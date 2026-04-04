@@ -62,7 +62,7 @@ let format_elapsed now timestamp fallback =
 let stuck_threshold_sec = 900.0 (* 15 minutes *)
 
 (** Threshold in seconds for "quiet" warning *)
-let quiet_threshold_sec = 300.0 (* 5 minutes *)
+let quiet_threshold_sec = Env_config.InternalTimers.label_quiet_threshold_sec
 
 (** Translate agent status + elapsed time into operator-readable description. *)
 let translate_agent_status ~(now : float) (status : Types.agent_status)

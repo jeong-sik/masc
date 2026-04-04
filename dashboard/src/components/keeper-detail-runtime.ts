@@ -100,7 +100,7 @@ function SignalRow({ label, value }: { label: string; value: string | number }) 
 function ToolChip({ name }: { name: string }) {
   return html`
     <button type="button"
-      class="inline-flex items-center py-0.5 px-2 rounded-full text-[10px] font-medium bg-[var(--accent-12)] text-[#9ad9ff] border border-[rgba(71,184,255,0.25)] hover:bg-[rgba(71,184,255,0.18)] cursor-pointer transition-colors"
+      class="inline-flex items-center py-0.5 px-2 rounded-full text-[10px] font-medium bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-30)] hover:bg-[var(--accent-20)] cursor-pointer transition-colors"
       title="클릭하여 도구 상세 보기"
       onClick=${() => openToolsInventory(name)}
     >${name}</button>
@@ -315,7 +315,7 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
 
   return html`
     <div class="flex flex-col gap-1.5">
-      <${SignalRow} label="네임스페이스" value=${namespaceName} />
+      <${SignalRow} label="프로젝트 범위" value=${namespaceName} />
       <${SignalRow} label="프로젝트" value=${project} />
       ${clusterVisible ? html`<${SignalRow} label="클러스터" value=${clusterRaw} />` : null}
       <${SignalRow} label="현재 태스크" value=${currentTaskLabel} />

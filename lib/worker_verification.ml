@@ -6,8 +6,6 @@
 
     @since Phase 3-D — OAS Verified_output integration *)
 
-module Oas = Agent_sdk
-
 type verified_result = {
   run_result : Worker_container_types.run_result;
   verified_output : Oas.Verified_output.verified Oas.Verified_output.output;

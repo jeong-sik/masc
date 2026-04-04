@@ -16,7 +16,10 @@ let derived_local_runtime_actor ~session_id ~prompt =
 
 let normalize_spawn_agent agent_name =
   let normalized = String.lowercase_ascii (String.trim agent_name) in
-  if normalized = "" then "default" else normalized
+  if normalized = "" then begin
+    Log.Spawn.debug "normalize_spawn_agent: empty agent_name → fallback \"default\"";
+    "default"
+  end else normalized
 
 let is_local_spawn_agent agent_name =
   match normalize_spawn_agent agent_name with
@@ -206,28 +209,44 @@ let normalized_spawn_text ~spawn_prompt ~spawn_role =
     | None -> [])
   |> String.lowercase_ascii
 
+(** {1 Heuristic Keyword Classification}
+
+    WARNING: Non-deterministic boundary.
+    These keyword lists map free-text prompts to task profiles via substring
+    matching. The same semantic intent expressed with different words can
+    produce different classifications. This is an inherent limitation of
+    keyword heuristics — RFC-0001 Phase 1 will wrap results in [Uncertain.t].
+
+    Until then, all keyword-based decisions carry implicit confidence ~0.78
+    and should be treated as advisory, not authoritative. *)
+
+(** Profile-to-keyword mapping. Each group associates a task profile with
+    keywords that suggest it. Order matters: first match wins when multiple
+    profiles match (see [keyword_matches]). *)
+let profile_keyword_groups : (Team_session_types.task_profile * string list) list =
+  [
+    ( Team_session_types.Profile_extract,
+      [ "fetch"; "collect"; "gather"; "search"; "find source"; "read docs"; "web"; "official docs"; "article"; "paper"; "source" ] );
+    ( Team_session_types.Profile_normalize,
+      [ "normalize"; "convert"; "transform"; "schema"; "format"; "json"; "label"; "tag"; "dedup" ] );
+    ( Team_session_types.Profile_summarize,
+      [ "summarize"; "summary"; "digest"; "brief"; "recap"; "short answer"; "bullet" ] );
+    ( Team_session_types.Profile_verify,
+      [ "verify"; "validate"; "check"; "review"; "audit"; "judge"; "prove"; "test"; "compare" ] );
+    ( Team_session_types.Profile_decide,
+      [ "decide"; "choose"; "route"; "triage"; "prioritize"; "assign"; "classify" ] );
+    ( Team_session_types.Profile_synthesize,
+      [ "synthesize"; "write"; "draft"; "compose"; "architecture"; "design"; "plan"; "proposal"; "explain" ] );
+  ]
+
 let keyword_matches text =
-  let groups =
-    [
-      ( Team_session_types.Profile_extract,
-        [ "fetch"; "collect"; "gather"; "search"; "find source"; "read docs"; "web"; "official docs"; "article"; "paper"; "source" ] );
-      ( Team_session_types.Profile_normalize,
-        [ "normalize"; "convert"; "transform"; "schema"; "format"; "json"; "label"; "tag"; "dedup" ] );
-      ( Team_session_types.Profile_summarize,
-        [ "summarize"; "summary"; "digest"; "brief"; "recap"; "short answer"; "bullet" ] );
-      ( Team_session_types.Profile_verify,
-        [ "verify"; "validate"; "check"; "review"; "audit"; "judge"; "prove"; "test"; "compare" ] );
-      ( Team_session_types.Profile_decide,
-        [ "decide"; "choose"; "route"; "triage"; "prioritize"; "assign"; "classify" ] );
-      ( Team_session_types.Profile_synthesize,
-        [ "synthesize"; "write"; "draft"; "compose"; "architecture"; "design"; "plan"; "proposal"; "explain" ] );
-    ]
-  in
   List.filter_map
     (fun (profile, keywords) ->
       if contains_any_ci text keywords then Some profile else None)
-    groups
+    profile_keyword_groups
 
+(** Keywords that escalate risk to [Risk_high] regardless of base profile risk.
+    Same heuristic caveat as [profile_keyword_groups] above. *)
 let high_risk_keywords =
   [ "security"; "policy"; "final"; "merge"; "customer"; "public"; "external"; "production"; "critical"; "architecture"; "decision" ]
 
@@ -248,9 +267,13 @@ let router_judge_model () =
 let classify_risk ~task_profile ~spawn_prompt ~spawn_role =
   let text = normalized_spawn_text ~spawn_prompt ~spawn_role in
   let base = default_risk_for_profile task_profile in
-  if contains_any_ci text high_risk_keywords then
-    min_risk base Team_session_types.Risk_high
-  else base
+  if contains_any_ci text high_risk_keywords then begin
+    let escalated = min_risk base Team_session_types.Risk_high in
+    Log.Spawn.debug "classify_risk: heuristic escalation base=%s → %s (keyword match in prompt)"
+      (Team_session_types.risk_level_to_string base)
+      (Team_session_types.risk_level_to_string escalated);
+    escalated
+  end else base
 
 let heuristic_routing ~spawn_prompt ~spawn_role ~worker_class ~task_profile
     ~risk_level ~routing_confidence ~routing_reason =

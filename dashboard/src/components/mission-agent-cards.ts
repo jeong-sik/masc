@@ -31,7 +31,7 @@ import {
 
 export function AgentBriefCard({ row }: { row: EnrichedAgentRow }) {
   const info = extractAgentInfo(row.brief.agent_name)
-  const who = row.withWhom.length > 0 ? row.withWhom.slice(0, 3).join(', ') : '단독 또는 방 단위'
+  const who = row.withWhom.length > 0 ? row.withWhom.slice(0, 3).join(', ') : '단독 또는 프로젝트 범위'
   const recentToolsLabel =
     row.recentTools.length > 0
       ? row.recentTools.join(', ')
@@ -179,7 +179,7 @@ export function InternalSignalCard({ item }: { item: DashboardMissionInternalSig
         <${StatusChip} label=${item.signal_type === 'action' && action ? workflowActionLabel(action.action_type) : attention?.kind ?? '내부 신호'} tone=${toneClass(item.severity)} />
         <span class="text-[var(--text-muted)] text-[13px]">${missionTargetTypeLabel(item.target_type)}${item.target_id ? ` · ${item.target_id}` : ''}</span>
       </div>
-      <p class="m-0 text-[rgba(255,255,255,0.8)] leading-normal">${item.summary}</p>
+      <p class="m-0 text-[var(--text-body)] leading-normal">${item.summary}</p>
       ${action ? html`<div class="py-3 px-4 rounded-xl bg-[var(--white-5)] border border-[var(--white-8)] text-[var(--text-strong)] leading-snug">${action.reason}</div>` : null}
       <${ActionBar}>
         ${action

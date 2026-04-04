@@ -2,15 +2,16 @@ import { html } from 'htm/preact'
 import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+void vi
+
 const fetchPauseStatus = vi.fn().mockResolvedValue(undefined)
 const pauseRoom = vi.fn().mockResolvedValue(undefined)
 const resumeRoom = vi.fn().mockResolvedValue(undefined)
-const interruptRoom = vi.fn().mockResolvedValue(undefined)
 const fetchRoomStrategy = vi.fn().mockResolvedValue(undefined)
 const runGarbageCollection = vi.fn().mockResolvedValue(undefined)
 const cleanupZombies = vi.fn().mockResolvedValue(undefined)
 
-const flowState = { value: 'running' as 'running' | 'paused' | 'unknown' }
+const flowState = { value: 'running' as 'running' | 'paused' | 'initializing' | 'unknown' }
 const flowLoading = { value: false }
 const roomStrategy = { value: null as Record<string, unknown> | null }
 const roomStrategyLoading = { value: false }
@@ -30,7 +31,6 @@ async function loadPanel() {
     fetchRoomStrategy,
     flowLoading,
     flowState,
-    interruptRoom,
     maintenanceLoading,
     maintenanceResult,
     pauseRoom,
@@ -73,7 +73,6 @@ describe('FlowControlPanel', () => {
     expect(container.textContent).toContain('흐름 제어')
     expect(container.textContent).toContain('일시정지')
     expect(container.textContent).toContain('재개')
-    expect(container.textContent).toContain('인터럽트')
     expect(container.textContent).not.toContain('새로고침')
   })
 })

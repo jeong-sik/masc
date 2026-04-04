@@ -74,7 +74,11 @@ let is_room_lifecycle_broadcast (event : Activity_graph.event) =
   match string_member_opt "content" event.payload with
   | Some content ->
       String.ends_with ~suffix:"joined the room" content
+      || String.ends_with ~suffix:"joined the namespace" content
       || String.ends_with ~suffix:"left the room" content
+      || String.ends_with ~suffix:"left the namespace" content
+      || String_util.contains_substring content " rejoined the namespace"
+      || String_util.contains_substring content " rejoined namespace "
   | None -> false
 
 let relevant_activity_event (event : Activity_graph.event) =
@@ -301,7 +305,7 @@ let json ?session_id ?room_id ~(config : Room.config) () =
   let linkage_gaps =
     Team_session_types.dedup_strings
       ((if unlinked_activity_count > 0 then
-          [ "namespace activity exists without explicit session/operation linkage" ]
+          [ "project activity exists without explicit session/operation linkage" ]
         else
           [])
       @
@@ -332,11 +336,11 @@ let json ?session_id ?room_id ~(config : Room.config) () =
     else if interaction_event_count > 0 || explicit_linked_activity_count > 0 then
       ( "partial",
         "상호작용 흔적은 있지만 증거가 분산돼 있습니다.",
-        "세션 이벤트나 explicit linked namespace activity는 보이지만 proof 또는 관계 근거가 충분히 묶이지 않았습니다." )
+        "세션 이벤트나 explicit linked project activity는 보이지만 proof 또는 관계 근거가 충분히 묶이지 않았습니다." )
     else if unlinked_activity_count > 0 then
       ( "partial",
-        "네임스페이스 활동은 보이지만 세션 연결이 비어 있습니다.",
-        "namespace activity는 있으나 session_id 또는 operation_id linkage가 없어 협업 근거로 승격되지 않았습니다." )
+        "프로젝트 활동은 보이지만 세션 연결이 비어 있습니다.",
+        "project activity는 있으나 session_id 또는 operation_id linkage가 없어 협업 근거로 승격되지 않았습니다." )
     else
       ( "missing",
         "기록된 협업 근거가 아직 약합니다.",

@@ -16,8 +16,6 @@
     @since Phase 8 — Cascade module deleted, defaults moved here
     @since Phase 9 — gRPC transport option added (#2381) *)
 
-module Oas = Agent_sdk
-
 type cascade_attempt = {
   attempt_index : int;
   model_id : string;

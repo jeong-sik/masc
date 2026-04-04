@@ -16,8 +16,6 @@
 open Printf
 open Result_syntax
 
-module Oas = Agent_sdk
-
 (* ================================================================ *)
 (* worker_container_meta -> OAS Types.model                          *)
 (* ================================================================ *)
@@ -39,6 +37,18 @@ let max_turns_cap_of_scope (scope : Team_session_types.execution_scope) : int =
   | Observe_only -> 12
   | Limited_code_change -> 20
   | Autonomous -> 30
+
+let lowercase_enum_case_name raw =
+  let raw =
+    match String.rindex_opt raw '.' with
+    | Some idx when idx + 1 < String.length raw ->
+        String.sub raw (idx + 1) (String.length raw - idx - 1)
+    | _ -> raw
+  in
+  String.lowercase_ascii raw
+
+let proof_result_status_to_string status =
+  Oas.Cdal_proof.show_result_status status |> lowercase_enum_case_name
 
 (** Derive max_turns from worker meta, applying the scope cap.
     When max_turns_override is set, it is clamped to [1, cap].
@@ -163,6 +173,11 @@ let local_model_gate =
     max_cost_usd = 1.00;
   }
 
+(* Boundary: MASC selects the internal retry policy, but OAS owns
+   retry classification, feedback synthesis, and loop control. *)
+let default_internal_tool_retry_policy =
+  Oas.Tool_retry_policy.default_internal
+
 let tool_policy_of_execution_scope
     (scope : Team_session_types.execution_scope) : Tool_access_policy.t =
   match scope with
@@ -260,7 +275,7 @@ let build_agent
     |> Oas.Builder.with_tools tools
     |> Oas.Builder.with_hooks hooks
     |> Oas.Builder.with_guardrails guardrails
-    |> Oas.Builder.with_tool_retry_policy Oas.Tool_retry_policy.default_internal
+    |> Oas.Builder.with_tool_retry_policy default_internal_tool_retry_policy
     |> Oas.Builder.with_raw_trace raw_trace
     |> Oas.Builder.with_periodic_callbacks heartbeat_callbacks
     |> Oas.Builder.with_description (description_of_meta meta)
@@ -426,7 +441,8 @@ and resume_worker_via_oas
     Worker_container.build_resume_config ~worker_name
       ~provider:resume_provider ~model_id:resume_model_id ~system_prompt ~tools
       ~max_turns ~thinking_enabled ~hooks ~raw_trace
-      ~periodic_callbacks:heartbeat_cbs ~guardrails ()
+      ~periodic_callbacks:heartbeat_cbs ~guardrails
+      ~tool_retry_policy:default_internal_tool_retry_policy ()
   in
   Fun.protect
     ~finally:(fun () ->
@@ -536,14 +552,12 @@ and run_existing_worker_agent
           (match proof with
            | Some p ->
              Log.LocalWorker.warn
-               "worker %s errored with CDAL proof: run_id=%s status=%s (proof persisted by Proof_store)"
+               "worker %s errored with CDAL proof: run_id=%s status=%s error=%s"
                worker_name p.run_id
-               (match p.result_status with
-                | Oas.Cdal_proof.Completed -> "completed"
-                | Oas.Cdal_proof.Errored -> "errored"
-                | Oas.Cdal_proof.Timed_out -> "timed_out"
-                | Oas.Cdal_proof.Cancelled -> "cancelled")
-           | None -> ());
+               (proof_result_status_to_string p.result_status)
+               detail
+           | None ->
+             Log.LocalWorker.warn "worker %s errored (no proof): %s" worker_name detail);
           let* () =
             Worker_container.append_worker_completion_log
               ~base_path ~team_session_id ~worker_name ~prompt ~tool_names

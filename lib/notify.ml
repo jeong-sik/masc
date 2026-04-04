@@ -268,9 +268,6 @@ let notify event =
 let notify_mention ?target_agent ~from_agent ~message () =
   notify (Mention { from_agent; target_agent; message })
 
-let notify_interrupt ~agent ~action =
-  notify (Interrupt { agent; action })
-
 let notify_portal ?target_agent ~from_agent ~message () =
   notify (PortalMessage { from_agent; target_agent; message })
 

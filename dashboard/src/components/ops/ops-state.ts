@@ -36,8 +36,8 @@ export const keeperMessage = signal('')
 export const hydratedWorkflowId = signal<string | null>(null)
 
 // QuickIntervene: unified message target
-// 'room' = broadcast, 'session:{id}' = team_note, 'keeper:{name}' = keeper_message
-export const quickTarget = signal('room')
+// 'namespace' = broadcast, 'session:{id}' = team_note, 'keeper:{name}' = keeper_message
+export const quickTarget = signal('namespace')
 export const quickMessage = signal('')
 
 export function persistActorName(value: string): void {

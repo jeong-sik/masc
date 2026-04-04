@@ -24,6 +24,9 @@ let () =
             `Quick
             Test_operator_control_snapshot
             .test_snapshot_lightweight_summary_caps_completed_sessions_by_recency;
+          Alcotest.test_case "snapshot waiters share inflight result" `Quick
+            Test_operator_control_snapshot
+            .test_snapshot_waiters_share_inflight_result;
           Alcotest.test_case "orchestra room core shape" `Quick
             Test_operator_control_snapshot.test_orchestra_room_core_shape;
           Alcotest.test_case "orchestra session edge and pending signal" `Quick
@@ -71,6 +74,9 @@ let () =
           Alcotest.test_case "task inject immediate flow" `Quick
             Test_operator_control_actions
             .test_task_inject_executes_immediately;
+          Alcotest.test_case "digest defaults to namespace target" `Quick
+            Test_operator_control_actions
+            .test_digest_defaults_to_namespace_target;
           Alcotest.test_case "team turn fallback actor" `Quick
             Test_operator_control_actions.test_team_turn_falls_back_to_session_actor;
           Alcotest.test_case "team note logs action" `Quick

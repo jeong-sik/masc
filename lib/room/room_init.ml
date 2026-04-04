@@ -24,7 +24,6 @@ let init config ~agent_name =
       root_perpetual_dir;
       root_tasks_dir;
       root_messages_dir;
-      rooms_root_dir config;
     ];
   if not (path_exists_root config (root_state_path config)) then begin
     let root_state = {
@@ -46,7 +45,8 @@ let init config ~agent_name =
     (* Sync PG state to local file on startup so filesystem fallback has fresh data *)
     let root_json = read_json_root config (root_state_path config) in
     (try write_json_local (root_state_path config) root_json
-     with _exn -> ())
+     with exn ->
+       Log.Room.warn "init: local sync of root state failed: %s" (Printexc.to_string exn))
   end;
   if not (path_exists_root config root_backlog_path) then begin
     let root_backlog = { tasks = []; last_updated = now_iso (); version = 1 } in
@@ -54,13 +54,16 @@ let init config ~agent_name =
   end else begin
     let root_backlog_json = read_json_root config root_backlog_path in
     (try write_json_local root_backlog_path root_backlog_json
-     with _exn -> ())
+     with exn ->
+       Log.Room.warn "init: local sync of root backlog failed: %s" (Printexc.to_string exn))
   end;
 
   if is_initialized config then begin
     (* Sync PG scoped state to local file so filesystem fallback has fresh data *)
     let scoped_json = read_json config (state_path config) in
-    (try write_json_local (state_path config) scoped_json with _exn -> ());
+    (try write_json_local (state_path config) scoped_json
+     with exn ->
+       Log.Room.warn "init: local sync of scoped state failed: %s" (Printexc.to_string exn));
     "MASC already initialized."
   end
   else begin

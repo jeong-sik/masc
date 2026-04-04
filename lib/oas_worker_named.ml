@@ -175,8 +175,8 @@ let run_named
   in
   let config : Oas_worker_exec.config =
     { (Oas_worker_exec.default_config ~name ~provider ~model_id:primary_provider.model_id
-         ~system_prompt ~tools)
-      with
+      ~system_prompt ~tools)
+    with
       max_turns; max_tokens; temperature; max_idle_turns;
       guardrails; hooks; context_reducer; memory; tool_retry_policy;
       description = Some (Printf.sprintf "cascade:%s" cascade_name);
@@ -254,7 +254,8 @@ let run_model_by_label
           config_for_label ~name:"oas-label-model" ~model_label ~system_prompt
             ~tools ~max_turns ~max_tokens ~temperature
             ~max_idle_turns ?guardrails ?hooks ?context_reducer ?memory
-            ?tool_retry_policy ?enable_thinking
+            ?tool_retry_policy
+            ?enable_thinking
             ~description:(Some (Printf.sprintf "model_label:%s" model_label))
             ()
         in
@@ -299,7 +300,8 @@ let run_named_with_masc_tools
   ) masc_tools in
   run_named ~cascade_name ~goal ~system_prompt ~tools:oas_tools
     ~max_turns ~temperature ~max_tokens ?guardrails ?hooks ?memory
-    ?tool_retry_policy ?raw_trace ?on_event ?on_yield ?on_resume ?proof_ref
+    ?tool_retry_policy
+    ?raw_trace ?on_event ?on_yield ?on_resume ?proof_ref
     ?contract
     ?transport ~yield_on_tool ?sw ?net ()
 
@@ -332,8 +334,8 @@ let run_model_with_masc_tools
         | Some t -> t
         | None -> Masc_grpc_transport.from_env ()
       in
-      let config =
-        config_for_label ~name:"oas-explicit-model" ~model_label ~system_prompt
+        let config =
+          config_for_label ~name:"oas-explicit-model" ~model_label ~system_prompt
           ~tools:[] ~max_turns ~max_tokens ~temperature ?guardrails ?hooks
           ?memory ?tool_retry_policy ?enable_thinking
           ~description:(Some (Printf.sprintf "model_label:%s" model_label))

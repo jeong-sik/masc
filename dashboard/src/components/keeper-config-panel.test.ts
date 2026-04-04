@@ -2,6 +2,8 @@ import { html } from 'htm/preact'
 import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+void vi
+
 const mocks = vi.hoisted(() => ({
   fetchKeeperConfig: vi.fn(async () => ({
     name: 'keeper-sangsu',
@@ -59,6 +61,7 @@ const mocks = vi.hoisted(() => ({
       paused: false,
       registered: true,
       keepalive_running: true,
+      registry_state: 'running',
       fiber_health: 'healthy',
       presence_keepalive: true,
       presence_keepalive_sec: 30,
@@ -135,6 +138,8 @@ describe('KeeperConfigPanel', () => {
     expect(container.textContent).toContain('런타임 설정')
     expect(container.textContent).toContain('/tmp/.masc/keepers/keeper-sangsu/live.json')
     expect(container.textContent).toContain('활성 모델')
+    expect(container.textContent).toContain('레지스트리 상태')
+    expect(container.textContent).toContain('running')
 
     const editButton = Array.from(container.querySelectorAll('button')).find(button =>
       button.textContent?.includes('편집'),

@@ -54,7 +54,7 @@ let canonical_soul_profile raw =
   | "safety" -> Some "safety"
   | "delivery" | "executor" | "execution" -> Some "delivery"
   | "research" | "analyst" -> Some "research"
-  | "relationship" | "companion" -> Some "relationship"
+  | "relationship" | "companion" | "musician" -> Some "relationship"
   | "minimal" | "lean" -> Some "minimal"
   | _ -> None
 
@@ -139,7 +139,7 @@ let parse_soul_profile_opt args key : (string option, string) result =
        | None ->
            Error
              (Printf.sprintf
-                "invalid soul_profile '%s' (allowed: balanced, safety, delivery, research, relationship, minimal)"
+                "invalid soul_profile '%s' (allowed: balanced, safety, delivery, research, relationship, musician, minimal)"
                 raw))
 
 let utf8_safe_prefix_bytes (s : string) ~(max_bytes : int) : string =
@@ -299,14 +299,17 @@ let keeper_compact_max_messages () : int =
 let keeper_compact_max_tokens () : int =
   int_of_env_default
     "MASC_KEEPER_COMPACT_MAX_TOKENS"
-    ~default:0
+    ~default:8000
     ~min_v:0
     ~max_v:5000000
 
+(** Cooldown between compaction attempts.  Previous default (90s) exceeded
+    the proactive heartbeat interval (30s), permanently blocking compaction
+    for proactive keepers.  15s allows compaction to fire every other cycle. *)
 let keeper_continuity_compaction_cooldown_sec () : int =
   int_of_env_default
     "MASC_KEEPER_CONTINUITY_COMPACTION_COOLDOWN_SEC"
-    ~default:90
+    ~default:15
     ~min_v:0
     ~max_v:172800
 
@@ -423,70 +426,6 @@ let normalize_proactive_cooldown_sec (v : int) : int =
   clamp_int v ~min_v:0 ~max_v:172800
 
 
-(* ================================================================ *)
-(* Proactive turn parameters                                        *)
-(* ================================================================ *)
-
-let keeper_proactive_temperature_low () : float =
-  float_of_env_default
-    "MASC_KEEPER_PROACTIVE_TEMP_LOW"
-    ~default:0.55
-    ~min_v:0.0
-    ~max_v:2.0
-
-let keeper_proactive_temperature_mid () : float =
-  float_of_env_default
-    "MASC_KEEPER_PROACTIVE_TEMP_MID"
-    ~default:0.75
-    ~min_v:0.0
-    ~max_v:2.0
-
-let keeper_proactive_temperature_high () : float =
-  float_of_env_default
-    "MASC_KEEPER_PROACTIVE_TEMP_HIGH"
-    ~default:0.9
-    ~min_v:0.0
-    ~max_v:2.0
-
-let keeper_proactive_similarity_threshold () : float =
-  float_of_env_default
-    "MASC_KEEPER_PROACTIVE_SIMILARITY"
-    ~default:0.72
-    ~min_v:0.0
-    ~max_v:1.0
-
-(* ================================================================ *)
-(* Keeper execution parameters (previously hardcoded)               *)
-(* ================================================================ *)
-
-let keeper_proactive_max_tokens () : int =
-  int_of_env_default
-    "MASC_KEEPER_PROACTIVE_MAX_TOKENS"
-    ~default:1024
-    ~min_v:128
-    ~max_v:4096
-
-let keeper_deterministic_temp () : float =
-  float_of_env_default
-    "MASC_KEEPER_DETERMINISTIC_TEMP"
-    ~default:0.3
-    ~min_v:0.0
-    ~max_v:2.0
-
-let keeper_reflection_temp () : float =
-  float_of_env_default
-    "MASC_KEEPER_REFLECTION_TEMP"
-    ~default:0.6
-    ~min_v:0.0
-    ~max_v:2.0
-
-let keeper_planning_temp () : float =
-  float_of_env_default
-    "MASC_KEEPER_PLANNING_TEMP"
-    ~default:0.35
-    ~min_v:0.0
-    ~max_v:2.0
-
 let keeper_batch_limit () : int =
   int_of_env_default
     "MASC_KEEPER_BATCH_LIMIT"
@@ -494,26 +433,22 @@ let keeper_batch_limit () : int =
     ~min_v:10
     ~max_v:2000
 
-let keeper_msg_timeout_max_sec () : int =
-  int_of_env_default
-    "MASC_KEEPER_MSG_TIMEOUT_MAX_SEC"
-    ~default:300
-    ~min_v:5
-    ~max_v:3600
-
-let keeper_cost_gate_usd () : float =
-  float_of_env_default
-    "MASC_KEEPER_COST_GATE_USD"
-    ~default:0.10
-    ~min_v:0.01
-    ~max_v:10.0
-
 let keeper_tool_cost_max_usd () : float =
   float_of_env_default
     "MASC_KEEPER_TOOL_COST_MAX_USD"
     ~default:0.50
     ~min_v:0.01
     ~max_v:50.0
+
+let keeper_max_tools_per_turn () : int =
+  int_of_env_default
+    "MASC_KEEPER_MAX_TOOLS_PER_TURN"
+    ~default:40
+    ~min_v:5
+    ~max_v:200
+
+let keeper_retry_max_tools_per_turn () : int =
+  min 8 (keeper_max_tools_per_turn ())
 
 (* ================================================================ *)
 (* Rule engine thresholds                                           *)
@@ -572,61 +507,6 @@ let keeper_rule_guardrail_context_threshold () : float =
 (* Keeper execution — previously hardcoded magic numbers             *)
 (* ================================================================ *)
 
-(** Maximum tool loop rounds before forcing termination.
-    Used in proactive generation and social board event turns.
-    Env: [MASC_KEEPER_MAX_TOOL_ROUNDS]. Default: 3. *)
-let keeper_max_tool_rounds () : int =
-  int_of_env_default
-    "MASC_KEEPER_MAX_TOOL_ROUNDS"
-    ~default:3
-    ~min_v:1
-    ~max_v:20
-
-(** Max tokens for autonomous execution MODEL calls.
-    Env: [MASC_KEEPER_AUTONOMOUS_MAX_TOKENS]. Default: 4000. *)
-let keeper_autonomous_max_tokens () : int =
-  int_of_env_default
-    "MASC_KEEPER_AUTONOMOUS_MAX_TOKENS"
-    ~default:4000
-    ~min_v:512
-    ~max_v:16000
-
-(** Max tokens for keeper deliberation calls.
-    Env: [MASC_KEEPER_DELIBERATION_MAX_TOKENS]. Default: 1024. *)
-let keeper_deliberation_max_tokens () : int =
-  int_of_env_default
-    "MASC_KEEPER_DELIBERATION_MAX_TOKENS"
-    ~default:1024
-    ~min_v:256
-    ~max_v:8000
-
-(** Max tokens for explicit reply generation.
-    Env: [MASC_KEEPER_EXPLICIT_REPLY_MAX_TOKENS]. Default: 256. *)
-let keeper_explicit_reply_max_tokens () : int =
-  int_of_env_default
-    "MASC_KEEPER_EXPLICIT_REPLY_MAX_TOKENS"
-    ~default:256
-    ~min_v:64
-    ~max_v:2048
-
-(** Max tokens for social board initial turn.
-    Env: [MASC_KEEPER_SOCIAL_INITIAL_MAX_TOKENS]. Default: 768. *)
-let keeper_social_initial_max_tokens () : int =
-  int_of_env_default
-    "MASC_KEEPER_SOCIAL_INITIAL_MAX_TOKENS"
-    ~default:768
-    ~min_v:256
-    ~max_v:4096
-
-(** Max tokens for social board followup turns.
-    Env: [MASC_KEEPER_SOCIAL_FOLLOWUP_MAX_TOKENS]. Default: 512. *)
-let keeper_social_followup_max_tokens () : int =
-  int_of_env_default
-    "MASC_KEEPER_SOCIAL_FOLLOWUP_MAX_TOKENS"
-    ~default:512
-    ~min_v:128
-    ~max_v:4096
-
 (* ================================================================ *)
 (* Unified Keeper Turn parameters                                   *)
 (* ================================================================ *)
@@ -654,11 +534,12 @@ let keeper_unified_max_tokens () : int =
     A productive keeper workflow (read -> inspect -> edit -> build -> verify)
     can consume 8-12 turns once retries and board/reporting steps are included.
     Previous default (1000) caused 787s+ latency per turn.
-    At 10, multi-step workflows still truncate too often before [extend_turns]
-    is used. *)
+    20 caused 6.7GB RSS in 2 minutes with 3 concurrent keepers (each turn
+    serializes full message history as JSON for the LLM API call).
+    3 is sufficient for proactive "one observation, one action" cycles. *)
 let keeper_unified_max_turns () : int =
   int_of_env_default
     "MASC_KEEPER_UNIFIED_MAX_TURNS"
-    ~default:20
+    ~default:3
     ~min_v:1
     ~max_v:50

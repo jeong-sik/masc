@@ -1,7 +1,24 @@
-(** Board_pg query definitions — row types, SQL queries, column defs. *)
+(** Board_pg query definitions — row types, SQL queries, column defs.
+
+    Also hosts the shared [t] connection pool type used by all Board_pg
+    sub-modules. *)
 
 open Board
 open Pg_infix
+
+(* ================================================================ *)
+(* Shared connection type                                            *)
+(* ================================================================ *)
+
+type t = {
+  pool: (Caqti_eio.connection, Caqti_error.t) Caqti_eio.Pool.t;
+}
+
+(** Get pool for Board_listener pub/sub bridge *)
+let get_pool t = t.pool
+
+(** Convert Caqti errors to board_error *)
+let caqti_err e = Io_error (Caqti_error.show e)
 
 let ttl_where = "(expires_at = 0 OR expires_at > extract(epoch from now()))"
 let comment_ttl_where = "(c.expires_at = 0 OR c.expires_at > extract(epoch from now()))"
@@ -151,6 +168,14 @@ let list_hot_q = mk_list_q "(votes_up - votes_down) DESC, created_at DESC"
 let list_recent_q = mk_list_q "created_at DESC"
 let list_updated_q = mk_list_q "updated_at DESC"
 let list_discussed_q = mk_list_q "reply_count DESC, created_at DESC"
+
+let list_updated_since_q =
+  (Caqti_type.float ->* post_row_t)
+  (Printf.sprintf
+     "SELECT %s FROM masc_board_posts \
+      WHERE %s AND updated_at >= $1 \
+      ORDER BY updated_at ASC, id ASC"
+     post_columns ttl_where)
 
 (* Trending: engagement / sqrt(age_in_hours) *)
 let list_trending_q = mk_list_q

@@ -2,15 +2,6 @@ type runtime_kind =
   | Local
   | Direct_api
 
-type provider_family =
-  | Claude_family
-  | OpenAI_family
-  | Gemini_family
-  | Glm_family
-  | Llama_family
-  | OpenRouter_family
-  | Custom_family of string
-
 type auth_mode =
   | No_auth
   | Api_key of string
@@ -27,15 +18,15 @@ type voice_transport =
 type adapter = {
   canonical_name : string;
   runtime_kind : runtime_kind;
-  provider_family : provider_family;
   auth_mode : auth_mode;
   aliases : string list;
+  spawn_key : string option;       (** Key into Spawn.default_configs. None = not spawnable via CLI. *)
+  default_voice : string option;   (** Default TTS voice name. None = no voice assignment. *)
 }
 
 type voice_adapter = {
   canonical_name : string;
   transport : voice_transport;
-  provider_family : provider_family;
   auth_mode : auth_mode;
   aliases : string list;
 }
@@ -68,15 +59,6 @@ let string_of_runtime_kind = function
   | Local -> "local"
   | Direct_api -> "direct_api"
 
-let string_of_provider_family = function
-  | Claude_family -> "claude"
-  | OpenAI_family -> "openai"
-  | Gemini_family -> "gemini"
-  | Glm_family -> "glm"
-  | Llama_family -> "llama"
-  | OpenRouter_family -> "openrouter"
-  | Custom_family name -> "custom:" ^ name
-
 let string_of_auth_mode = function
   | No_auth -> "none"
   | Api_key env_name -> "api_key:" ^ env_name
@@ -90,54 +72,73 @@ let string_of_voice_transport = function
 
 let normalize_label label = String.trim label |> String.lowercase_ascii
 
+(* ── Canonical adapter names (single definition point) ──────── *)
+
+let cn_llama = "llama"
+let cn_claude = "claude-api"
+let cn_codex = "codex-api"
+let cn_gemini = "gemini-api"
+let cn_glm = "glm"
+let cn_openrouter = "openrouter"
+
+(** Single source of truth for all agent adapters.
+    spawn_key maps to Spawn.default_configs keys.
+    default_voice maps to TTS voice names.
+    Adding a new agent = adding one entry here. *)
 let direct_adapters =
   [
     {
-      canonical_name = "llama";
+      canonical_name = cn_llama;
       runtime_kind = Local;
-      provider_family = Llama_family;
       auth_mode = No_auth;
-      aliases = [ "llama"; "llama.cpp"; "llamacpp" ];
+      aliases = [ cn_llama; "llama.cpp"; "llamacpp" ];
+      spawn_key = Some "llama";
+      default_voice = Some "Laura";
     };
     {
-      canonical_name = "claude-api";
+      canonical_name = cn_claude;
       runtime_kind = Direct_api;
-      provider_family = Claude_family;
       auth_mode = Api_key "ANTHROPIC_API_KEY";
-      aliases = [ "claude-api"; "claude"; "anthropic" ];
+      aliases = [ cn_claude; "claude"; "anthropic"; "claude-code"; "claude-api" ];
+      spawn_key = Some "claude";
+      default_voice = Some "Sarah";
     };
     {
-      canonical_name = "codex-api";
+      canonical_name = cn_codex;
       runtime_kind = Direct_api;
-      provider_family = OpenAI_family;
       auth_mode = Api_key "OPENAI_API_KEY";
-      aliases = [ "codex-api"; "openai" ];
+      aliases = [ cn_codex; "openai"; "codex-cli"; "codex-api" ];
+      spawn_key = Some "codex";
+      default_voice = Some "George";
     };
     {
-      canonical_name = "gemini-api";
+      canonical_name = cn_gemini;
       runtime_kind = Direct_api;
-      provider_family = Gemini_family;
       auth_mode =
         Vertex_adc
           {
             project_env = google_cloud_project_env;
             location_env = google_cloud_location_env;
           };
-      aliases = [ "gemini-api"; "gemini"; "google" ];
+      aliases = [ cn_gemini; "gemini"; "google"; "gemini-cli"; "gemini-api" ];
+      spawn_key = Some "gemini";
+      default_voice = Some "Roger";
     };
     {
-      canonical_name = "glm";
+      canonical_name = cn_glm;
       runtime_kind = Direct_api;
-      provider_family = Glm_family;
       auth_mode = Api_key "ZAI_API_KEY";
-      aliases = [ "glm"; "glm_cloud"; "zai" ];
+      aliases = [ cn_glm; "glm_cloud"; "zai" ];
+      spawn_key = None;
+      default_voice = None;
     };
     {
-      canonical_name = "openrouter";
+      canonical_name = cn_openrouter;
       runtime_kind = Direct_api;
-      provider_family = OpenRouter_family;
       auth_mode = Api_key "OPENROUTER_API_KEY";
-      aliases = [ "openrouter" ];
+      aliases = [ cn_openrouter ];
+      spawn_key = None;
+      default_voice = None;
     };
   ]
 
@@ -145,7 +146,6 @@ let voice_openai_compat_adapter =
   {
     canonical_name = "voice-openai-compat";
     transport = Voice_openai_compat;
-    provider_family = OpenAI_family;
     auth_mode = No_auth;
     aliases =
       [ "voice-openai-compat"; "openai_compat"; "openai"; "railway-elevenlabs-proxy" ];
@@ -155,7 +155,6 @@ let voice_elevenlabs_direct_adapter =
   {
     canonical_name = "elevenlabs-direct";
     transport = Voice_elevenlabs_direct;
-    provider_family = Custom_family "elevenlabs";
     auth_mode = Api_key "ELEVENLABS_API_KEY";
     aliases = [ "elevenlabs-direct"; "elevenlabs"; "tts-elevenlabs" ];
   }
@@ -164,7 +163,6 @@ let voice_mcp_adapter =
   {
     canonical_name = "voice-mcp";
     transport = Voice_mcp;
-    provider_family = Custom_family "voice_mcp";
     auth_mode = No_auth;
     aliases = [ "voice-mcp"; "voice_mcp"; "mcp"; "local-voice-mcp" ];
   }
@@ -176,6 +174,44 @@ let voice_adapters =
     voice_mcp_adapter;
   ]
 
+(** The "custom" provider prefix represents user-provided self-hosted
+    endpoints (e.g. "custom:model@url").  It is not in [direct_adapters]
+    because it has no fixed config; it is always considered available and
+    requires no API key. *)
+let cn_custom = "custom"
+
+(** Returns true if the provider name represents a local runtime that
+    uses runtime discovery (e.g. the live /props probe for per-slot
+    context).  Any provider with [runtime_kind = Local] qualifies.
+    Adding a new local provider (ollama, vllm, ...) only requires
+    adding an entry with [runtime_kind = Local] in [direct_adapters]. *)
+let requires_discovery pname =
+  let normalized = normalize_label pname in
+  List.exists
+    (fun (adapter : adapter) ->
+      adapter.runtime_kind = Local
+      && List.exists (fun alias -> normalize_label alias = normalized) adapter.aliases)
+    direct_adapters
+
+(** Returns true if the provider is self-hosted and always considered
+    available (no API key validation needed).  Covers both
+    [runtime_kind = Local] adapters and the special "custom" prefix. *)
+let is_local_provider pname =
+  let normalized = normalize_label pname in
+  normalized = cn_custom || requires_discovery pname
+
+(** Default fallback label for local runtime when no other preferred
+    model labels are configured.  Uses "provider:auto" for the first
+    [Local] adapter found. *)
+let default_local_fallback_label () =
+  match
+    List.find_opt
+      (fun (adapter : adapter) -> adapter.runtime_kind = Local)
+      direct_adapters
+  with
+  | Some adapter -> adapter.canonical_name ^ ":auto"
+  | None -> "auto"
+
 let resolve_direct_adapter label =
   let normalized = normalize_label label in
   List.find_opt
@@ -185,6 +221,33 @@ let resolve_direct_adapter label =
 
 let resolve_direct_canonical_name label =
   Option.map (fun (adapter : adapter) -> adapter.canonical_name) (resolve_direct_adapter label)
+
+(** Resolve spawn_key for an agent label.
+    Returns the key to look up in Spawn.default_configs. *)
+let resolve_spawn_key label =
+  match resolve_direct_adapter label with
+  | Some adapter -> adapter.spawn_key
+  | None -> None
+
+(** Resolve default TTS voice for an agent label. *)
+let resolve_default_voice label =
+  match resolve_direct_adapter label with
+  | Some adapter -> adapter.default_voice
+  | None -> None
+
+(** All agents that are spawnable via CLI. *)
+let spawnable_canonical_names () =
+  direct_adapters
+  |> List.filter_map (fun a -> if a.spawn_key <> None then Some a.canonical_name else None)
+
+(** All agent voices as (canonical_name, voice_name) pairs.
+    For backward compatibility with voice_bridge_core. *)
+let all_agent_voices () =
+  direct_adapters
+  |> List.filter_map (fun a ->
+    match a.default_voice with
+    | Some v -> Some (a.canonical_name, v)
+    | None -> None)
 
 let resolve_voice_adapter label =
   let normalized = normalize_label label in
@@ -279,8 +342,8 @@ let legacy_voice_base_url_opt () =
   | None, None -> None
   | _ ->
       warn_legacy_voice_env_once ();
-      let host = Option.value host_opt ~default:"127.0.0.1" in
-      let port = Option.value port_opt ~default:"8936" in
+      let host = Option.value host_opt ~default:(Env_config.Voice.default_host) in
+      let port = Option.value port_opt ~default:(string_of_int Env_config.Voice.default_port) in
       Some (Printf.sprintf "http://%s:%s" host port)
 
 let http_listener_env_explicit () =
@@ -521,9 +584,10 @@ let auth_env_var_of_adapter (adapter : adapter) =
 let provider_auth_available label =
   match resolve_direct_adapter label with
   | Some adapter ->
-      (match auth_env_var_of_adapter adapter with
-       | Some env_name -> env_present env_name
-       | None -> true)
+      (match adapter.auth_mode with
+       | No_auth -> true
+       | Api_key env_name -> env_present env_name
+       | Vertex_adc { project_env; _ } -> env_present project_env)
   | None -> false
 
 (** Derive the auth_kind string for a provider by looking up its
@@ -600,31 +664,34 @@ let provider_model_label provider model =
   if model = "" then None
   else Some (Printf.sprintf "%s:%s" provider model)
 
-(** Family → model label. Uses "provider:auto" for cloud providers;
-    OAS cascade resolves the concrete model at runtime. *)
-let default_model_label_for_family = function
-  | Claude_family -> Ok "claude:auto"
-  | Gemini_family -> Ok "gemini:auto"
-  | OpenAI_family -> Ok "openai:auto"
-  | Glm_family -> Ok "glm:auto"
-  | Llama_family -> explicit_llama_model_label_result ()
-  | OpenRouter_family ->
+(** canonical_name → model label. Uses "provider:auto" for cloud providers;
+    OAS cascade resolves the concrete model at runtime.
+    MASC no longer knows vendor families — only canonical adapter names. *)
+let default_model_label_for_adapter (adapter : adapter) =
+  match adapter.canonical_name with
+  | s when s = cn_claude -> Ok "claude:auto"
+  | s when s = cn_gemini -> Ok "gemini:auto"
+  | s when s = cn_codex -> Ok "openai:auto"
+  | s when s = cn_glm -> Ok "glm:auto"
+  | s when s = cn_llama -> explicit_llama_model_label_result ()
+  | s when s = cn_openrouter ->
       Error "OpenRouter requires explicit runtime_model"
-  | Custom_family _ ->
-      Error "Custom provider requires explicit runtime_model"
+  | name ->
+      Error (Printf.sprintf "Provider '%s' requires explicit runtime_model" name)
 
 (** Build the "provider:auto" label for each adapter that has auth
     credentials present.  Used by preferred_*_model_labels to avoid
     hardcoding vendor env var names. *)
 let auto_label_for_adapter (adapter : adapter) =
   let is_available =
-    match auth_env_var_of_adapter adapter with
-    | Some env_name -> env_present env_name
-    | None -> true  (* No_auth providers always available *)
+    match adapter.auth_mode with
+    | No_auth -> true
+    | Api_key env_name -> env_present env_name
+    | Vertex_adc { project_env; _ } -> env_present project_env
   in
   if not is_available then None
   else
-    match default_model_label_for_family adapter.provider_family with
+    match default_model_label_for_adapter adapter with
     | Ok label -> Some label
     | Error _ -> None
 
@@ -635,7 +702,7 @@ let auto_detect_adapters =
   List.filter
     (fun (adapter : adapter) ->
       adapter.runtime_kind = Direct_api
-      && adapter.provider_family <> OpenRouter_family)
+      && adapter.canonical_name <> cn_openrouter)
     direct_adapters
 
 let preferred_execution_model_labels () =

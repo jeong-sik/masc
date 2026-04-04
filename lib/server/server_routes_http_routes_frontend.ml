@@ -26,7 +26,7 @@ let canonical_loopback_location ~default_port request =
   let (host, port) =
     parse_host_port
       (Httpun.Headers.get request.Httpun.Request.headers "host")
-      "127.0.0.1" default_port
+      (Env_config_core.masc_host ()) default_port
   in
   let canonical_host = Transport_read_model.normalize_advertised_host host in
   if String.equal canonical_host host then
@@ -38,7 +38,7 @@ let canonical_root_dashboard_location ~default_port request =
   let (host, port) =
     parse_host_port
       (Httpun.Headers.get request.Httpun.Request.headers "host")
-      "127.0.0.1" default_port
+      (Env_config_core.masc_host ()) default_port
   in
   let canonical_host = Transport_read_model.normalize_advertised_host host in
   if String.equal canonical_host host then

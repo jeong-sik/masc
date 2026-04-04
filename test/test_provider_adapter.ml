@@ -139,6 +139,52 @@ let test_stt_request_openai_compat () =
            req.form_fields)
   | Error err -> fail (Printf.sprintf "expected Ok, got Error: %s" err)
 
+let test_requires_discovery_llama () =
+  check bool "llama requires discovery" true
+    (Adapter.requires_discovery "llama");
+  check bool "llamacpp requires discovery" true
+    (Adapter.requires_discovery "llamacpp");
+  check bool "LLAMA case insensitive" true
+    (Adapter.requires_discovery "LLAMA")
+
+let test_requires_discovery_cloud () =
+  check bool "claude does not require discovery" false
+    (Adapter.requires_discovery "claude");
+  check bool "gemini does not require discovery" false
+    (Adapter.requires_discovery "gemini");
+  check bool "custom does not require discovery" false
+    (Adapter.requires_discovery "custom")
+
+let test_is_local_provider_llama () =
+  check bool "llama is local" true
+    (Adapter.is_local_provider "llama");
+  check bool "llamacpp is local" true
+    (Adapter.is_local_provider "llamacpp")
+
+let test_is_local_provider_custom () =
+  check bool "custom is local" true
+    (Adapter.is_local_provider "custom");
+  check bool "CUSTOM case insensitive" true
+    (Adapter.is_local_provider "CUSTOM")
+
+let test_is_local_provider_cloud () =
+  check bool "claude is not local" false
+    (Adapter.is_local_provider "claude");
+  check bool "gemini is not local" false
+    (Adapter.is_local_provider "gemini");
+  check bool "unknown is not local" false
+    (Adapter.is_local_provider "unknown-provider")
+
+let test_default_local_fallback_label () =
+  let label = Adapter.default_local_fallback_label () in
+  check bool "fallback label contains colon" true
+    (String.contains label ':');
+  check bool "fallback label ends with :auto" true
+    (let suffix = ":auto" in
+     let slen = String.length label in
+     let plen = String.length suffix in
+     slen >= plen && String.sub label (slen - plen) plen = suffix)
+
 let test_stt_request_mcp_rejected () =
   let endpoint : Masc_mcp.Voice_config.endpoint =
     { id = "test-mcp-stt"; kind = Voice_mcp;
@@ -171,6 +217,21 @@ let () =
           test_case "resolve voice aliases" `Quick test_resolve_voice_aliases;
           test_case "voice auth env resolution" `Quick
             test_voice_auth_env_resolution;
+        ] );
+      ( "local_provider",
+        [
+          test_case "requires_discovery llama" `Quick
+            test_requires_discovery_llama;
+          test_case "requires_discovery cloud" `Quick
+            test_requires_discovery_cloud;
+          test_case "is_local_provider llama" `Quick
+            test_is_local_provider_llama;
+          test_case "is_local_provider custom" `Quick
+            test_is_local_provider_custom;
+          test_case "is_local_provider cloud" `Quick
+            test_is_local_provider_cloud;
+          test_case "default_local_fallback_label" `Quick
+            test_default_local_fallback_label;
         ] );
       ( "stt",
         [

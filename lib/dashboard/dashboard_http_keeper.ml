@@ -10,6 +10,14 @@ open Keeper_status_bridge
 
 include Dashboard_http_keeper_detail
 
+(** Context-ratio thresholds for keeper health scoring.
+    These are distinct from Dashboard.ctx_* (compaction triggers) —
+    health scoring penalizes keepers approaching context limits. *)
+let health_ctx_critical = 0.9
+let health_ctx_warn = 0.8
+let health_penalty_critical = 20.0
+let health_penalty_warn = 10.0
+
 (** Compute keeper health score (0-100). Pure function.
     Inputs: restart_count, max_restarts, recent_crash_count,
             is_dead, context_ratio (0.0-1.0). *)
@@ -28,8 +36,8 @@ let compute_health_score
       Float.min 30.0 (float_of_int recent_crash_count *. 10.0)
     in
     let context_penalty =
-      if context_ratio > 0.9 then 20.0
-      else if context_ratio > 0.8 then 10.0
+      if context_ratio > health_ctx_critical then health_penalty_critical
+      else if context_ratio > health_ctx_warn then health_penalty_warn
       else 0.0
     in
     let raw = 100.0 -. budget_penalty -. crash_penalty -. context_penalty in
@@ -99,6 +107,10 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
           in
           let last_proactive_ago_s =
             if m.runtime.proactive_rt.last_ts <= 0.0 then 0.0 else now_ts -. m.runtime.proactive_rt.last_ts
+          in
+          let last_visible_proactive_ago_s =
+            if m.runtime.proactive_rt.last_visible_ts <= 0.0 then 0.0
+            else now_ts -. m.runtime.proactive_rt.last_visible_ts
           in
           (* C-3 fix: compute last_activity from the most recent activity timestamp
              to avoid showing misleading staleness when agent is actually active *)
@@ -501,6 +513,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
               ("last_handoff_ago_s", `Float last_handoff_ago_s);
               ("last_compaction_ago_s", `Float last_compaction_ago_s);
               ("last_proactive_ago_s", `Float last_proactive_ago_s);
+              ("last_visible_proactive_ago_s", `Float last_visible_proactive_ago_s);
               ("last_activity_ago_s", `Float last_activity_ago_s);
               ("handoff_count_total", `Int trace_history_count);
               ("total_turns", `Int m.runtime.usage.total_turns);
@@ -525,6 +538,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
               ("proactive_idle_sec", `Int m.proactive.idle_sec);
               ("proactive_cooldown_sec", `Int m.proactive.cooldown_sec);
               ("proactive_count_total", `Int m.runtime.proactive_rt.count_total);
+              ("proactive_visible_count_total", `Int m.runtime.proactive_rt.visible_count_total);
               ("social_model", `String m.social_model);
               ("autonomous_turn_count", `Int m.runtime.autonomous_turn_count);
               ("autonomous_text_turn_count", `Int m.runtime.autonomous_text_turn_count);
@@ -534,6 +548,11 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
               ("noop_turn_count", `Int m.runtime.noop_turn_count);
               ("autonomous_action_count", `Int m.runtime.autonomous_action_count);
               ("last_proactive_ts", `Float m.runtime.proactive_rt.last_ts);
+              ("last_visible_proactive_ts", `Float m.runtime.proactive_rt.last_visible_ts);
+              ( "last_proactive_outcome"
+              , `String
+                  (Keeper_types.proactive_cycle_outcome_to_string
+                     m.runtime.proactive_rt.last_outcome) );
               ("last_proactive_reason",
                 if String.trim m.runtime.proactive_rt.last_reason = ""
                 then `Null

@@ -3,17 +3,6 @@
 
 open Keeper_types
 
-type keeper_reward_candidate = {
-  bias: float;
-  weights: (string * float) list;
-}
-
-type keeper_reward_model = {
-  version: string;
-  path: string;
-  candidates: (string * keeper_reward_candidate) list;
-}
-
 type keeper_policy_observation = {
   source_kind: string;
   room_id: string option;
@@ -28,137 +17,6 @@ type keeper_policy_observation = {
   room_scope: Keeper_contract.room_scope;
   last_turn_ago_s: float;
 }
-
-type keeper_policy_candidate_score = {
-  action: string;
-  bias: float;
-  feature_scores: (string * float) list;
-  score: float;
-  allowed: bool;
-}
-
-let empty_keeper_reward_candidate = { bias = 0.0; weights = [] }
-
-let policy_action_order action =
-  match action with
-  | "noop" -> 0
-  | "reply_in_room" -> 1
-  | "board_post" -> 2
-  | _ -> 9
-
-let keeper_policy_feature_vector (obs : keeper_policy_observation) : (string * float) list =
-  let clamp01 value = max 0.0 (min 1.0 value) in
-  [
-    ("direct_mention", if obs.direct_mention then 1.0 else 0.0);
-    ("question_mark", if obs.has_question then 1.0 else 0.0);
-    ("message_chars", clamp01 (float_of_int obs.message_chars /. 400.0));
-    ("active_goal_count", clamp01 (float_of_int obs.active_goal_count /. 5.0));
-    ("joined_room_count", clamp01 (float_of_int obs.joined_room_count /. 5.0));
-    ( "room_scope_all",
-      if Keeper_contract.room_scope_to_string obs.room_scope = "all" then 1.0 else 0.0 );
-    ("idle_seconds", clamp01 (obs.last_turn_ago_s /. 3600.0));
-  ]
-
-let float_assoc_to_json (items : (string * float) list) : Yojson.Safe.t =
-  `Assoc (List.map (fun (key, value) -> (key, `Float value)) items)
-
-let keeper_policy_observation_to_json (obs : keeper_policy_observation) : Yojson.Safe.t =
-  `Assoc
-    [
-      ("source_kind", `String obs.source_kind);
-      ("room_id", Json_util.string_opt_to_json obs.room_id);
-      ("from_agent", `String obs.from_agent);
-      ("message", `String obs.message);
-      ("direct_mention", `Bool obs.direct_mention);
-      ("has_question", `Bool obs.has_question);
-      ("message_chars", `Int obs.message_chars);
-      ("total_turns", `Int obs.total_turns);
-      ("active_goal_count", `Int obs.active_goal_count);
-      ("joined_room_count", `Int obs.joined_room_count);
-      ("room_scope", `String (Keeper_contract.room_scope_to_string obs.room_scope));
-      ("last_turn_ago_s", `Float obs.last_turn_ago_s);
-    ]
-
-let keeper_policy_candidate_score_to_json
-    (candidate : keeper_policy_candidate_score) : Yojson.Safe.t =
-  `Assoc
-    [
-      ("action", `String candidate.action);
-      ("bias", `Float candidate.bias);
-      ("feature_scores", float_assoc_to_json candidate.feature_scores);
-      ("score", `Float candidate.score);
-      ("allowed", `Bool candidate.allowed);
-    ]
-
-let reward_candidate_of_json (json : Yojson.Safe.t) : keeper_reward_candidate =
-  let bias = Safe_ops.json_float ~default:0.0 "bias" json in
-  let weights =
-    match Yojson.Safe.Util.member "weights" json with
-    | `Assoc fields ->
-        fields
-        |> List.filter_map (fun (feature, value) ->
-               match value with
-               | `Float weight -> Some (feature, weight)
-               | `Int n -> Some (feature, float_of_int n)
-               | `Intlit raw ->
-                   Some (feature, Safe_ops.float_of_string_with_default ~default:0.0 raw)
-               | _ -> None)
-    | _ -> []
-  in
-  { bias; weights }
-
-let load_keeper_reward_model (path : string) : (keeper_reward_model, string) result =
-  let path = String.trim path in
-  if path = "" then
-    Error "reward_model_path is required for learned_offline_v1"
-  else
-    match Safe_ops.read_json_file_safe path with
-    | Error e -> Error e
-    | Ok json ->
-        let version = Safe_ops.json_string ~default:"reward-model-v1" "version" json in
-        let candidates =
-          match Yojson.Safe.Util.member "candidates" json with
-          | `Assoc fields ->
-              fields |> List.map (fun (name, value) -> (name, reward_candidate_of_json value))
-          | _ -> []
-        in
-        if candidates = [] then
-          Error "reward model must define candidates"
-        else
-          Ok { version; path; candidates }
-
-let score_keeper_policy_candidate
-    ~(model : keeper_reward_model)
-    ~(features : (string * float) list)
-    ~(action : string)
-    ~(allowed : bool) : keeper_policy_candidate_score =
-  let candidate_model =
-    model.candidates
-    |> List.find_map (fun (candidate_action, candidate_model) ->
-           if candidate_action = action then Some candidate_model else None)
-    |> Option.value ~default:empty_keeper_reward_candidate
-  in
-  let feature_scores =
-    candidate_model.weights
-    |> List.map (fun (feature_name, weight) ->
-           let feature_value =
-             features
-             |> List.find_map (fun (name, value) ->
-                    if name = feature_name then Some value else None)
-             |> Option.value ~default:0.0
-           in
-           (feature_name, weight *. feature_value))
-  in
-  let score =
-    List.fold_left (fun acc (_, value) -> acc +. value) candidate_model.bias feature_scores
-  in
-  {
-    action;
-    bias = candidate_model.bias;
-    feature_scores;
-    score;
-    allowed;
-  }
 
 let observation_has_question (message : string) =
   String.contains message '?'
@@ -188,30 +46,6 @@ let keeper_policy_observation_of_room_message
     room_scope = Keeper_contract.room_scope_of_string meta.room_scope;
     last_turn_ago_s;
   }
-
-let deterministic_policy_baseline_action_typed
-    (obs : keeper_policy_observation) : Keeper_deliberation.deliberation_action =
-  if obs.direct_mention then
-    Keeper_deliberation.ReplyInRoom { room_id = ""; content = "" }
-  else
-    Keeper_deliberation.Noop "no_trigger"
-
-(** Backward-compatible string interface for existing callers. *)
-let deterministic_policy_baseline_action (obs : keeper_policy_observation) : string =
-  deterministic_policy_baseline_action_typed obs
-  |> Keeper_deliberation.deliberation_action_to_policy_label
-
-let choose_policy_action (candidates : keeper_policy_candidate_score list) :
-    keeper_policy_candidate_score option =
-  candidates
-  |> List.filter (fun candidate -> candidate.allowed)
-  |> List.sort (fun a b ->
-         let score_cmp = Float.compare b.score a.score in
-         if score_cmp <> 0 then score_cmp
-         else compare (policy_action_order a.action) (policy_action_order b.action))
-  |> function
-  | candidate :: _ -> Some candidate
-  | [] -> None
 
 type alert_channel_result = {
   channel: string;
@@ -257,23 +91,6 @@ let alert_channel_result_to_json (r : alert_channel_result) : Yojson.Safe.t =
       match r.detail with
       | Some d when String.trim d <> "" -> `String d
       | _ -> `Null);
-  ]
-
-let interesting_alert_result_to_json (r : interesting_alert_result) : Yojson.Safe.t =
-  `Assoc [
-    ("enabled", `Bool r.enabled);
-    ("triggered", `Bool r.triggered);
-    ("score", `Float r.score);
-    ("threshold", `Float r.threshold);
-    ("reasons", `List (List.map (fun s -> `String s) r.reasons));
-    ("keywords", `List (List.map (fun s -> `String s) r.keywords));
-    ("alert_id",
-      match r.alert_id with
-      | Some id when String.trim id <> "" -> `String id
-      | _ -> `Null);
-    ("channels", `List (List.map alert_channel_result_to_json r.channels));
-    ("retry_queued", `Bool r.retry_queued);
-    ("deadlettered", `Bool r.deadlettered);
   ]
 
 type keeper_state_snapshot = {
@@ -513,26 +330,6 @@ let latest_state_snapshot_from_messages (messages : Agent_sdk.Types.message list
       | Some snapshot -> Some snapshot
   in
   loop (List.rev messages)
-
-let append_continuity_context_prompt
-    ~(base_prompt : string)
-    (snapshot : keeper_state_snapshot option)
-    ~(continuity_summary : string) : string =
-  let fallback_summary =
-    let trimmed = String.trim continuity_summary in
-    if trimmed = "" then "No continuity snapshot available." else trimmed
-  in
-  let summary =
-    match snapshot with
-    | None -> fallback_summary
-    | Some s -> keeper_state_snapshot_to_summary_text s
-  in
-  if summary = "No continuity snapshot available." then base_prompt
-  else
-    Printf.sprintf
-      "%s\n\nRecent continuity snapshot:\n%s"
-      base_prompt
-      summary
 
 let priority_for_kind ~soul_profile ~(kind : string) : int =
   match soul_profile, kind with

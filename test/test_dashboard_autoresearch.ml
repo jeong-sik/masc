@@ -357,6 +357,7 @@ let test_delete_loop_json_removes_bundle_and_branch () =
       loop_id;
       session_id = "session-delete";
       operation_id = None;
+      task_id = None;
       target_file = "README.md";
       program_note = None;
       created_by = None;
@@ -403,6 +404,40 @@ let test_delete_loop_json_rejects_unsafe_loop_id () =
   | Error message ->
       check string "invalid delete loop_id" "invalid loop_id" message
 
+let test_linked_status_json_includes_task_id () =
+  with_eio_test @@ fun () ->
+  with_clean_loops @@ fun () ->
+  with_temp_base @@ fun base_path ->
+  let loop_id = "task-linked-loop" in
+  let state =
+    Lib.Autoresearch.create_state
+      ~goal:"task linked"
+      ~metric_fn:"echo 1"
+      ~model_model:"glm"
+      ~target_file:"README.md"
+      ~cycle_timeout_s:30.0
+      ~max_cycles:1
+      ~workdir:base_path
+      ()
+  in
+  let state = { state with loop_id; source_workdir = base_path } in
+  Lib.Autoresearch.save_state ~base_path state;
+  let link : Lib.Autoresearch.swarm_link =
+    {
+      loop_id;
+      session_id = "session-task";
+      operation_id = Some "op-task";
+      task_id = Some "task-777";
+      target_file = "README.md";
+      program_note = None;
+      created_by = Some "codex";
+      linked_at = Unix.gettimeofday ();
+    }
+  in
+  let json = Lib.Autoresearch.linked_status_json ~base_path link in
+  check (option string) "linked status includes task_id" (Some "task-777")
+    Yojson.Safe.Util.(json |> member "task_id" |> to_string_option)
+
 let () =
   run "dashboard_autoresearch"
     [
@@ -422,6 +457,8 @@ let () =
             test_retry_loop_json_restores_missing_worktree;
           test_case "delete removes bundle and branch" `Quick
             test_delete_loop_json_removes_bundle_and_branch;
+          test_case "linked status includes task id" `Quick
+            test_linked_status_json_includes_task_id;
           test_case "retry rejects unsafe loop id" `Quick
             test_retry_loop_json_rejects_unsafe_loop_id;
           test_case "delete rejects unsafe loop id" `Quick

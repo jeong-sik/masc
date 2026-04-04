@@ -325,6 +325,23 @@ let test_dashboard_component_split_contracts () =
     (file_contains_pattern "lib/room/room_utils_backend_setup.ml"
        "Transaction Pooler companion")
 
+let test_mission_briefing_memory_guard_contracts () =
+  check bool "mission briefing snapshot disables keeper payload" true
+    (file_contains_pattern "lib/dashboard/dashboard_mission_briefing.ml"
+       "~include_keepers:false");
+  check bool "mission briefing snapshot stays off command plane" true
+    (file_contains_pattern "lib/dashboard/dashboard_mission_briefing.ml"
+       "~include_command_plane:false");
+  check bool "mission briefing snapshot stays lightweight" true
+    (file_contains_pattern "lib/dashboard/dashboard_mission_briefing.ml"
+       "~lightweight_summary:true");
+  check bool "mission briefing reuses mission keeper briefs" true
+    (file_contains_pattern "lib/dashboard/dashboard_mission_briefing.ml"
+       {|mission_json |> member_assoc "keeper_briefs"|});
+  check bool "mission briefing card no longer forces eager operator snapshot" true
+    (file_not_contains_pattern "dashboard/src/components/mission-briefing-card.ts"
+       "refreshOperatorSnapshot({ force: true })")
+
 let test_activity_surface_contracts () =
   check bool "activity tab exposes activity graph label" true
     (file_contains_pattern "dashboard/src/components/activity.ts"
@@ -530,10 +547,36 @@ let test_oas_worker_capability_threading_contracts () =
     (file_contains_pattern "lib/team_session/team_session_oas_bridge.ml"
        "?raw_trace ~proof_ref ?contract ~sw")
 
+let test_oas_capacity_restore_contracts () =
+  check bool "operator judge backoff uses OAS local capacity" true
+    (file_contains_pattern "lib/dashboard/dashboard_operator_judge.ml"
+       "local_capacity_for_selections ~sw ~net");
+  check bool "operator judge selection is explicit" true
+    (file_contains_pattern "lib/dashboard/dashboard_operator_judge.ml"
+       {|[ "operator_judge" ]|});
+  check bool "governance judge backoff uses OAS local capacity" true
+    (file_contains_pattern "lib/dashboard/dashboard_governance_judge.ml"
+       "local_capacity_for_selections ~sw ~net");
+  check bool "governance judge selection is explicit" true
+    (file_contains_pattern "lib/dashboard/dashboard_governance_judge.ml"
+       {|[ "governance_judge" ]|});
+  check bool "team session swarm config restores slot-aware OAS capacity query" true
+    (file_contains_pattern "lib/team_session/team_session_oas_bridge.ml"
+       "local_capacity_for_selections ~sw ~net");
+  check bool "team session swarm config reuses slot-aware cap helper" true
+    (file_contains_pattern "lib/team_session/team_session_oas_bridge.ml"
+       "slot_aware_concurrency_cap ~entry_count");
+  check bool "autoresearch background gating restores OAS capacity query" true
+    (file_contains_pattern "lib/autoresearch_codegen.ml"
+       "local_capacity_for_selections ~sw ~net");
+  check bool "autoresearch uses Eio context fallback for capacity probing" true
+    (file_contains_pattern "lib/autoresearch_codegen.ml"
+       "Eio_context.get_switch_opt (), Eio_context.get_net_opt ()")
+
 let test_team_session_spawn_tool_contracts () =
-  check bool "team session spawn uses Worker_runtime.run_worker" true
+  check bool "team session spawn preflights via Worker_runtime" true
     (file_contains_pattern "lib/tool_team_session_step_spawn.ml"
-       "Worker_runtime.run_worker");
+       "Worker_runtime.preflight_spawn_batch");
   check bool "team session spawn branches on local spawn agents" true
     (file_contains_pattern "lib/tool_team_session_step_exec.ml"
        "if env.deps.is_local_spawn_agent spec.spawn_agent then");
@@ -673,6 +716,8 @@ let () =
              test_room_current_validation_contracts;
            test_case "root redirect contracts" `Quick test_root_redirect_contracts;
            test_case "dashboard component split contracts" `Quick test_dashboard_component_split_contracts;
+           test_case "mission briefing memory guard contracts" `Quick
+             test_mission_briefing_memory_guard_contracts;
            test_case "activity surface contracts" `Quick test_activity_surface_contracts;
            test_case "local review script contracts" `Quick test_local_review_script_contracts;
            test_case "keeper oas cleanup contracts" `Quick test_keeper_oas_cleanup_contracts;
@@ -686,6 +731,8 @@ let () =
              test_worktree_list_contracts;
            test_case "oas worker capability threading contracts" `Quick
              test_oas_worker_capability_threading_contracts;
+           test_case "oas capacity restore contracts" `Quick
+             test_oas_capacity_restore_contracts;
            test_case "team session spawn tool contracts" `Quick
              test_team_session_spawn_tool_contracts;
            test_case "dashboard timeout guard contracts" `Quick

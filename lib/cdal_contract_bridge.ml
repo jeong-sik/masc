@@ -1,5 +1,3 @@
-module Oas = Agent_sdk
-
 let workspace_mutating_tools =
   Tool_catalog_surfaces.workspace_mutating_tool_names
 

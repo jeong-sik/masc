@@ -1,8 +1,9 @@
 import { html } from 'htm/preact'
 import { render } from 'preact'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import * as Vitest from 'vitest'
 import type { DashboardGovernanceResponse, GovernanceCaseBundle } from '../types'
 
+const { afterEach, beforeEach, describe, expect, it } = Vitest
 async function flushUi(): Promise<void> {
   for (let i = 0; i < 4; i += 1) {
     await Promise.resolve()
@@ -74,10 +75,10 @@ async function loadComponentWithApi(api: {
   submitGovernanceCaseBrief: () => Promise<GovernanceCaseBundle>
   submitGovernancePetition: () => Promise<{ case: { id: string } }>
 }) {
-  vi.resetModules()
-  vi.doMock('../api', () => api)
-  vi.doMock('../sse-store', () => ({
-    registerGovernanceRefresh: vi.fn(),
+  Vitest.vi.resetModules()
+  Vitest.vi.doMock('../api', () => api)
+  Vitest.vi.doMock('../sse-store', () => ({
+    registerGovernanceRefresh: Vitest.vi.fn(),
   }))
   return import('./governance')
 }
@@ -93,25 +94,25 @@ describe('Governance surface', () => {
   afterEach(() => {
     render(null, container)
     container.remove()
-    vi.resetModules()
-    vi.clearAllMocks()
-    vi.doUnmock('../api')
-    vi.doUnmock('../sse-store')
+    Vitest.vi.resetModules()
+    Vitest.vi.clearAllMocks()
+    Vitest.vi.doUnmock('../api')
+    Vitest.vi.doUnmock('../sse-store')
   })
 
   it('renders and refreshes without corrupting the DOM tree', async () => {
-    const fetchDashboardGovernance = vi.fn<() => Promise<DashboardGovernanceResponse>>()
+    const fetchDashboardGovernance = Vitest.vi.fn<() => Promise<DashboardGovernanceResponse>>()
       .mockResolvedValue(governanceResponse())
-    const fetchGovernanceCaseStatus = vi.fn<(caseId: string) => Promise<GovernanceCaseBundle>>()
+    const fetchGovernanceCaseStatus = Vitest.vi.fn<(caseId: string) => Promise<GovernanceCaseBundle>>()
       .mockResolvedValue(governanceBundle())
 
     const { Governance } = await loadComponentWithApi({
-      decideGovernanceExecutionOrder: vi.fn().mockResolvedValue(undefined),
+      decideGovernanceExecutionOrder: Vitest.vi.fn().mockResolvedValue(undefined),
       fetchDashboardGovernance,
       fetchGovernanceCaseStatus,
-      fetchRuntimeParams: vi.fn().mockResolvedValue({ parameters: [], surfaces: [] }),
-      submitGovernanceCaseBrief: vi.fn().mockResolvedValue(governanceBundle()),
-      submitGovernancePetition: vi.fn().mockResolvedValue({ case: { id: 'gov-case-1' } }),
+      fetchRuntimeParams: Vitest.vi.fn().mockResolvedValue({ parameters: [], surfaces: [] }),
+      submitGovernanceCaseBrief: Vitest.vi.fn().mockResolvedValue(governanceBundle()),
+      submitGovernancePetition: Vitest.vi.fn().mockResolvedValue({ case: { id: 'gov-case-1' } }),
     })
 
     expect(() => {
@@ -152,18 +153,50 @@ describe('Governance surface', () => {
     }
 
     const { Governance } = await loadComponentWithApi({
-      decideGovernanceExecutionOrder: vi.fn().mockResolvedValue(undefined),
-      fetchDashboardGovernance: vi.fn().mockResolvedValue(emptyResponse),
-      fetchGovernanceCaseStatus: vi.fn().mockResolvedValue(governanceBundle()),
-      fetchRuntimeParams: vi.fn().mockResolvedValue({ parameters: [], surfaces: [] }),
-      submitGovernanceCaseBrief: vi.fn().mockResolvedValue(governanceBundle()),
-      submitGovernancePetition: vi.fn().mockResolvedValue({ case: { id: 'gov-case-1' } }),
+      decideGovernanceExecutionOrder: Vitest.vi.fn().mockResolvedValue(undefined),
+      fetchDashboardGovernance: Vitest.vi.fn().mockResolvedValue(emptyResponse),
+      fetchGovernanceCaseStatus: Vitest.vi.fn().mockResolvedValue(governanceBundle()),
+      fetchRuntimeParams: Vitest.vi.fn().mockResolvedValue({ parameters: [], surfaces: [] }),
+      submitGovernanceCaseBrief: Vitest.vi.fn().mockResolvedValue(governanceBundle()),
+      submitGovernancePetition: Vitest.vi.fn().mockResolvedValue({ case: { id: 'gov-case-1' } }),
     })
 
     render(html`<${Governance} />`, container)
     await flushUi()
 
     expect(container.textContent).toContain('keeper가 활동 중일 때 자동 생성됩니다')
+  }, 20000)
+
+  it('shows retired guidance when case tracking is disabled', async () => {
+    const serverNote = 'Server says governance case tracking is retired; only live judge signals remain.'
+    const retiredResponse: DashboardGovernanceResponse = {
+      generated_at: '2026-03-26T00:00:00Z',
+      case_tracking_available: false,
+      note: serverNote,
+      summary: {
+        judge_online: false,
+      },
+      items: [],
+      activity: [],
+      judgments: [],
+      pending_actions: [],
+    }
+
+    const { Governance } = await loadComponentWithApi({
+      decideGovernanceExecutionOrder: Vitest.vi.fn().mockResolvedValue(undefined),
+      fetchDashboardGovernance: Vitest.vi.fn().mockResolvedValue(retiredResponse),
+      fetchGovernanceCaseStatus: Vitest.vi.fn().mockResolvedValue(governanceBundle()),
+      fetchRuntimeParams: Vitest.vi.fn().mockResolvedValue({ parameters: [], surfaces: [] }),
+      submitGovernanceCaseBrief: Vitest.vi.fn().mockResolvedValue(governanceBundle()),
+      submitGovernancePetition: Vitest.vi.fn().mockResolvedValue({ case: { id: 'gov-case-1' } }),
+    })
+
+    render(html`<${Governance} />`, container)
+    await flushUi()
+
+    expect(container.textContent).toContain(serverNote)
+    expect(container.textContent).toContain('judge-only / 최근 판단 0건')
+    expect(container.textContent).not.toContain('keeper가 활동 중일 때 자동 생성됩니다')
   }, 20000)
 
   it('renders judgments section with recommended action', async () => {
@@ -189,12 +222,12 @@ describe('Governance surface', () => {
     }
 
     const { Governance } = await loadComponentWithApi({
-      decideGovernanceExecutionOrder: vi.fn().mockResolvedValue(undefined),
-      fetchDashboardGovernance: vi.fn().mockResolvedValue(withJudgments),
-      fetchGovernanceCaseStatus: vi.fn().mockResolvedValue(governanceBundle()),
-      fetchRuntimeParams: vi.fn().mockResolvedValue({ parameters: [], surfaces: [] }),
-      submitGovernanceCaseBrief: vi.fn().mockResolvedValue(governanceBundle()),
-      submitGovernancePetition: vi.fn().mockResolvedValue({ case: { id: 'gov-case-1' } }),
+      decideGovernanceExecutionOrder: Vitest.vi.fn().mockResolvedValue(undefined),
+      fetchDashboardGovernance: Vitest.vi.fn().mockResolvedValue(withJudgments),
+      fetchGovernanceCaseStatus: Vitest.vi.fn().mockResolvedValue(governanceBundle()),
+      fetchRuntimeParams: Vitest.vi.fn().mockResolvedValue({ parameters: [], surfaces: [] }),
+      submitGovernanceCaseBrief: Vitest.vi.fn().mockResolvedValue(governanceBundle()),
+      submitGovernancePetition: Vitest.vi.fn().mockResolvedValue({ case: { id: 'gov-case-1' } }),
     })
 
     render(html`<${Governance} />`, container)
@@ -227,12 +260,12 @@ describe('Governance surface', () => {
     }
 
     const { Governance } = await loadComponentWithApi({
-      decideGovernanceExecutionOrder: vi.fn().mockResolvedValue(undefined),
-      fetchDashboardGovernance: vi.fn().mockResolvedValue(offlineJudge),
-      fetchGovernanceCaseStatus: vi.fn().mockResolvedValue(governanceBundle()),
-      fetchRuntimeParams: vi.fn().mockResolvedValue({ parameters: [], surfaces: [] }),
-      submitGovernanceCaseBrief: vi.fn().mockResolvedValue(governanceBundle()),
-      submitGovernancePetition: vi.fn().mockResolvedValue({ case: { id: 'gov-case-1' } }),
+      decideGovernanceExecutionOrder: Vitest.vi.fn().mockResolvedValue(undefined),
+      fetchDashboardGovernance: Vitest.vi.fn().mockResolvedValue(offlineJudge),
+      fetchGovernanceCaseStatus: Vitest.vi.fn().mockResolvedValue(governanceBundle()),
+      fetchRuntimeParams: Vitest.vi.fn().mockResolvedValue({ parameters: [], surfaces: [] }),
+      submitGovernanceCaseBrief: Vitest.vi.fn().mockResolvedValue(governanceBundle()),
+      submitGovernancePetition: Vitest.vi.fn().mockResolvedValue({ case: { id: 'gov-case-1' } }),
     })
 
     render(html`<${Governance} />`, container)
@@ -261,12 +294,12 @@ describe('Governance surface', () => {
     }
 
     const { Governance } = await loadComponentWithApi({
-      decideGovernanceExecutionOrder: vi.fn().mockResolvedValue(undefined),
-      fetchDashboardGovernance: vi.fn().mockResolvedValue(emptyWithAge),
-      fetchGovernanceCaseStatus: vi.fn().mockResolvedValue(governanceBundle()),
-      fetchRuntimeParams: vi.fn().mockResolvedValue({ parameters: [], surfaces: [] }),
-      submitGovernanceCaseBrief: vi.fn().mockResolvedValue(governanceBundle()),
-      submitGovernancePetition: vi.fn().mockResolvedValue({ case: { id: 'gov-case-1' } }),
+      decideGovernanceExecutionOrder: Vitest.vi.fn().mockResolvedValue(undefined),
+      fetchDashboardGovernance: Vitest.vi.fn().mockResolvedValue(emptyWithAge),
+      fetchGovernanceCaseStatus: Vitest.vi.fn().mockResolvedValue(governanceBundle()),
+      fetchRuntimeParams: Vitest.vi.fn().mockResolvedValue({ parameters: [], surfaces: [] }),
+      submitGovernanceCaseBrief: Vitest.vi.fn().mockResolvedValue(governanceBundle()),
+      submitGovernancePetition: Vitest.vi.fn().mockResolvedValue({ case: { id: 'gov-case-1' } }),
     })
 
     render(html`<${Governance} />`, container)

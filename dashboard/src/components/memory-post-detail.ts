@@ -5,6 +5,7 @@ import { TimeAgo } from './common/time-ago'
 import { Markdown } from './common/markdown'
 import { showToast } from './common/toast'
 import { EmptyState } from './common/empty-state'
+import { LoadingState } from './common/feedback-state'
 import { TextInput } from './common/input'
 import { stripStateBlocks } from '../keeper-message'
 import { navigate } from '../router'
@@ -277,7 +278,7 @@ export function PostDetail({ post }: { post: BoardPost }) {
       <div class="mt-4">
         <${Card} title="댓글">
           ${detailLoading.value
-            ? html`<div class="loading-state loading-pulse">댓글 불러오는 중...</div>`
+            ? html`<${LoadingState}>댓글 불러오는 중...<//>`
             : html`<${CommentThread} comments=${detailComments.value} postId=${post.id} />`}
           <${CommentForm} postId=${post.id} />
         <//>

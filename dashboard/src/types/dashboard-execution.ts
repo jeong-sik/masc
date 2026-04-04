@@ -331,6 +331,8 @@ export interface DashboardMemoryResponse {
 
 export interface DashboardGovernanceResponse {
   generated_at?: string
+  case_tracking_available?: boolean
+  note?: string
   summary?: {
     cases_open?: number
     pending_ruling?: number
@@ -362,6 +364,56 @@ export interface DashboardPlanningResponse {
     done?: number
     cancelled?: number
   }
+}
+
+// --- Goal Tree (hierarchical goal decomposition) ---
+
+export interface GoalTreeTask {
+  id: string
+  title: string
+  status: string
+  status_color: string
+  priority: number
+  assignee: string | null
+  is_terminal: boolean
+  created_at: string
+}
+
+export interface GoalTreeNode {
+  id: string
+  title: string
+  horizon: string
+  status: string
+  status_color: string
+  priority: number
+  metric: string | null
+  target_value: string | null
+  due_date: string | null
+  parent_goal_id: string | null
+  convergence: number
+  convergence_pct: number
+  tasks: GoalTreeTask[]
+  task_count: number
+  task_done_count: number
+  children: GoalTreeNode[]
+  child_count: number
+  created_at: string
+  updated_at: string
+}
+
+export interface GoalTreeSummary {
+  total_goals: number
+  active_goals: number
+  total_tasks: number
+  done_tasks: number
+  overall_convergence: number
+  overall_convergence_pct: number
+}
+
+export interface DashboardGoalsTreeResponse {
+  generated_at?: string
+  tree: GoalTreeNode[]
+  summary: GoalTreeSummary
 }
 
 

@@ -14,7 +14,7 @@ import {
   refreshMissionBriefing,
 } from '../mission-store'
 import { keepers } from '../store'
-import { operatorSnapshot, refreshOperatorSnapshot } from '../operator-store'
+import { operatorSnapshot } from '../operator-store'
 import { navigate } from '../router'
 import {
   missionTargetTypeLabel,
@@ -31,6 +31,7 @@ import {
 import type { DashboardWorkflowContext } from '../workflow-context'
 import type {
   DashboardMissionBriefingResponse,
+  DashboardMissionKeeperBrief,
   DashboardMissionResponse,
   Keeper,
   OperatorSnapshot,
@@ -137,6 +138,15 @@ export function resolveLiveJudgeTarget(
   }
 }
 
+function fallbackKeepersFromMission(
+  mission: DashboardMissionResponse | null | undefined,
+): Keeper[] {
+  return (mission?.keeper_briefs ?? []).map((keeper: DashboardMissionKeeperBrief) => ({
+    name: keeper.name,
+    status: keeper.status ?? 'unknown',
+  }))
+}
+
 export function buildLiveJudgeSituationReport({
   mission,
   briefing,
@@ -187,7 +197,7 @@ function createLiveJudgeWorkflowContext(
     focus_kind: 'live_judgment',
     operation_id: null,
     summary: `${target.name}에게 상황판 요약을 보내 live 판단을 받습니다.`,
-    payload_preview: `namespace ${mission?.summary.namespace ?? mission?.summary.namespace_id ?? 'default'} · attention ${mission?.attention_queue.length ?? 0} · gaps ${metadataGapCount}`,
+    payload_preview: `scope ${mission?.summary.namespace ?? mission?.summary.namespace_id ?? 'default'} · attention ${mission?.attention_queue.length ?? 0} · gaps ${metadataGapCount}`,
     suggested_payload: { message },
     preview: {
       keeper_name: target.name,
@@ -206,7 +216,10 @@ function createLiveJudgeWorkflowContext(
 export function MissionBriefingCard() {
   const mission = missionSnapshot.value
   const briefing = missionBriefing.value
-  const liveJudge = resolveLiveJudgeTarget(operatorSnapshot.value, keepers.value)
+  const liveJudge = resolveLiveJudgeTarget(
+    operatorSnapshot.value,
+    keepers.value.length > 0 ? keepers.value : fallbackKeepersFromMission(mission),
+  )
   const liveJudgeTone = toneClass(liveJudge?.online ? 'ok' : 'warn')
   const liveJudgeReport =
     mission && liveJudge
@@ -223,12 +236,6 @@ export function MissionBriefingCard() {
       void refreshMissionBriefing()
     }
   }, [briefing, missionBriefingLoading.value, missionBriefingError.value])
-
-  useEffect(() => {
-    if (!operatorSnapshot.value) {
-      void refreshOperatorSnapshot({ force: true })
-    }
-  }, [])
 
   const openLiveJudgeIntervene = () => {
     if (!liveJudge) return
@@ -326,7 +333,7 @@ export function MissionBriefingCard() {
                       ${section.evidence_quality ? html`<${StatusChip} label=${section.evidence_quality} />` : null}
                     </div>
                   </div>
-                  <p class="m-0 text-[rgba(255,255,255,0.8)] leading-normal">${section.summary}</p>
+                  <p class="m-0 text-[var(--text-body)] leading-normal">${section.summary}</p>
                   ${section.evidence.length > 0
                     ? html`
                         <details class="pt-2 border-t border-[var(--white-6)] mt-3">
@@ -360,7 +367,7 @@ export function MissionBriefingCard() {
                       <strong>${missionTargetTypeLabel(item.scope_type)}${item.scope_id ? ` · ${item.scope_id}` : ''}</strong>
                       <${StatusChip} label=${statusLabel(item.severity)} tone=${item.severity === 'watch' ? 'warn' : ''} />
                     </div>
-                    <p class="m-0 text-[rgba(255,255,255,0.78)] leading-snug">${item.summary}</p>
+                    <p class="m-0 text-[var(--text-body)] leading-snug">${item.summary}</p>
                   </article>
                 `)}
               </div>

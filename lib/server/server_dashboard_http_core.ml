@@ -189,13 +189,15 @@ let dashboard_batch_json ?(compact = false) (config : Room.config) : Yojson.Safe
       ~min_v:10
       ~max_v:86400
   in
+  let canonical_namespace = Room.default_namespace_id in
   let status_json =
     `Assoc [
-      ("namespace_id", `String "default");
-      ("namespace", `String "default");
-      ("current_namespace", `String room_id);
+      ("namespace_id", `String canonical_namespace);
+      ("namespace", `String canonical_namespace);
+      ("current_namespace", `String canonical_namespace);
       ("namespace_mode", `String "flattened");
       ("room", `Null);
+      ("current_room", `String room_id);
       ("room_base_path", `Null);
       ("coordination_root", `String config.base_path);
       ("workspace_path", `String config.workspace_path);
@@ -228,18 +230,29 @@ let dashboard_batch_json ?(compact = false) (config : Room.config) : Yojson.Safe
   in
   let tasks_json =
     List.map (fun (t : Types.task) ->
-      `Assoc [
-        ("id", `String t.id);
-        ("title", `String t.title);
-        ("status", `String (Types.string_of_task_status t.task_status));
-        ("priority", `Int t.priority);
-        ("assignee",
-         match t.task_status with
-         | Claimed { assignee; _ } | InProgress { assignee; _ } | Done { assignee; _ } ->
-             `String assignee
-         | _ -> `Null);
-      ]
-    )
+      let base_fields =
+        [
+          ("id", `String t.id);
+          ("title", `String t.title);
+          ("description", `String t.description);
+          ("status", `String (Types.string_of_task_status t.task_status));
+          ("priority", `Int t.priority);
+          ( "assignee",
+            match t.task_status with
+            | Claimed { assignee; _ }
+            | InProgress { assignee; _ }
+            | Done { assignee; _ } ->
+                `String assignee
+            | _ -> `Null );
+          ("created_at", `String t.created_at);
+        ]
+      in
+      let projection_fields =
+        match Task_contract_gate.task_projection_json config t with
+        | `Assoc fields -> fields
+        | _ -> []
+      in
+      `Assoc (base_fields @ projection_fields))
       (List.filter
          (fun (t : Types.task) ->
            match t.task_status with
@@ -454,7 +467,7 @@ let start_operator_digest_refresh_loop ~state ~sw ~clock =
             }
           in
           match
-            Operator_control.digest_json ~actor:"dashboard" ~target_type:"room"
+            Operator_control.digest_json ~actor:"dashboard" ~target_type:"namespace"
               ~sessions ?command_plane_summary ?swarm_status ctx
           with
           | Ok json ->
@@ -575,21 +588,24 @@ let operator_digest_http_json ~state ~sw ~clock request =
     | Some ("1" | "true" | "yes") -> Some true
     | _ -> None
   in
-  let default_room_request =
+  let namespace_target_type value =
+    match Option.map (fun raw -> String.lowercase_ascii (String.trim raw)) value with
+    | None -> true
+    | Some "namespace" | Some "room" -> true
+    | Some _ -> false
+  in
+  let default_namespace_request =
     actor = None
     && target_id = None
     && include_workers = None
-    &&
-    match target_type with
-    | None -> true
-    | Some raw -> String.equal (String.lowercase_ascii (String.trim raw)) "room"
+    && namespace_target_type target_type
   in
-  if default_room_request then
+  if default_namespace_request then
     Ok (cached_surface_json _operator_digest_cache)
   else
     let started_at = Unix.gettimeofday () in
     let effective_target_type =
-      Option.value ~default:"room" target_type
+      Option.value ~default:"namespace" target_type
     in
     match Eio.Time.with_timeout clock _dashboard_request_timeout_s (fun () ->
       Ok
@@ -609,13 +625,13 @@ let operator_digest_http_json ~state ~sw ~clock request =
                }
              in
              let command_plane_summary, swarm_status =
-               if String.equal effective_target_type "room" then
+               if namespace_target_type (Some effective_target_type) then
                  command_plane_summary_cache_parts ~allow_initializing:false ~state
                else
                  (None, None)
              in
              let sessions =
-               if String.equal effective_target_type "room"
+               if namespace_target_type (Some effective_target_type)
                   && Room.is_initialized config
                then
                  Some (dashboard_active_or_recent_sessions ~clock config)
@@ -827,15 +843,16 @@ let dashboard_proof_http_json ~state request =
 let dashboard_shell_status_json (config : Room.config) : Yojson.Safe.t =
   let room_state = Room.read_state config in
   let current_room =
-    Room.read_current_room config |> Option.value ~default:"default"
+    Room.read_current_room config |> Option.value ~default:Room.default_namespace_id
   in
+  let canonical_namespace = Room.default_namespace_id in
   let tempo = Tempo.get_tempo config in
   let build = Build_identity.current () in
   `Assoc
     [
-      ("namespace_id", `String "default");
-      ("namespace", `String "default");
-      ("current_namespace", `String current_room);
+      ("namespace_id", `String canonical_namespace);
+      ("namespace", `String canonical_namespace);
+      ("current_namespace", `String canonical_namespace);
       ("namespace_mode", `String "flattened");
       ("room", `Null);
       ("current_room", `String current_room);
@@ -857,8 +874,8 @@ let dashboard_task_assignee (task : Types.task) =
       Some assignee
   | Todo | Cancelled _ -> None
 
-let dashboard_task_json (task : Types.task) =
-  `Assoc
+let dashboard_task_json config (task : Types.task) =
+  let base_fields =
     [
       ("id", `String task.id);
       ("title", `String task.title);
@@ -868,6 +885,13 @@ let dashboard_task_json (task : Types.task) =
       ("assignee", Json_util.string_opt_to_json (dashboard_task_assignee task));
       ("created_at", `String task.created_at);
     ]
+  in
+  let projection_fields =
+    match Task_contract_gate.task_projection_json config task with
+    | `Assoc fields -> fields
+    | _ -> []
+  in
+  `Assoc (base_fields @ projection_fields)
 
 let dashboard_agent_json (agent : Types.agent) =
   let profile = Dashboard_execution_helpers.get_agent_profile agent.name in
@@ -928,6 +952,7 @@ let dashboard_shell_timeout_s =
 
 let dashboard_shell_payload_json (config : Room.config) : Yojson.Safe.t =
   let current_room = dashboard_current_room_id config in
+  let canonical_namespace = Room.default_namespace_id in
   let started_at = Unix.gettimeofday () in
   let measure_ms f =
     let t0 = Unix.gettimeofday () in
@@ -962,7 +987,7 @@ let dashboard_shell_payload_json (config : Room.config) : Yojson.Safe.t =
   |> with_projection_diagnostics ~surface:"shell" ~started_at
        ~extra:
          [
-           ("current_namespace", `String current_room);
+           ("current_namespace", `String canonical_namespace);
            ("current_room", `String current_room);
            ("coordination_root", `String config.base_path);
            ("workspace_path", `String config.workspace_path);

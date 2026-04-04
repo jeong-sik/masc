@@ -68,21 +68,34 @@ let parse_required_string_field ~field json =
   | Some _ ->
     Result.error (Printf.sprintf "\"%s\" field must be a string in MODEL response" field)
 
-(** Parse MODEL response containing a strict JSON object with hypothesis and
-    modified_code string fields. Returns Ok (hypothesis, modified_code) or
-    Error reason. *)
+(** Parse MODEL response expected to contain a JSON object with hypothesis and
+    modified_code string fields. Uses Lenient_json for deterministic recovery
+    (strip fences, unwrap double-stringify, trailing commas, close brackets).
+    Returns Ok (hypothesis, modified_code) or Error reason. *)
 let parse_model_code_response response =
   let trimmed_response = String.trim response in
   if trimmed_response = "" then
     Result.error "MODEL returned empty response"
   else
-    match
-      Safe_ops.parse_json_safe
-        ~context:"autoresearch_codegen.parse_model_code_response"
-        trimmed_response
-    with
-    | Error err -> Result.error err
-    | Ok (`Assoc _ as json) ->
+    (* Lenient_json.parse applies deterministic recovery transforms:
+       strip markdown fences, unwrap double-stringify, trailing commas,
+       keyword completion, bracket closure — then standard parse.
+       Falls back to {raw: string} if all transforms fail. *)
+    match Llm_provider.Lenient_json.parse trimmed_response with
+    | `Assoc [("raw", `String raw)] ->
+      (* Lenient_json fallback: all recovery transforms failed, raw string returned *)
+      let preview =
+        raw
+        |> String.split_on_char '\n'
+        |> String.concat " "
+        |> String.trim
+        |> fun normalized ->
+        if String.length normalized > 80
+        then String.sub normalized 0 80 ^ "..."
+        else normalized
+      in
+      Result.error (Printf.sprintf "MODEL response is not valid JSON after lenient recovery: %s" preview)
+    | `Assoc _ as json ->
       (match parse_required_string_field ~field:"hypothesis" json with
       | Error _ as e -> e
       | Ok hypothesis ->
@@ -94,12 +107,26 @@ let parse_model_code_response response =
             Result.error "Empty \"modified_code\" field in MODEL response"
           else
             Result.ok (String.trim hypothesis, normalized_code))
-    | Ok _ ->
+    | _ ->
       Result.error "MODEL response must be a JSON object"
 
-(* local_capacity_for_selections removed from OAS SDK.
-   TODO(#4326): reimplement via Discovery.discover when needed. *)
-let has_background_capacity () = true
+let has_background_capacity () =
+  match Eio_context.get_switch_opt (), Eio_context.get_net_opt () with
+  | Some sw, Some net -> (
+      try
+        let capacity =
+          Llm_provider.Cascade_config.local_capacity_for_selections ~sw ~net
+            [ "autoresearch" ]
+        in
+        not
+          (capacity.all_discovered && capacity.endpoints_found > 0
+           && capacity.process_available <= 0)
+      with
+      | Eio.Cancel.Cancelled _ as ex -> raise ex
+      | ex ->
+        Eio.traceln "[autoresearch] capacity check failed: %s" (Printexc.to_string ex);
+        true)
+  | _ -> true
 
 (** Generate code change via Cascade "autoresearch" profile.
     Returns Ok (hypothesis, new_code) or Error reason. *)

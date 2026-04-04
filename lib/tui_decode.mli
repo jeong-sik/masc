@@ -11,6 +11,8 @@ type task = {
   status : string;
   priority : int;
   claimed_by : string option;
+  parent_task_id : string option;
+  goal_id : string option;
 }
 
 type keeper = {

@@ -332,12 +332,21 @@ let children_map units =
           :: List.remove_assoc parent_id acc)
     [] units
 
-let rec descendant_ids child_map unit_id =
+let _max_tree_depth = 50
+
+let rec descendant_ids ?(visited = []) child_map unit_id =
+  if List.mem unit_id visited then []
+  else
+  let visited = unit_id :: visited in
   let children = List.assoc_opt unit_id child_map |> Option.value ~default:[] in
   let direct = List.map (fun (unit : unit_record) -> unit.unit_id) children in
-  direct @ List.concat_map (fun child_id -> descendant_ids child_map child_id) direct
+  direct @ List.concat_map (fun child_id -> descendant_ids ~visited child_map child_id) direct
 
-let rec build_tree_json ~child_map ~unit_lookup ~agent_statuses ~live_agents ~operations unit_id =
+let rec build_tree_json ?(depth = 0) ?(visited = [])
+    ~child_map ~unit_lookup ~agent_statuses ~live_agents ~operations unit_id =
+  if depth > _max_tree_depth || List.mem unit_id visited then None
+  else
+  let visited = unit_id :: visited in
   match List.assoc_opt unit_id unit_lookup with
   | None -> None
   | Some (unit : unit_record) ->
@@ -348,7 +357,8 @@ let rec build_tree_json ~child_map ~unit_lookup ~agent_statuses ~live_agents ~op
             |> List.sort (fun (a : unit_record) (b : unit_record) ->
                    compare (kind_order a.kind, a.label) (kind_order b.kind, b.label))
             |> List.filter_map (fun (child : unit_record) ->
-                   build_tree_json ~child_map ~unit_lookup ~agent_statuses
+                   build_tree_json ~depth:(depth + 1) ~visited
+                     ~child_map ~unit_lookup ~agent_statuses
                      ~live_agents ~operations child.unit_id)
         | None -> []
       in
@@ -412,9 +422,13 @@ let rec build_tree_json ~child_map ~unit_lookup ~agent_statuses ~live_agents ~op
           ])
 
 (* O(n + ops) indexed version — uses pre-computed Hashtbl lookups.
-   Produces identical JSON output as build_tree_json. *)
-let rec build_tree_json_indexed ~(tree_idx : Cp_tree_index.tree_index) unit_id
-    =
+   Produces identical JSON output as build_tree_json.
+   depth/visited guards prevent Stack_overflow on cyclic or deep graphs. *)
+let rec build_tree_json_indexed ?(depth = 0) ?(visited = [])
+    ~(tree_idx : Cp_tree_index.tree_index) unit_id =
+  if depth > _max_tree_depth || List.mem unit_id visited then None
+  else
+  let visited = unit_id :: visited in
   match Hashtbl.find_opt tree_idx.unit_tbl unit_id with
   | None -> None
   | Some (unit : unit_record) ->
@@ -425,7 +439,8 @@ let rec build_tree_json_indexed ~(tree_idx : Cp_tree_index.tree_index) unit_id
             |> List.sort (fun (a : unit_record) (b : unit_record) ->
                    compare (kind_order a.kind, a.label) (kind_order b.kind, b.label))
             |> List.filter_map (fun (child : unit_record) ->
-                   build_tree_json_indexed ~tree_idx child.unit_id)
+                   build_tree_json_indexed ~depth:(depth + 1) ~visited
+                     ~tree_idx child.unit_id)
         | None -> []
       in
       let descendant_op_count =

@@ -147,6 +147,122 @@ export async function fetchWithTimeout(path: string, init: RequestInit, timeoutM
   }
 }
 
+const DASHBOARD_BOOTSTRAP_WARM_PATHS = new Set([
+  '/api/v1/dashboard/shell',
+  '/api/v1/dashboard/namespace-truth',
+  '/api/v1/dashboard/room-truth',
+  '/api/v1/dashboard/execution',
+  '/api/v1/dashboard/planning',
+  '/api/v1/dashboard/mission',
+])
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function isNotInitializedEnvelope(raw: unknown): boolean {
+  if (!isRecord(raw)) return false
+  return typeof raw.error === 'string' && raw.error.trim().toLowerCase() === 'not initialized'
+}
+
+function bootstrapStatusEnvelope(generatedAt: string): Record<string, unknown> {
+  return {
+    namespace_id: 'default',
+    namespace: 'default',
+    project: 'initializing',
+    generated_at: generatedAt,
+  }
+}
+
+function bootstrapInitializingPayload(path: string): unknown | null {
+  const generatedAt = new Date().toISOString()
+  switch (path) {
+    case '/api/v1/dashboard/shell':
+      return {
+        generated_at: generatedAt,
+        status: bootstrapStatusEnvelope(generatedAt),
+        counts: { agents: 0, tasks: 0, keepers: 0 },
+        providers: {},
+        meta_cognition: null,
+        auth: null,
+      }
+    case '/api/v1/dashboard/namespace-truth':
+    case '/api/v1/dashboard/room-truth':
+      return {
+        status: 'initializing',
+        generated_at: generatedAt,
+        message: 'Dashboard bootstrap is still warming up.',
+      }
+    case '/api/v1/dashboard/execution':
+      return {
+        generated_at: generatedAt,
+        status: bootstrapStatusEnvelope(generatedAt),
+        summary: {},
+        execution_queue: [],
+        session_briefs: [],
+        operation_briefs: [],
+        worker_support_briefs: [],
+        continuity_briefs: [],
+        offline_worker_briefs: [],
+        agents: [],
+        tasks: [],
+        messages: [],
+        keepers: [],
+      }
+    case '/api/v1/dashboard/planning':
+      return {
+        generated_at: generatedAt,
+        goals: [],
+        rollup: {},
+        task_backlog: {
+          todo: 0,
+          claimed: 0,
+          in_progress: 0,
+          done: 0,
+          cancelled: 0,
+        },
+      }
+    case '/api/v1/dashboard/mission':
+      return {
+        generated_at: generatedAt,
+        summary: {
+          room_health: 'initializing',
+        },
+        incidents: [],
+        recommended_actions: [],
+        command_focus: { session_cards: [] },
+        operator_targets: { sessions: [], keepers: [], pending_confirms: [], available_actions: [] },
+        attention_queue: [],
+        sessions: [],
+        session_briefs: [],
+        agent_briefs: [],
+        keeper_briefs: [],
+        internal_signals: [],
+      }
+    default:
+      return null
+  }
+}
+
+async function bootstrapWarmPayload(path: string, res: Response): Promise<unknown | null> {
+  if (!DASHBOARD_BOOTSTRAP_WARM_PATHS.has(path)) return null
+  if (res.status < 500) return null
+  let rawText = ''
+  try {
+    rawText = await res.text()
+  } catch {
+    return null
+  }
+  if (rawText.trim() === '') return null
+  try {
+    const parsed = JSON.parse(rawText) as unknown
+    if (!isNotInitializedEnvelope(parsed)) return null
+    return bootstrapInitializingPayload(path)
+  } catch {
+    return null
+  }
+}
+
 export function defaultBoardVoter(): string {
   const params = getQueryParams()
   return sanitizeDashboardActorName(params.get('agent'))
@@ -168,6 +284,10 @@ export async function get<T>(path: string, opts: GetOptions = {}): Promise<T> {
     opts.timeoutMs ?? DEFAULT_GET_TIMEOUT_MS,
   )
   if (!res.ok) {
+    const warmPayload = await bootstrapWarmPayload(path, res)
+    if (warmPayload !== null) {
+      return warmPayload as T
+    }
     throw new ApiRequestError({
       method: 'GET',
       path,
@@ -175,7 +295,13 @@ export async function get<T>(path: string, opts: GetOptions = {}): Promise<T> {
       statusText: res.statusText,
     })
   }
-  return res.json() as Promise<T>
+  const data = await res.json()
+  // Server may return 200 OK with {"error":"not initialized"} during startup
+  if (DASHBOARD_BOOTSTRAP_WARM_PATHS.has(path) && isNotInitializedEnvelope(data)) {
+    const payload = bootstrapInitializingPayload(path)
+    if (payload !== null) return payload as T
+  }
+  return data as T
 }
 
 export function sleep(ms: number): Promise<void> {
@@ -340,7 +466,7 @@ export function fetchOperatorSnapshot(): Promise<OperatorSnapshot> {
 }
 
 export function fetchOperatorDigest(options: {
-  targetType?: 'room' | 'team_session'
+  targetType?: 'namespace' | 'room' | 'team_session'
   targetId?: string
   includeWorkers?: boolean
 } = {}): Promise<OperatorDigest> {

@@ -47,6 +47,10 @@ vi.mock('./config-resolution-panel', () => ({
   ConfigResolutionPanel: () => html`<div>ConfigResolutionPanel</div>`,
 }))
 
+vi.mock('../tool-executor/tool-executor', () => ({
+  ToolExecutor: () => html`<div>ToolExecutor</div>`,
+}))
+
 import { Tools } from './tools-main'
 
 async function flush(): Promise<void> {

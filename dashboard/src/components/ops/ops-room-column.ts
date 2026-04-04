@@ -1,6 +1,7 @@
-// Ops — Namespace column: broadcast, pause/resume, task inject, recommended actions, pending confirmations, namespace feed
+// Ops — Project-scope column: broadcast, pause/resume, task inject, recommended actions, pending confirmations, shared feed
 
 import { html } from 'htm/preact'
+import { JsonViewerCard } from '../common/json-viewer'
 import { signal } from '@preact/signals'
 import { CARD_STANDARD } from '../common/card'
 import { ActionButton } from '../common/button'
@@ -25,7 +26,7 @@ import {
   guidanceLayerTone,
   hydrateRecommendedAction,
   pauseReason,
-  prettyJson,
+  
   runtimeJudgeLabel,
   runtimeJudgeTone,
   submitBroadcast,
@@ -112,7 +113,7 @@ export function OpsRoomColumn() {
         ` : activeRecommendedActions.length > 0 ? html`
           <div class="flex flex-col gap-2">
             ${activeRecommendedActions.map(item => html`
-              <article key=${`${item.action_type}:${item.target_type}:${item.target_id ?? 'room'}`} class="p-3 rounded-xl bg-[var(--white-3)] border border-[var(--white-8)] ${logEntryBorderClass(item.severity)}">
+              <article key=${`${item.action_type}:${item.target_type}:${item.target_id ?? 'namespace'}`} class="p-3 rounded-xl bg-[var(--white-3)] border border-[var(--white-8)] ${logEntryBorderClass(item.severity)}">
                 <div class="text-[var(--fs-xs)] text-[var(--text-muted)] mt-1 whitespace-nowrap overflow-hidden text-ellipsis">
                   <strong>${actionTypeLabel(item.action_type)}</strong>
                   <span>${targetTypeLabel(item.target_type)}${item.target_id ? ` · ${item.target_id}` : ''}</span>
@@ -191,7 +192,7 @@ export function OpsRoomColumn() {
                   <span>${item.delegated_tool ?? '위임 도구 확인 필요'}</span>
                   <span>owner ${item.actor ?? 'unknown'}</span>
                 </div>
-                ${item.preview ? html`<pre class="mt-2 py-[10px] px-3 rounded-xl bg-[rgba(8,15,29,0.82)] border border-solid border-[var(--white-8)] text-[#b9d6ff] text-[11px] leading-[1.45] overflow-x-auto whitespace-pre-wrap break-words max-h-[180px]">${prettyJson(item.preview)}</pre>` : null}
+                ${item.preview ? html`<${JsonViewerCard} data=${item.preview} title="Preview" />` : null}
                 <div class="mt-2 text-[12px] leading-[1.45] text-[var(--text-muted)]">
                   ${canManage ? '' : '읽기 전용'}
                 </div>
@@ -218,13 +219,13 @@ export function OpsRoomColumn() {
 
       <section class="${CARD_STANDARD} flex flex-col gap-3 min-h-0 ops-lane-panel">
         <div class="pb-2 border-b border-[var(--card-border)] mb-1">
-          <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider">Namespace 상태</h3>
+          <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider">프로젝트 상태</h3>
         </div>
-        <p class="text-[12px] text-[var(--text-muted)] leading-[1.45]">평소에는 추천 개입만 보면 됩니다. namespace 전체를 건드릴 때만 아래 고급 제어를 여세요.</p>
+        <p class="text-[12px] text-[var(--text-muted)] leading-[1.45]">평소에는 추천 개입만 보면 됩니다. 프로젝트 전체에 손댈 때만 아래 고급 제어를 여세요.</p>
 
         <div class="grid grid-cols-2 gap-3 max-[880px]:grid-cols-1">
           <div class="ops-stat p-3 rounded-xl border border-[var(--white-8)] bg-[var(--white-3)] flex flex-col gap-1">
-            <span>네임스페이스</span>
+            <span>기본 범위</span>
             <strong>${room.namespace ?? room.namespace_id ?? 'default'}</strong>
           </div>
           <div class="ops-stat p-3 rounded-xl border border-[var(--white-8)] bg-[var(--white-3)] flex flex-col gap-1">
@@ -251,9 +252,9 @@ export function OpsRoomColumn() {
           open=${room.paused ? true : undefined}
         >
           <summary class="ops-control-summary list-none cursor-pointer grid gap-1 p-3 px-3.5">
-            <span class="text-[#9fe6b5] text-[var(--fs-2xs)] tracking-[0.08em] uppercase">고급 namespace 제어</span>
-            <strong>${room.paused ? '지금은 namespace가 멈춰 있어 재개 동선이 열려 있습니다.' : '전체 공지, 일시정지, 작업 주입'}</strong>
-            <span>${room.paused ? '운영 점검 후 재개하거나 공지를 보내세요.' : '기본 화면은 읽기 중심이고, 실제 namespace 변경은 이 안에서만 합니다.'}</span>
+            <span class="text-[#9fe6b5] text-[var(--fs-2xs)] tracking-[0.08em] uppercase">고급 프로젝트 제어</span>
+            <strong>${room.paused ? '지금은 프로젝트 범위가 멈춰 있어 재개 동선이 열려 있습니다.' : '전체 공지, 일시정지, 작업 주입'}</strong>
+            <span>${room.paused ? '운영 점검 후 재개하거나 공지를 보내세요.' : '기본 화면은 읽기 중심이고, 실제 전체 변경은 이 안에서만 합니다.'}</span>
           </summary>
 
           <div class="grid gap-3 px-3.5 pb-3.5 border-t border-[var(--white-8)]">
@@ -263,7 +264,7 @@ export function OpsRoomColumn() {
                 id="ops-broadcast"
                 class="control-input"
                 type="text"
-                placeholder="@agent 또는 namespace 전체 공지"
+                placeholder="@agent 또는 전체 공지"
                 value=${broadcastMessage.value}
                 onInput=${(event: Event) => { broadcastMessage.value = (event.target as HTMLInputElement).value }}
                 onKeyDown=${(event: KeyboardEvent) => { if (event.key === 'Enter') void submitBroadcast() }}
@@ -332,9 +333,9 @@ export function OpsRoomColumn() {
 
       <section class="${CARD_STANDARD} flex flex-col gap-3 min-h-0">
         <div class="pb-2 border-b border-[var(--card-border)] mb-1">
-          <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider">최근 Namespace 메시지</h3>
+          <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider">최근 전체 메시지</h3>
         </div>
-        <p class="text-[12px] text-[var(--text-muted)] leading-[1.45]">namespace 맥락은 참고만 하고, 실제 판단은 위의 개입 큐 기준으로 합니다.</p>
+        <p class="text-[12px] text-[var(--text-muted)] leading-[1.45]">전체 메시지는 참고만 하고, 실제 판단은 위의 개입 큐 기준으로 합니다.</p>
         ${roomFeed.length > 0 ? html`
           <div class="flex flex-col gap-3 max-h-[400px] overflow-y-auto min-w-0 text-[var(--fs-sm)] text-[var(--text-muted)]">
             ${roomFeed.map(message => html`
@@ -347,7 +348,7 @@ export function OpsRoomColumn() {
               </article>
             `)}
           </div>
-        ` : html`<div class="p-3 rounded-xl border border-dashed border-[var(--card-border)] text-[var(--text-muted)] text-[13px]">최근 namespace 메시지가 없습니다.</div>`}
+        ` : html`<div class="p-3 rounded-xl border border-dashed border-[var(--card-border)] text-[var(--text-muted)] text-[13px]">최근 전체 메시지가 없습니다.</div>`}
       </section>
     </div>
   `

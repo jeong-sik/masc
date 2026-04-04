@@ -19,20 +19,33 @@ let provider_name_of_label (label : string) : string option =
     if idx = 0 then None
     else Some (String.sub label 0 idx |> String.trim |> String.lowercase_ascii)
 
-(** Resolve max_context for a model label by looking up the OAS Provider_registry.
-    Falls back to 128_000 if the provider is unknown. *)
+(** Resolve max_context for a model label.
+    Prefers discovered per-slot context (from live /props probe) for local
+    providers, falls back to static Provider_registry value, then 128_000. *)
 let max_context_of_label (label : string) : int =
   match provider_name_of_label label with
   | None -> 128_000
   | Some pname ->
-    match Llm_provider.Provider_registry.find default_registry pname with
-    | Some entry -> entry.max_context
-    | None -> 128_000
+    (* For local providers, prefer discovered per-slot context *)
+    if Provider_adapter.requires_discovery pname then
+      match Llm_provider.Provider_registry.discovered_max_context () with
+      | Some ctx -> ctx
+      | None ->
+        (match Llm_provider.Provider_registry.find default_registry pname with
+         | Some entry -> entry.max_context
+         | None -> 128_000)
+    else
+      match Llm_provider.Provider_registry.find default_registry pname with
+      | Some entry -> entry.max_context
+      | None -> 128_000
 
 (** Resolve max_context for the first available model in a label list.
     "Available" means the provider's API key env var is set (or not required).
+    Prefers discovered per-slot context for local providers.
     Falls back to 128_000 if no model is available. *)
 let resolve_primary_max_context (labels : string list) : int =
+  (* Check discovered context first — applies to any local provider *)
+  let discovered = Llm_provider.Provider_registry.discovered_max_context () in
   let rec find = function
     | [] -> 128_000
     | label :: rest ->
@@ -42,7 +55,11 @@ let resolve_primary_max_context (labels : string list) : int =
         match Llm_provider.Provider_registry.find default_registry pname with
         | None -> find rest
         | Some entry ->
-          if entry.is_available () then entry.max_context
+          if entry.is_available () then
+            (* For local providers, prefer discovered context *)
+            if Provider_adapter.requires_discovery pname then
+              Option.value ~default:entry.max_context discovered
+            else entry.max_context
           else find rest
   in
   find labels
@@ -123,8 +140,8 @@ let ensure_api_keys_for_labels (labels : string list) : (unit, string) result =
              Treat as available — the cascade resolves providers at runtime. *)
           true
       | Some pname ->
-        if pname = "custom" then
-          (* custom:model@url is self-hosted; always considered available *)
+        if Provider_adapter.is_local_provider pname then
+          (* Self-hosted / local runtime; always considered available *)
           true
         else
           match Llm_provider.Provider_registry.find default_registry pname with
@@ -137,7 +154,7 @@ let ensure_api_keys_for_labels (labels : string list) : (unit, string) result =
         match provider_name_of_label label with
         | None -> None
         | Some pname ->
-          if pname = "custom" then None  (* self-hosted, no API key needed *)
+          if Provider_adapter.is_local_provider pname then None
           else
             match Llm_provider.Provider_registry.find default_registry pname with
             | None -> Some (Printf.sprintf "%s (unknown provider)" pname)
@@ -165,7 +182,7 @@ let cascade_config_path () : string option =
 let models_of_cascade_name (cascade_name : string) : string list =
   let defaults =
     match Provider_adapter.preferred_execution_model_labels () with
-    | [] -> ["llama:auto"]
+    | [] -> [Provider_adapter.default_local_fallback_label ()]
     | labels -> labels
   in
   let config_path = cascade_config_path () in

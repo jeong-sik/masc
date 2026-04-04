@@ -104,11 +104,77 @@ let build_plan ~goals opts =
     nodes;
   }
 
+(* ================================================================ *)
+(* Complexity Analyzer (deterministic, no LLM)                      *)
+(* ================================================================ *)
+
+(** Karpathy-inspired reversibility heuristic.
+    Estimates how reversible a task is based on keyword patterns.
+    0.0 = irreversible (deploy, delete), 1.0 = fully reversible (read, search). *)
+let estimate_reversibility description =
+  let desc = String.lowercase_ascii description in
+  let has w =
+    let wlen = String.length w in
+    let dlen = String.length desc in
+    if wlen > dlen then false
+    else
+      let found = ref false in
+      for i = 0 to dlen - wlen do
+        if not !found && String.sub desc i wlen = w then found := true
+      done;
+      !found
+  in
+  if has "deploy" || has "release" || has "publish" || has "production" then 0.1
+  else if has "delete" || has "drop" || has "remove" || has "destroy" then 0.2
+  else if has "migrate" || has "schema" || has "database" then 0.3
+  else if has "config" || has "environment" || has "secret" then 0.6
+  else if has "refactor" || has "implement" || has "code" || has "fix" then 0.8
+  else if has "test" || has "lint" || has "format" then 0.9
+  else if has "read" || has "search" || has "query" || has "list" || has "view" then 1.0
+  else 0.7  (* unknown defaults to moderately reversible *)
+
+type task_complexity = {
+  estimated_turns : int;
+  reversibility : float;
+}
+
+(** Estimate task complexity from description.
+    Uses word count as a proxy for scope, combined with reversibility. *)
+let estimate_complexity description =
+  let words = String.split_on_char ' ' description |> List.length in
+  let estimated_turns = max 1 (words / 5) in
+  let reversibility = estimate_reversibility description in
+  { estimated_turns; reversibility }
+
+(** Threshold above which tasks should be split.
+    Tasks with estimated_turns above this are flagged for decomposition. *)
+let needs_decomposition complexity =
+  complexity.estimated_turns > 20
+
+(* ================================================================ *)
+(* Idempotent Task Dispatch                                         *)
+(* ================================================================ *)
+
+(** Check if a task with the same title prefix already exists in backlog.
+    Prevents duplicate task creation when execute_plan is called multiple times. *)
+let task_exists_in_backlog config ~title_prefix =
+  let backlog = Room.read_backlog config in
+  List.exists (fun (t : Types.task) ->
+    let tlen = String.length title_prefix in
+    String.length t.title >= tlen && String.sub t.title 0 tlen = title_prefix
+  ) backlog.tasks
+
+(** Idempotent version of add_task.
+    Skips creation if a task with matching title prefix already exists. *)
 let add_task_safe config ~title ~description =
-  try
-    let response = Room.add_task config ~title ~priority:3 ~description in
-    Ok response
-  with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Error (Printexc.to_string exn)
+  let prefix = if String.length title > 40 then String.sub title 0 40 else title in
+  if task_exists_in_backlog config ~title_prefix:prefix then
+    Ok (Printf.sprintf "(skipped, already exists) %s" (String.sub title 0 (min 60 (String.length title))))
+  else
+    try
+      let response = Room.add_task config ~title ~priority:3 ~description in
+      Ok response
+    with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Error (Printexc.to_string exn)
 
 let execute_plan config ~agent_name:_ plan =
   let created = ref [] in

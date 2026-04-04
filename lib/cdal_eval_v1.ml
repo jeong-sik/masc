@@ -77,6 +77,9 @@ let friction_of_outcome = function
 (* JSONL persistence                                                *)
 (* ================================================================ *)
 
+(* Evaluated at module init time (eager). MASC_DATA_DIR / ME_ROOT must
+   be set before this module is loaded. Safe in practice because the
+   server sets all env vars at process startup. *)
 let default_base_path =
   let root = try Sys.getenv "MASC_DATA_DIR"
     with Not_found ->

@@ -115,9 +115,9 @@ let command_plane_help_http_json () =
       ( "concepts",
         `List
           [
-            concept ~id:"namespace" ~title:"Namespace"
+            concept ~id:"namespace" ~title:"Project Scope"
               ~summary:
-                "Project coordination namespace. Use masc_start as the primary onboarding entrypoint. Historical room naming remains only as a compatibility alias, and masc_set_room now selects only the project coordination root while runtime state still lives in the flattened default namespace under .masc/.";
+                "Shared project coordination scope. Use masc_start as the primary onboarding entrypoint. Historical room naming remains only as a compatibility alias, and masc_set_room now selects only the project coordination root while runtime state still lives in the flattened default scope under .masc/.";
             concept ~id:"task" ~title:"Task"
               ~summary:
                 "Backlog work item. Claim semantics differ by tool: masc_transition(action=claim) leaves planning current_task unset, while masc_claim_next auto-binds it in current builds.";
@@ -137,28 +137,28 @@ let command_plane_help_http_json () =
       ( "golden_paths",
         `List
           [
-            path ~id:"namespace_task_hygiene" ~title:"Namespace / Task Hygiene"
+            path ~id:"namespace_task_hygiene" ~title:"Project Scope / Task Hygiene"
               ~summary:
-                "Minimal MCP sequence before doing any real work in the project namespace."
+                "Minimal MCP sequence before doing any real work in the shared project scope."
               ~when_to_use:
                 "Use this before benchmark runs, CPv2 experiments, or ordinary implementation work."
               ~steps:
                 [
-                  step ~id:"start" ~title:"Start namespace onboarding" ~tool:"masc_start"
+                  step ~id:"start" ~title:"Start project onboarding" ~tool:"masc_start"
                     ~summary:
-                      "Preferred front door. Sets the project coordination root, joins the default namespace, and can optionally create+claim a task in one call."
+                      "Preferred front door. Sets the project coordination root, joins the default shared scope, and can optionally create+claim a task in one call."
                     ~success_signals:
                       [ "coordination root resolves to the project root"; "agent can appear in masc_status immediately after onboarding" ]
                     ~pitfalls:
                       [ "calling masc_set_room only changes project scope; it does not complete the full onboarding flow";
                         "omitting task_title means you still need a later claim/create step" ];
-                  step ~id:"status" ~title:"Verify namespace state" ~tool:"masc_status"
+                  step ~id:"status" ~title:"Verify project state" ~tool:"masc_status"
                     ~summary:
-                      "Confirm the namespace is healthy, your agent is visible, and the backlog is in the expected state."
+                      "Confirm the shared project scope is healthy, your agent is visible, and the backlog is in the expected state."
                     ~success_signals:
-                      [ "agent visible in masc_status"; "namespace agent roster includes your agent" ]
+                      [ "agent visible in masc_status"; "project agent roster includes your agent" ]
                     ~pitfalls:
-                      [ "without join you are invisible to scheduling" ];
+                      [ "if you only called masc_set_room, or masc_start did not complete successfully, your agent may not be joined and will not appear for scheduling" ];
                   step ~id:"claim" ~title:"Claim or create work" ~tool:"masc_transition"
                     ~summary:
                       "Claim a specific task with masc_transition(action=claim), or use masc_claim_next when any queued task is acceptable."

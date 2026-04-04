@@ -91,7 +91,17 @@ dune exec test/test_council.exe
 
 # Build only (fast check)
 dune build
+
+# Build + run a Valgrind leak check on the HTTP server startup/MCP smoke path
+make check-memory-leak
 ```
+
+- `make check-memory-leak` builds `bin/main_eio.exe`, starts it under Valgrind memcheck, waits for `/health`, runs `initialize` + `tools/list`, and fails on definite / indirect / possible leaks.
+- Prerequisites: `dune`, `curl`, `python3`, and `valgrind`.
+- Useful overrides:
+  - `MASC_MAIN_EIO_EXE=/abs/path/to/main_eio.exe make check-memory-leak`
+  - `VALGRIND_BIN=/abs/path/to/valgrind make check-memory-leak`
+  - `bash scripts/check-memory-leak.sh --skip-build --keep-artifacts`
 
 ### External Dependencies
 

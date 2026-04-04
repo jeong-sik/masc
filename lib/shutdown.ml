@@ -80,6 +80,16 @@ type hook = {
   action : unit -> unit;
 }
 
+(** Global shutdown-started flag.  Set to [true] on the first [initiate]
+    call.  This flag is sticky: it is never cleared, so it indicates that
+    shutdown has started at least once, not that shutdown is currently in
+    progress.  In production the process exits shortly after shutdown, so
+    the sticky semantics are safe.  In tests where [exit_fn] is a no-op,
+    callers must be aware that the flag stays [true]. *)
+let shutting_down_flag = Atomic.make false
+
+let is_shutting_down_global () = Atomic.get shutting_down_flag
+
 let hooks : hook list ref = ref []
 
 let register ~name ?(priority = 50) action =
@@ -153,6 +163,7 @@ let initiate state ~clock ~reason ~notify_fn ~drain_check ~exit_fn =
     Log.Server.warn "[Shutdown] already in progress (phase=%s), ignoring"
       (phase_to_string state.phase);
   end else begin
+    Atomic.set shutting_down_flag true;
     state.started_at <- Eio.Time.now clock;
     state.reason <- reason;
     Log.Server.info "[Shutdown] initiated: %s" reason;

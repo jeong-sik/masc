@@ -2148,6 +2148,140 @@ let test_keeper_bootstrap_marks_stale_explicit_keeper () =
       check bool "diagnostic removed from status" true
         Yojson.Safe.Util.(status_json |> member "diagnostic" = `Null))
 
+let janitor_toml_contents = {|
+[keeper]
+goal = "Keep the runtime clean."
+short_goal = "Materialize from TOML."
+mid_goal = "Stay bootable from declarative config."
+long_goal = "Remain durable."
+soul_profile = "delivery"
+instructions = "Bootstrap from TOML only."
+room_scope = "all"
+scope_kind = "global"
+mention_targets = ["janitor"]
+proactive_enabled = false
+tool_preset = "research"
+tool_also_allow = ["keeper_board_delete"]
+|}
+
+let test_keeper_bootstrap_materializes_toml_only_keeper () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  Masc_mcp.Keeper_registry.clear ();
+  let base_dir = temp_dir () in
+  let config_root = Filename.concat (Filename.concat base_dir ".masc") "config" in
+  let keepers_root = Filename.concat config_root "keepers" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc_mcp.Config_dir_resolver.reset ();
+      Masc_mcp.Keeper_keepalive.stop_keepalive "janitor";
+      Masc_mcp.Keeper_registry.clear ();
+      rm_rf base_dir)
+    (fun () ->
+      write_file (Filename.concat keepers_root "janitor.toml") janitor_toml_contents;
+      with_env "MASC_CONFIG_DIR" config_root (fun () ->
+        Masc_mcp.Config_dir_resolver.reset ();
+        let config = Masc_mcp.Room.default_config base_dir in
+        ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
+        let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
+          { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env); net = None }
+        in
+        check bool "bootable keeper names include declarative janitor" true
+          (List.mem "janitor" (Masc_mcp.Keeper_runtime.bootable_keeper_names config));
+        let stats = Masc_mcp.Keeper_runtime.bootstrap_existing_keepers keeper_ctx in
+        check bool "bootstrap enabled" true stats.enabled;
+        check int "declarative keeper started" 1 stats.started;
+        check int "declarative keeper not stale on first materialization" 0 stats.stale;
+        let meta =
+          match Masc_mcp.Keeper_types.read_meta config "janitor" with
+          | Ok (Some meta) -> meta
+          | Ok None -> fail "missing janitor meta"
+          | Error e -> fail e
+        in
+        check string "goal came from TOML" "Keep the runtime clean." meta.goal;
+        check bool "janitor keepalive running" true
+          (Masc_mcp.Keeper_registry.is_running ~base_path:config.base_path "janitor")))
+
+let test_keeper_board_delete_requires_explicit_opt_in () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc_mcp.Keeper_keepalive.stop_keepalive "board-delete-demo";
+      Masc_mcp.Keeper_keepalive.stop_keepalive "board-delete-full";
+      Masc_mcp.Keeper_keepalive.stop_keepalive "board-delete-optin";
+      rm_rf base_dir)
+    (fun () ->
+      let config = Masc_mcp.Room.default_config base_dir in
+      ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
+      let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
+        { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env); net = None }
+      in
+      let dispatch name args =
+        match Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name ~args with
+        | Some result -> result
+        | None -> fail ("missing dispatch for " ^ name)
+      in
+      let ok_default, body_default =
+        dispatch "masc_keeper_up"
+          (`Assoc
+            [
+              ("name", `String "board-delete-demo");
+              ("goal", `String "Check default board delete policy");
+              ("proactive_enabled", `Bool false);
+              ("tool_preset", `String "research");
+            ])
+      in
+      if not ok_default then fail ("default keeper_up failed: " ^ body_default);
+      let ok_full, body_full =
+        dispatch "masc_keeper_up"
+          (`Assoc
+            [
+              ("name", `String "board-delete-full");
+              ("goal", `String "Check full board delete policy");
+              ("proactive_enabled", `Bool false);
+              ("tool_preset", `String "full");
+            ])
+      in
+      if not ok_full then fail ("full keeper_up failed: " ^ body_full);
+      let ok_optin, body_optin =
+        dispatch "masc_keeper_up"
+          (`Assoc
+            [
+              ("name", `String "board-delete-optin");
+              ("goal", `String "Check explicit board delete policy");
+              ("proactive_enabled", `Bool false);
+              ("tool_preset", `String "research");
+              ("tool_also_allow", `List [ `String "keeper_board_delete" ]);
+            ])
+      in
+      if not ok_optin then fail ("opt-in keeper_up failed: " ^ body_optin);
+      let default_meta =
+        match Masc_mcp.Keeper_types.read_meta config "board-delete-demo" with
+        | Ok (Some meta) -> meta
+        | Ok None -> fail "missing board-delete-demo meta"
+        | Error e -> fail e
+      in
+      let optin_meta =
+        match Masc_mcp.Keeper_types.read_meta config "board-delete-optin" with
+        | Ok (Some meta) -> meta
+        | Ok None -> fail "missing board-delete-optin meta"
+        | Error e -> fail e
+      in
+      let full_meta =
+        match Masc_mcp.Keeper_types.read_meta config "board-delete-full" with
+        | Ok (Some meta) -> meta
+        | Ok None -> fail "missing board-delete-full meta"
+        | Error e -> fail e
+      in
+      check_keeper_exec_tool_presence "default research preset board delete"
+        default_meta ~tool_name:"keeper_board_delete" ~expect_allowed:false;
+      check_keeper_exec_tool_presence "default full preset board delete"
+        full_meta ~tool_name:"keeper_board_delete" ~expect_allowed:false;
+      check_keeper_exec_tool_presence "explicit board delete opt-in"
+        optin_meta ~tool_name:"keeper_board_delete" ~expect_allowed:true)
+
 let test_keeper_supervisor_recovers_missing_desired_keeper () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -2693,6 +2827,10 @@ let () =
            test_parse_agent_status_reads_compressed_filesystem_backend;
          test_case "keeper bootstrap marks stale explicit keeper" `Quick
            test_keeper_bootstrap_marks_stale_explicit_keeper;
+         test_case "keeper bootstrap materializes TOML-only keeper" `Quick
+           test_keeper_bootstrap_materializes_toml_only_keeper;
+         test_case "keeper board delete requires explicit opt-in" `Quick
+           test_keeper_board_delete_requires_explicit_opt_in;
          test_case "keeper supervisor recovers missing desired keeper" `Quick
            test_keeper_supervisor_recovers_missing_desired_keeper;
          test_case "legacy presence_keepalive false migrates to paused" `Quick

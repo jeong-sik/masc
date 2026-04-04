@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { JsonViewerCard } from '../common/json-viewer'
 import { useEffect } from 'preact/hooks'
 import { CARD_STANDARD } from '../common/card'
 import { ActionButton } from '../common/button'
@@ -33,7 +34,7 @@ import {
   hydrateOpsWorkflow,
   hydrateRecommendedAction,
   hydratedWorkflowId,
-  prettyJson,
+  
   primaryActionForReviewItem,
   relativeAge,
   reviewDecisionReason,
@@ -50,9 +51,9 @@ import { FlowControlPanel } from '../flow-control/flow-control-panel'
 function severityClass(value?: string | null): string {
   switch ((value ?? '').trim().toLowerCase()) {
     case 'bad':
-      return 'border-[rgba(239,68,68,0.26)] bg-[rgba(239,68,68,0.08)]'
+      return 'border-[var(--bad-30)] bg-[var(--bad-10)]'
     case 'warn':
-      return 'border-[rgba(251,191,36,0.26)] bg-[rgba(251,191,36,0.08)]'
+      return 'border-[var(--warn-30)] bg-[var(--warn-10)]'
     default:
       return 'border-[var(--card-border)] bg-[var(--white-3)]'
   }
@@ -189,8 +190,8 @@ function renderSummaryBadges(activeCount: number, deferredCount: number, recentC
   const roomPaused = operatorSnapshot.value?.namespace?.paused
   const roomLabel =
     typeof roomPaused === 'boolean'
-      ? roomPaused ? '네임스페이스 일시정지' : '네임스페이스 진행 중'
-      : '네임스페이스 확인 필요'
+      ? roomPaused ? '프로젝트 일시정지' : '프로젝트 진행 중'
+      : '프로젝트 상태 확인 필요'
   const roomTone: ActivityTone =
     typeof roomPaused !== 'boolean'
       ? 'default'
@@ -249,7 +250,7 @@ function renderTruth(item: OperatorReviewItem | null) {
     return html`
       <div class="grid grid-cols-2 gap-3 max-[880px]:grid-cols-1">
         <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)]">
-          <div class="text-[11px] text-[var(--text-muted)] uppercase tracking-[0.08em]">Namespace</div>
+          <div class="text-[11px] text-[var(--text-muted)] uppercase tracking-[0.08em]">Project</div>
           <strong>${room.namespace ?? room.namespace_id ?? 'default'}</strong>
           <div class="text-[12px] text-[var(--text-muted)]">${room.project ?? 'project'} · ${room.cluster ?? 'cluster'}</div>
         </div>
@@ -349,7 +350,7 @@ function renderFriction(item: OperatorReviewItem | null) {
               return html`
                 <div class="text-[13px] leading-[1.45] text-[var(--text-body)]">
                   <strong>${typeof record?.severity === 'string' ? record.severity : 'info'}</strong>
-                  <span> ${typeof record?.summary === 'string' ? record.summary : prettyJson(row)}</span>
+                  <span> ${typeof record?.summary === 'string' ? record.summary : (row)}</span>
                 </div>
               `
             })}
@@ -358,7 +359,7 @@ function renderFriction(item: OperatorReviewItem | null) {
       ` : null}
       <details class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)]">
         <summary class="cursor-pointer text-[11px] text-[var(--text-muted)] uppercase tracking-[0.08em]">Raw Friction</summary>
-        <pre class="mt-2 text-[11px] leading-[1.45] overflow-auto">${prettyJson(item.friction)}</pre>
+        <${JsonViewerCard} data=${item.friction} />
       </details>
     </div>
   `
@@ -596,7 +597,7 @@ export function Ops() {
 
                   ${confirmToken
                     ? html`
-                        <article class="p-3 rounded-xl border border-[rgba(251,191,36,0.26)] bg-[rgba(251,191,36,0.08)] grid gap-2">
+                        <article class="p-3 rounded-xl border border-[var(--warn-30)] bg-[var(--warn-10)] grid gap-2">
                           <div class="text-[11px] text-[var(--text-muted)] uppercase tracking-[0.08em]">승인 대기</div>
                           <div class="text-[13px] text-[var(--text-body)]">${confirmToken}</div>
                           <div class="flex gap-2 flex-wrap">

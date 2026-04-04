@@ -165,7 +165,7 @@ function workflowContextId(
     sourceLabel,
     actionType ?? 'action',
     targetType ?? 'target',
-    targetId ?? 'room',
+    targetId ?? 'namespace',
     focusKind ?? 'focus',
     operationId ?? 'operation',
     createdAt,
@@ -307,21 +307,25 @@ export function missionInterveneParams(context: DashboardWorkflowContext): Recor
 
 export function workflowTargetLabel(context?: DashboardWorkflowContext | null): string {
   if (!context?.target_type) return '대상 정보 없음'
-  return context.target_id ? `${context.target_type} · ${context.target_id}` : context.target_type
+  const targetType =
+    context.target_type === 'room' || context.target_type === 'namespace'
+      ? '프로젝트'
+      : context.target_type
+  return context.target_id ? `${targetType} · ${context.target_id}` : targetType
 }
 
 export function workflowActionLabel(actionType?: string | null): string {
   switch (actionType) {
     case 'broadcast':
-      return 'namespace 방송'
+      return '전체 공지'
     case 'namespace_pause':
     case 'room_pause':
-      return 'namespace 일시정지'
+      return '프로젝트 일시정지'
     case 'namespace_resume':
     case 'room_resume':
-      return 'namespace 재개'
+      return '프로젝트 재개'
     case 'task_inject':
-      return 'namespace 작업 주입'
+      return '프로젝트 작업 주입'
     case 'team_turn':
       return 'session 업데이트'
     case 'team_note':

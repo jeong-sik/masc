@@ -191,11 +191,16 @@ let () = test "dispatch_room_strategy_get" (fun () ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let ctx = make_test_ctx () in
   let _ = Room.init ctx.config ~agent_name:(Some "test-agent") in
+  Room.write_current_room ctx.config "focus-room";
+  Room.ensure_room_bootstrap ctx.config "focus-room";
   match Tool_room.dispatch ctx ~name:"masc_room_strategy_get" ~args:(`Assoc []) with
   | Some (success, result) ->
       assert success;
-      assert (str_contains result "\"search_strategy_default\"");
-      assert (str_contains result "\"speculation_enabled\"")
+      let json = Yojson.Safe.from_string result in
+      assert (Yojson.Safe.Util.member "namespace_id" json |> Yojson.Safe.Util.to_string = Room.default_namespace_id);
+      assert (Yojson.Safe.Util.member "room_id" json |> Yojson.Safe.Util.to_string = Room.default_namespace_id);
+      ignore (Yojson.Safe.Util.member "search_strategy_default" json |> Yojson.Safe.Util.to_string);
+      ignore (Yojson.Safe.Util.member "speculation_enabled" json |> Yojson.Safe.Util.to_bool)
   | None -> failwith "dispatch returned None"
 )
 

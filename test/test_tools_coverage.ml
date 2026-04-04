@@ -3,6 +3,8 @@
 open Types
 open Masc_mcp.Tools
 
+let schema_inventory = all_schemas_extended
+
 (* ============================================================ *)
 (* Helper functions                                              *)
 (* ============================================================ *)
@@ -37,11 +39,11 @@ let get_json_assoc key obj =
 
 let test_all_schemas_not_empty () =
   Alcotest.(check bool) "all_schemas is not empty"
-    true (List.length all_schemas > 0)
+    true (List.length schema_inventory > 0)
 
 let test_all_schemas_count () =
   (* Verify we have at least 100 tools defined *)
-  let count = List.length all_schemas in
+  let count = List.length schema_inventory in
   Alcotest.(check bool) "at least 100 tools defined"
     true (count >= 100);
   Printf.printf "Total tool schemas: %d\n" count
@@ -58,11 +60,10 @@ let test_schema_has_required_fields () =
     match schema.input_schema with
     | `Assoc _ -> ()
     | _ -> Alcotest.fail (Printf.sprintf "%s input_schema is not an object" schema.name)
-  ) all_schemas
+  ) schema_inventory
 
-(* TODO: activate after fixing duplicate schema names in tool registry *)
-let _test_schema_names_are_unique () =
-  let names = List.map (fun s -> s.name) all_schemas in
+let test_schema_names_are_unique () =
+  let names = List.map (fun s -> s.name) schema_inventory in
   let unique_names = List.sort_uniq String.compare names in
   Alcotest.(check int) "all schema names are unique"
     (List.length names) (List.length unique_names)
@@ -71,7 +72,7 @@ let test_all_names_start_with_masc () =
   List.iter (fun schema ->
     Alcotest.(check bool) (Printf.sprintf "%s starts with masc_" schema.name)
       true (String.length schema.name >= 5 && String.sub schema.name 0 5 = "masc_")
-  ) all_schemas
+  ) schema_inventory
 
 (* ============================================================ *)
 (* 2. find_tool Function Tests                                   *)
@@ -119,14 +120,14 @@ let test_input_schema_type_is_object () =
     | Some "object" -> ()
     | Some t -> Alcotest.fail (Printf.sprintf "%s input_schema type is %s, expected object" schema.name t)
     | None -> Alcotest.fail (Printf.sprintf "%s input_schema missing type field" schema.name)
-  ) all_schemas
+  ) schema_inventory
 
 let test_input_schema_has_properties () =
   List.iter (fun schema ->
     match get_json_assoc "properties" schema.input_schema with
     | Some _ -> ()
     | None -> Alcotest.fail (Printf.sprintf "%s input_schema missing properties" schema.name)
-  ) all_schemas
+  ) schema_inventory
 
 let test_required_field_is_list () =
   List.iter (fun schema ->
@@ -137,7 +138,7 @@ let test_required_field_is_list () =
          | Some (`List _) -> ()
          | Some _ -> Alcotest.fail (Printf.sprintf "%s required field is not a list" schema.name))
     | _ -> Alcotest.fail (Printf.sprintf "%s input_schema is not an object" schema.name)
-  ) all_schemas
+  ) schema_inventory
 
 (* ============================================================ *)
 (* 4. Specific Tool Tests                                        *)
@@ -202,7 +203,9 @@ let test_masc_transition_schema () =
           Alcotest.(check bool) "has completion_contract" true
             (List.mem_assoc "completion_contract" props);
           Alcotest.(check bool) "has evaluator_cascade" true
-            (List.mem_assoc "evaluator_cascade" props)
+            (List.mem_assoc "evaluator_cascade" props);
+          Alcotest.(check bool) "has handoff_context" true
+            (List.mem_assoc "handoff_context" props)
       | None -> Alcotest.fail "masc_transition missing properties");
       match get_json_list "required" schema.input_schema with
       | Some reqs ->
@@ -219,7 +222,8 @@ let test_masc_add_task_schema () =
       | Some props ->
           Alcotest.(check bool) "has title" true (List.mem_assoc "title" props);
           Alcotest.(check bool) "has priority" true (List.mem_assoc "priority" props);
-          Alcotest.(check bool) "has description" true (List.mem_assoc "description" props)
+          Alcotest.(check bool) "has description" true (List.mem_assoc "description" props);
+          Alcotest.(check bool) "has contract" true (List.mem_assoc "contract" props)
       | None -> Alcotest.fail "masc_add_task missing properties"
 
 let test_masc_operator_snapshot_schema () =
@@ -942,14 +946,14 @@ let test_description_not_too_short () =
   List.iter (fun schema ->
     Alcotest.(check bool) (Printf.sprintf "%s description >= 20 chars" schema.name)
       true (String.length schema.description >= 20)
-  ) all_schemas
+  ) schema_inventory
 
 let test_description_not_too_long () =
   List.iter (fun schema ->
     (* Description should be reasonable length for MODEL context *)
     Alcotest.(check bool) (Printf.sprintf "%s description <= 1000 chars" schema.name)
       true (String.length schema.description <= 1000)
-  ) all_schemas
+  ) schema_inventory
 
 let test_no_duplicate_properties () =
   List.iter (fun schema ->
@@ -960,7 +964,7 @@ let test_no_duplicate_properties () =
         Alcotest.(check int) (Printf.sprintf "%s no duplicate properties" schema.name)
           (List.length prop_names) (List.length unique_names)
     | None -> ()
-  ) all_schemas
+  ) schema_inventory
 
 let test_property_types_valid () =
   let valid_types = ["string"; "integer"; "number"; "boolean"; "array"; "object"] in
@@ -976,7 +980,7 @@ let test_property_types_valid () =
           | None -> ()  (* Type might be inferred or use enum *)
         ) props
     | None -> ()
-  ) all_schemas
+  ) schema_inventory
 
 (* ============================================================ *)
 (* Test Runner                                                   *)
@@ -988,6 +992,7 @@ let () =
       Alcotest.test_case "not_empty" `Quick test_all_schemas_not_empty;
       Alcotest.test_case "count" `Quick test_all_schemas_count;
       Alcotest.test_case "required_fields" `Quick test_schema_has_required_fields;
+      Alcotest.test_case "unique_names" `Quick test_schema_names_are_unique;
       Alcotest.test_case "masc_prefix" `Quick test_all_names_start_with_masc;
     ];
     "find_tool", [

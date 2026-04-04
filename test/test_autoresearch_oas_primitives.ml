@@ -202,6 +202,100 @@ let test_cycle_reinjects_diff_guard_lesson () =
     | None -> -1) in
   check int "cycle advanced twice" 2 final_cycle
 
+let test_build_verify_downgrade_rewrites_history () =
+  with_temp_dir "masc_cycle_build_verify" @@ fun root ->
+  with_me_root root @@ fun () ->
+  with_eio @@ fun ~sw ~clock ->
+  with_clean_state @@ fun () ->
+  let repo = Filename.concat root "repo" in
+  Unix.mkdir repo 0o755;
+  init_git_repo repo;
+  run_in_dir repo "git checkout -q -b test-loop";
+  let state =
+    Lib.Autoresearch.create_state
+      ~goal:"Improve main file"
+      ~metric_fn:"/usr/bin/printf 1.0"
+      ~model_model:"glm:test"
+      ~target_file:"main.txt"
+      ~cycle_timeout_s:5.0
+      ~max_cycles:3
+      ~build_verify_fn:"/usr/bin/false"
+      ~workdir:repo
+      ()
+  in
+  Lib.Autoresearch.with_loops_rw (fun () ->
+      Hashtbl.replace Lib.Autoresearch.active_loops state.loop_id state;
+      Lib.Autoresearch.latest_loop_id := Some state.loop_id);
+  let ctx : Lib.Tool_autoresearch_repo_synthesis.context =
+    {
+      base_path = root;
+      agent_name = Some "test";
+      start_operation = None;
+      start_team_session = None;
+      config = None;
+      sw = Some sw;
+      clock = Some clock;
+    }
+  in
+  Lib.Tool_autoresearch_registry.set_generator state.loop_id
+    (fun ~goal:_ ~baseline:_ ~history:_ ~insights:_ ~target_file:_ ~file_content:_ ->
+       Ok ("optimistic keep", "changed-once\n"));
+  let first =
+    Lib.Tool_autoresearch_cycle.handle_cycle ctx
+      (`Assoc [ ("loop_id", `String state.loop_id) ])
+  in
+  let open Yojson.Safe.Util in
+  let first_decision =
+    match first |> member "decision" |> to_string_option with
+    | Some decision -> decision
+    | None ->
+      failf "expected first cycle decision, got %s"
+        (Yojson.Safe.to_string first)
+  in
+  check string "first cycle downgraded to discard"
+    "discard" first_decision;
+  let state_after_first =
+    Lib.Autoresearch.with_loops_ro (fun () ->
+      match Hashtbl.find_opt Lib.Autoresearch.active_loops state.loop_id with
+      | Some s -> s
+      | None -> fail "loop missing after first cycle")
+  in
+  let history_head =
+    match state_after_first.history with
+    | head :: _ -> head
+    | [] -> fail "expected first cycle history"
+  in
+  check string "stored history head rewritten to discard"
+    "discard"
+    (Lib.Autoresearch.decision_to_string history_head.decision);
+  let captured_history = ref None in
+  Lib.Tool_autoresearch_registry.set_generator state.loop_id
+    (fun ~goal:_ ~baseline:_ ~history ~insights:_ ~target_file:_ ~file_content:_ ->
+       captured_history := Some history;
+       Ok ("second pass", "changed-twice\n"));
+  let second =
+    Lib.Tool_autoresearch_cycle.handle_cycle ctx
+      (`Assoc [ ("loop_id", `String state.loop_id) ])
+  in
+  let second_decision =
+    match second |> member "decision" |> to_string_option with
+    | Some decision -> decision
+    | None ->
+      failf "expected second cycle decision, got %s"
+        (Yojson.Safe.to_string second)
+  in
+  check string "second cycle still runs" "discard"
+    second_decision;
+  let next_history_head =
+    match !captured_history with
+    | Some (head :: _) -> head
+    | Some [] -> fail "generator history unexpectedly empty"
+    | None -> fail "generator did not capture history"
+  in
+  check string "next cycle receives downgraded discard history"
+    "discard"
+    (Lib.Autoresearch.decision_to_string next_history_head.decision)
+
 let () =
   run "autoresearch_oas_primitives"
     [
@@ -216,5 +310,7 @@ let () =
         [
           test_case "diff guard lesson is reinjected" `Quick
             test_cycle_reinjects_diff_guard_lesson;
+          test_case "build verify downgrade rewrites history" `Quick
+            test_build_verify_downgrade_rewrites_history;
         ] );
     ]

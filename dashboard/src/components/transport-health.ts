@@ -5,6 +5,7 @@ import type { ComponentChildren } from 'preact'
 import { get } from '../api/core'
 import { lastEvent } from '../sse'
 import type { SSEEvent } from '../types'
+import { FetchScheduler } from '../lib/fetch-scheduler'
 
 type StatusTone = 'ok' | 'warn' | 'bad'
 
@@ -362,25 +363,24 @@ function CaseCard({ item, data }: { item: PracticalCase; data: TransportHealthDa
 export function TransportHealthPanel() {
   useEffect(() => {
     void refreshTransportHealth()
+    const sseRefreshScheduler = new FetchScheduler(
+      () => refreshTransportHealth(),
+      { cooldownMs: 0, debounceMs: 1200 },
+    )
 
     const interval = setInterval(() => {
       void refreshTransportHealth()
     }, 30_000)
 
-    let debounceTimer: ReturnType<typeof setTimeout> | null = null
     const unsubscribe = lastEvent.subscribe((event) => {
       if (!event || !shouldRefreshFromEvent(event)) return
-      if (debounceTimer) clearTimeout(debounceTimer)
-      debounceTimer = setTimeout(() => {
-        void refreshTransportHealth()
-        debounceTimer = null
-      }, 1200)
+      sseRefreshScheduler.request()
     })
 
     return () => {
       clearInterval(interval)
       unsubscribe()
-      if (debounceTimer) clearTimeout(debounceTimer)
+      sseRefreshScheduler.dispose()
     }
   }, [])
 
@@ -414,8 +414,8 @@ export function TransportHealthPanel() {
     : `topology ${data.cluster.topology_source}`
   const namespaceChip =
     data.cluster.cluster && data.cluster.cluster !== 'unknown' && data.cluster.cluster !== 'default'
-      ? `${data.cluster.cluster} / namespace ${data.cluster.room_id}`
-      : `namespace ${data.cluster.room_id}`
+      ? `${data.cluster.cluster} / scope ${data.cluster.room_id}`
+      : `scope ${data.cluster.room_id}`
 
   return html`
     <div class="space-y-4">

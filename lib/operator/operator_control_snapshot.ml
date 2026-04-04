@@ -199,19 +199,34 @@ let keeper_tool_audit_fields config (meta : Keeper_types.keeper_meta) =
         fallback_snapshot.tool_audit_source,
         fallback_snapshot.tool_audit_at )
 
+(* Concurrency cap for parallel keeper snapshot fibers.
+   Prevents memory bursts when many keepers are processed simultaneously.
+   Each keeper fiber does filesystem I/O + heavy JSON construction (~50 fields). *)
+let _keeper_snapshot_max_concurrency =
+  Dashboard_http_helpers.int_of_env_default
+    "MASC_DASHBOARD_KEEPER_SNAPSHOT_MAX_CONCURRENCY"
+    ~default:4 ~min_v:1 ~max_v:32
+
+let _keeper_sem = Eio.Semaphore.make _keeper_snapshot_max_concurrency
+
 let keepers_json ?keeper_names ?(include_recent_activity = false)
     ?(lightweight = false) config =
   let names = match keeper_names with
     | Some n -> n
     | None -> Keeper_types.keeper_names config
   in
-  (* Parallel keeper I/O: each keeper's metadata + agent status reads run
-     concurrently as Eio fibers.  Same pattern as dashboard_http_keeper.ml. *)
+  (* Parallel keeper I/O with concurrency cap: at most
+     _keeper_snapshot_max_concurrency fibers run simultaneously.
+     Without this cap, 9+ keepers doing concurrent file I/O + JSON
+     construction can cause memory spikes during dashboard refresh. *)
   let n = List.length names in
   let results = Array.make n None in
   Eio.Fiber.all
     (List.mapi
        (fun idx name () ->
+         Eio.Semaphore.acquire _keeper_sem;
+         Fun.protect ~finally:(fun () -> Eio.Semaphore.release _keeper_sem)
+           (fun () ->
          results.(idx) <-
            (try
              match Keeper_types.read_meta config name with
@@ -337,7 +352,7 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              Log.Dashboard.error "keepers_json fiber error (%s): %s"
                name (Printexc.to_string exn);
-             None))
+             None)))
        names);
   let rows = Array.to_list results |> List.filter_map Fun.id in
   `Assoc [ ("count", `Int (List.length rows)); ("items", `List rows) ]
@@ -508,13 +523,80 @@ let parse_snapshot_view = function
       | _ -> Full)
   | None -> Full
 
-(* Snapshot TTL cache: avoids redundant DB queries on repeated calls
-   (dashboard SSE polling, multiple MCP clients). *)
-let _snapshot_cache : (string * Yojson.Safe.t * float) option ref = ref None
+(* Snapshot TTL cache with same-key deduplication (singleflight).
+   When multiple fibers hit a cache miss for the same key concurrently,
+   only one computes; the rest wait for its result via Eio.Condition.
+   This prevents memory bursts during keeper autoboot where many
+   concurrent dashboard polls would each build heavy keeper snapshots. *)
+
+type snapshot_slot =
+  | Cached of { value : Yojson.Safe.t; expires_at : float }
+  | Computing of { cond : Eio.Condition.t }
+
+let _snapshot_table : (string, snapshot_slot) Hashtbl.t = Hashtbl.create 4
+let _snapshot_mu = Eio.Mutex.create ()
 
 let _snapshot_ttl_s = Env_config.Operator.cache_ttl_sec
 
-let invalidate_snapshot_cache () = _snapshot_cache := None
+(* Maximum snapshot cache entries.  Each entry holds a full JSON snapshot
+   tree which can be several MB.  Unbounded growth caused OOM when the
+   dashboard was connected for extended periods (#4795). *)
+let _snapshot_max_entries =
+  Dashboard_http_helpers.int_of_env_default
+    "MASC_DASHBOARD_SNAPSHOT_CACHE_MAX_ENTRIES" ~default:16 ~min_v:4 ~max_v:64
+
+(* Evict one expired or oldest entry when table reaches _snapshot_max_entries.
+   Called inside _snapshot_mu when Eio is ready; pre-Eio callers are
+   single-threaded so no lock is needed. *)
+let _maybe_evict_snapshot () =
+  if Hashtbl.length _snapshot_table >= _snapshot_max_entries then begin
+    let now_ts = Time_compat.now () in
+    (* Prefer expired entries *)
+    let victim = ref None in
+    Hashtbl.iter (fun key slot ->
+      match slot, !victim with
+      | Cached { expires_at; _ }, None when now_ts >= expires_at ->
+        victim := Some key
+      | _ -> ()
+    ) _snapshot_table;
+    (match !victim with
+     | Some key -> Hashtbl.remove _snapshot_table key
+     | None ->
+       (* All fresh or computing — evict the entry closest to expiry *)
+       let oldest_cached = ref None in
+       let any_key = ref None in
+       Hashtbl.iter (fun key slot ->
+         match slot with
+         | Cached { expires_at; _ } ->
+           (match !oldest_cached with
+            | None -> oldest_cached := Some (key, expires_at)
+            | Some (_, e) when expires_at < e -> oldest_cached := Some (key, expires_at)
+            | _ -> ())
+         | Computing _ ->
+           if !any_key = None then any_key := Some key
+       ) _snapshot_table;
+       (match !oldest_cached with
+        | Some (key, _) -> Hashtbl.remove _snapshot_table key
+        | None ->
+          (* Last resort: evict a Computing slot to enforce the cap *)
+          (match !any_key with
+           | Some key -> Hashtbl.remove _snapshot_table key
+           | None -> ())))
+  end
+
+let invalidate_snapshot_cache () =
+  if Eio_guard.is_ready () then begin
+    let conds =
+      Eio.Mutex.use_rw ~protect:true _snapshot_mu (fun () ->
+        let cs = Hashtbl.fold (fun _key slot acc ->
+          match slot with Computing { cond } -> cond :: acc | _ -> acc
+        ) _snapshot_table [] in
+        Hashtbl.clear _snapshot_table;
+        cs)
+    in
+    List.iter Eio.Condition.broadcast conds
+  end else
+    Hashtbl.clear _snapshot_table
 
 let namespace_scope_cache_segment (_config : Room_utils.config) = "default"
 
@@ -531,11 +613,82 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
       include_messages include_sessions include_keepers include_summary_fields
       include_command_plane lightweight_summary
   in
-  let now = Time_compat.now () in
-  (match !_snapshot_cache with
-   | Some (k, json, ts) when k = cache_key && now -. ts < _snapshot_ttl_s ->
-       json
-   | _ ->
+  (* Singleflight cache lookup: check for fresh hit, in-flight compute,
+     or start a new compute.  Uses Eio.Mutex for safe Hashtbl access.
+     Waiters use poll-retry (not Condition.await inside protect:true)
+     to stay cancellable — same pattern as Dashboard_cache. *)
+  let _max_wait_s = 60.0 in
+  let _poll_interval_s = 0.25 in
+  let rec cache_lookup ~waited =
+    if not (Eio_guard.is_ready ()) then
+      (* Pre-Eio: no concurrency, compute directly *)
+      let now = Time_compat.now () in
+      match Hashtbl.find_opt _snapshot_table cache_key with
+      | Some (Cached { value; expires_at }) when now < expires_at -> value
+      | _ ->
+        let result = compute_snapshot () in
+        let ts = Time_compat.now () in
+        _maybe_evict_snapshot ();
+        Hashtbl.replace _snapshot_table cache_key
+          (Cached { value = result; expires_at = ts +. _snapshot_ttl_s });
+        result
+    else
+      let action =
+        Eio.Mutex.use_rw ~protect:true _snapshot_mu (fun () ->
+          match Hashtbl.find_opt _snapshot_table cache_key with
+          | Some (Cached { value; expires_at }) when Time_compat.now () < expires_at ->
+            `Hit value
+          | Some (Computing { cond }) ->
+            if waited >= _max_wait_s then begin
+              (* Stuck compute — evict and take over *)
+              Log.Dashboard.warn
+                "[snapshot_json] evicting stuck Computing slot for %s (%.1fs waited)"
+                cache_key waited;
+              Hashtbl.remove _snapshot_table cache_key;
+              Eio.Condition.broadcast cond;
+              let new_cond = Eio.Condition.create () in
+              _maybe_evict_snapshot ();
+              Hashtbl.replace _snapshot_table cache_key (Computing { cond = new_cond });
+              `Compute new_cond
+            end else
+              `Wait
+          | _ ->
+            let cond = Eio.Condition.create () in
+            _maybe_evict_snapshot ();
+            Hashtbl.replace _snapshot_table cache_key (Computing { cond });
+            `Compute cond)
+      in
+      match action with
+      | `Hit value -> value
+      | `Wait ->
+        (* Another fiber is computing this key — poll-retry outside mutex
+           to remain cancellable. *)
+        Eio.Time.sleep ctx.clock _poll_interval_s;
+        cache_lookup ~waited:(waited +. _poll_interval_s)
+      | `Compute cond ->
+        (match compute_snapshot () with
+         | result ->
+           let ts = Time_compat.now () in
+           Eio.Mutex.use_rw ~protect:true _snapshot_mu (fun () ->
+             (* Only write back if we still own the slot *)
+             match Hashtbl.find_opt _snapshot_table cache_key with
+             | Some (Computing { cond = c }) when c == cond ->
+               _maybe_evict_snapshot ();
+               Hashtbl.replace _snapshot_table cache_key
+                 (Cached { value = result; expires_at = ts +. _snapshot_ttl_s })
+             | _ -> ());
+           Eio.Condition.broadcast cond;
+           result
+         | exception exn ->
+           let bt = Printexc.get_raw_backtrace () in
+           Eio.Mutex.use_rw ~protect:true _snapshot_mu (fun () ->
+             match Hashtbl.find_opt _snapshot_table cache_key with
+             | Some (Computing { cond = c }) when c == cond ->
+               Hashtbl.remove _snapshot_table cache_key
+             | _ -> ());
+           Eio.Condition.broadcast cond;
+           Printexc.raise_with_backtrace exn bt)
+  and compute_snapshot () =
   let t0 = Time_compat.now () in
   let timing_records = ref [] in
   let timed label f =
@@ -629,18 +782,6 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
       ]
     else [])
   in
-  let command_plane_json = timed "command_plane_json" (fun () ->
-    if initialized && include_command_plane then
-      Command_plane_v2.snapshot_json ~sessions:tracked_sessions config
-    else
-      `Null)
-  in
-  let swarm_status_json =
-    if initialized && include_command_plane then
-      Swarm_status.build_json_from_snapshot config command_plane_json
-    else
-      `Null
-  in
   let keeper_names =
     if initialized && include_keepers then
       Keeper_types.keeper_names config
@@ -658,13 +799,17 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
          ("namespace", room_json config);
        ]
       @ (
-         (* Parallelize independent I/O: sessions, keepers, persistent_agents.
-            Eio.Fiber.all runs all thunks as fibers within the current switch,
-            completing when all finish. On failure, remaining fibers are cancelled. *)
+         (* Parallelize independent I/O: sessions, keepers, persistent_agents,
+            and command_plane + swarm_status.  command_plane_json was previously
+            computed sequentially before the fiber block, blocking the entire
+            snapshot when command plane generation was slow.  Now it runs as
+            a 4th fiber, overlapping with sessions/keepers I/O. *)
          let empty_section = `Assoc [ ("count", `Int 0); ("items", `List []) ] in
          let sessions_ref = ref empty_section in
          let keepers_ref = ref empty_section in
          let persistent_ref = ref empty_section in
+         let command_plane_ref = ref `Null in
+         let swarm_status_ref = ref `Null in
          Eio.Fiber.all [
            (fun () ->
              sessions_ref :=
@@ -672,8 +817,6 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
                  if initialized && include_sessions then
                    let capped =
                      if lightweight_summary then
-                       (* Lightweight: only active/paused + last 5 recent.
-                          Full session_status_json is heavy (reads events per session). *)
                        let active, rest =
                          List.partition (fun (s : Team_session_types.session) ->
                            s.status = Running || s.status = Paused) tracked_sessions
@@ -701,17 +844,26 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
                  if initialized && include_keepers then
                    persistent_agents_json ~keeper_names config
                  else empty_section));
+           (fun () ->
+             let cp = timed "command_plane_json" (fun () ->
+               if initialized && include_command_plane then
+                 Command_plane_v2.snapshot_json ~sessions:tracked_sessions config
+               else `Null)
+             in
+             command_plane_ref := cp;
+             swarm_status_ref :=
+               if initialized && include_command_plane then
+                 Swarm_status.build_json_from_snapshot config cp
+               else `Null);
          ];
          [
            ("sessions", !sessions_ref);
            ("keepers", !keepers_ref);
            ("persistent_agents", !persistent_ref);
-           ("command_plane", command_plane_json);
+           ("command_plane", !command_plane_ref);
+           ("swarm_status", !swarm_status_ref);
          ]
       )
-      @ [
-         ("swarm_status", swarm_status_json);
-       ]
       @ (let (role_census, runtime_pools, lane_census, controller_census,
               control_domains, task_profiles, escalation_count) =
            timed "aggregates" (fun () -> aggregate_all_worker_metrics tracked_sessions)
@@ -762,5 +914,6 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
         Log.Dashboard.info "[snapshot_json]   %s: %.0fms" label (dt *. 1000.0))
       (List.rev !timing_records)
   end;
-  _snapshot_cache := Some (cache_key, result, now);
-  result)
+  result
+  in
+  cache_lookup ~waited:0.0

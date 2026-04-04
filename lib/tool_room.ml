@@ -79,7 +79,7 @@ let room_strategy_json config =
   let state = Room.read_state config in
   `Assoc
     [
-      ("namespace_id", `String (Room.current_room_id config));
+      ("namespace_id", `String Room.default_namespace_id);
       ("room_id", `String (Room.current_room_id config));
       ("search_strategy_default",
        Json_util.string_opt_to_json state.search_strategy_default);
@@ -299,7 +299,7 @@ let status_summary_string (ctx : context) =
   if cluster_name <> state.project then
     Buffer.add_string buf (Printf.sprintf "📦 Project: %s\n" state.project);
   Buffer.add_string buf
-    (Printf.sprintf "📍 Namespace: %s (flattened)\n" current_room);
+    (Printf.sprintf "📍 Scope: %s (flattened)\n" current_room);
   Buffer.add_string buf (Printf.sprintf "📁 Path: %s\n" ctx.config.base_path);
   Buffer.add_string buf "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n";
   Buffer.add_string buf

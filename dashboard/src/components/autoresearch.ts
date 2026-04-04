@@ -199,35 +199,35 @@ function CycleHistoryTable({ cycles }: { cycles: AutoresearchCycleRecord[] }) {
   }
 
   return html`
-    <div class="overflow-x-auto">
+    <div class="overflow-x-auto overflow-y-auto max-h-[400px] custom-scrollbar rounded-lg border border-[var(--white-6)] bg-[rgba(0,0,0,0.1)]">
       <table class="w-full text-xs">
         <thead>
-          <tr class="text-[var(--text-muted)] text-[10px] uppercase tracking-wider border-b border-card-border">
-            <th class="text-left py-2 px-2 font-medium">#</th>
-            <th class="text-left py-2 px-2 font-medium">가설</th>
-            <th class="text-right py-2 px-2 font-medium">이전</th>
-            <th class="text-right py-2 px-2 font-medium">이후</th>
-            <th class="text-right py-2 px-2 font-medium">변화</th>
-            <th class="text-center py-2 px-2 font-medium">판정</th>
-            <th class="text-right py-2 px-2 font-medium">시간</th>
+          <tr class="text-[var(--text-muted)] text-[10px] uppercase tracking-wider border-b border-[var(--white-10)]">
+            <th scope="col" class="sticky top-0 z-10 bg-[rgba(10,18,34,0.95)] backdrop-blur-md text-left py-2.5 px-3 font-medium">#</th>
+            <th scope="col" class="sticky top-0 z-10 bg-[rgba(10,18,34,0.95)] backdrop-blur-md text-left py-2.5 px-3 font-medium">가설</th>
+            <th scope="col" class="sticky top-0 z-10 bg-[rgba(10,18,34,0.95)] backdrop-blur-md text-right py-2.5 px-3 font-medium">이전</th>
+            <th scope="col" class="sticky top-0 z-10 bg-[rgba(10,18,34,0.95)] backdrop-blur-md text-right py-2.5 px-3 font-medium">이후</th>
+            <th scope="col" class="sticky top-0 z-10 bg-[rgba(10,18,34,0.95)] backdrop-blur-md text-right py-2.5 px-3 font-medium">변화</th>
+            <th scope="col" class="sticky top-0 z-10 bg-[rgba(10,18,34,0.95)] backdrop-blur-md text-center py-2.5 px-3 font-medium">판정</th>
+            <th scope="col" class="sticky top-0 z-10 bg-[rgba(10,18,34,0.95)] backdrop-blur-md text-right py-2.5 px-3 font-medium shadow-[1px_1px_2px_rgba(0,0,0,0.2)]">시간</th>
           </tr>
         </thead>
         <tbody>
           ${cycles.map(c => html`
-            <tr key=${c.cycle} class="border-b border-card-border/50 hover:bg-white/[0.02]">
-              <td class="py-1.5 px-2 font-mono text-[var(--text-muted)]">${c.cycle}</td>
-              <td class="py-1.5 px-2 text-[var(--text-body)] max-w-[200px] truncate" title=${c.hypothesis}>${c.hypothesis}</td>
-              <td class="py-1.5 px-2 text-right font-mono text-[var(--text-body)]">${c.score_before.toFixed(4)}</td>
-              <td class="py-1.5 px-2 text-right font-mono text-[var(--text-body)]">${c.score_after.toFixed(4)}</td>
-              <td class="py-1.5 px-2 text-right font-mono ${c.delta >= 0 ? 'text-green-400' : 'text-red-400'}">${formatDelta(c.delta)}</td>
-              <td class="py-1.5 px-2 text-center">
+            <tr key=${c.cycle} class="border-b border-[var(--white-5)] hover:bg-[var(--white-4)] transition-colors duration-150">
+              <td class="py-2 px-3 font-mono text-[var(--text-muted)]">${c.cycle}</td>
+              <td class="py-2 px-3 text-[var(--text-body)] max-w-[200px] truncate" title=${c.hypothesis}>${c.hypothesis}</td>
+              <td class="py-2 px-3 text-right font-mono text-[var(--text-body)]">${c.score_before.toFixed(4)}</td>
+              <td class="py-2 px-3 text-right font-mono text-[var(--text-body)]">${c.score_after.toFixed(4)}</td>
+              <td class="py-2 px-3 text-right font-mono ${c.delta >= 0 ? 'text-green-400' : 'text-red-400'}">${formatDelta(c.delta)}</td>
+              <td class="py-2 px-3 text-center">
                 <span class="px-1.5 py-0.5 rounded text-[10px] font-semibold ${
                   c.decision === 'keep'
-                    ? 'bg-green-500/15 text-green-400'
-                    : 'bg-red-500/15 text-red-400'
+                    ? 'bg-green-500/15 text-green-400 border border-green-500/20'
+                    : 'bg-red-500/15 text-red-400 border border-red-500/20'
                 }">${decisionLabel(c.decision)}</span>
               </td>
-              <td class="py-1.5 px-2 text-right text-[var(--text-muted)] font-mono">${formatTimestamp(c.timestamp)}</td>
+              <td class="py-2 px-3 text-right text-[var(--text-muted)] font-mono">${formatTimestamp(c.timestamp)}</td>
             </tr>
           `)}
         </tbody>

@@ -3,6 +3,8 @@ import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { OperatorSnapshot } from '../../types'
 
+void vi
+
 async function flushUi(): Promise<void> {
   await Promise.resolve()
   await Promise.resolve()
@@ -57,9 +59,9 @@ describe('QuickIntervene', () => {
     actorName.value = 'dashboard-eager-manta'
     operatorActionBusy.value = false
     quickMessage.value = ''
-    quickTarget.value = 'room'
+    quickTarget.value = 'namespace'
     operatorSnapshot.value = {
-      room: { paused: false },
+      namespace: { paused: false, namespace: 'default' },
       sessions: [{ session_id: 'session-a', status: 'active' }],
       keepers: [{ name: 'keeper-a', status: 'online' }],
       recent_messages: [],
@@ -71,6 +73,7 @@ describe('QuickIntervene', () => {
     await flushUi()
 
     expect(container.textContent).toContain('빠른 개입')
+    expect((container.querySelector('select[aria-label="개입 대상"]') as HTMLSelectElement | null)?.value).toBe('namespace')
     expect(container.querySelector('input[name="quick_intervene_actor"]')).toBeNull()
 
     const toggle = Array.from(container.querySelectorAll('button'))

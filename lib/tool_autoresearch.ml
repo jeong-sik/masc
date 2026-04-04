@@ -166,7 +166,15 @@ let status_json (ctx : context) ~loop_id json_fields =
   let base_fields =
     match json_fields with
     | `Assoc fields ->
-        strip_keys [ "session_id"; "operation_id"; "program_note"; "queued_hypothesis" ] fields
+        strip_keys
+          [
+            "session_id";
+            "operation_id";
+            "task_id";
+            "program_note";
+            "queued_hypothesis";
+          ]
+          fields
     | _ -> [ ("error", `String "invalid status payload") ]
   in
   let link =
@@ -180,9 +188,10 @@ let status_json (ctx : context) ~loop_id json_fields =
           ("session_id", `String link.session_id);
           ( "operation_id",
             Json_util.string_opt_to_json link.operation_id );
+          ("task_id", Json_util.string_opt_to_json link.task_id);
         ]
     | None ->
-        [ ("session_id", `Null); ("operation_id", `Null) ]
+        [ ("session_id", `Null); ("operation_id", `Null); ("task_id", `Null) ]
   in
   `Assoc
     (base_fields
@@ -256,6 +265,7 @@ let handle_swarm_start (ctx : context) args =
           let swarm_tracker = Progress.start_tracking ~task_id:swarm_task_id ~total_steps:4 () in
           Progress.Tracker.step swarm_tracker ~message:"Initializing autoresearch loop" ();
           let program_note = normalize_string_opt (get_string_opt args "program_note") in
+          let task_id = normalize_string_opt (get_string_opt args "task_id") in
           (match setup_running_loop ctx params with
           | Error message ->
             Progress.stop_tracking swarm_task_id;
@@ -325,6 +335,7 @@ let handle_swarm_start (ctx : context) args =
                       loop_id = state.loop_id;
                       session_id;
                       operation_id;
+                      task_id;
                       target_file = params.target_file;
                       program_note;
                       created_by = ctx.agent_name;
@@ -332,14 +343,47 @@ let handle_swarm_start (ctx : context) args =
                     }
                   in
                   Autoresearch.save_swarm_link ~base_path:ctx.base_path link;
+                  let room_config =
+                    match ctx.config with
+                    | Some config -> config
+                    | None ->
+                        Room.default_config ctx.base_path
+                        |> Room.config_with_resolved_scope
+                  in
+                  let task_link_json =
+                    match task_id with
+                    | None -> `Null
+                    | Some task_id -> (
+                        match
+                          Room.link_task_execution_artifacts_r room_config
+                            ~task_id ~session_id ~autoresearch_loop_id:state.loop_id
+                            ?operation_id ()
+                        with
+                        | Ok message ->
+                            `Assoc
+                              [
+                                ("status", `String "ok");
+                                ("message", `String message);
+                              ]
+                        | Error error ->
+                            `Assoc
+                              [
+                                ("status", `String "error");
+                                ( "message",
+                                  `String
+                                    (Types.masc_error_to_string error) );
+                              ])
+                  in
                   `Assoc
                     [
                       ("loop_id", `String state.loop_id);
                       ("session_id", `String session_id);
                       ( "operation_id",
                         Json_util.string_opt_to_json operation_id );
+                      ("task_id", Json_util.string_opt_to_json task_id);
                       ("artifacts_dir", `String artifacts_dir);
                       ("linked_status", Autoresearch.linked_status_json ~base_path:ctx.base_path link);
+                      ("task_link", task_link_json);
                       ( "warnings",
                         `List (List.map (fun w -> `String w) state.warnings) );
                       ("goal", `String params.goal);

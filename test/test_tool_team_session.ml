@@ -103,6 +103,10 @@ let () =
             Test_tool_team_session_misc
               .test_delegate_ready_worker_accepts_background;
           Alcotest.test_case
+            "delegate-settle-ignores-other-worker-events" `Quick
+            Test_tool_team_session_misc
+              .test_wait_for_background_delegate_settle_ignores_other_worker_events;
+          Alcotest.test_case
             "delegate-rejects-corrupt-checkpoint-worker" `Quick
             Test_tool_team_session_misc
               .test_delegate_rejects_corrupt_checkpoint_worker;

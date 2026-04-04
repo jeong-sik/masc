@@ -5,6 +5,7 @@ import { TimeAgo } from './common/time-ago'
 import { showToast } from './common/toast'
 import { requestConfirm } from './common/confirm-dialog'
 import { EmptyState } from './common/empty-state'
+import { LoadingState } from './common/feedback-state'
 import { Markdown } from './common/markdown'
 import { TextInput, TextArea } from './common/input'
 import { stripStateBlocks } from '../keeper-message'
@@ -201,7 +202,7 @@ function SortBar() {
         <div class="ml-auto flex items-center gap-2">
           ${selectedPostIds.value.size > 0 ? html`
             <button type="button"
-              class="px-3 py-1 rounded-lg text-[11px] font-medium transition-all duration-150 border cursor-pointer bg-[rgba(239,68,68,0.1)] text-[#f87171] border-[rgba(239,68,68,0.3)] hover:bg-[rgba(239,68,68,0.2)] disabled:opacity-50 disabled:cursor-not-allowed"
+              class="px-3 py-1 rounded-lg text-[11px] font-medium transition-all duration-150 border cursor-pointer bg-[var(--bad-10)] text-[#f87171] border-[var(--bad-30)] hover:bg-[rgba(239,68,68,0.2)] disabled:opacity-50 disabled:cursor-not-allowed"
               onClick=${bulkDeleteSelected}
               disabled=${bulkDeleting.value}
             >
@@ -367,7 +368,7 @@ function PostCard({ post }: { post: BoardPost }) {
 
           <!-- Delete button -->
           <button type="button"
-            class="ml-auto px-2 py-0.5 rounded text-[10px] font-semibold border border-[rgba(239,68,68,0.3)] bg-[rgba(239,68,68,0.1)] text-[#f87171] hover:bg-[rgba(239,68,68,0.2)] transition-all cursor-pointer opacity-0 group-hover:opacity-100 disabled:opacity-50 disabled:cursor-not-allowed"
+            class="ml-auto px-2 py-0.5 rounded text-[10px] font-semibold border border-[var(--bad-30)] bg-[var(--bad-10)] text-[#f87171] hover:bg-[rgba(239,68,68,0.2)] transition-all cursor-pointer opacity-0 group-hover:opacity-100 disabled:opacity-50 disabled:cursor-not-allowed"
             onClick=${handleDelete}
             disabled=${isDeleting}
           >
@@ -408,7 +409,7 @@ export function Memory() {
               onClick=${() => navigate('workspace', { section: 'board' })}
             >← 게시판으로 돌아가기</button>
             ${detailLoading.value
-              ? html`<div class="loading-state loading-pulse">글 불러오는 중...</div>`
+              ? html`<${LoadingState}>글 불러오는 중...<//>`
               : html`<${EmptyState} message="글을 찾지 못했습니다" compact />`}
           </div>
         `
@@ -427,7 +428,7 @@ export function Memory() {
         <${NewPostForm} />
       </div>
       ${boardLoading.value
-        ? html`<div class="loading-state loading-pulse">메모리 피드 불러오는 중...</div>`
+        ? html`<${LoadingState}>메모리 피드 불러오는 중...<//>`
         : posts.length === 0
           ? html`<${EmptyState} message="아직 게시글이 없습니다. 에이전트가 활동하면 소통과 지식 공유 글이 여기에 나타납니다." compact />`
           : html`

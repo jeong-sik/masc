@@ -81,7 +81,7 @@ masc_start(path="/your/project", task_title="My first task")
 수동 제어가 필요하면:
 
 ```text
-masc_start(path="/your/project")
+masc_set_room(path="/your/project")
 masc_join(agent_name="codex")
 masc_status()
 masc_add_task(title="My task")
@@ -89,6 +89,8 @@ masc_claim_next()
 # masc_claim_next auto-binds current_task in current builds
 # masc_plan_set_task(task_id="task-001")  # only if current_task is still missing
 ```
+
+수동 경로에서는 먼저 project scope만 고르고(`masc_set_room`), 그 다음 `masc_join(agent_name="codex")` 로 agent identity를 명시적으로 붙인다. `masc_start(path=...)` 는 이미 default namespace join까지 처리하므로, 같은 흐름에서 `masc_join(...)` 를 바로 이어 호출하지 않는다.
 
 `masc_set_room(path=...)` 는 여전히 호출 가능하지만 compatibility alias 이고, project scope 만 고른다. 기본 온보딩은 `masc_start(...)` 를 쓴다.
 
@@ -156,6 +158,9 @@ export MASC_PERSONAS_DIR=/srv/masc/personas
 ```
 
 상세: `docs/KEEPER-USER-MANUAL.md`
+
+호환성 참고:
+- 전체 부트스트랩 단축 경로 없이 에이전트만 연결하려는 경우에도 명시적 join 흐름을 계속 지원한다: `masc_join(agent_name="codex")`
 
 ## References
 

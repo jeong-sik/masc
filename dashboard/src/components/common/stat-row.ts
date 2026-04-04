@@ -24,7 +24,7 @@ export function StatRow({ label, class: cx, children }: StatRowProps) {
 // ── KPI card (vertical: label on top, big number, optional hint) ──
 interface KpiCardProps {
   label: string
-  value: ComponentChildren
+  value: string | number | ComponentChildren
   hint?: string
   tone?: string
   class?: string

@@ -187,10 +187,10 @@ let test_collaboration_evidence_tracks_unlinked_room_noise () =
       check string "linkage policy" "explicit_first"
         (linkage |> member "policy" |> to_string);
       check string "linkage gap wording"
-        "namespace activity exists without explicit session/operation linkage"
+        "project activity exists without explicit session/operation linkage"
         (linkage |> member "gaps" |> index 0 |> to_string);
-      check string "partial detail wording"
-        "세션 이벤트나 explicit linked namespace activity는 보이지만 proof 또는 관계 근거가 충분히 묶이지 않았습니다."
+      check string "strong detail wording"
+        "세션 이벤트나 explicit linked project activity는 보이지만 proof 또는 관계 근거가 충분히 묶이지 않았습니다."
         (json |> member "detail" |> to_string);
       check bool "linkage gaps populated" true
         ((linkage |> member "gaps" |> to_list) <> []))
@@ -238,6 +238,41 @@ let test_recent_unlinked_activity_preserves_chronological_order () =
           "unlinked-8" ]
         summaries)
 
+let test_rejoined_namespace_broadcast_is_excluded_from_unlinked_activity () =
+  with_eio @@ fun _env ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "tester"));
+      let started_at = Time_compat.now () -. 60.0 in
+      let planned_end_at = started_at +. 600.0 in
+      let session =
+        make_manual_session config ~goal:"namespace lifecycle filtering"
+          ~created_by:"tester" ~agent_names:[ "alice"; "bob" ] ~min_agents:1
+          ~checkpoint_interval_sec:30 ~started_at ~planned_end_at
+          ~fallback_policy:Team_session_types.Fallback_cascade_then_task
+          ~model_cascade:[ "glm:auto" ]
+      in
+      ignore
+        (Activity_graph.emit config ~room_id:session.room_id
+           ~kind:"message.broadcast"
+           ~actor:(Activity_graph.entity ~kind:"agent" "system")
+           ~payload:
+             (`Assoc
+               [
+                 ("content", `String "👋 alice rejoined namespace default");
+               ])
+           ~tags:[ "message"; "broadcast" ] ());
+      let json =
+        Dashboard_collaboration_evidence.json ~session_id:session.session_id
+          ~config ()
+      in
+      let counts = json |> U.member "counts" in
+      check int "rejoin lifecycle excluded from unlinked activity" 0
+        (counts |> U.member "unlinked_activity_count" |> U.to_int))
+
 let test_emit_message_activity_normalizes_evidence_refs () =
   with_eio @@ fun _env ->
   let base_dir = temp_dir () in
@@ -278,6 +313,8 @@ let () =
             test_collaboration_evidence_tracks_unlinked_room_noise;
           test_case "recent unlinked activity preserves order" `Quick
             test_recent_unlinked_activity_preserves_chronological_order;
+          test_case "rejoined namespace broadcast is excluded" `Quick
+            test_rejoined_namespace_broadcast_is_excluded_from_unlinked_activity;
           test_case "emit message activity normalizes evidence refs" `Quick
             test_emit_message_activity_normalizes_evidence_refs;
         ] );

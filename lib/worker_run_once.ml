@@ -1,7 +1,5 @@
 open Result_syntax
 
-module Oas = Agent_sdk
-
 let resolve_net ?net () =
   match net with
   | Some net -> Ok net

@@ -34,11 +34,10 @@ let make_loop_memory (ctx : Tool_autoresearch_repo_synthesis.context)
        ~limit:20);
   (* Load ALL procedures without threshold — autoresearch needs recent
      lessons that may not yet meet top_procedures' adaptive threshold. *)
-  Procedural_memory.load_procedures
-    ~agent_name:autoresearch_lesson_agent_name
-  |> List.iter (fun proc ->
-         Agent_sdk.Memory.store_procedure memory
-           (Memory_oas_bridge.oas_procedure_of_masc proc));
+  ignore
+    (Memory_oas_bridge.seed_all_procedures_as_oas
+       ~memory
+       ~agent_name:autoresearch_lesson_agent_name);
   memory
 
 let flush_loop_memory memory =
@@ -67,8 +66,8 @@ let build_goal_with_feedback
   let pattern = lesson_pattern state in
   let memory = make_loop_memory ctx state in
   let lesson_text =
-    Agent_sdk.Lesson_memory.retrieve_lessons memory ~pattern ~limit:3 ()
-    |> Agent_sdk.Lesson_memory.render_prompt_context
+    Memory_oas_bridge.render_lesson_prompt_context
+      ~memory ~pattern ~limit:3
   in
   let finding_text =
     Autoresearch_knowledge.search_findings ~query:pattern ~limit:3 ()
@@ -105,24 +104,19 @@ let persist_failure_feedback
       ("goal", `String state.goal);
     ]
   in
-  ignore
-    (Agent_sdk.Lesson_memory.record_failure memory
-       {
-         pattern = lesson_pattern state;
-         summary;
-         action;
-         stdout;
-         stderr;
-         diff_summary;
-         trace_summary;
-         metric_name =
-           Option.map
-             (fun _ -> Agent_sdk.Metric_contract.default_metric_name)
-             metric_error;
-         metric_error;
-         participants = [ autoresearch_lesson_agent_name; "autoresearch_cycle" ];
-         metadata;
-       });
+  Memory_oas_bridge.record_failure_lesson
+    ~memory
+    ~pattern:(lesson_pattern state)
+    ~summary
+    ?action ?stdout ?stderr ?diff_summary ?trace_summary
+    ?metric_name:
+      (Option.map
+         (fun _ -> Autoresearch_metric.default_metric_name)
+         metric_error)
+    ?metric_error
+    ~participants:[ autoresearch_lesson_agent_name; "autoresearch_cycle" ]
+    ~metadata
+    ();
   flush_loop_memory memory;
   let finding : Autoresearch_knowledge.finding =
     {
@@ -489,7 +483,7 @@ let handle_cycle (ctx : Tool_autoresearch_repo_synthesis.context) args =
                          ~summary:(Printf.sprintf "Post-metric failed: %s" e)
                          ~action:
                            ("Make the metric harness deterministic and emit "
-                          ^ Agent_sdk.Metric_contract.prompt_snippet ())
+                          ^ Autoresearch_metric.prompt_snippet ())
                          ~metric_error:e
                          ~stderr:e
                          ~tags:["post-metric-failure"]
@@ -579,6 +573,13 @@ let handle_cycle (ctx : Tool_autoresearch_repo_synthesis.context) args =
                          if build_gate_override then
                            { record with decision = Autoresearch.Discard }
                          else record
+                       in
+                       let state =
+                         if build_gate_override then
+                           match state.history with
+                           | _ :: rest -> { state with history = effective_record :: rest }
+                           | [] -> { state with history = [ effective_record ] }
+                         else state
                        in
                        Autoresearch.append_cycle ~base_path:ctx.base_path state.loop_id effective_record;
                        let state = { state with

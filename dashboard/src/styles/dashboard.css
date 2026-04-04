@@ -324,7 +324,7 @@
 
 .swimlane-vis-container .vis-item.activity-swimlane-item {
   border-color: transparent;
-  color: #0f172a;
+  color: var(--text-body);
 }
 
 .swimlane-vis-container .vis-item.activity-swimlane-item--presence {
@@ -379,4 +379,42 @@
   border-width: 2px;
   box-shadow: 0 0 5px rgba(251, 191, 36, 0.5);
   z-index: 10;
+}
+
+
+/* ── Card Subtle Hover Lift ── */
+.card {
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.25s cubic-bezier(0.4, 0, 0.2, 1), border-color 0.25s;
+}
+
+.card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(71, 184, 255, 0.08);
+  border-color: rgba(71, 184, 255, 0.25);
+}
+
+/* ── Custom Webkit Scrollbar ── */
+@layer utilities {
+  .custom-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: var(--white-10) transparent;
+  }
+  
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: var(--white-10);
+    border-radius: 10px;
+  }
+  
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: var(--white-20);
+  }
 }

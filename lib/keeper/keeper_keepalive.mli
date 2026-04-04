@@ -24,6 +24,10 @@ val wakeup_keeper : string -> unit
     or system-wide events. *)
 val wakeup_all_keepers : unit -> unit
 
+val keeper_turn_throttle_limit : int
+(** Runtime keeper turn concurrency limit derived from
+    [MASC_KEEPER_AUTOBOOT_MAX]. *)
+
 val wakeup_relevant_keeper_for_board_signal :
   config:Room.config -> Board_dispatch.keeper_board_signal -> unit
 

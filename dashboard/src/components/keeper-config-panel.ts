@@ -479,7 +479,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
         >취소</button>
       ` : html`
         <button type="button"
-          class="${btnBase} bg-[var(--purple)] text-[#000]"
+          class="${btnBase} bg-[var(--purple)] text-[#1e1b4b]"
           onClick=${enterEditMode}
         >편집</button>
       `}
@@ -670,6 +670,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
         <span class="text-xs text-[var(--text-muted)]">킵얼라이브 실행</span>
         <${BoolBadge} value=${c.runtime.keepalive_running} />
       </div>
+      <${ConfigRow} label="레지스트리 상태" value=${c.runtime.registry_state || '--'} />
       <${ConfigRow} label="파이버 상태" value=${c.runtime.fiber_health || '--'} />
       <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
         <span class="text-xs text-[var(--text-muted)]">프레즌스 킵얼라이브</span>
@@ -678,14 +679,14 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       <${ConfigRow} label="프레즌스 간격" value=${c.runtime.presence_keepalive_sec + 's'} />
 
       <${SectionHeader} title="조율" />
-      <${ConfigRow} label="네임스페이스 범위" value=${c.coordination.room_scope || '--'} />
+      <${ConfigRow} label="프로젝트 범위" value=${c.coordination.room_scope || '--'} />
       <${ConfigRow} label="범위 유형" value=${c.coordination.scope_kind || '--'} />
       <div class="mt-1.5">
         <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">멘션 대상</div>
         <${ModelList} models=${c.coordination.mention_targets} />
       </div>
       <div class="mt-1.5">
-        <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">참여 네임스페이스</div>
+        <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">참여 범위</div>
         <${ModelList} models=${c.coordination.joined_room_ids} />
       </div>
 

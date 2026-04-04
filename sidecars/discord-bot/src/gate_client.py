@@ -130,14 +130,23 @@ class GateClient:
     def _note_transport_failure(self, reason: str) -> None:
         self._consecutive_failures += 1
         self._last_failure = reason
-        if self._breaker_enabled() and self._consecutive_failures >= self._breaker_failure_threshold:
+        breaker_enabled = self._breaker_enabled()
+        if breaker_enabled and self._consecutive_failures >= self._breaker_failure_threshold:
             self._breaker_open_until = self._now() + self._breaker_reset_sec
-        logger.warning(
-            "Gate transport failure %d/%d: %s",
-            self._consecutive_failures,
-            self._breaker_failure_threshold,
-            reason,
-        )
+        if breaker_enabled:
+            msg = "Gate transport failure %d/%d: %s"
+            args = (
+                self._consecutive_failures,
+                self._breaker_failure_threshold,
+                reason,
+            )
+        else:
+            msg = "Gate transport failure %d (breaker disabled): %s"
+            args = (
+                self._consecutive_failures,
+                reason,
+            )
+        logger.warning(msg, *args)
 
     def breaker_snapshot(self) -> BreakerSnapshot:
         remaining = max(0, int(round(self._breaker_open_until - self._now())))
@@ -371,4 +380,3 @@ class GateClient:
             return None
         self._keeper_status_cache[normalized] = (self._now(), data)
         return data
-

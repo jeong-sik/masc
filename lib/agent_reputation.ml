@@ -141,17 +141,29 @@ let count_mention_activity (config : Room.config) ~(agent_name : string)
 
 (** {1 Overall Score Computation} *)
 
-(** Compute weighted overall score.
-    - 0.4 * completion_rate
-    - 0.3 * response_rate
-    - 0.3 * board_activity_normalized (capped at 20 actions) *)
+(** {1 Reputation Score Weights}
+
+    Weighted linear combination for overall reputation.
+    Rationale: task completion is the primary signal (0.4) because
+    it directly measures value delivered. Response rate (0.3) and
+    board activity (0.3) are secondary engagement signals.
+
+    Board activity is capped at [board_activity_cap] to prevent
+    high-volume low-quality posting from inflating scores.
+
+    TODO(RFC-0001 Phase 3): Register in Runtime_params for tuning. *)
+let weight_completion = 0.4
+let weight_response   = 0.3
+let weight_board      = 0.3
+let board_activity_cap = 20.0
+
 let compute_overall_score ~completion_rate ~response_rate
     ~board_posts ~board_comments : float =
   let board_total = float_of_int (board_posts + board_comments) in
-  let board_norm = Float.min 1.0 (board_total /. 20.0) in
-  (0.4 *. completion_rate)
-  +. (0.3 *. response_rate)
-  +. (0.3 *. board_norm)
+  let board_norm = Float.min 1.0 (board_total /. board_activity_cap) in
+  (weight_completion *. completion_rate)
+  +. (weight_response *. response_rate)
+  +. (weight_board *. board_norm)
 
 (** {1 Main Computation} *)
 

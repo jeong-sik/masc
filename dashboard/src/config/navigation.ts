@@ -9,6 +9,7 @@ export type SurfaceSectionId =
   | 'governance'
   | 'evidence'
   | 'planning'
+  | 'goals'
   | 'worktrees'
   | 'intervene'
   | 'tools'
@@ -58,7 +59,7 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
     id: 'monitoring',
     label: '모니터링',
     icon: '📡',
-    description: '세션, 네임스페이스 및 에이전트/키퍼 현황 관찰',
+    description: '세션, 프로젝트 범위, 에이전트/키퍼 현황 관찰',
     defaultTab: 'monitoring',
     defaultParams: { section: 'sessions' },
     tabs: ['monitoring'],
@@ -112,8 +113,8 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
   monitoring: [
     {
       id: 'sessions',
-      label: '세션 & 네임스페이스',
-      description: '세션 = SSE로 연결된 실시간 작업 단위. 네임스페이스 = 같은 .masc/ 폴더를 공유하는 에이전트 조정 공간.',
+      label: '세션 & 프로젝트 범위',
+      description: '세션 = SSE로 연결된 실시간 작업 단위. 프로젝트 범위 = 같은 .masc/ 폴더를 공유하는 에이전트 조정 공간.',
       params: { section: 'sessions' },
     },
     {
@@ -133,7 +134,7 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     {
       id: 'intervene',
       label: '실시간 개입',
-      description: '네임스페이스 일시정지, 세션 중단, 키퍼 재시작 등 운영 개입.',
+      description: '프로젝트 일시정지, 세션 중단, 키퍼 재시작 등 운영 개입.',
       params: { section: 'intervene' },
     },
     {
@@ -161,6 +162,12 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: '계획 및 메트릭',
       description: 'backlog와 수동 등록형 goal 상태를 함께 보는 화면. goal은 자동 생성되지 않습니다.',
       params: { section: 'planning' },
+    },
+    {
+      id: 'goals',
+      label: '목표 트리',
+      description: '목표의 부모-자식 계층 구조와 수렴도. 태스크 연결, 에이전트 배정 상태 시각화.',
+      params: { section: 'goals' },
     },
     {
       id: 'worktrees',

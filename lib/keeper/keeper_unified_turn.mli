@@ -34,6 +34,7 @@ val update_metrics_from_result :
 val update_metrics_from_failure :
   Keeper_types.keeper_meta ->
   latency_ms:int ->
+  observation:Keeper_world_observation.world_observation ->
   reason:string ->
   ?social_state:Keeper_social_model.social_state ->
   unit ->
@@ -74,6 +75,12 @@ val context_overflow_limit : string -> int option
 
 (** [true] when an error string should trigger overflow recovery handling. *)
 val should_attempt_context_overflow_retry : string -> bool
+
+val overflow_retry_history_budget :
+  available_context:int ->
+  system_prompt:string ->
+  user_message:string ->
+  int
 
 val run_unified_turn :
   config:Room.config ->

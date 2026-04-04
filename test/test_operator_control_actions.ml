@@ -48,6 +48,25 @@ let test_task_inject_executes_immediately () =
       let tasks = Room.get_tasks_raw config in
       Alcotest.(check int) "task injected" 1 (List.length tasks))
 
+let test_digest_defaults_to_namespace_target () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "operator"));
+      let ctx = operator_ctx env sw config "operator" in
+      let digest_json =
+        match Operator_control.digest_json ctx with
+        | Ok json -> json
+        | Error err -> Alcotest.fail err
+      in
+      Alcotest.(check string) "default target_type" "namespace"
+        Yojson.Safe.Util.(digest_json |> member "target_type" |> to_string))
+
 let test_team_turn_falls_back_to_session_actor () =
   Eio_main.run @@ fun env ->
   ensure_fs env;

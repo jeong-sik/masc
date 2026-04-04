@@ -75,6 +75,8 @@ let base_observation : WO.world_observation =
   {
     pending_mentions = [];
     pending_board_events = [];
+    pending_scope_messages = [];
+    message_cursor_updates = [];
     idle_seconds = 0;
     active_goals = [];
     continuity_summary = "";
@@ -569,9 +571,12 @@ let test_prompt_room_state_section () =
     }
   in
   let _sys, user = UP.build_prompt ~meta:minimal_meta ~observation:obs in
-  check bool "has room state" true
+  check bool "has namespace state" true
     (let found =
-       try ignore (Str.search_forward (Str.regexp_string "Room State") user 0); true
+       try
+         ignore
+           (Str.search_forward (Str.regexp_string "Namespace State") user 0);
+         true
        with Not_found -> false
      in found)
 
@@ -603,8 +608,8 @@ let test_prompt_omits_room_signal_when_flag_disabled () =
     }
   in
   let _sys, user = UP.build_prompt ~meta:minimal_meta ~observation:obs in
-  check bool "room signal section omitted" true
-    (not (contains_substring user "Room Signal Interpretation"))
+  check bool "namespace signal section omitted" true
+    (not (contains_substring user "Namespace Signal Interpretation"))
 
 let test_prompt_includes_room_signal_when_flag_enabled () =
   let interpretation : Masc_mcp.Meta_cognition.interpretation =
@@ -638,18 +643,18 @@ let test_prompt_includes_room_signal_when_flag_enabled () =
     }
   in
   let _sys, user = UP.build_prompt ~meta:room_signal_meta ~observation:obs in
-  check bool "room signal section included" true
-    (contains_substring user "Room Signal Interpretation");
-  check bool "room signal primary included" true
-    (contains_substring user "room_signal_primary: contested_belief");
-  check bool "room signal secondary included" true
-    (contains_substring user "room_signal_secondary: operator_tension, stagnant_room");
-  check bool "room signal evidence refs included" true
-    (contains_substring user "room_signal_evidence_refs: post:p-root, comment:c-1");
-  check bool "room signal guard included" true
-    (contains_substring user "room_signal_guard:");
-  check bool "room digest ref included" true
-    (contains_substring user "room_digest_post_id: post-digest-1")
+  check bool "namespace signal section included" true
+    (contains_substring user "Namespace Signal Interpretation");
+  check bool "namespace signal primary included" true
+    (contains_substring user "namespace_signal_primary: contested_belief");
+  check bool "namespace signal secondary included" true
+    (contains_substring user "namespace_signal_secondary: operator_tension, stagnant_room");
+  check bool "namespace signal evidence refs included" true
+    (contains_substring user "namespace_signal_evidence_refs: post:p-root, comment:c-1");
+  check bool "namespace signal guard included" true
+    (contains_substring user "namespace_signal_guard:");
+  check bool "namespace digest ref included" true
+    (contains_substring user "namespace_digest_post_id: post-digest-1")
 
 (* ---------- Config tests ---------- *)
 
@@ -670,7 +675,7 @@ let test_unified_turn_runtime_defaults () =
       (KC.keeper_unified_temperature ());
     check int "unified max_tokens default" 2048
       (KC.keeper_unified_max_tokens ());
-    check int "unified max_turns default" 20
+    check int "unified max_turns default" 3
       (KC.keeper_unified_max_turns ()))))
 
 let test_meta_defaults_social_model () =
@@ -706,6 +711,12 @@ let test_metrics_text_response () =
   check int "total_turns +1" (minimal_meta.runtime.usage.total_turns + 1) updated.runtime.usage.total_turns;
   check int "proactive_count +1"
     (minimal_meta.runtime.proactive_rt.count_total + 1) updated.runtime.proactive_rt.count_total;
+  check int "proactive visible_count +1"
+    (minimal_meta.runtime.proactive_rt.visible_count_total + 1)
+    updated.runtime.proactive_rt.visible_count_total;
+  check bool "proactive outcome text" true
+    (updated.runtime.proactive_rt.last_outcome
+     = Masc_mcp.Keeper_types.Proactive_text_response);
   check int "no autonomous action" minimal_meta.runtime.autonomous_action_count
     updated.runtime.autonomous_action_count;
   check int "input tokens" (minimal_meta.runtime.usage.total_input_tokens + 100) updated.runtime.usage.total_input_tokens;
@@ -722,6 +733,12 @@ let test_metrics_tool_response () =
   in
   check int "proactive_count +1" (minimal_meta.runtime.proactive_rt.count_total + 1)
     updated.runtime.proactive_rt.count_total;
+  check int "proactive visible_count +1"
+    (minimal_meta.runtime.proactive_rt.visible_count_total + 1)
+    updated.runtime.proactive_rt.visible_count_total;
+  check bool "proactive outcome tool" true
+    (updated.runtime.proactive_rt.last_outcome
+     = Masc_mcp.Keeper_types.Proactive_tool_use);
   check int "autonomous_action +2" (minimal_meta.runtime.autonomous_action_count + 2)
     updated.runtime.autonomous_action_count;
   check int "latency_ms" 500 updated.runtime.usage.last_latency_ms
@@ -735,11 +752,108 @@ let test_metrics_noop_response () =
     UT.update_metrics_from_result minimal_meta ~latency_ms:100
       ~observation:base_observation result
   in
-  check int "proactive_count unchanged" minimal_meta.runtime.proactive_rt.count_total
+  check int "proactive_count +1"
+    (minimal_meta.runtime.proactive_rt.count_total + 1)
     updated.runtime.proactive_rt.count_total;
+  check int "proactive visible_count unchanged"
+    minimal_meta.runtime.proactive_rt.visible_count_total
+    updated.runtime.proactive_rt.visible_count_total;
+  check bool "proactive outcome silent" true
+    (updated.runtime.proactive_rt.last_outcome
+     = Masc_mcp.Keeper_types.Proactive_silent);
   check int "autonomous unchanged" minimal_meta.runtime.autonomous_action_count
     updated.runtime.autonomous_action_count;
   check int "total_turns +1" (minimal_meta.runtime.usage.total_turns + 1) updated.runtime.usage.total_turns
+
+let test_metrics_reactive_turn_does_not_mutate_proactive_runtime () =
+  let reactive_observation =
+    { base_observation with
+      pending_mentions = [ ("alice", "@test-keeper check this") ]
+    }
+  in
+  let result =
+    make_run_result ~text:"On it." ~tools:[]
+      ~model:"test-model" ~input_tok:90 ~output_tok:30
+  in
+  let updated =
+    UT.update_metrics_from_result minimal_meta ~latency_ms:120
+      ~observation:reactive_observation result
+  in
+  check int "proactive_count unchanged on reactive turn"
+    minimal_meta.runtime.proactive_rt.count_total
+    updated.runtime.proactive_rt.count_total;
+  check int "proactive visible_count unchanged on reactive turn"
+    minimal_meta.runtime.proactive_rt.visible_count_total
+    updated.runtime.proactive_rt.visible_count_total;
+  check bool "proactive outcome unchanged on reactive turn" true
+    (minimal_meta.runtime.proactive_rt.last_outcome
+     = updated.runtime.proactive_rt.last_outcome)
+
+let test_silent_proactive_cycle_advances_cooldown_anchor () =
+  let result =
+    make_run_result ~text:"" ~tools:[]
+      ~model:"test-model" ~input_tok:40 ~output_tok:10
+  in
+  let updated =
+    UT.update_metrics_from_result
+      { minimal_meta with
+        proactive = { minimal_meta.proactive with enabled = true; cooldown_sec = 300 }
+      }
+      ~latency_ms:80
+      ~observation:base_observation
+      result
+  in
+  check bool "silent proactive updates last_ts" true
+    (updated.runtime.proactive_rt.last_ts > 0.0);
+  check bool "silent proactive leaves last_visible_ts untouched" true
+    (updated.runtime.proactive_rt.last_visible_ts = 0.0);
+  check bool "cooldown blocks immediate rerun after silent cycle" false
+    (WO.should_run_unified_turn ~meta:updated base_observation)
+
+let test_metrics_reactive_failure_does_not_mutate_proactive_runtime () =
+  let reactive_observation =
+    { base_observation with
+      pending_board_events = [ sample_board_event ]
+    }
+  in
+  let updated =
+    UT.update_metrics_from_failure minimal_meta ~latency_ms:90
+      ~observation:reactive_observation ~reason:"reactive failure" ()
+  in
+  check int "reactive failure leaves proactive_count unchanged"
+    minimal_meta.runtime.proactive_rt.count_total
+    updated.runtime.proactive_rt.count_total;
+  check int "reactive failure leaves visible_count unchanged"
+    minimal_meta.runtime.proactive_rt.visible_count_total
+    updated.runtime.proactive_rt.visible_count_total;
+  check bool "reactive failure leaves last_ts unchanged" true
+    (updated.runtime.proactive_rt.last_ts
+     = minimal_meta.runtime.proactive_rt.last_ts);
+  check bool "reactive failure leaves last_outcome unchanged" true
+    (updated.runtime.proactive_rt.last_outcome
+     = minimal_meta.runtime.proactive_rt.last_outcome)
+
+let test_meta_migration_does_not_infer_visible_proactive_fields () =
+  let legacy_json =
+    `Assoc
+      [
+        ("name", `String "legacy-keeper");
+        ("goal", `String "legacy goal");
+        ("trace_id", `String "legacy-trace");
+        ("proactive_count_total", `Int 7);
+        ("last_proactive_ts", `Float 1234.0);
+      ]
+  in
+  match Masc_mcp.Keeper_types.meta_of_json legacy_json with
+  | Error e -> fail ("legacy meta_of_json failed: " ^ e)
+  | Ok meta ->
+      check int "legacy visible count stays unknown->0" 0
+        meta.runtime.proactive_rt.visible_count_total;
+      check (float 0.001) "legacy visible ts stays unknown->0" 0.0
+        meta.runtime.proactive_rt.last_visible_ts;
+      check bool "legacy outcome unknown" true
+        (meta.runtime.proactive_rt.last_outcome
+         = Masc_mcp.Keeper_types.Proactive_unknown)
 
 let test_append_metrics_snapshot_includes_cascade_observation () =
   Eio_main.run @@ fun env ->
@@ -910,13 +1024,17 @@ let test_metrics_persist_social_state_fields () =
 let test_metrics_failure_response () =
   let reason = "Agent run failed: Max turns exceeded (turn 10, limit 10)" in
   let updated =
-    UT.update_metrics_from_failure minimal_meta ~latency_ms:250 ~reason ()
+    UT.update_metrics_from_failure minimal_meta ~latency_ms:250
+      ~observation:base_observation ~reason ()
   in
   check int "total_turns +1" (minimal_meta.runtime.usage.total_turns + 1) updated.runtime.usage.total_turns;
   check int "latency recorded" 250 updated.runtime.usage.last_latency_ms;
   check bool "last_turn_ts updated" true (updated.runtime.usage.last_turn_ts > 0.0);
-  check int "proactive count unchanged" minimal_meta.runtime.proactive_rt.count_total
+  check int "proactive count +1" (minimal_meta.runtime.proactive_rt.count_total + 1)
     updated.runtime.proactive_rt.count_total;
+  check bool "proactive outcome error" true
+    (updated.runtime.proactive_rt.last_outcome
+     = Masc_mcp.Keeper_types.Proactive_error);
   check bool "failure reason tagged" true
     (let found =
        try
@@ -1067,6 +1185,16 @@ let test_overflow_detection_and_limit_parsing () =
   check bool "unrelated error not overflow" false
     (UT.should_attempt_context_overflow_retry "Network error: timeout")
 
+let test_overflow_retry_history_budget_reserves_headroom () =
+  let system_prompt = String.make 2400 's' in
+  let user_message = String.make 1800 'u' in
+  let budget =
+    UT.overflow_retry_history_budget ~available_context:8192
+      ~system_prompt ~user_message
+  in
+  check bool "budget is reduced below raw context" true (budget < 8192);
+  check bool "budget leaves meaningful history room" true (budget >= 256)
+
 let test_metrics_mixed_response () =
   let result =
     make_run_result ~text:"Done." ~tools:["keeper_fs_read"]
@@ -1078,6 +1206,12 @@ let test_metrics_mixed_response () =
   in
   check int "proactive +1" (minimal_meta.runtime.proactive_rt.count_total + 1)
     updated.runtime.proactive_rt.count_total;
+  check int "proactive visible_count +1"
+    (minimal_meta.runtime.proactive_rt.visible_count_total + 1)
+    updated.runtime.proactive_rt.visible_count_total;
+  check bool "proactive outcome mixed" true
+    (updated.runtime.proactive_rt.last_outcome
+     = Masc_mcp.Keeper_types.Proactive_mixed_response);
   check int "autonomous +1" (minimal_meta.runtime.autonomous_action_count + 1)
     updated.runtime.autonomous_action_count;
   check bool "proactive reason has unified" true
@@ -1467,6 +1601,14 @@ let () =
           test_case "text response" `Quick test_metrics_text_response;
           test_case "tool response" `Quick test_metrics_tool_response;
           test_case "noop response" `Quick test_metrics_noop_response;
+          test_case "reactive turn leaves proactive runtime untouched" `Quick
+            test_metrics_reactive_turn_does_not_mutate_proactive_runtime;
+          test_case "silent proactive cycle advances cooldown anchor" `Quick
+            test_silent_proactive_cycle_advances_cooldown_anchor;
+          test_case "reactive failure leaves proactive runtime untouched" `Quick
+            test_metrics_reactive_failure_does_not_mutate_proactive_runtime;
+          test_case "legacy migration does not infer visible proactive fields" `Quick
+            test_meta_migration_does_not_infer_visible_proactive_fields;
           test_case "snapshot includes cascade observation" `Quick
             test_append_metrics_snapshot_includes_cascade_observation;
           test_case "social fields" `Quick
@@ -1552,5 +1694,7 @@ let () =
             test_context_overflow_limit_parses_common_oas_errors;
           test_case "overflow retry gate only opens for overflow errors" `Quick
             test_should_attempt_context_overflow_retry_only_for_overflow_errors;
+          test_case "overflow retry history budget reserves headroom" `Quick
+            test_overflow_retry_history_budget_reserves_headroom;
         ] );
     ]

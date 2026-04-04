@@ -28,6 +28,8 @@ type pending_board_event = {
 type world_observation = {
   pending_mentions : (string * string) list;
   pending_board_events : pending_board_event list;
+  pending_scope_messages : (string * string) list;
+  message_cursor_updates : (string * int) list;
   idle_seconds : int;
   active_goals : string list;
   continuity_summary : string;
@@ -48,33 +50,88 @@ type board_signal_match = {
   score : int;
 }
 
-(** Collect pending direct mentions from joined rooms since last cursor. *)
-let collect_pending_mentions ~(config : Room.config) ~(meta : keeper_meta)
-    : (string * string) list =
-  let targets =
-    if meta.mention_targets <> [] then meta.mention_targets else [ meta.name ]
+let scope_message_feed_enabled (meta : keeper_meta) : bool =
+  match Keeper_contract.scope_kind_of_string meta.scope_kind with
+  | Keeper_contract.Global -> true
+  | Keeper_contract.Local ->
+      Keeper_contract.room_scope_of_string meta.room_scope = Keeper_contract.All
+
+let message_feed_targets (meta : keeper_meta) =
+  if meta.mention_targets <> [] then meta.mention_targets else [ meta.name ]
+
+let collect_message_scope ~(config : Room.config) ~(meta : keeper_meta) :
+    ((string * string) list * (string * string) list * (string * int) list) =
+  let targets = message_feed_targets meta in
+  let broad_scope = scope_message_feed_enabled meta in
+  let self_tokens =
+    [ meta.name; meta.agent_name ]
+    |> List.map (fun value -> String.lowercase_ascii (String.trim value))
   in
   let batch_limit = Keeper_config.keeper_batch_limit () in
+  let rec consume_room_messages remaining last_processed mentions scope_messages =
+    function
+    | [] -> (`Done, remaining, last_processed, List.rev mentions, List.rev scope_messages)
+    | (msg : Types.message) :: rest ->
+        let author =
+          String.lowercase_ascii (String.trim msg.from_agent)
+        in
+        if author = "" || List.mem author self_tokens then
+          consume_room_messages remaining msg.seq mentions scope_messages rest
+        else if exact_direct_mention_present ~targets msg.content then
+          if remaining <= 0 then
+            (`Saturated, remaining, last_processed, List.rev mentions, List.rev scope_messages)
+          else
+            consume_room_messages
+              (remaining - 1)
+              msg.seq
+              ((msg.from_agent, msg.content) :: mentions)
+              scope_messages
+              rest
+        else if broad_scope then
+          if remaining <= 0 then
+            (`Saturated, remaining, last_processed, List.rev mentions, List.rev scope_messages)
+          else
+            consume_room_messages
+              (remaining - 1)
+              msg.seq
+              mentions
+              ((msg.from_agent, msg.content) :: scope_messages)
+              rest
+        else
+          consume_room_messages remaining msg.seq mentions scope_messages rest
+  in
+  let rec consume_rooms remaining mentions_acc scope_acc cursor_acc = function
+    | [] -> (mentions_acc, scope_acc, List.rev cursor_acc)
+    | _ when remaining <= 0 -> (mentions_acc, scope_acc, List.rev cursor_acc)
+    | room_id :: rest ->
+        let since_seq = room_cursor_for meta room_id in
+        let messages =
+          try
+            Room.get_all_messages_raw_in_room config ~room_id ~since_seq
+          with
+          | Eio.Cancel.Cancelled _ as e -> raise e
+          | _ -> []
+        in
+        let status, remaining, last_processed, room_mentions, room_scope_messages =
+          consume_room_messages remaining since_seq [] [] messages
+        in
+        let cursor_acc =
+          if last_processed > since_seq then (room_id, last_processed) :: cursor_acc
+          else cursor_acc
+        in
+        let mentions_acc = mentions_acc @ room_mentions in
+        let scope_acc = scope_acc @ room_scope_messages in
+        match status with
+        | `Done -> consume_rooms remaining mentions_acc scope_acc cursor_acc rest
+        | `Saturated -> (mentions_acc, scope_acc, List.rev cursor_acc)
+  in
+  consume_rooms batch_limit [] [] [] meta.joined_room_ids
+
+let apply_message_cursor_updates (meta : keeper_meta)
+    (updates : (string * int) list) : keeper_meta =
   List.fold_left
-    (fun acc room_id ->
-      let since_seq = room_cursor_for meta room_id in
-      let messages =
-        try
-          Room.get_messages_raw_in_room config ~room_id ~since_seq
-            ~limit:batch_limit
-        with
-        | Eio.Cancel.Cancelled _ as e -> raise e
-        | _ -> []
-      in
-      List.fold_left
-        (fun inner_acc (msg : Types.message) ->
-          if msg.from_agent = meta.agent_name then inner_acc
-          else if not (exact_direct_mention_present ~targets msg.content) then
-            inner_acc
-          else (msg.from_agent, msg.content) :: inner_acc)
-        acc messages)
-    [] meta.joined_room_ids
-  |> List.rev
+    (fun acc (room_id, seq) -> set_room_cursor acc room_id seq)
+    meta updates
 
 (** Read room backlog counts. *)
 let read_backlog_counts ~(config : Room.config) : int * int =
@@ -113,11 +170,44 @@ let compute_idle_seconds ~(meta : keeper_meta) : int =
     |> Option.value ~default:0.0
   in
   let activity_ts =
-    let base = max meta.runtime.usage.last_turn_ts meta.runtime.proactive_rt.last_ts in
-    if base > 0.0 then base else created_ts
+    List.fold_left max created_ts
+      [
+        meta.runtime.usage.last_turn_ts;
+        meta.runtime.proactive_rt.last_ts;
+      ]
   in
   if activity_ts <= 0.0 then 0
   else int_of_float (max 0.0 (now_ts -. activity_ts))
+
+let board_post_id_string (post : Board.post) =
+  Board.Post_id.to_string post.id
+
+let compare_board_cursor_token (ts_a, post_id_a) (ts_b, post_id_b) =
+  let cmp = Float.compare ts_a ts_b in
+  if cmp <> 0 then cmp else String.compare post_id_a post_id_b
+
+let board_cursor_token_of_post (post : Board.post) =
+  (post.updated_at, board_post_id_string post)
+
+let list_board_posts_after_cursor (cursor_ts, cursor_post_id) =
+  let cursor_post_id = Option.value ~default:"" cursor_post_id in
+  let is_after_cursor post =
+    compare_board_cursor_token
+      (board_cursor_token_of_post post)
+      (cursor_ts, cursor_post_id)
+    > 0
+  in
+  match Board_dispatch.backend () with
+  | Board_dispatch.Jsonl store ->
+      Board.search_posts store ~predicate:(fun _ -> true) ~limit:max_int
+      |> List.filter is_after_cursor
+      |> List.sort (fun (a : Board.post) (b : Board.post) ->
+           compare_board_cursor_token
+             (board_cursor_token_of_post a)
+             (board_cursor_token_of_post b))
+  | Board_dispatch.Postgres t ->
+      Board_pg.list_posts_updated_since t ~since_ts:cursor_ts
+      |> List.filter is_after_cursor
 
 let board_signal_text (signal : Board_dispatch.keeper_board_signal) =
   String.concat "\n"
@@ -206,7 +296,7 @@ let read_continuity_summary ~(config : Room.config) ~(meta : keeper_meta)
       if trimmed = "" then "No continuity snapshot available." else trimmed
 
 (** Board event cursor bootstrap window (seconds). *)
-let bootstrap_window_sec = 300.0
+let bootstrap_window_sec = Env_config.InternalTimers.bootstrap_window_sec
 
 let is_self_author ~self_tokens (author : string) : bool =
   List.mem (String.lowercase_ascii (String.trim author)) self_tokens
@@ -271,7 +361,7 @@ let read_room_signal ~(config : Room.config) ~(meta : keeper_meta) =
         (None, None)
 
 (** Collect recent board activity using cursor-based tracking.
-    Cursor state lives in Keeper_registry (board_cursor_ts field).
+    Cursor state lives in Keeper_registry as [(updated_at, post_id)].
     Returns (structured events, new post count, mention count).
 
     Comment-stream dedup: after the initial cursor + author filter,
@@ -282,16 +372,17 @@ let read_room_signal ~(config : Room.config) ~(meta : keeper_meta) =
 let collect_board_events ~(base_path : string) ~(continuity_summary : string)
     ~(meta : keeper_meta) : pending_board_event list * int * int =
   try
-    let since_ts =
-      let ts = Keeper_registry.get_board_cursor_ts ~base_path meta.name in
-      if ts > 0.0 then ts
-      else Time_compat.now () -. bootstrap_window_sec
+    let broad_scope = scope_message_feed_enabled meta in
+    let cursor_ts, cursor_post_id =
+      Keeper_registry.get_board_cursor ~base_path meta.name
     in
-    let cursor_watermark = Time_compat.now () in
-    let posts =
-      Board_dispatch.list_posts ~sort_by:Board_dispatch.Updated ~limit:50 ()
+    let base_cursor =
+      if cursor_ts > 0.0 then
+        (cursor_ts, cursor_post_id)
+      else
+        (Time_compat.now () -. bootstrap_window_sec, None)
     in
-    Keeper_registry.set_board_cursor_ts ~base_path meta.name cursor_watermark;
+    let posts = list_board_posts_after_cursor base_cursor in
     let self_tokens =
       [ meta.name; meta.agent_name ]
       |> List.map (fun value -> String.lowercase_ascii (String.trim value))
@@ -299,9 +390,8 @@ let collect_board_events ~(base_path : string) ~(continuity_summary : string)
     let recent =
       List.filter
         (fun (p : Board.post) ->
-          p.updated_at >= since_ts
-          && not (is_self_author ~self_tokens
-                    (Board.Agent_id.to_string p.author)))
+          not (is_self_author ~self_tokens
+                 (Board.Agent_id.to_string p.author)))
         posts
     in
     let new_count = List.length recent in
@@ -325,22 +415,19 @@ let collect_board_events ~(base_path : string) ~(continuity_summary : string)
                targets)
            recent)
     in
-    let capped =
-      if List.length recent > 10 then
-        List.filteri (fun i _ -> i < 10) recent
-      else recent
-    in
-    let events =
-      List.filter_map
-        (fun (p : Board.post) ->
+    let event_limit = 5 in
+    let rec consume_posts remaining last_cursor acc = function
+      | [] -> (List.rev acc, last_cursor)
+      | (p : Board.post) :: rest ->
           let post_id = Board.Post_id.to_string p.id in
+          let next_cursor = board_cursor_token_of_post p in
           let comment_status = check_self_comment_status ~self_tokens ~post_id in
           match comment_status with
           | `No_new_external ->
               Log.Keeper.debug
                 "board dedup: skipping post_id=%s (no new external since my comment)"
                 post_id;
-              None
+              consume_posts remaining (Some next_cursor) acc rest
           | `Never ->
               let signal : Board_dispatch.keeper_board_signal =
                 {
@@ -353,63 +440,81 @@ let collect_board_events ~(base_path : string) ~(continuity_summary : string)
                 }
               in
               let matched = board_signal_match ~continuity_summary ~meta ~signal in
-              if matched.explicit_mention then
-                Some
-                  {
-                    post_id;
-                    author = Board.Agent_id.to_string p.author;
-                    title = p.title;
-                    preview = short_preview ~max_len:80 p.content;
-                    hearth = p.hearth;
-                    post_kind = p.post_kind;
-                    updated_at = p.updated_at;
-                    explicit_mention = matched.explicit_mention;
-                    matched_targets = matched.matched_targets;
-                    self_commented = false;
-                    new_external_since = 0;
-                    latest_external_author = None;
-                    latest_external_preview = None;
-                  }
-              else (
+              if not (matched.explicit_mention || broad_scope) then (
                 Log.Keeper.debug
                   "board dedup: skipping post_id=%s (no mention and no prior keeper participation)"
                   post_id;
-                None)
+                consume_posts remaining (Some next_cursor) acc rest)
+              else if remaining <= 0 then
+                (List.rev acc, last_cursor)
+              else
+                consume_posts
+                  (remaining - 1)
+                  (Some next_cursor)
+                  ({
+                     post_id;
+                     author = Board.Agent_id.to_string p.author;
+                     title = p.title;
+                     preview = short_preview ~max_len:80 p.content;
+                     hearth = p.hearth;
+                     post_kind = p.post_kind;
+                     updated_at = p.updated_at;
+                     explicit_mention = matched.explicit_mention;
+                     matched_targets = matched.matched_targets;
+                     self_commented = false;
+                     new_external_since = 0;
+                     latest_external_author = None;
+                     latest_external_preview = None;
+                   }
+                   :: acc)
+                  rest
           | `New_external (count, ext_author, ext_preview) ->
-              let signal : Board_dispatch.keeper_board_signal =
-                {
-                  kind = Board_dispatch.Board_post_created;
-                  post_id;
-                  author = Board.Agent_id.to_string p.author;
-                  title = p.title;
-                  content = p.content;
-                  hearth = p.hearth;
-                }
-              in
-              let matched = board_signal_match ~continuity_summary ~meta ~signal in
-              Some
-                {
-                  post_id;
-                  author = Board.Agent_id.to_string p.author;
-                  title = p.title;
-                  preview = short_preview ~max_len:80 p.content;
-                  hearth = p.hearth;
-                  post_kind = p.post_kind;
-                  updated_at = p.updated_at;
-                  explicit_mention = matched.explicit_mention;
-                  matched_targets = matched.matched_targets;
-                  self_commented = true;
-                  new_external_since = count;
-                  latest_external_author = Some ext_author;
-                  latest_external_preview = Some ext_preview;
-                })
-        capped
+              if remaining <= 0 then
+                (List.rev acc, last_cursor)
+              else
+                let signal : Board_dispatch.keeper_board_signal =
+                  {
+                    kind = Board_dispatch.Board_post_created;
+                    post_id;
+                    author = Board.Agent_id.to_string p.author;
+                    title = p.title;
+                    content = p.content;
+                    hearth = p.hearth;
+                  }
+                in
+                let matched = board_signal_match ~continuity_summary ~meta ~signal in
+                consume_posts
+                  (remaining - 1)
+                  (Some next_cursor)
+                  ({
+                     post_id;
+                     author = Board.Agent_id.to_string p.author;
+                     title = p.title;
+                     preview = short_preview ~max_len:80 p.content;
+                     hearth = p.hearth;
+                     post_kind = p.post_kind;
+                     updated_at = p.updated_at;
+                     explicit_mention = matched.explicit_mention;
+                     matched_targets = matched.matched_targets;
+                     self_commented = true;
+                     new_external_since = count;
+                     latest_external_author = Some ext_author;
+                     latest_external_preview = Some ext_preview;
+                   }
+                   :: acc)
+                  rest
     in
-    let final_events =
-      if List.length events > 5 then
-        List.filteri (fun i _ -> i < 5) events
-      else events
+    let final_events, last_cursor =
+      consume_posts event_limit None [] recent
     in
+    (match last_cursor with
+     | Some (ts, post_id)
+       when compare_board_cursor_token
+              (ts, post_id)
+              (fst base_cursor, Option.value ~default:"" (snd base_cursor))
+            > 0 ->
+         Keeper_registry.set_board_cursor ~base_path meta.name ts (Some post_id)
+     | _ -> ());
     (final_events, new_count, mention_count)
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -422,7 +527,9 @@ let observe ~(pending_board_events : pending_board_event list option)
     ~(config : Room.config)
     ~(meta : keeper_meta) :
     world_observation =
-  let pending_mentions = collect_pending_mentions ~config ~meta in
+  let pending_mentions, pending_scope_messages, message_cursor_updates =
+    collect_message_scope ~config ~meta
+  in
   let unclaimed_task_count, failed_task_count =
     read_backlog_counts ~config
   in
@@ -453,6 +560,8 @@ let observe ~(pending_board_events : pending_board_event list option)
   {
     pending_mentions;
     pending_board_events;
+    pending_scope_messages;
+    message_cursor_updates;
     idle_seconds;
     active_goals = meta.active_goal_ids;
     continuity_summary;
@@ -485,7 +594,9 @@ let effective_proactive_cooldown ~(base_cooldown : int) ~(since_last : int) : in
 
 let should_run_unified_turn ~(meta : keeper_meta) (observation : world_observation) =
   let has_external_event =
-    observation.pending_mentions <> [] || observation.pending_board_events <> []
+    observation.pending_mentions <> []
+    || observation.pending_board_events <> []
+    || observation.pending_scope_messages <> []
   in
   if has_external_event then
     true

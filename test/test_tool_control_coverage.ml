@@ -20,7 +20,7 @@ let test name f =
 
 let test_counter = ref 0
 
-let with_ctx f =
+let with_ctx ?(initialize = true) f =
   Fun.protect
     ~finally:Fs_compat.clear_fs
     (fun () ->
@@ -35,7 +35,7 @@ let with_ctx f =
       in
       Unix.mkdir tmp 0o755;
       let config = Room.default_config tmp in
-      let _ = Room.init config ~agent_name:(Some "test-agent") in
+      if initialize then ignore (Room.init config ~agent_name:(Some "test-agent"));
       f { Tool_control.config; agent_name = "test-agent" })
 
 let () =
@@ -113,6 +113,21 @@ let () =
           assert
             (Yojson.Safe.Util.member "requested_namespace_id" json
              = `String "focus-room")
+      | None -> failwith "dispatch returned None")
+
+let () =
+  test "dispatch_pause_status_uninitialized_room_is_safe" (fun () ->
+      with_ctx ~initialize:false @@ fun ctx ->
+      match Tool_control.dispatch ctx ~name:"masc_pause_status" ~args:(`Assoc []) with
+      | Some (success, result) ->
+          assert success;
+          let json = parse_json result in
+          assert (Yojson.Safe.Util.member "status" json = `String "initializing");
+          assert (Yojson.Safe.Util.member "initializing" json = `Bool true);
+          assert (Yojson.Safe.Util.member "paused" json = `Null);
+          assert (Yojson.Safe.Util.member "namespace_id" json = `String "default");
+          assert (Yojson.Safe.Util.member "namespace" json = `String "default");
+          assert (Yojson.Safe.Util.member "namespace_mode" json = `String "flattened")
       | None -> failwith "dispatch returned None")
 
 let () =

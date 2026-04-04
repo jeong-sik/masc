@@ -24,7 +24,7 @@ module TokenStore = struct
   let tokens : (string, token) Hashtbl.t = Hashtbl.create 64
   let lock : Eio.Mutex.t option ref = ref None
   let last_cleanup : float ref = ref 0.0
-  let cleanup_interval = 300.0  (* 5 minutes *)
+  let cleanup_interval = Env_config.InternalTimers.cancellation_cleanup_sec
 
   (** Initialize the token store with Eio mutex. Call once at server startup. *)
   let init () : unit =

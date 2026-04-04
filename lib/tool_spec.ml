@@ -86,15 +86,26 @@ let register (spec : t) =
   (* 3. Requires-join set *)
   if spec.requires_join then
     Tool_dispatch.init_requires_join_set [ spec.name ];
-  (* 4. Catalog metadata *)
+  (* 4. Catalog metadata — enforce Hidden for System_internal tools *)
+  let is_system_internal =
+    Tool_catalog_surfaces.is_on_surface System_internal spec.name
+  in
+  let effective_visibility =
+    if is_system_internal && spec.visibility = Tool_catalog.Default
+    then Tool_catalog.Hidden
+    else spec.visibility
+  in
+  let effective_allow_direct =
+    spec.allow_direct_call_when_hidden || is_system_internal
+  in
   Tool_catalog.register_metadata spec.name
-    { Tool_catalog.visibility = spec.visibility;
+    { Tool_catalog.visibility = effective_visibility;
       lifecycle = spec.lifecycle;
       implementation_status = spec.implementation_status;
       canonical_name = spec.canonical_name;
       replacement = spec.replacement;
       reason = spec.reason;
-      allow_direct_call_when_hidden = spec.allow_direct_call_when_hidden;
+      allow_direct_call_when_hidden = effective_allow_direct;
       readonly = Some spec.is_read_only;
       destructive = Some spec.is_destructive;
       idempotent = Some spec.is_idempotent;

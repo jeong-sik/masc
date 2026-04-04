@@ -9,6 +9,7 @@ import { namespaceTruthInitializing } from '../namespace-truth-store'
 import { Overview } from './overview/overview'
 import { ErrorBoundary } from './common/error-boundary'
 import { TimeAgo } from './common/time-ago'
+import { LoadingState } from './common/feedback-state'
 import {
   DASHBOARD_SURFACES,
   DASHBOARD_NAV_ITEMS,
@@ -27,7 +28,7 @@ const LazyLabSurface = lazy(async () => ({ default: (await import('./lab')).Lab 
 const LazyLogViewer = lazy(async () => ({ default: (await import('./logs')).LogViewer }))
 
 function lazyTabFallback(label: string) {
-  return html`<div class="loading-state loading-pulse">${label} 불러오는 중...</div>`
+  return html`<${LoadingState}>${label} 불러오는 중...<//>`
 }
 
 function formatDisconnectDuration(): string {
@@ -81,7 +82,7 @@ export function BuildIdentityBadge() {
   return html`
     <div class="relative">
       <button type="button"
-        class="text-[11px] py-[6px] px-[11px] rounded-md border border-solid border-[rgba(71,184,255,0.28)] bg-[rgba(71,184,255,0.12)] text-[#bfe7ff] cursor-pointer font-[inherit] transition-colors duration-150 hover:bg-[rgba(71,184,255,0.18)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(71,184,255,0.45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-0)]"
+        class="text-[11px] py-[6px] px-[11px] rounded-md border border-solid border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--text-strong)] cursor-pointer font-[inherit] transition-colors duration-150 hover:bg-[var(--accent-20)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(71,184,255,0.45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-0)]"
         aria-expanded=${buildIdentityOpen.value}
         onClick=${() => {
           buildIdentityOpen.value = !buildIdentityOpen.value
@@ -91,7 +92,7 @@ export function BuildIdentityBadge() {
       </button>
       ${buildIdentityOpen.value
         ? html`
-            <div class="absolute top-[calc(100%+8px)] right-0 min-w-[280px] rounded-lg border border-solid border-[var(--card-border)] bg-[rgba(6,14,28,0.96)] px-3 py-2.5 shadow-[0_10px_24px_rgba(0,0,0,0.22)] grid gap-1.5">
+            <div class="absolute top-[calc(100%+8px)] right-0 min-w-[280px] rounded-lg border border-solid border-[var(--card-border)] bg-[var(--bg-panel)] px-3 py-2.5 shadow-[0_10px_24px_rgba(0,0,0,0.22)] grid gap-1.5">
               <div class="flex justify-between gap-3 text-xs text-[color:var(--text-muted)]">
                 <span>릴리즈</span>
                 <strong class="text-[color:var(--text-strong)] text-right">${build?.release_version ?? status?.version ?? 'unknown'}</strong>
@@ -172,12 +173,12 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
       <div class="flex items-center ${collapsed ? 'justify-center' : 'justify-between'} px-2 pt-2 pb-1">
         ${!collapsed ? html`
           <div class="px-1">
-            <div class="text-[10px] font-bold uppercase tracking-[0.2em] text-[rgba(154,217,255,0.5)]">내비게이션</div>
+            <div class="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--text-muted)]">내비게이션</div>
             <div class="mt-0.5 text-[13px] font-semibold tracking-[-0.02em] text-[var(--text-strong)]">MASC Core</div>
           </div>
         ` : null}
         <button type="button"
-          class="flex size-7 items-center justify-center rounded-lg text-[var(--text-muted)] cursor-pointer transition-colors duration-200 hover:bg-[rgba(255,255,255,0.08)] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(71,184,255,0.45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-1)]"
+          class="flex size-7 items-center justify-center rounded-lg text-[var(--text-muted)] cursor-pointer transition-colors duration-200 hover:bg-[var(--white-10)] hover:text-[var(--text-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(71,184,255,0.45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-1)]"
           aria-label=${collapsed ? '사이드바 펼치기' : '사이드바 접기'}
           onClick=${onToggle}
           title=${collapsed ? '사이드바 펼치기' : '사이드바 접기'}
@@ -197,7 +198,7 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
                 <${RouteLink}
                   tab=${surface.defaultTab}
                   params=${surface.defaultParams}
-                  class="flex items-center justify-center w-full rounded-xl border p-2 cursor-pointer transition-[background-color,border-color,color,box-shadow] duration-200 ${isSurfaceActive ? 'bg-[rgba(71,184,255,0.16)] text-[#d9f2ff] shadow-[inset_0_1px_1px_rgba(255,255,255,0.08)] border-[rgba(71,184,255,0.18)]' : 'border-transparent text-[var(--text-muted)] hover:bg-[rgba(255,255,255,0.05)]'}"
+                  class="flex items-center justify-center w-full rounded-xl border p-2 cursor-pointer transition-[background-color,border-color,color,box-shadow] duration-200 ${isSurfaceActive ? 'bg-[var(--accent-soft)] text-[var(--text-strong)] shadow-[inset_0_1px_1px_var(--white-10)] border-[var(--accent-20)]' : 'border-transparent text-[var(--text-muted)] hover:bg-[var(--white-5)]'}"
                   title=${surface.label}
                   ariaCurrent=${isSurfaceActive ? 'page' : undefined}
                 >
@@ -211,19 +212,19 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
                 <${RouteLink}
                   tab=${surface.defaultTab}
                   params=${surface.defaultParams}
-                  class="flex items-center gap-2 w-full rounded-lg border px-2 py-1.5 text-left cursor-pointer transition-[background-color,border-color,color,box-shadow] duration-200 ${isSurfaceActive && sections.length === 0 ? 'bg-[linear-gradient(135deg,rgba(71,184,255,0.14),rgba(71,184,255,0.04))] text-[#d9f2ff] shadow-[inset_0_1px_1px_rgba(255,255,255,0.08)] border-[rgba(71,184,255,0.18)]' : 'bg-transparent border-transparent text-[var(--text-strong)] hover:bg-[rgba(255,255,255,0.05)]'}"
+                  class="flex items-center gap-2 w-full rounded-lg border px-2 py-1.5 text-left cursor-pointer transition-[background-color,border-color,color,box-shadow] duration-200 ${isSurfaceActive && sections.length === 0 ? 'bg-[linear-gradient(135deg,rgba(71,184,255,0.14),rgba(71,184,255,0.04))] text-[var(--text-strong)] shadow-[inset_0_1px_1px_var(--white-10)] border-[var(--accent-20)]' : 'bg-transparent border-transparent text-[var(--text-strong)] hover:bg-[var(--white-5)]'}"
                   ariaCurrent=${isSurfaceActive && sections.length === 0 ? 'page' : undefined}
                 >
-                  <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[rgba(255,255,255,0.1)] bg-[rgba(255,255,255,0.03)] text-[14px]">
+                  <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[var(--white-10)] bg-[var(--white-3)] text-[14px]">
                     ${surface.icon}
                   </span>
                   <div class="flex-1 min-w-0">
-                    <div class="text-[14px] font-medium truncate leading-none ${isSurfaceActive ? 'text-[#9ad9ff]' : ''}">${surface.label}</div>
+                    <div class="text-[14px] font-medium truncate leading-none ${isSurfaceActive ? 'text-[var(--accent)]' : ''}">${surface.label}</div>
                   </div>
                 <//>
 
                 ${sections.length > 0 ? html`
-                  <div class="ml-7 flex flex-col gap-0.5 border-l border-[rgba(255,255,255,0.05)] pl-3" role="list">
+                  <div class="ml-7 flex flex-col gap-0.5 border-l border-[var(--border-subtle)] pl-3" role="list">
                     ${sections.map(item => {
                       const isSectionActive = isSurfaceActive && currentSection?.id === item.id
                       return html`
@@ -231,7 +232,7 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
                           role="listitem"
                           tab=${surface.id}
                           params=${item.params}
-                          class="w-full rounded-lg border px-2 py-1 text-left cursor-pointer text-[13px] transition-[background-color,border-color,color,box-shadow] duration-200 ${isSectionActive ? 'bg-[rgba(71,184,255,0.14)] text-[#cfeaff] font-medium shadow-[inset_0_1px_1px_rgba(255,255,255,0.08)] border-[rgba(71,184,255,0.14)]' : 'border-transparent text-[var(--text-muted)] hover:bg-[rgba(255,255,255,0.05)] hover:text-[var(--text-body)]'}"
+                          class="w-full rounded-lg border px-2 py-1 text-left cursor-pointer text-[13px] transition-[background-color,border-color,color,box-shadow] duration-200 ${isSectionActive ? 'bg-[var(--accent-soft)] text-[var(--accent)] font-medium shadow-[inset_0_1px_1px_var(--white-10)] border-[var(--accent-soft)]' : 'border-transparent text-[var(--text-muted)] hover:bg-[var(--white-5)] hover:text-[var(--text-body)]'}"
                           ariaCurrent=${isSectionActive ? 'page' : undefined}
                         >
                           <div class="truncate">${item.label}</div>
@@ -246,7 +247,7 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
         </div>
       </div>
 
-      <div class="shrink-0 border-t border-[rgba(255,255,255,0.08)] px-2 py-2">
+      <div class="shrink-0 border-t border-[var(--white-10)] px-2 py-2">
         <${HealthIndicator} collapsed=${collapsed} />
       </div>
     </nav>
@@ -305,7 +306,7 @@ function SurfaceLead() {
     <div class="mb-3 flex flex-wrap items-baseline justify-between gap-2">
       <h2 class="flex items-center gap-2 text-[22px] font-bold tracking-tight text-[var(--text-strong)]">
         ${currentSection?.label ?? currentView?.label ?? '홈'}
-        ${description ? html`<span class="text-[13px] font-normal text-[rgba(255,255,255,0.44)] truncate min-w-0">${description}</span>` : null}
+        ${description ? html`<span class="text-[13px] font-normal text-[var(--text-dim)] truncate min-w-0">${description}</span>` : null}
       </h2>
     </div>
   `
@@ -313,7 +314,7 @@ function SurfaceLead() {
 
 export function DashboardMain() {
   if (dashboardLoading.value && !connected.value && !namespaceTruthInitializing.value) {
-    return html`<div class="loading-state loading-pulse">대시보드 불러오는 중...</div>`
+    return html`<${LoadingState}>대시보드 불러오는 중...<//>`
   }
 
   const routeLabel = [

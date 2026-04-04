@@ -3,7 +3,7 @@ import { callMcpTool } from '../../api/mcp'
 import { showToast } from '../common/toast'
 import { createAsyncResource, getData } from '../../lib/async-state'
 
-export type FlowState = 'unknown' | 'running' | 'paused'
+export type FlowState = 'unknown' | 'initializing' | 'running' | 'paused'
 export const flowState = signal<FlowState>('unknown')
 export const flowLoading = signal(false)
 
@@ -22,37 +22,33 @@ export const maintenanceLoading = signal(false)
 export async function fetchPauseStatus(): Promise<void> {
   try {
     const raw = await callMcpTool('masc_pause_status', {})
-    const parsed = JSON.parse(raw) as { paused?: boolean; status?: string }
-    flowState.value = parsed.paused === true || parsed.status === 'paused' ? 'paused' : 'running'
+    const parsed = JSON.parse(raw) as { paused?: boolean | null; status?: string; initializing?: boolean }
+    if (parsed.paused === true || parsed.status === 'paused') {
+      flowState.value = 'paused'
+      return
+    }
+    if (parsed.initializing === true || parsed.status === 'initializing') {
+      flowState.value = 'initializing'
+      return
+    }
+    flowState.value = 'running'
   } catch { flowState.value = 'unknown' }
 }
 
 export async function pauseRoom(): Promise<void> {
   flowLoading.value = true
-  try { await callMcpTool('masc_pause', {}); flowState.value = 'paused'; showToast('네임스페이스 일시정지', 'success') }
+  try { await callMcpTool('masc_pause', {}); flowState.value = 'paused'; showToast('프로젝트 일시정지', 'success') }
   catch (err) { showToast(`일시정지 실패: ${err instanceof Error ? err.message : String(err)}`, 'error') }
   finally { flowLoading.value = false }
 }
 
 export async function resumeRoom(): Promise<void> {
   flowLoading.value = true
-  try { await callMcpTool('masc_resume', {}); flowState.value = 'running'; showToast('네임스페이스 재개', 'success') }
+  try { await callMcpTool('masc_resume', {}); flowState.value = 'running'; showToast('프로젝트 재개', 'success') }
   catch (err) { showToast(`재개 실패: ${err instanceof Error ? err.message : String(err)}`, 'error') }
   finally { flowLoading.value = false }
 }
 
-export async function interruptRoom(reason?: string): Promise<void> {
-  flowLoading.value = true
-  try {
-    const args: Record<string, unknown> = {}
-    if (reason) args.reason = reason
-    await callMcpTool('masc_interrupt', args)
-    showToast('네임스페이스 인터럽트 전송', 'success')
-    await fetchPauseStatus()
-  } catch (err) {
-    showToast(`인터럽트 실패: ${err instanceof Error ? err.message : String(err)}`, 'error')
-  } finally { flowLoading.value = false }
-}
 
 // ── Room Strategy ───────────────────────────────
 
@@ -61,7 +57,7 @@ export async function fetchRoomStrategy(): Promise<void> {
     const raw = await callMcpTool('masc_room_strategy_get', {})
     return JSON.parse(raw) as Record<string, unknown>
   }).catch(() => {
-    showToast('네임스페이스 전략 조회 실패', 'error')
+    showToast('프로젝트 전략 조회 실패', 'error')
   })
 }
 
@@ -69,10 +65,10 @@ export async function setRoomStrategy(updates: Record<string, unknown>): Promise
   roomStrategyMutating.value = true
   try {
     await callMcpTool('masc_room_strategy_set', updates)
-    showToast('네임스페이스 전략 업데이트 완료', 'success')
+    showToast('프로젝트 전략 업데이트 완료', 'success')
     await fetchRoomStrategy()
   } catch (err) {
-    showToast(`네임스페이스 전략 저장 실패: ${err instanceof Error ? err.message : String(err)}`, 'error')
+    showToast(`프로젝트 전략 저장 실패: ${err instanceof Error ? err.message : String(err)}`, 'error')
   } finally {
     roomStrategyMutating.value = false
   }

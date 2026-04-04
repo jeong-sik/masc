@@ -4,7 +4,6 @@
     and OAS trace utilities. *)
 
 open Tool_args
-module Oas = Agent_sdk
 
 type 'a context = 'a Tool_team_session_step.context = {
   config : Room.config;
@@ -275,7 +274,7 @@ let evidence_session_id_of_json json =
   | `String value when String.trim value <> "" -> Some (String.trim value)
   | _ -> None
 
-let oas_trace_capability_to_string = function
+let oas_trace_capability_to_string : Oas.Sessions.trace_capability -> string = function
   | Oas.Sessions.Raw -> "raw"
   | Oas.Sessions.Summary_only -> "summary_only"
   | Oas.Sessions.No_trace -> "none"

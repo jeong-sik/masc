@@ -142,8 +142,8 @@ let test_masc_mcp_tools_has_worktree () =
 let test_masc_mcp_tools_has_handover () =
   check bool "has handover" true (List.mem "mcp__masc__masc_handover_create" Spawn.masc_mcp_tools)
 
-let test_masc_mcp_tools_has_relay_status () =
-  check bool "has relay_status" true
+let test_masc_mcp_tools_omits_relay_status () =
+  check bool "omits relay_status" false
     (List.mem "mcp__masc__masc_relay_status" Spawn.masc_mcp_tools)
 
 let test_masc_mcp_tools_has_team_session_step () =
@@ -154,8 +154,8 @@ let test_masc_mcp_tools_has_team_session_finalize () =
   check bool "has team_session_finalize" true
     (List.mem "mcp__masc__masc_team_session_finalize" Spawn.masc_mcp_tools)
 
-let test_masc_mcp_tools_has_a2a_delegate () =
-  check bool "has a2a_delegate" true
+let test_masc_mcp_tools_omits_a2a_delegate () =
+  check bool "omits a2a_delegate" false
     (List.mem "mcp__masc__masc_a2a_delegate" Spawn.masc_mcp_tools)
 
 let test_masc_mcp_tools_has_run_deliverable () =
@@ -174,7 +174,7 @@ let test_masc_mcp_tools_has_tool_admin_snapshot () =
   check bool "omits tool_admin_snapshot" false
     (List.mem "mcp__masc__masc_tool_admin_snapshot" Spawn.masc_mcp_tools)
 
-let test_masc_mcp_tools_has_keeper_tool_catalog () =
+let test_masc_mcp_tools_omits_keeper_tool_catalog () =
   check bool "omits keeper_tool_catalog" false
     (List.mem "mcp__masc__masc_keeper_tool_catalog" Spawn.masc_mcp_tools)
 
@@ -212,13 +212,13 @@ let test_lifecycle_suffix_has_heartbeat () =
     (try let _ = Str.search_forward (Str.regexp_string "heartbeat") Spawn.masc_lifecycle_suffix 0 in true
      with Not_found -> false)
 
-let test_lifecycle_suffix_has_relay_status () =
-  check bool "has relay_status" true
-    (try let _ = Str.search_forward (Str.regexp_string "relay_status") Spawn.masc_lifecycle_suffix 0 in true
+let test_lifecycle_suffix_has_handover_create () =
+  check bool "has handover_create" true
+    (try let _ = Str.search_forward (Str.regexp_string "handover_create") Spawn.masc_lifecycle_suffix 0 in true
      with Not_found -> false)
 
-let test_lifecycle_suffix_has_relay_checkpoint () =
-  check bool "has relay_checkpoint" true
+let test_lifecycle_suffix_omits_relay_checkpoint () =
+  check bool "omits relay_checkpoint" false
     (try let _ = Str.search_forward (Str.regexp_string "relay_checkpoint") Spawn.masc_lifecycle_suffix 0 in true
      with Not_found -> false)
 
@@ -352,21 +352,20 @@ let test_build_mcp_args_empty () =
   check (list string) "empty flags" [] flags
 
 let test_build_mcp_args_claude () =
-  (* "claude" resolves to canonical "claude-api" via Provider_adapter,
-     so the match arm "claude" no longer triggers — returns [] *)
+  (* "claude" resolves via spawn_key to "claude" — MCP flags are passed *)
   let flags = Spawn.build_mcp_args "claude" ["tool1"; "tool2"] in
-  check (list string) "claude resolves to claude-api, no flags" [] flags
+  check (list string) "claude allowed tools" ["--allowedTools"; "tool1,tool2"] flags
 
 let test_build_mcp_args_gemini () =
-  (* "gemini" resolves to canonical "gemini-api" via Provider_adapter,
-     so the match arm "gemini" no longer triggers — returns [] *)
+  (* "gemini" resolves via spawn_key to "gemini" — MCP flags are passed *)
   let flags = Spawn.build_mcp_args "gemini" ["tool1"] in
-  check (list string) "gemini resolves to gemini-api, no flags" [] flags
+  check (list string) "gemini allowed tools"
+    ["--allowed-mcp-server-names"; "masc"; "--allowed-tools"; "tool1"] flags
 
 let test_build_mcp_args_gemini_allowed_tools () =
-  (* Same as above — canonical name mismatch yields empty flags *)
-  let flags = Spawn.build_mcp_args "gemini" ["tool1"] in
-  check (list string) "gemini resolves to gemini-api, no allowed-tools" [] flags
+  let flags = Spawn.build_mcp_args "gemini" ["tool1"; "tool2"] in
+  check (list string) "gemini multi tools"
+    ["--allowed-mcp-server-names"; "masc"; "--allowed-tools"; "tool1"; "tool2"] flags
 
 let test_build_mcp_args_codex () =
   let flags = Spawn.build_mcp_args "codex" ["tool1"; "tool2"] in
@@ -381,8 +380,7 @@ let test_build_mcp_args_unknown () =
   check (list string) "unknown empty" [] flags
 
 let test_build_prompt_args_gemini () =
-  (* "gemini" resolves to canonical "gemini-api" via Provider_adapter,
-     and the match arm now correctly matches "gemini-api" *)
+  (* "gemini" resolves via spawn_key to "gemini" — prompt args passed *)
   let flags = Spawn.build_prompt_args "gemini" "hello" in
   check (list string) "gemini prompt args" ["-p"; "hello"] flags
 
@@ -447,7 +445,8 @@ let test_parse_gemini_output_with_cache () =
   check (option int) "input" (Some 100) p.input_tokens;
   check (option int) "output" (Some 50) p.output_tokens;
   check (option int) "cached" (Some 80) p.cache_read_tokens;
-  check bool "has cost" true (Option.is_some p.cost_usd)
+  (* cost_usd now requires explicit total_cost_usd in JSON; no hardcoded pricing *)
+  check bool "no cost without total_cost_usd" true (p.cost_usd = None)
 
 let test_parse_gemini_output_cli_json () =
   let json = {|
@@ -465,7 +464,16 @@ let test_parse_gemini_output_cli_json () =
   check (option int) "input" (Some 15769) p.input_tokens;
   check (option int) "output" (Some 85) p.output_tokens;
   check (option int) "cached" None p.cache_read_tokens;
-  check bool "has cost" true (Option.is_some p.cost_usd)
+  (* cost_usd now requires explicit total_cost_usd in JSON; no hardcoded pricing *)
+  check bool "no cost without total_cost_usd" true (p.cost_usd = None)
+
+let test_parse_gemini_output_with_cost () =
+  let json = {|{"usageMetadata": {"promptTokenCount": 200, "candidatesTokenCount": 80}, "total_cost_usd": 0.0042}|} in
+  let p = Spawn.parse_gemini_output json in
+  check (option int) "input" (Some 200) p.input_tokens;
+  check (option int) "output" (Some 80) p.output_tokens;
+  check bool "has cost" true (Option.is_some p.cost_usd);
+  check (option (float 0.0001)) "cost value" (Some 0.0042) p.cost_usd
 
 let test_parse_gemini_output_invalid () =
   let p = Spawn.parse_gemini_output "invalid" in
@@ -726,17 +734,17 @@ let () =
       test_case "has tasks" `Quick test_masc_mcp_tools_has_tasks;
       test_case "has worktree" `Quick test_masc_mcp_tools_has_worktree;
       test_case "has handover" `Quick test_masc_mcp_tools_has_handover;
-      test_case "has relay_status" `Quick test_masc_mcp_tools_has_relay_status;
+      test_case "omits relay_status" `Quick test_masc_mcp_tools_omits_relay_status;
       test_case "has team_session_step" `Quick test_masc_mcp_tools_has_team_session_step;
       test_case "has team_session_finalize" `Quick test_masc_mcp_tools_has_team_session_finalize;
-      test_case "has a2a_delegate" `Quick test_masc_mcp_tools_has_a2a_delegate;
+      test_case "omits a2a_delegate" `Quick test_masc_mcp_tools_omits_a2a_delegate;
       test_case "has run_deliverable" `Quick test_masc_mcp_tools_has_run_deliverable;
       test_case "omits tool_stats" `Quick test_masc_mcp_tools_has_tool_stats;
       test_case "has tool_help" `Quick test_masc_mcp_tools_has_tool_help;
       test_case "omits tool_admin_snapshot" `Quick
         test_masc_mcp_tools_has_tool_admin_snapshot;
       test_case "omits keeper_tool_catalog" `Quick
-        test_masc_mcp_tools_has_keeper_tool_catalog;
+        test_masc_mcp_tools_omits_keeper_tool_catalog;
       test_case "has tool_list" `Quick test_masc_mcp_tools_has_tool_list;
       test_case "has tool_grant" `Quick test_masc_mcp_tools_has_tool_grant;
       test_case "has tool_revoke" `Quick test_masc_mcp_tools_has_tool_revoke;
@@ -746,8 +754,8 @@ let () =
       test_case "has protocol" `Quick test_lifecycle_suffix_has_protocol;
       test_case "has join" `Quick test_lifecycle_suffix_has_join;
       test_case "has heartbeat" `Quick test_lifecycle_suffix_has_heartbeat;
-      test_case "has relay_status" `Quick test_lifecycle_suffix_has_relay_status;
-      test_case "has relay_checkpoint" `Quick test_lifecycle_suffix_has_relay_checkpoint;
+      test_case "has handover_create" `Quick test_lifecycle_suffix_has_handover_create;
+      test_case "omits relay_checkpoint" `Quick test_lifecycle_suffix_omits_relay_checkpoint;
     ];
     "default_configs", [
       test_case "not empty" `Quick test_default_configs_not_empty;
@@ -794,6 +802,7 @@ let () =
       test_case "success" `Quick test_parse_gemini_output_success;
       test_case "with cache" `Quick test_parse_gemini_output_with_cache;
       test_case "cli json stats" `Quick test_parse_gemini_output_cli_json;
+      test_case "with explicit cost" `Quick test_parse_gemini_output_with_cost;
       test_case "invalid" `Quick test_parse_gemini_output_invalid;
     ];
     "int_opt_to_json", [

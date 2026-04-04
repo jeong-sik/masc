@@ -49,6 +49,8 @@ let write_valid_worker_checkpoint (config : Room.config) session_id worker_name 
         worker_name err
 
 let wait_for_background_delegate_settle
+    ?(attempts = 200)
+    ?(sleep_sec = 0.01)
     (ctx : _ Tool_team_session.context) config session_id worker_run_id =
   let meta_path =
     Team_session_store.worker_run_meta_path config session_id worker_run_id
@@ -63,14 +65,59 @@ let wait_for_background_delegate_settle
         Team_session_store.read_events config session_id
         |> List.filter (fun json ->
                Yojson.Safe.Util.member "event_type" json
-               = `String "team_step_delegate")
+               = `String "team_step_delegate"
+               && Yojson.Safe.Util.member "worker_run_id"
+                    (Yojson.Safe.Util.member "detail" json)
+                  = `String worker_run_id)
       in
       if delegate_events <> [] then ()
       else (
-        Eio.Time.sleep ctx.clock 0.01;
+        Eio.Time.sleep ctx.clock sleep_sec;
         loop (attempts - 1))
   in
-  loop 200
+  loop attempts
+
+let test_wait_for_background_delegate_settle_ignores_other_worker_events () =
+  with_eio @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "owner"));
+      ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
+      let ctx : _ Tool_team_session.context =
+        { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None; net = None }
+      in
+      let session_id = start_session_exn ctx ~goal:"delegate-settle-filter" |> get_session_id in
+      Team_session_store.append_event config session_id
+        ~event_type:"team_step_delegate"
+        ~detail:
+          (`Assoc
+            [
+              ("worker_run_id", `String "other-run");
+              ("target_agent", `String "worker-a");
+              ("success", `Bool true);
+            ]);
+      let target_worker_run_id = "target-run" in
+      let negative_path_attempts = 10 in
+      let negative_path_sleep_sec = 0.001 in
+      Alcotest.match_raises
+        "unrelated delegate event does not settle target"
+        (function
+          | exn ->
+              Room_utils.contains_substring (Printexc.to_string exn)
+                "background delegate did not settle before cleanup")
+        (fun () ->
+          wait_for_background_delegate_settle
+            ~attempts:negative_path_attempts
+            ~sleep_sec:negative_path_sleep_sec
+            ctx config session_id target_worker_run_id;
+          ());
+      Team_session_store.save_worker_run_meta_json config session_id target_worker_run_id
+        (`Assoc [ ("worker_run_id", `String target_worker_run_id) ]);
+      wait_for_background_delegate_settle ctx config session_id target_worker_run_id)
 
 let test_prove_strong_requires_additional_evidence () =
   with_eio @@ fun env ->

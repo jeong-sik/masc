@@ -308,7 +308,7 @@ export function normalizeOperatorDigest(raw: unknown): OperatorDigest {
   const root = isRecord(raw) ? raw : {}
   return {
     trace_id: asString(root.trace_id),
-    target_type: asString(root.target_type) ?? 'room',
+    target_type: asString(root.target_type) ?? 'namespace',
     target_id: asString(root.target_id) ?? null,
     health: asString(root.health),
     judgment_owner: asString(root.judgment_owner) ?? null,

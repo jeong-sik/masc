@@ -259,10 +259,19 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
       let resolved = identity.Agent_identity.agent_name in
       if resolved <> "" then resolved else "unknown"
   in
-  let error_msg = if success then None else Some (Printf.sprintf "timeout=%d|duration_ms=%d" (if !timeout_hit then 1 else 0) duration_ms) in
+  let error_detail =
+    if success then None
+    else
+      let truncated =
+        if String.length message > 200 then String.sub message 0 200 ^ "..."
+        else message
+      in
+      Some (Printf.sprintf "timeout=%d|duration_ms=%d|detail=%s"
+              (if !timeout_hit then 1 else 0) duration_ms truncated)
+  in
   let otel_trace_id = Otel_spans.current_trace_id () in
   Audit_log.log_tool_call state.Mcp_server.room_config
-    ~agent_id:agent_name ~tool_name:name ~success ~error_msg
+    ~agent_id:agent_name ~tool_name:name ~success ~error_msg:error_detail
     ?trace_id:otel_trace_id ();
   if not success then
     Log.emit Log.Error ~module_name:"MCP"
@@ -275,8 +284,10 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
             ("duration_ms", `Int duration_ms);
             ("timeout_hit", `Bool !timeout_hit);
             ("attempts", `Int attempts);
+            ("error_detail", `String (Option.value ~default:"" error_detail));
           ])
-      (Printf.sprintf "tool call failed: %s" name);
+      (Printf.sprintf "tool call failed: %s — %s" name
+         (Option.value ~default:"(no detail)" error_detail));
 
   (* Track tool call in telemetry (controlled by MASC_TELEMETRY_ENABLED) *)
   let telemetry_enabled = Env_config_core.telemetry_enabled () in

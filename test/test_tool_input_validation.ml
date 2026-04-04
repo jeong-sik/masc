@@ -1,4 +1,7 @@
-(** Unit tests for Tool_input_validation — pre-dispatch schema validation. *)
+(** Unit tests for Tool_input_validation — OAS-delegated validation with coercion.
+
+    Tests the integration: MASC JSON Schema -> Tool_bridge.params_of_json_schema
+    -> Agent_sdk.Tool_input_validation.validate -> pre_hook_action mapping. *)
 
 open Masc_mcp
 
@@ -15,8 +18,33 @@ let string_contains haystack needle =
     !found
 
 (* ================================================================ *)
-(* Helper: build a simple tool schema                                *)
+(* Helper: validate via the same pipeline as the pre-hook            *)
 (* ================================================================ *)
+
+(** Reproduce the exact validation pipeline used in the pre-hook:
+    JSON Schema -> params_of_json_schema -> OAS validate. *)
+let validate_via_oas ~tool_name ~(schema : Yojson.Safe.t) ~(args : Yojson.Safe.t)
+  : Tool_dispatch.pre_hook_action =
+  let parameters = Tool_bridge.params_of_json_schema schema in
+  if parameters = [] then Pass
+  else
+    let oas_schema : Agent_sdk.Types.tool_schema =
+      { name = tool_name; description = ""; parameters }
+    in
+    match Agent_sdk.Tool_input_validation.validate oas_schema args with
+    | Agent_sdk.Tool_input_validation.Valid coerced ->
+      if Yojson.Safe.equal coerced args then Pass
+      else Proceed coerced
+    | Agent_sdk.Tool_input_validation.Invalid errors ->
+      let msg =
+        Agent_sdk.Tool_input_validation.format_errors ~tool_name errors
+      in
+      Reject {
+        Tool_result.success = false;
+        data = `Assoc [("error", `String msg)];
+        tool_name;
+        duration_ms = 0.0;
+      }
 
 (** Build a JSON Schema object with given properties and required list. *)
 let make_schema ?(required = []) (props : (string * string) list) : Yojson.Safe.t =
@@ -31,6 +59,18 @@ let make_schema ?(required = []) (props : (string * string) list) : Yojson.Safe.
     ("required", `List (List.map (fun s -> `String s) required));
   ]
 
+let run_registered_hook ?schema ~tool_name ~(args : Yojson.Safe.t) () =
+  Tool_dispatch.clear_hooks ();
+  (match schema with
+   | Some input_schema ->
+     let schema_def : Types.tool_schema =
+       { name = tool_name; description = "test"; input_schema }
+     in
+     Tool_dispatch.register_module_tag ~schemas:[schema_def] ~tag:Mod_misc
+   | None -> ());
+  Tool_input_validation.register_pre_hook ();
+  Tool_dispatch.run_pre_hooks ~name:tool_name ~args
+
 (* ================================================================ *)
 (* Test: required field validation                                   *)
 (* ================================================================ *)
@@ -38,83 +78,139 @@ let make_schema ?(required = []) (props : (string * string) list) : Yojson.Safe.
 let test_required_present () =
   let schema = make_schema ~required:["name"] [("name", "string")] in
   let args = `Assoc [("name", `String "alice")] in
-  match Tool_input_validation.validate ~tool_name:"test" ~schema ~args with
-  | Ok () -> ()
-  | Error msg -> Alcotest.fail (Printf.sprintf "Expected Ok, got Error: %s" msg)
+  match validate_via_oas ~tool_name:"test" ~schema ~args with
+  | Pass -> ()
+  | Proceed _ -> ()  (* coerced but still valid *)
+  | Reject r -> Alcotest.fail (Printf.sprintf "Expected Pass, got Reject: %s"
+      (Yojson.Safe.to_string r.data))
 
 let test_required_missing () =
   let schema = make_schema ~required:["name"; "room"] [("name", "string"); ("room", "string")] in
   let args = `Assoc [("name", `String "alice")] in
-  match Tool_input_validation.validate ~tool_name:"test" ~schema ~args with
-  | Error msg ->
-    Alcotest.(check bool) "mentions room" true (String.length msg > 0 && string_contains msg "room")
-  | Ok () -> Alcotest.fail "Expected Error for missing required field"
+  match validate_via_oas ~tool_name:"test" ~schema ~args with
+  | Reject r ->
+    let msg = Yojson.Safe.to_string r.data in
+    Alcotest.(check bool) "mentions room" true (string_contains msg "room")
+  | Pass | Proceed _ -> Alcotest.fail "Expected Reject for missing required field"
 
 let test_required_missing_multiple () =
-  let schema = make_schema ~required:["a"; "b"; "c"] [("a", "string"); ("b", "string"); ("c", "string")] in
+  let schema = make_schema ~required:["a"; "b"; "c"]
+    [("a", "string"); ("b", "string"); ("c", "string")] in
   let args = `Assoc [("a", `String "ok")] in
-  match Tool_input_validation.validate ~tool_name:"test" ~schema ~args with
-  | Error msg ->
+  match validate_via_oas ~tool_name:"test" ~schema ~args with
+  | Reject r ->
+    let msg = Yojson.Safe.to_string r.data in
     Alcotest.(check bool) "mentions b" true (string_contains msg "b");
     Alcotest.(check bool) "mentions c" true (string_contains msg "c")
-  | Ok () -> Alcotest.fail "Expected Error for missing multiple fields"
+  | Pass | Proceed _ -> Alcotest.fail "Expected Reject for missing multiple fields"
 
 let test_no_required_fields () =
   let schema = make_schema [("name", "string")] in
   let args = `Assoc [] in
-  match Tool_input_validation.validate ~tool_name:"test" ~schema ~args with
-  | Ok () -> ()
-  | Error msg -> Alcotest.fail (Printf.sprintf "Expected Ok, got Error: %s" msg)
+  match validate_via_oas ~tool_name:"test" ~schema ~args with
+  | Pass -> ()
+  | Proceed _ -> ()
+  | Reject r -> Alcotest.fail (Printf.sprintf "Expected Pass, got Reject: %s"
+      (Yojson.Safe.to_string r.data))
 
 (* ================================================================ *)
-(* Test: type validation                                             *)
+(* Test: type coercion (Samchon Harness Rank 1)                     *)
 (* ================================================================ *)
 
-let test_type_string_ok () =
-  let schema = make_schema [("name", "string")] in
-  let args = `Assoc [("name", `String "alice")] in
-  match Tool_input_validation.validate ~tool_name:"test" ~schema ~args with
-  | Ok () -> ()
-  | Error msg -> Alcotest.fail msg
-
-let test_type_string_wrong () =
-  let schema = make_schema [("name", "string")] in
-  let args = `Assoc [("name", `Int 42)] in
-  match Tool_input_validation.validate ~tool_name:"test" ~schema ~args with
-  | Error msg ->
-    Alcotest.(check bool) "mentions type mismatch" true
-      (string_contains msg "expected string")
-  | Ok () -> Alcotest.fail "Expected type error"
-
-let test_type_integer_ok () =
+let test_coerce_string_to_integer () =
   let schema = make_schema [("count", "integer")] in
-  let args = `Assoc [("count", `Int 5)] in
-  match Tool_input_validation.validate ~tool_name:"test" ~schema ~args with
-  | Ok () -> ()
-  | Error msg -> Alcotest.fail msg
+  let args = `Assoc [("count", `String "42")] in
+  match validate_via_oas ~tool_name:"test" ~schema ~args with
+  | Proceed coerced ->
+    let count = Yojson.Safe.Util.member "count" coerced in
+    Alcotest.(check string) "coerced to int" "42"
+      (match count with `Int i -> string_of_int i | _ -> "not_int")
+  | Pass -> Alcotest.fail "Expected Proceed (coercion), got Pass"
+  | Reject r -> Alcotest.fail (Printf.sprintf "Expected Proceed, got Reject: %s"
+      (Yojson.Safe.to_string r.data))
 
-let test_type_boolean_wrong () =
+let test_coerce_string_to_boolean () =
   let schema = make_schema [("flag", "boolean")] in
   let args = `Assoc [("flag", `String "true")] in
-  match Tool_input_validation.validate ~tool_name:"test" ~schema ~args with
-  | Error msg ->
-    Alcotest.(check bool) "mentions boolean" true
-      (string_contains msg "expected boolean")
-  | Ok () -> Alcotest.fail "Expected type error"
+  match validate_via_oas ~tool_name:"test" ~schema ~args with
+  | Proceed coerced ->
+    let flag = Yojson.Safe.Util.member "flag" coerced in
+    Alcotest.(check bool) "coerced to true" true
+      (match flag with `Bool b -> b | _ -> false)
+  | Pass -> Alcotest.fail "Expected Proceed (coercion), got Pass"
+  | Reject r -> Alcotest.fail (Printf.sprintf "Expected Proceed, got Reject: %s"
+      (Yojson.Safe.to_string r.data))
 
-let test_type_array_ok () =
-  let schema = make_schema [("items", "array")] in
-  let args = `Assoc [("items", `List [`String "a"; `String "b"])] in
-  match Tool_input_validation.validate ~tool_name:"test" ~schema ~args with
-  | Ok () -> ()
-  | Error msg -> Alcotest.fail msg
+let test_coerce_string_to_number () =
+  let schema = make_schema [("value", "number")] in
+  let args = `Assoc [("value", `String "3.14")] in
+  match validate_via_oas ~tool_name:"test" ~schema ~args with
+  | Proceed coerced ->
+    let v = Yojson.Safe.Util.member "value" coerced in
+    (match v with
+     | `Float f -> Alcotest.(check bool) "close to pi" true (Float.abs (f -. 3.14) < 0.001)
+     | _ -> Alcotest.fail "Expected Float after coercion")
+  | Pass -> Alcotest.fail "Expected Proceed (coercion), got Pass"
+  | Reject r -> Alcotest.fail (Printf.sprintf "Expected Proceed, got Reject: %s"
+      (Yojson.Safe.to_string r.data))
 
-let test_number_accepts_int () =
+let test_coerce_int_to_number () =
   let schema = make_schema [("value", "number")] in
   let args = `Assoc [("value", `Int 42)] in
-  match Tool_input_validation.validate ~tool_name:"test" ~schema ~args with
-  | Ok () -> ()
-  | Error msg -> Alcotest.fail msg
+  match validate_via_oas ~tool_name:"test" ~schema ~args with
+  | Pass -> ()  (* Int is valid Number, may not need coercion *)
+  | Proceed _ -> ()  (* widened to Float, also ok *)
+  | Reject r -> Alcotest.fail (Printf.sprintf "Expected Pass/Proceed, got Reject: %s"
+      (Yojson.Safe.to_string r.data))
+
+let test_coerce_intlit_to_integer () =
+  let schema = make_schema [("count", "integer")] in
+  let args = `Assoc [("count", `Intlit "123")] in
+  match validate_via_oas ~tool_name:"test" ~schema ~args with
+  | Proceed coerced ->
+    let count = Yojson.Safe.Util.member "count" coerced in
+    Alcotest.(check string) "normalized to Int" "123"
+      (match count with `Int i -> string_of_int i | _ -> "not_int")
+  | Pass -> ()  (* some impls may consider Intlit valid *)
+  | Reject r -> Alcotest.fail (Printf.sprintf "Expected Proceed/Pass, got Reject: %s"
+      (Yojson.Safe.to_string r.data))
+
+let test_invalid_string_to_integer () =
+  let schema = make_schema ~required:["count"] [("count", "integer")] in
+  let args = `Assoc [("count", `String "not_a_number")] in
+  match validate_via_oas ~tool_name:"test" ~schema ~args with
+  | Reject r ->
+    let msg = Yojson.Safe.to_string r.data in
+    Alcotest.(check bool) "mentions count" true (string_contains msg "count")
+  | Pass | Proceed _ -> Alcotest.fail "Expected Reject for non-coercible string"
+
+(* ================================================================ *)
+(* Test: correct types pass without coercion                        *)
+(* ================================================================ *)
+
+let test_correct_string () =
+  let schema = make_schema [("name", "string")] in
+  let args = `Assoc [("name", `String "alice")] in
+  match validate_via_oas ~tool_name:"test" ~schema ~args with
+  | Pass -> ()
+  | Proceed _ -> Alcotest.fail "Expected Pass (no coercion needed)"
+  | Reject r -> Alcotest.fail (Yojson.Safe.to_string r.data)
+
+let test_correct_integer () =
+  let schema = make_schema [("count", "integer")] in
+  let args = `Assoc [("count", `Int 5)] in
+  match validate_via_oas ~tool_name:"test" ~schema ~args with
+  | Pass -> ()
+  | Proceed _ -> ()  (* normalization is acceptable *)
+  | Reject r -> Alcotest.fail (Yojson.Safe.to_string r.data)
+
+let test_correct_boolean () =
+  let schema = make_schema [("flag", "boolean")] in
+  let args = `Assoc [("flag", `Bool true)] in
+  match validate_via_oas ~tool_name:"test" ~schema ~args with
+  | Pass -> ()
+  | Proceed _ -> Alcotest.fail "Expected Pass (no coercion needed)"
+  | Reject r -> Alcotest.fail (Yojson.Safe.to_string r.data)
 
 (* ================================================================ *)
 (* Test: edge cases                                                  *)
@@ -123,55 +219,131 @@ let test_number_accepts_int () =
 let test_null_args_no_required () =
   let schema = make_schema [("optional", "string")] in
   let args = `Null in
-  match Tool_input_validation.validate ~tool_name:"test" ~schema ~args with
-  | Ok () -> ()
-  | Error msg -> Alcotest.fail msg
+  match validate_via_oas ~tool_name:"test" ~schema ~args with
+  | Pass -> ()
+  | Proceed _ -> ()
+  | Reject r -> Alcotest.fail (Yojson.Safe.to_string r.data)
 
 let test_null_args_with_required () =
   let schema = make_schema ~required:["name"] [("name", "string")] in
   let args = `Null in
-  match Tool_input_validation.validate ~tool_name:"test" ~schema ~args with
-  | Error _ -> ()
-  | Ok () -> Alcotest.fail "Expected error for null args with required fields"
+  match validate_via_oas ~tool_name:"test" ~schema ~args with
+  | Reject _ -> ()
+  | Pass | Proceed _ -> Alcotest.fail "Expected Reject for null args with required fields"
 
 let test_extra_fields_allowed () =
   let schema = make_schema ~required:["name"] [("name", "string")] in
   let args = `Assoc [("name", `String "alice"); ("extra", `Int 42)] in
-  match Tool_input_validation.validate ~tool_name:"test" ~schema ~args with
-  | Ok () -> ()
-  | Error msg -> Alcotest.fail msg
+  match validate_via_oas ~tool_name:"test" ~schema ~args with
+  | Pass -> ()
+  | Proceed _ -> ()
+  | Reject r -> Alcotest.fail (Yojson.Safe.to_string r.data)
 
-let test_non_object_schema_skipped () =
-  let schema = `Assoc [("type", `String "string")] in
-  let args = `String "anything" in
-  match Tool_input_validation.validate ~tool_name:"test" ~schema ~args with
-  | Ok () -> ()
-  | Error msg -> Alcotest.fail msg
+let test_empty_schema_passes () =
+  let schema = `Assoc [] in
+  let args = `Assoc [("anything", `String "goes")] in
+  match validate_via_oas ~tool_name:"test" ~schema ~args with
+  | Pass -> ()  (* empty params -> Pass *)
+  | Proceed _ -> Alcotest.fail "Empty schema should Pass"
+  | Reject r -> Alcotest.fail (Yojson.Safe.to_string r.data)
+
+(* ================================================================ *)
+(* Test: registered pre-hook path                                    *)
+(* ================================================================ *)
+
+let test_registered_hook_coerces_args () =
+  let args = `Assoc [("count", `String "42")] in
+  let blocked, forwarded =
+    run_registered_hook
+      ~schema:(make_schema [("count", "integer")])
+      ~tool_name:"__tool_input_validation_registered_coerce"
+      ~args
+      ()
+  in
+  Alcotest.(check bool) "not blocked" true (Option.is_none blocked);
+  Alcotest.(check bool) "coercion changed args" false
+    (Yojson.Safe.equal forwarded args);
+  match Yojson.Safe.Util.member "count" forwarded with
+  | `Int 42 -> ()
+  | _ -> Alcotest.fail "expected integer coercion through registered pre-hook"
+
+let test_registered_hook_keeps_noop_as_pass () =
+  let args = `Assoc [("count", `Int 42)] in
+  let blocked, forwarded =
+    run_registered_hook
+      ~schema:(make_schema [("count", "integer")])
+      ~tool_name:"__tool_input_validation_registered_noop"
+      ~args
+      ()
+  in
+  Alcotest.(check bool) "not blocked" true (Option.is_none blocked);
+  Alcotest.(check bool) "args unchanged" true
+    (Yojson.Safe.equal forwarded args)
+
+let test_registered_hook_bypasses_unknown_tool () =
+  let args = `Assoc [("count", `String "42")] in
+  let blocked, forwarded =
+    run_registered_hook
+      ~tool_name:"__tool_input_validation_registered_unknown"
+      ~args
+      ()
+  in
+  Alcotest.(check bool) "not blocked" true (Option.is_none blocked);
+  Alcotest.(check bool) "args unchanged" true
+    (Yojson.Safe.equal forwarded args)
+
+let test_registered_hook_bypasses_empty_schema () =
+  let args = `Assoc [("anything", `String "goes")] in
+  let blocked, forwarded =
+    run_registered_hook
+      ~schema:(`Assoc [])
+      ~tool_name:"__tool_input_validation_registered_empty"
+      ~args
+      ()
+  in
+  Alcotest.(check bool) "not blocked" true (Option.is_none blocked);
+  Alcotest.(check bool) "args unchanged" true
+    (Yojson.Safe.equal forwarded args)
 
 (* ================================================================ *)
 (* Runner                                                            *)
 (* ================================================================ *)
 
 let () =
-  Alcotest.run "Tool_input_validation" [
+  Alcotest.run "Tool_input_validation (OAS delegation)" [
     ("required", [
       Alcotest.test_case "present" `Quick test_required_present;
       Alcotest.test_case "missing" `Quick test_required_missing;
       Alcotest.test_case "missing multiple" `Quick test_required_missing_multiple;
       Alcotest.test_case "no required fields" `Quick test_no_required_fields;
     ]);
-    ("type_check", [
-      Alcotest.test_case "string ok" `Quick test_type_string_ok;
-      Alcotest.test_case "string wrong" `Quick test_type_string_wrong;
-      Alcotest.test_case "integer ok" `Quick test_type_integer_ok;
-      Alcotest.test_case "boolean wrong" `Quick test_type_boolean_wrong;
-      Alcotest.test_case "array ok" `Quick test_type_array_ok;
-      Alcotest.test_case "number accepts int" `Quick test_number_accepts_int;
+    ("coercion", [
+      Alcotest.test_case "string -> integer" `Quick test_coerce_string_to_integer;
+      Alcotest.test_case "string -> boolean" `Quick test_coerce_string_to_boolean;
+      Alcotest.test_case "string -> number" `Quick test_coerce_string_to_number;
+      Alcotest.test_case "int -> number (widening)" `Quick test_coerce_int_to_number;
+      Alcotest.test_case "Intlit -> Int (normalize)" `Quick test_coerce_intlit_to_integer;
+      Alcotest.test_case "non-coercible string -> reject" `Quick test_invalid_string_to_integer;
+    ]);
+    ("correct_types", [
+      Alcotest.test_case "string passes" `Quick test_correct_string;
+      Alcotest.test_case "integer passes" `Quick test_correct_integer;
+      Alcotest.test_case "boolean passes" `Quick test_correct_boolean;
     ]);
     ("edge_cases", [
       Alcotest.test_case "null args no required" `Quick test_null_args_no_required;
       Alcotest.test_case "null args with required" `Quick test_null_args_with_required;
       Alcotest.test_case "extra fields allowed" `Quick test_extra_fields_allowed;
-      Alcotest.test_case "non-object schema skipped" `Quick test_non_object_schema_skipped;
+      Alcotest.test_case "empty schema passes" `Quick test_empty_schema_passes;
+    ]);
+    ("registered_hook", [
+      Alcotest.test_case "coercion flows through registered hook" `Quick
+        test_registered_hook_coerces_args;
+      Alcotest.test_case "no-op coercion stays pass" `Quick
+        test_registered_hook_keeps_noop_as_pass;
+      Alcotest.test_case "unknown tool bypasses validation" `Quick
+        test_registered_hook_bypasses_unknown_tool;
+      Alcotest.test_case "empty schema bypasses validation" `Quick
+        test_registered_hook_bypasses_empty_schema;
     ]);
   ]

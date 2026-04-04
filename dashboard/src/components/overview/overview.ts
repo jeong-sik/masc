@@ -71,7 +71,7 @@ function OverviewFreshnessStrip() {
               : html` <strong class="text-[var(--text-strong)]">아직 불러오지 않음</strong>`}
           </div>
           <div class="mt-1 text-[11px] text-[var(--text-muted)]">
-            기준: namespace truth와 mission snapshot 중 더 오래된 시각
+            기준: project truth와 mission snapshot 중 더 오래된 시각
           </div>
         </div>
         <${ActionButton}
@@ -217,7 +217,7 @@ function desireActionabilityLabel(actionability?: string | null): string {
     case 'operator_or_scheduler':
       return '운영자/스케줄러 액션'
     case 'room_or_operator':
-      return '네임스페이스/운영자 액션'
+      return '프로젝트/운영자 액션'
     default:
       return '추가 판독 필요'
   }

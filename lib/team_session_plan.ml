@@ -5,8 +5,6 @@
 
     @since Phase 3 — OAS feature adoption *)
 
-module Oas = Agent_sdk
-
 let worker_step_id (w : Team_session_types.planned_worker) : string =
   match w.runtime_actor with
   | Some actor when String.trim actor <> "" -> actor

@@ -20,6 +20,16 @@ let with_temp_dir prefix f =
   Unix.mkdir dir 0o755;
   Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
 
+let with_eio_runtime f =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio_guard.enable ();
+  Fun.protect
+    ~finally:(fun () ->
+      Eio_guard.disable ();
+      Fs_compat.clear_fs ())
+    f
+
 let quote = Filename.quote
 
 let run_ok ~cwd cmd =
@@ -78,6 +88,16 @@ let test_capture_distinguishes_new_changes () =
            true
          with Not_found -> false))
 
+let test_capture_change_block_in_eio_runtime () =
+  with_temp_dir "worktree-live-context" (fun dir ->
+      init_repo dir;
+      write_file (Filename.concat dir "sample.ml") "let value = 2\n";
+      with_eio_runtime (fun () ->
+        let first = Wlc.capture_change_block ~base_path:dir ~actor_key:"keeper-a" in
+        check bool "changed repo produces block in eio" true (Option.is_some first);
+        check (option string) "same change not repeated in eio" None
+          (Wlc.capture_change_block ~base_path:dir ~actor_key:"keeper-a")))
+
 let () =
   run "Worktree_live_context"
     [
@@ -86,5 +106,7 @@ let () =
           test_case "only on change" `Quick test_capture_only_on_change;
           test_case "distinguishes new changes" `Quick
             test_capture_distinguishes_new_changes;
+          test_case "works in Eio runtime" `Quick
+            test_capture_change_block_in_eio_runtime;
         ] );
     ]

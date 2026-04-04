@@ -44,7 +44,7 @@ describe('keeperDirectChatAccess', () => {
     expect(result.blocked).toBe(true)
     expect(result.message).toContain('@alice는 masc_keeper_msg 권한이 없습니다.')
     expect(result.message).toContain('현재 역할은 worker입니다.')
-    expect(result.message).toContain('namespace 기본 권한을 올린 뒤 다시 시도하세요.')
+    expect(result.message).toContain('프로젝트 기본 권한을 올린 뒤 다시 시도하세요.')
     expect(result.message).not.toContain('Bearer token이 없어')
     expect(result.message).not.toContain('public read fallback')
   })

@@ -997,10 +997,6 @@ let run_case sw ~proc_mgr ~fs ~net ~mono_clock clock
   Unix.putenv "SB_PG_URL" "";
   let base_path = temp_dir "mcp-tool-matrix-" in
   Unix.putenv "MASC_BASE_PATH" base_path;
-  let fixture =
-    make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path
-      (case_for_name schema.Types.name).init_mode
-  in
   let result =
     Fun.protect
       ~finally:(fun () ->
@@ -1014,9 +1010,13 @@ let run_case sw ~proc_mgr ~fs ~net ~mono_clock clock
         | Some home -> Unix.putenv "HOME" home
         | None -> Unix.putenv "HOME" "")
       (fun () ->
-        Unix.putenv "HOME" fixture.base_path;
+        Unix.putenv "HOME" base_path;
         try
           let case = case_for_name schema.Types.name in
+          let fixture =
+            make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path
+              case.init_mode
+          in
           case.prepare fixture;
           let arguments = case.arguments fixture schema in
           let response = call_tool_json fixture schema arguments in
@@ -1029,4 +1029,4 @@ let run_case sw ~proc_mgr ~fs ~net ~mono_clock clock
             (Printf.sprintf "%s raised during contract execution: %s"
                schema.Types.name (Printexc.to_string exn)))
   in
-  (fixture.base_path, result)
+  (base_path, result)

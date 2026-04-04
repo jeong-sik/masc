@@ -54,7 +54,6 @@
         test_keeper_allowed_paths
         test_keeper_compaction
         test_metrics_rotation
-        test_tool_tier
         test_tool_access_policy
         test_tool_access_role
         test_tool_token
@@ -112,7 +111,6 @@
           test_keeper_allowed_paths
           test_keeper_compaction
           test_metrics_rotation
-          test_tool_tier
           test_tool_access_policy
           test_tool_access_role
           test_tool_token
@@ -155,8 +153,8 @@
 ; Group 2: Property-based tests (QCheck)
 ; ============================================================
 (tests
- (names test_pbt_mention test_pbt_validation test_pbt_text_processing)
- (modules test_pbt_mention test_pbt_validation test_pbt_text_processing)
+ (names test_pbt_mention test_pbt_validation test_pbt_text_processing test_pbt_similarity)
+ (modules test_pbt_mention test_pbt_validation test_pbt_text_processing test_pbt_similarity)
  (libraries masc_test_deps))
 
 ; ============================================================
@@ -249,6 +247,7 @@
         test_keeper_tool_exposure
         test_keeper_voice_loop
         test_keeper_task_dispatch
+        test_keeper_tag_dispatch
         test_autoresearch_knowledge
         test_mcp_server_eio
         test_mcp_server_eio_call_tool
@@ -389,6 +388,7 @@
         test_keeper_tool_exposure
         test_keeper_voice_loop
         test_keeper_task_dispatch
+        test_keeper_tag_dispatch
         test_autoresearch_knowledge
         test_mcp_server_eio
         test_mcp_server_eio_call_tool
@@ -500,7 +500,7 @@
         test_tool_suspend_coverage test_tool_code_coverage
         test_tool_library_coverage test_tool_shard_coverage
         test_context_compact_oas_coverage test_keeper_masc_bridge
-        test_anti_rationalization_coverage)
+        test_anti_rationalization_coverage test_field_validation)
  (modules test_backend_coverage test_tools_coverage test_types_utils_coverage
         test_agent_card_coverage test_misc_coverage test_relay_coverage
         test_tempo_coverage test_transport_coverage test_validation_coverage
@@ -533,7 +533,7 @@
         test_tool_suspend_coverage test_tool_code_coverage
         test_tool_library_coverage test_tool_shard_coverage
         test_context_compact_oas_coverage test_keeper_masc_bridge
-        test_anti_rationalization_coverage)
+        test_anti_rationalization_coverage test_field_validation)
  (libraries masc_test_deps))
 
 ; ============================================================
@@ -605,6 +605,14 @@
  (deps tool_matrix_case_runner.exe)
  (libraries masc_test_deps))
 
+; Keeper Tool Matrix (3 modules + runner dep)
+(test
+ (name test_keeper_tool_matrix)
+ (modules test_keeper_tool_matrix test_keeper_tool_matrix_cases
+          test_mcp_tool_matrix_cases)
+ (deps keeper_tool_matrix_case_runner.exe)
+ (libraries masc_test_deps))
+
 ; ============================================================
 ; Special: Custom compiler flags
 ; ============================================================
@@ -658,6 +666,13 @@
  (enabled_if (= %{env:MASC_E2E_TESTS=false} "true")))
 
 (test
+ (name test_dashboard_keeper_routes)
+ (modules test_dashboard_keeper_routes)
+ (libraries masc_test_deps)
+ (deps ../bin/main_eio.exe)
+ (enabled_if (= %{env:MASC_E2E_TESTS=false} "true")))
+
+(test
  (name test_compression_boundary)
  (modules test_compression_boundary)
  (libraries alcotest masc_backend masc_compression))
@@ -679,6 +694,11 @@
 (test
  (name test_channel_gate_metrics)
  (modules test_channel_gate_metrics)
+ (libraries masc_test_deps))
+
+(test
+ (name test_gate_protocol)
+ (modules test_gate_protocol)
  (libraries masc_test_deps))
 
 (test
@@ -792,4 +812,10 @@
 (executable
  (name tool_matrix_case_runner)
  (modules tool_matrix_case_runner test_mcp_tool_matrix_cases)
+ (libraries masc_test_deps))
+
+(executable
+ (name keeper_tool_matrix_case_runner)
+ (modules keeper_tool_matrix_case_runner test_keeper_tool_matrix_cases
+          test_mcp_tool_matrix_cases)
  (libraries masc_test_deps))

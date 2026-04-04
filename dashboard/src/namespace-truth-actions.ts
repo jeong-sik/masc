@@ -43,7 +43,7 @@ async function doFetchNamespaceTruth(): Promise<void> {
       normalized.namespace.status ?? null,
     )
   } catch (err) {
-    const detail = err instanceof Error ? err.message : 'Failed to load namespace truth'
+    const detail = err instanceof Error ? err.message : 'Failed to load project truth'
     console.warn('[namespace-truth] fetch failed:', detail)
     namespaceTruthError.value = detail
   } finally {

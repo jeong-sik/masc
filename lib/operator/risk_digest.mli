@@ -16,7 +16,7 @@ type drift_signal =
 (** Structural drift signals from session metadata. *)
 
 type unsafe_edit_signal =
-  | Destructive_tool of string
+  | Autonomous_execution_scope of string
   | Zero_repair_budget
   | High_risk_class
 (** Structural signals indicating unsafe edit potential. *)

@@ -336,7 +336,7 @@ export function OrchestraSurface() {
         <div class="card rounded-xl-title">오케스트라 맵</div>
       </div>
       <p class="cmd-card rounded-xl-sub">
-        네임스페이스 전체를 한 장의 작전판으로 읽는 시각화입니다. 확대/이동으로 밀집 구간을 읽고, 노드를 눌러 상세 신호와 연결 대상을 확인합니다.
+        프로젝트 전체를 한 장의 작전판으로 읽는 시각화입니다. 확대/이동으로 밀집 구간을 읽고, 노드를 눌러 상세 신호와 연결 대상을 확인합니다.
       </p>
 
       <div class="orchestra-toolbar">

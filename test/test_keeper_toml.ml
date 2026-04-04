@@ -193,6 +193,21 @@ policy_voice_enabled = false
         d.room_signal_prompt_enabled;
       check (option bool) "policy_voice" (Some false) d.policy_voice_enabled
 
+let test_profile_musician_soul_profile () =
+  let input = {|
+[keeper]
+goal = "test"
+soul_profile = "musician"
+|} in
+  match TL.parse_toml input with
+  | Error e -> fail e
+  | Ok doc ->
+    match KTP.profile_defaults_of_toml doc with
+    | Error e -> fail e
+    | Ok defaults ->
+      check (option string) "musician maps to relationship"
+        (Some "relationship") defaults.soul_profile
+
 let test_profile_invalid_soul_profile () =
   let input = {|
 [keeper]
@@ -436,6 +451,24 @@ let test_persona_profile_canonicalizes_soul_profile () =
   let defaults = KTP.load_keeper_profile_defaults_from_persona "probe" in
   check (option string) "canonical soul_profile" (Some "delivery") defaults.soul_profile
 
+let test_persona_profile_musician_soul_profile () =
+  with_personas_dir @@ fun personas_dir ->
+  let persona_dir = Filename.concat personas_dir "probe" in
+  mkdir_p persona_dir;
+  write_file
+    (Filename.concat persona_dir "profile.json")
+    {|
+{
+  "name": "Probe",
+  "keeper": {
+    "goal": "test",
+    "soul_profile": "musician"
+  }
+}
+|};
+  let defaults = KTP.load_keeper_profile_defaults_from_persona "probe" in
+  check (option string) "musician maps to relationship" (Some "relationship") defaults.soul_profile
+
 let test_persona_profile_ignores_invalid_soul_profile () =
   with_personas_dir @@ fun personas_dir ->
   let persona_dir = Filename.concat personas_dir "probe" in
@@ -506,6 +539,8 @@ let () =
         [
           test_case "minimal" `Quick test_profile_minimal;
           test_case "full" `Quick test_profile_full;
+          test_case "musician soul_profile maps to relationship" `Quick
+            test_profile_musician_soul_profile;
           test_case "invalid soul_profile" `Quick test_profile_invalid_soul_profile;
           test_case "rejects removed model keys" `Quick
             test_profile_rejects_removed_model_keys;
@@ -526,6 +561,8 @@ let () =
           test_case "skips bad files" `Quick test_discover_skips_bad_files;
           test_case "persona profile canonicalizes soul_profile" `Quick
             test_persona_profile_canonicalizes_soul_profile;
+          test_case "persona profile musician maps to relationship" `Quick
+            test_persona_profile_musician_soul_profile;
           test_case "persona profile ignores invalid soul_profile" `Quick
             test_persona_profile_ignores_invalid_soul_profile;
           test_case "persona resolver defaults to research tool_preset" `Quick

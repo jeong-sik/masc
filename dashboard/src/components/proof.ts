@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { JsonViewerCard } from './common/json-viewer'
 import { useEffect } from 'preact/hooks'
 import { Card, CARD_STANDARD } from './common/card'
 import { EmptyState } from './common/empty-state'
@@ -12,7 +13,7 @@ import type {
   DashboardProofToolEvidence,
   DashboardProofWorkerRunEvidence,
 } from '../types'
-import { prettyJson, relativeTime } from './command/helpers'
+import { relativeTime } from './command/helpers'
 import {
   asRecord,
   dedupeTimeline,
@@ -213,7 +214,7 @@ export function Proof() {
           <${KeyValueGrid} rows=${goalBindingRows} />
           <details class="pt-1 border-t border-[var(--white-6)] mt-2">
             <summary class="cursor-pointer text-[12px] text-[var(--text-muted)] py-1.5 hover:text-[var(--text-body)] transition-colors">원본 목표 연결 JSON</summary>
-            <pre class="command-json-block">${prettyJson(snapshot?.goal_binding ?? {})}</pre>
+            <${JsonViewerCard} data=${snapshot?.goal_binding ?? {}} title="Goal Binding" />
           </details>
         <//>
       </div>
@@ -279,7 +280,7 @@ export function Proof() {
           <${KeyValueGrid} rows=${backingSummaryRows} />
           <details class="pt-1 border-t border-[var(--white-6)] mt-2">
             <summary class="cursor-pointer text-[12px] text-[var(--text-muted)] py-1.5 hover:text-[var(--text-body)] transition-colors">원본 CPv2 backing JSON</summary>
-            <pre class="command-json-block">${prettyJson(cpEvidence ?? {})}</pre>
+            <${JsonViewerCard} data=${cpEvidence ?? {}} title="Evidence" />
           </details>
         <//>
       </div>

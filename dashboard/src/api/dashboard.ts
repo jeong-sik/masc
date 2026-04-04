@@ -20,6 +20,7 @@ import type {
   DashboardMissionSessionDetailResponse,
   DashboardProofResponse,
   DashboardPlanningResponse,
+  DashboardGoalsTreeResponse,
   DashboardNamespaceTruthResponse,
   DashboardShellResponse,
   BoardSortMode,
@@ -273,6 +274,9 @@ export function fetchDashboardGovernance(): Promise<DashboardGovernanceResponse>
       : []
     return {
       generated_at: asNullableIsoTimestamp(raw.generated_at) ?? undefined,
+      case_tracking_available:
+        typeof raw.case_tracking_available === 'boolean' ? raw.case_tracking_available : undefined,
+      note: typeof raw.note === 'string' && raw.note.trim() !== '' ? raw.note.trim() : undefined,
       summary: isRecord(raw.summary)
         ? {
             cases_open: asInt(raw.summary.cases_open) ?? undefined,
@@ -483,6 +487,10 @@ export function fetchDashboardProof(
 
 export function fetchDashboardPlanning(): Promise<DashboardPlanningResponse> {
   return get('/api/v1/dashboard/planning')
+}
+
+export function fetchDashboardGoalsTree(): Promise<DashboardGoalsTreeResponse> {
+  return get('/api/v1/dashboard/goals')
 }
 
 // --- Tool metrics (P4 Phase 4.5) ---

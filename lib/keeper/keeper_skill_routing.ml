@@ -24,11 +24,7 @@ type keeper_skill_route_resolution = {
   provenance: string;
 }
 
-let contains_ci (haystack : string) (needle : string) : bool =
-  let h = String.lowercase_ascii haystack in
-  let n = String.lowercase_ascii needle in
-  if n = "" then false
-  else Re.execp (Re.str n |> Re.compile) h
+let contains_ci = String_util.contains_substring_ci
 
 let keeper_skill_selection_mode () : keeper_skill_selection_mode =
   SkillSelectAgent
@@ -277,10 +273,3 @@ let skill_route_context_text
     soul_profile
     fallback_route.primary_skill
 
-let skill_route_system_prompt_agent
-    ~(base_system_prompt : string)
-    ~(fallback_route : keeper_skill_route)
-    ~(soul_profile : string) : string =
-  Printf.sprintf "%s\n\n%s"
-    base_system_prompt
-    (skill_route_context_text ~fallback_route ~soul_profile)

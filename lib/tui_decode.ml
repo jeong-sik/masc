@@ -13,6 +13,8 @@ type task = {
   status : string;
   priority : int;
   claimed_by : string option;
+  parent_task_id : string option;
+  goal_id : string option;
 }
 
 type keeper = {
@@ -151,6 +153,8 @@ let decode_task json =
   let* status = require_string_field json "status" in
   let* priority = optional_int json "priority" in
   let* claimed_by = optional_string json "claimed_by" in
+  let* parent_task_id = optional_string json "parent_task_id" in
+  let* goal_id = optional_string json "goal_id" in
   Ok
     {
       id;
@@ -158,6 +162,8 @@ let decode_task json =
       status;
       priority = Option.value priority ~default:3;
       claimed_by;
+      parent_task_id;
+      goal_id;
     }
 
 let decode_keeper ~filename json =

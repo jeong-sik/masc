@@ -54,20 +54,6 @@ let test_adapter_well_formed () =
       true (List.length a.aliases > 0))
     Adapter.direct_adapters
 
-let test_provider_family_roundtrip () =
-  let cases =
-    [ (Adapter.Claude_family, "claude");
-      (Adapter.OpenAI_family, "openai");
-      (Adapter.Gemini_family, "gemini");
-      (Adapter.Glm_family, "glm");
-      (Adapter.Llama_family, "llama");
-      (Adapter.OpenRouter_family, "openrouter") ]
-  in
-  List.iter (fun (family, expected) ->
-    check string ("family -> string")
-      expected (Adapter.string_of_provider_family family))
-    cases
-
 let test_runtime_kind_strings () =
   check string "local" "local" (Adapter.string_of_runtime_kind Adapter.Local);
   check string "direct_api" "direct_api"
@@ -194,8 +180,6 @@ let () =
           test_case "whitespace trimmed" `Quick test_whitespace_trimmed;
           test_case "unknown returns none" `Quick test_unknown_returns_none;
           test_case "adapter well formed" `Quick test_adapter_well_formed;
-          test_case "provider family roundtrip" `Quick
-            test_provider_family_roundtrip;
           test_case "runtime kind strings" `Quick test_runtime_kind_strings;
         ] );
       ( "oas_model_resolve",

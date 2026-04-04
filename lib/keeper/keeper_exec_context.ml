@@ -13,6 +13,16 @@ open Keeper_alerting
 open Keeper_exec_status
 
 (* ================================================================ *)
+(* Constants                                                         *)
+(* ================================================================ *)
+
+(** Maximum messages to retain in checkpoints (load and save).
+    Caps both load-time deserialization and save-time persistence to prevent
+    unbounded memory growth.  The context_reducer (keep_last 30) trims
+    further during Agent.run, so 60 gives the reducer room to operate. *)
+let max_checkpoint_messages = 60
+
+(* ================================================================ *)
 (* Working Context Types (re-exported from Keeper_types)             *)
 (* ================================================================ *)
 
@@ -245,13 +255,8 @@ let context_of_oas_checkpoint
   let max_tokens =
     checkpoint_max_tokens cp ~fallback:primary_model_max_tokens
   in
-  (* Cap loaded messages to prevent unbounded memory growth.
-     Checkpoints accumulate full message history (200+ messages, 500KB+).
-     With 9 keepers loading simultaneously, this causes 14GB+ peak allocation.
-     The context_reducer (keep_last 30) trims during Agent.run anyway,
-     so loading more than ~60 messages from checkpoint is wasted work.
-     Keep last 60 to give the reducer room to operate. *)
-  let max_checkpoint_messages = 60 in
+  (* Cap loaded messages — see module-level max_checkpoint_messages. *)
+  let max_checkpoint_messages = max_checkpoint_messages in
   let messages =
     let n = List.length cp.messages in
     if n <= max_checkpoint_messages then cp.messages
@@ -290,6 +295,16 @@ let save_oas_checkpoint
   let checkpoint_context = Agent_sdk.Context.copy ctx.context in
   Agent_sdk.Context.set_scoped checkpoint_context Agent_sdk.Context.Session
     checkpoint_generation_key (`Int generation);
+  (* Truncate messages at save time to match the load-time cap.
+     Without this, checkpoints grow unbounded between compaction cycles,
+     causing multi-GB transient allocations when loaded by concurrent keepers. *)
+  let capped_messages =
+    let n = List.length ctx.messages in
+    if n <= max_checkpoint_messages then ctx.messages
+    else
+      let drop = n - max_checkpoint_messages in
+      List.filteri (fun i _ -> i >= drop) ctx.messages
+  in
   let state =
     {
       Agent_sdk.Types.config =
@@ -300,7 +315,7 @@ let save_oas_checkpoint
           system_prompt = Some ctx.system_prompt;
           max_total_tokens = Some ctx.max_tokens;
         };
-      messages = ctx.messages;
+      messages = capped_messages;
       turn_count = 0;
       usage = Agent_sdk.Types.empty_usage;
     }

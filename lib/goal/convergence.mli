@@ -1,0 +1,33 @@
+(** Convergence detection for goal-driven task execution.
+
+    Pure deterministic logic with no Eio dependency. Evaluates whether
+    a goal's associated tasks have reached a terminal state. *)
+
+(** Signal emitted when convergence is detected or progress has stalled. *)
+type convergence_signal =
+  | MetricMet of { metric : string; value : float; threshold : float }
+  | AllSubTasksDone of { completed : int; total : int }
+  | StagnationDetected of { iterations_without_progress : int }
+
+(** Serialize a convergence signal to JSON. *)
+val convergence_signal_to_yojson : convergence_signal -> Yojson.Safe.t
+
+(** Check whether a goal's tasks have converged.
+
+    Returns [Some signal] when convergence or stagnation is detected,
+    [None] when work is still in progress.
+
+    @param goal_id  The goal whose tasks to evaluate.
+    @param tasks    All tasks in the room (filtered internally by goal_id prefix in title).
+    @param stagnation_threshold  Number of iterations without progress before
+                                 emitting [StagnationDetected]. Defaults to [5].
+    @param iterations_without_progress  Current count of iterations with no task
+                                        completions. Caller is responsible for
+                                        tracking this across invocations. *)
+val check_convergence :
+  goal_id:string ->
+  tasks:Types.task list ->
+  ?stagnation_threshold:int ->
+  iterations_without_progress:int ->
+  unit ->
+  convergence_signal option

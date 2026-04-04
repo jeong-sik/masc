@@ -54,7 +54,7 @@ let canonical_soul_profile raw =
   | "safety" -> Some "safety"
   | "delivery" | "executor" | "execution" -> Some "delivery"
   | "research" | "analyst" -> Some "research"
-  | "relationship" | "companion" -> Some "relationship"
+  | "relationship" | "companion" | "musician" -> Some "relationship"
   | "minimal" | "lean" -> Some "minimal"
   | _ -> None
 
@@ -139,7 +139,7 @@ let parse_soul_profile_opt args key : (string option, string) result =
        | None ->
            Error
              (Printf.sprintf
-                "invalid soul_profile '%s' (allowed: balanced, safety, delivery, research, relationship, minimal)"
+                "invalid soul_profile '%s' (allowed: balanced, safety, delivery, research, relationship, musician, minimal)"
                 raw))
 
 let utf8_safe_prefix_bytes (s : string) ~(max_bytes : int) : string =

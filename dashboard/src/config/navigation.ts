@@ -9,6 +9,7 @@ export type SurfaceSectionId =
   | 'governance'
   | 'evidence'
   | 'planning'
+  | 'goals'
   | 'worktrees'
   | 'intervene'
   | 'tools'
@@ -161,6 +162,12 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: '계획 및 메트릭',
       description: 'backlog와 수동 등록형 goal 상태를 함께 보는 화면. goal은 자동 생성되지 않습니다.',
       params: { section: 'planning' },
+    },
+    {
+      id: 'goals',
+      label: '목표 트리',
+      description: '목표의 부모-자식 계층 구조와 수렴도. 태스크 연결, 에이전트 배정 상태 시각화.',
+      params: { section: 'goals' },
     },
     {
       id: 'worktrees',

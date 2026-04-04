@@ -205,10 +205,35 @@ let summarize_old_messages ~(keep_recent : int)
       Tool interactions represent actions taken and should be preserved for
       trajectory coherence.
 
-    Special cases: Memory summaries and goal messages are boosted to 0.95
-    regardless of computed score — they anchor the keeper's purpose.
+    Special cases: Memory summaries and goal messages are boosted to
+    [anchor_boost] regardless of computed score — they anchor the keeper's purpose.
 
     Memory summaries and goal messages use MASC-specific prefix matching. *)
+
+(** Importance scoring weights. See rationale in comment block above. *)
+let w_recency = 0.50
+let w_role    = 0.35
+let w_tool    = 0.15
+
+(** Role importance values. *)
+let role_system    = 1.0
+let role_tool      = 0.7
+let role_user      = 0.6
+let role_assistant = 0.4
+
+(** Tool content presence weight. *)
+let tool_present = 0.8
+let tool_absent  = 0.5
+
+(** Minimum score for memory/goal anchor messages. *)
+let anchor_boost = 0.95
+
+(** Score threshold below which messages are dropped by [DropLowImportance]. *)
+let drop_importance_threshold = 0.3
+
+(** Number of recent messages to keep in [SummarizeOld] strategy. *)
+let summarize_keep_recent = 5
+
 let score_messages (msgs : Agent_sdk.Types.message list) : (int * float) list =
   let n = List.length msgs in
   List.mapi (fun i (m : Agent_sdk.Types.message) ->
@@ -217,24 +242,24 @@ let score_messages (msgs : Agent_sdk.Types.message list) : (int * float) list =
            t *. t
     in
     let role_w = match m.role with
-      | Agent_sdk.Types.System -> 1.0
-      | Agent_sdk.Types.Tool -> 0.7
-      | Agent_sdk.Types.User -> 0.6
-      | Agent_sdk.Types.Assistant -> 0.4
+      | Agent_sdk.Types.System -> role_system
+      | Agent_sdk.Types.Tool -> role_tool
+      | Agent_sdk.Types.User -> role_user
+      | Agent_sdk.Types.Assistant -> role_assistant
     in
     let msg_text = Agent_sdk.Types.text_of_message m in
     let has_tool_content = List.exists (function
       | Agent_sdk.Types.ToolUse _ | Agent_sdk.Types.ToolResult _ -> true
       | _ -> false) m.content
     in
-    let tool_w = if has_tool_content then 0.8 else 0.5 in
-    let score = 0.5 *. recency +. 0.35 *. role_w +. 0.15 *. tool_w in
+    let tool_w = if has_tool_content then tool_present else tool_absent in
+    let score = w_recency *. recency +. w_role *. role_w +. w_tool *. tool_w in
     let score =
       if starts_with ~prefix:memory_summary_prefix msg_text
          || starts_with ~prefix:_legacy_memory_summary_prefix msg_text
          || starts_with ~prefix:goal_prefix msg_text
          || starts_with ~prefix:_legacy_goal_prefix msg_text then
-        Float.max score 0.95
+        Float.max score anchor_boost
       else score
     in
     (i, Float.min 1.0 (Float.max 0.0 score))
@@ -262,7 +287,7 @@ let oas_strategy_of (s : strategy) : Agent_sdk.Context_reducer.strategy =
   | DropLowImportance ->
     Agent_sdk.Context_reducer.Custom (fun msgs ->
       let scores = score_messages msgs in
-      let threshold = 0.3 in
+      let threshold = drop_importance_threshold in
       List.filteri (fun i _m ->
         match List.assoc_opt i scores with
         | Some score -> score >= threshold
@@ -273,14 +298,14 @@ let oas_strategy_of (s : strategy) : Agent_sdk.Context_reducer.strategy =
        If it leaks here, fall back to DropLowImportance. *)
     Agent_sdk.Context_reducer.Custom (fun msgs ->
       let scores = score_messages msgs in
-      let threshold = 0.3 in
+      let threshold = drop_importance_threshold in
       List.filteri (fun i _m ->
         match List.assoc_opt i scores with
         | Some score -> score >= threshold
         | None -> true
       ) msgs)
   | SummarizeOld ->
-    Agent_sdk.Context_reducer.Custom (summarize_old_messages ~keep_recent:5)
+    Agent_sdk.Context_reducer.Custom (summarize_old_messages ~keep_recent:summarize_keep_recent)
 
 (* ================================================================ *)
 (* Public API                                                       *)
@@ -372,11 +397,17 @@ let observation_summary = function
     - Small local model: prefer pruning (cheaper, faster)
     - Large-context cloud (>= 500K): quality-preserving with summarization
     - Normal: standard DropLowImportance *)
+
+(** Context ratio thresholds for dynamic strategy selection.
+    Distinct from Dashboard.ctx_* (display) — these drive compaction behavior. *)
+let dynamic_multi_agent_ctx = 0.80
+let dynamic_focused_ctx = 0.70
+
 let default_dynamic_selector (obs : observation_context) : strategy list =
-  if obs.context_ratio >= 0.80 && obs.active_agent_count > 1 then
+  if obs.context_ratio >= dynamic_multi_agent_ctx && obs.active_agent_count > 1 then
     (* Dense coordination: preserve recent turns, aggressive pruning *)
     [PruneToolOutputs; DropLowImportance; MergeContiguous]
-  else if obs.context_ratio >= 0.70 && obs.is_single_focused_task then
+  else if obs.context_ratio >= dynamic_focused_ctx && obs.is_single_focused_task then
     (* Focused work near budget: summarize old context *)
     [PruneToolOutputs; SummarizeOld]
   else if obs.is_local_model && obs.context_window < 32_000 then

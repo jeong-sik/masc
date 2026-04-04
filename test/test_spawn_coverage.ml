@@ -212,13 +212,13 @@ let test_lifecycle_suffix_has_heartbeat () =
     (try let _ = Str.search_forward (Str.regexp_string "heartbeat") Spawn.masc_lifecycle_suffix 0 in true
      with Not_found -> false)
 
-let test_lifecycle_suffix_has_relay_status () =
-  check bool "has relay_status" true
-    (try let _ = Str.search_forward (Str.regexp_string "relay_status") Spawn.masc_lifecycle_suffix 0 in true
+let test_lifecycle_suffix_has_handover_create () =
+  check bool "has handover_create" true
+    (try let _ = Str.search_forward (Str.regexp_string "handover_create") Spawn.masc_lifecycle_suffix 0 in true
      with Not_found -> false)
 
-let test_lifecycle_suffix_has_relay_checkpoint () =
-  check bool "has relay_checkpoint" true
+let test_lifecycle_suffix_omits_relay_checkpoint () =
+  check bool "omits relay_checkpoint" false
     (try let _ = Str.search_forward (Str.regexp_string "relay_checkpoint") Spawn.masc_lifecycle_suffix 0 in true
      with Not_found -> false)
 
@@ -352,21 +352,20 @@ let test_build_mcp_args_empty () =
   check (list string) "empty flags" [] flags
 
 let test_build_mcp_args_claude () =
-  (* "claude" resolves to canonical "claude-api" via Provider_adapter,
-     so the match arm "claude" no longer triggers — returns [] *)
+  (* "claude" resolves via spawn_key to "claude" — MCP flags are passed *)
   let flags = Spawn.build_mcp_args "claude" ["tool1"; "tool2"] in
-  check (list string) "claude resolves to claude-api, no flags" [] flags
+  check (list string) "claude allowed tools" ["--allowedTools"; "tool1,tool2"] flags
 
 let test_build_mcp_args_gemini () =
-  (* "gemini" resolves to canonical "gemini-api" via Provider_adapter,
-     so the match arm "gemini" no longer triggers — returns [] *)
+  (* "gemini" resolves via spawn_key to "gemini" — MCP flags are passed *)
   let flags = Spawn.build_mcp_args "gemini" ["tool1"] in
-  check (list string) "gemini resolves to gemini-api, no flags" [] flags
+  check (list string) "gemini allowed tools"
+    ["--allowed-mcp-server-names"; "masc"; "--allowed-tools"; "tool1"] flags
 
 let test_build_mcp_args_gemini_allowed_tools () =
-  (* Same as above — canonical name mismatch yields empty flags *)
-  let flags = Spawn.build_mcp_args "gemini" ["tool1"] in
-  check (list string) "gemini resolves to gemini-api, no allowed-tools" [] flags
+  let flags = Spawn.build_mcp_args "gemini" ["tool1"; "tool2"] in
+  check (list string) "gemini multi tools"
+    ["--allowed-mcp-server-names"; "masc"; "--allowed-tools"; "tool1"; "tool2"] flags
 
 let test_build_mcp_args_codex () =
   let flags = Spawn.build_mcp_args "codex" ["tool1"; "tool2"] in
@@ -381,8 +380,7 @@ let test_build_mcp_args_unknown () =
   check (list string) "unknown empty" [] flags
 
 let test_build_prompt_args_gemini () =
-  (* "gemini" resolves to canonical "gemini-api" via Provider_adapter,
-     and the match arm now correctly matches "gemini-api" *)
+  (* "gemini" resolves via spawn_key to "gemini" — prompt args passed *)
   let flags = Spawn.build_prompt_args "gemini" "hello" in
   check (list string) "gemini prompt args" ["-p"; "hello"] flags
 
@@ -746,8 +744,8 @@ let () =
       test_case "has protocol" `Quick test_lifecycle_suffix_has_protocol;
       test_case "has join" `Quick test_lifecycle_suffix_has_join;
       test_case "has heartbeat" `Quick test_lifecycle_suffix_has_heartbeat;
-      test_case "has relay_status" `Quick test_lifecycle_suffix_has_relay_status;
-      test_case "has relay_checkpoint" `Quick test_lifecycle_suffix_has_relay_checkpoint;
+      test_case "has handover_create" `Quick test_lifecycle_suffix_has_handover_create;
+      test_case "omits relay_checkpoint" `Quick test_lifecycle_suffix_omits_relay_checkpoint;
     ];
     "default_configs", [
       test_case "not empty" `Quick test_default_configs_not_empty;

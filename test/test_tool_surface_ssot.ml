@@ -254,7 +254,8 @@ let test_system_internal_callable () =
 let test_pruned_tools_registered_as_deprecated () =
   (* Tools pruned from user-facing surfaces in #4999 are registered as
      Deprecated in explicit_metadata (#5039). They remain on System_internal
-     for backward compat but carry Deprecated lifecycle. *)
+     for backward compat, stay hidden from tools/list, and remain callable
+     for in-flight sessions. *)
   let deprecated_names =
     List.map fst Tool_catalog.deprecated_tool_entries
   in
@@ -265,7 +266,9 @@ let test_pruned_tools_registered_as_deprecated () =
       Alcotest.(check bool) (name ^ " on System_internal") true
         (Tool_catalog.is_on_surface Tool_catalog.System_internal name);
       Alcotest.(check bool) (name ^ " hidden") false
-        (Tool_catalog.is_visible name))
+        (Tool_catalog.is_visible name);
+      Alcotest.(check bool) (name ^ " callable") true
+        (Tool_catalog.allow_direct_call name))
     [
       "masc_a2a_delegate";
       "masc_a2a_discover";
@@ -293,7 +296,6 @@ let test_pruned_tools_registered_as_deprecated () =
       "masc_voice_session_start";
       "masc_voice_sessions";
     ]
-
 let test_workspace_mutating_canonical_used () =
   (* workspace_mutating_tool_names in tool_catalog_surfaces is the canonical list.
      Verify no empty or phantom entries. *)

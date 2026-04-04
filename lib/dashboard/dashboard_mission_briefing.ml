@@ -7,7 +7,7 @@
 
 open Briefing_json_helpers
 
-let cache_ttl_sec = 300.0
+let cache_ttl_sec = Env_config.InternalTimers.briefing_cache_ttl_sec
 
 let mission_briefing_surface_contract_json =
   `Assoc

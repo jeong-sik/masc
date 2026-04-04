@@ -45,24 +45,25 @@ let normalize_similarity_text (s : string) : string =
 let similarity_tokens (s : string) : string list =
   s
   |> normalize_similarity_text
-  |> Re.split (Re.Pcre.re "[ \t\r\n]+" |> Re.compile)
+  |> String.split_on_char ' '
   |> List.filter (fun t -> String.length t >= 2)
 
 let jaccard_similarity (a : string list) (b : string list) : float =
-  let to_set xs =
-    List.fold_left
-      (fun acc x -> if List.mem x acc then acc else x :: acc)
-      []
-      xs
+  let set_of_list xs =
+    let tbl = Hashtbl.create (List.length xs) in
+    List.iter (fun x -> Hashtbl.replace tbl x ()) xs;
+    tbl
   in
-  let sa = to_set a in
-  let sb = to_set b in
-  if sa = [] && sb = [] then 1.0
+  let sa = set_of_list a in
+  let sb = set_of_list b in
+  let sa_len = Hashtbl.length sa in
+  let sb_len = Hashtbl.length sb in
+  if sa_len = 0 && sb_len = 0 then 1.0
   else
     let inter =
-      List.fold_left (fun n x -> if List.mem x sb then n + 1 else n) 0 sa
+      Hashtbl.fold (fun k () n -> if Hashtbl.mem sb k then n + 1 else n) sa 0
     in
-    let union = List.length sa + List.length sb - inter in
+    let union = sa_len + sb_len - inter in
     if union <= 0 then 0.0 else float_of_int inter /. float_of_int union
 
 let proactive_similarity_score ~(candidate : string) ~(previous : string) : float =
@@ -323,7 +324,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
            | None ->
                Error
                  (Printf.sprintf
-                    "invalid soul_profile '%s' (allowed: balanced, safety, delivery, research, relationship, minimal)"
+                    "invalid soul_profile '%s' (allowed: balanced, safety, delivery, research, relationship, musician, minimal)"
                     raw)
            | Some _ -> Ok ())
       | None -> Ok ())

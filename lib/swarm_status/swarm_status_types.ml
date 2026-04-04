@@ -124,8 +124,12 @@ type session_info = {
     300s (5 min): A typical tool-call round trip (LLM inference 10-20s + tool
     execution 5-30s + network latency) completes within 1-2 minutes. 5 minutes
     accommodates 2-3 consecutive round trips without false "stalled" signals.
-    If no event occurs within this window, the lane transitions to "waiting". *)
-let moving_window_sec = 300.0
+    If no event occurs within this window, the lane transitions to "waiting".
+    Self-contained config (masc_swarm_status is below masc_config). *)
+let moving_window_sec =
+  match Sys.getenv_opt "MASC_SWARM_MOVING_WINDOW_SEC" with
+  | Some s -> (try Float.max 30.0 (float_of_string s) with _ -> 300.0)
+  | None -> 300.0
 
 (** Time window for "stalled" (no activity, likely stuck) status.
     900s (15 min) = 3x moving_window. The 1:3 ratio mirrors common

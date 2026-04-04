@@ -534,6 +534,14 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           in
           h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
 
+      | `GET, "/api/v1/dashboard/goals" ->
+          let state = get_server_state () in
+          let json =
+            dashboard_goals_tree_http_json
+              ~config:state.Mcp_server.room_config
+          in
+          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+
       | `GET, "/api/v1/dashboard/mission" ->
           let state = get_server_state () in
           let json = dashboard_mission_http_json ~state ~sw ~clock httpun_request in

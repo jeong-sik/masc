@@ -1,6 +1,17 @@
 # Changelog
 
 
+## [2.223.0] - 2026-04-04
+
+### Fixed
+- **OAS SDK pin bump** -- bump to v0.100.7 to resolve `Cdal_proof.Context_overflow` compilation failure on main (#5034).
+- **Context_overflow matches** -- remove direct pattern matches that depended on missing OAS variant (#5025).
+- **Operator judge room key** -- clarify operator judge room key compatibility (#5000).
+
+### Changed
+- **Dead proactive code removal** -- remove 475 lines of unused proactive generation code (#5003).
+- **OAS tool retry policy** -- wire internal OAS tool retry policy (#5009).
+
 ## [2.222.0] - 2026-04-04
 
 ### Added

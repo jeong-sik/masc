@@ -136,9 +136,10 @@ let parse_optional_summary parse value =
 
 let parse_summary json =
   let open Yojson.Safe.Util in
-  match json_float_opt (member "stagnation_score" json) with
-  | None -> Error "summary.stagnation_score missing or invalid"
-  | Some stagnation_score -> (
+  let stagnation_score =
+    Option.value ~default:0.0 (json_float_opt (member "stagnation_score" json))
+  in
+  (
       match json_int_opt (member "belief_count" json),
             json_int_opt (member "contested_belief_count" json),
             parse_optional_summary parse_belief_summary (member "dominant_belief" json),

@@ -213,6 +213,66 @@ let test_digest_body_keeps_secondary_signals () =
          && contains_substring post.body "comment:c-1")
   | [] -> Alcotest.fail "expected digest post to exist"
 
+module Meta_cognition = Masc_mcp.Meta_cognition
+
+(* --- parse_summary robustness tests --- *)
+
+let summary_json_without_stagnation_score =
+  `Assoc
+    [
+      ("belief_count", `Int 2);
+      ("contested_belief_count", `Int 1);
+      ( "dominant_belief",
+        `Assoc
+          [
+            ("id", `String "b1");
+            ("claim", `String "claim");
+            ("status", `String "active");
+            ("support_agent_count", `Int 1);
+            ("challenge_agent_count", `Int 0);
+            ("evidence_refs", `List []);
+            ("challenge_refs", `List []);
+          ] );
+      ( "top_tension",
+        `Assoc
+          [
+            ("id", `String "t1");
+            ("topic", `String "topic");
+            ("severity", `String "low");
+            ("needs_operator", `Bool false);
+            ("evidence_refs", `List []);
+          ] );
+      ( "top_desire",
+        `Assoc
+          [
+            ("id", `String "d1");
+            ("desired_state", `String "state");
+            ("actionability", `String "agent");
+            ("evidence_refs", `List []);
+          ] );
+    ]
+
+let test_parse_summary_without_stagnation_score () =
+  match Meta_cognition.parse_summary summary_json_without_stagnation_score with
+  | Error msg -> Alcotest.fail (Printf.sprintf "parse_summary should succeed without stagnation_score: %s" msg)
+  | Ok summary ->
+      Alcotest.(check (float 0.01)) "default stagnation_score is 0.0"
+        0.0 summary.stagnation_score
+
+let test_parse_summary_with_stagnation_score () =
+  let json =
+    `Assoc
+      (("stagnation_score", `Float 0.85)
+       :: (match summary_json_without_stagnation_score with
+           | `Assoc fields -> fields
+           | _ -> []))
+  in
+  match Meta_cognition.parse_summary json with
+  | Error msg -> Alcotest.fail (Printf.sprintf "parse_summary should succeed: %s" msg)
+  | Ok summary ->
+      Alcotest.(check (float 0.01)) "stagnation_score is parsed"
+        0.85 summary.stagnation_score
+
 let () =
   Alcotest.run "Meta_cognition_feedback"
     [
@@ -226,5 +286,12 @@ let () =
             test_exposes_latest_digest_reference;
           Alcotest.test_case "body keeps secondary signals" `Quick
             test_digest_body_keeps_secondary_signals;
+        ] );
+      ( "parse_summary",
+        [
+          Alcotest.test_case "succeeds without stagnation_score" `Quick
+            test_parse_summary_without_stagnation_score;
+          Alcotest.test_case "parses stagnation_score when present" `Quick
+            test_parse_summary_with_stagnation_score;
         ] );
     ]

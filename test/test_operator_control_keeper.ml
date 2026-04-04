@@ -482,15 +482,15 @@ let test_keeper_msg_auto_team_session_bridge () =
      || Sys.getenv_opt "CI_TEST_TIMEOUT_SEC" <> None then
     Alcotest.skip ()
   else
-  (* Check runtime availability only after env guards pass — the pool lock
-     uses Eio.Mutex which requires an active Eio runtime. *)
+  Eio_main.run @@ fun env ->
+  (* Check runtime availability only after env guards pass and within an
+     active Eio runtime because the pool lock uses Eio.Mutex. *)
   let local_runtime_available =
     Masc_mcp.Local_runtime_pool.healthy_runtime_count () > 0
   in
   if not local_runtime_available then
     Alcotest.skip ()
   else
-  Eio_main.run @@ fun env ->
   ensure_fs env;
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in

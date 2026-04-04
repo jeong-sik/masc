@@ -27,7 +27,7 @@ let max_context_of_label (label : string) : int =
   | None -> 128_000
   | Some pname ->
     (* For local providers, prefer discovered per-slot context *)
-    if pname = "llama" then
+    if Provider_adapter.requires_discovery pname then
       match Llm_provider.Provider_registry.discovered_max_context () with
       | Some ctx -> ctx
       | None ->
@@ -57,7 +57,7 @@ let resolve_primary_max_context (labels : string list) : int =
         | Some entry ->
           if entry.is_available () then
             (* For local providers, prefer discovered context *)
-            if pname = "llama" then
+            if Provider_adapter.requires_discovery pname then
               Option.value ~default:entry.max_context discovered
             else entry.max_context
           else find rest
@@ -140,8 +140,8 @@ let ensure_api_keys_for_labels (labels : string list) : (unit, string) result =
              Treat as available — the cascade resolves providers at runtime. *)
           true
       | Some pname ->
-        if pname = "custom" then
-          (* custom:model@url is self-hosted; always considered available *)
+        if Provider_adapter.is_local_provider pname then
+          (* Self-hosted / local runtime; always considered available *)
           true
         else
           match Llm_provider.Provider_registry.find default_registry pname with
@@ -154,7 +154,7 @@ let ensure_api_keys_for_labels (labels : string list) : (unit, string) result =
         match provider_name_of_label label with
         | None -> None
         | Some pname ->
-          if pname = "custom" then None  (* self-hosted, no API key needed *)
+          if Provider_adapter.is_local_provider pname then None
           else
             match Llm_provider.Provider_registry.find default_registry pname with
             | None -> Some (Printf.sprintf "%s (unknown provider)" pname)
@@ -182,7 +182,7 @@ let cascade_config_path () : string option =
 let models_of_cascade_name (cascade_name : string) : string list =
   let defaults =
     match Provider_adapter.preferred_execution_model_labels () with
-    | [] -> ["llama:auto"]
+    | [] -> [Provider_adapter.default_local_fallback_label ()]
     | labels -> labels
   in
   let config_path = cascade_config_path () in

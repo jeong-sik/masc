@@ -174,6 +174,44 @@ let voice_adapters =
     voice_mcp_adapter;
   ]
 
+(** The "custom" provider prefix represents user-provided self-hosted
+    endpoints (e.g. "custom:model@url").  It is not in [direct_adapters]
+    because it has no fixed config; it is always considered available and
+    requires no API key. *)
+let cn_custom = "custom"
+
+(** Returns true if the provider name represents a local runtime that
+    uses runtime discovery (e.g. the live /props probe for per-slot
+    context).  Any provider with [runtime_kind = Local] qualifies.
+    Adding a new local provider (ollama, vllm, ...) only requires
+    adding an entry with [runtime_kind = Local] in [direct_adapters]. *)
+let requires_discovery pname =
+  let normalized = normalize_label pname in
+  List.exists
+    (fun (adapter : adapter) ->
+      adapter.runtime_kind = Local
+      && List.exists (fun alias -> normalize_label alias = normalized) adapter.aliases)
+    direct_adapters
+
+(** Returns true if the provider is self-hosted and always considered
+    available (no API key validation needed).  Covers both
+    [runtime_kind = Local] adapters and the special "custom" prefix. *)
+let is_local_provider pname =
+  let normalized = normalize_label pname in
+  normalized = cn_custom || requires_discovery pname
+
+(** Default fallback label for local runtime when no other preferred
+    model labels are configured.  Uses "provider:auto" for the first
+    [Local] adapter found. *)
+let default_local_fallback_label () =
+  match
+    List.find_opt
+      (fun (adapter : adapter) -> adapter.runtime_kind = Local)
+      direct_adapters
+  with
+  | Some adapter -> adapter.canonical_name ^ ":auto"
+  | None -> "auto"
+
 let resolve_direct_adapter label =
   let normalized = normalize_label label in
   List.find_opt

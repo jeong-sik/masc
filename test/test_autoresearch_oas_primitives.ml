@@ -422,6 +422,14 @@ let test_is_in_git_repo_true_for_git_dir () =
   check bool "dir with git init" true
     (Lib.Autoresearch.is_in_git_repo dir)
 
+let test_is_in_git_repo_true_for_subdirectory () =
+  with_temp_dir "test_subdir" @@ fun dir ->
+  init_git_repo dir;
+  let subdir = Filename.concat dir "nested" in
+  Unix.mkdir subdir 0o755;
+  check bool "subdirectory of git repo" true
+    (Lib.Autoresearch.is_in_git_repo subdir)
+
 let test_git_top_level_fast_fail_no_git () =
   with_temp_dir "test_fast_fail" @@ fun dir ->
   with_eio @@ fun ~sw:_ ~clock:_ ->
@@ -472,6 +480,8 @@ let () =
             test_is_in_git_repo_false_for_tmpdir;
           test_case "is_in_git_repo true for git dir" `Quick
             test_is_in_git_repo_true_for_git_dir;
+          test_case "is_in_git_repo true for subdirectory" `Quick
+            test_is_in_git_repo_true_for_subdirectory;
           test_case "git_top_level fast-fails without .git" `Quick
             test_git_top_level_fast_fail_no_git;
           test_case "git_head_short returns None without .git" `Quick

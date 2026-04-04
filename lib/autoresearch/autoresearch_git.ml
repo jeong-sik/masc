@@ -19,7 +19,7 @@ let is_in_git_repo workdir =
       let parent = Filename.dirname dir in
       if String.equal parent dir then false else walk parent
   in
-  try walk workdir with _ -> false
+  try walk workdir with Sys_error _ -> false
 
 (** Run a shell command via Process_eio and capture stdout lines.
     Non-blocking: delegates to Eio.Process instead of Unix.open_process_in. *)

@@ -4,9 +4,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-# GitHub release metadata can lag for this repo. Keep the minimum supported
-# version aligned with the latest tagged SDK floor, but ratchet the runtime pin
-# against upstream main so CI catches drift immediately.
+# GitHub release metadata can lag for this repo. Keep the dependency floor
+# aligned with the pinned SDK's declared opam version, and ratchet the runtime
+# pin against upstream main so CI catches drift immediately.
 source "${SCRIPT_DIR}/oas-agent-sdk-pin.sh"
 
 min_version_re="${OAS_AGENT_SDK_MIN_VERSION//./\\.}"

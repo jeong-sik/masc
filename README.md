@@ -169,6 +169,7 @@ The dashboard is a read / operate UI. Canonical write and control paths remain M
   `PORT="$(scripts/run-local.sh --print-port --target-dir "$PWD")"`
   `cd dashboard && MASC_DASHBOARD_PROXY_TARGET="http://127.0.0.1:${PORT}" pnpm run dev`
 - For manual rebuilds, run `cd dashboard && pnpm run build`.
+- For local admin bearer bootstrap and dashboard keeper lifecycle control, see [docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md](docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md).
 
 ## Verification
 
@@ -209,6 +210,7 @@ CI_TEST_TIMEOUT_SEC=1200 CI_TEST_HEARTBEAT_SEC=30 \
 - [docs/BENCHMARK-RUNBOOK.md](docs/BENCHMARK-RUNBOOK.md) — single-agent vs swarm comparison
 - [docs/SUPERVISOR-MODE.md](docs/SUPERVISOR-MODE.md) — supervised team-session / operator workflow
 - [docs/REMOTE-MCP-OPERATOR.md](docs/REMOTE-MCP-OPERATOR.md) — remote-safe operator endpoint and confirm flow
+- [docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md](docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md) — local admin bearer bootstrap, base-path checks, and dashboard keeper lifecycle control
 - [docs/KEEPER-USER-MANUAL.md](docs/KEEPER-USER-MANUAL.md) — keeper lifecycle and troubleshooting
 - [docs/spec/SPEC-INDEX.md](docs/spec/SPEC-INDEX.md) — spec suite front door
 - `llms.txt` / `llms-full.txt` — compressed front door for language models

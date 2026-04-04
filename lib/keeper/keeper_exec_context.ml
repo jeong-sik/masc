@@ -914,41 +914,15 @@ let[@warning "-32"] recover_latest_checkpoint_for_overflow_retry
       let strategy_after_message_tokens =
         message_token_count compacted_ctx
       in
-      let compacted_ctx =
-        if
-          primary_model_max_tokens > 0
-          && strategy_after_message_tokens > primary_model_max_tokens
-        then
-          let reducer =
-            Agent_sdk.Context_reducer.from_context_config ~max_tokens:primary_model_max_tokens ()
-          in
-          let messages = Agent_sdk.Context_reducer.reduce reducer compacted_ctx.messages in
-          sync_oas_context
-            { compacted_ctx with messages; max_tokens = min compacted_ctx.max_tokens primary_model_max_tokens }
-        else
-          compacted_ctx
-      in
+      let _ = strategy_after_tokens in
+      let _ = strategy_after_message_tokens in
       let after_tokens = token_count compacted_ctx in
-      let after_message_tokens = message_token_count compacted_ctx in
-      let hard_trim_applied = after_tokens < strategy_after_tokens in
-      let decision =
-        if hard_trim_applied then
-          Printf.sprintf "%s+budget_trim(%d->%d,msg<=%d)"
-            base_decision strategy_after_tokens after_tokens
-            primary_model_max_tokens
-        else
-          base_decision
-      in
+      let decision = base_decision in
       let compaction_applied =
-        String.starts_with ~prefix:"applied:" base_decision || hard_trim_applied
+        String.starts_with ~prefix:"applied:" base_decision
       in
       let meaningful_reduction = after_tokens < before_tokens in
-      let fits_budget =
-        primary_model_max_tokens <= 0
-        || after_message_tokens <= primary_model_max_tokens
-      in
-      if not (compaction_applied && meaningful_reduction && fits_budget) then None
-      else
+      if compaction_applied && meaningful_reduction then
         let compaction =
           {
             applied = true;
@@ -973,6 +947,7 @@ let[@warning "-32"] recover_latest_checkpoint_for_overflow_retry
               ~label:"overflow retry checkpoint save failed"
               exn;
             None
+      else None
 
 let generate_trace_id = Keeper_identity.generate_trace_id
 

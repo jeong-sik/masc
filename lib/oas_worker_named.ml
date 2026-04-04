@@ -65,6 +65,7 @@ let config_for_label
     ~(tools : Agent_sdk.Tool.t list)
     ~(max_turns : int)
     ~(max_tokens : int)
+    ?(max_input_tokens : int option)
     ~(temperature : float)
     ?(max_idle_turns = 3)
     ?guardrails
@@ -73,7 +74,6 @@ let config_for_label
     ?memory
     ?tool_retry_policy
     ?enable_thinking
-    ?max_input_tokens
     ?compact_ratio
     ~(description : string option)
     () : Oas_worker_exec.config =
@@ -91,6 +91,7 @@ let config_for_label
     with
     max_turns;
     max_tokens;
+    max_input_tokens;
     temperature;
     max_idle_turns;
     guardrails;
@@ -100,7 +101,6 @@ let config_for_label
     tool_retry_policy;
     enable_thinking;
     description;
-    max_input_tokens;
     compact_ratio;
   }
 
@@ -125,6 +125,7 @@ let run_named
     ?(max_idle_turns = 3)
     ?(temperature = Oas_worker_cascade.default_temperature)
     ?(max_tokens = Oas_worker_cascade.default_max_tokens)
+    ?max_input_tokens
     ?(accept = fun (_ : Oas_response.api_response) -> true)
     ?guardrails
     ?hooks
@@ -143,7 +144,6 @@ let run_named
     ?working_context
     ?(cache_system_prompt = false)
     ?(yield_on_tool = false)
-    ?max_input_tokens
     ?compact_ratio
     ?sw
     ?net
@@ -185,7 +185,7 @@ let run_named
       ~system_prompt ~tools)
     with
       priority;
-      max_turns; max_tokens; temperature; max_idle_turns;
+      max_turns; max_tokens; max_input_tokens; temperature; max_idle_turns;
       guardrails; hooks; context_reducer; memory; tool_retry_policy;
       description = Some (Printf.sprintf "cascade:%s" cascade_name);
       transport = transport_resolved;
@@ -193,7 +193,6 @@ let run_named
       working_context;
       session_id;
       cache_system_prompt;
-      max_input_tokens;
       compact_ratio;
     }
   in

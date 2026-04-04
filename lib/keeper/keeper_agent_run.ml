@@ -859,6 +859,7 @@ let run_turn
           ~max_idle_turns:5
           ~temperature
           ~max_tokens
+          ~max_input_tokens:max_context
           ?guardrails
           ?on_event
           ?on_yield

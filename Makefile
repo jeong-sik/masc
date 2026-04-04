@@ -1,7 +1,7 @@
 # masc-mcp Makefile
 # Enterprise-ready development commands
 
-.PHONY: build test test-unit test-contract test-contract-live test-transport test-webrtc-live-env test-all clean coverage coverage-summary coverage-html coverage-percent doc install-deps dev-setup fmt fmt-check health ci dashboard build-all viewer-build viewer-serve harness-game-view-contract harness-streamable-http-contract harness-trpg-session-contract harness-trpg-grimland-smoke viewer-local-e2e-check
+.PHONY: build test test-unit test-contract test-contract-live test-transport test-webrtc-live-env test-all clean coverage coverage-summary coverage-html coverage-percent doc install-deps dev-setup fmt fmt-check health ci dashboard build-all viewer-build viewer-serve harness-game-view-contract harness-streamable-http-contract harness-trpg-session-contract harness-trpg-grimland-smoke viewer-local-e2e-check check-memory-leak
 
 # Default target — OCaml + dashboard
 all: build-all
@@ -96,6 +96,10 @@ health:
 	@mkdir -p .health
 	bash scripts/health_snapshot.sh --json-out .health/health-snapshot.json
 	@echo "Health snapshot: .health/health-snapshot.json"
+
+# Build and run a Valgrind-based startup/MCP smoke check for memory leaks
+check-memory-leak:
+	bash scripts/check-memory-leak.sh
 
 # CI target (for GitHub Actions)
 ci: fmt-check test test-contract test-transport

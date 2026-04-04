@@ -136,6 +136,7 @@ let log_keeper_proof ~(keeper_name : string) (proof : Agent_sdk.Cdal_proof.t) =
           (Agent_sdk.Execution_mode.to_string proof.effective_execution_mode)
           (Agent_sdk.Cdal_proof.show_result_status proof.result_status)
           (List.length proof.raw_evidence_refs)
+  | Agent_sdk.Cdal_proof.Context_overflow
   | Agent_sdk.Cdal_proof.Errored
   | Agent_sdk.Cdal_proof.Timed_out
   | Agent_sdk.Cdal_proof.Cancelled

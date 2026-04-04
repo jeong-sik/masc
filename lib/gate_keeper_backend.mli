@@ -4,13 +4,11 @@
     and [Room].  The gate orchestrator ([Channel_gate]) calls
     {!dispatch} without knowing how keeper dispatch works internally.
 
-    @since 2.222.0 *)
+    The return type {!Gate_protocol.dispatch_result} lives in
+    [Gate_protocol] so that [Channel_gate] does not need to depend
+    on this module for type definitions.
 
-(** Result of dispatching a message to a keeper. *)
-type dispatch_result =
-  | Reply of { content : string; stats : Gate_protocol.turn_stats option }
-  | Keeper_error of string
-  | Unavailable
+    @since 2.222.0 *)
 
 val dispatch :
   sw:Eio.Switch.t ->
@@ -22,7 +20,7 @@ val dispatch :
   channel_user_id:string ->
   keeper_name:string ->
   content:string ->
-  dispatch_result
+  Gate_protocol.dispatch_result
 (** Build a keeper context, call [Tool_keeper.dispatch], and parse
     the response.  The [channel] and [channel_user_id] are used to
     construct the agent name ([gate:<channel>:<user_id>]). *)

@@ -141,16 +141,16 @@ let test_inbound_of_json_normalizes_channel_label () =
 (* ── Mock dispatch for handle_inbound tests ──────────────────── *)
 
 let mock_dispatch_ok ~channel:_ ~channel_user_id:_ ~keeper_name:_ ~content:_ =
-  Gate_keeper_backend.Reply {
+  Gate_protocol.Reply {
     content = "mock reply";
     stats = Some { Gate_protocol.model_used = "test-model"; duration_ms = 42; tokens_used = 10 };
   }
 
 let mock_dispatch_error ~channel:_ ~channel_user_id:_ ~keeper_name:_ ~content:_ =
-  Gate_keeper_backend.Keeper_error "mock keeper error"
+  Gate_protocol.Keeper_error_result "mock keeper error"
 
 let mock_dispatch_unavailable ~channel:_ ~channel_user_id:_ ~keeper_name:_ ~content:_ =
-  Gate_keeper_backend.Unavailable
+  Gate_protocol.Unavailable_result
 
 let test_handle_inbound_success () =
   reset_dedup ();

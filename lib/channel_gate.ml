@@ -49,7 +49,7 @@ type dispatch_fn =
   channel_user_id:string ->
   keeper_name:string ->
   content:string ->
-  Gate_keeper_backend.dispatch_result
+  Gate_protocol.dispatch_result
 
 (* ── Configuration ──────────────────────────────────────────── *)
 
@@ -156,7 +156,7 @@ let handle_inbound ~dispatch (msg : inbound_message) =
           ~content:(String.trim msg.content)
       in
       (match result with
-       | Gate_keeper_backend.Reply { content = reply; stats } ->
+       | Gate_protocol.Reply { content = reply; stats } ->
            let duration_ms = match stats with
              | Some s -> s.duration_ms
              | None -> 0
@@ -168,7 +168,7 @@ let handle_inbound ~dispatch (msg : inbound_message) =
              ~duration_ms
              Channel_gate_metrics.Success;
            Ok { keeper_name = keeper; content = reply; turn_stats = stats }
-       | Gate_keeper_backend.Keeper_error err ->
+       | Gate_protocol.Keeper_error_result err ->
            Channel_gate_metrics.record_attempt
              ~channel
              ~room_id:msg.channel_room_id
@@ -176,7 +176,7 @@ let handle_inbound ~dispatch (msg : inbound_message) =
              ~duration_ms:0
              (Channel_gate_metrics.Keeper_error err);
            Error (Keeper_error err)
-       | Gate_keeper_backend.Unavailable ->
+       | Gate_protocol.Unavailable_result ->
            Channel_gate_metrics.record_attempt
              ~channel
              ~room_id:msg.channel_room_id

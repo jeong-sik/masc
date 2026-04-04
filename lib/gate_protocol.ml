@@ -75,6 +75,13 @@ let gate_error_to_string = function
   | Dispatch_unavailable -> "keeper dispatch unavailable"
   | Internal _ -> "internal error"
 
+(* ── Dispatch Result ─────────────────────────────────────────── *)
+
+type dispatch_result =
+  | Reply of { content : string; stats : turn_stats option }
+  | Keeper_error_result of string
+  | Unavailable_result
+
 (* ── JSON Codecs ─────────────────────────────────────────────── *)
 
 let inbound_of_json json =

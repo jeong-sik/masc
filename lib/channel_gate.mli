@@ -85,7 +85,7 @@ type dispatch_fn =
   channel_user_id:string ->
   keeper_name:string ->
   content:string ->
-  Gate_keeper_backend.dispatch_result
+  Gate_protocol.dispatch_result
 
 val handle_inbound :
   dispatch:dispatch_fn ->

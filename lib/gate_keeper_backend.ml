@@ -1,11 +1,6 @@
 (** Gate_keeper_backend -- adapter between the Channel Gate and the keeper subsystem.
     See [gate_keeper_backend.mli] for the full contract. *)
 
-type dispatch_result =
-  | Reply of { content : string; stats : Gate_protocol.turn_stats option }
-  | Keeper_error of string
-  | Unavailable
-
 (* ── Keeper response parsing ─────────────────────────────────── *)
 
 let extract_turn_stats (body : string) : Gate_protocol.turn_stats option =
@@ -69,8 +64,8 @@ let dispatch ~sw ~clock ~proc_mgr ~net ~config
         | Some s -> Some { s with duration_ms }
         | None -> Some { Gate_protocol.model_used = ""; duration_ms; tokens_used = 0 }
       in
-      Reply { content = reply; stats }
+      Gate_protocol.Reply { content = reply; stats }
   | Some (false, err) ->
-      Keeper_error err
+      Gate_protocol.Keeper_error_result err
   | None ->
-      Unavailable
+      Gate_protocol.Unavailable_result

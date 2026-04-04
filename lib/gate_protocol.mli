@@ -71,6 +71,16 @@ type gate_error =
 
 val gate_error_to_string : gate_error -> string
 
+(** {1 Dispatch Result}
+
+    Returned by the injected dispatch function.
+    Lives here so that [Channel_gate] does not depend on [Gate_keeper_backend]. *)
+
+type dispatch_result =
+  | Reply of { content : string; stats : turn_stats option }
+  | Keeper_error_result of string
+  | Unavailable_result
+
 (** {1 JSON Codecs} *)
 
 val inbound_of_json : Yojson.Safe.t -> (inbound_message, string) result

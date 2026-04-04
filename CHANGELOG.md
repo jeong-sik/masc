@@ -5,7 +5,7 @@
 
 ### Added
 - **RFC-0001 Det/NonDet boundary hardening** -- design RFC for deterministic/nondeterministic boundary hardening, emotional recovery loop, and adversarial harness (#4824).
-- **Dashboard rich UI components** -- JsonViewerCard for structured data, Markdown rendering via Shiki, Loader2 spinners, scrollable tables, custom scrollbars (#4977, #4959, #4932, #4935, #4844, #4952, #4951, #4939).
+- **Dashboard rich UI components** -- JsonViewerCard for structured data, Markdown rendering with Shiki syntax highlighting for code blocks, Loader2 spinners, scrollable tables, custom scrollbars (#4977, #4959, #4932, #4935, #4844, #4952, #4951, #4939).
 - **Metacognition observation and threshold modules** -- deterministic keeper behavior metrics and configurable threshold alerting with per-keeper cooldown (#4946).
 - **Post-build Valgrind memory leak check** -- CI workflow for detecting memory leaks (#4884).
 

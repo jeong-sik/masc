@@ -659,6 +659,11 @@ type task_status =
   | Completed of string   (* agent_id *)
   | Failed of string * string  (* agent_id, reason *)
 
+type complexity = {
+  estimated_turns: int;
+  reversibility: float;
+}
+
 type task = {
   id: string;
   description: string;
@@ -666,7 +671,21 @@ type task = {
   created_at: float;
   updated_at: float;
   priority: int;
+  parent_task_id: string option;
+  goal_id: string option;
+  complexity_estimate: complexity option;
 }
+
+let complexity_to_json c =
+  `Assoc [
+    ("estimated_turns", `Int c.estimated_turns);
+    ("reversibility", `Float c.reversibility);
+  ]
+
+let complexity_of_json json =
+  let open Yojson.Safe.Util in
+  { estimated_turns = json |> member "estimated_turns" |> to_int;
+    reversibility = json |> member "reversibility" |> to_number }
 
 let task_status_to_json = function
   | Pending -> `Assoc [("type", `String "pending")]
@@ -683,15 +702,26 @@ let task_status_of_json json =
   | "failed" -> Ok (Failed (json |> member "agent" |> to_string, json |> member "reason" |> to_string))
   | s -> Error ("Unknown task status: " ^ s)
 
+let json_string_opt_field name value =
+  match value with Some s -> [(name, `String s)] | None -> []
+
 let task_to_json task =
-  `Assoc [
+  let base = [
     ("id", `String task.id);
     ("description", `String task.description);
     ("status", task_status_to_json task.status);
     ("created_at", `Float task.created_at);
     ("updated_at", `Float task.updated_at);
     ("priority", `Int task.priority);
-  ]
+  ] in
+  let opt_fields =
+    json_string_opt_field "parent_task_id" task.parent_task_id
+    @ json_string_opt_field "goal_id" task.goal_id
+    @ (match task.complexity_estimate with
+       | Some c -> [("complexity_estimate", complexity_to_json c)]
+       | None -> [])
+  in
+  `Assoc (base @ opt_fields)
 
 let task_of_json json =
   let open Yojson.Safe.Util in
@@ -699,6 +729,13 @@ let task_of_json json =
     match task_status_of_json (json |> member "status") with
     | Error e -> Error e
     | Ok status ->
+        let str_opt key = match json |> member key with
+          | `String s -> Some s | _ -> None
+        in
+        let complexity_opt = match json |> member "complexity_estimate" with
+          | `Assoc _ as j -> Some (complexity_of_json j)
+          | _ -> None
+        in
         Ok {
           id = json |> member "id" |> to_string;
           description = json |> member "description" |> to_string;
@@ -706,13 +743,16 @@ let task_of_json json =
           created_at = json |> member "created_at" |> to_float;
           updated_at = json |> member "updated_at" |> to_float;
           priority = json |> member "priority" |> to_int;
+          parent_task_id = str_opt "parent_task_id";
+          goal_id = str_opt "goal_id";
+          complexity_estimate = complexity_opt;
         }
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | e -> Error (Printexc.to_string e)
 
 (** Create a new task *)
-let create_task config ~description ?(priority=1) () =
+let create_task config ~description ?(priority=1) ?parent_task_id ?goal_id ?complexity_estimate () =
   let id = Printf.sprintf "task_%d_%04x" (int_of_float (Time_compat.now () *. 1000.)) (Hashtbl.hash (Unix.gettimeofday ()) land 0xFFFF) in
   let now = Time_compat.now () in
   let task = {
@@ -722,6 +762,9 @@ let create_task config ~description ?(priority=1) () =
     created_at = now;
     updated_at = now;
     priority;
+    parent_task_id;
+    goal_id;
+    complexity_estimate;
   } in
   let json_str = Yojson.Safe.to_string (task_to_json task) in
   match Backend.FileSystem.set config.backend (task_key id) json_str with

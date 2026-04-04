@@ -99,6 +99,20 @@ let test_keeper_internal_contains_known_tools () =
       Alcotest.(check bool) (name ^ " is internal") true (SS.mem name internal))
     [ "keeper_time_now"; "keeper_board_post"; "keeper_bash"; "keeper_memory_search" ]
 
+let test_keeper_voice_replacement_contract () =
+  Alcotest.(check (option string))
+    "voice speak maps to public tool"
+    (Some "masc_voice_speak")
+    (Tool_catalog_surfaces.keeper_internal_replacement "keeper_voice_speak");
+  Alcotest.(check (option string))
+    "voice agent maps to public tool"
+    (Some "masc_voice_agent")
+    (Tool_catalog_surfaces.keeper_internal_replacement "keeper_voice_agent");
+  Alcotest.(check (option string))
+    "voice listen remains keeper-only"
+    None
+    (Tool_catalog_surfaces.keeper_internal_replacement "keeper_voice_listen")
+
 let test_is_on_surface_consistent () =
   List.iter (fun surface ->
     let tools = Tool_catalog.tools_for_surface surface in
@@ -256,6 +270,8 @@ let () =
             test_keeper_internal_disjoint_from_public_mcp;
           Alcotest.test_case "Keeper_internal contains known tools" `Quick
             test_keeper_internal_contains_known_tools;
+          Alcotest.test_case "Keeper voice replacement contract" `Quick
+            test_keeper_voice_replacement_contract;
           Alcotest.test_case "is_on_surface consistent" `Quick
             test_is_on_surface_consistent;
         ] );

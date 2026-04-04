@@ -142,8 +142,8 @@ let test_masc_mcp_tools_has_worktree () =
 let test_masc_mcp_tools_has_handover () =
   check bool "has handover" true (List.mem "mcp__masc__masc_handover_create" Spawn.masc_mcp_tools)
 
-let test_masc_mcp_tools_has_relay_status () =
-  check bool "has relay_status" true
+let test_masc_mcp_tools_omits_relay_status () =
+  check bool "omits relay_status (pruned)" false
     (List.mem "mcp__masc__masc_relay_status" Spawn.masc_mcp_tools)
 
 let test_masc_mcp_tools_has_team_session_step () =
@@ -154,8 +154,8 @@ let test_masc_mcp_tools_has_team_session_finalize () =
   check bool "has team_session_finalize" true
     (List.mem "mcp__masc__masc_team_session_finalize" Spawn.masc_mcp_tools)
 
-let test_masc_mcp_tools_has_a2a_delegate () =
-  check bool "has a2a_delegate" true
+let test_masc_mcp_tools_omits_a2a_delegate () =
+  check bool "omits a2a_delegate (pruned)" false
     (List.mem "mcp__masc__masc_a2a_delegate" Spawn.masc_mcp_tools)
 
 let test_masc_mcp_tools_has_run_deliverable () =
@@ -174,8 +174,8 @@ let test_masc_mcp_tools_has_tool_admin_snapshot () =
   check bool "omits tool_admin_snapshot" false
     (List.mem "mcp__masc__masc_tool_admin_snapshot" Spawn.masc_mcp_tools)
 
-let test_masc_mcp_tools_has_keeper_tool_catalog () =
-  check bool "includes keeper_tool_catalog" true
+let test_masc_mcp_tools_omits_keeper_tool_catalog () =
+  check bool "omits keeper_tool_catalog (pruned)" false
     (List.mem "mcp__masc__masc_keeper_tool_catalog" Spawn.masc_mcp_tools)
 
 let test_masc_mcp_tools_has_tool_list () =
@@ -212,13 +212,13 @@ let test_lifecycle_suffix_has_heartbeat () =
     (try let _ = Str.search_forward (Str.regexp_string "heartbeat") Spawn.masc_lifecycle_suffix 0 in true
      with Not_found -> false)
 
-let test_lifecycle_suffix_has_relay_status () =
-  check bool "has relay_status" true
-    (try let _ = Str.search_forward (Str.regexp_string "relay_status") Spawn.masc_lifecycle_suffix 0 in true
+let test_lifecycle_suffix_has_handover_create () =
+  check bool "has handover_create" true
+    (try let _ = Str.search_forward (Str.regexp_string "handover_create") Spawn.masc_lifecycle_suffix 0 in true
      with Not_found -> false)
 
-let test_lifecycle_suffix_has_relay_checkpoint () =
-  check bool "has relay_checkpoint" true
+let test_lifecycle_suffix_omits_relay_checkpoint () =
+  check bool "omits relay_checkpoint" false
     (try let _ = Str.search_forward (Str.regexp_string "relay_checkpoint") Spawn.masc_lifecycle_suffix 0 in true
      with Not_found -> false)
 
@@ -726,17 +726,17 @@ let () =
       test_case "has tasks" `Quick test_masc_mcp_tools_has_tasks;
       test_case "has worktree" `Quick test_masc_mcp_tools_has_worktree;
       test_case "has handover" `Quick test_masc_mcp_tools_has_handover;
-      test_case "has relay_status" `Quick test_masc_mcp_tools_has_relay_status;
+      test_case "omits relay_status" `Quick test_masc_mcp_tools_omits_relay_status;
       test_case "has team_session_step" `Quick test_masc_mcp_tools_has_team_session_step;
       test_case "has team_session_finalize" `Quick test_masc_mcp_tools_has_team_session_finalize;
-      test_case "has a2a_delegate" `Quick test_masc_mcp_tools_has_a2a_delegate;
+      test_case "omits a2a_delegate" `Quick test_masc_mcp_tools_omits_a2a_delegate;
       test_case "has run_deliverable" `Quick test_masc_mcp_tools_has_run_deliverable;
       test_case "omits tool_stats" `Quick test_masc_mcp_tools_has_tool_stats;
       test_case "has tool_help" `Quick test_masc_mcp_tools_has_tool_help;
       test_case "omits tool_admin_snapshot" `Quick
         test_masc_mcp_tools_has_tool_admin_snapshot;
-      test_case "includes keeper_tool_catalog" `Quick
-        test_masc_mcp_tools_has_keeper_tool_catalog;
+      test_case "omits keeper_tool_catalog" `Quick
+        test_masc_mcp_tools_omits_keeper_tool_catalog;
       test_case "has tool_list" `Quick test_masc_mcp_tools_has_tool_list;
       test_case "has tool_grant" `Quick test_masc_mcp_tools_has_tool_grant;
       test_case "has tool_revoke" `Quick test_masc_mcp_tools_has_tool_revoke;
@@ -746,8 +746,8 @@ let () =
       test_case "has protocol" `Quick test_lifecycle_suffix_has_protocol;
       test_case "has join" `Quick test_lifecycle_suffix_has_join;
       test_case "has heartbeat" `Quick test_lifecycle_suffix_has_heartbeat;
-      test_case "has relay_status" `Quick test_lifecycle_suffix_has_relay_status;
-      test_case "has relay_checkpoint" `Quick test_lifecycle_suffix_has_relay_checkpoint;
+      test_case "has handover_create" `Quick test_lifecycle_suffix_has_handover_create;
+      test_case "omits relay_checkpoint" `Quick test_lifecycle_suffix_omits_relay_checkpoint;
     ];
     "default_configs", [
       test_case "not empty" `Quick test_default_configs_not_empty;

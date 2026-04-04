@@ -246,6 +246,33 @@ let system_internal_surface_tools =
     "masc_tool_stats"; "masc_surface_audit";
     (* Phase 2 addition *)
     "masc_get_metrics";
+    (* Spawned/admin tools pruned from visible surfaces in #5011 but still
+       schema-registered and callable for internal workflows. Keep them on
+       System_internal so SSOT validation does not treat them as orphans. *)
+    "masc_relay_status"; "masc_relay_checkpoint";
+    "masc_relay_now"; "masc_relay_smart_check";
+    "masc_archive_view";
+    "masc_error_add"; "masc_error_resolve";
+    "masc_find_by_capability";
+    "masc_keeper_tool_catalog";
+    "masc_room_strategy_get"; "masc_room_strategy_set";
+    "masc_team_session_compare"; "masc_team_session_prove";
+    "masc_improve_loop_start"; "masc_improve_loop_status";
+    "masc_improve_loop_pause"; "masc_improve_loop_resume";
+    "masc_improve_loop_tick";
+    "masc_library_add"; "masc_library_list"; "masc_library_promote";
+    "masc_library_read"; "masc_library_search";
+    "masc_collaboration_evidence"; "masc_collaboration_graph";
+    "masc_detachment_list"; "masc_detachment_status";
+    "masc_observe_alerts"; "masc_observe_capacity";
+    "masc_observe_operations"; "masc_observe_swarm";
+    "masc_observe_topology"; "masc_observe_traces";
+    "masc_operation_checkpoint"; "masc_operation_finalize";
+    "masc_operation_pause"; "masc_operation_resume";
+    "masc_operation_start"; "masc_operation_status";
+    "masc_operation_stop";
+    "masc_unit_define"; "masc_unit_list";
+    "masc_unit_reassign"; "masc_unit_reparent";
     (* Portal subsystem — schema-registered, not yet public *)
     "masc_portal_open"; "masc_portal_send"; "masc_portal_close";
     "masc_portal_status";

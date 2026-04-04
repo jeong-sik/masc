@@ -272,9 +272,19 @@ let implementation_allows_public_visibility = function
   | Real | Adapter -> true
   | Simulation | Placeholder -> false
 
+let apply_system_internal_override name meta =
+  if Tool_catalog_surfaces.is_on_surface System_internal name then
+    {
+      meta with
+      visibility = Hidden;
+      allow_direct_call_when_hidden = true;
+      reason = Some "System-internal tool; callable but not listed in tools/list.";
+    }
+  else meta
+
 let metadata name =
   match Hashtbl.find_opt metadata_table name with
-  | Some meta -> meta
+  | Some meta -> apply_system_internal_override name meta
   | None ->
     if is_public_mcp name then default_metadata
     else if Hashtbl.mem keeper_internal_set name then

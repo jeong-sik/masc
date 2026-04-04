@@ -6,8 +6,7 @@ type storage_backend =
   | FileSystem of Backend.FileSystem.t
   | PostgresNative of Backend.Postgres.t
 
-(** Room configuration.
-    scope field removed — all state lives under root .masc/ directly. *)
+(** Room configuration *)
 type config = {
   base_path: string;
   workspace_path: string;
@@ -471,7 +470,7 @@ let default_config base_path =
                   Memory (Backend.Memory.get_or_create ~base_path:backend_config.cluster_name)))
   in
   {
-    base_path = resolved_path;
+    base_path = resolved_path;  (* Use resolved path (git root for worktrees) *)
     workspace_path = base_path;
     lock_expiry_minutes = 2;
     backend_config;

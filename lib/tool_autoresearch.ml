@@ -346,9 +346,7 @@ let handle_swarm_start (ctx : context) args =
                   let room_config =
                     match ctx.config with
                     | Some config -> config
-                    | None ->
-                        Room.default_config ctx.base_path
-                       
+                    | None -> Room.default_config ctx.base_path
                   in
                   let task_link_json =
                     match task_id with

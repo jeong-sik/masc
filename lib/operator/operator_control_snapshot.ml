@@ -523,6 +523,39 @@ let _snapshot_mu = Eio.Mutex.create ()
 
 let _snapshot_ttl_s = Env_config.Operator.cache_ttl_sec
 
+(** Maximum snapshot cache entries. Prevents unbounded growth from diverse
+    cache key combinations (actor x view x include_* booleans).
+    Evicts expired entries first, then oldest stale entry. *)
+let _snapshot_max_entries = 8
+
+let maybe_evict_snapshots () =
+  if Hashtbl.length _snapshot_table <= _snapshot_max_entries then ()
+  else begin
+    let now_ts = Time_compat.now () in
+    let expired_key = ref None in
+    Hashtbl.iter (fun key slot ->
+      match slot with
+      | Cached { expires_at; _ } when expires_at <= now_ts ->
+          (match !expired_key with None -> expired_key := Some key | _ -> ())
+      | _ -> ()
+    ) _snapshot_table;
+    match !expired_key with
+    | Some key -> Hashtbl.remove _snapshot_table key
+    | None ->
+        let oldest_key = ref None in
+        let oldest_time = ref infinity in
+        Hashtbl.iter (fun key slot ->
+          match slot with
+          | Cached { expires_at; _ } when expires_at < !oldest_time ->
+              oldest_key := Some key;
+              oldest_time := expires_at
+          | _ -> ()
+        ) _snapshot_table;
+        (match !oldest_key with
+         | Some key -> Hashtbl.remove _snapshot_table key
+         | None -> ())
+  end
+
 let invalidate_snapshot_cache () =
   if Eio_guard.is_ready () then begin
     let conds =
@@ -567,6 +600,7 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
       | _ ->
         let result = compute_snapshot () in
         let ts = Time_compat.now () in
+        maybe_evict_snapshots ();
         Hashtbl.replace _snapshot_table cache_key
           (Cached { value = result; expires_at = ts +. _snapshot_ttl_s });
         result
@@ -591,6 +625,7 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
               `Wait
           | _ ->
             let cond = Eio.Condition.create () in
+            maybe_evict_snapshots ();
             Hashtbl.replace _snapshot_table cache_key (Computing { cond });
             `Compute cond)
       in
@@ -609,6 +644,7 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
              (* Only write back if we still own the slot *)
              match Hashtbl.find_opt _snapshot_table cache_key with
              | Some (Computing { cond = c }) when c == cond ->
+               maybe_evict_snapshots ();
                Hashtbl.replace _snapshot_table cache_key
                  (Cached { value = result; expires_at = ts +. _snapshot_ttl_s })
              | _ -> ());

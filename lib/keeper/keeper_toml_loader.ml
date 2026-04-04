@@ -52,6 +52,18 @@ let multiline_suffix_is_valid suffix =
   let i = skip_ws 0 in
   i >= len || suffix.[i] = '#'
 
+(* TOML allows up to two `"` chars immediately after the closing `"""` to be
+   part of the string content.  Extract those and return (trailing, rest). *)
+let extract_trailing_quotes suffix =
+  let n = String.length suffix in
+  let count =
+    if n > 0 && suffix.[0] = '"' then
+      if n > 1 && suffix.[1] = '"' then 2
+      else 1
+    else 0
+  in
+  (String.make count '"', String.sub suffix count (n - count))
+
 let strip_comment (line : string) : string =
   (* Find # that is not inside a quoted string. *)
   let len = String.length line in
@@ -84,6 +96,16 @@ let parse_basic_string (s : string) : (string, string) result =
         | 'r' -> Buffer.add_char buf '\r'; loop (i + 2)
         | '\\' -> Buffer.add_char buf '\\'; loop (i + 2)
         | '"' -> Buffer.add_char buf '"'; loop (i + 2)
+        | '\n' | '\r' ->
+          (* TOML multiline line-ending backslash: trim the backslash, the
+             newline, and any subsequent whitespace/newlines. *)
+          let rec skip_ws j =
+            if j >= len then j
+            else if s.[j] = ' ' || s.[j] = '\t' || s.[j] = '\n' || s.[j] = '\r'
+            then skip_ws (j + 1)
+            else j
+          in
+          loop (skip_ws (i + 2))
         | c -> Error (Printf.sprintf "unknown escape \\%c" c)
     end
     else begin
@@ -184,23 +206,22 @@ let starts_with_triple_quote s =
   let len = String.length s in
   len >= 3 && s.[0] = '"' && s.[1] = '"' && s.[2] = '"'
 
-let is_escaped_quote s idx =
-  let rec count_backslashes i count =
-    if i < 0 then count
-    else if s.[i] = '\\' then count_backslashes (i - 1) (count + 1)
-    else count
-  in
-  (count_backslashes (idx - 1) 0) mod 2 = 1
-
 let find_closing_triple_quote s start =
   let len = String.length s in
-  let rec scan i =
+  (* Scan forward, tracking the number of consecutive backslashes immediately
+     preceding the current index (parity determines whether a quote is escaped).
+     This keeps the overall search O(n) rather than O(n^2). *)
+  let rec scan i backslashes =
     if i + 2 >= len then None
-    else if s.[i] = '"' && s.[i+1] = '"' && s.[i+2] = '"'
-            && not (is_escaped_quote s i) then Some i
-    else scan (i + 1)
+    else
+      let escaped = (backslashes mod 2) = 1 in
+      if s.[i] = '"' && s.[i+1] = '"' && s.[i+2] = '"' && not escaped then
+        Some i
+      else
+        let next_backslashes = if s.[i] = '\\' then backslashes + 1 else 0 in
+        scan (i + 1) next_backslashes
   in
-  scan start
+  scan start 0
 
 let parse_toml (content : string) : (toml_doc, string) result =
   let lines = String.split_on_char '\n' content in
@@ -226,13 +247,15 @@ let parse_toml (content : string) : (toml_doc, string) result =
             String.sub raw_line (close_pos + 3)
               (String.length raw_line - close_pos - 3)
           in
-          if not (multiline_suffix_is_valid suffix) then
+          let trailing_quotes, suffix_remainder = extract_trailing_quotes suffix in
+          if not (multiline_suffix_is_valid suffix_remainder) then
             error := Some
               (Printf.sprintf "line %d: unexpected content after closing multiline string"
                  !line_num)
           else begin
             if Buffer.length !ml_buf > 0 then Buffer.add_char !ml_buf '\n';
             Buffer.add_string !ml_buf prefix;
+            Buffer.add_string !ml_buf trailing_quotes;
             let raw_str = Buffer.contents !ml_buf in
             (match parse_basic_string raw_str with
              | Ok v -> acc := (!ml_key, Toml_string v) :: !acc
@@ -291,12 +314,13 @@ let parse_toml (content : string) : (toml_doc, string) result =
                     String.sub after_open (close_pos + 3)
                       (String.length after_open - close_pos - 3)
                   in
-                  if not (multiline_suffix_is_valid suffix) then
+                  let trailing_quotes, suffix_remainder = extract_trailing_quotes suffix in
+                  if not (multiline_suffix_is_valid suffix_remainder) then
                     error := Some
                       (Printf.sprintf "line %d: unexpected content after closing multiline string"
                          !line_num)
                   else
-                    (match parse_basic_string inner with
+                    (match parse_basic_string (inner ^ trailing_quotes) with
                      | Ok v -> acc := (full_key, Toml_string v) :: !acc
                      | Error e ->
                        error := Some (Printf.sprintf "line %d: %s" !line_num e))

@@ -232,6 +232,52 @@ let test_parse_multiline_normalizes_crlf () =
      | _ -> fail "expected Toml_string")
   | Error e -> fail ("multiline CRLF failed: " ^ e)
 
+(* TOML spec: up to two `"` immediately after closing `"""` are content. *)
+let test_parse_multiline_single_trailing_quote_inline () =
+  (* key = """"one quote"""" → content is `"one quote"` *)
+  let input = {|key = """"one quote""""|} in
+  match TL.parse_toml input with
+  | Ok doc ->
+    (match List.assoc_opt "key" doc with
+     | Some (TL.Toml_string s) ->
+       check string "single trailing quote inline" "\"one quote\"" s
+     | _ -> fail "expected Toml_string")
+  | Error e -> fail ("single trailing quote inline failed: " ^ e)
+
+let test_parse_multiline_double_trailing_quote_inline () =
+  (* key = """""two quotes""""" → content is `""two quotes""` *)
+  let input = {|key = """""two quotes"""""|} in
+  match TL.parse_toml input with
+  | Ok doc ->
+    (match List.assoc_opt "key" doc with
+     | Some (TL.Toml_string s) ->
+       check string "double trailing quote inline" "\"\"two quotes\"\"" s
+     | _ -> fail "expected Toml_string")
+  | Error e -> fail ("double trailing quote inline failed: " ^ e)
+
+let test_parse_multiline_trailing_quote_on_close_line () =
+  (* Multiline with one extra `"` on the closing line *)
+  let input = "key = \"\"\"\nsome content\n\"\"\"\"" in
+  match TL.parse_toml input with
+  | Ok doc ->
+    (match List.assoc_opt "key" doc with
+     | Some (TL.Toml_string s) ->
+       check string "trailing quote multiline" "some content\n\"" s
+     | _ -> fail "expected Toml_string")
+  | Error e -> fail ("trailing quote multiline failed: " ^ e)
+
+let test_parse_multiline_line_ending_backslash () =
+  (* TOML line-ending backslash: `\` at end of line trims newline and following
+     indentation, joining with the next non-whitespace content. *)
+  let input = "key = \"\"\"\nfirst \\\n    second\n\"\"\"" in
+  match TL.parse_toml input with
+  | Ok doc ->
+    (match List.assoc_opt "key" doc with
+     | Some (TL.Toml_string s) ->
+       check string "line ending backslash" "first second\n" s
+     | _ -> fail "expected Toml_string")
+  | Error e -> fail ("line ending backslash failed: " ^ e)
+
 let test_parse_error_unterminated_table () =
   let input = "[missing_bracket" in
   match TL.parse_toml input with
@@ -651,6 +697,14 @@ let () =
             test_parse_multiline_rejects_trailing_garbage;
           test_case "multiline normalizes CRLF" `Quick
             test_parse_multiline_normalizes_crlf;
+          test_case "multiline single trailing quote inline" `Quick
+            test_parse_multiline_single_trailing_quote_inline;
+          test_case "multiline double trailing quote inline" `Quick
+            test_parse_multiline_double_trailing_quote_inline;
+          test_case "multiline trailing quote on close line" `Quick
+            test_parse_multiline_trailing_quote_on_close_line;
+          test_case "multiline line-ending backslash" `Quick
+            test_parse_multiline_line_ending_backslash;
           test_case "error: unterminated table" `Quick test_parse_error_unterminated_table;
           test_case "error: no equals" `Quick test_parse_error_no_equals;
         ] );

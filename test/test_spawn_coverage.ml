@@ -352,21 +352,20 @@ let test_build_mcp_args_empty () =
   check (list string) "empty flags" [] flags
 
 let test_build_mcp_args_claude () =
-  (* "claude" resolves to canonical "claude-api" via Provider_adapter,
-     so the match arm "claude" no longer triggers — returns [] *)
+  (* "claude" resolves via spawn_key to "claude" — MCP flags are passed *)
   let flags = Spawn.build_mcp_args "claude" ["tool1"; "tool2"] in
-  check (list string) "claude resolves to claude-api, no flags" [] flags
+  check (list string) "claude allowed tools" ["--allowedTools"; "tool1,tool2"] flags
 
 let test_build_mcp_args_gemini () =
-  (* "gemini" resolves to canonical "gemini-api" via Provider_adapter,
-     so the match arm "gemini" no longer triggers — returns [] *)
+  (* "gemini" resolves via spawn_key to "gemini" — MCP flags are passed *)
   let flags = Spawn.build_mcp_args "gemini" ["tool1"] in
-  check (list string) "gemini resolves to gemini-api, no flags" [] flags
+  check (list string) "gemini allowed tools"
+    ["--allowed-mcp-server-names"; "masc"; "--allowed-tools"; "tool1"] flags
 
 let test_build_mcp_args_gemini_allowed_tools () =
-  (* Same as above — canonical name mismatch yields empty flags *)
-  let flags = Spawn.build_mcp_args "gemini" ["tool1"] in
-  check (list string) "gemini resolves to gemini-api, no allowed-tools" [] flags
+  let flags = Spawn.build_mcp_args "gemini" ["tool1"; "tool2"] in
+  check (list string) "gemini multi tools"
+    ["--allowed-mcp-server-names"; "masc"; "--allowed-tools"; "tool1"; "tool2"] flags
 
 let test_build_mcp_args_codex () =
   let flags = Spawn.build_mcp_args "codex" ["tool1"; "tool2"] in
@@ -381,8 +380,7 @@ let test_build_mcp_args_unknown () =
   check (list string) "unknown empty" [] flags
 
 let test_build_prompt_args_gemini () =
-  (* "gemini" resolves to canonical "gemini-api" via Provider_adapter,
-     and the match arm now correctly matches "gemini-api" *)
+  (* "gemini" resolves via spawn_key to "gemini" — prompt args passed *)
   let flags = Spawn.build_prompt_args "gemini" "hello" in
   check (list string) "gemini prompt args" ["-p"; "hello"] flags
 

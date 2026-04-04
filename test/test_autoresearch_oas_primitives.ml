@@ -409,6 +409,40 @@ let test_cycle_restores_ignored_target_after_empty_diff () =
   check string "ignored file restored" "original\n"
     (Fs_compat.load_file target_path)
 
+(* ── git repo guard tests (#5197) ──────────────────────────── *)
+
+let test_is_in_git_repo_false_for_tmpdir () =
+  with_temp_dir "test_no_git" @@ fun dir ->
+  check bool "temp dir without .git" false
+    (Lib.Autoresearch.is_in_git_repo dir)
+
+let test_is_in_git_repo_true_for_git_dir () =
+  with_temp_dir "test_with_git" @@ fun dir ->
+  init_git_repo dir;
+  check bool "dir with git init" true
+    (Lib.Autoresearch.is_in_git_repo dir)
+
+let test_git_top_level_fast_fail_no_git () =
+  with_temp_dir "test_fast_fail" @@ fun dir ->
+  with_eio @@ fun ~sw:_ ~clock:_ ->
+  match Lib.Autoresearch.git_top_level ~workdir:dir with
+  | Error msg ->
+    check bool "error mentions not git repo" true
+      (contains msg "not inside a git repository")
+  | Ok _ -> fail "should return Error for non-git dir"
+
+let test_git_head_short_none_for_no_git () =
+  with_temp_dir "test_head_no_git" @@ fun dir ->
+  with_eio @@ fun ~sw:_ ~clock:_ ->
+  check (option string) "returns None without git" None
+    (Lib.Autoresearch.git_head_short ~workdir:dir)
+
+let test_git_is_dirty_false_for_no_git () =
+  with_temp_dir "test_dirty_no_git" @@ fun dir ->
+  with_eio @@ fun ~sw:_ ~clock:_ ->
+  check bool "returns false without git" false
+    (Lib.Autoresearch.git_is_dirty ~workdir:dir)
+
 let () =
   run "autoresearch_oas_primitives"
     [
@@ -431,5 +465,18 @@ let () =
             test_resolve_target_file_path_reports_realpath_errors;
           test_case "cycle restores ignored target after empty diff" `Quick
             test_cycle_restores_ignored_target_after_empty_diff;
+        ] );
+      ( "git_repo_guard",
+        [
+          test_case "is_in_git_repo false for tmpdir" `Quick
+            test_is_in_git_repo_false_for_tmpdir;
+          test_case "is_in_git_repo true for git dir" `Quick
+            test_is_in_git_repo_true_for_git_dir;
+          test_case "git_top_level fast-fails without .git" `Quick
+            test_git_top_level_fast_fail_no_git;
+          test_case "git_head_short returns None without .git" `Quick
+            test_git_head_short_none_for_no_git;
+          test_case "git_is_dirty returns false without .git" `Quick
+            test_git_is_dirty_false_for_no_git;
         ] );
     ]

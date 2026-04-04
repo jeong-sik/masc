@@ -8,6 +8,19 @@
 
     @since 2.80.0 *)
 
+(** Check if workdir is inside a git repository by walking parent directories.
+    Returns true if .git exists at workdir or any ancestor.
+    Fast-fail guard: avoids expensive subprocess timeouts in non-repo dirs. *)
+let is_in_git_repo workdir =
+  let rec walk dir =
+    let git_marker = Filename.concat dir ".git" in
+    if Sys.file_exists git_marker then true
+    else
+      let parent = Filename.dirname dir in
+      if String.equal parent dir then false else walk parent
+  in
+  try walk workdir with _ -> false
+
 (** Run a shell command via Process_eio and capture stdout lines.
     Non-blocking: delegates to Eio.Process instead of Unix.open_process_in. *)
 let run_capture_lines cmd =
@@ -24,6 +37,8 @@ let run_capture_lines cmd =
 
 (** Get current HEAD commit hash (short). *)
 let git_head_short ~workdir =
+  if not (is_in_git_repo workdir) then None
+  else
   let cmd = Printf.sprintf "cd %s && git rev-parse --short HEAD 2>/dev/null"
     (Filename.quote workdir) in
   let status, raw_output =
@@ -40,6 +55,9 @@ let git_head_short ~workdir =
     Error msg when git commit itself fails (e.g. missing identity, hooks). *)
 let git_commit ~workdir ~message
   : (string option, string) Stdlib.result =
+  if not (is_in_git_repo workdir) then
+    Result.error "not inside a git repository"
+  else
   let check_cmd = Printf.sprintf
     "cd %s && git add -A && git diff --cached --quiet"
     (Filename.quote workdir) in
@@ -75,6 +93,8 @@ let git_commit ~workdir ~message
 
 (** Restore worktree files to current HEAD without moving the branch. *)
 let git_restore_head ~workdir =
+  if not (is_in_git_repo workdir) then ()
+  else
   let cmd = Printf.sprintf "cd %s && git reset --hard HEAD 2>/dev/null"
     (Filename.quote workdir) in
   (try
@@ -87,6 +107,8 @@ let git_restore_head ~workdir =
 
 (** Reset to HEAD~1, discarding the last commit. *)
 let git_reset_last ~workdir =
+  if not (is_in_git_repo workdir) then ()
+  else
   let cmd = Printf.sprintf "cd %s && git reset --hard HEAD~1 2>/dev/null"
     (Filename.quote workdir) in
   (try
@@ -111,6 +133,8 @@ let git_commit_cycle ~workdir ~cycle ~hypothesis ~baseline =
 
 (** Tag the current HEAD as the best result so far. *)
 let git_tag_best ~workdir ~cycle ~score =
+  if not (is_in_git_repo workdir) then ()
+  else
   let tag = Printf.sprintf "ar-best-c%d-%.4f" cycle score in
   let cmd = Printf.sprintf "cd %s && git tag -f %s 2>/dev/null"
     (Filename.quote workdir) (Filename.quote tag) in
@@ -120,6 +144,9 @@ let git_tag_best ~workdir ~cycle ~score =
 
 (** Get the git top-level directory for a workdir. *)
 let git_top_level ~workdir =
+  if not (is_in_git_repo workdir) then
+    Result.error "workdir is not inside a git repository"
+  else
   let cmd =
     Printf.sprintf "cd %s && git rev-parse --show-toplevel 2>/dev/null"
       (Filename.quote workdir)
@@ -133,6 +160,8 @@ let git_top_level ~workdir =
 
 (** Get the current branch name. *)
 let git_current_branch ~workdir =
+  if not (is_in_git_repo workdir) then None
+  else
   let cmd =
     Printf.sprintf "cd %s && git rev-parse --abbrev-ref HEAD 2>/dev/null"
       (Filename.quote workdir)
@@ -145,6 +174,8 @@ let git_current_branch ~workdir =
 
 (** Check if the working tree has uncommitted changes. *)
 let git_is_dirty ~workdir =
+  if not (is_in_git_repo workdir) then false
+  else
   let cmd =
     Printf.sprintf "cd %s && git status --porcelain 2>/dev/null"
       (Filename.quote workdir)

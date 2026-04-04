@@ -50,7 +50,7 @@ let state_file ~repo_root ~actor_key =
 
 let read_file_if_exists path =
   try
-    if Sys.file_exists path then
+    if Fs_compat.file_exists path then
       Some (String.trim (Fs_compat.load_file path))
     else
       None
@@ -58,7 +58,7 @@ let read_file_if_exists path =
 
 let write_text path content =
   Fs_compat.mkdir_p (Filename.dirname path);
-  Out_channel.with_open_bin path (fun oc -> output_string oc content)
+  Fs_compat.save_file path content
 
 let hash_lines lines =
   Digest.string (String.concat "\n" lines) |> Digest.to_hex

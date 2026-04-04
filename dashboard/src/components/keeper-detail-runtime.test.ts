@@ -239,9 +239,43 @@ describe('resolveAllowlistPreview', () => {
       hiddenCount: 2,
     })
   })
+
+  it('clamps zero and negative limits to an empty preview', () => {
+    expect(resolveAllowlistPreview(['a', 'b'], 0)).toEqual({
+      visibleTools: [],
+      hiddenCount: 2,
+    })
+    expect(resolveAllowlistPreview(['a', 'b'], -3)).toEqual({
+      visibleTools: [],
+      hiddenCount: 2,
+    })
+  })
 })
 
 describe('AllowlistPreview', () => {
+  it('renders the empty fallback when there are no tools', () => {
+    render(h(AllowlistPreview, {
+      tools: [],
+      emptyLabel: 'none',
+      previewLimit: 12,
+    }))
+
+    expect(screen.getByText('none')).toBeInTheDocument()
+    expect(screen.queryByRole('button')).not.toBeInTheDocument()
+  })
+
+  it('does not show a toggle when the tool count is exactly at the preview limit', () => {
+    const tools = Array.from({ length: 12 }, (_, index) => `tool-${index + 1}`)
+    render(h(AllowlistPreview, {
+      tools,
+      emptyLabel: 'none',
+      previewLimit: 12,
+    }))
+
+    expect(screen.getByText('tool-12')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /허용된 도구/ })).not.toBeInTheDocument()
+  })
+
   it('collapses long allowlists until explicitly expanded', () => {
     const tools = Array.from({ length: 15 }, (_, index) => `tool-${index + 1}`)
     render(h(AllowlistPreview, {

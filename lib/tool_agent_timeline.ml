@@ -210,7 +210,7 @@ let build_timeline (config : Room.config) ~agent_name ~since_hours ~limit
     ~include_tasks ~include_board:_ =
   let now = Time_compat.now () in
   let cutoff = now -. (since_hours *. 3600.0) in
-  let room_id = Room.current_room_id config in
+  let room_id = "default" in
   (* Collect events from the currently selected room only. *)
   let all_events =
     let agent_evts = agent_events config ~agent_name ~room_id in

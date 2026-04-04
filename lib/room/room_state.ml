@@ -187,8 +187,7 @@ let read_backlog config =
 let write_backlog config backlog =
   write_json config (backlog_path config) (backlog_to_yojson backlog)
 
-let current_room_id config =
-  read_current_room config |> Option.value ~default:default_namespace_id
+let current_room_id _config = default_namespace_id
 
 let activity_room_id _config = default_namespace_id
 

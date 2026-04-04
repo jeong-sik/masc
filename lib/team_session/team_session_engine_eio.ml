@@ -41,7 +41,7 @@ let start_session ~sw ~(env : < clock : _ Eio.Time.clock ; process_mgr : _ Eio.P
       | None -> Ok ()
     in
     let room_id =
-      Room_utils.read_current_room config |> Option.value ~default:"default"
+      "default"
     in
     let selected_agents =
       if agent_names <> [] then

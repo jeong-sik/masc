@@ -381,8 +381,7 @@ let claim_task_r config ~agent_name ~task_id
   | Error e, _ -> Error e
   | _, Error e -> Error e
   | Ok _, Ok _ ->
-    (* BUG-005: Verify agent has joined before allowing claim.
-       Single path: agents_dir derives from config.scope. *)
+    (* BUG-005: Verify agent has joined before allowing claim. *)
     let actual_name = resolve_agent_name config agent_name in
     let filename = safe_filename actual_name ^ ".json" in
     let agent_path = Filename.concat (agents_dir config) filename in

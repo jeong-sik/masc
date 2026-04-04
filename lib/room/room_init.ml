@@ -24,7 +24,6 @@ let init config ~agent_name =
       root_perpetual_dir;
       root_tasks_dir;
       root_messages_dir;
-      rooms_root_dir config;
     ];
   if not (path_exists_root config (root_state_path config)) then begin
     let root_state = {

@@ -84,7 +84,7 @@ describe('collaborationEvidenceSupportRows', () => {
     expect(collaborationEvidenceSupportRows(fixture)).toEqual([
       'proof verdict · proven · available',
       'linked operation · op-1',
-      'unlinked namespace activity · 2',
+      'unlinked project activity · 2',
       'message broadcast count · 4',
       'linkage gap · namespace activity exists without explicit session/operation linkage',
     ])

@@ -1,0 +1,466 @@
+open Alcotest
+module Routes = Masc_mcp.Server_routes_http_routes_dashboard
+
+type http_result =
+  { status : int option
+  ; body : string
+  ; curl_exit : int
+  ; stderr : string
+  }
+
+let read_all ic =
+  let buf = Buffer.create 1024 in
+  (try
+     while true do
+       Buffer.add_channel buf ic 4096
+     done
+   with
+   | End_of_file -> ());
+  Buffer.contents buf
+;;
+
+let read_file path =
+  let ic = open_in_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr ic)
+    (fun () ->
+       let len = in_channel_length ic in
+       really_input_string ic len)
+;;
+
+let write_file path content =
+  let oc = open_out_bin path in
+  Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () -> output_string oc content)
+;;
+
+let rec rm_rf path =
+  if Sys.file_exists path
+  then
+    if Sys.is_directory path
+    then (
+      Sys.readdir path |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+      Unix.rmdir path)
+    else Sys.remove path
+;;
+
+let trim_cr s =
+  let n = String.length s in
+  if n > 0 && s.[n - 1] = '\r' then String.sub s 0 (n - 1) else s
+;;
+
+let parse_status header_raw =
+  let lines = String.split_on_char '\n' header_raw |> List.map trim_cr in
+  let rec find_http = function
+    | [] -> None
+    | line :: rest ->
+      if String.length line >= 5 && String.sub line 0 5 = "HTTP/"
+      then (
+        match String.split_on_char ' ' line with
+        | _proto :: code :: _ ->
+          (try Some (int_of_string code) with
+           | _ -> None)
+        | _ -> None)
+      else find_http rest
+  in
+  find_http lines
+;;
+
+let contains_substr needle haystack =
+  let n = String.length needle in
+  let h = String.length haystack in
+  let rec loop i =
+    if i + n > h
+    then false
+    else if String.sub haystack i n = needle
+    then true
+    else loop (i + 1)
+  in
+  n = 0 || loop 0
+;;
+
+let find_main_eio_exe () =
+  let env_override = Sys.getenv_opt "MASC_MAIN_EIO_EXE" in
+  let candidates =
+    match env_override with
+    | Some p -> [ p ]
+    | None ->
+      let build_roots = [ "."; ".."; "../.."; "../../.."; "../../../.." ] in
+      let build_candidates =
+        List.map
+          (fun root -> Filename.concat root "_build/default/bin/main_eio.exe")
+          build_roots
+      in
+      [ "./bin/main_eio.exe"
+      ; "../bin/main_eio.exe"
+      ; "../../bin/main_eio.exe"
+      ; "../../../bin/main_eio.exe"
+      ; "../../../../bin/main_eio.exe"
+      ]
+      @ build_candidates
+  in
+  match List.find_opt Sys.file_exists candidates with
+  | Some path -> path
+  | None ->
+    fail
+      "main_eio executable not found. Set MASC_MAIN_EIO_EXE or build with `dune build \
+       bin/main_eio.exe`."
+;;
+
+let find_free_port () =
+  let socket = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
+  Fun.protect
+    ~finally:(fun () -> Unix.close socket)
+    (fun () ->
+       Unix.setsockopt socket Unix.SO_REUSEADDR true;
+       match Unix.bind socket (Unix.ADDR_INET (Unix.inet_addr_loopback, 0)) with
+       | () ->
+         (match Unix.getsockname socket with
+          | Unix.ADDR_INET (_, port) -> Some port
+          | _ -> fail "unexpected socket address")
+       | exception Unix.Unix_error ((Unix.EPERM | Unix.EACCES), "bind", _) -> None)
+;;
+
+let wait_for_health ~port ~timeout_s =
+  let deadline = Unix.gettimeofday () +. timeout_s in
+  let rec loop () =
+    if Unix.gettimeofday () > deadline
+    then false
+    else (
+      let res =
+        let header_file = Filename.temp_file "dashboard-keeper-health-" ".hdr" in
+        let body_file = Filename.temp_file "dashboard-keeper-health-" ".body" in
+        let url = Printf.sprintf "http://127.0.0.1:%d/health" port in
+        let args =
+          [| "curl"
+           ; "-sS"
+           ; "--http1.1"
+           ; "--max-time"
+           ; "1"
+           ; "-X"
+           ; "GET"
+           ; "-o"
+           ; body_file
+           ; "-D"
+           ; header_file
+           ; url
+          |]
+        in
+        let ic, oc, ec = Unix.open_process_args_full "curl" args (Unix.environment ()) in
+        close_out_noerr oc;
+        let _stdout = read_all ic in
+        let stderr = read_all ec in
+        let curl_exit =
+          match Unix.close_process_full (ic, oc, ec) with
+          | Unix.WEXITED code -> code
+          | Unix.WSIGNALED code -> 128 + code
+          | Unix.WSTOPPED code -> 256 + code
+        in
+        let status = parse_status (read_file header_file) in
+        let body = read_file body_file in
+        (try Sys.remove header_file with
+         | _ -> ());
+        (try Sys.remove body_file with
+         | _ -> ());
+        { status; body; curl_exit; stderr }
+      in
+      match res.status with
+      | Some 200 when contains_substr "\"state_ready\":true" res.body -> true
+      | _ ->
+        Unix.sleepf 0.1;
+        loop ())
+  in
+  loop ()
+;;
+
+let wait_pid_exit ~pid ~timeout_s =
+  let deadline = Unix.gettimeofday () +. timeout_s in
+  let rec loop () =
+    match Unix.waitpid [ Unix.WNOHANG ] pid with
+    | 0, _ ->
+      if Unix.gettimeofday () > deadline
+      then false
+      else (
+        Unix.sleepf 0.05;
+        loop ())
+    | _pid, _status -> true
+    | exception Unix.Unix_error (Unix.ECHILD, _, _) -> true
+  in
+  loop ()
+;;
+
+let merge_env_overrides overrides =
+  let override_keys = List.map fst overrides in
+  let is_override_key entry =
+    match String.index_opt entry '=' with
+    | None -> false
+    | Some idx ->
+      let key = String.sub entry 0 idx in
+      List.mem key override_keys
+  in
+  let base =
+    Unix.environment ()
+    |> Array.to_list
+    |> List.filter (fun entry -> not (is_override_key entry))
+  in
+  let injected = List.map (fun (k, v) -> k ^ "=" ^ v) overrides in
+  Array.of_list (base @ injected)
+;;
+
+let run_curl_post ?body ?token ~port ~path () =
+  let header_file = Filename.temp_file "dashboard-keeper-post-" ".hdr" in
+  let body_file = Filename.temp_file "dashboard-keeper-post-" ".body" in
+  let url = Printf.sprintf "http://127.0.0.1:%d%s" port path in
+  let base_args =
+    [ "curl"
+    ; "-sS"
+    ; "--http1.1"
+    ; "--max-time"
+    ; "3"
+    ; "-X"
+    ; "POST"
+    ; "-o"
+    ; body_file
+    ; "-D"
+    ; header_file
+    ]
+  in
+  let data_file =
+    match body with
+    | None -> None
+    | Some payload ->
+      let path = Filename.temp_file "dashboard-keeper-post-" ".json" in
+      write_file path payload;
+      Some path
+  in
+  let args =
+    let args =
+      match data_file with
+      | Some payload_path ->
+        base_args
+        @ [ "-H"; "Content-Type: application/json"; "--data-binary"; "@" ^ payload_path ]
+      | None -> base_args
+    in
+    let args =
+      match token with
+      | Some raw_token ->
+        args @ [ "-H"; Printf.sprintf "Authorization: Bearer %s" raw_token ]
+      | None -> args
+    in
+    Array.of_list (args @ [ url ])
+  in
+  let ic, oc, ec = Unix.open_process_args_full "curl" args (Unix.environment ()) in
+  close_out_noerr oc;
+  let _stdout = read_all ic in
+  let stderr = read_all ec in
+  let curl_exit =
+    match Unix.close_process_full (ic, oc, ec) with
+    | Unix.WEXITED code -> code
+    | Unix.WSIGNALED code -> 128 + code
+    | Unix.WSTOPPED code -> 256 + code
+  in
+  let status = parse_status (read_file header_file) in
+  let body = read_file body_file in
+  (try Sys.remove header_file with
+   | _ -> ());
+  (try Sys.remove body_file with
+   | _ -> ());
+  Option.iter
+    (fun path ->
+       try Sys.remove path with
+       | _ -> ())
+    data_file;
+  { status; body; curl_exit; stderr }
+;;
+
+let make_keeper_meta_json ?(name = "route-shadow-demo") () =
+  match
+    Masc_mcp.Keeper_types.meta_of_json
+      (`Assoc
+          [ "name", `String name
+          ; "agent_name", `String ("keeper-" ^ name ^ "-agent")
+          ; "trace_id", `String ("trace-" ^ name ^ "-seed")
+          ; "goal", `String "Route shadow regression fixture"
+          ; "cascade_name", `String "keeper_unified"
+          ; "updated_at", `String "2026-04-04T00:00:00Z"
+          ; "paused", `Bool true
+          ])
+  with
+  | Ok meta -> Masc_mcp.Keeper_types.meta_to_json meta |> Yojson.Safe.pretty_to_string
+  | Error err -> fail ("keeper meta fixture parse failed: " ^ err)
+;;
+
+let seed_auth_and_keeper ~base_path ~keeper_name =
+  let config = Masc_mcp.Room.default_config base_path in
+  ignore (Masc_mcp.Room.init config ~agent_name:(Some "bootstrap-admin"));
+  Fs_compat.mkdir_p (Masc_mcp.Keeper_types.keeper_dir config);
+  write_file
+    (Masc_mcp.Keeper_types.keeper_meta_path config keeper_name)
+    (make_keeper_meta_json ~name:keeper_name ());
+  ignore
+    (Masc_mcp.Auth.enable_auth
+       base_path
+       ~require_token:true
+       ~agent_name:"bootstrap-admin");
+  let admin_token =
+    match
+      Masc_mcp.Auth.create_token base_path ~agent_name:"stable-admin" ~role:Types.Admin
+    with
+    | Ok (token, _cred) -> token
+    | Error err -> fail (Types.masc_error_to_string err)
+  in
+  config, admin_token
+;;
+
+let with_seeded_server f =
+  let exe = find_main_eio_exe () in
+  let port =
+    match find_free_port () with
+    | Some p -> p
+    | None -> Alcotest.skip ()
+  in
+  let log_file = Filename.temp_file "dashboard-keeper-routes-" ".log" in
+  let base_path = Filename.temp_file "dashboard-keeper-base-" "" in
+  let keeper_name = "route-shadow-demo" in
+  (try Sys.remove base_path with
+   | _ -> ());
+  Unix.mkdir base_path 0o755;
+  let config, admin_token = seed_auth_and_keeper ~base_path ~keeper_name in
+  let log_fd =
+    Unix.openfile log_file [ Unix.O_CREAT; Unix.O_WRONLY; Unix.O_TRUNC ] 0o644
+  in
+  let env =
+    merge_env_overrides
+      [ "MASC_AUTONOMY_ENABLED", "0"
+      ; "GRAPHQL_API_KEY", ""
+      ; "GRAPHQL_URL", "http://127.0.0.1:9/graphql"
+      ; "MASC_BASE_PATH", base_path
+      ; "MASC_ALLOW_INHERITED_BASE_PATH", "1"
+      ; "MASC_POSTGRES_URL", ""
+      ; "DATABASE_URL", ""
+      ; "SUPABASE_DB_URL", ""
+      ; "SB_PG_URL", ""
+      ; "MASC_BOARD_BACKEND", "jsonl"
+      ]
+  in
+  let argv =
+    [| exe
+     ; "--host"
+     ; "127.0.0.1"
+     ; "--port"
+     ; string_of_int port
+     ; "--base-path"
+     ; base_path
+    |]
+  in
+  let pid = Unix.create_process_env exe argv env Unix.stdin log_fd log_fd in
+  Unix.close log_fd;
+  let cleanup () =
+    (try Unix.kill pid Sys.sigterm with
+     | _ -> ());
+    if not (wait_pid_exit ~pid ~timeout_s:2.0)
+    then (
+      try Unix.kill pid Sys.sigkill with
+      | _ -> ());
+    ignore (wait_pid_exit ~pid ~timeout_s:1.0);
+    rm_rf log_file;
+    rm_rf base_path
+  in
+  if not (wait_for_health ~port ~timeout_s:20.0)
+  then (
+    let logs = read_file log_file in
+    cleanup ();
+    fail (Printf.sprintf "server failed to become ready on port %d\n%s" port logs));
+  Fun.protect ~finally:cleanup (fun () -> f ~port ~config ~admin_token ~keeper_name)
+;;
+
+let check_route path expected =
+  let actual = Routes.classify_keeper_post_route path in
+  if actual <> expected
+  then
+    failf
+      "expected %s for %s"
+      (match expected with
+       | Routes.Keeper_post_tools -> "tools"
+       | Routes.Keeper_post_config -> "config"
+       | Routes.Keeper_post_boot -> "boot"
+       | Routes.Keeper_post_shutdown -> "shutdown"
+       | Routes.Keeper_post_unknown -> "unknown")
+      path
+;;
+
+let test_keeper_post_route_classification () =
+  check_route "/api/v1/keepers/sangsu/tools" Routes.Keeper_post_tools;
+  check_route "/api/v1/keepers/sangsu/config" Routes.Keeper_post_config;
+  check_route "/api/v1/keepers/sangsu/boot" Routes.Keeper_post_boot;
+  check_route "/api/v1/keepers/sangsu/shutdown" Routes.Keeper_post_shutdown;
+  check_route "/api/v1/keepers/sangsu" Routes.Keeper_post_unknown;
+  check_route "/api/v1/keepers//boot" Routes.Keeper_post_unknown
+;;
+
+let require_status label expected result =
+  match result.status with
+  | Some code -> check int label expected code
+  | None ->
+    fail
+      (Printf.sprintf
+         "%s missing HTTP status (curl_exit=%d stderr=%s body=%s)"
+         label
+         result.curl_exit
+         result.stderr
+         result.body)
+;;
+
+let test_keeper_lifecycle_routes_do_not_fall_through_to_generic_404 () =
+  with_seeded_server
+  @@ fun ~port ~config ~admin_token ~keeper_name ->
+  let boot_path = Printf.sprintf "/api/v1/keepers/%s/boot" keeper_name in
+  let shutdown_path = Printf.sprintf "/api/v1/keepers/%s/shutdown" keeper_name in
+  let boot_result =
+    run_curl_post ~body:"{}" ~token:admin_token ~port ~path:boot_path ()
+  in
+  require_status "boot route returns 200" 200 boot_result;
+  check
+    bool
+    "boot route is not generic 404"
+    false
+    (contains_substr {|{"error":"not found"}|} boot_result.body);
+  check
+    bool
+    "boot route reaches lifecycle handler"
+    true
+    (contains_substr {|"action":"boot"|} boot_result.body);
+  let shutdown_result =
+    run_curl_post ~body:"{}" ~token:admin_token ~port ~path:shutdown_path ()
+  in
+  require_status "shutdown route returns 200" 200 shutdown_result;
+  check
+    bool
+    "shutdown route is not generic 404"
+    false
+    (contains_substr {|{"error":"not found"}|} shutdown_result.body);
+  check
+    bool
+    "shutdown route reaches lifecycle handler"
+    true
+    (contains_substr {|"action":"shutdown"|} shutdown_result.body);
+  match Masc_mcp.Keeper_types.read_meta config keeper_name with
+  | Ok (Some meta) -> check bool "shutdown persists paused keeper meta" true meta.paused
+  | Ok None -> fail "keeper meta missing after shutdown route"
+  | Error err -> fail ("failed to read keeper meta after shutdown: " ^ err)
+;;
+
+let () =
+  run
+    "dashboard_keeper_routes"
+    [ ( "dashboard_keeper_routes"
+      , [ test_case
+            "classify keeper POST routes"
+            `Quick
+            test_keeper_post_route_classification
+        ; test_case
+            "lifecycle POST routes do not fall through to generic 404"
+            `Slow
+            test_keeper_lifecycle_routes_do_not_fall_through_to_generic_404
+        ] )
+    ]
+;;

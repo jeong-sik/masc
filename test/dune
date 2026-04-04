@@ -668,6 +668,12 @@
  (enabled_if (= %{env:MASC_E2E_TESTS=false} "true")))
 
 (test
+ (name test_dashboard_keeper_routes)
+ (modules test_dashboard_keeper_routes)
+ (libraries masc_test_deps)
+ (deps ../bin/main_eio.exe))
+
+(test
  (name test_compression_boundary)
  (modules test_compression_boundary)
  (libraries alcotest masc_backend masc_compression))

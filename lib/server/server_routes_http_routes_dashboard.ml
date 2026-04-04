@@ -153,6 +153,172 @@ let handle_keeper_tools_post state req reqd =
              Http.Response.json ~status:`Bad_request
                (Printf.sprintf {|{"error":"invalid json: %s"}|} (String.escaped e)) reqd))
 
+type keeper_post_route_kind =
+  | Keeper_post_tools
+  | Keeper_post_config
+  | Keeper_post_boot
+  | Keeper_post_shutdown
+  | Keeper_post_unknown
+
+let classify_keeper_post_route req_path =
+  let prefix = "/api/v1/keepers/" in
+  let plen = String.length prefix in
+  let tlen = String.length req_path in
+  let ends_with suffix =
+    let slen = String.length suffix in
+    tlen > plen + slen
+    && String.sub req_path 0 plen = prefix
+    && String.sub req_path (tlen - slen) slen = suffix
+  in
+  if ends_with "/tools" then Keeper_post_tools
+  else if ends_with "/config" then Keeper_post_config
+  else if ends_with "/boot" then Keeper_post_boot
+  else if ends_with "/shutdown" then Keeper_post_shutdown
+  else Keeper_post_unknown
+
+let extract_keeper_name_for_post req_path suffix =
+  let prefix = "/api/v1/keepers/" in
+  let plen = String.length prefix in
+  let slen = String.length suffix in
+  String.trim
+    (String.sub req_path plen (String.length req_path - plen - slen))
+
+let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
+  let req_path = Http.Request.path req in
+  let name = extract_keeper_name_for_post req_path "/config" in
+  if String.length name = 0 then
+    Http.Response.json ~status:`Bad_request
+      {|{"error":"keeper name is required"}|} reqd
+  else
+    let config = state.Mcp_server.room_config in
+    match Keeper_types.read_meta config name with
+    | Error msg ->
+        Http.Response.json ~status:`Not_found
+          (Printf.sprintf {|{"error":"%s"}|}
+             (String.escaped msg))
+          reqd
+    | Ok None ->
+        Http.Response.json ~status:`Not_found
+          (Printf.sprintf {|{"error":"keeper %S not found"}|} name)
+          reqd
+    | Ok (Some meta0) ->
+        (try
+           let args = Yojson.Safe.from_string body_str in
+           let fields_opt =
+             match args with
+             | `Assoc fields -> Some fields
+             | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _
+             | `String _ | `List _ ->
+                 None
+           in
+           match fields_opt with
+           | Some fields ->
+               let body_name =
+                 match List.assoc_opt "name" fields with
+                 | Some (`String value) ->
+                     let trimmed = String.trim value in
+                     if trimmed = "" then None else Some trimmed
+                 | _ -> None
+               in
+               if Option.is_some body_name
+                  && body_name <> Some name
+               then
+                 Http.Response.json ~status:`Bad_request
+                   (Printf.sprintf
+                      {|{"error":"keeper name mismatch: route=%S body=%S"}|}
+                      name (Option.value ~default:"" body_name))
+                   reqd
+               else
+                 let args_with_name =
+                   `Assoc (("name", `String name) :: List.remove_assoc "name" fields)
+                 in
+                 let keeper_ctx : _ Tool_keeper.context =
+                   {
+                     config;
+                     agent_name;
+                     sw;
+                     clock;
+                     proc_mgr = state.Mcp_server.proc_mgr;
+                     net = state.Mcp_server.net;
+                   }
+                 in
+                 (match Keeper_turn_up_args.parse keeper_ctx args_with_name with
+                 | Error (_ok, msg) ->
+                     Http.Response.json ~status:`Bad_request
+                       (Printf.sprintf {|{"error":"%s"}|}
+                          (String.escaped msg))
+                       reqd
+                 | Ok parsed ->
+                     let ok, msg =
+                       Keeper_turn_up_update.update_keeper keeper_ctx parsed meta0
+                     in
+                     if not ok then
+                       Http.Response.json ~status:`Bad_request
+                         (Printf.sprintf {|{"error":"%s"}|}
+                            (String.escaped msg))
+                         reqd
+                     else
+                       let (_st, json) =
+                         Dashboard_http_keeper.keeper_config_json config name
+                       in
+                       Http.Response.json ~compress:true ~request:req
+                         (Yojson.Safe.to_string json) reqd)
+           | None ->
+               Http.Response.json ~status:`Bad_request
+                 {|{"error":"request body must be a JSON object"}|}
+                 reqd
+         with Yojson.Json_error e ->
+           Http.Response.json ~status:`Bad_request
+             (Printf.sprintf {|{"error":"invalid json: %s"}|}
+                (String.escaped e))
+             reqd)
+
+let handle_keeper_lifecycle_post ~sw ~clock ~tool_name ~action state agent_name req reqd =
+  let req_path = Http.Request.path req in
+  let suffix =
+    match action with
+    | "boot" -> "/boot"
+    | "shutdown" -> "/shutdown"
+    | _ -> ""
+  in
+  let name = extract_keeper_name_for_post req_path suffix in
+  if String.length name = 0 then
+    Http.Response.json ~status:`Bad_request
+      {|{"error":"keeper name is required"}|} reqd
+  else
+    let config = state.Mcp_server.room_config in
+    let keeper_ctx : _ Tool_keeper.context =
+      {
+        config;
+        agent_name;
+        sw;
+        clock;
+        proc_mgr = state.Mcp_server.proc_mgr;
+        net = state.Mcp_server.net;
+      }
+    in
+    let args = `Assoc [("name", `String name)] in
+    match Tool_keeper.dispatch keeper_ctx ~name:tool_name ~args with
+    | Some (true, body) when String.equal action "boot" ->
+        Http.Response.json ~compress:true ~request:req
+          (Printf.sprintf {|{"ok":true,"action":"boot","name":"%s","detail":%s}|}
+             (String.escaped name) body)
+          reqd
+    | Some (true, _body) ->
+        Http.Response.json ~compress:true ~request:req
+          (Printf.sprintf {|{"ok":true,"action":"shutdown","name":"%s"}|}
+             (String.escaped name))
+          reqd
+    | Some (false, body) ->
+        Http.Response.json ~status:`Bad_request ~request:req
+          (Yojson.Safe.to_string
+             (`Assoc [("ok", `Bool false); ("error", `String body)]))
+          reqd
+    | None ->
+        Http.Response.json ~status:`Internal_server_error ~request:req
+          {|{"ok":false,"error":"dispatch returned None"}|}
+          reqd
+
 let rec add_routes ~sw ~clock router =
   router
   |> Http.Router.post "/api/v1/broadcast" (fun request reqd ->
@@ -565,242 +731,34 @@ let rec add_routes ~sw ~clock router =
      /tools gets with_tool_auth (localhost-friendly) while /config keeps
      with_token_permission_auth (admin token required). *)
   |> Http.Router.prefix_post "/api/v1/keepers/" (fun request reqd ->
-       let _p = Http.Request.path request in
-       let _pfx_len = 16 in (* String.length "/api/v1/keepers/" *)
-       let _tl = "/tools" in let _tll = String.length _tl in let _pl = String.length _p in
-       if _pl > _pfx_len + _tll && String.sub _p (_pl - _tll) _tll = _tl then begin
-         with_tool_auth ~tool_name:"masc_keeper_up"
-           (fun state req reqd ->
-             handle_keeper_tools_post state req reqd
-           ) request reqd
-       end else begin
-       with_token_permission_auth ~permission:Types.CanAdmin
-         (fun state agent_name req reqd ->
-         Http.Request.read_body_async reqd (fun body_str ->
-           let req_path = Http.Request.path req in
-           let prefix = "/api/v1/keepers/" in
-           let suffix = "/config" in
-           let plen = String.length prefix in
-           let slen = String.length suffix in
-           let tlen = String.length req_path in
-           if tlen > plen + slen
-              && String.sub req_path 0 plen = prefix
-              && String.sub req_path (tlen - slen) slen = suffix
-           then
-             let name =
-               String.trim
-                 (String.sub req_path plen (tlen - plen - slen))
-             in
-             if String.length name = 0 then
-               Http.Response.json ~status:`Bad_request
-                 {|{"error":"keeper name is required"}|} reqd
-             else
-               let config = state.Mcp_server.room_config in
-               match Keeper_types.read_meta config name with
-               | Error msg ->
-                   Http.Response.json ~status:`Not_found
-                     (Printf.sprintf {|{"error":"%s"}|}
-                        (String.escaped msg))
-                     reqd
-               | Ok None ->
-                   Http.Response.json ~status:`Not_found
-                     (Printf.sprintf {|{"error":"keeper %S not found"}|} name)
-                     reqd
-               | Ok (Some meta0) ->
-                   (try
-                      let args = Yojson.Safe.from_string body_str in
-                      let fields_opt =
-                        match args with
-                        | `Assoc fields -> Some fields
-                        | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _
-                        | `String _ | `List _ ->
-                            None
-                      in
-                      match fields_opt with
-                      | Some fields ->
-                          let body_name =
-                            match List.assoc_opt "name" fields with
-                            | Some (`String value) ->
-                                let trimmed = String.trim value in
-                                if trimmed = "" then None else Some trimmed
-                            | _ -> None
-                          in
-                          if Option.is_some body_name
-                             && body_name <> Some name
-                          then
-                            Http.Response.json ~status:`Bad_request
-                              (Printf.sprintf
-                                 {|{"error":"keeper name mismatch: route=%S body=%S"}|}
-                                 name (Option.value ~default:"" body_name))
-                              reqd
-                          else
-                            let args_with_name =
-                              `Assoc (("name", `String name) :: List.remove_assoc "name" fields)
-                            in
-                            let keeper_ctx : _ Tool_keeper.context =
-                              {
-                                config;
-                                agent_name;
-                                sw;
-                                clock;
-                                proc_mgr = state.Mcp_server.proc_mgr;
-                                net = state.Mcp_server.net;
-                              }
-                            in
-                            (match Keeper_turn_up_args.parse keeper_ctx args_with_name with
-                            | Error (_ok, msg) ->
-                                Http.Response.json ~status:`Bad_request
-                                  (Printf.sprintf {|{"error":"%s"}|}
-                                     (String.escaped msg))
-                                  reqd
-                            | Ok parsed ->
-                                let ok, msg =
-                                  Keeper_turn_up_update.update_keeper keeper_ctx parsed meta0
-                                in
-                                if not ok then
-                                  Http.Response.json ~status:`Bad_request
-                                    (Printf.sprintf {|{"error":"%s"}|}
-                                       (String.escaped msg))
-                                    reqd
-                                else
-                                  let (_st, json) =
-                                    Dashboard_http_keeper.keeper_config_json config name
-                                  in
-                                  Http.Response.json ~compress:true ~request:req
-                                    (Yojson.Safe.to_string json) reqd)
-                      | None ->
-                          Http.Response.json ~status:`Bad_request
-                            {|{"error":"request body must be a JSON object"}|}
-                            reqd
-                    with Yojson.Json_error e ->
-                      Http.Response.json ~status:`Bad_request
-                        (Printf.sprintf {|{"error":"invalid json: %s"}|}
-                           (String.escaped e))
-                        reqd)
-           else
-             Http.Response.json ~status:`Not_found
-               {|{"error":"not found"}|} reqd
-         )
-       ) request reqd
-       end)
-
-  (* Keeper boot — POST /api/v1/keepers/:name/boot *)
-  |> Http.Router.prefix_post "/api/v1/keepers/" (fun request reqd ->
-       with_token_permission_auth ~permission:Types.CanAdmin
-         (fun state agent_name req reqd ->
-           let req_path = Http.Request.path req in
-           let prefix = "/api/v1/keepers/" in
-           let suffix = "/boot" in
-           let plen = String.length prefix in
-           let slen = String.length suffix in
-           let tlen = String.length req_path in
-           if tlen > plen + slen
-              && String.sub req_path 0 plen = prefix
-              && String.sub req_path (tlen - slen) slen = suffix
-           then
-             let name =
-               String.trim
-                 (String.sub req_path plen (tlen - plen - slen))
-             in
-             if String.length name = 0 then
-               Http.Response.json ~status:`Bad_request
-                 {|{"error":"keeper name is required"}|} reqd
-             else
-               let config = state.Mcp_server.room_config in
-               let keeper_ctx : _ Tool_keeper.context =
-                 {
-                   config;
-                   agent_name;
-                   sw;
-                   clock;
-                   proc_mgr = state.Mcp_server.proc_mgr;
-                   net = state.Mcp_server.net;
-                 }
-               in
-               let args = `Assoc [("name", `String name)] in
-               (match Tool_keeper.dispatch keeper_ctx ~name:"masc_keeper_up" ~args with
-               | Some (true, body) ->
-                   Http.Response.json ~compress:true ~request:req
-                     (Printf.sprintf {|{"ok":true,"action":"boot","name":"%s","detail":%s}|}
-                        (String.escaped name) body)
-                     reqd
-               | Some (false, body) ->
-                   Http.Response.json ~status:`Bad_request ~request:req
-                     (Yojson.Safe.to_string
-                        (`Assoc [("ok", `Bool false); ("error", `String body)]))
-                     reqd
-               | None ->
-                   Http.Response.json ~status:`Internal_server_error ~request:req
-                     {|{"ok":false,"error":"dispatch returned None"}|}
-                     reqd)
-           else
-             Http.Response.json ~status:`Not_found
-               {|{"error":"not found"}|} reqd
-         ) request reqd)
-
-  (* Keeper shutdown — POST /api/v1/keepers/:name/shutdown *)
-  |> Http.Router.prefix_post "/api/v1/keepers/" (fun request reqd ->
-       let _p = Http.Request.path request in
-       let _pfx_len = 16 in (* String.length "/api/v1/keepers/" *)
-       let _tl = "/tools" in let _tll = String.length _tl in let _pl = String.length _p in
-       if _pl > _pfx_len + _tll && String.sub _p (_pl - _tll) _tll = _tl then begin
-         with_tool_auth ~tool_name:"masc_keeper_up"
-           (fun state req reqd ->
-             handle_keeper_tools_post state req reqd
-           ) request reqd
-       end else begin
-       with_token_permission_auth ~permission:Types.CanAdmin
-         (fun state agent_name req reqd ->
-           let req_path = Http.Request.path req in
-           let prefix = "/api/v1/keepers/" in
-           let suffix = "/shutdown" in
-           let plen = String.length prefix in
-           let slen = String.length suffix in
-           let tlen = String.length req_path in
-           if tlen > plen + slen
-              && String.sub req_path 0 plen = prefix
-              && String.sub req_path (tlen - slen) slen = suffix
-           then
-             let name =
-               String.trim
-                 (String.sub req_path plen (tlen - plen - slen))
-             in
-             if String.length name = 0 then
-               Http.Response.json ~status:`Bad_request
-                 {|{"error":"keeper name is required"}|} reqd
-             else
-               let config = state.Mcp_server.room_config in
-               let keeper_ctx : _ Tool_keeper.context =
-                 {
-                   config;
-                   agent_name;
-                   sw;
-                   clock;
-                   proc_mgr = state.Mcp_server.proc_mgr;
-                   net = state.Mcp_server.net;
-                 }
-               in
-               let args = `Assoc [("name", `String name)] in
-               (match Tool_keeper.dispatch keeper_ctx ~name:"masc_keeper_down" ~args with
-               | Some (true, _body) ->
-                   Http.Response.json ~compress:true ~request:req
-                     (Printf.sprintf {|{"ok":true,"action":"shutdown","name":"%s"}|}
-                        (String.escaped name))
-                     reqd
-               | Some (false, body) ->
-                   Http.Response.json ~status:`Bad_request ~request:req
-                     (Yojson.Safe.to_string
-                        (`Assoc [("ok", `Bool false); ("error", `String body)]))
-                     reqd
-               | None ->
-                   Http.Response.json ~status:`Internal_server_error ~request:req
-                     {|{"ok":false,"error":"dispatch returned None"}|}
-                     reqd)
-           else
-             Http.Response.json ~status:`Not_found
-               {|{"error":"not found"}|} reqd
-         ) request reqd
-       end)
+       match classify_keeper_post_route (Http.Request.path request) with
+       | Keeper_post_tools ->
+           with_tool_auth ~tool_name:"masc_keeper_up"
+             (fun state req reqd ->
+               handle_keeper_tools_post state req reqd
+             ) request reqd
+       | Keeper_post_config ->
+           with_token_permission_auth ~permission:Types.CanAdmin
+             (fun state agent_name req reqd ->
+               Http.Request.read_body_async reqd (fun body_str ->
+                 handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str
+               )
+             ) request reqd
+       | Keeper_post_boot ->
+           with_token_permission_auth ~permission:Types.CanAdmin
+             (fun state agent_name req reqd ->
+               handle_keeper_lifecycle_post ~sw ~clock ~tool_name:"masc_keeper_up"
+                 ~action:"boot" state agent_name req reqd
+             ) request reqd
+       | Keeper_post_shutdown ->
+           with_token_permission_auth ~permission:Types.CanAdmin
+             (fun state agent_name req reqd ->
+               handle_keeper_lifecycle_post ~sw ~clock ~tool_name:"masc_keeper_down"
+                 ~action:"shutdown" state agent_name req reqd
+             ) request reqd
+       | Keeper_post_unknown ->
+           Http.Response.json ~status:`Not_found
+             {|{"error":"not found"}|} reqd)
 
   |> add_agent_api_routes
   |> add_autoresearch_routes

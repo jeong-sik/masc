@@ -155,6 +155,32 @@ let test_full_preset_includes_keeper_fs_edit () =
   check bool "has keeper_fs_edit" true
     (has_tool "keeper_fs_edit" tools)
 
+let test_coding_preset_includes_keeper_fs_edit () =
+  let meta = make_meta ~preset:Keeper_types.Coding () in
+  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  check bool "has keeper_fs_edit" true
+    (has_tool "keeper_fs_edit" tools)
+
+let test_research_preset_excludes_keeper_fs_edit () =
+  let meta = make_meta ~preset:Keeper_types.Research () in
+  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  check bool "no keeper_fs_edit" false
+    (has_tool "keeper_fs_edit" tools)
+
+let test_minimal_preset_excludes_keeper_fs_edit () =
+  let meta = make_meta ~preset:Keeper_types.Minimal () in
+  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  check bool "no keeper_fs_edit" false
+    (has_tool "keeper_fs_edit" tools)
+
+let test_coding_preset_has_keeper_bash () =
+  let meta = make_meta ~preset:Keeper_types.Coding () in
+  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  check bool "has keeper_bash" true
+    (has_tool "keeper_bash" tools);
+  check bool "has keeper_github" true
+    (has_tool "keeper_github" tools)
+
 (* ============================================================
    6. All keepers get autoresearch tools (mode removed)
    ============================================================ *)
@@ -431,6 +457,14 @@ let () =
       test_case "all keepers have coding tools" `Quick test_all_keepers_have_coding_tools;
       test_case "full preset includes keeper_fs_edit" `Quick
         test_full_preset_includes_keeper_fs_edit;
+      test_case "coding preset includes keeper_fs_edit" `Quick
+        test_coding_preset_includes_keeper_fs_edit;
+      test_case "research preset excludes keeper_fs_edit" `Quick
+        test_research_preset_excludes_keeper_fs_edit;
+      test_case "minimal preset excludes keeper_fs_edit" `Quick
+        test_minimal_preset_excludes_keeper_fs_edit;
+      test_case "coding preset has keeper_bash and keeper_github" `Quick
+        test_coding_preset_has_keeper_bash;
     ]);
     ("autoresearch_tools", [
       test_case "all keepers have autoresearch" `Quick test_all_keepers_have_autoresearch;

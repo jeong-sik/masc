@@ -38,6 +38,7 @@ let proof_result_status_to_string = function
   | Oas.Cdal_proof.Errored -> "errored"
   | Oas.Cdal_proof.Timed_out -> "timed_out"
   | Oas.Cdal_proof.Cancelled -> "cancelled"
+  | Oas.Cdal_proof.Context_overflow -> "context_overflow"
 
 let json_string_list values =
   `List (List.map (fun value -> `String value) values)

@@ -48,13 +48,5 @@ val proactive_has_terminal_ending : string -> bool
 (** Check if text looks like an incomplete fragment. *)
 val proactive_looks_fragmentary : string -> bool
 
-(** Generate a deterministic fallback reply for an idle keeper. *)
-val proactive_fallback_reply :
-  meta:Keeper_types.keeper_meta -> idle_seconds:int -> string
-
-(** Run quality checks on proactive text. Returns [Ok text] or
-    [Error reason]. *)
-val proactive_quality_check : string -> (string, string) result
-
 (** Check if history text appears fragmentary (for filtering). *)
 val looks_fragmentary_history_text : string -> bool

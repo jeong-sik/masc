@@ -3,7 +3,6 @@
     text output. *)
 
 open Keeper_types
-open Keeper_memory
 
 (** Case-insensitive substring check. Local copy to break
     Keeper_prompt -> Keeper_alerting -> Keeper_prompt cycle. *)
@@ -16,11 +15,6 @@ let contains_ci (haystack : string) (needle : string) : bool =
 let exact_direct_mention_present ~(targets : string list) (content : string) :
     bool =
   Mention.any_mentioned ~targets content
-
-let render_required_prompt key vars =
-  match Prompt_registry.render_prompt_template key vars with
-  | Ok value -> value
-  | Error _ -> Prompt_registry.get_prompt key
 
 let keeper_constitution () =
   Prompt_registry.get_prompt "keeper.constitution"
@@ -160,70 +154,5 @@ let apply_self_model_drift
     ~(work_kind : string) : keeper_meta * bool * string option =
   ignore (user_message, work_kind);
   (meta, false, None)
-
-let proactive_prompt_for_keeper
-    ~(meta : keeper_meta)
-    ~(idle_seconds : int)
-    (snapshot : keeper_state_snapshot option)
-    (continuity_summary : string) : string =
-  let seed = proactive_seed_for_soul_profile meta.soul_profile in
-  let profile =
-    canonical_soul_profile meta.soul_profile
-    |> Option.value ~default:default_soul_profile
-  in
-  let last_preview =
-    if String.trim meta.runtime.proactive_rt.last_preview = "" then "none"
-    else meta.runtime.proactive_rt.last_preview
-  in
-  let continuity_snapshot =
-    match snapshot with
-    | None -> "No continuity snapshot available."
-    | Some s -> keeper_state_snapshot_to_summary_text s
-  in
-  let continuity_snapshot =
-    if continuity_snapshot = "No continuity snapshot available." then
-      let fallback = String.trim continuity_summary in
-      if fallback = "" then continuity_snapshot else fallback
-    else continuity_snapshot
-  in
-  render_required_prompt "keeper.proactive_turn"
-    [
-      ("idle_seconds", string_of_int idle_seconds);
-      ("profile", profile);
-      ("goal", meta.goal);
-      ("last_preview", last_preview);
-      ("continuity_snapshot", continuity_snapshot);
-      ("seed", seed);
-    ]
-
-type proactive_generation_result = {
-  reply: string;
-  usage: Agent_sdk.Types.api_usage;
-  model_used: string;
-  latency_ms: int;
-  attempts: int;
-  total_cost_usd: float;
-  fallback_applied: bool;
-  tools_used: string list;
-}
-
-let proactive_retry_instruction attempt ~(reason : string) =
-  let attempt_phrase, directive =
-    if attempt = 2 then
-      ("previous attempt", "now with a clearly different angle.")
-    else
-      ( "previous attempts",
-        "one decisive check-in now, materially different from the last preview." )
-  in
-  render_required_prompt "keeper.proactive_retry"
-    [ ("attempt_phrase", attempt_phrase); ("reason", reason); ("directive", directive) ]
-
-let proactive_temperature ~cascade_name attempt =
-  let fallback () =
-    if attempt <= 1 then Keeper_config.keeper_proactive_temperature_low ()
-    else if attempt = 2 then Keeper_config.keeper_proactive_temperature_mid ()
-    else Keeper_config.keeper_proactive_temperature_high ()
-  in
-  Cascade_inference.resolve_temperature ~cascade_name ~fallback
 
 include Keeper_text_processing

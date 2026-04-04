@@ -84,7 +84,11 @@ let test_spawned_agent_surface_stays_curated () =
   check bool "omits portal_send" false
     (List.mem "mcp__masc__masc_portal_send" names);
   check bool "omits voice agent" false
-    (List.mem "mcp__masc__masc_voice_agent" names)
+    (List.mem "mcp__masc__masc_voice_agent" names);
+  check bool "omits voice speak" false
+    (List.mem "mcp__masc__masc_voice_speak" names);
+  check bool "omits voice ping pong" false
+    (List.mem "mcp__masc__masc_voice_ping_pong" names)
 
 let test_privileged_keeper_surface_is_split () =
   check bool "keeper_bash privileged" true

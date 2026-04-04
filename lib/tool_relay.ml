@@ -229,8 +229,7 @@ Call masc_relay_checkpoint first to save state. The successor continues where yo
         ]);
         ("target_agent", `Assoc [
           ("type", `String "string");
-          ("description", `String "Agent to relay to (default: claude)");
-          ("default", `String "claude");
+          ("description", `String "Agent to relay to. Defaults to the calling agent's own name.");
         ]);
         ("generation", `Assoc [
           ("type", `String "integer");

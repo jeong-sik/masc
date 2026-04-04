@@ -86,10 +86,7 @@ let resolve_plugin_id args =
 let default_model_label () =
   match Sys.getenv_opt "MODEL_LABEL" with
   | Some value when String.trim value <> "" -> String.trim value
-  | _ ->
-    match Provider_adapter.default_model_label_result () with
-    | Ok label -> label
-    | Error _ -> "local:unconfigured"
+  | _ -> Env_config.Local_runtime.default_model
 
 let load_state_required config loop_id =
   match Tool_repair_loop_storage.load_state config loop_id with

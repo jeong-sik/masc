@@ -46,14 +46,6 @@ let keeper_internal_tools =
     "keeper_shell_readonly";
     "keeper_bash";
     "keeper_github";
-    "keeper_voice_speak";
-    (* keeper_voice_listen is keeper-only; there is no public masc_voice_listen
-       counterpart on MCP surfaces. *)
-    "keeper_voice_listen";
-    "keeper_voice_agent";
-    "keeper_voice_sessions";
-    "keeper_voice_session_start";
-    "keeper_voice_session_end";
     (* keeper_deliberation_decision: Agent_sdk.Structured result schema, not
        a regular tool — does not need a keeper shard entry.
        keeper_unified: cascade name, not a tool. *)
@@ -72,11 +64,6 @@ let keeper_internal_replacement = function
   | "keeper_board_vote" -> Some "masc_board_vote"
   | "keeper_board_stats" -> Some "masc_board_stats"
   | "keeper_board_search" -> Some "masc_board_search"
-  | "keeper_voice_speak" -> Some "masc_voice_speak"
-  | "keeper_voice_agent" -> Some "masc_voice_agent"
-  | "keeper_voice_sessions" -> Some "masc_voice_sessions"
-  | "keeper_voice_session_start" -> Some "masc_voice_session_start"
-  | "keeper_voice_session_end" -> Some "masc_voice_session_end"
   | "keeper_tasks_list" -> Some "masc_tasks"
   | "keeper_broadcast" -> Some "masc_broadcast"
   | _ -> None

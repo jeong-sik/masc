@@ -139,7 +139,7 @@ let ensure_repo_synthesis_units config ~actor ~active_roster =
     ]
   in
   let rec loop = function
-    | [] -> Ok platoon_id
+    | [] -> Ok company_id
     | json :: rest -> (
         match ensure_unit json with
         | Ok () -> loop rest

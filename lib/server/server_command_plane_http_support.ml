@@ -63,6 +63,26 @@ let _cp_summary_refresh_interval_s =
     "MASC_CP_SUMMARY_REFRESH_INTERVAL_S"
     ~default:120.0 ~min_v:30.0 ~max_v:600.0
 
+type cp_snapshot_cache = {
+  snapshot : Yojson.Safe.t;
+  cached_at : float;
+}
+
+let _cp_snapshot_cache : cp_snapshot_cache ref =
+  ref
+    {
+      snapshot =
+        `Assoc [("generated_at", `String (Types.now_iso ())); ("status", `String "initializing")];
+      cached_at = 0.0;
+    }
+
+let cached_cp_snapshot_opt () =
+  let cache = !_cp_snapshot_cache in
+  if cache.cached_at > 0.0 then
+    Some cache.snapshot
+  else
+    None
+
 let compute_cp_summary ~state =
   let config = state.Mcp_server.room_config in
   let t0 = Time_compat.now () in
@@ -115,19 +135,6 @@ let command_plane_summary_http_json ~state:_ =
    legitimately take much longer than the dashboard-friendly summary surfaces.
    Use a slower cadence and larger timeout to avoid constant timeout/backoff
    churn while still keeping a warm cached snapshot available. *)
-
-type cp_snapshot_cache = {
-  snapshot : Yojson.Safe.t;
-  cached_at : float;
-}
-
-let _cp_snapshot_cache : cp_snapshot_cache ref =
-  ref
-    {
-      snapshot =
-        `Assoc [("generated_at", `String (Types.now_iso ())); ("status", `String "initializing")];
-      cached_at = 0.0;
-    }
 
 let _cp_snapshot_compute_mu = Eio.Mutex.create ()
 let _cp_snapshot_refresh_interval_s =

@@ -147,4 +147,34 @@ describe('normalizeKeepers lifecycle metrics', () => {
     expect(keeper as unknown as Record<string, unknown>).not.toHaveProperty('tool_denylist')
     expect(keeper as unknown as Record<string, unknown>).not.toHaveProperty('allowed_tool_names')
   })
+
+  it('preserves paused runtime signals and blocker metadata for keeper UI', () => {
+    const [keeper] = normalizeKeepers([
+      {
+        name: 'uranium666',
+        status: 'idle',
+        paused: true,
+        keepalive_running: true,
+        last_blocker: 'missing social headers',
+        last_speech_act: 'defer',
+        last_need: '현재 대화 맥락',
+        last_autonomous_action_at: '2026-04-04T14:08:35Z',
+        created_at: '2026-04-03T14:59:29Z',
+        updated_at: '2026-04-04T14:08:35Z',
+        last_activity_ago_s: 42,
+      },
+    ])
+
+    expect(keeper).toMatchObject({
+      paused: true,
+      keepalive_running: true,
+      last_blocker: 'missing social headers',
+      last_speech_act: 'defer',
+      last_need: '현재 대화 맥락',
+      last_autonomous_action_at: '2026-04-04T14:08:35Z',
+      created_at: '2026-04-03T14:59:29Z',
+      updated_at: '2026-04-04T14:08:35Z',
+      last_activity_ago_s: 42,
+    })
+  })
 })

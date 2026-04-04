@@ -1,0 +1,47 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Keeper } from '../types'
+import {
+  keeperDisplayStatus,
+  keeperRecentActionLabel,
+  keeperRecentHeartbeatLabel,
+  keeperRuntimeHint,
+} from '../lib/keeper-runtime-display'
+
+describe('mission keeper runtime helpers', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-04T15:00:00Z'))
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('elevates paused keepers above idle status', () => {
+    const keeper = {
+      name: 'uranium666',
+      status: 'idle',
+      paused: true,
+      keepalive_running: true,
+      last_blocker: 'missing social headers',
+      last_heartbeat: '2026-04-04T14:43:49Z',
+      last_autonomous_action_at: '2026-04-04T14:08:35Z',
+    } as Keeper
+
+    expect(keeperDisplayStatus(keeper, 'idle')).toBe('paused')
+    expect(keeperRuntimeHint(keeper)).toBe('일시정지 · missing social headers')
+    expect(keeperRecentHeartbeatLabel(keeper)).toContain('최근 하트비트')
+    expect(keeperRecentHeartbeatLabel(keeper)).toContain('16분 전')
+    expect(keeperRecentActionLabel(keeper)).toContain('마지막 행동')
+    expect(keeperRecentActionLabel(keeper)).toContain('51분 전')
+  })
+
+  it('falls back to turn age when no autonomous action timestamp exists', () => {
+    expect(
+      keeperRecentActionLabel(
+        { name: 'fallback', status: 'busy' } as Keeper,
+        125,
+      ),
+    ).toBe('마지막 턴 · 125초 전')
+  })
+})

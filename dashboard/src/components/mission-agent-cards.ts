@@ -9,6 +9,12 @@ import { openAgentDetail } from './agent-detail'
 import { openKeeperDetail } from './keeper-detail'
 import { workflowActionLabel } from '../workflow-context'
 import { formatPct } from '../lib/format-number'
+import {
+  keeperDisplayStatus,
+  keeperRecentActionLabel,
+  keeperRecentHeartbeatLabel,
+  keeperRuntimeHint,
+} from '../lib/keeper-runtime-display'
 import type {
   DashboardMissionInternalSignal,
   Keeper,
@@ -17,7 +23,6 @@ import {
   type EnrichedAgentRow,
   type EnrichedKeeperRow,
   toneClass,
-  relativeTime,
   statusLabel,
   missionTargetTypeLabel,
   trimText,
@@ -86,51 +91,57 @@ export function AgentBriefCard({ row }: { row: EnrichedAgentRow }) {
 }
 
 export function KeeperBriefCard({ row }: { row: EnrichedKeeperRow }) {
+  const effectiveStatus = keeperDisplayStatus(row.keeper, row.brief.status)
   const continuity = [
     `세대 ${row.brief.generation ?? row.keeper?.generation ?? 0}`,
     row.brief.context_ratio != null
       ? `컨텍스트 ${formatPct(row.brief.context_ratio)}`
       : (row.keeper?.context_ratio != null ? `컨텍스트 ${formatPct(row.keeper.context_ratio)}` : null),
-    row.brief.last_turn_ago_s != null ? `최근 턴 ${Math.round(row.brief.last_turn_ago_s)}초 전` : null,
   ]
     .filter((value): value is string => value !== null)
     .join(' · ')
+  const activitySignals = [
+    keeperRecentHeartbeatLabel(row.keeper),
+    keeperRecentActionLabel(row.keeper, row.brief.last_turn_ago_s),
+    continuity || null,
+  ].filter((value): value is string => value !== null)
+  const runtimeHint = keeperRuntimeHint(row.keeper)
   const recentToolsLabel =
     row.recentTools.length > 0
       ? row.recentTools.join(', ')
       : toolAuditStateLabel(linkedRecentToolsEmptyState(row.keeper))
 
   return html`
-    <article class="w-full p-4 rounded-xl border border-[var(--white-8)] bg-[var(--white-4)] grid gap-3 text-inherit text-left cursor-pointer ${toneClass(row.brief.status ?? row.keeper?.status)} ${liveStateClass(row.brief.status, row.keeper?.status)}">
+    <article class="w-full p-4 rounded-xl border border-[var(--white-8)] bg-[var(--white-4)] grid gap-3 text-inherit text-left cursor-pointer ${toneClass(effectiveStatus)} ${liveStateClass(effectiveStatus, row.keeper?.status)}">
       <button type="button" class="w-full p-0 border-0 bg-transparent text-inherit grid gap-3 text-left cursor-pointer" onClick=${() => {
         const keeper: Keeper = row.keeper ?? {
           name: row.brief.name,
           agent_name: row.brief.agent_name ?? row.brief.name,
-          status: row.brief.status ?? 'unknown',
+          status: effectiveStatus,
           context_ratio: row.brief.context_ratio ?? null,
         } as Keeper
         openKeeperDetail(keeper)
       }}>
         <div class="flex justify-between gap-3 items-start">
           <div class="flex gap-3 items-start">
-            <div class="mission-status-dot ${liveStateClass(row.brief.status, row.keeper?.status)} ${dotStateBg(liveStateClass(row.brief.status, row.keeper?.status))}"></div>
+            <div class="mission-status-dot ${liveStateClass(effectiveStatus, row.keeper?.status)} ${dotStateBg(liveStateClass(effectiveStatus, row.keeper?.status))}"></div>
             <span class="agent-emoji">${row.keeper?.emoji ?? ''}</span>
             <div>
               <strong>${row.brief.name}</strong>
               ${row.keeper?.koreanName ? html`<span>${row.keeper.koreanName}</span>` : null}
             </div>
           </div>
-          <${StatusChip} label=${statusLabel(row.brief.status ?? row.keeper?.status)} tone=${toneClass(row.brief.status ?? row.keeper?.status)} />
+          <${StatusChip} label=${statusLabel(effectiveStatus)} tone=${toneClass(effectiveStatus)} />
         </div>
 
         <div class="flex flex-wrap gap-3 text-[var(--text-body)] text-[13px] leading-snug">
-          <span>최근 하트비트 · ${row.keeper?.last_heartbeat ? relativeTime(row.keeper.last_heartbeat) : '기록 없음'}</span>
-          <span>${continuity || '연속성 정보 없음'}</span>
+          ${activitySignals.map(signal => html`<span>${signal}</span>`)}
         </div>
 
         <div class="grid gap-1.5">
           <span>무엇을</span>
           <strong>${row.currentWork}</strong>
+          ${runtimeHint ? html`<small class="text-[var(--warn)]">${runtimeHint}</small>` : null}
           ${row.keeper?.skill_reason ? html`<small>판단 요약 · ${trimText(row.keeper.skill_reason, 120)}</small>` : null}
         </div>
       </button>
@@ -142,7 +153,7 @@ export function KeeperBriefCard({ row }: { row: EnrichedKeeperRow }) {
           const keeper: Keeper = row.keeper ?? {
             name: row.brief.name,
             agent_name: row.brief.agent_name ?? row.brief.name,
-            status: row.brief.status ?? 'unknown',
+            status: effectiveStatus,
             context_ratio: row.brief.context_ratio ?? null,
           } as Keeper
           openKeeperDetail(keeper)

@@ -1,6 +1,21 @@
 # Changelog
 
 
+## [2.225.0] - 2026-04-04
+
+### Added
+- **Task goal decomposition** -- extend task schema with goal decomposition metadata (#5070).
+
+### Fixed
+- **Vendor/model hardcoding** -- remove 7 HIGH vendor/model hardcoding violations from MASC layer (#5064).
+- **Harness tool_matrix path** -- resolve tool_matrix runner path from build context (#5065).
+- **Dashboard stagnation_score** -- make stagnation_score optional in meta-cognition parse (#5071).
+
+### Changed
+- **SSOT batch 2** -- configurable thresholds and named constants across 4 files (#5063).
+- **Provider_adapter SSOT** -- consolidate 3 agent maps into Provider_adapter SSOT (#5060).
+- **Precompile regex** -- precompile regex patterns in keeper_text_processing (#5062).
+
 ## [2.224.0] - 2026-04-04
 
 ### Added

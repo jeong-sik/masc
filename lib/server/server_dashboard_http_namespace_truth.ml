@@ -57,7 +57,7 @@ let dashboard_namespace_truth_http_json ~state ~sw:_ ~clock _request =
           float_of_env_default_with_legacy
             ~canonical:"MASC_DASHBOARD_NAMESPACE_TRUTH_TIMEOUT_S"
             ~legacy:"MASC_DASHBOARD_ROOM_TRUTH_TIMEOUT_S"
-            ~default:5.0 ~min_v:2.0 ~max_v:25.0
+            ~default:8.0 ~min_v:2.0 ~max_v:25.0
         in
         let cold_timeout_s =
           float_of_env_default_with_legacy

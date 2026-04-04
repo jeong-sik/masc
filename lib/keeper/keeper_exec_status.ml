@@ -408,23 +408,22 @@ let keeper_surface_status
     |> Option.value ~default:"offline"
     |> String.lowercase_ascii
   in
-  if String.equal health_state "offline" then "offline"
-  else
-    match json_string_opt "status" agent_status with
-    | Some status -> (
-        match String.lowercase_ascii status with
-        | ("active" | "busy" | "listening" | "idle") as status -> status
-        | "offline" | "inactive" -> "offline"
-        | _ -> (
-            match health_state with
-            | "idle" -> "idle"
-            | "healthy" | "stale" | "degraded" -> "active"
-            | _ -> "offline"))
-    | None -> (
-        match health_state with
-        | "idle" -> "idle"
-        | "healthy" | "stale" | "degraded" -> "active"
-        | _ -> "offline")
+  let agent_runtime_status =
+    json_string_opt "status" agent_status |> Option.map String.lowercase_ascii
+  in
+  match health_state with
+  | "healthy" -> (
+      match agent_runtime_status with
+      | Some (("active" | "busy" | "listening" | "idle") as status) -> status
+      | Some ("offline" | "inactive") -> "offline"
+      | _ -> "active")
+  | "idle" -> "idle"
+  | "stale" | "degraded" | "zombie" | "dead" -> "inactive"
+  | "offline" -> "offline"
+  | _ -> (
+      match agent_runtime_status with
+      | Some ("offline" | "inactive") -> "offline"
+      | _ -> "inactive")
 
 let keeper_diagnostic_json
     ~(meta : keeper_meta)
@@ -470,7 +469,8 @@ let derive_pipeline_stage
     ~(surface_status : string)
     ~(now_ts : float)
   : string =
-  if String.equal surface_status "offline" then "offline"
+  if String.equal surface_status "offline" || String.equal surface_status "inactive"
+  then "offline"
   else
     let recency_threshold = 30.0 in
     let turn_ago =

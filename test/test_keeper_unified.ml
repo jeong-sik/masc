@@ -765,6 +765,34 @@ let test_metrics_noop_response () =
     updated.runtime.autonomous_action_count;
   check int "total_turns +1" (minimal_meta.runtime.usage.total_turns + 1) updated.runtime.usage.total_turns
 
+let test_metrics_heartbeat_only_tool_response_is_maintenance_only () =
+  let result =
+    make_run_result ~text:"" ~tools:["masc_heartbeat"]
+      ~model:"test-model" ~input_tok:40 ~output_tok:0
+  in
+  let updated =
+    UT.update_metrics_from_result minimal_meta ~latency_ms:80
+      ~observation:base_observation result
+  in
+  check int "proactive_count +1"
+    (minimal_meta.runtime.proactive_rt.count_total + 1)
+    updated.runtime.proactive_rt.count_total;
+  check int "proactive visible_count unchanged"
+    minimal_meta.runtime.proactive_rt.visible_count_total
+    updated.runtime.proactive_rt.visible_count_total;
+  check bool "heartbeat-only outcome stays silent" true
+    (updated.runtime.proactive_rt.last_outcome
+     = Masc_mcp.Keeper_types.Proactive_silent);
+  check int "autonomous action unchanged"
+    minimal_meta.runtime.autonomous_action_count
+    updated.runtime.autonomous_action_count;
+  check int "autonomous tool turn unchanged"
+    minimal_meta.runtime.autonomous_tool_turn_count
+    updated.runtime.autonomous_tool_turn_count;
+  check int "noop turn increments"
+    (minimal_meta.runtime.noop_turn_count + 1)
+    updated.runtime.noop_turn_count
+
 let test_metrics_reactive_turn_does_not_mutate_proactive_runtime () =
   let reactive_observation =
     { base_observation with
@@ -1636,6 +1664,8 @@ let () =
           test_case "text response" `Quick test_metrics_text_response;
           test_case "tool response" `Quick test_metrics_tool_response;
           test_case "noop response" `Quick test_metrics_noop_response;
+          test_case "heartbeat-only tool response is maintenance only" `Quick
+            test_metrics_heartbeat_only_tool_response_is_maintenance_only;
           test_case "reactive turn leaves proactive runtime untouched" `Quick
             test_metrics_reactive_turn_does_not_mutate_proactive_runtime;
           test_case "silent proactive cycle advances cooldown anchor" `Quick

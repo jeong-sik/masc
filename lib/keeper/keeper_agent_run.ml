@@ -92,6 +92,30 @@ let take n items =
   else
     List.filteri (fun i _ -> i < n) items
 
+let tool_query_text_of_user_message (text : string) : string =
+  let lines = String.split_on_char '\n' text in
+  let rec loop current_section kept = function
+    | [] ->
+        let filtered = List.rev kept |> String.concat "\n" |> String.trim in
+        if filtered <> "" then filtered else String.trim text
+    | line :: rest ->
+        let trimmed = String.trim line in
+        let current_section =
+          if String.starts_with ~prefix:"### " trimmed then Some trimmed
+          else current_section
+        in
+        let skip_line =
+          match current_section with
+          | Some "### Continuity" -> true
+          | _ -> false
+        in
+        if skip_line then
+          loop current_section kept rest
+        else
+          loop current_section (line :: kept) rest
+  in
+  loop None [] lines
+
 let prioritized_disclosed_tool_names
     ~(max_tools : int)
     ~(always_include_tools : string list)
@@ -600,8 +624,9 @@ let run_turn
           ) "" messages
         in
         let query_text =
-          if String.trim last_user_text <> "" then last_user_text
-          else user_message
+          (if String.trim last_user_text <> "" then last_user_text
+           else user_message)
+          |> tool_query_text_of_user_message
         in
         (* Confidence-gated union: always retrieve, but union fallback
            when BM25 confidence is low (e.g. Korean query vs English docs).

@@ -344,17 +344,23 @@ let test_keeper_msg_rejects_removed_runtime_args () =
 let make_keeper_exec_meta
     ?(name = "sangsu")
     ?(allowed_paths = [])
+    ?tool_access
     () =
-  let json =
-    `Assoc
-      [
-        ("name", `String name);
-        ("agent_name", `String name);
-        ("trace_id", `String ("trace-" ^ name));
-        ("allowed_paths", `List (List.map (fun path -> `String path) allowed_paths));
-      ]
+  let fields =
+    [
+      ("name", `String name);
+      ("agent_name", `String name);
+      ("trace_id", `String ("trace-" ^ name));
+      ("allowed_paths", `List (List.map (fun path -> `String path) allowed_paths));
+    ]
   in
-  match Masc_mcp.Keeper_types.meta_of_json json with
+  let fields =
+    match tool_access with
+    | Some access ->
+        ("tool_access", Masc_mcp.Keeper_types.tool_access_to_json access) :: fields
+    | None -> fields
+  in
+  match Masc_mcp.Keeper_types.meta_of_json (`Assoc fields) with
   | Ok meta -> meta
   | Error e -> failwith ("make_keeper_exec_meta failed: " ^ e)
 
@@ -476,6 +482,18 @@ let test_keeper_fs_read_policy_gates () =
   let unified = make_keeper_exec_meta () in
   check_keeper_exec_tool_presence "unified fs_read" unified
     ~tool_name:"keeper_fs_read" ~expect_allowed:true
+
+let test_research_preset_includes_task_audit () =
+  let research =
+    make_keeper_exec_meta
+      ~name:"research-keeper"
+      ~tool_access:
+        (Masc_mcp.Keeper_types.Preset
+           { preset = Masc_mcp.Keeper_types.Research; also_allow = [] })
+      ()
+  in
+  check_keeper_exec_tool_presence "research preset task audit" research
+    ~tool_name:"keeper_tasks_audit" ~expect_allowed:true
 
 let test_keeper_fs_read_enforces_allowed_paths_and_truncation () =
   Eio_main.run @@ fun env ->
@@ -2781,6 +2799,8 @@ let () =
            test_keeper_shell_readonly_enforces_allowed_paths;
          test_case "fs_read policy gates" `Quick
            test_keeper_fs_read_policy_gates;
+         test_case "research preset includes task audit" `Quick
+           test_research_preset_includes_task_audit;
          test_case "fs_read enforces allowed paths and truncation" `Quick
            test_keeper_fs_read_enforces_allowed_paths_and_truncation;
          test_case "keeper bash requires cmd and runs" `Quick

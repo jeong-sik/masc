@@ -44,6 +44,20 @@ type world_observation = {
   last_turn_budget : (int * int) option;
 }
 
+type unified_turn_channel =
+  | Reactive
+  | Scheduled_autonomous
+
+type unified_turn_decision = {
+  should_run : bool;
+  channel : unified_turn_channel;
+  reasons : string list;
+  since_last_proactive : int option;
+  effective_cooldown : int option;
+  task_reactive_cooldown : int option;
+  idle_gate_sec : int option;
+}
+
 type board_signal_match = {
   explicit_mention : bool;
   matched_targets : string list;
@@ -592,33 +606,90 @@ let effective_proactive_cooldown ~(base_cooldown : int) ~(since_last : int) : in
     let factor = 1.0 /. (Float.pow 2.0 (float_of_int capped_periods)) in
     max floor (int_of_float (float_of_int base_cooldown *. factor))
 
-let should_run_unified_turn ~(meta : keeper_meta) (observation : world_observation) =
-  let has_external_event =
-    observation.pending_mentions <> []
-    || observation.pending_board_events <> []
-    || observation.pending_scope_messages <> []
+let unified_turn_decision ~(meta : keeper_meta) (observation : world_observation) =
+  let reactive_reasons =
+    [
+      (if observation.pending_mentions <> [] then Some "pending_mentions" else None);
+      (if observation.pending_board_events <> [] then Some "pending_board_events" else None);
+      (if observation.pending_scope_messages <> [] then Some "pending_scope_messages" else None);
+    ]
+    |> List.filter_map Fun.id
   in
-  if has_external_event then
-    true
-  else
-    let since_last_proactive =
-      if meta.runtime.proactive_rt.last_ts <= 0.0 then max_int
-      else int_of_float (max 0.0 (Time_compat.now () -. meta.runtime.proactive_rt.last_ts))
-    in
-    if not meta.proactive.enabled then false
-    else
-      let effective_cooldown =
-        effective_proactive_cooldown
-          ~base_cooldown:meta.proactive.cooldown_sec
-          ~since_last:since_last_proactive
+  match reactive_reasons with
+  | _ :: _ ->
+      {
+        should_run = true;
+        channel = Reactive;
+        reasons = reactive_reasons;
+        since_last_proactive = None;
+        effective_cooldown = None;
+        task_reactive_cooldown = None;
+        idle_gate_sec = None;
+      }
+  | [] ->
+      let since_last_proactive =
+        if meta.runtime.proactive_rt.last_ts <= 0.0 then max_int
+        else
+          int_of_float (max 0.0 (Time_compat.now () -. meta.runtime.proactive_rt.last_ts))
       in
-      let cooldown_elapsed = since_last_proactive >= effective_cooldown in
-      let has_actionable_tasks =
-        observation.unclaimed_task_count > 0 || observation.failed_task_count > 0
-      in
-      (* When actionable tasks sit in the backlog, use a shorter cooldown
-         (1/3 of normal, floor 60s) so the keeper reacts faster to work.
-         Regular proactive turns still fire on the effective cooldown. *)
-      let task_reactive_cooldown = max 60 (effective_cooldown / 3) in
-      cooldown_elapsed
-      || (has_actionable_tasks && since_last_proactive >= task_reactive_cooldown)
+      let idle_gate_sec = meta.proactive.idle_sec in
+      if not meta.proactive.enabled then
+        {
+          should_run = false;
+          channel = Scheduled_autonomous;
+          reasons = [ "proactive_disabled" ];
+          since_last_proactive = Some since_last_proactive;
+          effective_cooldown = None;
+          task_reactive_cooldown = None;
+          idle_gate_sec = Some idle_gate_sec;
+        }
+      else
+        let effective_cooldown =
+          effective_proactive_cooldown
+            ~base_cooldown:meta.proactive.cooldown_sec
+            ~since_last:since_last_proactive
+        in
+        let task_cooldown_divisor =
+          Keeper_config.keeper_proactive_task_cooldown_divisor ()
+        in
+        let task_cooldown_floor =
+          Keeper_config.keeper_proactive_task_min_cooldown_sec ()
+        in
+        let task_reactive_cooldown =
+          max task_cooldown_floor
+            (effective_cooldown / max 1 task_cooldown_divisor)
+        in
+        let has_actionable_tasks =
+          observation.unclaimed_task_count > 0 || observation.failed_task_count > 0
+        in
+        let idle_gate_elapsed = observation.idle_seconds >= idle_gate_sec in
+        let cooldown_elapsed = since_last_proactive >= effective_cooldown in
+        let backlog_elapsed =
+          has_actionable_tasks
+          && since_last_proactive >= task_reactive_cooldown
+        in
+        let reasons =
+          [
+            Some "scheduled_autonomous_turn";
+            (if since_last_proactive = max_int then Some "never_started" else None);
+            (if idle_gate_elapsed then Some "idle_gate_elapsed" else Some "idle_gate_wait");
+            (if cooldown_elapsed then Some "cooldown_elapsed" else None);
+            (if has_actionable_tasks then Some "actionable_backlog" else None);
+            (if observation.unclaimed_task_count > 0 then Some "unclaimed_tasks" else None);
+            (if observation.failed_task_count > 0 then Some "failed_tasks" else None);
+            (if backlog_elapsed then Some "task_reactive_cooldown_elapsed" else None);
+          ]
+          |> List.filter_map Fun.id
+        in
+        {
+          should_run = idle_gate_elapsed && (cooldown_elapsed || backlog_elapsed);
+          channel = Scheduled_autonomous;
+          reasons;
+          since_last_proactive = Some since_last_proactive;
+          effective_cooldown = Some effective_cooldown;
+          task_reactive_cooldown = Some task_reactive_cooldown;
+          idle_gate_sec = Some idle_gate_sec;
+        }
+
+let should_run_unified_turn ~(meta : keeper_meta) (observation : world_observation) =
+  (unified_turn_decision ~meta observation).should_run

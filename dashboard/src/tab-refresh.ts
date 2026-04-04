@@ -68,6 +68,9 @@ export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params
       if (routeState.params.section === 'planning') {
         return ['goals', 'execution']
       }
+      if (routeState.params.section === 'goals') {
+        return ['goals']
+      }
       if (routeState.params.section === 'board') {
         return ['board']
       }

@@ -97,9 +97,23 @@ let parse_model_code_response response =
     | Ok _ ->
       Result.error "MODEL response must be a JSON object"
 
-(* local_capacity_for_selections removed from OAS SDK.
-   TODO(#4326): reimplement via Discovery.discover when needed. *)
-let has_background_capacity () = true
+let has_background_capacity () =
+  match Eio_context.get_switch_opt (), Eio_context.get_net_opt () with
+  | Some sw, Some net -> (
+      try
+        let capacity =
+          Llm_provider.Cascade_config.local_capacity_for_selections ~sw ~net
+            [ "autoresearch" ]
+        in
+        not
+          (capacity.all_discovered && capacity.endpoints_found > 0
+           && capacity.process_available <= 0)
+      with
+      | Eio.Cancel.Cancelled _ as ex -> raise ex
+      | ex ->
+        Eio.traceln "[autoresearch] capacity check failed: %s" (Printexc.to_string ex);
+        true)
+  | _ -> true
 
 (** Generate code change via Cascade "autoresearch" profile.
     Returns Ok (hypothesis, new_code) or Error reason. *)

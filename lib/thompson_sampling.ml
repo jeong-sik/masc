@@ -273,7 +273,8 @@ let load_stats () =
         | Some s ->
             Hashtbl.replace stats_table s.name s
         | None ->
-            Log.Thompson.error "Failed to parse stats line"
+            Log.Thompson.warn "Failed to parse stats line: %s"
+              (Yojson.Safe.to_string json)
       ) entries;
       Log.Metrics.debug "thompson sampling loaded stats for %d agents"
         (Hashtbl.length stats_table)

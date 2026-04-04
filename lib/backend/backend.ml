@@ -285,6 +285,8 @@ module FileSystem = struct
     let action =
       Mutex.lock t.key_index_mu;
       Fun.protect ~finally:(fun () -> Mutex.unlock t.key_index_mu) (fun () ->
+        (* Direct Hashtbl access — already inside key_index_mu lock.
+           ki_length would deadlock (non-reentrant mutex). *)
         if Hashtbl.length t.key_index > 0 then `Done
         else match t.key_index_promise with
           | Some p -> `Wait p

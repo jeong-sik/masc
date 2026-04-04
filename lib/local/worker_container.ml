@@ -331,7 +331,7 @@ let resolve_execution_scope ~base_path ~(team_session_id : string option)
   | None -> (
       match team_session_id with
       | Some session_id -> (
-          match Team_session_store.load_session (Room.default_config base_path |> Room.config_with_resolved_scope) session_id with
+          match Team_session_store.load_session (Room.default_config base_path) session_id with
           | Some session -> session.execution_scope
           | None -> Team_session_types.Limited_code_change)
       | None -> Team_session_types.Limited_code_change)

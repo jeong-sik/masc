@@ -472,7 +472,7 @@ type server_state = {
 let create_state ~base_path =
   let config =
     Room.default_config base_path
-    |> Room.config_with_resolved_scope
+   
   in
   let registry = Session.create () in
   (* Wire notification harness: subscription events → session queues *)
@@ -520,7 +520,7 @@ let create_state_eio ~sw ~env ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
           Board_dispatch.init_jsonl ()
         end)
       base_path
-    |> Room.config_with_resolved_scope
+   
   in
   let registry = Session.create () in
   (* Wire notification harness: subscription events → session queues *)

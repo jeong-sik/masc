@@ -75,7 +75,7 @@ let load_findings ~base_path ~team_session_id : string list =
     with Sys_error _ -> []
 
 let build ~base_path ~team_session_id =
-  let room_config = Room.default_config base_path |> Room.config_with_resolved_scope in
+  let room_config = Room.default_config base_path in
   let session_opt =
     Team_session_store.load_session room_config team_session_id
   in

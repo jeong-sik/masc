@@ -348,7 +348,7 @@ let handle_swarm_start (ctx : context) args =
                     | Some config -> config
                     | None ->
                         Room.default_config ctx.base_path
-                        |> Room.config_with_resolved_scope
+                       
                   in
                   let task_link_json =
                     match task_id with
@@ -417,7 +417,7 @@ let handle_stop (ctx : context) args =
     match Autoresearch.stop_loop ~base_path:ctx.base_path ~reason id with
     | None -> `Assoc [("error", `String (Printf.sprintf "Loop %s not found" id))]
     | Some state ->
-        let config = Room.default_config ctx.base_path |> Room.config_with_resolved_scope in
+        let config = Room.default_config ctx.base_path in
         broadcast_loop_lifecycle "autoresearch_stopped" state;
         (match Autoresearch.load_swarm_link_by_loop ~base_path:ctx.base_path id with
         | Some link ->

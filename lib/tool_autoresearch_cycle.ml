@@ -589,7 +589,7 @@ let handle_cycle (ctx : Tool_autoresearch_repo_synthesis.context) args =
                        Autoresearch.save_state ~base_path:ctx.base_path state;
                        let config =
                          Room.default_config ctx.base_path
-                         |> Room.config_with_resolved_scope
+                        
                        in
                        (match
                           Autoresearch.load_swarm_link_by_loop

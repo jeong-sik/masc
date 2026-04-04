@@ -1,6 +1,22 @@
 # Changelog
 
 
+## [2.230.0] - 2026-04-04
+
+### Added
+- **RFC-0001 Gate A instrumentation** -- det/nondet boundary instrumentation modules (#5110).
+
+### Fixed
+- **Provider hardcoding** -- abstract hardcoded provider checks in oas_model_resolve (#5111).
+- **Silent exception swallowing** -- replace with WARN logs (#5113).
+- **Shutdown cleanup** -- use mark_dead for keeper shutdown, document sticky flag (#5112).
+- **Tool error detail** -- include error detail in MCP tool call failure logs (#5108).
+- **Dashboard warm timeout** -- increase namespace-truth warm timeout 5s to 8s (#5107).
+- **Shutdown fiber crash** -- distinguish shutdown fiber cleanup from real crashes (#5106).
+
+### Changed
+- **Remove tier metadata** -- remove tool tier metadata and filters (#5109).
+
 ## [2.229.0] - 2026-04-04
 
 ### Added

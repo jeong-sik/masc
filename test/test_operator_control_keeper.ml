@@ -371,7 +371,7 @@ let test_snapshot_keeper_tool_audit_fallback () =
               (Yojson.Safe.to_string snapshot)
       in
       let keeper = load_keeper_snapshot 10 in
-      Alcotest.(check string) "durable keeper is active after keeper_up" "active"
+      Alcotest.(check string) "durable keeper is idle after keeper_up" "idle"
         (keeper |> member "status" |> to_string);
       Alcotest.(check bool) "allowed tool fallback present" true
         ((keeper |> member "allowed_tool_names" |> to_list) <> []);

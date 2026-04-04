@@ -10,7 +10,7 @@ function collaborationEvidenceFixture(): DashboardCollaborationEvidenceResponse 
     generated_at: '2026-03-27T00:00:00Z',
     evidence_status: 'partial',
     headline: '상호작용 흔적은 있지만 증거가 분산돼 있습니다.',
-    detail: '세션 이벤트나 namespace activity는 보이지만 proof 또는 관계 근거가 충분히 묶이지 않았습니다.',
+    detail: '세션 이벤트나 project activity는 보이지만 proof 또는 관계 근거가 충분히 묶이지 않았습니다.',
     session: null,
     room_id: 'default',
     counts: {
@@ -79,14 +79,14 @@ describe('collaborationEvidenceSupportRows', () => {
     fixture.counts.message_broadcast_count = 4
     fixture.linkage.selected_operation_id = 'op-1'
     fixture.linkage.unlinked_activity_count = 2
-    fixture.linkage.gaps = ['namespace activity exists without explicit session/operation linkage']
+    fixture.linkage.gaps = ['project activity exists without explicit session/operation linkage']
 
     expect(collaborationEvidenceSupportRows(fixture)).toEqual([
       'proof verdict · proven · available',
       'linked operation · op-1',
       'unlinked project activity · 2',
       'message broadcast count · 4',
-      'linkage gap · namespace activity exists without explicit session/operation linkage',
+      'linkage gap · project activity exists without explicit session/operation linkage',
     ])
   })
 })

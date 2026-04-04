@@ -46,7 +46,6 @@ export function visibleNamespaceLabel(namespaceId: string | null | undefined): s
   if (!value || value === 'default') return null
   return value
 }
-
 function loadGraph() {
   return graphResource.load(() => {
     const since = selectedTimeRange.value !== 'all' ? selectedTimeRange.value : undefined

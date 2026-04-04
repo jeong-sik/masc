@@ -99,7 +99,7 @@ function ToolCallDetail({ event }: { event: UnifiedTraceEvent }) {
       ` : null}
       ${event.toolResult || event.error ? html`
         <div class="mt-1">
-          <${JsonViewerCard} data=${event.error ?? event.toolResult} title=${event.error ? 'Error' : 'Result'} />
+          <${JsonViewerCard} data=${parseJsonLikeData(event.error ?? event.toolResult)} title=${event.error ? 'Error' : 'Result'} />
         </div>
       ` : null}
       ${gateRejected ? html`

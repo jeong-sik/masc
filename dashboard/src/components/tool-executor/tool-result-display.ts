@@ -1,8 +1,8 @@
 import { html } from 'htm/preact'
-import { Markdown } from "../common/markdown"
 import { useSignal } from '@preact/signals'
 import { CountBadge } from '../common/badge'
 import { ActionButton } from '../common/button'
+import { JsonViewer } from '../common/json-viewer'
 
 interface ToolResultProps {
   success: boolean
@@ -11,16 +11,19 @@ interface ToolResultProps {
   timestamp: number
 }
 
-function tryFormatJson(text: string): { isJson: boolean; formatted: string } {
-  try { const parsed = JSON.parse(text); return { isJson: true, formatted: JSON.stringify(parsed, null, 2) } }
-  catch { return { isJson: false, formatted: text } }
+function tryParseJson(text: string): { isJson: boolean; parsed: unknown } {
+  try {
+    return { isJson: true, parsed: JSON.parse(text) }
+  } catch {
+    return { isJson: false, parsed: null }
+  }
 }
 
 export function ToolResultDisplay({ success, text, toolName, timestamp }: ToolResultProps) {
   const expanded = useSignal(true)
-  const { formatted } = tryFormatJson(text)
+  const { isJson, parsed } = tryParseJson(text)
   const timeStr = new Date(timestamp).toLocaleTimeString('ko-KR')
-  const lines = formatted.split('\n').length
+  const lines = text.split('\n').length
   return html`
     <div class="flex flex-col gap-2 mt-3">
       <div class="flex items-center gap-2">
@@ -37,8 +40,11 @@ export function ToolResultDisplay({ success, text, toolName, timestamp }: ToolRe
           <${ActionButton} variant="subtle" size="sm" onClick=${() => void navigator.clipboard.writeText(text)}>복사<//>
         </div>
         ${expanded.value ? html`
-          <div class="max-h-[400px] overflow-auto bg-[var(--bg-0)]">
-            <${Markdown} text=${'```json\n' + formatted + '\n```'} />
+          <div class="px-3 py-2 overflow-x-auto max-h-[400px] overflow-y-auto">
+            ${isJson
+              ? html`<${JsonViewer} data=${parsed} />`
+              : html`<pre class="text-[12px] font-mono ${success ? 'text-[var(--text-body)]' : 'text-[#fda4af]'}">${text}</pre>`
+            }
           </div>
         ` : null}
       </div>

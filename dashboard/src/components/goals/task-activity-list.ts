@@ -6,7 +6,7 @@ import { useState } from 'preact/hooks'
 import { EmptyState } from '../common/empty-state'
 import { LoadingState } from '../common/feedback-state'
 import { TimeAgo } from '../common/time-ago'
-import { Markdown } from '../common/markdown'
+import { JsonViewerCard, parseJsonLikeData } from '../common/json-viewer'
 import { Settings, MessageSquare, CheckSquare, Heart, RefreshCcw, Dot, ChevronRight } from 'lucide-preact'
 import type { UnifiedTraceEvent, TraceEventKind } from '../session-trace/session-trace-state'
 import { activeFilter, type ActivityFilter } from './task-detail-state'
@@ -40,17 +40,6 @@ function durationColor(ms: number | undefined): string {
   return 'text-bad'
 }
 
-function wrapAsCodeBlock(text: string, language = ''): string {
-  const matches = text.match(/`+/g)
-  const longestFence = matches ? Math.max(...matches.map(match => match.length)) : 0
-  const fence = '`'.repeat(Math.max(3, longestFence + 1))
-  return `${fence}${language}\n${text}\n${fence}`
-}
-
-function formatPayload(value: unknown): string {
-  if (typeof value === 'string') return wrapAsCodeBlock(value)
-  return wrapAsCodeBlock(JSON.stringify(value ?? null, null, 2), 'json')
-}
 
 function ActivityEntry({ event }: { event: UnifiedTraceEvent }) {
   const hasDetail = event.toolArgs != null || event.toolResult != null || (event.detail && Object.keys(event.detail).length > 0)
@@ -85,18 +74,12 @@ function ActivityEntry({ event }: { event: UnifiedTraceEvent }) {
         <div class="px-3 pb-2 pt-1 ml-7">
           ${event.toolArgs != null ? html`
             <div class="mb-1">
-              <div class="text-[10px] text-text-dim mb-0.5">args</div>
-              <div class="max-h-[300px] overflow-y-auto custom-scrollbar">
-                <${Markdown} text=${formatPayload(event.toolArgs)} />
-              </div>
+              <${JsonViewerCard} data=${parseJsonLikeData(event.toolArgs)} title="Args" />
             </div>
           ` : null}
           ${event.toolResult != null ? html`
-            <div>
-              <div class="text-[10px] text-text-dim mb-0.5">result</div>
-              <div class="max-h-[300px] overflow-y-auto custom-scrollbar">
-                <${Markdown} text=${formatPayload(event.toolResult)} />
-              </div>
+            <div class="mb-1">
+              <${JsonViewerCard} data=${parseJsonLikeData(event.toolResult)} title="Result" />
             </div>
           ` : null}
           ${event.error ? html`<div class="text-[11px] text-bad mt-1">${event.error}</div>` : null}

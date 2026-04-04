@@ -1,6 +1,17 @@
 import { html } from 'htm/preact'
 import { useState } from 'preact/hooks'
 
+export function parseJsonLikeData(data: unknown): unknown {
+  if (typeof data !== 'string') return data
+  const trimmed = data.trim()
+  if (!(trimmed.startsWith('{') || trimmed.startsWith('['))) return data
+  try {
+    return JSON.parse(trimmed)
+  } catch {
+    return data
+  }
+}
+
 export function JsonViewer({ data, label, initialCollapsed = false, level = 0, ancestors = [] }: { data: unknown; label?: string; initialCollapsed?: boolean; level?: number; ancestors?: object[] }) {
   const [collapsed, setCollapsed] = useState(initialCollapsed)
 
@@ -19,7 +30,7 @@ export function JsonViewer({ data, label, initialCollapsed = false, level = 0, a
   if (!isObject) {
     let valueNode
     if (typeof data === 'string') {
-      valueNode = html`<span class="text-[var(--ok)] break-all">"${data}"</span>`
+      valueNode = html`<span class="text-[var(--ok)] whitespace-pre-wrap break-words">"${data}"</span>`
     } else if (typeof data === 'number') {
       valueNode = html`<span class="text-[var(--warn)]">${data}</span>`
     } else if (typeof data === 'boolean') {
@@ -67,7 +78,7 @@ export function JsonViewer({ data, label, initialCollapsed = false, level = 0, a
           ${isArray ? `[${(data as unknown[]).length}]` : `{${entries.length}}`}
         </span>
       </button>
-      
+
       ${!collapsed && html`
         <div class="pl-4 ml-1.5 border-l border-[var(--white-4)] mt-1 flex flex-col gap-0.5 w-full min-w-0">
           ${isArray

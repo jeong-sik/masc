@@ -46,16 +46,18 @@ let update_priority config ~task_id ~priority =
       Printf.sprintf "❌ Error: %s" (Printexc.to_string e)
   )
 
-(** Get raw task list (for orchestrator) *)
+(** Get raw task list (for orchestrator).
+    Requires initialization. *)
 let get_tasks_raw config =
   ensure_initialized config;
-  read_backlog_in_room config (current_room_id config) |> fun backlog -> backlog.tasks
+  (read_backlog config).tasks
 
-let get_tasks_raw_in_room config room_id =
+(** Like [get_tasks_raw] but returns [[]] when MASC is not
+    initialized — safe for dashboard and display contexts.
+    Replaces the former [get_tasks_raw_in_room]. *)
+let get_tasks_safe config =
   if not (root_is_initialized config) then []
-  else
-    let backlog = read_backlog_in_room config room_id in
-    backlog.tasks
+  else (read_backlog config).tasks
 
 let safe_yield () =
   try Eio.Fiber.yield () with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ()
@@ -88,22 +90,26 @@ let load_agents_from_dir config dir ~include_inactive =
              Some agent
          | Ok _ | Error _ -> None)
 
-(** Get raw agent list (for orchestrator) *)
+(** Get raw agent list (for orchestrator).
+    Includes inactive agents. Requires initialization. *)
 let get_agents_raw config =
   ensure_initialized config;
   let agents_path = agents_dir config in
   load_agents_from_dir config agents_path ~include_inactive:true
 
-let get_agents_raw_in_room config _room_id =
+(** Return active agents only.  Returns [[]] when MASC is not
+    initialized — safe for dashboard and display contexts.
+    Replaces the former [get_agents_raw_in_room]. *)
+let get_active_agents config =
   if not (root_is_initialized config) then []
   else
     let agents_path = agents_dir config in
     load_agents_from_dir config agents_path ~include_inactive:false
 
-(** Like [get_agents_raw_in_room] but includes Inactive agents.
-    Useful for keeper backlog-triage enrollment where inactive agents
-    should still participate as a fallback. *)
-let get_all_agents_in_room config _room_id =
+(** Like [get_agents_raw] but returns [[]] when not initialized
+    instead of raising.  Includes inactive agents.
+    Useful for keeper backlog-triage enrollment. *)
+let get_all_agents config =
   if not (root_is_initialized config) then []
   else
     let agents_path = agents_dir config in
@@ -147,7 +153,8 @@ let is_agent_active_at_path config path =
        | Ok agent -> agent.status <> Inactive
        | Error _ -> false)
 
-let is_agent_joined_in_room config ~room_id:_ ~agent_name =
+(** Check if an agent has joined the room *)
+let is_agent_joined config ~agent_name =
   if not (root_is_initialized config) then false
   else
     let actual_name = resolve_agent_name config agent_name in
@@ -155,11 +162,6 @@ let is_agent_joined_in_room config ~room_id:_ ~agent_name =
     let agents_path = agents_dir config in
     let agent_path = Filename.concat agents_path filename in
     is_agent_active_at_path config agent_path
-
-(** Check if an agent has joined the room *)
-let is_agent_joined config ~agent_name =
-  ensure_initialized config;
-  is_agent_joined_in_room config ~room_id:(current_room_id config) ~agent_name
 
 (** Check if filename is valid (no special characters) *)
 let is_valid_filename name =
@@ -331,22 +333,18 @@ let collect_recent_messages config ~msgs_path ~since_seq ~limit ~warn_label =
         in
         loop limit [] names
 
-(** Get raw message list (for dashboard) *)
+(** Get raw message list (for dashboard).
+    Returns [[]] when MASC is not initialized. *)
 let get_messages_raw config ~since_seq ~limit =
-  ensure_initialized config;
-  let msgs_path = messages_dir_in_room config (current_room_id config) in
-  collect_recent_messages config ~msgs_path ~since_seq ~limit ~warn_label:"message"
-
-let get_messages_raw_in_room config ~room_id ~since_seq ~limit =
   if not (root_is_initialized config) then []
   else
-    let msgs_path = messages_dir_in_room config room_id in
-    collect_recent_messages config ~msgs_path ~since_seq ~limit ~warn_label:"room message"
+    let msgs_path = messages_dir config in
+    collect_recent_messages config ~msgs_path ~since_seq ~limit ~warn_label:"message"
 
-let get_all_messages_raw_in_room config ~room_id ~since_seq =
+let get_all_messages_raw config ~since_seq =
   if not (root_is_initialized config) then []
   else
-    let msgs_path = messages_dir_in_room config room_id in
+    let msgs_path = messages_dir config in
     match config.backend with
     | PostgresNative _ -> (
         match collect_all_messages_from_pg config ~msgs_path ~since_seq with

@@ -4,9 +4,9 @@
     a single chronological timeline for a given agent.
 
     Data sources:
-    - Agent join status (Room.get_agents_raw_in_room)
-    - Task state transitions (Room.get_tasks_raw_in_room)
-    - Broadcast messages (Room.get_messages_raw_in_room)
+    - Agent join status (Room.get_agents_raw)
+    - Task state transitions (Room.get_tasks_raw)
+    - Broadcast messages (Room.get_messages_raw)
 *)
 
 open Tool_args
@@ -60,9 +60,9 @@ let event_to_json (e : timeline_event) : Yojson.Safe.t =
     ]
 
 (* Collect agent join/status events *)
-let agent_events (config : Room.config) ~agent_name ~room_id :
+let agent_events (config : Room.config) ~agent_name :
     timeline_event list =
-  let agents = Room.get_agents_raw_in_room config room_id in
+  let agents = Room.get_active_agents config in
   agents
   |> List.filter (fun (a : Types.agent) -> String.equal a.name agent_name)
   |> List.filter_map (fun (a : Types.agent) ->
@@ -76,7 +76,7 @@ let agent_events (config : Room.config) ~agent_name ~room_id :
                  detail =
                    `Assoc
                      [
-                       ("room", `String room_id);
+                       ("room", `String "default");
                        ( "status",
                          `String (Types.agent_status_to_string a.status) );
                        ( "current_task",
@@ -88,9 +88,9 @@ let agent_events (config : Room.config) ~agent_name ~room_id :
          | None -> None)
 
 (* Collect task-related events for an agent *)
-let task_events (config : Room.config) ~agent_name ~room_id :
+let task_events (config : Room.config) ~agent_name :
     timeline_event list =
-  let tasks = Room.get_tasks_raw_in_room config room_id in
+  let tasks = Room.get_tasks_safe config in
   tasks
   |> List.filter_map (fun (task : Types.task) ->
          match task.task_status with
@@ -176,10 +176,10 @@ let task_events (config : Room.config) ~agent_name ~room_id :
          | _ -> None)
 
 (* Collect broadcast messages from agent *)
-let message_events (config : Room.config) ~agent_name ~room_id ~limit :
+let message_events (config : Room.config) ~agent_name ~limit :
     timeline_event list =
   let messages =
-    Room.get_messages_raw_in_room config ~room_id ~since_seq:0 ~limit
+    Room.get_messages_raw config ~since_seq:0 ~limit
   in
   messages
   |> List.filter (fun (m : Types.message) ->
@@ -210,15 +210,14 @@ let build_timeline (config : Room.config) ~agent_name ~since_hours ~limit
     ~include_tasks ~include_board:_ =
   let now = Time_compat.now () in
   let cutoff = now -. (since_hours *. 3600.0) in
-  let room_id = "default" in
-  (* Collect events from the currently selected room only. *)
+  (* Collect events from the default namespace. *)
   let all_events =
-    let agent_evts = agent_events config ~agent_name ~room_id in
+    let agent_evts = agent_events config ~agent_name in
     let task_evts =
-      if include_tasks then task_events config ~agent_name ~room_id
+      if include_tasks then task_events config ~agent_name
       else []
     in
-    let msg_evts = message_events config ~agent_name ~room_id ~limit:200 in
+    let msg_evts = message_events config ~agent_name ~limit:200 in
     agent_evts @ task_evts @ msg_evts
   in
   (* Filter by time cutoff and sort chronologically *)

@@ -1,7 +1,7 @@
 (** Room GC - Heartbeat, Zombie Cleanup, and Garbage Collection.
 
     Extracted from room.ml for modularity.
-    Contains: heartbeat_in_room, heartbeat, cleanup_zombies, gc. *)
+    Contains: heartbeat, cleanup_zombies, gc. *)
 
 open Types
 open Room_utils
@@ -13,27 +13,7 @@ open Room_state
    The actual implementations are wired by room.ml at startup. *)
 
 
-(** Update agent heartbeat - must be called periodically.
-    Since #4638 rooms are flattened; delegates to root config. *)
-let heartbeat_in_room config ~room_id ~agent_name =
-  ensure_room_bootstrap config room_id;
-  let actual_name = resolve_agent_name config agent_name in
-  let filename = safe_filename actual_name ^ ".json" in
-  let agent_file = Filename.concat (agents_dir config) filename in
-  if path_exists config agent_file then begin
-    with_file_lock config agent_file (fun () ->
-      match read_agent_with_repair config agent_file with
-      | Ok agent ->
-          let updated = { agent with last_seen = now_iso () } in
-          write_json config agent_file (agent_to_yojson updated);
-          Printf.sprintf "💓 %s heartbeat updated in %s" actual_name room_id
-      | Error e ->
-          Log.Room.debug "heartbeat_scoped: invalid agent JSON for %s in %s: %s"
-            actual_name room_id e;
-          Printf.sprintf "⚠ Invalid agent file for %s in %s" actual_name room_id
-    )
-  end else
-    Printf.sprintf "⚠ Agent %s not found in %s" agent_name room_id
+(* heartbeat_in_room removed — rooms are flattened (#4638). Use heartbeat. *)
 
 let heartbeat config ~agent_name =
   ensure_initialized config;

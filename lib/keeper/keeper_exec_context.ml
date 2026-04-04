@@ -809,6 +809,18 @@ let clamp_context_max_tokens
   if clamped = ctx.max_tokens then ctx
   else sync_oas_context { ctx with max_tokens = clamped }
 
+let hard_trim_context_to_budget
+    (ctx : working_context)
+    ~(budget_tokens : int) : working_context =
+  if budget_tokens <= 0 then ctx
+  else
+    let reducer =
+      Agent_sdk.Context_reducer.from_context_config ~max_tokens:budget_tokens ()
+    in
+    let messages = Agent_sdk.Context_reducer.reduce reducer ctx.messages in
+    sync_oas_context
+      { ctx with messages; max_tokens = min ctx.max_tokens budget_tokens }
+
 let forced_overflow_retry_meta
     (meta : keeper_meta)
     ~(turn_generation : int)
@@ -913,15 +925,38 @@ let[@warning "-32"] recover_latest_checkpoint_for_overflow_retry
       let retry_meta =
         forced_overflow_retry_meta meta ~turn_generation ~now_ts
       in
-      let compacted_ctx, trigger, decision =
+      let compacted_ctx, trigger, base_decision =
         compact_if_needed ~meta:retry_meta ~now_ts ctx
       in
-      let compaction_applied =
-        String.starts_with ~prefix:"applied:" decision
+      let strategy_after_tokens = token_count compacted_ctx in
+      let compacted_ctx =
+        if
+          primary_model_max_tokens > 0
+          && strategy_after_tokens > primary_model_max_tokens
+        then
+          hard_trim_context_to_budget compacted_ctx
+            ~budget_tokens:primary_model_max_tokens
+        else
+          compacted_ctx
       in
       let after_tokens = token_count compacted_ctx in
+      let hard_trim_applied = after_tokens < strategy_after_tokens in
+      let decision =
+        if hard_trim_applied then
+          Printf.sprintf "%s+budget_trim(%d->%d<=%d)"
+            base_decision strategy_after_tokens after_tokens
+            primary_model_max_tokens
+        else
+          base_decision
+      in
+      let compaction_applied =
+        String.starts_with ~prefix:"applied:" base_decision || hard_trim_applied
+      in
       let meaningful_reduction = after_tokens < before_tokens in
-      if not (compaction_applied && meaningful_reduction) then None
+      let fits_budget =
+        primary_model_max_tokens <= 0 || after_tokens <= primary_model_max_tokens
+      in
+      if not (compaction_applied && meaningful_reduction && fits_budget) then None
       else
         let compaction =
           {

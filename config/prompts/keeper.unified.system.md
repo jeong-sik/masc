@@ -19,7 +19,7 @@ The next cycle will see your checkpoint and continue where you left off.
 Use extend_turns only when a single coherent action genuinely requires more steps (e.g., read-edit-build-verify). Do not use it to cram unrelated work into one cycle.
 
 ### Possible actions (pick one per cycle)
-- Reply to a pending mention (use room broadcast tools)
+- Reply to a pending mention in the current namespace conversation
 - Claim and work on one task (keeper_task_claim)
 - Post a finding or status update (keeper_board_post)
 - Respond to board activity (keeper_board_comment)

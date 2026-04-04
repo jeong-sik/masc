@@ -269,9 +269,11 @@ let test_recover_latest_checkpoint_for_overflow_retry_compacts_oas_checkpoint ()
           (match
              load_context ~base_dir ~trace_id:meta.runtime.trace_id
                ~max_tokens:256
-           with
+          with
           | Some loaded ->
               check int "checkpoint max tokens clamped" 256 loaded.max_tokens;
+              check bool "recovered context fits budget" true
+                (KEC.token_count loaded <= 256);
               check bool "message count reduced" true
                 (List.length loaded.messages < original_message_count)
           | None -> fail "expected compacted OAS checkpoint")
@@ -307,7 +309,9 @@ let test_recover_latest_checkpoint_for_overflow_retry_uses_legacy_checkpoint () 
                ~max_tokens:192
            with
           | Some loaded ->
-              check int "legacy retry max tokens clamped" 192 loaded.max_tokens
+              check int "legacy retry max tokens clamped" 192 loaded.max_tokens;
+              check bool "legacy recovered context fits budget" true
+                (KEC.token_count loaded <= 192)
           | None -> fail "expected compacted checkpoint after legacy recovery")
       | None -> fail "expected overflow retry recovery from legacy checkpoint")
 

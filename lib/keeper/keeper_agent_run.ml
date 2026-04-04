@@ -517,7 +517,11 @@ let run_turn
   let policy_allowed =
     Keeper_exec_tools.keeper_allowed_tool_names !meta_ref
   in
-  let max_fallback_tools = 30 in
+  let max_tools_per_turn =
+    if is_retry then Keeper_config.keeper_retry_max_tools_per_turn ()
+    else Keeper_config.keeper_max_tools_per_turn ()
+  in
+  let max_fallback_tools = min 30 max_tools_per_turn in
   let fallback_tools =
     let candidates =
       List.filter (fun name ->
@@ -597,10 +601,7 @@ let run_turn
           | [] -> 0.0
         in
         let use_fallback = top_score < confidence_threshold in
-        let max_tools =
-          Keeper_config.int_of_env_default
-            "MASC_KEEPER_MAX_TOOLS_PER_TURN" ~default:40 ~min_v:5 ~max_v:200
-        in
+        let max_tools = max_tools_per_turn in
         let portal_ctx : Tool_portal.context = {
           config;
           agent_name = meta.name;
@@ -651,6 +652,18 @@ let run_turn
                  what you accomplished and what the next generation should do. \
                  Do NOT start new tool work. If you need more turns, call extend_turns."
                 turn max_turns
+            in
+            (match ctx with
+             | None -> Some warning
+             | Some existing -> Some (existing ^ "\n\n" ^ warning))
+          else if is_retry then
+            let warning =
+              Printf.sprintf
+                "[RETRY] The previous attempt overflowed the model context. \
+                 Stay concise, prefer already-loaded context, and only use the \
+                 smallest essential tool set if a tool call is strictly necessary. \
+                 Current tool budget: %d."
+                max_tools
             in
             (match ctx with
              | None -> Some warning

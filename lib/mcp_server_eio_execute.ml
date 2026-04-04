@@ -235,8 +235,44 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   (match mcp_session_id with
    | Some sid -> Agent_registry_eio.set_resolved_name sid agent_name
    | None -> ());
+  let is_system_internal_tool =
+    Tool_catalog.is_on_surface Tool_catalog.System_internal name
+  in
+  let preview ?(max_len = 240) text =
+    if String.length text <= max_len then text
+    else String.sub text 0 max_len ^ "..."
+  in
+  let argument_keys_json =
+    match arguments with
+    | `Assoc fields ->
+        fields
+        |> List.map fst
+        |> List.sort_uniq String.compare
+        |> List.map (fun key -> `String key)
+    | _ -> []
+  in
+  let with_system_internal_audit ~agent_name ((success, message) as result) =
+    if is_system_internal_tool then (
+      let error_msg =
+        if success then None else Some (preview message)
+      in
+      let details =
+        `Assoc
+          [
+            ("source", `String "mcp_server_eio_execute");
+            ("visible_in_tools_list", `Bool (Tool_catalog.is_visible name));
+            ("allow_direct_call", `Bool (Tool_catalog.allow_direct_call name));
+            ("mcp_session_id_present", `Bool (Option.is_some mcp_session_id));
+            ("argument_keys", `List argument_keys_json);
+          ]
+      in
+      Audit_log.log_system_internal_tool_call config ~agent_id:agent_name
+        ~tool_name:name ~success ~error_msg ~details
+        ?trace_id:(Otel_spans.current_trace_id ()) ());
+    result
+  in
   match mode_gate_error with
-  | Some msg -> (false, msg)
+  | Some msg -> with_system_internal_audit ~agent_name (false, msg)
   | None ->
   (* Enforce tool authorization when enabled *)
   let auth_enabled = Auth.is_auth_enabled config.base_path in
@@ -250,7 +286,9 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   in
 
   match auth_result with
-  | Error err -> (false, Types.masc_error_to_string err)
+  | Error err ->
+      with_system_internal_audit ~agent_name
+        (false, Types.masc_error_to_string err)
   | Ok () ->
   let extract_nickname_from_join_result ~fallback result =
     try
@@ -306,7 +344,8 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   in
   match init_error with
   | Some msg ->
-      (false, Printf.sprintf "❌ %s" msg)
+      with_system_internal_audit ~agent_name
+        (false, Printf.sprintf "❌ %s" msg)
   | None ->
 
   let is_read_only = Tool_dispatch.is_read_only name in
@@ -410,13 +449,15 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     name agent_name join_required room_initialized is_joined;
 
   if join_required && not room_initialized then
-    (false, Printf.sprintf
-      "⚠️ MASC room not initialized.\n\n💡 Workflow: masc_init → masc_join → masc_status → %s\n📚 See: @~/me/instructions/masc-workflow.md\n[DEBUG] agent_name=%s room_initialized=%b"
-      name agent_name room_initialized)
+    with_system_internal_audit ~agent_name
+      (false, Printf.sprintf
+         "⚠️ MASC room not initialized.\n\n💡 Workflow: masc_init → masc_join → masc_status → %s\n📚 See: @~/me/instructions/masc-workflow.md\n[DEBUG] agent_name=%s room_initialized=%b"
+         name agent_name room_initialized)
   else if join_required && not is_joined then
-    (false, Printf.sprintf
-      "❌ Join required: Call masc_join first before using %s.\n\n💡 Workflow: masc_join → masc_status → %s\n📚 See: @~/me/instructions/masc-workflow.md\n[DEBUG] agent_name=%s is_joined=%b"
-      name name agent_name is_joined)
+    with_system_internal_audit ~agent_name
+      (false, Printf.sprintf
+         "❌ Join required: Call masc_join first before using %s.\n\n💡 Workflow: masc_join → masc_status → %s\n📚 See: @~/me/instructions/masc-workflow.md\n[DEBUG] agent_name=%s is_joined=%b"
+         name name agent_name is_joined)
   else
 
   (* === Fix 1: Tag-based lazy context dispatch ===
@@ -581,7 +622,8 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
      Validate). If mint fails, the tool is truly unknown. *)
   match Tool_dispatch.mint_token ~name with
   | Error reason ->
-      (false, Printf.sprintf "Unknown tool: %s (%s)" name reason)
+      with_system_internal_audit ~agent_name
+        (false, Printf.sprintf "Unknown tool: %s (%s)" name reason)
   | Ok _token ->
       (* Token proves the name is registered in at least one registry.
          lookup_tag None after mint is a registry inconsistency (tool in
@@ -592,7 +634,9 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         | None -> None
       in
       (match tag_result with
-       | Some result -> result
+       | Some result -> with_system_internal_audit ~agent_name result
        | None ->
            Log.Mcp.warn "registry inconsistency: %s minted but no tag" name;
-           (false, Printf.sprintf "Unknown tool: %s (registry inconsistency)" name))
+           with_system_internal_audit ~agent_name
+             (false,
+              Printf.sprintf "Unknown tool: %s (registry inconsistency)" name))

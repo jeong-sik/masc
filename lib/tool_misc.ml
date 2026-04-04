@@ -350,8 +350,7 @@ let handle_web_search _ctx args =
            | Ok (bing_url, rss_payload) when looks_like_rss_payload rss_payload ->
                let bing_hits = parse_bing_rss_items rss_payload |> take_results limit in
                (true, web_search_result_json ~query ~search_url:bing_url ~engine:"bing_rss" bing_hits)
-           | Ok _ -> (false, json_error "both DDG and Bing returned no results")
-           | Error e -> (false, json_error e))
+           | Ok _ -> (false, json_error "both DDG and Bing returned no results"))
     | Error ddg_err ->
         (* DDG failed — try Bing RSS fallback *)
         (match fetch_bing_rss ~query with

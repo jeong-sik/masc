@@ -485,6 +485,7 @@ export interface Keeper {
   name: string
   pipeline_stage?: PipelineStage
   runtime_class?: 'keeper'
+  paused?: boolean
   registered?: boolean
   reconcile_status?: string | null
   emoji?: string
@@ -521,10 +522,14 @@ export interface Keeper {
   last_proactive_ago_s?: number
   last_proactive_reason?: string | null
   last_proactive_preview?: string | null
+  last_speech_act?: string | null
+  last_blocker?: string | null
+  last_need?: string | null
   last_drift_reason?: string | null
   drift_count_total?: number
   generation?: number
   turn_count?: number
+  last_activity_ago_s?: number
   context_ratio?: number
   context_tokens?: number
   context_max?: number

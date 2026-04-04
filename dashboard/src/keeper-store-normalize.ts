@@ -3,7 +3,7 @@ import type {
   KeeperLifecycleState,
   KeeperMetricPoint,
 } from './types'
-import { isRecord, asString, asNumber, asStringArray, toIsoTimestamp } from './components/common/normalize'
+import { isRecord, asString, asNumber, asBoolean, asStringArray, toIsoTimestamp } from './components/common/normalize'
 import { isOfflineStatus } from './lib/status-utils'
 
 function normalizeKeeperAgentStatus(value: unknown): Keeper['status'] {
@@ -205,6 +205,7 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
       return {
         name,
         runtime_class: 'keeper' as const,
+        paused: asBoolean(row.paused),
         registered:
           typeof row.registered === 'boolean' ? row.registered : undefined,
         reconcile_status: asString(row.reconcile_status) ?? null,
@@ -226,7 +227,10 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
           typeof row.proactive_enabled === 'boolean' ? row.proactive_enabled : undefined,
         proactive_idle_sec: asNumber(row.proactive_idle_sec),
         proactive_cooldown_sec: asNumber(row.proactive_cooldown_sec),
+        created_at: toIsoTimestamp(row.created_at) ?? asString(row.created_at),
+        updated_at: toIsoTimestamp(row.updated_at) ?? asString(row.updated_at),
         last_heartbeat: asString(row.last_heartbeat) ?? asString(agentRaw?.last_seen),
+        last_autonomous_action_at: toIsoTimestamp(row.last_autonomous_action_at) ?? asString(row.last_autonomous_action_at) ?? null,
         generation: asNumber(row.generation),
         turn_count: asNumber(row.turn_count) ?? asNumber(row.total_turns),
         autonomous_action_count: asNumber(row.autonomous_action_count),
@@ -241,7 +245,12 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         last_handoff_ago_s: asNumber(row.last_handoff_ago_s),
         last_compaction_ago_s: asNumber(row.last_compaction_ago_s),
         last_proactive_ago_s: asNumber(row.last_proactive_ago_s),
+        last_proactive_reason: asString(row.last_proactive_reason) ?? null,
+        last_activity_ago_s: asNumber(row.last_activity_ago_s),
         last_proactive_preview: asString(row.last_proactive_preview) ?? null,
+        last_speech_act: asString(row.last_speech_act) ?? null,
+        last_blocker: asString(row.last_blocker) ?? null,
+        last_need: asString(row.last_need) ?? null,
         context_ratio: contextRatio,
         context_tokens: asNumber(row.context_tokens) ?? asNumber(contextRaw?.context_tokens),
         context_max: asNumber(row.context_max) ?? asNumber(contextRaw?.context_max),

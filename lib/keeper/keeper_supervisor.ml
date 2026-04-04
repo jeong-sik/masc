@@ -63,8 +63,10 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
     let resolve_done value =
       if not !resolved && Option.is_none (Eio.Promise.peek reg.done_p) then begin
         resolved := true;
-        Eio.Promise.resolve reg.done_r value
-      end
+        Eio.Promise.resolve reg.done_r value;
+        true
+      end else
+        false
     in
     Fun.protect
       (fun () ->
@@ -74,8 +76,8 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
            (* Normal exit: stop flag was set *)
            Keeper_registry.set_state ~base_path meta.name
              Keeper_registry.Stopped;
-           resolve_done `Stopped;
-           publish_lifecycle "stopped" meta.name "normal exit"
+           if resolve_done `Stopped then
+             publish_lifecycle "stopped" meta.name "normal exit"
          with
          | Keeper_registry.Keeper_heartbeat_failure info ->
              let reason =
@@ -92,8 +94,8 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
              Keeper_crash_persistence.enqueue_record ~keepers_dir
                ~name:meta.name ~ts ~reason ~restart_count:rc;
              Keeper_registry.record_error ~base_path meta.name reason;
-             resolve_done (`Crashed reason);
-             publish_lifecycle "crashed" meta.name reason
+             if resolve_done (`Crashed reason) then
+               publish_lifecycle "crashed" meta.name reason
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->
              let fr = Keeper_registry.Exception (Printexc.to_string exn) in
@@ -109,8 +111,8 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
              Keeper_crash_persistence.enqueue_record ~keepers_dir
                ~name:meta.name ~ts ~reason ~restart_count:rc;
              Keeper_registry.record_error ~base_path meta.name reason;
-             resolve_done (`Crashed reason);
-             publish_lifecycle "crashed" meta.name reason))
+             if resolve_done (`Crashed reason) then
+               publish_lifecycle "crashed" meta.name reason))
       ~finally:(fun () ->
         Keeper_registry.cleanup_tracking ~base_path meta.name;
         if not !resolved then begin
@@ -118,7 +120,7 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
             Log.Keeper.warn "%s: fiber unresolved during shutdown (not a crash)" meta.name;
             Keeper_registry.mark_dead ~base_path meta.name
               ~at:(Time_compat.now ());
-            resolve_done (`Crashed "shutdown")
+            ignore (resolve_done (`Crashed "shutdown"))
           end else begin
             let reason =
               Keeper_registry.failure_reason_to_string
@@ -135,8 +137,8 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
             Keeper_registry.record_error ~base_path meta.name reason;
             Keeper_registry.set_state ~base_path meta.name
               Keeper_registry.Crashed;
-            resolve_done (`Crashed reason);
-            publish_lifecycle "crashed" meta.name reason
+            if resolve_done (`Crashed reason) then
+              publish_lifecycle "crashed" meta.name reason
           end
         end))
 

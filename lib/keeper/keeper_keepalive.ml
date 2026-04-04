@@ -1156,6 +1156,49 @@ let publish_keeper_started ~(live_meta : keeper_meta) : unit =
     ~detail:"keepalive"
 ;;
 
+let resolve_registry_done
+      (entry : Keeper_registry.registry_entry)
+      (value : [ `Stopped | `Crashed of string ])
+  : bool
+  =
+  if Option.is_none (Eio.Promise.peek entry.done_p)
+  then (
+    Eio.Promise.resolve entry.done_r value;
+    true)
+  else false
+;;
+
+let record_keeper_stopped
+      (entry : Keeper_registry.registry_entry)
+      ~base_path
+      ~keeper_name
+      ~detail
+  : unit
+  =
+  if resolve_registry_done entry `Stopped
+  then (
+    Keeper_registry.set_state ~base_path keeper_name Keeper_registry.Stopped;
+    Keeper_registry.cleanup_tracking ~base_path keeper_name;
+    publish_keeper_lifecycle ~event:"stopped" ~keeper_name ~detail)
+;;
+
+let record_keeper_crashed
+      (entry : Keeper_registry.registry_entry)
+      ~base_path
+      ~keeper_name
+      ~failure_reason
+  : unit
+  =
+  let reason = Keeper_registry.failure_reason_to_string failure_reason in
+  if resolve_registry_done entry (`Crashed reason)
+  then (
+    Keeper_registry.set_failure_reason ~base_path keeper_name (Some failure_reason);
+    Keeper_registry.set_state ~base_path keeper_name Keeper_registry.Crashed;
+    Keeper_registry.record_crash ~base_path keeper_name (Time_compat.now ()) reason;
+    Keeper_registry.record_error ~base_path keeper_name reason;
+    publish_keeper_lifecycle ~event:"crashed" ~keeper_name ~detail:reason)
+;;
+
 let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_meta) : unit
   =
   if Keeper_registry.is_running ~base_path:ctx.config.base_path m.name
@@ -1179,35 +1222,19 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
     Keeper_registry.update_meta ~base_path:ctx.config.base_path m.name live_meta;
     publish_keeper_started ~live_meta;
     Eio.Fiber.fork ~sw:ctx.sw (fun () ->
-      let resolved = ref false in
-      let resolve_done value =
-        if not !resolved && Option.is_none (Eio.Promise.peek reg.done_p) then begin
-          resolved := true;
-          Eio.Promise.resolve reg.done_r value;
-          true
-        end else
-          false
-      in
       let record_crash failure_reason =
-        let reason = Keeper_registry.failure_reason_to_string failure_reason in
-        Keeper_registry.set_failure_reason ~base_path:ctx.config.base_path live_meta.name
-          (Some failure_reason);
-        Keeper_registry.set_state ~base_path:ctx.config.base_path live_meta.name
-          Keeper_registry.Crashed;
-        Keeper_registry.record_crash ~base_path:ctx.config.base_path live_meta.name
-          (Time_compat.now ()) reason;
-        Keeper_registry.record_error ~base_path:ctx.config.base_path live_meta.name
-          reason;
-        if resolve_done (`Crashed reason) then
-          publish_keeper_lifecycle ~event:"crashed" ~keeper_name:live_meta.name
-            ~detail:reason
+        record_keeper_crashed
+          reg
+          ~base_path:ctx.config.base_path
+          ~keeper_name:live_meta.name
+          ~failure_reason
       in
       let record_stopped detail =
-        Keeper_registry.set_state ~base_path:ctx.config.base_path live_meta.name
-          Keeper_registry.Stopped;
-        if resolve_done `Stopped then
-          publish_keeper_lifecycle ~event:"stopped" ~keeper_name:live_meta.name
-            ~detail
+        record_keeper_stopped
+          reg
+          ~base_path:ctx.config.base_path
+          ~keeper_name:live_meta.name
+          ~detail
       in
       Fun.protect
         (fun () ->
@@ -1250,6 +1277,12 @@ let stop_keepalive name =
            | Eio.Cancel.Cancelled _ as e -> raise e
            | _exn -> ())
         | None -> ());
-       Keeper_registry.set_state ~base_path:entry.base_path name Keeper_registry.Stopped)
+       if entry.state = Keeper_registry.Running
+       then
+         record_keeper_stopped
+           entry
+           ~base_path:entry.base_path
+           ~keeper_name:entry.name
+           ~detail:"manual stop")
     entries
 ;;

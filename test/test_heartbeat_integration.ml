@@ -433,6 +433,38 @@ let test_direct_start_keepalive_resolves_done_on_stop () =
            fail ("expected stopped promise, got crashed: " ^ reason)
          | None -> fail "expected done_p to resolve on stop"))
 
+let test_stop_keepalive_resolves_running_entry_immediately () =
+  R.clear ();
+  let keeper_name = "manual-stop-entry" in
+  let reg = R.register ~base_path:bp keeper_name (make_meta keeper_name) in
+  Masc_mcp.Keeper_keepalive.stop_keepalive keeper_name;
+  match R.get ~base_path:bp keeper_name with
+  | None -> fail "expected manual-stop-entry in registry"
+  | Some entry ->
+    check string "state stopped immediately" "stopped" (R.state_to_string entry.state);
+    (match Eio.Promise.peek reg.done_p with
+     | Some `Stopped -> ()
+     | Some (`Crashed reason) ->
+       fail ("expected stopped promise, got crashed: " ^ reason)
+     | None -> fail "expected manual stop to resolve done_p")
+
+let test_stop_keepalive_preserves_existing_crash_outcome () =
+  R.clear ();
+  let keeper_name = "crashed-before-stop" in
+  let reg = R.register ~base_path:bp keeper_name (make_meta keeper_name) in
+  let reason = "already crashed" in
+  R.set_state ~base_path:bp keeper_name R.Crashed;
+  Eio.Promise.resolve reg.done_r (`Crashed reason);
+  Masc_mcp.Keeper_keepalive.stop_keepalive keeper_name;
+  match R.get ~base_path:bp keeper_name with
+  | None -> fail "expected crashed-before-stop in registry"
+  | Some entry ->
+    check string "state remains crashed" "crashed" (R.state_to_string entry.state);
+    (match Eio.Promise.peek entry.done_p with
+     | Some (`Crashed msg) -> check string "crash reason preserved" reason msg
+     | Some `Stopped -> fail "manual stop should not overwrite a crashed promise"
+     | None -> fail "expected crash promise to remain resolved")
+
 (* ── Test runner ──────────────────────────────────────────── *)
 
 let () =
@@ -465,5 +497,9 @@ let () =
     "direct_keepalive", [
       test_case "stop resolves done promise" `Quick
         test_direct_start_keepalive_resolves_done_on_stop;
+      test_case "manual stop resolves running entry immediately" `Quick
+        test_stop_keepalive_resolves_running_entry_immediately;
+      test_case "manual stop preserves crashed outcome" `Quick
+        test_stop_keepalive_preserves_existing_crash_outcome;
     ];
   ]

@@ -502,7 +502,7 @@
         test_tool_suspend_coverage test_tool_code_coverage
         test_tool_library_coverage test_tool_shard_coverage
         test_context_compact_oas_coverage test_keeper_masc_bridge
-        test_anti_rationalization_coverage)
+        test_anti_rationalization_coverage test_field_validation)
  (modules test_backend_coverage test_tools_coverage test_types_utils_coverage
         test_agent_card_coverage test_misc_coverage test_relay_coverage
         test_tempo_coverage test_transport_coverage test_validation_coverage
@@ -535,7 +535,7 @@
         test_tool_suspend_coverage test_tool_code_coverage
         test_tool_library_coverage test_tool_shard_coverage
         test_context_compact_oas_coverage test_keeper_masc_bridge
-        test_anti_rationalization_coverage)
+        test_anti_rationalization_coverage test_field_validation)
  (libraries masc_test_deps))
 
 ; ============================================================

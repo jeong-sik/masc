@@ -108,7 +108,11 @@ let has_background_capacity () =
         not
           (capacity.all_discovered && capacity.endpoints_found > 0
            && capacity.process_available <= 0)
-      with _ -> true)
+      with
+      | Eio.Cancel.Cancelled _ as ex -> raise ex
+      | ex ->
+        Eio.traceln "[autoresearch] capacity check failed: %s" (Printexc.to_string ex);
+        true)
   | _ -> true
 
 (** Generate code change via Cascade "autoresearch" profile.

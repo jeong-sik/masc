@@ -759,14 +759,21 @@ let session_to_swarm_config
       match all_selections with
       | [] -> entry_count
       | _ ->
-          let capacity =
-            Llm_provider.Cascade_config.local_capacity_for_selections ~sw ~net
-              all_selections
-          in
-          slot_aware_concurrency_cap ~entry_count
-            ~selection_count:(List.length all_selections)
-            ~all_discovered:capacity.all_discovered
-            ~endpoints_found:capacity.endpoints_found ~total:capacity.total
+          (try
+            let capacity =
+              Llm_provider.Cascade_config.local_capacity_for_selections ~sw ~net
+                all_selections
+            in
+            slot_aware_concurrency_cap ~entry_count
+              ~selection_count:(List.length all_selections)
+              ~all_discovered:capacity.all_discovered
+              ~endpoints_found:capacity.endpoints_found ~total:capacity.total
+          with
+          | Eio.Cancel.Cancelled _ as ex -> raise ex
+          | ex ->
+            Eio.traceln "[swarm] capacity probe failed, using entry_count: %s"
+              (Printexc.to_string ex);
+            entry_count)
   in
   { entries; mode;
     convergence = make_convergence_metric ~entry_count success_by_agent;

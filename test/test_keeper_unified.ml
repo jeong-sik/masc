@@ -1545,6 +1545,30 @@ let test_tool_query_text_of_user_message_strips_continuity_noise () =
   check bool "worktree section preserved" true
     (contains_substring query "Live Worktree Delta")
 
+let test_tool_query_text_of_user_message_keeps_counted_headers () =
+  let obs =
+    {
+      base_observation with
+      pending_mentions = [ ("alice", "please inspect the failures") ];
+      pending_scope_messages = [ ("bob", "recent room update") ];
+      active_goals = [ "goal-1" ];
+      pending_board_events = [ sample_board_event ];
+      failed_task_count = 2;
+    }
+  in
+  let _sys, user = UP.build_prompt ~meta:minimal_meta ~observation:obs in
+  let query = KAR.tool_query_text_of_user_message user in
+  check bool "keeps counted pending mentions header" true
+    (contains_substring query "### Pending Mentions (1)");
+  check bool "keeps mention content" true
+    (contains_substring query "@alice: please inspect the failures");
+  check bool "keeps counted scope messages header" true
+    (contains_substring query "### Scope Messages (1 recent)");
+  check bool "keeps counted active goals header" true
+    (contains_substring query "### Active Goals (1)");
+  check bool "keeps counted board activity header" true
+    (contains_substring query "### Board Activity (1 new)")
+
 let test_social_model_silences_skip_only_turn () =
   let result =
     make_run_result
@@ -1835,6 +1859,8 @@ let () =
             test_prioritized_disclosed_tool_names_skips_fallback_when_disabled;
           test_case "tool query strips continuity noise" `Quick
             test_tool_query_text_of_user_message_strips_continuity_noise;
+          test_case "tool query keeps counted headers" `Quick
+            test_tool_query_text_of_user_message_keeps_counted_headers;
           test_case "social model silences skip-only turn" `Quick
             test_social_model_silences_skip_only_turn;
           test_case "social model requires explicit headers" `Quick

@@ -104,6 +104,11 @@ let tool_query_text_of_user_message (text : string) : string =
       "### Live Worktree Delta";
     ]
   in
+  let is_allowed_section section =
+    List.exists
+      (fun allowed -> String.starts_with ~prefix:allowed section)
+      allowed_sections
+  in
   let lines = String.split_on_char '\n' text in
   let rec loop current_section kept = function
     | [] ->
@@ -120,7 +125,7 @@ let tool_query_text_of_user_message (text : string) : string =
           | None ->
               String.starts_with ~prefix:"## Current World State" trimmed
           | Some section ->
-              List.mem section allowed_sections
+              is_allowed_section section
         in
         if keep_line then
           loop current_section (line :: kept) rest

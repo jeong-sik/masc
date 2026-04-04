@@ -161,6 +161,11 @@ let local_model_gate =
     max_cost_usd = 1.00;
   }
 
+(* Boundary: MASC selects the internal retry policy, but OAS owns
+   retry classification, feedback synthesis, and loop control. *)
+let default_internal_tool_retry_policy =
+  Oas.Tool_retry_policy.default_internal
+
 let tool_policy_of_execution_scope
     (scope : Team_session_types.execution_scope) : Tool_access_policy.t =
   match scope with
@@ -258,6 +263,7 @@ let build_agent
     |> Oas.Builder.with_tools tools
     |> Oas.Builder.with_hooks hooks
     |> Oas.Builder.with_guardrails guardrails
+    |> Oas.Builder.with_tool_retry_policy default_internal_tool_retry_policy
     |> Oas.Builder.with_raw_trace raw_trace
     |> Oas.Builder.with_periodic_callbacks heartbeat_callbacks
     |> Oas.Builder.with_description (description_of_meta meta)
@@ -423,7 +429,8 @@ and resume_worker_via_oas
     Worker_container.build_resume_config ~worker_name
       ~provider:resume_provider ~model_id:resume_model_id ~system_prompt ~tools
       ~max_turns ~thinking_enabled ~hooks ~raw_trace
-      ~periodic_callbacks:heartbeat_cbs ~guardrails ()
+      ~periodic_callbacks:heartbeat_cbs ~guardrails
+      ~tool_retry_policy:default_internal_tool_retry_policy ()
   in
   Fun.protect
     ~finally:(fun () ->

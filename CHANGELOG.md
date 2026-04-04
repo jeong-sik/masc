@@ -29,6 +29,7 @@
 - **OAS capacity-aware backoff** -- restore capacity-aware local backoff for provider adapter (#4986).
 - **Keeper autoboot** -- fix keeper autoboot for declarative janitor cleanup (#4987).
 - **Cascade config local-first** -- make cascade config local-first with llama:auto (#4981).
+- **OAS SDK pin truth** -- bump the `agent_sdk` floor to `0.100.7` and sync CI/runtime pin + docs for internal tool retry policy wiring (#5009, #5012).
 
 ## [2.220.0] - 2026-04-04
 

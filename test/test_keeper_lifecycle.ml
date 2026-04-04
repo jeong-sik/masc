@@ -65,6 +65,12 @@ let build_dense_context ~turns ~max_tokens ~state_reply =
   KEC.append ctx (Agent_sdk.Types.assistant_msg state_reply)
   |> KEC.sync_oas_context
 
+let message_token_count (ctx : KT.working_context) =
+  List.fold_left
+    (fun acc (msg : Agent_sdk.Types.message) ->
+      acc + Agent_sdk.Context_reducer.estimate_message_tokens msg)
+    0 ctx.messages
+
 let save_checkpoint ~base_dir ~(meta : KT.keeper_meta) ~ctx =
   let session =
     KEC.create_session ~session_id:meta.runtime.trace_id ~base_dir
@@ -315,6 +321,49 @@ let test_recover_latest_checkpoint_for_overflow_retry_uses_legacy_checkpoint () 
           | None -> fail "expected compacted checkpoint after legacy recovery")
       | None -> fail "expected overflow retry recovery from legacy checkpoint")
 
+let test_recover_latest_checkpoint_for_overflow_retry_ignores_checkpoint_system_prompt_in_history_budget () =
+  let base_dir = temp_dir "keeper_lifecycle_overflow_retry_system_prompt" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      Fs_compat.clear_fs ();
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let meta = make_keeper_meta ~trace_id:"trace-overflow-retry-system-prompt" () in
+      let long_system_prompt = String.make 4000 's' in
+      let original_ctx =
+        let rec loop idx ctx =
+          if idx > 20 then ctx else loop (idx + 1) (append_turn ctx idx)
+        in
+        let ctx =
+          loop 1
+            (KEC.create ~system_prompt:long_system_prompt ~max_tokens:4096)
+        in
+        KEC.append ctx
+          (Agent_sdk.Types.assistant_msg
+             "done\n\n[STATE]\nGoal: retry despite large system prompt\nProgress: ready\n[/STATE]")
+        |> KEC.sync_oas_context
+      in
+      ignore (save_checkpoint ~base_dir ~meta ~ctx:original_ctx);
+      match
+        KEC.recover_latest_checkpoint_for_overflow_retry ~base_dir ~meta
+          ~model:"llama:auto" ~primary_model_max_tokens:512
+      with
+      | Some _ ->
+          (match
+             load_context ~base_dir ~trace_id:meta.runtime.trace_id
+               ~max_tokens:512
+           with
+          | Some loaded ->
+              check bool "history messages fit budget" true
+                (message_token_count loaded <= 512);
+              check bool "stored context may exceed history budget once system prompt is counted"
+                true (KEC.token_count loaded > 512)
+          | None -> fail "expected overflow retry checkpoint to be saved")
+      | None ->
+          fail
+            "expected overflow retry recovery to keep message history within budget even with a large checkpoint system prompt")
+
 let () =
   run "keeper_lifecycle"
     [
@@ -330,5 +379,9 @@ let () =
             test_recover_latest_checkpoint_for_overflow_retry_compacts_oas_checkpoint;
           test_case "overflow retry falls back to legacy checkpoint" `Quick
             test_recover_latest_checkpoint_for_overflow_retry_uses_legacy_checkpoint;
+          test_case
+            "overflow retry history budget ignores checkpoint system prompt"
+            `Quick
+            test_recover_latest_checkpoint_for_overflow_retry_ignores_checkpoint_system_prompt_in_history_budget;
         ] );
     ]

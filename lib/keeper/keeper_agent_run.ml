@@ -138,7 +138,8 @@ let log_keeper_proof ~(keeper_name : string) (proof : Agent_sdk.Cdal_proof.t) =
           (List.length proof.raw_evidence_refs)
   | Agent_sdk.Cdal_proof.Errored
   | Agent_sdk.Cdal_proof.Timed_out
-  | Agent_sdk.Cdal_proof.Cancelled ->
+  | Agent_sdk.Cdal_proof.Cancelled
+  | Agent_sdk.Cdal_proof.Context_overflow ->
       Log.Keeper.warn "keeper:%s proof: run_id=%s mode=%s status=%s evidence_refs=%d"
         keeper_name proof.run_id
         (Agent_sdk.Execution_mode.to_string proof.effective_execution_mode)

@@ -15,6 +15,17 @@ let keeper_denied_set : (string, unit) Hashtbl.t =
     (Tool_catalog.tools_for_surface Tool_catalog.Keeper_denied);
   tbl
 
+let dedupe_tool_schemas (schemas : Types.tool_schema list) =
+  let seen = Hashtbl.create (max 16 (List.length schemas)) in
+  List.filter
+    (fun (schema : Types.tool_schema) ->
+      if Hashtbl.mem seen schema.name then
+        false
+      else (
+        Hashtbl.replace seen schema.name ();
+        true))
+    schemas
+
 let is_keeper_denied (name : string) : bool =
   Hashtbl.mem keeper_denied_set name
 
@@ -280,6 +291,7 @@ let keeper_preset_universe_model_tools (meta : keeper_meta) : Types.tool_schema 
   in
   all_schemas
   |> List.filter (fun tool -> List.mem tool.Types.name scoped)
+  |> dedupe_tool_schemas
 
 let keeper_allowed_model_tools ?(write_done = false) (meta : keeper_meta) :
     Types.tool_schema list =
@@ -297,6 +309,7 @@ let keeper_allowed_model_tools ?(write_done = false) (meta : keeper_meta) :
     let result =
       all_schemas
       |> List.filter (fun tool -> List.mem tool.Types.name allowed)
+      |> dedupe_tool_schemas
     in
     let count = List.length result in
     if count > 100 then
@@ -320,3 +333,4 @@ let keeper_universe_model_tools (meta : keeper_meta) : Types.tool_schema list =
   in
   all_schemas
   |> List.filter (fun tool -> List.mem tool.Types.name universe)
+  |> dedupe_tool_schemas

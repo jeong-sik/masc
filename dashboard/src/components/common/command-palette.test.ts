@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import { render } from 'preact'
+import { signal } from '@preact/signals'
 import { waitFor } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -7,6 +8,9 @@ const navigate = vi.fn()
 const requestConfirm = vi.fn()
 const runGarbageCollection = vi.fn().mockResolvedValue(undefined)
 const cleanupZombies = vi.fn().mockResolvedValue(undefined)
+const missionSnapshot = signal<any>(null)
+const missionAgentBriefs = signal<any[]>([])
+const missionKeeperBriefs = signal<any[]>([])
 
 async function loadPalette() {
   vi.resetModules()
@@ -15,6 +19,11 @@ async function loadPalette() {
   vi.doMock('../flow-control/flow-control-state', () => ({
     cleanupZombies,
     runGarbageCollection,
+  }))
+  vi.doMock('../../mission-signals', () => ({
+    missionSnapshot,
+    missionAgentBriefs,
+    missionKeeperBriefs,
   }))
   return import('./command-palette')
 }
@@ -25,6 +34,9 @@ describe('CommandPalette', () => {
   beforeEach(() => {
     container = document.createElement('div')
     document.body.appendChild(container)
+    missionSnapshot.value = null
+    missionAgentBriefs.value = []
+    missionKeeperBriefs.value = []
   })
 
   afterEach(() => {
@@ -35,6 +47,7 @@ describe('CommandPalette', () => {
     vi.doUnmock('../../router')
     vi.doUnmock('./confirm-dialog')
     vi.doUnmock('../flow-control/flow-control-state')
+    vi.doUnmock('../../mission-signals')
   })
 
   it('loads the web component lazily and wires navigation commands without reserved hotkeys', async () => {
@@ -85,5 +98,24 @@ describe('CommandPalette', () => {
     requestConfirm.mockResolvedValueOnce(false)
     await palette?.data?.find((item) => item.id === 'action-zombie')?.handler()
     expect(cleanupZombies).not.toHaveBeenCalled()
+  })
+
+  it('falls back to session briefs when snapshot sessions are empty', async () => {
+    missionSnapshot.value = {
+      sessions: [],
+      session_briefs: [
+        { session_id: 'sess-1', goal: 'fallback brief', status: 'running' },
+      ],
+    }
+
+    const { CommandPalette } = await loadPalette()
+    render(html`<${CommandPalette} />`, container)
+
+    await waitFor(() => {
+      const palette = container.querySelector('ninja-keys') as (HTMLElement & {
+        data?: Array<{ id: string; title: string }>
+      }) | null
+      expect(palette?.data?.some((item) => item.id === 'nav-session-sess-1')).toBe(true)
+    })
   })
 })

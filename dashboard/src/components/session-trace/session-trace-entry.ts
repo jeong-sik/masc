@@ -98,7 +98,9 @@ function ToolCallDetail({ event }: { event: UnifiedTraceEvent }) {
         </div>
       ` : null}
       ${event.toolResult || event.error ? html`
-        <div class="max-h-[300px] overflow-auto rounded-xl border border-[var(--white-6)] bg-[var(--bg-0)]"><${Markdown} text=${typeof (event.error ?? event.toolResult) === 'string' && String(event.error ?? event.toolResult).includes('```') ? String(event.error ?? event.toolResult) : '```json\n' + JSON.stringify((event.error ?? event.toolResult), null, 2) + '\n```'} /></div>
+        <div class="mt-1">
+          <${JsonViewerCard} data=${parseJsonLikeData(event.error ?? event.toolResult)} title=${event.error ? 'Error' : 'Result'} />
+        </div>
       ` : null}
       ${gateRejected ? html`
         <div class="text-[10px] px-2 py-1 rounded bg-[var(--bad-10)] text-[#ef4444] inline-block">

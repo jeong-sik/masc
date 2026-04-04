@@ -83,9 +83,17 @@ module FileSystem = struct
       (fun () -> Hashtbl.length t.key_index)
 
   let ki_iter t f =
+    let entries =
+      Mutex.lock t.key_index_mu;
+      Fun.protect ~finally:(fun () -> Mutex.unlock t.key_index_mu) (fun () ->
+        Hashtbl.fold (fun k v acc -> (k, v) :: acc) t.key_index [])
+    in
+    List.iter (fun (k, v) -> f k v) entries
+
+  let ki_replace_bulk t entries =
     Mutex.lock t.key_index_mu;
-    Fun.protect ~finally:(fun () -> Mutex.unlock t.key_index_mu)
-      (fun () -> Hashtbl.iter f t.key_index)
+    Fun.protect ~finally:(fun () -> Mutex.unlock t.key_index_mu) (fun () ->
+      List.iter (fun (k, v) -> Hashtbl.replace t.key_index k v) entries)
 
   (** {2 Key Validation} *)
 
@@ -285,7 +293,7 @@ module FileSystem = struct
            let keys =
              collect_keys_under ~requested_prefix:"" ~logical_prefix:"" t.fs []
            in
-           List.iter (fun k -> ki_replace t k ()) keys;
+           ki_replace_bulk t (List.map (fun k -> (k, ())) keys);
            let len = ki_length t in
            if len > 0 then
              Log.legacy_traceln ~level:Log.Info ~module_name:"Backend"

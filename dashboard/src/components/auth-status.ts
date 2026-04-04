@@ -67,7 +67,7 @@ function AuthPopover({ authenticated }: { authenticated: boolean }) {
         <div class="flex flex-col gap-2">
           <div class="text-[11px] text-[var(--text-muted)]">Bearer token이 설정되어 있습니다.</div>
           <button type="button"
-            class="w-full py-1.5 px-3 rounded-md text-[11px] border border-[rgba(239,68,68,0.3)] bg-[rgba(239,68,68,0.08)] text-[#fb7185] hover:bg-[rgba(239,68,68,0.15)] cursor-pointer transition-colors"
+            class="w-full py-1.5 px-3 rounded-md text-[11px] border border-[var(--bad-30)] bg-[var(--bad-10)] text-[#fb7185] hover:bg-[rgba(239,68,68,0.15)] cursor-pointer transition-colors"
             onClick=${handleClearToken}
           >토큰 제거</button>
         </div>
@@ -83,7 +83,7 @@ function AuthPopover({ authenticated }: { authenticated: boolean }) {
             onKeyDown=${(e: KeyboardEvent) => { if (e.key === 'Enter') handleSetToken() }}
           />
           <button type="button"
-            class="w-full py-1.5 px-3 rounded-md text-[11px] border border-[rgba(71,184,255,0.3)] bg-[rgba(71,184,255,0.08)] text-[#9ad9ff] hover:bg-[rgba(71,184,255,0.15)] cursor-pointer transition-colors"
+            class="w-full py-1.5 px-3 rounded-md text-[11px] border border-[rgba(71,184,255,0.3)] bg-[var(--accent-10)] text-[var(--accent)] hover:bg-[rgba(71,184,255,0.15)] cursor-pointer transition-colors"
             onClick=${handleSetToken}
           >토큰 설정</button>
         </div>
@@ -96,11 +96,11 @@ export function RemoteWarningBanner() {
   if (bannerDismissed.value || !isRemoteAccess() || getStoredToken()) return null
 
   return html`
-    <div class="shrink-0 flex items-center justify-between gap-3 px-4 py-2 bg-[rgba(251,191,36,0.08)] border-b border-[rgba(251,191,36,0.2)] text-[12px] text-[#fbbf24]">
+    <div class="shrink-0 flex items-center justify-between gap-3 px-4 py-2 bg-[var(--warn-10)] border-b border-[rgba(251,191,36,0.2)] text-[12px] text-[#fbbf24]">
       <span>원격 접속이 감지되었습니다. Mutation 작업을 위해 Bearer token을 설정하세요.</span>
       <div class="flex items-center gap-2 shrink-0">
         <button type="button"
-          class="px-2 py-0.5 rounded text-[11px] border border-[rgba(71,184,255,0.3)] bg-[rgba(71,184,255,0.08)] text-[#9ad9ff] hover:bg-[rgba(71,184,255,0.15)] cursor-pointer transition-colors"
+          class="px-2 py-0.5 rounded text-[11px] border border-[rgba(71,184,255,0.3)] bg-[var(--accent-10)] text-[var(--accent)] hover:bg-[rgba(71,184,255,0.15)] cursor-pointer transition-colors"
           onClick=${() => { popoverOpen.value = true }}
         >토큰 입력</button>
         <button type="button"

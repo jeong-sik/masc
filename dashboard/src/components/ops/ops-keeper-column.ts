@@ -88,7 +88,7 @@ export function OpsKeeperColumn() {
                     ${displayStatus(keeper.status)}
                   </span>
                   <button type="button"
-                    class="text-[11px] py-0.5 px-2 rounded-md border border-[rgba(71,184,255,0.25)] bg-[rgba(71,184,255,0.08)] text-[#9ad9ff] hover:bg-[rgba(71,184,255,0.18)] cursor-pointer transition-colors"
+                    class="text-[11px] py-0.5 px-2 rounded-md border border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--accent)] hover:bg-[var(--accent-20)] cursor-pointer transition-colors"
                     onClick=${(e: Event) => { e.stopPropagation(); openOpsKeeperDetail(keeper) }}
                   >상세 보기</button>
                 </div>

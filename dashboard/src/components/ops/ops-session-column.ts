@@ -1,8 +1,8 @@
 // Ops — Session column: session list, selected session digest, session actions
 
 import { signal } from '@preact/signals'
-import { Markdown } from "../common/markdown"
 import { html } from 'htm/preact'
+import { JsonViewerCard } from '../common/json-viewer'
 import { CARD_STANDARD } from '../common/card'
 import { ActionButton } from '../common/button'
 import {
@@ -294,7 +294,7 @@ export function OpsSessionColumn() {
                 : null}
             ` : null}
             ${selectedSession.recent_events && selectedSession.recent_events.length > 0 ? html`
-              <div class=\"max-h-[300px] overflow-auto rounded-xl border border-[var(--white-6)] bg-[var(--bg-0)]\"><${Markdown} text=${'```json\n' + JSON.stringify(selectedSession.recent_events.slice(-3), null, 2) + '\n```'} /></div>
+              <${JsonViewerCard} data=${selectedSession.recent_events.slice(-3)} title="Recent Events" />
             ` : null}
           </div>
         ` : html`<div class="p-3 rounded-xl border border-dashed border-[var(--card-border)] text-[var(--text-muted)] text-[13px]">먼저 세션을 하나 고르세요.</div>`}

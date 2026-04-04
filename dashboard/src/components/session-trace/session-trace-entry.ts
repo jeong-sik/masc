@@ -98,8 +98,8 @@ function ToolCallDetail({ event }: { event: UnifiedTraceEvent }) {
         </div>
       ` : null}
       ${event.toolResult || event.error ? html`
-        <div class="text-[11px] font-mono ${event.error ? 'text-[var(--bad)]' : 'text-[var(--text-dim)]'} bg-[var(--white-3)] px-3 py-2 rounded-lg overflow-x-auto whitespace-pre-wrap break-all max-h-48 overflow-y-auto">
-          ${event.error ?? event.toolResult}
+        <div class="mt-1">
+          <${JsonViewerCard} data=${event.error ?? event.toolResult} title=${event.error ? 'Error' : 'Result'} />
         </div>
       ` : null}
       ${gateRejected ? html`

@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { Markdown } from "../common/markdown"
+import { JsonViewerCard } from '../common/json-viewer'
 import { StatusChip } from '../common/status-chip'
 import type { CommandPlaneTraceEvent } from '../../types'
 import { relativeTime } from './helpers'
@@ -19,7 +19,7 @@ export function TraceRow({ event }: { event: CommandPlaneTraceEvent }) {
           ${event.actor ? ` · ${event.actor}` : ''}
         </div>
       </div>
-      <div class=\"max-h-[300px] overflow-auto rounded-xl border border-[var(--white-6)] bg-[var(--bg-0)]\"><${Markdown} text=${'```json\n' + JSON.stringify(event.detail, null, 2) + '\n```'} /></div>
+      <${JsonViewerCard} data=${event.detail} title="Event Detail" />
     </article>
   `
 }

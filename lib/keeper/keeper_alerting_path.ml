@@ -20,6 +20,32 @@ let normalize_path_for_check (path : string) : string =
     in
     Filename.concat parent_norm (Filename.basename path)
 
+let normalize_allowed_path_for_check ~(root : string) (path : string) : string option =
+  let raw = String.trim path in
+  if raw = "" then None
+  else
+    let candidate =
+      if Filename.is_relative raw then Filename.concat root raw else raw
+    in
+    let normalized = normalize_path_for_check candidate |> strip_trailing_slashes in
+    if normalized = "" then None else Some normalized
+
+let absolute_allowed_paths ~(config : Room.config) ~(allowed_paths : string list)
+    : string list =
+  let root = project_root_of_config config in
+  allowed_paths |> List.filter_map (normalize_allowed_path_for_check ~root)
+
+let absolute_allowed_paths_result ~(config : Room.config)
+    ~(allowed_paths : string list) : (string list, string) result =
+  let normalized = absolute_allowed_paths ~config ~allowed_paths in
+  if allowed_paths <> [] && normalized = [] then
+    Error
+      (Printf.sprintf
+         "allowed_paths_normalized_empty: [%s]"
+         (String.concat ", " allowed_paths))
+  else
+    Ok normalized
+
 let resolve_keeper_target_path ~(config : Room.config)
     ~(allowed_paths : string list) ~(raw_path : string)
     : (string, string) result =
@@ -43,25 +69,23 @@ let resolve_keeper_target_path ~(config : Room.config)
     else if allowed_paths = [] then
       Ok candidate
     else
-      let rel =
-        let prefix = root_norm ^ "/" in
-        if starts_with ~prefix target_norm then
-          String.sub target_norm (String.length prefix)
-            (String.length target_norm - String.length prefix)
-        else ""
+      let allowed_norms =
+        allowed_paths
+        |> List.filter_map (normalize_allowed_path_for_check ~root:root_norm)
       in
       let matches_any =
-        List.exists (fun ap ->
-          let ap' = strip_trailing_slashes ap in
-          rel = ap' || starts_with ~prefix:(ap' ^ "/") rel
-        ) allowed_paths
+        List.exists
+          (fun allowed_norm ->
+             target_norm = allowed_norm
+             || starts_with ~prefix:(allowed_norm ^ "/") target_norm)
+          allowed_norms
       in
       if matches_any then Ok candidate
       else
         Error
           (Printf.sprintf
              "path_not_in_allowed_paths: %s (allowed: [%s])"
-             raw (String.concat ", " allowed_paths))
+             raw (String.concat ", " allowed_norms))
 
 (** Compute effective allowed_paths from keeper meta, applying scope-based
     defaults when the operator has not set an explicit list.

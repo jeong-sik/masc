@@ -830,7 +830,17 @@ let run_turn
   let priority =
     Option.value priority ~default:Llm_provider.Request_priority.Proactive
   in
+  let effective_allowed_paths =
+    Keeper_alerting_path.effective_allowed_paths ~meta
+  in
   match
+        Keeper_alerting_path.absolute_allowed_paths_result
+          ~config
+          ~allowed_paths:effective_allowed_paths
+      with
+      | Error e -> Error e
+      | Ok oas_allowed_paths ->
+        (match
         Oas_worker.run_named
           ~cascade_name
           ~goal:user_message
@@ -853,7 +863,7 @@ let run_turn
           ?on_resume
           ~agent_ref
           ?contract
-          ~allowed_paths:(Keeper_alerting_path.effective_allowed_paths ~meta)
+          ~allowed_paths:oas_allowed_paths
           ~cache_system_prompt:true
           ~yield_on_tool
           ()
@@ -978,4 +988,4 @@ let run_turn
            checkpoint = result.checkpoint;
            proof = result.proof;
            stop_reason = result.stop_reason;
-         })
+         }))

@@ -1,4 +1,6 @@
 let () =
+  at_exit (fun () ->
+    Masc_mcp.Keeper_registry.clear ());
   Alcotest.run "Operator_control"
     [
       ( "operator",

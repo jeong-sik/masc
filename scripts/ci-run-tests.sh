@@ -174,21 +174,26 @@ run_with_timeout() {
     timeout_bin="gtimeout"
   fi
 
+  # Use pipe instead of process substitution to avoid orphaned tee
+  # processes that prevent timeout from terminating cleanly (#5206).
+  # --kill-after=10 sends SIGKILL 10s after SIGTERM to handle stuck dune.
   if [[ -n "${timeout_bin}" ]]; then
+    local timeout_flags="--kill-after=10 ${TEST_TIMEOUT_SEC}"
     if "${timeout_bin}" --help 2>&1 | grep -q -- '--foreground'; then
-      "${timeout_bin}" --foreground "${TEST_TIMEOUT_SEC}" bash -lc "${cmd}" \
-        > >(tee -a "${TEST_LOG_FILE}") \
-        2> >(tee -a "${TEST_LOG_FILE}" >&2)
-    else
-      "${timeout_bin}" "${TEST_TIMEOUT_SEC}" bash -lc "${cmd}" \
-        > >(tee -a "${TEST_LOG_FILE}") \
-        2> >(tee -a "${TEST_LOG_FILE}" >&2)
+      timeout_flags="--foreground ${timeout_flags}"
     fi
-  else
-    echo "[ci-run] WARN: timeout command not found (timeout/gtimeout); running without enforced timeout"
-    bash -lc "${cmd}" \
+    "${timeout_bin}" ${timeout_flags} bash -lc "${cmd}" \
       > >(tee -a "${TEST_LOG_FILE}") \
       2> >(tee -a "${TEST_LOG_FILE}" >&2)
+    local exit_code=$?
+    # Kill any orphaned tee processes from process substitution
+    jobs -p | xargs kill 2>/dev/null || true
+    wait 2>/dev/null || true
+    return "${exit_code}"
+  else
+    echo "[ci-run] WARN: timeout command not found (timeout/gtimeout); running without enforced timeout"
+    bash -lc "${cmd}" 2>&1 | tee -a "${TEST_LOG_FILE}"
+    return "${PIPESTATUS[0]}"
   fi
 }
 

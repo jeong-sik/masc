@@ -44,7 +44,7 @@ let cdal_proof_v1_json = {|{
   "capability_snapshot": {
     "tools": ["keeper_read", "keeper_fs_edit", "keeper_bash"],
     "mcp_servers": [],
-    "max_turns": 20,
+    "max_turns": 3,
     "max_tokens": null,
     "thinking_enabled": null
   },

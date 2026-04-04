@@ -273,10 +273,3 @@ let skill_route_context_text
     soul_profile
     fallback_route.primary_skill
 
-let skill_route_system_prompt_agent
-    ~(base_system_prompt : string)
-    ~(fallback_route : keeper_skill_route)
-    ~(soul_profile : string) : string =
-  Printf.sprintf "%s\n\n%s"
-    base_system_prompt
-    (skill_route_context_text ~fallback_route ~soul_profile)

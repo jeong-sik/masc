@@ -97,24 +97,6 @@ let soul_profile_policy profile =
       "SOUL profile: balanced.\n\
        Preserve in this order: safety/trust continuity, goal progress & decisions, unresolved risks, tool outcomes, style preferences."
 
-let proactive_seed_for_soul_profile (profile : string) : string =
-  match canonical_soul_profile profile |> Option.value ~default:default_soul_profile with
-  | "safety" ->
-      "Safety hint: prioritize current risk signals and mitigations."
-  | "delivery" ->
-      "Delivery hint: prioritize concrete next actions and execution momentum."
-  | "research" ->
-      "Research hint: you have access to masc_autoresearch_* tools. \
-       Use masc_autoresearch_start to begin an autonomous experiment loop. \
-       Check masc_autoresearch_status for progress and masc_autoresearch_search_findings for results. \
-       Prioritize hypotheses, evidence, and validation steps."
-  | "relationship" ->
-      "Relationship hint: prioritize user intent alignment and collaboration continuity."
-  | "minimal" ->
-      "Minimal hint: keep only high-signal continuity and next move."
-  | _ ->
-      "Balanced hint: keep a practical mix of risk, progress, and next step."
-
 let take n xs =
   let rec go i acc = function
     | [] -> List.rev acc

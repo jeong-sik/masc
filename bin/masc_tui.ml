@@ -7,7 +7,7 @@ open Masc_tui_loader
 (** Send a message to a keeper via HTTP POST to /api/v1/keepers/chat/stream *)
 let send_keeper_message (state : state) (keeper_name : string) (message : string) : string =
   try
-    let host = "127.0.0.1" in
+    let host = Env_config_core.masc_host () in
     let port = state.port in
     let addr = Unix.ADDR_INET (Unix.inet_addr_of_string host, port) in
     let (ic, oc) = Unix.open_connection addr in
@@ -93,13 +93,13 @@ let read_key () : string option =
 
 (** Parse command line arguments *)
 let parse_args () =
-  let port = ref 8935 in
+  let port = ref (Env_config_core.masc_http_port_int ()) in
   let room = ref "" in
   let refresh = ref 2.0 in
   let base_path = ref "" in
 
   let specs = [
-    ("--port", Arg.Set_int port, "MASC server port (default: 8935)");
+    ("--port", Arg.Set_int port, Printf.sprintf "MASC server port (default: %d)" (Env_config_core.masc_http_port_int ()));
     ("--room", Arg.Set_string room, "Room name (default: from ME_ROOT)");
     ("--refresh", Arg.Set_float refresh, "Refresh interval in seconds (default: 2)");
     ("--base", Arg.Set_string base_path, "Base path (default: ME_ROOT or cwd)");

@@ -135,18 +135,7 @@ let parse_gemini_output raw =
     let cached_tokens =
       match from_usage "cachedContentTokenCount" with
       | Some _ as v -> v | None -> from_stats_first ["cached"] in
-    let cost_usd =
-      match input_tokens, output_tokens, cached_tokens with
-      | Some inp, Some out, Some cached ->
-          let uncached = inp - cached in
-          Some (float_of_int uncached *. 0.00015 /. 1000.0
-                +. float_of_int cached *. 0.000015 /. 1000.0
-                +. float_of_int out *. 0.0006 /. 1000.0)
-      | Some inp, Some out, None ->
-          Some (float_of_int inp *. 0.00015 /. 1000.0
-                +. float_of_int out *. 0.0006 /. 1000.0)
-      | _ -> None
-    in
+    let cost_usd = Safe_ops.json_float_opt "total_cost_usd" json in
     { text = response_text; input_tokens; output_tokens;
       cache_creation_tokens = None; cache_read_tokens = cached_tokens; cost_usd }
   with Yojson.Json_error _ ->

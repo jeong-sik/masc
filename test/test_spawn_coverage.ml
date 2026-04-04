@@ -445,7 +445,8 @@ let test_parse_gemini_output_with_cache () =
   check (option int) "input" (Some 100) p.input_tokens;
   check (option int) "output" (Some 50) p.output_tokens;
   check (option int) "cached" (Some 80) p.cache_read_tokens;
-  check bool "has cost" true (Option.is_some p.cost_usd)
+  (* cost_usd now requires explicit total_cost_usd in JSON; no hardcoded pricing *)
+  check bool "no cost without total_cost_usd" true (p.cost_usd = None)
 
 let test_parse_gemini_output_cli_json () =
   let json = {|
@@ -463,7 +464,8 @@ let test_parse_gemini_output_cli_json () =
   check (option int) "input" (Some 15769) p.input_tokens;
   check (option int) "output" (Some 85) p.output_tokens;
   check (option int) "cached" None p.cache_read_tokens;
-  check bool "has cost" true (Option.is_some p.cost_usd)
+  (* cost_usd now requires explicit total_cost_usd in JSON; no hardcoded pricing *)
+  check bool "no cost without total_cost_usd" true (p.cost_usd = None)
 
 let test_parse_gemini_output_invalid () =
   let p = Spawn.parse_gemini_output "invalid" in

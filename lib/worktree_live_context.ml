@@ -23,11 +23,15 @@ let run_git_capture_lines ~workdir args =
   Eio_guard.run_in_systhread f
 
 let repo_root_for ~base_path =
-  match run_git_capture_lines ~workdir:base_path [ "rev-parse"; "--show-toplevel" ] with
-  | Some (root :: _) ->
-      let root = String.trim root in
-      if root = "" then None else Some root
-  | _ -> None
+  (* Fast-path: skip git subprocess when no .git marker in ancestry (#5197). *)
+  match Room_utils_backend_setup.find_git_root base_path with
+  | None -> None
+  | Some _ ->
+    match run_git_capture_lines ~workdir:base_path [ "rev-parse"; "--show-toplevel" ] with
+    | Some (root :: _) ->
+        let root = String.trim root in
+        if root = "" then None else Some root
+    | _ -> None
 
 let current_status_lines ~repo_root =
   let contains_substring text ~substring =

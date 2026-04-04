@@ -51,9 +51,13 @@ let is_valid_branch_name s =
 (* Git Repository Utilities                     *)
 (* ============================================ *)
 
-(** Get git root directory *)
+(** Get git root directory.
+    Fast-path: if no .git marker exists in the directory ancestry,
+    return None without spawning a process (#5197). *)
 let git_root ~base_path =
-  run_argv_line ["git"; "-C"; base_path; "rev-parse"; "--show-toplevel"]
+  match Room_utils_backend_setup.find_git_root base_path with
+  | None -> None
+  | Some _ -> run_argv_line ["git"; "-C"; base_path; "rev-parse"; "--show-toplevel"]
 
 (** Check if directory is a git repository *)
 let is_git_repo ~base_path =

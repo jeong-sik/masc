@@ -438,11 +438,19 @@ let handle_get_mcp ~deps ?legacy_messages_endpoint ?(profile = Full)
   let protocol_version = get_protocol_version_for_session ~session_id request in
   let base_path = deps.get_base_path () in
   let auth_result =
-    match profile with
-    | Full | Managed_agent ->
-        deps.verify_mcp_auth ~base_path request
-    | Operator_remote ->
-        deps.verify_operator_mcp_auth ~base_path request
+    match sse_kind with
+    | Sse.Observer ->
+        (* Dashboard observer streams are read-only; route-level
+           with_public_read already authorises them.  Skip the inner
+           token check so browsers can open EventSource without a
+           Bearer header (EventSource does not support custom headers). *)
+        Ok ()
+    | _ ->
+      (match profile with
+       | Full | Managed_agent ->
+           deps.verify_mcp_auth ~base_path request
+       | Operator_remote ->
+           deps.verify_operator_mcp_auth ~base_path request)
   in
   let legacy_headers =
     match legacy_messages_endpoint with

@@ -488,7 +488,8 @@ let handle_keeper_github
               ])))
 ;;
 
-let keeper_agent_sender ~(meta : keeper_meta) = Printf.sprintf "keeper-%s" meta.name
+let keeper_agent_sender ~(meta : keeper_meta) =
+  Printf.sprintf "keeper-%s" (strip_keeper_prefix meta.name)
 
 let keeper_tools_list_json ~(meta : keeper_meta) =
   let names = keeper_allowed_tool_names meta in

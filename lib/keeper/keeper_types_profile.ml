@@ -614,5 +614,14 @@ let session_base_dir (config : Room.config) =
   let d = Filename.concat (Room.masc_root_dir config) "traces" in
   ensure_dir d
 
+(** Strip "keeper-" prefix if already present to prevent double-prefixing.
+    E.g. "keeper-admin" -> "admin", "sangsu" -> "sangsu". *)
+let strip_keeper_prefix name =
+  let prefix = "keeper-" in
+  let plen = String.length prefix in
+  if String.length name > plen && String.sub name 0 plen = prefix
+  then String.sub name plen (String.length name - plen)
+  else name
+
 let keeper_agent_name name =
-  Printf.sprintf "keeper-%s-agent" name
+  Printf.sprintf "keeper-%s-agent" (strip_keeper_prefix name)

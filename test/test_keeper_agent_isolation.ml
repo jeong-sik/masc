@@ -231,6 +231,47 @@ let test_heuristic_has_fewer_tools_than_learned () =
     true (l_count >= h_count)
 
 (* ============================================================
+   Invariant 8: keeper- prefix is never double-attached (#5104)
+   ============================================================ *)
+
+let test_strip_keeper_prefix_no_prefix () =
+  Alcotest.(check string)
+    "plain name unchanged" "sangsu"
+    (Keeper_types.strip_keeper_prefix "sangsu")
+
+let test_strip_keeper_prefix_has_prefix () =
+  Alcotest.(check string)
+    "strips single keeper- prefix" "admin"
+    (Keeper_types.strip_keeper_prefix "keeper-admin")
+
+let test_strip_keeper_prefix_double () =
+  Alcotest.(check string)
+    "strips outer keeper- leaving keeper-admin" "keeper-admin"
+    (Keeper_types.strip_keeper_prefix "keeper-keeper-admin")
+
+let test_keeper_agent_sender_plain_name () =
+  let meta = make_meta ~name:"sangsu" () in
+  Alcotest.(check string)
+    "keeper-sangsu" "keeper-sangsu"
+    (Keeper_exec_tools.keeper_agent_sender ~meta)
+
+let test_keeper_agent_sender_prefixed_name () =
+  let meta = make_meta ~name:"keeper-admin" () in
+  Alcotest.(check string)
+    "no double prefix" "keeper-admin"
+    (Keeper_exec_tools.keeper_agent_sender ~meta)
+
+let test_keeper_agent_name_plain () =
+  Alcotest.(check string)
+    "keeper-sangsu-agent" "keeper-sangsu-agent"
+    (Keeper_types.keeper_agent_name "sangsu")
+
+let test_keeper_agent_name_prefixed () =
+  Alcotest.(check string)
+    "no double prefix in agent_name" "keeper-admin-agent"
+    (Keeper_types.keeper_agent_name "keeper-admin")
+
+(* ============================================================
    Test runner
    ============================================================ *)
 
@@ -262,5 +303,14 @@ let () =
     ]);
     ("policy_consistency", [
       Alcotest.test_case "learned >= heuristic" `Quick test_heuristic_has_fewer_tools_than_learned;
+    ]);
+    ("keeper_prefix_no_double", [
+      Alcotest.test_case "strip no prefix" `Quick test_strip_keeper_prefix_no_prefix;
+      Alcotest.test_case "strip has prefix" `Quick test_strip_keeper_prefix_has_prefix;
+      Alcotest.test_case "strip double prefix" `Quick test_strip_keeper_prefix_double;
+      Alcotest.test_case "sender plain name" `Quick test_keeper_agent_sender_plain_name;
+      Alcotest.test_case "sender prefixed name" `Quick test_keeper_agent_sender_prefixed_name;
+      Alcotest.test_case "agent_name plain" `Quick test_keeper_agent_name_plain;
+      Alcotest.test_case "agent_name prefixed" `Quick test_keeper_agent_name_prefixed;
     ]);
   ]

@@ -49,10 +49,11 @@ let check_threshold op actual threshold =
 
 (** Evaluate a single rule against a snapshot.
     Returns Some alert if the rule triggers, None otherwise.
-    [last_alert_times] maps rule_name -> last alert timestamp for cooldown. *)
+    [last_alert_times] maps "keeper_name:rule_name" -> last alert timestamp
+    for per-keeper cooldown tracking. *)
 let evaluate_rule ~(last_alert_times : (string, float) Hashtbl.t)
     (s : Metacognition_observation.snapshot) (r : rule) : alert option =
-  (* Check min_samples gate *)
+  (* Check min_samples gate — also prevents false positives from safe_avg 0.0 defaults *)
   if s.total_turns < r.min_samples then None
   else
     match metric_value s r.metric with
@@ -60,12 +61,13 @@ let evaluate_rule ~(last_alert_times : (string, float) Hashtbl.t)
     | Some actual ->
       if not (check_threshold r.operator actual r.threshold) then None
       else
-        (* Check cooldown *)
-        let last_time = Hashtbl.find_opt last_alert_times r.name
+        (* Check cooldown — keyed per keeper to avoid cross-keeper suppression *)
+        let cooldown_key = Printf.sprintf "%s:%s" s.keeper_name r.name in
+        let last_time = Hashtbl.find_opt last_alert_times cooldown_key
           |> Option.value ~default:0.0 in
         if s.timestamp -. last_time < r.cooldown_sec then None
         else begin
-          Hashtbl.replace last_alert_times r.name s.timestamp;
+          Hashtbl.replace last_alert_times cooldown_key s.timestamp;
           let op_str = match r.operator with Lt -> "<" | Gt -> ">" in
           Some {
             rule_name = r.name;
@@ -165,3 +167,19 @@ let%test "evaluate: cooldown prevents duplicate alerts" =
     ~keeper_name:"k" ~timestamp:200.0 m in
   let a2 = evaluate ~last_alert_times:tbl s2 default_rules in
   not (List.exists (fun a -> a.rule_name = "memory_failure_high") a2)
+
+let%test "evaluate: cooldown is per-keeper (no cross-keeper suppression)" =
+  let m = { Keeper_exec_status_metrics.empty_metrics_summary with
+    turn_points = 10;
+    memory_passed = 2;
+    memory_failed = 8;
+  } in
+  let tbl = Hashtbl.create 4 in
+  let s_a = Metacognition_observation.of_metrics
+    ~keeper_name:"keeper-a" ~timestamp:100.0 m in
+  let _alerts_a = evaluate ~last_alert_times:tbl s_a default_rules in
+  (* keeper-b should still alert despite keeper-a's cooldown *)
+  let s_b = Metacognition_observation.of_metrics
+    ~keeper_name:"keeper-b" ~timestamp:150.0 m in
+  let alerts_b = evaluate ~last_alert_times:tbl s_b default_rules in
+  List.exists (fun a -> a.rule_name = "memory_failure_high") alerts_b

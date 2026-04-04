@@ -79,11 +79,12 @@ let test_spawned_agent_surface_stays_curated () =
     (List.mem "mcp__masc__masc_status" names);
   check bool "contains team_session_step" true
     (List.mem "mcp__masc__masc_team_session_step" names);
-  check bool "contains voice agent" true
+  (* voice tools moved to System_internal in #4999 *)
+  check bool "omits voice agent (internal)" false
     (List.mem "mcp__masc__masc_voice_agent" names);
-  check bool "contains voice speak" true
+  check bool "omits voice speak (internal)" false
     (List.mem "mcp__masc__masc_voice_speak" names);
-  check bool "contains voice ping pong" true
+  check bool "omits voice ping pong (internal)" false
     (List.mem "mcp__masc__masc_voice_ping_pong" names)
 
 let test_privileged_keeper_surface_is_split () =

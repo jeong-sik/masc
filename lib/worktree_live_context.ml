@@ -23,6 +23,8 @@ let run_git_capture_lines ~workdir args =
   Eio_guard.run_in_systhread f
 
 let repo_root_for ~base_path =
+  if not (Room_git.has_git_marker base_path) then None
+  else
   match run_git_capture_lines ~workdir:base_path [ "rev-parse"; "--show-toplevel" ] with
   | Some (root :: _) ->
       let root = String.trim root in

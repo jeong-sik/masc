@@ -1310,3 +1310,11 @@ let stop_keepalive name =
             Keeper_registry.cleanup_tracking ~base_path:entry.base_path entry.name))
     entries
 ;;
+
+(** Stop all running keepers. Used in test cleanup to prevent orphaned
+    keepalive loops from blocking process exit. *)
+let stop_all_keepalives () =
+  Keeper_registry.all ()
+  |> List.iter (fun (entry : Keeper_registry.registry_entry) ->
+       stop_keepalive entry.name)
+;;

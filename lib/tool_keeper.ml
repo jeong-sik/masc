@@ -325,7 +325,7 @@ let default_keeper_model_label (meta : keeper_meta) =
   | "" -> (
       match Oas_model_resolve.models_of_cascade_name meta.cascade_name with
       | first :: _ when String.trim first <> "" -> first
-      | _ -> "llama:qwen3.5-9b-local")
+      | _ -> Env_config.Local_runtime.default_model)
   | model -> model
 
 let annotate_keeper_repair_json ~(keeper_name : string) body =

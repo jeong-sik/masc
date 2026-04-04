@@ -38,8 +38,17 @@ let max_turns_cap_of_scope (scope : Team_session_types.execution_scope) : int =
   | Limited_code_change -> 20
   | Autonomous -> 30
 
+let lowercase_enum_case_name raw =
+  let raw =
+    match String.rindex_opt raw '.' with
+    | Some idx when idx + 1 < String.length raw ->
+        String.sub raw (idx + 1) (String.length raw - idx - 1)
+    | _ -> raw
+  in
+  String.lowercase_ascii raw
+
 let proof_result_status_to_string status =
-  Oas.Cdal_proof.show_result_status status |> String.lowercase_ascii
+  Oas.Cdal_proof.show_result_status status |> lowercase_enum_case_name
 
 (** Derive max_turns from worker meta, applying the scope cap.
     When max_turns_override is set, it is clamped to [1, cap].

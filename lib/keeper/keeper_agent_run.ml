@@ -128,19 +128,28 @@ let prioritized_disclosed_tool_names
     acc
 
 let log_keeper_proof ~(keeper_name : string) (proof : Agent_sdk.Cdal_proof.t) =
+  let status_string =
+    Agent_sdk.Cdal_proof.show_result_status proof.result_status
+    |> fun raw ->
+    match String.rindex_opt raw '.' with
+    | Some idx when idx + 1 < String.length raw ->
+        String.sub raw (idx + 1) (String.length raw - idx - 1)
+    | _ -> raw
+    |> String.lowercase_ascii
+  in
   match proof.result_status with
   | Agent_sdk.Cdal_proof.Completed ->
       if Keeper_types_profile.keeper_debug then
         Log.Keeper.debug "keeper:%s proof: run_id=%s mode=%s status=%s evidence_refs=%d"
           keeper_name proof.run_id
           (Agent_sdk.Execution_mode.to_string proof.effective_execution_mode)
-          (Agent_sdk.Cdal_proof.show_result_status proof.result_status)
+          status_string
           (List.length proof.raw_evidence_refs)
   | _ ->
       Log.Keeper.warn "keeper:%s proof: run_id=%s mode=%s status=%s evidence_refs=%d"
         keeper_name proof.run_id
         (Agent_sdk.Execution_mode.to_string proof.effective_execution_mode)
-        (Agent_sdk.Cdal_proof.show_result_status proof.result_status)
+        status_string
         (List.length proof.raw_evidence_refs)
 
 let log_keeper_contract_verdict

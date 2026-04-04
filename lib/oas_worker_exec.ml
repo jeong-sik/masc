@@ -83,8 +83,17 @@ type run_result = {
   stop_reason : stop_reason;
 }
 
+let lowercase_enum_case_name raw =
+  let raw =
+    match String.rindex_opt raw '.' with
+    | Some idx when idx + 1 < String.length raw ->
+        String.sub raw (idx + 1) (String.length raw - idx - 1)
+    | _ -> raw
+  in
+  String.lowercase_ascii raw
+
 let proof_result_status_to_string status =
-  Oas.Cdal_proof.show_result_status status |> String.lowercase_ascii
+  Oas.Cdal_proof.show_result_status status |> lowercase_enum_case_name
 
 (* ================================================================ *)
 (* Internal: resolve provider                                        *)

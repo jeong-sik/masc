@@ -135,8 +135,16 @@ let public_surface_tools =
     "masc_code_search"; "masc_code_symbols"; "masc_code_read";
     "masc_code_write"; "masc_code_edit"; "masc_code_delete";
     "masc_code_shell"; "masc_code_git";
+    (* Team session *)
+    "masc_team_session_start"; "masc_team_session_step";
+    "masc_team_session_status"; "masc_team_session_events";
+    "masc_team_session_finalize"; "masc_team_session_stop";
+    "masc_team_session_report"; "masc_team_session_list";
+    (* Spawn / Events *)
+    "masc_spawn"; "masc_poll_events";
     (* Handover *)
     "masc_handover_create"; "masc_handover_list"; "masc_handover_get";
+    "masc_handover_claim";
     (* Verification *)
     "masc_verify_auto"; "masc_verify_pending";
     "masc_verify_request"; "masc_verify_status"; "masc_verify_submit";

@@ -27,10 +27,8 @@ let handle_resume ctx _args =
 let handle_pause_status ctx args =
   let requested_namespace = get_string args "namespace_id" "" |> String.trim in
   let namespace_id = "default" in
-  let pause_info =
-    if Room.is_initialized ctx.config then Room.pause_info ctx.config
-    else None
-  in
+  let room_initialized = Room.is_initialized ctx.config in
+  let pause_info = if room_initialized then Room.pause_info ctx.config else None in
   let payload =
     match pause_info with
     | Some (by, reason, at) ->
@@ -58,12 +56,17 @@ let handle_pause_status ctx args =
             ("namespace_id", `String namespace_id);
             ("namespace", `String namespace_id);
             ("namespace_mode", `String "flattened");
-            ("status", `String "running");
+            ("status", `String (if room_initialized then "running" else "initializing"));
             ("paused", `Bool false);
             ("paused_by", `Null);
             ("pause_reason", `Null);
             ("paused_at", `Null);
-            ("message", `String "Default project namespace is running (not paused)");
+            ( "message",
+              `String
+                (if room_initialized then
+                   "Default project namespace is running (not paused)"
+                 else
+                   "Default project namespace is initializing; pause state is not available yet") );
             ( "requested_namespace_id",
               if requested_namespace = "" then `Null
               else `String requested_namespace );

@@ -1,6 +1,33 @@
 # Changelog
 
 
+## [2.219.0] - 2026-04-04
+
+### Added
+- **RFC-0001 Det/NonDet boundary hardening** -- design RFC for deterministic/nondeterministic boundary hardening, emotional recovery loop, and adversarial harness (#4824).
+- **Dashboard rich UI components** -- JsonViewerCard for structured data, Markdown rendering via Shiki, Loader2 spinners, scrollable tables, custom scrollbars (#4977, #4959, #4932, #4935, #4844, #4952, #4951, #4939).
+- **Metacognition observation and threshold modules** -- deterministic keeper behavior metrics and configurable threshold alerting with per-keeper cooldown (#4946).
+- **Post-build Valgrind memory leak check** -- CI workflow for detecting memory leaks (#4884).
+
+### Fixed
+- **Server 98% CPU hang** -- replace Eio.Fiber.yield spin loop with Time_compat.sleep in dashboard cache and operator snapshot polling (#4948).
+- **Autoresearch history rewrite** -- build gate downgrade now rewrites loop history so subsequent cycles receive the corrected decision (#4950).
+- **Dashboard memory growth** -- cap snapshot cache, bound keeper snapshot concurrency, reduce mission snapshot memory pressure (#4921, #4940, #4926).
+- **Blocking auth/IO offload** -- move blocking auth and live-context IO off main fiber (#4916).
+- **Test alignment** -- fix stale test wording (Scope to Namespace, namespace to project), align CI expectations (#4969, #4972, #4944).
+
+### Changed
+- **Keeper meta parsing split** -- decompose keeper meta parsing and keepalive helpers into separate modules (#4947).
+- **Provider vendor-agnostic** -- remove provider_family type, MASC is now fully vendor-agnostic (#4942).
+- **Project-scope language simplification** -- unify namespace/project terminology across codebase (#4936).
+- **God file sweep** -- decompose 5 god files into 13 sub-modules (-2,599 lines) (#4914).
+- **Dashboard loading UX** -- improve loading states and fix pause status crash on uninitialized rooms (#4867).
+- **FetchScheduler reuse** -- reuse FetchScheduler for transport health SSE refreshes (#4866).
+
+### Performance
+- **Dashboard parallel rendering** -- move command_plane_json into parallel fiber block (#4933).
+- **Keeper snapshot concurrency cap** -- prevent unbounded concurrent snapshot fetches (#4940).
+
 ## [2.218.0] - 2026-04-03
 
 ### Added

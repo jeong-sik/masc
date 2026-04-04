@@ -3,6 +3,19 @@
 
 open Keeper_types
 
+type boot_meta_resolution = {
+  meta : keeper_meta;
+  materialized : bool;
+}
+
+let declarative_keeper_names () =
+  Config_dir_resolver.log_warnings ~context:"KeeperRuntime" ();
+  Keeper_types_profile.discover_keepers_toml (Config_dir_resolver.keepers_dir ())
+  |> List.map fst
+
+let bootable_keeper_names config =
+  dedupe_keep_order (keeper_names config @ declarative_keeper_names ())
+
 let ensure_keeper_meta config name =
   match read_meta config name with
   | Ok (Some meta) ->
@@ -46,6 +59,40 @@ let ensure_keeper_meta config name =
     Error (Printf.sprintf "no persistent meta for %s — run keeper_up to initialize" name)
   | Error msg -> Error msg
 
+let load_or_materialize_boot_meta (ctx : _ context) name
+    : (boot_meta_resolution, string) result =
+  match ensure_keeper_meta ctx.config name with
+  | Ok meta -> Ok { meta; materialized = false }
+  | Error original_error -> (
+      match Config_dir_resolver.keeper_toml_path_opt name with
+      | None -> Error original_error
+      | Some toml_path ->
+          Log.Keeper.info
+            "bootstrapping declarative keeper %s from %s"
+            name toml_path;
+          let ok, body =
+            Keeper_turn.handle_keeper_up ctx
+              (`Assoc [ ("name", `String name) ])
+          in
+          if not ok then
+            Error
+              (Printf.sprintf
+                 "failed to materialize declarative keeper %s from %s: %s"
+                 name toml_path body)
+          else
+            match read_meta ctx.config name with
+            | Ok (Some meta) -> Ok { meta; materialized = true }
+            | Ok None ->
+                Error
+                  (Printf.sprintf
+                     "materialized declarative keeper %s from %s but no meta was written"
+                     name toml_path)
+            | Error msg ->
+                Error
+                  (Printf.sprintf
+                     "materialized declarative keeper %s from %s but failed to reload meta: %s"
+                     name toml_path msg))
+
 type keeper_bootstrap_stats = {
   enabled: bool;
   scanned: int;
@@ -74,22 +121,20 @@ let bootstrap_existing_keepers ctx : keeper_bootstrap_stats =
          else
            max_int)
     in
-    let entries =
-      keeper_names ctx.config
-      |> take max_scan
-    in
+    let entries = bootable_keeper_names ctx.config |> take max_scan in
     let (enabled, scanned, started, stale, recovering) =
       List.fold_left
         (fun (enabled_acc, scanned_acc, started_acc, stale_acc, recovering_acc) name ->
-          match ensure_keeper_meta ctx.config name with
+          match load_or_materialize_boot_meta ctx name with
           | Error _ ->
               (enabled_acc, scanned_acc + 1, started_acc, stale_acc, recovering_acc)
-          | Ok m ->
+          | Ok { meta = m; materialized } ->
               if m.paused then
                 (enabled_acc, scanned_acc + 1, started_acc, stale_acc, recovering_acc)
               else
               let stale_now =
-                stale_turn_sec > 0.0
+                (not materialized)
+                && stale_turn_sec > 0.0
                 && (m.runtime.usage.last_turn_ts <= 0.0
                     || now_ts -. m.runtime.usage.last_turn_ts >= stale_turn_sec)
               in
@@ -97,7 +142,15 @@ let bootstrap_existing_keepers ctx : keeper_bootstrap_stats =
                 Keeper_registry.is_running ~base_path:ctx.config.base_path m.name
               in
               let started_here =
-                if already_running then false
+                if materialized then
+                  let started_now =
+                    Keeper_registry.is_running
+                      ~base_path:ctx.config.base_path m.name
+                  in
+                  if started_now && max_keepers > 0 then
+                    remaining_slots := max 0 (!remaining_slots - 1);
+                  started_now
+                else if already_running then false
                 else if max_keepers > 0 && !remaining_slots <= 0 then false
                 else (
                   Keeper_supervisor.supervise_keepalive
@@ -194,7 +247,7 @@ let existing_keepalive_bootstrap_done : (string, unit) Hashtbl.t =
   Hashtbl.create 4
 
 let has_boot_entries config =
-  keepalive_keeper_names config <> []
+  bootable_keeper_names config <> []
 
 let maybe_start_supervisor_sweep ctx (stats : keeper_bootstrap_stats) =
   if stats.enabled

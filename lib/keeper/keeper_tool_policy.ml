@@ -82,7 +82,7 @@ let select_existing_masc_tool_names names =
 
 (* ── Candidate aggregation ────────────────────────────────────── *)
 
-let keeper_all_candidate_tool_names () =
+let keeper_base_candidate_tool_names () =
   dedupe_tool_names
     ( keeper_internal_candidate_tool_names
     @ keeper_voice_tool_names
@@ -91,6 +91,16 @@ let keeper_all_candidate_tool_names () =
     @ keeper_coding_tool_names
     @ keeper_autoresearch_tool_names
     @ injected_masc_tool_names () )
+
+let explicit_optional_candidate_tool_names (meta : keeper_meta) =
+  let requested =
+    match meta.tool_access with
+    | Preset { also_allow; _ } -> also_allow
+    | Custom allowlist -> allowlist
+  in
+  requested
+  |> List.filter (fun name -> List.mem name keeper_optional_board_tool_names)
+  |> dedupe_tool_names
 
 (* ── Presets ──────────────────────────────────────────────────── *)
 
@@ -129,7 +139,7 @@ let preset_allowlist = function
         @ keeper_governance_tool_names
         @ keeper_autoresearch_tool_names
         @ select_existing_masc_tool_names keeper_core_masc_tool_names )
-  | Full -> keeper_all_candidate_tool_names ()
+  | Full -> keeper_base_candidate_tool_names ()
 
 let tool_policy_of_meta (meta : keeper_meta) =
   let allow =
@@ -159,7 +169,10 @@ let tool_name_set names =
   tbl
 
 let tool_access_lookup_of_meta (meta : keeper_meta) =
-  let candidate_names = keeper_all_candidate_tool_names () in
+  let candidate_names =
+    dedupe_tool_names
+      (keeper_base_candidate_tool_names () @ explicit_optional_candidate_tool_names meta)
+  in
   let candidate_set = tool_name_set candidate_names in
   let allow_names =
     Tool_access_policy.resolve

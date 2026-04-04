@@ -114,6 +114,12 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
       ~finally:(fun () ->
         Keeper_registry.cleanup_tracking ~base_path meta.name;
         if not !resolved then begin
+          if Shutdown.is_shutting_down_global () then begin
+            Log.Keeper.warn "%s: fiber unresolved during shutdown (not a crash)" meta.name;
+            Keeper_registry.set_state ~base_path meta.name
+              Keeper_registry.Dead;
+            resolve_done (`Crashed "shutdown")
+          end else begin
             let reason =
               Keeper_registry.failure_reason_to_string
                 Keeper_registry.Fiber_unresolved in
@@ -131,6 +137,7 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
               Keeper_registry.Crashed;
             resolve_done (`Crashed reason);
             publish_lifecycle "crashed" meta.name reason
+          end
         end))
 
 let supervise_keepalive ~proactive_warmup_sec (ctx : _ context)

@@ -80,7 +80,7 @@ let room_strategy_json config =
   `Assoc
     [
       ("namespace_id", `String Room.default_namespace_id);
-      ("room_id", `String "default");
+      ("room_id", `String Room.default_namespace_id);
       ("search_strategy_default",
        Json_util.string_opt_to_json state.search_strategy_default);
       ("speculation_enabled", `Bool state.speculation_enabled);

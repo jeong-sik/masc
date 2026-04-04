@@ -5,10 +5,6 @@ import '@testing-library/jest-dom'
 import type { UnifiedTraceEvent } from '../session-trace/session-trace-state'
 import { activeFilter } from './task-detail-state'
 
-vi.mock('../common/markdown', () => ({
-  Markdown: ({ text }: { text: string }) => h('div', { 'data-testid': 'markdown' }, text),
-}))
-
 vi.mock('../common/time-ago', () => ({
   TimeAgo: ({ timestamp }: { timestamp: string }) => h('span', {}, timestamp),
 }))
@@ -40,7 +36,7 @@ describe('TaskActivityList', () => {
     vi.clearAllMocks()
   })
 
-  it('renders markdown lazily and preserves raw string payloads inside code fences', async () => {
+  it('renders string args lazily and preserves the raw payload text', async () => {
     const { container } = render(h(TaskActivityList, {
       events: [sampleToolCallEvent()],
       loading: false,
@@ -48,7 +44,8 @@ describe('TaskActivityList', () => {
       showToolCalls: true,
     }))
 
-    expect(screen.queryByTestId('markdown')).not.toBeInTheDocument()
+    expect(screen.queryByText('Args')).not.toBeInTheDocument()
+    expect(screen.queryByText('"*literal* `ticks`"')).not.toBeInTheDocument()
 
     const details = container.querySelector('details')
     expect(details).not.toBeNull()
@@ -58,20 +55,12 @@ describe('TaskActivityList', () => {
     fireEvent(details, new Event('toggle', { bubbles: true }))
 
     await waitFor(() => {
-      expect(screen.getAllByTestId('markdown')).toHaveLength(1)
+      expect(screen.getByText('Args')).toBeInTheDocument()
     })
-    const blocks = screen.getAllByTestId('markdown')
-    expect(blocks).toHaveLength(1)
-    const firstBlock = blocks[0]
-    expect(firstBlock).toBeDefined()
-    if (!firstBlock) return
-    const text = firstBlock.textContent ?? ''
-    expect(text.startsWith('```')).toBe(true)
-    expect(text).toContain('*literal* `ticks`')
-    expect(text.endsWith('```')).toBe(true)
+    expect(screen.getByText('"*literal* `ticks`"')).toBeInTheDocument()
   })
 
-  it('formats object args as fenced json when expanded', async () => {
+  it('renders object args in the JsonViewer when expanded', async () => {
     const { container } = render(h(TaskActivityList, {
       events: [sampleToolCallEvent({ toolArgs: { ok: true } })],
       loading: false,
@@ -87,12 +76,11 @@ describe('TaskActivityList', () => {
     fireEvent(details, new Event('toggle', { bubbles: true }))
 
     await waitFor(() => {
-      expect(screen.getByTestId('markdown')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Collapse JSON object' })).toBeInTheDocument()
     })
-    const text = screen.getByTestId('markdown').textContent ?? ''
-    expect(text.startsWith('```json')).toBe(true)
-    expect(text).toContain('"ok": true')
-    expect(text.endsWith('```')).toBe(true)
+    expect(screen.getByText('Args')).toBeInTheDocument()
+    expect(screen.getByText('ok:')).toBeInTheDocument()
+    expect(screen.getByText('true')).toBeInTheDocument()
   })
 
   it('marks decorative icons as hidden from assistive tech', () => {

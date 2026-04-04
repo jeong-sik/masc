@@ -25,9 +25,9 @@ interface LoadingStateProps {
 /** Loading indicator with spin animation */
 export function LoadingState({ class: cx, children }: LoadingStateProps) {
   return html`
-    <div class="loading-state flex-col py-8 text-[13px] ${cx ?? ''}">
+    <div class="loading-state flex flex-col items-center py-8 text-[13px] ${cx ?? ''}">
       <${Loader2} size=${24} class="animate-spin mb-3 opacity-60 text-accent" />
-      <span class="loading-pulse">${children ?? '불러오는 중...'}</span>
+      <span>${children ?? '불러오는 중...'}</span>
     </div>
   `
 }

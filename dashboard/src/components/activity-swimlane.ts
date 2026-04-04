@@ -87,6 +87,18 @@ function spanColor(kind: string): string {
   }
 }
 
+/** Dark text on bright backgrounds, light text on dark/transparent backgrounds */
+function spanTextColor(kind: string): string {
+  switch (kind) {
+    case 'task':
+    case 'operation':
+    case 'autonomy':
+      return '#0f172a'
+    default:
+      return '#e2e8f0'
+  }
+}
+
 function loadSwimlane(since?: string) {
   return swimlaneResource.load(() => fetchSwimlane(since))
 }
@@ -122,6 +134,7 @@ export function ActivitySwimlane({ since }: { since?: string }) {
     let idCounter = 1
     const items = new DataSet(data.spans.map(span => {
       const color = spanColor(span.kind)
+      const textColor = spanTextColor(span.kind)
       const duration = formatDurationMs(span.end_ms - span.start_ms)
       const itemId = idCounter++
       const title = tooltipHtml([span.label || span.kind, `종류: ${span.kind}`, `지속: ${duration}`])
@@ -142,7 +155,7 @@ export function ActivitySwimlane({ since }: { since?: string }) {
         className: span.kind === 'presence'
           ? 'activity-swimlane-item activity-swimlane-item--presence'
           : 'activity-swimlane-item',
-        style: `background-color: ${color}; border-color: ${color}; color: #0f172a; font-size: 10px; border-radius: 3px; font-family: system-ui, sans-serif; overflow: hidden;`
+        style: `background-color: ${color}; border-color: ${color}; color: ${textColor}; font-size: 10px; border-radius: 3px; font-family: system-ui, sans-serif; overflow: hidden;`
       }
     }))
 

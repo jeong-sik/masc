@@ -324,7 +324,7 @@
 
 .swimlane-vis-container .vis-item.activity-swimlane-item {
   border-color: transparent;
-  color: #0f172a;
+  color: var(--text-body);
 }
 
 .swimlane-vis-container .vis-item.activity-swimlane-item--presence {

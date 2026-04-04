@@ -426,31 +426,6 @@ let normalize_proactive_cooldown_sec (v : int) : int =
   clamp_int v ~min_v:0 ~max_v:172800
 
 
-(* ================================================================ *)
-(* Proactive turn parameters                                        *)
-(* ================================================================ *)
-
-let keeper_proactive_temperature_low () : float =
-  float_of_env_default
-    "MASC_KEEPER_PROACTIVE_TEMP_LOW"
-    ~default:0.55
-    ~min_v:0.0
-    ~max_v:2.0
-
-let keeper_proactive_temperature_mid () : float =
-  float_of_env_default
-    "MASC_KEEPER_PROACTIVE_TEMP_MID"
-    ~default:0.75
-    ~min_v:0.0
-    ~max_v:2.0
-
-let keeper_proactive_temperature_high () : float =
-  float_of_env_default
-    "MASC_KEEPER_PROACTIVE_TEMP_HIGH"
-    ~default:0.9
-    ~min_v:0.0
-    ~max_v:2.0
-
 let keeper_proactive_similarity_threshold () : float =
   float_of_env_default
     "MASC_KEEPER_PROACTIVE_SIMILARITY"

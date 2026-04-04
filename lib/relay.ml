@@ -103,12 +103,15 @@ let resolve_max_context model =
     (match Llm_provider.Provider_registry.find default_registry model with
      | Some entry -> entry.Llm_provider.Provider_registry.max_context
      | None ->
-       (* Layer 3: extract base provider from hyphenated name
-          e.g. "claude-opus" -> "claude", "gpt-4o" -> registry lookup "gpt" *)
+       (* Layer 3: extract base provider from separator
+          "provider:model" -> "provider" (colon), "claude-opus" -> "claude" (hyphen) *)
        let base =
-         match String.index_opt model '-' with
+         match String.index_opt model ':' with
          | Some idx when idx > 0 -> String.sub model 0 idx
-         | _ -> ""
+         | _ ->
+           match String.index_opt model '-' with
+           | Some idx when idx > 0 -> String.sub model 0 idx
+           | _ -> ""
        in
        if base <> "" then
          match Llm_provider.Provider_registry.find default_registry base with

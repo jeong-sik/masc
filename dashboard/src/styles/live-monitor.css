@@ -20,11 +20,11 @@
 
 @utility activity-filter-btn {
   transition: background 0.15s, color 0.15s, border-color 0.15s;
-  &.active { color: rgba(255,255,255,0.85); border-color: var(--white-20); background: var(--white-6); }
+  &.active { color: var(--text-strong); border-color: var(--white-20); background: var(--white-6); }
   &.live-event-broadcast.active { border-color: rgba(96,165,250,0.4); color: var(--accent); }
   &.live-event-task.active { border-color: var(--ok-40); color: var(--ok); }
   &.live-event-keeper.active { border-color: rgba(168,85,247,0.4); color: #a855f7; }
-  &.live-event-system.active { border-color: var(--white-20); color: var(--white-70); }
+  &.live-event-system.active { border-color: var(--white-20); color: var(--text-muted); }
 }
 
 @utility activity-item {
@@ -44,7 +44,7 @@
   &.live-event-broadcast { background: var(--blue-400-15); color: var(--accent); }
   &.live-event-task { background: var(--ok-soft); color: var(--ok); }
   &.live-event-keeper { background: rgba(168,85,247,0.15); color: #a855f7; }
-  &.live-event-system { background: var(--white-6); color: var(--white-50); }
+  &.live-event-system { background: var(--white-6); color: var(--text-muted); }
 }
 
 @utility focus-agent-card {

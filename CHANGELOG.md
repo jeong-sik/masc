@@ -1,6 +1,20 @@
 # Changelog
 
 
+## [2.221.0] - 2026-04-04
+
+### Added
+- **Keeper tool matrix smoke test** -- basic smoke test for keeper tool discovery and BM25 ranking (#4984).
+
+### Fixed
+- **Dashboard text contrast** -- improve text contrast on dark backgrounds for readability (#4983).
+- **Dashboard json viewer followups** -- carry forward interactive viewer improvements from superseded rollout (#4982).
+- **Eio mutex poisoning** -- prevent Eio mutex poisoning in `with_test_env` (#4949).
+- **CI stabilization** -- stabilize quick-suite follow-ups and test alignment (#4930, #4901).
+- **OAS capacity-aware backoff** -- restore capacity-aware local backoff for provider adapter (#4986).
+- **Keeper autoboot** -- fix keeper autoboot for declarative janitor cleanup (#4987).
+- **Cascade config local-first** -- make cascade config local-first with llama:auto (#4981).
+
 ## [2.220.0] - 2026-04-04
 
 ### Added

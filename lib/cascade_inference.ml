@@ -55,7 +55,10 @@ let for_cascade ~(name : string) : t =
   | Some config_path ->
       (try of_oas (Llm_provider.Cascade_config.resolve_inference_params ~config_path ~name)
        with Eio.Cancel.Cancelled _ as e -> raise e
-          | _exn -> empty)
+          | exn ->
+            Eio.traceln "[cascade_inference] %s: config load failed (%s), using empty defaults"
+              name (Printexc.to_string exn);
+            empty)
 
 (** Resolve a temperature value: cascade config -> fallback. *)
 let resolve_temperature ~(cascade_name : string) ~(fallback : unit -> float) : float =

@@ -71,18 +71,21 @@ let parse_required_string_field ~field json =
 (** Parse MODEL response containing a strict JSON object with hypothesis and
     modified_code string fields. Returns Ok (hypothesis, modified_code) or
     Error reason. *)
+(** Parse MODEL response containing a strict JSON object with hypothesis and
+    modified_code string fields. Uses Lenient_json for 6-stage recovery
+    (strip fences, unwrap double-stringify, trailing commas, close brackets).
+    Returns Ok (hypothesis, modified_code) or Error reason. *)
 let parse_model_code_response response =
   let trimmed_response = String.trim response in
   if trimmed_response = "" then
     Result.error "MODEL returned empty response"
   else
-    match
-      Safe_ops.parse_json_safe
-        ~context:"autoresearch_codegen.parse_model_code_response"
-        trimmed_response
-    with
-    | Error err -> Result.error err
-    | Ok (`Assoc _ as json) ->
+    (* Lenient_json.parse applies deterministic recovery transforms:
+       strip markdown fences, unwrap double-stringify, trailing commas,
+       keyword completion, bracket closure — then standard parse.
+       Falls back to {raw: string} if all transforms fail. *)
+    match Llm_provider.Lenient_json.parse trimmed_response with
+    | `Assoc _ as json ->
       (match parse_required_string_field ~field:"hypothesis" json with
       | Error _ as e -> e
       | Ok hypothesis ->
@@ -94,7 +97,14 @@ let parse_model_code_response response =
             Result.error "Empty \"modified_code\" field in MODEL response"
           else
             Result.ok (String.trim hypothesis, normalized_code))
-    | Ok _ ->
+    | `Assoc [("raw", `String _)] ->
+      (* Lenient_json fallback: all recovery failed *)
+      let preview = if String.length trimmed_response > 80
+        then String.sub trimmed_response 0 80 ^ "..."
+        else trimmed_response
+      in
+      Result.error (Printf.sprintf "MODEL response is not valid JSON after lenient recovery: %s" preview)
+    | _ ->
       Result.error "MODEL response must be a JSON object"
 
 (* local_capacity_for_selections removed from OAS SDK.

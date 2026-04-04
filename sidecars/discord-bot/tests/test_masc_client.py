@@ -132,7 +132,7 @@ def test_config_allows_zero_disable_values(monkeypatch: pytest.MonkeyPatch) -> N
 
     cfg = BotConfig(
         discord_bot_token="test-token",
-        gate_api_token="test-api-token",
+        masc_api_token="test-api-token",
         gate_max_retries=0,
         status_cache_ttl_sec=0,
         keeper_cache_ttl_sec=0,

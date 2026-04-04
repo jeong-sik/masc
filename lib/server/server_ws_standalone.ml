@@ -15,7 +15,8 @@
 module Ws = Httpun_ws
 module Ws_eio = Httpun_ws_eio
 
-let default_port = 8937
+(** SSOT: [Env_config.Transport.ws_port]. *)
+let default_port = Env_config.Transport.ws_port
 
 (** Read the configured WS port from environment or use default. *)
 let configured_port () = Env_config.Transport.ws_port

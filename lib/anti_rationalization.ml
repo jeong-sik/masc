@@ -123,11 +123,15 @@ REJECT: <reason> - if the notes are vague, avoidant, or do not address the task|
 (* Verdict parsing                                                  *)
 (* ================================================================ *)
 
-let parse_verdict (text : string) : verdict =
+(** Parse LLM verdict text.
+    Returns [Some verdict] on successful parse, [None] on format mismatch.
+    Callers must decide how to handle [None] — the old behavior of silently
+    mapping format mismatch to [Approve] hides evaluator bias (RFC-0001 H1). *)
+let parse_verdict_opt (text : string) : verdict option =
   let trimmed = String.trim text in
   let upper = String.uppercase_ascii trimmed in
   if String.length upper >= 7 && String.sub upper 0 7 = "APPROVE" then
-    Approve
+    Some Approve
   else if String.length upper >= 6 && String.sub upper 0 6 = "REJECT" then
     let rest =
       if String.length trimmed > 6 then
@@ -140,10 +144,25 @@ let parse_verdict (text : string) : verdict =
         String.trim (String.sub rest 1 (String.length rest - 1))
       else rest
     in
-    if reason = "" then Reject "completion notes did not address the task"
-    else Reject reason
+    if reason = "" then Some (Reject "completion notes did not address the task")
+    else Some (Reject reason)
   else
-    (* Model did not follow format — default to approve (liveness) *)
+    None
+
+(** Backward-compatible wrapper. Logs a warning on format mismatch and
+    falls back to [Approve] for liveness. Prefer [parse_verdict_opt] in
+    new code to make the fallback explicit. *)
+let parse_verdict (text : string) : verdict =
+  match parse_verdict_opt text with
+  | Some v -> v
+  | None ->
+    let preview =
+      let t = String.trim text in
+      if String.length t > 80 then String.sub t 0 80 ^ "..." else t
+    in
+    Log.Task.warn
+      "[anti-rationalization] format mismatch in LLM verdict (falling back to Approve): %S"
+      preview;
     Approve
 
 (* ================================================================ *)
@@ -262,15 +281,21 @@ let review
      with
      | Ok result ->
        let text = Oas_response.text_of_response result.response in
-       let v = parse_verdict text in
+       let (v, gate) = match parse_verdict_opt text with
+         | Some verdict -> (verdict, "llm")
+         | None -> (Approve, "format_fallback")
+       in
        (match v with
         | Reject reason ->
           Log.Task.info "[anti-rationalization] LLM rejected: agent=%s task=%s cascade=%s reason=%s"
             req.agent_name req.task_title evaluator_cascade reason
+        | Approve when gate = "format_fallback" ->
+          Log.Task.warn "[anti-rationalization] LLM format mismatch → Approve fallback: agent=%s task=%s cascade=%s"
+            req.agent_name req.task_title evaluator_cascade
         | Approve ->
           Log.Task.info "[anti-rationalization] LLM approved: agent=%s task=%s cascade=%s"
             req.agent_name req.task_title evaluator_cascade);
-       emit { verdict = v; evaluator_cascade; generator_cascade; gate = "llm"; fallback_reason = None }
+       emit { verdict = v; evaluator_cascade; generator_cascade; gate; fallback_reason = None }
      | Error msg ->
        (* Liveness > correctness: if LLM is unavailable, approve *)
        Log.Task.warn "[anti-rationalization] LLM unavailable: %s (approving by default)" msg;

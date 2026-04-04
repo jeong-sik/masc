@@ -28,23 +28,21 @@ type decision =
   | Skip_busy
   | Skip_idle of float
 
+(** SSOT: [Env_config.SmartHeartbeatTuning] for base values and clamp bounds. *)
 let default_config = {
-  base_interval_s = 30.0;
-  idle_multiplier = 3.0;
+  base_interval_s = Env_config.SmartHeartbeatTuning.base_interval_s;
+  idle_multiplier = Env_config.SmartHeartbeatTuning.idle_multiplier;
   busy_skip = true;
-  idle_threshold_s = 300.0;  (* 5 minutes *)
+  idle_threshold_s = Env_config.SmartHeartbeatTuning.idle_threshold_s;
 }
 
 let make_config
-    ?(base_interval_s = 30.0)
-    ?(idle_multiplier = 3.0)
+    ?(base_interval_s = Env_config.SmartHeartbeatTuning.base_interval_s)
+    ?(idle_multiplier = Env_config.SmartHeartbeatTuning.idle_multiplier)
     ?(busy_skip = true)
-    ?(idle_threshold_s = 300.0)
+    ?(idle_threshold_s = Env_config.SmartHeartbeatTuning.idle_threshold_s)
     () =
-  (* Validate and clamp values *)
-  let base_interval_s = max 5.0 (min 300.0 base_interval_s) in
-  let idle_multiplier = max 1.0 (min 10.0 idle_multiplier) in
-  let idle_threshold_s = max 60.0 (min 3600.0 idle_threshold_s) in
+  (* Clamp bounds are already applied by Env_config.SmartHeartbeatTuning *)
   { base_interval_s; idle_multiplier; busy_skip; idle_threshold_s }
 
 let effective_interval ~config ~last_activity =

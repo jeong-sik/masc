@@ -189,6 +189,8 @@ let test_collaboration_evidence_tracks_unlinked_room_noise () =
       check string "linkage gap wording"
         "namespace activity exists without explicit session/operation linkage"
         (linkage |> member "gaps" |> index 0 |> to_string);
+      (* Unlinked namespace noise keeps the evidence partial until proof and
+         explicit linkage converge on the same session. *)
       check string "partial detail wording"
         "세션 이벤트나 explicit linked namespace activity는 보이지만 proof 또는 관계 근거가 충분히 묶이지 않았습니다."
         (json |> member "detail" |> to_string);

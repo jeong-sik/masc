@@ -322,6 +322,9 @@ let execute_spawn_pipeline
                              ]
                          in
                          try
+                           (* Team-session local spawns stay on the shared worker
+                              runtime so backend selection, scoped tools, and
+                              proof persistence remain aligned with standalone workers. *)
                            let worker_result =
                              Worker_runtime.run_worker ~sw:run_sw ?net:ctx.net
                                ~backend:execution.worker_backend

@@ -2209,6 +2209,7 @@ let test_keeper_board_delete_requires_explicit_opt_in () =
   Fun.protect
     ~finally:(fun () ->
       Masc_mcp.Keeper_keepalive.stop_keepalive "board-delete-demo";
+      Masc_mcp.Keeper_keepalive.stop_keepalive "board-delete-full";
       Masc_mcp.Keeper_keepalive.stop_keepalive "board-delete-optin";
       rm_rf base_dir)
     (fun () ->
@@ -2233,6 +2234,17 @@ let test_keeper_board_delete_requires_explicit_opt_in () =
             ])
       in
       if not ok_default then fail ("default keeper_up failed: " ^ body_default);
+      let ok_full, body_full =
+        dispatch "masc_keeper_up"
+          (`Assoc
+            [
+              ("name", `String "board-delete-full");
+              ("goal", `String "Check full board delete policy");
+              ("proactive_enabled", `Bool false);
+              ("tool_preset", `String "full");
+            ])
+      in
+      if not ok_full then fail ("full keeper_up failed: " ^ body_full);
       let ok_optin, body_optin =
         dispatch "masc_keeper_up"
           (`Assoc
@@ -2257,8 +2269,16 @@ let test_keeper_board_delete_requires_explicit_opt_in () =
         | Ok None -> fail "missing board-delete-optin meta"
         | Error e -> fail e
       in
+      let full_meta =
+        match Masc_mcp.Keeper_types.read_meta config "board-delete-full" with
+        | Ok (Some meta) -> meta
+        | Ok None -> fail "missing board-delete-full meta"
+        | Error e -> fail e
+      in
       check_keeper_exec_tool_presence "default research preset board delete"
         default_meta ~tool_name:"keeper_board_delete" ~expect_allowed:false;
+      check_keeper_exec_tool_presence "default full preset board delete"
+        full_meta ~tool_name:"keeper_board_delete" ~expect_allowed:false;
       check_keeper_exec_tool_presence "explicit board delete opt-in"
         optin_meta ~tool_name:"keeper_board_delete" ~expect_allowed:true)
 

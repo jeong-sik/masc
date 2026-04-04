@@ -121,8 +121,7 @@ let wakeup_relevant_keeper_for_board_signal
     |> List.filter (fun (meta, _matched) ->
          match Keeper_contract.scope_kind_of_string meta.scope_kind with
          | Keeper_contract.Global -> true
-         | Keeper_contract.Local ->
-             Keeper_contract.room_scope_of_string meta.room_scope = Keeper_contract.All)
+         | Keeper_contract.Local -> false)
   in
   let wake_meta (meta : keeper_meta) reason =
     if
@@ -1139,15 +1138,22 @@ let bootstrap_live_keeper_meta ~(ctx : _ context) (m : keeper_meta) : keeper_met
     m
 ;;
 
-let publish_keeper_started ~(live_meta : keeper_meta) : unit =
+let publish_keeper_lifecycle ~event ~keeper_name ~detail : unit =
   match get_bus () with
   | Some bus ->
     Oas_events.publish_keeper_lifecycle
       bus
-      ~event:"started"
-      ~keeper_name:live_meta.name
-      ~detail:"keepalive"
+      ~event
+      ~keeper_name
+      ~detail
   | None -> ()
+;;
+
+let publish_keeper_started ~(live_meta : keeper_meta) : unit =
+  publish_keeper_lifecycle
+    ~event:"started"
+    ~keeper_name:live_meta.name
+    ~detail:"keepalive"
 ;;
 
 let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_meta) : unit
@@ -1173,13 +1179,48 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
     Keeper_registry.update_meta ~base_path:ctx.config.base_path m.name live_meta;
     publish_keeper_started ~live_meta;
     Eio.Fiber.fork ~sw:ctx.sw (fun () ->
-      try run_heartbeat_loop ~proactive_warmup_sec ctx live_meta stop ~wakeup with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | exn ->
-        Log.Keeper.error
-          "heartbeat loop for %s crashed: %s"
-          live_meta.name
-          (Printexc.to_string exn)))
+      let resolved = ref false in
+      let resolve_done value =
+        if not !resolved && Option.is_none (Eio.Promise.peek reg.done_p) then begin
+          resolved := true;
+          Eio.Promise.resolve reg.done_r value
+        end
+      in
+      let record_crash failure_reason =
+        let reason = Keeper_registry.failure_reason_to_string failure_reason in
+        Keeper_registry.set_failure_reason ~base_path:ctx.config.base_path live_meta.name
+          (Some failure_reason);
+        Keeper_registry.set_state ~base_path:ctx.config.base_path live_meta.name
+          Keeper_registry.Crashed;
+        Keeper_registry.record_crash ~base_path:ctx.config.base_path live_meta.name
+          (Time_compat.now ()) reason;
+        Keeper_registry.record_error ~base_path:ctx.config.base_path live_meta.name
+          reason;
+        resolve_done (`Crashed reason);
+        publish_keeper_lifecycle ~event:"crashed" ~keeper_name:live_meta.name
+          ~detail:reason
+      in
+      Fun.protect
+        (fun () ->
+          try
+            run_heartbeat_loop ~proactive_warmup_sec ctx live_meta stop ~wakeup;
+            Keeper_registry.set_state ~base_path:ctx.config.base_path live_meta.name
+              Keeper_registry.Stopped;
+            resolve_done `Stopped;
+            publish_keeper_lifecycle ~event:"stopped" ~keeper_name:live_meta.name
+              ~detail:"normal exit"
+          with
+          | Keeper_registry.Keeper_heartbeat_failure info ->
+            record_crash info.reason
+          | Eio.Cancel.Cancelled _ as e -> raise e
+          | exn ->
+            Log.Keeper.error
+              "heartbeat loop for %s crashed: %s"
+              live_meta.name
+              (Printexc.to_string exn);
+            record_crash (Keeper_registry.Exception (Printexc.to_string exn)))
+        ~finally:(fun () ->
+          Keeper_registry.cleanup_tracking ~base_path:ctx.config.base_path live_meta.name)))
 ;;
 
 let stop_keepalive name =
@@ -1191,12 +1232,14 @@ let stop_keepalive name =
     (fun (entry : Keeper_registry.registry_entry) ->
        Atomic.set entry.fiber_stop true;
        (match Atomic.get entry.grpc_close with
-        | Some close_fn ->
+       | Some close_fn ->
           (try close_fn () with
            | Eio.Cancel.Cancelled _ as e -> raise e
            | _exn -> ())
         | None -> ());
        Keeper_registry.set_state ~base_path:entry.base_path name Keeper_registry.Stopped;
+       if Option.is_none (Eio.Promise.peek entry.done_p) then
+         Eio.Promise.resolve entry.done_r `Stopped;
        Keeper_registry.cleanup_tracking ~base_path:entry.base_path name;
        match get_bus () with
        | Some bus ->

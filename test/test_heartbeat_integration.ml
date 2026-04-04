@@ -21,6 +21,30 @@ module Cfg = Env_config
 
 let bp = "/tmp/test-heartbeat-integ"
 
+let temp_dir prefix =
+  let dir = Filename.temp_file prefix "" in
+  Unix.unlink dir;
+  Unix.mkdir dir 0o755;
+  dir
+
+let cleanup_dir dir =
+  let rec rm path =
+    if Sys.file_exists path then
+      if Sys.is_directory path then (
+        Array.iter (fun name -> rm (Filename.concat path name)) (Sys.readdir path);
+        Unix.rmdir path)
+      else
+        Unix.unlink path
+  in
+  try rm dir with _ -> ()
+
+let rec wait_until ~clock ~timeout_s predicate =
+  if predicate () then true
+  else if timeout_s <= 0.0 then false
+  else (
+    Eio.Time.sleep clock 0.05;
+    wait_until ~clock ~timeout_s:(timeout_s -. 0.05) predicate)
+
 let make_meta name =
   let json = `Assoc [
     ("name", `String name);
@@ -360,6 +384,55 @@ let test_cohort_key_turn_failures () =
     (Some (R.Turn_consecutive_failures 10)) in
   check string "turn failure cohort" "turn_failures" key
 
+(* ══════════════════════════════════════════════════════════
+   8. Direct keepalive path resolves lifecycle promises
+   ══════════════════════════════════════════════════════════ *)
+
+let test_direct_start_keepalive_resolves_done_on_stop () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  R.clear ();
+  let base_dir = temp_dir "direct-keepalive" in
+  let keeper_name = "direct-lifecycle" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc_mcp.Keeper_keepalive.stop_keepalive keeper_name;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc_mcp.Room.default_config base_dir in
+      ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
+      let meta = make_meta keeper_name in
+      Eio.Switch.run @@ fun sw ->
+      let ctx : _ KT.context =
+        {
+          config;
+          agent_name = "tester";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = None;
+        }
+      in
+      Masc_mcp.Keeper_keepalive.start_keepalive ctx meta;
+      Eio.Time.sleep ctx.clock 0.05;
+      Masc_mcp.Keeper_keepalive.stop_keepalive keeper_name;
+      let stopped_resolved =
+        wait_until ~clock:ctx.clock ~timeout_s:1.0 (fun () ->
+          match R.get ~base_path:config.base_path keeper_name with
+          | Some entry -> Option.is_some (Eio.Promise.peek entry.done_p)
+          | None -> false)
+      in
+      match R.get ~base_path:config.base_path keeper_name with
+      | None -> fail "expected direct-lifecycle registry entry"
+      | Some entry ->
+        check string "state stopped" "stopped" (R.state_to_string entry.state);
+        check bool "done promise resolved eventually" true stopped_resolved;
+        (match Eio.Promise.peek entry.done_p with
+         | Some `Stopped -> ()
+         | Some (`Crashed reason) ->
+           fail ("expected stopped promise, got crashed: " ^ reason)
+         | None -> fail "expected done_p to resolve on stop"))
+
 (* ── Test runner ──────────────────────────────────────────── *)
 
 let () =
@@ -388,5 +461,9 @@ let () =
     "turn_failure", [
       eio_test "turn crash flow" test_crash_turn_failures;
       test_case "cohort key" `Quick test_cohort_key_turn_failures;
+    ];
+    "direct_keepalive", [
+      test_case "stop resolves done promise" `Quick
+        test_direct_start_keepalive_resolves_done_on_stop;
     ];
   ]

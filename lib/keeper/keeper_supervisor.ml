@@ -61,7 +61,7 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
   Eio.Fiber.fork ~sw:ctx.sw (fun () ->
     let resolved = ref false in
     let resolve_done value =
-      if not !resolved then begin
+      if not !resolved && Option.is_none (Eio.Promise.peek reg.done_p) then begin
         resolved := true;
         Eio.Promise.resolve reg.done_r value
       end

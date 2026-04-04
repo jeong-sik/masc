@@ -69,6 +69,15 @@ let known_shared_agent_keeper_tool_names : string list =
     "masc_code_git";
   ]
 
+let test_known_shared_tools_exist_on_agent_surface () =
+  let agent_names = Agent_tool_surfaces.spawned_agent_public_tool_names in
+  List.iter
+    (fun name ->
+      Alcotest.(check bool)
+        (name ^ " is exposed on spawned agent surface")
+        true (List.mem name agent_names))
+    known_shared_agent_keeper_tool_names
+
 (* ============================================================
    Invariant 1: Non-research keepers only get keeper_* tools plus
    curated canonical masc_* keeper workflows
@@ -240,6 +249,8 @@ let () =
       Alcotest.test_case "spawned agent surface" `Quick test_agent_surface_no_keeper_tools;
     ]);
     ("disjoint_namespaces", [
+      Alcotest.test_case "shared tool whitelist stays real" `Quick
+        test_known_shared_tools_exist_on_agent_surface;
       Alcotest.test_case "heuristic vs agent" `Quick test_no_overlap_heuristic_vs_agent;
       Alcotest.test_case "research vs agent" `Quick test_no_overlap_research_vs_agent;
       Alcotest.test_case "shard vs agent" `Quick test_shard_tools_overlap_with_agent_documented;

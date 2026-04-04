@@ -4,7 +4,7 @@ open Masc_mcp
 let make_message ?(content = "hello") ?(keeper_name = "luna")
     ?(channel_user_id = "user-1") ?(idempotency_key = "key-1") () =
   {
-    Channel_gate.channel = Agent_identity.channel_of_string "discord";
+    Channel_gate.channel = "discord";
     channel_user_id;
     channel_user_name = "user";
     channel_room_id = "room-1";
@@ -135,9 +135,59 @@ let test_inbound_of_json_normalizes_channel_label () =
   in
   match Channel_gate.inbound_of_json json with
   | Ok msg ->
-      check string "channel normalized" "discord"
-        (Agent_identity.string_of_channel msg.channel)
+      check string "channel normalized" "discord" msg.channel
   | Error err -> fail ("expected inbound json to parse: " ^ err)
+
+(* ── Mock dispatch for handle_inbound tests ──────────────────── *)
+
+let mock_dispatch_ok ~channel:_ ~channel_user_id:_ ~keeper_name:_ ~content:_ =
+  Gate_keeper_backend.Reply {
+    content = "mock reply";
+    stats = Some { Gate_protocol.model_used = "test-model"; duration_ms = 42; tokens_used = 10 };
+  }
+
+let mock_dispatch_error ~channel:_ ~channel_user_id:_ ~keeper_name:_ ~content:_ =
+  Gate_keeper_backend.Keeper_error "mock keeper error"
+
+let mock_dispatch_unavailable ~channel:_ ~channel_user_id:_ ~keeper_name:_ ~content:_ =
+  Gate_keeper_backend.Unavailable
+
+let test_handle_inbound_success () =
+  reset_dedup ();
+  let msg = make_message ~idempotency_key:(unique_key "dispatch-ok") () in
+  match Channel_gate.handle_inbound ~dispatch:mock_dispatch_ok msg with
+  | Ok out ->
+      check string "reply content" "mock reply" out.content;
+      check string "keeper name" "luna" out.keeper_name;
+      (match out.turn_stats with
+       | Some s -> check string "model" "test-model" s.model_used
+       | None -> fail "expected turn_stats")
+  | Error e -> fail (Channel_gate.gate_error_to_string e)
+
+let test_handle_inbound_keeper_error () =
+  reset_dedup ();
+  let msg = make_message ~idempotency_key:(unique_key "dispatch-err") () in
+  match Channel_gate.handle_inbound ~dispatch:mock_dispatch_error msg with
+  | Error (Channel_gate.Keeper_error err) ->
+      check string "error message" "mock keeper error" err
+  | Error _ -> fail "expected Keeper_error"
+  | Ok _ -> fail "expected error"
+
+let test_handle_inbound_unavailable () =
+  reset_dedup ();
+  let msg = make_message ~idempotency_key:(unique_key "dispatch-unavail") () in
+  match Channel_gate.handle_inbound ~dispatch:mock_dispatch_unavailable msg with
+  | Error Channel_gate.Dispatch_unavailable -> ()
+  | Error _ -> fail "expected Dispatch_unavailable"
+  | Ok _ -> fail "expected error"
+
+let test_handle_inbound_validation_blocks_dispatch () =
+  reset_dedup ();
+  let msg = make_message ~content:"   " ~idempotency_key:(unique_key "val-block") () in
+  match Channel_gate.handle_inbound ~dispatch:mock_dispatch_ok msg with
+  | Error (Channel_gate.Validation Channel_gate.Empty_content) -> ()
+  | Error _ -> fail "expected Validation(Empty_content)"
+  | Ok _ -> fail "expected validation to block dispatch"
 
 let () =
   Alcotest.run "Channel_gate"
@@ -162,5 +212,16 @@ let () =
             test_validation_error_to_string;
           test_case "normalizes inbound channel labels" `Quick
             test_inbound_of_json_normalizes_channel_label;
+        ] );
+      ( "handle_inbound",
+        [
+          test_case "dispatches and returns reply" `Quick
+            test_handle_inbound_success;
+          test_case "returns keeper error" `Quick
+            test_handle_inbound_keeper_error;
+          test_case "returns unavailable" `Quick
+            test_handle_inbound_unavailable;
+          test_case "validation blocks dispatch" `Quick
+            test_handle_inbound_validation_blocks_dispatch;
         ] );
     ]

@@ -343,10 +343,14 @@ let append_judgments base_path judgments =
   let store = get_judgments_store base_path in
   List.iter (fun json -> Dated_jsonl.append store json) judgments
 
-let should_backoff ~sw:_ ~net:_ =
+let should_backoff ~sw ~net =
   try
-    (* local_capacity_for_selections removed from OAS SDK. TODO(#4326) *)
-    false
+    let capacity =
+      Llm_provider.Cascade_config.local_capacity_for_selections ~sw ~net
+        [ "governance_judge" ]
+    in
+    capacity.all_discovered && capacity.endpoints_found > 0
+    && capacity.process_available <= 0
   with exn ->
     Eio.traceln
       "[governance] capacity check failed in should_backoff: %s"

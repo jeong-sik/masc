@@ -547,6 +547,32 @@ let test_oas_worker_capability_threading_contracts () =
     (file_contains_pattern "lib/team_session/team_session_oas_bridge.ml"
        "?raw_trace ~proof_ref ?contract ~sw")
 
+let test_oas_capacity_restore_contracts () =
+  check bool "operator judge backoff uses OAS local capacity" true
+    (file_contains_pattern "lib/dashboard/dashboard_operator_judge.ml"
+       "local_capacity_for_selections ~sw ~net");
+  check bool "operator judge selection is explicit" true
+    (file_contains_pattern "lib/dashboard/dashboard_operator_judge.ml"
+       {|[ "operator_judge" ]|});
+  check bool "governance judge backoff uses OAS local capacity" true
+    (file_contains_pattern "lib/dashboard/dashboard_governance_judge.ml"
+       "local_capacity_for_selections ~sw ~net");
+  check bool "governance judge selection is explicit" true
+    (file_contains_pattern "lib/dashboard/dashboard_governance_judge.ml"
+       {|[ "governance_judge" ]|});
+  check bool "team session swarm config restores slot-aware OAS capacity query" true
+    (file_contains_pattern "lib/team_session/team_session_oas_bridge.ml"
+       "local_capacity_for_selections ~sw ~net");
+  check bool "team session swarm config reuses slot-aware cap helper" true
+    (file_contains_pattern "lib/team_session/team_session_oas_bridge.ml"
+       "slot_aware_concurrency_cap ~entry_count");
+  check bool "autoresearch background gating restores OAS capacity query" true
+    (file_contains_pattern "lib/autoresearch_codegen.ml"
+       "local_capacity_for_selections ~sw ~net");
+  check bool "autoresearch uses Eio context fallback for capacity probing" true
+    (file_contains_pattern "lib/autoresearch_codegen.ml"
+       "Eio_context.get_switch_opt (), Eio_context.get_net_opt ()")
+
 let test_team_session_spawn_tool_contracts () =
   check bool "team session spawn preflights via Worker_runtime" true
     (file_contains_pattern "lib/tool_team_session_step_spawn.ml"
@@ -705,6 +731,8 @@ let () =
              test_worktree_list_contracts;
            test_case "oas worker capability threading contracts" `Quick
              test_oas_worker_capability_threading_contracts;
+           test_case "oas capacity restore contracts" `Quick
+             test_oas_capacity_restore_contracts;
            test_case "team session spawn tool contracts" `Quick
              test_team_session_spawn_tool_contracts;
            test_case "dashboard timeout guard contracts" `Quick

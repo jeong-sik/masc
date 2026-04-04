@@ -219,7 +219,15 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
       Log.Keeper.info
         "autoboot: base_path=%s masc_root=%s keeper_dir=%s keeper_json_count=%d"
         config.base_path masc_root keeper_dir all_count;
-      let names = Keeper_types.keepalive_keeper_names config in
+      let names = Keeper_runtime.bootable_keeper_names config in
+      let keeper_boot_ctx : _ Keeper_types.context = {
+        config;
+        agent_name = "keeper-autoboot";
+        sw;
+        clock;
+        proc_mgr = Some proc_mgr;
+        net = state.net;
+      } in
       Log.Keeper.info
         "autoboot: %d keeper(s) to boot; concurrent keeper turns throttled to %d via MASC_KEEPER_AUTOBOOT_MAX"
         (List.length names) Keeper_keepalive.keeper_turn_throttle_limit;
@@ -230,24 +238,41 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
     List.iteri (fun idx name ->
         try
           Log.Keeper.info "autoboot: loading meta for %s" name;
-          match Keeper_runtime.ensure_keeper_meta config name with
+          match Keeper_runtime.load_or_materialize_boot_meta keeper_boot_ctx name with
           | Error e ->
             Log.Keeper.error "autoboot: failed to load meta for %s: %s" name e
-          | Ok m ->
-            let warmup = base_warmup + (idx * stagger_step) in
-            Log.Keeper.info "autoboot: calling start_keepalive for %s (warmup=%ds)"
-              name warmup;
-            let ctx : _ Keeper_types.context = {
-              config;
-              agent_name = m.agent_name;
-              sw;
-              clock;
-              proc_mgr = Some proc_mgr;
-              net = state.net;
-            } in
-            Keeper_keepalive.start_keepalive ~proactive_warmup_sec:warmup ctx m;
-            incr booted;
-            Log.Keeper.info "autoboot: started keepalive for %s" m.name
+          | Ok { meta = m; materialized } ->
+            let started_here =
+              if Keeper_registry.is_running ~base_path:config.base_path m.name then (
+                Log.Keeper.info
+                  "autoboot: %s already running%s"
+                  m.name
+                  (if materialized then " (materialized from TOML)" else "");
+                false
+              ) else begin
+                let warmup = base_warmup + (idx * stagger_step) in
+                Log.Keeper.info "autoboot: calling start_keepalive for %s (warmup=%ds)"
+                  name warmup;
+                let ctx : _ Keeper_types.context = {
+                  config;
+                  agent_name = m.agent_name;
+                  sw;
+                  clock;
+                  proc_mgr = Some proc_mgr;
+                  net = state.net;
+                } in
+                Keeper_keepalive.start_keepalive ~proactive_warmup_sec:warmup ctx m;
+                Keeper_registry.is_running ~base_path:config.base_path m.name
+              end
+            in
+            if started_here then begin
+              incr booted;
+              Log.Keeper.info "autoboot: started keepalive for %s" m.name
+            end else
+              Log.Keeper.info
+                "autoboot: keeper %s counted as already available%s"
+                m.name
+                (if materialized then " after TOML materialization" else "")
         with
         | Eio.Cancel.Cancelled _ as e -> raise e
         | exn ->

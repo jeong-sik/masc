@@ -607,6 +607,14 @@
  (deps tool_matrix_case_runner.exe)
  (libraries masc_test_deps))
 
+; Keeper Tool Matrix (3 modules + runner dep)
+(test
+ (name test_keeper_tool_matrix)
+ (modules test_keeper_tool_matrix test_keeper_tool_matrix_cases
+          test_mcp_tool_matrix_cases)
+ (deps keeper_tool_matrix_case_runner.exe)
+ (libraries masc_test_deps))
+
 ; ============================================================
 ; Special: Custom compiler flags
 ; ============================================================
@@ -658,6 +666,12 @@
  (libraries masc_test_deps)
  (deps ../bin/main_eio.exe)
  (enabled_if (= %{env:MASC_E2E_TESTS=false} "true")))
+
+(test
+ (name test_dashboard_keeper_routes)
+ (modules test_dashboard_keeper_routes)
+ (libraries masc_test_deps)
+ (deps ../bin/main_eio.exe))
 
 (test
  (name test_compression_boundary)
@@ -794,4 +808,10 @@
 (executable
  (name tool_matrix_case_runner)
  (modules tool_matrix_case_runner test_mcp_tool_matrix_cases)
+ (libraries masc_test_deps))
+
+(executable
+ (name keeper_tool_matrix_case_runner)
+ (modules keeper_tool_matrix_case_runner test_keeper_tool_matrix_cases
+          test_mcp_tool_matrix_cases)
  (libraries masc_test_deps))

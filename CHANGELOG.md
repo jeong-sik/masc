@@ -1,6 +1,15 @@
 # Changelog
 
 
+## [2.226.0] - 2026-04-04
+
+### Added
+- **Goal complexity analyzer** -- idempotent task dispatch with Karpathy complexity scoring (#5073).
+
+### Changed
+- **SSOT batch 3** -- named constants for alert weights, drift thresholds, context_ratio across 8 files (#5078).
+- **OAS pin refresh** -- bump OAS pin after overflow fix (#5049).
+
 ## [2.225.0] - 2026-04-04
 
 ### Added

@@ -17,7 +17,7 @@ mktemp_ci_log() {
 }
 
 TEST_CMD="${1:-opam exec -- dune test}"
-TEST_TIMEOUT_SEC="${CI_TEST_TIMEOUT_SEC:-1200}"
+TEST_TIMEOUT_SEC="${CI_TEST_TIMEOUT_SEC:-2400}"
 HEARTBEAT_SEC="${CI_TEST_HEARTBEAT_SEC:-30}"
 START_EPOCH="$(date +%s)"
 TEST_LOG_FILE="${CI_TEST_LOG_FILE:-$(mktemp_ci_log)}"

@@ -198,7 +198,7 @@ let test_dashboard_execution_namespace_status () =
       ignore (Lib.Room.init config ~agent_name:None);
       Lib.Room.ensure_room_bootstrap config "focus-room";
       check (option string) "room state current_room flattened" (Some "default")
-        (Some "default");
+        (Lib.Room.read_current_room config);
       Eio.Switch.run (fun sw ->
         let json =
           Lib.Dashboard_execution.json

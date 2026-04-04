@@ -750,6 +750,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
   match ensure_api_keys_for_labels model_labels with
   | Error e -> Error e
   | Ok () ->
+      ignore (Oas_model_resolve.refresh_local_discovery_if_possible model_labels);
       let primary_max_context =
         Oas_model_resolve.resolve_primary_max_context model_labels
       in

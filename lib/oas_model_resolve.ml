@@ -19,6 +19,48 @@ let provider_name_of_label (label : string) : string option =
     if idx = 0 then None
     else Some (String.sub label 0 idx |> String.trim |> String.lowercase_ascii)
 
+let labels_require_local_discovery (labels : string list) : bool =
+  List.exists
+    (fun label ->
+      match provider_name_of_label label with
+      | Some pname -> Provider_adapter.requires_discovery pname
+      | None -> false)
+    labels
+
+let refresh_local_discovery_if_possible ?sw ?net (labels : string list) : bool =
+  if not (labels_require_local_discovery labels) then false
+  else
+    let sw =
+      match sw with Some value -> Some value | None -> Eio_context.get_switch_opt ()
+    in
+    let net =
+      match net with Some value -> Some value | None -> Eio_context.get_net_opt ()
+    in
+    match sw, net with
+    | Some sw, Some net ->
+        let before = Llm_provider.Provider_registry.discovered_max_context () in
+        (try
+           ignore
+             (Llm_provider.Provider_registry.refresh_llama_endpoints ~sw ~net ());
+           let after = Llm_provider.Provider_registry.discovered_max_context () in
+           (match before, after with
+            | Some prev, Some next when prev <> next ->
+                Log.info ~ctx:"OasModelResolve"
+                  "refreshed local runtime context: %d -> %d" prev next
+            | None, Some next ->
+                Log.info ~ctx:"OasModelResolve"
+                  "refreshed local runtime context: unset -> %d" next
+            | _ -> ());
+           true
+         with
+         | Eio.Cancel.Cancelled _ as exn -> raise exn
+         | exn ->
+             Log.warn ~ctx:"OasModelResolve"
+               "local runtime discovery refresh failed: %s"
+               (Printexc.to_string exn);
+             false)
+    | _ -> false
+
 (** Resolve max_context for a model label.
     Prefers discovered per-slot context (from live /props probe) for local
     providers, falls back to static Provider_registry value, then 128_000. *)

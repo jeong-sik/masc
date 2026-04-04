@@ -221,40 +221,46 @@ let () = test "check_contract_direct" (fun () ->
 
 let () = test "parse_verdict_approve" (fun () ->
   match Anti_rationalization.parse_verdict "APPROVE" with
-  | Anti_rationalization.Approve -> ()
-  | _ -> failwith "expected Approve")
+  | Ok Anti_rationalization.Approve -> ()
+  | Ok _ -> failwith "expected Approve"
+  | Error e -> failwith (Printf.sprintf "unexpected error: %s" e))
 
 let () = test "parse_verdict_approve_with_trailing" (fun () ->
   match Anti_rationalization.parse_verdict "APPROVE - looks good" with
-  | Anti_rationalization.Approve -> ()
-  | _ -> failwith "expected Approve")
+  | Ok Anti_rationalization.Approve -> ()
+  | Ok _ -> failwith "expected Approve"
+  | Error e -> failwith (Printf.sprintf "unexpected error: %s" e))
 
 let () = test "parse_verdict_reject_with_reason" (fun () ->
   match Anti_rationalization.parse_verdict "REJECT: vague notes" with
-  | Anti_rationalization.Reject reason ->
+  | Ok (Anti_rationalization.Reject reason) ->
     assert (String.lowercase_ascii reason |> fun s ->
       let len = String.length s in len >= 5 && String.sub s 0 5 = "vague")
-  | _ -> failwith "expected Reject")
+  | Ok _ -> failwith "expected Reject"
+  | Error e -> failwith (Printf.sprintf "unexpected error: %s" e))
 
 let () = test "parse_verdict_reject_bare" (fun () ->
   match Anti_rationalization.parse_verdict "REJECT" with
-  | Anti_rationalization.Reject _ -> ()
-  | _ -> failwith "expected Reject")
+  | Ok (Anti_rationalization.Reject _) -> ()
+  | Ok _ -> failwith "expected Reject"
+  | Error e -> failwith (Printf.sprintf "unexpected error: %s" e))
 
 let () = test "parse_verdict_reject_colon_only" (fun () ->
   match Anti_rationalization.parse_verdict "REJECT:" with
-  | Anti_rationalization.Reject _ -> ()
-  | _ -> failwith "expected Reject")
+  | Ok (Anti_rationalization.Reject _) -> ()
+  | Ok _ -> failwith "expected Reject"
+  | Error e -> failwith (Printf.sprintf "unexpected error: %s" e))
 
-let () = test "parse_verdict_unrecognized_defaults_approve" (fun () ->
+(* ADR D3: unrecognized format now returns Error, NOT Approve *)
+let () = test "parse_verdict_unrecognized_returns_error" (fun () ->
   match Anti_rationalization.parse_verdict "I think it looks good" with
-  | Anti_rationalization.Approve -> ()
-  | _ -> failwith "expected Approve")
+  | Error _ -> ()
+  | Ok _ -> failwith "expected Error for unrecognized format (ADR D3)")
 
-let () = test "parse_verdict_empty_defaults_approve" (fun () ->
+let () = test "parse_verdict_empty_returns_error" (fun () ->
   match Anti_rationalization.parse_verdict "" with
-  | Anti_rationalization.Approve -> ()
-  | _ -> failwith "expected Approve")
+  | Error _ -> ()
+  | Ok _ -> failwith "expected Error for empty input (ADR D3)")
 
 (* ================================================================ *)
 (* find_excuse_pattern                                               *)

@@ -75,8 +75,14 @@ val review_result_to_json : review_result -> Yojson.Safe.t
     Exposed for testing. *)
 val find_excuse_pattern : string -> (string * string) option
 
-(** Parse LLM output into a verdict.
-    "APPROVE" -> [Approve], "REJECT: reason" -> [Reject reason].
-    Unrecognized format defaults to [Approve] (liveness).
-    Exposed for testing. *)
-val parse_verdict : string -> verdict
+(** Parse LLM text output into a verdict (lenient fallback path).
+    "APPROVE" -> [Ok Approve], "REJECT: reason" -> [Ok (Reject reason)].
+    Unrecognized format returns [Error] instead of silently approving (ADR D3).
+    Exposed for testing.
+    @since 2.223.0 changed return type from [verdict] to [(verdict, string) result] *)
+val parse_verdict : string -> (verdict, string) result
+
+(** Parse verdict from structured tool call JSON arguments (primary path).
+    Deterministic extraction from report_review_verdict tool output.
+    @since 2.223.0 *)
+val parse_review_verdict_from_json : Yojson.Safe.t -> (verdict, string) result

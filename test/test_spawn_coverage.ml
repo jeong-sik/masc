@@ -143,7 +143,7 @@ let test_masc_mcp_tools_has_handover () =
   check bool "has handover" true (List.mem "mcp__masc__masc_handover_create" Spawn.masc_mcp_tools)
 
 let test_masc_mcp_tools_omits_relay_status () =
-  check bool "omits relay_status (pruned)" false
+  check bool "omits relay_status" false
     (List.mem "mcp__masc__masc_relay_status" Spawn.masc_mcp_tools)
 
 let test_masc_mcp_tools_has_team_session_step () =
@@ -155,7 +155,7 @@ let test_masc_mcp_tools_has_team_session_finalize () =
     (List.mem "mcp__masc__masc_team_session_finalize" Spawn.masc_mcp_tools)
 
 let test_masc_mcp_tools_omits_a2a_delegate () =
-  check bool "omits a2a_delegate (pruned)" false
+  check bool "omits a2a_delegate" false
     (List.mem "mcp__masc__masc_a2a_delegate" Spawn.masc_mcp_tools)
 
 let test_masc_mcp_tools_has_run_deliverable () =
@@ -175,7 +175,7 @@ let test_masc_mcp_tools_has_tool_admin_snapshot () =
     (List.mem "mcp__masc__masc_tool_admin_snapshot" Spawn.masc_mcp_tools)
 
 let test_masc_mcp_tools_omits_keeper_tool_catalog () =
-  check bool "omits keeper_tool_catalog (pruned)" false
+  check bool "omits keeper_tool_catalog" false
     (List.mem "mcp__masc__masc_keeper_tool_catalog" Spawn.masc_mcp_tools)
 
 let test_masc_mcp_tools_has_tool_list () =

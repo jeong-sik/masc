@@ -323,7 +323,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
            | None ->
                Error
                  (Printf.sprintf
-                    "invalid soul_profile '%s' (allowed: balanced, safety, delivery, research, relationship, minimal)"
+                    "invalid soul_profile '%s' (allowed: balanced, safety, delivery, research, relationship, musician, minimal)"
                     raw)
            | Some _ -> Ok ())
       | None -> Ok ())

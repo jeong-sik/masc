@@ -12,6 +12,8 @@ open Keeper_tool_registry
 
 (* -- Config-driven preset resolution -------------------------------- *)
 
+(* Loaded by init_policy_config at server startup.
+   None = config not yet loaded or load failed (graceful degradation). *)
 let policy_config : Keeper_tool_policy_config.t option ref = ref None
 
 let init_policy_config ~base_path =

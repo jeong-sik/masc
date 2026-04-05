@@ -10,7 +10,10 @@ import type { TrajectoryEntry, TrajectoryResponse } from '../api/dashboard'
 import { truncate } from '../lib/truncate'
 import { TimeAgo } from './common/time-ago'
 import { toolCategory, durationColor, formatArgs, prettyArgs, formatDuration, summarizeEntries } from './tool-call-shared'
+import { keeperHeartbeats } from '../store'
 import type { Keeper } from '../types'
+
+const HEARTBEAT_STALE_MS = 30_000
 
 // ── Constants ────────────────────────────────────────────
 
@@ -67,7 +70,7 @@ function TrajectoryEntryRow({ entry }: { entry: TrajectoryEntry }) {
   const toggle = () => { expanded.value = !expanded.value }
 
   return html`
-    <div class="rounded-lg transition-colors ${gateRejected ? 'opacity-50' : ''} ${expanded.value ? 'bg-[var(--white-3)]' : ''}">
+    <div class="rounded-lg transition-colors ${gateRejected ? 'opacity-50' : ''} ${expanded.value ? 'bg-[var(--white-3)]' : ''}" style=${{ animation: 'activityFadeIn 0.3s ease-out' }}>
       <div
         class="group flex items-start gap-3 py-2.5 px-3 cursor-pointer hover:bg-[var(--white-3)] rounded-lg select-none"
         onClick=${toggle}
@@ -232,19 +235,44 @@ export function KeeperTrajectoryTimeline({ keeperName, keeper }: { keeperName: s
 
   const turnGroups = groupByTurn(data.entries)
   const turns = Array.from(turnGroups.entries()).sort(([a], [b]) => b - a)
+  const lastHb = keeperHeartbeats.value.get(keeperName)
+  const isLive = lastHb != null && (Date.now() - lastHb) < HEARTBEAT_STALE_MS
+  const isOnline = keeper && !['offline', 'inactive', 'dead', 'crashed'].includes(keeper.status)
+  const contextRatio = keeper?.context_ratio
 
   return html`
     <div class="flex flex-col gap-1">
       ${'' /* Header */}
       <div class="flex items-center justify-between mb-2">
         <div class="flex items-center gap-2">
+          ${isLive
+            ? html`<span class="inline-flex items-center gap-1 text-[10px] text-[var(--ok)]">
+                <span class="inline-block size-1.5 rounded-full bg-[var(--ok)] animate-pulse"></span>
+                live
+              </span>`
+            : isOnline
+              ? html`<span class="text-[10px] text-[var(--text-dim)]">online</span>`
+              : null}
           <span class="text-[10px] font-mono text-[var(--text-dim)]">trace: ${data.trace_id.slice(0, 8)}</span>
           <span class="text-[10px] text-[var(--text-dim)]">gen ${data.generation}</span>
+          ${contextRatio != null
+            ? html`<span class="text-[10px] font-mono ${contextRatio > 0.8 ? 'text-[var(--bad)]' : contextRatio > 0.6 ? 'text-[var(--warn)]' : 'text-[var(--text-dim)]'}">ctx ${(contextRatio * 100).toFixed(0)}%</span>`
+            : null}
         </div>
         <span class="text-[10px] text-[var(--text-dim)]">
           ${data.showing}/${data.total_entries} entries
         </span>
       </div>
+
+      ${'' /* Live processing indicator */}
+      ${isLive ? html`
+        <div class="flex items-center gap-2 px-3 py-2 mb-2 rounded-lg bg-[rgba(52,211,153,0.06)] border border-[rgba(52,211,153,0.15)]" style=${{ animation: 'pulse 2s ease-in-out infinite' }}>
+          <span class="inline-block size-2 rounded-full bg-[var(--ok)] animate-pulse"></span>
+          <span class="text-[11px] text-[var(--ok)]">도구 호출 스트리밍 중...</span>
+          <span class="flex-1"></span>
+          <span class="text-[10px] text-[var(--text-dim)] font-mono">SSE</span>
+        </div>
+      ` : null}
 
       ${'' /* Turn groups */}
       ${turns.map(([turnNum, entries]) => {

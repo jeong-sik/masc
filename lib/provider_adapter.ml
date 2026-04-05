@@ -832,21 +832,34 @@ let gemini_vertex_openai_base_url ~project ~location =
     "https://aiplatform.googleapis.com/v1/projects/%s/locations/%s/endpoints/openapi"
     project location
 
-(** Resolve the base endpoint URL for a canonical provider name.
-    Returns the runtime-configured URL for local/dynamic providers,
-    or the well-known public API URL for direct-API providers.
+(** Resolve the base endpoint URL for a provider name or alias.
+    The input is normalized with {!normalize_label}, so known aliases
+    (e.g. "llamacpp", "anthropic", "openai") are accepted in addition
+    to canonical labels.
+
+    Returns runtime-configured URLs for providers backed by local/runtime
+    config (llama, glm), well-known public API URLs for hosted providers
+    (claude-api, codex-api), and for gemini-api either a Vertex
+    OpenAI-compatible endpoint derived from runtime auth/config or the
+    public Generative Language API URL.
+
     Dashboard code should call this instead of hardcoding vendor URLs. *)
 let endpoint_url_for_canonical_name name =
-  match normalize_label name with
-  | "llama" | "llama.cpp" | "llamacpp" ->
+  let canonical =
+    match resolve_direct_canonical_name name with
+    | Some resolved -> resolved
+    | None -> normalize_label name
+  in
+  match canonical with
+  | "llama" ->
     Some Env_config_runtime.Llama.server_url
   | "glm" ->
     Some Env_config_runtime.Glm.server_url
-  | "claude-api" | "claude" | "anthropic" ->
+  | "claude-api" ->
     Some "https://api.anthropic.com"
-  | "codex-api" | "codex" | "openai" ->
+  | "codex-api" ->
     Some "https://api.openai.com"
-  | "gemini-api" | "gemini" -> (
+  | "gemini-api" -> (
     match resolve_gemini_direct_auth () with
     | Gemini_vertex_adc { project; location } ->
       Some (gemini_vertex_openai_base_url ~project ~location)

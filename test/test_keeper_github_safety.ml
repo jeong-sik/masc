@@ -196,6 +196,39 @@ let test_api_bypass_detected () =
         true (is_destructive cmd))
     api_destructive
 
+let test_graphql_mutation_detected () =
+  let graphql_destructive =
+    [
+      "api graphql -f query=mergePullRequest";
+      "api graphql -f query=closePullRequest";
+      "api graphql -f query=closeIssue";
+      "api graphql -f query=deleteIssue";
+      "api graphql -f query=deleteRef";
+      "api graphql -f query=deleteBranch";
+      "api graphql -f query=deleteProject";
+    ]
+  in
+  List.iter
+    (fun cmd ->
+      Alcotest.(check bool)
+        (Printf.sprintf "graphql destructive: gh %s" cmd)
+        true (is_destructive cmd))
+    graphql_destructive;
+  let graphql_safe =
+    [
+      "api graphql -f query=repository";
+      "api graphql -f query=pullRequest";
+      "api graphql -f query=addComment";
+      "api graphql -f query=createPullRequest";
+    ]
+  in
+  List.iter
+    (fun cmd ->
+      Alcotest.(check bool)
+        (Printf.sprintf "graphql safe: gh %s" cmd)
+        false (is_destructive cmd))
+    graphql_safe
+
 let test_api_safe_methods_not_flagged () =
   let safe_api =
     [
@@ -304,6 +337,8 @@ let () =
             test_destructive_ops_detected;
           Alcotest.test_case "api bypass via POST/PATCH/PUT detected" `Quick
             test_api_bypass_detected;
+          Alcotest.test_case "graphql destructive mutations detected" `Quick
+            test_graphql_mutation_detected;
           Alcotest.test_case "safe api methods not flagged" `Quick
             test_api_safe_methods_not_flagged;
           Alcotest.test_case "new commands destructive ops" `Quick

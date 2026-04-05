@@ -615,7 +615,9 @@ let run_turn
             ?config_path ~name:cascade_name ~defaults () in
           Some (Agent_sdk.Tool_selector.default_rerank_fn
             ~sw ~net ~named_cascade ~k:max_tools_per_turn ())
-        with exn ->
+        with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn ->
           Log.Keeper.warn "keeper:%s LLM rerank init failed: %s"
             meta.name (Printexc.to_string exn);
           None)
@@ -707,10 +709,11 @@ let run_turn
               with
               | Out_of_memory | Stack_overflow | Sys.Break as exn ->
                 raise exn
+              | Eio.Cancel.Cancelled _ as exn -> raise exn
               | exn ->
                 Log.Keeper.warn
-                  "rerank failed, falling back to BM25 order: %s"
-                  (Printexc.to_string exn);
+                  "keeper:%s rerank failed, falling back to BM25 order: %s"
+                  meta.name (Printexc.to_string exn);
                 bm25_names)
            | _ -> bm25_names)
           |> Tool_portal.filter_visible_tool_names portal_ctx

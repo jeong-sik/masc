@@ -509,7 +509,14 @@ let run_keepalive_unified_turn
               ~generation:meta_after_observe.runtime.generation
           with
           | Error e ->
-            Log.Keeper.error "unified turn failed: %s" e;
+            Log.Keeper.error "%s: unified turn failed: %s"
+              meta_after_observe.name e;
+            if String_util.contains_substring e "Eio switch not available"
+               || String_util.contains_substring e "Eio net not available"
+            then
+              raise (Keeper_registry.Keeper_heartbeat_failure
+                (Printf.sprintf "%s: fatal environment error: %s"
+                   meta_after_observe.name e));
             (match read_meta ctx.config meta_after_observe.name with
              | Ok (Some latest) -> latest
              | _ -> meta_after_observe)
@@ -522,7 +529,8 @@ let run_keepalive_unified_turn
     | Eio.Cancel.Cancelled _ as e -> raise e
     | Keeper_registry.Keeper_heartbeat_failure _ as e -> raise e
     | exn ->
-      Log.Keeper.error "unified turn exception: %s" (Printexc.to_string exn);
+      Log.Keeper.error "%s: unified turn exception: %s"
+        meta_after_observe.name (Printexc.to_string exn);
       meta_after_triage)
 ;;
 

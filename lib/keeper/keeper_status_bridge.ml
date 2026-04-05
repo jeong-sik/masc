@@ -148,7 +148,7 @@ let runtime_surface_json config (meta : keeper_meta) =
   in
   let registry_state =
     match runtime_registry_entry config meta.name with
-    | Some entry -> Some (Keeper_registry.state_to_string entry.phase)
+    | Some entry -> Some (Keeper_state_machine.phase_to_string entry.phase)
     | None -> None
   in
   `Assoc

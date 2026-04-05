@@ -35,7 +35,7 @@ let test_state_to_string_crashed () =
   match R.get ~base_path:bp "k1" with
   | None -> fail "expected k1"
   | Some e ->
-    check string "state is crashed" "crashed" (R.state_to_string e.phase)
+    check string "state is crashed" "crashed" (KSM.phase_to_string e.phase)
 
 let test_state_to_string_dead () =
   R.clear ();
@@ -44,7 +44,7 @@ let test_state_to_string_dead () =
   match R.get ~base_path:bp "k1" with
   | None -> fail "expected k1"
   | Some e ->
-    check string "state is dead" "dead" (R.state_to_string e.phase)
+    check string "state is dead" "dead" (KSM.phase_to_string e.phase)
 
 let test_running_count_crashed () =
   R.clear ();
@@ -146,7 +146,7 @@ let test_dead_to_running_blocked () =
   match R.get ~base_path:bp "k1" with
   | None -> fail "expected k1"
   | Some e ->
-    check string "still dead" "dead" (R.state_to_string e.phase);
+    check string "still dead" "dead" (KSM.phase_to_string e.phase);
     check int "still 0 running" 0 (R.count_running ())
 
 (* ── Fix 1: last_failure_reason stored in registry ────── *)

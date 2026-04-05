@@ -29,7 +29,7 @@ let test_register_and_get () =
   let meta = make_meta "k1" in
   let entry = R.register ~base_path:bp "k1" meta in
   check string "name" "k1" entry.name;
-  check string "state" "running" (R.state_to_string entry.phase);
+  check string "state" "running" (KSM.phase_to_string entry.phase);
   match R.get ~base_path:bp "k1" with
   | None -> fail "expected entry for k1"
   | Some e -> check string "get name" "k1" e.name
@@ -66,7 +66,7 @@ let test_set_state () =
   check bool "not running after pause" false (R.is_running ~base_path:bp "k4");
   match R.get ~base_path:bp "k4" with
   | None -> fail "expected k4"
-  | Some e -> check string "state" "paused" (R.state_to_string e.phase)
+  | Some e -> check string "state" "paused" (KSM.phase_to_string e.phase)
 
 let test_extended_states () =
   R.clear ();
@@ -75,12 +75,12 @@ let test_extended_states () =
     (KSM.Fiber_terminated { outcome = "test" }));
   (match R.get ~base_path:bp "k4x" with
    | None -> fail "expected k4x"
-   | Some e -> check string "crashed string" "crashed" (R.state_to_string e.phase));
+   | Some e -> check string "crashed string" "crashed" (KSM.phase_to_string e.phase));
   R.mark_dead ~base_path:bp "k4x" ~at:123.0;
   match R.get ~base_path:bp "k4x" with
   | None -> fail "expected k4x"
   | Some e ->
-      check string "dead string" "dead" (R.state_to_string e.phase);
+      check string "dead string" "dead" (KSM.phase_to_string e.phase);
       check (option (float 0.01)) "dead_since set" (Some 123.0) e.dead_since_ts
 
 let test_count_running () =

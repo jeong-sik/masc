@@ -75,21 +75,35 @@ let effective_discovered_ctx ~static_ctx ~(discovered : int option) : int =
   | Some ctx when ctx >= context_floor -> ctx
   | _ -> static_ctx
 
+let provider_name_of_cfg label (cfg : Llm_provider.Provider_config.t) =
+  match provider_name_of_label label with
+  | Some pname -> pname
+  | None ->
+      Llm_provider.Provider_config.(match cfg.kind with
+        | Anthropic -> "claude" | OpenAI_compat -> "openai"
+        | Gemini -> "gemini" | Glm -> "glm" | Claude_code -> "claude_code")
+
+let is_loopback_url url =
+  match Uri.host (Uri.of_string url) with
+  | Some "localhost" | Some "127.0.0.1" -> true
+  | _ -> false
+
+let uses_local_discovery pname (cfg : Llm_provider.Provider_config.t) =
+  Provider_adapter.requires_discovery pname ||
+  (pname = "openai" && is_loopback_url cfg.base_url)
+
 (** Resolve max_context for a model label.
     Prefers discovered per-slot context (from live /props probe) for local
     providers.  Discovered values below {!context_floor} are treated as
     server misconfiguration and replaced by the static registry value with
     a WARN log. *)
 let max_context_of_label (label : string) : int =
-  match provider_name_of_label label with
+  match Llm_provider.Cascade_config.parse_model_string label with
   | None -> 128_000
-  | Some pname ->
-    let static_ctx =
-      match Llm_provider.Provider_registry.find default_registry pname with
-      | Some entry -> entry.max_context
-      | None -> 128_000
-    in
-    if Provider_adapter.requires_discovery pname then begin
+  | Some cfg ->
+    let pname = provider_name_of_cfg label cfg in
+    let static_ctx = cfg.max_tokens in
+    if uses_local_discovery pname cfg then begin
       let discovered = Llm_provider.Provider_registry.discovered_max_context () in
       (match discovered with
        | Some low_ctx when low_ctx < context_floor ->
@@ -112,17 +126,22 @@ let resolve_primary_max_context (labels : string list) : int =
   let rec find = function
     | [] -> 128_000
     | label :: rest ->
-      match provider_name_of_label label with
+      match Llm_provider.Cascade_config.parse_model_string label with
       | None -> find rest
-      | Some pname ->
-        match Llm_provider.Provider_registry.find default_registry pname with
-        | None -> find rest
-        | Some entry ->
-          if entry.is_available () then
-            if Provider_adapter.requires_discovery pname then
-              effective_discovered_ctx ~static_ctx:entry.max_context ~discovered
-            else entry.max_context
-          else find rest
+      | Some cfg ->
+        let pname = provider_name_of_cfg label cfg in
+        let local_discovery = uses_local_discovery pname cfg in
+        let is_available =
+          if local_discovery then true
+          else
+            match Llm_provider.Provider_registry.find default_registry pname with
+            | Some entry -> entry.is_available ()
+            | None -> false
+        in
+        if not is_available then find rest
+        else if local_discovery then
+          effective_discovered_ctx ~static_ctx:cfg.max_tokens ~discovered
+        else cfg.max_tokens
   in
   find labels
 

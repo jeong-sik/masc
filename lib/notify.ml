@@ -147,8 +147,9 @@ let escape_applescript s =
   Buffer.contents buf
 
 (** Agent emoji mapping for visual distinction.
-    Configurable table — add entries without touching a match statement.
-    Agent names come from spawn_key in Provider_adapter.direct_adapters. *)
+    Agent names come from spawn_key in Provider_adapter.direct_adapters.
+    Use {!register_agent_emoji} at startup to add provider-specific entries
+    without modifying this file. *)
 let agent_emoji_table : (string, string) Hashtbl.t =
   let t = Hashtbl.create 8 in
   List.iter (fun (k, v) -> Hashtbl.replace t k v)
@@ -158,6 +159,12 @@ let agent_emoji_table : (string, string) Hashtbl.t =
       ("llama",  "🦙");
       ("system", "⚙️") ];
   t
+
+(** Register an agent-name → emoji mapping at startup.
+    Call this from your provider adapter's init hook to extend the table
+    without touching notify.ml. *)
+let register_agent_emoji name emoji =
+  Hashtbl.replace agent_emoji_table name emoji
 
 let agent_emoji name =
   match Hashtbl.find_opt agent_emoji_table name with

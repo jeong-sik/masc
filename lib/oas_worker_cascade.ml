@@ -99,9 +99,10 @@ let provider_name_of_config (cfg : Llm_provider.Provider_config.t) =
   | Llm_provider.Provider_config.Gemini -> "gemini"
   | Llm_provider.Provider_config.Glm -> "glm"
   | Llm_provider.Provider_config.Claude_code -> "claude_code"
+[@@deprecated "Pass provider name from cascade config parsing directly; remove after OAS delegation refactor"]
 
 let model_label_of_config (cfg : Llm_provider.Provider_config.t) =
-  Printf.sprintf "%s:%s" (provider_name_of_config cfg) cfg.model_id
+  Printf.sprintf "%s:%s" ((provider_name_of_config [@warning "-3"]) cfg) cfg.model_id
 
 let model_label_option_of_model_id
     ~(candidate_cfgs : Llm_provider.Provider_config.t list)

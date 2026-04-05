@@ -75,14 +75,14 @@ let string_of_voice_transport = function
 (** Map OAS Provider_config.provider_kind to MASC adapter canonical_name.
     NOTE: OAS now exports Provider_config.string_of_provider_kind (wire-format names).
     This MASC-specific mapping exists only for backward-compatible adapter names.
-    Callers should prefer the OAS canonical version where possible.
-    @deprecated Use Llm_provider.Provider_config.string_of_provider_kind after pin update. *)
+    Callers should prefer the OAS canonical version where possible. *)
 let string_of_provider_kind : Llm_provider.Provider_config.provider_kind -> string = function
   | Anthropic -> "claude-api"
   | OpenAI_compat -> "codex-api"
   | Gemini -> "gemini-api"
   | Glm -> "glm"
   | Claude_code -> "claude-code"
+[@@deprecated "Use Llm_provider.Provider_config.string_of_provider_kind after oas#623 pin update"]
 
 let normalize_label label = String.trim label |> String.lowercase_ascii
 

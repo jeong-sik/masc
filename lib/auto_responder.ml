@@ -81,9 +81,10 @@ let should_throttle ~agent_type =
 (* --- Mention helpers (re-export) --- *)
 
 let agent_type_of_mention = Mention.agent_type_of_mention
-let is_spawnable m =
-  let base = agent_type_of_mention m in
-  Provider_adapter.is_known_provider base
+
+let is_spawnable mention =
+  let base = agent_type_of_mention mention in
+  Provider_adapter.resolve_spawn_key base <> None
 
 (* --- CLI spawn (Spawn mode) --- *)
 
@@ -108,11 +109,11 @@ Respond in 1-2 sentences. Be helpful and concise.|}
     from_agent content mention mention
 
 let cli_argv_of_agent_type (agent_type : string) : string list =
-  match agent_type with
-  | "claude" -> ["claude"; "-p"; "--allowedTools"; "mcp__masc__*"]
-  | "gemini" -> ["gemini"; "--yolo"]
-  | "codex" -> ["codex"; "exec"]
-  | other -> [other]
+  match Spawn.get_config agent_type with
+  | Some config ->
+    String.split_on_char ' ' config.command
+    |> List.filter (fun s -> s <> "")
+  | None -> [agent_type]
 
 let run_cli_agent ~agent_type ~prompt =
   if Provider_adapter.is_bare_ollama_label agent_type then

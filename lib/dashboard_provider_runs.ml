@@ -160,22 +160,22 @@ let endpoint_url_for_provider provider =
   | _ -> None
 
 let default_model_for_provider provider =
-  match provider with
-  | "llama" -> (
-      match Provider_adapter.explicit_llama_model_id_result () with
-      | Ok model_id -> trim_nonempty model_id
-      | Error _ ->
-          (match trim_nonempty Env_config_runtime.Llama.default_model with
-          | Some value when value <> "explicit-model-required" -> Some value
-          | _ -> None))
-  | "claude-api" | "codex-api" | "gemini-api" | "glm" -> Some "auto"
-  | _ -> None
+  match Provider_adapter.resolve_direct_adapter provider with
+  | Some { runtime_kind = Provider_adapter.Local; _ } ->
+    (match Provider_adapter.explicit_llama_model_id_result () with
+     | Ok model_id -> trim_nonempty model_id
+     | Error _ ->
+       (match trim_nonempty Env_config_runtime.Llama.default_model with
+        | Some value when value <> "explicit-model-required" -> Some value
+        | _ -> None))
+  | Some { runtime_kind = Provider_adapter.Direct_api; _ } -> Some "auto"
+  | None -> None
 
 let candidate_models_for_provider provider =
-  match provider with
-  | "llama" -> []
-  | "claude-api" | "codex-api" | "gemini-api" | "glm" -> ["auto"]
-  | _ -> []
+  match Provider_adapter.resolve_direct_adapter provider with
+  | Some { runtime_kind = Provider_adapter.Local; _ } -> []
+  | Some { runtime_kind = Provider_adapter.Direct_api; _ } -> ["auto"]
+  | None -> []
 
 let llama_snapshot () =
   let discovered_models, status, available, note =

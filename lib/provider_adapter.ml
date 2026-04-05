@@ -107,7 +107,7 @@ let direct_adapters =
       canonical_name = cn_codex;
       runtime_kind = Direct_api;
       auth_mode = Api_key "OPENAI_API_KEY";
-      aliases = [ cn_codex; "openai"; "codex-cli"; "codex-api" ];
+      aliases = [ cn_codex; "codex"; "openai"; "codex-cli"; "codex-api" ];
       spawn_key = Some "codex";
       default_voice = Some "George";
     };

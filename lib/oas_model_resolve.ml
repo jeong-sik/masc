@@ -83,14 +83,9 @@ let provider_name_of_cfg label (cfg : Llm_provider.Provider_config.t) =
         | Anthropic -> "claude" | OpenAI_compat -> "openai"
         | Gemini -> "gemini" | Glm -> "glm" | Claude_code -> "claude_code")
 
-let is_loopback_url url =
-  match Uri.host (Uri.of_string url) with
-  | Some "localhost" | Some "127.0.0.1" -> true
-  | _ -> false
-
 let uses_local_discovery pname (cfg : Llm_provider.Provider_config.t) =
   Provider_adapter.requires_discovery pname ||
-  (pname = "openai" && is_loopback_url cfg.base_url)
+  (pname = "openai" && Url_utils.is_loopback_url cfg.base_url)
 
 (** Resolve max_context for a model label.
     Prefers discovered per-slot context (from live /props probe) for local

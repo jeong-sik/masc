@@ -91,7 +91,8 @@
         test_observability_provider_contracts
         test_worker_oas_scope_gate
         test_run_local_script
-        test_tool_prefilter)
+        test_tool_prefilter
+        test_keeper_state_machine)
  (modules test_room test_room_state_recovery test_types test_auth test_audit_log test_http_negotiation
           test_sse test_cancellation test_graphql_api
           test_graphql_endpoint
@@ -150,7 +151,8 @@
           test_observability_provider_contracts
           test_worker_oas_scope_gate
           test_run_local_script
-          test_tool_prefilter)
+          test_tool_prefilter
+          test_keeper_state_machine)
  (libraries masc_test_deps))
 
 ; ============================================================

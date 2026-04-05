@@ -1,5 +1,6 @@
 open Alcotest
 module Routes = Masc_mcp.Server_routes_http_routes_dashboard
+module Keeper_api = Masc_mcp.Server_dashboard_http_keeper_api
 
 type http_result =
   { status : int option
@@ -374,27 +375,27 @@ let with_seeded_server f =
 ;;
 
 let check_route path expected =
-  let actual = Routes.classify_keeper_post_route path in
+  let actual = Keeper_api.classify_keeper_post_route path in
   if actual <> expected
   then
     failf
       "expected %s for %s"
       (match expected with
-       | Routes.Keeper_post_tools -> "tools"
-       | Routes.Keeper_post_config -> "config"
-       | Routes.Keeper_post_boot -> "boot"
-       | Routes.Keeper_post_shutdown -> "shutdown"
-       | Routes.Keeper_post_unknown -> "unknown")
+       | Keeper_api.Keeper_post_tools -> "tools"
+       | Keeper_api.Keeper_post_config -> "config"
+       | Keeper_api.Keeper_post_boot -> "boot"
+       | Keeper_api.Keeper_post_shutdown -> "shutdown"
+       | Keeper_api.Keeper_post_unknown -> "unknown")
       path
 ;;
 
 let test_keeper_post_route_classification () =
-  check_route "/api/v1/keepers/sangsu/tools" Routes.Keeper_post_tools;
-  check_route "/api/v1/keepers/sangsu/config" Routes.Keeper_post_config;
-  check_route "/api/v1/keepers/sangsu/boot" Routes.Keeper_post_boot;
-  check_route "/api/v1/keepers/sangsu/shutdown" Routes.Keeper_post_shutdown;
-  check_route "/api/v1/keepers/sangsu" Routes.Keeper_post_unknown;
-  check_route "/api/v1/keepers//boot" Routes.Keeper_post_unknown
+  check_route "/api/v1/keepers/sangsu/tools" Keeper_api.Keeper_post_tools;
+  check_route "/api/v1/keepers/sangsu/config" Keeper_api.Keeper_post_config;
+  check_route "/api/v1/keepers/sangsu/boot" Keeper_api.Keeper_post_boot;
+  check_route "/api/v1/keepers/sangsu/shutdown" Keeper_api.Keeper_post_shutdown;
+  check_route "/api/v1/keepers/sangsu" Keeper_api.Keeper_post_unknown;
+  check_route "/api/v1/keepers//boot" Keeper_api.Keeper_post_unknown
 ;;
 
 let require_status label expected result =

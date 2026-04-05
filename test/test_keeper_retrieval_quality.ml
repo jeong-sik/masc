@@ -129,7 +129,9 @@ let build_keeper_index () =
       else None
     in
     let aliases = match List.assoc_opt name korean_keywords with
-      | Some kw -> String.split_on_char ' ' kw
+      | Some kw ->
+        String.split_on_char ' ' kw
+        |> List.filter (fun s -> s <> "")
       | None -> []
     in
     Agent_sdk.Tool_index.{ name; description = t.description; group; aliases }

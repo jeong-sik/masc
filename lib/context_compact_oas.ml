@@ -38,21 +38,10 @@ type strategy =
       Resolves to a list of concrete strategies (no nested Dynamic).
       @since #3070 *)
 
-(* ================================================================ *)
-(* Token Estimation                                                  *)
-(* ================================================================ *)
-
-(** CJK-aware token estimate delegated to OAS Context_reducer. *)
-let msg_tokens (m : Agent_sdk.Types.message) : int =
-  let base = Agent_sdk.Context_reducer.estimate_message_tokens m in
-  if Agent_sdk.Types.text_of_message m = "" then 0 else base + 4
-
-let count_tokens (system_prompt : string) (msgs : Agent_sdk.Types.message list) =
-  let sys_tokens =
-    if system_prompt = "" then 0
-    else Agent_sdk.Context_reducer.estimate_char_tokens system_prompt + 4
-  in
-  List.fold_left (fun acc m -> acc + msg_tokens m) sys_tokens msgs
+(* Token estimation lives in [Keeper_context_core] (authoritative, with 15%
+   safety buffer).  This module previously had its own msg_tokens/count_tokens
+   without the buffer, but they were only used by [compact]'s dead return value.
+   Removed in #5281 follow-up to consolidate to single estimation path. *)
 
 (* ================================================================ *)
 (* Importance Scoring (inlined from Context_scoring)                 *)
@@ -437,12 +426,12 @@ let default_dynamic_selector (obs : observation_context) : strategy list =
       When a strategy list contains [Dynamic], this context determines
       which concrete strategies are applied. *)
 let compact
-    ~(system_prompt : string)
+    ~system_prompt:(_system_prompt : string)
     ~(messages : Agent_sdk.Types.message list)
     ~(strategies : strategy list)
     ?(observation : observation_context option)
     ()
-  : Agent_sdk.Types.message list * int =
+  : Agent_sdk.Types.message list =
   let resolved = resolve_strategies ~obs:observation strategies in
   let strategy_names = List.map strategy_name resolved in
   Log.Compact.info "[compact] strategies=[%s] %s"
@@ -451,6 +440,4 @@ let compact
   let oas_strategies = List.map oas_strategy_of resolved in
   let reducer = Agent_sdk.Context_reducer.compose
     (List.map (fun s -> { Agent_sdk.Context_reducer.strategy = s }) oas_strategies) in
-  let reduced = Agent_sdk.Context_reducer.reduce reducer messages in
-  let token_count = count_tokens system_prompt reduced in
-  (reduced, token_count)
+  Agent_sdk.Context_reducer.reduce reducer messages

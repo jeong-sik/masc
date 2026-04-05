@@ -835,7 +835,7 @@ let forced_overflow_retry_meta
       };
   }
 
-let[@warning "-32"] recover_latest_checkpoint_for_overflow_retry
+let recover_latest_checkpoint_for_overflow_retry
     ~(base_dir : string)
     ~(meta : keeper_meta)
     ~(model : string)
@@ -907,7 +907,6 @@ let[@warning "-32"] recover_latest_checkpoint_for_overflow_retry
         compact_if_needed ~meta:retry_meta ~now_ts ctx
       in
       let after_tokens = token_count compacted_ctx in
-      let decision = base_decision in
       let compaction_applied =
         String.starts_with ~prefix:"applied:" base_decision
       in
@@ -918,7 +917,7 @@ let[@warning "-32"] recover_latest_checkpoint_for_overflow_retry
           {
             applied = true;
             trigger;
-            decision;
+            decision = base_decision;
             before_tokens;
             after_tokens;
             saved_tokens = max 0 (before_tokens - after_tokens);

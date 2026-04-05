@@ -125,7 +125,7 @@ let resolve_policy_group ~(fallback : string list) (group_name : string) : strin
   match !policy_config with
   | Some cfg ->
     (match Keeper_tool_policy_config.resolve_group cfg group_name with
-     | Some tools -> tools
+     | Some tools -> dedupe_tool_names tools
      | None ->
        Log.Keeper.warn "tool_policy group %S not found, using fallback (%d tools)"
          group_name (List.length fallback);
@@ -153,8 +153,9 @@ let explicit_optional_candidate_tool_names (meta : keeper_meta) =
     | Preset { also_allow; _ } -> also_allow
     | Custom allowlist -> allowlist
   in
+  let optional = keeper_optional_tool_names () in
   requested
-  |> List.filter (fun name -> List.mem name (keeper_optional_tool_names ()))
+  |> List.filter (fun name -> List.mem name optional)
   |> dedupe_tool_names
 
 (* ── Presets (config-driven) ───────────────────────────────────── *)

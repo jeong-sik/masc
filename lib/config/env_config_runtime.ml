@@ -143,7 +143,7 @@ end
 module Local_runtime = struct
   (** OpenAI-compatible local MODEL server URL *)
   let server_url =
-    get_string ~default:"http://127.0.0.1:8085" "LLAMA_SERVER_URL"
+    get_string ~default:Masc_network_defaults.local_llm_default_url "LLAMA_SERVER_URL"
 
   (** Default local runtime model id for llama.cpp/OpenAI-compatible servers. *)
   let default_model =

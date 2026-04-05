@@ -14,6 +14,10 @@ val handle_heartbeat_start : _ context -> Yojson.Safe.t -> result
 val handle_heartbeat_stop : _ context -> Yojson.Safe.t -> result
 val handle_heartbeat_list : _ context -> Yojson.Safe.t -> result
 
+(** Canonical masc_heartbeat schema — SSOT.
+    Other modules derive their projections from this value. *)
+val heartbeat_schema : Types.tool_schema
+
 (** Tool schemas for MCP tools/list *)
 val schemas : Types.tool_schema list
 

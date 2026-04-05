@@ -88,6 +88,12 @@ let cascade_max_keys = 256
 (* Provider label helpers                                            *)
 (* ================================================================ *)
 
+(** Map provider_kind to cascade-label prefix (e.g. "claude", "gemini").
+    These match the Provider_registry entry names used in cascade config strings.
+    TODO: pass the provider name from cascade config parsing instead of
+    reverse-mapping from provider_kind (which conflates llama/openrouter). *)
+(* TODO: remove after OAS delegation refactor — pass provider name from
+   cascade config parsing directly instead of reverse-mapping from kind. *)
 let provider_name_of_config (cfg : Llm_provider.Provider_config.t) =
   match cfg.kind with
   | Llm_provider.Provider_config.Anthropic -> "claude"

@@ -134,19 +134,8 @@ let model_id_of_label label =
       if model = "" then None else Some model
   | _ -> None
 
-let auth_kind_for_provider provider =
-  match provider with
-  | "gemini-api" -> (
-      match Provider_adapter.resolve_gemini_direct_auth () with
-      | Provider_adapter.Gemini_api_key -> "api_key:GEMINI_API_KEY"
-      | Provider_adapter.Gemini_vertex_adc { project; location } ->
-          Printf.sprintf "vertex_adc:%s:%s" project location
-      | Provider_adapter.Gemini_auth_missing _ ->
-          "vertex_adc:GOOGLE_CLOUD_PROJECT:GOOGLE_CLOUD_LOCATION")
-  | _ -> Provider_adapter.auth_kind_for_canonical_name provider
-
-let endpoint_url_for_provider provider =
-  Provider_adapter.endpoint_url_for_canonical_name provider
+(* auth_kind_for_provider and endpoint_url_for_provider removed.
+   Use Provider_adapter.auth_detail_of_provider instead. *)
 
 let default_model_for_provider provider =
   match Provider_adapter.resolve_direct_adapter provider with
@@ -184,128 +173,30 @@ let llama_snapshot () =
     default_model = default_model_for_provider "llama";
     models;
     source = "masc/local-runtime";
-    endpoint_url = endpoint_url_for_provider "llama";
+    endpoint_url = (Provider_adapter.auth_detail_of_provider "llama").endpoint_url;
     note;
   }
 
+(** Build snapshot for any direct-API provider.
+    Vendor-specific logic (Gemini Vertex ADC, etc.) is encapsulated
+    inside Provider_adapter.auth_detail_of_provider. *)
 let direct_provider_snapshot provider =
-  match provider with
-  | "claude-api" ->
-      let available = Provider_adapter.provider_auth_available "claude-api" in
-      let default_model = default_model_for_provider provider in
-      {
-        provider;
-        kind = "cloud";
-        runtime_kind = "direct_api";
-        auth_kind = auth_kind_for_provider provider;
-        status = if available then "configured" else "missing_auth";
-        available;
-        supports_single_agent_run = available && default_model <> None;
-        default_model;
-        models = candidate_models_for_provider provider;
-        source = "masc/provider-adapter";
-        endpoint_url = endpoint_url_for_provider provider;
-        note = None;
-      }
-  | "codex-api" ->
-      let available = Provider_adapter.provider_auth_available "codex-api" in
-      let default_model = default_model_for_provider provider in
-      {
-        provider;
-        kind = "cloud";
-        runtime_kind = "direct_api";
-        auth_kind = auth_kind_for_provider provider;
-        status = if available then "configured" else "missing_auth";
-        available;
-        supports_single_agent_run = available && default_model <> None;
-        default_model;
-        models = candidate_models_for_provider provider;
-        source = "masc/provider-adapter";
-        endpoint_url = endpoint_url_for_provider provider;
-        note = None;
-      }
-  | "glm" ->
-      let available = Provider_adapter.provider_auth_available "glm" in
-      let default_model = default_model_for_provider provider in
-      {
-        provider;
-        kind = "cloud";
-        runtime_kind = "direct_api";
-        auth_kind = auth_kind_for_provider provider;
-        status = if available then "configured" else "missing_auth";
-        available;
-        supports_single_agent_run = available && default_model <> None;
-        default_model;
-        models = candidate_models_for_provider provider;
-        source = "masc/provider-adapter";
-        endpoint_url = endpoint_url_for_provider provider;
-        note = None;
-      }
-  | "gemini-api" -> (
-      let default_model = default_model_for_provider provider in
-      match Provider_adapter.resolve_gemini_direct_auth () with
-      | Provider_adapter.Gemini_api_key ->
-          {
-            provider;
-            kind = "cloud";
-            runtime_kind = "direct_api";
-            auth_kind = auth_kind_for_provider provider;
-            status = "configured";
-            available = true;
-            supports_single_agent_run = default_model <> None;
-            default_model;
-            models = candidate_models_for_provider provider;
-            source = "masc/provider-adapter";
-            endpoint_url = endpoint_url_for_provider provider;
-            note = None;
-          }
-      | Provider_adapter.Gemini_vertex_adc _ ->
-          {
-            provider;
-            kind = "cloud";
-            runtime_kind = "direct_api";
-            auth_kind = auth_kind_for_provider provider;
-            status = "vertex_adc";
-            available = true;
-            supports_single_agent_run = false;
-            default_model;
-            models = candidate_models_for_provider provider;
-            source = "masc/provider-adapter";
-            endpoint_url = endpoint_url_for_provider provider;
-            note =
-              Some
-                "Dashboard run MVP only supports Gemini via GEMINI_API_KEY. Vertex ADC inventory is visible but run is disabled.";
-          }
-      | Provider_adapter.Gemini_auth_missing message ->
-          {
-            provider;
-            kind = "cloud";
-            runtime_kind = "direct_api";
-            auth_kind = auth_kind_for_provider provider;
-            status = "missing_auth";
-            available = false;
-            supports_single_agent_run = false;
-            default_model;
-            models = candidate_models_for_provider provider;
-            source = "masc/provider-adapter";
-            endpoint_url = endpoint_url_for_provider provider;
-            note = Some message;
-          })
-  | other ->
-      {
-        provider = other;
-        kind = "cloud";
-        runtime_kind = "direct_api";
-        auth_kind = "unknown";
-        status = "unsupported";
-        available = false;
-        supports_single_agent_run = false;
-        default_model = None;
-        models = [];
-        source = "masc/provider-adapter";
-        endpoint_url = None;
-        note = Some "Unsupported provider";
-      }
+  let detail = Provider_adapter.auth_detail_of_provider provider in
+  let default_model = default_model_for_provider provider in
+  {
+    provider;
+    kind = "cloud";
+    runtime_kind = "direct_api";
+    auth_kind = detail.auth_kind;
+    status = detail.status;
+    available = detail.available;
+    supports_single_agent_run = detail.supports_run && default_model <> None;
+    default_model;
+    models = candidate_models_for_provider provider;
+    source = "masc/provider-adapter";
+    endpoint_url = detail.endpoint_url;
+    note = detail.note;
+  }
 
 let provider_snapshots () : provider_snapshot list =
   [
@@ -373,17 +264,14 @@ let response_text_of_api_response (response : Oas.Types.api_response) =
   Agent_sdk.Types.text_of_content response.content |> String.trim
 
 let provider_label_for_model provider model =
-  match provider with
-  | "llama" -> Ok ("llama:" ^ model)
-  | "claude-api" -> Ok ("claude:" ^ model)
-  | "codex-api" -> Ok ("openai:" ^ model)
-  | "gemini-api" -> Ok ("gemini:" ^ model)
-  | "glm" -> Ok ("glm:" ^ model)
-  | other ->
-      Error
-        (Printf.sprintf
-           "Unsupported provider '%s' for dashboard single-agent runs"
-           other)
+  match Provider_adapter.resolve_direct_adapter provider with
+  | Some adapter ->
+    Ok (Provider_adapter.cascade_prefix_of_adapter adapter ^ ":" ^ model)
+  | None ->
+    Error
+      (Printf.sprintf
+         "Unsupported provider '%s' for dashboard single-agent runs"
+         provider)
 
 let resolve_provider_run_request ~provider ~model_opt ~prompt =
   match provider_snapshot_by_name provider with
@@ -420,19 +308,18 @@ let resolve_provider_run_request ~provider ~model_opt ~prompt =
             else
               Ok (snapshot, model))
 
-(** Check if a model label is runnable (has provider config + Gemini auth check). *)
+(** Check if a model label is runnable (has provider config + auth). *)
 let is_label_runnable (label : string) : bool =
   match Llm_provider.Cascade_config.parse_model_string label with
   | None -> false
-  | Some cfg ->
-    let rn = Llm_provider.Provider_config.(match cfg.kind with Anthropic -> "claude" | Gemini -> "gemini" | Glm -> "glm" | OpenAI_compat -> "openai" | Claude_code -> "claude") in
-    match rn with
-    | "gemini" -> (
-        match Provider_adapter.resolve_gemini_direct_auth () with
-        | Provider_adapter.Gemini_api_key -> true
-        | Provider_adapter.Gemini_vertex_adc _ -> false
-        | Provider_adapter.Gemini_auth_missing _ -> false)
-    | _ -> Llm_provider.Cascade_config.parse_model_string label <> None
+  | Some _cfg ->
+    (* Extract provider prefix from label and check auth detail *)
+    match String.index_opt label ':' with
+    | None -> false
+    | Some idx ->
+      let prefix = String.sub label 0 idx |> String.trim in
+      let detail = Provider_adapter.auth_detail_of_provider prefix in
+      detail.available && detail.supports_run
 
 let run_system_prompt provider =
   Printf.sprintf

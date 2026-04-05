@@ -53,10 +53,12 @@ type dispatch_fn =
 
 (* ── Configuration ──────────────────────────────────────────── *)
 
+let default_max_content_length = 4000
+
 let max_content_length () =
   match Sys.getenv_opt "MASC_CHANNEL_GATE_MAX_CONTENT_LENGTH" with
-  | Some s -> (try max 100 (min 16000 (int_of_string s)) with _ -> 4000)
-  | None -> 4000
+  | Some s -> (try max 100 (min 16000 (int_of_string s)) with _ -> default_max_content_length)
+  | None -> default_max_content_length
 
 let dedup_ttl_sec () =
   match Sys.getenv_opt "MASC_CHANNEL_GATE_DEDUP_TTL_SEC" with

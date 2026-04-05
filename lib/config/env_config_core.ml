@@ -156,24 +156,29 @@ let sb_path () =
   | Ok path -> path
   | Error msg -> raise (Config_error msg)
 
+let default_http_port = "8935"
+let default_http_port_int = int_of_string default_http_port
+
 let masc_http_port () =
   match Sys.getenv_opt "MASC_HTTP_PORT" |> trim_opt with
   | Some port -> port
-  | None -> "8935"
+  | None -> default_http_port
 
 let masc_http_port_int () =
-  Safe_ops.int_of_string_with_default ~default:8935 (masc_http_port ())
+  Safe_ops.int_of_string_with_default ~default:default_http_port_int (masc_http_port ())
 
 let masc_host_opt () =
   Sys.getenv_opt "MASC_HOST" |> trim_opt
 
+let default_host = "127.0.0.1"
+
 (** Centralized MASC_HOST reader.
     Reads MASC_HOST env var.
-    Default: "127.0.0.1". *)
+    Default: {!default_host} ("127.0.0.1"). *)
 let masc_host () =
   match masc_host_opt () with
   | Some host -> host
-  | None -> "127.0.0.1"
+  | None -> default_host
 
 (** Centralized MASC_ASSETS_DIR reader.
     Returns None when MASC_ASSETS_DIR is unset or empty. *)

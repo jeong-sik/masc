@@ -158,6 +158,11 @@ let test_destructive_ops_detected () =
       "PR Merge 123";
       "Issue CLOSE 456";
       "api -X DeLeTe repos/owner/repo";
+      "workflow -q delete deploy.yml";
+      "pr --verbose merge 123";
+      "issue -R owner/repo --json id close 456";
+      "cache --repo o/r delete";
+      "project -q close 1";
     ]
   in
   List.iter
@@ -180,6 +185,8 @@ let test_api_bypass_detected () =
       "api /repos/o/r/merges -F base=main -F head=feat";
       "api --method=POST /repos/o/r/pulls/1/merge";
       "api -x=put /repos/o/r/pulls/1/merge";
+      "api /repos/o/r/pulls/1/merge --field=sha=abc123";
+      "api /repos/o/r/merges -f=base=main";
     ]
   in
   List.iter

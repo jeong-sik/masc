@@ -497,36 +497,51 @@ let has_mutating_http_method parts =
     | tok :: rest when tok = "-x" || tok = "--method" ->
       (match rest with m :: _ -> is_mutating m | [] -> false)
     | tok :: rest ->
-      if String.length tok > 10
+      if String.length tok >= 10
          && String.lowercase_ascii (String.sub tok 0 9) = "--method="
       then is_mutating (String.sub tok 9 (String.length tok - 9))
       else if String.length tok > 3
               && String.lowercase_ascii (String.sub tok 0 3) = "-x="
       then is_mutating (String.sub tok 3 (String.length tok - 3))
-      else if tok = "-f" || tok = "-F" || tok = "--field" || tok = "--raw-field"
-      then true
-      else check rest
+      else
+        let tok_lower = String.lowercase_ascii tok in
+        if tok = "-f" || tok = "-F" || tok = "--field" || tok = "--raw-field"
+           || String.length tok_lower > 3 && String.sub tok_lower 0 3 = "-f="
+           || String.length tok_lower > 8 && String.sub tok_lower 0 8 = "--field="
+           || String.length tok_lower > 12 && String.sub tok_lower 0 12 = "--raw-field="
+        then true
+        else check rest
   in
   check parts
 
+(** Filter out flag-like tokens, keeping only positional args.
+    Handles boolean flag bypass (e.g. "workflow -q delete"). *)
+let positional_tokens parts =
+  List.filter (fun s -> String.length s = 0 || s.[0] <> '-') parts
+
 (** Check if a gh command is a destructive mutation that should be gated.
     Returns [true] for high-risk operations like merge, close, delete.
-    Low-risk writes (create, comment) return [false] and are allowed. *)
+    Low-risk writes (create, comment) return [false] and are allowed.
+    Scans positional tokens to handle boolean flag insertion bypass. *)
 let is_gh_destructive_operation cmd =
   let parts =
     String.split_on_char ' ' (String.trim cmd)
     |> List.filter (fun s -> s <> "")
     |> List.map String.lowercase_ascii
   in
+  let has_positional_subcmd subcmds rest =
+    let positionals = positional_tokens rest in
+    List.exists (fun s -> List.mem s subcmds) positionals
+  in
   match parts with
-  | "pr" :: sub :: _ -> List.mem sub [ "merge"; "close" ]
-  | "issue" :: sub :: _ -> List.mem sub [ "close"; "delete"; "transfer" ]
-  | "release" :: sub :: _ -> List.mem sub [ "delete" ]
-  | "repo" :: sub :: _ -> List.mem sub [ "archive"; "rename" ]
-  | "label" :: sub :: _ -> List.mem sub [ "delete" ]
-  | "cache" :: sub :: _ -> List.mem sub [ "delete" ]
-  | "project" :: sub :: _ -> List.mem sub [ "close"; "delete" ]
-  | "workflow" :: sub :: _ -> List.mem sub [ "delete" ]
+  | "pr" :: rest -> has_positional_subcmd [ "merge"; "close" ] rest
+  | "issue" :: rest -> has_positional_subcmd [ "close"; "delete"; "transfer" ] rest
+  | "release" :: rest -> has_positional_subcmd [ "delete" ] rest
+  | "repo" :: rest -> has_positional_subcmd [ "archive"; "rename" ] rest
+  | "label" :: rest -> has_positional_subcmd [ "delete" ] rest
+  | "cache" :: rest -> has_positional_subcmd [ "delete" ] rest
+  | "project" :: rest -> has_positional_subcmd [ "close"; "delete" ] rest
+  | "workflow" :: rest -> has_positional_subcmd [ "delete" ] rest
   | "ruleset" :: _ -> false
   | "api" :: _ ->
     let joined = String.concat " " parts in

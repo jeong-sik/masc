@@ -27,26 +27,90 @@ let tool_call_health_json ?(now_ts = Unix.gettimeofday ()) (config : Room.config
         (Printexc.to_string exn);
       []
   in
-  let total, failures =
+  (* Single pass: aggregate totals and per-tool failure counts. *)
+  let module SMap = Map.Make (String) in
+  let total, failures, per_tool =
     List.fold_left
-      (fun (t, f) (e : Audit_log.audit_entry) ->
+      (fun (t, f, m) (e : Audit_log.audit_entry) ->
         match e.action with
-        | Audit_log.ToolCall _ when e.timestamp >= since ->
-          let f =
-            match e.outcome with Audit_log.Failure _ -> f + 1 | _ -> f
+        | Audit_log.ToolCall tool_name when e.timestamp >= since ->
+          let is_fail =
+            match e.outcome with Audit_log.Failure _ -> true | _ -> false
           in
-          (t + 1, f)
-        | _ -> (t, f))
-      (0, 0) entries
+          let calls, fails =
+            match SMap.find_opt tool_name m with
+            | Some (c, fl) -> (c, fl)
+            | None -> (0, 0)
+          in
+          let m =
+            SMap.add tool_name
+              (calls + 1, if is_fail then fails + 1 else fails)
+              m
+          in
+          (t + 1, (if is_fail then f + 1 else f), m)
+        | _ -> (t, f, m))
+      (0, 0, SMap.empty) entries
   in
   let failure_rate =
     if total = 0 then 0.0 else float_of_int failures /. float_of_int total
+  in
+  (* Single-pass take: return the first [n] elements without traversing
+     the entire list to compute its length. *)
+  let take n ls =
+    let rec aux acc i = function
+      | _ when i >= n -> List.rev acc
+      | [] -> List.rev acc
+      | x :: xs -> aux (x :: acc) (i + 1) xs
+    in
+    aux [] 0 ls
+  in
+  (* Top 10 tools by failure count, breaking ties by call count descending
+     and then tool name ascending for deterministic ordering. *)
+  let top_failures =
+    SMap.bindings per_tool
+    |> List.filter (fun (_, (_, f)) -> f > 0)
+    |> List.sort (fun (name1, (c1, f1)) (name2, (c2, f2)) ->
+           let by_failures = Int.compare f2 f1 in
+           if by_failures <> 0 then by_failures
+           else
+             let by_calls = Int.compare c2 c1 in
+             if by_calls <> 0 then by_calls
+             else String.compare name1 name2)
+    |> take 10
+    |> List.map (fun (name, (calls, fails)) ->
+         `Assoc [
+           ("tool", `String name);
+           ("calls", `Int calls);
+           ("failures", `Int fails);
+         ])
+  in
+  (* Top 10 tools by call count (most active), breaking ties by failures
+     descending and then tool name ascending for deterministic ordering. *)
+  let top_active =
+    SMap.bindings per_tool
+    |> List.sort (fun (name1, (c1, f1)) (name2, (c2, f2)) ->
+           let by_calls = Int.compare c2 c1 in
+           if by_calls <> 0 then by_calls
+           else
+             let by_failures = Int.compare f2 f1 in
+             if by_failures <> 0 then by_failures
+             else String.compare name1 name2)
+    |> take 10
+    |> List.map (fun (name, (calls, fails)) ->
+         `Assoc [
+           ("tool", `String name);
+           ("calls", `Int calls);
+           ("failures", `Int fails);
+         ])
   in
   `Assoc [
     ("window_hours", `Float window_hours);
     ("tool_calls", `Int total);
     ("failures", `Int failures);
     ("failure_rate", `Float failure_rate);
+    ("distinct_tools", `Int (SMap.cardinal per_tool));
+    ("top_failures", `List top_failures);
+    ("top_active", `List top_active);
     ("since_epoch", `Float since);
   ]
 

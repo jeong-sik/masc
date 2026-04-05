@@ -41,14 +41,20 @@ let run_all () =
   (* Flush metric/stress buffers to prevent data loss *)
   (try Heuristic_metrics.flush ()
    with Eio.Cancel.Cancelled _ as e -> raise e
-      | _ -> Log.Server.warn "[Shutdown] heuristic_metrics flush failed");
+      | exn ->
+        Log.Server.warn "[Shutdown] heuristic_metrics flush failed: %s"
+          (Printexc.to_string exn));
   (try Agent_stress.flush ()
    with Eio.Cancel.Cancelled _ as e -> raise e
-      | _ -> Log.Server.warn "[Shutdown] agent_stress flush failed");
+      | exn ->
+        Log.Server.warn "[Shutdown] agent_stress flush failed: %s"
+          (Printexc.to_string exn));
   (* Clear transient A2A state to free memory *)
   (try A2a_tools.clear_transient_state ()
    with Eio.Cancel.Cancelled _ as e -> raise e
-      | _ -> Log.Server.warn "[Shutdown] a2a_tools clear failed");
+      | exn ->
+        Log.Server.warn "[Shutdown] a2a_tools clear failed: %s"
+          (Printexc.to_string exn));
   (* Clear session identity caches *)
   Agent_registry_eio.clear_session_caches ();
   Log.Server.info "[Shutdown] hooks total: %.2fs"

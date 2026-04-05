@@ -53,7 +53,14 @@ let log_refresh_failure ~config ~consecutive_failures ~current_interval ~dt exn 
 
 let notify_error config exn =
   match config.on_error with
-  | Some f -> (try f exn with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ())
+  | Some f ->
+      (try f exn with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | callback_exn ->
+           Log.Dashboard.warn
+             "%s on_error callback failed while handling %s: %s"
+             config.label (Printexc.to_string exn)
+             (Printexc.to_string callback_exn))
   | None -> ()
 
 let start ~sw ~clock ~config ~compute ~on_result =

@@ -68,7 +68,11 @@ let set_board_sse_hook hook =
 
 let emit_board_sse_event event =
   match Atomic.get board_sse_hook with
-  | Some hook -> (try hook event with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ())
+  | Some hook ->
+      (try hook event with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | ex ->
+           Log.BoardLog.warn "board SSE hook failed: %s" (Printexc.to_string ex))
   | None -> ()
 
 let is_initialized () =

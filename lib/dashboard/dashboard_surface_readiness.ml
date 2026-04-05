@@ -21,8 +21,12 @@ type surface_entry = {
 let ref_json ~kind ~label value =
   `Assoc [ ("kind", `String kind); ("label", `String label); ("value", `String value) ]
 
+let route_ref_prefix = '/'
+
 let live_spotcheck_kind (value : string) =
-  if String.length value > 0 && value.[0] = '/' then "route" else "script"
+  if String.length value > 0 && value.[0] = route_ref_prefix
+  then "route"
+  else "script"
 
 let refs_json (refs : verification_refs) =
   [

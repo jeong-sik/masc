@@ -6,6 +6,7 @@ import type { LogEntry } from '../api/dashboard.js'
 import { VirtualList } from './common/virtual-list'
 import { TextInput } from './common/input'
 import { createAsyncResource, loaded } from '../lib/async-state'
+import { toolCategory } from './tool-call-shared'
 
 interface LogData {
   entries: LogEntry[]
@@ -236,7 +237,7 @@ function renderLogRow(entry: LogEntry) {
           ? html`<span class="rounded-full border border-[rgba(71,184,255,0.16)] px-2 py-0.5 text-[10px] text-[#dff3ff]">${clientName}</span>`
           : null}
         ${toolName
-          ? html`<span class="rounded-full border border-[var(--white-10)] px-2 py-0.5 text-[10px] text-[var(--text-muted)]">${toolName}</span>`
+          ? html`<span class="inline-flex items-center gap-1 rounded-full border border-[var(--white-10)] px-2 py-0.5 text-[10px]"><span class="font-mono font-bold ${toolCategory(toolName).color}">${toolCategory(toolName).icon}</span><span class="text-[var(--text-muted)]">${toolName}</span></span>`
           : null}
         ${phase
           ? html`<span class="rounded-full border border-[var(--white-10)] px-2 py-0.5 text-[10px] text-[var(--text-muted)]">${phase}</span>`

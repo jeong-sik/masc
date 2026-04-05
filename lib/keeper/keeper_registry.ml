@@ -642,6 +642,16 @@ let dispatch_event ~base_path name (event : Keeper_state_machine.event) =
          (Keeper_state_machine.phase_to_string tr.prev_phase)
          (Keeper_state_machine.phase_to_string tr.new_phase)
          (Keeper_state_machine.event_to_string event);
+       (* Record transition in audit ring buffer for dashboard API *)
+       Keeper_transition_audit.record_transition ~keeper_name:name {
+         snapshot = None;
+         events_fired = [event];
+         selected_event = event;
+         prev_phase = tr.prev_phase;
+         new_phase = tr.new_phase;
+         transition_outcome = "applied";
+         wall_clock_at_decision = now;
+       };
        (* Update running count based on legacy projection *)
        let prev_legacy = Keeper_state_compat.to_legacy tr.prev_phase in
        let new_legacy = Keeper_state_compat.to_legacy tr.new_phase in

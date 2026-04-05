@@ -31,6 +31,79 @@ PORT="$(./start-masc-mcp.sh --print-port)"  # query the effective port for this 
 - worktree에서 `--port`를 생략하면 script가 worktree별 기본 포트를 자동 선택한다.
 - `--print-port`는 현재 checkout의 기본 포트 조회용이다. 서버 시작은 보통 `./start-masc-mcp.sh --http`로 충분하다.
 
+### 서버 내부 기본 루프 순서도
+
+`./start-masc-mcp.sh --http` 로 띄우면 실제 런타임은 아래 흐름으로 돈다.
+
+```mermaid
+flowchart TD
+    A["./start-masc-mcp.sh --http"] --> B["bin/main_eio.ml / run_cmd"]
+    B --> C["Eio_main.run"]
+    C --> D["Eio.Fiber.first"]
+    D --> E["run_server"]
+    D --> F["shutdown watcher"]
+
+    E --> G["Server_runtime_bootstrap.run"]
+    G --> H["listen socket open"]
+    G --> I["background init fiber"]
+    G --> J["startup watchdog fiber"]
+    G --> K["HTTP accept loop"]
+
+    I --> I1["server_state 생성"]
+    I --> I2["runtime params 복구"]
+    I --> I3["background maintenance 시작"]
+    I --> I4["gRPC / WS / WebRTC 시작"]
+    I --> I5["dashboard refresh loops 시작"]
+    I --> I6["keeper autoboot + keepalive 시작"]
+    I --> I7["lazy startup tasks 시작"]
+
+    K --> K1["accept()"]
+    K1 --> K2["connection fiber fork"]
+    K2 --> K3["HTTP/1.1 또는 HTTP/2 handler"]
+    K3 --> K1
+
+    F --> F1["50ms 간격으로 SIGINT/SIGTERM 확인"]
+    F1 --> F2{"종료 신호 수신?"}
+    F2 -- No --> F1
+    F2 -- Yes --> F3["SSE shutdown broadcast"]
+    F3 --> F4["shutdown hooks"]
+    F4 --> F5["board flush"]
+    F5 --> F6["run_server cancel"]
+```
+
+keeper가 올라온 뒤의 기본 keepalive loop는 아래와 같다.
+
+```mermaid
+flowchart TD
+    A["Keeper_keepalive.start_keepalive"] --> B["run_heartbeat_loop"]
+    B --> C{"stop flag?"}
+    C -- Yes --> Z["종료"]
+    C -- No --> D["Fiber.yield"]
+    D --> E["최신 keeper meta 읽기"]
+    E --> F["smart heartbeat gate"]
+    F --> G{"이번 cycle 실행?"}
+    G -- No --> H["interruptible sleep"]
+    H --> C
+    G -- Yes --> I["presence sync"]
+    I --> J["heartbeat snapshot 기록"]
+    J --> K["board events 수집"]
+    K --> L["unified proactive turn"]
+    L --> M["Room heartbeat 갱신"]
+    M --> N["recurring dispatch"]
+    N --> O["improve loop tick"]
+    O --> P["jitter 포함 sleep"]
+    P --> C
+```
+
+코드 기준 진입점:
+
+- `start-masc-mcp.sh`
+- `bin/main_eio.ml`
+- `lib/server/server_runtime_bootstrap.ml`
+- `lib/server/server_bootstrap_http.ml`
+- `lib/server/server_bootstrap_loops.ml`
+- `lib/keeper/keeper_keepalive.ml`
+
 ## 2. Health Check
 
 ```bash

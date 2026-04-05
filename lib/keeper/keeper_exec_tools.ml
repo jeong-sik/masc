@@ -452,18 +452,38 @@ let handle_keeper_github
             ; "reason", `String reason
             ])
     | Ok () ->
-      if Worker_dev_tools.is_gh_destructive_operation gh_raw
+      let preset_allows_workflow =
+        match Keeper_types.tool_access_preset meta.tool_access with
+        | Some (Coding | Full) -> true
+        | _ -> false
+      in
+      if Worker_dev_tools.is_gh_dangerous_operation gh_raw
       then (
-        Log.Keeper.info "keeper_github destructive-gate: %s (keeper=%s)" gh_raw meta.name;
+        Log.Keeper.info "keeper_github dangerous-gate: %s (keeper=%s)" gh_raw meta.name;
         Yojson.Safe.to_string
           (`Assoc
               [ "ok", `Bool false
-              ; "error", `String "destructive_operation_gated"
+              ; "error", `String "dangerous_operation_gated"
               ; ( "reason"
                 , `String
-                    "This gh command performs a destructive mutation \
-                     (merge/close/delete/archive). Use read-only commands \
-                     (view/list/diff/checks) or request operator approval." )
+                    "This gh command performs an irreversible operation \
+                     (delete/archive/transfer). Request operator approval." )
+              ; "cmd", `String ("gh " ^ gh_raw)
+              ]))
+      else if (not preset_allows_workflow)
+              && Worker_dev_tools.is_gh_workflow_operation gh_raw
+      then (
+        Log.Keeper.info "keeper_github workflow-gate: %s (keeper=%s, preset not coding/full)"
+          gh_raw meta.name;
+        Yojson.Safe.to_string
+          (`Assoc
+              [ "ok", `Bool false
+              ; "error", `String "workflow_operation_gated"
+              ; ( "reason"
+                , `String
+                    "This gh command performs a workflow mutation \
+                     (merge/close). Upgrade to coding or full preset, \
+                     or request operator approval." )
               ; "cmd", `String ("gh " ^ gh_raw)
               ]))
       else (

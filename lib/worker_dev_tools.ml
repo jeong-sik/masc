@@ -526,40 +526,58 @@ let has_mutating_http_method parts =
 let positional_tokens parts =
   List.filter (fun s -> String.length s = 0 || s.[0] <> '-') parts
 
-(** Check if a gh command is a destructive mutation that should be gated.
-    Returns [true] for high-risk operations like merge, close, delete.
-    Low-risk writes (create, comment) return [false] and are allowed.
-    Scans positional tokens to handle boolean flag insertion bypass. *)
-let is_gh_destructive_operation cmd =
-  let parts =
-    String.split_on_char ' ' (String.trim cmd)
-    |> List.filter (fun s -> s <> "")
-    |> List.map String.lowercase_ascii
-  in
-  let has_positional_subcmd subcmds rest =
-    let positionals = positional_tokens rest in
-    List.exists (fun s -> List.mem s subcmds) positionals
-  in
+(** Shared tokenizer for destructive-operation checks. *)
+let gh_op_parts cmd =
+  String.split_on_char ' ' (String.trim cmd)
+  |> List.filter (fun s -> s <> "")
+  |> List.map String.lowercase_ascii
+
+let has_positional_subcmd subcmds rest =
+  let positionals = positional_tokens rest in
+  List.exists (fun s -> List.mem s subcmds) positionals
+
+(** Check if a gh command is a normal workflow mutation (merge, close).
+    These are legitimate for coding-preset keepers but should still be
+    gated for lower-privilege presets. *)
+let is_gh_workflow_operation cmd =
+  let parts = gh_op_parts cmd in
   match parts with
   | "pr" :: rest -> has_positional_subcmd [ "merge"; "close" ] rest
-  | "issue" :: rest -> has_positional_subcmd [ "close"; "delete"; "transfer" ] rest
+  | "issue" :: rest -> has_positional_subcmd [ "close" ] rest
+  | "project" :: rest -> has_positional_subcmd [ "close" ] rest
+  | "api" :: _ ->
+    let joined = String.concat " " parts in
+    has_mutating_http_method parts
+    && List.exists (fun pat -> contains_substring joined pat)
+         [ "/merge"; "/merges"; "state=closed"; "state=\"closed\""; "state='closed'" ]
+  | _ -> false
+
+(** Check if a gh command is a dangerous irreversible operation (delete,
+    archive, transfer). Always gated regardless of preset. *)
+let is_gh_dangerous_operation cmd =
+  let parts = gh_op_parts cmd in
+  match parts with
+  | "issue" :: rest -> has_positional_subcmd [ "delete"; "transfer" ] rest
   | "release" :: rest -> has_positional_subcmd [ "delete" ] rest
   | "repo" :: rest -> has_positional_subcmd [ "archive"; "rename" ] rest
   | "label" :: rest -> has_positional_subcmd [ "delete" ] rest
   | "cache" :: rest -> has_positional_subcmd [ "delete" ] rest
-  | "project" :: rest -> has_positional_subcmd [ "close"; "delete" ] rest
+  | "project" :: rest -> has_positional_subcmd [ "delete" ] rest
   | "workflow" :: rest -> has_positional_subcmd [ "delete" ] rest
   | "ruleset" :: _ -> false
   | "api" :: _ ->
     let joined = String.concat " " parts in
     List.mem "delete" parts
-    || (has_mutating_http_method parts
-        && List.exists (fun pat -> contains_substring joined pat)
-             gh_api_destructive_patterns)
     || (List.mem "graphql" parts
         && List.exists (fun m -> contains_substring joined m)
              gh_graphql_destructive_mutations)
   | _ -> false
+
+(** Combined check: returns [true] for any destructive mutation.
+    Use [is_gh_dangerous_operation] for always-gated ops, or
+    [is_gh_workflow_operation] for preset-dependent gating. *)
+let is_gh_destructive_operation cmd =
+  is_gh_workflow_operation cmd || is_gh_dangerous_operation cmd
 
 (* --- Recursive mkdir --- *)
 

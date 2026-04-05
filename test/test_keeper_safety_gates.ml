@@ -242,7 +242,7 @@ let test_all_keepers_have_shell_and_coding () =
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "keeper_shell_readonly included" true (List.mem "keeper_shell_readonly" tools);
   check bool "keeper_fs_read included" true (List.mem "keeper_fs_read" tools);
-  check bool "keeper_board_get omitted" false (List.mem "keeper_board_get" tools)
+  check bool "keeper_board_get included" true (List.mem "keeper_board_get" tools)
 
 let test_all_modes_produce_same_tools () =
   let meta_a = make_meta ~preset:Keeper_types.Minimal () in

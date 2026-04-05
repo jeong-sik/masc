@@ -607,11 +607,22 @@ let run_turn
           | Some e -> `String e.when_to_use
           | None -> `Null
         in
+        (* Extract required params from MASC schema for immediate usability *)
+        let required_params =
+          match List.find_opt (fun (s : Types.tool_schema) -> s.name = name) masc_schemas with
+          | Some s ->
+            (try
+              let props = Yojson.Safe.Util.(member "required" s.input_schema |> to_list) in
+              `List (List.map (fun j -> j) props)
+            with _ -> `Null)
+          | None -> `Null
+        in
         `Assoc [
           ("name", `String name);
           ("score", `Float score);
           ("description", desc);
           ("when_to_use", when_to_use);
+          ("required_params", required_params);
         ]
       ) new_discoveries
     in

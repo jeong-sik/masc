@@ -3,22 +3,17 @@
 // Fetches from /api/v1/keepers/:name/trajectory on mount + SSE refresh.
 
 import { html } from 'htm/preact'
-import { signal } from '@preact/signals'
+import { signal, useSignal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
 import { fetchKeeperTrajectory } from '../api/dashboard'
 import type { TrajectoryEntry, TrajectoryResponse } from '../api/dashboard'
 import { truncate } from '../lib/truncate'
 import { TimeAgo } from './common/time-ago'
+import { toolCategory, durationColor, formatArgs, prettyArgs } from './tool-call-shared'
 
 // ── Constants ────────────────────────────────────────────
 
 const TRAJECTORY_DEFAULT_LIMIT = 50
-const ARGS_PREVIEW_MAX_CHARS = 80
-const ARGS_VALUE_MAX_CHARS = 30
-const ARGS_MAX_KEYS = 3
-const RESULT_PREVIEW_MAX_CHARS = 80
-const DURATION_FAST_MS = 500
-const DURATION_SLOW_MS = 2000
 
 // ── State (per-keeper to avoid cross-keeper corruption) ──
 
@@ -59,89 +54,108 @@ export function clearTrajectory(keeperName: string): void {
   trajectoryStates.value = next
 }
 
-// Tool category → icon/color mapping. Order matters: first match wins.
-const TOOL_CATEGORIES: Array<{ match: (n: string) => boolean; icon: string; color: string }> = [
-  { match: n => n.includes('bash'),                         icon: '>', color: 'text-[var(--ok)]' },
-  { match: n => n.includes('edit') || n.includes('fs'),     icon: 'E', color: 'text-[var(--warn)]' },
-  { match: n => n.includes('board') || n.includes('social'),icon: 'B', color: 'text-[var(--purple)]' },
-  { match: n => n.includes('github'),                       icon: 'G', color: 'text-[var(--accent)]' },
-  { match: n => n.includes('search') || n.includes('read'), icon: 'R', color: 'text-[#60a5fa]' },
-]
-const DEFAULT_TOOL_STYLE = { icon: 'T', color: 'text-[#94a3b8]' }
-
 // ── Helpers ──────────────────────────────────────────────
-
-function toolCategory(name: string): { icon: string; color: string } {
-  return TOOL_CATEGORIES.find(c => c.match(name)) ?? DEFAULT_TOOL_STYLE
-}
-
-function durationColor(ms: number): string {
-  if (ms < DURATION_FAST_MS) return 'text-[var(--ok)]'
-  if (ms < DURATION_SLOW_MS) return 'text-[var(--warn)]'
-  return 'text-[var(--bad)]'
-}
-
-function formatArgs(args: Record<string, unknown> | string): string {
-  if (typeof args === 'string') return truncate(args, ARGS_PREVIEW_MAX_CHARS)
-  const keys = Object.keys(args)
-  if (keys.length === 0) return '{}'
-  const preview = keys.slice(0, ARGS_MAX_KEYS).map(k => {
-    const v = args[k]
-    const vs = typeof v === 'string'
-      ? truncate(v, ARGS_VALUE_MAX_CHARS)
-      : truncate(JSON.stringify(v) ?? '', ARGS_VALUE_MAX_CHARS)
-    return `${k}: ${vs}`
-  }).join(', ')
-  return keys.length > ARGS_MAX_KEYS ? `{${preview}, ...}` : `{${preview}}`
-}
-
-function formatResult(result: string | null, error: string | null): string {
-  if (error) return `err: ${truncate(error, RESULT_PREVIEW_MAX_CHARS)}`
-  if (!result) return '-'
-  return truncate(result, RESULT_PREVIEW_MAX_CHARS)
-}
+// toolCategory, durationColor, formatArgs, prettyArgs imported from tool-call-shared
 
 // ── Components ───────────────────────────────────────────
 
 function TrajectoryEntryRow({ entry }: { entry: TrajectoryEntry }) {
+  const expanded = useSignal(false)
   const gateRejected = entry.gate.status === 'reject'
   const cat = toolCategory(entry.tool_name)
+  const toggle = () => { expanded.value = !expanded.value }
+
   return html`
-    <div class="group flex items-start gap-3 py-2.5 px-3 rounded-lg hover:bg-[var(--white-3)] transition-colors ${gateRejected ? 'opacity-50' : ''}">
-      ${'' /* Tool icon */}
-      <div class="flex-shrink-0 mt-0.5 size-7 rounded-md bg-[var(--white-5)] border border-[var(--white-8)] flex items-center justify-center text-[11px] font-mono font-bold ${cat.color}">
-        ${cat.icon}
-      </div>
-
-      ${'' /* Content */}
-      <div class="flex-1 min-w-0">
-        <div class="flex items-center gap-2 flex-wrap">
-          <span class="text-xs font-mono font-medium ${cat.color}">${entry.tool_name}</span>
-          <span class="text-[10px] text-[var(--text-dim)]">T${entry.turn}R${entry.round}</span>
-          ${gateRejected
-            ? html`<span class="text-[10px] px-1.5 py-0.5 rounded bg-[var(--bad-10)] text-[var(--bad)]">거부: ${entry.gate.reason ?? ''}</span>`
-            : null}
-          ${entry.error
-            ? html`<span class="text-[10px] px-1.5 py-0.5 rounded bg-[var(--bad-10)] text-[var(--bad)]">오류</span>`
-            : null}
+    <div class="rounded-lg transition-colors ${gateRejected ? 'opacity-50' : ''} ${expanded.value ? 'bg-[var(--white-3)]' : ''}">
+      <div
+        class="group flex items-start gap-3 py-2.5 px-3 cursor-pointer hover:bg-[var(--white-3)] rounded-lg select-none"
+        onClick=${toggle}
+        role="button"
+        aria-expanded=${expanded.value}
+        tabIndex=${0}
+        onKeyDown=${(e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle() } }}
+      >
+        ${'' /* Expand indicator + Tool icon */}
+        <div class="flex-shrink-0 flex items-center gap-1.5 mt-0.5">
+          <span class="text-[10px] text-[var(--text-dim)] w-3 text-center">${expanded.value ? '\u25BC' : '\u25B6'}</span>
+          <div class="size-7 rounded-md bg-[var(--white-5)] border border-[var(--white-8)] flex items-center justify-center text-[11px] font-mono font-bold ${cat.color}">
+            ${cat.icon}
+          </div>
         </div>
 
-        ${'' /* Args */}
-        <div class="mt-1 text-[11px] text-[var(--text-muted)] font-mono truncate max-w-full" title=${typeof entry.args === 'string' ? entry.args : JSON.stringify(entry.args)}>
-          ${formatArgs(entry.args)}
+        ${'' /* Content */}
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="text-xs font-mono font-medium ${cat.color}">${entry.tool_name}</span>
+            <span class="text-[10px] text-[var(--text-dim)]">T${entry.turn}R${entry.round}</span>
+            ${entry.cost_usd > 0
+              ? html`<span class="text-[10px] px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--accent)]">$${entry.cost_usd.toFixed(4)}</span>`
+              : null}
+            ${gateRejected
+              ? html`<span class="text-[10px] px-1.5 py-0.5 rounded bg-[var(--bad-10)] text-[var(--bad)]">거부: ${truncate(entry.gate.reason ?? '', 40)}</span>`
+              : null}
+            ${entry.error
+              ? html`<span class="text-[10px] px-1.5 py-0.5 rounded bg-[var(--bad-10)] text-[var(--bad)]">오류</span>`
+              : null}
+          </div>
+
+          ${'' /* Args preview (collapsed) */}
+          ${!expanded.value ? html`
+            <div class="mt-1 text-[11px] text-[var(--text-muted)] font-mono truncate max-w-full">
+              ${formatArgs(entry.args)}
+            </div>
+          ` : null}
         </div>
 
-        ${'' /* Result preview (on hover/expand) */}
-        <div class="mt-0.5 text-[11px] text-[var(--text-dim)] font-mono truncate max-w-full hidden group-hover:block">
-          ${formatResult(entry.result, entry.error)}
+        ${'' /* Duration + timestamp */}
+        <div class="flex-shrink-0 flex flex-col items-end gap-0.5">
+          <span class="text-[11px] font-mono ${durationColor(entry.duration_ms)}">${entry.duration_ms}ms</span>
+          <${TimeAgo} timestamp=${entry.ts} class="text-[10px] text-[var(--text-dim)]" />
         </div>
       </div>
 
-      ${'' /* Duration + timestamp */}
-      <div class="flex-shrink-0 flex flex-col items-end gap-0.5">
-        <span class="text-[11px] font-mono ${durationColor(entry.duration_ms)}">${entry.duration_ms}ms</span>
-        <${TimeAgo} timestamp=${entry.ts} class="text-[10px] text-[var(--text-dim)]" />
-      </div>
+      ${'' /* Expanded detail panel */}
+      ${expanded.value ? html`
+        <div class="mx-3 mb-3 mt-1 flex flex-col gap-2 border-l-2 border-[var(--white-8)] pl-3">
+          ${'' /* Full args */}
+          <div>
+            <div class="text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-1">Arguments</div>
+            <pre class="m-0 text-[11px] font-mono text-[var(--text-body)] bg-[var(--white-5)] rounded-md p-2 overflow-x-auto max-h-[300px] overflow-y-auto whitespace-pre-wrap break-all">${prettyArgs(entry.args)}</pre>
+          </div>
+
+          ${'' /* Result */}
+          ${entry.result != null ? html`
+            <div>
+              <div class="text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-1">Result</div>
+              <pre class="m-0 text-[11px] font-mono text-[var(--text-body)] bg-[var(--white-5)] rounded-md p-2 overflow-x-auto max-h-[300px] overflow-y-auto whitespace-pre-wrap break-all">${entry.result}</pre>
+            </div>
+          ` : null}
+
+          ${'' /* Error detail */}
+          ${entry.error ? html`
+            <div>
+              <div class="text-[10px] font-semibold text-[var(--bad)] uppercase tracking-wider mb-1">Error</div>
+              <pre class="m-0 text-[11px] font-mono text-[var(--bad)] bg-[var(--bad-10)] rounded-md p-2 overflow-x-auto max-h-[200px] overflow-y-auto whitespace-pre-wrap break-all">${entry.error}</pre>
+            </div>
+          ` : null}
+
+          ${'' /* Gate detail */}
+          ${gateRejected && entry.gate.reason ? html`
+            <div>
+              <div class="text-[10px] font-semibold text-[var(--warn)] uppercase tracking-wider mb-1">Gate Rejection</div>
+              <div class="text-[11px] font-mono text-[var(--warn)] bg-[var(--warn-10)] rounded-md p-2">${entry.gate.reason}</div>
+            </div>
+          ` : null}
+
+          ${'' /* Metadata row */}
+          <div class="flex gap-4 flex-wrap text-[10px] text-[var(--text-dim)]">
+            ${entry.cost_usd > 0 ? html`<span>Cost: $${entry.cost_usd.toFixed(6)}</span>` : null}
+            <span>Duration: ${entry.duration_ms}ms</span>
+            <span>Turn ${entry.turn}, Round ${entry.round}</span>
+            <span class="font-mono">${entry.ts_iso ?? new Date(entry.ts * 1000).toISOString()}</span>
+          </div>
+        </div>
+      ` : null}
     </div>
   `
 }

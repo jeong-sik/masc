@@ -1,4 +1,5 @@
 // Agent detail timeline section — activity timeline with event summary
+// Includes tool_call events from Activity Graph integration.
 
 import { html } from 'htm/preact'
 import { Card } from './common/card'
@@ -6,12 +7,14 @@ import { EmptyState } from './common/empty-state'
 import { TimeAgo } from './common/time-ago'
 import { agentTimeline } from './agent-detail-state'
 import { trimText } from '../lib/truncate'
+import { toolCategory, durationColor } from './tool-call-shared'
 import type { AgentTimelineEvent } from '../api'
 
 function timelineEventIcon(type: string): string {
   if (type === 'joined') return 'J'
   if (type.startsWith('task_')) return 'T'
   if (type === 'broadcast') return 'M'
+  if (type === 'tool_call') return 'W'
   return 'E'
 }
 
@@ -23,8 +26,32 @@ function timelineEventLabel(type: string): string {
     case 'task_completed': return '태스크 완료'
     case 'task_cancelled': return '태스크 취소'
     case 'broadcast': return '공지'
+    case 'tool_call': return '도구 호출'
     default: return type
   }
+}
+
+function ToolCallEventRow({ evt, idx }: { evt: AgentTimelineEvent; idx: number }) {
+  const d = evt.detail as Record<string, unknown>
+  const toolName = (d.tool_name as string) ?? 'unknown'
+  const success = d.success !== false
+  const durationMs = (d.duration_ms as number) ?? 0
+  const errorMsg = d.error as string | null
+  const cat = toolCategory(toolName)
+
+  return html`
+    <div class="flex items-center gap-2 py-1.5 px-2 text-[13px] rounded hover:bg-[var(--white-4)] transition-colors" key=${idx}>
+      <div class="flex-shrink-0 size-5 rounded bg-[var(--white-5)] border border-[var(--white-8)] flex items-center justify-center text-[9px] font-mono font-bold ${cat.color}">
+        ${cat.icon}
+      </div>
+      <span class="text-xs font-mono font-medium ${cat.color} truncate max-w-[180px]">${toolName}</span>
+      <span class="text-[11px] font-mono ${durationColor(durationMs)}">${durationMs}ms</span>
+      ${!success ? html`<span class="text-[10px] px-1 py-0.5 rounded bg-[var(--bad-10)] text-[var(--bad)]">실패</span>` : null}
+      ${errorMsg ? html`<span class="text-[10px] text-[var(--text-dim)] truncate max-w-[120px]" title=${errorMsg}>${trimText(errorMsg, 30)}</span>` : null}
+      <span class="flex-1"></span>
+      ${evt.ts ? html`<${TimeAgo} timestamp=${evt.ts} />` : null}
+    </div>
+  `
 }
 
 export function AgentTimelineSection() {
@@ -41,14 +68,18 @@ export function AgentTimelineSection() {
           ${summary.tasks_completed > 0 ? html`<span class="text-[10px] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[var(--accent)] whitespace-nowrap rounded-full">완료 ${summary.tasks_completed}</span>` : null}
           ${summary.tasks_claimed > 0 ? html`<span class="text-[10px] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[var(--accent)] whitespace-nowrap rounded-full">수임 ${summary.tasks_claimed}</span>` : null}
           ${summary.messages_sent > 0 ? html`<span class="text-[10px] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[var(--accent)] whitespace-nowrap rounded-full">메시지 ${summary.messages_sent}</span>` : null}
+          ${(summary.tool_calls ?? 0) > 0 ? html`<span class="text-[10px] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[var(--accent)] whitespace-nowrap rounded-full">도구 ${summary.tool_calls}</span>` : null}
           ${summary.active_duration_minutes > 0 ? html`<span class="text-[10px] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[var(--accent)] whitespace-nowrap rounded-full">${Math.round(summary.active_duration_minutes)}분 활동</span>` : null}
         </div>
       ` : null}
       ${events.length === 0
         ? html`<${EmptyState} message="작업 기록이 아직 없습니다" compact />`
         : html`
-            <div class="flex flex-col gap-0.5 max-h-[300px] overflow-y-auto">
+            <div class="flex flex-col gap-0.5 max-h-[400px] overflow-y-auto">
               ${events.map((evt: AgentTimelineEvent, idx: number) => {
+                if (evt.type === 'tool_call') {
+                  return html`<${ToolCallEventRow} evt=${evt} idx=${idx} />`
+                }
                 const detail = evt.detail as Record<string, string | undefined>
                 const title = detail.title ?? detail.content ?? ''
                 return html`

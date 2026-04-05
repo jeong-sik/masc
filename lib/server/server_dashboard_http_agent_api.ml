@@ -71,6 +71,7 @@ let add_agent_api_routes router =
                state.Mcp_server.room_config
                ~agent_name ~since_hours ~limit
                ~include_tasks:true ~include_board:false
+               ~include_tool_calls:true
            in
            Http.Response.json ~compress:true ~request:req
              (Yojson.Safe.to_string json) reqd

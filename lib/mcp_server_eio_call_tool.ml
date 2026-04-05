@@ -310,6 +310,24 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
   (* Track in-memory call counter for all declared tool names (including hidden). *)
   Tool_registry.record_call_if_known ~source:External_mcp ~tool_name:name ~success ~duration_ms ();
 
+  (* Emit activity graph event for tool call — enables real-time dashboard tracking *)
+  (try
+    ignore (Activity_graph.emit state.Mcp_server.room_config ~room_id:"default"
+      ~actor:(Activity_graph.entity ~kind:"agent" agent_name)
+      ~subject:(Activity_graph.entity ~kind:"tool" name)
+      ~kind:"tool.called"
+      ~payload:(`Assoc [
+        ("tool_name", `String name);
+        ("success", `Bool success);
+        ("duration_ms", `Int duration_ms);
+        ("source", `String (Tool_registry.string_of_source External_mcp));
+        ("error", match error_detail with Some e -> `String e | None -> `Null);
+      ])
+      ~tags:(if success then ["tool"; "success"] else ["tool"; "failure"])
+      ())
+  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+    log_mcp_exn ~label:"activity graph emit failed" exn);
+
   let jsonrpc_id_str =
     match id with
     | `String s -> s

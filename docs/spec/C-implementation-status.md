@@ -91,7 +91,7 @@
 | Anti-Fake | Test quality scoring | IMPL | anti_fake.ml |
 | Hooks | Autonomy level gating (l3/l4/l5) | IMPL | keeper_hooks_oas.ml |
 | Proactive | Quality gate + similarity + 3-retry fallback | IMPL | keeper_prompt.ml |
-| Self-Model Drift | will/needs/desires gradual mutation | IMPL | keeper_prompt.ml |
+| Self-Model Drift | will/needs/desires compaction | IMPL | keeper_config.ml |
 | TOML Config | config/keepers/*.toml | IMPL | keeper_toml_loader.ml |
 | OAS Memory.t Bridge | 5-tier mapping (부분적) | CODE | memory_oas_bridge.ml (Long_term 불완전) |
 

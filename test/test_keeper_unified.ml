@@ -1195,6 +1195,9 @@ let test_context_overflow_limit_parses_common_oas_errors () =
   check (option int) "available context size extracted" (Some 159671)
     (UT.context_overflow_limit
        "OpenAI returned 400: This model's maximum context length is 128000 tokens. However, your messages resulted in 193217 tokens. available context size (159671)");
+  check (option int) "input budget exceeded extracted" (Some 8192)
+    (UT.context_overflow_limit
+       "Agent run failed: Input token budget exceeded:\n  10847/8192");
   check (option int) "missing digits" None
     (UT.context_overflow_limit
        "available context size () but message malformed");
@@ -1206,6 +1209,9 @@ let test_should_attempt_context_overflow_retry_only_for_overflow_errors () =
   check bool "overflow string retries" true
     (UT.should_attempt_context_overflow_retry
        "provider error: available context size (32768) exceeded");
+  check bool "input budget exceeded retries" true
+    (UT.should_attempt_context_overflow_retry
+       "Agent run failed: Input token budget exceeded:\n  11010/8192");
   check bool "non-overflow string skips retry" false
     (UT.should_attempt_context_overflow_retry
        "Network error: Connection_reset")

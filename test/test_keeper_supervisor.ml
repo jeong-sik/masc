@@ -154,7 +154,8 @@ let test_self_preservation_subset () =
   let names = ["a"; "b"; "c"; "d"; "e"] in
   let entries = List.map (fun name ->
     let _reg = Reg.register ~base_path:bp name (make_meta name) in
-    Reg.set_state ~base_path:bp name Reg.Crashed;
+    ignore (Reg.dispatch_event ~base_path:bp name
+      (Masc_mcp.Keeper_state_machine.Fiber_terminated { outcome = "test" }));
     Reg.set_failure_reason ~base_path:bp name
       (Some (Reg.Heartbeat_consecutive_failures 3));
     match Reg.get ~base_path:bp name with

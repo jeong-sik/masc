@@ -26,20 +26,15 @@ exception Keeper_heartbeat_failure of {
   keeper_name : string;
 }
 
-type keeper_state =
-  | Running
-  | Paused
-  | Stopped
-  | Crashed
-  | Dead
+(** @deprecated Use [Keeper_state_machine.phase] directly. *)
+type keeper_state = Keeper_state_machine.phase
 
 type registry_entry = {
   base_path : string;
   name : string;
   meta : keeper_meta;
-  state : keeper_state;
   phase : Keeper_state_machine.phase;
-      (** Fine-grained phase from RFC-0002. *)
+      (** Keeper lifecycle phase (RFC-0002 11-state machine). *)
   conditions : Keeper_state_machine.conditions;
       (** Observable conditions that derive [phase]. *)
   fiber_stop : bool Atomic.t;
@@ -84,8 +79,7 @@ val all : ?base_path:string -> unit -> registry_entry list
 (** Update the meta for a registered keeper. No-op if not found. *)
 val update_meta : base_path:string -> string -> keeper_meta -> unit
 
-(** Change keeper state. No-op if not found. *)
-val set_state : base_path:string -> string -> keeper_state -> unit
+(** @deprecated Use [dispatch_event]. No external callers remain. *)
 
 (** Record a restart. Increments restart_count and updates last_restart_ts. *)
 val record_restart : base_path:string -> string -> unit

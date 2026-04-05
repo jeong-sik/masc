@@ -142,11 +142,4 @@ let append_trait_clause ~(base : string) ~(clause : string) : string =
   else if contains_ci b c then b
   else Printf.sprintf "%s; %s" b c
 
-let apply_self_model_drift
-    ~(meta : keeper_meta)
-    ~(user_message : string)
-    ~(work_kind : string) : keeper_meta * bool * string option =
-  ignore (user_message, work_kind);
-  (meta, false, None)
-
 include Keeper_text_processing

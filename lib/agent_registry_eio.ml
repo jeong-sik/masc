@@ -55,9 +55,28 @@ let session_identity_map : (string, string) Hashtbl.t = Hashtbl.create 64
     ~180 lines of identity resolution on 2nd+ calls. *)
 let resolved_names : (string, string) Hashtbl.t = Hashtbl.create 64
 
+(** Maximum session cache entries before forced eviction.
+    Prevents unbounded growth when many MCP sessions connect over time. *)
+let max_session_cache_entries = 1024
+
 let clear_session_caches () =
   Hashtbl.clear session_identity_map;
   Hashtbl.clear resolved_names
+
+(** Evict all session cache entries if either cache exceeds [max_session_cache_entries].
+    A simple full-clear is safe because the caches are write-through
+    (identity is reconstructed from params on the next call). *)
+let maybe_evict_session_caches () =
+  if Hashtbl.length session_identity_map > max_session_cache_entries
+     || Hashtbl.length resolved_names > max_session_cache_entries
+  then begin
+    Log.Identity.info
+      "[AgentRegistry] session cache eviction: identity=%d resolved=%d (max=%d)"
+      (Hashtbl.length session_identity_map)
+      (Hashtbl.length resolved_names)
+      max_session_cache_entries;
+    clear_session_caches ()
+  end
 
 (** Reset registry for testing *)
 let reset_for_testing () =
@@ -118,6 +137,7 @@ let get_or_create_identity ?mcp_session_id params =
         (String.sub registered.session_key 0 8)
         (Option.value mcp_session_id ~default:"none");
 
+      maybe_evict_session_caches ();
       registered
 
 (** Get identity by agent name (for backward compatibility) *)

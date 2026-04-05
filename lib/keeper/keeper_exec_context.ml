@@ -55,18 +55,12 @@ let count_tokens (system_prompt : string) (msgs : Agent_sdk.Types.message list) 
 let token_count (ctx : working_context) =
   count_tokens ctx.system_prompt ctx.messages
 
-let message_token_count (ctx : working_context) =
-  count_tokens "" ctx.messages
-
 let message_count (ctx : working_context) =
   List.length ctx.messages
 
 let context_ratio (ctx : working_context) : float =
   if ctx.max_tokens = 0 then 0.0
   else float_of_int (token_count ctx) /. float_of_int ctx.max_tokens
-
-let exceeds_threshold ctx threshold =
-  context_ratio ctx >= threshold
 
 let create ~system_prompt ~max_tokens =
   let context = Agent_sdk.Context.create () in
@@ -510,9 +504,14 @@ let load_context_from_checkpoint ~trace_id ~primary_model_max_tokens ~base_dir =
       trace_id;
   match (prefer_legacy, oas_checkpoint, legacy_checkpoint) with
   | (false, Some checkpoint, _) ->
-      ( session,
-        Some
-          (context_of_oas_checkpoint checkpoint ~primary_model_max_tokens) )
+      let ctx =
+        context_of_oas_checkpoint checkpoint ~primary_model_max_tokens
+      in
+      let ctx =
+        if primary_model_max_tokens <= 0 then ctx
+        else sync_oas_context { ctx with max_tokens = primary_model_max_tokens }
+      in
+      (session, Some ctx)
   | (_, _, Some ckpt) ->
       (try
          let ctx =
@@ -647,10 +646,6 @@ let compact_if_needed
           let msgs_after_fold =
             Agent_sdk.Context_reducer.reduce fold_reducer msgs_after_compact
           in
-          let token_count =
-            Context_compact_oas.count_tokens ctx.system_prompt msgs_after_fold
-          in
-          let _ = token_count in
           msgs_after_fold
         in
         let compacted_ctx =
@@ -842,7 +837,7 @@ let forced_overflow_retry_meta
       };
   }
 
-let[@warning "-32"] recover_latest_checkpoint_for_overflow_retry
+let recover_latest_checkpoint_for_overflow_retry
     ~(base_dir : string)
     ~(meta : keeper_meta)
     ~(model : string)
@@ -913,24 +908,18 @@ let[@warning "-32"] recover_latest_checkpoint_for_overflow_retry
       let compacted_ctx, trigger, base_decision =
         compact_if_needed ~meta:retry_meta ~now_ts ctx
       in
-      let strategy_after_message_tokens =
-        message_token_count compacted_ctx
-      in
-      let _ = strategy_after_message_tokens in
       let after_tokens = token_count compacted_ctx in
-      let decision = base_decision in
       let compaction_applied =
         String.starts_with ~prefix:"applied:" base_decision
       in
       let meaningful_reduction = after_tokens < before_tokens in
       if not (compaction_applied && meaningful_reduction) then None
       else
-        let _ = strategy_after_message_tokens in
         let compaction =
           {
             applied = true;
             trigger;
-            decision;
+            decision = base_decision;
             before_tokens;
             after_tokens;
             saved_tokens = max 0 (before_tokens - after_tokens);

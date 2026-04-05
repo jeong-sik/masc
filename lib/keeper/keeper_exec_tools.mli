@@ -72,7 +72,8 @@ val on_keeper_tool_call :
   (tool_name:string -> success:bool -> duration_ms:int -> unit) ref
 
 (** Callback for keeper_tool_search BM25 search.
-    Set in [keeper_agent_run.ml] after building the tool index. *)
+    Process-global fallback; prefer passing [~tool_search_fn] directly to
+    [execute_keeper_tool_call] for session-scoped search. *)
 val tool_search_fn :
   (query:string -> max_results:int -> Yojson.Safe.t) ref
 
@@ -98,6 +99,7 @@ val execute_keeper_tool_call :
   config:Room.config ->
   meta:keeper_meta ->
   ctx_work:working_context ->
+  ?search_fn:(query:string -> max_results:int -> Yojson.Safe.t) ->
   name:string ->
   input:Yojson.Safe.t ->
   string

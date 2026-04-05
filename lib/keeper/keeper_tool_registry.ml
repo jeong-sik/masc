@@ -86,7 +86,6 @@ let keeper_tool_search_schema : Types.tool_schema =
     description =
       "Search for additional tools by describing what you need. \
        Returns tool names, descriptions, and usage guidance. \
-       Discovered tools become available on your next turn. \
        Use when your current tools are insufficient for the task.";
     input_schema =
       `Assoc

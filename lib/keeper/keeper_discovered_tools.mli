@@ -1,8 +1,8 @@
 (** Per-session discovered tool tracking with turn-based decay.
 
-    Tools discovered via [keeper_tool_search] are added to this set.
-    The [before_turn_hook] reads [active_names] to include them in the
-    LLM-visible tool set.  Tools decay after [decay_turns] of non-use. *)
+    Tools discovered via [keeper_tool_search] can be added to this set.
+    Callers can query [active_names] to retrieve discovered tools that
+    have not yet decayed.  Tools decay after [decay_turns] of non-use. *)
 
 type t
 

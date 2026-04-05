@@ -149,6 +149,7 @@ let make_tools
     ~(config : Room.config)
     ~(meta : Keeper_types.keeper_meta)
     ~(ctx_ref : Keeper_types.working_context ref)
+    ?(search_fn : (query:string -> max_results:int -> Yojson.Safe.t) option = None)
     ()
   : Agent_sdk.Tool.t list =
   (* Build Tool.t for the full universe so BM25 and Tool_op can
@@ -191,6 +192,7 @@ let make_tools
                 Inference_utils.timed (fun () ->
                   Keeper_exec_tools.execute_keeper_tool_call
                     ~config ~meta ~ctx_work:(!ctx_ref)
+                    ?search_fn
                     ~name:td.name ~input)
               in
               let is_failure = keeper_tool_result_is_failure result in

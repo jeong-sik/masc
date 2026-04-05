@@ -55,6 +55,11 @@ let call_tool config meta name input =
   Keeper_exec_tools.execute_keeper_tool_call
     ~config ~meta ~ctx_work ~name ~input
 
+let call_tool_with_search config meta name input search_fn =
+  let ctx_work = make_ctx_work () in
+  Keeper_exec_tools.execute_keeper_tool_call
+    ~config ~meta ~ctx_work ~search_fn ~name ~input
+
 let parse_json s =
   try Yojson.Safe.from_string s
   with _ -> failwith (Printf.sprintf "invalid JSON: %s" s)
@@ -142,6 +147,93 @@ let test_done_after_claim () =
       | `String _ -> () (* error path also ok for format mismatch *)
       | _ -> fail "expected ok or error in done response")
 
+(* --- keeper_tool_search tests --- *)
+
+let test_tool_search_empty_query_returns_error () =
+  with_room (fun config ->
+    let meta = make_test_meta () in
+    let result = call_tool config meta "keeper_tool_search"
+      (`Assoc [ ("query", `String "") ]) in
+    let json = parse_json result in
+    match Yojson.Safe.Util.member "error" json with
+    | `String msg ->
+      check bool "error mentions query" true (String.length msg > 0)
+    | _ -> fail "expected error field for empty query")
+
+let test_tool_search_whitespace_query_returns_error () =
+  with_room (fun config ->
+    let meta = make_test_meta () in
+    let result = call_tool config meta "keeper_tool_search"
+      (`Assoc [ ("query", `String "   ") ]) in
+    let json = parse_json result in
+    match Yojson.Safe.Util.member "error" json with
+    | `String _ -> () (* expected *)
+    | _ -> fail "expected error field for whitespace-only query")
+
+let test_tool_search_returns_results_list () =
+  with_room (fun config ->
+    let meta = make_test_meta () in
+    (* With no custom search_fn, the global default returns {results:[]} *)
+    let result = call_tool config meta "keeper_tool_search"
+      (`Assoc [ ("query", `String "filesystem read write") ]) in
+    let json = parse_json result in
+    match Yojson.Safe.Util.member "results" json with
+    | `List _ -> () (* results field present *)
+    | _ -> fail "expected results list in response")
+
+let test_tool_search_max_results_clamped_to_10 () =
+  with_room (fun config ->
+    let meta = make_test_meta () in
+    let calls = ref [] in
+    let search_fn ~query:_ ~max_results =
+      calls := max_results :: !calls;
+      `Assoc [ ("results", `List []) ]
+    in
+    let _result = call_tool_with_search config meta "keeper_tool_search"
+      (`Assoc [ ("query", `String "worktree"); ("max_results", `Int 50) ])
+      search_fn in
+    match !calls with
+    | [n] -> check int "max_results clamped to 10" 10 n
+    | _ -> fail "expected exactly one search_fn call")
+
+let test_tool_search_max_results_minimum_1 () =
+  with_room (fun config ->
+    let meta = make_test_meta () in
+    let calls = ref [] in
+    let search_fn ~query:_ ~max_results =
+      calls := max_results :: !calls;
+      `Assoc [ ("results", `List []) ]
+    in
+    let _result = call_tool_with_search config meta "keeper_tool_search"
+      (`Assoc [ ("query", `String "worktree"); ("max_results", `Int 0) ])
+      search_fn in
+    match !calls with
+    | [n] -> check int "max_results clamped to min 1" 1 n
+    | _ -> fail "expected exactly one search_fn call")
+
+let test_tool_search_uses_provided_search_fn () =
+  with_room (fun config ->
+    let meta = make_test_meta () in
+    let search_fn ~query ~max_results:_ =
+      `Assoc [
+        ("ok", `Bool true);
+        ("query", `String query);
+        ("results", `List [
+          `Assoc [ ("name", `String "keeper_fs_read");
+                   ("score", `Float 0.9);
+                   ("description", `String "read a file") ];
+        ]);
+      ]
+    in
+    let result = call_tool_with_search config meta "keeper_tool_search"
+      (`Assoc [ ("query", `String "read file") ])
+      search_fn in
+    let json = parse_json result in
+    let results = Yojson.Safe.Util.(member "results" json |> to_list) in
+    check int "one result returned" 1 (List.length results);
+    let name = Yojson.Safe.Util.(List.hd results |> member "name" |> to_string) in
+    check string "result name matches" "keeper_fs_read" name)
+
 let () =
   let base_path = Masc_test_deps.find_project_root () in
   Keeper_exec_tools.init_policy_config ~base_path;
@@ -154,5 +246,13 @@ let () =
       test_case "empty task_id returns error" `Quick test_done_with_empty_task_id;
       test_case "nonexistent id returns error" `Quick test_done_with_nonexistent_id;
       test_case "done after claim" `Quick test_done_after_claim;
+    ];
+    "keeper_tool_search", [
+      test_case "empty query returns error" `Quick test_tool_search_empty_query_returns_error;
+      test_case "whitespace query returns error" `Quick test_tool_search_whitespace_query_returns_error;
+      test_case "non-empty query returns results list" `Quick test_tool_search_returns_results_list;
+      test_case "max_results clamped to 10" `Quick test_tool_search_max_results_clamped_to_10;
+      test_case "max_results minimum is 1" `Quick test_tool_search_max_results_minimum_1;
+      test_case "uses provided search_fn" `Quick test_tool_search_uses_provided_search_fn;
     ];
   ]

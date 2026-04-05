@@ -36,7 +36,7 @@ let tool_search_fn
   : (query:string -> max_results:int -> Yojson.Safe.t) ref
   =
   ref (fun ~query:_ ~max_results:_ ->
-    `Assoc [ ("error", `String "tool_search not initialized") ])
+    `Assoc [ ("results", `List []) ])
 ;;
 
 (** Tag-based dispatch callback for masc_* tools.
@@ -927,6 +927,7 @@ let execute_keeper_tool_call
       ~(config : Room.config)
       ~(meta : keeper_meta)
       ~(ctx_work : working_context)
+      ?(search_fn : (query:string -> max_results:int -> Yojson.Safe.t) option = None)
       ~(name : string)
       ~(input : Yojson.Safe.t)
   : string
@@ -950,7 +951,11 @@ let execute_keeper_tool_call
       if query = "" then
         error_json "query is required"
       else
-        Yojson.Safe.to_string (!tool_search_fn ~query ~max_results)
+        let fn = match search_fn with
+          | Some f -> f
+          | None -> !tool_search_fn
+        in
+        Yojson.Safe.to_string (fn ~query ~max_results)
     | "keeper_tools_list" -> keeper_tools_list_json ~meta
     | "keeper_time_now" ->
       Yojson.Safe.to_string

@@ -387,7 +387,20 @@ let run_turn
   let agent_name = meta.agent_name in
   let meta_ref = ref meta in
   let agent_ref : Agent_sdk.Agent.t option ref = ref None in
-  let keeper_tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_ref () in
+  (* Session-local search function ref.  Uses the forward-ref pattern:
+     1. Create a placeholder ref before make_tools (search index not yet built).
+     2. Pass it to make_tools so each tool call captures this ref by value.
+     3. After building the search index, update the ref with the real impl.
+     This makes keeper_tool_search session-scoped and race-free: each keeper
+     session owns its own ref; concurrent sessions never touch each other's state. *)
+  let local_search_fn_ref : (query:string -> max_results:int -> Yojson.Safe.t) ref =
+    ref (fun ~query:_ ~max_results:_ -> `Assoc [ ("results", `List []) ])
+  in
+  let keeper_tools =
+    Keeper_tools_oas.make_tools ~config ~meta ~ctx_ref
+      ~search_fn:(fun ~query ~max_results -> !local_search_fn_ref ~query ~max_results)
+      ()
+  in
   let extend_turns_tool = Keeper_extend_turns.make ~agent_ref ~max_turns () in
   let tools = extend_turns_tool :: keeper_tools in
   let tool_usage_before =
@@ -544,9 +557,11 @@ let run_turn
     ) keeper_tools;
     tbl
   in
-  (* Wire keeper_tool_search: BM25 over full universe, return enriched metadata *)
-  Keeper_exec_tools.tool_search_fn := (fun ~query ~max_results ->
-    let core = Keeper_exec_tools.effective_core_tools () in
+  (* Wire keeper_tool_search: update session-local ref with the real BM25 impl.
+     Filtering excludes core_always_tools so results are genuinely additional
+     tools beyond what is always visible. *)
+  local_search_fn_ref := (fun ~query ~max_results ->
+    let core = Keeper_exec_tools.core_always_tools in
     let retrieved = Agent_sdk.Tool_index.retrieve search_index query in
     let new_discoveries =
       retrieved
@@ -574,16 +589,14 @@ let run_turn
           ("score", `Float score);
           ("description", desc);
           ("when_to_use", when_to_use);
-          ("available_now", `Bool true);
         ]
       ) new_discoveries
     in
     `Assoc [
       ("ok", `Bool true);
       ("query", `String query);
-      ("discovered_count", `Int (List.length new_discoveries));
       ("results", `List results);
-      ("hint", `String "These tools are available now. Call them by name in this turn.");
+      ("hint", `String "Call any of these tools by name in this or a future turn.");
     ]
   );
   (* Visibility measurement (#4961): log universe size vs BM25 scope *)

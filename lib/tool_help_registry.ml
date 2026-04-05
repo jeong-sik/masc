@@ -127,14 +127,13 @@ let manual_help_entry name =
         {
           name;
           short_description = "Search for additional tools by natural language query.";
-          when_to_use = "Use when your core tools are insufficient for the current task. Describe what you need and matching tools will be discovered and made available.";
+          when_to_use = "Use when your core tools are insufficient for the current task and you need help identifying relevant tools by describing the capability you need.";
           key_constraints =
             [
-              "Discovered tools become available on the next turn.";
-              "Max 10 results per query.";
+              "Returns up to 10 matching results per query.";
             ];
           details_markdown =
-            "BM25 search over the full tool universe. Returns tool names, descriptions, and usage guidance. Discovered tools are tracked per session with turn-based decay.";
+            "BM25 search over the full tool universe. Returns matching tool names, descriptions, and usage guidance for discovery and selection.";
           doc_refs = [];
           prompt_hints = [];
         }

@@ -9,7 +9,7 @@ import { fetchKeeperTrajectory } from '../api/dashboard'
 import type { TrajectoryEntry, TrajectoryResponse } from '../api/dashboard'
 import { truncate } from '../lib/truncate'
 import { TimeAgo } from './common/time-ago'
-import { toolCategory, durationColor, formatArgs, prettyArgs } from './tool-call-shared'
+import { toolCategory, durationColor, formatArgs, prettyArgs, formatDuration, summarizeEntries } from './tool-call-shared'
 import type { Keeper } from '../types'
 
 // ── Constants ────────────────────────────────────────────
@@ -87,7 +87,8 @@ function TrajectoryEntryRow({ entry }: { entry: TrajectoryEntry }) {
         ${'' /* Content */}
         <div class="flex-1 min-w-0">
           <div class="flex items-center gap-2 flex-wrap">
-            <span class="text-xs font-mono font-medium ${cat.color}">${entry.tool_name}</span>
+            <span class="text-xs font-mono font-medium ${cat.color}" title=${entry.tool_name}>${entry.tool_name}</span>
+            <span class="text-[10px] px-1 py-0.5 rounded bg-[var(--white-5)] text-[var(--text-dim)]">${cat.label}</span>
             <span class="text-[10px] text-[var(--text-dim)]">T${entry.turn}R${entry.round}</span>
             ${entry.cost_usd > 0
               ? html`<span class="text-[10px] px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--accent)]">$${entry.cost_usd.toFixed(4)}</span>`
@@ -97,7 +98,9 @@ function TrajectoryEntryRow({ entry }: { entry: TrajectoryEntry }) {
               : null}
             ${entry.error
               ? html`<span class="text-[10px] px-1.5 py-0.5 rounded bg-[var(--bad-10)] text-[var(--bad)]">오류</span>`
-              : null}
+              : !gateRejected
+                ? html`<span class="text-[10px] px-1.5 py-0.5 rounded bg-[rgba(52,211,153,0.1)] text-[var(--ok)]">완료</span>`
+                : null}
           </div>
 
           ${'' /* Args preview (collapsed) */}
@@ -110,7 +113,7 @@ function TrajectoryEntryRow({ entry }: { entry: TrajectoryEntry }) {
 
         ${'' /* Duration + timestamp */}
         <div class="flex-shrink-0 flex flex-col items-end gap-0.5">
-          <span class="text-[11px] font-mono ${durationColor(entry.duration_ms)}">${entry.duration_ms}ms</span>
+          <span class="text-[11px] font-mono ${durationColor(entry.duration_ms)}">${formatDuration(entry.duration_ms)}</span>
           <${TimeAgo} timestamp=${entry.ts} class="text-[10px] text-[var(--text-dim)]" />
         </div>
       </div>
@@ -244,16 +247,25 @@ export function KeeperTrajectoryTimeline({ keeperName, keeper }: { keeperName: s
       </div>
 
       ${'' /* Turn groups */}
-      ${turns.map(([turnNum, entries]) => html`
-        <div class="mb-2">
-          <div class="flex items-center gap-2 mb-1">
-            <div class="text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-wider">Turn ${turnNum}</div>
-            <div class="flex-1 h-px bg-[var(--border-slate-12)]"></div>
-            <div class="text-[10px] text-[var(--text-dim)]">${entries.length} call${entries.length > 1 ? 's' : ''}</div>
+      ${turns.map(([turnNum, entries]) => {
+        const summary = summarizeEntries(entries)
+        return html`
+          <div class="mb-3">
+            <div class="flex items-center gap-2 mb-1.5 px-1">
+              <div class="text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-wider">Turn ${turnNum}</div>
+              <div class="flex-1 h-px bg-[var(--border-slate-12)]"></div>
+              <div class="flex items-center gap-2 text-[10px] text-[var(--text-dim)]">
+                ${summary.errorCount > 0
+                  ? html`<span class="text-[var(--bad)]">${summary.errorCount} err</span>`
+                  : null}
+                <span>${summary.successCount}/${entries.length}</span>
+                <span class="font-mono ${durationColor(summary.totalMs)}">${formatDuration(summary.totalMs)}</span>
+              </div>
+            </div>
+            ${entries.map((e: TrajectoryEntry) => html`<${TrajectoryEntryRow} entry=${e} />`)}
           </div>
-          ${entries.map((e: TrajectoryEntry) => html`<${TrajectoryEntryRow} entry=${e} />`)}
-        </div>
-      `)}
+        `
+      })}
     </div>
   `
 }

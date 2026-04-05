@@ -1,6 +1,16 @@
 # Changelog
 
 
+## [2.238.0] - 2026-04-05
+
+### Fixed
+- **Local context resolution** -- delegate to OAS for local providers (#5216).
+- **Small fixes** -- resolve #5069 OAS worker CDAL proof errors and #5100 context verification (#5227).
+- **RFC-0002 review** -- address Copilot review on keeper lifecycle (#5236).
+
+### Added
+- **Startup docs** -- flowcharts for quick start guide (#5233).
+
 ## [2.237.0] - 2026-04-05
 
 ### Added

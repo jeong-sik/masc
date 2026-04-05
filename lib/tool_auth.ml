@@ -78,6 +78,8 @@ let handle_auth_create_token ctx args =
       | Ok r -> r
       | Error _ -> Types.Worker
     in
+    Log.Auth.info "Creating token for agent '%s' with role '%s' (requested by '%s')"
+      target_agent (Types.agent_role_to_string role) ctx.agent_name;
     try
       match Auth.create_token ctx.config.base_path ~agent_name:target_agent ~role with
       | Ok (raw_token, cred) ->
@@ -86,6 +88,7 @@ let handle_auth_create_token ctx args =
             | Some exp -> exp
             | None -> "never"
           in
+          Log.Auth.info "Token created successfully for agent '%s'" target_agent;
           let msg = Printf.sprintf {|🔑 **Token Created for %s**
 
 Token (SAVE THIS - shown only once):
@@ -99,10 +102,13 @@ Pass this token in requests to authenticate.
           (true, msg)
       | Error e ->
           Hashtbl.replace create_token_failures target_agent (failures + 1);
-          (false, Printf.sprintf "Auth token creation failed: %s" (Types.masc_error_to_string e))
+          let err_msg = Types.masc_error_to_string e in
+          Log.Auth.error "Token creation failed for agent '%s': %s" target_agent err_msg;
+          (false, Printf.sprintf "Auth token creation failed: %s" err_msg)
     with exn ->
       Hashtbl.replace create_token_failures target_agent (failures + 1);
       let trace = Printexc.get_backtrace () in
+      Log.Auth.error "Token creation crashed for agent '%s': %s" target_agent (Printexc.to_string exn);
       (false, Printf.sprintf "Auth credential save crashed: %s\n%s" (Printexc.to_string exn) trace)
 
 let handle_auth_refresh ctx args =

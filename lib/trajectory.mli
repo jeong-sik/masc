@@ -104,7 +104,8 @@ val record_entry : accumulator -> tool_call_entry -> unit
 val finalize : accumulator -> trajectory_outcome -> trajectory
 
 val detect_entropy :
-  ?threshold:int -> accumulator -> string -> (string * int) option
-(** Detect if [tool_name] has been called [threshold]+ times consecutively. *)
+  ?threshold:int -> ?args_json:string -> accumulator -> string -> (string * int) option
+(** Detect if [tool_name] has been called [threshold]+ times consecutively.
+    If [args_json] is provided, only consecutive IDENTICAL calls (same tool and same args) are counted. *)
 
 val calls_in_current_turn : accumulator -> int

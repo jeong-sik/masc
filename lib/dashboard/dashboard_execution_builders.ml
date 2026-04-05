@@ -298,6 +298,9 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
             ("autonomous_action_count", `Int autonomous_action_count);
             ("autonomous_turn_count", `Int autonomous_turn_count);
             ("last_heartbeat_at", json_string_option last_heartbeat_at);
+            ("proactive_enabled", member_assoc "proactive_enabled" keeper);
+            ("proactive_idle_sec", member_assoc "proactive_idle_sec" keeper);
+            ("proactive_cooldown_sec", member_assoc "proactive_cooldown_sec" keeper);
             ("last_proactive_preview", member_assoc "last_proactive_preview" keeper);
             ("continuity_summary", `String (
               match trim_to_option (string_field "continuity_summary" keeper) with

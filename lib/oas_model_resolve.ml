@@ -105,7 +105,7 @@ let max_context_of_label (label : string) : int =
         | Some low_ctx when low_ctx < context_floor ->
           Log.warn ~ctx:"OasModelResolve"
             "discovered context %d < floor %d for %s; using static value. \
-             Increase the local runtime context limit."
+             Increase the local runtime context limit (for llama-server, raise the -c flag)."
             low_ctx context_floor pname
         | _ -> ());
       effective_discovered_ctx ~static_ctx ~discovered

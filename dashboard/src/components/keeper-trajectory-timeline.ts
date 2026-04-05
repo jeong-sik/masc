@@ -4,7 +4,7 @@
 
 import { html } from 'htm/preact'
 import { signal, useSignal } from '@preact/signals'
-import { useEffect } from 'preact/hooks'
+import { useEffect, useMemo } from 'preact/hooks'
 import { fetchKeeperTrajectory } from '../api/dashboard'
 import type { TrajectoryEntry, TrajectoryResponse } from '../api/dashboard'
 import { truncate } from '../lib/truncate'
@@ -14,6 +14,8 @@ import { keeperHeartbeats } from '../store'
 import type { Keeper } from '../types'
 
 const HEARTBEAT_STALE_MS = 30_000
+const OFFLINE_STATUSES = ['offline', 'inactive', 'dead', 'crashed'] as const
+const STAT_PILL = 'text-[10px] py-0.5 px-2 rounded-full bg-[var(--white-4)] border border-[var(--white-8)] text-[var(--text-muted)]'
 
 // ── Constants ────────────────────────────────────────────
 
@@ -168,7 +170,7 @@ function TrajectoryEntryRow({ entry }: { entry: TrajectoryEntry }) {
 }
 
 function TrajectoryEmptyState({ keeper }: { keeper?: Keeper }) {
-  const isOffline = keeper && ['offline', 'inactive', 'dead', 'crashed'].includes(keeper.status)
+  const isOffline = keeper && OFFLINE_STATUSES.includes(keeper.status as typeof OFFLINE_STATUSES[number])
   const toolNames = keeper?.recent_tool_names ?? keeper?.latest_tool_names ?? []
   const toolCount = keeper?.latest_tool_call_count ?? 0
   const generation = keeper?.generation ?? 0
@@ -246,13 +248,16 @@ export function KeeperTrajectoryTimeline({ keeperName, keeper }: { keeperName: s
     return html`<${TrajectoryEmptyState} keeper=${keeper} />`
   }
 
-  const turnGroups = groupByTurn(data.entries)
-  const turns = Array.from(turnGroups.entries()).sort(([a], [b]) => b - a)
-  const allSummary = summarizeEntries(data.entries)
-  const distinctTools = new Set(data.entries.map(e => e.tool_name)).size
+  const { turns, allSummary, distinctTools } = useMemo(() => {
+    const groups = groupByTurn(data.entries)
+    const sorted = Array.from(groups.entries()).sort(([a], [b]) => b - a)
+    const summary = summarizeEntries(data.entries)
+    const distinct = new Set(data.entries.map(e => e.tool_name)).size
+    return { turns: sorted, allSummary: summary, distinctTools: distinct }
+  }, [data.entries])
   const lastHb = keeperHeartbeats.value.get(keeperName)
   const isLive = lastHb != null && (Date.now() - lastHb) < HEARTBEAT_STALE_MS
-  const isOnline = keeper && !['offline', 'inactive', 'dead', 'crashed'].includes(keeper.status)
+  const isOnline = keeper && !OFFLINE_STATUSES.includes(keeper.status as typeof OFFLINE_STATUSES[number])
   const contextRatio = keeper?.context_ratio
 
   return html`
@@ -281,10 +286,10 @@ export function KeeperTrajectoryTimeline({ keeperName, keeper }: { keeperName: s
 
       ${'' /* Summary stats bar */}
       <div class="flex gap-3 flex-wrap mb-2 px-1">
-        <span class="text-[10px] py-0.5 px-2 rounded-full bg-[var(--white-4)] border border-[var(--white-8)] text-[var(--text-muted)]">${turns.length} turns</span>
-        <span class="text-[10px] py-0.5 px-2 rounded-full bg-[var(--white-4)] border border-[var(--white-8)] text-[var(--text-muted)]">${data.entries.length} calls</span>
-        <span class="text-[10px] py-0.5 px-2 rounded-full bg-[var(--white-4)] border border-[var(--white-8)] text-[var(--text-muted)]">${distinctTools} tools</span>
-        <span class="text-[10px] py-0.5 px-2 rounded-full bg-[var(--white-4)] border border-[var(--white-8)] font-mono ${durationColor(allSummary.totalMs)}">${formatDuration(allSummary.totalMs)}</span>
+        <span class="${STAT_PILL}">${turns.length} turns</span>
+        <span class="${STAT_PILL}">${data.entries.length} calls</span>
+        <span class="${STAT_PILL}">${distinctTools} tools</span>
+        <span class="${STAT_PILL} font-mono ${durationColor(allSummary.totalMs)}">${formatDuration(allSummary.totalMs)}</span>
         ${allSummary.errorCount > 0
           ? html`<span class="text-[10px] py-0.5 px-2 rounded-full bg-[var(--bad-10)] border border-[rgba(239,68,68,0.2)] text-[var(--bad)]">${allSummary.errorCount} err</span>`
           : html`<span class="text-[10px] py-0.5 px-2 rounded-full bg-[rgba(52,211,153,0.08)] border border-[rgba(52,211,153,0.15)] text-[var(--ok)]">all ok</span>`}

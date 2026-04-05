@@ -14,6 +14,7 @@ const refreshNamespaceTruth = vi.fn().mockResolvedValue(undefined)
 
 const topActiveAgents = { value: [] as unknown[] }
 const shellMetaCognition = { value: null as Record<string, unknown> | null }
+const serverStatus = { value: null as Record<string, unknown> | null }
 const navigate = vi.fn()
 const navigateToPost = vi.fn()
 const connected = { value: true }
@@ -42,6 +43,7 @@ async function loadOverview() {
   }))
   vi.doMock('../../store', () => ({
     shellMetaCognition,
+    serverStatus,
   }))
   vi.doMock('../../sse', () => ({
     journal: [],
@@ -52,6 +54,7 @@ async function loadOverview() {
   vi.doMock('../../router', () => ({
     navigate,
     navigateToPost,
+    hashForRoute: vi.fn().mockReturnValue('#'),
   }))
   vi.doMock('./situation-banner', () => ({
     SituationBanner: () => html`<div>Situation</div>`,
@@ -85,6 +88,7 @@ describe('Overview freshness strip', () => {
     namespaceTruthLoading.value = false
     topActiveAgents.value = []
     shellMetaCognition.value = null
+    serverStatus.value = null
     connected.value = true
     eventCount.value = 0
     lastEvent.value = null
@@ -215,5 +219,123 @@ describe('Overview freshness strip', () => {
     digestButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
     expect(navigateToPost).toHaveBeenCalledWith('post-meta-1')
+  }, 15000)
+})
+
+describe('ToolCallHealthPanel', () => {
+  let container: HTMLDivElement
+
+  beforeEach(() => {
+    vi.spyOn(Date, 'now').mockReturnValue(new Date('2026-03-26T12:10:00Z').getTime())
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    missionLoading.value = false
+    namespaceTruthLoading.value = false
+    topActiveAgents.value = []
+    shellMetaCognition.value = null
+    serverStatus.value = null
+    connected.value = true
+    eventCount.value = 0
+    lastEvent.value = null
+    missionSnapshot.value = {
+      generated_at: '2026-03-26T12:09:00Z',
+      summary: {},
+      sessions: [],
+      session_briefs: [],
+      attention_queue: [],
+    }
+    namespaceTruth.value = {
+      generated_at: '2026-03-26T12:08:00Z',
+    }
+  })
+
+  afterEach(() => {
+    render(null, container)
+    container.remove()
+    vi.clearAllMocks()
+    vi.restoreAllMocks()
+    vi.resetModules()
+    vi.doUnmock('../../mission-store')
+    vi.doUnmock('../../namespace-truth-store')
+    vi.doUnmock('../../observatory-store')
+    vi.doUnmock('../../store')
+    vi.doUnmock('../../sse')
+    vi.doUnmock('../../router')
+    vi.doUnmock('./situation-banner')
+    vi.doUnmock('./attention-spotlight')
+    vi.doUnmock('./narrative-timeline')
+    vi.doUnmock('./agent-avatar')
+    vi.doUnmock('../transport-health')
+    vi.doUnmock('../perf-snapshot')
+  })
+
+  it('hides the panel when serverStatus is null', async () => {
+    serverStatus.value = null
+
+    const { Overview } = await loadOverview()
+    render(html`<${Overview} />`, container)
+    await flushUi()
+
+    expect(container.textContent).not.toContain('도구 호출')
+    expect(container.textContent).not.toContain('호출')
+  }, 15000)
+
+  it('hides the panel when tool_calls is 0', async () => {
+    serverStatus.value = {
+      tool_call_health: {
+        window_hours: 1,
+        tool_calls: 0,
+        failures: 0,
+        failure_rate: 0,
+        since_epoch: 1711454400,
+      },
+    }
+
+    const { Overview } = await loadOverview()
+    render(html`<${Overview} />`, container)
+    await flushUi()
+
+    expect(container.textContent).not.toContain('도구 호출')
+  }, 15000)
+
+  it('shows the panel with correct counts and failure rate when tool_calls > 0', async () => {
+    serverStatus.value = {
+      tool_call_health: {
+        window_hours: 1,
+        tool_calls: 42,
+        failures: 3,
+        failure_rate: 0.0714,
+        since_epoch: 1711454400,
+      },
+    }
+
+    const { Overview } = await loadOverview()
+    render(html`<${Overview} />`, container)
+    await flushUi()
+
+    expect(container.textContent).toContain('도구 호출')
+    expect(container.textContent).toContain('42')
+    expect(container.textContent).toContain('3')
+    expect(container.textContent).toContain('7.1%')
+  }, 15000)
+
+  it('shows 0.0% failure rate when there are no failures', async () => {
+    serverStatus.value = {
+      tool_call_health: {
+        window_hours: 1,
+        tool_calls: 10,
+        failures: 0,
+        failure_rate: 0,
+        since_epoch: 1711454400,
+      },
+    }
+
+    const { Overview } = await loadOverview()
+    render(html`<${Overview} />`, container)
+    await flushUi()
+
+    expect(container.textContent).toContain('도구 호출')
+    expect(container.textContent).toContain('10')
+    expect(container.textContent).toContain('0.0%')
   }, 15000)
 })

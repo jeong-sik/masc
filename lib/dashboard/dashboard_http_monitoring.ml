@@ -46,9 +46,7 @@ let tool_call_health_json ?(now_ts = Unix.gettimeofday ()) (config : Room.config
     ("window_hours", `Float window_hours);
     ("tool_calls", `Int total);
     ("failures", `Int failures);
-    ("timeouts", `Null);
     ("failure_rate", `Float failure_rate);
-    ("p95_duration_ms", `Null);
     ("since_epoch", `Float since);
   ]
 

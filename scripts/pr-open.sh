@@ -30,6 +30,36 @@ require_cmd() {
   }
 }
 
+validate_pr_body_file() {
+  local path="$1"
+  local missing=()
+  local heading
+
+  if [[ ! -f "$path" ]]; then
+    echo "body file not found: $path" >&2
+    exit 1
+  fi
+
+  for heading in \
+    "## Summary" \
+    "## Product impact" \
+    "## Evidence" \
+    "## Review evidence" \
+    "## Linked issue"
+  do
+    if ! grep -Fq "$heading" "$path"; then
+      missing+=("$heading")
+    fi
+  done
+
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    echo "body file is missing required PR hygiene sections:" >&2
+    printf '  - %s\n' "${missing[@]}" >&2
+    echo "expected headings from .github/pull_request_template.md" >&2
+    exit 1
+  fi
+}
+
 is_doc_path() {
   case "$1" in
     docs/*|examples/trpg-mvp/*|README.md|*.md) return 0 ;;
@@ -74,6 +104,10 @@ branch="$(git rev-parse --abbrev-ref HEAD)"
 if [[ "$branch" == "main" || "$branch" == "master" ]]; then
   echo "refusing to open PR from branch '$branch'" >&2
   exit 1
+fi
+
+if [[ -n "$body_file" ]]; then
+  validate_pr_body_file "$body_file"
 fi
 
 if [[ -z "$repo" ]]; then

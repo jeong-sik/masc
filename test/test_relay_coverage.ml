@@ -11,6 +11,8 @@
 open Alcotest
 
 module Relay = Masc_mcp.Relay
+module Runtime_params = Masc_mcp.Runtime_params
+module Governance_registry = Masc_mcp.Governance_registry
 
 (* ============================================================
    relay_config Tests
@@ -126,6 +128,41 @@ let test_task_cost_exploration () =
 let test_task_cost_simple () =
   let cost = Relay.estimate_task_cost Relay.Simple_task in
   check int "simple cost" 1000 cost
+
+(* ============================================================
+   Runtime_params override Tests (estimate_context / estimate_task_cost)
+   ============================================================ *)
+
+let test_estimate_context_honors_token_override () =
+  let default_metrics = Relay.estimate_context ~messages:1 ~tool_calls:0 ~model:"claude" in
+  let default_tpu = Runtime_params.get Governance_registry.relay_tokens_per_user_msg in
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime_params.clear Governance_registry.relay_tokens_per_user_msg)
+    (fun () ->
+      (match Runtime_params.set Governance_registry.relay_tokens_per_user_msg (default_tpu + 17) with
+       | Ok () -> ()
+       | Error msg -> failwith msg);
+      let overridden = Relay.estimate_context ~messages:1 ~tool_calls:0 ~model:"claude" in
+      check bool "override changes estimated_tokens"
+        true (overridden.estimated_tokens <> default_metrics.estimated_tokens));
+  let cleared = Relay.estimate_context ~messages:1 ~tool_calls:0 ~model:"claude" in
+  check int "clear reverts estimated_tokens"
+    default_metrics.estimated_tokens cleared.estimated_tokens
+
+let test_estimate_task_cost_honors_simple_override () =
+  let default_cost = Relay.estimate_task_cost Relay.Simple_task in
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime_params.clear Governance_registry.relay_cost_simple)
+    (fun () ->
+      (match Runtime_params.set Governance_registry.relay_cost_simple (default_cost + 123) with
+       | Ok () -> ()
+       | Error msg -> failwith msg);
+      check int "override changes cost"
+        (default_cost + 123) (Relay.estimate_task_cost Relay.Simple_task));
+  check int "clear reverts cost"
+    default_cost (Relay.estimate_task_cost Relay.Simple_task)
 
 (* ============================================================
    should_relay (Reactive) Tests
@@ -886,6 +923,10 @@ let () =
       test_case "long running" `Quick test_task_cost_long_running;
       test_case "exploration" `Quick test_task_cost_exploration;
       test_case "simple" `Quick test_task_cost_simple;
+    ];
+    "relay_params_override", [
+      test_case "estimate_context token override" `Quick test_estimate_context_honors_token_override;
+      test_case "estimate_task_cost simple override" `Quick test_estimate_task_cost_honors_simple_override;
     ];
     "should_relay.reactive", [
       test_case "below threshold" `Quick test_should_relay_below_threshold;

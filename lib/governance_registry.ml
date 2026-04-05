@@ -50,7 +50,7 @@ let message_max_count =
   Runtime_params.register
     ~key:"message.max_count"
     ~default:(fun () -> Env_config_runtime.Message.max_count)
-    ~validate:(validate_int_range ~min:10 ~max:10000 "message_max_count")
+    ~validate:(validate_int_range ~min:10 ~max:10000 "message.max_count")
     ~serialize:(fun v -> `Int v)
     ~deserialize:deserialize_int
     ()
@@ -72,7 +72,7 @@ let inference_timeout =
   Runtime_params.register
     ~key:"inference.timeout_seconds"
     ~default:(fun () -> Env_config_governance.Inference.timeout_seconds)
-    ~validate:(validate_float_range ~min:5.0 ~max:300.0 "inference_timeout")
+    ~validate:(validate_float_range ~min:5.0 ~max:300.0 "inference.timeout_seconds")
     ~serialize:(fun v -> `Float v)
     ~deserialize:deserialize_float
     ()
@@ -87,7 +87,7 @@ let _cost_max_session_usd =
   Runtime_params.register
     ~key:"cost.max_session_usd"
     ~default:(fun () -> 0.50)
-    ~validate:(validate_float_range ~min:0.01 ~max:50.0 "cost_max_session_usd")
+    ~validate:(validate_float_range ~min:0.01 ~max:50.0 "cost.max_session_usd")
     ~serialize:(fun v -> `Float v)
     ~deserialize:deserialize_float
     ()
@@ -98,7 +98,7 @@ let keeper_max_hb_failures =
   Runtime_params.register
     ~key:"keeper.max_consecutive_hb_failures"
     ~default:(fun () -> Env_config_keeper.KeeperKeepalive.max_consecutive_failures)
-    ~validate:(validate_int_range ~min:2 ~max:50 "keeper_max_hb_failures")
+    ~validate:(validate_int_range ~min:2 ~max:50 "keeper.max_consecutive_hb_failures")
     ~serialize:(fun v -> `Int v)
     ~meta:{ description = "Heartbeat 연속 실패 허용 횟수";
             value_type = "int";
@@ -110,7 +110,7 @@ let keeper_max_turn_failures =
   Runtime_params.register
     ~key:"keeper.max_consecutive_turn_failures"
     ~default:(fun () -> Env_config_keeper.KeeperKeepalive.max_consecutive_turn_failures)
-    ~validate:(validate_int_range ~min:3 ~max:100 "keeper_max_turn_failures")
+    ~validate:(validate_int_range ~min:3 ~max:100 "keeper.max_consecutive_turn_failures")
     ~serialize:(fun v -> `Int v)
     ~meta:{ description = "Turn 연속 실패 허용 횟수";
             value_type = "int";
@@ -122,7 +122,7 @@ let keeper_supervisor_sweep_sec =
   Runtime_params.register
     ~key:"keeper.supervisor_sweep_sec"
     ~default:(fun () -> Env_config_keeper.KeeperSupervisor.sweep_interval_sec)
-    ~validate:(validate_float_range ~min:10.0 ~max:120.0 "keeper_supervisor_sweep_sec")
+    ~validate:(validate_float_range ~min:10.0 ~max:120.0 "keeper.supervisor_sweep_sec")
     ~serialize:(fun v -> `Float v)
     ~meta:{ description = "Supervisor sweep 주기(초)";
             value_type = "float";
@@ -134,7 +134,7 @@ let keeper_supervisor_max_restarts =
   Runtime_params.register
     ~key:"keeper.supervisor_max_restarts"
     ~default:(fun () -> Env_config_keeper.KeeperSupervisor.max_restarts)
-    ~validate:(validate_int_range ~min:1 ~max:50 "keeper_supervisor_max_restarts")
+    ~validate:(validate_int_range ~min:1 ~max:50 "keeper.supervisor_max_restarts")
     ~serialize:(fun v -> `Int v)
     ~meta:{ description = "Crash 후 재시작 예산";
             value_type = "int";
@@ -146,7 +146,7 @@ let keeper_keepalive_interval_sec =
   Runtime_params.register
     ~key:"keeper.keepalive_interval_sec"
     ~default:(fun () -> Env_config_keeper.KeeperKeepalive.interval_sec)
-    ~validate:(validate_int_range ~min:5 ~max:300 "keeper_keepalive_interval_sec")
+    ~validate:(validate_int_range ~min:5 ~max:300 "keeper.keepalive_interval_sec")
     ~serialize:(fun v -> `Int v)
     ~meta:{ description = "Heartbeat 주기(초)";
             value_type = "int";
@@ -158,7 +158,7 @@ let keeper_dead_ttl_sec =
   Runtime_params.register
     ~key:"keeper.dead_ttl_sec"
     ~default:(fun () -> Env_config_keeper.KeeperSupervisor.dead_ttl_sec)
-    ~validate:(validate_float_range ~min:60.0 ~max:86400.0 "keeper_dead_ttl_sec")
+    ~validate:(validate_float_range ~min:60.0 ~max:86400.0 "keeper.dead_ttl_sec")
     ~serialize:(fun v -> `Float v)
     ~meta:{ description = "Dead 상태 유지 시간(초)";
             value_type = "float";
@@ -261,7 +261,7 @@ let keeper_snapshot_sec =
   Runtime_params.register
     ~key:"keeper.snapshot_sec"
     ~default:(fun () -> Env_config_keeper.KeeperRuntime.snapshot_sec)
-    ~validate:(validate_int_range ~min:15 ~max:3600 "keeper_snapshot_sec")
+    ~validate:(validate_int_range ~min:15 ~max:3600 "keeper.snapshot_sec")
     ~serialize:(fun v -> `Int v)
     ~meta:{ description = "Snapshot 캡처 주기(초)";
             value_type = "int";
@@ -285,7 +285,7 @@ let keeper_work_as_hb_max_silence_sec =
   Runtime_params.register
     ~key:"keeper.work_as_hb_max_silence_sec"
     ~default:(fun () -> Env_config_keeper.WorkAsHeartbeat.max_silence_sec)
-    ~validate:(validate_float_range ~min:10.0 ~max:600.0 "keeper_work_as_hb_max_silence_sec")
+    ~validate:(validate_float_range ~min:10.0 ~max:600.0 "keeper.work_as_hb_max_silence_sec")
     ~serialize:(fun v -> `Float v)
     ~meta:{ description = "Work-as-heartbeat 최대 침묵 시간(초)";
             value_type = "float";
@@ -309,7 +309,7 @@ let keeper_stage_timing_ring_size =
   Runtime_params.register
     ~key:"keeper.stage_timing_ring_size"
     ~default:(fun () -> Env_config_keeper.KeeperProactive.stage_timing_ring_size)
-    ~validate:(validate_int_range ~min:10 ~max:1000 "keeper_stage_timing_ring_size")
+    ~validate:(validate_int_range ~min:10 ~max:1000 "keeper.stage_timing_ring_size")
     ~serialize:(fun v -> `Int v)
     ~meta:{ description = "Stage timing ring buffer 크기 (fiber restart 시 적용)";
             value_type = "int";

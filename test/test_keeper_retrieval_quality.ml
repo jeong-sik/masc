@@ -132,7 +132,7 @@ let build_keeper_index () =
       | Some kw -> " " ^ kw
       | None -> ""
     in
-    Agent_sdk.Tool_index.{ name; description = t.description ^ kr_kw; group }
+    Agent_sdk.Tool_index.{ name; description = t.description ^ kr_kw; group; aliases = [] }
   ) tool_schemas in
   Agent_sdk.Tool_index.build ~config:tool_index_config tool_entries
 

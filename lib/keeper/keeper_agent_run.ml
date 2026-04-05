@@ -525,7 +525,7 @@ let run_turn
       | Some kw -> " " ^ kw
       | None -> ""
     in
-    Agent_sdk.Tool_index.{ name; description = t.schema.description ^ kr_kw; group }
+    Agent_sdk.Tool_index.{ name; description = t.schema.description ^ kr_kw; group; aliases = [] }
   ) keeper_tools in
   (* Preset-scoped BM25 index: only index tools within the keeper's preset
      universe, not the full 244+ universe.  This reduces noise and improves

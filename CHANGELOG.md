@@ -1,6 +1,16 @@
 # Changelog
 
 
+## [2.244.0] - 2026-04-05
+
+### Added
+- **Tool rerank** -- optional LLM reranking of BM25 tool retrieval results in keeper. When BM25 confidence is sufficient, retrieved tools are re-ordered by a small LLM call for improved selection accuracy. Controlled by `MASC_KEEPER_LLM_RERANK` env var (disabled by default). Uses OAS `Tool_selector.default_rerank_fn` via global Eio context. Closes #5282, #5283.
+
+## [2.243.0] - 2026-04-05
+
+### Changed
+- **OAS pin** -- bump agent_sdk dependency to >= 0.101.0.
+
 ## [2.243.0] - 2026-04-05
 
 ### Fixed
@@ -10,7 +20,6 @@
 ### Changed
 - **Tool presets** -- migrate korean_keywords to Tool_index aliases (#5295).
 - **BM25** -- use OAS Tool_index.confident, simplify hook (#5296).
-
 ## [2.242.0] - 2026-04-05
 
 ### Fixed

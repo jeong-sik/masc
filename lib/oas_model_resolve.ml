@@ -1,9 +1,9 @@
 (** OAS model label resolution — resolve model labels to max_context and
     API key availability via OAS Cascade_config and Provider_registry.
 
-    Context resolution delegates to OAS {!Cascade_config.resolve_label_context}
+    Context resolution delegates to OAS {!Llm_provider.Cascade_config.resolve_label_context}
     which uses the same routing logic as cascade execution.
-    API key availability is checked via {!Provider_registry}.
+    API key availability is checked via {!Llm_provider.Provider_registry}.
     MASC does NOT guess routing — OAS owns resolution end-to-end.
 
     @since 2.135.0 — inference-to-oas migration (Phase 1) *)
@@ -62,15 +62,18 @@ let refresh_local_discovery_if_possible ?sw ?net (labels : string list) : bool =
     | _ -> false
 
 (** Resolve max_context for a model label.
-    Delegates routing to OAS {!Cascade_config.resolve_label_context} —
+    Delegates routing to OAS {!Llm_provider.Cascade_config.resolve_label_context} —
     MASC does not guess which endpoint serves the request.
 
     Resolution chain:
-    1. OAS Cascade_config.resolve_label_context — endpoint-specific context
-       (local providers: per-slot context from /props discovery)
-    2. OAS Provider_registry static entry — entry.max_context
-       (cloud providers or when endpoint discovery has no result)
-    3. Final fallback: 128_000 *)
+    1. OAS {!Llm_provider.Cascade_config.resolve_label_context}. Any intermediate OAS
+       fallbacks happen inside that function (for example, endpoint-specific
+       discovered context, per-slot /props results for local providers, or
+       broader discovered maxima used by the cascade resolver).
+    2. If {!Llm_provider.Cascade_config.resolve_label_context} returns [None], this
+       function falls back to the static OAS {!Llm_provider.Provider_registry} entry's
+       [max_context].
+    3. Final fallback: [128_000]. *)
 let max_context_of_label (label : string) : int =
   (* OAS owns routing resolution — we don't guess *)
   match Llm_provider.Cascade_config.resolve_label_context label with

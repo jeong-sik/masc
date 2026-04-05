@@ -121,9 +121,17 @@ let handle_keeper_status ctx args : tool_result =
                | Some idx when idx > 0 ->
                  String.sub label 0 idx |> String.trim |> String.lowercase_ascii
                | _ ->
-                 Llm_provider.Provider_config.(match cfg.kind with
+                 let base = Llm_provider.Provider_config.(match cfg.kind with
                    | Anthropic -> "claude" | OpenAI_compat -> "openai"
                    | Gemini -> "gemini" | Glm -> "glm" | Claude_code -> "claude_code")
+                 in
+                 let is_loopback url =
+                   match Uri.host (Uri.of_string url) with
+                   | Some "localhost" | Some "127.0.0.1" -> true
+                   | _ -> false
+                 in
+                 if base = "openai" && is_loopback cfg.base_url
+                 then "llama" else base
              in
              Some (`Assoc [
                ("provider", `String provider_name);

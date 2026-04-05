@@ -413,8 +413,11 @@ let run
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
+    let bt = Printexc.get_backtrace () in
     (try Oas.Agent.close agent with close_exn ->
       Log.Misc.warn "agent close failed during cleanup: %s" (Printexc.to_string close_exn));
+    Log.Misc.error "oas_worker %s: execution exception: %s\nBacktrace: %s"
+      config.name (Printexc.to_string exn) bt;
     Error (Printf.sprintf "Agent execution exception: %s" (Printexc.to_string exn)))
 
 (* ================================================================ *)

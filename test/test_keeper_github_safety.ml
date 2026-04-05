@@ -6,7 +6,9 @@
     3. Destructive operations (repo delete, gist delete) are blocked
     4. Shell metacharacters are rejected
     5. Destructive mutations (pr merge, pr close, etc.) are detected
-    6. Low-risk writes (pr create, pr comment, etc.) are not flagged *)
+    6. Low-risk writes (pr create, pr comment, etc.) are not flagged
+    7. gh api bypass via POST/PATCH/PUT to destructive endpoints is detected
+    8. Newly allowed commands (workflow, project, cache, ruleset) pass *)
 
 let validate = Masc_mcp.Worker_dev_tools.validate_gh_command
 
@@ -39,6 +41,12 @@ let test_allowed_read_commands () =
       "label list";
       "status";
       "api repos/owner/repo/pulls/123/comments";
+      "workflow list";
+      "workflow view deploy.yml";
+      "project list";
+      "project view 1";
+      "cache list";
+      "ruleset list";
     ]
   in
   List.iter
@@ -62,6 +70,7 @@ let test_allowed_write_commands () =
       "issue reopen 456";
       "gist create file.txt";
       "gist edit abc123";
+      "workflow run deploy.yml";
     ]
   in
   List.iter
@@ -98,6 +107,7 @@ let test_blocked_destructive_operations () =
       "gist delete abc123";
       "Repo Delete owner/repo";
       "GIST DELETE abc123";
+      "workflow disable deploy.yml";
     ]
   in
   List.iter
@@ -156,6 +166,42 @@ let test_destructive_ops_detected () =
         true (is_destructive cmd))
     destructive
 
+let test_api_bypass_detected () =
+  let api_destructive =
+    [
+      "api -X POST /repos/o/r/pulls/1/merge";
+      "api -X PUT /repos/o/r/pulls/1/merge";
+      "api -X PATCH /repos/o/r/pulls/1 -f state=closed";
+      "api --method POST /repos/o/r/merges -f base=main";
+      "api -X POST /repos/o/r/merges -f base=main -f head=feat";
+      "api -X PATCH /repos/o/r/issues/1 -f state=closed";
+    ]
+  in
+  List.iter
+    (fun cmd ->
+      Alcotest.(check bool)
+        (Printf.sprintf "api bypass detected: gh %s" cmd)
+        true (is_destructive cmd))
+    api_destructive
+
+let test_api_safe_methods_not_flagged () =
+  let safe_api =
+    [
+      "api repos/owner/repo/pulls";
+      "api -X GET repos/owner/repo";
+      "api repos/owner/repo/pulls/123/comments";
+      "api -X POST /repos/o/r/issues/1/comments -f body=ok";
+      "api -X POST /repos/o/r/pulls -f title=fix -f head=feat -f base=main";
+      "api -X PATCH /repos/o/r/pulls/1 -f title=newtitle";
+    ]
+  in
+  List.iter
+    (fun cmd ->
+      Alcotest.(check bool)
+        (Printf.sprintf "api safe: gh %s" cmd)
+        false (is_destructive cmd))
+    safe_api
+
 let test_non_destructive_ops () =
   let safe =
     [
@@ -173,6 +219,11 @@ let test_non_destructive_ops () =
       "api -X GET repos/owner/repo";
       "search issues 'query'";
       "status";
+      "workflow list";
+      "workflow view deploy.yml";
+      "project list";
+      "cache list";
+      "ruleset list";
     ]
   in
   List.iter
@@ -205,6 +256,10 @@ let () =
         [
           Alcotest.test_case "destructive mutations detected" `Quick
             test_destructive_ops_detected;
+          Alcotest.test_case "api bypass via POST/PATCH/PUT detected" `Quick
+            test_api_bypass_detected;
+          Alcotest.test_case "safe api methods not flagged" `Quick
+            test_api_safe_methods_not_flagged;
           Alcotest.test_case "safe ops not flagged" `Quick
             test_non_destructive_ops;
         ] );

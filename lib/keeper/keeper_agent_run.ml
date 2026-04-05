@@ -276,6 +276,7 @@ let run_turn
     ~(cascade_name : string)
     ~(generation : int)
     ?(max_turns : int = 50)
+    ?(max_idle_turns : int = 3)
     ?(history_user_source = "direct_user")
     ?(history_assistant_source = "direct_assistant")
     ?guardrails
@@ -908,7 +909,7 @@ let run_turn
           ~memory
           ~tool_retry_policy:Oas.Tool_retry_policy.default_internal
           ~max_turns
-          ~max_idle_turns:3
+          ~max_idle_turns
           ~temperature
           ~max_tokens
           ?max_cost_usd

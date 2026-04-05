@@ -884,10 +884,15 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
       let run_result, latency_ms =
         Keeper_exec_context.timed (fun () ->
           let do_run ~run_meta ~max_context ~run_generation ~is_retry =
+            let max_idle_turns =
+              match channel with
+              | Keeper_world_observation.Reactive -> 5
+              | Keeper_world_observation.Scheduled_autonomous -> 3
+            in
             Keeper_agent_run.run_turn ~config ~meta:run_meta ~base_dir
               ~max_context ~build_turn_prompt
               ~user_message ~cascade_name:"keeper_unified"
-              ~generation:run_generation ~max_turns
+              ~generation:run_generation ~max_turns ~max_idle_turns
               ~history_user_source:"world_state_prompt"
               ~history_assistant_source:"internal_assistant"
               ~temperature ~max_tokens

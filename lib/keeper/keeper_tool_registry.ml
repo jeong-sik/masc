@@ -80,38 +80,12 @@ let injected_masc_tool_names () =
 
 (* ── keeper_tool_search schema ───────────────────────────────── *)
 
+(** Schema defined in Tool_shard.keeper_model_tools (standalone_keeper_schemas).
+    Extracted by name to avoid duplication. *)
 let keeper_tool_search_schema : Types.tool_schema =
-  {
-    name = "keeper_tool_search";
-    description =
-      "Search for additional tools by describing what you need. \
-       Returns tool names, descriptions, and usage guidance. \
-       Use when your current tools are insufficient for the task.";
-    input_schema =
-      `Assoc
-        [
-          ("type", `String "object");
-          ( "properties",
-            `Assoc
-              [
-                ( "query",
-                  `Assoc
-                    [
-                      ("type", `String "string");
-                      ( "description",
-                        `String
-                          "Natural language description of what you need to \
-                           do, e.g. 'create a git worktree' or 'manage \
-                           auth tokens'" );
-                    ] );
-                ( "max_results",
-                  `Assoc
-                    [
-                      ("type", `String "integer");
-                      ( "description",
-                        `String "Maximum results (default 5, max 10)" );
-                    ] );
-              ] );
-          ("required", `List [ `String "query" ]);
-        ];
-  }
+  match List.find_opt
+    (fun (s : Types.tool_schema) -> s.name = "keeper_tool_search")
+    Tool_shard.keeper_model_tools
+  with
+  | Some s -> s
+  | None -> failwith "keeper_tool_search schema missing from Tool_shard.keeper_model_tools"

@@ -639,9 +639,37 @@ let list_all_shards () : (string * bool * int) list =
     (name, shard.removable, List.length shard.tools) :: acc
   ) all_shards []
 
-(** Default keeper tool set from [default_shard_names]. *)
+(** Default keeper tool set from [default_shard_names]
+    plus standalone keeper schemas (keeper_tool_search). *)
 let keeper_model_tools : Types.tool_schema list =
-  tools_of_shards default_shard_names
+  let shard_tools = tools_of_shards default_shard_names in
+  let standalone_keeper_schemas : Types.tool_schema list = [
+    {
+      name = "keeper_tool_search";
+      description =
+        "Search for additional tools by describing what you need. \
+         Returns tool names, descriptions, and usage guidance. \
+         Use when your current tools are insufficient for the task.";
+      input_schema =
+        `Assoc [
+          ("type", `String "object");
+          ("properties", `Assoc [
+            ("query", `Assoc [
+              ("type", `String "string");
+              ("description", `String
+                "Natural language description of what you need to \
+                 do, e.g. 'create a git worktree' or 'manage auth tokens'");
+            ]);
+            ("max_results", `Assoc [
+              ("type", `String "integer");
+              ("description", `String "Maximum results (default 5, max 10)");
+            ]);
+          ]);
+          ("required", `List [ `String "query" ]);
+        ];
+    };
+  ] in
+  shard_tools @ standalone_keeper_schemas
 
 (** {1 MCP Schemas} *)
 

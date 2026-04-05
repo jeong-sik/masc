@@ -1,8 +1,9 @@
 (** OAS model label resolution — resolve model labels to max_context and
-    API key availability using OAS Provider_registry directly.
+    API key availability via OAS Cascade_config and Provider_registry.
 
     Context resolution delegates to OAS {!Cascade_config.resolve_label_context}
     which uses the same routing logic as cascade execution.
+    API key availability is checked via {!Provider_registry}.
     MASC does NOT guess routing — OAS owns resolution end-to-end.
 
     @since 2.135.0 — inference-to-oas migration (Phase 1) *)
@@ -65,9 +66,11 @@ let refresh_local_discovery_if_possible ?sw ?net (labels : string list) : bool =
     MASC does not guess which endpoint serves the request.
 
     Resolution chain:
-    - OAS resolve_label_context: local providers → endpoint per-slot context
-    - OAS static registry fallback: cloud providers → entry.max_context
-    - Final fallback: 128_000 *)
+    1. OAS Cascade_config.resolve_label_context — endpoint-specific context
+       (local providers: per-slot context from /props discovery)
+    2. OAS Provider_registry static entry — entry.max_context
+       (cloud providers or when endpoint discovery has no result)
+    3. Final fallback: 128_000 *)
 let max_context_of_label (label : string) : int =
   (* OAS owns routing resolution — we don't guess *)
   match Llm_provider.Cascade_config.resolve_label_context label with

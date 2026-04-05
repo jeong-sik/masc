@@ -221,7 +221,20 @@ export function KeeperTrajectoryTimeline({ keeperName, keeper }: { keeperName: s
   const state = getState(keeperName)
 
   if (state.loading) {
-    return html`<div class="text-xs text-[var(--text-muted)] py-4 text-center">궤적 로딩 중...</div>`
+    return html`
+      <div class="flex flex-col gap-2 py-3" style=${{ animation: 'loadingPulse 1.5s ease-in-out infinite' }}>
+        ${[1, 2, 3].map(i => html`
+          <div key=${i} class="flex items-center gap-3 py-2.5 px-3 rounded-lg">
+            <div class="size-7 rounded-md bg-[var(--white-8)]"></div>
+            <div class="flex-1 flex flex-col gap-1.5">
+              <div class="h-3 w-32 rounded bg-[var(--white-8)]"></div>
+              <div class="h-2.5 w-48 rounded bg-[var(--white-5)]"></div>
+            </div>
+            <div class="h-3 w-12 rounded bg-[var(--white-5)]"></div>
+          </div>
+        `)}
+      </div>
+    `
   }
 
   if (state.error) {
@@ -235,6 +248,8 @@ export function KeeperTrajectoryTimeline({ keeperName, keeper }: { keeperName: s
 
   const turnGroups = groupByTurn(data.entries)
   const turns = Array.from(turnGroups.entries()).sort(([a], [b]) => b - a)
+  const allSummary = summarizeEntries(data.entries)
+  const distinctTools = new Set(data.entries.map(e => e.tool_name)).size
   const lastHb = keeperHeartbeats.value.get(keeperName)
   const isLive = lastHb != null && (Date.now() - lastHb) < HEARTBEAT_STALE_MS
   const isOnline = keeper && !['offline', 'inactive', 'dead', 'crashed'].includes(keeper.status)
@@ -262,6 +277,17 @@ export function KeeperTrajectoryTimeline({ keeperName, keeper }: { keeperName: s
         <span class="text-[10px] text-[var(--text-dim)]">
           ${data.showing}/${data.total_entries} entries
         </span>
+      </div>
+
+      ${'' /* Summary stats bar */}
+      <div class="flex gap-3 flex-wrap mb-2 px-1">
+        <span class="text-[10px] py-0.5 px-2 rounded-full bg-[var(--white-4)] border border-[var(--white-8)] text-[var(--text-muted)]">${turns.length} turns</span>
+        <span class="text-[10px] py-0.5 px-2 rounded-full bg-[var(--white-4)] border border-[var(--white-8)] text-[var(--text-muted)]">${data.entries.length} calls</span>
+        <span class="text-[10px] py-0.5 px-2 rounded-full bg-[var(--white-4)] border border-[var(--white-8)] text-[var(--text-muted)]">${distinctTools} tools</span>
+        <span class="text-[10px] py-0.5 px-2 rounded-full bg-[var(--white-4)] border border-[var(--white-8)] font-mono ${durationColor(allSummary.totalMs)}">${formatDuration(allSummary.totalMs)}</span>
+        ${allSummary.errorCount > 0
+          ? html`<span class="text-[10px] py-0.5 px-2 rounded-full bg-[var(--bad-10)] border border-[rgba(239,68,68,0.2)] text-[var(--bad)]">${allSummary.errorCount} err</span>`
+          : html`<span class="text-[10px] py-0.5 px-2 rounded-full bg-[rgba(52,211,153,0.08)] border border-[rgba(52,211,153,0.15)] text-[var(--ok)]">all ok</span>`}
       </div>
 
       ${'' /* Live processing indicator */}

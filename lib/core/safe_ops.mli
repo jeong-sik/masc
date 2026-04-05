@@ -6,6 +6,10 @@
 
 (** {1 Exception-Safe Wrappers} *)
 
+val protect : default:'a -> (unit -> 'a) -> 'a
+(** Run [f ()], re-raising [Eio.Cancel.Cancelled] with its original backtrace
+    and returning [default] for any other exception. *)
+
 val try_with_log : string -> (unit -> 'a) -> 'a option
 (** Execute a function, logging exceptions and returning None on failure. *)
 

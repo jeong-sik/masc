@@ -41,7 +41,8 @@ let test_workspace_empty_paths_computed_default () =
       ~name:"sangsu" () in
   let effective = KAP.effective_allowed_paths ~meta in
   check (list string) "workspace + [] = playground + computed default"
-    [".masc/playground/sangsu/"; ".masc/keepers/sangsu/"; ".masc/traces/"] effective
+    [".masc/playground/sangsu/"; ".masc/keepers/sangsu/"; ".masc/traces/";
+     "planning/"; "docs/"] effective
 
 let test_workspace_explicit_paths () =
   let meta = make_meta ~execution_scope:"workspace"
@@ -92,7 +93,8 @@ let test_computed_default_uses_keeper_name () =
   let effective = KAP.effective_allowed_paths ~meta in
   check (list string) "name embedded in path"
     [".masc/playground/cdal-formalist/";
-     ".masc/keepers/cdal-formalist/"; ".masc/traces/"] effective
+     ".masc/keepers/cdal-formalist/"; ".masc/traces/";
+     "planning/"; "docs/"] effective
 
 (* ── playground path ── *)
 

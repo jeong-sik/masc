@@ -26,28 +26,28 @@ interface KindStyle {
 const KIND_STYLES: Record<TraceEventKind, KindStyle> = {
   broadcast:  { icon: 'M', color: 'text-[#60a5fa]', label: '브로드캐스트' },
   task:       { icon: 'T', color: 'text-[var(--accent)]', label: '태스크' },
-  tool_call:  { icon: '>', color: 'text-[#4ade80]', label: '도구 호출' },
+  tool_call:  { icon: '>', color: 'text-[var(--ok)]', label: '도구 호출' },
   heartbeat:  { icon: 'H', color: 'text-[#94a3b8]', label: '하트비트' },
-  lifecycle:  { icon: 'L', color: 'text-[#fbbf24]', label: '생명주기' },
+  lifecycle:  { icon: 'L', color: 'text-[var(--warn)]', label: '생명주기' },
 }
 
 // Tool-specific icon/color overrides (same categories as keeper-trajectory-timeline)
 const TOOL_CATEGORIES: Array<{ match: (n: string) => boolean; icon: string; color: string }> = [
-  { match: n => n.includes('bash'),                          icon: '>', color: 'text-[#4ade80]' },
-  { match: n => n.includes('edit') || n.includes('fs'),      icon: 'E', color: 'text-[#fbbf24]' },
-  { match: n => n.includes('board') || n.includes('social'), icon: 'B', color: 'text-[#a78bfa]' },
+  { match: n => n.includes('bash'),                          icon: '>', color: 'text-[var(--ok)]' },
+  { match: n => n.includes('edit') || n.includes('fs'),      icon: 'E', color: 'text-[var(--warn)]' },
+  { match: n => n.includes('board') || n.includes('social'), icon: 'B', color: 'text-[var(--purple)]' },
   { match: n => n.includes('github'),                        icon: 'G', color: 'text-[var(--accent)]' },
   { match: n => n.includes('search') || n.includes('read'),  icon: 'R', color: 'text-[#60a5fa]' },
 ]
 
 function toolStyle(name: string): { icon: string; color: string } {
-  return TOOL_CATEGORIES.find(c => c.match(name)) ?? { icon: '>', color: 'text-[#4ade80]' }
+  return TOOL_CATEGORIES.find(c => c.match(name)) ?? { icon: '>', color: 'text-[var(--ok)]' }
 }
 
 function durationColor(ms: number): string {
-  if (ms < 500) return 'text-[#4ade80]'
-  if (ms < 2000) return 'text-[#fbbf24]'
-  return 'text-[#ef4444]'
+  if (ms < 500) return 'text-[var(--ok)]'
+  if (ms < 2000) return 'text-[var(--warn)]'
+  return 'text-[var(--bad)]'
 }
 
 // ── Formatters ─────────────────────────────────────────
@@ -103,7 +103,7 @@ function ToolCallDetail({ event }: { event: UnifiedTraceEvent }) {
         </div>
       ` : null}
       ${gateRejected ? html`
-        <div class="text-[10px] px-2 py-1 rounded bg-[var(--bad-10)] text-[#ef4444] inline-block">
+        <div class="text-[10px] px-2 py-1 rounded bg-[var(--bad-10)] text-[var(--bad)] inline-block">
           거부: ${event.gate?.reason ?? ''}
         </div>
       ` : null}
@@ -176,8 +176,8 @@ export function SessionTraceEntry({ event }: { event: UnifiedTraceEvent }) {
               ${taskIcon(String(event.detail.type))}
             </span>
           ` : null}
-          ${event.error ? html`<span class="text-[10px] px-1.5 py-0.5 rounded bg-[var(--bad-10)] text-[#ef4444]">오류</span>` : null}
-          ${gateRejected ? html`<span class="text-[10px] px-1.5 py-0.5 rounded bg-[var(--bad-10)] text-[#ef4444]">거부</span>` : null}
+          ${event.error ? html`<span class="text-[10px] px-1.5 py-0.5 rounded bg-[var(--bad-10)] text-[var(--bad)]">오류</span>` : null}
+          ${gateRejected ? html`<span class="text-[10px] px-1.5 py-0.5 rounded bg-[var(--bad-10)] text-[var(--bad)]">거부</span>` : null}
         </div>
         <div class="mt-0.5 text-[11px] text-[var(--text-muted)] font-mono truncate max-w-full" title=${event.summary}>
           ${summaryText}

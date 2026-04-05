@@ -30,8 +30,8 @@ const REPO_ISSUES_BASE = 'https://github.com/jeong-sik/masc-mcp/issues'
 
 function priorityToneClass(priority: number): string {
   switch (priority) {
-    case 1: return 'border-l-[#fb7185] bg-[#fb7185]/10 text-[#fecdd3]'
-    case 2: return 'border-l-[#fbbf24] bg-[#f59e0b]/10 text-[#fde68a]'
+    case 1: return 'border-l-[#fb7185] bg-[var(--bad)]/10 text-[#fecdd3]'
+    case 2: return 'border-l-[#fbbf24] bg-[var(--warn)]/10 text-[#fde68a]'
     case 3: return 'border-l-[#60a5fa] bg-[#60a5fa]/10 text-[#bfdbfe]'
     default: return 'border-l-[rgba(148,163,184,0.45)] bg-white/5 text-text-muted'
   }
@@ -100,7 +100,7 @@ export function KanbanCard({ task }: { task: Task }) {
         </div>
         <button
           type="button"
-          class="rounded-lg border border-[var(--bad-30)] bg-[var(--bad-10)] px-2 py-1 text-[10px] font-semibold text-[#f87171] transition-colors hover:bg-[rgba(239,68,68,0.16)] disabled:opacity-50 disabled:cursor-not-allowed"
+          class="rounded-lg border border-[var(--bad-30)] bg-[var(--bad-10)] px-2 py-1 text-[10px] font-semibold text-[var(--bad-light)] transition-colors hover:bg-[rgba(239,68,68,0.16)] disabled:opacity-50 disabled:cursor-not-allowed"
           onClick=${handleDelete}
           disabled=${isDeleting}
         >
@@ -133,7 +133,7 @@ export function KanbanCard({ task }: { task: Task }) {
 
       <div class="flex flex-wrap items-center gap-2 text-[11px] text-text-muted">
         ${task.created_at ? html`<span class="rounded-md border border-card-border/70 bg-white/4 px-2 py-1"><${TimeAgo} timestamp=${task.created_at} /></span>` : null}
-        ${task.assignee ? html`<span class="rounded-md border border-accent/20 bg-accent/10 px-2 py-1 text-accent">@${task.assignee}</span>` : null}
+        ${task.assignee ? html`<span class="rounded-md border border-accent/20 bg-[var(--accent-10)] px-2 py-1 text-accent">@${task.assignee}</span>` : null}
         <a
           href=${link.href}
           target="_blank"

@@ -328,15 +328,19 @@ let run_cmd host port base_path =
         | Some signal_name ->
             let shutdown_cfg = Masc_mcp.Shutdown.config_from_env () in
             let force_timeout = shutdown_cfg.force_timeout_s in
+            let t_shutdown_start = Unix.gettimeofday () in
             Log.Server.info
               "[MASC] Received %s, shutting down gracefully (timeout=%.0fs)..."
               signal_name force_timeout;
             Eio.Fiber.fork_daemon ~sw (fun () ->
                 Eio.Time.sleep clock force_timeout;
+                let elapsed = Unix.gettimeofday () -. t_shutdown_start in
                 Log.Server.error
-                  "[MASC] Graceful shutdown timed out after %.0fs, forcing exit."
-                  force_timeout;
+                  "[MASC] Graceful shutdown timed out after %.1fs (limit=%.0fs), forcing exit."
+                  elapsed force_timeout;
                 exit 1);
+            (* Phase 1: Notify SSE clients *)
+            let t_phase = Unix.gettimeofday () in
             let shutdown_data =
               Printf.sprintf
                 {|{"jsonrpc":"2.0","method":"notifications/shutdown","params":{"reason":"%s","message":"Server is shutting down, please reconnect"}}|}
@@ -344,11 +348,16 @@ let run_cmd host port base_path =
             in
             Sse.broadcast (Yojson.Safe.from_string shutdown_data);
             Log.Server.info
-              "[MASC] Sent shutdown notification to %d SSE clients"
-              (Sse.client_count ());
+              "[Shutdown] Phase 1/4 NOTIFY: sent to %d SSE clients (%.2fs) [active conn: %d, ws: %d]"
+              (Sse.client_count ())
+              (Unix.gettimeofday () -. t_phase)
+              (Masc_mcp.Server_mcp_transport_http_sse.active_session_count ())
+              (Masc_mcp.Server_mcp_transport_ws.session_count ());
+
             Eio.Time.sleep clock shutdown_cfg.notify_delay_s;
             (* Phase 2: Run shutdown hooks with cleanup timeout *)
-            Log.Server.info "[Shutdown] Phase: hooks (timeout=%.1fs)"
+            let t_phase = Unix.gettimeofday () in
+            Log.Server.info "[Shutdown] Phase 2/4 HOOKS: starting (timeout=%.1fs)"
               shutdown_cfg.cleanup_timeout_s;
             (try
               Eio.Time.with_timeout_exn clock shutdown_cfg.cleanup_timeout_s
@@ -356,40 +365,66 @@ let run_cmd host port base_path =
             with
             | Eio.Time.Timeout ->
                 Log.Server.warn
-                  "[Shutdown] hooks timeout after %.1fs, proceeding"
+                  "[Shutdown] Phase 2/4 HOOKS: timeout after %.1fs, proceeding (total=%.1fs)"
                   shutdown_cfg.cleanup_timeout_s
+                  (Unix.gettimeofday () -. t_shutdown_start)
             | Eio.Cancel.Cancelled _ as e -> raise e
             | exn ->
                 Log.Server.warn
-                  "[Shutdown] hooks failed, proceeding: %s"
+                  "[Shutdown] Phase 2/4 HOOKS: failed after %.2fs: %s"
+                  (Unix.gettimeofday () -. t_phase)
                   (Printexc.to_string exn));
+            let now = Unix.gettimeofday () in
+            Log.Server.info "[Shutdown] Phase 2/4 HOOKS: done (%.2fs, total=%.1fs) [active conn: %d, ws: %d]"
+              (now -. t_phase)
+              (now -. t_shutdown_start)
+              (Masc_mcp.Server_mcp_transport_http_sse.active_session_count ())
+              (Masc_mcp.Server_mcp_transport_ws.session_count ());
             (* Phase 3: Board flush with 2s timeout *)
-            Log.Server.info "[Shutdown] Phase: board flush (timeout=2.0s)";
+            let t_phase = Unix.gettimeofday () in
+            Log.Server.info "[Shutdown] Phase 3/4 BOARD: flush starting (timeout=2.0s)";
             (try
               Eio.Time.with_timeout_exn clock 2.0
                 (fun () -> Board_dispatch.flush ())
             with
             | Eio.Time.Timeout ->
-                Log.Server.warn "[Shutdown] Board flush timeout, skipping"
+                Log.Server.warn
+                  "[Shutdown] Phase 3/4 BOARD: timeout after 2.0s (total=%.1fs)"
+                  (Unix.gettimeofday () -. t_shutdown_start)
             | Eio.Cancel.Cancelled _ as e -> raise e
             | exn ->
                 Log.Server.warn
-                  "[Shutdown] Board flush skipped: %s"
+                  "[Shutdown] Phase 3/4 BOARD: skipped after %.2fs: %s"
+                  (Unix.gettimeofday () -. t_phase)
                   (Printexc.to_string exn));
+            let now = Unix.gettimeofday () in
+            Log.Server.info "[Shutdown] Phase 3/4 BOARD: done (%.2fs, total=%.1fs) [active conn: %d, ws: %d]"
+              (now -. t_phase)
+              (now -. t_shutdown_start)
+              (Masc_mcp.Server_mcp_transport_http_sse.active_session_count ())
+              (Masc_mcp.Server_mcp_transport_ws.session_count ());
+
             (* Phase 4: Return normally — Eio.Fiber.first will cancel
                run_server cleanly via Eio.Cancel.Cancelled. *)
-            Log.Server.info "[Shutdown] Phase: server cancel";
+            Log.Server.info
+              "[Shutdown] Phase 4/4 CANCEL: server cancel (total=%.1fs) [active conn: %d, ws: %d]"
+              (Unix.gettimeofday () -. t_shutdown_start)
+              (Masc_mcp.Server_mcp_transport_http_sse.active_session_count ())
+              (Masc_mcp.Server_mcp_transport_ws.session_count ());
             ()
-      in
-      Eio.Fiber.first
-        (fun () -> run_server ~sw ~env ~host ~port ~base_path)
-        await_shutdown_signal;
-      (* Server stopped; close SSE connections after server is down. *)
-      (try close_all_sse_connections ()
-       with
-       | Eio.Cancel.Cancelled _ as e -> raise e
-       | _ -> ());
-      Log.Server.info "MASC MCP: Server stopped, waiting for background fibers..."
+            in
+            Eio.Fiber.first
+            (fun () -> run_server ~sw ~env ~host ~port ~base_path)
+            await_shutdown_signal;
+            (* Server stopped; close SSE connections after server is down. *)
+            (try close_all_sse_connections ()
+            with
+            | Eio.Cancel.Cancelled _ as e -> raise e
+            | _ -> ());
+            Log.Server.info "MASC MCP: Server stopped, waiting for background fibers... [active conn: %d, ws: %d]"
+            (Masc_mcp.Server_mcp_transport_http_sse.active_session_count ())
+            (Masc_mcp.Server_mcp_transport_ws.session_count ())
+
     with
     | Eio.Cancel.Cancelled _ ->
         Log.Server.info "MASC MCP: Server cancelled, waiting for background fibers..."

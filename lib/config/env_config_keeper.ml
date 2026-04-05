@@ -5,7 +5,7 @@ open Env_config_core
 module KeeperBootstrap = struct
   (** Enable startup keeper bootstrap scan *)
   let enabled =
-    get_bool ~default:true "MASC_KEEPER_BOOTSTRAP_ENABLED"
+    Feature_flag_registry.get_bool "MASC_KEEPER_BOOTSTRAP_ENABLED"
 
   (** Keeper considered stale when last turn exceeds this threshold (seconds) *)
   let stale_turn_seconds =
@@ -37,7 +37,7 @@ end
 module KeeperAlert = struct
   (** Master switch for keeper interesting alert detection/fanout *)
   let enabled =
-    get_bool ~default:true "MASC_KEEPER_ALERT_ENABLED"
+    Feature_flag_registry.get_bool "MASC_KEEPER_ALERT_ENABLED"
 
   (** Minimum score required to trigger alert fanout *)
   let min_score =
@@ -57,7 +57,7 @@ module KeeperAlert = struct
 
   (** Board fanout configuration *)
   let board_enabled =
-    get_bool ~default:true "MASC_KEEPER_ALERT_BOARD_ENABLED"
+    Feature_flag_registry.get_bool "MASC_KEEPER_ALERT_BOARD_ENABLED"
 
   let board_author =
     get_string ~default:"keeper-alert-bot" "MASC_KEEPER_ALERT_BOARD_AUTHOR"
@@ -70,21 +70,21 @@ module KeeperAlert = struct
 
   (** Slack fanout configuration *)
   let slack_enabled =
-    get_bool ~default:true "MASC_KEEPER_ALERT_SLACK_ENABLED"
+    Feature_flag_registry.get_bool "MASC_KEEPER_ALERT_SLACK_ENABLED"
 
   let slack_webhook_url =
     get_string ~default:"" "MASC_KEEPER_ALERT_SLACK_WEBHOOK_URL"
 
   (** Slack DM fanout configuration *)
   let slack_dm_enabled =
-    get_bool ~default:false "MASC_KEEPER_ALERT_SLACK_DM_ENABLED"
+    Feature_flag_registry.get_bool "MASC_KEEPER_ALERT_SLACK_DM_ENABLED"
 
   let slack_dm_user_id =
     get_string ~default:"" "MASC_KEEPER_ALERT_SLACK_DM_USER_ID"
 
   (** GitHub issue fanout configuration *)
   let github_enabled =
-    get_bool ~default:false "MASC_KEEPER_ALERT_GITHUB_ENABLED"
+    Feature_flag_registry.get_bool "MASC_KEEPER_ALERT_GITHUB_ENABLED"
 
   let github_repo =
     get_string ~default:"" "MASC_KEEPER_ALERT_GITHUB_REPO"
@@ -138,7 +138,7 @@ end
 
 module KeeperRuntime = struct
   (** Enable keeper debug logging. Default: false. *)
-  let debug = get_bool ~default:false "MASC_KEEPER_DEBUG"
+  let debug = Feature_flag_registry.get_bool "MASC_KEEPER_DEBUG"
 
   (** Daily budget for keeper deliberation (USD). Default: 0.10.
       Runtime-readable (tests change this via putenv). *)
@@ -166,11 +166,11 @@ let keepalive_interval_sec_ =
 (** {1 Work-as-Heartbeat Configuration (Phase 1)} *)
 
 module WorkAsHeartbeat = struct
-  (** Master switch. When true, successful Room.heartbeat_in_room after a
+  (** Master switch. When true, successful Room.heartbeat after a
       unified turn counts as presence proof, allowing the next cycle to skip
       the full ensure_keeper_room_presence call. *)
   let enabled =
-    get_bool ~default:true "MASC_KEEPER_WORK_AS_HEARTBEAT"
+    Feature_flag_registry.get_bool "MASC_KEEPER_WORK_AS_HEARTBEAT"
 
   (** Maximum seconds since last successful room heartbeat before presence
       sync is required again. Floor = keepalive interval (dynamic). *)
@@ -186,7 +186,7 @@ module SmartHeartbeat = struct
       When true, Heartbeat_smart.should_emit gates presence/snapshot/board/turn
       blocks, skipping cycles when the keeper is busy or deeply idle. *)
   let enabled =
-    get_bool ~default:true "MASC_KEEPER_SMART_HEARTBEAT"
+    Feature_flag_registry.get_bool "MASC_KEEPER_SMART_HEARTBEAT"
 end
 
 (** {1 Keeper Keepalive Loop Constants} *)

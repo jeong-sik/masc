@@ -91,7 +91,8 @@
         test_observability_provider_contracts
         test_worker_oas_scope_gate
         test_run_local_script
-        test_tool_prefilter)
+        test_tool_prefilter
+        test_keeper_state_machine)
  (modules test_room test_room_state_recovery test_types test_auth test_audit_log test_http_negotiation
           test_sse test_cancellation test_graphql_api
           test_graphql_endpoint
@@ -150,7 +151,8 @@
           test_observability_provider_contracts
           test_worker_oas_scope_gate
           test_run_local_script
-          test_tool_prefilter)
+          test_tool_prefilter
+          test_keeper_state_machine)
  (libraries masc_test_deps))
 
 ; ============================================================
@@ -324,7 +326,8 @@
         test_cdal_friction_projection
         test_task_sandbox
         test_governance_yojson_roundtrip
-        test_eval_calibration)
+        test_eval_calibration
+        test_goal_janitor)
  (modules
         test_runtime_params
         test_config_dir_resolver
@@ -465,7 +468,8 @@
         test_cdal_friction_projection
         test_task_sandbox
         test_governance_yojson_roundtrip
-        test_eval_calibration)
+        test_eval_calibration
+        test_goal_janitor)
  (libraries masc_test_deps))
 
 ; ============================================================

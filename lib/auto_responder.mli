@@ -10,8 +10,7 @@ val extract_nickname : string -> string option
 val chain_limit : int
 val chain_window_sec : float
 
-(** Mention helpers (re-exported from Mention) *)
-val spawnable_agents : string list
+(** Mention helpers *)
 val agent_type_of_mention : string -> string
 val is_spawnable : string -> bool
 

@@ -16,32 +16,31 @@ val update_priority : config -> task_id:string -> priority:int -> string
 
 (** {1 Raw Data Retrieval} *)
 
-(** Return raw task list for the current room (used by orchestrator). *)
+(** Return raw task list (used by orchestrator).
+    Requires initialization. *)
 val get_tasks_raw : config -> Types.task list
 
-(** Return raw task list for a specific room. *)
-val get_tasks_raw_in_room : config -> string -> Types.task list
+(** Like {!get_tasks_raw} but returns [[]] when not initialized. *)
+val get_tasks_safe : config -> Types.task list
 
-(** Return active agents for the current room. *)
+(** Return all agents including inactive (for orchestrator).
+    Requires initialization. *)
 val get_agents_raw : config -> Types.agent list
 
-(** Return active agents for a specific room. *)
-val get_agents_raw_in_room : config -> string -> Types.agent list
+(** Return active agents only.  Returns [[]] when MASC is not
+    initialized — safe for dashboard and display contexts. *)
+val get_active_agents : config -> Types.agent list
 
-(** Like {!get_agents_raw_in_room} but includes Inactive agents.
-    Useful for keeper backlog-triage enrollment where inactive agents
-    should still participate as a fallback. *)
-val get_all_agents_in_room : config -> string -> Types.agent list
+(** Like {!get_agents_raw} but returns [[]] when not initialized
+    instead of raising.  Includes inactive agents.
+    Useful for keeper backlog-triage enrollment. *)
+val get_all_agents : config -> Types.agent list
 
 (** Find claimed/in_progress tasks whose assignees are not active.
     Returns [(task, assignee)] pairs for orphaned tasks. *)
 val audit_orphan_tasks : config -> (Types.task * string) list
 
 (** {1 Agent Membership} *)
-
-(** Check if an agent has joined a specific room. *)
-val is_agent_joined_in_room :
-  config -> room_id:string -> agent_name:string -> bool
 
 (** Check if an agent has joined the current room. *)
 val is_agent_joined : config -> agent_name:string -> bool
@@ -52,15 +51,10 @@ val is_agent_joined : config -> agent_name:string -> bool
 val get_messages_raw :
   config -> since_seq:int -> limit:int -> Types.message list
 
-(** Return raw messages for a specific room. *)
-val get_messages_raw_in_room :
-  config -> room_id:string -> since_seq:int -> limit:int ->
-  Types.message list
-
-(** Return all raw messages for a specific room after [since_seq], ordered
+(** Return all raw messages after [since_seq], ordered
     from oldest unseen to newest unseen. *)
-val get_all_messages_raw_in_room :
-  config -> room_id:string -> since_seq:int -> Types.message list
+val get_all_messages_raw :
+  config -> since_seq:int -> Types.message list
 
 (** {1 Formatted Output} *)
 

@@ -48,7 +48,8 @@ let event_to_json (e : event) : Yojson.Safe.t =
 (* ================================================================ *)
 
 let store_path_ref : string option ref = ref None
-let mu = Eio.Mutex.create ()
+(* Stdlib.Mutex: record is non-yielding, callers may run outside Eio context *)
+let mu = Stdlib.Mutex.create ()
 let buffer : Yojson.Safe.t Queue.t = Queue.create ()
 let buffer_cap = 64
 
@@ -79,7 +80,7 @@ let do_flush () =
     end
 
 let init ~base_path =
-  Eio.Mutex.use_rw ~protect:true mu (fun () ->
+  Stdlib.Mutex.protect mu (fun () ->
     match !store_path_ref with
     | Some _ -> ()
     | None ->
@@ -88,14 +89,14 @@ let init ~base_path =
       store_path_ref := Some path)
 
 let record (e : event) =
-  Eio.Mutex.use_rw ~protect:true mu (fun () ->
+  Stdlib.Mutex.protect mu (fun () ->
     let json = event_to_json e in
     Queue.add json buffer;
     if Queue.length buffer >= buffer_cap then
       (try do_flush () with Exit -> ()))
 
 let flush () =
-  Eio.Mutex.use_rw ~protect:true mu (fun () ->
+  Stdlib.Mutex.protect mu (fun () ->
     try do_flush () with Exit -> ())
 
 let recent n =

@@ -51,15 +51,29 @@ let is_valid_branch_name s =
 (* Git Repository Utilities                     *)
 (* ============================================ *)
 
+(** Fast check for .git marker by walking parent directories.
+    Avoids spawning a subprocess when clearly not in a git repo. *)
+let has_git_marker path =
+  let rec walk dir =
+    let marker = Filename.concat dir ".git" in
+    if Sys.file_exists marker then true
+    else
+      let parent = Filename.dirname dir in
+      if String.equal parent dir then false else walk parent
+  in
+  try walk path with Sys_error _ -> false
+
 (** Get git root directory *)
 let git_root ~base_path =
-  run_argv_line ["git"; "-C"; base_path; "rev-parse"; "--show-toplevel"]
+  if not (has_git_marker base_path) then None
+  else run_argv_line ["git"; "-C"; base_path; "rev-parse"; "--show-toplevel"]
 
 (** Check if directory is a git repository *)
 let is_git_repo ~base_path =
-  match git_root ~base_path with
-  | Some _ -> true
-  | None -> false
+  has_git_marker base_path
+  && match git_root ~base_path with
+     | Some _ -> true
+     | None -> false
 
 let remote_branch_exists root branch =
   if not (is_valid_branch_name branch) then false

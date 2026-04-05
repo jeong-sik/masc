@@ -39,6 +39,8 @@ type config = {
   working_context : Yojson.Safe.t option;
   cache_system_prompt : bool;
   yield_on_tool : bool;
+  max_input_tokens : int option;
+  compact_ratio : float option;
 }
 
 let default_config ~name ~provider ~model_id ~system_prompt ~tools : config =
@@ -65,6 +67,8 @@ let default_config ~name ~provider ~model_id ~system_prompt ~tools : config =
     working_context = None;
     cache_system_prompt = false;
     yield_on_tool = false;
+    max_input_tokens = None;
+    compact_ratio = None;
   }
 
 (* ================================================================ *)
@@ -243,8 +247,50 @@ let build
       Oas.Builder.with_initial_messages config.initial_messages builder
     else builder
   in
+  let builder =
+    match config.max_input_tokens with
+    | Some n -> Oas.Builder.with_max_input_tokens n builder
+    | None -> builder
+  in
+  let builder =
+    match config.compact_ratio with
+    | Some ratio -> Oas.Builder.with_context_thresholds ~compact_ratio:ratio builder
+    | None -> builder
+  in
   Oas.Builder.build_safe builder
   |> Result.map_error Oas.Error.to_string
+
+(* ================================================================ *)
+(* Idle-detail enrichment                                           *)
+(* ================================================================ *)
+
+(** Enrich an [Oas.Error.to_string] detail with the name of the most
+    recently called tool when the error is an "Idle detected" failure.
+    For all other error strings the input is returned unchanged.
+
+    Exposed at module level so it can be unit-tested independently of
+    the network-bound [run] function. *)
+let enrich_idle_detail (detail : string) (messages : Oas.Types.message list) : string =
+  if String.starts_with ~prefix:"Idle detected" detail then
+    let last_tool =
+      let rec find = function
+        | [] -> None
+        | (m : Oas.Types.message) :: rest ->
+          let later = find rest in
+          if Option.is_some later then later
+          else if m.role = Oas.Types.Assistant then
+            List.find_map (function
+              | Oas.Types.ToolUse { name; _ } -> Some name
+              | _ -> None
+            ) m.content
+          else None
+      in
+      find messages
+    in
+    (match last_tool with
+     | Some name -> Printf.sprintf "%s (tool: %s)" detail name
+     | None -> detail)
+  else detail
 
 (* ================================================================ *)
 (* Run                                                               *)
@@ -352,6 +398,9 @@ let run
         }
     | Error err ->
       let detail = Oas.Error.to_string err in
+      let detail =
+        enrich_idle_detail detail (Oas.Agent.state agent).messages
+      in
       (match proof with
        | Some p ->
          Log.Misc.warn "oas_worker: agent errored with CDAL proof: run_id=%s status=%s error=%s"

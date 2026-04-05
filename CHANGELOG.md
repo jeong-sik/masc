@@ -1,6 +1,61 @@
 # Changelog
 
 
+## [2.237.0] - 2026-04-05
+
+### Added
+- **Goal janitor** -- automated stale goal cleanup (#5225).
+- **Entropy logging** -- secret-safe args preview for idle loop detection (#5199).
+
+### Fixed
+- **Context overflow** -- resolve overflow with overrides and conservative estimation (#5220, closes #5053).
+- **Local LLM context** -- enforce 64K context floor for local discovery (#5214).
+- **Vendor hardcoding** -- remove from 4 files, Provider_adapter SSOT (#5222).
+- **Shutdown observability** -- improve logging for shutdown and idle loop (#5223).
+- **Keeper review** -- ceiling rounding, validation, log level (#5224).
+- **Small bugs** -- resolve remaining observability issues (#5215).
+
+### Changed
+- **Room terminology** -- flatten onboarding and dashboard wording (#5221).
+
+## [2.236.0] - 2026-04-05
+
+### Fixed
+- **Graceful shutdown** -- per-phase elapsed time logging for shutdown diagnostics (#5203, closes #5014).
+- **Keeper context warning** -- warn when discovered LLM context is below 16K threshold (#5212).
+
+## [2.235.0] - 2026-04-05
+
+### Added
+- **TOML multiline strings** -- parser now handles triple-quoted basic strings, fixing janitor/masc-improver config loading (#5148, closes #5068).
+- **OAS Builder setters** -- adopt Builder pattern for context management (#5201, closes #5141).
+
+### Fixed
+- **CI timeout** -- add fast-fail git repo guard preventing 900s test hang (#5202, closes #5206).
+- **Auth circuit breaker** -- add retry limit and trace for masc_auth_create_token (#5183).
+- **Portal retry loops** -- allow proactive behaviors and prevent infinite delegation retries (#5177).
+- **Test null audit** -- handle null tool_audit_source in keeper snapshot (#5209).
+
+### Changed
+- **Dashboard** -- optimize responsive layouts, enhance micro-interactions (#5198, #5194).
+- **Session listing** -- bypass full filesystem scan for performance (#5186).
+- **Semantic theme** -- task 288 dashboard theme tokens (#5191).
+
+## [2.234.0] - 2026-04-05
+
+### Added
+- **Keeper playground** -- per-keeper playground directory for scratch files (#5174).
+- **Gate A instrumentation** -- wire 4 heuristic decision sites for det/nondet boundary (#5188).
+- **TOML CI validation** -- add TOML syntax check script and remove deprecated keys (#5185).
+
+### Changed
+- **Boundary cleanup** -- deduplicate sampling params, proof_status, estimate_tokens (#5187).
+- **GLM URL SSOT** -- extract hardcoded GLM URL to provider config (#5189).
+- **Room shim removal** -- remove _in_room shim functions and current_room_id (#5192).
+
+### Fixed
+- **Test warning** -- fix unused variable warning for original_message_count (#5190).
+
 ## [2.233.0] - 2026-04-04
 
 ### Removed

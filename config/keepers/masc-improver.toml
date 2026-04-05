@@ -36,5 +36,3 @@ execution_scope = "workspace"
 allowed_paths = ["*"]
 
 proactive_enabled = true
-presence_keepalive = true
-presence_keepalive_sec = 30

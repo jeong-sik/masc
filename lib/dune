@@ -254,6 +254,7 @@
    relay
    goal_store
    goal_guard
+   goal_janitor
    goal_orchestrator
    goal_scheduler
    convergence
@@ -478,6 +479,11 @@
    keeper_chat_store
    keeper_recurring
    keeper_registry
+   keeper_state_machine
+   keeper_state_compat
+   keeper_measurement
+   keeper_guard
+   keeper_transition_audit
    keeper_supervisor
    keeper_runtime
    keeper_turn_session

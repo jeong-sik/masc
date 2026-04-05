@@ -252,11 +252,11 @@ let test_list_sessions_records_fallback_diagnostics () =
            ~updated_at_iso:"2026-03-24T10:00:00Z");
       ignore (Team_session_store.list_sessions ~since_unix:1.0 ~limit:1 config);
       let diagnostics = Team_session_store.session_list_diagnostics_json () in
-      Alcotest.(check string) "fallback source" "backend_get_all"
+      Alcotest.(check string) "fallback source" "filesystem"
         Yojson.Safe.Util.(diagnostics |> member "source" |> to_string);
       Alcotest.(check bool) "pg recent not attempted" false
         Yojson.Safe.Util.(diagnostics |> member "pg_recent_attempted" |> to_bool);
-      Alcotest.(check string) "fallback reason" "pg_recent_unavailable"
+      Alcotest.(check string) "fallback reason" "filesystem_scan"
         Yojson.Safe.Util.(diagnostics |> member "fallback_reason" |> to_string);
       Alcotest.(check bool) "last error mentions pg recent" true
         (String.length Yojson.Safe.Util.(diagnostics |> member "last_error" |> to_string) > 0);

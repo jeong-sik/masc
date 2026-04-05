@@ -41,6 +41,12 @@ const TIME_RANGES: Array<{ value: string; label: string }> = [
   { value: 'all', label: '전체' },
 ]
 
+export function visibleNamespaceLabel(namespaceId: string | null | undefined): string | null {
+  const value = typeof namespaceId === 'string' ? namespaceId.trim() : ''
+  if (!value || value === 'default') return null
+  return value
+}
+
 function loadGraph() {
   return graphResource.load(() => {
     const since = selectedTimeRange.value !== 'all' ? selectedTimeRange.value : undefined
@@ -56,7 +62,7 @@ function TimeRangeSelector() {
         <button type="button" key=${value}
           class="px-3 py-1 text-xs rounded-full border cursor-pointer transition-all duration-150 ${
             current === value
-              ? 'border-[rgba(200,168,78,0.5)] bg-[rgba(200,168,78,0.12)] text-[#e8d48b]'
+              ? 'border-[var(--warn-20)] bg-[var(--warn-10)] text-[var(--warn-bright)]'
               : 'border-[var(--white-10)] bg-[var(--white-4)] text-[var(--text-dim)] hover:bg-[var(--white-8)]'
           }"
           onClick=${() => { selectedTimeRange.value = value; loadGraph() }}
@@ -111,15 +117,15 @@ function StatsRow({ data }: { data: ActivityGraphResponse }) {
 function actionCategoryClass(group: ActionTimelineGroup): string {
   switch (group.category) {
     case 'task':
-      return 'border-[#fbbf24]/35 bg-[#fbbf24]/10 text-[#fcd34d]'
+      return 'border-[#fbbf24]/35 bg-[#fbbf24]/10 text-[var(--warn)]'
     case 'session':
-      return 'border-[#4ade80]/35 bg-[#4ade80]/10 text-[#86efac]'
+      return 'border-[#4ade80]/35 bg-[var(--ok)]/10 text-[var(--ok-20)]'
     case 'message':
-      return 'border-[#22d3ee]/35 bg-[#22d3ee]/10 text-[#67e8f9]'
+      return 'border-[#22d3ee]/35 bg-[#22d3ee]/10 text-[var(--cyan)]'
     case 'board':
-      return 'border-[#c084fc]/35 bg-[#c084fc]/10 text-[#d8b4fe]'
+      return 'border-[#c084fc]/35 bg-[#c084fc]/10 text-[var(--purple)]'
     case 'governance':
-      return 'border-[#fb7185]/35 bg-[#fb7185]/10 text-[#fda4af]'
+      return 'border-[#fb7185]/35 bg-[var(--bad)]/10 text-[var(--bad-light)]'
     case 'lifecycle':
       return 'border-[var(--white-10)] bg-[var(--white-4)] text-[var(--text-dim)]'
     default:
@@ -236,7 +242,9 @@ function ActionTimeline({ data }: { data: ActivityGraphResponse }) {
                         </span>
                         <div class="min-w-0 flex-1">
                           <div class="text-[12px] text-[var(--text-body)]">${eventDetail(event, 160)}</div>
-                          <div class="mt-1 text-[11px] text-[var(--text-muted)]">namespace: ${event.room_id}</div>
+                           ${(() => { const ns = visibleNamespaceLabel(event.room_id); return ns
+                             ? html`<div class="mt-1 text-[11px] text-[var(--text-muted)]">namespace: ${ns}</div>`
+                             : null; })()}
                         </div>
                         <span class="shrink-0 text-[11px] text-[var(--text-muted)]">
                           <${TimeAgo} timestamp=${event.ts_iso} />
@@ -384,7 +392,9 @@ export function ActivityGraphSurface() {
           <span>생성 시각: ${data.generated_at}</span>
           <span>데이터 범위: 최근 ${data.window.limit}건 이벤트</span>
           ${selectedTimeRange.value !== 'all' ? html`<span>필터: ${TIME_RANGES.find(r => r.value === selectedTimeRange.value)?.label}</span>` : null}
-          ${data.window.room_id ? html`<span>namespace: ${data.window.room_id}</span>` : null}
+          ${(() => { const ns = visibleNamespaceLabel(data.window.room_id); return ns
+            ? html`<span>namespace: ${ns}</span>`
+            : null; })()}
         </div>
       <//>
 

@@ -103,7 +103,7 @@ export function inputHandler(sig: { value: string }) {
 export function StartFormButton({ class: cx }: { class?: string }) {
   return html`
     <button type="button"
-      class=${cx ?? 'px-3 py-1.5 rounded-lg text-xs font-medium border border-accent/50 text-accent hover:bg-accent/10 transition-colors'}
+      class=${cx ?? 'px-3 py-1.5 rounded-lg text-xs font-medium border border-accent/50 text-accent hover:bg-[var(--accent-10)] transition-colors'}
       onClick=${() => { showStartForm.value = true }}
     >
       새 루프 시작
@@ -230,7 +230,7 @@ export function StartAutoresearchForm() {
         ` : null}
 
         ${startFormError.value ? html`
-          <div class="px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-xs">
+          <div class="px-3 py-2 rounded-lg bg-[var(--bad-10)] border border-[var(--bad-20)] text-[var(--bad)] text-xs">
             ${startFormError.value}
           </div>
         ` : null}

@@ -240,6 +240,21 @@ let spawnable_canonical_names () =
   direct_adapters
   |> List.filter_map (fun a -> if a.spawn_key <> None then Some a.canonical_name else None)
 
+(** All spawn keys (short names used for @mention routing and CLI dispatch). *)
+let spawnable_spawn_keys () =
+  direct_adapters
+  |> List.filter_map (fun a -> a.spawn_key)
+
+(** Check if a name is a known direct adapter label or alias.
+    This includes adapters that do not have a CLI spawn_key (e.g. glm, openrouter). *)
+let is_known_provider name =
+  resolve_direct_adapter name <> None
+
+(** Check if a name is a CLI-spawnable agent (has a spawn_key).
+    For a broader "known provider" predicate, use {!is_known_provider}. *)
+let is_spawnable_agent name =
+  resolve_spawn_key name <> None
+
 (** All agent voices as (canonical_name, voice_name) pairs.
     For backward compatibility with voice_bridge_core. *)
 let all_agent_voices () =

@@ -75,7 +75,7 @@ let prepare_start_params (ctx : context) args =
   let source_workdir = get_string args "workdir" ctx.base_path in
   let max_cycles = get_int args "max_cycles" 100 in
   let cycle_timeout_s = get_float args "cycle_timeout_s" 300.0 in
-  let model_model = get_string args "model_model" "glm" in
+  let model_model = get_string args "model_model" "" in
   if goal = "" then
     Error "goal is required"
   else if metric_fn = "" then

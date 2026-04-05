@@ -39,6 +39,7 @@
 @import "./roster-detail.css";
 @import "./tools.css";
 @import "./ui.css";
+@import "./responsive.css";
 @import "./a11y.css"; /* after feature styles so reduced-motion overrides win */
 
 /* ── Card / Section / Headline base styles ─────────────────────

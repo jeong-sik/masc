@@ -483,6 +483,19 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                   ]
                 else
                   `Null );
+              ( "active_goals_tree",
+                if include_goals && m.active_goal_ids <> [] then
+                  let all_goals = Goal_store.list_goals config () in
+                  let linked = List.filter (fun (g : Goal_store.goal) ->
+                    List.mem g.id m.active_goal_ids) all_goals in
+                  let tasks = Room.get_tasks_safe config in
+                  let forest = Dashboard_goals.build_forest ~goals:linked ~tasks in
+                  `Assoc [
+                    ("count", `Int (List.length linked));
+                    ("nodes", `List (List.map Dashboard_goals.tree_node_to_json forest));
+                  ]
+                else
+                  `Null );
               ("soul_profile", `String m.soul_profile);
               ("will", if String.trim m.will = "" then `Null else `String m.will);
               ("needs", if String.trim m.needs = "" then `Null else `String m.needs);

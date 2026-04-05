@@ -406,6 +406,14 @@ let select_with_feedback ~agents ~max_n ~pending_triggers ~tick_interval_s =
         let s = get_stats name in
         let ticks = ticks_since_selection ~stats:s ~tick_interval_s in
         let signal = starvation_bonus ~ticks in
+        (* RFC-0001 Gate A: record thompson selection observation *)
+        Heuristic_metrics.record {
+          module_name = "thompson_sampling"; site = "priority_trigger";
+          raw_value = signal; threshold = 0.0;
+          triggered = true;
+          provenance = Thompson "starvation_bonus";
+          timestamp = Unix.gettimeofday ();
+        };
         add_selected {
           agent_name = name;
           trigger;

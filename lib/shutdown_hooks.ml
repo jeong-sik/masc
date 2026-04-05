@@ -13,14 +13,30 @@ let cancel_orchestrator_ref : (unit -> unit) option ref = ref None
 let register_cancel_orchestrator (f : unit -> unit) =
   cancel_orchestrator_ref := Some f
 
-(** Call all registered shutdown hooks *)
+(** Call all registered shutdown hooks with per-hook timing. *)
 let run_all () =
+  let t0 = Unix.gettimeofday () in
   (* Cancel orchestrator first *)
   (match !cancel_orchestrator_ref with
    | Some cancel ->
+     let t_start = Unix.gettimeofday () in
      Log.Server.info "Cancelling orchestrator...";
-     cancel ()
-   | None -> ());
+     cancel ();
+     Log.Server.info "[Shutdown] orchestrator cancelled (%.2fs)"
+       (Unix.gettimeofday () -. t_start)
+   | None ->
+     Log.Server.info "[Shutdown] no orchestrator registered, skipping");
   (* Close all SSE clients *)
+  let t_sse = Unix.gettimeofday () in
   let sse_count = Sse.close_all_clients () in
-  Log.Server.info "Closed %d SSE clients" sse_count
+  Log.Server.info "Closed %d SSE clients (%.2fs) [remaining conn: %d]"
+    sse_count (Unix.gettimeofday () -. t_sse)
+    (Server_mcp_transport_http_sse.active_session_count ());
+  (* Close WebSocket sessions *)
+  let t_ws = Unix.gettimeofday () in
+  let ws_count = Server_mcp_transport_ws.close_all () in
+  Log.Server.info "Closed %d WebSocket sessions (%.2fs) [remaining ws: %d]"
+    ws_count (Unix.gettimeofday () -. t_ws)
+    (Server_mcp_transport_ws.session_count ());
+  Log.Server.info "[Shutdown] hooks total: %.2fs"
+    (Unix.gettimeofday () -. t0)

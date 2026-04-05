@@ -146,6 +146,8 @@ type keeper_meta =
   ; (* -- Lifecycle -- *)
     created_at : string
   ; updated_at : string
+  ; (* -- Performance & Limits -- *)
+    max_context_override : int option
   ; (* -- Operational control (top-level, not runtime) -- *)
     continuity_summary : string
   ; active_goal_ids : string list
@@ -604,6 +606,7 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; "last_need", `String rt.last_need
     ; "paused", `Bool m.paused
     ; "current_task_id", Json_util.string_opt_to_json m.current_task_id
+    ; "max_context_override", Json_util.int_opt_to_json m.max_context_override
     ]
 ;;
 
@@ -657,6 +660,7 @@ type parsed_keeper_state =
   ; ps_team_session_start_count_total : int
   ; ps_paused : bool
   ; ps_current_task_id : string option
+  ; ps_max_context_override : int option
   ; ps_runtime : agent_runtime_state
   }
 
@@ -965,6 +969,7 @@ let parse_keeper_state
   let last_need = Safe_ops.json_string ~default:"" "last_need" json in
   let ps_paused = Safe_ops.json_bool ~default:false "paused" json in
   let ps_current_task_id = Safe_ops.json_string_opt "current_task_id" json in
+  let ps_max_context_override = Safe_ops.json_int_opt "max_context_override" json in
   { ps_created_at_raw
   ; ps_updated_at_raw
   ; ps_continuity_summary
@@ -974,6 +979,7 @@ let parse_keeper_state
   ; ps_team_session_start_count_total
   ; ps_paused
   ; ps_current_task_id
+  ; ps_max_context_override
   ; ps_runtime =
       { usage = parse_usage_metrics json
       ; compaction_rt = parse_compaction_runtime json
@@ -1069,6 +1075,7 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
              ; team_session_start_count_total = state.ps_team_session_start_count_total
              ; paused = state.ps_paused
              ; current_task_id = state.ps_current_task_id
+             ; max_context_override = state.ps_max_context_override
              ; runtime = state.ps_runtime
              })
   with
@@ -1164,6 +1171,7 @@ let fallback_canonical_keeper_meta_key_names =
   ; "last_need"
   ; "paused"
   ; "current_task_id"
+  ; "max_context_override"
   ]
 ;;
 

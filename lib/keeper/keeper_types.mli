@@ -148,6 +148,7 @@ type keeper_meta = {
   voice_agent_id: string;
   created_at: string;
   updated_at: string;
+  max_context_override: int option;
   continuity_summary: string;
   active_goal_ids: string list;
   active_team_session_id: string option;

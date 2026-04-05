@@ -237,7 +237,7 @@ export function ActivitySwimlane({ since }: { since?: string }) {
       </div>
       <div class="flex flex-wrap gap-3 mt-3 text-[11px] text-[var(--text-muted)]">
         <span class="flex items-center gap-1.5"><span class="w-3 h-2 rounded-sm bg-[#fbbf24] inline-block"></span>작업</span>
-        <span class="flex items-center gap-1.5"><span class="w-3 h-2 rounded-sm bg-[#4ade80] inline-block"></span>운영</span>
+        <span class="flex items-center gap-1.5"><span class="w-3 h-2 rounded-sm bg-[var(--ok)] inline-block"></span>운영</span>
         <span class="flex items-center gap-1.5"><span class="w-3 h-2 rounded-sm bg-[#22d3ee] inline-block"></span>자율</span>
         <span class="flex items-center gap-1.5"><span class="w-3 h-2 rounded-sm bg-[rgba(148,163,184,0.5)] inline-block"></span>접속</span>
       </div>

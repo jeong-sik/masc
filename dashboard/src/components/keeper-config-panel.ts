@@ -232,7 +232,7 @@ function ModelList({ models }: { models: string[] }) {
   if (models.length === 0) return html`<span class="text-[11px] text-text-muted italic">none</span>`
   return html`
     <div class="flex flex-wrap gap-1.5">
-      ${models.map(m => html`<span class="inline-flex items-center py-1 px-2.5 rounded-lg text-[11px] font-semibold bg-accent/10 text-accent border border-accent/20 shadow-sm hover:bg-accent/20 transition-colors cursor-default">${m}</span>`)}
+      ${models.map(m => html`<span class="inline-flex items-center py-1 px-2.5 rounded-lg text-[11px] font-semibold bg-[var(--accent-10)] text-accent border border-accent/20 shadow-sm hover:bg-accent/20 transition-colors cursor-default">${m}</span>`)}
     </div>
   `
 }
@@ -388,7 +388,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
   }
 
   if (state.status === 'error') {
-    return html`<div class="py-3 text-xs text-[#ef4444]">${state.message}</div>`
+    return html`<div class="py-3 text-xs text-[var(--bad)]">${state.message}</div>`
   }
 
   if (state.status !== 'loaded') return null
@@ -468,7 +468,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
     <div class="flex gap-2 items-center mb-3">
       ${isEditing ? html`
         <button type="button"
-          class="${btnBase} bg-[#4ade80] text-[#000]"
+          class="${btnBase} bg-[var(--ok)] text-[#000]"
           onClick=${saveConfig}
           disabled=${isSaving}
         >${isSaving ? '저장 중...' : '저장'}</button>
@@ -483,7 +483,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
           onClick=${enterEditMode}
         >편집</button>
       `}
-      ${saveError.value ? html`<span class="text-xs text-[#ef4444]">${saveError.value}</span>` : null}
+      ${saveError.value ? html`<span class="text-xs text-[var(--bad)]">${saveError.value}</span>` : null}
     </div>
   `
 
@@ -686,7 +686,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
         <${ModelList} models=${c.coordination.mention_targets} />
       </div>
       <div class="mt-1.5">
-        <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">참여 범위</div>
+        <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">참여 네임스페이스</div>
         <${ModelList} models=${c.coordination.joined_room_ids} />
       </div>
 
@@ -727,7 +727,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       ${runtimeHasChanges ? html`
         <div class="flex gap-2 items-center mt-4 mb-2 p-3 rounded-xl border border-accent/30 bg-accent/5">
           <button type="button"
-            class="${btnBase} bg-[#4ade80] text-[#000]"
+            class="${btnBase} bg-[var(--ok)] text-[#000]"
             onClick=${saveRuntimeConfig}
             disabled=${runtimeSaving.value}
           >${runtimeSaving.value ? '저장 중...' : '런타임 설정 저장'}</button>
@@ -743,7 +743,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
         <${SectionHeader} title="훅 슬롯" />
         ${Object.entries(c.hooks.slots).map(([name, slot]) => html`
           <div class="flex items-start gap-2 py-2 px-3 rounded-xl border border-card-border/50 bg-card/20 mb-1.5">
-            <span class="mt-1 w-2 h-2 rounded-full shrink-0 ${slot.active ? 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.5)]' : 'bg-zinc-500'}"></span>
+            <span class="mt-1 w-2 h-2 rounded-full shrink-0 ${slot.active ? 'bg-[var(--ok)] shadow-[0_0_6px_var(--ok-48)]' : 'bg-[var(--text-dim)]'}"></span>
             <div class="flex-1 min-w-0">
               <div class="flex justify-between">
                 <span class="text-[12px] font-semibold text-text-strong">${name}</span>
@@ -752,7 +752,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
               ${(slot.gates ?? slot.effects ?? slot.features ?? []).length > 0 ? html`
                 <div class="flex flex-wrap gap-1 mt-1">
                   ${(slot.gates ?? slot.effects ?? slot.features ?? []).map((d: string) => html`
-                    <span class="text-[9px] px-1.5 py-0.5 rounded-md ${d.endsWith('_off') ? 'bg-zinc-700/50 text-zinc-400' : 'bg-accent/10 text-accent/80'}">${d}</span>
+                    <span class="text-[9px] px-1.5 py-0.5 rounded-md ${d.endsWith('_off') ? 'bg-[var(--white-10)] text-[var(--text-dim)]' : 'bg-[var(--accent-10)] text-[var(--accent)] opacity-80'}">${d}</span>
                   `)}
                 </div>
               ` : null}

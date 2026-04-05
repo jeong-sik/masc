@@ -256,7 +256,7 @@ function MetaCognitionCard() {
           </span>
           ${summary.contested_belief_count > 0
             ? html`
-                <span class="rounded-full border border-[rgba(255,196,107,0.25)] bg-[rgba(255,196,107,0.12)] px-2.5 py-1 text-[11px] font-semibold text-[#ffd78f]">
+                <span class="rounded-full border border-[var(--warn-20)] bg-[var(--warn-10)] px-2.5 py-1 text-[11px] font-semibold text-[var(--warn-bright)]">
                   이견 ${summary.contested_belief_count}
                 </span>
               `
@@ -293,7 +293,7 @@ function MetaCognitionCard() {
                 </div>
                 <button
                   type="button"
-                  class="rounded-lg border border-accent/25 bg-accent/10 px-3 py-1.5 text-[12px] font-semibold text-accent transition-colors hover:bg-accent/18"
+                  class="rounded-lg border border-accent/25 bg-[var(--accent-10)] px-3 py-1.5 text-[12px] font-semibold text-accent transition-colors hover:bg-accent/18"
                   onClick=${() => navigateToPost(latestDigest.post_id)}
                 >
                   게시물 열기

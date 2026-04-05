@@ -78,7 +78,7 @@ export function ToolEvidenceRow({ item }: { item: DashboardProofToolEvidence }) 
         const tags = toolEvidenceTags(item)
         return tags.length > 0
           ? html`<div class="flex flex-wrap gap-2 mt-3 pt-3 border-t border-card-border/50">
-              ${tags.map(name => html`<span class="px-2 py-1 rounded-md text-[10px] font-medium bg-accent/10 text-accent border border-accent/20 shadow-sm">${name}</span>`)}
+              ${tags.map(name => html`<span class="px-2 py-1 rounded-md text-[10px] font-medium bg-[var(--accent-10)] text-accent border border-accent/20 shadow-sm">${name}</span>`)}
             </div>`
           : null
       })()}
@@ -133,7 +133,7 @@ export function WorkerRunEvidenceRow({ item }: { item: DashboardProofWorkerRunEv
         ? html`<div class="flex flex-col gap-2 mt-2 pt-3 border-t border-card-border/50">
             <strong class="text-[11px] font-semibold uppercase tracking-widest text-text-muted">실행 도구</strong>
             <div class="flex flex-wrap gap-2">
-              ${toolNames.map(name => html`<span class="px-2 py-1 rounded-md text-[10px] font-medium bg-accent/10 text-accent border border-accent/20 shadow-sm">${name}</span>`)}
+              ${toolNames.map(name => html`<span class="px-2 py-1 rounded-md text-[10px] font-medium bg-[var(--accent-10)] text-accent border border-accent/20 shadow-sm">${name}</span>`)}
             </div>
           </div>`
         : null}
@@ -149,7 +149,7 @@ export function TimelineRow({ item }: { item: DedupedTimelineItem }) {
           <strong class="text-[13px] text-text-strong font-medium truncate">${item.summary ?? item.event_type ?? '이벤트'}</strong>
           <div class="flex items-center gap-2 text-[11px] font-medium text-text-muted flex-wrap">
             <span class="px-2 py-0.5 rounded-md bg-white/5 border border-white/10">${timelineMetaLabel(item)}</span>
-            <span class="px-2 py-0.5 rounded-md bg-accent/10 text-accent border border-accent/20 shadow-sm">${item.event_type ?? '이벤트'}</span>
+            <span class="px-2 py-0.5 rounded-md bg-[var(--accent-10)] text-accent border border-accent/20 shadow-sm">${item.event_type ?? '이벤트'}</span>
             <span class="text-text-dim/60">•</span>
             <span>${item.actor ?? '시스템'}</span>
           </div>

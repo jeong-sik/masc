@@ -111,10 +111,32 @@ let parse_presets
   tbl
 
 let load ~base_path : (t, string) result =
-  let path = Filename.concat base_path "config/tool_policy.toml" in
-  match Safe_ops.read_file_safe path with
-  | Error msg -> Error (Printf.sprintf "tool policy config not found: %s: %s" path msg)
-  | Ok content ->
+  let rel = "config/tool_policy.toml" in
+  let base_candidate = Filename.concat base_path rel in
+  let cwd_candidate = Filename.concat (Sys.getcwd ()) rel in
+  (* Try base_path first, then cwd as fallback; skip cwd if identical to base_path *)
+  let candidates =
+    if base_candidate = cwd_candidate then [ base_candidate ]
+    else [ base_candidate; cwd_candidate ]
+  in
+  let rec try_candidates failures = function
+    | [] ->
+      let detail =
+        failures
+        |> List.rev_map (fun (p, m) -> Printf.sprintf "%s: %s" p m)
+        |> String.concat "; "
+      in
+      Error
+        (Printf.sprintf
+           "tool policy config not found in base directory or current working directory. %s" detail)
+    | path :: rest ->
+      (match Safe_ops.read_file_safe path with
+       | Ok content -> Ok (path, content)
+       | Error msg -> try_candidates ((path, msg) :: failures) rest)
+  in
+  match try_candidates [] candidates with
+  | Error _ as e -> e
+  | Ok (path, content) ->
     match Keeper_toml_loader.parse_toml content with
     | Error msg -> Error (Printf.sprintf "tool policy config parse error: %s" msg)
     | Ok doc ->

@@ -75,7 +75,6 @@ let config_for_label
     ?memory
     ?tool_retry_policy
     ?enable_thinking
-    ?max_input_tokens
     ?compact_ratio
     ?contract
     ~(description : string option)
@@ -150,7 +149,6 @@ let run_named
     ?working_context
     ?(cache_system_prompt = false)
     ?(yield_on_tool = false)
-    ?max_input_tokens
     ?compact_ratio
     ?sw
     ?net
@@ -200,7 +198,6 @@ let run_named
       working_context;
       session_id;
       cache_system_prompt;
-      max_input_tokens;
       compact_ratio;
       contract;
     }
@@ -252,7 +249,6 @@ let run_model_by_label
     ?memory
     ?tool_retry_policy
     ?enable_thinking
-    ?max_input_tokens
     ?compact_ratio
     ?contract
     ?on_event
@@ -278,7 +274,6 @@ let run_model_by_label
             ~max_idle_turns ?guardrails ?hooks ?context_reducer ?memory
             ?tool_retry_policy
             ?enable_thinking
-            ?max_input_tokens
             ?compact_ratio
             ~description:(Some (Printf.sprintf "model_label:%s" model_label))
             ()
@@ -315,7 +310,6 @@ let run_named_with_masc_tools
     ?contract
     ?transport
     ?(yield_on_tool = false)
-    ?max_input_tokens
     ?compact_ratio
     ?sw
     ?net
@@ -330,7 +324,6 @@ let run_named_with_masc_tools
   run_named ~cascade_name ~goal ?priority ~system_prompt ~tools:oas_tools
     ~max_turns ~temperature ~max_tokens ?max_input_tokens ?max_cost_usd ?guardrails ?hooks ?memory
     ?tool_retry_policy
-    ?max_input_tokens
     ?compact_ratio
     ?raw_trace ?on_event ?on_yield ?on_resume ?proof_ref
     ?contract
@@ -352,7 +345,6 @@ let run_model_with_masc_tools
     ?memory
     ?tool_retry_policy
     ?enable_thinking
-    ?max_input_tokens
     ?compact_ratio
     ?contract
     ?raw_trace
@@ -373,7 +365,7 @@ let run_model_with_masc_tools
           config_for_label ~name:"oas-explicit-model" ~model_label ~system_prompt
           ~tools:[] ~max_turns ~max_tokens ?max_input_tokens ?max_cost_usd ~temperature ?guardrails ?hooks
           ?memory ?tool_retry_policy ?enable_thinking
-          ?max_input_tokens ?compact_ratio
+          ?compact_ratio
           ~description:(Some (Printf.sprintf "model_label:%s" model_label))
           ()
       in

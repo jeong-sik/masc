@@ -81,8 +81,18 @@ let legacy_migrate_post_kind ~meta_json ~author ~visibility ~expires_at ~hearth 
               || contains_substring hearth "harness")
   then
     Automation_post
-  else if legacy_author_looks_automation author then
+  else if legacy_author_looks_automation author then begin
+    Heuristic_metrics.record {
+      module_name = "board_core_classify";
+      site = "legacy_migrate_post_kind";
+      raw_value = 1.0;
+      threshold = 0.5;
+      triggered = true;
+      provenance = Board_classify ("author_heuristic:" ^ author);
+      timestamp = Unix.gettimeofday ();
+    };
     Automation_post
+  end
   else
     Human_post
 

@@ -111,10 +111,15 @@ let parse_presets
   tbl
 
 let project_root_from_executable () =
+  let raw_exe =
+    try Sys.executable_name with _ -> ""
+  in
   let exe =
-    try Unix.realpath Sys.executable_name
-    with Unix.Unix_error _ | Sys_error _ ->
-      (try Sys.executable_name with _ -> "")
+    if String.equal raw_exe "" then ""
+    else
+      try Unix.realpath raw_exe
+      with Unix.Unix_error _ | Sys_error _ | Invalid_argument _ ->
+        raw_exe
   in
   if String.equal exe "" then None
   else
@@ -138,7 +143,8 @@ let load ~base_path : (t, string) result =
     [ base_candidate; cwd_candidate ]
     @ (match exe_candidate with Some c -> [ c ] | None -> [])
     |> List.fold_left (fun acc x ->
-      if List.exists (String.equal x) acc then acc else x :: acc) []
+      if List.exists (String.equal x) acc then acc else x :: acc
+    ) []
     |> List.rev
   in
   let rec try_candidates failures = function

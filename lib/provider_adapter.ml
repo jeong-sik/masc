@@ -57,10 +57,6 @@ type gemini_direct_auth =
 let google_cloud_project_env = "GOOGLE_CLOUD_PROJECT"
 let google_cloud_location_env = "GOOGLE_CLOUD_LOCATION"
 
-let string_of_runtime_kind = function
-  | Local -> "local"
-  | Direct_api -> "direct_api"
-
 let string_of_auth_mode = function
   | No_auth -> "none"
   | Api_key env_name -> "api_key:" ^ env_name
@@ -75,14 +71,18 @@ let string_of_voice_transport = function
 (** Map OAS Provider_config.provider_kind to MASC adapter canonical_name.
     NOTE: OAS now exports Provider_config.string_of_provider_kind (wire-format names).
     This MASC-specific mapping exists only for backward-compatible adapter names.
-    Callers should prefer the OAS canonical version where possible. *)
-let string_of_provider_kind : Llm_provider.Provider_config.provider_kind -> string = function
-  | Anthropic -> "claude-api"
-  | OpenAI_compat -> "codex-api"
-  | Gemini -> "gemini-api"
-  | Glm -> "glm"
-  | Claude_code -> "claude-code"
-[@@deprecated "Use Llm_provider.Provider_config.string_of_provider_kind after oas#623 pin update"]
+    Callers should prefer the OAS canonical version where possible.
+    TODO: remove after oas#623 pin update. *)
+let string_of_provider_kind
+    : Llm_provider.Provider_config.provider_kind -> string
+  =
+  fun kind ->
+    match kind with
+    | Anthropic -> "claude-api"
+    | OpenAI_compat -> "codex-api"
+    | Gemini -> "gemini-api"
+    | Glm -> "glm"
+    | Claude_code -> "claude-code"
 
 let normalize_label label = String.trim label |> String.lowercase_ascii
 
@@ -256,22 +256,6 @@ let resolve_spawn_key label =
   match resolve_direct_adapter label with
   | Some adapter -> adapter.spawn_key
   | None -> None
-
-(** Resolve default TTS voice for an agent label. *)
-let resolve_default_voice label =
-  match resolve_direct_adapter label with
-  | Some adapter -> adapter.default_voice
-  | None -> None
-
-(** All agents that are spawnable via CLI. *)
-let spawnable_canonical_names () =
-  direct_adapters
-  |> List.filter_map (fun a -> if a.spawn_key <> None then Some a.canonical_name else None)
-
-(** All spawn keys (short names used for @mention routing and CLI dispatch). *)
-let spawnable_spawn_keys () =
-  direct_adapters
-  |> List.filter_map (fun a -> a.spawn_key)
 
 (** Check if a name is a known direct adapter label or alias.
     This includes adapters that do not have a CLI spawn_key (e.g. glm, openrouter). *)
@@ -868,17 +852,17 @@ type auth_detail = {
     E.g. "claude-api" -> "claude", "codex-api" -> "openai". *)
 let cascade_prefix_of_adapter (adapter : adapter) =
   match adapter.canonical_name with
-  | "claude-api" -> "claude"
-  | "codex-api" -> "openai"
-  | "gemini-api" -> "gemini"
+  | v when v = cn_claude -> "claude"
+  | v when v = cn_codex -> "openai"
+  | v when v = cn_gemini -> "gemini"
   | other -> other
 
 let endpoint_url_of_adapter (adapter : adapter) =
   match adapter.canonical_name with
   | name when name = cn_llama -> Some Env_config_runtime.Llama.server_url
   | name when name = cn_glm -> Some Env_config_runtime.Glm.server_url
-  | "claude-api" -> Some "https://api.anthropic.com"
-  | "codex-api" -> Some "https://api.openai.com"
+  | name when name = cn_claude -> Some "https://api.anthropic.com"
+  | name when name = cn_codex -> Some "https://api.openai.com"
   | _ -> None
 
 (** Resolve auth detail for any provider by canonical name or alias.
@@ -916,8 +900,7 @@ let auth_detail_of_provider provider =
         endpoint_url = endpoint_url_of_adapter adapter;
         note = None }
 
-(** Check if a provider has a spawn_key (can be launched via CLI). *)
+(** Check if a provider has a spawn_key (can be launched via CLI).
+    Delegates to {!is_spawnable_agent} for single source of truth. *)
 let is_spawnable provider =
-  match resolve_direct_adapter provider with
-  | Some adapter -> adapter.spawn_key <> None
-  | None -> false
+  is_spawnable_agent provider

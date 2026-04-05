@@ -92,6 +92,8 @@ let cascade_max_keys = 256
     These match the Provider_registry entry names used in cascade config strings.
     TODO: pass the provider name from cascade config parsing instead of
     reverse-mapping from provider_kind (which conflates llama/openrouter). *)
+(* TODO: remove after OAS delegation refactor — pass provider name from
+   cascade config parsing directly instead of reverse-mapping from kind. *)
 let provider_name_of_config (cfg : Llm_provider.Provider_config.t) =
   match cfg.kind with
   | Llm_provider.Provider_config.Anthropic -> "claude"
@@ -99,10 +101,9 @@ let provider_name_of_config (cfg : Llm_provider.Provider_config.t) =
   | Llm_provider.Provider_config.Gemini -> "gemini"
   | Llm_provider.Provider_config.Glm -> "glm"
   | Llm_provider.Provider_config.Claude_code -> "claude_code"
-[@@deprecated "Pass provider name from cascade config parsing directly; remove after OAS delegation refactor"]
 
 let model_label_of_config (cfg : Llm_provider.Provider_config.t) =
-  Printf.sprintf "%s:%s" ((provider_name_of_config [@warning "-3"]) cfg) cfg.model_id
+  Printf.sprintf "%s:%s" (provider_name_of_config cfg) cfg.model_id
 
 let model_label_option_of_model_id
     ~(candidate_cfgs : Llm_provider.Provider_config.t list)

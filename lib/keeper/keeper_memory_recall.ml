@@ -279,13 +279,16 @@ let keeper_reflection_payload_of_auto_rules (e : keeper_auto_rule_eval) : Yojson
     Uses concrete parameters (context_window, is_local) from
     [Llm_provider.Model_meta] instead of tier classification.
 
-    - Local models with small context (< 32K): (0.75, 0.75) — earlier handoff.
+    - Local models with small context (< 64K): (0.75, 0.75) — earlier handoff.
     - Models with large context (>= 200K): (1.15, 1.10) — prefer compaction.
-    - Everything else: (1.0, 1.0) (no adjustment). *)
+    - Everything else: (1.0, 1.0) (no adjustment).
+
+    64K floor: llama-server default 8K is too small for keeper sessions.
+    Models below 64K get early-handoff to avoid context overflow. *)
 let model_threshold_multipliers_of_model_id (model_id : string) : float * float =
   let meta = Llm_provider.Model_meta.for_model_id model_id in
   let ctx = meta.context_window in
-  if meta.is_local && ctx < 32_000 then
+  if meta.is_local && ctx < 64_000 then
     (0.75, 0.75)
   else if ctx >= 200_000 then
     (1.15, 1.10)

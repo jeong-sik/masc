@@ -116,14 +116,15 @@ let project_root_from_executable () =
     with Unix.Unix_error _ | Sys_error _ ->
       (try Sys.executable_name with _ -> "")
   in
-  let rec walk_up dir =
-    let parent = Filename.dirname dir in
-    if String.equal parent dir then None
-    else if Filename.basename dir = "_build" then Some parent
-    else walk_up parent
-  in
   if String.equal exe "" then None
-  else walk_up (Filename.dirname exe)
+  else
+    let rec walk_up dir =
+      let parent = Filename.dirname dir in
+      if String.equal parent dir then None
+      else if String.equal (Filename.basename dir) "_build" then Some parent
+      else walk_up parent
+    in
+    walk_up (Filename.dirname exe)
 
 let load ~base_path : (t, string) result =
   let rel = "config/tool_policy.toml" in

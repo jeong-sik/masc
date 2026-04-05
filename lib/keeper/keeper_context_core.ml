@@ -39,6 +39,17 @@ let text_of_message = Agent_sdk.Types.text_of_message
 let ensure_dir path =
   ignore (Keeper_fs.ensure_dir path)
 
+(** {1 Token Estimation Facade}
+
+    All OAS Context_reducer calls in MASC pass through this module.
+    Other keeper modules must NOT call Agent_sdk.Context_reducer directly
+    for their own decision-making. *)
+
+(** Estimate token count for a raw string (CJK-aware).
+    Single entry point for char-based estimation in MASC. *)
+let estimate_char_tokens (s : string) : int =
+  Agent_sdk.Context_reducer.estimate_char_tokens s
+
 (** CJK-aware token estimate delegated to OAS Context_reducer. *)
 let msg_tokens (m : Agent_sdk.Types.message) : int =
   let estimated = Agent_sdk.Context_reducer.estimate_message_tokens m in

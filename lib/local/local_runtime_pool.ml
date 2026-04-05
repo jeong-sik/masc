@@ -619,9 +619,10 @@ let release (lease : lease) ~success ?error ?latency_ms () =
         updated.total_success updated.total_failure
         (Option.value ~default:"" (trim_opt error))
 
-(** Return a parseable model label (e.g. "llama:qwen3.5") for an assignment. *)
+(** Return a parseable model label (e.g. "llama:qwen3.5") for an assignment.
+    Delegates to [Provider_adapter.make_local_label] for SSOT. *)
 let model_label_of_assignment (assignment : assignment) : string =
-  Printf.sprintf "llama:%s" assignment.model_name
+  Provider_adapter.make_local_label assignment.model_name
 
 let snapshot_to_yojson (snapshot : runtime_snapshot) =
   `Assoc

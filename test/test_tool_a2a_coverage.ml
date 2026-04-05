@@ -129,6 +129,24 @@ let test_dispatch_unknown_tool () =
   | Some _ -> fail "expected None for unknown tool"
 
 (* ============================================================
+   Security Regression Tests
+   ============================================================ *)
+
+(** Compile-time regression: emit_heartbeat_task must not accept ~auth_token.
+    If someone re-adds the parameter, the explicit type annotation below will
+    cause a compile error because of a label mismatch. See #5310. *)
+let test_heartbeat_no_auth_token_signature () =
+  let _fn : agent:string -> goal:string -> context:string ->
+            allowed_tools:string list ->
+            ?board_id:string -> ?worker_mode:string ->
+            ?mcp_base_url:string -> ?session_id:string ->
+            ?decision_reason:string -> ?decision_confidence:float ->
+            unit -> unit =
+    Masc_mcp.A2a_tools.emit_heartbeat_task
+  in
+  check bool "emit_heartbeat_task has no auth_token parameter (#5310)" true true
+
+(* ============================================================
    Test Runners
    ============================================================ *)
 
@@ -161,5 +179,8 @@ let () =
       test_case "a2a_unsubscribe" `Quick test_dispatch_a2a_unsubscribe;
       test_case "poll_events" `Quick test_dispatch_poll_events;
       test_case "unknown" `Quick test_dispatch_unknown_tool;
+    ];
+    "security", [
+      test_case "heartbeat_no_auth_token (#5310)" `Quick test_heartbeat_no_auth_token_signature;
     ];
   ]

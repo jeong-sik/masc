@@ -503,6 +503,8 @@
    masc_eio_env
    discovery_cache
    observability_redact
+   url_utils
+   provider_label_utils
    oas_model_resolve
    context_compact_oas
    verifier_core

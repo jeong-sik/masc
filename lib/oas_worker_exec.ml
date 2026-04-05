@@ -112,17 +112,22 @@ let proof_result_status_to_string status =
 
 (** Resolve a model label string to an OAS Provider.config.
     Uses OAS Cascade_config.parse_model_string (Provider_registry SSOT).
-    Falls back to glm when parsing fails. *)
+    Falls back to default local provider when parsing fails. *)
 let resolve_provider_of_label (label : string) : Oas.Provider.config =
   match Llm_provider.Cascade_config.parse_model_string label with
   | Some pc -> Oas.Provider.config_of_provider_config pc
   | None ->
-    Oas.Provider.config_of_provider_config
-      (Llm_provider.Provider_config.make
-         ~kind:Llm_provider.Provider_config.OpenAI_compat
-         ~model_id:"auto"
-         ~base_url:(Llm_provider.Provider_registry.next_llama_endpoint ())
-         ~request_path:"/v1/chat/completions" ())
+    let fallback = Provider_adapter.default_local_fallback_label () in
+    match Llm_provider.Cascade_config.parse_model_string fallback with
+    | Some pc -> Oas.Provider.config_of_provider_config pc
+    | None ->
+      (* Failsafe: use "auto" sentinel rather than the unparseable label. *)
+      Oas.Provider.config_of_provider_config
+        (Llm_provider.Provider_config.make
+           ~kind:Llm_provider.Provider_config.OpenAI_compat
+           ~model_id:"auto"
+           ~base_url:(Llm_provider.Provider_registry.next_llama_endpoint ())
+           ~request_path:"/v1/chat/completions" ())
 
 (* ================================================================ *)
 (* Internal: event publishing                                        *)

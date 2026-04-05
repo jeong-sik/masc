@@ -150,20 +150,17 @@ let endpoint_url_for_provider provider =
 
 let default_model_for_provider provider =
   match Provider_adapter.resolve_direct_adapter provider with
-  | Some { runtime_kind = Provider_adapter.Local; _ } ->
-    (match Provider_adapter.explicit_llama_model_id_result () with
-     | Ok model_id -> trim_nonempty model_id
-     | Error _ ->
-       (match trim_nonempty Env_config_runtime.Llama.default_model with
-        | Some value when value <> "explicit-model-required" -> Some value
-        | _ -> None))
-  | Some { runtime_kind = Provider_adapter.Direct_api; _ } -> Some "auto"
+  | Some { canonical_name; _ } when canonical_name = Provider_adapter.cn_llama -> (
+      match Provider_adapter.explicit_llama_model_id_result () with
+      | Ok model_id -> trim_nonempty model_id
+      | Error _ -> None)
+  | Some { default_model_id; _ } -> default_model_id
   | None -> None
 
 let candidate_models_for_provider provider =
   match Provider_adapter.resolve_direct_adapter provider with
-  | Some { runtime_kind = Provider_adapter.Local; _ } -> []
-  | Some { runtime_kind = Provider_adapter.Direct_api; _ } -> ["auto"]
+  | Some { canonical_name; _ } when canonical_name = Provider_adapter.cn_llama -> []
+  | Some _ -> [ "auto" ]
   | None -> []
 
 let llama_snapshot () =

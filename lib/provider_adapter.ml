@@ -57,6 +57,10 @@ type gemini_direct_auth =
 let google_cloud_project_env = "GOOGLE_CLOUD_PROJECT"
 let google_cloud_location_env = "GOOGLE_CLOUD_LOCATION"
 
+let string_of_runtime_kind = function
+  | Local -> "local"
+  | Direct_api -> "direct_api"
+
 let string_of_auth_mode = function
   | No_auth -> "none"
   | Api_key env_name -> "api_key:" ^ env_name
@@ -67,22 +71,6 @@ let string_of_voice_transport = function
   | Voice_openai_compat -> "openai_compat"
   | Voice_elevenlabs_direct -> "elevenlabs_direct"
   | Voice_mcp -> "voice_mcp"
-
-(** Map OAS Provider_config.provider_kind to MASC adapter canonical_name.
-    NOTE: OAS now exports Provider_config.string_of_provider_kind (wire-format names).
-    This MASC-specific mapping exists only for backward-compatible adapter names.
-    Callers should prefer the OAS canonical version where possible.
-    TODO: remove after oas#623 pin update. *)
-let string_of_provider_kind
-    : Llm_provider.Provider_config.provider_kind -> string
-  =
-  fun kind ->
-    match kind with
-    | Anthropic -> "claude-api"
-    | OpenAI_compat -> "codex-api"
-    | Gemini -> "gemini-api"
-    | Glm -> "glm"
-    | Claude_code -> "claude-code"
 
 let normalize_label label = String.trim label |> String.lowercase_ascii
 
@@ -266,6 +254,10 @@ let is_known_provider name =
     For a broader "known provider" predicate, use {!is_known_provider}. *)
 let is_spawnable_agent name =
   resolve_spawn_key name <> None
+
+let spawnable_canonical_names () =
+  direct_adapters
+  |> List.filter_map (fun a -> if a.spawn_key <> None then Some a.canonical_name else None)
 
 (** All agent voices as (canonical_name, voice_name) pairs.
     For backward compatibility with voice_bridge_core. *)

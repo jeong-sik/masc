@@ -73,6 +73,14 @@ let known_shared_agent_keeper_tool_names : string list =
     "masc_code_edit";
     "masc_code_shell";
     "masc_code_git";
+    "masc_status";
+    "masc_tasks";
+    "masc_claim_next";
+    "masc_plan_set_task";
+    "masc_transition";
+    "masc_add_task";
+    "masc_broadcast";
+    "masc_heartbeat";
   ]
 
 let test_known_shared_tools_exist_on_agent_surface () =

@@ -295,8 +295,8 @@ let make_hooks
           | [] -> "<none>"
           | names -> String.concat ", " names
         in
-        if consecutive_idle_turns >= 3 then begin
-          Log.Keeper.warn "keeper:%s idle_turns=%d repeated_tools=[%s] — requesting stop"
+        if consecutive_idle_turns >= 2 then begin
+          Log.Keeper.warn "keeper:%s idle_turns=%d repeated_tools=[%s] — requesting stop (threshold=2, max_idle_turns=3)"
             (!meta_ref).name consecutive_idle_turns tools_str;
           Agent_sdk.Hooks.Skip
         end else begin

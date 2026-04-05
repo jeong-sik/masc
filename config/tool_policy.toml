@@ -4,9 +4,8 @@
 # Presets are composed from groups. Each group is a named list of tool names.
 #
 # Groups with `shard = "..."` resolve tool names from Tool_shard at runtime.
-# MASC entries referenced by `masc_groups`/`masc_tools` are filtered later by
-# `masc_filter` in Keeper_tool_policy at runtime; the TOML loader does not
-# perform that filtering itself.
+# MASC groups are filtered via masc_filter in preset_allowlist: only tools
+# that were injected by inject_masc_schemas at startup are included.
 #
 # To add a tool to a preset: add it to a group, then reference that group
 # in the preset's `groups` list.

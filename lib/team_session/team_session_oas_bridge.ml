@@ -620,7 +620,8 @@ let planned_worker_to_entry_with_state
         if syn = "" then t.description
         else t.description ^ " " ^ syn
       in
-      Oas.Tool_index.{ name = t.name; description; group = None }
+      (* synonyms remain in description; aliases migration is keeper-specific *)
+      Oas.Tool_index.{ name = t.name; description; group = None; aliases = [] }
     ) scoped_masc_tools in
     Oas.Tool_index.build entries
   in

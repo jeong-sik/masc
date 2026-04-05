@@ -84,6 +84,16 @@ let cn_gemini = "gemini-api"
 let cn_glm = "glm"
 let cn_openrouter = "openrouter"
 
+(** SSOT cascade prefix for local llama-server instances.
+    All cascade label construction for local models must use this constant.
+    Format: [local_cascade_prefix ^ ":" ^ model_id] → e.g. "llama:qwen3.5" *)
+let local_cascade_prefix = cn_llama
+
+(** Build a cascade model label for a local model.
+    Single entry point — other modules must not concatenate prefix manually. *)
+let make_local_label (model_id : string) : string =
+  local_cascade_prefix ^ ":" ^ model_id
+
 (** Map OAS Provider_config.provider_kind to MASC adapter canonical_name.
     Note: OpenAI_compat maps to codex-api (cloud); llama (local) uses the
     same provider_kind but is identified by endpoint, not by this function. *)
@@ -474,7 +484,8 @@ let voice_endpoint_supports_http_tts (endpoint : Voice_config.endpoint) =
   voice_adapter_for_endpoint endpoint
   |> voice_transport_supports_http_tts
 
-let default_elevenlabs_base_url = "https://api.elevenlabs.io/v1"
+(** ElevenLabs base URL — SSOT is [Voice_config.default_elevenlabs_base_url]. *)
+let default_elevenlabs_base_url = Voice_config.default_elevenlabs_base_url
 
 let voice_endpoint_base_url (endpoint : Voice_config.endpoint) =
   match voice_adapter_for_endpoint endpoint with
@@ -662,7 +673,7 @@ let explicit_llama_model_id () =
   | Error msg -> invalid_arg msg
 
 let explicit_llama_model_label_result () =
-  Result.map (fun model_id -> "llama:" ^ model_id) (explicit_llama_model_id_result ())
+  Result.map make_local_label (explicit_llama_model_id_result ())
 
 let explicit_llama_model_label () =
   match explicit_llama_model_label_result () with

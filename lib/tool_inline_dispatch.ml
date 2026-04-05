@@ -217,7 +217,7 @@ let dispatch (ctx : context) ~(name : string) : result option =
         | "llama", None -> Error "model is required when agent_name=llama"
         | "llama", Some raw ->
             let spec_name =
-              if String.contains raw ':' then raw else "llama:" ^ raw
+              if String.contains raw ':' then raw else Provider_adapter.make_local_label raw
             in
             (* Validate the label parses without retaining model_spec *)
             (match Llm_provider.Cascade_config.parse_model_string spec_name with Some _ -> Ok () | None -> Error "invalid model spec")

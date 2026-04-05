@@ -21,7 +21,10 @@ type adapter = {
   auth_mode : auth_mode;
   aliases : string list;
   spawn_key : string option;       (** Key into Spawn.default_configs. None = not spawnable via CLI. *)
-  cascade_prefix : string;         (** OAS cascade model prefix (e.g. "claude", "openai"). Used in "prefix:model_id" labels. *)
+  cascade_prefix : string;         (** OAS cascade model prefix (e.g. "claude", "openai").
+                                       CONTRACT: Must match the prefix used by OAS Cascade_config 
+                                       and Provider_registry to identify and route model requests.
+                                       This is the primary linkage boundary between MASC and OAS. *)
   default_voice : string option;   (** Default TTS voice name. None = no voice assignment. *)
   endpoint_url : string option;    (** Base URL for the provider API. *)
   default_model_id : string option; (** Default model ID for the provider. *)

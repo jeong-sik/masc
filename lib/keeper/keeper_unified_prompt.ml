@@ -359,6 +359,15 @@ let build_prompt ~(meta : Keeper_types.keeper_meta)
     Buffer.add_string ubuf "\n### Autonomous Trigger\n";
     Buffer.add_string ubuf (String.concat "\n" autonomous_trigger);
     Buffer.add_string ubuf "\n");
+  (* Tool inventory — show the LLM which tools it can call this cycle *)
+  let allowed_tools = Keeper_tool_policy.keeper_allowed_tool_names meta in
+  let keeper_tools =
+    List.filter (fun n -> String.starts_with ~prefix:"keeper_" n) allowed_tools
+  in
+  if keeper_tools <> [] then (
+    Buffer.add_string ubuf "\n### Your Tools\n";
+    Buffer.add_string ubuf (String.concat ", " keeper_tools);
+    Buffer.add_string ubuf "\n");
   let routes = actionable_routes ~meta observation in
   if routes <> [] then (
     Buffer.add_string ubuf "\n### Actionable Routes\n";

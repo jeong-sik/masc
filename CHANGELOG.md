@@ -1,6 +1,12 @@
 # Changelog
 
 
+## [2.235.1] - 2026-04-05
+
+### Fixed
+- **Shutdown diagnostics** -- add per-phase elapsed time logging to graceful shutdown for 10s timeout diagnosis (#5203, closes #5014).
+- **Context overflow warning** -- warn when discovered LLM context is below 16K to prevent repeated keeper turn failures (#5212, partially addresses #5053).
+
 ## [2.235.0] - 2026-04-05
 
 ### Added

@@ -295,13 +295,16 @@ let make_hooks
           | [] -> "<none>"
           | names -> String.concat ", " names
         in
-        if consecutive_idle_turns >= 3 then
-          Log.Keeper.warn "keeper:%s idle_turns=%d repeated_tools=[%s]"
-            (!meta_ref).name consecutive_idle_turns tools_str
-        else
+        if consecutive_idle_turns >= 3 then begin
+          Log.Keeper.info
+            "keeper:%s idle_turns=%d repeated_tools=[%s] — graceful exit (Skip)"
+            (!meta_ref).name consecutive_idle_turns tools_str;
+          Agent_sdk.Hooks.Skip
+        end else begin
           Log.Keeper.debug "keeper:%s idle_turns=%d tools=[%s]"
             (!meta_ref).name consecutive_idle_turns tools_str;
-        Agent_sdk.Hooks.Continue
+          Agent_sdk.Hooks.Continue
+        end
       | _ -> Agent_sdk.Hooks.Continue);
   }
 

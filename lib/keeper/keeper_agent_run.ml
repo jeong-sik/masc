@@ -521,11 +521,11 @@ let run_turn
       else if String.starts_with ~prefix:"masc_" name then Some "masc_core"
       else None
     in
-    let kr_kw = match List.assoc_opt name korean_keywords with
-      | Some kw -> " " ^ kw
-      | None -> ""
+    let aliases = match List.assoc_opt name korean_keywords with
+      | Some kw -> String.split_on_char ' ' kw
+      | None -> []
     in
-    Agent_sdk.Tool_index.{ name; description = t.schema.description ^ kr_kw; group }
+    Agent_sdk.Tool_index.{ name; description = t.schema.description; group; aliases }
   ) keeper_tools in
   (* Preset-scoped BM25 index: only index tools within the keeper's preset
      universe, not the full 244+ universe.  This reduces noise and improves

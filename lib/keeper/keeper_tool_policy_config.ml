@@ -113,7 +113,7 @@ let parse_presets
 let load ~base_path : (t, string) result =
   let path = Filename.concat base_path "config/tool_policy.toml" in
   match Safe_ops.read_file_safe path with
-  | Error _ -> Error (Printf.sprintf "tool policy config not found: %s" path)
+  | Error msg -> Error (Printf.sprintf "tool policy config not found: %s: %s" path msg)
   | Ok content ->
     match Keeper_toml_loader.parse_toml content with
     | Error msg -> Error (Printf.sprintf "tool policy config parse error: %s" msg)
@@ -155,8 +155,8 @@ let resolve_group_source = function
     | Some shard ->
       shard.tools |> List.map (fun (t : Types.tool_schema) -> t.name)
     | None ->
-      Log.Keeper.warn "tool_policy_config: shard '%s' not found, resolving to empty" shard_name;
-      []
+      invalid_arg
+        (Printf.sprintf "tool_policy_config: shard '%s' not found" shard_name)
 
 let resolve_group (config : t) (name : string) : string list option =
   match Hashtbl.find_opt config.groups name with

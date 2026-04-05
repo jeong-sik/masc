@@ -514,9 +514,11 @@ let run_keepalive_unified_turn
             if String_util.contains_substring e "Eio switch not available"
                || String_util.contains_substring e "Eio net not available"
             then
-              raise (Keeper_registry.Keeper_heartbeat_failure
-                (Printf.sprintf "%s: fatal environment error: %s"
-                   meta_after_observe.name e));
+              raise (Keeper_registry.Keeper_heartbeat_failure {
+                reason = Keeper_registry.Exception
+                  (Printf.sprintf "fatal environment error: %s" e);
+                keeper_name = meta_after_observe.name;
+              });
             (match read_meta ctx.config meta_after_observe.name with
              | Ok (Some latest) -> latest
              | _ -> meta_after_observe)

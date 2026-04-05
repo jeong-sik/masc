@@ -9,10 +9,19 @@ let lane_pressure_ctx_ratio = 0.80
 include Dashboard_mission_agents
 
 let keeper_tool_audit_json_fields config keeper agent_name =
-  (* Compatibility-only derived allowlist. Keeper detail SSOT must source
-     authored/effective policy from /api/v1/keepers/:name/config instead. *)
+  let keeper_name =
+    match trim_to_option (string_field "name" keeper) with
+    | Some n -> n
+    | None -> agent_name
+  in
   let fallback_allowed =
-    string_list_of_json (member_assoc "allowed_tool_names" keeper)
+    let from_json = string_list_of_json (member_assoc "allowed_tool_names" keeper) in
+    if from_json <> [] then from_json
+    else
+      (* Realtime fallback: compute from registry meta when JSON field is empty *)
+      match Keeper_registry.get ~base_path:(Room.base_path config) keeper_name with
+      | Some entry -> Keeper_exec_tools.keeper_allowed_tool_names entry.meta
+      | None -> []
   in
   let fallback_latest =
     string_list_of_json (member_assoc "latest_tool_names" keeper)

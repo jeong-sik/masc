@@ -30,7 +30,8 @@ let on_keeper_tool_call
 ;;
 
 (** Callback for keeper_tool_search.  Set in [keeper_agent_run.ml] after
-    building the BM25 tool index.  Default: returns empty results. *)
+    building the BM25 tool index.  Default: returns an error indicating
+    the search index has not been initialized yet. *)
 let tool_search_fn
   : (query:string -> max_results:int -> Yojson.Safe.t) ref
   =
@@ -947,8 +948,7 @@ let execute_keeper_tool_call
         min 10 (max 1 (Safe_ops.json_int ~default:5 "max_results" args))
       in
       if query = "" then
-        Yojson.Safe.to_string
-          (`Assoc [ ("error", `String "query is required") ])
+        error_json "query is required"
       else
         Yojson.Safe.to_string (!tool_search_fn ~query ~max_results)
     | "keeper_tools_list" -> keeper_tools_list_json ~meta

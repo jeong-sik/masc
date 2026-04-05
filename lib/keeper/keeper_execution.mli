@@ -94,14 +94,6 @@ val build_keeper_system_prompt :
 (** Append trait clause to existing trait string. *)
 val append_trait_clause : base:string -> clause:string -> string
 
-(** Apply self-model drift to keeper metadata.
-    Returns updated meta, whether drift occurred, and optional reason. *)
-val apply_self_model_drift :
-  meta:keeper_meta ->
-  user_message:string ->
-  work_kind:string ->
-  keeper_meta * bool * string option
-
 (** {1 Text Processing} *)
 
 (** Remove [STATE]..[/STATE] blocks from text. *)

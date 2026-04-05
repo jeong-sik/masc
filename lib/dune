@@ -118,6 +118,9 @@
    server_routes_http_pages
    server_routes_http_runtime
    server_routes_http_keeper_stream
+   server_dashboard_http_keeper_api
+   server_dashboard_http_agent_api
+   server_dashboard_http_delete_actions
    server_routes_http_routes_frontend
    server_routes_http_routes_room
    server_routes_http_routes_dashboard

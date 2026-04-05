@@ -146,30 +146,26 @@ let escape_applescript s =
   ) s;
   Buffer.contents buf
 
-(** Agent emoji mapping for visual distinction.
-    Agent names come from spawn_key in Provider_adapter.direct_adapters.
-    Use {!register_agent_emoji} at startup to add provider-specific entries
-    without modifying this file. *)
-let agent_emoji_table : (string, string) Hashtbl.t =
-  let t = Hashtbl.create 8 in
-  List.iter (fun (k, v) -> Hashtbl.replace t k v)
+(** Agent emoji lookup and registration.
+    [register_agent_emoji name emoji] adds or updates an entry.
+    Call at startup to extend the table without modifying this file.
+    [agent_emoji name] returns the emoji for [name], or "🤖" as default.
+    The backing table is private; only these two functions are exposed. *)
+let register_agent_emoji, agent_emoji =
+  let table : (string, string) Hashtbl.t = Hashtbl.create 8 in
+  List.iter (fun (k, v) -> Hashtbl.replace table k v)
     [ ("claude", "🟣");
       ("gemini", "🔵");
       ("codex",  "🟢");
       ("llama",  "🦙");
       ("system", "⚙️") ];
-  t
-
-(** Register an agent-name → emoji mapping at startup.
-    Call this from your provider adapter's init hook to extend the table
-    without touching notify.ml. *)
-let register_agent_emoji name emoji =
-  Hashtbl.replace agent_emoji_table name emoji
-
-let agent_emoji name =
-  match Hashtbl.find_opt agent_emoji_table name with
-  | Some emoji -> emoji
-  | None -> "🤖"
+  let register_agent_emoji name emoji = Hashtbl.replace table name emoji in
+  let agent_emoji name =
+    match Hashtbl.find_opt table name with
+    | Some emoji -> emoji
+    | None -> "🤖"
+  in
+  register_agent_emoji, agent_emoji
 
 (** Send notification via terminal-notifier (preferred) *)
 let send_via_terminal_notifier ~title ~subtitle ~message ~sound ~focus_cmd =

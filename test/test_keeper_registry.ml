@@ -2,6 +2,7 @@ open Alcotest
 
 module R = Masc_mcp.Keeper_registry
 module Keeper_types = Masc_mcp.Keeper_types
+module KSM = Masc_mcp.Keeper_state_machine
 
 let bp = "/tmp/test"
 
@@ -28,7 +29,7 @@ let test_register_and_get () =
   let meta = make_meta "k1" in
   let entry = R.register ~base_path:bp "k1" meta in
   check string "name" "k1" entry.name;
-  check string "state" "running" (R.state_to_string entry.state);
+  check string "state" "running" (R.state_to_string entry.phase);
   match R.get ~base_path:bp "k1" with
   | None -> fail "expected entry for k1"
   | Some e -> check string "get name" "k1" e.name
@@ -61,24 +62,25 @@ let test_set_state () =
   R.clear ();
   let _entry = R.register ~base_path:bp "k4" (make_meta "k4") in
   check bool "running" true (R.is_running ~base_path:bp "k4");
-  R.set_state ~base_path:bp "k4" R.Paused;
+  ignore (R.dispatch_event ~base_path:bp "k4" KSM.Operator_pause);
   check bool "not running after pause" false (R.is_running ~base_path:bp "k4");
   match R.get ~base_path:bp "k4" with
   | None -> fail "expected k4"
-  | Some e -> check string "state" "paused" (R.state_to_string e.state)
+  | Some e -> check string "state" "paused" (R.state_to_string e.phase)
 
 let test_extended_states () =
   R.clear ();
   let _entry = R.register ~base_path:bp "k4x" (make_meta "k4x") in
-  R.set_state ~base_path:bp "k4x" R.Crashed;
+  ignore (R.dispatch_event ~base_path:bp "k4x"
+    (KSM.Fiber_terminated { outcome = "test" }));
   (match R.get ~base_path:bp "k4x" with
    | None -> fail "expected k4x"
-   | Some e -> check string "crashed string" "crashed" (R.state_to_string e.state));
+   | Some e -> check string "crashed string" "crashed" (R.state_to_string e.phase));
   R.mark_dead ~base_path:bp "k4x" ~at:123.0;
   match R.get ~base_path:bp "k4x" with
   | None -> fail "expected k4x"
   | Some e ->
-      check string "dead string" "dead" (R.state_to_string e.state);
+      check string "dead string" "dead" (R.state_to_string e.phase);
       check (option (float 0.01)) "dead_since set" (Some 123.0) e.dead_since_ts
 
 let test_count_running () =
@@ -87,7 +89,7 @@ let test_count_running () =
   let _e2 = R.register ~base_path:bp "r2" (make_meta "r2") in
   let _e3 = R.register ~base_path:bp "r3" (make_meta "r3") in
   check int "3 running" 3 (R.count_running ());
-  R.set_state ~base_path:bp "r2" R.Paused;
+  ignore (R.dispatch_event ~base_path:bp "r2" KSM.Operator_pause);
   check int "2 running" 2 (R.count_running ());
   R.unregister ~base_path:bp "r1";
   check int "1 running" 1 (R.count_running ())
@@ -99,7 +101,7 @@ let test_count_running_atomic_transitions () =
   ignore (R.register ~base_path:bp2 "fast2" (make_meta "fast2"));
   check int "global fast-path count" 2 (R.count_running ());
   check int "scoped count stays exact" 1 (R.count_running ~base_path:bp ());
-  R.set_state ~base_path:bp2 "fast2" R.Paused;
+  ignore (R.dispatch_event ~base_path:bp2 "fast2" KSM.Operator_pause);
   check int "pause decrements global fast-path" 1 (R.count_running ());
   ignore (R.register ~base_path:bp "fast1" (make_meta "fast1"));
   check int "replacing running entry keeps count stable" 1 (R.count_running ());
@@ -150,7 +152,7 @@ let test_get_exn_not_found () =
 let test_noop_on_missing () =
   R.clear ();
   R.update_meta ~base_path:bp "ghost" (make_meta "ghost");
-  R.set_state ~base_path:bp "ghost" R.Paused;
+  ignore (R.dispatch_event ~base_path:bp "ghost" KSM.Operator_pause);
   R.record_restart ~base_path:bp "ghost";
   R.record_error ~base_path:bp "ghost" "err";
   R.record_crash ~base_path:bp "ghost" 0.0 "crash";
@@ -221,8 +223,9 @@ let test_wakeup_all () =
   let e2 = R.register ~base_path:bp "wa2" (make_meta "wa2") in
   let e3 = R.register ~base_path:bp "wa3" (make_meta "wa3") in
   let e4 = R.register ~base_path:bp "wa4" (make_meta "wa4") in
-  R.set_state ~base_path:bp "wa3" R.Stopped;
-  R.set_state ~base_path:bp "wa4" R.Paused;
+  ignore (R.dispatch_event ~base_path:bp "wa3" KSM.Stop_requested);
+  ignore (R.dispatch_event ~base_path:bp "wa3" KSM.Drain_complete);
+  ignore (R.dispatch_event ~base_path:bp "wa4" KSM.Operator_pause);
   R.wakeup_all ();
   check bool "wa1 woken" true (Atomic.get e1.fiber_wakeup);
   check bool "wa2 woken" true (Atomic.get e2.fiber_wakeup);
@@ -261,7 +264,8 @@ let test_fiber_health_crashed () =
 let test_fiber_health_crashed_state_without_done_signal () =
   R.clear ();
   let _entry = R.register ~base_path:bp "fh3-state" (make_meta "fh3-state") in
-  R.set_state ~base_path:bp "fh3-state" R.Crashed;
+  ignore (R.dispatch_event ~base_path:bp "fh3-state"
+    (KSM.Fiber_terminated { outcome = "test" }));
   match R.fiber_health_of ~base_path:bp "fh3-state" with
   | Keeper_types.Fiber_zombie -> ()
   | _ -> fail "expected Fiber_zombie for explicit crashed state"

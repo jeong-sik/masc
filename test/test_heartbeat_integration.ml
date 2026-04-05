@@ -17,6 +17,7 @@ open Alcotest
 module R = Masc_mcp.Keeper_registry
 module Sup = Masc_mcp.Keeper_supervisor
 module KT = Masc_mcp.Keeper_types
+module KSM = Masc_mcp.Keeper_state_machine
 module Cfg = Env_config
 
 let bp = "/tmp/test-heartbeat-integ"
@@ -75,7 +76,8 @@ let test_crash_heartbeat_failure () =
   let reason = R.Heartbeat_consecutive_failures 5 in
   let reason_str = R.failure_reason_to_string reason in
   R.set_failure_reason ~base_path:bp "hb-crash" (Some reason);
-  R.set_state ~base_path:bp "hb-crash" R.Crashed;
+  ignore (R.dispatch_event ~base_path:bp "hb-crash"
+    (KSM.Fiber_terminated { outcome = "heartbeat_failure" }));
   R.record_crash ~base_path:bp "hb-crash" 1000.0 reason_str;
   R.record_error ~base_path:bp "hb-crash" reason_str;
   Eio.Promise.resolve reg.done_r (`Crashed reason_str);
@@ -83,7 +85,7 @@ let test_crash_heartbeat_failure () =
   (match R.get ~base_path:bp "hb-crash" with
    | None -> fail "expected hb-crash in registry"
    | Some e ->
-     check string "state" "crashed" (R.state_to_string e.state);
+     check string "state" "crashed" (R.state_to_string e.phase);
      (match e.last_failure_reason with
       | Some (R.Heartbeat_consecutive_failures n) ->
         check int "failure count preserved" 5 n
@@ -106,14 +108,15 @@ let test_crash_generic_exception () =
   let fr = R.Exception exn_str in
   let reason_str = R.failure_reason_to_string fr in
   R.set_failure_reason ~base_path:bp "exn-crash" (Some fr);
-  R.set_state ~base_path:bp "exn-crash" R.Crashed;
+  ignore (R.dispatch_event ~base_path:bp "exn-crash"
+    (KSM.Fiber_terminated { outcome = "exception" }));
   R.record_crash ~base_path:bp "exn-crash" 1001.0 reason_str;
   R.record_error ~base_path:bp "exn-crash" reason_str;
   Eio.Promise.resolve reg.done_r (`Crashed reason_str);
   match R.get ~base_path:bp "exn-crash" with
   | None -> fail "expected exn-crash"
   | Some e ->
-    check string "state" "crashed" (R.state_to_string e.state);
+    check string "state" "crashed" (R.state_to_string e.phase);
     (match e.last_failure_reason with
      | Some (R.Exception s) ->
        check string "exception text" exn_str s
@@ -130,7 +133,8 @@ let test_crash_fiber_unresolved () =
   R.set_failure_reason ~base_path:bp "unresolved" (Some fr);
   R.record_crash ~base_path:bp "unresolved" 1002.0 reason_str;
   R.record_error ~base_path:bp "unresolved" reason_str;
-  R.set_state ~base_path:bp "unresolved" R.Crashed;
+  ignore (R.dispatch_event ~base_path:bp "unresolved"
+    (KSM.Fiber_terminated { outcome = "unresolved" }));
   Eio.Promise.resolve reg.done_r (`Crashed reason_str);
   match R.get ~base_path:bp "unresolved" with
   | None -> fail "expected unresolved"
@@ -138,7 +142,7 @@ let test_crash_fiber_unresolved () =
     (match e.last_failure_reason with
      | Some R.Fiber_unresolved -> ()
      | _ -> fail "expected Fiber_unresolved reason");
-    check string "state" "crashed" (R.state_to_string e.state)
+    check string "state" "crashed" (R.state_to_string e.phase)
 
 (* ══════════════════════════════════════════════════════════
    2. Dead tombstone lifecycle
@@ -152,10 +156,11 @@ let test_dead_tombstone_full_lifecycle () =
   let meta = make_meta "mortal" in
   let reg = R.register ~base_path:bp "mortal" meta in
   check string "initially running" "running"
-    (R.state_to_string (Option.get (R.get ~base_path:bp "mortal")).state);
+    (R.state_to_string (Option.get (R.get ~base_path:bp "mortal")).phase);
   (* Crash *)
   Eio.Promise.resolve reg.done_r (`Crashed "test");
-  R.set_state ~base_path:bp "mortal" R.Crashed;
+  ignore (R.dispatch_event ~base_path:bp "mortal"
+    (KSM.Fiber_terminated { outcome = "test" }));
   (* Simulate budget exhaustion *)
   let max_restarts = Cfg.KeeperSupervisor.max_restarts in
   R.restore_supervisor_state ~base_path:bp "mortal"
@@ -164,22 +169,23 @@ let test_dead_tombstone_full_lifecycle () =
    | Some e -> check bool "budget exhausted" true (e.restart_count >= max_restarts)
    | None -> fail "expected mortal");
   (* Transition to Dead (what sweep does) *)
-  R.set_state ~base_path:bp "mortal" R.Dead;
+  R.mark_dead ~base_path:bp "mortal" ~at:(Unix.gettimeofday ());
   (* Invariant checks *)
   check bool "Dead is registered" true (R.is_registered ~base_path:bp "mortal");
   check bool "Dead is not running" false (R.is_running ~base_path:bp "mortal");
   check int "running count 0" 0 (R.count_running ~base_path:bp ());
   (* Dead → Running blocked *)
-  R.set_state ~base_path:bp "mortal" R.Running;
+  ignore (R.dispatch_event ~base_path:bp "mortal" KSM.Fiber_started);
   (match R.get ~base_path:bp "mortal" with
    | Some e -> check string "still dead after Running attempt" "dead"
-       (R.state_to_string e.state)
+       (R.state_to_string e.phase)
    | None -> fail "expected mortal");
   (* Dead → Crashed blocked *)
-  R.set_state ~base_path:bp "mortal" R.Crashed;
+  ignore (R.dispatch_event ~base_path:bp "mortal"
+    (KSM.Fiber_terminated { outcome = "test" }));
   (match R.get ~base_path:bp "mortal" with
    | Some e -> check string "still dead after Crashed attempt" "dead"
-       (R.state_to_string e.state)
+       (R.state_to_string e.phase)
    | None -> fail "expected mortal");
   (* Only unregister removes Dead entry *)
   R.unregister ~base_path:bp "mortal";
@@ -199,7 +205,8 @@ let test_self_preservation_suppresses_dominant () =
   let names = ["sp-hb1"; "sp-hb2"; "sp-hb3"; "sp-exn"] in
   let entries = List.map (fun name ->
     let _reg = R.register ~base_path:bp name (make_meta name) in
-    R.set_state ~base_path:bp name R.Crashed;
+    ignore (R.dispatch_event ~base_path:bp name
+      (KSM.Fiber_terminated { outcome = "test" }));
     let reason = if String.length name > 4 && String.sub name 3 2 = "hb"
       then Some (R.Heartbeat_consecutive_failures 5)
       else Some (R.Exception "timeout") in
@@ -228,7 +235,8 @@ let test_self_preservation_suppresses_dominant () =
 let test_self_preservation_below_threshold () =
   R.clear ();
   let _reg = R.register ~base_path:bp "lone" (make_meta "lone") in
-  R.set_state ~base_path:bp "lone" R.Crashed;
+  ignore (R.dispatch_event ~base_path:bp "lone"
+    (KSM.Fiber_terminated { outcome = "test" }));
   R.set_failure_reason ~base_path:bp "lone"
     (Some (R.Heartbeat_consecutive_failures 3));
   let entry = match R.get ~base_path:bp "lone" with
@@ -242,7 +250,8 @@ let test_self_preservation_below_threshold () =
 let test_self_preservation_min_candidates_not_met () =
   R.clear ();
   let _reg = R.register ~base_path:bp "solo" (make_meta "solo") in
-  R.set_state ~base_path:bp "solo" R.Crashed;
+  ignore (R.dispatch_event ~base_path:bp "solo"
+    (KSM.Fiber_terminated { outcome = "test" }));
   R.set_failure_reason ~base_path:bp "solo"
     (Some (R.Heartbeat_consecutive_failures 3));
   let entry = match R.get ~base_path:bp "solo" with
@@ -266,39 +275,44 @@ let test_reconcile_predicate_sweep_owned () =
   let _e = R.register ~base_path:bp "r1" (make_meta "r1") in
   (match R.get ~base_path:bp "r1" with
    | Some e ->
-     check string "running" "running" (R.state_to_string e.state);
+     check string "running" "running" (R.state_to_string e.phase);
      check bool "sweep-owned" true
-       (e.state = R.Running || e.state = R.Paused
-        || e.state = R.Crashed || e.state = R.Dead)
+       (e.phase = KSM.Running || e.phase = KSM.Paused
+        || e.phase = KSM.Crashed || e.phase = KSM.Dead)
    | None -> fail "expected r1");
   (* Crashed = sweep-owned *)
-  R.set_state ~base_path:bp "r1" R.Crashed;
+  ignore (R.dispatch_event ~base_path:bp "r1"
+    (KSM.Fiber_terminated { outcome = "test" }));
   (match R.get ~base_path:bp "r1" with
    | Some e -> check bool "crashed is sweep-owned" true
-       (e.state = R.Crashed)
+       (e.phase = KSM.Crashed)
    | None -> fail "expected r1");
   (* Dead = sweep-owned *)
-  R.set_state ~base_path:bp "r1" R.Dead;
+  R.mark_dead ~base_path:bp "r1" ~at:(Unix.gettimeofday ());
   (match R.get ~base_path:bp "r1" with
    | Some e -> check bool "dead is sweep-owned" true
-       (e.state = R.Dead)
+       (e.phase = KSM.Dead)
    | None -> fail "expected r1")
 
 let test_reconcile_predicate_stopped_resolved () =
   R.clear ();
   let reg = R.register ~base_path:bp "s1" (make_meta "s1") in
-  R.set_state ~base_path:bp "s1" R.Stopped;
+  ignore (R.dispatch_event ~base_path:bp "s1" KSM.Stop_requested);
+  ignore (R.dispatch_event ~base_path:bp "s1" KSM.Drain_complete);
   Eio.Promise.resolve reg.done_r `Stopped;
   (* Stopped + resolved done_p = reconcile-eligible *)
   (match R.get ~base_path:bp "s1" with
    | Some e ->
-     check string "stopped" "stopped" (R.state_to_string e.state);
+     check string "stopped" "stopped" (R.state_to_string e.phase);
      check bool "done_p resolved" true
        (Option.is_some (Eio.Promise.peek e.done_p));
      (* dominated_by_sweep logic: Stopped with resolved → NOT dominated *)
-     let dominated = match e.state with
-       | R.Running | R.Paused | R.Crashed | R.Dead -> true
-       | R.Stopped -> Eio.Promise.peek e.done_p = None
+     let dominated = match e.phase with
+       | KSM.Running | KSM.Paused | KSM.Crashed | KSM.Dead -> true
+       | KSM.Failing | KSM.Compacting | KSM.HandingOff
+       | KSM.Draining | KSM.Restarting -> true
+       | KSM.Offline -> false
+       | KSM.Stopped -> Eio.Promise.peek e.done_p = None
      in
      check bool "not dominated (reconcile-eligible)" false dominated
    | None -> fail "expected s1")
@@ -306,16 +320,20 @@ let test_reconcile_predicate_stopped_resolved () =
 let test_reconcile_predicate_stopped_unresolved () =
   R.clear ();
   let _reg = R.register ~base_path:bp "s2" (make_meta "s2") in
-  R.set_state ~base_path:bp "s2" R.Stopped;
+  ignore (R.dispatch_event ~base_path:bp "s2" KSM.Stop_requested);
+  ignore (R.dispatch_event ~base_path:bp "s2" KSM.Drain_complete);
   (* Stopped + unresolved done_p = sweep will handle *)
   (match R.get ~base_path:bp "s2" with
    | Some e ->
-     check string "stopped" "stopped" (R.state_to_string e.state);
+     check string "stopped" "stopped" (R.state_to_string e.phase);
      check bool "done_p NOT resolved" true
        (Option.is_none (Eio.Promise.peek e.done_p));
-     let dominated = match e.state with
-       | R.Running | R.Paused | R.Crashed | R.Dead -> true
-       | R.Stopped -> Eio.Promise.peek e.done_p = None
+     let dominated = match e.phase with
+       | KSM.Running | KSM.Paused | KSM.Crashed | KSM.Dead -> true
+       | KSM.Failing | KSM.Compacting | KSM.HandingOff
+       | KSM.Draining | KSM.Restarting -> true
+       | KSM.Offline -> false
+       | KSM.Stopped -> Eio.Promise.peek e.done_p = None
      in
      check bool "dominated (sweep will handle)" true dominated
    | None -> fail "expected s2")
@@ -331,7 +349,8 @@ let test_restart_state_preservation () =
   let meta = make_meta "restartable" in
   let reg1 = R.register ~base_path:bp "restartable" meta in
   Eio.Promise.resolve reg1.done_r (`Crashed "first crash");
-  R.set_state ~base_path:bp "restartable" R.Crashed;
+  ignore (R.dispatch_event ~base_path:bp "restartable"
+    (KSM.Fiber_terminated { outcome = "first crash" }));
   R.record_crash ~base_path:bp "restartable" 100.0 "first crash";
   (* Simulate sweep restart: re-register then restore state *)
   let _reg2 = R.register ~base_path:bp "restartable" meta in
@@ -349,7 +368,7 @@ let test_restart_state_preservation () =
       (Option.is_none e.last_failure_reason);
     (* state should be Running after re-register *)
     check string "state running after restart" "running"
-      (R.state_to_string e.state)
+      (R.state_to_string e.phase)
 
 (* ══════════════════════════════════════════════════════════
    7. Turn failure → Crashed with Turn_consecutive_failures reason
@@ -364,14 +383,15 @@ let test_crash_turn_failures () =
   let reason = R.Turn_consecutive_failures 10 in
   let reason_str = R.failure_reason_to_string reason in
   R.set_failure_reason ~base_path:bp "turn-crash" (Some reason);
-  R.set_state ~base_path:bp "turn-crash" R.Crashed;
+  ignore (R.dispatch_event ~base_path:bp "turn-crash"
+    (KSM.Fiber_terminated { outcome = "turn failure" }));
   R.record_crash ~base_path:bp "turn-crash" 2000.0 reason_str;
   R.record_error ~base_path:bp "turn-crash" reason_str;
   Eio.Promise.resolve reg.done_r (`Crashed reason_str);
   match R.get ~base_path:bp "turn-crash" with
   | None -> fail "expected turn-crash"
   | Some e ->
-    check string "state crashed" "crashed" (R.state_to_string e.state);
+    check string "state crashed" "crashed" (R.state_to_string e.phase);
     (match e.last_failure_reason with
      | Some (R.Turn_consecutive_failures n) ->
        check int "turn failure count" 10 n
@@ -425,7 +445,7 @@ let test_direct_start_keepalive_resolves_done_on_stop () =
       match R.get ~base_path:config.base_path keeper_name with
       | None -> fail "expected direct-lifecycle registry entry"
       | Some entry ->
-        check string "state stopped" "stopped" (R.state_to_string entry.state);
+        check string "state stopped" "stopped" (R.state_to_string entry.phase);
         check bool "done promise resolved eventually" true stopped_resolved;
         (match Eio.Promise.peek entry.done_p with
          | Some `Stopped -> ()
@@ -441,7 +461,7 @@ let test_stop_keepalive_resolves_running_entry_immediately () =
   match R.get ~base_path:bp keeper_name with
   | None -> fail "expected manual-stop-entry in registry"
   | Some entry ->
-    check string "state stopped immediately" "stopped" (R.state_to_string entry.state);
+    check string "state stopped immediately" "stopped" (R.state_to_string entry.phase);
     (match Eio.Promise.peek reg.done_p with
      | Some `Stopped -> ()
      | Some (`Crashed reason) ->
@@ -453,13 +473,14 @@ let test_stop_keepalive_preserves_existing_crash_outcome () =
   let keeper_name = "crashed-before-stop" in
   let reg = R.register ~base_path:bp keeper_name (make_meta keeper_name) in
   let reason = "already crashed" in
-  R.set_state ~base_path:bp keeper_name R.Crashed;
+  ignore (R.dispatch_event ~base_path:bp keeper_name
+    (KSM.Fiber_terminated { outcome = "already crashed" }));
   Eio.Promise.resolve reg.done_r (`Crashed reason);
   Masc_mcp.Keeper_keepalive.stop_keepalive keeper_name;
   match R.get ~base_path:bp keeper_name with
   | None -> fail "expected crashed-before-stop in registry"
   | Some entry ->
-    check string "state remains crashed" "crashed" (R.state_to_string entry.state);
+    check string "state remains crashed" "crashed" (R.state_to_string entry.phase);
     (match Eio.Promise.peek entry.done_p with
      | Some (`Crashed msg) -> check string "crash reason preserved" reason msg
      | Some `Stopped -> fail "manual stop should not overwrite a crashed promise"

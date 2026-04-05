@@ -5,6 +5,7 @@ open Alcotest
 
 module R = Masc_mcp.Keeper_registry
 module KT = Masc_mcp.Keeper_types
+module KSM = Masc_mcp.Keeper_state_machine
 module Cfg = Env_config
 
 let bp = "/tmp/test-phase2"
@@ -29,29 +30,31 @@ let eio_test name fn =
 let test_state_to_string_crashed () =
   R.clear ();
   let _entry = R.register ~base_path:bp "k1" (make_meta "k1") in
-  R.set_state ~base_path:bp "k1" R.Crashed;
+  ignore (R.dispatch_event ~base_path:bp "k1"
+    (KSM.Fiber_terminated { outcome = "test" }));
   match R.get ~base_path:bp "k1" with
   | None -> fail "expected k1"
   | Some e ->
-    check string "state is crashed" "crashed" (R.state_to_string e.state)
+    check string "state is crashed" "crashed" (R.state_to_string e.phase)
 
 let test_state_to_string_dead () =
   R.clear ();
   let _entry = R.register ~base_path:bp "k1" (make_meta "k1") in
-  R.set_state ~base_path:bp "k1" R.Dead;
+  R.mark_dead ~base_path:bp "k1" ~at:(Unix.gettimeofday ());
   match R.get ~base_path:bp "k1" with
   | None -> fail "expected k1"
   | Some e ->
-    check string "state is dead" "dead" (R.state_to_string e.state)
+    check string "state is dead" "dead" (R.state_to_string e.phase)
 
 let test_running_count_crashed () =
   R.clear ();
   let _e1 = R.register ~base_path:bp "a" (make_meta "a") in
   let _e2 = R.register ~base_path:bp "b" (make_meta "b") in
   check int "2 running" 2 (R.count_running ());
-  R.set_state ~base_path:bp "a" R.Crashed;
+  ignore (R.dispatch_event ~base_path:bp "a"
+    (KSM.Fiber_terminated { outcome = "test" }));
   check int "1 running after crash" 1 (R.count_running ());
-  R.set_state ~base_path:bp "b" R.Dead;
+  R.mark_dead ~base_path:bp "b" ~at:(Unix.gettimeofday ());
   check int "0 running after dead" 0 (R.count_running ())
 
 (* ── is_registered ────────────────────────────────────── *)
@@ -64,13 +67,14 @@ let test_is_registered_running () =
 let test_is_registered_crashed () =
   R.clear ();
   let _e = R.register ~base_path:bp "k1" (make_meta "k1") in
-  R.set_state ~base_path:bp "k1" R.Crashed;
+  ignore (R.dispatch_event ~base_path:bp "k1"
+    (KSM.Fiber_terminated { outcome = "test" }));
   check bool "crashed → still registered" true (R.is_registered ~base_path:bp "k1")
 
 let test_is_registered_dead () =
   R.clear ();
   let _e = R.register ~base_path:bp "k1" (make_meta "k1") in
-  R.set_state ~base_path:bp "k1" R.Dead;
+  R.mark_dead ~base_path:bp "k1" ~at:(Unix.gettimeofday ());
   check bool "dead → still registered" true (R.is_registered ~base_path:bp "k1")
 
 let test_is_registered_unregistered () =
@@ -121,7 +125,8 @@ let test_state_transition_running_crashed_running () =
   R.clear ();
   let _e = R.register ~base_path:bp "k1" (make_meta "k1") in
   check int "1 running" 1 (R.count_running ());
-  R.set_state ~base_path:bp "k1" R.Crashed;
+  ignore (R.dispatch_event ~base_path:bp "k1"
+    (KSM.Fiber_terminated { outcome = "test" }));
   check int "0 running" 0 (R.count_running ());
   check bool "is_running false" false (R.is_running ~base_path:bp "k1");
   check bool "is_registered true" true (R.is_registered ~base_path:bp "k1");
@@ -134,14 +139,14 @@ let test_state_transition_running_crashed_running () =
 let test_dead_to_running_blocked () =
   R.clear ();
   let _e = R.register ~base_path:bp "k1" (make_meta "k1") in
-  R.set_state ~base_path:bp "k1" R.Dead;
+  R.mark_dead ~base_path:bp "k1" ~at:(Unix.gettimeofday ());
   check int "0 running" 0 (R.count_running ());
   (* Attempt to transition Dead → Running via set_state *)
-  R.set_state ~base_path:bp "k1" R.Running;
+  ignore (R.dispatch_event ~base_path:bp "k1" KSM.Fiber_started);
   match R.get ~base_path:bp "k1" with
   | None -> fail "expected k1"
   | Some e ->
-    check string "still dead" "dead" (R.state_to_string e.state);
+    check string "still dead" "dead" (R.state_to_string e.phase);
     check int "still 0 running" 0 (R.count_running ())
 
 (* ── Fix 1: last_failure_reason stored in registry ────── *)
@@ -205,8 +210,9 @@ let test_cohort_key_none () =
 let test_dead_tombstone_is_registered () =
   R.clear ();
   let _e = R.register ~base_path:bp "k1" (make_meta "k1") in
-  R.set_state ~base_path:bp "k1" R.Crashed;
-  R.set_state ~base_path:bp "k1" R.Dead;
+  ignore (R.dispatch_event ~base_path:bp "k1"
+    (KSM.Fiber_terminated { outcome = "test" }));
+  R.mark_dead ~base_path:bp "k1" ~at:(Unix.gettimeofday ());
   (* Dead keeper is still registered — reconcile must skip *)
   check bool "Dead is registered" true (R.is_registered ~base_path:bp "k1");
   check bool "Dead is not running" false (R.is_running ~base_path:bp "k1")

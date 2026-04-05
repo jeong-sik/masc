@@ -242,9 +242,9 @@ function ActionTimeline({ data }: { data: ActivityGraphResponse }) {
                         </span>
                         <div class="min-w-0 flex-1">
                           <div class="text-[12px] text-[var(--text-body)]">${eventDetail(event, 160)}</div>
-                           ${visibleNamespaceLabel(event.room_id)
-                             ? html`<div class="mt-1 text-[11px] text-[var(--text-muted)]">namespace: ${visibleNamespaceLabel(event.room_id)}</div>`
-                             : null}
+                           ${(() => { const ns = visibleNamespaceLabel(event.room_id); return ns
+                             ? html`<div class="mt-1 text-[11px] text-[var(--text-muted)]">namespace: ${ns}</div>`
+                             : null; })()}
                         </div>
                         <span class="shrink-0 text-[11px] text-[var(--text-muted)]">
                           <${TimeAgo} timestamp=${event.ts_iso} />
@@ -392,9 +392,9 @@ export function ActivityGraphSurface() {
           <span>생성 시각: ${data.generated_at}</span>
           <span>데이터 범위: 최근 ${data.window.limit}건 이벤트</span>
           ${selectedTimeRange.value !== 'all' ? html`<span>필터: ${TIME_RANGES.find(r => r.value === selectedTimeRange.value)?.label}</span>` : null}
-          ${visibleNamespaceLabel(data.window.room_id)
-            ? html`<span>namespace: ${visibleNamespaceLabel(data.window.room_id)}</span>`
-            : null}
+          ${(() => { const ns = visibleNamespaceLabel(data.window.room_id); return ns
+            ? html`<span>namespace: ${ns}</span>`
+            : null; })()}
         </div>
       <//>
 

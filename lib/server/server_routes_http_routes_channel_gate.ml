@@ -161,14 +161,15 @@ let handle_gate_message ~sw ~clock state request reqd =
           (Yojson.Safe.to_string (Channel_gate.error_json client_msg))
   )
 
-(** GET /api/v1/gate/events?channel=<channel>&keeper=<keeper>&room_id=<room>
+(** GET /api/v1/gate/events?channel=<channel>&keeper=<keeper>&room_id=<room>&limit=<n>
 
     Recent connector event snapshot for dashboard/ops surfaces.
-    Returns newest-first gate attempts with optional filters. *)
+    Returns newest-first gate attempts with optional filters.
+    [limit] defaults to 50 and is clamped to [1..Channel_gate_metrics.max_recent_events]. *)
 let handle_gate_events _state request reqd =
   let limit =
     int_query_param request "limit" ~default:50
-    |> fun value -> max 1 (min 200 value)
+    |> fun value -> max 1 (min Channel_gate_metrics.max_recent_events value)
   in
   let trim_filter key =
     query_param request key

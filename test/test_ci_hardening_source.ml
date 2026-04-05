@@ -120,12 +120,16 @@ let test_route_auth_contracts () =
        {|Http.Router.post "/api/v1/gate/message"|});
   check bool "channel gate health route stays public read" true
     (file_contains_pattern
-       "lib/server/server_routes_http_routes_channel_gate.ml"
-       "with_public_read");
+        "lib/server/server_routes_http_routes_channel_gate.ml"
+        "with_public_read");
+  check bool "channel gate events route stays public read" true
+    (file_contains_pattern
+       "lib/server/server_auth.ml"
+       {|String.equal path "/api/v1/gate/events"|});
   check bool "channel gate health route is registered" true
     (file_contains_pattern
-       "lib/server/server_routes_http_routes_channel_gate.ml"
-       {|Http.Router.get "/api/v1/gate/health"|})
+        "lib/server/server_routes_http_routes_channel_gate.ml"
+        {|Http.Router.get "/api/v1/gate/health"|})
 
 let test_http_write_auth_contracts () =
   check bool "server auth no longer accepts query token fallback" true

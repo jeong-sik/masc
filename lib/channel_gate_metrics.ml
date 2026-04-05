@@ -433,35 +433,38 @@ let take_up_to limit rows =
   in
   loop limit [] rows
 
+let events_locked ?channel ?keeper ?room_id ~limit () =
+  let matches expected actual =
+    match expected with
+    | None -> true
+    | Some value -> String.equal (String.trim value) actual
+  in
+  let normalized_channel =
+    channel
+    |> Option.map (fun value ->
+           let trimmed = String.trim value in
+           String.lowercase_ascii trimmed)
+  in
+  let normalized_keeper = keeper |> Option.map String.trim in
+  let normalized_room_id = room_id |> Option.map String.trim in
+  let latest_seq = !next_event_seq in
+  let filtered =
+    Queue.fold
+      (fun acc event ->
+        if
+          matches normalized_channel event.channel
+          && matches normalized_keeper event.keeper
+          && matches normalized_room_id event.room_id
+        then event :: acc
+        else acc)
+      [] recent_events
+    |> take_up_to limit
+  in
+  (latest_seq, filtered)
+
 let events ?channel ?keeper ?room_id ~limit () =
   Eio_guard.with_mutex_ro mu (fun () ->
-      let matches expected actual =
-        match expected with
-        | None -> true
-        | Some value -> String.equal (String.trim value) actual
-      in
-      let normalized_channel =
-        channel
-        |> Option.map (fun value ->
-               let trimmed = String.trim value in
-               String.lowercase_ascii trimmed)
-      in
-      let normalized_keeper = keeper |> Option.map String.trim in
-      let normalized_room_id = room_id |> Option.map String.trim in
-      let latest_seq = !next_event_seq in
-      let filtered =
-        Queue.fold
-          (fun acc event ->
-            if
-              matches normalized_channel event.channel
-              && matches normalized_keeper event.keeper
-              && matches normalized_room_id event.room_id
-            then event :: acc
-            else acc)
-          [] recent_events
-        |> take_up_to limit
-      in
-      (latest_seq, filtered))
+      events_locked ?channel ?keeper ?room_id ~limit ())
 
 let total_messages () =
   Eio_guard.with_mutex_ro mu (fun () ->
@@ -530,10 +533,96 @@ let binding_health (stats : binding_stats) =
     ~duplicate_count:stats.duplicate_count ~timed_count:stats.timed_count
     ~slow_count:0
 
+let gate_event_to_json (event : gate_event) =
+  `Assoc
+    [
+      ("seq", `Int event.seq);
+      ("timestamp", `String (iso_of_ts event.timestamp));
+      ("channel", `String event.channel);
+      ("room_id", `String event.room_id);
+      ("keeper", `String event.keeper);
+      ("outcome", `String event.outcome);
+      ("error_kind", `String event.error_kind);
+      ("error", `String event.error);
+      ("duration_ms", `Int event.duration_ms);
+    ]
+
+let snapshot_locked () =
+  let channels =
+    Hashtbl.fold
+      (fun channel acc rows ->
+        {
+          channel;
+          message_count = acc.msg_count;
+          success_count = acc.success_count;
+          error_count = acc.err_count;
+          duplicate_count = acc.duplicate_count;
+          validation_error_count = acc.validation_error_count;
+          keeper_error_count = acc.keeper_error_count;
+          dispatch_unavailable_count = acc.dispatch_unavailable_count;
+          internal_error_count = acc.internal_error_count;
+          last_activity_ts = acc.last_ts;
+          last_success_ts = acc.last_success_ts;
+          last_error_ts = acc.last_error_ts;
+          last_keeper = acc.last_keeper;
+          last_room_id = acc.last_room_id;
+          last_error = acc.last_error;
+          last_error_kind = acc.last_error_kind;
+          last_outcome = acc.last_outcome;
+          total_duration_ms = acc.total_dur_ms;
+          timed_count = acc.timed_count;
+          max_duration_ms = acc.max_dur_ms;
+          slow_count = acc.slow_count;
+          room_count = Hashtbl.length acc.rooms;
+        }
+        :: rows)
+      table []
+    |> List.sort (fun a b ->
+           let by_messages = compare b.message_count a.message_count in
+           if by_messages <> 0 then by_messages
+           else String.compare a.channel b.channel)
+  in
+  let bindings =
+    Hashtbl.fold
+      (fun channel acc rows ->
+        Hashtbl.fold
+          (fun room_id binding binding_rows ->
+            {
+              channel;
+              room_id;
+              keeper = binding.keeper;
+              message_count = binding.msg_count;
+              success_count = binding.success_count;
+              error_count = binding.err_count;
+              duplicate_count = binding.duplicate_count;
+              last_activity_ts = binding.last_ts;
+              last_success_ts = binding.last_success_ts;
+              last_error_ts = binding.last_error_ts;
+              last_error = binding.last_error;
+              last_error_kind = binding.last_error_kind;
+              last_outcome = binding.last_outcome;
+              total_duration_ms = binding.total_dur_ms;
+              timed_count = binding.timed_count;
+              max_duration_ms = binding.max_dur_ms;
+            }
+            :: binding_rows)
+          acc.bindings rows)
+      table []
+    |> List.sort (fun a b ->
+           let by_activity = Float.compare b.last_activity_ts a.last_activity_ts in
+           if by_activity <> 0 then by_activity
+           else
+             let by_channel = String.compare a.channel b.channel in
+             if by_channel <> 0 then by_channel
+             else String.compare a.room_id b.room_id)
+  in
+  let _latest_seq, recent = events_locked ~limit:max_recent_events () in
+  (channels, bindings, recent)
+
 let snapshot_json () =
-  let channels = snapshot () in
-  let bindings = binding_snapshot () in
-  let _latest_seq, recent_events = events ~limit:max_recent_events () in
+  let channels, bindings, recent_events =
+    Eio_guard.with_mutex_ro mu snapshot_locked
+  in
   let total =
     List.fold_left
       (fun sum (stats : channel_stats) -> sum + stats.message_count)
@@ -613,25 +702,11 @@ let snapshot_json () =
         ("health", `String (binding_health stats));
       ]
   in
-  let event_json (event : gate_event) =
-    `Assoc
-      [
-        ("seq", `Int event.seq);
-        ("timestamp", `String (iso_of_ts event.timestamp));
-        ("channel", `String event.channel);
-        ("room_id", `String event.room_id);
-        ("keeper", `String event.keeper);
-        ("outcome", `String event.outcome);
-        ("error_kind", `String event.error_kind);
-        ("error", `String event.error);
-        ("duration_ms", `Int event.duration_ms);
-      ]
-  in
   `Assoc
     [
       ("channels", `List (List.map channel_json channels));
       ("bindings", `List (List.map binding_json bindings));
-      ("recent_events", `List (List.map event_json recent_events));
+      ("recent_events", `List (List.map gate_event_to_json recent_events));
       ("total_messages", `Int total);
       ("total_success", `Int total_success);
       ("total_errors", `Int total_errors);
@@ -646,23 +721,9 @@ let snapshot_json () =
 
 let events_json ?channel ?keeper ?room_id ~limit () =
   let latest_seq, rows = events ?channel ?keeper ?room_id ~limit () in
-  let event_json (event : gate_event) =
-    `Assoc
-      [
-        ("seq", `Int event.seq);
-        ("timestamp", `String (iso_of_ts event.timestamp));
-        ("channel", `String event.channel);
-        ("room_id", `String event.room_id);
-        ("keeper", `String event.keeper);
-        ("outcome", `String event.outcome);
-        ("error_kind", `String event.error_kind);
-        ("error", `String event.error);
-        ("duration_ms", `Int event.duration_ms);
-      ]
-  in
   `Assoc
     [
-      ("events", `List (List.map event_json rows));
+      ("events", `List (List.map gate_event_to_json rows));
       ("latest_seq", `Int latest_seq);
       ("total", `Int (List.length rows));
     ]

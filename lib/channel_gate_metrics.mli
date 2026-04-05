@@ -74,6 +74,9 @@ type gate_event = {
   duration_ms : int;
 }
 
+val max_recent_events : int
+(** Maximum number of recent connector events retained in memory. *)
+
 val record_attempt :
   channel:string ->
   room_id:string ->

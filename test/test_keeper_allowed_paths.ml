@@ -49,7 +49,7 @@ let test_workspace_explicit_paths () =
   let effective = KAP.effective_allowed_paths ~meta in
   check (list string) "workspace + explicit = playground + ws defaults + explicit"
     [".masc/playground/t/"; ".masc/keepers/t/"; ".masc/traces/";
-     "planning/"; "docs/"; "src/"; "docs/"] effective
+     "."; "src/"; "docs/"] effective
 
 let test_workspace_star_wildcard () =
   let meta = make_meta ~execution_scope:"workspace"
@@ -91,7 +91,7 @@ let test_explicit_paths_any_scope () =
   let ws_effective = KAP.effective_allowed_paths ~meta:ws_meta in
   check (list string) "workspace + explicit = playground + ws defaults + explicit"
     [".masc/playground/t/"; ".masc/keepers/t/"; ".masc/traces/";
-     "planning/"; "docs/"; "lib/keeper/"; "test/"] ws_effective
+     "."; "lib/keeper/"; "test/"] ws_effective
 
 (* ── keeper name in computed default ── *)
 

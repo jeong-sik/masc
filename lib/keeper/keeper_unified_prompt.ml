@@ -203,7 +203,7 @@ let build_prompt ~(meta : Keeper_types.keeper_meta)
   in
   let base_system_prompt =
     match
-      Prompt_registry.render_prompt_template "keeper.unified.system"
+      Prompt_registry.render_prompt_template Keeper_prompt_names.unified_system
         [
           ("identity_header", Printf.sprintf "You are %s, a keeper agent." meta.name);
           ("trait_lines", trait_lines);
@@ -212,7 +212,7 @@ let build_prompt ~(meta : Keeper_types.keeper_meta)
         ]
     with
     | Ok value -> value
-    | Error _ -> Prompt_registry.get_prompt "keeper.unified.system"
+    | Error _ -> Prompt_registry.get_prompt Keeper_prompt_names.unified_system
   in
   let turn_intent_block =
     "Use the world state below as raw context.\n\

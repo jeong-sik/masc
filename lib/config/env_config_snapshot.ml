@@ -57,8 +57,8 @@ let category name entries =
 
 let server_entries =
   [
-    entry ~default:"8935" "MASC_HTTP_PORT" "HTTP server port";
-    entry ~default:"127.0.0.1" "MASC_HOST" "Server bind host";
+    entry ~default:Env_config_core.default_http_port "MASC_HTTP_PORT" "HTTP server port";
+    entry ~default:Env_config_core.default_host "MASC_HOST" "Server bind host";
     entry ~default:"(derived)" "MASC_HTTP_BASE_URL" "Public HTTP base URL";
     entry ~default:"" "MASC_CLUSTER_NAME" "Cluster name for multi-instance";
     entry ~default:"(cwd)" "MASC_BASE_PATH" "Base storage directory";

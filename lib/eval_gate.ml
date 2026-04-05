@@ -238,13 +238,24 @@ let pre_check
             ~args_json acc tool_name in
           begin match entropy with
           | Some (_name, count) ->
-              let args_preview =
-                if String.length args_json > 120 then String.sub args_json 0 120 ^ "..."
-                else args_json
+              let args_preview_opt =
+                try
+                  let json = Yojson.Safe.from_string args_json in
+                  Observability_redact.redact_tool_input ~tool_name json
+                with Yojson.Json_error _ ->
+                  Some (Observability_redact.redact_preview args_json)
               in
-              Trajectory.Reject (Printf.sprintf
-                "entropy detected: '%s' called %d consecutive times with args=%s (threshold: %d)"
-                tool_name count args_preview config.entropy_threshold)
+              let reason = match args_preview_opt with
+                | None ->
+                    Printf.sprintf
+                      "entropy detected: '%s' called %d consecutive times (threshold: %d)"
+                      tool_name count config.entropy_threshold
+                | Some args_preview ->
+                    Printf.sprintf
+                      "entropy detected: '%s' called %d consecutive times with args=%s (threshold: %d)"
+                      tool_name count args_preview config.entropy_threshold
+              in
+              Trajectory.Reject reason
           | None ->
               (* 6. Destructive pattern check (bash tools only) *)
               if config.destructive_check_enabled

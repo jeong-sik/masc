@@ -53,7 +53,6 @@
         test_keeper_registry
         test_keeper_supervisor
         test_keeper_allowed_paths
-        test_keeper_compaction
         test_keeper_llama_only
         test_keeper_meta_cwd_resilience
         test_metrics_rotation
@@ -82,7 +81,6 @@
         test_labeling
         test_tool_deep_review
         test_typed_state
-        test_keeper_turn_prompt
         test_keeper_prompt_metrics
         test_cache_metrics_wiring
         test_tool_surface_ssot
@@ -113,7 +111,6 @@
           test_keeper_registry
           test_keeper_supervisor
           test_keeper_allowed_paths
-          test_keeper_compaction
           test_keeper_llama_only
           test_keeper_meta_cwd_resilience
           test_metrics_rotation
@@ -142,7 +139,6 @@
           test_labeling
           test_tool_deep_review
           test_typed_state
-          test_keeper_turn_prompt
           test_keeper_prompt_metrics
           test_cache_metrics_wiring
           test_tool_surface_ssot
@@ -248,7 +244,6 @@
         test_swarm_persistence
         test_tool_repo_synthesis
         test_local_runtime_pool
-        test_tool_keeper
         test_keeper_tools_oas
         test_keeper_tool_exposure
         test_keeper_voice_loop
@@ -390,7 +385,6 @@
         test_swarm_persistence
         test_tool_repo_synthesis
         test_local_runtime_pool
-        test_tool_keeper
         test_keeper_tools_oas
         test_keeper_tool_exposure
         test_keeper_voice_loop

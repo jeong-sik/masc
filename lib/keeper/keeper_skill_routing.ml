@@ -20,10 +20,7 @@ let keeper_allowed_skills = [ "masc-heartbeat"; "masc-keeper-autonomy" ]
 let is_valid_keeper_skill s = List.mem s keeper_allowed_skills
 
 let contains_ci (haystack : string) (needle : string) : bool =
-  let h = String.lowercase_ascii haystack in
-  let n = String.lowercase_ascii needle in
-  if n = "" then true
-  else Re.execp (Re.str n |> Re.compile) h
+  String_util.contains_substring_ci haystack needle
 
 let skill_match_count_ci ~(text : string) ~(keywords : string list) : int =
   let text_lc = String.lowercase_ascii text in

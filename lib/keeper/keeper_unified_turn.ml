@@ -108,8 +108,10 @@ let overflow_retry_history_budget
       Agent_sdk.Context_reducer.estimate_char_tokens system_prompt
       + Agent_sdk.Context_reducer.estimate_char_tokens user_message
     in
-    (* Use 20% safety buffer for prompt estimation errors (#5053) *)
-    int_of_float (float_of_int estimated *. 1.2)
+    (* Use 20% safety buffer for prompt estimation errors (#5053).
+       Ceiling-based to avoid truncation erasing the buffer. *)
+    if estimated <= 0 then estimated
+    else estimated + ((estimated + 4) / 5)
   in
   let prompt_reserve = max 1024 prompt_tokens in
   let tool_reserve =
@@ -783,7 +785,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
       let primary_max_context =
         match meta.max_context_override with
         | Some v ->
-            Log.Keeper.info "%s: using max_context_override=%d" meta.name v;
+            Log.Keeper.debug "%s: using max_context_override=%d" meta.name v;
             v
         | None -> Oas_model_resolve.resolve_primary_max_context model_labels
       in

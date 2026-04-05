@@ -482,6 +482,13 @@ let gh_api_destructive_patterns =
   [ "/merge"; "/merges";
     "state=closed"; "state=\"closed\""; "state='closed'" ]
 
+(** Known destructive GraphQL mutation names (lowercase).
+    Used to detect bypass via "gh api graphql -f query='mutation ...'". *)
+let gh_graphql_destructive_mutations =
+  [ "mergepullrequest"; "closepullrequest"; "closeissue";
+    "deleteissue"; "deleteref"; "deletebranch";
+    "deletebranchprotectionrule"; "deleteproject" ]
+
 (** Check if a gh API command uses or implies a non-GET HTTP method.
     Returns [true] for explicit mutating methods (-X POST, --method PATCH,
     etc.) and for implicit POST via field flags (-f, -F, --field,
@@ -549,6 +556,9 @@ let is_gh_destructive_operation cmd =
     || (has_mutating_http_method parts
         && List.exists (fun pat -> contains_substring joined pat)
              gh_api_destructive_patterns)
+    || (List.mem "graphql" parts
+        && List.exists (fun m -> contains_substring joined m)
+             gh_graphql_destructive_mutations)
   | _ -> false
 
 (* --- Recursive mkdir --- *)

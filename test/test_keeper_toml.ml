@@ -290,6 +290,74 @@ let test_parse_error_no_equals () =
   | Error _ -> ()
 
 (* ================================================================ *)
+(* Multi-line array tests                                            *)
+(* ================================================================ *)
+
+let test_parse_multiline_array () =
+  let input = "tags = [\n  \"alpha\",\n  \"beta\",\n  \"gamma\",\n]" in
+  match TL.parse_toml input with
+  | Ok doc ->
+    (match List.assoc_opt "tags" doc with
+     | Some (TL.Toml_string_array xs) ->
+       check int "array length" 3 (List.length xs);
+       check string "first" "alpha" (List.nth xs 0);
+       check string "second" "beta" (List.nth xs 1);
+       check string "third" "gamma" (List.nth xs 2)
+     | _ -> fail "expected Toml_string_array")
+  | Error e -> fail e
+
+let test_parse_multiline_array_no_trailing_comma () =
+  let input = "tags = [\n  \"one\",\n  \"two\"\n]" in
+  match TL.parse_toml input with
+  | Ok doc ->
+    (match List.assoc_opt "tags" doc with
+     | Some (TL.Toml_string_array xs) ->
+       check int "array length" 2 (List.length xs);
+       check string "first" "one" (List.nth xs 0);
+       check string "second" "two" (List.nth xs 1)
+     | _ -> fail "expected Toml_string_array")
+  | Error e -> fail e
+
+let test_parse_multiline_array_with_comments () =
+  let input = "tags = [\n  \"a\", # first\n  \"b\", # second\n]" in
+  match TL.parse_toml input with
+  | Ok doc ->
+    (match List.assoc_opt "tags" doc with
+     | Some (TL.Toml_string_array xs) ->
+       check int "array length" 2 (List.length xs);
+       check string "first" "a" (List.nth xs 0);
+       check string "second" "b" (List.nth xs 1)
+     | _ -> fail "expected Toml_string_array")
+  | Error e -> fail e
+
+let test_parse_multiline_array_empty () =
+  let input = "tags = [\n]" in
+  match TL.parse_toml input with
+  | Ok doc ->
+    (match List.assoc_opt "tags" doc with
+     | Some (TL.Toml_string_array xs) ->
+       check int "empty array" 0 (List.length xs)
+     | _ -> fail "expected empty Toml_string_array")
+  | Error e -> fail e
+
+let test_parse_multiline_array_single_element () =
+  let input = "tags = [\n  \"only\"\n]" in
+  match TL.parse_toml input with
+  | Ok doc ->
+    (match List.assoc_opt "tags" doc with
+     | Some (TL.Toml_string_array xs) ->
+       check int "array length" 1 (List.length xs);
+       check string "only" "only" (List.nth xs 0)
+     | _ -> fail "expected Toml_string_array")
+  | Error e -> fail e
+
+let test_parse_multiline_array_unterminated () =
+  let input = "tags = [\n  \"a\"\n" in
+  match TL.parse_toml input with
+  | Ok _ -> fail "expected parse error for unterminated multiline array"
+  | Error _ -> ()
+
+(* ================================================================ *)
 (* Profile defaults conversion tests                                 *)
 (* ================================================================ *)
 
@@ -706,6 +774,16 @@ let () =
             test_parse_multiline_line_ending_backslash;
           test_case "error: unterminated table" `Quick test_parse_error_unterminated_table;
           test_case "error: no equals" `Quick test_parse_error_no_equals;
+          test_case "multiline array" `Quick test_parse_multiline_array;
+          test_case "multiline array no trailing comma" `Quick
+            test_parse_multiline_array_no_trailing_comma;
+          test_case "multiline array with comments" `Quick
+            test_parse_multiline_array_with_comments;
+          test_case "multiline array empty" `Quick test_parse_multiline_array_empty;
+          test_case "multiline array single element" `Quick
+            test_parse_multiline_array_single_element;
+          test_case "multiline array unterminated" `Quick
+            test_parse_multiline_array_unterminated;
         ] );
       ( "profile_defaults",
         [

@@ -1,6 +1,23 @@
 # Changelog
 
 
+## [2.235.0] - 2026-04-05
+
+### Added
+- **TOML multiline strings** -- parser now handles triple-quoted basic strings, fixing janitor/masc-improver config loading (#5148, closes #5068).
+- **OAS Builder setters** -- adopt Builder pattern for context management (#5201, closes #5141).
+
+### Fixed
+- **CI timeout** -- add fast-fail git repo guard preventing 900s test hang (#5202, closes #5206).
+- **Auth circuit breaker** -- add retry limit and trace for masc_auth_create_token (#5183).
+- **Portal retry loops** -- allow proactive behaviors and prevent infinite delegation retries (#5177).
+- **Test null audit** -- handle null tool_audit_source in keeper snapshot (#5209).
+
+### Changed
+- **Dashboard** -- optimize responsive layouts, enhance micro-interactions (#5198, #5194).
+- **Session listing** -- bypass full filesystem scan for performance (#5186).
+- **Semantic theme** -- task 288 dashboard theme tokens (#5191).
+
 ## [2.234.0] - 2026-04-05
 
 ### Added

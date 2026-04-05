@@ -327,7 +327,7 @@ let evaluate_run env fixture run_index =
                 in
                 match
                   UT.run_unified_turn ~config ~meta ~observation
-                    ~generation:meta.runtime.generation
+                    ~generation:meta.runtime.generation ()
                 with
                 | Error err ->
                     failure_report ~fixture ~run_index ~base_dir ?primary_salience

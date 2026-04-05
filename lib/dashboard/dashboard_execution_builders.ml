@@ -195,6 +195,7 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
   in
   let autonomous_action_count = int_field "autonomous_action_count" keeper in
   let autonomous_turn_count = int_field "autonomous_turn_count" keeper in
+  let noop_turn_count = int_field "noop_turn_count" keeper in
   let turn_count = int_field "turn_count" keeper in
   let generation = int_field "generation" keeper in
   let goal_count = List.length (list_field "active_goal_ids" keeper) in
@@ -297,6 +298,7 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
             ("tool_audit_at", json_string_option audit.tool_audit_at);
             ("autonomous_action_count", `Int autonomous_action_count);
             ("autonomous_turn_count", `Int autonomous_turn_count);
+            ("noop_turn_count", `Int noop_turn_count);
             ("last_heartbeat_at", json_string_option last_heartbeat_at);
             ("proactive_enabled", member_assoc "proactive_enabled" keeper);
             ("proactive_idle_sec", member_assoc "proactive_idle_sec" keeper);
@@ -311,8 +313,13 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
                 else if autonomous_turn_count = 0 then
                   Printf.sprintf "대기 중 (턴 %d회, 자율 턴 0회)" turn_count
                 else
-                  Printf.sprintf "자율 턴 %d회, 도구 행동 %d회, 턴 %d회, 세대 %d"
-                    autonomous_turn_count autonomous_action_count turn_count generation));
+                  let noop_note =
+                    if noop_turn_count > 0 then
+                      Printf.sprintf " · noop %d회" noop_turn_count
+                    else ""
+                  in
+                  Printf.sprintf "자율 턴 %d회, 도구 행동 %d회, 턴 %d회, 세대 %d%s"
+                    autonomous_turn_count autonomous_action_count turn_count generation noop_note));
             ("skill_route_summary", json_string_option skill_route_summary);
             ( "model",
               match trim_to_option (string_field "active_model" keeper) with

@@ -222,10 +222,6 @@ val extract_checkin_text : string -> string option
 
 (** {1 Fragment Detection (used by dashboard)} *)
 
-val proactive_has_terminal_punct : string -> bool
-val proactive_has_terminal_korean_ending : string -> bool
-val proactive_has_terminal_ending : string -> bool
-val proactive_looks_fragmentary : string -> bool
 val looks_fragmentary_history_text : string -> bool
 
 (** {1 Memory Check} *)

@@ -48,7 +48,7 @@ let make_closing_client ~sw ~net ~https =
     | None -> ()
     | Some sock ->
         last_sock := None;
-        (try Eio.Net.close sock with _ -> ()));
+        (try Eio.Net.close sock with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ()));
   client
 
 (** POST with structured error handling.

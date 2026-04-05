@@ -111,11 +111,16 @@ let parse_presets
   tbl
 
 let project_root_from_executable () =
-  let exe = try Sys.executable_name with _ -> "" in
+  let exe =
+    try Unix.realpath Sys.executable_name
+    with Unix.Unix_error _ | Sys_error _ ->
+      (try Sys.executable_name with _ -> "")
+  in
   let rec walk_up dir =
-    if dir = "/" || dir = "." || dir = "" then None
-    else if Filename.basename dir = "_build" then Some (Filename.dirname dir)
-    else walk_up (Filename.dirname dir)
+    let parent = Filename.dirname dir in
+    if String.equal parent dir then None
+    else if Filename.basename dir = "_build" then Some parent
+    else walk_up parent
   in
   walk_up (Filename.dirname exe)
 
@@ -130,7 +135,9 @@ let load ~base_path : (t, string) result =
   let candidates =
     [ base_candidate; cwd_candidate ]
     @ (match exe_candidate with Some c -> [ c ] | None -> [])
-    |> List.sort_uniq String.compare
+    |> List.fold_left (fun acc x ->
+      if List.mem x acc then acc else x :: acc) []
+    |> List.rev
   in
   let rec try_candidates failures = function
     | [] ->

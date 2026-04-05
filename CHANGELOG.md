@@ -1,10 +1,9 @@
 # Changelog
 
 
-## [2.245.0] - 2026-04-06
+## [Unreleased]
 
 ### Added
-- **Git clone for keepers** -- `masc_code_git` now supports `clone` action, restricted to allowed GitHub orgs via `config/tool_policy.toml` `[git_clone]` section. URL parsing supports HTTPS, SSH, SSH protocol formats. Security: flag args blocked, case-insensitive org matching, domain spoofing prevention. Closes #5341.
 - **tool_rerank cascade profile** -- add `tool_rerank_models` to `config/cascade.json`, required for `MASC_KEEPER_LLM_RERANK=true` to use an explicit model list instead of silent defaults fallback.
 
 ## [2.244.0] - 2026-04-05

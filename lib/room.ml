@@ -207,7 +207,6 @@ let () = Room_hooks.cleanup_board_artifacts_fn := (fun () ->
     let author = String.lowercase_ascii (String.trim author) in
     author = "auto-researcher"
     || String.starts_with ~prefix:"qa-" author
-    || String.starts_with ~prefix:"qwen35-probe" author
     || ((not (String.contains author ' '))
         && String.ends_with ~suffix:"-probe" author)
   in

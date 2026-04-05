@@ -831,3 +831,19 @@ let gemini_vertex_openai_base_url ~project ~location =
   Printf.sprintf
     "https://aiplatform.googleapis.com/v1/projects/%s/locations/%s/endpoints/openapi"
     project location
+
+(** Resolve the API endpoint URL for a canonical provider name.
+    Local and runtime-configured providers use Env_config_runtime.
+    Cloud API providers return their well-known base URLs. *)
+let endpoint_url_for_canonical_name name =
+  match name with
+  | "llama" -> Some Env_config_runtime.Llama.server_url
+  | "glm" -> Some Env_config_runtime.Glm.server_url
+  | "claude-api" -> Some "https://api.anthropic.com"
+  | "codex-api" -> Some "https://api.openai.com"
+  | "gemini-api" -> (
+      match resolve_gemini_direct_auth () with
+      | Gemini_vertex_adc { project; location } ->
+          Some (gemini_vertex_openai_base_url ~project ~location)
+      | _ -> Some "https://generativelanguage.googleapis.com")
+  | _ -> None

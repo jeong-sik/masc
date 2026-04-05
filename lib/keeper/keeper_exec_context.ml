@@ -802,28 +802,6 @@ let apply_post_turn_lifecycle
         message_count = rollover.message_count;
       }
 
-let clamp_context_max_tokens
-    (ctx : working_context)
-    ~(primary_model_max_tokens : int) : working_context =
-  let clamped =
-    if primary_model_max_tokens <= 0 then ctx.max_tokens
-    else min ctx.max_tokens primary_model_max_tokens
-  in
-  if clamped = ctx.max_tokens then ctx
-  else sync_oas_context { ctx with max_tokens = clamped }
-
-let hard_trim_context_to_budget
-    (ctx : working_context)
-    ~(budget_tokens : int) : working_context =
-  if budget_tokens <= 0 then ctx
-  else
-    let reducer =
-      Agent_sdk.Context_reducer.from_context_config ~max_tokens:budget_tokens ()
-    in
-    let messages = Agent_sdk.Context_reducer.reduce reducer ctx.messages in
-    sync_oas_context
-      { ctx with messages; max_tokens = min ctx.max_tokens budget_tokens }
-
 let forced_overflow_retry_meta
     (meta : keeper_meta)
     ~(turn_generation : int)
@@ -922,7 +900,8 @@ let[@warning "-32"] recover_latest_checkpoint_for_overflow_retry
   | Some (ctx, turn_generation) ->
       let now_ts = Time_compat.now () in
       let ctx =
-        clamp_context_max_tokens ctx ~primary_model_max_tokens
+        if primary_model_max_tokens <= 0 then ctx
+        else sync_oas_context { ctx with max_tokens = min ctx.max_tokens primary_model_max_tokens }
       in
       let before_tokens = token_count ctx in
       let retry_meta =
@@ -940,8 +919,12 @@ let[@warning "-32"] recover_latest_checkpoint_for_overflow_retry
           primary_model_max_tokens > 0
           && strategy_after_message_tokens > primary_model_max_tokens
         then
-          hard_trim_context_to_budget compacted_ctx
-            ~budget_tokens:primary_model_max_tokens
+          let reducer =
+            Agent_sdk.Context_reducer.from_context_config ~max_tokens:primary_model_max_tokens ()
+          in
+          let messages = Agent_sdk.Context_reducer.reduce reducer compacted_ctx.messages in
+          sync_oas_context
+            { compacted_ctx with messages; max_tokens = min compacted_ctx.max_tokens primary_model_max_tokens }
         else
           compacted_ctx
       in

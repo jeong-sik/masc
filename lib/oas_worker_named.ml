@@ -73,6 +73,8 @@ let config_for_label
     ?memory
     ?tool_retry_policy
     ?enable_thinking
+    ?max_input_tokens
+    ?compact_ratio
     ~(description : string option)
     () : Oas_worker_exec.config =
   let provider = Oas_worker_exec.resolve_provider_of_label model_label in
@@ -98,6 +100,8 @@ let config_for_label
     tool_retry_policy;
     enable_thinking;
     description;
+    max_input_tokens;
+    compact_ratio;
   }
 
 (** Run a single Agent.run() call with cascade model fallback.
@@ -139,6 +143,8 @@ let run_named
     ?working_context
     ?(cache_system_prompt = false)
     ?(yield_on_tool = false)
+    ?max_input_tokens
+    ?compact_ratio
     ?sw
     ?net
     ()
@@ -187,6 +193,8 @@ let run_named
       working_context;
       session_id;
       cache_system_prompt;
+      max_input_tokens;
+      compact_ratio;
     }
   in
   let config = { config with named_cascade = Some named_cascade; initial_messages; raw_trace; yield_on_tool } in
@@ -234,6 +242,8 @@ let run_model_by_label
     ?memory
     ?tool_retry_policy
     ?enable_thinking
+    ?max_input_tokens
+    ?compact_ratio
     ?contract
     ?on_event
     ?transport
@@ -258,6 +268,8 @@ let run_model_by_label
             ~max_idle_turns ?guardrails ?hooks ?context_reducer ?memory
             ?tool_retry_policy
             ?enable_thinking
+            ?max_input_tokens
+            ?compact_ratio
             ~description:(Some (Printf.sprintf "model_label:%s" model_label))
             ()
         in
@@ -291,6 +303,8 @@ let run_named_with_masc_tools
     ?contract
     ?transport
     ?(yield_on_tool = false)
+    ?max_input_tokens
+    ?compact_ratio
     ?sw
     ?net
     ()
@@ -304,6 +318,8 @@ let run_named_with_masc_tools
   run_named ~cascade_name ~goal ?priority ~system_prompt ~tools:oas_tools
     ~max_turns ~temperature ~max_tokens ?guardrails ?hooks ?memory
     ?tool_retry_policy
+    ?max_input_tokens
+    ?compact_ratio
     ?raw_trace ?on_event ?on_yield ?on_resume ?proof_ref
     ?contract
     ?transport ~yield_on_tool ?sw ?net ()
@@ -322,6 +338,8 @@ let run_model_with_masc_tools
     ?memory
     ?tool_retry_policy
     ?enable_thinking
+    ?max_input_tokens
+    ?compact_ratio
     ?contract
     ?raw_trace
     ?on_event
@@ -341,6 +359,7 @@ let run_model_with_masc_tools
           config_for_label ~name:"oas-explicit-model" ~model_label ~system_prompt
           ~tools:[] ~max_turns ~max_tokens ~temperature ?guardrails ?hooks
           ?memory ?tool_retry_policy ?enable_thinking
+          ?max_input_tokens ?compact_ratio
           ~description:(Some (Printf.sprintf "model_label:%s" model_label))
           ()
       in

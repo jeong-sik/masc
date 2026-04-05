@@ -72,6 +72,18 @@ let string_of_voice_transport = function
   | Voice_elevenlabs_direct -> "elevenlabs_direct"
   | Voice_mcp -> "voice_mcp"
 
+(** Map OAS Provider_config.provider_kind to MASC adapter canonical_name.
+    Callers should prefer OAS canonical version where possible.
+    TODO: remove after oas#623 pin update. *)
+let string_of_provider_kind
+    : Llm_provider.Provider_config.provider_kind -> string
+  = function
+  | Anthropic -> "claude-api"
+  | OpenAI_compat -> "codex-api"
+  | Gemini -> "gemini-api"
+  | Glm -> "glm"
+  | Claude_code -> "claude-code"
+
 let normalize_label label = String.trim label |> String.lowercase_ascii
 
 (* ── Canonical adapter names (single definition point) ──────── *)

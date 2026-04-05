@@ -125,7 +125,12 @@ let handle_keeper_status ctx args : tool_result =
                    | Anthropic -> "claude" | OpenAI_compat -> "openai"
                    | Gemini -> "gemini" | Glm -> "glm" | Claude_code -> "claude_code")
                  in
-                 if base = "openai" && (String.contains cfg.base_url "127.0.0.1" || String.contains cfg.base_url "localhost")
+                 let is_loopback url =
+                   match Uri.host (Uri.of_string url) with
+                   | Some "localhost" | Some "127.0.0.1" -> true
+                   | _ -> false
+                 in
+                 if base = "openai" && is_loopback cfg.base_url
                  then "llama" else base
              in
              Some (`Assoc [

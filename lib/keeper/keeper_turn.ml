@@ -174,7 +174,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
        | Ok () ->
          Progress.Tracker.step turn_tracker ~message:"Building turn prompt" ();
          ignore (Oas_model_resolve.refresh_local_discovery_if_possible effective_models);
-         let primary_max_context =
+         let max_cascade_context =
            match meta.max_context_override with
            | Some v ->
                Log.Keeper.debug "%s: using max_context_override=%d (manual turn)" meta.name v;
@@ -283,7 +283,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
               Keeper_exec_context.timed (fun () ->
                   Keeper_agent_run.run_turn
                     ~config:ctx.config ~meta ~base_dir
-                    ~max_context:primary_max_context
+                    ~max_context:max_cascade_context
                     ~build_turn_prompt
                     ~user_message:message
                     ~cascade_name:turn_cascade_name
@@ -310,7 +310,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                 Keeper_exec_context.apply_post_turn_lifecycle ~base_dir
                   ~meta
                   ~model:result.model_used
-                  ~primary_model_max_tokens:primary_max_context
+                  ~primary_model_max_tokens:max_cascade_context
                   ~checkpoint:result.checkpoint
               in
               (* RFC-0002: dispatch buffer state events after lifecycle *)

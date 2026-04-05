@@ -164,7 +164,7 @@ let overflow_retry_history_budget
 let recover_context_overflow_retry
     ~(meta : keeper_meta)
     ~(base_dir : string)
-    ~(primary_max_context : int)
+    ~(max_cascade_context : int)
     ~(system_prompt : string)
     ~(user_message : string)
     ~(error : string) : overflow_retry_plan option =
@@ -172,8 +172,8 @@ let recover_context_overflow_retry
   | None -> None
   | Some actual_limit ->
       let retry_max_context =
-        if primary_max_context <= 0 then actual_limit
-        else min primary_max_context actual_limit
+        if max_cascade_context <= 0 then actual_limit
+        else min max_cascade_context actual_limit
       in
       let retry_history_budget =
         overflow_retry_history_budget ~available_context:retry_max_context
@@ -823,12 +823,12 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
   | Error e -> Error e
   | Ok () ->
       ignore (Oas_model_resolve.refresh_local_discovery_if_possible model_labels);
-      let primary_max_context =
+      let max_cascade_context =
         match meta.max_context_override with
         | Some v ->
             Log.Keeper.debug "%s: using max_context_override=%d" meta.name v;
             v
-        | None -> Oas_model_resolve.resolve_primary_max_context model_labels
+        | None -> Oas_model_resolve.resolve_max_cascade_context model_labels
       in
       (* Yield before CPU-bound prompt construction so the Eio scheduler
          can service HTTP handlers between keeper turn setups. *)
@@ -898,7 +898,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
                            && should_attempt_context_overflow_retry e -> (
                 match
                   recover_context_overflow_retry ~meta ~base_dir
-                    ~primary_max_context ~system_prompt ~user_message ~error:e
+                    ~max_cascade_context ~system_prompt ~user_message ~error:e
                 with
                 | Some retry_plan ->
                     let retry_meta =
@@ -918,7 +918,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
                 | None -> Error e)
             | Error e -> Error e
           in
-          retry_loop ~run_meta:meta ~max_context:primary_max_context
+          retry_loop ~run_meta:meta ~max_context:max_cascade_context
             ~run_generation:generation ~attempt:1
             ~is_retry:false ~overflow_retry_used:false)
       in
@@ -926,7 +926,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
       | Error e ->
           Log.Keeper.error
             "%s: unified turn FAILED cascade=%s max_context=%d latency=%dms error=%s"
-            meta.name meta.cascade_name primary_max_context latency_ms
+            meta.name meta.cascade_name max_cascade_context latency_ms
             (short_preview e);
           let social_state =
             Social.derive_failure_state ~meta ~observation ~reason:e
@@ -1003,7 +1003,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
             apply_post_turn_lifecycle ~base_dir
               ~meta
               ~model:result.model_used
-              ~primary_model_max_tokens:primary_max_context
+              ~primary_model_max_tokens:max_cascade_context
               ~checkpoint:result.checkpoint
           in
           (* RFC-0002: dispatch buffer state events after lifecycle *)

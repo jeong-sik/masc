@@ -114,6 +114,22 @@ let test_effective_discovered_ctx () =
   check int "none uses static" 128_000
     (edc ~static_ctx:128_000 ~discovered:None)
 
+let test_resolve_max_cascade_context () =
+  (* Empty list → 128_000 fallback *)
+  check int "empty labels fallback 128000" 128_000
+    (Masc_mcp.Oas_model_resolve.resolve_max_cascade_context []);
+  (* Unknown provider → fallback *)
+  check int "unknown provider fallback 128000" 128_000
+    (Masc_mcp.Oas_model_resolve.resolve_max_cascade_context
+       [ "nonexistent:model" ]);
+  (* Malformed label (no colon) → fallback *)
+  check int "malformed label fallback 128000" 128_000
+    (Masc_mcp.Oas_model_resolve.resolve_max_cascade_context [ "nocolonlabel" ]);
+  (* Known provider with available key returns max context > 0 *)
+  let ctx = Masc_mcp.Oas_model_resolve.resolve_max_cascade_context
+      [ "claude:claude-sonnet-4-6" ] in
+  check bool "known provider returns positive context" true (ctx > 0)
+
 let test_labels_require_local_discovery () =
   check bool "llama labels refresh local discovery" true
     (Masc_mcp.Oas_model_resolve.labels_require_local_discovery
@@ -221,6 +237,8 @@ let () =
             test_effective_discovered_ctx;
           test_case "local discovery label detection" `Quick
             test_labels_require_local_discovery;
+          test_case "resolve max cascade context" `Quick
+            test_resolve_max_cascade_context;
         ] );
       ( "dashboard_schema",
         [

@@ -40,14 +40,20 @@ let run_all () =
     (Server_mcp_transport_ws.session_count ());
   (* Flush metric/stress buffers to prevent data loss *)
   (try Heuristic_metrics.flush ()
-   with Eio.Cancel.Cancelled _ as e -> raise e
+   with Eio.Cancel.Cancelled _ as e ->
+     let bt = Printexc.get_raw_backtrace () in
+     Printexc.raise_with_backtrace e bt
       | _ -> Log.Server.warn "[Shutdown] heuristic_metrics flush failed");
   (try Agent_stress.flush ()
-   with Eio.Cancel.Cancelled _ as e -> raise e
+   with Eio.Cancel.Cancelled _ as e ->
+     let bt = Printexc.get_raw_backtrace () in
+     Printexc.raise_with_backtrace e bt
       | _ -> Log.Server.warn "[Shutdown] agent_stress flush failed");
   (* Clear transient A2A state to free memory *)
   (try A2a_tools.clear_transient_state ()
-   with Eio.Cancel.Cancelled _ as e -> raise e
+   with Eio.Cancel.Cancelled _ as e ->
+     let bt = Printexc.get_raw_backtrace () in
+     Printexc.raise_with_backtrace e bt
       | _ -> Log.Server.warn "[Shutdown] a2a_tools clear failed");
   (* Clear session identity caches *)
   Agent_registry_eio.clear_session_caches ();

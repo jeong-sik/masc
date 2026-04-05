@@ -10,11 +10,23 @@
     - Log unexpected failures for debugging
 *)
 
+(** Run [f ()], re-raising [Eio.Cancel.Cancelled] with its original backtrace
+    and returning [default] for any other exception. *)
+let protect ~default f =
+  try f ()
+  with
+  | Eio.Cancel.Cancelled _ as e ->
+    let bt = Printexc.get_raw_backtrace () in
+    Printexc.raise_with_backtrace e bt
+  | _ -> default
+
 (** Execute a function, logging exceptions and returning None on failure *)
 let try_with_log context f =
   try Some (f ())
   with
-  | Eio.Cancel.Cancelled _ as e -> raise e
+  | Eio.Cancel.Cancelled _ as e ->
+    let bt = Printexc.get_raw_backtrace () in
+    Printexc.raise_with_backtrace e bt
   | e ->
     Log.Misc.error "%s failed: %s" context (Printexc.to_string e);
     None

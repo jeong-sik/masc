@@ -244,18 +244,15 @@ let log_keeper_exn ~label exn =
 let checkpoint_generation_key = "keeper_generation"
 
 let checkpoint_max_tokens (cp : Agent_sdk.Checkpoint.t) ~(fallback : int) : int =
-  let stored_limit =
-    let open Yojson.Safe.Util in
-    match cp.max_total_tokens with
-    | Some value when value > 0 -> Some value
-    | _ -> (
-        match cp.working_context with
-        | Some (`Assoc _ as sidecar) ->
-            sidecar |> member "max_tokens" |> to_int_option
-        | _ -> None)
-  in
-  if fallback > 0 then fallback
-  else Option.value ~default:fallback stored_limit
+  let open Yojson.Safe.Util in
+  match cp.max_total_tokens with
+  | Some value -> value
+  | None -> (
+      match cp.working_context with
+      | Some (`Assoc _ as sidecar) ->
+          sidecar |> member "max_tokens" |> to_int_option
+          |> Option.value ~default:fallback
+      | _ -> fallback)
 
 let context_of_oas_checkpoint
     (cp : Agent_sdk.Checkpoint.t)
@@ -513,9 +510,14 @@ let load_context_from_checkpoint ~trace_id ~primary_model_max_tokens ~base_dir =
       trace_id;
   match (prefer_legacy, oas_checkpoint, legacy_checkpoint) with
   | (false, Some checkpoint, _) ->
-      ( session,
-        Some
-          (context_of_oas_checkpoint checkpoint ~primary_model_max_tokens) )
+      let ctx =
+        context_of_oas_checkpoint checkpoint ~primary_model_max_tokens
+      in
+      let ctx =
+        if primary_model_max_tokens <= 0 then ctx
+        else sync_oas_context { ctx with max_tokens = primary_model_max_tokens }
+      in
+      (session, Some ctx)
   | (_, _, Some ckpt) ->
       (try
          let ctx =

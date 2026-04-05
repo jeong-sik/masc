@@ -33,3 +33,7 @@ val derive_pipeline_stage :
   surface_status:string ->
   now_ts:float ->
   string
+
+(** RFC-0002: derive pipeline stage directly from phase.
+    Deterministic mapping, no 30s recency heuristic. *)
+val pipeline_stage_of_phase : Keeper_state_machine.phase -> string

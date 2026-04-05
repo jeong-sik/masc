@@ -272,6 +272,26 @@ let write_heartbeat_snapshot
         ~response_alignment
         ()
     in
+    (* RFC-0002: dispatch Context_measured event through state machine *)
+    let _dispatch_result =
+      Keeper_registry.dispatch_event
+        ~base_path:ctx.config.base_path
+        meta_current.name
+        (Keeper_state_machine.Context_measured {
+          context_ratio = Keeper_exec_context.context_ratio c;
+          message_count = Keeper_exec_context.message_count c;
+          token_count = Keeper_exec_context.token_count c;
+          auto_rules = {
+            Keeper_state_machine.reflect = auto_rules.reflect;
+            plan = auto_rules.plan;
+            compact = auto_rules.compact;
+            handoff = auto_rules.handoff;
+            guardrail_stop = auto_rules.guardrail_stop;
+            guardrail_reason = auto_rules.guardrail_reason;
+            goal_drift = auto_rules.goal_drift;
+          };
+        })
+    in
     let snapshot =
       `Assoc
         [ "ts", `String (now_iso ())
@@ -398,10 +418,21 @@ let sync_keeper_presence
         Log.Keeper.warn
           "room presence returned empty rooms (%d/%d)"
           !consecutive_failures
-          (max_consecutive_heartbeat_failures ()))
+          (max_consecutive_heartbeat_failures ());
+        (* RFC-0002: dispatch heartbeat failure *)
+        ignore (Keeper_registry.dispatch_event
+          ~base_path:ctx.config.base_path meta_current.name
+          (Keeper_state_machine.Heartbeat_failed {
+            consecutive = !consecutive_failures;
+            max_allowed = max_consecutive_heartbeat_failures ();
+          })))
       else (
         consecutive_failures := 0;
-        last_successful_heartbeat_ts := Time_compat.now ());
+        last_successful_heartbeat_ts := Time_compat.now ();
+        (* RFC-0002: dispatch heartbeat success *)
+        ignore (Keeper_registry.dispatch_event
+          ~base_path:ctx.config.base_path meta_current.name
+          Keeper_state_machine.Heartbeat_ok));
       match write_meta ctx.config synced with
       | Ok () -> synced
       | Error e ->
@@ -416,6 +447,13 @@ let sync_keeper_presence
         !consecutive_failures
         (max_consecutive_heartbeat_failures ())
         (Printexc.to_string exn);
+      (* RFC-0002: dispatch heartbeat failure *)
+      ignore (Keeper_registry.dispatch_event
+        ~base_path:ctx.config.base_path meta_current.name
+        (Keeper_state_machine.Heartbeat_failed {
+          consecutive = !consecutive_failures;
+          max_allowed = max_consecutive_heartbeat_failures ();
+        }));
       meta_current)
 ;;
 
@@ -851,6 +889,18 @@ let run_heartbeat_loop
         let turn_fail_count =
           Keeper_registry.get_turn_failures ~base_path:ctx.config.base_path m.name
         in
+        (* RFC-0002: dispatch turn status event *)
+        if turn_fail_count > 0 then
+          ignore (Keeper_registry.dispatch_event
+            ~base_path:ctx.config.base_path m.name
+            (Keeper_state_machine.Turn_failed {
+              consecutive = turn_fail_count;
+              max_allowed = max_consecutive_turn_failures ();
+            }))
+        else
+          ignore (Keeper_registry.dispatch_event
+            ~base_path:ctx.config.base_path m.name
+            Keeper_state_machine.Turn_succeeded);
         if turn_fail_count >= max_consecutive_turn_failures ()
         then
           raise

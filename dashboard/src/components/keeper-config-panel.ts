@@ -26,7 +26,8 @@ type EditDraft = {
   goal: string
   short_goal: string
   mid_goal: string
-  long_goal: string  will: string
+  long_goal: string
+  will: string
   needs: string
   desires: string
   instructions: string
@@ -39,7 +40,8 @@ function initDraftFromConfig(c: KeeperConfig): EditDraft {
     goal: c.prompt.goal,
     short_goal: c.prompt.short_goal,
     mid_goal: c.prompt.mid_goal,
-    long_goal: c.prompt.long_goal,    will: c.prompt.will,
+    long_goal: c.prompt.long_goal,
+    will: c.prompt.will,
     needs: c.prompt.needs,
     desires: c.prompt.desires,
     instructions: c.prompt.instructions,
@@ -51,7 +53,8 @@ function buildPayload(draft: EditDraft, orig: KeeperConfig): KeeperConfigUpdateP
   if (draft.goal !== orig.prompt.goal) payload.goal = draft.goal
   if (draft.short_goal !== orig.prompt.short_goal) payload.short_goal = draft.short_goal
   if (draft.mid_goal !== orig.prompt.mid_goal) payload.mid_goal = draft.mid_goal
-  if (draft.long_goal !== orig.prompt.long_goal) payload.long_goal = draft.long_goal  if (draft.will !== orig.prompt.will) payload.will = draft.will
+  if (draft.long_goal !== orig.prompt.long_goal) payload.long_goal = draft.long_goal
+  if (draft.will !== orig.prompt.will) payload.will = draft.will
   if (draft.needs !== orig.prompt.needs) payload.needs = draft.needs
   if (draft.desires !== orig.prompt.desires) payload.desires = draft.desires
   if (draft.instructions !== orig.prompt.instructions) payload.instructions = draft.instructions
@@ -279,8 +282,6 @@ function PromptBlock({
   `
 }
 
-const SOUL_PROFILES = ['balanced', 'safety', 'delivery', 'research', 'relationship', 'minimal'] as const
-
 const fieldStyle = 'w-full bg-card/60 backdrop-blur-md text-text-strong text-[13px] border border-card-border rounded-xl py-2 px-3 font-sans focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/50 transition-all duration-200 shadow-inner'
 
 // ── Inline editing components for runtime config ────────
@@ -345,24 +346,6 @@ function EditTextarea({ field, label, rows = 3 }: { field: keyof EditDraft; labe
         value=${val}
         onInput=${(e: Event) => updateDraft(field, (e.target as HTMLTextAreaElement).value)}
       />
-    </div>
-  `
-}
-
-function EditSelect({ field, label, options }: { field: keyof EditDraft; label: string; options: readonly string[] }) {
-  const d = editDraft.value
-  if (!d) return null
-  const val = d[field] as string
-  return html`
-    <div class="mt-3">
-      <div class="text-[11px] font-semibold uppercase tracking-wider text-text-muted mb-1.5">${label}</div>
-      <select
-        class="${fieldStyle} appearance-none cursor-pointer hover:border-accent/30"
-        value=${val}
-        onChange=${(e: Event) => updateDraft(field, (e.target as HTMLSelectElement).value)}
-      >
-        ${options.map(o => html`<option value=${o} class="bg-bg-1">${o}</option>`)}
-      </select>
     </div>
   `
 }
@@ -487,7 +470,8 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
     <${EditTextarea} field="goal" label="목표" rows=${3} />
     <${EditTextarea} field="short_goal" label="단기 목표" rows=${2} />
     <${EditTextarea} field="mid_goal" label="중기 목표" rows=${2} />
-    <${EditTextarea} field="long_goal" label="장기 목표" rows=${2} />    <${EditTextarea} field="will" label="의지" rows=${2} />
+    <${EditTextarea} field="long_goal" label="장기 목표" rows=${2} />
+    <${EditTextarea} field="will" label="의지" rows=${2} />
     <${EditTextarea} field="needs" label="필요" rows=${2} />
     <${EditTextarea} field="desires" label="욕구" rows=${2} />
     <${EditTextarea} field="instructions" label="지시사항" rows=${4} />

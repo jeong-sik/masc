@@ -65,9 +65,12 @@ else
   FAIL=$((FAIL+1)); echo "  FAIL: empty edit no-op (HTTP $EDIT_RESP)"
 fi
 INVALID_RESP=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE/api/v1/keepers/sangsu/config" \
+  -H 'Content-Type: application/json' -d '{"__unknown_field__": true}' 2>/dev/null)
 TOTAL=$((TOTAL+1))
 if [ "$INVALID_RESP" = "400" ]; then
+  PASS=$((PASS+1)); echo "  PASS: unknown field rejected (HTTP $INVALID_RESP)"
 else
+  FAIL=$((FAIL+1)); echo "  FAIL: unknown field rejected (HTTP $INVALID_RESP)"
 fi
 
 echo "[5/7] Logs"

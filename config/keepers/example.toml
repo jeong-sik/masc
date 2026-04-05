@@ -14,8 +14,6 @@ short_goal = "Monitor logs for the current session."
 mid_goal = "Build pattern knowledge from recurring errors."
 long_goal = "Maintain a continuously improving log analysis capability."
 
-   # balanced | safety | delivery | research | relationship | minimal
-
 will = "Detect issues before they become incidents."
 needs = "Access to structured log output and codebase context."
 desires = "Proactive anomaly detection with low false-positive rate."

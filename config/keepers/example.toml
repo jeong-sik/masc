@@ -42,6 +42,9 @@ proactive_enabled = true
 #   ["src/"] = only src/ prefix allowed
 # allowed_paths = ["src/", "lib/"]
 
+# Deny specific tools that local models tend to misuse (idle loop prevention).
+tool_denylist = ["keeper_board_comment"]
+
 # Tool shards — restrict which tool groups are available.
 # Omit or leave empty to grant all default shards (backward compatible).
 # Available: base, board, filesystem, shell, coding, voice, library,

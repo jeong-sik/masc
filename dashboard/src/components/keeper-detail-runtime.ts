@@ -6,6 +6,7 @@ import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useEffect, useState } from 'preact/hooks'
 import { TimeAgo } from './common/time-ago'
+import { toolCategory } from './tool-call-shared'
 import type { Keeper } from '../types'
 import { serverStatus } from '../store'
 import { operatorSnapshot } from '../operator-store'
@@ -99,12 +100,16 @@ function SignalRow({ label, value }: { label: string; value: string | number }) 
 // ── Tool chip badge ──────────────────────────────────────
 
 function ToolChip({ name }: { name: string }) {
+  const cat = toolCategory(name)
   return html`
     <button type="button"
-      class="inline-flex items-center py-0.5 px-2 rounded-full text-[10px] font-medium bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-30)] hover:bg-[var(--accent-20)] cursor-pointer transition-colors"
-      title="클릭하여 도구 상세 보기"
+      class="inline-flex items-center gap-1 py-0.5 px-2 rounded-full text-[10px] font-medium bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-30)] hover:bg-[var(--accent-20)] cursor-pointer transition-colors"
+      title=${`${cat.label}: ${name}`}
       onClick=${() => openToolsInventory(name)}
-    >${name}</button>
+    >
+      <span class="font-mono font-bold ${cat.color}">${cat.icon}</span>
+      <span>${name}</span>
+    </button>
   `
 }
 

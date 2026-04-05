@@ -6,6 +6,7 @@ import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { fetchToolMetrics, type ToolMetricsResponse, type ToolMetricsTopEntry } from '../api'
 import { createAsyncResource } from '../lib/async-state'
+import { toolCategory } from './tool-call-shared'
 
 const metricsResource = createAsyncResource<ToolMetricsResponse>()
 
@@ -29,18 +30,34 @@ function tierBadgeClass(tier: string): string {
   }
 }
 
+/** Map category color CSS class (text-[...]) to a usable bar background color. */
+function categoryBarColor(colorClass: string): string {
+  const match = colorClass.match(/text-\[(.*)\]/)
+  if (!match) return 'var(--accent)'
+  const val = match[1]!
+  // CSS variable references
+  if (val.startsWith('var(')) return val
+  // Direct hex/rgb
+  return val
+}
+
 function BarChart({ items, maxCount }: { items: ToolMetricsTopEntry[]; maxCount: number }) {
   if (items.length === 0) return html`<p class="muted">아직 도구 호출 기록이 없습니다.</p>`
   return html`
     <div class="flex flex-col gap-1.5">
       ${items.map(item => {
         const pct = maxCount > 0 ? (item.call_count / maxCount) * 100 : 0
+        const cat = toolCategory(item.name)
+        const barBg = categoryBarColor(cat.color)
         return html`
           <div class="tool-bar-row" key=${item.name}>
-            <span class="text-[var(--text-body)] overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px]">${item.name}</span>
+            <div class="flex items-center gap-1.5 overflow-hidden">
+              <span class="flex-shrink-0 size-4 rounded text-[9px] font-mono font-bold flex items-center justify-center bg-[var(--white-5)] ${cat.color}">${cat.icon}</span>
+              <span class="text-[var(--text-body)] overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px]" title=${item.name}>${item.name}</span>
+            </div>
             <span class="px-1.5 py-px rounded-[3px] text-[10px] font-semibold text-center ${tierBadgeClass(item.tier)}">${tierLabel(item.tier)}</span>
             <div class="h-3.5 rounded-[3px] bg-[var(--white-6)] overflow-hidden">
-              <div class="h-full rounded-[3px] bg-[var(--accent)] min-w-0.5 transition-[width] duration-300 ease-in-out" style=${{ width: `${pct}%` }} />
+              <div class="h-full rounded-[3px] min-w-0.5 transition-[width] duration-300 ease-in-out" style=${{ width: `${pct}%`, backgroundColor: barBg }} />
             </div>
             <span class="text-[var(--text-muted)] text-[11px] text-right font-mono">${item.call_count}</span>
           </div>

@@ -73,9 +73,13 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
         (try
            Keeper_keepalive.run_heartbeat_loop ~proactive_warmup_sec
              ctx meta reg.fiber_stop ~wakeup:reg.fiber_wakeup;
-           (* Normal exit: stop flag was set *)
-           Keeper_registry.set_state ~base_path meta.name
-             Keeper_registry.Stopped;
+           (* Normal exit: stop flag was set — dispatch typed events *)
+           ignore (Keeper_registry.dispatch_event ~base_path meta.name
+             Keeper_state_machine.Stop_requested);
+           ignore (Keeper_registry.dispatch_event ~base_path meta.name
+             Keeper_state_machine.Drain_complete);
+           ignore (Keeper_registry.dispatch_event ~base_path meta.name
+             (Keeper_state_machine.Fiber_terminated { outcome = "normal exit" }));
            if resolve_done `Stopped then
              publish_lifecycle "stopped" meta.name "normal exit"
          with
@@ -84,8 +88,8 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
                Keeper_registry.failure_reason_to_string info.reason in
              Keeper_registry.set_failure_reason ~base_path meta.name
                (Some info.reason);
-             Keeper_registry.set_state ~base_path meta.name
-               Keeper_registry.Crashed;
+             ignore (Keeper_registry.dispatch_event ~base_path meta.name
+               (Keeper_state_machine.Fiber_terminated { outcome = reason }));
              let ts = Time_compat.now () in
              Keeper_registry.record_crash ~base_path
                meta.name ts reason;
@@ -101,8 +105,8 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
              let fr = Keeper_registry.Exception (Printexc.to_string exn) in
              let reason = Keeper_registry.failure_reason_to_string fr in
              Keeper_registry.set_failure_reason ~base_path meta.name (Some fr);
-             Keeper_registry.set_state ~base_path meta.name
-               Keeper_registry.Crashed;
+             ignore (Keeper_registry.dispatch_event ~base_path meta.name
+               (Keeper_state_machine.Fiber_terminated { outcome = reason }));
              let ts = Time_compat.now () in
              Keeper_registry.record_crash ~base_path
                meta.name ts reason;
@@ -135,8 +139,8 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
             Keeper_crash_persistence.enqueue_record ~keepers_dir
               ~name:meta.name ~ts ~reason ~restart_count:rc;
             Keeper_registry.record_error ~base_path meta.name reason;
-            Keeper_registry.set_state ~base_path meta.name
-              Keeper_registry.Crashed;
+            ignore (Keeper_registry.dispatch_event ~base_path meta.name
+              (Keeper_state_machine.Fiber_terminated { outcome = reason }));
             if resolve_done (`Crashed reason) then
               publish_lifecycle "crashed" meta.name reason
           end

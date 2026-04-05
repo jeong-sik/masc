@@ -4,8 +4,9 @@
     boundary. The [measurement_snapshot] is an immutable record captured once per
     decision cycle. Everything downstream of this record is deterministic.
 
-    Phase 1: types only (no [capture] implementation yet).
-    Phase 4 will add the [capture] function that performs I/O. *)
+    Phase 1: types and serialization.
+    Phase 4: pure [capture] function — accepts pre-computed values,
+    returns [measurement_snapshot]. All I/O happens upstream in the caller. *)
 
 (** {1 Threshold Parameters} *)
 
@@ -78,6 +79,34 @@ type measurement_snapshot = {
   timing : timing_measurement;
   failures : failure_measurement;
 }
+
+(** {1 Capture} *)
+
+(** Pure snapshot constructor — the det/nondet boundary.
+    All I/O (clock reads, file reads, Runtime_params queries) must happen
+    before calling [capture]. The returned record is fully deterministic. *)
+val capture :
+  snapshot_id:string ->
+  keeper_name:string ->
+  generation:int ->
+  timestamp:float ->
+  thresholds:threshold_params ->
+  context_ratio:float ->
+  message_count:int ->
+  token_count:int ->
+  max_tokens:int ->
+  repetition_risk:float ->
+  goal_alignment:float ->
+  response_alignment:float ->
+  now_ts:float ->
+  idle_seconds:int ->
+  since_last_compaction_sec:float ->
+  since_last_handoff_sec:float ->
+  proactive_warmup_elapsed:bool ->
+  consecutive_hb_failures:int ->
+  consecutive_turn_failures:int ->
+  unit ->
+  measurement_snapshot
 
 (** {1 Serialization} *)
 

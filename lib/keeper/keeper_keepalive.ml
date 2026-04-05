@@ -272,6 +272,63 @@ let write_heartbeat_snapshot
         ~response_alignment
         ()
     in
+    (* RFC-0002: build measurement_snapshot via pure capture function.
+       Timing/failure fields not yet wired from heartbeat loop context
+       use defaults; a follow-up PR will thread them through. *)
+    let thresholds : Keeper_measurement.threshold_params =
+      { compaction_ratio_gate = meta_current.compaction.ratio_gate
+      ; compaction_message_gate = meta_current.compaction.message_gate
+      ; compaction_token_gate = meta_current.compaction.token_gate
+      ; compaction_cooldown_sec = meta_current.compaction.cooldown_sec
+      ; handoff_threshold = meta_current.handoff_threshold
+      ; handoff_cooldown_sec = meta_current.handoff_cooldown_sec
+      ; auto_handoff_enabled = meta_current.auto_handoff
+      ; reflect_repetition_threshold =
+          Keeper_config.keeper_rule_reflect_repetition_threshold ()
+      ; plan_goal_alignment_threshold =
+          Keeper_config.keeper_rule_plan_goal_alignment_threshold ()
+      ; plan_response_alignment_threshold =
+          Keeper_config.keeper_rule_plan_response_alignment_threshold ()
+      ; guardrail_repetition_threshold =
+          Keeper_config.keeper_rule_guardrail_repetition_threshold ()
+      ; guardrail_goal_alignment_threshold =
+          Keeper_config.keeper_rule_guardrail_goal_alignment_threshold ()
+      ; guardrail_response_alignment_threshold =
+          Keeper_config.keeper_rule_guardrail_response_alignment_threshold ()
+      ; guardrail_context_threshold =
+          Keeper_config.keeper_rule_guardrail_context_threshold ()
+      ; max_consecutive_hb_failures = max_consecutive_heartbeat_failures ()
+      ; max_consecutive_turn_failures = max_consecutive_turn_failures ()
+      ; model_ratio_multiplier = 1.0
+      ; model_handoff_multiplier = 1.0
+      }
+    in
+    let _measurement =
+      Keeper_measurement.capture
+        ~snapshot_id:
+          (Printf.sprintf "msnap-%s-%Ld"
+             meta_current.name
+             (Int64.of_float (now_ts *. 1000.0)))
+        ~keeper_name:meta_current.name
+        ~generation:meta_current.runtime.generation
+        ~timestamp:now_ts
+        ~thresholds
+        ~context_ratio:(Keeper_exec_context.context_ratio c)
+        ~message_count:(Keeper_exec_context.message_count c)
+        ~token_count:(Keeper_exec_context.token_count c)
+        ~max_tokens:c.max_tokens
+        ~repetition_risk
+        ~goal_alignment
+        ~response_alignment
+        ~now_ts
+        ~idle_seconds:0
+        ~since_last_compaction_sec:0.0
+        ~since_last_handoff_sec:0.0
+        ~proactive_warmup_elapsed:false
+        ~consecutive_hb_failures:0
+        ~consecutive_turn_failures:0
+        ()
+    in
     (* RFC-0002: dispatch Context_measured event through state machine *)
     let _dispatch_result =
       Keeper_registry.dispatch_event

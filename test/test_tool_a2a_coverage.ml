@@ -129,6 +129,50 @@ let test_dispatch_unknown_tool () =
   | Some _ -> fail "expected None for unknown tool"
 
 (* ============================================================
+   Security Regression Tests
+   ============================================================ *)
+
+(** Asserts that auth_token is not present anywhere in the JSON string. *)
+let assert_no_auth_token json_str =
+  let lower = String.lowercase_ascii json_str in
+  let needle = "auth_token" in
+  let haystack_len = String.length lower in
+  let needle_len = String.length needle in
+  let found = ref false in
+  for i = 0 to haystack_len - needle_len do
+    if String.sub lower i needle_len = needle then found := true
+  done;
+  if !found then
+    fail "auth_token unexpectedly found in poll_events response"
+
+let test_emit_heartbeat_task_no_auth_token_in_events () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  (* Subscribe to heartbeat_task events *)
+  let sub_id =
+    match Masc_mcp.A2a_tools.subscribe ~events:["heartbeat_task"] () with
+    | Ok json ->
+      (match Yojson.Safe.Util.member "subscription_id" json with
+       | `String id -> id
+       | _ -> fail "subscription_id missing")
+    | Error e -> fail (Printf.sprintf "subscribe failed: %s" e)
+  in
+  (* Emit a heartbeat_task with an auth_token — the token must not appear in the broadcast *)
+  Masc_mcp.A2a_tools.emit_heartbeat_task
+    ~agent:"security-test-agent"
+    ~goal:"test goal"
+    ~context:"test context"
+    ~allowed_tools:["masc_heartbeat"]
+    ~auth_token:(Some "secret-token-should-not-appear")
+    ();
+  (* Poll the buffered events and assert auth_token is absent *)
+  (match Masc_mcp.A2a_tools.poll_events ~subscription_id:sub_id ~clear:true () with
+   | Ok json -> assert_no_auth_token (Yojson.Safe.to_string json)
+   | Error e -> fail (Printf.sprintf "poll_events failed: %s" e));
+  (* Cleanup *)
+  ignore (Masc_mcp.A2a_tools.unsubscribe ~subscription_id:sub_id)
+
+(* ============================================================
    Test Runners
    ============================================================ *)
 
@@ -161,5 +205,9 @@ let () =
       test_case "a2a_unsubscribe" `Quick test_dispatch_a2a_unsubscribe;
       test_case "poll_events" `Quick test_dispatch_poll_events;
       test_case "unknown" `Quick test_dispatch_unknown_tool;
+    ];
+    "security", [
+      test_case "no_auth_token_in_heartbeat_task_events" `Quick
+        test_emit_heartbeat_task_no_auth_token_in_events;
     ];
   ]

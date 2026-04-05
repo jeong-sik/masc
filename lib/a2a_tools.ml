@@ -638,6 +638,8 @@ let emit_heartbeat_task
     ?(decision_reason : string option)
     ?(decision_confidence : float option)
     () : unit =
+  (* Deliberately unused: auth tokens must not be included in broadcast
+     event payloads; this is reserved for future per-agent delivery only. *)
   ignore auth_token;
   Eio.Mutex.use_rw ~protect:true heartbeat_mutex (fun () ->
     let m = SMap.add agent

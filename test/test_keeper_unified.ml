@@ -778,10 +778,13 @@ let test_prompt_actionable_routes_respect_tool_policy () =
     (contains_substring user "file-inspection tools are unavailable")
 
 let test_prompt_no_actionable_work_fallback () =
-  (* minimal_policy_meta has Minimal preset — no board/web-search tools,
-     so proactive routes are empty and the fallback fires. *)
+  (* Custom empty tool list — no tools at all means no proactive routes,
+     so the "No actionable work" fallback fires. *)
+  let empty_tools_meta =
+    { minimal_meta with tool_access = Custom [] }
+  in
   let obs = base_observation in
-  let _sys, user = UP.build_prompt ~base_path:"/test" ~meta:minimal_policy_meta ~observation:obs in
+  let _sys, user = UP.build_prompt ~base_path:"/test" ~meta:empty_tools_meta ~observation:obs in
   check bool "has actionable routes section" true
     (contains_substring user "Actionable Routes");
   check bool "has no-actionable-work fallback" true

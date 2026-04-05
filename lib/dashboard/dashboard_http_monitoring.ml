@@ -54,12 +54,29 @@ let tool_call_health_json ?(now_ts = Unix.gettimeofday ()) (config : Room.config
   let failure_rate =
     if total = 0 then 0.0 else float_of_int failures /. float_of_int total
   in
-  (* Top 10 tools by failure count, then by call count. *)
+  (* Single-pass take: return the first [n] elements without traversing
+     the entire list to compute its length. *)
+  let take n ls =
+    let rec aux acc i = function
+      | _ when i >= n -> List.rev acc
+      | [] -> List.rev acc
+      | x :: xs -> aux (x :: acc) (i + 1) xs
+    in
+    aux [] 0 ls
+  in
+  (* Top 10 tools by failure count, breaking ties by call count descending
+     and then tool name ascending for deterministic ordering. *)
   let top_failures =
     SMap.bindings per_tool
     |> List.filter (fun (_, (_, f)) -> f > 0)
-    |> List.sort (fun (_, (_, f1)) (_, (_, f2)) -> Int.compare f2 f1)
-    |> (fun ls -> if List.length ls > 10 then List.filteri (fun i _ -> i < 10) ls else ls)
+    |> List.sort (fun (name1, (c1, f1)) (name2, (c2, f2)) ->
+           let by_failures = Int.compare f2 f1 in
+           if by_failures <> 0 then by_failures
+           else
+             let by_calls = Int.compare c2 c1 in
+             if by_calls <> 0 then by_calls
+             else String.compare name1 name2)
+    |> take 10
     |> List.map (fun (name, (calls, fails)) ->
          `Assoc [
            ("tool", `String name);
@@ -67,11 +84,18 @@ let tool_call_health_json ?(now_ts = Unix.gettimeofday ()) (config : Room.config
            ("failures", `Int fails);
          ])
   in
-  (* Top 10 tools by call count (most active). *)
+  (* Top 10 tools by call count (most active), breaking ties by failures
+     descending and then tool name ascending for deterministic ordering. *)
   let top_active =
     SMap.bindings per_tool
-    |> List.sort (fun (_, (c1, _)) (_, (c2, _)) -> Int.compare c2 c1)
-    |> (fun ls -> if List.length ls > 10 then List.filteri (fun i _ -> i < 10) ls else ls)
+    |> List.sort (fun (name1, (c1, f1)) (name2, (c2, f2)) ->
+           let by_calls = Int.compare c2 c1 in
+           if by_calls <> 0 then by_calls
+           else
+             let by_failures = Int.compare f2 f1 in
+             if by_failures <> 0 then by_failures
+             else String.compare name1 name2)
+    |> take 10
     |> List.map (fun (name, (calls, fails)) ->
          `Assoc [
            ("tool", `String name);

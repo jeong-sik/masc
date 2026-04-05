@@ -167,7 +167,8 @@ let test_script_runs_under_system_bash_without_watch () =
       let gh_log = Filename.concat dir "gh.log" in
       let gh_labels = Filename.concat dir "gh-labels.json" in
       let body_file = Filename.concat dir "body.md" in
-      write_file body_file "## Summary\nTest body\n";
+      write_file body_file
+        "## Summary\nTest body\n\n## Product impact\n- Promise affected: `none/internal`\n- User-visible change: none\n\n## Evidence\n- local script test\n\n## Review evidence\n- not applicable for script test\n\n## Linked issue\n- Refs #1234\n";
       let path =
         Printf.sprintf "%s:%s" fake_gh_dir
           (match Sys.getenv_opt "PATH" with Some p -> p | None -> "")
@@ -203,6 +204,44 @@ let test_script_runs_under_system_bash_without_watch () =
       check bool "does not add docs label for code-only change" false
         (contains_substring labels "\"docs\""))
 
+let test_script_rejects_body_missing_required_sections () =
+  with_temp_dir "pr-open-script-missing-sections" (fun dir ->
+      init_repo_with_remote dir;
+      let fake_gh_dir = make_fake_gh dir in
+      let gh_log = Filename.concat dir "gh.log" in
+      let gh_labels = Filename.concat dir "gh-labels.json" in
+      let body_file = Filename.concat dir "body.md" in
+      write_file body_file "## Summary\nOnly summary present\n";
+      let path =
+        Printf.sprintf "%s:%s" fake_gh_dir
+          (match Sys.getenv_opt "PATH" with Some p -> p | None -> "")
+      in
+      let env =
+        [
+          ("PATH", path);
+          ("FAKE_GH_LOG", gh_log);
+          ("FAKE_GH_LABELS", gh_labels);
+        ]
+      in
+      let cmd =
+        Printf.sprintf "/bin/bash %s --repo %s --title %s --body-file %s --no-watch"
+          (quote (script_path ()))
+          (quote "example/test")
+          (quote "fix: reject incomplete PR body")
+          (quote body_file)
+      in
+      let code, stdout, stderr = run_shell ~cwd:dir ~env cmd in
+      check bool "command fails" true (code <> 0);
+      check bool "stdout empty" true (String.trim stdout = "");
+      check bool "mentions hygiene failure" true
+        (contains_substring stderr "body file is missing required PR hygiene sections:");
+      check bool "mentions product impact heading" true
+        (contains_substring stderr "## Product impact");
+      check bool "mentions linked issue heading" true
+        (contains_substring stderr "## Linked issue");
+      check bool "gh never invoked before validation" false
+        (Sys.file_exists gh_log))
+
 let () =
   run "pr_open_script"
     [
@@ -212,5 +251,7 @@ let () =
             test_source_avoids_mapfile_only_bash4_features;
           test_case "runs under system bash without watch" `Quick
             test_script_runs_under_system_bash_without_watch;
+          test_case "rejects body missing required sections" `Quick
+            test_script_rejects_body_missing_required_sections;
         ] );
     ]

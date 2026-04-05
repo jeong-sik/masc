@@ -528,7 +528,7 @@ let run_keepalive_unified_turn
     | Keeper_registry.Keeper_heartbeat_failure _ as e -> raise e
     | exn ->
       Log.Keeper.error "%s: unified turn exception: %s"
-        meta_after_observe.name (Printexc.to_string exn);
+        meta_after_triage.name (Printexc.to_string exn);
       meta_after_triage)
 ;;
 

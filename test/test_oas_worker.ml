@@ -850,7 +850,7 @@ let test_keeper_checkpoint_prefers_oas_checkpoint () =
       | Some loaded ->
           Alcotest.(check string) "system prompt from OAS checkpoint"
             "oas system" loaded.system_prompt;
-          Alcotest.(check int) "max_tokens from OAS checkpoint" 4096
+          Alcotest.(check int) "max_tokens from live primary context" 1024
             loaded.max_tokens;
           Alcotest.(check string) "loaded OAS message" "oas"
             (Agent_sdk.Types.text_of_message (List.hd loaded.messages))

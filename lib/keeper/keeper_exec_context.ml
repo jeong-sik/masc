@@ -507,9 +507,14 @@ let load_context_from_checkpoint ~trace_id ~primary_model_max_tokens ~base_dir =
       trace_id;
   match (prefer_legacy, oas_checkpoint, legacy_checkpoint) with
   | (false, Some checkpoint, _) ->
-      ( session,
-        Some
-          (context_of_oas_checkpoint checkpoint ~primary_model_max_tokens) )
+      let ctx =
+        context_of_oas_checkpoint checkpoint ~primary_model_max_tokens
+      in
+      let ctx =
+        if primary_model_max_tokens <= 0 then ctx
+        else sync_oas_context { ctx with max_tokens = primary_model_max_tokens }
+      in
+      (session, Some ctx)
   | (_, _, Some ckpt) ->
       (try
          let ctx =

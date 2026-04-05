@@ -61,6 +61,20 @@ let refresh_local_discovery_if_possible ?sw ?net (labels : string list) : bool =
              false)
     | _ -> false
 
+(** Absolute minimum acceptable discovered context size.
+    llama-server defaults to [-c 8192]; keeper conversations need 64K+ for
+    multi-turn interactions with tool calls.  Below this floor we ignore the
+    discovered value and use the static registry value instead. *)
+let context_floor = 65_536
+
+(** Select the effective discovered context, applying {!context_floor}.
+    Returns [discovered] when it is at least [context_floor]; otherwise
+    falls back to [static_ctx]. *)
+let effective_discovered_ctx ~static_ctx ~(discovered : int option) : int =
+  match discovered with
+  | Some ctx when ctx >= context_floor -> ctx
+  | _ -> static_ctx
+
 (** Resolve max_context for a model label.
     Delegates routing to OAS {!Llm_provider.Cascade_config.resolve_label_context} —
     MASC does not guess which endpoint serves the request.

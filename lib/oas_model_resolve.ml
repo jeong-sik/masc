@@ -122,6 +122,33 @@ let resolve_primary_max_context (labels : string list) : int =
   in
   find labels
 
+(** Maximum context across all available models in a label list.
+    Returns the largest context window that any model in the cascade can
+    handle.  This is the value MASC should use for [max_input_tokens]:
+    OAS cascade will try providers in order — if the primary overflows,
+    the cascade fails over to the next provider that can handle the
+    prompt size.  Falls back to [128_000] if no model is available. *)
+let resolve_max_cascade_context (labels : string list) : int =
+  let contexts = List.filter_map (fun label ->
+    match provider_name_of_label label with
+    | None -> None
+    | Some pname ->
+      match Llm_provider.Provider_registry.find default_registry pname with
+      | None -> None
+      | Some entry ->
+        if entry.is_available () then
+          let static_ctx = entry.max_context in
+          let ctx = match Llm_provider.Cascade_config.resolve_label_context label with
+            | Some discovered -> effective_discovered_ctx ~static_ctx ~discovered:(Some discovered)
+            | None -> static_ctx
+          in
+          Some ctx
+        else None
+  ) labels in
+  match contexts with
+  | [] -> 128_000
+  | ctxs -> List.fold_left max 0 ctxs
+
 (** Resolve model_id for the first available model in a label list.
     Returns the model_id portion of "provider:model_id".
     Falls back to empty string if no model is available. *)

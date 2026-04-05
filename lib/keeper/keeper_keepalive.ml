@@ -219,7 +219,7 @@ let write_heartbeat_snapshot
   let primary_max_context =
     match meta_current.max_context_override with
     | Some v -> v
-    | None -> Oas_model_resolve.resolve_primary_max_context cascade_models
+    | None -> Oas_model_resolve.resolve_max_cascade_context cascade_models
   in
   let base_dir = session_base_dir ctx.config in
   ignore (Keeper_fs.ensure_dir (Filename.concat base_dir meta_current.runtime.trace_id));

@@ -479,6 +479,8 @@ let sync_keeper_presence
           !consecutive_failures
           (max_consecutive_heartbeat_failures ());
         (* RFC-0002: dispatch heartbeat failure *)
+        Prometheus.inc_counter "masc_keeper_heartbeat_failures_total"
+          ~labels:[("keeper", meta_current.name)] ();
         ignore (Keeper_registry.dispatch_event
           ~base_path:ctx.config.base_path meta_current.name
           (Keeper_state_machine.Heartbeat_failed {
@@ -492,6 +494,8 @@ let sync_keeper_presence
         ignore (Keeper_registry.dispatch_event
           ~base_path:ctx.config.base_path meta_current.name
           Keeper_state_machine.Heartbeat_ok);
+        Prometheus.inc_counter "masc_keeper_heartbeat_successes_total"
+          ~labels:[("keeper", meta_current.name)] ();
         (* Failing recovery: heartbeat success proves infrastructure is healthy.
            Reset stale turn failures so the keeper can exit Failing phase.
            Without this, a single turn failure traps the keeper in Failing forever

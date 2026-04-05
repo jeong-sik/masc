@@ -134,3 +134,24 @@ let headers limiter ~key =
 
 let too_many_requests_body () =
   {|{"error":"Too Many Requests","message":"Rate limit exceeded"}|}
+
+let headers_global ~key =
+  headers (Eio.Lazy.force global) ~key
+
+(** {1 Client Address Key Extraction} *)
+
+(** Convert an [Eio.Net.Sockaddr.stream] to a rate-limit key string.
+    For TCP connections the key is the client IP address (dotted-decimal for
+    IPv4, colon-hex for IPv6).  Unix-domain sockets use a "unix:" prefix so
+    they never collide with TCP keys.  The port is excluded so that all
+    connections from the same host share one rate-limit bucket. *)
+let key_of_sockaddr (client_addr : Eio.Net.Sockaddr.stream) =
+  match client_addr with
+  | `Tcp (ip, _) -> Fmt.str "%a" Eio.Net.Ipaddr.pp ip
+  | `Unix path -> "unix:" ^ Filename.basename path
+
+(** {1 Global Startup Helper} *)
+
+(** Start the global rate-limit cleanup loop.  Call once at server startup. *)
+let start_global_cleanup_loop ~sw ~clock =
+  start_cleanup_loop ~sw ~clock (Eio.Lazy.force global)

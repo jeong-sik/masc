@@ -168,6 +168,53 @@ let test_too_many_requests_body () =
      with Not_found -> false)
 
 (* ============================================================
+   key_of_sockaddr Tests
+   ============================================================ *)
+
+let test_key_of_sockaddr_ipv4_loopback () =
+  let ip = Eio.Net.Ipaddr.of_raw "\127\000\000\001" in
+  let addr = `Tcp (ip, 8080) in
+  check string "IPv4 loopback" "127.0.0.1" (Rate_limit.key_of_sockaddr addr)
+
+let test_key_of_sockaddr_ipv4_arbitrary () =
+  let ip = Eio.Net.Ipaddr.of_raw "\192\168\001\042" in
+  let addr = `Tcp (ip, 1234) in
+  check string "IPv4 arbitrary" "192.168.1.42" (Rate_limit.key_of_sockaddr addr)
+
+let test_key_of_sockaddr_ignores_port () =
+  let ip = Eio.Net.Ipaddr.of_raw "\010\000\000\001" in
+  let k1 = Rate_limit.key_of_sockaddr (`Tcp (ip, 1111)) in
+  let k2 = Rate_limit.key_of_sockaddr (`Tcp (ip, 9999)) in
+  check string "same key regardless of port" k1 k2
+
+let test_key_of_sockaddr_unix () =
+  let key = Rate_limit.key_of_sockaddr (`Unix "/run/masc.sock") in
+  check bool "unix key starts with unix:" true
+    (String.length key > 5 && String.sub key 0 5 = "unix:")
+
+let test_key_of_sockaddr_ipv6_loopback () =
+  (* IPv6 loopback ::1 = 15 leading zero bytes + 1 *)
+  let raw = String.make 15 '\000' ^ "\001" in
+  let ip = Eio.Net.Ipaddr.of_raw raw in
+  let key = Rate_limit.key_of_sockaddr (`Tcp (ip, 443)) in
+  (* Eio.Net.Ipaddr.pp follows RFC 5952 compressed notation *)
+  check string "IPv6 loopback key" "::1" key
+
+(* ============================================================
+   headers_global Tests
+   ============================================================ *)
+
+let test_headers_global_has_limit () =
+  let hdrs = Rate_limit.headers_global ~key:"global_hdr_test" in
+  check bool "has X-RateLimit-Limit" true
+    (List.mem_assoc "X-RateLimit-Limit" hdrs)
+
+let test_headers_global_has_remaining () =
+  let hdrs = Rate_limit.headers_global ~key:"global_hdr_test_new" in
+  check bool "has X-RateLimit-Remaining" true
+    (List.mem_assoc "X-RateLimit-Remaining" hdrs)
+
+(* ============================================================
    Test Runners
    ============================================================ *)
 
@@ -215,5 +262,16 @@ let () =
       test_case "headers has remaining" `Quick test_headers_has_remaining;
       test_case "headers limit value" `Quick test_headers_limit_value;
       test_case "too_many_requests_body" `Quick test_too_many_requests_body;
+    ];
+    "key_of_sockaddr", [
+      test_case "ipv4 loopback" `Quick test_key_of_sockaddr_ipv4_loopback;
+      test_case "ipv4 arbitrary" `Quick test_key_of_sockaddr_ipv4_arbitrary;
+      test_case "ignores port" `Quick test_key_of_sockaddr_ignores_port;
+      test_case "unix socket" `Quick test_key_of_sockaddr_unix;
+      test_case "ipv6 loopback" `Quick test_key_of_sockaddr_ipv6_loopback;
+    ];
+    "headers_global", [
+      test_case "has limit header" `Quick test_headers_global_has_limit;
+      test_case "has remaining header" `Quick test_headers_global_has_remaining;
     ];
   ]

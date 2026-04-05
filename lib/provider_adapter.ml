@@ -84,6 +84,34 @@ let cn_gemini = "gemini-api"
 let cn_glm = "glm"
 let cn_openrouter = "openrouter"
 
+<<<<<<< HEAD
+||||||| parent of be892854e (refactor(boundary): eliminate remaining vendor match statements in provider_adapter)
+(** Map OAS Provider_config.provider_kind to MASC adapter canonical_name.
+    Note: OpenAI_compat maps to codex-api (cloud); llama (local) uses the
+    same provider_kind but is identified by endpoint, not by this function. *)
+let string_of_provider_kind
+    : Llm_provider.Provider_config.provider_kind -> string
+  = function
+  | Anthropic -> cn_claude
+  | OpenAI_compat -> cn_codex
+  | Gemini -> cn_gemini
+  | Glm -> cn_glm
+  | Claude_code -> "claude-code"
+
+=======
+(** Map OAS Provider_config.provider_kind to MASC adapter canonical_name.
+    Note: OpenAI_compat maps to codex-api (cloud); llama (local) uses the
+    same provider_kind but is identified by endpoint, not by this function. *)
+let string_of_provider_kind
+    : Llm_provider.Provider_config.provider_kind -> string
+  = function
+  | Anthropic -> cn_claude
+  | OpenAI_compat -> cn_codex
+  | Gemini -> cn_gemini
+  | Glm -> cn_glm
+  | Claude_code -> cn_claude
+
+>>>>>>> be892854e (refactor(boundary): eliminate remaining vendor match statements in provider_adapter)
 (** Single source of truth for all agent adapters.
     spawn_key maps to Spawn.default_configs keys.
     default_voice maps to TTS voice names.
@@ -694,16 +722,12 @@ let provider_model_label provider model =
     OAS cascade resolves the concrete model at runtime.
     MASC no longer knows vendor families — only canonical adapter names. *)
 let default_model_label_for_adapter (adapter : adapter) =
-  match adapter.canonical_name with
-  | s when s = cn_claude -> Ok "claude:auto"
-  | s when s = cn_gemini -> Ok "gemini:auto"
-  | s when s = cn_codex -> Ok "openai:auto"
-  | s when s = cn_glm -> Ok "glm:auto"
-  | s when s = cn_llama -> explicit_llama_model_label_result ()
-  | s when s = cn_openrouter ->
-      Error "OpenRouter requires explicit runtime_model"
-  | name ->
-      Error (Printf.sprintf "Provider '%s' requires explicit runtime_model" name)
+  match adapter.runtime_kind with
+  | Local -> explicit_llama_model_label_result ()
+  | Direct_api ->
+    match adapter.default_model_id with
+    | Some _ -> Ok (adapter.cascade_prefix ^ ":auto")
+    | None -> Error (Printf.sprintf "Provider '%s' requires explicit runtime_model" adapter.canonical_name)
 
 (** Build the "provider:auto" label for each adapter that has auth
     credentials present.  Used by preferred_*_model_labels to avoid
@@ -850,13 +874,7 @@ type auth_detail = {
 (** Cascade config prefix from adapter record. No match needed. *)
 let cascade_prefix_of_adapter (adapter : adapter) = adapter.cascade_prefix
 
-let endpoint_url_of_adapter (adapter : adapter) =
-  match adapter.canonical_name with
-  | name when name = cn_llama -> Some Env_config_runtime.Llama.server_url
-  | name when name = cn_glm -> Some Env_config_runtime.Glm.server_url
-  | name when name = cn_claude -> Some "https://api.anthropic.com"
-  | name when name = cn_codex -> Some "https://api.openai.com"
-  | _ -> None
+let endpoint_url_of_adapter (adapter : adapter) = adapter.endpoint_url
 
 (** Resolve auth detail for any provider by canonical name or alias.
     Gemini-specific Vertex ADC vs API Key logic is internal. *)

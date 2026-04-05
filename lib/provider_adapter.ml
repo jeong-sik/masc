@@ -850,18 +850,74 @@ let gemini_vertex_openai_base_url ~project ~location =
     "https://aiplatform.googleapis.com/v1/projects/%s/locations/%s/endpoints/openapi"
     project location
 
-(** Resolve the API endpoint URL for a canonical provider name.
-    Local and runtime-configured providers use Env_config_runtime.
-    Cloud API providers return their well-known base URLs. *)
-let endpoint_url_for_canonical_name name =
-  match name with
-  | s when s = cn_llama -> Some Env_config_runtime.Llama.server_url
-  | s when s = cn_glm -> Some Env_config_runtime.Glm.server_url
-  | s when s = cn_claude -> Some "https://api.anthropic.com"
-  | s when s = cn_codex -> Some "https://api.openai.com"
-  | s when s = cn_gemini -> (
-      match resolve_gemini_direct_auth () with
-      | Gemini_vertex_adc { project; location } ->
-          Some (gemini_vertex_openai_base_url ~project ~location)
-      | _ -> Some "https://generativelanguage.googleapis.com")
+(* ── Generic provider auth detail ─────────────────────────────── *)
+
+(** Provider-agnostic auth detail for dashboard display.
+    Encapsulates vendor-specific auth logic (e.g. Gemini Vertex/API key)
+    so consumers do not branch on vendor names. *)
+type auth_detail = {
+  auth_kind : string;
+  status : string;
+  available : bool;
+  supports_run : bool;
+  endpoint_url : string option;
+  note : string option;
+}
+
+(** Map adapter canonical_name to the cascade config prefix.
+    E.g. "claude-api" -> "claude", "codex-api" -> "openai". *)
+let cascade_prefix_of_adapter (adapter : adapter) =
+  match adapter.canonical_name with
+  | "claude-api" -> "claude"
+  | "codex-api" -> "openai"
+  | "gemini-api" -> "gemini"
+  | other -> other
+
+let endpoint_url_of_adapter (adapter : adapter) =
+  match adapter.canonical_name with
+  | name when name = cn_llama -> Some Env_config_runtime.Llama.server_url
+  | name when name = cn_glm -> Some Env_config_runtime.Glm.server_url
+  | "claude-api" -> Some "https://api.anthropic.com"
+  | "codex-api" -> Some "https://api.openai.com"
   | _ -> None
+
+(** Resolve auth detail for any provider by canonical name or alias.
+    Gemini-specific Vertex ADC vs API Key logic is internal. *)
+let auth_detail_of_provider provider =
+  match resolve_direct_adapter provider with
+  | None ->
+    { auth_kind = "unknown"; status = "unsupported"; available = false;
+      supports_run = false; endpoint_url = None;
+      note = Some "Unsupported provider" }
+  | Some adapter ->
+    let auth_kind_base = string_of_auth_mode adapter.auth_mode in
+    if adapter.canonical_name = cn_gemini then
+      match resolve_gemini_direct_auth () with
+      | Gemini_api_key ->
+        { auth_kind = "api_key:GEMINI_API_KEY"; status = "configured";
+          available = true; supports_run = true;
+          endpoint_url = Some "https://generativelanguage.googleapis.com";
+          note = None }
+      | Gemini_vertex_adc { project; location } ->
+        { auth_kind = Printf.sprintf "vertex_adc:%s:%s" project location;
+          status = "vertex_adc"; available = true; supports_run = false;
+          endpoint_url = Some (gemini_vertex_openai_base_url ~project ~location);
+          note = Some "Dashboard run MVP only supports Gemini via GEMINI_API_KEY. \
+                       Vertex ADC inventory is visible but run is disabled." }
+      | Gemini_auth_missing message ->
+        { auth_kind = auth_kind_base; status = "missing_auth";
+          available = false; supports_run = false;
+          endpoint_url = None; note = Some message }
+    else
+      let available = provider_auth_available provider in
+      { auth_kind = auth_kind_base;
+        status = (if available then "configured" else "missing_auth");
+        available; supports_run = available;
+        endpoint_url = endpoint_url_of_adapter adapter;
+        note = None }
+
+(** Check if a provider has a spawn_key (can be launched via CLI). *)
+let is_spawnable provider =
+  match resolve_direct_adapter provider with
+  | Some adapter -> adapter.spawn_key <> None
+  | None -> false

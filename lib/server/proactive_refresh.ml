@@ -53,7 +53,8 @@ let log_refresh_failure ~config ~consecutive_failures ~current_interval ~dt exn 
 
 let notify_error config exn =
   match config.on_error with
-  | Some f -> (try f exn with _ -> ())
+  | Some f -> (try f exn
+    with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ())
   | None -> ()
 
 let start ~sw ~clock ~config ~compute ~on_result =
@@ -93,7 +94,8 @@ let start ~sw ~clock ~config ~compute ~on_result =
       Eio.Time.sleep clock (!current_interval +. jitter);
       let health_ok = match config.health_check with
         | None -> true
-        | Some check -> (try check () with _ -> false)
+        | Some check -> (try check ()
+          with Eio.Cancel.Cancelled _ as e -> raise e | _ -> false)
       in
       if not health_ok then begin
         incr consecutive_failures;

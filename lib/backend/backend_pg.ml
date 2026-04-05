@@ -314,7 +314,8 @@ let use_with_retry pool f =
     Log.Backend.warn "[EioPG] stale connection detected, draining pool and retrying: %s"
       (Caqti_error.show err);
     Eio.Mutex.use_rw ~protect:false _drain_mutex (fun () ->
-      try Caqti_eio.Pool.drain pool with _ -> ());
+      try Caqti_eio.Pool.drain pool
+       with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
     Caqti_eio.Pool.use f pool
   | Error _ as err -> err
 

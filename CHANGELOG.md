@@ -1,6 +1,12 @@
 # Changelog
 
 
+## [2.239.0] - 2026-04-05
+
+### Changed
+- **MCP coordination** -- remove explicit join/leave from MCP-facing flow (#5230).
+- **Keeper state machine** -- integrate into registry, RFC-0002 Phase 2 (#5243).
+
 ## [2.238.0] - 2026-04-05
 
 ### Fixed

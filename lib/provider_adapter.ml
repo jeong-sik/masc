@@ -837,11 +837,11 @@ let gemini_vertex_openai_base_url ~project ~location =
     Cloud API providers return their well-known base URLs. *)
 let endpoint_url_for_canonical_name name =
   match name with
-  | "llama" -> Some Env_config_runtime.Llama.server_url
-  | "glm" -> Some Env_config_runtime.Glm.server_url
-  | "claude-api" -> Some "https://api.anthropic.com"
-  | "codex-api" -> Some "https://api.openai.com"
-  | "gemini-api" -> (
+  | s when s = cn_llama -> Some Env_config_runtime.Llama.server_url
+  | s when s = cn_glm -> Some Env_config_runtime.Glm.server_url
+  | s when s = cn_claude -> Some "https://api.anthropic.com"
+  | s when s = cn_codex -> Some "https://api.openai.com"
+  | s when s = cn_gemini -> (
       match resolve_gemini_direct_auth () with
       | Gemini_vertex_adc { project; location } ->
           Some (gemini_vertex_openai_base_url ~project ~location)

@@ -454,6 +454,7 @@
    keeper_tool_registry
    keeper_tool_policy_config
    keeper_tool_policy
+   keeper_discovered_tools
    keeper_tag_dispatch
    keeper_exec_tools
    keeper_voice_local
@@ -606,6 +607,7 @@
   keeper_tool_registry
   keeper_tool_policy_config
   keeper_tool_policy
+  keeper_discovered_tools
   keeper_exec_tools
   keeper_exec_status_metrics
   keeper_exec_status

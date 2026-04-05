@@ -29,6 +29,15 @@ let on_keeper_tool_call
   ref (fun ~tool_name:_ ~success:_ ~duration_ms:_ -> ())
 ;;
 
+(** Callback for keeper_tool_search.  Set in [keeper_agent_run.ml] after
+    building the BM25 tool index.  Default: returns empty results. *)
+let tool_search_fn
+  : (query:string -> max_results:int -> Yojson.Safe.t) ref
+  =
+  ref (fun ~query:_ ~max_results:_ ->
+    `Assoc [ ("error", `String "tool_search not initialized") ])
+;;
+
 (** Tag-based dispatch callback for masc_* tools.
     Set at server initialization to Keeper_tag_dispatch.dispatch.
     Breaks the dependency cycle: keeper_exec_tools cannot import Tool_*
@@ -930,6 +939,18 @@ let execute_keeper_tool_call
       (`Assoc [ "error", `String "tool_not_allowed"; "tool", `String name ])
   else (
     match name with
+    | "keeper_tool_search" ->
+      let query =
+        Safe_ops.json_string ~default:"" "query" args |> String.trim
+      in
+      let max_results =
+        min 10 (max 1 (Safe_ops.json_int ~default:5 "max_results" args))
+      in
+      if query = "" then
+        Yojson.Safe.to_string
+          (`Assoc [ ("error", `String "query is required") ])
+      else
+        Yojson.Safe.to_string (!tool_search_fn ~query ~max_results)
     | "keeper_tools_list" -> keeper_tools_list_json ~meta
     | "keeper_time_now" ->
       Yojson.Safe.to_string

@@ -532,13 +532,68 @@ let run_turn
     ) tool_entries
   in
   let tool_index = Agent_sdk.Tool_index.build ~config:tool_index_config scoped_tool_entries in
+  (* Full-universe search index for keeper_tool_search.
+     Separate from the preset-scoped BM25 index used for progressive disclosure:
+     search needs access to ALL tools so the keeper can discover beyond its preset. *)
+  let search_index = Agent_sdk.Tool_index.build ~config:tool_index_config tool_entries in
+  (* Map tool name → OAS schema description for search result enrichment *)
+  let oas_description_map =
+    let tbl = Hashtbl.create (List.length keeper_tools) in
+    List.iter (fun (t : Agent_sdk.Tool.t) ->
+      Hashtbl.replace tbl t.schema.name t.schema.description
+    ) keeper_tools;
+    tbl
+  in
+  (* Wire keeper_tool_search: BM25 over full universe, return enriched metadata *)
+  Keeper_exec_tools.tool_search_fn := (fun ~query ~max_results ->
+    let core = Keeper_exec_tools.effective_core_tools () in
+    let retrieved = Agent_sdk.Tool_index.retrieve search_index query in
+    let new_discoveries =
+      retrieved
+      |> List.filter (fun (name, _) -> not (List.mem name core))
+      |> List.filteri (fun i _ -> i < max_results)
+    in
+    (* Try MASC help_entry (from injected schemas), fall back to OAS description *)
+    let masc_schemas = !Keeper_exec_tools.masc_schemas_ref in
+    let results =
+      List.map (fun (name, score) ->
+        let help_opt = Tool_help_registry.find_entry masc_schemas name in
+        let desc = match help_opt with
+          | Some e -> `String e.short_description
+          | None ->
+            (match Hashtbl.find_opt oas_description_map name with
+             | Some d -> `String d
+             | None -> `Null)
+        in
+        let when_to_use = match help_opt with
+          | Some e -> `String e.when_to_use
+          | None -> `Null
+        in
+        `Assoc [
+          ("name", `String name);
+          ("score", `Float score);
+          ("description", desc);
+          ("when_to_use", when_to_use);
+          ("available_next_turn", `Bool true);
+        ]
+      ) new_discoveries
+    in
+    `Assoc [
+      ("ok", `Bool true);
+      ("query", `String query);
+      ("discovered_count", `Int (List.length new_discoveries));
+      ("results", `List results);
+      ("hint", `String "These tools are now available. Call them by name.");
+    ]
+  );
   (* Visibility measurement (#4961): log universe size vs BM25 scope *)
   if Keeper_types_profile.keeper_debug then
-    Log.Keeper.debug "keeper:%s tool visibility: total=%d preset_scoped=%d bm25_indexed=%d"
+    Log.Keeper.debug "keeper:%s tool visibility: total=%d preset_scoped=%d bm25_indexed=%d search_indexed=%d"
       meta.name
       (List.length tool_entries)
       (List.length preset_scoped_names)
-      (List.length scoped_tool_entries);
+      (List.length scoped_tool_entries)
+      (List.length tool_entries);
   (* Layer 0: Core tools — always visible to the LLM regardless of preset.
      Kept to 5 survival-critical tools (#4961).  Other coordination tools
      (keeper_broadcast, keeper_task_claim, keeper_task_done, keeper_tasks_list,

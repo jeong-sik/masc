@@ -28,6 +28,21 @@ val keeper_preset_universe_model_tools : keeper_meta -> Types.tool_schema list
     E.g. masc_status, masc_heartbeat, masc_tool_help, extend_turns. *)
 val core_always_tools : string list
 
+(** Expanded core set for tool-discovery mode (MASC_KEEPER_TOOL_DISCOVERY). *)
+val core_discovery_tools : string list
+
+(** Returns [core_discovery_tools] when discovery enabled, else [core_always_tools]. *)
+val effective_core_tools : unit -> string list
+
+(** Whether MASC_KEEPER_TOOL_DISCOVERY env var is set. *)
+val tool_discovery_enabled : unit -> bool
+
+(** Schema for the keeper_tool_search tool. *)
+val keeper_tool_search_schema : Types.tool_schema
+
+(** Injected masc_* tool schemas (populated at startup by [inject_masc_schemas]). *)
+val masc_schemas_ref : Types.tool_schema list ref
+
 (** [is_core_always_tool name] — true if [name] bypasses policy restrictions. *)
 val is_core_always_tool : string -> bool
 
@@ -55,6 +70,11 @@ val is_keeper_denied : string -> bool
     Set at server initialization to avoid Config dependency cycle. *)
 val on_keeper_tool_call :
   (tool_name:string -> success:bool -> duration_ms:int -> unit) ref
+
+(** Callback for keeper_tool_search BM25 search.
+    Set in [keeper_agent_run.ml] after building the tool index. *)
+val tool_search_fn :
+  (query:string -> max_results:int -> Yojson.Safe.t) ref
 
 (** Tag-based dispatch callback for masc_* tools without handler registry entries.
     Set at server init to [Keeper_tag_dispatch.dispatch]. Default: returns None.

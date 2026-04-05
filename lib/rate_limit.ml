@@ -147,21 +147,7 @@ let headers_global ~key =
     connections from the same host share one rate-limit bucket. *)
 let key_of_sockaddr (client_addr : Eio.Net.Sockaddr.stream) =
   match client_addr with
-  | `Tcp (ip, _) ->
-      let raw = (ip :> string) in
-      (match String.length raw with
-       | 4 ->
-           Printf.sprintf "%d.%d.%d.%d"
-             (Char.code raw.[0]) (Char.code raw.[1])
-             (Char.code raw.[2]) (Char.code raw.[3])
-       | 16 ->
-           let group i =
-             (Char.code raw.[i] lsl 8) lor Char.code raw.[i + 1]
-           in
-           Printf.sprintf "%x:%x:%x:%x:%x:%x:%x:%x"
-             (group 0) (group 2) (group 4) (group 6)
-             (group 8) (group 10) (group 12) (group 14)
-       | _ -> "unknown")
+  | `Tcp (ip, _) -> Fmt.str "%a" Eio.Net.Ipaddr.pp ip
   | `Unix path -> "unix:" ^ Filename.basename path
 
 (** {1 Global Startup Helper} *)

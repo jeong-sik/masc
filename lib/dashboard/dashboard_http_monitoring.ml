@@ -7,8 +7,11 @@ open Dashboard_http_helpers
 
 (** Compute tool-call health metrics from [Audit_log] entries within a
     configurable time window.  Reads the canonical date-split audit store
-    and counts [ToolCall _] actions, partitioned by outcome. *)
-let tool_call_health_json (config : Room.config) : Yojson.Safe.t =
+    and counts [ToolCall _] actions, partitioned by outcome.
+
+    [~now_ts] is injectable for testing; defaults to wall-clock time. *)
+let tool_call_health_json ?(now_ts = Unix.gettimeofday ()) (config : Room.config)
+    : Yojson.Safe.t =
   let window_hours =
     float_of_env_default
       "MASC_DASHBOARD_TOOL_CALL_WINDOW_HOURS"
@@ -16,8 +19,7 @@ let tool_call_health_json (config : Room.config) : Yojson.Safe.t =
       ~min_v:0.1
       ~max_v:168.0
   in
-  let now = Unix.gettimeofday () in
-  let since = now -. (window_hours *. 3600.0) in
+  let since = now_ts -. (window_hours *. 3600.0) in
   let entries =
     try Audit_log.read_entries ~n:50_000 config
     with exn ->
@@ -25,20 +27,17 @@ let tool_call_health_json (config : Room.config) : Yojson.Safe.t =
         (Printexc.to_string exn);
       []
   in
-  let is_tool_call (e : Audit_log.audit_entry) =
-    match e.action with Audit_log.ToolCall _ -> true | _ -> false
-  in
-  let in_window (e : Audit_log.audit_entry) = e.timestamp >= since in
-  let tool_entries =
-    entries |> List.filter (fun e -> is_tool_call e && in_window e)
-  in
-  let total = List.length tool_entries in
-  let failures =
-    List.length
-      (List.filter
-         (fun (e : Audit_log.audit_entry) ->
-           match e.outcome with Audit_log.Failure _ -> true | _ -> false)
-         tool_entries)
+  let total, failures =
+    List.fold_left
+      (fun (t, f) (e : Audit_log.audit_entry) ->
+        match e.action with
+        | Audit_log.ToolCall _ when e.timestamp >= since ->
+          let f =
+            match e.outcome with Audit_log.Failure _ -> f + 1 | _ -> f
+          in
+          (t + 1, f)
+        | _ -> (t, f))
+      (0, 0) entries
   in
   let failure_rate =
     if total = 0 then 0.0 else float_of_int failures /. float_of_int total
@@ -47,7 +46,9 @@ let tool_call_health_json (config : Room.config) : Yojson.Safe.t =
     ("window_hours", `Float window_hours);
     ("tool_calls", `Int total);
     ("failures", `Int failures);
+    ("timeouts", `Null);
     ("failure_rate", `Float failure_rate);
+    ("p95_duration_ms", `Null);
     ("since_epoch", `Float since);
   ]
 

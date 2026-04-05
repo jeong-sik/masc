@@ -22,8 +22,7 @@ let init_policy_config ~base_path =
       (List.length (Keeper_tool_policy_config.preset_names cfg))
       (List.length (Keeper_tool_policy_config.group_names cfg))
   | Error msg ->
-    Log.Keeper.error "tool policy config load failed: %s" msg;
-    failwith (Printf.sprintf "tool policy config load failed: %s" msg)
+    Log.Keeper.error "tool policy config load failed: %s" msg
 
 let preset_name_of_tool_preset = function
   | Minimal -> "minimal"
@@ -140,10 +139,10 @@ let preset_allowlist preset =
   let name = preset_name_of_tool_preset preset in
   match !policy_config with
   | None ->
-    invalid_arg
-      (Printf.sprintf
-        "tool policy config not loaded; preset '%s' cannot be resolved. \
-         Call init_policy_config at startup." name)
+    Log.Keeper.error
+      "tool policy config not loaded; preset '%s' returns empty. \
+       Call init_policy_config at startup." name;
+    []
   | Some cfg ->
     let injected = injected_masc_tool_names () in
     let injected_lookup = Hashtbl.create (List.length injected) in

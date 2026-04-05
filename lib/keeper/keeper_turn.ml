@@ -177,7 +177,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
          let primary_max_context =
            match meta.max_context_override with
            | Some v ->
-               Log.Keeper.info "%s: using max_context_override=%d (manual turn)" meta.name v;
+               Log.Keeper.debug "%s: using max_context_override=%d (manual turn)" meta.name v;
                v
            | None -> Oas_model_resolve.resolve_primary_max_context effective_models
          in

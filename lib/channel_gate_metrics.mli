@@ -81,7 +81,9 @@ val record_attempt :
   duration_ms:int ->
   outcome ->
   unit
-(** Record one gate attempt. Thread-safe. *)
+(** Record one gate attempt. Thread-safe.
+    Channel names are normalized to lowercase in the stored observability
+    surface so filtering is case-insensitive across connectors. *)
 
 val record_internal_error_exn :
   channel:string ->

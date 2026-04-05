@@ -171,7 +171,7 @@ function shortText(value: string, limit = 96): string {
   return `${trimmed.slice(0, limit - 1)}…`
 }
 
-function shortId(value: string, limit = 18): string {
+function truncateMiddle(value: string, limit = 18): string {
   const trimmed = value.trim()
   if (!trimmed) return '-'
   if (trimmed.length <= limit) return trimmed
@@ -275,7 +275,7 @@ function BindingRow({ binding }: { binding: BindingInfo }) {
       <div class="flex items-start justify-between gap-3">
         <div class="min-w-0">
           <div class="text-xs font-medium text-[var(--text-body)]">
-            ${binding.channel} · room ${shortId(binding.room_id)}
+            ${binding.channel} · room ${truncateMiddle(binding.room_id)}
           </div>
           <div class="text-[10px] uppercase tracking-[0.16em] text-[var(--text-dim)]">
             ${binding.keeper ? `keeper ${binding.keeper}` : 'keeper pending'}
@@ -321,7 +321,7 @@ function EventRow({ event }: { event: GateEventInfo }) {
       <div class="flex items-start justify-between gap-3">
         <div class="min-w-0 text-[11px] text-[var(--text-dim)]">
           <div class="font-medium text-[var(--text-body)]">
-            ${event.channel} · ${event.keeper || 'unassigned'} · room ${shortId(event.room_id)}
+            ${event.channel} · ${event.keeper || 'unassigned'} · room ${truncateMiddle(event.room_id)}
           </div>
           <div class="mt-1">
             ${timeAgo(event.timestamp)}

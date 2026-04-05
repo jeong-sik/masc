@@ -600,6 +600,33 @@ let run_turn
     ~config ~meta_ref ~session ~ctx_ref ~generation ?max_cost_usd
     ?trajectory_acc
     () in
+  (* Optional LLM reranker for BM25 results.
+     When enabled, uses OAS default_rerank_fn via global Eio context.
+     Disabled by default (MASC_KEEPER_LLM_RERANK=true to enable). *)
+  let rerank_fn =
+    if Keeper_config.keeper_llm_rerank_enabled () then
+      match Eio_context.get_switch_opt (), Eio_context.get_net_opt () with
+      | Some sw, Some net ->
+        (try
+          let cascade_name = Keeper_config.keeper_llm_rerank_cascade () in
+          let defaults = Oas_worker_named.default_model_strings ~cascade_name in
+          let config_path = Oas_worker_named.default_config_path () in
+          let named_cascade = Agent_sdk.Api.named_cascade
+            ?config_path ~name:cascade_name ~defaults () in
+          Some (Agent_sdk.Tool_selector.default_rerank_fn
+            ~sw ~net ~named_cascade ~k:max_tools_per_turn ())
+        with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn ->
+          Log.Keeper.warn "keeper:%s LLM rerank init failed: %s"
+            meta.name (Printexc.to_string exn);
+          None)
+      | _ ->
+        Log.Keeper.warn "keeper:%s LLM rerank enabled but Eio context unavailable"
+          meta.name;
+        None
+    else None
+  in
   (* Compose dynamic_context injection + progressive tool disclosure
      in a single before_turn_params hook.
 
@@ -657,8 +684,38 @@ let run_turn
         let visible_always_include_tools =
           Tool_portal.filter_visible_tool_names portal_ctx always_include_tools
         in
+        (* Optional LLM rerank: when BM25 confidence is sufficient and
+           rerank_fn is provided, re-order retrieved results via LLM.
+           Self-healing: rerank failure falls back to BM25 order. *)
         let retrieved_names =
-          List.map fst retrieved
+          let bm25_names = List.map fst retrieved in
+          (match rerank_fn with
+           | Some rerank when not use_fallback ->
+             let candidates = List.filter_map (fun (name, _score) ->
+               match List.find_opt (fun (t : Agent_sdk.Tool.t) ->
+                 t.schema.name = name) tools with
+               | Some t -> Some (name, t.schema.description)
+               | None -> None
+             ) retrieved in
+             (try
+                let reranked = rerank ~context:query_text ~candidates in
+                let valid = List.filter (fun n ->
+                  List.exists (fun (cn, _) -> cn = n) candidates) reranked in
+                if valid <> [] then
+                  let missing_bm25 = List.filter (fun n ->
+                    not (List.exists (( = ) n) valid)) bm25_names in
+                  valid @ missing_bm25
+                else bm25_names
+              with
+              | Out_of_memory | Stack_overflow | Sys.Break as exn ->
+                raise exn
+              | Eio.Cancel.Cancelled _ as exn -> raise exn
+              | exn ->
+                Log.Keeper.warn
+                  "keeper:%s rerank failed, falling back to BM25 order: %s"
+                  meta.name (Printexc.to_string exn);
+                bm25_names)
+           | _ -> bm25_names)
           |> Tool_portal.filter_visible_tool_names portal_ctx
         in
         let selected_tools =
@@ -681,9 +738,11 @@ let run_turn
         in
         if Keeper_types_profile.keeper_debug then
           Log.Keeper.info
-            "tool_disclosure keeper=%s top_score=%.3f retrieved=%d allowed=%d fallback=%b query_len=%d"
+            "tool_disclosure keeper=%s top_score=%.3f retrieved=%d allowed=%d fallback=%b rerank=%b query_len=%d"
             meta.name top_score (List.length retrieved_names)
-            (List.length all_allowed) use_fallback (String.length query_text);
+            (List.length all_allowed) use_fallback
+            (Option.is_some rerank_fn && not use_fallback)
+            (String.length query_text);
         (* 3. Graceful last-turn: inject budget warnings and restrict
            tools when approaching the turn limit.
            - Warning zone (2 turns before limit): inject budget warning

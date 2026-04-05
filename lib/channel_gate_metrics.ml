@@ -421,8 +421,17 @@ let binding_snapshot () =
          if by_activity <> 0 then by_activity
          else
            let by_channel = String.compare a.channel b.channel in
-           if by_channel <> 0 then by_channel
-           else String.compare a.room_id b.room_id)
+            if by_channel <> 0 then by_channel
+            else String.compare a.room_id b.room_id)
+
+let take_up_to limit rows =
+  let rec loop remaining acc items =
+    match (remaining, items) with
+    | remaining, _ when remaining <= 0 -> List.rev acc
+    | _, [] -> List.rev acc
+    | remaining, item :: rest -> loop (remaining - 1) (item :: acc) rest
+  in
+  loop limit [] rows
 
 let events ?channel ?keeper ?room_id ~limit () =
   Eio_guard.with_mutex_ro mu (fun () ->
@@ -450,7 +459,7 @@ let events ?channel ?keeper ?room_id ~limit () =
             then event :: acc
             else acc)
           [] recent_events
-        |> fun rows -> List.take limit rows
+        |> take_up_to limit
       in
       (latest_seq, filtered))
 

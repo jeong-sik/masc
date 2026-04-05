@@ -175,8 +175,10 @@ function shortId(value: string, limit = 18): string {
   const trimmed = value.trim()
   if (!trimmed) return '-'
   if (trimmed.length <= limit) return trimmed
-  const head = Math.max(6, Math.floor((limit - 1) / 2))
-  const tail = Math.max(4, limit - head - 1)
+  if (limit <= 5) return `${trimmed.slice(0, Math.max(1, limit - 1))}…`
+  const budget = limit - 1
+  const tail = Math.max(4, Math.floor(budget / 3))
+  const head = Math.max(2, budget - tail)
   return `${trimmed.slice(0, head)}…${trimmed.slice(-tail)}`
 }
 

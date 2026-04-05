@@ -14,7 +14,7 @@ short_goal = "Monitor logs for the current session."
 mid_goal = "Build pattern knowledge from recurring errors."
 long_goal = "Maintain a continuously improving log analysis capability."
 
-soul_profile = "research"   # balanced | safety | delivery | research | relationship | minimal
+   # balanced | safety | delivery | research | relationship | minimal
 
 will = "Detect issues before they become incidents."
 needs = "Access to structured log output and codebase context."

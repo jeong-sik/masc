@@ -26,9 +26,7 @@ type EditDraft = {
   goal: string
   short_goal: string
   mid_goal: string
-  long_goal: string
-  soul_profile: string
-  will: string
+  long_goal: string  will: string
   needs: string
   desires: string
   instructions: string
@@ -41,9 +39,7 @@ function initDraftFromConfig(c: KeeperConfig): EditDraft {
     goal: c.prompt.goal,
     short_goal: c.prompt.short_goal,
     mid_goal: c.prompt.mid_goal,
-    long_goal: c.prompt.long_goal,
-    soul_profile: c.prompt.soul_profile,
-    will: c.prompt.will,
+    long_goal: c.prompt.long_goal,    will: c.prompt.will,
     needs: c.prompt.needs,
     desires: c.prompt.desires,
     instructions: c.prompt.instructions,
@@ -55,9 +51,7 @@ function buildPayload(draft: EditDraft, orig: KeeperConfig): KeeperConfigUpdateP
   if (draft.goal !== orig.prompt.goal) payload.goal = draft.goal
   if (draft.short_goal !== orig.prompt.short_goal) payload.short_goal = draft.short_goal
   if (draft.mid_goal !== orig.prompt.mid_goal) payload.mid_goal = draft.mid_goal
-  if (draft.long_goal !== orig.prompt.long_goal) payload.long_goal = draft.long_goal
-  if (draft.soul_profile !== orig.prompt.soul_profile) payload.soul_profile = draft.soul_profile
-  if (draft.will !== orig.prompt.will) payload.will = draft.will
+  if (draft.long_goal !== orig.prompt.long_goal) payload.long_goal = draft.long_goal  if (draft.will !== orig.prompt.will) payload.will = draft.will
   if (draft.needs !== orig.prompt.needs) payload.needs = draft.needs
   if (draft.desires !== orig.prompt.desires) payload.desires = draft.desires
   if (draft.instructions !== orig.prompt.instructions) payload.instructions = draft.instructions
@@ -493,9 +487,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
     <${EditTextarea} field="goal" label="목표" rows=${3} />
     <${EditTextarea} field="short_goal" label="단기 목표" rows=${2} />
     <${EditTextarea} field="mid_goal" label="중기 목표" rows=${2} />
-    <${EditTextarea} field="long_goal" label="장기 목표" rows=${2} />
-    <${EditSelect} field="soul_profile" label="소울 프로필" options=${SOUL_PROFILES} />
-    <${EditTextarea} field="will" label="의지" rows=${2} />
+    <${EditTextarea} field="long_goal" label="장기 목표" rows=${2} />    <${EditTextarea} field="will" label="의지" rows=${2} />
     <${EditTextarea} field="needs" label="필요" rows=${2} />
     <${EditTextarea} field="desires" label="욕구" rows=${2} />
     <${EditTextarea} field="instructions" label="지시사항" rows=${4} />
@@ -514,10 +506,6 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
     ${c.prompt.long_goal ? html`
       <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">장기 목표</div>
       <${LongText} text=${c.prompt.long_goal} />
-    ` : null}
-    ${c.prompt.soul_profile ? html`
-      <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">소울 프로필</div>
-      <${LongText} text=${c.prompt.soul_profile} />
     ` : null}
     ${c.prompt.instructions ? html`
       <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">지시사항</div>

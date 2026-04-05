@@ -85,7 +85,6 @@ Keeper의 전체 상태를 담는 레코드. `lib/keeper/keeper_types.ml`에 정
 
 - **Identity**: `name`, `agent_name`, `trace_id`, `trace_history`
 - **Goal (3-horizon)**: `goal`, `short_goal`, `mid_goal`, `long_goal`
-- **Self-Model (BDI)**: `soul_profile`, `will`, `needs`, `desires`
 - **Model**: `cascade_name`, `last_model_used`, derived `active_model`
 - **Capability**: `policy_voice_enabled`, `allowed_paths`
 - **Scope**: `scope_kind`, `room_scope` (`current` only compatibility field), `mention_targets`
@@ -159,7 +158,6 @@ type fiber_health =
 
 Supervisor가 keeper fiber의 건강 상태를 추적하는 데 사용.
 
-### 3.6 soul_profile
 
 | 값 | 별칭 | 의미 |
 |----|------|------|
@@ -170,7 +168,6 @@ Supervisor가 keeper fiber의 건강 상태를 추적하는 데 사용.
 | `relationship` | `companion` | 관계/소통 우선 |
 | `minimal` | `lean` | 최소 프롬프트 |
 
-Soul profile에 따라 compaction 시 보존 우선순위가 달라진다(`soul_profile_policy`).
 
 ---
 
@@ -506,7 +503,6 @@ Keeper turn에서 어떤 "skill" 경로를 사용할지 결정:
 허용 skill 목록: `masc-heartbeat`, `masc-keeper-autonomy`
 
 선택 모드:
-- `SkillSelectHeuristic`: soul_profile + 메시지 내용 기반 규칙 매칭
 - `SkillSelectAgent`: MODEL에 skill 선택을 위임하는 단일 모드
 
 ---
@@ -529,9 +525,7 @@ Keeper turn에서 어떤 "skill" 경로를 사용할지 결정:
 
 `compact_if_needed`에서 `last_reflection_ts`가 `continuity_compaction_cooldown_sec` 이내면 compaction을 건너뛴다. 이는 reflexion 직후 context가 즉시 압축되어 반성 내용이 손실되는 것을 방지한다.
 
-### INV-KEEPER-005: soul_profile 정규화
 
-`canonical_soul_profile`이 입력을 6개 허용 값 중 하나로 정규화한다. 인식 불가 시 `None`을 반환하고 기본값(`balanced`)으로 대체된다.
 
 ### INV-KEEPER-006: proactive quality gate
 

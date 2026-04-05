@@ -19,7 +19,6 @@ type keeper = {
   k_name : string;
   k_goal : string;
   k_short_goal : string;
-  k_soul_profile : string;
   k_generation : int;
   k_active_model : string option;
   k_models : string list;

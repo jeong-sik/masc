@@ -193,7 +193,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
             let effective_no_skill_route = no_skill_route || direct_reply in
             let effective_no_state_block = no_state_block || direct_reply in
             let fallback_skill_route =
-              route_keeper_skill ~soul_profile:meta.soul_profile ~message
+              route_keeper_skill  ~message
             in
             let live_worktree_change =
               if direct_reply then
@@ -225,7 +225,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                 else
                   skill_route_context_text
                     ~fallback_route:fallback_skill_route
-                    ~soul_profile:meta.soul_profile
+                    
               in
               (* 3. Worktree changes *)
               let worktree_text =

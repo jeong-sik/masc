@@ -594,9 +594,7 @@ export interface KeeperConfigPrompt {
   goal: string
   short_goal: string
   mid_goal: string
-  long_goal: string
-  soul_profile: string
-  will: string
+  long_goal: string  will: string
   needs: string
   desires: string
   instructions: string

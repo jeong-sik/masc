@@ -5,7 +5,7 @@ They get keeper-native tools plus `masc_*` tools that are executable without
 MCP runtime/session context.
 Triage and trigger detection run on each heartbeat using the proactive idle/cooldown settings.
 
-Research profile (`soul_profile = "research"`) adds autoresearch/research tools.
+Research profile (``) adds autoresearch/research tools.
 
 ## Tool Shards (keeper_model_tools: 26 tools total)
 
@@ -87,7 +87,7 @@ BoardActivity, IdleTimeout, MetricsAnomaly, StrategicReview.
 
 ## Research Profile Additions
 
-When `soul_profile = "research"`, these tools are added (any policy mode):
+When ``, these tools are added (any policy mode):
 
 | Source | Tools | Note |
 |--------|-------|------|

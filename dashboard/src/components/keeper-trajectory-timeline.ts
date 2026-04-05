@@ -10,7 +10,10 @@ import type { TrajectoryEntry, TrajectoryResponse } from '../api/dashboard'
 import { truncate } from '../lib/truncate'
 import { TimeAgo } from './common/time-ago'
 import { toolCategory, durationColor, formatArgs, prettyArgs, formatDuration, summarizeEntries } from './tool-call-shared'
+import { keeperHeartbeats } from '../store'
 import type { Keeper } from '../types'
+
+const HEARTBEAT_STALE_MS = 30_000
 
 // ── Constants ────────────────────────────────────────────
 
@@ -67,7 +70,7 @@ function TrajectoryEntryRow({ entry }: { entry: TrajectoryEntry }) {
   const toggle = () => { expanded.value = !expanded.value }
 
   return html`
-    <div class="rounded-lg transition-colors ${gateRejected ? 'opacity-50' : ''} ${expanded.value ? 'bg-[var(--white-3)]' : ''}">
+    <div class="rounded-lg transition-colors ${gateRejected ? 'opacity-50' : ''} ${expanded.value ? 'bg-[var(--white-3)]' : ''}" style=${{ animation: 'activityFadeIn 0.3s ease-out' }}>
       <div
         class="group flex items-start gap-3 py-2.5 px-3 cursor-pointer hover:bg-[var(--white-3)] rounded-lg select-none"
         onClick=${toggle}
@@ -218,7 +221,20 @@ export function KeeperTrajectoryTimeline({ keeperName, keeper }: { keeperName: s
   const state = getState(keeperName)
 
   if (state.loading) {
-    return html`<div class="text-xs text-[var(--text-muted)] py-4 text-center">궤적 로딩 중...</div>`
+    return html`
+      <div class="flex flex-col gap-2 py-3" style=${{ animation: 'loadingPulse 1.5s ease-in-out infinite' }}>
+        ${[1, 2, 3].map(i => html`
+          <div key=${i} class="flex items-center gap-3 py-2.5 px-3 rounded-lg">
+            <div class="size-7 rounded-md bg-[var(--white-8)]"></div>
+            <div class="flex-1 flex flex-col gap-1.5">
+              <div class="h-3 w-32 rounded bg-[var(--white-8)]"></div>
+              <div class="h-2.5 w-48 rounded bg-[var(--white-5)]"></div>
+            </div>
+            <div class="h-3 w-12 rounded bg-[var(--white-5)]"></div>
+          </div>
+        `)}
+      </div>
+    `
   }
 
   if (state.error) {
@@ -232,19 +248,57 @@ export function KeeperTrajectoryTimeline({ keeperName, keeper }: { keeperName: s
 
   const turnGroups = groupByTurn(data.entries)
   const turns = Array.from(turnGroups.entries()).sort(([a], [b]) => b - a)
+  const allSummary = summarizeEntries(data.entries)
+  const distinctTools = new Set(data.entries.map(e => e.tool_name)).size
+  const lastHb = keeperHeartbeats.value.get(keeperName)
+  const isLive = lastHb != null && (Date.now() - lastHb) < HEARTBEAT_STALE_MS
+  const isOnline = keeper && !['offline', 'inactive', 'dead', 'crashed'].includes(keeper.status)
+  const contextRatio = keeper?.context_ratio
 
   return html`
     <div class="flex flex-col gap-1">
       ${'' /* Header */}
       <div class="flex items-center justify-between mb-2">
         <div class="flex items-center gap-2">
+          ${isLive
+            ? html`<span class="inline-flex items-center gap-1 text-[10px] text-[var(--ok)]">
+                <span class="inline-block size-1.5 rounded-full bg-[var(--ok)] animate-pulse"></span>
+                live
+              </span>`
+            : isOnline
+              ? html`<span class="text-[10px] text-[var(--text-dim)]">online</span>`
+              : null}
           <span class="text-[10px] font-mono text-[var(--text-dim)]">trace: ${data.trace_id.slice(0, 8)}</span>
           <span class="text-[10px] text-[var(--text-dim)]">gen ${data.generation}</span>
+          ${contextRatio != null
+            ? html`<span class="text-[10px] font-mono ${contextRatio > 0.8 ? 'text-[var(--bad)]' : contextRatio > 0.6 ? 'text-[var(--warn)]' : 'text-[var(--text-dim)]'}">ctx ${(contextRatio * 100).toFixed(0)}%</span>`
+            : null}
         </div>
         <span class="text-[10px] text-[var(--text-dim)]">
           ${data.showing}/${data.total_entries} entries
         </span>
       </div>
+
+      ${'' /* Summary stats bar */}
+      <div class="flex gap-3 flex-wrap mb-2 px-1">
+        <span class="text-[10px] py-0.5 px-2 rounded-full bg-[var(--white-4)] border border-[var(--white-8)] text-[var(--text-muted)]">${turns.length} turns</span>
+        <span class="text-[10px] py-0.5 px-2 rounded-full bg-[var(--white-4)] border border-[var(--white-8)] text-[var(--text-muted)]">${data.entries.length} calls</span>
+        <span class="text-[10px] py-0.5 px-2 rounded-full bg-[var(--white-4)] border border-[var(--white-8)] text-[var(--text-muted)]">${distinctTools} tools</span>
+        <span class="text-[10px] py-0.5 px-2 rounded-full bg-[var(--white-4)] border border-[var(--white-8)] font-mono ${durationColor(allSummary.totalMs)}">${formatDuration(allSummary.totalMs)}</span>
+        ${allSummary.errorCount > 0
+          ? html`<span class="text-[10px] py-0.5 px-2 rounded-full bg-[var(--bad-10)] border border-[rgba(239,68,68,0.2)] text-[var(--bad)]">${allSummary.errorCount} err</span>`
+          : html`<span class="text-[10px] py-0.5 px-2 rounded-full bg-[rgba(52,211,153,0.08)] border border-[rgba(52,211,153,0.15)] text-[var(--ok)]">all ok</span>`}
+      </div>
+
+      ${'' /* Live processing indicator */}
+      ${isLive ? html`
+        <div class="flex items-center gap-2 px-3 py-2 mb-2 rounded-lg bg-[rgba(52,211,153,0.06)] border border-[rgba(52,211,153,0.15)]" style=${{ animation: 'pulse 2s ease-in-out infinite' }}>
+          <span class="inline-block size-2 rounded-full bg-[var(--ok)] animate-pulse"></span>
+          <span class="text-[11px] text-[var(--ok)]">도구 호출 스트리밍 중...</span>
+          <span class="flex-1"></span>
+          <span class="text-[10px] text-[var(--text-dim)] font-mono">SSE</span>
+        </div>
+      ` : null}
 
       ${'' /* Turn groups */}
       ${turns.map(([turnNum, entries]) => {

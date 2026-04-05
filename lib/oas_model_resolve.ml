@@ -98,46 +98,29 @@ let max_context_of_label (label : string) : int =
   | Some ctx -> effective_discovered_ctx ~static_ctx ~discovered:(Some ctx)
   | None -> static_ctx
 
-(** Resolve context for a label if its provider is available; returns [None]
-    if the provider is unknown, unavailable, or the label is malformed.
-    Applies {!context_floor} to discovered values. *)
-let context_if_available (label : string) : int option =
-  match provider_name_of_label label with
-  | None -> None
-  | Some pname ->
-    match Llm_provider.Provider_registry.find default_registry pname with
-    | None -> None
-    | Some entry ->
-      if entry.is_available () then
-        let static_ctx = entry.max_context in
-        let ctx =
-          match Llm_provider.Cascade_config.resolve_label_context label with
-          | Some discovered -> effective_discovered_ctx ~static_ctx ~discovered:(Some discovered)
-          | None -> static_ctx
-        in
-        Some ctx
-      else None
-
 (** Resolve max_context for the first available model in a label list.
     "Available" means the provider's API key env var is set (or not required).
     Per-label context resolved by OAS — no routing guess in MASC.
     Applies {!context_floor} to discovered values.
     Falls back to 128_000 if no model is available. *)
 let resolve_primary_max_context (labels : string list) : int =
-  match List.find_map context_if_available labels with
-  | Some ctx -> ctx
-  | None -> 128_000
-
-(** Maximum context across all available models in a label list.
-    Returns the largest context window that any model in the cascade can
-    handle.  This is the value MASC should use for [max_input_tokens]:
-    OAS cascade will try providers in order — if the primary overflows,
-    the cascade fails over to the next provider that can handle the
-    prompt size.  Falls back to [128_000] if no model is available. *)
-let resolve_max_cascade_context (labels : string list) : int =
-  match List.filter_map context_if_available labels with
-  | [] -> 128_000
-  | ctxs -> List.fold_left max 0 ctxs
+  let rec find = function
+    | [] -> 128_000
+    | label :: rest ->
+      match provider_name_of_label label with
+      | None -> find rest
+      | Some pname ->
+        match Llm_provider.Provider_registry.find default_registry pname with
+        | None -> find rest
+        | Some entry ->
+          if entry.is_available () then
+            let static_ctx = entry.max_context in
+            match Llm_provider.Cascade_config.resolve_label_context label with
+            | Some ctx -> effective_discovered_ctx ~static_ctx ~discovered:(Some ctx)
+            | None -> static_ctx
+          else find rest
+  in
+  find labels
 
 (** Resolve model_id for the first available model in a label list.
     Returns the model_id portion of "provider:model_id".

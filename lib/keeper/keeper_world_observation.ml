@@ -262,7 +262,7 @@ let read_context_ratio ~(config : Room.config) ~(meta : keeper_meta) : float =
   try
     let cascade_models = Oas_model_resolve.models_of_cascade_name meta.cascade_name in
     let primary_max_context =
-      Oas_model_resolve.resolve_max_cascade_context cascade_models
+      Oas_model_resolve.resolve_primary_max_context cascade_models
     in
     let base_dir = session_base_dir config in
     let _session, ctx_opt =
@@ -282,7 +282,7 @@ let read_continuity_summary ~(config : Room.config) ~(meta : keeper_meta)
   try
     let cascade_models = Oas_model_resolve.models_of_cascade_name meta.cascade_name in
     let primary_max_context =
-      Oas_model_resolve.resolve_max_cascade_context cascade_models
+      Oas_model_resolve.resolve_primary_max_context cascade_models
     in
     let base_dir = session_base_dir config in
     let _session, ctx_opt =

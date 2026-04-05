@@ -998,8 +998,48 @@ let execute_keeper_tool_call
     | name when String.starts_with ~prefix:"masc_" name ->
       handle_keeper_masc_tool ~config ~meta ~name ~args
     | other ->
-      Yojson.Safe.to_string
-        (`Assoc [ "error", `String "unknown_tool"; "tool", `String other ]))
+      (* Hallucination recovery: suggest similar tools via fuzzy match *)
+      let suggestion =
+        let candidates = keeper_allowed_tool_names meta in
+        let scored =
+          candidates
+          |> List.filter_map (fun c ->
+            if String.length c > 2 && String.length other > 2 then
+              (* Simple substring containment as fast heuristic *)
+              let other_lower = String.lowercase_ascii other in
+              let c_lower = String.lowercase_ascii c in
+              let contains haystack needle =
+                let nlen = String.length needle in
+                let hlen = String.length haystack in
+                if nlen = 0 then true
+                else if nlen > hlen then false
+                else
+                  let found = ref false in
+                  for i = 0 to hlen - nlen do
+                    if not !found
+                       && String.sub haystack i nlen = needle
+                    then found := true
+                  done;
+                  !found
+              in
+              if contains c_lower other_lower
+                 || contains other_lower c_lower
+              then Some c
+              else None
+            else None)
+          |> List.filteri (fun i _ -> i < 3)
+        in
+        scored
+      in
+      let fields =
+        [ ("error", `String "unknown_tool"); ("tool", `String other) ]
+        @ (match suggestion with
+           | [] -> [("hint", `String "Use keeper_tool_search to find available tools.")]
+           | names ->
+             [ ("did_you_mean", `List (List.map (fun n -> `String n) names));
+               ("hint", `String "Use keeper_tool_search to discover tools by description.") ])
+      in
+      Yojson.Safe.to_string (`Assoc fields))
 ;;
 
 (* keeper_tool_loop_system_prompt and keeper_tool_followup_prompt removed:

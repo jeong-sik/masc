@@ -574,7 +574,7 @@ let run_turn
           ("score", `Float score);
           ("description", desc);
           ("when_to_use", when_to_use);
-          ("available_next_turn", `Bool true);
+          ("available_now", `Bool true);
         ]
       ) new_discoveries
     in
@@ -583,7 +583,7 @@ let run_turn
       ("query", `String query);
       ("discovered_count", `Int (List.length new_discoveries));
       ("results", `List results);
-      ("hint", `String "These tools are now available. Call them by name.");
+      ("hint", `String "These tools are available now. Call them by name in this turn.");
     ]
   );
   (* Visibility measurement (#4961): log universe size vs BM25 scope *)

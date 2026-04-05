@@ -10,6 +10,10 @@ type group_source =
   | Static of string list        (** Explicit tool name list *)
   | Shard_ref of string          (** Resolve from Tool_shard at runtime *)
 
+type preset_resolution =
+  | All_candidates        (** Use the entire candidate tool set *)
+  | Subset of string list (** Use exactly this list of tool names *)
+
 type preset_def = {
   groups : string list;          (** Group names to include *)
   masc_groups : string list;     (** MASC group names to include *)
@@ -84,18 +88,13 @@ let parse_presets
   let tbl = Hashtbl.create 8 in
   let names = collect_table_names doc ~prefix:"presets" in
   List.iter (fun name ->
-    let prefix = "presets." ^ name in
     let groups = toml_string_list_at doc "presets" (name ^ ".groups") in
     let masc_groups = toml_string_list_at doc "presets" (name ^ ".masc_groups") in
     let masc_tools = toml_string_list_at doc "presets" (name ^ ".masc_tools") in
     let all_candidates =
       match toml_bool_at doc "presets" (name ^ ".all_candidates") with
       | Some b -> b
-      | None ->
-        (* Also check directly under the preset prefix *)
-        match Keeper_toml_loader.toml_bool_opt doc (prefix ^ ".all_candidates") with
-        | Some b -> b
-        | None -> false
+      | None -> false
     in
     Hashtbl.replace tbl name { groups; masc_groups; masc_tools; all_candidates }
   ) names;
@@ -138,13 +137,12 @@ let resolve_preset
     (preset_name : string)
     ?(masc_filter = fun _ -> true)
     ()
-  : string list option =
+  : preset_resolution option =
   match Hashtbl.find_opt config.presets preset_name with
   | None -> None
   | Some def ->
     if def.all_candidates then
-      (* "full" preset: signal to caller to use all candidates *)
-      Some []
+      Some All_candidates
     else
       let group_tools =
         def.groups
@@ -169,7 +167,7 @@ let resolve_preset
       let masc_individual =
         def.masc_tools |> List.filter masc_filter
       in
-      Some (group_tools @ masc_from_groups @ masc_individual)
+      Some (Subset (group_tools @ masc_from_groups @ masc_individual))
 
 let preset_names (config : t) : string list =
   Hashtbl.fold (fun name _ acc -> name :: acc) config.presets []

@@ -8,6 +8,12 @@
 (** A parsed tool policy configuration. *)
 type t
 
+(** The result of resolving a preset: either the full candidate set
+    (when [all_candidates = true] in config) or an explicit subset. *)
+type preset_resolution =
+  | All_candidates        (** Use the entire candidate tool set *)
+  | Subset of string list (** Use exactly this list of tool names *)
+
 (** Load and parse config/tool_policy.toml relative to [base_path].
     Returns [Error msg] if the file is missing or malformed. *)
 val load : base_path:string -> (t, string) result
@@ -24,7 +30,7 @@ val resolve_preset :
   string ->
   ?masc_filter:(string -> bool) ->
   unit ->
-  string list option
+  preset_resolution option
 
 (** List all defined preset names. *)
 val preset_names : t -> string list

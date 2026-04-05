@@ -22,7 +22,8 @@ let init_policy_config ~base_path =
       (List.length (Keeper_tool_policy_config.preset_names cfg))
       (List.length (Keeper_tool_policy_config.group_names cfg))
   | Error msg ->
-    Log.Keeper.error "tool policy config load failed: %s" msg
+    Log.Keeper.error "tool policy config load failed: %s" msg;
+    failwith (Printf.sprintf "tool policy config load failed: %s" msg)
 
 let preset_name_of_tool_preset = function
   | Minimal -> "minimal"
@@ -140,10 +141,10 @@ let preset_allowlist preset =
     let injected = injected_masc_tool_names () in
     let masc_filter tool_name = List.mem tool_name injected in
     match Keeper_tool_policy_config.resolve_preset cfg name ~masc_filter () with
-    | Some [] when preset = Full ->
+    | Some Keeper_tool_policy_config.All_candidates ->
       (* all_candidates = true: return full candidate set *)
       keeper_base_candidate_tool_names ()
-    | Some tools -> dedupe_tool_names tools
+    | Some (Keeper_tool_policy_config.Subset tools) -> dedupe_tool_names tools
     | None ->
       Log.Keeper.error "preset '%s' not defined in config/tool_policy.toml" name;
       []

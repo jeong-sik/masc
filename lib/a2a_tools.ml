@@ -673,8 +673,10 @@ let emit_heartbeat_task
   @ (match decision_confidence with
     | Some confidence -> [("decision_confidence", `Float confidence)]
     | None -> [])
+  (* auth_token intentionally excluded from broadcast payload —
+     SSE goes to all clients including dashboard observers. *)
   @ (match auth_token with
-    | Some token -> [("auth_token", `String token)]
+    | Some _token -> [("auth_token_present", `Bool true)]
     | None -> []))
   in
   notify_event ~event_type:HeartbeatTask ~agent ~data;

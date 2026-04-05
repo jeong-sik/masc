@@ -226,6 +226,9 @@ let test_agent_emoji_gemini () =
 let test_agent_emoji_codex () =
   check string "codex" "🟢" (Notify.agent_emoji "codex")
 
+let test_agent_emoji_llama () =
+  check string "llama" "🦙" (Notify.agent_emoji "llama")
+
 let test_agent_emoji_system () =
   check string "system" "⚙️" (Notify.agent_emoji "system")
 
@@ -384,6 +387,7 @@ let () =
       test_case "claude" `Quick test_agent_emoji_claude;
       test_case "gemini" `Quick test_agent_emoji_gemini;
       test_case "codex" `Quick test_agent_emoji_codex;
+      test_case "llama" `Quick test_agent_emoji_llama;
       test_case "system" `Quick test_agent_emoji_system;
       test_case "unknown" `Quick test_agent_emoji_unknown;
       test_case "empty" `Quick test_agent_emoji_empty;

@@ -1006,6 +1006,30 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
               ~primary_model_max_tokens:primary_max_context
               ~checkpoint:result.checkpoint
           in
+          (* RFC-0002: dispatch buffer state events after lifecycle *)
+          if lifecycle.compaction.applied then begin
+            ignore (Keeper_registry.dispatch_event
+              ~base_path:base_dir meta.name
+              Keeper_state_machine.Compaction_started);
+            ignore (Keeper_registry.dispatch_event
+              ~base_path:base_dir meta.name
+              (Keeper_state_machine.Compaction_completed {
+                before_tokens = lifecycle.compaction.before_tokens;
+                after_tokens = lifecycle.compaction.after_tokens;
+              }))
+          end;
+          (match lifecycle.handoff_json with
+           | Some _json ->
+               ignore (Keeper_registry.dispatch_event
+                 ~base_path:base_dir meta.name
+                 Keeper_state_machine.Handoff_started);
+               ignore (Keeper_registry.dispatch_event
+                 ~base_path:base_dir meta.name
+                 (Keeper_state_machine.Handoff_completed {
+                   generation = lifecycle.updated_meta.runtime.generation;
+                   new_trace_id = lifecycle.updated_meta.runtime.trace_id;
+                 }))
+           | None -> ());
           let scope_only_reactive =
             observation.pending_scope_messages <> []
             && observation.pending_mentions = []

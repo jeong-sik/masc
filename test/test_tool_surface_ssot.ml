@@ -257,10 +257,10 @@ let test_system_internal_callable () =
   Alcotest.(check bool) "all system_internal callable" true (uncallable = [])
 
 let test_pruned_tools_registered_as_deprecated () =
-  (* Tools pruned from user-facing surfaces in #4999 are registered as
-     Deprecated in explicit_metadata (#5039). They remain on System_internal
-     for backward compat, stay hidden from tools/list, and remain callable
-     for in-flight sessions. *)
+  (* Tools pruned from user-facing surfaces are registered as Deprecated
+     in explicit_metadata (#5039). They stay hidden from tools/list and
+     remain callable for in-flight sessions. Some may be fully removed
+     from surfaces when no backward compat is needed. *)
   let deprecated_names =
     List.map fst Tool_catalog.deprecated_tool_entries
   in
@@ -268,18 +268,11 @@ let test_pruned_tools_registered_as_deprecated () =
     (fun name ->
       Alcotest.(check bool) (name ^ " is Deprecated") true
         (List.mem name deprecated_names);
-      Alcotest.(check bool) (name ^ " on System_internal") true
-        (Tool_catalog.is_on_surface Tool_catalog.System_internal name);
       Alcotest.(check bool) (name ^ " hidden") false
         (Tool_catalog.is_visible name);
       Alcotest.(check bool) (name ^ " callable") true
         (Tool_catalog.allow_direct_call name))
     [
-      "masc_a2a_delegate";
-      "masc_a2a_discover";
-      "masc_a2a_query_skill";
-      "masc_a2a_subscribe";
-      "masc_a2a_unsubscribe";
       "masc_board_migrate";
       "masc_board_reclassify";
       "masc_episode_flush";
@@ -300,6 +293,25 @@ let test_pruned_tools_registered_as_deprecated () =
       "masc_voice_session_end";
       "masc_voice_session_start";
       "masc_voice_sessions";
+    ];
+  (* Fully removed from all surfaces — deprecated only, not callable *)
+  List.iter
+    (fun name ->
+      Alcotest.(check bool) (name ^ " is Deprecated") true
+        (List.mem name deprecated_names))
+    [
+      "masc_a2a_delegate";
+      "masc_a2a_discover";
+      "masc_a2a_query_skill";
+      "masc_a2a_subscribe";
+      "masc_a2a_unsubscribe";
+      "masc_improve_loop_start";
+      "masc_improve_loop_status";
+      "masc_improve_loop_pause";
+      "masc_improve_loop_resume";
+      "masc_improve_loop_tick";
+      "masc_detachment_list";
+      "masc_detachment_status";
     ]
 let test_workspace_mutating_canonical_used () =
   (* workspace_mutating_tool_names in tool_catalog_surfaces is the canonical list.

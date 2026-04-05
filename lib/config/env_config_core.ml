@@ -162,10 +162,11 @@ let default_http_port_int = int_of_string default_http_port
 let masc_http_port () =
   match Sys.getenv_opt "MASC_HTTP_PORT" |> trim_opt with
   | Some port -> port
-  | None -> default_http_port
+  | None -> Masc_network_defaults.masc_http_default_port_s
 
 let masc_http_port_int () =
-  Safe_ops.int_of_string_with_default ~default:default_http_port_int (masc_http_port ())
+  Safe_ops.int_of_string_with_default
+    ~default:Masc_network_defaults.masc_http_default_port (masc_http_port ())
 
 let masc_host_opt () =
   Sys.getenv_opt "MASC_HOST" |> trim_opt

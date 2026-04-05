@@ -499,6 +499,9 @@ let test_path_empty_allowed_permits_all_within_root () =
    ============================================================ *)
 
 let () =
+  let base_path = Masc_test_deps.find_project_root () in
+  Keeper_exec_tools.inject_masc_schemas Config.raw_all_tool_schemas;
+  Keeper_exec_tools.init_policy_config ~base_path;
   run "Keeper_tool_exposure" [
     ("write_done", [
       test_case "blocks all tools" `Quick test_write_done_blocks_all_tools;

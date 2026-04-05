@@ -123,24 +123,28 @@ let dispatch ctx ~name ~args : result option =
   | "masc_heartbeat_list" -> Some (handle_heartbeat_list ctx args)
   | _ -> None
 
-let schemas : Types.tool_schema list = [
-  (* masc_heartbeat *)
-  {
-    name = "masc_heartbeat";
-    description = "Update your heartbeat timestamp to prove you are still active. \
+(** Canonical masc_heartbeat schema — SSOT.
+    Consumers (agent_tool_surfaces, sdk_tool_contract) derive their
+    projections from this value. *)
+let heartbeat_schema : Types.tool_schema = {
+  name = "masc_heartbeat";
+  description = "Update your heartbeat timestamp to prove you are still active. \
 Call every few minutes during long tasks; agents silent for 5+ min become zombie candidates. \
 Prefer masc_heartbeat_start for automatic pings. Pair with masc_cleanup_zombies to reap stale agents.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("agent_name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Your agent name");
-        ]);
+  input_schema = `Assoc [
+    ("type", `String "object");
+    ("properties", `Assoc [
+      ("agent_name", `Assoc [
+        ("type", `String "string");
+        ("description", `String "Your agent name");
       ]);
-      ("required", `List [`String "agent_name"]);
-    ];
-  };
+    ]);
+    ("required", `List [`String "agent_name"]);
+  ];
+}
+
+let schemas : Types.tool_schema list = [
+  heartbeat_schema;
 
   (* masc_heartbeat_start *)
   {

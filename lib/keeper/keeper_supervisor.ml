@@ -356,6 +356,9 @@ let sweep_and_recover (ctx : _ context) =
     Keeper_registry.unregister ~base_path entry.name
   ) !to_unregister;
   List.iter (fun ((entry : Keeper_registry.registry_entry), msg) ->
+    (* RFC-0002: dispatch budget exhaustion before marking dead *)
+    ignore (Keeper_registry.dispatch_event ~base_path entry.name
+      Keeper_state_machine.Restart_budget_exhausted);
     Keeper_registry.mark_dead ~base_path entry.name ~at:now;
     publish_lifecycle "dead" entry.name
       (Printf.sprintf "restart budget exhausted (%d), last: %s"
@@ -377,6 +380,9 @@ let sweep_and_recover (ctx : _ context) =
     match read_meta ctx.config old_entry.name with
     | Ok (Some meta) ->
         let attempt = old_entry.restart_count + 1 in
+        (* RFC-0002: dispatch restart attempt event *)
+        ignore (Keeper_registry.dispatch_event ~base_path old_entry.name
+          (Keeper_state_machine.Supervisor_restart_attempt { attempt }));
         let old_crash_log = old_entry.crash_log in
         let reg =
           Keeper_registry.register ~base_path old_entry.name meta

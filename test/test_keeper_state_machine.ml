@@ -314,6 +314,84 @@ let test_apply_crash_to_dead () =
     ~event:SM.Restart_budget_exhausted in
   check phase_t "-> Dead" SM.Dead tr.new_phase
 
+(* ── Transition coverage tests (#5273) ────────────────── *)
+
+let test_apply_compacting_to_crashed () =
+  (* Fiber dies during compaction -> Crashed *)
+  let compacting_conds = { running_conditions with compaction_active = true } in
+  let tr = apply_ok
+    ~current_phase:SM.Compacting
+    ~conditions:compacting_conds
+    ~event:(SM.Fiber_terminated { outcome = "crash during compaction" }) in
+  check phase_t "Compacting + fiber death -> Crashed" SM.Crashed tr.new_phase
+
+let test_apply_handingoff_to_crashed () =
+  (* Fiber dies during handoff -> Crashed *)
+  let handoff_conds = { running_conditions with handoff_active = true } in
+  let tr = apply_ok
+    ~current_phase:SM.HandingOff
+    ~conditions:handoff_conds
+    ~event:(SM.Fiber_terminated { outcome = "crash during handoff" }) in
+  check phase_t "HandingOff + fiber death -> Crashed" SM.Crashed tr.new_phase
+
+let test_apply_failing_to_draining () =
+  (* Failing keeper receives stop request -> Draining *)
+  let failing_conds = { running_conditions with heartbeat_healthy = false } in
+  let tr = apply_ok
+    ~current_phase:SM.Failing
+    ~conditions:failing_conds
+    ~event:SM.Stop_requested in
+  check phase_t "Failing + stop -> Draining" SM.Draining tr.new_phase
+
+let test_apply_restarting_to_crashed () =
+  (* Restart attempt: fiber launched then crashes again -> Crashed *)
+  let restarting_conds = { SM.default_conditions with
+    fiber_alive = true;
+    restart_budget_remaining = true;
+    backoff_elapsed = false;
+  } in
+  let tr = apply_ok
+    ~current_phase:SM.Restarting
+    ~conditions:restarting_conds
+    ~event:(SM.Fiber_terminated { outcome = "restart failed" }) in
+  check phase_t "Restarting + fiber death -> Crashed" SM.Crashed tr.new_phase
+
+let test_apply_restarting_to_dead () =
+  (* Restart budget exhausted during restart -> Dead *)
+  let restarting_conds = { SM.default_conditions with
+    fiber_alive = false;
+    restart_budget_remaining = true;
+    backoff_elapsed = true;
+  } in
+  let tr = apply_ok
+    ~current_phase:SM.Restarting
+    ~conditions:restarting_conds
+    ~event:SM.Restart_budget_exhausted in
+  check phase_t "Restarting + budget exhausted -> Dead" SM.Dead tr.new_phase
+
+let test_apply_paused_to_draining () =
+  (* Paused keeper receives stop request -> Draining *)
+  let paused_conds = { running_conditions with operator_paused = true } in
+  let tr = apply_ok
+    ~current_phase:SM.Paused
+    ~conditions:paused_conds
+    ~event:SM.Stop_requested in
+  check phase_t "Paused + stop -> Draining" SM.Draining tr.new_phase
+
+let test_apply_paused_stop_drain_lifecycle () =
+  (* Paused -> Draining (stop) -> Stopped (drain complete) *)
+  let paused_conds = { running_conditions with operator_paused = true } in
+  let tr1 = apply_ok
+    ~current_phase:SM.Paused
+    ~conditions:paused_conds
+    ~event:SM.Stop_requested in
+  check phase_t "Paused + stop -> Draining" SM.Draining tr1.new_phase;
+  let tr2 = apply_ok
+    ~current_phase:SM.Draining
+    ~conditions:tr1.updated_conditions
+    ~event:SM.Drain_complete in
+  check phase_t "Draining + drain complete -> Stopped" SM.Stopped tr2.new_phase
+
 (* ── Terminal state tests ──────────────────────────────── *)
 
 let test_dead_rejects_all_events () =
@@ -372,6 +450,33 @@ let test_can_transition_crashed_only_restart_or_dead () =
   check bool "-> Dead" true (SM.can_transition ~from_phase:SM.Crashed ~to_phase:SM.Dead);
   check bool "no -> Running" false (SM.can_transition ~from_phase:SM.Crashed ~to_phase:SM.Running);
   check bool "no -> Paused" false (SM.can_transition ~from_phase:SM.Crashed ~to_phase:SM.Paused)
+
+let test_can_transition_compacting_to_failing () =
+  check bool "-> Failing" true (SM.can_transition ~from_phase:SM.Compacting ~to_phase:SM.Failing)
+
+let test_can_transition_compacting_to_crashed () =
+  check bool "-> Crashed" true (SM.can_transition ~from_phase:SM.Compacting ~to_phase:SM.Crashed)
+
+let test_can_transition_handingoff_to_failing () =
+  check bool "-> Failing" true (SM.can_transition ~from_phase:SM.HandingOff ~to_phase:SM.Failing)
+
+let test_can_transition_handingoff_to_crashed () =
+  check bool "-> Crashed" true (SM.can_transition ~from_phase:SM.HandingOff ~to_phase:SM.Crashed)
+
+let test_can_transition_failing_to_draining () =
+  check bool "-> Draining" true (SM.can_transition ~from_phase:SM.Failing ~to_phase:SM.Draining)
+
+let test_can_transition_restarting_to_crashed () =
+  check bool "-> Crashed" true (SM.can_transition ~from_phase:SM.Restarting ~to_phase:SM.Crashed)
+
+let test_can_transition_restarting_to_dead () =
+  check bool "-> Dead" true (SM.can_transition ~from_phase:SM.Restarting ~to_phase:SM.Dead)
+
+let test_can_transition_paused_to_draining () =
+  check bool "-> Draining" true (SM.can_transition ~from_phase:SM.Paused ~to_phase:SM.Draining)
+
+let test_can_transition_paused_to_stopped () =
+  check bool "-> Stopped" true (SM.can_transition ~from_phase:SM.Paused ~to_phase:SM.Stopped)
 
 (* ── Backward compat tests ─────────────────────────────── *)
 
@@ -566,6 +671,13 @@ let () =
       test_case "fiber terminated -> Crashed" `Quick test_apply_fiber_terminated_crash;
       test_case "crash -> restart -> Running" `Quick test_apply_crash_restart_lifecycle;
       test_case "crash -> Dead" `Quick test_apply_crash_to_dead;
+      test_case "Compacting + fiber death -> Crashed" `Quick test_apply_compacting_to_crashed;
+      test_case "HandingOff + fiber death -> Crashed" `Quick test_apply_handingoff_to_crashed;
+      test_case "Failing + stop -> Draining" `Quick test_apply_failing_to_draining;
+      test_case "Restarting + fiber death -> Crashed" `Quick test_apply_restarting_to_crashed;
+      test_case "Restarting + budget exhausted -> Dead" `Quick test_apply_restarting_to_dead;
+      test_case "Paused + stop -> Draining" `Quick test_apply_paused_to_draining;
+      test_case "Paused -> Draining -> Stopped" `Quick test_apply_paused_stop_drain_lifecycle;
     ];
     "terminal", [
       test_case "Dead rejects all" `Quick test_dead_rejects_all_events;
@@ -576,6 +688,15 @@ let () =
       test_case "Running invalid targets" `Quick test_can_transition_running_invalid;
       test_case "terminal -> nothing" `Quick test_can_transition_terminal_nothing;
       test_case "Crashed -> Restarting|Dead only" `Quick test_can_transition_crashed_only_restart_or_dead;
+      test_case "Compacting -> Failing" `Quick test_can_transition_compacting_to_failing;
+      test_case "Compacting -> Crashed" `Quick test_can_transition_compacting_to_crashed;
+      test_case "HandingOff -> Failing" `Quick test_can_transition_handingoff_to_failing;
+      test_case "HandingOff -> Crashed" `Quick test_can_transition_handingoff_to_crashed;
+      test_case "Failing -> Draining" `Quick test_can_transition_failing_to_draining;
+      test_case "Restarting -> Crashed" `Quick test_can_transition_restarting_to_crashed;
+      test_case "Restarting -> Dead" `Quick test_can_transition_restarting_to_dead;
+      test_case "Paused -> Draining" `Quick test_can_transition_paused_to_draining;
+      test_case "Paused -> Stopped" `Quick test_can_transition_paused_to_stopped;
     ];
     "backward_compat", [
       test_case "buffer -> Running" `Quick test_legacy_buffer_states_map_to_running;

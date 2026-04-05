@@ -1,5 +1,6 @@
 (** Keeper Measurement — Det/NonDet Boundary Types (RFC-0002).
-    Phase 1: types and serialization only. *)
+    Phase 1: types and serialization.
+    Phase 4: pure [capture] function. *)
 
 type threshold_params = {
   compaction_ratio_gate : float;
@@ -81,6 +82,58 @@ let threshold_params_to_json (t : threshold_params) : Yojson.Safe.t =
     "model_ratio_multiplier", `Float t.model_ratio_multiplier;
     "model_handoff_multiplier", `Float t.model_handoff_multiplier;
   ]
+
+let capture
+      ~snapshot_id
+      ~keeper_name
+      ~generation
+      ~timestamp
+      ~thresholds
+      ~context_ratio
+      ~message_count
+      ~token_count
+      ~max_tokens
+      ~repetition_risk
+      ~goal_alignment
+      ~response_alignment
+      ~now_ts
+      ~idle_seconds
+      ~since_last_compaction_sec
+      ~since_last_handoff_sec
+      ~proactive_warmup_elapsed
+      ~consecutive_hb_failures
+      ~consecutive_turn_failures
+      ()
+    : measurement_snapshot
+  =
+  { snapshot_id
+  ; keeper_name
+  ; generation
+  ; timestamp
+  ; thresholds
+  ; context =
+      { context_ratio
+      ; message_count
+      ; token_count
+      ; max_tokens
+      }
+  ; similarity =
+      { repetition_risk
+      ; goal_alignment
+      ; response_alignment
+      }
+  ; timing =
+      { now_ts
+      ; idle_seconds
+      ; since_last_compaction_sec
+      ; since_last_handoff_sec
+      ; proactive_warmup_elapsed
+      }
+  ; failures =
+      { consecutive_hb_failures
+      ; consecutive_turn_failures
+      }
+  }
 
 let measurement_snapshot_to_json (s : measurement_snapshot) : Yojson.Safe.t =
   `Assoc [

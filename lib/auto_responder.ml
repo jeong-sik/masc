@@ -336,15 +336,9 @@ let maybe_respond ~sw ~base_path:_ ~from_agent ~content ~mention =
                 Log.AutoResponder.info "Calling %s for @%s" mention_base m;
                 call_model_and_broadcast ~sw ~agent_type:mention_base ~prompt:content ~mention:from_agent
             | Spawn ->
-                if mention_base = "glm" then (
-                  (* No CLI for glm; use MODEL mode path. *)
-                  Log.AutoResponder.info "Calling glm for @%s" m;
-                  call_model_and_broadcast ~sw ~agent_type:"glm" ~prompt:content ~mention:from_agent
-                ) else (
-                  let prompt = build_response_prompt ~from_agent ~content ~mention:m in
-                  Log.AutoResponder.info "Spawning %s for @%s from %s" mention_base m from_agent;
-                  run_cli_agent ~agent_type:mention_base ~prompt
-                )
+                let prompt = build_response_prompt ~from_agent ~content ~mention:m in
+                Log.AutoResponder.info "Spawning %s for @%s from %s" mention_base m from_agent;
+                run_cli_agent ~agent_type:mention_base ~prompt
           with
           | Eio.Cancel.Cancelled _ as e -> raise e
           | exn ->

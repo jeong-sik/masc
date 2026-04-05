@@ -1,6 +1,32 @@
 # Changelog
 
 
+## [2.242.0] - 2026-04-05
+
+### Fixed
+- **Concurrency** -- replace `option ref` with `Atomic.t` for OCaml 5 multi-domain safety in fs_compat, board_dispatch, tool_board, shutdown_hooks (#5286, #3158 Phase 1).
+- **Dead code** -- remove context_floor and effective_discovered_ctx from oas_model_resolve (#5279).
+
+### Changed
+- **State machine** -- dispatch Compaction_completed and Handoff_completed events to keeper state machine (#5279, #5270).
+- **Boundary** -- eliminate vendor/model knowledge in MASC core logic (#5246).
+- **Tool presets** -- load tool presets from config/tool_policy.toml (#5278).
+- **Surfaces** -- prune a2a, improve_loop, detachment from system_internal (#5276).
+- **Keeper config** -- handle escaped quotes in TOML array splitter (#5275).
+
+## [2.241.0] - 2026-04-05
+
+### Changed
+- **SSOT consolidation** -- centralize keeper prompt template names; extract port/host default constants (#5259).
+- **Boundary cleanup** -- move vendor endpoint URLs to Provider_adapter; remove redundant probe check (#5259).
+- **TOML multiline** -- support multi-line TOML arrays; enforce base_path in dashboard (#5255).
+- **Role catalog SSOT** -- consolidate tool names into Tool_catalog_surfaces (#5256).
+- **RFC-0002 Phase 3** -- migrate set_state to dispatch_event (#5250).
+
+### Fixed
+- **Memory growth** -- bound global mutable state to prevent growth on rerun (#5252).
+- **Dead code** -- remove apply_self_model_drift and exceeds_threshold stubs (#5253).
+
 ## [2.240.0] - 2026-04-05
 
 ### Changed

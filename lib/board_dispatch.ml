@@ -49,25 +49,25 @@ let board_mu = Eio.Mutex.create ()
 let with_board_rw f = Eio_guard.with_mutex board_mu f
 let with_board_ro f = Eio_guard.with_mutex_ro board_mu f
 
-let keeper_board_signal_hook : (keeper_board_signal -> unit) option ref = ref None
+(* Hooks are WORM Atomic: set once at server bootstrap, read from any fiber.
+   No mutex needed — Atomic.get/set are single-instruction operations. *)
+let keeper_board_signal_hook : (keeper_board_signal -> unit) option Atomic.t = Atomic.make None
 
 let set_keeper_board_signal_hook hook =
-  with_board_rw (fun () -> keeper_board_signal_hook := Some hook)
+  Atomic.set keeper_board_signal_hook (Some hook)
 
 let emit_keeper_board_signal signal =
-  let hook_opt = with_board_ro (fun () -> !keeper_board_signal_hook) in
-  match hook_opt with
+  match Atomic.get keeper_board_signal_hook with
   | Some hook -> hook signal
   | None -> ()
 
-let board_sse_hook : (board_sse_event -> unit) option ref = ref None
+let board_sse_hook : (board_sse_event -> unit) option Atomic.t = Atomic.make None
 
 let set_board_sse_hook hook =
-  with_board_rw (fun () -> board_sse_hook := Some hook)
+  Atomic.set board_sse_hook (Some hook)
 
 let emit_board_sse_event event =
-  let hook_opt = with_board_ro (fun () -> !board_sse_hook) in
-  match hook_opt with
+  match Atomic.get board_sse_hook with
   | Some hook -> (try hook event with _ -> ())
   | None -> ()
 

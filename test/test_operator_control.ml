@@ -1,4 +1,6 @@
 let () =
+  let base_path = Masc_test_deps.find_project_root () in
+  Masc_mcp.Keeper_exec_tools.init_policy_config ~base_path;
   Alcotest.run "Operator_control"
     [
       ( "operator",

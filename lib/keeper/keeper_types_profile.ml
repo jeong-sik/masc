@@ -492,7 +492,9 @@ let keeper_default_source_snapshot name : keeper_default_source_snapshot =
 
 (** Load extended persona description from AGENT.md if present.
     Truncated to [max_chars] to avoid bloating the system prompt. *)
-let load_persona_extended ?(max_chars = 4000) name : string option =
+let persona_description_max_chars = 4000
+
+let load_persona_extended ?(max_chars = persona_description_max_chars) name : string option =
   let dirs =
     try Config_dir_resolver.personas_dirs ()
     with

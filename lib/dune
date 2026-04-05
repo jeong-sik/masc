@@ -449,6 +449,7 @@
    keeper_alerting
    keeper_alerting_path
    keeper_tool_registry
+   keeper_tool_policy_config
    keeper_tool_policy
    keeper_tag_dispatch
    keeper_exec_tools
@@ -596,6 +597,7 @@
  tool_command_plane_schemas_01
  tool_command_plane_schemas_02
   keeper_tool_registry
+  keeper_tool_policy_config
   keeper_tool_policy
   keeper_exec_tools
   keeper_exec_status_metrics

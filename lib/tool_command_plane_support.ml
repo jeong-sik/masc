@@ -88,7 +88,9 @@ let read_all ic =
    with End_of_file -> ());
   Buffer.contents buf
 
-let tail_text ?(max_chars = 4000) text =
+let tail_display_max_chars = 4000
+
+let tail_text ?(max_chars = tail_display_max_chars) text =
   let len = String.length text in
   if len <= max_chars then text
   else String.sub text (len - max_chars) max_chars

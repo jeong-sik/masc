@@ -22,6 +22,8 @@ type adapter = {
   aliases : string list;
   spawn_key : string option;       (** Key into Spawn.default_configs. None = not spawnable via CLI. *)
   default_voice : string option;   (** Default TTS voice name. None = no voice assignment. *)
+  endpoint_url : string option;    (** Base URL for the provider API. *)
+  default_model_id : string option; (** Default model ID for the provider. *)
 }
 
 type voice_adapter = {
@@ -70,10 +72,11 @@ let string_of_voice_transport = function
   | Voice_elevenlabs_direct -> "elevenlabs_direct"
   | Voice_mcp -> "voice_mcp"
 
-(** Map OAS Provider_config.provider_kind to canonical string.
-    Exhaustive match: adding a new OAS provider_kind triggers compile error here.
-    TODO: move to OAS Provider_config.string_of_provider_kind when OAS exports it. *)
-let string_of_provider_kind : Llm_provider.Provider_config.provider_kind -> string = function
+(** Map OAS Provider_config.provider_kind to MASC adapter canonical_name.
+    TODO: remove after OAS exports string_of_provider_kind (oas#623 pin). *)
+let string_of_provider_kind
+    : Llm_provider.Provider_config.provider_kind -> string
+  = function
   | Anthropic -> "claude-api"
   | OpenAI_compat -> "codex-api"
   | Gemini -> "gemini-api"
@@ -104,6 +107,10 @@ let direct_adapters =
       aliases = [ cn_llama; "llama.cpp"; "llamacpp" ];
       spawn_key = Some "llama";
       default_voice = Some "Laura";
+      endpoint_url = Some Env_config_runtime.Llama.server_url;
+      default_model_id =
+        (let m = Env_config_runtime.Llama.default_model in
+         if m = "" || m = "explicit-model-required" then None else Some m);
     };
     {
       canonical_name = cn_claude;
@@ -112,6 +119,8 @@ let direct_adapters =
       aliases = [ cn_claude; "claude"; "anthropic"; "claude-code"; "claude-api" ];
       spawn_key = Some "claude";
       default_voice = Some "Sarah";
+      endpoint_url = Some "https://api.anthropic.com";
+      default_model_id = Some "auto";
     };
     {
       canonical_name = cn_codex;
@@ -120,6 +129,8 @@ let direct_adapters =
       aliases = [ cn_codex; "codex"; "openai"; "codex-cli"; "codex-api" ];
       spawn_key = Some "codex";
       default_voice = Some "George";
+      endpoint_url = Some "https://api.openai.com";
+      default_model_id = Some "auto";
     };
     {
       canonical_name = cn_gemini;
@@ -133,6 +144,8 @@ let direct_adapters =
       aliases = [ cn_gemini; "gemini"; "google"; "gemini-cli"; "gemini-api" ];
       spawn_key = Some "gemini";
       default_voice = Some "Roger";
+      endpoint_url = None; (** Resolved dynamically for Gemini *)
+      default_model_id = Some "auto";
     };
     {
       canonical_name = cn_glm;
@@ -141,6 +154,8 @@ let direct_adapters =
       aliases = [ cn_glm; "glm_cloud"; "zai" ];
       spawn_key = None;
       default_voice = None;
+      endpoint_url = Some Env_config_runtime.Glm.server_url;
+      default_model_id = Some "auto";
     };
     {
       canonical_name = cn_openrouter;
@@ -149,6 +164,8 @@ let direct_adapters =
       aliases = [ cn_openrouter ];
       spawn_key = None;
       default_voice = None;
+      endpoint_url = Some "https://openrouter.ai/api/v1";
+      default_model_id = None;
     };
   ]
 
@@ -239,22 +256,6 @@ let resolve_spawn_key label =
   | Some adapter -> adapter.spawn_key
   | None -> None
 
-(** Resolve default TTS voice for an agent label. *)
-let resolve_default_voice label =
-  match resolve_direct_adapter label with
-  | Some adapter -> adapter.default_voice
-  | None -> None
-
-(** All agents that are spawnable via CLI. *)
-let spawnable_canonical_names () =
-  direct_adapters
-  |> List.filter_map (fun a -> if a.spawn_key <> None then Some a.canonical_name else None)
-
-(** All spawn keys (short names used for @mention routing and CLI dispatch). *)
-let spawnable_spawn_keys () =
-  direct_adapters
-  |> List.filter_map (fun a -> a.spawn_key)
-
 (** Check if a name is a known direct adapter label or alias.
     This includes adapters that do not have a CLI spawn_key (e.g. glm, openrouter). *)
 let is_known_provider name =
@@ -264,6 +265,10 @@ let is_known_provider name =
     For a broader "known provider" predicate, use {!is_known_provider}. *)
 let is_spawnable_agent name =
   resolve_spawn_key name <> None
+
+let spawnable_canonical_names () =
+  direct_adapters
+  |> List.filter_map (fun a -> if a.spawn_key <> None then Some a.canonical_name else None)
 
 (** All agent voices as (canonical_name, voice_name) pairs.
     For backward compatibility with voice_bridge_core. *)
@@ -832,18 +837,70 @@ let gemini_vertex_openai_base_url ~project ~location =
     "https://aiplatform.googleapis.com/v1/projects/%s/locations/%s/endpoints/openapi"
     project location
 
-(** Resolve the API endpoint URL for a canonical provider name.
-    Local and runtime-configured providers use Env_config_runtime.
-    Cloud API providers return their well-known base URLs. *)
-let endpoint_url_for_canonical_name name =
-  match name with
-  | s when s = cn_llama -> Some Env_config_runtime.Llama.server_url
-  | s when s = cn_glm -> Some Env_config_runtime.Glm.server_url
-  | s when s = cn_claude -> Some "https://api.anthropic.com"
-  | s when s = cn_codex -> Some "https://api.openai.com"
-  | s when s = cn_gemini -> (
-      match resolve_gemini_direct_auth () with
-      | Gemini_vertex_adc { project; location } ->
-          Some (gemini_vertex_openai_base_url ~project ~location)
-      | _ -> Some "https://generativelanguage.googleapis.com")
+(* ── Generic provider auth detail ─────────────────────────────── *)
+
+(** Provider-agnostic auth detail for dashboard display.
+    Encapsulates vendor-specific auth logic (e.g. Gemini Vertex/API key)
+    so consumers do not branch on vendor names. *)
+type auth_detail = {
+  auth_kind : string;
+  status : string;
+  available : bool;
+  supports_run : bool;
+  endpoint_url : string option;
+  note : string option;
+}
+
+(** Map adapter canonical_name to the cascade config prefix.
+    E.g. "claude-api" -> "claude", "codex-api" -> "openai". *)
+let cascade_prefix_of_adapter (adapter : adapter) =
+  match adapter.canonical_name with
+  | v when v = cn_claude -> "claude"
+  | v when v = cn_codex -> "openai"
+  | v when v = cn_gemini -> "gemini"
+  | _ -> adapter.canonical_name
+
+let endpoint_url_of_adapter (adapter : adapter) =
+  match adapter.canonical_name with
+  | name when name = cn_llama -> Some Env_config_runtime.Llama.server_url
+  | name when name = cn_glm -> Some Env_config_runtime.Glm.server_url
+  | name when name = cn_claude -> Some "https://api.anthropic.com"
+  | name when name = cn_codex -> Some "https://api.openai.com"
   | _ -> None
+
+(** Resolve auth detail for any provider by canonical name or alias.
+    Gemini-specific Vertex ADC vs API Key logic is internal. *)
+let auth_detail_of_provider provider =
+  match resolve_direct_adapter provider with
+  | None ->
+    { auth_kind = "unknown"; status = "unsupported"; available = false;
+      supports_run = false; endpoint_url = None;
+      note = Some "Unsupported provider" }
+  | Some adapter ->
+    let auth_kind_base = string_of_auth_mode adapter.auth_mode in
+    if adapter.canonical_name = cn_gemini then
+      match resolve_gemini_direct_auth () with
+      | Gemini_api_key ->
+        { auth_kind = "api_key:GEMINI_API_KEY"; status = "configured";
+          available = true; supports_run = true;
+          endpoint_url = Some "https://generativelanguage.googleapis.com";
+          note = None }
+      | Gemini_vertex_adc { project; location } ->
+        { auth_kind = Printf.sprintf "vertex_adc:%s:%s" project location;
+          status = "vertex_adc"; available = true; supports_run = false;
+          endpoint_url = Some (gemini_vertex_openai_base_url ~project ~location);
+          note = Some "Dashboard run MVP only supports Gemini via GEMINI_API_KEY. \
+                       Vertex ADC inventory is visible but run is disabled." }
+      | Gemini_auth_missing message ->
+        { auth_kind = auth_kind_base; status = "missing_auth";
+          available = false; supports_run = false;
+          endpoint_url = None; note = Some message }
+    else
+      let available = provider_auth_available provider in
+      { auth_kind = auth_kind_base;
+        status = (if available then "configured" else "missing_auth");
+        available; supports_run = available;
+        endpoint_url = endpoint_url_of_adapter adapter;
+        note = None }
+
+(* is_spawnable removed: use is_spawnable_agent directly. *)

@@ -27,13 +27,15 @@ let contract_of_spec ~execution_scope (spec : Worker_execution_spec.t) =
              (spec.allowed_tools @ spec.allowed_shell_tools)))
     spec.delivery_contract
 
-let provider_and_model_id_of_label model_label =
-  let provider = Worker_container.oas_provider_of_label model_label in
-  let model_id =
-    match Llm_provider.Cascade_config.parse_model_string model_label with
-    | Some cfg -> cfg.Llm_provider.Provider_config.model_id
-    | None -> model_label
-  in
+let model_id_of_label label =
+  match Llm_provider.Cascade_config.parse_model_string label with
+  | Some cfg -> cfg.Llm_provider.Provider_config.model_id
+  | None -> label
+
+let provider_and_model_id_of_label model_label :
+    (Oas.Provider.config * string, string) result =
+  let+ provider = Worker_container.oas_provider_of_label model_label in
+  let model_id = model_id_of_label model_label in
   (provider, model_id)
 
 let execute_spec ~sw ?net ~room_config (spec : Worker_execution_spec.t) :
@@ -50,9 +52,7 @@ let execute_spec ~sw ?net ~room_config (spec : Worker_execution_spec.t) :
       ~worker_name:spec.worker_name ~mcp_session_id ~role:spec.role
       ~selection_note:spec.selection_note ~execution_scope
       ~worker_class:spec.worker_class
-      ~effective_model:
-        (match provider_and_model_id_of_label spec.model_label with
-        | _provider, model_id -> model_id)
+      ~effective_model:(model_id_of_label spec.model_label)
       ~thinking_enabled:spec.thinking_enabled
       ~max_turns_override:(Some spec.max_turns)
       ~timeout_seconds:(Some spec.timeout_sec)
@@ -66,8 +66,12 @@ let execute_spec ~sw ?net ~room_config (spec : Worker_execution_spec.t) :
       let evidence_session_id =
         Worker_container.evidence_session_id_of_worker_run spec.worker_run_id
       in
-      let _provider, model_id = provider_and_model_id_of_label spec.model_label in
-      let provider = Worker_container.oas_provider_of_label spec.model_label in
+      let* provider, model_id =
+        provider_and_model_id_of_label spec.model_label
+        |> Result.map_error (fun e ->
+          Printf.sprintf "worker %s: model label %S: %s"
+            spec.worker_name spec.model_label e)
+      in
       let system_prompt =
         Worker_container.default_system_prompt ~worker_name:spec.worker_name
           ~model_id ?session_id:spec.team_session_id ?role:spec.role

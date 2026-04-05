@@ -1,8 +1,11 @@
-(** Keeper_tool_registry — declarative tool name lists and schema injection.
+(** Keeper_tool_registry -- runtime tool name sources and schema injection.
 
-    This module is pure data: tool name constants grouped by family,
-    plus the mutable schema registry for dynamically injected masc_* tools.
-    No access-policy logic lives here; see [Keeper_tool_policy]. *)
+    Static tool name lists have been moved to config/tool_policy.toml.
+    This module retains only runtime-resolved names (Tool_catalog,
+    Tool_shard, injected MASC tools), core always-visible tools, and
+    dynamic schema injection.
+
+    See Keeper_tool_policy_config for the declarative tool groups and presets. *)
 
 open Keeper_types
 
@@ -10,54 +13,7 @@ let dedupe_tool_names names =
   dedupe_keep_order
     (names |> List.map String.trim |> List.filter (fun name -> name <> ""))
 
-(* ── Static tool name lists ────────────────────────────────────── *)
-
-let keeper_coordination_tool_names =
-  [
-    "keeper_tasks_list";
-    "keeper_tasks_audit";
-    "keeper_task_claim";
-    "keeper_task_done";
-    "keeper_broadcast";
-  ]
-
-let keeper_board_tool_names =
-  [
-    "keeper_board_get";
-    "keeper_board_post";
-    "keeper_board_comment";
-    "keeper_board_vote";
-    "keeper_board_list";
-    "keeper_board_stats";
-    "keeper_board_search";
-  ]
-
-let keeper_optional_board_tool_names =
-  [
-    (* Deliberately excluded from default presets. Explicit opt-in only. *)
-    "keeper_board_delete";
-  ]
-
-let keeper_voice_tool_names =
-  [ "keeper_voice_speak"; "keeper_voice_listen"; "keeper_voice_agent";
-    "keeper_voice_sessions";
-    "keeper_voice_session_start"; "keeper_voice_session_end" ]
-
-let keeper_shell_readonly_tool_names = [ "keeper_shell_readonly" ]
-
-let keeper_governance_tool_names =
-  Tool_shard.governance_tools
-  |> List.map (fun (t : Types.tool_schema) -> t.name)
-
-let keeper_coding_shard_tool_names =
-  Tool_shard.coding_tools
-  |> List.map (fun (t : Types.tool_schema) -> t.name)
-
-let keeper_autoresearch_tool_names =
-  Tool_shard.autoresearch_keeper_tools
-  |> List.map (fun (t : Types.tool_schema) -> t.name)
-
-let keeper_coding_tool_names = Tool_code_write.tool_names
+(* ── Runtime-resolved tool names ─────────────────────────────── *)
 
 let keeper_internal_candidate_tool_names =
   Tool_catalog.tools_for_surface Tool_catalog.Keeper_internal
@@ -66,39 +22,6 @@ let keeper_voice_tool_schemas =
   match Tool_shard.get_shard "voice" with
   | Some shard -> shard.tools
   | None -> []
-
-let keeper_base_tool_names =
-  [ "keeper_time_now"; "keeper_context_status"; "keeper_memory_search" ]
-
-let keeper_filesystem_tool_names = [ "keeper_fs_read" ]
-let keeper_filesystem_write_tool_names = [ "keeper_fs_edit" ]
-let keeper_library_tool_names = [ "keeper_library_search"; "keeper_library_read" ]
-
-let keeper_core_masc_tool_names =
-  [
-    "masc_status";
-    "masc_heartbeat";
-    "masc_tasks";
-    "masc_claim_next";
-    "masc_transition";
-    "masc_add_task";
-    "masc_batch_add_tasks";
-    "masc_agents";
-    "masc_dashboard";
-    "masc_agent_card";
-    "masc_tool_help";
-    "masc_web_search";
-  ]
-
-let keeper_coding_masc_tool_names =
-  [
-    "masc_code_search";
-    "masc_code_symbols";
-    "masc_code_read";
-    "masc_worktree_create";
-    "masc_worktree_remove";
-    "masc_worktree_list";
-  ]
 
 (* ── Layer 0: Core tools (always executable, always visible) ───── *)
 

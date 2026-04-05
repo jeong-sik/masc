@@ -208,9 +208,22 @@ let message_events (config : Room.config) ~agent_name ~limit :
 (* Collect tool call events from Activity Graph *)
 let tool_call_events (config : Room.config) ~agent_name ~limit :
     timeline_event list =
+  let rec take n xs =
+    match (n, xs) with
+    | n, _ when n <= 0 -> []
+    | _, [] -> []
+    | n, x :: rest -> x :: take (n - 1) rest
+  in
+  (* `list_events` limits globally before we filter by actor, so fetch a
+     wider bounded window to reduce the chance that busy-room activity from
+     other agents crowds out this agent's tool events. *)
+  let scan_limit =
+    let expanded = if limit <= 0 then 0 else limit * 10 in
+    min 1000 (max limit expanded)
+  in
   let all_events =
     Activity_graph.list_events config ~room_id:"default"
-      ~kinds:["tool.called"] ~after_seq:0 ~limit ()
+      ~kinds:["tool.called"] ~after_seq:0 ~limit:scan_limit ()
   in
   all_events
   |> List.filter (fun (e : Activity_graph.event) ->
@@ -252,6 +265,7 @@ let tool_call_events (config : Room.config) ~agent_name ~limit :
                            | Some s -> `String s | None -> `Null);
                ];
          })
+  |> take limit
 
 (* Build the full timeline *)
 let build_timeline (config : Room.config) ~agent_name ~since_hours ~limit
@@ -397,6 +411,15 @@ let schemas : Types.tool_schema list =
                           `String
                             "Include board activity (default: false, \
                              reserved)" );
+                      ] );
+                  ( "include_tool_calls",
+                    `Assoc
+                      [
+                        ("type", `String "boolean");
+                        ( "description",
+                          `String
+                            "Include tool call events from Activity Graph \
+                             (default: true)" );
                       ] );
                 ] );
             ("required", `List [ `String "agent_name" ]);

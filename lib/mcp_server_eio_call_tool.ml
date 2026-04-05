@@ -325,7 +325,8 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
       ])
       ~tags:(if success then ["tool"; "success"] else ["tool"; "failure"])
       ())
-  with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
+  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+    log_mcp_exn ~label:"activity graph emit failed" exn);
 
   let jsonrpc_id_str =
     match id with

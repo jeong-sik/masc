@@ -409,6 +409,15 @@ let handle_keeper_get_subroutes state req request reqd =
              ~default:trajectory_default_limit
            |> max 1 |> min trajectory_max_limit
          in
+         (* Allow caller to request more result text up to a safe max.
+            Default 2000 chars is enough for the collapsed list view;
+            set result_max_len=10000 (or higher, capped at 10000) to
+            get full detail for an expanded entry. *)
+         let result_max_len =
+           Server_utils.int_query_param req "result_max_len"
+             ~default:2000
+           |> max 0 |> min 10000
+         in
          let masc_root = Filename.concat config.base_path ".masc" in
          let entries =
            Trajectory.read_entries ~masc_root ~keeper_name:m.name
@@ -427,7 +436,7 @@ let handle_keeper_get_subroutes state req request reqd =
            ("generation", `Int m.runtime.generation);
            ("total_entries", `Int total);
            ("showing", `Int (List.length recent));
-           ("entries", `List (List.map (Trajectory.entry_to_json ~result_max_len:0) recent));
+           ("entries", `List (List.map (Trajectory.entry_to_json ~result_max_len) recent));
          ] in
          Http.Response.json ~compress:true ~request:req
            (Yojson.Safe.to_string json) reqd)

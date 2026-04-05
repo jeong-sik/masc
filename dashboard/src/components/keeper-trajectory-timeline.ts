@@ -71,6 +71,7 @@ function TrajectoryEntryRow({ entry }: { entry: TrajectoryEntry }) {
         class="group flex items-start gap-3 py-2.5 px-3 cursor-pointer hover:bg-[var(--white-3)] rounded-lg select-none"
         onClick=${toggle}
         role="button"
+        aria-expanded=${expanded.value}
         tabIndex=${0}
         onKeyDown=${(e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle() } }}
       >

@@ -18,15 +18,12 @@ let default_config_path () : string option =
     and the cascade name has no "{name}_models" entry.
     All profiles are now in config/cascade.json (hot-reloadable). *)
 let default_model_strings ~cascade_name:_ =
-  let llama_model = Env_config.Llama.default_model in
-  let models =
-    if llama_model <> "" then [ Printf.sprintf "llama:%s" llama_model ] else []
-  in
-  if models = [] then
-    match Provider_adapter.preferred_execution_model_labels () with
-    | [] -> [ "llama:auto" ]
-    | labels -> labels
-  else models
+  match Provider_adapter.explicit_llama_model_label_result () with
+  | Ok label -> [ label ]
+  | Error _ -> (
+      match Provider_adapter.preferred_execution_model_labels () with
+      | [] -> [ Provider_adapter.default_local_fallback_label () ]
+      | labels -> labels)
 
 (* ================================================================ *)
 (* Named model execution                                            *)
@@ -168,16 +165,11 @@ let run_named
   let named_cascade = Agent_sdk.Api.named_cascade ?config_path
     ~metrics ~name:cascade_name ~defaults () in
   let name = Printf.sprintf "oas-%s" cascade_name in
-  let primary_provider = match candidate_cfgs with
-    | cfg :: _ -> cfg
-    | [] ->
-      Llm_provider.Provider_config.make
-        ~kind:Llm_provider.Provider_config.Glm
-        ~model_id:"auto"
-        ~base_url:(Env_config_runtime.Glm.server_url ^ "/api/coding/paas/v4")
-        ~request_path:"/chat/completions"
-        ()
-  in
+  match candidate_cfgs with
+  | [] ->
+    Log.Misc.error "cascade %s: no callable models available" cascade_name;
+    Error (Printf.sprintf "cascade %s: no callable models available" cascade_name)
+  | primary_provider :: _ ->
   let provider : Agent_sdk.Provider.config =
     Agent_sdk.Provider.config_of_provider_config primary_provider
   in

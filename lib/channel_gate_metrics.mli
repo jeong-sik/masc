@@ -41,6 +41,42 @@ type channel_stats = {
   room_count : int;
 }
 
+(** Per-room binding snapshot (channel room -> keeper). *)
+type binding_stats = {
+  channel : string;
+  room_id : string;
+  keeper : string;
+  message_count : int;
+  success_count : int;
+  error_count : int;
+  duplicate_count : int;
+  last_activity_ts : float;
+  last_success_ts : float;
+  last_error_ts : float;
+  last_error : string;
+  last_error_kind : string;
+  last_outcome : string;
+  total_duration_ms : int;
+  timed_count : int;
+  max_duration_ms : int;
+}
+
+(** Recent connector event snapshot. *)
+type gate_event = {
+  seq : int;
+  timestamp : float;
+  channel : string;
+  room_id : string;
+  keeper : string;
+  outcome : string;
+  error_kind : string;
+  error : string;
+  duration_ms : int;
+}
+
+val max_recent_events : int
+(** Maximum number of recent connector events retained in memory. *)
+
 val record_attempt :
   channel:string ->
   room_id:string ->
@@ -48,7 +84,9 @@ val record_attempt :
   duration_ms:int ->
   outcome ->
   unit
-(** Record one gate attempt. Thread-safe. *)
+(** Record one gate attempt. Thread-safe.
+    Channel names are normalized to lowercase in the stored observability
+    surface so filtering is case-insensitive across connectors. *)
 
 val record_internal_error_exn :
   channel:string ->
@@ -65,6 +103,15 @@ val snapshot : unit -> channel_stats list
 
 val snapshot_json : unit -> Yojson.Safe.t
 (** Full status JSON for the [/api/v1/gate/status] endpoint. *)
+
+val events_json :
+  ?channel:string ->
+  ?keeper:string ->
+  ?room_id:string ->
+  limit:int ->
+  unit ->
+  Yojson.Safe.t
+(** Filtered recent-event JSON for the [/api/v1/gate/events] endpoint. *)
 
 val total_messages : unit -> int
 (** Sum of all channels' message counts. *)

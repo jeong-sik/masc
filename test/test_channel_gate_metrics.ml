@@ -138,8 +138,67 @@ let test_snapshot_json_reports_health_and_latency () =
         (row |> U.member "success_rate_pct" |> U.to_int);
       check string "health" "failing"
         (row |> U.member "health" |> U.to_string);
-      check string "last_error" "upstream timeout"
-        (row |> U.member "last_error" |> U.to_string))
+       check string "last_error" "upstream timeout"
+         (row |> U.member "last_error" |> U.to_string))
+
+let test_snapshot_json_includes_room_bindings () =
+  with_eio (fun () ->
+      let channel = unique_channel "discord-bindings" in
+      Metrics.record_attempt ~channel ~room_id:"room-alpha" ~keeper:"luna"
+        ~duration_ms:120 Metrics.Success;
+      Metrics.record_attempt ~channel ~room_id:"room-beta" ~keeper:"sangsu"
+        ~duration_ms:0
+        (Metrics.Keeper_error "keeper offline");
+      let json = Metrics.snapshot_json () in
+      let bindings =
+        json |> U.member "bindings" |> U.to_list
+        |> List.filter (fun item ->
+               String.equal (item |> U.member "channel" |> U.to_string) channel)
+      in
+      let alpha =
+        bindings
+        |> List.find (fun item ->
+               String.equal (item |> U.member "room_id" |> U.to_string) "room-alpha")
+      in
+      let beta =
+        bindings
+        |> List.find (fun item ->
+               String.equal (item |> U.member "room_id" |> U.to_string) "room-beta")
+      in
+      check string "alpha keeper" "luna"
+        (alpha |> U.member "keeper" |> U.to_string);
+      check string "alpha health" "healthy"
+        (alpha |> U.member "health" |> U.to_string);
+      check string "beta last error" "keeper offline"
+        (beta |> U.member "last_error" |> U.to_string);
+      check string "beta health" "failing"
+        (beta |> U.member "health" |> U.to_string))
+
+let test_events_json_filters_newest_first () =
+  with_eio (fun () ->
+      let channel = unique_channel "discord-events" in
+      Metrics.record_attempt ~channel ~room_id:"room-a" ~keeper:"luna"
+        ~duration_ms:77 Metrics.Success;
+      Metrics.record_attempt ~channel ~room_id:"room-a" ~keeper:"luna"
+        ~duration_ms:0
+        (Metrics.Keeper_error "upstream timeout");
+      Metrics.record_attempt ~channel ~room_id:"room-b" ~keeper:"sangsu"
+        ~duration_ms:0
+        (Metrics.Validation_error "content is required");
+      let json = Metrics.events_json ~channel ~keeper:"luna" ~limit:5 () in
+      let rows = json |> U.member "events" |> U.to_list in
+      check int "filtered count" 2 (List.length rows);
+      let newest = List.hd rows in
+      let older = List.nth rows 1 in
+      check string "newest room" "room-a"
+        (newest |> U.member "room_id" |> U.to_string);
+      check string "newest outcome" "keeper_error"
+        (newest |> U.member "outcome" |> U.to_string);
+      check string "older outcome" "success"
+        (older |> U.member "outcome" |> U.to_string);
+      check bool "latest seq present" true
+        ((json |> U.member "latest_seq" |> U.to_int) >=
+         (newest |> U.member "seq" |> U.to_int)))
 
 let test_room_tracking_is_bounded () =
   with_eio (fun () ->
@@ -170,9 +229,13 @@ let () =
             test_record_validation_error_metric_tracks_request_metadata;
           test_case "records validation diagnostics for invalid json" `Quick
             test_record_validation_error_metric_falls_back_for_invalid_json;
-          test_case "serializes health and latency" `Quick
-            test_snapshot_json_reports_health_and_latency;
-          test_case "bounds tracked rooms" `Quick
-            test_room_tracking_is_bounded;
-        ] );
+           test_case "serializes health and latency" `Quick
+             test_snapshot_json_reports_health_and_latency;
+           test_case "serializes room bindings" `Quick
+             test_snapshot_json_includes_room_bindings;
+           test_case "serializes filtered recent events" `Quick
+             test_events_json_filters_newest_first;
+           test_case "bounds tracked rooms" `Quick
+             test_room_tracking_is_bounded;
+         ] );
     ]

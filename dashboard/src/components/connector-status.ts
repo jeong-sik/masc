@@ -37,6 +37,8 @@ interface ChannelInfo {
 
 interface GateStatusData {
   channels: ChannelInfo[]
+  bindings: BindingInfo[]
+  recent_events: GateEventInfo[]
   total_messages: number
   total_success: number
   total_errors: number
@@ -44,6 +46,38 @@ interface GateStatusData {
   success_rate_pct: number
   dedup_table_size: number
   uptime_seconds: number
+}
+
+interface BindingInfo {
+  channel: string
+  room_id: string
+  keeper: string
+  message_count: number
+  success_count: number
+  error_count: number
+  duplicate_count: number
+  last_activity: string
+  last_success: string
+  last_error_at: string
+  last_error: string
+  last_error_kind: string
+  last_outcome: string
+  avg_duration_ms: number
+  max_duration_ms: number
+  success_rate_pct: number
+  health: 'idle' | 'healthy' | 'degraded' | 'failing' | string
+}
+
+interface GateEventInfo {
+  seq: number
+  timestamp: string
+  channel: string
+  room_id: string
+  keeper: string
+  outcome: string
+  error_kind: string
+  error: string
+  duration_ms: number
 }
 
 const data = signal<GateStatusData | null>(null)
@@ -137,6 +171,17 @@ function shortText(value: string, limit = 96): string {
   return `${trimmed.slice(0, limit - 1)}…`
 }
 
+function truncateMiddle(value: string, limit = 18): string {
+  const trimmed = value.trim()
+  if (!trimmed) return '-'
+  if (trimmed.length <= limit) return trimmed
+  if (limit <= 5) return `${trimmed.slice(0, Math.max(1, limit - 1))}…`
+  const budget = limit - 1
+  const tail = Math.max(4, Math.floor(budget / 3))
+  const head = Math.max(2, budget - tail)
+  return `${trimmed.slice(0, head)}…${trimmed.slice(-tail)}`
+}
+
 function ChannelCard({ ch }: { ch: ChannelInfo }) {
   const tone = healthTone(ch.health)
   const lastError = shortText(ch.last_error)
@@ -221,6 +266,85 @@ function ChannelCard({ ch }: { ch: ChannelInfo }) {
   `
 }
 
+function BindingRow({ binding }: { binding: BindingInfo }) {
+  const tone = healthTone(binding.health)
+  const lastError = shortText(binding.last_error, 72)
+
+  return html`
+    <div class="rounded-md border border-[var(--white-8)] bg-[var(--white-4)] px-3 py-2">
+      <div class="flex items-start justify-between gap-3">
+        <div class="min-w-0">
+          <div class="text-xs font-medium text-[var(--text-body)]">
+            ${binding.channel} · room ${truncateMiddle(binding.room_id)}
+          </div>
+          <div class="text-[10px] uppercase tracking-[0.16em] text-[var(--text-dim)]">
+            ${binding.keeper ? `keeper ${binding.keeper}` : 'keeper pending'}
+          </div>
+        </div>
+        <span class=${`rounded-full px-2 py-1 text-[10px] uppercase tracking-[0.16em] ${tone.badge}`}>
+          ${tone.label}
+        </span>
+      </div>
+      <div class="mt-2 grid grid-cols-3 gap-2 text-[11px] text-[var(--text-dim)]">
+        <div>
+          msgs <span class="font-mono text-[var(--text-body)]">${binding.message_count}</span>
+        </div>
+        <div>
+          success <span class="font-mono text-[var(--text-body)]">${binding.success_rate_pct}%</span>
+        </div>
+        <div>
+          last <span class="font-mono text-[var(--text-body)]">${binding.last_outcome}</span>
+        </div>
+      </div>
+      <div class="mt-1 text-[11px] text-[var(--text-dim)]">
+        recent activity <span class="font-mono text-[var(--text-body)]">${timeAgo(binding.last_activity)}</span>
+      </div>
+      ${lastError
+        ? html`
+            <div class="mt-2 rounded border border-rose-400/20 bg-rose-500/8 px-2 py-1 text-[10px] text-rose-100">
+              ${binding.last_error_kind || 'error'} · ${lastError}
+            </div>
+          `
+        : null}
+    </div>
+  `
+}
+
+function EventRow({ event }: { event: GateEventInfo }) {
+  const isError = Boolean(event.error)
+  const badgeClass = isError
+    ? 'border border-rose-400/30 bg-rose-500/12 text-rose-100'
+    : 'border border-[var(--white-8)] bg-[var(--white-4)] text-[var(--text-dim)]'
+
+  return html`
+    <div class="rounded-md border border-[var(--white-8)] bg-[var(--white-4)] px-3 py-2">
+      <div class="flex items-start justify-between gap-3">
+        <div class="min-w-0 text-[11px] text-[var(--text-dim)]">
+          <div class="font-medium text-[var(--text-body)]">
+            ${event.channel} · ${event.keeper || 'unassigned'} · room ${truncateMiddle(event.room_id)}
+          </div>
+          <div class="mt-1">
+            ${timeAgo(event.timestamp)}
+            ${event.duration_ms > 0
+              ? html`<span class="ml-2 font-mono">${(event.duration_ms / 1000).toFixed(1)}s</span>`
+              : null}
+          </div>
+        </div>
+        <span class=${`rounded-full px-2 py-1 text-[10px] uppercase tracking-[0.16em] ${badgeClass}`}>
+          ${event.outcome}
+        </span>
+      </div>
+      ${event.error
+        ? html`
+            <div class="mt-2 text-[10px] text-rose-100">
+              ${event.error_kind || 'error'} · ${shortText(event.error, 96)}
+            </div>
+          `
+        : null}
+    </div>
+  `
+}
+
 export function ConnectorStatusPanel() {
   useEffect(() => {
     refresh()
@@ -270,6 +394,34 @@ export function ConnectorStatusPanel() {
         <div class="rounded-md border border-[var(--white-8)] bg-[var(--white-4)] px-3 py-2">
           active connectors
           <span class="ml-2 font-mono text-[var(--text-body)]">${d.channels.length}</span>
+        </div>
+      </div>
+
+      <div class="mb-4 grid grid-cols-2 gap-3 max-[900px]:grid-cols-1">
+        <div>
+          <div class="mb-2 text-[10px] uppercase tracking-[0.16em] text-[var(--text-dim)]">
+            Channel bindings
+          </div>
+          ${d.bindings.length === 0
+            ? html`<div class="rounded-md border border-dashed border-[var(--white-8)] px-3 py-4 text-xs text-[var(--text-dim)]">No observed room bindings yet</div>`
+            : html`
+                <div class="space-y-2">
+                  ${d.bindings.slice(0, 6).map(binding => html`<${BindingRow} binding=${binding} />`)}
+                </div>
+              `}
+        </div>
+
+        <div>
+          <div class="mb-2 text-[10px] uppercase tracking-[0.16em] text-[var(--text-dim)]">
+            Recent gate events
+          </div>
+          ${d.recent_events.length === 0
+            ? html`<div class="rounded-md border border-dashed border-[var(--white-8)] px-3 py-4 text-xs text-[var(--text-dim)]">No connector events recorded yet</div>`
+            : html`
+                <div class="space-y-2">
+                  ${d.recent_events.slice(0, 8).map(event => html`<${EventRow} event=${event} />`)}
+                </div>
+              `}
         </div>
       </div>
 

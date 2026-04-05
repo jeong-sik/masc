@@ -54,7 +54,7 @@
       "청소부",
       "janitor"
     ],
-    "tool_tier": "standard",
+    "tool_preset": "messaging",
     "presence_keepalive": true,
     "proactive_enabled": true,
     "execution_scope": "workspace"

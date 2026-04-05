@@ -29,9 +29,9 @@ let on_keeper_tool_call
   ref (fun ~tool_name:_ ~success:_ ~duration_ms:_ -> ())
 ;;
 
-(** Callback for keeper_tool_search.  Set in [keeper_agent_run.ml] after
-    building the BM25 tool index.  Default: returns an error indicating
-    the search index has not been initialized yet. *)
+(** Callback for keeper_tool_search.  Process-global fallback; prefer
+    passing [~search_fn] directly to [execute_keeper_tool_call] for
+    session-scoped, race-free search.  Default: returns empty results. *)
 let tool_search_fn
   : (query:string -> max_results:int -> Yojson.Safe.t) ref
   =

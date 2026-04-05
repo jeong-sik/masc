@@ -72,8 +72,8 @@ val on_keeper_tool_call :
   (tool_name:string -> success:bool -> duration_ms:int -> unit) ref
 
 (** Callback for keeper_tool_search BM25 search.
-    Process-global fallback; prefer passing [~tool_search_fn] directly to
-    [execute_keeper_tool_call] for session-scoped search. *)
+    Process-global fallback; prefer passing [~search_fn] to
+    [execute_keeper_tool_call] for session-scoped, race-free search. *)
 val tool_search_fn :
   (query:string -> max_results:int -> Yojson.Safe.t) ref
 

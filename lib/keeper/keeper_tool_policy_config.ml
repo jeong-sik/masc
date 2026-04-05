@@ -204,18 +204,15 @@ let resolve_preset
       let group_tools =
         def.groups
         |> List.concat_map (fun group_name ->
-          match Hashtbl.find_opt config.groups group_name with
-          | Some source -> resolve_group_source source |> List.filter filter_masc_tool
-          (* None is unreachable: load validates all group references *)
-          | None -> [])
+          (* Hashtbl.find is safe: load validates all group references *)
+          resolve_group_source (Hashtbl.find config.groups group_name)
+          |> List.filter filter_masc_tool)
       in
       let masc_from_groups =
         def.masc_groups
         |> List.concat_map (fun mg_name ->
-          match Hashtbl.find_opt config.masc_groups mg_name with
-          | Some tools -> List.filter masc_filter tools
-          (* None is unreachable: load validates all masc_group references *)
-          | None -> [])
+          (* Hashtbl.find is safe: load validates all masc_group references *)
+          List.filter masc_filter (Hashtbl.find config.masc_groups mg_name))
       in
       let masc_individual =
         def.masc_tools |> List.filter masc_filter

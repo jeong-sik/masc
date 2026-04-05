@@ -405,18 +405,14 @@ let build_local_shell_tools ~room_config ~worker_name ~execution_scope ~workdir 
   | Error e, _ | _, Error e -> Error e
 
 (** Convert a model label to an OAS Provider.config.
-    Uses OAS Provider.config_of_provider_config directly.
-    Falls back to glm for unrecognized labels. *)
+    Uses OAS Provider.config_of_provider_config directly. *)
 let oas_provider_of_label (label : string) : Oas.Provider.config =
   match Llm_provider.Cascade_config.parse_model_string label with
   | Some pc -> Oas.Provider.config_of_provider_config pc
   | None ->
-    Oas.Provider.config_of_provider_config
-      (Llm_provider.Provider_config.make
-         ~kind:Llm_provider.Provider_config.Glm
-         ~model_id:label
-         ~base_url:(Env_config_runtime.Glm.server_url ^ "/api/coding/paas/v4")
-         ~request_path:"/chat/completions" ())
+    let msg = Printf.sprintf "Cannot parse model label: %s (expected provider:model)" label in
+    Log.Misc.error "%s" msg;
+    invalid_arg msg
 
 (** Resolve provider from a model label string.
     Returns the provider config and model_id on success. *)

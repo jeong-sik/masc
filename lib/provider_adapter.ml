@@ -22,6 +22,8 @@ type adapter = {
   aliases : string list;
   spawn_key : string option;       (** Key into Spawn.default_configs. None = not spawnable via CLI. *)
   default_voice : string option;   (** Default TTS voice name. None = no voice assignment. *)
+  endpoint_url : string option;    (** Base URL for the provider API. *)
+  default_model_id : string option; (** Default model ID for the provider. *)
 }
 
 type voice_adapter = {
@@ -104,6 +106,8 @@ let direct_adapters =
       aliases = [ cn_llama; "llama.cpp"; "llamacpp" ];
       spawn_key = Some "llama";
       default_voice = Some "Laura";
+      endpoint_url = Some Env_config_runtime.Llama.server_url;
+      default_model_id = Some Env_config_runtime.Llama.default_model;
     };
     {
       canonical_name = cn_claude;
@@ -112,6 +116,8 @@ let direct_adapters =
       aliases = [ cn_claude; "claude"; "anthropic"; "claude-code"; "claude-api" ];
       spawn_key = Some "claude";
       default_voice = Some "Sarah";
+      endpoint_url = Some "https://api.anthropic.com";
+      default_model_id = None;
     };
     {
       canonical_name = cn_codex;
@@ -120,6 +126,8 @@ let direct_adapters =
       aliases = [ cn_codex; "codex"; "openai"; "codex-cli"; "codex-api" ];
       spawn_key = Some "codex";
       default_voice = Some "George";
+      endpoint_url = Some "https://api.openai.com";
+      default_model_id = None;
     };
     {
       canonical_name = cn_gemini;
@@ -133,6 +141,8 @@ let direct_adapters =
       aliases = [ cn_gemini; "gemini"; "google"; "gemini-cli"; "gemini-api" ];
       spawn_key = Some "gemini";
       default_voice = Some "Roger";
+      endpoint_url = None; (** Resolved dynamically for Gemini *)
+      default_model_id = None;
     };
     {
       canonical_name = cn_glm;
@@ -141,6 +151,8 @@ let direct_adapters =
       aliases = [ cn_glm; "glm_cloud"; "zai" ];
       spawn_key = None;
       default_voice = None;
+      endpoint_url = Some Env_config_runtime.Glm.server_url;
+      default_model_id = Some "auto";
     };
     {
       canonical_name = cn_openrouter;
@@ -149,6 +161,8 @@ let direct_adapters =
       aliases = [ cn_openrouter ];
       spawn_key = None;
       default_voice = None;
+      endpoint_url = Some "https://openrouter.ai/api/v1";
+      default_model_id = None;
     };
   ]
 

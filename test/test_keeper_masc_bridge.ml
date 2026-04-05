@@ -563,6 +563,9 @@ let test_denied_excluded_from_allowed_names () =
     (List.mem "masc_status" names)
 
 let () =
+  let base_path = Masc_test_deps.find_project_root () in
+  KET.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas;
+  KET.init_policy_config ~base_path;
   Alcotest.run "Keeper masc bridge"
     [
       ( "injection",

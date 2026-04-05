@@ -161,9 +161,37 @@ let heartbeat_mutex = Eio.Mutex.create ()
 
 let heartbeat_snapshot_seq = ref 0
 
+(** Maximum agent entries in heartbeat snapshot maps.
+    Beyond this, oldest entries (by timestamp) are evicted on write. *)
+let max_heartbeat_agents = 128
+
 let next_heartbeat_snapshot_seq () =
   heartbeat_snapshot_seq := !heartbeat_snapshot_seq + 1;
   !heartbeat_snapshot_seq
+
+(** Evict oldest entries from a heartbeat SMap when it exceeds [max_heartbeat_agents].
+    [get_ts] extracts the ISO8601 timestamp string from a snapshot value.
+    Keeps the [max_heartbeat_agents] most recent entries. *)
+let evict_heartbeat_map ~get_ts (m : 'a SMap.t) : 'a SMap.t =
+  if SMap.cardinal m <= max_heartbeat_agents then m
+  else begin
+    let entries = SMap.bindings m in
+    let sorted = List.sort (fun (_, a) (_, b) ->
+      String.compare (get_ts b) (get_ts a)
+    ) entries in
+    let kept = List.filteri (fun i _ -> i < max_heartbeat_agents) sorted in
+    List.fold_left (fun acc (k, v) -> SMap.add k v acc) SMap.empty kept
+  end
+
+(** Clear all transient in-memory state (heartbeat snapshots + event buffers).
+    Call on shutdown or between flow runs to prevent memory accumulation. *)
+let clear_transient_state () =
+  Eio.Mutex.use_rw ~protect:true heartbeat_mutex (fun () ->
+    latest_heartbeat_tasks := SMap.empty;
+    latest_heartbeat_results := SMap.empty;
+    heartbeat_snapshot_seq := 0);
+  Eio.Mutex.use_rw ~protect:true event_buffers_mutex (fun () ->
+    event_buffers := SMap.empty)
 
 let latest_heartbeat_task agent =
   Eio_guard.with_mutex heartbeat_mutex (fun () ->
@@ -612,7 +640,7 @@ let emit_heartbeat_task
     ?(auth_token : string option)
     () : unit =
   Eio.Mutex.use_rw ~protect:true heartbeat_mutex (fun () ->
-    latest_heartbeat_tasks := SMap.add agent
+    let m = SMap.add agent
       {
         seq = next_heartbeat_snapshot_seq ();
         goal;
@@ -621,7 +649,9 @@ let emit_heartbeat_task
         allowed_tools;
         decision_reason;
         created_at = now_iso8601 ();
-      } !latest_heartbeat_tasks);
+      } !latest_heartbeat_tasks in
+    latest_heartbeat_tasks :=
+      evict_heartbeat_map ~get_ts:(fun s -> s.created_at) m);
   let data = `Assoc ([
     ("agent", `String agent);
     ("goal", `String goal);
@@ -707,7 +737,7 @@ let submit_heartbeat_result
   (match result with
    | Ok _ ->
        Eio.Mutex.use_rw ~protect:true heartbeat_mutex (fun () ->
-         latest_heartbeat_results := SMap.add agent
+         let m = SMap.add agent
            {
              seq = next_heartbeat_snapshot_seq ();
              status = normalized_status;
@@ -719,7 +749,9 @@ let submit_heartbeat_result
              decision_confidence;
              failure_reason;
              updated_at = now_iso8601 ();
-           } !latest_heartbeat_results);
+           } !latest_heartbeat_results in
+         latest_heartbeat_results :=
+           evict_heartbeat_map ~get_ts:(fun s -> s.updated_at) m);
        notify_event ~event_type:Completion ~agent
          ~data:(`Assoc [
            ("worker", `String worker_name);

@@ -49,6 +49,25 @@ let entry_json (entry : surface_entry) =
 let all_entries =
   [
     {
+      id = "overview";
+      label = "오버뷰";
+      exposure_status = "main";
+      hidden_from_nav = false;
+      meets_main_gate = true;
+      rationale =
+        "오버뷰는 shell/mission/namespace truth를 묶는 front-door 브리핑 surface라 메인에서 유지합니다.";
+      route_hash = Some "#overview";
+      refs =
+        {
+          fixture_harness = Some "./scripts/harness_dashboard_mission_smoke.sh";
+          live_spotcheck = Some "/api/v1/dashboard/shell";
+          logs_ref = Some "/api/v1/dashboard/logs";
+          metrics_ref = Some "/metrics";
+          proof_ref = Some "/api/v1/dashboard/proof";
+          tool_name = Some "masc_operator_snapshot";
+        };
+    };
+    {
       id = "monitoring.sessions";
       label = "세션 & 네임스페이스";
       exposure_status = "main";
@@ -177,6 +196,82 @@ let all_entries =
         };
     };
     {
+      id = "workspace.board";
+      label = "작업 게시판";
+      exposure_status = "main";
+      hidden_from_nav = false;
+      meets_main_gate = true;
+      rationale =
+        "게시판은 에이전트 간 공유 사실을 확인하는 기본 협업 surface라 메인에서 유지합니다.";
+      route_hash = Some "#workspace?section=board";
+      refs =
+        {
+          fixture_harness = Some "./scripts/harness_dashboard_collaboration_evidence_smoke.sh";
+          live_spotcheck = Some "/api/v1/dashboard/board";
+          logs_ref = Some "/api/v1/dashboard/logs";
+          metrics_ref = Some "/metrics";
+          proof_ref = None;
+          tool_name = Some "masc_board_list";
+        };
+    };
+    {
+      id = "workspace.planning";
+      label = "계획 및 메트릭";
+      exposure_status = "main";
+      hidden_from_nav = false;
+      meets_main_gate = true;
+      rationale =
+        "계획/goal 진행 상태는 작업 운영의 기본 읽기 surface라 메인에서 유지합니다.";
+      route_hash = Some "#workspace?section=planning";
+      refs =
+        {
+          fixture_harness = None;
+          live_spotcheck = Some "/api/v1/dashboard/planning";
+          logs_ref = Some "/api/v1/dashboard/logs";
+          metrics_ref = Some "/metrics";
+          proof_ref = None;
+          tool_name = Some "masc_plan_get";
+        };
+    };
+    {
+      id = "workspace.goals";
+      label = "목표 트리";
+      exposure_status = "main";
+      hidden_from_nav = false;
+      meets_main_gate = true;
+      rationale =
+        "목표 트리는 planning read model 위에서 목표 계층을 읽는 메인 작업 surface로 유지합니다.";
+      route_hash = Some "#workspace?section=goals";
+      refs =
+        {
+          fixture_harness = None;
+          live_spotcheck = Some "/api/v1/dashboard/planning";
+          logs_ref = Some "/api/v1/dashboard/logs";
+          metrics_ref = Some "/metrics";
+          proof_ref = None;
+          tool_name = Some "masc_plan_get";
+        };
+    };
+    {
+      id = "workspace.worktrees";
+      label = "워크트리";
+      exposure_status = "main";
+      hidden_from_nav = false;
+      meets_main_gate = true;
+      rationale =
+        "현재 활성 worktree inventory는 충돌 회피와 작업 격리에 직접 연결되므로 메인 작업 surface로 유지합니다.";
+      route_hash = Some "#workspace?section=worktrees";
+      refs =
+        {
+          fixture_harness = None;
+          live_spotcheck = Some "masc_worktree_list";
+          logs_ref = Some "/api/v1/dashboard/logs";
+          metrics_ref = Some "/metrics";
+          proof_ref = None;
+          tool_name = Some "masc_worktree_list";
+        };
+    };
+    {
       id = "lab.tools";
       label = "도구 & 실험";
       exposure_status = "lab";
@@ -192,6 +287,101 @@ let all_entries =
           metrics_ref = Some "/metrics";
           proof_ref = None;
           tool_name = Some "masc_surface_audit";
+        };
+    };
+    {
+      id = "lab.autoresearch";
+      label = "오토리서치";
+      exposure_status = "lab";
+      hidden_from_nav = false;
+      meets_main_gate = false;
+      rationale =
+        "오토리서치는 유용하지만 research loop 성격이 강해 Lab에서 유지하며 readiness만 명시합니다.";
+      route_hash = Some "#lab?section=autoresearch";
+      refs =
+        {
+          fixture_harness = None;
+          live_spotcheck = Some "/api/v1/autoresearch/loops";
+          logs_ref = Some "/api/v1/dashboard/logs";
+          metrics_ref = Some "/metrics";
+          proof_ref = None;
+          tool_name = Some "masc_autoresearch_status";
+        };
+    };
+    {
+      id = "lab.harness";
+      label = "세이프티 하네스";
+      exposure_status = "lab";
+      hidden_from_nav = false;
+      meets_main_gate = false;
+      rationale =
+        "하네스는 evaluator/compaction/handoff rail의 건강도를 읽는 실험·진단 surface로 Lab에서 유지합니다.";
+      route_hash = Some "#lab?section=harness";
+      refs =
+        {
+          fixture_harness = None;
+          live_spotcheck = Some "/api/v1/dashboard/harness-health";
+          logs_ref = Some "/api/v1/dashboard/logs";
+          metrics_ref = Some "/metrics";
+          proof_ref = None;
+          tool_name = Some "masc_surface_audit";
+        };
+    };
+    {
+      id = "lab.features";
+      label = "피처 플래그";
+      exposure_status = "lab";
+      hidden_from_nav = false;
+      meets_main_gate = false;
+      rationale =
+        "피처 플래그 헬스는 supporting read surface지만 제품 문서상 아직 split 상태라 Lab에서 유지합니다.";
+      route_hash = Some "#lab?section=features";
+      refs =
+        {
+          fixture_harness = None;
+          live_spotcheck = Some "/api/v1/dashboard/feature-health";
+          logs_ref = Some "/api/v1/dashboard/logs";
+          metrics_ref = Some "/metrics";
+          proof_ref = None;
+          tool_name = Some "masc_surface_audit";
+        };
+    };
+    {
+      id = "lab.config";
+      label = "서버 설정";
+      exposure_status = "lab";
+      hidden_from_nav = false;
+      meets_main_gate = false;
+      rationale =
+        "config introspection은 working but split 상태라 readiness를 공개하되 Lab 진단 surface로 유지합니다.";
+      route_hash = Some "#lab?section=config";
+      refs =
+        {
+          fixture_harness = None;
+          live_spotcheck = Some "/api/v1/dashboard/config";
+          logs_ref = Some "/api/v1/dashboard/logs";
+          metrics_ref = Some "/metrics";
+          proof_ref = None;
+          tool_name = Some "masc_config";
+        };
+    };
+    {
+      id = "logs";
+      label = "로그";
+      exposure_status = "main";
+      hidden_from_nav = false;
+      meets_main_gate = true;
+      rationale =
+        "로그는 모든 surface의 운영 확인 기본선이라 메인 탐색에 남기고 readiness 기준도 함께 노출합니다.";
+      route_hash = Some "#logs";
+      refs =
+        {
+          fixture_harness = None;
+          live_spotcheck = Some "/api/v1/dashboard/logs";
+          logs_ref = Some "/api/v1/dashboard/logs";
+          metrics_ref = Some "/metrics";
+          proof_ref = None;
+          tool_name = None;
         };
     };
   ]

@@ -17,7 +17,7 @@ open Masc_mcp
 (** Build a keeper_meta via JSON round-trip, overriding key policy fields. *)
 let make_meta
     ?(policy_voice_enabled = false)
-    ?(soul_profile = "default")
+    
     ?(name = "test-keeper")
     ?(preset = Keeper_types.Full)
     ?(also_allow = [])
@@ -33,7 +33,7 @@ let make_meta
     ("agent_name", `String name);
     ("trace_id", `String "safety-test-trace");
     ("policy_voice_enabled", `Bool policy_voice_enabled);
-    ("soul_profile", `String soul_profile);
+    
     ("tool_access", Keeper_types.tool_access_to_json tool_access);
   ] in
   match Keeper_types.meta_of_json json with
@@ -186,7 +186,7 @@ let test_safe_empty () =
 
 let test_write_done_kills_all () =
   let meta = make_meta
-    ~policy_voice_enabled:true ~soul_profile:"research" () in
+    ~policy_voice_enabled:true  () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names ~write_done:true meta in
   check (list string) "write_done returns empty" [] tools
 
@@ -216,7 +216,7 @@ let test_voice_disabled () =
   check bool "keeper_voice_agent omitted" false (List.mem "keeper_voice_agent" tools)
 
 let test_all_keepers_have_research_tools () =
-  let meta = make_meta ~preset:Keeper_types.Research ~soul_profile:"default" () in
+  let meta = make_meta ~preset:Keeper_types.Research  () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   let has_any_research = List.exists (fun t ->
     String.length t > 5 &&

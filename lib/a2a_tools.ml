@@ -637,7 +637,6 @@ let emit_heartbeat_task
     ?(session_id : string option)
     ?(decision_reason : string option)
     ?(decision_confidence : float option)
-    ?(auth_token : string option)
     () : unit =
   Eio.Mutex.use_rw ~protect:true heartbeat_mutex (fun () ->
     let m = SMap.add agent
@@ -673,9 +672,7 @@ let emit_heartbeat_task
   @ (match decision_confidence with
     | Some confidence -> [("decision_confidence", `Float confidence)]
     | None -> [])
-  @ (match auth_token with
-    | Some token -> [("auth_token", `String token)]
-    | None -> []))
+  )
   in
   notify_event ~event_type:HeartbeatTask ~agent ~data;
   Log.info ~ctx:"heartbeat"

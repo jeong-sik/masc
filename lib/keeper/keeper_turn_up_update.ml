@@ -122,12 +122,6 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
     short_goal;
     mid_goal;
     long_goal;
-    soul_profile =
-      Option.value
-        ~default:
-          (if String.trim old.soul_profile <> "" then old.soul_profile
-           else Option.value ~default:default_soul_profile p.profile_defaults.soul_profile)
-        p.soul_profile_opt;
     cascade_name =
       (if String.trim old.cascade_name <> "" then old.cascade_name
        else "keeper_unified");

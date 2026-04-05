@@ -491,7 +491,26 @@ let sync_keeper_presence
         (* RFC-0002: dispatch heartbeat success *)
         ignore (Keeper_registry.dispatch_event
           ~base_path:ctx.config.base_path meta_current.name
-          Keeper_state_machine.Heartbeat_ok));
+          Keeper_state_machine.Heartbeat_ok);
+        (* Failing recovery: heartbeat success proves infrastructure is healthy.
+           Reset stale turn failures so the keeper can exit Failing phase.
+           Without this, a single turn failure traps the keeper in Failing forever
+           because no new turn runs → Turn_succeeded never dispatches → turn_healthy
+           stays false. If the underlying issue persists, the next turn will re-fail. *)
+        let stale_turn_failures =
+          Keeper_registry.get_turn_failures
+            ~base_path:ctx.config.base_path meta_current.name
+        in
+        if stale_turn_failures > 0 then begin
+          Keeper_registry.reset_turn_failures
+            ~base_path:ctx.config.base_path meta_current.name;
+          ignore (Keeper_registry.dispatch_event
+            ~base_path:ctx.config.base_path meta_current.name
+            Keeper_state_machine.Turn_succeeded);
+          Log.Keeper.info
+            "heartbeat recovery: reset %d stale turn failures for %s"
+            stale_turn_failures meta_current.name
+        end);
       match write_meta ctx.config synced with
       | Ok () -> synced
       | Error e ->

@@ -32,7 +32,6 @@ let validate_name name =
   let re = Re.Pcre.re "^[A-Za-z0-9._-]+$" |> Re.compile in
   name <> "" && Re.execp re name
 
-let default_soul_profile = "balanced"
 let default_execution_scope = "workspace"
 let default_proactive_enabled = true
 let default_proactive_idle_sec = 900
@@ -48,15 +47,6 @@ let default_drift_max_chars = 320
 let keeper_room_signal_prompt_enabled_override () =
   bool_of_env_opt "MASC_KEEPER_ROOM_SIGNAL_PROMPT_ENABLED"
 
-let canonical_soul_profile raw =
-  match String.lowercase_ascii (String.trim raw) with
-  | "balanced" | "default" -> Some "balanced"
-  | "safety" -> Some "safety"
-  | "delivery" | "executor" | "execution" -> Some "delivery"
-  | "research" | "analyst" -> Some "research"
-  | "relationship" | "companion" | "musician" -> Some "relationship"
-  | "minimal" | "lean" -> Some "minimal"
-  | _ -> None
 
 let removed_keeper_input_key_names =
   [
@@ -73,6 +63,7 @@ let removed_keeper_input_key_names =
     "initiative_cooldown_sec";
     "policy_mode";
     "policy_shell_mode";
+    
   ]
 
 let removed_keeper_msg_input_key_names =
@@ -82,7 +73,7 @@ let removed_keeper_msg_input_key_names =
     "mid_goal";
     "long_goal";
     "instructions";
-    "soul_profile";
+    
     "will";
     "needs";
     "desires";
@@ -92,7 +83,7 @@ let removed_keeper_msg_input_key_names =
     "new_mid_goal";
     "new_long_goal";
     "new_instructions";
-    "new_soul_profile";
+    
     "new_will";
     "new_needs";
     "new_desires";
@@ -129,18 +120,6 @@ let reject_removed_keeper_msg_input_keys ~tool_name (args : Yojson.Safe.t) =
            "removed keeper message args for %s: %s. Use masc_keeper_up for keeper creation or persisted updates."
            tool_name
            (String.concat ", " fields))
-
-let parse_soul_profile_opt args key : (string option, string) result =
-  match get_string_opt args key with
-  | None -> Ok None
-  | Some raw ->
-      (match canonical_soul_profile raw with
-       | Some p -> Ok (Some p)
-       | None ->
-           Error
-             (Printf.sprintf
-                "invalid soul_profile '%s' (allowed: balanced, safety, delivery, research, relationship, musician, minimal)"
-                raw))
 
 let utf8_safe_prefix_bytes (s : string) ~(max_bytes : int) : string =
   if max_bytes <= 0 then ""

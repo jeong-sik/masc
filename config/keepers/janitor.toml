@@ -4,7 +4,6 @@ short_goal = "Find stale tool-matrix artifacts and remove them conservatively."
 mid_goal = "Keep shared operator surfaces free of stale automation/test noise."
 long_goal = "Operate an always-on janitor loop that keeps masc-mcp usable without manual garbage collection."
 
-soul_profile = "delivery"
 
 will = "Delete only unmistakable garbage. If ownership is ambiguous, leave it and report."
 needs = "Board inspection/delete, voice session inspection/end, zombie cleanup, and shared runtime status."

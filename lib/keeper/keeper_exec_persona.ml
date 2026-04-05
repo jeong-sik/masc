@@ -35,7 +35,7 @@ let find_jsonl_row_by_action_id rows action_id =
 
 let resolved_keeper_args_to_json
     ~name ~persona_name ~goal ~short_goal ~mid_goal ~long_goal
-    ~instructions ~soul_profile ~will ~needs ~desires ~policy_voice_enabled
+    ~instructions ~will ~needs ~desires ~policy_voice_enabled
     ~room_scope ~scope_kind ~mention_targets
     ~tool_preset ~tool_also_allow ~tool_denylist
     ~proactive_enabled ~shards
@@ -49,7 +49,6 @@ let resolved_keeper_args_to_json
       ("mid_goal", `String mid_goal);
       ("long_goal", `String long_goal);
       ("instructions", `String instructions);
-      ("soul_profile", `String soul_profile);
       ("will", `String will);
       ("needs", `String needs);
       ("desires", `String desires);
@@ -90,74 +89,65 @@ let validate_resolved_keeper_create_json (json : Yojson.Safe.t) : string list =
 let resolved_keeper_args_from_persona args :
     ((persona_summary * Yojson.Safe.t), string) result =
   let persona_name = get_string args "persona_name" "" |> String.trim in
-  let soul_profile_opt_res = parse_soul_profile_opt args "soul_profile" in
-  match soul_profile_opt_res with
-  | Error err -> Error err
-  | Ok soul_profile_opt ->
-      if not (validate_name persona_name) then
-        Error "persona_name is required"
-      else
-        match reject_legacy_model_args ~tool_name:"masc_keeper_create_from_persona" args with
-        | Error err -> Error err
-        | Ok () ->
-        match reject_removed_keeper_input_keys
-                ~tool_name:"masc_keeper_create_from_persona" args with
-        | Error err -> Error err
-        | Ok () ->
-        match load_persona_summary persona_name with
-        | None ->
-            Error
-              (Printf.sprintf
-                 "persona not found or missing profile.json: %s"
-                 persona_name)
-        | Some persona ->
-            let defaults = load_keeper_profile_defaults persona_name in
-            let name =
-              get_string_opt args "name" |> Option.value ~default:persona_name
-            in
-            let goal =
-              get_string_opt args "goal"
-              |> first_some defaults.goal
-              |> Option.value ~default:""
-              |> normalize_goal_horizon_text
-            in
-            let short_goal =
-              parse_goal_horizon_opt args "short_goal"
-              |> first_some defaults.short_goal
-              |> Option.value ~default:goal
-              |> normalize_goal_horizon_text
-            in
-            let mid_goal =
-              parse_goal_horizon_opt args "mid_goal"
-              |> first_some defaults.mid_goal
-              |> Option.value ~default:goal
-              |> normalize_goal_horizon_text
-            in
-            let long_goal =
-              parse_goal_horizon_opt args "long_goal"
-              |> first_some defaults.long_goal
-              |> Option.value ~default:goal
-              |> normalize_goal_horizon_text
-            in
-            let instructions =
-              get_string_opt args "instructions"
-              |> first_some defaults.instructions
-              |> Option.value ~default:""
-            in
-            let soul_profile =
-              soul_profile_opt
-              |> first_some defaults.soul_profile
-              |> Option.value ~default:default_soul_profile
-            in
-            let will =
-              parse_self_model_opt args "will"
-              |> first_some defaults.will
-              |> Option.value ~default:default_keeper_will
-            in
-            let needs =
-              parse_self_model_opt args "needs"
-              |> first_some defaults.needs
-              |> Option.value ~default:default_keeper_needs
+  if not (validate_name persona_name) then
+    Error "persona_name is required"
+  else
+    match reject_legacy_model_args ~tool_name:"masc_keeper_create_from_persona" args with
+    | Error err -> Error err
+    | Ok () ->
+    match reject_removed_keeper_input_keys
+            ~tool_name:"masc_keeper_create_from_persona" args with
+    | Error err -> Error err
+    | Ok () ->
+    match load_persona_summary persona_name with
+    | None ->
+        Error
+          (Printf.sprintf
+             "persona not found or missing profile.json: %s"
+             persona_name)
+    | Some persona ->
+        let defaults = load_keeper_profile_defaults persona_name in
+        let name =
+          get_string_opt args "name" |> Option.value ~default:persona_name
+        in
+        let goal =
+          get_string_opt args "goal"
+          |> first_some defaults.goal
+          |> Option.value ~default:""
+          |> normalize_goal_horizon_text
+        in
+        let short_goal =
+          parse_goal_horizon_opt args "short_goal"
+          |> first_some defaults.short_goal
+          |> Option.value ~default:goal
+          |> normalize_goal_horizon_text
+        in
+        let mid_goal =
+          parse_goal_horizon_opt args "mid_goal"
+          |> first_some defaults.mid_goal
+          |> Option.value ~default:goal
+          |> normalize_goal_horizon_text
+        in
+        let long_goal =
+          parse_goal_horizon_opt args "long_goal"
+          |> first_some defaults.long_goal
+          |> Option.value ~default:goal
+          |> normalize_goal_horizon_text
+        in
+        let instructions =
+          get_string_opt args "instructions"
+          |> first_some defaults.instructions
+          |> Option.value ~default:""
+        in
+        let will =
+          parse_self_model_opt args "will"
+          |> first_some defaults.will
+          |> Option.value ~default:default_keeper_will
+        in
+        let needs =
+          parse_self_model_opt args "needs"
+          |> first_some defaults.needs
+          |> Option.value ~default:default_keeper_needs
             in
             let desires =
               parse_self_model_opt args "desires"
@@ -237,7 +227,7 @@ let resolved_keeper_args_from_persona args :
                          ~name
                          ~persona_name
                          ~goal ~short_goal ~mid_goal ~long_goal
-                         ~instructions ~soul_profile ~will ~needs ~desires
+                         ~instructions  ~will ~needs ~desires
                          ~policy_voice_enabled
                          ~room_scope ~scope_kind ~mention_targets
                          ~tool_preset ~tool_also_allow ~tool_denylist
@@ -281,7 +271,7 @@ let resolved_keeper_args_from_persona args :
                      ~name
                      ~persona_name
                      ~goal ~short_goal ~mid_goal ~long_goal
-                     ~instructions ~soul_profile ~will ~needs ~desires
+                     ~instructions  ~will ~needs ~desires
                      ~policy_voice_enabled
                      ~room_scope ~scope_kind ~mention_targets
                      ~tool_preset ~tool_also_allow ~tool_denylist

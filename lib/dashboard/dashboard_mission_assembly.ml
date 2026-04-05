@@ -8,11 +8,22 @@ let lane_pressure_ctx_ratio = 0.80
 
 include Dashboard_mission_agents
 
-let keeper_tool_audit_json_fields config keeper agent_name =
-  (* Compatibility-only derived allowlist. Keeper detail SSOT must source
-     authored/effective policy from /api/v1/keepers/:name/config instead. *)
+let keeper_tool_audit_json_fields config registry_lookup keeper agent_name =
+  let keeper_name =
+    match member_assoc "name" keeper with
+    | `String n when String.trim n <> "" -> String.trim n
+    | _ -> agent_name
+  in
   let fallback_allowed =
-    string_list_of_json (member_assoc "allowed_tool_names" keeper)
+    let raw_allowed = member_assoc "allowed_tool_names" keeper in
+    match raw_allowed with
+    | `Null ->
+        (* Realtime fallback: compute from registry meta when JSON field is absent/null *)
+        (match registry_lookup keeper_name with
+         | Some (entry : Keeper_registry.registry_entry) ->
+           Keeper_exec_tools.keeper_allowed_tool_names entry.meta
+         | None -> [])
+    | _ -> string_list_of_json raw_allowed
   in
   let fallback_latest =
     string_list_of_json (member_assoc "latest_tool_names" keeper)
@@ -40,10 +51,7 @@ let keeper_tool_audit_json_fields config keeper agent_name =
     in
     match
       Keeper_exec_status_metrics.latest_tool_audit_snapshot_from_files config
-        ~keeper_name:
-          (match trim_to_option (string_field "name" keeper) with
-           | Some name -> name
-           | None -> agent_name)
+        ~keeper_name
     with
     | Some snapshot ->
         Some
@@ -213,6 +221,10 @@ let action_matches_incident incident action =
       List.mem action_type (incident_action_types (string_field "kind" incident))
 
 let build_keeper_briefs config (keepers : Yojson.Safe.t list) =
+  let all_entries = Keeper_registry.all () in
+  let registry_lookup name =
+    List.find_opt (fun (e : Keeper_registry.registry_entry) -> String.equal e.name name) all_entries
+  in
   keepers
   |> List.filter_map (fun keeper ->
          let name = string_field "name" keeper in
@@ -257,7 +269,7 @@ let build_keeper_briefs config (keepers : Yojson.Safe.t list) =
                            | None -> trim_to_option (string_field "goal" keeper)) );
                       ("last_autonomous_action_at", member_assoc "last_autonomous_action_at" keeper);
                     ]
-                    @ keeper_tool_audit_json_fields config keeper
+                    @ keeper_tool_audit_json_fields config registry_lookup keeper
                         (match trim_to_option (string_field "agent_name" keeper) with
                          | Some agent_name -> agent_name
                          | None -> name));

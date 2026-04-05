@@ -83,15 +83,13 @@ let [@warning "-32"] cleanup_expired () =
     List.iter (fun key -> Hashtbl.remove table key) victims;
     List.length victims)
 
-(** Background revalidation switch — must be set via [set_sw] before
-    stale-while-revalidate can fork background fibers. *)
-let _bg_sw : Eio.Switch.t option ref = ref None
-
 (* clock_ref removed: Time_compat.sleep is the single sleep path
    since the Fiber.yield spin-loop fix (#4948). *)
 let set_clock _clk = ()
 
-let set_sw sw = _bg_sw := Some sw
+(* _bg_sw removed: uses Eio_context.get_switch_opt() directly.
+   set_sw retained as no-op for backward compat with server_runtime_bootstrap. *)
+let set_sw _sw = ()
 
 let now () = Time_compat.now ()
 
@@ -246,7 +244,7 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
       (* Background revalidation: fork on the main domain's switch if available.
          When called from Executor_pool (different domain), fork would raise
          "Switch accessed from wrong domain!" — fall back to inline compute. *)
-      (match !_bg_sw with
+      (match Eio_context.get_switch_opt () with
        | Some sw ->
            (try Eio.Fiber.fork ~sw (fun () ->
               try do_bg_compute ()

@@ -6,18 +6,18 @@
     @since 0.5.0
 *)
 
-(** Registered cancel function for orchestrator *)
-let cancel_orchestrator_ref : (unit -> unit) option ref = ref None
+(** Registered cancel function for orchestrator — WORM Atomic. *)
+let cancel_orchestrator_ref : (unit -> unit) option Atomic.t = Atomic.make None
 
 (** Register the orchestrator cancel function *)
 let register_cancel_orchestrator (f : unit -> unit) =
-  cancel_orchestrator_ref := Some f
+  Atomic.set cancel_orchestrator_ref (Some f)
 
 (** Call all registered shutdown hooks with per-hook timing. *)
 let run_all () =
   let t0 = Unix.gettimeofday () in
   (* Cancel orchestrator first *)
-  (match !cancel_orchestrator_ref with
+  (match Atomic.get cancel_orchestrator_ref with
    | Some cancel ->
      let t_start = Unix.gettimeofday () in
      Log.Server.info "Cancelling orchestrator...";

@@ -122,6 +122,8 @@ let handle_keeper_status ctx args : tool_result =
                   String.sub label 0 idx |> String.trim |> String.lowercase_ascii
                 | _ ->
                   let base = Provider_label_utils.provider_name_of_kind cfg.kind in
+                  (* Loopback OpenAI-compatible endpoints are our local llama
+                     runtimes, so surface that provider name in status output. *)
                   if base = "openai" && Url_utils.is_loopback_url cfg.base_url
                   then "llama" else base
              in

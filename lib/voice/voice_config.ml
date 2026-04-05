@@ -73,11 +73,14 @@ let base_path_voice_config_path_opt () =
   |> Option.map (fun root -> Filename.concat root ".masc/voice_config.json")
 
 let repo_voice_config_path_opt () =
-  let cwd = Sys.getcwd () in
   let root =
-    match Room_utils_backend_setup.find_git_root cwd with
-    | Some path -> path
-    | None -> cwd
+    match Env_config_core.base_path_opt () with
+    | Some bp -> bp
+    | None ->
+      let cwd = Sys.getcwd () in
+      (match Room_utils_backend_setup.find_git_root cwd with
+       | Some path -> path
+       | None -> cwd)
   in
   Some (Filename.concat root ".masc/voice_config.json")
 
@@ -86,7 +89,12 @@ let me_root_voice_config_path_opt () =
   |> Option.map (fun root -> Filename.concat root ".masc/voice_config.json")
 
 let cwd_voice_config_path () =
-  Filename.concat (Sys.getcwd ()) ".masc/voice_config.json"
+  let root =
+    match Env_config_core.base_path_opt () with
+    | Some bp -> bp
+    | None -> Sys.getcwd ()
+  in
+  Filename.concat root ".masc/voice_config.json"
 
 let config_path_candidates () =
   [

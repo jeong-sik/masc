@@ -306,13 +306,7 @@ let current_worktree_results_dir (config : Room.config) =
 let display_benchmark_path (config : Room.config) path =
   match path_relative_to ~root:config.base_path path with
   | Some relative -> relative
-  | None ->
-      let cwd = Sys.getcwd () in
-      if path_descends_from ~root:config.base_path cwd then
-        (match path_relative_to ~root:cwd path with
-         | Some relative -> relative
-         | None -> Filename.basename path)
-      else Filename.basename path
+  | None -> Filename.basename path
 
 let benchmark_results_dir_candidates (config : Room.config) =
   let env_dir =

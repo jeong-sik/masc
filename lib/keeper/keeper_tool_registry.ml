@@ -38,10 +38,11 @@ let core_always_tools =
     visible when [MASC_KEEPER_TOOL_DISCOVERY=true]; all other tools are
     discoverable via [keeper_tool_search]. *)
 let core_discovery_tools =
-  [ (* Session survival *)
-    "keeper_context_status"; "keeper_tool_search"; "extend_turns";
-    (* Liveness *)
-    "masc_status"; "masc_heartbeat";
+  (* Explicit superset of core_always_tools: all always-visible tools are
+     present here so discovery mode preserves their always-visible guarantee. *)
+  core_always_tools @
+  [ (* Search / discovery entry point *)
+    "keeper_tool_search";
     (* Coordination essentials *)
     "keeper_broadcast"; "keeper_tasks_list";
     "keeper_task_claim"; "keeper_task_done";

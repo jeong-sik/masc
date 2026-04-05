@@ -396,9 +396,26 @@ let run_turn
   let local_search_fn_ref : (query:string -> max_results:int -> Yojson.Safe.t) ref =
     ref (fun ~query:_ ~max_results:_ -> `Assoc [ ("results", `List []) ])
   in
+  (* Track current agent turn so Keeper_discovered_tools.add/mark_used
+     use the real turn rather than a constant 0.  Updated at the start of
+     each turn inside before_turn_params. *)
+  let current_turn_ref : int ref = ref 0 in
+  (* Per-session discovered tools: populated by keeper_tool_search,
+     consumed by before_turn_hook in discovery mode.
+     Defined here (before make_tools) so on_tool_called can capture it. *)
+  let decay_turns =
+    match Sys.getenv_opt "MASC_KEEPER_TOOL_DECAY_TURNS" with
+    | Some s -> (try max 1 (int_of_string s) with _ -> 5)
+    | None -> 5
+  in
+  let discovered_ref = ref (Keeper_discovered_tools.create ~decay_turns) in
   let keeper_tools =
     Keeper_tools_oas.make_tools ~config ~meta ~ctx_ref
       ~search_fn:(fun ~query ~max_results -> !local_search_fn_ref ~query ~max_results)
+      ~on_tool_called:(fun name ->
+        if Keeper_exec_tools.tool_discovery_enabled () then
+          Keeper_discovered_tools.mark_used !discovered_ref
+            ~turn:!current_turn_ref ~name)
       ()
   in
   let extend_turns_tool = Keeper_extend_turns.make ~agent_ref ~max_turns () in
@@ -545,14 +562,6 @@ let run_turn
     ) tool_entries
   in
   let tool_index = Agent_sdk.Tool_index.build ~config:tool_index_config scoped_tool_entries in
-  (* Per-session discovered tools: populated by keeper_tool_search,
-     consumed by before_turn_hook in discovery mode. *)
-  let decay_turns =
-    match Sys.getenv_opt "MASC_KEEPER_TOOL_DECAY_TURNS" with
-    | Some s -> (try max 1 (int_of_string s) with _ -> 5)
-    | None -> 5
-  in
-  let discovered_ref = ref (Keeper_discovered_tools.create ~decay_turns) in
   (* Full-universe search index for keeper_tool_search.
      Separate from the preset-scoped BM25 index used for progressive disclosure:
      search needs access to ALL tools so the keeper can discover beyond its preset. *)
@@ -571,9 +580,10 @@ let run_turn
   local_search_fn_ref := (fun ~query ~max_results ->
     let core = Keeper_exec_tools.core_always_tools in
     let retrieved = Agent_sdk.Tool_index.retrieve search_index query in
-    (* Pre-filter: exclude core tools and policy-denied tools.
-       Samchon principle: "if you can verify, you converge" — only return
-       tools the keeper can actually call, preventing hallucinated attempts. *)
+    (* Pre-filter: exclude core tools, the search tool itself, and
+       policy-denied tools.  Samchon principle: "if you can verify, you
+       converge" — only return tools the keeper can actually call,
+       preventing hallucinated attempts. *)
     let allowed = Keeper_exec_tools.keeper_allowed_tool_names meta in
     let allowed_set =
       let tbl = Hashtbl.create (List.length allowed) in
@@ -583,14 +593,14 @@ let run_turn
       retrieved
       |> List.filter (fun (name, _) ->
         not (List.mem name core)
+        && name <> "keeper_tool_search"
         && Hashtbl.mem allowed_set name)
       |> List.filteri (fun i _ -> i < max_results)
     in
-    (* Register discovered tools for discovery-mode before_turn_hook.
-       Turn 0 used as placeholder — decay is relative, so absolute turn
-       value only matters when discovery mode is active. *)
+    (* Register discovered tools for discovery-mode before_turn_hook
+       using the actual current turn so decay/visibility stay aligned. *)
     let discovered_names = List.map fst new_discoveries in
-    Keeper_discovered_tools.add !discovered_ref ~turn:0 ~names:discovered_names;
+    Keeper_discovered_tools.add !discovered_ref ~turn:!current_turn_ref ~names:discovered_names;
     (* Try MASC help_entry (from injected schemas), fall back to OAS description *)
     let masc_schemas = !Keeper_exec_tools.masc_schemas_ref in
     let results =
@@ -743,6 +753,9 @@ let run_turn
     before_turn_params = Some (fun event ->
       match event with
       | Agent_sdk.Hooks.BeforeTurnParams { turn; current_params; messages; _ } ->
+        (* Update current_turn_ref so session-scoped callbacks
+           (keeper_tool_search, on_tool_called) use the correct turn. *)
+        current_turn_ref := turn;
         (* 1. Dynamic context injection *)
         let ctx =
           if String.trim dynamic_context = "" then

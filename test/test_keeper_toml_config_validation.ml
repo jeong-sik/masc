@@ -8,10 +8,17 @@ module KTP = Masc_mcp.Keeper_types_profile
     the fix).  Runs as part of [dune test], so CI will fail before deploy. *)
 
 let test_all_keeper_tomls_parse () =
-  let config_dir = "config/keepers" in
+  let relative_config_dir = "config/keepers" in
+  let config_dir =
+    match Sys.getenv_opt "DUNE_SOURCEROOT" with
+    | Some repo_root -> Filename.concat repo_root relative_config_dir
+    | None -> relative_config_dir
+  in
   if not (Sys.file_exists config_dir && Sys.is_directory config_dir) then
-    (* Not running from project root -- skip gracefully. *)
-    ()
+    fail
+      (Printf.sprintf
+         "Could not locate %s (resolved to %s)"
+         relative_config_dir config_dir)
   else
     let files =
       Sys.readdir config_dir

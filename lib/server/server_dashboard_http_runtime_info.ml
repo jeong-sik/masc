@@ -287,13 +287,13 @@ let parse_benchmark_timestamp path =
          (String.length base - String.length prefix - String.length suffix))
 
 let current_worktree_results_dir (config : Room.config) =
-  let base = config.base_path in
+  let cwd = Sys.getcwd () in
   let worktrees_root = Filename.concat config.base_path ".worktrees" in
-  if String.equal base worktrees_root then
+  if String.equal cwd worktrees_root then
     None
-  else if path_descends_from ~root:worktrees_root base then
-    let rel = String.sub base (String.length worktrees_root + 1)
-        (String.length base - String.length worktrees_root - 1) in
+  else if path_descends_from ~root:worktrees_root cwd then
+    let rel = String.sub cwd (String.length worktrees_root + 1)
+        (String.length cwd - String.length worktrees_root - 1) in
     let worktree_name =
       match String.index_opt rel '/' with
       | Some i -> String.sub rel 0 i

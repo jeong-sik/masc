@@ -146,8 +146,10 @@ let overflow_retry_history_budget
     ~(user_message : string) : int =
   let prompt_tokens =
     let estimated =
-      Agent_sdk.Context_reducer.estimate_char_tokens system_prompt
-      + Agent_sdk.Context_reducer.estimate_char_tokens user_message
+      (* Route through Keeper_context_core facade — MASC must not call
+         Agent_sdk.Context_reducer directly for its own decisions. *)
+      Keeper_context_core.estimate_char_tokens system_prompt
+      + Keeper_context_core.estimate_char_tokens user_message
     in
     (* Use 20% safety buffer for prompt estimation errors (#5053).
        Ceiling-based to avoid truncation erasing the buffer. *)

@@ -114,14 +114,13 @@ let handle_keeper_status ctx args : tool_result =
            | None -> None
            | Some cfg ->
              let pricing = Llm_provider.Pricing.pricing_for_model cfg.model_id in
-             (* Extract provider name from label directly to avoid
-                OpenAI_compat conflating llama/openrouter *)
+             (* Extract provider name from cascade label prefix.
+                Keeper must not reference OAS provider_kind directly. *)
              let provider_name =
                match String.index_opt label ':' with
                | Some idx when idx > 0 ->
                  String.sub label 0 idx |> String.trim |> String.lowercase_ascii
-               | _ ->
-                 Llm_provider.Provider_config.string_of_provider_kind cfg.kind
+               | _ -> "unknown"
              in
              Some (`Assoc [
                ("provider", `String provider_name);

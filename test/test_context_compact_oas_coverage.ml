@@ -269,11 +269,11 @@ let test_dynamic_small_local_model () =
     ["PruneToolOutputs"; "MergeContiguous"] names
 
 let test_dynamic_local_at_64k_boundary () =
-  (* Local model at exactly 64K: NOT small — gets standard compaction *)
+  (* Local model at exactly the small_local_ctx_floor: NOT small — gets standard compaction *)
   let obs : Compact.observation_context = {
     context_ratio = 0.50; active_agent_count = 1;
     unclaimed_task_count = 0; is_single_focused_task = false;
-    context_window = 64_000; is_local_model = true } in
+    context_window = Compact.small_local_ctx_floor; is_local_model = true } in
   let resolved = Compact.resolve_strategies ~obs:(Some obs)
     [Compact.Dynamic Compact.default_dynamic_selector] in
   let names = strategy_names resolved in
@@ -281,11 +281,11 @@ let test_dynamic_local_at_64k_boundary () =
     ["DropLowImportance"] names
 
 let test_dynamic_local_below_64k () =
-  (* Local model at 63K: small — lightweight compaction *)
+  (* Local model at 63,999 (just below small_local_ctx_floor): small — lightweight compaction *)
   let obs : Compact.observation_context = {
     context_ratio = 0.50; active_agent_count = 1;
     unclaimed_task_count = 0; is_single_focused_task = false;
-    context_window = 63_999; is_local_model = true } in
+    context_window = Compact.small_local_ctx_floor - 1; is_local_model = true } in
   let resolved = Compact.resolve_strategies ~obs:(Some obs)
     [Compact.Dynamic Compact.default_dynamic_selector] in
   let names = strategy_names resolved in

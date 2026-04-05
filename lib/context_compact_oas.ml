@@ -404,6 +404,10 @@ let observation_summary = function
 let dynamic_multi_agent_ctx = 0.80
 let dynamic_focused_ctx = 0.70
 
+(** Context window floor (in tokens) below which a local model is classified
+    as "small-local", triggering lightweight compaction strategies. *)
+let small_local_ctx_floor = 64_000
+
 let default_dynamic_selector (obs : observation_context) : strategy list =
   if obs.context_ratio >= dynamic_multi_agent_ctx && obs.active_agent_count > 1 then
     (* Dense coordination: preserve recent turns, aggressive pruning *)
@@ -411,7 +415,7 @@ let default_dynamic_selector (obs : observation_context) : strategy list =
   else if obs.context_ratio >= dynamic_focused_ctx && obs.is_single_focused_task then
     (* Focused work near budget: summarize old context *)
     [PruneToolOutputs; SummarizeOld]
-  else if obs.is_local_model && obs.context_window < 64_000 then
+  else if obs.is_local_model && obs.context_window < small_local_ctx_floor then
     (* Small local models (< 64K): lightweight compaction only.
        Uses an approximate 64K floor here; llama-server default 8K is
        unsuitable for multi-turn keeper conversations. *)

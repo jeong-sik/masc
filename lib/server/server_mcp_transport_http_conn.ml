@@ -82,6 +82,11 @@ let is_active_sse_session session_id =
   Eio.Mutex.use_ro sse_registry_mutex (fun () ->
     Hashtbl.mem sse_conn_by_session session_id)
 
+(** Number of active SSE connections. *)
+let active_session_count () =
+  Eio.Mutex.use_ro sse_registry_mutex (fun () ->
+    Hashtbl.length sse_conn_by_session)
+
 let reap_stale_guards () =
   Eio.Mutex.use_rw ~protect:true sse_registry_mutex (fun () ->
     let stale =

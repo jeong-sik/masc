@@ -366,6 +366,31 @@ let run
         }
     | Error err ->
       let detail = Oas.Error.to_string err in
+      let detail =
+        if String.starts_with ~prefix:"Idle detected" detail then
+          let state = Oas.Agent.state agent in
+          let messages = state.messages in
+          let last_tool =
+            let rec find = function
+              | [] -> None
+              | (m : Oas.Types.message) :: rest ->
+                let later = find rest in
+                if Option.is_some later then later
+                else if m.role = Oas.Types.Assistant then
+                  List.find_map (function
+                    | Oas.Types.ToolUse { name; _ } -> Some name
+                    | _ -> None
+                  ) m.content
+                else None
+            in
+            find messages
+          in
+          match last_tool with
+          | Some name ->
+            Printf.sprintf "%s (tool: %s)" detail name
+          | None -> detail
+        else detail
+      in
       (match proof with
        | Some p ->
          Log.Misc.warn "oas_worker: agent errored with CDAL proof: run_id=%s status=%s error=%s"

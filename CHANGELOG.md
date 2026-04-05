@@ -1,6 +1,19 @@
 # Changelog
 
 
+## [2.242.0] - 2026-04-05
+
+### Fixed
+- **Concurrency** -- replace `option ref` with `Atomic.t` for OCaml 5 multi-domain safety in fs_compat, board_dispatch, tool_board, shutdown_hooks (#5286, #3158 Phase 1).
+- **Dead code** -- remove context_floor and effective_discovered_ctx from oas_model_resolve (#5279).
+
+### Changed
+- **State machine** -- dispatch Compaction_completed and Handoff_completed events to keeper state machine (#5279, #5270).
+- **Boundary** -- eliminate vendor/model knowledge in MASC core logic (#5246).
+- **Tool presets** -- load tool presets from config/tool_policy.toml (#5278).
+- **Surfaces** -- prune a2a, improve_loop, detachment from system_internal (#5276).
+- **Keeper config** -- handle escaped quotes in TOML array splitter (#5275).
+
 ## [2.241.0] - 2026-04-05
 
 ### Changed

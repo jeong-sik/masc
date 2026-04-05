@@ -118,6 +118,8 @@ let actionable_routes ~(allowed_tools : string list)
            (Printf.sprintf
               "- Live worktree delta: inspect changed files with %s if you need to understand whether action is required."
               (String.concat ", " tools)));
+  if !routes = [] then
+    add "- No actionable work. Emit your [STATE] block and end your turn.";
   List.rev !routes
 
 let autonomous_trigger_lines

@@ -1489,6 +1489,31 @@ let test_heartbeat_concurrent_start_stop () =
   (* List should be empty now *)
   Alcotest.(check int) "list empty after cleanup" 0 (List.length (Heartbeat.list ()))
 
+(* === Idle loop stop signal tests === *)
+
+let test_empty_backlog_stop_signal () =
+  with_test_env (fun config ->
+    let result = Room.list_tasks config in
+    Alcotest.(check bool) "contains ACTION stop signal"
+      true (str_contains result "ACTION: Do not re-check"))
+
+let test_no_active_tasks_stop_signal () =
+  with_test_env (fun config ->
+    let _ = Room.add_task config ~title:"Done Task" ~priority:1 ~description:"" in
+    let _ = Room.claim_task config ~agent_name:"alice" ~task_id:"task-001" in
+    let _ = Room.complete_task config ~agent_name:"alice" ~task_id:"task-001" ~notes:"done" in
+    let result = Room.list_tasks config in
+    Alcotest.(check bool) "contains ACTION stop signal"
+      true (str_contains result "ACTION: Do not re-check"))
+
+let test_no_unclaimed_tasks_stop_signal () =
+  with_test_env (fun config ->
+    let _ = Room.add_task config ~title:"Claimed" ~priority:1 ~description:"" in
+    let _ = Room.claim_task config ~agent_name:"alice" ~task_id:"task-001" in
+    let result = Room.claim_next config ~agent_name:"bob" in
+    Alcotest.(check bool) "contains ACTION stop signal"
+      true (str_contains result "ACTION: Stop task-checking"))
+
 let () =
   Eio_guard.enable ();
   Random.init 42;
@@ -1679,5 +1704,12 @@ let () =
       Alcotest.test_case "BUG-4: zombie transitions to inactive" `Quick test_zombie_cleanup_transitions_to_inactive;
       Alcotest.test_case "BUG-5: keeper detection by agent_type" `Quick test_keeper_detection_by_agent_type;
       Alcotest.test_case "BUG-6: heartbeat concurrent start/stop" `Quick test_heartbeat_concurrent_start_stop;
+    ];
+
+    (* === Idle loop stop signal tests === *)
+    "idle_stop_signals", [
+      Alcotest.test_case "empty backlog has stop signal" `Quick test_empty_backlog_stop_signal;
+      Alcotest.test_case "no active tasks has stop signal" `Quick test_no_active_tasks_stop_signal;
+      Alcotest.test_case "no unclaimed tasks has stop signal" `Quick test_no_unclaimed_tasks_stop_signal;
     ];
   ]

@@ -908,7 +908,7 @@ let run_turn
           ~memory
           ~tool_retry_policy:Oas.Tool_retry_policy.default_internal
           ~max_turns
-          ~max_idle_turns:5
+          ~max_idle_turns:3
           ~temperature
           ~max_tokens
           ?max_cost_usd

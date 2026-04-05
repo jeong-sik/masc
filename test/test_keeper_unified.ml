@@ -777,6 +777,14 @@ let test_prompt_actionable_routes_respect_tool_policy () =
   check bool "explains file inspection unavailable" true
     (contains_substring user "file-inspection tools are unavailable")
 
+let test_prompt_no_actionable_work_fallback () =
+  let obs = base_observation in
+  let _sys, user = UP.build_prompt ~meta:minimal_meta ~observation:obs in
+  check bool "has actionable routes section" true
+    (contains_substring user "Actionable Routes");
+  check bool "has no-actionable-work fallback" true
+    (contains_substring user "No actionable work")
+
 let test_prompt_omits_room_signal_when_flag_disabled () =
   let interpretation : Masc_mcp.Meta_cognition.interpretation =
     {
@@ -1887,6 +1895,8 @@ let () =
             test_prompt_includes_actionable_routes_for_operational_signals;
           test_case "actionable routes respect tool policy" `Quick
             test_prompt_actionable_routes_respect_tool_policy;
+          test_case "no actionable work fallback" `Quick
+            test_prompt_no_actionable_work_fallback;
           test_case "omits room signal when disabled" `Quick
             test_prompt_omits_room_signal_when_flag_disabled;
           test_case "includes room signal when enabled" `Quick

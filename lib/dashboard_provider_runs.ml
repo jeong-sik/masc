@@ -173,7 +173,7 @@ let llama_snapshot () =
     default_model = default_model_for_provider "llama";
     models;
     source = "masc/local-runtime";
-    endpoint_url = Some Env_config_runtime.Llama.server_url;
+    endpoint_url = (Provider_adapter.auth_detail_of_provider "llama").endpoint_url;
     note;
   }
 

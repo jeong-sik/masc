@@ -74,8 +74,9 @@ let string_of_voice_transport = function
 
 (** Map OAS Provider_config.provider_kind to MASC adapter canonical_name.
     Callers should prefer OAS canonical version where possible.
-    TODO: remove after oas#623 pin update. *)
-let string_of_provider_kind
+    Remove after oas#623 pin update. *)
+let[@deprecated "Use Llm_provider.Provider_config.string_of_provider_kind after oas#623 pin update"]
+  string_of_provider_kind
     : Llm_provider.Provider_config.provider_kind -> string
   = function
   | Anthropic -> "claude-api"

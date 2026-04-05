@@ -10,6 +10,7 @@
    env_config_keeper
    env_config_runtime
    env_config_snapshot
-   feature_flag_registry)
+   feature_flag_registry
+   masc_network_defaults)
  (wrapped false)
  (libraries masc_core masc_log yojson uri))

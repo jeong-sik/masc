@@ -21,6 +21,7 @@ type adapter = {
   auth_mode : auth_mode;
   aliases : string list;
   spawn_key : string option;       (** Key into Spawn.default_configs. None = not spawnable via CLI. *)
+  cascade_prefix : string;         (** OAS cascade model prefix (e.g. "claude", "openai"). Used in "prefix:model_id" labels. *)
   default_voice : string option;   (** Default TTS voice name. None = no voice assignment. *)
   endpoint_url : string option;    (** Base URL for the provider API. *)
   default_model_id : string option; (** Default model ID for the provider. *)
@@ -72,17 +73,6 @@ let string_of_voice_transport = function
   | Voice_elevenlabs_direct -> "elevenlabs_direct"
   | Voice_mcp -> "voice_mcp"
 
-(** Map OAS Provider_config.provider_kind to MASC adapter canonical_name.
-    TODO: remove after OAS exports string_of_provider_kind (oas#623 pin). *)
-let string_of_provider_kind
-    : Llm_provider.Provider_config.provider_kind -> string
-  = function
-  | Anthropic -> "claude-api"
-  | OpenAI_compat -> "codex-api"
-  | Gemini -> "gemini-api"
-  | Glm -> "glm"
-  | Claude_code -> "claude-code"
-
 let normalize_label label = String.trim label |> String.lowercase_ascii
 
 (* ── Canonical adapter names (single definition point) ──────── *)
@@ -93,6 +83,18 @@ let cn_codex = "codex-api"
 let cn_gemini = "gemini-api"
 let cn_glm = "glm"
 let cn_openrouter = "openrouter"
+
+(** Map OAS Provider_config.provider_kind to MASC adapter canonical_name.
+    Note: OpenAI_compat maps to codex-api (cloud); llama (local) uses the
+    same provider_kind but is identified by endpoint, not by this function. *)
+let string_of_provider_kind
+    : Llm_provider.Provider_config.provider_kind -> string
+  = function
+  | Anthropic -> cn_claude
+  | OpenAI_compat -> cn_codex
+  | Gemini -> cn_gemini
+  | Glm -> cn_glm
+  | Claude_code -> "claude-code"
 
 (** Single source of truth for all agent adapters.
     spawn_key maps to Spawn.default_configs keys.
@@ -106,6 +108,7 @@ let direct_adapters =
       auth_mode = No_auth;
       aliases = [ cn_llama; "llama.cpp"; "llamacpp" ];
       spawn_key = Some "llama";
+      cascade_prefix = "llama";
       default_voice = Some "Laura";
       endpoint_url = Some Env_config_runtime.Llama.server_url;
       default_model_id =
@@ -118,6 +121,7 @@ let direct_adapters =
       auth_mode = Api_key "ANTHROPIC_API_KEY";
       aliases = [ cn_claude; "claude"; "anthropic"; "claude-code"; "claude-api" ];
       spawn_key = Some "claude";
+      cascade_prefix = "claude";
       default_voice = Some "Sarah";
       endpoint_url = Some "https://api.anthropic.com";
       default_model_id = Some "auto";
@@ -128,6 +132,7 @@ let direct_adapters =
       auth_mode = Api_key "OPENAI_API_KEY";
       aliases = [ cn_codex; "codex"; "openai"; "codex-cli"; "codex-api" ];
       spawn_key = Some "codex";
+      cascade_prefix = "openai";
       default_voice = Some "George";
       endpoint_url = Some "https://api.openai.com";
       default_model_id = Some "auto";
@@ -143,6 +148,7 @@ let direct_adapters =
           };
       aliases = [ cn_gemini; "gemini"; "google"; "gemini-cli"; "gemini-api" ];
       spawn_key = Some "gemini";
+      cascade_prefix = "gemini";
       default_voice = Some "Roger";
       endpoint_url = None; (** Resolved dynamically for Gemini *)
       default_model_id = Some "auto";
@@ -153,6 +159,7 @@ let direct_adapters =
       auth_mode = Api_key "ZAI_API_KEY";
       aliases = [ cn_glm; "glm_cloud"; "zai" ];
       spawn_key = None;
+      cascade_prefix = "glm";
       default_voice = None;
       endpoint_url = Some Env_config_runtime.Glm.server_url;
       default_model_id = Some "auto";
@@ -163,6 +170,7 @@ let direct_adapters =
       auth_mode = Api_key "OPENROUTER_API_KEY";
       aliases = [ cn_openrouter ];
       spawn_key = None;
+      cascade_prefix = "openrouter";
       default_voice = None;
       endpoint_url = Some "https://openrouter.ai/api/v1";
       default_model_id = None;
@@ -851,14 +859,8 @@ type auth_detail = {
   note : string option;
 }
 
-(** Map adapter canonical_name to the cascade config prefix.
-    E.g. "claude-api" -> "claude", "codex-api" -> "openai". *)
-let cascade_prefix_of_adapter (adapter : adapter) =
-  match adapter.canonical_name with
-  | v when v = cn_claude -> "claude"
-  | v when v = cn_codex -> "openai"
-  | v when v = cn_gemini -> "gemini"
-  | _ -> adapter.canonical_name
+(** Cascade config prefix from adapter record. No match needed. *)
+let cascade_prefix_of_adapter (adapter : adapter) = adapter.cascade_prefix
 
 let endpoint_url_of_adapter (adapter : adapter) =
   match adapter.canonical_name with

@@ -39,6 +39,10 @@ export function statusLabel(value?: string | null): string {
     case 'offline':
     case 'inactive':
       return '오프라인'
+    case 'unbooted':
+      return '미기동'
+    case 'stopped':
+      return '중단됨'
     case 'idle':
       return '대기'
     case 'quiet':
@@ -68,8 +72,6 @@ export function statusLabel(value?: string | null): string {
       return '완료'
     case 'cancelled':
       return '취소됨'
-    case 'stopped':
-      return '문제'
     case 'retired':
       return '은퇴'
     case 'spawned':

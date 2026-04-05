@@ -4,7 +4,35 @@ import { relativeTime } from './format-time'
 export function keeperDisplayStatus(keeper: Keeper | null | undefined, fallbackStatus?: string | null): string {
   if (keeper?.paused) return 'paused'
   const status = keeper?.status ?? fallbackStatus
+  const normalized = (status ?? '').trim().toLowerCase()
+
+  // Refine generic offline/inactive into specific sub-states
+  if (normalized === 'offline' || normalized === 'inactive') {
+    return refineOfflineStatus(keeper)
+  }
+
   return status && status.trim() !== '' ? status : 'unknown'
+}
+
+/** Distinguish "never booted" from "was running but stopped" keepers. */
+function refineOfflineStatus(keeper: Keeper | null | undefined): string {
+  if (!keeper) return 'offline'
+
+  const generation = keeper.generation ?? 0
+  const turnCount = keeper.turn_count ?? 0
+  const agentExists = keeper.agent?.exists ?? false
+
+  // Never ran a single turn or generation — registered but never booted
+  if (generation === 0 && turnCount === 0 && !agentExists) {
+    return 'unbooted'
+  }
+
+  // Had activity before but now offline — stopped/crashed
+  if (generation > 0 || turnCount > 0) {
+    return 'stopped'
+  }
+
+  return 'offline'
 }
 
 export function keeperRecentHeartbeatLabel(keeper: Keeper | null | undefined): string {

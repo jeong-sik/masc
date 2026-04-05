@@ -4,6 +4,7 @@
 
 import { html } from 'htm/preact'
 import { isOfflineStatus } from '../lib/status-utils'
+import { keeperDisplayStatus } from '../lib/keeper-runtime-display'
 import { signal } from '@preact/signals'
 import { useRef } from 'preact/hooks'
 import { requestConfirm } from './common/confirm-dialog'
@@ -103,6 +104,10 @@ function statusColor(status: string): { bg: string; text: string; dot: string } 
     case 'offline':
     case 'inactive':
       return { bg: 'bg-[rgba(148,163,184,0.12)]', text: 'text-[#94a3b8]', dot: 'bg-[#64748b]' }
+    case 'unbooted':
+      return { bg: 'bg-[rgba(148,163,184,0.08)]', text: 'text-[#64748b]', dot: 'bg-[#475569]' }
+    case 'stopped':
+      return { bg: 'bg-[rgba(239,68,68,0.08)]', text: 'text-[#fb7185]', dot: 'bg-[#f43f5e]' }
     case 'error':
     case 'critical':
       return { bg: 'bg-[rgba(239,68,68,0.12)]', text: 'text-[var(--bad)]', dot: 'bg-[var(--bad)]' }
@@ -361,7 +366,7 @@ export function KeeperDetailOverlay() {
   const keeper = findKeeper(selected.name) ?? selected
   const closeButtonRef = useRef<HTMLButtonElement>(null)
   const titleId = `keeper-detail-title-${keeper.name}`
-  const effectiveStatus = keeper.paused ? 'paused' : keeper.status
+  const effectiveStatus = keeperDisplayStatus(keeper)
 
   return html`
     <${DialogOverlay}
@@ -396,8 +401,8 @@ export function KeeperDetailOverlay() {
           </div>
           <div class="flex items-center gap-2">
             ${(() => {
-              const isOffline = ['offline', 'inactive', 'dead', 'crashed'].includes(keeper.status)
-              const isRunning = ['active', 'running', 'idle', 'busy', 'listening', 'working'].includes(keeper.status)
+              const isOffline = ['offline', 'inactive', 'dead', 'crashed', 'unbooted', 'stopped'].includes(effectiveStatus)
+              const isRunning = ['active', 'running', 'idle', 'busy', 'listening', 'working'].includes(effectiveStatus)
               if (isOffline) return html`
                 <button type="button"
                   class="py-1 px-3 rounded-lg text-[11px] font-semibold cursor-pointer border border-[rgba(34,197,94,0.4)] bg-[rgba(34,197,94,0.08)] text-[var(--ok)] hover:bg-[rgba(34,197,94,0.15)] transition-colors"

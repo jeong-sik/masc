@@ -15,6 +15,8 @@ module Tool_shard = Masc_mcp.Tool_shard
 module Tool_catalog = Masc_mcp.Tool_catalog
 module Keeper_types = Masc_mcp.Keeper_types
 module Tool_code_write = Masc_mcp.Tool_code_write
+module Keeper_tool_registry = Masc_mcp.Keeper_tool_registry
+module Config = Masc_mcp.Config
 
 (* ============================================================
    Helper: create keeper_meta via meta_of_json (canonical pattern)
@@ -46,19 +48,11 @@ let has_keeper_prefix name =
   String.length name >= 7 && String.sub name 0 7 = "keeper_"
 
 (** Non-keeper_ tool names legitimately granted to keepers.
-    Derived from actual module exports — no prefix guessing. *)
-let known_non_keeper_tool_names : string list =
+    Derived from actual module exports — no prefix guessing.
+    Must be a function (not a let-binding) because injected_masc_tool_names
+    depends on inject_masc_schemas which runs after module init. *)
+let known_non_keeper_tool_names () : string list =
   List.concat [
-    [
-      "masc_status";
-      "masc_tasks";
-      "masc_claim_next";
-      "masc_plan_set_task";
-      "masc_transition";
-      "masc_add_task";
-      "masc_broadcast";
-      "masc_heartbeat";
-    ];
     Tool_shard.governance_tools
     |> List.map (fun (t : Types.tool_schema) -> t.name);
     Tool_shard.autoresearch_keeper_tools
@@ -66,11 +60,19 @@ let known_non_keeper_tool_names : string list =
     Tool_shard.coding_tools
     |> List.map (fun (t : Types.tool_schema) -> t.name);
     Tool_code_write.tool_names;
+    (* MASC tools injected via tool_policy.toml masc groups *)
+    Keeper_tool_registry.injected_masc_tool_names ();
   ]
   |> List.sort_uniq String.compare
 
 let known_shared_agent_keeper_tool_names : string list =
   [
+    "masc_worktree_create";
+    "masc_worktree_list";
+    "masc_code_write";
+    "masc_code_edit";
+    "masc_code_shell";
+    "masc_code_git";
     "masc_status";
     "masc_tasks";
     "masc_claim_next";
@@ -78,12 +80,6 @@ let known_shared_agent_keeper_tool_names : string list =
     "masc_add_task";
     "masc_broadcast";
     "masc_heartbeat";
-    "masc_worktree_create";
-    "masc_worktree_list";
-    "masc_code_write";
-    "masc_code_edit";
-    "masc_code_shell";
-    "masc_code_git";
   ]
 
 let test_known_shared_tools_exist_on_agent_surface () =
@@ -105,7 +101,7 @@ let test_heuristic_only_keeper_prefixed () =
   let names = Keeper_exec_tools.keeper_allowed_tool_names meta in
   let non_keeper = List.filter (fun n -> not (has_keeper_prefix n)) names in
   let unexpected =
-    List.filter (fun n -> not (List.mem n known_non_keeper_tool_names)) non_keeper
+    List.filter (fun n -> not (List.mem n (known_non_keeper_tool_names ()))) non_keeper
   in
   Alcotest.(check (list string))
     "heuristic keeper only has keeper_* or curated masc_* tools" [] unexpected
@@ -115,7 +111,7 @@ let test_learned_only_keeper_prefixed () =
   let names = Keeper_exec_tools.keeper_allowed_tool_names meta in
   let non_keeper = List.filter (fun n -> not (has_keeper_prefix n)) names in
   let unexpected =
-    List.filter (fun n -> not (List.mem n known_non_keeper_tool_names)) non_keeper
+    List.filter (fun n -> not (List.mem n (known_non_keeper_tool_names ()))) non_keeper
   in
   Alcotest.(check (list string))
     "learned keeper only has keeper_* or curated masc_* tools" [] unexpected
@@ -130,7 +126,7 @@ let test_research_extra_tools_are_research_only () =
   let names = Keeper_exec_tools.keeper_allowed_tool_names meta in
   let non_keeper = List.filter (fun n -> not (has_keeper_prefix n)) names in
   let unexpected = List.filter (fun n ->
-    not (List.mem n known_non_keeper_tool_names)) non_keeper in
+    not (List.mem n (known_non_keeper_tool_names ()))) non_keeper in
   Alcotest.(check (list string))
     "non-keeper tools come from known sources" [] unexpected
 
@@ -156,8 +152,8 @@ let test_no_overlap_heuristic_vs_agent () =
   let meta = make_meta () in
   let keeper_names = Keeper_exec_tools.keeper_allowed_tool_names meta in
   let agent_names = Agent_tool_surfaces.spawned_agent_public_tool_names in
-  (* Compatibility keepers still expose canonical masc_* coordination tools,
-     and mode removal added shared worktree/code tools. *)
+  (* Mode removal: all keepers now get the approved shared agent/keeper tools,
+     which include worktree and masc_code_* tools. *)
   let overlap =
     List.filter
       (fun n ->
@@ -213,7 +209,7 @@ let test_research_admin_overlap_documented () =
      This test documents the overlap rather than preventing it. *)
   List.iter (fun name ->
     Alcotest.(check bool) (name ^ " is a research tool") true
-      (List.mem name known_non_keeper_tool_names)
+      (List.mem name (known_non_keeper_tool_names ()))
   ) overlap
 
 (* ============================================================
@@ -230,7 +226,7 @@ let test_non_research_admin_tools_documented () =
      appear in keeper tool set come from known sources (coding, research shards). *)
   List.iter (fun name ->
     Alcotest.(check bool) (name ^ " is from known source") true
-      (List.mem name known_non_keeper_tool_names)
+      (List.mem name (known_non_keeper_tool_names ()))
   ) overlap
 
 (* ============================================================
@@ -294,6 +290,7 @@ let test_keeper_agent_name_prefixed () =
 
 let () =
   let base_path = Masc_test_deps.find_project_root () in
+  Keeper_exec_tools.inject_masc_schemas Config.raw_all_tool_schemas;
   Keeper_exec_tools.init_policy_config ~base_path;
   Alcotest.run "Keeper_agent_isolation" [
     ("non_research_prefix", [

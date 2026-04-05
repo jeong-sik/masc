@@ -110,51 +110,14 @@ let parse_presets
   ) names;
   tbl
 
-let dedupe_keep_order paths =
-  let rec loop seen acc = function
-    | [] -> List.rev acc
-    | path :: rest when List.mem path seen -> loop seen acc rest
-    | path :: rest -> loop (path :: seen) (path :: acc) rest
-  in
-  loop [] [] paths
-
-let rec find_marker_in_ancestors ~start_dir rel_path =
-  let candidate = Filename.concat start_dir rel_path in
-  if Sys.file_exists candidate then
-    Some candidate
-  else
-    let parent = Filename.dirname start_dir in
-    if String.equal parent start_dir then
-      None
-    else
-      find_marker_in_ancestors ~start_dir:parent rel_path
-
 let load ~base_path : (t, string) result =
   let rel = "config/tool_policy.toml" in
   let base_candidate = Filename.concat base_path rel in
-  let cwd_candidate =
-    find_marker_in_ancestors ~start_dir:(Sys.getcwd ()) rel
-  in
-  let exe_candidate =
-    let exe_path =
-      if Filename.is_relative Sys.executable_name then
-        Filename.concat (Sys.getcwd ()) Sys.executable_name
-      else
-        Sys.executable_name
-    in
-    let exe_dir = Filename.dirname exe_path in
-    find_marker_in_ancestors ~start_dir:exe_dir rel
-  in
-  let resolved_config_candidate =
-    let resolution = Config_dir_resolver.resolve () in
-    Filename.concat resolution.config_root.path "tool_policy.toml"
-  in
+  let cwd_candidate = Filename.concat (Sys.getcwd ()) rel in
+  (* Try base_path first, then cwd as fallback; skip cwd if identical to base_path *)
   let candidates =
-    dedupe_keep_order
-      ( [ base_candidate ]
-      @ Option.to_list cwd_candidate
-      @ Option.to_list exe_candidate
-      @ [ resolved_config_candidate ] )
+    if base_candidate = cwd_candidate then [ base_candidate ]
+    else [ base_candidate; cwd_candidate ]
   in
   let rec try_candidates failures = function
     | [] ->
@@ -165,12 +128,7 @@ let load ~base_path : (t, string) result =
       in
       Error
         (Printf.sprintf
-           "tool policy config not found after checking, in order: \
-            base_path/config/tool_policy.toml, \
-            current working directory ancestor search for config/tool_policy.toml, \
-            executable directory ancestor search for config/tool_policy.toml, \
-            and Config_dir_resolver-resolved config/tool_policy.toml. %s"
-           detail)
+           "tool policy config not found in base directory or current working directory. %s" detail)
     | path :: rest ->
       (match Safe_ops.read_file_safe path with
        | Ok content -> Ok (path, content)
@@ -239,16 +197,11 @@ let resolve_preset
     if def.all_candidates then
       Some All_candidates
     else
-      let filter_masc_tool name =
-        if String.starts_with ~prefix:"masc_" name then masc_filter name
-        else true
-      in
       let group_tools =
         def.groups
         |> List.concat_map (fun group_name ->
           (* Hashtbl.find is safe: load validates all group references *)
-          resolve_group_source (Hashtbl.find config.groups group_name)
-          |> List.filter filter_masc_tool)
+          resolve_group_source (Hashtbl.find config.groups group_name))
       in
       let masc_from_groups =
         def.masc_groups

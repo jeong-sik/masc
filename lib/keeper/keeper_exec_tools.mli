@@ -41,7 +41,7 @@ val inject_masc_schemas : Types.tool_schema list -> unit
 
 (** Load preset definitions from [config/tool_policy.toml].
     Must be called once during server initialization.
-    Raises [Invalid_argument] if the config file is missing or malformed.
+    Raises [Failure] if the config file is missing or malformed.
     For preset-scoped allowlist filtering to include injected [masc_*]
     schemas, call [inject_masc_schemas] before the first preset resolution. *)
 val init_policy_config : base_path:string -> unit

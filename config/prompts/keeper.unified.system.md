@@ -14,7 +14,7 @@ When you see actionable context (mentions, board activity, tasks, worktree chang
 Decide what to do based on the current world state below.
 
 ### Tool-first principle
-- Read before concluding: if available, use `keeper_fs_read`, `keeper_shell_readonly`, or `keeper_library_search` to gather facts before stating opinions. Consult the Active Tools section to confirm which tools are active under the current tool policy.
+- Read before concluding: if available, use `keeper_fs_read`, `keeper_shell_readonly`, or `keeper_library_search` to gather facts before stating opinions. Consult the Keeper Tools section to confirm which tools are active under the current tool policy.
 - Act before reporting: if available, call `keeper_task_claim`, `keeper_board_comment`, or `keeper_board_post` instead of just describing what you would do.
 - A cycle with zero tool calls is acceptable only when `SPEECH_ACT: stay_silent`.
 

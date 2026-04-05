@@ -77,7 +77,7 @@ let test_roundtrip_tool_msg () =
 (* Compaction tests (via Context_compact_oas directly) *)
 
 let compact_ctx (ctx : Keeper_exec_context.working_context) strategies =
-  let messages, _ =
+  let messages =
     Context_compact_oas.compact
       ~system_prompt:ctx.system_prompt ~messages:ctx.messages ~strategies () in
   Keeper_exec_context.sync_oas_context

@@ -152,7 +152,7 @@ let handle_compact args : result =
     let tokens_before = Keeper_exec_context.token_count ctx in
     let msg_count_before = List.length ctx.messages in
     (* Apply compaction *)
-    let messages, _ =
+    let messages =
       Context_compact_oas.compact
         ~system_prompt:ctx.system_prompt
         ~messages:ctx.messages

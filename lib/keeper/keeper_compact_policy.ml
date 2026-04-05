@@ -114,7 +114,7 @@ let compact_if_needed
           Log.Harness.warn "[pre_compact] sse broadcast failed: %s"
             (Printexc.to_string exn));
       let messages =
-          let msgs_after_compact, _ =
+          let msgs_after_compact =
             Context_compact_oas.compact
               ~system_prompt:ctx.system_prompt
               ~messages:ctx.messages

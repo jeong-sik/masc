@@ -89,18 +89,13 @@ let cascade_max_keys = 256
 (* ================================================================ *)
 
 (** Map provider_kind to cascade-label prefix (e.g. "claude", "gemini").
-    These match the Provider_registry entry names used in cascade config strings.
+    Delegates to Provider_adapter.cascade_prefix_of_provider_kind.
+    Note: reverse-mapping from provider_kind is inherently lossy —
+    OpenAI_compat conflates codex/openrouter/llama into one kind.
     TODO: pass the provider name from cascade config parsing instead of
-    reverse-mapping from provider_kind (which conflates llama/openrouter). *)
-(* TODO: remove after OAS delegation refactor — pass provider name from
-   cascade config parsing directly instead of reverse-mapping from kind. *)
+    reverse-mapping from provider_kind to avoid this ambiguity. *)
 let provider_name_of_config (cfg : Llm_provider.Provider_config.t) =
-  match cfg.kind with
-  | Llm_provider.Provider_config.Anthropic -> "claude"
-  | Llm_provider.Provider_config.OpenAI_compat -> "openai"
-  | Llm_provider.Provider_config.Gemini -> "gemini"
-  | Llm_provider.Provider_config.Glm -> "glm"
-  | Llm_provider.Provider_config.Claude_code -> "claude_code"
+  Provider_adapter.cascade_prefix_of_provider_kind cfg.kind
 
 let model_label_of_config (cfg : Llm_provider.Provider_config.t) =
   Printf.sprintf "%s:%s" (provider_name_of_config cfg) cfg.model_id

@@ -860,7 +860,6 @@ let run_turn
           ~temperature
           ~max_tokens
           ?max_cost_usd
-          ~max_input_tokens:max_context
           ?guardrails
           ?on_event
           ?on_yield

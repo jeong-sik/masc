@@ -145,7 +145,7 @@ let headers_global ~key =
     IPv4, colon-hex for IPv6).  Unix-domain sockets use a "unix:" prefix so
     they never collide with TCP keys.  The port is excluded so that all
     connections from the same host share one rate-limit bucket. *)
-let key_of_sockaddr client_addr =
+let key_of_sockaddr (client_addr : Eio.Net.Sockaddr.stream) =
   match client_addr with
   | `Tcp (ip, _) ->
       let raw = (ip :> string) in

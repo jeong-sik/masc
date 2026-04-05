@@ -279,7 +279,6 @@ let keeper_universe_masc_tool_schemas (meta : keeper_meta) : Types.tool_schema l
 
 let keeper_default_model_tools (_meta : keeper_meta) : Types.tool_schema list =
   keeper_model_tools @ keeper_voice_tool_schemas
-  @ [ keeper_tool_search_schema ]
 
 let keeper_allowed_tool_names ?(write_done = false) (meta : keeper_meta) :
     string list =

@@ -76,7 +76,7 @@ groups = ["base", "board", "coordination", "voice", "governance"]
 masc_groups = ["core"]
 
 [presets.coding]
-groups = ["base", "filesystem", "filesystem_write", "library", "shell", "coordination", "coding_shard", "coding"]
+groups = ["base", "board", "filesystem", "filesystem_write", "library", "shell", "coordination", "coding_shard", "coding"]
 masc_groups = ["core", "coding"]
 
 [presets.research]

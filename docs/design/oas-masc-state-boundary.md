@@ -2,6 +2,11 @@
 
 Issue: #1736
 
+> Status: historical audit + migration backlog
+>
+> Boundary contract SSOT lives in `/home/runner/work/masc-mcp/masc-mcp/docs/OAS-MASC-BOUNDARY.md`.
+> Implementation status / open ledger lives in `/home/runner/work/masc-mcp/masc-mcp/docs/spec/13-oas-integration.md`.
+
 ## Related
 
 - [Contract-Driven Agent Loop RFC](./contract-driven-agent-loop-rfc.md)
@@ -30,11 +35,11 @@ State that describes an agent's runtime, cognitive context, and operational life
 
 | Category | Data | Current Owner | Target Owner |
 |----------|------|---------------|--------------|
-| Turn count | `turn_count`, `total_turns` | **MASC** (`keeper_meta`) | OAS `Session.t` |
-| Messages/history | `messages : message list` | **MASC** (`keeper_working_context`) | OAS `Context.t` |
-| Token usage | `total_input_tokens`, `total_output_tokens`, `total_tokens`, `total_cost_usd` | **MASC** (`keeper_meta`) | OAS `Session.t` or `Usage_tracker` |
-| Context window | `token_count`, `max_tokens`, `importance_scores` | **MASC** (`keeper_working_context`) | OAS `Context.t` |
-| Checkpoint | `checkpoint_id`, `generation`, `serialized` | **MASC** (`keeper_working_context`) | OAS `Checkpoint` |
+| Turn count | `turn_count`, `total_turns` | **MASC** (`keeper_meta.runtime`, partial split) | OAS `Session.t` |
+| Messages/history | `messages : message list` | **MASC** (`keeper_exec_context` / `working_context`) | OAS `Context.t` |
+| Token usage | `total_input_tokens`, `total_output_tokens`, `total_tokens`, `total_cost_usd` | **MASC** (`keeper_meta.runtime`, partial split) | OAS `Session.t` or `Usage_tracker` |
+| Context window | `token_count`, `max_tokens`, `importance_scores` | **MASC** (`keeper_exec_context` / `working_context`) | OAS `Context.t` |
+| Checkpoint | `checkpoint_id`, `generation`, `serialized` | **MASC** (`keeper_exec_context`) | OAS `Checkpoint` |
 | Memory (5-tier) | `long_term`, `episodic`, `procedural`, `working`, `scratchpad` | **Bridge** (`memory_oas_bridge`) | OAS `Memory.t` (already the target) |
 | Context reduction | `PruneToolOutputs`, `MergeContiguous`, `DropLowImportance`, `SummarizeOld` | **MASC** (`context_compact_oas`) | OAS `Context_reducer` |
 | Model selection | `last_model_used`, derived `active_model`, `cascade_name` | **MASC** (`keeper_meta`) | OAS `Cascade_config` |
@@ -60,9 +65,16 @@ State that describes the coordination domain — not how an agent thinks, but wh
 
 ## 3. Current Boundary Violations
 
-### V1: `keeper_meta` is a god record mixing agent state and domain state
+Classification used below:
 
-`keeper_types.ml` defines `keeper_meta` with 54 direct fields.
+- **Resolved**
+- **Partial**
+- **Open**
+
+### V1 (Partial): `keeper_meta` still mixes domain profile and runtime ownership
+
+`keeper_types.ml` no longer stores all runtime fields flat on `keeper_meta`; it already groups runtime-heavy state under `runtime : agent_runtime_state`.
+That is real progress, but ownership is still mixed because keeper persistence still writes agent-runtime data as part of the MASC keeper record.
 
 Nested sub-records expand the effective surface further:
 
@@ -89,9 +101,9 @@ So the flattened operational surface is roughly 83 fields. Approximately 29-30 o
 
 **Impact**: Every keeper turn reads the full keeper record, updates agent-runtime fields, and writes it back. This couples domain persistence (MASC JSONL/PG) with agent-runtime state that OAS should own.
 
-### V2: `keeper_working_context` duplicates OAS Context.t
+### V2 (Open): keeper `working_context` duplicates OAS Context.t
 
-`keeper_working_context.ml` defines a `working_context` record:
+The current code keeps the wrapper in `keeper_exec_context.ml` / `keeper_types.ml`:
 ```ocaml
 type working_context = {
   system_prompt : string;
@@ -107,13 +119,13 @@ This wraps `Agent_sdk.Context.t` with additional MASC-specific fields (`importan
 
 **Impact**: Checkpoint save/restore serializes this MASC wrapper rather than the native OAS checkpoint. Two sources of truth for message state.
 
-### V3: `context_compact_oas.ml` re-implements OAS scoring in MASC
+### V3 (Open): `context_compact_oas.ml` re-implements OAS scoring in MASC
 
 `context_compact_oas.ml` contains `score_messages` (importance scoring) and `oas_strategy_of` (strategy mapping). While it delegates to `Agent_sdk.Context_reducer`, it maintains MASC-side scoring logic (`[MASC_GOAL]` prefix detection, `[MASC_MEMORY_SUMMARY v1]` markers) that creates MASC-specific context semantics inside what should be pure agent-runtime behavior.
 
 **Impact**: MASC-specific markers (`[MASC_GOAL]`, `[STATE]...[/STATE]`) embedded in messages that OAS Context_reducer must handle. Domain concepts leak into message content format.
 
-### V4: Decorative petition bridge issue resolved
+### V4 (Resolved): Decorative petition bridge issue resolved
 
 The retired petition bridge no longer creates decorative `Collaboration.t` instances for petitions. Governance petitions persist directly via the current governance surface.
 
@@ -147,7 +159,7 @@ The bridge direction is correct (MASC domain -> OAS agent memory), but the bridg
 
 **Impact**: MASC must know OAS `Memory.t` internals to seed correctly. If OAS changes Memory tier semantics, MASC bridge breaks.
 
-### V7: `keeper_agent_run.ml` orchestrates OAS agent lifecycle from MASC
+### V7 (Open): `keeper_agent_run.ml` orchestrates OAS agent lifecycle from MASC
 
 `keeper_agent_run.ml` builds the full OAS agent lifecycle:
 1. Loads checkpoint via MASC's `keeper_exec_context`
@@ -223,7 +235,7 @@ type working_context = {
 (* token_count read from Context.t *)
 ```
 
-**Effort**: Medium-High. `keeper_exec_context.ml` (694 lines) and `keeper_working_context.ml` (317 lines) need rewrite.
+**Effort**: Medium-High. `keeper_exec_context.ml` and the `Keeper_types.working_context` boundary need rewrite.
 **Risk**: Medium — checkpoint format change requires migration or dual-read.
 **Prerequisite for**: Phase 3.
 

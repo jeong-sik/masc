@@ -30,28 +30,7 @@ let spawned_agent_prefixed_tools : string list =
   prefixed_tool_names spawned_agent_public_tool_names
 
 let local_worker_public_tool_names : string list =
-  unique_preserve_order
-    [
-       "masc_board_get";
-       "masc_board_list";
-       "masc_board_search";
-       "masc_board_comment";
-       "masc_board_vote";
-       "masc_board_post";
-       "masc_code_search";
-       "masc_code_symbols";
-       "masc_code_read";
-       "masc_worktree_create";
-       "masc_worktree_list";
-       "masc_worktree_remove";
-       "masc_run_init";
-       "masc_run_plan";
-       "masc_run_log";
-       "masc_run_deliverable";
-       "masc_run_get";
-       "masc_run_list";
-       "masc_spawn";
-    ]
+  Tool_catalog.tools_for_surface Tool_catalog.Local_worker
 
 let local_worker_contract_schemas : Types.tool_schema list =
   Sdk_tool_contract.sdk_tool_schemas
@@ -547,7 +526,10 @@ let local_worker_tool_schemas ?names () :
 let admin_tool_names : string list =
   Tool_catalog.tools_for_surface Tool_catalog.Admin
 
-(** Coordination tool names for coordinators and fleet leaders. *)
+(** Role-catalog candidates for coordinators and fleet leaders.
+    These are curated subsets, not surface SSOTs. [build_tool_catalog]
+    filters them against surfaced tool names so stale hardcoded entries
+    cannot escape into prompts. *)
 let coordination_tool_names : string list =
   [
     "masc_status";
@@ -572,12 +554,10 @@ let coordination_tool_names : string list =
     "masc_team_session_report";
     "masc_team_session_list";
     "masc_spawn";
-    "masc_portal_open";
-    "masc_portal_send";
-    "masc_portal_status";
   ]
 
-(** Execution tool names for worker agents. *)
+(** Role-catalog candidates for worker agents.
+    These are curated subsets, not surface SSOTs. *)
 let execution_tool_names : string list =
   [
     "masc_heartbeat";
@@ -596,6 +576,11 @@ let execution_tool_names : string list =
     "masc_tool_help";
   ]
 
+let filter_catalog_to_available ~available names =
+  names
+  |> List.filter (fun name -> List.mem name available)
+  |> unique_preserve_order
+
 (** Build a role-based tool catalog from the full registered tool set.
     [role] determines which subset of tools the agent sees:
     - ["worker"]: execution-focused tools
@@ -609,8 +594,10 @@ let build_tool_catalog ~(role : string) () : string list =
   in
   let filtered =
     match role with
-    | "worker" -> execution_tool_names
-    | "coordinator" | "fleet_leader" -> coordination_tool_names
+    | "worker" ->
+        filter_catalog_to_available ~available:all_names execution_tool_names
+    | "coordinator" | "fleet_leader" ->
+        filter_catalog_to_available ~available:all_names coordination_tool_names
     | _ ->
         (* autonomous: all except admin *)
         List.filter

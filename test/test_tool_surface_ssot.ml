@@ -40,6 +40,11 @@ let test_local_worker_parity () =
   let ssot = set_of (Tool_catalog.tools_for_surface Tool_catalog.Local_worker) in
   check_set_equal "Local_worker" ~expected:legacy ~actual:ssot
 
+let test_agent_local_worker_parity () =
+  let legacy = set_of Agent_tool_surfaces.local_worker_public_tool_names in
+  let ssot = set_of (Tool_catalog.tools_for_surface Tool_catalog.Local_worker) in
+  check_set_equal "Agent_tool_surfaces.Local_worker" ~expected:legacy ~actual:ssot
+
 let test_session_min_parity () =
   let legacy = set_of Worker_container.session_min_tool_names in
   let ssot = set_of (Tool_catalog.tools_for_surface Tool_catalog.Session_min) in
@@ -305,6 +310,30 @@ let test_workspace_mutating_canonical_used () =
     Alcotest.(check bool) (name ^ " non-empty") true (String.length name > 0)
   ) Tool_catalog_surfaces.workspace_mutating_tool_names
 
+let test_role_catalogs_only_expose_available_tools () =
+  let available =
+    Agent_tool_surfaces.spawned_agent_public_tool_names
+    @ Agent_tool_surfaces.local_worker_public_tool_names
+    |> set_of
+  in
+  let check_all role tools =
+    List.iter (fun name ->
+      Alcotest.(check bool)
+        (Printf.sprintf "%s role tool available: %s" role name)
+        true (SS.mem name available)
+    ) tools
+  in
+  check_all "worker" Agent_tool_surfaces.execution_tool_names;
+  check_all "coordinator" Agent_tool_surfaces.coordination_tool_names
+
+let test_role_catalogs_drop_stale_entries_when_built () =
+  let worker_tools = Agent_tool_surfaces.build_tool_catalog ~role:"worker" () in
+  let coordinator_tools = Agent_tool_surfaces.build_tool_catalog ~role:"coordinator" () in
+  Alcotest.(check bool) "worker role excludes portal_open" false
+    (List.mem "masc_portal_open" worker_tools);
+  Alcotest.(check bool) "coordinator role excludes portal_open" false
+    (List.mem "masc_portal_open" coordinator_tools)
+
 let () =
   Alcotest.run "tool_surface_ssot"
     [
@@ -313,6 +342,8 @@ let () =
           Alcotest.test_case "Public_mcp parity" `Quick test_public_mcp_parity;
           Alcotest.test_case "Spawned_agent parity" `Quick test_spawned_agent_parity;
           Alcotest.test_case "Local_worker parity" `Quick test_local_worker_parity;
+          Alcotest.test_case "Agent local_worker parity" `Quick
+            test_agent_local_worker_parity;
           Alcotest.test_case "Session_min parity" `Quick test_session_min_parity;
           Alcotest.test_case "Admin parity" `Quick test_admin_parity;
           Alcotest.test_case "Keeper_denied parity" `Quick test_keeper_denied_parity;
@@ -341,9 +372,13 @@ let () =
           Alcotest.test_case "replacement targets have schemas" `Quick
             test_replacement_targets_have_schemas;
           Alcotest.test_case "keeper internal tools have schemas" `Quick
-            test_keeper_internal_tools_have_schemas;
+             test_keeper_internal_tools_have_schemas;
           Alcotest.test_case "workspace_mutating canonical used" `Quick
-            test_workspace_mutating_canonical_used;
+             test_workspace_mutating_canonical_used;
+          Alcotest.test_case "role catalogs use only available tools" `Quick
+            test_role_catalogs_only_expose_available_tools;
+          Alcotest.test_case "built role catalogs drop stale entries" `Quick
+            test_role_catalogs_drop_stale_entries_when_built;
         ] );
       ( "ssot_validation",
         [

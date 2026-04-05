@@ -8,6 +8,13 @@ OAS (OCaml Agent SDK)와 MASC-MCP 사이의 역할 경계를 정의한다.
 consumer → MASC-MCP (coordination/orchestration) → OAS (agent runtime)
 ```
 
+## 문서 역할 (SSOT)
+
+- 이 문서는 **boundary contract SSOT**다.
+- `/home/runner/work/masc-mcp/masc-mcp/docs/spec/13-oas-integration.md`는 구현 세부와 open issue ledger를 유지한다.
+- `/home/runner/work/masc-mcp/masc-mcp/docs/qa/OAS-BOUNDARY-HEALTHCHECK-2026-03-31.md`는 시점별 health snapshot이다.
+- `/home/runner/work/masc-mcp/masc-mcp/docs/design/oas-masc-state-boundary.md`는 historical audit + migration backlog로 취급한다.
+
 ## 역할 분리
 
 | 관심사 | OAS | MASC |
@@ -37,9 +44,16 @@ OAS  ──does not know──→ MASC
 |------|--------|-------|
 | Context compaction | Partial complete | `context_compact_oas.ml`는 OAS `Context_reducer`를 사용한다. MASC 전체 context system이 OAS `Context.t`로 통합된 것은 아니다. |
 | Event bus bridge | Complete for current `masc:*` flow | `oas_events.ml` publishes, `oas_sse_bridge.ml` relays to dashboard SSE |
-| Checkpoint integration | Real | OAS checkpoint is used in shared worker/runtime paths |
+| Checkpoint integration | Partial complete | OAS checkpoint is used in shared worker/runtime paths, but keeper runtime still persists its own `working_context` / serialized checkpoint path in `lib/keeper/keeper_exec_context.ml` |
 | Memory bridge | Partial complete | long-term + procedural + institution episodic are bridged; broader memory unification is still separate |
 | Team-session swarm | Partial complete | OAS Swarm runner is active, delivery-contract persistence/verdict export now live, but bridge fidelity is still incomplete |
+
+## Open Structural Gaps
+
+- keeper runtime still uses a MASC-owned `working_context` wrapper around OAS context/checkpoint primitives
+- keeper continuity still leaks domain semantics through raw message text (`[STATE]`, goal/memory markers)
+- `memory_oas_bridge.ml` still owns imperative seeding/flushing instead of a hook-first boundary
+- team-session bridge fidelity and runtime-health signaling are still incomplete
 
 ## Delivery-Contract Split
 

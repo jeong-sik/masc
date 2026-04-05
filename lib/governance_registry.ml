@@ -166,6 +166,49 @@ let keeper_dead_ttl_sec =
     ~deserialize:deserialize_float
     ()
 
+(* ── keeper_handoff surface (Medium risk) ─────────────────────── *)
+
+(** Default handoff threshold (context_ratio).
+    When context ratio exceeds this, automatic handoff is considered. *)
+let keeper_handoff_threshold =
+  Runtime_params.register
+    ~key:"keeper.handoff_threshold"
+    ~default:(fun () -> 0.85)
+    ~validate:(validate_float_range ~min:0.5 ~max:0.99 "keeper_handoff_threshold")
+    ~serialize:(fun v -> `Float v)
+    ~meta:{ description = "Handoff context ratio 임계값";
+            value_type = "float";
+            min_value = Some (`Float 0.5); max_value = Some (`Float 0.99) }
+    ~deserialize:deserialize_float
+    ()
+
+(** Handoff cooldown in seconds.
+    After a handoff, suppress further handoffs for this duration. *)
+let keeper_handoff_cooldown_sec =
+  Runtime_params.register
+    ~key:"keeper.handoff_cooldown_sec"
+    ~default:(fun () -> 300)
+    ~validate:(validate_int_range ~min:30 ~max:3600 "keeper_handoff_cooldown_sec")
+    ~serialize:(fun v -> `Int v)
+    ~meta:{ description = "Handoff 쿨다운(초)";
+            value_type = "int";
+            min_value = Some (`Int 30); max_value = Some (`Int 3600) }
+    ~deserialize:deserialize_int
+    ()
+
+(** Context ratio above which handoff pressure alert fires. *)
+let keeper_handoff_pressure_threshold =
+  Runtime_params.register
+    ~key:"keeper.handoff_pressure_threshold"
+    ~default:(fun () -> 0.88)
+    ~validate:(validate_float_range ~min:0.5 ~max:0.99 "keeper_handoff_pressure_threshold")
+    ~serialize:(fun v -> `Float v)
+    ~meta:{ description = "Handoff pressure 알림 임계값";
+            value_type = "float";
+            min_value = Some (`Float 0.5); max_value = Some (`Float 0.99) }
+    ~deserialize:deserialize_float
+    ()
+
 (* ── keeper_diagnostics surface (Medium risk) ─────────────────── *)
 
 let keeper_snapshot_sec =
@@ -272,6 +315,16 @@ let surfaces =
         "keeper.supervisor_sweep_sec";
         "keeper.keepalive_interval_sec";
         "keeper.dead_ttl_sec";
+      ];
+    };
+    {
+      id = "keeper_handoff";
+      description = "Keeper handoff context ratio, cooldown, and pressure thresholds";
+      risk = "medium";
+      param_keys = [
+        "keeper.handoff_threshold";
+        "keeper.handoff_cooldown_sec";
+        "keeper.handoff_pressure_threshold";
       ];
     };
     {

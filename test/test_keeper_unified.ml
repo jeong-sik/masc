@@ -778,13 +778,13 @@ let test_prompt_actionable_routes_respect_tool_policy () =
     (contains_substring user "file-inspection tools are unavailable")
 
 let test_prompt_no_actionable_work_fallback () =
+  (* minimal_policy_meta has Minimal preset — no board/web-search tools *)
   let obs = base_observation in
-  let _sys, user = UP.build_prompt ~meta:minimal_meta ~observation:obs in
+  let _sys, user = UP.build_prompt ~meta:minimal_policy_meta ~observation:obs in
   check bool "has actionable routes section" true
     (contains_substring user "Actionable Routes");
-  (* With research preset, proactive routes should appear instead of no-actionable-work *)
-  check bool "has proactive board route" true
-    (contains_substring user "Proactive")
+  check bool "has no-actionable-work fallback" true
+    (contains_substring user "No actionable work")
 
 let research_meta =
   { minimal_meta with

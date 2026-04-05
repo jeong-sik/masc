@@ -108,15 +108,24 @@ let select_existing_masc_tool_names names =
 (* ── Candidate aggregation (config-driven) ────────────────────── *)
 
 let keeper_base_candidate_tool_names () =
+  let injected = injected_masc_tool_names () in
+  (* max 1: Hashtbl.create 0 is valid but atypical; guard for empty-injection edge case *)
+  let injected_lookup = Hashtbl.create (max 1 (List.length injected)) in
+  List.iter (fun n -> Hashtbl.replace injected_lookup n ()) injected;
   let config_tools =
     match !policy_config with
     | None -> []
-    | Some cfg -> Keeper_tool_policy_config.all_group_tools cfg
+    | Some cfg ->
+      Keeper_tool_policy_config.all_group_tools cfg
+      |> List.filter (fun name ->
+          if String.starts_with ~prefix:"masc_" name
+          then Hashtbl.mem injected_lookup name
+          else true)
   in
   dedupe_tool_names
     ( config_tools
     @ keeper_internal_candidate_tool_names
-    @ injected_masc_tool_names () )
+    @ injected )
 
 (** Optional tools that require explicit opt-in via also_allow.
     Kept separate from config groups because they are deliberately

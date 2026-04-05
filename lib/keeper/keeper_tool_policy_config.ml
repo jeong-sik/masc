@@ -165,7 +165,11 @@ let load ~base_path : (t, string) result =
       in
       Error
         (Printf.sprintf
-           "tool policy config not found in base_path, resolved config dir, or current working directory. %s"
+           "tool policy config not found after checking, in order: \
+            base_path/config/tool_policy.toml, \
+            current working directory ancestor search for config/tool_policy.toml, \
+            executable directory ancestor search for config/tool_policy.toml, \
+            and resolved config dir tool_policy.toml. %s"
            detail)
     | path :: rest ->
       (match Safe_ops.read_file_safe path with

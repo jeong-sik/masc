@@ -17,8 +17,10 @@ type preset_resolution =
 (** Load and parse [config/tool_policy.toml].
     Candidate order is:
     1. [base_path/config/tool_policy.toml]
-    2. the config dir resolved by [Config_dir_resolver]
-    3. [Sys.getcwd ()/config/tool_policy.toml]
+    2. [config/tool_policy.toml] in ancestor directories of [Sys.getcwd ()]
+    3. [config/tool_policy.toml] in ancestor directories of
+       [Sys.executable_name]
+    4. the config dir resolved by [Config_dir_resolver]
     Returns [Error msg] if the file is missing or malformed. *)
 val load : base_path:string -> (t, string) result
 

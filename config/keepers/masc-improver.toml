@@ -34,4 +34,7 @@ mention_targets = ["masc-improver", "improver"]
 execution_scope = "workspace"
 allowed_paths = ["*"]
 
+# Delivery preset: research + coding tools for keepers that produce code changes.
+tool_preset = "delivery"
+
 proactive_enabled = true

@@ -31,6 +31,7 @@ let preset_name_of_tool_preset = function
   | Messaging -> "messaging"
   | Coding -> "coding"
   | Research -> "research"
+  | Delivery -> "delivery"
   | Full -> "full"
 
 (* ── Denied-tool set (O(1) lookup) ────────────────────────────── *)

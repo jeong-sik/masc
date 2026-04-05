@@ -71,7 +71,7 @@ let interruptible_sleep ~clock ~stop ~wakeup duration =
 let wakeup_keeper name =
   Keeper_registry.all ()
   |> List.iter (fun (entry : Keeper_registry.registry_entry) ->
-    if String.equal entry.name name && entry.state = Keeper_registry.Running
+    if String.equal entry.name name && entry.phase = Keeper_state_machine.Running
     then Keeper_registry.wakeup ~base_path:entry.base_path name)
 ;;
 
@@ -94,7 +94,7 @@ let wakeup_relevant_keeper_for_board_signal
   let running_names =
     Keeper_registry.all ()
     |> List.filter_map (fun (e : Keeper_registry.registry_entry) ->
-      if e.state = Keeper_registry.Running then Some e.name else None)
+      if e.phase = Keeper_state_machine.Running then Some e.name else None)
   in
   let candidates =
     running_names
@@ -1315,8 +1315,8 @@ let stop_keepalive name =
            | Eio.Cancel.Cancelled _ as e -> raise e
            | _exn -> ())
         | None -> ());
-       (match entry.state with
-        | Keeper_registry.Crashed | Keeper_registry.Dead -> ()
+       (match entry.phase with
+        | Keeper_state_machine.Crashed | Keeper_state_machine.Dead -> ()
         | _ ->
           if
             record_keeper_stopped

@@ -27,8 +27,8 @@ let keep_last_n n item lst =
 
 let should_cleanup_dead ~now ~dead_ttl_sec
     (entry : Keeper_registry.registry_entry) =
-  match entry.state, entry.dead_since_ts with
-  | Keeper_registry.Dead, Some dead_since ->
+  match entry.phase, entry.dead_since_ts with
+  | Keeper_state_machine.Dead, Some dead_since ->
       now -. dead_since >= dead_ttl_sec
   | _ -> false
 
@@ -196,10 +196,14 @@ let reconcile_keepalive_keepers (ctx : _ context) =
                match Keeper_registry.get ~base_path meta.name with
                | None -> false  (* no entry = orphaned, reconcile OK *)
                | Some e ->
-                 match e.state with
-                 | Keeper_registry.Running | Keeper_registry.Paused -> true
-                 | Keeper_registry.Crashed | Keeper_registry.Dead -> true
-                 | Keeper_registry.Stopped ->
+                 match e.phase with
+                 | Keeper_state_machine.Running | Keeper_state_machine.Paused -> true
+                 | Keeper_state_machine.Crashed | Keeper_state_machine.Dead -> true
+                 | Keeper_state_machine.Failing | Keeper_state_machine.Compacting
+                 | Keeper_state_machine.HandingOff | Keeper_state_machine.Draining
+                 | Keeper_state_machine.Restarting -> true
+                 | Keeper_state_machine.Offline -> false
+                 | Keeper_state_machine.Stopped ->
                      (* Stopped with unresolved fiber → sweep will clean up *)
                      Eio.Promise.peek e.done_p = None
              in
@@ -320,18 +324,21 @@ let sweep_and_recover (ctx : _ context) =
   let to_mark_dead = ref [] in
   let to_cleanup_dead = ref [] in
   List.iter (fun (entry : Keeper_registry.registry_entry) ->
-    match entry.state with
-    | Keeper_registry.Dead ->
+    match entry.phase with
+    | Keeper_state_machine.Dead ->
         (match entry.dead_since_ts with
          | Some dead_since when now -. dead_since >= dead_ttl_sec ->
              to_cleanup_dead := entry :: !to_cleanup_dead
          | _ -> ())
-    | Keeper_registry.Stopped ->
+    | Keeper_state_machine.Stopped ->
         to_unregister := entry :: !to_unregister
-    | Keeper_registry.Running | Keeper_registry.Paused
-    | Keeper_registry.Crashed ->
+    | Keeper_state_machine.Running | Keeper_state_machine.Paused
+    | Keeper_state_machine.Crashed
+    | Keeper_state_machine.Failing | Keeper_state_machine.Compacting
+    | Keeper_state_machine.HandingOff | Keeper_state_machine.Draining
+    | Keeper_state_machine.Restarting | Keeper_state_machine.Offline ->
       (match Eio.Promise.peek entry.done_p with
-      | None when entry.state = Keeper_registry.Stopped ->
+      | None when entry.phase = Keeper_state_machine.Stopped ->
           to_unregister := entry :: !to_unregister
       | None -> ()  (* Alive — skip *)
       | Some `Stopped ->
@@ -359,7 +366,7 @@ let sweep_and_recover (ctx : _ context) =
   List.iter (cleanup_dead_tombstone ctx) !to_cleanup_dead;
   let active_count =
     List.length (List.filter (fun (e : Keeper_registry.registry_entry) ->
-      e.state = Keeper_registry.Running || e.state = Keeper_registry.Crashed
+      e.phase = Keeper_state_machine.Running || e.phase = Keeper_state_machine.Crashed
     ) entries) in
   let restart_list =
     let keepers_dir =

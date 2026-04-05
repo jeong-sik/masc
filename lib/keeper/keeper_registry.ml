@@ -46,19 +46,14 @@ exception Keeper_heartbeat_failure of {
   keeper_name : string;
 }
 
-type keeper_state =
-  | Running
-  | Paused
-  | Stopped
-  | Crashed  (** Error exit, restart candidate (backoff applies) *)
-  | Dead     (** Restart budget exhausted, tombstone — no re-launch *)
+(** @deprecated Use [Keeper_state_machine.phase] directly. *)
+type keeper_state = Keeper_state_machine.phase
 
 type registry_entry = {
   base_path : string;
   name : string;
   meta : keeper_meta;
-  state : keeper_state;
-  (** Fine-grained phase from RFC-0002 state machine. *)
+  (** Keeper lifecycle phase (RFC-0002 11-state machine). *)
   phase : Keeper_state_machine.phase;
   (** Observable conditions that derive [phase]. *)
   conditions : Keeper_state_machine.conditions;
@@ -82,12 +77,8 @@ type registry_entry = {
   tool_usage : (string, tool_call_entry) Hashtbl.t;
 }
 
-let state_to_string = function
-  | Running -> "running"
-  | Paused -> "paused"
-  | Stopped -> "stopped"
-  | Crashed -> "crashed"
-  | Dead -> "dead"
+(** @deprecated Use [Keeper_state_machine.phase_to_string]. *)
+let state_to_string = Keeper_state_machine.phase_to_string
 
 let registry : registry_entry StringMap.t ref = ref StringMap.empty
 let running_count_atomic = Atomic.make 0
@@ -112,7 +103,7 @@ let register ~base_path name meta =
   let done_p, done_r = Eio.Promise.create () in
   let key = registry_key ~base_path name in
   (match StringMap.find_opt key !registry with
-   | Some entry when entry.state = Running ->
+   | Some entry when entry.phase = Running ->
        Log.Keeper.warn "registry: overwriting running keeper during register name=%s" name;
        Atomic.set running_count_atomic (max 0 (Atomic.get running_count_atomic - 1))
    | _ -> ());
@@ -125,7 +116,6 @@ let register ~base_path name meta =
     base_path;
     name;
     meta;
-    state = Running;
     phase = Keeper_state_machine.Running;
     conditions = initial_conditions;
     fiber_stop = Atomic.make false;
@@ -157,13 +147,13 @@ let unregister ~base_path name =
   Log.Keeper.info "registry: unregistering keeper name=%s base_path=%s" name base_path;
   let key = registry_key ~base_path name in
   (match StringMap.find_opt key !registry with
-   | Some entry when entry.state = Running ->
+   | Some entry when entry.phase = Running ->
        Atomic.set running_count_atomic (max 0 (Atomic.get running_count_atomic - 1));
        Log.Keeper.debug "registry: unregistered running keeper name=%s running_count=%d"
          name (Atomic.get running_count_atomic)
    | Some entry ->
        Log.Keeper.debug "registry: unregistered non-running keeper name=%s state=%s"
-         name (state_to_string entry.state)
+         name (state_to_string entry.phase)
    | None ->
        Log.Keeper.warn "registry: attempted to unregister non-existent keeper name=%s" name);
   registry := StringMap.remove key !registry
@@ -239,52 +229,55 @@ let conditions_of_legacy_state (_prev : Keeper_state_machine.conditions) (state 
       Keeper_state_machine.fiber_alive = false;
       restart_budget_remaining = false;
     }
+  (* Buffer states map to their parent stable conditions *)
+  | Failing ->
+    { base with
+      Keeper_state_machine.fiber_alive = true;
+      restart_budget_remaining = true;
+      heartbeat_healthy = false;
+    }
+  | Compacting ->
+    { base with
+      Keeper_state_machine.fiber_alive = true;
+      restart_budget_remaining = true;
+      compaction_active = true;
+    }
+  | HandingOff ->
+    { base with
+      Keeper_state_machine.fiber_alive = true;
+      restart_budget_remaining = true;
+      handoff_active = true;
+    }
+  | Draining ->
+    { base with
+      Keeper_state_machine.fiber_alive = true;
+      restart_budget_remaining = true;
+      stop_requested = true;
+    }
+  | Restarting ->
+    { base with
+      Keeper_state_machine.fiber_alive = false;
+      restart_budget_remaining = true;
+      backoff_elapsed = true;
+    }
+  | Offline -> base
 
-let set_state ~base_path name state =
-  let key = registry_key ~base_path name in
-  match StringMap.find_opt key !registry with
-  | Some entry ->
-      (* Dead is terminal — only unregister can remove a Dead entry *)
-      if entry.state = Dead && state <> Dead then
-        Log.Keeper.warn "registry: attempted state change on Dead keeper name=%s new_state=%s"
-          name (state_to_string state)
-      else if entry.state <> state then begin
-        Log.Keeper.info "registry: state transition name=%s old=%s new=%s"
-          name (state_to_string entry.state) (state_to_string state);
-        (match (entry.state, state) with
-         | Running, (Paused | Stopped | Crashed | Dead) ->
-             Atomic.set running_count_atomic
-               (max 0 (Atomic.get running_count_atomic - 1))
-         | (Paused | Stopped | Crashed), Running ->
-             Atomic.set running_count_atomic (Atomic.get running_count_atomic + 1)
-         | _ -> ());
-        let dead_since_ts =
-          match entry.state, state with
-          | _, Dead -> entry.dead_since_ts
-          | Dead, Running -> None
-          | Dead, _ -> entry.dead_since_ts
-          | _ -> None
-        in
-        (* Sync phase/conditions with legacy state *)
-        let conditions = conditions_of_legacy_state entry.conditions state in
-        let phase = Keeper_state_machine.derive_phase conditions in
-        put_entry key { entry with state; dead_since_ts; phase; conditions }
-      end
-  | None ->
-      Log.Keeper.warn "registry: set_state on non-existent keeper name=%s" name
+(** @deprecated No external callers remain after Phase 3 migration.
+    Retained temporarily for mark_dead compatibility. Use [dispatch_event]. *)
+let _set_state_deprecated ~base_path:_ _name (_state : Keeper_state_machine.phase) = ()
 
 let mark_dead ~base_path name ~at =
   Log.Keeper.error "registry: marking keeper dead name=%s at=%.0f" name at;
   update_entry ~base_path name (fun entry ->
-    if entry.state <> Dead then begin
-      (match entry.state with
+    if entry.phase <> Dead then begin
+      (match entry.phase with
        | Running ->
            Atomic.set running_count_atomic
              (max 0 (Atomic.get running_count_atomic - 1))
        | _ -> ());
       let conditions = conditions_of_legacy_state entry.conditions Dead in
       let phase = Keeper_state_machine.derive_phase conditions in
-      { entry with state = Dead; dead_since_ts = Some at; phase; conditions }
+      { entry with dead_since_ts = Some at; phase; conditions }
     end else
       { entry with dead_since_ts = Some (Option.value ~default:at entry.dead_since_ts) })
 
@@ -316,7 +309,7 @@ let get_turn_failures ~base_path name =
 
 let is_running ~base_path name =
   match get ~base_path name with
-  | Some { state = Running; _ } -> true
+  | Some { phase = Running; _ } -> true
   | _ -> false
 
 (** True if the keeper has ANY registry entry (regardless of state).
@@ -330,7 +323,7 @@ let count_running ?base_path () =
   | Some expected ->
       StringMap.fold
         (fun _k v acc ->
-          if String.equal expected v.base_path && v.state = Running then acc + 1
+          if String.equal expected v.base_path && v.phase = Running then acc + 1
           else acc)
         !registry 0
 
@@ -365,22 +358,22 @@ let wakeup_all ?base_path () =
   StringMap.iter (fun _k entry ->
     (match base_path with
      | Some expected when not (String.equal expected entry.base_path) -> ()
-     | _ -> if entry.state = Running then Atomic.set entry.fiber_wakeup true)
+     | _ -> if entry.phase = Running then Atomic.set entry.fiber_wakeup true)
   ) !registry
 
 let fiber_health_of ~base_path name =
   match StringMap.find_opt (registry_key ~base_path name) !registry with
   | None -> Fiber_unknown
   | Some entry -> (
-      match entry.state with
+      match entry.phase with
       | Dead -> Fiber_dead
-      | Crashed ->
+      | Crashed | Restarting ->
           let max_restarts =
             Runtime_params.get Governance_registry.keeper_supervisor_max_restarts
           in
           if entry.restart_count >= max_restarts then Fiber_dead else Fiber_zombie
-      | Stopped -> Fiber_unknown
-      | Running | Paused -> (
+      | Stopped | Offline -> Fiber_unknown
+      | Running | Paused | Failing | Compacting | HandingOff | Draining -> (
           match Eio.Promise.peek entry.done_p with
           | None -> Fiber_alive
           | Some `Stopped -> Fiber_unknown
@@ -649,18 +642,10 @@ let dispatch_event ~base_path name (event : Keeper_state_machine.event) =
          (Keeper_state_machine.phase_to_string tr.prev_phase)
          (Keeper_state_machine.phase_to_string tr.new_phase)
          (Keeper_state_machine.event_to_string event);
-       (* Sync legacy state *)
-       let legacy = Keeper_state_compat.to_legacy tr.new_phase in
-       let legacy_state = match legacy with
-         | Keeper_state_compat.Running -> Running
-         | Keeper_state_compat.Paused -> Paused
-         | Keeper_state_compat.Stopped -> Stopped
-         | Keeper_state_compat.Crashed -> Crashed
-         | Keeper_state_compat.Dead -> Dead
-       in
-       (* Update running count *)
+       (* Update running count based on legacy projection *)
        let prev_legacy = Keeper_state_compat.to_legacy tr.prev_phase in
-       (match prev_legacy, legacy with
+       let new_legacy = Keeper_state_compat.to_legacy tr.new_phase in
+       (match prev_legacy, new_legacy with
         | Keeper_state_compat.Running, (Keeper_state_compat.Paused | Stopped | Crashed | Dead) ->
           Atomic.set running_count_atomic (max 0 (Atomic.get running_count_atomic - 1))
         | (Keeper_state_compat.Paused | Stopped | Crashed), Keeper_state_compat.Running ->
@@ -673,7 +658,6 @@ let dispatch_event ~base_path name (event : Keeper_state_machine.event) =
        in
        put_entry key {
          entry with
-         state = legacy_state;
          phase = tr.new_phase;
          conditions = tr.updated_conditions;
          dead_since_ts;

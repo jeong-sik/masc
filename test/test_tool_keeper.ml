@@ -875,8 +875,12 @@ let test_keepalive_gap_reports_not_running_instead_of_disabled () =
         | Some entry -> entry
         | None -> fail "missing registry entry after keeper_down"
       in
-      check string "registry state paused" "paused"
-        (Masc_mcp.Keeper_registry.state_to_string entry.state))
+      (* After stop_keepalive → Stopped (terminal), keeper_down's
+         Operator_pause is rejected by the state machine. The registry
+         phase stays "stopped"; the meta.paused flag carries the
+         "paused for later resume" semantic instead. *)
+      check string "registry state stopped (terminal)" "stopped"
+        (Masc_mcp.Keeper_registry.state_to_string entry.phase))
 
 let test_keeper_msg_missing_keeper_fails_without_bootstrap () =
   Eio_main.run @@ fun env ->

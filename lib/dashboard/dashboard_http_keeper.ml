@@ -289,7 +289,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
             Keeper_registry.get ~base_path:config.base_path m.name in
           let registry_state =
             match registry_entry with
-            | Some entry -> Some (Keeper_registry.state_to_string entry.state)
+            | Some entry -> Some (Keeper_registry.state_to_string entry.phase)
             | None -> None
           in
           let phase =

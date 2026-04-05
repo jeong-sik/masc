@@ -23,7 +23,7 @@ let init_policy_config ~base_path =
       (List.length (Keeper_tool_policy_config.group_names cfg))
   | Error msg ->
     Log.Keeper.error "tool policy config load failed: %s" msg;
-    failwith (Printf.sprintf "tool policy config load failed: %s" msg)
+    invalid_arg (Printf.sprintf "tool policy config load failed: %s" msg)
 
 let preset_name_of_tool_preset = function
   | Minimal -> "minimal"

@@ -674,6 +674,13 @@ let emit_heartbeat_task
     | None -> [])
   )
   in
+  let () =
+    match data with
+    | `Assoc fields ->
+        if List.assoc_opt "auth_token" fields <> None then
+          invalid_arg "emit_heartbeat_task: auth_token must not be present in HeartbeatTask SSE payload"
+    | _ -> ()
+  in
   notify_event ~event_type:HeartbeatTask ~agent ~data;
   Log.info ~ctx:"heartbeat"
     "💓 HeartbeatTask emitted for %s (goal: %d chars, tools: %d, worker_mode: %s)"

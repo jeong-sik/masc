@@ -464,6 +464,20 @@ let keeper_max_tools_per_turn () : int =
 let keeper_retry_max_tools_per_turn () : int =
   min 8 (keeper_max_tools_per_turn ())
 
+(** Enable LLM reranking of BM25 tool retrieval results.
+    When enabled, confident BM25 results are re-ordered by a small LLM
+    call before progressive disclosure. Disabled by default.
+    Env: [MASC_KEEPER_LLM_RERANK]. *)
+let keeper_llm_rerank_enabled () : bool =
+  bool_of_env_default "MASC_KEEPER_LLM_RERANK" ~default:false
+
+(** Named cascade profile for the LLM reranker.
+    Env: [MASC_KEEPER_LLM_RERANK_CASCADE]. Default: "tool_rerank". *)
+let keeper_llm_rerank_cascade () : string =
+  match Sys.getenv_opt "MASC_KEEPER_LLM_RERANK_CASCADE" with
+  | Some v when String.trim v <> "" -> String.trim v
+  | _ -> "tool_rerank"
+
 (* ================================================================ *)
 (* Rule engine thresholds                                           *)
 (* ================================================================ *)

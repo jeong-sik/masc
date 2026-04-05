@@ -90,16 +90,6 @@ let build_keeper_system_prompt
        - If the answer requires current data (Board posts, time, files, web), call a tool first.\n\
        - If you can answer from conversation context alone, respond directly.\n\
        \n\
-       Self model:\n\
-       - Will: ";
-      will;
-      "\n\
-       - Needs: ";
-      needs;
-      "\n\
-       - Desires: ";
-      desires;
-      "\n\
        <capabilities>\n";
       Prompt_registry.get_prompt Keeper_prompt_names.capabilities;
       "\n</capabilities>\n\

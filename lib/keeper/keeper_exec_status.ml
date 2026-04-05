@@ -158,6 +158,19 @@ let keeper_reply_snapshot_of_history (history_items : Yojson.Safe.t list) =
   | None, Some (assistant_ts, preview) ->
       (`String "delivered", `Float assistant_ts, `String preview)
 
+(** Error keyword detection — includes provider names from adapter registry. *)
+let error_keywords =
+  let provider_keywords =
+    List.map (fun (a : Provider_adapter.adapter) -> a.canonical_name)
+      Provider_adapter.direct_adapters
+    @ List.concat_map (fun (a : Provider_adapter.adapter) -> a.aliases)
+        Provider_adapter.direct_adapters
+  in
+  [ "error"; "failed"; "timeout"; "graphql"; "model" ] @ provider_keywords
+
+let looks_error_like text =
+  List.exists (string_contains_ci text) error_keywords
+
 let keeper_error_hint ~agent_status ~meta =
   let agent_error = json_string_opt "error" agent_status in
   let proactive_reason =
@@ -165,16 +178,6 @@ let keeper_error_hint ~agent_status ~meta =
     if reason = "" then None else Some reason
   in
   let drift_reason = None in
-  let looks_error_like text =
-    let provider_keywords =
-      List.map (fun (a : Provider_adapter.adapter) -> a.canonical_name)
-        Provider_adapter.direct_adapters
-      @ List.concat_map (fun (a : Provider_adapter.adapter) -> a.aliases)
-          Provider_adapter.direct_adapters
-    in
-    List.exists (string_contains_ci text)
-      ([ "error"; "failed"; "timeout"; "graphql"; "model" ] @ provider_keywords)
-  in
   match agent_error with
   | Some _ as error -> error
   | None -> (
@@ -215,12 +218,7 @@ let classify_keeper_quiet_reason ~meta ~keepalive_running ~agent_status ~now_ts 
   else
     match error_hint with
     | Some reason when string_contains_ci reason "graphql" -> Some "graphql_error"
-    | Some reason
-      when
-        List.exists (string_contains_ci reason)
-          [ "model"; "timeout"; "ollama"; "gemini"; "openai" ]
-      ->
-        Some "model_error"
+    | Some reason when looks_error_like reason -> Some "model_error"
     | Some _ -> Some "unknown"
     | None ->
         let last_turn_ago_s =

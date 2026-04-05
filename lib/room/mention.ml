@@ -124,10 +124,12 @@ let any_mentioned ~targets content =
   |> List.exists (fun target -> is_mentioned target content)
 
 (** Agent types that can be auto-spawned by Auto-Responder.
-    Mirrors Provider_adapter.direct_adapters short aliases. *)
+    NOTE: this list exists because masc_room cannot depend on main lib.
+    Callers in main lib should use Provider_adapter.is_spawnable_agent instead. *)
 let spawnable_agents = ["gemini"; "codex"; "claude"; "llama"; "glm"]
 
-(** Check if an agent type is spawnable *)
+(** Check if an agent type is spawnable.
+    Prefer Provider_adapter.is_spawnable_agent when available. *)
 let is_spawnable mention =
   let base = agent_type_of_mention mention in
   List.mem base spawnable_agents

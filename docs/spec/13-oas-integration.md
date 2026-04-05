@@ -26,6 +26,15 @@ MASC 전용 요구가 생기면 MASC adapter/bridge로 먼저 해결하고, OAS 
 
 ---
 
+## 1.1 Document Ownership
+
+- `/home/runner/work/masc-mcp/masc-mcp/docs/OAS-MASC-BOUNDARY.md` is the boundary contract SSOT.
+- This spec keeps the implementation map, bridge inventory, and open structural gaps.
+- `/home/runner/work/masc-mcp/masc-mcp/docs/design/oas-masc-state-boundary.md` is a historical audit / migration backlog, not the primary boundary contract.
+- `/home/runner/work/masc-mcp/masc-mcp/docs/qa/OAS-BOUNDARY-HEALTHCHECK-2026-03-31.md` is evidence, not contract.
+
+---
+
 ## 2. Architecture
 
 ```mermaid
@@ -382,13 +391,24 @@ Static pre-filtering은 OAS Guardrails가, stateful per-call checks는 Eval_gate
 | Agent 실행 | Complete | `oas_worker.ml`이 모든 MODEL 호출을 Agent.run으로 라우팅 |
 | Context compaction | Complete | OAS Context_reducer 직접 위임, MASC Custom closure 주입 |
 | Event_bus bridge | Complete | `masc:*` 이벤트 13종 publish + SSE relay |
-| Checkpoint | Complete | OAS Checkpoint persist in shared worker paths |
+| Checkpoint | Partial | shared worker/runtime paths는 OAS Checkpoint를 사용하지만 keeper 경로는 `lib/keeper/keeper_exec_context.ml`의 wrapper + serialized context를 유지 |
 | Memory bridge | Partial | Long_term + Episodic + Procedural bridged. Working/Scratchpad는 OAS 내부. 전체 통합은 미완 |
 | Team-session swarm | Partial | OAS Swarm runner 활성, bridge fidelity 불완전 |
 | Cascade config | Complete | cascade_name -> OAS Provider_registry -> Provider_config.t |
 | Verifier | Complete | PreToolUse hook + Guardrails adapter |
 | Model resolution | Complete | oas_model_resolve.ml이 Provider_Registry SSOT 사용 |
 | Tool bridge | Complete | MASC tool_schema -> OAS Tool.t 변환 |
+
+### 12.1 Open Boundary Ledger
+
+| Item | Status | Notes |
+|------|--------|-------|
+| `keeper_meta` runtime split | Partial | runtime-heavy fields are grouped under `keeper_meta.runtime`, but keeper persistence still owns them |
+| keeper `working_context` wrapper | Open | keeper runtime still wraps OAS context/checkpoint state |
+| keeper checkpoint nativeization | Open | keeper path still serializes MASC-owned context |
+| message marker leakage | Open | `[STATE]`, `[GOAL]`, memory-summary markers still carry domain semantics in raw text |
+| memory bridge hooks/callbacks | Open | seeding/flushing remains imperative in `memory_oas_bridge.ml` |
+| team-session bridge fidelity | Open | healthcheck still calls out projection/resource-health gaps |
 
 ---
 

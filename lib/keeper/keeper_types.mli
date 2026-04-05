@@ -41,6 +41,7 @@ type tool_preset =
   | Messaging
   | Coding
   | Research
+  | Delivery
   | Full
 
 type tool_access =

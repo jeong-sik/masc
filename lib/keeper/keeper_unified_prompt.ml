@@ -104,7 +104,7 @@ let actionable_routes ~(allowed_tools : string list)
   if observation.failed_task_count > 0 then
     if can "keeper_tasks_audit" then
       add
-        "- Failed tasks: audit them with keeper_tasks_audit before deciding there is nothing meaningful to do."
+        "- Failed tasks: audit once with keeper_tasks_audit. If the audit returns no orphans or actionable items, do NOT call keeper_tasks_audit again — instead post a brief status summary to the board with keeper_board_post and end your turn."
     else
       add
         "- Failed tasks are actionable, but task-audit tooling is unavailable under the current tool policy.";
@@ -223,7 +223,15 @@ let build_prompt ~(meta : Keeper_types.keeper_meta)
      Unclaimed tasks in the backlog are actionable work — if your skills match, \
      claim one with keeper_task_claim and work on it.\n\
      When you have findings, opinions, or status updates worth sharing, post them to the board \
-     using keeper_board_post. When responding to board activity, use keeper_board_comment.\n\
+     using keeper_board_post. When responding to board activity, use keeper_board_comment.\n\n\
+     ## Anti-Repetition Rules\n\
+     CRITICAL: Never call the same tool with the same arguments twice in a row within a single turn.\n\
+     If a tool returned no actionable results (e.g. audit found no orphans, search found nothing), \
+     do NOT retry it. Instead choose one of:\n\
+     1. Post a status summary to the board (keeper_board_post)\n\
+     2. Claim a different task if available (keeper_task_claim)\n\
+     3. End your turn silently (DELIVERY_SURFACE: silent)\n\
+     Progress means doing something NEW each cycle, not re-checking the same state.\n\n\
      Every response must begin with these machine-readable headers exactly once:\n\
      SOCIAL_MODEL: bdi_speech_v1\n\
      BELIEF_SUMMARY: <short summary>\n\

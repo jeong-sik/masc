@@ -39,6 +39,7 @@ type tool_preset =
   | Messaging
   | Coding
   | Research
+  | Delivery
   | Full
 
 type tool_access =
@@ -199,6 +200,7 @@ let tool_preset_to_string = function
   | Messaging -> "messaging"
   | Coding -> "coding"
   | Research -> "research"
+  | Delivery -> "delivery"
   | Full -> "full"
 ;;
 
@@ -208,6 +210,7 @@ let tool_preset_of_string raw =
   | "messaging" -> Some Messaging
   | "coding" -> Some Coding
   | "research" -> Some Research
+  | "delivery" -> Some Delivery
   | "full" -> Some Full
   | _ -> None
 ;;

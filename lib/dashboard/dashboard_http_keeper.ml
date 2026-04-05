@@ -292,6 +292,11 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
             | Some entry -> Some (Keeper_registry.state_to_string entry.state)
             | None -> None
           in
+          let phase =
+            match registry_entry with
+            | Some entry -> Some (Keeper_state_machine.phase_to_string entry.phase)
+            | None -> None
+          in
           let supervisor_diagnostics =
             let max_restarts =
               Runtime_params.get Governance_registry.keeper_supervisor_max_restarts in
@@ -460,6 +465,10 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
               ("registry_state",
                 match registry_state with
                 | Some state -> `String state
+                | None -> `Null);
+              ("phase",
+                match phase with
+                | Some p -> `String p
                 | None -> `Null);
               ("supervisor_diagnostics", supervisor_diagnostics);
               ("agent_name", `String m.agent_name);

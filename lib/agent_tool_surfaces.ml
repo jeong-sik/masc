@@ -7,6 +7,8 @@
 
 open Types
 
+module SS = Set.Make (String)
+
 let unique_preserve_order = Json_util.dedupe_keep_order
 
 let dedupe_schemas (schemas : Types.tool_schema list) =
@@ -577,8 +579,9 @@ let execution_tool_names : string list =
   ]
 
 let filter_catalog_to_available ~available names =
+  let available = SS.of_list available in
   names
-  |> List.filter (fun name -> List.mem name available)
+  |> List.filter (fun name -> SS.mem name available)
   |> unique_preserve_order
 
 (** Build a role-based tool catalog from the full registered tool set.

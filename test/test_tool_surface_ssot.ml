@@ -372,9 +372,9 @@ let () =
           Alcotest.test_case "replacement targets have schemas" `Quick
             test_replacement_targets_have_schemas;
           Alcotest.test_case "keeper internal tools have schemas" `Quick
-             test_keeper_internal_tools_have_schemas;
+            test_keeper_internal_tools_have_schemas;
           Alcotest.test_case "workspace_mutating canonical used" `Quick
-             test_workspace_mutating_canonical_used;
+            test_workspace_mutating_canonical_used;
           Alcotest.test_case "role catalogs use only available tools" `Quick
             test_role_catalogs_only_expose_available_tools;
           Alcotest.test_case "built role catalogs drop stale entries" `Quick

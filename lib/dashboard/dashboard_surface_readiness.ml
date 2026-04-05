@@ -25,7 +25,8 @@ let route_ref_prefix = '/'
 
 (** Surface readiness inventories historically stored live spotchecks as a single
     string field. Values that begin with a route prefix are dashboard endpoints;
-    all other values are script or command references. *)
+    all other values are script or command references. Empty strings fall back to
+    [script] so malformed values do not get misclassified as routes. *)
 let live_spotcheck_kind (value : string) =
   match value with
   | "" -> "script"

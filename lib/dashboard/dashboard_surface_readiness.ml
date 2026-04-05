@@ -29,7 +29,9 @@ let route_ref_prefix_string = String.make 1 route_ref_prefix
     all other values are script or command references. Empty strings fall back to
     [script] so malformed values do not get misclassified as routes. *)
 let live_spotcheck_kind (value : string) =
-  if String.starts_with ~prefix:route_ref_prefix_string value
+  if value = ""
+  then "script"
+  else if String.starts_with ~prefix:route_ref_prefix_string value
   then "route"
   else "script"
 

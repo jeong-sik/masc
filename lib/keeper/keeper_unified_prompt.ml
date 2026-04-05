@@ -118,6 +118,15 @@ let actionable_routes ~(allowed_tools : string list)
            (Printf.sprintf
               "- Live worktree delta: inspect changed files with %s if you need to understand whether action is required."
               (String.concat ", " tools)));
+  (* Proactive routes: only when nothing reactive is pending *)
+  if !routes = [] then begin
+    if can "keeper_board_post" then
+      add
+        "- Proactive: post an observation, commentary, or finding to the board using keeper_board_post.";
+    if can "masc_web_search" then
+      add
+        "- Proactive: use masc_web_search to find something relevant to share or investigate.";
+  end;
   if !routes = [] then
     add "- No actionable work. Emit your [STATE] block and end your turn.";
   List.rev !routes

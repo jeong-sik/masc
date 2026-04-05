@@ -782,8 +782,34 @@ let test_prompt_no_actionable_work_fallback () =
   let _sys, user = UP.build_prompt ~meta:minimal_meta ~observation:obs in
   check bool "has actionable routes section" true
     (contains_substring user "Actionable Routes");
-  check bool "has no-actionable-work fallback" true
-    (contains_substring user "No actionable work")
+  (* With research preset, proactive routes should appear instead of no-actionable-work *)
+  check bool "has proactive board route" true
+    (contains_substring user "Proactive")
+
+let research_meta =
+  { minimal_meta with
+    tool_access =
+      Preset { preset = Research; also_allow = [] };
+  }
+
+let test_prompt_proactive_board_route () =
+  let obs = base_observation in
+  let _sys, user = UP.build_prompt ~meta:research_meta ~observation:obs in
+  check bool "has proactive board post route" true
+    (contains_substring user "keeper_board_post");
+  (* masc_web_search is injected at runtime, not available in test env *)
+  check bool "has proactive route section" true
+    (contains_substring user "Proactive")
+
+let test_prompt_proactive_routes_suppressed_when_reactive () =
+  let obs =
+    { base_observation with unclaimed_task_count = 3 }
+  in
+  let _sys, user = UP.build_prompt ~meta:research_meta ~observation:obs in
+  check bool "has task claim route" true
+    (contains_substring user "keeper_task_claim");
+  check bool "no proactive board route when reactive" true
+    (not (contains_substring user "Proactive"))
 
 let test_prompt_omits_room_signal_when_flag_disabled () =
   let interpretation : Masc_mcp.Meta_cognition.interpretation =
@@ -1897,6 +1923,10 @@ let () =
             test_prompt_actionable_routes_respect_tool_policy;
           test_case "no actionable work fallback" `Quick
             test_prompt_no_actionable_work_fallback;
+          test_case "proactive board route when idle" `Quick
+            test_prompt_proactive_board_route;
+          test_case "proactive routes suppressed when reactive" `Quick
+            test_prompt_proactive_routes_suppressed_when_reactive;
           test_case "omits room signal when disabled" `Quick
             test_prompt_omits_room_signal_when_flag_disabled;
           test_case "includes room signal when enabled" `Quick

@@ -1494,8 +1494,8 @@ let test_heartbeat_concurrent_start_stop () =
 let test_empty_backlog_stop_signal () =
   with_test_env (fun config ->
     let result = Room.list_tasks config in
-    Alcotest.(check bool) "contains ACTION stop signal"
-      true (str_contains result "ACTION: Do not re-check"))
+    Alcotest.(check bool) "contains STOP signal"
+      true (str_contains result "STOP calling keeper_tasks_list"))
 
 let test_no_active_tasks_stop_signal () =
   with_test_env (fun config ->
@@ -1503,8 +1503,8 @@ let test_no_active_tasks_stop_signal () =
     let _ = Room.claim_task config ~agent_name:"alice" ~task_id:"task-001" in
     let _ = Room.complete_task config ~agent_name:"alice" ~task_id:"task-001" ~notes:"done" in
     let result = Room.list_tasks config in
-    Alcotest.(check bool) "contains ACTION stop signal"
-      true (str_contains result "ACTION: Do not re-check"))
+    Alcotest.(check bool) "contains STOP signal"
+      true (str_contains result "STOP calling keeper_tasks_list"))
 
 let test_no_unclaimed_tasks_stop_signal () =
   with_test_env (fun config ->

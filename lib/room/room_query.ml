@@ -406,9 +406,9 @@ let list_tasks ?(include_done = false) ?(include_cancelled = false) ?status conf
   in
   if tasks = [] then
     if backlog.tasks = [] then
-      "📋 No tasks. ACTION: Do not re-check — the backlog is empty."
+      "📋 No tasks. ACTION: STOP calling keeper_tasks_list — the backlog is empty. Move on to other work or end your turn."
     else
-      "📋 No active tasks (all done/cancelled). ACTION: Do not re-check."
+      "📋 No active tasks (all done/cancelled). ACTION: STOP calling keeper_tasks_list — do not re-check. Move on to other work or end your turn."
   else begin
     let buf = Buffer.create 256 in
     Buffer.add_string buf "📋 Quest Board\n";

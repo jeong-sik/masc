@@ -446,8 +446,8 @@ let healthy_snapshot : Meas.measurement_snapshot = {
   timing = {
     now_ts = 1000.0;
     idle_seconds = 10;
-    since_last_compaction_ts = 600.0;
-    since_last_handoff_ts = 600.0;
+    since_last_compaction_sec = 600.0;
+    since_last_handoff_sec = 600.0;
     proactive_warmup_elapsed = true;
   };
   failures = {

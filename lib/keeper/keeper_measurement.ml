@@ -38,8 +38,8 @@ type similarity_measurement = {
 type timing_measurement = {
   now_ts : float;
   idle_seconds : int;
-  since_last_compaction_ts : float;
-  since_last_handoff_ts : float;
+  since_last_compaction_sec : float;
+  since_last_handoff_sec : float;
   proactive_warmup_elapsed : bool;
 }
 
@@ -103,8 +103,8 @@ let measurement_snapshot_to_json (s : measurement_snapshot) : Yojson.Safe.t =
     "timing", `Assoc [
       "now_ts", `Float s.timing.now_ts;
       "idle_seconds", `Int s.timing.idle_seconds;
-      "since_last_compaction_ts", `Float s.timing.since_last_compaction_ts;
-      "since_last_handoff_ts", `Float s.timing.since_last_handoff_ts;
+      "since_last_compaction_sec", `Float s.timing.since_last_compaction_sec;
+      "since_last_handoff_sec", `Float s.timing.since_last_handoff_sec;
       "proactive_warmup_elapsed", `Bool s.timing.proactive_warmup_elapsed;
     ];
     "failures", `Assoc [

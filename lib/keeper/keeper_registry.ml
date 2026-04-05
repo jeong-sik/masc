@@ -199,38 +199,43 @@ let () =
     This is a backward-compat shim: it synthesizes conditions so that
     [derive_phase] returns a phase consistent with the legacy state.
     Phase 3-4 will migrate callers to [dispatch_event] directly. *)
-let conditions_of_legacy_state (prev : Keeper_state_machine.conditions) (state : keeper_state)
+(** Compute conditions from a legacy keeper_state transition.
+    This is a backward-compat shim: it synthesizes conditions so that
+    [derive_phase] returns a phase consistent with the legacy state.
+    All core conditions are set explicitly (not inherited from [prev])
+    to prevent stale values from causing incorrect phase derivation.
+    Phase 3-4 will migrate callers to [dispatch_event] directly. *)
+let conditions_of_legacy_state (_prev : Keeper_state_machine.conditions) (state : keeper_state)
     : Keeper_state_machine.conditions =
+  let base = Keeper_state_machine.default_conditions in
   match state with
   | Running ->
-    { prev with
+    { base with
       Keeper_state_machine.fiber_alive = true;
+      restart_budget_remaining = true;
       heartbeat_healthy = true;
       turn_healthy = true;
-      operator_paused = false;
-      stop_requested = false;
-      compaction_active = false;
-      handoff_active = false;
-      guardrail_triggered = false;
     }
   | Paused ->
-    { prev with
+    { base with
       Keeper_state_machine.fiber_alive = true;
+      restart_budget_remaining = true;
       operator_paused = true;
     }
   | Stopped ->
-    { prev with
-      Keeper_state_machine.stop_requested = true;
+    { base with
+      Keeper_state_machine.fiber_alive = false;
+      stop_requested = true;
       drain_complete = true;
     }
   | Crashed ->
-    { prev with
+    { base with
       Keeper_state_machine.fiber_alive = false;
       restart_budget_remaining = true;
       backoff_elapsed = false;
     }
   | Dead ->
-    { prev with
+    { base with
       Keeper_state_machine.fiber_alive = false;
       restart_budget_remaining = false;
     }
@@ -616,6 +621,9 @@ let restore_tool_usage ~base_path name =
 
 (* ── RFC-0002 Event Dispatch ───────────────────────────── *)
 
+(** Thread-safety: same as [set_state] — all operations are non-yielding
+    (StringMap lookup + put, Atomic.set). In single-domain Eio, non-yielding
+    code runs atomically w.r.t. other fibers. No mutex needed. *)
 let dispatch_event ~base_path name (event : Keeper_state_machine.event) =
   let key = registry_key ~base_path name in
   match StringMap.find_opt key !registry with
@@ -658,9 +666,9 @@ let dispatch_event ~base_path name (event : Keeper_state_machine.event) =
         | (Keeper_state_compat.Paused | Stopped | Crashed), Keeper_state_compat.Running ->
           Atomic.set running_count_atomic (Atomic.get running_count_atomic + 1)
         | _ -> ());
-       (* Update dead_since_ts *)
+       (* Update dead_since_ts: always set to now on Dead transition *)
        let dead_since_ts = match tr.new_phase with
-         | Keeper_state_machine.Dead -> Some (Option.value ~default:now entry.dead_since_ts)
+         | Keeper_state_machine.Dead -> Some now
          | _ -> None
        in
        put_entry key {

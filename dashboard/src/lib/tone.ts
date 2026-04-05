@@ -10,6 +10,7 @@ export function toneClass(tone?: string | null): string {
     || tone === 'failed'
     || tone === 'fatal'
     || tone === 'offline'
+    || tone === 'stopped'
     || tone === 'critical'
     || tone === 'risk'
   ) {
@@ -24,6 +25,7 @@ export function toneClass(tone?: string | null): string {
     || tone === 'watch'
     || tone === 'paused'
     || tone === 'blocked'
+    || tone === 'unbooted'
   ) {
     return 'warn'
   }

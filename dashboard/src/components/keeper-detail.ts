@@ -206,6 +206,17 @@ function SectionCard({ title, children }: { title: string; children: preact.Comp
   `
 }
 
+// ── Profile field (label + value inline) ────────────────
+
+function ProfileField({ label, value, color }: { label: string; value: string; color: string }) {
+  return html`
+    <div class="flex items-start gap-2 text-xs text-[var(--text-muted)]">
+      <span class="flex-shrink-0">${label}:</span>
+      <span class="font-medium leading-relaxed" style="color: ${color}">${value}</span>
+    </div>
+  `
+}
+
 // ── Supervisor Diagnostics Panel ────────────────────────
 
 function registryStateBadge(state: string | null) {
@@ -493,18 +504,77 @@ export function KeeperDetailOverlay() {
             ${keeper.skill_reason
               ? html`<div class="text-[11px] text-[var(--text-muted)] mt-1 leading-relaxed">${keeper.skill_reason}</div>`
               : null}
-            ${keeper.last_heartbeat
-              ? html`<div class="flex items-center gap-2 mt-2 text-xs text-[var(--text-muted)]">
-                  <span>마지막 하트비트:</span>
-                  <${TimeAgo} timestamp=${keeper.last_heartbeat} />
-                </div>`
+
+            ${'' /* ── Identity: will / needs / desires ── */}
+            ${keeper.will || keeper.needs || keeper.desires
+              ? html`
+                <div class="mt-3 flex flex-col gap-1.5">
+                  ${keeper.will ? html`<${ProfileField} label="의지" value=${keeper.will} color="var(--cyan)" />` : null}
+                  ${keeper.needs ? html`<${ProfileField} label="필요" value=${keeper.needs} color="var(--warn)" />` : null}
+                  ${keeper.desires ? html`<${ProfileField} label="열망" value=${keeper.desires} color="var(--purple)" />` : null}
+                </div>
+              `
               : null}
+
+            ${'' /* ── Timestamps ── */}
+            <div class="mt-3 flex flex-col gap-1">
+              ${keeper.last_heartbeat
+                ? html`<div class="flex items-center gap-2 text-xs text-[var(--text-muted)]">
+                    <span>마지막 하트비트:</span>
+                    <${TimeAgo} timestamp=${keeper.last_heartbeat} />
+                  </div>`
+                : null}
+              ${keeper.created_at
+                ? html`<div class="flex items-center gap-2 text-xs text-[var(--text-muted)]">
+                    <span>생성일:</span>
+                    <${TimeAgo} timestamp=${keeper.created_at} />
+                  </div>`
+                : null}
+            </div>
+
+            ${'' /* ── Recent activity preview ── */}
+            ${keeper.recent_output_preview
+              ? html`
+                <div class="mt-3 py-2 px-3 rounded-lg bg-[rgba(71,184,255,0.06)] border border-[rgba(71,184,255,0.12)] text-xs text-[var(--text-body)] leading-relaxed">
+                  <div class="text-[10px] font-semibold text-[var(--accent)] uppercase tracking-wider mb-1">최근 출력</div>
+                  <div class="line-clamp-3">${keeper.recent_output_preview}</div>
+                </div>
+              `
+              : null}
+
+            ${'' /* ── K2K social stats ── */}
+            ${(keeper.k2k_count ?? 0) > 0 || (keeper.conversation_tail_count ?? 0) > 0
+              ? html`
+                <div class="mt-3 flex flex-wrap gap-2">
+                  ${(keeper.k2k_count ?? 0) > 0
+                    ? html`<span class="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-md bg-[rgba(167,139,250,0.08)] border border-[rgba(167,139,250,0.15)] text-[var(--text-muted)]">
+                        K2K 소통 <span class="font-mono font-medium text-[#a78bfa]">${keeper.k2k_count}</span>회
+                      </span>`
+                    : null}
+                  ${(keeper.conversation_tail_count ?? 0) > 0
+                    ? html`<span class="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-md bg-[var(--white-4)] border border-[var(--white-6)] text-[var(--text-muted)]">
+                        대화 <span class="font-mono font-medium">${keeper.conversation_tail_count}</span>건
+                      </span>`
+                    : null}
+                </div>
+              `
+              : null}
+
             ${keeper.memory_recent_note
               ? html`
                 <div class="mt-3 py-2 px-3 rounded-lg bg-[rgba(167,139,250,0.06)] border border-[rgba(167,139,250,0.12)] text-xs text-[var(--text-body)] leading-relaxed">
+                  <div class="text-[10px] font-semibold text-[#a78bfa] uppercase tracking-wider mb-1">메모리 노트</div>
                   ${keeper.memory_recent_note}
                 </div>
               `
+              : null}
+
+            ${'' /* ── Last speech act ── */}
+            ${keeper.last_speech_act
+              ? html`<div class="flex items-center gap-2 mt-2 text-xs text-[var(--text-muted)]">
+                  <span>최근 행동:</span>
+                  <span class="font-mono text-[11px] px-1.5 py-0.5 rounded bg-[var(--white-5)] text-[var(--text-body)]">${keeper.last_speech_act}</span>
+                </div>`
               : null}
           <//>
 
@@ -526,13 +596,13 @@ export function KeeperDetailOverlay() {
 
           <div class="md:col-span-2">
             <${SectionCard} title="도구 호출 궤적">
-              <${KeeperTrajectoryTimeline} keeperName=${keeper.name} />
+              <${KeeperTrajectoryTimeline} keeperName=${keeper.name} keeper=${keeper} />
             <//>
           </div>
 
           <div class="md:col-span-2">
             <${CollapsibleSection} title="통합 활동 추적" badge=${html`<span class="text-[10px] text-[var(--text-dim)] font-normal ml-1">공지 + 태스크 + 도구 호출</span>`}>
-              <${SessionTraceView} agentName=${keeper.name} isKeeper=${true} />
+              <${SessionTraceView} agentName=${keeper.name} isKeeper=${true} keeperStatus=${keeper.status} keeperGeneration=${keeper.generation} />
             <//>
           </div>
 

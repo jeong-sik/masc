@@ -69,9 +69,11 @@ function LiveIndicator({ events }: { events: readonly { ts: number }[] }) {
 interface SessionTraceViewProps {
   agentName: string
   isKeeper: boolean
+  keeperStatus?: string
+  keeperGeneration?: number
 }
 
-export function SessionTraceView({ agentName, isKeeper }: SessionTraceViewProps) {
+export function SessionTraceView({ agentName, isKeeper, keeperStatus, keeperGeneration }: SessionTraceViewProps) {
   const listRef = useRef<HTMLDivElement>(null)
 
   // Load on first mount. Clean up only when agentName changes (overlay closes).
@@ -123,11 +125,17 @@ export function SessionTraceView({ agentName, isKeeper }: SessionTraceViewProps)
     `
   }
 
-  // Empty state
+  // Empty state — contextual message based on keeper status
   if (events.length === 0) {
+    const isOffline = keeperStatus && ['offline', 'inactive', 'dead', 'crashed'].includes(keeperStatus)
+    const msg = isOffline
+      ? '키퍼가 오프라인입니다. 기동하면 활동이 기록됩니다.'
+      : (keeperGeneration ?? 0) === 0
+        ? '아직 시작되지 않은 키퍼입니다. 활동 기록이 없습니다.'
+        : '현재 세대에서 기록된 활동이 없습니다.'
     return html`
       <div class="py-4">
-        <${EmptyState} message="기록된 활동이 없습니다" compact />
+        <${EmptyState} message=${msg} compact />
       </div>
     `
   }

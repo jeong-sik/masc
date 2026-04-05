@@ -10,6 +10,7 @@ import type { TrajectoryEntry, TrajectoryResponse } from '../api/dashboard'
 import { truncate } from '../lib/truncate'
 import { TimeAgo } from './common/time-ago'
 import { toolCategory, durationColor, formatArgs, prettyArgs } from './tool-call-shared'
+import type { Keeper } from '../types'
 
 // ── Constants ────────────────────────────────────────────
 
@@ -160,6 +161,38 @@ function TrajectoryEntryRow({ entry }: { entry: TrajectoryEntry }) {
   `
 }
 
+function TrajectoryEmptyState({ keeper }: { keeper?: Keeper }) {
+  const isOffline = keeper && ['offline', 'inactive', 'dead', 'crashed'].includes(keeper.status)
+  const toolNames = keeper?.recent_tool_names ?? keeper?.latest_tool_names ?? []
+  const toolCount = keeper?.latest_tool_call_count ?? 0
+  const generation = keeper?.generation ?? 0
+
+  return html`
+    <div class="py-4 flex flex-col items-center gap-3">
+      <div class="text-xs text-[var(--text-muted)] text-center">
+        ${isOffline
+          ? '키퍼가 오프라인입니다. 기동하면 도구 호출 내역이 기록됩니다.'
+          : generation === 0
+            ? '아직 시작되지 않은 키퍼입니다.'
+            : '현재 세대에서 기록된 도구 호출이 없습니다.'}
+      </div>
+      ${toolNames.length > 0 ? html`
+        <div class="w-full max-w-md">
+          <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-dim)] mb-1.5">이전 사용 도구</div>
+          <div class="flex flex-wrap gap-1.5">
+            ${toolNames.map((name: string) => html`
+              <span class="inline-flex items-center text-[11px] font-mono px-2 py-0.5 rounded-md bg-[var(--white-4)] border border-[var(--white-6)] text-[var(--text-muted)]">${name}</span>
+            `)}
+          </div>
+          ${toolCount > 0 ? html`
+            <div class="text-[10px] text-[var(--text-dim)] mt-1.5">누적 호출 ${toolCount}회</div>
+          ` : null}
+        </div>
+      ` : null}
+    </div>
+  `
+}
+
 function groupByTurn(entries: TrajectoryEntry[]): Map<number, TrajectoryEntry[]> {
   const groups = new Map<number, TrajectoryEntry[]>()
   for (const e of entries) {
@@ -173,7 +206,7 @@ function groupByTurn(entries: TrajectoryEntry[]): Map<number, TrajectoryEntry[]>
   return groups
 }
 
-export function KeeperTrajectoryTimeline({ keeperName }: { keeperName: string }) {
+export function KeeperTrajectoryTimeline({ keeperName, keeper }: { keeperName: string; keeper?: Keeper }) {
   useEffect(() => {
     void loadTrajectory(keeperName)
     return () => clearTrajectory(keeperName)
@@ -191,7 +224,7 @@ export function KeeperTrajectoryTimeline({ keeperName }: { keeperName: string })
 
   const data = state.data
   if (!data || data.entries.length === 0) {
-    return html`<div class="text-xs text-[var(--text-muted)] py-4 text-center">이 세션에 기록된 도구 호출이 없습니다.</div>`
+    return html`<${TrajectoryEmptyState} keeper=${keeper} />`
   }
 
   const turnGroups = groupByTurn(data.entries)

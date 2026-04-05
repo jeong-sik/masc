@@ -114,7 +114,9 @@ let effective_allowed_paths ~(meta : Keeper_types.keeper_meta) : string list =
        let safe_name = sanitize_keeper_name meta.name in
        [ playground;
          Printf.sprintf ".masc/keepers/%s/" safe_name;
-         ".masc/traces/" ]
+         ".masc/traces/";
+         "planning/";
+         "docs/" ]
      | _ -> [ playground ])
 
 let truncate_tool_output ?(max_len = 12000) (s : string) : string =

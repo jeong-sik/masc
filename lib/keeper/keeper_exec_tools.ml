@@ -338,7 +338,7 @@ let handle_keeper_shell_readonly
     resolve_keeper_path ~config ~meta ~raw_path
   in
   let render_process_result ~cmd argv =
-    let st, out = Process_eio.run_argv_with_status ~timeout_sec:15.0 argv in
+    let st, out = Process_eio.run_argv_with_status ~timeout_sec:30.0 argv in
     Yojson.Safe.to_string
       (`Assoc
           [ "ok", `Bool (st = Unix.WEXITED 0)
@@ -352,14 +352,14 @@ let handle_keeper_shell_readonly
   | "pwd" -> render_process_result ~cmd:"pwd" [ "/bin/pwd" ]
   | "git_status" ->
     render_process_result
-      ~cmd:"git -C <root> status --short --branch"
-      [ "git"; "-C"; root; "status"; "--short"; "--branch" ]
+      ~cmd:"git -C <root> --no-optional-locks status --short --branch"
+      [ "git"; "-C"; root; "--no-optional-locks"; "status"; "--short"; "--branch" ]
   | "ls" ->
     (match read_target () with
      | Error e -> error_json ~fields:[ "op", `String op ] e
      | Ok target ->
        let st, out =
-         Process_eio.run_argv_with_status ~timeout_sec:15.0 [ "/bin/ls"; "-la"; target ]
+         Process_eio.run_argv_with_status ~timeout_sec:30.0 [ "/bin/ls"; "-la"; target ]
        in
        let limit = shell_readonly_limit args in
        Yojson.Safe.to_string

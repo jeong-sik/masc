@@ -736,8 +736,16 @@ let handle_keeper_task_tool
              ])
         orphans
     in
+    let action_hint =
+      if orphans = [] then
+        "ACTION: STOP calling keeper_tasks_audit — no orphans found. Move on to other work or end your turn."
+      else
+        Printf.sprintf "ACTION: %d orphan(s) found. Use keeper_task_force_release or keeper_task_force_done to resolve, then STOP re-auditing."
+          (List.length orphans)
+    in
     Yojson.Safe.to_string
-      (`Assoc [ "orphan_count", `Int (List.length orphans); "orphans", `List items ])
+      (`Assoc [ "orphan_count", `Int (List.length orphans); "orphans", `List items;
+                "action", `String action_hint ])
   | "keeper_task_force_release" ->
     let task_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
     let reason = Safe_ops.json_string ~default:"" "reason" args in

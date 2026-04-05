@@ -22,16 +22,16 @@ let ref_json ~kind ~label value =
   `Assoc [ ("kind", `String kind); ("label", `String label); ("value", `String value) ]
 
 let route_ref_prefix = '/'
+let route_ref_prefix_string = String.make 1 route_ref_prefix
 
 (** Surface readiness inventories historically stored live spotchecks as a single
     string field. Values that begin with a route prefix are dashboard endpoints;
     all other values are script or command references. Empty strings fall back to
     [script] so malformed values do not get misclassified as routes. *)
 let live_spotcheck_kind (value : string) =
-  match value with
-  | "" -> "script"
-  | _ when value.[0] = route_ref_prefix -> "route"
-  | _ -> "script"
+  if String.starts_with ~prefix:route_ref_prefix_string value
+  then "route"
+  else "script"
 
 let refs_json (refs : verification_refs) =
   [

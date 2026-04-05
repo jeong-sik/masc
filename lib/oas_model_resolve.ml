@@ -85,6 +85,12 @@ let max_context_of_label (label : string) : int =
     "Available" means the provider's API key env var is set (or not required).
     Prefers discovered per-slot context for local providers.
     Falls back to 128_000 if no model is available. *)
+(** Minimum context below which a warning is emitted.
+    8K is the llama-server default, but most keeper conversations
+    need 32K+. If discovered < this, the operator should increase
+    the llama-server -c flag. *)
+let context_warning_threshold = 16_000
+
 let resolve_primary_max_context (labels : string list) : int =
   (* Check discovered context first — applies to any local provider *)
   let discovered = Llm_provider.Provider_registry.discovered_max_context () in
@@ -98,9 +104,14 @@ let resolve_primary_max_context (labels : string list) : int =
         | None -> find rest
         | Some entry ->
           if entry.is_available () then
-            (* For local providers, prefer discovered context *)
             if Provider_adapter.requires_discovery pname then
-              Option.value ~default:entry.max_context discovered
+              let ctx = Option.value ~default:entry.max_context discovered in
+              (if ctx < context_warning_threshold then
+                 Log.warn ~ctx:"OasModelResolve"
+                   "discovered context %d < %d for %s — keeper turns will likely overflow. \
+                    Increase llama-server -c flag (model supports up to %d)."
+                   ctx context_warning_threshold pname entry.max_context);
+              ctx
             else entry.max_context
           else find rest
   in

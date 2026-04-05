@@ -571,9 +571,19 @@ let run_turn
   local_search_fn_ref := (fun ~query ~max_results ->
     let core = Keeper_exec_tools.core_always_tools in
     let retrieved = Agent_sdk.Tool_index.retrieve search_index query in
+    (* Pre-filter: exclude core tools and policy-denied tools.
+       Samchon principle: "if you can verify, you converge" — only return
+       tools the keeper can actually call, preventing hallucinated attempts. *)
+    let allowed = Keeper_exec_tools.keeper_allowed_tool_names meta in
+    let allowed_set =
+      let tbl = Hashtbl.create (List.length allowed) in
+      List.iter (fun n -> Hashtbl.replace tbl n ()) allowed; tbl
+    in
     let new_discoveries =
       retrieved
-      |> List.filter (fun (name, _) -> not (List.mem name core))
+      |> List.filter (fun (name, _) ->
+        not (List.mem name core)
+        && Hashtbl.mem allowed_set name)
       |> List.filteri (fun i _ -> i < max_results)
     in
     (* Register discovered tools for discovery-mode before_turn_hook.

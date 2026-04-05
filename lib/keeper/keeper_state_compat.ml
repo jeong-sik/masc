@@ -23,14 +23,14 @@ let legacy_of_string = function
   | _ -> None
 
 let to_legacy : Keeper_state_machine.phase -> legacy_state = function
-  | Offline -> Stopped
-  | Running -> Running
-  | Failing -> Running
-  | Compacting -> Running
-  | HandingOff -> Running
-  | Draining -> Running
-  | Paused -> Paused
-  | Stopped -> Stopped
-  | Crashed -> Crashed
-  | Restarting -> Crashed
-  | Dead -> Dead
+  | Keeper_state_machine.Offline -> Stopped
+  | Keeper_state_machine.Running -> Running
+  | Keeper_state_machine.Failing -> Running
+  | Keeper_state_machine.Compacting -> Running
+  | Keeper_state_machine.HandingOff -> Running
+  | Keeper_state_machine.Draining -> Running
+  | Keeper_state_machine.Paused -> Paused
+  | Keeper_state_machine.Stopped -> Stopped
+  | Keeper_state_machine.Crashed -> Crashed
+  | Keeper_state_machine.Restarting -> Crashed
+  | Keeper_state_machine.Dead -> Dead

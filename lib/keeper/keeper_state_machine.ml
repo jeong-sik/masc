@@ -196,8 +196,8 @@ let can_transition ~from_phase ~to_phase =
   (* Terminal states accept nothing *)
   | Stopped, _ -> false
   | Dead, _ -> false
-  (* Offline -> Running | Stopped *)
-  | Offline, (Running | Stopped) -> true
+  (* Offline -> Running | Stopped | Draining (stop while not yet started) *)
+  | Offline, (Running | Stopped | Draining) -> true
   | Offline, _ -> false
   (* Running -> buffer states, Paused, Stopped, Crashed (fiber death) *)
   | Running, (Failing | Compacting | HandingOff | Draining | Paused | Stopped | Crashed) -> true
@@ -418,7 +418,60 @@ let conditions_to_json (c : conditions) =
     "drain_complete", `Bool c.drain_complete;
   ]
 
-let event_to_json ev = `String (event_to_string ev)
+let event_to_json (ev : event) : Yojson.Safe.t =
+  let obj typ fields = `Assoc (("type", `String typ) :: fields) in
+  match ev with
+  | Heartbeat_ok -> obj "heartbeat_ok" []
+  | Heartbeat_failed r ->
+    obj "heartbeat_failed" [
+      "consecutive", `Int r.consecutive;
+      "max_allowed", `Int r.max_allowed;
+    ]
+  | Turn_succeeded -> obj "turn_succeeded" []
+  | Turn_failed r ->
+    obj "turn_failed" [
+      "consecutive", `Int r.consecutive;
+      "max_allowed", `Int r.max_allowed;
+    ]
+  | Context_measured r ->
+    obj "context_measured" [
+      "context_ratio", `Float r.context_ratio;
+      "message_count", `Int r.message_count;
+      "token_count", `Int r.token_count;
+      "auto_rules", `Assoc [
+        "reflect", `Bool r.auto_rules.reflect;
+        "plan", `Bool r.auto_rules.plan;
+        "compact", `Bool r.auto_rules.compact;
+        "handoff", `Bool r.auto_rules.handoff;
+        "guardrail_stop", `Bool r.auto_rules.guardrail_stop;
+        "goal_drift", `Float r.auto_rules.goal_drift;
+      ];
+    ]
+  | Compaction_started -> obj "compaction_started" []
+  | Compaction_completed r ->
+    obj "compaction_completed" [
+      "before_tokens", `Int r.before_tokens;
+      "after_tokens", `Int r.after_tokens;
+    ]
+  | Compaction_failed r -> obj "compaction_failed" ["reason", `String r.reason]
+  | Handoff_started -> obj "handoff_started" []
+  | Handoff_completed r ->
+    obj "handoff_completed" [
+      "new_trace_id", `String r.new_trace_id;
+      "generation", `Int r.generation;
+    ]
+  | Handoff_failed r -> obj "handoff_failed" ["reason", `String r.reason]
+  | Operator_pause -> obj "operator_pause" []
+  | Operator_resume -> obj "operator_resume" []
+  | Operator_stop r -> obj "operator_stop" ["remove_meta", `Bool r.remove_meta]
+  | Stop_requested -> obj "stop_requested" []
+  | Drain_complete -> obj "drain_complete" []
+  | Fiber_started -> obj "fiber_started" []
+  | Fiber_terminated r -> obj "fiber_terminated" ["outcome", `String r.outcome]
+  | Supervisor_restart_attempt r ->
+    obj "supervisor_restart_attempt" ["attempt", `Int r.attempt]
+  | Restart_budget_exhausted -> obj "restart_budget_exhausted" []
+  | Guardrail_stop r -> obj "guardrail_stop" ["reason", `String r.reason]
 
 let transition_result_to_json (tr : transition_result) =
   `Assoc [

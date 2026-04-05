@@ -1,9 +1,9 @@
-# RFC-0002: Keeper 10-State Machine + Det/NonDet Boundary Formalization
+# RFC-0002: Keeper 11-State Machine + Det/NonDet Boundary Formalization
 
 **Status**: Draft
 **Date**: 2026-04-05
 **Scope**: `masc-mcp` keeper lifecycle state machine redesign
-**One sentence**: Keeper의 5-state 상태 머신을 10-state로 확장하고, 비결정론적 측정과 결정론적 전이 사이에 관찰 가능한 buffer state와 snapshot-at-decision 경계를 도입한다.
+**One sentence**: Keeper의 5-state 상태 머신을 11-state로 확장하고, 비결정론적 측정과 결정론적 전이 사이에 관찰 가능한 buffer state와 snapshot-at-decision 경계를 도입한다.
 
 ## Related Documents
 
@@ -57,7 +57,7 @@ Layer 1 (Storage)         Atomic registry updates + backward-compat projection
 
 ## State Definition
 
-### 10-State Phase Enum
+### 11-State Phase Enum
 
 ```ocaml
 type phase =
@@ -127,7 +127,7 @@ Terminal states: Stopped, Dead.
 ### Backward Compatibility
 
 ```ocaml
-(* 10-state -> 5-state projection *)
+(* 11-state -> 5-state projection *)
 let to_legacy = function
   | Offline       -> Stopped
   | Running       -> Running
@@ -202,7 +202,7 @@ val evaluate : measurement_snapshot -> event list
 | Risk | Mitigation |
 |------|-----------|
 | Eio fiber safety | conditions는 non-yielding 연산만 사용. 단일 fiber 소유 |
-| Dashboard backward compat | registry_state (5-state) 유지, phase (10-state) 추가 |
+| Dashboard backward compat | registry_state (5-state) 유지, phase (11-state) 추가 |
 | Transition table 복잡도 | derive_phase single pure function + property test 전수 검증 |
 | GADT 과잉 | Phase payload 차이가 작아 plain variant + exhaustive match 선택 |
 

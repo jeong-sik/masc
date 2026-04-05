@@ -62,7 +62,7 @@ let evaluate (s : measurement_snapshot) : event list =
   let compact_msg = s.context.message_count >= t.compaction_message_gate in
   let compact_tok = s.context.token_count >= t.compaction_token_gate in
   let cooldown_ok =
-    s.timing.since_last_compaction_ts >= float_of_int t.compaction_cooldown_sec
+    s.timing.since_last_compaction_sec >= float_of_int t.compaction_cooldown_sec
   in
   if (compact_ratio || compact_msg || compact_tok) && cooldown_ok then
     add Compaction_started;
@@ -70,7 +70,7 @@ let evaluate (s : measurement_snapshot) : event list =
   (* 5. Handoff: context ratio above threshold *)
   let handoff_threshold = t.handoff_threshold *. t.model_handoff_multiplier in
   let handoff_cooldown_ok =
-    s.timing.since_last_handoff_ts >= float_of_int t.handoff_cooldown_sec
+    s.timing.since_last_handoff_sec >= float_of_int t.handoff_cooldown_sec
   in
   if t.auto_handoff_enabled
      && s.context.context_ratio >= handoff_threshold
@@ -117,6 +117,7 @@ let evaluate (s : measurement_snapshot) : event list =
   List.sort (fun a b -> compare (event_priority a) (event_priority b))
     (List.rev !events)
 
-let prioritized_event = function
+let rec prioritized_event = function
   | [] -> Heartbeat_ok
+  | Context_measured _ :: rest -> prioritized_event rest
   | first :: _ -> first

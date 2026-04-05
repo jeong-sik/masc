@@ -616,7 +616,8 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
             ~name:tool_name ~arguments
         in
         if not success then
-          Log.Server.error "gRPC tool call failed: %s — %s" tool_name result_str;
+          Log.Server.error "gRPC tool call failed: tool=%s error_bytes=%d"
+            tool_name (String.length result_str);
         if success then Ok result_str else Error result_str
       in
       Masc_grpc_server.start ~sw ~env ~room_config:state.room_config

@@ -263,8 +263,13 @@ let finalize (acc : accumulator) (outcome : trajectory_outcome) : trajectory =
 (* Entropy detection                                                *)
 (* ================================================================ *)
 
-(** Detect repeated tool calls: if the same tool is called N+ times
-    consecutively, return Some(tool_name, count). *)
+(** Detect whether the current candidate call would make a consecutive streak of
+    calls to [tool_name] reach or exceed [threshold]. The count includes the
+    candidate call being checked, so rejection can occur before executing the
+    threshold-th call.
+    If [args_json] is provided, only consecutive calls with the same tool name
+    and the same raw [args_json] string are counted; this is string equality,
+    not semantic JSON equality. *)
 let detect_entropy ?(threshold = 3) ?args_json (acc : accumulator) (tool_name : string) : (string * int) option =
   let recent =
     acc.entries

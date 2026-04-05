@@ -271,14 +271,20 @@ let keeper_compact_ratio () : float =
 let keeper_compact_max_messages () : int =
   int_of_env_default
     "MASC_KEEPER_COMPACT_MAX_MESSAGES"
-    ~default:240
+    (* Lowered from 240: keeper turns are short-lived Agent.run sessions
+       (max ~10 messages before idle detection).  A gate of 240 was never
+       reachable, preventing continuity_summary updates entirely. *)
+    ~default:12
     ~min_v:0
     ~max_v:5000
 
 let keeper_compact_max_tokens () : int =
   int_of_env_default
     "MASC_KEEPER_COMPACT_MAX_TOKENS"
-    ~default:8000
+    (* Lowered from 8000: within a single keeper turn the token count
+       rarely exceeds 5K.  A reachable gate triggers continuity updates
+       that enable cross-turn memory accumulation. *)
+    ~default:4000
     ~min_v:0
     ~max_v:5000000
 

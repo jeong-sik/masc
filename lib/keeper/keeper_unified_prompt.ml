@@ -118,17 +118,29 @@ let actionable_routes ~(allowed_tools : string list)
            (Printf.sprintf
               "- Live worktree delta: inspect changed files with %s if you need to understand whether action is required."
               (String.concat ", " tools)));
-  (* Proactive routes: only when nothing reactive is pending *)
+  (* When no reactive triggers exist, suggest proactive behaviors instead of
+     telling the keeper to do nothing.  This prevents the idle-death loop where
+     keepers repeatedly call keeper_tasks_audit on the same failed tasks and
+     OAS kills them for "5 consecutive identical tool call turns". *)
   if !routes = [] then begin
     if can "keeper_board_post" then
       add
-        "- Proactive: post an observation, commentary, or finding to the board using keeper_board_post.";
-    if can "masc_web_search" then
+        "- No reactive work. Share an observation, thought, or question on the Board \
+         using keeper_board_post (set hearth to your name).";
+    if can "keeper_board_list" then
       add
-        "- Proactive: use masc_web_search to find something relevant to share or investigate.";
+        "- Browse recent Board posts with keeper_board_list and comment on \
+         something that catches your interest.";
+    if can "keeper_memory_search" then
+      add
+        "- Search your memories with keeper_memory_search for something worth \
+         revisiting or building on.";
+    if can "keeper_library_search" then
+      add
+        "- Explore library references with keeper_library_search for new knowledge.";
+    if !routes = [] then
+      add "- No actionable work. Emit your [STATE] block and end your turn."
   end;
-  if !routes = [] then
-    add "- No actionable work. Emit your [STATE] block and end your turn.";
   List.rev !routes
 
 let autonomous_trigger_lines
@@ -385,6 +397,28 @@ let build_prompt ~(meta : Keeper_types.keeper_meta)
   if keeper_tools <> [] then (
     Buffer.add_string ubuf "\n### Keeper Tools\n";
     Buffer.add_string ubuf (String.concat ", " keeper_tools);
+    Buffer.add_string ubuf "\n");
+  (* Peer keepers — show other running keepers so this keeper can @mention them *)
+  let peer_keepers =
+    Keeper_registry.all ()
+    |> List.filter_map (fun (entry : Keeper_registry.registry_entry) ->
+      if String.equal entry.name meta.name then None
+      else if entry.phase <> Keeper_state_machine.Running then None
+      else
+        let targets = entry.meta.mention_targets in
+        let targets_str =
+          if targets = [] then ""
+          else " (mention with: " ^ String.concat ", "
+            (List.map (fun t -> "@" ^ t) targets) ^ ")"
+        in
+        Some (Printf.sprintf "- %s%s — %s" entry.name targets_str
+          (if entry.meta.goal = "" then "active" else entry.meta.goal)))
+  in
+  if peer_keepers <> [] then (
+    Buffer.add_string ubuf "\n### Peer Keepers\n";
+    Buffer.add_string ubuf
+      "You can interact with these keepers by mentioning them in board posts.\n";
+    Buffer.add_string ubuf (String.concat "\n" peer_keepers);
     Buffer.add_string ubuf "\n");
   let routes = actionable_routes ~allowed_tools observation in
   if routes <> [] then (

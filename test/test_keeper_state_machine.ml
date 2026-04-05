@@ -16,12 +16,10 @@ module Meas = Masc_mcp.Keeper_measurement
 module Guard = Masc_mcp.Keeper_guard
 
 let phase_t = testable
-  (Fmt.of_to_string SM.phase_to_string)
-  (fun a b -> SM.phase_to_string a = SM.phase_to_string b)
+  (Fmt.of_to_string SM.phase_to_string) (=)
 
 let legacy_t = testable
-  (Fmt.of_to_string Compat.legacy_to_string)
-  (fun a b -> Compat.legacy_to_string a = Compat.legacy_to_string b)
+  (Fmt.of_to_string Compat.legacy_to_string) (=)
 
 (* ── Helpers ───────────────────────────────────────────── *)
 
@@ -235,6 +233,48 @@ let test_apply_drain_lifecycle () =
     ~conditions:tr1.updated_conditions
     ~event:SM.Drain_complete in
   check phase_t "-> Stopped" SM.Stopped tr2.new_phase
+
+let test_apply_drain_fiber_death () =
+  (* Draining + fiber dies -> Crashed (drain did not complete) *)
+  let draining_conds = { running_conditions with
+    stop_requested = true;
+    drain_complete = false;
+  } in
+  let tr = apply_ok
+    ~current_phase:SM.Draining
+    ~conditions:draining_conds
+    ~event:(SM.Fiber_terminated { outcome = "exception during drain" }) in
+  check phase_t "Draining + fiber death -> Crashed" SM.Crashed tr.new_phase
+
+let test_apply_drain_complete_then_fiber_exit () =
+  (* drain_complete=true + fiber exits -> Stopped (drain succeeded) *)
+  let drain_done_conds = { running_conditions with
+    stop_requested = true;
+    drain_complete = true;
+  } in
+  let tr = apply_ok
+    ~current_phase:SM.Draining
+    ~conditions:drain_done_conds
+    ~event:(SM.Fiber_terminated { outcome = "clean exit" }) in
+  check phase_t "drain complete + fiber exit -> Stopped" SM.Stopped tr.new_phase
+
+let test_apply_failing_to_crashed () =
+  (* Failing keeper receives fatal failure -> Crashed *)
+  let failing_conds = { running_conditions with heartbeat_healthy = false } in
+  let tr = apply_ok
+    ~current_phase:SM.Failing
+    ~conditions:failing_conds
+    ~event:(SM.Fiber_terminated { outcome = "fatal" }) in
+  check phase_t "Failing + fiber death -> Crashed" SM.Crashed tr.new_phase
+
+let test_apply_partial_heartbeat_failure () =
+  (* Partial failure (1/5) should still mark unhealthy and go to Failing *)
+  let tr = apply_ok
+    ~current_phase:SM.Running
+    ~conditions:running_conditions
+    ~event:(SM.Heartbeat_failed { consecutive = 1; max_allowed = 5 }) in
+  check phase_t "partial failure -> Failing" SM.Failing tr.new_phase;
+  check bool "hb unhealthy on partial" false tr.updated_conditions.heartbeat_healthy
 
 let test_apply_fiber_terminated_crash () =
   let tr = apply_ok
@@ -519,6 +559,10 @@ let () =
       test_case "handoff lifecycle" `Quick test_apply_handoff_lifecycle;
       test_case "pause/resume" `Quick test_apply_operator_pause_resume;
       test_case "drain lifecycle" `Quick test_apply_drain_lifecycle;
+      test_case "drain + fiber death -> Crashed" `Quick test_apply_drain_fiber_death;
+      test_case "drain complete + fiber exit -> Stopped" `Quick test_apply_drain_complete_then_fiber_exit;
+      test_case "Failing + fiber death -> Crashed" `Quick test_apply_failing_to_crashed;
+      test_case "partial heartbeat -> Failing" `Quick test_apply_partial_heartbeat_failure;
       test_case "fiber terminated -> Crashed" `Quick test_apply_fiber_terminated_crash;
       test_case "crash -> restart -> Running" `Quick test_apply_crash_restart_lifecycle;
       test_case "crash -> Dead" `Quick test_apply_crash_to_dead;

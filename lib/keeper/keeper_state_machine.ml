@@ -228,18 +228,37 @@ let can_transition ~from_phase ~to_phase =
 
 let derive_phase (c : conditions) : phase =
   (* Priority order: first match wins.
-     Terminal/lifecycle checks first, then buffer states, then healthy. *)
-  if not c.fiber_alive && not c.restart_budget_remaining then Dead
+
+     Design note: stop_requested + drain_complete -> Stopped is checked
+     BEFORE fiber_alive checks. This means a keeper that completed its
+     drain cleanly (drain_complete=true) reaches Stopped even if the
+     fiber subsequently exits. This is correct: the drain succeeded,
+     so the keeper should be Stopped, not Crashed.
+
+     However, if the fiber dies DURING drain (drain_complete=false),
+     the fiber_alive checks fire first and the keeper goes to Crashed.
+     This is also correct: the drain did not complete. *)
+
+  (* 1. Completed stop always wins — drain succeeded *)
+  if c.stop_requested && c.drain_complete then Stopped
+  (* 2. Fiber lifecycle — Dead / Restarting / Crashed *)
+  else if not c.fiber_alive && not c.restart_budget_remaining then Dead
   else if not c.fiber_alive && c.restart_budget_remaining && c.backoff_elapsed then Restarting
-  else if not c.fiber_alive && c.restart_budget_remaining && not c.backoff_elapsed then Crashed
-  else if c.stop_requested && c.drain_complete then Stopped
-  else if c.stop_requested && not c.drain_complete then Draining
+  else if not c.fiber_alive && c.restart_budget_remaining then Crashed
+  (* 3. In-progress stop — still draining *)
+  else if c.stop_requested then Draining
+  (* 4. Guardrail -> Failing *)
   else if c.guardrail_triggered then Failing
+  (* 5. Operator control *)
   else if c.operator_paused then Paused
+  (* 6. Buffer states: in-progress operations *)
   else if c.handoff_active then HandingOff
   else if c.compaction_active then Compacting
+  (* 7. Health degradation *)
   else if not c.heartbeat_healthy || not c.turn_healthy then Failing
+  (* 8. Healthy running *)
   else if c.fiber_alive then Running
+  (* 9. Initial / unreachable fallback *)
   else Offline
 
 (* ── Condition Updaters ────────────────────────────────── *)
@@ -250,11 +269,15 @@ let update_conditions (c : conditions) (ev : event) : conditions =
   | Heartbeat_ok ->
     { c with heartbeat_healthy = true }
   | Heartbeat_failed { consecutive; max_allowed } ->
-    { c with heartbeat_healthy = consecutive < max_allowed }
+    (* Any failure makes heartbeat unhealthy. Recovery requires Heartbeat_ok.
+       The consecutive count is for audit/logging, not for health determination. *)
+    let _ = max_allowed in
+    { c with heartbeat_healthy = consecutive = 0 }
   | Turn_succeeded ->
     { c with turn_healthy = true }
   | Turn_failed { consecutive; max_allowed } ->
-    { c with turn_healthy = consecutive < max_allowed }
+    let _ = max_allowed in
+    { c with turn_healthy = consecutive = 0 }
   | Context_measured { auto_rules; _ } ->
     { c with
       guardrail_triggered = auto_rules.guardrail_stop;

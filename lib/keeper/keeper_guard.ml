@@ -95,7 +95,7 @@ let evaluate (s : measurement_snapshot) : event list =
       plan =
         s.similarity.goal_alignment <= t.plan_goal_alignment_threshold
         || s.similarity.response_alignment <= t.plan_response_alignment_threshold;
-      compact = compact_ratio || compact_msg || compact_tok;
+      compact = (compact_ratio || compact_msg || compact_tok) && cooldown_ok;
       handoff =
         t.auto_handoff_enabled
         && s.context.context_ratio >= handoff_threshold;

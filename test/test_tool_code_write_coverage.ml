@@ -1,143 +1,168 @@
-(** Coverage tests for Tool_code_write — git clone org validation.
+(** Coverage tests for Tool_code_write — git clone URL parsing
+    and org allowlist validation. Pure function tests only. *)
 
-    Tests extract_github_org, validate_clone_url, and clone dispatch
-    error paths. Pure function tests do not require Eio or file I/O.
-*)
+open Alcotest
 
 module Tool_code_write = Masc_mcp.Tool_code_write
 
-let test_counter = ref 0
-let pass = ref 0
-let fail = ref 0
-
-let check name cond =
-  incr test_counter;
-  if cond then (
-    incr pass;
-    Printf.printf "\027[32mPASS\027[0m %s\n" name)
-  else (
-    incr fail;
-    Printf.printf "\027[31mFAIL\027[0m %s\n" name)
-
 (* ── extract_github_org ──────────────────────────────────────────── *)
 
-let () = check "extract_github_org: https URL with .git"
-  (Tool_code_write.extract_github_org
-     "https://github.com/jeong-sik/masc-mcp.git"
-   = Some "jeong-sik")
+let test_https_url () =
+  (check (option string)) "https with .git"
+    (Some "jeong-sik")
+    (Tool_code_write.extract_github_org
+       "https://github.com/jeong-sik/masc-mcp.git")
 
-let () = check "extract_github_org: https URL without .git"
-  (Tool_code_write.extract_github_org
-     "https://github.com/jeong-sik/masc-mcp"
-   = Some "jeong-sik")
+let test_https_url_no_git () =
+  (check (option string)) "https without .git"
+    (Some "jeong-sik")
+    (Tool_code_write.extract_github_org
+       "https://github.com/jeong-sik/masc-mcp")
 
-let () = check "extract_github_org: ssh URL"
-  (Tool_code_write.extract_github_org
-     "git@github.com:jeong-sik/oas.git"
-   = Some "jeong-sik")
+let test_ssh_url () =
+  (check (option string)) "ssh URL"
+    (Some "jeong-sik")
+    (Tool_code_write.extract_github_org
+       "git@github.com:jeong-sik/oas.git")
 
-let () = check "extract_github_org: ssh protocol URL"
-  (Tool_code_write.extract_github_org
-     "ssh://git@github.com/jeong-sik/oas.git"
-   = Some "jeong-sik")
+let test_ssh_protocol_url () =
+  (check (option string)) "ssh protocol URL"
+    (Some "jeong-sik")
+    (Tool_code_write.extract_github_org
+       "ssh://git@github.com/jeong-sik/oas.git")
 
-let () = check "extract_github_org: non-github URL returns None"
-  (Tool_code_write.extract_github_org
-     "https://gitlab.com/someone/repo.git"
-   = None)
+let test_non_github_url () =
+  (check (option string)) "non-github returns None"
+    None
+    (Tool_code_write.extract_github_org
+       "https://gitlab.com/someone/repo.git")
 
-let () = check "extract_github_org: bare string returns None"
-  (Tool_code_write.extract_github_org "not-a-url" = None)
+let test_bare_string () =
+  (check (option string)) "bare string returns None"
+    None
+    (Tool_code_write.extract_github_org "not-a-url")
 
-let () = check "extract_github_org: different org"
-  (Tool_code_write.extract_github_org
-     "https://github.com/kidsnote/backend.git"
-   = Some "kidsnote")
+let test_different_org () =
+  (check (option string)) "different org"
+    (Some "kidsnote")
+    (Tool_code_write.extract_github_org
+       "https://github.com/kidsnote/backend.git")
 
-let () = check "extract_github_org: empty string returns None"
-  (Tool_code_write.extract_github_org "" = None)
+let test_empty_string () =
+  (check (option string)) "empty string returns None"
+    None
+    (Tool_code_write.extract_github_org "")
 
-let () = check "extract_github_org: URL with no path after org"
-  (Tool_code_write.extract_github_org
-     "https://github.com/jeong-sik"
-   = None)
+let test_no_repo_path () =
+  (check (option string)) "URL with no path after org"
+    None
+    (Tool_code_write.extract_github_org
+       "https://github.com/jeong-sik")
+
+(* ── Security: authority spoofing ──────────────────────────────── *)
+
+let test_domain_spoofing () =
+  (check (option string)) "github.com.evil.com rejected"
+    None
+    (Tool_code_write.extract_github_org
+       "https://github.com.evil.com/jeong-sik/repo.git")
+
+let test_authority_spoofing () =
+  (check (option string)) "authority via @ rejected"
+    None
+    (Tool_code_write.extract_github_org
+       "https://jeong-sik@evil.com/repo")
+
+let test_uppercase_normalized () =
+  (check (option string)) "uppercase normalized to lowercase"
+    (Some "jeong-sik")
+    (Tool_code_write.extract_github_org
+       "https://github.com/JEONG-SIK/repo.git")
+
+let test_percent_encoded_org () =
+  (check (option string)) "percent-encoded org rejected"
+    None
+    (Tool_code_write.extract_github_org
+       "https://github.com/jeong%2Dsik/repo.git")
+
+let test_org_with_dots () =
+  (check (option string)) "org with dots rejected"
+    None
+    (Tool_code_write.extract_github_org
+       "https://github.com/jeong.sik/repo.git")
 
 (* ── validate_clone_url ──────────────────────────────────────────── *)
 
-let () =
-  (* Inject cache to avoid file I/O *)
-  Tool_code_write.clone_allowed_orgs_cache := Some ["jeong-sik"]
+let with_cache orgs f =
+  Tool_code_write.clone_allowed_orgs_cache := Some orgs;
+  f ()
 
-let () = check "validate_clone_url: allowed org passes"
-  (Tool_code_write.validate_clone_url ~base_path:"/tmp"
-     "https://github.com/jeong-sik/masc-mcp.git" = Ok ())
+let test_allowed_org () = with_cache ["jeong-sik"] @@ fun () ->
+  (check (result unit string)) "allowed org passes"
+    (Ok ())
+    (Tool_code_write.validate_clone_url ~base_path:"/tmp"
+       "https://github.com/jeong-sik/masc-mcp.git")
 
-let () = check "validate_clone_url: disallowed org rejected"
-  (match Tool_code_write.validate_clone_url ~base_path:"/tmp"
-     "https://github.com/other-org/repo.git" with
-   | Error _ -> true | Ok () -> false)
+let test_disallowed_org () = with_cache ["jeong-sik"] @@ fun () ->
+  match Tool_code_write.validate_clone_url ~base_path:"/tmp"
+    "https://github.com/other-org/repo.git" with
+  | Error _ -> ()
+  | Ok () -> fail "expected error for disallowed org"
 
-let () = check "validate_clone_url: non-github URL rejected"
-  (match Tool_code_write.validate_clone_url ~base_path:"/tmp"
-     "https://gitlab.com/jeong-sik/repo.git" with
-   | Error _ -> true | Ok () -> false)
+let test_non_github_rejected () = with_cache ["jeong-sik"] @@ fun () ->
+  match Tool_code_write.validate_clone_url ~base_path:"/tmp"
+    "https://gitlab.com/jeong-sik/repo.git" with
+  | Error _ -> ()
+  | Ok () -> fail "expected error for non-github URL"
 
-let () = check "validate_clone_url: ssh allowed org passes"
-  (Tool_code_write.validate_clone_url ~base_path:"/tmp"
-     "git@github.com:jeong-sik/oas.git" = Ok ())
+let test_ssh_allowed () = with_cache ["jeong-sik"] @@ fun () ->
+  (check (result unit string)) "ssh allowed org passes"
+    (Ok ())
+    (Tool_code_write.validate_clone_url ~base_path:"/tmp"
+       "git@github.com:jeong-sik/oas.git")
 
-let () =
-  Tool_code_write.clone_allowed_orgs_cache := Some []
+let test_empty_allowlist () = with_cache [] @@ fun () ->
+  match Tool_code_write.validate_clone_url ~base_path:"/tmp"
+    "https://github.com/jeong-sik/repo.git" with
+  | Error msg ->
+    (check bool) "mentions 'No allowed orgs'" true
+      (String.starts_with ~prefix:"No allowed orgs" msg)
+  | Ok () -> fail "expected error for empty allowlist"
 
-let () = check "validate_clone_url: empty allowlist rejected"
-  (match Tool_code_write.validate_clone_url ~base_path:"/tmp"
-     "https://github.com/jeong-sik/repo.git" with
-   | Error msg ->
-     let needle = "No allowed orgs" in
-     (try ignore (Str.search_forward (Str.regexp_string needle) msg 0); true
-      with Not_found -> false)
-   | Ok () -> false)
+let test_mixed_case_org () = with_cache ["jeong-sik"] @@ fun () ->
+  (check (result unit string)) "mixed-case org passes"
+    (Ok ())
+    (Tool_code_write.validate_clone_url ~base_path:"/tmp"
+       "https://github.com/Jeong-Sik/repo.git")
 
-(* ── Security: authority spoofing ─────────────────────────────────── *)
-
-let () = check "extract_github_org: domain spoofing github.com.evil.com rejected"
-  (Tool_code_write.extract_github_org
-     "https://github.com.evil.com/jeong-sik/repo.git"
-   = None)
-
-let () = check "extract_github_org: authority spoofing via @ rejected"
-  (Tool_code_write.extract_github_org
-     "https://jeong-sik@evil.com/repo"
-   = None)
-
-(* ── Security: case-insensitive org matching ─────────────────────── *)
+(* ── Runner ──────────────────────────────────────────────────────── *)
 
 let () =
-  Tool_code_write.clone_allowed_orgs_cache := Some ["jeong-sik"]
-
-let () = check "validate_clone_url: mixed-case org passes (case-insensitive)"
-  (Tool_code_write.validate_clone_url ~base_path:"/tmp"
-     "https://github.com/Jeong-Sik/repo.git" = Ok ())
-
-let () = check "extract_github_org: uppercase normalized to lowercase"
-  (Tool_code_write.extract_github_org
-     "https://github.com/JEONG-SIK/repo.git"
-   = Some "jeong-sik")
-
-(* ── Security: org name validation ───────────────────────────────── *)
-
-let () = check "extract_github_org: percent-encoded org rejected"
-  (Tool_code_write.extract_github_org
-     "https://github.com/jeong%2Dsik/repo.git"
-   = None)
-
-let () = check "extract_github_org: org with dots rejected"
-  (Tool_code_write.extract_github_org
-     "https://github.com/jeong.sik/repo.git"
-   = None)
-
-(* ── Summary ─────────────────────────────────────────────────────── *)
-
-let () =
-  Printf.printf "\n%d/%d tests passed\n" !pass !test_counter;
-  if !fail > 0 then exit 1
+  Alcotest.run "Tool_code_write" [
+    ("extract_github_org", [
+      test_case "https with .git" `Quick test_https_url;
+      test_case "https without .git" `Quick test_https_url_no_git;
+      test_case "ssh URL" `Quick test_ssh_url;
+      test_case "ssh protocol URL" `Quick test_ssh_protocol_url;
+      test_case "non-github URL" `Quick test_non_github_url;
+      test_case "bare string" `Quick test_bare_string;
+      test_case "different org" `Quick test_different_org;
+      test_case "empty string" `Quick test_empty_string;
+      test_case "no repo path" `Quick test_no_repo_path;
+    ]);
+    ("security", [
+      test_case "domain spoofing" `Quick test_domain_spoofing;
+      test_case "authority spoofing" `Quick test_authority_spoofing;
+      test_case "uppercase normalized" `Quick test_uppercase_normalized;
+      test_case "percent-encoded org" `Quick test_percent_encoded_org;
+      test_case "org with dots" `Quick test_org_with_dots;
+    ]);
+    ("validate_clone_url", [
+      test_case "allowed org" `Quick test_allowed_org;
+      test_case "disallowed org" `Quick test_disallowed_org;
+      test_case "non-github rejected" `Quick test_non_github_rejected;
+      test_case "ssh allowed" `Quick test_ssh_allowed;
+      test_case "empty allowlist" `Quick test_empty_allowlist;
+      test_case "mixed-case org" `Quick test_mixed_case_org;
+    ]);
+  ]

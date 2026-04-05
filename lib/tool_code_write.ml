@@ -78,10 +78,14 @@ let load_clone_allowed_orgs ~base_path =
     let rel = "config/tool_policy.toml" in
     let path = Filename.concat base_path rel in
     let orgs = match Safe_ops.read_file_safe path with
-      | Error _ -> []
+      | Error msg ->
+        Log.Keeper.warn "git_clone: cannot read %s: %s" path msg;
+        []
       | Ok content ->
         match Keeper_toml_loader.parse_toml content with
-        | Error _ -> []
+        | Error msg ->
+          Log.Keeper.warn "git_clone: TOML parse error in %s: %s" path msg;
+          []
         | Ok doc -> Keeper_toml_loader.toml_string_list doc "git_clone.allowed_orgs"
     in
     clone_allowed_orgs_cache := Some orgs;

@@ -304,6 +304,57 @@ let system_internal_surface_tools =
   ]
 
 (* ================================================================ *)
+(* Role catalogs — curated subsets for agent role assignment.        *)
+(* These are NOT surfaces; they define what a role *should* see.    *)
+(* Consumers must filter against actual surfaced tools via          *)
+(* [filter_catalog_to_available] before exposing to agents.        *)
+(* ================================================================ *)
+
+let coordination_role_tools : string list =
+  [
+    "masc_status";
+    "masc_tasks";
+    "masc_add_task";
+    "masc_broadcast";
+    "masc_join";
+    "masc_leave";
+    "masc_who";
+    "masc_heartbeat";
+    "masc_messages";
+    "masc_board_list";
+    "masc_board_post";
+    "masc_board_comment";
+    "masc_board_vote";
+    "masc_board_get";
+    "masc_claim_next";
+    "masc_transition";
+    "masc_team_session_start";
+    "masc_team_session_status";
+    "masc_team_session_events";
+    "masc_team_session_report";
+    "masc_team_session_list";
+    "masc_spawn";
+  ]
+
+let execution_role_tools : string list =
+  [
+    "masc_heartbeat";
+    "masc_team_session_step";
+    "masc_team_session_status";
+    "masc_claim_next";
+    "masc_transition";
+    "masc_broadcast";
+    "masc_code_search";
+    "masc_code_symbols";
+    "masc_code_read";
+    "masc_run_init";
+    "masc_run_log";
+    "masc_run_deliverable";
+    "masc_run_get";
+    "masc_tool_help";
+  ]
+
+(* ================================================================ *)
 (* Surface query functions                                          *)
 (* ================================================================ *)
 

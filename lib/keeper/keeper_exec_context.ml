@@ -55,9 +55,6 @@ let count_tokens (system_prompt : string) (msgs : Agent_sdk.Types.message list) 
 let token_count (ctx : working_context) =
   count_tokens ctx.system_prompt ctx.messages
 
-let message_token_count (ctx : working_context) =
-  count_tokens "" ctx.messages
-
 let message_count (ctx : working_context) =
   List.length ctx.messages
 
@@ -647,10 +644,6 @@ let compact_if_needed
           let msgs_after_fold =
             Agent_sdk.Context_reducer.reduce fold_reducer msgs_after_compact
           in
-          let token_count =
-            Context_compact_oas.count_tokens ctx.system_prompt msgs_after_fold
-          in
-          let _ = token_count in
           msgs_after_fold
         in
         let compacted_ctx =
@@ -913,10 +906,6 @@ let[@warning "-32"] recover_latest_checkpoint_for_overflow_retry
       let compacted_ctx, trigger, base_decision =
         compact_if_needed ~meta:retry_meta ~now_ts ctx
       in
-      let strategy_after_message_tokens =
-        message_token_count compacted_ctx
-      in
-      let _ = strategy_after_message_tokens in
       let after_tokens = token_count compacted_ctx in
       let decision = base_decision in
       let compaction_applied =
@@ -925,7 +914,6 @@ let[@warning "-32"] recover_latest_checkpoint_for_overflow_retry
       let meaningful_reduction = after_tokens < before_tokens in
       if not (compaction_applied && meaningful_reduction) then None
       else
-        let _ = strategy_after_message_tokens in
         let compaction =
           {
             applied = true;

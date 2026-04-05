@@ -50,10 +50,9 @@ let register_all () =
     "masc_code_shell"; "masc_code_git";
   ];
 
-  (* ── Mod_a2a: Tool_a2a ───────────────────────────────────────── *)
+  (* ── Mod_a2a: a2a federation tools deprecated (#4999).
+     poll_events and heartbeat_result remain — used by dashboard/auth. *)
   reg Mod_a2a [
-    "masc_a2a_discover"; "masc_a2a_query_skill"; "masc_a2a_delegate";
-    "masc_a2a_subscribe"; "masc_a2a_unsubscribe";
     "masc_poll_events"; "masc_heartbeat_result";
   ];
 

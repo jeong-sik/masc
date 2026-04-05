@@ -93,6 +93,18 @@ let test_parse_string_array () =
      | _ -> fail "expected Toml_string_array")
   | Error e -> fail e
 
+let test_parse_string_array_escaped_quotes () =
+  let input = {|tags = ["a\"b", "c\\d"]|} in
+  match TL.parse_toml input with
+  | Ok doc ->
+    (match List.assoc_opt "tags" doc with
+     | Some (TL.Toml_string_array xs) ->
+       check int "array length" 2 (List.length xs);
+       check string "escaped quote" "a\"b" (List.nth xs 0);
+       check string "escaped backslash" "c\\d" (List.nth xs 1)
+     | _ -> fail "expected Toml_string_array")
+  | Error e -> fail e
+
 let test_parse_empty_array () =
   let input = "items = []" in
   match TL.parse_toml input with
@@ -771,6 +783,8 @@ let () =
           test_case "float value" `Quick test_parse_float_value;
           test_case "bool values" `Quick test_parse_bool_values;
           test_case "string array" `Quick test_parse_string_array;
+          test_case "string array escaped quotes" `Quick
+            test_parse_string_array_escaped_quotes;
           test_case "empty array" `Quick test_parse_empty_array;
           test_case "table" `Quick test_parse_table;
           test_case "inline comment" `Quick test_parse_inline_comment;

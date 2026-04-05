@@ -88,7 +88,7 @@ let me_root_voice_config_path_opt () =
   trim_opt (Env_config_core.me_root_opt ())
   |> Option.map (fun root -> Filename.concat root ".masc/voice_config.json")
 
-let cwd_voice_config_path () =
+let fallback_voice_config_path () =
   let root =
     match Env_config_core.base_path_opt () with
     | Some bp -> bp
@@ -101,7 +101,7 @@ let config_path_candidates () =
     base_path_voice_config_path_opt ();
     repo_voice_config_path_opt ();
     me_root_voice_config_path_opt ();
-    Some (cwd_voice_config_path ());
+    Some (fallback_voice_config_path ());
   ]
   |> List.filter_map Fun.id
   |> dedupe_keep_order
@@ -111,7 +111,7 @@ let config_path () =
   match List.find_opt Sys.file_exists candidates, candidates with
   | Some path, _ -> path
   | None, path :: _ -> path
-  | None, [] -> cwd_voice_config_path ()
+  | None, [] -> fallback_voice_config_path ()
 
 let trim_nonempty = function
   | `String value ->

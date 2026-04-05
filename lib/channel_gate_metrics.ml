@@ -202,7 +202,7 @@ let update_error_fields acc ~now ~kind ~message =
   acc.last_error_kind <- kind;
   acc.last_error <- message
 
-let update_binding_error_fields acc ~now ~kind ~message =
+let update_binding_error_fields (acc : binding_acc) ~now ~kind ~message =
   acc.err_count <- acc.err_count + 1;
   acc.last_error_ts <- now;
   acc.last_error_kind <- kind;
@@ -354,11 +354,11 @@ let record_internal_error_exn ~channel ~room_id ~keeper ~duration_ms _exn =
   record_attempt ~channel ~room_id ~keeper ~duration_ms
     (Internal_error "internal error")
 
-let snapshot () =
+let snapshot () : channel_stats list =
   Eio_guard.with_mutex_ro mu (fun () ->
       Hashtbl.fold
-        (fun channel acc rows ->
-          {
+        (fun channel (acc : stats_acc) rows ->
+          ({
             channel;
             message_count = acc.msg_count;
             success_count = acc.success_count;
@@ -381,10 +381,10 @@ let snapshot () =
             max_duration_ms = acc.max_dur_ms;
             slow_count = acc.slow_count;
             room_count = Hashtbl.length acc.rooms;
-          }
+          } : channel_stats)
           :: rows)
         table [])
-  |> List.sort (fun a b ->
+  |> List.sort (fun (a : channel_stats) (b : channel_stats) ->
          let by_messages = compare b.message_count a.message_count in
          if by_messages <> 0 then by_messages
          else String.compare a.channel b.channel)
@@ -485,7 +485,7 @@ let percent numerator denominator =
       (Float.round
          ((float_of_int numerator *. 100.0) /. float_of_int denominator))
 
-let effective_attempt_count (stats : channel_stats) =
+let _effective_attempt_count (stats : channel_stats) =
   max 0 (stats.message_count - stats.duplicate_count)
 
 let effective_attempt_count_counts ~message_count ~duplicate_count =

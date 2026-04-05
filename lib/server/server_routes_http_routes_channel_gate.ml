@@ -172,9 +172,9 @@ let handle_gate_events _state request reqd =
     |> fun value -> max 1 (min Channel_gate_metrics.max_recent_events value)
   in
   let trim_filter key =
-    query_param request key
-    |> Option.map String.trim
-    |> Option.filter (fun value -> value <> "")
+    match query_param request key |> Option.map String.trim with
+    | Some value when value <> "" -> Some value
+    | _ -> None
   in
   let json =
     Channel_gate_metrics.events_json

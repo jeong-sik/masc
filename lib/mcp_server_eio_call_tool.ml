@@ -152,7 +152,7 @@ let tool_timeout_sec_opt ~(tool_name : string) ~(arguments : Yojson.Safe.t) : fl
         float_of_int
           (int_of_env_default
              "MASC_TOOL_TIMEOUT_DEFAULT_SEC"
-             ~default:30
+             ~default:60
              ~min_v:5
              ~max_v:300)
       in

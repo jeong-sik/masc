@@ -455,7 +455,6 @@ Keeper는 idle 상태에서 주기적으로 자발적 행동을 생성한다.
 **소스**: `keeper_config.ml` (`compact_self_model_text`)
 
 Keeper는 자기 모델(will, needs, desires)의 텍스트를 상한 내로 유지한다.
-`apply_self_model_drift`는 unified turn 리팩터링에서 제거됨 (PR #5251).
 
 - `drift_enabled`: 드리프트 활성화 여부
 - `drift_max_clauses`: 최대 절 수 (기본 6개)

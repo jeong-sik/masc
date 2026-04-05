@@ -824,11 +824,19 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
   | Ok () ->
       ignore (Oas_model_resolve.refresh_local_discovery_if_possible model_labels);
       let max_cascade_context =
-        match meta.max_context_override with
-        | Some v ->
-            Log.Keeper.debug "%s: using max_context_override=%d" meta.name v;
-            v
-        | None -> Oas_model_resolve.resolve_max_cascade_context model_labels
+        let min_keeper_context = 65_536 in
+        let raw =
+          match meta.max_context_override with
+          | Some v ->
+              Log.Keeper.debug "%s: using max_context_override=%d" meta.name v;
+              v
+          | None -> Oas_model_resolve.resolve_max_cascade_context model_labels
+        in
+        if raw < min_keeper_context then begin
+          Log.Keeper.warn "%s: resolved max_context=%d below minimum %d, clamped"
+            meta.name raw min_keeper_context;
+          min_keeper_context
+        end else raw
       in
       (* Yield before CPU-bound prompt construction so the Eio scheduler
          can service HTTP handlers between keeper turn setups. *)

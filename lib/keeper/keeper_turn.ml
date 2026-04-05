@@ -175,11 +175,19 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
          Progress.Tracker.step turn_tracker ~message:"Building turn prompt" ();
          ignore (Oas_model_resolve.refresh_local_discovery_if_possible effective_models);
          let max_cascade_context =
-           match meta.max_context_override with
-           | Some v ->
-               Log.Keeper.debug "%s: using max_context_override=%d (manual turn)" meta.name v;
-               v
-           | None -> Oas_model_resolve.resolve_max_cascade_context effective_models
+           let min_keeper_context = 65_536 in
+           let raw =
+             match meta.max_context_override with
+             | Some v ->
+                 Log.Keeper.debug "%s: using max_context_override=%d (manual turn)" meta.name v;
+                 v
+             | None -> Oas_model_resolve.resolve_max_cascade_context effective_models
+           in
+           if raw < min_keeper_context then begin
+             Log.Keeper.warn "%s: resolved max_context=%d below minimum %d, clamped"
+               meta.name raw min_keeper_context;
+             min_keeper_context
+           end else raw
          in
             let base_dir = session_base_dir ctx.config in
             let effective_no_skill_route = no_skill_route || direct_reply in

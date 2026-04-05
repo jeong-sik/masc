@@ -153,7 +153,7 @@ let default_model_for_provider provider =
   | Some { canonical_name; default_model_id; _ } when canonical_name = Provider_adapter.cn_llama -> (
       match Provider_adapter.explicit_llama_model_id_result () with
       | Ok model_id -> trim_nonempty model_id
-      | Error _ -> default_model_id)
+      | Error _ -> Option.bind default_model_id trim_nonempty)
   | Some { default_model_id; _ } -> default_model_id
   | None -> None
 

@@ -107,7 +107,9 @@ let direct_adapters =
       spawn_key = Some "llama";
       default_voice = Some "Laura";
       endpoint_url = Some Env_config_runtime.Llama.server_url;
-      default_model_id = Some Env_config_runtime.Llama.default_model;
+      default_model_id =
+        (let m = Env_config_runtime.Llama.default_model in
+         if m = "" || m = "explicit-model-required" then None else Some m);
     };
     {
       canonical_name = cn_claude;

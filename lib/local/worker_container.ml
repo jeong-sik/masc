@@ -411,7 +411,7 @@ let oas_provider_of_label (label : string) :
   match Llm_provider.Cascade_config.parse_model_string label with
   | Some pc -> Ok (Oas.Provider.config_of_provider_config pc)
   | None ->
-    let msg = Printf.sprintf "Cannot parse model label: %s (expected provider:model)" label in
+    let msg = Printf.sprintf "Cannot parse model label: %S (expected provider:model)" label in
     Log.Misc.error "%s" msg;
     Error msg
 

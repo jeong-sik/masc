@@ -364,10 +364,11 @@ let resolve_strategies
       let obs_val = match obs with
         | Some o -> o
         | None ->
-          (* Fallback: minimal observation when none provided *)
+          (* Fallback: minimal observation when none provided.
+             128_000 matches OAS resolve_primary_max_context fallback. *)
           { context_ratio = 0.5; active_agent_count = 1;
             unclaimed_task_count = 0; is_single_focused_task = true;
-            context_window = 100_000; is_local_model = false }
+            context_window = 128_000; is_local_model = false }
       in
       (* Resolve once — no recursive Dynamic *)
       selector obs_val
@@ -410,8 +411,10 @@ let default_dynamic_selector (obs : observation_context) : strategy list =
   else if obs.context_ratio >= dynamic_focused_ctx && obs.is_single_focused_task then
     (* Focused work near budget: summarize old context *)
     [PruneToolOutputs; SummarizeOld]
-  else if obs.is_local_model && obs.context_window < 32_000 then
-    (* Small local models: lightweight compaction only *)
+  else if obs.is_local_model && obs.context_window < 64_000 then
+    (* Small local models (< 64K): lightweight compaction only.
+       64K floor matches OAS context_floor — llama-server default 8K is
+       unsuitable for multi-turn keeper conversations. *)
     [PruneToolOutputs; MergeContiguous]
   else if obs.context_window >= 500_000 then
     (* Large-context cloud: invest in quality-preserving strategies *)

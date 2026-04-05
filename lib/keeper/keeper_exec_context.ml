@@ -40,7 +40,6 @@ let serialize_context = Keeper_context_core.serialize_context
 let deserialize_context = Keeper_context_core.deserialize_context
 let context_to_json = Keeper_context_core.context_to_json
 let create_checkpoint = Keeper_context_core.create_checkpoint
-let restore_checkpoint = Keeper_context_core.restore_checkpoint
 let create_session = Keeper_context_core.create_session
 let persist_message = Keeper_context_core.persist_message
 
@@ -50,15 +49,12 @@ let usage_of_response = Keeper_context_core.usage_of_response
 let total_tokens = Keeper_context_core.total_tokens
 
 let save_session_checkpoint = Keeper_context_core.save_session_checkpoint
-let load_latest_checkpoint = Keeper_context_core.load_latest_checkpoint
 
 let log_keeper_exn = Keeper_context_core.log_keeper_exn
 let checkpoint_max_tokens = Keeper_context_core.checkpoint_max_tokens
 let context_of_oas_checkpoint = Keeper_context_core.context_of_oas_checkpoint
-let context_of_legacy_checkpoint = Keeper_context_core.context_of_legacy_checkpoint
 let checkpoint_model_of_meta = Keeper_context_core.checkpoint_model_of_meta
 let save_oas_checkpoint = Keeper_context_core.save_oas_checkpoint
-let checkpoint_generation = Keeper_context_core.checkpoint_generation
 let load_context_from_checkpoint = Keeper_context_core.load_context_from_checkpoint
 let save_checkpoint = Keeper_context_core.save_checkpoint
 

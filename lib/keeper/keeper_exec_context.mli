@@ -7,7 +7,6 @@
     are provided directly by this module. *)
 
 open Keeper_types
-open Keeper_memory
 
 (** {1 Working Context Types (re-exported from Keeper_types)} *)
 
@@ -38,7 +37,6 @@ val serialize_context : working_context -> string
 val deserialize_context : string -> max_tokens:int -> working_context
 val context_to_json : working_context -> Yojson.Safe.t
 val create_checkpoint : working_context -> generation:int -> checkpoint
-val restore_checkpoint : checkpoint -> max_tokens:int -> working_context
 val create_session : session_id:string -> base_dir:string -> session_context
 val persist_message : ?source:string -> session_context -> Agent_sdk.Types.message -> unit
 
@@ -52,7 +50,6 @@ val total_tokens : Agent_sdk.Types.api_usage -> int
 (** {1 Checkpoint Store Delegation} *)
 
 val save_session_checkpoint : session_context -> checkpoint -> unit
-val load_latest_checkpoint : session_context -> checkpoint option
 
 (** {1 Keeper Context Lifecycle} *)
 
@@ -64,9 +61,6 @@ val checkpoint_max_tokens :
 val context_of_oas_checkpoint :
   Agent_sdk.Checkpoint.t -> primary_model_max_tokens:int -> working_context
 
-val context_of_legacy_checkpoint :
-  checkpoint -> primary_model_max_tokens:int -> working_context
-
 val checkpoint_model_of_meta : keeper_meta -> string
 
 val save_oas_checkpoint :
@@ -76,9 +70,6 @@ val save_oas_checkpoint :
   ctx:working_context ->
   generation:int ->
   Agent_sdk.Checkpoint.t
-
-val checkpoint_generation :
-  Agent_sdk.Checkpoint.t -> fallback:int -> int
 
 (** {1 Handoff Rollover} *)
 
@@ -214,18 +205,10 @@ val append_trait_clause : base:string -> clause:string -> string
 
 val strip_state_blocks_text : string -> string
 val trim_to_option : string -> string option
-val state_snapshot_reply_fallback : keeper_state_snapshot option -> string option
-val strip_internal_reply_markup : string -> string
 val user_visible_reply_text : ?fallback:string -> string -> string
-val normalize_proactive_text : string -> string
-val extract_checkin_text : string -> string option
 
 (** {1 Fragment Detection (used by dashboard)} *)
 
-val proactive_has_terminal_punct : string -> bool
-val proactive_has_terminal_korean_ending : string -> bool
-val proactive_has_terminal_ending : string -> bool
-val proactive_looks_fragmentary : string -> bool
 val looks_fragmentary_history_text : string -> bool
 
 (** {1 Memory Check} *)

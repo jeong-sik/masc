@@ -268,6 +268,30 @@ let test_dynamic_small_local_model () =
   check (list string) "small local strategies"
     ["PruneToolOutputs"; "MergeContiguous"] names
 
+let test_dynamic_local_at_64k_boundary () =
+  (* Local model at exactly 64K: NOT small — gets standard compaction *)
+  let obs : Compact.observation_context = {
+    context_ratio = 0.50; active_agent_count = 1;
+    unclaimed_task_count = 0; is_single_focused_task = false;
+    context_window = 64_000; is_local_model = true } in
+  let resolved = Compact.resolve_strategies ~obs:(Some obs)
+    [Compact.Dynamic Compact.default_dynamic_selector] in
+  let names = strategy_names resolved in
+  check (list string) "local 64K gets default strategies"
+    ["DropLowImportance"] names
+
+let test_dynamic_local_below_64k () =
+  (* Local model at 63K: small — lightweight compaction *)
+  let obs : Compact.observation_context = {
+    context_ratio = 0.50; active_agent_count = 1;
+    unclaimed_task_count = 0; is_single_focused_task = false;
+    context_window = 63_999; is_local_model = true } in
+  let resolved = Compact.resolve_strategies ~obs:(Some obs)
+    [Compact.Dynamic Compact.default_dynamic_selector] in
+  let names = strategy_names resolved in
+  check (list string) "local below 64K gets small local strategies"
+    ["PruneToolOutputs"; "MergeContiguous"] names
+
 let test_dynamic_large_context_cloud () =
   let obs : Compact.observation_context = {
     context_ratio = 0.50; active_agent_count = 1;
@@ -328,6 +352,8 @@ let () =
       test_case "high pressure multi-agent" `Quick test_dynamic_high_pressure_multi_agent;
       test_case "single focused task" `Quick test_dynamic_single_focused_task;
       test_case "small local model" `Quick test_dynamic_small_local_model;
+      test_case "local at 64K boundary" `Quick test_dynamic_local_at_64k_boundary;
+      test_case "local below 64K" `Quick test_dynamic_local_below_64k;
       test_case "large context cloud" `Quick test_dynamic_large_context_cloud;
       test_case "medium cloud default" `Quick test_dynamic_medium_cloud_default;
       test_case "no observation fallback" `Quick test_dynamic_no_observation;

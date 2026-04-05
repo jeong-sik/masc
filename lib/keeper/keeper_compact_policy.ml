@@ -1,0 +1,133 @@
+(** Keeper_compact_policy — compaction gate and strategy application.
+
+    Decides whether compaction should run based on ratio/message/token
+    gates and cooldown, then applies OAS strategies + persona fold.
+
+    Extracted from Keeper_exec_context as part of #4955 god-file split. *)
+
+open Keeper_types
+open Keeper_context_core
+
+let compaction_policy_of_keeper (meta : keeper_meta) : float * int * int =
+  (meta.compaction.ratio_gate, meta.compaction.message_gate, meta.compaction.token_gate)
+
+let compact_if_needed
+    ~(meta : keeper_meta)
+    ~(now_ts : float)
+    (ctx : working_context) :
+    working_context * string option * string =
+  let ratio = context_ratio ctx in
+  let msg_count = message_count ctx in
+  let tok_count = token_count ctx in
+  let ratio_gate, message_gate, token_gate = compaction_policy_of_keeper meta in
+  let cooldown = Float.of_int meta.compaction.cooldown_sec in
+  let last_reflection_ts = max meta.runtime.last_continuity_update_ts meta.runtime.proactive_rt.last_ts in
+  let reflection_ready =
+    last_reflection_ts > 0.0 && now_ts -. last_reflection_ts >= cooldown
+  in
+  let hold_s =
+    if cooldown <= 0.0 then 0.0
+    else if last_reflection_ts <= 0.0 then
+      Float.of_int meta.compaction.cooldown_sec
+    else
+      max
+        0.0
+        (Float.of_int meta.compaction.cooldown_sec
+       -. (now_ts -. last_reflection_ts))
+  in
+  let trigger_reason =
+    if not reflection_ready then
+      Some
+        (Printf.sprintf
+           "skipped:continuity_reflection(%0.0fs<%ds)"
+           hold_s meta.compaction.cooldown_sec)
+    else if ratio >= ratio_gate then
+      Some (Printf.sprintf "ratio(%.4f>=%.4f)" ratio ratio_gate)
+    else if message_gate > 0 && msg_count >= message_gate then
+      Some (Printf.sprintf "messages(%d>=%d)" msg_count message_gate)
+    else if token_gate > 0 && tok_count >= token_gate then
+      Some (Printf.sprintf "tokens(%d>=%d)" tok_count token_gate)
+    else None
+  in
+  match trigger_reason with
+  | None -> (ctx, None, "blocked:below_thresholds")
+  | Some reason ->
+      if String.starts_with ~prefix:"skipped:" reason then
+        (ctx, None, reason)
+      else
+        (* PreCompact observability: log strategy and context state (#3165) *)
+      let strategies = Context_compact_oas.[
+        PruneToolOutputs; MergeContiguous;
+        DropLowImportance]
+      in
+      (* FoldCompleted replaces SummarizeOld — applied as a separate
+         OAS Custom reducer after the standard strategy pipeline. *)
+      let fold_reducer = Keeper_compaction.persona_fold_strategy
+        ~soul_profile:meta.soul_profile () in
+      let strategy_names =
+        List.map Context_compact_oas.strategy_name strategies
+        @ ["FoldCompleted"]
+      in
+      Log.Harness.info
+        "[pre_compact] keeper=%s ratio=%.4f messages=%d tokens=%d trigger=%s"
+        meta.name ratio msg_count tok_count reason;
+      let model_meta =
+        let model_labels = Oas_model_resolve.models_of_cascade_name meta.cascade_name in
+        let primary_id = match Llm_provider.Cascade_config.parse_model_strings model_labels with
+          | c :: _ -> c.Llm_provider.Provider_config.model_id | [] -> "auto" in
+        Llm_provider.Model_meta.for_model_id primary_id
+      in
+      let pre_compact_event =
+        Dashboard_harness_health.record_pre_compact
+          ~keeper_name:meta.name ~context_ratio:ratio ~message_count:msg_count
+          ~token_count:tok_count ~strategies:strategy_names
+          ~context_window:model_meta.context_window
+          ~is_local_model:model_meta.is_local ~trigger:reason
+      in
+      (try
+         Sse.broadcast
+           (`Assoc
+             [
+               ("type", `String "oas:masc:harness:pre_compact");
+               ( "payload",
+                 `Assoc
+                   [
+                     ("timestamp", `Float pre_compact_event.timestamp);
+                     ("keeper_name", `String pre_compact_event.keeper_name);
+                     ("context_ratio", `Float pre_compact_event.context_ratio);
+                     ("message_count", `Int pre_compact_event.message_count);
+                     ("token_count", `Int pre_compact_event.token_count);
+                     ( "strategies",
+                       `List
+                         (List.map
+                            (fun value -> `String value)
+                            pre_compact_event.strategies) );
+                     ("model_family", `String pre_compact_event.model_family);
+                     ("context_window", `Int pre_compact_event.context_window);
+                     ("is_local_model", `Bool pre_compact_event.is_local_model);
+                     ("trigger", `String pre_compact_event.trigger);
+                   ] );
+             ])
+       with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn ->
+          Log.Harness.warn "[pre_compact] sse broadcast failed: %s"
+            (Printexc.to_string exn));
+      let messages =
+          let msgs_after_compact, _ =
+            Context_compact_oas.compact
+              ~system_prompt:ctx.system_prompt
+              ~messages:ctx.messages
+              ~strategies
+              ()
+          in
+          (* Apply keeper-private fold after standard strategies *)
+          let msgs_after_fold =
+            Agent_sdk.Context_reducer.reduce fold_reducer msgs_after_compact
+          in
+          msgs_after_fold
+        in
+        let compacted_ctx =
+          sync_oas_context { ctx with messages }
+        in
+        (compacted_ctx, Some reason, "applied:" ^ reason)

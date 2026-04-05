@@ -1,0 +1,326 @@
+(** Keeper_post_turn — post-turn lifecycle: compaction, handoff rollover,
+    continuity summary, and overflow retry recovery.
+
+    Orchestrates the end-of-turn pipeline that decides whether to compact
+    the context, roll over to a new generation, and update the continuity
+    summary from the latest state snapshot.
+
+    Extracted from Keeper_exec_context as part of #4955 god-file split. *)
+
+open Keeper_types
+open Keeper_memory
+open Keeper_context_core
+
+type compaction_event = {
+  applied : bool;
+  trigger : string option;
+  decision : string;
+  before_tokens : int;
+  after_tokens : int;
+  saved_tokens : int;
+}
+
+type post_turn_lifecycle = {
+  updated_meta : keeper_meta;
+  checkpoint : Agent_sdk.Checkpoint.t option;
+  handoff_json : Yojson.Safe.t option;
+  compaction : compaction_event;
+  turn_generation : int;
+  context_ratio : float;
+  context_tokens : int;
+  context_max : int;
+  message_count : int;
+}
+
+type overflow_retry_recovery = {
+  checkpoint : Agent_sdk.Checkpoint.t;
+  compaction : compaction_event;
+  turn_generation : int;
+} [@@warning "-69"]
+
+let apply_post_turn_lifecycle
+    ~(base_dir : string)
+    ~(meta : keeper_meta)
+    ~(model : string)
+    ~(primary_model_max_tokens : int)
+    ~(checkpoint : Agent_sdk.Checkpoint.t option) : post_turn_lifecycle =
+  let now_ts = Time_compat.now () in
+  let no_checkpoint_decision = "skipped:no_checkpoint" in
+  let apply_continuity_summary
+      ~(meta : keeper_meta)
+      ~(ctx : working_context) : keeper_meta =
+    match latest_state_snapshot_from_messages ctx.messages with
+    | None -> meta
+    | Some snapshot ->
+        {
+          meta with
+          continuity_summary = keeper_state_snapshot_to_summary_text snapshot;
+          runtime =
+            {
+              meta.runtime with
+              last_continuity_update_ts = now_ts;
+            };
+        }
+  in
+  match checkpoint with
+  | None ->
+      let updated_meta =
+        map_runtime
+          (fun rt ->
+            {
+              rt with
+              compaction_rt =
+                {
+                  rt.compaction_rt with
+                  last_check_ts = now_ts;
+                  last_decision = no_checkpoint_decision;
+                };
+            })
+          meta
+      in
+      {
+        updated_meta;
+        checkpoint = None;
+        handoff_json = None;
+        compaction =
+          {
+            applied = false;
+            trigger = None;
+            decision = no_checkpoint_decision;
+            before_tokens = 0;
+            after_tokens = 0;
+            saved_tokens = 0;
+          };
+        turn_generation = meta.runtime.generation;
+        context_ratio = 0.0;
+        context_tokens = 0;
+        context_max = primary_model_max_tokens;
+        message_count = 0;
+      }
+  | Some cp ->
+      let ctx = context_of_oas_checkpoint cp ~primary_model_max_tokens in
+      let current_generation =
+        checkpoint_generation cp ~fallback:meta.runtime.generation
+      in
+      let base_meta =
+        if current_generation = meta.runtime.generation then meta
+        else
+          map_runtime
+            (fun rt -> { rt with generation = current_generation })
+            meta
+      in
+      let before_tokens = token_count ctx in
+      let compacted_ctx, trigger, decision =
+        Keeper_compact_policy.compact_if_needed ~meta:base_meta ~now_ts ctx
+      in
+      let compaction_applied =
+        String.starts_with ~prefix:"applied:" decision
+      in
+      let after_tokens = token_count compacted_ctx in
+      let saved_tokens = max 0 (before_tokens - after_tokens) in
+      let meta_after_compaction =
+        map_runtime
+          (fun rt ->
+            {
+              rt with
+              compaction_rt =
+                {
+                  count =
+                    rt.compaction_rt.count
+                    + if compaction_applied then 1 else 0;
+                  last_ts =
+                    if compaction_applied then now_ts else rt.compaction_rt.last_ts;
+                  last_before_tokens =
+                    if compaction_applied then before_tokens
+                    else rt.compaction_rt.last_before_tokens;
+                  last_after_tokens =
+                    if compaction_applied then after_tokens
+                    else rt.compaction_rt.last_after_tokens;
+                  last_check_ts = now_ts;
+                  last_decision = decision;
+                };
+            })
+          base_meta
+      in
+      let checkpoint =
+        if not compaction_applied then Some cp
+        else
+          let session =
+            create_session ~session_id:meta_after_compaction.runtime.trace_id ~base_dir
+          in
+          Some
+            (save_oas_checkpoint ~session
+               ~agent_name:meta_after_compaction.agent_name
+               ~model ~ctx:compacted_ctx ~generation:current_generation)
+      in
+      let rollover =
+        Keeper_rollover.maybe_rollover_oas_handoff ~base_dir
+          ~meta:meta_after_compaction
+          ~model
+          ~primary_model_max_tokens
+          ~checkpoint
+      in
+      let continuity_meta =
+        apply_continuity_summary
+          ~meta:rollover.updated_meta
+          ~ctx:compacted_ctx
+      in
+      {
+        updated_meta = continuity_meta;
+        checkpoint;
+        handoff_json = rollover.handoff_json;
+        compaction =
+          {
+            applied = compaction_applied;
+            trigger;
+            decision;
+            before_tokens;
+            after_tokens;
+            saved_tokens;
+          };
+        turn_generation = current_generation;
+        context_ratio = rollover.context_ratio;
+        context_tokens = rollover.context_tokens;
+        context_max = rollover.context_max;
+        message_count = rollover.message_count;
+      }
+
+let forced_overflow_retry_meta
+    (meta : keeper_meta)
+    ~(turn_generation : int)
+    ~(now_ts : float) : keeper_meta =
+  let base_meta =
+    if turn_generation = meta.runtime.generation then meta
+    else
+      map_runtime
+        (fun rt -> { rt with generation = turn_generation })
+        meta
+  in
+  {
+    (map_runtime
+       (fun rt ->
+         let last_continuity_update_ts =
+           if rt.last_continuity_update_ts > 0.0
+           then rt.last_continuity_update_ts
+           else now_ts
+         in
+         let proactive_rt =
+           if rt.proactive_rt.last_ts > 0.0
+           then rt.proactive_rt
+           else { rt.proactive_rt with last_ts = now_ts }
+         in
+         { rt with last_continuity_update_ts; proactive_rt })
+       base_meta)
+    with
+    compaction =
+      {
+        base_meta.compaction with
+        ratio_gate = 0.0;
+        message_gate = 0;
+        token_gate = 0;
+        cooldown_sec = 0;
+      };
+  }
+
+let recover_latest_checkpoint_for_overflow_retry
+    ~(base_dir : string)
+    ~(meta : keeper_meta)
+    ~(model : string)
+    ~(primary_model_max_tokens : int) : overflow_retry_recovery option =
+  let session = create_session ~session_id:meta.runtime.trace_id ~base_dir in
+  let oas_checkpoint =
+    Keeper_checkpoint_store.load_oas ~session_dir:session.session_dir
+      ~session_id:meta.runtime.trace_id
+  in
+  let legacy_checkpoint =
+    try load_latest_checkpoint session
+    with exn ->
+      Log.Keeper.error "keeper:%s overflow retry checkpoint load failed: %s"
+        meta.runtime.trace_id (Printexc.to_string exn);
+      None
+  in
+  let prefer_legacy =
+    match oas_checkpoint, legacy_checkpoint with
+    | Some oas, Some legacy -> legacy.timestamp > oas.created_at
+    | _ -> false
+  in
+  let selected =
+    match (prefer_legacy, oas_checkpoint, legacy_checkpoint) with
+    | false, Some checkpoint, _ ->
+        let turn_generation =
+          checkpoint_generation checkpoint ~fallback:meta.runtime.generation
+        in
+        Some
+          ( context_of_oas_checkpoint checkpoint ~primary_model_max_tokens,
+            turn_generation )
+    | _, _, Some checkpoint ->
+        (try
+           Some
+             ( context_of_legacy_checkpoint checkpoint
+                 ~primary_model_max_tokens,
+               checkpoint.generation )
+         with
+         | Eio.Cancel.Cancelled _ as exn -> raise exn
+         | exn ->
+             Log.Keeper.error
+               "keeper:%s overflow retry legacy checkpoint restore failed: %s"
+               meta.runtime.trace_id (Printexc.to_string exn);
+             (match oas_checkpoint with
+              | Some checkpoint ->
+                  let turn_generation =
+                    checkpoint_generation checkpoint
+                      ~fallback:meta.runtime.generation
+                  in
+                  Some
+                    ( context_of_oas_checkpoint checkpoint
+                        ~primary_model_max_tokens,
+                      turn_generation )
+              | None -> None))
+    | _ -> None
+  in
+  match selected with
+  | None -> None
+  | Some (ctx, turn_generation) ->
+      let now_ts = Time_compat.now () in
+      let ctx =
+        if primary_model_max_tokens <= 0 then ctx
+        else sync_oas_context { ctx with max_tokens = min ctx.max_tokens primary_model_max_tokens }
+      in
+      let before_tokens = token_count ctx in
+      let retry_meta =
+        forced_overflow_retry_meta meta ~turn_generation ~now_ts
+      in
+      let compacted_ctx, trigger, base_decision =
+        Keeper_compact_policy.compact_if_needed ~meta:retry_meta ~now_ts ctx
+      in
+      let after_tokens = token_count compacted_ctx in
+      let compaction_applied =
+        String.starts_with ~prefix:"applied:" base_decision
+      in
+      let meaningful_reduction = after_tokens < before_tokens in
+      if not (compaction_applied && meaningful_reduction) then None
+      else
+        let compaction =
+          {
+            applied = true;
+            trigger;
+            decision = base_decision;
+            before_tokens;
+            after_tokens;
+            saved_tokens = max 0 (before_tokens - after_tokens);
+          }
+        in
+        try
+          let checkpoint =
+            save_oas_checkpoint ~session
+              ~agent_name:retry_meta.agent_name
+              ~model ~ctx:compacted_ctx ~generation:turn_generation
+          in
+          Some { checkpoint; compaction; turn_generation }
+        with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn ->
+            log_keeper_exn
+              ~label:"overflow retry checkpoint save failed"
+              exn;
+            None

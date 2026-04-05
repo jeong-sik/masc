@@ -1,6 +1,14 @@
 # Changelog
 
 
+## [2.245.0] - 2026-04-06
+
+### Changed
+- TBD
+
+### Deprecated
+- TBD
+
 ## [2.244.0] - 2026-04-05
 
 ### Added

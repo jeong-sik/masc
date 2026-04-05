@@ -61,22 +61,25 @@ let refresh_local_discovery_if_possible ?sw ?net (labels : string list) : bool =
              false)
     | _ -> false
 
-(** Minimum ratio of discovered context to static registry value.
-    If the server reports less than this fraction of the model's known
-    capacity, the server is likely misconfigured (e.g. llama-server
-    started without -c flag, defaulting to 8192).  In that case we
-    ignore the discovered value and use the static registry value.
+(** Absolute minimum acceptable discovered context size.
+    llama-server defaults to [-c 8192]; keeper conversations need 64K+ for
+    multi-turn interactions with tool calls.  Below this floor we ignore the
+    discovered value and use the static registry value instead. *)
+let context_floor = 65_536
 
-    25% means: a 128K model must have at least 32K configured;
-    a 262K model must have at least ~65K.  This is model-agnostic —
-    the threshold scales with the model's actual capacity. *)
-let min_discovered_ratio = 0.25
+(** Return [discovered] when it meets or exceeds {!context_floor};
+    otherwise return [static_ctx].  Pure — callers that need diagnostic
+    logging should inspect the result separately. *)
+let effective_discovered_ctx ~static_ctx ~(discovered : int option) : int =
+  match discovered with
+  | Some ctx when ctx >= context_floor -> ctx
+  | _ -> static_ctx
 
 (** Resolve max_context for a model label.
     Prefers discovered per-slot context (from live /props probe) for local
-    providers.  Discovered values below [min_discovered_ratio] of the
-    static registry value are treated as server misconfiguration and
-    ignored in favor of the static value. *)
+    providers.  Discovered values below {!context_floor} are treated as
+    server misconfiguration and replaced by the static registry value with
+    a WARN log. *)
 let max_context_of_label (label : string) : int =
   match provider_name_of_label label with
   | None -> 128_000
@@ -86,24 +89,24 @@ let max_context_of_label (label : string) : int =
       | Some entry -> entry.max_context
       | None -> 128_000
     in
-    if Provider_adapter.requires_discovery pname then
-      let floor = int_of_float (float_of_int static_ctx *. min_discovered_ratio) in
-      match Llm_provider.Provider_registry.discovered_max_context () with
-      | Some ctx when ctx >= floor -> ctx
-      | Some low_ctx ->
-        Log.warn ~ctx:"OasModelResolve"
-          "discovered context %d < %d%% of static %d (floor=%d) for %s; \
-           using static value. Increase llama-server -c flag."
-          low_ctx (int_of_float (min_discovered_ratio *. 100.0))
-          static_ctx floor pname;
-        static_ctx
-      | None -> static_ctx
+    if Provider_adapter.requires_discovery pname then begin
+      let discovered = Llm_provider.Provider_registry.discovered_max_context () in
+      (match discovered with
+       | Some low_ctx when low_ctx < context_floor ->
+         Log.warn ~ctx:"OasModelResolve"
+           "discovered context %d < floor %d for %s; using static value. \
+            Increase llama-server -c flag."
+           low_ctx context_floor pname
+       | _ -> ());
+      effective_discovered_ctx ~static_ctx ~discovered
+    end
     else static_ctx
 
 (** Resolve max_context for the first available model in a label list.
     "Available" means the provider's API key env var is set (or not required).
-    Prefers discovered per-slot context for local providers.
-    Falls back to 128_000 if no model is available. *)
+    Prefers discovered per-slot context for local providers; silently falls
+    back to the static registry value when the discovered context is below
+    {!context_floor}.  Falls back to 128_000 if no model is available. *)
 let resolve_primary_max_context (labels : string list) : int =
   let discovered = Llm_provider.Provider_registry.discovered_max_context () in
   let rec find = function
@@ -117,10 +120,7 @@ let resolve_primary_max_context (labels : string list) : int =
         | Some entry ->
           if entry.is_available () then
             if Provider_adapter.requires_discovery pname then
-              let floor = int_of_float (float_of_int entry.max_context *. min_discovered_ratio) in
-              match discovered with
-              | Some ctx when ctx >= floor -> ctx
-              | _ -> entry.max_context
+              effective_discovered_ctx ~static_ctx:entry.max_context ~discovered
             else entry.max_context
           else find rest
   in

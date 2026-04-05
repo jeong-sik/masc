@@ -58,6 +58,13 @@ tools = ["masc_status", "masc_heartbeat", "masc_tasks", "masc_claim_next", "masc
 [masc.coding]
 tools = ["masc_code_search", "masc_code_symbols", "masc_code_read", "masc_worktree_create", "masc_worktree_remove", "masc_worktree_list"]
 
+# ── Git Clone Policy ────────────────────────────────────────────────
+# GitHub org names allowed for masc_code_git clone action.
+# URLs not matching any org here are rejected.
+
+[git_clone]
+allowed_orgs = ["jeong-sik"]
+
 # ── Presets ─────────────────────────────────────────────────────────
 
 [presets.minimal]

@@ -4,6 +4,7 @@
     - All write operations restricted to .worktrees/ directories
     - Shell commands restricted to allowlist
     - Git push to main/master blocked
+    - Git clone restricted to allowed GitHub orgs (config/tool_policy.toml)
     - File size limit: 1MB for writes
     - Binary file extension check inherited from Tool_code
 
@@ -54,6 +55,7 @@ let allowed_shell_commands = [
 let allowed_git_actions = [
   "add"; "commit"; "push"; "diff"; "status";
   "log"; "branch"; "checkout"; "stash"; "fetch";
+  "clone";
 ]
 
 let max_output_bytes = 10 * 1024 (* 10KB output limit *)
@@ -62,6 +64,84 @@ let truncate_output s =
   if String.length s > max_output_bytes then
     String.sub s 0 max_output_bytes ^ "\n... (truncated)"
   else s
+
+(* ── Git clone org allowlist ─────────────────────────────────────── *)
+
+(* Cached clone allowed orgs loaded from config/tool_policy.toml.
+   Loaded once per process; config changes require restart. *)
+let clone_allowed_orgs_cache : string list option ref = ref None
+
+let load_clone_allowed_orgs ~base_path =
+  match !clone_allowed_orgs_cache with
+  | Some orgs -> orgs
+  | None ->
+    let rel = "config/tool_policy.toml" in
+    let path = Filename.concat base_path rel in
+    let orgs = match Safe_ops.read_file_safe path with
+      | Error _ -> []
+      | Ok content ->
+        match Keeper_toml_loader.parse_toml content with
+        | Error _ -> []
+        | Ok doc -> Keeper_toml_loader.toml_string_list doc "git_clone.allowed_orgs"
+    in
+    clone_allowed_orgs_cache := Some orgs;
+    orgs
+
+(** Extract GitHub org from clone URL.
+    Handles:
+    - [https://github.com/ORG/repo\[.git\]]
+    - [git@github.com:ORG/repo\[.git\]]
+    - [ssh://git@github.com/ORG/repo\[.git\]] *)
+let extract_github_org url =
+  let prefixes = [
+    "https://github.com/";
+    "git@github.com:";
+    "ssh://git@github.com/";
+  ] in
+  let after_prefix =
+    List.find_map (fun prefix ->
+      if String.starts_with ~prefix url then
+        let len = String.length prefix in
+        Some (String.sub url len (String.length url - len))
+      else None
+    ) prefixes
+  in
+  match after_prefix with
+  | None -> None
+  | Some rest ->
+    match String.index_opt rest '/' with
+    | None -> None
+    | Some idx -> Some (String.sub rest 0 idx)
+
+let validate_clone_url ~base_path url =
+  let allowed = load_clone_allowed_orgs ~base_path in
+  if allowed = [] then
+    Error "No allowed orgs configured for git clone (git_clone.allowed_orgs in tool_policy.toml)"
+  else
+    match extract_github_org url with
+    | None ->
+      Error (Printf.sprintf "Cannot parse GitHub org from URL: %s" url)
+    | Some org ->
+      if List.mem org allowed then Ok ()
+      else Error (Printf.sprintf
+        "GitHub org '%s' not in allowed list: %s" org (String.concat ", " allowed))
+
+(** Validate cwd for clone: allows .worktrees/ itself (not just subdirs). *)
+let validate_clone_cwd config cwd =
+  match Tool_code.validate_path config cwd with
+  | Error e -> Error e
+  | Ok canonical_path ->
+    match Room_git.git_root ~base_path:config.Room.base_path with
+    | None -> Error (IoError "Not in a git repository")
+    | Some root ->
+      let worktree_prefix = Tool_code.normalize_path
+        (Filename.concat root ".worktrees") in
+      if canonical_path = worktree_prefix ||
+         String.starts_with ~prefix:(worktree_prefix ^ "/") canonical_path then
+        Ok canonical_path
+      else
+        Error (IoError (Printf.sprintf
+          "Clone restricted to .worktrees/ directory (got: %s)" canonical_path))
 
 (* Handler: masc_code_write — Create or overwrite a file *)
 let handle_code_write ctx args =
@@ -282,8 +362,41 @@ let handle_code_git ctx args =
   else if not (List.mem action allowed_git_actions) then
     (false, Printf.sprintf "Git action '%s' not allowed. Allowed: %s"
        action (String.concat ", " allowed_git_actions))
+  else if action = "clone" then begin
+    (* Clone: validate org allowlist + cwd within .worktrees/ *)
+    let url = match git_args with url :: _ -> url | [] -> "" in
+    if url = "" then
+      (false, "clone requires a repository URL as first argument")
+    else if cwd = "" then
+      (false, "cwd parameter required for clone")
+    else
+      match validate_clone_url ~base_path:ctx.config.Room.base_path url with
+      | Error msg -> (false, msg)
+      | Ok () ->
+        match validate_clone_cwd ctx.config cwd with
+        | Error e -> (false, Types.masc_error_to_string e)
+        | Ok abs_cwd ->
+          let cmd = ["sh"; "-c";
+                     Printf.sprintf "cd %s && git clone %s"
+                       (Filename.quote abs_cwd)
+                       (String.concat " " (List.map Filename.quote git_args))]
+          in
+          match Process_eio.run_argv_with_status ~timeout_sec:120.0 cmd with
+          | Unix.WEXITED code, output ->
+            let response = `Assoc [
+              ("status", `String (if code = 0 then "ok" else "error"));
+              ("exit_code", `Int code);
+              ("output", `String (truncate_output output));
+              ("action", `String "clone");
+              ("url", `String url);
+              ("agent", `String ctx.agent_name);
+            ] in
+            (code = 0, Yojson.Safe.pretty_to_string response)
+          | _, output ->
+            (false, Printf.sprintf "Git clone failed: %s" (truncate_output output))
+  end
   else begin
-    (* Block dangerous operations *)
+    (* Non-clone actions: existing validation *)
     let is_dangerous =
       (action = "push" && List.mem "--force" git_args) ||
       (action = "push" && List.mem "-f" git_args) ||
@@ -296,7 +409,6 @@ let handle_code_git ctx args =
     if is_dangerous then
       (false, "Dangerous git operation blocked (force push, main push, or checkout .)")
     else begin
-      (* Validate cwd *)
       let cwd_result =
         if cwd = "" then (false, "cwd parameter required for git operations") |> fun (ok, msg) ->
           if ok then Ok None else Error (IoError msg)
@@ -448,14 +560,15 @@ Returns exit_code and stdout (truncated at 10KB).";
     name = "masc_code_git";
     description = "Run git commands in a worktree (.worktrees/ only). Structured alternative \
 to masc_code_shell for git operations. Supports: add, commit, push, diff, status, \
-log, branch, checkout, stash, fetch. Force push and push to main/master are blocked. \
+log, branch, checkout, stash, fetch, clone. Force push and push to main/master are blocked. \
+Clone is restricted to allowed GitHub orgs (configured in config/tool_policy.toml). \
 Returns git command output.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
         ("action", `Assoc [
           ("type", `String "string");
-          ("description", `String "Git action: add, commit, push, diff, status, log, branch, checkout, stash, fetch");
+          ("description", `String "Git action: add, commit, push, diff, status, log, branch, checkout, stash, fetch, clone");
         ]);
         ("args", `Assoc [
           ("type", `String "array");

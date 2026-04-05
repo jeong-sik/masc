@@ -257,12 +257,12 @@ let context_of_oas_checkpoint
     checkpoint_max_tokens cp ~fallback:primary_model_max_tokens
   in
   (* Cap loaded messages — see module-level max_checkpoint_messages. *)
-  let max_checkpoint_messages = max_checkpoint_messages () in
+  let max_cp_messages = max_checkpoint_messages () in
   let messages =
     let n = List.length cp.messages in
-    if n <= max_checkpoint_messages then cp.messages
+    if n <= max_cp_messages then cp.messages
     else
-      let drop = n - max_checkpoint_messages in
+      let drop = n - max_cp_messages in
       List.filteri (fun i _ -> i >= drop) cp.messages
   in
   sync_oas_context

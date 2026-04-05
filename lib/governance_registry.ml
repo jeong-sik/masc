@@ -176,7 +176,7 @@ let keeper_max_checkpoint_messages =
   Runtime_params.register
     ~key:"keeper.max_checkpoint_messages"
     ~default:(fun () -> 60)
-    ~validate:(validate_int_range ~min:10 ~max:500 "keeper_max_checkpoint_messages")
+    ~validate:(validate_int_range ~min:10 ~max:500 "keeper.max_checkpoint_messages")
     ~serialize:(fun v -> `Int v)
     ~meta:{ description = "Checkpoint 메시지 보존 상한";
             value_type = "int";
@@ -190,7 +190,7 @@ let keeper_safety_buffer_ratio =
   Runtime_params.register
     ~key:"keeper.safety_buffer_ratio"
     ~default:(fun () -> 1.15)
-    ~validate:(validate_float_range ~min:1.0 ~max:2.0 "keeper_safety_buffer_ratio")
+    ~validate:(validate_float_range ~min:1.0 ~max:2.0 "keeper.safety_buffer_ratio")
     ~serialize:(fun v -> `Float v)
     ~meta:{ description = "토큰 추정 안전 버퍼 비율 (1.15 = 15%)";
             value_type = "float";
@@ -204,7 +204,7 @@ let keeper_stale_threshold_sec =
   Runtime_params.register
     ~key:"keeper.stale_threshold_sec"
     ~default:(fun () -> 120.0)
-    ~validate:(validate_float_range ~min:30.0 ~max:600.0 "keeper_stale_threshold_sec")
+    ~validate:(validate_float_range ~min:30.0 ~max:600.0 "keeper.stale_threshold_sec")
     ~serialize:(fun v -> `Float v)
     ~meta:{ description = "Keeper stale 판정 임계값(초)";
             value_type = "float";
@@ -219,7 +219,7 @@ let keeper_startup_window_sec =
   Runtime_params.register
     ~key:"keeper.startup_window_sec"
     ~default:(fun () -> 120.0)
-    ~validate:(validate_float_range ~min:30.0 ~max:600.0 "keeper_startup_window_sec")
+    ~validate:(validate_float_range ~min:30.0 ~max:600.0 "keeper.startup_window_sec")
     ~serialize:(fun v -> `Float v)
     ~meta:{ description = "신규 keeper startup 판정 윈도우(초)";
             value_type = "float";
@@ -233,7 +233,7 @@ let keeper_recovery_window_sec =
   Runtime_params.register
     ~key:"keeper.recovery_window_sec"
     ~default:(fun () -> 60.0)
-    ~validate:(validate_float_range ~min:10.0 ~max:300.0 "keeper_recovery_window_sec")
+    ~validate:(validate_float_range ~min:10.0 ~max:300.0 "keeper.recovery_window_sec")
     ~serialize:(fun v -> `Float v)
     ~meta:{ description = "Keepalive 복구 윈도우(초)";
             value_type = "float";
@@ -247,7 +247,7 @@ let keeper_recency_threshold_sec =
   Runtime_params.register
     ~key:"keeper.recency_threshold_sec"
     ~default:(fun () -> 30.0)
-    ~validate:(validate_float_range ~min:5.0 ~max:120.0 "keeper_recency_threshold_sec")
+    ~validate:(validate_float_range ~min:5.0 ~max:120.0 "keeper.recency_threshold_sec")
     ~serialize:(fun v -> `Float v)
     ~meta:{ description = "파이프라인 스테이지 최근성 임계값(초)";
             value_type = "float";

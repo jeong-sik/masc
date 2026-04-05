@@ -47,7 +47,7 @@ validate_pr_body_file() {
     "## Review evidence" \
     "## Linked issue"
   do
-    if ! grep -Fq "$heading" "$path"; then
+    if ! grep -Fq -- "$heading" "$path"; then
       missing+=("$heading")
     fi
   done

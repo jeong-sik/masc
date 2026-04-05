@@ -119,11 +119,33 @@ let keeper_base_candidate_tool_names () =
     @ keeper_internal_candidate_tool_names
     @ injected_masc_tool_names () )
 
+(** Resolve a named group from tool_policy.toml.  Returns the hardcoded
+    fallback when config is not loaded. *)
+let resolve_policy_group ~(fallback : string list) (group_name : string) : string list =
+  match !policy_config with
+  | Some cfg ->
+    (match Keeper_tool_policy_config.resolve_group cfg group_name with
+     | Some tools -> tools
+     | None ->
+       Log.Keeper.warn "tool_policy group %S not found, using fallback (%d tools)"
+         group_name (List.length fallback);
+       fallback)
+  | None -> fallback
+
 (** Optional tools that require explicit opt-in via also_allow.
-    Kept separate from config groups because they are deliberately
-    excluded from all presets by default. *)
-let keeper_optional_tool_names =
-  [ "keeper_board_delete" ]
+    Reads [groups.optional] from tool_policy.toml; falls back to
+    hardcoded list when config is absent. *)
+let keeper_optional_tool_names () =
+  resolve_policy_group ~fallback:[ "keeper_board_delete" ] "optional"
+
+(** Tools allowed on the keeper's last turn.
+    Reads [groups.last_turn_safe] from tool_policy.toml. *)
+let last_turn_safe_tool_names () =
+  resolve_policy_group
+    ~fallback:[ "keeper_board_post"; "keeper_board_comment";
+                "keeper_context_status"; "extend_turns";
+                "keeper_time_now"; "keeper_broadcast" ]
+    "last_turn_safe"
 
 let explicit_optional_candidate_tool_names (meta : keeper_meta) =
   let requested =
@@ -132,7 +154,7 @@ let explicit_optional_candidate_tool_names (meta : keeper_meta) =
     | Custom allowlist -> allowlist
   in
   requested
-  |> List.filter (fun name -> List.mem name keeper_optional_tool_names)
+  |> List.filter (fun name -> List.mem name (keeper_optional_tool_names ()))
   |> dedupe_tool_names
 
 (* ── Presets (config-driven) ───────────────────────────────────── *)

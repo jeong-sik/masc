@@ -80,9 +80,10 @@ let should_throttle ~agent_type =
 
 (* --- Mention helpers (re-export) --- *)
 
-let spawnable_agents = Mention.spawnable_agents
 let agent_type_of_mention = Mention.agent_type_of_mention
-let is_spawnable = Mention.is_spawnable
+let is_spawnable m =
+  let base = agent_type_of_mention m in
+  Provider_adapter.is_known_provider base
 
 (* --- CLI spawn (Spawn mode) --- *)
 

@@ -125,7 +125,7 @@ let load ~base_path : (t, string) result =
         let presets = parse_presets doc in
         (* Validate that each preset's group references are defined *)
         let ref_errors =
-          Hashtbl.fold (fun preset_name def acc ->
+          Hashtbl.fold (fun preset_name (def : preset_def) acc ->
             let bad_groups =
               List.filter (fun g -> not (Hashtbl.mem groups g)) def.groups
               |> List.rev_map (fun g ->
@@ -171,7 +171,7 @@ let resolve_preset
   : preset_resolution option =
   match Hashtbl.find_opt config.presets preset_name with
   | None -> None
-  | Some def ->
+  | Some (def : preset_def) ->
     if def.all_candidates then
       Some All_candidates
     else

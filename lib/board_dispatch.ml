@@ -68,7 +68,7 @@ let set_board_sse_hook hook =
 
 let emit_board_sse_event event =
   match Atomic.get board_sse_hook with
-  | Some hook -> (try hook event with _ -> ())
+  | Some hook -> Safe_ops.protect ~default:() (fun () -> hook event)
   | None -> ()
 
 let is_initialized () =

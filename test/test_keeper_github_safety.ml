@@ -108,6 +108,7 @@ let test_blocked_destructive_operations () =
       "Repo Delete owner/repo";
       "GIST DELETE abc123";
       "workflow disable deploy.yml";
+      "workflow --repo owner/repo disable deploy.yml";
     ]
   in
   List.iter
@@ -175,6 +176,10 @@ let test_api_bypass_detected () =
       "api --method POST /repos/o/r/merges -f base=main";
       "api -X POST /repos/o/r/merges -f base=main -f head=feat";
       "api -X PATCH /repos/o/r/issues/1 -f state=closed";
+      "api /repos/o/r/pulls/1/merge -f sha=abc123";
+      "api /repos/o/r/merges -F base=main -F head=feat";
+      "api --method=POST /repos/o/r/pulls/1/merge";
+      "api -x=put /repos/o/r/pulls/1/merge";
     ]
   in
   List.iter
@@ -201,6 +206,40 @@ let test_api_safe_methods_not_flagged () =
         (Printf.sprintf "api safe: gh %s" cmd)
         false (is_destructive cmd))
     safe_api
+
+let test_new_command_destructive_ops () =
+  let destructive =
+    [
+      "cache delete --all";
+      "project delete 1";
+      "project close 1";
+      "workflow delete deploy.yml";
+    ]
+  in
+  List.iter
+    (fun cmd ->
+      Alcotest.(check bool)
+        (Printf.sprintf "new cmd destructive: gh %s" cmd)
+        true (is_destructive cmd))
+    destructive;
+  let safe =
+    [
+      "cache list";
+      "project list";
+      "project view 1";
+      "workflow list";
+      "workflow view deploy.yml";
+      "workflow run deploy.yml";
+      "ruleset list";
+      "ruleset view 1";
+    ]
+  in
+  List.iter
+    (fun cmd ->
+      Alcotest.(check bool)
+        (Printf.sprintf "new cmd safe: gh %s" cmd)
+        false (is_destructive cmd))
+    safe
 
 let test_non_destructive_ops () =
   let safe =
@@ -260,6 +299,8 @@ let () =
             test_api_bypass_detected;
           Alcotest.test_case "safe api methods not flagged" `Quick
             test_api_safe_methods_not_flagged;
+          Alcotest.test_case "new commands destructive ops" `Quick
+            test_new_command_destructive_ops;
           Alcotest.test_case "safe ops not flagged" `Quick
             test_non_destructive_ops;
         ] );

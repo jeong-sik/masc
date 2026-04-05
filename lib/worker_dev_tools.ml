@@ -420,8 +420,10 @@ let gh_blocked_operations =
 
 (** Extract the top-level command and its first subcommand from a gh
     command string (the portion after "gh ").
-    Flags (starting with '-') are skipped when looking for the subcommand.
-    Example: "pr view 123" -> (Some "pr", Some "view") *)
+    Flags (starting with '-') and their values are skipped when scanning
+    for the subcommand, preventing bypass via flag insertion.
+    Example: "pr view 123" -> (Some "pr", Some "view")
+    Example: "workflow --repo o/r disable" -> (Some "workflow", Some "disable") *)
 let extract_gh_command_pair cmd =
   let parts =
     String.split_on_char ' ' (String.trim cmd)
@@ -430,9 +432,16 @@ let extract_gh_command_pair cmd =
   match parts with
   | [] -> (None, None)
   | [ x ] -> (Some x, None)
-  | x :: y :: _ ->
-    if String.length y > 0 && y.[0] = '-' then (Some x, None)
-    else (Some x, Some y)
+  | x :: rest ->
+    let rec find_subcmd = function
+      | [] -> None
+      | tok :: tl ->
+        if String.length tok > 0 && tok.[0] = '-' then
+          if String.contains tok '=' then find_subcmd tl
+          else (match tl with _ :: rest' -> find_subcmd rest' | [] -> None)
+        else Some tok
+    in
+    (Some x, find_subcmd rest)
 
 (** Validate a gh CLI command string for safety.
     Checks: (1) shell metacharacters, (2) top-level command allowlist,
@@ -473,15 +482,30 @@ let gh_api_destructive_patterns =
   [ "/merge"; "/merges";
     "state=closed"; "state=\"closed\""; "state='closed'" ]
 
-(** Check if a gh API command uses a non-GET HTTP method.
-    Returns [true] for -X POST, -X PUT, -X PATCH, --method POST, etc. *)
+(** Check if a gh API command uses or implies a non-GET HTTP method.
+    Returns [true] for explicit mutating methods (-X POST, --method PATCH,
+    etc.) and for implicit POST via field flags (-f, -F, --field,
+    --raw-field), matching gh CLI behavior where field flags cause an
+    automatic POST. Handles both "--method POST" and "--method=POST". *)
 let has_mutating_http_method parts =
+  let is_mutating m =
+    let m = String.lowercase_ascii m in
+    m = "post" || m = "put" || m = "patch" || m = "delete"
+  in
   let rec check = function
     | [] -> false
-    | ("-x" | "--method") :: m :: _ ->
-      let m = String.lowercase_ascii m in
-      m = "post" || m = "put" || m = "patch" || m = "delete"
-    | _ :: rest -> check rest
+    | tok :: rest when tok = "-x" || tok = "--method" ->
+      (match rest with m :: _ -> is_mutating m | [] -> false)
+    | tok :: rest ->
+      if String.length tok > 10
+         && String.lowercase_ascii (String.sub tok 0 9) = "--method="
+      then is_mutating (String.sub tok 9 (String.length tok - 9))
+      else if String.length tok > 3
+              && String.lowercase_ascii (String.sub tok 0 3) = "-x="
+      then is_mutating (String.sub tok 3 (String.length tok - 3))
+      else if tok = "-f" || tok = "-F" || tok = "--field" || tok = "--raw-field"
+      then true
+      else check rest
   in
   check parts
 
@@ -500,6 +524,10 @@ let is_gh_destructive_operation cmd =
   | "release" :: sub :: _ -> List.mem sub [ "delete" ]
   | "repo" :: sub :: _ -> List.mem sub [ "archive"; "rename" ]
   | "label" :: sub :: _ -> List.mem sub [ "delete" ]
+  | "cache" :: sub :: _ -> List.mem sub [ "delete" ]
+  | "project" :: sub :: _ -> List.mem sub [ "close"; "delete" ]
+  | "workflow" :: sub :: _ -> List.mem sub [ "delete" ]
+  | "ruleset" :: _ -> false
   | "api" :: _ ->
     let joined = String.concat " " parts in
     List.mem "delete" parts

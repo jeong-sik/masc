@@ -163,7 +163,7 @@ let test_emit_heartbeat_task_no_auth_token_in_events () =
     ~goal:"test goal"
     ~context:"test context"
     ~allowed_tools:["masc_heartbeat"]
-    ~auth_token:(Some "secret-token-should-not-appear")
+    ~auth_token:"secret-token-should-not-appear"
     ();
   (* Poll the buffered events and assert auth_token is absent *)
   (match Masc_mcp.A2a_tools.poll_events ~subscription_id:sub_id ~clear:true () with

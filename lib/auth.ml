@@ -180,8 +180,13 @@ let create_token config ~agent_name ~role : (string * agent_credential, masc_err
     created_at = now;
     expires_at;
   } in
-  save_credential config cred;
-  Ok (raw_token, cred)  (* Return raw token to user, store hash *)
+  (try
+     save_credential config cred;
+     Ok (raw_token, cred)  (* Return raw token to user, store hash *)
+   with exn ->
+     let msg = Printf.sprintf "Failed to save agent credential: %s" (Printexc.to_string exn) in
+     Log.Auth.error "%s" msg;
+     Error (IoError msg))
 
 (** Verify a token *)
 let verify_token config ~agent_name ~token : (agent_credential, masc_error) result =

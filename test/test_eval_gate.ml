@@ -157,22 +157,23 @@ let test_pre_entropy () =
   with_tmpdir (fun dir ->
     let acc = make_acc dir in
     Trajectory.increment_turn acc;
-    let mk tool = { Trajectory.
+    let repeated_args = "{\"command\": \"echo hi\"}" in
+    let mk tool args = { Trajectory.
       ts = 1000.0; ts_iso = ""; turn = acc.Trajectory.turn; round = 0;
-      tool_name = tool; args_json = "{}";
+      tool_name = tool; args_json = args;
       gate_decision = Trajectory.Pass;
       result = Some "ok"; duration_ms = 10;
       error = None; cost_usd = 0.0001;
     } in
-    (* Add 3 consecutive same-tool calls *)
-    Trajectory.record_entry acc (mk "keeper_bash");
-    Trajectory.record_entry acc (mk "keeper_bash");
-    Trajectory.record_entry acc (mk "keeper_bash");
+    (* Add 3 consecutive same-tool calls with same args *)
+    Trajectory.record_entry acc (mk "keeper_bash" repeated_args);
+    Trajectory.record_entry acc (mk "keeper_bash" repeated_args);
+    Trajectory.record_entry acc (mk "keeper_bash" repeated_args);
     let decision = Eval_gate.pre_check
       ~config:default_config ~accumulated_cost:0.0
       ~trajectory_acc:(Some acc)
       ~tool_name:"keeper_bash"
-      ~args_json:"{\"command\": \"echo hi\"}" in
+      ~args_json:repeated_args in
     match decision with
     | Trajectory.Reject reason ->
         Alcotest.(check bool) "entropy reason" true
@@ -180,6 +181,34 @@ let test_pre_entropy () =
            try ignore (Str.search_forward (Str.regexp_string "entropy") r 0); true
            with Not_found -> false)
     | Trajectory.Pass -> Alcotest.fail "Should reject due to entropy")
+
+(* ================================================================ *)
+(* Test: pre_check — entropy does NOT trigger with different args    *)
+(* ================================================================ *)
+
+let test_pre_entropy_different_args () =
+  with_tmpdir (fun dir ->
+    let acc = make_acc dir in
+    Trajectory.increment_turn acc;
+    let mk tool args = { Trajectory.
+      ts = 1000.0; ts_iso = ""; turn = acc.Trajectory.turn; round = 0;
+      tool_name = tool; args_json = args;
+      gate_decision = Trajectory.Pass;
+      result = Some "ok"; duration_ms = 10;
+      error = None; cost_usd = 0.0001;
+    } in
+    (* Add 3 consecutive same-tool calls but with different args *)
+    Trajectory.record_entry acc (mk "keeper_bash" "{\"command\": \"echo a\"}");
+    Trajectory.record_entry acc (mk "keeper_bash" "{\"command\": \"echo b\"}");
+    Trajectory.record_entry acc (mk "keeper_bash" "{\"command\": \"echo c\"}");
+    let decision = Eval_gate.pre_check
+      ~config:default_config ~accumulated_cost:0.0
+      ~trajectory_acc:(Some acc)
+      ~tool_name:"keeper_bash"
+      ~args_json:"{\"command\": \"echo d\"}" in
+    match decision with
+    | Trajectory.Reject _ -> Alcotest.fail "Should NOT reject: different args do not form an entropy streak"
+    | Trajectory.Pass -> ())
 
 (* ================================================================ *)
 (* Test: pre_check — turn call limit                                 *)
@@ -358,6 +387,7 @@ let () =
       Alcotest.test_case "destructive bash" `Quick test_pre_destructive_bash;
       Alcotest.test_case "safe bash" `Quick test_pre_safe_bash;
       Alcotest.test_case "entropy" `Quick test_pre_entropy;
+      Alcotest.test_case "entropy different args" `Quick test_pre_entropy_different_args;
       Alcotest.test_case "turn limit" `Quick test_pre_turn_limit;
     ]);
     ("post_eval", [

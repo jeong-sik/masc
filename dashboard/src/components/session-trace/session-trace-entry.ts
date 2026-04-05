@@ -6,13 +6,11 @@ import { JsonViewerCard, parseJsonLikeData } from '../common/json-viewer'
 import { TimeAgo } from '../common/time-ago'
 import { Markdown } from '../common/markdown'
 import { truncate } from '../../lib/truncate'
+import { toolCategory, durationColor, formatDuration, formatArgs as sharedFormatArgs } from '../tool-call-shared'
 import type { UnifiedTraceEvent, TraceEventKind } from './session-trace-state'
 
 // ── Constants ──────────────────────────────────────────
 
-const ARGS_PREVIEW_MAX = 80
-const ARGS_VALUE_MAX = 30
-const ARGS_MAX_KEYS = 3
 const BROADCAST_PREVIEW_MAX = 160
 
 // ── Kind styling ───────────────────────────────────────
@@ -31,39 +29,16 @@ const KIND_STYLES: Record<TraceEventKind, KindStyle> = {
   lifecycle:  { icon: 'L', color: 'text-[var(--warn)]', label: '생명주기' },
 }
 
-// Tool-specific icon/color overrides (same categories as keeper-trajectory-timeline)
-const TOOL_CATEGORIES: Array<{ match: (n: string) => boolean; icon: string; color: string }> = [
-  { match: n => n.includes('bash'),                          icon: '>', color: 'text-[var(--ok)]' },
-  { match: n => n.includes('edit') || n.includes('fs'),      icon: 'E', color: 'text-[var(--warn)]' },
-  { match: n => n.includes('board') || n.includes('social'), icon: 'B', color: 'text-[var(--purple)]' },
-  { match: n => n.includes('github'),                        icon: 'G', color: 'text-[var(--accent)]' },
-  { match: n => n.includes('search') || n.includes('read'),  icon: 'R', color: 'text-[#60a5fa]' },
-]
-
+// Use shared tool category from tool-call-shared (SSOT)
 function toolStyle(name: string): { icon: string; color: string } {
-  return TOOL_CATEGORIES.find(c => c.match(name)) ?? { icon: '>', color: 'text-[var(--ok)]' }
-}
-
-function durationColor(ms: number): string {
-  if (ms < 500) return 'text-[var(--ok)]'
-  if (ms < 2000) return 'text-[var(--warn)]'
-  return 'text-[var(--bad)]'
+  return toolCategory(name)
 }
 
 // ── Formatters ─────────────────────────────────────────
 
+// formatArgs delegated to shared module (SSOT: tool-call-shared.ts)
 function formatArgs(args: Record<string, unknown> | string): string {
-  if (typeof args === 'string') return truncate(args, ARGS_PREVIEW_MAX)
-  const keys = Object.keys(args)
-  if (keys.length === 0) return '{}'
-  const preview = keys.slice(0, ARGS_MAX_KEYS).map(k => {
-    const v = args[k]
-    const vs = typeof v === 'string'
-      ? truncate(v, ARGS_VALUE_MAX)
-      : truncate(JSON.stringify(v) ?? '', ARGS_VALUE_MAX)
-    return `${k}: ${vs}`
-  }).join(', ')
-  return keys.length > ARGS_MAX_KEYS ? `{${preview}, …}` : `{${preview}}`
+  return sharedFormatArgs(args)
 }
 
 // ── Task event helpers ─────────────────────────────────
@@ -187,7 +162,7 @@ export function SessionTraceEntry({ event }: { event: UnifiedTraceEvent }) {
       ${'' /* Right side: duration + time */}
       <div class="flex-shrink-0 flex flex-col items-end gap-0.5">
         ${event.duration_ms != null ? html`
-          <span class="text-[11px] font-mono ${durationColor(event.duration_ms)}">${event.duration_ms}ms</span>
+          <span class="text-[11px] font-mono ${durationColor(event.duration_ms)}">${formatDuration(event.duration_ms)}</span>
         ` : null}
         <${TimeAgo} timestamp=${event.ts_iso} class="text-[10px] text-[var(--text-dim)]" />
       </div>

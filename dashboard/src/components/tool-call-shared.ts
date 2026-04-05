@@ -13,20 +13,94 @@ const ARGS_VALUE_MAX_CHARS = 30
 const ARGS_MAX_KEYS = 3
 
 // ── Tool categories ─────────────────────────────────────
+// Order matters: first match wins. More specific patterns before general ones.
 
-export const TOOL_CATEGORIES: Array<{ match: (n: string) => boolean; icon: string; color: string }> = [
-  { match: n => n.includes('bash'),                          icon: '>', color: 'text-[var(--ok)]' },
-  { match: n => n.includes('edit') || n.includes('fs'),      icon: 'E', color: 'text-[var(--warn)]' },
-  { match: n => n.includes('board') || n.includes('social'), icon: 'B', color: 'text-[var(--purple)]' },
-  { match: n => n.includes('github'),                        icon: 'G', color: 'text-[var(--accent)]' },
-  { match: n => n.includes('search') || n.includes('read'),  icon: 'R', color: 'text-[#60a5fa]' },
+export type ToolCategoryEntry = {
+  match: (n: string) => boolean
+  icon: string
+  color: string
+  label: string
+}
+
+export const TOOL_CATEGORIES: ToolCategoryEntry[] = [
+  // Shell / Bash — execution tools
+  { match: n => n.includes('bash') || n.includes('shell'),
+    icon: '>', color: 'text-[var(--ok)]', label: 'shell' },
+  // Git / GitHub / Worktree — version control
+  { match: n => n.includes('github') || n.includes('git') || n.includes('worktree'),
+    icon: 'G', color: 'text-[var(--accent)]', label: 'git' },
+  // File write / edit — mutations
+  { match: n => n.includes('edit') || n.includes('write') || n.includes('delete'),
+    icon: 'E', color: 'text-[var(--warn)]', label: 'edit' },
+  // File read / filesystem
+  { match: n => n.includes('fs_read') || n.includes('code_read'),
+    icon: 'F', color: 'text-[#a78bfa]', label: 'file' },
+  // Board / Social — community interaction
+  { match: n => n.includes('board') || n.includes('social'),
+    icon: 'B', color: 'text-[var(--purple)]', label: 'board' },
+  // Search / Read / Library / Symbols
+  { match: n => n.includes('search') || n.includes('symbols') || n.includes('library'),
+    icon: 'S', color: 'text-[#60a5fa]', label: 'search' },
+  // Voice — audio/speech
+  { match: n => n.includes('voice'),
+    icon: 'V', color: 'text-[#f472b6]', label: 'voice' },
+  // Web — network access
+  { match: n => n.includes('web') || n.includes('fetch'),
+    icon: 'W', color: 'text-[#38bdf8]', label: 'web' },
+  // Coordination — tasks, transitions, heartbeat
+  { match: n => n.includes('task') || n.includes('transition') || n.includes('claim') || n.includes('heartbeat') || n.includes('broadcast'),
+    icon: 'C', color: 'text-[#fbbf24]', label: 'coord' },
+  // Memory — recall, context, memory search
+  { match: n => n.includes('memory') || n.includes('recall') || n.includes('context'),
+    icon: 'M', color: 'text-[#34d399]', label: 'memory' },
+  // Status / Dashboard — observability
+  { match: n => n.includes('status') || n.includes('dashboard') || n.includes('agents') || n.includes('agent_card'),
+    icon: 'D', color: 'text-[#c084fc]', label: 'status' },
+  // Playwright / Browser — browser automation
+  { match: n => n.includes('playwright') || n.includes('browser') || n.includes('navigate'),
+    icon: 'P', color: 'text-[#fb923c]', label: 'browser' },
+  // Read (generic, after more specific patterns)
+  { match: n => n.includes('read'),
+    icon: 'R', color: 'text-[#60a5fa]', label: 'read' },
 ]
-export const DEFAULT_TOOL_STYLE = { icon: 'T', color: 'text-[#94a3b8]' }
+export const DEFAULT_TOOL_STYLE: Omit<ToolCategoryEntry, 'match'> = { icon: 'T', color: 'text-[#94a3b8]', label: 'tool' }
 
 // ── Functions ───────────────────────────────────────────
 
-export function toolCategory(name: string): { icon: string; color: string } {
-  return TOOL_CATEGORIES.find(c => c.match(name)) ?? DEFAULT_TOOL_STYLE
+export type ToolCategoryResult = { icon: string; color: string; label: string }
+
+export function toolCategory(name: string): ToolCategoryResult {
+  const found = TOOL_CATEGORIES.find(c => c.match(name))
+  return found ?? DEFAULT_TOOL_STYLE
+}
+
+/** Human-readable tool name: strip common prefixes, replace underscores. */
+export function humanToolName(name: string): string {
+  return name
+    .replace(/^(keeper_|masc_|mcp__[a-z_-]+__)/i, '')
+    .replace(/_/g, ' ')
+}
+
+/** Format duration as human-readable string with unit. */
+export function formatDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`
+  return `${(ms / 60_000).toFixed(1)}m`
+}
+
+/** Summarize a list of trajectory entries: total duration, success count, error count. */
+export function summarizeEntries(entries: Array<{ duration_ms: number; error: string | null }>): {
+  totalMs: number
+  successCount: number
+  errorCount: number
+} {
+  let totalMs = 0
+  let errorCount = 0
+  for (const e of entries) {
+    totalMs += e.duration_ms
+    if (e.error) errorCount++
+  }
+  return { totalMs, successCount: entries.length - errorCount, errorCount }
 }
 
 export function durationColor(ms: number): string {

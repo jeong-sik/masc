@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import { StatusChip } from './common/status-chip'
+import { toolCategory } from './tool-call-shared'
 import type {
   DashboardProofActorContribution,
   DashboardProofArtifactRef,
@@ -133,7 +134,10 @@ export function WorkerRunEvidenceRow({ item }: { item: DashboardProofWorkerRunEv
         ? html`<div class="flex flex-col gap-2 mt-2 pt-3 border-t border-card-border/50">
             <strong class="text-[11px] font-semibold uppercase tracking-widest text-text-muted">실행 도구</strong>
             <div class="flex flex-wrap gap-2">
-              ${toolNames.map(name => html`<span class="px-2 py-1 rounded-md text-[10px] font-medium bg-[var(--accent-10)] text-accent border border-accent/20 shadow-sm">${name}</span>`)}
+              ${toolNames.map(name => {
+                const cat = toolCategory(name)
+                return html`<span class="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium bg-[var(--accent-10)] text-accent border border-accent/20 shadow-sm"><span class="font-mono font-bold ${cat.color}">${cat.icon}</span>${name}</span>`
+              })}
             </div>
           </div>`
         : null}
@@ -219,7 +223,10 @@ export function ActorContributionRow({ item }: { item: DashboardProofActorContri
         : null}
       ${Array.isArray(item.recent_tool_names) && item.recent_tool_names.length > 0
         ? html`<div class="flex flex-wrap gap-1.5 mb-3">
-            ${item.recent_tool_names.map(name => html`<span class="semantic-tag">${name}</span>`)}
+            ${item.recent_tool_names.map(name => {
+              const cat = toolCategory(name)
+              return html`<span class="semantic-tag inline-flex items-center gap-1"><span class="font-mono font-bold ${cat.color}">${cat.icon}</span>${name}</span>`
+            })}
           </div>`
         : null}
     </article>

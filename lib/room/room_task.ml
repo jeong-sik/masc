@@ -506,19 +506,19 @@ let transition_task_r config ~agent_name ~task_id ~action
                      let action_s = Types.task_action_to_string action in
                      let transition =
                        match action, task.task_status with
-                        | Types.Claim, Types.Todo ->
-                            Ok (Types.Claimed { assignee = agent_name; claimed_at = now }, Some task_id)
-                        | Types.Claim, (Types.Claimed { assignee; _ } | Types.InProgress { assignee; _ }) when assignee = agent_name ->
-                            (* Idempotent: already claimed by me; do not trigger backlog/activity rewrites. *)
-                            Ok (task.task_status, None)
-                        | Types.Start, Types.Claimed { assignee; _ } when assignee = agent_name ->
-                            Ok (Types.InProgress { assignee = agent_name; started_at = now }, Some task_id)
-                        | Types.Start, Types.InProgress { assignee; _ } when assignee = agent_name ->
-                            (* Idempotent: already in progress by me; do not trigger backlog/activity rewrites. *)
-                            Ok (task.task_status, None)
-                        | (Types.Claim | Types.Start), Types.Done _ ->
-                            (* Idempotent: already done, no-op *)
-                            Ok (task.task_status, None)
+                       | Types.Claim, Types.Todo ->
+                           Ok (Types.Claimed { assignee = agent_name; claimed_at = now }, Some task_id)
+                       | Types.Claim, (Types.Claimed { assignee; _ } | Types.InProgress { assignee; _ }) when assignee = agent_name ->
+                           (* Idempotent: already claimed by me; do not trigger backlog/activity rewrites. *)
+                           Ok (task.task_status, None)
+                       | Types.Start, Types.Claimed { assignee; _ } when assignee = agent_name ->
+                           Ok (Types.InProgress { assignee = agent_name; started_at = now }, Some task_id)
+                       | Types.Start, Types.InProgress { assignee; _ } when assignee = agent_name ->
+                           (* Idempotent: already in progress by me; do not trigger backlog/activity rewrites. *)
+                           Ok (task.task_status, None)
+                       | (Types.Claim | Types.Start), Types.Done _ ->
+                           (* Idempotent: already done, no-op *)
+                           Ok (task.task_status, None)
                        | Types.Done_action, Types.Claimed { assignee; _ }
                        | Types.Done_action, Types.InProgress { assignee; _ } when assignee = agent_name || force ->
                            Ok (Types.Done {

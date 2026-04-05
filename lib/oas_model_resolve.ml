@@ -88,6 +88,11 @@ let uses_local_discovery pname (cfg : Llm_provider.Provider_config.t) =
   Provider_adapter.requires_discovery pname ||
   (pname = "openai" && Url_utils.is_loopback_url cfg.base_url)
 
+let local_runtime_context_hint pname =
+  if Provider_adapter.requires_discovery pname
+  then "Increase the local runtime context limit (for llama-server, raise the -c flag)."
+  else "Increase the local runtime context limit."
+
 (** Resolve max_context for a model label.
     Prefers discovered per-slot context (from live /props probe) for local
     providers.  Discovered values below {!context_floor} are treated as
@@ -103,15 +108,10 @@ let max_context_of_label (label : string) : int =
       let discovered = Llm_provider.Provider_registry.discovered_max_context () in
       (match discovered with
        | Some low_ctx when low_ctx < context_floor ->
-          let hint =
-            if pname = "llama" || pname = "openai"
-            then "Increase the local runtime context limit (for llama-server, raise the -c flag)."
-            else "Increase the local runtime context limit."
-          in
           Log.warn ~ctx:"OasModelResolve"
             "discovered context %d < floor %d for %s; using static value. \
              %s"
-            low_ctx context_floor pname hint
+            low_ctx context_floor pname (local_runtime_context_hint pname)
         | _ -> ());
       effective_discovered_ctx ~static_ctx ~discovered
     end

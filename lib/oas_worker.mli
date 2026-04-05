@@ -86,6 +86,8 @@ val run_named :
   ?max_idle_turns:int ->
   ?temperature:float ->
   ?max_tokens:int ->
+  ?max_input_tokens:int ->
+  ?max_cost_usd:float ->
   ?accept:(Oas_response.api_response -> bool) ->
   ?guardrails:Oas.Guardrails.t ->
   ?hooks:Oas.Hooks.hooks ->
@@ -122,6 +124,8 @@ val run_model_by_label :
   ?max_idle_turns:int ->
   ?temperature:float ->
   ?max_tokens:int ->
+  ?max_input_tokens:int ->
+  ?max_cost_usd:float ->
   ?accept:(Oas_response.api_response -> bool) ->
   ?guardrails:Oas.Guardrails.t ->
   ?hooks:Oas.Hooks.hooks ->
@@ -149,6 +153,8 @@ val run_named_with_masc_tools :
   ?max_turns:int ->
   ?temperature:float ->
   ?max_tokens:int ->
+  ?max_input_tokens:int ->
+  ?max_cost_usd:float ->
   ?guardrails:Oas.Guardrails.t ->
   ?hooks:Oas.Hooks.hooks ->
   ?memory:Oas.Memory.t ->
@@ -177,6 +183,8 @@ val run_model_with_masc_tools :
   ?max_turns:int ->
   ?temperature:float ->
   ?max_tokens:int ->
+  ?max_input_tokens:int ->
+  ?max_cost_usd:float ->
   ?guardrails:Oas.Guardrails.t ->
   ?hooks:Oas.Hooks.hooks ->
   ?memory:Oas.Memory.t ->

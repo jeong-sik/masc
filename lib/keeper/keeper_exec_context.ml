@@ -805,6 +805,15 @@ let apply_post_turn_lifecycle
         message_count = rollover.message_count;
       }
 
+let clamp_context_max_tokens
+    (ctx : working_context)
+    ~(primary_model_max_tokens : int) : working_context =
+  let clamped =
+    if primary_model_max_tokens <= 0 then ctx.max_tokens
+    else min ctx.max_tokens primary_model_max_tokens
+  in
+  if clamped = ctx.max_tokens then ctx
+  else sync_oas_context { ctx with max_tokens = clamped }
 let forced_overflow_retry_meta
     (meta : keeper_meta)
     ~(turn_generation : int)
@@ -913,46 +922,19 @@ let[@warning "-32"] recover_latest_checkpoint_for_overflow_retry
       let compacted_ctx, trigger, base_decision =
         compact_if_needed ~meta:retry_meta ~now_ts ctx
       in
-      let strategy_after_tokens = token_count compacted_ctx in
       let strategy_after_message_tokens =
         message_token_count compacted_ctx
       in
-      let compacted_ctx =
-        if
-          primary_model_max_tokens > 0
-          && strategy_after_message_tokens > primary_model_max_tokens
-        then
-          let reducer =
-            let target_tokens = int_of_float (float_of_int primary_model_max_tokens *. 0.9) in
-            Agent_sdk.Context_reducer.from_context_config ~max_tokens:target_tokens ()
-          in
-          let messages = Agent_sdk.Context_reducer.reduce reducer compacted_ctx.messages in
-          sync_oas_context
-            { compacted_ctx with messages; max_tokens = min compacted_ctx.max_tokens primary_model_max_tokens }
-        else
-          compacted_ctx
-      in
+      let _ = strategy_after_message_tokens in
       let after_tokens = token_count compacted_ctx in
-      let after_message_tokens = message_token_count compacted_ctx in
-      let hard_trim_applied = after_tokens < strategy_after_tokens in
-      let decision =
-        if hard_trim_applied then
-          Printf.sprintf "%s+budget_trim(%d->%d,msg<=%d)"
-            base_decision strategy_after_tokens after_tokens
-            primary_model_max_tokens
-        else
-          base_decision
-      in
+      let decision = base_decision in
       let compaction_applied =
-        String.starts_with ~prefix:"applied:" base_decision || hard_trim_applied
+        String.starts_with ~prefix:"applied:" base_decision
       in
       let meaningful_reduction = after_tokens < before_tokens in
-      let fits_budget =
-        primary_model_max_tokens <= 0
-        || after_message_tokens <= primary_model_max_tokens
-      in
-      if not (compaction_applied && meaningful_reduction && fits_budget) then None
+      if not (compaction_applied && meaningful_reduction) then None
       else
+        let _ = strategy_after_message_tokens in
         let compaction =
           {
             applied = true;

@@ -20,6 +20,8 @@ type config = {
   max_turns : int;
   max_idle_turns : int;
   max_tokens : int;
+  max_input_tokens : int option;
+  max_cost_usd : float option;
   temperature : float;
   hooks : Oas.Hooks.hooks option;
   context_reducer : Oas.Context_reducer.t option;
@@ -33,6 +35,7 @@ type config = {
   initial_messages : Oas.Types.message list;
   raw_trace : Oas.Raw_trace.t option;
   tool_retry_policy : Oas.Tool_retry_policy.t option;
+  contract : Oas.Risk_contract.t option;
   enable_thinking : bool option;
   transport : Masc_grpc_transport.t;
   allowed_paths : string list;
@@ -48,6 +51,8 @@ let default_config ~name ~provider ~model_id ~system_prompt ~tools : config =
     max_turns = 20;
     max_idle_turns = 3;
     max_tokens = Oas_worker_cascade.default_max_tokens;
+    max_input_tokens = None;
+    max_cost_usd = None;
     temperature = Oas_worker_cascade.default_temperature;
     hooks = None;
     context_reducer = None;
@@ -61,6 +66,7 @@ let default_config ~name ~provider ~model_id ~system_prompt ~tools : config =
     initial_messages = [];
     raw_trace = None;
     tool_retry_policy = None;
+    contract = None;
     enable_thinking = None;
     transport = Masc_grpc_transport.from_env ();
     allowed_paths = [];
@@ -228,6 +234,16 @@ let build
     | None -> builder
   in
   let builder =
+    match config.max_cost_usd with
+    | Some usd -> Oas.Builder.with_max_cost_usd usd builder
+    | None -> builder
+  in
+  let builder =
+    match config.max_input_tokens with
+    | Some tokens -> Oas.Builder.with_max_input_tokens tokens builder
+    | None -> builder
+  in
+  let builder =
     if config.cache_system_prompt then
       Oas.Builder.with_cache_system_prompt true builder
     else builder
@@ -332,8 +348,9 @@ let run
     Error (Printf.sprintf "Agent build failed: %s" e)
   | Ok agent ->
   (match agent_ref with Some r -> r := Some agent | None -> ());
+  let effective_contract = match contract with Some c -> Some c | None -> config.contract in
   (try
-    let result, proof = match contract with
+    let result, proof = match effective_contract with
       | Some c ->
         let cr = Oas.Contract_runner.run ~sw ~contract:c agent goal in
         (cr.response, Some cr.proof)

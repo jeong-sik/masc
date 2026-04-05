@@ -65,6 +65,8 @@ let config_for_label
     ~(tools : Agent_sdk.Tool.t list)
     ~(max_turns : int)
     ~(max_tokens : int)
+    ?(max_input_tokens : int option)
+    ?(max_cost_usd : float option)
     ~(temperature : float)
     ?(max_idle_turns = 3)
     ?guardrails
@@ -75,6 +77,7 @@ let config_for_label
     ?enable_thinking
     ?max_input_tokens
     ?compact_ratio
+    ?contract
     ~(description : string option)
     () : Oas_worker_exec.config =
   let provider = Oas_worker_exec.resolve_provider_of_label model_label in
@@ -91,6 +94,8 @@ let config_for_label
     with
     max_turns;
     max_tokens;
+    max_input_tokens;
+    max_cost_usd;
     temperature;
     max_idle_turns;
     guardrails;
@@ -99,6 +104,7 @@ let config_for_label
     memory;
     tool_retry_policy;
     enable_thinking;
+    contract;
     description;
     max_input_tokens;
     compact_ratio;
@@ -125,6 +131,8 @@ let run_named
     ?(max_idle_turns = 3)
     ?(temperature = Oas_worker_cascade.default_temperature)
     ?(max_tokens = Oas_worker_cascade.default_max_tokens)
+    ?max_input_tokens
+    ?max_cost_usd
     ?(accept = fun (_ : Oas_response.api_response) -> true)
     ?guardrails
     ?hooks
@@ -185,7 +193,7 @@ let run_named
       ~system_prompt ~tools)
     with
       priority;
-      max_turns; max_tokens; temperature; max_idle_turns;
+      max_turns; max_tokens; max_input_tokens; max_cost_usd; temperature; max_idle_turns;
       guardrails; hooks; context_reducer; memory; tool_retry_policy;
       description = Some (Printf.sprintf "cascade:%s" cascade_name);
       transport = transport_resolved;
@@ -195,6 +203,7 @@ let run_named
       cache_system_prompt;
       max_input_tokens;
       compact_ratio;
+      contract;
     }
   in
   let config = { config with named_cascade = Some named_cascade; initial_messages; raw_trace; yield_on_tool } in
@@ -235,6 +244,8 @@ let run_model_by_label
     ?(max_idle_turns = 3)
     ?(temperature = Oas_worker_cascade.default_temperature)
     ?(max_tokens = Oas_worker_cascade.default_max_tokens)
+    ?max_input_tokens
+    ?max_cost_usd
     ?(accept = fun (_ : Oas_response.api_response) -> true)
     ?guardrails
     ?hooks
@@ -264,7 +275,7 @@ let run_model_by_label
         in
         let config =
           config_for_label ~name:"oas-label-model" ~model_label ~system_prompt
-            ~tools ~max_turns ~max_tokens ~temperature
+            ~tools ~max_turns ~max_tokens ?max_input_tokens ?max_cost_usd ~temperature
             ~max_idle_turns ?guardrails ?hooks ?context_reducer ?memory
             ?tool_retry_policy
             ?enable_thinking
@@ -291,6 +302,8 @@ let run_named_with_masc_tools
     ?(max_turns = 20)
     ?(temperature = Oas_worker_cascade.default_temperature)
     ?(max_tokens = Oas_worker_cascade.default_max_tokens)
+    ?max_input_tokens
+    ?max_cost_usd
     ?guardrails
     ?hooks
     ?memory
@@ -316,7 +329,7 @@ let run_named_with_masc_tools
       (fun input -> dispatch ~name:td.name ~args:input)
   ) masc_tools in
   run_named ~cascade_name ~goal ?priority ~system_prompt ~tools:oas_tools
-    ~max_turns ~temperature ~max_tokens ?guardrails ?hooks ?memory
+    ~max_turns ~temperature ~max_tokens ?max_input_tokens ?max_cost_usd ?guardrails ?hooks ?memory
     ?tool_retry_policy
     ?max_input_tokens
     ?compact_ratio
@@ -333,6 +346,8 @@ let run_model_with_masc_tools
     ?(max_turns = 20)
     ?(temperature = Oas_worker_cascade.default_temperature)
     ?(max_tokens = Oas_worker_cascade.default_max_tokens)
+    ?max_input_tokens
+    ?max_cost_usd
     ?guardrails
     ?hooks
     ?memory
@@ -357,7 +372,7 @@ let run_model_with_masc_tools
       in
         let config =
           config_for_label ~name:"oas-explicit-model" ~model_label ~system_prompt
-          ~tools:[] ~max_turns ~max_tokens ~temperature ?guardrails ?hooks
+          ~tools:[] ~max_turns ~max_tokens ?max_input_tokens ?max_cost_usd ~temperature ?guardrails ?hooks
           ?memory ?tool_retry_policy ?enable_thinking
           ?max_input_tokens ?compact_ratio
           ~description:(Some (Printf.sprintf "model_label:%s" model_label))

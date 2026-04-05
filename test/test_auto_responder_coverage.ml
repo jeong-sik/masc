@@ -148,11 +148,11 @@ let test_extract_nickname_multiline () =
    ============================================================ *)
 
 let test_spawnable_agents_nonempty () =
-  let agents = Auto_responder.spawnable_agents in
+  let agents = Provider_adapter.spawnable_spawn_keys () in
   check bool "nonempty" true (List.length agents > 0)
 
 let test_spawnable_agents_contains_claude () =
-  let agents = Auto_responder.spawnable_agents in
+  let agents = Provider_adapter.spawnable_spawn_keys () in
   check bool "contains claude" true (List.mem "claude" agents)
 
 let test_agent_type_of_mention_claude () =

@@ -245,7 +245,13 @@ let spawnable_spawn_keys () =
   direct_adapters
   |> List.filter_map (fun a -> a.spawn_key)
 
-(** Check if a name is a known spawnable agent (by spawn_key or alias). *)
+(** Check if a name is a known direct adapter label or alias.
+    This includes adapters that do not have a CLI spawn_key (e.g. glm, openrouter). *)
+let is_known_provider name =
+  resolve_direct_adapter name <> None
+
+(** Check if a name is a CLI-spawnable agent (has a spawn_key).
+    For a broader "known provider" predicate, use {!is_known_provider}. *)
 let is_spawnable_agent name =
   resolve_spawn_key name <> None
 

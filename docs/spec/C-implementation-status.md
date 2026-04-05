@@ -85,7 +85,6 @@
 | Unified Turn | Observe→BuildPrompt→AgentRun→ToolExec→Checkpoint | IMPL | keeper_unified_turn.ml, 31 calls |
 | Supervisor | Init→Alive→Zombie→Dead with backoff | IMPL | keeper_supervisor.ml |
 | Deliberation | 9 triage triggers, budget check, execute | IMPL | keeper_deliberation.ml 589 LOC |
-| Memory Bank | JSONL, soul_profile priority, compaction | IMPL | keeper_memory_bank.ml |
 | Verifier | cost_guard + risk_guard + Verifier_oas | IMPL | keeper_verifier.ml 589 LOC |
 | Eval Harness | Scenario→graders→score | IMPL | eval_harness.ml |
 | Anti-Fake | Test quality scoring | IMPL | anti_fake.ml |

@@ -4,11 +4,10 @@ open Keeper_types
 
 include Keeper_memory_policy
 
-let select_memory_candidates_by_profile
-    ~(profile : string)
+let select_memory_candidates
     (rows : (string * string * int) list) : (string * string * int) list =
-  let total_cap = profile_total_cap profile in
-  let kind_caps = profile_kind_caps profile in
+  let total_cap = total_cap () in
+  let kind_caps = kind_caps () in
   let used_by_kind : (string, int) Hashtbl.t = Hashtbl.create 16 in
   let rec go acc = function
     | [] -> List.rev acc
@@ -67,12 +66,7 @@ let is_meaningful_memory_text (s : string) : bool =
   not (List.mem key placeholders)
 
 let memory_candidates_from_snapshot
-    ~(soul_profile : string)
     (snapshot : keeper_state_snapshot) : (string * string * int) list =
-  let profile =
-    canonical_soul_profile soul_profile
-    |> Option.value ~default:default_soul_profile
-  in
   let add_opt kind value acc =
     match value with
     | None -> acc
@@ -83,7 +77,6 @@ let memory_candidates_from_snapshot
           ( kind,
             text,
             tuned_priority_for_candidate
-              ~soul_profile:profile
               ~kind
               ~text )
           :: acc
@@ -97,7 +90,6 @@ let memory_candidates_from_snapshot
           ( kind,
             item,
             tuned_priority_for_candidate
-              ~soul_profile:profile
               ~kind
               ~text:item )
           :: acc)
@@ -116,7 +108,7 @@ let memory_candidates_from_snapshot
          let c = compare pb pa in
          if c <> 0 then c else String.compare ta tb)
   in
-  select_memory_candidates_by_profile ~profile raw
+  select_memory_candidates raw
 
 type keeper_memory_row_raw = {
   json: Yojson.Safe.t;
@@ -140,16 +132,8 @@ let parse_memory_bank_row (line : string) : keeper_memory_row_raw option =
   with Yojson.Json_error _ ->
     None
 
-let memory_compaction_target_notes ~(profile : string) : int =
-  let default_target =
-    match profile with
-    | "minimal" -> 80
-    | "safety" -> 180
-    | "delivery" -> 220
-    | "research" -> 260
-    | "relationship" -> 240
-    | _ -> 220
-  in
+let memory_compaction_target_notes () : int =
+  let default_target = 220 in
   let raw =
     Safe_ops.get_env_int_logged
       "MASC_KEEPER_MEMORY_MAX_NOTES"
@@ -167,16 +151,15 @@ let memory_compaction_trigger_bytes ~(target_notes : int) : int =
   max 60000 (min 20000000 raw)
 
 let memory_kind_caps_for_compaction
-    ~(profile : string)
     ~(target_notes : int) : (string, int) Hashtbl.t =
   let tbl : (string, int) Hashtbl.t = Hashtbl.create 16 in
-  let base_total = max 1 (profile_total_cap profile) in
+  let base_total = max 1 (total_cap ()) in
   let scale = max 6 (target_notes / base_total) in
   List.iter
     (fun (kind, base_cap) ->
       let cap = max 8 ((base_cap * scale) + (scale / 3)) in
       Hashtbl.replace tbl kind cap)
-    (profile_kind_caps profile);
+    (kind_caps ());
   tbl
 
 let memory_row_key (row : keeper_memory_row_raw) : string =
@@ -206,11 +189,7 @@ let write_memory_bank_rows
 let compact_memory_bank_if_needed
     (config : Room.config)
     (meta : keeper_meta) : memory_bank_compaction =
-  let profile =
-    canonical_soul_profile meta.soul_profile
-    |> Option.value ~default:default_soul_profile
-  in
-  let target_notes = memory_compaction_target_notes ~profile in
+  let target_notes = memory_compaction_target_notes () in
   let path = keeper_memory_bank_path config meta.name in
   if not (Sys.file_exists path) then
     { no_memory_bank_compaction with
@@ -277,7 +256,7 @@ let compact_memory_bank_if_needed
               }
             else
               let kind_caps =
-                memory_kind_caps_for_compaction ~profile ~target_notes
+                memory_kind_caps_for_compaction ~target_notes
               in
               let kind_used : (string, int) Hashtbl.t = Hashtbl.create 16 in
               let selected_keys : (string, unit) Hashtbl.t = Hashtbl.create 1024 in
@@ -386,8 +365,7 @@ let append_memory_notes_from_reply
         }
   in
   let notes =
-    memory_candidates_from_snapshot
-      ~soul_profile:meta.soul_profile snapshot
+    memory_candidates_from_snapshot snapshot
   in
   if notes = [] then
     (0, [])
@@ -411,7 +389,6 @@ let append_memory_notes_from_reply
               ("trace_id", `String meta.runtime.trace_id);
               ("generation", `Int meta.runtime.generation);
               ("turn", `Int turn);
-              ("soul_profile", `String meta.soul_profile);
               ("kind", `String kind);
               ("priority", `Int priority);
               ("text", `String text);

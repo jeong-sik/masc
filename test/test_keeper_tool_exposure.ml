@@ -11,7 +11,7 @@ open Masc_mcp
    Test Helpers
    ============================================================ *)
 
-let make_meta ?(name = "test-keeper") ?(soul_profile = "")
+let make_meta ?(name = "test-keeper") 
     ?(policy_voice_enabled = false) ?(preset = Keeper_types.Full)
     ?(also_allow = []) ?tool_access ()
     : Keeper_types.keeper_meta =
@@ -26,7 +26,7 @@ let make_meta ?(name = "test-keeper") ?(soul_profile = "")
         ("name", `String name);
         ("agent_name", `String name);
         ("trace_id", `String "test-trace-exposure");
-        ("soul_profile", `String soul_profile);
+        
         ("policy_voice_enabled", `Bool policy_voice_enabled);
         ("tool_access", Keeper_types.tool_access_to_json tool_access);
       ]
@@ -81,7 +81,7 @@ let test_default_has_no_legacy_governance_tools () =
     (has_tool "masc_case_brief_submit" tools)
 
 let test_default_has_research_tools () =
-  let meta = make_meta ~soul_profile:"default" () in
+  let meta = make_meta  () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "has autoresearch" true (has_any_prefix "masc_autoresearch_" tools)
 
@@ -186,7 +186,7 @@ let test_coding_preset_has_keeper_bash () =
    ============================================================ *)
 
 let test_all_keepers_have_autoresearch () =
-  let meta = make_meta ~preset:Keeper_types.Research ~soul_profile:"teaching" () in
+  let meta = make_meta ~preset:Keeper_types.Research  () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "has autoresearch" true (has_any_prefix "masc_autoresearch_" tools)
 
@@ -246,7 +246,7 @@ let test_sufficient_tool_count () =
 
 let test_research_plus_voice_override_combined () =
   let meta =
-    make_meta ~soul_profile:"research"
+    make_meta 
       ~tool_access:
         (Keeper_types.Preset
            {
@@ -267,7 +267,7 @@ let test_research_plus_voice_override_combined () =
    ============================================================ *)
 
 let test_no_duplicate_tools () =
-  let meta = make_meta ~soul_profile:"research"
+  let meta = make_meta 
     ~policy_voice_enabled:true () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   let unique = List.sort_uniq String.compare tools in

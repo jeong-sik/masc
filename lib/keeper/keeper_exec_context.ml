@@ -584,8 +584,7 @@ let compact_if_needed
       in
       (* FoldCompleted replaces SummarizeOld — applied as a separate
          OAS Custom reducer after the standard strategy pipeline. *)
-      let fold_reducer = Keeper_compaction.persona_fold_strategy
-        ~soul_profile:meta.soul_profile () in
+      let fold_reducer = Keeper_compaction.fold_completed_strategy () in
       let strategy_names =
         List.map Context_compact_oas.strategy_name strategies
         @ ["FoldCompleted"]

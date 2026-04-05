@@ -304,8 +304,7 @@ goal = "test goal"
     match KTP.profile_defaults_of_toml doc with
     | Error e -> fail e
     | Ok defaults ->
-      check (option string) "goal" (Some "test goal") defaults.goal;
-      check (option string) "soul_profile" None defaults.soul_profile
+      check (option string) "goal" (Some "test goal") defaults.goal
 
 let test_profile_full () =
   let input = {|
@@ -314,7 +313,6 @@ goal = "analyze logs"
 short_goal = "current session"
 mid_goal = "build patterns"
 long_goal = "continuous improvement"
-soul_profile = "research"
 will = "detect issues"
 needs = "log access"
 desires = "low false positives"
@@ -333,7 +331,6 @@ policy_voice_enabled = false
     | Error e -> fail e
     | Ok d ->
       check (option string) "goal" (Some "analyze logs") d.goal;
-      check (option string) "soul_profile" (Some "research") d.soul_profile;
       check (option string) "will" (Some "detect issues") d.will;
       check (option string) "room_scope canonicalized to current"
         (Some "current") d.room_scope;
@@ -342,38 +339,6 @@ policy_voice_enabled = false
       check (option bool) "room signal prompt" (Some true)
         d.room_signal_prompt_enabled;
       check (option bool) "policy_voice" (Some false) d.policy_voice_enabled
-
-let test_profile_musician_soul_profile () =
-  let input = {|
-[keeper]
-goal = "test"
-soul_profile = "musician"
-|} in
-  match TL.parse_toml input with
-  | Error e -> fail e
-  | Ok doc ->
-    match KTP.profile_defaults_of_toml doc with
-    | Error e -> fail e
-    | Ok defaults ->
-      check (option string) "musician maps to relationship"
-        (Some "relationship") defaults.soul_profile
-
-let test_profile_invalid_soul_profile () =
-  let input = {|
-[keeper]
-goal = "test"
-soul_profile = "nonexistent"
-|} in
-  match TL.parse_toml input with
-  | Error e -> fail e
-  | Ok doc ->
-    match KTP.profile_defaults_of_toml doc with
-    | Ok _ -> fail "expected validation error for invalid soul_profile"
-    | Error msg ->
-      check bool "mentions invalid or soul" true
-        (let lc = String.lowercase_ascii msg in
-         try ignore (Str.search_forward (Str.regexp "invalid\\|soul\\|unknown") lc 0); true
-         with Not_found -> false)
 
 let test_profile_rejects_removed_model_keys () =
   let input = {|
@@ -428,7 +393,6 @@ let test_load_from_file () =
 [keeper]
 name = "test-keeper"
 goal = "testing file load"
-soul_profile = "balanced"
 |} in
   let oc = open_out tmp in
   output_string oc content;
@@ -583,60 +547,6 @@ let with_personas_dir f =
       Masc_mcp.Config_dir_resolver.reset ();
       f personas_dir)
 
-let test_persona_profile_canonicalizes_soul_profile () =
-  with_personas_dir @@ fun personas_dir ->
-  let persona_dir = Filename.concat personas_dir "probe" in
-  mkdir_p persona_dir;
-  write_file
-    (Filename.concat persona_dir "profile.json")
-    {|
-{
-  "name": "Probe",
-  "keeper": {
-    "goal": "test",
-    "soul_profile": "delivery"
-  }
-}
-|};
-  let defaults = KTP.load_keeper_profile_defaults_from_persona "probe" in
-  check (option string) "canonical soul_profile" (Some "delivery") defaults.soul_profile
-
-let test_persona_profile_musician_soul_profile () =
-  with_personas_dir @@ fun personas_dir ->
-  let persona_dir = Filename.concat personas_dir "probe" in
-  mkdir_p persona_dir;
-  write_file
-    (Filename.concat persona_dir "profile.json")
-    {|
-{
-  "name": "Probe",
-  "keeper": {
-    "goal": "test",
-    "soul_profile": "musician"
-  }
-}
-|};
-  let defaults = KTP.load_keeper_profile_defaults_from_persona "probe" in
-  check (option string) "musician maps to relationship" (Some "relationship") defaults.soul_profile
-
-let test_persona_profile_ignores_invalid_soul_profile () =
-  with_personas_dir @@ fun personas_dir ->
-  let persona_dir = Filename.concat personas_dir "probe" in
-  mkdir_p persona_dir;
-  write_file
-    (Filename.concat persona_dir "profile.json")
-    {|
-{
-  "name": "Probe",
-  "keeper": {
-    "goal": "test",
-    "soul_profile": "utility"
-  }
-}
-|};
-  let defaults = KTP.load_keeper_profile_defaults_from_persona "probe" in
-  check (option string) "invalid soul_profile dropped" None defaults.soul_profile
-
 let test_persona_resolver_defaults_to_research_tool_preset () =
   with_personas_dir @@ fun personas_dir ->
   let persona_dir = Filename.concat personas_dir "probe" in
@@ -712,9 +622,6 @@ let () =
           test_case "minimal" `Quick test_profile_minimal;
           test_case "full" `Quick test_profile_full;
           test_case "musician soul_profile maps to relationship" `Quick
-            test_profile_musician_soul_profile;
-          test_case "invalid soul_profile" `Quick test_profile_invalid_soul_profile;
-          test_case "rejects removed model keys" `Quick
             test_profile_rejects_removed_model_keys;
           test_case "rejects removed initiative keys" `Quick
             test_profile_rejects_removed_initiative_keys;
@@ -732,12 +639,6 @@ let () =
           test_case "nonexistent dir" `Quick test_discover_nonexistent_dir;
           test_case "skips bad files" `Quick test_discover_skips_bad_files;
           test_case "persona profile canonicalizes soul_profile" `Quick
-            test_persona_profile_canonicalizes_soul_profile;
-          test_case "persona profile musician maps to relationship" `Quick
-            test_persona_profile_musician_soul_profile;
-          test_case "persona profile ignores invalid soul_profile" `Quick
-            test_persona_profile_ignores_invalid_soul_profile;
-          test_case "persona resolver defaults to research tool_preset" `Quick
             test_persona_resolver_defaults_to_research_tool_preset;
         ] );
     ]

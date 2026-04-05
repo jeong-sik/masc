@@ -131,11 +131,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         ~preferred:p.tool_denylist_opt
         ~fallback:p.profile_defaults.tool_denylist
     in
-    let soul_profile =
-      Option.value
-        ~default:(Option.value ~default:default_soul_profile p.profile_defaults.soul_profile)
-        p.soul_profile_opt
-    in
+    
     let will =
       Option.value
         ~default:(Option.value ~default:default_keeper_will p.profile_defaults.will)
@@ -206,7 +202,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             ~short_goal
             ~mid_goal
             ~long_goal
-            ~soul_profile
             ~will
             ~needs
             ~desires
@@ -222,7 +217,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         short_goal;
         mid_goal;
         long_goal;
-        soul_profile;
+        
         social_model = default_social_model;
         cascade_name = "keeper_unified";
         will;
@@ -360,7 +355,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           ("short_goal", `String meta.short_goal);
           ("mid_goal", `String meta.mid_goal);
           ("long_goal", `String meta.long_goal);
-          ("soul_profile", `String meta.soul_profile);
           ("will", `String meta.will);
           ("needs", `String meta.needs);
           ("desires", `String meta.desires);

@@ -14,18 +14,14 @@ let keeper_constitution () =
   Prompt_registry.get_prompt "keeper.constitution"
 
 let build_keeper_system_prompt
-    ~goal ~short_goal ~mid_goal ~long_goal ~soul_profile ~will ~needs ~desires
+    ~goal ~short_goal ~mid_goal ~long_goal ~will ~needs ~desires
     ~instructions ?(persona_extended = "") () =
-  let profile =
-    canonical_soul_profile soul_profile
-    |> Option.value ~default:default_soul_profile
-  in
   let goal = normalize_goal_horizon_text goal in
   let short_goal, mid_goal, long_goal =
     resolve_goal_horizons ~goal ~short_goal_opt:(Some short_goal)
       ~mid_goal_opt:(Some mid_goal) ~long_goal_opt:(Some long_goal)
   in
-  let profile_policy = soul_profile_policy profile in
+  let profile_policy = "Maintain high standard of reasoning, factual grounding, and clear communication." in
   let will =
     let s = normalize_self_model_text will in
     if s = "" then "Maintain coherent identity and goal continuity." else s

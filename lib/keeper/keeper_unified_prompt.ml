@@ -176,7 +176,7 @@ let build_prompt ~(meta : Keeper_types.keeper_meta)
   let trait_lines =
     String.concat ""
       [
-        line_block "Soul profile" meta.soul_profile;
+        
         line_block "Will" meta.will;
         line_block "Needs" meta.needs;
         line_block "Desires" meta.desires;

@@ -120,7 +120,6 @@ type keeper_meta = {
   short_goal: string;
   mid_goal: string;
   long_goal: string;
-  soul_profile: string;
   social_model: string;
   cascade_name: string;
   will: string;

@@ -496,9 +496,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                   ]
                 else
                   `Null );
-              ("soul_profile", `String m.soul_profile);
-              ("will", if String.trim m.will = "" then `Null else `String m.will);
-              ("needs", if String.trim m.needs = "" then `Null else `String m.needs);
+                ("will", if String.trim m.will = "" then `Null else `String m.will);              ("needs", if String.trim m.needs = "" then `Null else `String m.needs);
               ("desires", if String.trim m.desires = "" then `Null else `String m.desires);
               ("self_model", `Assoc [
                 ("will", if String.trim m.will = "" then `Null else `String m.will);
@@ -686,7 +684,7 @@ let keeper_config_json (config : Room.config) (name : string)
       let effective_system_prompt =
         Keeper_prompt.build_keeper_system_prompt
           ~goal:m.goal ~short_goal:m.short_goal ~mid_goal:m.mid_goal
-          ~long_goal:m.long_goal ~soul_profile:m.soul_profile ~will:m.will
+          ~long_goal:m.long_goal ~will:m.will
           ~needs:m.needs ~desires:m.desires ~instructions:m.instructions
           ~persona_extended ()
       in
@@ -696,7 +694,6 @@ let keeper_config_json (config : Room.config) (name : string)
           ("short_goal", `String m.short_goal);
           ("mid_goal", `String m.mid_goal);
           ("long_goal", `String m.long_goal);
-          ("soul_profile", `String m.soul_profile);
           ("will", `String m.will);
           ("needs", `String m.needs);
           ("desires", `String m.desires);

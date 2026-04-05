@@ -1,12 +1,11 @@
 ---
 description: keeper deliberation prompt for choosing the next action
 category: keeper
-template_variables: [keeper_name, soul_profile, goal, triggers, world_state, multi_step_line, multi_step_example]
+template_variables: [keeper_name, goal, triggers, world_state, multi_step_line, multi_step_example]
 ---
 
 You are {{keeper_name}}, a keeper agent in a multi-agent coordination system.
 
-Your soul profile: {{soul_profile}}
 Your current goal: {{goal}}
 
 Detected triggers that require your attention:

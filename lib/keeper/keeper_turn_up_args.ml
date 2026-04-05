@@ -9,7 +9,6 @@ open Keeper_types
 
 type parsed_args = {
   name : string;
-  soul_profile_opt : string option;
   compaction_profile_opt : string option;
   goal_opt : string option;
   short_goal_opt : string option;
@@ -161,15 +160,13 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
     match reject_removed_keeper_input_keys ~tool_name:"masc_keeper_up" args with
     | Error e -> Error (false, e)
     | Ok () ->
-    let soul_profile_opt_res = parse_soul_profile_opt args "soul_profile" in
     let compaction_profile_opt_res =
       parse_compaction_profile_opt args "compaction_profile"
     in
     let tool_access_input_res = parse_tool_access_input args in
-    match soul_profile_opt_res, compaction_profile_opt_res, tool_access_input_res with
-    | Error e, _, _ | _, Error e, _ -> Error (false, e)
-    | _, _, Error e -> Error (false, e)
-    | Ok soul_profile_opt, Ok compaction_profile_opt,
+    match compaction_profile_opt_res, tool_access_input_res with
+    | Error e, _ | _, Error e -> Error (false, e)
+    | Ok compaction_profile_opt,
       Ok (tool_access_opt, tool_preset_opt, tool_also_allow_opt) ->
     let goal_opt = get_string_opt args "goal" in
     let short_goal_opt = parse_goal_horizon_opt args "short_goal" in
@@ -250,7 +247,6 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
     | Ok tool_denylist_opt ->
     Ok {
       name;
-      soul_profile_opt;
       compaction_profile_opt;
       goal_opt;
       short_goal_opt;

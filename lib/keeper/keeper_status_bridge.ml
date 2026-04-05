@@ -86,10 +86,6 @@ let live_override_fields (meta : keeper_meta) (defaults : keeper_profile_default
        (match defaults.long_goal with
         | Some value -> value <> meta.long_goal
         | None -> false)
-  |> add_if "prompt.soul_profile"
-       (match defaults.soul_profile with
-        | Some value -> value <> meta.soul_profile
-        | None -> false)
   |> add_if "prompt.will"
        (match defaults.will with Some value -> value <> meta.will | None -> false)
   |> add_if "prompt.needs"

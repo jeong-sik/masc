@@ -649,6 +649,17 @@ let rec add_routes ~sw ~clock router =
          )
        ) request reqd)
 
+  |> Http.Router.post "/api/v1/dashboard/goals/sweep" (fun request reqd ->
+       with_public_read (fun state _req reqd ->
+         let config = state.Mcp_server.room_config in
+         let result = Goal_janitor.run config in
+         Http.Response.json ~compress:true ~request
+           (Yojson.Safe.to_string
+              (`Assoc [("ok", `Bool true);
+                       ("result", Goal_janitor.sweep_result_to_yojson result)]))
+           reqd
+       ) request reqd)
+
   |> Http.Router.post "/api/v1/keepers/chat/stream" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_keeper_msg" (fun state _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->

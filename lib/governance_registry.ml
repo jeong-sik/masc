@@ -209,6 +209,62 @@ let keeper_handoff_pressure_threshold =
     ~deserialize:deserialize_float
     ()
 
+(* ── relay_heuristic surface (Low risk) ───────────────────────── *)
+
+let relay_tokens_per_user_msg =
+  Runtime_params.register ~key:"relay.tokens_per_user_msg"
+    ~default:(fun () -> 150)
+    ~validate:(validate_int_range ~min:10 ~max:5000 "relay.tokens_per_user_msg")
+    ~serialize:(fun v -> `Int v) ~deserialize:deserialize_int ()
+
+let relay_tokens_per_assistant_msg =
+  Runtime_params.register ~key:"relay.tokens_per_assistant_msg"
+    ~default:(fun () -> 500)
+    ~validate:(validate_int_range ~min:10 ~max:10000 "relay.tokens_per_assistant_msg")
+    ~serialize:(fun v -> `Int v) ~deserialize:deserialize_int ()
+
+let relay_tokens_per_tool_call =
+  Runtime_params.register ~key:"relay.tokens_per_tool_call"
+    ~default:(fun () -> 200)
+    ~validate:(validate_int_range ~min:10 ~max:5000 "relay.tokens_per_tool_call")
+    ~serialize:(fun v -> `Int v) ~deserialize:deserialize_int ()
+
+let relay_tokens_per_tool_result =
+  Runtime_params.register ~key:"relay.tokens_per_tool_result"
+    ~default:(fun () -> 300)
+    ~validate:(validate_int_range ~min:10 ~max:10000 "relay.tokens_per_tool_result")
+    ~serialize:(fun v -> `Int v) ~deserialize:deserialize_int ()
+
+let relay_cost_large_file_read =
+  Runtime_params.register ~key:"relay.cost_large_file_read"
+    ~default:(fun () -> 10_000)
+    ~validate:(validate_int_range ~min:1000 ~max:100_000 "relay.cost_large_file_read")
+    ~serialize:(fun v -> `Int v) ~deserialize:deserialize_int ()
+
+let relay_cost_per_file_edit =
+  Runtime_params.register ~key:"relay.cost_per_file_edit"
+    ~default:(fun () -> 3_000)
+    ~validate:(validate_int_range ~min:500 ~max:50_000 "relay.cost_per_file_edit")
+    ~serialize:(fun v -> `Int v) ~deserialize:deserialize_int ()
+
+let relay_cost_long_running =
+  Runtime_params.register ~key:"relay.cost_long_running"
+    ~default:(fun () -> 20_000)
+    ~validate:(validate_int_range ~min:1000 ~max:200_000 "relay.cost_long_running")
+    ~serialize:(fun v -> `Int v) ~deserialize:deserialize_int ()
+
+let relay_cost_exploration =
+  Runtime_params.register ~key:"relay.cost_exploration"
+    ~default:(fun () -> 15_000)
+    ~validate:(validate_int_range ~min:1000 ~max:100_000 "relay.cost_exploration")
+    ~serialize:(fun v -> `Int v) ~deserialize:deserialize_int ()
+
+let relay_cost_simple =
+  Runtime_params.register ~key:"relay.cost_simple"
+    ~default:(fun () -> 1_000)
+    ~validate:(validate_int_range ~min:100 ~max:10_000 "relay.cost_simple")
+    ~serialize:(fun v -> `Int v) ~deserialize:deserialize_int ()
+
 (* ── keeper_diagnostics surface (Medium risk) ─────────────────── *)
 
 let keeper_snapshot_sec =
@@ -337,6 +393,17 @@ let surfaces =
         "keeper.work_as_hb_max_silence_sec";
         "keeper.smart_hb_enabled";
         "keeper.stage_timing_ring_size";
+      ];
+    };
+    {
+      id = "relay_heuristic";
+      description = "Relay token estimation and task cost heuristics (not calibrated)";
+      risk = "low";
+      param_keys = [
+        "relay.tokens_per_user_msg"; "relay.tokens_per_assistant_msg";
+        "relay.tokens_per_tool_call"; "relay.tokens_per_tool_result";
+        "relay.cost_large_file_read"; "relay.cost_per_file_edit";
+        "relay.cost_long_running"; "relay.cost_exploration"; "relay.cost_simple";
       ];
     };
   ]

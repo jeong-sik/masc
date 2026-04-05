@@ -1,6 +1,23 @@
 # Changelog
 
 
+## [2.237.0] - 2026-04-05
+
+### Added
+- **Goal janitor** -- automated stale goal cleanup (#5225).
+- **Entropy logging** -- secret-safe args preview for idle loop detection (#5199).
+
+### Fixed
+- **Context overflow** -- resolve overflow with overrides and conservative estimation (#5220, closes #5053).
+- **Local LLM context** -- enforce 64K context floor for local discovery (#5214).
+- **Vendor hardcoding** -- remove from 4 files, Provider_adapter SSOT (#5222).
+- **Shutdown observability** -- improve logging for shutdown and idle loop (#5223).
+- **Keeper review** -- ceiling rounding, validation, log level (#5224).
+- **Small bugs** -- resolve remaining observability issues (#5215).
+
+### Changed
+- **Room terminology** -- flatten onboarding and dashboard wording (#5221).
+
 ## [2.236.0] - 2026-04-05
 
 ### Fixed

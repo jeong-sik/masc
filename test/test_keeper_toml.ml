@@ -357,6 +357,30 @@ let test_parse_multiline_array_unterminated () =
   | Ok _ -> fail "expected parse error for unterminated multiline array"
   | Error _ -> ()
 
+let test_parse_multiline_array_comment_only_lines () =
+  let input = "tags = [\n  \"x\",\n  # comment line\n  \"y\"\n]" in
+  match TL.parse_toml input with
+  | Ok doc ->
+    (match List.assoc_opt "tags" doc with
+     | Some (TL.Toml_string_array xs) ->
+       check int "array length" 2 (List.length xs);
+       check string "first" "x" (List.nth xs 0);
+       check string "second" "y" (List.nth xs 1)
+     | _ -> fail "expected Toml_string_array")
+  | Error e -> fail e
+
+let test_parse_multiline_array_bracket_in_string () =
+  let input = "tags = [\n  \"a]\",\n  \"[b\"\n]" in
+  match TL.parse_toml input with
+  | Ok doc ->
+    (match List.assoc_opt "tags" doc with
+     | Some (TL.Toml_string_array xs) ->
+       check int "array length" 2 (List.length xs);
+       check string "first" "a]" (List.nth xs 0);
+       check string "second" "[b" (List.nth xs 1)
+     | _ -> fail "expected Toml_string_array")
+  | Error e -> fail e
+
 (* ================================================================ *)
 (* Profile defaults conversion tests                                 *)
 (* ================================================================ *)
@@ -784,6 +808,10 @@ let () =
             test_parse_multiline_array_single_element;
           test_case "multiline array unterminated" `Quick
             test_parse_multiline_array_unterminated;
+          test_case "multiline array comment-only lines" `Quick
+            test_parse_multiline_array_comment_only_lines;
+          test_case "multiline array bracket in string" `Quick
+            test_parse_multiline_array_bracket_in_string;
         ] );
       ( "profile_defaults",
         [

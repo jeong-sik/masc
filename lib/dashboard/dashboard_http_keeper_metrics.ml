@@ -9,7 +9,7 @@ let normalize_model_name s =
     | None -> s
     | Some i ->
         let prefix = String.sub s 0 i |> String.lowercase_ascii in
-        if Provider_adapter.is_known_provider prefix || Provider_adapter.is_local_provider prefix then
+        if Provider_adapter.resolve_direct_canonical_name prefix <> None then
           String.sub s (i + 1) (String.length s - i - 1)
         else
           s

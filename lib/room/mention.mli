@@ -38,8 +38,4 @@ val is_mentioned : string -> string -> bool
 val any_mentioned : targets:string list -> string -> bool
 (** Check whether content contains an exact direct mention for any target *)
 
-val spawnable_agents : string list
-(** List of agent types that can be auto-spawned *)
 
-val is_spawnable : string -> bool
-(** Check if an agent type is spawnable by Auto-Responder *)

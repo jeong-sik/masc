@@ -123,14 +123,3 @@ let any_mentioned ~targets content =
   |> List.filter (fun target -> String.trim target <> "")
   |> List.exists (fun target -> is_mentioned target content)
 
-(** Agent types that can be auto-responded to (CLI-spawnable or model-callable).
-    NOTE: this list exists because masc_room cannot depend on main lib.
-    Callers in main lib should use Provider_adapter.is_known_provider instead
-    (which covers all direct adapters including those without a CLI spawn_key). *)
-let spawnable_agents = ["gemini"; "codex"; "claude"; "llama"; "glm"]
-
-(** Check if an agent type is spawnable or model-callable.
-    Prefer Provider_adapter.is_known_provider when available. *)
-let is_spawnable mention =
-  let base = agent_type_of_mention mention in
-  List.mem base spawnable_agents

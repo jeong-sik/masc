@@ -216,40 +216,41 @@ let test_resolve_targets_empty_agents () =
    ============================================================ *)
 
 let test_is_spawnable_gemini () =
-  check bool "gemini is spawnable" true (Mention.is_spawnable "gemini")
+  check bool "gemini is spawnable" true (Masc_mcp.Auto_responder.is_spawnable "gemini")
 
 let test_is_spawnable_codex () =
-  check bool "codex is spawnable" true (Mention.is_spawnable "codex")
+  check bool "codex is spawnable" true (Masc_mcp.Auto_responder.is_spawnable "codex")
 
 let test_is_spawnable_claude () =
-  check bool "claude is spawnable" true (Mention.is_spawnable "claude")
+  check bool "claude is spawnable" true (Masc_mcp.Auto_responder.is_spawnable "claude")
 
 let test_is_spawnable_llama () =
-  check bool "llama is spawnable" true (Mention.is_spawnable "llama")
+  check bool "llama is spawnable" true (Masc_mcp.Auto_responder.is_spawnable "llama")
 
 let test_is_spawnable_glm () =
-  check bool "glm is spawnable" true (Mention.is_spawnable "glm")
+  (* glm has spawn_key=None in Provider_adapter — not CLI-spawnable *)
+  check bool "glm not spawnable" false (Masc_mcp.Auto_responder.is_spawnable "glm")
 
 let test_is_spawnable_unknown () =
-  check bool "unknown not spawnable" false (Mention.is_spawnable "unknown-agent")
+  check bool "unknown not spawnable" false (Masc_mcp.Auto_responder.is_spawnable "unknown-agent")
 
 let test_is_spawnable_nickname () =
   (* Should extract agent type from nickname *)
-  check bool "claude nickname spawnable" true (Mention.is_spawnable "claude-gentle-gecko")
+  check bool "claude nickname spawnable" true (Masc_mcp.Auto_responder.is_spawnable "claude-gentle-gecko")
 
 let test_is_spawnable_empty () =
-  check bool "empty not spawnable" false (Mention.is_spawnable "")
+  check bool "empty not spawnable" false (Masc_mcp.Auto_responder.is_spawnable "")
 
 (* ============================================================
    spawnable_agents Tests
    ============================================================ *)
 
 let test_spawnable_agents_list () =
-  check bool "list not empty" true (List.length Mention.spawnable_agents > 0);
-  check bool "contains claude" true (List.mem "claude" Mention.spawnable_agents);
-  check bool "contains gemini" true (List.mem "gemini" Mention.spawnable_agents);
-  check bool "does not contain bare ollama" false
-    (List.mem "ollama" Mention.spawnable_agents)
+  let names = Masc_mcp.Provider_adapter.spawnable_canonical_names () in
+  check bool "list not empty" true (List.length names > 0);
+  check bool "contains claude-api" true (List.mem "claude-api" names);
+  check bool "contains gemini-api" true (List.mem "gemini-api" names);
+  check bool "does not contain bare ollama" false (List.mem "ollama" names)
 
 (* ============================================================
    Test Runners

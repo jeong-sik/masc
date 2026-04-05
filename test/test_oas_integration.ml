@@ -108,7 +108,7 @@ let test_compact_syncs_oas_context () =
   let ctx = Keeper_exec_context.create ~system_prompt:"test" ~max_tokens:1000 in
   let ctx = Keeper_exec_context.append ctx (Agent_sdk.Types.user_msg "msg1") in
   let ctx = Keeper_exec_context.append ctx (Agent_sdk.Types.assistant_msg "msg2") in
-  let messages, _ =
+  let messages =
     Context_compact_oas.compact
       ~system_prompt:ctx.system_prompt ~messages:ctx.messages
       ~strategies:[Context_compact_oas.MergeContiguous] () in

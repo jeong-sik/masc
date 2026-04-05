@@ -199,13 +199,15 @@ let direct_provider_snapshot provider =
   }
 
 let provider_snapshots () : provider_snapshot list =
-  [
-    llama_snapshot ();
-    direct_provider_snapshot "claude-api";
-    direct_provider_snapshot "codex-api";
-    direct_provider_snapshot "gemini-api";
-    direct_provider_snapshot "glm";
-  ]
+  let direct =
+    Provider_adapter.direct_adapters
+    |> List.filter (fun (a : Provider_adapter.adapter) ->
+         a.runtime_kind = Provider_adapter.Direct_api
+         && a.default_model_id <> None)
+    |> List.map (fun (a : Provider_adapter.adapter) ->
+         direct_provider_snapshot a.canonical_name)
+  in
+  llama_snapshot () :: direct
 
 let provider_snapshot_by_name name =
   provider_snapshots ()

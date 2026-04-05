@@ -184,7 +184,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
     let primary_max_context =
       match p.max_context_override_opt with
       | Some v -> v
-      | None -> Oas_model_resolve.resolve_primary_max_context cascade_models
+      | None -> Oas_model_resolve.resolve_max_cascade_context cascade_models
     in
     Progress.Tracker.step tracker ~message:"Initializing session directory" ();
     let trace_id = generate_trace_id () in

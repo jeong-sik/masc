@@ -34,7 +34,7 @@ let test_merge_contiguous_still_merges_plain_user () =
     msg Agent_sdk.Types.User "World";
     msg Agent_sdk.Types.Assistant "Hi";
   ] in
-  let result, _tokens = Compact.compact
+  let result = Compact.compact
     ~system_prompt:"sys" ~messages:msgs
     ~strategies:[Compact.MergeContiguous] () in
   let user_msgs = List.filter (fun (m : Agent_sdk.Types.message) ->
@@ -52,7 +52,7 @@ let test_compact_prune_tool_outputs () =
     tool_msg long_output;
     msg Agent_sdk.Types.Assistant "answer";
   ] in
-  let result, _tokens = Compact.compact
+  let result = Compact.compact
     ~system_prompt:"sys" ~messages:msgs
     ~strategies:[Compact.PruneToolOutputs] () in
   let tool_text = Agent_sdk.Types.text_of_message (List.nth result 1) in
@@ -60,15 +60,14 @@ let test_compact_prune_tool_outputs () =
     (String.length tool_text < String.length long_output)
 
 let test_compact_empty_messages () =
-  let result, tokens = Compact.compact
+  let result = Compact.compact
     ~system_prompt:"sys" ~messages:[]
     ~strategies:[Compact.PruneToolOutputs; Compact.MergeContiguous] () in
-  check int "empty input = empty output" 0 (List.length result);
-  check bool "tokens > 0 (system prompt)" true (tokens > 0)
+  check int "empty input = empty output" 0 (List.length result)
 
 let test_compact_single_message () =
   let msgs = [msg Agent_sdk.Types.User "hello"] in
-  let result, _tokens = Compact.compact
+  let result = Compact.compact
     ~system_prompt:"sys" ~messages:msgs
     ~strategies:[Compact.MergeContiguous; Compact.DropLowImportance] () in
   check bool "single message survives" true (List.length result >= 1)
@@ -81,7 +80,7 @@ let test_compact_drop_low_importance () =
       msg Agent_sdk.Types.Assistant (Printf.sprintf "ok %d" i))
     @ [msg Agent_sdk.Types.User "latest question"]
   in
-  let result, _tokens = Compact.compact
+  let result = Compact.compact
     ~system_prompt:"sys" ~messages:msgs
     ~strategies:[Compact.DropLowImportance] () in
   check bool "some messages dropped" true
@@ -93,7 +92,7 @@ let test_compact_summarize_old () =
     msg (if i mod 2 = 0 then Agent_sdk.Types.User else Agent_sdk.Types.Assistant)
       (Printf.sprintf "message %d with enough content to be meaningful" i))
   in
-  let result, _tokens = Compact.compact
+  let result = Compact.compact
     ~system_prompt:"sys" ~messages:msgs
     ~strategies:[Compact.SummarizeOld] () in
   check bool "message count reduced" true
@@ -113,7 +112,7 @@ let test_summarize_old_masks_tool_results_but_preserves_pairing () =
     msg Agent_sdk.Types.User "Any tests exist?";
     msg Agent_sdk.Types.Assistant "Yes, there are focused compaction tests.";
   ] in
-  let result, _tokens = Compact.compact
+  let result = Compact.compact
     ~system_prompt:"sys" ~messages:msgs
     ~strategies:[Compact.SummarizeOld] () in
   check bool "message count reduced" true
@@ -235,7 +234,7 @@ let test_dynamic_high_pressure_multi_agent () =
     unclaimed_task_count = 2; is_single_focused_task = false;
     context_window = 200_000; is_local_model = false } in
   let msgs = [msg Agent_sdk.Types.User "test"] in
-  let _result, _tokens = Compact.compact
+  let _result = Compact.compact
     ~system_prompt:"sys" ~messages:msgs
     ~strategies:[Compact.Dynamic Compact.default_dynamic_selector]
     ~observation:obs () in

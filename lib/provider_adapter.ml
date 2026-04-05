@@ -84,6 +84,18 @@ let cn_gemini = "gemini-api"
 let cn_glm = "glm"
 let cn_openrouter = "openrouter"
 
+(** Map OAS Provider_config.provider_kind to MASC adapter canonical_name.
+    Note: OpenAI_compat maps to codex-api (cloud); llama (local) uses the
+    same provider_kind but is identified by endpoint, not by this function. *)
+let string_of_provider_kind
+    : Llm_provider.Provider_config.provider_kind -> string
+  = function
+  | Anthropic -> cn_claude
+  | OpenAI_compat -> cn_codex
+  | Gemini -> cn_gemini
+  | Glm -> cn_glm
+  | Claude_code -> cn_claude
+
 (** Single source of truth for all agent adapters.
     spawn_key maps to Spawn.default_configs keys.
     default_voice maps to TTS voice names.
@@ -690,20 +702,20 @@ let provider_model_label provider model =
   if model = "" then None
   else Some (Printf.sprintf "%s:%s" provider model)
 
-(** canonical_name → model label. Uses "provider:auto" for cloud providers;
-    OAS cascade resolves the concrete model at runtime.
-    MASC no longer knows vendor families — only canonical adapter names. *)
+(** Derives the default model label for an adapter from its [runtime_kind]
+    and [cascade_prefix].  Local adapters require an explicit model ID
+    (resolved via env); Direct_api adapters use "[cascade_prefix]:auto" when
+    a default model is configured. *)
 let default_model_label_for_adapter (adapter : adapter) =
-  match adapter.canonical_name with
-  | s when s = cn_claude -> Ok "claude:auto"
-  | s when s = cn_gemini -> Ok "gemini:auto"
-  | s when s = cn_codex -> Ok "openai:auto"
-  | s when s = cn_glm -> Ok "glm:auto"
-  | s when s = cn_llama -> explicit_llama_model_label_result ()
-  | s when s = cn_openrouter ->
-      Error "OpenRouter requires explicit runtime_model"
-  | name ->
-      Error (Printf.sprintf "Provider '%s' requires explicit runtime_model" name)
+  match adapter.runtime_kind with
+  | Local ->
+    Result.map
+      (fun model_id -> adapter.cascade_prefix ^ ":" ^ model_id)
+      (explicit_llama_model_id_result ())
+  | Direct_api ->
+    match adapter.default_model_id with
+    | Some _ -> Ok (adapter.cascade_prefix ^ ":auto")
+    | None -> Error (Printf.sprintf "Provider '%s' requires explicit runtime_model" adapter.canonical_name)
 
 (** Build the "provider:auto" label for each adapter that has auth
     credentials present.  Used by preferred_*_model_labels to avoid
@@ -850,13 +862,25 @@ type auth_detail = {
 (** Cascade config prefix from adapter record. No match needed. *)
 let cascade_prefix_of_adapter (adapter : adapter) = adapter.cascade_prefix
 
-let endpoint_url_of_adapter (adapter : adapter) =
-  match adapter.canonical_name with
-  | name when name = cn_llama -> Some Env_config_runtime.Llama.server_url
-  | name when name = cn_glm -> Some Env_config_runtime.Glm.server_url
-  | name when name = cn_claude -> Some "https://api.anthropic.com"
-  | name when name = cn_codex -> Some "https://api.openai.com"
-  | _ -> None
+let endpoint_url_of_adapter (adapter : adapter) = adapter.endpoint_url
+
+(** Best-effort mapping from OAS provider_kind to a cascade prefix via the
+    adapter registry.
+
+    Warning: this mapping is inherently ambiguous for provider_kind values that
+    cover multiple adapters/endpoints (for example OpenAI_compat may represent
+    different provider labels such as codex/openrouter/llama). The returned
+    string is a cascade prefix only; callers must not assume it can round-trip
+    or reconstruct the original provider label.
+
+    When the exact provider identity matters, the only unambiguous approach is
+    to parse the prefix directly from the original provider:model label. This
+    helper should be used only when a best-effort cascade prefix is sufficient. *)
+let cascade_prefix_of_provider_kind (kind : Llm_provider.Provider_config.provider_kind) : string =
+  let cn = string_of_provider_kind kind in
+  match resolve_direct_adapter cn with
+  | Some a -> a.cascade_prefix
+  | None -> cn
 
 (** Resolve auth detail for any provider by canonical name or alias.
     Gemini-specific Vertex ADC vs API Key logic is internal. *)

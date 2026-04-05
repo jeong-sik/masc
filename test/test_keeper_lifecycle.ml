@@ -194,6 +194,59 @@ let test_apply_post_turn_lifecycle_compacts_and_updates_continuity () =
             (List.length loaded.messages < _original_message_count)
       | None -> fail "expected compacted checkpoint to be persisted")
 
+let test_apply_post_turn_lifecycle_keeps_checkpoint_when_compaction_skips () =
+  let base_dir = temp_dir "keeper_lifecycle_skip_compaction" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      Fs_compat.clear_fs ();
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let meta =
+        let base = make_keeper_meta ~trace_id:"trace-lifecycle-skip" () in
+        {
+          base with
+          auto_handoff = false;
+          compaction =
+            {
+              base.compaction with
+              ratio_gate = 1.0;
+              message_gate = 0;
+              token_gate = 0;
+              cooldown_sec = 0;
+            };
+          runtime =
+            {
+              base.runtime with
+              last_continuity_update_ts = 1.0;
+            };
+        }
+      in
+      let original_ctx =
+        build_dense_context ~turns:2 ~max_tokens:4096
+          ~state_reply:
+            "done\n\n[STATE]\nGoal: keep checkpoint\nProgress: stable\n[/STATE]"
+      in
+      let original_count = List.length original_ctx.messages in
+      let checkpoint = save_checkpoint ~base_dir ~meta ~ctx:original_ctx in
+      let lifecycle =
+        KEC.apply_post_turn_lifecycle ~base_dir ~meta
+          ~model:"llama:auto"
+          ~primary_model_max_tokens:4096
+          ~checkpoint:(Some checkpoint)
+      in
+      check bool "compaction skipped" false lifecycle.compaction.applied;
+      check string "skip decision recorded" "blocked:below_thresholds"
+        lifecycle.compaction.decision;
+      match
+        load_context ~base_dir ~trace_id:lifecycle.updated_meta.runtime.trace_id
+          ~max_tokens:4096
+      with
+      | Some loaded ->
+          check int "checkpoint messages preserved" original_count
+            (List.length loaded.messages)
+      | None -> fail "expected original checkpoint to remain available")
+
 let test_apply_post_turn_lifecycle_handoffs_after_compaction () =
   let base_dir = temp_dir "keeper_lifecycle_handoff" in
   Fun.protect
@@ -382,6 +435,8 @@ let () =
             test_load_context_prefers_live_primary_max_tokens_over_checkpoint_limit;
           test_case "compaction persists checkpoint and continuity" `Quick
             test_apply_post_turn_lifecycle_compacts_and_updates_continuity;
+          test_case "skip compaction keeps checkpoint" `Quick
+            test_apply_post_turn_lifecycle_keeps_checkpoint_when_compaction_skips;
           test_case "handoff runs after compaction" `Quick
             test_apply_post_turn_lifecycle_handoffs_after_compaction;
           test_case "overflow retry compacts OAS checkpoint" `Quick

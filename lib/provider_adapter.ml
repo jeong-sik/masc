@@ -84,6 +84,25 @@ let cn_gemini = "gemini-api"
 let cn_glm = "glm"
 let cn_openrouter = "openrouter"
 
+(** Default API base URLs — overridable via env var for proxying/testing. *)
+
+let env_url_or ~env ~default =
+  match Sys.getenv_opt env with
+  | Some url when String.trim url <> "" -> String.trim url
+  | _ -> default
+
+let anthropic_api_url () =
+  env_url_or ~env:"ANTHROPIC_API_URL" ~default:"https://api.anthropic.com"
+
+let openai_api_url () =
+  env_url_or ~env:"OPENAI_API_URL" ~default:"https://api.openai.com"
+
+let openrouter_api_url () =
+  env_url_or ~env:"OPENROUTER_API_URL" ~default:"https://openrouter.ai/api/v1"
+
+let gemini_generative_api_url () =
+  env_url_or ~env:"GEMINI_API_URL" ~default:"https://generativelanguage.googleapis.com"
+
 (** SSOT cascade prefix for local llama-server instances.
     All cascade label construction for local models must use this constant.
     Format: [local_cascade_prefix ^ ":" ^ model_id] → e.g. "llama:qwen3.5" *)
@@ -133,7 +152,7 @@ let direct_adapters =
       spawn_key = Some "claude";
       cascade_prefix = "claude";
       default_voice = Some "Sarah";
-      endpoint_url = Some "https://api.anthropic.com";
+      endpoint_url = Some (anthropic_api_url ());
       default_model_id = Some "auto";
     };
     {
@@ -144,7 +163,7 @@ let direct_adapters =
       spawn_key = Some "codex";
       cascade_prefix = "openai";
       default_voice = Some "George";
-      endpoint_url = Some "https://api.openai.com";
+      endpoint_url = Some (openai_api_url ());
       default_model_id = Some "auto";
     };
     {
@@ -182,7 +201,7 @@ let direct_adapters =
       spawn_key = None;
       cascade_prefix = "openrouter";
       default_voice = None;
-      endpoint_url = Some "https://openrouter.ai/api/v1";
+      endpoint_url = Some (openrouter_api_url ());
       default_model_id = None;
     };
   ]
@@ -908,7 +927,7 @@ let auth_detail_of_provider provider =
       | Gemini_api_key ->
         { auth_kind = "api_key:GEMINI_API_KEY"; status = "configured";
           available = true; supports_run = true;
-          endpoint_url = Some "https://generativelanguage.googleapis.com";
+          endpoint_url = Some (gemini_generative_api_url ());
           note = None }
       | Gemini_vertex_adc { project; location } ->
         { auth_kind = Printf.sprintf "vertex_adc:%s:%s" project location;

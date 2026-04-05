@@ -5,9 +5,13 @@
 
 open Dashboard_http_helpers
 
-(* Tool_audit module removed — audit-based tool call health is retired.
-   Returns zeroed metrics so dashboard consumers degrade gracefully. *)
-let tool_call_health_json (_config : Room.config) : Yojson.Safe.t =
+(** Compute tool-call health metrics from [Audit_log] entries within a
+    configurable time window.  Reads the canonical date-split audit store
+    and counts [ToolCall _] actions, partitioned by outcome.
+
+    [~now_ts] is injectable for testing; defaults to wall-clock time. *)
+let tool_call_health_json ?(now_ts = Unix.gettimeofday ()) (config : Room.config)
+    : Yojson.Safe.t =
   let window_hours =
     float_of_env_default
       "MASC_DASHBOARD_TOOL_CALL_WINDOW_HOURS"
@@ -15,13 +19,37 @@ let tool_call_health_json (_config : Room.config) : Yojson.Safe.t =
       ~min_v:0.1
       ~max_v:168.0
   in
+  let since = now_ts -. (window_hours *. 3600.0) in
+  let entries =
+    try Audit_log.read_entries ~n:50_000 config
+    with exn ->
+      Log.Dashboard.warn "tool_call_health: read_entries failed: %s"
+        (Printexc.to_string exn);
+      []
+  in
+  let total, failures =
+    List.fold_left
+      (fun (t, f) (e : Audit_log.audit_entry) ->
+        match e.action with
+        | Audit_log.ToolCall _ when e.timestamp >= since ->
+          let f =
+            match e.outcome with Audit_log.Failure _ -> f + 1 | _ -> f
+          in
+          (t + 1, f)
+        | _ -> (t, f))
+      (0, 0) entries
+  in
+  let failure_rate =
+    if total = 0 then 0.0 else float_of_int failures /. float_of_int total
+  in
   `Assoc [
     ("window_hours", `Float window_hours);
-    ("tool_calls", `Int 0);
-    ("failures", `Int 0);
-    ("timeouts", `Int 0);
-    ("failure_rate", `Float 0.0);
+    ("tool_calls", `Int total);
+    ("failures", `Int failures);
+    ("timeouts", `Null);
+    ("failure_rate", `Float failure_rate);
     ("p95_duration_ms", `Null);
+    ("since_epoch", `Float since);
   ]
 
 let board_monitoring_json ~(now_ts : float) : Yojson.Safe.t * bool =

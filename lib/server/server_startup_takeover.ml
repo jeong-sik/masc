@@ -122,7 +122,7 @@ let probe_liveness ?(timeout_sec = 3.0) ?(path = "/health/live") port =
         match read_status_line socket ~timeout_sec with
         | Some line -> status_line_is_healthy line
         | None -> false)
-  with _ -> false
+  with Eio.Cancel.Cancelled _ as e -> raise e | _ -> false
 
 let read_pid_file path =
   try

@@ -1,6 +1,12 @@
 # Changelog
 
 
+## [2.236.0] - 2026-04-05
+
+### Fixed
+- **Graceful shutdown** -- per-phase elapsed time logging for shutdown diagnostics (#5203, closes #5014).
+- **Keeper context warning** -- warn when discovered LLM context is below 16K threshold (#5212).
+
 ## [2.235.0] - 2026-04-05
 
 ### Added

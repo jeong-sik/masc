@@ -49,6 +49,16 @@ let has_keeper_prefix name =
     Derived from actual module exports — no prefix guessing. *)
 let known_non_keeper_tool_names : string list =
   List.concat [
+    [
+      "masc_status";
+      "masc_tasks";
+      "masc_claim_next";
+      "masc_plan_set_task";
+      "masc_transition";
+      "masc_add_task";
+      "masc_broadcast";
+      "masc_heartbeat";
+    ];
     Tool_shard.governance_tools
     |> List.map (fun (t : Types.tool_schema) -> t.name);
     Tool_shard.autoresearch_keeper_tools
@@ -61,6 +71,13 @@ let known_non_keeper_tool_names : string list =
 
 let known_shared_agent_keeper_tool_names : string list =
   [
+    "masc_status";
+    "masc_tasks";
+    "masc_claim_next";
+    "masc_transition";
+    "masc_add_task";
+    "masc_broadcast";
+    "masc_heartbeat";
     "masc_worktree_create";
     "masc_worktree_list";
     "masc_code_write";
@@ -139,8 +156,8 @@ let test_no_overlap_heuristic_vs_agent () =
   let meta = make_meta () in
   let keeper_names = Keeper_exec_tools.keeper_allowed_tool_names meta in
   let agent_names = Agent_tool_surfaces.spawned_agent_public_tool_names in
-  (* Mode removal: all keepers now get the approved shared agent/keeper tools,
-     which include worktree and masc_code_* tools. *)
+  (* Compatibility keepers still expose canonical masc_* coordination tools,
+     and mode removal added shared worktree/code tools. *)
   let overlap =
     List.filter
       (fun n ->
@@ -276,6 +293,8 @@ let test_keeper_agent_name_prefixed () =
    ============================================================ *)
 
 let () =
+  let base_path = Masc_test_deps.find_project_root () in
+  Keeper_exec_tools.init_policy_config ~base_path;
   Alcotest.run "Keeper_agent_isolation" [
     ("non_research_prefix", [
       Alcotest.test_case "heuristic only keeper_*" `Quick test_heuristic_only_keeper_prefixed;

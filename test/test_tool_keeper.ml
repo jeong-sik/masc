@@ -2758,6 +2758,8 @@ let test_keeper_repair_passes_with_provided_source_text () =
         Yojson.Safe.Util.(json |> member "keeper_name" |> to_string))
 
 let () =
+  let base_path = Masc_test_deps.find_project_root () in
+  Masc_mcp.Keeper_exec_tools.init_policy_config ~base_path;
   run "Tool_keeper" [
     ("read_file_tail_lines", [
          test_case "drops partial first line" `Quick test_read_file_tail_lines_drops_partial_first_line;

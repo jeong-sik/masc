@@ -1,0 +1,54 @@
+(** Keeper_tool_policy_config — load tool policy from config/tool_policy.toml.
+
+    Replaces hardcoded preset definitions with declarative configuration.
+    Groups define named tool lists; presets compose groups.
+
+    @since 2.236.0 *)
+
+(** A parsed tool policy configuration. *)
+type t
+
+(** The result of resolving a preset: either the full candidate set
+    (when [all_candidates = true] in config) or an explicit subset. *)
+type preset_resolution =
+  | All_candidates        (** Use the entire candidate tool set *)
+  | Subset of string list (** Use exactly this list of tool names *)
+
+(** Load and parse [config/tool_policy.toml].
+    Candidate order is:
+    1. [base_path/config/tool_policy.toml]
+    2. the config dir resolved by [Config_dir_resolver]
+    3. [Sys.getcwd ()/config/tool_policy.toml]
+    Returns [Error msg] if the file is missing or malformed. *)
+val load : base_path:string -> (t, string) result
+
+(** Resolve a preset name to its tool name list.
+    Shard-backed groups are resolved via [Tool_shard] at call time.
+    MASC tools are filtered through [masc_filter] if provided.
+    Returns [None] if the preset is not defined.
+
+    @param masc_filter  applied to each MASC tool name; only those
+      returning [true] are included.  Defaults to [fun _ -> true]. *)
+val resolve_preset :
+  t ->
+  string ->
+  ?masc_filter:(string -> bool) ->
+  unit ->
+  preset_resolution option
+
+(** Resolve all groups and merge their tool names.
+    Used to build the full candidate set (superset of all presets). *)
+val all_group_tools : t -> string list
+
+(** Merge all MASC tool group names (unfiltered). *)
+val all_masc_tools : t -> string list
+
+(** List all defined preset names. *)
+val preset_names : t -> string list
+
+(** List all defined group names. *)
+val group_names : t -> string list
+
+(** Resolve a single group name to tool names.
+    Returns [None] if the group is not defined. *)
+val resolve_group : t -> string -> string list option

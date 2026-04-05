@@ -301,7 +301,7 @@ let record_attempt ~channel ~room_id ~keeper ~duration_ms outcome =
            binding.timed_count <- binding.timed_count + 1;
            binding.max_dur_ms <- max binding.max_dur_ms duration_ms
        | _ -> ());
-      match outcome with
+      (match outcome with
       | Success ->
           acc.success_count <- acc.success_count + 1;
           acc.last_success_ts <- now;
@@ -346,7 +346,7 @@ let record_attempt ~channel ~room_id ~keeper ~duration_ms outcome =
            | Some binding ->
                update_binding_error_fields binding ~now ~kind:"internal"
                  ~message
-           | None -> ());
+           | None -> ()));
       append_event ~channel:channel_key ~room_id:trimmed_room ~keeper:trimmed_keeper
         ~duration_ms outcome ~timestamp:now)
 

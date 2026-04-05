@@ -545,6 +545,14 @@ let run_turn
     ) tool_entries
   in
   let tool_index = Agent_sdk.Tool_index.build ~config:tool_index_config scoped_tool_entries in
+  (* Per-session discovered tools: populated by keeper_tool_search,
+     consumed by before_turn_hook in discovery mode. *)
+  let decay_turns =
+    match Sys.getenv_opt "MASC_KEEPER_TOOL_DECAY_TURNS" with
+    | Some s -> (try max 1 (int_of_string s) with _ -> 5)
+    | None -> 5
+  in
+  let discovered_ref = ref (Keeper_discovered_tools.create ~decay_turns) in
   (* Full-universe search index for keeper_tool_search.
      Separate from the preset-scoped BM25 index used for progressive disclosure:
      search needs access to ALL tools so the keeper can discover beyond its preset. *)
@@ -568,6 +576,11 @@ let run_turn
       |> List.filter (fun (name, _) -> not (List.mem name core))
       |> List.filteri (fun i _ -> i < max_results)
     in
+    (* Register discovered tools for discovery-mode before_turn_hook.
+       Turn 0 used as placeholder — decay is relative, so absolute turn
+       value only matters when discovery mode is active. *)
+    let discovered_names = List.map fst new_discoveries in
+    Keeper_discovered_tools.add !discovered_ref ~turn:0 ~names:discovered_names;
     (* Try MASC help_entry (from injected schemas), fall back to OAS description *)
     let masc_schemas = !Keeper_exec_tools.masc_schemas_ref in
     let results =
@@ -787,13 +800,25 @@ let run_turn
           |> Tool_portal.filter_visible_tool_names portal_ctx
         in
         let selected_tools =
-          prioritized_disclosed_tool_names
-            ~max_tools
-            ~always_include_tools:visible_always_include_tools
-            ~retrieved_names
-            ~fallback_tools:
-              (Tool_portal.filter_visible_tool_names portal_ctx fallback_tools)
-            ~use_fallback
+          if Keeper_exec_tools.tool_discovery_enabled () then
+            (* Discovery mode: core tools + actively discovered tools.
+               No BM25 auto-selection — keeper uses keeper_tool_search
+               explicitly to discover tools on demand. *)
+            let core = Keeper_exec_tools.effective_core_tools () in
+            let discovered =
+              Keeper_discovered_tools.active_names !discovered_ref ~turn
+            in
+            let _ = Keeper_discovered_tools.decay !discovered_ref ~turn in
+            Keeper_types.dedupe_keep_order (core @ discovered)
+            |> Tool_portal.filter_visible_tool_names portal_ctx
+          else
+            prioritized_disclosed_tool_names
+              ~max_tools
+              ~always_include_tools:visible_always_include_tools
+              ~retrieved_names
+              ~fallback_tools:
+                (Tool_portal.filter_visible_tool_names portal_ctx fallback_tools)
+              ~use_fallback
         in
         let all_allowed =
           Agent_sdk.Tool_op.apply

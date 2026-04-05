@@ -132,6 +132,17 @@ let estimate_reversibility description =
   else if has "test" || has "lint" || has "format" then 0.9
   else if has "read" || has "search" || has "query" || has "list" || has "view" then 1.0
   else 0.7  (* unknown defaults to moderately reversible *)
+  |> fun score ->
+    Heuristic_metrics.record {
+      module_name = "goal_orchestrator";
+      site = "estimate_reversibility";
+      raw_value = score;
+      threshold = 0.5;
+      triggered = score < 0.5;
+      provenance = Reversibility (Printf.sprintf "%.1f" score);
+      timestamp = Unix.gettimeofday ();
+    };
+    score
 
 type task_complexity = {
   estimated_turns : int;

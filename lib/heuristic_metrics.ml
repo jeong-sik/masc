@@ -11,6 +11,11 @@ type provenance =
   | Drift_guard of string
   | Anti_rationalization of string
   | Agent_reputation of string
+  | Relay of string
+  | Alert_scoring of string
+  | Pipeline_stage of string
+  | Board_classify of string
+  | Reversibility of string
 
 type event = {
   module_name : string;
@@ -37,6 +42,16 @@ let provenance_to_json = function
     `Assoc [("type", `String "anti_rationalization"); ("detail", `String gate)]
   | Agent_reputation metric ->
     `Assoc [("type", `String "agent_reputation"); ("detail", `String metric)]
+  | Relay site ->
+    `Assoc [("type", `String "relay"); ("detail", `String site)]
+  | Alert_scoring signal ->
+    `Assoc [("type", `String "alert_scoring"); ("detail", `String signal)]
+  | Pipeline_stage stage ->
+    `Assoc [("type", `String "pipeline_stage"); ("detail", `String stage)]
+  | Board_classify kind ->
+    `Assoc [("type", `String "board_classify"); ("detail", `String kind)]
+  | Reversibility est ->
+    `Assoc [("type", `String "reversibility"); ("detail", `String est)]
 
 let event_to_json (e : event) : Yojson.Safe.t =
   `Assoc [

@@ -310,7 +310,7 @@ let make_hooks
             (!meta_ref).name consecutive_idle_turns tools_str;
           Agent_sdk.Hooks.Skip
         end else begin
-          Log.Keeper.debug "keeper:%s idle_turns=%d tools=[%s]"
+          Log.Keeper.info "keeper:%s idle_turns=%d tools=[%s] — nudging via Continue"
             (!meta_ref).name consecutive_idle_turns tools_str;
           Agent_sdk.Hooks.Continue
         end

@@ -831,3 +831,24 @@ let gemini_vertex_openai_base_url ~project ~location =
   Printf.sprintf
     "https://aiplatform.googleapis.com/v1/projects/%s/locations/%s/endpoints/openapi"
     project location
+
+(** Resolve the base endpoint URL for a canonical provider name.
+    Returns the runtime-configured URL for local/dynamic providers,
+    or the well-known public API URL for direct-API providers.
+    Dashboard code should call this instead of hardcoding vendor URLs. *)
+let endpoint_url_for_canonical_name name =
+  match normalize_label name with
+  | "llama" | "llama.cpp" | "llamacpp" ->
+    Some Env_config_runtime.Llama.server_url
+  | "glm" ->
+    Some Env_config_runtime.Glm.server_url
+  | "claude-api" | "claude" | "anthropic" ->
+    Some "https://api.anthropic.com"
+  | "codex-api" | "codex" | "openai" ->
+    Some "https://api.openai.com"
+  | "gemini-api" | "gemini" -> (
+    match resolve_gemini_direct_auth () with
+    | Gemini_vertex_adc { project; location } ->
+      Some (gemini_vertex_openai_base_url ~project ~location)
+    | _ -> Some "https://generativelanguage.googleapis.com")
+  | _ -> None

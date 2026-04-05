@@ -146,18 +146,7 @@ let auth_kind_for_provider provider =
   | _ -> Provider_adapter.auth_kind_for_canonical_name provider
 
 let endpoint_url_for_provider provider =
-  match provider with
-  | "llama" -> Some Env_config_runtime.Llama.server_url
-  | "claude-api" -> Some "https://api.anthropic.com"
-  | "codex-api" -> Some "https://api.openai.com"
-  | "glm" -> Some Env_config_runtime.Glm.server_url
-  | "gemini-api" -> (
-      match Provider_adapter.resolve_gemini_direct_auth () with
-      | Provider_adapter.Gemini_vertex_adc { project; location } ->
-          Some
-            (Provider_adapter.gemini_vertex_openai_base_url ~project ~location)
-      | _ -> Some "https://generativelanguage.googleapis.com")
-  | _ -> None
+  Provider_adapter.endpoint_url_for_canonical_name provider
 
 let default_model_for_provider provider =
   match Provider_adapter.resolve_direct_adapter provider with

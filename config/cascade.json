@@ -38,6 +38,7 @@
   "spawn_glm_models": ["llama:auto", "glm:auto"],
   "keeper_unified_models": ["llama:auto"],
   "research_models": ["llama:auto", "glm:auto"],
+  "tool_rerank_models": ["llama:auto", "glm:auto"],
 
   "_comment_inference": "Per-cascade inference parameters (temperature, max_tokens). Falls back to caller defaults when absent.",
   "keeper_unified_temperature": 0.2,

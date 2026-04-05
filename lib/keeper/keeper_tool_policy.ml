@@ -105,17 +105,24 @@ let select_existing_masc_tool_names names =
   |> List.filter (fun name -> List.mem name injected)
   |> dedupe_tool_names
 
-(* ── Candidate aggregation ────────────────────────────────────── *)
+(* ── Candidate aggregation (config-driven) ────────────────────── *)
 
 let keeper_base_candidate_tool_names () =
+  let config_tools =
+    match !policy_config with
+    | None -> []
+    | Some cfg -> Keeper_tool_policy_config.all_group_tools cfg
+  in
   dedupe_tool_names
-    ( keeper_internal_candidate_tool_names
-    @ keeper_voice_tool_names
-    @ keeper_governance_tool_names
-    @ keeper_coding_shard_tool_names
-    @ keeper_coding_tool_names
-    @ keeper_autoresearch_tool_names
+    ( config_tools
+    @ keeper_internal_candidate_tool_names
     @ injected_masc_tool_names () )
+
+(** Optional tools that require explicit opt-in via also_allow.
+    Kept separate from config groups because they are deliberately
+    excluded from all presets by default. *)
+let keeper_optional_tool_names =
+  [ "keeper_board_delete" ]
 
 let explicit_optional_candidate_tool_names (meta : keeper_meta) =
   let requested =
@@ -124,7 +131,7 @@ let explicit_optional_candidate_tool_names (meta : keeper_meta) =
     | Custom allowlist -> allowlist
   in
   requested
-  |> List.filter (fun name -> List.mem name keeper_optional_board_tool_names)
+  |> List.filter (fun name -> List.mem name keeper_optional_tool_names)
   |> dedupe_tool_names
 
 (* ── Presets (config-driven) ───────────────────────────────────── *)

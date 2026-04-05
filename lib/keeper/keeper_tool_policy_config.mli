@@ -32,6 +32,13 @@ val resolve_preset :
   unit ->
   preset_resolution option
 
+(** Resolve all groups and merge their tool names.
+    Used to build the full candidate set (superset of all presets). *)
+val all_group_tools : t -> string list
+
+(** Merge all MASC tool group names (unfiltered). *)
+val all_masc_tools : t -> string list
+
 (** List all defined preset names. *)
 val preset_names : t -> string list
 

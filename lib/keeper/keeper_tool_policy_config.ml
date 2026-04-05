@@ -169,6 +169,14 @@ let resolve_preset
       in
       Some (Subset (group_tools @ masc_from_groups @ masc_individual))
 
+let all_group_tools (config : t) : string list =
+  Hashtbl.fold (fun _ source acc ->
+    resolve_group_source source @ acc
+  ) config.groups []
+
+let all_masc_tools (config : t) : string list =
+  Hashtbl.fold (fun _ tools acc -> tools @ acc) config.masc_groups []
+
 let preset_names (config : t) : string list =
   Hashtbl.fold (fun name _ acc -> name :: acc) config.presets []
   |> List.sort String.compare

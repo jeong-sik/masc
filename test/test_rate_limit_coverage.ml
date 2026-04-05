@@ -197,7 +197,8 @@ let test_key_of_sockaddr_ipv6_loopback () =
   let raw = String.make 15 '\000' ^ "\001" in
   let ip = Eio.Net.Ipaddr.of_raw raw in
   let key = Rate_limit.key_of_sockaddr (`Tcp (ip, 443)) in
-  check bool "IPv6 key non-empty" true (String.length key > 0)
+  (* Expected: 8 groups of 2 bytes, all zero except last = 1 *)
+  check string "IPv6 loopback key" "0:0:0:0:0:0:0:1" key
 
 (* ============================================================
    headers_global Tests

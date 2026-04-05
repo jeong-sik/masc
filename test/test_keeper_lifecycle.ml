@@ -106,6 +106,29 @@ let test_apply_post_turn_lifecycle_without_checkpoint_records_skip () =
       check int "turn generation unchanged" meta.runtime.generation
         lifecycle.turn_generation)
 
+let test_load_context_prefers_live_primary_max_tokens_over_checkpoint_limit () =
+  let base_dir = temp_dir "keeper_lifecycle_live_limit" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      Fs_compat.clear_fs ();
+      let meta = make_keeper_meta ~trace_id:"trace-live-limit" () in
+      let ctx =
+        build_dense_context ~turns:4 ~max_tokens:4096
+          ~state_reply:"[STATE]\nGoal: test\nProgress: saved\n[/STATE]"
+      in
+      let checkpoint = save_checkpoint ~base_dir ~meta ~ctx in
+      check int "stored checkpoint max used when fallback missing" 4096
+        (KEC.checkpoint_max_tokens checkpoint ~fallback:0);
+      match
+        load_context ~base_dir ~trace_id:meta.runtime.trace_id
+          ~max_tokens:32768
+      with
+      | Some loaded ->
+          check int "restore uses live primary max tokens" 32768
+            loaded.max_tokens
+      | None -> fail "expected checkpoint context to load")
+
 let test_apply_post_turn_lifecycle_compacts_and_updates_continuity () =
   let base_dir = temp_dir "keeper_lifecycle_compact" in
   Fun.protect
@@ -355,6 +378,8 @@ let () =
         [
           test_case "no checkpoint records skip state" `Quick
             test_apply_post_turn_lifecycle_without_checkpoint_records_skip;
+          test_case "restore prefers live primary max tokens" `Quick
+            test_load_context_prefers_live_primary_max_tokens_over_checkpoint_limit;
           test_case "compaction persists checkpoint and continuity" `Quick
             test_apply_post_turn_lifecycle_compacts_and_updates_continuity;
           test_case "handoff runs after compaction" `Quick

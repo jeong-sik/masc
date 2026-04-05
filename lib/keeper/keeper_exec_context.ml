@@ -244,15 +244,18 @@ let log_keeper_exn ~label exn =
 let checkpoint_generation_key = "keeper_generation"
 
 let checkpoint_max_tokens (cp : Agent_sdk.Checkpoint.t) ~(fallback : int) : int =
-  let open Yojson.Safe.Util in
-  match cp.max_total_tokens with
-  | Some value -> value
-  | None -> (
-      match cp.working_context with
-      | Some (`Assoc _ as sidecar) ->
-          sidecar |> member "max_tokens" |> to_int_option
-          |> Option.value ~default:fallback
-      | _ -> fallback)
+  let stored_limit =
+    let open Yojson.Safe.Util in
+    match cp.max_total_tokens with
+    | Some value when value > 0 -> Some value
+    | _ -> (
+        match cp.working_context with
+        | Some (`Assoc _ as sidecar) ->
+            sidecar |> member "max_tokens" |> to_int_option
+        | _ -> None)
+  in
+  if fallback > 0 then fallback
+  else Option.value ~default:fallback stored_limit
 
 let context_of_oas_checkpoint
     (cp : Agent_sdk.Checkpoint.t)

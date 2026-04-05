@@ -11,7 +11,7 @@
 
 (** {1 Result Conversion} *)
 
-let to_oas_tool_result ?(recoverable = true) (success, msg)
+let to_oas_tool_result ?(recoverable = false) (success, msg)
   : Agent_sdk.Types.tool_result =
   if success then Ok { Agent_sdk.Types.content = msg }
   else Error { Agent_sdk.Types.message = msg; recoverable }

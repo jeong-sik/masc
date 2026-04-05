@@ -11,6 +11,7 @@
 open Alcotest
 
 module Auto_responder = Masc_mcp.Auto_responder
+module Mention = Masc_room.Mention
 
 let file_contains_pattern file_rel pattern =
   let source_root =
@@ -148,11 +149,11 @@ let test_extract_nickname_multiline () =
    ============================================================ *)
 
 let test_spawnable_agents_nonempty () =
-  let agents = Provider_adapter.spawnable_spawn_keys () in
+  let agents = Mention.spawnable_agents in
   check bool "nonempty" true (List.length agents > 0)
 
 let test_spawnable_agents_contains_claude () =
-  let agents = Provider_adapter.spawnable_spawn_keys () in
+  let agents = Mention.spawnable_agents in
   check bool "contains claude" true (List.mem "claude" agents)
 
 let test_agent_type_of_mention_claude () =

@@ -75,6 +75,8 @@ let effective_discovered_ctx ~static_ctx ~(discovered : int option) : int =
   | Some ctx when ctx >= context_floor -> ctx
   | _ -> static_ctx
 
+(** Extract the provider name from the original label when present; otherwise
+    derive the display/provider key from the parsed provider config. *)
 let provider_name_of_cfg label (cfg : Llm_provider.Provider_config.t) =
   match provider_name_of_label label with
   | Some pname -> pname
@@ -83,6 +85,8 @@ let provider_name_of_cfg label (cfg : Llm_provider.Provider_config.t) =
         | Anthropic -> "claude" | OpenAI_compat -> "openai"
         | Gemini -> "gemini" | Glm -> "glm" | Claude_code -> "claude_code")
 
+(** Local providers use runtime discovery directly, and loopback
+    OpenAI-compatible endpoints are treated the same way. *)
 let uses_local_discovery pname (cfg : Llm_provider.Provider_config.t) =
   Provider_adapter.requires_discovery pname ||
   (pname = "openai" && Url_utils.is_loopback_url cfg.base_url)

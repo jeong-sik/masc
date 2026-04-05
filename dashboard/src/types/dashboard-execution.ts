@@ -434,9 +434,11 @@ export interface ServerStatus {
   tempo_interval_s?: number
   tempo?: string
   tool_call_health?: {
-    timeouts: number
-    p95_duration_ms: number | null
     window_hours: number
+    tool_calls: number
+    failures: number
+    failure_rate: number
+    since_epoch: number
   }
   alert_thresholds?: {
     proactive_fallback_warn: number

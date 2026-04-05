@@ -51,8 +51,8 @@ type similarity_measurement = {
 type timing_measurement = {
   now_ts : float;
   idle_seconds : int;
-  since_last_compaction_ts : float;
-  since_last_handoff_ts : float;
+  since_last_compaction_sec : float;
+  since_last_handoff_sec : float;
   proactive_warmup_elapsed : bool;
 }
 

@@ -21,10 +21,19 @@ type surface_entry = {
 let ref_json ~kind ~label value =
   `Assoc [ ("kind", `String kind); ("label", `String label); ("value", `String value) ]
 
+let live_spotcheck_kind (value : string) =
+  if String.length value > 0 && value.[0] = '/' then "route" else "script"
+
 let refs_json (refs : verification_refs) =
   [
     Option.map (ref_json ~kind:"script" ~label:"fixture_harness") refs.fixture_harness;
-    Option.map (ref_json ~kind:"script" ~label:"live_spotcheck") refs.live_spotcheck;
+    Option.map
+      (fun value ->
+        ref_json
+          ~kind:(live_spotcheck_kind value)
+          ~label:"live_spotcheck"
+          value)
+      refs.live_spotcheck;
     Option.map (ref_json ~kind:"route" ~label:"logs") refs.logs_ref;
     Option.map (ref_json ~kind:"route" ~label:"metrics") refs.metrics_ref;
     Option.map (ref_json ~kind:"route" ~label:"proof") refs.proof_ref;

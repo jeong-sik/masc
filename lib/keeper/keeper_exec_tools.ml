@@ -49,14 +49,11 @@ let tag_dispatch_fn
   ref (fun ~config:_ ~agent_name:_ ~tag:_ ~name:_ ~args:_ -> None)
 ;;
 
-(** Estimate total token count for a working context (system prompt + messages).
-    Mirrors [Keeper_exec_context.token_count] but avoids a dependency cycle. *)
+(** Delegate to [Keeper_exec_context.token_count] for consistent 15% safety
+    buffer (#5053).  Previous inline version lacked the buffer, causing
+    context_ratio in masc_status to be ~13% lower than the authoritative value. *)
 let count_context_tokens (ctx : working_context) =
-  Agent_sdk.Context_reducer.estimate_char_tokens ctx.system_prompt
-  + List.fold_left
-      (fun acc m -> acc + Agent_sdk.Context_reducer.estimate_message_tokens m)
-      0
-      ctx.messages
+  Keeper_exec_context.token_count ctx
 ;;
 
 let ensure_keeper_board_post_args ~author ~source = function

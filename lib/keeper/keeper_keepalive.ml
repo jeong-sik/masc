@@ -1037,7 +1037,12 @@ let set_keeper_paused_state ~agent_name paused =
        Keeper_registry.update_meta
          ~base_path:entry.base_path
          entry.name
-         { entry.meta with paused })
+         { entry.meta with paused };
+       (* RFC-0002: dispatch resume event through state machine *)
+       if not paused then
+         ignore (Keeper_registry.dispatch_event
+           ~base_path:entry.base_path entry.name
+           Keeper_state_machine.Operator_resume))
 ;;
 
 let wakeup_keeper_by_agent_name ~agent_name =

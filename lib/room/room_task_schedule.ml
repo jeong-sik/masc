@@ -234,8 +234,8 @@ let claim_next_r config ~agent_name ?(exclude_task_ids=[]) () =
 let claim_next config ~agent_name =
   match claim_next_r config ~agent_name () with
   | Claim_next_claimed { message; _ } -> message
-  | Claim_next_no_unclaimed -> "📋 No unclaimed tasks available"
-  | Claim_next_no_eligible _ -> "📋 No unclaimed tasks available"
+  | Claim_next_no_unclaimed -> "📋 No unclaimed tasks. ACTION: Stop task-checking — nothing to claim."
+  | Claim_next_no_eligible _ -> "📋 No unclaimed tasks. ACTION: Stop task-checking — nothing to claim."
   | Claim_next_error e -> Printf.sprintf "❌ Error: %s" e
 
 (** Release stale task claims older than [ttl_seconds].

@@ -805,15 +805,6 @@ let apply_post_turn_lifecycle
         message_count = rollover.message_count;
       }
 
-let clamp_context_max_tokens
-    (ctx : working_context)
-    ~(primary_model_max_tokens : int) : working_context =
-  let clamped =
-    if primary_model_max_tokens <= 0 then ctx.max_tokens
-    else min ctx.max_tokens primary_model_max_tokens
-  in
-  if clamped = ctx.max_tokens then ctx
-  else sync_oas_context { ctx with max_tokens = clamped }
 let forced_overflow_retry_meta
     (meta : keeper_meta)
     ~(turn_generation : int)

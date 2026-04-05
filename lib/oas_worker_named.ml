@@ -106,7 +106,6 @@ let config_for_label
     enable_thinking;
     contract;
     description;
-    max_input_tokens;
     compact_ratio;
   }
 

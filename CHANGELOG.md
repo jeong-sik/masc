@@ -1,6 +1,16 @@
 # Changelog
 
 
+## [2.243.0] - 2026-04-05
+
+### Fixed
+- **Concurrency** -- keeper_keepalive bus/gRPC refs to WORM Atomic (#5299, #3158 Phase 2).
+- **Context** -- 64K boundary tests for small-local classification (#5298).
+
+### Changed
+- **Tool presets** -- migrate korean_keywords to Tool_index aliases (#5295).
+- **BM25** -- use OAS Tool_index.confident, simplify hook (#5296).
+
 ## [2.242.0] - 2026-04-05
 
 ### Fixed

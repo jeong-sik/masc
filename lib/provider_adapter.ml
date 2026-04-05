@@ -718,12 +718,16 @@ let provider_model_label provider model =
   if model = "" then None
   else Some (Printf.sprintf "%s:%s" provider model)
 
-(** canonical_name → model label. Uses "provider:auto" for cloud providers;
-    OAS cascade resolves the concrete model at runtime.
-    MASC no longer knows vendor families — only canonical adapter names. *)
+(** Derives the default model label for an adapter from its [runtime_kind]
+    and [cascade_prefix].  Local adapters require an explicit model ID
+    (resolved via env); Direct_api adapters use "[cascade_prefix]:auto" when
+    a default model is configured. *)
 let default_model_label_for_adapter (adapter : adapter) =
   match adapter.runtime_kind with
-  | Local -> explicit_llama_model_label_result ()
+  | Local ->
+    Result.map
+      (fun model_id -> adapter.cascade_prefix ^ ":" ^ model_id)
+      (explicit_llama_model_id_result ())
   | Direct_api ->
     match adapter.default_model_id with
     | Some _ -> Ok (adapter.cascade_prefix ^ ":auto")

@@ -306,8 +306,8 @@ let system_internal_surface_tools =
 (* ================================================================ *)
 (* Role catalogs — curated subsets for agent role assignment.        *)
 (* These are NOT surfaces; they define what a role *should* see.    *)
-(* Consumers must filter against actual surfaced tools via          *)
-(* [filter_catalog_to_available] before exposing to agents.        *)
+(* Consumers must filter them against the tools actually surfaced   *)
+(* before exposing them to agents.                                 *)
 (* ================================================================ *)
 
 let coordination_role_tools : string list =

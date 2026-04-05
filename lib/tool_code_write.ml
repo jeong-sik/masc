@@ -87,12 +87,15 @@ let load_clone_allowed_orgs ~base_path =
     clone_allowed_orgs_cache := Some orgs;
     orgs
 
-(** Extract GitHub org from clone URL.
+(** Extract GitHub org from clone URL (case-normalized to lowercase).
+    Strict matching: URL must start with an exact known prefix to prevent
+    authority spoofing (e.g. github.com.evil.com).
     Handles:
     - [https://github.com/ORG/repo\[.git\]]
     - [git@github.com:ORG/repo\[.git\]]
     - [ssh://git@github.com/ORG/repo\[.git\]] *)
 let extract_github_org url =
+  let lc = String.lowercase_ascii url in
   let prefixes = [
     "https://github.com/";
     "git@github.com:";
@@ -100,18 +103,28 @@ let extract_github_org url =
   ] in
   let after_prefix =
     List.find_map (fun prefix ->
-      if String.starts_with ~prefix url then
+      if String.starts_with ~prefix lc then
         let len = String.length prefix in
-        Some (String.sub url len (String.length url - len))
+        Some (String.sub lc len (String.length lc - len))
       else None
     ) prefixes
   in
   match after_prefix with
   | None -> None
   | Some rest ->
+    (* rest must be "org/repo[.git]" — reject if org contains suspicious chars *)
     match String.index_opt rest '/' with
     | None -> None
-    | Some idx -> Some (String.sub rest 0 idx)
+    | Some idx ->
+      let org = String.sub rest 0 idx in
+      (* GitHub org names: alphanumeric + hyphens only *)
+      let valid_org_char c =
+        (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c = '-'
+      in
+      if org = "" || not (String.to_seq org |> Seq.for_all valid_org_char) then
+        None
+      else
+        Some org
 
 let validate_clone_url ~base_path url =
   let allowed = load_clone_allowed_orgs ~base_path in
@@ -122,7 +135,9 @@ let validate_clone_url ~base_path url =
     | None ->
       Error (Printf.sprintf "Cannot parse GitHub org from URL: %s" url)
     | Some org ->
-      if List.mem org allowed then Ok ()
+      (* Case-insensitive comparison: org is already lowercase from extract *)
+      let allowed_lc = List.map String.lowercase_ascii allowed in
+      if List.mem org allowed_lc then Ok ()
       else Error (Printf.sprintf
         "GitHub org '%s' not in allowed list: %s" org (String.concat ", " allowed))
 
@@ -363,10 +378,14 @@ let handle_code_git ctx args =
     (false, Printf.sprintf "Git action '%s' not allowed. Allowed: %s"
        action (String.concat ", " allowed_git_actions))
   else if action = "clone" then begin
-    (* Clone: validate org allowlist + cwd within .worktrees/ *)
+    (* Clone: validate org allowlist + cwd within .worktrees/.
+       Block all flag-like args to prevent --upload-pack injection (CVE-like). *)
     let url = match git_args with url :: _ -> url | [] -> "" in
+    let has_flag_args = List.exists (fun a -> String.length a > 0 && a.[0] = '-') git_args in
     if url = "" then
       (false, "clone requires a repository URL as first argument")
+    else if has_flag_args then
+      (false, "clone does not accept flags (security: --upload-pack injection blocked)")
     else if cwd = "" then
       (false, "cwd parameter required for clone")
     else
@@ -376,10 +395,11 @@ let handle_code_git ctx args =
         match validate_clone_cwd ctx.config cwd with
         | Error e -> (false, Types.masc_error_to_string e)
         | Ok abs_cwd ->
+          (* Only pass the validated URL — no extra args allowed *)
           let cmd = ["sh"; "-c";
                      Printf.sprintf "cd %s && git clone %s"
                        (Filename.quote abs_cwd)
-                       (String.concat " " (List.map Filename.quote git_args))]
+                       (Filename.quote url)]
           in
           match Process_eio.run_argv_with_status ~timeout_sec:120.0 cmd with
           | Unix.WEXITED code, output ->

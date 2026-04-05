@@ -98,6 +98,44 @@ let () = check "validate_clone_url: empty allowlist rejected"
       with Not_found -> false)
    | Ok () -> false)
 
+(* ── Security: authority spoofing ─────────────────────────────────── *)
+
+let () = check "extract_github_org: domain spoofing github.com.evil.com rejected"
+  (Tool_code_write.extract_github_org
+     "https://github.com.evil.com/jeong-sik/repo.git"
+   = None)
+
+let () = check "extract_github_org: authority spoofing via @ rejected"
+  (Tool_code_write.extract_github_org
+     "https://jeong-sik@evil.com/repo"
+   = None)
+
+(* ── Security: case-insensitive org matching ─────────────────────── *)
+
+let () =
+  Tool_code_write.clone_allowed_orgs_cache := Some ["jeong-sik"]
+
+let () = check "validate_clone_url: mixed-case org passes (case-insensitive)"
+  (Tool_code_write.validate_clone_url ~base_path:"/tmp"
+     "https://github.com/Jeong-Sik/repo.git" = Ok ())
+
+let () = check "extract_github_org: uppercase normalized to lowercase"
+  (Tool_code_write.extract_github_org
+     "https://github.com/JEONG-SIK/repo.git"
+   = Some "jeong-sik")
+
+(* ── Security: org name validation ───────────────────────────────── *)
+
+let () = check "extract_github_org: percent-encoded org rejected"
+  (Tool_code_write.extract_github_org
+     "https://github.com/jeong%2Dsik/repo.git"
+   = None)
+
+let () = check "extract_github_org: org with dots rejected"
+  (Tool_code_write.extract_github_org
+     "https://github.com/jeong.sik/repo.git"
+   = None)
+
 (* ── Summary ─────────────────────────────────────────────────────── *)
 
 let () =

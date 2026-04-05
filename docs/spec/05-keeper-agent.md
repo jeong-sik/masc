@@ -18,7 +18,7 @@
 Keeper는 MASC의 자율 에이전트 하네스(harness)다. OAS `Agent.run` 위에서 동작하며, 장기 실행(perpetual) 루프, 컨텍스트 관리, 메모리 계층, 심의(deliberation), 승계(succession), 검증(verification)을 담당한다.
 
 Keeper 하나는 다음을 소유한다:
-- **identity**: `keeper_meta` 레코드 (이름, 목표, soul profile, will/needs/desires)
+- **identity**: `keeper_meta` 레코드 (이름, 목표, will/needs/desires)
 - **context**: `working_context` (system prompt + messages + token count + OAS context)
 - **memory**: memory bank + memory policy + recall scoring
 - **lifecycle**: heartbeat fiber + supervisor + checkpoint store
@@ -429,10 +429,7 @@ Keeper는 idle 상태에서 주기적으로 자발적 행동을 생성한다.
 
 ### 10.2 Fallback Reply
 
-3회 모두 실패하면 deterministic fallback 템플릿 사용. Soul profile에 따라 문구가 달라진다:
-- `safety`: "리스크 우선 점검을 마쳤고"
-- `delivery`: "실행 단위로 정리해 두었고"
-- `research`: "가설 검증 포인트를 갱신했고"
+3회 모두 실패하면 deterministic fallback 템플릿을 사용한다. 모든 keeper에 동일한 통합 fallback 문구가 적용된다.
 
 ---
 

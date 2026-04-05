@@ -714,7 +714,6 @@ export type KeeperConfigUpdatePayload = {
   short_goal?: string
   mid_goal?: string
   long_goal?: string
-  soul_profile?: string
   will?: string
   needs?: string
   desires?: string

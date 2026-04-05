@@ -115,7 +115,6 @@ type keeper_meta =
   ; short_goal : string
   ; mid_goal : string
   ; long_goal : string
-  ; soul_profile : string
   ; social_model : string
   ; cascade_name : string
   ; will : string
@@ -523,7 +522,7 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; "short_goal", `String m.short_goal
     ; "mid_goal", `String m.mid_goal
     ; "long_goal", `String m.long_goal
-    ; "soul_profile", `String m.soul_profile
+    
     ; "social_model", `String m.social_model
     ; "cascade_name", `String m.cascade_name
     ; "will", `String m.will
@@ -619,7 +618,7 @@ type parsed_keeper_identity =
   ; pk_short_goal : string
   ; pk_mid_goal : string
   ; pk_long_goal : string
-  ; pk_soul_profile : string
+  
   ; pk_social_model : string
   ; pk_cascade_name : string
   ; pk_will : string
@@ -684,11 +683,6 @@ let parse_keeper_identity (json : Yojson.Safe.t) : parsed_keeper_identity =
       ~long_goal_opt:
         (normalize_goal_horizon_opt (Safe_ops.json_string_opt "long_goal" json))
   in
-  let pk_soul_profile =
-    Safe_ops.json_string ~default:default_soul_profile "soul_profile" json
-    |> canonical_soul_profile
-    |> Option.value ~default:default_soul_profile
-  in
   let pk_social_model =
     Safe_ops.json_string ~default:default_social_model "social_model" json
   in
@@ -716,7 +710,6 @@ let parse_keeper_identity (json : Yojson.Safe.t) : parsed_keeper_identity =
   ; pk_short_goal
   ; pk_mid_goal
   ; pk_long_goal
-  ; pk_soul_profile
   ; pk_social_model
   ; pk_cascade_name
   ; pk_will
@@ -1034,7 +1027,6 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
              ; short_goal = identity.pk_short_goal
              ; mid_goal = identity.pk_mid_goal
              ; long_goal = identity.pk_long_goal
-             ; soul_profile = identity.pk_soul_profile
              ; social_model = identity.pk_social_model
              ; cascade_name = identity.pk_cascade_name
              ; will = identity.pk_will
@@ -1092,7 +1084,6 @@ let fallback_canonical_keeper_meta_key_names =
   ; "short_goal"
   ; "mid_goal"
   ; "long_goal"
-  ; "soul_profile"
   ; "social_model"
   ; "cascade_name"
   ; "will"

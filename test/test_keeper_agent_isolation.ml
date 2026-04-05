@@ -25,7 +25,7 @@ module Config = Masc_mcp.Config
 let make_meta
     ?(name = "test-keeper")
     ?(policy_voice_enabled = false)
-    ?(soul_profile = "safety")
+    
     ()
   : Keeper_types.keeper_meta =
   match Keeper_types.meta_of_json
@@ -33,7 +33,7 @@ let make_meta
       ("name", `String name);
       ("agent_name", `String name);
       ("trace_id", `String "test-isolation-001");
-      ("soul_profile", `String soul_profile);
+      
       ("policy_voice_enabled", `Bool policy_voice_enabled);
     ]) with
   | Ok meta -> meta
@@ -122,7 +122,7 @@ let test_learned_only_keeper_prefixed () =
 
 let test_research_extra_tools_are_research_only () =
   let meta = make_meta ~policy_voice_enabled:true
-      ~soul_profile:"research" () in
+       () in
   let names = Keeper_exec_tools.keeper_allowed_tool_names meta in
   let non_keeper = List.filter (fun n -> not (has_keeper_prefix n)) names in
   let unexpected = List.filter (fun n ->
@@ -167,7 +167,7 @@ let test_no_overlap_heuristic_vs_agent () =
 
 let test_no_overlap_research_vs_agent () =
   let meta = make_meta ~policy_voice_enabled:true
-      ~soul_profile:"research" () in
+       () in
   let keeper_names = Keeper_exec_tools.keeper_allowed_tool_names meta in
   let agent_names = Agent_tool_surfaces.spawned_agent_public_tool_names in
   let overlap =
@@ -201,7 +201,7 @@ let test_shard_tools_overlap_with_agent_documented () =
 
 let test_research_admin_overlap_documented () =
   let admin = Tool_catalog.tools_for_surface Tool_catalog.Admin in
-  let meta = make_meta ~soul_profile:"research" () in
+  let meta = make_meta  () in
   let keeper_names = Keeper_exec_tools.keeper_allowed_tool_names meta in
   let overlap = List.filter (fun n -> List.mem n admin) keeper_names in
   (* These research tools are intentionally in both lists.
@@ -236,7 +236,7 @@ let test_non_research_admin_tools_documented () =
 let test_heuristic_has_fewer_tools_than_learned () =
   let heuristic = make_meta () in
   let learned = make_meta ~policy_voice_enabled:true
-      ~soul_profile:"research" () in
+       () in
   let h_count = List.length (Keeper_exec_tools.keeper_allowed_tool_names heuristic) in
   let l_count = List.length (Keeper_exec_tools.keeper_allowed_tool_names learned) in
   Alcotest.(check bool)

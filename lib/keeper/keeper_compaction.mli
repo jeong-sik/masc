@@ -18,22 +18,3 @@ val fold_completed_strategy :
   ?keep_recent:int ->
   unit ->
   Agent_sdk.Context_reducer.t
-
-(** Keywords that each [soul_profile] considers important for retention.
-    @since persona-fold *)
-val keywords_for_profile : string -> string list
-
-(** Extract up to 3 profile-relevant first-sentence excerpts. *)
-val extract_profile_relevant_excerpts :
-  soul_profile:string ->
-  Agent_sdk.Types.message list ->
-  string list
-
-(** Persona-aware lossy fold. Same recency logic as [fold_completed_strategy],
-    but stubs include profile-relevant excerpts via [keywords_for_profile].
-    @since persona-fold *)
-val persona_fold_strategy :
-  ?keep_recent:int ->
-  soul_profile:string ->
-  unit ->
-  Agent_sdk.Context_reducer.t

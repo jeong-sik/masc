@@ -35,11 +35,11 @@ let continuity_snapshot_text =
 let skill_route_text =
   let route : KSR.keeper_skill_route =
     { primary_skill = "code_review";
-      secondary_skills = [];
-      reason = "" }
+      secondary_skill = None;
+      reason = ""; selection_mode = Heuristic }
   in
   KSR.skill_route_context_text
-    ~fallback_route:route ~soul_profile:"delivery"
+    ~fallback_route:route 
 
 let worktree_text =
   "--- Worktree changes ---\n\

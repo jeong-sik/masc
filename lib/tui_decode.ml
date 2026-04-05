@@ -21,7 +21,6 @@ type keeper = {
   k_name : string;
   k_goal : string;
   k_short_goal : string;
-  k_soul_profile : string;
   k_generation : int;
   k_active_model : string option;
   k_models : string list;
@@ -169,7 +168,7 @@ let decode_task json =
 let decode_keeper ~filename json =
   let* k_goal = require_string_field json "goal" in
   let* k_short_goal = require_string_field json "short_goal" in
-  let* k_soul_profile = require_string_field json "soul_profile" in
+  
   let* k_generation = require_int_field json "generation" in
   let* k_active_model = optional_string json "active_model" in
   let* k_models =
@@ -214,7 +213,6 @@ let decode_keeper ~filename json =
       k_name;
       k_goal;
       k_short_goal;
-      k_soul_profile;
       k_generation;
       k_active_model;
       k_models;

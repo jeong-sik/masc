@@ -394,7 +394,6 @@ Keeper의 행동을 결정하는 설정은 3곳에서 공급된다.
 
 | 소스 | 경로 | 형식 | 역할 |
 |------|------|------|------|
-| Persona template | `<PERSONAS_ROOT>/<name>/profile.json` | JSON | Blueprint. goal, instructions, soul_profile 등 정의 |
 | TOML declaration | `<CONFIG_ROOT>/keepers/<name>.toml` | TOML | Persona 없이 선언적으로 keeper 정의 |
 | Persistent meta | `.masc/keepers/<name>.json` | JSON | 런타임 상태. turn 카운트, context ratio 등 포함 |
 

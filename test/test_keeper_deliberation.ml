@@ -158,7 +158,7 @@ let test_action_multistep_to_string () =
   let action =
     D.MultiStep
       [
-        D.TaskClaim { task_id = "t-1"; reason = "urgent" };
+        D.TaskClaim { task_id = "t-1"; reason = "urgent"};
         D.Broadcast { message = "claimed t-1" };
       ]
   in
@@ -300,7 +300,6 @@ let test_prompt_contains_keeper_name () =
   let prompt =
     D.build_deliberation_prompt
       ~keeper_name:"alpha-keeper"
-      ~soul_profile:"strategic coordinator"
       ~goal:"Monitor CI pipeline"
       ~triggers:[ D.DirectMention; D.NewUnclaimedTask ]
       base_obs
@@ -314,7 +313,7 @@ let test_prompt_contains_triggers () =
   let prompt =
     D.build_deliberation_prompt
       ~keeper_name:"test-k"
-      ~soul_profile:"observer"
+      
       ~goal:"Watch tasks"
       ~triggers:[ D.FailedTask; D.IdleTimeout ]
       base_obs
@@ -330,22 +329,24 @@ let test_prompt_contains_tool_input_instruction () =
   let prompt =
     D.build_deliberation_prompt
       ~keeper_name:"test-k"
-      ~soul_profile:"observer"
       ~goal:"Watch"
       ~triggers:[ D.DirectMention ]
       base_obs
   in
   check bool "mentions tool input schema" true
-    (try ignore (Str.search_forward
-                   (Str.regexp_string "tool input object for schema `keeper_deliberation_decision`")
-                   prompt 0); true
+    (try
+       ignore
+         (Str.search_forward
+            (Str.regexp_string
+               "tool input object for schema `keeper_deliberation_decision`")
+            prompt 0);
+       true
      with Not_found -> false)
 
 let test_prompt_contains_action_list () =
   let prompt =
     D.build_deliberation_prompt
       ~keeper_name:"test-k"
-      ~soul_profile:""
       ~goal:""
       ~triggers:[ D.DirectMention ]
       base_obs
@@ -446,7 +447,7 @@ let test_legality_verdict_rejects_illegal_task_claim () =
   in
   match
     D.legality_verdict obs
-      (D.TaskClaim { task_id = "task-1"; reason = "urgent" })
+      (D.TaskClaim { task_id = "task-1"; reason = "urgent"})
   with
   | D.Illegal msg ->
       check bool "mentions unclaimed tasks" true
@@ -460,7 +461,7 @@ let test_legality_verdict_rejects_nested_multistep () =
   let action =
     D.MultiStep
       [
-        D.TaskClaim { task_id = "task-1"; reason = "urgent" };
+        D.TaskClaim { task_id = "task-1"; reason = "urgent"};
         D.MultiStep [ D.Broadcast { message = "claimed" } ];
       ]
   in
@@ -477,7 +478,7 @@ let test_execute_structured_result_keeps_legal_action () =
   let structured =
     D.
       {
-        action = TaskClaim { task_id = "task-1"; reason = "urgent" };
+        action = TaskClaim { task_id = "task-1"; reason = "urgent"};
         reasoning = "claim the waiting task";
         confidence = 0.8;
       }
@@ -498,7 +499,7 @@ let test_execute_structured_result_falls_back_to_baseline () =
   let structured =
     D.
       {
-        action = TaskClaim { task_id = "task-1"; reason = "urgent" };
+        action = TaskClaim { task_id = "task-1"; reason = "urgent"};
         reasoning = "claim the waiting task";
         confidence = 0.8;
       }
@@ -817,7 +818,7 @@ let test_prompt_always_includes_multi_step () =
   let prompt =
     D.build_deliberation_prompt
       ~keeper_name:"strategic-keeper"
-      ~soul_profile:"strategist"
+      
       ~goal:"Plan and execute"
       ~triggers:[ D.DirectMention ]
       base_obs

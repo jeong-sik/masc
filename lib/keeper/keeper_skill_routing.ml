@@ -1,108 +1,103 @@
-(** Keeper_skill_routing — skill routing types and agent-selected prompt assembly
-    and prompt assembly for keeper execution.
+(** Keeper_skill_routing — automated and model-assisted skill routing for keepers.
+    Keepers always have access to all 'keeper' shard tools, but they
+    are routed to specific meta-skills (heartbeat, autonomy) based on
+    the user's request. *)
 
-    Extracted from keeper_alerting.ml to separate alert infrastructure
-    from skill routing logic.
+type selection_mode =
+  | Heuristic
+  | Model_selected of string
+  | Model_rejected of string
 
-    @since 2.95.0 *)
+type keeper_skill_route =
+  { primary_skill : string
+  ; secondary_skill : string option
+  ; reason : string
+  ; selection_mode : selection_mode
+  }
 
-open Keeper_types
-open Keeper_memory
+let keeper_allowed_skills = [ "masc-heartbeat"; "masc-keeper-autonomy" ]
 
-type keeper_skill_route = {
-  primary_skill: string;
-  secondary_skills: string list;
-  reason: string;
-}
+let is_valid_keeper_skill s = List.mem s keeper_allowed_skills
 
-type keeper_skill_selection_mode =
-  | SkillSelectAgent
-
-type keeper_skill_route_resolution = {
-  route: keeper_skill_route;
-  selection_mode: string;
-  provenance: string;
-}
-
-let contains_ci = String_util.contains_substring_ci
-
-let keeper_skill_selection_mode () : keeper_skill_selection_mode =
-  SkillSelectAgent
-
-let keeper_allowed_skills = [
-  "masc-heartbeat";
-  "masc-keeper-autonomy";
-]
-
-let canonical_keeper_skill_token (raw : string) : string option =
-  match String.lowercase_ascii (String.trim raw) with
-  | "masc-heartbeat" | "masc_heartbeat" | "heartbeat" -> Some "masc-heartbeat"
-  | "masc-keeper-autonomy" | "masc_keeper_autonomy" | "autonomy" -> Some "masc-keeper-autonomy"
-  | _ -> None
-
-let unique_skills_preserve_order (xs : string list) : string list =
-  List.fold_left
-    (fun acc x -> if List.mem x acc then acc else acc @ [x])
-    []
-    xs
+let contains_ci (haystack : string) (needle : string) : bool =
+  String_util.contains_substring_ci haystack needle
 
 let skill_match_count_ci ~(text : string) ~(keywords : string list) : int =
+  let text_lc = String.lowercase_ascii text in
   List.fold_left
-    (fun acc keyword -> if contains_ci text keyword then acc + 1 else acc)
+    (fun acc kw ->
+      let kw_lc = String.lowercase_ascii kw in
+      if contains_ci text_lc kw_lc then acc + 1 else acc)
     0 keywords
 
-let keeper_skill_priority ~(soul_profile : string) (skill : string) : int =
-  let profile =
-    canonical_soul_profile soul_profile |> Option.value ~default:default_soul_profile
-  in
-  match profile, skill with
-  | "safety", "masc-heartbeat" -> 0
-  | "safety", "masc-keeper-autonomy" -> 1
-  | "delivery", "masc-keeper-autonomy" -> 0
-  | "delivery", "masc-heartbeat" -> 1
-  | "research", "masc-keeper-autonomy" -> 0
-  | "research", "masc-heartbeat" -> 1
-  | _, "masc-keeper-autonomy" -> 0
-  | _, "masc-heartbeat" -> 1
+let keeper_skill_priority (skill : string) : int =
+  match skill with
+  | "masc-keeper-autonomy" -> 0
+  | "masc-heartbeat" -> 1
   | _ -> 9
 
-let route_keeper_skill ~(soul_profile : string) ~(message : string) : keeper_skill_route =
-  let heartbeat_keywords = [
-    "heartbeat"; "alive"; "status"; "health"; "diagnose"; "liveness";
-    "하트비트"; "살아"; "상태"; "진단"; "헬스";
-  ] in
-  let autonomy_keywords = [
-    "keeper"; "handoff"; "compaction"; "context"; "generation"; "trace"; "memory";
-    "board"; "post"; "comment"; "feed"; "social"; "k2k";
-    "키퍼"; "승계"; "핸드오프"; "컴팩팅"; "컨텍스트"; "세대"; "메모리";
-    "보드"; "포스트"; "댓글"; "피드"; "활동"; "소셜";
-  ] in
-  let profile =
-    canonical_soul_profile soul_profile |> Option.value ~default:default_soul_profile
+let route_keeper_skill ~(message : string) : keeper_skill_route =
+  let heartbeat_keywords =
+    [ "heartbeat"
+    ; "alive"
+    ; "status"
+    ; "health"
+    ; "diagnose"
+    ; "liveness"
+    ; "하트비트"
+    ; "살아"
+    ; "상태"
+    ; "진단"
+    ; "헬스"
+    ]
   in
-  let heartbeat_score = skill_match_count_ci ~text:message ~keywords:heartbeat_keywords in
-  let autonomy_score = skill_match_count_ci ~text:message ~keywords:autonomy_keywords in
-  let heartbeat_bonus, autonomy_bonus =
-    match profile with
-    | "safety" -> (1, 1)
-    | "delivery" -> (0, 1)
-    | "research" -> (0, 1)
-    | "relationship" -> (0, 1)
-    | _ -> (0, 1)
+  let autonomy_keywords =
+    [ "keeper"
+    ; "handoff"
+    ; "compaction"
+    ; "context"
+    ; "generation"
+    ; "trace"
+    ; "memory"
+    ; "board"
+    ; "post"
+    ; "comment"
+    ; "feed"
+    ; "social"
+    ; "k2k"
+    ; "키퍼"
+    ; "승계"
+    ; "핸드오프"
+    ; "컴팩팅"
+    ; "컨텍스트"
+    ; "세대"
+    ; "메모리"
+    ; "보드"
+    ; "포스트"
+    ; "댓글"
+    ; "피드"
+    ; "활동"
+    ; "소셜"
+    ]
   in
-  let scored = [
-    ("masc-heartbeat", heartbeat_score + heartbeat_bonus);
-    ("masc-keeper-autonomy", autonomy_score + autonomy_bonus);
-  ] in
+  let heartbeat_score =
+    skill_match_count_ci ~text:message ~keywords:heartbeat_keywords
+  in
+  let autonomy_score =
+    skill_match_count_ci ~text:message ~keywords:autonomy_keywords
+  in
+  let heartbeat_bonus, autonomy_bonus = (0, 1) in
+  let scored =
+    [ ("masc-heartbeat", heartbeat_score + heartbeat_bonus)
+    ; ("masc-keeper-autonomy", autonomy_score + autonomy_bonus)
+    ]
+  in
   let sorted =
     List.sort
       (fun (sa, score_a) (sb, score_b) ->
-         let c = compare score_b score_a in
-         if c <> 0 then c
-         else
-           compare
-             (keeper_skill_priority ~soul_profile:profile sa)
-             (keeper_skill_priority ~soul_profile:profile sb))
+        let c = compare score_b score_a in
+        if c <> 0 then c
+        else compare (keeper_skill_priority sa) (keeper_skill_priority sb))
       scored
   in
   let primary_skill =
@@ -110,47 +105,27 @@ let route_keeper_skill ~(soul_profile : string) ~(message : string) : keeper_ski
     | (name, _) :: _ -> name
     | [] -> "masc-keeper-autonomy"
   in
-  let secondary_skills =
-    sorted
-    |> List.filter_map (fun (name, score) ->
-           if name = primary_skill || score <= 0 then None else Some name)
-    |> take 1
+  let secondary_skill =
+    match sorted with
+    | _ :: (name, score) :: _ when score > 0 -> Some name
+    | _ -> None
   in
-  let reason =
-    Printf.sprintf
-      "profile=%s; scores{heartbeat=%d,autonomy=%d}"
-      profile
-      (heartbeat_score + heartbeat_bonus)
-      (autonomy_score + autonomy_bonus)
-  in
-  { primary_skill; secondary_skills; reason }
+  { primary_skill
+  ; secondary_skill
+  ; reason = "Heuristic match based on message content"
+  ; selection_mode = Heuristic
+  }
 
-let skill_route_header (route : keeper_skill_route) : string =
-  match route.secondary_skills with
-  | [] -> Printf.sprintf "SKILL: %s" route.primary_skill
-  | secs ->
-      Printf.sprintf
-        "SKILL: %s (+%s)"
-        route.primary_skill
-        (String.concat ", " secs)
+let format_skill_route_line (route : keeper_skill_route) : string =
+  match route.secondary_skill with
+  | Some s -> Printf.sprintf "SKILL: %s (+%s)" route.primary_skill s
+  | None -> Printf.sprintf "SKILL: %s" route.primary_skill
 
-let ensure_skill_route_header ~(route : keeper_skill_route) (raw : string) : string =
-  let trimmed = String.trim raw in
-  if trimmed = "" then
-    skill_route_header route
-  else
-    let first_line =
-      match String.split_on_char '\n' trimmed with
-      | head :: _ -> String.trim head
-      | [] -> ""
-    in
-    let already_tagged =
-      match strip_prefix_ci ~prefix:"SKILL:" first_line with
-      | Some _ -> true
-      | None -> false
-    in
-    if already_tagged then raw
-    else Printf.sprintf "%s\n%s" (skill_route_header route) raw
+let format_skill_route_reason (route : keeper_skill_route) : string =
+  match route.selection_mode with
+  | Heuristic -> Printf.sprintf "SKILL_REASON: %s" route.reason
+  | Model_selected r -> Printf.sprintf "SKILL_REASON: %s" r
+  | Model_rejected r -> Printf.sprintf "SKILL_REASON: %s (heuristic fallback)" r
 
 let strip_skill_route_lines (raw : string) : string =
   let lines = String.split_on_char '\n' raw in
@@ -158,110 +133,66 @@ let strip_skill_route_lines (raw : string) : string =
     let trimmed = String.trim line in
     if trimmed = "" then true
     else
-      match strip_prefix_ci ~prefix:"SKILL:" trimmed with
-      | Some _ -> false
-      | None -> (
-          match strip_prefix_ci ~prefix:"SKILL_REASON:" trimmed with
-          | Some _ -> false
-          | None -> true)
+      let lc = String.lowercase_ascii trimmed in
+      if String.starts_with ~prefix:"skill:" lc then false
+      else if String.starts_with ~prefix:"skill_reason:" lc then false
+      else true
   in
   lines |> List.filter keep |> String.concat "\n"
 
-let parse_skill_line (line : string) : (string * string list) option =
-  match strip_prefix_ci ~prefix:"SKILL:" line with
-  | None -> None
-  | Some payload ->
-      let payload = String.trim payload in
-      if payload = "" then None
-      else
-        let payload_len = String.length payload in
-        let rec first_sep i =
-          if i >= payload_len then payload_len
-          else
-            match payload.[i] with
-            | ' ' | '\t' | '(' -> i
-            | _ -> first_sep (i + 1)
-        in
-        let primary_end = first_sep 0 in
-        let primary_raw = String.sub payload 0 primary_end |> String.trim in
-        let rest =
-          if primary_end >= payload_len then ""
-          else String.sub payload primary_end (payload_len - primary_end) |> String.trim
-        in
-        let secondary_raw_opt =
-          if String.length rest >= 2 && String.sub rest 0 2 = "(+" then
-            match Re.exec_opt ~pos:2 (Re.str ")" |> Re.compile) rest with
-            | Some g ->
-              let close_idx = Re.Group.start g 0 in
-              let inside = String.sub rest 2 (close_idx - 2) |> String.trim in
-              if inside = "" then None else Some inside
-            | None -> None
-          else
-            None
-        in
-        match canonical_keeper_skill_token primary_raw with
-        | None -> None
-        | Some primary ->
-            let secondary =
-              match secondary_raw_opt with
-              | None -> []
-              | Some raw ->
-                  raw
-                  |> String.split_on_char ','
-                  |> List.filter_map canonical_keeper_skill_token
-                  |> unique_skills_preserve_order
-                  |> List.filter (fun s -> s <> primary)
-                  |> take 1
-            in
-            Some (primary, secondary)
-
-let parse_skill_reason_line (line : string) : string option =
-  match strip_prefix_ci ~prefix:"SKILL_REASON:" line with
-  | Some v -> trim_nonempty v
-  | None -> None
-
-let agent_selected_skill_route_from_reply (raw : string) : keeper_skill_route option =
-  let lines =
-    raw
-    |> String.split_on_char '\n'
-    |> List.map String.trim
-    |> List.filter (fun s -> s <> "")
+let parse_skill_route_response (text : string)
+    ~(fallback_route : keeper_skill_route) : keeper_skill_route =
+  let lines = String.split_on_char '\n' text in
+  let skill_line = List.find_opt (String.starts_with ~prefix:"SKILL:") lines in
+  let reason_line =
+    List.find_opt (String.starts_with ~prefix:"SKILL_REASON:") lines
   in
-  match lines with
-  | [] -> None
-  | first :: tail ->
-      (match parse_skill_line first with
-       | None -> None
-       | Some (primary, secondary) ->
-           let reason =
-             tail
-             |> take 3
-             |> List.find_map parse_skill_reason_line
-             |> Option.value ~default:"agent-selected"
-           in
-           Some { primary_skill = primary; secondary_skills = secondary; reason })
+  match skill_line with
+  | Some line ->
+      let raw =
+        String.sub line 6 (String.length line - 6) |> String.trim
+      in
+      let primary, secondary =
+        if contains_ci raw "(+" then
+          match String.split_on_char '(' raw with
+          | p :: s :: _ ->
+              let p = String.trim p in
+              let s =
+                String.sub s 1 (String.length s - 2)
+                |> String.trim
+                |> String.map (fun c -> if c = ')' then ' ' else c)
+                |> String.trim
+              in
+              (p, Some s)
+          | _ -> (raw, None)
+        else (raw, None)
+      in
+      if is_valid_keeper_skill primary then
+        let reason =
+          match reason_line with
+          | Some rl ->
+              String.sub rl 13 (String.length rl - 13) |> String.trim
+          | None -> "No reason provided by model"
+        in
+        { primary_skill = primary
+        ; secondary_skill = secondary
+        ; reason
+        ; selection_mode = Model_selected reason
+        }
+      else
+        { fallback_route with
+          selection_mode =
+            Model_rejected (Printf.sprintf "Invalid skill: %s" primary)
+        }
+  | None ->
+      { fallback_route with selection_mode = Model_rejected "No SKILL line found"
+      }
 
-let resolved_keeper_skill_route
-    ~(selection_mode : keeper_skill_selection_mode)
-    ~(fallback_route : keeper_skill_route)
-    ~(reply_raw : string) : keeper_skill_route_resolution =
-  match selection_mode with
-  | SkillSelectAgent ->
-      (match agent_selected_skill_route_from_reply reply_raw with
-       | Some route ->
-           { route; selection_mode = "agent"; provenance = "judgment" }
-       | None ->
-           { route = fallback_route; selection_mode = "agent"; provenance = "fallback" })
-
-(** Standalone skill routing context text — without base_system_prompt.
-    Used as soft context injected via [extra_system_context]. *)
-let skill_route_context_text
-    ~(fallback_route : keeper_skill_route)
-    ~(soul_profile : string) : string =
+let keeper_skill_routing_instructions ~(fallback_route : keeper_skill_route)
+    : string =
   Printf.sprintf
     "Skill routing policy (agent-selected):\n\
      - Available skills: %s\n\
-     - SOUL profile: %s\n\
      - You MUST choose exactly one primary skill from the list above.\n\
      - You MAY add at most one secondary skill.\n\
      - First line MUST be: SKILL: <primary> (+<secondary>)\n\
@@ -270,6 +201,15 @@ let skill_route_context_text
      - After those lines, answer normally and concretely.\n\
      - Do not fabricate capabilities beyond chosen skills."
     (String.concat ", " keeper_allowed_skills)
-    soul_profile
     fallback_route.primary_skill
 
+let skill_route_context_text ~(fallback_route : keeper_skill_route) : string =
+  let instructions = keeper_skill_routing_instructions ~fallback_route in
+  let current =
+    Printf.sprintf "Current heuristic route:\n%s\n%s"
+      (format_skill_route_line fallback_route)
+      (format_skill_route_reason fallback_route)
+  in
+  Printf.sprintf
+    "\n--- SKILL ROUTING ---\n%s\n\n%s\n----------------------\n"
+    instructions current

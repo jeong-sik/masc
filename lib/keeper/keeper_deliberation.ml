@@ -372,7 +372,7 @@ let world_observation_to_prompt_section (obs : world_observation) : string =
     The prompt describes the keeper's identity, current state, detected triggers,
     and available actions. The MODEL is asked to respond with JSON. *)
 let build_deliberation_prompt
-    ~keeper_name ~soul_profile ~goal
+    ~keeper_name  ~goal
     ~(triggers : deliberation_trigger list)
     (obs : world_observation) : string =
   let multi_step_line =
@@ -387,7 +387,6 @@ let build_deliberation_prompt
     Prompt_registry.render_prompt_template Keeper_prompt_names.deliberation
       [
         ("keeper_name", keeper_name);
-        ("soul_profile", soul_profile);
         ("goal", goal);
         ("triggers", triggers_to_prompt_list triggers);
         ("world_state", world_observation_to_prompt_section obs);

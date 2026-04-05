@@ -70,7 +70,6 @@ let keeper_schemas : tool_schema list = [
         ("mid_goal", `Assoc [("type", `String "string")]);
         ("long_goal", `Assoc [("type", `String "string")]);
         ("instructions", `Assoc [("type", `String "string")]);
-        ("soul_profile", `Assoc [("type", `String "string")]);
         ("will", `Assoc [("type", `String "string")]);
         ("needs", `Assoc [("type", `String "string")]);
         ("desires", `Assoc [("type", `String "string")]);
@@ -155,10 +154,6 @@ let keeper_schemas : tool_schema list = [
         ("instructions", `Assoc [
           ("type", `String "string");
           ("description", `String "Optional: additional system instructions (kept across compaction/handoff).");
-        ]);
-        ("soul_profile", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Memory priority preset. One of: balanced, safety, delivery, research, relationship, minimal.");
         ]);
         ("will", `Assoc [
           ("type", `String "string");

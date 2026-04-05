@@ -63,6 +63,9 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
     end
   in
   Unix.putenv "MASC_BASE_PATH" base_path;
+  (* RFC-0001 Gate A: initialize instrumentation stores *)
+  Heuristic_metrics.init ~base_path;
+  Agent_stress.init ~base_path;
   let state =
     Mcp_eio.create_state_eio ~sw ~env:caqti_env ~proc_mgr ~fs ~clock
       ~mono_clock ~net
@@ -271,7 +274,9 @@ let migrate_room_to_flat (state : Mcp_server.server_state) =
           Log.Misc.info "migrate: flattening room %s to .masc/ root" current_room;
           migrate_legacy_dirs_with_renames state
             [ (Filename.concat "rooms" current_room, ".") ]
-        end else
+        end else if current_room = "default" then
+          Log.Misc.info "migrate: legacy rooms/ exists but default room not found (likely already flattened)"
+        else
           Log.Misc.warn "migrate: rooms/ exists but active room %s not found" current_room
     | None ->
         Log.Misc.warn
@@ -612,6 +617,9 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
           Mcp_server_eio_execute.execute_tool_eio ~sw ~clock state
             ~name:tool_name ~arguments
         in
+        if not success then
+          Log.Server.error "gRPC tool call failed: tool=%s error_bytes=%d"
+            tool_name (String.length result_str);
         if success then Ok result_str else Error result_str
       in
       Masc_grpc_server.start ~sw ~env ~room_config:state.room_config

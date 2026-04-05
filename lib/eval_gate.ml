@@ -234,12 +234,28 @@ let pre_check
             calls_this_turn config.max_tool_calls_per_turn)
         else
           (* 5. Entropy detection *)
-          let entropy = Trajectory.detect_entropy ~threshold:config.entropy_threshold acc tool_name in
+          let entropy = Trajectory.detect_entropy ~threshold:config.entropy_threshold
+            ~args_json acc tool_name in
           begin match entropy with
           | Some (_name, count) ->
-              Trajectory.Reject (Printf.sprintf
-                "entropy detected: '%s' called %d consecutive times (threshold: %d)"
-                tool_name count config.entropy_threshold)
+              let args_preview_opt =
+                try
+                  let json = Yojson.Safe.from_string args_json in
+                  Observability_redact.redact_tool_input ~tool_name json
+                with Yojson.Json_error _ ->
+                  Some (Observability_redact.redact_preview args_json)
+              in
+              let reason = match args_preview_opt with
+                | None ->
+                    Printf.sprintf
+                      "entropy detected: '%s' called %d consecutive times (threshold: %d)"
+                      tool_name count config.entropy_threshold
+                | Some args_preview ->
+                    Printf.sprintf
+                      "entropy detected: '%s' called %d consecutive times with args=%s (threshold: %d)"
+                      tool_name count args_preview config.entropy_threshold
+              in
+              Trajectory.Reject reason
           | None ->
               (* 6. Destructive pattern check (bash tools only) *)
               if config.destructive_check_enabled

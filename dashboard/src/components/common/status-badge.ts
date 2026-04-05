@@ -15,7 +15,7 @@ function statusDotColor(status: string): string {
       return 'bg-[var(--warn)]'
     case 'interrupted':
     case 'listening':
-      return 'bg-[#38bdf8]'
+      return 'bg-[var(--accent)]'
     case 'inactive':
     case 'offline':
       return 'bg-[#5f7199]'
@@ -25,7 +25,7 @@ function statusDotColor(status: string): string {
     case 'stopped':
       return 'bg-[var(--text-slate)]'
     case 'error':
-      return 'bg-[#fb7185]'
+      return 'bg-[var(--bad)]'
     default:
       return 'bg-[var(--text-muted)]'
   }
@@ -33,7 +33,7 @@ function statusDotColor(status: string): string {
 
 export function StatusBadge({ status, label }: StatusBadgeProps) {
   return html`
-    <span class="border border-solid border-[var(--card-border)] ${status} ${status === 'offline' ? 'text-[#8da4cc]' : ''}">
+    <span class="border border-solid border-[var(--card-border)] ${status} ${status === 'offline' ? 'text-[var(--text-dim)]' : ''}">
       <span class="size-1.5 rounded-full inline-block ${statusDotColor(status)}"></span>
       ${label ?? statusLabel(status)}
     </span>

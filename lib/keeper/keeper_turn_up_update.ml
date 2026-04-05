@@ -199,6 +199,7 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
     auto_handoff = Option.value ~default:old.auto_handoff p.auto_handoff_opt;
     handoff_threshold = Option.value ~default:old.handoff_threshold p.handoff_threshold_opt;
     handoff_cooldown_sec = Option.value ~default:old.handoff_cooldown_sec p.handoff_cooldown_sec_opt;
+    max_context_override = (match p.max_context_override_opt with Some _ as v -> v | None -> old.max_context_override);
     updated_at = now_iso ();
   } in
   (match write_meta ctx.config updated with

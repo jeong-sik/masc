@@ -61,7 +61,7 @@ export function GuardrailPane({
                   ${ruling?.generated_at ? html`<span class="px-2 py-0.5 rounded-md bg-white/5 border border-white/10"><${TimeAgo} timestamp=${ruling.generated_at} /></span>` : null}
                 </div>
                 ${ruling?.summary
-                  ? html`<div class="mb-3.5 mt-1.5 rounded-xl border border-accent/20 bg-accent/10 p-3.5 text-[13px] leading-relaxed text-text-strong shadow-sm">${ruling.summary}</div>`
+                  ? html`<div class="mb-3.5 mt-1.5 rounded-xl border border-accent/20 bg-[var(--accent-10)] p-3.5 text-[13px] leading-relaxed text-text-strong shadow-sm">${ruling.summary}</div>`
                   : html`<div class="mt-1.5 rounded-xl border border-card-border/50 bg-card/34 p-3.5 text-center text-[13px] italic text-text-muted">아직 판정이 생성되지 않았습니다.</div>`}
                 <div class="mb-1.5 flex flex-wrap gap-1.5">
                   ${item.provenance ? html`<span class="inline-flex items-center rounded-lg border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-medium text-text-muted">${item.provenance}</span>` : null}
@@ -143,15 +143,15 @@ export function ActionRequestCard({ order }: { order: GovernanceExecutionOrder |
   return html`
     <div class="flex flex-col gap-2">
       <h4>집행 명령</h4>
-      <div class="mt-1 flex flex-wrap gap-2 text-[#8ea9d6] text-[11px]">
+      <div class="mt-1 flex flex-wrap gap-2 text-[var(--text-muted)] text-[11px]">
         <span>${request.resolved_tool || request.action_kind || request.target_type || 'action'}</span>
         <span>${orderStatusLabel(order.status)}</span>
       </div>
-      ${request.target_type ? html`<div class="text-[#c8daf7] text-[13px] leading-[1.45]">대상 ${request.target_type}${request.target_id ? `:${request.target_id}` : ''}</div>` : null}
-      ${request.reason ? html`<div class="text-[#c8daf7] text-[13px] leading-[1.45]">${request.reason}</div>` : null}
+      ${request.target_type ? html`<div class="text-[var(--text-body)] text-[13px] leading-[1.45]">대상 ${request.target_type}${request.target_id ? `:${request.target_id}` : ''}</div>` : null}
+      ${request.reason ? html`<div class="text-[var(--text-body)] text-[13px] leading-[1.45]">${request.reason}</div>` : null}
       ${request.payload_preview ? html`<div class="mt-0 max-h-[180px] overflow-auto rounded-[9px] border border-[var(--card-border)] bg-[var(--bg-0)] custom-scrollbar"><${Markdown} text=${'```json\n' + serializePreview(request.payload_preview) + '\n```'} /></div>` : null}
-      ${order.execution_ref ? html`<div class="text-[#c8daf7] text-[13px] leading-[1.45]">결과 참조 ${order.execution_ref}</div>` : null}
-      ${order.result_summary ? html`<div class="text-[#c8daf7] text-[13px] leading-[1.45]">${order.result_summary}</div>` : null}
+      ${order.execution_ref ? html`<div class="text-[var(--text-body)] text-[13px] leading-[1.45]">결과 참조 ${order.execution_ref}</div>` : null}
+      ${order.result_summary ? html`<div class="text-[var(--text-body)] text-[13px] leading-[1.45]">${order.result_summary}</div>` : null}
     </div>
   `
 }

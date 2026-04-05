@@ -145,9 +145,9 @@ let dashboard_batch_json ?(compact = false) (config : Room.config) : Yojson.Safe
   let tempo = Tempo.get_tempo config in
   (* M-17 fix: use room-scoped queries consistent with compact/shell dashboard *)
   let room_id = "default" in
-  let tasks = Room.get_tasks_raw_in_room config room_id in
-  let agents = Room.get_agents_raw_in_room config room_id in
-  let msgs = Room.get_messages_raw_in_room config ~room_id ~since_seq:0 ~limit:20 in
+  let tasks = Room.get_tasks_safe config in
+  let agents = Room.get_active_agents config in
+  let msgs = Room.get_messages_raw config ~since_seq:0 ~limit:20 in
   let now_ts = Time_compat.now () in
   let (board_monitor_json, board_contract_ok) = board_monitoring_json ~now_ts in
   let (governance_monitor_json, governance_feed_ok) =
@@ -920,16 +920,16 @@ let dashboard_message_json (message : Types.message) =
       ("seq", `Int message.seq);
     ]
 
-let dashboard_current_room_id _config = "default"
+let dashboard_current_room_id _config = Room.default_namespace_id
 
 let dashboard_tasks_safe config =
-  Room.get_tasks_raw_in_room config (dashboard_current_room_id config)
+  Room.get_tasks_safe config
 
 let dashboard_agents_safe config =
-  Room.get_agents_raw_in_room config (dashboard_current_room_id config)
+  Room.get_active_agents config
 
 let dashboard_messages_safe config ~since_seq ~limit =
-  Room.get_messages_raw_in_room config ~room_id:(dashboard_current_room_id config) ~since_seq ~limit
+  Room.get_messages_raw config ~since_seq ~limit
 
 let is_keeper_agent (agent : Types.agent) =
   String.equal (String.lowercase_ascii (String.trim agent.agent_type)) "keeper"

@@ -63,10 +63,9 @@ let test_current_room_writes_stay_canonical () =
       ignore (Room.add_task focused ~title:"focus task" ~priority:1 ~description:"");
       check int "default namespace task count" 1
         (List.length (Room.get_tasks_raw config));
-      check int "default room task count" 1
-        (List.length (Room.get_tasks_raw_in_room config "default"));
-      check int "compat room task count is flattened" 1
-        (List.length (Room.get_tasks_raw_in_room config "focus-room")))
+      (* All rooms are flattened to default — get_tasks_safe is the single path *)
+      check int "same tasks regardless of former room" 1
+        (List.length (Room.get_tasks_safe config)))
 
 let read_lines path =
   let ic = open_in path in

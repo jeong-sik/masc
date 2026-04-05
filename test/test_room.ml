@@ -585,7 +585,7 @@ let test_room_bootstrap_preserves_backend_state () =
     let room_id = "side-room" in
     Room.ensure_room_bootstrap config room_id;
     let _ =
-      Room.update_state_in_room config room_id (fun state ->
+      Room.update_state config (fun state ->
         { state with message_seq = 41 })
     in
     let backlog =
@@ -595,13 +595,13 @@ let test_room_bootstrap_preserves_backend_state () =
         version = 7;
       }
     in
-    Room_utils.write_json config (Room.backlog_path_in_room config room_id)
+    Room_utils.write_json config (Room.backlog_path config)
       (Types.backlog_to_yojson backlog);
 
     Room.ensure_room_bootstrap config room_id;
 
-    let state = Room.read_state_in_room config room_id in
-    let saved_backlog = Room.read_backlog_in_room config room_id in
+    let state = Room.read_state config in
+    let saved_backlog = Room.read_backlog config in
     Alcotest.(check int) "state preserved" 41 state.message_seq;
     Alcotest.(check int) "backlog preserved" 7 saved_backlog.version
   )

@@ -61,9 +61,9 @@ export function clearTrajectory(keeperName: string): void {
 
 // Tool category → icon/color mapping. Order matters: first match wins.
 const TOOL_CATEGORIES: Array<{ match: (n: string) => boolean; icon: string; color: string }> = [
-  { match: n => n.includes('bash'),                         icon: '>', color: 'text-[#4ade80]' },
-  { match: n => n.includes('edit') || n.includes('fs'),     icon: 'E', color: 'text-[#fbbf24]' },
-  { match: n => n.includes('board') || n.includes('social'),icon: 'B', color: 'text-[#a78bfa]' },
+  { match: n => n.includes('bash'),                         icon: '>', color: 'text-[var(--ok)]' },
+  { match: n => n.includes('edit') || n.includes('fs'),     icon: 'E', color: 'text-[var(--warn)]' },
+  { match: n => n.includes('board') || n.includes('social'),icon: 'B', color: 'text-[var(--purple)]' },
   { match: n => n.includes('github'),                       icon: 'G', color: 'text-[var(--accent)]' },
   { match: n => n.includes('search') || n.includes('read'), icon: 'R', color: 'text-[#60a5fa]' },
 ]
@@ -76,9 +76,9 @@ function toolCategory(name: string): { icon: string; color: string } {
 }
 
 function durationColor(ms: number): string {
-  if (ms < DURATION_FAST_MS) return 'text-[#4ade80]'
-  if (ms < DURATION_SLOW_MS) return 'text-[#fbbf24]'
-  return 'text-[#ef4444]'
+  if (ms < DURATION_FAST_MS) return 'text-[var(--ok)]'
+  if (ms < DURATION_SLOW_MS) return 'text-[var(--warn)]'
+  return 'text-[var(--bad)]'
 }
 
 function formatArgs(args: Record<string, unknown> | string): string {
@@ -119,10 +119,10 @@ function TrajectoryEntryRow({ entry }: { entry: TrajectoryEntry }) {
           <span class="text-xs font-mono font-medium ${cat.color}">${entry.tool_name}</span>
           <span class="text-[10px] text-[var(--text-dim)]">T${entry.turn}R${entry.round}</span>
           ${gateRejected
-            ? html`<span class="text-[10px] px-1.5 py-0.5 rounded bg-[var(--bad-10)] text-[#ef4444]">거부: ${entry.gate.reason ?? ''}</span>`
+            ? html`<span class="text-[10px] px-1.5 py-0.5 rounded bg-[var(--bad-10)] text-[var(--bad)]">거부: ${entry.gate.reason ?? ''}</span>`
             : null}
           ${entry.error
-            ? html`<span class="text-[10px] px-1.5 py-0.5 rounded bg-[var(--bad-10)] text-[#ef4444]">오류</span>`
+            ? html`<span class="text-[10px] px-1.5 py-0.5 rounded bg-[var(--bad-10)] text-[var(--bad)]">오류</span>`
             : null}
         </div>
 
@@ -172,7 +172,7 @@ export function KeeperTrajectoryTimeline({ keeperName }: { keeperName: string })
   }
 
   if (state.error) {
-    return html`<div class="text-xs text-[#ef4444] py-4 text-center">${state.error}</div>`
+    return html`<div class="text-xs text-[var(--bad)] py-4 text-center">${state.error}</div>`
   }
 
   const data = state.data

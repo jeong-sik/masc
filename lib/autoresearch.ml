@@ -103,6 +103,7 @@ let measure_metric_with_retry = Autoresearch_metric.measure_metric_with_retry
 (* Re-exports: Git                                                   *)
 (* ================================================================ *)
 
+let is_in_git_repo = Autoresearch_git.is_in_git_repo
 let run_capture_lines = Autoresearch_git.run_capture_lines
 let git_head_short = Autoresearch_git.git_head_short
 let git_commit = Autoresearch_git.git_commit

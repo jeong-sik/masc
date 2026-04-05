@@ -181,12 +181,20 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
     in
     let cascade_models = Oas_model_resolve.models_of_cascade_name "keeper_unified" in
     ignore (Oas_model_resolve.refresh_local_discovery_if_possible cascade_models);
-    let primary_max_context = Oas_model_resolve.resolve_primary_max_context cascade_models in
+    let primary_max_context =
+      match p.max_context_override_opt with
+      | Some v -> v
+      | None -> Oas_model_resolve.resolve_primary_max_context cascade_models
+    in
     Progress.Tracker.step tracker ~message:"Initializing session directory" ();
     let trace_id = generate_trace_id () in
       let base_dir = session_base_dir ctx.config in
       (* Ensure full session dir tree, not just base_dir (issue #3019) *)
       ignore (Keeper_fs.ensure_dir (Filename.concat base_dir trace_id));
+      (* Ensure keeper playground directory exists *)
+      let playground_rel = Keeper_alerting_path.playground_path_of_keeper p.name in
+      let project_root = Keeper_alerting_path.project_root_of_config ctx.config in
+      ignore (Keeper_fs.ensure_dir (Filename.concat project_root playground_rel));
       let session = Keeper_exec_context.create_session ~session_id:trace_id ~base_dir in
         let persona_extended =
           Keeper_types_profile.load_persona_extended p.name
@@ -252,6 +260,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         handoff_cooldown_sec;
         created_at = now_iso ();
         updated_at = now_iso ();
+        max_context_override = p.max_context_override_opt;
         continuity_summary = "";
         active_goal_ids = [];
         active_team_session_id = None;
@@ -379,6 +388,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           ("compaction_ratio_gate", `Float meta.compaction.ratio_gate);
           ("compaction_message_gate", `Int meta.compaction.message_gate);
           ("compaction_token_gate", `Int meta.compaction.token_gate);
+          ("max_context_override", Json_util.int_opt_to_json meta.max_context_override);
           ("auto_handoff", `Bool meta.auto_handoff);
           ("handoff_threshold", `Float meta.handoff_threshold);
         ] in

@@ -446,7 +446,13 @@ fi
 if [ "$PORT_EXPLICIT" != "1" ]; then
     PORT="$(default_port_for_path "$SCRIPT_DIR")"
     if [ "$PORT" != "8935" ]; then
-        WORKTREE_PORT_HINT="Using worktree-derived default port $PORT for $(basename "$SCRIPT_DIR") (override with MASC_MCP_PORT or --port)."
+        if [ -z "$MASC_GRPC_PORT" ]; then
+            export MASC_GRPC_PORT="$((PORT + 1))"
+        fi
+        if [ -z "$MASC_WS_PORT" ]; then
+            export MASC_WS_PORT="$((PORT + 2))"
+        fi
+        WORKTREE_PORT_HINT="Using worktree-derived default port $PORT (gRPC=$MASC_GRPC_PORT, WS=$MASC_WS_PORT) for $(basename "$SCRIPT_DIR") (override with MASC_MCP_PORT or --port)."
     fi
 fi
 
@@ -462,19 +468,27 @@ fi
 raise_open_file_limit
 
 # Fast preflight: fail before build/init if requested port is already occupied.
-if lsof -iTCP:"$PORT" -sTCP:LISTEN -t >/dev/null 2>&1 && [ "${MASC_ALLOW_PORT_REUSE:-0}" != "1" ]; then
-    listener_pid="$(lsof -iTCP:"$PORT" -sTCP:LISTEN -t 2>/dev/null | head -n 1)"
-    listener_cmd=""
-    if [ -n "$listener_pid" ]; then
-        listener_cmd="$(ps -p "$listener_pid" -o command= 2>/dev/null || true)"
+check_port_in_use() {
+    local check_port="$1"
+    local name="$2"
+    if [ -n "$check_port" ] && lsof -iTCP:"$check_port" -sTCP:LISTEN -t >/dev/null 2>&1 && [ "${MASC_ALLOW_PORT_REUSE:-0}" != "1" ]; then
+        local listener_pid="$(lsof -iTCP:"$check_port" -sTCP:LISTEN -t 2>/dev/null | head -n 1)"
+        local listener_cmd=""
+        if [ -n "$listener_pid" ]; then
+            listener_cmd="$(ps -p "$listener_pid" -o command= 2>/dev/null || true)"
+        fi
+        echo "❌ $name Port $check_port already in use; refusing startup before build/init." >&2
+        if [ -n "$listener_pid" ]; then
+            echo "   Existing listener: pid=$listener_pid ${listener_cmd}" >&2
+        fi
+        echo "   Stop the existing server, choose another --port, or set MASC_ALLOW_PORT_REUSE=1." >&2
+        exit 1
     fi
-    echo "❌ Port $PORT already in use; refusing startup before build/init." >&2
-    if [ -n "$listener_pid" ]; then
-        echo "   Existing listener: pid=$listener_pid ${listener_cmd}" >&2
-    fi
-    echo "   Stop the existing server, choose another --port, or set MASC_ALLOW_PORT_REUSE=1." >&2
-    exit 1
-fi
+}
+
+check_port_in_use "$PORT" "HTTP"
+check_port_in_use "${MASC_GRPC_PORT:-8936}" "gRPC"
+check_port_in_use "${MASC_WS_PORT:-8937}" "WebSocket"
 
 # Dashboard SPA build (Vite) — assets/dashboard/ is no longer committed to git.
 # Always attempt the build before server startup so the served bundle matches current sources.

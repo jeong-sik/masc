@@ -104,14 +104,18 @@ let overflow_retry_history_budget
     ~(system_prompt : string)
     ~(user_message : string) : int =
   let prompt_tokens =
-    Agent_sdk.Context_reducer.estimate_char_tokens system_prompt
-    + Agent_sdk.Context_reducer.estimate_char_tokens user_message
+    let estimated =
+      Agent_sdk.Context_reducer.estimate_char_tokens system_prompt
+      + Agent_sdk.Context_reducer.estimate_char_tokens user_message
+    in
+    (* Use 20% safety buffer for prompt estimation errors (#5053) *)
+    int_of_float (float_of_int estimated *. 1.2)
   in
   let prompt_reserve = max 1024 prompt_tokens in
   let tool_reserve =
     Keeper_config.keeper_retry_max_tools_per_turn () * 220
   in
-  let safety_reserve = 512 in
+  let safety_reserve = 1024 in
   max 256 (available_context - (prompt_reserve + tool_reserve + safety_reserve))
 
 let recover_context_overflow_retry
@@ -777,7 +781,11 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
   | Ok () ->
       ignore (Oas_model_resolve.refresh_local_discovery_if_possible model_labels);
       let primary_max_context =
-        Oas_model_resolve.resolve_primary_max_context model_labels
+        match meta.max_context_override with
+        | Some v ->
+            Log.Keeper.info "%s: using max_context_override=%d" meta.name v;
+            v
+        | None -> Oas_model_resolve.resolve_primary_max_context model_labels
       in
       (* Yield before CPU-bound prompt construction so the Eio scheduler
          can service HTTP handlers between keeper turn setups. *)
@@ -835,8 +843,9 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
                            && attempt <= max_transient_retries ->
                 let delay = transient_backoff_sec attempt in
                 Log.Keeper.warn
-                  "%s: transient network error (retry %d/%d), backoff %.0fs: %s"
-                  meta.name attempt max_transient_retries delay
+                  "%s: transient network error cascade=%s max_context=%d retry=%d/%d backoff=%.0fs: %s"
+                  meta.name meta.cascade_name max_context
+                  attempt max_transient_retries delay
                   (short_preview e);
                 Eio.Time.sleep (Eio_context.get_clock ()) delay;
                 retry_loop ~run_meta ~max_context ~run_generation
@@ -872,6 +881,10 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
       in
       match run_result with
       | Error e ->
+          Log.Keeper.error
+            "%s: unified turn FAILED cascade=%s max_context=%d latency=%dms error=%s"
+            meta.name meta.cascade_name primary_max_context latency_ms
+            (short_preview e);
           let social_state =
             Social.derive_failure_state ~meta ~observation ~reason:e
           in
@@ -1000,6 +1013,16 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
             ~selected_mode:(selected_mode_of_result result)
             ~social_state
             ~result:(Some result) ();
+          Log.Keeper.info
+            "%s: unified turn OK model=%s tokens=%d latency=%dms mode=%s stop=%s"
+            updated_meta.name result.model_used
+            (result.usage.input_tokens + result.usage.output_tokens)
+            latency_ms
+            (selected_mode_of_result result)
+            (match result.stop_reason with
+             | Oas_worker.Completed -> "completed"
+             | Oas_worker.TurnBudgetExhausted { turns_used; limit; _ } ->
+                 Printf.sprintf "budget_exhausted(%d/%d)" turns_used limit);
           (* 7. Persist updated meta *)
           (match write_meta config updated_meta with
            | Ok () -> ()

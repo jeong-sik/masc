@@ -24,6 +24,7 @@ type parsed_args = {
   voice_channel_opt : string option;
   voice_agent_id_opt : string option;
   mention_targets_in : string list;
+  max_context_override_opt : int option;
   proactive_enabled_opt : bool option;
   proactive_idle_sec_opt : int option;
   proactive_cooldown_sec_opt : int option;
@@ -186,6 +187,7 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
     let voice_channel_opt = get_string_opt args "voice_channel" in
     let voice_agent_id_opt = get_string_opt args "voice_agent_id" in
     let mention_targets_in = get_string_list args "mention_targets" in
+    let max_context_override_opt = Safe_ops.json_int_opt "max_context_override" args in
     let proactive_enabled_opt = get_bool_opt args "proactive_enabled" in
     let proactive_idle_sec_opt = Safe_ops.json_int_opt "proactive_idle_sec" args in
     let proactive_cooldown_sec_opt = Safe_ops.json_int_opt "proactive_cooldown_sec" args in
@@ -256,6 +258,7 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
       voice_channel_opt;
       voice_agent_id_opt;
       mention_targets_in;
+      max_context_override_opt;
       proactive_enabled_opt;
       proactive_idle_sec_opt;
       proactive_cooldown_sec_opt;

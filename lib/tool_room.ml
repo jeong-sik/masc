@@ -179,7 +179,7 @@ let status_summary_string (ctx : context) =
   Room.ensure_initialized ctx.config;
   let state = Room.read_state ctx.config in
   let current_room = "default" in
-  let backlog = Room.read_backlog_in_room ctx.config current_room in
+  let backlog = Room.read_backlog ctx.config in
   let max_agents_display = 40 in
   let max_active_tasks_display = 30 in
   let joined =

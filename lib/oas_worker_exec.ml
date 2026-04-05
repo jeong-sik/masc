@@ -39,6 +39,8 @@ type config = {
   working_context : Yojson.Safe.t option;
   cache_system_prompt : bool;
   yield_on_tool : bool;
+  max_input_tokens : int option;
+  compact_ratio : float option;
 }
 
 let default_config ~name ~provider ~model_id ~system_prompt ~tools : config =
@@ -65,6 +67,8 @@ let default_config ~name ~provider ~model_id ~system_prompt ~tools : config =
     working_context = None;
     cache_system_prompt = false;
     yield_on_tool = false;
+    max_input_tokens = None;
+    compact_ratio = None;
   }
 
 (* ================================================================ *)
@@ -242,6 +246,16 @@ let build
     if config.initial_messages <> [] then
       Oas.Builder.with_initial_messages config.initial_messages builder
     else builder
+  in
+  let builder =
+    match config.max_input_tokens with
+    | Some n -> Oas.Builder.with_max_input_tokens n builder
+    | None -> builder
+  in
+  let builder =
+    match config.compact_ratio with
+    | Some ratio -> Oas.Builder.with_context_thresholds ~compact_ratio:ratio builder
+    | None -> builder
   in
   Oas.Builder.build_safe builder
   |> Result.map_error Oas.Error.to_string

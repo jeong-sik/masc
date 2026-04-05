@@ -217,7 +217,9 @@ let write_heartbeat_snapshot
     Oas_model_resolve.models_of_cascade_name meta_current.cascade_name
   in
   let primary_max_context =
-    Oas_model_resolve.resolve_primary_max_context cascade_models
+    match meta_current.max_context_override with
+    | Some v -> v
+    | None -> Oas_model_resolve.resolve_primary_max_context cascade_models
   in
   let base_dir = session_base_dir ctx.config in
   ignore (Keeper_fs.ensure_dir (Filename.concat base_dir meta_current.runtime.trace_id));
@@ -386,6 +388,13 @@ let sync_keeper_presence
       if synced.joined_room_ids = []
       then (
         incr consecutive_failures;
+        (* RFC-0001 Gate A: record failure streak *)
+        Agent_stress.record {
+          agent_name = meta_current.name;
+          room_id = (match meta_current.joined_room_ids with r :: _ -> r | [] -> "");
+          kind = Failure_streak !consecutive_failures;
+          timestamp = Unix.gettimeofday ();
+        };
         Log.Keeper.warn
           "room presence returned empty rooms (%d/%d)"
           !consecutive_failures
@@ -530,19 +539,18 @@ let refresh_work_as_heartbeat
   then (
     let hb_ok =
       List.exists
-        (fun room_id ->
+        (fun _room_id ->
            try
              ignore
-               (Room.heartbeat_in_room
+               (Room.heartbeat
                   ctx.config
-                  ~room_id
                   ~agent_name:meta_after_proactive.agent_name);
              true
            with
            | Eio.Cancel.Cancelled _ as e -> raise e
            | exn ->
              Log.Keeper.debug
-               "heartbeat_in_room failed for %s: %s"
+               "heartbeat failed for %s: %s"
                meta_after_proactive.name
                (Printexc.to_string exn);
              false)
@@ -738,7 +746,7 @@ let run_heartbeat_loop
   let timing_cursor = ref 0 in
   let timing_filled = ref 0 in
   (* Phase 1: work-as-heartbeat freshness tracking.
-     Updated ONLY on Room.heartbeat_in_room success after turn. *)
+     Updated ONLY on Room.heartbeat success after turn. *)
   let last_successful_heartbeat_ts = ref (Time_compat.now ()) in
   let work_as_hb () = Runtime_params.get Governance_registry.keeper_work_as_hb_enabled in
   let max_silence () =
@@ -841,7 +849,7 @@ let run_heartbeat_loop
                ; keeper_name = m.name
                });
         (* Phase 1: work-as-heartbeat — renew point (b).
-                 After turn, call Room.heartbeat_in_room to prove room I/O health.
+                 After turn, call Room.heartbeat to prove room I/O health.
                  On success: refresh freshness lease + reset consecutive_failures.
                  On failure: leave timestamp unchanged → presence sync resumes next cycle. *)
         refresh_work_as_heartbeat
@@ -1303,4 +1311,12 @@ let stop_keepalive name =
           then
             Keeper_registry.cleanup_tracking ~base_path:entry.base_path entry.name))
     entries
+;;
+
+(** Stop all running keepers. Used in test cleanup to prevent orphaned
+    keepalive loops from blocking process exit. *)
+let stop_all_keepalives () =
+  Keeper_registry.all ()
+  |> List.iter (fun (entry : Keeper_registry.registry_entry) ->
+       stop_keepalive entry.name)
 ;;

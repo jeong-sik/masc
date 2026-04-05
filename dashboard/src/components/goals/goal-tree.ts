@@ -117,7 +117,7 @@ function TreeTask({ task }: { task: GoalTreeTask }) {
       <span class="size-2 rounded-full shrink-0" style="background:${task.status_color}"></span>
       <span class="flex-1 min-w-0 truncate text-text-body">${task.title}</span>
       ${task.assignee ? html`
-        <span class="shrink-0 rounded-md border border-accent/20 bg-accent/10 px-1.5 py-0.5 text-[10px] font-medium text-accent">${task.assignee}</span>
+        <span class="shrink-0 rounded-md border border-accent/20 bg-[var(--accent-10)] px-1.5 py-0.5 text-[10px] font-medium text-accent">${task.assignee}</span>
       ` : null}
       <${StatusBadge} status=${task.status} />
     </div>
@@ -154,7 +154,7 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
 
           <div class="flex flex-wrap items-center gap-3 text-[11px] text-text-muted">
             ${node.metric ? html`
-              <span class="rounded-md border border-accent/20 bg-accent/10 px-2 py-0.5 text-accent">
+              <span class="rounded-md border border-accent/20 bg-[var(--accent-10)] px-2 py-0.5 text-accent">
                 ${node.metric}${node.target_value ? ` \u2192 ${node.target_value}` : ''}
               </span>
             ` : null}

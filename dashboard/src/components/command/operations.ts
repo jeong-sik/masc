@@ -118,7 +118,7 @@ function ChainOperationListItem(
 
 function ChainHistoryRow({ item }: { item: ChainHistoryEventSummary }) {
   return html`
-    <article class="cmd-chain-history-row text-red-300">
+    <article class="cmd-chain-history-row text-[var(--bad)]">
       <div class="flex justify-between gap-3 items-start">
         <strong>${item.chain_id ?? '알 수 없는 체인'}</strong>
         <${StatusChip} label=${item.event} tone=${chainStatusTone(item.event)} />
@@ -140,7 +140,7 @@ function ChainRunNodeRow({ node }: { node: CommandPlaneChainRunNode }) {
         ${node.type ?? '노드'}
         ${typeof node.duration_ms === 'number' ? ` · ${node.duration_ms}ms` : ''}
       </div>
-      ${node.error ? html`<div class="cmd-card rounded-xl-sub text-red-300">${node.error}</div>` : null}
+      ${node.error ? html`<div class="cmd-card rounded-xl-sub text-[var(--bad)]">${node.error}</div>` : null}
     </article>
   `
 }

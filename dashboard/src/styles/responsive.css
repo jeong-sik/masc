@@ -1,0 +1,76 @@
+/* MASC Dashboard — Responsive Overrides (Task 292) */
+
+@media (max-width: 1024px) {
+  .app-shell {
+    width: calc(100% - 16px);
+    margin: 8px auto 16px;
+  }
+
+  .dashboard-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 16px;
+    padding: 16px;
+    min-height: auto;
+  }
+
+  .header-right {
+    width: 100%;
+    justify-content: space-between;
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 768px) {
+  :root {
+    --fs-base: 13px;
+    --fs-sm: 12px;
+    --fs-xs: 11px;
+    --fs-2xs: 10px;
+  }
+
+  .header-title-wrap h1 {
+    font-size: 22px;
+  }
+
+  /* Stack all common grids */
+  .monitor-grid, 
+  .control-row,
+  .dashboard-main-grid,
+  .agent-monitor-layout,
+  .ops-triple-column {
+    grid-template-columns: 1fr !important;
+    gap: 12px !important;
+  }
+
+  /* Responsive cards and panels */
+  .monitor-surface-card {
+    min-height: auto !important;
+    padding: 16px !important;
+  }
+
+  .dashboard-panel {
+    padding: 12px !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .dashboard-header {
+    padding: 12px;
+  }
+
+  .header-title-wrap h1 {
+    font-size: 18px;
+  }
+
+  .header-subtitle {
+    font-size: 11px;
+  }
+
+  .tab-pill-bar {
+    overflow-x: auto;
+    justify-content: flex-start !important;
+    padding-bottom: 4px;
+    &::-webkit-scrollbar { display: none; }
+  }
+}

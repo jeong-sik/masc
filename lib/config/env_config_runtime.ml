@@ -101,7 +101,7 @@ module Orchestrator = struct
     max 10 (min 3600 (get_int ~default:300 "MASC_ORCHESTRATOR_TIMEOUT"))
 
   let enabled =
-    get_bool ~default:false "MASC_ORCHESTRATOR_ENABLED"
+    Feature_flag_registry.get_bool "MASC_ORCHESTRATOR_ENABLED"
 end
 
 (** {1 Relay Configuration} *)
@@ -173,6 +173,10 @@ end
     continue to compile without changes. *)
 module Llama = Local_runtime
 
+module Glm = struct
+  let server_url = Env_config_core.get_string ~default:"https://api.z.ai" "ZAI_BASE_URL"
+end
+
 (** {1 Cancellation Token Configuration} *)
 
 module Cancellation = struct
@@ -226,7 +230,7 @@ module Transport = struct
 
   (** Whether gRPC transport is enabled. Default: true.
       Runtime-readable (tests change this via putenv). *)
-  let grpc_enabled () = get_bool ~default:true "MASC_GRPC_ENABLED"
+  let grpc_enabled () = Feature_flag_registry.get_bool "MASC_GRPC_ENABLED"
 
   (** gRPC client target address. Derived from grpc_port when unset. *)
   let grpc_target_opt () =
@@ -237,11 +241,11 @@ module Transport = struct
 
   (** Whether WebSocket transport is enabled. Default: true.
       Runtime-readable (tests change this via putenv). *)
-  let ws_enabled () = get_bool ~default:true "MASC_WS_ENABLED"
+  let ws_enabled () = Feature_flag_registry.get_bool "MASC_WS_ENABLED"
 
   (** Whether WebRTC transport is enabled. Default: true.
       Runtime-readable (tests change this via putenv). *)
-  let webrtc_enabled () = get_bool ~default:true "MASC_WEBRTC_ENABLED"
+  let webrtc_enabled () = Feature_flag_registry.get_bool "MASC_WEBRTC_ENABLED"
 
   (** HTTP mode: "auto", "h2_only", "h1_only". Default: "auto". *)
   let use_h2 () =
@@ -259,10 +263,10 @@ module Transport = struct
     Sys.getenv_opt "MASC_AGENT_TRANSPORT" |> trim_opt
 
   (** Whether OpenAI-compatible endpoint is enabled. Default: false. *)
-  let openai_compat_enabled = get_bool ~default:false "MASC_OPENAI_COMPAT"
+  let openai_compat_enabled = Feature_flag_registry.get_bool "MASC_OPENAI_COMPAT"
 
   let _http_auth_strict_registry =
-    get_bool ~default:false "MASC_HTTP_AUTH_STRICT"
+    Feature_flag_registry.get_bool "MASC_HTTP_AUTH_STRICT"
 
   (** Force strict auth for all HTTP endpoints. Default: false. *)
   let http_auth_strict_env_enabled () =
@@ -289,7 +293,7 @@ module TeamSession = struct
 
   (** Enable routing judge in team session dispatch. Default: true. *)
   let router_judge_enabled () =
-    get_bool ~default:true "MASC_TEAM_SESSION_ROUTER_JUDGE"
+    Feature_flag_registry.get_bool "MASC_TEAM_SESSION_ROUTER_JUDGE"
 
   let router_judge_timeout_sec () =
     max 5 (get_int ~default:15 "MASC_TEAM_SESSION_ROUTER_JUDGE_TIMEOUT_SEC")
@@ -307,15 +311,15 @@ end
 module Cdal = struct
   (** Enable contract-driven proof capture. Default: true. *)
   let enabled () =
-    get_bool ~default:true "MASC_CDAL_ENABLED"
+    Feature_flag_registry.get_bool "MASC_CDAL_ENABLED"
 
   (** Enforce contract risk violations. Default: false. *)
   let risk_enforcement_enabled () =
-    get_bool ~default:false "MASC_CDAL_RISK_ENFORCEMENT"
+    Feature_flag_registry.get_bool "MASC_CDAL_RISK_ENFORCEMENT"
 
   (** Aggregate proof bundles across turns. Default: false. *)
   let proof_aggregation_enabled () =
-    get_bool ~default:false "MASC_CDAL_PROOF_AGGREGATION"
+    Feature_flag_registry.get_bool "MASC_CDAL_PROOF_AGGREGATION"
 end
 
 (** {1 Slot Scheduling} *)
@@ -324,7 +328,7 @@ module Slot = struct
   (** Release LLM slot during tool execution so other agents can use it.
       Default: false. Set MASC_SLOT_YIELD_ENABLED=true to enable. *)
   let yield_enabled () =
-    get_bool ~default:false "MASC_SLOT_YIELD_ENABLED"
+    Feature_flag_registry.get_bool "MASC_SLOT_YIELD_ENABLED"
 end
 
 (** {1 Board Configuration} *)
@@ -361,11 +365,11 @@ end
 
 module Tools = struct
   (** Dispatch v2 feature flag. Default: true (since v2.102). *)
-  let dispatch_v2_enabled = get_bool ~default:true "MASC_DISPATCH_V2"
+  let dispatch_v2_enabled = Feature_flag_registry.get_bool "MASC_DISPATCH_V2"
 
   (** Full tool surface override. Default: false.
       Runtime-readable (tests change this via putenv). *)
-  let full_surface_enabled () = get_bool ~default:false "MASC_FULL_SURFACE"
+  let full_surface_enabled () = Feature_flag_registry.get_bool "MASC_FULL_SURFACE"
 
   (** Tool list page size, clamped to [10, 1024]. Default: 512.
       Runtime-readable (tests change this via putenv). *)
@@ -406,9 +410,9 @@ module Worker = struct
   (** Enable local runtime debug logging. Default: false.
       Falls back to MASC_LLAMA_RUNTIME_DEBUG for backward compatibility. *)
   let local_runtime_debug =
-    let primary = get_bool ~default:false "MASC_LOCAL_RUNTIME_DEBUG" in
+    let primary = Feature_flag_registry.get_bool "MASC_LOCAL_RUNTIME_DEBUG" in
     if primary then true
-    else get_bool ~default:false "MASC_LLAMA_RUNTIME_DEBUG"
+    else Feature_flag_registry.get_bool "MASC_LLAMA_RUNTIME_DEBUG"
 
   (** @deprecated Use {!local_runtime_debug}. *)
   let llama_runtime_debug = local_runtime_debug

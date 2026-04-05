@@ -27,6 +27,10 @@ let int_of_env_default name ~default ~min_v ~max_v =
 (** Compute total tokens from OAS api_usage. *)
 let total_tokens (u : Agent_sdk.Types.api_usage) = u.input_tokens + u.output_tokens
 
+(** CJK-aware token estimate delegated to OAS Context_reducer. *)
+let estimate_tokens (s : string) : int =
+  if s = "" then 0 else Agent_sdk.Context_reducer.estimate_char_tokens s
+
 (** Zero usage marker — delegates to OAS Types.zero_api_usage.
     @since 2.123.0 — delegated to OAS *)
 let zero_usage : Agent_sdk.Types.api_usage =

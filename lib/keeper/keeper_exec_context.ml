@@ -42,8 +42,10 @@ let ensure_dir path =
   ignore (Keeper_fs.ensure_dir path)
 
 (** CJK-aware token estimate delegated to OAS Context_reducer. *)
-let msg_tokens : Agent_sdk.Types.message -> int =
-  Agent_sdk.Context_reducer.estimate_message_tokens
+let msg_tokens (m : Agent_sdk.Types.message) : int =
+  let estimated = Agent_sdk.Context_reducer.estimate_message_tokens m in
+  (* Use 15% safety buffer for message estimation errors (#5053) *)
+  int_of_float (float_of_int estimated *. 1.15)
 
 let count_tokens (system_prompt : string) (msgs : Agent_sdk.Types.message list) =
   let sys_tokens = Agent_sdk.Context_reducer.estimate_char_tokens system_prompt in
@@ -802,28 +804,6 @@ let apply_post_turn_lifecycle
         message_count = rollover.message_count;
       }
 
-let clamp_context_max_tokens
-    (ctx : working_context)
-    ~(primary_model_max_tokens : int) : working_context =
-  let clamped =
-    if primary_model_max_tokens <= 0 then ctx.max_tokens
-    else min ctx.max_tokens primary_model_max_tokens
-  in
-  if clamped = ctx.max_tokens then ctx
-  else sync_oas_context { ctx with max_tokens = clamped }
-
-let hard_trim_context_to_budget
-    (ctx : working_context)
-    ~(budget_tokens : int) : working_context =
-  if budget_tokens <= 0 then ctx
-  else
-    let reducer =
-      Agent_sdk.Context_reducer.from_context_config ~max_tokens:budget_tokens ()
-    in
-    let messages = Agent_sdk.Context_reducer.reduce reducer ctx.messages in
-    sync_oas_context
-      { ctx with messages; max_tokens = min ctx.max_tokens budget_tokens }
-
 let forced_overflow_retry_meta
     (meta : keeper_meta)
     ~(turn_generation : int)
@@ -922,7 +902,8 @@ let[@warning "-32"] recover_latest_checkpoint_for_overflow_retry
   | Some (ctx, turn_generation) ->
       let now_ts = Time_compat.now () in
       let ctx =
-        clamp_context_max_tokens ctx ~primary_model_max_tokens
+        if primary_model_max_tokens <= 0 then ctx
+        else sync_oas_context { ctx with max_tokens = min ctx.max_tokens primary_model_max_tokens }
       in
       let before_tokens = token_count ctx in
       let retry_meta =
@@ -940,8 +921,13 @@ let[@warning "-32"] recover_latest_checkpoint_for_overflow_retry
           primary_model_max_tokens > 0
           && strategy_after_message_tokens > primary_model_max_tokens
         then
-          hard_trim_context_to_budget compacted_ctx
-            ~budget_tokens:primary_model_max_tokens
+          let reducer =
+            let target_tokens = int_of_float (float_of_int primary_model_max_tokens *. 0.9) in
+            Agent_sdk.Context_reducer.from_context_config ~max_tokens:target_tokens ()
+          in
+          let messages = Agent_sdk.Context_reducer.reduce reducer compacted_ctx.messages in
+          sync_oas_context
+            { compacted_ctx with messages; max_tokens = min compacted_ctx.max_tokens primary_model_max_tokens }
         else
           compacted_ctx
       in
@@ -1051,7 +1037,7 @@ let ensure_keeper_room_presence config (meta : keeper_meta) : keeper_meta =
         try
           if
             not
-              (Room.is_agent_joined_in_room config ~room_id
+              (Room.is_agent_joined config
                  ~agent_name:meta.agent_name)
           then begin
             Room.ensure_room_bootstrap config room_id;
@@ -1060,7 +1046,7 @@ let ensure_keeper_room_presence config (meta : keeper_meta) : keeper_meta =
                  ~capabilities:[ "keeper" ] ())
           end;
           ignore
-            (Room.heartbeat_in_room config ~room_id ~agent_name:meta.agent_name);
+            (Room.heartbeat config ~agent_name:meta.agent_name);
           room_id :: acc
         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
           log_keeper_exn ~label:(Printf.sprintf "room presence sync failed for %s in %s" meta.name room_id) exn;

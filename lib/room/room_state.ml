@@ -134,14 +134,8 @@ let update_state config f =
     new_state
   )
 
-let read_state_in_room config _room_id =
-  read_state config
-
-let write_state_in_room config _room_id state =
-  write_state config state
-
-let update_state_in_room config _room_id f =
-  update_state config f
+(* _in_room shims removed — rooms are flattened (#4638).
+   Use read_state / write_state / update_state directly. *)
 
 (* ============================================ *)
 (* Sequence Numbers                             *)
@@ -152,8 +146,7 @@ let next_seq config =
   let state = update_state config (fun s -> { s with message_seq = s.message_seq + 1 }) in
   state.message_seq
 
-let next_seq_in_room config _room_id =
-  next_seq config
+(* next_seq_in_room removed — rooms are flattened (#4638). Use next_seq. *)
 
 (* ============================================ *)
 (* Pause State                                  *)
@@ -186,8 +179,6 @@ let read_backlog config =
 (** Write backlog *)
 let write_backlog config backlog =
   write_json config (backlog_path config) (backlog_to_yojson backlog)
-
-let current_room_id _config = default_namespace_id
 
 let activity_room_id _config = default_namespace_id
 
@@ -238,17 +229,8 @@ let emit_message_activity config ~from_agent ~content ~mention
         ~tags:[ "message"; "mention" ] ()
   | _ -> ()
 
-let tasks_dir_in_room config _room_id =
-  tasks_dir config
-
-let messages_dir_in_room config _room_id =
-  messages_dir config
-
-let backlog_path_in_room config _room_id =
-  backlog_path config
-
-let read_backlog_in_room config _room_id =
-  read_backlog config
+(* _in_room path/backlog shims removed — rooms are flattened (#4638).
+   Use tasks_dir / messages_dir / backlog_path / read_backlog directly. *)
 
 (* ============================================ *)
 (* Task ID / Archive Management                 *)
@@ -457,6 +439,8 @@ let broadcast ?trace_context config ~from_agent ~content =
   (match backend_publish config ~channel:(broadcast_channel config)
       ~message:(Yojson.Safe.to_string (message_to_yojson msg)) with
    | Ok _ -> ()
+   | Error (Backend_types.BackendNotSupported msg) when String.starts_with ~prefix:"FileSystem backend" msg ->
+       Log.Misc.debug "broadcast publish skipped for %s: %s" room_id msg
    | Error e -> Log.Misc.error "broadcast publish failed for %s: %s" room_id (Backend_types.show_error e));
   emit_message_activity config ~from_agent:safe_agent ~content:safe_content
     ~mention ();

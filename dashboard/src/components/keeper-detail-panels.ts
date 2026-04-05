@@ -35,14 +35,14 @@ const KPI_TONE: Record<KpiTone, string> = {
   default: 'border-[var(--card-border)] bg-[var(--white-3)]',
   ok: 'border-[rgba(74,222,128,0.2)] bg-[rgba(74,222,128,0.06)]',
   warn: 'border-[rgba(251,191,36,0.2)] bg-[rgba(251,191,36,0.06)]',
-  bad: 'border-[rgba(239,68,68,0.2)] bg-[rgba(239,68,68,0.06)]',
+  bad: 'border-[var(--bad-20)] bg-[rgba(239,68,68,0.06)]',
 }
 
 const KPI_VALUE_TONE: Record<KpiTone, string> = {
   default: 'text-[var(--text-strong)]',
-  ok: 'text-[#4ade80]',
-  warn: 'text-[#fbbf24]',
-  bad: 'text-[#ef4444]',
+  ok: 'text-[var(--ok)]',
+  warn: 'text-[var(--warn)]',
+  bad: 'text-[var(--bad)]',
 }
 
 const KPI_ICON: Record<string, string> = {
@@ -195,8 +195,8 @@ export function KpiGrid({ keeper }: { keeper: Keeper }) {
       </div>
       ${'' /* Proactive activity callout */}
       ${keeper.last_proactive_ago_s != null ? html`
-        <div class="rounded-xl border border-purple-400/20 bg-purple-500/5 p-3 text-[11px]">
-          <span class="font-semibold text-purple-300">자율 활동</span>
+        <div class="rounded-xl border border-[var(--white-20)] bg-[var(--white-5)] p-3 text-[11px]">
+          <span class="font-semibold text-[var(--purple)]">자율 활동</span>
           <span class="text-text-muted ml-2">${formatDuration(keeper.last_proactive_ago_s)} 전</span>
           ${keeper.last_proactive_reason ? html`
             <span class="text-text-dim ml-2">| ${keeper.last_proactive_reason}</span>
@@ -318,7 +318,7 @@ export function MetricsCharts({ keeper }: { keeper: Keeper }) {
       <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)]">
         <div class="flex items-center justify-between mb-1.5">
           <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">비용</span>
-          <span class="text-xs font-mono tabular-nums text-[#a78bfa]">$${totalCost.toFixed(4)}</span>
+          <span class="text-xs font-mono tabular-nums text-[var(--purple)]">$${totalCost.toFixed(4)}</span>
         </div>
         <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" style="background:#0b1220;">
           ${costLine ? html`<polyline points="${costLine}" fill="none" stroke="#a78bfa" stroke-width="1.5"/>` : null}
@@ -334,7 +334,7 @@ export function MetricsCharts({ keeper }: { keeper: Keeper }) {
           </div>
           <div class="flex flex-wrap gap-1.5">
             ${modelSwitches.map(s => html`
-              <span class="text-[10px] px-2 py-0.5 rounded-full bg-[rgba(250,204,21,0.08)] text-[#facc15] border border-[rgba(250,204,21,0.15)] font-mono">
+              <span class="text-[10px] px-2 py-0.5 rounded-full bg-[var(--warn-10)] text-[var(--warn)] border border-[var(--warn-20)] font-mono">
                 T${s.index} -> ${s.model.length > MODEL_NAME_MAX_LEN ? s.model.slice(0, MODEL_NAME_MAX_LEN) + '...' : s.model}
               </span>
             `)}

@@ -32,6 +32,7 @@ let handle_portal_open ctx args =
     let initial_message = get_string_opt args "initial_message" in
     match Room.portal_open_r ctx.config ~agent_name:ctx.agent_name ~target_agent ~initial_message with
   | Ok msg -> (true, msg)
+  | Error (Types.PortalAlreadyOpen _) -> (true, Printf.sprintf "Portal already open: %s ↔ %s" ctx.agent_name target_agent)
   | Error e -> (false, Types.masc_error_to_string e)
 
 let handle_portal_send ctx args =

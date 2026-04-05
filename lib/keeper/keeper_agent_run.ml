@@ -848,6 +848,8 @@ let run_turn
           ~session_id:meta.runtime.trace_id
           ~system_prompt:turn_system_prompt
           ~tools
+          ~max_input_tokens:max_context
+          ~compact_ratio:meta.compaction.ratio_gate
           ~initial_messages:history_messages
           ~hooks
           ~context_reducer:reducer

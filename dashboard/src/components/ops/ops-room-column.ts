@@ -252,7 +252,7 @@ export function OpsRoomColumn() {
           open=${room.paused ? true : undefined}
         >
           <summary class="ops-control-summary list-none cursor-pointer grid gap-1 p-3 px-3.5">
-            <span class="text-[#9fe6b5] text-[var(--fs-2xs)] tracking-[0.08em] uppercase">고급 프로젝트 제어</span>
+            <span class="text-[var(--ok-20)] text-[var(--fs-2xs)] tracking-[0.08em] uppercase">고급 프로젝트 제어</span>
             <strong>${room.paused ? '지금은 프로젝트 범위가 멈춰 있어 재개 동선이 열려 있습니다.' : '전체 공지, 일시정지, 작업 주입'}</strong>
             <span>${room.paused ? '운영 점검 후 재개하거나 공지를 보내세요.' : '기본 화면은 읽기 중심이고, 실제 전체 변경은 이 안에서만 합니다.'}</span>
           </summary>

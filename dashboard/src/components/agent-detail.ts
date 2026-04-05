@@ -58,7 +58,7 @@ setKeeperRedirect((agentName: string) => {
 function TaskSummary({ task }: { task: Task }) {
   return html`
     <div class="flex items-center gap-3 border border-card-border bg-card/40 hover:bg-card/60 transition-colors px-3 py-2.5 rounded-xl shadow-sm">
-      <span class="text-[10px] font-medium py-1 px-2.5 border border-accent/20 bg-accent/10 text-accent whitespace-nowrap rounded-md shadow-sm">${task.id}</span>
+      <span class="text-[10px] font-medium py-1 px-2.5 border border-accent/20 bg-[var(--accent-10)] text-accent whitespace-nowrap rounded-md shadow-sm">${task.id}</span>
       <span class="flex-1 text-[13px] text-text-strong font-medium truncate">${task.title}</span>
       <${StatusBadge} status=${task.status} />
     </div>
@@ -69,7 +69,7 @@ function TaskHistoryPanel({ row }: { row: TaskHistoryRow }) {
   return html`
     <div class="border border-card-border rounded-xl bg-card/40 p-4 shadow-sm hover:border-accent/30 transition-colors group">
       <div class="mb-3">
-        <span class="text-[10px] font-medium py-1 px-2.5 border border-accent/20 bg-accent/10 text-accent whitespace-nowrap rounded-md shadow-sm group-hover:bg-accent/20 transition-colors">${row.taskId}</span>
+        <span class="text-[10px] font-medium py-1 px-2.5 border border-accent/20 bg-[var(--accent-10)] text-accent whitespace-nowrap rounded-md shadow-sm group-hover:bg-accent/20 transition-colors">${row.taskId}</span>
       </div>
       <pre class="m-0 whitespace-pre-wrap text-[12px] leading-relaxed text-text-body font-mono opacity-90">${row.text || '작업 이력 없음'}</pre>
     </div>
@@ -131,7 +131,7 @@ export function AgentDetailOverlay() {
                 <div class="flex items-center gap-2 mt-2 flex-wrap">
                   <${StatusBadge} status=${unified.canonical} />
                   ${unified.description !== unified.label ? html`<span class="text-[10px] font-medium py-1 px-2 border border-white/10 bg-white/5 text-text-muted whitespace-nowrap rounded-md" title=${unified.description}>${unified.description}</span>` : null}
-                  ${isArchivedParticipant ? html`<span class="text-[10px] font-medium py-1 px-2 border border-accent/20 bg-accent/10 text-accent whitespace-nowrap rounded-md shadow-sm">이전 세션 참여자</span>` : null}
+                  ${isArchivedParticipant ? html`<span class="text-[10px] font-medium py-1 px-2 border border-accent/20 bg-[var(--accent-10)] text-accent whitespace-nowrap rounded-md shadow-sm">이전 세션 참여자</span>` : null}
                   ${agent?.model ? html`<span class="font-mono text-[10px] font-medium bg-white/10 border border-white/5 px-2 py-1 rounded-md text-text-muted shadow-sm">${agent.model}</span>` : ''}
                   ${!agent && missionBrief?.archived_reason
                     ? html`<span class="text-xs text-text-dim italic">${missionBrief.archived_reason}</span>`
@@ -152,7 +152,7 @@ export function AgentDetailOverlay() {
                       ? html`<span class="flex items-center gap-1.5">연결된 키퍼: <strong class="text-text-strong">${keeper.name}</strong>${keeperIdentity ? html`<span class="text-text-dim text-xs">· ${keeperIdentity}</span>` : ''}</span>`
                       : null}
                     ${missionBrief?.related_session_id ? html`<span class="flex items-center gap-1.5">세션: <strong class="font-mono text-text-strong text-xs bg-white/5 px-1.5 rounded">${missionBrief.related_session_id}</strong></span>` : null}
-                    ${continuitySummary ? html`<span class="text-accent/90 bg-accent/10 px-2 py-0.5 rounded-md border border-accent/10">${continuitySummary}</span>` : null}
+                    ${continuitySummary ? html`<span class="text-accent/90 bg-[var(--accent-10)] px-2 py-0.5 rounded-md border border-accent/10">${continuitySummary}</span>` : null}
                   </div>
                 `
               : null}
@@ -215,7 +215,7 @@ export function AgentDetailOverlay() {
                 ].map(([label, val]) => html`
                   <div class="rounded-xl border border-card-border/50 bg-card/30 p-3 text-center">
                     <div class="text-[10px] font-semibold uppercase tracking-wider text-text-muted mb-1">${label}</div>
-                    <div class="text-lg font-bold ${(val as number) >= 0.7 ? 'text-ok' : (val as number) >= 0.4 ? 'text-[#fbbf24]' : 'text-bad'}">${val != null ? ((val as number) * 100).toFixed(0) + '%' : '-'}</div>
+                    <div class="text-lg font-bold ${(val as number) >= 0.7 ? 'text-ok' : (val as number) >= 0.4 ? 'text-[var(--warn)]' : 'text-bad'}">${val != null ? ((val as number) * 100).toFixed(0) + '%' : '-'}</div>
                   </div>
                 `)}
               </div>

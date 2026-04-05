@@ -64,7 +64,7 @@ function GovernanceSummaryStrip() {
 
   return html`
     ${caseTrackingRetired ? html`
-      <div class="mb-3.5 flex items-center gap-3 rounded-xl border border-accent/25 bg-accent/10 p-3.5 text-[13px] font-medium text-text-strong shadow-sm" data-testid="governance-retired-banner">
+      <div class="mb-3.5 flex items-center gap-3 rounded-xl border border-accent/25 bg-[var(--accent-10)] p-3.5 text-[13px] font-medium text-text-strong shadow-sm" data-testid="governance-retired-banner">
         <div class="shrink-0"><${AlertTriangle} size=${18} aria-hidden="true" /></div>
         <div>${governanceRetiredMessage()}</div>
       </div>
@@ -228,14 +228,14 @@ function DecisionInbox() {
                 <button type="button"
                   class="group flex w-full gap-3 rounded-xl border p-4 text-left cursor-pointer transition-[transform,background-color,border-color,box-shadow] duration-200 shadow-sm shadow-black/8 hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(71,184,255,0.45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-1)]
                     ${selected
-                      ? 'border-accent/40 bg-accent/10 shadow-[0_0_12px_rgba(71,184,255,0.12)]'
+                      ? 'border-accent/40 bg-[var(--accent-10)] shadow-[0_0_12px_rgba(71,184,255,0.12)]'
                       : 'border-card-border bg-card/34 hover:border-accent/30 hover:bg-card/52'
                     }"
                   onClick=${() => selectDecision(item)}
                 >
                   <div class="min-w-0 flex-1">
                     <div class="mb-1.5 flex min-w-0 items-center gap-2.5">
-                      <span class="inline-flex items-center rounded-lg border border-accent/20 bg-accent/10 px-2 py-0.5 text-[10px] font-bold text-accent">${kindLabel(item.kind)}</span>
+                      <span class="inline-flex items-center rounded-lg border border-accent/20 bg-[var(--accent-10)] px-2 py-0.5 text-[10px] font-bold text-accent">${kindLabel(item.kind)}</span>
                       <span class="text-[15px] font-bold text-text-strong break-words group-hover:text-accent transition-colors leading-tight tracking-wide">${item.topic}</span>
                     </div>
                     <div class="mt-1.5 flex flex-wrap gap-2.5 text-[12px] text-text-muted/90 font-medium">
@@ -277,7 +277,7 @@ function JudgmentsSection() {
         ${judgments.map(j => html`
           <div class="rounded-lg border border-card-border bg-card/34 p-3.5 text-[13px]" data-testid="judgment-item">
             <div class="flex items-center gap-2 mb-1.5">
-              <span class="inline-flex items-center rounded-md border border-accent/20 bg-accent/10 px-1.5 py-0.5 text-[10px] font-bold text-accent">${j.target_kind ?? 'unknown'}</span>
+              <span class="inline-flex items-center rounded-md border border-accent/20 bg-[var(--accent-10)] px-1.5 py-0.5 text-[10px] font-bold text-accent">${j.target_kind ?? 'unknown'}</span>
               <span class="font-medium text-text-strong">${j.target_id ?? ''}</span>
               ${j.confidence != null ? html`<span class="ml-auto text-[11px] text-text-muted">신뢰도 ${Math.round(j.confidence * 100)}%</span>` : null}
             </div>

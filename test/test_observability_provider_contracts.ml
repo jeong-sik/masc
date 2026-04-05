@@ -98,6 +98,32 @@ let test_max_context_of_label () =
       "nonexistent:model" in
   check int "fallback 128000" 128_000 fallback
 
+(* ── effective_discovered_ctx boundary tests ── *)
+
+let test_effective_ctx_below_floor () =
+  (* discovered=8192 (llama-server default) → static fallback *)
+  let result = Masc_mcp.Oas_model_resolve.effective_discovered_ctx
+      ~static_ctx:128_000 ~discovered:(Some 8_192) in
+  check int "below floor uses static" 128_000 result
+
+let test_effective_ctx_at_floor () =
+  (* discovered exactly at 65536 → accepted *)
+  let result = Masc_mcp.Oas_model_resolve.effective_discovered_ctx
+      ~static_ctx:128_000 ~discovered:(Some 65_536) in
+  check int "at floor uses discovered" 65_536 result
+
+let test_effective_ctx_above_floor () =
+  (* discovered=131072 (128K) → accepted *)
+  let result = Masc_mcp.Oas_model_resolve.effective_discovered_ctx
+      ~static_ctx:128_000 ~discovered:(Some 131_072) in
+  check int "above floor uses discovered" 131_072 result
+
+let test_effective_ctx_none () =
+  (* no discovered value → static fallback *)
+  let result = Masc_mcp.Oas_model_resolve.effective_discovered_ctx
+      ~static_ctx:128_000 ~discovered:None in
+  check int "none uses static" 128_000 result
+
 let test_labels_require_local_discovery () =
   check bool "llama labels refresh local discovery" true
     (Masc_mcp.Oas_model_resolve.labels_require_local_discovery
@@ -203,6 +229,14 @@ let () =
           test_case "max context of label" `Quick test_max_context_of_label;
           test_case "local discovery label detection" `Quick
             test_labels_require_local_discovery;
+          test_case "effective ctx: below floor falls back" `Quick
+            test_effective_ctx_below_floor;
+          test_case "effective ctx: at floor accepted" `Quick
+            test_effective_ctx_at_floor;
+          test_case "effective ctx: above floor accepted" `Quick
+            test_effective_ctx_above_floor;
+          test_case "effective ctx: none falls back" `Quick
+            test_effective_ctx_none;
         ] );
       ( "dashboard_schema",
         [

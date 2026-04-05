@@ -80,6 +80,10 @@ module Llama : sig
   val mcp_url : unit -> string
 end
 
+module Glm : sig
+  val server_url : string
+end
+
 module Cancellation : sig
   val token_max_age_seconds : float
 end

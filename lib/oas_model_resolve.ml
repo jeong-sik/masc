@@ -61,32 +61,53 @@ let refresh_local_discovery_if_possible ?sw ?net (labels : string list) : bool =
              false)
     | _ -> false
 
+(** Absolute minimum acceptable discovered context size.
+    llama-server defaults to [-c 8192]; keeper conversations need 64K+ for
+    multi-turn interactions with tool calls.  Below this floor we ignore the
+    discovered value and use the static registry value instead. *)
+let context_floor = 65_536
+
+(** Return [discovered] when it meets or exceeds {!context_floor};
+    otherwise return [static_ctx].  Pure — callers that need diagnostic
+    logging should inspect the result separately. *)
+let effective_discovered_ctx ~static_ctx ~(discovered : int option) : int =
+  match discovered with
+  | Some ctx when ctx >= context_floor -> ctx
+  | _ -> static_ctx
+
 (** Resolve max_context for a model label.
     Prefers discovered per-slot context (from live /props probe) for local
-    providers, falls back to static Provider_registry value, then 128_000. *)
+    providers.  Discovered values below {!context_floor} are treated as
+    server misconfiguration and replaced by the static registry value with
+    a WARN log. *)
 let max_context_of_label (label : string) : int =
   match provider_name_of_label label with
   | None -> 128_000
   | Some pname ->
-    (* For local providers, prefer discovered per-slot context *)
-    if Provider_adapter.requires_discovery pname then
-      match Llm_provider.Provider_registry.discovered_max_context () with
-      | Some ctx -> ctx
-      | None ->
-        (match Llm_provider.Provider_registry.find default_registry pname with
-         | Some entry -> entry.max_context
-         | None -> 128_000)
-    else
+    let static_ctx =
       match Llm_provider.Provider_registry.find default_registry pname with
       | Some entry -> entry.max_context
       | None -> 128_000
+    in
+    if Provider_adapter.requires_discovery pname then begin
+      let discovered = Llm_provider.Provider_registry.discovered_max_context () in
+      (match discovered with
+       | Some low_ctx when low_ctx < context_floor ->
+         Log.warn ~ctx:"OasModelResolve"
+           "discovered context %d < floor %d for %s; using static value. \
+            Increase llama-server -c flag."
+           low_ctx context_floor pname
+       | _ -> ());
+      effective_discovered_ctx ~static_ctx ~discovered
+    end
+    else static_ctx
 
 (** Resolve max_context for the first available model in a label list.
     "Available" means the provider's API key env var is set (or not required).
-    Prefers discovered per-slot context for local providers.
-    Falls back to 128_000 if no model is available. *)
+    Prefers discovered per-slot context for local providers; silently falls
+    back to the static registry value when the discovered context is below
+    {!context_floor}.  Falls back to 128_000 if no model is available. *)
 let resolve_primary_max_context (labels : string list) : int =
-  (* Check discovered context first — applies to any local provider *)
   let discovered = Llm_provider.Provider_registry.discovered_max_context () in
   let rec find = function
     | [] -> 128_000
@@ -98,9 +119,8 @@ let resolve_primary_max_context (labels : string list) : int =
         | None -> find rest
         | Some entry ->
           if entry.is_available () then
-            (* For local providers, prefer discovered context *)
             if Provider_adapter.requires_discovery pname then
-              Option.value ~default:entry.max_context discovered
+              effective_discovered_ctx ~static_ctx:entry.max_context ~discovered
             else entry.max_context
           else find rest
   in

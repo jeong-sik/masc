@@ -147,7 +147,7 @@ let test_apply_post_turn_lifecycle_compacts_and_updates_continuity () =
       let original_ctx =
         build_dense_context ~turns:24 ~max_tokens:320 ~state_reply
       in
-      let original_message_count = List.length original_ctx.messages in
+      let _original_message_count = List.length original_ctx.messages in
       let checkpoint = save_checkpoint ~base_dir ~meta ~ctx:original_ctx in
       let lifecycle =
         KEC.apply_post_turn_lifecycle ~base_dir ~meta
@@ -174,7 +174,7 @@ let test_apply_post_turn_lifecycle_compacts_and_updates_continuity () =
       with
       | Some loaded ->
           check bool "compacted checkpoint persisted" true
-            (List.length loaded.messages < original_message_count)
+            (List.length loaded.messages < _original_message_count)
       | None -> fail "expected compacted checkpoint to be persisted")
 
 let test_apply_post_turn_lifecycle_handoffs_after_compaction () =
@@ -262,7 +262,7 @@ let test_recover_latest_checkpoint_for_overflow_retry_compacts_oas_checkpoint ()
           ~state_reply:
             "done\n\n[STATE]\nGoal: retry after overflow\nProgress: ready\n[/STATE]"
       in
-      let original_message_count = List.length original_ctx.messages in
+      let _original_message_count = List.length original_ctx.messages in
       ignore (save_checkpoint ~base_dir ~meta ~ctx:original_ctx);
       match
         KEC.recover_latest_checkpoint_for_overflow_retry ~base_dir ~meta
@@ -281,7 +281,7 @@ let test_recover_latest_checkpoint_for_overflow_retry_compacts_oas_checkpoint ()
               check bool "recovered context fits budget" true
                 (KEC.token_count loaded <= 256);
               check bool "message count reduced" true
-                (List.length loaded.messages < original_message_count)
+                (List.length loaded.messages < _original_message_count)
           | None -> fail "expected compacted OAS checkpoint")
       | None -> fail "expected overflow retry recovery from OAS checkpoint")
 

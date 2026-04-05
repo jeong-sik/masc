@@ -9,8 +9,8 @@ type BadgeTone = 'default' | 'warn' | 'ok' | 'bad' | 'accent'
 const TONE_CLASSES: Record<BadgeTone, string> = {
   default: 'bg-[var(--white-8)] text-[var(--text-muted)]',
   warn: 'bg-[var(--warn-12)] text-[var(--warn)]',
-  ok: 'bg-[rgba(74,222,128,0.12)] text-[#86efac]',
-  bad: 'bg-[rgba(251,113,133,0.12)] text-[#fda4af]',
+  ok: 'bg-[var(--ok-10)] text-[var(--ok-20)]',
+  bad: 'bg-[var(--bad-10)] text-[var(--bad-light)]',
   accent: 'bg-[var(--accent-12)] text-[var(--accent)]',
 }
 

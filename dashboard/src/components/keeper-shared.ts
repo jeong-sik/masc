@@ -138,10 +138,10 @@ function conversationStateLabel(sending: boolean, hydrating: boolean): string {
 
 function conversationStateClass(sending: boolean, hydrating: boolean): string {
   if (sending) {
-    return 'border-[rgba(76,181,137,0.26)] bg-[rgba(76,181,137,0.12)] text-[#b9f1d1]'
+    return 'border-[var(--ok-20)] bg-[var(--ok-10)] text-[var(--ok-20)]'
   }
   if (hydrating) {
-    return 'border-[rgba(71,184,255,0.26)] bg-[var(--accent-10)] text-[#bfe8ff]'
+    return 'border-[var(--accent-20)] bg-[var(--accent-10)] text-[var(--text-strong)]'
   }
   return 'border-[rgba(148,163,184,0.18)] bg-[rgba(148,163,184,0.08)] text-[var(--text-body)]'
 }
@@ -224,7 +224,7 @@ export function KeeperDiagnosticSummary({
         ${diagnostic?.next_eligible_at_s ? html` -- 다음 응답 가능 ${formatEligible(diagnostic.next_eligible_at_s)}` : null}
       </div>
       ${diagnostic?.last_error
-        ? html`<div class="text-xs text-[#ffb4b4] leading-relaxed mt-1">${diagnostic.last_error}</div>`
+        ? html`<div class="text-xs text-[var(--bad-light)] leading-relaxed mt-1">${diagnostic.last_error}</div>`
         : null}
       ${showRawStatus
         ? html`<div class="mt-3 max-h-[240px] overflow-auto rounded-lg border border-[var(--card-border)] bg-[var(--bg-0)] custom-scrollbar"><${Markdown} text=${'```text\n' + (detail?.rawText ?? '키퍼 상태를 아직 불러오지 않았습니다.') + '\n```'} /></div>`
@@ -319,7 +319,7 @@ export function KeeperConversationPanel({
             </button>
             <button
               type="button"
-              class="rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-1.5 text-[11px] text-[var(--text-muted)] transition-colors hover:bg-[var(--white-6)] hover:text-[var(--text-body)] ${showInternal ? 'border-[rgba(167,139,250,0.3)] text-[#a78bfa]' : ''}"
+              class="rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-1.5 text-[11px] text-[var(--text-muted)] transition-colors hover:bg-[var(--white-6)] hover:text-[var(--text-body)] ${showInternal ? 'border-[rgba(167,139,250,0.3)] text-[var(--purple)]' : ''}"
               onClick=${toggleInternal}
             >
               ${showInternal ? '내부 메시지 숨김' : '내부 메시지 표시'}
@@ -346,7 +346,7 @@ export function KeeperConversationPanel({
         <div class="px-4 py-4">
           ${chatAccess.message
             ? html`
-                <div class="mb-4 rounded-[16px] border border-[rgba(245,158,11,0.18)] bg-[rgba(245,158,11,0.08)] px-3 py-2.5 text-[12px] leading-[1.6] text-[#f4d79e]">
+                <div class="mb-4 rounded-[16px] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2.5 text-[12px] leading-[1.6] text-[var(--warn-bright)]">
                   ${chatAccess.message}
                 </div>
               `
@@ -361,7 +361,7 @@ export function KeeperConversationPanel({
 
         ${!showInternal && hiddenCount > 0
           ? html`
-              <div class="mx-4 mb-4 rounded-[16px] border border-[rgba(245,158,11,0.16)] bg-[rgba(245,158,11,0.06)] px-3 py-2 text-[11px] leading-[1.55] text-[#f4d79e]">
+              <div class="mx-4 mb-4 rounded-[16px] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-[11px] leading-[1.55] text-[var(--warn-bright)]">
                 ${hiddenCount}개의 내부 메시지가 숨겨져 있습니다. "내부 메시지 표시"로 볼 수 있습니다.
               </div>
             `
@@ -381,7 +381,7 @@ export function KeeperConversationPanel({
         </div>
       </div>
 
-      ${error ? html`<div class="text-xs text-[#ffb4b4] leading-relaxed">${error}</div>` : null}
+      ${error ? html`<div class="text-xs text-[var(--bad-light)] leading-relaxed">${error}</div>` : null}
     </div>
   `
 }
@@ -451,9 +451,9 @@ export function KeeperRuntimeActions({
   const btnBase = 'py-1.5 px-4 rounded-lg text-xs font-medium cursor-pointer transition-colors border'
   const ghostBtn = `${btnBase} border-[var(--card-border)] bg-[var(--white-3)] text-[var(--text-muted)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)]`
   const activeGhostBtn = `${btnBase} border-[rgba(71,184,255,0.4)] bg-[var(--accent-12)] text-[var(--accent)] hover:bg-[rgba(71,184,255,0.2)]`
-  const secondaryBtn = `${btnBase} border-[rgba(251,191,36,0.3)] bg-[var(--warn-10)] text-[#fbbf24] hover:bg-[rgba(251,191,36,0.15)]`
-  const activeSecondaryBtn = `${btnBase} border-[rgba(251,191,36,0.5)] bg-[rgba(251,191,36,0.15)] text-[#fbbf24] hover:bg-[rgba(251,191,36,0.2)]`
-  const bootBtn = `${btnBase} border-[rgba(34,197,94,0.4)] bg-[rgba(34,197,94,0.08)] text-[#4ade80] hover:bg-[rgba(34,197,94,0.15)]`
+  const secondaryBtn = `${btnBase} border-[rgba(251,191,36,0.3)] bg-[var(--warn-10)] text-[var(--warn)] hover:bg-[rgba(251,191,36,0.15)]`
+  const activeSecondaryBtn = `${btnBase} border-[rgba(251,191,36,0.5)] bg-[rgba(251,191,36,0.15)] text-[var(--warn)] hover:bg-[rgba(251,191,36,0.2)]`
+  const bootBtn = `${btnBase} border-[rgba(34,197,94,0.4)] bg-[rgba(34,197,94,0.08)] text-[var(--ok)] hover:bg-[rgba(34,197,94,0.15)]`
   const shutdownBtn = `${btnBase} border-[var(--bad-30)] bg-[var(--bad-10)] text-[#fb7185] hover:bg-[rgba(239,68,68,0.15)]`
 
   return html`

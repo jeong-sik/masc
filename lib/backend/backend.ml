@@ -341,7 +341,8 @@ module FileSystem = struct
              | _ ->
                  ki_remove t key;
                  false
-           with _ ->
+           with Eio.Cancel.Cancelled _ as e -> raise e
+              | _ ->
              ki_remove t key;
              false)
 

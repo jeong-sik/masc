@@ -17,7 +17,8 @@ let now_ms () = Int64.of_float (Unix.gettimeofday () *. 1000.0)
 (** Read a file to string. Returns "" on error. *)
 let read_file_safe path =
   try Fs_compat.load_file path
-  with exn -> Log.Transport.warn "read_file_safe failed for %s: %s" path (Printexc.to_string exn); ""
+  with Eio.Cancel.Cancelled _ as e -> raise e
+     | exn -> Log.Transport.warn "read_file_safe failed for %s: %s" path (Printexc.to_string exn); ""
 
 (** Safe filename: replace non-alphanumeric chars with underscores. *)
 let safe_filename name =
@@ -255,7 +256,7 @@ let compute_directives
               (match Yojson.Safe.Util.member "status" task_json with
                | `String "todo" -> Some (Filename.chop_suffix f ".json")
                | _ -> None)
-            with _ -> None
+            with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None
           else None)
     in
     match unclaimed with

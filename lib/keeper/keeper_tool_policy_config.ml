@@ -129,19 +129,15 @@ let load ~base_path : (t, string) result =
           Hashtbl.fold (fun preset_name def acc ->
             let bad_groups =
               List.filter (fun g -> not (Hashtbl.mem groups g)) def.groups
+              |> List.rev_map (fun g ->
+                Printf.sprintf "presets.%s: group '%s' is not defined" preset_name g)
             in
             let bad_masc_groups =
               List.filter (fun g -> not (Hashtbl.mem masc_groups g)) def.masc_groups
-            in
-            let errs =
-              List.map (fun g ->
-                Printf.sprintf "presets.%s: group '%s' is not defined" preset_name g)
-                bad_groups
-              @ List.map (fun g ->
+              |> List.rev_map (fun g ->
                 Printf.sprintf "presets.%s: masc_group '%s' is not defined" preset_name g)
-                bad_masc_groups
             in
-            acc @ errs
+            List.rev_append bad_groups (List.rev_append bad_masc_groups acc)
           ) presets []
         in
         (match ref_errors with

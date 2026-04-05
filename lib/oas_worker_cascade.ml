@@ -89,8 +89,11 @@ let cascade_max_keys = 256
 (* ================================================================ *)
 
 (** Map provider_kind to cascade-label prefix (e.g. "claude", "gemini").
-    Delegates to Provider_adapter.cascade_prefix_of_provider_kind —
-    single source of truth for all provider name mappings. *)
+    Delegates to Provider_adapter.cascade_prefix_of_provider_kind.
+    Note: reverse-mapping from provider_kind is inherently lossy —
+    OpenAI_compat conflates codex/openrouter/llama into one kind.
+    TODO: pass the provider name from cascade config parsing instead of
+    reverse-mapping from provider_kind to avoid this ambiguity. *)
 let provider_name_of_config (cfg : Llm_provider.Provider_config.t) =
   Provider_adapter.cascade_prefix_of_provider_kind cfg.kind
 

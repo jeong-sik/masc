@@ -864,9 +864,18 @@ let cascade_prefix_of_adapter (adapter : adapter) = adapter.cascade_prefix
 
 let endpoint_url_of_adapter (adapter : adapter) = adapter.endpoint_url
 
-(** Map OAS provider_kind to cascade prefix via adapter registry.
-    Falls back to string_of_provider_kind → resolve_direct_adapter chain
-    when provider_kind has multiple adapters (e.g. OpenAI_compat). *)
+(** Best-effort mapping from OAS provider_kind to a cascade prefix via the
+    adapter registry.
+
+    Warning: this mapping is inherently ambiguous for provider_kind values that
+    cover multiple adapters/endpoints (for example OpenAI_compat may represent
+    different provider labels such as codex/openrouter/llama). The returned
+    string is a cascade prefix only; callers must not assume it can round-trip
+    or reconstruct the original provider label.
+
+    When the exact provider identity matters, the only unambiguous approach is
+    to parse the prefix directly from the original provider:model label. This
+    helper should be used only when a best-effort cascade prefix is sufficient. *)
 let cascade_prefix_of_provider_kind (kind : Llm_provider.Provider_config.provider_kind) : string =
   let cn = string_of_provider_kind kind in
   match resolve_direct_adapter cn with

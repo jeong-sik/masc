@@ -202,7 +202,8 @@ let provider_snapshots () : provider_snapshot list =
   let direct =
     Provider_adapter.direct_adapters
     |> List.filter (fun (a : Provider_adapter.adapter) ->
-         a.runtime_kind = Provider_adapter.Direct_api)
+         a.runtime_kind = Provider_adapter.Direct_api
+         && a.default_model_id <> None)
     |> List.map (fun (a : Provider_adapter.adapter) ->
          direct_provider_snapshot a.canonical_name)
   in

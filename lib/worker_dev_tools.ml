@@ -404,8 +404,9 @@ let truncate_for_log ?(max_len = 240) s =
     Commands not in this list are rejected at the allowlist gate. *)
 let gh_allowed_commands =
   [
-    "api"; "gist"; "issue"; "label"; "pr"; "release";
-    "repo"; "run"; "search"; "status";
+    "api"; "cache"; "gist"; "issue"; "label"; "pr"; "project";
+    "release"; "repo"; "ruleset"; "run"; "search"; "status";
+    "workflow";
   ]
 
 (** Specific (command, subcommand) pairs that are always blocked
@@ -414,6 +415,7 @@ let gh_blocked_operations =
   [
     ("repo", "delete");
     ("gist", "delete");
+    ("workflow", "disable");
   ]
 
 (** Extract the top-level command and its first subcommand from a gh
@@ -464,6 +466,25 @@ let validate_gh_command cmd =
             (Printf.sprintf "gh %s %s is blocked for safety" command sub)
         else Ok ()
 
+(** Known destructive API endpoint patterns.
+    Each pattern is checked as a substring of the full command.
+    Covers merge, state-closing, and branch-merge endpoints. *)
+let gh_api_destructive_patterns =
+  [ "/merge"; "/merges";
+    "state=closed"; "state=\"closed\""; "state='closed'" ]
+
+(** Check if a gh API command uses a non-GET HTTP method.
+    Returns [true] for -X POST, -X PUT, -X PATCH, --method POST, etc. *)
+let has_mutating_http_method parts =
+  let rec check = function
+    | [] -> false
+    | ("-x" | "--method") :: m :: _ ->
+      let m = String.lowercase_ascii m in
+      m = "post" || m = "put" || m = "patch" || m = "delete"
+    | _ :: rest -> check rest
+  in
+  check parts
+
 (** Check if a gh command is a destructive mutation that should be gated.
     Returns [true] for high-risk operations like merge, close, delete.
     Low-risk writes (create, comment) return [false] and are allowed. *)
@@ -479,7 +500,12 @@ let is_gh_destructive_operation cmd =
   | "release" :: sub :: _ -> List.mem sub [ "delete" ]
   | "repo" :: sub :: _ -> List.mem sub [ "archive"; "rename" ]
   | "label" :: sub :: _ -> List.mem sub [ "delete" ]
-  | "api" :: _ -> List.mem "delete" parts
+  | "api" :: _ ->
+    let joined = String.concat " " parts in
+    List.mem "delete" parts
+    || (has_mutating_http_method parts
+        && List.exists (fun pat -> contains_substring joined pat)
+             gh_api_destructive_patterns)
   | _ -> false
 
 (* --- Recursive mkdir --- *)

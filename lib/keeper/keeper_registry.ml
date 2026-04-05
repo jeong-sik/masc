@@ -46,9 +46,6 @@ exception Keeper_heartbeat_failure of {
   keeper_name : string;
 }
 
-(** @deprecated Use [Keeper_state_machine.phase] directly. *)
-type keeper_state = Keeper_state_machine.phase
-
 type registry_entry = {
   base_path : string;
   name : string;
@@ -77,8 +74,6 @@ type registry_entry = {
   tool_usage : (string, tool_call_entry) Hashtbl.t;
 }
 
-(** @deprecated Use [Keeper_state_machine.phase_to_string]. *)
-let state_to_string = Keeper_state_machine.phase_to_string
 
 let registry : registry_entry StringMap.t ref = ref StringMap.empty
 let running_count_atomic = Atomic.make 0
@@ -153,7 +148,7 @@ let unregister ~base_path name =
          name (Atomic.get running_count_atomic)
    | Some entry ->
        Log.Keeper.debug "registry: unregistered non-running keeper name=%s state=%s"
-         name (state_to_string entry.phase)
+         name (Keeper_state_machine.phase_to_string entry.phase)
    | None ->
        Log.Keeper.warn "registry: attempted to unregister non-existent keeper name=%s" name);
   registry := StringMap.remove key !registry
@@ -195,7 +190,7 @@ let () =
     All core conditions are set explicitly (not inherited from [prev])
     to prevent stale values from causing incorrect phase derivation.
     Phase 3-4 will migrate callers to [dispatch_event] directly. *)
-let conditions_of_legacy_state (_prev : Keeper_state_machine.conditions) (state : keeper_state)
+let conditions_of_legacy_state (_prev : Keeper_state_machine.conditions) (state : Keeper_state_machine.phase)
     : Keeper_state_machine.conditions =
   let base = Keeper_state_machine.default_conditions in
   match state with
@@ -262,9 +257,6 @@ let conditions_of_legacy_state (_prev : Keeper_state_machine.conditions) (state 
     }
   | Offline -> base
 
-(** @deprecated No external callers remain after Phase 3 migration.
-    Retained temporarily for mark_dead compatibility. Use [dispatch_event]. *)
-let _set_state_deprecated ~base_path:_ _name (_state : Keeper_state_machine.phase) = ()
 
 let mark_dead ~base_path name ~at =
   Log.Keeper.error "registry: marking keeper dead name=%s at=%.0f" name at;

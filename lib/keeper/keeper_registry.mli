@@ -26,9 +26,6 @@ exception Keeper_heartbeat_failure of {
   keeper_name : string;
 }
 
-(** @deprecated Use [Keeper_state_machine.phase] directly. *)
-type keeper_state = Keeper_state_machine.phase
-
 type registry_entry = {
   base_path : string;
   name : string;
@@ -58,8 +55,6 @@ type registry_entry = {
   board_cursor_post_id : string option;
   tool_usage : (string, Keeper_types.tool_call_entry) Hashtbl.t;
 }
-
-val state_to_string : keeper_state -> string
 
 (** Register a keeper as running. Returns the new entry. *)
 val register : base_path:string -> string -> keeper_meta -> registry_entry

@@ -85,7 +85,7 @@ let test_crash_heartbeat_failure () =
   (match R.get ~base_path:bp "hb-crash" with
    | None -> fail "expected hb-crash in registry"
    | Some e ->
-     check string "state" "crashed" (R.state_to_string e.phase);
+     check string "state" "crashed" (KSM.phase_to_string e.phase);
      (match e.last_failure_reason with
       | Some (R.Heartbeat_consecutive_failures n) ->
         check int "failure count preserved" 5 n
@@ -116,7 +116,7 @@ let test_crash_generic_exception () =
   match R.get ~base_path:bp "exn-crash" with
   | None -> fail "expected exn-crash"
   | Some e ->
-    check string "state" "crashed" (R.state_to_string e.phase);
+    check string "state" "crashed" (KSM.phase_to_string e.phase);
     (match e.last_failure_reason with
      | Some (R.Exception s) ->
        check string "exception text" exn_str s
@@ -142,7 +142,7 @@ let test_crash_fiber_unresolved () =
     (match e.last_failure_reason with
      | Some R.Fiber_unresolved -> ()
      | _ -> fail "expected Fiber_unresolved reason");
-    check string "state" "crashed" (R.state_to_string e.phase)
+    check string "state" "crashed" (KSM.phase_to_string e.phase)
 
 (* ══════════════════════════════════════════════════════════
    2. Dead tombstone lifecycle
@@ -156,7 +156,7 @@ let test_dead_tombstone_full_lifecycle () =
   let meta = make_meta "mortal" in
   let reg = R.register ~base_path:bp "mortal" meta in
   check string "initially running" "running"
-    (R.state_to_string (Option.get (R.get ~base_path:bp "mortal")).phase);
+    (KSM.phase_to_string (Option.get (R.get ~base_path:bp "mortal")).phase);
   (* Crash *)
   Eio.Promise.resolve reg.done_r (`Crashed "test");
   ignore (R.dispatch_event ~base_path:bp "mortal"
@@ -178,14 +178,14 @@ let test_dead_tombstone_full_lifecycle () =
   ignore (R.dispatch_event ~base_path:bp "mortal" KSM.Fiber_started);
   (match R.get ~base_path:bp "mortal" with
    | Some e -> check string "still dead after Running attempt" "dead"
-       (R.state_to_string e.phase)
+       (KSM.phase_to_string e.phase)
    | None -> fail "expected mortal");
   (* Dead → Crashed blocked *)
   ignore (R.dispatch_event ~base_path:bp "mortal"
     (KSM.Fiber_terminated { outcome = "test" }));
   (match R.get ~base_path:bp "mortal" with
    | Some e -> check string "still dead after Crashed attempt" "dead"
-       (R.state_to_string e.phase)
+       (KSM.phase_to_string e.phase)
    | None -> fail "expected mortal");
   (* Only unregister removes Dead entry *)
   R.unregister ~base_path:bp "mortal";
@@ -275,7 +275,7 @@ let test_reconcile_predicate_sweep_owned () =
   let _e = R.register ~base_path:bp "r1" (make_meta "r1") in
   (match R.get ~base_path:bp "r1" with
    | Some e ->
-     check string "running" "running" (R.state_to_string e.phase);
+     check string "running" "running" (KSM.phase_to_string e.phase);
      check bool "sweep-owned" true
        (e.phase = KSM.Running || e.phase = KSM.Paused
         || e.phase = KSM.Crashed || e.phase = KSM.Dead)
@@ -303,7 +303,7 @@ let test_reconcile_predicate_stopped_resolved () =
   (* Stopped + resolved done_p = reconcile-eligible *)
   (match R.get ~base_path:bp "s1" with
    | Some e ->
-     check string "stopped" "stopped" (R.state_to_string e.phase);
+     check string "stopped" "stopped" (KSM.phase_to_string e.phase);
      check bool "done_p resolved" true
        (Option.is_some (Eio.Promise.peek e.done_p));
      (* dominated_by_sweep logic: Stopped with resolved → NOT dominated *)
@@ -325,7 +325,7 @@ let test_reconcile_predicate_stopped_unresolved () =
   (* Stopped + unresolved done_p = sweep will handle *)
   (match R.get ~base_path:bp "s2" with
    | Some e ->
-     check string "stopped" "stopped" (R.state_to_string e.phase);
+     check string "stopped" "stopped" (KSM.phase_to_string e.phase);
      check bool "done_p NOT resolved" true
        (Option.is_none (Eio.Promise.peek e.done_p));
      let dominated = match e.phase with
@@ -368,7 +368,7 @@ let test_restart_state_preservation () =
       (Option.is_none e.last_failure_reason);
     (* state should be Running after re-register *)
     check string "state running after restart" "running"
-      (R.state_to_string e.phase)
+      (KSM.phase_to_string e.phase)
 
 (* ══════════════════════════════════════════════════════════
    7. Turn failure → Crashed with Turn_consecutive_failures reason
@@ -391,7 +391,7 @@ let test_crash_turn_failures () =
   match R.get ~base_path:bp "turn-crash" with
   | None -> fail "expected turn-crash"
   | Some e ->
-    check string "state crashed" "crashed" (R.state_to_string e.phase);
+    check string "state crashed" "crashed" (KSM.phase_to_string e.phase);
     (match e.last_failure_reason with
      | Some (R.Turn_consecutive_failures n) ->
        check int "turn failure count" 10 n
@@ -445,7 +445,7 @@ let test_direct_start_keepalive_resolves_done_on_stop () =
       match R.get ~base_path:config.base_path keeper_name with
       | None -> fail "expected direct-lifecycle registry entry"
       | Some entry ->
-        check string "state stopped" "stopped" (R.state_to_string entry.phase);
+        check string "state stopped" "stopped" (KSM.phase_to_string entry.phase);
         check bool "done promise resolved eventually" true stopped_resolved;
         (match Eio.Promise.peek entry.done_p with
          | Some `Stopped -> ()
@@ -461,7 +461,7 @@ let test_stop_keepalive_resolves_running_entry_immediately () =
   match R.get ~base_path:bp keeper_name with
   | None -> fail "expected manual-stop-entry in registry"
   | Some entry ->
-    check string "state stopped immediately" "stopped" (R.state_to_string entry.phase);
+    check string "state stopped immediately" "stopped" (KSM.phase_to_string entry.phase);
     (match Eio.Promise.peek reg.done_p with
      | Some `Stopped -> ()
      | Some (`Crashed reason) ->
@@ -480,7 +480,7 @@ let test_stop_keepalive_preserves_existing_crash_outcome () =
   match R.get ~base_path:bp keeper_name with
   | None -> fail "expected crashed-before-stop in registry"
   | Some entry ->
-    check string "state remains crashed" "crashed" (R.state_to_string entry.phase);
+    check string "state remains crashed" "crashed" (KSM.phase_to_string entry.phase);
     (match Eio.Promise.peek entry.done_p with
      | Some (`Crashed msg) -> check string "crash reason preserved" reason msg
      | Some `Stopped -> fail "manual stop should not overwrite a crashed promise"

@@ -1,6 +1,13 @@
 # Changelog
 
 
+## [2.240.0] - 2026-04-05
+
+### Changed
+- **OAS pin** -- bump agent_sdk to v0.100.8 (#5241).
+- **OAS Builder** -- adopt setters for max_cost_usd, max_input_tokens, contract (#5237, closes #5141).
+- **OAS boundary docs** -- align with current code, restore local-worker tool surface SSOT (#5247).
+
 ## [2.239.0] - 2026-04-05
 
 ### Changed

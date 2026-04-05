@@ -607,13 +607,18 @@ let run_turn
     if Keeper_config.keeper_llm_rerank_enabled () then
       match Eio_context.get_switch_opt (), Eio_context.get_net_opt () with
       | Some sw, Some net ->
-        let cascade_name = Keeper_config.keeper_llm_rerank_cascade () in
-        let defaults = Oas_worker_named.default_model_strings ~cascade_name in
-        let config_path = Oas_worker_named.default_config_path () in
-        let named_cascade = Agent_sdk.Api.named_cascade
-          ?config_path ~name:cascade_name ~defaults () in
-        Some (Agent_sdk.Tool_selector.default_rerank_fn
-          ~sw ~net ~named_cascade ~k:max_tools_per_turn ())
+        (try
+          let cascade_name = Keeper_config.keeper_llm_rerank_cascade () in
+          let defaults = Oas_worker_named.default_model_strings ~cascade_name in
+          let config_path = Oas_worker_named.default_config_path () in
+          let named_cascade = Agent_sdk.Api.named_cascade
+            ?config_path ~name:cascade_name ~defaults () in
+          Some (Agent_sdk.Tool_selector.default_rerank_fn
+            ~sw ~net ~named_cascade ~k:max_tools_per_turn ())
+        with exn ->
+          Log.Keeper.warn "keeper:%s LLM rerank init failed: %s"
+            meta.name (Printexc.to_string exn);
+          None)
       | _ ->
         Log.Keeper.warn "keeper:%s LLM rerank enabled but Eio context unavailable"
           meta.name;
@@ -694,11 +699,19 @@ let run_turn
                 let reranked = rerank ~context:query_text ~candidates in
                 let valid = List.filter (fun n ->
                   List.exists (fun (cn, _) -> cn = n) candidates) reranked in
-                if valid <> [] then valid else bm25_names
+                if valid <> [] then
+                  let missing_bm25 = List.filter (fun n ->
+                    not (List.exists (( = ) n) valid)) bm25_names in
+                  valid @ missing_bm25
+                else bm25_names
               with
               | Out_of_memory | Stack_overflow | Sys.Break as exn ->
                 raise exn
-              | _exn -> bm25_names)
+              | exn ->
+                Log.Keeper.warn
+                  "rerank failed, falling back to BM25 order: %s"
+                  (Printexc.to_string exn);
+                bm25_names)
            | _ -> bm25_names)
           |> Tool_portal.filter_visible_tool_names portal_ctx
         in

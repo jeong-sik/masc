@@ -42,8 +42,10 @@ let ensure_dir path =
   ignore (Keeper_fs.ensure_dir path)
 
 (** CJK-aware token estimate delegated to OAS Context_reducer. *)
-let msg_tokens : Agent_sdk.Types.message -> int =
-  Agent_sdk.Context_reducer.estimate_message_tokens
+let msg_tokens (m : Agent_sdk.Types.message) : int =
+  let estimated = Agent_sdk.Context_reducer.estimate_message_tokens m in
+  (* Use 15% safety buffer for message estimation errors (#5053) *)
+  int_of_float (float_of_int estimated *. 1.15)
 
 let count_tokens (system_prompt : string) (msgs : Agent_sdk.Types.message list) =
   let sys_tokens = Agent_sdk.Context_reducer.estimate_char_tokens system_prompt in
@@ -920,7 +922,8 @@ let[@warning "-32"] recover_latest_checkpoint_for_overflow_retry
           && strategy_after_message_tokens > primary_model_max_tokens
         then
           let reducer =
-            Agent_sdk.Context_reducer.from_context_config ~max_tokens:primary_model_max_tokens ()
+            let target_tokens = int_of_float (float_of_int primary_model_max_tokens *. 0.9) in
+            Agent_sdk.Context_reducer.from_context_config ~max_tokens:target_tokens ()
           in
           let messages = Agent_sdk.Context_reducer.reduce reducer compacted_ctx.messages in
           sync_oas_context

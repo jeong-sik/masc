@@ -148,7 +148,7 @@ let handle_keeper_board_tool
   match name with
   | "keeper_board_post" ->
     let author = meta.name in
-    Log.Keeper.info
+    Log.Keeper.debug
       "keeper_board_post called by %s, raw args: %s"
       author
       (Yojson.Safe.to_string args);
@@ -158,7 +158,7 @@ let handle_keeper_board_tool
         ~source:"keeper_board_post"
         (assoc_override_string "author" author args)
     in
-    Log.Keeper.info "board_args: %s" (Yojson.Safe.to_string board_args);
+    Log.Keeper.debug "board_args: %s" (Yojson.Safe.to_string board_args);
     let result = Tool_board.handle_tool "masc_board_post" board_args in
     let ok, msg = result in
     Log.Keeper.info

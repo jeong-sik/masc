@@ -713,9 +713,9 @@ let keeper_config_json (config : Room.config) (name : string)
           ( "system_prompt_blocks",
             `Assoc
               [
-                ("constitution", prompt_block_json "keeper.constitution");
-                ("world", prompt_block_json "keeper.world");
-                ("capabilities", prompt_block_json "keeper.capabilities");
+                ("constitution", prompt_block_json Keeper_prompt_names.constitution);
+                ("world", prompt_block_json Keeper_prompt_names.world);
+                ("capabilities", prompt_block_json Keeper_prompt_names.capabilities);
               ] );
           ("effective_system_prompt", `String effective_system_prompt);
         ]

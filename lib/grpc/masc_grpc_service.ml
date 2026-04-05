@@ -14,7 +14,8 @@ let service_name = "masc.coordination.v1.MascCoordination"
 (** Current timestamp in milliseconds. *)
 let now_ms () = Int64.of_float (Unix.gettimeofday () *. 1000.0)
 
-(** Read a file to string. Returns "" on error. *)
+(** Read a file to string. Returns [""] on non-cancellation errors.
+    Propagates [Eio.Cancel.Cancelled] so cooperative cancellation is preserved. *)
 let read_file_safe path =
   try Fs_compat.load_file path
   with Eio.Cancel.Cancelled _ as e -> raise e
@@ -241,7 +242,7 @@ let compute_directives
       (match Yojson.Safe.Util.member "paused" json with
        | `Bool true -> directives := "pause" :: !directives
        | _ -> ())
-    with _ -> ());
+    with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
   (* 2. Task assignment: find first unclaimed task for idle agent *)
   let tasks_dir = Filename.concat masc_dir "tasks" in
   (if Sys.file_exists tasks_dir then

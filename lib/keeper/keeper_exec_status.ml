@@ -212,7 +212,8 @@ let classify_keeper_quiet_reason ~meta ~keepalive_running ~agent_status ~now_ts 
       | Some created_ts when created_ts > 0.0 -> max 0.0 (now_ts -. created_ts)
       | _ -> 0.0
     in
-    if keeper_age_s <= 120.0 then Some "startup" else Some "never_started"
+    let startup_window = Runtime_params.get Governance_registry.keeper_startup_window_sec in
+    if keeper_age_s <= startup_window then Some "startup" else Some "never_started"
   else if quiet_active then
     Some "quiet_hours"
   else
@@ -257,7 +258,7 @@ let keeper_health_state ?(fiber_health = Fiber_unknown)
     json_float_opt "last_seen_ago_s" agent_status |> Option.value ~default:max_float
   in
   let is_zombie = json_bool "is_zombie" agent_status false in
-  let stale_threshold_s = 120.0 in
+  let stale_threshold_s = Runtime_params.get Governance_registry.keeper_stale_threshold_sec in
   let last_turn_ago_s =
     if meta.runtime.usage.last_turn_ts <= 0.0 then max_float
     else max 0.0 (now_ts -. meta.runtime.usage.last_turn_ts)
@@ -341,7 +342,7 @@ let keeper_continuity_state
   let recently_started =
     match keepalive_started_at with
     | Some started_at ->
-        let recovery_window_s = 60.0 in
+        let recovery_window_s = Runtime_params.get Governance_registry.keeper_recovery_window_sec in
         now_ts -. started_at < recovery_window_s
     | None -> false
   in
@@ -467,7 +468,7 @@ let derive_pipeline_stage
   if String.equal surface_status "offline" || String.equal surface_status "inactive"
   then "offline"
   else
-    let recency_threshold = 30.0 in
+    let recency_threshold = Runtime_params.get Governance_registry.keeper_recency_threshold_sec in
     let turn_ago =
       if meta.runtime.usage.last_turn_ts <= 0.0 then Float.infinity
       else now_ts -. meta.runtime.usage.last_turn_ts

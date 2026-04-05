@@ -166,6 +166,95 @@ let keeper_dead_ttl_sec =
     ~deserialize:deserialize_float
     ()
 
+(* ── keeper_context surface (Medium risk) ─────────────────────── *)
+
+(** Maximum messages to retain in checkpoints.
+    Caps both load-time deserialization and save-time persistence.
+    The context_reducer (keep_last 30) trims further during Agent.run,
+    so 60 gives the reducer room to operate. *)
+let keeper_max_checkpoint_messages =
+  Runtime_params.register
+    ~key:"keeper.max_checkpoint_messages"
+    ~default:(fun () -> 60)
+    ~validate:(validate_int_range ~min:10 ~max:500 "keeper_max_checkpoint_messages")
+    ~serialize:(fun v -> `Int v)
+    ~meta:{ description = "Checkpoint 메시지 보존 상한";
+            value_type = "int";
+            min_value = Some (`Int 10); max_value = Some (`Int 500) }
+    ~deserialize:deserialize_int
+    ()
+
+(** Safety buffer ratio for token estimation errors.
+    Applied as a multiplier to raw estimates (e.g., 1.15 = 15% buffer). *)
+let keeper_safety_buffer_ratio =
+  Runtime_params.register
+    ~key:"keeper.safety_buffer_ratio"
+    ~default:(fun () -> 1.15)
+    ~validate:(validate_float_range ~min:1.0 ~max:2.0 "keeper_safety_buffer_ratio")
+    ~serialize:(fun v -> `Float v)
+    ~meta:{ description = "토큰 추정 안전 버퍼 비율 (1.15 = 15%)";
+            value_type = "float";
+            min_value = Some (`Float 1.0); max_value = Some (`Float 2.0) }
+    ~deserialize:deserialize_float
+    ()
+
+(** Keeper staleness detection threshold in seconds.
+    If last_seen_ago exceeds this, the keeper is considered stale/zombie. *)
+let keeper_stale_threshold_sec =
+  Runtime_params.register
+    ~key:"keeper.stale_threshold_sec"
+    ~default:(fun () -> 120.0)
+    ~validate:(validate_float_range ~min:30.0 ~max:600.0 "keeper_stale_threshold_sec")
+    ~serialize:(fun v -> `Float v)
+    ~meta:{ description = "Keeper stale 판정 임계값(초)";
+            value_type = "float";
+            min_value = Some (`Float 30.0); max_value = Some (`Float 600.0) }
+    ~deserialize:deserialize_float
+    ()
+
+(** Startup window in seconds for newly-created keepers.
+    During this window, zero-turn keepers are classified as "startup"
+    rather than "never_started". *)
+let keeper_startup_window_sec =
+  Runtime_params.register
+    ~key:"keeper.startup_window_sec"
+    ~default:(fun () -> 120.0)
+    ~validate:(validate_float_range ~min:30.0 ~max:600.0 "keeper_startup_window_sec")
+    ~serialize:(fun v -> `Float v)
+    ~meta:{ description = "신규 keeper startup 판정 윈도우(초)";
+            value_type = "float";
+            min_value = Some (`Float 30.0); max_value = Some (`Float 600.0) }
+    ~deserialize:deserialize_float
+    ()
+
+(** Recovery window in seconds after keepalive fiber restart.
+    During this window, the keeper is classified as "recovering". *)
+let keeper_recovery_window_sec =
+  Runtime_params.register
+    ~key:"keeper.recovery_window_sec"
+    ~default:(fun () -> 60.0)
+    ~validate:(validate_float_range ~min:10.0 ~max:300.0 "keeper_recovery_window_sec")
+    ~serialize:(fun v -> `Float v)
+    ~meta:{ description = "Keepalive 복구 윈도우(초)";
+            value_type = "float";
+            min_value = Some (`Float 10.0); max_value = Some (`Float 300.0) }
+    ~deserialize:deserialize_float
+    ()
+
+(** Recency threshold for pipeline stage derivation.
+    Activity within this window is considered "recent" for stage inference. *)
+let keeper_recency_threshold_sec =
+  Runtime_params.register
+    ~key:"keeper.recency_threshold_sec"
+    ~default:(fun () -> 30.0)
+    ~validate:(validate_float_range ~min:5.0 ~max:120.0 "keeper_recency_threshold_sec")
+    ~serialize:(fun v -> `Float v)
+    ~meta:{ description = "파이프라인 스테이지 최근성 임계값(초)";
+            value_type = "float";
+            min_value = Some (`Float 5.0); max_value = Some (`Float 120.0) }
+    ~deserialize:deserialize_float
+    ()
+
 (* ── keeper_diagnostics surface (Medium risk) ─────────────────── *)
 
 let keeper_snapshot_sec =
@@ -272,6 +361,19 @@ let surfaces =
         "keeper.supervisor_sweep_sec";
         "keeper.keepalive_interval_sec";
         "keeper.dead_ttl_sec";
+      ];
+    };
+    {
+      id = "keeper_context";
+      description = "Keeper context estimation, checkpoint, and status thresholds";
+      risk = "medium";
+      param_keys = [
+        "keeper.max_checkpoint_messages";
+        "keeper.safety_buffer_ratio";
+        "keeper.stale_threshold_sec";
+        "keeper.startup_window_sec";
+        "keeper.recovery_window_sec";
+        "keeper.recency_threshold_sec";
       ];
     };
     {

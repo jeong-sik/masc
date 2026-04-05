@@ -205,6 +205,7 @@ let group_names (config : t) : string list =
   |> List.sort String.compare
 
 let all_group_tools (config : t) : string list =
+  (* group_names extracts keys from config.groups, so Hashtbl.find is safe *)
   group_names config
   |> List.concat_map (fun name -> resolve_group_source (Hashtbl.find config.groups name))
 

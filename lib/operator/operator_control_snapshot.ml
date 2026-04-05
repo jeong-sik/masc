@@ -333,6 +333,9 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                        ("latest_action_source", string_option_to_json latest_action_source);
                        ("tool_audit_source", string_option_to_json tool_audit_source);
                        ("tool_audit_at", string_option_to_json tool_audit_at);
+                       ("proactive_enabled", `Bool meta.proactive.enabled);
+                       ("proactive_idle_sec", `Int meta.proactive.idle_sec);
+                       ("proactive_cooldown_sec", `Int meta.proactive.cooldown_sec);
                        ("updated_at", `String meta.updated_at);
                        ("created_at", `String meta.created_at);
                        ("recent_activity",

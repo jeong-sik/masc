@@ -23,10 +23,14 @@ let ref_json ~kind ~label value =
 
 let route_ref_prefix = '/'
 
+(** Surface readiness inventories historically stored live spotchecks as a single
+    string field. Values that begin with a route prefix are dashboard endpoints;
+    all other values are script or command references. *)
 let live_spotcheck_kind (value : string) =
-  if String.length value > 0 && value.[0] = route_ref_prefix
-  then "route"
-  else "script"
+  match value with
+  | "" -> "script"
+  | _ when value.[0] = route_ref_prefix -> "route"
+  | _ -> "script"
 
 let refs_json (refs : verification_refs) =
   [

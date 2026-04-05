@@ -18,7 +18,7 @@ import { TransportHealthPanel } from '../transport-health'
 import { ConnectorStatusPanel } from '../connector-status'
 import { PerfSnapshotPanel } from '../perf-snapshot'
 import { RouteLink } from '../common/route-link'
-import { shellMetaCognition } from '../../store'
+import { serverStatus, shellMetaCognition } from '../../store'
 import { navigateToPost } from '../../router'
 import type { ObservatoryAgent } from '../../observatory-store'
 import type {
@@ -463,6 +463,38 @@ function AgentPulse() {
   `
 }
 
+// --- Tool Call Health ---
+
+function ToolCallHealthPanel() {
+  const status = serverStatus.value
+  const health = status?.tool_call_health
+  if (!health || health.tool_calls === 0) return null
+
+  const rate = health.failure_rate ?? 0
+  const rateColor = rate > 0.1 ? 'text-bad-light' : rate > 0.03 ? 'text-warn' : 'text-ok'
+  const ratePct = (rate * 100).toFixed(1)
+
+  return html`
+    <div>
+      <${HomeSectionHeader} label="도구 호출" linkLabel="도구 목록 ->" linkTab="monitoring" linkParams=${{ section: 'tools' }} />
+      <div class="grid grid-cols-3 gap-3 max-[640px]:grid-cols-1">
+        <div class="rounded-lg border border-card-border/30 bg-card/40 p-3 text-center">
+          <div class="text-[22px] font-bold text-text-strong">${health.tool_calls.toLocaleString()}</div>
+          <div class="text-[11px] text-text-muted mt-1">호출 (${health.window_hours}h)</div>
+        </div>
+        <div class="rounded-lg border border-card-border/30 bg-card/40 p-3 text-center">
+          <div class="text-[22px] font-bold text-text-strong">${health.failures}</div>
+          <div class="text-[11px] text-text-muted mt-1">실패</div>
+        </div>
+        <div class="rounded-lg border border-card-border/30 bg-card/40 p-3 text-center">
+          <div class="text-[22px] font-bold ${rateColor}">${ratePct}%</div>
+          <div class="text-[11px] text-text-muted mt-1">실패율</div>
+        </div>
+      </div>
+    </div>
+  `
+}
+
 // --- Overview (Home) ---
 
 export function Overview() {
@@ -471,6 +503,7 @@ export function Overview() {
   const metaCognitionCard = MetaCognitionCard()
   const hotSessions = HotSessions()
   const agentPulse = AgentPulse()
+  const toolHealth = ToolCallHealthPanel()
   const journalEntries = (
     Array.isArray(journal as unknown)
       ? { value: journal as unknown as unknown[] }
@@ -498,6 +531,14 @@ export function Overview() {
         ? html`
             <div class="rounded-xl border border-card-border/40 bg-card/18 p-4 shadow-sm shadow-black/8">
               ${agentPulse}
+            </div>
+          `
+        : null}
+
+      ${toolHealth
+        ? html`
+            <div class="rounded-xl border border-card-border/40 bg-card/18 p-4 shadow-sm shadow-black/8">
+              ${toolHealth}
             </div>
           `
         : null}

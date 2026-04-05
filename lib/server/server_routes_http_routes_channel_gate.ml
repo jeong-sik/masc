@@ -161,18 +161,29 @@ let handle_gate_message ~sw ~clock state request reqd =
           (Yojson.Safe.to_string (Channel_gate.error_json client_msg))
   )
 
-(** GET /api/v1/gate/events?channel=<channel>&keeper=<keeper>
+(** GET /api/v1/gate/events?channel=<channel>&keeper=<keeper>&room_id=<room>
 
-    SSE event stream.  The consumer opens a long-lived connection
-    and receives keeper events (board posts, broadcasts, lifecycle)
-    filtered by channel and optionally by keeper name.
-
-    Uses [Sse.subscribe_external] -- the same proven mechanism
-    used by gRPC and WebSocket transports. *)
-(* SSE events endpoint (GET /api/v1/gate/events) will be implemented
-   in Phase 3, building on the existing Sse.subscribe_external mechanism
-   used by gRPC and WebSocket transports.  For now, consumers poll
-   POST /api/v1/gate/message for request/response interaction. *)
+    Recent connector event snapshot for dashboard/ops surfaces.
+    Returns newest-first gate attempts with optional filters. *)
+let handle_gate_events _state request reqd =
+  let limit =
+    int_query_param request "limit" ~default:50
+    |> fun value -> max 1 (min 200 value)
+  in
+  let trim_filter key =
+    query_param request key
+    |> Option.map String.trim
+    |> Option.filter (fun value -> value <> "")
+  in
+  let json =
+    Channel_gate_metrics.events_json
+      ?channel:(trim_filter "channel")
+      ?keeper:(trim_filter "keeper")
+      ?room_id:(trim_filter "room_id")
+      ~limit ()
+  in
+  respond_json_with_cors ~status:`OK request reqd
+    (Yojson.Safe.to_string json)
 
 (** GET /api/v1/gate/health
 
@@ -277,12 +288,17 @@ let add_routes ~sw ~clock router =
        ) request reqd)
 
   |> Http.Router.get "/api/v1/gate/status" (fun request reqd ->
+        with_public_read (fun state _req reqd ->
+          handle_gate_status state request reqd
+        ) request reqd)
+
+  |> Http.Router.get "/api/v1/gate/events" (fun request reqd ->
        with_public_read (fun state _req reqd ->
-         handle_gate_status state request reqd
+         handle_gate_events state request reqd
        ) request reqd)
 
   |> Http.Router.get "/api/v1/gate/keepers" (fun request reqd ->
-       with_tool_auth ~tool_name:"channel_gate" (fun state _req reqd ->
+        with_tool_auth ~tool_name:"channel_gate" (fun state _req reqd ->
          handle_gate_keepers ~sw ~clock state request reqd
        ) request reqd)
 

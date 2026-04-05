@@ -33,6 +33,40 @@ function sampleResponse(overrides?: Partial<Record<string, unknown>>) {
         health: 'degraded',
       },
     ],
+    bindings: [
+      {
+        channel: 'discord',
+        room_id: '123456',
+        keeper: 'luna',
+        message_count: 8,
+        success_count: 7,
+        error_count: 1,
+        duplicate_count: 0,
+        last_activity: '2026-04-03T00:00:00Z',
+        last_success: '2026-04-03T00:00:00Z',
+        last_error_at: '2026-04-03T00:00:00Z',
+        last_error: 'upstream timeout',
+        last_error_kind: 'keeper',
+        last_outcome: 'keeper_error',
+        avg_duration_ms: 1400,
+        max_duration_ms: 4800,
+        success_rate_pct: 88,
+        health: 'degraded',
+      },
+    ],
+    recent_events: [
+      {
+        seq: 12,
+        timestamp: '2026-04-03T00:00:00Z',
+        channel: 'discord',
+        room_id: '123456',
+        keeper: 'luna',
+        outcome: 'keeper_error',
+        error_kind: 'keeper',
+        error: 'upstream timeout',
+        duration_ms: 4800,
+      },
+    ],
     total_messages: 12,
     total_success: 10,
     total_errors: 2,
@@ -106,6 +140,10 @@ describe('ConnectorStatusPanel', () => {
     expect(text).toContain('duplicates')
     expect(text).toMatch(/namespaces\s*2/)
     expect(text).toContain('last namespace 123456')
+    expect(text).toContain('Channel bindings')
+    expect(text).toContain('room 123456')
+    expect(text).toContain('Recent gate events')
+    expect(text).toContain('keeper_error')
     expect(text).toContain('upstream timeout')
     expect(container.innerHTML).toContain('degraded')
   })

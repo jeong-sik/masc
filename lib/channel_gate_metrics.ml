@@ -34,6 +34,54 @@ type channel_stats = {
   room_count : int;
 }
 
+type binding_stats = {
+  channel : string;
+  room_id : string;
+  keeper : string;
+  message_count : int;
+  success_count : int;
+  error_count : int;
+  duplicate_count : int;
+  last_activity_ts : float;
+  last_success_ts : float;
+  last_error_ts : float;
+  last_error : string;
+  last_error_kind : string;
+  last_outcome : string;
+  total_duration_ms : int;
+  timed_count : int;
+  max_duration_ms : int;
+}
+
+type gate_event = {
+  seq : int;
+  timestamp : float;
+  channel : string;
+  room_id : string;
+  keeper : string;
+  outcome : string;
+  error_kind : string;
+  error : string;
+  duration_ms : int;
+}
+
+type binding_acc = {
+  mutable msg_count : int;
+  mutable success_count : int;
+  mutable err_count : int;
+  mutable duplicate_count : int;
+  mutable last_ts : float;
+  mutable last_success_ts : float;
+  mutable last_error_ts : float;
+  mutable keeper : string;
+  mutable last_error : string;
+  mutable last_error_kind : string;
+  mutable last_outcome : string;
+  mutable total_dur_ms : int;
+  mutable timed_count : int;
+  mutable max_dur_ms : int;
+}
+
 type stats_acc = {
   mutable msg_count : int;
   mutable success_count : int;
@@ -57,6 +105,8 @@ type stats_acc = {
   mutable slow_count : int;
   rooms : (string, unit) Hashtbl.t;
   room_order : string Queue.t;
+  bindings : (string, binding_acc) Hashtbl.t;
+  binding_order : string Queue.t;
 }
 
 let parse_slow_threshold_ms value =
@@ -71,6 +121,25 @@ let slow_threshold_ms () =
   cached_slow_threshold_ms
 
 let max_tracked_rooms = 256
+let max_recent_events = 128
+
+let make_binding_acc () =
+  {
+    msg_count = 0;
+    success_count = 0;
+    err_count = 0;
+    duplicate_count = 0;
+    last_ts = 0.0;
+    last_success_ts = 0.0;
+    last_error_ts = 0.0;
+    keeper = "";
+    last_error = "";
+    last_error_kind = "";
+    last_outcome = "idle";
+    total_dur_ms = 0;
+    timed_count = 0;
+    max_dur_ms = 0;
+  }
 
 let make_acc () =
   {
@@ -96,11 +165,15 @@ let make_acc () =
     slow_count = 0;
     rooms = Hashtbl.create 8;
     room_order = Queue.create ();
+    bindings = Hashtbl.create 8;
+    binding_order = Queue.create ();
   }
 
 let table : (string, stats_acc) Hashtbl.t = Hashtbl.create 16
 let mu = Eio.Mutex.create ()
 let start_time = Unix.gettimeofday ()
+let recent_events : gate_event Queue.t = Queue.create ()
+let next_event_seq = ref 0
 
 let dedup_size_fn : (unit -> int) ref = ref (fun () -> 0)
 
@@ -129,6 +202,12 @@ let update_error_fields acc ~now ~kind ~message =
   acc.last_error_kind <- kind;
   acc.last_error <- message
 
+let update_binding_error_fields acc ~now ~kind ~message =
+  acc.err_count <- acc.err_count + 1;
+  acc.last_error_ts <- now;
+  acc.last_error_kind <- kind;
+  acc.last_error <- message
+
 let remember_room acc room_id =
   acc.last_room_id <- room_id;
   if not (Hashtbl.mem acc.rooms room_id) then begin
@@ -139,13 +218,56 @@ let remember_room acc room_id =
       Hashtbl.remove acc.rooms evicted
     end;
     Hashtbl.replace acc.rooms room_id ();
-    Queue.add room_id acc.room_order
-  end
+     Queue.add room_id acc.room_order
+   end
+
+let get_or_create_binding acc room_id =
+  match Hashtbl.find_opt acc.bindings room_id with
+  | Some binding -> binding
+  | None ->
+      if Hashtbl.length acc.bindings >= max_tracked_rooms
+         && not (Queue.is_empty acc.binding_order)
+      then begin
+        let evicted = Queue.take acc.binding_order in
+        Hashtbl.remove acc.bindings evicted
+      end;
+      let binding = make_binding_acc () in
+      Hashtbl.replace acc.bindings room_id binding;
+      Queue.add room_id acc.binding_order;
+      binding
+
+let outcome_error_details = function
+  | Validation_error message -> ("validation", message)
+  | Keeper_error message -> ("keeper", message)
+  | Dispatch_unavailable -> ("dispatch_unavailable", "keeper dispatch unavailable")
+  | Internal_error message -> ("internal", message)
+  | Success | Duplicate -> ("", "")
+
+let append_event ~channel ~room_id ~keeper ~duration_ms outcome ~timestamp =
+  let error_kind, error = outcome_error_details outcome in
+  incr next_event_seq;
+  if Queue.length recent_events >= max_recent_events then ignore (Queue.take recent_events);
+  Queue.add
+    {
+      seq = !next_event_seq;
+      timestamp;
+      channel;
+      room_id;
+      keeper;
+      outcome = outcome_name outcome;
+      error_kind;
+      error;
+      duration_ms;
+    }
+    recent_events
 
 let record_attempt ~channel ~room_id ~keeper ~duration_ms outcome =
   Eio_guard.with_mutex mu (fun () ->
       let trimmed_channel = String.trim channel in
-      let channel_key = if trimmed_channel = "" then "unknown" else trimmed_channel in
+      let channel_key =
+        if trimmed_channel = "" then "unknown"
+        else String.lowercase_ascii trimmed_channel
+      in
       let acc = get_or_create_acc channel_key in
       let now = Unix.gettimeofday () in
       let trimmed_keeper = String.trim keeper in
@@ -154,7 +276,18 @@ let record_attempt ~channel ~room_id ~keeper ~duration_ms outcome =
       acc.last_outcome <- outcome_name outcome;
       if trimmed_keeper <> "" then acc.last_keeper <- trimmed_keeper;
       let trimmed_room = String.trim room_id in
-      if trimmed_room <> "" then remember_room acc trimmed_room;
+      let binding =
+        if trimmed_room = "" then None
+        else begin
+          remember_room acc trimmed_room;
+          let binding = get_or_create_binding acc trimmed_room in
+          binding.msg_count <- binding.msg_count + 1;
+          binding.last_ts <- now;
+          binding.last_outcome <- outcome_name outcome;
+          if trimmed_keeper <> "" then binding.keeper <- trimmed_keeper;
+          Some binding
+        end
+      in
       if duration_ms > 0 then begin
         acc.total_dur_ms <- acc.total_dur_ms + duration_ms;
         acc.timed_count <- acc.timed_count + 1;
@@ -162,25 +295,60 @@ let record_attempt ~channel ~room_id ~keeper ~duration_ms outcome =
         if duration_ms >= slow_threshold_ms () then
           acc.slow_count <- acc.slow_count + 1
       end;
+      (match binding with
+       | Some binding when duration_ms > 0 ->
+           binding.total_dur_ms <- binding.total_dur_ms + duration_ms;
+           binding.timed_count <- binding.timed_count + 1;
+           binding.max_dur_ms <- max binding.max_dur_ms duration_ms
+       | _ -> ());
       match outcome with
       | Success ->
           acc.success_count <- acc.success_count + 1;
-          acc.last_success_ts <- now
+          acc.last_success_ts <- now;
+          (match binding with
+           | Some binding ->
+               binding.success_count <- binding.success_count + 1;
+               binding.last_success_ts <- now
+           | None -> ())
       | Duplicate ->
-          acc.duplicate_count <- acc.duplicate_count + 1
+          acc.duplicate_count <- acc.duplicate_count + 1;
+          (match binding with
+           | Some binding -> binding.duplicate_count <- binding.duplicate_count + 1
+           | None -> ())
       | Validation_error message ->
           acc.validation_error_count <- acc.validation_error_count + 1;
-          update_error_fields acc ~now ~kind:"validation" ~message
+          update_error_fields acc ~now ~kind:"validation" ~message;
+          (match binding with
+           | Some binding ->
+               update_binding_error_fields binding ~now ~kind:"validation"
+                 ~message
+           | None -> ())
       | Keeper_error message ->
           acc.keeper_error_count <- acc.keeper_error_count + 1;
-          update_error_fields acc ~now ~kind:"keeper" ~message
+          update_error_fields acc ~now ~kind:"keeper" ~message;
+          (match binding with
+           | Some binding ->
+               update_binding_error_fields binding ~now ~kind:"keeper" ~message
+           | None -> ())
       | Dispatch_unavailable ->
           acc.dispatch_unavailable_count <- acc.dispatch_unavailable_count + 1;
           update_error_fields acc ~now ~kind:"dispatch_unavailable"
-            ~message:"keeper dispatch unavailable"
+            ~message:"keeper dispatch unavailable";
+          (match binding with
+           | Some binding ->
+               update_binding_error_fields binding ~now ~kind:"dispatch_unavailable"
+                 ~message:"keeper dispatch unavailable"
+           | None -> ())
       | Internal_error message ->
           acc.internal_error_count <- acc.internal_error_count + 1;
-          update_error_fields acc ~now ~kind:"internal" ~message)
+          update_error_fields acc ~now ~kind:"internal" ~message;
+          (match binding with
+           | Some binding ->
+               update_binding_error_fields binding ~now ~kind:"internal"
+                 ~message
+           | None -> ());
+      append_event ~channel:channel_key ~room_id:trimmed_room ~keeper:trimmed_keeper
+        ~duration_ms outcome ~timestamp:now)
 
 let record_internal_error_exn ~channel ~room_id ~keeper ~duration_ms _exn =
   record_attempt ~channel ~room_id ~keeper ~duration_ms
@@ -221,6 +389,71 @@ let snapshot () =
          if by_messages <> 0 then by_messages
          else String.compare a.channel b.channel)
 
+let binding_snapshot () =
+  Eio_guard.with_mutex_ro mu (fun () ->
+      Hashtbl.fold
+        (fun channel acc rows ->
+          Hashtbl.fold
+            (fun room_id binding binding_rows ->
+              {
+                channel;
+                room_id;
+                keeper = binding.keeper;
+                message_count = binding.msg_count;
+                success_count = binding.success_count;
+                error_count = binding.err_count;
+                duplicate_count = binding.duplicate_count;
+                last_activity_ts = binding.last_ts;
+                last_success_ts = binding.last_success_ts;
+                last_error_ts = binding.last_error_ts;
+                last_error = binding.last_error;
+                last_error_kind = binding.last_error_kind;
+                last_outcome = binding.last_outcome;
+                total_duration_ms = binding.total_dur_ms;
+                timed_count = binding.timed_count;
+                max_duration_ms = binding.max_dur_ms;
+              }
+              :: binding_rows)
+            acc.bindings rows)
+        table [])
+  |> List.sort (fun a b ->
+         let by_activity = Float.compare b.last_activity_ts a.last_activity_ts in
+         if by_activity <> 0 then by_activity
+         else
+           let by_channel = String.compare a.channel b.channel in
+           if by_channel <> 0 then by_channel
+           else String.compare a.room_id b.room_id)
+
+let events ?channel ?keeper ?room_id ~limit () =
+  Eio_guard.with_mutex_ro mu (fun () ->
+      let matches expected actual =
+        match expected with
+        | None -> true
+        | Some value -> String.equal (String.trim value) actual
+      in
+      let normalized_channel =
+        channel
+        |> Option.map (fun value ->
+               let trimmed = String.trim value in
+               String.lowercase_ascii trimmed)
+      in
+      let normalized_keeper = keeper |> Option.map String.trim in
+      let normalized_room_id = room_id |> Option.map String.trim in
+      let latest_seq = !next_event_seq in
+      let filtered =
+        Queue.fold
+          (fun acc event ->
+            if
+              matches normalized_channel event.channel
+              && matches normalized_keeper event.keeper
+              && matches normalized_room_id event.room_id
+            then event :: acc
+            else acc)
+          [] recent_events
+        |> fun rows -> List.take limit rows
+      in
+      (latest_seq, filtered))
+
 let total_messages () =
   Eio_guard.with_mutex_ro mu (fun () ->
       Hashtbl.fold (fun _ acc sum -> sum + acc.msg_count) table 0)
@@ -243,25 +476,55 @@ let percent numerator denominator =
 let effective_attempt_count (stats : channel_stats) =
   max 0 (stats.message_count - stats.duplicate_count)
 
+let effective_attempt_count_counts ~message_count ~duplicate_count =
+  max 0 (message_count - duplicate_count)
+
+let success_rate_pct_counts ~success_count ~message_count ~duplicate_count =
+  percent success_count
+    (effective_attempt_count_counts ~message_count ~duplicate_count)
+
 let success_rate_pct (stats : channel_stats) =
-  percent stats.success_count (effective_attempt_count stats)
+  success_rate_pct_counts ~success_count:stats.success_count
+    ~message_count:stats.message_count ~duplicate_count:stats.duplicate_count
 
 let slow_rate_pct (stats : channel_stats) =
   percent stats.slow_count stats.timed_count
 
-let health_of_stats (stats : channel_stats) =
-  if stats.message_count = 0 then "idle"
-  else if stats.error_count = 0 then "healthy"
-  else if stats.success_count = 0 then "failing"
+let health_of_counts ~message_count ~error_count ~success_count ~duplicate_count
+    ~timed_count ~slow_count =
+  if message_count = 0 then "idle"
+  else if error_count = 0 then "healthy"
+  else if success_count = 0 then "failing"
   else
-    let err_rate = percent stats.error_count (effective_attempt_count stats) in
-    let slow_rate = slow_rate_pct stats in
+    let err_rate =
+      percent error_count
+        (effective_attempt_count_counts ~message_count ~duplicate_count)
+    in
+    let slow_rate = percent slow_count timed_count in
     if err_rate >= 50 then "failing"
     else if err_rate >= 10 || slow_rate >= 25 then "degraded"
     else "healthy"
 
+let health_of_stats (stats : channel_stats) =
+  health_of_counts ~message_count:stats.message_count
+    ~error_count:stats.error_count ~success_count:stats.success_count
+    ~duplicate_count:stats.duplicate_count ~timed_count:stats.timed_count
+    ~slow_count:stats.slow_count
+
+let binding_success_rate_pct (stats : binding_stats) =
+  success_rate_pct_counts ~success_count:stats.success_count
+    ~message_count:stats.message_count ~duplicate_count:stats.duplicate_count
+
+let binding_health (stats : binding_stats) =
+  health_of_counts ~message_count:stats.message_count
+    ~error_count:stats.error_count ~success_count:stats.success_count
+    ~duplicate_count:stats.duplicate_count ~timed_count:stats.timed_count
+    ~slow_count:0
+
 let snapshot_json () =
   let channels = snapshot () in
+  let bindings = binding_snapshot () in
+  let _latest_seq, recent_events = events ~limit:max_recent_events () in
   let total =
     List.fold_left
       (fun sum (stats : channel_stats) -> sum + stats.message_count)
@@ -315,9 +578,51 @@ let snapshot_json () =
         ("health", `String (health_of_stats stats));
       ]
   in
+  let binding_json (stats : binding_stats) =
+    let avg_dur =
+      if stats.timed_count > 0 then stats.total_duration_ms / stats.timed_count
+      else 0
+    in
+    `Assoc
+      [
+        ("channel", `String stats.channel);
+        ("room_id", `String stats.room_id);
+        ("keeper", `String stats.keeper);
+        ("message_count", `Int stats.message_count);
+        ("success_count", `Int stats.success_count);
+        ("error_count", `Int stats.error_count);
+        ("duplicate_count", `Int stats.duplicate_count);
+        ("last_activity", `String (iso_of_ts stats.last_activity_ts));
+        ("last_success", `String (iso_of_ts stats.last_success_ts));
+        ("last_error_at", `String (iso_of_ts stats.last_error_ts));
+        ("last_error", `String stats.last_error);
+        ("last_error_kind", `String stats.last_error_kind);
+        ("last_outcome", `String stats.last_outcome);
+        ("avg_duration_ms", `Int avg_dur);
+        ("max_duration_ms", `Int stats.max_duration_ms);
+        ("success_rate_pct", `Int (binding_success_rate_pct stats));
+        ("health", `String (binding_health stats));
+      ]
+  in
+  let event_json (event : gate_event) =
+    `Assoc
+      [
+        ("seq", `Int event.seq);
+        ("timestamp", `String (iso_of_ts event.timestamp));
+        ("channel", `String event.channel);
+        ("room_id", `String event.room_id);
+        ("keeper", `String event.keeper);
+        ("outcome", `String event.outcome);
+        ("error_kind", `String event.error_kind);
+        ("error", `String event.error);
+        ("duration_ms", `Int event.duration_ms);
+      ]
+  in
   `Assoc
     [
       ("channels", `List (List.map channel_json channels));
+      ("bindings", `List (List.map binding_json bindings));
+      ("recent_events", `List (List.map event_json recent_events));
       ("total_messages", `Int total);
       ("total_success", `Int total_success);
       ("total_errors", `Int total_errors);
@@ -328,4 +633,27 @@ let snapshot_json () =
              (max 0 (total - total_duplicates))) );
       ("dedup_table_size", `Int (dedup_table_size ()));
       ("uptime_seconds", `Int (int_of_float (Unix.gettimeofday () -. start_time)));
+    ]
+
+let events_json ?channel ?keeper ?room_id ~limit () =
+  let latest_seq, rows = events ?channel ?keeper ?room_id ~limit () in
+  let event_json (event : gate_event) =
+    `Assoc
+      [
+        ("seq", `Int event.seq);
+        ("timestamp", `String (iso_of_ts event.timestamp));
+        ("channel", `String event.channel);
+        ("room_id", `String event.room_id);
+        ("keeper", `String event.keeper);
+        ("outcome", `String event.outcome);
+        ("error_kind", `String event.error_kind);
+        ("error", `String event.error);
+        ("duration_ms", `Int event.duration_ms);
+      ]
+  in
+  `Assoc
+    [
+      ("events", `List (List.map event_json rows));
+      ("latest_seq", `Int latest_seq);
+      ("total", `Int (List.length rows));
     ]

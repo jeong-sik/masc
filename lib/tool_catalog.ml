@@ -221,6 +221,14 @@ let explicit_metadata : (string * metadata) list =
     ("masc_voice_agent", deprecated "Pruned from all surfaces in #4999");
     ("masc_voice_conference_start", deprecated "Pruned from all surfaces in #4999");
     ("masc_voice_conference_end", deprecated "Pruned from all surfaces in #4999");
+    (* improve_loop + detachment: 0 external refs, 0 commits in 90 days *)
+    ("masc_improve_loop_start", deprecated "Pruned: zero external refs, inactive 90d");
+    ("masc_improve_loop_status", deprecated "Pruned: zero external refs, inactive 90d");
+    ("masc_improve_loop_pause", deprecated "Pruned: zero external refs, inactive 90d");
+    ("masc_improve_loop_resume", deprecated "Pruned: zero external refs, inactive 90d");
+    ("masc_improve_loop_tick", deprecated "Pruned: zero external refs, inactive 90d");
+    ("masc_detachment_list", deprecated "Pruned: 2 refs (swarm read-only), inactive 90d");
+    ("masc_detachment_status", deprecated "Pruned: 2 refs (swarm read-only), inactive 90d");
   ]
 
 (* ================================================================ *)

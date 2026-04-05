@@ -165,29 +165,38 @@ let parse_value (raw : string) : (toml_value, string) result =
         (* Split on commas outside quotes *)
         let items = ref [] in
         let buf = Buffer.create 64 in
-        let in_str = ref false in
         let ok = ref true in
-        for i = 0 to String.length inner - 1 do
-          let c = inner.[i] in
-          if !in_str then begin
-            Buffer.add_char buf c;
-            if c = '"' then in_str := false
-            else if c = '\\' && i + 1 < String.length inner then
-              () (* next char consumed naturally *)
-          end
-          else if c = ',' then begin
-            items := Buffer.contents buf :: !items;
-            Buffer.clear buf
-          end
-          else if c = '"' then begin
-            in_str := true;
-            Buffer.add_char buf c
-          end
-          else if is_ws c then ()
-          else begin
-            ok := false
-          end
-        done;
+        let ilen = String.length inner in
+        let rec split i in_str =
+          if i >= ilen then ()
+          else
+            let c = inner.[i] in
+            if in_str then begin
+              Buffer.add_char buf c;
+              if c = '\\' && i + 1 < ilen then begin
+                (* Escaped char: add next char and skip it *)
+                Buffer.add_char buf inner.[i + 1];
+                split (i + 2) true
+              end
+              else if c = '"' then split (i + 1) false
+              else split (i + 1) true
+            end
+            else if c = ',' then begin
+              items := Buffer.contents buf :: !items;
+              Buffer.clear buf;
+              split (i + 1) false
+            end
+            else if c = '"' then begin
+              Buffer.add_char buf c;
+              split (i + 1) true
+            end
+            else if is_ws c then split (i + 1) false
+            else begin
+              ok := false;
+              split (i + 1) false
+            end
+        in
+        split 0 false;
         if Buffer.length buf > 0 then
           items := Buffer.contents buf :: !items;
         if not !ok then

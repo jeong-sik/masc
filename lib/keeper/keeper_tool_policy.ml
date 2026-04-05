@@ -146,7 +146,9 @@ let preset_allowlist preset =
          Call init_policy_config at startup." name)
   | Some cfg ->
     let injected = injected_masc_tool_names () in
-    let masc_filter tool_name = List.mem tool_name injected in
+    let injected_lookup = Hashtbl.create (List.length injected) in
+    List.iter (fun n -> Hashtbl.replace injected_lookup n ()) injected;
+    let masc_filter tool_name = Hashtbl.mem injected_lookup tool_name in
     match Keeper_tool_policy_config.resolve_preset cfg name ~masc_filter () with
     | Some Keeper_tool_policy_config.All_candidates ->
       (* all_candidates = true: return full candidate set *)

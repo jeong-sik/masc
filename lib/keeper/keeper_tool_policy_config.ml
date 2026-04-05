@@ -138,10 +138,10 @@ let load ~base_path : (t, string) result =
   | Error _ as e -> e
   | Ok (path, content) ->
     match Keeper_toml_loader.parse_toml content with
-    | Error msg -> Error (Printf.sprintf "tool policy config parse error: %s" msg)
+    | Error msg -> Error (Printf.sprintf "tool policy config parse error in %s: %s" path msg)
     | Ok doc ->
       match parse_groups doc with
-      | Error msg -> Error (Printf.sprintf "tool policy config group error: %s" msg)
+      | Error msg -> Error (Printf.sprintf "tool policy config group error in %s: %s" path msg)
       | Ok groups ->
         let masc_groups = parse_masc_groups doc in
         let presets = parse_presets doc in
@@ -162,7 +162,7 @@ let load ~base_path : (t, string) result =
           ) presets []
         in
         (match ref_errors with
-        | _ :: _ -> Error (String.concat "; " ref_errors)
+        | _ :: _ -> Error (Printf.sprintf "in %s: %s" path (String.concat "; " ref_errors))
         | [] ->
           Log.Keeper.info "tool_policy_config: loaded %d groups, %d masc_groups, %d presets from %s"
             (Hashtbl.length groups) (Hashtbl.length masc_groups) (Hashtbl.length presets) path;

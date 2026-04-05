@@ -1006,6 +1006,21 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
               ~primary_model_max_tokens:primary_max_context
               ~checkpoint:result.checkpoint
           in
+          (* Dispatch compaction/handoff events to state machine *)
+          if lifecycle.compaction.applied then
+            ignore (Keeper_registry.dispatch_event ~base_path:base_dir meta.name
+              (Compaction_completed {
+                before_tokens = lifecycle.compaction.before_tokens;
+                after_tokens = lifecycle.compaction.after_tokens;
+              }));
+          (match lifecycle.handoff_json with
+           | Some _ ->
+             ignore (Keeper_registry.dispatch_event ~base_path:base_dir meta.name
+               (Handoff_completed {
+                 new_trace_id = lifecycle.updated_meta.runtime.trace_id;
+                 generation = lifecycle.turn_generation;
+               }))
+           | None -> ());
           let scope_only_reactive =
             observation.pending_scope_messages <> []
             && observation.pending_mentions = []

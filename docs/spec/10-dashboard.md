@@ -453,7 +453,7 @@ const DEFAULT_ROUTE: RouteState = { tab: 'overview', params: {}, postId: null }
 3. canonical tab ID 해석 (`VALID_TABS` 확인)
 4. Command surface 하위 경로: `intervene`, `governance`
 5. Legacy command deep link (`/chains/operation/:id`, `warroom`)은 `intervene`로 canonical redirect
-6. Lab section: `tools`, `autoresearch`, `harness`, `config`
+6. Lab section: `tools`, `autoresearch`, `harness`, `features`, `config`
 
 ### 4.4. SSE Integration
 
@@ -519,8 +519,13 @@ Vite 설정:
 | `/api/v1/dashboard/governance` | GET | Governance surface |
 | `/api/v1/dashboard/board` | GET | Board monitoring |
 | `/api/v1/dashboard/namespace-truth` | GET | Namespace truth focus |
+| `/api/v1/dashboard/config` | GET | Config introspection snapshot |
 | `/api/v1/dashboard/tools` | GET | Tool inventory + usage |
+| `/api/v1/dashboard/surface-readiness` | GET | Surface exposure/readiness audit |
+| `/api/v1/dashboard/harness-health` | GET | Harness rail health snapshot |
+| `/api/v1/dashboard/feature-health` | GET | Feature flag health snapshot |
 | `/api/v1/dashboard/logs` | GET | System logs |
+| `/api/v1/dashboard/repo-synthesis` | GET | Repo synthesis benchmark read model |
 
 ### Resource APIs
 

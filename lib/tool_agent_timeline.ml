@@ -205,9 +205,57 @@ let message_events (config : Room.config) ~agent_name ~limit :
                }
          | None -> None)
 
+(* Collect tool call events from Activity Graph *)
+let tool_call_events (config : Room.config) ~agent_name ~limit :
+    timeline_event list =
+  let all_events =
+    Activity_graph.list_events config ~room_id:"default"
+      ~kinds:["tool.called"] ~after_seq:0 ~limit ()
+  in
+  all_events
+  |> List.filter (fun (e : Activity_graph.event) ->
+       match e.actor with
+       | Some a -> String.equal a.id agent_name
+       | None -> false)
+  |> List.filter_map (fun (e : Activity_graph.event) ->
+       let ts = Float.of_int e.ts_ms /. 1000.0 in
+       let open Yojson.Safe.Util in
+       let tool_name =
+         try e.payload |> member "tool_name" |> to_string
+         with _ -> "unknown"
+       in
+       let success =
+         try e.payload |> member "success" |> to_bool
+         with _ -> true
+       in
+       let duration_ms =
+         try e.payload |> member "duration_ms" |> to_int
+         with _ -> 0
+       in
+       let error_str =
+         try match e.payload |> member "error" with
+             | `String s -> Some s | _ -> None
+         with _ -> None
+       in
+       Some
+         {
+           ts;
+           ts_iso = e.ts_iso;
+           event_type = "tool_call";
+           detail =
+             `Assoc
+               [
+                 ("tool_name", `String tool_name);
+                 ("success", `Bool success);
+                 ("duration_ms", `Int duration_ms);
+                 ("error", match error_str with
+                           | Some s -> `String s | None -> `Null);
+               ];
+         })
+
 (* Build the full timeline *)
 let build_timeline (config : Room.config) ~agent_name ~since_hours ~limit
-    ~include_tasks ~include_board:_ =
+    ~include_tasks ~include_board:_ ~include_tool_calls =
   let now = Time_compat.now () in
   let cutoff = now -. (since_hours *. 3600.0) in
   (* Collect events from the default namespace. *)
@@ -218,7 +266,11 @@ let build_timeline (config : Room.config) ~agent_name ~since_hours ~limit
       else []
     in
     let msg_evts = message_events config ~agent_name ~limit:200 in
-    agent_evts @ task_evts @ msg_evts
+    let tool_evts =
+      if include_tool_calls then tool_call_events config ~agent_name ~limit:200
+      else []
+    in
+    agent_evts @ task_evts @ msg_evts @ tool_evts
   in
   (* Filter by time cutoff and sort chronologically *)
   let filtered =
@@ -256,6 +308,10 @@ let build_timeline (config : Room.config) ~agent_name ~since_hours ~limit
     List.length
       (List.filter (fun e -> String.equal e.event_type "broadcast") events)
   in
+  let tool_calls =
+    List.length
+      (List.filter (fun e -> String.equal e.event_type "tool_call") events)
+  in
   (* Active duration: time between first and last event *)
   let active_duration_minutes =
     match (events, List.rev events) with
@@ -284,6 +340,7 @@ let build_timeline (config : Room.config) ~agent_name ~since_hours ~limit
             ("tasks_completed", `Int tasks_completed);
             ("tasks_claimed", `Int tasks_claimed);
             ("messages_sent", `Int messages_sent);
+            ("tool_calls", `Int tool_calls);
             ("active_duration_minutes", `Float active_duration_minutes);
             ("total_events", `Int (List.length events));
           ] );
@@ -357,9 +414,10 @@ let handle_agent_timeline (ctx : context) args : result =
     let limit = get_int args "limit" 50 in
     let include_tasks = get_bool args "include_tasks" true in
     let include_board = get_bool args "include_board" false in
+    let include_tool_calls = get_bool args "include_tool_calls" true in
     let json =
       build_timeline ctx.config ~agent_name ~since_hours ~limit ~include_tasks
-        ~include_board
+        ~include_board ~include_tool_calls
     in
     (true, Yojson.Safe.pretty_to_string json)
 

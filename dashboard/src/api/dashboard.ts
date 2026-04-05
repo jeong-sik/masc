@@ -113,6 +113,7 @@ export interface AgentTimelineResponse {
     tasks_completed: number
     tasks_claimed: number
     messages_sent: number
+    tool_calls?: number
     active_duration_minutes: number
     total_events: number
   }

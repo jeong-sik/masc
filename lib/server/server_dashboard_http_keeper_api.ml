@@ -427,7 +427,7 @@ let handle_keeper_get_subroutes state req request reqd =
            ("generation", `Int m.runtime.generation);
            ("total_entries", `Int total);
            ("showing", `Int (List.length recent));
-           ("entries", `List (List.map (Trajectory.entry_to_json ~result_max_len:2000) recent));
+           ("entries", `List (List.map (Trajectory.entry_to_json ~result_max_len:0) recent));
          ] in
          Http.Response.json ~compress:true ~request:req
            (Yojson.Safe.to_string json) reqd)

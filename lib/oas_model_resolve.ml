@@ -80,10 +80,7 @@ let effective_discovered_ctx ~static_ctx ~(discovered : int option) : int =
 let provider_name_of_cfg label (cfg : Llm_provider.Provider_config.t) =
   match provider_name_of_label label with
   | Some pname -> pname
-  | None ->
-      Llm_provider.Provider_config.(match cfg.kind with
-        | Anthropic -> "claude" | OpenAI_compat -> "openai"
-        | Gemini -> "gemini" | Glm -> "glm" | Claude_code -> "claude_code")
+  | None -> Provider_label_utils.provider_name_of_kind cfg.kind
 
 (** Local providers use runtime discovery directly, and loopback
     OpenAI-compatible endpoints are treated the same way. *)
@@ -105,10 +102,10 @@ let max_context_of_label (label : string) : int =
     if uses_local_discovery pname cfg then begin
       let discovered = Llm_provider.Provider_registry.discovered_max_context () in
       (match discovered with
-       | Some low_ctx when low_ctx < context_floor ->
-         Log.warn ~ctx:"OasModelResolve"
-           "discovered context %d < floor %d for %s; using static value. \
-            Increase llama-server -c flag."
+        | Some low_ctx when low_ctx < context_floor ->
+          Log.warn ~ctx:"OasModelResolve"
+            "discovered context %d < floor %d for %s; using static value. \
+             Increase the local runtime context limit."
             low_ctx context_floor pname
         | _ -> ());
       effective_discovered_ctx ~static_ctx ~discovered

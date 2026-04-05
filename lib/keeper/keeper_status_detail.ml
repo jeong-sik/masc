@@ -118,15 +118,12 @@ let handle_keeper_status ctx args : tool_result =
                 OpenAI_compat conflating llama/openrouter *)
              let provider_name =
                match String.index_opt label ':' with
-               | Some idx when idx > 0 ->
-                 String.sub label 0 idx |> String.trim |> String.lowercase_ascii
-               | _ ->
-                 let base = Llm_provider.Provider_config.(match cfg.kind with
-                   | Anthropic -> "claude" | OpenAI_compat -> "openai"
-                   | Gemini -> "gemini" | Glm -> "glm" | Claude_code -> "claude_code")
-                 in
-                 if base = "openai" && Url_utils.is_loopback_url cfg.base_url
-                 then "llama" else base
+                | Some idx when idx > 0 ->
+                  String.sub label 0 idx |> String.trim |> String.lowercase_ascii
+                | _ ->
+                  let base = Provider_label_utils.provider_name_of_kind cfg.kind in
+                  if base = "openai" && Url_utils.is_loopback_url cfg.base_url
+                  then "llama" else base
              in
              Some (`Assoc [
                ("provider", `String provider_name);

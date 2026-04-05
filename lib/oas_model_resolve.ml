@@ -110,8 +110,8 @@ let max_context_of_label (label : string) : int =
          Log.warn ~ctx:"OasModelResolve"
            "discovered context %d < floor %d for %s; using static value. \
             Increase llama-server -c flag."
-           low_ctx context_floor pname
-       | _ -> ());
+            low_ctx context_floor pname
+        | _ -> ());
       effective_discovered_ctx ~static_ctx ~discovered
     end
     else static_ctx

@@ -264,7 +264,7 @@ let all_entries =
       refs =
         {
           fixture_harness = None;
-          live_spotcheck = Some "masc_worktree_list";
+          live_spotcheck = None;
           logs_ref = Some "/api/v1/dashboard/logs";
           metrics_ref = Some "/metrics";
           proof_ref = None;

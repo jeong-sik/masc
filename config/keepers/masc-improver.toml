@@ -37,4 +37,7 @@ allowed_paths = ["*"]
 # Delivery preset: research + coding tools for keepers that produce code changes.
 tool_preset = "delivery"
 
+# Deny tools that local models misuse in idle loops.
+tool_denylist = ["keeper_board_comment"]
+
 proactive_enabled = true

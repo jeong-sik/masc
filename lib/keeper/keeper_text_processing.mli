@@ -32,7 +32,25 @@ val normalize_proactive_text : string -> string
 (** Extract check-in text from a proactive reply. *)
 val extract_checkin_text : string -> string option
 
+(** {1 Terminal Ending Detection} *)
+
+(** Check for terminal punctuation ([.!?] or CJK equivalents).
+    @deprecated Use [looks_fragmentary_history_text] or newer text-processing helpers instead. *)
+val proactive_has_terminal_punct : string -> bool
+
+(** Check for terminal Korean verb endings.
+    @deprecated Use [looks_fragmentary_history_text] or newer text-processing helpers instead. *)
+val proactive_has_terminal_korean_ending : string -> bool
+
+(** Check for any terminal ending (punctuation or Korean).
+    @deprecated Use [looks_fragmentary_history_text] or newer text-processing helpers instead. *)
+val proactive_has_terminal_ending : string -> bool
+
 (** {1 Fragment Detection} *)
+
+(** Check if text looks like an incomplete fragment.
+    @deprecated Use [looks_fragmentary_history_text] instead. *)
+val proactive_looks_fragmentary : string -> bool
 
 (** Check if history text appears fragmentary (for filtering). *)
 val looks_fragmentary_history_text : string -> bool

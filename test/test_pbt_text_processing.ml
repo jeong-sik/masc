@@ -31,7 +31,7 @@ let gen_korean_text =
     return (prefix ^ korean_endings.(idx)))
 
 let arb_ascii_text = QCheck.make gen_ascii_text ~print:Fun.id
-let _arb_korean_text = QCheck.make gen_korean_text ~print:Fun.id
+let arb_korean_text = QCheck.make gen_korean_text ~print:Fun.id
 
 (* ── Properties ── *)
 
@@ -72,12 +72,44 @@ let prop_normalize_no_consecutive_spaces =
        not (try ignore (Re.Str.search_forward (Re.Str.regexp "  ") normalized 0); true
             with Not_found -> false))
 
+(* terminal punct detection: non-empty text + period *)
+let prop_terminal_punct =
+  QCheck.Test.make ~count:500 ~name:"word + period has terminal punct"
+    arb_ascii_text
+    (fun prefix ->
+       let trimmed = String.trim prefix in
+       QCheck.assume (trimmed <> "");
+       let text = trimmed ^ "." in
+       Tp.proactive_has_terminal_punct text)
+
+(* Korean endings detected *)
+let prop_terminal_korean =
+  QCheck.Test.make ~count:500 ~name:"Korean endings detected"
+    arb_korean_text
+    (fun text ->
+       let trimmed = String.trim text in
+       QCheck.assume (String.length trimmed > 2);
+       Tp.proactive_has_terminal_ending trimmed)
+
+(* fragmentary detection: trailing colon (safe char class member) *)
+let prop_fragmentary_trailing_colon =
+  QCheck.Test.make ~count:200 ~name:"trailing colon is fragmentary"
+    arb_ascii_text
+    (fun prefix ->
+       let trimmed = String.trim prefix in
+       QCheck.assume (trimmed <> "");
+       let text = trimmed ^ ":" in
+       Tp.proactive_looks_fragmentary text)
+
 let () =
   let suite =
     List.map QCheck_alcotest.to_alcotest
       [ prop_normalize_idempotent;
         prop_strip_state_preserves_no_markers;
         prop_strip_state_removes_block;
-        prop_normalize_no_consecutive_spaces ]
+        prop_normalize_no_consecutive_spaces;
+        prop_terminal_punct;
+        prop_terminal_korean;
+        prop_fragmentary_trailing_colon ]
   in
   Alcotest.run "pbt_text_processing" [ ("properties", suite) ]

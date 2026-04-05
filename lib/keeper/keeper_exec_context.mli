@@ -222,6 +222,14 @@ val extract_checkin_text : string -> string option
 
 (** {1 Fragment Detection (used by dashboard)} *)
 
+(** @deprecated Use [looks_fragmentary_history_text] or newer text-processing helpers instead. *)
+val proactive_has_terminal_punct : string -> bool
+(** @deprecated Use [looks_fragmentary_history_text] or newer text-processing helpers instead. *)
+val proactive_has_terminal_korean_ending : string -> bool
+(** @deprecated Use [looks_fragmentary_history_text] or newer text-processing helpers instead. *)
+val proactive_has_terminal_ending : string -> bool
+(** @deprecated Use [looks_fragmentary_history_text] instead. *)
+val proactive_looks_fragmentary : string -> bool
 val looks_fragmentary_history_text : string -> bool
 
 (** {1 Memory Check} *)

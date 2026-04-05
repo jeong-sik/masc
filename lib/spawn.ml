@@ -172,7 +172,7 @@ let default_configs = [
   });
   ("llama", {
     agent_name = "llama";
-    command = "llama:explicit-model-required";
+    command = Provider_adapter.make_local_label "explicit-model-required";
     timeout_seconds = Env_config.Spawn.timeout_seconds;
     working_dir = None;
     mcp_tools = masc_mcp_tools;

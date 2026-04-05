@@ -129,8 +129,8 @@ let actionable_routes ~(allowed_tools : string list)
          using keeper_board_post (set hearth to your name).";
     if can "keeper_board_list" then
       add
-        "- Browse recent Board posts with keeper_board_list and comment on \
-         something that catches your interest.";
+        "- Browse recent Board posts with keeper_board_list to look for topics \
+         or ideas worth revisiting.";
     if can "keeper_memory_search" then
       add
         "- Search your memories with keeper_memory_search for something worth \
@@ -192,7 +192,7 @@ let has_room_signal_section
       || interpretation.secondary_saliences <> []
   | None -> false
 
-let build_prompt ~(meta : Keeper_types.keeper_meta)
+let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
     ~(observation : Keeper_world_observation.world_observation) : string * string
     =
   let trait_lines =
@@ -400,7 +400,7 @@ let build_prompt ~(meta : Keeper_types.keeper_meta)
     Buffer.add_string ubuf "\n");
   (* Peer keepers — show other running keepers so this keeper can @mention them *)
   let peer_keepers =
-    Keeper_registry.all ()
+    Keeper_registry.all ~base_path ()
     |> List.filter_map (fun (entry : Keeper_registry.registry_entry) ->
       if String.equal entry.name meta.name then None
       else if entry.phase <> Keeper_state_machine.Running then None
@@ -411,8 +411,11 @@ let build_prompt ~(meta : Keeper_types.keeper_meta)
           else " (mention with: " ^ String.concat ", "
             (List.map (fun t -> "@" ^ t) targets) ^ ")"
         in
-        Some (Printf.sprintf "- %s%s — %s" entry.name targets_str
-          (if entry.meta.goal = "" then "active" else entry.meta.goal)))
+        let goal_summary =
+          if entry.meta.goal = "" then "active"
+          else short_preview ~max_len:200 entry.meta.goal
+        in
+        Some (Printf.sprintf "- %s%s — %s" entry.name targets_str goal_summary))
   in
   if peer_keepers <> [] then (
     Buffer.add_string ubuf "\n### Peer Keepers\n";

@@ -162,9 +162,9 @@ let keeper_execution_entries =
   [
     entry ~default:"0.5" "MASC_KEEPER_COMPACT_RATIO"
       "Context compaction trigger ratio";
-    entry ~default:"240" "MASC_KEEPER_COMPACT_MAX_MESSAGES"
+    entry ~default:"12" "MASC_KEEPER_COMPACT_MAX_MESSAGES"
       "Max messages before compaction";
-    entry ~default:"0" "MASC_KEEPER_COMPACT_MAX_TOKENS"
+    entry ~default:"4000" "MASC_KEEPER_COMPACT_MAX_TOKENS"
       "Max tokens before compaction (0=disabled)";
     entry ~default:"0.10" "MASC_KEEPER_COST_GATE_USD" "Per-turn cost gate (USD)";
     entry ~default:"0.50" "MASC_KEEPER_TOOL_COST_MAX_USD"

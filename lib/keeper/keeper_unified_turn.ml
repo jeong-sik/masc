@@ -847,7 +847,8 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
       Eio.Fiber.yield ();
       (* 2. Build unified prompt *)
       let system_prompt, user_message =
-        Keeper_unified_prompt.build_prompt ~meta ~observation
+        Keeper_unified_prompt.build_prompt ~meta ~base_path:config.base_path
+          ~observation
       in
       Eio.Fiber.yield ();
       let base_dir = session_base_dir config in

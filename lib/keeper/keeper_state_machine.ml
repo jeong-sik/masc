@@ -1,0 +1,407 @@
+(** Keeper State Machine — Deterministic Core (RFC-0002).
+    See .mli for documentation. *)
+
+(* ── Phase ─────────────────────────────────────────────── *)
+
+type phase =
+  | Offline
+  | Running
+  | Failing
+  | Compacting
+  | HandingOff
+  | Draining
+  | Paused
+  | Stopped
+  | Crashed
+  | Restarting
+  | Dead
+
+let phase_to_string = function
+  | Offline -> "offline"
+  | Running -> "running"
+  | Failing -> "failing"
+  | Compacting -> "compacting"
+  | HandingOff -> "handing_off"
+  | Draining -> "draining"
+  | Paused -> "paused"
+  | Stopped -> "stopped"
+  | Crashed -> "crashed"
+  | Restarting -> "restarting"
+  | Dead -> "dead"
+
+let phase_of_string = function
+  | "offline" -> Some Offline
+  | "running" -> Some Running
+  | "failing" -> Some Failing
+  | "compacting" -> Some Compacting
+  | "handing_off" -> Some HandingOff
+  | "draining" -> Some Draining
+  | "paused" -> Some Paused
+  | "stopped" -> Some Stopped
+  | "crashed" -> Some Crashed
+  | "restarting" -> Some Restarting
+  | "dead" -> Some Dead
+  | _ -> None
+
+let all_phases =
+  [ Offline; Running; Failing; Compacting; HandingOff;
+    Draining; Paused; Stopped; Crashed; Restarting; Dead ]
+
+(* ── Conditions ────────────────────────────────────────── *)
+
+type conditions = {
+  fiber_alive : bool;
+  heartbeat_healthy : bool;
+  turn_healthy : bool;
+  context_within_budget : bool;
+  context_handoff_needed : bool;
+  compaction_active : bool;
+  handoff_active : bool;
+  operator_paused : bool;
+  stop_requested : bool;
+  restart_budget_remaining : bool;
+  backoff_elapsed : bool;
+  guardrail_triggered : bool;
+  drain_complete : bool;
+}
+
+let default_conditions = {
+  fiber_alive = false;
+  heartbeat_healthy = true;
+  turn_healthy = true;
+  context_within_budget = true;
+  context_handoff_needed = false;
+  compaction_active = false;
+  handoff_active = false;
+  operator_paused = false;
+  stop_requested = false;
+  restart_budget_remaining = false;
+  backoff_elapsed = false;
+  guardrail_triggered = false;
+  drain_complete = false;
+}
+
+(* ── Events ────────────────────────────────────────────── *)
+
+type auto_rule_summary = {
+  reflect : bool;
+  plan : bool;
+  compact : bool;
+  handoff : bool;
+  guardrail_stop : bool;
+  guardrail_reason : string option;
+  goal_drift : float;
+}
+
+type event =
+  | Heartbeat_ok
+  | Heartbeat_failed of { consecutive : int; max_allowed : int }
+  | Turn_succeeded
+  | Turn_failed of { consecutive : int; max_allowed : int }
+  | Context_measured of {
+      context_ratio : float;
+      message_count : int;
+      token_count : int;
+      auto_rules : auto_rule_summary;
+    }
+  | Compaction_started
+  | Compaction_completed of { before_tokens : int; after_tokens : int }
+  | Compaction_failed of { reason : string }
+  | Handoff_started
+  | Handoff_completed of { new_trace_id : string; generation : int }
+  | Handoff_failed of { reason : string }
+  | Operator_pause
+  | Operator_resume
+  | Operator_stop of { remove_meta : bool }
+  | Stop_requested
+  | Drain_complete
+  | Fiber_started
+  | Fiber_terminated of { outcome : string }
+  | Supervisor_restart_attempt of { attempt : int }
+  | Restart_budget_exhausted
+  | Guardrail_stop of { reason : string }
+
+let event_to_string = function
+  | Heartbeat_ok -> "heartbeat_ok"
+  | Heartbeat_failed r ->
+    Printf.sprintf "heartbeat_failed(%d/%d)" r.consecutive r.max_allowed
+  | Turn_succeeded -> "turn_succeeded"
+  | Turn_failed r ->
+    Printf.sprintf "turn_failed(%d/%d)" r.consecutive r.max_allowed
+  | Context_measured r ->
+    Printf.sprintf "context_measured(ratio=%.3f)" r.context_ratio
+  | Compaction_started -> "compaction_started"
+  | Compaction_completed r ->
+    Printf.sprintf "compaction_completed(%d->%d)" r.before_tokens r.after_tokens
+  | Compaction_failed r ->
+    Printf.sprintf "compaction_failed(%s)" r.reason
+  | Handoff_started -> "handoff_started"
+  | Handoff_completed r ->
+    Printf.sprintf "handoff_completed(gen=%d)" r.generation
+  | Handoff_failed r ->
+    Printf.sprintf "handoff_failed(%s)" r.reason
+  | Operator_pause -> "operator_pause"
+  | Operator_resume -> "operator_resume"
+  | Operator_stop r ->
+    Printf.sprintf "operator_stop(remove_meta=%b)" r.remove_meta
+  | Stop_requested -> "stop_requested"
+  | Drain_complete -> "drain_complete"
+  | Fiber_started -> "fiber_started"
+  | Fiber_terminated r ->
+    Printf.sprintf "fiber_terminated(%s)" r.outcome
+  | Supervisor_restart_attempt r ->
+    Printf.sprintf "supervisor_restart_attempt(%d)" r.attempt
+  | Restart_budget_exhausted -> "restart_budget_exhausted"
+  | Guardrail_stop r ->
+    Printf.sprintf "guardrail_stop(%s)" r.reason
+
+(* ── Entry Actions ─────────────────────────────────────── *)
+
+type entry_action =
+  | Start_compaction
+  | Start_handoff
+  | Start_drain
+  | Schedule_restart of { delay_sec : float }
+  | Publish_lifecycle of { event_name : string; detail : string }
+  | Mark_dead_tombstone
+  | Cleanup_and_unregister
+
+(* ── Transition Types ──────────────────────────────────── *)
+
+type transition_result = {
+  prev_phase : phase;
+  new_phase : phase;
+  updated_conditions : conditions;
+  entry_actions : entry_action list;
+  event_applied : event;
+  timestamp : float;
+}
+
+type transition_error =
+  | Terminal_state of { current : phase; attempted_event : string }
+  | Invalid_transition of { from_phase : phase; to_phase : phase; reason : string }
+
+let transition_error_to_string = function
+  | Terminal_state r ->
+    Printf.sprintf "terminal_state: %s cannot accept %s"
+      (phase_to_string r.current) r.attempted_event
+  | Invalid_transition r ->
+    Printf.sprintf "invalid_transition: %s -> %s (%s)"
+      (phase_to_string r.from_phase) (phase_to_string r.to_phase) r.reason
+
+(* ── Transition Matrix ─────────────────────────────────── *)
+
+let can_transition ~from_phase ~to_phase =
+  match from_phase, to_phase with
+  (* Terminal states accept nothing *)
+  | Stopped, _ -> false
+  | Dead, _ -> false
+  (* Offline -> Running | Stopped *)
+  | Offline, (Running | Stopped) -> true
+  | Offline, _ -> false
+  (* Running -> buffer states, Paused, Stopped, Crashed (fiber death) *)
+  | Running, (Failing | Compacting | HandingOff | Draining | Paused | Stopped | Crashed) -> true
+  | Running, _ -> false
+  (* Failing -> Running (recovery) | Crashed (threshold) | Draining (stop) *)
+  | Failing, (Running | Crashed | Draining) -> true
+  | Failing, _ -> false
+  (* Compacting -> Running (done) | Failing (hb fail during) | Crashed (fatal) *)
+  | Compacting, (Running | Failing | Crashed) -> true
+  | Compacting, _ -> false
+  (* HandingOff -> Running (done) | Failing | Crashed *)
+  | HandingOff, (Running | Failing | Crashed) -> true
+  | HandingOff, _ -> false
+  (* Draining -> Stopped (done) | Crashed (fatal during drain) *)
+  | Draining, (Stopped | Crashed) -> true
+  | Draining, _ -> false
+  (* Paused -> Running (resume) | Draining (stop) | Stopped (remove) *)
+  | Paused, (Running | Draining | Stopped) -> true
+  | Paused, _ -> false
+  (* Crashed -> Restarting (backoff done) | Dead (budget exhausted) *)
+  | Crashed, (Restarting | Dead) -> true
+  | Crashed, _ -> false
+  (* Restarting -> Running (success) | Crashed (fail) | Dead (budget) *)
+  | Restarting, (Running | Crashed | Dead) -> true
+  | Restarting, _ -> false
+
+(* ── derive_phase ──────────────────────────────────────── *)
+
+let derive_phase (c : conditions) : phase =
+  (* Priority order: first match wins.
+     Terminal/lifecycle checks first, then buffer states, then healthy. *)
+  if not c.fiber_alive && not c.restart_budget_remaining then Dead
+  else if not c.fiber_alive && c.restart_budget_remaining && c.backoff_elapsed then Restarting
+  else if not c.fiber_alive && c.restart_budget_remaining && not c.backoff_elapsed then Crashed
+  else if c.stop_requested && c.drain_complete then Stopped
+  else if c.stop_requested && not c.drain_complete then Draining
+  else if c.guardrail_triggered then Failing
+  else if c.operator_paused then Paused
+  else if c.handoff_active then HandingOff
+  else if c.compaction_active then Compacting
+  else if not c.heartbeat_healthy || not c.turn_healthy then Failing
+  else if c.fiber_alive then Running
+  else Offline
+
+(* ── Condition Updaters ────────────────────────────────── *)
+
+(** Update conditions based on an event. Returns new conditions. *)
+let update_conditions (c : conditions) (ev : event) : conditions =
+  match ev with
+  | Heartbeat_ok ->
+    { c with heartbeat_healthy = true }
+  | Heartbeat_failed { consecutive; max_allowed } ->
+    { c with heartbeat_healthy = consecutive < max_allowed }
+  | Turn_succeeded ->
+    { c with turn_healthy = true }
+  | Turn_failed { consecutive; max_allowed } ->
+    { c with turn_healthy = consecutive < max_allowed }
+  | Context_measured { auto_rules; _ } ->
+    { c with
+      guardrail_triggered = auto_rules.guardrail_stop;
+      context_handoff_needed = auto_rules.handoff;
+    }
+  | Compaction_started ->
+    { c with compaction_active = true }
+  | Compaction_completed _ ->
+    { c with compaction_active = false }
+  | Compaction_failed _ ->
+    { c with compaction_active = false }
+  | Handoff_started ->
+    { c with handoff_active = true }
+  | Handoff_completed _ ->
+    { c with handoff_active = false }
+  | Handoff_failed _ ->
+    { c with handoff_active = false }
+  | Operator_pause ->
+    { c with operator_paused = true }
+  | Operator_resume ->
+    { c with operator_paused = false }
+  | Operator_stop _ ->
+    { c with stop_requested = true }
+  | Stop_requested ->
+    { c with stop_requested = true }
+  | Drain_complete ->
+    { c with drain_complete = true }
+  | Fiber_started ->
+    { c with fiber_alive = true }
+  | Fiber_terminated _ ->
+    { c with fiber_alive = false }
+  | Supervisor_restart_attempt _ ->
+    { c with backoff_elapsed = true }
+  | Restart_budget_exhausted ->
+    { c with restart_budget_remaining = false }
+  | Guardrail_stop _ ->
+    { c with guardrail_triggered = true }
+
+(** Compute entry actions for a phase transition. *)
+let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action list =
+  let lifecycle name detail =
+    Publish_lifecycle { event_name = name; detail }
+  in
+  match prev_phase, new_phase with
+  | _, Compacting ->
+    [ Start_compaction; lifecycle "compaction_started" "" ]
+  | _, HandingOff ->
+    [ Start_handoff; lifecycle "handoff_started" "" ]
+  | _, Draining ->
+    [ Start_drain; lifecycle "draining" "" ]
+  | _, Dead ->
+    [ Mark_dead_tombstone; lifecycle "dead" "restart budget exhausted" ]
+  | _, Stopped ->
+    [ Cleanup_and_unregister;
+      lifecycle "stopped"
+        (match event with
+         | Operator_stop { remove_meta } ->
+           Printf.sprintf "remove_meta=%b" remove_meta
+         | _ -> "drain_complete") ]
+  | Crashed, Restarting ->
+    [ lifecycle "restarting" "backoff elapsed" ]
+  | Restarting, Running ->
+    [ lifecycle "restarted" "fiber launched" ]
+  | _, Failing ->
+    [ lifecycle "failing" (event_to_string event) ]
+  | Failing, Running ->
+    [ lifecycle "recovered" "failure counters reset" ]
+  | _, Paused ->
+    [ lifecycle "paused" "operator request" ]
+  | Paused, Running ->
+    [ lifecycle "resumed" "operator request" ]
+  | _ -> []
+
+(* ── apply_event ───────────────────────────────────────── *)
+
+let apply_event ~current_phase ~conditions ~event ~now =
+  (* Terminal states reject all events *)
+  match current_phase with
+  | Stopped | Dead ->
+    Error (Terminal_state {
+      current = current_phase;
+      attempted_event = event_to_string event;
+    })
+  | _ ->
+    let updated_conditions = update_conditions conditions event in
+    let new_phase = derive_phase updated_conditions in
+    (* Validate transition is allowed *)
+    if new_phase = current_phase then
+      (* No transition — still valid *)
+      Ok {
+        prev_phase = current_phase;
+        new_phase;
+        updated_conditions;
+        entry_actions = [];
+        event_applied = event;
+        timestamp = now;
+      }
+    else if can_transition ~from_phase:current_phase ~to_phase:new_phase then
+      Ok {
+        prev_phase = current_phase;
+        new_phase;
+        updated_conditions;
+        entry_actions = entry_actions_for ~prev_phase:current_phase ~new_phase ~event;
+        event_applied = event;
+        timestamp = now;
+      }
+    else
+      (* derive_phase produced a phase that can_transition rejects.
+         This indicates a logic error between derive_phase and the matrix. *)
+      Error (Invalid_transition {
+        from_phase = current_phase;
+        to_phase = new_phase;
+        reason = Printf.sprintf "event %s caused derive_phase to produce %s from %s, \
+                                 but this transition is not in the matrix"
+          (event_to_string event)
+          (phase_to_string new_phase)
+          (phase_to_string current_phase);
+      })
+
+(* ── JSON Serialization ────────────────────────────────── *)
+
+let phase_to_json p = `String (phase_to_string p)
+
+let conditions_to_json (c : conditions) =
+  `Assoc [
+    "fiber_alive", `Bool c.fiber_alive;
+    "heartbeat_healthy", `Bool c.heartbeat_healthy;
+    "turn_healthy", `Bool c.turn_healthy;
+    "context_within_budget", `Bool c.context_within_budget;
+    "context_handoff_needed", `Bool c.context_handoff_needed;
+    "compaction_active", `Bool c.compaction_active;
+    "handoff_active", `Bool c.handoff_active;
+    "operator_paused", `Bool c.operator_paused;
+    "stop_requested", `Bool c.stop_requested;
+    "restart_budget_remaining", `Bool c.restart_budget_remaining;
+    "backoff_elapsed", `Bool c.backoff_elapsed;
+    "guardrail_triggered", `Bool c.guardrail_triggered;
+    "drain_complete", `Bool c.drain_complete;
+  ]
+
+let event_to_json ev = `String (event_to_string ev)
+
+let transition_result_to_json (tr : transition_result) =
+  `Assoc [
+    "prev_phase", phase_to_json tr.prev_phase;
+    "new_phase", phase_to_json tr.new_phase;
+    "conditions", conditions_to_json tr.updated_conditions;
+    "event", event_to_json tr.event_applied;
+    "timestamp", `Float tr.timestamp;
+  ]

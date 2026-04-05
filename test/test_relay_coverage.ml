@@ -144,8 +144,8 @@ let test_estimate_context_honors_token_override () =
        | Ok () -> ()
        | Error msg -> failwith msg);
       let overridden = Relay.estimate_context ~messages:1 ~tool_calls:0 ~model:"claude" in
-      check bool "override changes estimated_tokens"
-        true (overridden.estimated_tokens <> default_metrics.estimated_tokens));
+      check bool "override increases estimated_tokens"
+        true (overridden.estimated_tokens > default_metrics.estimated_tokens));
   let cleared = Relay.estimate_context ~messages:1 ~tool_calls:0 ~model:"claude" in
   check int "clear reverts estimated_tokens"
     default_metrics.estimated_tokens cleared.estimated_tokens

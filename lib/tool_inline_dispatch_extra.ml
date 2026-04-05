@@ -70,7 +70,7 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
            let recall_config = Auto_recall.make_config
              ~enabled:true
              ~sources:[Auto_recall.Recent_broadcasts; Auto_recall.Masc_cache; Auto_recall.File_context]
-             ~max_tokens:4000
+             ~max_tokens:4000 (* recall context token cap *)
              ~max_broadcasts:limit
              ()
            in

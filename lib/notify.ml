@@ -146,13 +146,23 @@ let escape_applescript s =
   ) s;
   Buffer.contents buf
 
-(** Agent emoji mapping for visual distinction *)
-let agent_emoji = function
-  | "claude" -> "🟣"  (* Purple for Claude *)
-  | "gemini" -> "🔵"  (* Blue for Gemini *)
-  | "codex" -> "🟢"   (* Green for Codex *)
-  | "system" -> "⚙️"
-  | _ -> "🤖"
+(** Agent emoji mapping for visual distinction.
+    Configurable table — add entries without touching a match statement.
+    Agent names come from spawn_key in Provider_adapter.direct_adapters. *)
+let agent_emoji_table : (string, string) Hashtbl.t =
+  let t = Hashtbl.create 8 in
+  List.iter (fun (k, v) -> Hashtbl.replace t k v)
+    [ ("claude", "🟣");
+      ("gemini", "🔵");
+      ("codex",  "🟢");
+      ("llama",  "🦙");
+      ("system", "⚙️") ];
+  t
+
+let agent_emoji name =
+  match Hashtbl.find_opt agent_emoji_table name with
+  | Some emoji -> emoji
+  | None -> "🤖"
 
 (** Send notification via terminal-notifier (preferred) *)
 let send_via_terminal_notifier ~title ~subtitle ~message ~sound ~focus_cmd =

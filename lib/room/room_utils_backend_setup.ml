@@ -206,7 +206,7 @@ let resolve_masc_base_path path =
     when should_ignore_inherited_base_path ~requested_path:path
            ~explicit_path:explicit ->
       let resolved = resolve_requested_base_path path in
-      Log.Room.warn
+      Log.Room.info
         "Ignoring inherited MASC_BASE_PATH=%s because both %s and %s have .masc; using requested base path %s. Set MASC_ALLOW_INHERITED_BASE_PATH=1 to preserve the inherited root."
         explicit (canonical_base_path path) (canonical_base_path explicit) resolved;
       resolved

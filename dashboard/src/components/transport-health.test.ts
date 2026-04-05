@@ -165,7 +165,7 @@ describe('TransportHealthPanel', () => {
     expect(container.textContent).toContain('shared_http')
     expect(container.innerHTML).toContain('signaling down')
     expect(container.innerHTML).not.toContain('2 ICE')
-    expect(container.textContent).toContain('scope default')
+    expect(container.textContent).toContain('namespace default')
   })
 
   it('renders namespace chip with cluster prefix for non-default clusters', async () => {
@@ -194,7 +194,7 @@ describe('TransportHealthPanel', () => {
     await flushUi()
 
     expect(get).toHaveBeenCalledWith('/api/v1/dashboard/transport-health')
-    expect(container.textContent).toContain('prod / scope default')
+    expect(container.textContent).toContain('prod / namespace default')
   })
 
   it('debounces SSE-driven transport refreshes through FetchScheduler', async () => {

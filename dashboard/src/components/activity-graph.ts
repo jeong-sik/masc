@@ -41,6 +41,12 @@ const TIME_RANGES: Array<{ value: string; label: string }> = [
   { value: 'all', label: '전체' },
 ]
 
+export function visibleNamespaceLabel(namespaceId: string | null | undefined): string | null {
+  const value = typeof namespaceId === 'string' ? namespaceId.trim() : ''
+  if (!value || value === 'default') return null
+  return value
+}
+
 function loadGraph() {
   return graphResource.load(() => {
     const since = selectedTimeRange.value !== 'all' ? selectedTimeRange.value : undefined
@@ -236,7 +242,9 @@ function ActionTimeline({ data }: { data: ActivityGraphResponse }) {
                         </span>
                         <div class="min-w-0 flex-1">
                           <div class="text-[12px] text-[var(--text-body)]">${eventDetail(event, 160)}</div>
-                          <div class="mt-1 text-[11px] text-[var(--text-muted)]">namespace: ${event.room_id}</div>
+                           ${(() => { const ns = visibleNamespaceLabel(event.room_id); return ns
+                             ? html`<div class="mt-1 text-[11px] text-[var(--text-muted)]">namespace: ${ns}</div>`
+                             : null; })()}
                         </div>
                         <span class="shrink-0 text-[11px] text-[var(--text-muted)]">
                           <${TimeAgo} timestamp=${event.ts_iso} />
@@ -384,7 +392,9 @@ export function ActivityGraphSurface() {
           <span>생성 시각: ${data.generated_at}</span>
           <span>데이터 범위: 최근 ${data.window.limit}건 이벤트</span>
           ${selectedTimeRange.value !== 'all' ? html`<span>필터: ${TIME_RANGES.find(r => r.value === selectedTimeRange.value)?.label}</span>` : null}
-          ${data.window.room_id ? html`<span>namespace: ${data.window.room_id}</span>` : null}
+          ${(() => { const ns = visibleNamespaceLabel(data.window.room_id); return ns
+            ? html`<span>namespace: ${ns}</span>`
+            : null; })()}
         </div>
       <//>
 

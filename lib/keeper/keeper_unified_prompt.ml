@@ -424,6 +424,39 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
       "You can interact with these keepers by mentioning them in board posts.\n";
     Buffer.add_string ubuf (String.concat "\n" peer_keepers);
     Buffer.add_string ubuf "\n");
+  (* Self-awareness: show this keeper its own recent board posts so it can
+     recognize repetitive patterns.  Non-heuristic: the model decides whether
+     its behavior is repetitive, not a hardcoded similarity check. *)
+  let own_recent_posts =
+    let posts_path =
+      Filename.concat (Filename.concat base_path ".masc") "board_posts.jsonl"
+    in
+    (try
+       Fs_compat.load_jsonl posts_path
+       |> List.filter_map Board.post_of_yojson
+       |> List.filter (fun (p : Board_types.post) ->
+         String.equal (Board_types.Agent_id.to_string p.author) meta.name)
+       |> List.rev
+       |> (fun posts ->
+         if List.length posts > 5
+         then List.filteri (fun i _ -> i < 5) posts
+         else posts)
+       |> List.map (fun (p : Board_types.post) ->
+         let title = p.title in
+         let truncated =
+           if String.length title <= 60 then title
+           else String.sub title 0 57 ^ "..."
+         in
+         Printf.sprintf "- \"%s\"" truncated)
+     with _ -> [])
+  in
+  if own_recent_posts <> [] then (
+    Buffer.add_string ubuf "\n### Your Recent Board Posts\n";
+    Buffer.add_string ubuf
+      "Review these before posting. If you see a repetitive pattern, \
+       do something genuinely different this turn.\n";
+    Buffer.add_string ubuf (String.concat "\n" own_recent_posts);
+    Buffer.add_string ubuf "\n");
   let routes = actionable_routes ~allowed_tools observation in
   if routes <> [] then (
     Buffer.add_string ubuf "\n### Actionable Routes\n";

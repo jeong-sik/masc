@@ -358,14 +358,11 @@ let build_prompt ~(meta : Keeper_types.keeper_meta)
     Buffer.add_string ubuf "\n### Autonomous Trigger\n";
     Buffer.add_string ubuf (String.concat "\n" autonomous_trigger);
     Buffer.add_string ubuf "\n");
-  (* Keeper tool inventory — show the keeper_* subset available this cycle *)
+  (* Active tool inventory for this cycle. *)
   let allowed_tools = Keeper_tool_policy.keeper_allowed_tool_names meta in
-  let keeper_tools =
-    List.filter (fun n -> String.starts_with ~prefix:"keeper_" n) allowed_tools
-  in
-  if keeper_tools <> [] then (
-    Buffer.add_string ubuf "\n### Keeper Tools\n";
-    Buffer.add_string ubuf (String.concat ", " keeper_tools);
+  if allowed_tools <> [] then (
+    Buffer.add_string ubuf "\n### Active Tools\n";
+    Buffer.add_string ubuf (String.concat ", " allowed_tools);
     Buffer.add_string ubuf "\n");
   let routes = actionable_routes ~allowed_tools observation in
   if routes <> [] then (

@@ -169,7 +169,7 @@ let load ~base_path : (t, string) result =
             base_path/config/tool_policy.toml, \
             current working directory ancestor search for config/tool_policy.toml, \
             executable directory ancestor search for config/tool_policy.toml, \
-            and resolved config dir tool_policy.toml. %s"
+            and Config_dir_resolver-resolved config/tool_policy.toml. %s"
            detail)
     | path :: rest ->
       (match Safe_ops.read_file_safe path with

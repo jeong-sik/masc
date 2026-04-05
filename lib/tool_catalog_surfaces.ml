@@ -262,9 +262,7 @@ let system_internal_surface_tools =
     (* Portal subsystem — schema-registered, not yet public *)
     "masc_portal_open"; "masc_portal_send"; "masc_portal_close";
     "masc_portal_status";
-    (* A2A federation — schema-registered, not yet public *)
-    "masc_a2a_discover"; "masc_a2a_query_skill"; "masc_a2a_delegate";
-    "masc_a2a_subscribe"; "masc_a2a_unsubscribe";
+    (* A2A federation — removed: deprecated in #4999, no active consumers *)
     (* Transport layer *)
     "masc_transport_status"; "masc_websocket_discovery";
     "masc_webrtc_offer"; "masc_webrtc_answer";
@@ -280,12 +278,8 @@ let system_internal_surface_tools =
     (* Hidden callable tools pruned from user-facing surfaces in #5011. *)
     "masc_archive_view";
     "masc_collaboration_evidence"; "masc_collaboration_graph";
-    "masc_detachment_list"; "masc_detachment_status";
     "masc_error_add"; "masc_error_resolve";
     "masc_find_by_capability";
-    "masc_improve_loop_start"; "masc_improve_loop_status";
-    "masc_improve_loop_pause"; "masc_improve_loop_resume";
-    "masc_improve_loop_tick";
     "masc_keeper_tool_catalog";
     "masc_library_add"; "masc_library_list"; "masc_library_promote";
     "masc_library_read"; "masc_library_search";

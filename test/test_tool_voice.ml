@@ -142,7 +142,7 @@ let test_voice_agent_uses_configured_voice () =
       in
       check bool "ok" true ok;
       check (option string) "voice"
-        (Some "Rachel")
+        (Some "Sarah")
         (match json_field "voice" body with Some (`String s) -> Some s | _ -> None))
 
 let test_voice_agent_reads_nested_tuning_config () =

@@ -389,7 +389,7 @@ let snapshot () : channel_stats list =
          if by_messages <> 0 then by_messages
          else String.compare a.channel b.channel)
 
-let binding_snapshot () =
+let _binding_snapshot () =
   Eio_guard.with_mutex_ro mu (fun () ->
       Hashtbl.fold
         (fun channel acc rows ->
@@ -550,8 +550,8 @@ let gate_event_to_json (event : gate_event) =
 let snapshot_locked () =
   let channels =
     Hashtbl.fold
-      (fun channel acc rows ->
-        {
+      (fun channel (acc : stats_acc) rows ->
+        ({
           channel;
           message_count = acc.msg_count;
           success_count = acc.success_count;
@@ -574,10 +574,10 @@ let snapshot_locked () =
           max_duration_ms = acc.max_dur_ms;
           slow_count = acc.slow_count;
           room_count = Hashtbl.length acc.rooms;
-        }
+        } : channel_stats)
         :: rows)
       table []
-    |> List.sort (fun a b ->
+    |> List.sort (fun (a : channel_stats) (b : channel_stats) ->
            let by_messages = compare b.message_count a.message_count in
            if by_messages <> 0 then by_messages
            else String.compare a.channel b.channel)

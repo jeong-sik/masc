@@ -880,6 +880,15 @@ let cascade_prefix_of_adapter (adapter : adapter) = adapter.cascade_prefix
 
 let endpoint_url_of_adapter (adapter : adapter) = adapter.endpoint_url
 
+(** Map OAS provider_kind to cascade prefix via adapter registry.
+    Falls back to string_of_provider_kind → resolve_direct_adapter chain
+    when provider_kind has multiple adapters (e.g. OpenAI_compat). *)
+let cascade_prefix_of_provider_kind (kind : Llm_provider.Provider_config.provider_kind) : string =
+  let cn = string_of_provider_kind kind in
+  match resolve_direct_adapter cn with
+  | Some a -> a.cascade_prefix
+  | None -> cn
+
 (** Resolve auth detail for any provider by canonical name or alias.
     Gemini-specific Vertex ADC vs API Key logic is internal. *)
 let auth_detail_of_provider provider =

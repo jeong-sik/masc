@@ -20,7 +20,8 @@ let keeper_tool_audit_json_fields config registry_lookup keeper agent_name =
     | `Null ->
         (* Realtime fallback: compute from registry meta when JSON field is absent/null *)
         (match registry_lookup keeper_name with
-         | Some entry -> Keeper_exec_tools.keeper_allowed_tool_names entry.meta
+         | Some (entry : Keeper_registry.registry_entry) ->
+           Keeper_exec_tools.keeper_allowed_tool_names entry.meta
          | None -> [])
     | _ -> string_list_of_json raw_allowed
   in
@@ -220,7 +221,7 @@ let action_matches_incident incident action =
       List.mem action_type (incident_action_types (string_field "kind" incident))
 
 let build_keeper_briefs config (keepers : Yojson.Safe.t list) =
-  let all_entries = Keeper_registry.all ~base_path:(Room.base_path config) () in
+  let all_entries = Keeper_registry.all () in
   let registry_lookup name =
     List.find_opt (fun (e : Keeper_registry.registry_entry) -> String.equal e.name name) all_entries
   in

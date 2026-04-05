@@ -818,7 +818,9 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
 
 let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
     ~(observation : Keeper_world_observation.world_observation)
-    ~(generation : int) : (keeper_meta, string) result =
+    ~(generation : int)
+    ?(channel : Keeper_world_observation.unified_turn_channel = Scheduled_autonomous)
+    () : (keeper_meta, string) result =
   (* 1. Check API keys *)
   let model_labels = Keeper_coordination.effective_model_labels_for_turn meta in
   match ensure_api_keys_for_labels model_labels with
@@ -862,7 +864,13 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
           ~cascade_name:"keeper_unified"
           ~fallback:Keeper_config.keeper_unified_max_tokens
       in
-      let max_turns = Keeper_config.keeper_unified_max_turns () in
+      let max_turns =
+        match channel with
+        | Keeper_world_observation.Reactive ->
+            Keeper_config.keeper_reactive_max_turns ()
+        | Keeper_world_observation.Scheduled_autonomous ->
+            Keeper_config.keeper_autonomous_max_turns ()
+      in
       let max_cost_usd = Keeper_config.keeper_tool_cost_max_usd () in
       (* 4. Build turn prompt callback: use our unified system prompt *)
       let build_turn_prompt ~base_system_prompt:_ ~messages:_

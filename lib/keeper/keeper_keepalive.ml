@@ -627,6 +627,8 @@ let run_keepalive_unified_turn
               ~meta:meta_after_observe
               ~observation:obs
               ~generation:meta_after_observe.runtime.generation
+              ~channel:turn_decision.channel
+              ()
           with
           | Error e ->
             Log.Keeper.error "%s: unified turn failed: %s"

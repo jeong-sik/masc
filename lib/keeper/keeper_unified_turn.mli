@@ -90,4 +90,6 @@ val run_unified_turn :
   meta:Keeper_types.keeper_meta ->
   observation:Keeper_world_observation.world_observation ->
   generation:int ->
+  ?channel:Keeper_world_observation.unified_turn_channel ->
+  unit ->
   (Keeper_types.keeper_meta, string) result

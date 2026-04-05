@@ -104,14 +104,18 @@ let overflow_retry_history_budget
     ~(system_prompt : string)
     ~(user_message : string) : int =
   let prompt_tokens =
-    Agent_sdk.Context_reducer.estimate_char_tokens system_prompt
-    + Agent_sdk.Context_reducer.estimate_char_tokens user_message
+    let estimated =
+      Agent_sdk.Context_reducer.estimate_char_tokens system_prompt
+      + Agent_sdk.Context_reducer.estimate_char_tokens user_message
+    in
+    (* Use 20% safety buffer for prompt estimation errors (#5053) *)
+    int_of_float (float_of_int estimated *. 1.2)
   in
   let prompt_reserve = max 1024 prompt_tokens in
   let tool_reserve =
     Keeper_config.keeper_retry_max_tools_per_turn () * 220
   in
-  let safety_reserve = 512 in
+  let safety_reserve = 1024 in
   max 256 (available_context - (prompt_reserve + tool_reserve + safety_reserve))
 
 let recover_context_overflow_retry
@@ -777,7 +781,11 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
   | Ok () ->
       ignore (Oas_model_resolve.refresh_local_discovery_if_possible model_labels);
       let primary_max_context =
-        Oas_model_resolve.resolve_primary_max_context model_labels
+        match meta.max_context_override with
+        | Some v ->
+            Log.Keeper.info "%s: using max_context_override=%d" meta.name v;
+            v
+        | None -> Oas_model_resolve.resolve_primary_max_context model_labels
       in
       (* Yield before CPU-bound prompt construction so the Eio scheduler
          can service HTTP handlers between keeper turn setups. *)

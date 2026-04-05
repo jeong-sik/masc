@@ -274,7 +274,9 @@ let migrate_room_to_flat (state : Mcp_server.server_state) =
           Log.Misc.info "migrate: flattening room %s to .masc/ root" current_room;
           migrate_legacy_dirs_with_renames state
             [ (Filename.concat "rooms" current_room, ".") ]
-        end else
+        end else if current_room = "default" then
+          Log.Misc.info "migrate: legacy rooms/ exists but default room not found (likely already flattened)"
+        else
           Log.Misc.warn "migrate: rooms/ exists but active room %s not found" current_room
     | None ->
         Log.Misc.warn

@@ -187,6 +187,10 @@ let keeper_schemas : tool_schema list = [
           ("items", `Assoc [("type", `String "string")]);
           ("description", `String "Exact direct-mention tokens that can wake the keeper in room traffic (for example ['sangsu']).");
         ]);
+        ("max_context_override", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Optional: absolute context token limit override for this keeper. Use to bypass global or discovered limits.");
+        ]);
         ("proactive_enabled", `Assoc [
           ("type", `String "boolean");
           ("description", `String "If true, keeper can send proactive check-ins after idle periods. Defaults to false unless explicitly enabled.");

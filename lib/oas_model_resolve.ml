@@ -1,10 +1,10 @@
 (** OAS model label resolution — resolve model labels to max_context and
-    API key availability using OAS Provider_registry directly.
+    API key availability via OAS Cascade_config and Provider_registry.
 
-    Replaces Model_spec convenience accessors for callers that only need
-    scalar values (max_context, model_id) from model label strings.
-    Goes through OAS Cascade_config.parse_model_string which uses
-    Provider_registry as SSOT, bypassing Model_spec.model_spec entirely.
+    Context resolution delegates to OAS {!Llm_provider.Cascade_config.resolve_label_context}
+    which uses the same routing logic as cascade execution.
+    API key availability is checked via {!Llm_provider.Provider_registry}.
+    MASC does NOT guess routing — OAS owns resolution end-to-end.
 
     @since 2.135.0 — inference-to-oas migration (Phase 1) *)
 
@@ -67,48 +67,45 @@ let refresh_local_discovery_if_possible ?sw ?net (labels : string list) : bool =
     discovered value and use the static registry value instead. *)
 let context_floor = 65_536
 
-(** Return [discovered] when it meets or exceeds {!context_floor};
-    otherwise return [static_ctx].  Pure — callers that need diagnostic
-    logging should inspect the result separately. *)
+(** Select the effective discovered context, applying {!context_floor}.
+    Returns [discovered] when it is at least [context_floor]; otherwise
+    falls back to [static_ctx]. *)
 let effective_discovered_ctx ~static_ctx ~(discovered : int option) : int =
   match discovered with
   | Some ctx when ctx >= context_floor -> ctx
   | _ -> static_ctx
 
 (** Resolve max_context for a model label.
-    Prefers discovered per-slot context (from live /props probe) for local
-    providers.  Discovered values below {!context_floor} are treated as
-    server misconfiguration and replaced by the static registry value with
-    a WARN log. *)
+    Delegates routing to OAS {!Llm_provider.Cascade_config.resolve_label_context} —
+    MASC does not guess which endpoint serves the request.
+
+    Resolution chain:
+    1. OAS {!Llm_provider.Cascade_config.resolve_label_context}. Any intermediate OAS
+       fallbacks happen inside that function (for example, endpoint-specific
+       discovered context, per-slot /props results for local providers, or
+       broader discovered maxima used by the cascade resolver).
+    2. If {!Llm_provider.Cascade_config.resolve_label_context} returns [None], this
+       function falls back to the static OAS {!Llm_provider.Provider_registry} entry's
+       [max_context].
+    3. Final fallback: [128_000]. *)
 let max_context_of_label (label : string) : int =
-  match provider_name_of_label label with
-  | None -> 128_000
-  | Some pname ->
-    let static_ctx =
+  (* OAS owns routing resolution — we don't guess *)
+  match Llm_provider.Cascade_config.resolve_label_context label with
+  | Some ctx -> ctx
+  | None ->
+    (* Cloud provider or unresolved: use static registry *)
+    match provider_name_of_label label with
+    | None -> 128_000
+    | Some pname ->
       match Llm_provider.Provider_registry.find default_registry pname with
       | Some entry -> entry.max_context
       | None -> 128_000
-    in
-    if Provider_adapter.requires_discovery pname then begin
-      let discovered = Llm_provider.Provider_registry.discovered_max_context () in
-      (match discovered with
-       | Some low_ctx when low_ctx < context_floor ->
-         Log.warn ~ctx:"OasModelResolve"
-           "discovered context %d < floor %d for %s; using static value. \
-            Increase llama-server -c flag."
-           low_ctx context_floor pname
-       | _ -> ());
-      effective_discovered_ctx ~static_ctx ~discovered
-    end
-    else static_ctx
 
 (** Resolve max_context for the first available model in a label list.
     "Available" means the provider's API key env var is set (or not required).
-    Prefers discovered per-slot context for local providers; silently falls
-    back to the static registry value when the discovered context is below
-    {!context_floor}.  Falls back to 128_000 if no model is available. *)
+    Per-label context resolved by OAS — no routing guess in MASC.
+    Falls back to 128_000 if no model is available. *)
 let resolve_primary_max_context (labels : string list) : int =
-  let discovered = Llm_provider.Provider_registry.discovered_max_context () in
   let rec find = function
     | [] -> 128_000
     | label :: rest ->
@@ -119,9 +116,10 @@ let resolve_primary_max_context (labels : string list) : int =
         | None -> find rest
         | Some entry ->
           if entry.is_available () then
-            if Provider_adapter.requires_discovery pname then
-              effective_discovered_ctx ~static_ctx:entry.max_context ~discovered
-            else entry.max_context
+            (* OAS resolves label → context. No routing guess in MASC. *)
+            match Llm_provider.Cascade_config.resolve_label_context label with
+            | Some ctx -> ctx
+            | None -> entry.max_context
           else find rest
   in
   find labels

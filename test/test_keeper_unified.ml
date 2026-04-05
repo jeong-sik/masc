@@ -27,8 +27,10 @@ let repo_root () =
       ascend (Sys.getcwd ())
 
 let () =
-  let prompts_dir = Filename.concat (repo_root ()) "config/prompts" in
+  let base_path = repo_root () in
+  let prompts_dir = Filename.concat base_path "config/prompts" in
   Prompt_registry.set_markdown_dir prompts_dir;
+  Masc_mcp.Keeper_exec_tools.init_policy_config ~base_path;
   Masc_mcp.Prompt_defaults.init ()
 
 let temp_dir () =
@@ -562,8 +564,8 @@ let test_prompt_includes_operational_tool_guidance () =
   let sys, _user = UP.build_prompt ~meta:minimal_meta ~observation:base_observation in
   check bool "mentions task audit guidance" true
     (contains_substring sys "keeper_tasks_audit");
-  check bool "mentions policy-aware availability" true
-    (contains_substring sys "current tool policy");
+  check bool "mentions tool-first principle" true
+    (contains_substring sys "Tool-first principle");
   check bool "mentions worktree inspection guidance" true
     (contains_substring sys "masc_code_read");
   check bool "mentions heartbeat maintenance guidance" true

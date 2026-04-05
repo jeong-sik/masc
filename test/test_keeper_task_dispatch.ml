@@ -143,6 +143,8 @@ let test_done_after_claim () =
       | _ -> fail "expected ok or error in done response")
 
 let () =
+  let base_path = Masc_test_deps.find_project_root () in
+  Keeper_exec_tools.init_policy_config ~base_path;
   Alcotest.run "Keeper_task_dispatch" [
     "claim", [
       test_case "claim returns result" `Quick test_claim_returns_result;

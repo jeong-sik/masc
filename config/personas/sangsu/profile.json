@@ -73,6 +73,7 @@
       "상수",
       "홍상수"
     ],
+    "tool_preset": "research",
     "presence_keepalive": true,
     "presence_keepalive_sec": 30,
     "proactive_enabled": true

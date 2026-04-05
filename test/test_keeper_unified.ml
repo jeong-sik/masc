@@ -525,7 +525,7 @@ let test_task_reactive_cooldown_floor_never_hits_zero () =
       decision.task_reactive_cooldown)
 
 let test_prompt_contains_identity () =
-  let sys, _user = UP.build_prompt ~meta:minimal_meta ~observation:base_observation in
+  let sys, _user = UP.build_prompt ~base_path:"/test" ~meta:minimal_meta ~observation:base_observation in
   check bool "contains name" true (String.length sys > 0);
   check bool "contains keeper name" true
     (let has_name =
@@ -534,7 +534,7 @@ let test_prompt_contains_identity () =
      in has_name)
 
 let test_prompt_contains_goal () =
-  let sys, _user = UP.build_prompt ~meta:minimal_meta ~observation:base_observation in
+  let sys, _user = UP.build_prompt ~base_path:"/test" ~meta:minimal_meta ~observation:base_observation in
   check bool "contains goal" true
     (let has_goal =
        try ignore (Str.search_forward (Str.regexp_string "test goal") sys 0); true
@@ -542,7 +542,7 @@ let test_prompt_contains_goal () =
      in has_goal)
 
 let test_prompt_mentions_extend_turns_guidance () =
-  let sys, _user = UP.build_prompt ~meta:minimal_meta ~observation:base_observation in
+  let sys, _user = UP.build_prompt ~base_path:"/test" ~meta:minimal_meta ~observation:base_observation in
   check bool "mentions extend_turns" true
     (let found =
        try
@@ -561,7 +561,7 @@ let test_prompt_mentions_extend_turns_guidance () =
      in found)
 
 let test_prompt_includes_operational_tool_guidance () =
-  let sys, _user = UP.build_prompt ~meta:minimal_meta ~observation:base_observation in
+  let sys, _user = UP.build_prompt ~base_path:"/test" ~meta:minimal_meta ~observation:base_observation in
   check bool "mentions task audit guidance" true
     (contains_substring sys "keeper_tasks_audit");
   check bool "mentions tool-first principle" true
@@ -587,7 +587,7 @@ let test_prompt_includes_autonomous_trigger_section () =
         };
     }
   in
-  let _sys, user = UP.build_prompt ~meta ~observation:base_observation in
+  let _sys, user = UP.build_prompt ~base_path:"/test" ~meta ~observation:base_observation in
   check bool "has autonomous trigger section" true
     (contains_substring user "Autonomous Trigger");
   check bool "includes scheduled reason" true
@@ -603,12 +603,12 @@ let test_prompt_omits_autonomous_trigger_for_reactive_turn () =
       idle_seconds = 999;
     }
   in
-  let _sys, user = UP.build_prompt ~meta:minimal_meta ~observation:obs in
+  let _sys, user = UP.build_prompt ~base_path:"/test" ~meta:minimal_meta ~observation:obs in
   check bool "reactive turn omits autonomous trigger section" false
     (contains_substring user "Autonomous Trigger")
 
 let test_prompt_omits_empty_sections () =
-  let _sys, user = UP.build_prompt ~meta:minimal_meta ~observation:base_observation in
+  let _sys, user = UP.build_prompt ~base_path:"/test" ~meta:minimal_meta ~observation:base_observation in
   check bool "no mention section" true
     (not (let found =
        try ignore (Str.search_forward (Str.regexp_string "Pending Mentions") user 0); true
@@ -626,7 +626,7 @@ let test_prompt_includes_mentions_section () =
       pending_mentions = [("alice", "hello keeper")]
     }
   in
-  let _sys, user = UP.build_prompt ~meta:minimal_meta ~observation:obs in
+  let _sys, user = UP.build_prompt ~base_path:"/test" ~meta:minimal_meta ~observation:obs in
   check bool "has mention section" true
     (let found =
        try ignore (Str.search_forward (Str.regexp_string "Pending Mentions") user 0); true
@@ -644,7 +644,7 @@ let test_prompt_includes_goals_section () =
       active_goals = ["goal-abc"]
     }
   in
-  let _sys, user = UP.build_prompt ~meta:minimal_meta ~observation:obs in
+  let _sys, user = UP.build_prompt ~base_path:"/test" ~meta:minimal_meta ~observation:obs in
   check bool "has goals section" true
     (let found =
        try ignore (Str.search_forward (Str.regexp_string "Active Goals") user 0); true
@@ -653,7 +653,7 @@ let test_prompt_includes_goals_section () =
 
 let test_prompt_includes_context_ratio () =
   let obs = { base_observation with context_ratio = 0.75 } in
-  let _sys, user = UP.build_prompt ~meta:minimal_meta ~observation:obs in
+  let _sys, user = UP.build_prompt ~base_path:"/test" ~meta:minimal_meta ~observation:obs in
   check bool "has context percentage" true
     (let found =
        try ignore (Str.search_forward (Str.regexp_string "75%") user 0); true
@@ -662,7 +662,7 @@ let test_prompt_includes_context_ratio () =
 
 let test_prompt_includes_idle () =
   let obs = { base_observation with idle_seconds = 300 } in
-  let _sys, user = UP.build_prompt ~meta:minimal_meta ~observation:obs in
+  let _sys, user = UP.build_prompt ~base_path:"/test" ~meta:minimal_meta ~observation:obs in
   check bool "has idle seconds" true
     (let found =
        try ignore (Str.search_forward (Str.regexp_string "300s") user 0); true
@@ -671,7 +671,7 @@ let test_prompt_includes_idle () =
 
 let test_prompt_frugal_economy () =
   let obs = { base_observation with economic_pressure = AE.Frugal } in
-  let _sys, user = UP.build_prompt ~meta:minimal_meta ~observation:obs in
+  let _sys, user = UP.build_prompt ~base_path:"/test" ~meta:minimal_meta ~observation:obs in
   check bool "has frugal warning" true
     (let found =
        try ignore (Str.search_forward (Str.regexp_string "Frugal") user 0); true
@@ -680,7 +680,7 @@ let test_prompt_frugal_economy () =
 
 let test_prompt_hustle_economy () =
   let obs = { base_observation with economic_pressure = AE.Hustle } in
-  let _sys, user = UP.build_prompt ~meta:minimal_meta ~observation:obs in
+  let _sys, user = UP.build_prompt ~base_path:"/test" ~meta:minimal_meta ~observation:obs in
   check bool "has hustle warning" true
     (let found =
        try ignore (Str.search_forward (Str.regexp_string "Hustle") user 0); true
@@ -695,7 +695,7 @@ let test_prompt_includes_worktree_delta () =
           "<git_status_change>\nWorking tree changed since last keeper turn (1 files):\n M lib/example.ml\n</git_status_change>"
     }
   in
-  let _sys, user = UP.build_prompt ~meta:minimal_meta ~observation:obs in
+  let _sys, user = UP.build_prompt ~base_path:"/test" ~meta:minimal_meta ~observation:obs in
   check bool "has worktree section" true
     (let found =
        try
@@ -725,7 +725,7 @@ let test_prompt_room_state_section () =
       active_agent_count = 5;
     }
   in
-  let _sys, user = UP.build_prompt ~meta:minimal_meta ~observation:obs in
+  let _sys, user = UP.build_prompt ~base_path:"/test" ~meta:minimal_meta ~observation:obs in
   check bool "has namespace state" true
     (let found =
        try
@@ -745,7 +745,7 @@ let test_prompt_includes_actionable_routes_for_operational_signals () =
           "<git_status_change>\nWorking tree changed since last keeper turn (1 files):\n?? lib/example.ml\n</git_status_change>";
     }
   in
-  let _sys, user = UP.build_prompt ~meta:minimal_meta ~observation:obs in
+  let _sys, user = UP.build_prompt ~base_path:"/test" ~meta:minimal_meta ~observation:obs in
   check bool "has actionable routes section" true
     (contains_substring user "Actionable Routes");
   check bool "includes task audit route" true
@@ -765,7 +765,7 @@ let test_prompt_actionable_routes_respect_tool_policy () =
           "<git_status_change>\nWorking tree changed since last keeper turn (1 files):\n?? lib/example.ml\n</git_status_change>";
     }
   in
-  let _sys, user = UP.build_prompt ~meta:minimal_policy_meta ~observation:obs in
+  let _sys, user = UP.build_prompt ~base_path:"/test" ~meta:minimal_policy_meta ~observation:obs in
   check bool "keeps actionable routes section" true
     (contains_substring user "Actionable Routes");
   check bool "does not recommend unavailable task audit tool" false
@@ -781,7 +781,7 @@ let test_prompt_no_actionable_work_fallback () =
   (* minimal_policy_meta has Minimal preset — no board/web-search tools,
      so proactive routes are empty and the fallback fires. *)
   let obs = base_observation in
-  let _sys, user = UP.build_prompt ~meta:minimal_policy_meta ~observation:obs in
+  let _sys, user = UP.build_prompt ~base_path:"/test" ~meta:minimal_policy_meta ~observation:obs in
   check bool "has actionable routes section" true
     (contains_substring user "Actionable Routes");
   check bool "has no-actionable-work fallback" true
@@ -814,7 +814,7 @@ let test_prompt_omits_room_signal_when_flag_disabled () =
           };
     }
   in
-  let _sys, user = UP.build_prompt ~meta:minimal_meta ~observation:obs in
+  let _sys, user = UP.build_prompt ~base_path:"/test" ~meta:minimal_meta ~observation:obs in
   check bool "namespace signal section omitted" true
     (not (contains_substring user "Namespace Signal Interpretation"))
 
@@ -849,7 +849,7 @@ let test_prompt_includes_room_signal_when_flag_enabled () =
           };
     }
   in
-  let _sys, user = UP.build_prompt ~meta:room_signal_meta ~observation:obs in
+  let _sys, user = UP.build_prompt ~base_path:"/test" ~meta:room_signal_meta ~observation:obs in
   check bool "namespace signal section included" true
     (contains_substring user "Namespace Signal Interpretation");
   check bool "namespace signal primary included" true
@@ -1296,7 +1296,7 @@ let test_prompt_includes_board_activity_section () =
       pending_board_events = [ sample_board_event ]
     }
   in
-  let _sys, user = UP.build_prompt ~meta:minimal_meta ~observation:obs in
+  let _sys, user = UP.build_prompt ~base_path:"/test" ~meta:minimal_meta ~observation:obs in
   check bool "has board activity section" true
     (let found =
        try ignore (Str.search_forward (Str.regexp_string "Board Activity") user 0); true
@@ -1309,7 +1309,7 @@ let test_prompt_includes_board_activity_section () =
      in found)
 
 let test_prompt_prefers_silence_guidance () =
-  let sys, _user = UP.build_prompt ~meta:minimal_meta ~observation:base_observation in
+  let sys, _user = UP.build_prompt ~base_path:"/test" ~meta:minimal_meta ~observation:base_observation in
   check bool "mentions speech act header" true
     (let found =
        try
@@ -1345,7 +1345,7 @@ let test_prompt_sanitizes_control_chars () =
         ];
     }
   in
-  let sys, user = UP.build_prompt ~meta ~observation:obs in
+  let sys, user = UP.build_prompt ~base_path:"/test" ~meta ~observation:obs in
   check bool "system prompt sanitized" false
     (contains_disallowed_control_char sys);
   check bool "user prompt sanitized" false
@@ -1620,7 +1620,7 @@ let test_tool_query_text_of_user_message_keeps_counted_headers () =
       failed_task_count = 2;
     }
   in
-  let _sys, user = UP.build_prompt ~meta:minimal_meta ~observation:obs in
+  let _sys, user = UP.build_prompt ~base_path:"/test" ~meta:minimal_meta ~observation:obs in
   let query = KAR.tool_query_text_of_user_message user in
   check bool "keeps counted pending mentions header" true
     (contains_substring query "### Pending Mentions (1)");

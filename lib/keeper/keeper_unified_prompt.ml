@@ -413,7 +413,8 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
         in
         let goal_summary =
           if entry.meta.goal = "" then "active"
-          else short_preview ~max_len:200 entry.meta.goal
+          else if String.length entry.meta.goal <= 200 then entry.meta.goal
+          else String.sub entry.meta.goal 0 197 ^ "..."
         in
         Some (Printf.sprintf "- %s%s — %s" entry.name targets_str goal_summary))
   in

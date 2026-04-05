@@ -443,6 +443,16 @@ let keeper_max_tools_per_turn () : int =
 let keeper_retry_max_tools_per_turn () : int =
   min 8 (keeper_max_tools_per_turn ())
 
+(** Max board events presented to a keeper per turn.
+    Higher values let keepers see more discussion context but
+    increase prompt size. Env: [MASC_KEEPER_BOARD_EVENT_LIMIT]. *)
+let keeper_board_event_limit () : int =
+  int_of_env_default
+    "MASC_KEEPER_BOARD_EVENT_LIMIT"
+    ~default:10
+    ~min_v:1
+    ~max_v:50
+
 (** Enable LLM reranking of BM25 tool retrieval results.
     When enabled, confident BM25 results are re-ordered by a small LLM
     call before progressive disclosure. Disabled by default.

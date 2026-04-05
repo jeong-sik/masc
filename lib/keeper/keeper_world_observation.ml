@@ -427,7 +427,7 @@ let collect_board_events ~(base_path : string) ~(continuity_summary : string)
                targets)
            recent)
     in
-    let event_limit = 5 in
+    let event_limit = Keeper_config.keeper_board_event_limit () in
     let rec consume_posts remaining last_cursor acc = function
       | [] -> (List.rev acc, last_cursor)
       | (p : Board.post) :: rest ->

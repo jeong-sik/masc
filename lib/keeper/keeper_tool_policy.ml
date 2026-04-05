@@ -10,7 +10,7 @@ open Keeper_types
 open Keeper_alerting
 open Keeper_tool_registry
 
-(* ─�� Config-driven preset resolution ─────────────────────────────── *)
+(* -- Config-driven preset resolution -------------------------------- *)
 
 let policy_config : Keeper_tool_policy_config.t option ref = ref None
 
@@ -153,8 +153,8 @@ let preset_allowlist preset =
       keeper_base_candidate_tool_names ()
     | Some (Keeper_tool_policy_config.Subset tools) -> dedupe_tool_names tools
     | None ->
-      Log.Keeper.error "preset '%s' not defined in config/tool_policy.toml" name;
-      []
+      invalid_arg
+        (Printf.sprintf "preset '%s' not defined in config/tool_policy.toml" name)
 
 let tool_policy_of_meta (meta : keeper_meta) =
   let allow =

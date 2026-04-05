@@ -180,33 +180,21 @@ let resolve_preset
         |> List.concat_map (fun group_name ->
           match Hashtbl.find_opt config.groups group_name with
           | Some source -> resolve_group_source source
-          | None ->
-            Log.Keeper.warn "tool_policy_config: group '%s' referenced by preset '%s' not found"
-              group_name preset_name;
-            [])
+          (* None is unreachable: load validates all group references *)
+          | None -> [])
       in
       let masc_from_groups =
         def.masc_groups
         |> List.concat_map (fun mg_name ->
           match Hashtbl.find_opt config.masc_groups mg_name with
           | Some tools -> List.filter masc_filter tools
-          | None ->
-            Log.Keeper.warn "tool_policy_config: masc group '%s' referenced by preset '%s' not found"
-              mg_name preset_name;
-            [])
+          (* None is unreachable: load validates all masc_group references *)
+          | None -> [])
       in
       let masc_individual =
         def.masc_tools |> List.filter masc_filter
       in
       Some (Subset (group_tools @ masc_from_groups @ masc_individual))
-
-let all_group_tools (config : t) : string list =
-  Hashtbl.fold (fun _ source acc ->
-    resolve_group_source source @ acc
-  ) config.groups []
-
-let all_masc_tools (config : t) : string list =
-  Hashtbl.fold (fun _ tools acc -> tools @ acc) config.masc_groups []
 
 let preset_names (config : t) : string list =
   Hashtbl.fold (fun name _ acc -> name :: acc) config.presets []
@@ -215,3 +203,10 @@ let preset_names (config : t) : string list =
 let group_names (config : t) : string list =
   Hashtbl.fold (fun name _ acc -> name :: acc) config.groups []
   |> List.sort String.compare
+
+let all_group_tools (config : t) : string list =
+  group_names config
+  |> List.concat_map (fun name -> resolve_group_source (Hashtbl.find config.groups name))
+
+let all_masc_tools (config : t) : string list =
+  Hashtbl.fold (fun _ tools acc -> tools @ acc) config.masc_groups []

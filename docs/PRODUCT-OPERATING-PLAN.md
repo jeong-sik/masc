@@ -1,8 +1,8 @@
 # Product Operating Plan
 
 > Current package version: v2.245.0
-> Latest release: v2.245.0 (2026-04-05)
-> Updated: 2026-04-05
+> Latest release: v2.245.0 (2026-04-06)
+> Updated: 2026-04-06
 
 Execution companion for capsule-only coordination hardening:
 [design/masc-capsule-execution-plan.md](design/masc-capsule-execution-plan.md)

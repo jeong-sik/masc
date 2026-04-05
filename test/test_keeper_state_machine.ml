@@ -373,6 +373,33 @@ let test_can_transition_crashed_only_restart_or_dead () =
   check bool "no -> Running" false (SM.can_transition ~from_phase:SM.Crashed ~to_phase:SM.Running);
   check bool "no -> Paused" false (SM.can_transition ~from_phase:SM.Crashed ~to_phase:SM.Paused)
 
+let test_can_transition_compacting_to_failing () =
+  check bool "-> Failing" true (SM.can_transition ~from_phase:SM.Compacting ~to_phase:SM.Failing)
+
+let test_can_transition_compacting_to_crashed () =
+  check bool "-> Crashed" true (SM.can_transition ~from_phase:SM.Compacting ~to_phase:SM.Crashed)
+
+let test_can_transition_handingoff_to_failing () =
+  check bool "-> Failing" true (SM.can_transition ~from_phase:SM.HandingOff ~to_phase:SM.Failing)
+
+let test_can_transition_handingoff_to_crashed () =
+  check bool "-> Crashed" true (SM.can_transition ~from_phase:SM.HandingOff ~to_phase:SM.Crashed)
+
+let test_can_transition_failing_to_draining () =
+  check bool "-> Draining" true (SM.can_transition ~from_phase:SM.Failing ~to_phase:SM.Draining)
+
+let test_can_transition_restarting_to_crashed () =
+  check bool "-> Crashed" true (SM.can_transition ~from_phase:SM.Restarting ~to_phase:SM.Crashed)
+
+let test_can_transition_restarting_to_dead () =
+  check bool "-> Dead" true (SM.can_transition ~from_phase:SM.Restarting ~to_phase:SM.Dead)
+
+let test_can_transition_paused_to_draining () =
+  check bool "-> Draining" true (SM.can_transition ~from_phase:SM.Paused ~to_phase:SM.Draining)
+
+let test_can_transition_paused_to_stopped () =
+  check bool "-> Stopped" true (SM.can_transition ~from_phase:SM.Paused ~to_phase:SM.Stopped)
+
 (* ── Backward compat tests ─────────────────────────────── *)
 
 let test_legacy_buffer_states_map_to_running () =
@@ -576,6 +603,15 @@ let () =
       test_case "Running invalid targets" `Quick test_can_transition_running_invalid;
       test_case "terminal -> nothing" `Quick test_can_transition_terminal_nothing;
       test_case "Crashed -> Restarting|Dead only" `Quick test_can_transition_crashed_only_restart_or_dead;
+      test_case "Compacting -> Failing" `Quick test_can_transition_compacting_to_failing;
+      test_case "Compacting -> Crashed" `Quick test_can_transition_compacting_to_crashed;
+      test_case "HandingOff -> Failing" `Quick test_can_transition_handingoff_to_failing;
+      test_case "HandingOff -> Crashed" `Quick test_can_transition_handingoff_to_crashed;
+      test_case "Failing -> Draining" `Quick test_can_transition_failing_to_draining;
+      test_case "Restarting -> Crashed" `Quick test_can_transition_restarting_to_crashed;
+      test_case "Restarting -> Dead" `Quick test_can_transition_restarting_to_dead;
+      test_case "Paused -> Draining" `Quick test_can_transition_paused_to_draining;
+      test_case "Paused -> Stopped" `Quick test_can_transition_paused_to_stopped;
     ];
     "backward_compat", [
       test_case "buffer -> Running" `Quick test_legacy_buffer_states_map_to_running;

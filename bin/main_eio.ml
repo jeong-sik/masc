@@ -107,11 +107,30 @@ open Server_routes_http
 
 (** Extended router to handle OPTIONS *)
 let make_extended_handler routes =
-  fun _client_addr gluten_reqd ->
+  fun client_addr gluten_reqd ->
     let reqd = gluten_reqd.Gluten.Reqd.reqd in
     let request = Httpun.Reqd.request reqd in
+    (* Rate limiting: enforce before any auth or routing.
+       Health-check endpoints are exempt so load-balancer probes never block. *)
+    let path = Http.Request.path request in
+    let skip_rate_limit =
+      String.equal path "/health"
+      || String.equal path "/health/live"
+      || String.equal path "/health/ready"
+    in
+    let rl_key = Masc_mcp.Rate_limit.key_of_sockaddr client_addr in
+    if (not skip_rate_limit) && not (Masc_mcp.Rate_limit.check_global ~key:rl_key) then
+      let body = Masc_mcp.Rate_limit.too_many_requests_body () in
+      let rl_headers = Masc_mcp.Rate_limit.headers_global ~key:rl_key in
+      let headers = Httpun.Headers.of_list (
+        ("content-type", "application/json") ::
+        ("content-length", string_of_int (String.length body)) ::
+        rl_headers
+      ) in
+      Httpun.Reqd.respond_with_string reqd
+        (Httpun.Response.create ~headers `Too_many_requests) body
+    else
     try
-      let path = Http.Request.path request in
       let is_mcp_like =
         String.equal path "/mcp"
         || String.equal path "/mcp/managed"

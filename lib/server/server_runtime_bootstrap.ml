@@ -442,6 +442,10 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
   (* Initialize Eio environment for MODEL HTTP calls (cohttp-eio via OAS Provider) *)
   Masc_eio_env.init ~sw ~net ~clock ();
   Discovery_cache.set_env ~sw ~net;
+  (* Start global rate-limit bucket cleanup loop to prevent unbounded growth of
+     per-client buckets.  The loop is a background fiber that wakes periodically
+     and removes stale entries according to MASC_RATE_LIMIT_ENTRY_MAX_AGE_SEC. *)
+  Rate_limit.start_global_cleanup_loop ~sw ~clock;
   let refresh_llama_endpoints () =
     try
       let llama_endpoints =

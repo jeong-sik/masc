@@ -134,3 +134,41 @@ let headers limiter ~key =
 
 let too_many_requests_body () =
   {|{"error":"Too Many Requests","message":"Rate limit exceeded"}|}
+
+let headers_global ~key =
+  headers (Eio.Lazy.force global) ~key
+
+(** {1 Client Address Key Extraction} *)
+
+(** Convert an [Eio.Net.Sockaddr.stream] to a rate-limit key string.
+    For TCP connections the key is the client IP address (dotted-decimal for
+    IPv4, colon-hex for IPv6).  Unix-domain sockets use a "unix:" prefix so
+    they never collide with TCP keys.  The port is excluded so that all
+    connections from the same host share one rate-limit bucket. *)
+let key_of_sockaddr client_addr =
+  match client_addr with
+  | `Tcp (ip, _) ->
+      let raw = (ip :> string) in
+      (match String.length raw with
+       | 4 ->
+           Printf.sprintf "%d.%d.%d.%d"
+             (Char.code raw.[0]) (Char.code raw.[1])
+             (Char.code raw.[2]) (Char.code raw.[3])
+       | 16 ->
+           Printf.sprintf "%x:%x:%x:%x:%x:%x:%x:%x"
+             ((Char.code raw.[0] lsl 8) lor Char.code raw.[1])
+             ((Char.code raw.[2] lsl 8) lor Char.code raw.[3])
+             ((Char.code raw.[4] lsl 8) lor Char.code raw.[5])
+             ((Char.code raw.[6] lsl 8) lor Char.code raw.[7])
+             ((Char.code raw.[8] lsl 8) lor Char.code raw.[9])
+             ((Char.code raw.[10] lsl 8) lor Char.code raw.[11])
+             ((Char.code raw.[12] lsl 8) lor Char.code raw.[13])
+             ((Char.code raw.[14] lsl 8) lor Char.code raw.[15])
+       | _ -> "unknown")
+  | `Unix path -> "unix:" ^ Filename.basename path
+
+(** {1 Global Startup Helper} *)
+
+(** Start the global rate-limit cleanup loop.  Call once at server startup. *)
+let start_global_cleanup_loop ~sw ~clock =
+  start_cleanup_loop ~sw ~clock (Eio.Lazy.force global)

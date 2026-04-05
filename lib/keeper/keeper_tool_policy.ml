@@ -140,10 +140,13 @@ let preset_allowlist preset =
   let name = preset_name_of_tool_preset preset in
   match !policy_config with
   | None ->
-    Log.Keeper.error
-      "tool policy config not loaded; preset '%s' resolves to empty. \
-       Call init_policy_config at startup." name;
-    []
+    let msg =
+      Printf.sprintf
+        "tool policy config not loaded; preset '%s' cannot be resolved. \
+         Call init_policy_config at startup." name
+    in
+    Log.Keeper.error "%s" msg;
+    failwith msg
   | Some cfg ->
     let injected = injected_masc_tool_names () in
     let masc_filter tool_name = List.mem tool_name injected in

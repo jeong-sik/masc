@@ -57,20 +57,31 @@ let collect_table_names (doc : Keeper_toml_loader.toml_doc) ~(prefix : string) :
 
 (* ── Loading ──────────────────────────────────────────────────────── *)
 
-let parse_groups (doc : Keeper_toml_loader.toml_doc) : (string, group_source) Hashtbl.t =
+let parse_groups (doc : Keeper_toml_loader.toml_doc) : ((string, group_source) Hashtbl.t, string) result =
   let tbl = Hashtbl.create 16 in
   let names = collect_table_names doc ~prefix:"groups" in
-  List.iter (fun name ->
-    let source =
-      match toml_string_opt_at doc "groups" (name ^ ".shard") with
-      | Some shard_name -> Shard_ref shard_name
-      | None ->
-        let tools = toml_string_list_at doc "groups" (name ^ ".tools") in
-        Static tools
-    in
-    Hashtbl.replace tbl name source
-  ) names;
-  tbl
+  let errors =
+    List.filter_map (fun name ->
+      let shard = toml_string_opt_at doc "groups" (name ^ ".shard") in
+      let tools = toml_string_list_at doc "groups" (name ^ ".tools") in
+      match shard, tools with
+      | Some _, _ :: _ ->
+        Some (Printf.sprintf
+          "groups.%s: define exactly one of 'shard' or non-empty 'tools', not both" name)
+      | Some shard_name, [] ->
+        Hashtbl.replace tbl name (Shard_ref shard_name);
+        None
+      | None, _ :: _ ->
+        Hashtbl.replace tbl name (Static tools);
+        None
+      | None, [] ->
+        Some (Printf.sprintf
+          "groups.%s: must define exactly one of 'shard' or non-empty 'tools'" name)
+    ) names
+  in
+  match errors with
+  | [] -> Ok tbl
+  | _ -> Error (String.concat "; " errors)
 
 let parse_masc_groups (doc : Keeper_toml_loader.toml_doc) : (string, string list) Hashtbl.t =
   let tbl = Hashtbl.create 8 in
@@ -108,12 +119,37 @@ let load ~base_path : (t, string) result =
     match Keeper_toml_loader.parse_toml content with
     | Error msg -> Error (Printf.sprintf "tool policy config parse error: %s" msg)
     | Ok doc ->
-      let groups = parse_groups doc in
-      let masc_groups = parse_masc_groups doc in
-      let presets = parse_presets doc in
-      Log.Keeper.info "tool_policy_config: loaded %d groups, %d masc_groups, %d presets from %s"
-        (Hashtbl.length groups) (Hashtbl.length masc_groups) (Hashtbl.length presets) path;
-      Ok { groups; masc_groups; presets }
+      match parse_groups doc with
+      | Error msg -> Error (Printf.sprintf "tool policy config group error: %s" msg)
+      | Ok groups ->
+        let masc_groups = parse_masc_groups doc in
+        let presets = parse_presets doc in
+        (* Validate that each preset's group references are defined *)
+        let ref_errors =
+          Hashtbl.fold (fun preset_name def acc ->
+            let bad_groups =
+              List.filter (fun g -> not (Hashtbl.mem groups g)) def.groups
+            in
+            let bad_masc_groups =
+              List.filter (fun g -> not (Hashtbl.mem masc_groups g)) def.masc_groups
+            in
+            let errs =
+              List.map (fun g ->
+                Printf.sprintf "presets.%s: group '%s' is not defined" preset_name g)
+                bad_groups
+              @ List.map (fun g ->
+                Printf.sprintf "presets.%s: masc_group '%s' is not defined" preset_name g)
+                bad_masc_groups
+            in
+            acc @ errs
+          ) presets []
+        in
+        (match ref_errors with
+        | _ :: _ -> Error (String.concat "; " ref_errors)
+        | [] ->
+          Log.Keeper.info "tool_policy_config: loaded %d groups, %d masc_groups, %d presets from %s"
+            (Hashtbl.length groups) (Hashtbl.length masc_groups) (Hashtbl.length presets) path;
+          Ok { groups; masc_groups; presets })
 
 (* ── Resolution ───────────────────────────────────────────────────── *)
 

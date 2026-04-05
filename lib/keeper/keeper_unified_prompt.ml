@@ -73,9 +73,8 @@ let line_block label value =
 let format_room_signal_salience salience =
   Meta_cognition.salience_to_string salience
 
-let actionable_routes ~(meta : Keeper_types.keeper_meta)
+let actionable_routes ~(allowed_tools : string list)
     (observation : Keeper_world_observation.world_observation) : string list =
-  let allowed_tools = Keeper_tool_policy.keeper_allowed_tool_names meta in
   let can tool_name = List.mem tool_name allowed_tools in
   let available tool_names =
     List.filter (fun tool_name -> can tool_name) tool_names
@@ -359,16 +358,16 @@ let build_prompt ~(meta : Keeper_types.keeper_meta)
     Buffer.add_string ubuf "\n### Autonomous Trigger\n";
     Buffer.add_string ubuf (String.concat "\n" autonomous_trigger);
     Buffer.add_string ubuf "\n");
-  (* Tool inventory — show the LLM which tools it can call this cycle *)
+  (* Keeper tool inventory — show the keeper_* subset available this cycle *)
   let allowed_tools = Keeper_tool_policy.keeper_allowed_tool_names meta in
   let keeper_tools =
     List.filter (fun n -> String.starts_with ~prefix:"keeper_" n) allowed_tools
   in
   if keeper_tools <> [] then (
-    Buffer.add_string ubuf "\n### Your Tools\n";
+    Buffer.add_string ubuf "\n### Keeper Tools\n";
     Buffer.add_string ubuf (String.concat ", " keeper_tools);
     Buffer.add_string ubuf "\n");
-  let routes = actionable_routes ~meta observation in
+  let routes = actionable_routes ~allowed_tools observation in
   if routes <> [] then (
     Buffer.add_string ubuf "\n### Actionable Routes\n";
     Buffer.add_string ubuf (String.concat "\n" routes);

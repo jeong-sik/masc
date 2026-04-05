@@ -331,44 +331,14 @@ let latest_state_snapshot_from_messages (messages : Agent_sdk.Types.message list
   in
   loop (List.rev messages)
 
-let priority_for_kind ~soul_profile ~(kind : string) : int =
-  match soul_profile, kind with
-  | "safety", "constraints" -> 100
-  | "safety", "open_question" -> 88
-  | "safety", "decision" -> 82
-  | "safety", "goal" -> 76
-  | "safety", "next" -> 70
-  | "safety", "progress" -> 62
-  | "delivery", "next" -> 100
-  | "delivery", "decision" -> 90
-  | "delivery", "goal" -> 80
-  | "delivery", "progress" -> 74
-  | "delivery", "open_question" -> 68
-  | "delivery", "constraints" -> 62
-  | "research", "open_question" -> 100
-  | "research", "decision" -> 92
-  | "research", "progress" -> 84
-  | "research", "goal" -> 76
-  | "research", "next" -> 70
-  | "research", "constraints" -> 62
-  | "relationship", "goal" -> 96
-  | "relationship", "progress" -> 90
-  | "relationship", "constraints" -> 84
-  | "relationship", "decision" -> 78
-  | "relationship", "open_question" -> 72
-  | "relationship", "next" -> 66
-  | "minimal", "goal" -> 100
-  | "minimal", "next" -> 92
-  | "minimal", "decision" -> 80
-  | "minimal", "constraints" -> 74
-  | "minimal", "open_question" -> 70
-  | "minimal", "progress" -> 60
-  | _, "constraints" -> 90
-  | _, "decision" -> 86
-  | _, "next" -> 80
-  | _, "open_question" -> 76
-  | _, "goal" -> 72
-  | _, "progress" -> 66
+let priority_for_kind ~(kind : string) : int =
+  match kind with
+  | "constraints" -> 90
+  | "decision" -> 86
+  | "next" -> 80
+  | "open_question" -> 76
+  | "goal" -> 72
+  | "progress" -> 66
   | _ -> 60
 
 let contains_any_ci (text : string) (needles : string list) : bool =
@@ -379,76 +349,41 @@ let contains_any_ci (text : string) (needles : string list) : bool =
       n <> "" && Re.execp (Re.str n |> Re.compile) hay)
     needles
 
-let profile_signal_bonus ~(profile : string) ~(kind : string) ~(text : string) : int =
-  let safety_words = [
+let signal_bonus ~(text : string) : int =
+  let high_priority_words = [
     "risk"; "danger"; "unsafe"; "security"; "privacy"; "consent"; "guardrail";
     "위험"; "보안"; "개인정보"; "동의"; "안전";
-  ] in
-  let delivery_words = [
     "blocker"; "deadline"; "ship"; "release"; "next step"; "todo"; "must";
     "막힘"; "차단"; "데드라인"; "배포"; "다음 단계"; "필수";
-  ] in
-  let research_words = [
     "hypothesis"; "evidence"; "experiment"; "measure"; "benchmark"; "assume";
     "가설"; "근거"; "실험"; "측정"; "벤치";
-  ] in
-  let relationship_words = [
     "preference"; "style"; "tone"; "boundary"; "expectation"; "trust";
     "선호"; "스타일"; "톤"; "경계"; "기대"; "신뢰";
+    "required"; "중요"; "critical"
   ] in
   let uncertainty_words = [
     "unknown"; "unclear"; "maybe"; "tbd"; "later"; "todo"; "unsure";
     "모름"; "불명"; "아마"; "추정"; "미정"; "나중";
   ] in
-  let profile_bonus =
-    match profile with
-    | "safety" when kind = "constraints" || contains_any_ci text safety_words -> 14
-    | "delivery" when kind = "next" || kind = "decision" || contains_any_ci text delivery_words ->
-        12
-    | "research" when kind = "open_question" || contains_any_ci text research_words -> 12
-    | "relationship" when kind = "goal" || kind = "progress" || contains_any_ci text relationship_words ->
-        12
-    | "minimal" when kind = "goal" || kind = "next" -> 6
-    | _ -> 0
-  in
-  let global_bonus =
-    if contains_any_ci text ["must"; "required"; "필수"; "중요"; "critical"] then 4 else 0
+  let keyword_bonus =
+    if contains_any_ci text high_priority_words then 8 else 0
   in
   let uncertainty_penalty =
     if contains_any_ci text uncertainty_words then -8 else 0
   in
-  profile_bonus + global_bonus + uncertainty_penalty
+  keyword_bonus + uncertainty_penalty
 
 let tuned_priority_for_candidate
-    ~(soul_profile : string)
     ~(kind : string)
     ~(text : string) : int =
-  let base = priority_for_kind ~soul_profile ~kind in
-  let bonus = profile_signal_bonus ~profile:soul_profile ~kind ~text in
+  let base = priority_for_kind ~kind in
+  let bonus = signal_bonus ~text in
   max 1 (min 100 (base + bonus))
 
-let profile_total_cap (profile : string) : int =
-  match profile with
-  | "minimal" -> 4
-  | "safety" -> 10
-  | "research" -> 11
-  | "relationship" -> 11
-  | _ -> 12
+let total_cap () : int = 12
 
-let profile_kind_caps (profile : string) : (string * int) list =
-  match profile with
-  | "safety" ->
-      [ ("constraints", 3); ("open_question", 2); ("decision", 2); ("goal", 1); ("next", 1); ("progress", 1) ]
-  | "delivery" ->
-      [ ("next", 3); ("decision", 3); ("goal", 2); ("progress", 2); ("constraints", 1); ("open_question", 1) ]
-  | "research" ->
-      [ ("open_question", 3); ("decision", 3); ("progress", 2); ("goal", 1); ("next", 1); ("constraints", 1) ]
-  | "relationship" ->
-      [ ("goal", 2); ("progress", 3); ("constraints", 2); ("decision", 2); ("open_question", 1); ("next", 1) ]
-  | "minimal" ->
-      [ ("goal", 1); ("next", 1); ("decision", 1); ("constraints", 1); ("open_question", 0); ("progress", 0) ]
-  | _ ->
-      [ ("constraints", 2); ("decision", 2); ("next", 2); ("goal", 2); ("progress", 2); ("open_question", 2) ]
+let kind_caps () : (string * int) list =
+  [ ("constraints", 2); ("decision", 2); ("next", 2); ("goal", 2); ("progress", 2); ("open_question", 2) ]
 
 let cap_for_kind (caps : (string * int) list) (kind : string) : int =
   List.assoc_opt kind caps |> Option.value ~default:1

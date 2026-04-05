@@ -216,14 +216,12 @@ let render_keeper_list (state : state) =
         let goal_width = max 10 (cols - 68) in
         let goal_trunc = fit_width k.k_goal goal_width in
         let name_col = Printf.sprintf "%-16s" k.k_name in
-        let profile_col = Printf.sprintf "%-14s" k.k_soul_profile in
         let gen_col = Printf.sprintf "%5d" k.k_generation in
         let model_col = Printf.sprintf "%-20s" model_short in
         let line_content =
           if is_selected then
             Ansi.reverse ^ ">" ^ Ansi.reset
             ^ "  " ^ Ansi.bold ^ name_col ^ Ansi.reset
-            ^ " " ^ (soul_color k.k_soul_profile) ^ profile_col ^ Ansi.reset
             ^ " " ^ gen_col
             ^ "  " ^ model_col
             ^ " " ^ proactive_str
@@ -231,7 +229,6 @@ let render_keeper_list (state : state) =
           else
             " "
             ^ "  " ^ name_col
-            ^ " " ^ (soul_color k.k_soul_profile) ^ profile_col ^ Ansi.reset
             ^ " " ^ gen_col
             ^ "  " ^ model_col
             ^ " " ^ proactive_str
@@ -292,7 +289,6 @@ let render_keeper_detail (state : state) =
     (* Identity section *)
     add_section "Identity";
     add_row "Name:" k.k_name;
-    add_row "Soul Profile:" (Printf.sprintf "%s%s%s" (soul_color k.k_soul_profile) k.k_soul_profile Ansi.reset);
     add_row "Generation:" (string_of_int k.k_generation);
     add_row "Scope:" (Printf.sprintf "%s / %s" k.k_scope_kind k.k_room_scope);
     add_row "Trigger Mode:" k.k_trigger_mode;

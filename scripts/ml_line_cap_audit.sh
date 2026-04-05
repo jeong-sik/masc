@@ -20,50 +20,41 @@ from pathlib import Path
 def parse_args(repo_root: Path) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="scripts/ml_line_cap_audit.sh",
-        description="Audit .ml file line caps across repo roots.",
-    )
+        description="Audit .ml file line caps across repo roots.")
     parser.add_argument("--max-lines", type=int, default=500)
     parser.add_argument(
         "--exceptions-file",
         default=".ci/ml-line-cap-exceptions.txt",
-        help="Repo-relative file containing one exception path per line.",
-    )
+        help="Repo-relative file containing one exception path per line.")
     parser.add_argument(
         "--baseline-file",
         default=".ci/health-baseline.json",
-        help="Repo-relative JSON file with fallback baseline counts.",
-    )
+        help="Repo-relative JSON file with fallback baseline counts.")
     parser.add_argument(
         "--baseline-ref",
         default="",
-        help="Git ref to compare total manual-over-cap count against.",
-    )
+        help="Git ref to compare total manual-over-cap count against.")
     parser.add_argument(
         "--changed-ref",
         default="",
-        help="Git ref to compare changed-file violations against.",
-    )
+        help="Git ref to compare changed-file violations against.")
     parser.add_argument(
         "--json-out",
         default="",
-        help="Write machine-readable JSON output to this path.",
-    )
+        help="Write machine-readable JSON output to this path.")
     parser.add_argument(
         "--fail-on-regression",
         action="store_true",
-        help="Exit non-zero when manual-over-cap count exceeds the baseline.",
-    )
+        help="Exit non-zero when manual-over-cap count exceeds the baseline.")
     parser.add_argument(
         "--fail-on-changed-violations",
         action="store_true",
-        help="Exit non-zero when changed files remain over the cap.",
-    )
+        help="Exit non-zero when changed files remain over the cap.")
     parser.add_argument(
         "--roots",
         nargs="*",
         default=["lib", "bin", "test", "examples"],
-        help="Repo-relative roots to scan.",
-    )
+        help="Repo-relative roots to scan.")
     args = parser.parse_args(sys.argv[2:])
     args.repo_root = repo_root
     return args
@@ -132,8 +123,7 @@ def build_tree_from_ref(repo_root: Path, ref: str, archive_paths: list[str]) -> 
             cwd=repo_root,
             check=True,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
+            stderr=subprocess.PIPE)
     except subprocess.CalledProcessError:
         shutil.rmtree(tmp_dir, ignore_errors=True)
         raise
@@ -181,8 +171,7 @@ def compute_changed_paths(repo_root: Path, ref: str, roots: list[str]) -> list[s
         check=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        text=True,
-    )
+        text=True)
     paths = []
     for raw in diff.stdout.splitlines():
         path = raw.strip()
@@ -256,8 +245,7 @@ def main() -> int:
             ["date", "-u", "+%Y-%m-%dT%H:%M:%SZ"],
             check=True,
             stdout=subprocess.PIPE,
-            text=True,
-        ).stdout.strip(),
+            text=True).stdout.strip(),
         "max_lines": args.max_lines,
         "roots": args.roots,
         "exceptions_file": args.exceptions_file,

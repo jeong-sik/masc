@@ -18,7 +18,7 @@
 Keeper는 MASC의 자율 에이전트 하네스(harness)다. OAS `Agent.run` 위에서 동작하며, 장기 실행(perpetual) 루프, 컨텍스트 관리, 메모리 계층, 심의(deliberation), 승계(succession), 검증(verification)을 담당한다.
 
 Keeper 하나는 다음을 소유한다:
-- **identity**: `keeper_meta` 레코드 (이름, 목표, soul profile, will/needs/desires)
+- **identity**: `keeper_meta` 레코드 (이름, 목표, will/needs/desires)
 - **context**: `working_context` (system prompt + messages + token count + OAS context)
 - **memory**: memory bank + memory policy + recall scoring
 - **lifecycle**: heartbeat fiber + supervisor + checkpoint store
@@ -85,7 +85,6 @@ Keeper의 전체 상태를 담는 레코드. `lib/keeper/keeper_types.ml`에 정
 
 - **Identity**: `name`, `agent_name`, `trace_id`, `trace_history`
 - **Goal (3-horizon)**: `goal`, `short_goal`, `mid_goal`, `long_goal`
-- **Self-Model (BDI)**: `soul_profile`, `will`, `needs`, `desires`
 - **Model**: `cascade_name`, `last_model_used`, derived `active_model`
 - **Capability**: `policy_voice_enabled`, `allowed_paths`
 - **Scope**: `scope_kind`, `room_scope` (`current` only compatibility field), `mention_targets`
@@ -158,19 +157,6 @@ type fiber_health =
 ```
 
 Supervisor가 keeper fiber의 건강 상태를 추적하는 데 사용.
-
-### 3.6 soul_profile
-
-| 값 | 별칭 | 의미 |
-|----|------|------|
-| `balanced` | `default` | 범용 (기본값) |
-| `safety` | `steward` | 안전 우선, 리스크 보존 |
-| `delivery` | `executor` | 실행/산출물 우선 |
-| `research` | `analyst` | 가설 검증 우선 |
-| `relationship` | `companion` | 관계/소통 우선 |
-| `minimal` | `lean` | 최소 프롬프트 |
-
-Soul profile에 따라 compaction 시 보존 우선순위가 달라진다(`soul_profile_policy`).
 
 ---
 
@@ -443,10 +429,7 @@ Keeper는 idle 상태에서 주기적으로 자발적 행동을 생성한다.
 
 ### 10.2 Fallback Reply
 
-3회 모두 실패하면 deterministic fallback 템플릿 사용. Soul profile에 따라 문구가 달라진다:
-- `safety`: "리스크 우선 점검을 마쳤고"
-- `delivery`: "실행 단위로 정리해 두었고"
-- `research`: "가설 검증 포인트를 갱신했고"
+3회 모두 실패하면 deterministic fallback 템플릿을 사용한다. 모든 keeper에 동일한 통합 fallback 문구가 적용된다.
 
 ---
 
@@ -506,7 +489,6 @@ Keeper turn에서 어떤 "skill" 경로를 사용할지 결정:
 허용 skill 목록: `masc-heartbeat`, `masc-keeper-autonomy`
 
 선택 모드:
-- `SkillSelectHeuristic`: soul_profile + 메시지 내용 기반 규칙 매칭
 - `SkillSelectAgent`: MODEL에 skill 선택을 위임하는 단일 모드
 
 ---
@@ -529,9 +511,7 @@ Keeper turn에서 어떤 "skill" 경로를 사용할지 결정:
 
 `compact_if_needed`에서 `last_reflection_ts`가 `continuity_compaction_cooldown_sec` 이내면 compaction을 건너뛴다. 이는 reflexion 직후 context가 즉시 압축되어 반성 내용이 손실되는 것을 방지한다.
 
-### INV-KEEPER-005: soul_profile 정규화
 
-`canonical_soul_profile`이 입력을 6개 허용 값 중 하나로 정규화한다. 인식 불가 시 `None`을 반환하고 기본값(`balanced`)으로 대체된다.
 
 ### INV-KEEPER-006: proactive quality gate
 

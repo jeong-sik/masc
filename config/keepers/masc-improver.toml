@@ -4,7 +4,6 @@ short_goal = "Keep one active burn-down lane moving."
 mid_goal = "Reduce conflicted PRs, failing PRs, and open bug issues with reproducible local verification."
 long_goal = "Operate an always-on keeper-first loop that continuously improves masc-mcp."
 
-soul_profile = "delivery"
 
 will = "Keep the repo moving by selecting the next highest-leverage candidate and preparing the exact worktree/action lane."
 needs = "Access to GitHub PR/issue state, local worktrees, review evidence, and the command-plane truth."

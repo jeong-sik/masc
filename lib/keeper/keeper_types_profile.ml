@@ -28,32 +28,6 @@ let short_preview ?(max_len = 220) (s : string) : string =
   if String.length s <= max_len then s
   else utf8_safe_prefix_bytes s ~max_bytes:max_len ^ "..."
 
-let soul_profile_policy profile =
-  match profile with
-  | "safety" ->
-      "SOUL profile: safety-first.\n\
-       Preserve first: user safety boundaries, explicit consent constraints, unresolved risks, and trust continuity.\n\
-       Keep policy/guardrail decisions before optimization details."
-  | "delivery" ->
-      "SOUL profile: delivery.\n\
-       Preserve first: concrete goal progress, accepted decisions, blockers, and next executable steps.\n\
-       Keep implementation tradeoffs and done/not-done boundaries."
-  | "research" ->
-      "SOUL profile: research.\n\
-       Preserve first: hypotheses, evidence, source-backed findings, and confidence/uncertainty.\n\
-       Keep why conclusions changed, not just final statements."
-  | "relationship" ->
-      "SOUL profile: relationship.\n\
-       Preserve first: user preferences, tone cues, collaboration style, and long-lived context about expectations.\n\
-       Keep agreements and communication constraints."
-  | "minimal" ->
-      "SOUL profile: minimal.\n\
-       Preserve only high-signal continuity: current goal, single most important decision, top blocker, and next action.\n\
-       Aggressively drop low-value historical detail."
-  | _ ->
-      "SOUL profile: balanced.\n\
-       Preserve in this order: safety/trust continuity, goal progress & decisions, unresolved risks, tool outcomes, style preferences."
-
 let take n xs =
   let rec go i acc = function
     | [] -> List.rev acc
@@ -151,7 +125,6 @@ type keeper_profile_defaults = {
   short_goal : string option;
   mid_goal : string option;
   long_goal : string option;
-  soul_profile : string option;
   will : string option;
   needs : string option;
   desires : string option;
@@ -185,7 +158,6 @@ let empty_keeper_profile_defaults = {
   short_goal = None;
   mid_goal = None;
   long_goal = None;
-  soul_profile = None;
   will = None;
   needs = None;
   desires = None;
@@ -259,19 +231,6 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
   in
   let result =
     Result.bind result (fun () ->
-      match str "soul_profile" with
-      | Some raw ->
-          (match canonical_soul_profile raw with
-           | None ->
-               Error
-                 (Printf.sprintf
-                    "invalid soul_profile '%s' (allowed: balanced, safety, delivery, research, relationship, musician, minimal)"
-                    raw)
-           | Some _ -> Ok ())
-      | None -> Ok ())
-  in
-  let result =
-    Result.bind result (fun () ->
         match str "tool_preset" with
         | Some raw -> (
             match normalize_tool_preset_raw raw with
@@ -297,11 +256,6 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         long_goal =
           str "long_goal"
           |> normalize_goal_horizon_opt;
-        soul_profile =
-          str "soul_profile"
-          |> Option.map (fun s ->
-               canonical_soul_profile s
-               |> Option.value ~default:default_soul_profile);
         will = str "will";
         needs = str "needs";
         desires = str "desires";
@@ -386,28 +340,18 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
           let keeper_json = Yojson.Safe.Util.member "keeper" json in
           match keeper_json with
           | `Assoc _ ->
-              let soul_profile =
-                match Safe_ops.json_string_opt "soul_profile" keeper_json with
-                | None -> None
-                | Some raw -> (
-                    match canonical_soul_profile raw with
-                    | Some profile -> Some profile
-                    | None ->
-                        Log.Keeper.warn
-                          "persona profile %s has invalid soul_profile '%s'; ignoring"
-                          path raw;
-                        None)
-              in
               {
                 manifest_path = Some path;
                 goal = Safe_ops.json_string_opt "goal" keeper_json;
                 short_goal =
-                  normalize_goal_horizon_opt (Safe_ops.json_string_opt "short_goal" keeper_json);
+                  normalize_goal_horizon_opt
+                    (Safe_ops.json_string_opt "short_goal" keeper_json);
                 mid_goal =
-                  normalize_goal_horizon_opt (Safe_ops.json_string_opt "mid_goal" keeper_json);
+                  normalize_goal_horizon_opt
+                    (Safe_ops.json_string_opt "mid_goal" keeper_json);
                 long_goal =
-                  normalize_goal_horizon_opt (Safe_ops.json_string_opt "long_goal" keeper_json);
-                soul_profile;
+                  normalize_goal_horizon_opt
+                    (Safe_ops.json_string_opt "long_goal" keeper_json);
                 will = Safe_ops.json_string_opt "will" keeper_json;
                 needs = Safe_ops.json_string_opt "needs" keeper_json;
                 desires = Safe_ops.json_string_opt "desires" keeper_json;

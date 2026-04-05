@@ -154,7 +154,6 @@ val deliberation_budget_check :
     tool input object. *)
 val build_deliberation_prompt :
   keeper_name:string ->
-  soul_profile:string ->
   goal:string ->
   triggers:deliberation_trigger list ->
   world_observation ->

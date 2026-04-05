@@ -175,6 +175,15 @@ let test_is_local_provider_cloud () =
   check bool "unknown is not local" false
     (Adapter.is_local_provider "unknown-provider")
 
+let test_make_local_label () =
+  check string "make_local_label basic" "llama:qwen3.5"
+    (Adapter.make_local_label "qwen3.5");
+  check string "make_local_label preserves model id" "llama:some-model"
+    (Adapter.make_local_label "some-model");
+  (* Verify make_local_label uses the same prefix as the llama adapter *)
+  check string "prefix matches cn_llama" Adapter.local_cascade_prefix
+    Adapter.cn_llama
+
 let test_default_local_fallback_label () =
   let label = Adapter.default_local_fallback_label () in
   check bool "fallback label contains colon" true
@@ -230,6 +239,7 @@ let () =
             test_is_local_provider_custom;
           test_case "is_local_provider cloud" `Quick
             test_is_local_provider_cloud;
+          test_case "make_local_label" `Quick test_make_local_label;
           test_case "default_local_fallback_label" `Quick
             test_default_local_fallback_label;
         ] );

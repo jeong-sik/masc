@@ -447,7 +447,6 @@ let handle_keeper_status ctx args : tool_result =
              ("mid", `String m.mid_goal);
              ("long", `String m.long_goal);
            ]);
-           ("soul_profile", `String m.soul_profile);
            ("will", if String.trim m.will = "" then `Null else `String m.will);
            ("needs", if String.trim m.needs = "" then `Null else `String m.needs);
            ("desires", if String.trim m.desires = "" then `Null else `String m.desires);

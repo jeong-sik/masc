@@ -167,8 +167,7 @@ async function gotoHash(page, hash, expectText) {
   await page.waitForFunction(
     expected => document.body && document.body.innerText.includes(expected),
     expectText,
-    { timeout: 15000 },
-  );
+    { timeout: 15000 });
 }
 
 async function mcpCall(name, args) {

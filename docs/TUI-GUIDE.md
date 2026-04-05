@@ -58,7 +58,6 @@ Keeper: sangsu
 
   Identity
   Name:                  sangsu
-  Soul Profile:          relationship
   Generation:            0
 
   Live Context

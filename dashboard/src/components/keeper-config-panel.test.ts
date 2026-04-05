@@ -12,7 +12,6 @@ const mocks = vi.hoisted(() => ({
       short_goal: 'Diagnose agent liveness',
       mid_goal: 'Reduce restart confusion',
       long_goal: 'Keep command plane stable',
-      soul_profile: 'delivery',
       will: 'Stay on call',
       needs: 'Accurate runtime state',
       desires: 'Clear operator feedback',

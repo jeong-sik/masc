@@ -384,7 +384,7 @@ let build_deliberation_prompt
 {"action":"multi_step","params":{"steps":[{"action":"task_claim","params":{"task_id":"task-1","reason":"urgent"}},{"action":"broadcast","params":{"message":"Claimed task-1"}}]},"reasoning":"Claim and announce","confidence":0.7}|}
   in
   match
-    Prompt_registry.render_prompt_template "keeper.deliberation"
+    Prompt_registry.render_prompt_template Keeper_prompt_names.deliberation
       [
         ("keeper_name", keeper_name);
         ("soul_profile", soul_profile);
@@ -396,7 +396,7 @@ let build_deliberation_prompt
       ]
   with
   | Ok value -> value
-  | Error _ -> Prompt_registry.get_prompt "keeper.deliberation"
+  | Error _ -> Prompt_registry.get_prompt Keeper_prompt_names.deliberation
 
 type structured_result = {
   action: deliberation_action;

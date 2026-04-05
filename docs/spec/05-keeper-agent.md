@@ -452,16 +452,15 @@ Keeper는 idle 상태에서 주기적으로 자발적 행동을 생성한다.
 
 ## 11. Self-Model Drift
 
-**소스**: `keeper_prompt.ml` (`apply_self_model_drift`)
+**소스**: `keeper_config.ml` (`compact_self_model_text`)
 
-Keeper는 작업 내용에 따라 자기 모델(will, needs, desires)을 점진적으로 변이시킨다.
+Keeper는 자기 모델(will, needs, desires)의 텍스트를 상한 내로 유지한다.
 
 - `drift_enabled`: 드리프트 활성화 여부
-- `drift_min_turn_gap`: 최소 턴 간격 (기본 6턴)
 - `drift_max_clauses`: 최대 절 수 (기본 6개)
 - `drift_max_chars`: 최대 문자 수 (기본 320자)
 
-Semicolon으로 구분된 절 목록에 새 절을 추가하고, 상한 초과 시 오래된 절을 제거(`take_last`).
+`compact_self_model_text`가 semicolon으로 구분된 절 목록을 상한 내로 유지하며, 초과 시 오래된 절을 제거(`take_last`).
 
 ---
 

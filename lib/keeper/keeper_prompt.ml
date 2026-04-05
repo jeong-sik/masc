@@ -11,7 +11,7 @@ let exact_direct_mention_present ~(targets : string list) (content : string) :
   Mention.any_mentioned ~targets content
 
 let keeper_constitution () =
-  Prompt_registry.get_prompt "keeper.constitution"
+  Prompt_registry.get_prompt Keeper_prompt_names.constitution
 
 let build_keeper_system_prompt
     ~goal ~short_goal ~mid_goal ~long_goal ~soul_profile ~will ~needs ~desires
@@ -55,7 +55,7 @@ let build_keeper_system_prompt
     [
       persona_block;
       "<world>\n";
-      Prompt_registry.get_prompt "keeper.world";
+      Prompt_registry.get_prompt Keeper_prompt_names.world;
       "\n</world>\n\
        \n\
        <identity>\n\
@@ -105,7 +105,7 @@ let build_keeper_system_prompt
       desires;
       "\n\
        <capabilities>\n";
-      Prompt_registry.get_prompt "keeper.capabilities";
+      Prompt_registry.get_prompt Keeper_prompt_names.capabilities;
       "\n</capabilities>\n\
        \n\
        ";
@@ -141,12 +141,5 @@ let append_trait_clause ~(base : string) ~(clause : string) : string =
   else if b = "" then c
   else if contains_ci b c then b
   else Printf.sprintf "%s; %s" b c
-
-let apply_self_model_drift
-    ~(meta : keeper_meta)
-    ~(user_message : string)
-    ~(work_kind : string) : keeper_meta * bool * string option =
-  ignore (user_message, work_kind);
-  (meta, false, None)
 
 include Keeper_text_processing

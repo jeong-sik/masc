@@ -51,8 +51,8 @@ let handle_keeper_down ctx args : tool_result =
          in
          (write_meta_logged ctx.config retained;
           Keeper_registry.update_meta ~base_path:ctx.config.base_path name retained;
-          Keeper_registry.set_state ~base_path:ctx.config.base_path name
-            Keeper_registry.Paused));
+          ignore (Keeper_registry.dispatch_event ~base_path:ctx.config.base_path name
+            Keeper_state_machine.Operator_pause)));
       if remove_session then (
         let rec rm_rf path =
           if Sys.file_exists path then begin

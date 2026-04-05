@@ -1,7 +1,8 @@
 (** Keeper_toml_loader -- load keeper configuration from TOML files.
 
     Minimal TOML parser: tables, strings (basic + multiline),
-    integers, floats, booleans, and string arrays.
+    integers, floats, booleans, and string arrays (single-line and
+    multi-line).
     Enough to express all keeper_profile_defaults fields. *)
 
 type toml_value =
@@ -63,6 +64,20 @@ let extract_trailing_quotes suffix =
     else 0
   in
   (String.make count '"', String.sub suffix count (n - count))
+
+let has_closing_bracket s =
+  let len = String.length s in
+  let rec scan i in_str =
+    if i >= len then false
+    else if in_str then
+      if s.[i] = '"' then scan (i + 1) false
+      else if s.[i] = '\\' && i + 1 < len then scan (i + 2) true
+      else scan (i + 1) true
+    else if s.[i] = '"' then scan (i + 1) true
+    else if s.[i] = ']' then true
+    else scan (i + 1) false
+  in
+  scan 0 false
 
 let strip_comment (line : string) : string =
   (* Find # that is not inside a quoted string. *)
@@ -234,6 +249,11 @@ let parse_toml (content : string) : (toml_doc, string) result =
   let ml_buf = ref (Buffer.create 0) in
   let ml_active = ref false in
   let ml_start_line = ref 0 in
+  (* Multiline array accumulation state *)
+  let arr_key = ref "" in
+  let arr_buf = ref (Buffer.create 0) in
+  let arr_active = ref false in
+  let arr_start_line = ref 0 in
   List.iter (fun raw_line ->
     incr line_num;
     let raw_line = strip_trailing_cr raw_line in
@@ -267,6 +287,23 @@ let parse_toml (content : string) : (toml_doc, string) result =
         | None ->
           if Buffer.length !ml_buf > 0 then Buffer.add_char !ml_buf '\n';
           Buffer.add_string !ml_buf raw_line
+      end
+      else if !arr_active then begin
+        (* Inside a multiline array -- accumulate until closing ] *)
+        let line = strip_comment raw_line in
+        let trimmed = String.trim line in
+        if trimmed <> "" then begin
+          if Buffer.length !arr_buf > 0 then Buffer.add_char !arr_buf ' ';
+          Buffer.add_string !arr_buf trimmed
+        end;
+        if has_closing_bracket trimmed then begin
+          let assembled = Buffer.contents !arr_buf in
+          (match parse_value assembled with
+           | Ok v -> acc := (!arr_key, v) :: !acc
+           | Error e ->
+             error := Some (Printf.sprintf "line %d: %s" !arr_start_line e));
+          arr_active := false
+        end
       end
       else begin
         let line = strip_comment raw_line in
@@ -336,6 +373,15 @@ let parse_toml (content : string) : (toml_doc, string) result =
                   ml_active := true;
                   ml_start_line := !line_num
               end
+              else if String.length trimmed > 0 && trimmed.[0] = '['
+                      && not (has_closing_bracket trimmed) then begin
+                (* Start of multiline array *)
+                arr_key := full_key;
+                arr_buf := Buffer.create 256;
+                Buffer.add_string !arr_buf trimmed;
+                arr_active := true;
+                arr_start_line := !line_num
+              end
               else
                 match parse_value value_raw with
                 | Ok v -> acc := (full_key, v) :: !acc
@@ -347,6 +393,8 @@ let parse_toml (content : string) : (toml_doc, string) result =
   ) lines;
   if !ml_active && Option.is_none !error then
     error := Some (Printf.sprintf "line %d: unterminated multiline string" !ml_start_line);
+  if !arr_active && Option.is_none !error then
+    error := Some (Printf.sprintf "line %d: unterminated multiline array" !arr_start_line);
   match !error with
   | Some e -> Error e
   | None -> Ok (List.rev !acc)

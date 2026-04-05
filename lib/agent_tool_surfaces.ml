@@ -529,54 +529,16 @@ let admin_tool_names : string list =
   Tool_catalog.tools_for_surface Tool_catalog.Admin
 
 (** Role-catalog candidates for coordinators and fleet leaders.
-    These are curated subsets, not surface SSOTs. [build_tool_catalog]
-    filters them against surfaced tool names so stale hardcoded entries
-    cannot escape into prompts. *)
+    SSOT: Tool_catalog_surfaces.coordination_role_tools.
+    [build_tool_catalog] filters against surfaced tool names so stale
+    entries cannot escape into prompts. *)
 let coordination_tool_names : string list =
-  [
-    "masc_status";
-    "masc_tasks";
-    "masc_add_task";
-    "masc_broadcast";
-    "masc_join";
-    "masc_leave";
-    "masc_who";
-    "masc_heartbeat";
-    "masc_messages";
-    "masc_board_list";
-    "masc_board_post";
-    "masc_board_comment";
-    "masc_board_vote";
-    "masc_board_get";
-    "masc_claim_next";
-    "masc_transition";
-    "masc_team_session_start";
-    "masc_team_session_status";
-    "masc_team_session_events";
-    "masc_team_session_report";
-    "masc_team_session_list";
-    "masc_spawn";
-  ]
+  Tool_catalog_surfaces.coordination_role_tools
 
 (** Role-catalog candidates for worker agents.
-    These are curated subsets, not surface SSOTs. *)
+    SSOT: Tool_catalog_surfaces.execution_role_tools. *)
 let execution_tool_names : string list =
-  [
-    "masc_heartbeat";
-    "masc_team_session_step";
-    "masc_team_session_status";
-    "masc_claim_next";
-    "masc_transition";
-    "masc_broadcast";
-    "masc_code_search";
-    "masc_code_symbols";
-    "masc_code_read";
-    "masc_run_init";
-    "masc_run_log";
-    "masc_run_deliverable";
-    "masc_run_get";
-    "masc_tool_help";
-  ]
+  Tool_catalog_surfaces.execution_role_tools
 
 let filter_catalog_to_available ~available names =
   let available = SS.of_list available in

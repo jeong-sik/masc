@@ -471,6 +471,7 @@
    keeper_unified_prompt
    keeper_unified_turn
 
+   keeper_prompt_names
    keeper_prompt
    keeper_coordination
    keeper_execution

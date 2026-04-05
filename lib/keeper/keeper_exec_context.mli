@@ -25,7 +25,6 @@ val count_tokens : string -> Agent_sdk.Types.message list -> int
 val token_count : working_context -> int
 val message_count : working_context -> int
 val context_ratio : working_context -> float
-val exceeds_threshold : working_context -> float -> bool
 val create : system_prompt:string -> max_tokens:int -> working_context
 val set_system_prompt : working_context -> system_prompt:string -> working_context
 val append : working_context -> Agent_sdk.Types.message -> working_context

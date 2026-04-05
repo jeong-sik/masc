@@ -71,7 +71,7 @@ let interruptible_sleep ~clock ~stop ~wakeup duration =
 let wakeup_keeper name =
   Keeper_registry.all ()
   |> List.iter (fun (entry : Keeper_registry.registry_entry) ->
-    if String.equal entry.name name && entry.state = Keeper_registry.Running
+    if String.equal entry.name name && entry.phase = Keeper_state_machine.Running
     then Keeper_registry.wakeup ~base_path:entry.base_path name)
 ;;
 
@@ -94,7 +94,7 @@ let wakeup_relevant_keeper_for_board_signal
   let running_names =
     Keeper_registry.all ()
     |> List.filter_map (fun (e : Keeper_registry.registry_entry) ->
-      if e.state = Keeper_registry.Running then Some e.name else None)
+      if e.phase = Keeper_state_machine.Running then Some e.name else None)
   in
   let candidates =
     running_names
@@ -272,6 +272,26 @@ let write_heartbeat_snapshot
         ~response_alignment
         ()
     in
+    (* RFC-0002: dispatch Context_measured event through state machine *)
+    let _dispatch_result =
+      Keeper_registry.dispatch_event
+        ~base_path:ctx.config.base_path
+        meta_current.name
+        (Keeper_state_machine.Context_measured {
+          context_ratio = Keeper_exec_context.context_ratio c;
+          message_count = Keeper_exec_context.message_count c;
+          token_count = Keeper_exec_context.token_count c;
+          auto_rules = {
+            Keeper_state_machine.reflect = auto_rules.reflect;
+            plan = auto_rules.plan;
+            compact = auto_rules.compact;
+            handoff = auto_rules.handoff;
+            guardrail_stop = auto_rules.guardrail_stop;
+            guardrail_reason = auto_rules.guardrail_reason;
+            goal_drift = auto_rules.goal_drift;
+          };
+        })
+    in
     let snapshot =
       `Assoc
         [ "ts", `String (now_iso ())
@@ -398,10 +418,21 @@ let sync_keeper_presence
         Log.Keeper.warn
           "room presence returned empty rooms (%d/%d)"
           !consecutive_failures
-          (max_consecutive_heartbeat_failures ()))
+          (max_consecutive_heartbeat_failures ());
+        (* RFC-0002: dispatch heartbeat failure *)
+        ignore (Keeper_registry.dispatch_event
+          ~base_path:ctx.config.base_path meta_current.name
+          (Keeper_state_machine.Heartbeat_failed {
+            consecutive = !consecutive_failures;
+            max_allowed = max_consecutive_heartbeat_failures ();
+          })))
       else (
         consecutive_failures := 0;
-        last_successful_heartbeat_ts := Time_compat.now ());
+        last_successful_heartbeat_ts := Time_compat.now ();
+        (* RFC-0002: dispatch heartbeat success *)
+        ignore (Keeper_registry.dispatch_event
+          ~base_path:ctx.config.base_path meta_current.name
+          Keeper_state_machine.Heartbeat_ok));
       match write_meta ctx.config synced with
       | Ok () -> synced
       | Error e ->
@@ -416,6 +447,13 @@ let sync_keeper_presence
         !consecutive_failures
         (max_consecutive_heartbeat_failures ())
         (Printexc.to_string exn);
+      (* RFC-0002: dispatch heartbeat failure *)
+      ignore (Keeper_registry.dispatch_event
+        ~base_path:ctx.config.base_path meta_current.name
+        (Keeper_state_machine.Heartbeat_failed {
+          consecutive = !consecutive_failures;
+          max_allowed = max_consecutive_heartbeat_failures ();
+        }));
       meta_current)
 ;;
 
@@ -851,6 +889,18 @@ let run_heartbeat_loop
         let turn_fail_count =
           Keeper_registry.get_turn_failures ~base_path:ctx.config.base_path m.name
         in
+        (* RFC-0002: dispatch turn status event *)
+        if turn_fail_count > 0 then
+          ignore (Keeper_registry.dispatch_event
+            ~base_path:ctx.config.base_path m.name
+            (Keeper_state_machine.Turn_failed {
+              consecutive = turn_fail_count;
+              max_allowed = max_consecutive_turn_failures ();
+            }))
+        else
+          ignore (Keeper_registry.dispatch_event
+            ~base_path:ctx.config.base_path m.name
+            Keeper_state_machine.Turn_succeeded);
         if turn_fail_count >= max_consecutive_turn_failures ()
         then
           raise
@@ -1206,7 +1256,12 @@ let record_keeper_stopped
   =
   if resolve_registry_done entry `Stopped
   then (
-    Keeper_registry.set_state ~base_path keeper_name Keeper_registry.Stopped;
+    ignore (Keeper_registry.dispatch_event ~base_path keeper_name
+      Keeper_state_machine.Stop_requested);
+    ignore (Keeper_registry.dispatch_event ~base_path keeper_name
+      Keeper_state_machine.Drain_complete);
+    ignore (Keeper_registry.dispatch_event ~base_path keeper_name
+      (Keeper_state_machine.Fiber_terminated { outcome = "stopped" }));
     publish_keeper_lifecycle ~event:"stopped" ~keeper_name ~detail;
     true)
   else
@@ -1224,7 +1279,8 @@ let record_keeper_crashed
   if resolve_registry_done entry (`Crashed reason)
   then (
     Keeper_registry.set_failure_reason ~base_path keeper_name (Some failure_reason);
-    Keeper_registry.set_state ~base_path keeper_name Keeper_registry.Crashed;
+    ignore (Keeper_registry.dispatch_event ~base_path keeper_name
+      (Keeper_state_machine.Fiber_terminated { outcome = reason }));
     Keeper_registry.record_crash ~base_path keeper_name (Time_compat.now ()) reason;
     Keeper_registry.record_error ~base_path keeper_name reason;
     publish_keeper_lifecycle ~event:"crashed" ~keeper_name ~detail:reason)
@@ -1309,8 +1365,8 @@ let stop_keepalive name =
            | Eio.Cancel.Cancelled _ as e -> raise e
            | _exn -> ())
         | None -> ());
-       (match entry.state with
-        | Keeper_registry.Crashed | Keeper_registry.Dead -> ()
+       (match entry.phase with
+        | Keeper_state_machine.Crashed | Keeper_state_machine.Dead -> ()
         | _ ->
           if
             record_keeper_stopped

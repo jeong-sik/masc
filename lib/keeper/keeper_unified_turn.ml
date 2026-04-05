@@ -71,25 +71,66 @@ let transient_backoff_sec (attempt : int) : float =
   Float.min 4.0 (1.0 *. Float.of_int (1 lsl (attempt - 1)))
 
 let context_overflow_anchor = "available context size ("
+let input_budget_exceeded_anchor = "input token budget exceeded:"
 
-let context_overflow_limit (msg : string) : int option =
-  let lowered = String.lowercase_ascii msg in
-  match find_substring ~needle:context_overflow_anchor lowered with
+let is_ascii_whitespace = function
+  | ' ' | '\n' | '\r' | '\t' -> true
+  | _ -> false
+
+let skip_ascii_whitespace (text : string) idx =
+  let rec loop i =
+    if i >= String.length text then i
+    else if is_ascii_whitespace text.[i] then loop (i + 1)
+    else i
+  in
+  loop idx
+
+let int_run_from (text : string) start_idx : (int * int) option =
+  let rec consume_digits idx =
+    if idx >= String.length text then idx
+    else
+      match text.[idx] with
+      | '0' .. '9' -> consume_digits (idx + 1)
+      | _ -> idx
+  in
+  let end_idx = consume_digits start_idx in
+  if end_idx = start_idx then None
+  else
+    String.sub text start_idx (end_idx - start_idx)
+    |> int_of_string_opt
+    |> Option.map (fun value -> (value, end_idx))
+
+let parse_available_context_limit (msg : string) : int option =
+  match find_substring ~needle:context_overflow_anchor msg with
   | None -> None
   | Some anchor_idx ->
       let start_idx = anchor_idx + String.length context_overflow_anchor in
-      let rec consume_digits idx =
-        if idx >= String.length lowered then idx
-        else
-          match lowered.[idx] with
-          | '0' .. '9' -> consume_digits (idx + 1)
-          | _ -> idx
+      int_run_from msg start_idx |> Option.map fst
+
+let parse_input_budget_exceeded_limit (msg : string) : int option =
+  match find_substring ~needle:input_budget_exceeded_anchor msg with
+  | None -> None
+  | Some anchor_idx ->
+      let used_start =
+        skip_ascii_whitespace msg
+          (anchor_idx + String.length input_budget_exceeded_anchor)
       in
-      let end_idx = consume_digits start_idx in
-      if end_idx = start_idx then None
-      else
-        String.sub lowered start_idx (end_idx - start_idx)
-        |> int_of_string_opt
+      match int_run_from msg used_start with
+      | None -> None
+      | Some (_, used_end) ->
+          let slash_idx = skip_ascii_whitespace msg used_end in
+          if slash_idx >= String.length msg || msg.[slash_idx] <> '/' then None
+          else
+            let limit_start =
+              skip_ascii_whitespace msg (slash_idx + 1)
+            in
+            int_run_from msg limit_start |> Option.map fst
+
+let context_overflow_limit (msg : string) : int option =
+  let lowered = String.lowercase_ascii msg in
+  match parse_available_context_limit lowered with
+  | Some limit -> Some limit
+  | None -> parse_input_budget_exceeded_limit lowered
 
 let should_attempt_context_overflow_retry (msg : string) : bool =
   Option.is_some (context_overflow_limit msg)

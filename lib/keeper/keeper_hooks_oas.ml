@@ -290,9 +290,17 @@ let make_hooks
 
     on_idle = Some (fun event ->
       match event with
-      | Agent_sdk.Hooks.OnIdle { consecutive_idle_turns; _ } ->
-        Log.Keeper.debug "keeper:%s idle_turns=%d"
-          (!meta_ref).name consecutive_idle_turns;
+      | Agent_sdk.Hooks.OnIdle { consecutive_idle_turns; tool_names } ->
+        let tools_str = match tool_names with
+          | [] -> "<none>"
+          | names -> String.concat ", " names
+        in
+        if consecutive_idle_turns >= 3 then
+          Log.Keeper.warn "keeper:%s idle_turns=%d repeated_tools=[%s]"
+            (!meta_ref).name consecutive_idle_turns tools_str
+        else
+          Log.Keeper.debug "keeper:%s idle_turns=%d tools=[%s]"
+            (!meta_ref).name consecutive_idle_turns tools_str;
         Agent_sdk.Hooks.Continue
       | _ -> Agent_sdk.Hooks.Continue);
   }

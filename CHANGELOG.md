@@ -1,6 +1,19 @@
 # Changelog
 
 
+## [2.241.0] - 2026-04-05
+
+### Changed
+- **SSOT consolidation** -- centralize keeper prompt template names; extract port/host default constants (#5259).
+- **Boundary cleanup** -- move vendor endpoint URLs to Provider_adapter; remove redundant probe check (#5259).
+- **TOML multiline** -- support multi-line TOML arrays; enforce base_path in dashboard (#5255).
+- **Role catalog SSOT** -- consolidate tool names into Tool_catalog_surfaces (#5256).
+- **RFC-0002 Phase 3** -- migrate set_state to dispatch_event (#5250).
+
+### Fixed
+- **Memory growth** -- bound global mutable state to prevent growth on rerun (#5252).
+- **Dead code** -- remove apply_self_model_drift and exceeds_threshold stubs (#5253).
+
 ## [2.240.0] - 2026-04-05
 
 ### Changed

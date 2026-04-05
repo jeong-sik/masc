@@ -70,6 +70,16 @@ let string_of_voice_transport = function
   | Voice_elevenlabs_direct -> "elevenlabs_direct"
   | Voice_mcp -> "voice_mcp"
 
+(** Map OAS Provider_config.provider_kind to canonical string.
+    Exhaustive match: adding a new OAS provider_kind triggers compile error here.
+    TODO: move to OAS Provider_config.string_of_provider_kind when OAS exports it. *)
+let string_of_provider_kind : Llm_provider.Provider_config.provider_kind -> string = function
+  | Anthropic -> "claude-api"
+  | OpenAI_compat -> "codex-api"
+  | Gemini -> "gemini-api"
+  | Glm -> "glm"
+  | Claude_code -> "claude-code"
+
 let normalize_label label = String.trim label |> String.lowercase_ascii
 
 (* ── Canonical adapter names (single definition point) ──────── *)

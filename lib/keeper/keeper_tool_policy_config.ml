@@ -110,14 +110,27 @@ let parse_presets
   ) names;
   tbl
 
+let project_root_from_executable () =
+  let exe = try Sys.executable_name with _ -> "" in
+  let rec walk_up dir =
+    if dir = "/" || dir = "." || dir = "" then None
+    else if Filename.basename dir = "_build" then Some (Filename.dirname dir)
+    else walk_up (Filename.dirname dir)
+  in
+  walk_up (Filename.dirname exe)
+
 let load ~base_path : (t, string) result =
   let rel = "config/tool_policy.toml" in
   let base_candidate = Filename.concat base_path rel in
   let cwd_candidate = Filename.concat (Sys.getcwd ()) rel in
-  (* Try base_path first, then cwd as fallback; skip cwd if identical to base_path *)
+  let exe_candidate = match project_root_from_executable () with
+    | Some root -> Some (Filename.concat root rel)
+    | None -> None
+  in
   let candidates =
-    if base_candidate = cwd_candidate then [ base_candidate ]
-    else [ base_candidate; cwd_candidate ]
+    [ base_candidate; cwd_candidate ]
+    @ (match exe_candidate with Some c -> [ c ] | None -> [])
+    |> List.sort_uniq String.compare
   in
   let rec try_candidates failures = function
     | [] ->

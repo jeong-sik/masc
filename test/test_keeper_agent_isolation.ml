@@ -76,7 +76,6 @@ let known_shared_agent_keeper_tool_names : string list =
     "masc_status";
     "masc_tasks";
     "masc_claim_next";
-    "masc_plan_set_task";
     "masc_transition";
     "masc_add_task";
     "masc_broadcast";

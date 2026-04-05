@@ -787,9 +787,7 @@ let run_turn
           else ctx
         in
         let safe_last_turn_tools =
-          [ "keeper_board_post"; "keeper_board_comment";
-            "keeper_context_status"; "extend_turns";
-            "keeper_time_now"; "keeper_broadcast" ]
+          Keeper_tool_policy.last_turn_safe_tool_names ()
         in
         let all_allowed =
           if is_last_turn then

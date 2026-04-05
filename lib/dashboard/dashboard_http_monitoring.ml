@@ -27,26 +27,66 @@ let tool_call_health_json ?(now_ts = Unix.gettimeofday ()) (config : Room.config
         (Printexc.to_string exn);
       []
   in
-  let total, failures =
+  (* Single pass: aggregate totals and per-tool failure counts. *)
+  let module SMap = Map.Make (String) in
+  let total, failures, per_tool =
     List.fold_left
-      (fun (t, f) (e : Audit_log.audit_entry) ->
+      (fun (t, f, m) (e : Audit_log.audit_entry) ->
         match e.action with
-        | Audit_log.ToolCall _ when e.timestamp >= since ->
-          let f =
-            match e.outcome with Audit_log.Failure _ -> f + 1 | _ -> f
+        | Audit_log.ToolCall tool_name when e.timestamp >= since ->
+          let is_fail =
+            match e.outcome with Audit_log.Failure _ -> true | _ -> false
           in
-          (t + 1, f)
-        | _ -> (t, f))
-      (0, 0) entries
+          let calls, fails =
+            match SMap.find_opt tool_name m with
+            | Some (c, fl) -> (c, fl)
+            | None -> (0, 0)
+          in
+          let m =
+            SMap.add tool_name
+              (calls + 1, if is_fail then fails + 1 else fails)
+              m
+          in
+          (t + 1, (if is_fail then f + 1 else f), m)
+        | _ -> (t, f, m))
+      (0, 0, SMap.empty) entries
   in
   let failure_rate =
     if total = 0 then 0.0 else float_of_int failures /. float_of_int total
+  in
+  (* Top 10 tools by failure count, then by call count. *)
+  let top_failures =
+    SMap.bindings per_tool
+    |> List.filter (fun (_, (_, f)) -> f > 0)
+    |> List.sort (fun (_, (_, f1)) (_, (_, f2)) -> Int.compare f2 f1)
+    |> (fun ls -> if List.length ls > 10 then List.filteri (fun i _ -> i < 10) ls else ls)
+    |> List.map (fun (name, (calls, fails)) ->
+         `Assoc [
+           ("tool", `String name);
+           ("calls", `Int calls);
+           ("failures", `Int fails);
+         ])
+  in
+  (* Top 10 tools by call count (most active). *)
+  let top_active =
+    SMap.bindings per_tool
+    |> List.sort (fun (_, (c1, _)) (_, (c2, _)) -> Int.compare c2 c1)
+    |> (fun ls -> if List.length ls > 10 then List.filteri (fun i _ -> i < 10) ls else ls)
+    |> List.map (fun (name, (calls, fails)) ->
+         `Assoc [
+           ("tool", `String name);
+           ("calls", `Int calls);
+           ("failures", `Int fails);
+         ])
   in
   `Assoc [
     ("window_hours", `Float window_hours);
     ("tool_calls", `Int total);
     ("failures", `Int failures);
     ("failure_rate", `Float failure_rate);
+    ("distinct_tools", `Int (SMap.cardinal per_tool));
+    ("top_failures", `List top_failures);
+    ("top_active", `List top_active);
     ("since_epoch", `Float since);
   ]
 

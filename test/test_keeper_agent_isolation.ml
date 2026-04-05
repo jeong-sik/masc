@@ -15,6 +15,8 @@ module Tool_shard = Masc_mcp.Tool_shard
 module Tool_catalog = Masc_mcp.Tool_catalog
 module Keeper_types = Masc_mcp.Keeper_types
 module Tool_code_write = Masc_mcp.Tool_code_write
+module Keeper_tool_registry = Masc_mcp.Keeper_tool_registry
+module Config = Masc_mcp.Config
 
 (* ============================================================
    Helper: create keeper_meta via meta_of_json (canonical pattern)
@@ -56,6 +58,8 @@ let known_non_keeper_tool_names : string list =
     Tool_shard.coding_tools
     |> List.map (fun (t : Types.tool_schema) -> t.name);
     Tool_code_write.tool_names;
+    (* MASC tools injected via tool_policy.toml masc groups *)
+    Keeper_tool_registry.injected_masc_tool_names ();
   ]
   |> List.sort_uniq String.compare
 
@@ -277,6 +281,7 @@ let test_keeper_agent_name_prefixed () =
 
 let () =
   let base_path = Masc_test_deps.find_project_root () in
+  Keeper_exec_tools.inject_masc_schemas Config.raw_all_tool_schemas;
   Keeper_exec_tools.init_policy_config ~base_path;
   Alcotest.run "Keeper_agent_isolation" [
     ("non_research_prefix", [

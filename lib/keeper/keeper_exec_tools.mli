@@ -102,4 +102,5 @@ val execute_keeper_tool_call :
   ?search_fn:(query:string -> max_results:int -> Yojson.Safe.t) ->
   name:string ->
   input:Yojson.Safe.t ->
+  unit ->
   string

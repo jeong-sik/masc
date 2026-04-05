@@ -927,9 +927,10 @@ let execute_keeper_tool_call
       ~(config : Room.config)
       ~(meta : keeper_meta)
       ~(ctx_work : working_context)
-      ?(search_fn : (query:string -> max_results:int -> Yojson.Safe.t) option = None)
+      ?search_fn
       ~(name : string)
       ~(input : Yojson.Safe.t)
+      ()
   : string
   =
   let args = input in

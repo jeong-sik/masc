@@ -84,21 +84,6 @@ let cn_gemini = "gemini-api"
 let cn_glm = "glm"
 let cn_openrouter = "openrouter"
 
-<<<<<<< HEAD
-||||||| parent of be892854e (refactor(boundary): eliminate remaining vendor match statements in provider_adapter)
-(** Map OAS Provider_config.provider_kind to MASC adapter canonical_name.
-    Note: OpenAI_compat maps to codex-api (cloud); llama (local) uses the
-    same provider_kind but is identified by endpoint, not by this function. *)
-let string_of_provider_kind
-    : Llm_provider.Provider_config.provider_kind -> string
-  = function
-  | Anthropic -> cn_claude
-  | OpenAI_compat -> cn_codex
-  | Gemini -> cn_gemini
-  | Glm -> cn_glm
-  | Claude_code -> "claude-code"
-
-=======
 (** Map OAS Provider_config.provider_kind to MASC adapter canonical_name.
     Note: OpenAI_compat maps to codex-api (cloud); llama (local) uses the
     same provider_kind but is identified by endpoint, not by this function. *)
@@ -111,7 +96,6 @@ let string_of_provider_kind
   | Glm -> cn_glm
   | Claude_code -> cn_claude
 
->>>>>>> be892854e (refactor(boundary): eliminate remaining vendor match statements in provider_adapter)
 (** Single source of truth for all agent adapters.
     spawn_key maps to Spawn.default_configs keys.
     default_voice maps to TTS voice names.

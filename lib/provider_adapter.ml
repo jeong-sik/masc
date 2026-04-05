@@ -860,7 +860,7 @@ let cascade_prefix_of_adapter (adapter : adapter) =
   | v when v = cn_claude -> "claude"
   | v when v = cn_codex -> "openai"
   | v when v = cn_gemini -> "gemini"
-  | other -> other
+  | _ -> adapter.canonical_name
 
 let endpoint_url_of_adapter (adapter : adapter) =
   match adapter.canonical_name with
@@ -905,7 +905,4 @@ let auth_detail_of_provider provider =
         endpoint_url = endpoint_url_of_adapter adapter;
         note = None }
 
-(** Check if a provider has a spawn_key (can be launched via CLI).
-    Delegates to {!is_spawnable_agent} for single source of truth. *)
-let is_spawnable provider =
-  is_spawnable_agent provider
+(* is_spawnable removed: use is_spawnable_agent directly. *)

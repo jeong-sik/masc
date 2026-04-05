@@ -13,7 +13,7 @@
 
 let validate_float_range ~min ~max key v =
   if v >= min && v <= max then Ok ()
-  else Error (Printf.sprintf "%s must be in [%.1f, %.1f], got %.1f" key min max v)
+  else Error (Printf.sprintf "%s must be in [%g, %g], got %g" key min max v)
 
 let validate_int_range ~min ~max key v =
   if v >= min && v <= max then Ok ()
@@ -174,7 +174,7 @@ let keeper_handoff_threshold =
   Runtime_params.register
     ~key:"keeper.handoff_threshold"
     ~default:(fun () -> 0.85)
-    ~validate:(validate_float_range ~min:0.5 ~max:0.99 "keeper_handoff_threshold")
+    ~validate:(validate_float_range ~min:0.5 ~max:0.99 "keeper.handoff_threshold")
     ~serialize:(fun v -> `Float v)
     ~meta:{ description = "Handoff context ratio 임계값";
             value_type = "float";
@@ -188,7 +188,7 @@ let keeper_handoff_cooldown_sec =
   Runtime_params.register
     ~key:"keeper.handoff_cooldown_sec"
     ~default:(fun () -> 300)
-    ~validate:(validate_int_range ~min:30 ~max:3600 "keeper_handoff_cooldown_sec")
+    ~validate:(validate_int_range ~min:30 ~max:3600 "keeper.handoff_cooldown_sec")
     ~serialize:(fun v -> `Int v)
     ~meta:{ description = "Handoff 쿨다운(초)";
             value_type = "int";
@@ -201,7 +201,7 @@ let keeper_handoff_pressure_threshold =
   Runtime_params.register
     ~key:"keeper.handoff_pressure_threshold"
     ~default:(fun () -> 0.88)
-    ~validate:(validate_float_range ~min:0.5 ~max:0.99 "keeper_handoff_pressure_threshold")
+    ~validate:(validate_float_range ~min:0.5 ~max:0.99 "keeper.handoff_pressure_threshold")
     ~serialize:(fun v -> `Float v)
     ~meta:{ description = "Handoff pressure 알림 임계값";
             value_type = "float";

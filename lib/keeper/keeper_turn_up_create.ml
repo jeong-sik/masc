@@ -110,11 +110,15 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
     in
     let auto_handoff = Option.value ~default:true p.auto_handoff_opt in
     let handoff_threshold =
-      Option.value ~default:(Runtime_params.get Governance_registry.keeper_handoff_threshold)
-        p.handoff_threshold_opt in
+      match p.handoff_threshold_opt with
+      | Some threshold -> threshold
+      | None -> Runtime_params.get Governance_registry.keeper_handoff_threshold
+    in
     let handoff_cooldown_sec =
-      Option.value ~default:(Runtime_params.get Governance_registry.keeper_handoff_cooldown_sec)
-        p.handoff_cooldown_sec_opt in
+      match p.handoff_cooldown_sec_opt with
+      | Some cooldown_sec -> cooldown_sec
+      | None -> Runtime_params.get Governance_registry.keeper_handoff_cooldown_sec
+    in
     let tool_access =
       match p.tool_access_opt with
       | Some access -> access

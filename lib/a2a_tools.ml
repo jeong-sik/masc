@@ -672,11 +672,9 @@ let emit_heartbeat_task
     | None -> [])
   @ (match decision_confidence with
     | Some confidence -> [("decision_confidence", `Float confidence)]
-    | None -> [])
-  @ (match auth_token with
-    | Some token -> [("auth_token", `String token)]
     | None -> []))
   in
+  let _ = auth_token in (* Parameter kept for signature compatibility but excluded from SSE *)
   notify_event ~event_type:HeartbeatTask ~agent ~data;
   Log.info ~ctx:"heartbeat"
     "💓 HeartbeatTask emitted for %s (goal: %d chars, tools: %d, worker_mode: %s)"

@@ -29,12 +29,14 @@ let run_all () =
   (* Close all SSE clients *)
   let t_sse = Unix.gettimeofday () in
   let sse_count = Sse.close_all_clients () in
-  Log.Server.info "Closed %d SSE clients (%.2fs)"
-    sse_count (Unix.gettimeofday () -. t_sse);
+  Log.Server.info "Closed %d SSE clients (%.2fs) [remaining conn: %d]"
+    sse_count (Unix.gettimeofday () -. t_sse)
+    (Server_mcp_transport_http_sse.active_session_count ());
   (* Close WebSocket sessions *)
   let t_ws = Unix.gettimeofday () in
   let ws_count = Server_mcp_transport_ws.close_all () in
-  Log.Server.info "Closed %d WebSocket sessions (%.2fs)"
-    ws_count (Unix.gettimeofday () -. t_ws);
+  Log.Server.info "Closed %d WebSocket sessions (%.2fs) [remaining ws: %d]"
+    ws_count (Unix.gettimeofday () -. t_ws)
+    (Server_mcp_transport_ws.session_count ());
   Log.Server.info "[Shutdown] hooks total: %.2fs"
     (Unix.gettimeofday () -. t0)

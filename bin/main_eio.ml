@@ -348,9 +348,12 @@ let run_cmd host port base_path =
             in
             Sse.broadcast (Yojson.Safe.from_string shutdown_data);
             Log.Server.info
-              "[Shutdown] Phase 1/4 NOTIFY: sent to %d SSE clients (%.2fs)"
+              "[Shutdown] Phase 1/4 NOTIFY: sent to %d SSE clients (%.2fs) [active conn: %d, ws: %d]"
               (Sse.client_count ())
-              (Unix.gettimeofday () -. t_phase);
+              (Unix.gettimeofday () -. t_phase)
+              (Masc_mcp.Server_mcp_transport_http_sse.active_session_count ())
+              (Masc_mcp.Server_mcp_transport_ws.session_count ());
+
             Eio.Time.sleep clock shutdown_cfg.notify_delay_s;
             (* Phase 2: Run shutdown hooks with cleanup timeout *)
             let t_phase = Unix.gettimeofday () in
@@ -372,9 +375,11 @@ let run_cmd host port base_path =
                   (Unix.gettimeofday () -. t_phase)
                   (Printexc.to_string exn));
             let now = Unix.gettimeofday () in
-            Log.Server.info "[Shutdown] Phase 2/4 HOOKS: done (%.2fs, total=%.1fs)"
+            Log.Server.info "[Shutdown] Phase 2/4 HOOKS: done (%.2fs, total=%.1fs) [active conn: %d, ws: %d]"
               (now -. t_phase)
-              (now -. t_shutdown_start);
+              (now -. t_shutdown_start)
+              (Masc_mcp.Server_mcp_transport_http_sse.active_session_count ())
+              (Masc_mcp.Server_mcp_transport_ws.session_count ());
             (* Phase 3: Board flush with 2s timeout *)
             let t_phase = Unix.gettimeofday () in
             Log.Server.info "[Shutdown] Phase 3/4 BOARD: flush starting (timeout=2.0s)";
@@ -393,25 +398,33 @@ let run_cmd host port base_path =
                   (Unix.gettimeofday () -. t_phase)
                   (Printexc.to_string exn));
             let now = Unix.gettimeofday () in
-            Log.Server.info "[Shutdown] Phase 3/4 BOARD: done (%.2fs, total=%.1fs)"
+            Log.Server.info "[Shutdown] Phase 3/4 BOARD: done (%.2fs, total=%.1fs) [active conn: %d, ws: %d]"
               (now -. t_phase)
-              (now -. t_shutdown_start);
+              (now -. t_shutdown_start)
+              (Masc_mcp.Server_mcp_transport_http_sse.active_session_count ())
+              (Masc_mcp.Server_mcp_transport_ws.session_count ());
+
             (* Phase 4: Return normally — Eio.Fiber.first will cancel
                run_server cleanly via Eio.Cancel.Cancelled. *)
             Log.Server.info
-              "[Shutdown] Phase 4/4 CANCEL: server cancel (total=%.1fs)"
-              (Unix.gettimeofday () -. t_shutdown_start);
+              "[Shutdown] Phase 4/4 CANCEL: server cancel (total=%.1fs) [active conn: %d, ws: %d]"
+              (Unix.gettimeofday () -. t_shutdown_start)
+              (Masc_mcp.Server_mcp_transport_http_sse.active_session_count ())
+              (Masc_mcp.Server_mcp_transport_ws.session_count ());
             ()
-      in
-      Eio.Fiber.first
-        (fun () -> run_server ~sw ~env ~host ~port ~base_path)
-        await_shutdown_signal;
-      (* Server stopped; close SSE connections after server is down. *)
-      (try close_all_sse_connections ()
-       with
-       | Eio.Cancel.Cancelled _ as e -> raise e
-       | _ -> ());
-      Log.Server.info "MASC MCP: Server stopped, waiting for background fibers..."
+            in
+            Eio.Fiber.first
+            (fun () -> run_server ~sw ~env ~host ~port ~base_path)
+            await_shutdown_signal;
+            (* Server stopped; close SSE connections after server is down. *)
+            (try close_all_sse_connections ()
+            with
+            | Eio.Cancel.Cancelled _ as e -> raise e
+            | _ -> ());
+            Log.Server.info "MASC MCP: Server stopped, waiting for background fibers... [active conn: %d, ws: %d]"
+            (Masc_mcp.Server_mcp_transport_http_sse.active_session_count ())
+            (Masc_mcp.Server_mcp_transport_ws.session_count ())
+
     with
     | Eio.Cancel.Cancelled _ ->
         Log.Server.info "MASC MCP: Server cancelled, waiting for background fibers..."

@@ -261,6 +261,38 @@ let build
   |> Result.map_error Oas.Error.to_string
 
 (* ================================================================ *)
+(* Idle-detail enrichment                                           *)
+(* ================================================================ *)
+
+(** Enrich an [Oas.Error.to_string] detail with the name of the most
+    recently called tool when the error is an "Idle detected" failure.
+    For all other error strings the input is returned unchanged.
+
+    Exposed at module level so it can be unit-tested independently of
+    the network-bound [run] function. *)
+let enrich_idle_detail (detail : string) (messages : Oas.Types.message list) : string =
+  if String.starts_with ~prefix:"Idle detected" detail then
+    let last_tool =
+      let rec find = function
+        | [] -> None
+        | (m : Oas.Types.message) :: rest ->
+          let later = find rest in
+          if Option.is_some later then later
+          else if m.role = Oas.Types.Assistant then
+            List.find_map (function
+              | Oas.Types.ToolUse { name; _ } -> Some name
+              | _ -> None
+            ) m.content
+          else None
+      in
+      find messages
+    in
+    (match last_tool with
+     | Some name -> Printf.sprintf "%s (tool: %s)" detail name
+     | None -> detail)
+  else detail
+
+(* ================================================================ *)
 (* Run                                                               *)
 (* ================================================================ *)
 
@@ -366,6 +398,9 @@ let run
         }
     | Error err ->
       let detail = Oas.Error.to_string err in
+      let detail =
+        enrich_idle_detail detail (Oas.Agent.state agent).messages
+      in
       (match proof with
        | Some p ->
          Log.Misc.warn "oas_worker: agent errored with CDAL proof: run_id=%s status=%s error=%s"

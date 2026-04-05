@@ -23,7 +23,8 @@ let global_fs : Eio.Fs.dir_ty Eio.Path.t option Atomic.t = Atomic.make None
 let set_fs fs =
   Atomic.set global_fs (Some fs)
 
-(** Clear the global fs (for testing or shutdown) *)
+(** Clear the global fs (testing/shutdown only — not called in production).
+    Safe because test runners and shutdown are single-fiber sequential. *)
 let clear_fs () =
   Atomic.set global_fs None
 

@@ -1,11 +1,35 @@
 (** Keeper_tool_policy — tool access control, presets, and allowed-tool resolution.
 
-    Consumes [Keeper_tool_registry] for tool name lists.
+    Preset definitions are loaded from [config/tool_policy.toml] at startup
+    via {!Keeper_tool_policy_config}.  See that module for the config format.
+
+    Consumes [Keeper_tool_registry] for candidate aggregation and core tools.
     Produces the access-policy types and functions used by the dispatch layer. *)
 
 open Keeper_types
 open Keeper_alerting
 open Keeper_tool_registry
+
+(* ─�� Config-driven preset resolution ─────────────────────────────── *)
+
+let policy_config : Keeper_tool_policy_config.t option ref = ref None
+
+let init_policy_config ~base_path =
+  match Keeper_tool_policy_config.load ~base_path with
+  | Ok cfg ->
+    policy_config := Some cfg;
+    Log.Keeper.info "tool policy config loaded: %d presets, %d groups"
+      (List.length (Keeper_tool_policy_config.preset_names cfg))
+      (List.length (Keeper_tool_policy_config.group_names cfg))
+  | Error msg ->
+    Log.Keeper.error "tool policy config load failed: %s" msg
+
+let preset_name_of_tool_preset = function
+  | Minimal -> "minimal"
+  | Messaging -> "messaging"
+  | Coding -> "coding"
+  | Research -> "research"
+  | Full -> "full"
 
 (* ── Denied-tool set (O(1) lookup) ────────────────────────────── *)
 
@@ -102,45 +126,27 @@ let explicit_optional_candidate_tool_names (meta : keeper_meta) =
   |> List.filter (fun name -> List.mem name keeper_optional_board_tool_names)
   |> dedupe_tool_names
 
-(* ── Presets ──────────────────────────────────────────────────── *)
+(* ── Presets (config-driven) ───────────────────────────────────── *)
 
-let preset_allowlist = function
-  | Minimal ->
-      dedupe_tool_names
-        ( keeper_base_tool_names
-        @ select_existing_masc_tool_names [ "masc_status"; "masc_tool_help" ] )
-  | Messaging ->
-      dedupe_tool_names
-        ( keeper_base_tool_names
-        @ keeper_board_tool_names
-        @ keeper_coordination_tool_names
-        @ keeper_voice_tool_names
-        @ keeper_governance_tool_names
-        @ select_existing_masc_tool_names keeper_core_masc_tool_names )
-  | Coding ->
-      dedupe_tool_names
-        ( keeper_base_tool_names
-        @ keeper_filesystem_tool_names
-        @ keeper_filesystem_write_tool_names
-        @ keeper_library_tool_names
-        @ keeper_shell_readonly_tool_names
-        @ keeper_coordination_tool_names
-        @ keeper_coding_shard_tool_names
-        @ keeper_coding_tool_names
-        @ select_existing_masc_tool_names
-            (keeper_core_masc_tool_names @ keeper_coding_masc_tool_names) )
-  | Research ->
-      dedupe_tool_names
-        ( keeper_base_tool_names
-        @ keeper_filesystem_tool_names
-        @ keeper_library_tool_names
-        @ keeper_shell_readonly_tool_names
-        @ keeper_coordination_tool_names
-        @ keeper_board_tool_names
-        @ keeper_governance_tool_names
-        @ keeper_autoresearch_tool_names
-        @ select_existing_masc_tool_names keeper_core_masc_tool_names )
-  | Full -> keeper_base_candidate_tool_names ()
+let preset_allowlist preset =
+  let name = preset_name_of_tool_preset preset in
+  match !policy_config with
+  | None ->
+    Log.Keeper.error
+      "tool policy config not loaded; preset '%s' resolves to empty. \
+       Call init_policy_config at startup." name;
+    []
+  | Some cfg ->
+    let injected = injected_masc_tool_names () in
+    let masc_filter tool_name = List.mem tool_name injected in
+    match Keeper_tool_policy_config.resolve_preset cfg name ~masc_filter () with
+    | Some [] when preset = Full ->
+      (* all_candidates = true: return full candidate set *)
+      keeper_base_candidate_tool_names ()
+    | Some tools -> dedupe_tool_names tools
+    | None ->
+      Log.Keeper.error "preset '%s' not defined in config/tool_policy.toml" name;
+      []
 
 let tool_policy_of_meta (meta : keeper_meta) =
   let allow =

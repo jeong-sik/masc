@@ -498,7 +498,20 @@ let test_path_empty_allowed_permits_all_within_root () =
    Runner
    ============================================================ *)
 
+(* Initialize policy config from project root before running tests.
+   Tests run from _build/default/test/ so we walk up to find the root. *)
+let find_project_root () =
+  let rec walk dir depth =
+    if depth > 10 then dir
+    else if Sys.file_exists (Filename.concat dir "config/tool_policy.toml") then dir
+    else walk (Filename.concat dir "..") (depth + 1)
+  in
+  walk (Sys.getcwd ()) 0
+
 let () =
+  let base_path = find_project_root () in
+  Keeper_exec_tools.inject_masc_schemas Config.raw_all_tool_schemas;
+  Keeper_exec_tools.init_policy_config ~base_path;
   run "Keeper_tool_exposure" [
     ("write_done", [
       test_case "blocks all tools" `Quick test_write_done_blocks_all_tools;

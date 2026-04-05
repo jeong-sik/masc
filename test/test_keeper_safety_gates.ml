@@ -363,6 +363,14 @@ let test_integration_edit_destructive_content () =
 (* ================================================================ *)
 
 let () =
+  let rec find_root dir depth =
+    if depth > 10 then dir
+    else if Sys.file_exists (Filename.concat dir "config/tool_policy.toml") then dir
+    else find_root (Filename.concat dir "..") (depth + 1)
+  in
+  let base_path = find_root (Sys.getcwd ()) 0 in
+  Keeper_exec_tools.inject_masc_schemas Config.raw_all_tool_schemas;
+  Keeper_exec_tools.init_policy_config ~base_path;
   Alcotest.run "Keeper_safety_gates" [
     ("detect_destructive_all_patterns", [
       test_case "rm -rf" `Quick test_detect_rm_rf;

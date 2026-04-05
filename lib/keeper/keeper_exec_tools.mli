@@ -39,6 +39,11 @@ val dedupe_tool_names : string list -> string list
     Keeper_denied tools are excluded at injection time. *)
 val inject_masc_schemas : Types.tool_schema list -> unit
 
+(** Load preset definitions from [config/tool_policy.toml].
+    Must be called once during server initialization, after
+    [inject_masc_schemas]. Presets resolve to empty if not loaded. *)
+val init_policy_config : base_path:string -> unit
+
 (** Check if a tool name is in the Keeper_denied surface (Tool_catalog).
     Denied tools are excluded from both the schema list sent to the LLM
     and blocked at execution time by the pre_tool_use hook. *)

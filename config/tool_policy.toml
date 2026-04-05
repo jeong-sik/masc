@@ -1,0 +1,79 @@
+# Tool Policy Configuration
+#
+# Defines tool groups and presets declaratively.
+# Presets are composed from groups. Each group is a named list of tool names.
+#
+# Groups with `shard = "..."` resolve tool names from Tool_shard at runtime.
+# MASC groups are filtered through select_existing_masc_tool_names at runtime.
+#
+# To add a tool to a preset: add it to a group, then reference that group
+# in the preset's `groups` list.
+
+# ── Tool Groups ─────────────────────────────────────────────────────
+
+[groups.base]
+tools = ["keeper_time_now", "keeper_context_status", "keeper_memory_search"]
+
+[groups.board]
+tools = ["keeper_board_get", "keeper_board_post", "keeper_board_comment", "keeper_board_vote", "keeper_board_list", "keeper_board_stats", "keeper_board_search"]
+
+[groups.coordination]
+tools = ["keeper_tasks_list", "keeper_tasks_audit", "keeper_task_claim", "keeper_task_done", "keeper_broadcast"]
+
+[groups.voice]
+tools = ["keeper_voice_speak", "keeper_voice_listen", "keeper_voice_agent", "keeper_voice_sessions", "keeper_voice_session_start", "keeper_voice_session_end"]
+
+[groups.shell]
+tools = ["keeper_shell_readonly"]
+
+[groups.filesystem]
+tools = ["keeper_fs_read"]
+
+[groups.filesystem_write]
+tools = ["keeper_fs_edit"]
+
+[groups.library]
+tools = ["keeper_library_search", "keeper_library_read"]
+
+# Shard-backed groups: tool names resolved from Tool_shard at runtime.
+[groups.governance]
+shard = "governance"
+
+[groups.coding_shard]
+shard = "coding"
+
+[groups.autoresearch]
+shard = "autoresearch"
+
+# Code-write tools (masc_code_write, masc_code_edit, etc.)
+[groups.coding]
+tools = ["masc_code_write", "masc_code_edit", "masc_code_delete", "masc_code_shell", "masc_code_git"]
+
+# ── MASC Tool Groups ───────────────────────────────────────────────
+
+[masc.core]
+tools = ["masc_status", "masc_heartbeat", "masc_tasks", "masc_claim_next", "masc_transition", "masc_add_task", "masc_batch_add_tasks", "masc_agents", "masc_dashboard", "masc_agent_card", "masc_tool_help", "masc_web_search"]
+
+[masc.coding]
+tools = ["masc_code_search", "masc_code_symbols", "masc_code_read", "masc_worktree_create", "masc_worktree_remove", "masc_worktree_list"]
+
+# ── Presets ─────────────────────────────────────────────────────────
+
+[presets.minimal]
+groups = ["base"]
+masc_tools = ["masc_status", "masc_tool_help"]
+
+[presets.messaging]
+groups = ["base", "board", "coordination", "voice", "governance"]
+masc_groups = ["core"]
+
+[presets.coding]
+groups = ["base", "filesystem", "filesystem_write", "library", "shell", "coordination", "coding_shard", "coding"]
+masc_groups = ["core", "coding"]
+
+[presets.research]
+groups = ["base", "filesystem", "library", "shell", "coordination", "board", "governance", "autoresearch"]
+masc_groups = ["core"]
+
+[presets.full]
+all_candidates = true

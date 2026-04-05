@@ -563,6 +563,14 @@ let test_denied_excluded_from_allowed_names () =
     (List.mem "masc_status" names)
 
 let () =
+  let rec find_root dir depth =
+    if depth > 10 then dir
+    else if Sys.file_exists (Filename.concat dir "config/tool_policy.toml") then dir
+    else find_root (Filename.concat dir "..") (depth + 1)
+  in
+  let base_path = find_root (Sys.getcwd ()) 0 in
+  KET.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas;
+  KET.init_policy_config ~base_path;
   Alcotest.run "Keeper masc bridge"
     [
       ( "injection",

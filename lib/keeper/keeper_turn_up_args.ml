@@ -188,11 +188,18 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
     let voice_agent_id_opt = get_string_opt args "voice_agent_id" in
     let mention_targets_in = get_string_list args "mention_targets" in
     let max_context_override_opt =
+      let min_keeper_context = 65_536 in
       match Safe_ops.json_int_opt "max_context_override" args with
       | None -> None
-      | Some v when v > 0 && v <= 1_000_000 -> Some v
+      | Some v when v >= min_keeper_context && v <= 1_000_000 -> Some v
+      | Some v when v > 0 && v < min_keeper_context ->
+          Log.Misc.warn
+            "max_context_override=%d below minimum %d, clamped to %d"
+            v min_keeper_context min_keeper_context;
+          Some min_keeper_context
       | Some v ->
-          Log.Misc.warn "max_context_override=%d out of range (1..1000000), ignored" v;
+          Log.Misc.warn "max_context_override=%d out of range (%d..1000000), ignored"
+            v min_keeper_context;
           None
     in
     let proactive_enabled_opt = get_bool_opt args "proactive_enabled" in

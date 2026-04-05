@@ -47,8 +47,9 @@ let test_workspace_explicit_paths () =
   let meta = make_meta ~execution_scope:"workspace"
       ~allowed_paths:["src/"; "docs/"] ~name:"t" () in
   let effective = KAP.effective_allowed_paths ~meta in
-  check (list string) "workspace + explicit = playground + explicit"
-    [".masc/playground/t/"; "src/"; "docs/"] effective
+  check (list string) "workspace + explicit = playground + ws defaults + explicit"
+    [".masc/playground/t/"; ".masc/keepers/t/"; ".masc/traces/";
+     "planning/"; "docs/"; "src/"; "docs/"] effective
 
 let test_workspace_star_wildcard () =
   let meta = make_meta ~execution_scope:"workspace"
@@ -76,13 +77,21 @@ let test_star_wildcard_any_scope () =
 
 let test_explicit_paths_any_scope () =
   let paths = ["lib/keeper/"; "test/"] in
-  let expected = [".masc/playground/t/"; "lib/keeper/"; "test/"] in
-  let scopes = ["observe_only"; "workspace"; "local"] in
+  let non_ws_expected = [".masc/playground/t/"; "lib/keeper/"; "test/"] in
+  (* non-workspace scopes: playground + explicit only *)
   List.iter (fun scope ->
     let meta = make_meta ~execution_scope:scope ~allowed_paths:paths ~name:"t" () in
     let effective = KAP.effective_allowed_paths ~meta in
-    check (list string) (scope ^ " + explicit = playground + explicit") expected effective
-  ) scopes
+    check (list string) (scope ^ " + explicit = playground + explicit")
+      non_ws_expected effective
+  ) ["observe_only"; "local"];
+  (* workspace scope: playground + workspace defaults + explicit *)
+  let ws_meta = make_meta ~execution_scope:"workspace"
+      ~allowed_paths:paths ~name:"t" () in
+  let ws_effective = KAP.effective_allowed_paths ~meta:ws_meta in
+  check (list string) "workspace + explicit = playground + ws defaults + explicit"
+    [".masc/playground/t/"; ".masc/keepers/t/"; ".masc/traces/";
+     "planning/"; "docs/"; "lib/keeper/"; "test/"] ws_effective
 
 (* ── keeper name in computed default ── *)
 

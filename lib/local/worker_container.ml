@@ -405,14 +405,15 @@ let build_local_shell_tools ~room_config ~worker_name ~execution_scope ~workdir 
   | Error e, _ | _, Error e -> Error e
 
 (** Convert a model label to an OAS Provider.config.
-    Uses OAS Provider.config_of_provider_config directly. *)
-let oas_provider_of_label (label : string) : Oas.Provider.config =
+    Returns Error when the label cannot be parsed. *)
+let oas_provider_of_label (label : string) :
+    (Oas.Provider.config, string) result =
   match Llm_provider.Cascade_config.parse_model_string label with
-  | Some pc -> Oas.Provider.config_of_provider_config pc
+  | Some pc -> Ok (Oas.Provider.config_of_provider_config pc)
   | None ->
     let msg = Printf.sprintf "Cannot parse model label: %s (expected provider:model)" label in
     Log.Misc.error "%s" msg;
-    invalid_arg msg
+    Error msg
 
 (** Resolve provider from a model label string.
     Returns the provider config and model_id on success. *)
@@ -420,7 +421,10 @@ let resolve_oas_provider_of_label (label : string) :
     (Oas.Provider.config * string, string) result =
   match Llm_provider.Cascade_config.parse_model_string label with
   | None -> Error (Printf.sprintf "Cannot parse model: %s" label)
-  | Some pc -> Ok (oas_provider_of_label label, pc.Llm_provider.Provider_config.model_id)
+  | Some pc ->
+    Ok
+      ( Oas.Provider.config_of_provider_config pc,
+        pc.Llm_provider.Provider_config.model_id )
 
 let oas_tool_names (tools : Oas.Tool.t list) =
   List.map (fun (tool : Oas.Tool.t) -> tool.schema.name) tools

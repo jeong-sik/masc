@@ -117,7 +117,7 @@ let direct_adapters =
       spawn_key = Some "claude";
       default_voice = Some "Sarah";
       endpoint_url = Some "https://api.anthropic.com";
-      default_model_id = None;
+      default_model_id = Some "auto";
     };
     {
       canonical_name = cn_codex;
@@ -127,7 +127,7 @@ let direct_adapters =
       spawn_key = Some "codex";
       default_voice = Some "George";
       endpoint_url = Some "https://api.openai.com";
-      default_model_id = None;
+      default_model_id = Some "auto";
     };
     {
       canonical_name = cn_gemini;
@@ -142,7 +142,7 @@ let direct_adapters =
       spawn_key = Some "gemini";
       default_voice = Some "Roger";
       endpoint_url = None; (** Resolved dynamically for Gemini *)
-      default_model_id = None;
+      default_model_id = Some "auto";
     };
     {
       canonical_name = cn_glm;

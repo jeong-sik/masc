@@ -121,11 +121,11 @@ let resolve_provider_of_label (label : string) : Oas.Provider.config =
     match Llm_provider.Cascade_config.parse_model_string fallback with
     | Some pc -> Oas.Provider.config_of_provider_config pc
     | None ->
-      (* Failsafe for "auto" or other weirdness *)
+      (* Failsafe: use "auto" sentinel rather than the unparseable label. *)
       Oas.Provider.config_of_provider_config
         (Llm_provider.Provider_config.make
            ~kind:Llm_provider.Provider_config.OpenAI_compat
-           ~model_id:label
+           ~model_id:"auto"
            ~base_url:(Llm_provider.Provider_registry.next_llama_endpoint ())
            ~request_path:"/v1/chat/completions" ())
 

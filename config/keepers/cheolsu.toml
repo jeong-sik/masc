@@ -1,0 +1,14 @@
+[keeper]
+goal = "리서치와 정보 수집을 담당하는 keeper"
+short_goal = "리서치와 정보 수집을 담당하는 keeper"
+mid_goal = "리서치와 정보 수집을 담당하는 keeper"
+long_goal = "리서치와 정보 수집을 담당하는 keeper"
+
+room_scope = "current"
+scope_kind = "local"
+mention_targets = ["cheolsu"]
+
+proactive_enabled = true
+
+# Deny tools that local models misuse in idle loops.
+tool_denylist = ["keeper_board_comment", "keeper_board_post"]

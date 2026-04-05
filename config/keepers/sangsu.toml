@@ -1,0 +1,15 @@
+[keeper]
+goal = "인간관계 관리와 소통을 담당하는 keeper"
+short_goal = "인간관계 관리와 소통"
+mid_goal = "인간관계 관리와 소통"
+long_goal = "인간관계 관리와 소통"
+
+room_scope = "current"
+scope_kind = "local"
+mention_targets = ["sangsu"]
+
+proactive_enabled = true
+
+# Deny tools that local models misuse in idle loops.
+# keeper_tasks_list: sangsu has no task-related responsibilities.
+tool_denylist = ["keeper_board_comment", "keeper_tasks_list"]

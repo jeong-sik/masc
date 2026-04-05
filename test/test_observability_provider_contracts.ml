@@ -99,6 +99,21 @@ let test_max_context_of_label () =
   check int "fallback 128000" 128_000 fallback
 
 
+let test_effective_discovered_ctx () =
+  let edc = Masc_mcp.Oas_model_resolve.effective_discovered_ctx in
+  (* Below floor (4096) → use static *)
+  check int "below floor uses static" 128_000
+    (edc ~static_ctx:128_000 ~discovered:(Some 2048));
+  (* At floor → use discovered *)
+  check int "at floor uses discovered" 4_096
+    (edc ~static_ctx:128_000 ~discovered:(Some 4_096));
+  (* Above floor → use discovered *)
+  check int "above floor uses discovered" 32_768
+    (edc ~static_ctx:128_000 ~discovered:(Some 32_768));
+  (* None → use static *)
+  check int "none uses static" 128_000
+    (edc ~static_ctx:128_000 ~discovered:None)
+
 let test_labels_require_local_discovery () =
   check bool "llama labels refresh local discovery" true
     (Masc_mcp.Oas_model_resolve.labels_require_local_discovery
@@ -202,6 +217,8 @@ let () =
             test_default_registry_populated;
           test_case "provider name of label" `Quick test_provider_name_of_label;
           test_case "max context of label" `Quick test_max_context_of_label;
+          test_case "effective discovered ctx floor" `Quick
+            test_effective_discovered_ctx;
           test_case "local discovery label detection" `Quick
             test_labels_require_local_discovery;
         ] );

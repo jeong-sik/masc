@@ -58,6 +58,10 @@ type registry_entry = {
   name : string;
   meta : keeper_meta;
   state : keeper_state;
+  (** Fine-grained phase from RFC-0002 state machine. *)
+  phase : Keeper_state_machine.phase;
+  (** Observable conditions that derive [phase]. *)
+  conditions : Keeper_state_machine.conditions;
   fiber_stop : bool Atomic.t;
   fiber_wakeup : bool Atomic.t;
   started_at : float;
@@ -112,11 +116,18 @@ let register ~base_path name meta =
        Log.Keeper.warn "registry: overwriting running keeper during register name=%s" name;
        Atomic.set running_count_atomic (max 0 (Atomic.get running_count_atomic - 1))
    | _ -> ());
+  let initial_conditions = {
+    Keeper_state_machine.default_conditions with
+    fiber_alive = true;
+    restart_budget_remaining = true;
+  } in
   let entry = {
     base_path;
     name;
     meta;
     state = Running;
+    phase = Keeper_state_machine.Running;
+    conditions = initial_conditions;
     fiber_stop = Atomic.make false;
     fiber_wakeup = Atomic.make false;
     started_at = Time_compat.now ();
@@ -184,6 +195,46 @@ let () =
   register_runtime_meta_write_sync (fun config meta ->
       update_meta ~base_path:config.base_path meta.name meta)
 
+(** Compute conditions from a legacy keeper_state transition.
+    This is a backward-compat shim: it synthesizes conditions so that
+    [derive_phase] returns a phase consistent with the legacy state.
+    Phase 3-4 will migrate callers to [dispatch_event] directly. *)
+let conditions_of_legacy_state (prev : Keeper_state_machine.conditions) (state : keeper_state)
+    : Keeper_state_machine.conditions =
+  match state with
+  | Running ->
+    { prev with
+      Keeper_state_machine.fiber_alive = true;
+      heartbeat_healthy = true;
+      turn_healthy = true;
+      operator_paused = false;
+      stop_requested = false;
+      compaction_active = false;
+      handoff_active = false;
+      guardrail_triggered = false;
+    }
+  | Paused ->
+    { prev with
+      Keeper_state_machine.fiber_alive = true;
+      operator_paused = true;
+    }
+  | Stopped ->
+    { prev with
+      Keeper_state_machine.stop_requested = true;
+      drain_complete = true;
+    }
+  | Crashed ->
+    { prev with
+      Keeper_state_machine.fiber_alive = false;
+      restart_budget_remaining = true;
+      backoff_elapsed = false;
+    }
+  | Dead ->
+    { prev with
+      Keeper_state_machine.fiber_alive = false;
+      restart_budget_remaining = false;
+    }
+
 let set_state ~base_path name state =
   let key = registry_key ~base_path name in
   match StringMap.find_opt key !registry with
@@ -209,7 +260,10 @@ let set_state ~base_path name state =
           | Dead, _ -> entry.dead_since_ts
           | _ -> None
         in
-        put_entry key { entry with state; dead_since_ts }
+        (* Sync phase/conditions with legacy state *)
+        let conditions = conditions_of_legacy_state entry.conditions state in
+        let phase = Keeper_state_machine.derive_phase conditions in
+        put_entry key { entry with state; dead_since_ts; phase; conditions }
       end
   | None ->
       Log.Keeper.warn "registry: set_state on non-existent keeper name=%s" name
@@ -223,7 +277,9 @@ let mark_dead ~base_path name ~at =
            Atomic.set running_count_atomic
              (max 0 (Atomic.get running_count_atomic - 1))
        | _ -> ());
-      { entry with state = Dead; dead_since_ts = Some at }
+      let conditions = conditions_of_legacy_state entry.conditions Dead in
+      let phase = Keeper_state_machine.derive_phase conditions in
+      { entry with state = Dead; dead_since_ts = Some at; phase; conditions }
     end else
       { entry with dead_since_ts = Some (Option.value ~default:at entry.dead_since_ts) })
 
@@ -557,3 +613,82 @@ let restore_tool_usage ~base_path name =
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->
          Log.Keeper.warn "restore_tool_usage %s: %s" name (Printexc.to_string exn))
+
+(* ── RFC-0002 Event Dispatch ───────────────────────────── *)
+
+let dispatch_event ~base_path name (event : Keeper_state_machine.event) =
+  let key = registry_key ~base_path name in
+  match StringMap.find_opt key !registry with
+  | None ->
+    Error (Keeper_state_machine.Invalid_transition {
+      from_phase = Keeper_state_machine.Offline;
+      to_phase = Keeper_state_machine.Offline;
+      reason = Printf.sprintf "keeper %s not registered" name;
+    })
+  | Some entry ->
+    let now = Time_compat.now () in
+    let result =
+      Keeper_state_machine.apply_event
+        ~current_phase:entry.phase
+        ~conditions:entry.conditions
+        ~event
+        ~now
+    in
+    (match result with
+     | Ok tr when tr.new_phase <> tr.prev_phase ->
+       Log.Keeper.info "registry: phase transition name=%s old=%s new=%s event=%s"
+         name
+         (Keeper_state_machine.phase_to_string tr.prev_phase)
+         (Keeper_state_machine.phase_to_string tr.new_phase)
+         (Keeper_state_machine.event_to_string event);
+       (* Sync legacy state *)
+       let legacy = Keeper_state_compat.to_legacy tr.new_phase in
+       let legacy_state = match legacy with
+         | Keeper_state_compat.Running -> Running
+         | Keeper_state_compat.Paused -> Paused
+         | Keeper_state_compat.Stopped -> Stopped
+         | Keeper_state_compat.Crashed -> Crashed
+         | Keeper_state_compat.Dead -> Dead
+       in
+       (* Update running count *)
+       let prev_legacy = Keeper_state_compat.to_legacy tr.prev_phase in
+       (match prev_legacy, legacy with
+        | Keeper_state_compat.Running, (Keeper_state_compat.Paused | Stopped | Crashed | Dead) ->
+          Atomic.set running_count_atomic (max 0 (Atomic.get running_count_atomic - 1))
+        | (Keeper_state_compat.Paused | Stopped | Crashed), Keeper_state_compat.Running ->
+          Atomic.set running_count_atomic (Atomic.get running_count_atomic + 1)
+        | _ -> ());
+       (* Update dead_since_ts *)
+       let dead_since_ts = match tr.new_phase with
+         | Keeper_state_machine.Dead -> Some (Option.value ~default:now entry.dead_since_ts)
+         | _ -> None
+       in
+       put_entry key {
+         entry with
+         state = legacy_state;
+         phase = tr.new_phase;
+         conditions = tr.updated_conditions;
+         dead_since_ts;
+       };
+       Ok tr
+     | Ok tr ->
+       (* No phase change — still update conditions *)
+       put_entry key {
+         entry with
+         conditions = tr.updated_conditions;
+       };
+       Ok tr
+     | Error e ->
+       Log.Keeper.warn "registry: dispatch_event rejected name=%s error=%s"
+         name (Keeper_state_machine.transition_error_to_string e);
+       Error e)
+
+let get_phase ~base_path name =
+  match get ~base_path name with
+  | Some entry -> Some entry.phase
+  | None -> None
+
+let get_conditions ~base_path name =
+  match get ~base_path name with
+  | Some entry -> Some entry.conditions
+  | None -> None

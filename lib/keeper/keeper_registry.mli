@@ -38,6 +38,10 @@ type registry_entry = {
   name : string;
   meta : keeper_meta;
   state : keeper_state;
+  phase : Keeper_state_machine.phase;
+      (** Fine-grained phase from RFC-0002. *)
+  conditions : Keeper_state_machine.conditions;
+      (** Observable conditions that derive [phase]. *)
   fiber_stop : bool Atomic.t;
   fiber_wakeup : bool Atomic.t;
   started_at : float;
@@ -208,3 +212,19 @@ val flush_tool_usage : base_path:string -> string -> unit
 
 (** Restore tool usage stats from disk after keeper re-registration. *)
 val restore_tool_usage : base_path:string -> string -> unit
+
+(** {1 RFC-0002 Event Dispatch} *)
+
+(** Dispatch a typed event through the state machine.
+    Updates conditions, derives new phase, syncs legacy state.
+    Returns the transition result or an error for invalid transitions.
+    Prefer this over [set_state] for new code. *)
+val dispatch_event :
+  base_path:string -> string -> Keeper_state_machine.event ->
+  (Keeper_state_machine.transition_result, Keeper_state_machine.transition_error) result
+
+(** Get the fine-grained phase of a keeper. *)
+val get_phase : base_path:string -> string -> Keeper_state_machine.phase option
+
+(** Get the observable conditions of a keeper. *)
+val get_conditions : base_path:string -> string -> Keeper_state_machine.conditions option

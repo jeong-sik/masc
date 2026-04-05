@@ -65,9 +65,6 @@ let context_ratio (ctx : working_context) : float =
   if ctx.max_tokens = 0 then 0.0
   else float_of_int (token_count ctx) /. float_of_int ctx.max_tokens
 
-let exceeds_threshold ctx threshold =
-  context_ratio ctx >= threshold
-
 let create ~system_prompt ~max_tokens =
   let context = Agent_sdk.Context.create () in
   { system_prompt; messages = []; max_tokens; context }

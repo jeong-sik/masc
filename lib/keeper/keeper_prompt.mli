@@ -26,12 +26,6 @@ val append_direct_reply_mode_prompt :
 
 val append_trait_clause : base:string -> clause:string -> string
 
-val apply_self_model_drift :
-  meta:Keeper_types.keeper_meta ->
-  user_message:string ->
-  work_kind:string ->
-  Keeper_types.keeper_meta * bool * string option
-
 (** {1 Text Processing}
 
     Re-exported from [Keeper_text_processing]. *)

@@ -48,8 +48,10 @@ let has_keeper_prefix name =
   String.length name >= 7 && String.sub name 0 7 = "keeper_"
 
 (** Non-keeper_ tool names legitimately granted to keepers.
-    Derived from actual module exports — no prefix guessing. *)
-let known_non_keeper_tool_names : string list =
+    Derived from actual module exports — no prefix guessing.
+    Must be a function (not a let-binding) because injected_masc_tool_names
+    depends on inject_masc_schemas which runs after module init. *)
+let known_non_keeper_tool_names () : string list =
   List.concat [
     Tool_shard.governance_tools
     |> List.map (fun (t : Types.tool_schema) -> t.name);
@@ -92,7 +94,7 @@ let test_heuristic_only_keeper_prefixed () =
   let names = Keeper_exec_tools.keeper_allowed_tool_names meta in
   let non_keeper = List.filter (fun n -> not (has_keeper_prefix n)) names in
   let unexpected =
-    List.filter (fun n -> not (List.mem n known_non_keeper_tool_names)) non_keeper
+    List.filter (fun n -> not (List.mem n (known_non_keeper_tool_names ()))) non_keeper
   in
   Alcotest.(check (list string))
     "heuristic keeper only has keeper_* or curated masc_* tools" [] unexpected
@@ -102,7 +104,7 @@ let test_learned_only_keeper_prefixed () =
   let names = Keeper_exec_tools.keeper_allowed_tool_names meta in
   let non_keeper = List.filter (fun n -> not (has_keeper_prefix n)) names in
   let unexpected =
-    List.filter (fun n -> not (List.mem n known_non_keeper_tool_names)) non_keeper
+    List.filter (fun n -> not (List.mem n (known_non_keeper_tool_names ()))) non_keeper
   in
   Alcotest.(check (list string))
     "learned keeper only has keeper_* or curated masc_* tools" [] unexpected
@@ -117,7 +119,7 @@ let test_research_extra_tools_are_research_only () =
   let names = Keeper_exec_tools.keeper_allowed_tool_names meta in
   let non_keeper = List.filter (fun n -> not (has_keeper_prefix n)) names in
   let unexpected = List.filter (fun n ->
-    not (List.mem n known_non_keeper_tool_names)) non_keeper in
+    not (List.mem n (known_non_keeper_tool_names ()))) non_keeper in
   Alcotest.(check (list string))
     "non-keeper tools come from known sources" [] unexpected
 
@@ -200,7 +202,7 @@ let test_research_admin_overlap_documented () =
      This test documents the overlap rather than preventing it. *)
   List.iter (fun name ->
     Alcotest.(check bool) (name ^ " is a research tool") true
-      (List.mem name known_non_keeper_tool_names)
+      (List.mem name (known_non_keeper_tool_names ()))
   ) overlap
 
 (* ============================================================
@@ -217,7 +219,7 @@ let test_non_research_admin_tools_documented () =
      appear in keeper tool set come from known sources (coding, research shards). *)
   List.iter (fun name ->
     Alcotest.(check bool) (name ^ " is from known source") true
-      (List.mem name known_non_keeper_tool_names)
+      (List.mem name (known_non_keeper_tool_names ()))
   ) overlap
 
 (* ============================================================

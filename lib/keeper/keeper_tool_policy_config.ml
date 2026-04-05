@@ -197,16 +197,11 @@ let resolve_preset
     if def.all_candidates then
       Some All_candidates
     else
-      let filter_masc_tool name =
-        if String.starts_with ~prefix:"masc_" name then masc_filter name
-        else true
-      in
       let group_tools =
         def.groups
         |> List.concat_map (fun group_name ->
           (* Hashtbl.find is safe: load validates all group references *)
-          resolve_group_source (Hashtbl.find config.groups group_name)
-          |> List.filter filter_masc_tool)
+          resolve_group_source (Hashtbl.find config.groups group_name))
       in
       let masc_from_groups =
         def.masc_groups

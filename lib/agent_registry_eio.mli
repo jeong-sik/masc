@@ -27,5 +27,6 @@ val list_active : ?within_seconds:float -> unit -> Agent_identity.t list
 
 (** {1 Cleanup} *)
 
+val clear_session_caches : unit -> unit
 val cleanup_stale_sessions : unit -> int
 val unregister : string -> unit

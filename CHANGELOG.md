@@ -3,11 +3,36 @@
 
 ## [2.245.0] - 2026-04-06
 
+### Added
+- **Git clone for keepers** -- `masc_code_git` supports `clone` action, restricted to allowed GitHub orgs via `config/tool_policy.toml` `[git_clone]` section. Closes #5341.
+- **tool_rerank cascade profile** -- `tool_rerank_models` in `config/cascade.json` for explicit model list when `MASC_KEEPER_LLM_RERANK=true`.
+- **Heuristic instrumentation** -- RFC-0001 Phase 0.1: instrument 4 heuristic decision sites (pipeline stage, alert scoring, board classify, reversibility) with provenance-tagged metrics to `.masc/heuristic_metrics.jsonl`. (#5355)
+- **Phase transition audit** -- record keeper phase transitions in audit ring buffer for observability. (#5357)
+- **Prometheus counters** -- compaction and heartbeat telemetry counters. (#5362)
+
 ### Changed
-- TBD
+- **Keeper idle exit** -- return `Skip` on 3 consecutive idle turns to terminate loop. (#5348)
+- **Idle loop signals** -- terminal stop signals and prompt fallback for idle keeper exit. (#5353)
+- **Failing deadlock recovery** -- heartbeat-driven turn failure reset breaks Failing phase deadlock. 64K context floor enforced across all keeper turn paths. (#5346)
+- **Dashboard keeper detail** -- enriched profile display and empty state handling. (#5342)
+- **Dashboard keeper status** -- refined offline status into unbooted/stopped. (#5345)
+- **Dashboard tool fallback** -- realtime fallback for `allowed_tool_names` in operator snapshot. (#5327)
+- **Model vendor SSOT** -- consolidate local model label and ElevenLabs URL to `Provider_adapter` single source. (#5343)
+- **OAS boundary** -- enforce estimation facade and remove `provider_kind` from keeper. (#5349)
+- **Relay externalization** -- externalize relay token estimation constants to `Governance_registry`. (#5360)
+- **Eio.Cancel safety** -- re-raise `Eio.Cancel.Cancelled` in 3 I/O cleanup paths. (#5358)
+
+### Security
+- **auth_token leak** -- remove `auth_token` parameter from `emit_heartbeat_task` SSE broadcast. Fixes #5310. (#5344)
+
+### Removed
+- **soul_profile feature** -- removed entirely (config, types, prompts, dashboard, tests). (#5347)
 
 ### Deprecated
-- TBD
+- **keeper_exec_context functions** -- `restore_checkpoint` and unused helpers deprecated, pointing to `Keeper_context_core` equivalents. (#5332)
+
+### Tests
+- Regression tests for #5344 auth_token removal and #5345 keeper status refinement. (#5351)
 
 ## [2.244.0] - 2026-04-05
 

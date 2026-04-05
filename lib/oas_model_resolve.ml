@@ -61,38 +61,50 @@ let refresh_local_discovery_if_possible ?sw ?net (labels : string list) : bool =
              false)
     | _ -> false
 
+(** Minimum ratio of discovered context to static registry value.
+    If the server reports less than this fraction of the model's known
+    capacity, the server is likely misconfigured (e.g. llama-server
+    started without -c flag, defaulting to 8192).  In that case we
+    ignore the discovered value and use the static registry value.
+
+    25% means: a 128K model must have at least 32K configured;
+    a 262K model must have at least ~65K.  This is model-agnostic —
+    the threshold scales with the model's actual capacity. *)
+let min_discovered_ratio = 0.25
+
 (** Resolve max_context for a model label.
     Prefers discovered per-slot context (from live /props probe) for local
-    providers, falls back to static Provider_registry value, then 128_000. *)
+    providers.  Discovered values below [min_discovered_ratio] of the
+    static registry value are treated as server misconfiguration and
+    ignored in favor of the static value. *)
 let max_context_of_label (label : string) : int =
   match provider_name_of_label label with
   | None -> 128_000
   | Some pname ->
-    (* For local providers, prefer discovered per-slot context *)
-    if Provider_adapter.requires_discovery pname then
-      match Llm_provider.Provider_registry.discovered_max_context () with
-      | Some ctx -> ctx
-      | None ->
-        (match Llm_provider.Provider_registry.find default_registry pname with
-         | Some entry -> entry.max_context
-         | None -> 128_000)
-    else
+    let static_ctx =
       match Llm_provider.Provider_registry.find default_registry pname with
       | Some entry -> entry.max_context
       | None -> 128_000
+    in
+    if Provider_adapter.requires_discovery pname then
+      let floor = int_of_float (float_of_int static_ctx *. min_discovered_ratio) in
+      match Llm_provider.Provider_registry.discovered_max_context () with
+      | Some ctx when ctx >= floor -> ctx
+      | Some low_ctx ->
+        Log.warn ~ctx:"OasModelResolve"
+          "discovered context %d < %d%% of static %d (floor=%d) for %s; \
+           using static value. Increase llama-server -c flag."
+          low_ctx (int_of_float (min_discovered_ratio *. 100.0))
+          static_ctx floor pname;
+        static_ctx
+      | None -> static_ctx
+    else static_ctx
 
 (** Resolve max_context for the first available model in a label list.
     "Available" means the provider's API key env var is set (or not required).
     Prefers discovered per-slot context for local providers.
     Falls back to 128_000 if no model is available. *)
-(** Minimum context below which a warning is emitted.
-    8K is the llama-server default, but most keeper conversations
-    need 32K+. If discovered < this, the operator should increase
-    the llama-server -c flag. *)
-let context_warning_threshold = 16_000
-
 let resolve_primary_max_context (labels : string list) : int =
-  (* Check discovered context first — applies to any local provider *)
   let discovered = Llm_provider.Provider_registry.discovered_max_context () in
   let rec find = function
     | [] -> 128_000
@@ -105,13 +117,10 @@ let resolve_primary_max_context (labels : string list) : int =
         | Some entry ->
           if entry.is_available () then
             if Provider_adapter.requires_discovery pname then
-              let ctx = Option.value ~default:entry.max_context discovered in
-              (if ctx < context_warning_threshold then
-                 Log.warn ~ctx:"OasModelResolve"
-                   "discovered context %d < %d for %s — keeper turns will likely overflow. \
-                    Increase llama-server -c flag (model supports up to %d)."
-                   ctx context_warning_threshold pname entry.max_context);
-              ctx
+              let floor = int_of_float (float_of_int entry.max_context *. min_discovered_ratio) in
+              match discovered with
+              | Some ctx when ctx >= floor -> ctx
+              | _ -> entry.max_context
             else entry.max_context
           else find rest
   in

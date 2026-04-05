@@ -227,6 +227,16 @@ let make_hooks
           | Error { Agent_sdk.Types.message; _ } ->
             Printf.sprintf "error: %s" message
         in
+        let input_keys = match input with
+          | `Assoc pairs -> String.concat "," (List.map fst pairs)
+          | _ -> "-"
+        in
+        let outcome, out_len = match output with
+          | Ok { Agent_sdk.Types.content; _ } -> "ok", String.length content
+          | Error { Agent_sdk.Types.message; _ } -> "error", String.length message
+        in
+        Log.Keeper.info "keeper:%s tool_call tool=%s params=[%s] outcome=%s out_len=%d"
+          (!meta_ref).name tool_name input_keys outcome out_len;
         (try on_tool_executed tool_name input output_text
          with Eio.Cancel.Cancelled _ as e -> raise e
             | exn ->

@@ -130,18 +130,19 @@ let resolve_max_context model =
     No formal benchmark has validated these specific numbers.
 
     TODO(RFC-0001 Phase 0): Replace with empirical calibration once
-    heuristic_metrics.jsonl collects actual token counts per message type. *)
-let tokens_per_user_msg = 150
-let tokens_per_assistant_msg = 500
-let tokens_per_tool_call = 200
-let tokens_per_tool_result = 300
+    heuristic_metrics.jsonl collects actual token counts per message type.
+    Governable via [Governance_registry.relay_tokens_per_*]. *)
+let tokens_per_user_msg () = Runtime_params.get Governance_registry.relay_tokens_per_user_msg
+let tokens_per_assistant_msg () = Runtime_params.get Governance_registry.relay_tokens_per_assistant_msg
+let tokens_per_tool_call () = Runtime_params.get Governance_registry.relay_tokens_per_tool_call
+let tokens_per_tool_result () = Runtime_params.get Governance_registry.relay_tokens_per_tool_result
 
 (** Estimate context usage.
     Token-per-message estimates are rough heuristics, corrected by calibration. *)
 let estimate_context ~messages ~tool_calls ~model =
 
-  let message_tokens = messages * (tokens_per_user_msg + tokens_per_assistant_msg) in
-  let tool_tokens = tool_calls * (tokens_per_tool_call + tokens_per_tool_result) in
+  let message_tokens = messages * (tokens_per_user_msg () + tokens_per_assistant_msg ()) in
+  let tool_tokens = tool_calls * (tokens_per_tool_call () + tokens_per_tool_result ()) in
   let estimated_raw = message_tokens + tool_tokens in
   let factor = calibration.correction_factor in
   let estimated = int_of_float (float_of_int estimated_raw *. factor) in
@@ -165,19 +166,14 @@ type task_hint =
   | Simple_task                  (* Quick task, no relay needed *)
 
 (** Task cost estimates (tokens). Same heuristic caveat as above —
-    these are order-of-magnitude guesses, not measured values. *)
-let cost_large_file_read = 10_000
-let cost_per_file_edit   = 3_000
-let cost_long_running    = 20_000
-let cost_exploration     = 15_000
-let cost_simple          = 1_000
-
+    these are order-of-magnitude guesses, not measured values.
+    Governable via [Governance_registry.relay_cost_*]. *)
 let estimate_task_cost = function
-  | Large_file_read _ -> cost_large_file_read
-  | Multi_file_edit n -> n * cost_per_file_edit
-  | Long_running_task -> cost_long_running
-  | Exploration_task -> cost_exploration
-  | Simple_task -> cost_simple
+  | Large_file_read _ -> Runtime_params.get Governance_registry.relay_cost_large_file_read
+  | Multi_file_edit n -> n * Runtime_params.get Governance_registry.relay_cost_per_file_edit
+  | Long_running_task -> Runtime_params.get Governance_registry.relay_cost_long_running
+  | Exploration_task -> Runtime_params.get Governance_registry.relay_cost_exploration
+  | Simple_task -> Runtime_params.get Governance_registry.relay_cost_simple
 
 (** Proactive relay decision - key insight: predict before hitting limit *)
 let should_relay_proactive ~config ~metrics ~task_hint =

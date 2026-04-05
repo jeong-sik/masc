@@ -122,7 +122,8 @@ let project_root_from_executable () =
     else if Filename.basename dir = "_build" then Some parent
     else walk_up parent
   in
-  walk_up (Filename.dirname exe)
+  if String.equal exe "" then None
+  else walk_up (Filename.dirname exe)
 
 let load ~base_path : (t, string) result =
   let rel = "config/tool_policy.toml" in
@@ -136,7 +137,7 @@ let load ~base_path : (t, string) result =
     [ base_candidate; cwd_candidate ]
     @ (match exe_candidate with Some c -> [ c ] | None -> [])
     |> List.fold_left (fun acc x ->
-      if List.mem x acc then acc else x :: acc) []
+      if List.exists (String.equal x) acc then acc else x :: acc) []
     |> List.rev
   in
   let rec try_candidates failures = function

@@ -13,24 +13,26 @@
     @since 2026-02 - Keeper Emergent Identity v2.0
 *)
 
-(** Global fs reference - set at Eio_main.run startup *)
-let global_fs : Eio.Fs.dir_ty Eio.Path.t option ref = ref None
+(** Global fs — WORM Atomic (write-once at startup, read from any domain).
+    Using Atomic.t is required for OCaml 5 multi-domain safety:
+    Executor_pool workers run on a separate domain and read this value. *)
+let global_fs : Eio.Fs.dir_ty Eio.Path.t option Atomic.t = Atomic.make None
 
 (** Set the global Eio filesystem. Call once at server startup.
     @param fs The Eio fs from [Eio.Stdenv.fs env] *)
 let set_fs fs =
-  global_fs := Some fs
+  Atomic.set global_fs (Some fs)
 
 (** Clear the global fs (for testing or shutdown) *)
 let clear_fs () =
-  global_fs := None
+  Atomic.set global_fs None
 
 let get_fs_opt () =
-  !global_fs
+  Atomic.get global_fs
 
 (** Check if Eio fs is available *)
 let has_fs () =
-  Option.is_some !global_fs
+  Option.is_some (Atomic.get global_fs)
 
 (** Normalize [Eio.Io] to [Sys_error] so callers only need one catch.
     Eio operations raise [Eio.Io _] on permission errors, missing files, etc.
@@ -42,7 +44,7 @@ let with_io ~path f =
     raise (Sys_error (Printf.sprintf "%s: %s" path (Printexc.to_string e)))
 
 let with_fs_or_fallback ~path ~fallback f =
-  match !global_fs with
+  match Atomic.get global_fs with
   | Some fs -> (
       try with_io ~path (fun () -> f fs)
       with Stdlib.Effect.Unhandled _ -> fallback ())

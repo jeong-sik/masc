@@ -83,10 +83,10 @@ let visibility_of_string = function
 (** Agent lookup callback — set once at server startup with the real
     Room.is_agent_joined check so that board posts are auto-classified
     without requiring callers to pass config or post_kind. *)
-let agent_lookup_hook : (string -> bool) option ref = ref None
+let agent_lookup_hook : (string -> bool) option Atomic.t = Atomic.make None
 
-let set_agent_lookup f = agent_lookup_hook := Some f
-let set_agent_lookup_none () = agent_lookup_hook := None
+let set_agent_lookup f = Atomic.set agent_lookup_hook (Some f)
+let set_agent_lookup_none () = Atomic.set agent_lookup_hook None
 
 
 
@@ -94,7 +94,7 @@ let set_agent_lookup_none () = agent_lookup_hook := None
     lookup (Room.is_agent_joined) when available via [agent_lookup_hook];
     returns [false] when no hook is installed. *)
 let is_agent name =
-  match !agent_lookup_hook with
+  match Atomic.get agent_lookup_hook with
   | Some lookup -> lookup name
   | None -> false
 
@@ -114,7 +114,7 @@ let resolve_board_post_kind ~author (raw_kind : string option) :
            automation to prevent misleading direct-attributed posts (#4604). *)
         Ok Board.Automation_post
       else
-        (match !agent_lookup_hook with
+        (match Atomic.get agent_lookup_hook with
          | Some _ when is_agent author_lc -> Ok Board.Automation_post
          | _ -> Ok Board.Human_post)
 
@@ -407,10 +407,10 @@ type evolution_callback = {
   record_feedback: name:string -> dimension:string -> is_positive:bool -> unit;
 }
 
-let evolution_hook : evolution_callback option ref = ref None
+let evolution_hook : evolution_callback option Atomic.t = Atomic.make None
 
 let register_evolution_callback cb =
-  evolution_hook := Some cb
+  Atomic.set evolution_hook (Some cb)
 
 let handle_vote args =
   let post_id = get_string args "post_id" "" in
@@ -427,7 +427,7 @@ let handle_vote args =
       let arrow = if direction = Board.Up then "↑" else "↓" in
       (* SOUL Evolution via callback (breaks compile-time dependency cycle) *)
       let evolution_msg =
-        match !evolution_hook with
+        match Atomic.get evolution_hook with
         | None -> ""  (* Not initialized yet *)
         | Some cb ->
             match Board_dispatch.get_post ~post_id with

@@ -22,3 +22,6 @@ let masc_http_default_port = 8935
 (** Default port as string (for env config fallback). *)
 let masc_http_default_port_s =
   string_of_int masc_http_default_port
+
+(** Default host for the MASC HTTP server. *)
+let masc_http_default_host = "127.0.0.1"

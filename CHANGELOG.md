@@ -1,6 +1,12 @@
 # Changelog
 
 
+## [2.243.0] - 2026-04-05
+
+### Changed
+- **Tool index** -- migrate korean_keywords from description concatenation to Tool_index.entry.aliases field (OAS 0.101.0). BM25 behavior preserved (#5295).
+- **OAS pin** -- bump agent_sdk dependency to >= 0.101.0.
+
 ## [2.242.0] - 2026-04-05
 
 ### Fixed

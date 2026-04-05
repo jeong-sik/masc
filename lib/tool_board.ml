@@ -64,14 +64,14 @@ let format_ttl_remaining expires_at =
   else Printf.sprintf "%dd left" (int_of_float (remaining /. 86400.0))
 
 let board_error_to_string = function
-  | Board.Invalid_id s -> Printf.sprintf "Invalid ID: %s" s
-  | Board.Post_not_found s -> Printf.sprintf "Post not found: %s" s
-  | Board.Comment_not_found s -> Printf.sprintf "Comment not found: %s" s
+  | Board.Invalid_id s -> Printf.sprintf "Invalid ID: %s. ACTION: Do not retry — check the ID format." s
+  | Board.Post_not_found s -> Printf.sprintf "Post not found: %s. ACTION: Do not retry — the post does not exist." s
+  | Board.Comment_not_found s -> Printf.sprintf "Comment not found: %s. ACTION: Do not retry — the comment does not exist." s
   | Board.Rate_limited { retry_after } -> Printf.sprintf "Rate limited. Retry after %.1fs" retry_after
   | Board.Capacity_exceeded { current; max } -> Printf.sprintf "Capacity exceeded: %d/%d" current max
   | Board.Io_error s -> Printf.sprintf "I/O error: %s" s
   | Board.Validation_error s -> Printf.sprintf "Validation error: %s" s
-  | Board.Already_voted s -> Printf.sprintf "Already voted: %s" s
+  | Board.Already_voted s -> Printf.sprintf "Already voted: %s. ACTION: Do not retry — vote is already recorded." s
 
 let visibility_of_string = function
   | "public" -> Some Board.Public

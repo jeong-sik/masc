@@ -166,7 +166,8 @@ let signal_bonus_low_alignment = 0.12
 let signal_bonus_multi_tool = 0.06
 
 (** Context ratio above which handoff pressure is flagged. *)
-let handoff_pressure_threshold = 0.88
+let handoff_pressure_threshold () =
+  Runtime_params.get Governance_registry.keeper_handoff_pressure_threshold
 (** Goal alignment below which low-alignment signal fires. *)
 let goal_alignment_floor = 0.20
 (** Response alignment below which low-alignment signal fires. *)
@@ -201,7 +202,7 @@ let keeper_alert_signal
     score := !score +. signal_bonus_guardrail_stop;
     reasons := "guardrail_stop" :: !reasons
   end;
-  if auto_rules.handoff && context_ratio >= handoff_pressure_threshold then begin
+  if auto_rules.handoff && context_ratio >= handoff_pressure_threshold () then begin
     score := !score +. signal_bonus_handoff_pressure;
     reasons := "handoff_pressure" :: !reasons
   end;

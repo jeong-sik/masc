@@ -121,7 +121,7 @@ let handle_keeper_status ctx args : tool_result =
                | Some idx when idx > 0 ->
                  String.sub label 0 idx |> String.trim |> String.lowercase_ascii
                | _ ->
-                 Provider_adapter.string_of_provider_kind cfg.kind
+                 Llm_provider.Provider_config.string_of_provider_kind cfg.kind
              in
              Some (`Assoc [
                ("provider", `String provider_name);

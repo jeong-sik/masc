@@ -17,10 +17,10 @@ let keepalive_interval_sec () =
 
 let board_reactive_debounce_sec = Env_config.KeeperKeepalive.board_debounce_sec
 
-(* OAS Event_bus ref — set via bootstrap *)
-let bus_ref : Agent_sdk.Event_bus.t option ref = ref None
-let set_bus bus = bus_ref := Some bus
-let get_bus () = !bus_ref
+(* OAS Event_bus — WORM Atomic: set once at server bootstrap. *)
+let bus_ref : Agent_sdk.Event_bus.t option Atomic.t = Atomic.make None
+let set_bus bus = Atomic.set bus_ref (Some bus)
+let get_bus () = Atomic.get bus_ref
 
 let keeper_turn_throttle_limit =
   Keeper_config.int_of_env_default
@@ -34,16 +34,15 @@ let with_keeper_turn_slot f =
   Fun.protect ~finally:(fun () -> Eio.Semaphore.release turn_semaphore) f
 ;;
 
-(** Optional gRPC client + env — set at server bootstrap when
-    [MASC_AGENT_TRANSPORT=grpc]. When set, heartbeat sends
-    status pings over gRPC unary RPC. *)
-let grpc_client_ref : Masc_grpc_client.t option ref = ref None
+(** Optional gRPC client + env — WORM Atomic: set at server bootstrap
+    when [MASC_AGENT_TRANSPORT=grpc]. *)
+let grpc_client_ref : Masc_grpc_client.t option Atomic.t = Atomic.make None
 
-let grpc_env_ref : Eio_unix.Stdenv.base option ref = ref None
+let grpc_env_ref : Eio_unix.Stdenv.base option Atomic.t = Atomic.make None
 
 let set_grpc_client ?(env : Eio_unix.Stdenv.base option) c =
-  grpc_client_ref := Some c;
-  grpc_env_ref := env
+  Atomic.set grpc_client_ref (Some c);
+  Atomic.set grpc_env_ref env
 ;;
 
 (** Sleep in short chunks so [stop_keepalive] or [wakeup_keeper] takes
@@ -415,7 +414,7 @@ let write_heartbeat_snapshot
      | Eio.Cancel.Cancelled _ as e -> raise e
      | exn ->
        Log.Keeper.error "heartbeat SSE broadcast failed: %s" (Printexc.to_string exn));
-    (match !bus_ref with
+    (match Atomic.get bus_ref with
      | Some bus ->
        Oas_events.publish_keeper_snapshot
          bus
@@ -1181,7 +1180,7 @@ let run_grpc_heartbeat_fiber
       ~(interval_sec : float)
       ~(clock : _ Eio.Time.clock)
   =
-  match Eio_context.get_switch_opt (), !grpc_env_ref with
+  match Eio_context.get_switch_opt (), Atomic.get grpc_env_ref with
   | None, _ | _, None ->
     Log.Keeper.warn "gRPC heartbeat: Eio context or env not available";
     None
@@ -1237,7 +1236,7 @@ let start_keeper_grpc_heartbeat
       ~(stop : bool Atomic.t)
   : (unit -> unit) option
   =
-  match Masc_grpc_transport.from_env (), !grpc_client_ref with
+  match Masc_grpc_transport.from_env (), Atomic.get grpc_client_ref with
   | Masc_grpc_transport.Grpc, Some client ->
     Log.Keeper.info "keeper %s: starting gRPC heartbeat fiber" m.name;
     let interval = float_of_int (keepalive_interval_sec ()) in

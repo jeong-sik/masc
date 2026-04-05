@@ -290,7 +290,7 @@ let make_hooks
 
     on_idle = Some (fun event ->
       match event with
-      | Agent_sdk.Hooks.OnIdle { consecutive_idle_turns; tool_names } ->
+      | Agent_sdk.Hooks.OnIdle { consecutive_idle_turns; tool_names; _ } ->
         let tools_str = match tool_names with
           | [] -> "<none>"
           | names -> String.concat ", " names

@@ -10,9 +10,6 @@
 
     @since Phase 5 — Keeper Agent.run encapsulation *)
 
-(** BM25 confidence threshold below which tool selection falls back to
-    the full policy-allowed preset. *)
-let bm25_confidence_threshold = 0.5
 
 (** Structured prompt result from [build_turn_prompt] callback.
     [system_prompt] contains hard constraints (identity, policy guards,
@@ -140,15 +137,9 @@ let prioritized_disclosed_tool_names
     ~(retrieved_names : string list)
     ~(fallback_tools : string list)
     ~(use_fallback : bool) : string list =
-  let always_include_tools =
-    Keeper_exec_tools.dedupe_tool_names always_include_tools
-  in
-  let retrieved_names =
-    Keeper_exec_tools.dedupe_tool_names retrieved_names
-  in
-  let fallback_tools =
-    Keeper_exec_tools.dedupe_tool_names fallback_tools
-  in
+  (* Cross-list dedup handled by [seen] hashtable below.
+     Per-list dedup removed: inputs are already unique
+     (retrieve returns distinct names, core_always is a static set). *)
   let seen = Hashtbl.create (max 16 max_tools) in
   let add_with_budget acc names =
     let remaining = max_tools - List.length acc in
@@ -598,7 +589,6 @@ let run_turn
         List.filteri (fun i _ -> i < max_fallback_tools) merged
       else merged
   in
-  let confidence_threshold = bm25_confidence_threshold in
   (* Runtime tool overlay: external callers (masc_tool_grant/revoke)
      push Tool_op.t values here. The hook applies them each turn.
      If caller provides one, use it; otherwise create a local one. *)
@@ -656,7 +646,9 @@ let run_turn
           | (_, s) :: _ -> s
           | [] -> 0.0
         in
-        let use_fallback = top_score < confidence_threshold in
+        let use_fallback =
+          not (Agent_sdk.Tool_index.confident tool_index query_text ~threshold:0.5)
+        in
         let max_tools = max_tools_per_turn in
         let portal_ctx : Tool_portal.context = {
           config;

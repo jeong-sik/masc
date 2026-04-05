@@ -497,3 +497,20 @@ let derive_pipeline_stage
     else if scheduled_autonomous_ago < recency_threshold then "scheduled_autonomous"
     else if turn_ago < recency_threshold then "thinking"
     else "idle"
+
+(** RFC-0002: derive pipeline stage directly from phase.
+    Replaces the heuristic-based [derive_pipeline_stage] with a
+    deterministic mapping from the 11-state phase. *)
+let pipeline_stage_of_phase (phase : Keeper_state_machine.phase) : string =
+  match phase with
+  | Keeper_state_machine.Offline -> "offline"
+  | Keeper_state_machine.Running -> "idle"
+  | Keeper_state_machine.Failing -> "failing"
+  | Keeper_state_machine.Compacting -> "compacting"
+  | Keeper_state_machine.HandingOff -> "handoff"
+  | Keeper_state_machine.Draining -> "draining"
+  | Keeper_state_machine.Paused -> "paused"
+  | Keeper_state_machine.Stopped -> "offline"
+  | Keeper_state_machine.Crashed -> "crashed"
+  | Keeper_state_machine.Restarting -> "restarting"
+  | Keeper_state_machine.Dead -> "offline"

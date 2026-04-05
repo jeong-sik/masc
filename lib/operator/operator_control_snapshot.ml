@@ -280,8 +280,11 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                    else Keeper_exec_status.keeper_surface_status ~agent_status:agent_json ~diagnostic
                  in
                  let pipeline_stage =
-                   Keeper_exec_status.derive_pipeline_stage ~meta
-                     ~surface_status:agent_status ~now_ts
+                   match Keeper_registry.get_phase ~base_path:config.base_path meta.name with
+                   | Some phase -> Keeper_exec_status.pipeline_stage_of_phase phase
+                   | None ->
+                     Keeper_exec_status.derive_pipeline_stage ~meta
+                       ~surface_status:agent_status ~now_ts
                  in
                  Some
                    (`Assoc

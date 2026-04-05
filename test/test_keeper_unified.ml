@@ -27,8 +27,10 @@ let repo_root () =
       ascend (Sys.getcwd ())
 
 let () =
-  let prompts_dir = Filename.concat (repo_root ()) "config/prompts" in
+  let base_path = repo_root () in
+  let prompts_dir = Filename.concat base_path "config/prompts" in
   Prompt_registry.set_markdown_dir prompts_dir;
+  Masc_mcp.Keeper_exec_tools.init_policy_config ~base_path;
   Masc_mcp.Prompt_defaults.init ()
 
 let temp_dir () =

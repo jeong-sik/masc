@@ -170,7 +170,7 @@ let keeper_execution_entries =
     entry ~default:"0.50" "MASC_KEEPER_TOOL_COST_MAX_USD"
       "Max tool call cost (USD)";
     entry ~default:"0.4" "MASC_KEEPER_UNIFIED_TEMP" "Unified turn temperature";
-    entry ~default:"2048" "MASC_KEEPER_UNIFIED_MAX_TOKENS"
+    entry ~default:"131072" "MASC_KEEPER_UNIFIED_MAX_TOKENS"
       "Unified turn max output tokens";
     entry ~default:"20" "MASC_KEEPER_UNIFIED_MAX_TURNS"
       "Unified turn max tool loops";

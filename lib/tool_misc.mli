@@ -15,6 +15,7 @@ val schemas : Types.tool_schema list
 
 val looks_like_rss_payload : string -> bool
 val parse_bing_rss_items : string -> (string * string * string) list
+val parse_searxng_json : string -> (string * string * string) list
 
 val dispatch : context -> name:string -> args:Yojson.Safe.t -> result option
 

@@ -82,7 +82,7 @@ groups = ["base"]
 masc_tools = ["masc_status", "masc_tool_help"]
 
 [presets.messaging]
-groups = ["base", "board", "coordination", "governance"]
+groups = ["base", "board", "coordination", "governance", "github", "library", "shell", "filesystem"]
 masc_groups = ["core"]
 
 [presets.coding]

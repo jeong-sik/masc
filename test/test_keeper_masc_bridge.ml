@@ -97,8 +97,12 @@ let test_messaging_preset_exposes_board () =
   (* Governance tools are no longer available *)
   Alcotest.(check bool) "no masc_governance_status" false
     (List.mem "masc_governance_status" names);
-  Alcotest.(check bool) "omits keeper_shell_readonly" false
-    (List.mem "keeper_shell_readonly" names)
+  Alcotest.(check bool) "has keeper_shell_readonly" true
+    (List.mem "keeper_shell_readonly" names);
+  Alcotest.(check bool) "has keeper_github" true
+    (List.mem "keeper_github" names);
+  Alcotest.(check bool) "has keeper_fs_read" true
+    (List.mem "keeper_fs_read" names)
 
 let test_custom_opens_specific_tools_only () =
   prime_keeper_bridge ();

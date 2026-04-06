@@ -147,6 +147,7 @@ let run_named
     ?(cache_system_prompt = false)
     ?(yield_on_tool = false)
     ?compact_ratio
+    ?checkpoint_dir
     ?sw
     ?net
     ()
@@ -192,6 +193,7 @@ let run_named
       cache_system_prompt;
       compact_ratio;
       contract;
+      checkpoint_dir;
     }
   in
   let config = { config with named_cascade = Some named_cascade; initial_messages; raw_trace; yield_on_tool } in

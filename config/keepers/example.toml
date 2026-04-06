@@ -1,5 +1,0 @@
-[keeper]
-goal = "Assist with investigation, log analysis, cleanup, and improvement tasks for this keeper."
-mention_targets = ["sherlock", "log-analyzer", "janitor", "masc-improver"]
-
-proactive_enabled = true

@@ -409,7 +409,10 @@ let make_tool_tracking_hooks ?gate_config ?context () =
                | None -> Oas.Hooks.Continue
                | Some (gate : Eval_gate.gate_config) ->
                  (* Gate 0: Deny list *)
-                 if List.mem tool_name gate.denied_tools then begin
+                 if Tool_access_policy.selector_matches_name
+                      (Tool_access_policy.Names gate.denied_tools)
+                      tool_name
+                 then begin
                    Log.LocalWorker.warn "worker deny list: blocked %s"
                      tool_name;
                    Oas.Hooks.Override

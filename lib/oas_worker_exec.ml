@@ -45,6 +45,7 @@ type config = {
   compact_ratio : float option;
   context_injector : Oas.Hooks.context_injector option;
   context : Oas.Context.t option;
+  slot_id : int option;
 }
 
 let default_config ~name ~provider ~model_id ~system_prompt ~tools : config =
@@ -77,6 +78,7 @@ let default_config ~name ~provider ~model_id ~system_prompt ~tools : config =
     compact_ratio = None;
     context_injector = None;
     context = None;
+    slot_id = None;
   }
 
 (* ================================================================ *)
@@ -281,6 +283,10 @@ let build
   in
   let builder = match config.context with
     | Some ctx -> Oas.Builder.with_context ctx builder
+    | None -> builder
+  in
+  let builder = match config.slot_id with
+    | Some id -> Oas.Builder.with_slot_id id builder
     | None -> builder
   in
   Oas.Builder.build_safe builder

@@ -570,3 +570,23 @@ let keeper_unified_max_tokens () : int =
    - 3 turns left keepers unable to do meaningful work (board_post x3 only)
    - 10 turns was insufficient for multi-step tasks (PR creation, web search)
    - 50 turns balances completion rate vs resource usage *)
+
+(** Number of llama-server KV cache slots available for keeper pinning.
+    Keepers are assigned slot_id = (hash(name) mod num_slots).
+    0 = disable slot pinning. Must match llama-server --parallel N.
+    Env: [MASC_KEEPER_LLAMA_SLOTS]. Default: 4. *)
+let keeper_llama_slots () : int =
+  int_of_env_default
+    "MASC_KEEPER_LLAMA_SLOTS"
+    ~default:4
+    ~min_v:0
+    ~max_v:32
+
+(** Compute a deterministic slot_id for a keeper name.
+    Returns [None] when slot pinning is disabled (num_slots = 0). *)
+let keeper_slot_id (name : string) : int option =
+  let num_slots = keeper_llama_slots () in
+  if num_slots <= 0 then None
+  else
+    let h = Hashtbl.hash name in
+    Some (h mod num_slots)

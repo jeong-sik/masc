@@ -390,3 +390,33 @@ let keeper_universe_model_tools (meta : keeper_meta) : Types.tool_schema list =
   all_schemas
   |> List.filter (fun tool -> List.mem tool.Types.name universe)
   |> dedupe_tool_schemas
+
+(* ── Tool description lookup (for prompt auto-hints) ─────────── *)
+
+(** Extract the first sentence from a tool description.
+    Truncates at the first period+space or 80 chars, whichever is shorter. *)
+let first_sentence desc =
+  let max_len = 80 in
+  let len = String.length desc in
+  let cutoff =
+    match String.index_opt desc '.' with
+    | Some i when i < max_len -> i + 1
+    | _ -> min len max_len
+  in
+  let s = String.sub desc 0 cutoff in
+  if cutoff < len then String.trim s else s
+
+(** Lookup tool description by name from all available schema sources.
+    Returns [Some first_sentence] if found, [None] otherwise.
+    Searches shard-resolved tools, inline schemas, injected masc_* schemas,
+    and code-write schemas. *)
+let tool_hint_of (name : string) : string option =
+  let all_schemas =
+    Tool_shard.keeper_model_tools
+    @ Tool_schemas_inline.schemas
+    @ !masc_schemas_ref
+    @ Tool_code_write.schemas
+  in
+  match List.find_opt (fun (s : Types.tool_schema) -> s.name = name) all_schemas with
+  | Some s -> Some (first_sentence s.description)
+  | None -> None

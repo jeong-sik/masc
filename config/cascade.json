@@ -41,8 +41,8 @@
 
   "_comment_inference": "Per-cascade inference parameters (temperature, max_tokens). Falls back to caller defaults when absent.",
   "keeper_unified_temperature": 0.2,
-  "keeper_unified_max_tokens": 2048,
+  "keeper_unified_max_tokens": 8192,
   "keeper_autonomy_temperature": 0.1,
-  "keeper_autonomy_max_tokens": 500,
-  "keeper_turn_max_tokens": 1024
+  "keeper_autonomy_max_tokens": 2048,
+  "keeper_turn_max_tokens": 4096
 }

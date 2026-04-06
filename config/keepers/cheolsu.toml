@@ -37,5 +37,5 @@ mention_targets = ["cheolsu", "철수", "sangsu", "coder"]
 proactive_enabled = true
 execution_scope = "workspace"
 
-tool_preset = "delivery"
-tool_denylist = []
+tool_preset = "messaging"
+tool_also_allow = ["keeper_library_search", "keeper_library_read"]

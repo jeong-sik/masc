@@ -43,5 +43,4 @@ proactive_enabled = true
 # .masc/keepers/<name>.json (live runtime meta). See keeper_types_profile.ml.
 execution_scope = "workspace"
 
-tool_preset = "delivery"
-tool_denylist = []
+tool_preset = "messaging"

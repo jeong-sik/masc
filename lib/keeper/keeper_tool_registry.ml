@@ -39,11 +39,12 @@ let core_always_tools =
 let core_discovery_tools =
   core_always_tools @
   [ "keeper_tool_search";
-    "keeper_broadcast"; "keeper_tasks_list";
+    "keeper_broadcast"; "keeper_tasks_list"; "keeper_tasks_audit";
     "keeper_task_claim"; "keeper_task_done";
     "keeper_memory_search"; "keeper_time_now";
     "keeper_fs_read";
     "keeper_board_get"; "keeper_board_post"; "keeper_board_comment";
+    "keeper_board_list";
   ]
 
 let effective_core_tools () = core_discovery_tools

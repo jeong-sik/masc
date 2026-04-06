@@ -31,7 +31,7 @@ val core_always_tools : string list
 (** Expanded core set for tool-discovery mode (MASC_KEEPER_TOOL_DISCOVERY). *)
 val core_discovery_tools : string list
 
-(** Returns [core_discovery_tools] when discovery enabled, else [core_always_tools]. *)
+(** Returns [core_discovery_tools].  Discovery mode is the default. *)
 val effective_core_tools : unit -> string list
 
 (** Schema for the keeper_tool_search tool. *)

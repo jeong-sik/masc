@@ -46,7 +46,7 @@ let transient_error_patterns =
 
 let is_transient_network_error (msg : string) : bool =
   List.exists
-    (fun needle -> string_contains_substring ~needle msg)
+    (fun needle -> string_contains_substring_ci ~needle msg)
     transient_error_patterns
 
 (** Max transient retries (excluding the initial attempt).  Total attempts
@@ -702,13 +702,14 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
           if is_scheduled_autonomous_cycle && not is_transient then now_ts
           else meta.runtime.proactive_rt.last_ts;
         last_outcome =
-          if is_scheduled_autonomous_cycle then Proactive_error
+          if is_scheduled_autonomous_cycle && not is_transient then Proactive_error
           else meta.runtime.proactive_rt.last_outcome;
         last_reason =
-          if is_scheduled_autonomous_cycle then "unified:error:" ^ String.trim reason
+          if is_scheduled_autonomous_cycle && not is_transient
+          then "unified:error:" ^ String.trim reason
           else meta.runtime.proactive_rt.last_reason;
         last_preview =
-          if is_scheduled_autonomous_cycle then preview
+          if is_scheduled_autonomous_cycle && not is_transient then preview
           else meta.runtime.proactive_rt.last_preview;
       };
       last_speech_act =

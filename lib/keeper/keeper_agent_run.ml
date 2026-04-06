@@ -589,12 +589,15 @@ let run_turn
         not (List.mem name core)
         && name <> "keeper_tool_search")
     in
-    let new_discoveries =
+    let after_policy_filter =
       after_core_filter
       |> List.filter (fun (name, _) -> Hashtbl.mem allowed_set name)
+    in
+    let new_discoveries =
+      after_policy_filter
       |> List.filteri (fun i _ -> i < max_results)
     in
-    let filtered_by_policy = List.length after_core_filter - List.length new_discoveries in
+    let filtered_by_policy = List.length after_core_filter - List.length after_policy_filter in
     (* Register discovered tools for discovery-mode before_turn_hook
        using the actual current turn so decay/visibility stay aligned. *)
     let discovered_names = List.map fst new_discoveries in

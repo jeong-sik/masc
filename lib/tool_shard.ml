@@ -54,12 +54,10 @@ compact context, extend turns, or hand off to the next generation.";
   (* Memory *)
   {
     name = "keeper_memory_search";
-    description = "Recall what the user said earlier or search your memory for past goals, \
-decisions, progress notes, and conversation history across all generations. \
-Returns scored results with metadata. Use to retrieve earlier instructions, \
-deployment plans, or any prior context. Default searches the structured memory bank. \
+    description = "Search memory for past goals, decisions, progress, or conversation history. \
+Returns scored results with metadata. Default searches the structured memory bank. \
 Use 'kind' to filter (goal, decision, progress, next, open_question, constraints). \
-Use source='history' for raw user message history, source='all' for both.";
+Use source='history' for raw user messages, source='all' for both.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -101,7 +99,7 @@ timestamp, vote_count, and comment thread.";
   };
   {
     name = "keeper_board_post";
-    description = "Create a new post on the MASC Board. Use hearth to target a topic channel \
+    description = "Create a new board post with content. Use hearth to target a topic channel \
 (e.g. 'code-review', 'research', 'ops'). Use for sharing findings, asking questions, \
 or starting discussions that other keepers should see.";
     input_schema = `Assoc [
@@ -130,7 +128,7 @@ and content preview for each post.";
   };
   {
     name = "keeper_board_comment";
-    description = "Add a comment to an existing board post. Use to respond to questions, \
+    description = "Add a comment to a board post by post_id. Use to respond to questions, \
 provide feedback, or continue a discussion thread.";
     input_schema = `Assoc [
       ("type", `String "object");
@@ -178,8 +176,8 @@ Use when looking for specific topics, past discussions, or related prior work.";
   };
   {
     name = "keeper_board_delete";
-    description = "Delete a board post that is clearly safe to remove. \
-Use only for generated garbage, expired automation, or other explicitly-approved cleanup cases.";
+    description = "Delete a board post by post_id. Use only for generated garbage, \
+expired automation, or other explicitly-approved cleanup cases.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -216,7 +214,7 @@ For searching across multiple files, use keeper_shell_readonly with op=rg instea
   };
   {
     name = "keeper_fs_edit";
-    description = "Write or append to a file in the project. Use to create new files or update \
+    description = "Write or append content to a file by path. Use to create new files or update \
 existing ones. For small targeted edits prefer this over keeper_bash with echo/cat. \
 Mode 'overwrite' replaces the entire file; 'append' adds to the end.";
     input_schema = `Assoc [
@@ -258,7 +256,7 @@ git_log/git_diff for repo history, bash for curl/jq/env/which.";
 let coding_keeper_bridge_tools : Types.tool_schema list = [
   {
     name = "keeper_bash";
-    description = "Run a write-capable shell command (builds, tests, git, file edits) — \
+    description = "Run a shell command by cmd (builds, tests, git, file edits) — \
 returns exit_code and output. For read-only ops prefer keeper_shell_readonly, \
 for file writes prefer keeper_fs_edit, for worktree-isolated code prefer masc_code_shell.";
     input_schema = `Assoc [

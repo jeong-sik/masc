@@ -1,6 +1,24 @@
 # Changelog
 
 
+## [2.251.0] - 2026-04-06
+
+### Added
+- **Messaging preset expansion** -- add github, library, shell, filesystem tools to messaging preset. (#5559)
+- **Cross-generation memory search** -- wire keeper_memory_search to trace history. (#5552, #5557)
+
+### Fixed
+- **Shared context persistence** -- persist shared_context across keeper turns. (#5547)
+- **9B tool calling accuracy** -- improve tool selection for autonomous turns on 9B models. (#5558)
+- **Cascade model order** -- remove hardcoded gemini:auto from model label resolution. (#5555)
+- **Dashboard pipeline_stage** -- add pipeline_stage normalizer and expandable thinking blocks. (#5553)
+- **Social keeper preset** -- downgrade social keepers from delivery to messaging. (#5549)
+- **Proactive defaults** -- lower proactive timing 900/1800 to 120/300, add TOML support. (#5548)
+
+### Changed
+- **Keeper registry** -- replace mutable Hashtbl with immutable StringMap. (#5550)
+- **Example keeper removal** -- remove example, rewrite masc-improver as refactoring engineer. (#5556)
+
 ## [2.250.0] - 2026-04-06
 
 ### Added

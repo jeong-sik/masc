@@ -751,6 +751,7 @@ let confirm_json ?actor_hint (ctx : _ context) args :
                  [
                    ("trace_id", `String entry.trace_id);
                    ("decision", `String "deny");
+                   ("tool_name", `String entry.delegated_tool);
                    ("executed_action", pending_confirm_to_yojson entry);
                  ]))
           else
@@ -791,6 +792,9 @@ let confirm_json ?actor_hint (ctx : _ context) args :
                  [
                    ("trace_id", `String entry.trace_id);
                    ("decision", `String "confirm");
+                   ("tool_name", `String entry.delegated_tool);
+                   ("result", executed);
                    ("executed_action", pending_confirm_to_yojson entry);
+                   (* backward compat — remove after dashboard migration *)
                    ("delegated_tool_result", executed);
                  ]))

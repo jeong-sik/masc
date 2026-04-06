@@ -709,6 +709,8 @@ export interface OperatorActionResult {
   preview?: unknown
   tool_name?: string
   result?: unknown
+  /** @deprecated Use result instead. Kept for backward compat during migration. */
+  delegated_tool_result?: unknown
   executed_action?: unknown
 }
 

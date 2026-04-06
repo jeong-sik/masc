@@ -321,21 +321,28 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         };
       } in
       Progress.Tracker.step tracker ~message:"Saving initial checkpoint" ();
-      (try
-         (match Keeper_exec_context.save_oas_checkpoint
-              ~session
-              ~agent_name:meta.agent_name
-              ~model:(Keeper_exec_context.checkpoint_model_of_meta meta)
-              ~ctx:ctx0
-              ~generation:0
-          with
-          | Ok _ -> ()
-          | Error e ->
-              Log.Keeper.error "save_oas_checkpoint (init) failed: %s" e)
-       with
-       | Eio.Cancel.Cancelled _ as e -> raise e
-       | exn ->
-           log_keeper_exn ~label:"save_oas_checkpoint (init) exception" exn);
+      let init_save_result =
+        try
+          Keeper_exec_context.save_oas_checkpoint
+            ~session
+            ~agent_name:meta.agent_name
+            ~model:(Keeper_exec_context.checkpoint_model_of_meta meta)
+            ~ctx:ctx0
+            ~generation:0
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn ->
+            log_keeper_exn ~label:"save_oas_checkpoint (init) exception" exn;
+            Error (Printexc.to_string exn)
+      in
+      match init_save_result with
+      | Error e ->
+        Log.Keeper.error
+          "create_keeper failed: initial checkpoint save error for name=%s: %s"
+          p.name e;
+        Progress.stop_tracking task_id;
+        (false, Printf.sprintf "initial checkpoint save failed: %s" e)
+      | Ok _ ->
       Progress.Tracker.step tracker ~message:"Writing keeper metadata" ();
       match write_meta ctx.config meta with
       | Error e ->

@@ -30,7 +30,7 @@ let make_test_ctx () =
 
 let test_make_tools_returns_nonempty () =
   let meta = make_test_meta () in
-  let ctx_ref = ref (make_test_ctx ()) in
+  let ctx_snapshot = make_test_ctx () in
   let dir = Filename.concat (Filename.get_temp_dir_name ())
     (Printf.sprintf "test_keeper_tools_%d" (Random.int 100000)) in
   (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
@@ -43,12 +43,12 @@ let test_make_tools_returns_nonempty () =
       Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
       let config = Room.default_config dir in
-      let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_ref () in
+      let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_snapshot () in
       check bool "tools nonempty" true (List.length tools > 0))
 
 let test_tools_have_valid_schemas () =
   let meta = make_test_meta () in
-  let ctx_ref = ref (make_test_ctx ()) in
+  let ctx_snapshot = make_test_ctx () in
   let dir = Filename.concat (Filename.get_temp_dir_name ())
     (Printf.sprintf "test_keeper_tools_schema_%d" (Random.int 100000)) in
   (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
@@ -61,7 +61,7 @@ let test_tools_have_valid_schemas () =
       Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
       let config = Room.default_config dir in
-      let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_ref () in
+      let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_snapshot () in
       List.iter (fun (tool : Agent_sdk.Tool.t) ->
         check bool (Printf.sprintf "tool %s has name" tool.schema.name)
           true (String.length tool.schema.name > 0);
@@ -71,7 +71,7 @@ let test_tools_have_valid_schemas () =
 
 let test_tool_count_matches_allowed () =
   let meta = make_test_meta () in
-  let ctx_ref = ref (make_test_ctx ()) in
+  let ctx_snapshot = make_test_ctx () in
   let dir = Filename.concat (Filename.get_temp_dir_name ())
     (Printf.sprintf "test_keeper_tools_count_%d" (Random.int 100000)) in
   (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
@@ -84,7 +84,7 @@ let test_tool_count_matches_allowed () =
       Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
       let config = Room.default_config dir in
-      let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_ref () in
+      let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_snapshot () in
       let allowed = Keeper_exec_tools.keeper_allowed_tool_names meta in
       let tool_names = List.map (fun (t : Agent_sdk.Tool.t) -> t.schema.name) tools in
       check bool "all tools are in allowed list" true
@@ -110,7 +110,7 @@ let is_guardrail_message message =
 
 let test_error_json_is_returned_as_tool_error () =
   let meta = make_test_meta () in
-  let ctx_ref = ref (make_test_ctx ()) in
+  let ctx_snapshot = make_test_ctx () in
   let dir = Filename.concat (Filename.get_temp_dir_name ())
     (Printf.sprintf "test_keeper_tools_error_%d" (Random.int 100000)) in
   (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
@@ -123,7 +123,7 @@ let test_error_json_is_returned_as_tool_error () =
       Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
       let config = Room.default_config dir in
-      let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_ref () in
+      let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_snapshot () in
       let tool = find_tool "keeper_fs_read" tools in
       match Tool.execute tool
               (`Assoc [("path", `String "missing-file-for-keeper-tools-oas.txt")])
@@ -142,7 +142,7 @@ let test_error_json_is_returned_as_tool_error () =
 
 let test_repeated_error_results_are_blocked () =
   let meta = make_test_meta () in
-  let ctx_ref = ref (make_test_ctx ()) in
+  let ctx_snapshot = make_test_ctx () in
   let dir = Filename.concat (Filename.get_temp_dir_name ())
     (Printf.sprintf "test_keeper_tools_guard_%d" (Random.int 100000)) in
   (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
@@ -155,7 +155,7 @@ let test_repeated_error_results_are_blocked () =
       Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
       let config = Room.default_config dir in
-      let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_ref () in
+      let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_snapshot () in
       let tool = find_tool "keeper_fs_read" tools in
       let args =
         `Assoc [("path", `String "missing-file-for-keeper-tools-oas.txt")]
@@ -173,7 +173,7 @@ let test_repeated_error_results_are_blocked () =
 
 let test_failure_count_resets_after_success () =
   let meta = make_test_meta () in
-  let ctx_ref = ref (make_test_ctx ()) in
+  let ctx_snapshot = make_test_ctx () in
   let dir = Filename.concat (Filename.get_temp_dir_name ())
     (Printf.sprintf "test_keeper_tools_reset_%d" (Random.int 100000)) in
   (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
@@ -188,7 +188,7 @@ let test_failure_count_resets_after_success () =
       Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
       let config = Room.default_config dir in
-      let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_ref () in
+      let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_snapshot () in
       let tool = find_tool "keeper_fs_read" tools in
       let path = "reset-after-success.txt" in
       let args = `Assoc [("path", `String path)] in
@@ -219,7 +219,7 @@ let test_failure_count_resets_after_success () =
 
 let test_failure_tracking_is_independent_per_args () =
   let meta = make_test_meta () in
-  let ctx_ref = ref (make_test_ctx ()) in
+  let ctx_snapshot = make_test_ctx () in
   let dir = Filename.concat (Filename.get_temp_dir_name ())
     (Printf.sprintf "test_keeper_tools_independent_%d" (Random.int 100000)) in
   (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
@@ -232,7 +232,7 @@ let test_failure_tracking_is_independent_per_args () =
       Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
       let config = Room.default_config dir in
-      let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_ref () in
+      let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_snapshot () in
       let tool = find_tool "keeper_fs_read" tools in
       let args_a = `Assoc [("path", `String "missing-a.txt")] in
       let args_b = `Assoc [("path", `String "missing-b.txt")] in

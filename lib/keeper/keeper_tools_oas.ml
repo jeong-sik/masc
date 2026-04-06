@@ -3,7 +3,7 @@
     Bridges [Keeper_exec_tools.execute_keeper_tool_call] dispatch
     to [Agent_sdk.Tool.t] list via [Tool_bridge.oas_tool_of_masc].
 
-    Tool execution reads current context from [ctx_ref] (mutable ref),
+    Tool execution reads current context from [ctx_snapshot] (immutable),
     enabling Agent.run() to manage messages while keeper tools
     access the working context for status/metrics.
 
@@ -51,12 +51,12 @@ let recent_tools_for_keeper ?(limit = 5) keeper_name : string list =
 (** Build OAS Tool.t list from keeper's allowed tools.
 
     Each tool delegates to [execute_keeper_tool_call] with the current
-    [ctx_ref] snapshot. Tools that raise exceptions return error results
+    [ctx_snapshot] value. Tools that raise exceptions return error results
     instead of crashing the agent loop.
 
     @param config Room configuration for tool dispatch
     @param meta Keeper metadata (determines which tools are allowed)
-    @param ctx_ref Mutable ref to current working context *)
+    @param ctx_snapshot Immutable snapshot of current working context *)
 (** Repeated-failure guardrail: blocks a tool after [max_consecutive]
     consecutive failures with the same (tool_name, args_hash) key.
     Resets on success. Prevents infinite retry loops (e.g. keeper
@@ -148,7 +148,7 @@ let normalize_tool_result ~(success : bool) (raw : string) : string =
 let make_tools
     ~(config : Room.config)
     ~(meta : Keeper_types.keeper_meta)
-    ~(ctx_ref : Keeper_types.working_context ref)
+    ~(ctx_snapshot : Keeper_types.working_context)
     ?search_fn
     ?on_tool_called
     ()
@@ -192,7 +192,7 @@ let make_tools
               let (result, duration_ms) =
                 Inference_utils.timed (fun () ->
                   Keeper_exec_tools.execute_keeper_tool_call
-                    ~config ~meta ~ctx_work:(!ctx_ref)
+                    ~config ~meta ~ctx_work:ctx_snapshot
                     ?search_fn
                     ~name:td.name ~input ())
               in

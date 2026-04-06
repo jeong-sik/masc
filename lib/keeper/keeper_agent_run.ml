@@ -348,7 +348,7 @@ let run_turn
   if not is_retry then
     Keeper_exec_context.persist_message ~source:history_user_source session user_msg;
   (* 7. Set up agent *)
-  let ctx_ref = ref ctx_work in
+  let ctx_snapshot = ctx_work in
   let agent_name = meta.agent_name in
   let meta_ref = ref meta in
   let agent_ref : Agent_sdk.Agent.t option ref = ref None in
@@ -375,7 +375,7 @@ let run_turn
   in
   let discovered_ref = ref (Keeper_discovered_tools.create ~decay_turns) in
   let keeper_tools =
-    Keeper_tools_oas.make_tools ~config ~meta ~ctx_ref
+    Keeper_tools_oas.make_tools ~config ~meta ~ctx_snapshot
       ~search_fn:(fun ~query ~max_results -> !local_search_fn_ref ~query ~max_results)
       ~on_tool_called:(fun name ->
           Keeper_discovered_tools.mark_used !discovered_ref
@@ -730,7 +730,7 @@ let run_turn
     | None -> ref Agent_sdk.Tool_op.Keep_all
   in
   let base_hooks = Keeper_hooks_oas.make_hooks
-    ~config ~meta_ref ~session ~ctx_ref ~generation ?max_cost_usd
+    ~config ~meta_ref ~session ~ctx_snapshot ~generation ?max_cost_usd
     ?trajectory_acc
     () in
   (* BM25 Tool_selector removed: discovery mode uses core + keeper_tool_search.
@@ -1115,7 +1115,10 @@ let run_turn
              Keeper_exec_context.persist_message
                ~source:history_assistant_source
                session assistant_msg;
-             ctx_ref := Keeper_exec_context.append !ctx_ref assistant_msg;
+             (* ctx_snapshot is immutable — assistant message is persisted
+                via checkpoint (OAS) and persist_message (history file).
+                No in-memory mutation needed; next turn reconstructs
+                context from checkpoint. *)
              (* Save checkpoint AFTER [STATE] synthesis.  Patch the last
                 assistant message in the OAS checkpoint so that the persisted
                 checkpoint contains the [STATE] block.  Without this patch,

@@ -380,7 +380,6 @@
    tool_code
    tool_code_write
    tool_suspend
-   tool_voice
    mention_inbox
    agent_reputation
    activity_feed

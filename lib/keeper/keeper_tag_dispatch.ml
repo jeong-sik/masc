@@ -180,14 +180,6 @@ let dispatch
              ~name ~args
        | Error e, _ | _, Error e -> Some (false, e))
 
-  | Mod_voice ->
-      (match require_sw (), require_clock () with
-       | Ok sw, Ok clock ->
-           Tool_voice.dispatch
-             { agent_name; sw; clock; net = get_net_opt () }
-             ~name ~args
-       | Error e, _ | _, Error e -> Some (false, e))
-
   | Mod_autoresearch ->
       (* Keeper already handles masc_autoresearch_* before reaching this path.
          If we get here, provide a minimal context without team session starter. *)

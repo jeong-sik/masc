@@ -151,8 +151,6 @@ let explicit_metadata : (string * metadata) list =
     ("masc_tool_help", readonly_tool);
     ("masc_keeper_list", readonly_tool);
     ("masc_keeper_status", readonly_tool);
-    ("masc_transport_status", deprecated "Pruned from all surfaces in #4999");
-    ("masc_websocket_discovery", deprecated "Pruned from all surfaces in #4999");
     ("masc_plan_get", readonly_tool);
     ("masc_worktree_list", readonly_tool);
     ( "masc_set_room",
@@ -201,14 +199,6 @@ let explicit_metadata : (string * metadata) list =
     ("masc_webrtc_answer", deprecated "Pruned from all surfaces in #4999");
     ("masc_board_migrate", deprecated "Pruned from all surfaces in #4999");
     ("masc_board_reclassify", deprecated "Pruned from all surfaces in #4999");
-    ("masc_voice_ping_pong", deprecated "Pruned from all surfaces in #4999");
-    ("masc_voice_speak", deprecated "Pruned from all surfaces in #4999");
-    ("masc_voice_session_start", deprecated "Pruned from all surfaces in #4999");
-    ("masc_voice_session_end", deprecated "Pruned from all surfaces in #4999");
-    ("masc_voice_sessions", deprecated "Pruned from all surfaces in #4999");
-    ("masc_voice_agent", deprecated "Pruned from all surfaces in #4999");
-    ("masc_voice_conference_start", deprecated "Pruned from all surfaces in #4999");
-    ("masc_voice_conference_end", deprecated "Pruned from all surfaces in #4999");
     (* detachment: 2 refs (swarm read-only), inactive 90 days *)
     ("masc_detachment_list", deprecated "Pruned: 2 refs (swarm read-only), inactive 90d");
     ("masc_detachment_status", deprecated "Pruned: 2 refs (swarm read-only), inactive 90d");

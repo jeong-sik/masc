@@ -273,7 +273,6 @@ let legacy_permission_for_tool = function
   | "masc_join" -> Some CanJoin
   | "masc_leave" -> Some CanLeave
   | "masc_status" | "masc_who" | "masc_tasks" | "masc_messages"
-  | "masc_transport_status" | "masc_websocket_discovery"
   | "masc_agents"
   | "masc_worktree_list"
   | "masc_task_history" | "masc_operator_snapshot"
@@ -286,7 +285,6 @@ let legacy_permission_for_tool = function
   | "masc_observe_topology" | "masc_observe_operations"
   | "masc_observe_swarm" | "masc_observe_capacity" | "masc_observe_alerts"
   | "masc_observe_traces"
-  | "masc_voice_sessions" | "masc_voice_agent"
   | "masc_agent_card" | "masc_agent_fitness"
   | "masc_agent_relations"
   | "masc_dashboard" | "masc_check"

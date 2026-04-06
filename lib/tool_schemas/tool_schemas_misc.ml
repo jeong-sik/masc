@@ -19,24 +19,6 @@ Pass category to filter results to a single section.";
     ];
   };
   {
-    name = "masc_transport_status";
-    description = "Return the active transport surfaces and runtime counters for HTTP, gRPC, WebSocket, and WebRTC. \
-Use when selecting a client transport or debugging whether realtime transports are enabled and reachable.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc []);
-    ];
-  };
-  {
-    name = "masc_websocket_discovery";
-    description = "Return the standalone WebSocket discovery payload equivalent to GET /ws, including enablement, port, URL, and session count. \
-Use before opening a WebSocket client to discover the correct ws:// endpoint.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc []);
-    ];
-  };
-  {
     name = "masc_webrtc_offer";
     description = "Create a WebRTC signaling offer in the server registry and return an offer_id. \
 Use from the initiating side before calling masc_webrtc_answer from the answering side.";

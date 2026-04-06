@@ -169,7 +169,7 @@ let is_mcp_context_required name =
 
 type module_tag =
   | Mod_plan | Mod_operator | Mod_command_plane
-  | Mod_local_runtime | Mod_team_session | Mod_voice
+  | Mod_local_runtime | Mod_team_session
   | Mod_worktree
   | Mod_code | Mod_code_write
   | Mod_a2a | Mod_handover

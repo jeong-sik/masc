@@ -254,10 +254,13 @@ let write_heartbeat_snapshot
           try
             let json = Yojson.Safe.from_string line in
             Some (Keeper_context_core.message_of_json json)
-          with _ -> None)
-      with e ->
+          with exn ->
+            Log.Keeper.warn "failed to parse message from history.jsonl: %s"
+              (Printexc.to_string exn);
+            None)
+      with exn ->
         Log.Keeper.warn "write_heartbeat_snapshot: history.jsonl load error (%s): %s"
-          meta_current.name (Printexc.to_string e);
+          meta_current.name (Printexc.to_string exn);
         [])
   in
   let c_messages = messages_for_continuity in

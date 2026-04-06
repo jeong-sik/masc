@@ -189,7 +189,7 @@ val transition_result_to_json : transition_result -> Yojson.Safe.t
 (** {1 Mermaid Visualization} *)
 
 (** Generate a Mermaid stateDiagram-v2 string with the given phase
-    highlighted. The diagram shows the full 11-state transition graph
-    with the current phase visually distinguished (green for active,
+    highlighted. The diagram visualizes the keeper phases and
+    distinguishes the current phase visually (green for active,
     amber for buffer, gray for terminal). *)
 val phase_to_mermaid : current:phase -> string

@@ -519,6 +519,20 @@ let transition_result_to_json (tr : transition_result) =
 
 (* ── Mermaid State Diagram ────────────────────────────── *)
 
+(** Maps a phase to the capitalized state ID used in the Mermaid diagram. *)
+let phase_to_mermaid_id = function
+  | Offline -> "Offline"
+  | Running -> "Running"
+  | Failing -> "Failing"
+  | Compacting -> "Compacting"
+  | HandingOff -> "HandingOff"
+  | Draining -> "Draining"
+  | Paused -> "Paused"
+  | Stopped -> "Stopped"
+  | Crashed -> "Crashed"
+  | Restarting -> "Restarting"
+  | Dead -> "Dead"
+
 let phase_to_mermaid ~(current : phase) : string =
   let b = Buffer.create 512 in
   let p fmt = Printf.bprintf b fmt in
@@ -526,30 +540,40 @@ let phase_to_mermaid ~(current : phase) : string =
   (* Phase nodes with display names *)
   p "    [*] --> Offline\n";
   p "    Offline --> Running : Fiber_started\n";
+  p "    Offline --> Draining : stop requested\n";
+  p "    Offline --> Stopped : stop while not started\n";
   p "    Running --> Failing : hb/turn fail\n";
   p "    Running --> Compacting : compact start\n";
   p "    Running --> HandingOff : handoff start\n";
   p "    Running --> Draining : stop requested\n";
   p "    Running --> Paused : operator pause\n";
+  p "    Running --> Stopped : stop requested\n";
+  p "    Running --> Crashed : fiber death\n";
   p "    Failing --> Running : hb/turn ok\n";
   p "    Failing --> Crashed : fiber death\n";
   p "    Failing --> Draining : stop requested\n";
+  p "    Failing --> Paused : operator pause\n";
   p "    Compacting --> Running : compact done\n";
   p "    Compacting --> Failing : hb fail\n";
   p "    Compacting --> Crashed : fiber death\n";
+  p "    Compacting --> Draining : stop requested\n";
   p "    HandingOff --> Running : handoff done\n";
   p "    HandingOff --> Failing : hb fail\n";
   p "    HandingOff --> Crashed : fiber death\n";
+  p "    HandingOff --> Draining : stop requested\n";
   p "    Draining --> Stopped : drain done\n";
   p "    Draining --> Crashed : fiber death\n";
   p "    Paused --> Running : operator resume\n";
   p "    Paused --> Draining : stop requested\n";
+  p "    Paused --> Stopped : stop requested\n";
   p "    Paused --> Crashed : fiber death\n";
   p "    Crashed --> Restarting : backoff elapsed\n";
   p "    Crashed --> Dead : budget exhausted\n";
   p "    Restarting --> Running : fiber started\n";
   p "    Restarting --> Crashed : launch fail\n";
   p "    Restarting --> Dead : budget exhausted\n";
+  p "    Restarting --> Draining : stop requested\n";
+  p "    Restarting --> Paused : operator pause\n";
   p "    Stopped --> [*]\n";
   p "    Dead --> [*]\n";
   (* Highlight current phase with classDef *)
@@ -559,10 +583,9 @@ let phase_to_mermaid ~(current : phase) : string =
   p "    classDef buffer fill:#f59e0b,stroke:#d97706,color:#fff\n";
   (match current with
    | Stopped | Dead ->
-     p "    class %s terminal\n" (phase_to_string current)
+     p "    class %s terminal\n" (phase_to_mermaid_id current)
    | Failing | Compacting | HandingOff | Draining | Restarting ->
-     p "    class %s buffer\n" (phase_to_string current);
-     p "    class %s active\n" (phase_to_string current)
+     p "    class %s buffer\n" (phase_to_mermaid_id current)
    | _ ->
-     p "    class %s active\n" (phase_to_string current));
+     p "    class %s active\n" (phase_to_mermaid_id current));
   Buffer.contents b

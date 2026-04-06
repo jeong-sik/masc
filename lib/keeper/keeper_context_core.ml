@@ -49,12 +49,12 @@ let ensure_dir path =
 let estimate_char_tokens (s : string) : int =
   Agent_sdk.Context_reducer.estimate_char_tokens s
 
-(** CJK-aware token estimate delegated to OAS Context_reducer. *)
+(** CJK-aware token estimate delegated to OAS Context_reducer.
+    OAS estimator is already conservative (CJK-aware, ceil-based).
+    Prior 15% buffer (#5053) removed — it caused premature compaction
+    and masked the OAS estimator's actual accuracy. *)
 let msg_tokens (m : Agent_sdk.Types.message) : int =
-  let estimated = Agent_sdk.Context_reducer.estimate_message_tokens m in
-  (* Use 15% safety buffer for message estimation errors (#5053).
-     Ceiling-based to avoid truncation erasing the buffer. *)
-  int_of_float (ceil (float_of_int estimated *. 1.15))
+  Agent_sdk.Context_reducer.estimate_message_tokens m
 
 let count_tokens (system_prompt : string) (msgs : Agent_sdk.Types.message list) =
   let sys_tokens = Agent_sdk.Context_reducer.estimate_char_tokens system_prompt in

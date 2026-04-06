@@ -81,43 +81,12 @@ let get_calibration_info () =
     ("enabled", `Bool (Env_config_core.relay_calibration_enabled ()));
   ]
 
-(** Cached default registry — avoids re-allocation on every resolve call. *)
-let default_registry = Llm_provider.Provider_registry.default ()
-
-(** Resolve max context tokens from OAS Provider_registry / Capabilities (SSOT).
-    Resolution order:
-    1. Capabilities.for_model_id — per-model override (e.g. "claude-opus-4-6" -> 1M)
-    2. Provider_registry.find — provider-level default (e.g. "claude" -> 200K)
-    3. 128_000 fallback (matches Oas_model_resolve.resolve_primary_max_context) *)
+(** Resolve max context tokens via OAS Model_meta (SSOT).
+    Delegates to [Llm_provider.Model_meta.for_model_id] which internally
+    queries Capabilities, Provider_registry, and applies a 100K fallback
+    for unknown models. *)
 let resolve_max_context model =
-  (* Layer 1: per-model capabilities (e.g. "claude-opus-4-6" -> 1M) *)
-  let from_caps =
-    match Llm_provider.Capabilities.for_model_id model with
-    | Some caps -> caps.Llm_provider.Capabilities.max_context_tokens
-    | None -> None
-  in
-  match from_caps with
-  | Some n -> n
-  | None ->
-    (* Layer 2: exact provider name lookup (e.g. "claude" -> 200K) *)
-    (match Llm_provider.Provider_registry.find default_registry model with
-     | Some entry -> entry.Llm_provider.Provider_registry.max_context
-     | None ->
-       (* Layer 3: extract base provider from separator
-          "provider:model" -> "provider" (colon), "claude-opus" -> "claude" (hyphen) *)
-       let base =
-         match String.index_opt model ':' with
-         | Some idx when idx > 0 -> String.sub model 0 idx
-         | _ ->
-           match String.index_opt model '-' with
-           | Some idx when idx > 0 -> String.sub model 0 idx
-           | _ -> ""
-       in
-       if base <> "" then
-         match Llm_provider.Provider_registry.find default_registry base with
-         | Some entry -> entry.Llm_provider.Provider_registry.max_context
-         | None -> 128_000
-       else 128_000)
+  (Llm_provider.Model_meta.for_model_id model).context_window
 
 (** {1 Token estimation constants}
 

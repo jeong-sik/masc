@@ -35,10 +35,15 @@ instructions = """
 
 room_scope = "current"
 scope_kind = "local"
-mention_targets = ["sangsu"]
+mention_targets = ["sangsu", "상수", "홍상수", "cheolsu", "uranium666"]
 
 proactive_enabled = true
+proactive_idle_sec = 120
+proactive_cooldown_sec = 300
 execution_scope = "workspace"
+
+compaction_ratio_gate = 0.3
+compaction_message_gate = 8
 
 tool_preset = "delivery"
 tool_denylist = []

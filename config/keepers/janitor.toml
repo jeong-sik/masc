@@ -42,10 +42,15 @@ Tone: terse, operational, no speeches.
 
 room_scope = "current"
 scope_kind = "global"
-mention_targets = ["janitor", "garbage-keeper", "tool-matrix-janitor"]
+mention_targets = ["janitor", "garbage-keeper", "tool-matrix-janitor", "coder", "masc-improver"]
 
 proactive_enabled = true
+proactive_idle_sec = 120
+proactive_cooldown_sec = 300
 execution_scope = "workspace"
+
+compaction_ratio_gate = 0.3
+compaction_message_gate = 8
 
 tool_preset = "delivery"
 tool_also_allow = [

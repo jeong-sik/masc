@@ -488,110 +488,11 @@ let test_stop_keepalive_preserves_existing_crash_outcome () =
      | None -> fail "expected crash promise to remain resolved")
 
 (* ══════════════════════════════════════════════════════════
-   9. RFC-0002: Keeper_fiber_crash ordering invariant
-   ══════════════════════════════════════════════════════════ *)
+   9. RFC-0002: pipeline_stage_of_phase deterministic mapping
 
-(** REAL ordering test: pre-store reason → raise Keeper_fiber_crash →
-    catch → read structured reason from registry.
-    The exception actually flies. The catch handler (matching supervisor
-    logic) reads last_failure_reason from registry.
-    Tests 3 failure_reason variants across the raise/catch boundary. *)
-let test_fiber_crash_ordering_invariant () =
-  R.clear ();
-  let meta = make_meta "ordering-test" in
-  let _reg = R.register ~base_path:bp "ordering-test" meta in
-  (* Variant 1: Heartbeat_consecutive_failures *)
-  let caught1 = ref None in
-  R.set_failure_reason ~base_path:bp "ordering-test"
-    (Some (R.Heartbeat_consecutive_failures 7));
-  (try raise R.Keeper_fiber_crash
-   with R.Keeper_fiber_crash ->
-     caught1 := (match R.get ~base_path:bp "ordering-test" with
-       | Some e -> e.last_failure_reason
-       | None -> None));
-  (match !caught1 with
-   | Some (R.Heartbeat_consecutive_failures n) ->
-     check int "hb reason survives raise/catch" 7 n
-   | _ -> fail "catch could not read pre-stored Heartbeat reason");
-  (* Variant 2: Turn_consecutive_failures *)
-  let caught2 = ref None in
-  R.set_failure_reason ~base_path:bp "ordering-test"
-    (Some (R.Turn_consecutive_failures 12));
-  (try raise R.Keeper_fiber_crash
-   with R.Keeper_fiber_crash ->
-     caught2 := (match R.get ~base_path:bp "ordering-test" with
-       | Some e -> e.last_failure_reason
-       | None -> None));
-  (match !caught2 with
-   | Some (R.Turn_consecutive_failures n) ->
-     check int "turn reason survives raise/catch" 12 n
-   | _ -> fail "catch could not read pre-stored Turn reason");
-  (* Variant 3: Exception (fatal env error) *)
-  let caught3 = ref None in
-  R.set_failure_reason ~base_path:bp "ordering-test"
-    (Some (R.Exception "fatal environment error: Eio switch not available"));
-  (try raise R.Keeper_fiber_crash
-   with R.Keeper_fiber_crash ->
-     caught3 := (match R.get ~base_path:bp "ordering-test" with
-       | Some e -> e.last_failure_reason
-       | None -> None));
-  (match !caught3 with
-   | Some (R.Exception s) ->
-     check bool "env error msg preserved across raise/catch"
-       true (String.length s > 30)
-   | _ -> fail "catch could not read pre-stored Exception reason")
-
-(** REAL fallback test: raise Keeper_fiber_crash WITHOUT pre-storing
-    any reason → catch handler must fall back to Exception("fiber_crash").
-    This exercises the supervisor's unified exn handler logic where
-    Keeper_fiber_crash is caught but registry has no pre-stored reason.
-    Also tests a generic (non-Keeper_fiber_crash) exception to verify
-    the handler distinguishes the two branches. *)
-let test_fiber_crash_no_prestored_reason () =
-  R.clear ();
-  let meta = make_meta "no-reason" in
-  let _reg = R.register ~base_path:bp "no-reason" meta in
-  (* Path 1: Keeper_fiber_crash without pre-stored reason *)
-  let caught_fr = ref (R.Exception "initial") in
-  (try raise R.Keeper_fiber_crash
-   with
-   | R.Keeper_fiber_crash ->
-     caught_fr := (match R.get ~base_path:bp "no-reason" with
-       | Some e ->
-         Option.value
-           ~default:(R.Exception "fiber_crash")
-           e.last_failure_reason
-       | None -> R.Exception "fiber_crash (unregistered)")
-   | _exn ->
-     caught_fr := R.Exception "wrong branch");
-  (match !caught_fr with
-   | R.Exception s ->
-     check string "fallback on no pre-stored reason" "fiber_crash" s
-   | other ->
-     fail (Printf.sprintf "expected Exception fallback, got %s"
-       (R.failure_reason_to_string other)));
-  (* Path 2: generic exception → must wrap in Exception(string) *)
-  let caught_generic = ref (R.Exception "initial") in
-  (try raise (Failure "disk full")
-   with exn ->
-     caught_generic := (match exn with
-       | R.Keeper_fiber_crash ->
-         (match R.get ~base_path:bp "no-reason" with
-          | Some e ->
-            Option.value ~default:(R.Exception "fiber_crash")
-              e.last_failure_reason
-          | None -> R.Exception "fiber_crash")
-       | _ -> R.Exception (Printexc.to_string exn)));
-  (match !caught_generic with
-   | R.Exception s ->
-     check bool "generic exn wraps in Exception"
-       true (String.length s > 0 && s <> "fiber_crash")
-   | other ->
-     fail (Printf.sprintf "expected Exception(string), got %s"
-       (R.failure_reason_to_string other)))
-
-(* ══════════════════════════════════════════════════════════
-   10. RFC-0002: pipeline_stage_of_phase deterministic mapping
+   NOTE: The "set_failure_reason before raise Keeper_fiber_crash"
+   ordering invariant is a code convention enforced by review,
+   not a runtime property testable by unit tests. See PR #5560.
    ══════════════════════════════════════════════════════════ *)
 
 module ES = Masc_mcp.Keeper_exec_status
@@ -709,12 +610,6 @@ let () =
         test_stop_keepalive_resolves_running_entry_immediately;
       test_case "manual stop preserves crashed outcome" `Quick
         test_stop_keepalive_preserves_existing_crash_outcome;
-    ];
-    "fiber_crash_invariant", [
-      eio_test "ordering: set_failure_reason before catch reads"
-        test_fiber_crash_ordering_invariant;
-      eio_test "no pre-stored reason → fallback"
-        test_fiber_crash_no_prestored_reason;
     ];
     "pipeline_stage_phase", [
       test_case "exhaustive 11-phase mapping" `Quick

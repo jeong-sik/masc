@@ -113,16 +113,13 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
             | None -> Custom names)
   in
   let tool_denylist =
-    let profile_or_old =
-      match p.profile_defaults.tool_denylist with
-      | Some _ as toml -> toml
-      | None ->
-        if old.tool_denylist <> [] then Some old.tool_denylist
-        else None
+    let old_or_profile =
+      if old.tool_denylist <> [] then Some old.tool_denylist
+      else p.profile_defaults.tool_denylist
     in
     resolve_tool_name_list
       ~preferred:p.tool_denylist_opt
-      ~fallback:profile_or_old
+      ~fallback:old_or_profile
   in
   let updated = { old with
     goal;

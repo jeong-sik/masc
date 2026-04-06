@@ -857,12 +857,11 @@ let run_turn
       ()
   in
   let reducer = Agent_sdk.Context_reducer.compose [
-    Agent_sdk.Context_reducer.keep_last 30;
-    Agent_sdk.Context_reducer.clear_tool_results ~keep_recent:2;
     Agent_sdk.Context_reducer.merge_contiguous;
-    (* max_context = model's input context window (e.g., 8192 for 8K models).
-       max_tokens = output generation limit (e.g., 2048).
-       The reducer needs the context window, not the output budget. *)
+    (* Let OAS manage context naturally via token budget.
+       Previous clear_tool_results ~keep_recent:2 and keep_last 30 destroyed
+       the keeper's memory of its own actions, causing repetitive behavior.
+       from_context_config handles eviction when the window is full. *)
     Agent_sdk.Context_reducer.from_context_config ~max_tokens:max_context ();
   ] in
   (* 8. Run Agent *)

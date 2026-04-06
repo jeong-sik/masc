@@ -42,6 +42,9 @@ type world_observation = {
   room_signal_interpretation : Meta_cognition.interpretation option;
   room_signal_digest_ref : Meta_cognition.digest_ref option;
   last_turn_budget : (int * int) option;
+  last_tools_used : string list;
+    (** Tools used in the previous cycle. Empty on first cycle.
+        Used by the unified prompt to generate data-driven anti-repetition hints. *)
 }
 
 type unified_turn_channel =
@@ -586,6 +589,7 @@ let observe ~(pending_board_events : pending_board_event list option)
     room_signal_interpretation;
     room_signal_digest_ref;
     last_turn_budget = None;
+    last_tools_used = [];
   }
 
 (** Compute effective scheduled autonomous cooldown with idle decay.

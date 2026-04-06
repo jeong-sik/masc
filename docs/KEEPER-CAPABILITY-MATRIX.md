@@ -108,4 +108,3 @@ These overlap with `Tool_permissions.admin_tools` for `masc_autoresearch_start` 
 | Allowlist/Denylist | Explicit tool filtering | `allowed_tools`, `denied_tools` |
 
 Source: `lib/eval_gate.ml`, `lib/keeper/keeper_exec_tools.ml`, `lib/tool_shard.ml`
-# Keeper merge test - 2026-04-06T00:11:53Z

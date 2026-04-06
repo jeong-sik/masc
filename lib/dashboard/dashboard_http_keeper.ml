@@ -12,11 +12,12 @@ include Dashboard_http_keeper_detail
 
 (** Context-ratio thresholds for keeper health scoring.
     These are distinct from Dashboard.ctx_* (compaction triggers) —
-    health scoring penalizes keepers approaching context limits. *)
-let health_ctx_critical = 0.9
-let health_ctx_warn = 0.8
-let health_penalty_critical = 20.0
-let health_penalty_warn = 10.0
+    health scoring penalizes keepers approaching context limits.
+    Values sourced from [Env_config_keeper.DashboardHealth]. *)
+let health_ctx_critical = Env_config_keeper.DashboardHealth.ctx_critical
+let health_ctx_warn = Env_config_keeper.DashboardHealth.ctx_warn
+let health_penalty_critical = Env_config_keeper.DashboardHealth.penalty_critical
+let health_penalty_warn = Env_config_keeper.DashboardHealth.penalty_warn
 
 (** Compute keeper health score (0-100). Pure function.
     Inputs: restart_count, max_restarts, recent_crash_count,

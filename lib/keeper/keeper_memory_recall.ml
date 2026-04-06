@@ -310,7 +310,7 @@ let evaluate_keeper_auto_rules
     | Some id -> model_threshold_multipliers_of_model_id id
     | None -> (1.0, 1.0)
   in
-  let ratio_gate = Float.min 0.95 (meta.compaction.ratio_gate *. ratio_mult) in
+  let ratio_gate = Float.min Env_config_keeper.context_ratio_hard_cap (meta.compaction.ratio_gate *. ratio_mult) in
   let message_gate = meta.compaction.message_gate in
   let token_gate = meta.compaction.token_gate in
   let reflect_threshold = keeper_rule_reflect_repetition_threshold () in
@@ -337,7 +337,7 @@ let evaluate_keeper_auto_rules
     || (message_gate > 0 && message_count >= message_gate)
     || (token_gate > 0 && token_count >= token_gate)
   in
-  let adjusted_handoff_threshold = Float.min 0.95 (meta.handoff_threshold *. handoff_mult) in
+  let adjusted_handoff_threshold = Float.min Env_config_keeper.context_ratio_hard_cap (meta.handoff_threshold *. handoff_mult) in
   let handoff = meta.auto_handoff && context_ratio >= adjusted_handoff_threshold in
   let guardrail_stop =
     repetition_risk >= guardrail_repetition_threshold
@@ -474,7 +474,7 @@ let learned_policy_auto_rules
     | Some id -> model_threshold_multipliers_of_model_id id
     | None -> (1.0, 1.0)
   in
-  let ratio_gate = Float.min 0.95 (meta.compaction.ratio_gate *. ratio_mult) in
+  let ratio_gate = Float.min Env_config_keeper.context_ratio_hard_cap (meta.compaction.ratio_gate *. ratio_mult) in
   let message_gate = meta.compaction.message_gate in
   let token_gate = meta.compaction.token_gate in
   let goal_drift =
@@ -487,7 +487,7 @@ let learned_policy_auto_rules
     || (message_gate > 0 && message_count >= message_gate)
     || (token_gate > 0 && token_count >= token_gate)
   in
-  let adjusted_handoff_threshold = Float.min 0.95 (meta.handoff_threshold *. handoff_mult) in
+  let adjusted_handoff_threshold = Float.min Env_config_keeper.context_ratio_hard_cap (meta.handoff_threshold *. handoff_mult) in
   let handoff = meta.auto_handoff && context_ratio >= adjusted_handoff_threshold in
   {
     repetition_risk;

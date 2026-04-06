@@ -50,9 +50,10 @@ let max_signal_scan = 500
 let runtime_stale_after_s = 30. *. 60.
 let evaluator_stale_after_s = 12. *. 3600.
 
-(** Runtime health warning thresholds. Distinct from compaction thresholds. *)
-let runtime_warning_ctx_ratio = 0.95
-let runtime_warning_token_count = 50_000
+(** Runtime health warning thresholds. Distinct from compaction thresholds.
+    Values sourced from [Env_config_keeper.DashboardHealth]. *)
+let runtime_warning_ctx_ratio = Env_config_keeper.DashboardHealth.runtime_warning_ctx_ratio
+let runtime_warning_token_count = Env_config_keeper.DashboardHealth.runtime_warning_token_count
 
 let pre_compact_store_ref : Dated_jsonl.t option ref = ref None
 

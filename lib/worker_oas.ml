@@ -314,18 +314,157 @@ let make_heartbeat_callbacks
       };
     ]
 
-let make_tool_tracking_hooks ?context () =
+(** Command-oriented tools that need destructive pattern screening in Workers.
+    Limit screening to tools whose relevant input is a command string, to
+    avoid false positives from file content payloads (for example write/edit
+    tool bodies containing shell snippets in docs or tests). *)
+let worker_destructive_check_tools =
+  [ "shell_exec"; "masc_code_shell"; "masc_code_git"; "masc_code_delete" ]
+
+(** Convert a JSON field value into a string suitable for safety screening. *)
+let string_of_screening_value (value : Yojson.Safe.t) : string =
+  match value with
+  | `String s -> s
+  | `Int i -> string_of_int i
+  | `Intlit s -> s
+  | `Float f -> string_of_float f
+  | `Bool b -> string_of_bool b
+  | `Null -> ""
+  | (`Assoc _ | `List _) as json -> Yojson.Safe.to_string json
+
+(** Extract command-like content from tool input JSON for screening.
+    Reads "command", "cmd", "content", "action"/"args", or "path" keys.
+    Shared pattern with keeper_hooks_oas.ml extract_command_from_input. *)
+let extract_command_from_input (input : Yojson.Safe.t) : string =
+  let open Yojson.Safe.Util in
+  let string_member key =
+    match input |> member key with
+    | `String s -> s
+    | _ -> ""
+  in
+  let member_to_string key =
+    match input |> member key with
+    | `Null -> ""
+    | value -> string_of_screening_value value
+  in
+  try
+    let command = string_member "command" in
+    if command <> "" then command
+    else
+      let cmd = string_member "cmd" in
+      if cmd <> "" then cmd
+      else
+        let content = string_member "content" in
+        if content <> "" then content
+        else
+          let action = string_member "action" in
+          let args = member_to_string "args" in
+          (match action, args with
+           | "", "" ->
+             let path = string_member "path" in
+             if path <> "" then path else ""
+           | a, "" -> a
+           | "", b -> b
+           | a, b  -> String.trim (a ^ " " ^ b))
+  with Yojson.Safe.Util.Type_error _ -> ""
+
+(** Render inline skip reason for blocked tool calls.
+    Returns a text block that OAS displays instead of executing the tool. *)
+let render_worker_skip_reason ~tool_name ~reason_code ~reason_text =
+  Printf.sprintf
+    "[tool_blocked] tool=%s reason_code=%s reason=%s"
+    tool_name reason_code reason_text
+
+(** Build pre_tool_use hook with optional safety gates.
+
+    When [gate_config] is provided, adds 3-gate defense-in-depth
+    (same pattern as keeper_hooks_oas.ml):
+    - Gate 0: Deny list — reject tools in [gate_config.denied_tools]
+    - Gate 1: Cost budget — reject when [accumulated_cost_usd >= max_cost_usd]
+    - Gate 2: Destructive pattern detection — reject dangerous shell commands
+
+    When [gate_config] is None, only name tracking is performed (backward compat).
+
+    @since Audit #2 — Worker safety gates *)
+let make_tool_tracking_hooks ?gate_config ?context () =
   let tool_names_ref = ref [] in
   let tracking =
     {
       Oas.Hooks.empty with
       pre_tool_use =
         Some
-          (function
-            | Oas.Hooks.PreToolUse { tool_name; _ } ->
-                tool_names_ref := tool_name :: !tool_names_ref;
-                Oas.Hooks.Continue
+          (fun event ->
+            match event with
+            | Oas.Hooks.PreToolUse { tool_name; input; accumulated_cost_usd; _ } ->
+              (* Always track tool names *)
+              tool_names_ref := tool_name :: !tool_names_ref;
+              (* Safety gates (when gate_config is provided) *)
+              (match gate_config with
+               | None -> Oas.Hooks.Continue
+               | Some (gate : Eval_gate.gate_config) ->
+                 (* Gate 0: Deny list *)
+                 if Tool_access_policy.selector_matches_name
+                      (Tool_access_policy.Names gate.denied_tools)
+                      tool_name
+                 then begin
+                   Log.LocalWorker.warn "worker deny list: blocked %s"
+                     tool_name;
+                   Oas.Hooks.Override
+                     (render_worker_skip_reason
+                        ~tool_name
+                        ~reason_code:"worker_deny"
+                        ~reason_text:"tool is on the worker deny list")
+                 end
+                 else
+                 (* Gate 1: Cost budget *)
+                 if accumulated_cost_usd >= gate.max_cost_usd then begin
+                   let reason_text =
+                     Printf.sprintf
+                       "accumulated_cost_usd=%.4f exceeded limit=%.4f"
+                       accumulated_cost_usd gate.max_cost_usd
+                   in
+                   Log.LocalWorker.warn
+                     "worker cost gate: $%.4f >= $%.4f limit, skipping %s"
+                     accumulated_cost_usd gate.max_cost_usd tool_name;
+                   Oas.Hooks.Override
+                     (render_worker_skip_reason
+                        ~tool_name ~reason_code:"cost_gate" ~reason_text)
+                 end
+                 else
+                 (* Gate 2: Destructive pattern detection *)
+                 if gate.destructive_check_enabled
+                    && List.mem tool_name worker_destructive_check_tools
+                 then
+                   let cmd = extract_command_from_input input in
+                   (match Eval_gate.detect_destructive cmd with
+                    | Some (pattern, desc) ->
+                      let reason_text =
+                        Printf.sprintf "pattern='%s' (%s)" pattern desc
+                      in
+                      Log.LocalWorker.warn
+                        "worker destructive pattern in %s: '%s' (%s)"
+                        tool_name pattern desc;
+                      Oas.Hooks.Override
+                        (render_worker_skip_reason
+                           ~tool_name
+                           ~reason_code:"destructive_guard"
+                           ~reason_text)
+                    | None -> Oas.Hooks.Continue)
+                 else
+                   Oas.Hooks.Continue)
             | _ -> Oas.Hooks.Continue);
+      on_error = Some (function
+        | Oas.Hooks.OnError { detail; context = err_ctx } ->
+          Log.LocalWorker.warn "worker on_error: %s (context: %s)"
+            detail err_ctx;
+          Oas.Hooks.Continue
+        | _ -> Oas.Hooks.Continue);
+      on_tool_error = Some (function
+        | Oas.Hooks.OnToolError { tool_name; error } ->
+          Log.LocalWorker.warn "worker tool_error: %s — %s"
+            tool_name error;
+          Oas.Hooks.Continue
+        | _ -> Oas.Hooks.Continue);
     }
   in
   let hooks = match context with
@@ -395,7 +534,7 @@ let rec run_worker_via_oas
   let injector_config = Masc_context_injector.default_config () in
   let context_injector = Masc_context_injector.make ~config:injector_config () in
   let shared_context = Oas.Context.create () in
-  let tool_names_ref, hooks = make_tool_tracking_hooks ~context:shared_context () in
+  let tool_names_ref, hooks = make_tool_tracking_hooks ?gate_config ~context:shared_context () in
   let* agent =
     build_agent ~net ~meta ~provider ~system_prompt ~tools ~hooks
       ~raw_trace ~heartbeat_callbacks:heartbeat_cbs ?gate_config
@@ -449,7 +588,8 @@ and resume_worker_via_oas
   let injector_config = Masc_context_injector.default_config () in
   let context_injector = Masc_context_injector.make ~config:injector_config () in
   let shared_context = Oas.Context.create () in
-  let tool_names_ref, hooks = make_tool_tracking_hooks ~context:shared_context () in
+  let gate_config = gate_config_of_execution_scope meta.execution_scope in
+  let tool_names_ref, hooks = make_tool_tracking_hooks ~gate_config ~context:shared_context () in
   let resume_model_id = resume_model_id_of_checkpoint meta checkpoint in
   let* resume_provider =
     oas_provider_of_label (Provider_adapter.make_local_label resume_model_id)
@@ -623,23 +763,13 @@ let orchestrate_workers
     () : (Oas.Orchestrator.task_result list, string) result =
   let rec build_agents acc = function
     | [] -> Ok (List.rev acc)
-    | (meta, provider, system_prompt, tools, raw_trace, heartbeat_cbs) :: rest ->
-      let tool_names_ref = ref [] in
-      let hooks =
-        {
-          Oas.Hooks.empty with
-          pre_tool_use =
-            Some
-              (function
-                | Oas.Hooks.PreToolUse { tool_name; _ } ->
-                  tool_names_ref := tool_name :: !tool_names_ref;
-                  Oas.Hooks.Continue
-                | _ -> Oas.Hooks.Continue);
-        }
-      in
+    | ((meta : Worker_container_types.worker_container_meta), provider, system_prompt, tools, raw_trace, heartbeat_cbs) :: rest ->
+      let gate_config = gate_config_of_execution_scope meta.execution_scope in
+      let tool_names_ref, hooks = make_tool_tracking_hooks ~gate_config () in
       let* agent =
         build_agent ~net ~meta ~provider ~system_prompt ~tools ~hooks
-          ~raw_trace ~heartbeat_callbacks:heartbeat_cbs ()
+          ~raw_trace ~heartbeat_callbacks:heartbeat_cbs
+          ~gate_config ()
       in
       ignore tool_names_ref;
       build_agents ((meta.worker_name, agent) :: acc) rest

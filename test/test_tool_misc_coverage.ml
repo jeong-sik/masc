@@ -238,6 +238,98 @@ let () = test "parse_bing_rss_items_drops_non_http_links" (fun () ->
   | _ -> failwith "expected one safe parsed item"
 )
 
+let () = test "parse_searxng_json_basic" (fun () ->
+  let payload =
+    {|{
+      "results": [
+        { "title": "OpenAI Research", "url": "https://openai.com/research", "content": "Latest AI research from OpenAI." },
+        { "title": "Example Site", "url": "https://example.com/", "content": "A sample page." }
+      ]
+    }|}
+  in
+  let items = Tool_misc.parse_searxng_json payload in
+  assert (List.length items = 2);
+  match items with
+  | (title1, url1, snippet1) :: (title2, url2, snippet2) :: _ ->
+      assert (title1 = "OpenAI Research");
+      assert (url1 = "https://openai.com/research");
+      assert (snippet1 = "Latest AI research from OpenAI.");
+      assert (title2 = "Example Site");
+      assert (url2 = "https://example.com/");
+      assert (snippet2 = "A sample page.")
+  | _ -> failwith "expected two parsed items"
+)
+
+let () = test "parse_searxng_json_cleans_html" (fun () ->
+  let payload =
+    {|{
+      "results": [
+        {
+          "title": "Result with <b>HTML</b> &amp; entities",
+          "url": "https://example.com/page",
+          "content": "<p>Snippet with <em>markup</em> &amp; detail</p>"
+        }
+      ]
+    }|}
+  in
+  let items = Tool_misc.parse_searxng_json payload in
+  assert (List.length items = 1);
+  match items with
+  | [ (title, _url, snippet) ] ->
+      assert (title = "Result with HTML & entities");
+      assert (not (str_contains snippet "<p>"));
+      assert (not (str_contains snippet "<em>"));
+      assert (str_contains snippet "markup")
+  | _ -> failwith "expected one item"
+)
+
+let () = test "parse_searxng_json_drops_invalid_urls" (fun () ->
+  let payload =
+    {|{
+      "results": [
+        { "title": "Valid", "url": "https://example.com/", "content": "ok" },
+        { "title": "Bad scheme", "url": "javascript:alert(1)", "content": "bad" },
+        { "title": "Valid B", "url": "https://example.com/b", "content": "second valid entry" },
+        { "title": "", "url": "https://example.com/c", "content": "empty title" }
+      ]
+    }|}
+  in
+  let items = Tool_misc.parse_searxng_json payload in
+  assert (List.length items = 2);
+  match items with
+  | (t1, u1, _) :: (t2, u2, _) :: _ ->
+      assert (t1 = "Valid");
+      assert (u1 = "https://example.com/");
+      assert (t2 = "Valid B");
+      assert (u2 = "https://example.com/b")
+  | _ -> failwith "expected two valid items"
+)
+
+let () = test "parse_searxng_json_invalid_payload" (fun () ->
+  assert (Tool_misc.parse_searxng_json "not json" = []);
+  assert (Tool_misc.parse_searxng_json "{}" = []);
+  assert (Tool_misc.parse_searxng_json {|{"results": null}|} = [])
+)
+
+let () = test "dispatch_web_search_cascade_error_includes_backend_details" (fun () ->
+  (* Point SearXNG at a port that refuses connections; both DDG and Bing will
+     also fail in a sandboxed environment. The response error message must
+     contain the SearXNG error detail rather than a bare "all search engines failed". *)
+  with_env "MASC_SEARXNG_URL" (Some "http://127.0.0.1:1") (fun () ->
+    let ctx = make_test_ctx () in
+    let args = `Assoc [ ("query", `String "test query") ] in
+    match Tool_misc.dispatch ctx ~name:"masc_web_search" ~args with
+    | Some (success, result) ->
+        if not success then begin
+          let json = parse_json result in
+          let msg = Yojson.Safe.Util.(json |> member "message" |> to_string) in
+          (* Error message must include the cascade structure *)
+          assert (str_contains msg "searxng:")
+        end
+        (* If somehow a backend succeeds in this environment, that's also fine *)
+    | None -> failwith "dispatch returned None")
+)
+
 let () = test "dispatch_webrtc_offer" (fun () ->
   let ctx = make_test_ctx () in
   let args =

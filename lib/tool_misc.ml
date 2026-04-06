@@ -211,22 +211,37 @@ let fetch_ddg_html ~query =
 (* --- SearXNG JSON search backend (self-hosted, primary) --- *)
 
 let searxng_base_url () =
-  match Sys.getenv_opt "MASC_SEARXNG_URL" with
-  | Some url -> url
-  | None -> "http://localhost:8888"
+  let raw =
+    match Sys.getenv_opt "MASC_SEARXNG_URL" with
+    | Some url -> String.trim url
+    | None -> "http://localhost:8888"
+  in
+  (* Strip trailing slashes to avoid double-slash in constructed URLs *)
+  let n = String.length raw in
+  let i = ref (n - 1) in
+  while !i >= 0 && raw.[!i] = '/' do decr i done;
+  let url = if !i = n - 1 then raw else String.sub raw 0 (!i + 1) in
+  (* Fail fast on misconfigured scheme *)
+  (match Uri.scheme (Uri.of_string url) |> Option.map String.lowercase_ascii with
+   | Some "http" | Some "https" -> ()
+   | _ ->
+       failwith
+         (Printf.sprintf
+            "MASC_SEARXNG_URL must use http or https scheme (got: %s)" url));
+  url
 
 let fetch_searxng ~query =
   let search_url =
     searxng_base_url () ^ "/search?q=" ^ Uri.pct_encode query ^ "&format=json"
   in
   match Tool_local_runtime_http.http_get_text_with_status ~timeout_sec:15 search_url with
-  | Error e -> Error (Printf.sprintf "SearXNG: %s" e)
+  | Error e -> Error e
   | Ok (status_opt, payload) -> (
       match status_opt with
       | Some 200 -> Ok (search_url, payload)
       | Some status ->
-          Error (Printf.sprintf "SearXNG returned HTTP %d" status)
-      | None -> Error "SearXNG returned no HTTP status")
+          Error (Printf.sprintf "HTTP %d" status)
+      | None -> Error "no HTTP status")
 
 let parse_searxng_json (payload : string) : web_search_hit list =
   try
@@ -234,12 +249,16 @@ let parse_searxng_json (payload : string) : web_search_hit list =
     let open Yojson.Safe.Util in
     json |> member "results" |> to_list
     |> List.filter_map (fun item ->
-           let title = item |> member "title" |> to_string_option |> Option.value ~default:"" in
+           let title =
+             item |> member "title" |> to_string_option
+             |> Option.value ~default:"" |> clean_search_text
+           in
            let url = item |> member "url" |> to_string_option |> Option.value ~default:"" in
            let snippet =
-             item |> member "content" |> to_string_option |> Option.value ~default:""
+             item |> member "content" |> to_string_option
+             |> Option.value ~default:"" |> clean_search_text
            in
-           if title <> "" && url <> "" then Some (title, url, snippet)
+           if title <> "" && valid_search_result_url url then Some (title, url, snippet)
            else None)
   with _ -> []
 
@@ -373,24 +392,30 @@ let handle_web_search _ctx args =
   else
     let limit = max 1 (min 10 (get_int args "limit" 5)) in
     (* Primary: SearXNG (self-hosted). Fallback: DDG HTML. Fallback: Bing RSS. *)
-    let try_ddg_then_bing () =
+    let all_failed errors =
+      (false,
+       json_error
+         (Printf.sprintf "all search engines failed (%s)"
+            (String.concat "; " errors)))
+    in
+    let try_bing ~prior_errors () =
+      match fetch_bing_rss ~query with
+      | Ok (bing_url, rss_payload) when looks_like_rss_payload rss_payload ->
+          let bing_hits = parse_bing_rss_items rss_payload |> take_results limit in
+          (true, web_search_result_json ~query ~search_url:bing_url ~engine:"bing_rss" bing_hits)
+      | Ok _ -> all_failed (prior_errors @ ["bing_rss: non-rss response"])
+      | Error bing_err -> all_failed (prior_errors @ [Printf.sprintf "bing_rss: %s" bing_err])
+    in
+    let try_ddg_then_bing ~prior_errors () =
       match fetch_ddg_html ~query with
       | Ok (search_url, payload) ->
           let hits = parse_ddg_html payload |> take_results limit in
           if hits <> [] then
             (true, web_search_result_json ~query ~search_url ~engine:"duckduckgo" hits)
           else
-            (match fetch_bing_rss ~query with
-             | Ok (bing_url, rss_payload) when looks_like_rss_payload rss_payload ->
-                 let bing_hits = parse_bing_rss_items rss_payload |> take_results limit in
-                 (true, web_search_result_json ~query ~search_url:bing_url ~engine:"bing_rss" bing_hits)
-             | _ -> (false, json_error "all search engines failed"))
-      | Error _ ->
-          (match fetch_bing_rss ~query with
-           | Ok (bing_url, rss_payload) when looks_like_rss_payload rss_payload ->
-               let bing_hits = parse_bing_rss_items rss_payload |> take_results limit in
-               (true, web_search_result_json ~query ~search_url:bing_url ~engine:"bing_rss" bing_hits)
-           | _ -> (false, json_error "all search engines failed"))
+            try_bing ~prior_errors:(prior_errors @ ["ddg: no results"]) ()
+      | Error ddg_err ->
+          try_bing ~prior_errors:(prior_errors @ [Printf.sprintf "ddg: %s" ddg_err]) ()
     in
     match fetch_searxng ~query with
     | Ok (search_url, payload) ->
@@ -398,9 +423,9 @@ let handle_web_search _ctx args =
         if hits <> [] then
           (true, web_search_result_json ~query ~search_url ~engine:"searxng" hits)
         else
-          try_ddg_then_bing ()
-    | Error _searxng_err ->
-        try_ddg_then_bing ()
+          try_ddg_then_bing ~prior_errors:["searxng: no results"] ()
+    | Error searxng_err ->
+        try_ddg_then_bing ~prior_errors:[Printf.sprintf "searxng: %s" searxng_err] ()
 
 let handle_keeper_tool_catalog _ctx args =
   let include_hidden = get_bool args "include_hidden" false in

@@ -137,6 +137,24 @@ let emit_cost_event
     @param destructive_check Enable destructive pattern detection (default true)
     @param on_tool_executed Optional callback after each tool execution
     @param trajectory_acc Optional trajectory accumulator for cost attribution *)
+
+(** Pure decision logic for the on_idle hook.  Testable without Room.config.
+    Returns Nudge on first idle turn (resets idle counter in OAS), Skip on 2+. *)
+let on_idle_decision ~consecutive_idle_turns ~tool_names : Agent_sdk.Hooks.hook_decision =
+  let tools_str = match tool_names with
+    | [] -> "<none>"
+    | names -> String.concat ", " names
+  in
+  if consecutive_idle_turns >= 2 then
+    Agent_sdk.Hooks.Skip
+  else
+    Agent_sdk.Hooks.Nudge
+      (Printf.sprintf
+         "You have been repeating the same tools (%s) without making progress. \
+          Try a genuinely different approach: post findings to the board, \
+          claim a different task, or end your turn silently."
+         tools_str)
+
 let make_hooks
     ~config:(_config : Room.config)
     ~(meta_ref : Keeper_types.keeper_meta ref)
@@ -301,19 +319,17 @@ let make_hooks
     on_idle = Some (fun event ->
       match event with
       | Agent_sdk.Hooks.OnIdle { consecutive_idle_turns; tool_names; _ } ->
-        let tools_str = match tool_names with
-          | [] -> "<none>"
-          | names -> String.concat ", " names
-        in
-        if consecutive_idle_turns >= 2 then begin
-          Log.Keeper.warn "keeper:%s idle_turns=%d repeated_tools=[%s] — requesting stop (threshold=2, max_idle_turns=3)"
-            (!meta_ref).name consecutive_idle_turns tools_str;
-          Agent_sdk.Hooks.Skip
-        end else begin
-          Log.Keeper.info "keeper:%s idle_turns=%d tools=[%s] — nudging via Continue"
-            (!meta_ref).name consecutive_idle_turns tools_str;
-          Agent_sdk.Hooks.Continue
-        end
+        let decision =
+          on_idle_decision ~consecutive_idle_turns ~tool_names in
+        (match decision with
+         | Agent_sdk.Hooks.Skip ->
+           Log.Keeper.warn "keeper:%s idle_turns=%d — requesting stop"
+             (!meta_ref).name consecutive_idle_turns
+         | Agent_sdk.Hooks.Nudge _ ->
+           Log.Keeper.info "keeper:%s idle_turns=%d — nudging LLM via Nudge"
+             (!meta_ref).name consecutive_idle_turns
+         | _ -> ());
+        decision
       | _ -> Agent_sdk.Hooks.Continue);
   }
 

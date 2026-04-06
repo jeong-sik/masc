@@ -80,13 +80,13 @@ function normalizeGovernanceResolvedAction(raw: unknown): GovernanceResolvedActi
 function normalizeGovernanceExecutedRoute(raw: unknown): GovernanceExecutedRoute | null {
   if (!isRecord(raw)) return null
   const actionType = asNullableString(raw.action_type)
-  const delegatedTool = asNullableString(raw.delegated_tool)
+  const toolName = asNullableString(raw.tool_name) ?? asNullableString(raw.delegated_tool)
   const confirmationState = asNullableString(raw.confirmation_state)
   const createdAt = asNullableIsoTimestamp(raw.created_at)
-  if (!actionType && !delegatedTool && !confirmationState && !createdAt) return null
+  if (!actionType && !toolName && !confirmationState && !createdAt) return null
   return {
     action_type: actionType ?? undefined,
-    delegated_tool: delegatedTool,
+    tool_name: toolName,
     confirmation_state: confirmationState ?? undefined,
     created_at: createdAt,
   }

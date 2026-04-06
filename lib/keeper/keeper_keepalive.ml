@@ -17,6 +17,10 @@ let keepalive_interval_sec () =
 
 let board_reactive_debounce_sec = Env_config.KeeperKeepalive.board_debounce_sec
 
+(* ── Heartbeat history fallback read limits ── *)
+let max_history_read_bytes = 256 * 1024
+let max_history_read_lines = 200
+
 (* OAS Event_bus — WORM Atomic: set once at server bootstrap. *)
 let bus_ref : Agent_sdk.Event_bus.t option Atomic.t = Atomic.make None
 let set_bus bus = Atomic.set bus_ref (Some bus)
@@ -234,7 +238,8 @@ let write_heartbeat_snapshot
   (* Fallback: when OAS checkpoint is absent (e.g. after server restart
      mid-turn), load messages from history.jsonl to recover continuity.
      This prevents the "orphan user" problem where interrupted turns
-     leave user-only entries and continuity_summary stays empty forever. *)
+     leave user-only entries and continuity_summary stays empty forever.
+     Read is bounded to avoid large allocations during heartbeats. *)
   let messages_for_continuity = match ctx_opt with
     | Some c -> c.messages
     | None ->
@@ -244,20 +249,23 @@ let write_heartbeat_snapshot
           "history.jsonl"
       in
       (try
-        Fs_compat.load_jsonl history_path
-        |> List.filter_map (fun json ->
-          try Some (Keeper_context_core.message_of_json json)
+        read_file_tail_lines history_path ~max_bytes:max_history_read_bytes ~max_lines:max_history_read_lines
+        |> List.filter_map (fun line ->
+          try
+            let json = Yojson.Safe.from_string line in
+            Some (Keeper_context_core.message_of_json json)
           with _ -> None)
-      with _ -> [])
+      with e ->
+        Log.Keeper.warn "write_heartbeat_snapshot: history.jsonl load error (%s): %s"
+          meta_current.name (Printexc.to_string e);
+        [])
   in
-  if messages_for_continuity = [] then ()
-  else
-    let c_messages = messages_for_continuity in
-    let latest_user_message =
-      latest_message_content_by_role ~role:Agent_sdk.Types.User c_messages
-    in
-    let latest_assistant_message =
-      latest_message_content_by_role ~role:Agent_sdk.Types.Assistant c_messages
+  let c_messages = messages_for_continuity in
+  let latest_user_message =
+    latest_message_content_by_role ~role:Agent_sdk.Types.User c_messages
+  in
+  let latest_assistant_message =
+    latest_message_content_by_role ~role:Agent_sdk.Types.Assistant c_messages
     in
     let continuity_snapshot = latest_state_snapshot_from_messages c_messages in
     let continuity_summary =

@@ -97,12 +97,12 @@ let test_team_turn_falls_back_to_session_actor () =
         | Error err -> Alcotest.fail err
       in
       Alcotest.(check string) "delegated tool" "masc_team_session_step"
-        Yojson.Safe.Util.(action_json |> member "delegated_tool" |> to_string);
+        Yojson.Safe.Util.(action_json |> member "tool_name" |> to_string);
       let delegated = action_json |> Yojson.Safe.Util.member "result" in
       Alcotest.(check bool) "override true" true
         Yojson.Safe.Util.(delegated |> member "operator_override" |> to_bool);
       Alcotest.(check string) "result delegated tool" "masc_team_session_step"
-        Yojson.Safe.Util.(delegated |> member "delegated_tool" |> to_string);
+        Yojson.Safe.Util.(delegated |> member "tool_name" |> to_string);
       let events = Team_session_store.read_events ~max_events:20 config session_id in
       Alcotest.(check bool) "event recorded" true (List.length events > 0))
 
@@ -139,7 +139,7 @@ let test_team_note_records_action_log () =
       Alcotest.(check bool) "no confirm required" false
         Yojson.Safe.Util.(action_json |> member "confirm_required" |> to_bool);
       Alcotest.(check string) "delegated tool" "masc_team_session_step"
-        Yojson.Safe.Util.(action_json |> member "delegated_tool" |> to_string);
+        Yojson.Safe.Util.(action_json |> member "tool_name" |> to_string);
       let snapshot = Operator_control.snapshot_json ~actor:"dashboard" ctx in
       let recent_actions =
         snapshot |> Yojson.Safe.Util.member "recent_actions" |> Yojson.Safe.Util.to_list
@@ -180,7 +180,7 @@ let test_team_broadcast_records_event () =
         | Error err -> Alcotest.fail err
       in
       Alcotest.(check string) "delegated tool" "masc_team_session_step"
-        Yojson.Safe.Util.(action_json |> member "delegated_tool" |> to_string);
+        Yojson.Safe.Util.(action_json |> member "tool_name" |> to_string);
       Alcotest.(check bool) "result present" true
         (Yojson.Safe.Util.member "result" action_json <> `Null);
       let events = Team_session_store.read_events ~max_events:20 config session_id in
@@ -226,7 +226,7 @@ let test_team_task_inject_requires_confirm_then_executes () =
       Alcotest.(check bool) "confirm required" true
         Yojson.Safe.Util.(action_json |> member "confirm_required" |> to_bool);
       Alcotest.(check string) "delegated tool" "masc_team_session_step"
-        Yojson.Safe.Util.(action_json |> member "delegated_tool" |> to_string);
+        Yojson.Safe.Util.(action_json |> member "tool_name" |> to_string);
       let confirm_json =
         Operator_control.confirm_json ctx
           (`Assoc [ ("actor", `String "dashboard"); ("confirm_token", `String confirm_token) ])
@@ -240,7 +240,7 @@ let test_team_task_inject_requires_confirm_then_executes () =
         (Yojson.Safe.Util.member "delegated_tool_result" confirm_json <> `Null);
       Alcotest.(check string) "delegated tool result" "masc_team_session_step"
         Yojson.Safe.Util.
-          (confirm_json |> member "delegated_tool_result" |> member "delegated_tool"
+          (confirm_json |> member "delegated_tool_result" |> member "tool_name"
          |> to_string);
       let pending_confirms =
         Operator_control.snapshot_json ~actor:"dashboard" ctx
@@ -294,7 +294,7 @@ let test_team_worker_spawn_batch_requires_confirm_then_executes () =
       Alcotest.(check bool) "confirm required" true
         Yojson.Safe.Util.(action_json |> member "confirm_required" |> to_bool);
       Alcotest.(check string) "delegated tool" "masc_team_session_step"
-        Yojson.Safe.Util.(action_json |> member "delegated_tool" |> to_string);
+        Yojson.Safe.Util.(action_json |> member "tool_name" |> to_string);
       let confirm_token =
         Yojson.Safe.Util.(action_json |> member "confirm_token" |> to_string)
       in
@@ -311,7 +311,7 @@ let test_team_worker_spawn_batch_requires_confirm_then_executes () =
         Yojson.Safe.Util.member "delegated_tool_result" confirm_json
       in
       Alcotest.(check string) "delegated tool result" "masc_team_session_step"
-        Yojson.Safe.Util.(delegated_result |> member "delegated_tool" |> to_string);
+        Yojson.Safe.Util.(delegated_result |> member "tool_name" |> to_string);
       let events = Team_session_store.read_events ~max_events:20 config session_id in
       Alcotest.(check bool) "team_step_spawn recorded" true
         (List.exists

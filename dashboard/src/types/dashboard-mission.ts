@@ -707,10 +707,11 @@ export interface OperatorActionResult {
   confirm_required?: boolean
   confirm_token?: string
   preview?: unknown
-  delegated_tool?: string
+  tool_name?: string
   result?: unknown
-  executed_action?: unknown
+  /** @deprecated Use result instead. Kept for backward compat during migration. */
   delegated_tool_result?: unknown
+  executed_action?: unknown
 }
 
 export interface OperatorActionLogEntry {
@@ -721,5 +722,5 @@ export interface OperatorActionLogEntry {
   target_label: string
   outcome: 'preview' | 'executed' | 'confirmed' | 'error'
   message: string
-  delegated_tool?: string
+  tool_name?: string
 }

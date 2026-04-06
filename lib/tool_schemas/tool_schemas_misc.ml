@@ -13,7 +13,8 @@ Pass category to filter results to a single section.";
       ("properties", `Assoc [
         ("category", `Assoc [
           ("type", `String "string");
-          ("description", `String "Optional category filter: server, auth, transport, storage, runtime, rate_limiting, inference, keeper, dashboard");
+          ("enum", `List [`String "server"; `String "auth"; `String "transport"; `String "storage"; `String "runtime"; `String "rate_limiting"; `String "inference"; `String "keeper"; `String "dashboard"]);
+          ("description", `String "Filter by config category");
         ]);
       ]);
     ];
@@ -80,7 +81,8 @@ Use from the answering side after a prior masc_webrtc_offer call.";
         ]);
         ("scope", `Assoc [
           ("type", `String "string");
-          ("description", `String "Dashboard scope: 'all' (default) or 'current'");
+          ("enum", `List [`String "all"; `String "current"]);
+          ("description", `String "Dashboard scope (default: all)");
           ("default", `String "all");
         ]);
       ]);
@@ -209,7 +211,8 @@ After masc_tool_admin_snapshot to review current state before making changes.";
       ("properties", `Assoc [
         ("section", `Assoc [
           ("type", `String "string");
-          ("description", `String "One of: auth, unit_policy");
+          ("enum", `List [`String "auth"; `String "unit_policy"]);
+          ("description", `String "Config section to update");
         ]);
         ("enabled", `Assoc [
           ("type", `String "boolean");
@@ -221,7 +224,8 @@ After masc_tool_admin_snapshot to review current state before making changes.";
         ]);
         ("default_role", `Assoc [
           ("type", `String "string");
-          ("description", `String "Default role for unauthenticated agents: reader|worker|admin");
+          ("enum", `List [`String "reader"; `String "worker"; `String "admin"]);
+          ("description", `String "Default role for unauthenticated agents");
         ]);
         ("token_expiry_hours", `Assoc [
           ("type", `String "integer");

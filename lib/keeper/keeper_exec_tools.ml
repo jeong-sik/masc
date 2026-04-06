@@ -148,6 +148,7 @@ let error_json ?(fields = []) (message : string) =
 let tool_result_or_error (ok, msg) = if ok then msg else error_json msg
 
 let max_suggested_entries = 12
+let file_not_found_prefix = "File not found:"
 
 let missing_file_error_json ~(config : Room.config) ~(target : string)
       ~(error : string) =
@@ -254,7 +255,7 @@ let handle_keeper_fs_read
   | Error e -> error_json e
   | Ok target ->
     (match Safe_ops.read_file_safe target with
-     | Error e when String.starts_with ~prefix:"File not found:" e ->
+     | Error e when String.starts_with ~prefix:file_not_found_prefix e ->
        missing_file_error_json ~config ~target ~error:e
      | Error e -> error_json ~fields:[ "path", `String target ] e
      | Ok content ->

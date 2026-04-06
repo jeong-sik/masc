@@ -29,6 +29,25 @@ let on_keeper_tool_call
   ref (fun ~tool_name:_ ~success:_ ~duration_ms:_ -> ())
 ;;
 
+(** Ephemeral per-turn observers for tool call events.
+    Each keeper registers its own observer via [add_tool_call_observer]
+    and removes it via [remove_tool_call_observer].  Unlike wrapping
+    [on_keeper_tool_call], observers are independent — concurrent keepers
+    do not interfere with each other's save/restore lifecycle. *)
+let tool_call_observers
+  : (tool_name:string -> success:bool -> unit) list ref
+  = ref []
+
+let add_tool_call_observer fn =
+  tool_call_observers := fn :: !tool_call_observers
+
+let remove_tool_call_observer fn =
+  tool_call_observers := List.filter (fun f -> f != fn) !tool_call_observers
+
+let notify_tool_call_observers ~tool_name ~success =
+  List.iter (fun f -> f ~tool_name ~success) !tool_call_observers
+;;
+
 (** Callback for keeper_tool_search.  Process-global fallback; prefer
     passing [~search_fn] directly to [execute_keeper_tool_call] for
     session-scoped, race-free search.  Default: returns empty results. *)

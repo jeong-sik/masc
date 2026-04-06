@@ -30,6 +30,7 @@ const KIND_STYLES: Record<TraceEventKind, KindStyle> = {
   tool_call:  { icon: '>', color: 'text-[var(--ok)]', label: '도구 호출' },
   heartbeat:  { icon: 'H', color: 'text-[#94a3b8]', label: '하트비트' },
   lifecycle:  { icon: 'L', color: 'text-[var(--warn)]', label: '생명주기' },
+  thinking:   { icon: '\u{1F4AD}', color: 'text-[#c084fc]', label: '내부 사고' },
 }
 
 // Use shared tool category from tool-call-shared (SSOT)
@@ -211,6 +212,25 @@ function TaskDetail({ event }: { event: UnifiedTraceEvent }) {
   `
 }
 
+function ThinkingDetail({ event }: { event: UnifiedTraceEvent }) {
+  if (event.thinkingRedacted) {
+    return html`
+      <div class="mt-2 px-3 py-2 rounded-lg bg-[rgba(192,132,252,0.06)] border border-[rgba(192,132,252,0.15)] text-xs text-[#c084fc] italic">
+        이 사고 과정은 비공개 처리되었습니다.
+      </div>
+    `
+  }
+  const content = event.thinkingContent ?? ''
+  if (!content) return null
+  return html`
+    <div class="mt-2 px-3 py-2 rounded-lg bg-[rgba(192,132,252,0.04)] border border-[rgba(192,132,252,0.12)]">
+      <div class="text-[13px] leading-relaxed text-[var(--text-body)]">
+        <${Markdown} text=${content} />
+      </div>
+    </div>
+  `
+}
+
 export function SessionTraceEntry({ event }: { event: UnifiedTraceEvent }) {
   const kindStyle = KIND_STYLES[event.kind]
   // For tool_call, use tool-specific icon/color
@@ -232,6 +252,7 @@ export function SessionTraceEntry({ event }: { event: UnifiedTraceEvent }) {
   const hasDetail = event.kind === 'tool_call'
     || (event.kind === 'broadcast' && typeof event.detail.content === 'string' && event.detail.content.length > BROADCAST_PREVIEW_MAX)
     || event.kind === 'task'
+    || event.kind === 'thinking'
 
   const row = html`
     <div class="flex items-start gap-3 py-2 px-3 rounded-lg ${gateRejected ? 'opacity-50' : ''}">
@@ -284,6 +305,7 @@ export function SessionTraceEntry({ event }: { event: UnifiedTraceEvent }) {
         ${event.kind === 'tool_call' ? html`<${ToolCallDetail} event=${event} />` : null}
         ${event.kind === 'broadcast' ? html`<${BroadcastDetail} event=${event} />` : null}
         ${event.kind === 'task' ? html`<${TaskDetail} event=${event} />` : null}
+        ${event.kind === 'thinking' ? html`<${ThinkingDetail} event=${event} />` : null}
       </div>
     </details>
   `

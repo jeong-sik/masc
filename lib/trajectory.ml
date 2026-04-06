@@ -59,6 +59,23 @@ type trajectory = {
 }
 
 (* ================================================================ *)
+(* Thinking entries                                                  *)
+(* ================================================================ *)
+
+type thinking_entry = {
+  ts : float;
+  ts_iso : string;
+  turn : int;
+  content : string;
+  content_length : int;
+  redacted : bool;
+}
+
+type trajectory_line =
+  | Tool_call of tool_call_entry
+  | Thinking of thinking_entry
+
+(* ================================================================ *)
 (* Cost estimation                                                  *)
 (* ================================================================ *)
 
@@ -125,6 +142,29 @@ let entry_to_json ?(result_max_len = default_result_truncation) (e : tool_call_e
     ("cost_usd", `Float e.cost_usd);
   ]
 
+let default_thinking_truncation = 2000
+
+let thinking_entry_to_json ?(content_max_len = default_thinking_truncation) (e : thinking_entry) : Yojson.Safe.t =
+  let content =
+    if content_max_len > 0 && String.length e.content > content_max_len then
+      String.sub e.content 0 content_max_len ^ "..."
+    else e.content
+  in
+  `Assoc [
+    ("type", `String "thinking");
+    ("ts", `Float e.ts);
+    ("ts_iso", `String e.ts_iso);
+    ("turn", `Int e.turn);
+    ("content", `String content);
+    ("content_length", `Int e.content_length);
+    ("redacted", `Bool e.redacted);
+  ]
+
+let trajectory_line_to_json ?(result_max_len = default_result_truncation)
+    ?(content_max_len = default_thinking_truncation) = function
+  | Tool_call e -> entry_to_json ~result_max_len e
+  | Thinking e -> thinking_entry_to_json ~content_max_len e
+
 let trajectory_to_json (t : trajectory) : Yojson.Safe.t =
   `Assoc [
     ("scenario_id", Json_util.string_opt_to_json t.scenario_id);
@@ -161,6 +201,16 @@ let append_entry ~(masc_root : string) ~(keeper_name : string) ~(trace_id : stri
   ensure_dir dir;
   let path = trajectory_path masc_root keeper_name trace_id in
   let json = entry_to_json entry in
+  let line = Yojson.Safe.to_string json ^ "\n" in
+  Fs_compat.append_file path line
+
+(** Append a thinking block entry to the JSONL trajectory file. *)
+let append_thinking ~(masc_root : string) ~(keeper_name : string) ~(trace_id : string)
+    (entry : thinking_entry) : unit =
+  let dir = trajectories_dir masc_root keeper_name in
+  ensure_dir dir;
+  let path = trajectory_path masc_root keeper_name trace_id in
+  let json = thinking_entry_to_json entry in
   let line = Yojson.Safe.to_string json ^ "\n" in
   Fs_compat.append_file path line
 
@@ -330,4 +380,52 @@ let read_entries ~(masc_root : string) ~(keeper_name : string) ~(trace_id : stri
                    | _ -> None);
                 cost_usd = json |> member "cost_usd" |> to_float;
               }
+        with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None)
+
+(** Read all trajectory lines including thinking entries. *)
+let read_all_lines ~(masc_root : string) ~(keeper_name : string) ~(trace_id : string)
+    : trajectory_line list =
+  let path = trajectory_path masc_root keeper_name trace_id in
+  if not (Sys.file_exists path) then []
+  else
+    let content = Fs_compat.load_file path in
+    String.split_on_char '\n' content
+    |> List.filter (fun line -> String.trim line <> "")
+    |> List.filter_map (fun line ->
+        try
+          let json = Yojson.Safe.from_string line in
+          let open Yojson.Safe.Util in
+          match json |> member "type" with
+          | `String "trajectory_summary" -> None
+          | `String "thinking" ->
+              Some (Thinking {
+                ts = json |> member "ts" |> to_float;
+                ts_iso = json |> member "ts_iso" |> to_string;
+                turn = json |> member "turn" |> to_int;
+                content = json |> member "content" |> to_string;
+                content_length = json |> member "content_length" |> to_int;
+                redacted = (match json |> member "redacted" with `Bool b -> b | _ -> false);
+              })
+          | _ ->
+              Some (Tool_call {
+                ts = json |> member "ts" |> to_float;
+                ts_iso = json |> member "ts_iso" |> to_string;
+                turn = json |> member "turn" |> to_int;
+                round = json |> member "round" |> to_int;
+                tool_name = json |> member "tool_name" |> to_string;
+                args_json = json |> member "args" |> Yojson.Safe.to_string;
+                gate_decision = Pass;
+                result =
+                  (match json |> member "result" with
+                   | `Null -> None
+                   | `String s -> Some s
+                   | _ -> None);
+                duration_ms = json |> member "duration_ms" |> to_int;
+                error =
+                  (match json |> member "error" with
+                   | `Null -> None
+                   | `String s -> Some s
+                   | _ -> None);
+                cost_usd = json |> member "cost_usd" |> to_float;
+              })
         with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None)

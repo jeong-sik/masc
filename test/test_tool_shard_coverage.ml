@@ -139,17 +139,13 @@ let test_tools_of_shards_unknown_ignored () =
 
 let test_keeper_model_tools_count () =
   let tools = Tool_shard.keeper_model_tools in
-  (* keeper_model_tools = tools_of_shards default_shard_names
-     + standalone keeper schemas (e.g. keeper_tool_search).
-     Verify it contains at least the shard tools. *)
-  let shard_only = Tool_shard.tools_of_shards Tool_shard.default_shard_names in
-  Alcotest.(check bool) "includes all shard tools"
-    true (List.length tools >= List.length shard_only);
-  Alcotest.(check bool) "has tools" true (List.length tools >= 1);
-  (* Verify standalone schema is present *)
-  let names = List.map (fun (t : Types.tool_schema) -> t.name) tools in
-  Alcotest.(check bool) "has keeper_tool_search" true
-    (List.mem "keeper_tool_search" names)
+  (* keeper_model_tools = tools_of_shards default_shard_names;
+     verify it equals the sum of individual default shards.
+     Standalone keeper schemas (keeper_tool_search) are added downstream
+     in keeper_tool_policy.keeper_default_model_tools, not here. *)
+  let expected = Tool_shard.tools_of_shards Tool_shard.default_shard_names in
+  Alcotest.(check int) "matches default shards sum" (List.length expected) (List.length tools);
+  Alcotest.(check bool) "has tools" true (List.length tools >= 1)
 
 (* ============================================================
    grant_shard tests

@@ -183,8 +183,9 @@ let test_keeper_internal_tools_have_schemas () =
      means the LLM can never select it — a silent capability gap. *)
   let voice_schemas = match Tool_shard.get_shard "voice" with
     | Some shard -> shard.tools | None -> [] in
+  let standalone_schemas = [ Keeper_exec_tools.keeper_tool_search_schema ] in
   let schema_names =
-    (Tool_shard.keeper_model_tools @ voice_schemas)
+    (Tool_shard.keeper_model_tools @ voice_schemas @ standalone_schemas)
     |> List.map (fun (s : Types.tool_schema) -> s.name)
     |> SS.of_list
   in

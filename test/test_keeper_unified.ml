@@ -871,13 +871,11 @@ let test_prompt_includes_room_signal_when_flag_enabled () =
 let test_unified_turn_runtime_defaults () =
   with_env "MASC_KEEPER_UNIFIED_TEMP" "" (fun () ->
   with_env "MASC_KEEPER_UNIFIED_MAX_TOKENS" "" (fun () ->
-  with_env "MASC_KEEPER_UNIFIED_MAX_TURNS" "" (fun () ->
     check (float 0.01) "unified temp default" 0.4
       (KC.keeper_unified_temperature ());
     check int "unified max_tokens default" 2048
-      (KC.keeper_unified_max_tokens ());
-    check int "unified max_turns default" 3
-      (KC.keeper_unified_max_turns ()))))
+      (KC.keeper_unified_max_tokens ())
+    (* max_turns removed: agent turn budgets belong in OAS *)))
 
 let test_meta_defaults_social_model () =
   check string "default social model" "bdi_speech_v1"

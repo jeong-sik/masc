@@ -202,26 +202,31 @@ let can_transition ~from_phase ~to_phase =
   (* Running -> buffer states, Paused, Stopped, Crashed (fiber death) *)
   | Running, (Failing | Compacting | HandingOff | Draining | Paused | Stopped | Crashed) -> true
   | Running, _ -> false
-  (* Failing -> Running (recovery) | Crashed (threshold) | Draining (stop) *)
-  | Failing, (Running | Crashed | Draining) -> true
+  (* Failing -> Running (recovery) | Crashed (threshold) | Draining (stop)
+     | Paused (operator can pause for investigation) *)
+  | Failing, (Running | Crashed | Draining | Paused) -> true
   | Failing, _ -> false
-  (* Compacting -> Running (done) | Failing (hb fail during) | Crashed (fatal) *)
-  | Compacting, (Running | Failing | Crashed) -> true
+  (* Compacting -> Running (done) | Failing (hb fail / guardrail during)
+     | Crashed (fatal) | Draining (operator stop during) *)
+  | Compacting, (Running | Failing | Crashed | Draining) -> true
   | Compacting, _ -> false
-  (* HandingOff -> Running (done) | Failing | Crashed *)
-  | HandingOff, (Running | Failing | Crashed) -> true
+  (* HandingOff -> Running (done) | Failing | Crashed
+     | Draining (operator stop during handoff) *)
+  | HandingOff, (Running | Failing | Crashed | Draining) -> true
   | HandingOff, _ -> false
   (* Draining -> Stopped (done) | Crashed (fatal during drain) *)
   | Draining, (Stopped | Crashed) -> true
   | Draining, _ -> false
-  (* Paused -> Running (resume) | Draining (stop) | Stopped (remove) *)
-  | Paused, (Running | Draining | Stopped) -> true
+  (* Paused -> Running (resume) | Draining (stop) | Stopped (remove)
+     | Crashed (fiber can die while keeper is paused) *)
+  | Paused, (Running | Draining | Stopped | Crashed) -> true
   | Paused, _ -> false
   (* Crashed -> Restarting (backoff done) | Dead (budget exhausted) *)
   | Crashed, (Restarting | Dead) -> true
   | Crashed, _ -> false
-  (* Restarting -> Running (success) | Crashed (fail) | Dead (budget) *)
-  | Restarting, (Running | Crashed | Dead) -> true
+  (* Restarting -> Running (success) | Crashed (fail) | Dead (budget)
+     | Draining (stop_requested persists) | Paused (operator_paused persists) *)
+  | Restarting, (Running | Crashed | Dead | Draining | Paused) -> true
   | Restarting, _ -> false
 
 (* ── derive_phase ──────────────────────────────────────── *)

@@ -881,6 +881,297 @@ let test_chain_terminal_permanence () =
         (SM.event_to_string ev) (SM.phase_to_string tr.new_phase))
   ) events
 
+(* ── Edge case ("맛탱이") chain tests ─────────────────── *)
+
+(** 12. Restart inherits operator_paused: operator paused before crash,
+    new fiber should wake up in Paused, not Running.
+    Operator intent transcends fiber lifetime. *)
+let test_chain_restart_inherits_paused () =
+  let final_phase, final_conds = chain_apply
+    ~init_phase:SM.Running
+    ~init_conditions:running_conditions
+    [
+      SM.Operator_pause,                                       SM.Paused;
+      SM.Fiber_terminated { outcome="OOM while paused" },      SM.Crashed;
+      SM.Supervisor_restart_attempt { attempt=1 },             SM.Restarting;
+      SM.Fiber_started,                                        SM.Paused;
+    ]
+  in
+  check phase_t "paused survives restart" SM.Paused final_phase;
+  check bool "operator_paused=true" true final_conds.operator_paused;
+  (* Resume should bring it back *)
+  let tr = apply_ok ~current_phase:SM.Paused ~conditions:final_conds
+    ~event:SM.Operator_resume in
+  check phase_t "resume after restart" SM.Running tr.new_phase
+
+(** 13. Restart inherits stop_requested: operator requested stop before crash.
+    New fiber should go directly to Draining, not Running. *)
+let test_chain_restart_inherits_stop () =
+  let final_phase, _ = chain_apply
+    ~init_phase:SM.Running
+    ~init_conditions:running_conditions
+    [
+      SM.Stop_requested,                                       SM.Draining;
+      SM.Fiber_terminated { outcome="crash during drain" },    SM.Crashed;
+      SM.Supervisor_restart_attempt { attempt=1 },             SM.Restarting;
+      (* Fiber starts but stop_requested persists -> Draining *)
+      SM.Fiber_started,                                        SM.Draining;
+      SM.Drain_complete,                                       SM.Stopped;
+    ]
+  in
+  check phase_t "stop persists through crash-restart" SM.Stopped final_phase
+
+(** 14. Handoff fails then retries successfully.
+    First handoff attempt fails, keeper recovers to Running, second succeeds. *)
+let test_chain_handoff_fail_retry () =
+  let final_phase, _ = chain_apply
+    ~init_phase:SM.Running
+    ~init_conditions:running_conditions
+    [
+      SM.Handoff_started,                                      SM.HandingOff;
+      SM.Handoff_failed { reason="target generation conflict" }, SM.Running;
+      SM.Heartbeat_ok,                                         SM.Running;
+      SM.Handoff_started,                                      SM.HandingOff;
+      SM.Handoff_completed { new_trace_id="gen2"; generation=2 }, SM.Running;
+    ]
+  in
+  check phase_t "handoff retry succeeded" SM.Running final_phase
+
+(** 15. Guardrail fires during compaction.
+    Context_measured with guardrail_stop=true arrives while compaction is active.
+    Guardrail has HIGHER priority than compaction in derive_phase
+    (priority 4 vs priority 9), so keeper immediately enters Failing.
+    Compaction_completed clears compaction_active but guardrail persists.
+    Context_measured with guardrail_stop=false clears it -> Running. *)
+let test_chain_guardrail_during_compaction () =
+  let final_phase, _ = chain_apply
+    ~init_phase:SM.Running
+    ~init_conditions:running_conditions
+    [
+      SM.Compaction_started,                                   SM.Compacting;
+      (* Guardrail > Compacting in priority -> immediate Failing *)
+      SM.Context_measured {
+        context_ratio=0.85; message_count=200; token_count=85000;
+        auto_rules={ reflect=false; plan=false; compact=false;
+                     handoff=false; guardrail_stop=true;
+                     guardrail_reason=Some "repetition detected";
+                     goal_drift=0.9 };
+      },                                                       SM.Failing;
+      (* Compaction completes but guardrail still active -> still Failing *)
+      SM.Compaction_completed { before_tokens=85000; after_tokens=40000 }, SM.Failing;
+      (* Clear guardrail -> Running *)
+      SM.Context_measured {
+        context_ratio=0.40; message_count=50; token_count=40000;
+        auto_rules={ reflect=false; plan=false; compact=false;
+                     handoff=false; guardrail_stop=false;
+                     guardrail_reason=None; goal_drift=0.1 };
+      },                                                       SM.Running;
+    ]
+  in
+  check phase_t "guardrail cleared after compaction" SM.Running final_phase
+
+(** 16. Turn failures accumulate alongside heartbeat failures.
+    Both turn_healthy=false AND heartbeat_healthy=false. Recovery requires
+    both Turn_succeeded AND Heartbeat_ok. *)
+let test_chain_double_failure_recovery () =
+  let final_phase, _ = chain_apply
+    ~init_phase:SM.Running
+    ~init_conditions:running_conditions
+    [
+      SM.Heartbeat_failed { consecutive=2; max_allowed=5 },    SM.Failing;
+      SM.Turn_failed { consecutive=3; max_allowed=10 },        SM.Failing;
+      (* Heartbeat recovers but turn still unhealthy -> still Failing *)
+      SM.Heartbeat_ok,                                         SM.Failing;
+      (* Turn recovers -> both healthy -> Running *)
+      SM.Turn_succeeded,                                       SM.Running;
+    ]
+  in
+  check phase_t "both failures must clear" SM.Running final_phase
+
+(** 17. Operator stop during handoff.
+    Handoff is in progress when operator requests stop.
+    Stop has higher priority -> Draining, handoff abandoned. *)
+let test_chain_stop_during_handoff () =
+  let final_phase, _ = chain_apply
+    ~init_phase:SM.Running
+    ~init_conditions:running_conditions
+    [
+      SM.Handoff_started,                                      SM.HandingOff;
+      SM.Operator_stop { remove_meta=false },                  SM.Draining;
+      SM.Drain_complete,                                       SM.Stopped;
+    ]
+  in
+  check phase_t "stop overrides handoff" SM.Stopped final_phase
+
+(** 18. The Phoenix that can't rise: complete lifecycle to Dead,
+    verify nothing can revive it. Then verify Stopped is equally terminal. *)
+let test_chain_no_phoenix () =
+  let _, dead_conds = chain_apply
+    ~init_phase:SM.Running
+    ~init_conditions:running_conditions
+    [
+      SM.Fiber_terminated { outcome="fatal" },                 SM.Crashed;
+      SM.Restart_budget_exhausted,                             SM.Dead;
+    ]
+  in
+  (* Every conceivable event must fail on Dead *)
+  let all_events = [
+    SM.Heartbeat_ok;
+    SM.Heartbeat_failed { consecutive=1; max_allowed=5 };
+    SM.Turn_succeeded;
+    SM.Turn_failed { consecutive=1; max_allowed=10 };
+    SM.Context_measured {
+      context_ratio=0.5; message_count=10; token_count=5000;
+      auto_rules={ reflect=false; plan=false; compact=false;
+                   handoff=false; guardrail_stop=false;
+                   guardrail_reason=None; goal_drift=0.0 };
+    };
+    SM.Compaction_started;
+    SM.Compaction_completed { before_tokens=100; after_tokens=50 };
+    SM.Compaction_failed { reason="test" };
+    SM.Handoff_started;
+    SM.Handoff_completed { new_trace_id="x"; generation=99 };
+    SM.Handoff_failed { reason="test" };
+    SM.Operator_pause;
+    SM.Operator_resume;
+    SM.Operator_stop { remove_meta=true };
+    SM.Stop_requested;
+    SM.Drain_complete;
+    SM.Fiber_started;
+    SM.Fiber_terminated { outcome="test" };
+    SM.Supervisor_restart_attempt { attempt=99 };
+    SM.Restart_budget_exhausted;
+    SM.Guardrail_stop { reason="test" };
+  ] in
+  List.iter (fun ev ->
+    match SM.apply_event ~current_phase:SM.Dead ~conditions:dead_conds ~event:ev ~now:9999.0 with
+    | Error (SM.Terminal_state _) -> ()
+    | Error e -> fail (Printf.sprintf "Dead: wrong error for %s: %s"
+        (SM.event_to_string ev) (SM.transition_error_to_string e))
+    | Ok tr -> fail (Printf.sprintf "Dead accepted %s -> %s"
+        (SM.event_to_string ev) (SM.phase_to_string tr.new_phase))
+  ) all_events
+
+(** 19. Triple crash-restart cycle: the keeper barely survives three crashes
+    before stabilizing. Tests that Fiber_started resets are correct across
+    multiple consecutive restart cycles. *)
+let test_chain_triple_restart_survives () =
+  let final_phase, _ = chain_apply
+    ~init_phase:SM.Running
+    ~init_conditions:running_conditions
+    [
+      (* Crash 1 *)
+      SM.Fiber_terminated { outcome="crash 1" },               SM.Crashed;
+      SM.Supervisor_restart_attempt { attempt=1 },             SM.Restarting;
+      SM.Fiber_started,                                        SM.Running;
+      (* Crash 2 *)
+      SM.Fiber_terminated { outcome="crash 2" },               SM.Crashed;
+      SM.Supervisor_restart_attempt { attempt=2 },             SM.Restarting;
+      SM.Fiber_started,                                        SM.Running;
+      (* Crash 3 *)
+      SM.Fiber_terminated { outcome="crash 3" },               SM.Crashed;
+      SM.Supervisor_restart_attempt { attempt=3 },             SM.Restarting;
+      SM.Fiber_started,                                        SM.Running;
+      (* Finally stabilizes *)
+      SM.Heartbeat_ok,                                         SM.Running;
+      SM.Compaction_started,                                   SM.Compacting;
+      SM.Compaction_completed { before_tokens=60000; after_tokens=25000 }, SM.Running;
+      SM.Heartbeat_ok,                                         SM.Running;
+    ]
+  in
+  check phase_t "survived 3 crashes and stabilized" SM.Running final_phase
+
+(** 20. Operator pause during Failing, then stop while paused.
+    The keeper is unhealthy AND paused. Guardrail beats Paused in priority,
+    but since heartbeat failure sets heartbeat_healthy=false (not guardrail),
+    and Paused comes before Failing in condition check...
+    Actually: derive_phase checks guardrail(false) then operator_paused(true).
+    So heartbeat unhealthy is checked AFTER paused -> paused wins.
+    Then stop while paused -> Draining. *)
+let test_chain_pause_while_failing_then_stop () =
+  let failing_conds = { running_conditions with heartbeat_healthy = false } in
+  let final_phase, _ = chain_apply
+    ~init_phase:SM.Failing
+    ~init_conditions:failing_conds
+    [
+      SM.Operator_pause,                                       SM.Paused;
+      (* Paused beats heartbeat-Failing in priority *)
+      SM.Stop_requested,                                       SM.Draining;
+      SM.Drain_complete,                                       SM.Stopped;
+    ]
+  in
+  check phase_t "failing+paused -> stop -> stopped" SM.Stopped final_phase
+
+(** 21. Maximum turbulence: every buffer state visited in one lifecycle.
+    Running -> Compacting -> Running -> HandingOff -> Running ->
+    Failing -> Running -> Paused -> Running -> Draining -> Stopped.
+    10 transitions touching 7 distinct phases. *)
+let test_chain_maximum_turbulence () =
+  let final_phase, _ = chain_apply
+    ~init_phase:SM.Running
+    ~init_conditions:running_conditions
+    [
+      (* Compaction cycle *)
+      SM.Compaction_started,                                   SM.Compacting;
+      SM.Compaction_completed { before_tokens=90000; after_tokens=40000 }, SM.Running;
+      (* Handoff cycle *)
+      SM.Handoff_started,                                      SM.HandingOff;
+      SM.Handoff_completed { new_trace_id="gen2"; generation=2 }, SM.Running;
+      (* Failure cycle *)
+      SM.Heartbeat_failed { consecutive=2; max_allowed=5 },    SM.Failing;
+      SM.Heartbeat_ok,                                         SM.Running;
+      (* Pause cycle *)
+      SM.Operator_pause,                                       SM.Paused;
+      SM.Operator_resume,                                      SM.Running;
+      (* Graceful exit *)
+      SM.Stop_requested,                                       SM.Draining;
+      SM.Drain_complete,                                       SM.Stopped;
+    ]
+  in
+  check phase_t "visited all buffer states" SM.Stopped final_phase
+
+(** 22. Condition snapshot consistency: verify exact conditions at each
+    interesting point in a lifecycle chain. This catches subtle condition
+    leaks between phases. *)
+let test_chain_condition_snapshot_audit () =
+  (* Step 1: start and compact *)
+  let init_conds = { SM.default_conditions with restart_budget_remaining = true } in
+  let tr1 = apply_ok ~current_phase:SM.Offline ~conditions:init_conds
+    ~event:SM.Fiber_started in
+  check phase_t "step 1" SM.Running tr1.new_phase;
+  check bool "fiber alive" true tr1.updated_conditions.fiber_alive;
+  check bool "hb healthy" true tr1.updated_conditions.heartbeat_healthy;
+  check bool "turn healthy" true tr1.updated_conditions.turn_healthy;
+  check bool "no compaction" false tr1.updated_conditions.compaction_active;
+  check bool "no handoff" false tr1.updated_conditions.handoff_active;
+  check bool "no guardrail" false tr1.updated_conditions.guardrail_triggered;
+  check bool "backoff reset" false tr1.updated_conditions.backoff_elapsed;
+  (* Step 2: crash *)
+  let tr2 = apply_ok ~current_phase:SM.Running ~conditions:tr1.updated_conditions
+    ~event:(SM.Fiber_terminated { outcome="crash" }) in
+  check phase_t "step 2" SM.Crashed tr2.new_phase;
+  check bool "fiber dead" false tr2.updated_conditions.fiber_alive;
+  check bool "budget remaining" true tr2.updated_conditions.restart_budget_remaining;
+  (* Step 3: restart *)
+  let tr3 = apply_ok ~current_phase:SM.Crashed ~conditions:tr2.updated_conditions
+    ~event:(SM.Supervisor_restart_attempt { attempt=1 }) in
+  check phase_t "step 3" SM.Restarting tr3.new_phase;
+  check bool "backoff elapsed" true tr3.updated_conditions.backoff_elapsed;
+  (* Step 4: fiber starts - verify ALL resets *)
+  let tr4 = apply_ok ~current_phase:SM.Restarting ~conditions:tr3.updated_conditions
+    ~event:SM.Fiber_started in
+  check phase_t "step 4" SM.Running tr4.new_phase;
+  check bool "fiber alive (reset)" true tr4.updated_conditions.fiber_alive;
+  check bool "hb healthy (reset)" true tr4.updated_conditions.heartbeat_healthy;
+  check bool "turn healthy (reset)" true tr4.updated_conditions.turn_healthy;
+  check bool "compaction (reset)" false tr4.updated_conditions.compaction_active;
+  check bool "handoff (reset)" false tr4.updated_conditions.handoff_active;
+  check bool "backoff (reset)" false tr4.updated_conditions.backoff_elapsed;
+  check bool "guardrail (reset)" false tr4.updated_conditions.guardrail_triggered;
+  check bool "drain (reset)" false tr4.updated_conditions.drain_complete;
+  (* Preserved across restart: *)
+  check bool "budget preserved" true tr4.updated_conditions.restart_budget_remaining
+
 (* ── Property: derive_phase x apply_event consistency ──── *)
 
 let test_all_phases_covered () =
@@ -982,5 +1273,18 @@ let () =
       test_case "failing -> graceful stop" `Quick test_chain_failing_graceful_stop;
       test_case "heartbeat flapping (8 oscillations)" `Quick test_chain_heartbeat_flapping;
       test_case "terminal permanence (8 rejected events)" `Quick test_chain_terminal_permanence;
+    ];
+    "edge_cases", [
+      test_case "restart inherits operator_paused" `Quick test_chain_restart_inherits_paused;
+      test_case "restart inherits stop_requested" `Quick test_chain_restart_inherits_stop;
+      test_case "handoff fail then retry" `Quick test_chain_handoff_fail_retry;
+      test_case "guardrail during compaction" `Quick test_chain_guardrail_during_compaction;
+      test_case "double failure (hb+turn) recovery" `Quick test_chain_double_failure_recovery;
+      test_case "operator stop during handoff" `Quick test_chain_stop_during_handoff;
+      test_case "no phoenix (21 events on Dead)" `Quick test_chain_no_phoenix;
+      test_case "triple restart survives" `Quick test_chain_triple_restart_survives;
+      test_case "pause while failing then stop" `Quick test_chain_pause_while_failing_then_stop;
+      test_case "maximum turbulence (7 phases)" `Quick test_chain_maximum_turbulence;
+      test_case "condition snapshot audit" `Quick test_chain_condition_snapshot_audit;
     ];
   ]

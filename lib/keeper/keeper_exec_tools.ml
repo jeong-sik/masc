@@ -569,9 +569,23 @@ let handle_keeper_pr_workflow
           ; "reason", `String "keeper_pr_workflow requires delivery, coding, or full preset"
           ])
     else
+      (* Sanitize branch/task_id: reject path traversal chars *)
+      let safe_name s =
+        String.to_seq s
+        |> Seq.filter (fun c ->
+          (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+          || (c >= '0' && c <= '9') || c = '-' || c = '_' || c = '/')
+        |> String.of_seq
+      in
+      let branch_safe = safe_name branch in
+      if branch_safe <> branch then
+        error_json "branch_contains_invalid_chars"
+      else
       let root = project_root_of_config config in
-      let task_id = Printf.sprintf "pr-%s" (String.sub branch 0 (min 20 (String.length branch))) in
-      let agent_name = Printf.sprintf "keeper-%s" (strip_keeper_prefix meta.name) in
+      let task_id = Printf.sprintf "pr-%s"
+        (safe_name (String.sub branch 0 (min 20 (String.length branch)))) in
+      let agent_name = Printf.sprintf "keeper-%s"
+        (safe_name (strip_keeper_prefix meta.name)) in
       let steps = Buffer.create 512 in
       let step_ok = ref true in
       let step_error = ref "" in
@@ -595,24 +609,44 @@ let handle_keeper_pr_workflow
       let _s1 = run_step "worktree_create" (fun () ->
         match Room.worktree_create_r config ~agent_name ~task_id ~base_branch with
         | Ok msg ->
-          (* Extract worktree path from message *)
+          (* Derive worktree path from known naming convention, then verify it exists *)
           let wt_dir = Filename.concat root
             (Printf.sprintf ".worktrees/%s-%s" agent_name task_id) in
-          worktree_path := wt_dir;
-          Ok msg
+          if Sys.file_exists wt_dir && Sys.is_directory wt_dir then begin
+            worktree_path := wt_dir;
+            Ok msg
+          end else
+            Error (Printf.sprintf "worktree created but path not found: %s" wt_dir)
         | Error e -> Error (Types.masc_error_to_string e)
       ) in
-      (* Step 2: Write file *)
+      (* Step 2: Write file — with path traversal guard *)
       let _s2 = run_step "file_write" (fun () ->
         if !worktree_path = "" then Error "no worktree path"
         else begin
           let abs_path = Filename.concat !worktree_path file_path in
-          try
-            let dir = Filename.dirname abs_path in
-            Fs_compat.mkdir_p dir;
-            Fs_compat.save_file abs_path file_content;
-            Ok (Printf.sprintf "wrote %d bytes to %s" (String.length file_content) file_path)
-          with exn -> Error (Printexc.to_string exn)
+          (* Resolve symlinks and normalize to catch ../.. traversal *)
+          let canonical =
+            try Some (Unix.realpath abs_path)
+            with Unix.Unix_error _ ->
+              (* File doesn't exist yet: check parent dir *)
+              try
+                let parent = Unix.realpath (Filename.dirname abs_path) in
+                Some (Filename.concat parent (Filename.basename abs_path))
+              with Unix.Unix_error _ -> None
+          in
+          match canonical with
+          | None -> Error (Printf.sprintf "cannot resolve path: %s" file_path)
+          | Some resolved ->
+            if not (String.starts_with ~prefix:(!worktree_path ^ "/") resolved) then
+              Error (Printf.sprintf "path escapes worktree boundary: %s" file_path)
+            else begin
+              try
+                let dir = Filename.dirname resolved in
+                Fs_compat.mkdir_p dir;
+                Fs_compat.save_file resolved file_content;
+                Ok (Printf.sprintf "wrote %d bytes to %s" (String.length file_content) file_path)
+              with exn -> Error (Printexc.to_string exn)
+            end
         end
       ) in
       (* Step 3: Git add + commit + push *)
@@ -644,13 +678,13 @@ let handle_keeper_pr_workflow
           end
         end
       ) in
-      (* Step 4: Create draft PR via gh CLI *)
+      (* Step 4: Create draft PR — run from worktree for correct branch context *)
       let pr_url = ref "" in
       let _s4 = run_step "gh_pr_create" (fun () ->
         let body = if pr_body = "" then pr_title else pr_body in
         let gh_cmd = Printf.sprintf
           "cd %s && gh pr create --draft --title %s --body %s --base %s 2>&1"
-          (Filename.quote root) (Filename.quote pr_title) (Filename.quote body)
+          (Filename.quote !worktree_path) (Filename.quote pr_title) (Filename.quote body)
           (Filename.quote base_branch) in
         let st, out =
           Process_eio.run_argv_with_status ~timeout_sec:30.0

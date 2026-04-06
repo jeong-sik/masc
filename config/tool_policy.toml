@@ -36,6 +36,9 @@ tools = ["keeper_fs_edit"]
 [groups.library]
 tools = ["keeper_library_search", "keeper_library_read"]
 
+[groups.github]
+tools = ["keeper_github"]
+
 # Shard-backed groups: tool names resolved from Tool_shard at runtime.
 [groups.governance]
 shard = "governance"
@@ -86,7 +89,7 @@ groups = ["base", "board", "coordination", "voice", "governance"]
 masc_groups = ["core"]
 
 [presets.coding]
-groups = ["base", "board", "filesystem", "filesystem_write", "library", "shell", "coordination", "coding_shard", "coding"]
+groups = ["base", "board", "filesystem", "filesystem_write", "library", "shell", "coordination", "coding_shard", "coding", "github"]
 masc_groups = ["core", "coding"]
 
 [presets.research]
@@ -96,7 +99,7 @@ masc_groups = ["core"]
 # Delivery preset: research + coding for keepers that need to produce code changes.
 # Use for keepers with soul_profile=delivery whose goal involves PRs, issues, or code fixes.
 [presets.delivery]
-groups = ["base", "filesystem", "filesystem_write", "library", "shell", "coordination", "board", "governance", "autoresearch", "coding_shard", "coding"]
+groups = ["base", "filesystem", "filesystem_write", "library", "shell", "coordination", "board", "governance", "autoresearch", "coding_shard", "coding", "github"]
 masc_groups = ["core", "coding"]
 
 [presets.full]

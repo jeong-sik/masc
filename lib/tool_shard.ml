@@ -619,6 +619,9 @@ let get_agent_shards (agent_name : string) : string list =
 let set_agent_shards (agent_name : string) (shards : string list) : unit =
   agent_shards := StringMap.add agent_name (List.sort_uniq String.compare shards) !agent_shards
 
+let remove_agent_shards (agent_name : string) : unit =
+  agent_shards := StringMap.remove agent_name !agent_shards
+
 (** All predefined shards by name *)
 let all_shards : shard StringMap.t =
   List.fold_left (fun map s -> StringMap.add s.name s map) StringMap.empty [
@@ -677,6 +680,7 @@ let list_all_shards () : (string * bool * int) list =
   StringMap.fold (fun name (shard : shard) acc ->
     (name, shard.removable, List.length shard.tools) :: acc
   ) all_shards []
+  |> List.rev
 
 (** Default keeper tool set from [default_shard_names]. *)
 let keeper_model_tools : Types.tool_schema list =

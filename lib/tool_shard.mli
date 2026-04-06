@@ -32,9 +32,6 @@ val shard_governance : shard
 val get_shard : string -> shard option
 (** Get a shard by name. *)
 
-val all_shards : (string, shard) Hashtbl.t
-(** All predefined shards by name. *)
-
 (** {1 Tool Composition} *)
 
 val default_shard_names : string list
@@ -64,14 +61,14 @@ val list_all_shards : unit -> (string * bool * int) list
 
 (** {1 Per-Agent Shard State} *)
 
-val agent_shards : (string, string list) Hashtbl.t
-(** Global agent → active_shards mapping. *)
-
 val get_agent_shards : string -> string list
 (** Get shards for an agent. Returns [default_shard_names] if unset. *)
 
 val set_agent_shards : string -> string list -> unit
 (** Set active shards for an agent. *)
+
+val remove_agent_shards : string -> unit
+(** Remove agent from the shard registry (resets to defaults). *)
 
 (** {1 Tool Definitions} *)
 
@@ -91,7 +88,7 @@ val schemas : Types.tool_schema list
 
 val execute : string -> Yojson.Safe.t -> (bool * Yojson.Safe.t)
 (** Execute tool_shard MCP tools (grant, revoke, list).
-    Agent shard state is tracked in-memory via [agent_shards] hashtable. *)
+    Agent shard state is tracked in-memory via [agent_shards] map. *)
 
 val autoresearch_keeper_tools : Types.tool_schema list
 (** Autoresearch tools for keeper use (excludes swarm_start). *)

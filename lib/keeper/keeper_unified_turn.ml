@@ -42,7 +42,7 @@ let string_contains_substring_ci ~(needle : string) (haystack : string) : bool =
 let transient_error_patterns =
   [ "Connection_reset"; "Broken pipe"; "End_of_file";
     "connection closed"; "Connection refused";
-    "Loading model"; "HTTP 503" ]
+    "unavailable_error"; "HTTP 503:" ]
 
 let is_transient_network_error (msg : string) : bool =
   List.exists

@@ -140,20 +140,27 @@ let emit_cost_event
 
 (** Pure decision logic for the on_idle hook.  Testable without Room.config.
 
-    Graduated response (idle_skip_threshold = 3):
-    - idle 1: gentle nudge — suggest alternatives
-    - idle 2: final warning — explicit tool names to try
-    - idle 3+: Skip — end this turn. Heartbeat retries in ~30s.
+    Graduated response to repeated tool calls uses the configured
+    [Env_config_keeper.KeeperKeepalive.idle_skip_threshold]:
+    - For idle counts below [skip_at - 1]: gentle nudge suggesting alternatives
+    - For idle counts at [skip_at - 1]: final warning (stronger nudge)
+      suggesting [stay_silent]
+    - For idle counts at or above [skip_at]: Skip (end this turn, but the
+      heartbeat loop will retry next cycle)
+
+    This keeps behavior accurate when [idle_skip_threshold] changes.
+    With the default [skip_at = 3], for example, the keeper gets a gentle
+    nudge on idle 1, a final warning on idle 2, and Skip on idle 3.
 
     Skip is not death. The keeper's heartbeat loop will schedule a new
     turn on the next cycle with fresh context. The key insight is that
     burning more tokens on a stuck LLM is worse than retrying later. *)
-let on_idle_decision ~consecutive_idle_turns ~tool_names : Agent_sdk.Hooks.hook_decision =
+let on_idle_decision_with_threshold ~skip_at ~consecutive_idle_turns ~tool_names
+  : Agent_sdk.Hooks.hook_decision =
   let tools_str = match tool_names with
     | [] -> "<none>"
     | names -> String.concat ", " names
   in
-  let skip_at = Env_config_keeper.KeeperKeepalive.idle_skip_threshold in
   if consecutive_idle_turns >= skip_at then
     Agent_sdk.Hooks.Skip
   else if consecutive_idle_turns = skip_at - 1 then
@@ -172,6 +179,12 @@ let on_idle_decision ~consecutive_idle_turns ~tool_names : Agent_sdk.Hooks.hook_
           Try a different tool: post to the board, search for tools with \
           keeper_tool_search, claim a task, or stay_silent."
          tools_str)
+
+(** Wrapper around {!on_idle_decision_with_threshold} that supplies the
+    [idle_skip_threshold] constant from [Env_config_keeper.KeeperKeepalive]. *)
+let on_idle_decision ~consecutive_idle_turns ~tool_names : Agent_sdk.Hooks.hook_decision =
+  let skip_at = Env_config_keeper.KeeperKeepalive.idle_skip_threshold in
+  on_idle_decision_with_threshold ~skip_at ~consecutive_idle_turns ~tool_names
 
 let make_hooks
     ~config:(_config : Room.config)

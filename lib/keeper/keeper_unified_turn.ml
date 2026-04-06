@@ -923,14 +923,26 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
                Log.Keeper.error
                  "write_meta failed after unified turn failure: %s" msg);
           let base_path = config.base_path in
-          Keeper_registry.increment_turn_failures ~base_path meta.name;
+          (* Transient errors (429 rate limit, 503 overloaded, network
+             timeout) do not count toward the consecutive failure threshold.
+             They are already retried at the turn level with backoff; killing
+             the keeper fiber for a transient API blip is an overreaction
+             that causes unnecessary restarts and context loss.
+             Only persistent errors (auth failure, config error, context
+             overflow after compaction) increment the crash counter. *)
+          if not is_transient then
+            Keeper_registry.increment_turn_failures ~base_path meta.name
+          else
+            Log.Keeper.info
+              "%s: transient turn failure (not counted toward crash threshold): %s"
+              meta.name (short_preview e_str);
           let count = Keeper_registry.get_turn_failures ~base_path meta.name in
           let threshold =
             Runtime_params.get Governance_registry.keeper_max_turn_failures
           in
           if count >= threshold then begin
             Log.Keeper.error
-              "%s: %d consecutive turn failures (threshold=%d), escalating to supervisor crash path"
+              "%s: %d consecutive persistent turn failures (threshold=%d), escalating to supervisor crash path"
               meta.name count threshold;
             Keeper_registry.set_failure_reason ~base_path:config.base_path
               meta.name

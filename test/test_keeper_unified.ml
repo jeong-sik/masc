@@ -1798,8 +1798,8 @@ let test_prompt_no_self_check_in_prompt () =
     false (contains_substring user "SELF-CHECK")
 
 let test_on_idle_nudge_at_first_idle () =
-  (* Use explicit skip_at=3 (the default constant) so the test is decoupled
-     from the global constant and remains accurate regardless of value *)
+  (* Use an explicit skip_at=3 to exercise the pure helper at a chosen
+     threshold, independent of any global/default configuration. *)
   let decision = HK.on_idle_decision_with_threshold
     ~skip_at:3
     ~consecutive_idle_turns:1

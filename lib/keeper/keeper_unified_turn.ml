@@ -865,13 +865,8 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
           ~cascade_name:"keeper_unified"
           ~fallback:Keeper_config.keeper_unified_max_tokens
       in
-      let max_turns =
-        match channel with
-        | Keeper_world_observation.Reactive ->
-            Keeper_config.keeper_reactive_max_turns ()
-        | Keeper_world_observation.Scheduled_autonomous ->
-            Keeper_config.keeper_autonomous_max_turns ()
-      in
+      (* max_turns: defer to OAS default (Types.default_agent_config.max_turns).
+         MASC does not hardcode agent runtime budgets. *)
       let max_cost_usd = Keeper_config.keeper_tool_cost_max_usd () in
       (* 4. Build turn prompt callback: use our unified system prompt *)
       let build_turn_prompt ~base_system_prompt:_ ~messages:_
@@ -893,7 +888,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
             Keeper_agent_run.run_turn ~config ~meta:run_meta ~base_dir
               ~max_context ~build_turn_prompt
               ~user_message ~cascade_name:"keeper_unified"
-              ~generation:run_generation ~max_turns ~max_idle_turns
+              ~generation:run_generation ~max_idle_turns
               ~history_user_source:"world_state_prompt"
               ~history_assistant_source:"internal_assistant"
               ~temperature ~max_tokens

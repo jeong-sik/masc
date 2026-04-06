@@ -552,34 +552,11 @@ let keeper_unified_max_tokens () : int =
     ~min_v:256
     ~max_v:16000
 
-(** Max agent turns (tool loops) for unified keeper turns.
-    Env: [MASC_KEEPER_UNIFIED_MAX_TURNS]. Default: 3.
-    Previous default (1000) caused 787s+ latency per turn.
-    20 caused 6.7GB RSS in 2 minutes with 3 concurrent keepers.
-    This value is the fallback; channel-aware functions below are preferred. *)
-let keeper_unified_max_turns () : int =
-  int_of_env_default
-    "MASC_KEEPER_UNIFIED_MAX_TURNS"
-    ~default:3
-    ~min_v:1
-    ~max_v:50
-
-(** Max turns for reactive channel (responding to mentions, board events, messages).
-    Reactive turns need more budget: read context -> reason -> act -> report.
-    Env: [MASC_KEEPER_REACTIVE_MAX_TURNS]. Default: 8. *)
-let keeper_reactive_max_turns () : int =
-  int_of_env_default
-    "MASC_KEEPER_REACTIVE_MAX_TURNS"
-    ~default:8
-    ~min_v:2
-    ~max_v:30
-
-(** Max turns for scheduled autonomous channel (proactive check-ins).
-    Autonomous turns are "observe one thing, do one thing" cycles.
-    Env: [MASC_KEEPER_AUTONOMOUS_MAX_TURNS]. Default: 5. *)
-let keeper_autonomous_max_turns () : int =
-  int_of_env_default
-    "MASC_KEEPER_AUTONOMOUS_MAX_TURNS"
-    ~default:5
-    ~min_v:1
-    ~max_v:20
+(* max_turns removed: agent turn budgets belong in OAS
+   (Types.default_agent_config.max_turns = 10). MASC must not hardcode
+   agent runtime parameters.
+   Known constraints (retain for future OAS tuning):
+   - 1000 turns caused 787s+ latency per turn
+   - 20 turns caused 6.7GB RSS in 2 minutes with 3 concurrent keepers
+   - 3 turns left keepers unable to do meaningful work (board_post x3 only)
+   If OAS default needs adjustment, change it in OAS types.ml. *)

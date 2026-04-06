@@ -254,7 +254,7 @@ let log_keeper_memory_write
     @param user_message The user's message to the keeper
     @param cascade_name Cascade profile name for model selection
     @param generation Current generation counter
-    @param max_turns Maximum agent turns (default 50)
+    @param max_turns Maximum agent turns (default: OAS default, currently 10)
     @param guardrails Optional OAS guardrails for tool safety gates
     @param temperature MODEL temperature override; when omitted, resolved
            from [Cascade_inference] with a 0.3 fallback
@@ -275,7 +275,7 @@ let run_turn
     ~(user_message : string)
     ~(cascade_name : string)
     ~(generation : int)
-    ?(max_turns : int = 50)
+    ?(max_turns : int = 10) (* align with OAS Types.default_agent_config.max_turns *)
     ?(max_idle_turns : int = 3)
     ?(history_user_source = "direct_user")
     ?(history_assistant_source = "direct_assistant")

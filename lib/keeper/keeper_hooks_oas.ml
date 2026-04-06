@@ -131,7 +131,7 @@ let emit_cost_event
     @param config Room configuration
     @param meta_ref Mutable ref to keeper metadata
     @param session Session context for checkpoint persistence
-    @param ctx_ref Mutable ref to current working context
+    @param ctx_snapshot Immutable snapshot of working context (reserved, unused)
     @param generation Current generation counter
     @param max_cost_usd Optional cost budget (rejects tool calls above limit)
     @param destructive_check Enable destructive pattern detection (default true)
@@ -190,7 +190,7 @@ let make_hooks
     ~config:(_config : Room.config)
     ~(meta_ref : Keeper_types.keeper_meta ref)
     ~session:(_session : Keeper_exec_context.session_context)
-    ~ctx_ref:(_ctx_ref : Keeper_exec_context.working_context ref)
+    ~ctx_snapshot:(_ctx_snapshot : Keeper_exec_context.working_context)
     ~(generation : int)
     ?(max_cost_usd : float option)
     ?(destructive_check : bool = true)

@@ -24,7 +24,7 @@ and fixture = {
   generic : Generic.fixture;
   config : Masc_mcp.Room.config;
   meta : Masc_mcp.Keeper_types.keeper_meta;
-  ctx_ref : Masc_mcp.Keeper_types.working_context ref;
+  ctx_snapshot : Masc_mcp.Keeper_types.working_context;
   tools : Agent_sdk.Tool.t list;
 }
 
@@ -127,16 +127,16 @@ let make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path init_mode =
     Masc_mcp.Keeper_exec_context.append ctx
       (Agent_sdk.Types.user_msg "tool matrix memory needle")
   in
-  let ctx_ref = ref ctx in
+  let ctx_snapshot = ctx in
   let meta = make_meta () in
-  let tools = KTO.make_tools ~config ~meta ~ctx_ref () in
+  let tools = KTO.make_tools ~config ~meta ~ctx_snapshot () in
   (match init_mode with
    | Init_joined ->
        ignore
          (Masc_mcp.Room.join config ~agent_name:("keeper-" ^ meta.name)
             ~capabilities:[] ())
    | Fresh | Init_only -> ());
-  { generic; config; meta; ctx_ref; tools }
+  { generic; config; meta; ctx_snapshot; tools }
 
 let keeper_agent_name fixture = "keeper-" ^ fixture.meta.name
 
@@ -189,10 +189,9 @@ let prepare_keeper_name fixture name =
   then
     ensure_keeper_claim fixture;
   if name = "keeper_voice_session_end" then ensure_voice_session fixture;
-  if name = "keeper_memory_search" then
-    fixture.ctx_ref :=
-      Masc_mcp.Keeper_exec_context.append !(fixture.ctx_ref)
-        (Agent_sdk.Types.user_msg "keeper tool matrix memory needle")
+  (* keeper_memory_search: needle "tool matrix memory needle" is already
+     in ctx_snapshot from fixture creation (line ~128). No mutation needed. *)
+  ignore (name = "keeper_memory_search")
 
 let keeper_arguments fixture (schema : Types.tool_schema) =
   let name = schema.name in

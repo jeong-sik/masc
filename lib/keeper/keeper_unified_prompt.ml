@@ -386,14 +386,13 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
     Buffer.add_string ubuf "\n### Autonomous Trigger\n";
     Buffer.add_string ubuf (String.concat "\n" autonomous_trigger);
     Buffer.add_string ubuf "\n");
-  (* Keeper tool inventory — show the keeper_* subset available this cycle *)
+  (* Keeper tool inventory — show all allowed tools this cycle.
+     Previously filtered to keeper_* prefix only, hiding masc_web_search
+     and other masc_* tools the keeper can actually call. *)
   let allowed_tools = Keeper_tool_policy.keeper_allowed_tool_names meta in
-  let keeper_tools =
-    List.filter (fun n -> String.starts_with ~prefix:"keeper_" n) allowed_tools
-  in
-  if keeper_tools <> [] then (
+  if allowed_tools <> [] then (
     Buffer.add_string ubuf "\n### Keeper Tools\n";
-    Buffer.add_string ubuf (String.concat ", " keeper_tools);
+    Buffer.add_string ubuf (String.concat ", " allowed_tools);
     Buffer.add_string ubuf "\n");
   (* Metacognition: show the keeper its own recent tool activity so it can
      recognise patterns — thrashing, failure loops, tool over-reliance.

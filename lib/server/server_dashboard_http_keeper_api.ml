@@ -390,8 +390,8 @@ let handle_keeper_get_subroutes state req request reqd =
         {|{"error":"keeper name is required"}|} reqd
     else if not (Keeper_config.validate_name name) then
       Http.Response.json ~status:`Bad_request
-        (Printf.sprintf {|{"error":"invalid keeper name: %S"}|}
-           (String.escaped name)) reqd
+        (Yojson.Safe.to_string
+           (`Assoc [("error", `String (Printf.sprintf "invalid keeper name: %s" name))])) reqd
     else
       let config = state.Mcp_server.room_config in
       let masc_root = Filename.concat config.base_path ".masc" in
@@ -420,6 +420,10 @@ let handle_keeper_get_subroutes state req request reqd =
     if String.length name = 0 then
       Http.Response.json ~status:`Bad_request
         {|{"error":"keeper name is required"}|} reqd
+    else if not (Keeper_config.validate_name name) then
+      Http.Response.json ~status:`Bad_request
+        (Yojson.Safe.to_string
+           (`Assoc [("error", `String (Printf.sprintf "invalid keeper name: %s" name))])) reqd
     else
       let limit =
         Server_utils.int_query_param req "limit" ~default:50
@@ -442,8 +446,8 @@ let handle_keeper_get_subroutes state req request reqd =
         {|{"error":"keeper name is required"}|} reqd
     else if not (Keeper_config.validate_name name) then
       Http.Response.json ~status:`Bad_request
-        (Printf.sprintf {|{"error":"invalid keeper name: %S"}|}
-           (String.escaped name)) reqd
+        (Yojson.Safe.to_string
+           (`Assoc [("error", `String (Printf.sprintf "invalid keeper name: %s" name))])) reqd
     else
       let config = state.Mcp_server.room_config in
       (match Keeper_types.read_meta config name with

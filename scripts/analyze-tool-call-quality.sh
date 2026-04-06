@@ -55,13 +55,11 @@ echo "=== Tool Call Quality Analysis (Samchon Harness Metrics) ==="
 echo "Source: ${#FILES[@]} file(s), last ${DAYS} day(s)"
 echo ""
 
-# Merge all files
-ALL_DATA=$(cat "${FILES[@]}")
-TOTAL=$(echo "$ALL_DATA" | wc -l | tr -d ' ')
+# Stream files directly into jq (avoid loading all data into memory)
 
 echo "[1/6] Overview"
 echo "─────────────────────────────────────────"
-echo "$ALL_DATA" | jq -s '
+jq -s '
   {
     total_calls: length,
     success: ([.[] | select(.success == true)] | length),
@@ -76,12 +74,12 @@ echo "$ALL_DATA" | jq -s '
   "Unique keepers:  \(.unique_keepers)",
   "Unique tools:    \(.unique_tools)",
   "Avg duration:    \(.avg_duration_ms)ms"
-'
+' "${FILES[@]}"
 echo ""
 
 echo "[2/6] Per-Keeper Tool Call Quality"
 echo "─────────────────────────────────────────"
-echo "$ALL_DATA" | jq -s '
+jq -s '
   group_by(.keeper) | map({
     keeper: .[0].keeper,
     total: length,
@@ -91,12 +89,12 @@ echo "$ALL_DATA" | jq -s '
     avg_ms: (([.[] | .duration_ms] | add) / length | . * 10 | floor / 10),
   }) | sort_by(-.total) | .[] |
   "\(.keeper)\t\(.total)\t\(.success)/\(.fail)\t\(.tools_used) tools\t\(.avg_ms)ms"
-' | (echo -e "KEEPER\tCALLS\tOK/FAIL\tTOOLS\tAVG_MS"; cat) | column -t -s $'\t'
+' "${FILES[@]}" | (echo -e "KEEPER\tCALLS\tOK/FAIL\tTOOLS\tAVG_MS"; cat) | column -t -s $'\t'
 echo ""
 
 echo "[3/6] Tool Success Rate (Top 20)"
 echo "─────────────────────────────────────────"
-echo "$ALL_DATA" | jq -s '
+jq -s '
   group_by(.tool) | map({
     tool: .[0].tool,
     total: length,
@@ -106,12 +104,12 @@ echo "$ALL_DATA" | jq -s '
     avg_ms: (([.[] | .duration_ms] | add) / length | . * 10 | floor / 10),
   }) | sort_by(-.total) | .[:20] | .[] |
   "\(.tool)\t\(.total)\t\(.rate)%\t\(.avg_ms)ms"
-' | (echo -e "TOOL\tCALLS\tSUCCESS%\tAVG_MS"; cat) | column -t -s $'\t'
+' "${FILES[@]}" | (echo -e "TOOL\tCALLS\tSUCCESS%\tAVG_MS"; cat) | column -t -s $'\t'
 echo ""
 
 echo "[4/6] Duration Distribution (Samchon: fast recovery = good harness)"
 echo "─────────────────────────────────────────"
-echo "$ALL_DATA" | jq -s '
+jq -s '
   {
     fast: ([.[] | select(.duration_ms < 500)] | length),
     normal: ([.[] | select(.duration_ms >= 500 and .duration_ms < 2000)] | length),
@@ -123,16 +121,16 @@ echo "$ALL_DATA" | jq -s '
   "  500-2s (normal):  \(.normal) (\(.normal * 100 / .total)%)",
   "  2-10s (slow):     \(.slow) (\(.slow * 100 / .total)%)",
   "  >10s (very slow): \(.very_slow) (\(.very_slow * 100 / .total)%)"
-'
+' "${FILES[@]}"
 echo ""
 
 echo "[5/6] Failed Calls Detail (Samchon: failures are loop inputs)"
 echo "─────────────────────────────────────────"
-FAIL_COUNT=$(echo "$ALL_DATA" | jq -s '[.[] | select(.success == false)] | length')
+FAIL_COUNT=$(jq -s '[.[] | select(.success == false)] | length' "${FILES[@]}")
 if [ "$FAIL_COUNT" -eq 0 ]; then
   echo "  No failures recorded."
 else
-  echo "$ALL_DATA" | jq -s '
+  jq -s '
     [.[] | select(.success == false)] | group_by(.tool) | map({
       tool: .[0].tool,
       count: length,
@@ -142,13 +140,13 @@ else
     "  \(.tool) (\(.count)x, keepers: \(.keepers | join(",")))",
     "    sample: \(.sample_output)",
     ""
-  '
+  ' "${FILES[@]}"
 fi
 echo ""
 
 echo "[6/6] Tool Category Distribution"
 echo "─────────────────────────────────────────"
-echo "$ALL_DATA" | jq -s '
+jq -s '
   def cat:
     if test("bash|shell") then "shell"
     elif test("github|git|worktree") then "git"
@@ -167,7 +165,7 @@ echo "$ALL_DATA" | jq -s '
     ok: ([.[] | select(.success)] | length),
   }) | sort_by(-.count) | .[] |
   "  \(.category)\t\(.count) calls\t\(.ok * 100 / .count)% ok"
-' | column -t -s $'\t'
+' "${FILES[@]}" | column -t -s $'\t'
 echo ""
 
 echo "=== Samchon Harness Alignment Check ==="

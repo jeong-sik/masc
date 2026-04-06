@@ -7,6 +7,14 @@
 val contains_substring : sub:string -> string -> bool
 (** Test helper: check if [sub] occurs in the string. *)
 
+val is_denied_tool : tool_name:string -> bool
+(** Returns [true] if the tool is on the deny list (auth, encryption, etc.)
+    and its I/O must not be logged or previewed. *)
+
+val redact_json_value : Yojson.Safe.t -> Yojson.Safe.t
+(** Recursively redact sensitive fields (tokens, secrets, passwords, etc.)
+    from a JSON value, preserving structure. *)
+
 val redact_preview : ?max_len:int -> string -> string
 (** Truncate to [max_len] (default 200) and strip known sensitive patterns.
     Result is safe for storage in proof/dashboard/metrics. *)

@@ -25,12 +25,11 @@ let init ~base_path =
      Log.Misc.warn "keeper_tool_call_log: init failed: %s"
        (Printexc.to_string exn))
 
+let reset_for_testing () =
+  store_ref := None
+
 let suffix = "...(truncated)"
 let suffix_len = String.length suffix
-
-let truncate_output s =
-  if String.length s <= max_output_len then s
-  else String.sub s 0 (max_output_len - suffix_len) ^ suffix
 
 let input_to_json (input : Yojson.Safe.t) : Yojson.Safe.t =
   let s = Yojson.Safe.to_string input in
@@ -39,27 +38,37 @@ let input_to_json (input : Yojson.Safe.t) : Yojson.Safe.t =
   else input
 
 let log_call ~keeper_name ~tool_name ~(input : Yojson.Safe.t)
-    ~(output_text : string) ~(success : bool) ~(duration_ms : float) =
-  match !store_ref with
-  | None -> ()
-  | Some store ->
-    let json =
-      `Assoc
-        [ ("ts", `Float (Time_compat.now ()))
-        ; ("keeper", `String keeper_name)
-        ; ("tool", `String tool_name)
-        ; ("input", input_to_json input)
-        ; ("output", `String (truncate_output output_text))
-        ; ("success", `Bool success)
-        ; ("duration_ms", `Float duration_ms)
-        ]
-    in
-    (try Dated_jsonl.append store json
-     with exn ->
-       Log.Misc.warn "keeper_tool_call_log: append failed for %s/%s: %s"
-         keeper_name tool_name (Printexc.to_string exn))
+    ~(output_text : string) ~(success : bool) ~(duration_ms : float)
+    ?(model : string = "") () =
+  if Observability_redact.is_denied_tool ~tool_name then ()
+  else
+    match !store_ref with
+    | None -> ()
+    | Some store ->
+      let model_field =
+        if model = "" then [] else [("model", `String model)]
+      in
+      let safe_input = input_to_json (Observability_redact.redact_json_value input) in
+      let safe_output = Observability_redact.redact_preview ~max_len:max_output_len output_text in
+      let json =
+        `Assoc
+          ([ ("ts", `Float (Time_compat.now ()))
+          ; ("keeper", `String keeper_name)
+          ; ("tool", `String tool_name)
+          ; ("input", safe_input)
+          ; ("output", `String safe_output)
+          ; ("success", `Bool success)
+          ; ("duration_ms", `Float duration_ms)
+          ] @ model_field)
+      in
+      (try Dated_jsonl.append store json
+       with exn ->
+         Log.Misc.warn "keeper_tool_call_log: append failed for %s/%s: %s"
+           keeper_name tool_name (Printexc.to_string exn))
 
 let read_recent ?keeper_name ?(n = 100) () : Yojson.Safe.t list =
+  if n <= 0 then []
+  else
   match !store_ref with
   | None -> []
   | Some store ->

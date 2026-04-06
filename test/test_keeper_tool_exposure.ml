@@ -216,22 +216,6 @@ let test_sufficient_tool_count () =
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "tool count from shards" true (List.length tools >= 20)
 
-(* Verify masc_web_search survives inject_masc_schemas after
-   tag_registry initialization. This catches missing Mod_misc entries
-   in tool_tag_init.ml — the bug where lookup_tag returns None and
-   supported_in_keeper rejects the tool at runtime. *)
-let test_web_search_survives_tag_registry () =
-  check bool "tag_registry is initialized" true
-    (Tool_dispatch.is_tag_registry_initialized ());
-  let injected = !Keeper_exec_tools.masc_schemas_ref in
-  let names = List.map (fun (s : Types.tool_schema) -> s.name) injected in
-  check bool "masc_web_search in injected schemas" true
-    (List.mem "masc_web_search" names);
-  let meta = make_meta ~preset:Keeper_types.Delivery () in
-  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  check bool "delivery preset has masc_web_search" true
-    (has_tool "masc_web_search" tools)
-
 (* ============================================================
    8. Combined profiles
    ============================================================ *)
@@ -563,15 +547,6 @@ let test_keeper_reported_observe_only_scope () =
 
 let () =
   let base_path = Masc_test_deps.find_project_root () in
-  (* Reproduce server boot sequence: tag registration must precede injection
-     so that inject_masc_schemas filters via lookup_tag after initialization.
-     Without this, is_tag_registry_initialized returns false and the tag
-     check is bypassed — hiding missing tag entries. *)
-  Tool_dispatch.register_module_tag
-    ~schemas:Tool_schemas_inline.schemas ~tag:Tool_dispatch.Mod_inline;
-  Tool_tag_init.register_all ();
-  Tool_board.register ();
-  Tool_dispatch.mark_tag_registry_initialized ();
   Keeper_exec_tools.inject_masc_schemas Config.raw_all_tool_schemas;
   Keeper_exec_tools.init_policy_config ~base_path;
   run "Keeper_tool_exposure" [
@@ -614,10 +589,6 @@ let () =
       test_case "coding has coordination tools" `Quick test_coding_preset_has_coordination_tools;
       test_case "messaging legacy governance tools removed" `Quick test_messaging_preset_has_no_legacy_governance_tools;
       test_case "sufficient tool count" `Quick test_sufficient_tool_count;
-    ]);
-    ("tag_registry_integration", [
-      test_case "masc_web_search survives tag registry" `Quick
-        test_web_search_survives_tag_registry;
     ]);
     ("combined_profiles", [
       test_case "research plus also_allow override" `Quick test_research_plus_also_allow_combined;

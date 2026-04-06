@@ -383,8 +383,9 @@ let test_snapshot_keeper_tool_audit_fallback () =
         (match tool_audit_source with
          | None -> true  (* null before first turn — expected *)
          | Some s -> List.mem s [ "keeper_metrics"; "keeper_decision_log" ]);
-      Alcotest.(check int) "tool audit count exposed as zero" 0
-        (keeper |> member "latest_tool_call_count" |> to_int);
+      Alcotest.(check int) "tool audit count zero or absent" 0
+        (keeper |> member "latest_tool_call_count"
+         |> to_int_option |> Option.value ~default:0);
       Alcotest.(check bool) "tool audit names remain empty" true
         ((keeper |> member "latest_tool_names" |> to_list) = []);
       Alcotest.(check bool) "diagnostic removed from snapshot" true

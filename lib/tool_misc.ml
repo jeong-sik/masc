@@ -210,17 +210,25 @@ let fetch_ddg_html ~query =
 
 (* --- SearXNG JSON search backend (self-hosted, primary) --- *)
 
-let searxng_base_url () =
-  let raw =
-    match Sys.getenv_opt "MASC_SEARXNG_URL" with
-    | Some url -> String.trim url
-    | None -> "http://localhost:8888"
+let searxng_default_url = "http://localhost:8888"
+
+let strip_trailing_slashes s =
+  let rec find_last_non_slash i =
+    if i < 0 then -1
+    else if s.[i] = '/' then find_last_non_slash (i - 1)
+    else i
   in
-  (* Strip trailing slashes to avoid double-slash in constructed URLs *)
-  let n = String.length raw in
-  let i = ref (n - 1) in
-  while !i >= 0 && raw.[!i] = '/' do decr i done;
-  let url = if !i = n - 1 then raw else String.sub raw 0 (!i + 1) in
+  let last = find_last_non_slash (String.length s - 1) in
+  if last < 0 then "" else String.sub s 0 (last + 1)
+
+let searxng_base_url () =
+  let url =
+    match Sys.getenv_opt "MASC_SEARXNG_URL" with
+    | Some raw ->
+        let normalized = raw |> String.trim |> strip_trailing_slashes in
+        if normalized = "" then searxng_default_url else normalized
+    | None -> searxng_default_url
+  in
   (* Fail fast on misconfigured scheme *)
   (match Uri.scheme (Uri.of_string url) |> Option.map String.lowercase_ascii with
    | Some "http" | Some "https" -> ()

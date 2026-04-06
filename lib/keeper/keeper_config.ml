@@ -554,8 +554,10 @@ let keeper_unified_temperature () : float =
     ~max_v:2.0
 
 (** Max output tokens for unified keeper turns.
-    131072 removes MASC-side bottleneck; the LLM context window (64k/slot)
-    is the effective ceiling.  Override via [MASC_KEEPER_UNIFIED_MAX_TOKENS].
+    131072 removes the MASC-side bottleneck; the effective ceiling is
+    determined by the model's context window and output token limit
+    (provider-dependent — verify against the active model before raising above
+    the default).  Override via [MASC_KEEPER_UNIFIED_MAX_TOKENS].
     Env: [MASC_KEEPER_UNIFIED_MAX_TOKENS]. Default: 131072. *)
 let keeper_unified_max_tokens () : int =
   int_of_env_default

@@ -41,7 +41,8 @@ let string_contains_substring_ci ~(needle : string) (haystack : string) : bool =
     These patterns match OAS cascade error messages for connection-level failures. *)
 let transient_error_patterns =
   [ "Connection_reset"; "Broken pipe"; "End_of_file";
-    "connection closed"; "Connection refused" ]
+    "connection closed"; "Connection refused";
+    "unavailable_error"; "HTTP 503:" ]
 
 let is_transient_network_error (msg : string) : bool =
   List.exists
@@ -674,7 +675,7 @@ let broadcast_lifecycle_events ~(name : string)
 
 let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
     ~(observation : Keeper_world_observation.world_observation)
-    ~(reason : string) ?social_state () : keeper_meta =
+    ~(reason : string) ?(is_transient = false) ?social_state () : keeper_meta =
   let now_ts = Time_compat.now () in
   let is_scheduled_autonomous_cycle =
     is_scheduled_autonomous_cycle_of_observation observation
@@ -698,7 +699,7 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
           meta.runtime.proactive_rt.count_total
           + (if is_scheduled_autonomous_cycle then 1 else 0);
         last_ts =
-          if is_scheduled_autonomous_cycle then now_ts
+          if is_scheduled_autonomous_cycle && not is_transient then now_ts
           else meta.runtime.proactive_rt.last_ts;
         last_outcome =
           if is_scheduled_autonomous_cycle then Proactive_error
@@ -855,16 +856,18 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
       in
       match run_result with
       | Error e ->
+          let is_transient = is_transient_network_error e in
           Log.Keeper.error
-            "%s: unified turn FAILED cascade=%s max_context=%d latency=%dms error=%s"
+            "%s: unified turn FAILED cascade=%s max_context=%d latency=%dms%s error=%s"
             meta.name meta.cascade_name max_cascade_context latency_ms
+            (if is_transient then " (transient, cooldown preserved)" else "")
             (short_preview e);
           let social_state =
             Social.derive_failure_state ~meta ~observation ~reason:e
           in
           let updated_meta =
             update_metrics_from_failure meta ~latency_ms ~observation ~reason:e
-              ~social_state ()
+              ~is_transient ~social_state ()
           in
           append_decision_record ~config ~meta:updated_meta ~observation
             ~latency_ms ~outcome:"error" ~selected_mode:"error"

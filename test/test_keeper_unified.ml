@@ -1621,7 +1621,7 @@ let test_social_model_requires_explicit_headers () =
       check string "delivery surface" "silent"
         (KSM.delivery_surface_to_string state.delivery_surface);
       check (option string) "blocker notes protocol violation"
-        (Some "missing social headers") state.blocker;
+        (Some "no tool calls and no social headers") state.blocker;
       check string "visible response suppressed" "" routed.response_text;
       check (list string) "no synthetic tools" [] routed.tools_used)
 

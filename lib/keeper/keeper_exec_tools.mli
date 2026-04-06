@@ -34,9 +34,6 @@ val core_discovery_tools : string list
 (** Returns [core_discovery_tools] when discovery enabled, else [core_always_tools]. *)
 val effective_core_tools : unit -> string list
 
-(** Whether MASC_KEEPER_TOOL_DISCOVERY env var is set. *)
-val tool_discovery_enabled : unit -> bool
-
 (** Schema for the keeper_tool_search tool. *)
 val keeper_tool_search_schema : Types.tool_schema
 

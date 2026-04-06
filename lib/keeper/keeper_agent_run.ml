@@ -374,7 +374,6 @@ let run_turn
     Keeper_tools_oas.make_tools ~config ~meta ~ctx_ref
       ~search_fn:(fun ~query ~max_results -> !local_search_fn_ref ~query ~max_results)
       ~on_tool_called:(fun name ->
-        if Keeper_exec_tools.tool_discovery_enabled () then
           Keeper_discovered_tools.mark_used !discovered_ref
             ~turn:!current_turn_ref ~name)
       ()
@@ -838,20 +837,17 @@ let run_turn
             ~tools:scoped_tools
           |> Tool_portal.filter_visible_tool_names portal_ctx
         in
-        (* In discovery mode, bypass Tool_selector BM25 and use only
-           core + actively discovered tools.  The keeper discovers tools
-           on demand via keeper_tool_search. *)
+        (* Core + discovered tools: the keeper discovers additional tools
+           on demand via keeper_tool_search.  BM25 auto-selection is replaced
+           by explicit discovery — only tools the keeper asked for appear. *)
         let effective_selected =
-          if Keeper_exec_tools.tool_discovery_enabled () then
-            let core = Keeper_exec_tools.effective_core_tools () in
-            let discovered =
-              Keeper_discovered_tools.active_names !discovered_ref ~turn
-            in
-            let _ = Keeper_discovered_tools.decay !discovered_ref ~turn in
-            Keeper_types.dedupe_keep_order (core @ discovered)
-            |> Tool_portal.filter_visible_tool_names portal_ctx
-          else
-            selected_names
+          let core = Keeper_exec_tools.effective_core_tools () in
+          let discovered =
+            Keeper_discovered_tools.active_names !discovered_ref ~turn
+          in
+          let _ = Keeper_discovered_tools.decay !discovered_ref ~turn in
+          Keeper_types.dedupe_keep_order (core @ discovered)
+          |> Tool_portal.filter_visible_tool_names portal_ctx
         in
         (* Apply runtime tool overlay (masc_tool_grant/revoke) and
            intersect with the full dispatch universe. *)

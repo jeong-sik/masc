@@ -322,17 +322,20 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
       } in
       Progress.Tracker.step tracker ~message:"Saving initial checkpoint" ();
       (try
-         ignore
-           (Keeper_exec_context.save_oas_checkpoint
+         (match Keeper_exec_context.save_oas_checkpoint
               ~session
               ~agent_name:meta.agent_name
               ~model:(Keeper_exec_context.checkpoint_model_of_meta meta)
               ~ctx:ctx0
-              ~generation:0)
+              ~generation:0
+          with
+          | Ok _ -> ()
+          | Error e ->
+              Log.Keeper.error "save_oas_checkpoint (init) failed: %s" e)
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->
-           log_keeper_exn ~label:"save_oas_checkpoint (init) failed" exn);
+           log_keeper_exn ~label:"save_oas_checkpoint (init) exception" exn);
       Progress.Tracker.step tracker ~message:"Writing keeper metadata" ();
       match write_meta ctx.config meta with
       | Error e ->

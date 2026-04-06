@@ -148,10 +148,16 @@ let apply_post_turn_lifecycle
           let session =
             create_session ~session_id:meta_after_compaction.runtime.trace_id ~base_dir
           in
-          Some
-            (save_oas_checkpoint ~session
+          (match save_oas_checkpoint ~session
                ~agent_name:meta_after_compaction.agent_name
-               ~model ~ctx:compacted_ctx ~generation:current_generation)
+               ~model ~ctx:compacted_ctx ~generation:current_generation
+          with
+          | Ok saved_cp -> Some saved_cp
+          | Error e ->
+              Log.Keeper.error
+                "keeper:%s compaction checkpoint save failed: %s"
+                meta_after_compaction.agent_name e;
+              Some cp)
       in
       let rollover =
         Keeper_rollover.maybe_rollover_oas_handoff ~base_dir
@@ -313,16 +319,20 @@ let recover_latest_checkpoint_for_overflow_retry
           }
         in
         try
-          let checkpoint =
-            save_oas_checkpoint ~session
+          (match save_oas_checkpoint ~session
               ~agent_name:retry_meta.agent_name
               ~model ~ctx:compacted_ctx ~generation:turn_generation
-          in
-          Some { checkpoint; compaction; turn_generation }
+          with
+          | Ok checkpoint ->
+              Some { checkpoint; compaction; turn_generation }
+          | Error e ->
+              Log.Keeper.error
+                "overflow retry checkpoint save failed: %s" e;
+              None)
         with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn ->
             log_keeper_exn
-              ~label:"overflow retry checkpoint save failed"
+              ~label:"overflow retry checkpoint save exception"
               exn;
             None

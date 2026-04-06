@@ -70,11 +70,14 @@ let save_checkpoint ~base_dir ~(meta : KT.keeper_meta) ~ctx =
   let session =
     KEC.create_session ~session_id:meta.runtime.trace_id ~base_dir
   in
-  KEC.save_oas_checkpoint ~session
+  match KEC.save_oas_checkpoint ~session
     ~agent_name:meta.agent_name
     ~model:"llama:auto"
     ~ctx
     ~generation:meta.runtime.generation
+  with
+  | Ok cp -> cp
+  | Error e -> Alcotest.fail (Printf.sprintf "save_oas_checkpoint failed: %s" e)
 
 let load_context ~base_dir ~trace_id ~max_tokens =
   let (_session, loaded_opt) =

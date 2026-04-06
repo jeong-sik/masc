@@ -302,7 +302,7 @@ let save_oas_checkpoint
     ~(model : string)
     ~(ctx : working_context)
     ~(generation : int)
-  : Agent_sdk.Checkpoint.t =
+  : (Agent_sdk.Checkpoint.t, string) result =
   let checkpoint_context = Agent_sdk.Context.copy ctx.context in
   Agent_sdk.Context.set_scoped checkpoint_context Agent_sdk.Context.Session
     checkpoint_generation_key (`Int generation);
@@ -340,10 +340,11 @@ let save_oas_checkpoint
       ~mcp_clients:[]
       ()
   in
-  (match Keeper_checkpoint_store.save_oas ~session_dir:session.session_dir checkpoint with
-   | Ok () -> ()
-   | Error e -> Log.Keeper.error "save_oas_checkpoint failed: %s" e);
-  checkpoint
+  match Keeper_checkpoint_store.save_oas ~session_dir:session.session_dir checkpoint with
+  | Ok () -> Ok checkpoint
+  | Error e ->
+      Log.Keeper.error "save_oas_checkpoint failed: %s" e;
+      Error e
 
 let checkpoint_generation (cp : Agent_sdk.Checkpoint.t) ~(fallback : int) : int =
   let open Yojson.Safe.Util in

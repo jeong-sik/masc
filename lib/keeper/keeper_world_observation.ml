@@ -529,7 +529,16 @@ let collect_board_events ~(base_path : string) ~(continuity_summary : string)
               (fst base_cursor, Option.value ~default:"" (snd base_cursor))
             > 0 ->
          Keeper_registry.set_board_cursor ~base_path meta.name ts (Some post_id)
-     | _ -> ());
+     | Some (ts, post_id) ->
+       Log.Keeper.debug
+         "board cursor not advanced for %s: new=(%f, %s) not greater than base=(%f, %s)"
+         meta.name ts post_id (fst base_cursor)
+         (Option.value ~default:"" (snd base_cursor))
+     | None ->
+       if final_events <> [] then
+         Log.Keeper.warn
+           "board cursor not updated for %s despite %d events processed"
+           meta.name (List.length final_events));
     (final_events, new_count, mention_count)
   with
   | Eio.Cancel.Cancelled _ as e -> raise e

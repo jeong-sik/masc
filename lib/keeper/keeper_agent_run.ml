@@ -249,6 +249,7 @@ let run_turn
     ?(tool_overlay : Agent_sdk.Tool_op.t ref option)
     ?priority
     ?(is_retry = false)
+    ?shared_context
     ()
   : (run_result, Oas.Error.sdk_error) result =
   (* 0. Resolve inference parameters via Cascade_inference *)
@@ -270,7 +271,16 @@ let run_turn
   (* 0b. Create context injector for temporal awareness *)
   let injector_config = Masc_context_injector.default_config () in
   let context_injector = Masc_context_injector.make ~config:injector_config () in
-  let shared_context = Oas.Context.create () in
+  (* Use caller-provided Context.t for cross-turn state persistence.
+     OAS Context.t is a mutable cross-turn container; creating a fresh
+     instance per turn loses accumulated temporal state (elapsed time,
+     tool call counts) that hooks and context_injector depend on.
+     Callers that manage a persistent lifecycle (keeper heartbeat loop)
+     should pass a long-lived instance via ~shared_context. *)
+  let shared_context = match shared_context with
+    | Some ctx -> ctx
+    | None -> Oas.Context.create ()
+  in
   (* 1. Ensure session directory tree exists.
      Both the base traces dir AND the trace-specific session dir must
      exist before any file I/O (checkpoint load, history persist).

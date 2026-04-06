@@ -635,6 +635,7 @@ let run_keepalive_unified_turn
       ~pending_board_events
       ~(stop : bool Atomic.t)
       ~(proactive_warmup_elapsed : bool)
+      ~(shared_context : Agent_sdk.Context.t)
   : keeper_meta
   =
   if not proactive_warmup_elapsed
@@ -692,6 +693,7 @@ let run_keepalive_unified_turn
               ~observation:obs
               ~generation:meta_after_observe.runtime.generation
               ~channel:turn_decision.channel
+              ~shared_context
               ()
           with
           | Error err ->
@@ -932,6 +934,13 @@ let run_heartbeat_loop
   in
   let smart_hb_config = Heartbeat_smart.default_config in
   let last_heartbeat_cycle_ts = ref 0.0 in
+  (* Persistent OAS Context.t — created once per keeper lifecycle.
+     OAS Context.t is designed as a mutable cross-turn state container.
+     Hooks and context_injector accumulate temporal state (elapsed time,
+     tool call counts, etc.) into this instance across turns.
+     Previously, a fresh Context.create() was called per turn in run_turn,
+     losing all accumulated state.  See docs/analysis/2026-04-06-keeper-lifecycle-analysis.md *)
+  let shared_context = Agent_sdk.Context.create () in
   let rec loop () =
     if Atomic.get stop
     then ()
@@ -1015,6 +1024,7 @@ let run_heartbeat_loop
             ~pending_board_events
             ~stop
             ~proactive_warmup_elapsed
+            ~shared_context
         in
         (* Turn failure threshold: registry tracks count (via unified_turn),
                  keepalive raises to terminate the fiber for supervisor restart. *)

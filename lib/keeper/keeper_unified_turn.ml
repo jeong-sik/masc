@@ -740,6 +740,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
     ~(observation : Keeper_world_observation.world_observation)
     ~(generation : int)
     ?(channel : Keeper_world_observation.unified_turn_channel = Scheduled_autonomous)
+    ?shared_context
     () : (keeper_meta, Oas.Error.sdk_error) result =
   (* 1. Check API keys *)
   let model_labels = Keeper_coordination.effective_model_labels_for_turn meta in
@@ -840,6 +841,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
               ~temperature ~max_tokens
               ~max_cost_usd
               ~is_retry
+              ?shared_context
               ()
           in
           let rec retry_loop ~run_meta ~max_context ~run_generation

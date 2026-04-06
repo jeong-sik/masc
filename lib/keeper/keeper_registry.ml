@@ -11,10 +11,8 @@
     fibers and the resource is only accessed from one domain, then no
     mutex is needed at all."
 
-    Caveat: board_wakeups and tool_usage are mutable Hashtbl fields
-    mutated in-place.  The fiber-atomicity argument still holds because
-    each keeper has exactly one owning fiber (the keepalive loop), so
-    concurrent mutation of the same entry does not occur.
+    All per-keeper state (board_wakeups, tool_usage) uses immutable
+    StringMap values, updated atomically via [update_entry]/[put_entry].
 
     Implementation: [Atomic.t] for inter-fiber signaling (lock-free
     visibility); persistent [StringMap] behind a single [ref]. *)
@@ -68,10 +66,10 @@ type registry_entry = {
   last_failure_reason : failure_reason option;
   turn_consecutive_failures : int;
   last_agent_count : int;
-  board_wakeups : (string, float) Hashtbl.t;
+  board_wakeups : float StringMap.t;
   board_cursor_ts : float;
   board_cursor_post_id : string option;
-  tool_usage : (string, tool_call_entry) Hashtbl.t;
+  tool_usage : tool_call_entry StringMap.t;
 }
 
 
@@ -127,10 +125,10 @@ let register ~base_path name meta =
     last_failure_reason = None;
     turn_consecutive_failures = 0;
     last_agent_count = 0;
-    board_wakeups = Hashtbl.create 8;
+    board_wakeups = StringMap.empty;
     board_cursor_ts = 0.0;
     board_cursor_post_id = None;
-    tool_usage = Hashtbl.create 16;
+    tool_usage = StringMap.empty;
   } in
   put_entry key entry;
   Atomic.set running_count_atomic (Atomic.get running_count_atomic + 1);
@@ -407,25 +405,24 @@ let board_wakeup_allowed ~base_path name ~post_id ~debounce_sec =
   | None -> true
   | Some entry ->
       let now_ts = Time_compat.now () in
-      match Hashtbl.find_opt entry.board_wakeups post_id with
+      match StringMap.find_opt post_id entry.board_wakeups with
       | Some last_ts when now_ts -. last_ts < debounce_sec -> false
       | _ ->
-          Hashtbl.replace entry.board_wakeups post_id now_ts;
+          update_entry ~base_path name (fun e ->
+            { e with board_wakeups = StringMap.add post_id now_ts e.board_wakeups });
           true
 
 let clear_board_wakeups ~base_path name =
-  match StringMap.find_opt (registry_key ~base_path name) !registry with
-  | Some entry -> Hashtbl.reset entry.board_wakeups
-  | None -> ()
+  update_entry ~base_path name (fun e -> { e with board_wakeups = StringMap.empty })
 
 let cleanup_tracking ~base_path name =
   let key = registry_key ~base_path name in
   match StringMap.find_opt key !registry with
   | Some entry ->
-      Hashtbl.reset entry.board_wakeups;
-      Hashtbl.reset entry.tool_usage;
       put_entry key
         { entry with
+          board_wakeups = StringMap.empty;
+          tool_usage = StringMap.empty;
           last_agent_count = 0;
           board_cursor_ts = 0.0;
           board_cursor_post_id = None;
@@ -466,27 +463,26 @@ let set_board_cursor ~base_path name ts post_id =
    record_tool_use for a given (base_path, name) pair.  See module
    docstring for thread-safety reasoning. *)
 let record_tool_use ~base_path name ~tool_name ~success =
-  match StringMap.find_opt (registry_key ~base_path name) !registry with
-  | None -> ()
-  | Some entry ->
+  update_entry ~base_path name (fun entry ->
     let e =
-      match Hashtbl.find_opt entry.tool_usage tool_name with
+      match StringMap.find_opt tool_name entry.tool_usage with
       | Some e -> e
-      | None ->
-        let e = { count = 0; successes = 0; failures = 0;
-                  last_used_at = 0.0 } in
-        Hashtbl.replace entry.tool_usage tool_name e; e
+      | None -> { count = 0; successes = 0; failures = 0; last_used_at = 0.0 }
     in
-    e.count <- e.count + 1;
-    (if success then e.successes <- e.successes + 1
-     else e.failures <- e.failures + 1);
-    e.last_used_at <- Time_compat.now ()
+    let updated =
+      { count = e.count + 1
+      ; successes = (if success then e.successes + 1 else e.successes)
+      ; failures = (if success then e.failures else e.failures + 1)
+      ; last_used_at = Time_compat.now ()
+      }
+    in
+    { entry with tool_usage = StringMap.add tool_name updated entry.tool_usage })
 
 let tool_usage_of ~base_path name =
   match StringMap.find_opt (registry_key ~base_path name) !registry with
   | None -> []
   | Some entry ->
-    Hashtbl.fold (fun n e acc -> (n, e) :: acc) entry.tool_usage []
+    StringMap.fold (fun n e acc -> (n, e) :: acc) entry.tool_usage []
     |> List.sort (fun (_, a) (_, b) -> Int.compare b.count a.count)
 
 (** Look up a keeper by name across all base_paths (O(n) scan). *)
@@ -511,7 +507,7 @@ let tool_usage_of_by_name name =
   match find_by_name name with
   | None -> []
   | Some entry ->
-    Hashtbl.fold (fun n e acc -> (n, e) :: acc) entry.tool_usage []
+    StringMap.fold (fun n e acc -> (n, e) :: acc) entry.tool_usage []
     |> List.sort (fun (_, a) (_, b) -> Int.compare b.count a.count)
 
 (* -- Config resolution --------------------------------------------- *)
@@ -541,7 +537,7 @@ let flush_tool_usage ~base_path name =
   | None -> ()
   | Some entry ->
     let items =
-      Hashtbl.fold (fun tool_name (e : tool_call_entry) acc ->
+      StringMap.fold (fun tool_name (e : tool_call_entry) acc ->
         `Assoc [
           ("tool", `String tool_name);
           ("count", `Int e.count);
@@ -569,7 +565,7 @@ let restore_tool_usage ~base_path name =
   else
     match StringMap.find_opt (registry_key ~base_path name) !registry with
     | None -> ()
-    | Some entry ->
+    | Some _entry ->
       (try
          let content = Fs_compat.load_file path in
          let json = Yojson.Safe.from_string content in
@@ -596,7 +592,8 @@ let restore_tool_usage ~base_path name =
                failures;
                last_used_at;
              } in
-             Hashtbl.replace entry.tool_usage tool_name e
+             update_entry ~base_path name (fun ent ->
+               { ent with tool_usage = StringMap.add tool_name e ent.tool_usage })
            | _ -> ()
          ) tools
        with

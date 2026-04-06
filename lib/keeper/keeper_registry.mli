@@ -10,6 +10,8 @@
 
 open Keeper_types
 
+module StringMap : Map.S with type key = string
+
 (** Structured failure reason for crash cohort detection. *)
 type failure_reason =
   | Heartbeat_consecutive_failures of int
@@ -50,10 +52,10 @@ type registry_entry = {
   last_failure_reason : failure_reason option;
   turn_consecutive_failures : int;
   last_agent_count : int;
-  board_wakeups : (string, float) Hashtbl.t;
+  board_wakeups : float StringMap.t;
   board_cursor_ts : float;
   board_cursor_post_id : string option;
-  tool_usage : (string, Keeper_types.tool_call_entry) Hashtbl.t;
+  tool_usage : Keeper_types.tool_call_entry StringMap.t;
 }
 
 (** Register a keeper as running. Returns the new entry. *)

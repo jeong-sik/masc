@@ -26,6 +26,9 @@ let with_config_dir f =
   let original = Sys.getenv_opt "MASC_CONFIG_DIR" in
   Fun.protect
     ~finally:(fun () ->
+      (* OCaml stdlib trim_opt treats "" as absent; Config_dir_resolver.reset
+         ensures the cleared value takes effect. This matches the pattern used
+         throughout the test suite for restoring env vars. *)
       (match original with
       | Some value -> Unix.putenv "MASC_CONFIG_DIR" value
       | None -> Unix.putenv "MASC_CONFIG_DIR" "");

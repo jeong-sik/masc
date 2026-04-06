@@ -157,9 +157,17 @@ type checkpoint_load_error =
   | Parse_error of string
   | Io_error of string
 
+let is_not_found_detail (detail : string) : bool =
+  let d = String.lowercase_ascii detail in
+  String.starts_with ~prefix:"no_such_file" d  (* Eio.Fs.Not_found *)
+  || String.starts_with ~prefix:"no such file" d
+  || String.starts_with ~prefix:"unix_error (enoent" d  (* POSIX *)
+
 let classify_sdk_error (e : Agent_sdk.Error.sdk_error) : checkpoint_load_error =
   match e with
-  | Io (FileOpFailed _) -> Not_found
+  | Io (FileOpFailed r) ->
+      if is_not_found_detail r.detail then Not_found
+      else Io_error (sprintf "file %s failed on %s: %s" r.op r.path r.detail)
   | Io (ValidationFailed r) -> Store_error r.detail
   | Serialization (JsonParseError r) -> Parse_error r.detail
   | Serialization (VersionMismatch r) ->

@@ -418,19 +418,8 @@ let load_context_from_checkpoint ~trace_id ~primary_model_max_tokens ~base_dir =
            trace_id (Printexc.to_string ex);
          (session, None))
   | _ ->
-      (* Both OAS and legacy checkpoints unavailable *)
-      (match oas_result with
-       | Error Not_found -> ()
-       | Error e ->
-           Log.Keeper.warn
-             "keeper:%s no checkpoint available (oas=%s, legacy=none)"
-             trace_id
-             (match e with
-              | Parse_error d -> "parse_error:" ^ d
-              | Store_error d -> "store_error:" ^ d
-              | Io_error d -> "io_error:" ^ d
-              | Not_found -> "not_found")
-       | Ok _ -> ());
+      (* Both OAS and legacy checkpoints unavailable.
+         Non-trivial OAS errors were already logged above at error level. *)
       (session, None)
 
 (** Patch an OAS checkpoint: unify session_id and replace the last

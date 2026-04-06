@@ -322,6 +322,64 @@ let test_apply_post_turn_lifecycle_handoffs_after_compaction () =
             (List.length loaded.messages > 0)
       | None -> fail "expected rollover checkpoint in new trace")
 
+let test_rollover_aborts_on_save_failure () =
+  let base_dir = temp_dir "keeper_lifecycle_rollover_abort" in
+  Fun.protect
+    ~finally:(fun () ->
+      (* Restore write permissions for cleanup *)
+      (try Unix.chmod base_dir 0o755 with _ -> ());
+      cleanup_dir base_dir)
+    (fun () ->
+      Fs_compat.clear_fs ();
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let now_ts = Time_compat.now () in
+      let original_trace = "trace-rollover-abort" in
+      let meta =
+        let base = make_keeper_meta ~trace_id:original_trace () in
+        {
+          base with
+          auto_handoff = true;
+          handoff_threshold = 0.0;
+          handoff_cooldown_sec = 0;
+          compaction =
+            {
+              base.compaction with
+              ratio_gate = 1.0;
+              message_gate = 0;
+              token_gate = 0;
+              cooldown_sec = 0;
+            };
+          runtime =
+            {
+              base.runtime with
+              last_continuity_update_ts = now_ts -. 60.0;
+            };
+        }
+      in
+      let ctx =
+        build_dense_context ~turns:10 ~max_tokens:256
+          ~state_reply:
+            "done\n\n[STATE]\nGoal: test abort\nProgress: saved\n[/STATE]"
+      in
+      let checkpoint = save_checkpoint ~base_dir ~meta ~ctx in
+      (* Make base_dir read-only so new session dir creation fails *)
+      Unix.chmod base_dir 0o555;
+      let rollover =
+        KEC.maybe_rollover_oas_handoff ~base_dir ~meta
+          ~model:"llama:auto"
+          ~primary_model_max_tokens:256
+          ~checkpoint:(Some checkpoint)
+      in
+      (* Restore permissions before assertions *)
+      Unix.chmod base_dir 0o755;
+      check bool "handoff NOT emitted on save failure" false
+        (Option.is_some rollover.handoff_json);
+      check string "trace_id unchanged" original_trace
+        rollover.updated_meta.runtime.trace_id;
+      check int "generation unchanged" 0
+        rollover.updated_meta.runtime.generation)
+
 let test_recover_latest_checkpoint_for_overflow_retry_compacts_oas_checkpoint () =
   let base_dir = temp_dir "keeper_lifecycle_overflow_retry_oas" in
   Fun.protect
@@ -534,6 +592,8 @@ let () =
             test_apply_post_turn_lifecycle_keeps_checkpoint_when_compaction_skips;
           test_case "handoff runs after compaction" `Quick
             test_apply_post_turn_lifecycle_handoffs_after_compaction;
+          test_case "rollover aborts on save failure" `Quick
+            test_rollover_aborts_on_save_failure;
           test_case "overflow retry compacts OAS checkpoint" `Quick
             test_recover_latest_checkpoint_for_overflow_retry_compacts_oas_checkpoint;
           test_case "overflow retry falls back to legacy checkpoint" `Quick

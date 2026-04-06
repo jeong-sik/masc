@@ -70,10 +70,10 @@ let maybe_rollover_oas_handoff
         let prev_trace_id = base_meta.runtime.trace_id in
         let new_trace_id = Keeper_identity.generate_trace_id () in
         let next_generation = current_generation + 1 in
-        let new_session =
-          create_session ~session_id:new_trace_id ~base_dir
-        in
         (try
+          let new_session =
+            create_session ~session_id:new_trace_id ~base_dir
+          in
           match save_oas_checkpoint ~session:new_session
                   ~agent_name:base_meta.agent_name
                   ~model ~ctx ~generation:next_generation with

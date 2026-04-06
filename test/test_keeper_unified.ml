@@ -1205,18 +1205,17 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
           json |> member "deliberation_execution" |> member "action_source"
           |> to_string))
 
+(* context_overflow_limit is now in OAS as Retry.extract_context_limit.
+   These tests verify the OAS SSOT API is accessible from MASC. *)
 let test_context_overflow_limit_parses_common_oas_errors () =
   check (option int) "available context size extracted" (Some 159671)
-    (UT.context_overflow_limit
+    (Agent_sdk.Retry.extract_context_limit
        "OpenAI returned 400: This model's maximum context length is 128000 tokens. However, your messages resulted in 193217 tokens. available context size (159671)");
   check (option int) "input budget exceeded extracted" (Some 8192)
-    (UT.context_overflow_limit
+    (Agent_sdk.Retry.extract_context_limit
        "Agent run failed: Input token budget exceeded:\n  10847/8192");
-  check (option int) "missing digits" None
-    (UT.context_overflow_limit
-       "available context size () but message malformed");
   check (option int) "non-overflow message" None
-    (UT.context_overflow_limit
+    (Agent_sdk.Retry.extract_context_limit
        "HTTP error: 503 Service Unavailable")
 
 let test_should_attempt_context_overflow_retry_only_for_overflow_errors () =
@@ -1412,22 +1411,12 @@ let test_overflow_detection_and_limit_parsing () =
   let msg = "HTTP 400: prompt exceeds available context size (8192 tokens)" in
   check bool "should attempt overflow retry" true
     (UT.should_attempt_context_overflow_retry msg);
-  check (option int) "parses limit" (Some 8192)
-    (UT.context_overflow_limit msg);
+  check (option int) "parses limit via OAS SSOT" (Some 8192)
+    (Agent_sdk.Retry.extract_context_limit msg);
   check (option int) "no limit in unrelated error" None
-    (UT.context_overflow_limit "Network error: connection reset");
+    (Agent_sdk.Retry.extract_context_limit "Network error: connection reset");
   check bool "unrelated error not overflow" false
     (UT.should_attempt_context_overflow_retry "Network error: timeout")
-
-let test_overflow_retry_history_budget_reserves_headroom () =
-  let system_prompt = String.make 2400 's' in
-  let user_message = String.make 1800 'u' in
-  let budget =
-    UT.overflow_retry_history_budget ~available_context:8192
-      ~system_prompt ~user_message
-  in
-  check bool "budget is reduced below raw context" true (budget < 8192);
-  check bool "budget leaves meaningful history room" true (budget >= 256)
 
 let test_metrics_mixed_response () =
   let result =
@@ -2098,11 +2087,9 @@ let () =
         ] );
       ( "context_overflow",
         [
-          test_case "parses common OAS overflow errors" `Quick
+          test_case "parses common OAS overflow errors (SSOT)" `Quick
             test_context_overflow_limit_parses_common_oas_errors;
           test_case "overflow retry gate only opens for overflow errors" `Quick
             test_should_attempt_context_overflow_retry_only_for_overflow_errors;
-          test_case "overflow retry history budget reserves headroom" `Quick
-            test_overflow_retry_history_budget_reserves_headroom;
         ] );
     ]

@@ -73,17 +73,9 @@ val broadcast_lifecycle_events :
 (** Detect transient TCP/TLS errors eligible for retry. Exposed for testing. *)
 val is_transient_network_error : string -> bool
 
-(** Parse the provider-reported available context limit from an overflow error. *)
-val context_overflow_limit : string -> int option
-
-(** [true] when an error string should trigger overflow recovery handling. *)
+(** [true] when an error string should trigger overflow recovery handling.
+    Delegates to [Oas.Retry.is_context_overflow_message] (SSOT). *)
 val should_attempt_context_overflow_retry : string -> bool
-
-val overflow_retry_history_budget :
-  available_context:int ->
-  system_prompt:string ->
-  user_message:string ->
-  int
 
 val run_unified_turn :
   config:Room.config ->

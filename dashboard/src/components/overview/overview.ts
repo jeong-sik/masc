@@ -312,7 +312,7 @@ function MetaCognitionCard() {
                   ${belief?.claim ?? '아직 강한 belief가 드러나지 않았습니다.'}
                 </div>
                 <div class="mt-2 text-[11px] text-[var(--text-muted)]">
-                  ${belief ? `${beliefStatusLabel(belief.status)} · ${belief.support_agent_count ?? 0}명 지지` : '공감대 형성 전'}
+                  ${belief ? `${beliefStatusLabel(belief.status)}${belief.support_agent_count != null ? ` · ${belief.support_agent_count}명 지지` : ''}` : '공감대 형성 전'}
                 </div>
               </div>
 
@@ -470,9 +470,10 @@ function ToolCallHealthPanel() {
   const health = status?.tool_call_health
   if (!health || health.tool_calls === 0) return null
 
-  const rate = health.failure_rate ?? 0
-  const rateColor = rate > 0.1 ? 'text-bad-light' : rate > 0.03 ? 'text-warn' : 'text-ok'
-  const ratePct = (rate * 100).toFixed(1)
+  const rate = health.failure_rate
+  const hasRate = rate != null
+  const rateColor = hasRate ? (rate > 0.1 ? 'text-bad-light' : rate > 0.03 ? 'text-warn' : 'text-ok') : 'text-text-dim'
+  const ratePct = hasRate ? `${(rate * 100).toFixed(1)}%` : '-'
 
   return html`
     <div>
@@ -487,7 +488,7 @@ function ToolCallHealthPanel() {
           <div class="text-[11px] text-text-muted mt-1">실패</div>
         </div>
         <div class="rounded-lg border border-card-border/30 bg-card/40 p-3 text-center">
-          <div class="text-[22px] font-bold ${rateColor}">${ratePct}%</div>
+          <div class="text-[22px] font-bold ${rateColor}">${ratePct}</div>
           <div class="text-[11px] text-text-muted mt-1">실패율</div>
         </div>
       </div>

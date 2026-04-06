@@ -355,7 +355,7 @@ let resume_from_checkpoint
     enable_thinking = config.enable_thinking;
     cache_system_prompt = config.cache_system_prompt;
     max_input_tokens = config.max_input_tokens;
-    max_total_tokens = Some config.max_tokens;
+    max_total_tokens = None;  (* MASC does not manage cumulative token budgets — OAS SSOT *)
   } in
   let agent_config : Oas.Types.agent_config = {
     Oas.Types.default_config with

@@ -784,10 +784,10 @@ let preferred_execution_model_labels () =
     (match explicit_llama_model_label_result () with
     | Ok label -> Some label
     | Error _ -> None);
-    (* Provider auto-detection: iterate adapters, check auth
-       availability from config, delegate model selection to
-       OAS cascade via "provider:auto". *)
-    (if gemini_direct_available () then Some "gemini:auto" else None);
+    (* No hardcoded provider preference here.  Model order is determined
+       by cascade.json (OAS Cascade_config), not by MASC.  The auto_detect
+       list below only serves as a last-resort fallback when cascade.json
+       is missing entirely. *)
   ] in
   Json_util.dedupe_keep_order
     (List.filter_map Fun.id explicit
@@ -801,7 +801,6 @@ let preferred_verifier_model_labels () =
     (match explicit_llama_model_label_result () with
     | Ok label -> Some label
     | Error _ -> None);
-    (if gemini_direct_available () then Some "gemini:auto" else None);
   ] in
   Json_util.dedupe_keep_order
     (List.filter_map Fun.id explicit

@@ -306,7 +306,21 @@ let update_conditions (c : conditions) (ev : event) : conditions =
   | Drain_complete ->
     { c with drain_complete = true }
   | Fiber_started ->
-    { c with fiber_alive = true }
+    (* A new fiber = a new life. Reset health, buffer, and backoff conditions.
+       Previous heartbeat/turn failures, in-progress compaction/handoff, and
+       supervisor backoff state are all irrelevant to the new fiber.
+       Operator intentions (operator_paused, stop_requested) and budget
+       (restart_budget_remaining) are preserved — they transcend fiber lifetime. *)
+    { c with
+      fiber_alive = true;
+      heartbeat_healthy = true;
+      turn_healthy = true;
+      compaction_active = false;
+      handoff_active = false;
+      backoff_elapsed = false;
+      guardrail_triggered = false;
+      drain_complete = false;
+    }
   | Fiber_terminated _ ->
     { c with fiber_alive = false }
   | Supervisor_restart_attempt _ ->

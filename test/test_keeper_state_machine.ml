@@ -627,6 +627,260 @@ let test_phase_string_roundtrip () =
     | None -> fail (Printf.sprintf "phase_of_string failed for %s" s)
   ) SM.all_phases
 
+(* ── Multi-turn lifecycle chain tests ─────────────────── *)
+
+(** Chain helper: apply events sequentially, checking each resulting phase.
+    Threads conditions through the entire chain — just like a real keeper
+    lifecycle where each event modifies conditions that feed into the next
+    derive_phase call. Timestamps advance 30s per step (one heartbeat cycle). *)
+let chain_apply ~init_phase ~init_conditions steps =
+  let rec go phase conds ts = function
+    | [] -> (phase, conds)
+    | (event, expected_phase) :: rest ->
+      let tr = match SM.apply_event ~current_phase:phase ~conditions:conds ~event ~now:ts with
+        | Ok tr -> tr
+        | Error e ->
+          fail (Printf.sprintf "chain step at t=%.0f (%s -> ???): %s"
+            ts (SM.phase_to_string phase) (SM.transition_error_to_string e))
+      in
+      check phase_t
+        (Printf.sprintf "t=%.0f: %s -> %s"
+          ts (SM.phase_to_string phase) (SM.phase_to_string expected_phase))
+        expected_phase tr.new_phase;
+      go tr.new_phase tr.updated_conditions (ts +. 30.0) rest
+  in
+  go init_phase init_conditions 1000.0 steps
+
+(** 1. Happy path: boot -> heartbeats -> compact -> handoff -> graceful stop.
+    The most common keeper lifecycle in production.
+    9 transitions, 6 distinct phases visited. *)
+let test_chain_happy_path () =
+  let init_conds = { SM.default_conditions with restart_budget_remaining = true } in
+  let final_phase, _ = chain_apply
+    ~init_phase:SM.Offline
+    ~init_conditions:init_conds
+    [
+      SM.Fiber_started,                                        SM.Running;
+      SM.Heartbeat_ok,                                         SM.Running;
+      SM.Heartbeat_ok,                                         SM.Running;
+      SM.Compaction_started,                                   SM.Compacting;
+      SM.Compaction_completed { before_tokens=90000; after_tokens=40000 }, SM.Running;
+      SM.Handoff_started,                                      SM.HandingOff;
+      SM.Handoff_completed { new_trace_id="gen2"; generation=2 }, SM.Running;
+      SM.Stop_requested,                                       SM.Draining;
+      SM.Drain_complete,                                       SM.Stopped;
+    ]
+  in
+  check phase_t "ends Stopped" SM.Stopped final_phase
+
+(** 2. Crash recovery: failing heartbeats -> crash -> supervisor restart -> resume.
+    Verifies the supervisor restart loop works end-to-end. *)
+let test_chain_crash_recovery () =
+  let final_phase, _ = chain_apply
+    ~init_phase:SM.Running
+    ~init_conditions:running_conditions
+    [
+      SM.Heartbeat_failed { consecutive=3; max_allowed=5 },    SM.Failing;
+      SM.Heartbeat_failed { consecutive=5; max_allowed=5 },    SM.Failing;
+      SM.Fiber_terminated { outcome="hb threshold exceeded" }, SM.Crashed;
+      SM.Supervisor_restart_attempt { attempt=1 },             SM.Restarting;
+      SM.Fiber_started,                                        SM.Running;
+      SM.Heartbeat_ok,                                         SM.Running;
+      SM.Heartbeat_ok,                                         SM.Running;
+    ]
+  in
+  check phase_t "recovered to Running" SM.Running final_phase
+
+(** 3. Death spiral: crash -> restart -> crash again -> budget exhausted -> Dead.
+    The worst case: a fundamentally broken keeper that cannot recover. *)
+let test_chain_death_spiral () =
+  let final_phase, final_conds = chain_apply
+    ~init_phase:SM.Running
+    ~init_conditions:running_conditions
+    [
+      SM.Fiber_terminated { outcome="OOM" },                   SM.Crashed;
+      SM.Supervisor_restart_attempt { attempt=1 },             SM.Restarting;
+      SM.Fiber_started,                                        SM.Running;
+      SM.Fiber_terminated { outcome="OOM again" },             SM.Crashed;
+      SM.Supervisor_restart_attempt { attempt=2 },             SM.Restarting;
+      SM.Fiber_started,                                        SM.Running;
+      SM.Fiber_terminated { outcome="OOM third time" },        SM.Crashed;
+      SM.Restart_budget_exhausted,                             SM.Dead;
+    ]
+  in
+  check phase_t "ends Dead" SM.Dead final_phase;
+  check bool "no budget left" false final_conds.restart_budget_remaining
+
+(** 4. Operator intervention: pause during work, resume, then stop.
+    Verifies operator controls compose correctly with normal operations. *)
+let test_chain_operator_intervention () =
+  let final_phase, _ = chain_apply
+    ~init_phase:SM.Running
+    ~init_conditions:running_conditions
+    [
+      SM.Heartbeat_ok,                                         SM.Running;
+      SM.Compaction_started,                                   SM.Compacting;
+      SM.Compaction_completed { before_tokens=80000; after_tokens=35000 }, SM.Running;
+      SM.Operator_pause,                                       SM.Paused;
+      SM.Operator_resume,                                      SM.Running;
+      SM.Heartbeat_ok,                                         SM.Running;
+      SM.Stop_requested,                                       SM.Draining;
+      SM.Drain_complete,                                       SM.Stopped;
+    ]
+  in
+  check phase_t "ends Stopped" SM.Stopped final_phase
+
+(** 5. Compaction failure -> handoff fallback -> success.
+    When compaction fails to free enough context, the system falls back
+    to a full generation handoff. *)
+let test_chain_compaction_fail_handoff_fallback () =
+  let final_phase, _ = chain_apply
+    ~init_phase:SM.Running
+    ~init_conditions:running_conditions
+    [
+      SM.Compaction_started,                                   SM.Compacting;
+      SM.Compaction_failed { reason="insufficient reduction" }, SM.Running;
+      SM.Handoff_started,                                      SM.HandingOff;
+      SM.Handoff_completed { new_trace_id="gen3"; generation=3 }, SM.Running;
+      SM.Heartbeat_ok,                                         SM.Running;
+    ]
+  in
+  check phase_t "recovered via handoff" SM.Running final_phase
+
+(** 6. Guardrail -> recovery -> normal operations.
+    Guardrail triggers Failing, then context measurement clears it. *)
+let test_chain_guardrail_recovery () =
+  let final_phase, _ = chain_apply
+    ~init_phase:SM.Running
+    ~init_conditions:running_conditions
+    [
+      SM.Guardrail_stop { reason="repetition loop detected" }, SM.Failing;
+      (* Context measurement with guardrail_stop=false clears the flag *)
+      SM.Context_measured {
+        context_ratio=0.30; message_count=20; token_count=15000;
+        auto_rules={ reflect=false; plan=false; compact=false;
+                     handoff=false; guardrail_stop=false;
+                     guardrail_reason=None; goal_drift=0.1 };
+      },                                                       SM.Running;
+      SM.Heartbeat_ok,                                         SM.Running;
+    ]
+  in
+  check phase_t "guardrail cleared" SM.Running final_phase
+
+(** 7. Long-running keeper: multiple compaction + handoff cycles.
+    Simulates a keeper that runs for hours, going through several
+    context management cycles before a clean shutdown.
+    15 transitions across 5 context management cycles. *)
+let test_chain_long_running_multi_cycle () =
+  let final_phase, _ = chain_apply
+    ~init_phase:SM.Running
+    ~init_conditions:running_conditions
+    [
+      (* Cycle 1: compaction *)
+      SM.Heartbeat_ok,                                         SM.Running;
+      SM.Compaction_started,                                   SM.Compacting;
+      SM.Compaction_completed { before_tokens=90000; after_tokens=45000 }, SM.Running;
+      SM.Heartbeat_ok,                                         SM.Running;
+      (* Cycle 2: compaction again *)
+      SM.Compaction_started,                                   SM.Compacting;
+      SM.Compaction_completed { before_tokens=85000; after_tokens=40000 }, SM.Running;
+      (* Cycle 3: handoff (context still growing) *)
+      SM.Handoff_started,                                      SM.HandingOff;
+      SM.Handoff_completed { new_trace_id="gen2"; generation=2 }, SM.Running;
+      SM.Heartbeat_ok,                                         SM.Running;
+      (* Cycle 4: compaction in new generation *)
+      SM.Compaction_started,                                   SM.Compacting;
+      SM.Compaction_completed { before_tokens=70000; after_tokens=30000 }, SM.Running;
+      (* Cycle 5: another handoff *)
+      SM.Handoff_started,                                      SM.HandingOff;
+      SM.Handoff_completed { new_trace_id="gen3"; generation=3 }, SM.Running;
+      (* Clean shutdown *)
+      SM.Stop_requested,                                       SM.Draining;
+      SM.Drain_complete,                                       SM.Stopped;
+    ]
+  in
+  check phase_t "clean stop after multi-cycle" SM.Stopped final_phase
+
+(** 8. Crash during buffer state -> full recovery.
+    Fiber dies mid-compaction, supervisor recovers, then a successful
+    handoff completes the context management. *)
+let test_chain_crash_during_compaction_recovery () =
+  let final_phase, _ = chain_apply
+    ~init_phase:SM.Running
+    ~init_conditions:running_conditions
+    [
+      SM.Compaction_started,                                   SM.Compacting;
+      SM.Fiber_terminated { outcome="segfault in compactor" }, SM.Crashed;
+      SM.Supervisor_restart_attempt { attempt=1 },             SM.Restarting;
+      SM.Fiber_started,                                        SM.Running;
+      SM.Heartbeat_ok,                                         SM.Running;
+      SM.Handoff_started,                                      SM.HandingOff;
+      SM.Handoff_completed { new_trace_id="gen2"; generation=2 }, SM.Running;
+      SM.Heartbeat_ok,                                         SM.Running;
+    ]
+  in
+  check phase_t "fully recovered after compaction crash" SM.Running final_phase
+
+(** 9. Failing keeper receives stop -> drains -> stops.
+    Even unhealthy keepers should shut down gracefully. *)
+let test_chain_failing_graceful_stop () =
+  let final_phase, _ = chain_apply
+    ~init_phase:SM.Running
+    ~init_conditions:running_conditions
+    [
+      SM.Heartbeat_failed { consecutive=3; max_allowed=5 },    SM.Failing;
+      SM.Stop_requested,                                       SM.Draining;
+      SM.Drain_complete,                                       SM.Stopped;
+    ]
+  in
+  check phase_t "failing keeper stopped gracefully" SM.Stopped final_phase
+
+(** 10. Rapid event storm: heartbeat flapping.
+    Heartbeat alternates ok/fail rapidly. The keeper should oscillate
+    between Running and Failing but never crash (fiber stays alive). *)
+let test_chain_heartbeat_flapping () =
+  let final_phase, _ = chain_apply
+    ~init_phase:SM.Running
+    ~init_conditions:running_conditions
+    [
+      SM.Heartbeat_failed { consecutive=1; max_allowed=5 },    SM.Failing;
+      SM.Heartbeat_ok,                                         SM.Running;
+      SM.Heartbeat_failed { consecutive=1; max_allowed=5 },    SM.Failing;
+      SM.Heartbeat_ok,                                         SM.Running;
+      SM.Heartbeat_failed { consecutive=1; max_allowed=5 },    SM.Failing;
+      SM.Heartbeat_ok,                                         SM.Running;
+      SM.Heartbeat_failed { consecutive=1; max_allowed=5 },    SM.Failing;
+      SM.Heartbeat_ok,                                         SM.Running;
+    ]
+  in
+  check phase_t "stabilized after flapping" SM.Running final_phase
+
+(** 11. Terminal permanence: after Stopped, every event type is rejected.
+    Comprehensive check with real threaded conditions from the chain. *)
+let test_chain_terminal_permanence () =
+  let final_phase, final_conds = chain_apply
+    ~init_phase:SM.Running
+    ~init_conditions:running_conditions
+    [
+      SM.Stop_requested,                                       SM.Draining;
+      SM.Drain_complete,                                       SM.Stopped;
+    ]
+  in
+  check phase_t "reached Stopped" SM.Stopped final_phase;
+  let events = [
+    SM.Heartbeat_ok; SM.Fiber_started; SM.Operator_resume;
+    SM.Compaction_started; SM.Handoff_started;
+    SM.Supervisor_restart_attempt { attempt=1 };
+    SM.Stop_requested; SM.Drain_complete;
+  ] in
+  List.iter (fun ev ->
+    match SM.apply_event ~current_phase:SM.Stopped ~conditions:final_conds ~event:ev ~now:2000.0 with
+    | Error (SM.Terminal_state _) -> ()
+    | Error e -> fail (Printf.sprintf "wrong error: %s" (SM.transition_error_to_string e))
+    | Ok tr -> fail (Printf.sprintf "Stopped accepted %s -> %s"
+        (SM.event_to_string ev) (SM.phase_to_string tr.new_phase))
+  ) events
+
 (* ── Property: derive_phase x apply_event consistency ──── *)
 
 let test_all_phases_covered () =
@@ -715,5 +969,18 @@ let () =
     "roundtrip", [
       test_case "phase string roundtrip" `Quick test_phase_string_roundtrip;
       test_case "11 phases" `Quick test_all_phases_covered;
+    ];
+    "lifecycle_chain", [
+      test_case "happy path (boot->compact->handoff->stop)" `Quick test_chain_happy_path;
+      test_case "crash recovery (fail->crash->restart->run)" `Quick test_chain_crash_recovery;
+      test_case "death spiral (crash->restart->crash->dead)" `Quick test_chain_death_spiral;
+      test_case "operator intervention (pause->resume->stop)" `Quick test_chain_operator_intervention;
+      test_case "compaction fail -> handoff fallback" `Quick test_chain_compaction_fail_handoff_fallback;
+      test_case "guardrail -> recovery" `Quick test_chain_guardrail_recovery;
+      test_case "long-running multi-cycle (5 cycles)" `Quick test_chain_long_running_multi_cycle;
+      test_case "crash during compaction -> recovery" `Quick test_chain_crash_during_compaction_recovery;
+      test_case "failing -> graceful stop" `Quick test_chain_failing_graceful_stop;
+      test_case "heartbeat flapping (8 oscillations)" `Quick test_chain_heartbeat_flapping;
+      test_case "terminal permanence (8 rejected events)" `Quick test_chain_terminal_permanence;
     ];
   ]

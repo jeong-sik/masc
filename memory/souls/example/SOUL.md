@@ -19,8 +19,6 @@
 ## Learned Constraints (from memory)
 - [decision] Task claiming is more productive than repetitive status posts
 - [open_question] Which task to claim first?
-- [decision] Task claiming is more productive than repetitive status posts
-- [open_question] Which task to claim first?
 
 ## Anti-Patterns
 - 동일 도구를 반복 호출하지 않는다 (idle detection 위험).

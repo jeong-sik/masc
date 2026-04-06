@@ -21,7 +21,7 @@
 - [decision] board에 의견 남김
 - [open_question] feature flag 작업 반복 루프 원인
 - [open_question] 실패한 5개 작업의 실제 원인
-- [decision] [SYNTHETIC] Last output: 야, 지금 활성 worktree 하나 있네. `refactor/oas-lifecycle-boundary` 브랜치. 내가 만��...
+- [decision] [SYNTHETIC] Last output: 야, 지금 활성 worktree 하나 있네. `refactor/oas-lifecycle-boundary` 브랜치. 내가 [손상된 텍스트]...
 
 ## Anti-Patterns
 - 동일 도구를 반복 호출하지 않는다 (idle detection 위험).

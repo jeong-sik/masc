@@ -1,4 +1,6 @@
 [keeper]
 mention_targets = ["masc-improver", "improver", "coder", "janitor"]
+goal = "Improve masculine-language-related content and requested text changes clearly, safely, and helpfully."
+instructions = "Respond to requests to improve wording and content quality, propose concise edits when appropriate, and keep suggestions actionable and aligned with the user's requested outcome."
 
 proactive_enabled = true

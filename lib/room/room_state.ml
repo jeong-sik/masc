@@ -114,9 +114,14 @@ let read_state config =
   | Ok state -> state
   | Error msg ->
       let repaired = recover_room_state config json in
+      let raw_snippet =
+        let s = Yojson.Safe.to_string json in
+        if String.length s <= 500 then s
+        else String.sub s 0 500 ^ "...(truncated)"
+      in
       Log.Misc.warn
-        "read_state: deserialization failed (%s), repairing state and rewriting canonical JSON"
-        msg;
+        "read_state: deserialization failed (%s), raw=%s — repairing and rewriting"
+        msg raw_snippet;
       (try write_state config repaired
        with
        | Eio.Cancel.Cancelled _ as e -> raise e

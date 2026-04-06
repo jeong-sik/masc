@@ -16,7 +16,6 @@ module EG = Masc_mcp.Eval_gate
 
 (* ── Helpers ──────────────────────────────────── *)
 
-(** Simulate a PreToolUse event and return the hook_result. *)
 let dummy_schedule : Agent_sdk.Hooks.tool_schedule = {
   planned_index = 0;
   batch_index = 0;

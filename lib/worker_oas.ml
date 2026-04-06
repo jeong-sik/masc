@@ -314,27 +314,64 @@ let make_heartbeat_callbacks
       };
     ]
 
-(** Shell-like tools that need destructive pattern screening in Workers.
-    Analogous to keeper_hooks_oas.ml's destructive_check_tools. *)
+(** Command-oriented tools that need destructive pattern screening in Workers.
+    Limit screening to tools whose relevant input is a command string, to
+    avoid false positives from file content payloads (for example write/edit
+    tool bodies containing shell snippets in docs or tests). *)
 let worker_destructive_check_tools =
-  [ "shell_exec"; "masc_code_shell"; "masc_code_git";
-    "masc_code_edit"; "masc_code_write"; "masc_code_delete" ]
+  [ "shell_exec"; "masc_code_shell"; "masc_code_git"; "masc_code_delete" ]
 
-(** Extract command or content string from tool input JSON for screening.
-    Reads "command", "cmd", or "content" keys.
+(** Convert a JSON field value into a string suitable for safety screening. *)
+let rec string_of_screening_value (value : Yojson.Safe.t) : string =
+  match value with
+  | `String s -> s
+  | `Int i -> string_of_int i
+  | `Intlit s -> s
+  | `Float f -> string_of_float f
+  | `Bool b -> string_of_bool b
+  | `Null -> ""
+  | (`Assoc _ | `List _) as json -> Yojson.Safe.to_string json
+  | `Tuple items -> Yojson.Safe.to_string (`List items)
+  | `Variant (name, None) -> name
+  | `Variant (name, Some v) ->
+    if String.length (string_of_screening_value v) = 0 then name
+    else Printf.sprintf "%s %s" name (string_of_screening_value v)
+
+(** Extract command-like content from tool input JSON for screening.
+    Reads "command", "cmd", "content", "action"/"args", or "path" keys.
     Shared pattern with keeper_hooks_oas.ml extract_command_from_input. *)
 let extract_command_from_input (input : Yojson.Safe.t) : string =
   let open Yojson.Safe.Util in
-  try
-    match input |> member "command" with
+  let string_member key =
+    match input |> member key with
     | `String s -> s
-    | `Null | _ ->
-      (match input |> member "cmd" with
-       | `String s -> s
-       | `Null | _ ->
-         (match input |> member "content" with
-          | `String s -> s
-          | _ -> ""))
+    | _ -> ""
+  in
+  let member_to_string key =
+    match input |> member key with
+    | `Null -> ""
+    | value -> string_of_screening_value value
+  in
+  try
+    let command = string_member "command" in
+    if command <> "" then command
+    else
+      let cmd = string_member "cmd" in
+      if cmd <> "" then cmd
+      else
+        let content = string_member "content" in
+        if content <> "" then content
+        else
+          let action = string_member "action" in
+          let args = member_to_string "args" in
+          if action <> "" || args <> "" then
+            String.trim
+              (if action <> "" && args <> "" then action ^ " " ^ args
+               else if action <> "" then action
+               else args)
+          else
+            let path = string_member "path" in
+            if path <> "" then path else ""
   with Yojson.Safe.Util.Type_error _ -> ""
 
 (** Render inline skip reason for blocked tool calls.

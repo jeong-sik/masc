@@ -817,7 +817,7 @@
  (modules test_masc_context_injector)
  (libraries masc_test_deps))
 
-(executable
+(test
  (name test_worker_safety_gates)
  (modules test_worker_safety_gates)
  (libraries masc_test_deps))

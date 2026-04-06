@@ -14,25 +14,6 @@ function loadMetrics() {
   return metricsResource.load(() => fetchToolMetrics())
 }
 
-function tierLabel(tier: string | null | undefined): string {
-  switch (tier) {
-    case 'essential': return '필수'
-    case 'standard': return '표준'
-    case 'full': return '전체'
-    case null: case undefined: return '-'
-    default: return tier
-  }
-}
-
-function tierBadgeClass(tier: string | null | undefined): string {
-  switch (tier) {
-    case 'essential': return 'badge-essential'
-    case 'standard': return 'badge-standard'
-    case 'full': return 'badge-full'
-    default: return 'bg-[var(--white-4)] text-[var(--text-dim)]'
-  }
-}
-
 /** Map category color CSS class (text-[...]) to a usable bar background color. */
 function categoryBarColor(colorClass: string): string {
   const match = colorClass.match(/text-\[(.*)\]/)
@@ -46,7 +27,6 @@ function categoryBarColor(colorClass: string): string {
 
 function BarChart({ items, maxCount }: { items: ToolMetricsTopEntry[]; maxCount: number }) {
   if (items.length === 0) return html`<p class="muted">아직 도구 호출 기록이 없습니다.</p>`
-  const hasTier = items.some(item => item.tier != null && item.tier !== '')
   return html`
     <div class="flex flex-col gap-1.5">
       ${items.map(item => {
@@ -59,9 +39,7 @@ function BarChart({ items, maxCount }: { items: ToolMetricsTopEntry[]; maxCount:
               <span class="flex-shrink-0 size-4 rounded text-[9px] font-mono font-bold flex items-center justify-center bg-[var(--white-5)] ${cat.color}">${cat.icon}</span>
               <span class="text-[var(--text-body)] overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px]" title=${item.name}>${item.name}</span>
             </div>
-            ${hasTier
-              ? html`<span class="px-1.5 py-px rounded-[3px] text-[10px] font-semibold text-center ${tierBadgeClass(item.tier)}">${tierLabel(item.tier)}</span>`
-              : html`<span class="px-1.5 py-px rounded-[3px] text-[10px] font-medium text-center text-[var(--text-dim)] bg-[var(--white-4)]">${cat.label}</span>`}
+            <span class="px-1.5 py-px rounded-[3px] text-[10px] font-medium text-center text-[var(--text-dim)] bg-[var(--white-4)]">${cat.label}</span>
             <div class="h-3.5 rounded-[3px] bg-[var(--white-6)] overflow-hidden">
               <div class="h-full rounded-[3px] min-w-0.5 transition-[width] duration-300 ease-in-out" style=${{ width: `${pct}%`, backgroundColor: barBg }} />
             </div>
@@ -73,32 +51,29 @@ function BarChart({ items, maxCount }: { items: ToolMetricsTopEntry[]; maxCount:
   `
 }
 
-function TierDistribution({ dist }: { dist: Record<string, number> | null | undefined }) {
-  if (!dist) return html`<div class="text-[11px] text-[var(--text-muted)] italic">서버에서 계층 분류 데이터를 제공하지 않습니다.</div>`
-  const total = dist.total ?? dist.full ?? 0
-  const essential = dist.essential ?? 0
-  const standardOnly = dist.standard_only ?? dist.standard ?? 0
-  const fullOnly = dist.full_only ?? (total - standardOnly)
-  const essentialPct = total > 0 ? ((essential / total) * 100).toFixed(1) : '0'
-  const standardPct = total > 0 ? ((standardOnly / total) * 100).toFixed(1) : '0'
-  const fullOnlyPct = total > 0 ? ((fullOnly / total) * 100).toFixed(1) : '0'
+function ToolDistribution({ dist }: { dist: { total: number; public: number; visible: number; hidden: number } | null | undefined }) {
+  if (!dist) return html`<div class="text-[11px] text-[var(--text-muted)] italic">도구 분포 데이터가 없습니다.</div>`
+  // Mutually exclusive segments: public ⊂ visible, hidden = total - visible
+  const visibleExclusive = Math.max(0, dist.visible - dist.public)
+  const pct = (n: number) => dist.total > 0 ? ((n / dist.total) * 100).toFixed(1) : '0'
   return html`
     <div class="flex flex-col gap-2">
       <div class="flex items-center gap-3">
-        <span class="inline-block min-w-[72px] px-2 py-0.5 text-[11px] font-semibold text-center rounded badge-essential">필수</span>
-        <span class="text-[var(--text-strong)] text-sm font-semibold min-w-9 text-right">${essential}</span>
-        <span class="text-[var(--text-muted)] text-[13px] min-w-12 text-right">${essentialPct}%</span>
+        <span class="inline-block min-w-[72px] px-2 py-0.5 text-[11px] font-semibold text-center rounded badge-essential">공개 MCP</span>
+        <span class="text-[var(--text-strong)] text-sm font-semibold min-w-9 text-right">${dist.public}</span>
+        <span class="text-[var(--text-muted)] text-[13px] min-w-12 text-right">${pct(dist.public)}%</span>
       </div>
       <div class="flex items-center gap-3">
-        <span class="inline-block min-w-[72px] px-2 py-0.5 text-[11px] font-semibold text-center rounded badge-standard">표준</span>
-        <span class="text-[var(--text-strong)] text-sm font-semibold min-w-9 text-right">${standardOnly}</span>
-        <span class="text-[var(--text-muted)] text-[13px] min-w-12 text-right">${standardPct}%</span>
+        <span class="inline-block min-w-[72px] px-2 py-0.5 text-[11px] font-semibold text-center rounded badge-standard">내부 전용</span>
+        <span class="text-[var(--text-strong)] text-sm font-semibold min-w-9 text-right">${visibleExclusive}</span>
+        <span class="text-[var(--text-muted)] text-[13px] min-w-12 text-right">${pct(visibleExclusive)}%</span>
       </div>
       <div class="flex items-center gap-3">
-        <span class="inline-block min-w-[72px] px-2 py-0.5 text-[11px] font-semibold text-center rounded badge-full">전체 전용</span>
-        <span class="text-[var(--text-strong)] text-sm font-semibold min-w-9 text-right">${fullOnly}</span>
-        <span class="text-[var(--text-muted)] text-[13px] min-w-12 text-right">${fullOnlyPct}%</span>
+        <span class="inline-block min-w-[72px] px-2 py-0.5 text-[11px] font-semibold text-center rounded badge-full">숨김</span>
+        <span class="text-[var(--text-strong)] text-sm font-semibold min-w-9 text-right">${dist.hidden}</span>
+        <span class="text-[var(--text-muted)] text-[13px] min-w-12 text-right">${pct(dist.hidden)}%</span>
       </div>
+      <div class="text-[10px] text-[var(--text-dim)] mt-1">전체 ${dist.total}개 (공개 ${dist.public} + 내부 ${visibleExclusive} + 숨김 ${dist.hidden})</div>
     </div>
   `
 }
@@ -159,8 +134,8 @@ export function ToolMetrics() {
 
         <div class="tool-metrics-sections">
           <div>
-            <h4 class="text-[var(--text-muted)] text-[11px] uppercase tracking-[0.05em] mb-2.5 mt-0">계층 분포</h4>
-            <${TierDistribution} dist=${data.tier_distribution} />
+            <h4 class="text-[var(--text-muted)] text-[11px] uppercase tracking-[0.05em] mb-2.5 mt-0">도구 분포</h4>
+            <${ToolDistribution} dist=${data.tool_distribution} />
           </div>
           <div>
             <h4 class="text-[var(--text-muted)] text-[11px] uppercase tracking-[0.05em] mb-2.5 mt-0">상위 20 도구</h4>

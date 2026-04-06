@@ -530,7 +530,6 @@ export interface DashboardToolInventoryResponse {
 export interface ToolMetricsTopEntry {
   name: string
   call_count: number
-  tier: string
 }
 
 export interface ToolMetricsResponse {
@@ -538,7 +537,7 @@ export interface ToolMetricsResponse {
   distinct_tools_called: number
   top_20: ToolMetricsTopEntry[]
   never_called_count: number
-  tier_distribution: { essential: number; standard: number; full: number }
+  tool_distribution?: { total: number; public: number; visible: number; hidden: number } | null
   dispatch_v2_enabled: boolean
   registered_count: number
 }

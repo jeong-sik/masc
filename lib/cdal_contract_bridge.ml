@@ -57,14 +57,19 @@ let of_delivery_contract
 let infer_keeper_risk_class ~(scope_kind : string) : Oas.Risk_class.t =
   match String.lowercase_ascii scope_kind with
   | "read_only" | "readonly" | "observe" -> Oas.Risk_class.Low
-  | "workspace" | "local" -> Oas.Risk_class.Medium
+  | "workspace" | "local" | "global" -> Oas.Risk_class.Medium
   | "full" | "unrestricted" -> Oas.Risk_class.Medium
-  | _ -> Oas.Risk_class.Medium
+  | unknown ->
+    Log.Misc.warn "infer_keeper_risk_class: unknown scope_kind %S, defaulting to Medium" unknown;
+    Oas.Risk_class.Medium
 
 let infer_keeper_execution_mode ~(scope_kind : string) : Oas.Execution_mode.t =
   match String.lowercase_ascii scope_kind with
   | "read_only" | "readonly" | "observe" -> Oas.Execution_mode.Diagnose
-  | _ -> Oas.Execution_mode.Execute
+  | "workspace" | "local" | "global" | "full" | "unrestricted" -> Oas.Execution_mode.Execute
+  | unknown ->
+    Log.Misc.warn "infer_keeper_execution_mode: unknown scope_kind %S, defaulting to Diagnose" unknown;
+    Oas.Execution_mode.Diagnose
 
 let infer_keeper_allowed_mutations ~(execution_scope : string) =
   match String.lowercase_ascii execution_scope with

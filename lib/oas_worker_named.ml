@@ -150,6 +150,7 @@ let run_named
     ?checkpoint_dir
     ?context_injector
     ?context
+    ?oas_checkpoint
     ?sw
     ?net
     ()
@@ -202,7 +203,7 @@ let run_named
     }
   in
   let config = { config with named_cascade = Some named_cascade; initial_messages; raw_trace; yield_on_tool } in
-  match Oas_worker_exec.run ~sw ~net ~config ?on_event ?on_yield ?on_resume ?agent_ref ?proof_ref ?contract goal with
+  match Oas_worker_exec.run ~sw ~net ~config ?oas_checkpoint ?on_event ?on_yield ?on_resume ?agent_ref ?proof_ref ?contract goal with
   | Ok result when accept result.response ->
     let observation =
       Oas_worker_cascade.cascade_observation_with_metrics ~cascade_name ~configured_labels

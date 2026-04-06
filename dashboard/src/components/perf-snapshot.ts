@@ -2,6 +2,7 @@ import { html } from 'htm/preact'
 import { signal, type Signal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
 import { ActionButton } from './common/button'
+import { DistributionBars, SegmentedBar, type DistributionItem } from './common/distribution-bars'
 import { TimeAgo } from './common/time-ago'
 import { fetchDashboardPerf, type DashboardPerfComparisonRow, type DashboardPerfResponse, type DashboardPerfRow } from '../api'
 
@@ -91,6 +92,66 @@ function metricDetail(row?: DashboardPerfRow | null): string | null {
   return row.notes || null
 }
 
+function benchmarkTone(row: DashboardPerfRow): DistributionItem['tone'] {
+  if (row.p95_ms >= 1000 || row.avg_ms >= 1000) return 'bad'
+  if (row.p95_ms >= 500 || row.avg_ms >= 500) return 'warn'
+  if (row.avg_ms > 0) return 'accent'
+  return 'muted'
+}
+
+function comparisonTone(verdict?: string): DistributionItem['tone'] {
+  if (verdict === 'improved') return 'ok'
+  if (verdict === 'regressed') return 'bad'
+  if (verdict === 'mixed') return 'warn'
+  return 'muted'
+}
+
+function benchmarkDistribution(data: DashboardPerfResponse | null): DistributionItem[] {
+  const highlightRows = [
+    data?.highlights?.session_init,
+    data?.highlights?.worst_live_mcp,
+    data?.highlights?.runtime_single,
+    data?.highlights?.runtime_status,
+  ].filter((row): row is DashboardPerfRow => row != null)
+  const seen = new Set<string>()
+  const preferred = [...highlightRows, ...(data?.benchmarks ?? [])]
+  const items: DistributionItem[] = []
+
+  for (const row of preferred) {
+    if (seen.has(row.benchmark)) continue
+    seen.add(row.benchmark)
+    const label = row.benchmark.replace(/^mcp_/, '').replace(/^oas_/, '')
+    items.push({
+      label,
+      value: row.p95_ms > 0 ? row.p95_ms : row.avg_ms,
+      detail: `avg ${formatMs(row.avg_ms)} · max ${formatMs(row.max_ms)}`,
+      tone: benchmarkTone(row),
+    })
+    if (items.length >= 6) break
+  }
+
+  return items
+}
+
+function comparisonSegments(data: DashboardPerfResponse | null): DistributionItem[] {
+  const verdictCounts = data?.comparison?.verdict_counts
+  return [
+    { label: 'improved', value: verdictCounts?.improved ?? 0, tone: 'ok' },
+    { label: 'stable', value: verdictCounts?.stable ?? 0, tone: 'muted' },
+    { label: 'mixed', value: verdictCounts?.mixed ?? 0, tone: 'warn' },
+    { label: 'regressed', value: verdictCounts?.regressed ?? 0, tone: 'bad' },
+  ]
+}
+
+function topChangeDistribution(rows: DashboardPerfComparisonRow[]): DistributionItem[] {
+  return rows.slice(0, 4).map(row => ({
+    label: row.benchmark,
+    value: Math.max(Math.abs(row.p95_delta_ms), Math.abs(row.avg_delta_ms)),
+    detail: `avg ${row.avg_delta_ms > 0 ? '+' : ''}${row.avg_delta_ms}ms · p95 ${row.p95_delta_ms > 0 ? '+' : ''}${row.p95_delta_ms}ms`,
+    tone: comparisonTone(row.verdict),
+  }))
+}
+
 export function PerfSnapshotPanel() {
   useEffect(() => {
     if (!loading.value) {
@@ -170,26 +231,38 @@ export function PerfSnapshotPanel() {
 
             ${verdictCounts
               ? html`
-                  <div class="rounded-xl border border-card-border/35 bg-black/10 px-3 py-3">
-                    <div class="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">Baseline Diff</div>
-                    <div class="mt-2 flex flex-wrap gap-2 text-[11px]">
-                      <span class="rounded-full border border-[var(--ok)]/25 bg-[var(--ok)]/10 px-2 py-1 text-[var(--ok)]">improved ${verdictCounts.improved ?? 0}</span>
-                      <span class="rounded-full border border-card-border/45 bg-card/25 px-2 py-1 text-[var(--text-muted)]">stable ${verdictCounts.stable ?? 0}</span>
-                      <span class="rounded-full border border-[var(--warn)]/25 bg-[var(--warn)]/10 px-2 py-1 text-[var(--warn)]">mixed ${verdictCounts.mixed ?? 0}</span>
-                      <span class="rounded-full border border-[var(--bad)]/25 bg-[var(--bad)]/10 px-2 py-1 text-[var(--bad)]">regressed ${verdictCounts.regressed ?? 0}</span>
-                    </div>
-                    ${data.comparison?.baseline_file
-                      ? html`<div class="mt-2 text-[11px] text-[var(--text-muted)]">baseline ${shortPath(data.comparison.baseline_file)}</div>`
-                      : null}
-                  </div>
+                  <${SegmentedBar}
+                    title="Baseline Diff"
+                    subtitle=${data.comparison?.baseline_file
+                      ? `baseline ${shortPath(data.comparison.baseline_file)}`
+                      : 'baseline 대비 verdict 분포'}
+                    items=${comparisonSegments(data)}
+                    valueFormatter=${(value: number) => `${value}`}
+                  />
                 `
               : null}
 
+            <${DistributionBars}
+              title="Benchmark p95"
+              subtitle="최근 snapshot에서 눈에 띄는 benchmark 지연"
+              items=${benchmarkDistribution(data)}
+              valueFormatter=${(value: number) => formatMs(value)}
+              emptyLabel="시각화할 benchmark row가 없습니다."
+            />
+
             ${topChanges.length > 0
               ? html`
-                  <div class="flex flex-col gap-2">
-                    <div class="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">Top Changes</div>
-                    ${topChanges.slice(0, 4).map(row => html`<${DiffRow} row=${row} />`)}
+                  <div class="grid grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)] gap-3 max-[960px]:grid-cols-1">
+                    <div class="flex flex-col gap-2">
+                      <div class="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">Top Changes</div>
+                      ${topChanges.slice(0, 4).map(row => html`<${DiffRow} row=${row} />`)}
+                    </div>
+                    <${DistributionBars}
+                      title="Delta Magnitude"
+                      subtitle="변화폭이 큰 benchmark 우선"
+                      items=${topChangeDistribution(topChanges)}
+                      valueFormatter=${(value: number) => `${Math.round(value)}ms`}
+                    />
                   </div>
                 `
               : null}

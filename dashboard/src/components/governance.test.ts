@@ -122,6 +122,8 @@ describe('Governance surface', () => {
     await flushUi()
 
     expect(container.textContent).toContain('거버넌스')
+    expect(container.textContent).toContain('Case Load Visualized')
+    expect(container.textContent).toContain('Case Status Mix')
     expect(container.textContent).toContain('command:governance 렌더링 오류')
     expect(fetchDashboardGovernance).toHaveBeenCalledTimes(1)
     expect(fetchGovernanceCaseStatus).toHaveBeenCalledWith('gov-case-1')

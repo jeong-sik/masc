@@ -25,7 +25,7 @@ let dedupe_schemas (schemas : Types.tool_schema list) =
 let prefixed_tool_names names =
   names |> List.map (fun name -> "mcp__masc__" ^ name)
 
-let named_schemas_exn ~label all_schemas values =
+let lookup_schemas_by_name_exn ~label all_schemas values =
   let requested =
     values
     |> List.map String.trim
@@ -71,9 +71,12 @@ let local_worker_compat_passthrough_tool_names =
   ]
 
 let local_worker_compat_passthrough_schemas : Types.tool_schema list =
-  named_schemas_exn
+  lookup_schemas_by_name_exn
     ~label:"agent_tool_surfaces.local_worker_compat_passthrough_schemas"
-    Config.raw_all_tool_schemas local_worker_compat_passthrough_tool_names
+    (Tool_schemas_room_core.schemas
+     @ Tool_task_schemas.schemas
+     @ Tool_schemas_inline_room.schemas)
+    local_worker_compat_passthrough_tool_names
 
 let local_worker_internal_schemas : Types.tool_schema list =
   [

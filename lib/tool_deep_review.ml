@@ -124,7 +124,8 @@ let handle_deep_review (config : Room.config) args : bool * string =
               ("review", `String text);
               ("files_reviewed", `Int (List.length target_files));
             ]))
-        | Error msg ->
+        | Error err ->
+            let msg = Oas.Error.to_string err in
             Log.Misc.warn "adversarial review failed: %s" msg;
             (true, Yojson.Safe.to_string (`Assoc [
               ("verdict", `String "unavailable");

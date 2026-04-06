@@ -37,17 +37,16 @@ let string_contains_substring_ci ~(needle : string) (haystack : string) : bool =
     ~needle:(String.lowercase_ascii needle)
     (String.lowercase_ascii haystack)
 
-(** Detect transient TCP/TLS errors that warrant retry with short backoff.
-    These patterns match OAS cascade error messages for connection-level failures. *)
-let transient_error_patterns =
-  [ "Connection_reset"; "Broken pipe"; "End_of_file";
-    "connection closed"; "Connection refused";
-    "unavailable_error"; "HTTP 503:" ]
-
-let is_transient_network_error (msg : string) : bool =
-  List.exists
-    (fun needle -> string_contains_substring_ci ~needle msg)
-    transient_error_patterns
+(** Detect transient network errors that warrant retry with short backoff.
+    Uses structured [Oas.Error.sdk_error] pattern matching instead of
+    substring matching on stringified error messages. *)
+let is_transient_network_error (err : Oas.Error.sdk_error) : bool =
+  match err with
+  | Oas.Error.Api (NetworkError _) -> true
+  | Oas.Error.Api (Timeout _) -> true
+  | Oas.Error.Api (Overloaded _) -> true
+  | Oas.Error.Api (ServerError { status = 503; _ }) -> true
+  | _ -> false
 
 (** Max transient retries (excluding the initial attempt).  Total attempts
     = 1 initial + max_transient_retries.  OAS internal retry is 3 per
@@ -60,12 +59,13 @@ let max_transient_retries = 2
 let transient_backoff_sec (attempt : int) : float =
   Float.min 4.0 (1.0 *. Float.of_int (1 lsl (attempt - 1)))
 
-(** Detect context overflow errors via OAS SSOT.
-    Uses [Oas.Retry.is_context_overflow_message] — the single source of truth
-    for overflow detection.  MASC must not reimplement its own parser.
-    See also: [Oas.Retry.extract_context_limit] for limit extraction (OAS >= 0.101.2). *)
-let should_attempt_context_overflow_retry (msg : string) : bool =
-  Oas.Retry.is_context_overflow_message msg
+(** Detect context overflow errors via structured OAS error types.
+    Matches [Oas.Error.Api (ContextOverflow _)] directly instead of
+    parsing stringified error messages. *)
+let is_context_overflow (err : Oas.Error.sdk_error) : bool =
+  match err with
+  | Oas.Error.Api (ContextOverflow _) -> true
+  | _ -> false
 
 type overflow_retry_plan = {
   retry_max_context : int;
@@ -74,19 +74,20 @@ type overflow_retry_plan = {
 
 (** Recover from context overflow by compacting and reducing max_context.
 
-    Limit extraction delegates to [Oas.Retry.extract_context_limit] (SSOT).
+    Extracts the token limit directly from the structured [ContextOverflow]
+    error instead of re-parsing stringified error messages.
     No local token-budget math — OAS owns context budgeting.
     MASC only decides whether to compact and retry. *)
 let recover_context_overflow_retry
     ~(meta : keeper_meta)
     ~(base_dir : string)
     ~(max_cascade_context : int)
-    ~(error : string) : overflow_retry_plan option =
+    ~(error : Oas.Error.sdk_error) : overflow_retry_plan option =
   let actual_limit =
-    match Oas.Retry.extract_context_limit error with
-    | Some limit -> limit
-    | None ->
-      (* Overflow detected but limit not parseable — use 80% of cascade max
+    match error with
+    | Oas.Error.Api (ContextOverflow { limit = Some limit; _ }) -> limit
+    | _ ->
+      (* Overflow detected but limit not available — use 80% of cascade max
          as a conservative fallback. *)
       max 4096 (max_cascade_context * 4 / 5)
   in
@@ -114,7 +115,7 @@ let recover_context_overflow_retry
   | None ->
       Log.Keeper.warn
         "%s: context overflow detected but checkpoint recovery unavailable: %s"
-        meta.name (short_preview error);
+        meta.name (short_preview (Oas.Error.to_string error));
       None
 
 let decision_channel_of_observation
@@ -739,11 +740,11 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
     ~(observation : Keeper_world_observation.world_observation)
     ~(generation : int)
     ?(channel : Keeper_world_observation.unified_turn_channel = Scheduled_autonomous)
-    () : (keeper_meta, string) result =
+    () : (keeper_meta, Oas.Error.sdk_error) result =
   (* 1. Check API keys *)
   let model_labels = Keeper_coordination.effective_model_labels_for_turn meta in
   match ensure_api_keys_for_labels model_labels with
-  | Error e -> Error e
+  | Error e -> Error (Oas.Error.Internal e)
   | Ok () ->
       ignore (Oas_model_resolve.refresh_local_discovery_if_possible model_labels);
       let max_cascade_context =
@@ -844,30 +845,30 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
               ~overflow_retry_used =
             match do_run ~run_meta ~max_context ~run_generation ~is_retry with
             | Ok _ as ok -> ok
-            | Error e when is_transient_network_error e
-                           && attempt <= max_transient_retries ->
+            | Error err when is_transient_network_error err
+                             && attempt <= max_transient_retries ->
                 if !side_effect_occurred then begin
                   Log.Keeper.warn
                     "%s: transient error after side-effecting tool call — skipping retry to prevent duplicate (error: %s)"
-                    meta.name (short_preview e);
-                  Error e
+                    meta.name (short_preview (Oas.Error.to_string err));
+                  Error err
                 end else begin
                   let delay = transient_backoff_sec attempt in
                   Log.Keeper.warn
                     "%s: transient network error cascade=%s max_context=%d retry=%d/%d backoff=%.0fs: %s"
                     meta.name meta.cascade_name max_context
                     attempt max_transient_retries delay
-                    (short_preview e);
+                    (short_preview (Oas.Error.to_string err));
                   Eio.Time.sleep (Eio_context.get_clock ()) delay;
                   retry_loop ~run_meta ~max_context ~run_generation
                     ~attempt:(attempt + 1)
                     ~is_retry:true ~overflow_retry_used
                 end
-            | Error e when (not overflow_retry_used)
-                           && should_attempt_context_overflow_retry e -> (
+            | Error err when (not overflow_retry_used)
+                             && is_context_overflow err -> (
                 match
                   recover_context_overflow_retry ~meta ~base_dir
-                    ~max_cascade_context ~error:e
+                    ~max_cascade_context ~error:err
                 with
                 | Some retry_plan ->
                     let retry_meta =
@@ -884,32 +885,33 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
                       ~max_context:retry_plan.retry_max_context
                       ~run_generation:retry_plan.retry_generation ~attempt:1
                       ~is_retry:true ~overflow_retry_used:true
-                | None -> Error e)
-            | Error e -> Error e
+                | None -> Error err)
+            | Error err -> Error err
           in
           retry_loop ~run_meta:meta ~max_context:max_cascade_context
             ~run_generation:generation ~attempt:1
             ~is_retry:false ~overflow_retry_used:false))
       in
       match run_result with
-      | Error e ->
-          let is_transient = is_transient_network_error e in
+      | Error err ->
+          let e_str = Oas.Error.to_string err in
+          let is_transient = is_transient_network_error err in
           Log.Keeper.error
             "%s: unified turn FAILED cascade=%s max_context=%d latency=%dms%s error=%s"
             meta.name meta.cascade_name max_cascade_context latency_ms
             (if is_transient then " (transient, cooldown preserved)" else "")
-            (short_preview e);
+            (short_preview e_str);
           let social_state =
-            Social.derive_failure_state ~meta ~observation ~reason:e
+            Social.derive_failure_state ~meta ~observation ~reason:e_str
           in
           let updated_meta =
-            update_metrics_from_failure meta ~latency_ms ~observation ~reason:e
+            update_metrics_from_failure meta ~latency_ms ~observation ~reason:e_str
               ~is_transient ~social_state ()
           in
           append_decision_record ~config ~meta:updated_meta ~observation
             ~latency_ms ~outcome:"error" ~selected_mode:"error"
             ~social_state
-            ~error:e ();
+            ~error:e_str ();
           (match write_meta config updated_meta with
            | Ok () -> ()
            | Error msg ->
@@ -930,7 +932,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
               (Keeper_registry.Keeper_heartbeat_failure
                  { reason; keeper_name = meta.name })
           end;
-          Error e
+          Error err
       | Ok result ->
           let result, social_state =
             Social.apply_to_result ~meta ~observation result

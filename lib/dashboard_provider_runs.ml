@@ -356,7 +356,7 @@ let execute_single_agent_run ~sw ~net ~provider ~model ~prompt =
           with
           | Ok result ->
               Ok (response_text_of_api_response result.response)
-          | Error error -> Error error))
+          | Error err -> Error (Oas.Error.to_string err)))
 
 let start_run ~sw ~net ~provider ~model_opt ~prompt =
   match resolve_provider_run_request ~provider ~model_opt ~prompt with

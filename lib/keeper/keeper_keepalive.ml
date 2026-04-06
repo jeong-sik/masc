@@ -686,15 +686,16 @@ let run_keepalive_unified_turn
               ~channel:turn_decision.channel
               ()
           with
-          | Error e ->
+          | Error err ->
+            let e_str = Oas.Error.to_string err in
             Log.Keeper.error "%s: unified turn failed: %s"
-              meta_after_observe.name e;
-            if String_util.contains_substring e "Eio switch not available"
-               || String_util.contains_substring e "Eio net not available"
+              meta_after_observe.name e_str;
+            if String_util.contains_substring e_str "Eio switch not available"
+               || String_util.contains_substring e_str "Eio net not available"
             then
               raise (Keeper_registry.Keeper_heartbeat_failure {
                 reason = Keeper_registry.Exception
-                  (Printf.sprintf "fatal environment error: %s" e);
+                  (Printf.sprintf "fatal environment error: %s" e_str);
                 keeper_name = meta_after_observe.name;
               });
             (match read_meta ctx.config meta_after_observe.name with

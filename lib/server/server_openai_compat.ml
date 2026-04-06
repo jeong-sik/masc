@@ -113,8 +113,8 @@ let route_cascade ~message ~system_prompt ~max_tokens ~temperature
   with
   | Ok result ->
     Ok (Oas_response.text_of_response result.response)
-  | Error e ->
-    Error e
+  | Error err ->
+    Error (Oas.Error.to_string err)
 
 (** Handle a POST /v1/chat/completions request.
     Parses the OpenAI-format request body, routes to keeper or cascade,

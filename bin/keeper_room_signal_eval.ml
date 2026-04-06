@@ -331,7 +331,7 @@ let evaluate_run env fixture run_index =
                 with
                 | Error err ->
                     failure_report ~fixture ~run_index ~base_dir ?primary_salience
-                      err
+                      (Oas.Error.to_string err)
                 | Ok updated_meta -> (
                     match read_latest_decision_json config keeper_name with
                     | Error err ->

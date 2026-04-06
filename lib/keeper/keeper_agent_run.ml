@@ -250,7 +250,7 @@ let run_turn
     ?priority
     ?(is_retry = false)
     ()
-  : (run_result, string) result =
+  : (run_result, Oas.Error.sdk_error) result =
   (* 0. Resolve inference parameters via Cascade_inference *)
   let temperature = match temperature with
     | Some t -> t
@@ -969,7 +969,7 @@ let run_turn
           ~config
           ~allowed_paths:effective_allowed_paths
       with
-      | Error e -> Error e
+      | Error e -> Error (Oas.Error.Internal e)
       | Ok oas_allowed_paths ->
         (match
         Oas_worker.run_named
@@ -1084,7 +1084,7 @@ let run_turn
         in
         let usage = Keeper_exec_context.usage_of_response result.response in
         (match normalize_response_text ~text ~tool_names () with
-         | Error e -> Error e
+         | Error e -> Error (Oas.Error.Internal e)
          | Ok response_text ->
              (* Ensure every generation has a [STATE] block for continuity.
                 If the model omitted it, synthesize one deterministically

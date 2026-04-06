@@ -147,5 +147,5 @@ let generate_code_change ~goal ~baseline ~history ~insights
         ~cascade_name:"autoresearch" ~fallback:(fun () -> 4096))
       ()
   with
-  | Error e -> Result.error (Printf.sprintf "MODEL call failed: %s" e)
+  | Error e -> Result.error (Printf.sprintf "MODEL call failed: %s" (Oas.Error.to_string e))
   | Ok result -> parse_model_code_response (Oas_response.text_of_response result.Oas_worker.response)

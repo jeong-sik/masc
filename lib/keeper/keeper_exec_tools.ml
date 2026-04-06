@@ -158,7 +158,10 @@ let missing_file_error_json ~(config : Room.config) ~(target : string)
   in
   let suggested_entries =
     match Safe_ops.list_dir_safe suggestion_dir with
-    | Ok entries -> entries |> List.sort String.compare |> take max_suggested_entries
+    | Ok entries ->
+      entries
+      |> List.sort String.compare
+      |> List.filteri (fun i _ -> i < max_suggested_entries)
     | Error _ -> []
   in
   let message =

@@ -89,13 +89,14 @@ type pending_confirm_scope = {
 
 type available_action = {
   action_type : string;
+  tool_name : string;
   target_type : string;
   description : string;
   confirm_required : bool;
 }
 
-let make_available_action ~action_type ~target_type ~description =
-  { action_type; target_type; description;
+let make_available_action ~action_type ~tool_name ~target_type ~description =
+  { action_type; tool_name; target_type; description;
     confirm_required = Operator_approval.confirm_required action_type }
 
 let preview_of_pending_confirm (entry : pending_confirm) =
@@ -254,50 +255,49 @@ let pending_confirms_json ?actor config =
 
 let available_actions : available_action list =
   [
-    make_available_action ~action_type:"broadcast" ~target_type:"namespace"
-      ~description:"Use this when you need a namespace-wide operator broadcast.";
-    make_available_action ~action_type:"namespace_pause" ~target_type:"namespace"
-      ~description:"Use this when you need to pause namespace automation or spawning.";
-    make_available_action ~action_type:"namespace_resume" ~target_type:"namespace"
-      ~description:
-        "Resume a paused MASC namespace, allowing the orchestrator to spawn agents again. Use when the pause reason is resolved (review done, incident cleared).";
-    make_available_action ~action_type:"social_sweep" ~target_type:"namespace"
-      ~description:
-        "Use this when you need to run one immediate public-square social sweep and inspect which keepers acted, passed, or were system-skipped.";
-    make_available_action ~action_type:"task_inject" ~target_type:"namespace"
-      ~description:
-        "Use this when you need to inject a new backlog task into the namespace immediately.";
-    make_available_action ~action_type:"team_note" ~target_type:"team_session"
-      ~description:
-        "Use this when you need to append a non-broadcast operator note to a team session.";
-    make_available_action ~action_type:"team_broadcast"
+    make_available_action ~action_type:"broadcast" ~tool_name:"masc_broadcast"
+      ~target_type:"namespace"
+      ~description:"Namespace-wide operator broadcast.";
+    make_available_action ~action_type:"namespace_pause" ~tool_name:"masc_pause"
+      ~target_type:"namespace"
+      ~description:"Pause namespace automation and spawning.";
+    make_available_action ~action_type:"namespace_resume" ~tool_name:"masc_resume"
+      ~target_type:"namespace"
+      ~description:"Resume a paused namespace.";
+    make_available_action ~action_type:"task_inject" ~tool_name:"masc_add_task"
+      ~target_type:"namespace"
+      ~description:"Inject a backlog task into the namespace.";
+    make_available_action ~action_type:"team_note" ~tool_name:"masc_team_session_step"
       ~target_type:"team_session"
-      ~description:
-        "Use this when you need a broadcast-style orchestration turn in a team session.";
-    make_available_action ~action_type:"team_task_inject"
+      ~description:"Append an operator note to a team session.";
+    make_available_action ~action_type:"team_broadcast" ~tool_name:"masc_team_session_step"
       ~target_type:"team_session"
-      ~description:
-        "Use this when you need to inject a new task into a running team session.";
-    make_available_action ~action_type:"team_worker_spawn_batch"
+      ~description:"Broadcast-style orchestration turn in a team session.";
+    make_available_action ~action_type:"team_task_inject" ~tool_name:"masc_team_session_step"
       ~target_type:"team_session"
-      ~description:
-        "Use this when you need to spawn or replace one or more team-session workers.";
-    make_available_action ~action_type:"team_stop" ~target_type:"team_session"
-      ~description:"Use this when you need to stop a running team session.";
-    make_available_action ~action_type:"keeper_message" ~target_type:"keeper"
-      ~description:"Use this when you need to send a direct operator message to a keeper.";
-    make_available_action ~action_type:"keeper_probe" ~target_type:"keeper"
-      ~description:
-        "Use this when you need an immediate keeper diagnostic snapshot with health, silence reason, and next suggested action.";
-    make_available_action ~action_type:"keeper_recover" ~target_type:"keeper"
-      ~description:
-        "Use this when a keeper is stale, degraded, or offline and you need a safe down/up recovery with before-and-after diagnostics.";
+      ~description:"Inject a task into a running team session.";
+    make_available_action ~action_type:"team_worker_spawn_batch" ~tool_name:"masc_team_session_step"
+      ~target_type:"team_session"
+      ~description:"Spawn or replace team-session workers.";
+    make_available_action ~action_type:"team_stop" ~tool_name:"masc_team_session_stop"
+      ~target_type:"team_session"
+      ~description:"Stop a running team session.";
+    make_available_action ~action_type:"keeper_message" ~tool_name:"masc_keeper_msg"
+      ~target_type:"keeper"
+      ~description:"Send a direct operator message to a keeper.";
+    make_available_action ~action_type:"keeper_probe" ~tool_name:"masc_keeper_status"
+      ~target_type:"keeper"
+      ~description:"Immediate keeper diagnostic snapshot.";
+    make_available_action ~action_type:"keeper_recover" ~tool_name:"masc_keeper_recover"
+      ~target_type:"keeper"
+      ~description:"Safe down/up recovery for stale/degraded keeper.";
   ]
 
 let available_action_to_yojson (entry : available_action) =
   `Assoc
     [
       ("action_type", `String entry.action_type);
+      ("tool_name", `String entry.tool_name);
       ("target_type", `String entry.target_type);
       ("description", `String entry.description);
       ("confirm_required", `Bool entry.confirm_required);

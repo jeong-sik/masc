@@ -39,6 +39,7 @@ type pending_confirm_scope = {
 
 type available_action = {
   action_type : string;
+  tool_name : string;
   target_type : string;
   description : string;
   confirm_required : bool;

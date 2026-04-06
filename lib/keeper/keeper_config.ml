@@ -553,14 +553,15 @@ let keeper_unified_max_tokens () : int =
     ~max_v:16000
 
 (** Max agent turns (tool loops) for unified keeper turns.
-    Env: [MASC_KEEPER_UNIFIED_MAX_TURNS]. Default: 3.
-    Previous default (1000) caused 787s+ latency per turn.
-    20 caused 6.7GB RSS in 2 minutes with 3 concurrent keepers.
+    Env: [MASC_KEEPER_UNIFIED_MAX_TURNS]. Default: 8.
+    History: 1000 caused 787s+ latency; 20 caused 6.7GB RSS with 3 keepers;
+    3 left keepers unable to do meaningful work (board_post x3 only).
+    8 allows observe-reason-act-report chains without runaway resource use.
     This value is the fallback; channel-aware functions below are preferred. *)
 let keeper_unified_max_turns () : int =
   int_of_env_default
     "MASC_KEEPER_UNIFIED_MAX_TURNS"
-    ~default:3
+    ~default:8
     ~min_v:1
     ~max_v:50
 

@@ -242,6 +242,43 @@ let rec add_routes ~sw ~clock router =
            (Yojson.Safe.to_string json) reqd
        ) _request reqd)
 
+  (* ── Telemetry unified view ── *)
+  |> Http.Router.get "/api/v1/dashboard/telemetry" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let base_path = state.Mcp_server.room_config.base_path in
+         let n =
+           Server_utils.int_query_param req "n" ~default:100
+           |> max 1 |> min 500
+         in
+         let keeper_name = Server_utils.query_param req "keeper" in
+         let sources =
+           match Server_utils.query_param req "source" with
+           | None -> Telemetry_unified.all_sources
+           | Some s ->
+             (match Telemetry_unified.source_of_string s with
+              | Some src -> [src]
+              | None -> Telemetry_unified.all_sources)
+         in
+         let entries =
+           Telemetry_unified.read_unified ~base_path ~sources
+             ?keeper_name ~n ()
+         in
+         let json = `Assoc [
+           ("generated_at", `String (Types.now_iso ()));
+           ("count", `Int (List.length entries));
+           ("entries", `List entries);
+         ] in
+         Http.Response.json ~compress:true ~request:req
+           (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/telemetry/summary" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let base_path = state.Mcp_server.room_config.base_path in
+         let json = Telemetry_unified.summary_json ~base_path () in
+         Http.Response.json ~compress:true ~request:req
+           (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+
   (* ── Dashboard delete actions (extracted) ── *)
   |> Server_dashboard_http_delete_actions.add_delete_action_routes
 

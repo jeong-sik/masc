@@ -294,6 +294,7 @@
    swarm_status_inputs
    swarm_checkpoint
    telemetry_eio
+   telemetry_unified
    tempo
    tui_decode
    tools

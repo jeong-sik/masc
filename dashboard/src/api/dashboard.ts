@@ -872,3 +872,52 @@ export function fetchKeeperToolCalls(
     `/api/v1/keepers/${encodeURIComponent(name)}/tool-calls${params}`,
   )
 }
+
+// ── Unified telemetry ──────────────────────────────────
+
+export type TelemetrySource = 'keeper_metric' | 'agent_event' | 'tool_call_io' | 'tool_usage' | 'tool_metric'
+
+export type TelemetryEntry = Record<string, unknown> & {
+  source: TelemetrySource
+  ts?: number
+  ts_unix?: number
+  timestamp?: number
+}
+
+export type TelemetryResponse = {
+  generated_at: string
+  count: number
+  entries: TelemetryEntry[]
+}
+
+export type TelemetrySourceSummary = {
+  source: string
+  path?: string
+  exists?: boolean
+  entry_count: number
+  keepers?: Array<{ name: string; path: string }>
+  keeper_count?: number
+}
+
+export type TelemetrySummaryResponse = {
+  generated_at: string
+  sources: TelemetrySourceSummary[]
+  total_entries: number
+}
+
+export function fetchTelemetry(opts?: {
+  source?: TelemetrySource
+  keeper?: string
+  n?: number
+}): Promise<TelemetryResponse> {
+  const params = new URLSearchParams()
+  if (opts?.source) params.set('source', opts.source)
+  if (opts?.keeper) params.set('keeper', opts.keeper)
+  if (opts?.n) params.set('n', String(opts.n))
+  const qs = params.toString()
+  return get<TelemetryResponse>(`/api/v1/dashboard/telemetry${qs ? '?' + qs : ''}`)
+}
+
+export function fetchTelemetrySummary(): Promise<TelemetrySummaryResponse> {
+  return get<TelemetrySummaryResponse>('/api/v1/dashboard/telemetry/summary')
+}

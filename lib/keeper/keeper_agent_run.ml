@@ -267,6 +267,10 @@ let run_turn
         (* Keep under Cloudflare tunnel 100s timeout: 2048 / 35 tok/s ~ 59s *)
         ~fallback:(fun () -> 2048)
   in
+  (* 0b. Create context injector for temporal awareness *)
+  let injector_config = Masc_context_injector.default_config () in
+  let context_injector = Masc_context_injector.make ~config:injector_config () in
+  let shared_context = Oas.Context.create () in
   (* 1. Ensure session directory tree exists.
      Both the base traces dir AND the trace-specific session dir must
      exist before any file I/O (checkpoint load, history persist).
@@ -759,6 +763,15 @@ let run_turn
             | None -> Some dynamic_context
             | Some existing -> Some (existing ^ "\n\n" ^ dynamic_context)
         in
+        (* 1b. Temporal context from context_injector (turn 1+) *)
+        let ctx =
+          match Masc_context_injector.render_temporal_summary shared_context with
+          | None -> ctx
+          | Some temporal ->
+            (match ctx with
+             | None -> Some temporal
+             | Some existing -> Some (existing ^ "\n\n" ^ temporal))
+        in
         (* 2. Progressive tool disclosure via OAS Tool_selector.
            Extract context from last user message for relevance scoring. *)
         let last_user_text =
@@ -992,6 +1005,8 @@ let run_turn
           ~cache_system_prompt:true
           ~yield_on_tool
           ~checkpoint_dir:session_dir
+          ~context_injector
+          ~context:shared_context
           ()
       with
       | Error e -> Error e

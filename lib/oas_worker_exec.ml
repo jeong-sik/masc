@@ -43,6 +43,8 @@ type config = {
   cache_system_prompt : bool;
   yield_on_tool : bool;
   compact_ratio : float option;
+  context_injector : Oas.Hooks.context_injector option;
+  context : Oas.Context.t option;
 }
 
 let default_config ~name ~provider ~model_id ~system_prompt ~tools : config =
@@ -73,6 +75,8 @@ let default_config ~name ~provider ~model_id ~system_prompt ~tools : config =
     cache_system_prompt = false;
     yield_on_tool = false;
     compact_ratio = None;
+    context_injector = None;
+    context = None;
   }
 
 (* ================================================================ *)
@@ -269,6 +273,14 @@ let build
   let builder =
     match config.compact_ratio with
     | Some ratio -> Oas.Builder.with_context_thresholds ~compact_ratio:ratio builder
+    | None -> builder
+  in
+  let builder = match config.context_injector with
+    | Some injector -> Oas.Builder.with_context_injector injector builder
+    | None -> builder
+  in
+  let builder = match config.context with
+    | Some ctx -> Oas.Builder.with_context ctx builder
     | None -> builder
   in
   Oas.Builder.build_safe builder

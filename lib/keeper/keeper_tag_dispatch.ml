@@ -69,8 +69,6 @@ let dispatch
   | Mod_local_runtime ->
       Tool_local_runtime.dispatch { Tool_local_runtime.config; agent_name }
         ~name ~args
-  | Mod_portal ->
-      Tool_portal.dispatch { Tool_portal.config; agent_name } ~name ~args
   | Mod_worktree ->
       Tool_worktree.dispatch { Tool_worktree.config; agent_name } ~name ~args
   | Mod_code ->

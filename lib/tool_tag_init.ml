@@ -22,7 +22,6 @@ let register_all () =
     "masc_mcp_session";
     "masc_cancellation"; "masc_subscription"; "masc_progress";
     "masc_governance_set"; "masc_spawn";
-    "masc_episode_flush"; "masc_episode_list";
     "masc_recall_search";
     (* board *)
     "masc_board_post"; "masc_board_comment";

@@ -195,15 +195,8 @@ let explicit_metadata : (string * metadata) list =
       destructive_tool );
     ( "masc_operation_pause",
       { default_metadata with destructive = Some false } );
-    (* Tools pruned from all surfaces in #4999 — registered as Deprecated
-       so the SSOT orphan check passes while handlers remain for backward compat.
-       Removed from System_internal surface; schema kept for in-flight sessions. *)
-    ("masc_episode_flush", deprecated "Pruned from all surfaces in #4999");
-    ("masc_episode_list", deprecated "Pruned from all surfaces in #4999");
-    ("masc_portal_open", deprecated "Pruned from all surfaces in #4999");
-    ("masc_portal_send", deprecated "Pruned from all surfaces in #4999");
-    ("masc_portal_close", deprecated "Pruned from all surfaces in #4999");
-    ("masc_portal_status", deprecated "Pruned from all surfaces in #4999");
+    (* Tools pruned from all surfaces in #4999 — handlers removed,
+       only catalog entries for tools still having code remain. *)
     ("masc_a2a_discover", deprecated "Pruned from all surfaces in #4999");
     ("masc_a2a_query_skill", deprecated "Pruned from all surfaces in #4999");
     ("masc_a2a_delegate", deprecated "Pruned from all surfaces in #4999");

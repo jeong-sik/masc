@@ -274,7 +274,7 @@ let legacy_permission_for_tool = function
   | "masc_leave" -> Some CanLeave
   | "masc_status" | "masc_who" | "masc_tasks" | "masc_messages"
   | "masc_transport_status" | "masc_websocket_discovery"
-  | "masc_agents" | "masc_portal_status"
+  | "masc_agents"
   | "masc_worktree_list"
   | "masc_task_history" | "masc_operator_snapshot"
   | "masc_operator_digest" | "masc_surface_audit"
@@ -290,7 +290,7 @@ let legacy_permission_for_tool = function
   | "masc_agent_card" | "masc_agent_fitness"
   | "masc_agent_relations" | "masc_a2a_discover" | "masc_a2a_query_skill"
   | "masc_dashboard" | "masc_check"
-  | "masc_collaboration_graph" | "masc_episode_list"
+  | "masc_collaboration_graph"
   | "masc_feature_flags" | "masc_get_metrics"
   | "masc_meta_cognition_snapshot" | "masc_poll_events"
   | "masc_recall_search" | "masc_room_strategy_get"
@@ -336,8 +336,6 @@ let legacy_permission_for_tool = function
   (* Command-plane write operations require Admin *)
   | "masc_policy_freeze_unit" | "masc_policy_kill_switch" ->
       Some CanAdmin
-  | "masc_portal_open" | "masc_portal_close" -> Some CanOpenPortal
-  | "masc_portal_send" -> Some CanSendPortal
   | "masc_worktree_create" -> Some CanCreateWorktree
   | "masc_worktree_remove" -> Some CanRemoveWorktree
   | "masc_cleanup_zombies" -> Some CanBroadcast (* Worker level *)

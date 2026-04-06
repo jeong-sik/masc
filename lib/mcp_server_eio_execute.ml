@@ -498,8 +498,6 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         Tool_team_session.dispatch ctx ~name ~args:coerced_args
     | Mod_voice ->
         Tool_voice.dispatch { agent_name; sw; clock; net = state.Mcp_server.net } ~name ~args:coerced_args
-    | Mod_portal ->
-        Tool_portal.dispatch { Tool_portal.config; agent_name } ~name ~args:coerced_args
     | Mod_worktree ->
         Tool_worktree.dispatch { Tool_worktree.config; agent_name } ~name ~args:coerced_args
     | Mod_code ->

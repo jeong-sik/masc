@@ -218,8 +218,6 @@
         test_worker_runtime
         test_capability_registry
         test_tool_local_runtime_verify
-        test_tool_voice
-        test_tool_improve_loop
         test_board_ttl
         test_worker_dev_tools
         test_oas_integration
@@ -360,8 +358,6 @@
         test_worker_runtime
         test_capability_registry
         test_tool_local_runtime_verify
-        test_tool_voice
-        test_tool_improve_loop
         test_board_ttl
         test_worker_dev_tools
         test_oas_integration
@@ -500,8 +496,8 @@
         test_http_server_eio_coverage test_telemetry_eio_coverage
         test_room_git_coverage test_prometheus_coverage
         test_auto_responder_coverage test_tool_plan_coverage
-        test_tool_portal_coverage test_tool_worktree_coverage
-        test_tool_a2a_coverage test_tool_handover_coverage
+        test_tool_worktree_coverage
+        test_tool_handover_coverage
         test_tool_relay_coverage test_tool_heartbeat_coverage
         test_tool_auth_coverage test_tool_agent_coverage
         test_tool_task_coverage test_tool_room_coverage
@@ -534,8 +530,8 @@
         test_http_server_eio_coverage test_telemetry_eio_coverage
         test_room_git_coverage test_prometheus_coverage
         test_auto_responder_coverage test_tool_plan_coverage
-        test_tool_portal_coverage test_tool_worktree_coverage
-        test_tool_a2a_coverage test_tool_handover_coverage
+        test_tool_worktree_coverage
+        test_tool_handover_coverage
         test_tool_relay_coverage test_tool_heartbeat_coverage
         test_tool_auth_coverage test_tool_agent_coverage
         test_tool_task_coverage test_tool_room_coverage

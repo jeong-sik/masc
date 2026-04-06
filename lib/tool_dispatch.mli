@@ -98,8 +98,8 @@ val is_mcp_context_required : string -> bool
 
 type module_tag =
   | Mod_plan | Mod_operator | Mod_command_plane
-  | Mod_local_runtime | Mod_team_session | Mod_voice
-  | Mod_portal | Mod_worktree
+  | Mod_local_runtime | Mod_team_session
+  | Mod_worktree
   | Mod_code | Mod_code_write
   | Mod_a2a | Mod_handover
   | Mod_relay | Mod_heartbeat
@@ -109,7 +109,6 @@ type module_tag =
   | Mod_control | Mod_agent_timeline | Mod_misc | Mod_suspend
   | Mod_library | Mod_keeper | Mod_repair_loop
   | Mod_inline
-  | Mod_improve_loop
   | Mod_autoresearch
   | Mod_shard
 

@@ -406,22 +406,6 @@ let test_post_list_filter_combinations () =
   Alcotest.(check bool) "exclude both hides harness" false
     (contains_substring body3 "dashboard-harness-bot")
 
-let test_dispatch_reclassify_dry_run () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  cleanup ();
-  ignore (Board_dispatch.create_post ~author:"dm-keeper" ~content:"keeper"
-            ~post_kind:Board.Automation_post
-            ~meta_json:(`Assoc [ ("source", `String "keeper_board_post") ]) ());
-  let ok, body = dispatch "masc_board_reclassify"
-    (make_args [("dry_run", `Bool true)]) in
-  Alcotest.(check bool) "reclassify ok" true ok;
-  let json = Yojson.Safe.from_string body in
-  Alcotest.(check bool) "dry_run true" true
-    Yojson.Safe.Util.(json |> member "dry_run" |> to_bool);
-  Alcotest.(check int) "changed zero" 0
-    Yojson.Safe.Util.(json |> member "changed" |> to_int)
-
 let test_dispatch_delete_success () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -619,24 +603,13 @@ let test_dispatch_unknown_tool () =
     (try ignore (Str.search_forward (Str.regexp_string "Unknown") body 0); true
      with Not_found -> false)
 
-let test_dispatch_migrate_without_pg () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  cleanup ();
-  (* Default backend is JSONL, so migrate should fail *)
-  let ok, body = dispatch "masc_board_migrate" (make_args []) in
-  Alcotest.(check bool) "migrate without pg fails" false ok;
-  Alcotest.(check bool) "error mentions pg" true
-    (try ignore (Str.search_forward (Str.regexp_string "PostgreSQL") body 0); true
-     with Not_found -> false)
-
 (** {2 Group 8: Tool Schema Definitions} *)
 
 let test_tools_count () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
-  Alcotest.(check int) "13 tool schemas" 13 (List.length Tool_board.tools)
+  Alcotest.(check int) "11 tool schemas" 11 (List.length Tool_board.tools)
 
 let test_tools_names_unique () =
   Eio_main.run @@ fun env ->
@@ -727,8 +700,6 @@ let () =
       ( "dispatch",
         [
           Alcotest.test_case "unknown tool" `Quick test_dispatch_unknown_tool;
-          Alcotest.test_case "migrate without pg" `Quick test_dispatch_migrate_without_pg;
-          Alcotest.test_case "reclassify dry run" `Quick test_dispatch_reclassify_dry_run;
           Alcotest.test_case "delete success" `Quick test_dispatch_delete_success;
           Alcotest.test_case "delete not found" `Quick test_dispatch_delete_not_found;
           Alcotest.test_case "delete empty id" `Quick test_dispatch_delete_empty_id;

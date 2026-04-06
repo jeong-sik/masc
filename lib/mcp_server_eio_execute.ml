@@ -496,10 +496,6 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
                     proc_mgr = state.Mcp_server.proc_mgr;
                     net = state.Mcp_server.net } in
         Tool_team_session.dispatch ctx ~name ~args:coerced_args
-    | Mod_voice ->
-        Tool_voice.dispatch { agent_name; sw; clock; net = state.Mcp_server.net } ~name ~args:coerced_args
-    | Mod_portal ->
-        Tool_portal.dispatch { Tool_portal.config; agent_name } ~name ~args:coerced_args
     | Mod_worktree ->
         Tool_worktree.dispatch { Tool_worktree.config; agent_name } ~name ~args:coerced_args
     | Mod_code ->
@@ -533,17 +529,6 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         Tool_room.dispatch { Tool_room.config; agent_name } ~name ~args:coerced_args
     | Mod_control ->
         Tool_control.dispatch { Tool_control.config; agent_name } ~name ~args:coerced_args
-    | Mod_improve_loop ->
-        Tool_improve_loop.dispatch
-          {
-            Tool_improve_loop.config;
-            agent_name;
-            sw = Some sw;
-            clock = Some clock;
-            proc_mgr = state.Mcp_server.proc_mgr;
-            net = state.Mcp_server.net;
-          }
-          ~name ~args:coerced_args
     | Mod_agent_timeline ->
         Tool_agent_timeline.dispatch { Tool_agent_timeline.config; agent_name } ~name ~args:coerced_args
     | Mod_misc ->

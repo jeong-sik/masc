@@ -74,11 +74,11 @@ let keeper_internal_replacement = function
   | "keeper_board_vote" -> Some "masc_board_vote"
   | "keeper_board_stats" -> Some "masc_board_stats"
   | "keeper_board_search" -> Some "masc_board_search"
-  | "keeper_voice_speak" -> Some "masc_voice_speak"
-  | "keeper_voice_agent" -> Some "masc_voice_agent"
-  | "keeper_voice_sessions" -> Some "masc_voice_sessions"
-  | "keeper_voice_session_start" -> Some "masc_voice_session_start"
-  | "keeper_voice_session_end" -> Some "masc_voice_session_end"
+  | "keeper_voice_speak"
+  | "keeper_voice_agent"
+  | "keeper_voice_sessions"
+  | "keeper_voice_session_start"
+  | "keeper_voice_session_end" -> None
   | "keeper_tasks_list" -> Some "masc_tasks"
   | "keeper_broadcast" -> Some "masc_broadcast"
   | _ -> None
@@ -261,22 +261,8 @@ let system_internal_surface_tools =
     "masc_tool_stats"; "masc_surface_audit";
     (* Phase 2 addition *)
     "masc_get_metrics";
-    (* Portal subsystem — schema-registered, not yet public *)
-    "masc_portal_open"; "masc_portal_send"; "masc_portal_close";
-    "masc_portal_status";
-    (* A2A federation — removed: deprecated in #4999, no active consumers *)
-    (* Transport layer *)
-    "masc_transport_status"; "masc_websocket_discovery";
+    (* WebRTC signaling — deprecated as MCP tools but used as HTTP endpoints *)
     "masc_webrtc_offer"; "masc_webrtc_answer";
-    (* Episode persistence *)
-    "masc_episode_flush"; "masc_episode_list";
-    (* Board moderation *)
-    "masc_board_migrate"; "masc_board_reclassify";
-    (* Voice subsystem — schema-registered, not yet public *)
-    "masc_voice_ping_pong"; "masc_voice_speak";
-    "masc_voice_session_start"; "masc_voice_session_end";
-    "masc_voice_sessions"; "masc_voice_agent";
-    "masc_voice_conference_start"; "masc_voice_conference_end";
     (* Hidden callable tools pruned from user-facing surfaces in #5011. *)
     "masc_archive_view";
     "masc_collaboration_evidence"; "masc_collaboration_graph";

@@ -158,32 +158,6 @@ let () = test "dispatch_cleanup_zombies" (fun () ->
   | None -> failwith "dispatch returned None"
 )
 
-let () = test "dispatch_transport_status" (fun () ->
-  let ctx = make_test_ctx () in
-  let args = `Assoc [] in
-  match Tool_misc.dispatch ctx ~name:"masc_transport_status" ~args with
-  | Some (success, result) ->
-      assert success;
-      let json = parse_json result in
-      assert (Yojson.Safe.Util.member "http" json <> `Null);
-      assert (Yojson.Safe.Util.member "websocket" json <> `Null);
-      assert (Yojson.Safe.Util.member "webrtc" json <> `Null)
-  | None -> failwith "dispatch returned None"
-)
-
-let () = test "dispatch_websocket_discovery" (fun () ->
-  let ctx = make_test_ctx () in
-  let args = `Assoc [] in
-  match Tool_misc.dispatch ctx ~name:"masc_websocket_discovery" ~args with
-  | Some (success, result) ->
-      assert success;
-      let json = parse_json result in
-      assert (Yojson.Safe.Util.member "enabled" json <> `Null);
-      assert (Yojson.Safe.Util.member "mode" json <> `Null);
-      assert (Yojson.Safe.Util.member "session_count" json <> `Null)
-  | None -> failwith "dispatch returned None"
-)
-
 let () = test "dispatch_web_search_requires_query" (fun () ->
   let ctx = make_test_ctx () in
   let args = `Assoc [] in

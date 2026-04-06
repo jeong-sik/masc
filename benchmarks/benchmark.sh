@@ -450,7 +450,6 @@ bench_locking() {
 }
 
 bench_a2a() {
-  collect_tool_samples "mcp_a2a_discover" "masc_a2a_discover" '{}' "$ITERATIONS" "discover peers"
   collect_tool_samples "mcp_capability_lookup" "masc_find_by_capability" '{"capability":"code-review"}' "$ITERATIONS" "capability routing"
 }
 

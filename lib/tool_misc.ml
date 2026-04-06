@@ -451,8 +451,6 @@ let dispatch ctx ~name ~args : result option =
   in
   match name with
   | "masc_config" -> Some (Tool_misc_admin.handle_config args)
-  | "masc_transport_status" -> Some (Tool_misc_transport.handle_transport_status args)
-  | "masc_websocket_discovery" -> Some (Tool_misc_transport.handle_websocket_discovery args)
   | "masc_webrtc_offer" -> Some (Tool_misc_transport.handle_webrtc_offer args)
   | "masc_webrtc_answer" -> Some (Tool_misc_transport.handle_webrtc_answer args)
   | "masc_dashboard" -> Some (handle_dashboard ctx args)
@@ -477,8 +475,6 @@ let schemas = Tool_schemas_misc.schemas
 
 let _tool_spec_read_only =
   [
-    "masc_transport_status";
-    "masc_websocket_discovery";
     "masc_verify_handoff";
     "masc_tool_help";
     "masc_web_search";

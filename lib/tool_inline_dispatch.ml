@@ -5,7 +5,6 @@
       masc_set_room, masc_join, masc_leave
     - Tool_inline_dispatch_comm: masc_bounded_run, masc_broadcast,
       masc_messages, masc_listen, masc_who
-    - Tool_inline_dispatch_episode: masc_episode_flush, masc_episode_list
     - Tool_inline_dispatch_extra: remaining tools (recall,
       board, conversation, keeper, etc.)
 
@@ -244,13 +243,6 @@ let dispatch (ctx : context) ~(name : string) : result option =
                ~prompt ~timeout_seconds ?working_dir ()
            in
            Some (result.Spawn.success, Spawn.result_to_string result))
-
-  (* ── Episodes (delegated) ───────────────────────────────────── *)
-  | "masc_episode_flush" ->
-      Tool_inline_dispatch_episode.handle_episode_flush ~config ~arguments ~state ~sw
-
-  | "masc_episode_list" ->
-      Tool_inline_dispatch_episode.handle_episode_list ~config ~arguments
 
   (* ── Tool discovery ─────────────────────────────────────────── *)
   | "masc_discover_tools" ->

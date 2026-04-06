@@ -151,8 +151,6 @@ let explicit_metadata : (string * metadata) list =
     ("masc_tool_help", readonly_tool);
     ("masc_keeper_list", readonly_tool);
     ("masc_keeper_status", readonly_tool);
-    ("masc_transport_status", deprecated "Pruned from all surfaces in #4999");
-    ("masc_websocket_discovery", deprecated "Pruned from all surfaces in #4999");
     ("masc_plan_get", readonly_tool);
     ("masc_worktree_list", readonly_tool);
     ( "masc_set_room",
@@ -195,40 +193,13 @@ let explicit_metadata : (string * metadata) list =
       destructive_tool );
     ( "masc_operation_pause",
       { default_metadata with destructive = Some false } );
-    (* Tools pruned from all surfaces in #4999 — registered as Deprecated
-       so the SSOT orphan check passes while handlers remain for backward compat.
-       Removed from System_internal surface; schema kept for in-flight sessions. *)
-    ("masc_episode_flush", deprecated "Pruned from all surfaces in #4999");
-    ("masc_episode_list", deprecated "Pruned from all surfaces in #4999");
-    ("masc_portal_open", deprecated "Pruned from all surfaces in #4999");
-    ("masc_portal_send", deprecated "Pruned from all surfaces in #4999");
-    ("masc_portal_close", deprecated "Pruned from all surfaces in #4999");
-    ("masc_portal_status", deprecated "Pruned from all surfaces in #4999");
-    ("masc_a2a_discover", deprecated "Pruned from all surfaces in #4999");
-    ("masc_a2a_query_skill", deprecated "Pruned from all surfaces in #4999");
-    ("masc_a2a_delegate", deprecated "Pruned from all surfaces in #4999");
-    ("masc_a2a_subscribe", deprecated "Pruned from all surfaces in #4999");
-    ("masc_a2a_unsubscribe", deprecated "Pruned from all surfaces in #4999");
+    (* WebRTC tools: deprecated as MCP tools but still used as HTTP
+       signaling endpoints in server_h2_gateway.ml — kept for now. *)
     ("masc_webrtc_offer", deprecated "Pruned from all surfaces in #4999");
     ("masc_webrtc_answer", deprecated "Pruned from all surfaces in #4999");
-    ("masc_board_migrate", deprecated "Pruned from all surfaces in #4999");
-    ("masc_board_reclassify", deprecated "Pruned from all surfaces in #4999");
-    ("masc_voice_ping_pong", deprecated "Pruned from all surfaces in #4999");
-    ("masc_voice_speak", deprecated "Pruned from all surfaces in #4999");
-    ("masc_voice_session_start", deprecated "Pruned from all surfaces in #4999");
-    ("masc_voice_session_end", deprecated "Pruned from all surfaces in #4999");
-    ("masc_voice_sessions", deprecated "Pruned from all surfaces in #4999");
-    ("masc_voice_agent", deprecated "Pruned from all surfaces in #4999");
-    ("masc_voice_conference_start", deprecated "Pruned from all surfaces in #4999");
-    ("masc_voice_conference_end", deprecated "Pruned from all surfaces in #4999");
-    (* improve_loop + detachment: 0 external refs, 0 commits in 90 days *)
-    ("masc_improve_loop_start", deprecated "Pruned: zero external refs, inactive 90d");
-    ("masc_improve_loop_status", deprecated "Pruned: zero external refs, inactive 90d");
-    ("masc_improve_loop_pause", deprecated "Pruned: zero external refs, inactive 90d");
-    ("masc_improve_loop_resume", deprecated "Pruned: zero external refs, inactive 90d");
-    ("masc_improve_loop_tick", deprecated "Pruned: zero external refs, inactive 90d");
-    ("masc_detachment_list", deprecated "Pruned: 2 refs (swarm read-only), inactive 90d");
-    ("masc_detachment_status", deprecated "Pruned: 2 refs (swarm read-only), inactive 90d");
+    (* Voice MCP tool: deprecated after voice group removal from tool_policy.toml.
+       Schema still registered in keeper_schema.ml for backward compat dispatch. *)
+    ("masc_voice_ping_pong", deprecated "Voice group removed from tool_policy.toml");
   ]
 
 (* ================================================================ *)

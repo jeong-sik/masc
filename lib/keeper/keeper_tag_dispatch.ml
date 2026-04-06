@@ -69,8 +69,6 @@ let dispatch
   | Mod_local_runtime ->
       Tool_local_runtime.dispatch { Tool_local_runtime.config; agent_name }
         ~name ~args
-  | Mod_portal ->
-      Tool_portal.dispatch { Tool_portal.config; agent_name } ~name ~args
   | Mod_worktree ->
       Tool_worktree.dispatch { Tool_worktree.config; agent_name } ~name ~args
   | Mod_code ->
@@ -148,15 +146,6 @@ let dispatch
           sw = Eio_context.get_switch_opt () }
         ~name ~args
 
-  | Mod_improve_loop ->
-      Tool_improve_loop.dispatch
-        { Tool_improve_loop.config; agent_name;
-          sw = Eio_context.get_switch_opt ();
-          clock = Eio_context.get_clock_opt ();
-          proc_mgr = get_proc_mgr_opt ();
-          net = get_net_opt () }
-        ~name ~args
-
   | Mod_repair_loop ->
       let ctx : _ Tool_repair_loop_types.context =
         { config; agent_name;
@@ -188,14 +177,6 @@ let dispatch
              { Tool_team_session.config; agent_name; sw; clock;
                proc_mgr = get_proc_mgr_opt ();
                net = get_net_opt () }
-             ~name ~args
-       | Error e, _ | _, Error e -> Some (false, e))
-
-  | Mod_voice ->
-      (match require_sw (), require_clock () with
-       | Ok sw, Ok clock ->
-           Tool_voice.dispatch
-             { agent_name; sw; clock; net = get_net_opt () }
              ~name ~args
        | Error e, _ | _, Error e -> Some (false, e))
 

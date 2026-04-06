@@ -34,7 +34,6 @@ let admin_only_tools =
     "masc_policy_freeze_unit";
     "masc_policy_kill_switch";
     (* CanAdmin — board moderation *)
-    "masc_board_reclassify";
     "masc_board_delete";
     (* CanAdmin — auth *)
     "masc_auth_create_token";
@@ -82,13 +81,6 @@ let worker_only_tools =
     "masc_keeper_msg";
     "masc_keeper_repair";
     "masc_keeper_create_from_persona";
-    (* CanBroadcast — voice *)
-    "masc_voice_speak";
-    "masc_voice_session_start";
-    "masc_voice_session_end";
-    "masc_voice_conference_start";
-    "masc_voice_conference_end";
-    "masc_voice_ping_pong";
     (* CanBroadcast — org units *)
     "masc_unit_define";
     "masc_unit_reparent";

@@ -387,8 +387,6 @@ let keeper_privileged_tool_names : string list =
 
 let keeper_wrapped_server_tools : string list =
   [ "masc_board_post"; "masc_board_comment"; "masc_board_list";
-    "masc_voice_speak"; "masc_voice_agent"; "masc_voice_sessions";
-    "masc_voice_session_start"; "masc_voice_session_end";
     "masc_tasks"; "masc_broadcast";
     "masc_worktree_create"; "masc_worktree_list";
     "masc_code_search"; "masc_code_symbols"; "masc_code_read";

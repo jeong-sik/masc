@@ -44,17 +44,6 @@ let handle_dispatch_recall (ctx : (_, _) context) args : result =
 let handle_dispatch_tick (ctx : (_, _) context) args : result =
   json_result (Command_plane_v2.dispatch_tick_json ctx.config ~actor:ctx.agent_name args)
 
-let handle_detachment_list (ctx : (_, _) context) args : result =
-  let operation_id = get_string_opt args "operation_id" in
-  let detachment_id = get_string_opt args "detachment_id" in
-  ( true,
-    Yojson.Safe.to_string
-      (Command_plane_v2.list_detachments_json ctx.config ?operation_id
-         ?detachment_id) )
-
-let handle_detachment_status (ctx : (_, _) context) args : result =
-  json_result (Command_plane_v2.detachment_status_json ctx.config args)
-
 let handle_policy_status (ctx : (_, _) context) : result =
   (true, Yojson.Safe.to_string (Command_plane_v2.policy_status_json ctx.config))
 

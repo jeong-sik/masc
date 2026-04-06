@@ -22,16 +22,14 @@ let register_all () =
     "masc_mcp_session";
     "masc_cancellation"; "masc_subscription"; "masc_progress";
     "masc_governance_set"; "masc_spawn";
-    "masc_episode_flush"; "masc_episode_list";
     "masc_recall_search";
     (* board *)
     "masc_board_post"; "masc_board_comment";
     "masc_board_list"; "masc_board_get";
     "masc_board_vote"; "masc_board_stats";
     "masc_board_search"; "masc_board_comment_vote";
-    "masc_board_profile"; "masc_board_hearths"; "masc_board_migrate";
+    "masc_board_profile"; "masc_board_hearths";
     "masc_board_delete";
-    "masc_board_reclassify";
   ];
 
   (* ── Mod_task: non-schema tools ─────────────────────────────── *)

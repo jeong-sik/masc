@@ -21,9 +21,6 @@ tools = ["keeper_board_get", "keeper_board_post", "keeper_board_comment", "keepe
 [groups.coordination]
 tools = ["keeper_tasks_list", "keeper_tasks_audit", "keeper_task_claim", "keeper_task_done", "keeper_broadcast"]
 
-[groups.voice]
-tools = ["keeper_voice_speak", "keeper_voice_listen", "keeper_voice_agent", "keeper_voice_sessions", "keeper_voice_session_start", "keeper_voice_session_end"]
-
 [groups.shell]
 tools = ["keeper_shell_readonly"]
 
@@ -85,7 +82,7 @@ groups = ["base"]
 masc_tools = ["masc_status", "masc_tool_help"]
 
 [presets.messaging]
-groups = ["base", "board", "coordination", "voice", "governance"]
+groups = ["base", "board", "coordination", "governance"]
 masc_groups = ["core"]
 
 [presets.coding]

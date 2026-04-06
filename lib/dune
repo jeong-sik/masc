@@ -298,11 +298,6 @@
    tools
    tool_args
    task_sandbox
-   tool_improve_loop_schemas
-   tool_improve_loop_types
-   tool_improve_loop_gh
-   tool_improve_loop_planner
-   tool_improve_loop_executor
    tool_repair_loop_types
    tool_repair_loop_storage
    tool_repair_loop_ocaml
@@ -342,7 +337,6 @@
    tool_room
    workflow_guide
    tool_control
-   tool_improve_loop
    tool_repair_loop
    tool_verification
    tool_misc
@@ -379,7 +373,6 @@
    tool_inline_dispatch_room
    tool_inline_dispatch_comm
    tool_inline_dispatch
-   tool_inline_dispatch_episode
    tool_inline_dispatch_extra
    tool_unified
    tool_help_registry
@@ -387,7 +380,6 @@
    tool_code
    tool_code_write
    tool_suspend
-   tool_voice
    mention_inbox
    agent_reputation
    activity_feed
@@ -671,11 +663,6 @@
   tool_inline_dispatch_types
   tool_inline_dispatch_room
   tool_inline_dispatch_comm
-  ;; tool_improve_loop sub-modules
-  tool_improve_loop_types
-  tool_improve_loop_gh
-  tool_improve_loop_planner
-  tool_improve_loop_executor
   ;; tool_schema_dsl — shared JSON Schema builder (added by #3640)
   tool_schema_dsl
   ;; godsplit-catalog: tool_catalog decomposition

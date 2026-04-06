@@ -15,14 +15,12 @@ let raw_schemas : tool_schema list =
   @ Tool_schemas_plan.schemas
   @ Tool_schemas_agent.schemas
   @ Tool_schemas_auth.schemas
-  @ Tool_schemas_portal.schemas
   @ Tool_schemas_worktree.schemas
   @ Tool_run.schemas
   @ Tool_task.schemas
   @ Tool_suspend.schemas
   @ Tool_relay.schemas
   @ Tool_handover.schemas
-  @ Tool_improve_loop.schemas
   @ Tool_code.schemas
   @ Tool_code_write.schemas
   @ Tool_library.schemas
@@ -38,7 +36,7 @@ let all_schemas_extended =
   @ Tool_schemas_misc.schemas
   @ Tool_keeper.schemas
   @ Tool_operator.schemas @ Tool_local_runtime.schemas @ Tool_command_plane.schemas
-  @ Tool_team_session.schemas @ Tool_voice.schemas @ Tool_shard.schemas
+  @ Tool_team_session.schemas @ Tool_shard.schemas
   @ Tool_autoresearch.schemas
 
 (** Get tool by name *)

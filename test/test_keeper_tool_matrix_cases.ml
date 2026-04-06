@@ -306,11 +306,6 @@ let extra_guard_fragments_for_name = function
   | "masc_portal_send" -> [ "no portal open" ]
   | "masc_repo_synthesis_swarm_start" ->
       [ "requires team-session launch support" ]
-  | "masc_voice_conference_start"
-  | "masc_voice_conference_end" ->
-      [ "agent_ids must include at least one agent";
-        "no active voice sessions";
-        "no active session" ]
   | "masc_worktree_remove" -> [ "worktree not found" ]
   | _ -> []
 

@@ -440,8 +440,22 @@ let enum_hints_of_schema (schema : Yojson.Safe.t) : string =
   in
   String.concat ", " enums
 
+(** Extract required fields from a tool's input_schema.
+    Returns a compact string like "required: path, content" or "" if no required fields. *)
+let required_hints_of_schema (schema : Yojson.Safe.t) : string =
+  let module U = Yojson.Safe.Util in
+  match U.member "required" schema with
+  | `List reqs ->
+    let names = List.filter_map (function
+      | `String v -> Some v
+      | _ -> None
+    ) reqs in
+    if names = [] then ""
+    else "required: " ^ String.concat ", " names
+  | _ -> ""
+
 (** Lookup tool description by name from all available schema sources.
-    Returns [Some first_sentence] + optional enum hints if found, [None] otherwise.
+    Returns [Some first_sentence] + optional enum/required hints if found, [None] otherwise.
     Searches shard-resolved tools, inline schemas, injected masc_* schemas,
     and code-write schemas. *)
 let tool_hint_of (name : string) : string option =
@@ -455,6 +469,9 @@ let tool_hint_of (name : string) : string option =
   | Some s ->
     let base = first_sentence s.description in
     let enums = enum_hints_of_schema s.Types.input_schema in
-    if enums = "" then Some base
-    else Some (base ^ " [" ^ enums)
+    let required = required_hints_of_schema s.Types.input_schema in
+    let parts = ref [base] in
+    if enums <> "" then parts := !parts @ ["[" ^ enums ^ "]"];
+    if required <> "" then parts := !parts @ [required];
+    Some (String.concat " " !parts)
   | None -> None

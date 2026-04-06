@@ -2,8 +2,3 @@
 mention_targets = ["sherlock", "log-analyzer", "janitor", "masc-improver"]
 
 proactive_enabled = true
-proactive_idle_sec = 120
-proactive_cooldown_sec = 300
-
-compaction_ratio_gate = 0.3
-compaction_message_gate = 8

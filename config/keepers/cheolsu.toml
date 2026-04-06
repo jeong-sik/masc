@@ -35,12 +35,7 @@ scope_kind = "local"
 mention_targets = ["cheolsu", "철수", "sangsu", "coder"]
 
 proactive_enabled = true
-proactive_idle_sec = 120
-proactive_cooldown_sec = 300
 execution_scope = "workspace"
-
-compaction_ratio_gate = 0.3
-compaction_message_gate = 8
 
 tool_preset = "delivery"
 tool_denylist = []

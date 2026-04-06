@@ -391,7 +391,7 @@ let run_turn
      Solves the 9B text_response trap by making proven tools visible at
      turn 0 without requiring keeper_tool_search first.  #5566 *)
   let affinity_k = Keeper_tool_affinity.configured_max_k () in
-  let _affinity_entries =
+  let affinity_populated =
     if affinity_k > 0 then begin
       let masc_root = Filename.concat config.base_path ".masc" in
       let allowed = Keeper_tool_policy.keeper_allowed_tool_names meta in
@@ -947,9 +947,10 @@ let run_turn
            unreliable for 9B models.  See #5566. *)
         let tool_choice =
           let is_autonomous = history_user_source = "world_state_prompt" in
-          if is_autonomous && turn = 0 && List.length all_allowed > 0 then begin
-            Log.Keeper.info "keeper:%s L2 tool_choice=Any on autonomous turn 0"
-              meta.name;
+          if is_autonomous && turn = 0 && affinity_populated <> []
+             && List.length all_allowed > 0 then begin
+            Log.Keeper.info "keeper:%s L2 tool_choice=Any on autonomous turn 0 (%d affinity tools)"
+              meta.name (List.length affinity_populated);
             Some Agent_sdk.Types.Any
           end else
             current_params.tool_choice

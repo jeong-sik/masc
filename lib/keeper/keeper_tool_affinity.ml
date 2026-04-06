@@ -45,8 +45,17 @@ type affinity_entry = {
 (* ISO8601 timestamp parser (minimal)                                *)
 (* ================================================================ *)
 
-(** Parse "YYYY-MM-DDTHH:MM:SSZ" to Unix timestamp.
-    Returns [None] on parse failure. *)
+(** Compute the local→UTC offset in seconds.
+    Cached once per process to avoid repeated syscalls. *)
+let utc_offset_sec : float =
+  let t = Unix.gettimeofday () in
+  let utc_tm = Unix.gmtime t in
+  let (local_as_utc, _) = Unix.mktime utc_tm in
+  t -. local_as_utc
+
+(** Parse "YYYY-MM-DDTHH:MM:SSZ" to Unix timestamp (UTC).
+    [Unix.mktime] interprets as local time, so we subtract [utc_offset_sec]
+    to convert to true UTC.  Returns [None] on parse failure. *)
 let unix_of_iso8601 (s : string) : float option =
   try
     Scanf.sscanf s "%d-%d-%dT%d:%d:%d"
@@ -57,7 +66,7 @@ let unix_of_iso8601 (s : string) : float option =
           tm_wday = 0; tm_yday = 0; tm_isdst = false;
         } in
         let (ts, _) = Unix.mktime tm in
-        Some ts)
+        Some (ts -. utc_offset_sec))
   with _ -> None
 
 (* ================================================================ *)
@@ -110,8 +119,9 @@ let pre_populate_from_history
     let entries =
       Trajectory.read_entries_since ~masc_root ~keeper_name ~since
     in
-    if entries = [] then []
-    else
+    match entries with
+    | [] -> []
+    | _ ->
       let tool_stats = Trajectory.aggregate_tool_stats entries in
       let allowed_set = Hashtbl.create (List.length allowed_tool_names) in
       List.iter (fun n -> Hashtbl.replace allowed_set n ()) allowed_tool_names;

@@ -9,6 +9,7 @@ import { LoadingState } from './common/feedback-state'
 import { TextInput } from './common/input'
 import { stripStateBlocks } from '../keeper-message'
 import { navigate } from '../router'
+import { navigateToAuthor } from '../lib/board-utils'
 import {
   detailComments,
   detailLoading,
@@ -82,14 +83,14 @@ function CommentItem({
       <div class="board-comment rounded-lg p-3 bg-[var(--white-3)] border border-[var(--border-slate-12)] ${depth > 0 ? 'border-l-2 border-l-[var(--accent-20)]' : ''}">
         <div class="flex items-center gap-2 mb-1.5">
           <span class="text-[12px]">${authorAvatar(comment.author)}</span>
-          <a class="text-[12px] font-medium text-[var(--text-body)] hover:text-[var(--accent)] transition-colors cursor-pointer" onClick=${() => navigate('monitoring', { section: 'agents', agent: comment.author })}>${comment.author}</a>
+          <a class="text-[12px] font-medium text-[var(--text-body)] hover:text-[var(--accent)] transition-colors cursor-pointer" onClick=${() => navigateToAuthor(comment.author)}>${comment.author}</a>
           <span class="text-[11px] text-[var(--text-muted)] opacity-60"><${TimeAgo} timestamp=${comment.created_at} /></span>
           <button type="button"
             class="text-[11px] text-[var(--text-muted)] hover:text-[var(--accent)] cursor-pointer bg-transparent border-0 ml-auto"
             onClick=${() => { replyingTo.value = isReplying ? null : comment.id; commentText.value = '' }}
           >${isReplying ? '취소' : '답글'}</button>
         </div>
-        <div class="text-[13px] text-[var(--text-body)] leading-[1.55] whitespace-pre-wrap">${displayText}</div>
+        <div class="text-[13px] text-[var(--text-body)] leading-[1.55]"><${Markdown} text=${displayText} /></div>
         ${needsTruncation ? html`
           <button type="button"
             class="mt-1 text-[11px] text-[var(--accent)] hover:underline cursor-pointer bg-transparent border-0"
@@ -224,7 +225,7 @@ export function PostDetail({ post }: { post: BoardPost }) {
           <!-- Author and meta -->
           <div class="flex gap-2.5 items-center flex-wrap pt-3 border-t border-[var(--border-slate-12)]">
             <span class="text-[13px]">${authorAvatar(post.author)}</span>
-            <a class="text-[12px] text-[var(--text-body)] hover:text-[var(--accent)] transition-colors cursor-pointer" onClick=${() => navigate('monitoring', { section: 'agents', agent: post.author })}>${post.author}</a>
+            <a class="text-[12px] text-[var(--text-body)] hover:text-[var(--accent)] transition-colors cursor-pointer" onClick=${() => navigateToAuthor(post.author)}>${post.author}</a>
             <span class="text-[11px] text-[var(--text-muted)]"><${TimeAgo} timestamp=${post.created_at} /></span>
             <span class="text-[11px] text-[var(--text-muted)]">${post.votes ?? 0} votes</span>
           </div>

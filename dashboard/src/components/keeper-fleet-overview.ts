@@ -149,8 +149,8 @@ export function KeeperFleetOverview({ keepers: allKeepers }: { keepers: Keeper[]
 
   // Sort: active first, then by recency
   const sorted = [...allKeepers].sort((a, b) => {
-    const aActive = a.pipeline_stage === 'thinking' || a.pipeline_stage === 'tool_use' ? 1 : 0
-    const bActive = b.pipeline_stage === 'thinking' || b.pipeline_stage === 'tool_use' ? 1 : 0
+    const aActive = ACTIVE_STAGES.has(a.pipeline_stage ?? '') ? 1 : 0
+    const bActive = ACTIVE_STAGES.has(b.pipeline_stage ?? '') ? 1 : 0
     if (aActive !== bActive) return bActive - aActive
     return (a.last_activity_ago_s ?? 9999) - (b.last_activity_ago_s ?? 9999)
   })

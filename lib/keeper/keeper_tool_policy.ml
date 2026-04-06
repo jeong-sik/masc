@@ -417,8 +417,31 @@ let first_sentence desc =
   let s = String.sub desc 0 cutoff in
   if cutoff < len then String.trim s else s
 
+(** Extract enum values from a tool's input_schema.
+    Returns a compact string like "op=pwd|ls|cat|rg|git_status" or "" if no enums found. *)
+let enum_hints_of_schema (schema : Yojson.Safe.t) : string =
+  let module U = Yojson.Safe.Util in
+  let properties = match U.member "properties" schema with
+  | `Assoc props -> U.to_assoc props
+  | _ -> []
+  in
+  let enums =
+    properties
+    |> List.filter_map (fun (name, field_schema) ->
+      match U.member "enum" field_schema with
+      | `List values ->
+        let vals = List.filter_map (function
+          | `String v -> Some v
+          | _ -> None
+        ) values in
+        if vals = [] then None
+        else Some (Printf.sprintf "%s=%s" name (String.concat "|" vals))
+      | _ -> None)
+  in
+  String.concat ", " enums
+
 (** Lookup tool description by name from all available schema sources.
-    Returns [Some first_sentence] if found, [None] otherwise.
+    Returns [Some first_sentence] + optional enum hints if found, [None] otherwise.
     Searches shard-resolved tools, inline schemas, injected masc_* schemas,
     and code-write schemas. *)
 let tool_hint_of (name : string) : string option =
@@ -429,5 +452,9 @@ let tool_hint_of (name : string) : string option =
     @ Tool_code_write.schemas
   in
   match List.find_opt (fun (s : Types.tool_schema) -> s.name = name) all_schemas with
-  | Some s -> Some (first_sentence s.description)
+  | Some s ->
+    let base = first_sentence s.description in
+    let enums = enum_hints_of_schema s.Types.input_schema in
+    if enums = "" then Some base
+    else Some (base ^ " [" ^ enums)
   | None -> None

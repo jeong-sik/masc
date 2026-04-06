@@ -37,12 +37,10 @@ let failure_reason_to_string = function
   | Fiber_unresolved -> "fiber_unresolved"
   | Exception s -> Printf.sprintf "exception(%s)" s
 
-(** Structured exception raised by keeper_keepalive when consecutive
-    heartbeat failures exceed the threshold. *)
-exception Keeper_heartbeat_failure of {
-  reason : failure_reason;
-  keeper_name : string;
-}
+(** Pure control-flow signal for immediate fiber termination (RFC-0002).
+    Carries no state — failure reason must be pre-stored via
+    [set_failure_reason] before raising. *)
+exception Keeper_fiber_crash
 
 type registry_entry = {
   base_path : string;

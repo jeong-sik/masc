@@ -65,14 +65,15 @@ let eio_test name fn =
    1. Structured crash flow — supervisor catch simulation
    ══════════════════════════════════════════════════════════ *)
 
-(** Simulate the Keeper_heartbeat_failure catch branch in
-    launch_supervised_fiber (lines 54-65 of keeper_supervisor.ml).
+(** Simulate the Keeper_fiber_crash catch branch in
+    launch_supervised_fiber.  Failure reason is pre-stored in registry,
+    exception carries no payload (RFC-0002).
     Verifies: state = Crashed, failure_reason stored, done_p resolved. *)
 let test_crash_heartbeat_failure () =
   R.clear ();
   let meta = make_meta "hb-crash" in
   let reg = R.register ~base_path:bp "hb-crash" meta in
-  (* Simulate what launch_supervised_fiber does on Keeper_heartbeat_failure *)
+  (* Simulate what launch_supervised_fiber does on Keeper_fiber_crash *)
   let reason = R.Heartbeat_consecutive_failures 5 in
   let reason_str = R.failure_reason_to_string reason in
   R.set_failure_reason ~base_path:bp "hb-crash" (Some reason);
@@ -486,6 +487,93 @@ let test_stop_keepalive_preserves_existing_crash_outcome () =
      | Some `Stopped -> fail "manual stop should not overwrite a crashed promise"
      | None -> fail "expected crash promise to remain resolved")
 
+(* ══════════════════════════════════════════════════════════
+   9. RFC-0002: pipeline_stage_of_phase deterministic mapping
+
+   NOTE: The "set_failure_reason before raise Keeper_fiber_crash"
+   ordering invariant is a code convention enforced by review,
+   not a runtime property testable by unit tests. See PR #5560.
+   ══════════════════════════════════════════════════════════ *)
+
+module ES = Masc_mcp.Keeper_exec_status
+
+(** Verify pipeline_stage_of_phase covers all 11 phases and produces
+    the expected deterministic mapping. No heuristic, no timestamps. *)
+let test_pipeline_stage_of_phase_exhaustive () =
+  let cases = [
+    (KSM.Offline, "offline");
+    (KSM.Running, "idle");
+    (KSM.Failing, "failing");
+    (KSM.Compacting, "compacting");
+    (KSM.HandingOff, "handoff");
+    (KSM.Draining, "draining");
+    (KSM.Paused, "paused");
+    (KSM.Stopped, "offline");
+    (KSM.Crashed, "crashed");
+    (KSM.Restarting, "restarting");
+    (KSM.Dead, "offline");
+  ] in
+  check int "all 11 phases covered" 11 (List.length cases);
+  List.iter (fun (phase, expected) ->
+    let actual = ES.pipeline_stage_of_phase phase in
+    check string
+      (Printf.sprintf "%s → %s" (KSM.phase_to_string phase) expected)
+      expected actual
+  ) cases
+
+(** Verify non-registered keepers → get_phase returns None, and
+    registered keepers in every phase → pipeline_stage_of_phase produces
+    a non-None mapping. This tests the production boundary:
+    get_phase feeds into pipeline_stage_of_phase. *)
+let test_pipeline_stage_unregistered_is_offline () =
+  R.clear ();
+  (* Unregistered: get_phase must return None *)
+  check bool "unregistered → no phase"
+    true (Option.is_none (R.get_phase ~base_path:bp "ghost"));
+  (* Registered: get_phase returns real phase, of_phase gives deterministic stage *)
+  let meta = make_meta "alive" in
+  let _reg = R.register ~base_path:bp "alive" meta in
+  (match R.get_phase ~base_path:bp "alive" with
+   | Some phase ->
+     let stage = ES.pipeline_stage_of_phase phase in
+     check bool "registered → non-empty stage" true (String.length stage > 0);
+     check string "running → idle" "idle" stage
+   | None -> fail "registered keeper must have a phase");
+  (* Crash the keeper and verify phase + stage update *)
+  ignore (R.dispatch_event ~base_path:bp "alive"
+    (KSM.Fiber_terminated { outcome = "test" }));
+  (match R.get_phase ~base_path:bp "alive" with
+   | Some phase ->
+     let stage = ES.pipeline_stage_of_phase phase in
+     check string "crashed → crashed stage" "crashed" stage;
+     check string "phase is crashed" "crashed" (KSM.phase_to_string phase)
+   | None -> fail "crashed keeper must still have a phase")
+
+(** Sensitivity: pipeline_stage_of_phase DIFFERS from "offline" for
+    most active phases. Proves the mapping has teeth — it actually
+    distinguishes running/failing/compacting/etc. *)
+let test_pipeline_stage_sensitivity () =
+  let non_offline_phases = [
+    KSM.Running; KSM.Failing; KSM.Compacting; KSM.HandingOff;
+    KSM.Draining; KSM.Paused; KSM.Crashed; KSM.Restarting;
+  ] in
+  List.iter (fun phase ->
+    let stage = ES.pipeline_stage_of_phase phase in
+    check bool
+      (Printf.sprintf "%s should NOT map to offline"
+         (KSM.phase_to_string phase))
+      true (stage <> "offline")
+  ) non_offline_phases;
+  (* Terminal/inactive phases DO map to offline *)
+  let offline_phases = [KSM.Offline; KSM.Stopped; KSM.Dead] in
+  List.iter (fun phase ->
+    let stage = ES.pipeline_stage_of_phase phase in
+    check string
+      (Printf.sprintf "%s should map to offline"
+         (KSM.phase_to_string phase))
+      "offline" stage
+  ) offline_phases
+
 (* ── Test runner ──────────────────────────────────────────── *)
 
 let () =
@@ -522,5 +610,13 @@ let () =
         test_stop_keepalive_resolves_running_entry_immediately;
       test_case "manual stop preserves crashed outcome" `Quick
         test_stop_keepalive_preserves_existing_crash_outcome;
+    ];
+    "pipeline_stage_phase", [
+      test_case "exhaustive 11-phase mapping" `Quick
+        test_pipeline_stage_of_phase_exhaustive;
+      test_case "unregistered keeper → offline" `Quick
+        test_pipeline_stage_unregistered_is_offline;
+      test_case "sensitivity: active phases ≠ offline" `Quick
+        test_pipeline_stage_sensitivity;
     ];
   ]

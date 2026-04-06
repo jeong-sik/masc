@@ -83,26 +83,23 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
            if resolve_done `Stopped then
              publish_lifecycle "stopped" meta.name "normal exit"
          with
-         | Keeper_registry.Keeper_heartbeat_failure info ->
-             let reason =
-               Keeper_registry.failure_reason_to_string info.reason in
-             Keeper_registry.set_failure_reason ~base_path meta.name
-               (Some info.reason);
-             ignore (Keeper_registry.dispatch_event ~base_path meta.name
-               (Keeper_state_machine.Fiber_terminated { outcome = reason }));
-             let ts = Time_compat.now () in
-             Keeper_registry.record_crash ~base_path
-               meta.name ts reason;
-             let rc = match Keeper_registry.get ~base_path meta.name with
-               | Some e -> e.restart_count | None -> 0 in
-             Keeper_crash_persistence.enqueue_record ~keepers_dir
-               ~name:meta.name ~ts ~reason ~restart_count:rc;
-             Keeper_registry.record_error ~base_path meta.name reason;
-             if resolve_done (`Crashed reason) then
-               publish_lifecycle "crashed" meta.name reason
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->
-             let fr = Keeper_registry.Exception (Printexc.to_string exn) in
+             (* RFC-0002: unified crash handler.
+                Keeper_fiber_crash carries no payload — failure_reason is
+                pre-stored in registry by the raise site.
+                For unexpected exceptions, wrap in Exception variant. *)
+             let fr = match exn with
+               | Keeper_registry.Keeper_fiber_crash ->
+                 (match Keeper_registry.get ~base_path meta.name with
+                  | Some e ->
+                    Option.value
+                      ~default:(Keeper_registry.Exception "fiber_crash")
+                      e.last_failure_reason
+                  | None ->
+                    Keeper_registry.Exception "fiber_crash (unregistered)")
+               | _ -> Keeper_registry.Exception (Printexc.to_string exn)
+             in
              let reason = Keeper_registry.failure_reason_to_string fr in
              Keeper_registry.set_failure_reason ~base_path meta.name (Some fr);
              ignore (Keeper_registry.dispatch_event ~base_path meta.name

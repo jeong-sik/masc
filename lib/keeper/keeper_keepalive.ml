@@ -702,12 +702,13 @@ let run_keepalive_unified_turn
               meta_after_observe.name e_str;
             if String_util.contains_substring e_str "Eio switch not available"
                || String_util.contains_substring e_str "Eio net not available"
-            then
-              raise (Keeper_registry.Keeper_heartbeat_failure {
-                reason = Keeper_registry.Exception
-                  (Printf.sprintf "fatal environment error: %s" e_str);
-                keeper_name = meta_after_observe.name;
-              });
+            then begin
+              Keeper_registry.set_failure_reason
+                ~base_path:ctx.config.base_path meta_after_observe.name
+                (Some (Keeper_registry.Exception
+                  (Printf.sprintf "fatal environment error: %s" e_str)));
+              raise Keeper_registry.Keeper_fiber_crash
+            end;
             (match read_meta ctx.config meta_after_observe.name with
              | Ok (Some latest) -> latest
              | _ -> meta_after_observe)
@@ -718,7 +719,7 @@ let run_keepalive_unified_turn
         meta_after_triage
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
-    | Keeper_registry.Keeper_heartbeat_failure _ as e -> raise e
+    | Keeper_registry.Keeper_fiber_crash as e -> raise e
     | exn ->
       Log.Keeper.error "%s: unified turn exception: %s"
         meta_after_triage.name (Printexc.to_string exn);
@@ -984,15 +985,15 @@ let run_heartbeat_loop
             ~work_as_hb
             ~max_silence
         in
-        (* Phase 2: structured exception instead of silent stop *)
+        (* RFC-0002: fiber crash on heartbeat threshold breach *)
         if !consecutive_failures >= max_consecutive_heartbeat_failures ()
-        then
-          raise
-            (Keeper_registry.Keeper_heartbeat_failure
-               { reason =
-                   Keeper_registry.Heartbeat_consecutive_failures !consecutive_failures
-               ; keeper_name = m.name
-               });
+        then begin
+          Keeper_registry.set_failure_reason
+            ~base_path:ctx.config.base_path m.name
+            (Some (Keeper_registry.Heartbeat_consecutive_failures
+                     !consecutive_failures));
+          raise Keeper_registry.Keeper_fiber_crash
+        end;
         let t_presence_end = Time_compat.now () in
         let now_ts = t_presence_end in
         let t_snapshot_start = now_ts in
@@ -1044,12 +1045,12 @@ let run_heartbeat_loop
             ~base_path:ctx.config.base_path m.name
             Keeper_state_machine.Turn_succeeded);
         if turn_fail_count >= max_consecutive_turn_failures ()
-        then
-          raise
-            (Keeper_registry.Keeper_heartbeat_failure
-               { reason = Keeper_registry.Turn_consecutive_failures turn_fail_count
-               ; keeper_name = m.name
-               });
+        then begin
+          Keeper_registry.set_failure_reason
+            ~base_path:ctx.config.base_path m.name
+            (Some (Keeper_registry.Turn_consecutive_failures turn_fail_count));
+          raise Keeper_registry.Keeper_fiber_crash
+        end;
         (* Phase 1: work-as-heartbeat — renew point (b).
                  After turn, call Room.heartbeat to prove room I/O health.
                  On success: refresh freshness lease + reset consecutive_failures.
@@ -1472,11 +1473,20 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
             run_heartbeat_loop ~proactive_warmup_sec ctx live_meta stop ~wakeup;
             record_stopped "normal exit"
           with
-          | Keeper_registry.Keeper_heartbeat_failure info ->
+          | Keeper_registry.Keeper_fiber_crash ->
             if Atomic.get stop then
               record_stopped "manual stop"
             else
-              record_crash info.reason
+              let reason =
+                match Keeper_registry.get
+                        ~base_path:ctx.config.base_path live_meta.name with
+                | Some e ->
+                  Option.value
+                    ~default:(Keeper_registry.Exception "fiber_crash")
+                    e.last_failure_reason
+                | None -> Keeper_registry.Exception "fiber_crash"
+              in
+              record_crash reason
           | Eio.Cancel.Cancelled _ as e -> raise e
           | exn ->
             if Atomic.get stop then

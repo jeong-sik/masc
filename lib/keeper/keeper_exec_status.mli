@@ -38,12 +38,6 @@ val keeper_surface_status :
   diagnostic:Yojson.Safe.t ->
   string
 
-val derive_pipeline_stage :
-  meta:keeper_meta ->
-  surface_status:string ->
-  now_ts:float ->
-  string
-
-(** RFC-0002: derive pipeline stage directly from phase.
+(** Derive pipeline stage directly from phase (RFC-0002).
     Deterministic mapping, no 30s recency heuristic. *)
 val pipeline_stage_of_phase : Keeper_state_machine.phase -> string

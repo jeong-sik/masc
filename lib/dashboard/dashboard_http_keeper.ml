@@ -461,12 +461,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                 (match registry_entry with
                  | Some entry ->
                    Keeper_exec_status.pipeline_stage_of_phase entry.phase
-                 | None ->
-                   Keeper_exec_status.derive_pipeline_stage
-                     ~meta:m
-                     ~surface_status:(Keeper_exec_status.keeper_surface_status
-                                        ~agent_status:agent ~diagnostic)
-                     ~now_ts));
+                 | None -> "offline"));
               ("runtime_class", `String "keeper");
               ("registry_state",
                 match registry_state with
@@ -779,25 +774,10 @@ let keeper_config_json (config : Room.config) (name : string)
           ("compaction_count", `Int m.runtime.compaction_rt.count);
         ]
       in
-      let now_ts = Time_compat.now () in
-      let agent_status =
-        Keeper_exec_status.parse_agent_status config ~agent_name:m.agent_name
-      in
       let pipeline_stage =
         match Keeper_registry.get_phase ~base_path:config.base_path m.name with
         | Some phase -> Keeper_exec_status.pipeline_stage_of_phase phase
-        | None ->
-          let diagnostic_for_stage =
-            Keeper_exec_status.keeper_diagnostic_json
-              ~meta:m ~agent_status
-              ~keepalive_running:(runtime_keepalive_running config m)
-              ~history_items:[] ~now_ts
-          in
-          let surface =
-            Keeper_exec_status.keeper_surface_status
-              ~agent_status ~diagnostic:diagnostic_for_stage
-          in
-          Keeper_exec_status.derive_pipeline_stage ~meta:m ~surface_status:surface ~now_ts
+        | None -> "offline"
       in
       let tools_access =
         let allowed = Keeper_exec_tools.keeper_allowed_tool_names m in

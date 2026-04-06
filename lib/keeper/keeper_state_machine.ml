@@ -242,10 +242,17 @@ let derive_phase (c : conditions) : phase =
 
      However, if the fiber dies DURING drain (drain_complete=false),
      the fiber_alive checks fire first and the keeper goes to Crashed.
-     This is also correct: the drain did not complete. *)
+     This is also correct: the drain did not complete.
 
-  (* 1. Completed stop always wins — drain succeeded *)
-  if c.stop_requested && c.drain_complete then Stopped
+     TLA+ model checking (TLC) found a deadlock where Stopped is entered
+     while compaction_active or handoff_active is still TRUE. This is a
+     semantic contradiction: drain_complete means ALL work is finished,
+     which includes buffer operations. Guard Stopped against active buffer
+     ops so the keeper stays in Draining until compaction/handoff exits. *)
+
+  (* 1. Completed stop — drain succeeded AND no buffer ops in flight *)
+  if c.stop_requested && c.drain_complete
+     && not c.compaction_active && not c.handoff_active then Stopped
   (* 2. Fiber lifecycle — Dead / Restarting / Crashed *)
   else if not c.fiber_alive && not c.restart_budget_remaining then Dead
   else if not c.fiber_alive && c.restart_budget_remaining && c.backoff_elapsed then Restarting
@@ -311,11 +318,19 @@ let update_conditions (c : conditions) (ev : event) : conditions =
   | Drain_complete ->
     { c with drain_complete = true }
   | Fiber_started ->
-    (* A new fiber = a new life. Reset health, buffer, and backoff conditions.
+    (* A new fiber = a new life. Reset health, buffer, backoff, and stop conditions.
        Previous heartbeat/turn failures, in-progress compaction/handoff, and
        supervisor backoff state are all irrelevant to the new fiber.
-       Operator intentions (operator_paused, stop_requested) and budget
-       (restart_budget_remaining) are preserved — they transcend fiber lifetime. *)
+
+       TLA+ model checking found that preserving stop_requested across fiber
+       restart causes a liveness violation: the new fiber enters Draining
+       immediately and can never complete drain, creating an infinite loop.
+       Restart = "bring this keeper back" which contradicts "stop this keeper."
+       Therefore stop_requested is reset on fiber start.
+
+       operator_paused IS preserved — pause is an operator investigation tool
+       that should survive restarts. Budget is preserved — it's a supervisor
+       policy, not a fiber concern. *)
     { c with
       fiber_alive = true;
       heartbeat_healthy = true;
@@ -325,6 +340,7 @@ let update_conditions (c : conditions) (ev : event) : conditions =
       backoff_elapsed = false;
       guardrail_triggered = false;
       drain_complete = false;
+      stop_requested = false;
     }
   | Fiber_terminated _ ->
     { c with fiber_alive = false }

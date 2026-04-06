@@ -107,7 +107,7 @@ function statusColor(status: string): { bg: string; text: string; dot: string } 
     case 'unbooted':
       return { bg: 'bg-[rgba(148,163,184,0.08)]', text: 'text-[#64748b]', dot: 'bg-[#475569]' }
     case 'stopped':
-      return { bg: 'bg-[rgba(239,68,68,0.08)]', text: 'text-[#fb7185]', dot: 'bg-[#f43f5e]' }
+      return { bg: 'bg-[rgba(148,163,184,0.12)]', text: 'text-[#94a3b8]', dot: 'bg-[#64748b]' }
     case 'error':
     case 'critical':
       return { bg: 'bg-[rgba(239,68,68,0.12)]', text: 'text-[var(--bad)]', dot: 'bg-[var(--bad)]' }
@@ -171,28 +171,14 @@ function KeeperCommsPanel({ keeper }: { keeper: Keeper }) {
         <div class="px-4 py-3 rounded-xl border border-[var(--card-border)] bg-[rgba(90,100,120,0.08)] text-[13px] text-[var(--text-muted)]">
           이 키퍼는 현재 비활동 상태입니다. 기동 후 메시지를 보낼 수 있습니다.
         </div>
-      ` : null}
-
-      <div class="flex flex-col gap-4">
+      ` : html`
         <div class="w-full">
           <${KeeperConversationPanel}
             keeperName=${keeper.name}
-            placeholder=${isOffline ? '키퍼 오프라인 — 기동 필요' : '이 키퍼에게 직접 프롬프트 전송'}
+            placeholder=${'이 키퍼에게 직접 프롬프트 전송'}
           />
         </div>
-
-        <details class="group">
-          <summary class="cursor-pointer py-2.5 px-4 text-xs text-[var(--text-muted)] tracking-wider uppercase list-none select-none rounded-lg hover:bg-[var(--white-3)] transition-colors">런타임 진단</summary>
-          <div class="flex flex-col gap-3 px-4 pb-4 pt-2">
-            <${KeeperDiagnosticSummary} keeper=${keeper} />
-            <${KeeperRuntimeActions}
-              actor=${currentDashboardActor()}
-              keeper=${keeper}
-              onSocialSweep=${() => { void runSocialSweep() }}
-            />
-          </div>
-        </details>
-      </div>
+      `}
     </div>
   `
 }
@@ -486,12 +472,26 @@ export function KeeperDetailOverlay() {
         <${MetricsCharts} keeper=${keeper} />
 
         ${'' /* ── Per-keeper tool telemetry ── */}
-        <${SectionCard} title="도구 텔레메트리">
-          <${KeeperToolTelemetry} keeperName=${keeper.name} />
-        <//>
+        <${KeeperToolTelemetry} keeperName=${keeper.name} />
 
         ${'' /* ── Direct conversation ── */}
         <${KeeperCommsPanel} keeper=${keeper} />
+
+        ${'' /* ── Runtime diagnostics (promoted from comms panel) ── */}
+        <details class="group">
+          <summary class="cursor-pointer py-2.5 px-4 text-xs text-[var(--text-muted)] tracking-wider uppercase list-none select-none rounded-lg hover:bg-[var(--white-3)] transition-colors flex items-center gap-2">
+            <span class="w-1.5 h-1.5 rounded-full bg-[var(--text-dim)]"></span>
+            런타임 진단
+          </summary>
+          <div class="flex flex-col gap-3 px-4 pb-4 pt-2">
+            <${KeeperDiagnosticSummary} keeper=${keeper} />
+            <${KeeperRuntimeActions}
+              actor=${currentDashboardActor()}
+              keeper=${keeper}
+              onSocialSweep=${() => { void runSocialSweep() }}
+            />
+          </div>
+        </details>
 
         ${'' /* ── Live journal stream ── */}
         <${AgentJournalStream} agentName=${keeper.name} />
@@ -609,16 +609,22 @@ export function KeeperDetailOverlay() {
 
           ${'' /* ── Activity Trace (promoted to main view) ── */}
           <div class="md:col-span-2">
-            <${SectionCard} title="활동 추적">
+            <${SectionCard} title="세션 활동 로그">
+              <div class="text-[11px] text-[var(--text-muted)] mb-3">현재 세션의 도구 호출, 태스크 완료, 메시지 등 이벤트 기록</div>
               <${SessionTraceView} agentName=${keeper.name} isKeeper=${true} keeperStatus=${keeper.status} keeperGeneration=${keeper.generation} />
             <//>
           </div>
 
-          <${SectionCard} title="품질 시그널">
+          <details class="p-5 rounded-2xl border border-card-border bg-card/40 backdrop-blur-md shadow-sm">
+            <summary class="cursor-pointer text-[11px] font-semibold uppercase tracking-widest text-text-muted list-none select-none flex items-center gap-2">
+              <span class="w-1.5 h-1.5 rounded-full bg-accent/50"></span>
+              품질 시그널 (고급 지표)
+            </summary>
+            <div class="mt-3 text-[11px] text-[var(--text-muted)] mb-3">폴백 비율, 정렬 품질, 자율 행동 비율 등 metrics_window 기반 런타임 품질 지표</div>
             <${RuntimeSignals} keeper=${keeper} />
-          <//>
+          </details>
 
-          <${SectionCard} title="인근 환경 & 도구 감사">
+          <${SectionCard} title="도구 정책 & 감사">
             <${KeeperNeighborhood} keeper=${keeper} />
           <//>
 

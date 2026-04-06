@@ -587,7 +587,7 @@ and resume_worker_via_oas
   in
   let injector_config = Masc_context_injector.default_config () in
   let context_injector = Masc_context_injector.make ~config:injector_config () in
-  let shared_context = Oas.Context.create () in
+  let shared_context = Oas.Context.copy checkpoint.context in
   let gate_config = gate_config_of_execution_scope meta.execution_scope in
   let tool_names_ref, hooks = make_tool_tracking_hooks ~gate_config ~context:shared_context () in
   let resume_model_id = resume_model_id_of_checkpoint meta checkpoint in
@@ -606,8 +606,7 @@ and resume_worker_via_oas
     Option.value ~default:false meta.thinking_enabled
   in
   let guardrails =
-    gate_config_of_execution_scope meta.execution_scope
-    |> Verifier_oas.eval_gate_to_oas_guardrails
+    Verifier_oas.eval_gate_to_oas_guardrails gate_config
   in
   let config, options =
     Worker_container.build_resume_config ~worker_name
@@ -633,7 +632,8 @@ and resume_worker_via_oas
         | Error e -> raise (Failure ("worker join failed: " ^ e))
       in
       let agent =
-        Oas.Agent.resume ~net ~checkpoint ~tools ~options ~config ()
+        Oas.Agent.resume ~net ~checkpoint ~tools ~options ~config
+          ~context:shared_context ()
       in
       let workspace_path =
         if String.trim meta.workspace_path <> "" then meta.workspace_path

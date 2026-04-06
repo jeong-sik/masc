@@ -818,6 +818,11 @@
  (libraries masc_test_deps))
 
 (executable
+ (name test_worker_safety_gates)
+ (modules test_worker_safety_gates)
+ (libraries masc_test_deps))
+
+(executable
  (name tool_matrix_manifest)
  (modules tool_matrix_manifest test_mcp_tool_matrix_cases)
  (libraries masc_test_deps))

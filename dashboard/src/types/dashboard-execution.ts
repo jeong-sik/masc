@@ -439,6 +439,9 @@ export interface ServerStatus {
     failures: number
     failure_rate: number
     since_epoch: number
+    distinct_tools?: number
+    top_failures?: Array<{ tool: string; calls: number; failures: number }>
+    top_active?: Array<{ tool: string; calls: number; failures: number }>
   }
   alert_thresholds?: {
     proactive_fallback_warn: number

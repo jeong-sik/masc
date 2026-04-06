@@ -13,6 +13,8 @@ type shard = {
   description : string;
 }
 
+module StringMap = Map.Make(String)
+
 (** Predefined shards *)
 
 let base_tools : Types.tool_schema list = [
@@ -593,7 +595,7 @@ let shard_autoresearch : shard = {
   description = "Autonomous experiment loop: start, cycle, status, inject, stop";
 }
 
-let agent_shards : (string, string list) Hashtbl.t = Hashtbl.create 32
+let agent_shards : string list StringMap.t ref = ref StringMap.empty
 
 (** Default shards for a new keeper.
     All keepers get all shards unconditionally. Safety is handled by
@@ -611,16 +613,15 @@ let default_shard_names : string list = [
 ]
 
 let get_agent_shards (agent_name : string) : string list =
-  Hashtbl.find_opt agent_shards agent_name
+  StringMap.find_opt agent_name !agent_shards
   |> Option.value ~default:default_shard_names
 
 let set_agent_shards (agent_name : string) (shards : string list) : unit =
-  Hashtbl.replace agent_shards agent_name (List.sort_uniq String.compare shards)
+  agent_shards := StringMap.add agent_name (List.sort_uniq String.compare shards) !agent_shards
 
 (** All predefined shards by name *)
-let all_shards : (string, shard) Hashtbl.t =
-  let tbl = Hashtbl.create 16 in
-  List.iter (fun s -> Hashtbl.add tbl s.name s) [
+let all_shards : shard StringMap.t =
+  List.fold_left (fun map s -> StringMap.add s.name s map) StringMap.empty [
     shard_base;
     shard_board;
     shard_filesystem;
@@ -631,17 +632,16 @@ let all_shards : (string, shard) Hashtbl.t =
     shard_taskboard;
     shard_governance;
     shard_autoresearch;
-  ];
-  tbl
+  ]
 
 (** Get a shard by name *)
 let get_shard (name : string) : shard option =
-  Hashtbl.find_opt all_shards name
+  StringMap.find_opt name all_shards
 
 (** Combine tools from multiple shard names *)
 let tools_of_shards (shard_names : string list) : Types.tool_schema list =
   shard_names
-  |> List.filter_map (fun name -> Hashtbl.find_opt all_shards name)
+  |> List.filter_map (fun name -> StringMap.find_opt name all_shards)
   |> List.concat_map (fun (s : shard) -> s.tools)
 
 (** {1 Dynamic Shard Management} *)
@@ -650,7 +650,7 @@ let tools_of_shards (shard_names : string list) : Types.tool_schema list =
     Fails if shard doesn't exist or is already granted. *)
 let grant_shard (active_shards : string list) (shard_name : string) :
   (string list, string) result =
-  match Hashtbl.find_opt all_shards shard_name with
+  match StringMap.find_opt shard_name all_shards with
   | None -> Error (Printf.sprintf "Unknown shard: %s" shard_name)
   | Some _ ->
     if List.mem shard_name active_shards then
@@ -662,7 +662,7 @@ let grant_shard (active_shards : string list) (shard_name : string) :
     Fails if shard is not removable or not currently granted. *)
 let revoke_shard (active_shards : string list) (shard_name : string) :
   (string list, string) result =
-  match Hashtbl.find_opt all_shards shard_name with
+  match StringMap.find_opt shard_name all_shards with
   | None -> Error (Printf.sprintf "Unknown shard: %s" shard_name)
   | Some shard ->
     if not shard.removable then
@@ -674,7 +674,7 @@ let revoke_shard (active_shards : string list) (shard_name : string) :
 
 (** List all available shards with their status *)
 let list_all_shards () : (string * bool * int) list =
-  Hashtbl.fold (fun name (shard : shard) acc ->
+  StringMap.fold (fun name (shard : shard) acc ->
     (name, shard.removable, List.length shard.tools) :: acc
   ) all_shards []
 

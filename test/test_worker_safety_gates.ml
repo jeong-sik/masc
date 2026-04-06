@@ -114,6 +114,21 @@ let test_cost_gate_blocks_over_budget () =
        (Astring.String.is_infix ~affix:"cost_gate" msg)
    | _ -> fail "expected Override for cost budget exceeded")
 
+let test_cost_gate_blocks_at_exact_limit () =
+  let gate_config = default_gate ~max_cost_usd:0.50 () in
+  let _ref, hooks = WO.make_tool_tracking_hooks ~gate_config () in
+  let result =
+    fire_pre_tool_use ~hooks
+      ~tool_name:"any_tool"
+      ~input:`Null
+      ~accumulated_cost_usd:0.50
+  in
+  (match result with
+   | Agent_sdk.Hooks.Override msg ->
+     check bool "contains cost_gate" true
+       (Astring.String.is_infix ~affix:"cost_gate" msg)
+   | _ -> fail "expected Override at exact budget limit")
+
 let test_cost_gate_allows_under_budget () =
   let gate_config = default_gate ~max_cost_usd:1.0 () in
   let _ref, hooks = WO.make_tool_tracking_hooks ~gate_config () in
@@ -222,6 +237,8 @@ let () =
         [
           test_case "blocks over budget" `Quick
             test_cost_gate_blocks_over_budget;
+          test_case "blocks at exact limit" `Quick
+            test_cost_gate_blocks_at_exact_limit;
           test_case "allows under budget" `Quick
             test_cost_gate_allows_under_budget;
         ] );

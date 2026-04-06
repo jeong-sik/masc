@@ -270,4 +270,30 @@ module KeeperToolExec = struct
     max 2 (min 20 (get_int ~default:3 "MASC_KEEPER_MAX_CONSECUTIVE_TOOL_FAILURES"))
 end
 
+(** {1 Context Compaction (OAS)} *)
+
+module ContextCompact = struct
+  let w_recency = get_float ~default:0.50 "MASC_COMPACT_W_RECENCY"
+  let w_role = get_float ~default:0.35 "MASC_COMPACT_W_ROLE"
+  let w_tool = get_float ~default:0.15 "MASC_COMPACT_W_TOOL"
+
+  let role_system = get_float ~default:1.0 "MASC_COMPACT_ROLE_SYSTEM"
+  let role_tool = get_float ~default:0.7 "MASC_COMPACT_ROLE_TOOL"
+  let role_user = get_float ~default:0.6 "MASC_COMPACT_ROLE_USER"
+  let role_assistant = get_float ~default:0.4 "MASC_COMPACT_ROLE_ASSISTANT"
+
+  let tool_present = get_float ~default:0.8 "MASC_COMPACT_TOOL_PRESENT"
+  let tool_absent = get_float ~default:0.5 "MASC_COMPACT_TOOL_ABSENT"
+
+  let anchor_boost = get_float ~default:0.95 "MASC_COMPACT_ANCHOR_BOOST"
+  let drop_importance_threshold = get_float ~default:0.3 "MASC_COMPACT_DROP_THRESHOLD"
+  let summarize_keep_recent = get_int ~default:5 "MASC_COMPACT_KEEP_RECENT"
+
+  let tool_output_prune_limit = get_int ~default:1500 "MASC_COMPACT_TOOL_PRUNE_LIMIT"
+
+  let dynamic_multi_agent_ratio = get_float ~default:0.80 "MASC_COMPACT_DYN_MULTI_AGENT_RATIO"
+  let dynamic_focused_ratio = get_float ~default:0.70 "MASC_COMPACT_DYN_FOCUSED_RATIO"
+  let small_local_floor = get_int ~default:64_000 "MASC_COMPACT_SMALL_LOCAL_FLOOR"
+end
+
 (** Print configuration summary for debugging *)

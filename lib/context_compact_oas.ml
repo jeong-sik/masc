@@ -265,7 +265,7 @@ let score_messages (msgs : Agent_sdk.Types.message list) : (int * float) list =
     - SummarizeOld uses OAS Custom with extractive summaries plus ToolResult
       structured stubs so ToolUse/ToolResult pairing survives compaction. *)
 (** Max length for tool output before pruning. Shared with keeper_agent_run. *)
-let tool_output_prune_limit = 1500
+let tool_output_prune_limit = Env_config.ContextCompact.tool_output_prune_limit
 
 let oas_strategy_of (s : strategy) : Agent_sdk.Context_reducer.strategy =
   match s with
@@ -390,12 +390,12 @@ let observation_summary = function
 
 (** Context ratio thresholds for dynamic strategy selection.
     Distinct from Dashboard.ctx_* (display) — these drive compaction behavior. *)
-let dynamic_multi_agent_ctx = Env_config_core.get_float ~default:0.80 "MASC_COMPACT_DYN_MULTI_AGENT_RATIO"
-let dynamic_focused_ctx = Env_config_core.get_float ~default:0.70 "MASC_COMPACT_DYN_FOCUSED_RATIO"
+let dynamic_multi_agent_ctx = Env_config.ContextCompact.dynamic_multi_agent_ratio
+let dynamic_focused_ctx = Env_config.ContextCompact.dynamic_focused_ratio
 
 (** Context window floor (in tokens) below which a local model is classified
     as "small-local", triggering lightweight compaction strategies. *)
-let small_local_ctx_floor = Env_config_core.get_int ~default:64_000 "MASC_COMPACT_SMALL_LOCAL_FLOOR"
+let small_local_ctx_floor = Env_config.ContextCompact.small_local_floor
 
 let default_dynamic_selector (obs : observation_context) : strategy list =
   if obs.context_ratio >= dynamic_multi_agent_ctx && obs.active_agent_count > 1 then

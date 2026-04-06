@@ -75,7 +75,10 @@ let print_summary () =
   Log.Env.info "SelfPreservation: ratio=%.2f min_candidates=%d dead_ttl=%.0fs"
     Env_config_keeper.KeeperSupervisor.self_preservation_ratio
     Env_config_keeper.KeeperSupervisor.self_preservation_min_candidates
-    Env_config_keeper.KeeperSupervisor.dead_ttl_sec
+    Env_config_keeper.KeeperSupervisor.dead_ttl_sec;
+  Log.Env.info "ContextCompact: drop_thr=%.2f prune_limit=%d"
+    Env_config_keeper.ContextCompact.drop_importance_threshold
+    Env_config_keeper.ContextCompact.tool_output_prune_limit
 
 (** Compatibility wrapper around the canonical config snapshot categories.
     Keep callers on [Env_config] while root-level wrappers may enrich the same

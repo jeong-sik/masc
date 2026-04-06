@@ -11,6 +11,7 @@ import { TextInput, TextArea } from './common/input'
 import { stripStateBlocks } from '../keeper-message'
 import { navigate, navigateToPost, route } from '../router'
 import { PostDetail } from './memory-post-detail'
+import { stripInlineMarkdown, navigateToAuthor } from '../lib/board-utils'
 import {
   boardPosts,
   boardSortMode,
@@ -336,7 +337,7 @@ function PostCard({ post }: { post: BoardPost }) {
       <!-- Post body -->
       <div class="flex-1 min-w-0">
         <!-- Title -->
-        <div class="text-[15px] font-semibold text-[var(--text-strong)] leading-snug mb-1.5 group-hover:text-[var(--accent)] transition-colors">${post.title}</div>
+        <div class="text-[15px] font-semibold text-[var(--text-strong)] leading-snug mb-1.5 group-hover:text-[var(--accent)] transition-colors">${stripInlineMarkdown(post.title)}</div>
 
         <!-- Content preview: rendered markdown, height-capped -->
         <div class="board-post-preview text-[13px] text-[var(--text-body)] leading-[1.55] mb-2.5 overflow-hidden relative ${richPreview ? 'max-h-[12rem]' : 'max-h-[4.8em]'}">
@@ -350,7 +351,7 @@ function PostCard({ post }: { post: BoardPost }) {
           <span class="text-[12px] text-[var(--text-muted)]">${authorAvatar(post.author)}</span>
           <a
             class="text-[12px] text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors cursor-pointer"
-            onClick=${(e: Event) => { e.stopPropagation(); navigate('monitoring', { section: 'agents', agent: post.author }) }}
+            onClick=${(e: Event) => navigateToAuthor(post.author, e)}
           >${post.author}</a>
           <span class="text-[11px] text-[var(--text-muted)] opacity-60"><${TimeAgo} timestamp=${post.created_at} /></span>
           ${isUpdated(post) ? html`<span class="text-[10px] text-[var(--text-muted)] opacity-50">(수정됨)</span>` : null}

@@ -75,23 +75,27 @@ function BarChart({ items, maxCount }: { items: ToolMetricsTopEntry[]; maxCount:
 
 function ToolDistribution({ dist }: { dist: { total: number; public: number; visible: number; hidden: number } | null | undefined }) {
   if (!dist) return html`<div class="text-[11px] text-[var(--text-muted)] italic">도구 분포 데이터가 없습니다.</div>`
+  // Mutually exclusive segments: public ⊂ visible, hidden = total - visible
+  const visibleExclusive = Math.max(0, dist.visible - dist.public)
+  const pct = (n: number) => dist.total > 0 ? ((n / dist.total) * 100).toFixed(1) : '0'
   return html`
     <div class="flex flex-col gap-2">
       <div class="flex items-center gap-3">
-        <span class="inline-block min-w-[72px] px-2 py-0.5 text-[11px] font-semibold text-center rounded badge-essential">공개</span>
+        <span class="inline-block min-w-[72px] px-2 py-0.5 text-[11px] font-semibold text-center rounded badge-essential">공개 MCP</span>
         <span class="text-[var(--text-strong)] text-sm font-semibold min-w-9 text-right">${dist.public}</span>
-        <span class="text-[var(--text-muted)] text-[13px] min-w-12 text-right">${dist.total > 0 ? ((dist.public / dist.total) * 100).toFixed(1) : '0'}%</span>
+        <span class="text-[var(--text-muted)] text-[13px] min-w-12 text-right">${pct(dist.public)}%</span>
       </div>
       <div class="flex items-center gap-3">
-        <span class="inline-block min-w-[72px] px-2 py-0.5 text-[11px] font-semibold text-center rounded badge-standard">표시</span>
-        <span class="text-[var(--text-strong)] text-sm font-semibold min-w-9 text-right">${dist.visible}</span>
-        <span class="text-[var(--text-muted)] text-[13px] min-w-12 text-right">${dist.total > 0 ? ((dist.visible / dist.total) * 100).toFixed(1) : '0'}%</span>
+        <span class="inline-block min-w-[72px] px-2 py-0.5 text-[11px] font-semibold text-center rounded badge-standard">내부 전용</span>
+        <span class="text-[var(--text-strong)] text-sm font-semibold min-w-9 text-right">${visibleExclusive}</span>
+        <span class="text-[var(--text-muted)] text-[13px] min-w-12 text-right">${pct(visibleExclusive)}%</span>
       </div>
       <div class="flex items-center gap-3">
         <span class="inline-block min-w-[72px] px-2 py-0.5 text-[11px] font-semibold text-center rounded badge-full">숨김</span>
         <span class="text-[var(--text-strong)] text-sm font-semibold min-w-9 text-right">${dist.hidden}</span>
-        <span class="text-[var(--text-muted)] text-[13px] min-w-12 text-right">${dist.total > 0 ? ((dist.hidden / dist.total) * 100).toFixed(1) : '0'}%</span>
+        <span class="text-[var(--text-muted)] text-[13px] min-w-12 text-right">${pct(dist.hidden)}%</span>
       </div>
+      <div class="text-[10px] text-[var(--text-dim)] mt-1">전체 ${dist.total}개 (공개 ${dist.public} + 내부 ${visibleExclusive} + 숨김 ${dist.hidden})</div>
     </div>
   `
 }

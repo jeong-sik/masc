@@ -538,6 +538,7 @@ export interface ToolMetricsResponse {
   distinct_tools_called: number
   top_20: ToolMetricsTopEntry[]
   never_called_count: number
+  /** @deprecated Server never returns this field. Use tool_distribution instead. */
   tier_distribution?: { essential: number; standard: number; full: number } | null
   tool_distribution?: { total: number; public: number; visible: number; hidden: number } | null
   dispatch_v2_enabled: boolean

@@ -938,6 +938,12 @@ let run_heartbeat_loop
         | Ok (Some latest) -> latest
         | _ -> m
       in
+      (* Sync disk meta to registry so dashboard reads live values.  #5364.
+         Physical inequality: read_meta returns a fresh record when the JSON
+         file changed; same pointer means no disk change occurred. *)
+      if meta_current != m then
+        Keeper_registry.update_meta
+          ~base_path:ctx.config.base_path meta_current.name meta_current;
       if
         run_smart_heartbeat_gate
           ~clock:ctx.clock

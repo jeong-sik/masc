@@ -420,7 +420,7 @@ let handle_keeper_get_subroutes state req request reqd =
          in
          let include_thinking =
            Server_utils.bool_query_param req "include_thinking"
-             ~default:true
+             ~default:false
          in
          let masc_root = Filename.concat config.base_path ".masc" in
          let all_lines =

@@ -1037,7 +1037,11 @@ let run_turn
         let _flushed = Memory_oas_bridge.flush_all ~memory ~agent_name in
         let text = Agent_sdk.Types.text_of_content result.response.content in
         let model = result.response.model in
-        (* Extract and persist thinking blocks to trajectory JSONL *)
+        (* Extract and persist thinking blocks to trajectory JSONL.
+           NOTE: turn = acc.turn stays at 0 in the keeper path because
+           Trajectory.increment_turn is never called here — the keeper
+           uses OAS Agent.run which manages its own internal call count.
+           Consumers should treat turn=0 as "turn not tracked in keeper path". *)
         (match trajectory_acc with
          | Some acc ->
            let now = Time_compat.now () in

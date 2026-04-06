@@ -36,6 +36,20 @@ function sampleToolCallEvent(overrides: Partial<UnifiedTraceEvent> = {}): Unifie
   }
 }
 
+function sampleThinkingEvent(overrides: Partial<UnifiedTraceEvent> = {}): UnifiedTraceEvent {
+  return {
+    id: 'thinking-1',
+    ts: 2,
+    ts_iso: '2026-04-03T00:01:00Z',
+    kind: 'thinking',
+    summary: 'thinking block (120 chars)',
+    detail: {},
+    thinkingContent: 'The user wants to refactor the module. I should check the dependency graph first.',
+    thinkingRedacted: false,
+    ...overrides,
+  }
+}
+
 describe('SessionTraceEntry', () => {
   it('renders tool results through JsonViewerCard and parses JSON-string payloads', () => {
     const { container } = render(h(SessionTraceEntry, { event: sampleToolCallEvent() }))
@@ -64,11 +78,39 @@ describe('SessionTraceEntry', () => {
     expect(cards[0]?.getAttribute('data-title')).toBe('Args')
 
     // Plain-text errors render through ResultViewer <pre>, not JsonViewerCard
-    // (this specific 'plain error' payload is classified as 'plain')
     const errorPre = container.querySelector('pre')
     expect(errorPre?.textContent ?? '').toContain('plain error')
 
     // ResultViewer should display the "Error" title label
     expect(screen.getByText('Error')).toBeTruthy()
+  })
+
+  it('renders ThinkingDetail with markdown content when expanded', () => {
+    const { container } = render(h(SessionTraceEntry, {
+      event: sampleThinkingEvent(),
+    }))
+
+    fireEvent.click(container.querySelector('summary') as HTMLElement)
+
+    const mdBlocks = screen.getAllByTestId('markdown')
+    expect(mdBlocks.length).toBeGreaterThanOrEqual(1)
+    const thinkingMd = mdBlocks.find(el =>
+      (el.textContent ?? '').includes('refactor the module'),
+    )
+    expect(thinkingMd).toBeDefined()
+  })
+
+  it('renders redacted ThinkingDetail with placeholder text', () => {
+    const { container } = render(h(SessionTraceEntry, {
+      event: sampleThinkingEvent({
+        thinkingRedacted: true,
+        thinkingContent: undefined,
+      }),
+    }))
+
+    fireEvent.click(container.querySelector('summary') as HTMLElement)
+
+    // The redacted placeholder should be visible (Korean text)
+    expect(container.textContent).toContain('비공개 처리')
   })
 })

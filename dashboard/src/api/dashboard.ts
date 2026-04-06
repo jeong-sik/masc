@@ -766,14 +766,15 @@ export type TrajectoryEntry = {
   ts: number
   ts_iso: string
   turn: number
-  round: number
-  tool_name: string
-  args: Record<string, unknown> | string
-  gate: TrajectoryGate
-  result: string | null
-  duration_ms: number
-  error: string | null
-  cost_usd: number
+  // Tool-call fields (absent on thinking entries)
+  round?: number
+  tool_name?: string
+  args?: Record<string, unknown> | string
+  gate?: TrajectoryGate
+  result?: string | null
+  duration_ms?: number
+  error?: string | null
+  cost_usd?: number
   // Thinking-specific fields
   content?: string
   content_length?: number
@@ -796,7 +797,9 @@ export function fetchKeeperTrajectory(
 ): Promise<TrajectoryResponse> {
   const params = new URLSearchParams()
   if (limit != null) params.set('limit', String(limit))
-  if (includeThinking) params.set('include_thinking', 'true')
+  // Always send include_thinking explicitly — backend defaults to false,
+  // so omitting the param means "don't include".
+  params.set('include_thinking', includeThinking ? 'true' : 'false')
   const qs = params.toString()
   return get<TrajectoryResponse>(
     `/api/v1/keepers/${encodeURIComponent(name)}/trajectory${qs ? `?${qs}` : ''}`,

@@ -14,10 +14,10 @@
 (** Re-export from Keeper_types so dashboard code using
     [e.Keeper_tools_oas.count] keeps compiling. *)
 type tool_call_entry = Keeper_types.tool_call_entry = {
-  mutable count : int;
-  mutable successes : int;
-  mutable failures : int;
-  mutable last_used_at : float;
+  count : int;
+  successes : int;
+  failures : int;
+  last_used_at : float;
 }
 
 (** Tool usage now lives in Keeper_registry (per-entry tool_usage Hashtbl).

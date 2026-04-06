@@ -237,10 +237,10 @@ type fiber_health =
 (** {1 Per-tool usage tracking} *)
 
 type tool_call_entry = {
-  mutable count : int;
-  mutable successes : int;
-  mutable failures : int;
-  mutable last_used_at : float;
+  count : int;
+  successes : int;
+  failures : int;
+  last_used_at : float;
 }
 
 (** {1 Working Context Types (moved from Keeper_working_context)} *)

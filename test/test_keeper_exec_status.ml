@@ -88,6 +88,73 @@ let test_derive_pipeline_stage_treats_inactive_as_offline () =
   check string "inactive keeper does not advertise a live pipeline stage"
     "offline" stage
 
+(* --- keeper_health_state tests (online/offline mismatch fix) --- *)
+
+let make_agent_status ?(exists = true) ?(status = "active")
+    ?(last_seen_ago_s = 10.0) ?(is_zombie = false) () : Yojson.Safe.t =
+  `Assoc [
+    ("exists", `Bool exists);
+    ("status", `String status);
+    ("last_seen_ago_s", `Float last_seen_ago_s);
+    ("is_zombie", `Bool is_zombie);
+  ]
+
+let test_health_keepalive_running_overrides_stale_last_seen () =
+  let meta = make_meta () in
+  let agent_status = make_agent_status ~last_seen_ago_s:600.0 () in
+  let health =
+    ES.keeper_health_state ~meta ~keepalive_running:true
+      ~agent_status ~quiet_reason:None ~now_ts:(Time_compat.now ()) ()
+  in
+  (* keepalive is running — last_seen staleness should NOT make it "stale" *)
+  check bool "keepalive running + stale last_seen is NOT stale"
+    true (health <> "stale");
+  check bool "keepalive running + stale last_seen is NOT offline"
+    true (health <> "offline")
+
+let test_health_keepalive_not_running_respects_stale_last_seen () =
+  let meta = make_meta () in
+  let agent_status = make_agent_status ~last_seen_ago_s:600.0 () in
+  let health =
+    ES.keeper_health_state ~meta ~keepalive_running:false
+      ~agent_status ~quiet_reason:None ~now_ts:(Time_compat.now ()) ()
+  in
+  check string "no keepalive + stale last_seen → stale" "stale" health
+
+let test_health_zombie_overrides_keepalive () =
+  let meta = make_meta () in
+  let agent_status = make_agent_status ~is_zombie:true ~last_seen_ago_s:10.0 () in
+  let health =
+    ES.keeper_health_state ~meta ~keepalive_running:true
+      ~agent_status ~quiet_reason:None ~now_ts:(Time_compat.now ()) ()
+  in
+  check string "zombie overrides keepalive" "stale" health
+
+let test_health_keepalive_running_fresh_is_healthy () =
+  let meta =
+    let base = make_meta () in
+    { base with runtime = { base.runtime with
+        usage = { base.runtime.usage with
+          total_turns = 5;
+          last_turn_ts = Time_compat.now () };
+      }}
+  in
+  let agent_status = make_agent_status ~last_seen_ago_s:10.0 () in
+  let health =
+    ES.keeper_health_state ~meta ~keepalive_running:true
+      ~agent_status ~quiet_reason:None ~now_ts:(Time_compat.now ()) ()
+  in
+  check string "keepalive + fresh + turns → healthy" "healthy" health
+
+let test_health_keepalive_not_running_not_stale_is_offline () =
+  let meta = make_meta () in
+  let agent_status = make_agent_status ~last_seen_ago_s:50.0 () in
+  let health =
+    ES.keeper_health_state ~meta ~keepalive_running:false
+      ~agent_status ~quiet_reason:None ~now_ts:(Time_compat.now ()) ()
+  in
+  check string "no keepalive + not stale → offline" "offline" health
+
 let test_derive_pipeline_stage_prefers_scheduled_autonomous () =
   let meta =
     let base = make_meta () in
@@ -113,6 +180,19 @@ let test_derive_pipeline_stage_prefers_scheduled_autonomous () =
 let () =
   run "keeper_exec_status"
     [
+      ( "health_state",
+        [
+          test_case "keepalive running overrides stale last_seen" `Quick
+            test_health_keepalive_running_overrides_stale_last_seen;
+          test_case "no keepalive respects stale last_seen" `Quick
+            test_health_keepalive_not_running_respects_stale_last_seen;
+          test_case "zombie overrides keepalive" `Quick
+            test_health_zombie_overrides_keepalive;
+          test_case "keepalive + fresh turns → healthy" `Quick
+            test_health_keepalive_running_fresh_is_healthy;
+          test_case "no keepalive + not stale → offline" `Quick
+            test_health_keepalive_not_running_not_stale_is_offline;
+        ] );
       ( "surface_status",
         [
           test_case "preserves live agent states" `Quick

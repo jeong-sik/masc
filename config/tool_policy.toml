@@ -94,7 +94,7 @@ groups = ["base", "filesystem", "library", "shell", "coordination", "board", "go
 masc_groups = ["core"]
 
 # Delivery preset: research + coding for keepers that need to produce code changes.
-# Use for keepers with soul_profile=delivery whose goal involves PRs, issues, or code fixes.
+# Use for keepers whose goal involves PRs, issues, or code fixes.
 [presets.delivery]
 groups = ["base", "filesystem", "filesystem_write", "library", "shell", "coordination", "board", "governance", "autoresearch", "coding_shard", "coding", "github"]
 masc_groups = ["core", "coding"]

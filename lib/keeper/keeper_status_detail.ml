@@ -1,5 +1,9 @@
 (** Keeper_status_detail — single-keeper detailed status handler.
-    Split from keeper_status.ml. *)
+    Split from keeper_status.ml.
+
+    Server-side response cache: keyed on (name, updated_at, args_hash).
+    Avoids expensive JSONL parsing and checkpoint loading when keeper
+    state has not changed between consecutive status polls. *)
 
 open Tool_args
 open Keeper_types
@@ -13,6 +17,38 @@ open Keeper_status_bridge
 
 type tool_result = Keeper_types.tool_result
 
+(* ── Response cache ──────────────────────────────────── *)
+
+type cache_entry = {
+  updated_at : string;
+  args_hash : string;
+  response : string;
+}
+
+let _cache : (string, cache_entry) Hashtbl.t = Hashtbl.create 8
+
+let invalidate_status_cache_for name =
+  Hashtbl.remove _cache name
+
+let invalidate_status_cache_all () =
+  Hashtbl.clear _cache
+
+(** Hash the status-affecting args so different parameter combos
+    get separate cache entries (e.g. fast=true vs fast=false). *)
+let hash_status_args args =
+  let parts = [
+    get_string args "name" "";
+    string_of_bool (get_bool args "fast" false);
+    string_of_bool (get_bool args "include_context" false);
+    string_of_bool (get_bool args "include_metrics_overview" false);
+    string_of_bool (get_bool args "include_memory_bank" false);
+    string_of_bool (get_bool args "include_history_tail" false);
+    string_of_bool (get_bool args "include_compaction_history" false);
+    string_of_int (get_int args "tail_turns" 3);
+    string_of_int (get_int args "tail_messages" 5);
+  ] in
+  Digest.string (String.concat "|" parts) |> Digest.to_hex
+
 let handle_keeper_status ctx args : tool_result =
   let name = get_string args "name" "" in
   if not (validate_name name) then
@@ -22,6 +58,14 @@ let handle_keeper_status ctx args : tool_result =
     | Error e -> (false, "❌ " ^ e)
     | Ok None -> (false, Printf.sprintf "❌ keeper not found: %s" name)
     | Ok (Some m) ->
+      let args_hash = hash_status_args args in
+      (* Cache hit: same updated_at + same args → return cached response *)
+      (match Hashtbl.find_opt _cache name with
+       | Some entry
+         when entry.updated_at = m.updated_at
+           && entry.args_hash = args_hash ->
+         (true, entry.response)
+       | _ ->
       let tail_turns = max 0 (get_int args "tail_turns" 3) in
       let tail_messages = max 0 (get_int args "tail_messages" 5) in
       let tail_compactions = max 0 (get_int args "tail_compactions" 10) in
@@ -614,4 +658,7 @@ let handle_keeper_status ctx args : tool_result =
              ("history", `String history_path);
            ]);
          ] in
-         (true, Yojson.Safe.pretty_to_string json)
+         let response = Yojson.Safe.pretty_to_string json in
+         Hashtbl.replace _cache name
+           { updated_at = m.updated_at; args_hash; response };
+         (true, response))

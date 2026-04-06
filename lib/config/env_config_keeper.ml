@@ -232,34 +232,32 @@ module KeeperKeepalive = struct
 
   (** {2 Idle Turn Constants}
 
-      These are intentionally NOT configurable via env vars.
-      Each value has a specific rationale tied to the keeper architecture:
-      - Keepers retry every ~30s (heartbeat interval), so a skipped turn
-        is not permanent — only the current Agent.run() ends.
-      - Each idle iteration burns 5K-30K tokens on the local 9B model.
-      - Nudge effectiveness degrades after 1-2 attempts; more nudges
-        just waste tokens without changing behavior.
-
-      Change these only with measured data (idle frequency + nudge
-      response rate from keeper decision logs). *)
+      With tool_choice=Any, keepers always call tools.  Idle detection
+      now only fires when the same tool+args pattern repeats.  Higher
+      thresholds allow legitimate multi-step exploration (e.g., calling
+      keeper_tool_search with different queries). *)
 
   (** Max idle turns for scheduled autonomous keeper turns.
-      Rationale: autonomous turns are speculative (no trigger event).
-      5 iterations × ~5K tokens = ~25K token budget before giving up.
-      The next heartbeat cycle (30s) will try again with fresh context. *)
-  let max_idle_turns_autonomous = 5
+      With tool_choice=Any and max_turns=50, keepers have room to
+      explore.  10 idle turns × ~5K tokens = ~50K budget.
+      Env: [MASC_KEEPER_MAX_IDLE_TURNS_AUTONOMOUS]. Default: 10. *)
+  let max_idle_turns_autonomous =
+    max 2 (min 50 (get_int ~default:10 "MASC_KEEPER_MAX_IDLE_TURNS_AUTONOMOUS"))
 
   (** Max idle turns for reactive (board/mention triggered) keeper turns.
-      Rationale: reactive turns have an explicit trigger, so the keeper
-      has more reason to persist. 8 iterations before skip. *)
-  let max_idle_turns_reactive = 8
+      Reactive turns have an explicit trigger — more patience warranted.
+      Env: [MASC_KEEPER_MAX_IDLE_TURNS_REACTIVE]. Default: 15. *)
+  let max_idle_turns_reactive =
+    max 2 (min 50 (get_int ~default:15 "MASC_KEEPER_MAX_IDLE_TURNS_REACTIVE"))
 
   (** Consecutive idle tool repetitions before on_idle hook issues Skip.
       Below this: graduated Nudge messages.
-      Rationale: 1st nudge has ~50% behavior change (estimated from
-      OAS idle hook design). 2nd nudge catches stragglers. 3rd is
-      the hard stop. Total: 3 chances before ending the turn. *)
-  let idle_skip_threshold = 3
+      With tool_choice=Any, the model always calls tools, so idle
+      detection triggers on repeated tool calls.  8 gives enough
+      room for legitimate exploration before cutting off.
+      Env: [MASC_KEEPER_IDLE_SKIP_THRESHOLD]. Default: 8. *)
+  let idle_skip_threshold =
+    max 2 (min 20 (get_int ~default:8 "MASC_KEEPER_IDLE_SKIP_THRESHOLD"))
 end
 
 (** {1 gRPC Heartbeat Reconnect} *)

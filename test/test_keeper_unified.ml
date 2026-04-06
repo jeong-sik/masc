@@ -874,9 +874,9 @@ let test_unified_turn_runtime_defaults () =
   with_env "MASC_KEEPER_UNIFIED_MAX_TOKENS" "" (fun () ->
     check (float 0.01) "unified temp default" 0.4
       (KC.keeper_unified_temperature ());
-    check int "unified max_tokens default" 2048
+    check int "unified max_tokens default" 8192
       (KC.keeper_unified_max_tokens ())
-    (* max_turns removed: agent turn budgets belong in OAS *)))
+    (* max_turns is set in keeper_agent_run.ml (default: 50) *)))
 
 let test_meta_defaults_social_model () =
   check string "default social model" "bdi_speech_v1"

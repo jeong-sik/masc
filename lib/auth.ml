@@ -288,7 +288,7 @@ let legacy_permission_for_tool = function
   | "masc_observe_traces"
   | "masc_voice_sessions" | "masc_voice_agent"
   | "masc_agent_card" | "masc_agent_fitness"
-  | "masc_agent_relations" | "masc_a2a_discover" | "masc_a2a_query_skill"
+  | "masc_agent_relations"
   | "masc_dashboard" | "masc_check"
   | "masc_collaboration_graph"
   | "masc_feature_flags" | "masc_get_metrics"

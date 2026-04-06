@@ -195,13 +195,8 @@ let explicit_metadata : (string * metadata) list =
       destructive_tool );
     ( "masc_operation_pause",
       { default_metadata with destructive = Some false } );
-    (* Tools pruned from all surfaces in #4999 — handlers removed,
-       only catalog entries for tools still having code remain. *)
-    ("masc_a2a_discover", deprecated "Pruned from all surfaces in #4999");
-    ("masc_a2a_query_skill", deprecated "Pruned from all surfaces in #4999");
-    ("masc_a2a_delegate", deprecated "Pruned from all surfaces in #4999");
-    ("masc_a2a_subscribe", deprecated "Pruned from all surfaces in #4999");
-    ("masc_a2a_unsubscribe", deprecated "Pruned from all surfaces in #4999");
+    (* WebRTC tools: deprecated as MCP tools but still used as HTTP
+       signaling endpoints in server_h2_gateway.ml — kept for now. *)
     ("masc_webrtc_offer", deprecated "Pruned from all surfaces in #4999");
     ("masc_webrtc_answer", deprecated "Pruned from all surfaces in #4999");
     ("masc_board_migrate", deprecated "Pruned from all surfaces in #4999");

@@ -114,7 +114,10 @@ let role_to_string (r : Agent_sdk.Types.role) = match r with
 
 let role_of_string = function
   | "system" -> Agent_sdk.Types.System | "user" -> Agent_sdk.Types.User
-  | "assistant" -> Agent_sdk.Types.Assistant | _ -> Agent_sdk.Types.Tool
+  | "assistant" -> Agent_sdk.Types.Assistant | "tool" -> Agent_sdk.Types.Tool
+  | unknown ->
+    Log.Misc.warn "keeper_context_core: unknown role %S, defaulting to User" unknown;
+    Agent_sdk.Types.User
 
 let message_to_json (m : Agent_sdk.Types.message) : Yojson.Safe.t =
   let m = Inference_utils.sanitize_message_utf8 m in
@@ -291,7 +294,7 @@ let checkpoint_model_of_meta (meta : keeper_meta) =
     :: Oas_model_resolve.models_of_cascade_name meta.cascade_name
   in
   List.find_opt (fun value -> String.trim value <> "") candidates
-  |> Option.value ~default:"keeper_unified"
+  |> Option.value ~default:Keeper_config.default_cascade_name
 
 let save_oas_checkpoint
     ~(session : session_context)

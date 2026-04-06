@@ -183,7 +183,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         ~fallback_message:env_message_gate
         ~fallback_token:env_token_gate
     in
-    let cascade_models = Oas_model_resolve.models_of_cascade_name "keeper_unified" in
+    let cascade_models = Oas_model_resolve.models_of_cascade_name Keeper_config.default_cascade_name in
     ignore (Oas_model_resolve.refresh_local_discovery_if_possible cascade_models);
     let primary_max_context =
       match p.max_context_override_opt with
@@ -227,7 +227,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         long_goal;
         
         social_model = default_social_model;
-        cascade_name = "keeper_unified";
+        cascade_name = Keeper_config.default_cascade_name;
         will;
         needs;
         desires;

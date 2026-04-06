@@ -2,6 +2,10 @@
 
 open Tool_args
 
+(** Default cascade name for keeper turns. SSOT — all keeper code must
+    reference this constant instead of using the string literal. *)
+let default_cascade_name = "keeper_unified"
+
 let bool_default_true_of_env name =
   match Sys.getenv_opt name with
   | None -> true

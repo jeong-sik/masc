@@ -236,6 +236,7 @@ let write_heartbeat_snapshot
   ignore (Keeper_fs.ensure_dir (Filename.concat base_dir meta_current.runtime.trace_id));
   let _session, ctx_opt =
     load_context_from_checkpoint
+      ~max_checkpoint_messages:meta_current.compaction.max_checkpoint_messages
       ~trace_id:meta_current.runtime.trace_id
       ~primary_model_max_tokens:max_cascade_context
       ~base_dir

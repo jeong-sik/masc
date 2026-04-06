@@ -5,6 +5,7 @@ open Keeper_types
 val log_keeper_exn : label:string -> exn -> unit
 
 val load_context_from_checkpoint :
+  max_checkpoint_messages:int ->
   trace_id:string ->
   primary_model_max_tokens:int ->
   base_dir:string ->

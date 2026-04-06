@@ -14,11 +14,12 @@ open Keeper_types
 (* Constants                                                         *)
 (* ================================================================ *)
 
-(** Maximum messages to retain in checkpoints (load and save).
+(** Default maximum messages to retain in checkpoints (load and save).
     Caps both load-time deserialization and save-time persistence to prevent
     unbounded memory growth.  The context_reducer (keep_last 30) trims
-    further during Agent.run, so 60 gives the reducer room to operate. *)
-let max_checkpoint_messages = 60
+    further during Agent.run, so 120 gives the reducer room to operate.
+    Per-keeper override via [compaction_policy.max_checkpoint_messages]. *)
+let default_max_checkpoint_messages = 120
 
 (* ================================================================ *)
 (* Working Context Types (re-exported from Keeper_types)             *)
@@ -260,14 +261,13 @@ let checkpoint_max_tokens (cp : Agent_sdk.Checkpoint.t) ~(fallback : int) : int 
       | _ -> fallback)
 
 let context_of_oas_checkpoint
+    ~(max_checkpoint_messages : int)
     (cp : Agent_sdk.Checkpoint.t)
     ~(primary_model_max_tokens : int) : working_context =
   let system_prompt = Option.value ~default:"" cp.system_prompt in
   let max_tokens =
     checkpoint_max_tokens cp ~fallback:primary_model_max_tokens
   in
-  (* Cap loaded messages — see module-level max_checkpoint_messages. *)
-  let max_checkpoint_messages = max_checkpoint_messages in
   let messages =
     let n = List.length cp.messages in
     if n <= max_checkpoint_messages then cp.messages
@@ -297,6 +297,7 @@ let checkpoint_model_of_meta (meta : keeper_meta) =
   |> Option.value ~default:(Provider_adapter.default_local_fallback_label ())
 
 let save_oas_checkpoint
+    ~(max_checkpoint_messages : int)
     ~(session : session_context)
     ~(agent_name : string)
     ~(model : string)
@@ -363,7 +364,7 @@ let checkpoint_generation (cp : Agent_sdk.Checkpoint.t) ~(fallback : int) : int 
 (* Checkpoint Loading                                                *)
 (* ================================================================ *)
 
-let load_context_from_checkpoint ~trace_id ~primary_model_max_tokens ~base_dir =
+let load_context_from_checkpoint ~max_checkpoint_messages ~trace_id ~primary_model_max_tokens ~base_dir =
   let session = create_session ~session_id:trace_id ~base_dir in
   let oas_result =
     Keeper_checkpoint_store.load_oas ~session_dir:session.session_dir
@@ -398,7 +399,7 @@ let load_context_from_checkpoint ~trace_id ~primary_model_max_tokens ~base_dir =
   match (prefer_legacy, oas_checkpoint, legacy_checkpoint) with
   | (false, Some checkpoint, _) ->
       let ctx =
-        context_of_oas_checkpoint checkpoint ~primary_model_max_tokens
+        context_of_oas_checkpoint ~max_checkpoint_messages checkpoint ~primary_model_max_tokens
       in
       let ctx =
         if primary_model_max_tokens <= 0 then ctx

@@ -35,7 +35,7 @@ let maybe_rollover_oas_handoff
         message_count = 0;
       }
   | Some cp ->
-      let ctx = context_of_oas_checkpoint cp ~primary_model_max_tokens in
+      let ctx = context_of_oas_checkpoint ~max_checkpoint_messages:meta.compaction.max_checkpoint_messages cp ~primary_model_max_tokens in
       let current_generation =
         checkpoint_generation cp ~fallback:meta.runtime.generation
       in
@@ -74,7 +74,9 @@ let maybe_rollover_oas_handoff
           let new_session =
             create_session ~session_id:new_trace_id ~base_dir
           in
-          match save_oas_checkpoint ~session:new_session
+          match save_oas_checkpoint
+                  ~max_checkpoint_messages:base_meta.compaction.max_checkpoint_messages
+                  ~session:new_session
                   ~agent_name:base_meta.agent_name
                   ~model ~ctx ~generation:next_generation with
           | Error e ->

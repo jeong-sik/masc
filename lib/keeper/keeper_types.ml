@@ -13,6 +13,7 @@ type compaction_policy =
   ; message_gate : int
   ; token_gate : int
   ; cooldown_sec : int
+  ; max_checkpoint_messages : int
   }
 
 type proactive_policy =
@@ -552,6 +553,7 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; "compaction_message_gate", `Int m.compaction.message_gate
     ; "compaction_token_gate", `Int m.compaction.token_gate
     ; "continuity_compaction_cooldown_sec", `Int m.compaction.cooldown_sec
+    ; "max_checkpoint_messages", `Int m.compaction.max_checkpoint_messages
     ; "auto_handoff", `Bool m.auto_handoff
     ; "handoff_threshold", `Float m.handoff_threshold
     ; "handoff_cooldown_sec", `Int m.handoff_cooldown_sec
@@ -847,6 +849,8 @@ let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
           ; message_gate = compaction_message_gate
           ; token_gate = compaction_token_gate
           ; cooldown_sec = continuity_compaction_cooldown_sec
+          ; max_checkpoint_messages =
+              Safe_ops.json_int ~default:120 "max_checkpoint_messages" json
           }
       ; pp_auto_handoff
       ; pp_handoff_threshold

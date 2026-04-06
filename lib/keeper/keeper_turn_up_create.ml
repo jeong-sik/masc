@@ -257,6 +257,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           message_gate = compaction_message_gate;
           token_gate = compaction_token_gate;
           cooldown_sec = continuity_compaction_cooldown_sec;
+          max_checkpoint_messages = 120;
         };
         auto_handoff;
         handoff_threshold;
@@ -324,6 +325,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
       let init_save_result =
         try
           Keeper_exec_context.save_oas_checkpoint
+            ~max_checkpoint_messages:meta.compaction.max_checkpoint_messages
             ~session
             ~agent_name:meta.agent_name
             ~model:(Keeper_exec_context.checkpoint_model_of_meta meta)

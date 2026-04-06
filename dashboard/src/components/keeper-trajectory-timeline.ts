@@ -65,10 +65,29 @@ export function clearTrajectory(keeperName: string): void {
 
 // ── Components ───────────────────────────────────────────
 
+function ThinkingEntryRow({ entry }: { entry: TrajectoryEntry }) {
+  const len = entry.content_length ?? entry.content?.length ?? 0
+  return html`
+    <div class="flex items-center gap-3 py-2 px-3 rounded-lg opacity-60">
+      <div class="flex-shrink-0 flex items-center gap-1.5">
+        <span class="text-[10px] text-[var(--text-dim)] w-3"></span>
+        <div class="size-7 rounded-md bg-[var(--white-5)] border border-[var(--white-8)] flex items-center justify-center text-[11px]">💭</div>
+      </div>
+      <div class="flex-1 min-w-0 flex items-center gap-2">
+        <span class="text-xs font-mono text-[var(--text-muted)]">${entry.redacted ? '사고 (비공개)' : '사고'}</span>
+        <span class="text-[10px] text-[var(--text-dim)]">T${entry.turn}</span>
+        ${len > 0 ? html`<span class="text-[10px] text-[var(--text-dim)]">${len}자</span>` : null}
+      </div>
+    </div>
+  `
+}
+
 function TrajectoryEntryRow({ entry }: { entry: TrajectoryEntry }) {
+  if (entry.type === 'thinking') return html`<${ThinkingEntryRow} entry=${entry} />`
+
   const expanded = useSignal(false)
   const gateRejected = entry.gate?.status === 'reject'
-  const cat = toolCategory(entry.tool_name ?? '')
+  const cat = toolCategory(entry.tool_name ?? 'unknown')
   const toggle = () => { expanded.value = !expanded.value }
 
   return html`
@@ -92,9 +111,9 @@ function TrajectoryEntryRow({ entry }: { entry: TrajectoryEntry }) {
         ${'' /* Content */}
         <div class="flex-1 min-w-0">
           <div class="flex items-center gap-2 flex-wrap">
-            <span class="text-xs font-mono font-medium ${cat.color}" title=${entry.tool_name}>${entry.tool_name}</span>
+            <span class="text-xs font-mono font-medium ${cat.color}" title=${entry.tool_name ?? ''}>${entry.tool_name ?? 'unknown'}</span>
             <span class="text-[10px] px-1 py-0.5 rounded bg-[var(--white-5)] text-[var(--text-dim)]">${cat.label}</span>
-            <span class="text-[10px] text-[var(--text-dim)]">T${entry.turn}R${entry.round}</span>
+            <span class="text-[10px] text-[var(--text-dim)]">T${entry.turn}R${entry.round ?? 0}</span>
             ${(entry.cost_usd ?? 0) > 0
               ? html`<span class="text-[10px] px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--accent)]">$${(entry.cost_usd ?? 0).toFixed(4)}</span>`
               : null}
@@ -160,7 +179,7 @@ function TrajectoryEntryRow({ entry }: { entry: TrajectoryEntry }) {
           <div class="flex gap-4 flex-wrap text-[10px] text-[var(--text-dim)]">
             ${(entry.cost_usd ?? 0) > 0 ? html`<span>Cost: $${(entry.cost_usd ?? 0).toFixed(6)}</span>` : null}
             <span>Duration: ${entry.duration_ms ?? 0}ms</span>
-            <span>Turn ${entry.turn}, Round ${entry.round}</span>
+            <span>Turn ${entry.turn}, Round ${entry.round ?? 0}</span>
             <span class="font-mono">${entry.ts_iso ?? new Date(entry.ts * 1000).toISOString()}</span>
           </div>
         </div>

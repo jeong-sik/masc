@@ -246,35 +246,6 @@ jobs:
           opam exec -- dune fmt 2>&1 || true
           # Note: dune fmt may not be available, skip if so
 
-      - name: Verification matrix summary
-        run: |
-          echo "::notice::Required CI gates: dune test, test_sse_storm_e2e, transport harness suite (contract harness runs in dedicated job)"
-          echo "::notice::Optional env-gated suites not run here: PostgreSQL tests, live ICE/STUN/TURN/browser interop, viewer-local-e2e-check, swarm/team-session workload harnesses"
-
-  contract:
-    name: Contract Harness
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    needs: [pr-sync-check, release-train]
-    if: ${{ !cancelled() && (needs.pr-sync-check.result == 'success' || needs.pr-sync-check.result == 'skipped') && needs.release-train.result == 'success' }}
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Setup OCaml toolchain
-        uses: ./.github/actions/setup-ocaml-toolchain
-
-      - name: Pin external OCaml dependencies
-        uses: ./.github/actions/pin-ocaml-deps
-
-      - name: Install system and OCaml dependencies
-        uses: ./.github/actions/install-ocaml-deps
-
-      - name: Build server executable
-        run: |
-          opam exec -- dune build ./bin/main_eio.exe
-
       - name: Run contract harness suite
         env:
           ME_ROOT: /tmp/me
@@ -289,8 +260,8 @@ jobs:
 
       - name: Verification matrix summary
         run: |
-          echo "::notice::Required CI gates: contract harness suite"
-          echo "::notice::Optional env-gated suites not run here: PostgreSQL tests, live ICE/STUN, viewer-local-e2e-check, swarm/team-session workload harnesses"
+          echo "::notice::Required CI gates: dune test, test_sse_storm_e2e, transport harness, contract harness"
+          echo "::notice::Optional env-gated suites not run here: PostgreSQL tests, live ICE/STUN/TURN/browser interop, viewer-local-e2e-check, swarm/team-session workload harnesses"
 
   lint:
     name: Lint

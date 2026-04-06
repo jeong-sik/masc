@@ -438,7 +438,9 @@ let run
   let agent_result = match oas_checkpoint with
     | Some checkpoint ->
       (try Ok (resume_from_checkpoint ~net ~config ~checkpoint)
-       with exn ->
+       with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
          Log.Misc.warn "oas_worker %s: resume_from_checkpoint failed (%s), falling back to build"
            config.name (Printexc.to_string exn);
          build ~net ~config)

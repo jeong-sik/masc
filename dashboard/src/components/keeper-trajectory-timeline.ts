@@ -66,18 +66,41 @@ export function clearTrajectory(keeperName: string): void {
 // ── Components ───────────────────────────────────────────
 
 function ThinkingEntryRow({ entry }: { entry: TrajectoryEntry }) {
+  const expanded = useSignal(false)
   const len = entry.content_length ?? entry.content?.length ?? 0
+  const toggle = () => { expanded.value = !expanded.value }
+  const hasContent = !entry.redacted && (entry.content?.length ?? 0) > 0
+
   return html`
-    <div class="flex items-center gap-3 py-2 px-3 rounded-lg opacity-60">
-      <div class="flex-shrink-0 flex items-center gap-1.5">
-        <span class="text-[10px] text-[var(--text-dim)] w-3"></span>
-        <div class="size-7 rounded-md bg-[var(--white-5)] border border-[var(--white-8)] flex items-center justify-center text-[11px]">💭</div>
+    <div class="rounded-lg transition-colors ${expanded.value ? 'bg-[rgba(168,85,247,0.06)]' : ''}" style=${{ animation: 'activityFadeIn 0.3s ease-out' }}>
+      <div
+        class="group flex items-start gap-3 py-2.5 px-3 ${hasContent ? 'cursor-pointer hover:bg-[rgba(168,85,247,0.06)]' : ''} rounded-lg select-none"
+        onClick=${hasContent ? toggle : undefined}
+        role=${hasContent ? 'button' : undefined}
+        aria-expanded=${hasContent ? expanded.value : undefined}
+        tabIndex=${hasContent ? 0 : undefined}
+        onKeyDown=${hasContent ? (e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle() } } : undefined}
+      >
+        <div class="flex-shrink-0 flex items-center gap-1.5 mt-0.5">
+          <span class="text-[10px] text-[var(--text-dim)] w-3 text-center">${hasContent ? (expanded.value ? '\u25BC' : '\u25B6') : ''}</span>
+          <div class="size-7 rounded-md bg-[rgba(168,85,247,0.12)] border border-[rgba(168,85,247,0.2)] flex items-center justify-center text-[12px]">\u{1F4AD}</div>
+        </div>
+        <div class="flex-1 min-w-0 flex items-center gap-2">
+          <span class="text-xs font-mono font-medium text-[#a855f7]">${entry.redacted ? 'thinking (redacted)' : 'thinking'}</span>
+          <span class="text-[10px] text-[var(--text-dim)]">T${entry.turn}</span>
+          ${len > 0 ? html`<span class="text-[10px] px-1.5 py-0.5 rounded bg-[rgba(168,85,247,0.1)] text-[#a855f7]">${len}자</span>` : null}
+        </div>
+        <div class="flex-shrink-0">
+          <${TimeAgo} timestamp=${entry.ts} class="text-[10px] text-[var(--text-dim)]" />
+        </div>
       </div>
-      <div class="flex-1 min-w-0 flex items-center gap-2">
-        <span class="text-xs font-mono text-[var(--text-muted)]">${entry.redacted ? '사고 (비공개)' : '사고'}</span>
-        <span class="text-[10px] text-[var(--text-dim)]">T${entry.turn}</span>
-        ${len > 0 ? html`<span class="text-[10px] text-[var(--text-dim)]">${len}자</span>` : null}
-      </div>
+
+      ${expanded.value && hasContent ? html`
+        <div class="mx-3 mb-3 mt-1 border-l-2 border-[rgba(168,85,247,0.3)] pl-3">
+          <div class="text-[10px] font-semibold text-[#a855f7] uppercase tracking-wider mb-1">Thinking Content</div>
+          <pre class="m-0 text-[11px] font-mono text-[var(--text-body)] bg-[var(--white-5)] rounded-md p-2 overflow-x-auto max-h-[400px] overflow-y-auto whitespace-pre-wrap break-all">${entry.content}</pre>
+        </div>
+      ` : null}
     </div>
   `
 }

@@ -2,6 +2,7 @@ import type {
   Keeper,
   KeeperLifecycleState,
   KeeperMetricPoint,
+  PipelineStage,
 } from './types'
 import { isRecord, asString, asNumber, asBoolean, asStringArray, toIsoTimestamp } from './components/common/normalize'
 import { isOfflineStatus } from './lib/status-utils'
@@ -209,6 +210,7 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
       return {
         name,
         runtime_class: 'keeper' as const,
+        pipeline_stage: (asString(row.pipeline_stage) ?? 'idle') as PipelineStage,
         paused: asBoolean(row.paused),
         registered:
           typeof row.registered === 'boolean' ? row.registered : undefined,

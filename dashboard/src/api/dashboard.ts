@@ -538,7 +538,8 @@ export interface ToolMetricsResponse {
   distinct_tools_called: number
   top_20: ToolMetricsTopEntry[]
   never_called_count: number
-  tier_distribution: { essential: number; standard: number; full: number }
+  tier_distribution?: { essential: number; standard: number; full: number } | null
+  tool_distribution?: { total: number; public: number; visible: number; hidden: number } | null
   dispatch_v2_enabled: boolean
   registered_count: number
 }

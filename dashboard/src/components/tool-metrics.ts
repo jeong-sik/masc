@@ -73,31 +73,24 @@ function BarChart({ items, maxCount }: { items: ToolMetricsTopEntry[]; maxCount:
   `
 }
 
-function TierDistribution({ dist }: { dist: Record<string, number> | null | undefined }) {
-  if (!dist) return html`<div class="text-[11px] text-[var(--text-muted)] italic">서버에서 계층 분류 데이터를 제공하지 않습니다.</div>`
-  const total = dist.total ?? dist.full ?? 0
-  const essential = dist.essential ?? 0
-  const standardOnly = dist.standard_only ?? dist.standard ?? 0
-  const fullOnly = dist.full_only ?? (total - standardOnly)
-  const essentialPct = total > 0 ? ((essential / total) * 100).toFixed(1) : '0'
-  const standardPct = total > 0 ? ((standardOnly / total) * 100).toFixed(1) : '0'
-  const fullOnlyPct = total > 0 ? ((fullOnly / total) * 100).toFixed(1) : '0'
+function ToolDistribution({ dist }: { dist: { total: number; public: number; visible: number; hidden: number } | null | undefined }) {
+  if (!dist) return html`<div class="text-[11px] text-[var(--text-muted)] italic">도구 분포 데이터가 없습니다.</div>`
   return html`
     <div class="flex flex-col gap-2">
       <div class="flex items-center gap-3">
-        <span class="inline-block min-w-[72px] px-2 py-0.5 text-[11px] font-semibold text-center rounded badge-essential">필수</span>
-        <span class="text-[var(--text-strong)] text-sm font-semibold min-w-9 text-right">${essential}</span>
-        <span class="text-[var(--text-muted)] text-[13px] min-w-12 text-right">${essentialPct}%</span>
+        <span class="inline-block min-w-[72px] px-2 py-0.5 text-[11px] font-semibold text-center rounded badge-essential">공개</span>
+        <span class="text-[var(--text-strong)] text-sm font-semibold min-w-9 text-right">${dist.public}</span>
+        <span class="text-[var(--text-muted)] text-[13px] min-w-12 text-right">${dist.total > 0 ? ((dist.public / dist.total) * 100).toFixed(1) : '0'}%</span>
       </div>
       <div class="flex items-center gap-3">
-        <span class="inline-block min-w-[72px] px-2 py-0.5 text-[11px] font-semibold text-center rounded badge-standard">표준</span>
-        <span class="text-[var(--text-strong)] text-sm font-semibold min-w-9 text-right">${standardOnly}</span>
-        <span class="text-[var(--text-muted)] text-[13px] min-w-12 text-right">${standardPct}%</span>
+        <span class="inline-block min-w-[72px] px-2 py-0.5 text-[11px] font-semibold text-center rounded badge-standard">표시</span>
+        <span class="text-[var(--text-strong)] text-sm font-semibold min-w-9 text-right">${dist.visible}</span>
+        <span class="text-[var(--text-muted)] text-[13px] min-w-12 text-right">${dist.total > 0 ? ((dist.visible / dist.total) * 100).toFixed(1) : '0'}%</span>
       </div>
       <div class="flex items-center gap-3">
-        <span class="inline-block min-w-[72px] px-2 py-0.5 text-[11px] font-semibold text-center rounded badge-full">전체 전용</span>
-        <span class="text-[var(--text-strong)] text-sm font-semibold min-w-9 text-right">${fullOnly}</span>
-        <span class="text-[var(--text-muted)] text-[13px] min-w-12 text-right">${fullOnlyPct}%</span>
+        <span class="inline-block min-w-[72px] px-2 py-0.5 text-[11px] font-semibold text-center rounded badge-full">숨김</span>
+        <span class="text-[var(--text-strong)] text-sm font-semibold min-w-9 text-right">${dist.hidden}</span>
+        <span class="text-[var(--text-muted)] text-[13px] min-w-12 text-right">${dist.total > 0 ? ((dist.hidden / dist.total) * 100).toFixed(1) : '0'}%</span>
       </div>
     </div>
   `
@@ -159,8 +152,8 @@ export function ToolMetrics() {
 
         <div class="tool-metrics-sections">
           <div>
-            <h4 class="text-[var(--text-muted)] text-[11px] uppercase tracking-[0.05em] mb-2.5 mt-0">계층 분포</h4>
-            <${TierDistribution} dist=${data.tier_distribution} />
+            <h4 class="text-[var(--text-muted)] text-[11px] uppercase tracking-[0.05em] mb-2.5 mt-0">도구 분포</h4>
+            <${ToolDistribution} dist=${data.tool_distribution} />
           </div>
           <div>
             <h4 class="text-[var(--text-muted)] text-[11px] uppercase tracking-[0.05em] mb-2.5 mt-0">상위 20 도구</h4>

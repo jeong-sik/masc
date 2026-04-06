@@ -259,8 +259,8 @@ let handle_keeper_fs_read
        missing_file_error_json ~config ~target ~error:e
      | Error e -> error_json ~fields:[ "path", `String target ] e
      | Ok content ->
-       let total = String.length content in
-       let truncated = total > max_bytes in
+        let total = String.length content in
+        let truncated = total > max_bytes in
         let body = if truncated then String.sub content 0 max_bytes else content in
         Yojson.Safe.to_string
           (`Assoc

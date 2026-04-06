@@ -34,7 +34,7 @@ tools = ["keeper_fs_edit"]
 tools = ["keeper_library_search", "keeper_library_read"]
 
 [groups.github]
-tools = ["keeper_github"]
+tools = ["keeper_github", "keeper_pr_workflow"]
 
 # Shard-backed groups: tool names resolved from Tool_shard at runtime.
 [groups.governance]

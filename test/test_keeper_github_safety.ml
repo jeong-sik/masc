@@ -16,6 +16,8 @@ let is_ok = function Ok () -> true | Error _ -> false
 let is_error = function Error _ -> true | Ok () -> false
 
 let is_destructive = Masc_mcp.Worker_dev_tools.is_gh_destructive_operation
+let is_workflow = Masc_mcp.Worker_dev_tools.is_gh_workflow_operation
+let is_dangerous = Masc_mcp.Worker_dev_tools.is_gh_dangerous_operation
 
 let test_allowed_read_commands () =
   let allowed =
@@ -312,6 +314,54 @@ let test_non_destructive_ops () =
         false (is_destructive cmd))
     safe
 
+let test_workflow_vs_dangerous () =
+  let workflow_ops =
+    [
+      "pr merge 123";
+      "pr close 123";
+      "issue close 456";
+      "project close 1";
+      "api -X POST /repos/o/r/pulls/1/merge";
+      "api -X PATCH /repos/o/r/pulls/1 -f state=closed";
+    ]
+  in
+  List.iter
+    (fun cmd ->
+      Alcotest.(check bool)
+        (Printf.sprintf "workflow: gh %s" cmd)
+        true (is_workflow cmd);
+      Alcotest.(check bool)
+        (Printf.sprintf "not dangerous: gh %s" cmd)
+        false (is_dangerous cmd);
+      Alcotest.(check bool)
+        (Printf.sprintf "still destructive: gh %s" cmd)
+        true (is_destructive cmd))
+    workflow_ops;
+  let dangerous_ops =
+    [
+      "issue delete 456";
+      "issue transfer 456 owner/other";
+      "repo archive owner/repo";
+      "repo rename owner/repo new-name";
+      "release delete v1.0";
+      "label delete bug";
+      "cache delete --all";
+      "project delete 1";
+      "workflow delete deploy.yml";
+      "api -X DELETE repos/owner/repo/issues/1";
+      "api graphql -f query=mergePullRequest";
+    ]
+  in
+  List.iter
+    (fun cmd ->
+      Alcotest.(check bool)
+        (Printf.sprintf "dangerous: gh %s" cmd)
+        true (is_dangerous cmd);
+      Alcotest.(check bool)
+        (Printf.sprintf "not workflow: gh %s" cmd)
+        false (is_workflow cmd))
+    dangerous_ops
+
 let () =
   Alcotest.run "Keeper github safety"
     [
@@ -345,6 +395,11 @@ let () =
             test_new_command_destructive_ops;
           Alcotest.test_case "safe ops not flagged" `Quick
             test_non_destructive_ops;
+        ] );
+      ( "tier_split",
+        [
+          Alcotest.test_case "workflow ops classified correctly" `Quick
+            test_workflow_vs_dangerous;
         ] );
       ( "edge",
         [

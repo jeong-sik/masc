@@ -1,6 +1,25 @@
 # Changelog
 
 
+## [2.248.0] - 2026-04-06
+
+### Added
+- **Thinking blocks** -- capture and display LLM thinking blocks in trajectory. (#5461)
+- **Tool stats API** -- server-side per-tool call counts, p95 latency, cost, and sparkline timeline. (#5477)
+- **Keeper tool feedback** -- structured feedback for empty tool search results. (#5476)
+- **Tool discovery default** -- tool discovery is now the default mode, feature flag removed. (#5484)
+
+### Fixed
+- **Silent defaults** -- disambiguate trajectory sort type, fix bare exception catches. (#5483)
+- **Operator action phase 2** -- replace delegated_tool with tool_name, centralize labels, fix heartbeat and autonomy_tick. (#5440)
+- **Room broadcast noise** -- remove noisy task claim/release broadcasts from room chat. (#5464)
+- **Dashboard** -- handle optional TrajectoryEntry fields after thinking merge. (#5485)
+
+### Changed
+- **Deprecated tool pruning** -- remove 30 deprecated tools (-5,255 lines). (#5460)
+- **CI pinning** -- pin floating deps to SHA, merge contract into build job. (#5475)
+- **OAS pin** -- bump agent_sdk 0.101.2 to 0.103.0. (#5482)
+
 ## [2.247.0] - 2026-04-06
 
 ### Added

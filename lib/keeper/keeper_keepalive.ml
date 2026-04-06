@@ -938,8 +938,8 @@ let run_heartbeat_loop
      OAS Context.t is designed as a mutable cross-turn state container.
      Hooks and context_injector accumulate temporal state (elapsed time,
      tool call counts, etc.) into this instance across turns.
-     Previously, a fresh Context.create() was called per turn in run_turn,
-     losing all accumulated state.  See docs/analysis/2026-04-06-keeper-lifecycle-analysis.md *)
+     Previously, a fresh Context.create () was called per turn in
+     run_turn, losing all accumulated state. *)
   let shared_context = Agent_sdk.Context.create () in
   let rec loop () =
     if Atomic.get stop

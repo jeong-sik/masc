@@ -587,7 +587,7 @@ and resume_worker_via_oas
   in
   let injector_config = Masc_context_injector.default_config () in
   let context_injector = Masc_context_injector.make ~config:injector_config () in
-  let shared_context = Oas.Context.create () in
+  let shared_context = Oas.Context.copy checkpoint.context in
   let gate_config = gate_config_of_execution_scope meta.execution_scope in
   let tool_names_ref, hooks = make_tool_tracking_hooks ~gate_config ~context:shared_context () in
   let resume_model_id = resume_model_id_of_checkpoint meta checkpoint in

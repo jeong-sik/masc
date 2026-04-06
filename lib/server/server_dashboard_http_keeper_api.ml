@@ -383,6 +383,38 @@ let handle_keeper_get_subroutes state req request reqd =
       in
       Http.Response.json ~status ~compress:true ~request:req
         (Yojson.Safe.to_string json) reqd
+  else if ends_with "/tool-stats" then
+    let name = extract_name "/tool-stats" in
+    if String.length name = 0 then
+      Http.Response.json ~status:`Bad_request
+        {|{"error":"keeper name is required"}|} reqd
+    else if not (Keeper_config.validate_name name) then
+      Http.Response.json ~status:`Bad_request
+        (Printf.sprintf {|{"error":"invalid keeper name: %S"}|}
+           (String.escaped name)) reqd
+    else
+      let config = state.Mcp_server.room_config in
+      let masc_root = Filename.concat config.base_path ".masc" in
+      let window_hours =
+        Server_utils.int_query_param req "window_hours"
+          ~default:24
+        |> max 1 |> min 168  (* 1h .. 7d *)
+      in
+      let since = Time_compat.now () -. (float_of_int window_hours *. 3600.0) in
+      let entries =
+        Trajectory.read_entries_since ~masc_root ~keeper_name:name ~since
+      in
+      let tools = Trajectory.aggregate_tool_stats entries in
+      let timeline = Trajectory.hourly_timeline entries in
+      let json = `Assoc [
+        ("keeper", `String name);
+        ("window_hours", `Int window_hours);
+        ("total_entries", `Int (List.length entries));
+        ("tools", `List (List.map Trajectory.tool_stat_to_json tools));
+        ("timeline", `List (List.map Trajectory.hourly_bucket_to_json timeline));
+      ] in
+      Http.Response.json ~compress:true ~request:req
+        (Yojson.Safe.to_string json) reqd
   else if ends_with "/trajectory" then
     let name = extract_name "/trajectory" in
     if String.length name = 0 then

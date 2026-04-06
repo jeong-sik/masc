@@ -290,6 +290,168 @@ let calls_in_current_turn (acc : accumulator) : int =
   List.length (List.filter (fun (e : tool_call_entry) -> e.turn = acc.turn) acc.entries)
 
 (* ================================================================ *)
+(* Tool stats aggregation                                          *)
+(* ================================================================ *)
+
+type tool_stat = {
+  name : string;
+  call_count : int;
+  success_count : int;
+  failure_count : int;
+  avg_duration_ms : int;
+  p95_duration_ms : int;
+  max_duration_ms : int;
+  total_cost_usd : float;
+  last_used_at : string;
+}
+
+type hourly_bucket = {
+  hour : string;
+  call_count : int;
+  error_count : int;
+}
+
+(** Compute p95 from a sorted int array. *)
+let p95_of_sorted (durations : int array) : int =
+  let n = Array.length durations in
+  if n = 0 then 0
+  else
+    let idx = min (n - 1) (int_of_float (Float.round (float_of_int n *. 0.95))) in
+    durations.(idx)
+
+let aggregate_tool_stats (entries : tool_call_entry list) : tool_stat list =
+  let tbl : (string, int list * int * int * float * float * string) Hashtbl.t =
+    Hashtbl.create 32
+  in
+  List.iter (fun (e : tool_call_entry) ->
+    let is_failure = Option.is_some e.error || (match e.gate_decision with Reject _ -> true | Pass -> false) in
+    match Hashtbl.find_opt tbl e.tool_name with
+    | None ->
+      let succ = if is_failure then 0 else 1 in
+      let fail = if is_failure then 1 else 0 in
+      Hashtbl.replace tbl e.tool_name
+        ([e.duration_ms], succ, fail, e.cost_usd, e.ts, e.ts_iso)
+    | Some (durations, succ, fail, cost, max_ts, max_iso) ->
+      let succ' = if is_failure then succ else succ + 1 in
+      let fail' = if is_failure then fail + 1 else fail in
+      let (ts', iso') = if e.ts > max_ts then (e.ts, e.ts_iso) else (max_ts, max_iso) in
+      Hashtbl.replace tbl e.tool_name
+        (e.duration_ms :: durations, succ', fail', cost +. e.cost_usd, ts', iso')
+  ) entries;
+  let stats = Hashtbl.fold (fun name (durations, succ, fail, cost, _max_ts, last_iso) acc ->
+    let count = succ + fail in
+    let total_dur = List.fold_left (+) 0 durations in
+    let avg = if count > 0 then total_dur / count else 0 in
+    let sorted = Array.of_list durations in
+    Array.sort compare sorted;
+    let max_d = if Array.length sorted > 0 then sorted.(Array.length sorted - 1) else 0 in
+    { name;
+      call_count = count;
+      success_count = succ;
+      failure_count = fail;
+      avg_duration_ms = avg;
+      p95_duration_ms = p95_of_sorted sorted;
+      max_duration_ms = max_d;
+      total_cost_usd = cost;
+      last_used_at = last_iso;
+    } :: acc
+  ) tbl [] in
+  List.sort (fun (a : tool_stat) (b : tool_stat) -> compare b.call_count a.call_count) stats
+
+(** Truncate a Unix timestamp to the start of its UTC hour. *)
+let hour_start_iso (ts : float) : string =
+  let t = Unix.gmtime ts in
+  Printf.sprintf "%04d-%02d-%02dT%02d:00:00Z"
+    (t.tm_year + 1900) (t.tm_mon + 1) t.tm_mday t.tm_hour
+
+let hourly_timeline (entries : tool_call_entry list) : hourly_bucket list =
+  let tbl : (string, int * int) Hashtbl.t = Hashtbl.create 24 in
+  List.iter (fun (e : tool_call_entry) ->
+    let hour = hour_start_iso e.ts in
+    let is_err = Option.is_some e.error in
+    match Hashtbl.find_opt tbl hour with
+    | None -> Hashtbl.replace tbl hour (1, if is_err then 1 else 0)
+    | Some (c, errs) -> Hashtbl.replace tbl hour (c + 1, errs + (if is_err then 1 else 0))
+  ) entries;
+  let buckets = Hashtbl.fold (fun hour (call_count, error_count) acc ->
+    { hour; call_count; error_count } :: acc
+  ) tbl [] in
+  List.sort (fun a b -> String.compare a.hour b.hour) buckets
+
+let tool_stat_to_json (s : tool_stat) : Yojson.Safe.t =
+  `Assoc [
+    ("name", `String s.name);
+    ("call_count", `Int s.call_count);
+    ("success_count", `Int s.success_count);
+    ("failure_count", `Int s.failure_count);
+    ("avg_duration_ms", `Int s.avg_duration_ms);
+    ("p95_duration_ms", `Int s.p95_duration_ms);
+    ("max_duration_ms", `Int s.max_duration_ms);
+    ("total_cost_usd", `Float s.total_cost_usd);
+    ("last_used_at", `String s.last_used_at);
+  ]
+
+let hourly_bucket_to_json (b : hourly_bucket) : Yojson.Safe.t =
+  `Assoc [
+    ("hour", `String b.hour);
+    ("call_count", `Int b.call_count);
+    ("error_count", `Int b.error_count);
+  ]
+
+(** Read all .jsonl trace files for a keeper. Filter entries with ts >= since.
+    Scans the keeper's trajectory directory for all trace files. *)
+let read_entries_since ~(masc_root : string) ~(keeper_name : string) ~(since : float)
+    : tool_call_entry list =
+  let dir = trajectories_dir masc_root keeper_name in
+  if not (Sys.file_exists dir) then []
+  else
+    let files = Sys.readdir dir in
+    let all_entries = ref [] in
+    Array.iter (fun fname ->
+      if Filename.check_suffix fname ".jsonl" then begin
+        let path = Filename.concat dir fname in
+        (try
+           let content = Fs_compat.load_file path in
+           String.split_on_char '\n' content
+           |> List.iter (fun line ->
+             if String.trim line <> "" then
+               try
+                 let json = Yojson.Safe.from_string line in
+                 let open Yojson.Safe.Util in
+                 (match member "type" json with
+                  | `String "trajectory_summary" -> ()
+                  | _ ->
+                    let ts = json |> member "ts" |> to_float in
+                    if ts >= since then
+                      let entry = {
+                        ts;
+                        ts_iso = json |> member "ts_iso" |> to_string;
+                        turn = json |> member "turn" |> to_int;
+                        round = json |> member "round" |> to_int;
+                        tool_name = json |> member "tool_name" |> to_string;
+                        args_json = json |> member "args" |> Yojson.Safe.to_string;
+                        gate_decision = Pass;
+                        result =
+                          (match json |> member "result" with
+                           | `Null -> None
+                           | `String s -> Some s
+                           | _ -> None);
+                        duration_ms = json |> member "duration_ms" |> to_int;
+                        error =
+                          (match json |> member "error" with
+                           | `Null -> None
+                           | `String s -> Some s
+                           | _ -> None);
+                        cost_usd = json |> member "cost_usd" |> to_float;
+                      } in
+                      all_entries := entry :: !all_entries)
+               with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> ())
+         with Sys_error _ -> ())
+      end
+    ) files;
+    List.sort (fun a b -> compare a.ts b.ts) !all_entries
+
+(* ================================================================ *)
 (* Read trajectory from JSONL (for replay/eval)                     *)
 (* ================================================================ *)
 

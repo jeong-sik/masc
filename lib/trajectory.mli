@@ -109,3 +109,43 @@ val detect_entropy :
     If [args_json] is provided, only consecutive IDENTICAL calls (same tool and same args) are counted. *)
 
 val calls_in_current_turn : accumulator -> int
+
+(** {1 Tool stats aggregation}
+
+    Server-side aggregation for the keeper tool telemetry dashboard.
+    Computes per-tool call counts, latency percentiles, cost, and
+    hourly activity buckets from raw trajectory entries. *)
+
+type tool_stat = {
+  name : string;
+  call_count : int;
+  success_count : int;
+  failure_count : int;
+  avg_duration_ms : int;
+  p95_duration_ms : int;
+  max_duration_ms : int;
+  total_cost_usd : float;
+  last_used_at : string;
+}
+
+type hourly_bucket = {
+  hour : string;  (** ISO8601 hour start, e.g. "2026-04-06T10:00:00Z" *)
+  call_count : int;
+  error_count : int;
+}
+
+val aggregate_tool_stats : tool_call_entry list -> tool_stat list
+(** Aggregate per-tool statistics from a list of entries.
+    Results sorted by call_count descending. *)
+
+val hourly_timeline : tool_call_entry list -> hourly_bucket list
+(** Bucket entries by hour. Results sorted chronologically. *)
+
+val tool_stat_to_json : tool_stat -> Yojson.Safe.t
+val hourly_bucket_to_json : hourly_bucket -> Yojson.Safe.t
+
+val read_entries_since :
+  masc_root:string -> keeper_name:string -> since:float ->
+  tool_call_entry list
+(** Read entries from all trace files for a keeper with ts >= [since].
+    Results sorted chronologically. *)

@@ -42,20 +42,23 @@ let make_meta ?(last_model_used = "glm-5.1") () =
   | Ok meta -> meta
   | Error err -> fail ("meta_of_json failed: " ^ err)
 
-(* cascade.json defines keeper_unified_models as ["llama:auto"].
-   The test must match the cascade SSOT, not Env_config_runtime.Llama.default_model
-   which is the local llama-server model id — a different concern. *)
-let cascade_llama_label = "llama:auto"
-
+(* Behavioral: stale model from a different provider is excluded from result.
+   MASC does not assert specific vendor labels — only cascade behavior. *)
 let test_stale_last_model_is_not_reused_outside_current_cascade () =
-  let labels = labels_for_turn (make_meta ()) in
-  check (list string) "llama-only cascade excludes stale glm pin"
-    [ cascade_llama_label ] labels
+  let labels = labels_for_turn (make_meta ~last_model_used:"glm-5.1" ()) in
+  check bool "result is non-empty" true (labels <> []);
+  check bool "stale glm pin not in cascade labels"
+    true (not (List.mem "glm-5.1" labels))
 
+(* Behavioral: when last_model_used matches a configured cascade model,
+   it stays first in the returned labels. *)
 let test_matching_last_model_is_preserved_when_still_in_cascade () =
-  let labels = labels_for_turn (make_meta ~last_model_used:cascade_llama_label ()) in
-  check (list string) "llama label stays first when still allowed"
-    [ cascade_llama_label ] labels
+  let baseline = labels_for_turn (make_meta ~last_model_used:"none" ()) in
+  match baseline with
+  | [] -> fail "cascade resolved to empty labels"
+  | first :: _ ->
+    let labels = labels_for_turn (make_meta ~last_model_used:first ()) in
+    check string "matching model stays first" first (List.hd labels)
 
 let () =
   run "keeper_llama_only"

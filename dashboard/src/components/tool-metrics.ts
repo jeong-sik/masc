@@ -14,20 +14,22 @@ function loadMetrics() {
   return metricsResource.load(() => fetchToolMetrics())
 }
 
-function tierLabel(tier: string | undefined): string {
+function tierLabel(tier: string | null | undefined): string {
   switch (tier) {
     case 'essential': return '필수'
     case 'standard': return '표준'
     case 'full': return '전체'
-    default: return tier ?? '-'
+    case null: case undefined: return '-'
+    default: return tier
   }
 }
 
-function tierBadgeClass(tier: string): string {
+function tierBadgeClass(tier: string | null | undefined): string {
   switch (tier) {
     case 'essential': return 'badge-essential'
     case 'standard': return 'badge-standard'
-    default: return 'badge-full'
+    case 'full': return 'badge-full'
+    default: return 'bg-[var(--white-4)] text-[var(--text-dim)]'
   }
 }
 

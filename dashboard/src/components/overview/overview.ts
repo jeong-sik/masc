@@ -473,7 +473,7 @@ function ToolCallHealthPanel() {
   const rate = health.failure_rate
   const hasRate = rate != null
   const rateColor = hasRate ? (rate > 0.1 ? 'text-bad-light' : rate > 0.03 ? 'text-warn' : 'text-ok') : 'text-text-dim'
-  const ratePct = hasRate ? (rate * 100).toFixed(1) : '-'
+  const ratePct = hasRate ? `${(rate * 100).toFixed(1)}%` : '-'
 
   return html`
     <div>
@@ -488,7 +488,7 @@ function ToolCallHealthPanel() {
           <div class="text-[11px] text-text-muted mt-1">실패</div>
         </div>
         <div class="rounded-lg border border-card-border/30 bg-card/40 p-3 text-center">
-          <div class="text-[22px] font-bold ${rateColor}">${ratePct}%</div>
+          <div class="text-[22px] font-bold ${rateColor}">${ratePct}</div>
           <div class="text-[11px] text-text-muted mt-1">실패율</div>
         </div>
       </div>

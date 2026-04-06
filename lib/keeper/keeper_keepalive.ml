@@ -942,6 +942,11 @@ let run_heartbeat_loop
      and tool-call counters are recreated inside run_turn and therefore
      do not accumulate for the full keeper lifecycle. *)
   let shared_context = Agent_sdk.Context.create () in
+  (* Mtime-based change detection for keeper meta disk reads.
+     Avoids re-parsing the JSON file on every heartbeat cycle when
+     no operator has modified it.  Initialized to 0.0 so the first
+     cycle always reads. *)
+  let last_meta_mtime = ref 0.0 in
   let rec loop () =
     if Atomic.get stop
     then ()
@@ -953,9 +958,11 @@ let run_heartbeat_loop
       (* Phase 0: timing markers *)
       let t_presence_start = Time_compat.now () in
       let meta_current =
-        match read_meta ctx.config m.name with
-        | Ok (Some latest) -> latest
-        | _ -> m
+        match read_meta_if_changed ctx.config m.name ~last_mtime:!last_meta_mtime with
+        | Some (latest, new_mtime) ->
+          last_meta_mtime := new_mtime;
+          latest
+        | None -> m
       in
       (* Sync disk meta to registry so dashboard reads live values.  #5364.
          Physical inequality: read_meta returns a fresh record when the JSON

@@ -9,6 +9,7 @@ scope_kind = "local"
 mention_targets = ["cheolsu"]
 
 proactive_enabled = true
+execution_scope = "workspace"
 
-# Deny tools that local models misuse in idle loops.
-tool_denylist = ["keeper_board_comment", "keeper_board_post", "keeper_board_vote"]
+tool_preset = "delivery"
+tool_denylist = []

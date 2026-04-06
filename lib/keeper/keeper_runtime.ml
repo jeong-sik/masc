@@ -28,6 +28,16 @@ let ensure_keeper_meta config name =
       | Some v -> v
       | None -> Keeper_config.default_proactive_enabled
     in
+    let target_idle_sec =
+      match defaults.proactive_idle_sec with
+      | Some v -> v
+      | None -> Keeper_config.default_proactive_idle_sec
+    in
+    let target_cooldown_sec =
+      match defaults.proactive_cooldown_sec with
+      | Some v -> v
+      | None -> Keeper_config.default_proactive_cooldown_sec
+    in
     let target_room_signal_prompt_enabled =
       match Keeper_config.keeper_room_signal_prompt_enabled_override () with
       | Some override -> override
@@ -41,16 +51,27 @@ let ensure_keeper_meta config name =
       | None -> meta.tool_denylist
     in
     let denylist_changed = meta.tool_denylist <> target_denylist in
+    let proactive_timers_changed =
+      meta.proactive.idle_sec <> target_idle_sec
+      || meta.proactive.cooldown_sec <> target_cooldown_sec
+    in
     if meta.proactive.enabled <> target_proactive
+       || proactive_timers_changed
        || meta.room_signal_prompt_enabled <> target_room_signal_prompt_enabled
        || denylist_changed then begin
       Log.Keeper.info
-        "ensure_keeper_meta: re-syncing proactive.enabled %b -> %b, room_signal_prompt_enabled %b -> %b, denylist_changed %b for %s"
+        "ensure_keeper_meta: re-syncing proactive.enabled %b -> %b, idle_sec %d -> %d, cooldown_sec %d -> %d, room_signal_prompt_enabled %b -> %b, denylist_changed %b for %s"
         meta.proactive.enabled target_proactive
+        meta.proactive.idle_sec target_idle_sec
+        meta.proactive.cooldown_sec target_cooldown_sec
         meta.room_signal_prompt_enabled target_room_signal_prompt_enabled
         denylist_changed meta.name;
       let updated = { meta with
-        proactive = { meta.proactive with enabled = target_proactive };
+        proactive = {
+          enabled = target_proactive;
+          idle_sec = target_idle_sec;
+          cooldown_sec = target_cooldown_sec;
+        };
         room_signal_prompt_enabled = target_room_signal_prompt_enabled;
         tool_denylist = target_denylist;
         updated_at = now_iso ();

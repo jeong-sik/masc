@@ -101,11 +101,17 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         p.proactive_enabled_opt
     in
     let proactive_idle_sec =
-      Option.value ~default:default_proactive_idle_sec p.proactive_idle_sec_opt
+      Option.value
+        ~default:
+          (Option.value ~default:default_proactive_idle_sec p.profile_defaults.proactive_idle_sec)
+        p.proactive_idle_sec_opt
       |> normalize_proactive_idle_sec
     in
     let proactive_cooldown_sec =
-      Option.value ~default:default_proactive_cooldown_sec p.proactive_cooldown_sec_opt
+      Option.value
+        ~default:
+          (Option.value ~default:default_proactive_cooldown_sec p.profile_defaults.proactive_cooldown_sec)
+        p.proactive_cooldown_sec_opt
       |> normalize_proactive_cooldown_sec
     in
     let auto_handoff = Option.value ~default:true p.auto_handoff_opt in

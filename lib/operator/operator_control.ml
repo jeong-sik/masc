@@ -579,7 +579,9 @@ let known_action_types =
       (fun (a : Operator_pending_confirm.available_action) -> a.action_type)
       Operator_pending_confirm.available_actions
   in
-  from_registry @ [ "social_sweep"; "autonomy_tick"; "team_turn";
+  (* autonomy_tick excluded: canonical_action_type maps it to social_sweep
+     before validate_request runs, so it never reaches here as-is. *)
+  from_registry @ [ "social_sweep"; "team_turn";
                     "review_resolve"; "review_defer" ]
 
 let validate_request request =

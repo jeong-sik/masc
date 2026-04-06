@@ -34,7 +34,6 @@ let admin_only_tools =
     "masc_policy_freeze_unit";
     "masc_policy_kill_switch";
     (* CanAdmin — board moderation *)
-    "masc_board_reclassify";
     "masc_board_delete";
     (* CanAdmin — auth *)
     "masc_auth_create_token";

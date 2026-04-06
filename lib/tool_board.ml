@@ -645,53 +645,6 @@ let tool_hearth_list : Types.tool_schema = {
   ];
 }
 
-(** {1 Migration Tool} *)
-
-let handle_migrate _args =
-  match Board_dispatch.backend () with
-  | Board_dispatch.Postgres t ->
-      (* Load JSONL data into a temporary store *)
-      let store = Board.create_store () in
-      Board.load_persisted_posts store;
-      Board.load_persisted_comments store;
-      Board.recalculate_reply_counts store;
-      Board.load_persisted_votes store;
-      let jsonl_posts = Hashtbl.length store.Board.posts in
-      let jsonl_comments = Hashtbl.length store.Board.comments in
-      let jsonl_votes = Hashtbl.length store.Board.vote_log in
-      if jsonl_posts = 0 && jsonl_comments = 0 then
-        (true, "📭 No JSONL data to migrate.")
-      else begin
-        let r = Board_pg.migrate_from_store t store in
-        (true, Printf.sprintf
-          "✅ Migration complete.\n\
-           JSONL source: %d posts, %d comments, %d votes\n\
-           PG migrated: %d posts, %d comments, %d votes\n\
-           Skipped: %d posts, %d comments\n\
-           Backend: %s"
-          jsonl_posts jsonl_comments jsonl_votes
-          r.posts_migrated r.comments_migrated r.votes_migrated
-          r.posts_skipped r.comments_skipped
-          (Board_dispatch.backend_name ()))
-      end
-  | Board_dispatch.Jsonl _ ->
-      (false, "❌ Migration requires PostgreSQL backend. Set MASC_POSTGRES_URL and restart.")
-
-let handle_reclassify args =
-  let dry_run = get_bool args "dry_run" true in
-  let limit = get_int args "limit" 5200 |> max 0 |> min 5200 in
-  let report = Board_dispatch.reclassify_posts ~limit ~dry_run () in
-  (true, Yojson.Safe.pretty_to_string (Board.reclassify_report_to_yojson report))
-
-let tool_migrate : Types.tool_schema = {
-  name = "masc_board_migrate";
-  description = "Migrate Board data from JSONL files to PostgreSQL (idempotent, safe to re-run)";
-  input_schema = `Assoc [
-    ("type", `String "object");
-    ("properties", `Assoc []);
-  ];
-}
-
 let handle_delete args =
   let post_id = String.trim (get_string args "post_id" "") in
   if post_id = "" then
@@ -713,18 +666,6 @@ let tool_delete : Types.tool_schema = {
   ];
 }
 
-let tool_reclassify : Types.tool_schema = {
-  name = "masc_board_reclassify";
-  description = "Backfill legacy board rows that predate explicit post_kind contracts. Hidden admin tool for safe dry-run migration only.";
-  input_schema = `Assoc [
-    ("type", `String "object");
-    ("properties", `Assoc [
-      ("dry_run", `Assoc [("type", `String "boolean"); ("description", `String "Preview changes without writing (default: true)")]);
-      ("limit", `Assoc [("type", `String "integer"); ("description", `String "Max active posts to scan (default: 5200, max: 5200)")]);
-    ]);
-  ];
-}
-
 (** All board tools *)
 let tools = [
   tool_post_create;
@@ -738,8 +679,6 @@ let tools = [
   tool_profile;
   tool_hearth_list;
   tool_delete;
-  tool_migrate;
-  tool_reclassify;
 ]
 
 (** Tool dispatcher *)
@@ -756,8 +695,6 @@ let handle_tool name args =
   | "masc_board_profile" -> handle_profile args
   | "masc_board_hearths" -> handle_hearth_list args
   | "masc_board_delete" -> handle_delete args
-  | "masc_board_migrate" -> handle_migrate args
-  | "masc_board_reclassify" -> handle_reclassify args
   | _ -> (false, Printf.sprintf "Unknown tool: %s" name)
 
 let register () =

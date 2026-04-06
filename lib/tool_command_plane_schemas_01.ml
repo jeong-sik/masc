@@ -238,31 +238,6 @@ After masc_operation_start or masc_dispatch_assign; run repeatedly until stable.
           ];
     };
     {
-      name = "masc_detachment_list";
-      description =
-        "List managed and projected detachments after dispatch/tick to confirm runtime materialization. \
-Use when verifying that dispatch_tick created the expected detachments. \
-After masc_dispatch_tick; pair with masc_detachment_status for per-detachment details.";
-      input_schema =
-        object_schema
-          [
-            ("operation_id", string_prop "Optional operation or trace filter.");
-            ("detachment_id", string_prop "Optional detachment id filter.");
-          ];
-    };
-    {
-      name = "masc_detachment_status";
-      description =
-        "Inspect a single detachment with runtime, heartbeat, failover, and approval context. \
-Use when debugging a specific detachment or verifying its runtime state. \
-After masc_detachment_list identifies the detachment_id.";
-      input_schema =
-        object_schema ~required:[ "detachment_id" ]
-          [
-            ("detachment_id", string_prop "Managed detachment id.");
-          ];
-    };
-    {
       name = "masc_policy_status";
       description =
         "Read policy decisions, approval queue, capacity overlays, and topology state. \

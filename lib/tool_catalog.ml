@@ -197,11 +197,6 @@ let explicit_metadata : (string * metadata) list =
        signaling endpoints in server_h2_gateway.ml — kept for now. *)
     ("masc_webrtc_offer", deprecated "Pruned from all surfaces in #4999");
     ("masc_webrtc_answer", deprecated "Pruned from all surfaces in #4999");
-    ("masc_board_migrate", deprecated "Pruned from all surfaces in #4999");
-    ("masc_board_reclassify", deprecated "Pruned from all surfaces in #4999");
-    (* detachment: 2 refs (swarm read-only), inactive 90 days *)
-    ("masc_detachment_list", deprecated "Pruned: 2 refs (swarm read-only), inactive 90d");
-    ("masc_detachment_status", deprecated "Pruned: 2 refs (swarm read-only), inactive 90d");
   ]
 
 (* ================================================================ *)

@@ -21,8 +21,6 @@ let dispatch (ctx : (_, _) context) ~name ~args : result option =
   | "masc_dispatch_escalate" -> Some (handle_dispatch_escalate ctx args)
   | "masc_dispatch_recall" -> Some (handle_dispatch_recall ctx args)
   | "masc_dispatch_tick" -> Some (handle_dispatch_tick ctx args)
-  | "masc_detachment_list" -> Some (handle_detachment_list ctx args)
-  | "masc_detachment_status" -> Some (handle_detachment_status ctx args)
   | "masc_policy_status" -> Some (handle_policy_status ctx)
   | "masc_policy_approve" -> Some (handle_policy_approve ctx args)
   | "masc_policy_deny" -> Some (handle_policy_deny ctx args)

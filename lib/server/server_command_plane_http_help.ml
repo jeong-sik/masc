@@ -206,12 +206,12 @@ let command_plane_help_http_json () =
                     ~summary:
                       "Run the scheduler/reconciler to create or update detachments."
                     ~success_signals:
-                      [ "masc_detachment_list returns active detachments"; "operation moves from planned to active runtime" ]
+                      [ "operation moves from planned to active runtime" ]
                     ~pitfalls:
                       [ "active op with zero detachments usually means tick has not been run yet" ];
-                  step ~id:"observe" ~title:"Observe runtime" ~tool:"masc_detachment_status"
+                  step ~id:"observe" ~title:"Observe runtime" ~tool:"masc_observe_operations"
                     ~summary:
-                      "Inspect detachments, topology, alerts, and trace events while the operation runs."
+                      "Inspect operations, topology, alerts, and trace events while the operation runs."
                     ~success_signals:
                       [ "heartbeat_deadline and last_progress_at advance"; "alerts/traces explain stalls or approvals" ]
                     ~pitfalls:
@@ -321,7 +321,7 @@ let command_plane_help_http_json () =
               ~description:
                 "Canonical swarm/benchmark tool family."
               ~tools:
-                [ "masc_unit_define"; "masc_operation_start"; "masc_dispatch_tick"; "masc_detachment_list"; "masc_detachment_status"; "masc_observe_topology"; "masc_observe_operations"; "masc_observe_alerts"; "masc_observe_traces"; "masc_policy_status"; "masc_policy_approve"; "masc_policy_deny"; "masc_operation_checkpoint"; "masc_operation_finalize" ];
+                [ "masc_unit_define"; "masc_operation_start"; "masc_dispatch_tick"; "masc_observe_topology"; "masc_observe_operations"; "masc_observe_alerts"; "masc_observe_traces"; "masc_policy_status"; "masc_policy_approve"; "masc_policy_deny"; "masc_operation_checkpoint"; "masc_operation_finalize" ];
             tool_group ~id:"supervisor" ~title:"Supervisor Session"
               ~description:
                 "Small operator loop for intervention-oriented sessions."

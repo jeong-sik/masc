@@ -247,8 +247,7 @@ let after_operation_start ~success =
 let after_dispatch_tick ~success =
   if success then
     { next_steps =
-        [ s "masc_detachment_list" "Check materialized detachments";
-          s "masc_observe_operations" "Monitor operation progress";
+        [ s "masc_observe_operations" "Monitor operation progress";
           s "masc_policy_status" "Review pending policy approvals" ];
       preconditions = [ "room_set"; "joined"; "operation_active" ];
       common_mistakes = [] }

@@ -28,9 +28,8 @@ let register_all () =
     "masc_board_list"; "masc_board_get";
     "masc_board_vote"; "masc_board_stats";
     "masc_board_search"; "masc_board_comment_vote";
-    "masc_board_profile"; "masc_board_hearths"; "masc_board_migrate";
+    "masc_board_profile"; "masc_board_hearths";
     "masc_board_delete";
-    "masc_board_reclassify";
   ];
 
   (* ── Mod_task: non-schema tools ─────────────────────────────── *)

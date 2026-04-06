@@ -1,6 +1,11 @@
 # Changelog
 
 
+## [2.249.0] - 2026-04-06
+
+### Changed
+- **OAS pin bump** -- update agent_sdk dependency to v0.107.0 (context resilience). (#5525)
+
 ## [2.248.0] - 2026-04-06
 
 ### Added

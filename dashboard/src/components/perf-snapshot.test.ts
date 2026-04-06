@@ -63,7 +63,17 @@ describe('PerfSnapshotPanel', () => {
     const fetchDashboardPerf = vi.fn().mockResolvedValue({
       status: 'ok',
       generated_at: '2026-03-31T05:00:00Z',
-      benchmarks: [],
+      benchmarks: [
+        {
+          benchmark: 'mcp_avg_only_probe',
+          avg_ms: 41,
+          p50_ms: 40,
+          p95_ms: 0,
+          max_ms: 44,
+          notes: 'avg-only row',
+          note_tags: {},
+        },
+      ],
       source: {
         results_dir: 'benchmarks/results',
         result_file: 'benchmarks/results/results_20260331_140000.csv',
@@ -140,12 +150,14 @@ describe('PerfSnapshotPanel', () => {
     expect(container.textContent).toContain('Worst MCP p95')
     expect(container.textContent).toContain('Runtime Avg')
     expect(container.textContent).toContain('Runtime Status')
-    expect(container.textContent).toContain('improved')
-    expect(container.textContent).toContain('regressed')
+    expect(container.textContent).toContain('improved:1')
+    expect(container.textContent).toContain('stable:2')
+    expect(container.textContent).toContain('regressed:1')
     expect(container.textContent).toContain('Benchmark p95')
     expect(container.textContent).toContain('Delta Magnitude')
     expect(container.textContent).toContain('oas_runtime_single')
     expect(container.textContent).toContain('measured ceiling 1')
+    expect(container.textContent).not.toContain('avg_only_probe')
   })
 
   it('renders request errors', async () => {

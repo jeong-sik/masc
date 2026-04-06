@@ -147,10 +147,12 @@ export function SegmentedBar({
                 ${visibleItems.map(item => {
                   const palette = paletteFor(item.tone)
                   const width = (item.value / total) * 100
+                  const formattedValue = valueFormatter(item.value)
                   return html`
                     <div
-                      title=${`${item.label} ${valueFormatter(item.value)}`}
-                      style=${`width:${Math.max(width, 4)}%;background:${palette.fill};opacity:0.82;`}
+                      aria-label=${`${item.label}: ${formattedValue}`}
+                      title=${`${item.label}: ${formattedValue}`}
+                      style=${`width:${width}%;background:${palette.fill};opacity:0.82;`}
                     ></div>
                   `
                 })}
@@ -158,14 +160,18 @@ export function SegmentedBar({
               <div class="flex flex-wrap gap-2">
                 ${visibleItems.map(item => {
                   const palette = paletteFor(item.tone)
+                  const formattedValue = valueFormatter(item.value)
                   return html`
                     <span
+                      aria-label=${`${item.label}: ${formattedValue}`}
+                      title=${`${item.label}: ${formattedValue}`}
                       class="inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-medium"
                       style=${`color:${palette.text};background:${palette.chipBg};border-color:${palette.chipBorder};`}
                     >
                       <span class="inline-block h-1.5 w-1.5 rounded-full" style=${`background:${palette.fill};`}></span>
                       <span>${item.label}</span>
-                      <span class="font-semibold">${valueFormatter(item.value)}</span>
+                      <span aria-hidden="true">:</span>
+                      <span class="font-semibold">${formattedValue}</span>
                     </span>
                   `
                 })}

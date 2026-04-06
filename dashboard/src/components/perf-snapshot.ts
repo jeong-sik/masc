@@ -120,10 +120,11 @@ function benchmarkDistribution(data: DashboardPerfResponse | null): Distribution
   for (const row of preferred) {
     if (seen.has(row.benchmark)) continue
     seen.add(row.benchmark)
+    if (row.p95_ms <= 0) continue
     const label = row.benchmark.replace(/^mcp_/, '').replace(/^oas_/, '')
     items.push({
       label,
-      value: row.p95_ms > 0 ? row.p95_ms : row.avg_ms,
+      value: row.p95_ms,
       detail: `avg ${formatMs(row.avg_ms)} · max ${formatMs(row.max_ms)}`,
       tone: benchmarkTone(row),
     })

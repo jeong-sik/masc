@@ -220,7 +220,25 @@ let handle_keeper_fs_read
   | Error e -> error_json e
   | Ok target ->
     (match Safe_ops.read_file_safe target with
-     | Error e -> error_json ~fields:[ "path", `String target ] e
+     | Error e ->
+       let parent = Filename.dirname target in
+       let siblings =
+         try
+           Sys.readdir parent
+           |> Array.to_list
+           |> List.sort String.compare
+           |> (fun l -> if List.length l > 20 then List.filteri (fun i _ -> i < 20) l @ ["..."] else l)
+         with _ -> []
+       in
+       let fields =
+         ("path", `String target)
+         :: (if siblings <> [] then
+               [ "hint", `String "File not found. Check available entries in parent directory.";
+                 "parent", `String parent;
+                 "entries", `List (List.map (fun s -> `String s) siblings) ]
+             else [])
+       in
+       error_json ~fields e
      | Ok content ->
        let total = String.length content in
        let truncated = total > max_bytes in

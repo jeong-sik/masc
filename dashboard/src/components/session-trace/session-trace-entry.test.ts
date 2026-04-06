@@ -64,8 +64,11 @@ describe('SessionTraceEntry', () => {
     expect(cards[0]?.getAttribute('data-title')).toBe('Args')
 
     // Plain-text errors render through ResultViewer <pre>, not JsonViewerCard
-    // (detectContentHint returns 'plain' for non-JSON strings)
+    // (this specific 'plain error' payload is classified as 'plain')
     const errorPre = container.querySelector('pre')
     expect(errorPre?.textContent ?? '').toContain('plain error')
+
+    // ResultViewer should display the "Error" title label
+    expect(screen.getByText('Error')).toBeTruthy()
   })
 })

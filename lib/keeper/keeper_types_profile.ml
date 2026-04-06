@@ -134,6 +134,8 @@ type keeper_profile_defaults = {
   scope_kind : string option;
   mention_targets : string list;
   proactive_enabled : bool option;
+  proactive_idle_sec : int option;
+  proactive_cooldown_sec : int option;
   room_signal_prompt_enabled : bool option;
   shards : string list option;
   allowed_paths : string list option;
@@ -167,6 +169,8 @@ let empty_keeper_profile_defaults = {
   scope_kind = None;
   mention_targets = [];
   proactive_enabled = None;
+  proactive_idle_sec = None;
+  proactive_cooldown_sec = None;
   room_signal_prompt_enabled = None;
   shards = None;
   allowed_paths = None;
@@ -214,6 +218,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
   let k key = "keeper." ^ key in
   let str key = Keeper_toml_loader.toml_string_opt doc (k key) in
   let bool_ key = Keeper_toml_loader.toml_bool_opt doc (k key) in
+  let int_ key = Keeper_toml_loader.toml_int_opt doc (k key) in
   let strs key = Keeper_toml_loader.toml_string_list doc (k key) in
   let removed_present =
     removed_keeper_input_key_names
@@ -267,6 +272,8 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         scope_kind = str "scope_kind";
         mention_targets = strs "mention_targets";
         proactive_enabled = bool_ "proactive_enabled";
+        proactive_idle_sec = int_ "proactive_idle_sec";
+        proactive_cooldown_sec = int_ "proactive_cooldown_sec";
         room_signal_prompt_enabled = bool_ "room_signal_prompt_enabled";
         shards =
           (match strs "shards" with
@@ -364,6 +371,8 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
                 scope_kind = Safe_ops.json_string_opt "scope_kind" keeper_json;
                 mention_targets = Safe_ops.json_string_list "mention_targets" keeper_json;
                 proactive_enabled = Safe_ops.json_bool_opt "proactive_enabled" keeper_json;
+                proactive_idle_sec = Safe_ops.json_int_opt "proactive_idle_sec" keeper_json;
+                proactive_cooldown_sec = Safe_ops.json_int_opt "proactive_cooldown_sec" keeper_json;
                 room_signal_prompt_enabled =
                   Safe_ops.json_bool_opt "room_signal_prompt_enabled" keeper_json;
                 shards =

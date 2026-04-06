@@ -38,8 +38,8 @@ let validate_name name =
 
 let default_execution_scope = "workspace"
 let default_proactive_enabled = true
-let default_proactive_idle_sec = 900
-let default_proactive_cooldown_sec = 1800
+let default_proactive_idle_sec = 120
+let default_proactive_cooldown_sec = 300
 let default_keeper_will = ""
 let default_keeper_needs = ""
 let default_keeper_desires = ""

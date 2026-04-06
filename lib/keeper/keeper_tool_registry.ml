@@ -37,8 +37,8 @@ let core_always_tools =
 
 (** Core tools always visible to the LLM.  All other tools are
     discoverable on demand via [keeper_tool_search].
-    Kept intentionally small (~15) to improve 9B tool selection
-    accuracy.  Board browse/audit tools moved to discoverable. *)
+    Aligns with [board_core] preset: get/post/comment/vote/list visible by
+    default; board_extended (stats/search) remain discoverable. *)
 let core_discovery_tools =
   core_always_tools @
   [ "keeper_broadcast"; "keeper_tasks_list";
@@ -46,6 +46,7 @@ let core_discovery_tools =
     "keeper_memory_search"; "keeper_time_now";
     "keeper_fs_read";
     "keeper_board_get"; "keeper_board_post";
+    "keeper_board_comment"; "keeper_board_vote"; "keeper_board_list";
   ]
 
 let effective_core_tools () = core_discovery_tools

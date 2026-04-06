@@ -49,9 +49,11 @@ let hash_status_args ~name args =
   ] in
   Digest.string (String.concat "|" parts) |> Digest.to_hex
 
+let normalize_status_name = String.trim
+
 let effective_status_name ctx args =
-  match String.trim (get_string args "name" "") with
-  | "" -> String.trim ctx.agent_name
+  match normalize_status_name (get_string args "name" "") with
+  | "" -> normalize_status_name ctx.agent_name
   | value -> value
 
 let handle_keeper_status ctx args : tool_result =

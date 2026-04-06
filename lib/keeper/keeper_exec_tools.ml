@@ -147,6 +147,8 @@ let error_json ?(fields = []) (message : string) =
 
 let tool_result_or_error (ok, msg) = if ok then msg else error_json msg
 
+let max_suggested_entries = 12
+
 let missing_file_error_json ~(config : Room.config) ~(target : string)
       ~(error : string) =
   let project_root = Keeper_alerting_path.project_root_of_config config in
@@ -156,7 +158,7 @@ let missing_file_error_json ~(config : Room.config) ~(target : string)
   in
   let suggested_entries =
     match Safe_ops.list_dir_safe suggestion_dir with
-    | Ok entries -> entries |> List.sort String.compare |> take 12
+    | Ok entries -> entries |> List.sort String.compare |> take max_suggested_entries
     | Error _ -> []
   in
   let message =

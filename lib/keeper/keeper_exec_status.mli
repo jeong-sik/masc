@@ -23,6 +23,16 @@ val augment_keeper_diagnostic_json :
   Yojson.Safe.t ->
   Yojson.Safe.t
 
+val keeper_health_state :
+  ?fiber_health:fiber_health ->
+  meta:keeper_meta ->
+  keepalive_running:bool ->
+  agent_status:Yojson.Safe.t ->
+  quiet_reason:string option ->
+  now_ts:float ->
+  unit ->
+  string
+
 val keeper_surface_status :
   agent_status:Yojson.Safe.t ->
   diagnostic:Yojson.Safe.t ->

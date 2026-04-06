@@ -264,19 +264,22 @@ let keeper_health_state ?(fiber_health = Fiber_unknown)
   in
   if not agent_exists || agent_status_text = "offline" || agent_status_text = "inactive"
   then "offline"
-  (* H-4 fix: report zombie/stale keepers regardless of keepalive state *)
-  else if is_zombie || last_seen_ago_s > stale_threshold_s then
-    "stale"
-  else if not keepalive_running then
-    "offline"
-  else
-    match quiet_reason with
+  (* H-4 fix: true zombies are stale regardless of keepalive state *)
+  else if is_zombie then "stale"
+  else if keepalive_running then
+    (* Keepalive fiber is alive — trust it over last_seen.
+       presence_fresh optimization may skip Room.heartbeat(),
+       causing last_seen to drift without the keeper actually being stale. *)
+    (match quiet_reason with
     | Some "graphql_error" | Some "model_error" -> "degraded"
     | _ ->
         if meta.runtime.usage.total_turns = 0 && meta.runtime.proactive_rt.count_total = 0 then "idle"
         else if last_turn_ago_s > float_of_int (max meta.proactive.idle_sec 900)
         then "idle"
-        else "healthy"
+        else "healthy")
+  (* Keepalive NOT running — fall back to last_seen for stale detection *)
+  else if last_seen_ago_s > stale_threshold_s then "stale"
+  else "offline"
 
 let keeper_next_action_path ~health_state ~quiet_reason =
   match health_state with

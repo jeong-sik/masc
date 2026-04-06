@@ -553,5 +553,10 @@ let keeper_unified_max_tokens () : int =
     ~max_v:16000
 
 (* max_turns removed: agent turn budgets belong in OAS
-   (Types.default_agent_config.max_turns). MASC must not hardcode
-   agent runtime parameters. See OAS types.ml:79. *)
+   (Types.default_agent_config.max_turns = 10). MASC must not hardcode
+   agent runtime parameters.
+   Known constraints (retain for future OAS tuning):
+   - 1000 turns caused 787s+ latency per turn
+   - 20 turns caused 6.7GB RSS in 2 minutes with 3 concurrent keepers
+   - 3 turns left keepers unable to do meaningful work (board_post x3 only)
+   If OAS default needs adjustment, change it in OAS types.ml. *)

@@ -481,9 +481,18 @@ let write_memory_bank config name lines =
   write_lines path lines
 
 let memory_note ~kind ~text ~priority ~generation ~turn ~ts_unix =
-  Printf.sprintf
-    {|{"ts":"2026-04-06T00:00:00Z","ts_unix":%f,"name":"test","trace_id":"t1","generation":%d,"turn":%d,"kind":"%s","priority":%d,"text":"%s"}|}
-    ts_unix generation turn kind priority text
+  Yojson.Safe.to_string
+    (`Assoc [
+      ("ts", `String "2026-04-06T00:00:00Z");
+      ("ts_unix", `Float ts_unix);
+      ("name", `String "test");
+      ("trace_id", `String "t1");
+      ("generation", `Int generation);
+      ("turn", `Int turn);
+      ("kind", `String kind);
+      ("priority", `Int priority);
+      ("text", `String text);
+    ])
 
 (** Test: memory bank search returns structured results with scoring. *)
 let test_memory_search_bank_basic () =

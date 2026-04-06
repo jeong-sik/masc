@@ -821,7 +821,7 @@ let search_memory_bank
       ~(kind_filter : string)
       ~(limit : int) : memory_match list * int =
   let path = keeper_memory_bank_path config meta.name in
-  let lines = read_file_tail_lines path ~max_bytes:0 ~max_lines:500 in
+  let lines = read_file_tail_lines path ~max_bytes:(256 * 1024) ~max_lines:500 in
   let now_ts = Time_compat.now () in
   let parsed =
     lines
@@ -854,13 +854,19 @@ let search_memory_bank
      recency_weight normalizes age relative to the oldest note in the result set.
      No hardcoded decay constant — uses min/max normalization. *)
   let ts_values = List.map (fun m -> m.score) matched in
-  let min_ts = List.fold_left min now_ts ts_values in
+  let min_ts =
+    match ts_values with
+    | [] -> now_ts
+    | ts :: rest -> List.fold_left min ts rest
+  in
   let max_age = max 1.0 (now_ts -. min_ts) in
   let scored =
     matched
     |> List.map (fun m ->
-         let age = now_ts -. m.score in
-         let recency_weight = 1.0 -. (0.3 *. (age /. max_age)) in
+         let age = max 0.0 (now_ts -. m.score) in
+         let recency_weight =
+           max 0.0 (min 1.0 (1.0 -. (0.3 *. (age /. max_age))))
+         in
          let synthetic_penalty =
            if contains_ci m.text "[SYNTHETIC]" then -0.1 else 0.0
          in
@@ -948,13 +954,14 @@ let keeper_memory_search_json
     match source with
     | "history" ->
       let matches = search_history ~config ~meta ~ctx_work ~query ~limit in
+      let no_match = matches = [] in
       let match_jsons = List.map (fun msg -> `String msg) matches in
-      `Assoc [
+      `Assoc ([
         "query", `String query;
         "source", `String "history";
         "match_count", `Int (List.length matches);
         "matches", `List match_jsons;
-      ]
+      ] @ (if no_match then [ "no_match", `Bool true ] else []))
     | "all" ->
       let (bank_matches, bank_total) =
         search_memory_bank ~config ~meta ~query ~kind_filter ~limit
@@ -965,17 +972,19 @@ let keeper_memory_search_json
         then search_history ~config ~meta ~ctx_work ~query ~limit:history_limit
         else []
       in
+      let total_matches = List.length bank_matches + List.length history_matches in
+      let no_match = total_matches = 0 in
       let bank_jsons = List.map memory_match_to_json bank_matches in
       let history_jsons = List.map (fun msg ->
         `Assoc [ "source", `String "history"; "text", `String msg ]
       ) history_matches in
-      `Assoc [
+      `Assoc ([
         "query", `String query;
         "source", `String "all";
         "total_candidates", `Int bank_total;
-        "match_count", `Int (List.length bank_matches + List.length history_matches);
+        "match_count", `Int total_matches;
         "matches", `List (bank_jsons @ history_jsons);
-      ]
+      ] @ (if no_match then [ "no_match", `Bool true ] else []))
     | _ (* "memory" *) ->
       let (matches, total_candidates) =
         search_memory_bank ~config ~meta ~query ~kind_filter ~limit
@@ -999,15 +1008,28 @@ let keeper_memory_search_json
       | Some (`Int n) -> n | _ -> 0)
     | _ -> 0
   in
+  let log_top_score =
+    match result with
+    | `Assoc fields -> (match List.assoc_opt "matches" fields with
+      | Some (`List (first :: _)) ->
+        (match first with
+         | `Assoc mfields -> (match List.assoc_opt "score" mfields with
+           | Some (`Float s) -> Some s | _ -> None)
+         | _ -> None)
+      | _ -> None)
+    | _ -> None
+  in
   (try
-    let log_entry = `Assoc [
+    let log_entry = `Assoc ([
       "ts_unix", `Float (Time_compat.now ());
       "event", `String "memory_search";
       "query", `String query;
       "source", `String source;
       "kind_filter", `String kind_filter;
       "match_count", `Int log_match_count;
-    ] in
+    ] @ (match log_top_score with
+         | Some s -> [ "top_score", `Float s ]
+         | None -> [])) in
     append_jsonl_line (keeper_decision_log_path config meta.name) log_entry
   with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
   Yojson.Safe.to_string result

@@ -1,6 +1,19 @@
 # Changelog
 
 
+## [2.252.0] - 2026-04-07
+
+### Added
+- **3-layer defense for 9B tool calling** -- trajectory affinity pre-population (L1) + tool_choice=Any on autonomous turn 0 (L2). (#5568)
+- **Composite PR workflow tool** -- keeper_pr_workflow for 9B models to reduce multi-step tool failures. (#5561)
+- **Auto tool hints** -- inject schema descriptions into keeper prompt for tool discovery. (#5570)
+
+### Fixed
+- **Memory bank search** -- search structured memory bank instead of raw history, improve description for retrieval quality. (#5571)
+- **Tool call authority** -- make tool calls authoritative over BDI text headers. (#5573)
+- **Max tokens budget** -- prevent max_tokens output limit from poisoning cumulative token budget. (#5574)
+- **Keeper tool autonomy** -- expand autonomous tool access for keeper agents. (#5575)
+
 ## [2.251.0] - 2026-04-06
 
 ### Added

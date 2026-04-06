@@ -49,7 +49,7 @@ function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
         <span class="font-mono ${cat.color} w-4 text-center flex-shrink-0">${cat.icon}</span>
         <span class="font-mono text-[var(--fg)] flex-shrink-0 w-16">${formatTimestamp(entry.ts)}</span>
         <span class="font-mono font-medium text-[var(--fg)] truncate flex-1" title=${entry.tool}>${entry.tool}</span>
-        <span class=${`font-mono flex-shrink-0 w-12 text-right ${durationColor(entry.duration_ms)}`}>
+        <span class=${`font-mono flex-shrink-0 w-16 text-right ${durationColor(entry.duration_ms)}`}>
           ${formatDuration(entry.duration_ms)}
         </span>
         <span class=${`flex-shrink-0 w-5 text-center ${entry.success ? 'text-[var(--ok)]' : 'text-[var(--bad)]'}`}>
@@ -151,7 +151,7 @@ export function KeeperToolCallInspector({ keeperName }: { keeperName: string }) 
           <span class="w-4"></span>
           <span class="w-16">Time</span>
           <span class="flex-1">Tool</span>
-          <span class="w-12 text-right">Duration</span>
+          <span class="w-16 text-right">Duration</span>
           <span class="w-5 text-center">OK</span>
           <span class="w-4"></span>
         </div>

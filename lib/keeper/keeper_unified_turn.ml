@@ -791,7 +791,27 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
         { system_prompt; dynamic_context = "" }
       in
       (* 5. Run via OAS Agent.run() with transient-error retry *)
+      (* Track whether side-effecting tool calls have been executed.
+         If a board_post/comment/shell succeeded and then a transient error
+         occurs, retrying would replay those tool calls and produce duplicates.
+         In that case, we propagate the error instead of retrying. *)
+      let side_effect_occurred = ref false in
+      let side_effect_tools =
+        [ "keeper_board_post"; "keeper_board_comment"; "keeper_board_vote";
+          "keeper_board_delete";
+          "keeper_shell_exec"; "keeper_file_write"; "keeper_git_commit";
+          "keeper_npm_run"; "keeper_github" ]
+      in
+      let original_on_tool_call = !Keeper_exec_tools.on_keeper_tool_call in
+      Keeper_exec_tools.on_keeper_tool_call :=
+        (fun ~tool_name ~success ~duration_ms ->
+           if success && List.mem tool_name side_effect_tools then
+             side_effect_occurred := true;
+           original_on_tool_call ~tool_name ~success ~duration_ms);
       let run_result, latency_ms =
+        Fun.protect ~finally:(fun () ->
+          Keeper_exec_tools.on_keeper_tool_call := original_on_tool_call)
+        (fun () ->
         Keeper_exec_context.timed (fun () ->
           let do_run ~run_meta ~max_context ~run_generation ~is_retry =
             let max_idle_turns =
@@ -817,16 +837,23 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
             | Ok _ as ok -> ok
             | Error e when is_transient_network_error e
                            && attempt <= max_transient_retries ->
-                let delay = transient_backoff_sec attempt in
-                Log.Keeper.warn
-                  "%s: transient network error cascade=%s max_context=%d retry=%d/%d backoff=%.0fs: %s"
-                  meta.name meta.cascade_name max_context
-                  attempt max_transient_retries delay
-                  (short_preview e);
-                Eio.Time.sleep (Eio_context.get_clock ()) delay;
-                retry_loop ~run_meta ~max_context ~run_generation
-                  ~attempt:(attempt + 1)
-                  ~is_retry:true ~overflow_retry_used
+                if !side_effect_occurred then begin
+                  Log.Keeper.warn
+                    "%s: transient error after side-effecting tool call — skipping retry to prevent duplicate (error: %s)"
+                    meta.name (short_preview e);
+                  Error e
+                end else begin
+                  let delay = transient_backoff_sec attempt in
+                  Log.Keeper.warn
+                    "%s: transient network error cascade=%s max_context=%d retry=%d/%d backoff=%.0fs: %s"
+                    meta.name meta.cascade_name max_context
+                    attempt max_transient_retries delay
+                    (short_preview e);
+                  Eio.Time.sleep (Eio_context.get_clock ()) delay;
+                  retry_loop ~run_meta ~max_context ~run_generation
+                    ~attempt:(attempt + 1)
+                    ~is_retry:true ~overflow_retry_used
+                end
             | Error e when (not overflow_retry_used)
                            && should_attempt_context_overflow_retry e -> (
                 match
@@ -853,7 +880,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
           in
           retry_loop ~run_meta:meta ~max_context:max_cascade_context
             ~run_generation:generation ~attempt:1
-            ~is_retry:false ~overflow_retry_used:false)
+            ~is_retry:false ~overflow_retry_used:false))
       in
       match run_result with
       | Error e ->

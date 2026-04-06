@@ -34,6 +34,7 @@ export interface Task {
   description?: string
   created_at?: string
   updated_at?: string
+  completed_at?: string
   contract?: TaskContract | null
   handoff_context?: TaskHandoffContext | null
   gate?: TaskGateSnapshot | null

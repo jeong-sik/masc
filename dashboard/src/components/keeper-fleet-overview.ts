@@ -25,6 +25,8 @@ const STAGE_STYLES: Record<string, StageStyle> = {
   offline:              { label: '오프',    color: 'var(--text-dim)', bg: 'var(--white-3)',        pulse: false },
 }
 
+const ACTIVE_STAGES = new Set<string>(['thinking', 'tool_use', 'compacting', 'handoff', 'scheduled_autonomous'])
+
 function stageStyle(stage?: PipelineStage): StageStyle {
   if (!stage) return STAGE_STYLES['offline']!
   return STAGE_STYLES[stage] ?? STAGE_STYLES['offline']!
@@ -62,7 +64,7 @@ function formatRecency(agoS: number | undefined): string {
 
 function KeeperRow({ keeper }: { keeper: Keeper }) {
   const stage = stageStyle(keeper.pipeline_stage)
-  const isActive = keeper.pipeline_stage === 'thinking' || keeper.pipeline_stage === 'tool_use'
+  const isActive = ACTIVE_STAGES.has(keeper.pipeline_stage ?? '')
   const toolCount = keeper.latest_tool_call_count ?? keeper.metrics_window?.tool_call_count ?? 0
 
   return html`
@@ -104,7 +106,7 @@ function KeeperRow({ keeper }: { keeper: Keeper }) {
 // ── Fleet summary bar ─────────────────────────────────
 
 function FleetSummary({ keepers }: { keepers: Keeper[] }) {
-  const active = keepers.filter(k => k.pipeline_stage === 'thinking' || k.pipeline_stage === 'tool_use').length
+  const active = keepers.filter(k => ACTIVE_STAGES.has(k.pipeline_stage ?? '')).length
   const idle = keepers.filter(k => k.pipeline_stage === 'idle').length
   const offline = keepers.length - active - idle
   const avgCtx = keepers.reduce((s, k) => s + (k.context_ratio ?? 0), 0) / (keepers.length || 1)

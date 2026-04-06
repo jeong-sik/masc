@@ -65,7 +65,26 @@ export function clearTrajectory(keeperName: string): void {
 
 // ── Components ───────────────────────────────────────────
 
+function ThinkingEntryRow({ entry }: { entry: TrajectoryEntry }) {
+  const len = entry.content_length ?? entry.content?.length ?? 0
+  return html`
+    <div class="flex items-center gap-3 py-2 px-3 rounded-lg opacity-60">
+      <div class="flex-shrink-0 flex items-center gap-1.5">
+        <span class="text-[10px] text-[var(--text-dim)] w-3"></span>
+        <div class="size-7 rounded-md bg-[var(--white-5)] border border-[var(--white-8)] flex items-center justify-center text-[11px]">💭</div>
+      </div>
+      <div class="flex-1 min-w-0 flex items-center gap-2">
+        <span class="text-xs font-mono text-[var(--text-muted)]">${entry.redacted ? '사고 (비공개)' : '사고'}</span>
+        <span class="text-[10px] text-[var(--text-dim)]">T${entry.turn}</span>
+        ${len > 0 ? html`<span class="text-[10px] text-[var(--text-dim)]">${len}자</span>` : null}
+      </div>
+    </div>
+  `
+}
+
 function TrajectoryEntryRow({ entry }: { entry: TrajectoryEntry }) {
+  if (entry.type === 'thinking') return html`<${ThinkingEntryRow} entry=${entry} />`
+
   const expanded = useSignal(false)
   const gateRejected = entry.gate?.status === 'reject'
   const cat = toolCategory(entry.tool_name ?? 'unknown')

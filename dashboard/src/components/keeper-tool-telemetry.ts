@@ -125,10 +125,11 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
 
   const s = state.value
 
-  // Loading, error, and empty states return null — the section card
+  // Loading and empty states return null — the section card
   // is only rendered when there is actual telemetry data to show.
-  if (s.loading || s.error || s.tools.length === 0) {
-    return null
+  if (s.loading || s.tools.length === 0) return null
+  if (s.error) {
+    return html`<div class="text-xs text-[var(--bad)] py-2 px-3">텔레메트리 로드 실패: ${s.error}</div>`
   }
 
   const totalCost = s.tools.reduce((sum, t) => sum + t.total_cost_usd, 0)
@@ -146,7 +147,7 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
         <span class="w-1.5 h-1.5 rounded-full bg-accent/50"></span>
         도구 텔레메트리
       </div>
-    <div class="flex flex-col gap-4">
+      <div class="flex flex-col gap-4">
 
       ${'' /* Summary row */}
       <div class="flex gap-3 flex-wrap text-[11px]">
@@ -235,7 +236,7 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
           `)}
         </div>
       ` : null}
-    </div>
+      </div>
     </div>
   `
 }

@@ -383,7 +383,7 @@ let tuned_priority_for_candidate
 let total_cap () : int = 12
 
 let kind_caps () : (string * int) list =
-  [ ("constraints", 2); ("decision", 2); ("next", 2); ("goal", 2); ("progress", 2); ("open_question", 2) ]
+  [ ("constraints", 2); ("decision", 2); ("next", 2); ("goal", 2); ("progress", 2); ("open_question", 2); ("long_term", 4) ]
 
 let cap_for_kind (caps : (string * int) list) (kind : string) : int =
   List.assoc_opt kind caps |> Option.value ~default:1

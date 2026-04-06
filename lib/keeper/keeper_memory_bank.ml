@@ -132,6 +132,113 @@ let parse_memory_bank_row (line : string) : keeper_memory_row_raw option =
   with Yojson.Json_error _ ->
     None
 
+(* ── Memory Consolidation ───────────────────────────────── *)
+
+(** Extract trace_id from a memory row's JSON. *)
+let row_trace_id (row : keeper_memory_row_raw) : string =
+  Safe_ops.json_string ~default:"" "trace_id" row.json
+
+(** Consolidate memory notes before compaction.
+    1. Merge progress notes from same trace_id (3+ → single summary).
+    2. Promote recurring texts across trace_ids to long_term (priority 95).
+    Returns a new row list with consolidated entries appended. *)
+let consolidate_memory_notes (rows : keeper_memory_row_raw list)
+    : keeper_memory_row_raw list * int =
+  let now = Unix.gettimeofday () in
+  let consolidated = ref [] in
+  let consolidated_count = ref 0 in
+  (* 1. Group progress notes by trace_id *)
+  let progress_by_trace : (string, keeper_memory_row_raw list) Hashtbl.t =
+    Hashtbl.create 32
+  in
+  List.iter (fun (row : keeper_memory_row_raw) ->
+    if row.kind = "progress" then begin
+      let tid = row_trace_id row in
+      if tid <> "" then
+        let existing =
+          Option.value ~default:[] (Hashtbl.find_opt progress_by_trace tid)
+        in
+        Hashtbl.replace progress_by_trace tid (row :: existing)
+    end)
+    rows;
+  Hashtbl.iter (fun tid group ->
+    if List.length group >= 3 then begin
+      let texts =
+        List.map (fun (r : keeper_memory_row_raw) -> r.text) group
+        |> List.sort_uniq String.compare
+      in
+      let summary_text =
+        Printf.sprintf "[consolidated:%d] %s"
+          (List.length group)
+          (String.concat "; " (take 5 texts))
+      in
+      let summary_json = `Assoc [
+        ("ts", `String (now_iso ()));
+        ("ts_unix", `Float now);
+        ("kind", `String "long_term");
+        ("priority", `Int 90);
+        ("text", `String summary_text);
+        ("trace_id", `String tid);
+        ("consolidated_from", `Int (List.length group));
+      ] in
+      consolidated := {
+        json = summary_json;
+        kind = "long_term";
+        text = summary_text;
+        priority = 90;
+        ts_unix = now;
+      } :: !consolidated;
+      incr consolidated_count
+    end)
+    progress_by_trace;
+  (* 2. Promote recurring texts across multiple trace_ids *)
+  let text_traces : (string, string list) Hashtbl.t = Hashtbl.create 256 in
+  List.iter (fun (row : keeper_memory_row_raw) ->
+    if row.kind <> "long_term" then begin
+      let norm = normalize_memory_text_key row.text in
+      let tid = row_trace_id row in
+      if norm <> "" && tid <> "" then begin
+        let existing =
+          Option.value ~default:[] (Hashtbl.find_opt text_traces norm)
+        in
+        if not (List.mem tid existing) then
+          Hashtbl.replace text_traces norm (tid :: existing)
+      end
+    end)
+    rows;
+  Hashtbl.iter (fun norm_text tids ->
+    if List.length tids >= 3 then begin
+      (* Find the highest-priority original row for this text *)
+      let best =
+        List.fold_left (fun acc (row : keeper_memory_row_raw) ->
+          if normalize_memory_text_key row.text = norm_text
+             && row.priority > (match acc with Some r -> r.priority | None -> 0)
+          then Some row else acc)
+          None rows
+      in
+      match best with
+      | Some row ->
+        let lt_json = `Assoc [
+          ("ts", `String (now_iso ()));
+          ("ts_unix", `Float now);
+          ("kind", `String "long_term");
+          ("priority", `Int 95);
+          ("text", `String row.text);
+          ("recurring_across", `Int (List.length tids));
+        ] in
+        consolidated := {
+          json = lt_json;
+          kind = "long_term";
+          text = row.text;
+          priority = 95;
+          ts_unix = now;
+        } :: !consolidated;
+        incr consolidated_count
+      | None -> ()
+    end)
+    text_traces;
+  (rows @ !consolidated, !consolidated_count)
+
 let memory_compaction_target_notes () : int =
   let default_target = 220 in
   let raw =
@@ -238,12 +345,17 @@ let compact_memory_bank_if_needed
               reason = Some "under_target";
             }
           else
+            (* Consolidation: merge progress clusters and promote recurring notes *)
+            let (consolidated_parsed, consolidated_count) =
+              consolidate_memory_notes parsed
+            in
+            let _ = consolidated_count in
             let by_recency =
               List.sort
                 (fun (a : keeper_memory_row_raw) (b : keeper_memory_row_raw) ->
                   let c = compare b.ts_unix a.ts_unix in
                   if c <> 0 then c else compare b.priority a.priority)
-                parsed
+                consolidated_parsed
             in
             let deduped = dedup_by_key memory_row_key by_recency in
             let dedup_dropped = max 0 (before_notes - List.length deduped) in

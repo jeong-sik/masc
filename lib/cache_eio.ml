@@ -145,11 +145,16 @@ let cached_entry_count = Atomic.make (-1)
 let reset_cached_entry_count () = Atomic.set cached_entry_count (-1)
 
 let decrement_cached_entry_count () =
-  let current = Atomic.get cached_entry_count in
-  if current > 0 then
-    ignore (Atomic.fetch_and_add cached_entry_count (-1))
-  else
-    Atomic.set cached_entry_count 0
+  let rec loop () =
+    let current = Atomic.get cached_entry_count in
+    if current < 0 then
+      ()
+    else
+      let next = max 0 (current - 1) in
+      if not (Atomic.compare_and_set cached_entry_count current next) then
+        loop ()
+  in
+  loop ()
 
 let maybe_migrate_legacy_entry config ~key entry =
   let legacy_path = legacy_cache_file config key in
@@ -312,22 +317,22 @@ let set config ~key ~value ?(ttl_seconds : int option) ?(tags : string list = []
            try
              let target_exists = Sys.file_exists primary_path in
              Fs_compat.save_file primary_path content;
-             let removed_legacy =
-               if not (String.equal primary_path legacy_path) then
-                 match legacy_entry with
-                 | Some existing when String.equal existing.key key ->
-                     remove_file_if_exists legacy_path
+              let removed_legacy =
+                if not (String.equal primary_path legacy_path) then
+                  match legacy_entry with
+                  | Some existing when String.equal existing.key key ->
+                      remove_file_if_exists legacy_path
                  | _ -> false
                else false
              in
-             if (not target_exists) && not removed_legacy then
-               ignore (Atomic.fetch_and_add cached_entry_count 1);
-             else if (not target_exists) && Option.is_some legacy_entry then
-               Atomic.set cached_entry_count (-1);
-             Ok entry
-           with
-           | Eio.Cancel.Cancelled _ as e -> raise e
-           | e -> Error (Printexc.to_string e))
+              if removed_legacy then
+                Atomic.set cached_entry_count (-1)
+              else if not target_exists then
+                ignore (Atomic.fetch_and_add cached_entry_count 1);
+              Ok entry
+            with
+            | Eio.Cancel.Cancelled _ as e -> raise e
+            | e -> Error (Printexc.to_string e))
   end
 
 (** Get cache entry - synchronous.
@@ -416,13 +421,19 @@ let list config ?(tag : string option) () : cache_entry list =
                         | Some t -> List.mem t entry.tags
                       in
                       if include_entry then
+                        let is_primary =
+                          String.equal filename (cache_filename entry.key ^ ".json")
+                        in
                         match Hashtbl.find_opt deduped entry.key with
-                        | Some existing when existing.created_at >= entry.created_at -> ()
-                        | _ -> Hashtbl.replace deduped entry.key entry
+                        | Some (existing, existing_is_primary)
+                          when existing.created_at > entry.created_at
+                            || (existing.created_at = entry.created_at
+                                && (existing_is_primary || not is_primary)) -> ()
+                        | _ -> Hashtbl.replace deduped entry.key (entry, is_primary)
                     end
                 | None -> ()
       ) entries;
-      Hashtbl.fold (fun _ entry acc -> entry :: acc) deduped [])
+      Hashtbl.fold (fun _ (entry, _) acc -> entry :: acc) deduped [])
 
 (** Clear all cache entries - synchronous *)
 let clear config : (int, string) result =

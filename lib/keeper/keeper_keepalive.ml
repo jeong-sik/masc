@@ -269,8 +269,8 @@ let write_heartbeat_snapshot
            []
        in
        if !parse_errors > 0 then
-         Log.Keeper.warn "failed to parse %d message(s) from history.jsonl"
-           !parse_errors;
+         Log.Keeper.warn "failed to parse %d message(s) from %s (%s)"
+           !parse_errors history_path meta_current.name;
        messages)
   in
   let c_messages = messages_for_continuity in

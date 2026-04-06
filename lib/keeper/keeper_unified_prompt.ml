@@ -127,6 +127,9 @@ let actionable_routes ~(allowed_tools : string list)
       add
         "- No reactive work. Share an observation, thought, or question on the Board \
          using keeper_board_post (set hearth to your name).";
+    if can "keeper_broadcast" then
+      add
+        "- No reactive work. Share a brief status update using keeper_broadcast.";
     if can "keeper_board_list" then
       add
         "- Browse recent Board posts with keeper_board_list to look for topics \

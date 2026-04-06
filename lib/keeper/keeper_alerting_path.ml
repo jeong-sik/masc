@@ -87,12 +87,11 @@ let resolve_keeper_target_path ~(config : Room.config)
              "path_not_in_allowed_paths: %s (allowed: [%s])"
              raw (String.concat ", " allowed_norms))
 
-(** Compute effective allowed_paths from keeper meta, applying scope-based
-    defaults when the operator has not set an explicit list.
-    - ["*"]          → [] (full access, explicit opt-in)
-    - non-empty list → list as-is (explicit restriction)
-    - [] + workspace → keeper's own dirs (computed default)
-    - [] + otherwise → [] (observe_only blocks writes; local = full access) *)
+(** Compute effective allowed_paths from keeper meta.
+    Always prepends the keeper's playground path and, for workspace scope,
+    the workspace default dirs (.masc/keepers/<name>/, .masc/traces/, ".").
+    - ["*"]          → [] (full access, explicit opt-in bypasses path checks)
+    - other          → playground :: workspace_defaults @ explicit *)
 let sanitize_keeper_name (name : string) : string =
   String.map (fun c ->
     if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
@@ -105,18 +104,18 @@ let playground_path_of_keeper (name : string) : string =
 
 let effective_allowed_paths ~(meta : Keeper_types.keeper_meta) : string list =
   let playground = playground_path_of_keeper meta.name in
+  let workspace_defaults =
+    match String.lowercase_ascii meta.execution_scope with
+    | "workspace" ->
+      let safe_name = sanitize_keeper_name meta.name in
+      [ Printf.sprintf ".masc/keepers/%s/" safe_name;
+        ".masc/traces/";
+        "." ]
+    | _ -> []
+  in
   match meta.allowed_paths with
   | ["*"] -> []
-  | _ :: _ as explicit -> playground :: explicit
-  | [] ->
-    (match String.lowercase_ascii meta.execution_scope with
-     | "workspace" ->
-       let safe_name = sanitize_keeper_name meta.name in
-       [ playground;
-         Printf.sprintf ".masc/keepers/%s/" safe_name;
-         ".masc/traces/";
-         "." ]
-     | _ -> [ playground ])
+  | explicit -> playground :: workspace_defaults @ explicit
 
 let truncate_tool_output ?(max_len = 12000) (s : string) : string =
   if String.length s <= max_len then s

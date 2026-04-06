@@ -303,6 +303,7 @@ module ContextCompact = struct
   let dynamic_multi_agent_ratio = get_float ~default:0.80 "MASC_COMPACT_DYN_MULTI_AGENT_RATIO"
   let dynamic_focused_ratio = get_float ~default:0.70 "MASC_COMPACT_DYN_FOCUSED_RATIO"
   let small_local_floor = get_int ~default:64_000 "MASC_COMPACT_SMALL_LOCAL_FLOOR"
+  let large_cloud_floor = get_int ~default:500_000 "MASC_COMPACT_LARGE_CLOUD_FLOOR"
 end
 
 (** {1 Dashboard Health Thresholds}

@@ -49,10 +49,7 @@ let claim_next_r config ~agent_name ?(exclude_task_ids=[]) () =
             log_event config (Printf.sprintf
               "{\"type\":\"task_claim_next_auto_release\",\"agent\":\"%s\",\"released_task\":\"%s\",\"ts\":\"%s\"}"
               agent_name prev.id (now_iso ()));
-            let _ = broadcast config ~from_agent:agent_name
-              ~content:(Printf.sprintf
-                "⚠ Auto-released %s (was %s) before claiming next task"
-                prev.id (Types.task_status_to_string prev.task_status)) in
+            (* No broadcast — internal state transition, log_event suffices. *)
             let updated = List.map (fun (t : Types.task) ->
               if String.equal t.id prev.id then { t with task_status = Todo }
               else t
@@ -173,13 +170,7 @@ let claim_next_r config ~agent_name ?(exclude_task_ids=[]) () =
                 Log.Misc.error "agent state write failed: %s" msg
           end;
 
-          let release_note = match released_task_id with
-            | Some rid -> Printf.sprintf " (auto-released %s)" rid
-            | None -> ""
-          in
-          let _ = broadcast config ~from_agent:agent_name
-            ~content:(Printf.sprintf "📋 Auto-claimed [P%d] %s: %s%s"
-              task.priority task.id task.title release_note) in
+          (* No broadcast — log_event + emit_task_activity below are sufficient. *)
           (match released_task_id with
            | Some rid ->
                Room_task.emit_task_activity config ~agent_name ~task_id:rid

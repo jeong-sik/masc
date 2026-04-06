@@ -233,11 +233,13 @@ let recover_latest_checkpoint_for_overflow_retry
       ~session_id:meta.runtime.trace_id
   in
   let legacy_checkpoint =
-    try load_latest_checkpoint session
-    with exn ->
-      Log.Keeper.error "keeper:%s overflow retry checkpoint load failed: %s"
-        meta.runtime.trace_id (Printexc.to_string exn);
-      None
+    (try load_latest_checkpoint session
+     with
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | exn ->
+         Log.Keeper.error "keeper:%s overflow retry checkpoint load failed: %s"
+           meta.runtime.trace_id (Printexc.to_string exn);
+         None)
   in
   let prefer_legacy =
     match oas_checkpoint, legacy_checkpoint with

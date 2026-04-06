@@ -10,6 +10,6 @@ mention_targets = ["sangsu"]
 
 proactive_enabled = true
 
-# Deny tools that local models misuse in idle loops.
-# keeper_tasks_list: sangsu has no task-related responsibilities.
-tool_denylist = ["keeper_board_comment", "keeper_tasks_list"]
+
+
+tool_denylist = []

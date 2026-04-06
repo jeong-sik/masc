@@ -10,5 +10,5 @@ mention_targets = ["cheolsu"]
 
 proactive_enabled = true
 
-# Deny tools that local models misuse in idle loops.
-tool_denylist = ["keeper_board_comment", "keeper_board_post", "keeper_board_vote"]
+
+tool_denylist = []

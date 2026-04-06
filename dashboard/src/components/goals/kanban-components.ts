@@ -132,7 +132,7 @@ export function KanbanCard({ task }: { task: Task }) {
       `}
 
       <div class="flex flex-wrap items-center gap-2 text-[11px] text-text-muted">
-        ${task.created_at ? html`<span class="rounded-md border border-card-border/70 bg-white/4 px-2 py-1"><${TimeAgo} timestamp=${task.created_at} /></span>` : null}
+        ${task.completed_at ? html`<span class="rounded-md border border-ok/25 bg-ok/10 px-2 py-1 text-ok">완료 <${TimeAgo} timestamp=${task.completed_at} /></span>` : task.created_at ? html`<span class="rounded-md border border-card-border/70 bg-white/4 px-2 py-1"><${TimeAgo} timestamp=${task.created_at} /></span>` : null}
         ${task.assignee ? html`<span class="rounded-md border border-accent/20 bg-[var(--accent-10)] px-2 py-1 text-accent">@${task.assignee}</span>` : null}
         <a
           href=${link.href}

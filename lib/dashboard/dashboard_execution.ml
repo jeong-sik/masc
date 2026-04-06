@@ -50,7 +50,7 @@ let messages_safe config =
 
 
 let task_json (task : Types.task) =
-  `Assoc
+  let base =
     [
       ("id", `String task.id);
       ("title", `String task.title);
@@ -60,6 +60,15 @@ let task_json (task : Types.task) =
       ("assignee", Json_util.string_opt_to_json (task_assignee task));
       ("created_at", `String task.created_at);
     ]
+  in
+  let extra = match task.task_status with
+    | Types.Done { completed_at; _ } ->
+      [("completed_at", `String completed_at)]
+    | Types.Cancelled { cancelled_at; _ } ->
+      [("completed_at", `String cancelled_at)]
+    | _ -> []
+  in
+  `Assoc (base @ extra)
 
 let agent_json (agent : Types.agent) =
   let (emoji, korean_name) = get_agent_identity agent.name in
@@ -272,16 +281,34 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
           ("keepers", `List keepers);
         ]
       in
+      let now = Time_compat.now () in
+      let recent_cutoff = now -. 86400.0 in (* 24 hours *)
       let active_tasks = List.filter (fun (t : Types.task) ->
         match t.task_status with
         | Types.Done _ | Types.Cancelled _ -> false
         | _ -> true
       ) tasks in
-      let limited_tasks = take 50 active_tasks in
+      let recent_done = tasks
+        |> List.filter (fun (t : Types.task) ->
+          match t.task_status with
+          | Types.Done { completed_at; _ } ->
+            (match Types.parse_iso8601_opt completed_at with
+             | Some ts -> ts >= recent_cutoff
+             | None -> false)
+          | Types.Cancelled { cancelled_at; _ } ->
+            (match Types.parse_iso8601_opt cancelled_at with
+             | Some ts -> ts >= recent_cutoff
+             | None -> false)
+          | _ -> false)
+        |> take 20
+      in
+      let all_visible = active_tasks @ recent_done in
+      let limited_tasks = take 50 all_visible in
       let task_fields = [
         ("tasks", `List (List.map task_json limited_tasks));
         ("task_counts", `Assoc [
           ("active", `Int (List.length active_tasks));
+          ("done_recent", `Int (List.length recent_done));
           ("total", `Int (List.length tasks));
           ("shown", `Int (List.length limited_tasks));
         ]);

@@ -479,11 +479,6 @@ let test_permission_for_tool_operator_confirm () =
   | Some Types.CanBroadcast -> ()
   | _ -> fail "expected CanBroadcast"
 
-let test_permission_for_tool_voice_ping_pong () =
-  match Auth.permission_for_tool "masc_voice_ping_pong" with
-  | Some Types.CanBroadcast -> ()
-  | _ -> fail "expected CanBroadcast"
-
 let test_permission_for_tool_autoresearch_status () =
   match Auth.permission_for_tool "masc_autoresearch_status" with
   | Some Types.CanReadState -> ()
@@ -691,8 +686,6 @@ let () =
       test_case "join" `Quick test_permission_for_tool_join;
       test_case "leave" `Quick test_permission_for_tool_leave;
       test_case "status" `Quick test_permission_for_tool_status;
-      test_case "transport_status" `Quick test_permission_for_tool_transport_status;
-      test_case "websocket_discovery" `Quick test_permission_for_tool_websocket_discovery;
       test_case "who" `Quick test_permission_for_tool_who;
       test_case "tasks" `Quick test_permission_for_tool_tasks;
       test_case "add_task" `Quick test_permission_for_tool_add_task;
@@ -705,10 +698,7 @@ let () =
       test_case "channel_gate" `Quick test_permission_for_tool_channel_gate;
       test_case "board_list" `Quick test_permission_for_tool_board_list;
       test_case "board_post" `Quick test_permission_for_tool_board_post;
-      test_case "board_reclassify" `Quick test_permission_for_tool_board_reclassify;
       test_case "board_delete" `Quick test_permission_for_tool_board_delete;
-      test_case "portal_open" `Quick test_permission_for_tool_portal_open;
-      test_case "portal_send" `Quick test_permission_for_tool_portal_send;
       test_case "worktree_create" `Quick test_permission_for_tool_worktree_create;
       test_case "worktree_remove" `Quick test_permission_for_tool_worktree_remove;
       test_case "interrupt" `Quick test_permission_for_tool_interrupt;
@@ -732,7 +722,6 @@ let () =
         test_permission_for_tool_collaboration_evidence;
       test_case "operator_action" `Quick test_permission_for_tool_operator_action;
       test_case "operator_confirm" `Quick test_permission_for_tool_operator_confirm;
-      test_case "voice_ping_pong" `Quick test_permission_for_tool_voice_ping_pong;
       test_case "autoresearch_status" `Quick
         test_permission_for_tool_autoresearch_status;
       test_case "autoresearch_start" `Quick

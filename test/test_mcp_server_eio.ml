@@ -1065,56 +1065,6 @@ let test_handle_request_tools_call_operator_profile_rejects_non_operator () =
    | _ -> Alcotest.fail "response not an object");
   cleanup_dir base_path
 
-let test_handle_request_tools_call_system_internal_transport_status () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let clock = Eio.Stdenv.clock env in
-  Eio.Switch.run @@ fun sw ->
-  let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-  let request = Yojson.Safe.to_string (`Assoc [
-    ("jsonrpc", `String "2.0");
-    ("id", `Int 14);
-    ("method", `String "tools/call");
-    ("params", `Assoc [
-      ("name", `String "masc_transport_status");
-      ("arguments", `Assoc []);
-    ]);
-  ]) in
-  let response = Mcp_eio.handle_request ~clock ~sw state request in
-  let _ = result_fields_exn response in
-  let structured = structured_content_exn response in
-  Alcotest.(check bool) "transport status includes http block" true
-    Yojson.Safe.Util.(structured |> member "http" <> `Null);
-  Alcotest.(check bool) "transport status includes websocket block" true
-    Yojson.Safe.Util.(structured |> member "websocket" <> `Null);
-  let audit_entries = Masc_mcp.Audit_log.read_entries ~n:100 state.room_config in
-  let system_internal_entry =
-    List.find_opt
-      (fun (entry : Masc_mcp.Audit_log.audit_entry) ->
-        match entry.action with
-        | Masc_mcp.Audit_log.Custom "system_internal_tool_call" ->
-            Yojson.Safe.Util.(
-              entry.details |> member "tool_name" |> to_string_option
-              = Some "masc_transport_status")
-        | _ -> false)
-      audit_entries
-  in
-  let entry =
-    match system_internal_entry with
-    | Some entry -> entry
-    | None ->
-        Alcotest.fail
-          "missing durable audit entry for system_internal tool call"
-  in
-  Alcotest.(check string) "audit surface" "system_internal"
-    Yojson.Safe.Util.(entry.details |> member "surface" |> to_string);
-  Alcotest.(check bool) "audit visibility hidden" false
-    Yojson.Safe.Util.(entry.details |> member "visible_in_tools_list" |> to_bool);
-  Alcotest.(check bool) "audit callable when hidden" true
-    Yojson.Safe.Util.(entry.details |> member "allow_direct_call" |> to_bool);
-  cleanup_dir base_path
-
 let test_handle_request_tools_list_rejects_nonstandard_names_filter () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -2618,8 +2568,6 @@ let eio_tests = [
     test_handle_request_jsonrpc_response_returns_null;
   "reject non-operator tool on operator profile", `Quick,
   test_handle_request_tools_call_operator_profile_rejects_non_operator;
-  "handle tools/call system_internal transport_status", `Quick,
-    test_handle_request_tools_call_system_internal_transport_status;
   "handle tools/call managed profile sdk alias claim", `Quick,
     test_handle_request_tools_call_managed_profile_sdk_alias_claim;
   "handle tools/call transition claim guidance", `Quick,

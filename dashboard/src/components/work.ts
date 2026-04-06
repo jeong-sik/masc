@@ -7,13 +7,12 @@ import { Memory } from './memory'
 import { Proof } from './proof'
 import { Planning } from './goals'
 import { GoalTree } from './goals/goal-tree'
-import { Worktrees } from './worktrees'
 import { ErrorBoundary } from './common/error-boundary'
 
-type WorkSection = 'board' | 'evidence' | 'planning' | 'goals' | 'worktrees'
+type WorkSection = 'board' | 'evidence' | 'planning' | 'goals'
 
 function isWorkSection(v: string | undefined): v is WorkSection {
-  return v === 'board' || v === 'evidence' || v === 'planning' || v === 'goals' || v === 'worktrees'
+  return v === 'board' || v === 'evidence' || v === 'planning' || v === 'goals'
 }
 
 export function Work() {
@@ -28,8 +27,7 @@ export function Work() {
           ${current === 'board' ? html`<${Memory} />`
             : current === 'evidence' ? html`<${Proof} />`
             : current === 'planning' ? html`<${Planning} />`
-            : current === 'goals' ? html`<${GoalTree} />`
-            : html`<${Worktrees} />`
+            : html`<${GoalTree} />`
           }
         </>
       </div>

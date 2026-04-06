@@ -499,7 +499,7 @@ let read_entries_since ~(masc_root : string) ~(keeper_name : string) ~(since : f
          with Sys_error _ -> ())
       end
     ) files;
-    List.sort (fun a b -> compare a.ts b.ts) !all_entries
+    List.sort (fun (a : tool_call_entry) (b : tool_call_entry) -> compare a.ts b.ts) !all_entries
 
 (* ================================================================ *)
 (* Read trajectory from JSONL (for replay/eval)                     *)

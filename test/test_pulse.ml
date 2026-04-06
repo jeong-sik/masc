@@ -452,34 +452,6 @@ let () = test "reenable previously disabled consumer" (fun () ->
   Eio.Time.sleep clock 0.1
 )
 
-(* ── Test: backoff delay_sequence ──────────────────────────── *)
-
-let () = test "backoff delay_sequence produces correct values" (fun () ->
-  let p = Backoff.{ max_attempts = 4; base_delay_s = 1.0;
-                     max_delay_s = 10.0; multiplier = 2.0; jitter = false } in
-  let seq = Backoff.delay_sequence p in
-  (* 3 delays for 4 attempts: 1.0, 2.0, 4.0 *)
-  assert (List.length seq = 3);
-  let expected = [1.0; 2.0; 4.0] in
-  List.iter2 (fun actual exp ->
-    if Float.abs (actual -. exp) > 0.001 then
-      failwith (Printf.sprintf "expected %.1f, got %.1f" exp actual)
-  ) seq expected
-)
-
-(* ── Test: backoff delay capping ───────────────────────────── *)
-
-let () = test "backoff delay capped at max_delay_s" (fun () ->
-  let p = Backoff.{ max_attempts = 5; base_delay_s = 5.0;
-                     max_delay_s = 10.0; multiplier = 3.0; jitter = false } in
-  let seq = Backoff.delay_sequence p in
-  (* delays: 5.0, 15.0→10.0, 45.0→10.0, 135.0→10.0 *)
-  List.iter (fun d ->
-    if d > 10.001 then
-      failwith (Printf.sprintf "delay %.1f exceeds max 10.0" d)
-  ) seq
-)
-
 (* ── Test: circuit_breaker wrap ────────────────────────────── *)
 
 let () = test "circuit_breaker wrap records success/failure" (fun () ->

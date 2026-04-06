@@ -340,7 +340,7 @@ let review
          ~masc_tools:[report_review_verdict_schema]
          ~dispatch
          ~max_turns:1
-         ~temperature:0.0
+         ~temperature:Oas_worker_cascade.deterministic_temperature
          ~max_tokens:200
          ?sw
          ()

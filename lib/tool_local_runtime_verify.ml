@@ -142,7 +142,7 @@ let probe_chat_completion_compatible
         Llm_provider.Provider_config.make
           ~kind:Llm_provider.Provider_config.OpenAI_compat
           ~model_id ~base_url:endpoint.url ~request_path:"/v1/chat/completions"
-          ~max_tokens:1 ~temperature:0.0 ()
+          ~max_tokens:1 ~temperature:Oas_worker_cascade.deterministic_temperature ()
       in
       let messages =
         [

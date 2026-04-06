@@ -37,17 +37,6 @@ let string_contains_substring_ci ~(needle : string) (haystack : string) : bool =
     ~needle:(String.lowercase_ascii needle)
     (String.lowercase_ascii haystack)
 
-let find_substring ~(needle : string) (haystack : string) : int option =
-  let needle_len = String.length needle in
-  let hay_len = String.length haystack in
-  let rec loop i =
-    if needle_len = 0 then Some 0
-    else if i + needle_len > hay_len then None
-    else if substring_matches_at ~needle haystack i then Some i
-    else loop (i + 1)
-  in
-  loop 0
-
 (** Detect transient TCP/TLS errors that warrant retry with short backoff.
     These patterns match OAS cascade error messages for connection-level failures. *)
 let transient_error_patterns =
@@ -70,139 +59,62 @@ let max_transient_retries = 2
 let transient_backoff_sec (attempt : int) : float =
   Float.min 4.0 (1.0 *. Float.of_int (1 lsl (attempt - 1)))
 
-let context_overflow_anchor = "available context size ("
-let input_budget_exceeded_anchor = "input token budget exceeded:"
-
-let is_ascii_whitespace = function
-  | ' ' | '\n' | '\r' | '\t' -> true
-  | _ -> false
-
-let skip_ascii_whitespace (text : string) idx =
-  let rec loop i =
-    if i >= String.length text then i
-    else if is_ascii_whitespace text.[i] then loop (i + 1)
-    else i
-  in
-  loop idx
-
-let int_run_from (text : string) start_idx : (int * int) option =
-  let rec consume_digits idx =
-    if idx >= String.length text then idx
-    else
-      match text.[idx] with
-      | '0' .. '9' -> consume_digits (idx + 1)
-      | _ -> idx
-  in
-  let end_idx = consume_digits start_idx in
-  if end_idx = start_idx then None
-  else
-    String.sub text start_idx (end_idx - start_idx)
-    |> int_of_string_opt
-    |> Option.map (fun value -> (value, end_idx))
-
-let parse_available_context_limit (msg : string) : int option =
-  match find_substring ~needle:context_overflow_anchor msg with
-  | None -> None
-  | Some anchor_idx ->
-      let start_idx = anchor_idx + String.length context_overflow_anchor in
-      int_run_from msg start_idx |> Option.map fst
-
-let parse_input_budget_exceeded_limit (msg : string) : int option =
-  match find_substring ~needle:input_budget_exceeded_anchor msg with
-  | None -> None
-  | Some anchor_idx ->
-      let used_start =
-        skip_ascii_whitespace msg
-          (anchor_idx + String.length input_budget_exceeded_anchor)
-      in
-      match int_run_from msg used_start with
-      | None -> None
-      | Some (_, used_end) ->
-          let slash_idx = skip_ascii_whitespace msg used_end in
-          if slash_idx >= String.length msg || msg.[slash_idx] <> '/' then None
-          else
-            let limit_start =
-              skip_ascii_whitespace msg (slash_idx + 1)
-            in
-            int_run_from msg limit_start |> Option.map fst
-
-let context_overflow_limit (msg : string) : int option =
-  let lowered = String.lowercase_ascii msg in
-  match parse_available_context_limit lowered with
-  | Some limit -> Some limit
-  | None -> parse_input_budget_exceeded_limit lowered
-
+(** Detect context overflow errors via OAS SSOT.
+    Uses [Oas.Retry.is_context_overflow_message] — the single source of truth
+    for overflow detection.  MASC must not reimplement its own parser.
+    See also: [Oas.Retry.extract_context_limit] for limit extraction (OAS >= 0.101.2). *)
 let should_attempt_context_overflow_retry (msg : string) : bool =
-  Option.is_some (context_overflow_limit msg)
+  Oas.Retry.is_context_overflow_message msg
 
 type overflow_retry_plan = {
   retry_max_context : int;
   retry_generation : int;
 }
 
-let overflow_retry_history_budget
-    ~(available_context : int)
-    ~(system_prompt : string)
-    ~(user_message : string) : int =
-  let prompt_tokens =
-    let estimated =
-      (* Route through Keeper_context_core facade — MASC must not call
-         Agent_sdk.Context_reducer directly for its own decisions. *)
-      Keeper_context_core.estimate_char_tokens system_prompt
-      + Keeper_context_core.estimate_char_tokens user_message
-    in
-    (* Use 20% safety buffer for prompt estimation errors (#5053).
-       Ceiling-based to avoid truncation erasing the buffer. *)
-    if estimated <= 0 then estimated
-    else estimated + ((estimated + 4) / 5)
-  in
-  let prompt_reserve = max 1024 prompt_tokens in
-  let tool_reserve =
-    Keeper_config.keeper_retry_max_tools_per_turn () * 220
-  in
-  let safety_reserve = 1024 in
-  max 256 (available_context - (prompt_reserve + tool_reserve + safety_reserve))
+(** Recover from context overflow by compacting and reducing max_context.
 
+    Limit extraction delegates to [Oas.Retry.extract_context_limit] (SSOT).
+    No local token-budget math — OAS owns context budgeting.
+    MASC only decides whether to compact and retry. *)
 let recover_context_overflow_retry
     ~(meta : keeper_meta)
     ~(base_dir : string)
     ~(max_cascade_context : int)
-    ~(system_prompt : string)
-    ~(user_message : string)
     ~(error : string) : overflow_retry_plan option =
-  match context_overflow_limit error with
-  | None -> None
-  | Some actual_limit ->
-      let retry_max_context =
-        if max_cascade_context <= 0 then actual_limit
-        else min max_cascade_context actual_limit
-      in
-      let retry_history_budget =
-        overflow_retry_history_budget ~available_context:retry_max_context
-          ~system_prompt ~user_message
-      in
-      let model = Keeper_exec_context.checkpoint_model_of_meta meta in
-      match
-        Keeper_exec_context.recover_latest_checkpoint_for_overflow_retry
-          ~base_dir ~meta ~model
-          ~primary_model_max_tokens:retry_history_budget
-      with
-      | Some recovery ->
-          Log.Keeper.warn
-            "%s: context overflow retry prepared with compacted checkpoint (%d->%d tokens, max_context=%d, history_budget=%d, generation=%d)"
-            meta.name recovery.compaction.before_tokens
-            recovery.compaction.after_tokens
-            retry_max_context retry_history_budget recovery.turn_generation;
-          Some
-            {
-              retry_max_context;
-              retry_generation = recovery.turn_generation;
-            }
-      | None ->
-          Log.Keeper.warn
-            "%s: context overflow detected but checkpoint recovery was unavailable: %s"
-            meta.name (short_preview error);
-          None
+  let actual_limit =
+    match Oas.Retry.extract_context_limit error with
+    | Some limit -> limit
+    | None ->
+      (* Overflow detected but limit not parseable — use 80% of cascade max
+         as a conservative fallback. *)
+      max 4096 (max_cascade_context * 4 / 5)
+  in
+  let retry_max_context =
+    if max_cascade_context <= 0 then actual_limit
+    else min max_cascade_context actual_limit
+  in
+  let model = Keeper_exec_context.checkpoint_model_of_meta meta in
+  match
+    Keeper_exec_context.recover_latest_checkpoint_for_overflow_retry
+      ~base_dir ~meta ~model
+      ~primary_model_max_tokens:retry_max_context
+  with
+  | Some recovery ->
+      Log.Keeper.warn
+        "%s: context overflow retry — compacted checkpoint (%d->%d tokens, max_context=%d, generation=%d)"
+        meta.name recovery.compaction.before_tokens
+        recovery.compaction.after_tokens
+        retry_max_context recovery.turn_generation;
+      Some
+        {
+          retry_max_context;
+          retry_generation = recovery.turn_generation;
+        }
+  | None ->
+      Log.Keeper.warn
+        "%s: context overflow detected but checkpoint recovery unavailable: %s"
+        meta.name (short_preview error);
+      None
 
 let decision_channel_of_observation
     (observation : Keeper_world_observation.world_observation) : string =
@@ -917,7 +829,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
                            && should_attempt_context_overflow_retry e -> (
                 match
                   recover_context_overflow_retry ~meta ~base_dir
-                    ~max_cascade_context ~system_prompt ~user_message ~error:e
+                    ~max_cascade_context ~error:e
                 with
                 | Some retry_plan ->
                     let retry_meta =

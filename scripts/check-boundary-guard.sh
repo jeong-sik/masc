@@ -49,7 +49,7 @@ check "V5-memory-store-bypass" 5 \
 # V6: OAS lifecycle orchestration from keeper_agent_run
 # Memory_oas_bridge + Oas_worker.run_named calls should be isolated
 # to a thin bridge; currently spread in keeper_agent_run.ml.
-check "V6-oas-orchestration" 4 \
+check "V6-oas-orchestration" 5 \
   'Memory_oas_bridge\|Oas_worker\.run_named' \
   "lib/keeper/keeper_agent_run.ml"
 

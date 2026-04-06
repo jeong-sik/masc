@@ -370,7 +370,7 @@ let test_memory_search_cross_generation () =
     (* Search for "canary" — only exists in history.jsonl *)
     let result = KET.execute_keeper_tool_call ~config ~meta ~ctx_work
       ~name:"keeper_memory_search"
-      ~input:(`Assoc [ ("query", `String "canary"); ("limit", `Int 5) ])
+      ~input:(`Assoc [ ("query", `String "canary"); ("limit", `Int 5); ("source", `String "history") ])
       () in
     let json = Yojson.Safe.from_string result in
     let match_count = Yojson.Safe.Util.(json |> member "match_count" |> to_int) in
@@ -392,7 +392,7 @@ let test_memory_search_checkpoint_only () =
       (Agent_sdk.Types.text_message Agent_sdk.Types.User "optimize the database query") in
     let result = KET.execute_keeper_tool_call ~config ~meta ~ctx_work
       ~name:"keeper_memory_search"
-      ~input:(`Assoc [ ("query", `String "database"); ("limit", `Int 5) ])
+      ~input:(`Assoc [ ("query", `String "database"); ("limit", `Int 5); ("source", `String "history") ])
       () in
     let json = Yojson.Safe.from_string result in
     let match_count = Yojson.Safe.Util.(json |> member "match_count" |> to_int) in
@@ -415,7 +415,7 @@ let test_memory_search_dedup () =
       (Agent_sdk.Types.text_message Agent_sdk.Types.User "shared needle message") in
     let result = KET.execute_keeper_tool_call ~config ~meta ~ctx_work
       ~name:"keeper_memory_search"
-      ~input:(`Assoc [ ("query", `String "needle"); ("limit", `Int 10) ])
+      ~input:(`Assoc [ ("query", `String "needle"); ("limit", `Int 10); ("source", `String "history") ])
       () in
     let json = Yojson.Safe.from_string result in
     let match_count = Yojson.Safe.Util.(json |> member "match_count" |> to_int) in
@@ -453,7 +453,7 @@ let test_memory_search_prev_generation () =
     (* Search for "postgres" — only in previous generation's history *)
     let result = KET.execute_keeper_tool_call ~config ~meta ~ctx_work
       ~name:"keeper_memory_search"
-      ~input:(`Assoc [ ("query", `String "postgres"); ("limit", `Int 5) ])
+      ~input:(`Assoc [ ("query", `String "postgres"); ("limit", `Int 5); ("source", `String "history") ])
       () in
     let json = Yojson.Safe.from_string result in
     let match_count = Yojson.Safe.Util.(json |> member "match_count" |> to_int) in
@@ -465,11 +465,185 @@ let test_memory_search_prev_generation () =
     (* Also verify current generation is searchable *)
     let result2 = KET.execute_keeper_tool_call ~config ~meta ~ctx_work
       ~name:"keeper_memory_search"
-      ~input:(`Assoc [ ("query", `String "cluster"); ("limit", `Int 5) ])
+      ~input:(`Assoc [ ("query", `String "cluster"); ("limit", `Int 5); ("source", `String "history") ])
       () in
     let json2 = Yojson.Safe.from_string result2 in
     let match2 = Yojson.Safe.Util.(json2 |> member "match_count" |> to_int) in
     check bool "found cluster from current generation" true (match2 > 0))
+
+(* ================================================================ *)
+(* Memory Bank Search Tests (structured notes from memory.jsonl)     *)
+(* ================================================================ *)
+
+(** Helper: write memory bank JSONL lines for a keeper. *)
+let write_memory_bank config name lines =
+  let path = Keeper_types.keeper_memory_bank_path config name in
+  write_lines path lines
+
+let memory_note ~kind ~text ~priority ~generation ~turn ~ts_unix =
+  Printf.sprintf
+    {|{"ts":"2026-04-06T00:00:00Z","ts_unix":%f,"name":"test","trace_id":"t1","generation":%d,"turn":%d,"kind":"%s","priority":%d,"text":"%s"}|}
+    ts_unix generation turn kind priority text
+
+(** Test: memory bank search returns structured results with scoring. *)
+let test_memory_search_bank_basic () =
+  let dir = test_tmpdir () in
+  Fun.protect ~finally:(fun () -> cleanup_tmpdir_r dir) (fun () ->
+    let config = make_test_room_config dir in
+    let meta = keeper_meta ~name:"bank-keeper" ~mention_targets:["bank-keeper"] () in
+    write_memory_bank config "bank-keeper" [
+      memory_note ~kind:"decision" ~text:"Switched to Postgres for persistence"
+        ~priority:86 ~generation:1 ~turn:3 ~ts_unix:1000.0;
+      memory_note ~kind:"goal" ~text:"Improve search quality"
+        ~priority:72 ~generation:1 ~turn:1 ~ts_unix:900.0;
+      memory_note ~kind:"progress" ~text:"Implemented basic keyword matching"
+        ~priority:66 ~generation:2 ~turn:5 ~ts_unix:1100.0;
+    ];
+    let ctx_work = KEC.create ~system_prompt:"test" ~max_tokens:4096 in
+    let result = KET.execute_keeper_tool_call ~config ~meta ~ctx_work
+      ~name:"keeper_memory_search"
+      ~input:(`Assoc [ ("query", `String "Postgres") ])
+      () in
+    let json = Yojson.Safe.from_string result in
+    let source = Yojson.Safe.Util.(json |> member "source" |> to_string) in
+    check string "default source is memory" "memory" source;
+    let match_count = Yojson.Safe.Util.(json |> member "match_count" |> to_int) in
+    check bool "found Postgres" true (match_count > 0);
+    let first_match = Yojson.Safe.Util.(json |> member "matches" |> to_list |> List.hd) in
+    let kind = Yojson.Safe.Util.(first_match |> member "kind" |> to_string) in
+    check string "match kind is decision" "decision" kind;
+    let score = Yojson.Safe.Util.(first_match |> member "score" |> to_float) in
+    check bool "score is positive" true (score > 0.0))
+
+(** Test: kind filter narrows results to matching kind only. *)
+let test_memory_search_bank_kind_filter () =
+  let dir = test_tmpdir () in
+  Fun.protect ~finally:(fun () -> cleanup_tmpdir_r dir) (fun () ->
+    let config = make_test_room_config dir in
+    let meta = keeper_meta ~name:"filter-keeper" ~mention_targets:["filter-keeper"] () in
+    write_memory_bank config "filter-keeper" [
+      memory_note ~kind:"decision" ~text:"use Postgres" ~priority:86 ~generation:1 ~turn:1 ~ts_unix:1000.0;
+      memory_note ~kind:"goal" ~text:"use Redis" ~priority:72 ~generation:1 ~turn:2 ~ts_unix:1100.0;
+      memory_note ~kind:"progress" ~text:"use Postgres done" ~priority:66 ~generation:1 ~turn:3 ~ts_unix:1200.0;
+    ];
+    let ctx_work = KEC.create ~system_prompt:"test" ~max_tokens:4096 in
+    (* Search with kind=goal — should only return "use Redis" *)
+    let result = KET.execute_keeper_tool_call ~config ~meta ~ctx_work
+      ~name:"keeper_memory_search"
+      ~input:(`Assoc [ ("query", `String "use"); ("kind", `String "goal") ])
+      () in
+    let json = Yojson.Safe.from_string result in
+    let match_count = Yojson.Safe.Util.(json |> member "match_count" |> to_int) in
+    check int "only 1 goal match" 1 match_count;
+    let first = Yojson.Safe.Util.(json |> member "matches" |> to_list |> List.hd) in
+    let text = Yojson.Safe.Util.(first |> member "text" |> to_string) in
+    check bool "text contains Redis" true (Re.execp (Re.str "Redis" |> Re.compile) text))
+
+(** Test: results sorted by score descending. *)
+let test_memory_search_bank_scored_order () =
+  let dir = test_tmpdir () in
+  Fun.protect ~finally:(fun () -> cleanup_tmpdir_r dir) (fun () ->
+    let config = make_test_room_config dir in
+    let meta = keeper_meta ~name:"score-keeper" ~mention_targets:["score-keeper"] () in
+    write_memory_bank config "score-keeper" [
+      memory_note ~kind:"progress" ~text:"task alpha" ~priority:50 ~generation:1 ~turn:1 ~ts_unix:100.0;
+      memory_note ~kind:"decision" ~text:"task alpha upgrade" ~priority:90 ~generation:2 ~turn:3 ~ts_unix:200.0;
+    ];
+    let ctx_work = KEC.create ~system_prompt:"test" ~max_tokens:4096 in
+    let result = KET.execute_keeper_tool_call ~config ~meta ~ctx_work
+      ~name:"keeper_memory_search"
+      ~input:(`Assoc [ ("query", `String "alpha"); ("limit", `Int 5) ])
+      () in
+    let json = Yojson.Safe.from_string result in
+    let matches = Yojson.Safe.Util.(json |> member "matches" |> to_list) in
+    check bool "2 matches" true (List.length matches = 2);
+    let s1 = Yojson.Safe.Util.(List.nth matches 0 |> member "score" |> to_float) in
+    let s2 = Yojson.Safe.Util.(List.nth matches 1 |> member "score" |> to_float) in
+    check bool "first score >= second score" true (s1 >= s2))
+
+(** Test: empty memory bank returns no_match: true *)
+let test_memory_search_bank_empty () =
+  let dir = test_tmpdir () in
+  Fun.protect ~finally:(fun () -> cleanup_tmpdir_r dir) (fun () ->
+    let config = make_test_room_config dir in
+    let meta = keeper_meta ~name:"empty-keeper" ~mention_targets:["empty-keeper"] () in
+    let ctx_work = KEC.create ~system_prompt:"test" ~max_tokens:4096 in
+    let result = KET.execute_keeper_tool_call ~config ~meta ~ctx_work
+      ~name:"keeper_memory_search"
+      ~input:(`Assoc [ ("query", `String "anything") ])
+      () in
+    let json = Yojson.Safe.from_string result in
+    let no_match = Yojson.Safe.Util.(json |> member "no_match" |> to_bool) in
+    check bool "no_match is true" true no_match;
+    let match_count = Yojson.Safe.Util.(json |> member "match_count" |> to_int) in
+    check int "match_count is 0" 0 match_count)
+
+(** Test: query with no matching text returns no_match: true *)
+let test_memory_search_bank_no_match () =
+  let dir = test_tmpdir () in
+  Fun.protect ~finally:(fun () -> cleanup_tmpdir_r dir) (fun () ->
+    let config = make_test_room_config dir in
+    let meta = keeper_meta ~name:"nomatch-keeper" ~mention_targets:["nomatch-keeper"] () in
+    write_memory_bank config "nomatch-keeper" [
+      memory_note ~kind:"decision" ~text:"deploy to staging" ~priority:86 ~generation:1 ~turn:1 ~ts_unix:1000.0;
+    ];
+    let ctx_work = KEC.create ~system_prompt:"test" ~max_tokens:4096 in
+    let result = KET.execute_keeper_tool_call ~config ~meta ~ctx_work
+      ~name:"keeper_memory_search"
+      ~input:(`Assoc [ ("query", `String "nonexistent_keyword_xyz") ])
+      () in
+    let json = Yojson.Safe.from_string result in
+    let no_match = Yojson.Safe.Util.(json |> member "no_match" |> to_bool) in
+    check bool "no_match for unrelated query" true no_match)
+
+(** Test: source=history uses legacy cross-generation search. *)
+let test_memory_search_source_history () =
+  let dir = test_tmpdir () in
+  Fun.protect ~finally:(fun () -> cleanup_tmpdir_r dir) (fun () ->
+    let config = make_test_room_config dir in
+    let meta = keeper_meta ~name:"hist-keeper" ~mention_targets:["hist-keeper"] () in
+    let trace_id = meta.runtime.trace_id in
+    let history_path = Keeper_types.keeper_history_path config trace_id in
+    write_lines history_path [
+      {|{"role":"user","content":"deploy the legacy service"}|};
+    ];
+    let ctx_work = KEC.create ~system_prompt:"test" ~max_tokens:4096 in
+    let result = KET.execute_keeper_tool_call ~config ~meta ~ctx_work
+      ~name:"keeper_memory_search"
+      ~input:(`Assoc [ ("query", `String "legacy"); ("source", `String "history") ])
+      () in
+    let json = Yojson.Safe.from_string result in
+    let source = Yojson.Safe.Util.(json |> member "source" |> to_string) in
+    check string "source is history" "history" source;
+    let match_count = Yojson.Safe.Util.(json |> member "match_count" |> to_int) in
+    check bool "found legacy in history" true (match_count > 0))
+
+(** Test: source=all merges memory bank and history results. *)
+let test_memory_search_source_all () =
+  let dir = test_tmpdir () in
+  Fun.protect ~finally:(fun () -> cleanup_tmpdir_r dir) (fun () ->
+    let config = make_test_room_config dir in
+    let meta = keeper_meta ~name:"all-keeper" ~mention_targets:["all-keeper"] () in
+    (* Memory bank has structured note *)
+    write_memory_bank config "all-keeper" [
+      memory_note ~kind:"decision" ~text:"alpha from bank" ~priority:86 ~generation:1 ~turn:1 ~ts_unix:1000.0;
+    ];
+    (* History has raw message *)
+    let trace_id = meta.runtime.trace_id in
+    let history_path = Keeper_types.keeper_history_path config trace_id in
+    write_lines history_path [
+      {|{"role":"user","content":"alpha from history"}|};
+    ];
+    let ctx_work = KEC.create ~system_prompt:"test" ~max_tokens:4096 in
+    let result = KET.execute_keeper_tool_call ~config ~meta ~ctx_work
+      ~name:"keeper_memory_search"
+      ~input:(`Assoc [ ("query", `String "alpha"); ("source", `String "all"); ("limit", `Int 10) ])
+      () in
+    let json = Yojson.Safe.from_string result in
+    let source = Yojson.Safe.Util.(json |> member "source" |> to_string) in
+    check string "source is all" "all" source;
+    let match_count = Yojson.Safe.Util.(json |> member "match_count" |> to_int) in
+    check bool "found matches from both sources" true (match_count >= 2))
 
 let () =
   run "Keeper_memory"
@@ -526,5 +700,22 @@ let () =
             test_memory_search_dedup;
           test_case "finds messages from previous generation via trace_history" `Quick
             test_memory_search_prev_generation;
+        ] );
+      ( "memory_bank_search",
+        [
+          test_case "basic keyword search in memory bank" `Quick
+            test_memory_search_bank_basic;
+          test_case "kind filter narrows results" `Quick
+            test_memory_search_bank_kind_filter;
+          test_case "results sorted by score descending" `Quick
+            test_memory_search_bank_scored_order;
+          test_case "empty bank returns no_match" `Quick
+            test_memory_search_bank_empty;
+          test_case "no matching query returns no_match" `Quick
+            test_memory_search_bank_no_match;
+          test_case "source=history uses legacy search" `Quick
+            test_memory_search_source_history;
+          test_case "source=all merges bank and history" `Quick
+            test_memory_search_source_all;
         ] );
     ]

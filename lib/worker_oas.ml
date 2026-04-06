@@ -322,7 +322,7 @@ let worker_destructive_check_tools =
   [ "shell_exec"; "masc_code_shell"; "masc_code_git"; "masc_code_delete" ]
 
 (** Convert a JSON field value into a string suitable for safety screening. *)
-let rec string_of_screening_value (value : Yojson.Safe.t) : string =
+let string_of_screening_value (value : Yojson.Safe.t) : string =
   match value with
   | `String s -> s
   | `Int i -> string_of_int i
@@ -331,12 +331,6 @@ let rec string_of_screening_value (value : Yojson.Safe.t) : string =
   | `Bool b -> string_of_bool b
   | `Null -> ""
   | (`Assoc _ | `List _) as json -> Yojson.Safe.to_string json
-  | `Tuple items -> Yojson.Safe.to_string (`List items)
-  | `Variant (name, None) -> name
-  | `Variant (name, Some v) ->
-    let s = string_of_screening_value v in
-    if String.length s = 0 then name
-    else Printf.sprintf "%s %s" name s
 
 (** Extract command-like content from tool input JSON for screening.
     Reads "command", "cmd", "content", "action"/"args", or "path" keys.

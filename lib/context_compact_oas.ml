@@ -410,7 +410,8 @@ let default_dynamic_selector (obs : observation_context) : strategy list =
        unsuitable for multi-turn keeper conversations. *)
     [PruneToolOutputs; MergeContiguous]
   else if obs.context_window >= Env_config.ContextCompact.large_cloud_floor then
-    (* Large-context cloud: invest in quality-preserving strategies *)
+    (* Large-context cloud (>= MASC_COMPACT_LARGE_CLOUD_FLOOR, default 500K):
+       invest in quality-preserving strategies *)
     [DropLowImportance; SummarizeOld]
   else
     (* Default: importance-based *)

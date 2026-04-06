@@ -68,15 +68,15 @@ let test_estimate_context_gemini () =
   check int "max tokens gemini" 1000000 m.max_tokens
 
 let test_estimate_context_codex () =
-  (* "codex" not in OAS Provider_registry; 128K fallback
-     (matches Oas_model_resolve.resolve_primary_max_context). *)
+  (* "codex" not in OAS Provider_registry; 100K fallback
+     (delegated to Llm_provider.Model_meta.for_model_id which defaults to 100K). *)
   let m = Relay.estimate_context ~messages:10 ~tool_calls:5 ~model:"codex" in
-  check int "max tokens codex" 128000 m.max_tokens
+  check int "max tokens codex" 100000 m.max_tokens
 
 let test_estimate_context_gpt () =
-  (* "gpt" not in OAS Provider_registry; same 128K fallback. *)
+  (* "gpt" not in OAS Provider_registry; same 100K fallback via Model_meta. *)
   let m = Relay.estimate_context ~messages:10 ~tool_calls:5 ~model:"gpt" in
-  check int "max tokens gpt" 128000 m.max_tokens
+  check int "max tokens gpt" 100000 m.max_tokens
 
 let test_estimate_context_claude_opus () =
   let m = Relay.estimate_context ~messages:10 ~tool_calls:5 ~model:"claude-opus" in
@@ -84,7 +84,7 @@ let test_estimate_context_claude_opus () =
 
 let test_estimate_context_unknown_model () =
   let m = Relay.estimate_context ~messages:10 ~tool_calls:5 ~model:"unknown" in
-  check int "max tokens unknown" 128000 m.max_tokens
+  check int "max tokens unknown" 100000 m.max_tokens
 
 let test_estimate_context_usage_ratio () =
   let m = Relay.estimate_context ~messages:100 ~tool_calls:50 ~model:"claude" in

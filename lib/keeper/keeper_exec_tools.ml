@@ -534,6 +534,144 @@ let handle_keeper_github
               ])))
 ;;
 
+(** keeper_pr_workflow — deterministic pipeline: worktree → write → git → PR.
+    Reduces 4-step tool chain to a single call for 9B models that cannot
+    reliably chain multi-step tool sequences. *)
+let handle_keeper_pr_workflow
+      ~(config : Room.config)
+      ~(meta : keeper_meta)
+      ~(args : Yojson.Safe.t)
+  =
+  let branch = Safe_ops.json_string ~default:"" "branch" args |> String.trim in
+  let file_path = Safe_ops.json_string ~default:"" "file_path" args |> String.trim in
+  let file_content = Safe_ops.json_string ~default:"" "file_content" args in
+  let commit_message = Safe_ops.json_string ~default:"" "commit_message" args |> String.trim in
+  let pr_title = Safe_ops.json_string ~default:"" "pr_title" args |> String.trim in
+  let pr_body = Safe_ops.json_string ~default:"" "pr_body" args |> String.trim in
+  let base_branch = Safe_ops.json_string ~default:"main" "base_branch" args |> String.trim in
+  (* Validate required fields *)
+  if branch = "" then error_json "branch_required"
+  else if file_path = "" then error_json "file_path_required"
+  else if commit_message = "" then error_json "commit_message_required"
+  else if pr_title = "" then error_json "pr_title_required"
+  else
+    (* Check preset: requires delivery or coding *)
+    let preset_ok =
+      match Keeper_types.tool_access_preset meta.tool_access with
+      | Some (Delivery | Coding | Full) -> true
+      | _ -> false
+    in
+    if not preset_ok then
+      Yojson.Safe.to_string
+        (`Assoc
+          [ "ok", `Bool false
+          ; "error", `String "preset_insufficient"
+          ; "reason", `String "keeper_pr_workflow requires delivery, coding, or full preset"
+          ])
+    else
+      let root = project_root_of_config config in
+      let task_id = Printf.sprintf "pr-%s" (String.sub branch 0 (min 20 (String.length branch))) in
+      let agent_name = Printf.sprintf "keeper-%s" (strip_keeper_prefix meta.name) in
+      let steps = Buffer.create 512 in
+      let step_ok = ref true in
+      let step_error = ref "" in
+      let run_step name f =
+        if !step_ok then begin
+          match f () with
+          | Ok msg ->
+            Buffer.add_string steps (Printf.sprintf "  %s: ok\n" name);
+            Log.Keeper.info "pr_workflow step %s ok (keeper=%s)" name meta.name;
+            Some msg
+          | Error msg ->
+            step_ok := false;
+            step_error := Printf.sprintf "%s failed: %s" name msg;
+            Buffer.add_string steps (Printf.sprintf "  %s: FAILED — %s\n" name msg);
+            Log.Keeper.warn "pr_workflow step %s failed: %s (keeper=%s)" name msg meta.name;
+            None
+        end else None
+      in
+      (* Step 1: Create worktree *)
+      let worktree_path = ref "" in
+      let _s1 = run_step "worktree_create" (fun () ->
+        match Room.worktree_create_r config ~agent_name ~task_id ~base_branch with
+        | Ok msg ->
+          (* Extract worktree path from message *)
+          let wt_dir = Filename.concat root
+            (Printf.sprintf ".worktrees/%s-%s" agent_name task_id) in
+          worktree_path := wt_dir;
+          Ok msg
+        | Error e -> Error (Types.masc_error_to_string e)
+      ) in
+      (* Step 2: Write file *)
+      let _s2 = run_step "file_write" (fun () ->
+        if !worktree_path = "" then Error "no worktree path"
+        else begin
+          let abs_path = Filename.concat !worktree_path file_path in
+          try
+            let dir = Filename.dirname abs_path in
+            Fs_compat.mkdir_p dir;
+            Fs_compat.save_file abs_path file_content;
+            Ok (Printf.sprintf "wrote %d bytes to %s" (String.length file_content) file_path)
+          with exn -> Error (Printexc.to_string exn)
+        end
+      ) in
+      (* Step 3: Git add + commit + push *)
+      let _s3 = run_step "git_commit_push" (fun () ->
+        if !worktree_path = "" then Error "no worktree path"
+        else begin
+          let run_git cmd =
+            let shell = Printf.sprintf "cd %s && git %s 2>&1"
+              (Filename.quote !worktree_path) cmd in
+            Process_eio.run_argv_with_status ~timeout_sec:30.0
+              [ "/bin/zsh"; "-lc"; shell ]
+          in
+          let st_add, out_add = run_git (Printf.sprintf "add %s" (Filename.quote file_path)) in
+          if st_add <> Unix.WEXITED 0 then
+            Error (Printf.sprintf "git add: %s" out_add)
+          else begin
+            let st_commit, out_commit = run_git
+              (Printf.sprintf "commit -m %s" (Filename.quote commit_message)) in
+            if st_commit <> Unix.WEXITED 0 then
+              Error (Printf.sprintf "git commit: %s" out_commit)
+            else begin
+              let st_push, out_push = run_git
+                (Printf.sprintf "push -u origin %s" (Filename.quote branch)) in
+              if st_push <> Unix.WEXITED 0 then
+                Error (Printf.sprintf "git push: %s" out_push)
+              else
+                Ok "committed and pushed"
+            end
+          end
+        end
+      ) in
+      (* Step 4: Create draft PR via gh CLI *)
+      let pr_url = ref "" in
+      let _s4 = run_step "gh_pr_create" (fun () ->
+        let body = if pr_body = "" then pr_title else pr_body in
+        let gh_cmd = Printf.sprintf
+          "cd %s && gh pr create --draft --title %s --body %s --base %s 2>&1"
+          (Filename.quote root) (Filename.quote pr_title) (Filename.quote body)
+          (Filename.quote base_branch) in
+        let st, out =
+          Process_eio.run_argv_with_status ~timeout_sec:30.0
+            [ "/bin/zsh"; "-lc"; gh_cmd ] in
+        if st <> Unix.WEXITED 0 then
+          Error (Printf.sprintf "gh pr create: %s" out)
+        else begin
+          pr_url := String.trim out;
+          Ok (Printf.sprintf "PR created: %s" (String.trim out))
+        end
+      ) in
+      Yojson.Safe.to_string
+        (`Assoc
+          [ "ok", `Bool !step_ok
+          ; "steps", `String (Buffer.contents steps)
+          ; "pr_url", `String !pr_url
+          ; "error", `String !step_error
+          ; "keeper", `String meta.name
+          ])
+;;
+
 let keeper_agent_sender ~(meta : keeper_meta) =
   Printf.sprintf "keeper-%s" (strip_keeper_prefix meta.name)
 
@@ -1094,6 +1232,7 @@ let execute_keeper_tool_call
     | "keeper_voice_session_start"
     | "keeper_voice_session_end" -> handle_keeper_voice_tool ~meta ~name ~args
     | "keeper_github" -> handle_keeper_github ~config ~meta ~args
+    | "keeper_pr_workflow" -> handle_keeper_pr_workflow ~config ~meta ~args
     | "keeper_tasks_list"
     | "keeper_tasks_audit"
     | "keeper_task_force_release"

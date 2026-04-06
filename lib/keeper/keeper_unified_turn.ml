@@ -812,7 +812,8 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
       let side_effect_tools =
         [ "keeper_board_post"; "keeper_board_comment"; "keeper_board_vote";
           "keeper_board_delete";
-          "keeper_bash"; "keeper_fs_edit"; "keeper_github" ]
+          "keeper_bash"; "keeper_fs_edit"; "keeper_github";
+          "keeper_pr_workflow" ]
       in
       let side_effect_observer ~tool_name ~success =
         if success && List.mem tool_name side_effect_tools then

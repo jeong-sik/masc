@@ -265,6 +265,25 @@ Returns gh command output. Example: cmd='pr list --state open'.";
       ]);
     ];
   };
+  {
+    name = "keeper_pr_workflow";
+    description = "One-shot PR pipeline: creates worktree, writes file, commits, pushes, \
+and opens a draft PR. Use this instead of chaining worktree_create + code_write + code_git + \
+keeper_github manually. Requires delivery or coding preset.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("branch", `Assoc [("type", `String "string"); ("description", `String "Branch name for the PR (e.g. fix/changelog-unreleased)")]);
+        ("file_path", `Assoc [("type", `String "string"); ("description", `String "File path to create or overwrite, relative to repo root")]);
+        ("file_content", `Assoc [("type", `String "string"); ("description", `String "Full file content to write")]);
+        ("commit_message", `Assoc [("type", `String "string"); ("description", `String "Git commit message")]);
+        ("pr_title", `Assoc [("type", `String "string"); ("description", `String "PR title")]);
+        ("pr_body", `Assoc [("type", `String "string"); ("description", `String "PR body/description (optional, defaults to pr_title)")]);
+        ("base_branch", `Assoc [("type", `String "string"); ("description", `String "Base branch to target (default: main)")]);
+      ]);
+      ("required", `List [`String "branch"; `String "file_path"; `String "file_content"; `String "commit_message"; `String "pr_title"]);
+    ];
+  };
 ]
 
 let coding_workspace_tool_names : string list =

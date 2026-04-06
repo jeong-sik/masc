@@ -440,6 +440,7 @@ let run_turn
     "keeper_shell_readonly", "명령어 조회 검색 탐색";
     "keeper_bash", "명령어 실행 쉘 빌드 테스트";
     "keeper_github", "깃허브 이슈 풀리퀘스트 PR CI";
+    "keeper_pr_workflow", "PR 생성 워크트리 커밋 푸시 풀리퀘스트 원���";
     "keeper_memory_search", "기억 검색 대화 이전 메시지";
     "keeper_library_search", "라이브러리 지식 문서 검색";
     "keeper_library_read", "라이브러리 문서 읽기 지식";

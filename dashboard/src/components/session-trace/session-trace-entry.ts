@@ -133,7 +133,7 @@ function ResultViewer({ text, hint, isError: isErr }: { text: string; hint: Cont
         <div class="${shouldCollapse ? `max-h-[${RESULT_COLLAPSED_MAX_HEIGHT}px] overflow-hidden relative` : ''}"
              style=${shouldCollapse ? `max-height: ${RESULT_COLLAPSED_MAX_HEIGHT}px` : ''}>
           ${hint === 'diff' ? html`<${DiffBlock} text=${text} />`
-            : hint === 'json' ? html`<${JsonViewerCard} data=${parseJsonLikeData(text)} />`
+            : hint === 'json' ? html`<${JsonViewerCard} title=${titleLabel} data=${parseJsonLikeData(text)} />`
             : html`<pre class="m-0 text-[11px] font-mono ${isErr ? 'text-[var(--bad)]' : 'text-[var(--text-body)]'} p-3 overflow-x-auto whitespace-pre-wrap break-all leading-relaxed">${text}</pre>`}
           ${shouldCollapse ? html`
             <div class="absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t ${isErr ? 'from-[rgba(239,68,68,0.08)]' : 'from-[var(--white-3)]'} to-transparent pointer-events-none"></div>
@@ -165,7 +165,7 @@ function ToolCallDetail({ event }: { event: UnifiedTraceEvent }) {
       ${event.toolArgs ? html`
         <div>
           <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">Args</div>
-          <${JsonViewerCard} data=${parseJsonLikeData(event.toolArgs)} />
+          <${JsonViewerCard} title="Args" data=${parseJsonLikeData(event.toolArgs)} />
         </div>
       ` : null}
       ${resultText ? html`

@@ -229,11 +229,11 @@ function trajectoryEntryToTrace(entry: TrajectoryEntry, index: number): UnifiedT
   }
 
   return {
-    id: `tj-${ts}-${entry.tool_name}-T${entry.turn}R${entry.round}-${index}`,
+    id: `tj-${ts}-${entry.tool_name ?? 'unknown'}-T${entry.turn}R${entry.round ?? 0}-${index}`,
     ts,
     ts_iso: entry.ts_iso,
     kind: 'tool_call',
-    summary: entry.tool_name ?? '',
+    summary: entry.tool_name ?? 'unknown',
     detail: {},
     toolName: entry.tool_name,
     toolArgs: entry.args,

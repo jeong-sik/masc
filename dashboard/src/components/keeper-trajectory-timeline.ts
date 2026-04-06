@@ -68,7 +68,7 @@ export function clearTrajectory(keeperName: string): void {
 function TrajectoryEntryRow({ entry }: { entry: TrajectoryEntry }) {
   const expanded = useSignal(false)
   const gateRejected = entry.gate?.status === 'reject'
-  const cat = toolCategory(entry.tool_name ?? '')
+  const cat = toolCategory(entry.tool_name ?? 'unknown')
   const toggle = () => { expanded.value = !expanded.value }
 
   return html`
@@ -92,9 +92,9 @@ function TrajectoryEntryRow({ entry }: { entry: TrajectoryEntry }) {
         ${'' /* Content */}
         <div class="flex-1 min-w-0">
           <div class="flex items-center gap-2 flex-wrap">
-            <span class="text-xs font-mono font-medium ${cat.color}" title=${entry.tool_name}>${entry.tool_name}</span>
+            <span class="text-xs font-mono font-medium ${cat.color}" title=${entry.tool_name ?? ''}>${entry.tool_name ?? 'unknown'}</span>
             <span class="text-[10px] px-1 py-0.5 rounded bg-[var(--white-5)] text-[var(--text-dim)]">${cat.label}</span>
-            <span class="text-[10px] text-[var(--text-dim)]">T${entry.turn}R${entry.round}</span>
+            <span class="text-[10px] text-[var(--text-dim)]">T${entry.turn}R${entry.round ?? 0}</span>
             ${(entry.cost_usd ?? 0) > 0
               ? html`<span class="text-[10px] px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--accent)]">$${(entry.cost_usd ?? 0).toFixed(4)}</span>`
               : null}
@@ -160,7 +160,7 @@ function TrajectoryEntryRow({ entry }: { entry: TrajectoryEntry }) {
           <div class="flex gap-4 flex-wrap text-[10px] text-[var(--text-dim)]">
             ${(entry.cost_usd ?? 0) > 0 ? html`<span>Cost: $${(entry.cost_usd ?? 0).toFixed(6)}</span>` : null}
             <span>Duration: ${entry.duration_ms ?? 0}ms</span>
-            <span>Turn ${entry.turn}, Round ${entry.round}</span>
+            <span>Turn ${entry.turn}, Round ${entry.round ?? 0}</span>
             <span class="font-mono">${entry.ts_iso ?? new Date(entry.ts * 1000).toISOString()}</span>
           </div>
         </div>

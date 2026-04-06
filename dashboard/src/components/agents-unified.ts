@@ -13,6 +13,7 @@ import { AgentProfile } from './agent-profile'
 import { namespaceTruth } from '../namespace-truth-store'
 import { resolveRuntimeCounts } from '../runtime-counts'
 import { KeeperSpawnPanel } from './keeper-spawn/keeper-spawn-panel'
+import { KeeperFleetOverview } from './keeper-fleet-overview'
 
 type AgentsView = 'all' | 'agents' | 'keepers'
 
@@ -111,6 +112,10 @@ export function AgentsUnified() {
       </details>
 
       ${currentView !== 'agents' ? html`<${KeeperSpawnPanel} />` : null}
+
+      ${currentView !== 'agents' && keepers.value.length > 0 ? html`
+        <${KeeperFleetOverview} keepers=${keepers.value} />
+      ` : null}
 
       <${AgentRoster}
         keeperFilter=${currentView === 'keepers' ? 'keeper-only'

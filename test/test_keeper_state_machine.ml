@@ -132,12 +132,16 @@ let test_derive_failing_turn () =
   check phase_t "turn unhealthy = Failing" SM.Failing (SM.derive_phase c)
 
 let test_derive_priority_stop_over_compact () =
+  (* TLA+ fix: Stopped requires no buffer ops in flight.
+     stop + drain_complete + compaction_active → Draining (not Stopped). *)
   let c = { running_conditions with
     stop_requested = true;
     drain_complete = true;
     compaction_active = true;
   } in
-  check phase_t "Stopped beats Compacting" SM.Stopped (SM.derive_phase c)
+  check phase_t "compaction blocks Stopped → Draining" SM.Draining (SM.derive_phase c);
+  let c2 = { c with compaction_active = false } in
+  check phase_t "no buffer ops → Stopped" SM.Stopped (SM.derive_phase c2)
 
 let test_derive_priority_guardrail_over_paused () =
   let c = { running_conditions with
@@ -906,20 +910,22 @@ let test_chain_restart_inherits_paused () =
 
 (** 13. Restart inherits stop_requested: operator requested stop before crash.
     New fiber should go directly to Draining, not Running. *)
-let test_chain_restart_inherits_stop () =
-  let final_phase, _ = chain_apply
+let test_chain_restart_clears_stop () =
+  (* TLA+ liveness fix: FiberStarted resets stop_requested.
+     Restart = "bring back" contradicts "stop". New fiber starts clean. *)
+  let final_phase, final_conds = chain_apply
     ~init_phase:SM.Running
     ~init_conditions:running_conditions
     [
       SM.Stop_requested,                                       SM.Draining;
       SM.Fiber_terminated { outcome="crash during drain" },    SM.Crashed;
       SM.Supervisor_restart_attempt { attempt=1 },             SM.Restarting;
-      (* Fiber starts but stop_requested persists -> Draining *)
-      SM.Fiber_started,                                        SM.Draining;
-      SM.Drain_complete,                                       SM.Stopped;
+      (* Fiber starts: stop_requested is reset → Running, not Draining *)
+      SM.Fiber_started,                                        SM.Running;
     ]
   in
-  check phase_t "stop persists through crash-restart" SM.Stopped final_phase
+  check phase_t "restart clears stop → Running" SM.Running final_phase;
+  check bool "stop_requested cleared" false final_conds.SM.stop_requested
 
 (** 14. Handoff fails then retries successfully.
     First handoff attempt fails, keeper recovers to Running, second succeeds. *)
@@ -992,16 +998,19 @@ let test_chain_double_failure_recovery () =
     Handoff is in progress when operator requests stop.
     Stop has higher priority -> Draining, handoff abandoned. *)
 let test_chain_stop_during_handoff () =
+  (* TLA+ fix: handoff must finish before Stopped.
+     Drain_complete while handoff_active → stays Draining. *)
   let final_phase, _ = chain_apply
     ~init_phase:SM.Running
     ~init_conditions:running_conditions
     [
       SM.Handoff_started,                                      SM.HandingOff;
       SM.Operator_stop { remove_meta=false },                  SM.Draining;
-      SM.Drain_complete,                                       SM.Stopped;
+      SM.Drain_complete,                                       SM.Draining;
+      SM.Handoff_completed { new_trace_id="t"; generation=2 }, SM.Stopped;
     ]
   in
-  check phase_t "stop overrides handoff" SM.Stopped final_phase
+  check phase_t "handoff completes then Stopped" SM.Stopped final_phase
 
 (** 18. The Phoenix that can't rise: complete lifecycle to Dead,
     verify nothing can revive it. Then verify Stopped is equally terminal. *)
@@ -1225,15 +1234,23 @@ let test_invariant_terminal_absorbing () =
     let mutated = toggle dead_conds field in
     check phase_t "Dead absorbs field toggle" SM.Dead (SM.derive_phase mutated)
   ) non_critical_fields;
-  (* Stopped: toggling non-critical fields should keep Stopped *)
+  (* Stopped: toggling non-critical fields should keep Stopped.
+     TLA+ fix: compaction_active and handoff_active are NOW critical for
+     Stopped — toggling them ON breaks the Stopped condition (→ Draining).
+     This is correct: buffer ops block terminal entry. *)
+  let stopped_non_critical = [`Hb; `Turn; `Ctx; `Hand_need; `Guard] in
   List.iter (fun field ->
     let mutated = toggle stopped_conds field in
-    (* Stopped requires stop_requested=true AND drain_complete=true.
-       Toggling other fields shouldn't break this as long as fiber_alive
-       is still true and restart_budget stays. *)
     let p = SM.derive_phase mutated in
     check phase_t "Stopped absorbs field toggle" SM.Stopped p
-  ) non_critical_fields
+  ) stopped_non_critical;
+  (* Sensitivity: toggling compaction/handoff ON must BREAK Stopped *)
+  let with_comp = toggle stopped_conds `Comp in
+  check phase_t "compaction breaks Stopped → Draining"
+    SM.Draining (SM.derive_phase with_comp);
+  let with_hand = toggle stopped_conds `Hand in
+  check phase_t "handoff breaks Stopped → Draining"
+    SM.Draining (SM.derive_phase with_hand)
 
 (** INV-3: Fiber_started resets are exhaustive.
     After Fiber_started, EVERY per-fiber condition is in its "clean" state.
@@ -1270,9 +1287,11 @@ let test_invariant_fiber_started_reset_exhaustive () =
   check bool "backoff_elapsed reset" false updated.backoff_elapsed;
   check bool "guardrail_triggered reset" false updated.guardrail_triggered;
   check bool "drain_complete reset" false updated.drain_complete;
-  (* Operator-intent conditions MUST be preserved *)
+  (* TLA+ liveness fix: stop_requested is now RESET on Fiber_started.
+     Restart contradicts stop. operator_paused is still preserved. *)
+  check bool "stop_requested reset" false updated.stop_requested;
+  (* Operator-intent conditions that ARE preserved *)
   check bool "operator_paused preserved" true updated.operator_paused;
-  check bool "stop_requested preserved" true updated.stop_requested;
   check bool "restart_budget preserved" true updated.restart_budget_remaining;
   (* Untouched conditions stay as-is *)
   check bool "context_within_budget unchanged" false updated.context_within_budget;
@@ -1351,6 +1370,8 @@ let test_invariant_no_cross_life_buffer_leakage () =
     Once stop_requested=true, it NEVER reverts to false through normal events.
     Only Fiber_started preserves (not clears) it. *)
 let test_invariant_stop_requested_monotonic () =
+  (* TLA+ liveness fix: Fiber_started now resets stop_requested.
+     All OTHER events must preserve it (monotonic within a fiber life). *)
   let events_that_should_not_clear_stop = [
     SM.Heartbeat_ok;
     SM.Heartbeat_failed { consecutive=1; max_allowed=5 };
@@ -1363,7 +1384,7 @@ let test_invariant_stop_requested_monotonic () =
     SM.Operator_pause;
     SM.Operator_resume;
     SM.Guardrail_stop { reason="test" };
-    SM.Fiber_started;
+    (* Fiber_started intentionally OMITTED — it resets stop *)
     SM.Fiber_terminated { outcome="test" };
     SM.Supervisor_restart_attempt { attempt=1 };
     SM.Drain_complete;
@@ -1383,7 +1404,20 @@ let test_invariant_stop_requested_monotonic () =
     in
     check bool (Printf.sprintf "stop persists after %s" (SM.event_to_string ev))
       true updated.stop_requested
-  ) events_that_should_not_clear_stop
+  ) events_that_should_not_clear_stop;
+  (* Fiber_started IS the one event that clears stop_requested *)
+  let restart_conds = { SM.default_conditions with
+    fiber_alive = false;
+    restart_budget_remaining = true;
+    backoff_elapsed = true;
+    stop_requested = true;
+  } in
+  let updated = match SM.apply_event ~current_phase:SM.Restarting
+      ~conditions:restart_conds ~event:SM.Fiber_started ~now:1000.0 with
+    | Ok tr -> tr.updated_conditions
+    | Error e -> fail (SM.transition_error_to_string e)
+  in
+  check bool "Fiber_started clears stop_requested" false updated.stop_requested
 
 (** INV-8: restart_budget_remaining monotonicity.
     Once Restart_budget_exhausted fires, budget is permanently false.
@@ -1509,7 +1543,11 @@ let test_invariant_priority_chain () =
     guardrail_triggered = true;
     drain_complete = true;
   } in
-  check phase_t "all true: Stopped (stop+drain highest)" SM.Stopped (SM.derive_phase all_true);
+  (* TLA+ fix: all_true has compaction+handoff active, so Stopped is blocked → Draining.
+     Clear buffer ops to reach Stopped. *)
+  check phase_t "all true: Draining (buffer ops block Stopped)" SM.Draining (SM.derive_phase all_true);
+  let clean_stopped = { all_true with compaction_active = false; handoff_active = false } in
+  check phase_t "no buffer ops: Stopped" SM.Stopped (SM.derive_phase clean_stopped);
   (* Remove drain_complete: Draining wins *)
   let no_drain = { all_true with drain_complete = false } in
   check phase_t "no drain_complete: Draining" SM.Draining (SM.derive_phase no_drain);
@@ -1633,7 +1671,7 @@ let () =
     ];
     "edge_cases", [
       test_case "restart inherits operator_paused" `Quick test_chain_restart_inherits_paused;
-      test_case "restart inherits stop_requested" `Quick test_chain_restart_inherits_stop;
+      test_case "restart clears stop_requested" `Quick test_chain_restart_clears_stop;
       test_case "handoff fail then retry" `Quick test_chain_handoff_fail_retry;
       test_case "guardrail during compaction" `Quick test_chain_guardrail_during_compaction;
       test_case "double failure (hb+turn) recovery" `Quick test_chain_double_failure_recovery;

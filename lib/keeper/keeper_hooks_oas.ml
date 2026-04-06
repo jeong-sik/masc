@@ -199,7 +199,7 @@ let on_idle_decision_with_threshold ~skip_at ~consecutive_idle_turns
     Agent_sdk.Hooks.Nudge
       (Printf.sprintf
          "FINAL WARNING: you repeated %s %d times. Next idle = turn ends. \
-          Use one of these instead: %s — or SPEECH_ACT: stay_silent."
+          Use one of these instead: %s — or call keeper_stay_silent to do nothing."
          tools_str consecutive_idle_turns alt_str)
   else
     Agent_sdk.Hooks.Nudge

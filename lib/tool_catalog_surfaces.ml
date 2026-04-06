@@ -19,6 +19,7 @@ let keeper_internal_tools =
   [
     (* keeper_read removed: dead alias for keeper_fs_read with no schema.
        Dispatch still accepts it for backward compat. See #4120. *)
+    "keeper_stay_silent";
     "keeper_fs_read";
     "keeper_fs_edit";
     "keeper_memory_search";

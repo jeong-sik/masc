@@ -1594,6 +1594,11 @@ let execute_keeper_tool_call
           | None -> !tool_search_fn
         in
         Yojson.Safe.to_string (fn ~query ~max_results)
+    | "keeper_stay_silent" ->
+      (* No-op tool: lets model explicitly skip a turn under tool_choice=Any.
+         Without this, tool_choice=Any forces the model to call a real tool
+         even when there is nothing to do. *)
+      Yojson.Safe.to_string (`Assoc [ "status", `String "silent" ])
     | "keeper_tools_list" -> keeper_tools_list_json ~meta
     | "keeper_time_now" ->
       Yojson.Safe.to_string

@@ -32,19 +32,20 @@ let keeper_voice_tool_schemas =
     retrieval to free ranking budget.  See #4961. *)
 let core_always_tools =
   [ "keeper_context_status"; "keeper_tools_list";
+    "keeper_stay_silent"; "keeper_tool_search";
     "masc_status"; "masc_heartbeat"; "extend_turns" ]
 
 (** Core tools always visible to the LLM.  All other tools are
-    discoverable on demand via [keeper_tool_search]. *)
+    discoverable on demand via [keeper_tool_search].
+    Kept intentionally small (~15) to improve 9B tool selection
+    accuracy.  Board browse/audit tools moved to discoverable. *)
 let core_discovery_tools =
   core_always_tools @
-  [ "keeper_tool_search";
-    "keeper_broadcast"; "keeper_tasks_list"; "keeper_tasks_audit";
+  [ "keeper_broadcast"; "keeper_tasks_list";
     "keeper_task_claim"; "keeper_task_done";
     "keeper_memory_search"; "keeper_time_now";
     "keeper_fs_read";
-    "keeper_board_get"; "keeper_board_post"; "keeper_board_comment";
-    "keeper_board_list";
+    "keeper_board_get"; "keeper_board_post";
   ]
 
 let effective_core_tools () = core_discovery_tools

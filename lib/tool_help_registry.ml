@@ -122,6 +122,21 @@ let constraints_from_metadata name =
 
 let manual_help_entry name =
   match name with
+  | "keeper_tool_search" ->
+      Some
+        {
+          name;
+          short_description = "Search for additional tools by natural language query.";
+          when_to_use = "Use when your core tools are insufficient for the current task and you need help identifying relevant tools by describing the capability you need.";
+          key_constraints =
+            [
+              "Returns up to 10 matching results per query.";
+            ];
+          details_markdown =
+            "BM25 search over the full tool universe. Returns matching tool names, descriptions, and usage guidance for discovery and selection.";
+          doc_refs = [];
+          prompt_hints = [];
+        }
   | "masc_tool_help" ->
       Some
         {

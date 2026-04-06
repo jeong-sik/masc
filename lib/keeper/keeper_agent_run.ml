@@ -387,7 +387,37 @@ let run_turn
   let agent_name = meta.agent_name in
   let meta_ref = ref meta in
   let agent_ref : Agent_sdk.Agent.t option ref = ref None in
-  let keeper_tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_ref () in
+  (* Session-local search function ref.  Uses the forward-ref pattern:
+     1. Create a placeholder ref before make_tools (search index not yet built).
+     2. Pass it to make_tools so each tool call captures this ref by value.
+     3. After building the search index, update the ref with the real impl.
+     This makes keeper_tool_search session-scoped and race-free: each keeper
+     session owns its own ref; concurrent sessions never touch each other's state. *)
+  let local_search_fn_ref : (query:string -> max_results:int -> Yojson.Safe.t) ref =
+    ref (fun ~query:_ ~max_results:_ -> `Assoc [ ("results", `List []) ])
+  in
+  (* Track current agent turn so Keeper_discovered_tools.add/mark_used
+     use the real turn rather than a constant 0.  Updated at the start of
+     each turn inside before_turn_params. *)
+  let current_turn_ref : int ref = ref 0 in
+  (* Per-session discovered tools: populated by keeper_tool_search,
+     consumed by before_turn_hook in discovery mode.
+     Defined here (before make_tools) so on_tool_called can capture it. *)
+  let decay_turns =
+    match Sys.getenv_opt "MASC_KEEPER_TOOL_DECAY_TURNS" with
+    | Some s -> (try max 1 (int_of_string s) with _ -> 5)
+    | None -> 5
+  in
+  let discovered_ref = ref (Keeper_discovered_tools.create ~decay_turns) in
+  let keeper_tools =
+    Keeper_tools_oas.make_tools ~config ~meta ~ctx_ref
+      ~search_fn:(fun ~query ~max_results -> !local_search_fn_ref ~query ~max_results)
+      ~on_tool_called:(fun name ->
+        if Keeper_exec_tools.tool_discovery_enabled () then
+          Keeper_discovered_tools.mark_used !discovered_ref
+            ~turn:!current_turn_ref ~name)
+      ()
+  in
   let extend_turns_tool = Keeper_extend_turns.make ~agent_ref ~max_turns () in
   let tools = extend_turns_tool :: keeper_tools in
   let tool_usage_before =
@@ -532,13 +562,95 @@ let run_turn
     ) tool_entries
   in
   let tool_index = Agent_sdk.Tool_index.build ~config:tool_index_config scoped_tool_entries in
+  (* Full-universe search index for keeper_tool_search.
+     Separate from the preset-scoped BM25 index used for progressive disclosure:
+     search needs access to ALL tools so the keeper can discover beyond its preset. *)
+  let search_index = Agent_sdk.Tool_index.build ~config:tool_index_config tool_entries in
+  (* Map tool name → OAS schema description for search result enrichment *)
+  let oas_description_map =
+    let tbl = Hashtbl.create (List.length keeper_tools) in
+    List.iter (fun (t : Agent_sdk.Tool.t) ->
+      Hashtbl.replace tbl t.schema.name t.schema.description
+    ) keeper_tools;
+    tbl
+  in
+  (* Wire keeper_tool_search: update session-local ref with the real BM25 impl.
+     Filtering excludes core_always_tools so results are genuinely additional
+     tools beyond what is always visible. *)
+  local_search_fn_ref := (fun ~query ~max_results ->
+    let core = Keeper_exec_tools.core_always_tools in
+    let retrieved = Agent_sdk.Tool_index.retrieve search_index query in
+    (* Pre-filter: exclude core tools, the search tool itself, and
+       policy-denied tools.  Samchon principle: "if you can verify, you
+       converge" — only return tools the keeper can actually call,
+       preventing hallucinated attempts. *)
+    let allowed = Keeper_exec_tools.keeper_allowed_tool_names meta in
+    let allowed_set =
+      let tbl = Hashtbl.create (List.length allowed) in
+      List.iter (fun n -> Hashtbl.replace tbl n ()) allowed; tbl
+    in
+    let new_discoveries =
+      retrieved
+      |> List.filter (fun (name, _) ->
+        not (List.mem name core)
+        && name <> "keeper_tool_search"
+        && Hashtbl.mem allowed_set name)
+      |> List.filteri (fun i _ -> i < max_results)
+    in
+    (* Register discovered tools for discovery-mode before_turn_hook
+       using the actual current turn so decay/visibility stay aligned. *)
+    let discovered_names = List.map fst new_discoveries in
+    Keeper_discovered_tools.add !discovered_ref ~turn:!current_turn_ref ~names:discovered_names;
+    (* Try MASC help_entry (from injected schemas), fall back to OAS description *)
+    let masc_schemas = !Keeper_exec_tools.masc_schemas_ref in
+    let results =
+      List.map (fun (name, score) ->
+        let help_opt = Tool_help_registry.find_entry masc_schemas name in
+        let desc = match help_opt with
+          | Some e -> `String e.short_description
+          | None ->
+            (match Hashtbl.find_opt oas_description_map name with
+             | Some d -> `String d
+             | None -> `Null)
+        in
+        let when_to_use = match help_opt with
+          | Some e -> `String e.when_to_use
+          | None -> `Null
+        in
+        (* Extract required params from MASC schema for immediate usability *)
+        let required_params =
+          match List.find_opt (fun (s : Types.tool_schema) -> s.name = name) masc_schemas with
+          | Some s ->
+            (try
+              let props = Yojson.Safe.Util.(member "required" s.input_schema |> to_list) in
+              `List (List.map (fun j -> j) props)
+            with _ -> `Null)
+          | None -> `Null
+        in
+        `Assoc [
+          ("name", `String name);
+          ("score", `Float score);
+          ("description", desc);
+          ("when_to_use", when_to_use);
+          ("required_params", required_params);
+        ]
+      ) new_discoveries
+    in
+    `Assoc [
+      ("ok", `Bool true);
+      ("query", `String query);
+      ("results", `List results);
+      ("hint", `String "Call any of these tools by name in this or a future turn.");
+    ]
+  );
   (* Visibility measurement (#4961): log universe size vs BM25 scope *)
   if Keeper_types_profile.keeper_debug then
-    Log.Keeper.debug "keeper:%s tool visibility: total=%d preset_scoped=%d bm25_indexed=%d"
+    Log.Keeper.debug "keeper:%s tool visibility: total=%d preset_scoped=%d bm25_indexed=%d search_indexed=%d"
       meta.name
       (List.length tool_entries)
       (List.length preset_scoped_names)
-      (List.length scoped_tool_entries);
+      (List.length scoped_tool_entries)
+      (List.length tool_entries);
   (* Layer 0: Core tools — always visible to the LLM regardless of preset.
      Kept to 5 survival-critical tools (#4961).  Other coordination tools
      (keeper_broadcast, keeper_task_claim, keeper_task_done, keeper_tasks_list,
@@ -641,6 +753,9 @@ let run_turn
     before_turn_params = Some (fun event ->
       match event with
       | Agent_sdk.Hooks.BeforeTurnParams { turn; current_params; messages; _ } ->
+        (* Update current_turn_ref so session-scoped callbacks
+           (keeper_tool_search, on_tool_called) use the correct turn. *)
+        current_turn_ref := turn;
         (* 1. Dynamic context injection *)
         let ctx =
           if String.trim dynamic_context = "" then
@@ -719,13 +834,25 @@ let run_turn
           |> Tool_portal.filter_visible_tool_names portal_ctx
         in
         let selected_tools =
-          prioritized_disclosed_tool_names
-            ~max_tools
-            ~always_include_tools:visible_always_include_tools
-            ~retrieved_names
-            ~fallback_tools:
-              (Tool_portal.filter_visible_tool_names portal_ctx fallback_tools)
-            ~use_fallback
+          if Keeper_exec_tools.tool_discovery_enabled () then
+            (* Discovery mode: core tools + actively discovered tools.
+               No BM25 auto-selection — keeper uses keeper_tool_search
+               explicitly to discover tools on demand. *)
+            let core = Keeper_exec_tools.effective_core_tools () in
+            let discovered =
+              Keeper_discovered_tools.active_names !discovered_ref ~turn
+            in
+            let _ = Keeper_discovered_tools.decay !discovered_ref ~turn in
+            Keeper_types.dedupe_keep_order (core @ discovered)
+            |> Tool_portal.filter_visible_tool_names portal_ctx
+          else
+            prioritized_disclosed_tool_names
+              ~max_tools
+              ~always_include_tools:visible_always_include_tools
+              ~retrieved_names
+              ~fallback_tools:
+                (Tool_portal.filter_visible_tool_names portal_ctx fallback_tools)
+              ~use_fallback
         in
         let all_allowed =
           Agent_sdk.Tool_op.apply

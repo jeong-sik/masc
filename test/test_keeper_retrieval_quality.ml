@@ -357,6 +357,29 @@ let test_index_size () =
     true (size >= 25)
 
 (* ================================================================ *)
+(* Scenarios: keeper_tool_search discovery                          *)
+(* ================================================================ *)
+
+(** Verify keeper_tool_search itself is retrievable (meta-search). *)
+let test_tool_search_self_en () =
+  let idx = build_keeper_index () in
+  ignore (assert_retrieves ~label:"tool_search_self" idx
+    "discover tools by describing what I need" "keeper_tool_search")
+
+(** Full-universe search should find worktree tools even for
+    a minimal-preset keeper. *)
+let test_full_universe_worktree_en () =
+  let idx = build_keeper_index () in
+  ignore (assert_retrieves ~label:"full_worktree" idx
+    "create a git worktree for isolated development" "masc_worktree_create")
+
+(** Auth tools should be discoverable via search. *)
+let test_full_universe_auth_en () =
+  let idx = build_keeper_index () in
+  ignore (assert_retrieves ~label:"full_auth" idx
+    "manage authentication tokens and credentials" "masc_auth_status")
+
+(* ================================================================ *)
 (* Runner                                                           *)
 (* ================================================================ *)
 
@@ -417,6 +440,15 @@ let () =
         [
           Alcotest.test_case "fs_edit ranks higher than bash for file creation" `Quick
             test_prefer_fs_edit_over_bash;
+        ] );
+      ( "tool_search",
+        [
+          Alcotest.test_case "tool_search retrieves keeper_tool_search (en)" `Quick
+            test_tool_search_self_en;
+          Alcotest.test_case "worktree via full-universe search (en)" `Quick
+            test_full_universe_worktree_en;
+          Alcotest.test_case "auth tools via full-universe search (en)" `Quick
+            test_full_universe_auth_en;
         ] );
       ( "stats",
         [

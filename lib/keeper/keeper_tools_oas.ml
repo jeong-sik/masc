@@ -149,6 +149,8 @@ let make_tools
     ~(config : Room.config)
     ~(meta : Keeper_types.keeper_meta)
     ~(ctx_ref : Keeper_types.working_context ref)
+    ?search_fn
+    ?on_tool_called
     ()
   : Agent_sdk.Tool.t list =
   (* Build Tool.t for the full universe so BM25 and Tool_op can
@@ -191,7 +193,8 @@ let make_tools
                 Inference_utils.timed (fun () ->
                   Keeper_exec_tools.execute_keeper_tool_call
                     ~config ~meta ~ctx_work:(!ctx_ref)
-                    ~name:td.name ~input)
+                    ?search_fn
+                    ~name:td.name ~input ())
               in
               let is_failure = keeper_tool_result_is_failure result in
               if is_failure then begin
@@ -212,6 +215,8 @@ let make_tools
                 Hashtbl.remove failure_counts key;
                 Keeper_registry.record_tool_use ~base_path:config.base_path meta.name ~tool_name:td.name ~success:true;
                 !Keeper_exec_tools.on_keeper_tool_call ~tool_name:td.name ~success:true ~duration_ms;
+                (* Notify session callback (e.g., mark_used for discovered tools) *)
+                (match on_tool_called with Some f -> f td.name | None -> ());
                 (* PR#814 Gap 1: Capture git status delta after successful tool execution.
                    If the working tree changed, log it so the keeper is aware of
                    file-system side effects from its tool calls. *)

@@ -29,6 +29,16 @@ let on_keeper_tool_call
   ref (fun ~tool_name:_ ~success:_ ~duration_ms:_ -> ())
 ;;
 
+(** Callback for keeper_tool_search.  Process-global fallback; prefer
+    passing [~search_fn] directly to [execute_keeper_tool_call] for
+    session-scoped, race-free search.  Default: returns empty results. *)
+let tool_search_fn
+  : (query:string -> max_results:int -> Yojson.Safe.t) ref
+  =
+  ref (fun ~query:_ ~max_results:_ ->
+    `Assoc [ ("results", `List []) ])
+;;
+
 (** Tag-based dispatch callback for masc_* tools.
     Set at server initialization to Keeper_tag_dispatch.dispatch.
     Breaks the dependency cycle: keeper_exec_tools cannot import Tool_*
@@ -945,8 +955,10 @@ let execute_keeper_tool_call
       ~(config : Room.config)
       ~(meta : keeper_meta)
       ~(ctx_work : working_context)
+      ?search_fn
       ~(name : string)
       ~(input : Yojson.Safe.t)
+      ()
   : string
   =
   let args = input in
@@ -958,6 +970,21 @@ let execute_keeper_tool_call
       (`Assoc [ "error", `String "tool_not_allowed"; "tool", `String name ])
   else (
     match name with
+    | "keeper_tool_search" ->
+      let query =
+        Safe_ops.json_string ~default:"" "query" args |> String.trim
+      in
+      let max_results =
+        min 10 (max 1 (Safe_ops.json_int ~default:5 "max_results" args))
+      in
+      if query = "" then
+        error_json "query is required"
+      else
+        let fn = match search_fn with
+          | Some f -> f
+          | None -> !tool_search_fn
+        in
+        Yojson.Safe.to_string (fn ~query ~max_results)
     | "keeper_tools_list" -> keeper_tools_list_json ~meta
     | "keeper_time_now" ->
       Yojson.Safe.to_string
@@ -1005,8 +1032,48 @@ let execute_keeper_tool_call
     | name when String.starts_with ~prefix:"masc_" name ->
       handle_keeper_masc_tool ~config ~meta ~name ~args
     | other ->
-      Yojson.Safe.to_string
-        (`Assoc [ "error", `String "unknown_tool"; "tool", `String other ]))
+      (* Hallucination recovery: suggest similar tools via fuzzy match *)
+      let suggestion =
+        let candidates = keeper_allowed_tool_names meta in
+        let scored =
+          candidates
+          |> List.filter_map (fun c ->
+            if String.length c > 2 && String.length other > 2 then
+              (* Simple substring containment as fast heuristic *)
+              let other_lower = String.lowercase_ascii other in
+              let c_lower = String.lowercase_ascii c in
+              let contains haystack needle =
+                let nlen = String.length needle in
+                let hlen = String.length haystack in
+                if nlen = 0 then true
+                else if nlen > hlen then false
+                else
+                  let found = ref false in
+                  for i = 0 to hlen - nlen do
+                    if not !found
+                       && String.sub haystack i nlen = needle
+                    then found := true
+                  done;
+                  !found
+              in
+              if contains c_lower other_lower
+                 || contains other_lower c_lower
+              then Some c
+              else None
+            else None)
+          |> List.filteri (fun i _ -> i < 3)
+        in
+        scored
+      in
+      let fields =
+        [ ("error", `String "unknown_tool"); ("tool", `String other) ]
+        @ (match suggestion with
+           | [] -> [("hint", `String "Use keeper_tool_search to find available tools.")]
+           | names ->
+             [ ("did_you_mean", `List (List.map (fun n -> `String n) names));
+               ("hint", `String "Use keeper_tool_search to discover tools by description.") ])
+      in
+      Yojson.Safe.to_string (`Assoc fields))
 ;;
 
 (* keeper_tool_loop_system_prompt and keeper_tool_followup_prompt removed:

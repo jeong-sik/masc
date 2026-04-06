@@ -554,15 +554,16 @@ let keeper_unified_temperature () : float =
     ~max_v:2.0
 
 (** Max output tokens for unified keeper turns.
-    131072 removes the MASC-side bottleneck; the effective ceiling is
-    determined by the model's context window and output token limit
-    (provider-dependent — verify against the active model before raising above
-    the default).  Override via [MASC_KEEPER_UNIFIED_MAX_TOKENS].
-    Env: [MASC_KEEPER_UNIFIED_MAX_TOKENS]. Default: 131072. *)
+    16384 accommodates BDI headers (~500), STATE blocks (~300), multi-tool
+    reasoning (~4000), and chain-of-thought (~8000) with headroom.
+    131072 caused llama-server slot stalls when 4+ keepers requested
+    simultaneously (total reservation exceeded KV cache budget).
+    Override via [MASC_KEEPER_UNIFIED_MAX_TOKENS].
+    Env: [MASC_KEEPER_UNIFIED_MAX_TOKENS]. Default: 16384. *)
 let keeper_unified_max_tokens () : int =
   int_of_env_default
     "MASC_KEEPER_UNIFIED_MAX_TOKENS"
-    ~default:131072
+    ~default:16384
     ~min_v:256
     ~max_v:262144
 

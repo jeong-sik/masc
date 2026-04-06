@@ -2016,6 +2016,14 @@ let () =
             check bool "refused" true
               (UT.is_transient_network_error
                  "Eio.Io Net Connection refused"));
+          test_case "503 loading model detected" `Quick (fun () ->
+            check bool "503 loading" true
+              (UT.is_transient_network_error
+                 {|HTTP 503: {"error":{"message":"Loading model","type":"unavailable_error","code":503}}|}));
+          test_case "503 service unavailable detected" `Quick (fun () ->
+            check bool "503 plain" true
+              (UT.is_transient_network_error
+                 "Network error: All models failed: HTTP 503: Service Unavailable"));
           test_case "auth error not transient" `Quick (fun () ->
             check bool "auth 401" false
               (UT.is_transient_network_error

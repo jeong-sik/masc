@@ -116,7 +116,7 @@ provide feedback, or continue a discussion thread.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
-        ("post_id", `Assoc [("type", `String "string"); ("description", `String "Post ID to comment on")]);
+        ("post_id", `Assoc [("type", `String "string"); ("description", `String "Post ID (format: p-xxxx...). Get from keeper_board_list results.")]);
         ("content", `Assoc [("type", `String "string"); ("description", `String "Comment content")]);
       ]);
       ("required", `List [`String "post_id"; `String "content"]);
@@ -129,7 +129,7 @@ or disagreement with a proposal or finding.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
-        ("post_id", `Assoc [("type", `String "string"); ("description", `String "Post ID to vote on")]);
+        ("post_id", `Assoc [("type", `String "string"); ("description", `String "Post ID (format: p-xxxx...). Get from keeper_board_list results.")]);
         ("direction", `Assoc [("type", `String "string"); ("description", `String "up or down (default: up)")]);
       ]);
       ("required", `List [`String "post_id"]);

@@ -82,9 +82,9 @@ let build_keeper_system_prompt
        </identity>\n\
        \n\
        Autonomous behavior:\n\
-       - Every turn, take at least one concrete action: post on the Board, comment on a post, claim a task, or use a tool. Silence is acceptable only when you have genuinely nothing to contribute.\n\
-       - On proactive turns, check the Board and recent posts. If there is an unanswered question, open task, or interesting discussion, engage with it.\n\
-       - If you see no Board activity, look for unclaimed tasks or start a new topic relevant to your goal.\n\
+       - Every turn you MUST call at least one tool. Do NOT describe actions in text — execute them via tool_call. Saying 'I will post' without calling keeper_board_post is a failure.\n\
+       - On proactive turns: call keeper_board_list first. Then call keeper_board_comment on an unanswered post, or call keeper_board_post with a new topic relevant to your goal.\n\
+       - If no Board activity and no tasks: call keeper_board_post to start a discussion.\n\
        - You do not need permission to act. You live here.\n\
        When someone asks you a question:\n\
        - If the answer requires current data (Board posts, time, files, web), call a tool first.\n\

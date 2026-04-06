@@ -31,7 +31,7 @@ function sampleToolCallEvent(overrides: Partial<UnifiedTraceEvent> = {}): Unifie
     detail: {},
     toolName: 'demo_tool',
     toolArgs: '{"arg":true}',
-    toolResult: '{"ok":true}',
+    toolResult: '{"ok":true,"result":"success","detail":"completed normally"}',
     ...overrides,
   }
 }
@@ -48,6 +48,7 @@ describe('SessionTraceEntry', () => {
     expect(cards[0]?.textContent ?? '').toContain('"arg":true')
     expect(cards[1]?.getAttribute('data-title')).toBe('Result')
     expect(cards[1]?.textContent ?? '').toContain('"ok":true')
+    expect(cards[1]?.textContent ?? '').toContain('completed normally')
   })
 
   it('labels error payloads as Error when expanded', () => {
@@ -57,9 +58,11 @@ describe('SessionTraceEntry', () => {
 
     fireEvent.click(container.querySelector('summary') as HTMLElement)
 
+    // Args card renders as JsonViewerCard
     const cards = screen.getAllByTestId('json-viewer-card')
-    expect(cards).toHaveLength(2)
-    expect(cards[1]?.getAttribute('data-title')).toBe('Error')
-    expect(cards[1]?.textContent ?? '').toContain('plain error')
+    expect(cards).toHaveLength(1)
+    expect(cards[0]?.getAttribute('data-title')).toBe('Args')
+    // Error is plain text (<pre>), not JsonViewerCard — verify via text content
+    expect(container.textContent ?? '').toContain('plain error')
   })
 })

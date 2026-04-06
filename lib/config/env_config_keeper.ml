@@ -229,6 +229,37 @@ module KeeperKeepalive = struct
   let jitter_factor =
     Float.max 0.0 (Float.min 0.5
       (get_float ~default:0.2 "MASC_KEEPER_HEARTBEAT_JITTER_FACTOR"))
+
+  (** {2 Idle Turn Constants}
+
+      These are intentionally NOT configurable via env vars.
+      Each value has a specific rationale tied to the keeper architecture:
+      - Keepers retry every ~30s (heartbeat interval), so a skipped turn
+        is not permanent — only the current Agent.run() ends.
+      - Each idle iteration burns 5K-30K tokens on the local 9B model.
+      - Nudge effectiveness degrades after 1-2 attempts; more nudges
+        just waste tokens without changing behavior.
+
+      Change these only with measured data (idle frequency + nudge
+      response rate from keeper decision logs). *)
+
+  (** Max idle turns for scheduled autonomous keeper turns.
+      Rationale: autonomous turns are speculative (no trigger event).
+      5 iterations × ~5K tokens = ~25K token budget before giving up.
+      The next heartbeat cycle (30s) will try again with fresh context. *)
+  let max_idle_turns_autonomous = 5
+
+  (** Max idle turns for reactive (board/mention triggered) keeper turns.
+      Rationale: reactive turns have an explicit trigger, so the keeper
+      has more reason to persist. 8 iterations before skip. *)
+  let max_idle_turns_reactive = 8
+
+  (** Consecutive idle tool repetitions before on_idle hook issues Skip.
+      Below this: graduated Nudge messages.
+      Rationale: 1st nudge has ~50% behavior change (estimated from
+      OAS idle hook design). 2nd nudge catches stragglers. 3rd is
+      the hard stop. Total: 3 chances before ending the turn. *)
+  let idle_skip_threshold = 3
 end
 
 (** {1 gRPC Heartbeat Reconnect} *)

@@ -139,20 +139,38 @@ let emit_cost_event
     @param trajectory_acc Optional trajectory accumulator for cost attribution *)
 
 (** Pure decision logic for the on_idle hook.  Testable without Room.config.
-    Returns Nudge on first idle turn (resets idle counter in OAS), Skip on 2+. *)
+
+    Graduated response (idle_skip_threshold = 3):
+    - idle 1: gentle nudge — suggest alternatives
+    - idle 2: final warning — explicit tool names to try
+    - idle 3+: Skip — end this turn. Heartbeat retries in ~30s.
+
+    Skip is not death. The keeper's heartbeat loop will schedule a new
+    turn on the next cycle with fresh context. The key insight is that
+    burning more tokens on a stuck LLM is worse than retrying later. *)
 let on_idle_decision ~consecutive_idle_turns ~tool_names : Agent_sdk.Hooks.hook_decision =
   let tools_str = match tool_names with
     | [] -> "<none>"
     | names -> String.concat ", " names
   in
-  if consecutive_idle_turns >= 2 then
+  let skip_at = Env_config_keeper.KeeperKeepalive.idle_skip_threshold in
+  if consecutive_idle_turns >= skip_at then
     Agent_sdk.Hooks.Skip
-  else
+  else if consecutive_idle_turns = skip_at - 1 then
+    (* Final warning before skip *)
     Agent_sdk.Hooks.Nudge
       (Printf.sprintf
-         "You have been repeating the same tools (%s) without making progress. \
-          Try a genuinely different approach: post findings to the board, \
-          claim a different task, or end your turn silently."
+         "FINAL WARNING: you repeated %s %d times. Next idle = turn ends. \
+          Do one of: (1) keeper_board_post a finding, (2) keeper_board_comment on a post, \
+          (3) keeper_tool_search to find tools, or (4) SPEECH_ACT: stay_silent."
+         tools_str consecutive_idle_turns)
+  else
+    (* First nudge *)
+    Agent_sdk.Hooks.Nudge
+      (Printf.sprintf
+         "You are repeating %s without progress. \
+          Try a different tool: post to the board, search for tools with \
+          keeper_tool_search, claim a task, or stay_silent."
          tools_str)
 
 let make_hooks

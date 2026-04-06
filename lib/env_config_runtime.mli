@@ -142,8 +142,6 @@ end
 
 module Cdal : sig
   val enabled : unit -> bool
-  val risk_enforcement_enabled : unit -> bool
-  val proof_aggregation_enabled : unit -> bool
 end
 
 module Board : sig

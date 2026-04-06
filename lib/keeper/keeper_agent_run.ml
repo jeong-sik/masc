@@ -387,6 +387,30 @@ let run_turn
     | None -> 5
   in
   let discovered_ref = ref (Keeper_discovered_tools.create ~decay_turns) in
+  (* L1 Tool Affinity: pre-populate discovered tools from trajectory history.
+     Solves the 9B text_response trap by making proven tools visible at
+     turn 0 without requiring keeper_tool_search first.  #5566 *)
+  let affinity_k = Keeper_tool_affinity.configured_max_k () in
+  let _affinity_entries =
+    if affinity_k > 0 then begin
+      let masc_root = Filename.concat config.base_path ".masc" in
+      let allowed = Keeper_tool_policy.keeper_allowed_tool_names meta in
+      let core = Keeper_tool_registry.core_discovery_tools in
+      let entries =
+        Keeper_tool_affinity.pre_populate_from_history
+          ~masc_root ~keeper_name:meta.name
+          ~allowed_tool_names:allowed ~core_tool_names:core
+          ~discovered:!discovered_ref ~max_k:affinity_k
+      in
+      if entries <> [] then
+        Log.Keeper.info "keeper:%s affinity pre-populated %d tools: [%s]"
+          meta.name (List.length entries)
+          (String.concat ", "
+             (List.map (fun (e : Keeper_tool_affinity.affinity_entry) ->
+                Printf.sprintf "%s(%.1f)" e.tool_name e.score) entries));
+      entries
+    end else []
+  in
   let keeper_tools =
     Keeper_tools_oas.make_tools ~config ~meta ~ctx_snapshot
       ~search_fn:(fun ~query ~max_results -> !local_search_fn_ref ~query ~max_results)
@@ -917,6 +941,19 @@ let run_turn
             all_allowed
         in
         let tool_filter = Agent_sdk.Guardrails.AllowList all_allowed in
+        (* L2: Force tool calling on autonomous turn 0.
+           tool_choice=Any is deterministic — the API parser enforces tool call
+           format.  Prompt-level "MUST call a tool" is non-deterministic and
+           unreliable for 9B models.  See #5566. *)
+        let tool_choice =
+          let is_autonomous = history_user_source = "world_state_prompt" in
+          if is_autonomous && turn = 0 && List.length all_allowed > 0 then begin
+            Log.Keeper.info "keeper:%s L2 tool_choice=Any on autonomous turn 0"
+              meta.name;
+            Some Agent_sdk.Types.Any
+          end else
+            current_params.tool_choice
+        in
         (* Yield after CPU-bound tool filtering to let HTTP handlers run.
            Without this, N concurrent keeper fibers starve the Eio scheduler
            during turn setup (tool list construction + prompt building). *)
@@ -924,6 +961,7 @@ let run_turn
         Agent_sdk.Hooks.AdjustParams
           { current_params with
             extra_system_context = ctx;
+            tool_choice;
             tool_filter_override = Some tool_filter }
       | _ -> Agent_sdk.Hooks.Continue)
   } in

@@ -69,13 +69,13 @@ function taskColor(type: string): string {
 type ContentHint = 'plain' | 'code' | 'diff' | 'json'
 
 function detectContentHint(text: string): ContentHint {
-  if (!text || text.length < 10) return 'plain'
+  if (!text || text.length < 5) return 'plain'
   const trimmed = text.trimStart()
   // Diff detection: unified diff markers
   if (trimmed.startsWith('@@') || trimmed.startsWith('---') || trimmed.startsWith('+++')
     || /^[-+] /m.test(trimmed.slice(0, 500))) return 'diff'
   // JSON detection
-  if ((trimmed.startsWith('{') || trimmed.startsWith('[')) && trimmed.length > 20) {
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
     try { JSON.parse(trimmed); return 'json' } catch { /* not json */ }
   }
   // Code detection: indentation patterns or common code markers

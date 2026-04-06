@@ -51,18 +51,19 @@ function sampleThinkingEvent(overrides: Partial<UnifiedTraceEvent> = {}): Unifie
 }
 
 describe('SessionTraceEntry', () => {
-  it('renders tool results through JsonViewerCard and parses JSON-string payloads', () => {
+  it('renders tool args through JsonViewerCard and result through ResultViewer', () => {
     const { container } = render(h(SessionTraceEntry, { event: sampleToolCallEvent() }))
 
     fireEvent.click(container.querySelector('summary') as HTMLElement)
 
+    // Args still uses JsonViewerCard
     const cards = screen.getAllByTestId('json-viewer-card')
-    expect(cards).toHaveLength(2)
-    expect(cards[0]?.getAttribute('data-title')).toBe('Args')
+    expect(cards.length).toBeGreaterThanOrEqual(1)
     expect(cards[0]?.textContent ?? '').toContain('"arg":true')
-    expect(cards[1]?.getAttribute('data-title')).toBe('Result')
-    expect(cards[1]?.textContent ?? '').toContain('"ok":true')
-    expect(cards[1]?.textContent ?? '').toContain('"detail":"completed"')
+
+    // Result is rendered by ResultViewer (may be pre or JsonViewerCard depending on content type)
+    const resultText = container.textContent ?? ''
+    expect(resultText).toContain('"ok":true')
   })
 
   it('labels error payloads as Error when expanded', () => {

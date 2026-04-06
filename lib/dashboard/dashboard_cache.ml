@@ -103,6 +103,15 @@ let stale_factor =
     "MASC_DASHBOARD_STALE_FACTOR"
     ~default:3.0 ~min_v:1.0 ~max_v:10.0
 
+(** Backoff multiplier for stale_grace on bg-revalidation failure.
+    Extends the stale window to reduce retry pressure when compute
+    repeatedly fails.  Default 2.0 means the second attempt waits
+    twice the normal stale_grace before retrying.  #5402 *)
+let bg_revalidate_backoff_factor =
+  Dashboard_http_helpers.float_of_env_default
+    "MASC_DASHBOARD_BG_REVALIDATE_BACKOFF"
+    ~default:2.0 ~min_v:1.0 ~max_v:10.0
+
 exception Compute_timeout of string * bool
 
 (** Maximum seconds a waiter will poll for a [Computing] slot before evicting
@@ -232,12 +241,16 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
           Eio.Mutex.use_rw ~protect:true mu (fun () ->
             match Hashtbl.find_opt table key with
             | Some (Computing { cond = c; _ }) when c == cond ->
-              (* Restore stale entry so next request can still serve it *)
+              (* Restore stale entry with extended grace to reduce retry
+                 pressure.  Without backoff, every request within the
+                 original stale_grace triggers another failing compute.
+                 #5402 *)
               let ts = now () in
+              let backoff_grace = stale_grace *. bg_revalidate_backoff_factor in
               Hashtbl.replace table key
                 (Ready { value = stale_value;
                          expires_at = ts;
-                         stale_until = ts +. stale_grace })
+                         stale_until = ts +. backoff_grace })
             | _ -> ());
           Eio.Condition.broadcast cond
       in

@@ -37,6 +37,11 @@ Execution loop:
 4. Run `masc_cleanup_zombies` when stale automation agents are present.
 5. Broadcast a one-line summary only when action was taken or cleanup was blocked by ambiguity.
 
+Anti-echo rules:
+- Do NOT comment on a post you already commented on in this turn.
+- If you see your own name in the last 3 comments of a post, skip it.
+- Maximum 1 comment per post per turn. Move on after commenting once.
+
 Tone: terse, operational, no speeches.
 """
 

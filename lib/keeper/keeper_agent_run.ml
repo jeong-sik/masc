@@ -582,14 +582,19 @@ let run_turn
       let tbl = Hashtbl.create (List.length allowed) in
       List.iter (fun n -> Hashtbl.replace tbl n ()) allowed; tbl
     in
-    let new_discoveries =
+    let raw_hit_count = List.length retrieved in
+    let after_core_filter =
       retrieved
       |> List.filter (fun (name, _) ->
         not (List.mem name core)
-        && name <> "keeper_tool_search"
-        && Hashtbl.mem allowed_set name)
+        && name <> "keeper_tool_search")
+    in
+    let new_discoveries =
+      after_core_filter
+      |> List.filter (fun (name, _) -> Hashtbl.mem allowed_set name)
       |> List.filteri (fun i _ -> i < max_results)
     in
+    let filtered_by_policy = List.length after_core_filter - List.length new_discoveries in
     (* Register discovered tools for discovery-mode before_turn_hook
        using the actual current turn so decay/visibility stay aligned. *)
     let discovered_names = List.map fst new_discoveries in
@@ -627,11 +632,26 @@ let run_turn
         ]
       ) new_discoveries
     in
+    let hint = match results with
+      | [] when raw_hit_count = 0 ->
+        "No tools match this query. Try different keywords (e.g., 'worktree', 'board', 'github')."
+      | [] when filtered_by_policy > 0 ->
+        Printf.sprintf "Found %d matches but all filtered (already visible or policy-denied). Your current tools may already cover this need." filtered_by_policy
+      | [] ->
+        Printf.sprintf "Found %d raw BM25 hits but all are already in your core tool set." raw_hit_count
+      | _ -> "Call any of these tools by name in this or a future turn."
+    in
     `Assoc [
       ("ok", `Bool true);
       ("query", `String query);
       ("results", `List results);
-      ("hint", `String "Call any of these tools by name in this or a future turn.");
+      ("result_count", `Int (List.length results));
+      ("diagnostics", `Assoc [
+        ("raw_bm25_hits", `Int raw_hit_count);
+        ("filtered_by_core", `Int (raw_hit_count - List.length after_core_filter));
+        ("filtered_by_policy", `Int filtered_by_policy);
+      ]);
+      ("hint", `String hint);
     ]
   );
   (* Visibility measurement (#4961): log universe size vs BM25 scope *)

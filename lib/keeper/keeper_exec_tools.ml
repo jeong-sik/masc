@@ -638,15 +638,42 @@ let keeper_memory_search_json
   let query = Safe_ops.json_string ~default:"" "query" args |> String.trim in
   let limit = max 1 (min 8 (Safe_ops.json_int ~default:5 "limit" args)) in
   (* Cross-generation search: merge current checkpoint messages with
-     persisted history.jsonl.  Checkpoint messages are prioritized;
-     history provides recall across earlier generations. *)
-  let history_path = keeper_history_path config meta.runtime.trace_id in
+     persisted history.jsonl from current AND previous generations.
+     trace_history contains trace_ids from earlier generations,
+     accumulated by keeper_rollover on each handoff. *)
+  let current_history =
+    load_history_user_messages
+      ~path:(keeper_history_path config meta.runtime.trace_id)
+      ~max_n:50
+  in
+  let prev_history =
+    meta.runtime.trace_history
+    |> List.concat_map (fun old_trace_id ->
+         load_history_user_messages
+           ~path:(keeper_history_path config old_trace_id)
+           ~max_n:20)
+  in
+  (* Checkpoint messages first (most recent), then current session
+     history, then previous generations.  Deduplicate by first 100 chars. *)
+  let checkpoint_user_msgs =
+    recent_user_messages ctx_work.messages ~max_n:100
+  in
+  let seen : (string, unit) Hashtbl.t = Hashtbl.create 64 in
+  let key_of s =
+    let len = min 100 (String.length s) in
+    String.sub s 0 len
+  in
+  List.iter (fun s -> Hashtbl.replace seen (key_of s) ()) checkpoint_user_msgs;
+  let dedup lst =
+    List.filter (fun s ->
+      let k = key_of s in
+      if Hashtbl.mem seen k then false
+      else (Hashtbl.replace seen k (); true)) lst
+  in
   let all_candidates =
-    recall_candidates_with_history
-      ~checkpoint_messages:ctx_work.messages
-      ~history_path
-      ~max_checkpoint:100
-      ~max_history:50
+    checkpoint_user_msgs
+    @ dedup current_history
+    @ dedup prev_history
   in
   let matches =
     all_candidates

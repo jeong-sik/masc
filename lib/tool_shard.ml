@@ -214,7 +214,7 @@ For searching across multiple files, use keeper_shell_readonly with op=rg instea
   };
   {
     name = "keeper_fs_edit";
-    description = "Write or append content to a file by path. Use to create new files or update \
+    description = "Write or append to a file in the project. Use to create new files or update \
 existing ones. For small targeted edits prefer this over keeper_bash with echo/cat. \
 Mode 'overwrite' replaces the entire file; 'append' adds to the end.";
     input_schema = `Assoc [

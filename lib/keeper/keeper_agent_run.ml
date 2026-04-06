@@ -562,9 +562,10 @@ let run_turn
     ) tool_entries
   in
   let tool_index = Agent_sdk.Tool_index.build ~config:tool_index_config scoped_tool_entries in
-  (* Full-universe search index for keeper_tool_search.
-     Separate from the preset-scoped BM25 index used for progressive disclosure:
-     search needs access to ALL tools so the keeper can discover beyond its preset. *)
+  (* Broad search index for keeper_tool_search.
+     Built from all registered tool entries (not just preset-scoped),
+     but search results are post-filtered to keeper_allowed_tool_names
+     so the keeper only sees tools it is actually permitted to call. *)
   let search_index = Agent_sdk.Tool_index.build ~config:tool_index_config tool_entries in
   (* Map tool name → OAS schema description for search result enrichment *)
   let oas_description_map =
@@ -575,10 +576,10 @@ let run_turn
     tbl
   in
   (* Wire keeper_tool_search: update session-local ref with the real BM25 impl.
-     Filtering excludes core_always_tools so results are genuinely additional
-     tools beyond what is always visible. *)
+     Filtering excludes already-visible tools (core_discovery_tools in discovery
+     mode, core_always_tools otherwise) so results are genuinely additional. *)
   local_search_fn_ref := (fun ~query ~max_results ->
-    let core = Keeper_exec_tools.core_always_tools in
+    let core = Keeper_exec_tools.effective_core_tools () in
     let retrieved = Agent_sdk.Tool_index.retrieve search_index query in
     (* Pre-filter: exclude core tools, the search tool itself, and
        policy-denied tools.  Samchon principle: "if you can verify, you

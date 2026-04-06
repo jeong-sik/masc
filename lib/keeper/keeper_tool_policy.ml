@@ -395,14 +395,24 @@ let keeper_universe_model_tools (meta : keeper_meta) : Types.tool_schema list =
 (* ── Tool description lookup (for prompt auto-hints) ─────────── *)
 
 (** Extract the first sentence from a tool description.
-    Truncates at the first period+space or 80 chars, whichever is shorter. *)
+    Truncates at the first period followed by space/newline/end, or 150 chars,
+    whichever is shorter. 150 chars preserves op enums and parameter hints
+    that 9B models need to call tools correctly on the first attempt. *)
 let first_sentence desc =
-  let max_len = 80 in
+  let max_len = 150 in
   let len = String.length desc in
   let cutoff =
-    match String.index_opt desc '.' with
-    | Some i when i < max_len -> i + 1
-    | _ -> min len max_len
+    (* Find first '.' followed by space, newline, or end-of-string *)
+    let rec find_stop i =
+      if i >= len then len
+      else if desc.[i] = '.' then
+        if i + 1 >= len then i + 1  (* period at end *)
+        else if desc.[i + 1] = ' ' || desc.[i + 1] = '\n' then i + 1
+        else find_stop (i + 1)
+      else find_stop (i + 1)
+    in
+    let sentence_end = find_stop 0 in
+    min sentence_end max_len
   in
   let s = String.sub desc 0 cutoff in
   if cutoff < len then String.trim s else s

@@ -64,9 +64,9 @@ Use source='history' for raw user message history, source='all' for both.";
       ("type", `String "object");
       ("properties", `Assoc [
         ("query", `Assoc [("type", `String "string"); ("description", `String "keyword to search for")]);
-        ("kind", `Assoc [("type", `String "string"); ("description", `String "filter by memory kind: goal, decision, progress, next, open_question, constraints")]);
+        ("kind", `Assoc [("type", `String "string"); ("enum", `List [`String "goal"; `String "decision"; `String "progress"; `String "next"; `String "open_question"; `String "constraints"]); ("description", `String "Filter by memory kind")]);
         ("limit", `Assoc [("type", `String "integer"); ("description", `String "max results (1-10, default 5)")]);
-        ("source", `Assoc [("type", `String "string"); ("description", `String "memory (default, structured notes), history (raw messages), or all")]);
+        ("source", `Assoc [("type", `String "string"); ("enum", `List [`String "memory"; `String "history"; `String "all"]); ("description", `String "Search scope: memory (default, structured notes), history (raw messages), or all")]);
       ]);
       ("required", `List [`String "query"]);
     ];
@@ -124,7 +124,7 @@ and content preview for each post.";
       ("properties", `Assoc [
         ("hearth", `Assoc [("type", `String "string"); ("description", `String "Filter by topic channel (e.g. code-review, research)")]);
         ("limit", `Assoc [("type", `String "integer"); ("description", `String "Max posts to return (default: 20, max: 50)")]);
-        ("sort_by", `Assoc [("type", `String "string"); ("description", `String "Sort: recent (newest), hot (score+recency), updated (most active)")]);
+        ("sort_by", `Assoc [("type", `String "string"); ("enum", `List [`String "recent"; `String "hot"; `String "updated"]); ("description", `String "Sort order (default: recent)")]);
       ]);
     ];
   };
@@ -149,7 +149,7 @@ or disagreement with a proposal or finding.";
       ("type", `String "object");
       ("properties", `Assoc [
         ("post_id", `Assoc [("type", `String "string"); ("description", `String "Post ID (format: p-xxxx...). Get from keeper_board_list results.")]);
-        ("direction", `Assoc [("type", `String "string"); ("description", `String "up or down (default: up)")]);
+        ("direction", `Assoc [("type", `String "string"); ("enum", `List [`String "up"; `String "down"]); ("description", `String "Vote direction (default: up)")]);
       ]);
       ("required", `List [`String "post_id"]);
     ];
@@ -224,7 +224,7 @@ Mode 'overwrite' replaces the entire file; 'append' adds to the end.";
       ("properties", `Assoc [
         ("path", `Assoc [("type", `String "string"); ("description", `String "Relative or absolute file path to write")]);
         ("content", `Assoc [("type", `String "string"); ("description", `String "File content to write")]);
-        ("mode", `Assoc [("type", `String "string"); ("description", `String "Write mode: 'overwrite' (default) or 'append'")]);
+        ("mode", `Assoc [("type", `String "string"); ("enum", `List [`String "overwrite"; `String "append"]); ("description", `String "Write mode (default: overwrite)")]);
       ]);
       ("required", `List [`String "path"; `String "content"]);
     ];
@@ -242,7 +242,7 @@ git_log/git_diff for repo history, bash for curl/jq/env/which.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
-        ("op", `Assoc [("type", `String "string"); ("description", `String "One of: pwd, ls, cat, rg, git_status, find, head, tail, wc, tree, git_log, git_diff, bash")]);
+        ("op", `Assoc [("type", `String "string"); ("enum", `List [`String "pwd"; `String "ls"; `String "cat"; `String "rg"; `String "git_status"; `String "find"; `String "head"; `String "tail"; `String "wc"; `String "tree"; `String "git_log"; `String "git_diff"; `String "bash"]); ("description", `String "Command to run")]);
         ("path", `Assoc [("type", `String "string"); ("description", `String "Target path for ls/cat/rg/find/head/tail/wc/tree")]);
         ("pattern", `Assoc [("type", `String "string"); ("description", `String "Search pattern for rg, or name pattern for find")]);
         ("limit", `Assoc [("type", `String "integer"); ("description", `String "Result limit for ls/rg/find/tree, or line count for git_log")]);
@@ -258,12 +258,9 @@ git_log/git_diff for repo history, bash for curl/jq/env/which.";
 let coding_keeper_bridge_tools : Types.tool_schema list = [
   {
     name = "keeper_bash";
-    description = "Run a shell command from project root with full shell access. \
-Use for builds (dune build, make), tests (dune test), git operations, \
-and any command that may modify files. Returns exit_code and output. \
-For read-only exploration, prefer keeper_shell_readonly (safer). \
-To write a file, prefer keeper_fs_edit (path-checked, audited). \
-For worktree-isolated code operations, prefer masc_code_shell (restricted path).";
+    description = "Run a write-capable shell command (builds, tests, git, file edits) — \
+returns exit_code and output. For read-only ops prefer keeper_shell_readonly, \
+for file writes prefer keeper_fs_edit, for worktree-isolated code prefer masc_code_shell.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -289,9 +286,10 @@ Returns gh command output. Example: cmd='pr list --state open'.";
   };
   {
     name = "keeper_pr_workflow";
-    description = "One-shot PR pipeline: creates worktree, writes file, commits, pushes, \
-and opens a draft PR. Use this instead of chaining worktree_create + code_write + code_git + \
-keeper_github manually. Requires delivery or coding preset.";
+    description = "One-shot PR pipeline: creates branch, writes file, commits, pushes, opens draft PR. \
+Provide all 5 required params: branch, file_path, file_content, commit_message, pr_title. \
+Example: branch='fix/typo', file_path='lib/foo.ml', file_content='let x = 1', \
+commit_message='fix typo', pr_title='Fix typo in foo'. Requires coding or delivery preset.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -419,7 +417,7 @@ and priority for each task. Use to see what work is available or in progress.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
-        ("status", `Assoc [("type", `String "string"); ("description", `String "Filter by status (optional). One of: todo, claimed, in_progress, done, cancelled")]);
+        ("status", `Assoc [("type", `String "string"); ("enum", `List [`String "todo"; `String "claimed"; `String "in_progress"; `String "done"; `String "cancelled"]); ("description", `String "Filter by task status")]);
         ("include_done", `Assoc [("type", `String "boolean"); ("description", `String "Include completed tasks (default: false)")]);
       ]);
     ];

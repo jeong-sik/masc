@@ -592,7 +592,8 @@ Returns git command output.";
       ("properties", `Assoc [
         ("action", `Assoc [
           ("type", `String "string");
-          ("description", `String "Git action: add, commit, push, diff, status, log, branch, checkout, stash, fetch, clone");
+          ("enum", `List [`String "add"; `String "commit"; `String "push"; `String "diff"; `String "status"; `String "log"; `String "branch"; `String "checkout"; `String "stash"; `String "fetch"; `String "clone"]);
+          ("description", `String "Git action to perform");
         ]);
         ("args", `Assoc [
           ("type", `String "array");

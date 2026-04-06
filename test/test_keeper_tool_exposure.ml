@@ -467,8 +467,79 @@ let test_path_empty_allowed_permits_all_within_root () =
     check bool "src ok with empty allowed" true (Result.is_ok r2))
 
 (* ============================================================
-   11. Dead alias removal (#4120)
+   11. Keeper-reported allowed_paths symlink bug
    ============================================================ *)
+
+let make_masc_path_test_dir () =
+  let create_dir path =
+    try Unix.mkdir path 0o755
+    with Unix.Unix_error (err, _, _) ->
+      failwith
+        (Printf.sprintf "make_masc_path_test_dir: mkdir %s failed: %s"
+           path (Unix.error_message err))
+  in
+  let dir =
+    let prefix = Filename.concat (Filename.get_temp_dir_name ())
+        (Printf.sprintf "keeper_masc_path_test_%d" (Random.bits ())) in
+    create_dir prefix;
+    prefix
+  in
+  let git_dir = Filename.concat dir ".git" in
+  create_dir git_dir;
+  let masc = Filename.concat dir ".masc" in
+  create_dir masc;
+  let keepers = Filename.concat masc "keepers" in
+  create_dir keepers;
+  let traces = Filename.concat masc "traces" in
+  create_dir traces;
+  let playground = Filename.concat masc "playground" in
+  create_dir playground;
+  dir
+
+let test_keeper_reported_nonexistent_subdir () =
+  let dir = make_masc_path_test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
+    Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+    let config = Room.default_config dir in
+    let allowed = [
+      ".masc/playground/goal-default-demo/";
+      ".masc/keepers/goal-default-demo/";
+      ".masc/traces/";
+      "."
+    ] in
+    let r1 = Keeper_alerting_path.resolve_keeper_target_path
+      ~config ~allowed_paths:allowed
+      ~raw_path:".masc/keepers/goal-default-demo/" in
+    check bool "keeper dir access (exact match)" true (Result.is_ok r1);
+    let r2 = Keeper_alerting_path.resolve_keeper_target_path
+      ~config ~allowed_paths:allowed
+      ~raw_path:".masc/traces/session.json" in
+    check bool "traces file access" true (Result.is_ok r2);
+    let r3 = Keeper_alerting_path.resolve_keeper_target_path
+      ~config ~allowed_paths:allowed
+      ~raw_path:"lib/foo.ml" in
+    check bool "project file via dot allowed" true (Result.is_ok r3))
+
+let test_keeper_reported_observe_only_scope () =
+  let dir = make_masc_path_test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
+    Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+    let config = Room.default_config dir in
+    let allowed = [
+      ".masc/playground/observer/";
+      ".masc/keepers/observer/";
+      ".masc/traces/"
+    ] in
+    let r1 = Keeper_alerting_path.resolve_keeper_target_path
+      ~config ~allowed_paths:allowed
+      ~raw_path:".masc/keepers/observer/" in
+    check bool "observer dir access" true (Result.is_ok r1);
+    let r2 = Keeper_alerting_path.resolve_keeper_target_path
+      ~config ~allowed_paths:allowed
+      ~raw_path:"lib/foo.ml" in
+    check bool "observer blocked from lib/" true (Result.is_error r2))
 
 (* ============================================================
    Runner
@@ -545,6 +616,10 @@ let () =
       test_case "empty path rejected" `Quick test_path_empty_rejected;
       test_case "whitespace only rejected" `Quick test_path_whitespace_only_rejected;
       test_case "empty allowed permits all" `Quick test_path_empty_allowed_permits_all_within_root;
+      test_case "keeper-reported nonexistent subdir" `Quick
+        test_keeper_reported_nonexistent_subdir;
+      test_case "keeper-reported observe_only scope" `Quick
+        test_keeper_reported_observe_only_scope;
     ]);
     (* Merged from test_keeper_deny_list_coverage.ml *)
     ("deny_list", [

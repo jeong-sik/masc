@@ -333,6 +333,20 @@ let make_hooks
          | _ -> ());
         decision
       | _ -> Agent_sdk.Hooks.Continue);
+
+    on_error = Some (function
+      | Agent_sdk.Hooks.OnError { detail; context = err_ctx } ->
+        Log.Keeper.warn "keeper:%s on_error: %s (context: %s)"
+          (!meta_ref).name detail err_ctx;
+        Agent_sdk.Hooks.Continue
+      | _ -> Agent_sdk.Hooks.Continue);
+
+    on_tool_error = Some (function
+      | Agent_sdk.Hooks.OnToolError { tool_name; error } ->
+        Log.Keeper.warn "keeper:%s tool_error: %s — %s"
+          (!meta_ref).name tool_name error;
+        Agent_sdk.Hooks.Continue
+      | _ -> Agent_sdk.Hooks.Continue);
   }
 
 (** Static introspection of hook slot configuration.
@@ -388,6 +402,14 @@ let hook_introspection_json
         ]);
       ]);
       ("on_idle", `Assoc [
+        ("active", `Bool true);
+        ("source", `String "keeper_hooks_oas");
+      ]);
+      ("on_error", `Assoc [
+        ("active", `Bool true);
+        ("source", `String "keeper_hooks_oas");
+      ]);
+      ("on_tool_error", `Assoc [
         ("active", `Bool true);
         ("source", `String "keeper_hooks_oas");
       ]);

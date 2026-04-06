@@ -419,6 +419,18 @@ let make_tool_tracking_hooks ?gate_config ?context () =
                  else
                    Oas.Hooks.Continue)
             | _ -> Oas.Hooks.Continue);
+      on_error = Some (function
+        | Oas.Hooks.OnError { detail; context = err_ctx } ->
+          Log.LocalWorker.warn "worker on_error: %s (context: %s)"
+            detail err_ctx;
+          Oas.Hooks.Continue
+        | _ -> Oas.Hooks.Continue);
+      on_tool_error = Some (function
+        | Oas.Hooks.OnToolError { tool_name; error } ->
+          Log.LocalWorker.warn "worker tool_error: %s — %s"
+            tool_name error;
+          Oas.Hooks.Continue
+        | _ -> Oas.Hooks.Continue);
     }
   in
   let hooks = match context with

@@ -792,3 +792,41 @@ export function fetchKeeperTrajectory(
     `/api/v1/keepers/${encodeURIComponent(name)}/trajectory${limit != null ? `?limit=${limit}` : ''}`,
   )
 }
+
+// ── Keeper tool stats (server-side aggregation) ──────────
+
+export type ToolStat = {
+  name: string
+  call_count: number
+  success_count: number
+  failure_count: number
+  avg_duration_ms: number
+  p95_duration_ms: number
+  max_duration_ms: number
+  total_cost_usd: number
+  last_used_at: string
+}
+
+export type HourlyBucket = {
+  hour: string
+  call_count: number
+  error_count: number
+}
+
+export type ToolStatsResponse = {
+  keeper: string
+  window_hours: number
+  total_entries: number
+  tools: ToolStat[]
+  timeline: HourlyBucket[]
+}
+
+export function fetchKeeperToolStats(
+  name: string,
+  windowHours?: number,
+): Promise<ToolStatsResponse> {
+  const params = windowHours != null ? `?window_hours=${windowHours}` : ''
+  return get<ToolStatsResponse>(
+    `/api/v1/keepers/${encodeURIComponent(name)}/tool-stats${params}`,
+  )
+}

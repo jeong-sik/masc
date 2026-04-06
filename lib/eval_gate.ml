@@ -425,15 +425,41 @@ let guarded_execute
   let decision = pre_check ~config ~accumulated_cost ~trajectory_acc
     ~tool_name ~args_json in
 
+  let record_trajectory ~gate_decision ~result ~error ~duration_ms =
+    match trajectory_acc with
+    | None -> ()
+    | Some acc ->
+        let now = Time_compat.now () in
+        let entry : Trajectory.tool_call_entry = {
+          ts = now;
+          ts_iso = Types_core.iso8601_of_unix_seconds now;
+          turn = acc.turn;
+          round = Trajectory.calls_in_current_turn acc + 1;
+          tool_name;
+          args_json;
+          gate_decision;
+          result;
+          duration_ms;
+          error;
+          cost_usd = Trajectory.tool_cost_estimate tool_name;
+        } in
+        Trajectory.record_entry acc entry
+  in
+
   match decision with
   | Trajectory.Reject _reason ->
+      record_trajectory ~gate_decision:decision ~result:None ~error:None
+        ~duration_ms:0;
       (decision, None, None, 0)
   | Trajectory.Pass ->
       let t0 = Time_compat.now () in
+      let error_ref = ref None in
       let result =
         try execute ()
         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-          Log.info "eval_gate tool %s failed: %s" tool_name (Printexc.to_string exn);
+          let msg = Printexc.to_string exn in
+          error_ref := Some msg;
+          Log.info "eval_gate tool %s failed: %s" tool_name msg;
           Yojson.Safe.to_string (`Assoc [
             ("error", `String "Tool execution failed (internal error)");
             ("tool", `String tool_name);
@@ -441,6 +467,9 @@ let guarded_execute
       in
       let t1 = Time_compat.now () in
       let duration_ms = int_of_float ((t1 -. t0) *. 1000.0) in
+
+      record_trajectory ~gate_decision:decision ~result:(Some result)
+        ~error:!error_ref ~duration_ms;
 
       let eval = post_eval ~config ~tool_name ~result ~duration_ms
         ~accumulated_cost in

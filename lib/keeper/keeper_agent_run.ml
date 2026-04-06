@@ -513,7 +513,10 @@ let run_turn
      Separate from the preset-scoped Tool_selector used for progressive disclosure:
      search needs access to ALL tools so the keeper can discover beyond its preset.
      BM25 progressive disclosure is now delegated to OAS Tool_selector.select_names;
-     this index serves only the explicit keeper_tool_search tool. *)
+     this index serves only the explicit keeper_tool_search tool.
+     top_k=20 for broad coverage; groups enable co-retrieval of related tools. *)
+  let tool_index_config =
+    { Agent_sdk.Tool_index.default_config with top_k = 20 } in
   let tool_entries = List.map (fun (t : Agent_sdk.Tool.t) ->
     let name = t.schema.name in
     let group =
@@ -1097,15 +1100,13 @@ let run_turn
                        checkpoint ~session_id:meta.runtime.trace_id
                        ~response_text
                    in
-                   (try
-                     Keeper_checkpoint_store.save_oas
-                       ~session_dir:session.session_dir patched
-                   with
-                   | Eio.Cancel.Cancelled _ as exn -> raise exn
-                   | exn ->
+                   (match Keeper_checkpoint_store.save_oas
+                       ~session_dir:session.session_dir patched with
+                   | Ok () -> ()
+                   | Error e ->
                        Log.Keeper.error
                          "keeper:%s OAS checkpoint save failed: %s"
-                         meta.name (Printexc.to_string exn));
+                         meta.name e);
                    Some patched
                | None ->
                    Log.Keeper.warn

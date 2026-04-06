@@ -630,12 +630,26 @@ let keeper_context_status_json ~(meta : keeper_meta) ~(ctx_work : working_contex
         ])
 ;;
 
-let keeper_memory_search_json ~(ctx_work : working_context) ~(args : Yojson.Safe.t) =
+let keeper_memory_search_json
+      ~(config : Room.config)
+      ~(meta : keeper_meta)
+      ~(ctx_work : working_context)
+      ~(args : Yojson.Safe.t) =
   let query = Safe_ops.json_string ~default:"" "query" args |> String.trim in
   let limit = max 1 (min 8 (Safe_ops.json_int ~default:5 "limit" args)) in
-  let user_msgs = extract_user_messages ctx_work in
+  (* Cross-generation search: merge current checkpoint messages with
+     persisted history.jsonl.  Checkpoint messages are prioritized;
+     history provides recall across earlier generations. *)
+  let history_path = keeper_history_path config meta.runtime.trace_id in
+  let all_candidates =
+    recall_candidates_with_history
+      ~checkpoint_messages:ctx_work.messages
+      ~history_path
+      ~max_checkpoint:100
+      ~max_history:50
+  in
   let matches =
-    user_msgs
+    all_candidates
     |> List.filter (fun msg -> query <> "" && contains_ci msg query)
     |> List.rev
     |> take limit
@@ -1023,7 +1037,7 @@ let execute_keeper_tool_call
       Yojson.Safe.to_string
         (`Assoc [ "now_iso", `String (now_iso ()); "now_unix", `Float now_ts ])
     | "keeper_context_status" -> keeper_context_status_json ~meta ~ctx_work
-    | "keeper_memory_search" -> keeper_memory_search_json ~ctx_work ~args
+    | "keeper_memory_search" -> keeper_memory_search_json ~config ~meta ~ctx_work ~args
     | "keeper_library_search" ->
       let ok, msg =
         Tool_library.handle_search Tool_library.{ agent_name = meta.name } args

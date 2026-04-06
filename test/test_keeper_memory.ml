@@ -324,6 +324,102 @@ let test_memory_write_then_recall_meta_fallback () =
     in
     check bool "recall finds fallback notes" true (summary.total_notes > 0))
 
+module KET = Masc_mcp.Keeper_exec_tools
+module KEC = Masc_mcp.Keeper_exec_context
+
+(** Recursive cleanup for nested temp dirs (traces/<id>/history.jsonl). *)
+let rec cleanup_tmpdir_r dir =
+  if Sys.file_exists dir && Sys.is_directory dir then begin
+    Array.iter (fun f ->
+      let path = Filename.concat dir f in
+      if Sys.is_directory path then cleanup_tmpdir_r path
+      else (try Sys.remove path with _ -> ()))
+      (Sys.readdir dir);
+    (try Unix.rmdir dir with _ -> ())
+  end
+
+(** Write lines to a file, creating parent dirs as needed. *)
+let write_lines path lines =
+  Keeper_types.mkdir_p (Filename.dirname path);
+  let oc = open_out path in
+  Fun.protect ~finally:(fun () -> close_out oc) (fun () ->
+    List.iter (fun l -> output_string oc (l ^ "\n")) lines)
+
+(** Test: keeper_memory_search finds messages from history.jsonl that are
+    NOT in the current checkpoint messages.  This verifies cross-generation
+    recall via execute_keeper_tool_call dispatch. *)
+let test_memory_search_cross_generation () =
+  let dir = test_tmpdir () in
+  Fun.protect ~finally:(fun () -> cleanup_tmpdir_r dir) (fun () ->
+    let config = make_test_room_config dir in
+    let meta = keeper_meta ~name:"cross-gen-keeper" ~mention_targets:["cross-gen-keeper"] in
+    let trace_id = meta.runtime.trace_id in
+    (* Write history.jsonl with messages from previous generations *)
+    let history_path = Keeper_types.keeper_history_path config trace_id in
+    write_lines history_path [
+      {|{"role":"user","content":"deploy the canary release"}|};
+      {|{"role":"assistant","content":"deploying now"}|};
+      {|{"role":"user","content":"what was the incident root cause"}|};
+      {|{"role":"user","content":"scale the fleet to 12 pods"}|};
+    ];
+    (* Current checkpoint has different messages — no overlap with history query *)
+    let ctx_work = KEC.create ~system_prompt:"test" ~max_tokens:4096 in
+    let ctx_work = KEC.append ctx_work
+      (Agent_sdk.Types.text_message Agent_sdk.Types.User "hello keeper") in
+    (* Search for "canary" — only exists in history.jsonl *)
+    let result = KET.execute_keeper_tool_call ~config ~meta ~ctx_work
+      ~name:"keeper_memory_search"
+      ~input:(`Assoc [ ("query", `String "canary"); ("limit", `Int 5) ])
+      () in
+    let json = Yojson.Safe.from_string result in
+    let match_count = Yojson.Safe.Util.(json |> member "match_count" |> to_int) in
+    check bool "found canary from history" true (match_count > 0);
+    let matches = Yojson.Safe.Util.(json |> member "matches" |> to_list
+      |> List.map to_string) in
+    check bool "match contains deploy canary" true
+      (List.exists (fun m -> Re.execp (Re.str "canary" |> Re.compile) m) matches))
+
+(** Test: keeper_memory_search still finds messages from current checkpoint. *)
+let test_memory_search_checkpoint_only () =
+  let dir = test_tmpdir () in
+  Fun.protect ~finally:(fun () -> cleanup_tmpdir_r dir) (fun () ->
+    let config = make_test_room_config dir in
+    let meta = keeper_meta ~name:"ckpt-keeper" ~mention_targets:["ckpt-keeper"] in
+    (* No history.jsonl — only checkpoint messages *)
+    let ctx_work = KEC.create ~system_prompt:"test" ~max_tokens:4096 in
+    let ctx_work = KEC.append ctx_work
+      (Agent_sdk.Types.text_message Agent_sdk.Types.User "optimize the database query") in
+    let result = KET.execute_keeper_tool_call ~config ~meta ~ctx_work
+      ~name:"keeper_memory_search"
+      ~input:(`Assoc [ ("query", `String "database"); ("limit", `Int 5) ])
+      () in
+    let json = Yojson.Safe.from_string result in
+    let match_count = Yojson.Safe.Util.(json |> member "match_count" |> to_int) in
+    check bool "found database from checkpoint" true (match_count > 0))
+
+(** Test: deduplication — same message in checkpoint and history appears once. *)
+let test_memory_search_dedup () =
+  let dir = test_tmpdir () in
+  Fun.protect ~finally:(fun () -> cleanup_tmpdir_r dir) (fun () ->
+    let config = make_test_room_config dir in
+    let meta = keeper_meta ~name:"dedup-keeper" ~mention_targets:["dedup-keeper"] in
+    let trace_id = meta.runtime.trace_id in
+    let history_path = Keeper_types.keeper_history_path config trace_id in
+    write_lines history_path [
+      {|{"role":"user","content":"unique needle from history"}|};
+      {|{"role":"user","content":"shared needle message"}|};
+    ];
+    let ctx_work = KEC.create ~system_prompt:"test" ~max_tokens:4096 in
+    let ctx_work = KEC.append ctx_work
+      (Agent_sdk.Types.text_message Agent_sdk.Types.User "shared needle message") in
+    let result = KET.execute_keeper_tool_call ~config ~meta ~ctx_work
+      ~name:"keeper_memory_search"
+      ~input:(`Assoc [ ("query", `String "needle"); ("limit", `Int 10) ])
+      () in
+    let json = Yojson.Safe.from_string result in
+    let match_count = Yojson.Safe.Util.(json |> member "match_count" |> to_int) in
+    check int "2 unique matches (deduped)" 2 match_count)
+
 let () =
   run "Keeper_memory"
     [
@@ -368,5 +464,14 @@ let () =
             test_memory_write_then_recall_with_state_block;
           test_case "write via meta fallback then recall" `Quick
             test_memory_write_then_recall_meta_fallback;
+        ] );
+      ( "cross_generation_search",
+        [
+          test_case "finds messages from history.jsonl" `Quick
+            test_memory_search_cross_generation;
+          test_case "finds messages from checkpoint only" `Quick
+            test_memory_search_checkpoint_only;
+          test_case "deduplicates checkpoint and history" `Quick
+            test_memory_search_dedup;
         ] );
     ]

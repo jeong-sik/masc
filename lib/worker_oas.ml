@@ -334,8 +334,9 @@ let rec string_of_screening_value (value : Yojson.Safe.t) : string =
   | `Tuple items -> Yojson.Safe.to_string (`List items)
   | `Variant (name, None) -> name
   | `Variant (name, Some v) ->
-    if String.length (string_of_screening_value v) = 0 then name
-    else Printf.sprintf "%s %s" name (string_of_screening_value v)
+    let s = string_of_screening_value v in
+    if String.length s = 0 then name
+    else Printf.sprintf "%s %s" name s
 
 (** Extract command-like content from tool input JSON for screening.
     Reads "command", "cmd", "content", "action"/"args", or "path" keys.
@@ -364,14 +365,13 @@ let extract_command_from_input (input : Yojson.Safe.t) : string =
         else
           let action = string_member "action" in
           let args = member_to_string "args" in
-          if action <> "" || args <> "" then
-            String.trim
-              (if action <> "" && args <> "" then action ^ " " ^ args
-               else if action <> "" then action
-               else args)
-          else
-            let path = string_member "path" in
-            if path <> "" then path else ""
+          (match action, args with
+           | "", "" ->
+             let path = string_member "path" in
+             if path <> "" then path else ""
+           | a, "" -> a
+           | "", b -> b
+           | a, b  -> String.trim (a ^ " " ^ b))
   with Yojson.Safe.Util.Type_error _ -> ""
 
 (** Render inline skip reason for blocked tool calls.

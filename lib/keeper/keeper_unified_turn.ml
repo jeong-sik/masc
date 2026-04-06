@@ -682,6 +682,8 @@ let broadcast_lifecycle_events ~(name : string)
 let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
     ~(observation : Keeper_world_observation.world_observation)
     ~(reason : string) ?(is_transient = false) ?social_state () : keeper_meta =
+  ignore is_transient; (* Param retained for caller compatibility; no longer
+                          used internally after zombie-fix #5594. *)
   let now_ts = Time_compat.now () in
   let is_scheduled_autonomous_cycle =
     is_scheduled_autonomous_cycle_of_observation observation
@@ -704,18 +706,24 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
         count_total =
           meta.runtime.proactive_rt.count_total
           + (if is_scheduled_autonomous_cycle then 1 else 0);
+        (* Always update last_ts on scheduled_autonomous attempts,
+           including transient errors. Without this, transient errors
+           (e.g. llama-server down) leave last_ts stale, causing
+           cooldown_elapsed=false permanently → scheduled turns never
+           resume. last_ts tracks attempts, not successes.
+           Root cause of keeper zombie state: #5594. *)
         last_ts =
-          if is_scheduled_autonomous_cycle && not is_transient then now_ts
+          if is_scheduled_autonomous_cycle then now_ts
           else meta.runtime.proactive_rt.last_ts;
         last_outcome =
-          if is_scheduled_autonomous_cycle && not is_transient then Proactive_error
+          if is_scheduled_autonomous_cycle then Proactive_error
           else meta.runtime.proactive_rt.last_outcome;
         last_reason =
-          if is_scheduled_autonomous_cycle && not is_transient
+          if is_scheduled_autonomous_cycle
           then "unified:error:" ^ String.trim reason
           else meta.runtime.proactive_rt.last_reason;
         last_preview =
-          if is_scheduled_autonomous_cycle && not is_transient then preview
+          if is_scheduled_autonomous_cycle then preview
           else meta.runtime.proactive_rt.last_preview;
       };
       last_speech_act =

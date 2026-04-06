@@ -200,28 +200,28 @@ let summarize_old_messages ~(keep_recent : int)
     Memory summaries and goal messages use MASC-specific prefix matching. *)
 
 (** Importance scoring weights. See rationale in comment block above. *)
-let w_recency = 0.50
-let w_role    = 0.35
-let w_tool    = 0.15
+let w_recency = Env_config_core.get_float ~default:0.50 "MASC_COMPACT_W_RECENCY"
+let w_role    = Env_config_core.get_float ~default:0.35 "MASC_COMPACT_W_ROLE"
+let w_tool    = Env_config_core.get_float ~default:0.15 "MASC_COMPACT_W_TOOL"
 
 (** Role importance values. *)
-let role_system    = 1.0
-let role_tool      = 0.7
-let role_user      = 0.6
-let role_assistant = 0.4
+let role_system    = Env_config_core.get_float ~default:1.0 "MASC_COMPACT_ROLE_SYSTEM"
+let role_tool      = Env_config_core.get_float ~default:0.7 "MASC_COMPACT_ROLE_TOOL"
+let role_user      = Env_config_core.get_float ~default:0.6 "MASC_COMPACT_ROLE_USER"
+let role_assistant = Env_config_core.get_float ~default:0.4 "MASC_COMPACT_ROLE_ASSISTANT"
 
 (** Tool content presence weight. *)
-let tool_present = 0.8
-let tool_absent  = 0.5
+let tool_present = Env_config_core.get_float ~default:0.8 "MASC_COMPACT_TOOL_PRESENT"
+let tool_absent  = Env_config_core.get_float ~default:0.5 "MASC_COMPACT_TOOL_ABSENT"
 
 (** Minimum score for memory/goal anchor messages. *)
-let anchor_boost = 0.95
+let anchor_boost = Env_config_core.get_float ~default:0.95 "MASC_COMPACT_ANCHOR_BOOST"
 
 (** Score threshold below which messages are dropped by [DropLowImportance]. *)
-let drop_importance_threshold = 0.3
+let drop_importance_threshold = Env_config_core.get_float ~default:0.3 "MASC_COMPACT_DROP_THRESHOLD"
 
 (** Number of recent messages to keep in [SummarizeOld] strategy. *)
-let summarize_keep_recent = 5
+let summarize_keep_recent = Env_config_core.get_int ~default:5 "MASC_COMPACT_KEEP_RECENT"
 
 let score_messages (msgs : Agent_sdk.Types.message list) : (int * float) list =
   let n = List.length msgs in
@@ -265,7 +265,7 @@ let score_messages (msgs : Agent_sdk.Types.message list) : (int * float) list =
     - SummarizeOld uses OAS Custom with extractive summaries plus ToolResult
       structured stubs so ToolUse/ToolResult pairing survives compaction. *)
 (** Max length for tool output before pruning. Shared with keeper_agent_run. *)
-let tool_output_prune_limit = 1500
+let tool_output_prune_limit = Env_config.ContextCompact.tool_output_prune_limit
 
 let oas_strategy_of (s : strategy) : Agent_sdk.Context_reducer.strategy =
   match s with
@@ -390,12 +390,12 @@ let observation_summary = function
 
 (** Context ratio thresholds for dynamic strategy selection.
     Distinct from Dashboard.ctx_* (display) — these drive compaction behavior. *)
-let dynamic_multi_agent_ctx = 0.80
-let dynamic_focused_ctx = 0.70
+let dynamic_multi_agent_ctx = Env_config.ContextCompact.dynamic_multi_agent_ratio
+let dynamic_focused_ctx = Env_config.ContextCompact.dynamic_focused_ratio
 
 (** Context window floor (in tokens) below which a local model is classified
     as "small-local", triggering lightweight compaction strategies. *)
-let small_local_ctx_floor = 64_000
+let small_local_ctx_floor = Env_config.ContextCompact.small_local_floor
 
 let default_dynamic_selector (obs : observation_context) : strategy list =
   if obs.context_ratio >= dynamic_multi_agent_ctx && obs.active_agent_count > 1 then

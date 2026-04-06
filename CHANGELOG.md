@@ -1,6 +1,26 @@
 # Changelog
 
 
+## [2.247.0] - 2026-04-06
+
+### Added
+- **OAS boundary cleanup** -- consume OAS Tool_selector, idle, reducer APIs instead of reimplementing. Remove lifecycle invasion. (#5442, #5446)
+- **Dashboard telemetry** -- enhance keeper tool visibility and telemetry display. (#5452)
+- **Continuity recovery** -- recover from history.jsonl when checkpoint is absent. (#5439)
+- **Checkpoint STATE synthesis** -- patch OAS checkpoint with [STATE] block for continuity. (#5447)
+
+### Fixed
+- **CI blocker** -- model_labels test made vendor-agnostic. MASC does not assert specific vendor labels. (#5448)
+- **Dashboard** -- board title markdown strip, author nav, comment rendering. Normalize missing category/tier. (#5444, #5432)
+- **Keeper denylist** -- re-sync tool_denylist from TOML at bootstrap, refine search filter. (#5435)
+- **Cascade SSOT** -- extract cascade_name SSOT and fix silent role corruption. (#5436)
+- **Threshold externalization** -- externalize scattered hardcoded thresholds and align dashboard types. (#5458)
+
+### Changed
+- **on_idle Nudge** -- use OAS on_idle Nudge instead of prompt SELF-CHECK. (#5438)
+- **Samchon verification** -- verification loop for tool search errors. (#5441)
+- **Version sync** -- opam version, PRODUCT-OPERATING-PLAN, SPEC-INDEX aligned. (#5453, #5450)
+
 ## [2.246.0] - 2026-04-06
 
 ### Added

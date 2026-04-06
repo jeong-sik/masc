@@ -920,6 +920,7 @@ let run_turn
           ~allowed_paths:oas_allowed_paths
           ~cache_system_prompt:true
           ~yield_on_tool
+          ~checkpoint_dir:session_dir
           ()
       with
       | Error e -> Error e

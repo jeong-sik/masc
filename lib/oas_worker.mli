@@ -107,6 +107,7 @@ val run_named :
   ?cache_system_prompt:bool ->
   ?yield_on_tool:bool ->
   ?compact_ratio:float ->
+  ?checkpoint_dir:string ->
   ?sw:Eio.Switch.t ->
   ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   unit ->

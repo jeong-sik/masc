@@ -7,14 +7,15 @@ module Keeper_memory_recall = Masc_mcp.Keeper_memory_recall
 module Keeper_types = Masc_mcp.Keeper_types
 module Types = Types
 
-let keeper_meta ~name ~mention_targets =
+let keeper_meta ?(trace_id = "trace-1") ?(trace_history = []) ~name ~mention_targets () =
   let json =
     `Assoc
       [
         ("name", `String name);
-        ("trace_id", `String "trace-1");
+        ("trace_id", `String trace_id);
         ("goal", `String "keep continuity");
         ("mention_targets", `List (List.map (fun target -> `String target) mention_targets));
+        ("trace_history", `List (List.map (fun s -> `String s) trace_history));
       ]
   in
   match Keeper_types.meta_of_json json with
@@ -40,7 +41,7 @@ let test_any_mentioned_ambient_message () =
     (Mention.any_mentioned ~targets:[ "sangsu" ] "hello everyone, just chatting")
 
 let test_keeper_policy_observation_direct_mention () =
-  let meta = keeper_meta ~name:"sangsu" ~mention_targets:[ "sangsu"; "director" ] in
+  let meta = keeper_meta ~name:"sangsu" ~mention_targets:[ "sangsu"; "director" ] () in
   let obs =
     Keeper_memory.keeper_policy_observation_of_room_message
       ~meta ~room_id:"default" (room_message "@director, what do you think?")
@@ -48,7 +49,7 @@ let test_keeper_policy_observation_direct_mention () =
   check bool "keeper observation uses mention targets" true obs.direct_mention
 
 let test_keeper_policy_observation_non_mention () =
-  let meta = keeper_meta ~name:"sangsu" ~mention_targets:[ "sangsu"; "director" ] in
+  let meta = keeper_meta ~name:"sangsu" ~mention_targets:[ "sangsu"; "director" ] () in
   let obs =
     Keeper_memory.keeper_policy_observation_of_room_message
       ~meta ~room_id:"default" (room_message "ambient room chatter")
@@ -268,7 +269,7 @@ let test_memory_write_then_recall_with_state_block () =
   let dir = test_tmpdir () in
   Fun.protect ~finally:(fun () -> cleanup_tmpdir dir) (fun () ->
     let config = make_test_room_config dir in
-    let meta = keeper_meta ~name:"e2e-keeper" ~mention_targets:["e2e-keeper"] in
+    let meta = keeper_meta ~name:"e2e-keeper" ~mention_targets:["e2e-keeper"] () in
 
     (* Simulate a keeper reply with [STATE] block *)
     let reply =
@@ -304,7 +305,7 @@ let test_memory_write_then_recall_meta_fallback () =
   let dir = test_tmpdir () in
   Fun.protect ~finally:(fun () -> cleanup_tmpdir dir) (fun () ->
     let config = make_test_room_config dir in
-    let meta = keeper_meta ~name:"fallback-keeper" ~mention_targets:["fallback-keeper"] in
+    let meta = keeper_meta ~name:"fallback-keeper" ~mention_targets:["fallback-keeper"] () in
 
     (* Reply WITHOUT [STATE] block — should trigger meta-based fallback *)
     let reply = "네, 이해했습니다. 바로 작업을 시작하겠습니다." in
@@ -352,7 +353,7 @@ let test_memory_search_cross_generation () =
   let dir = test_tmpdir () in
   Fun.protect ~finally:(fun () -> cleanup_tmpdir_r dir) (fun () ->
     let config = make_test_room_config dir in
-    let meta = keeper_meta ~name:"cross-gen-keeper" ~mention_targets:["cross-gen-keeper"] in
+    let meta = keeper_meta ~name:"cross-gen-keeper" ~mention_targets:["cross-gen-keeper"] () in
     let trace_id = meta.runtime.trace_id in
     (* Write history.jsonl with messages from previous generations *)
     let history_path = Keeper_types.keeper_history_path config trace_id in
@@ -384,7 +385,7 @@ let test_memory_search_checkpoint_only () =
   let dir = test_tmpdir () in
   Fun.protect ~finally:(fun () -> cleanup_tmpdir_r dir) (fun () ->
     let config = make_test_room_config dir in
-    let meta = keeper_meta ~name:"ckpt-keeper" ~mention_targets:["ckpt-keeper"] in
+    let meta = keeper_meta ~name:"ckpt-keeper" ~mention_targets:["ckpt-keeper"] () in
     (* No history.jsonl — only checkpoint messages *)
     let ctx_work = KEC.create ~system_prompt:"test" ~max_tokens:4096 in
     let ctx_work = KEC.append ctx_work
@@ -402,7 +403,7 @@ let test_memory_search_dedup () =
   let dir = test_tmpdir () in
   Fun.protect ~finally:(fun () -> cleanup_tmpdir_r dir) (fun () ->
     let config = make_test_room_config dir in
-    let meta = keeper_meta ~name:"dedup-keeper" ~mention_targets:["dedup-keeper"] in
+    let meta = keeper_meta ~name:"dedup-keeper" ~mention_targets:["dedup-keeper"] () in
     let trace_id = meta.runtime.trace_id in
     let history_path = Keeper_types.keeper_history_path config trace_id in
     write_lines history_path [
@@ -419,6 +420,56 @@ let test_memory_search_dedup () =
     let json = Yojson.Safe.from_string result in
     let match_count = Yojson.Safe.Util.(json |> member "match_count" |> to_int) in
     check int "2 unique matches (deduped)" 2 match_count)
+
+(** Test: keeper_memory_search finds messages from a PREVIOUS generation's
+    history.jsonl via trace_history.  This is the true cross-generation test. *)
+let test_memory_search_prev_generation () =
+  let dir = test_tmpdir () in
+  Fun.protect ~finally:(fun () -> cleanup_tmpdir_r dir) (fun () ->
+    let config = make_test_room_config dir in
+    let prev_trace = "gen-0-trace" in
+    let curr_trace = "gen-1-trace" in
+    let meta = keeper_meta
+      ~trace_id:curr_trace
+      ~trace_history:[prev_trace]
+      ~name:"multi-gen-keeper"
+      ~mention_targets:["multi-gen-keeper"]
+      () in
+    (* Previous generation's history — different trace_id directory *)
+    let prev_history_path = Keeper_types.keeper_history_path config prev_trace in
+    write_lines prev_history_path [
+      {|{"role":"user","content":"migrate the postgres schema to v3"}|};
+      {|{"role":"user","content":"rollback the failed deployment"}|};
+    ];
+    (* Current generation's history — empty (just started) *)
+    let curr_history_path = Keeper_types.keeper_history_path config curr_trace in
+    write_lines curr_history_path [
+      {|{"role":"user","content":"check cluster health"}|};
+    ];
+    (* Checkpoint has only new-gen messages *)
+    let ctx_work = KEC.create ~system_prompt:"test" ~max_tokens:4096 in
+    let ctx_work = KEC.append ctx_work
+      (Agent_sdk.Types.text_message Agent_sdk.Types.User "status report") in
+    (* Search for "postgres" — only in previous generation's history *)
+    let result = KET.execute_keeper_tool_call ~config ~meta ~ctx_work
+      ~name:"keeper_memory_search"
+      ~input:(`Assoc [ ("query", `String "postgres"); ("limit", `Int 5) ])
+      () in
+    let json = Yojson.Safe.from_string result in
+    let match_count = Yojson.Safe.Util.(json |> member "match_count" |> to_int) in
+    check bool "found postgres from previous generation" true (match_count > 0);
+    let matches = Yojson.Safe.Util.(json |> member "matches" |> to_list
+      |> List.map to_string) in
+    check bool "match references schema migration" true
+      (List.exists (fun m -> Re.execp (Re.str "postgres" |> Re.compile) m) matches);
+    (* Also verify current generation is searchable *)
+    let result2 = KET.execute_keeper_tool_call ~config ~meta ~ctx_work
+      ~name:"keeper_memory_search"
+      ~input:(`Assoc [ ("query", `String "cluster"); ("limit", `Int 5) ])
+      () in
+    let json2 = Yojson.Safe.from_string result2 in
+    let match2 = Yojson.Safe.Util.(json2 |> member "match_count" |> to_int) in
+    check bool "found cluster from current generation" true (match2 > 0))
 
 let () =
   run "Keeper_memory"
@@ -473,5 +524,7 @@ let () =
             test_memory_search_checkpoint_only;
           test_case "deduplicates checkpoint and history" `Quick
             test_memory_search_dedup;
+          test_case "finds messages from previous generation via trace_history" `Quick
+            test_memory_search_prev_generation;
         ] );
     ]

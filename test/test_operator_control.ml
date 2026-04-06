@@ -103,7 +103,9 @@ let () =
           Alcotest.test_case "digest recommends worker spawn batch" `Quick
             Test_operator_control_judgment
             .test_digest_recommends_worker_spawn_batch_for_planned_worker_without_turn;
-          Alcotest.test_case "snapshot exposes keeper and social actions" `Quick
+          (* Slow: Eio_linux io_uring crash on GitHub Actions Ubuntu runner.
+             Passes locally on macOS (Eio_posix).  See #5449. *)
+          Alcotest.test_case "snapshot exposes keeper and social actions" `Slow
             Test_operator_control_keeper.test_snapshot_exposes_keeper_and_social_actions;
           Alcotest.test_case "keeper status exposes summary and recoverable"
             `Quick

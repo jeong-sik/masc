@@ -703,7 +703,7 @@ let parse_keeper_identity (json : Yojson.Safe.t) : parsed_keeper_identity =
   in
   let pk_instructions = Safe_ops.json_string ~default:"" "instructions" json in
   let pk_cascade_name =
-    Safe_ops.json_string ~default:default_cascade_name "cascade_name" json
+    Safe_ops.json_string ~default:Keeper_config.default_cascade_name "cascade_name" json
   in
   { pk_name
   ; pk_agent_name

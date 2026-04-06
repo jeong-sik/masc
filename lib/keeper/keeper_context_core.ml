@@ -294,7 +294,7 @@ let checkpoint_model_of_meta (meta : keeper_meta) =
     :: Oas_model_resolve.models_of_cascade_name meta.cascade_name
   in
   List.find_opt (fun value -> String.trim value <> "") candidates
-  |> Option.value ~default:Keeper_config.default_cascade_name
+  |> Option.value ~default:(Provider_adapter.default_local_fallback_label ())
 
 let save_oas_checkpoint
     ~(session : session_context)

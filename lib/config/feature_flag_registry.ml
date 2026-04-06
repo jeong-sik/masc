@@ -137,11 +137,6 @@ let all_flags : flag list = [
     default = false; category = "keeper";
     lifecycle = Experimental; since = "2.214.0" };
 
-  { env_name = "MASC_SLOT_YIELD_ENABLED";
-    description = "Turn-level slot yielding during tool execution";
-    default = false; category = "keeper";
-    lifecycle = Experimental; since = "2.207.0" };
-
   (* ── Dashboard & Governance ───────────────────────────────── *)
   { env_name = "MASC_COMMAND_PLANE_SNAPSHOT_REFRESH_ENABLED";
     description = "Proactive command-plane snapshot refresh loop";
@@ -190,11 +185,6 @@ let all_flags : flag list = [
     default = false; category = "runtime";
     lifecycle = Active; since = "2.200.0" };
 
-  { env_name = "MASC_LLAMA_RUNTIME_DEBUG";
-    description = "Deprecated: use MASC_LOCAL_RUNTIME_DEBUG";
-    default = false; category = "runtime";
-    lifecycle = Deprecated "use MASC_LOCAL_RUNTIME_DEBUG"; since = "2.100.0" };
-
   { env_name = "MASC_SLOT_YIELD_ENABLED";
     description = "Release LLM slot during tool execution so other agents can use it";
     default = false; category = "runtime";
@@ -216,10 +206,6 @@ let all_flags : flag list = [
     default = false; category = "runtime";
     lifecycle = Experimental; since = "2.162.0" };
 
-  { env_name = "MASC_SLOT_YIELD_ENABLED";
-    description = "Release LLM slot during tool execution so other agents can use it";
-    default = false; category = "runtime";
-    lifecycle = Experimental; since = "2.207.0" };
 ]
 
 (** Lookup a flag by env var name. O(n) — acceptable for ~30 flags. *)

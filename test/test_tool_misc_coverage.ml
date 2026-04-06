@@ -351,16 +351,10 @@ let () = test "parse_official_provider_json_payloads" (fun () ->
 )
 
 let () = test "parse_official_provider_json_payloads_tolerate_malformed_json" (fun () ->
-  assert (
-    try
-      ignore (Tool_misc.parse_brave_json {|{"web":|});
-      false
-    with _ -> true);
-  assert (
-    try
-      ignore (Tool_misc.parse_tavily_json {|{"results": "oops"}|});
-      true
-    with _ -> false)
+  assert (Tool_misc.parse_brave_json {|{"web":|} = []);
+  assert (Tool_misc.parse_tavily_json {|{"results": "oops"}|} = []);
+  assert (Tool_misc.parse_exa_json {|{"results": [}|} = []);
+  assert (Tool_misc.parse_bing_search_json {|{"webPages": "oops"}|} = [])
 )
 
 let () = test "dispatch_webrtc_offer" (fun () ->

@@ -205,69 +205,72 @@ let json_string_member json path =
     path json |> to_string_option |> Option.bind trim_nonempty
   with _ -> None
 
+let with_parsed_json payload f =
+  try Yojson.Safe.from_string payload |> f with _ -> []
+
 let parse_brave_json payload =
-  let json = Yojson.Safe.from_string payload in
-  json_list_member json (fun j -> Yojson.Safe.Util.member "web" j |> Yojson.Safe.Util.member "results")
-  |> List.filter_map (fun item ->
-         match
-           json_string_member item (Yojson.Safe.Util.member "title"),
-           json_string_member item (Yojson.Safe.Util.member "url")
-         with
-         | Some title, Some url when valid_search_result_url url ->
-             let snippet =
-               json_string_member item (Yojson.Safe.Util.member "description")
-               |> Option.value ~default:""
-             in
-             Some (title, url, snippet)
-         | _ -> None)
+  with_parsed_json payload (fun json ->
+      json_list_member json (fun j -> Yojson.Safe.Util.member "web" j |> Yojson.Safe.Util.member "results")
+      |> List.filter_map (fun item ->
+             match
+               json_string_member item (Yojson.Safe.Util.member "title"),
+               json_string_member item (Yojson.Safe.Util.member "url")
+             with
+             | Some title, Some url when valid_search_result_url url ->
+                 let snippet =
+                   json_string_member item (Yojson.Safe.Util.member "description")
+                   |> Option.value ~default:""
+                 in
+                 Some (title, url, snippet)
+             | _ -> None))
 
 let parse_tavily_json payload =
-  let json = Yojson.Safe.from_string payload in
-  json_list_member json (Yojson.Safe.Util.member "results")
-  |> List.filter_map (fun item ->
-         match
-           json_string_member item (Yojson.Safe.Util.member "title"),
-           json_string_member item (Yojson.Safe.Util.member "url")
-         with
-         | Some title, Some url when valid_search_result_url url ->
-             let snippet =
-               json_string_member item (Yojson.Safe.Util.member "content")
-               |> Option.value ~default:""
-             in
-             Some (title, url, snippet)
-         | _ -> None)
+  with_parsed_json payload (fun json ->
+      json_list_member json (Yojson.Safe.Util.member "results")
+      |> List.filter_map (fun item ->
+             match
+               json_string_member item (Yojson.Safe.Util.member "title"),
+               json_string_member item (Yojson.Safe.Util.member "url")
+             with
+             | Some title, Some url when valid_search_result_url url ->
+                 let snippet =
+                   json_string_member item (Yojson.Safe.Util.member "content")
+                   |> Option.value ~default:""
+                 in
+                 Some (title, url, snippet)
+             | _ -> None))
 
 let parse_exa_json payload =
-  let json = Yojson.Safe.from_string payload in
-  json_list_member json (Yojson.Safe.Util.member "results")
-  |> List.filter_map (fun item ->
-         match
-           json_string_member item (Yojson.Safe.Util.member "title"),
-           json_string_member item (Yojson.Safe.Util.member "url")
-         with
-         | Some title, Some url when valid_search_result_url url ->
-             let snippet =
-               json_string_member item (Yojson.Safe.Util.member "text")
-               |> Option.value ~default:""
-             in
-             Some (title, url, snippet)
-         | _ -> None)
+  with_parsed_json payload (fun json ->
+      json_list_member json (Yojson.Safe.Util.member "results")
+      |> List.filter_map (fun item ->
+             match
+               json_string_member item (Yojson.Safe.Util.member "title"),
+               json_string_member item (Yojson.Safe.Util.member "url")
+             with
+             | Some title, Some url when valid_search_result_url url ->
+                 let snippet =
+                   json_string_member item (Yojson.Safe.Util.member "text")
+                   |> Option.value ~default:""
+                 in
+                 Some (title, url, snippet)
+             | _ -> None))
 
 let parse_bing_search_json payload =
-  let json = Yojson.Safe.from_string payload in
-  json_list_member json (fun j -> Yojson.Safe.Util.member "webPages" j |> Yojson.Safe.Util.member "value")
-  |> List.filter_map (fun item ->
-         match
-           json_string_member item (Yojson.Safe.Util.member "name"),
-           json_string_member item (Yojson.Safe.Util.member "url")
-         with
-         | Some title, Some url when valid_search_result_url url ->
-             let snippet =
-               json_string_member item (Yojson.Safe.Util.member "snippet")
-               |> Option.value ~default:""
-             in
-             Some (title, url, snippet)
-         | _ -> None)
+  with_parsed_json payload (fun json ->
+      json_list_member json (fun j -> Yojson.Safe.Util.member "webPages" j |> Yojson.Safe.Util.member "value")
+      |> List.filter_map (fun item ->
+             match
+               json_string_member item (Yojson.Safe.Util.member "name"),
+               json_string_member item (Yojson.Safe.Util.member "url")
+             with
+             | Some title, Some url when valid_search_result_url url ->
+                 let snippet =
+                   json_string_member item (Yojson.Safe.Util.member "snippet")
+                   |> Option.value ~default:""
+                 in
+                 Some (title, url, snippet)
+             | _ -> None))
 
 let looks_like_rss_payload payload =
   let normalized = String.lowercase_ascii payload in
@@ -629,7 +632,8 @@ type cache_entry = {
   expires_at : float;
 }
 
-let cache_entries : (string, cache_entry) Hashtbl.t = Hashtbl.create 32
+let initial_cache_capacity = 32
+let cache_entries : (string, cache_entry) Hashtbl.t = Hashtbl.create initial_cache_capacity
 let cache_mutex = Eio.Mutex.create ()
 let request_times : float Queue.t = Queue.create ()
 let rate_limit_mutex = Eio.Mutex.create ()

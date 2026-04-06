@@ -826,8 +826,10 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
           let do_run ~run_meta ~max_context ~run_generation ~is_retry =
             let max_idle_turns =
               match channel with
-              | Keeper_world_observation.Reactive -> 5
-              | Keeper_world_observation.Scheduled_autonomous -> 3
+              | Keeper_world_observation.Reactive ->
+                  Env_config_keeper.KeeperKeepalive.max_idle_turns_reactive
+              | Keeper_world_observation.Scheduled_autonomous ->
+                  Env_config_keeper.KeeperKeepalive.max_idle_turns_autonomous
             in
             Keeper_agent_run.run_turn ~config ~meta:run_meta ~base_dir
               ~max_context ~build_turn_prompt

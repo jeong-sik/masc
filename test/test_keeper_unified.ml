@@ -1803,7 +1803,10 @@ let test_prompt_no_self_check_in_prompt () =
     false (contains_substring user "SELF-CHECK")
 
 let test_on_idle_nudge_at_first_idle () =
-  let decision = HK.on_idle_decision
+  (* Use an explicit skip_at=3 to exercise the pure helper at a chosen
+     threshold, independent of any global/default configuration. *)
+  let decision = HK.on_idle_decision_with_threshold
+    ~skip_at:3
     ~consecutive_idle_turns:1
     ~tool_names:["keeper_board_list"; "keeper_tasks_list"] in
   match decision with
@@ -1815,14 +1818,45 @@ let test_on_idle_nudge_at_first_idle () =
       (Agent_sdk.Hooks.decision_kind_to_string
         (Agent_sdk.Hooks.classify_decision other)))
 
-let test_on_idle_skip_at_repeated_idle () =
-  let decision = HK.on_idle_decision
+let test_on_idle_final_warning_before_skip () =
+  (* At skip_at - 1, the hook should send a final-warning nudge *)
+  let decision = HK.on_idle_decision_with_threshold
+    ~skip_at:3
     ~consecutive_idle_turns:2
+    ~tool_names:["keeper_board_list"] in
+  match decision with
+  | Agent_sdk.Hooks.Nudge msg ->
+    check bool "final warning mentions stay_silent"
+      true (contains_substring msg "stay_silent")
+  | other ->
+    fail (Printf.sprintf "expected Nudge (final warning), got %s"
+      (Agent_sdk.Hooks.decision_kind_to_string
+        (Agent_sdk.Hooks.classify_decision other)))
+
+let test_on_idle_skip_at_repeated_idle () =
+  (* At skip_at the hook should issue Skip; use explicit threshold so the
+     test does not depend on the global constant *)
+  let decision = HK.on_idle_decision_with_threshold
+    ~skip_at:3
+    ~consecutive_idle_turns:3
     ~tool_names:["keeper_board_list"] in
   match decision with
   | Agent_sdk.Hooks.Skip -> ()
   | other ->
     fail (Printf.sprintf "expected Skip, got %s"
+      (Agent_sdk.Hooks.decision_kind_to_string
+        (Agent_sdk.Hooks.classify_decision other)))
+
+let test_on_idle_skip_with_custom_threshold () =
+  (* The pure helper must respect a custom skip_at value *)
+  let decision = HK.on_idle_decision_with_threshold
+    ~skip_at:2
+    ~consecutive_idle_turns:2
+    ~tool_names:["keeper_board_list"] in
+  match decision with
+  | Agent_sdk.Hooks.Skip -> ()
+  | other ->
+    fail (Printf.sprintf "expected Skip at custom threshold 2, got %s"
       (Agent_sdk.Hooks.decision_kind_to_string
         (Agent_sdk.Hooks.classify_decision other)))
 
@@ -1929,8 +1963,12 @@ let () =
             test_prompt_no_outcome_for_fresh_keeper;
           test_case "on_idle nudge at first idle" `Quick
             test_on_idle_nudge_at_first_idle;
+          test_case "on_idle final warning before skip" `Quick
+            test_on_idle_final_warning_before_skip;
           test_case "on_idle skip at repeated idle" `Quick
             test_on_idle_skip_at_repeated_idle;
+          test_case "on_idle skip with custom threshold" `Quick
+            test_on_idle_skip_with_custom_threshold;
         ] );
       ( "config",
         [

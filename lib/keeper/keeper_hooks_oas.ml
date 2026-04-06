@@ -139,21 +139,52 @@ let emit_cost_event
     @param trajectory_acc Optional trajectory accumulator for cost attribution *)
 
 (** Pure decision logic for the on_idle hook.  Testable without Room.config.
-    Returns Nudge on first idle turn (resets idle counter in OAS), Skip on 2+. *)
-let on_idle_decision ~consecutive_idle_turns ~tool_names : Agent_sdk.Hooks.hook_decision =
+
+    Graduated response to repeated tool calls uses the configured
+    [Env_config_keeper.KeeperKeepalive.idle_skip_threshold]:
+    - For idle counts below [skip_at - 1]: gentle nudge suggesting alternatives
+    - For idle counts at [skip_at - 1]: final warning (stronger nudge)
+      suggesting [stay_silent]
+    - For idle counts at or above [skip_at]: Skip (end this turn, but the
+      heartbeat loop will retry next cycle)
+
+    This keeps behavior accurate when [idle_skip_threshold] changes.
+    With the default [skip_at = 3], for example, the keeper gets a gentle
+    nudge on idle 1, a final warning on idle 2, and Skip on idle 3.
+
+    Skip is not death. The keeper's heartbeat loop will schedule a new
+    turn on the next cycle with fresh context. The key insight is that
+    burning more tokens on a stuck LLM is worse than retrying later. *)
+let on_idle_decision_with_threshold ~skip_at ~consecutive_idle_turns ~tool_names
+  : Agent_sdk.Hooks.hook_decision =
   let tools_str = match tool_names with
     | [] -> "<none>"
     | names -> String.concat ", " names
   in
-  if consecutive_idle_turns >= 2 then
+  if consecutive_idle_turns >= skip_at then
     Agent_sdk.Hooks.Skip
-  else
+  else if consecutive_idle_turns = skip_at - 1 then
+    (* Final warning before skip *)
     Agent_sdk.Hooks.Nudge
       (Printf.sprintf
-         "You have been repeating the same tools (%s) without making progress. \
-          Try a genuinely different approach: post findings to the board, \
-          claim a different task, or end your turn silently."
+         "FINAL WARNING: you repeated %s %d times. Next idle = turn ends. \
+          Do one of: (1) keeper_board_post a finding, (2) keeper_board_comment on a post, \
+          (3) keeper_tool_search to find tools, or (4) SPEECH_ACT: stay_silent."
+         tools_str consecutive_idle_turns)
+  else
+    (* First nudge *)
+    Agent_sdk.Hooks.Nudge
+      (Printf.sprintf
+         "You are repeating %s without progress. \
+          Try a different tool: post to the board, search for tools with \
+          keeper_tool_search, claim a task, or stay_silent."
          tools_str)
+
+(** Wrapper around {!on_idle_decision_with_threshold} that supplies the
+    [idle_skip_threshold] constant from [Env_config_keeper.KeeperKeepalive]. *)
+let on_idle_decision ~consecutive_idle_turns ~tool_names : Agent_sdk.Hooks.hook_decision =
+  let skip_at = Env_config_keeper.KeeperKeepalive.idle_skip_threshold in
+  on_idle_decision_with_threshold ~skip_at ~consecutive_idle_turns ~tool_names
 
 let make_hooks
     ~config:(_config : Room.config)

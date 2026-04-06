@@ -26,9 +26,16 @@ let bus_ref : Agent_sdk.Event_bus.t option Atomic.t = Atomic.make None
 let set_bus bus = Atomic.set bus_ref (Some bus)
 let get_bus () = Atomic.get bus_ref
 
+(* Concurrent keeper turn slots. This is NOT the LLM slot count —
+   it is the number of keeper fibers allowed to attempt a turn
+   simultaneously. The LLM's own slot limit (llama-server -np)
+   handles inference queuing. Setting this lower than the keeper
+   count causes starvation: reactive wakeups (explicit mentions)
+   queue behind long autonomous turns and never execute.
+   Default 12 = generous headroom for up to 12 keepers. *)
 let keeper_turn_throttle_limit =
   Keeper_config.int_of_env_default
-    "MASC_KEEPER_AUTOBOOT_MAX" ~default:3 ~min_v:1 ~max_v:20
+    "MASC_KEEPER_AUTOBOOT_MAX" ~default:12 ~min_v:1 ~max_v:20
 ;;
 
 let turn_semaphore = Eio.Semaphore.make keeper_turn_throttle_limit

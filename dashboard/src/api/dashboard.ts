@@ -599,8 +599,16 @@ export function fetchToolMetrics(): Promise<ToolMetricsResponse> {
   return get('/api/v1/tool-metrics')
 }
 
-export function fetchDashboardTools(): Promise<DashboardToolsResponse> {
-  return get('/api/v1/dashboard/tools')
+export async function fetchDashboardTools(): Promise<DashboardToolsResponse> {
+  const raw = await get<DashboardToolsResponse>('/api/v1/dashboard/tools')
+  if (raw.tool_inventory?.tools) {
+    raw.tool_inventory.tools = raw.tool_inventory.tools.map(t => ({
+      ...t,
+      category: t.category ?? 'uncategorized',
+      tier: t.tier ?? 'standard',
+    }))
+  }
+  return raw
 }
 
 export type PromptSource = 'override' | 'file' | 'default' | 'missing'

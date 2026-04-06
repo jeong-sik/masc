@@ -1317,6 +1317,23 @@ let read_meta config name : (keeper_meta option, string) result =
   read_meta_file_path path
 ;;
 
+(** Read keeper meta only if the file's mtime has changed since [last_mtime].
+    Returns [Some (meta, new_mtime)] when the file changed, [None] when
+    unchanged.  Avoids parsing JSON on every heartbeat cycle when no
+    operator has modified the meta file. *)
+let read_meta_if_changed config name ~(last_mtime : float)
+  : (keeper_meta * float) option =
+  let path = keeper_meta_path config name in
+  if not (Sys.file_exists path) then None
+  else
+    let stat = Unix.stat path in
+    if stat.Unix.st_mtime <= last_mtime then None
+    else
+      match read_meta_file_path path with
+      | Ok (Some meta) -> Some (meta, stat.Unix.st_mtime)
+      | _ -> None
+;;
+
 (* Model selection, path utilities, and JSONL helpers
    extracted to Keeper_types_support *)
 include Keeper_types_support

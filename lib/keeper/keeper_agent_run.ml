@@ -215,12 +215,12 @@ let log_keeper_memory_write
     @param user_message The user's message to the keeper
     @param cascade_name Cascade profile name for model selection
     @param generation Current generation counter
-    @param max_turns Maximum agent turns (default: OAS default, currently 10)
+    @param max_turns Maximum agent turns (default: 50, generous budget for multi-step)
     @param guardrails Optional OAS guardrails for tool safety gates
     @param temperature MODEL temperature override; when omitted, resolved
            from [Cascade_inference] with a 0.3 fallback
     @param max_tokens Maximum output tokens override; when omitted, resolved
-           from [Cascade_inference] with a 2048 fallback
+           from [Cascade_inference] with a 8192 fallback
     @param is_retry When [true], replays the current user message into the
            working context without persisting it again, so transient retry
            attempts do not duplicate the user entry in session history *)
@@ -236,7 +236,7 @@ let run_turn
     ~(user_message : string)
     ~(cascade_name : string)
     ~(generation : int)
-    ?(max_turns : int = 10) (* align with OAS Types.default_agent_config.max_turns *)
+    ?(max_turns : int = 50) (* generous budget for multi-step tool chains *)
     ?(max_idle_turns : int = 3)
     ?(history_user_source = "direct_user")
     ?(history_assistant_source = "direct_assistant")
@@ -265,8 +265,10 @@ let run_turn
     | None ->
       Cascade_inference.resolve_max_tokens
         ~cascade_name
-        (* Keep under Cloudflare tunnel 100s timeout: 2048 / 35 tok/s ~ 59s *)
-        ~fallback:(fun () -> 2048)
+        (* 8192 allows complex multi-tool reasoning per turn.
+           Cloudflare tunnel 100s is no longer a constraint with
+           streaming responses. *)
+        ~fallback:(fun () -> 8192)
   in
   (* 0b. Create context injector for temporal awareness *)
   let injector_config = Masc_context_injector.default_config () in
@@ -407,7 +409,7 @@ let run_turn
      Solves the 9B text_response trap by making proven tools visible at
      turn 0 without requiring keeper_tool_search first.  #5566 *)
   let affinity_k = Keeper_tool_affinity.configured_max_k () in
-  let affinity_populated =
+  let _affinity_populated =
     if affinity_k > 0 then begin
       let masc_root = Filename.concat config.base_path ".masc" in
       let allowed = Keeper_tool_policy.keeper_allowed_tool_names meta in
@@ -961,19 +963,18 @@ let run_turn
             all_allowed
         in
         let tool_filter = Agent_sdk.Guardrails.AllowList all_allowed in
-        (* L2: Force tool calling on autonomous turn 0.
-           tool_choice=Any is deterministic — the API parser enforces tool call
-           format.  Prompt-level "MUST call a tool" is non-deterministic and
-           unreliable for 9B models.  See #5566. *)
+        (* Force tool calling on every turn except the last.
+           tool_choice=Any (→ "required") is deterministic at the API level:
+           the parser enforces tool call format, preventing the "text response
+           trap" where 9B models respond with text instead of calling tools.
+           WHICH tool is called remains non-deterministic (model decides).
+           Last turn uses Auto so the keeper can emit a [STATE] text block.
+           Supersedes L2 turn-0-only approach.  See #5566. *)
         let tool_choice =
-          let is_autonomous = history_user_source = "world_state_prompt" in
-          if is_autonomous && turn = 0 && affinity_populated <> []
-             && List.length all_allowed > 0 then begin
-            Log.Keeper.info "keeper:%s L2 tool_choice=Any on autonomous turn 0 (%d affinity tools)"
-              meta.name (List.length affinity_populated);
-            Some Agent_sdk.Types.Any
-          end else
-            current_params.tool_choice
+          if is_last_turn || List.length all_allowed = 0 then
+            current_params.tool_choice  (* last turn: Auto for [STATE] block *)
+          else
+            Some Agent_sdk.Types.Any  (* all other turns: force tool use *)
         in
         (* Yield after CPU-bound tool filtering to let HTTP handlers run.
            Without this, N concurrent keeper fibers starve the Eio scheduler

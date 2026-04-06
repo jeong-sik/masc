@@ -554,19 +554,19 @@ let keeper_unified_temperature () : float =
     ~max_v:2.0
 
 (** Max output tokens for unified keeper turns.
-    Env: [MASC_KEEPER_UNIFIED_MAX_TOKENS]. Default: 2048. *)
+    8192 allows complex multi-tool reasoning and chain-of-thought per turn.
+    Env: [MASC_KEEPER_UNIFIED_MAX_TOKENS]. Default: 8192. *)
 let keeper_unified_max_tokens () : int =
   int_of_env_default
     "MASC_KEEPER_UNIFIED_MAX_TOKENS"
-    ~default:2048
+    ~default:8192
     ~min_v:256
-    ~max_v:16000
+    ~max_v:32000
 
-(* max_turns removed: agent turn budgets belong in OAS
-   (Types.default_agent_config.max_turns = 10). MASC must not hardcode
-   agent runtime parameters.
-   Known constraints (retain for future OAS tuning):
+(* max_turns is set in keeper_agent_run.ml (default: 50).
+   Known constraints (retain for future tuning):
    - 1000 turns caused 787s+ latency per turn
    - 20 turns caused 6.7GB RSS in 2 minutes with 3 concurrent keepers
    - 3 turns left keepers unable to do meaningful work (board_post x3 only)
-   If OAS default needs adjustment, change it in OAS types.ml. *)
+   - 10 turns was insufficient for multi-step tasks (PR creation, web search)
+   - 50 turns balances completion rate vs resource usage *)

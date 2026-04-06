@@ -310,14 +310,16 @@ let run_argv_with_status ?(timeout_sec = 60.0) ?env ?cwd (argv : string list) : 
           | None -> default_cwd
           | Some dir -> Eio.Path.(default_cwd / dir)
         in
-        let buf = Buffer.create 1024 in
+        let stdout_buf = Buffer.create 1024 in
+        let stderr_buf = Buffer.create 256 in
         let label = String.concat " " (List.map Filename.quote argv) in
         try
           Eio.Time.with_timeout_exn clk timeout_sec (fun () ->
               Eio.Switch.run (fun sw ->
                   let proc =
                     Eio.Process.spawn ~sw pm ~cwd:effective_cwd ?env
-                      ~stdout:(Eio.Flow.buffer_sink buf)
+                      ~stdout:(Eio.Flow.buffer_sink stdout_buf)
+                      ~stderr:(Eio.Flow.buffer_sink stderr_buf)
                       argv
                   in
                   let status = Eio.Process.await proc in
@@ -326,12 +328,28 @@ let run_argv_with_status ?(timeout_sec = 60.0) ?env ?cwd (argv : string list) : 
                     | `Exited n -> Unix.WEXITED n
                     | `Signaled n -> Unix.WSIGNALED n
                   in
-                  (unix_status, Buffer.contents buf)))
+                  let output =
+                    let stdout_s = Buffer.contents stdout_buf in
+                    let stderr_s = Buffer.contents stderr_buf in
+                    match unix_status with
+                    | Unix.WEXITED 0 -> stdout_s
+                    | _ ->
+                      if stderr_s = "" then stdout_s
+                      else if stdout_s = "" then stderr_s
+                      else stdout_s ^ "\n" ^ stderr_s
+                  in
+                  (unix_status, output)))
         with
         | Eio.Time.Timeout ->
             Log.Misc.warn "[Process_eio] Timeout after %.0fs: %s"
               timeout_sec label;
-            (Unix.WSIGNALED Sys.sigterm, Buffer.contents buf)
+            let partial = Buffer.contents stdout_buf in
+            let err = Buffer.contents stderr_buf in
+            let output = if err = "" then partial
+              else if partial = "" then err
+              else partial ^ "\n" ^ err
+            in
+            (Unix.WSIGNALED Sys.sigterm, output)
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn ->
             if should_retry_unix_fallback exn then (

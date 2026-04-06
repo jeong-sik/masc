@@ -148,15 +148,6 @@ let dispatch
           sw = Eio_context.get_switch_opt () }
         ~name ~args
 
-  | Mod_improve_loop ->
-      Tool_improve_loop.dispatch
-        { Tool_improve_loop.config; agent_name;
-          sw = Eio_context.get_switch_opt ();
-          clock = Eio_context.get_clock_opt ();
-          proc_mgr = get_proc_mgr_opt ();
-          net = get_net_opt () }
-        ~name ~args
-
   | Mod_repair_loop ->
       let ctx : _ Tool_repair_loop_types.context =
         { config; agent_name;

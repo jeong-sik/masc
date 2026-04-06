@@ -165,7 +165,6 @@ type stage_timing =
   ; board_ms : float
   ; turn_ms : float
   ; recurring_ms : float
-  ; improve_ms : float
   }
 
 let stage_timing_ring_size () =
@@ -203,7 +202,6 @@ let stage_timing_to_json ~ring ~count =
       ; "board", extract (fun t -> t.board_ms)
       ; "turn", extract (fun t -> t.turn_ms)
       ; "recurring", extract (fun t -> t.recurring_ms)
-      ; "improve", extract (fun t -> t.improve_ms)
       ])
 ;;
 
@@ -838,25 +836,6 @@ let maybe_write_heartbeat_snapshot
     last_snapshot_ts := now_ts)
 ;;
 
-let tick_keepalive_improve_loop ~(ctx : _ context) ~(meta_after_proactive : keeper_meta)
-  : unit
-  =
-  try
-    Tool_improve_loop.maybe_tick_from_keepalive
-      ~config:ctx.config
-      ~agent_name:meta_after_proactive.agent_name
-      ~keeper_name:meta_after_proactive.name
-      ~sw:ctx.sw
-      ~clock:ctx.clock
-      ~proc_mgr:ctx.proc_mgr
-      ~net:ctx.net
-      ()
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
-    Log.Keeper.warn "improve loop keepalive tick skipped: %s" (Printexc.to_string exn)
-;;
-
 let record_keepalive_stage_timing
       ~(timing_ring : stage_timing array)
       ~(timing_cursor : int ref)
@@ -872,8 +851,6 @@ let record_keepalive_stage_timing
       ~(t_turn_end : float)
       ~(t_recurring_start : float)
       ~(t_recurring_end : float)
-      ~(t_improve_start : float)
-      ~(t_improve_end : float)
   : unit
   =
   let timing =
@@ -882,7 +859,6 @@ let record_keepalive_stage_timing
     ; board_ms = (t_board_end -. t_board_start) *. 1000.0
     ; turn_ms = (t_turn_end -. t_turn_start) *. 1000.0
     ; recurring_ms = (t_recurring_end -. t_recurring_start) *. 1000.0
-    ; improve_ms = (t_improve_end -. t_improve_start) *. 1000.0
     }
   in
   timing_ring.(!timing_cursor) <- timing;
@@ -916,7 +892,6 @@ let run_heartbeat_loop
       ; board_ms = 0.0
       ; turn_ms = 0.0
       ; recurring_ms = 0.0
-      ; improve_ms = 0.0
       }
   in
   let timing_cursor = ref 0 in
@@ -1054,7 +1029,6 @@ let run_heartbeat_loop
           dispatch_recurring_keepalive ~ctx ~meta_after_proactive ~now_ts
         in
         let t_recurring_end = Time_compat.now () in
-        let t_improve_start = t_recurring_end in
         let base =
           if smart_hb_enabled ()
           then
@@ -1063,8 +1037,6 @@ let run_heartbeat_loop
               ~last_activity:!last_successful_heartbeat_ts
           else float_of_int (keepalive_interval_sec ())
         in
-        tick_keepalive_improve_loop ~ctx ~meta_after_proactive;
-        let t_improve_end = Time_compat.now () in
         (* Phase 0: push stage timing to ring buffer *)
         record_keepalive_stage_timing
           ~timing_ring
@@ -1080,9 +1052,7 @@ let run_heartbeat_loop
           ~t_turn_start
           ~t_turn_end
           ~t_recurring_start
-          ~t_recurring_end
-          ~t_improve_start
-          ~t_improve_end;
+          ~t_recurring_end;
         let jitter =
           base *. Env_config.KeeperKeepalive.jitter_factor *. Random.float 1.0
         in

@@ -36,8 +36,9 @@ let test_snapshot_exposes_keeper_and_social_actions () =
             Yojson.Safe.Util.(row |> member "action_type" |> to_string = action_type))
           available_actions
       in
-      match find_action "social_sweep" with
-      | None -> Alcotest.fail "expected social_sweep in available_actions"
+      (* social_sweep removed in #5428; verify broadcast instead *)
+      match find_action "broadcast" with
+      | None -> Alcotest.fail "expected broadcast in available_actions"
       | Some row ->
           Alcotest.(check string) "target_type" "namespace"
             Yojson.Safe.Util.(row |> member "target_type" |> to_string);

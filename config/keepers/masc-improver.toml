@@ -38,6 +38,6 @@ allowed_paths = ["*"]
 tool_preset = "delivery"
 
 # Deny tools that local models misuse in idle loops.
-tool_denylist = ["keeper_board_comment"]
+tool_denylist = ["keeper_board_comment", "keeper_board_post"]
 
 proactive_enabled = true

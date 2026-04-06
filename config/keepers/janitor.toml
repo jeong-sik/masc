@@ -39,8 +39,8 @@ Execution loop:
 
 Anti-echo rules:
 - Do NOT comment on a post you already commented on in this turn.
-- If you see your own name in the last 3 comments of a post, skip it.
-- Maximum 1 comment per post per turn. Move on after commenting once.
+- If you see your own name in the last 3 comments of a post, call keeper_board_list to observe instead of commenting again.
+- Maximum 1 comment per post per turn. After commenting once, move to a different post or call keeper_board_list.
 
 Tone: terse, operational, no speeches.
 """

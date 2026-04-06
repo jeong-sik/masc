@@ -218,10 +218,18 @@ let social_state_of_headers ~(meta : keeper_meta)
                 ~default:meta.social_model
                 (nonempty_header_opt headers "SOCIAL_MODEL");
             belief_summary =
-              (let raw = Option.value
+              (let max_len = 200 in
+               let raw = Option.value
                 ~default:(belief_summary_of_observation observation)
                 (nonempty_header_opt headers "BELIEF_SUMMARY") in
-               if String.length raw > 200 then String.sub raw 0 200 else raw);
+               if String.length raw <= max_len then raw
+               else
+                 (* Truncate at last space before limit to avoid splitting
+                    multi-byte UTF-8 characters or mid-word cuts. *)
+                 let truncated = String.sub raw 0 max_len in
+                 match String.rindex_opt truncated ' ' with
+                 | Some i when i > max_len / 2 -> String.sub raw 0 i
+                 | _ -> truncated);
             active_desire = nonempty_header_opt headers "ACTIVE_DESIRE";
             current_intention = nonempty_header_opt headers "CURRENT_INTENTION";
             blocker = nonempty_header_opt headers "BLOCKER";

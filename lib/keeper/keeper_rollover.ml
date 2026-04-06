@@ -70,47 +70,52 @@ let maybe_rollover_oas_handoff
         let prev_trace_id = base_meta.runtime.trace_id in
         let new_trace_id = Keeper_identity.generate_trace_id () in
         let next_generation = current_generation + 1 in
-        let new_session =
-          create_session ~session_id:new_trace_id ~base_dir
-        in
-        try
-          ignore
-            (save_oas_checkpoint ~session:new_session
-               ~agent_name:base_meta.agent_name
-               ~model ~ctx ~generation:next_generation);
-          let updated_meta =
-            {
-              base_meta with
-              updated_at = now_iso ();
-              runtime = { base_meta.runtime with
-                trace_id = new_trace_id;
-                trace_history =
-                  dedupe_keep_order (prev_trace_id :: base_meta.runtime.trace_history);
-                generation = next_generation;
-                last_handoff_ts = now_ts;
-              };
-            }
+        (try
+          let new_session =
+            create_session ~session_id:new_trace_id ~base_dir
           in
-          let handoff_json =
-            `Assoc
-              [
-                ("performed", `Bool true);
-                ("from_generation", `Int current_generation);
-                ("to_generation", `Int next_generation);
-                ("new_generation", `Int next_generation);
-                ("prev_trace_id", `String prev_trace_id);
-                ("new_trace_id", `String new_trace_id);
-                ("to_model", `String model);
-                ("context_ratio", `Float ratio);
-              ]
-          in
-          Log.Keeper.info
-            "keeper:%s OAS handoff rollover trace=%s->%s gen=%d->%d ratio=%.3f"
-            base_meta.name prev_trace_id new_trace_id current_generation
-            next_generation ratio;
-          { rollover_base with updated_meta; handoff_json = Some handoff_json }
+          match save_oas_checkpoint ~session:new_session
+                  ~agent_name:base_meta.agent_name
+                  ~model ~ctx ~generation:next_generation with
+          | Error e ->
+              Log.Keeper.error
+                "keeper:%s OAS handoff rollover ABORTED — checkpoint save failed: %s"
+                base_meta.name e;
+              rollover_base
+          | Ok _checkpoint ->
+              let updated_meta =
+                {
+                  base_meta with
+                  updated_at = now_iso ();
+                  runtime = { base_meta.runtime with
+                    trace_id = new_trace_id;
+                    trace_history =
+                      dedupe_keep_order (prev_trace_id :: base_meta.runtime.trace_history);
+                    generation = next_generation;
+                    last_handoff_ts = now_ts;
+                  };
+                }
+              in
+              let handoff_json =
+                `Assoc
+                  [
+                    ("performed", `Bool true);
+                    ("from_generation", `Int current_generation);
+                    ("to_generation", `Int next_generation);
+                    ("new_generation", `Int next_generation);
+                    ("prev_trace_id", `String prev_trace_id);
+                    ("new_trace_id", `String new_trace_id);
+                    ("to_model", `String model);
+                    ("context_ratio", `Float ratio);
+                  ]
+              in
+              Log.Keeper.info
+                "keeper:%s OAS handoff rollover trace=%s->%s gen=%d->%d ratio=%.3f"
+                base_meta.name prev_trace_id new_trace_id current_generation
+                next_generation ratio;
+              { rollover_base with updated_meta; handoff_json = Some handoff_json }
         with
         | Eio.Cancel.Cancelled _ as e -> raise e
         | exn ->
             log_keeper_exn ~label:"keeper OAS handoff rollover failed" exn;
-            rollover_base
+            rollover_base)

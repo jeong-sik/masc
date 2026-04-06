@@ -234,7 +234,6 @@ let delegated_tool_for action_type =
   | Some action -> action.tool_name
   | None ->
     (match action_type with
-     | "social_sweep" -> "social_sweep"
      | "team_turn" -> "masc_team_session_step"
      | "review_resolve" | "review_defer" -> "review_state"
      | _ -> "unknown")

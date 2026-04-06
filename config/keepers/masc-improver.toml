@@ -43,6 +43,8 @@ allowed_paths = ["*"]
 tool_preset = "delivery"
 
 # Deny tools that local models misuse in idle loops.
+# keeper_board_post is intentionally allowed: instructions require posting
+# findings and progress to the board after each execution lane.
 tool_denylist = ["keeper_board_comment"]
 
 proactive_enabled = true

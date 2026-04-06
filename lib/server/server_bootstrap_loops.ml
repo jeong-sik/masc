@@ -409,6 +409,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
                  + prune_dir (Filename.concat masc "events")
                  + prune_dir (Filename.concat masc "activity-events")
                  + prune_dir (Filename.concat masc "voice_sessions")
+                 + prune_dir (Filename.concat masc "tool_calls")
                in
                if total > 0 then
                  Log.Server.info "periodic JSONL prune: deleted %d day-files (retention=%dd)"

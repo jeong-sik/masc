@@ -3,7 +3,7 @@
     Persists complete tool call records to [.masc/tool_calls/YYYY-MM/DD.jsonl].
     Used by dashboard tool-call inspector for debugging.
 
-    @since 2.250.0 *)
+    @since 2.249.0 *)
 
 val init : base_path:string -> unit
 (** [init ~base_path] creates the Dated_jsonl store. Call once at startup. *)

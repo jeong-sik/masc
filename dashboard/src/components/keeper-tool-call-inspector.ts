@@ -31,10 +31,20 @@ function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
 
   return html`
     <div
-      class="border-b border-[var(--border)] hover:bg-[var(--bg-hover)] cursor-pointer transition-colors"
-      onClick=${() => { expanded.value = !expanded.value }}
+      class="border-b border-[var(--border)] hover:bg-[var(--bg-hover)] transition-colors"
     >
-      <div class="flex items-center gap-2 px-3 py-2 text-xs">
+      <div
+        class="flex items-center gap-2 px-3 py-2 text-xs cursor-pointer"
+        role="button"
+        tabIndex=${0}
+        onClick=${() => { expanded.value = !expanded.value }}
+        onKeyDown=${(e: KeyboardEvent) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            expanded.value = !expanded.value
+          }
+        }}
+      >
         <span class="font-mono ${cat.color} w-4 text-center flex-shrink-0">${cat.icon}</span>
         <span class="font-mono text-[var(--fg)] flex-shrink-0 w-16">${formatTimestamp(entry.ts)}</span>
         <span class="font-mono font-medium text-[var(--fg)] truncate flex-1" title=${entry.tool}>${entry.tool}</span>

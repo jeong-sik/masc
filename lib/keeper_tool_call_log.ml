@@ -10,7 +10,7 @@
     Output is truncated to {!max_output_len} bytes to prevent disk
     explosion from large tool results (e.g. full file reads).
 
-    @since 2.250.0 — Keeper observability *)
+    @since 2.249.0 — Keeper observability *)
 
 let max_output_len = 4000
 
@@ -25,14 +25,17 @@ let init ~base_path =
      Log.Misc.warn "keeper_tool_call_log: init failed: %s"
        (Printexc.to_string exn))
 
+let suffix = "...(truncated)"
+let suffix_len = String.length suffix
+
 let truncate_output s =
   if String.length s <= max_output_len then s
-  else String.sub s 0 max_output_len ^ "...(truncated)"
+  else String.sub s 0 (max_output_len - suffix_len) ^ suffix
 
 let input_to_json (input : Yojson.Safe.t) : Yojson.Safe.t =
   let s = Yojson.Safe.to_string input in
   if String.length s > max_output_len then
-    `String (String.sub s 0 max_output_len ^ "...(truncated)")
+    `String (String.sub s 0 (max_output_len - suffix_len) ^ suffix)
   else input
 
 let log_call ~keeper_name ~tool_name ~(input : Yojson.Safe.t)
@@ -56,7 +59,7 @@ let log_call ~keeper_name ~tool_name ~(input : Yojson.Safe.t)
        Log.Misc.warn "keeper_tool_call_log: append failed for %s/%s: %s"
          keeper_name tool_name (Printexc.to_string exn))
 
-let read_recent ?(keeper_name : string option) ?(n = 100) () : Yojson.Safe.t list =
+let read_recent ?keeper_name ?(n = 100) () : Yojson.Safe.t list =
   match !store_ref with
   | None -> []
   | Some store ->

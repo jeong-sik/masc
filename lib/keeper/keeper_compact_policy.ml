@@ -60,12 +60,12 @@ let compact_if_needed
         PruneToolOutputs; MergeContiguous;
         DropLowImportance]
       in
-      (* FoldCompleted replaces SummarizeOld — applied as a separate
-         OAS Custom reducer after the standard strategy pipeline. *)
-      let fold_reducer = Keeper_compaction.fold_completed_strategy () in
+      (* Use OAS stub_tool_results instead of MASC's FoldCompleted —
+         OAS owns context reduction, MASC is a consumer. *)
+      let fold_reducer = Agent_sdk.Context_reducer.stub_tool_results ~keep_recent:2 in
       let strategy_names =
         List.map Context_compact_oas.strategy_name strategies
-        @ ["FoldCompleted"]
+        @ ["StubToolResults"]
       in
       Log.Harness.info
         "[pre_compact] keeper=%s ratio=%.4f messages=%d tokens=%d trigger=%s"

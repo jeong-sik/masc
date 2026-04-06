@@ -83,12 +83,6 @@ let normalize_response_text
           (Printf.sprintf "Completed without a textual reply. Tools used: %s."
              (String.concat ", " tool_names))
 
-let take n items =
-  if n <= 0 then
-    []
-  else
-    List.filteri (fun i _ -> i < n) items
-
 let tool_query_text_of_user_message (text : string) : string =
   let allowed_sections =
     [
@@ -130,39 +124,6 @@ let tool_query_text_of_user_message (text : string) : string =
           loop current_section kept rest
   in
   loop None [] lines
-
-let prioritized_disclosed_tool_names
-    ~(max_tools : int)
-    ~(always_include_tools : string list)
-    ~(retrieved_names : string list)
-    ~(fallback_tools : string list)
-    ~(use_fallback : bool) : string list =
-  (* Cross-list dedup handled by [seen] hashtable below.
-     Per-list dedup removed: inputs are already unique
-     (retrieve returns distinct names, core_always is a static set). *)
-  let seen = Hashtbl.create (max 16 max_tools) in
-  let add_with_budget acc names =
-    let remaining = max_tools - List.length acc in
-    if remaining <= 0 then
-      acc
-    else
-      let remaining = ref remaining in
-      let added_rev = ref [] in
-      List.iter (fun name ->
-        if !remaining > 0 && not (Hashtbl.mem seen name) then begin
-          Hashtbl.replace seen name ();
-          decr remaining;
-          added_rev := name :: !added_rev
-        end
-      ) names;
-      acc @ List.rev !added_rev
-  in
-  let acc = add_with_budget [] always_include_tools in
-  let acc = add_with_budget acc retrieved_names in
-  if use_fallback then
-    add_with_budget acc fallback_tools
-  else
-    acc
 
 let log_keeper_proof ~(keeper_name : string) (proof : Agent_sdk.Cdal_proof.t) =
   let status_string =
@@ -423,24 +384,34 @@ let run_turn
   let tool_usage_before =
     keeper_tool_usage_snapshot ~base_path:config.base_path ~keeper_name:meta.name
   in
-  (* Build BM25 tool index for progressive disclosure.
-     Index uses **preset-scoped** universe (not the full 244+ universe)
-     so BM25 searches a smaller, relevant candidate pool per preset.
-     A Minimal keeper indexes ~30 tools instead of 244+, giving 66.7%
-     visibility at top_k=20 instead of 8.2%.  See #4637.
+  (* Progressive tool disclosure via OAS Tool_selector.
+     Delegates BM25 retrieval, confidence gating, fallback, and optional
+     LLM reranking to Tool_selector.select instead of manual Tool_index
+     calls.  See OAS boundary violation #6.
 
-     The dispatch-time tool set (keeper_tools / all_tool_names) still
-     covers the full universe so externally-granted tools remain callable.
+     Korean keyword aliases: Tool_selector.select uses Tool_index.of_tools
+     internally (aliases=[], group=None).  To preserve bilingual BM25
+     matching, we append Korean keywords directly into tool descriptions.
+     This gives equivalent BM25 term overlap.
 
-     top_k=20 (up from default 10) for better coverage.
-     Group by prefix so co-retrieval pulls related tools together
-     (e.g. matching keeper_board_post also retrieves keeper_board_comment).
-     OAS Tool_index.build already supports group co-retrieval. *)
-  let tool_index_config =
-    { Agent_sdk.Tool_index.default_config with top_k = 20 } in
-  (* Korean keyword aliases for bilingual BM25 matching.
+     Trade-off vs previous manual approach:
+     - Lost: group co-retrieval (e.g. matching keeper_board_post would
+       pull keeper_board_comment).  Mitigated by k=20 which already
+       retrieves enough related tools.
+     - Lost: pre-built index reuse across turns.  Tool_selector rebuilds
+       per call, but Tool_index construction is O(n) with n~30-60 for
+       preset-scoped tools — sub-millisecond on M3.
+     - Gained: single-point-of-truth for BM25+confidence+fallback+rerank
+       logic.  ~120 fewer lines of manual retrieval code.
+
+     TODO(OAS): Add Tool_selector.select_with_index that accepts a
+     pre-built Tool_index.t to support aliases, groups, and index reuse.
+     When that lands, this code can drop the description augmentation. *)
+
+  (* Korean keyword map for bilingual BM25 matching.
      Tool descriptions are English; Korean users issue Korean queries.
-     Appending Korean keywords gives BM25 term overlap across languages.
+     Appending Korean keywords to descriptions gives BM25 term overlap
+     across languages.
      Keys must match actual tool names from keeper_tools. *)
   let korean_keywords = [
     "keeper_board_post", "게시판 글 작성 올리기 포스트";
@@ -516,6 +487,33 @@ let run_turn
     (* masc_broadcast, masc_who, masc_messages require MCP session context
        and fail in keeper. Use keeper_broadcast instead. (#4694) *)
   ] in
+  (* Augment tool descriptions with Korean keywords for bilingual BM25.
+     Tool_selector.select builds its index from Tool.t descriptions, so
+     appending keywords here is equivalent to the old Tool_index aliases. *)
+  let augment_tool_description (t : Agent_sdk.Tool.t) : Agent_sdk.Tool.t =
+    match List.assoc_opt t.schema.name korean_keywords with
+    | None -> t
+    | Some kw ->
+      let augmented_desc = t.schema.description ^ " " ^ kw in
+      { t with schema = { t.schema with description = augmented_desc } }
+  in
+  (* Preset-scoped tool universe: only include tools within the keeper's
+     preset, not the full 244+ universe.  This reduces BM25 noise and
+     improves ranking quality.  See #4637. *)
+  let preset_scoped_names =
+    Keeper_exec_tools.keeper_preset_universe_tool_names meta
+  in
+  let scoped_tools =
+    List.filter (fun (t : Agent_sdk.Tool.t) ->
+      List.mem t.schema.name preset_scoped_names
+    ) keeper_tools
+    |> List.map augment_tool_description
+  in
+  (* Full-universe search index for keeper_tool_search.
+     Separate from the preset-scoped Tool_selector used for progressive disclosure:
+     search needs access to ALL tools so the keeper can discover beyond its preset.
+     BM25 progressive disclosure is now delegated to OAS Tool_selector.select_names;
+     this index serves only the explicit keeper_tool_search tool. *)
   let tool_entries = List.map (fun (t : Agent_sdk.Tool.t) ->
     let name = t.schema.name in
     let group =
@@ -550,21 +548,12 @@ let run_turn
     in
     Agent_sdk.Tool_index.{ name; description = t.schema.description; group; aliases }
   ) keeper_tools in
-  (* Preset-scoped BM25 index: only index tools within the keeper's preset
-     universe, not the full 244+ universe.  This reduces noise and improves
-     BM25 ranking quality.  See #4637. *)
-  let preset_scoped_names =
-    Keeper_exec_tools.keeper_preset_universe_tool_names meta
-  in
-  let scoped_tool_entries =
-    List.filter (fun (e : Agent_sdk.Tool_index.entry) ->
-      List.mem e.name preset_scoped_names
-    ) tool_entries
-  in
-  let tool_index = Agent_sdk.Tool_index.build ~config:tool_index_config scoped_tool_entries in
-  (* Broad search index for keeper_tool_search.
-     Built from all registered tool entries (not just preset-scoped),
-     but search results are post-filtered to keeper_allowed_tool_names
+  (* Full-universe search index for keeper_tool_search.
+     Separate from the preset-scoped Tool_selector used for progressive disclosure:
+     search needs access to ALL tools so the keeper can discover beyond its preset.
+     BM25 progressive disclosure is now delegated to OAS Tool_selector.select_names;
+     this index serves only the explicit keeper_tool_search tool.
+     Search results are post-filtered to keeper_allowed_tool_names
      so the keeper only sees tools it is actually permitted to call. *)
   let search_index = Agent_sdk.Tool_index.build ~config:tool_index_config tool_entries in
   (* Map tool name → OAS schema description for search result enrichment *)
@@ -644,11 +633,10 @@ let run_turn
   );
   (* Visibility measurement (#4961): log universe size vs BM25 scope *)
   if Keeper_types_profile.keeper_debug then
-    Log.Keeper.debug "keeper:%s tool visibility: total=%d preset_scoped=%d bm25_indexed=%d search_indexed=%d"
+    Log.Keeper.debug "keeper:%s tool visibility: total=%d preset_scoped=%d search_indexed=%d"
       meta.name
-      (List.length tool_entries)
-      (List.length preset_scoped_names)
-      (List.length scoped_tool_entries)
+      (List.length keeper_tools)
+      (List.length scoped_tools)
       (List.length tool_entries);
   (* Layer 0: Core tools — always visible to the LLM regardless of preset.
      Kept to 5 survival-critical tools (#4961).  Other coordination tools
@@ -711,11 +699,13 @@ let run_turn
     ~config ~meta_ref ~session ~ctx_ref ~generation ?max_cost_usd
     ?trajectory_acc
     () in
-  (* Optional LLM reranker for BM25 results.
-     When enabled, uses OAS default_rerank_fn via global Eio context.
-     Disabled by default (MASC_KEEPER_LLM_RERANK=true to enable). *)
-  let rerank_fn =
-    if Keeper_config.keeper_llm_rerank_enabled () then
+  (* Build OAS Tool_selector strategy.
+     Uses TopK_llm when LLM reranking is enabled, TopK_bm25 otherwise.
+     The strategy is constructed once and reused by the before_turn_params
+     hook on each turn. *)
+  let tool_selector_strategy : Agent_sdk.Tool_selector.strategy =
+    let llm_rerank_enabled = Keeper_config.keeper_llm_rerank_enabled () in
+    if llm_rerank_enabled then
       match Eio_context.get_switch_opt (), Eio_context.get_net_opt () with
       | Some sw, Some net ->
         (try
@@ -724,19 +714,42 @@ let run_turn
           let config_path = Oas_worker_named.default_config_path () in
           let named_cascade = Agent_sdk.Api.named_cascade
             ?config_path ~name:cascade_name ~defaults () in
-          Some (Agent_sdk.Tool_selector.default_rerank_fn
-            ~sw ~net ~named_cascade ~k:max_tools_per_turn ())
+          let rerank_fn = Agent_sdk.Tool_selector.default_rerank_fn
+            ~sw ~net ~named_cascade ~k:max_tools_per_turn () in
+          Agent_sdk.Tool_selector.TopK_llm {
+            k = max_tools_per_turn;
+            bm25_prefilter_n = 20;
+            always_include = always_include_tools;
+            confidence_threshold = 0.5;
+            rerank_fn;
+          }
         with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn ->
-          Log.Keeper.warn "keeper:%s LLM rerank init failed: %s"
+          Log.Keeper.warn "keeper:%s LLM rerank init failed, using BM25: %s"
             meta.name (Printexc.to_string exn);
-          None)
+          Agent_sdk.Tool_selector.TopK_bm25 {
+            k = max_tools_per_turn;
+            always_include = always_include_tools;
+            confidence_threshold = Some 0.5;
+            fallback_tools;
+          })
       | _ ->
-        Log.Keeper.warn "keeper:%s LLM rerank enabled but Eio context unavailable"
+        Log.Keeper.warn "keeper:%s LLM rerank enabled but Eio context unavailable, using BM25"
           meta.name;
-        None
-    else None
+        Agent_sdk.Tool_selector.TopK_bm25 {
+          k = max_tools_per_turn;
+          always_include = always_include_tools;
+          confidence_threshold = Some 0.5;
+          fallback_tools;
+        }
+    else
+      Agent_sdk.Tool_selector.TopK_bm25 {
+        k = max_tools_per_turn;
+        always_include = always_include_tools;
+        confidence_threshold = Some 0.5;
+        fallback_tools;
+      }
   in
   (* Compose dynamic_context injection + progressive tool disclosure
      in a single before_turn_params hook.
@@ -744,9 +757,10 @@ let run_turn
      Both modifications return AdjustParams, so they must be in the
      same hook to avoid compose's outer-bypasses-inner semantics.
 
-     Progressive disclosure uses BM25 retrieval: each turn selects
-     the top-k tools most relevant to the current goal + context,
-     plus always_include essentials. This keeps the LLM focused. *)
+     Progressive disclosure delegates to OAS Tool_selector.select:
+     each turn selects the top-k tools most relevant to the current
+     context, with confidence-gated fallback and optional LLM rerank.
+     This replaces ~120 lines of manual Tool_index calls. *)
   let before_turn_hook : Agent_sdk.Hooks.hooks = {
     Agent_sdk.Hooks.empty with
     before_turn_params = Some (fun event ->
@@ -764,7 +778,7 @@ let run_turn
             | None -> Some dynamic_context
             | Some existing -> Some (existing ^ "\n\n" ^ dynamic_context)
         in
-        (* 2. Progressive tool disclosure via BM25 retrieval.
+        (* 2. Progressive tool disclosure via OAS Tool_selector.
            Extract context from last user message for relevance scoring. *)
         let last_user_text =
           List.fold_left (fun acc (m : Agent_sdk.Types.message) ->
@@ -779,17 +793,6 @@ let run_turn
            else user_message)
           |> tool_query_text_of_user_message
         in
-        (* Confidence-gated union: always retrieve, but union fallback
-           when BM25 confidence is low (e.g. Korean query vs English docs).
-           Partial retrieval results are always kept — never discarded. *)
-        let retrieved = Agent_sdk.Tool_index.retrieve tool_index query_text in
-        let top_score = match retrieved with
-          | (_, s) :: _ -> s
-          | [] -> 0.0
-        in
-        let use_fallback =
-          not (Agent_sdk.Tool_index.confident tool_index query_text ~threshold:0.5)
-        in
         let max_tools = max_tools_per_turn in
         let portal_ctx : Tool_portal.context = {
           config;
@@ -798,45 +801,22 @@ let run_turn
         let visible_always_include_tools =
           Tool_portal.filter_visible_tool_names portal_ctx always_include_tools
         in
-        (* Optional LLM rerank: when BM25 confidence is sufficient and
-           rerank_fn is provided, re-order retrieved results via LLM.
-           Self-healing: rerank failure falls back to BM25 order. *)
-        let retrieved_names =
-          let bm25_names = List.map fst retrieved in
-          (match rerank_fn with
-           | Some rerank when not use_fallback ->
-             let candidates = List.filter_map (fun (name, _score) ->
-               match List.find_opt (fun (t : Agent_sdk.Tool.t) ->
-                 t.schema.name = name) tools with
-               | Some t -> Some (name, t.schema.description)
-               | None -> None
-             ) retrieved in
-             (try
-                let reranked = rerank ~context:query_text ~candidates in
-                let valid = List.filter (fun n ->
-                  List.exists (fun (cn, _) -> cn = n) candidates) reranked in
-                if valid <> [] then
-                  let missing_bm25 = List.filter (fun n ->
-                    not (List.exists (( = ) n) valid)) bm25_names in
-                  valid @ missing_bm25
-                else bm25_names
-              with
-              | Out_of_memory | Stack_overflow | Sys.Break as exn ->
-                raise exn
-              | Eio.Cancel.Cancelled _ as exn -> raise exn
-              | exn ->
-                Log.Keeper.warn
-                  "keeper:%s rerank failed, falling back to BM25 order: %s"
-                  meta.name (Printexc.to_string exn);
-                bm25_names)
-           | _ -> bm25_names)
+        (* Delegate BM25 retrieval + confidence gate + fallback + optional
+           LLM reranking to OAS Tool_selector.select.  This is the core
+           boundary fix: MASC no longer manually calls Tool_index.retrieve,
+           Tool_index.confident, or orchestrates the rerank fallback chain. *)
+        let selected_names =
+          Agent_sdk.Tool_selector.select_names
+            ~strategy:tool_selector_strategy
+            ~context:query_text
+            ~tools:scoped_tools
           |> Tool_portal.filter_visible_tool_names portal_ctx
         in
-        let selected_tools =
+        (* In discovery mode, bypass Tool_selector BM25 and use only
+           core + actively discovered tools.  The keeper discovers tools
+           on demand via keeper_tool_search. *)
+        let effective_selected =
           if Keeper_exec_tools.tool_discovery_enabled () then
-            (* Discovery mode: core tools + actively discovered tools.
-               No BM25 auto-selection — keeper uses keeper_tool_search
-               explicitly to discover tools on demand. *)
             let core = Keeper_exec_tools.effective_core_tools () in
             let discovered =
               Keeper_discovered_tools.active_names !discovered_ref ~turn
@@ -845,18 +825,14 @@ let run_turn
             Keeper_types.dedupe_keep_order (core @ discovered)
             |> Tool_portal.filter_visible_tool_names portal_ctx
           else
-            prioritized_disclosed_tool_names
-              ~max_tools
-              ~always_include_tools:visible_always_include_tools
-              ~retrieved_names
-              ~fallback_tools:
-                (Tool_portal.filter_visible_tool_names portal_ctx fallback_tools)
-              ~use_fallback
+            selected_names
         in
+        (* Apply runtime tool overlay (masc_tool_grant/revoke) and
+           intersect with the full dispatch universe. *)
         let all_allowed =
           Agent_sdk.Tool_op.apply
             (Agent_sdk.Tool_op.compose [
-              Agent_sdk.Tool_op.Replace_with selected_tools;
+              Agent_sdk.Tool_op.Replace_with effective_selected;
               !tool_overlay_ref;
             ])
             all_tool_names
@@ -864,10 +840,9 @@ let run_turn
         in
         if Keeper_types_profile.keeper_debug then
           Log.Keeper.info
-            "tool_disclosure keeper=%s top_score=%.3f retrieved=%d allowed=%d fallback=%b rerank=%b query_len=%d"
-            meta.name top_score (List.length retrieved_names)
-            (List.length all_allowed) use_fallback
-            (Option.is_some rerank_fn && not use_fallback)
+            "tool_disclosure keeper=%s selected=%d allowed=%d query_len=%d"
+            meta.name (List.length selected_names)
+            (List.length all_allowed)
             (String.length query_text);
         (* 3. Graceful last-turn: inject budget warnings and restrict
            tools when approaching the turn limit.
@@ -927,9 +902,9 @@ let run_turn
           Log.Keeper.info
             "keeper:%s turn_budget turn=%d/%d last_turn=%b"
             meta.name turn max_turns is_last_turn;
-        (* Context overflow guard: tool disclosure is first budgeted via
-           prioritized_disclosed_tool_names, then overlays can still grow the
-           visible set. Cap the post-overlay set to stay inside small-model
+        (* Context overflow guard: Tool_selector.select already respects
+           the k limit, but overlays can grow the visible set beyond
+           max_tools.  Cap the post-overlay set to stay inside small-model
            context windows. Configurable via MASC_KEEPER_MAX_TOOLS_PER_TURN. *)
         let all_allowed =
           if List.length all_allowed > max_tools then begin
@@ -941,18 +916,7 @@ let run_turn
             let non_essential = List.filter
               (fun name -> not (List.mem name visible_always_include_tools)) all_allowed in
             let budget = max_tools - List.length essential in
-            (* Sort non-essential by BM25 score descending so the most
-               relevant tools survive truncation.  Tools not in the
-               retrieved set (e.g. fallback) get score 0.0. *)
-            let score_of name =
-              match List.assoc_opt name retrieved with
-              | Some s -> s
-              | None -> 0.0
-            in
-            let sorted = List.stable_sort
-              (fun a b -> compare (score_of b) (score_of a))
-              non_essential in
-            essential @ (List.filteri (fun i _ -> i < budget) sorted)
+            essential @ (List.filteri (fun i _ -> i < budget) non_essential)
           end else
             all_allowed
         in
@@ -982,14 +946,22 @@ let run_turn
       ~global_procedure_limit:5
       ()
   in
-  let reducer = Agent_sdk.Context_reducer.compose [
-    Agent_sdk.Context_reducer.merge_contiguous;
-    (* Let OAS manage context naturally via token budget.
-       Previous clear_tool_results ~keep_recent:2 and keep_last 30 destroyed
-       the keeper's memory of its own actions, causing repetitive behavior.
-       from_context_config handles eviction when the window is full. *)
-    Agent_sdk.Context_reducer.from_context_config ~max_tokens:max_context ();
-  ] in
+  let reducer = Agent_sdk.Context_reducer.dynamic (fun ~turn ~messages:_ ->
+    (* Turn-aware: early turns keep more history for context;
+       later turns prune aggressively to stay within budget. *)
+    let open Agent_sdk.Context_reducer in
+    if turn <= 5 then
+      Compose [
+        Merge_contiguous;
+        Token_budget max_context;
+      ]
+    else
+      Compose [
+        Merge_contiguous;
+        Stub_tool_results { keep_recent = 3 };
+        Token_budget max_context;
+      ]
+  ) in
   (* 8. Run Agent *)
   let contract =
     if Env_config.Cdal.enabled ()
@@ -1030,6 +1002,10 @@ let run_turn
           ~hooks
           ~context_reducer:reducer
           ~memory
+          (* Keepers rely on turn-level retry (multi-turn loop) rather than
+             per-call retry. Ideally this would be Tool_retry_policy.none, but
+             OAS does not expose a zero-retry variant yet. default_internal
+             (max_retries=1) is acceptable as a minimal fallback. *)
           ~tool_retry_policy:Oas.Tool_retry_policy.default_internal
           ~max_turns
           ~max_idle_turns

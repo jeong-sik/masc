@@ -54,4 +54,4 @@ tool_also_allow = [
   "masc_voice_session_end",
   "masc_cleanup_zombies",
 ]
-tool_denylist = ["keeper_board_comment"]
+tool_denylist = ["keeper_board_comment", "keeper_board_post"]

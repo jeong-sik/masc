@@ -22,13 +22,18 @@ let compact_if_needed
   let ratio_gate, message_gate, token_gate = compaction_policy_of_keeper meta in
   let cooldown = Float.of_int meta.compaction.cooldown_sec in
   let last_reflection_ts = max meta.runtime.last_continuity_update_ts meta.runtime.proactive_rt.last_ts in
+  (* When no reflection has ever happened (ts=0.0), there is nothing to
+     preserve — allow compaction immediately.  Also bypass the cooldown
+     when context pressure is critical (ratio >= 0.8) to prevent the
+     overflow that killed janitor at 218K/200K (#5634). *)
+  let emergency = ratio >= 0.8 in
   let reflection_ready =
-    last_reflection_ts > 0.0 && now_ts -. last_reflection_ts >= cooldown
+    emergency
+    || last_reflection_ts <= 0.0
+    || (last_reflection_ts > 0.0 && now_ts -. last_reflection_ts >= cooldown)
   in
   let hold_s =
-    if cooldown <= 0.0 then 0.0
-    else if last_reflection_ts <= 0.0 then
-      Float.of_int meta.compaction.cooldown_sec
+    if cooldown <= 0.0 || emergency || last_reflection_ts <= 0.0 then 0.0
     else
       max
         0.0

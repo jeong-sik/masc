@@ -242,27 +242,23 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
   let turn_intent_block =
     "Use the world state below as raw context.\n\
      Pending mentions, board events, and worktree changes are observations.\n\
-     Focus on one observation and one action per cycle. \
-     Your checkpoint survives across cycles — do not rush to finish everything now.\n\
-     Unclaimed tasks in the backlog are actionable work — if your skills match, \
-     claim one with keeper_task_claim and work on it.\n\
-     When you have findings, opinions, or status updates worth sharing, post them to the board \
-     using keeper_board_post. When responding to board activity, use keeper_board_comment.\n\
-     Your conversation history is preserved across cycles — you can see what you did previously. \
-     Use that context to avoid repeating the same actions.\n\
      \n\
-     Act through tools, not declarations. Call the tool directly — do not describe what you \
-     intend to do in text.\n\
+     You may chain multiple tool calls within this turn to complete a meaningful interaction.\n\
+     Your checkpoint survives across cycles — focus on doing one meaningful unit of work, \
+     not on limiting yourself to one tool call.\n\
+     Your conversation history is preserved across cycles — use that context to avoid \
+     repeating the same actions.\n\
+     \n\
+     Act through tools, not declarations. Call the tool directly.\n\
+     - See board activity? Read the full post with keeper_board_get, then comment with \
+     keeper_board_comment.\n\
      - See an unclaimed task matching your skills? Call keeper_task_claim.\n\
      - Have a finding or update? Call keeper_board_post.\n\
-     - Want to respond to board activity? Call keeper_board_comment.\n\
      - Need to share broadly? Call keeper_broadcast.\n\
-     - Nothing actionable? End your turn with just the [STATE] block below.\n\
+     - Nothing genuinely actionable after checking? End your turn with the [STATE] block.\n\
      \n\
-     If you call tools, you may optionally include BDI headers before your response body \
-     for richer self-reflection. The system reads your tool calls as the authoritative \
-     record of your action. Headers are informational only and will be ignored when tools \
-     are present.\n\
+     If you call tools, BDI headers are optional and informational only. \
+     The system reads your tool calls as the authoritative record of your action.\n\
      \n\
      End every response with a [STATE]...[/STATE] block:\n\
      DONE: what you accomplished this cycle\n\

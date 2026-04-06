@@ -481,6 +481,28 @@ let keeper_agent_status (meta : keeper_meta) =
     | None -> Types.Active)
 ;;
 
+(** Reset stale turn failures so the keeper can exit Failing phase.
+    Called unconditionally after presence sync (whether I/O was skipped or not).
+    If the underlying issue persists, the next turn will re-fail. *)
+let maybe_recover_from_failing ~(ctx : _ context) ~(meta : keeper_meta) =
+  let stale_turn_failures =
+    Keeper_registry.get_turn_failures
+      ~base_path:ctx.config.base_path meta.name
+  in
+  if stale_turn_failures > 0 then begin
+    Keeper_registry.reset_turn_failures
+      ~base_path:ctx.config.base_path meta.name;
+    ignore (Keeper_registry.dispatch_event
+      ~base_path:ctx.config.base_path meta.name
+      Keeper_state_machine.Heartbeat_ok);
+    ignore (Keeper_registry.dispatch_event
+      ~base_path:ctx.config.base_path meta.name
+      Keeper_state_machine.Turn_succeeded);
+    Log.Keeper.info
+      "heartbeat recovery: reset %d stale turn failures for %s"
+      stale_turn_failures meta.name
+  end
+
 let sync_keeper_presence
       ~(ctx : _ context)
       ~(meta_current : keeper_meta)
@@ -499,6 +521,7 @@ let sync_keeper_presence
     Log.Keeper.debug
       "presence sync skipped: fresh heartbeat %.0fs ago"
       (t_presence_start -. !last_successful_heartbeat_ts);
+    maybe_recover_from_failing ~ctx ~meta:meta_current;
     meta_current)
   else (
     try
@@ -535,25 +558,7 @@ let sync_keeper_presence
           Keeper_state_machine.Heartbeat_ok);
         Prometheus.inc_counter "masc_keeper_heartbeat_successes_total"
           ~labels:[("keeper", meta_current.name)] ();
-        (* Failing recovery: heartbeat success proves infrastructure is healthy.
-           Reset stale turn failures so the keeper can exit Failing phase.
-           Without this, a single turn failure traps the keeper in Failing forever
-           because no new turn runs → Turn_succeeded never dispatches → turn_healthy
-           stays false. If the underlying issue persists, the next turn will re-fail. *)
-        let stale_turn_failures =
-          Keeper_registry.get_turn_failures
-            ~base_path:ctx.config.base_path meta_current.name
-        in
-        if stale_turn_failures > 0 then begin
-          Keeper_registry.reset_turn_failures
-            ~base_path:ctx.config.base_path meta_current.name;
-          ignore (Keeper_registry.dispatch_event
-            ~base_path:ctx.config.base_path meta_current.name
-            Keeper_state_machine.Turn_succeeded);
-          Log.Keeper.info
-            "heartbeat recovery: reset %d stale turn failures for %s"
-            stale_turn_failures meta_current.name
-        end);
+        maybe_recover_from_failing ~ctx ~meta:meta_current);
       match write_meta ctx.config synced with
       | Ok () -> synced
       | Error e ->

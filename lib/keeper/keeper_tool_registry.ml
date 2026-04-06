@@ -34,34 +34,19 @@ let core_always_tools =
   [ "keeper_context_status"; "keeper_tools_list";
     "masc_status"; "masc_heartbeat"; "extend_turns" ]
 
-(** Expanded core set for tool-discovery mode.  These tools are always
-    visible when [MASC_KEEPER_TOOL_DISCOVERY=true]; all other tools are
-    discoverable via [keeper_tool_search]. *)
+(** Core tools always visible to the LLM.  All other tools are
+    discoverable on demand via [keeper_tool_search]. *)
 let core_discovery_tools =
-  (* Explicit superset of core_always_tools: all always-visible tools are
-     present here so discovery mode preserves their always-visible guarantee. *)
   core_always_tools @
-  [ (* Search / discovery entry point *)
-    "keeper_tool_search";
-    (* Coordination essentials *)
+  [ "keeper_tool_search";
     "keeper_broadcast"; "keeper_tasks_list";
     "keeper_task_claim"; "keeper_task_done";
-    (* Knowledge *)
     "keeper_memory_search"; "keeper_time_now";
-    (* Filesystem *)
     "keeper_fs_read";
-    (* Board essentials *)
     "keeper_board_get"; "keeper_board_post"; "keeper_board_comment";
   ]
 
-let tool_discovery_enabled () : bool =
-  match Sys.getenv_opt "MASC_KEEPER_TOOL_DISCOVERY" with
-  | Some ("true" | "1") -> true
-  | _ -> false
-
-let effective_core_tools () =
-  if tool_discovery_enabled () then core_discovery_tools
-  else core_always_tools
+let effective_core_tools () = core_discovery_tools
 
 let core_always_set : (string, unit) Hashtbl.t =
   let tbl = Hashtbl.create (List.length core_always_tools) in

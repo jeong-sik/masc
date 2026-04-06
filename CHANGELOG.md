@@ -1,6 +1,41 @@
 # Changelog
 
 
+## [2.246.0] - 2026-04-06
+
+### Added
+- **Keeper merge ops** -- coding preset keepers can execute `gh pr merge` and `gh issue close` via `keeper_github`. (#5407)
+- **Proactive board/web routes** -- autonomous keepers can post to board and perform web searches. (#5382)
+- **Keeper tool search** -- `keeper_tool_search` for lazy tool discovery. (#5375)
+- **Self-awareness prompt** -- keepers see their own recent board posts to prevent repetitive behavior. (#5411)
+- **ToolCallHealth panel** -- new dashboard panel for per-tool failure breakdown. (#5378, #5391)
+- **Streaming indicators** -- entry animations and streaming state in tool timeline. (#5389)
+- **Tool call observability** -- log tool call parameters and outcome in PostToolUse hook. (#5387)
+
+### Changed
+- **Channel-aware budget** -- reactive turns get 8 tool calls, autonomous gets 5. (#5388)
+- **SSOT migration** -- last-turn and optional tool lists moved to `tool_policy.toml`. (#5381)
+- **Anti-repetition rules** -- delivery preset and anti-repetition instructions for autonomous keepers. (#5390)
+- **Workspace allowed_paths** -- preserve workspace defaults when explicit paths set. (#5385)
+- **Idle skip threshold** -- lowered from 3 to 2. (#5384)
+- **Tool timeout** -- default increased from 30s to 60s. (#5401)
+- **Tool error default** -- errors default to non-retryable (recoverable=false). (#5415)
+
+### Security
+- **GH safety gates** -- close boolean flag bypass, `--field=` implicit POST, destructive GraphQL mutations. (#5392, #5395, #5399)
+- **Board denylist** -- expanded for idle loop prevention. (#5394, #5403)
+- **TOML denylist precedence** -- over stale runtime state. (#5416)
+
+### Fixed
+- **Workspace paths** -- add `planning/` and `docs/` to workspace scope, shell timeout 30s, `--no-optional-locks`. (#5383)
+- **Board in coding preset** -- add board group. (#5366)
+- **Idle-death loop** -- break with proactive routes and peer awareness. (#5377)
+- **Dashboard** -- proactive fields, tool metrics, execution builder fixes. (#5368, #5369, #5379, #5412)
+- **CI** -- align agent_sdk version floor with OAS pin v0.101.1. (#5405, #5406, #5410)
+
+### Tests
+- Keeper merge capability verification. (#5417)
+
 ## [2.245.0] - 2026-04-06
 
 ### Added

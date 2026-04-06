@@ -792,25 +792,29 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
       in
       (* 5. Run via OAS Agent.run() with transient-error retry *)
       (* Track whether side-effecting tool calls have been executed.
-         If a board_post/comment/shell succeeded and then a transient error
-         occurs, retrying would replay those tool calls and produce duplicates.
-         In that case, we propagate the error instead of retrying. *)
+         If a board_post/comment/shell/file edit succeeded and then a
+         transient error occurs, retrying would replay those tool calls and
+         produce duplicates. In that case, we propagate the error instead of
+         retrying.
+
+         Uses a per-turn observer via [add_tool_call_observer] instead of
+         wrapping the global [on_keeper_tool_call] ref. Each keeper registers
+         an independent observer, so concurrent keepers cannot interfere
+         with each other's save/restore lifecycle. *)
       let side_effect_occurred = ref false in
       let side_effect_tools =
         [ "keeper_board_post"; "keeper_board_comment"; "keeper_board_vote";
           "keeper_board_delete";
-          "keeper_shell_exec"; "keeper_file_write"; "keeper_git_commit";
-          "keeper_npm_run"; "keeper_github" ]
+          "keeper_bash"; "keeper_fs_edit"; "keeper_github" ]
       in
-      let original_on_tool_call = !Keeper_exec_tools.on_keeper_tool_call in
-      Keeper_exec_tools.on_keeper_tool_call :=
-        (fun ~tool_name ~success ~duration_ms ->
-           if success && List.mem tool_name side_effect_tools then
-             side_effect_occurred := true;
-           original_on_tool_call ~tool_name ~success ~duration_ms);
+      let side_effect_observer ~tool_name ~success =
+        if success && List.mem tool_name side_effect_tools then
+          side_effect_occurred := true
+      in
+      Keeper_exec_tools.add_tool_call_observer side_effect_observer;
       let run_result, latency_ms =
         Fun.protect ~finally:(fun () ->
-          Keeper_exec_tools.on_keeper_tool_call := original_on_tool_call)
+          Keeper_exec_tools.remove_tool_call_observer side_effect_observer)
         (fun () ->
         Keeper_exec_context.timed (fun () ->
           let do_run ~run_meta ~max_context ~run_generation ~is_retry =

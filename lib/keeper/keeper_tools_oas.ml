@@ -202,6 +202,7 @@ let make_tools
                 Hashtbl.replace failure_counts key count;
                 Keeper_registry.record_tool_use ~base_path:config.base_path meta.name ~tool_name:td.name ~success:false;
                 !Keeper_exec_tools.on_keeper_tool_call ~tool_name:td.name ~success:false ~duration_ms;
+                Keeper_exec_tools.notify_tool_call_observers ~tool_name:td.name ~success:false;
                 let detail =
                   let s = String.trim result in
                   if String.length s <= 300 then s
@@ -215,6 +216,7 @@ let make_tools
                 Hashtbl.remove failure_counts key;
                 Keeper_registry.record_tool_use ~base_path:config.base_path meta.name ~tool_name:td.name ~success:true;
                 !Keeper_exec_tools.on_keeper_tool_call ~tool_name:td.name ~success:true ~duration_ms;
+                Keeper_exec_tools.notify_tool_call_observers ~tool_name:td.name ~success:true;
                 (* Notify session callback (e.g., mark_used for discovered tools) *)
                 (match on_tool_called with Some f -> f td.name | None -> ());
                 (* PR#814 Gap 1: Capture git status delta after successful tool execution.
@@ -254,6 +256,7 @@ let make_tools
               Hashtbl.replace failure_counts key count;
               Keeper_registry.record_tool_use ~base_path:config.base_path meta.name ~tool_name:td.name ~success:false;
               !Keeper_exec_tools.on_keeper_tool_call ~tool_name:td.name ~success:false ~duration_ms;
+              Keeper_exec_tools.notify_tool_call_observers ~tool_name:td.name ~success:false;
               let msg = Printf.sprintf "tool %s failed (%d/%d): %s"
                 td.name count max_consecutive_failures
                 (Printexc.to_string exn) in

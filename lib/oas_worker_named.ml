@@ -153,9 +153,9 @@ let run_named
     ?sw
     ?net
     ()
-  : (Oas_worker_exec.run_result, string) result =
+  : (Oas_worker_exec.run_result, Oas.Error.sdk_error) result =
   match require_eio ?sw ?net () with
-  | Error e -> Error e
+  | Error e -> Error (Oas.Error.Internal e)
   | Ok (sw, net) ->
   let defaults = default_model_strings ~cascade_name in
   let config_path = default_config_path () in
@@ -171,7 +171,8 @@ let run_named
   match candidate_cfgs with
   | [] ->
     Log.Misc.error "cascade %s: no callable models available" cascade_name;
-    Error (Printf.sprintf "cascade %s: no callable models available" cascade_name)
+    Error (Oas.Error.Internal
+      (Printf.sprintf "cascade %s: no callable models available" cascade_name))
   | primary_provider :: _ ->
   let provider : Agent_sdk.Provider.config =
     Agent_sdk.Provider.config_of_provider_config primary_provider
@@ -218,7 +219,8 @@ let run_named
         ~capture
     in
     Oas_worker_cascade.record_cascade ~cascade_name ~outcome:`Rejected ~observation:(Some observation);
-    Error (Printf.sprintf "cascade %s: response rejected by accept" cascade_name)
+    Error (Oas.Error.Internal
+      (Printf.sprintf "cascade %s: response rejected by accept" cascade_name))
   | Error e ->
     let observation =
       Oas_worker_cascade.cascade_observation_with_metrics ~cascade_name ~configured_labels
@@ -254,13 +256,14 @@ let run_model_by_label
     ?sw
     ?net
     ()
-  : (Oas_worker_exec.run_result, string) result =
+  : (Oas_worker_exec.run_result, Oas.Error.sdk_error) result =
   (match Llm_provider.Cascade_config.parse_model_string model_label with
   | None ->
-    Error (Printf.sprintf "Cannot parse model label: %s" model_label)
+    Error (Oas.Error.Internal
+      (Printf.sprintf "Cannot parse model label: %s" model_label))
   | Some _pc ->
     match require_eio ?sw ?net () with
-    | Error e -> Error e
+    | Error e -> Error (Oas.Error.Internal e)
     | Ok (sw, net) ->
         let transport_resolved = match transport with
           | Some t -> t
@@ -280,8 +283,8 @@ let run_model_by_label
         (match Oas_worker_exec.run ~sw ~net ~config ?on_event ?contract goal with
         | Ok result when accept result.response -> Ok result
         | Ok _ ->
-            Error
-              (Printf.sprintf "response rejected by accept from %s" model_label)
+            Error (Oas.Error.Internal
+              (Printf.sprintf "response rejected by accept from %s" model_label))
         | Error e -> Error e))
 
 let run_named_with_masc_tools
@@ -312,7 +315,7 @@ let run_named_with_masc_tools
     ?sw
     ?net
     ()
-  : (Oas_worker_exec.run_result, string) result =
+  : (Oas_worker_exec.run_result, Oas.Error.sdk_error) result =
   let oas_tools = List.map (fun (td : Types.tool_schema) ->
     Tool_bridge.oas_tool_of_masc
       ~name:td.name ~description:td.description
@@ -351,9 +354,9 @@ let run_model_with_masc_tools
     ?sw
     ?net
     ()
-  : (Oas_worker_exec.run_result, string) result =
+  : (Oas_worker_exec.run_result, Oas.Error.sdk_error) result =
   match require_eio ?sw ?net () with
-  | Error e -> Error e
+  | Error e -> Error (Oas.Error.Internal e)
   | Ok (sw, net) ->
       let transport_resolved = match transport with
         | Some t -> t

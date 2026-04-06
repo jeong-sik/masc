@@ -113,7 +113,7 @@ val run_named :
   ?sw:Eio.Switch.t ->
   ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   unit ->
-  (run_result, string) result
+  (run_result, Oas.Error.sdk_error) result
 
 (** Run a single Agent.run() using a model label string (e.g. "llama:qwen3.5").
     Validates the label parses before attempting execution. *)
@@ -142,7 +142,7 @@ val run_model_by_label :
   ?sw:Eio.Switch.t ->
   ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   unit ->
-  (run_result, string) result
+  (run_result, Oas.Error.sdk_error) result
 
 val run_named_with_masc_tools :
   cascade_name:string ->
@@ -172,7 +172,7 @@ val run_named_with_masc_tools :
   ?sw:Eio.Switch.t ->
   ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   unit ->
-  (run_result, string) result
+  (run_result, Oas.Error.sdk_error) result
 
 val run_model_with_masc_tools :
   model_label:string ->
@@ -198,4 +198,4 @@ val run_model_with_masc_tools :
   ?sw:Eio.Switch.t ->
   ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   unit ->
-  (run_result, string) result
+  (run_result, Oas.Error.sdk_error) result

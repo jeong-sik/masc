@@ -175,7 +175,7 @@ let build_checkpoint ~session_id ?working_context (agent : Oas.Agent.t) =
 let build
     ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
     ~(config : config)
-  : (Oas.Agent.t, string) result =
+  : (Oas.Agent.t, Oas.Error.sdk_error) result =
   let tool_names =
     List.map (fun (t : Oas.Tool.t) -> t.schema.name) config.tools in
   let guardrails = match config.guardrails with
@@ -284,7 +284,6 @@ let build
     | None -> builder
   in
   Oas.Builder.build_safe builder
-  |> Result.map_error Oas.Error.to_string
 
 (* ================================================================ *)
 (* Idle-detail enrichment                                           *)
@@ -333,7 +332,7 @@ let run
     ?(proof_ref : Oas.Cdal_proof.t option ref option)
     ?(contract : Oas.Risk_contract.t option)
     (goal : string)
-  : (run_result, string) result =
+  : (run_result, Oas.Error.sdk_error) result =
   let session_id = match config.session_id with
     | Some id -> id
     | None ->
@@ -353,9 +352,10 @@ let run
   match build ~net ~config with
   | Error e ->
     Option.iter (fun bus ->
-      publish_lifecycle bus ~name:config.name ~event:"build_error" ~detail:e
+      publish_lifecycle bus ~name:config.name ~event:"build_error"
+        ~detail:(Oas.Error.to_string e)
     ) config.event_bus;
-    Error (Printf.sprintf "Agent build failed: %s" e)
+    Error e
   | Ok agent ->
   (match agent_ref with Some r -> r := Some agent | None -> ());
   let effective_contract = match contract with Some c -> Some c | None -> config.contract in
@@ -436,7 +436,7 @@ let run
            detail
        | None ->
          Log.Misc.warn "oas_worker: agent errored (no proof): %s" detail);
-      Error (Printf.sprintf "Agent run failed: %s" detail))
+      Error err)
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
@@ -445,7 +445,7 @@ let run
       Log.Misc.warn "agent close failed during cleanup: %s" (Printexc.to_string close_exn));
     Log.Misc.error "oas_worker %s: execution exception: %s\nBacktrace: %s"
       config.name (Printexc.to_string exn) bt;
-    Error (Printf.sprintf "Agent execution exception: %s" (Printexc.to_string exn)))
+    Error (Oas.Error.Internal (Printf.sprintf "execution exception: %s" (Printexc.to_string exn))))
 
 (* ================================================================ *)
 (* Convenience: run_with_masc_tools                                  *)
@@ -462,7 +462,7 @@ let run_with_masc_tools
     ?on_yield
     ?on_resume
     (goal : string)
-  : (run_result, string) result =
+  : (run_result, Oas.Error.sdk_error) result =
   let oas_tools = List.map (fun (td : Types.tool_schema) ->
     Tool_bridge.oas_tool_of_masc
       ~name:td.name

@@ -174,7 +174,7 @@ let call_model_direct_sync ~agent_type ~prompt =
              resp.model agent_type);
         if String.trim text = "" then "no response" else text
     | Error err ->
-        Log.AutoResponder.error "MODEL cascade failed: %s" err;
+        Log.AutoResponder.error "MODEL cascade failed: %s" (Oas.Error.to_string err);
         "no response"
   with
   | Eio.Cancel.Cancelled _ as e -> raise e

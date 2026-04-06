@@ -71,12 +71,12 @@ val broadcast_lifecycle_events :
   handoff_json:Yojson.Safe.t option ->
   unit
 
-(** Detect transient TCP/TLS errors eligible for retry. Exposed for testing. *)
-val is_transient_network_error : string -> bool
+(** Detect transient network errors eligible for retry.
+    Uses structured [Oas.Error.sdk_error] pattern matching. *)
+val is_transient_network_error : Oas.Error.sdk_error -> bool
 
-(** [true] when an error string should trigger overflow recovery handling.
-    Delegates to [Oas.Retry.is_context_overflow_message] (SSOT). *)
-val should_attempt_context_overflow_retry : string -> bool
+(** [true] when a structured error indicates context overflow. *)
+val is_context_overflow : Oas.Error.sdk_error -> bool
 
 val run_unified_turn :
   config:Room.config ->
@@ -85,4 +85,4 @@ val run_unified_turn :
   generation:int ->
   ?channel:Keeper_world_observation.unified_turn_channel ->
   unit ->
-  (Keeper_types.keeper_meta, string) result
+  (Keeper_types.keeper_meta, Oas.Error.sdk_error) result

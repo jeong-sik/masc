@@ -113,8 +113,8 @@ let verify (req : verification_request) : (verdict, string) result =
             Log.Verifier.warn "Verdict parse failed (%s); raw=%s"
               parse_err (String.sub text 0 (min 80 (String.length text)));
             Error (sprintf "verdict parse: %s" parse_err)))
-    | Error message ->
-      Error message
+    | Error err ->
+      Error (Oas.Error.to_string err)
 
 (* ================================================================ *)
 (* Verdict -> Hook Decision (OAS bridge)                            *)

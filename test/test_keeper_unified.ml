@@ -1218,16 +1218,19 @@ let test_context_overflow_limit_parses_common_oas_errors () =
     (Agent_sdk.Retry.extract_context_limit
        "HTTP error: 503 Service Unavailable")
 
-let test_should_attempt_context_overflow_retry_only_for_overflow_errors () =
-  check bool "overflow string retries" true
-    (UT.should_attempt_context_overflow_retry
-       "provider error: available context size (32768) exceeded");
-  check bool "input budget exceeded retries" true
-    (UT.should_attempt_context_overflow_retry
-       "Agent run failed: Input token budget exceeded:\n  11010/8192");
-  check bool "non-overflow string skips retry" false
-    (UT.should_attempt_context_overflow_retry
-       "Network error: Connection_reset")
+let test_is_context_overflow_only_for_overflow_errors () =
+  check bool "ContextOverflow matches" true
+    (UT.is_context_overflow
+       (Agent_sdk.Error.Api (ContextOverflow { message = "exceeded"; limit = Some 32768 })));
+  check bool "ContextOverflow without limit" true
+    (UT.is_context_overflow
+       (Agent_sdk.Error.Api (ContextOverflow { message = "exceeded"; limit = None })));
+  check bool "NetworkError does not match" false
+    (UT.is_context_overflow
+       (Agent_sdk.Error.Api (NetworkError { message = "Connection_reset" })));
+  check bool "Internal does not match" false
+    (UT.is_context_overflow
+       (Agent_sdk.Error.Internal "some error"))
 
 let test_metrics_persist_social_state_fields () =
   let result =
@@ -1408,15 +1411,17 @@ let test_sanitize_messages_utf8_reuses_clean_history_list () =
   check bool "same list reused" true (sanitized == msgs)
 
 let test_overflow_detection_and_limit_parsing () =
-  let msg = "HTTP 400: prompt exceeds available context size (8192 tokens)" in
-  check bool "should attempt overflow retry" true
-    (UT.should_attempt_context_overflow_retry msg);
+  check bool "ContextOverflow with limit" true
+    (UT.is_context_overflow
+       (Agent_sdk.Error.Api (ContextOverflow { message = "exceeded"; limit = Some 8192 })));
   check (option int) "parses limit via OAS SSOT" (Some 8192)
-    (Agent_sdk.Retry.extract_context_limit msg);
+    (Agent_sdk.Retry.extract_context_limit
+       "HTTP 400: prompt exceeds available context size (8192 tokens)");
   check (option int) "no limit in unrelated error" None
     (Agent_sdk.Retry.extract_context_limit "Network error: connection reset");
-  check bool "unrelated error not overflow" false
-    (UT.should_attempt_context_overflow_retry "Network error: timeout")
+  check bool "NetworkError not overflow" false
+    (UT.is_context_overflow
+       (Agent_sdk.Error.Api (NetworkError { message = "timeout" })))
 
 let test_metrics_mixed_response () =
   let result =
@@ -1996,49 +2001,42 @@ let () =
         ] );
       ( "transient_network_error",
         [
-          test_case "connection reset detected" `Quick (fun () ->
-            check bool "readv reset" true
+          test_case "NetworkError detected" `Quick (fun () ->
+            check bool "network error" true
               (UT.is_transient_network_error
-                 "Network error: All models failed: Eio.Io Net Connection_reset Unix_error (Connection reset by peer, \"readv\", \"\")"));
-          test_case "broken pipe detected" `Quick (fun () ->
-            check bool "writev broken pipe" true
+                 (Agent_sdk.Error.Api (NetworkError { message = "Connection_reset" }))));
+          test_case "Timeout detected" `Quick (fun () ->
+            check bool "timeout" true
               (UT.is_transient_network_error
-                 "Network error: All models failed: Eio.Io Net Connection_reset Unix_error (Broken pipe, \"writev\", \"\")"));
-          test_case "end of file detected" `Quick (fun () ->
-            check bool "eof" true
+                 (Agent_sdk.Error.Api (Timeout { message = "connection timed out" }))));
+          test_case "Overloaded detected" `Quick (fun () ->
+            check bool "overloaded" true
               (UT.is_transient_network_error
-                 "Agent execution exception: End_of_file"));
-          test_case "connection closed detected" `Quick (fun () ->
-            check bool "closed" true
+                 (Agent_sdk.Error.Api (Overloaded { message = "server busy" }))));
+          test_case "ServerError 503 detected" `Quick (fun () ->
+            check bool "503" true
               (UT.is_transient_network_error
-                 "Network error: All models failed: connection closed by peer"));
-          test_case "connection refused detected" `Quick (fun () ->
-            check bool "refused" true
+                 (Agent_sdk.Error.Api (ServerError { status = 503; message = "Service Unavailable" }))));
+          test_case "ServerError 500 not transient" `Quick (fun () ->
+            check bool "500" false
               (UT.is_transient_network_error
-                 "Eio.Io Net Connection refused"));
-          test_case "503 loading model (unavailable_error type)" `Quick (fun () ->
-            check bool "unavailable_error" true
+                 (Agent_sdk.Error.Api (ServerError { status = 500; message = "Internal" }))));
+          test_case "AuthError not transient" `Quick (fun () ->
+            check bool "auth" false
               (UT.is_transient_network_error
-                 {|HTTP 503: {"error":{"message":"Loading model","type":"unavailable_error","code":503}}|}));
-          test_case "503 service unavailable (HTTP 503: prefix)" `Quick (fun () ->
-            check bool "503 colon" true
-              (UT.is_transient_network_error
-                 "Network error: All models failed: HTTP 503: Service Unavailable"));
-          test_case "bare HTTP 503 without colon not transient" `Quick (fun () ->
-            check bool "bare 503" false
-              (UT.is_transient_network_error
-                 "expected HTTP 503 response"));
-          test_case "auth error not transient" `Quick (fun () ->
-            check bool "auth 401" false
-              (UT.is_transient_network_error
-                 "HTTP error: 401 Unauthorized"));
-          test_case "rate limit not transient" `Quick (fun () ->
+                 (Agent_sdk.Error.Api (AuthError { message = "Unauthorized" }))));
+          test_case "RateLimited not transient" `Quick (fun () ->
             check bool "rate limit" false
               (UT.is_transient_network_error
-                 "HTTP error: 429 Too Many Requests"));
-          test_case "empty string not transient" `Quick (fun () ->
-            check bool "empty" false
-              (UT.is_transient_network_error ""));
+                 (Agent_sdk.Error.Api (RateLimited { retry_after = None; message = "429" }))));
+          test_case "ContextOverflow not transient" `Quick (fun () ->
+            check bool "overflow" false
+              (UT.is_transient_network_error
+                 (Agent_sdk.Error.Api (ContextOverflow { message = "exceeded"; limit = None }))));
+          test_case "Internal error not transient" `Quick (fun () ->
+            check bool "internal" false
+              (UT.is_transient_network_error
+                 (Agent_sdk.Error.Internal "some error")));
           test_case "overflow detection and limit parsing" `Quick
             test_overflow_detection_and_limit_parsing;
         ] );
@@ -2046,7 +2044,7 @@ let () =
         [
           test_case "parses common OAS overflow errors (SSOT)" `Quick
             test_context_overflow_limit_parses_common_oas_errors;
-          test_case "overflow retry gate only opens for overflow errors" `Quick
-            test_should_attempt_context_overflow_retry_only_for_overflow_errors;
+          test_case "is_context_overflow only matches ContextOverflow" `Quick
+            test_is_context_overflow_only_for_overflow_errors;
         ] );
     ]

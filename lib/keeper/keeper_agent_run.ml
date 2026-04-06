@@ -618,14 +618,12 @@ let run_turn
           | Some e -> `String e.when_to_use
           | None -> `Null
         in
-        (* Extract required params from MASC schema for immediate usability *)
-        let required_params =
+        (* Samchon verification principle: include full input_schema so
+           the LLM can construct a correct call on the first attempt.
+           "Schema drives both LLM guidance and validation." *)
+        let input_schema =
           match List.find_opt (fun (s : Types.tool_schema) -> s.name = name) masc_schemas with
-          | Some s ->
-            (try
-              let props = Yojson.Safe.Util.(member "required" s.input_schema |> to_list) in
-              `List (List.map (fun j -> j) props)
-            with _ -> `Null)
+          | Some s -> s.input_schema
           | None -> `Null
         in
         `Assoc [
@@ -633,7 +631,7 @@ let run_turn
           ("score", `Float score);
           ("description", desc);
           ("when_to_use", when_to_use);
-          ("required_params", required_params);
+          ("input_schema", input_schema);
         ]
       ) new_discoveries
     in

@@ -966,8 +966,22 @@ let execute_keeper_tool_call
   let lookup = tool_access_lookup_of_meta meta in
   if not (can_execute ~lookup name)
   then
+    (* Samchon verification loop: structured rejection with actionable
+       guidance so the LLM can self-correct on the next attempt. *)
+    let reason =
+      if not (Hashtbl.mem lookup.candidate_set name)
+      then "not_in_candidate_set"
+      else if Hashtbl.mem lookup.deny_set name
+      then "denied_by_policy"
+      else "not_in_allow_set"
+    in
     Yojson.Safe.to_string
-      (`Assoc [ "error", `String "tool_not_allowed"; "tool", `String name ])
+      (`Assoc [
+        ("error", `String "tool_not_allowed");
+        ("tool", `String name);
+        ("reason", `String reason);
+        ("hint", `String "Use keeper_tool_search to find allowed alternatives.");
+      ])
   else (
     match name with
     | "keeper_tool_search" ->
@@ -1065,13 +1079,29 @@ let execute_keeper_tool_call
         in
         scored
       in
+      (* Samchon verification loop: include schema for suggested tools
+         so the LLM can self-correct in one step, not two. *)
+      let masc_schemas = !masc_schemas_ref in
+      let enrich_suggestion name =
+        let schema_opt =
+          List.find_opt (fun (s : Types.tool_schema) -> s.name = name) masc_schemas
+        in
+        match schema_opt with
+        | Some s ->
+          `Assoc [
+            ("name", `String name);
+            ("description", `String s.description);
+            ("input_schema", s.input_schema);
+          ]
+        | None -> `String name
+      in
       let fields =
         [ ("error", `String "unknown_tool"); ("tool", `String other) ]
         @ (match suggestion with
            | [] -> [("hint", `String "Use keeper_tool_search to find available tools.")]
            | names ->
-             [ ("did_you_mean", `List (List.map (fun n -> `String n) names));
-               ("hint", `String "Use keeper_tool_search to discover tools by description.") ])
+             [ ("did_you_mean", `List (List.map enrich_suggestion names));
+               ("hint", `String "Call one of these tools with the correct parameters.") ])
       in
       Yojson.Safe.to_string (`Assoc fields))
 ;;

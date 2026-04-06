@@ -1,8 +1,6 @@
 import { html } from 'htm/preact'
 import { Markdown } from "./common/markdown"
 import { useState } from 'preact/hooks'
-import { requestConfirm } from './common/confirm-dialog'
-import { isOfflineStatus } from '../lib/status-utils'
 import { keeperDirectChatAccess } from '../lib/keeper-chat-access'
 import type { Keeper, KeeperDiagnostic } from '../types'
 import {
@@ -22,14 +20,11 @@ import {
   sendKeeperThreadMessage,
 } from '../keeper-runtime'
 import { isVisibleDirectConversationEntry } from '../keeper-state'
-import { bootKeeper, shutdownKeeper } from '../api/keeper'
 import { ChatComposer, ChatTranscript } from './chat/primitives'
 import { showToast } from './common/toast'
 import { signal } from '@preact/signals'
-import { invalidateDashboardCache, refreshDashboard, shellAuthSummary } from '../store'
+import { shellAuthSummary } from '../store'
 
-const keeperBooting = signal<Record<string, boolean>>({})
-const keeperShuttingDown = signal<Record<string, boolean>>({})
 
 const KEEPER_CHAT_METADATA_VISIBLE_KEY = 'masc_keeper_chat_metadata_visible'
 const KEEPER_CHAT_INTERNAL_VISIBLE_KEY = 'masc_keeper_chat_internal_visible'
@@ -401,81 +396,17 @@ export function KeeperRuntimeActions({
   const diagnostic = effectiveDiagnostic(keeper)
   const probing = keeperProbing.value[keeper.name] ?? false
   const recovering = keeperRecovering.value[keeper.name] ?? false
-  const booting = keeperBooting.value[keeper.name] ?? false
-  const shuttingDown = keeperShuttingDown.value[keeper.name] ?? false
   const recommended = diagnostic?.next_action_path ?? null
   const canRecover = diagnostic?.recoverable === true
-  const isOffline = isOfflineStatus(keeper.status)
-  const isRunning = keeper.status === 'active' || keeper.status === 'running' || keeper.status === 'idle' || keeper.status === 'watching' || keeper.status === 'listening'
-  const refreshKeeperRuntime = async () => {
-    invalidateDashboardCache()
-    await refreshDashboard({ force: true })
-  }
-  const runBoot = async () => {
-    keeperBooting.value = { ...keeperBooting.value, [keeper.name]: true }
-    try {
-      const response = await bootKeeper(keeper.name)
-      if (!response.ok) {
-        throw new Error(response.error ?? `${keeper.name} 기동 실패`)
-      }
-      showToast(`${keeper.name} 기동됨`, 'success')
-      await refreshKeeperRuntime()
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : `${keeper.name} 기동 실패`, 'error')
-    } finally {
-      keeperBooting.value = { ...keeperBooting.value, [keeper.name]: false }
-    }
-  }
-  const runShutdown = async () => {
-    const confirmed = await requestConfirm({
-      title: '키퍼 종료',
-      message: `${keeper.name} 키퍼를 종료합니까?`,
-      tone: 'danger'
-    })
-    if (!confirmed) return
-    keeperShuttingDown.value = { ...keeperShuttingDown.value, [keeper.name]: true }
-    try {
-      const response = await shutdownKeeper(keeper.name)
-      if (!response.ok) {
-        throw new Error(response.error ?? `${keeper.name} 종료 실패`)
-      }
-      showToast(`${keeper.name} 종료됨`, 'success')
-      await refreshKeeperRuntime()
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : `${keeper.name} 종료 실패`, 'error')
-    } finally {
-      keeperShuttingDown.value = { ...keeperShuttingDown.value, [keeper.name]: false }
-    }
-  }
 
   const btnBase = 'py-1.5 px-4 rounded-lg text-xs font-medium cursor-pointer transition-colors border'
   const ghostBtn = `${btnBase} border-[var(--card-border)] bg-[var(--white-3)] text-[var(--text-muted)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)]`
   const activeGhostBtn = `${btnBase} border-[rgba(71,184,255,0.4)] bg-[var(--accent-12)] text-[var(--accent)] hover:bg-[rgba(71,184,255,0.2)]`
   const secondaryBtn = `${btnBase} border-[rgba(251,191,36,0.3)] bg-[var(--warn-10)] text-[var(--warn)] hover:bg-[rgba(251,191,36,0.15)]`
   const activeSecondaryBtn = `${btnBase} border-[rgba(251,191,36,0.5)] bg-[rgba(251,191,36,0.15)] text-[var(--warn)] hover:bg-[rgba(251,191,36,0.2)]`
-  const bootBtn = `${btnBase} border-[rgba(34,197,94,0.4)] bg-[rgba(34,197,94,0.08)] text-[var(--ok)] hover:bg-[rgba(34,197,94,0.15)]`
-  const shutdownBtn = `${btnBase} border-[var(--bad-30)] bg-[var(--bad-10)] text-[#fb7185] hover:bg-[rgba(239,68,68,0.15)]`
 
   return html`
     <div class="flex flex-wrap gap-2">
-      ${isOffline ? html`
-        <button type="button"
-          class=${bootBtn}
-          onClick=${() => { void runBoot() }}
-          disabled=${booting}
-        >
-          ${booting ? '기동 중...' : '기동'}
-        </button>
-      ` : null}
-      ${isRunning ? html`
-        <button type="button"
-          class=${shutdownBtn}
-          onClick=${() => { void runShutdown() }}
-          disabled=${shuttingDown}
-        >
-          ${shuttingDown ? '종료 중...' : '종료'}
-        </button>
-      ` : null}
       <button type="button"
         class=${recommended === 'probe' ? activeGhostBtn : ghostBtn}
         onClick=${() => {

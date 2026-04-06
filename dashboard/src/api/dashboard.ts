@@ -601,14 +601,18 @@ export function fetchToolMetrics(): Promise<ToolMetricsResponse> {
 
 export async function fetchDashboardTools(): Promise<DashboardToolsResponse> {
   const raw = await get<DashboardToolsResponse>('/api/v1/dashboard/tools')
-  if (raw.tool_inventory?.tools) {
-    raw.tool_inventory.tools = raw.tool_inventory.tools.map(t => ({
-      ...t,
-      category: t.category ?? 'uncategorized',
-      tier: t.tier ?? 'standard',
-    }))
+  const normalizedTools = raw.tool_inventory?.tools?.map(t => ({
+    ...t,
+    category: t.category ?? 'uncategorized',
+    tier: t.tier ?? 'standard',
+  }))
+  return {
+    ...raw,
+    tool_inventory: {
+      ...raw.tool_inventory,
+      ...(normalizedTools ? { tools: normalizedTools } : {}),
+    },
   }
-  return raw
 }
 
 export type PromptSource = 'override' | 'file' | 'default' | 'missing'

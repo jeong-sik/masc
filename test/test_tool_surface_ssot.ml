@@ -106,24 +106,24 @@ let test_keeper_internal_contains_known_tools () =
 
 let test_keeper_voice_replacement_contract () =
   Alcotest.(check (option string))
-    "voice speak maps to hidden public tool"
-    (Some "masc_voice_speak")
+    "voice speak replacement removed"
+    None
     (Tool_catalog_surfaces.keeper_internal_replacement "keeper_voice_speak");
   Alcotest.(check (option string))
-    "voice agent maps to hidden public tool"
-    (Some "masc_voice_agent")
+    "voice agent replacement removed"
+    None
     (Tool_catalog_surfaces.keeper_internal_replacement "keeper_voice_agent");
   Alcotest.(check (option string))
-    "voice sessions map to hidden public tool"
-    (Some "masc_voice_sessions")
+    "voice sessions replacement removed"
+    None
     (Tool_catalog_surfaces.keeper_internal_replacement "keeper_voice_sessions");
   Alcotest.(check (option string))
-    "voice session start maps to hidden public tool"
-    (Some "masc_voice_session_start")
+    "voice session start replacement removed"
+    None
     (Tool_catalog_surfaces.keeper_internal_replacement "keeper_voice_session_start");
   Alcotest.(check (option string))
-    "voice session end maps to hidden public tool"
-    (Some "masc_voice_session_end")
+    "voice session end replacement removed"
+    None
     (Tool_catalog_surfaces.keeper_internal_replacement "keeper_voice_session_end");
   Alcotest.(check (option string))
     "voice listen remains keeper-only"
@@ -274,45 +274,8 @@ let test_pruned_tools_registered_as_deprecated () =
       Alcotest.(check bool) (name ^ " callable") true
         (Tool_catalog.allow_direct_call name))
     [
-      "masc_board_migrate";
-      "masc_board_reclassify";
-      "masc_episode_flush";
-      "masc_episode_list";
-      "masc_portal_close";
-      "masc_portal_open";
-      "masc_portal_send";
-      "masc_portal_status";
-      "masc_transport_status";
-      "masc_websocket_discovery";
       "masc_webrtc_answer";
       "masc_webrtc_offer";
-      "masc_voice_agent";
-      "masc_voice_conference_end";
-      "masc_voice_speak";
-      "masc_voice_conference_start";
-      "masc_voice_ping_pong";
-      "masc_voice_session_end";
-      "masc_voice_session_start";
-      "masc_voice_sessions";
-    ];
-  (* Fully removed from all surfaces — deprecated only, not callable *)
-  List.iter
-    (fun name ->
-      Alcotest.(check bool) (name ^ " is Deprecated") true
-        (List.mem name deprecated_names))
-    [
-      "masc_a2a_delegate";
-      "masc_a2a_discover";
-      "masc_a2a_query_skill";
-      "masc_a2a_subscribe";
-      "masc_a2a_unsubscribe";
-      "masc_improve_loop_start";
-      "masc_improve_loop_status";
-      "masc_improve_loop_pause";
-      "masc_improve_loop_resume";
-      "masc_improve_loop_tick";
-      "masc_detachment_list";
-      "masc_detachment_status";
     ]
 let test_workspace_mutating_canonical_used () =
   (* workspace_mutating_tool_names in tool_catalog_surfaces is the canonical list.

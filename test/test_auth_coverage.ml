@@ -181,16 +181,6 @@ let test_permission_for_tool_status () =
   | Some Types.CanReadState -> ()
   | _ -> fail "expected CanReadState"
 
-let test_permission_for_tool_transport_status () =
-  match Auth.permission_for_tool "masc_transport_status" with
-  | Some Types.CanReadState -> ()
-  | _ -> fail "expected CanReadState"
-
-let test_permission_for_tool_websocket_discovery () =
-  match Auth.permission_for_tool "masc_websocket_discovery" with
-  | Some Types.CanReadState -> ()
-  | _ -> fail "expected CanReadState"
-
 let test_permission_for_tool_runtime_verify () =
   match Auth.permission_for_tool "masc_runtime_verify" with
   | Some Types.CanReadState -> ()
@@ -261,25 +251,10 @@ let test_permission_for_tool_board_post () =
   | Some Types.CanBroadcast -> ()
   | _ -> fail "expected CanBroadcast"
 
-let test_permission_for_tool_board_reclassify () =
-  match Auth.permission_for_tool "masc_board_reclassify" with
-  | Some Types.CanAdmin -> ()
-  | _ -> fail "expected CanAdmin"
-
 let test_permission_for_tool_board_delete () =
   match Auth.permission_for_tool "masc_board_delete" with
   | Some Types.CanAdmin -> ()
   | _ -> fail "expected CanAdmin"
-
-let test_permission_for_tool_portal_open () =
-  match Auth.permission_for_tool "masc_portal_open" with
-  | Some Types.CanOpenPortal -> ()
-  | _ -> fail "expected CanOpenPortal"
-
-let test_permission_for_tool_portal_send () =
-  match Auth.permission_for_tool "masc_portal_send" with
-  | Some Types.CanSendPortal -> ()
-  | _ -> fail "expected CanSendPortal"
 
 let test_permission_for_tool_worktree_create () =
   match Auth.permission_for_tool "masc_worktree_create" with
@@ -501,16 +476,6 @@ let test_permission_for_tool_operator_action () =
 
 let test_permission_for_tool_operator_confirm () =
   match Auth.permission_for_tool "masc_operator_confirm" with
-  | Some Types.CanBroadcast -> ()
-  | _ -> fail "expected CanBroadcast"
-
-let test_permission_for_tool_voice_sessions () =
-  match Auth.permission_for_tool "masc_voice_sessions" with
-  | Some Types.CanReadState -> ()
-  | _ -> fail "expected CanReadState"
-
-let test_permission_for_tool_voice_speak () =
-  match Auth.permission_for_tool "masc_voice_speak" with
   | Some Types.CanBroadcast -> ()
   | _ -> fail "expected CanBroadcast"
 
@@ -767,8 +732,6 @@ let () =
         test_permission_for_tool_collaboration_evidence;
       test_case "operator_action" `Quick test_permission_for_tool_operator_action;
       test_case "operator_confirm" `Quick test_permission_for_tool_operator_confirm;
-      test_case "voice_sessions" `Quick test_permission_for_tool_voice_sessions;
-      test_case "voice_speak" `Quick test_permission_for_tool_voice_speak;
       test_case "voice_ping_pong" `Quick test_permission_for_tool_voice_ping_pong;
       test_case "autoresearch_status" `Quick
         test_permission_for_tool_autoresearch_status;

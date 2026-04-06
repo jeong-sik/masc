@@ -516,3 +516,53 @@ let transition_result_to_json (tr : transition_result) =
     "event", event_to_json tr.event_applied;
     "timestamp", `Float tr.timestamp;
   ]
+
+(* ── Mermaid State Diagram ────────────────────────────── *)
+
+let phase_to_mermaid ~(current : phase) : string =
+  let b = Buffer.create 512 in
+  let p fmt = Printf.bprintf b fmt in
+  p "stateDiagram-v2\n";
+  (* Phase nodes with display names *)
+  p "    [*] --> Offline\n";
+  p "    Offline --> Running : Fiber_started\n";
+  p "    Running --> Failing : hb/turn fail\n";
+  p "    Running --> Compacting : compact start\n";
+  p "    Running --> HandingOff : handoff start\n";
+  p "    Running --> Draining : stop requested\n";
+  p "    Running --> Paused : operator pause\n";
+  p "    Failing --> Running : hb/turn ok\n";
+  p "    Failing --> Crashed : fiber death\n";
+  p "    Failing --> Draining : stop requested\n";
+  p "    Compacting --> Running : compact done\n";
+  p "    Compacting --> Failing : hb fail\n";
+  p "    Compacting --> Crashed : fiber death\n";
+  p "    HandingOff --> Running : handoff done\n";
+  p "    HandingOff --> Failing : hb fail\n";
+  p "    HandingOff --> Crashed : fiber death\n";
+  p "    Draining --> Stopped : drain done\n";
+  p "    Draining --> Crashed : fiber death\n";
+  p "    Paused --> Running : operator resume\n";
+  p "    Paused --> Draining : stop requested\n";
+  p "    Paused --> Crashed : fiber death\n";
+  p "    Crashed --> Restarting : backoff elapsed\n";
+  p "    Crashed --> Dead : budget exhausted\n";
+  p "    Restarting --> Running : fiber started\n";
+  p "    Restarting --> Crashed : launch fail\n";
+  p "    Restarting --> Dead : budget exhausted\n";
+  p "    Stopped --> [*]\n";
+  p "    Dead --> [*]\n";
+  (* Highlight current phase with classDef *)
+  p "\n";
+  p "    classDef active fill:#22c55e,stroke:#16a34a,color:#fff,stroke-width:3px\n";
+  p "    classDef terminal fill:#6b7280,stroke:#4b5563,color:#fff\n";
+  p "    classDef buffer fill:#f59e0b,stroke:#d97706,color:#fff\n";
+  (match current with
+   | Stopped | Dead ->
+     p "    class %s terminal\n" (phase_to_string current)
+   | Failing | Compacting | HandingOff | Draining | Restarting ->
+     p "    class %s buffer\n" (phase_to_string current);
+     p "    class %s active\n" (phase_to_string current)
+   | _ ->
+     p "    class %s active\n" (phase_to_string current));
+  Buffer.contents b

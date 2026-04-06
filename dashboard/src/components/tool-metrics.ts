@@ -14,25 +14,6 @@ function loadMetrics() {
   return metricsResource.load(() => fetchToolMetrics())
 }
 
-function tierLabel(tier: string | null | undefined): string {
-  switch (tier) {
-    case 'essential': return '필수'
-    case 'standard': return '표준'
-    case 'full': return '전체'
-    case null: case undefined: return '-'
-    default: return tier
-  }
-}
-
-function tierBadgeClass(tier: string | null | undefined): string {
-  switch (tier) {
-    case 'essential': return 'badge-essential'
-    case 'standard': return 'badge-standard'
-    case 'full': return 'badge-full'
-    default: return 'bg-[var(--white-4)] text-[var(--text-dim)]'
-  }
-}
-
 /** Map category color CSS class (text-[...]) to a usable bar background color. */
 function categoryBarColor(colorClass: string): string {
   const match = colorClass.match(/text-\[(.*)\]/)
@@ -46,7 +27,6 @@ function categoryBarColor(colorClass: string): string {
 
 function BarChart({ items, maxCount }: { items: ToolMetricsTopEntry[]; maxCount: number }) {
   if (items.length === 0) return html`<p class="muted">아직 도구 호출 기록이 없습니다.</p>`
-  const hasTier = items.some(item => item.tier != null && item.tier !== '')
   return html`
     <div class="flex flex-col gap-1.5">
       ${items.map(item => {
@@ -59,9 +39,7 @@ function BarChart({ items, maxCount }: { items: ToolMetricsTopEntry[]; maxCount:
               <span class="flex-shrink-0 size-4 rounded text-[9px] font-mono font-bold flex items-center justify-center bg-[var(--white-5)] ${cat.color}">${cat.icon}</span>
               <span class="text-[var(--text-body)] overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px]" title=${item.name}>${item.name}</span>
             </div>
-            ${hasTier
-              ? html`<span class="px-1.5 py-px rounded-[3px] text-[10px] font-semibold text-center ${tierBadgeClass(item.tier)}">${tierLabel(item.tier)}</span>`
-              : html`<span class="px-1.5 py-px rounded-[3px] text-[10px] font-medium text-center text-[var(--text-dim)] bg-[var(--white-4)]">${cat.label}</span>`}
+            <span class="px-1.5 py-px rounded-[3px] text-[10px] font-medium text-center text-[var(--text-dim)] bg-[var(--white-4)]">${cat.label}</span>
             <div class="h-3.5 rounded-[3px] bg-[var(--white-6)] overflow-hidden">
               <div class="h-full rounded-[3px] min-w-0.5 transition-[width] duration-300 ease-in-out" style=${{ width: `${pct}%`, backgroundColor: barBg }} />
             </div>

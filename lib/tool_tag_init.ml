@@ -85,6 +85,7 @@ let register_all () =
     "masc_dashboard"; "masc_verify_handoff";
     "masc_gc"; "masc_cleanup_zombies";
     "masc_tool_stats"; "masc_tool_help";
+    "masc_web_search";
     "masc_tool_admin_snapshot"; "masc_tool_admin_update";
     "masc_keeper_tool_catalog";
     "masc_feature_flags";

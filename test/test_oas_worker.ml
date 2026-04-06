@@ -789,7 +789,7 @@ let test_keeper_checkpoint_store_oas_roundtrip () =
       match
         Keeper_checkpoint_store.load_oas ~session_dir ~session_id:"trace-store"
       with
-      | Some loaded ->
+      | Ok loaded ->
           Alcotest.(check (float 0.000001)) "created_at preserved"
             checkpoint.created_at
             loaded.created_at;
@@ -803,7 +803,7 @@ let test_keeper_checkpoint_store_oas_roundtrip () =
           Alcotest.(check (option int)) "sidecar max_tokens preserved"
             (Some 4096)
             sidecar_max_tokens
-      | None -> Alcotest.fail "expected OAS checkpoint roundtrip")
+      | Error _ -> Alcotest.fail "expected OAS checkpoint roundtrip")
 
 let test_keeper_checkpoint_store_oas_missing_returns_none () =
   let base_dir = temp_dir "keeper_oas_store_missing" in
@@ -812,11 +812,17 @@ let test_keeper_checkpoint_store_oas_missing_returns_none () =
     (fun () ->
       Fs_compat.clear_fs ();
       let session_dir = Filename.concat base_dir "missing-session" in
-      Alcotest.(check (option string)) "missing checkpoint"
-        None
-        (Keeper_checkpoint_store.load_oas ~session_dir
-           ~session_id:"missing-session"
-         |> Option.map (fun (cp : Agent_sdk.Checkpoint.t) -> cp.session_id)))
+      (match Keeper_checkpoint_store.load_oas ~session_dir
+               ~session_id:"missing-session" with
+       | Error Not_found -> ()
+       | Ok _ -> Alcotest.fail "expected Not_found for missing checkpoint"
+       | Error e ->
+           Alcotest.fail (Printf.sprintf "expected Not_found, got other error: %s"
+             (match e with
+              | Parse_error d -> "parse:" ^ d
+              | Store_error d -> "store:" ^ d
+              | Io_error d -> "io:" ^ d
+              | Not_found -> "not_found"))))
 
 let test_keeper_checkpoint_prefers_oas_checkpoint () =
   let base_dir = temp_dir "keeper_oas_checkpoint" in
@@ -976,7 +982,7 @@ let test_keeper_oas_handoff_rollover_increments_generation () =
         Keeper_checkpoint_store.load_oas ~session_dir:new_session.session_dir
           ~session_id:rollover.updated_meta.runtime.trace_id
       with
-      | Some loaded ->
+      | Ok loaded ->
           let generation =
             Agent_sdk.Context.get_scoped loaded.context Agent_sdk.Context.Session
               "keeper_generation"
@@ -987,7 +993,7 @@ let test_keeper_oas_handoff_rollover_increments_generation () =
               | `Int value -> Some value
               | `Intlit raw -> int_of_string_opt raw
               | _ -> None))
-      | None -> Alcotest.fail "expected rollover checkpoint")
+      | Error _ -> Alcotest.fail "expected rollover checkpoint")
 
 let test_keeper_oas_handoff_rollover_below_threshold_noop () =
   let base_dir = temp_dir "keeper_oas_handoff_noop" in

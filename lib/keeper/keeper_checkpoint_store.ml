@@ -151,25 +151,42 @@ let save_oas ~(session_dir : string) (ckpt : Agent_sdk.Checkpoint.t)
 (* Delta Checkpoint Shadow-Apply removed: Agent_sdk.Checkpoint.delta
    type was removed upstream. Functions had zero callers. *)
 
+type checkpoint_load_error =
+  | Not_found
+  | Store_error of string
+  | Parse_error of string
+  | Io_error of string
+
+let classify_sdk_error (e : Agent_sdk.Error.sdk_error) : checkpoint_load_error =
+  match e with
+  | Io (FileOpFailed _) -> Not_found
+  | Io (ValidationFailed r) -> Store_error r.detail
+  | Serialization (JsonParseError r) -> Parse_error r.detail
+  | Serialization (VersionMismatch r) ->
+      Parse_error (sprintf "version mismatch: expected %d, got %d" r.expected r.got)
+  | Serialization (UnknownVariant r) ->
+      Parse_error (sprintf "unknown variant %s: %s" r.type_name r.value)
+  | _ -> Io_error (Agent_sdk.Error.to_string e)
+
 let load_oas ~(session_dir : string) ~(session_id : string) :
-    Agent_sdk.Checkpoint.t option =
+    (Agent_sdk.Checkpoint.t, checkpoint_load_error) result =
   match Fs_compat.get_fs_opt () with
   | Some fs ->
       let dir = Eio.Path.(fs / session_dir) in
       (match Agent_sdk.Checkpoint_store.create dir with
        | Ok store -> (
            match Agent_sdk.Checkpoint_store.load store session_id with
-           | Ok ckpt -> Some ckpt
-           | Error _ -> None)
-       | Error _ -> None)
+           | Ok ckpt -> Ok ckpt
+           | Error e -> Error (classify_sdk_error e))
+       | Error e -> Error (Store_error (Agent_sdk.Error.to_string e)))
   | None ->
       let path = oas_checkpoint_path ~session_dir ~session_id in
       if Sys.file_exists path then
         try
           match Agent_sdk.Checkpoint.of_string (Fs_compat.load_file path) with
-          | Ok ckpt -> Some ckpt
-          | Error _ -> None
+          | Ok ckpt -> Ok ckpt
+          | Error e -> Error (classify_sdk_error e)
         with
         | Eio.Cancel.Cancelled _ as e -> raise e
-        | _ -> None
-      else None
+        | exn -> Error (Io_error (Printexc.to_string exn))
+      else Error Not_found

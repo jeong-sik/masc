@@ -234,10 +234,16 @@ let recover_latest_checkpoint_for_overflow_retry
     ~(model : string)
     ~(primary_model_max_tokens : int) : overflow_retry_recovery option =
   let session = create_session ~session_id:meta.runtime.trace_id ~base_dir in
-  let oas_checkpoint =
+  let oas_result =
     Keeper_checkpoint_store.load_oas ~session_dir:session.session_dir
       ~session_id:meta.runtime.trace_id
   in
+  (match oas_result with
+   | Error (Parse_error d | Store_error d | Io_error d) ->
+       Log.Keeper.error "keeper:%s overflow retry OAS load error: %s"
+         meta.runtime.trace_id d
+   | Error Not_found | Ok _ -> ());
+  let oas_checkpoint = Result.to_option oas_result in
   let legacy_checkpoint =
     (try load_latest_checkpoint session
      with

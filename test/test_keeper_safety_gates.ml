@@ -217,7 +217,9 @@ let test_messaging_preset_tools () =
   let meta = make_meta ~preset:Keeper_types.Messaging () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "has board tools" true (List.mem "keeper_board_post" tools);
-  check bool "omits keeper_fs_read" false (List.mem "keeper_fs_read" tools)
+  check bool "has keeper_fs_read" true (List.mem "keeper_fs_read" tools);
+  check bool "has keeper_shell_readonly" true (List.mem "keeper_shell_readonly" tools);
+  check bool "has keeper_github" true (List.mem "keeper_github" tools)
 
 let test_all_keepers_have_shell_and_coding () =
   let meta = make_meta ~preset:Keeper_types.Coding () in

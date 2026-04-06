@@ -17,6 +17,7 @@ export type SurfaceSectionId =
   | 'harness'
   | 'features'
   | 'config'
+  | 'telemetry'
 
 type NonHomeTabId = Exclude<TabId, 'overview' | 'logs'>
 
@@ -128,6 +129,12 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: '활동 그래프',
       description: '실시간 이벤트 흐름 (broadcast, task, keeper 이벤트).',
       params: { section: 'activity' },
+    },
+    {
+      id: 'telemetry',
+      label: '텔레메트리',
+      description: '도구 호출, keeper 메트릭, 에이전트 이벤트 통합 뷰.',
+      params: { section: 'telemetry' },
     },
   ],
   command: [

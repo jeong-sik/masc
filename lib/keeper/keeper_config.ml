@@ -275,20 +275,26 @@ let keeper_compact_ratio () : float =
 let keeper_compact_max_messages () : int =
   int_of_env_default
     "MASC_KEEPER_COMPACT_MAX_MESSAGES"
-    (* Lowered from 240: keeper turns are short-lived Agent.run sessions
-       (max ~10 messages before idle detection).  A gate of 240 was never
-       reachable, preventing continuity_summary updates entirely. *)
-    ~default:12
+    (* Disabled by default (0 = never trigger on message count alone).
+       Message count is a poor proxy for context pressure: a single
+       tool_call message can be 50 tokens or 5 000 tokens.  Use the
+       token gate instead.  Previous default of 12 fired every turn,
+       destroying conversation history before the model could learn
+       from its own actions. *)
+    ~default:0
     ~min_v:0
     ~max_v:5000
 
 let keeper_compact_max_tokens () : int =
   int_of_env_default
     "MASC_KEEPER_COMPACT_MAX_TOKENS"
-    (* Lowered from 8000: within a single keeper turn the token count
-       rarely exceeds 5K.  A reachable gate triggers continuity updates
-       that enable cross-turn memory accumulation. *)
-    ~default:4000
+    (* Gate at 75 % of the 262 144 context window = 196 608 tokens.
+       Keepers accumulate cross-turn history in OAS checkpoints;
+       compaction should only fire when context pressure is real.
+       Previous default of 4 000 fired at 1.5 % utilisation, wiping
+       history so aggressively that keepers could not see their own
+       prior actions and repeated the same board posts every cycle. *)
+    ~default:196608
     ~min_v:0
     ~max_v:5000000
 

@@ -558,11 +558,44 @@ let run_turn
      Search results are post-filtered to keeper_allowed_tool_names
      so the keeper only sees tools it is actually permitted to call. *)
   let search_index = Agent_sdk.Tool_index.build ~config:tool_index_config tool_entries in
-  (* Map tool name → OAS schema description for search result enrichment *)
+  (* Map tool name → OAS schema for search result enrichment.
+     Two maps: description (string) and full schema (tool_schema).
+     Covers both keeper_* and masc_* tools from the OAS Tool.t list. *)
   let oas_description_map =
     let tbl = Hashtbl.create (List.length keeper_tools) in
     List.iter (fun (t : Agent_sdk.Tool.t) ->
       Hashtbl.replace tbl t.schema.name t.schema.description
+    ) keeper_tools;
+    tbl
+  in
+  (* Map tool name → OAS input_schema JSON for keeper_tool_search enrichment.
+     Covers keeper_* tools that don't appear in masc_schemas_ref. *)
+  let oas_input_schema_map =
+    let tbl = Hashtbl.create (List.length keeper_tools) in
+    List.iter (fun (t : Agent_sdk.Tool.t) ->
+      let param_type_str (pt : Agent_sdk.Types.param_type) = match pt with
+        | String -> "string" | Integer -> "integer" | Number -> "number"
+        | Boolean -> "boolean" | Array -> "array" | Object -> "object"
+      in
+      let props =
+        List.map (fun (p : Agent_sdk.Types.tool_param) ->
+          (p.name, `Assoc [
+            ("type", `String (param_type_str p.param_type));
+            ("description", `String p.description);
+          ])
+        ) t.schema.parameters
+      in
+      let required =
+        t.schema.parameters
+        |> List.filter (fun (p : Agent_sdk.Types.tool_param) -> p.required)
+        |> List.map (fun (p : Agent_sdk.Types.tool_param) -> `String p.name)
+      in
+      let schema = `Assoc [
+        ("type", `String "object");
+        ("properties", `Assoc props);
+        ("required", `List required);
+      ] in
+      Hashtbl.replace tbl t.schema.name schema
     ) keeper_tools;
     tbl
   in
@@ -619,11 +652,15 @@ let run_turn
         in
         (* Samchon verification principle: include full input_schema so
            the LLM can construct a correct call on the first attempt.
-           "Schema drives both LLM guidance and validation." *)
+           "Schema drives both LLM guidance and validation."
+           Fallback chain: MASC injected schema → OAS tool schema. *)
         let input_schema =
           match List.find_opt (fun (s : Types.tool_schema) -> s.name = name) masc_schemas with
           | Some s -> s.input_schema
-          | None -> `Null
+          | None ->
+            (match Hashtbl.find_opt oas_input_schema_map name with
+             | Some j -> j
+             | None -> `Null)
         in
         `Assoc [
           ("name", `String name);
@@ -677,41 +714,9 @@ let run_turn
     "extend_turns"
     :: List.map (fun (t : Agent_sdk.Tool.t) -> t.schema.name) keeper_tools
   in
-  (* Layer 1: Policy fallback — when BM25 confidence is low, fall back
-     to a capped subset of the preset-allowed tools.
-     Full-preset keepers can have 300+ policy-allowed tools; sending all
-     of them as fallback produces ~39K tokens which exceeds 8K model
-     context windows.  Cap to max_fallback_tools, prioritizing keeper_*
-     tools (preset-scoped, always relevant) then session-min MASC
-     tools (coordination essentials).  See #4592. *)
-  let policy_allowed =
-    Keeper_exec_tools.keeper_allowed_tool_names !meta_ref
-  in
   let max_tools_per_turn =
     if is_retry then Keeper_config.keeper_retry_max_tools_per_turn ()
     else Keeper_config.keeper_max_tools_per_turn ()
-  in
-  let max_fallback_tools = min 30 max_tools_per_turn in
-  let fallback_tools =
-    let candidates =
-      List.filter (fun name ->
-        not (List.mem name always_include_tools)
-        && List.mem name policy_allowed
-      ) all_tool_names
-    in
-    if List.length candidates <= max_fallback_tools then
-      candidates
-    else
-      let keeper = List.filter (fun n ->
-        String.starts_with ~prefix:"keeper_" n) candidates in
-      let masc_std = List.filter (fun n ->
-        String.starts_with ~prefix:"masc_" n
-        && Tool_catalog.is_on_surface Tool_catalog.Session_min n
-      ) candidates in
-      let merged = keeper @ masc_std in
-      if List.length merged > max_fallback_tools then
-        List.filteri (fun i _ -> i < max_fallback_tools) merged
-      else merged
   in
   (* Runtime tool overlay: external callers (masc_tool_grant/revoke)
      push Tool_op.t values here. The hook applies them each turn.
@@ -724,58 +729,9 @@ let run_turn
     ~config ~meta_ref ~session ~ctx_ref ~generation ?max_cost_usd
     ?trajectory_acc
     () in
-  (* Build OAS Tool_selector strategy.
-     Uses TopK_llm when LLM reranking is enabled, TopK_bm25 otherwise.
-     The strategy is constructed once and reused by the before_turn_params
-     hook on each turn. *)
-  let tool_selector_strategy : Agent_sdk.Tool_selector.strategy =
-    let llm_rerank_enabled = Keeper_config.keeper_llm_rerank_enabled () in
-    if llm_rerank_enabled then
-      match Eio_context.get_switch_opt (), Eio_context.get_net_opt () with
-      | Some sw, Some net ->
-        (try
-          let cascade_name = Keeper_config.keeper_llm_rerank_cascade () in
-          let defaults = Oas_worker_named.default_model_strings ~cascade_name in
-          let config_path = Oas_worker_named.default_config_path () in
-          let named_cascade = Agent_sdk.Api.named_cascade
-            ?config_path ~name:cascade_name ~defaults () in
-          let rerank_fn = Agent_sdk.Tool_selector.default_rerank_fn
-            ~sw ~net ~named_cascade ~k:max_tools_per_turn () in
-          Agent_sdk.Tool_selector.TopK_llm {
-            k = max_tools_per_turn;
-            bm25_prefilter_n = 20;
-            always_include = always_include_tools;
-            confidence_threshold = 0.5;
-            rerank_fn;
-          }
-        with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn ->
-          Log.Keeper.warn "keeper:%s LLM rerank init failed, using BM25: %s"
-            meta.name (Printexc.to_string exn);
-          Agent_sdk.Tool_selector.TopK_bm25 {
-            k = max_tools_per_turn;
-            always_include = always_include_tools;
-            confidence_threshold = Some 0.5;
-            fallback_tools;
-          })
-      | _ ->
-        Log.Keeper.warn "keeper:%s LLM rerank enabled but Eio context unavailable, using BM25"
-          meta.name;
-        Agent_sdk.Tool_selector.TopK_bm25 {
-          k = max_tools_per_turn;
-          always_include = always_include_tools;
-          confidence_threshold = Some 0.5;
-          fallback_tools;
-        }
-    else
-      Agent_sdk.Tool_selector.TopK_bm25 {
-        k = max_tools_per_turn;
-        always_include = always_include_tools;
-        confidence_threshold = Some 0.5;
-        fallback_tools;
-      }
-  in
+  (* BM25 Tool_selector removed: discovery mode uses core + keeper_tool_search.
+     The search_index (full universe BM25) is still used by keeper_tool_search
+     for explicit on-demand discovery. *)
   (* Compose dynamic_context injection + progressive tool disclosure
      in a single before_turn_params hook.
 
@@ -826,20 +782,10 @@ let run_turn
         let visible_always_include_tools =
           Tool_portal.filter_visible_tool_names portal_ctx always_include_tools
         in
-        (* Delegate BM25 retrieval + confidence gate + fallback + optional
-           LLM reranking to OAS Tool_selector.select.  This is the core
-           boundary fix: MASC no longer manually calls Tool_index.retrieve,
-           Tool_index.confident, or orchestrates the rerank fallback chain. *)
-        let selected_names =
-          Agent_sdk.Tool_selector.select_names
-            ~strategy:tool_selector_strategy
-            ~context:query_text
-            ~tools:scoped_tools
-          |> Tool_portal.filter_visible_tool_names portal_ctx
-        in
         (* Core + discovered tools: the keeper discovers additional tools
-           on demand via keeper_tool_search.  BM25 auto-selection is replaced
-           by explicit discovery — only tools the keeper asked for appear. *)
+           on demand via keeper_tool_search.  BM25 auto-selection (previously
+           computed here via Tool_selector.select_names) was removed — only
+           tools explicitly requested via keeper_tool_search appear. *)
         let effective_selected =
           let core = Keeper_exec_tools.effective_core_tools () in
           let discovered =
@@ -862,8 +808,10 @@ let run_turn
         in
         if Keeper_types_profile.keeper_debug then
           Log.Keeper.info
-            "tool_disclosure keeper=%s selected=%d allowed=%d query_len=%d"
-            meta.name (List.length selected_names)
+            "tool_disclosure keeper=%s core=%d discovered=%d allowed=%d query_len=%d"
+            meta.name
+            (List.length (Keeper_exec_tools.effective_core_tools ()))
+            (List.length (Keeper_discovered_tools.active_names !discovered_ref ~turn))
             (List.length all_allowed)
             (String.length query_text);
         (* 3. Graceful last-turn: inject budget warnings and restrict

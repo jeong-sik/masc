@@ -4,6 +4,9 @@ open Masc_mcp
 
 let () = Random.init 42
 
+let default_cache_max_entries = 1000
+let default_cache_max_entry_size = 102400
+
 let rec rm_rf path =
   if Sys.file_exists path then
     if Sys.is_directory path then begin
@@ -262,13 +265,13 @@ let with_cache_limits ~max_entries ~max_entry_size f =
   Unix.putenv "MASC_CACHE_MAX_ENTRIES" (string_of_int max_entries);
   Unix.putenv "MASC_CACHE_MAX_ENTRY_SIZE" (string_of_int max_entry_size);
   Fun.protect
-    ~finally:(fun () ->
+       ~finally:(fun () ->
       (match prev_max_entries with
        | Some v -> Unix.putenv "MASC_CACHE_MAX_ENTRIES" v
-       | None -> Unix.putenv "MASC_CACHE_MAX_ENTRIES" "1000");
+       | None -> Unix.putenv "MASC_CACHE_MAX_ENTRIES" (string_of_int default_cache_max_entries));
       match prev_max_entry_size with
       | Some v -> Unix.putenv "MASC_CACHE_MAX_ENTRY_SIZE" v
-      | None -> Unix.putenv "MASC_CACHE_MAX_ENTRY_SIZE" "102400")
+      | None -> Unix.putenv "MASC_CACHE_MAX_ENTRY_SIZE" (string_of_int default_cache_max_entry_size))
     f
 
 let test_distinct_keys_do_not_collide_after_sanitize () =
@@ -287,7 +290,7 @@ let test_distinct_keys_do_not_collide_after_sanitize () =
   print_endline "  test_distinct_keys_do_not_collide_after_sanitize passed"
 
 let test_overwrite_existing_key_when_cache_is_full () =
-  with_cache_limits ~max_entries:1 ~max_entry_size:102400 (fun () ->
+  with_cache_limits ~max_entries:1 ~max_entry_size:default_cache_max_entry_size (fun () ->
     with_temp_masc_dir (fun config ->
       let _ = Cache_eio.set config ~key:"same-key" ~value:"first" () in
       match Cache_eio.set config ~key:"same-key" ~value:"second" () with

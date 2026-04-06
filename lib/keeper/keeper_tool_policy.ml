@@ -457,10 +457,12 @@ let required_hints_of_schema (schema : Yojson.Safe.t) : string =
 (** Lookup tool description by name from all available schema sources.
     Returns [Some first_sentence] + optional enum/required hints if found, [None] otherwise.
     Searches shard-resolved tools, inline schemas, injected masc_* schemas,
-    and code-write schemas. *)
+    code-write schemas, voice tools, and tool_search schema. *)
 let tool_hint_of (name : string) : string option =
   let all_schemas =
     Tool_shard.keeper_model_tools
+    @ Keeper_tool_registry.keeper_voice_tool_schemas
+    @ [ Keeper_tool_registry.keeper_tool_search_schema ]
     @ Tool_schemas_inline.schemas
     @ !masc_schemas_ref
     @ Tool_code_write.schemas

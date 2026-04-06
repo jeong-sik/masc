@@ -298,6 +298,22 @@ let run_turn
       ~primary_model_max_tokens:max_context
       ~base_dir
   in
+  (* 2b. Load raw OAS checkpoint for Agent.resume path.
+     Preserves turn_count, usage_stats, and lifecycle state across turns.
+     Falls back to fresh build when unavailable (first turn, rollover). *)
+  let raw_oas_checkpoint =
+    match Keeper_checkpoint_store.load_oas
+            ~session_dir:session.session_dir
+            ~session_id:meta.runtime.trace_id with
+    | Ok cp -> Some cp
+    | Error _ -> None
+  in
+  (* Starting turn count for per-call budget calculation in hooks.
+     With Agent.resume, turn count is cumulative from checkpoint. *)
+  let start_turn_count = match raw_oas_checkpoint with
+    | Some cp -> cp.turn_count
+    | None -> 0
+  in
   (* 3. Build base system prompt from meta *)
   let persona_extended =
     Keeper_types_profile.load_persona_extended meta.name
@@ -845,8 +861,11 @@ let run_turn
            - Warning zone (2 turns before limit): inject budget warning
            - Last turn (1 turn before limit): restrict to safe tools + force [STATE]
            The keeper can still call extend_turns to escape the limit. *)
-        let is_last_turn = turn >= max_turns - 1 in
-        let is_warning_zone = turn >= max_turns - 2 in
+        (* With Agent.resume, turn is cumulative from checkpoint.
+           Use per-call turn count for budget calculations. *)
+        let per_call_turn = turn - start_turn_count in
+        let is_last_turn = per_call_turn >= max_turns - 1 in
+        let is_warning_zone = per_call_turn >= max_turns - 2 in
         let ctx =
           if is_last_turn then
             let warning =
@@ -1020,6 +1039,7 @@ let run_turn
           ~checkpoint_dir:session_dir
           ~context_injector
           ~context:shared_context
+          ?oas_checkpoint:raw_oas_checkpoint
           ()
       with
       | Error e -> Error e

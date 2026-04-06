@@ -1578,21 +1578,6 @@ let test_all_phases_covered () =
 let mermaid_lines phase =
   SM.phase_to_mermaid ~current:phase |> String.split_on_char '\n'
 
-(** The Mermaid state ID used in the diagram for each phase. *)
-let mermaid_id_of phase =
-  match phase with
-  | SM.Offline -> "Offline"
-  | SM.Running -> "Running"
-  | SM.Failing -> "Failing"
-  | SM.Compacting -> "Compacting"
-  | SM.HandingOff -> "HandingOff"
-  | SM.Draining -> "Draining"
-  | SM.Paused -> "Paused"
-  | SM.Stopped -> "Stopped"
-  | SM.Crashed -> "Crashed"
-  | SM.Restarting -> "Restarting"
-  | SM.Dead -> "Dead"
-
 (** Returns true if [needle] appears as a substring of [haystack]. *)
 let string_contains haystack needle =
   let hl = String.length haystack and nl = String.length needle in
@@ -1615,7 +1600,7 @@ let test_mermaid_header () =
 let test_mermaid_all_phases_appear () =
   List.iter (fun phase ->
     let diagram = SM.phase_to_mermaid ~current:phase in
-    let id = mermaid_id_of phase in
+    let id = SM.phase_to_mermaid_id phase in
     check bool (Printf.sprintf "phase %s appears in diagram" id)
       true (string_contains diagram id)
   ) SM.all_phases
@@ -1631,7 +1616,7 @@ let test_mermaid_active_class () =
   let active_phases = [ SM.Offline; SM.Running; SM.Paused ] in
   List.iter (fun phase ->
     let lines = mermaid_lines phase in
-    let id = mermaid_id_of phase in
+    let id = SM.phase_to_mermaid_id phase in
     let cls = class_lines_for lines id in
     check int
       (Printf.sprintf "phase %s has exactly one class line" id)
@@ -1646,7 +1631,7 @@ let test_mermaid_buffer_class () =
     [ SM.Failing; SM.Compacting; SM.HandingOff; SM.Draining; SM.Restarting ] in
   List.iter (fun phase ->
     let lines = mermaid_lines phase in
-    let id = mermaid_id_of phase in
+    let id = SM.phase_to_mermaid_id phase in
     let cls = class_lines_for lines id in
     check int
       (Printf.sprintf "phase %s has exactly one class line" id)
@@ -1660,7 +1645,7 @@ let test_mermaid_terminal_class () =
   let terminal_phases = [ SM.Stopped; SM.Dead ] in
   List.iter (fun phase ->
     let lines = mermaid_lines phase in
-    let id = mermaid_id_of phase in
+    let id = SM.phase_to_mermaid_id phase in
     let cls = class_lines_for lines id in
     check int
       (Printf.sprintf "phase %s has exactly one class line" id)

@@ -188,6 +188,10 @@ val transition_result_to_json : transition_result -> Yojson.Safe.t
 
 (** {1 Mermaid Visualization} *)
 
+(** Maps a phase to its Mermaid diagram state identifier (capitalized).
+    Use this to reference states in generated Mermaid `class` directives. *)
+val phase_to_mermaid_id : phase -> string
+
 (** Generate a Mermaid stateDiagram-v2 string with the given phase
     highlighted. The diagram visualizes the keeper phases and
     distinguishes the current phase visually (green for active,

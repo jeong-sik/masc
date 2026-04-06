@@ -264,6 +264,9 @@ let available_actions : available_action list =
     make_available_action ~action_type:"namespace_resume" ~tool_name:"masc_resume"
       ~target_type:"namespace"
       ~description:"Resume a paused namespace.";
+    make_available_action ~action_type:"social_sweep" ~tool_name:"social_sweep"
+      ~target_type:"namespace"
+      ~description:"Run one immediate social sweep across keepers.";
     make_available_action ~action_type:"task_inject" ~tool_name:"masc_add_task"
       ~target_type:"namespace"
       ~description:"Inject a backlog task into the namespace.";

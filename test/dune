@@ -252,6 +252,7 @@
         test_local_runtime_pool
         test_keeper_tools_oas
         test_keeper_tool_exposure
+        test_keeper_runtime_denylist
         test_keeper_voice_loop
         test_keeper_task_dispatch
         test_keeper_tag_dispatch
@@ -393,6 +394,7 @@
         test_local_runtime_pool
         test_keeper_tools_oas
         test_keeper_tool_exposure
+        test_keeper_runtime_denylist
         test_keeper_voice_loop
         test_keeper_task_dispatch
         test_keeper_tag_dispatch

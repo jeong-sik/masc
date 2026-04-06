@@ -248,20 +248,30 @@ let write_heartbeat_snapshot
           (Filename.concat base_dir meta_current.runtime.trace_id)
           "history.jsonl"
       in
-      (try
-        read_file_tail_lines history_path ~max_bytes:max_history_read_bytes ~max_lines:max_history_read_lines
-        |> List.filter_map (fun line ->
-          try
-            let json = Yojson.Safe.from_string line in
-            Some (Keeper_context_core.message_of_json json)
-          with exn ->
-            Log.Keeper.warn "failed to parse message from history.jsonl: %s"
-              (Printexc.to_string exn);
-            None)
-      with exn ->
-        Log.Keeper.warn "write_heartbeat_snapshot: history.jsonl load error (%s): %s"
-          meta_current.name (Printexc.to_string exn);
-        [])
+      (let parse_errors = ref 0 in
+       let messages =
+         try
+           read_file_tail_lines history_path ~max_bytes:max_history_read_bytes ~max_lines:max_history_read_lines
+           |> List.filter_map (fun line ->
+             try
+               let json = Yojson.Safe.from_string line in
+               Some (Keeper_context_core.message_of_json json)
+             with
+             | Eio.Cancel.Cancelled _ as e -> raise e
+             | _exn ->
+               incr parse_errors;
+               None)
+         with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | exn ->
+           Log.Keeper.warn "write_heartbeat_snapshot: history.jsonl load error (%s): %s"
+             meta_current.name (Printexc.to_string exn);
+           []
+       in
+       if !parse_errors > 0 then
+         Log.Keeper.warn "failed to parse %d message(s) from history.jsonl"
+           !parse_errors;
+       messages)
   in
   let c_messages = messages_for_continuity in
   let latest_user_message =

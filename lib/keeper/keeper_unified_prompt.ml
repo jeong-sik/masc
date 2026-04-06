@@ -244,15 +244,9 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
      Unclaimed tasks in the backlog are actionable work — if your skills match, \
      claim one with keeper_task_claim and work on it.\n\
      When you have findings, opinions, or status updates worth sharing, post them to the board \
-     using keeper_board_post. When responding to board activity, use keeper_board_comment.\n\n\
-     ## Anti-Repetition Rules\n\
-     CRITICAL: Never call the same tool with the same arguments twice in a row within a single turn.\n\
-     If a tool returned no actionable results (e.g. audit found no orphans, search found nothing), \
-     do NOT retry it. Instead choose one of:\n\
-     1. Post a status summary to the board (keeper_board_post)\n\
-     2. Claim a different task if available (keeper_task_claim)\n\
-     3. End your turn silently (DELIVERY_SURFACE: silent)\n\
-     Progress means doing something NEW each cycle, not re-checking the same state.\n\n\
+     using keeper_board_post. When responding to board activity, use keeper_board_comment.\n\
+     Your conversation history is preserved across cycles — you can see what you did previously. \
+     Use that context to avoid repeating the same actions.\n\
      Every response must begin with these machine-readable headers exactly once:\n\
      SOCIAL_MODEL: bdi_speech_v1\n\
      BELIEF_SUMMARY: <short summary>\n\

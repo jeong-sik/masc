@@ -104,6 +104,7 @@ let direct_turn_observation (meta : keeper_meta) :
     room_signal_interpretation = None;
     room_signal_digest_ref = None;
     last_turn_budget = None;
+    last_tools_used = [];
   }
 
 (* -- handle_keeper_msg: orchestrator ---------------------------------------- *)

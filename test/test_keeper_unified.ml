@@ -100,6 +100,7 @@ let base_observation : WO.world_observation =
     room_signal_interpretation = None;
     room_signal_digest_ref = None;
     last_turn_budget = None;
+    last_tools_used = [];
   }
 
 let sample_board_event : WO.pending_board_event =

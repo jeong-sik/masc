@@ -415,6 +415,26 @@ let handle_keeper_get_subroutes state req request reqd =
       ] in
       Http.Response.json ~compress:true ~request:req
         (Yojson.Safe.to_string json) reqd
+  else if ends_with "/tool-calls" then
+    let name = extract_name "/tool-calls" in
+    if String.length name = 0 then
+      Http.Response.json ~status:`Bad_request
+        {|{"error":"keeper name is required"}|} reqd
+    else
+      let limit =
+        Server_utils.int_query_param req "limit" ~default:50
+        |> max 1 |> min 200
+      in
+      let entries =
+        Keeper_tool_call_log.read_recent ~keeper_name:name ~n:limit ()
+      in
+      let json = `Assoc [
+        ("keeper", `String name);
+        ("count", `Int (List.length entries));
+        ("entries", `List entries);
+      ] in
+      Http.Response.json ~compress:true ~request:req
+        (Yojson.Safe.to_string json) reqd
   else if ends_with "/trajectory" then
     let name = extract_name "/trajectory" in
     if String.length name = 0 then

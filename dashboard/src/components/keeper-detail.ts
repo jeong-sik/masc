@@ -45,6 +45,7 @@ import { DialogOverlay } from './common/dialog'
 import { SessionTraceView } from './session-trace/session-trace-view'
 import { SessionProgressHeader } from './session-progress-header'
 import { KeeperToolTelemetry } from './keeper-tool-telemetry'
+import { KeeperToolCallInspector } from './keeper-tool-call-inspector'
 
 // ── Global overlay state ──────────────────────────────────
 
@@ -473,6 +474,12 @@ export function KeeperDetailOverlay() {
 
         ${'' /* ── Per-keeper tool telemetry ── */}
         <${KeeperToolTelemetry} keeperName=${keeper.name} />
+
+        ${'' /* ── Tool call I/O inspector ── */}
+        <div class="space-y-2">
+          <h3 class="text-sm font-semibold text-[var(--fg)]">Tool Call Inspector</h3>
+          <${KeeperToolCallInspector} keeperName=${keeper.name} />
+        </div>
 
         ${'' /* ── Direct conversation ── */}
         <${KeeperCommsPanel} keeper=${keeper} />

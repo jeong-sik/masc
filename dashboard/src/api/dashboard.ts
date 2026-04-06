@@ -843,3 +843,31 @@ export function fetchKeeperToolStats(
     `/api/v1/keepers/${encodeURIComponent(name)}/tool-stats${params}`,
   )
 }
+
+// ── Keeper tool call log (full I/O) ──────────────────────
+
+export type ToolCallEntry = {
+  ts: number
+  keeper: string
+  tool: string
+  input: unknown
+  output: string
+  success: boolean
+  duration_ms: number
+}
+
+export type ToolCallsResponse = {
+  keeper: string
+  count: number
+  entries: ToolCallEntry[]
+}
+
+export function fetchKeeperToolCalls(
+  name: string,
+  limit?: number,
+): Promise<ToolCallsResponse> {
+  const params = limit != null ? `?limit=${limit}` : ''
+  return get<ToolCallsResponse>(
+    `/api/v1/keepers/${encodeURIComponent(name)}/tool-calls${params}`,
+  )
+}

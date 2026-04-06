@@ -172,6 +172,7 @@ let make_hooks
   let board_write_tools =
     [ "keeper_board_post"; "keeper_board_comment"; "keeper_board_vote" ]
   in
+  let tool_start_time = ref 0.0 in
   { Agent_sdk.Hooks.empty with
 
     after_turn = Some (fun event ->
@@ -255,6 +256,16 @@ let make_hooks
         in
         Log.Keeper.info "keeper:%s tool_call tool=%s params=[%s] outcome=%s out_len=%d"
           (!meta_ref).name tool_name input_keys outcome out_len;
+        (* Persistent tool call I/O log for dashboard inspector *)
+        let duration_ms =
+          (Time_compat.now () -. !tool_start_time) *. 1000.0
+        in
+        (try
+           Keeper_tool_call_log.log_call
+             ~keeper_name:(!meta_ref).name
+             ~tool_name ~input ~output_text
+             ~success:(outcome = "ok") ~duration_ms
+         with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
         (try on_tool_executed tool_name input output_text
          with Eio.Cancel.Cancelled _ as e -> raise e
             | exn ->
@@ -269,6 +280,7 @@ let make_hooks
     pre_tool_use = Some (fun event ->
       match event with
       | Agent_sdk.Hooks.PreToolUse { tool_name; input; accumulated_cost_usd; _ } ->
+        tool_start_time := Time_compat.now ();
         let keeper_name = (!meta_ref).name in
         (* Safety gate 0: Keeper deny list *)
         if List.mem tool_name keeper_denied_tools then begin

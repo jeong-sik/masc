@@ -313,13 +313,6 @@ module Cdal = struct
   let enabled () =
     Feature_flag_registry.get_bool "MASC_CDAL_ENABLED"
 
-  (** Enforce contract risk violations. Default: false. *)
-  let risk_enforcement_enabled () =
-    Feature_flag_registry.get_bool "MASC_CDAL_RISK_ENFORCEMENT"
-
-  (** Aggregate proof bundles across turns. Default: false. *)
-  let proof_aggregation_enabled () =
-    Feature_flag_registry.get_bool "MASC_CDAL_PROOF_AGGREGATION"
 end
 
 (** {1 Slot Scheduling} *)

@@ -135,7 +135,7 @@ let all_flags : flag list = [
   { env_name = "MASC_KEEPER_ROOM_SIGNAL_PROMPT_ENABLED";
     description = "Global override for keeper room-signal prompt injection";
     default = false; category = "keeper";
-    lifecycle = Experimental; since = "2.214.0" };
+    lifecycle = Active; since = "2.214.0" };
 
   (* ── Dashboard & Governance ───────────────────────────────── *)
   { env_name = "MASC_COMMAND_PLANE_SNAPSHOT_REFRESH_ENABLED";
@@ -171,9 +171,9 @@ let all_flags : flag list = [
 
   (* ── Runtime ──────────────────────────────────────────────── *)
   { env_name = "MASC_ORCHESTRATOR_ENABLED";
-    description = "Auto-orchestration background loop";
+    description = "Auto-orchestration background loop (superseded by zero-zombie cleanup)";
     default = false; category = "runtime";
-    lifecycle = Active; since = "2.0.0" };
+    lifecycle = Deprecated "superseded by zero-zombie cleanup since v2.130.0"; since = "2.0.0" };
 
   { env_name = "MASC_TEAM_SESSION_ROUTER_JUDGE";
     description = "Team session routing judge for dispatch";
@@ -195,16 +195,6 @@ let all_flags : flag list = [
     description = "Contract-driven agent loop: proof capture and verdict evaluation";
     default = true; category = "runtime";
     lifecycle = Active; since = "2.162.0" };
-
-  { env_name = "MASC_CDAL_RISK_ENFORCEMENT";
-    description = "Enforce risk_contract constraints (fail on violation)";
-    default = false; category = "runtime";
-    lifecycle = Experimental; since = "2.162.0" };
-
-  { env_name = "MASC_CDAL_PROOF_AGGREGATION";
-    description = "Aggregate proof bundles across multi-turn sessions";
-    default = false; category = "runtime";
-    lifecycle = Experimental; since = "2.162.0" };
 
 ]
 

@@ -142,7 +142,7 @@ let generate_or_repair_code (ctx : _ context) (state : state) :
       let result =
         Oas_worker.run_model_by_label ~model_label:state.model_label
           ~goal:prompt ~system_prompt:Ocaml.system_prompt ~max_turns:1
-          ~temperature:0.0 ~max_tokens:1024 ~enable_thinking:false
+          ~temperature:Oas_worker_cascade.deterministic_temperature ~max_tokens:1024 ~enable_thinking:false
           ?sw:ctx.sw ()
       in
       Result.map
@@ -169,7 +169,7 @@ let generate_or_repair_code (ctx : _ context) (state : state) :
       let result =
         Oas_worker.run_model_by_label ~model_label:state.model_label
           ~goal:prompt ~system_prompt:Ocaml.system_prompt ~max_turns:1
-          ~temperature:0.0 ~max_tokens:1024 ~enable_thinking:false
+          ~temperature:Oas_worker_cascade.deterministic_temperature ~max_tokens:1024 ~enable_thinking:false
           ?sw:ctx.sw ()
       in
       Result.map

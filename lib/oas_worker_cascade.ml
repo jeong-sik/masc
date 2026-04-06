@@ -18,8 +18,16 @@ let default_temperature =
 let default_max_tokens =
   Llm_provider.Constants.Inference_profile.agent_default.max_tokens
 
-(** Worker defaults — SSOT for worker_oas.ml + worker_container.ml. *)
-let worker_temperature = 0.2
+(** Deterministic temperature (0.0) for evaluation, verification, routing.
+    Delegates to OAS Inference_profile.deterministic. *)
+let deterministic_temperature =
+  Llm_provider.Constants.Inference_profile.deterministic.temperature
+
+(** Worker defaults — SSOT for worker_oas.ml + worker_container.ml.
+    temperature delegates to OAS Inference_profile.worker_default.
+    top_p/top_k/min_p are provider-specific sampling params (not in OAS profiles). *)
+let worker_temperature =
+  Llm_provider.Constants.Inference_profile.worker_default.temperature
 let worker_top_p = 0.95
 let worker_top_k = 20
 let worker_min_p = 0.0

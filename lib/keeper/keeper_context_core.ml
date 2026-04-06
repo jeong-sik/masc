@@ -406,6 +406,31 @@ let load_context_from_checkpoint ~trace_id ~primary_model_max_tokens ~base_dir =
          (session, None))
   | _ -> (session, None)
 
+(** Patch an OAS checkpoint: unify session_id and replace the last
+    assistant message's text content with [response_text] (which includes
+    MASC's [STATE] synthesis).  This ensures read_continuity_summary can
+    find the [STATE] block in checkpoint messages on the next turn.  #5431 *)
+let patch_checkpoint_last_assistant
+    (cp : Agent_sdk.Checkpoint.t) ~session_id ~response_text
+  : Agent_sdk.Checkpoint.t =
+  (* Find index of last assistant message. *)
+  let last_asst_idx = ref (-1) in
+  List.iteri
+    (fun i (msg : Agent_sdk.Types.message) ->
+      if msg.role = Agent_sdk.Types.Assistant then last_asst_idx := i)
+    cp.messages;
+  let messages =
+    if !last_asst_idx < 0 then cp.messages
+    else
+      List.mapi
+        (fun i msg ->
+          if i = !last_asst_idx then
+            Agent_sdk.Types.assistant_msg response_text
+          else msg)
+        cp.messages
+  in
+  { cp with Agent_sdk.Checkpoint.session_id; messages }
+
 let save_checkpoint session (ctx : working_context) ~generation =
   let ckpt = create_checkpoint ctx ~generation in
   save_session_checkpoint session ckpt;

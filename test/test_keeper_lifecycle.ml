@@ -1,6 +1,7 @@
 open Alcotest
 
 module KEC = Masc_mcp.Keeper_exec_context
+module KCC = Masc_mcp.Keeper_context_core
 module KT = Masc_mcp.Keeper_types
 
 let temp_dir prefix =
@@ -424,6 +425,97 @@ let test_recover_latest_checkpoint_for_overflow_retry_ignores_checkpoint_system_
           fail
             "expected overflow retry recovery to keep message history within budget even with a large checkpoint system prompt")
 
+(* --- patch_checkpoint_last_assistant tests (#5431) --- *)
+
+let make_test_checkpoint ?(session_id = "old-session")
+    (messages : Agent_sdk.Types.message list) : Agent_sdk.Checkpoint.t =
+  {
+    Agent_sdk.Checkpoint.version = Agent_sdk.Checkpoint.checkpoint_version;
+    session_id;
+    agent_name = "patch-test";
+    model = "test-model";
+    system_prompt = None;
+    messages;
+    usage = Agent_sdk.Types.empty_usage;
+    turn_count = List.length messages;
+    created_at = 0.0;
+    tools = [];
+    tool_choice = None;
+    disable_parallel_tool_use = false;
+    temperature = None;
+    top_p = None;
+    top_k = None;
+    min_p = None;
+    enable_thinking = None;
+    response_format_json = false;
+    thinking_budget = None;
+    cache_system_prompt = false;
+    max_input_tokens = None;
+    max_total_tokens = Some 4096;
+    context = Agent_sdk.Context.create ();
+    mcp_sessions = [];
+    working_context = None;
+  }
+
+let test_patch_checkpoint_replaces_last_assistant () =
+  let msgs =
+    [ Agent_sdk.Types.user_msg "hello";
+      Agent_sdk.Types.assistant_msg "raw response without STATE" ]
+  in
+  let cp = make_test_checkpoint msgs in
+  let patched =
+    KCC.patch_checkpoint_last_assistant cp
+      ~session_id:"new-session"
+      ~response_text:"patched response\n[STATE]\nprogress: done\n[/STATE]"
+  in
+  let last_msg = List.nth patched.messages 1 in
+  let text = Agent_sdk.Types.text_of_message last_msg in
+  check bool "contains STATE block" true (contains_substring text "[STATE]");
+  check bool "contains patched text" true
+    (contains_substring text "patched response");
+  check string "session_id updated" "new-session" patched.session_id
+
+let test_patch_checkpoint_preserves_non_assistant () =
+  let msgs =
+    [ Agent_sdk.Types.user_msg "question 1";
+      Agent_sdk.Types.assistant_msg "answer 1";
+      Agent_sdk.Types.user_msg "question 2";
+      Agent_sdk.Types.assistant_msg "answer 2 raw" ]
+  in
+  let cp = make_test_checkpoint msgs in
+  let patched =
+    KCC.patch_checkpoint_last_assistant cp
+      ~session_id:"s" ~response_text:"answer 2 with STATE"
+  in
+  (* First user message preserved *)
+  let first_text = Agent_sdk.Types.text_of_message (List.nth patched.messages 0) in
+  check string "first user preserved" "question 1" first_text;
+  (* First assistant preserved (only LAST assistant is patched) *)
+  let second_text = Agent_sdk.Types.text_of_message (List.nth patched.messages 1) in
+  check string "first assistant preserved" "answer 1" second_text;
+  (* Last assistant patched *)
+  let last_text = Agent_sdk.Types.text_of_message (List.nth patched.messages 3) in
+  check string "last assistant patched" "answer 2 with STATE" last_text
+
+let test_patch_checkpoint_updates_session_id () =
+  let cp = make_test_checkpoint ~session_id:"old" [] in
+  let patched =
+    KCC.patch_checkpoint_last_assistant cp
+      ~session_id:"new-trace-id" ~response_text:"unused"
+  in
+  check string "session_id" "new-trace-id" patched.session_id
+
+let test_patch_checkpoint_no_assistant_noop () =
+  let msgs = [ Agent_sdk.Types.user_msg "only user" ] in
+  let cp = make_test_checkpoint msgs in
+  let patched =
+    KCC.patch_checkpoint_last_assistant cp
+      ~session_id:"s" ~response_text:"should not appear"
+  in
+  check int "message count unchanged" 1 (List.length patched.messages);
+  let text = Agent_sdk.Types.text_of_message (List.hd patched.messages) in
+  check string "user msg unchanged" "only user" text
+
 let () =
   run "keeper_lifecycle"
     [
@@ -447,5 +539,16 @@ let () =
             "overflow retry history budget ignores checkpoint system prompt"
             `Quick
             test_recover_latest_checkpoint_for_overflow_retry_ignores_checkpoint_system_prompt_in_history_budget;
+        ] );
+      ( "checkpoint_patch",
+        [
+          test_case "patch replaces last assistant text" `Quick
+            test_patch_checkpoint_replaces_last_assistant;
+          test_case "patch preserves non-assistant messages" `Quick
+            test_patch_checkpoint_preserves_non_assistant;
+          test_case "patch updates session_id" `Quick
+            test_patch_checkpoint_updates_session_id;
+          test_case "patch with no assistant is noop" `Quick
+            test_patch_checkpoint_no_assistant_noop;
         ] );
     ]

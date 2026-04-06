@@ -1050,25 +1050,11 @@ let run_turn
       with
       | Error e -> Error e
       | Ok result ->
-        (match result.checkpoint with
-         | Some checkpoint -> (
-             try
-               (* Unify session_id to trace_id so load_oas can find this
-                  checkpoint on the next turn. oas_worker generates a per-turn
-                  session_id that differs from trace_id, causing a load miss. *)
-               let checkpoint =
-                 { checkpoint with Agent_sdk.Checkpoint.session_id = meta.runtime.trace_id }
-               in
-               Keeper_checkpoint_store.save_oas ~session_dir:session.session_dir
-                 checkpoint
-             with
-             | Eio.Cancel.Cancelled _ as exn -> raise exn
-             | exn ->
-                 Log.Keeper.error "keeper:%s OAS checkpoint save failed: %s"
-                   meta.name (Printexc.to_string exn))
-         | None ->
-             Log.Keeper.warn "keeper:%s missing OAS checkpoint after run"
-               meta.name);
+        (* Checkpoint save is deferred until after [STATE] synthesis so the
+           persisted checkpoint includes the synthesized continuity block.
+           Without this, read_continuity_summary finds no [STATE] in the
+           checkpoint messages and returns empty — causing keepers to lose
+           context across turns.  See #5431. *)
         let _flushed = Memory_oas_bridge.flush_all ~memory ~agent_name in
         let text = Agent_sdk.Types.text_of_content result.response.content in
         let model = result.response.model in
@@ -1122,6 +1108,35 @@ let run_turn
                ~source:history_assistant_source
                session assistant_msg;
              ctx_ref := Keeper_exec_context.append !ctx_ref assistant_msg;
+             (* Save checkpoint AFTER [STATE] synthesis.  Patch the last
+                assistant message in the OAS checkpoint so that the persisted
+                checkpoint contains the [STATE] block.  Without this patch,
+                read_continuity_summary would find no [STATE] in checkpoint
+                messages and return empty, causing context loss.  #5431 *)
+             let saved_checkpoint =
+               match result.checkpoint with
+               | Some checkpoint ->
+                   let patched =
+                     Keeper_context_core.patch_checkpoint_last_assistant
+                       checkpoint ~session_id:meta.runtime.trace_id
+                       ~response_text
+                   in
+                   (try
+                     Keeper_checkpoint_store.save_oas
+                       ~session_dir:session.session_dir patched
+                   with
+                   | Eio.Cancel.Cancelled _ as exn -> raise exn
+                   | exn ->
+                       Log.Keeper.error
+                         "keeper:%s OAS checkpoint save failed: %s"
+                         meta.name (Printexc.to_string exn));
+                   Some patched
+               | None ->
+                   Log.Keeper.warn
+                     "keeper:%s missing OAS checkpoint after run"
+                     meta.name;
+                   None
+             in
              (match result.proof with
              | Some p ->
                 log_keeper_proof ~keeper_name:meta.name p;
@@ -1165,7 +1180,7 @@ let run_turn
            tool_calls_made = List.length tool_names;
            usage;
            tools_used = tool_names;
-           checkpoint = result.checkpoint;
+           checkpoint = saved_checkpoint;
            proof = result.proof;
            stop_reason = result.stop_reason;
          }))

@@ -314,7 +314,7 @@ let append_decision_record
           match response_preview with
           | Some preview -> `String preview
           | None -> `Null );
-        ( "response_full",
+        ( "response_preview_2000",
           match result with
           | Some r when String.trim r.response_text <> "" ->
               `String (short_preview ~max_len:2000 r.response_text)

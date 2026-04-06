@@ -854,6 +854,7 @@ export type ToolCallEntry = {
   output: string
   success: boolean
   duration_ms: number
+  model?: string
 }
 
 export type ToolCallsResponse = {

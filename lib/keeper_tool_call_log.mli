@@ -15,9 +15,12 @@ val log_call :
   output_text:string ->
   success:bool ->
   duration_ms:float ->
+  ?model:string ->
+  unit ->
   unit
 (** [log_call ...] persists a single tool call record with full I/O.
-    Output is truncated to 4000 bytes. Best-effort (failures logged). *)
+    Output is truncated to 4000 bytes. [model] records which LLM generated
+    the tool call (for 9B vs GLM comparison). Best-effort (failures logged). *)
 
 val read_recent :
   ?keeper_name:string ->
@@ -26,3 +29,6 @@ val read_recent :
   Yojson.Safe.t list
 (** [read_recent ?keeper_name ?n ()] returns the [n] most recent entries,
     optionally filtered by keeper name. Default [n=100]. *)
+
+val reset_for_testing : unit -> unit
+(** Resets the in-memory store reference. For unit tests only. *)

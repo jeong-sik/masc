@@ -287,7 +287,9 @@ let make_hooks
         in
         Log.Keeper.info "keeper:%s tool_call tool=%s params=[%s] outcome=%s out_len=%d"
           (!meta_ref).name tool_name input_keys outcome out_len;
-        (* Persistent tool call I/O log for dashboard inspector *)
+        (* Persistent tool call I/O log for dashboard inspector.
+           tool_start_time is keeper-local (one ref per make_hooks call).
+           Tool calls within Agent.run are sequential, so no race. *)
         let duration_ms =
           (Time_compat.now () -. !tool_start_time) *. 1000.0
         in
@@ -296,6 +298,7 @@ let make_hooks
              ~keeper_name:(!meta_ref).name
              ~tool_name ~input ~output_text
              ~success:(outcome = "ok") ~duration_ms
+             ~model:(!meta_ref).runtime.usage.last_model_used ()
          with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
         (try on_tool_executed tool_name input output_text
          with Eio.Cancel.Cancelled _ as e -> raise e

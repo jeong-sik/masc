@@ -37,6 +37,7 @@ function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
         class="flex items-center gap-2 px-3 py-2 text-xs cursor-pointer"
         role="button"
         tabIndex=${0}
+        aria-expanded=${expanded.value}
         onClick=${() => { expanded.value = !expanded.value }}
         onKeyDown=${(e: KeyboardEvent) => {
           if (e.key === 'Enter' || e.key === ' ') {
@@ -61,6 +62,9 @@ function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
 
       ${expanded.value ? html`
         <div class="px-3 pb-3 space-y-2">
+          ${entry.model ? html`
+            <div class="text-[10px] text-[var(--fg-dim)]">model: <span class="text-[var(--fg)] font-mono">${entry.model}</span></div>
+          ` : null}
           <div>
             <div class="text-[10px] text-[var(--fg-dim)] uppercase tracking-wider mb-1">Input</div>
             <pre class="text-xs font-mono bg-[var(--bg-deep)] rounded p-2 overflow-x-auto max-h-48 whitespace-pre-wrap text-[var(--fg)]">${formatInput(entry.input)}</pre>
@@ -151,7 +155,7 @@ export function KeeperToolCallInspector({ keeperName }: { keeperName: string }) 
           <span class="w-5 text-center">OK</span>
           <span class="w-4"></span>
         </div>
-        ${sorted.map((entry, i) => html`<${ToolCallRow} key=${`${entry.ts}-${entry.tool}-${i}`} entry=${entry} />`)}
+        ${sorted.map((entry) => html`<${ToolCallRow} key=${`${entry.ts}-${entry.keeper}-${entry.tool}`} entry=${entry} />`)}
       </div>
     </div>
   `

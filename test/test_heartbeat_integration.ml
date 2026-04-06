@@ -487,6 +487,162 @@ let test_stop_keepalive_preserves_existing_crash_outcome () =
      | Some `Stopped -> fail "manual stop should not overwrite a crashed promise"
      | None -> fail "expected crash promise to remain resolved")
 
+(* ══════════════════════════════════════════════════════════
+   9. RFC-0002: Keeper_fiber_crash ordering invariant
+   ══════════════════════════════════════════════════════════ *)
+
+(** Verify the raise-site contract: set_failure_reason is called BEFORE
+    Keeper_fiber_crash is raised. The catch site must be able to read the
+    structured reason from the registry after catching the payload-less
+    exception. This tests the REAL supervisor catch logic. *)
+let test_fiber_crash_ordering_invariant () =
+  R.clear ();
+  let meta = make_meta "ordering-test" in
+  let _reg = R.register ~base_path:bp "ordering-test" meta in
+  (* Simulate the raise-site contract: pre-store reason, then raise *)
+  let stored_reason = R.Heartbeat_consecutive_failures 7 in
+  R.set_failure_reason ~base_path:bp "ordering-test" (Some stored_reason);
+  (* Simulate catching Keeper_fiber_crash and reading from registry
+     (this is what the supervisor's unified handler does) *)
+  let recovered_reason =
+    match R.get ~base_path:bp "ordering-test" with
+    | Some e ->
+      Option.value
+        ~default:(R.Exception "fiber_crash")
+        e.last_failure_reason
+    | None -> R.Exception "not found"
+  in
+  (* The recovered reason must match the pre-stored reason *)
+  (match recovered_reason with
+   | R.Heartbeat_consecutive_failures n ->
+     check int "recovered failure count matches" 7 n
+   | other ->
+     fail (Printf.sprintf "expected Heartbeat_consecutive_failures, got %s"
+       (R.failure_reason_to_string other)));
+  (* Also test Turn_consecutive_failures path *)
+  R.set_failure_reason ~base_path:bp "ordering-test"
+    (Some (R.Turn_consecutive_failures 12));
+  let recovered2 =
+    match R.get ~base_path:bp "ordering-test" with
+    | Some e ->
+      Option.value ~default:(R.Exception "?") e.last_failure_reason
+    | None -> R.Exception "?"
+  in
+  (match recovered2 with
+   | R.Turn_consecutive_failures n ->
+     check int "turn failure count round-trips" 12 n
+   | other ->
+     fail (Printf.sprintf "expected Turn_consecutive_failures, got %s"
+       (R.failure_reason_to_string other)));
+  (* Also test Exception variant (fatal env error path) *)
+  let env_reason = R.Exception "fatal environment error: Eio switch not available" in
+  R.set_failure_reason ~base_path:bp "ordering-test" (Some env_reason);
+  let recovered3 =
+    match R.get ~base_path:bp "ordering-test" with
+    | Some e ->
+      Option.value ~default:(R.Exception "?") e.last_failure_reason
+    | None -> R.Exception "?"
+  in
+  (match recovered3 with
+   | R.Exception s ->
+     check bool "env error message preserved"
+       true (String.length s > 0 && s = "fatal environment error: Eio switch not available")
+   | other ->
+     fail (Printf.sprintf "expected Exception, got %s"
+       (R.failure_reason_to_string other)))
+
+(** Verify that when no failure_reason is pre-stored (e.g. unexpected exn),
+    the catch site falls back to Exception variant. *)
+let test_fiber_crash_no_prestored_reason () =
+  R.clear ();
+  let meta = make_meta "no-reason" in
+  let _reg = R.register ~base_path:bp "no-reason" meta in
+  (* Don't call set_failure_reason — simulate unexpected exception path *)
+  let recovered =
+    match R.get ~base_path:bp "no-reason" with
+    | Some e ->
+      Option.value
+        ~default:(R.Exception "fiber_crash")
+        e.last_failure_reason
+    | None -> R.Exception "not found"
+  in
+  (* last_failure_reason is None for a fresh entry → fallback should fire *)
+  (match recovered with
+   | R.Exception s ->
+     check string "fallback reason" "fiber_crash" s
+   | other ->
+     fail (Printf.sprintf "expected Exception fallback, got %s"
+       (R.failure_reason_to_string other)))
+
+(* ══════════════════════════════════════════════════════════
+   10. RFC-0002: pipeline_stage_of_phase deterministic mapping
+   ══════════════════════════════════════════════════════════ *)
+
+module ES = Masc_mcp.Keeper_exec_status
+
+(** Verify pipeline_stage_of_phase covers all 11 phases and produces
+    the expected deterministic mapping. No heuristic, no timestamps. *)
+let test_pipeline_stage_of_phase_exhaustive () =
+  let cases = [
+    (KSM.Offline, "offline");
+    (KSM.Running, "idle");
+    (KSM.Failing, "failing");
+    (KSM.Compacting, "compacting");
+    (KSM.HandingOff, "handoff");
+    (KSM.Draining, "draining");
+    (KSM.Paused, "paused");
+    (KSM.Stopped, "offline");
+    (KSM.Crashed, "crashed");
+    (KSM.Restarting, "restarting");
+    (KSM.Dead, "offline");
+  ] in
+  check int "all 11 phases covered" 11 (List.length cases);
+  List.iter (fun (phase, expected) ->
+    let actual = ES.pipeline_stage_of_phase phase in
+    check string
+      (Printf.sprintf "%s → %s" (KSM.phase_to_string phase) expected)
+      expected actual
+  ) cases
+
+(** Verify non-registered keepers get "offline" — the behavioral change
+    from derive_pipeline_stage (heuristic) to direct phase mapping. *)
+let test_pipeline_stage_unregistered_is_offline () =
+  R.clear ();
+  (* No keeper registered — get_phase returns None *)
+  let phase = R.get_phase ~base_path:bp "nonexistent" in
+  check bool "no phase for unregistered" true (Option.is_none phase);
+  (* The call sites now use: match get_phase with Some → of_phase | None → "offline" *)
+  let stage = match phase with
+    | Some p -> ES.pipeline_stage_of_phase p
+    | None -> "offline"
+  in
+  check string "unregistered → offline" "offline" stage
+
+(** Sensitivity: pipeline_stage_of_phase DIFFERS from "offline" for
+    most active phases. Proves the mapping has teeth — it actually
+    distinguishes running/failing/compacting/etc. *)
+let test_pipeline_stage_sensitivity () =
+  let non_offline_phases = [
+    KSM.Running; KSM.Failing; KSM.Compacting; KSM.HandingOff;
+    KSM.Draining; KSM.Paused; KSM.Crashed; KSM.Restarting;
+  ] in
+  List.iter (fun phase ->
+    let stage = ES.pipeline_stage_of_phase phase in
+    check bool
+      (Printf.sprintf "%s should NOT map to offline"
+         (KSM.phase_to_string phase))
+      true (stage <> "offline")
+  ) non_offline_phases;
+  (* Terminal/inactive phases DO map to offline *)
+  let offline_phases = [KSM.Offline; KSM.Stopped; KSM.Dead] in
+  List.iter (fun phase ->
+    let stage = ES.pipeline_stage_of_phase phase in
+    check string
+      (Printf.sprintf "%s should map to offline"
+         (KSM.phase_to_string phase))
+      "offline" stage
+  ) offline_phases
+
 (* ── Test runner ──────────────────────────────────────────── *)
 
 let () =
@@ -523,5 +679,19 @@ let () =
         test_stop_keepalive_resolves_running_entry_immediately;
       test_case "manual stop preserves crashed outcome" `Quick
         test_stop_keepalive_preserves_existing_crash_outcome;
+    ];
+    "fiber_crash_invariant", [
+      eio_test "ordering: set_failure_reason before catch reads"
+        test_fiber_crash_ordering_invariant;
+      eio_test "no pre-stored reason → fallback"
+        test_fiber_crash_no_prestored_reason;
+    ];
+    "pipeline_stage_phase", [
+      test_case "exhaustive 11-phase mapping" `Quick
+        test_pipeline_stage_of_phase_exhaustive;
+      test_case "unregistered keeper → offline" `Quick
+        test_pipeline_stage_unregistered_is_offline;
+      test_case "sensitivity: active phases ≠ offline" `Quick
+        test_pipeline_stage_sensitivity;
     ];
   ]

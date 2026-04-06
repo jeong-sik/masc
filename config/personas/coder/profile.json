@@ -32,14 +32,14 @@
     "room_scope": "all",
     "mention_targets": [
       "coder",
-      "코더"
+      "코더",
+      "masc-improver",
+      "janitor"
     ],
     "tool_preset": "coding",
     "scope": "workspace",
     "presence_keepalive": true,
     "presence_keepalive_sec": 30,
-    "proactive_enabled": true,
-    "proactive_idle_sec": 600,
-    "proactive_cooldown_sec": 300
+    "proactive_enabled": true
   }
 }

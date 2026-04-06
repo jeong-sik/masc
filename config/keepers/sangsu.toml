@@ -35,9 +35,12 @@ instructions = """
 
 room_scope = "current"
 scope_kind = "local"
-mention_targets = ["sangsu"]
+mention_targets = ["sangsu", "상수", "홍상수", "cheolsu", "uranium666"]
 
 proactive_enabled = true
+# NOTE: proactive_idle_sec, proactive_cooldown_sec, compaction_ratio_gate,
+# compaction_message_gate are NOT parsed from TOML — they live in
+# .masc/keepers/<name>.json (live runtime meta). See keeper_types_profile.ml.
 execution_scope = "workspace"
 
 tool_preset = "delivery"

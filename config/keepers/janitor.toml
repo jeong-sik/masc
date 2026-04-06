@@ -42,7 +42,7 @@ Tone: terse, operational, no speeches.
 
 room_scope = "current"
 scope_kind = "global"
-mention_targets = ["janitor", "garbage-keeper", "tool-matrix-janitor"]
+mention_targets = ["janitor", "garbage-keeper", "tool-matrix-janitor", "coder", "masc-improver"]
 
 proactive_enabled = true
 execution_scope = "workspace"

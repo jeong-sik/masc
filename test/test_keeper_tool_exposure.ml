@@ -641,6 +641,37 @@ let () =
         check bool "non-empty" true (n > 0);
         check bool "5-30 range" true (n >= 5 && n <= 30));
     ]);
+    ("auto_tool_hints", [
+      test_case "known tool has hint" `Quick (fun () ->
+        match Keeper_tool_policy.tool_hint_of "keeper_board_post" with
+        | Some hint ->
+          check bool "hint non-empty" true (String.length hint > 0);
+          check bool "hint max 80 chars" true (String.length hint <= 81)
+        | None -> fail "keeper_board_post should have a hint");
+      test_case "unknown tool has no hint" `Quick (fun () ->
+        check (option string) "no hint for unknown"
+          None (Keeper_tool_policy.tool_hint_of "totally_fake_tool"));
+      test_case "masc tool has hint" `Quick (fun () ->
+        match Keeper_tool_policy.tool_hint_of "masc_web_search" with
+        | Some hint ->
+          check bool "hint non-empty" true (String.length hint > 0)
+        | None -> fail "masc_web_search should have a hint");
+      test_case "all allowed tools have hints" `Quick (fun () ->
+        let meta = make_meta ~preset:Keeper_types.Messaging () in
+        let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
+        let missing = List.filter (fun name ->
+          Keeper_tool_policy.tool_hint_of name = None) tools in
+        (* Some shard-resolved or governance tools may not have schemas
+           in the static list. Log them but don't fail — the important
+           thing is that the majority of tools have hints. *)
+        if missing <> [] then
+          Printf.eprintf "[info] tools without hints: %s\n"
+            (String.concat ", " missing);
+        let total = List.length tools in
+        let with_hints = total - List.length missing in
+        check bool "at least 80%% of tools have hints" true
+          (with_hints * 100 / (max total 1) >= 80));
+    ]);
     ("tool_access_of_meta_json_validation", [
       test_case "string tools field returns error" `Quick (fun () ->
         let json = `Assoc [

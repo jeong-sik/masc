@@ -386,15 +386,20 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
     Buffer.add_string ubuf "\n### Autonomous Trigger\n";
     Buffer.add_string ubuf (String.concat "\n" autonomous_trigger);
     Buffer.add_string ubuf "\n");
-  (* Keeper tool inventory — show the keeper_* subset available this cycle *)
+  (* Keeper tool inventory — show allowed tools with auto-generated hints
+     from schema descriptions.  This is the SSOT for tool discovery:
+     keepers see what they can use and why, without manual duplication
+     in instructions. *)
   let allowed_tools = Keeper_tool_policy.keeper_allowed_tool_names meta in
-  let keeper_tools =
-    List.filter (fun n -> String.starts_with ~prefix:"keeper_" n) allowed_tools
-  in
-  if keeper_tools <> [] then (
-    Buffer.add_string ubuf "\n### Keeper Tools\n";
-    Buffer.add_string ubuf (String.concat ", " keeper_tools);
-    Buffer.add_string ubuf "\n");
+  if allowed_tools <> [] then (
+    Buffer.add_string ubuf "\n### Available Tools\n";
+    List.iter (fun name ->
+      match Keeper_tool_policy.tool_hint_of name with
+      | Some hint ->
+        Buffer.add_string ubuf (Printf.sprintf "- %s — %s\n" name hint)
+      | None ->
+        Buffer.add_string ubuf (Printf.sprintf "- %s\n" name))
+      allowed_tools);
   (* Metacognition: show the keeper its own recent tool activity so it can
      recognise patterns — thrashing, failure loops, tool over-reliance.
      Data comes from Keeper_registry per-entry tool_usage Hashtbl. *)

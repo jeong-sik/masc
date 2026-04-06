@@ -125,26 +125,11 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
 
   const s = state.value
 
-  if (s.loading) {
-    return html`
-      <div class="flex flex-col gap-2 py-3" style="animation: loadingPulse 1.5s ease-in-out infinite">
-        ${[1, 2, 3].map(i => html`
-          <div key=${i} class="flex items-center gap-3 py-2 px-3">
-            <div class="size-5 rounded bg-[var(--white-8)]"></div>
-            <div class="flex-1 h-2 rounded bg-[var(--white-5)]"></div>
-            <div class="w-10 h-2 rounded bg-[var(--white-5)]"></div>
-          </div>
-        `)}
-      </div>
-    `
-  }
-
+  // Loading and empty states return null — the section card
+  // is only rendered when there is actual telemetry data to show.
+  if (s.loading || s.tools.length === 0) return null
   if (s.error) {
-    return html`<div class="text-xs text-[var(--bad)] py-3 text-center">${s.error}</div>`
-  }
-
-  if (s.tools.length === 0) {
-    return html`<div class="text-xs text-[var(--text-muted)] py-3 text-center italic">도구 호출 데이터 없음</div>`
+    return html`<div class="text-xs text-[var(--bad)] py-2 px-3">텔레메트리 로드 실패: ${s.error}</div>`
   }
 
   const totalCost = s.tools.reduce((sum, t) => sum + t.total_cost_usd, 0)
@@ -157,7 +142,12 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
   )
 
   return html`
-    <div class="flex flex-col gap-4">
+    <div class="p-5 rounded-2xl border border-card-border bg-card/40 backdrop-blur-md shadow-sm transition-[border-color,box-shadow] duration-200 hover:border-accent/30 hover:shadow-md">
+      <div class="text-[11px] font-semibold uppercase tracking-widest text-text-muted mb-4 flex items-center gap-2">
+        <span class="w-1.5 h-1.5 rounded-full bg-accent/50"></span>
+        도구 텔레메트리
+      </div>
+      <div class="flex flex-col gap-4">
 
       ${'' /* Summary row */}
       <div class="flex gap-3 flex-wrap text-[11px]">
@@ -246,6 +236,7 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
           `)}
         </div>
       ` : null}
+      </div>
     </div>
   `
 }

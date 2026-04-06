@@ -208,22 +208,6 @@ function BoolBadge({ value }: { value: boolean }) {
     : html`<span class="text-[11px] font-bold px-2 py-0.5 rounded-md bg-white/5 text-text-dim border border-white/10 shadow-sm">OFF</span>`
 }
 
-function FeatureBadge({
-  status,
-  value,
-}: {
-  status?: string
-  value: boolean | null
-}) {
-  if (status && status !== 'wired') {
-    const label = status === 'source_only' ? 'SOURCE ONLY' : 'UNWIRED'
-    return html`<span class="text-[11px] font-bold px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-300 border border-amber-400/20 shadow-sm">${label}</span>`
-  }
-  if (value === null) {
-    return html`<span class="text-[11px] font-bold px-2 py-0.5 rounded-md bg-white/5 text-text-dim border border-white/10 shadow-sm">--</span>`
-  }
-  return html`<${BoolBadge} value=${value} />`
-}
 
 function ModelList({ models }: { models: string[] }) {
   if (models.length === 0) return html`<span class="text-[11px] text-text-muted italic">none</span>`
@@ -431,6 +415,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       configState.value = loaded(updated)
       editMode.value = false
       editDraft.value = null
+      showToast('프롬프트 저장 완료', 'success')
     } catch (err) {
       saveError.value = err instanceof Error ? err.message : '저장 실패'
     } finally {
@@ -650,31 +635,18 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       </div>
       <${ConfigRow} label="프레즌스 간격" value=${c.runtime.presence_keepalive_sec + 's'} />
 
-      <${SectionHeader} title="조율" />
+      <${SectionHeader} title="네임스페이스 조율" />
       <${ConfigRow} label="프로젝트 범위" value=${c.coordination.room_scope || '--'} />
       <${ConfigRow} label="범위 유형" value=${c.coordination.scope_kind || '--'} />
+      ${c.coordination.mention_targets.length > 0 ? html`
       <div class="mt-1.5">
         <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">멘션 대상</div>
         <${ModelList} models=${c.coordination.mention_targets} />
       </div>
+      ` : null}
       <div class="mt-1.5">
         <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">참여 네임스페이스</div>
         <${ModelList} models=${c.coordination.joined_room_ids} />
-      </div>
-
-      <${SectionHeader} title="드리프트" />
-      <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
-        <span class="text-xs text-[var(--text-muted)]">상태</span>
-        <${FeatureBadge} status=${c.drift.status} value=${c.drift.enabled} />
-      </div>
-      <${ConfigRow} label="최소 턴 간격" value=${formatMaybeNumber(c.drift.min_turn_gap)} />
-      <${ConfigRow} label="총 횟수" value=${formatMaybeNumber(c.drift.count_total)} />
-      ${c.drift.last_reason ? html`<${ConfigRow} label="마지막 사유" value=${c.drift.last_reason} />` : null}
-
-      <${SectionHeader} title="자동 팀 세션" />
-      <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
-        <span class="text-xs text-[var(--text-muted)]">상태</span>
-        <${FeatureBadge} status=${c.auto_team_session.status} value=${c.auto_team_session.enabled} />
       </div>
 
       <${SectionHeader} title="핸드오프" />

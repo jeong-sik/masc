@@ -13,7 +13,6 @@ import { operatorSnapshot } from '../operator-store'
 import {
   allowlistEmptyState,
   auditMetadataState,
-  linkedRecentToolsEmptyState,
   linkedRuntimeState,
   observedToolsEmptyState,
   openToolsInventory,
@@ -56,13 +55,6 @@ export function actionDescriptorLabel(actionType?: string): string {
     default:
       return actionType?.trim() || 'action'
   }
-}
-
-function keeperRecentTools(keeper: Keeper): string[] {
-  if (keeper.recent_tool_names && keeper.recent_tool_names.length > 0) {
-    return keeper.recent_tool_names
-  }
-  return []
 }
 
 function keeperTopTools(keeper: Keeper): string[] {
@@ -329,15 +321,6 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
   const keeperConfig = peekLoadedKeeperConfig(keeper.name)
   const configLoadStatus = peekKeeperConfigLoadStatus(keeper.name)
   const namespaceStatus = operatorSnapshot.value?.namespace ?? {}
-  const actions = (operatorSnapshot.value?.available_actions ?? [])
-    .filter(
-      action =>
-        action.target_type === 'keeper'
-        || action.target_type === 'namespace'
-        || action.target_type === 'room',
-    )
-    .slice(0, 8)
-  const recentTools = keeperRecentTools(keeper)
   const topTools = keeperTopTools(keeper)
   const missionBrief = resolveKeeperMissionBrief(keeper)
   const toolPolicy = resolveKeeperToolPolicy(keeperConfig, configLoadStatus)
@@ -347,7 +330,6 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
   const toolCallCount = observedAudit.latestToolCallCount
   const auditSource = observedAudit.toolAuditSource
   const auditAt = observedAudit.toolAuditAt
-  const capabilities = keeper.agent?.capabilities ?? []
   const namespaceName =
     namespaceStatus.namespace ?? namespaceStatus.namespace_id ?? serverStatus.value?.namespace ?? 'default'
   const project = namespaceStatus.project ?? serverStatus.value?.project ?? 'N/A'
@@ -356,7 +338,6 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
   const allowlistFallback = toolAuditStateLabel(allowlistEmptyState(keeper))
   const observedFallback = toolAuditStateLabel(observedToolsEmptyState(keeper, auditSource))
   const metadataFallback = toolAuditStateLabel(auditMetadataState(keeper, auditSource))
-  const linkedRecentFallback = toolAuditStateLabel(linkedRecentToolsEmptyState(keeper))
   const runtimeState = linkedRuntimeState(keeper)
   const currentTaskLabel = resolveKeeperCurrentTaskLabel(keeper)
   const skillRouteLabel =
@@ -382,7 +363,7 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
         : policyEditable
           ? allowlistFallback
           : unavailablePolicyLabel
-  const openToolsQuery = allowedTools[0] ?? observedTools[0] ?? recentTools[0] ?? null
+  const openToolsQuery = allowedTools[0] ?? observedTools[0] ?? null
 
   return html`
     <div class="flex flex-col gap-1.5">
@@ -464,27 +445,9 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
         <span class="text-xs font-medium text-[var(--text-strong)]">${auditAt ? html`<${TimeAgo} timestamp=${auditAt} />` : metadataFallback}</span>
       </div>
 
-      <${ToolSection}
-        title="키퍼 최근 도구"
-        tools=${recentTools}
-        fallback=${linkedRecentFallback}
-      />
-
       ${topTools.length > 0
         ? html`<${ToolSection} title="윈도우 상위 도구" tools=${topTools} fallback="" />`
         : null}
-
-      <${ToolSection}
-        title="등록된 기능"
-        tools=${capabilities}
-        fallback="등록된 기능 없음"
-      />
-
-      <${ToolSection}
-        title="사용 가능한 인근 액션"
-        tools=${actions.map(action => actionDescriptorLabel(action.action_type))}
-        fallback="사용 가능한 액션 없음"
-      />
     </div>
   `
 }

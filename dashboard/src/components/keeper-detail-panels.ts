@@ -161,10 +161,12 @@ export function KpiGrid({ keeper }: { keeper: Keeper }) {
         <${KpiCard}
           label="인계"
           value=${keeper.handoff_count_total ?? '-'}
+          hint=${(keeper.handoff_count_total ?? 0) === 0 ? '첫 인계 후 표시' : undefined}
         />
         <${KpiCard}
           label="압축"
           value=${keeper.compaction_count ?? '-'}
+          hint=${(keeper.compaction_count ?? 0) === 0 ? '첫 압축 후 표시' : undefined}
         />
         ${latestCost
           ? html`<${KpiCard} label="비용 (USD)" value=${latestCost} />`

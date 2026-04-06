@@ -404,7 +404,7 @@ Destructive check 대상 도구: `keeper_bash`, `keeper_fs_edit`, `keeper_edit`,
 
 ### 9.2 TOML Configuration
 
-`config/keepers/*.toml`로 keeper를 선언적으로 정의. 파일명이 keeper 이름. 지원 타입: string, int, float, bool, string array. 테이블은 dotted key로 평탄화. 예시: `config/keepers/example.toml`.
+`config/keepers/*.toml`로 keeper를 선언적으로 정의. 파일명이 keeper 이름. 지원 타입: string, int, float, bool, string array. 테이블은 dotted key로 평탄화. 예시: `config/keepers/janitor.toml`.
 
 ### 9.3 Keeper Runtime Spec
 
@@ -587,6 +587,6 @@ MASC 자체 memory 4개(memory_stream, institution, procedural, context_manager)
 | Trajectory | `lib/trajectory.ml` |
 | Supervisor | `lib/keeper/keeper_supervisor.ml` |
 | Config | `lib/keeper/keeper_config.ml` |
-| TOML Example | `config/keepers/example.toml` |
+| TOML Example | `config/keepers/janitor.toml` |
 | Memory: MASC-OAS 통합 | `memory/masc-oas-memory-integration.md` |
 | Memory: keeper 재설계 | `memory/project_dashboard-keeper-detail-redesign.md` |

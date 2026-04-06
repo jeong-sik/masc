@@ -409,7 +409,7 @@ let default_dynamic_selector (obs : observation_context) : strategy list =
        Uses an approximate 64K floor here; llama-server default 8K is
        unsuitable for multi-turn keeper conversations. *)
     [PruneToolOutputs; MergeContiguous]
-  else if obs.context_window >= 500_000 then
+  else if obs.context_window >= Env_config.ContextCompact.large_cloud_floor then
     (* Large-context cloud: invest in quality-preserving strategies *)
     [DropLowImportance; SummarizeOld]
   else

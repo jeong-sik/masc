@@ -340,7 +340,9 @@ let save_oas_checkpoint
       ~mcp_clients:[]
       ()
   in
-  Keeper_checkpoint_store.save_oas ~session_dir:session.session_dir checkpoint;
+  (match Keeper_checkpoint_store.save_oas ~session_dir:session.session_dir checkpoint with
+   | Ok () -> ()
+   | Error e -> Log.Keeper.error "save_oas_checkpoint failed: %s" e);
   checkpoint
 
 let checkpoint_generation (cp : Agent_sdk.Checkpoint.t) ~(fallback : int) : int =

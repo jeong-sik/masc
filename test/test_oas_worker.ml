@@ -783,7 +783,9 @@ let test_keeper_checkpoint_store_oas_roundtrip () =
           ~messages:[Agent_sdk.Types.user_msg "roundtrip"]
           ~working_context:sidecar ()
       in
-      Keeper_checkpoint_store.save_oas ~session_dir checkpoint;
+      (match Keeper_checkpoint_store.save_oas ~session_dir checkpoint with
+       | Ok () -> ()
+       | Error e -> Alcotest.fail (Printf.sprintf "save_oas failed: %s" e));
       match
         Keeper_checkpoint_store.load_oas ~session_dir ~session_id:"trace-store"
       with
@@ -899,7 +901,9 @@ let test_keeper_checkpoint_prefers_newer_legacy_during_migration () =
           ~messages:[Agent_sdk.Types.user_msg "old-oas"]
           ~working_context:(Some (`Assoc [("max_tokens", `Int 3000)])) ()
       in
-      Keeper_checkpoint_store.save_oas ~session_dir:session.session_dir old_oas;
+      (match Keeper_checkpoint_store.save_oas ~session_dir:session.session_dir old_oas with
+       | Ok () -> ()
+       | Error e -> Alcotest.fail (Printf.sprintf "save_oas failed: %s" e));
       let legacy_ctx =
         Keeper_exec_context.create ~system_prompt:"new legacy" ~max_tokens:2048
         |> fun ctx ->

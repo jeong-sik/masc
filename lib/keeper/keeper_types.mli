@@ -15,6 +15,7 @@ type compaction_policy = {
   message_gate: int;
   token_gate: int;
   cooldown_sec: int;
+  max_checkpoint_messages: int;
 }
 
 type proactive_policy = {

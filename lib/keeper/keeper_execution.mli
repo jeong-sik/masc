@@ -17,6 +17,7 @@ val log_keeper_exn : label:string -> exn -> unit
 
 (** Load keeper context from checkpoint for resumption. *)
 val load_context_from_checkpoint :
+  max_checkpoint_messages:int ->
   trace_id:string ->
   primary_model_max_tokens:int ->
   base_dir:string ->

@@ -281,6 +281,7 @@ let run_turn
   (* 2. Load checkpoint *)
   let (session, ctx_opt) =
     Keeper_exec_context.load_context_from_checkpoint
+      ~max_checkpoint_messages:meta.compaction.max_checkpoint_messages
       ~trace_id:meta.runtime.trace_id
       ~primary_model_max_tokens:max_context
       ~base_dir

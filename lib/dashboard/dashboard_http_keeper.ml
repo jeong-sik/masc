@@ -388,6 +388,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                      let base_dir = Keeper_types.session_base_dir config in
                      let (_session, ctx_opt) =
                        Keeper_execution.load_context_from_checkpoint
+                         ~max_checkpoint_messages:m.compaction.max_checkpoint_messages
                          ~trace_id:m.runtime.trace_id
                          ~primary_model_max_tokens:primary_max_context
                          ~base_dir

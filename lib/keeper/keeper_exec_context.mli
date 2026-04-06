@@ -59,11 +59,13 @@ val checkpoint_max_tokens :
   Agent_sdk.Checkpoint.t -> fallback:int -> int
 
 val context_of_oas_checkpoint :
+  max_checkpoint_messages:int ->
   Agent_sdk.Checkpoint.t -> primary_model_max_tokens:int -> working_context
 
 val checkpoint_model_of_meta : keeper_meta -> string
 
 val save_oas_checkpoint :
+  max_checkpoint_messages:int ->
   session:session_context ->
   agent_name:string ->
   model:string ->
@@ -120,6 +122,7 @@ val maybe_rollover_oas_handoff :
 (** {1 Checkpoint Loading and Saving} *)
 
 val load_context_from_checkpoint :
+  max_checkpoint_messages:int ->
   trace_id:string ->
   primary_model_max_tokens:int ->
   base_dir:string ->

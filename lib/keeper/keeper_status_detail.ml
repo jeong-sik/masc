@@ -43,6 +43,7 @@ let handle_keeper_status ctx args : tool_result =
            if include_context then
              let (_session, ctx_opt) =
                load_context_from_checkpoint
+                 ~max_checkpoint_messages:m.compaction.max_checkpoint_messages
                  ~trace_id:m.runtime.trace_id
                  ~primary_model_max_tokens:primary_max_context
                  ~base_dir

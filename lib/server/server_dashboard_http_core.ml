@@ -70,9 +70,8 @@ let _dashboard_mission_timeout_s =
   float_of_env_default "MASC_DASHBOARD_MISSION_TIMEOUT_S"
     ~default:25.0 ~min_v:10.0 ~max_v:120.0
 
-let dashboard_session_list_timeout_s =
-  float_of_env_default "MASC_DASHBOARD_SESSION_LIST_TIMEOUT_S"
-    ~default:5.0 ~min_v:1.0 ~max_v:30.0
+let _session_list_timeout_s =
+  dashboard_session_list_timeout_s ()
 
 let dashboard_active_or_recent_sessions ~clock config =
   let cutoff_unix = Time_compat.now () -. 86400.0 in
@@ -80,7 +79,7 @@ let dashboard_active_or_recent_sessions ~clock config =
   let limit = dashboard_session_list_limit () in
   let sessions =
     match
-      Eio.Time.with_timeout clock dashboard_session_list_timeout_s (fun () ->
+      Eio.Time.with_timeout clock _session_list_timeout_s (fun () ->
           Ok
             (Team_session_store.list_sessions ~since_unix:cutoff_unix
                ~limit config))
@@ -89,7 +88,7 @@ let dashboard_active_or_recent_sessions ~clock config =
     | Error `Timeout ->
         Log.Dashboard.warn
           "dashboard session list timed out after %.0fs (limit=%d); serving without session rows"
-          dashboard_session_list_timeout_s limit;
+          _session_list_timeout_s limit;
         []
   in
   sessions

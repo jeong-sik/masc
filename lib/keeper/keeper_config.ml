@@ -554,14 +554,15 @@ let keeper_unified_temperature () : float =
     ~max_v:2.0
 
 (** Max output tokens for unified keeper turns.
-    8192 allows complex multi-tool reasoning and chain-of-thought per turn.
-    Env: [MASC_KEEPER_UNIFIED_MAX_TOKENS]. Default: 8192. *)
+    131072 removes MASC-side bottleneck; the LLM context window (64k/slot)
+    is the effective ceiling.  Override via [MASC_KEEPER_UNIFIED_MAX_TOKENS].
+    Env: [MASC_KEEPER_UNIFIED_MAX_TOKENS]. Default: 131072. *)
 let keeper_unified_max_tokens () : int =
   int_of_env_default
     "MASC_KEEPER_UNIFIED_MAX_TOKENS"
-    ~default:8192
+    ~default:131072
     ~min_v:256
-    ~max_v:32000
+    ~max_v:262144
 
 (* max_turns is set in keeper_agent_run.ml (default: 50).
    Known constraints (retain for future tuning):

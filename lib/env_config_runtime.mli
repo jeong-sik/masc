@@ -180,8 +180,8 @@ module Rate_bucket : sig
 end
 
 module Worker : sig
-  val llama_runtime_debug : bool
-  val llama_runtime_cooldown_sec_opt : unit -> string option
+  val local_runtime_debug : bool
+  val local_runtime_cooldown_sec_opt : unit -> string option
   val local_worker_max_tokens : int
   val local_worker_heartbeat_sec : int
 end

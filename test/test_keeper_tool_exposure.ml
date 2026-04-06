@@ -479,9 +479,10 @@ let make_masc_path_test_dir () =
            path (Unix.error_message err))
   in
   let dir =
-    Unix.mkdtemp
-      (Filename.concat (Filename.get_temp_dir_name ())
-         "keeper_masc_path_test_XXXXXX")
+    let prefix = Filename.concat (Filename.get_temp_dir_name ())
+        (Printf.sprintf "keeper_masc_path_test_%d" (Random.bits ())) in
+    create_dir prefix;
+    prefix
   in
   let git_dir = Filename.concat dir ".git" in
   create_dir git_dir;

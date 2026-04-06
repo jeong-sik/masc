@@ -396,7 +396,7 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
      recognise patterns — thrashing, failure loops, tool over-reliance.
      Data comes from Keeper_registry per-entry tool_usage Hashtbl. *)
   let tool_activity =
-    Keeper_tools_oas.tool_usage_for_keeper meta.name
+    Keeper_registry.tool_usage_of ~base_path meta.name
     |> List.sort (fun (_, a) (_, b) ->
       Float.compare b.Keeper_types.last_used_at a.Keeper_types.last_used_at)
   in

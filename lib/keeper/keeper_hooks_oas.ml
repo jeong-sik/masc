@@ -321,13 +321,15 @@ let make_hooks
       | Agent_sdk.Hooks.OnIdle { consecutive_idle_turns; tool_names; _ } ->
         let decision =
           on_idle_decision ~consecutive_idle_turns ~tool_names in
+        let tools_str = match tool_names with
+          | [] -> "<none>" | names -> String.concat ", " names in
         (match decision with
          | Agent_sdk.Hooks.Skip ->
-           Log.Keeper.warn "keeper:%s idle_turns=%d — requesting stop"
-             (!meta_ref).name consecutive_idle_turns
+           Log.Keeper.warn "keeper:%s idle_turns=%d repeated_tools=[%s] — requesting stop"
+             (!meta_ref).name consecutive_idle_turns tools_str
          | Agent_sdk.Hooks.Nudge _ ->
-           Log.Keeper.info "keeper:%s idle_turns=%d — nudging LLM via Nudge"
-             (!meta_ref).name consecutive_idle_turns
+           Log.Keeper.info "keeper:%s idle_turns=%d tools=[%s] — nudging LLM via Nudge"
+             (!meta_ref).name consecutive_idle_turns tools_str
          | _ -> ());
         decision
       | _ -> Agent_sdk.Hooks.Continue);

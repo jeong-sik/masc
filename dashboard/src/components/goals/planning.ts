@@ -2,6 +2,7 @@
 
 import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
+import { useMemo } from 'preact/hooks'
 import { EmptyState } from '../common/empty-state'
 import { ActionButton } from '../common/button'
 import {
@@ -12,7 +13,6 @@ import {
   keepers,
 } from '../../store'
 import { navigate } from '../../router'
-import type { MetricsWindowTopItem } from '../../types'
 import {
   groupedByHorizon,
 } from './goal-helpers'
@@ -107,29 +107,36 @@ function GuideCard({
 }
 
 function KeeperToolActivity() {
-  const activeKeepers = keepers.value.filter(k => {
-    const stage = k.pipeline_stage ?? 'idle'
-    return stage !== 'offline' && stage !== 'idle'
-  })
+  const keeperList = keepers.value
+  if (keeperList.length === 0) return null
 
-  // Aggregate top tools across all active keepers
-  const toolCounts = new Map<string, number>()
-  let totalToolTurns = 0
-  for (const k of keepers.value) {
-    totalToolTurns += k.autonomous_tool_turn_count ?? 0
-    const topTools = (k as Record<string, unknown>).top_tools as MetricsWindowTopItem[] | undefined
-    if (topTools) {
-      for (const t of topTools) {
-        const name = t.tool ?? ''
-        if (name) toolCounts.set(name, (toolCounts.get(name) ?? 0) + (t.count ?? 1))
+  const activeKeepers = useMemo(() =>
+    keeperList.filter(k => {
+      const stage = k.pipeline_stage ?? 'idle'
+      return stage !== 'offline' && stage !== 'idle'
+    }),
+    [keeperList],
+  )
+
+  // Aggregate top tools across all keepers (memoized)
+  const { topTools, totalToolTurns } = useMemo(() => {
+    const toolCounts = new Map<string, number>()
+    let turns = 0
+    for (const k of keeperList) {
+      turns += k.autonomous_tool_turn_count ?? 0
+      const items = k.metrics_window?.top_tools
+      if (items) {
+        for (const t of items) {
+          const name = t.tool ?? ''
+          if (name) toolCounts.set(name, (toolCounts.get(name) ?? 0) + (t.count ?? 1))
+        }
       }
     }
-  }
-  const topTools = [...toolCounts.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 8)
-
-  if (keepers.value.length === 0) return null
+    return {
+      topTools: [...toolCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8),
+      totalToolTurns: turns,
+    }
+  }, [keeperList])
 
   return html`
     <details class="overview-section-collapsible group overflow-hidden rounded-xl border border-card-border/60 bg-[rgba(9,14,24,0.82)]" open=${true}>

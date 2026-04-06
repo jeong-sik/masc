@@ -17,6 +17,10 @@ let keepalive_interval_sec () =
 
 let board_reactive_debounce_sec = Env_config.KeeperKeepalive.board_debounce_sec
 
+(* ── Heartbeat history fallback read limits ── *)
+let max_history_read_bytes = 256 * 1024
+let max_history_read_lines = 200
+
 (* OAS Event_bus — WORM Atomic: set once at server bootstrap. *)
 let bus_ref : Agent_sdk.Event_bus.t option Atomic.t = Atomic.make None
 let set_bus bus = Atomic.set bus_ref (Some bus)
@@ -245,7 +249,7 @@ let write_heartbeat_snapshot
           "history.jsonl"
       in
       (try
-        read_file_tail_lines history_path ~max_bytes:(256 * 1024) ~max_lines:200
+        read_file_tail_lines history_path ~max_bytes:max_history_read_bytes ~max_lines:max_history_read_lines
         |> List.filter_map (fun line ->
           try
             let json = Yojson.Safe.from_string line in

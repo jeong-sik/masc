@@ -128,31 +128,25 @@ let load_latest ~(session_dir : string) : Keeper_types.checkpoint option =
 let oas_checkpoint_path ~(session_dir : string) ~(session_id : string) =
   Filename.concat session_dir (session_id ^ ".json")
 
-let save_oas_error (detail : string) =
-  Sys_error (Printf.sprintf "save_oas: %s" detail)
-
-let save_oas ~(session_dir : string) (ckpt : Agent_sdk.Checkpoint.t) : unit =
+let save_oas ~(session_dir : string) (ckpt : Agent_sdk.Checkpoint.t)
+  : (unit, string) result =
   try
     ignore (Keeper_fs.ensure_dir session_dir);
     match Fs_compat.get_fs_opt () with
     | Some fs ->
         let dir = Eio.Path.(fs / session_dir) in
         (match Agent_sdk.Checkpoint_store.create dir with
-         | Ok store -> (
-             match Agent_sdk.Checkpoint_store.save store ckpt with
-             | Ok () -> ()
-             | Error err ->
-                 raise (save_oas_error (Agent_sdk.Error.to_string err)))
-         | Error err ->
-             raise (save_oas_error (Agent_sdk.Error.to_string err)))
+         | Ok store -> Agent_sdk.Checkpoint_store.save store ckpt
+             |> Result.map_error Agent_sdk.Error.to_string
+         | Error err -> Error (Agent_sdk.Error.to_string err))
     | None ->
         Keeper_fs.save_atomic
           (oas_checkpoint_path ~session_dir ~session_id:ckpt.session_id)
-          (Agent_sdk.Checkpoint.to_string ckpt)
+          (Agent_sdk.Checkpoint.to_string ckpt);
+        Ok ()
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
-  | Sys_error _ as e -> raise e
-  | exn -> raise (save_oas_error (Printexc.to_string exn))
+  | exn -> Error (Printf.sprintf "save_oas: %s" (Printexc.to_string exn))
 
 (* Delta Checkpoint Shadow-Apply removed: Agent_sdk.Checkpoint.delta
    type was removed upstream. Functions had zero callers. *)

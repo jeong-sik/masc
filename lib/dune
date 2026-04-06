@@ -466,7 +466,6 @@
    keeper_identity
    keeper_checkpoint_store
    keeper_text_processing
-   keeper_compaction
    keeper_context_core
    keeper_compact_policy
    keeper_rollover
@@ -617,7 +616,6 @@
   keeper_identity
   keeper_checkpoint_store
   keeper_text_processing
-  keeper_compaction
   keeper_context_core
   keeper_compact_policy
   keeper_rollover

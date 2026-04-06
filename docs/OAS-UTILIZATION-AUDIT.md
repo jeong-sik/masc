@@ -1,7 +1,7 @@
 # MASC-MCP OAS Utilization Audit
 
 Date: 2026-04-04
-OAS Version: 0.100.7 floor (CI/runtime pin on `jeong-sik/oas@8b7e4d90676273db85ea210d78340274062a33b2`, latest tagged base `v0.100.6`)
+OAS Version: 0.108.0 floor (CI/runtime pin on `jeong-sik/oas@96edc450bcc3b82d9155f809d6142176459575d7`, latest tagged base `v0.108.0`)
 Snapshot: `main` audit aligned to the current upstream `agent_sdk.opam`; drift is checked against upstream `refs/heads/main`, not GitHub releases
 
 Latest boundary check: [docs/qa/OAS-BOUNDARY-HEALTHCHECK-2026-03-31.md](docs/qa/OAS-BOUNDARY-HEALTHCHECK-2026-03-31.md)
@@ -17,7 +17,7 @@ The main remaining problems are no longer “missing migration” at large. They
 
 ## Pin Policy
 
-`masc-mcp` keeps the runtime pin ratcheted against upstream `main`, while the dependency floor tracks the pinned SDK's declared `agent_sdk.opam` version. As of this audit refresh, the runtime pin is `main@8b7e4d90676273db85ea210d78340274062a33b2`, the latest tagged base is `v0.100.6`, and the dependency floor is pinned to `0.100.7`.
+`masc-mcp` keeps the runtime pin ratcheted against upstream `main`, while the dependency floor tracks the pinned SDK's declared `agent_sdk.opam` version. As of this audit refresh, the runtime pin is `main@96edc450bcc3b82d9155f809d6142176459575d7`, the latest tagged base is `v0.108.0`, and the dependency floor is pinned to `0.108.0`.
 
 ## Status by Area
 
@@ -29,6 +29,16 @@ The main remaining problems are no longer “missing migration” at large. They
 | Memory bridge | Partial but real | `memory_oas_bridge.ml` now seeds long-term, procedural, and episodic memory; Working/Scratchpad remain runtime-only |
 | Team session swarm | Partial but real | `team_session_swarm_runner.ml` runs through OAS Swarm and now receives a real supported-tool dispatch bundle |
 | Runtime dedupe | Improving | dashboard single-run and initial local worker run now reuse shared OAS execution helpers |
+
+## Boundary Audit Snapshot
+
+| Surface | Classification | Evidence |
+|---------|----------------|----------|
+| `oas_worker*.ml`, `worker_oas.ml`, `verifier_oas.ml` | Correct | MASC consumes runtime/build/hook contracts without adding MASC concepts to OAS APIs |
+| `context_compact_oas.ml` | Acceptable but lossy | compaction is OAS-native, but importance scoring still keys on MASC marker text |
+| `memory_oas_bridge.ml` | Acceptable but lossy | correct consumer-side adapter, but seeding/flushing is still imperative |
+| `team_session_oas_bridge.ml` | Acceptable but lossy | OAS Swarm runs the workers, but projection/runtime-health fidelity is incomplete |
+| keeper continuity path | Boundary violation | keeper still owns `working_context` and raw-text continuity markers |
 
 ## What Changed In This Pass
 
@@ -60,7 +70,14 @@ The bridge still throws away part of MASC session semantics:
 
 This means the runner is now tool-capable, but not yet fidelity-complete.
 
-### 2. Resume path is only partially consolidated
+### 2. Keeper runtime still owns duplicated state
+
+The public OAS worker surface no longer exposes the MASC-specific `working_context`
+name and instead treats extra checkpoint JSON as a neutral checkpoint sidecar.
+That helps the boundary at the worker API edge, but the keeper runtime still owns
+its own `working_context` wrapper and serialized continuity path.
+
+### 3. Resume path is only partially consolidated
 
 Direct OAS build/run sites now remain primarily in:
 
@@ -70,12 +87,19 @@ Direct OAS build/run sites now remain primarily in:
 
 The resume path now shares the same checkpoint/evidence/completion-log cleanup helper as the initial run path, but it still constructs resume-specific config locally before delegating into the shared execution tail.
 
-### 3. Memory bridge scope is now honest, but not universal
+### 4. Message marker leakage remains real
+
+Keeper continuity still depends on raw message conventions like `[STATE]`,
+goal markers, and memory-summary markers. That is workable, but it is still
+boundary leakage because OAS-facing runtime/compaction paths can observe MASC
+domain semantics through plain text instead of structured metadata.
+
+### 5. Memory bridge scope is now honest, but not universal
 
 The episodic source of truth is `Institution_eio` JSONL.
 That is enough for current keeper/governance/handoff usage, but it does not mean every historical MASC memory source has been unified into OAS memory.
 
-### 4. Some older docs are still stale by implication
+### 6. Some older docs are still stale by implication
 
 The worst offenders were fixed in this pass, but any document still prioritizing:
 
@@ -87,6 +111,8 @@ should be treated as outdated until refreshed.
 
 ## Recommended Priorities
 
-1. Finish team-session bridge fidelity: trace refs, richer runtime-health checks, and less-lossy worker/session projection.
-2. Collapse the remaining resume-config construction path onto the same shared worker execution template used by initial runs.
-3. Keep docs synced to code after each OAS migration step; the documentation drift is currently more dangerous than the remaining missing code.
+1. Finish keeper runtime state ownership migration so OAS owns runtime context/checkpoint semantics more directly.
+2. Reduce marker/text leakage in keeper continuity and compaction-related paths.
+3. Finish team-session bridge fidelity: trace refs, richer runtime-health checks, and less-lossy worker/session projection.
+4. Move memory bridge lifecycle toward more reusable hook/callback seams where the abstraction stays generic.
+5. Keep docs synced to code after each OAS migration step; documentation drift is currently more dangerous than the remaining missing code.

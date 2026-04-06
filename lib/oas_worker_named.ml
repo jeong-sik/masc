@@ -143,7 +143,7 @@ let run_named
     ?contract
     ?transport
     ?(allowed_paths = [])
-    ?working_context
+    ?checkpoint_sidecar
     ?(cache_system_prompt = false)
     ?(yield_on_tool = false)
     ?compact_ratio
@@ -193,7 +193,7 @@ let run_named
       description = Some (Printf.sprintf "cascade:%s" cascade_name);
       transport = transport_resolved;
       allowed_paths;
-      working_context;
+      checkpoint_sidecar;
       session_id;
       cache_system_prompt;
       compact_ratio;

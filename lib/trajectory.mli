@@ -45,6 +45,25 @@ type trajectory = {
   task_id : string option;
 }
 
+(** {1 Thinking entries}
+
+    Thinking blocks from LLM responses, persisted alongside tool call entries
+    in the same JSONL file with [type = "thinking"]. *)
+
+type thinking_entry = {
+  ts : float;
+  ts_iso : string;
+  turn : int;
+  content : string;
+  content_length : int;
+  redacted : bool;
+}
+
+(** Tagged union for reading mixed JSONL (tool calls + thinking). *)
+type trajectory_line =
+  | Tool_call of tool_call_entry
+  | Thinking of thinking_entry
+
 (** {1 Cost estimation} *)
 
 val tool_cost_estimate : string -> float
@@ -57,6 +76,8 @@ val outcome_to_json : trajectory_outcome -> Yojson.Safe.t
 val outcome_to_string : trajectory_outcome -> string
 val default_result_truncation : int
 val entry_to_json : ?result_max_len:int -> tool_call_entry -> Yojson.Safe.t
+val thinking_entry_to_json : ?content_max_len:int -> thinking_entry -> Yojson.Safe.t
+val trajectory_line_to_json : ?result_max_len:int -> ?content_max_len:int -> trajectory_line -> Yojson.Safe.t
 val trajectory_to_json : trajectory -> Yojson.Safe.t
 
 (** {1 Persistence} *)
@@ -72,9 +93,18 @@ val append_summary :
   masc_root:string -> keeper_name:string -> trace_id:string ->
   trajectory -> unit
 
+val append_thinking :
+  masc_root:string -> keeper_name:string -> trace_id:string ->
+  thinking_entry -> unit
+
 val read_entries :
   masc_root:string -> keeper_name:string -> trace_id:string ->
   tool_call_entry list
+
+val read_all_lines :
+  masc_root:string -> keeper_name:string -> trace_id:string ->
+  trajectory_line list
+(** Read all entries (tool calls + thinking) from JSONL. *)
 
 (** {1 Accumulator}
 

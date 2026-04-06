@@ -10,7 +10,7 @@ import type { AgentTimelineEvent, AgentTimelineResponse, TrajectoryEntry, Trajec
 
 // ── Types ──────────────────────────────────────────────
 
-export type TraceEventKind = 'broadcast' | 'task' | 'tool_call' | 'heartbeat' | 'lifecycle'
+export type TraceEventKind = 'broadcast' | 'task' | 'tool_call' | 'heartbeat' | 'lifecycle' | 'thinking'
 
 export interface UnifiedTraceEvent {
   id: string
@@ -29,6 +29,9 @@ export interface UnifiedTraceEvent {
   round?: number
   cost_usd?: number
   error?: string | null
+  // thinking fields
+  thinkingContent?: string
+  thinkingRedacted?: boolean
 }
 
 export interface TraceSummary {
@@ -38,6 +41,7 @@ export interface TraceSummary {
   task_claimed_count: number
   heartbeat_count: number
   lifecycle_count: number
+  thinking_count: number
   total_cost_usd: number
 }
 
@@ -100,6 +104,7 @@ export function getTraceSummary(agent: string): TraceSummary {
   let task_claimed_count = 0
   let heartbeat_count = 0
   let lifecycle_count = 0
+  let thinking_count = 0
   let total_cost_usd = 0
 
   for (const e of events) {
@@ -121,15 +126,18 @@ export function getTraceSummary(agent: string): TraceSummary {
       case 'lifecycle':
         lifecycle_count++
         break
+      case 'thinking':
+        thinking_count++
+        break
     }
   }
 
-  return { tool_call_count, broadcast_count, task_completed_count, task_claimed_count, heartbeat_count, lifecycle_count, total_cost_usd }
+  return { tool_call_count, broadcast_count, task_completed_count, task_claimed_count, heartbeat_count, lifecycle_count, thinking_count, total_cost_usd }
 }
 
 export function getKindCounts(agent: string): Record<TraceEventKind | 'all', number> {
   const events = getTraceEvents(agent)
-  const counts: Record<string, number> = { all: events.length, broadcast: 0, task: 0, tool_call: 0, heartbeat: 0, lifecycle: 0 }
+  const counts: Record<string, number> = { all: events.length, broadcast: 0, task: 0, tool_call: 0, heartbeat: 0, lifecycle: 0, thinking: 0 }
   for (const e of events) counts[e.kind] = (counts[e.kind] ?? 0) + 1
   return counts as Record<TraceEventKind | 'all', number>
 }
@@ -204,6 +212,22 @@ function timelineEventToTrace(evt: AgentTimelineEvent, index: number): UnifiedTr
 
 function trajectoryEntryToTrace(entry: TrajectoryEntry, index: number): UnifiedTraceEvent {
   const ts = typeof entry.ts === 'number' ? entry.ts : safeTimestamp(entry.ts_iso)
+
+  // Handle thinking entries (type === 'thinking')
+  if (entry.type === 'thinking') {
+    return {
+      id: `tj-${ts}-thinking-T${entry.turn}-${index}`,
+      ts,
+      ts_iso: entry.ts_iso,
+      kind: 'thinking',
+      summary: entry.redacted ? '[비공개 사고]' : (entry.content?.slice(0, 120) ?? ''),
+      detail: {},
+      turn: entry.turn,
+      thinkingContent: entry.content,
+      thinkingRedacted: entry.redacted,
+    }
+  }
+
   return {
     id: `tj-${ts}-${entry.tool_name}-T${entry.turn}R${entry.round}-${index}`,
     ts,

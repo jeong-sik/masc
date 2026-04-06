@@ -450,17 +450,28 @@ let handle_keeper_get_subroutes state req request reqd =
              ~default:2000
            |> max 0 |> min 10000
          in
+         let include_thinking =
+           Server_utils.bool_query_param req "include_thinking"
+             ~default:false
+         in
          let masc_root = Filename.concat config.base_path ".masc" in
-         let entries =
-           Trajectory.read_entries ~masc_root ~keeper_name:m.name
+         let all_lines =
+           Trajectory.read_all_lines ~masc_root ~keeper_name:m.name
              ~trace_id:m.runtime.trace_id
          in
-         let total = List.length entries in
+         (* Filter out thinking entries if not requested *)
+         let lines =
+           if include_thinking then all_lines
+           else List.filter (function
+             | Trajectory.Tool_call _ -> true
+             | Trajectory.Thinking _ -> false) all_lines
+         in
+         let total = List.length lines in
          let recent =
-           if total <= limit then entries
+           if total <= limit then lines
            else
              let drop = total - limit in
-             List.filteri (fun i _e -> i >= drop) entries
+             List.filteri (fun i _e -> i >= drop) lines
          in
          let json = `Assoc [
            ("keeper", `String name);
@@ -468,7 +479,8 @@ let handle_keeper_get_subroutes state req request reqd =
            ("generation", `Int m.runtime.generation);
            ("total_entries", `Int total);
            ("showing", `Int (List.length recent));
-           ("entries", `List (List.map (Trajectory.entry_to_json ~result_max_len) recent));
+           ("entries", `List (List.map
+             (Trajectory.trajectory_line_to_json ~result_max_len) recent));
          ] in
          Http.Response.json ~compress:true ~request:req
            (Yojson.Safe.to_string json) reqd)

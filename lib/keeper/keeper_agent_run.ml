@@ -1037,6 +1037,53 @@ let run_turn
         let _flushed = Memory_oas_bridge.flush_all ~memory ~agent_name in
         let text = Agent_sdk.Types.text_of_content result.response.content in
         let model = result.response.model in
+        (* Extract and persist thinking blocks to trajectory JSONL.
+           NOTE: turn = acc.turn stays at 0 in the keeper path because
+           Trajectory.increment_turn is never called here — the keeper
+           uses OAS Agent.run which manages its own internal call count.
+           Consumers should treat turn=0 as "turn not tracked in keeper path". *)
+        (match trajectory_acc with
+         | Some acc ->
+           let now = Time_compat.now () in
+           let now_iso = Types.now_iso () in
+           List.iter (function
+             | Agent_sdk.Types.Thinking { content; _ } ->
+               let entry : Trajectory.thinking_entry = {
+                 ts = now;
+                 ts_iso = now_iso;
+                 turn = acc.Trajectory.turn;
+                 content;
+                 content_length = String.length content;
+                 redacted = false;
+               } in
+               (try Trajectory.append_thinking
+                      ~masc_root:acc.Trajectory.masc_root
+                      ~keeper_name:acc.Trajectory.keeper_name
+                      ~trace_id:acc.Trajectory.trace_id entry
+                with Eio.Cancel.Cancelled _ as e -> raise e
+                | exn ->
+                  Log.Keeper.error "keeper:%s thinking persist failed: %s"
+                    meta.name (Printexc.to_string exn))
+             | Agent_sdk.Types.RedactedThinking _ ->
+               let entry : Trajectory.thinking_entry = {
+                 ts = now;
+                 ts_iso = now_iso;
+                 turn = acc.Trajectory.turn;
+                 content = "[redacted]";
+                 content_length = 0;
+                 redacted = true;
+               } in
+               (try Trajectory.append_thinking
+                      ~masc_root:acc.Trajectory.masc_root
+                      ~keeper_name:acc.Trajectory.keeper_name
+                      ~trace_id:acc.Trajectory.trace_id entry
+                with Eio.Cancel.Cancelled _ as e -> raise e
+                | exn ->
+                  Log.Keeper.error "keeper:%s redacted thinking persist failed: %s"
+                    meta.name (Printexc.to_string exn))
+             | _ -> ())
+             result.response.content
+         | None -> ());
         let reported_tool_names =
           List.filter_map (function
             | Agent_sdk.Types.ToolUse { name; _ } -> Some name | _ -> None)

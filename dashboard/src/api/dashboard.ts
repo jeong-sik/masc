@@ -762,17 +762,23 @@ export type TrajectoryGate = {
 }
 
 export type TrajectoryEntry = {
+  type?: 'thinking'  // absent for tool calls, 'thinking' for thinking blocks
   ts: number
   ts_iso: string
   turn: number
-  round: number
-  tool_name: string
-  args: Record<string, unknown> | string
-  gate: TrajectoryGate
-  result: string | null
-  duration_ms: number
-  error: string | null
-  cost_usd: number
+  // Tool-call fields (absent on thinking entries)
+  round?: number
+  tool_name?: string
+  args?: Record<string, unknown> | string
+  gate?: TrajectoryGate
+  result?: string | null
+  duration_ms?: number
+  error?: string | null
+  cost_usd?: number
+  // Thinking-specific fields
+  content?: string
+  content_length?: number
+  redacted?: boolean
 }
 
 export type TrajectoryResponse = {
@@ -787,9 +793,16 @@ export type TrajectoryResponse = {
 export function fetchKeeperTrajectory(
   name: string,
   limit?: number,
+  includeThinking = true,
 ): Promise<TrajectoryResponse> {
+  const params = new URLSearchParams()
+  if (limit != null) params.set('limit', String(limit))
+  // Always send include_thinking explicitly — backend defaults to false,
+  // so omitting the param means "don't include".
+  params.set('include_thinking', includeThinking ? 'true' : 'false')
+  const qs = params.toString()
   return get<TrajectoryResponse>(
-    `/api/v1/keepers/${encodeURIComponent(name)}/trajectory${limit != null ? `?limit=${limit}` : ''}`,
+    `/api/v1/keepers/${encodeURIComponent(name)}/trajectory${qs ? `?${qs}` : ''}`,
   )
 }
 

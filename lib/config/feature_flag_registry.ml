@@ -187,7 +187,7 @@ let all_flags : flag list = [
 
   { env_name = "MASC_SLOT_YIELD_ENABLED";
     description = "Release LLM slot during tool execution so other agents can use it";
-    default = false; category = "runtime";
+    default = true; category = "runtime";
     lifecycle = Active; since = "2.208.0" };
 
   (* ── CDAL (Contract-Driven Agent Loop) ───────────────────── *)

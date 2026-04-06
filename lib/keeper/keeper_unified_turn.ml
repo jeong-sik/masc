@@ -893,9 +893,26 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
                 | None -> Error err)
             | Error err -> Error err
           in
-          retry_loop ~run_meta:meta ~max_context:max_cascade_context
-            ~run_generation:generation ~attempt:1
-            ~is_retry:false ~overflow_retry_used:false))
+          (* Wall-clock timeout guards against indefinite TCP-level hangs
+             from upstream LLM providers. Without this, a single stalled
+             connection blocks the keeper fiber forever. *)
+          let timeout_sec =
+            Env_config_keeper.KeeperKeepalive.turn_timeout_sec
+          in
+          (try
+            Eio.Time.with_timeout_exn (Eio_context.get_clock ()) timeout_sec
+              (fun () ->
+                retry_loop ~run_meta:meta ~max_context:max_cascade_context
+                  ~run_generation:generation ~attempt:1
+                  ~is_retry:false ~overflow_retry_used:false)
+          with Eio.Time.Timeout ->
+            let msg =
+              Printf.sprintf
+                "Turn wall-clock timeout after %.0fs (MASC_KEEPER_TURN_TIMEOUT_SEC)"
+                timeout_sec
+            in
+            Log.Keeper.error "%s: %s" meta.name msg;
+            Error (Oas.Error.Internal msg))))
       in
       match run_result with
       | Error err ->

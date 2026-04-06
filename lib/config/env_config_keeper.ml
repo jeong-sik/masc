@@ -250,6 +250,14 @@ module KeeperKeepalive = struct
   let max_idle_turns_reactive =
     max 2 (min 50 (get_int ~default:15 "MASC_KEEPER_MAX_IDLE_TURNS_REACTIVE"))
 
+  (** Wall-clock timeout in seconds for a single unified turn (including all
+      retries and cascade fallbacks). Prevents indefinite blocking when an
+      upstream LLM hangs at the TCP level.
+      Env: [MASC_KEEPER_TURN_TIMEOUT_SEC]. Default: 600. Range: [60, 1800]. *)
+  let turn_timeout_sec =
+    Float.max 60.0 (Float.min 1800.0
+      (get_float ~default:600.0 "MASC_KEEPER_TURN_TIMEOUT_SEC"))
+
   (** Consecutive idle tool repetitions before on_idle hook issues Skip.
       Below this: graduated Nudge messages.
       With tool_choice=Any, the model always calls tools, so idle

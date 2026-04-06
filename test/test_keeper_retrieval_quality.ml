@@ -364,7 +364,7 @@ let test_index_size () =
 let test_tool_search_self_en () =
   let idx = build_keeper_index () in
   ignore (assert_retrieves ~label:"tool_search_self" idx
-    "search for additional tools" "keeper_tool_search")
+    "discover tools by describing what I need" "keeper_tool_search")
 
 (** Full-universe search should find worktree tools even for
     a minimal-preset keeper. *)

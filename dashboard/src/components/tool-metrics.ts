@@ -14,11 +14,12 @@ function loadMetrics() {
   return metricsResource.load(() => fetchToolMetrics())
 }
 
-function tierLabel(tier: string): string {
+function tierLabel(tier: string | undefined): string {
   switch (tier) {
     case 'essential': return '필수'
     case 'standard': return '표준'
-    default: return '전체'
+    case 'full': return '전체'
+    default: return tier ?? '-'
   }
 }
 

@@ -35,7 +35,7 @@ function ToolCallEventRow({ evt, idx }: { evt: AgentTimelineEvent; idx: number }
   const d = evt.detail as Record<string, unknown>
   const toolName = (d.tool_name as string) ?? 'unknown'
   const success = d.success !== false
-  const durationMs = (d.duration_ms as number) ?? 0
+  const durationMs = d.duration_ms as number | undefined
   const errorMsg = d.error as string | null
   const args = d.args as Record<string, unknown> | string | undefined
   const cat = toolCategory(toolName)
@@ -48,7 +48,9 @@ function ToolCallEventRow({ evt, idx }: { evt: AgentTimelineEvent; idx: number }
         </div>
         <span class="text-xs font-mono font-medium ${cat.color} truncate max-w-[200px]" title=${toolName}>${toolName}</span>
         <span class="text-[9px] px-1 py-0.5 rounded bg-[var(--white-5)] text-[var(--text-dim)]">${cat.label}</span>
-        <span class="text-[11px] font-mono ${durationColor(durationMs)}">${formatDuration(durationMs)}</span>
+        ${durationMs != null
+          ? html`<span class="text-[11px] font-mono ${durationColor(durationMs)}">${formatDuration(durationMs)}</span>`
+          : null}
         ${success
           ? html`<span class="text-[10px] px-1 py-0.5 rounded bg-[rgba(52,211,153,0.1)] text-[var(--ok)]">ok</span>`
           : html`<span class="text-[10px] px-1 py-0.5 rounded bg-[var(--bad-10)] text-[var(--bad)]">err</span>`}

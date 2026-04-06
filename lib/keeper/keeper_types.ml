@@ -37,6 +37,7 @@ type scheduled_autonomous_cycle_outcome = proactive_cycle_outcome
 
 type tool_preset =
   | Minimal
+  | Social
   | Messaging
   | Coding
   | Research
@@ -198,6 +199,7 @@ let migrate_legacy_restricted_tools names =
 
 let tool_preset_to_string = function
   | Minimal -> "minimal"
+  | Social -> "social"
   | Messaging -> "messaging"
   | Coding -> "coding"
   | Research -> "research"
@@ -208,6 +210,7 @@ let tool_preset_to_string = function
 let tool_preset_of_string raw =
   match String.trim (String.lowercase_ascii raw) with
   | "minimal" -> Some Minimal
+  | "social" -> Some Social
   | "messaging" -> Some Messaging
   | "coding" -> Some Coding
   | "research" -> Some Research

@@ -64,7 +64,7 @@ let normalize_name_list_opt items =
 let normalize_tool_preset_raw raw =
   let normalized = String.trim (String.lowercase_ascii raw) in
   match normalized with
-  | "minimal" | "messaging" | "coding" | "research" | "delivery" | "full" -> Some normalized
+  | "minimal" | "social" | "messaging" | "coding" | "research" | "delivery" | "full" -> Some normalized
   | _ -> None
 
 let first_some = Dashboard_utils.first_some

@@ -28,6 +28,7 @@ let init_policy_config ~base_path =
 
 let preset_name_of_tool_preset = function
   | Minimal -> "minimal"
+  | Social -> "social"
   | Messaging -> "messaging"
   | Coding -> "coding"
   | Research -> "research"

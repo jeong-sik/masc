@@ -113,10 +113,29 @@ let apply_post_turn_lifecycle
       let compacted_ctx, trigger, decision =
         Keeper_compact_policy.compact_if_needed ~meta:base_meta ~now_ts ctx
       in
-      let compaction_applied =
+      let compaction_decided =
         String.starts_with ~prefix:"applied:" decision
       in
-      let after_tokens = token_count compacted_ctx in
+      (* Attempt save before updating meta so that a save failure is treated as
+         compaction not applied — keeping ctx/checkpoint/metrics consistent. *)
+      let effective_compaction_applied, effective_ctx, checkpoint =
+        if not compaction_decided then (false, ctx, Some cp)
+        else
+          let session =
+            create_session ~session_id:base_meta.runtime.trace_id ~base_dir
+          in
+          (match save_oas_checkpoint ~session
+               ~agent_name:base_meta.agent_name
+               ~model ~ctx:compacted_ctx ~generation:current_generation
+          with
+          | Ok saved_cp -> (true, compacted_ctx, Some saved_cp)
+          | Error e ->
+              Log.Keeper.error
+                "keeper:%s compaction checkpoint save failed: %s"
+                base_meta.name e;
+              (false, ctx, Some cp))
+      in
+      let after_tokens = token_count effective_ctx in
       let saved_tokens = max 0 (before_tokens - after_tokens) in
       let meta_after_compaction =
         map_runtime
@@ -127,37 +146,21 @@ let apply_post_turn_lifecycle
                 {
                   count =
                     rt.compaction_rt.count
-                    + if compaction_applied then 1 else 0;
+                    + if effective_compaction_applied then 1 else 0;
                   last_ts =
-                    if compaction_applied then now_ts else rt.compaction_rt.last_ts;
+                    if effective_compaction_applied then now_ts
+                    else rt.compaction_rt.last_ts;
                   last_before_tokens =
-                    if compaction_applied then before_tokens
+                    if effective_compaction_applied then before_tokens
                     else rt.compaction_rt.last_before_tokens;
                   last_after_tokens =
-                    if compaction_applied then after_tokens
+                    if effective_compaction_applied then after_tokens
                     else rt.compaction_rt.last_after_tokens;
                   last_check_ts = now_ts;
                   last_decision = decision;
                 };
             })
           base_meta
-      in
-      let checkpoint =
-        if not compaction_applied then Some cp
-        else
-          let session =
-            create_session ~session_id:meta_after_compaction.runtime.trace_id ~base_dir
-          in
-          (match save_oas_checkpoint ~session
-               ~agent_name:meta_after_compaction.agent_name
-               ~model ~ctx:compacted_ctx ~generation:current_generation
-          with
-          | Ok saved_cp -> Some saved_cp
-          | Error e ->
-              Log.Keeper.error
-                "keeper:%s compaction checkpoint save failed: %s"
-                meta_after_compaction.agent_name e;
-              Some cp)
       in
       let rollover =
         Keeper_rollover.maybe_rollover_oas_handoff ~base_dir
@@ -169,7 +172,7 @@ let apply_post_turn_lifecycle
       let continuity_meta =
         apply_continuity_summary
           ~meta:rollover.updated_meta
-          ~ctx:compacted_ctx
+          ~ctx:effective_ctx
       in
       {
         updated_meta = continuity_meta;
@@ -177,7 +180,7 @@ let apply_post_turn_lifecycle
         handoff_json = rollover.handoff_json;
         compaction =
           {
-            applied = compaction_applied;
+            applied = effective_compaction_applied;
             trigger;
             decision;
             before_tokens;

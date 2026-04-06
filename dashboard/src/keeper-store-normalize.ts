@@ -5,6 +5,7 @@ import type {
 } from './types'
 import { isRecord, asString, asNumber, asBoolean, asStringArray, toIsoTimestamp } from './components/common/normalize'
 import { isOfflineStatus } from './lib/status-utils'
+import { keeperDisplayStatus } from './lib/keeper-runtime-display'
 
 function normalizeKeeperAgentStatus(value: unknown): Keeper['status'] {
   const raw = typeof value === 'string' ? value.toLowerCase() : ''
@@ -15,6 +16,8 @@ function normalizeKeeperAgentStatus(value: unknown): Keeper['status'] {
     || raw === 'idle'
     || raw === 'inactive'
     || raw === 'offline'
+    || raw === 'unbooted'
+    || raw === 'stopped'
   ) {
     return raw
   }
@@ -25,7 +28,7 @@ function normalizeKeeperAgentStatus(value: unknown): Keeper['status'] {
 
 export function deriveLifecycleState(keeper: Keeper): KeeperLifecycleState {
   const status = keeper.status?.toLowerCase() ?? ''
-  if (isOfflineStatus(status)) return 'offline'
+  if (isOfflineStatus(status)) return keeperDisplayStatus(keeper) as KeeperLifecycleState
 
   const series = keeper.metrics_series
   if (!series || series.length === 0) {

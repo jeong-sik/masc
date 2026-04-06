@@ -170,6 +170,8 @@ export type KeeperLifecycleState =
   | 'handoff-imminent'
   | 'idle'
   | 'offline'
+  | 'unbooted'
+  | 'stopped'
 
 // --- Keeper SSE Events ---
 

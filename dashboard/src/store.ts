@@ -4,6 +4,7 @@
 
 import { signal, computed, type ReadonlySignal } from '@preact/signals'
 import { isOfflineStatus } from './lib/status-utils'
+import { keeperDisplayStatus } from './lib/keeper-runtime-display'
 import type {
   Agent,
   Task,
@@ -238,7 +239,8 @@ export const keeperLifecycles: ReadonlySignal<Map<string, KeeperLifecycleState>>
   for (const k of keepers.value) {
     const status = k.status?.toLowerCase() ?? ''
     if (isOfflineStatus(status)) {
-      map.set(k.name, 'offline')
+      const refined = keeperDisplayStatus(k) as KeeperLifecycleState
+      map.set(k.name, refined)
       continue
     }
     if (!k.metrics_series || k.metrics_series.length === 0) continue

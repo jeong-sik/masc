@@ -41,12 +41,9 @@ import {
 } from './keeper-config-panel'
 import { PipelineStageBar } from './keeper-pipeline-stage'
 import { AgentJournalStream } from './agent-detail-journal'
-import { KeeperTrajectoryTimeline } from './keeper-trajectory-timeline'
 import { DialogOverlay } from './common/dialog'
-import { CollapsibleSection } from './common/collapsible'
 import { SessionTraceView } from './session-trace/session-trace-view'
 import { SessionProgressHeader } from './session-progress-header'
-import { getTraceSummary } from './session-trace/session-trace-state'
 import { KeeperToolTelemetry } from './keeper-tool-telemetry'
 
 // ── Global overlay state ──────────────────────────────────
@@ -474,7 +471,7 @@ export function KeeperDetailOverlay() {
         <${PipelineStageBar} stage=${keeper.pipeline_stage} />
 
         ${'' /* ── Session progress header (Copilot-style) ── */}
-        <${SessionProgressHeader} keeper=${keeper} summary=${getTraceSummary(keeper.name)} />
+        <${SessionProgressHeader} keeper=${keeper} summary=${null} />
 
         ${'' /* ── KPIs ── */}
         <${KpiGrid} keeper=${keeper} />
@@ -614,13 +611,6 @@ export function KeeperDetailOverlay() {
           <div class="md:col-span-2">
             <${SectionCard} title="활동 추적">
               <${SessionTraceView} agentName=${keeper.name} isKeeper=${true} keeperStatus=${keeper.status} keeperGeneration=${keeper.generation} />
-            <//>
-          </div>
-
-          ${'' /* ── Tool-only trajectory (collapsed, for deep inspection) ── */}
-          <div class="md:col-span-2">
-            <${CollapsibleSection} title="도구 호출 상세" badge=${html`<span class="text-[10px] text-[var(--text-dim)] font-normal ml-1">궤적 전용</span>`}>
-              <${KeeperTrajectoryTimeline} keeperName=${keeper.name} keeper=${keeper} />
             <//>
           </div>
 

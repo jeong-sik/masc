@@ -99,9 +99,7 @@ let render_timeout_s =
     ~default:60.0 ~min_v:10.0 ~max_v:300.0
 
 let session_list_timeout_s =
-  Dashboard_http_helpers.float_of_env_default
-    "MASC_DASHBOARD_SESSION_LIST_TIMEOUT_S"
-    ~default:5.0 ~min_v:1.0 ~max_v:30.0
+  Dashboard_http_helpers.dashboard_session_list_timeout_s ()
 
 let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
       let ctx : _ Operator_control.context =

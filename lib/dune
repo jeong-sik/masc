@@ -370,6 +370,7 @@
    tool_metrics
    tool_metrics_persist
    tool_usage_log
+   keeper_tool_call_log
    tool_inline_dispatch_types
    tool_inline_dispatch_room
    tool_inline_dispatch_comm

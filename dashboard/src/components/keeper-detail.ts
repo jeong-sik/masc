@@ -159,6 +159,62 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
   `
 }
 
+// ── Lifecycle Buttons (boot / shutdown) ─────────────────
+
+function KeeperLifecycleButtons({ keeper, effectiveStatus }: { keeper: Keeper; effectiveStatus: string }) {
+  const isOffline = ['offline', 'inactive', 'dead', 'crashed', 'unbooted', 'stopped'].includes(effectiveStatus)
+  const isRunning = ['active', 'running', 'idle', 'busy', 'listening', 'working'].includes(effectiveStatus)
+
+  if (isOffline) return html`
+    <button type="button"
+      class="py-1 px-3 rounded-lg text-[11px] font-semibold cursor-pointer border border-[rgba(34,197,94,0.4)] bg-[rgba(34,197,94,0.08)] text-[var(--ok)] hover:bg-[rgba(34,197,94,0.15)] transition-colors"
+      onClick=${() => {
+        void (async () => {
+          try {
+            const res = await bootKeeper(keeper.name)
+            if (res.ok) {
+              showToast(keeper.name + ' 기동됨', 'success')
+              await refreshAfterRuntimeAction()
+            } else {
+              showToast(res.error ?? '기동 실패', 'error')
+            }
+          } catch {
+            showToast('기동 실패', 'error')
+          }
+        })()
+      }}
+    >기동</button>`
+
+  if (isRunning) return html`
+    <button type="button"
+      class="py-1 px-3 rounded-lg text-[11px] font-semibold cursor-pointer border border-[var(--bad-30)] bg-[var(--bad-10)] text-[#fb7185] hover:bg-[rgba(239,68,68,0.15)] transition-colors"
+      onClick=${() => {
+        void (async () => {
+          const confirmed = await requestConfirm({
+            title: '키퍼 종료',
+            message: keeper.name + ' 키퍼를 종료합니까?',
+            tone: 'danger'
+          })
+          if (confirmed) {
+            try {
+              const res = await shutdownKeeper(keeper.name)
+              if (res.ok) {
+                showToast(keeper.name + ' 종료됨', 'success')
+                await refreshAfterRuntimeAction()
+              } else {
+                showToast(res.error ?? '종료 실패', 'error')
+              }
+            } catch {
+              showToast('종료 실패', 'error')
+            }
+          }
+        })()
+      }}
+    >종료</button>`
+
+  return null
+}
+
 // ── Comms Panel ──────────────────────────────────────────
 
 function KeeperCommsPanel({ keeper }: { keeper: Keeper }) {
@@ -387,56 +443,7 @@ export function KeeperDetailOverlay() {
             </div>
           </div>
           <div class="flex items-center gap-2">
-            ${(() => {
-              const isOffline = ['offline', 'inactive', 'dead', 'crashed', 'unbooted', 'stopped'].includes(effectiveStatus)
-              const isRunning = ['active', 'running', 'idle', 'busy', 'listening', 'working'].includes(effectiveStatus)
-              if (isOffline) return html`
-                <button type="button"
-                  class="py-1 px-3 rounded-lg text-[11px] font-semibold cursor-pointer border border-[rgba(34,197,94,0.4)] bg-[rgba(34,197,94,0.08)] text-[var(--ok)] hover:bg-[rgba(34,197,94,0.15)] transition-colors"
-                  onClick=${() => {
-                    void (async () => {
-                      try {
-                        const res = await bootKeeper(keeper.name)
-                        if (res.ok) {
-                          showToast(keeper.name + ' 기동됨', 'success')
-                          await refreshAfterRuntimeAction()
-                        } else {
-                          showToast(res.error ?? '기동 실패', 'error')
-                        }
-                      } catch {
-                        showToast('기동 실패', 'error')
-                      }
-                    })()
-                  }}
-                >기동</button>`
-              if (isRunning) return html`
-                <button type="button"
-                  class="py-1 px-3 rounded-lg text-[11px] font-semibold cursor-pointer border border-[var(--bad-30)] bg-[var(--bad-10)] text-[#fb7185] hover:bg-[rgba(239,68,68,0.15)] transition-colors"
-                  onClick=${() => {
-                    void (async () => {
-                      const confirmed = await requestConfirm({
-                        title: '키퍼 종료',
-                        message: keeper.name + ' 키퍼를 종료합니까?',
-                        tone: 'danger'
-                      })
-                      if (confirmed) {
-                        try {
-                          const res = await shutdownKeeper(keeper.name)
-                          if (res.ok) {
-                            showToast(keeper.name + ' 종료됨', 'success')
-                            await refreshAfterRuntimeAction()
-                          } else {
-                            showToast(res.error ?? '종료 실패', 'error')
-                          }
-                        } catch {
-                          showToast('종료 실패', 'error')
-                        }
-                      }
-                    })()
-                  }}
-                >종료</button>`
-              return null
-            })()}
+            <${KeeperLifecycleButtons} keeper=${keeper} effectiveStatus=${effectiveStatus} />
             <button
               ref=${closeButtonRef}
               type="button"
@@ -476,21 +483,20 @@ export function KeeperDetailOverlay() {
         <${KeeperToolTelemetry} keeperName=${keeper.name} />
 
         ${'' /* ── Tool call I/O inspector ── */}
-        <div class="space-y-2">
-          <h3 class="text-sm font-semibold text-[var(--fg)]">Tool Call Inspector</h3>
+        <${SectionCard} title="도구 호출 검사기">
           <${KeeperToolCallInspector} keeperName=${keeper.name} />
-        </div>
+        <//>
 
         ${'' /* ── Direct conversation ── */}
         <${KeeperCommsPanel} keeper=${keeper} />
 
         ${'' /* ── Runtime diagnostics (promoted from comms panel) ── */}
-        <details class="group">
-          <summary class="cursor-pointer py-2.5 px-4 text-xs text-[var(--text-muted)] tracking-wider uppercase list-none select-none rounded-lg hover:bg-[var(--white-3)] transition-colors flex items-center gap-2">
-            <span class="w-1.5 h-1.5 rounded-full bg-[var(--text-dim)]"></span>
+        <details class="rounded-2xl border border-card-border bg-card/40 backdrop-blur-md shadow-sm">
+          <summary class="cursor-pointer py-3 px-5 text-[11px] font-semibold uppercase tracking-widest text-text-muted list-none select-none flex items-center gap-2">
+            <span class="w-1.5 h-1.5 rounded-full bg-accent/50"></span>
             런타임 진단
           </summary>
-          <div class="flex flex-col gap-3 px-4 pb-4 pt-2">
+          <div class="flex flex-col gap-3 px-5 pb-5 pt-2">
             <${KeeperDiagnosticSummary} keeper=${keeper} />
             <${KeeperRuntimeActions}
               actor=${currentDashboardActor()}
@@ -500,8 +506,16 @@ export function KeeperDetailOverlay() {
           </div>
         </details>
 
-        ${'' /* ── Live journal stream ── */}
-        <${AgentJournalStream} agentName=${keeper.name} />
+        ${'' /* ── Live journal stream (collapsed by default — verbose) ── */}
+        <details>
+          <summary class="cursor-pointer py-2.5 px-4 text-xs text-[var(--text-muted)] tracking-wider uppercase list-none select-none rounded-lg hover:bg-[var(--white-3)] transition-colors flex items-center gap-2">
+            <span class="w-1.5 h-1.5 rounded-full bg-[var(--text-dim)]"></span>
+            실시간 저널
+          </summary>
+          <div class="mt-2">
+            <${AgentJournalStream} agentName=${keeper.name} />
+          </div>
+        </details>
 
         ${'' /* ── Detail sections grid ── */}
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -552,51 +566,53 @@ export function KeeperDetailOverlay() {
                 : null}
             </div>
 
-            ${'' /* ── Recent activity preview ── */}
-            ${keeper.recent_output_preview
-              ? html`
-                <div class="mt-3 py-2 px-3 rounded-lg bg-[rgba(71,184,255,0.06)] border border-[rgba(71,184,255,0.12)] text-xs text-[var(--text-body)] leading-relaxed">
-                  <div class="text-[10px] font-semibold text-[var(--accent)] uppercase tracking-wider mb-1">최근 출력</div>
-                  <div class="line-clamp-3">${keeper.recent_output_preview}</div>
-                </div>
-              `
-              : null}
-
-            ${'' /* ── K2K social stats ── */}
-            ${(keeper.k2k_count ?? 0) > 0 || (keeper.conversation_tail_count ?? 0) > 0
-              ? html`
-                <div class="mt-3 flex flex-wrap gap-2">
-                  ${(keeper.k2k_count ?? 0) > 0
-                    ? html`<span class="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-md bg-[rgba(167,139,250,0.08)] border border-[rgba(167,139,250,0.15)] text-[var(--text-muted)]">
-                        K2K 소통 <span class="font-mono font-medium text-[#a78bfa]">${keeper.k2k_count}</span>회
-                      </span>`
-                    : null}
-                  ${(keeper.conversation_tail_count ?? 0) > 0
-                    ? html`<span class="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-md bg-[var(--white-4)] border border-[var(--white-6)] text-[var(--text-muted)]">
-                        대화 <span class="font-mono font-medium">${keeper.conversation_tail_count}</span>건
-                      </span>`
-                    : null}
-                </div>
-              `
-              : null}
-
-            ${keeper.memory_recent_note
-              ? html`
-                <div class="mt-3 py-2 px-3 rounded-lg bg-[rgba(167,139,250,0.06)] border border-[rgba(167,139,250,0.12)] text-xs text-[var(--text-body)] leading-relaxed">
-                  <div class="text-[10px] font-semibold text-[#a78bfa] uppercase tracking-wider mb-1">메모리 노트</div>
-                  ${keeper.memory_recent_note}
-                </div>
-              `
-              : null}
-
-            ${'' /* ── Last speech act ── */}
-            ${keeper.last_speech_act
-              ? html`<div class="flex items-center gap-2 mt-2 text-xs text-[var(--text-muted)]">
-                  <span>최근 행동:</span>
-                  <span class="font-mono text-[11px] px-1.5 py-0.5 rounded bg-[var(--white-5)] text-[var(--text-body)]">${keeper.last_speech_act}</span>
-                </div>`
-              : null}
           <//>
+
+          ${'' /* ── Recent activity (extracted from profile) ── */}
+          ${keeper.recent_output_preview || (keeper.k2k_count ?? 0) > 0 || (keeper.conversation_tail_count ?? 0) > 0 || keeper.memory_recent_note || keeper.last_speech_act
+            ? html`
+              <${SectionCard} title="최근 활동">
+                ${keeper.recent_output_preview
+                  ? html`
+                    <div class="py-2 px-3 rounded-lg bg-[rgba(71,184,255,0.06)] border border-[rgba(71,184,255,0.12)] text-xs text-[var(--text-body)] leading-relaxed">
+                      <div class="text-[10px] font-semibold text-[var(--accent)] uppercase tracking-wider mb-1">최근 출력</div>
+                      <div class="line-clamp-3">${keeper.recent_output_preview}</div>
+                    </div>
+                  `
+                  : null}
+                ${(keeper.k2k_count ?? 0) > 0 || (keeper.conversation_tail_count ?? 0) > 0
+                  ? html`
+                    <div class="mt-2 flex flex-wrap gap-2">
+                      ${(keeper.k2k_count ?? 0) > 0
+                        ? html`<span class="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-md bg-[rgba(167,139,250,0.08)] border border-[rgba(167,139,250,0.15)] text-[var(--text-muted)]">
+                            K2K 소통 <span class="font-mono font-medium text-[#a78bfa]">${keeper.k2k_count}</span>회
+                          </span>`
+                        : null}
+                      ${(keeper.conversation_tail_count ?? 0) > 0
+                        ? html`<span class="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-md bg-[var(--white-4)] border border-[var(--white-6)] text-[var(--text-muted)]">
+                            대화 <span class="font-mono font-medium">${keeper.conversation_tail_count}</span>건
+                          </span>`
+                        : null}
+                    </div>
+                  `
+                  : null}
+                ${keeper.memory_recent_note
+                  ? html`
+                    <div class="mt-2 py-2 px-3 rounded-lg bg-[rgba(167,139,250,0.06)] border border-[rgba(167,139,250,0.12)] text-xs text-[var(--text-body)] leading-relaxed">
+                      <div class="text-[10px] font-semibold text-[#a78bfa] uppercase tracking-wider mb-1">메모리 노트</div>
+                      ${keeper.memory_recent_note}
+                    </div>
+                  `
+                  : null}
+                ${keeper.last_speech_act
+                  ? html`<div class="flex items-center gap-2 mt-2 text-xs text-[var(--text-muted)]">
+                      <span>최근 행동:</span>
+                      <span class="font-mono text-[11px] px-1.5 py-0.5 rounded bg-[var(--white-5)] text-[var(--text-body)]">${keeper.last_speech_act}</span>
+                    </div>`
+                  : null}
+              <//>
+            `
+            : null}
 
           ${keeper.inventory && keeper.inventory.length > 0
             ? html`

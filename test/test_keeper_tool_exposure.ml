@@ -471,19 +471,28 @@ let test_path_empty_allowed_permits_all_within_root () =
    ============================================================ *)
 
 let make_masc_path_test_dir () =
-  let dir = Filename.concat (Filename.get_temp_dir_name ())
-    (Printf.sprintf "keeper_masc_path_test_%d" (Random.int 100000)) in
-  (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  let create_dir path =
+    try Unix.mkdir path 0o755
+    with Unix.Unix_error (err, _, _) ->
+      failwith
+        (Printf.sprintf "make_masc_path_test_dir: mkdir %s failed: %s"
+           path (Unix.error_message err))
+  in
+  let dir =
+    Unix.mkdtemp
+      (Filename.concat (Filename.get_temp_dir_name ())
+         "keeper_masc_path_test_XXXXXX")
+  in
   let git_dir = Filename.concat dir ".git" in
-  (try Unix.mkdir git_dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  create_dir git_dir;
   let masc = Filename.concat dir ".masc" in
-  (try Unix.mkdir masc 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  create_dir masc;
   let keepers = Filename.concat masc "keepers" in
-  (try Unix.mkdir keepers 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  create_dir keepers;
   let traces = Filename.concat masc "traces" in
-  (try Unix.mkdir traces 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  create_dir traces;
   let playground = Filename.concat masc "playground" in
-  (try Unix.mkdir playground 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  create_dir playground;
   dir
 
 let test_keeper_reported_nonexistent_subdir () =

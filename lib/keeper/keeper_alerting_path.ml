@@ -13,20 +13,23 @@ let strip_trailing_slashes = Env_config_core.strip_trailing_slashes
 let normalize_path_for_check (path : string) : string =
   try Unix.realpath path
   with Unix.Unix_error _ ->
-    (* Walk up the directory tree until we find an ancestor that exists
-       and can be resolved via realpath, then reconstruct the suffix.
-       This handles symlinks (e.g., /tmp -> /private/tmp on macOS) even
-       when intermediate directories do not exist on disk. *)
-    let rec resolve_deepest p =
-      try Unix.realpath p
-      with Unix.Unix_error _ ->
-        let parent = Filename.dirname p in
-        if parent = p then p (* reached filesystem root *)
-        else
-          let parent_resolved = resolve_deepest parent in
-          Filename.concat parent_resolved (Filename.basename p)
+    (* Walk up the directory tree iteratively until we find an ancestor that
+       exists and can be resolved via realpath, then reconstruct the suffix.
+       This handles symlinks (e.g., /tmp -> /private/tmp on macOS) even when
+       intermediate directories do not exist on disk.
+       Iterative (not recursive) to avoid stack overflow on deep untrusted paths. *)
+    let rec collect_suffix p acc =
+      let parent = Filename.dirname p in
+      if parent = p then
+        (* Reached filesystem root without a successful realpath. *)
+        (p, acc)
+      else
+        match (try Some (Unix.realpath p) with Unix.Unix_error _ -> None) with
+        | Some resolved -> (resolved, acc)
+        | None -> collect_suffix parent (Filename.basename p :: acc)
     in
-    resolve_deepest path
+    let (resolved_base, suffix_parts) = collect_suffix path [] in
+    List.fold_left Filename.concat resolved_base suffix_parts
 
 let normalize_allowed_path_for_check ~(root : string) (path : string) : string option =
   let raw = String.trim path in

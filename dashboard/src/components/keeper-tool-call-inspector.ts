@@ -141,7 +141,7 @@ export function KeeperToolCallInspector({ keeperName }: { keeperName: string }) 
           <span class="w-5 text-center">OK</span>
           <span class="w-4"></span>
         </div>
-        ${sorted.map(entry => html`<${ToolCallRow} key=${entry.ts + entry.tool} entry=${entry} />`)}
+        ${sorted.map((entry, i) => html`<${ToolCallRow} key=${`${entry.ts}-${entry.tool}-${i}`} entry=${entry} />`)}
       </div>
     </div>
   `

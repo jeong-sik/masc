@@ -60,23 +60,29 @@ let read_recent ?(keeper_name : string option) ?(n = 100) () : Yojson.Safe.t lis
   match !store_ref with
   | None -> []
   | Some store ->
-    let entries = Dated_jsonl.read_recent store (n * 5) in
-    let filtered = match keeper_name with
-      | None -> entries
-      | Some name ->
-        List.filter (fun json ->
-          match Safe_ops.json_string_opt "keeper" json with
-          | Some k -> String.equal k name
-          | None -> false
-        ) entries
+    (* Single-pass: read from store, filter, and collect last n in one traversal *)
+    let raw = Dated_jsonl.read_recent store (n * 5) in
+    let matches name json =
+      match Safe_ops.json_string_opt "keeper" json with
+      | Some k -> String.equal k name
+      | None -> false
     in
-    let len = List.length filtered in
-    if len <= n then filtered
-    else
-      (* take last n entries *)
-      let to_drop = len - n in
-      let rec drop lst count =
-        if count <= 0 then lst
-        else match lst with [] -> [] | _ :: tl -> drop tl (count - 1)
+    let buf = Array.make n (`Null : Yojson.Safe.t) in
+    let pos = ref 0 in
+    let total = ref 0 in
+    List.iter (fun json ->
+      let dominated = match keeper_name with
+        | None -> true
+        | Some name -> matches name json
       in
-      drop filtered to_drop
+      if dominated then begin
+        buf.(!pos mod n) <- json;
+        incr pos;
+        incr total
+      end
+    ) raw;
+    let count = min !total n in
+    if count = 0 then []
+    else
+      let start = if !total <= n then 0 else !pos mod n in
+      List.init count (fun i -> buf.((start + i) mod n))

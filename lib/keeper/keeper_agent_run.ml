@@ -271,12 +271,14 @@ let run_turn
   (* 0b. Create context injector for temporal awareness *)
   let injector_config = Masc_context_injector.default_config () in
   let context_injector = Masc_context_injector.make ~config:injector_config () in
-  (* Use caller-provided Context.t for cross-turn state persistence.
-     OAS Context.t is a mutable cross-turn container; creating a fresh
-     instance per turn loses accumulated temporal state (elapsed time,
-     tool call counts) that hooks and context_injector depend on.
-     Callers that manage a persistent lifecycle (keeper heartbeat loop)
-     should pass a long-lived instance via ~shared_context. *)
+  (* Use caller-provided Context.t for cross-turn OAS context persistence.
+     OAS Context.t is a mutable container, so reusing it preserves any
+     state stored in that context across keeper turns. Note, however, that
+     this function creates a fresh [context_injector] on each call, so any
+     injector-local elapsed-time or tool-call counters do not accumulate
+     across turns merely by sharing [~shared_context]. Callers that manage
+     a persistent lifecycle (keeper heartbeat loop) should pass a long-lived
+     [~shared_context] when they need cross-turn OAS context continuity. *)
   let shared_context = match shared_context with
     | Some ctx -> ctx
     | None -> Oas.Context.create ()

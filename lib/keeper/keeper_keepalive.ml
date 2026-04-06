@@ -935,11 +935,11 @@ let run_heartbeat_loop
   let smart_hb_config = Heartbeat_smart.default_config in
   let last_heartbeat_cycle_ts = ref 0.0 in
   (* Persistent OAS Context.t — created once per keeper lifecycle.
-     OAS Context.t is designed as a mutable cross-turn state container.
-     Hooks and context_injector accumulate temporal state (elapsed time,
-     tool call counts, etc.) into this instance across turns.
-     Previously, a fresh Context.create () was called per turn in
-     run_turn, losing all accumulated state. *)
+     OAS Context.t is a mutable cross-turn state container for values
+     written directly into the shared context. This preserves shared
+     metadata across turns, but per-turn context_injector-local timing
+     and tool-call counters are recreated inside run_turn and therefore
+     do not accumulate for the full keeper lifecycle. *)
   let shared_context = Agent_sdk.Context.create () in
   let rec loop () =
     if Atomic.get stop

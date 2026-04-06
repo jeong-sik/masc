@@ -70,7 +70,9 @@ let save_checkpoint ~base_dir ~(meta : KT.keeper_meta) ~ctx =
   let session =
     KEC.create_session ~session_id:meta.runtime.trace_id ~base_dir
   in
-  match KEC.save_oas_checkpoint ~session
+  match KEC.save_oas_checkpoint
+    ~max_checkpoint_messages:120
+    ~session
     ~agent_name:meta.agent_name
     ~model:"llama:auto"
     ~ctx
@@ -81,7 +83,9 @@ let save_checkpoint ~base_dir ~(meta : KT.keeper_meta) ~ctx =
 
 let load_context ~base_dir ~trace_id ~max_tokens =
   let (_session, loaded_opt) =
-    KEC.load_context_from_checkpoint ~trace_id
+    KEC.load_context_from_checkpoint
+      ~max_checkpoint_messages:120
+      ~trace_id
       ~primary_model_max_tokens:max_tokens
       ~base_dir
   in

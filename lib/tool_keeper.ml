@@ -166,6 +166,9 @@ let keeper_list_row_json ~runtime_class config name =
             ("updated_at", `String meta.updated_at);
           ])
 
+let invalidate_status_cache name =
+  Keeper_status_detail.invalidate_status_cache_for name
+
 let handle_keeper_create_from_persona ctx args : tool_result =
   match Keeper_exec_persona.resolved_keeper_args_from_persona args with
   | Error e -> (false, "❌ " ^ e)
@@ -199,6 +202,7 @@ let handle_keeper_create_from_persona ctx args : tool_result =
               ]
           in
           invalidate_keeper_list_cache ();
+          invalidate_status_cache (get_string resolved_args "name" "");
           (true, Yojson.Safe.pretty_to_string json)
 
 let handle_keeper_up ctx args : tool_result =
@@ -209,6 +213,7 @@ let handle_keeper_up ctx args : tool_result =
       try Yojson.Safe.from_string body with Yojson.Json_error _ -> `String body
     in
     invalidate_keeper_list_cache ();
+    invalidate_status_cache (get_string args "name" "");
     (true,
      Yojson.Safe.pretty_to_string
        (annotate_keeper_json ~runtime_class:"keeper" json))
@@ -235,10 +240,12 @@ let handle_keeper_msg ctx args : tool_result =
   match ensure_keeper_exists ctx args with
   | Error err -> (false, err)
   | Ok _ ->
+      let name = get_string args "name" "" in
       let ok, body = Turn.handle_keeper_msg ctx args in
       if not ok then (ok, body)
       else begin
         invalidate_keeper_list_cache ();
+        invalidate_status_cache name;
         let json =
           try Yojson.Safe.from_string body with Yojson.Json_error _ -> `String body
         in
@@ -251,10 +258,12 @@ let handle_keeper_msg_stream ~on_text_delta ctx args : tool_result =
   match ensure_keeper_exists ctx args with
   | Error err -> (false, err)
   | Ok _ ->
+      let name = get_string args "name" "" in
       let ok, body = Turn.handle_keeper_msg ~on_text_delta ctx args in
       if not ok then (ok, body)
       else begin
         invalidate_keeper_list_cache ();
+        invalidate_status_cache name;
         let json =
           try Yojson.Safe.from_string body with Yojson.Json_error _ -> `String body
         in
@@ -373,10 +382,12 @@ let handle_keeper_repair ctx args : tool_result =
                       ~sw:ctx.sw ~clock:ctx.clock ~config:ctx.config
                       (`Assoc fields)
                   in
+                  invalidate_status_cache meta.name;
                   (ok, annotate_keeper_repair_json ~keeper_name:meta.name body)
 
 let handle_keeper_down ctx args : tool_result =
   invalidate_keeper_list_cache ();
+  invalidate_status_cache (get_string args "name" "");
   Turn.handle_keeper_down ctx args
 
 let handle_keeper_list ctx args : tool_result =

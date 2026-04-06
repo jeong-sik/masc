@@ -185,3 +185,15 @@ val phase_to_json : phase -> Yojson.Safe.t
 val conditions_to_json : conditions -> Yojson.Safe.t
 val event_to_json : event -> Yojson.Safe.t
 val transition_result_to_json : transition_result -> Yojson.Safe.t
+
+(** {1 Mermaid Visualization} *)
+
+(** Maps a phase to its Mermaid diagram state identifier (capitalized).
+    Use this to reference states in generated Mermaid `class` directives. *)
+val phase_to_mermaid_id : phase -> string
+
+(** Generate a Mermaid stateDiagram-v2 string with the given phase
+    highlighted. The diagram visualizes the keeper phases and
+    distinguishes the current phase visually (green for active,
+    amber for buffer, gray for terminal). *)
+val phase_to_mermaid : current:phase -> string

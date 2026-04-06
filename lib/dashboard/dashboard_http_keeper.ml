@@ -774,10 +774,17 @@ let keeper_config_json (config : Room.config) (name : string)
           ("compaction_count", `Int m.runtime.compaction_rt.count);
         ]
       in
+      let current_phase =
+        Keeper_registry.get_phase ~base_path:config.base_path m.name
+      in
       let pipeline_stage =
-        match Keeper_registry.get_phase ~base_path:config.base_path m.name with
+        match current_phase with
         | Some phase -> Keeper_exec_status.pipeline_stage_of_phase phase
         | None -> "offline"
+      in
+      let state_diagram =
+        Keeper_state_machine.phase_to_mermaid
+          ~current:(Option.value ~default:Keeper_state_machine.Offline current_phase)
       in
       let tools_access =
         let allowed = Keeper_exec_tools.keeper_allowed_tool_names m in
@@ -822,6 +829,7 @@ let keeper_config_json (config : Room.config) (name : string)
            `List (List.map (fun s -> `String s)
              (Keeper_alerting_path.effective_allowed_paths ~meta:m)));
          ("pipeline_stage", `String pipeline_stage);
+         ("state_diagram", `String state_diagram);
          ("prompt", prompt);
          ("execution", execution);
          ("compaction", compaction);

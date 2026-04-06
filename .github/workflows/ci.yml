@@ -307,7 +307,7 @@ jobs:
 
       - name: Build with warnings as errors
         run: |
-          opam exec -- dune build @install --force
+          opam exec -- dune build @install
         env:
           OCAMLPARAM: "_,warn-error=+a"
 

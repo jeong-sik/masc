@@ -236,7 +236,7 @@ let run_turn
     ~(user_message : string)
     ~(cascade_name : string)
     ~(generation : int)
-    ?(max_turns : int = 50) (* generous budget for multi-step tool chains *)
+    ?(max_turns : int = 200) (* large budget: keeper needs research + code + PR in one cycle *)
     ?(max_idle_turns : int = 3)
     ?(history_user_source = "direct_user")
     ?(history_assistant_source = "direct_assistant")

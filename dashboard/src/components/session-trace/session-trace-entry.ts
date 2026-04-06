@@ -2,6 +2,7 @@
 // Reuses tool category patterns from keeper-trajectory-timeline.ts.
 
 import { html } from 'htm/preact'
+import { useSignal } from '@preact/signals'
 import { JsonViewerCard, parseJsonLikeData } from '../common/json-viewer'
 import { TimeAgo } from '../common/time-ago'
 import { Markdown } from '../common/markdown'
@@ -12,6 +13,8 @@ import type { UnifiedTraceEvent, TraceEventKind } from './session-trace-state'
 // ── Constants ──────────────────────────────────────────
 
 const BROADCAST_PREVIEW_MAX = 160
+const RESULT_COLLAPSED_MAX_HEIGHT = 200 // px
+const RESULT_LINES_THRESHOLD = 12 // lines above which we collapse
 
 // ── Kind styling ───────────────────────────────────────
 
@@ -61,25 +64,123 @@ function taskColor(type: string): string {
   }
 }
 
+// ── Content type detection ─────────────────────────────
+
+type ContentHint = 'plain' | 'code' | 'diff' | 'json'
+
+function detectContentHint(text: string): ContentHint {
+  if (!text || text.length < 10) return 'plain'
+  const trimmed = text.trimStart()
+  // Diff detection: unified diff markers
+  if (trimmed.startsWith('@@') || trimmed.startsWith('---') || trimmed.startsWith('+++')
+    || /^[-+] /m.test(trimmed.slice(0, 500))) return 'diff'
+  // JSON detection
+  if ((trimmed.startsWith('{') || trimmed.startsWith('[')) && trimmed.length > 20) {
+    try { JSON.parse(trimmed); return 'json' } catch { /* not json */ }
+  }
+  // Code detection: indentation patterns or common code markers
+  const lines = trimmed.split('\n').slice(0, 20)
+  const indentedLines = lines.filter(l => /^[ \t]{2,}/.test(l)).length
+  if (indentedLines > lines.length * 0.4) return 'code'
+  if (/^(def |fn |let |const |import |function |class |module |type )/.test(trimmed)) return 'code'
+  return 'plain'
+}
+
+function isLongContent(text: string): boolean {
+  if (!text) return false
+  return text.split('\n').length > RESULT_LINES_THRESHOLD || text.length > 1500
+}
+
+// ── Diff renderer ─────────────────────────────────────
+
+function DiffBlock({ text }: { text: string }) {
+  const lines = text.split('\n')
+  return html`
+    <div class="font-mono text-[11px] leading-[1.6] overflow-x-auto">
+      ${lines.map((line: string) => {
+        const cls =
+          line.startsWith('+') && !line.startsWith('+++') ? 'text-[var(--ok)] bg-[rgba(74,222,128,0.06)]'
+          : line.startsWith('-') && !line.startsWith('---') ? 'text-[var(--bad)] bg-[rgba(239,68,68,0.06)]'
+          : line.startsWith('@@') ? 'text-[var(--accent)] font-semibold'
+          : 'text-[var(--text-body)]'
+        return html`<div class="${cls} px-2 min-h-[1.6em]">${line || ' '}</div>`
+      })}
+    </div>
+  `
+}
+
+// ── Collapsible result viewer ─────────────────────────
+
+function ResultViewer({ text, hint, isError: isErr }: { text: string; hint: ContentHint; isError: boolean }) {
+  const expanded = useSignal(false)
+  const needsCollapse = isLongContent(text)
+  const shouldCollapse = needsCollapse && !expanded.value
+
+  const titleLabel = isErr ? 'Error' : 'Result'
+  const titleColor = isErr ? 'text-[var(--bad)]' : 'text-[var(--text-muted)]'
+  const borderColor = isErr ? 'border-[rgba(239,68,68,0.2)]' : 'border-[var(--white-8)]'
+  const bgColor = isErr ? 'bg-[rgba(239,68,68,0.04)]' : 'bg-[var(--white-3)]'
+
+  return html`
+    <div>
+      <div class="flex items-center justify-between mb-1">
+        <span class="text-[10px] font-semibold uppercase tracking-wider ${titleColor}">${titleLabel}</span>
+        ${hint !== 'plain' ? html`
+          <span class="text-[9px] px-1.5 py-0.5 rounded bg-[var(--white-5)] text-[var(--text-dim)] uppercase">${hint}</span>
+        ` : null}
+      </div>
+      <div class="rounded-lg border ${borderColor} ${bgColor} overflow-hidden">
+        <div class="${shouldCollapse ? `max-h-[${RESULT_COLLAPSED_MAX_HEIGHT}px] overflow-hidden relative` : ''}"
+             style=${shouldCollapse ? `max-height: ${RESULT_COLLAPSED_MAX_HEIGHT}px` : ''}>
+          ${hint === 'diff' ? html`<${DiffBlock} text=${text} />`
+            : hint === 'json' ? html`<${JsonViewerCard} data=${parseJsonLikeData(text)} />`
+            : html`<pre class="m-0 text-[11px] font-mono ${isErr ? 'text-[var(--bad)]' : 'text-[var(--text-body)]'} p-3 overflow-x-auto whitespace-pre-wrap break-all leading-relaxed">${text}</pre>`}
+          ${shouldCollapse ? html`
+            <div class="absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t ${isErr ? 'from-[rgba(239,68,68,0.08)]' : 'from-[var(--white-3)]'} to-transparent pointer-events-none"></div>
+          ` : null}
+        </div>
+        ${needsCollapse ? html`
+          <button
+            type="button"
+            class="w-full py-1.5 text-[10px] font-medium text-[var(--accent)] hover:text-[var(--text-strong)] hover:bg-[var(--white-5)] transition-colors cursor-pointer border-t border-[var(--white-6)] bg-transparent"
+            onClick=${() => { expanded.value = !expanded.value }}
+          >
+            ${expanded.value ? '접기' : `전체 보기 (${text.split('\n').length}줄)`}
+          </button>
+        ` : null}
+      </div>
+    </div>
+  `
+}
+
 // ── Components ─────────────────────────────────────────
 
 function ToolCallDetail({ event }: { event: UnifiedTraceEvent }) {
   const gateRejected = event.gate?.status === 'reject'
+  const resultText = event.error ?? event.toolResult ?? null
+  const hint = resultText ? detectContentHint(resultText) : 'plain'
+
   return html`
-    <div class="mt-2 space-y-1.5">
+    <div class="mt-2 space-y-2">
       ${event.toolArgs ? html`
-        <div class="mt-1">
-          <${JsonViewerCard} data=${parseJsonLikeData(event.toolArgs)} title="Args" />
+        <div>
+          <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">Args</div>
+          <${JsonViewerCard} data=${parseJsonLikeData(event.toolArgs)} />
         </div>
       ` : null}
-      ${event.toolResult || event.error ? html`
-        <div class="mt-1">
-          <${JsonViewerCard} data=${parseJsonLikeData(event.error ?? event.toolResult)} title=${event.error ? 'Error' : 'Result'} />
-        </div>
+      ${resultText ? html`
+        <${ResultViewer} text=${resultText} hint=${hint} isError=${Boolean(event.error)} />
       ` : null}
       ${gateRejected ? html`
         <div class="text-[10px] px-2 py-1 rounded bg-[var(--bad-10)] text-[var(--bad)] inline-block">
           거부: ${event.gate?.reason ?? ''}
+        </div>
+      ` : null}
+      ${'' /* Metadata row */}
+      ${event.cost_usd != null && event.cost_usd > 0 ? html`
+        <div class="flex gap-3 text-[10px] text-[var(--text-dim)]">
+          <span>비용: <span class="font-mono text-[var(--accent)]">$${event.cost_usd.toFixed(4)}</span></span>
+          ${event.duration_ms != null ? html`<span>소요: <span class="font-mono ${durationColor(event.duration_ms)}">${formatDuration(event.duration_ms)}</span></span>` : null}
         </div>
       ` : null}
     </div>
@@ -151,8 +252,13 @@ export function SessionTraceEntry({ event }: { event: UnifiedTraceEvent }) {
               ${taskIcon(String(event.detail.type))}
             </span>
           ` : null}
-          ${event.error ? html`<span class="text-[10px] px-1.5 py-0.5 rounded bg-[var(--bad-10)] text-[var(--bad)]">오류</span>` : null}
-          ${gateRejected ? html`<span class="text-[10px] px-1.5 py-0.5 rounded bg-[var(--bad-10)] text-[var(--bad)]">거부</span>` : null}
+          ${event.error
+            ? html`<span class="text-[10px] px-1.5 py-0.5 rounded bg-[var(--bad-10)] text-[var(--bad)]">오류</span>`
+            : gateRejected
+              ? html`<span class="text-[10px] px-1.5 py-0.5 rounded bg-[var(--bad-10)] text-[var(--bad)]">거부</span>`
+              : event.kind === 'tool_call'
+                ? html`<span class="text-[10px] px-1.5 py-0.5 rounded bg-[rgba(52,211,153,0.1)] text-[var(--ok)]">완료</span>`
+                : null}
         </div>
         <div class="mt-0.5 text-[11px] text-[var(--text-muted)] font-mono truncate max-w-full" title=${event.summary}>
           ${summaryText}

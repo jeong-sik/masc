@@ -11,9 +11,9 @@ import { truncate } from '../lib/truncate'
 import { TimeAgo } from './common/time-ago'
 import { toolCategory, durationColor, formatArgs, prettyArgs, formatDuration, summarizeEntries } from './tool-call-shared'
 import { keeperHeartbeats } from '../store'
+import { isConnected } from '../sse'
+import { TRAJECTORY_HEARTBEAT_STALE_MS, LIVENESS_TICK_MS, CONTEXT_RATIO_CRITICAL, CONTEXT_RATIO_WARN } from '../config/constants'
 import type { Keeper } from '../types'
-
-const HEARTBEAT_STALE_MS = 30_000
 const OFFLINE_STATUSES = ['offline', 'inactive', 'dead', 'crashed'] as const
 const STAT_PILL = 'text-[10px] py-0.5 px-2 rounded-full bg-[var(--white-4)] border border-[var(--white-8)] text-[var(--text-muted)]'
 
@@ -274,9 +274,16 @@ export function KeeperTrajectoryTimeline({ keeperName, keeper }: { keeperName: s
     const distinct = new Set(data.entries.filter(e => e.tool_name).map(e => e.tool_name)).size
     return { turns: sorted, allSummary: summary, distinctTools: distinct }
   }, [data.entries])
+  // Tick every LIVENESS_TICK_MS so isLive transitions from true→false
+  // when heartbeat goes stale while the component is mounted.
+  const now = useSignal(Date.now())
+  useEffect(() => {
+    const id = setInterval(() => { now.value = Date.now() }, LIVENESS_TICK_MS)
+    return () => clearInterval(id)
+  }, [])
   const lastHb = keeperHeartbeats.value.get(keeperName)
-  const isLive = lastHb != null && (Date.now() - lastHb) < HEARTBEAT_STALE_MS
-  const isOnline = keeper && !OFFLINE_STATUSES.includes(keeper.status as typeof OFFLINE_STATUSES[number])
+  const isLive = isConnected.value && lastHb != null && (now.value - lastHb) < TRAJECTORY_HEARTBEAT_STALE_MS
+  const isOnline = keeper != null && !OFFLINE_STATUSES.includes(keeper.status as typeof OFFLINE_STATUSES[number])
   const contextRatio = keeper?.context_ratio
 
   return html`
@@ -295,7 +302,7 @@ export function KeeperTrajectoryTimeline({ keeperName, keeper }: { keeperName: s
           <span class="text-[10px] font-mono text-[var(--text-dim)]">trace: ${data.trace_id.slice(0, 8)}</span>
           <span class="text-[10px] text-[var(--text-dim)]">gen ${data.generation}</span>
           ${contextRatio != null
-            ? html`<span class="text-[10px] font-mono ${contextRatio > 0.8 ? 'text-[var(--bad)]' : contextRatio > 0.6 ? 'text-[var(--warn)]' : 'text-[var(--text-dim)]'}">ctx ${(contextRatio * 100).toFixed(0)}%</span>`
+            ? html`<span class="text-[10px] font-mono ${contextRatio > CONTEXT_RATIO_CRITICAL ? 'text-[var(--bad)]' : contextRatio > CONTEXT_RATIO_WARN ? 'text-[var(--warn)]' : 'text-[var(--text-dim)]'}">ctx ${(contextRatio * 100).toFixed(0)}%</span>`
             : null}
         </div>
         <span class="text-[10px] text-[var(--text-dim)]">

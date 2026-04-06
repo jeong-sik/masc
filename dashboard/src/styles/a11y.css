@@ -13,4 +13,5 @@
   [class*="avatar-pulse-glow"] { animation: none; }
   [style*="workingPulse"] { animation: none; }
   [style*="keeperPulse"] { animation: none; }
+  [style*="activityFadeIn"] { animation: none; }
 }

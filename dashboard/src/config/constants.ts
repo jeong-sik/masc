@@ -34,6 +34,14 @@ export const SSE_RECONNECT_RETRY_MS = 3_000
 export const PERIODIC_REFRESH_DEV_MS = 180_000
 export const PERIODIC_REFRESH_PROD_MS = 120_000
 
+// --- Context ratio thresholds (SSOT: backend env_config_runtime.ml:496-499) ---
+export const CONTEXT_RATIO_CRITICAL = 0.85
+export const CONTEXT_RATIO_WARN = 0.70
+
+// --- Trajectory timeline ---
+export const TRAJECTORY_HEARTBEAT_STALE_MS = 30_000
+export const LIVENESS_TICK_MS = 5_000
+
 // --- Keeper UI/runtime limits ---
 export const KEEPER_STATUS_TAIL_MESSAGES = 50
 export const KEEPER_HISTORY_TAIL_MESSAGES = 200

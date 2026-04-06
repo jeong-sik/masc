@@ -16,6 +16,7 @@ import {
   normalizeJournalSource,
 } from './journal-entry'
 import type { OasKeeperSnapshot } from './types/oas'
+import { appendLiveToolCall } from './components/session-trace/session-trace-state'
 
 import {
   RECONNECT_BASE_MS,
@@ -383,6 +384,33 @@ function handleEvent(event: SSEEvent): void {
         },
       )
       break
+    case 'keeper_tool_call': {
+      const toolName = event.tool_name ?? '?'
+      const durationMs = event.duration_ms ?? 0
+      const isError = event.success === false
+      addTypedJournalEntry(
+        event.name ?? agent,
+        `Tool: ${toolName} (${durationMs}ms)${isError ? ' ERR' : ''}`,
+        'keepers',
+        'keeper_tool_call',
+        {
+          severity: isError ? 'warn' : 'info',
+          source: event.source,
+          narrativeText: `${actorLabel(event.name ?? agent)}가 ${toolName} 도구를 실행했습니다 (${durationMs}ms)`,
+        },
+      )
+      // Push to live trace if session trace is open for this keeper
+      if (event.name) {
+        appendLiveToolCall(event.name, {
+          toolName,
+          durationMs,
+          success: event.success !== false,
+          error: event.error_text ?? null,
+          tsUnix: typeof event.ts_unix === 'number' ? event.ts_unix : Date.now() / 1000,
+        })
+      }
+      break
+    }
     // OAS bridge events
     case 'oas:masc:autonomy:agent_selected': {
       const p = (event.payload ?? {}) as Record<string, unknown>

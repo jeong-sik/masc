@@ -309,6 +309,40 @@ export async function loadSessionTrace(agentName: string, isKeeper: boolean): Pr
   }
 }
 
+/** Append a live tool call event from SSE into an open trace slot.
+ *  No-op if the agent's trace is not open (user hasn't opened the session view). */
+export function appendLiveToolCall(
+  agentName: string,
+  evt: {
+    toolName: string
+    durationMs: number
+    success: boolean
+    error: string | null
+    tsUnix: number
+  },
+): void {
+  const slot = traceSlots.value[agentName]
+  if (!slot) return // trace not open for this agent
+
+  const tsMs = evt.tsUnix * 1000
+  const id = `live-${tsMs}-${evt.toolName}-${Math.random().toString(36).slice(2, 6)}`
+  const event: UnifiedTraceEvent = {
+    id,
+    ts: tsMs,
+    ts_iso: new Date(tsMs).toISOString(),
+    kind: 'tool_call',
+    summary: evt.toolName,
+    detail: {},
+    toolName: evt.toolName,
+    duration_ms: evt.durationMs,
+    error: evt.error,
+  }
+
+  // Insert in chronological order (append — SSE events arrive in order)
+  const events = [...slot.events, event]
+  patchSlot(agentName, { events })
+}
+
 export function closeSessionTrace(agentName: string): void {
   const next = { ...traceSlots.value }
   delete next[agentName]

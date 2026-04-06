@@ -17,6 +17,8 @@ export type SSEEventType =
   | 'masc/keeper_compaction'
   | 'keeper_guardrail'
   | 'masc/keeper_guardrail'
+  | 'keeper_tool_call'
+  | 'masc/keeper_tool_call'
   | 'keeper_turn_complete'
   | 'masc/keeper_turn_complete'
   | 'client_input_approved'
@@ -74,6 +76,11 @@ export interface SSEEvent {
   saved_tokens?: number
   trigger?: string
   reason?: string
+  // Keeper tool call fields
+  tool_name?: string
+  duration_ms?: number
+  success?: boolean
+  error_text?: string
   // OAS bridge payload (generic container for Event_bus events)
   payload?: Record<string, unknown>
 }
@@ -92,6 +99,7 @@ export type JournalEventType =
   | 'keeper_handoff'
   | 'keeper_compaction'
   | 'keeper_guardrail'
+  | 'keeper_tool_call'
   | 'oas_keeper_snapshot'
   | 'oas_event'
   | 'unknown'

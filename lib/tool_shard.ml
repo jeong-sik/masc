@@ -40,14 +40,19 @@ compact context, extend turns, or hand off to the next generation.";
   (* Memory *)
   {
     name = "keeper_memory_search";
-    description = "Search recent user messages in your conversation history by keyword. \
-Returns matching message snippets. Use to recall earlier instructions or context \
-from this session without re-reading full history.";
+    description = "Recall what the user said earlier or search your memory for past goals, \
+decisions, progress notes, and conversation history across all generations. \
+Returns scored results with metadata. Use to retrieve earlier instructions, \
+deployment plans, or any prior context. Default searches the structured memory bank. \
+Use 'kind' to filter (goal, decision, progress, next, open_question, constraints). \
+Use source='history' for raw user message history, source='all' for both.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
-        ("query", `Assoc [("type", `String "string")]);
-        ("limit", `Assoc [("type", `String "integer")]);
+        ("query", `Assoc [("type", `String "string"); ("description", `String "keyword to search for")]);
+        ("kind", `Assoc [("type", `String "string"); ("description", `String "filter by memory kind: goal, decision, progress, next, open_question, constraints")]);
+        ("limit", `Assoc [("type", `String "integer"); ("description", `String "max results (1-10, default 5)")]);
+        ("source", `Assoc [("type", `String "string"); ("description", `String "memory (default, structured notes), history (raw messages), or all")]);
       ]);
       ("required", `List [`String "query"]);
     ];

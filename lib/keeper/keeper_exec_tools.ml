@@ -802,17 +802,106 @@ let keeper_context_status_json ~(meta : keeper_meta) ~(ctx_work : working_contex
         ])
 ;;
 
-let keeper_memory_search_json
+(* --- Memory bank search (structured notes from [STATE] blocks) --- *)
+
+type memory_match = {
+  kind: string;
+  text: string;
+  priority: int;
+  generation: int;
+  turn: int;
+  ts: string;
+  score: float;
+}
+
+let search_memory_bank
+      ~(config : Room.config)
+      ~(meta : keeper_meta)
+      ~(query : string)
+      ~(kind_filter : string)
+      ~(limit : int) : memory_match list * int =
+  let path = keeper_memory_bank_path config meta.name in
+  let lines = read_file_tail_lines path ~max_bytes:(256 * 1024) ~max_lines:500 in
+  let now_ts = Time_compat.now () in
+  let parsed =
+    lines
+    |> List.filter_map (fun line ->
+         try
+           let j = Yojson.Safe.from_string line in
+           let kind = Safe_ops.json_string ~default:"" "kind" j |> String.trim in
+           let text = Safe_ops.json_string ~default:"" "text" j |> String.trim in
+           let priority = Safe_ops.json_int ~default:0 "priority" j in
+           let generation = Safe_ops.json_int ~default:0 "generation" j in
+           let turn = Safe_ops.json_int ~default:0 "turn" j in
+           let ts = Safe_ops.json_string ~default:"" "ts" j in
+           let ts_unix = Safe_ops.json_float ~default:0.0 "ts_unix" j in
+           if kind = "" || text = "" then None
+           else Some { kind; text; priority; generation; turn; ts; score = ts_unix }
+         with Yojson.Json_error _ -> None)
+  in
+  let total_candidates = List.length parsed in
+  (* Structured filter: kind (deterministic) *)
+  let filtered =
+    if kind_filter = "" then parsed
+    else List.filter (fun m -> String.lowercase_ascii m.kind = String.lowercase_ascii kind_filter) parsed
+  in
+  (* Text match: query against text field (non-deterministic data) *)
+  let matched =
+    if query = "" then filtered
+    else List.filter (fun m -> contains_ci m.text query) filtered
+  in
+  (* Scoring: priority * recency_weight.
+     recency_weight normalizes age relative to the oldest note in the result set.
+     No hardcoded decay constant — uses min/max normalization. *)
+  let ts_values = List.map (fun m -> m.score) matched in
+  let min_ts =
+    match ts_values with
+    | [] -> now_ts
+    | ts :: rest -> List.fold_left min ts rest
+  in
+  let max_age = max 1.0 (now_ts -. min_ts) in
+  let scored =
+    matched
+    |> List.map (fun m ->
+         let age = max 0.0 (now_ts -. m.score) in
+         let recency_weight =
+           max 0.0 (min 1.0 (1.0 -. (0.3 *. (age /. max_age))))
+         in
+         let synthetic_penalty =
+           if contains_ci m.text "[SYNTHETIC]" then -0.1 else 0.0
+         in
+         let score =
+           (float_of_int m.priority /. 100.0) *. recency_weight +. synthetic_penalty
+         in
+         let rounded = Float.round (score *. 1000.0) /. 1000.0 in
+         { m with score = rounded })
+  in
+  let sorted =
+    scored
+    |> List.sort (fun a b -> Float.compare b.score a.score)
+    |> take limit
+  in
+  (sorted, total_candidates)
+
+let memory_match_to_json (m : memory_match) : Yojson.Safe.t =
+  `Assoc [
+    "kind", `String m.kind;
+    "text", `String m.text;
+    "priority", `Int m.priority;
+    "generation", `Int m.generation;
+    "turn", `Int m.turn;
+    "ts", `String m.ts;
+    "score", `Float m.score;
+  ]
+
+(* --- History search (cross-generation, retained for backward compat) --- *)
+
+let search_history
       ~(config : Room.config)
       ~(meta : keeper_meta)
       ~(ctx_work : working_context)
-      ~(args : Yojson.Safe.t) =
-  let query = Safe_ops.json_string ~default:"" "query" args |> String.trim in
-  let limit = max 1 (min 8 (Safe_ops.json_int ~default:5 "limit" args)) in
-  (* Cross-generation search: merge current checkpoint messages with
-     persisted history.jsonl from current AND previous generations.
-     trace_history contains trace_ids from earlier generations,
-     accumulated by keeper_rollover on each handoff. *)
+      ~(query : string)
+      ~(limit : int) : string list =
   let current_history =
     load_history_user_messages
       ~path:(keeper_history_path config meta.runtime.trace_id)
@@ -825,8 +914,6 @@ let keeper_memory_search_json
            ~path:(keeper_history_path config old_trace_id)
            ~max_n:20)
   in
-  (* Checkpoint messages first (most recent), then current session
-     history, then previous generations.  Deduplicate by first 100 chars. *)
   let checkpoint_user_msgs =
     recent_user_messages ctx_work.messages ~max_n:100
   in
@@ -847,19 +934,105 @@ let keeper_memory_search_json
     @ dedup current_history
     @ dedup prev_history
   in
-  let matches =
-    all_candidates
-    |> List.filter (fun msg -> query <> "" && contains_ci msg query)
-    |> List.rev
-    |> take limit
-    |> List.map (fun msg -> `String msg)
+  all_candidates
+  |> List.filter (fun msg -> query <> "" && contains_ci msg query)
+  |> List.rev
+  |> take limit
+
+(* --- Unified keeper_memory_search dispatch --- *)
+
+let keeper_memory_search_json
+      ~(config : Room.config)
+      ~(meta : keeper_meta)
+      ~(ctx_work : working_context)
+      ~(args : Yojson.Safe.t) =
+  let query = Safe_ops.json_string ~default:"" "query" args |> String.trim in
+  let limit = max 1 (min 10 (Safe_ops.json_int ~default:5 "limit" args)) in
+  let source = Safe_ops.json_string ~default:"memory" "source" args |> String.trim in
+  let kind_filter = Safe_ops.json_string ~default:"" "kind" args |> String.trim in
+  let result =
+    match source with
+    | "history" ->
+      let matches = search_history ~config ~meta ~ctx_work ~query ~limit in
+      let no_match = matches = [] in
+      let match_jsons = List.map (fun msg -> `String msg) matches in
+      `Assoc ([
+        "query", `String query;
+        "source", `String "history";
+        "match_count", `Int (List.length matches);
+        "matches", `List match_jsons;
+      ] @ (if no_match then [ "no_match", `Bool true ] else []))
+    | "all" ->
+      let (bank_matches, bank_total) =
+        search_memory_bank ~config ~meta ~query ~kind_filter ~limit
+      in
+      let history_limit = max 0 (limit - List.length bank_matches) in
+      let history_matches =
+        if history_limit > 0
+        then search_history ~config ~meta ~ctx_work ~query ~limit:history_limit
+        else []
+      in
+      let total_matches = List.length bank_matches + List.length history_matches in
+      let no_match = total_matches = 0 in
+      let bank_jsons = List.map memory_match_to_json bank_matches in
+      let history_jsons = List.map (fun msg ->
+        `Assoc [ "source", `String "history"; "text", `String msg ]
+      ) history_matches in
+      `Assoc ([
+        "query", `String query;
+        "source", `String "all";
+        "total_candidates", `Int bank_total;
+        "match_count", `Int total_matches;
+        "matches", `List (bank_jsons @ history_jsons);
+      ] @ (if no_match then [ "no_match", `Bool true ] else []))
+    | _ (* "memory" *) ->
+      let (matches, total_candidates) =
+        search_memory_bank ~config ~meta ~query ~kind_filter ~limit
+      in
+      let no_match = matches = [] in
+      let match_jsons = List.map memory_match_to_json matches in
+      `Assoc ([
+        "query", `String query;
+        "source", `String "memory";
+        "total_candidates", `Int total_candidates;
+        "match_count", `Int (List.length matches);
+        "matches", `List match_jsons;
+      ] @ (if no_match then [ "no_match", `Bool true ] else [])
+      @ (if kind_filter <> "" then [ "kind_filter", `String kind_filter ] else []))
   in
-  Yojson.Safe.to_string
-    (`Assoc
-        [ "query", `String query
-        ; "match_count", `Int (List.length matches)
-        ; "matches", `List matches
-        ])
+  (* Day-1 search logging: append search event to decisions log.
+     Extract match_count and top_score from the already-computed result. *)
+  let log_match_count =
+    match result with
+    | `Assoc fields -> (match List.assoc_opt "match_count" fields with
+      | Some (`Int n) -> n | _ -> 0)
+    | _ -> 0
+  in
+  let log_top_score =
+    match result with
+    | `Assoc fields -> (match List.assoc_opt "matches" fields with
+      | Some (`List (first :: _)) ->
+        (match first with
+         | `Assoc mfields -> (match List.assoc_opt "score" mfields with
+           | Some (`Float s) -> Some s | _ -> None)
+         | _ -> None)
+      | _ -> None)
+    | _ -> None
+  in
+  (try
+    let log_entry = `Assoc ([
+      "ts_unix", `Float (Time_compat.now ());
+      "event", `String "memory_search";
+      "query", `String query;
+      "source", `String source;
+      "kind_filter", `String kind_filter;
+      "match_count", `Int log_match_count;
+    ] @ (match log_top_score with
+         | Some s -> [ "top_score", `Float s ]
+         | None -> [])) in
+    append_jsonl_line (keeper_decision_log_path config meta.name) log_entry
+  with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
+  Yojson.Safe.to_string result
 ;;
 
 let handle_keeper_voice_tool

@@ -123,6 +123,7 @@ Notes:
 - Normal local use starts with `/mcp`.
 - Remote supervision uses bearer-token `/mcp/operator` and the reduced operator profile.
 - Full HTTP / stdio templates live in [docs/MCP-TEMPLATE.md](docs/MCP-TEMPLATE.md).
+- `masc_web_search` is a read-only current-information lookup tool. By default it prefers configured official providers (`brave`, `tavily`, `exa`, `bing_api`) and falls back to `duckduckgo` / `bing_rss` scraping when credentials are absent or providers fail.
 
 ## Safe Starting Paths
 

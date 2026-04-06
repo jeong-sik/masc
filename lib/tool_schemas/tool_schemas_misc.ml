@@ -165,7 +165,7 @@ Use from the answering side after a prior masc_webrtc_offer call.";
     name = "masc_web_search";
     description = "Search the public web and return top result titles, URLs, and snippets. \
 Read-only helper for current-information lookups before deeper file or repo work. \
-Uses a public RSS-backed search endpoint and returns structured JSON.";
+Uses configured web-search providers with structured fallback behavior and returns structured JSON.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

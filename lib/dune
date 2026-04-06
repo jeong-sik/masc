@@ -542,6 +542,7 @@
    ;; godsplit-misc: tool_misc decomposition (private sub-modules)
    tool_misc_transport
    tool_misc_admin
+   tool_misc_web_search
 )
 (private_modules
  dashboard_http_keeper_metrics
@@ -677,6 +678,7 @@
   ;; godsplit-misc: tool_misc decomposition
   tool_misc_transport
   tool_misc_admin
+  tool_misc_web_search
   ;; godsplit-oas-worker: oas_worker decomposition
   oas_worker_cascade
   oas_worker_exec

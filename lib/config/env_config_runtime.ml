@@ -385,6 +385,31 @@ module Tools = struct
   (** Extra public tools (comma-separated names). *)
   let public_tools_extra_opt () =
     Sys.getenv_opt "MASC_PUBLIC_TOOLS_EXTRA" |> trim_opt
+
+  let web_search_provider_opt () =
+    Sys.getenv_opt "MASC_WEB_SEARCH_PROVIDER" |> trim_opt
+
+  let web_search_provider_order_opt () =
+    Sys.getenv_opt "MASC_WEB_SEARCH_PROVIDER_ORDER" |> trim_opt
+
+  let web_search_fallbacks_opt () =
+    Sys.getenv_opt "MASC_WEB_SEARCH_FALLBACKS" |> trim_opt
+
+  let web_search_timeout_sec () =
+    let v = get_int ~default:15 "MASC_WEB_SEARCH_TIMEOUT_SEC" in
+    max 1 (min 60 v)
+
+  let web_search_cache_ttl_sec () =
+    let v = get_float ~default:30.0 "MASC_WEB_SEARCH_CACHE_TTL_SEC" in
+    if v < 0.0 then 0.0 else v
+
+  let web_search_rate_limit_window_sec () =
+    let v = get_float ~default:30.0 "MASC_WEB_SEARCH_RATE_LIMIT_WINDOW_SEC" in
+    if v < 1.0 then 1.0 else v
+
+  let web_search_rate_limit_max_calls () =
+    let v = get_int ~default:10 "MASC_WEB_SEARCH_RATE_LIMIT_MAX_CALLS" in
+    max 1 v
 end
 
 (** {1 Rate Limit Bucket Configuration} *)

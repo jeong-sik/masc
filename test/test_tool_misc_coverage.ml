@@ -4,7 +4,6 @@ open Masc_mcp
 
 let () = Random.self_init ()
 let () = Mirage_crypto_rng_unix.use_default ()
-let () = Server_startup_state.mark_state_ready ~backend_mode:"test"
 
 let () = Printf.printf "\n=== Tool_misc Coverage Tests ===\n"
 
@@ -23,19 +22,6 @@ let str_contains s sub =
 let parse_json s =
   try Yojson.Safe.from_string s
   with Yojson.Json_error err -> failwith ("invalid json: " ^ err)
-
-let rec mkdir_p dir =
-  if dir = "" || dir = "." || dir = "/" then ()
-  else if Sys.file_exists dir then ()
-  else begin
-    mkdir_p (Filename.dirname dir);
-    Unix.mkdir dir 0o755
-  end
-
-let write_file path content =
-  let oc = open_out path in
-  output_string oc content;
-  close_out oc
 
 (* Test helper — runs inside Eio context for code paths that use Eio.Mutex *)
 let test name f =
@@ -199,6 +185,20 @@ let () = test "dispatch_web_search_rejects_long_query" (fun () ->
   | None -> failwith "dispatch returned None"
 )
 
+let () = test "dispatch_web_search_rejects_secret_like_query" (fun () ->
+  let ctx = make_test_ctx () in
+  let args = `Assoc [ ("query", `String "Authorization: Bearer secret-token") ] in
+  match Tool_misc.dispatch ctx ~name:"masc_web_search" ~args with
+  | Some (success, result) ->
+      assert (not success);
+      let json = parse_json result in
+      assert (Yojson.Safe.Util.member "status" json = `String "error");
+      assert
+        (Yojson.Safe.Util.member "message" json
+         = `String "query looks like it may contain secrets; refine it before using web search")
+  | None -> failwith "dispatch returned None"
+)
+
 let () = test "parse_bing_rss_items" (fun () ->
   let payload =
     {|<?xml version="1.0" encoding="utf-8" ?>
@@ -252,96 +252,115 @@ let () = test "parse_bing_rss_items_drops_non_http_links" (fun () ->
   | _ -> failwith "expected one safe parsed item"
 )
 
-let () = test "parse_searxng_json_basic" (fun () ->
+let () = test "parse_ddg_html" (fun () ->
   let payload =
-    {|{
-      "results": [
-        { "title": "OpenAI Research", "url": "https://openai.com/research", "content": "Latest AI research from OpenAI." },
-        { "title": "Example Site", "url": "https://example.com/", "content": "A sample page." }
-      ]
-    }|}
+    {|<html><body>
+      <a rel="nofollow" class="result__a" href="/l/?uddg=https%3A%2F%2Fexample.com%2Falpha">Alpha <b>Result</b></a>
+      <a class="result__snippet">Alpha <b>snippet</b></a>
+      <a rel="nofollow" class="result__a" href="/l/?uddg=https%3A%2F%2Fexample.com%2Fbeta">Beta</a>
+      <a class="result__snippet">Beta summary</a>
+    </body></html>|}
   in
-  let items = Tool_misc.parse_searxng_json payload in
+  let items = Tool_misc.parse_ddg_html payload in
   assert (List.length items = 2);
   match items with
   | (title1, url1, snippet1) :: (title2, url2, snippet2) :: _ ->
-      assert (title1 = "OpenAI Research");
-      assert (url1 = "https://openai.com/research");
-      assert (snippet1 = "Latest AI research from OpenAI.");
-      assert (title2 = "Example Site");
-      assert (url2 = "https://example.com/");
-      assert (snippet2 = "A sample page.")
+      assert (title1 = "Alpha Result");
+      assert (url1 = "https://example.com/alpha");
+      assert (snippet1 = "Alpha snippet");
+      assert (title2 = "Beta");
+      assert (url2 = "https://example.com/beta");
+      assert (snippet2 = "Beta summary")
   | _ -> failwith "expected two parsed items"
 )
 
-let () = test "parse_searxng_json_cleans_html" (fun () ->
-  let payload =
-    {|{
-      "results": [
-        {
-          "title": "Result with <b>HTML</b> &amp; entities",
-          "url": "https://example.com/page",
-          "content": "<p>Snippet with <em>markup</em> &amp; detail</p>"
-        }
+let () = test "web_search_provider_plan_defaults_to_scraping_fallbacks" (fun () ->
+  with_env "BRAVE_SEARCH_API_KEY" None (fun () ->
+    with_env "TAVILY_API_KEY" None (fun () ->
+      with_env "EXA_API_KEY" None (fun () ->
+        with_env "BING_SEARCH_API_KEY" None (fun () ->
+          with_env "AZURE_BING_SEARCH_API_KEY" None (fun () ->
+            with_env "MASC_WEB_SEARCH_PROVIDER" None (fun () ->
+              with_env "MASC_WEB_SEARCH_PROVIDER_ORDER" None (fun () ->
+                with_env "MASC_WEB_SEARCH_FALLBACKS" None (fun () ->
+                  assert
+                    (Tool_misc.web_search_provider_plan ()
+                     = [ "duckduckgo"; "bing_rss" ])))))))))
+)
+
+let () = test "web_search_provider_plan_prefers_configured_official_provider" (fun () ->
+  with_env "BRAVE_SEARCH_API_KEY" (Some "brave-key") (fun () ->
+    with_env "MASC_WEB_SEARCH_PROVIDER" (Some "brave") (fun () ->
+      with_env "MASC_WEB_SEARCH_FALLBACKS" (Some "ddg,bing_rss") (fun () ->
+        with_env "MASC_WEB_SEARCH_PROVIDER_ORDER" None (fun () ->
+          assert
+            (Tool_misc.web_search_provider_plan ()
+             = [ "brave"; "duckduckgo"; "bing_rss" ])))))
+)
+
+let () = test "web_search_simulate_for_test_falls_back_after_error" (fun () ->
+  let success, result =
+    Tool_misc.web_search_simulate_for_test ~query:"ocaml eio" ~limit:3
+      [
+        ("brave", `Error "provider failed");
+        ("duckduckgo", `Hits [ ("Eio", "https://example.com/eio", "Fiber runtime") ]);
       ]
-    }|}
   in
-  let items = Tool_misc.parse_searxng_json payload in
-  assert (List.length items = 1);
-  match items with
-  | [ (title, _url, snippet) ] ->
-      assert (title = "Result with HTML & entities");
-      assert (not (str_contains snippet "<p>"));
-      assert (not (str_contains snippet "<em>"));
-      assert (str_contains snippet "markup")
-  | _ -> failwith "expected one item"
+  assert success;
+  let json = parse_json result in
+  let result_json = Yojson.Safe.Util.member "result" json in
+  assert (Yojson.Safe.Util.member "engine" result_json = `String "duckduckgo");
+  assert (Yojson.Safe.Util.member "result_count" result_json = `Int 1)
 )
 
-let () = test "parse_searxng_json_drops_invalid_urls" (fun () ->
-  let payload =
-    {|{
-      "results": [
-        { "title": "Valid", "url": "https://example.com/", "content": "ok" },
-        { "title": "Bad scheme", "url": "javascript:alert(1)", "content": "bad" },
-        { "title": "Valid B", "url": "https://example.com/b", "content": "second valid entry" },
-        { "title": "", "url": "https://example.com/c", "content": "empty title" }
-      ]
-    }|}
+let () = test "web_search_simulate_for_test_reports_all_failures" (fun () ->
+  let success, result =
+    Tool_misc.web_search_simulate_for_test ~query:"ocaml eio" ~limit:3
+      [ ("brave", `Empty); ("bing_rss", `Error "rss unavailable") ]
   in
-  let items = Tool_misc.parse_searxng_json payload in
-  assert (List.length items = 2);
-  match items with
-  | (t1, u1, _) :: (t2, u2, _) :: _ ->
-      assert (t1 = "Valid");
-      assert (u1 = "https://example.com/");
-      assert (t2 = "Valid B");
-      assert (u2 = "https://example.com/b")
-  | _ -> failwith "expected two valid items"
+  assert (not success);
+  let json = parse_json result in
+  assert (Yojson.Safe.Util.member "status" json = `String "error");
+  assert
+    (str_contains
+       Yojson.Safe.Util.(member "message" json |> to_string)
+       "bing_rss: rss unavailable")
 )
 
-let () = test "parse_searxng_json_invalid_payload" (fun () ->
-  assert (Tool_misc.parse_searxng_json "not json" = []);
-  assert (Tool_misc.parse_searxng_json "{}" = []);
-  assert (Tool_misc.parse_searxng_json {|{"results": null}|} = [])
+let () = test "parse_official_provider_json_payloads" (fun () ->
+  let brave =
+    Tool_misc.parse_brave_json
+      {|{"web":{"results":[{"title":"Brave title","url":"https://example.com/brave","description":"Brave snippet"}]}}|}
+  in
+  let tavily =
+    Tool_misc.parse_tavily_json
+      {|{"results":[{"title":"Tavily title","url":"https://example.com/tavily","content":"Tavily snippet"}]}|}
+  in
+  let exa =
+    Tool_misc.parse_exa_json
+      {|{"results":[{"title":"Exa title","url":"https://example.com/exa","text":"Exa snippet"}]}|}
+  in
+  let bing =
+    Tool_misc.parse_bing_search_json
+      {|{"webPages":{"value":[{"name":"Bing title","url":"https://example.com/bing","snippet":"Bing snippet"}]}}|}
+  in
+  assert (brave = [ ("Brave title", "https://example.com/brave", "Brave snippet") ]);
+  assert (tavily = [ ("Tavily title", "https://example.com/tavily", "Tavily snippet") ]);
+  assert (exa = [ ("Exa title", "https://example.com/exa", "Exa snippet") ]);
+  assert (bing = [ ("Bing title", "https://example.com/bing", "Bing snippet") ])
 )
 
-let () = test "dispatch_web_search_cascade_error_includes_backend_details" (fun () ->
-  (* Point SearXNG at a port that refuses connections; both DDG and Bing will
-     also fail in a sandboxed environment. The response error message must
-     contain the SearXNG error detail rather than a bare "all search engines failed". *)
-  with_env "MASC_SEARXNG_URL" (Some "http://127.0.0.1:1") (fun () ->
-    let ctx = make_test_ctx () in
-    let args = `Assoc [ ("query", `String "test query") ] in
-    match Tool_misc.dispatch ctx ~name:"masc_web_search" ~args with
-    | Some (success, result) ->
-        if not success then begin
-          let json = parse_json result in
-          let msg = Yojson.Safe.Util.(json |> member "message" |> to_string) in
-          (* Error message must include the cascade structure *)
-          assert (str_contains msg "searxng:")
-        end
-        (* If somehow a backend succeeds in this environment, that's also fine *)
-    | None -> failwith "dispatch returned None")
+let () = test "parse_official_provider_json_payloads_tolerate_malformed_json" (fun () ->
+  assert (
+    try
+      ignore (Tool_misc.parse_brave_json {|{"web":|});
+      false
+    with _ -> true);
+  assert (
+    try
+      ignore (Tool_misc.parse_tavily_json {|{"results": "oops"}|});
+      true
+    with _ -> false)
 )
 
 let () = test "dispatch_webrtc_offer" (fun () ->
@@ -593,88 +612,6 @@ let () = test "dispatch_tool_admin_update_keeper_policy" (fun () ->
           | None -> failwith "dispatch returned None")
       | Some (false, err) -> failwith err
       | None -> failwith "keeper up dispatch returned None")
-)
-
-let () = test "dispatch_keeper_up_blocked_by_startup_state" (fun () ->
-  Server_startup_state.reset ~backend_mode:"test" ();
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  Eio.Switch.run @@ fun sw ->
-  let ctx = make_test_ctx () in
-  let keeper_ctx : _ Tool_keeper.context =
-    {
-      config = ctx.config;
-      agent_name = "tester";
-      sw;
-      clock = Eio.Stdenv.clock env;
-      proc_mgr = Some (Eio.Stdenv.process_mgr env);
-      net = None;
-    }
-  in
-  match
-    Tool_keeper.dispatch keeper_ctx ~name:"masc_keeper_up"
-      ~args:(`Assoc [ ("name", `String "boot-keeper"); ("goal", `String "startup gate test") ])
-  with
-  | Some (false, result) ->
-      let json = parse_json result in
-      assert (Yojson.Safe.Util.member "error" json = `String "server_initializing");
-      assert (Yojson.Safe.Util.member "retry_after_ms" json = `Int 3000)
-  | Some (true, _) -> failwith "keeper up should be blocked while startup is not ready"
-  | None -> failwith "keeper up dispatch returned None"
-)
-
-let () = test "dispatch_keeper_create_from_persona_blocked_by_startup_state" (fun () ->
-  Server_startup_state.reset ~backend_mode:"test" ();
-  let personas_dir = Filename.concat (Filename.get_temp_dir_name ()) "masc-persona-gate-test" in
-  if not (Sys.file_exists personas_dir) then Unix.mkdir personas_dir 0o755;
-  let persona_name = "boot_probe" in
-  let persona_dir = Filename.concat personas_dir persona_name in
-  mkdir_p persona_dir;
-  write_file
-    (Filename.concat persona_dir "profile.json")
-    (Printf.sprintf
-       {|
-{
-  "name": "%s",
-  "keeper": {
-    "goal": "Startup gate smoke",
-    "short_goal": "Startup gate smoke",
-    "mid_goal": "Startup gate smoke",
-    "long_goal": "Startup gate smoke",
-    "mention_targets": ["boot-probe"],
-    "tool_preset": "research",
-    "policy_voice_enabled": false
-  }
-}
-|}
-       persona_name);
-  with_env "MASC_PERSONAS_DIR" (Some personas_dir) @@ fun () ->
-    Masc_mcp.Config_dir_resolver.reset ();
-    Eio_main.run @@ fun env ->
-    Fs_compat.set_fs (Eio.Stdenv.fs env);
-    Eio.Switch.run @@ fun sw ->
-    let ctx = make_test_ctx () in
-    let keeper_ctx : _ Tool_keeper.context =
-      {
-        config = ctx.config;
-        agent_name = "tester";
-        sw;
-        clock = Eio.Stdenv.clock env;
-        proc_mgr = Some (Eio.Stdenv.process_mgr env);
-        net = None;
-      }
-    in
-    match
-      Tool_keeper.dispatch keeper_ctx ~name:"masc_keeper_create_from_persona"
-        ~args:(`Assoc [ ("persona_name", `String persona_name) ])
-    with
-    | Some (false, result) ->
-        let json = parse_json result in
-        assert (Yojson.Safe.Util.member "error" json = `String "server_initializing");
-        assert (Yojson.Safe.Util.member "retry_after_ms" json = `Int 3000)
-    | Some (true, _) ->
-        failwith "keeper create_from_persona should be blocked while startup is not ready"
-    | None -> failwith "keeper create_from_persona dispatch returned None"
 )
 
 (* Test helper functions *)

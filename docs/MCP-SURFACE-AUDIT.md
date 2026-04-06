@@ -49,6 +49,13 @@ The key split is intentional:
 | Remote operator | `/mcp/operator` | `masc_operator_snapshot`, `masc_operator_digest` | Separate 4-tool remote-safe profile |
 | Internal prompt/runtime plane | Not MCP-discoverable | `Prompt_registry`, `data/prompts/*.json`, `config/prompts/*.md` | Used by chains, keepers, dashboard judges, and runtime execution |
 
+`masc_web_search` public contract note:
+
+- Public tool name remains `masc_web_search`.
+- Request contract remains `query` + optional `limit`.
+- Response contract remains `{status:"ok", result:{query, engine, search_url, result_count, results[]}}`, with normalized per-result metadata (`source`, `rank`, optional `published_at`) added inside `results[]`.
+- Runtime selection is config/env driven: official APIs first when configured, scraping fallback second.
+
 ## Public Surface Map
 
 ```mermaid

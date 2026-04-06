@@ -15,7 +15,22 @@ val schemas : Types.tool_schema list
 
 val looks_like_rss_payload : string -> bool
 val parse_bing_rss_items : string -> (string * string * string) list
-val parse_searxng_json : string -> (string * string * string) list
+val parse_ddg_html : string -> (string * string * string) list
+val parse_brave_json : string -> (string * string * string) list
+val parse_tavily_json : string -> (string * string * string) list
+val parse_exa_json : string -> (string * string * string) list
+val parse_bing_search_json : string -> (string * string * string) list
+val web_search_provider_plan : unit -> string list
+val web_search_simulate_for_test :
+  query:string ->
+  limit:int ->
+  (string
+   * [ `Error of string
+     | `Empty
+     | `Hits of (string * string * string) list
+     ])
+  list ->
+  result
 
 val dispatch : context -> name:string -> args:Yojson.Safe.t -> result option
 

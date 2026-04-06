@@ -175,6 +175,11 @@ MASC_PUBLIC_TOOLS_EXTRA=masc_board_search,masc_pause
 # Restore the full inventory (debugging)
 MASC_FULL_SURFACE=1
 
+# Web search provider control
+MASC_WEB_SEARCH_PROVIDER=brave
+MASC_WEB_SEARCH_FALLBACKS=ddg,bing_rss
+BRAVE_SEARCH_API_KEY=...  # optional; without provider credentials the tool falls back to scraping
+
 # Query all tools via API after initialize
 curl -sS "http://127.0.0.1:${PORT}/mcp" \
   -H "Accept: application/json, text/event-stream" \
@@ -184,6 +189,25 @@ curl -sS "http://127.0.0.1:${PORT}/mcp" \
 ```
 
 Allowlist SSOT: `lib/tool_catalog.ml` > `public_mcp_tools`
+
+`masc_web_search` 메모:
+
+- read-only 현재 정보 조회용 도구다.
+- 기본 auto 모드는 공식 provider key가 있으면 `brave`, `tavily`, `exa`, `bing_api` 순으로 먼저 시도한다.
+- 공식 provider가 없거나 실패하면 `duckduckgo`, `bing_rss` 순으로 fallback 한다.
+- env:
+  - `MASC_WEB_SEARCH_PROVIDER`
+  - `MASC_WEB_SEARCH_PROVIDER_ORDER`
+  - `MASC_WEB_SEARCH_FALLBACKS`
+  - `MASC_WEB_SEARCH_TIMEOUT_SEC`
+  - `MASC_WEB_SEARCH_CACHE_TTL_SEC`
+  - `MASC_WEB_SEARCH_RATE_LIMIT_WINDOW_SEC`
+  - `MASC_WEB_SEARCH_RATE_LIMIT_MAX_CALLS`
+- provider credentials:
+  - `BRAVE_SEARCH_API_KEY`
+  - `TAVILY_API_KEY`
+  - `EXA_API_KEY`
+  - `BING_SEARCH_API_KEY` or `AZURE_BING_SEARCH_API_KEY`
 
 ## 6. Error Recovery
 

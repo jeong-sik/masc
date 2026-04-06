@@ -233,7 +233,7 @@ function trajectoryEntryToTrace(entry: TrajectoryEntry, index: number): UnifiedT
     ts,
     ts_iso: entry.ts_iso,
     kind: 'tool_call',
-    summary: entry.tool_name,
+    summary: entry.tool_name ?? '',
     detail: {},
     toolName: entry.tool_name,
     toolArgs: entry.args,

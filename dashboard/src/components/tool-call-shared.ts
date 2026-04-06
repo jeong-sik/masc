@@ -89,7 +89,7 @@ export function formatDuration(ms: number): string {
 }
 
 /** Summarize a list of trajectory entries: total duration, success count, error count. */
-export function summarizeEntries(entries: Array<{ duration_ms: number; error: string | null }>): {
+export function summarizeEntries(entries: Array<{ duration_ms?: number; error?: string | null }>): {
   totalMs: number
   successCount: number
   errorCount: number
@@ -97,7 +97,7 @@ export function summarizeEntries(entries: Array<{ duration_ms: number; error: st
   let totalMs = 0
   let errorCount = 0
   for (const e of entries) {
-    totalMs += e.duration_ms
+    totalMs += e.duration_ms ?? 0
     if (e.error) errorCount++
   }
   return { totalMs, successCount: entries.length - errorCount, errorCount }

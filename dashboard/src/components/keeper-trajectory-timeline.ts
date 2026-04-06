@@ -67,8 +67,8 @@ export function clearTrajectory(keeperName: string): void {
 
 function TrajectoryEntryRow({ entry }: { entry: TrajectoryEntry }) {
   const expanded = useSignal(false)
-  const gateRejected = entry.gate.status === 'reject'
-  const cat = toolCategory(entry.tool_name)
+  const gateRejected = entry.gate?.status === 'reject'
+  const cat = toolCategory(entry.tool_name ?? '')
   const toggle = () => { expanded.value = !expanded.value }
 
   return html`
@@ -95,11 +95,11 @@ function TrajectoryEntryRow({ entry }: { entry: TrajectoryEntry }) {
             <span class="text-xs font-mono font-medium ${cat.color}" title=${entry.tool_name}>${entry.tool_name}</span>
             <span class="text-[10px] px-1 py-0.5 rounded bg-[var(--white-5)] text-[var(--text-dim)]">${cat.label}</span>
             <span class="text-[10px] text-[var(--text-dim)]">T${entry.turn}R${entry.round}</span>
-            ${entry.cost_usd > 0
-              ? html`<span class="text-[10px] px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--accent)]">$${entry.cost_usd.toFixed(4)}</span>`
+            ${(entry.cost_usd ?? 0) > 0
+              ? html`<span class="text-[10px] px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--accent)]">$${(entry.cost_usd ?? 0).toFixed(4)}</span>`
               : null}
             ${gateRejected
-              ? html`<span class="text-[10px] px-1.5 py-0.5 rounded bg-[var(--bad-10)] text-[var(--bad)]">거부: ${truncate(entry.gate.reason ?? '', 40)}</span>`
+              ? html`<span class="text-[10px] px-1.5 py-0.5 rounded bg-[var(--bad-10)] text-[var(--bad)]">거부: ${truncate(entry.gate?.reason ?? '', 40)}</span>`
               : null}
             ${entry.error
               ? html`<span class="text-[10px] px-1.5 py-0.5 rounded bg-[var(--bad-10)] text-[var(--bad)]">오류</span>`
@@ -111,14 +111,14 @@ function TrajectoryEntryRow({ entry }: { entry: TrajectoryEntry }) {
           ${'' /* Args preview (collapsed) */}
           ${!expanded.value ? html`
             <div class="mt-1 text-[11px] text-[var(--text-muted)] font-mono truncate max-w-full">
-              ${formatArgs(entry.args)}
+              ${formatArgs(entry.args ?? {})}
             </div>
           ` : null}
         </div>
 
         ${'' /* Duration + timestamp */}
         <div class="flex-shrink-0 flex flex-col items-end gap-0.5">
-          <span class="text-[11px] font-mono ${durationColor(entry.duration_ms)}">${formatDuration(entry.duration_ms)}</span>
+          <span class="text-[11px] font-mono ${durationColor(entry.duration_ms ?? 0)}">${formatDuration(entry.duration_ms ?? 0)}</span>
           <${TimeAgo} timestamp=${entry.ts} class="text-[10px] text-[var(--text-dim)]" />
         </div>
       </div>
@@ -129,7 +129,7 @@ function TrajectoryEntryRow({ entry }: { entry: TrajectoryEntry }) {
           ${'' /* Full args */}
           <div>
             <div class="text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-1">Arguments</div>
-            <pre class="m-0 text-[11px] font-mono text-[var(--text-body)] bg-[var(--white-5)] rounded-md p-2 overflow-x-auto max-h-[300px] overflow-y-auto whitespace-pre-wrap break-all">${prettyArgs(entry.args)}</pre>
+            <pre class="m-0 text-[11px] font-mono text-[var(--text-body)] bg-[var(--white-5)] rounded-md p-2 overflow-x-auto max-h-[300px] overflow-y-auto whitespace-pre-wrap break-all">${prettyArgs(entry.args ?? {})}</pre>
           </div>
 
           ${'' /* Result */}
@@ -149,17 +149,17 @@ function TrajectoryEntryRow({ entry }: { entry: TrajectoryEntry }) {
           ` : null}
 
           ${'' /* Gate detail */}
-          ${gateRejected && entry.gate.reason ? html`
+          ${gateRejected && entry.gate?.reason ? html`
             <div>
               <div class="text-[10px] font-semibold text-[var(--warn)] uppercase tracking-wider mb-1">Gate Rejection</div>
-              <div class="text-[11px] font-mono text-[var(--warn)] bg-[var(--warn-10)] rounded-md p-2">${entry.gate.reason}</div>
+              <div class="text-[11px] font-mono text-[var(--warn)] bg-[var(--warn-10)] rounded-md p-2">${entry.gate?.reason}</div>
             </div>
           ` : null}
 
           ${'' /* Metadata row */}
           <div class="flex gap-4 flex-wrap text-[10px] text-[var(--text-dim)]">
-            ${entry.cost_usd > 0 ? html`<span>Cost: $${entry.cost_usd.toFixed(6)}</span>` : null}
-            <span>Duration: ${entry.duration_ms}ms</span>
+            ${(entry.cost_usd ?? 0) > 0 ? html`<span>Cost: $${(entry.cost_usd ?? 0).toFixed(6)}</span>` : null}
+            <span>Duration: ${entry.duration_ms ?? 0}ms</span>
             <span>Turn ${entry.turn}, Round ${entry.round}</span>
             <span class="font-mono">${entry.ts_iso ?? new Date(entry.ts * 1000).toISOString()}</span>
           </div>
@@ -252,7 +252,7 @@ export function KeeperTrajectoryTimeline({ keeperName, keeper }: { keeperName: s
     const groups = groupByTurn(data.entries)
     const sorted = Array.from(groups.entries()).sort(([a], [b]) => b - a)
     const summary = summarizeEntries(data.entries)
-    const distinct = new Set(data.entries.map(e => e.tool_name)).size
+    const distinct = new Set(data.entries.filter(e => e.tool_name).map(e => e.tool_name)).size
     return { turns: sorted, allSummary: summary, distinctTools: distinct }
   }, [data.entries])
   const lastHb = keeperHeartbeats.value.get(keeperName)

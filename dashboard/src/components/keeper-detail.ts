@@ -45,6 +45,9 @@ import { KeeperTrajectoryTimeline } from './keeper-trajectory-timeline'
 import { DialogOverlay } from './common/dialog'
 import { CollapsibleSection } from './common/collapsible'
 import { SessionTraceView } from './session-trace/session-trace-view'
+import { SessionProgressHeader } from './session-progress-header'
+import { getTraceSummary } from './session-trace/session-trace-state'
+import { KeeperToolTelemetry } from './keeper-tool-telemetry'
 
 // ── Global overlay state ──────────────────────────────────
 
@@ -470,6 +473,9 @@ export function KeeperDetailOverlay() {
         ${'' /* ── Pipeline stage indicator ── */}
         <${PipelineStageBar} stage=${keeper.pipeline_stage} />
 
+        ${'' /* ── Session progress header (Copilot-style) ── */}
+        <${SessionProgressHeader} keeper=${keeper} summary=${getTraceSummary(keeper.name)} />
+
         ${'' /* ── KPIs ── */}
         <${KpiGrid} keeper=${keeper} />
 
@@ -481,6 +487,11 @@ export function KeeperDetailOverlay() {
 
         ${'' /* ── Latency / Cost / Model charts ── */}
         <${MetricsCharts} keeper=${keeper} />
+
+        ${'' /* ── Per-keeper tool telemetry ── */}
+        <${SectionCard} title="도구 텔레메트리">
+          <${KeeperToolTelemetry} keeperName=${keeper.name} />
+        <//>
 
         ${'' /* ── Direct conversation ── */}
         <${KeeperCommsPanel} keeper=${keeper} />
@@ -599,15 +610,17 @@ export function KeeperDetailOverlay() {
             `
             : null}
 
+          ${'' /* ── Activity Trace (promoted to main view) ── */}
           <div class="md:col-span-2">
-            <${SectionCard} title="도구 호출 궤적">
-              <${KeeperTrajectoryTimeline} keeperName=${keeper.name} keeper=${keeper} />
+            <${SectionCard} title="활동 추적">
+              <${SessionTraceView} agentName=${keeper.name} isKeeper=${true} keeperStatus=${keeper.status} keeperGeneration=${keeper.generation} />
             <//>
           </div>
 
+          ${'' /* ── Tool-only trajectory (collapsed, for deep inspection) ── */}
           <div class="md:col-span-2">
-            <${CollapsibleSection} title="통합 활동 추적" badge=${html`<span class="text-[10px] text-[var(--text-dim)] font-normal ml-1">공지 + 태스크 + 도구 호출</span>`}>
-              <${SessionTraceView} agentName=${keeper.name} isKeeper=${true} keeperStatus=${keeper.status} keeperGeneration=${keeper.generation} />
+            <${CollapsibleSection} title="도구 호출 상세" badge=${html`<span class="text-[10px] text-[var(--text-dim)] font-normal ml-1">궤적 전용</span>`}>
+              <${KeeperTrajectoryTimeline} keeperName=${keeper.name} keeper=${keeper} />
             <//>
           </div>
 

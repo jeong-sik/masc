@@ -38,7 +38,9 @@ let append_pair ~base_dir ~keeper_name
     let user_line = encode_line ~role:"user" ~content:user_content ~ts in
     let asst_line = encode_line ~role:"assistant" ~content:assistant_content ~ts in
     Fs_compat.append_file path (user_line ^ "\n" ^ asst_line ^ "\n")
-  with exn ->
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
     Log.Keeper.warn "keeper_chat_store: append failed for %s: %s"
       (sanitize_name keeper_name) (Printexc.to_string exn)
 

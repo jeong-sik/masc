@@ -302,14 +302,15 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                     ())
             in
             match run_result with
-            | Error e ->
+            | Error err ->
+              let e_str = Oas.Error.to_string err in
               (try ignore (Trajectory.finalize trajectory_acc
-                 (Trajectory.Failed e))
+                 (Trajectory.Failed e_str))
                with Eio.Cancel.Cancelled _ as e -> raise e | exn -> log_keeper_exn
                  ~label:"trajectory finalize (agent_run error)" exn);
               start_keepalive ctx meta;
               Progress.stop_tracking turn_task_id;
-              (false, Printf.sprintf "❌ Agent.run failed: %s" e)
+              (false, Printf.sprintf "❌ Agent.run failed: %s" e_str)
             | Ok result ->
               (try ignore (Trajectory.finalize trajectory_acc
                  Trajectory.Completed)

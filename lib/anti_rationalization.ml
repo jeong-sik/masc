@@ -372,8 +372,9 @@ let review
           Log.Task.info "[anti-rationalization] LLM approved: agent=%s task=%s cascade=%s"
             req.agent_name req.task_title evaluator_cascade);
        emit { verdict = v; evaluator_cascade; generator_cascade; gate; fallback_reason }
-     | Error msg ->
+     | Error err ->
        (* Liveness > correctness: if LLM is unavailable, approve *)
+       let msg = Oas.Error.to_string err in
        Log.Task.warn "[anti-rationalization] LLM unavailable: %s (approving by default)" msg;
        emit { verdict = Approve; evaluator_cascade; generator_cascade; gate = "fallback"; fallback_reason = Some msg })
 

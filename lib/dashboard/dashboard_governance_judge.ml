@@ -312,7 +312,7 @@ let compute_judgments
       ~goal:prompt ~masc_tools ~dispatch ~max_turns:3
       ()
   with
-  | Error message -> Error message
+  | Error err -> Error (Oas.Error.to_string err)
   | Ok result -> (
       let response = result.Oas_worker.response in
       try

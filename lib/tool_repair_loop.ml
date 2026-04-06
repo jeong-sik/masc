@@ -145,10 +145,10 @@ let generate_or_repair_code (ctx : _ context) (state : state) :
           ~temperature:Oas_worker_cascade.deterministic_temperature ~max_tokens:1024 ~enable_thinking:false
           ?sw:ctx.sw ()
       in
-      Result.map
-        (fun (run_result : Oas_worker.run_result) ->
+      result
+      |> Result.map_error Oas.Error.to_string
+      |> Result.map (fun (run_result : Oas_worker.run_result) ->
           (Generate, Oas_response.text_of_response run_result.response))
-        result
   | Repair ->
       let previous_code =
         Option.value ~default:"" state.current_code
@@ -172,10 +172,10 @@ let generate_or_repair_code (ctx : _ context) (state : state) :
           ~temperature:Oas_worker_cascade.deterministic_temperature ~max_tokens:1024 ~enable_thinking:false
           ?sw:ctx.sw ()
       in
-      Result.map
-        (fun (run_result : Oas_worker.run_result) ->
+      result
+      |> Result.map_error Oas.Error.to_string
+      |> Result.map (fun (run_result : Oas_worker.run_result) ->
           (Repair, Oas_response.text_of_response run_result.response))
-        result
 
 (* Security: Ensure [child] is either equal to [parent] or located under [parent]. *)
 let is_safe_subpath ~parent ~child =

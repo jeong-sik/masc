@@ -683,17 +683,15 @@ let planned_worker_to_entry_with_state
           ~trace_ref:result.trace_ref ~success:true ~output_preview
           ~error:None proof_opt;
         Ok result.response
-    | Error e ->
+    | Error err ->
+        let e_str = Oas.Error.to_string err in
         Hashtbl.replace success_by_agent name false;
         telemetry_ref := Swarm.Swarm_types.empty_telemetry;
         persist_worker_run_proof_if_present ~config ~session_id
           ~fallback_name:name ~planned_worker:pw ~resolved_model:None
           ~trace_ref:None ~success:false
-          ~output_preview:(preview_text_opt e) ~error:(Some e) !proof_ref;
-        Error
-          (Oas.Error.Config
-             (Oas.Error.InvalidConfig
-                { field = "worker"; detail = Printf.sprintf "%s: %s" name e }))
+          ~output_preview:(preview_text_opt e_str) ~error:(Some e_str) !proof_ref;
+        Error err
   in
   { name; run; role; get_telemetry = Some (fun () -> !telemetry_ref); extensions = [] }
 

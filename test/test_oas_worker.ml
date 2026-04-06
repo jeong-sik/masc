@@ -444,7 +444,7 @@ let test_oas_worker_exec_build_defaults_without_retry_policy () =
       Alcotest.(check bool) "default leaves retry disabled" true
         (Option.is_none policy);
       Oas.Agent.close agent
-  | Error err -> Alcotest.fail err
+  | Error err -> Alcotest.fail (Oas.Error.to_string err)
 
 let test_oas_worker_exec_build_applies_retry_policy () =
   let provider = make_local_provider () in
@@ -465,7 +465,7 @@ let test_oas_worker_exec_build_applies_retry_policy () =
       let policy = (Oas.Agent.options agent).tool_retry_policy in
       check_policy_matches_default_internal "exec build opt-in" policy;
       Oas.Agent.close agent
-  | Error err -> Alcotest.fail err
+  | Error err -> Alcotest.fail (Oas.Error.to_string err)
 
 let test_oas_worker_exec_build_default_priority_unset () =
   let provider = make_local_provider () in
@@ -483,7 +483,7 @@ let test_oas_worker_exec_build_default_priority_unset () =
       Alcotest.(check bool) "default priority remains unset" true
         (Option.is_none priority);
       Oas.Agent.close agent
-  | Error err -> Alcotest.fail err
+  | Error err -> Alcotest.fail (Oas.Error.to_string err)
 
 let test_oas_worker_exec_build_applies_priority () =
   let provider = make_local_provider () in
@@ -507,7 +507,7 @@ let test_oas_worker_exec_build_applies_priority () =
          | Some Llm_provider.Request_priority.Proactive -> true
          | _ -> false);
       Oas.Agent.close agent
-  | Error err -> Alcotest.fail err
+  | Error err -> Alcotest.fail (Oas.Error.to_string err)
 
 let test_worker_build_agent_uses_default_internal_retry_policy () =
   with_raw_trace "worker_build_agent_retry" @@ fun raw_trace ->

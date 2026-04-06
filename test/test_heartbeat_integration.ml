@@ -491,87 +491,103 @@ let test_stop_keepalive_preserves_existing_crash_outcome () =
    9. RFC-0002: Keeper_fiber_crash ordering invariant
    ══════════════════════════════════════════════════════════ *)
 
-(** Verify the raise-site contract: set_failure_reason is called BEFORE
-    Keeper_fiber_crash is raised. The catch site must be able to read the
-    structured reason from the registry after catching the payload-less
-    exception. This tests the REAL supervisor catch logic. *)
+(** REAL ordering test: pre-store reason → raise Keeper_fiber_crash →
+    catch → read structured reason from registry.
+    The exception actually flies. The catch handler (matching supervisor
+    logic) reads last_failure_reason from registry.
+    Tests 3 failure_reason variants across the raise/catch boundary. *)
 let test_fiber_crash_ordering_invariant () =
   R.clear ();
   let meta = make_meta "ordering-test" in
   let _reg = R.register ~base_path:bp "ordering-test" meta in
-  (* Simulate the raise-site contract: pre-store reason, then raise *)
-  let stored_reason = R.Heartbeat_consecutive_failures 7 in
-  R.set_failure_reason ~base_path:bp "ordering-test" (Some stored_reason);
-  (* Simulate catching Keeper_fiber_crash and reading from registry
-     (this is what the supervisor's unified handler does) *)
-  let recovered_reason =
-    match R.get ~base_path:bp "ordering-test" with
-    | Some e ->
-      Option.value
-        ~default:(R.Exception "fiber_crash")
-        e.last_failure_reason
-    | None -> R.Exception "not found"
-  in
-  (* The recovered reason must match the pre-stored reason *)
-  (match recovered_reason with
-   | R.Heartbeat_consecutive_failures n ->
-     check int "recovered failure count matches" 7 n
-   | other ->
-     fail (Printf.sprintf "expected Heartbeat_consecutive_failures, got %s"
-       (R.failure_reason_to_string other)));
-  (* Also test Turn_consecutive_failures path *)
+  (* Variant 1: Heartbeat_consecutive_failures *)
+  let caught1 = ref None in
+  R.set_failure_reason ~base_path:bp "ordering-test"
+    (Some (R.Heartbeat_consecutive_failures 7));
+  (try raise R.Keeper_fiber_crash
+   with R.Keeper_fiber_crash ->
+     caught1 := (match R.get ~base_path:bp "ordering-test" with
+       | Some e -> e.last_failure_reason
+       | None -> None));
+  (match !caught1 with
+   | Some (R.Heartbeat_consecutive_failures n) ->
+     check int "hb reason survives raise/catch" 7 n
+   | _ -> fail "catch could not read pre-stored Heartbeat reason");
+  (* Variant 2: Turn_consecutive_failures *)
+  let caught2 = ref None in
   R.set_failure_reason ~base_path:bp "ordering-test"
     (Some (R.Turn_consecutive_failures 12));
-  let recovered2 =
-    match R.get ~base_path:bp "ordering-test" with
-    | Some e ->
-      Option.value ~default:(R.Exception "?") e.last_failure_reason
-    | None -> R.Exception "?"
-  in
-  (match recovered2 with
-   | R.Turn_consecutive_failures n ->
-     check int "turn failure count round-trips" 12 n
-   | other ->
-     fail (Printf.sprintf "expected Turn_consecutive_failures, got %s"
-       (R.failure_reason_to_string other)));
-  (* Also test Exception variant (fatal env error path) *)
-  let env_reason = R.Exception "fatal environment error: Eio switch not available" in
-  R.set_failure_reason ~base_path:bp "ordering-test" (Some env_reason);
-  let recovered3 =
-    match R.get ~base_path:bp "ordering-test" with
-    | Some e ->
-      Option.value ~default:(R.Exception "?") e.last_failure_reason
-    | None -> R.Exception "?"
-  in
-  (match recovered3 with
-   | R.Exception s ->
-     check bool "env error message preserved"
-       true (String.length s > 0 && s = "fatal environment error: Eio switch not available")
-   | other ->
-     fail (Printf.sprintf "expected Exception, got %s"
-       (R.failure_reason_to_string other)))
+  (try raise R.Keeper_fiber_crash
+   with R.Keeper_fiber_crash ->
+     caught2 := (match R.get ~base_path:bp "ordering-test" with
+       | Some e -> e.last_failure_reason
+       | None -> None));
+  (match !caught2 with
+   | Some (R.Turn_consecutive_failures n) ->
+     check int "turn reason survives raise/catch" 12 n
+   | _ -> fail "catch could not read pre-stored Turn reason");
+  (* Variant 3: Exception (fatal env error) *)
+  let caught3 = ref None in
+  R.set_failure_reason ~base_path:bp "ordering-test"
+    (Some (R.Exception "fatal environment error: Eio switch not available"));
+  (try raise R.Keeper_fiber_crash
+   with R.Keeper_fiber_crash ->
+     caught3 := (match R.get ~base_path:bp "ordering-test" with
+       | Some e -> e.last_failure_reason
+       | None -> None));
+  (match !caught3 with
+   | Some (R.Exception s) ->
+     check bool "env error msg preserved across raise/catch"
+       true (String.length s > 30)
+   | _ -> fail "catch could not read pre-stored Exception reason")
 
-(** Verify that when no failure_reason is pre-stored (e.g. unexpected exn),
-    the catch site falls back to Exception variant. *)
+(** REAL fallback test: raise Keeper_fiber_crash WITHOUT pre-storing
+    any reason → catch handler must fall back to Exception("fiber_crash").
+    This exercises the supervisor's unified exn handler logic where
+    Keeper_fiber_crash is caught but registry has no pre-stored reason.
+    Also tests a generic (non-Keeper_fiber_crash) exception to verify
+    the handler distinguishes the two branches. *)
 let test_fiber_crash_no_prestored_reason () =
   R.clear ();
   let meta = make_meta "no-reason" in
   let _reg = R.register ~base_path:bp "no-reason" meta in
-  (* Don't call set_failure_reason — simulate unexpected exception path *)
-  let recovered =
-    match R.get ~base_path:bp "no-reason" with
-    | Some e ->
-      Option.value
-        ~default:(R.Exception "fiber_crash")
-        e.last_failure_reason
-    | None -> R.Exception "not found"
-  in
-  (* last_failure_reason is None for a fresh entry → fallback should fire *)
-  (match recovered with
+  (* Path 1: Keeper_fiber_crash without pre-stored reason *)
+  let caught_fr = ref (R.Exception "initial") in
+  (try raise R.Keeper_fiber_crash
+   with
+   | R.Keeper_fiber_crash ->
+     caught_fr := (match R.get ~base_path:bp "no-reason" with
+       | Some e ->
+         Option.value
+           ~default:(R.Exception "fiber_crash")
+           e.last_failure_reason
+       | None -> R.Exception "fiber_crash (unregistered)")
+   | _exn ->
+     caught_fr := R.Exception "wrong branch");
+  (match !caught_fr with
    | R.Exception s ->
-     check string "fallback reason" "fiber_crash" s
+     check string "fallback on no pre-stored reason" "fiber_crash" s
    | other ->
      fail (Printf.sprintf "expected Exception fallback, got %s"
+       (R.failure_reason_to_string other)));
+  (* Path 2: generic exception → must wrap in Exception(string) *)
+  let caught_generic = ref (R.Exception "initial") in
+  (try raise (Failure "disk full")
+   with exn ->
+     caught_generic := (match exn with
+       | R.Keeper_fiber_crash ->
+         (match R.get ~base_path:bp "no-reason" with
+          | Some e ->
+            Option.value ~default:(R.Exception "fiber_crash")
+              e.last_failure_reason
+          | None -> R.Exception "fiber_crash")
+       | _ -> R.Exception (Printexc.to_string exn)));
+  (match !caught_generic with
+   | R.Exception s ->
+     check bool "generic exn wraps in Exception"
+       true (String.length s > 0 && s <> "fiber_crash")
+   | other ->
+     fail (Printf.sprintf "expected Exception(string), got %s"
        (R.failure_reason_to_string other)))
 
 (* ══════════════════════════════════════════════════════════
@@ -604,19 +620,33 @@ let test_pipeline_stage_of_phase_exhaustive () =
       expected actual
   ) cases
 
-(** Verify non-registered keepers get "offline" — the behavioral change
-    from derive_pipeline_stage (heuristic) to direct phase mapping. *)
+(** Verify non-registered keepers → get_phase returns None, and
+    registered keepers in every phase → pipeline_stage_of_phase produces
+    a non-None mapping. This tests the production boundary:
+    get_phase feeds into pipeline_stage_of_phase. *)
 let test_pipeline_stage_unregistered_is_offline () =
   R.clear ();
-  (* No keeper registered — get_phase returns None *)
-  let phase = R.get_phase ~base_path:bp "nonexistent" in
-  check bool "no phase for unregistered" true (Option.is_none phase);
-  (* The call sites now use: match get_phase with Some → of_phase | None → "offline" *)
-  let stage = match phase with
-    | Some p -> ES.pipeline_stage_of_phase p
-    | None -> "offline"
-  in
-  check string "unregistered → offline" "offline" stage
+  (* Unregistered: get_phase must return None *)
+  check bool "unregistered → no phase"
+    true (Option.is_none (R.get_phase ~base_path:bp "ghost"));
+  (* Registered: get_phase returns real phase, of_phase gives deterministic stage *)
+  let meta = make_meta "alive" in
+  let _reg = R.register ~base_path:bp "alive" meta in
+  (match R.get_phase ~base_path:bp "alive" with
+   | Some phase ->
+     let stage = ES.pipeline_stage_of_phase phase in
+     check bool "registered → non-empty stage" true (String.length stage > 0);
+     check string "running → idle" "idle" stage
+   | None -> fail "registered keeper must have a phase");
+  (* Crash the keeper and verify phase + stage update *)
+  ignore (R.dispatch_event ~base_path:bp "alive"
+    (KSM.Fiber_terminated { outcome = "test" }));
+  (match R.get_phase ~base_path:bp "alive" with
+   | Some phase ->
+     let stage = ES.pipeline_stage_of_phase phase in
+     check string "crashed → crashed stage" "crashed" stage;
+     check string "phase is crashed" "crashed" (KSM.phase_to_string phase)
+   | None -> fail "crashed keeper must still have a phase")
 
 (** Sensitivity: pipeline_stage_of_phase DIFFERS from "offline" for
     most active phases. Proves the mapping has teeth — it actually

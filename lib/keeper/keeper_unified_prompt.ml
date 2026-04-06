@@ -396,7 +396,7 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
      recognise patterns — thrashing, failure loops, tool over-reliance.
      Data comes from Keeper_registry per-entry tool_usage Hashtbl. *)
   let tool_activity =
-    Keeper_tools_oas.tool_usage_for_keeper meta.name
+    Keeper_registry.tool_usage_of ~base_path meta.name
     |> List.sort (fun (_, a) (_, b) ->
       Float.compare b.Keeper_types.last_used_at a.Keeper_types.last_used_at)
   in
@@ -417,14 +417,11 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
         (Printf.sprintf "- %s: %d calls (%d ok, %d fail, %.0f%% success)%s\n"
            name e.count e.successes e.failures rate warning)
     ) recent_activity;
-    (* Pattern detection: warn if recent activity is too homogeneous *)
-    let unique_tools = List.sort_uniq String.compare
-      (List.map fst recent_activity) in
-    if List.length recent_activity >= 4
-       && List.length unique_tools <= 2 then
-      Buffer.add_string ubuf
-        "NOTE: You are using very few distinct tools. Consider a different approach.\n");
-  (* Metacognition: last cycle outcome so keeper knows its own behavioral pattern *)
+    );
+  (* Metacognition: last cycle outcome so keeper knows its own behavioral pattern.
+     This is MASC domain data (proactive_rt) not available in OAS.
+     Per-turn behavioral correction (idle loops, tool repetition) is handled by
+     OAS on_idle → Nudge hook in keeper_hooks_oas.ml — not here. *)
   let prt = meta.runtime.proactive_rt in
   let outcome_str = Keeper_types.proactive_cycle_outcome_to_string prt.last_outcome in
   if prt.count_total > 0 then (
@@ -437,19 +434,7 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
     Buffer.add_string ubuf
       (Printf.sprintf "- Cycles total: %d (visible: %d, silent: %d)\n"
          prt.count_total prt.visible_count_total
-         (prt.count_total - prt.visible_count_total));
-    (* Self-correction cues based on pattern *)
-    (match prt.last_outcome with
-     | Proactive_silent ->
-       Buffer.add_string ubuf
-         "SELF-CHECK: Last cycle was silent. If you have observations, act on them.\n"
-     | Proactive_error ->
-       Buffer.add_string ubuf
-         "SELF-CHECK: Last cycle ended in error. Diagnose before retrying the same approach.\n"
-     | Proactive_tool_use when prt.visible_count_total = 0 ->
-       Buffer.add_string ubuf
-         "SELF-CHECK: You have been using tools but never producing visible output. Consider sharing findings.\n"
-     | _ -> ()));
+         (prt.count_total - prt.visible_count_total)));
   (* Peer keepers — show other running keepers so this keeper can @mention them *)
   let peer_keepers =
     Keeper_registry.all ~base_path ()

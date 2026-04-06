@@ -1850,17 +1850,36 @@ let test_prompt_includes_last_cycle_outcome () =
   check bool "shows cycle counts"
     true (contains_substring user "Cycles total: 5")
 
-let test_prompt_self_check_after_silent () =
+let test_prompt_no_self_check_in_prompt () =
+  (* SELF-CHECK cues were removed; per-turn correction is done via OAS on_idle Nudge *)
   let meta = meta_with_proactive_history Masc_mcp.Keeper_types.Proactive_silent 3 1 in
   let _sys, user = UP.build_prompt ~base_path:"/test" ~meta ~observation:base_observation in
-  check bool "has SELF-CHECK for silent"
-    true (contains_substring user "SELF-CHECK: Last cycle was silent")
+  check bool "no SELF-CHECK in prompt (moved to OAS hook)"
+    false (contains_substring user "SELF-CHECK")
 
-let test_prompt_self_check_after_error () =
-  let meta = meta_with_proactive_history Masc_mcp.Keeper_types.Proactive_error 2 1 in
-  let _sys, user = UP.build_prompt ~base_path:"/test" ~meta ~observation:base_observation in
-  check bool "has SELF-CHECK for error"
-    true (contains_substring user "SELF-CHECK: Last cycle ended in error")
+let test_on_idle_nudge_at_first_idle () =
+  let decision = HK.on_idle_decision
+    ~consecutive_idle_turns:1
+    ~tool_names:["keeper_board_list"; "keeper_tasks_list"] in
+  match decision with
+  | Agent_sdk.Hooks.Nudge msg ->
+    check bool "nudge mentions repeated tools"
+      true (contains_substring msg "keeper_board_list")
+  | other ->
+    fail (Printf.sprintf "expected Nudge, got %s"
+      (Agent_sdk.Hooks.decision_kind_to_string
+        (Agent_sdk.Hooks.classify_decision other)))
+
+let test_on_idle_skip_at_repeated_idle () =
+  let decision = HK.on_idle_decision
+    ~consecutive_idle_turns:2
+    ~tool_names:["keeper_board_list"] in
+  match decision with
+  | Agent_sdk.Hooks.Skip -> ()
+  | other ->
+    fail (Printf.sprintf "expected Skip, got %s"
+      (Agent_sdk.Hooks.decision_kind_to_string
+        (Agent_sdk.Hooks.classify_decision other)))
 
 let test_prompt_no_outcome_for_fresh_keeper () =
   let _sys, user = UP.build_prompt ~base_path:"/test" ~meta:minimal_meta ~observation:base_observation in
@@ -1959,12 +1978,14 @@ let () =
         [
           test_case "includes last cycle outcome" `Quick
             test_prompt_includes_last_cycle_outcome;
-          test_case "self-check after silent" `Quick
-            test_prompt_self_check_after_silent;
-          test_case "self-check after error" `Quick
-            test_prompt_self_check_after_error;
+          test_case "no SELF-CHECK in prompt (OAS hook)" `Quick
+            test_prompt_no_self_check_in_prompt;
           test_case "no outcome for fresh keeper" `Quick
             test_prompt_no_outcome_for_fresh_keeper;
+          test_case "on_idle nudge at first idle" `Quick
+            test_on_idle_nudge_at_first_idle;
+          test_case "on_idle skip at repeated idle" `Quick
+            test_on_idle_skip_at_repeated_idle;
         ] );
       ( "config",
         [

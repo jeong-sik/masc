@@ -110,6 +110,7 @@ val run_named :
   ?checkpoint_dir:string ->
   ?context_injector:Oas.Hooks.context_injector ->
   ?context:Oas.Context.t ->
+  ?slot_id:int ->
   ?oas_checkpoint:Oas.Checkpoint.t ->
   ?sw:Eio.Switch.t ->
   ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->

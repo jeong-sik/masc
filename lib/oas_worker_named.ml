@@ -150,6 +150,7 @@ let run_named
     ?checkpoint_dir
     ?context_injector
     ?context
+    ?slot_id
     ?oas_checkpoint
     ?sw
     ?net
@@ -200,6 +201,7 @@ let run_named
       checkpoint_dir;
       context_injector;
       context;
+      slot_id;
     }
   in
   let config = { config with named_cascade = Some named_cascade; initial_messages; raw_trace; yield_on_tool } in

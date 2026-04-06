@@ -20,6 +20,7 @@ type deliberation_trigger =
   | IdleTimeout
   | MetricsAnomaly of string
   | StrategicReview
+  | SelfDirectedExplore
 
 let deliberation_trigger_to_string = function
   | DirectMention -> "direct_mention"
@@ -31,6 +32,7 @@ let deliberation_trigger_to_string = function
   | IdleTimeout -> "idle_timeout"
   | MetricsAnomaly detail -> "metrics_anomaly:" ^ detail
   | StrategicReview -> "strategic_review"
+  | SelfDirectedExplore -> "self_directed_explore"
 
 let deliberation_trigger_to_json trigger =
   `String (deliberation_trigger_to_string trigger)
@@ -258,7 +260,7 @@ let triage (obs : world_observation) : triage_result =
   if obs.failed_task_count > 0 then add FailedTask;
   if obs.agent_count_changed then add AgentJoinedOrLeft;
 
-  (* L2 Proactive triggers *)
+  (* L2 Proactive triggers — goal-directed *)
   if obs.board_mention_count > 0 then
     add (BoardActivity "mentioned_in_post");
   if obs.idle_seconds > obs.idle_gate && obs.active_goal_count > 0 then
@@ -269,6 +271,24 @@ let triage (obs : world_observation) : triage_result =
   if obs.idle_seconds > obs.idle_gate * 5
      && obs.active_goal_count > 0 then
     add StrategicReview;
+
+  (* L3 Self-directed triggers — no goal requirement.
+     Deterministic gates with longer cooldowns to prevent noise.
+
+     Board-reactive: engage with new posts after idle_gate/2 cooldown.
+     Enables community participation without requiring @mention.
+     Gate: idle_seconds >= idle_gate/2 prevents every heartbeat from triggering.
+
+     Self-directed explore: keepers without explicit goals can still act.
+     4x idle_gate (~20min) provides generous cooldown.
+     Allows curiosity-driven behavior: board posts, discussions, findings.
+     Ref: Deepset "spectrum" — self-directed at the autonomy end. *)
+  if obs.board_new_post_count > 0 && obs.idle_seconds >= obs.idle_gate / 2
+     && obs.board_mention_count = 0 then
+    add (BoardActivity "new_posts");
+  if obs.active_goal_count = 0
+     && obs.idle_seconds > obs.idle_gate * 4 then
+    add SelfDirectedExplore;
 
   match List.rev !triggers with
   | [] -> Skip "no triggers detected"
@@ -450,14 +470,23 @@ let has_operational_signal (obs : world_observation) =
   || obs.agent_count_changed
   || has_board_signal obs
 
+(** Self-directed context: keeper is idle with no goals.
+    Deterministic predicate — same conditions as the L3 SelfDirectedExplore
+    trigger in [triage]. Used in [legality_error] to relax action gates
+    for keepers exploring autonomously.
+    Ref: CSA autonomy Level 2-3 — human monitors, agent acts. *)
+let is_self_directed (obs : world_observation) =
+  obs.active_goal_count = 0 && obs.idle_seconds > obs.idle_gate * 4
+
 let rec legality_error (obs : world_observation) = function
   | Noop _ -> None
   | ReplyInRoom _ ->
       if has_room_signal obs then None
       else Some "reply_in_room requires direct mention or a question"
   | BoardPost _ ->
-      if has_board_signal obs || obs.active_goal_count > 0 then None
-      else Some "board_post requires board activity or active goals"
+      if has_board_signal obs || obs.active_goal_count > 0
+         || is_self_directed obs then None
+      else Some "board_post requires board activity, active goals, or self-directed context"
   | BoardComment _ ->
       if has_board_signal obs then None
       else Some "board_comment requires board activity"
@@ -475,19 +504,21 @@ let rec legality_error (obs : world_observation) = function
          || obs.active_goal_count > 0 then None
       else Some "propose_spawn requires failed tasks, unclaimed tasks, or active goals"
   | StartDiscussion _ ->
-      if has_board_signal obs || obs.active_goal_count > 0 then None
-      else Some "start_discussion requires board activity or active goals"
+      if has_board_signal obs || obs.active_goal_count > 0
+         || is_self_directed obs then None
+      else Some "start_discussion requires board activity, active goals, or self-directed context"
   | ShareFinding _ ->
-      if has_board_signal obs || obs.active_goal_count > 0 then None
-      else Some "share_finding requires board activity or active goals"
+      if has_board_signal obs || obs.active_goal_count > 0
+         || is_self_directed obs then None
+      else Some "share_finding requires board activity, active goals, or self-directed context"
   | CreateTask _ ->
       if obs.active_goal_count > 0 || obs.failed_task_count > 0
-         || has_operational_signal obs then None
-      else Some "create_task requires active goals, failed tasks, or an operational signal"
+         || has_operational_signal obs || is_self_directed obs then None
+      else Some "create_task requires active goals, failed tasks, operational signal, or self-directed context"
   | CreateIssue _ ->
       if obs.active_goal_count > 0 || obs.failed_task_count > 0
-         || has_operational_signal obs then None
-      else Some "create_issue requires active goals, failed tasks, or an operational signal"
+         || has_operational_signal obs || is_self_directed obs then None
+      else Some "create_issue requires active goals, failed tasks, operational signal, or self-directed context"
   | MultiStep actions -> (
       match actions with
       | [] -> Some "multi_step requires non-empty steps"

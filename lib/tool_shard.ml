@@ -40,10 +40,11 @@ compact context, extend turns, or hand off to the next generation.";
   (* Memory *)
   {
     name = "keeper_memory_search";
-    description = "Search your memory for past goals, decisions, progress notes, user messages, \
-and conversation history across all generations. Returns scored results with metadata. \
-Default searches the structured memory bank. Use 'kind' to filter by category \
-(goal, decision, progress, next, open_question, constraints). \
+    description = "Recall what the user said earlier or search your memory for past goals, \
+decisions, progress notes, and conversation history across all generations. \
+Returns scored results with metadata. Use to retrieve earlier instructions, \
+deployment plans, or any prior context. Default searches the structured memory bank. \
+Use 'kind' to filter (goal, decision, progress, next, open_question, constraints). \
 Use source='history' for raw user message history, source='all' for both.";
     input_schema = `Assoc [
       ("type", `String "object");

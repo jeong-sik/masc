@@ -553,6 +553,12 @@ let execute_review_action (ctx : 'a context) (request : action_request) =
 
 let execute_action (ctx : 'a context) (request : action_request) :
     (Yojson.Safe.t, string) result =
+  (* Canonicalize legacy action_type aliases before dispatch. *)
+  let request =
+    match request.action_type with
+    | "autonomy_tick" -> { request with action_type = "social_sweep" }
+    | _ -> request
+  in
   match request.action_type with
   | "broadcast" | "namespace_pause" | "namespace_resume" | "social_sweep" | "task_inject" ->
       execute_room_action ctx request

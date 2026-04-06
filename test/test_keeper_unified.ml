@@ -1829,6 +1829,45 @@ let test_normalize_override_passthrough () =
   | Ok text -> check string "passes through" override_text text
   | Error e -> fail ("unexpected error: " ^ e)
 
+(* ---------- Metacognition tests ---------- *)
+
+let meta_with_proactive_history outcome count visible =
+  let rt = minimal_meta.runtime in
+  let prt = { rt.proactive_rt with
+    last_outcome = outcome;
+    count_total = count;
+    visible_count_total = visible;
+    last_reason = "test-reason";
+  } in
+  { minimal_meta with runtime = { rt with proactive_rt = prt } }
+
+let test_prompt_includes_last_cycle_outcome () =
+  let meta = meta_with_proactive_history Masc_mcp.Keeper_types.Proactive_tool_use 5 3 in
+  let _sys, user = UP.build_prompt ~base_path:"/test" ~meta ~observation:base_observation in
+  check bool "has Last Cycle Outcome section"
+    true (contains_substring user "### Last Cycle Outcome");
+  check bool "shows tool_use result"
+    true (contains_substring user "tool_use");
+  check bool "shows cycle counts"
+    true (contains_substring user "Cycles total: 5")
+
+let test_prompt_self_check_after_silent () =
+  let meta = meta_with_proactive_history Masc_mcp.Keeper_types.Proactive_silent 3 1 in
+  let _sys, user = UP.build_prompt ~base_path:"/test" ~meta ~observation:base_observation in
+  check bool "has SELF-CHECK for silent"
+    true (contains_substring user "SELF-CHECK: Last cycle was silent")
+
+let test_prompt_self_check_after_error () =
+  let meta = meta_with_proactive_history Masc_mcp.Keeper_types.Proactive_error 2 1 in
+  let _sys, user = UP.build_prompt ~base_path:"/test" ~meta ~observation:base_observation in
+  check bool "has SELF-CHECK for error"
+    true (contains_substring user "SELF-CHECK: Last cycle ended in error")
+
+let test_prompt_no_outcome_for_fresh_keeper () =
+  let _sys, user = UP.build_prompt ~base_path:"/test" ~meta:minimal_meta ~observation:base_observation in
+  check bool "no Last Cycle Outcome for fresh keeper"
+    false (contains_substring user "### Last Cycle Outcome")
+
 (* ---------- Test runner ---------- *)
 
 let () =
@@ -1916,6 +1955,17 @@ let () =
             test_sanitize_messages_utf8_cleans_history_path;
           test_case "sanitize_messages_utf8 reuses clean history list" `Quick
             test_sanitize_messages_utf8_reuses_clean_history_list;
+        ] );
+      ( "metacognition",
+        [
+          test_case "includes last cycle outcome" `Quick
+            test_prompt_includes_last_cycle_outcome;
+          test_case "self-check after silent" `Quick
+            test_prompt_self_check_after_silent;
+          test_case "self-check after error" `Quick
+            test_prompt_self_check_after_error;
+          test_case "no outcome for fresh keeper" `Quick
+            test_prompt_no_outcome_for_fresh_keeper;
         ] );
       ( "config",
         [

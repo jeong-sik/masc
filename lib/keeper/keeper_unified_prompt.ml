@@ -398,6 +398,64 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
     Buffer.add_string ubuf "\n### Keeper Tools\n";
     Buffer.add_string ubuf (String.concat ", " keeper_tools);
     Buffer.add_string ubuf "\n");
+  (* Metacognition: show the keeper its own recent tool activity so it can
+     recognise patterns — thrashing, failure loops, tool over-reliance.
+     Data comes from Keeper_registry per-entry tool_usage Hashtbl. *)
+  let tool_activity =
+    Keeper_tools_oas.tool_usage_for_keeper meta.name
+    |> List.sort (fun (_, a) (_, b) ->
+      Float.compare b.Keeper_types.last_used_at a.Keeper_types.last_used_at)
+  in
+  let recent_activity = List.filteri (fun i _ -> i < 8) tool_activity in
+  if recent_activity <> [] then (
+    Buffer.add_string ubuf "\n### Recent Tool Activity\n";
+    List.iter (fun (name, (e : Keeper_types.tool_call_entry)) ->
+      let rate =
+        if e.count > 0
+        then float_of_int e.successes /. float_of_int e.count *. 100.0
+        else 0.0
+      in
+      let warning =
+        if e.count >= 3 && rate < 50.0 then " [LOW SUCCESS — try different approach]"
+        else ""
+      in
+      Buffer.add_string ubuf
+        (Printf.sprintf "- %s: %d calls (%d ok, %d fail, %.0f%% success)%s\n"
+           name e.count e.successes e.failures rate warning)
+    ) recent_activity;
+    (* Pattern detection: warn if recent activity is too homogeneous *)
+    let unique_tools = List.sort_uniq String.compare
+      (List.map fst recent_activity) in
+    if List.length recent_activity >= 4
+       && List.length unique_tools <= 2 then
+      Buffer.add_string ubuf
+        "NOTE: You are using very few distinct tools. Consider a different approach.\n");
+  (* Metacognition: last cycle outcome so keeper knows its own behavioral pattern *)
+  let prt = meta.runtime.proactive_rt in
+  let outcome_str = Keeper_types.proactive_cycle_outcome_to_string prt.last_outcome in
+  if prt.count_total > 0 then (
+    Buffer.add_string ubuf "\n### Last Cycle Outcome\n";
+    Buffer.add_string ubuf
+      (Printf.sprintf "- Result: %s\n" outcome_str);
+    if prt.last_reason <> "" then
+      Buffer.add_string ubuf
+        (Printf.sprintf "- Reason: %s\n" prt.last_reason);
+    Buffer.add_string ubuf
+      (Printf.sprintf "- Cycles total: %d (visible: %d, silent: %d)\n"
+         prt.count_total prt.visible_count_total
+         (prt.count_total - prt.visible_count_total));
+    (* Self-correction cues based on pattern *)
+    (match prt.last_outcome with
+     | Proactive_silent ->
+       Buffer.add_string ubuf
+         "SELF-CHECK: Last cycle was silent. If you have observations, act on them.\n"
+     | Proactive_error ->
+       Buffer.add_string ubuf
+         "SELF-CHECK: Last cycle ended in error. Diagnose before retrying the same approach.\n"
+     | Proactive_tool_use when prt.visible_count_total = 0 ->
+       Buffer.add_string ubuf
+         "SELF-CHECK: You have been using tools but never producing visible output. Consider sharing findings.\n"
+     | _ -> ()));
   (* Peer keepers — show other running keepers so this keeper can @mention them *)
   let peer_keepers =
     Keeper_registry.all ~base_path ()

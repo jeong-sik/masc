@@ -1,6 +1,31 @@
 # Changelog
 
 
+## [2.250.0] - 2026-04-06
+
+### Added
+- **Worker safety gates** -- 3-gate pre_tool_use safety checks for Worker. (#5524)
+- **Keeper tool I/O logging** -- tool call input/output logging and inspector. (#5526)
+- **Temporal context injection** -- integrate OAS context_injector for temporal awareness. (#5513)
+
+### Fixed
+- **Keeper creation save failure** -- abort creation on save failure, fix compaction consistency. (#5527)
+- **Keeper empty profiles** -- populate empty keeper profiles with personas and goals. (#5519)
+- **Structured checkpoint errors** -- return structured errors from load_oas instead of option. (#5523)
+- **Dashboard keeper detail** -- keeper detail page audit and cleanup. (#5520)
+- **GLM fallback** -- add glm:auto fallback to keeper_unified_models. (#5518)
+- **SPEC-INDEX baseline** -- align snapshot baseline to 2.249.0. (#5529)
+- **SSOT config tuning** -- SSOT config and SOUL.md for all keepers. (#5536)
+- **Web search tag registry** -- register masc_web_search in Mod_misc tag registry. (#5535)
+- **Idle turn limits** -- relax idle turn limits and make on_idle_decision testable. (#5528)
+- **World state prompt** -- remove keeper_* prefix filter from world state prompt. (#5541)
+
+### Changed
+- **OAS pin bump** -- update agent_sdk dependency to v0.108.0. (#5540, #5525, #5521)
+- **Structured error propagation** -- propagate structured sdk_error instead of strings. (#5539)
+- **Temperature delegation** -- delegate temperature defaults to OAS inference profiles. (#5510)
+- **Token buffer removal** -- remove 15% token buffer, extract 500K compaction threshold. (#5522)
+
 ## [2.249.0] - 2026-04-06
 
 ### Changed

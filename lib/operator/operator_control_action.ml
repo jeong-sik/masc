@@ -222,22 +222,22 @@ let normalize_request_target_type (request : action_request) =
   in
   Ok { request with target_type }
 
+(** Resolve tool name for an action_type. Looks up available_actions first,
+    falls back to legacy mapping for unlisted actions. *)
 let delegated_tool_for action_type =
-  match action_type with
-  | "broadcast" -> "masc_broadcast"
-  | "namespace_pause" -> "masc_pause"
-  | "namespace_resume" -> "masc_resume"
-  | "social_sweep" -> "social_sweep"
-  | "team_turn" | "team_note" | "team_broadcast" | "team_task_inject" ->
-      "masc_team_session_step"
-  | "team_worker_spawn_batch" -> "masc_team_session_step"
-  | "team_stop" -> "masc_team_session_stop"
-  | "keeper_message" -> "masc_keeper_msg"
-  | "keeper_probe" -> "masc_keeper_status"
-  | "keeper_recover" -> "masc_keeper_recover"
-  | "task_inject" -> "masc_add_task"
-  | "review_resolve" | "review_defer" -> "review_state"
-  | _ -> "unknown"
+  match
+    List.find_opt
+      (fun (a : Operator_pending_confirm.available_action) ->
+        String.equal a.action_type action_type)
+      Operator_pending_confirm.available_actions
+  with
+  | Some action -> action.tool_name
+  | None ->
+    (match action_type with
+     | "social_sweep" -> "social_sweep"
+     | "team_turn" -> "masc_team_session_step"
+     | "review_resolve" | "review_defer" -> "review_state"
+     | _ -> "unknown")
 
 let confirm_required = Operator_approval.confirm_required
 

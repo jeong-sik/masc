@@ -929,10 +929,10 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
             Log.Keeper.error
               "%s: %d consecutive turn failures (threshold=%d), escalating to supervisor crash path"
               meta.name count threshold;
-            let reason = Keeper_registry.Turn_consecutive_failures count in
-            raise
-              (Keeper_registry.Keeper_heartbeat_failure
-                 { reason; keeper_name = meta.name })
+            Keeper_registry.set_failure_reason ~base_path:config.base_path
+              meta.name
+              (Some (Keeper_registry.Turn_consecutive_failures count));
+            raise Keeper_registry.Keeper_fiber_crash
           end;
           Error err
       | Ok result ->

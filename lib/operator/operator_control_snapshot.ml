@@ -282,9 +282,7 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                  let pipeline_stage =
                    match Keeper_registry.get_phase ~base_path:config.base_path meta.name with
                    | Some phase -> Keeper_exec_status.pipeline_stage_of_phase phase
-                   | None ->
-                     Keeper_exec_status.derive_pipeline_stage ~meta
-                       ~surface_status:agent_status ~now_ts
+                   | None -> "offline"
                  in
                  Some
                    (`Assoc

@@ -199,7 +199,7 @@ module KeeperKeepalive = struct
   let interval_sec = keepalive_interval_sec_
 
   (** Maximum consecutive heartbeat failures before raising
-      Keeper_heartbeat_failure (structured crash). Default: 5.
+      Keeper_fiber_crash (structured crash via dispatch_event). Default: 5.
       Range: [2, 50]. *)
   let max_consecutive_failures =
     max 2 (min 50 (get_int ~default:5 "MASC_KEEPER_MAX_CONSECUTIVE_HB_FAILURES"))

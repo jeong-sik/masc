@@ -457,62 +457,8 @@ let keeper_diagnostic_json
       ("next_eligible_at_s", keeper_next_eligible_at_s ~meta ~quiet_reason ~now_ts);
     ]
 
-(** Derive pipeline stage from keeper_meta timestamps.
-    Uses recency thresholds to infer what the keeper is doing.
-    Stages: "idle" | "thinking" | "tool_use" | "compacting" | "handoff"
-            | "scheduled_autonomous" | "offline"
-    The 30s recency window matches the typical keeper turn duration. *)
-let derive_pipeline_stage
-    ~(meta : keeper_meta)
-    ~(surface_status : string)
-    ~(now_ts : float)
-  : string =
-  if String.equal surface_status "offline" || String.equal surface_status "inactive"
-  then "offline"
-  else
-    let recency_threshold = 30.0 in
-    let turn_ago =
-      if meta.runtime.usage.last_turn_ts <= 0.0 then Float.infinity
-      else now_ts -. meta.runtime.usage.last_turn_ts
-    in
-    let compaction_ago =
-      if meta.runtime.compaction_rt.last_ts <= 0.0 then Float.infinity
-      else now_ts -. meta.runtime.compaction_rt.last_ts
-    in
-    let handoff_ago =
-      if meta.runtime.last_handoff_ts <= 0.0 then Float.infinity
-      else now_ts -. meta.runtime.last_handoff_ts
-    in
-    let scheduled_autonomous_ago =
-      if meta.runtime.proactive_rt.last_ts <= 0.0 then Float.infinity
-      else now_ts -. meta.runtime.proactive_rt.last_ts
-    in
-    (* Pick the most recent activity within the recency window.
-       Priority order when multiple are recent:
-       handoff > compacting > scheduled autonomous > thinking *)
-    let result =
-      if handoff_ago < recency_threshold then "handoff"
-      else if compaction_ago < recency_threshold then "compacting"
-      else if scheduled_autonomous_ago < recency_threshold then "scheduled_autonomous"
-      else if turn_ago < recency_threshold then "thinking"
-      else "idle"
-    in
-    let min_ago = Float.min turn_ago (Float.min compaction_ago
-        (Float.min handoff_ago scheduled_autonomous_ago)) in
-    Heuristic_metrics.record {
-      module_name = "keeper_exec_status";
-      site = "derive_pipeline_stage";
-      raw_value = min_ago;
-      threshold = recency_threshold;
-      triggered = min_ago < recency_threshold;
-      provenance = Pipeline_stage result;
-      timestamp = now_ts;
-    };
-    result
-
-(** RFC-0002: derive pipeline stage directly from phase.
-    Replaces the heuristic-based [derive_pipeline_stage] with a
-    deterministic mapping from the 11-state phase. *)
+(** Derive pipeline stage directly from the 11-state phase (RFC-0002).
+    Deterministic mapping — no 30s recency heuristic. *)
 let pipeline_stage_of_phase (phase : Keeper_state_machine.phase) : string =
   match phase with
   | Keeper_state_machine.Offline -> "offline"

@@ -65,14 +65,15 @@ let eio_test name fn =
    1. Structured crash flow — supervisor catch simulation
    ══════════════════════════════════════════════════════════ *)
 
-(** Simulate the Keeper_heartbeat_failure catch branch in
-    launch_supervised_fiber (lines 54-65 of keeper_supervisor.ml).
+(** Simulate the Keeper_fiber_crash catch branch in
+    launch_supervised_fiber.  Failure reason is pre-stored in registry,
+    exception carries no payload (RFC-0002).
     Verifies: state = Crashed, failure_reason stored, done_p resolved. *)
 let test_crash_heartbeat_failure () =
   R.clear ();
   let meta = make_meta "hb-crash" in
   let reg = R.register ~base_path:bp "hb-crash" meta in
-  (* Simulate what launch_supervised_fiber does on Keeper_heartbeat_failure *)
+  (* Simulate what launch_supervised_fiber does on Keeper_fiber_crash *)
   let reason = R.Heartbeat_consecutive_failures 5 in
   let reason_str = R.failure_reason_to_string reason in
   R.set_failure_reason ~base_path:bp "hb-crash" (Some reason);

@@ -278,9 +278,9 @@ let test_task_id_null_when_none () =
 (* Test: aggregate_tool_stats                                        *)
 (* ================================================================ *)
 
-let mk_entry ?(error = None) ?(gate = Trajectory.Pass) name dur cost ts_iso =
+let mk_entry ?(ts = 1000.0) ?(error = None) ?(gate = Trajectory.Pass) name dur cost ts_iso =
   { Trajectory.
-    ts = 1000.0; ts_iso; turn = 1; round = 0;
+    ts; ts_iso; turn = 1; round = 0;
     tool_name = name; args_json = "{}";
     gate_decision = gate;
     result = Some "ok"; duration_ms = dur;
@@ -323,7 +323,7 @@ let test_aggregate_empty () =
   Alcotest.(check int) "empty" 0 (List.length stats)
 
 let test_aggregate_p95 () =
-  (* 20 entries: durations 100, 200, ..., 2000. p95 index = floor(20 * 0.95) = 19 -> 2000 *)
+  (* 20 entries: durations 100, 200, ..., 2000. p95 index = round(20 * 0.95) = 19 -> 2000 *)
   let entries = List.init 20 (fun i ->
     mk_entry "keeper_bash" ((i + 1) * 100) 0.0
       (Printf.sprintf "2026-04-06T10:%02d:00Z" i)
@@ -343,7 +343,7 @@ let test_hourly_single_bucket () =
     { (mk_entry "keeper_bash" 100 0.0 "2026-04-06T10:30:00Z") with Trajectory.ts = 1743939000.0 };
   ] in
   let timeline = Trajectory.hourly_timeline entries in
-  (* Both have the same ts so should be 1 bucket *)
+  (* Both entries fall in the same hour bucket (25 min apart) *)
   Alcotest.(check int) "bucket count" 1 (List.length timeline);
   let b = List.hd timeline in
   Alcotest.(check int) "call count" 2 b.Trajectory.call_count;
@@ -410,7 +410,7 @@ let test_read_entries_since () =
     ignore (Sys.command (Printf.sprintf "mkdir -p %s" (Filename.quote traj_dir)));
     let path = Filename.concat traj_dir "trace-100.jsonl" in
     let entry_json ts = Printf.sprintf
-      {|{"ts":%.1f,"ts_iso":"2026-04-06T10:00:00Z","turn":1,"round":0,"tool_name":"keeper_bash","args":"{}","result":"ok","duration_ms":100,"error":null,"cost_usd":0.001}|}
+      {|{"ts":%.1f,"ts_iso":"2026-04-06T10:00:00Z","turn":1,"round":0,"tool_name":"keeper_bash","args":{},"result":"ok","duration_ms":100,"error":null,"cost_usd":0.001}|}
       ts
     in
     let oc = open_out path in

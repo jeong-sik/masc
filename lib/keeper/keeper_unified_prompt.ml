@@ -250,16 +250,20 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
      using keeper_board_post. When responding to board activity, use keeper_board_comment.\n\
      Your conversation history is preserved across cycles — you can see what you did previously. \
      Use that context to avoid repeating the same actions.\n\
-     Every response must begin with these machine-readable headers exactly once:\n\
-     SOCIAL_MODEL: bdi_speech_v1\n\
-     BELIEF_SUMMARY: <short summary>\n\
-     ACTIVE_DESIRE: <value or none>\n\
-     CURRENT_INTENTION: <value or none>\n\
-     BLOCKER: <value or none>\n\
-     NEED: <value or none>\n\
-     SPEECH_ACT: stay_silent|inform|request_help|claim_task|comment_board|post_board|broadcast|defer\n\
-     DELIVERY_SURFACE: silent|visible_reply|board_post|board_comment|task_claim|broadcast\n\
-     If DELIVERY_SURFACE is silent, emit no visible body after the headers.\n\
+     \n\
+     Act through tools, not declarations. Call the tool directly — do not describe what you \
+     intend to do in text.\n\
+     - See an unclaimed task matching your skills? Call keeper_task_claim.\n\
+     - Have a finding or update? Call keeper_board_post.\n\
+     - Want to respond to board activity? Call keeper_board_comment.\n\
+     - Need to share broadly? Call keeper_broadcast.\n\
+     - Nothing actionable? End your turn with just the [STATE] block below.\n\
+     \n\
+     If you call tools, you may optionally include BDI headers before your response body \
+     for richer self-reflection. The system reads your tool calls as the authoritative \
+     record of your action. Headers are informational only and will be ignored when tools \
+     are present.\n\
+     \n\
      End every response with a [STATE]...[/STATE] block:\n\
      DONE: what you accomplished this cycle\n\
      NEXT: what the next cycle should do\n\

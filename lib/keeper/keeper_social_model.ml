@@ -313,13 +313,18 @@ let apply_to_result ~(meta : keeper_meta)
     (result : Keeper_agent_run.run_result) =
   let headers, response_body = parse_header_block result.response_text in
   let state =
-    if headers <> [] then
-      social_state_of_headers ~meta ~observation headers
-    else if result.tools_used <> [] then
+    (* Tool calls are the authoritative record of action.
+       When tools are present, infer social state from tool calls regardless
+       of whether BDI headers were also emitted. This ensures deterministic
+       observation: the system reads what the agent DID (tool calls), not what
+       it DECLARED (text headers). *)
+    if result.tools_used <> [] then
       tool_only_state ~meta ~observation ~result
+    else if headers <> [] then
+      social_state_of_headers ~meta ~observation headers
     else
       protocol_violation_state ~meta ~observation
-        ~reason:"missing social headers"
+        ~reason:"no tool calls and no social headers"
   in
   match state.speech_act, state.delivery_surface with
   | Request_help, Board_post when result.tools_used = [] ->

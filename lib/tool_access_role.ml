@@ -81,8 +81,6 @@ let worker_only_tools =
     "masc_keeper_msg";
     "masc_keeper_repair";
     "masc_keeper_create_from_persona";
-    (* CanBroadcast — voice *)
-    "masc_voice_ping_pong";
     (* CanBroadcast — org units *)
     "masc_unit_define";
     "masc_unit_reparent";

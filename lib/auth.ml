@@ -313,7 +313,6 @@ let legacy_permission_for_tool = function
   | "masc_keeper_up" | "masc_keeper_down" | "masc_keeper_msg"
   | "masc_keeper_repair"
   | "masc_keeper_create_from_persona"
-  | "masc_voice_ping_pong"
   | "masc_operator_confirm" | "masc_unit_define"
   | "masc_unit_reparent"
   | "masc_unit_reassign" | "masc_operation_start"

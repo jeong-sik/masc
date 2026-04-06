@@ -1,8 +1,7 @@
 (** Keeper Tool Exposure Tests
 
     Verifies that keeper_allowed_tool_names returns the full tool set
-    unconditionally, with voice tools available by default,
-    and write_done producing empty list. *)
+    per preset/custom policy and write_done producing empty list. *)
 
 open Alcotest
 open Masc_mcp
@@ -65,12 +64,6 @@ let test_default_has_base_tools () =
   check bool "has keeper_time_now" true (has_tool "keeper_time_now" tools);
   check bool "has keeper_context_status" true (has_tool "keeper_context_status" tools)
 
-let test_default_has_voice () =
-  let meta = make_meta ~policy_voice_enabled:false () in
-  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  check bool "voice tools available by default" true
-    (has_tool "keeper_voice_speak" tools)
-
 (* Governance tool schemas are no longer registered. *)
 let test_default_has_no_legacy_governance_tools () =
   let meta = make_meta () in
@@ -106,23 +99,6 @@ let test_custom_unknown_tool_names_are_dropped () =
     (has_tool "masc_status" tools);
   check bool "drops unknown tool" false
     (has_tool "totally_unknown_tool" tools)
-
-(* ============================================================
-   3. Voice tools are always available
-   ============================================================ *)
-
-let test_messaging_preset_has_voice_tools () =
-  let meta = make_meta ~preset:Keeper_types.Messaging () in
-  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  check bool "has keeper_voice_speak" true (has_tool "keeper_voice_speak" tools);
-  check bool "has keeper_voice_agent" true (has_tool "keeper_voice_agent" tools);
-  check bool "has keeper_voice_sessions" true (has_tool "keeper_voice_sessions" tools)
-
-let test_coding_preset_omits_voice_tools () =
-  let meta = make_meta ~preset:Keeper_types.Coding () in
-  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  check bool "voice_speak omitted" false (has_tool "keeper_voice_speak" tools);
-  check bool "voice_agent omitted" false (has_tool "keeper_voice_agent" tools)
 
 (* ============================================================
    4. All keepers get shell tools (mode removed)
@@ -244,22 +220,22 @@ let test_sufficient_tool_count () =
    8. Combined profiles
    ============================================================ *)
 
-let test_research_plus_voice_override_combined () =
+let test_research_plus_also_allow_combined () =
   let meta =
-    make_meta 
+    make_meta
       ~tool_access:
         (Keeper_types.Preset
            {
              preset = Keeper_types.Research;
-             also_allow = [ "keeper_voice_speak"; "keeper_voice_agent" ];
+             also_allow = [ "keeper_board_get"; "keeper_board_post" ];
            })
       ()
   in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  check bool "has voice" true (has_tool "keeper_voice_speak" tools);
+  check bool "has board_get via also_allow" true (has_tool "keeper_board_get" tools);
   check bool "has shell readonly" true (has_tool "keeper_shell_readonly" tools);
   check bool "has autoresearch" true (has_any_prefix "masc_autoresearch_" tools);
-  check bool "has board" true (has_tool "keeper_board_get" tools);
+  check bool "has board_post via also_allow" true (has_tool "keeper_board_post" tools);
   check bool "has read" true (has_tool "keeper_fs_read" tools)
 
 (* ============================================================
@@ -509,17 +485,12 @@ let () =
     ]);
     ("default_profile", [
       test_case "has base tools" `Quick test_default_has_base_tools;
-      test_case "has voice tools" `Quick test_default_has_voice;
       test_case "legacy governance tools removed" `Quick test_default_has_no_legacy_governance_tools;
       test_case "has research tools" `Quick test_default_has_research_tools;
       test_case "custom empty blocks all tools" `Quick
         test_custom_empty_blocks_all_tools;
       test_case "custom unknown tool names are dropped" `Quick
         test_custom_unknown_tool_names_are_dropped;
-    ]);
-    ("voice_profile", [
-      test_case "messaging preset has voice" `Quick test_messaging_preset_has_voice_tools;
-      test_case "coding preset omits voice" `Quick test_coding_preset_omits_voice_tools;
     ]);
     ("shell_tools", [
       test_case "coding preset has shell readonly" `Quick test_coding_preset_has_shell_readonly;
@@ -549,7 +520,7 @@ let () =
       test_case "sufficient tool count" `Quick test_sufficient_tool_count;
     ]);
     ("combined_profiles", [
-      test_case "research plus voice override" `Quick test_research_plus_voice_override_combined;
+      test_case "research plus also_allow override" `Quick test_research_plus_also_allow_combined;
     ]);
     ("deduplication", [
       test_case "no duplicate tools" `Quick test_no_duplicate_tools;

@@ -196,24 +196,7 @@ let test_all_keepers_get_full_toolset () =
   check bool "has keeper_fs_read" true (List.mem "keeper_fs_read" tools);
   check bool "has keeper_board_list" true (List.mem "keeper_board_list" tools);
   check bool "has keeper_board_get" true (List.mem "keeper_board_get" tools);
-  check bool "has keeper_shell_readonly" true (List.mem "keeper_shell_readonly" tools);
-  check bool "keeper_voice_speak available" true
-    (List.mem "keeper_voice_speak" tools);
-  check bool "keeper_voice_listen available" true
-    (List.mem "keeper_voice_listen" tools)
-
-let test_voice_enabled () =
-  let meta = make_meta ~preset:Keeper_types.Messaging () in
-  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  check bool "has keeper_voice_speak" true (List.mem "keeper_voice_speak" tools);
-  check bool "has keeper_voice_listen" true (List.mem "keeper_voice_listen" tools);
-  check bool "has keeper_voice_agent" true (List.mem "keeper_voice_agent" tools)
-
-let test_voice_disabled () =
-  let meta = make_meta ~preset:Keeper_types.Coding () in
-  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  check bool "keeper_voice_speak omitted" false (List.mem "keeper_voice_speak" tools);
-  check bool "keeper_voice_agent omitted" false (List.mem "keeper_voice_agent" tools)
+  check bool "has keeper_shell_readonly" true (List.mem "keeper_shell_readonly" tools)
 
 let test_all_keepers_have_research_tools () =
   let meta = make_meta ~preset:Keeper_types.Research  () in
@@ -230,10 +213,9 @@ let test_heuristic_mode_tools () =
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "heuristic returns nonempty tools" true (List.length tools > 0)
 
-let test_voice_plus_other_tools () =
+let test_messaging_preset_tools () =
   let meta = make_meta ~preset:Keeper_types.Messaging () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  check bool "has voice_speak" true (List.mem "keeper_voice_speak" tools);
   check bool "has board tools" true (List.mem "keeper_board_post" tools);
   check bool "omits keeper_fs_read" false (List.mem "keeper_fs_read" tools)
 
@@ -405,11 +387,9 @@ let () =
     ("policy_mode_tool_grants", [
       test_case "write_done kills all tools" `Quick test_write_done_kills_all;
       test_case "all keepers get full toolset" `Quick test_all_keepers_get_full_toolset;
-      test_case "voice enabled" `Quick test_voice_enabled;
-      test_case "voice disabled" `Quick test_voice_disabled;
       test_case "allowlisted keepers have research tools" `Quick test_all_keepers_have_research_tools;
       test_case "heuristic mode" `Quick test_heuristic_mode_tools;
-      test_case "voice plus other tools" `Quick test_voice_plus_other_tools;
+      test_case "messaging preset tools" `Quick test_messaging_preset_tools;
       test_case "all keepers have shell and coding" `Quick test_all_keepers_have_shell_and_coding;
       test_case "all modes produce same tools" `Quick test_all_modes_produce_same_tools;
     ]);

@@ -52,12 +52,12 @@ describe('normalizeKeepers lifecycle metrics', () => {
             latency_ms: 140,
             generation: 5,
             channel: 'turn',
-            model_used: 'gpt-5.4',
+            model_used: 'llama:test-balanced',
             cost_usd: 0.2,
             compacted: false,
             handoff: {
               performed: true,
-              to_model: 'gpt-5.4',
+              to_model: 'llama:test-balanced',
               to_generation: 6,
             },
           },
@@ -69,7 +69,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
     const metric = keeper!.metrics_series![0]
     expect(metric).toMatchObject({
       is_handoff: true,
-      handoff_to_model: 'gpt-5.4',
+      handoff_to_model: 'llama:test-balanced',
       handoff_new_generation: 6,
     })
     expect(deriveLifecycleState(keeper!)).toBe('handoff-imminent')

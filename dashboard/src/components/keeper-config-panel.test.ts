@@ -24,8 +24,8 @@ const mocks = vi.hoisted(() => ({
       effective_system_prompt: 'full prompt',
     },
     execution: {
-      models: ['gpt-5.4'],
-      active_model: 'gpt-5.4',
+      models: ['llama:test-balanced'],
+      active_model: 'llama:test-balanced',
       verify: true,
     },
     compaction: {
@@ -86,7 +86,7 @@ const mocks = vi.hoisted(() => ({
       total_output_tokens: 800,
       total_tokens: 2000,
       total_cost_usd: 0.12,
-      last_model_used: 'gpt-5.4',
+      last_model_used: 'llama:test-balanced',
       last_input_tokens: 120,
       last_output_tokens: 80,
       last_total_tokens: 200,

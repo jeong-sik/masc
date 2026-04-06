@@ -422,7 +422,7 @@ let first_sentence desc =
 let enum_hints_of_schema (schema : Yojson.Safe.t) : string =
   let module U = Yojson.Safe.Util in
   let properties = match U.member "properties" schema with
-  | `Assoc props -> U.to_assoc props
+  | `Assoc props -> props
   | _ -> []
   in
   let enums =

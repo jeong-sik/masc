@@ -43,6 +43,7 @@ proactive_enabled = true
 # allowed_paths = ["src/", "lib/"]
 
 
+tool_preset = "delivery"
 tool_denylist = []
 
 # Tool shards — restrict which tool groups are available.

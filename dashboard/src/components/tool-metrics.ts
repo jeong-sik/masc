@@ -43,6 +43,7 @@ function categoryBarColor(colorClass: string): string {
 
 function BarChart({ items, maxCount }: { items: ToolMetricsTopEntry[]; maxCount: number }) {
   if (items.length === 0) return html`<p class="muted">아직 도구 호출 기록이 없습니다.</p>`
+  const hasTier = items.some(item => item.tier != null && item.tier !== '')
   return html`
     <div class="flex flex-col gap-1.5">
       ${items.map(item => {
@@ -55,7 +56,9 @@ function BarChart({ items, maxCount }: { items: ToolMetricsTopEntry[]; maxCount:
               <span class="flex-shrink-0 size-4 rounded text-[9px] font-mono font-bold flex items-center justify-center bg-[var(--white-5)] ${cat.color}">${cat.icon}</span>
               <span class="text-[var(--text-body)] overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px]" title=${item.name}>${item.name}</span>
             </div>
-            <span class="px-1.5 py-px rounded-[3px] text-[10px] font-semibold text-center ${tierBadgeClass(item.tier)}">${tierLabel(item.tier)}</span>
+            ${hasTier
+              ? html`<span class="px-1.5 py-px rounded-[3px] text-[10px] font-semibold text-center ${tierBadgeClass(item.tier)}">${tierLabel(item.tier)}</span>`
+              : html`<span class="px-1.5 py-px rounded-[3px] text-[10px] font-medium text-center text-[var(--text-dim)] bg-[var(--white-4)]">${cat.label}</span>`}
             <div class="h-3.5 rounded-[3px] bg-[var(--white-6)] overflow-hidden">
               <div class="h-full rounded-[3px] min-w-0.5 transition-[width] duration-300 ease-in-out" style=${{ width: `${pct}%`, backgroundColor: barBg }} />
             </div>
@@ -67,7 +70,8 @@ function BarChart({ items, maxCount }: { items: ToolMetricsTopEntry[]; maxCount:
   `
 }
 
-function TierDistribution({ dist }: { dist: Record<string, number> }) {
+function TierDistribution({ dist }: { dist: Record<string, number> | null | undefined }) {
+  if (!dist) return html`<div class="text-[11px] text-[var(--text-muted)] italic">서버에서 계층 분류 데이터를 제공하지 않습니다.</div>`
   const total = dist.total ?? dist.full ?? 0
   const essential = dist.essential ?? 0
   const standardOnly = dist.standard_only ?? dist.standard ?? 0

@@ -87,7 +87,9 @@ let role_of_string = function
   | "user" -> Agent_sdk.Types.User
   | "assistant" -> Agent_sdk.Types.Assistant
   | "tool" -> Agent_sdk.Types.Tool
-  | _ -> Agent_sdk.Types.User
+  | unknown ->
+    Log.Misc.warn "tool_compact: unknown role %S, defaulting to User" unknown;
+    Agent_sdk.Types.User
 
 let string_of_role = function
   | Agent_sdk.Types.System -> "system"

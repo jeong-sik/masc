@@ -131,7 +131,7 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
     long_goal;
     cascade_name =
       (if String.trim old.cascade_name <> "" then old.cascade_name
-       else "keeper_unified");
+       else Keeper_config.default_cascade_name);
     will =
       Option.value
         ~default:

@@ -2,10 +2,11 @@
 
 import { html } from 'htm/preact'
 import { keeperHealthSummary, type KeeperPressure } from '../../live-store'
+import { CONTEXT_RATIO_CRITICAL, CONTEXT_RATIO_WARN } from '../../config/constants'
 
 function pressureColor(ratio: number): string {
-  if (ratio > 0.85) return 'bg-[var(--bad)]'
-  if (ratio > 0.70) return 'bg-[var(--warn)]'
+  if (ratio > CONTEXT_RATIO_CRITICAL) return 'bg-[var(--bad)]'
+  if (ratio > CONTEXT_RATIO_WARN) return 'bg-[var(--warn)]'
   if (ratio > 0.50) return 'bg-[var(--warn)]'
   return 'bg-[var(--ok)]'
 }

@@ -6,6 +6,7 @@ import type {
 import { isRecord, asString, asNumber, asBoolean, asStringArray, toIsoTimestamp } from './components/common/normalize'
 import { isOfflineStatus } from './lib/status-utils'
 import { keeperDisplayStatus } from './lib/keeper-runtime-display'
+import { CONTEXT_RATIO_CRITICAL, CONTEXT_RATIO_WARN } from './config/constants'
 
 function normalizeKeeperAgentStatus(value: unknown): Keeper['status'] {
   const raw = typeof value === 'string' ? value.toLowerCase() : ''
@@ -39,8 +40,8 @@ export function deriveLifecycleState(keeper: Keeper): KeeperLifecycleState {
   if (latest.is_handoff) return 'handoff-imminent'
   if (latest.is_compaction) return 'compacting'
   const ratio = latest.context_ratio
-  if (ratio > 0.85) return 'handoff-imminent'
-  if (ratio > 0.70) return 'preparing'
+  if (ratio > CONTEXT_RATIO_CRITICAL) return 'handoff-imminent'
+  if (ratio > CONTEXT_RATIO_WARN) return 'preparing'
   if (ratio > 0.50) return 'compacting'
   return 'active'
 }

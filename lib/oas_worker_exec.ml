@@ -318,6 +318,91 @@ let enrich_idle_detail (detail : string) (messages : Oas.Types.message list) : s
   else detail
 
 (* ================================================================ *)
+(* Resume from checkpoint                                            *)
+(* ================================================================ *)
+
+(** Build an Agent.t from a checkpoint via [Agent.resume], overriding
+    per-turn config values from the MASC config.
+
+    The checkpoint provides: messages, turn_count, usage_stats.
+    The MASC config provides: provider, model_id, system_prompt,
+    max_turns, temperature, tools, hooks, guardrails, etc.
+
+    [max_turns] and [max_cost_usd] are adjusted to account for
+    cumulative values in the checkpoint — the keeper's per-call budget
+    is added on top of the checkpoint's accumulated state. *)
+let resume_from_checkpoint
+    ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
+    ~(config : config)
+    ~(checkpoint : Oas.Checkpoint.t)
+  : Oas.Agent.t =
+  (* Adjust budgets: max_turns and max_cost_usd are per-call, but
+     Agent.resume restores turn_count/usage from checkpoint. Without
+     adjustment the loop guard fires immediately on resumed agents. *)
+  let effective_max_turns = checkpoint.turn_count + config.max_turns in
+  let effective_max_cost_usd = match config.max_cost_usd with
+    | Some budget ->
+      Some (checkpoint.usage.estimated_cost_usd +. budget)
+    | None -> None
+  in
+  (* Patch checkpoint fields that MASC controls per-turn.
+     OAS build_resume copies checkpoint.model/system_prompt/temperature
+     over the base config, so we align the checkpoint with MASC intent. *)
+  let patched_checkpoint = { checkpoint with
+    Oas.Checkpoint.model = config.model_id;
+    system_prompt = Some config.system_prompt;
+    temperature = Some config.temperature;
+    enable_thinking = config.enable_thinking;
+    cache_system_prompt = config.cache_system_prompt;
+    max_input_tokens = config.max_input_tokens;
+    max_total_tokens = Some config.max_tokens;
+  } in
+  let agent_config : Oas.Types.agent_config = {
+    Oas.Types.default_config with
+    name = config.name;
+    model = config.model_id;
+    system_prompt = Some config.system_prompt;
+    max_tokens = config.max_tokens;
+    max_turns = effective_max_turns;
+    temperature = Some config.temperature;
+    enable_thinking = config.enable_thinking;
+    cache_system_prompt = config.cache_system_prompt;
+    max_input_tokens = config.max_input_tokens;
+    max_cost_usd = effective_max_cost_usd;
+    yield_on_tool = config.yield_on_tool;
+    context_compact_ratio = config.compact_ratio;
+    priority = config.priority;
+  } in
+  let tool_names =
+    List.map (fun (t : Oas.Tool.t) -> t.schema.name) config.tools in
+  let guardrails = match config.guardrails with
+    | Some g -> g
+    | None ->
+      { Oas.Guardrails.default with
+        tool_filter =
+          if tool_names <> [] then Oas.Guardrails.AllowList tool_names
+          else Oas.Guardrails.AllowAll }
+  in
+  let options : Oas.Agent.options = {
+    Oas.Agent.default_options with
+    provider = Some config.provider;
+    hooks = Option.value ~default:Oas.Hooks.empty config.hooks;
+    max_idle_turns = config.max_idle_turns;
+    guardrails;
+    context_reducer = config.context_reducer;
+    context_injector = config.context_injector;
+    event_bus = config.event_bus;
+    memory = config.memory;
+    raw_trace = config.raw_trace;
+    tool_retry_policy = config.tool_retry_policy;
+    allowed_paths = config.allowed_paths;
+    description = config.description;
+  } in
+  Oas.Agent.resume ~net ~checkpoint:patched_checkpoint ~tools:config.tools
+    ?context:config.context ?named_cascade:config.named_cascade
+    ~options ~config:agent_config ()
+
+(* ================================================================ *)
 (* Run                                                               *)
 (* ================================================================ *)
 
@@ -325,6 +410,7 @@ let run
     ~(sw : Eio.Switch.t)
     ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
     ~(config : config)
+    ?oas_checkpoint
     ?(on_event : (Oas.Types.sse_event -> unit) option)
     ?(on_yield : (unit -> unit) option)
     ?(on_resume : (unit -> unit) option)
@@ -349,7 +435,18 @@ let run
   Option.iter (fun bus ->
     publish_lifecycle bus ~name:config.name ~event:"build" ~detail:goal
   ) config.event_bus;
-  match build ~net ~config with
+  let agent_result = match oas_checkpoint with
+    | Some checkpoint ->
+      (try Ok (resume_from_checkpoint ~net ~config ~checkpoint)
+       with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
+         Log.Misc.warn "oas_worker %s: resume_from_checkpoint failed (%s), falling back to build"
+           config.name (Printexc.to_string exn);
+         build ~net ~config)
+    | None -> build ~net ~config
+  in
+  match agent_result with
   | Error e ->
     Option.iter (fun bus ->
       publish_lifecycle bus ~name:config.name ~event:"build_error"

@@ -231,16 +231,35 @@ let write_heartbeat_snapshot
       ~primary_model_max_tokens:max_cascade_context
       ~base_dir
   in
-  match ctx_opt with
-  | None -> ()
-  | Some c ->
+  (* Fallback: when OAS checkpoint is absent (e.g. after server restart
+     mid-turn), load messages from history.jsonl to recover continuity.
+     This prevents the "orphan user" problem where interrupted turns
+     leave user-only entries and continuity_summary stays empty forever. *)
+  let messages_for_continuity = match ctx_opt with
+    | Some c -> c.messages
+    | None ->
+      let history_path =
+        Filename.concat
+          (Filename.concat base_dir meta_current.runtime.trace_id)
+          "history.jsonl"
+      in
+      (try
+        Fs_compat.load_jsonl history_path
+        |> List.filter_map (fun json ->
+          try Some (Keeper_context_core.message_of_json json)
+          with _ -> None)
+      with _ -> [])
+  in
+  if messages_for_continuity = [] then ()
+  else
+    let c_messages = messages_for_continuity in
     let latest_user_message =
-      latest_message_content_by_role ~role:Agent_sdk.Types.User c.messages
+      latest_message_content_by_role ~role:Agent_sdk.Types.User c_messages
     in
     let latest_assistant_message =
-      latest_message_content_by_role ~role:Agent_sdk.Types.Assistant c.messages
+      latest_message_content_by_role ~role:Agent_sdk.Types.Assistant c_messages
     in
-    let continuity_snapshot = latest_state_snapshot_from_messages c.messages in
+    let continuity_snapshot = latest_state_snapshot_from_messages c_messages in
     let continuity_summary =
       match continuity_snapshot with
       | Some s -> keeper_state_snapshot_to_summary_text s
@@ -249,7 +268,7 @@ let write_heartbeat_snapshot
         if trimmed = "" then "No continuity snapshot available." else trimmed
     in
     let repetition_risk =
-      repetition_risk_score ~messages:c.messages ~candidate_reply:None
+      repetition_risk_score ~messages:c_messages ~candidate_reply:None
     in
     let goal_alignment =
       goal_alignment_score
@@ -263,12 +282,24 @@ let write_heartbeat_snapshot
         jaccard_similarity user_message assistant_message
       | _ -> 0.0
     in
+    let context_ratio_v = match ctx_opt with
+      | Some c -> Keeper_exec_context.context_ratio c
+      | None -> 0.0
+    in
+    let message_count_v = match ctx_opt with
+      | Some c -> Keeper_exec_context.message_count c
+      | None -> List.length c_messages
+    in
+    let token_count_v = match ctx_opt with
+      | Some c -> Keeper_exec_context.token_count c
+      | None -> 0
+    in
     let auto_rules =
       evaluate_keeper_auto_rules
         ~meta:meta_current
-        ~context_ratio:(Keeper_exec_context.context_ratio c)
-        ~message_count:(Keeper_exec_context.message_count c)
-        ~token_count:(Keeper_exec_context.token_count c)
+        ~context_ratio:context_ratio_v
+        ~message_count:message_count_v
+        ~token_count:token_count_v
         ~repetition_risk
         ~goal_alignment
         ~response_alignment
@@ -315,10 +346,10 @@ let write_heartbeat_snapshot
         ~generation:meta_current.runtime.generation
         ~timestamp:now_ts
         ~thresholds
-        ~context_ratio:(Keeper_exec_context.context_ratio c)
-        ~message_count:(Keeper_exec_context.message_count c)
-        ~token_count:(Keeper_exec_context.token_count c)
-        ~max_tokens:c.max_tokens
+        ~context_ratio:context_ratio_v
+        ~message_count:message_count_v
+        ~token_count:token_count_v
+        ~max_tokens:(match ctx_opt with Some c -> c.max_tokens | None -> max_cascade_context)
         ~repetition_risk
         ~goal_alignment
         ~response_alignment
@@ -337,9 +368,9 @@ let write_heartbeat_snapshot
         ~base_path:ctx.config.base_path
         meta_current.name
         (Keeper_state_machine.Context_measured {
-          context_ratio = Keeper_exec_context.context_ratio c;
-          message_count = Keeper_exec_context.message_count c;
-          token_count = Keeper_exec_context.token_count c;
+          context_ratio = context_ratio_v;
+          message_count = message_count_v;
+          token_count = token_count_v;
           auto_rules = {
             Keeper_state_machine.reflect = auto_rules.reflect;
             plan = auto_rules.plan;
@@ -367,18 +398,18 @@ let write_heartbeat_snapshot
           )
         ; "latency_ms", `Int 0
         ; "cost_usd", `Float 0.0
-        ; "context_ratio", `Float (Keeper_exec_context.context_ratio c)
-        ; "context_tokens", `Int (Keeper_exec_context.token_count c)
-        ; "context_max", `Int c.max_tokens
-        ; "message_count", `Int (Keeper_exec_context.message_count c)
+        ; "context_ratio", `Float context_ratio_v
+        ; "context_tokens", `Int token_count_v
+        ; "context_max", `Int (match ctx_opt with Some c -> c.max_tokens | None -> max_cascade_context)
+        ; "message_count", `Int message_count_v
         ; ( "continuity_state"
           , match continuity_snapshot with
             | None -> `Null
             | Some s -> keeper_state_snapshot_to_json s )
         ; "continuity_summary", `String continuity_summary
         ; "compacted", `Bool false
-        ; "compaction_before_tokens", `Int (Keeper_exec_context.token_count c)
-        ; "compaction_after_tokens", `Int (Keeper_exec_context.token_count c)
+        ; "compaction_before_tokens", `Int token_count_v
+        ; "compaction_after_tokens", `Int token_count_v
         ; "work_kind", `String "status_tick"
         ; "tool_call_count", `Int 0
         ; "tools_used", `List []
@@ -410,7 +441,7 @@ let write_heartbeat_snapshot
              [ "type", `String "keeper_heartbeat"
              ; "name", `String meta_current.name
              ; "generation", `Int meta_current.runtime.generation
-             ; "context_ratio", `Float (Keeper_exec_context.context_ratio c)
+             ; "context_ratio", `Float context_ratio_v
              ; "ts_unix", `Float now_ts
              ])
      with
@@ -423,8 +454,8 @@ let write_heartbeat_snapshot
          bus
          ~keeper_name:meta_current.name
          ~generation:meta_current.runtime.generation
-         ~context_ratio:(Keeper_exec_context.context_ratio c)
-         ~message_count:(List.length c.messages)
+         ~context_ratio:context_ratio_v
+         ~message_count:message_count_v
      | None -> ());
     (try
        Keeper_registry.flush_tool_usage ~base_path:ctx.config.base_path meta_current.name

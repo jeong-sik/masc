@@ -80,6 +80,19 @@ let test_set_with_tags () =
   );
   print_endline "✓ test_set_with_tags passed"
 
+let test_large_value_round_trips_without_truncation () =
+  with_temp_masc_dir (fun config ->
+    let large_value = String.make 2048 'x' in
+    let result = Cache_eio.set config ~key:"large-value" ~value:large_value () in
+    assert (Result.is_ok result);
+    match Cache_eio.get config ~key:"large-value" with
+    | Ok (Some entry) ->
+        assert (String.length entry.Cache_eio.value = 2048);
+        assert (entry.Cache_eio.value = large_value)
+    | _ -> failwith "Expected large cache value to round-trip intact"
+  );
+  print_endline "✓ test_large_value_round_trips_without_truncation passed"
+
 let test_get_nonexistent () =
   with_temp_masc_dir (fun config ->
     match Cache_eio.get config ~key:"nonexistent" with
@@ -243,11 +256,92 @@ let test_maybe_evict_expired_throttled () =
   );
   print_endline "  test_maybe_evict_expired_throttled passed"
 
+let with_cache_limits ~max_entries ~max_entry_size f =
+  let prev_max_entries = Sys.getenv_opt "MASC_CACHE_MAX_ENTRIES" in
+  let prev_max_entry_size = Sys.getenv_opt "MASC_CACHE_MAX_ENTRY_SIZE" in
+  Unix.putenv "MASC_CACHE_MAX_ENTRIES" (string_of_int max_entries);
+  Unix.putenv "MASC_CACHE_MAX_ENTRY_SIZE" (string_of_int max_entry_size);
+  Fun.protect
+    ~finally:(fun () ->
+      (match prev_max_entries with
+       | Some v -> Unix.putenv "MASC_CACHE_MAX_ENTRIES" v
+       | None -> Unix.putenv "MASC_CACHE_MAX_ENTRIES" "1000");
+      match prev_max_entry_size with
+      | Some v -> Unix.putenv "MASC_CACHE_MAX_ENTRY_SIZE" v
+      | None -> Unix.putenv "MASC_CACHE_MAX_ENTRY_SIZE" "102400")
+    f
+
+let test_distinct_keys_do_not_collide_after_sanitize () =
+  with_temp_masc_dir (fun config ->
+    let key_a = "feature/a" in
+    let key_b = "feature:a" in
+    let _ = Cache_eio.set config ~key:key_a ~value:"value-a" () in
+    let _ = Cache_eio.set config ~key:key_b ~value:"value-b" () in
+    match Cache_eio.get config ~key:key_a, Cache_eio.get config ~key:key_b with
+    | Ok (Some entry_a), Ok (Some entry_b) ->
+        assert (entry_a.Cache_eio.value = "value-a");
+        assert (entry_b.Cache_eio.value = "value-b");
+        assert (Cache_eio.count_entries config = 2)
+    | _ -> failwith "Expected both colliding-sanitize keys to survive independently"
+  );
+  print_endline "  test_distinct_keys_do_not_collide_after_sanitize passed"
+
+let test_overwrite_existing_key_when_cache_is_full () =
+  with_cache_limits ~max_entries:1 ~max_entry_size:102400 (fun () ->
+    with_temp_masc_dir (fun config ->
+      let _ = Cache_eio.set config ~key:"same-key" ~value:"first" () in
+      match Cache_eio.set config ~key:"same-key" ~value:"second" () with
+      | Ok entry ->
+          assert (entry.Cache_eio.value = "second");
+          assert (Cache_eio.count_entries config = 1);
+          (match Cache_eio.get config ~key:"same-key" with
+           | Ok (Some fetched) -> assert (fetched.Cache_eio.value = "second")
+           | _ -> failwith "Expected overwrite to remain readable")
+      | Error msg ->
+          failwith ("Expected overwrite to succeed when cache is full: " ^ msg)
+    ));
+  print_endline "  test_overwrite_existing_key_when_cache_is_full passed"
+
+let test_get_migrates_legacy_entry_and_list_dedupes () =
+  with_temp_masc_dir (fun config ->
+    let key = "legacy/key" in
+    let legacy_path =
+      Filename.concat (Cache_eio.cache_dir config)
+        (Cache_eio.sanitize_key key ^ ".json")
+    in
+    Fs_compat.mkdir_p (Filename.dirname legacy_path);
+    let entry : Cache_eio.cache_entry = {
+      key;
+      value = "legacy-value";
+      created_at = Unix.gettimeofday ();
+      expires_at = None;
+      tags = ["legacy"];
+    } in
+    Fs_compat.save_file legacy_path
+      (Yojson.Safe.pretty_to_string (Cache_eio.entry_to_json entry));
+    Cache_eio.reset_cached_entry_count ();
+    assert (Cache_eio.count_entries config = 1);
+    (match Cache_eio.get config ~key with
+     | Ok (Some fetched) -> assert (fetched.Cache_eio.value = "legacy-value")
+     | _ -> failwith "Expected legacy entry to be readable");
+    let primary_path =
+      Filename.concat (Cache_eio.cache_dir config)
+        (Cache_eio.cache_filename key ^ ".json")
+    in
+    assert (Sys.file_exists primary_path);
+    assert (not (Sys.file_exists legacy_path));
+    let listed = Cache_eio.list config () in
+    assert (List.length listed = 1);
+    assert (Cache_eio.count_entries config = 1)
+  );
+  print_endline "  test_get_migrates_legacy_entry_and_list_dedupes passed"
+
 let () =
   print_endline "\n=== Cache_eio Tests (Pure Sync) ===\n";
   test_set_and_get ();
   test_set_with_ttl ();
   test_set_with_tags ();
+  test_large_value_round_trips_without_truncation ();
   test_get_nonexistent ();
   test_delete ();
   test_list ();
@@ -257,4 +351,7 @@ let () =
   test_evict_expired_batch ();
   test_maybe_evict_expired_triggers_when_ratio_high ();
   test_maybe_evict_expired_throttled ();
-  print_endline "\n=== All 12 Cache_eio tests passed ===\n"
+  test_distinct_keys_do_not_collide_after_sanitize ();
+  test_overwrite_existing_key_when_cache_is_full ();
+  test_get_migrates_legacy_entry_and_list_dedupes ();
+  print_endline "\n=== All 16 Cache_eio tests passed ===\n"

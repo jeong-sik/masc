@@ -42,24 +42,33 @@ let sanitize_key key =
     String.sub safe 0 64
   else safe
 
+let key_filename_prefix key =
+  let safe = sanitize_key key in
+  if String.length safe > 48 then
+    String.sub safe 0 48
+  else safe
+
+let key_filename_hash key =
+  Digestif.SHA256.(digest_string key |> to_hex)
+  |> fun hex -> String.sub hex 0 16
+
+let cache_filename key =
+  let prefix = key_filename_prefix key in
+  let suffix = key_filename_hash key in
+  if prefix = "" then suffix else prefix ^ "-" ^ suffix
+
 (** Get cache file path *)
 let cache_file config key =
+  Filename.concat (cache_dir config) (cache_filename key ^ ".json")
+
+let legacy_cache_file config key =
   Filename.concat (cache_dir config) (sanitize_key key ^ ".json")
 
-(** Entry to JSON — truncates value at 512 bytes for listing responses *)
-let max_list_value_len = 512
-
 let entry_to_json (entry : cache_entry) : Yojson.Safe.t =
-  let value_len = String.length entry.value in
-  let display_value =
-    if value_len > max_list_value_len then
-      String.sub entry.value 0 max_list_value_len ^ "...(truncated)"
-    else entry.value
-  in
   `Assoc [
     ("key", `String entry.key);
-    ("value", `String display_value);
-    ("value_size", `Int value_len);
+    ("value", `String entry.value);
+    ("value_size", `Int (String.length entry.value));
     ("created_at", `Float entry.created_at);
     ("expires_at", match entry.expires_at with
       | Some t -> `Float t
@@ -89,6 +98,29 @@ let entry_of_json (json : Yojson.Safe.t) : cache_entry option =
     Log.Misc.error "Unexpected error in entry_of_json: %s" (Printexc.to_string e);
     None
 
+let read_entry_file path =
+  match Safe_ops.read_file_safe path with
+  | Error _ -> None
+  | Ok content ->
+      match Safe_ops.parse_json_safe ~context:"cache_entry_read" content with
+      | Error _ -> None
+      | Ok json -> entry_of_json json
+
+let read_matching_entry path ~key =
+  match read_entry_file path with
+  | Some entry when String.equal entry.key key -> Some entry
+  | _ -> None
+
+let remove_file_if_exists path =
+  if Sys.file_exists path then (
+    try
+      Sys.remove path;
+      true
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | _ -> false)
+  else false
+
 (** Check if entry is expired *)
 let is_expired entry =
   match entry.expires_at with
@@ -111,6 +143,29 @@ let cached_entry_count = Atomic.make (-1)
 
 (** Reset cached entry count. Call when switching cache directories (tests). *)
 let reset_cached_entry_count () = Atomic.set cached_entry_count (-1)
+
+let decrement_cached_entry_count () =
+  let current = Atomic.get cached_entry_count in
+  if current > 0 then
+    ignore (Atomic.fetch_and_add cached_entry_count (-1))
+  else
+    Atomic.set cached_entry_count 0
+
+let maybe_migrate_legacy_entry config ~key entry =
+  let legacy_path = legacy_cache_file config key in
+  let primary_path = cache_file config key in
+  if primary_path = legacy_path || not (Sys.file_exists legacy_path) || Sys.file_exists primary_path then
+    ()
+  else
+    try
+      let json = entry_to_json entry in
+      let content = Yojson.Safe.pretty_to_string json in
+      Fs_compat.save_file primary_path content;
+      if not (remove_file_if_exists legacy_path) then
+        Atomic.set cached_entry_count (-1)
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | _ -> ()
 
 (** Guard to prevent concurrent directory scan stampedes.
     Only one fiber may scan the cache directory at a time;
@@ -222,93 +277,114 @@ let set config ~key ~value ?(ttl_seconds : int option) ?(tags : string list = []
     Error (Printf.sprintf "Value exceeds max entry size (%d > %d bytes)" (String.length value) max_size)
   else begin
     ensure_cache_dir config;
-    (* BUG-012: Max entries cap — evict expired first, then reject if still full *)
-    let max_entries = Env_config.Cache.max_entries in
-    let current = count_entries config in
-    if current >= max_entries then begin
-      let _evicted = evict_expired config in
-      let after_evict = count_entries config in
-      if after_evict >= max_entries then
-        Error (Printf.sprintf "Cache full (%d entries, max %d)" after_evict max_entries)
-      else begin
-        let now = Time_compat.now () in
-        let expires_at = Option.map (fun ttl -> now +. float_of_int ttl) ttl_seconds in
-        let entry = { key; value; created_at = now; expires_at; tags } in
-        let path = cache_file config key in
-        let is_overwrite = Sys.file_exists path in
-        let json = entry_to_json entry in
-        let content = Yojson.Safe.pretty_to_string json in
-        try
-          Fs_compat.save_file path content;
-          if not is_overwrite then
-            ignore (Atomic.fetch_and_add cached_entry_count 1);
-          Ok entry
-        with
-        | Eio.Cancel.Cancelled _ as e -> raise e
-        | e -> Error (Printexc.to_string e)
-      end
-    end else begin
-      let now = Time_compat.now () in
-      let expires_at = Option.map (fun ttl -> now +. float_of_int ttl) ttl_seconds in
-      let entry = { key; value; created_at = now; expires_at; tags } in
-      let path = cache_file config key in
-      let is_overwrite = Sys.file_exists path in
-      let json = entry_to_json entry in
-      let content = Yojson.Safe.pretty_to_string json in
-      try
-        Fs_compat.save_file path content;
-        if not is_overwrite then
-          ignore (Atomic.fetch_and_add cached_entry_count 1);
-        Ok entry
-      with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | e -> Error (Printexc.to_string e)
-    end
+    let primary_path = cache_file config key in
+    let legacy_path = legacy_cache_file config key in
+    let primary_entry = read_entry_file primary_path in
+    let legacy_entry =
+      if String.equal primary_path legacy_path then None
+      else read_entry_file legacy_path
+    in
+    let is_overwrite =
+      Option.exists (fun entry -> String.equal entry.key key) primary_entry
+      || Option.exists (fun entry -> String.equal entry.key key) legacy_entry
+    in
+    (match primary_entry with
+     | Some entry when not (String.equal entry.key key) ->
+         Error "Cache file collision detected for hashed key"
+     | _ ->
+         (* BUG-012: Max entries cap — evict expired first, then reject if still full.
+            Overwrites and legacy-path migrations bypass the cap check. *)
+         let max_entries = Env_config.Cache.max_entries in
+         let current = count_entries config in
+         if (not is_overwrite) && current >= max_entries then begin
+           let _evicted = evict_expired config in
+           let after_evict = count_entries config in
+           if after_evict >= max_entries then
+             Error (Printf.sprintf "Cache full (%d entries, max %d)" after_evict max_entries)
+           else Ok ()
+         end else Ok ())
+    |> Result.bind (fun () ->
+           let now = Time_compat.now () in
+           let expires_at = Option.map (fun ttl -> now +. float_of_int ttl) ttl_seconds in
+           let entry = { key; value; created_at = now; expires_at; tags } in
+           let json = entry_to_json entry in
+           let content = Yojson.Safe.pretty_to_string json in
+           try
+             let target_exists = Sys.file_exists primary_path in
+             Fs_compat.save_file primary_path content;
+             let removed_legacy =
+               if not (String.equal primary_path legacy_path) then
+                 match legacy_entry with
+                 | Some existing when String.equal existing.key key ->
+                     remove_file_if_exists legacy_path
+                 | _ -> false
+               else false
+             in
+             if (not target_exists) && not removed_legacy then
+               ignore (Atomic.fetch_and_add cached_entry_count 1);
+             else if (not target_exists) && Option.is_some legacy_entry then
+               Atomic.set cached_entry_count (-1);
+             Ok entry
+           with
+           | Eio.Cancel.Cancelled _ as e -> raise e
+           | e -> Error (Printexc.to_string e))
   end
 
 (** Get cache entry - synchronous.
     Also triggers batch eviction when expired ratio > 50% (throttled). *)
 let get config ~key : (cache_entry option, string) result =
-  let path = cache_file config key in
-  if not (Sys.file_exists path) then begin
+  let primary_path = cache_file config key in
+  let legacy_path = legacy_cache_file config key in
+  let located =
+    match read_matching_entry primary_path ~key with
+    | Some entry -> Some (primary_path, entry, false)
+    | None ->
+        if String.equal primary_path legacy_path then None
+        else
+          match read_matching_entry legacy_path ~key with
+          | Some entry -> Some (legacy_path, entry, true)
+          | None -> None
+  in
+  match located with
+  | None ->
     (* Trigger batch eviction check even on miss *)
     let _evicted = maybe_evict_expired config in
     Ok None
-  end
-  else
-    try
-      let content = Fs_compat.load_file path in
-      let json = Yojson.Safe.from_string content in
-      match entry_of_json json with
-      | Some entry ->
+  | Some (path, entry, from_legacy) ->
+      try
         if is_expired entry then begin
           (* Auto-delete expired entries *)
-          Sys.remove path;
-          ignore (Atomic.fetch_and_add cached_entry_count (-1));
+          if remove_file_if_exists path then decrement_cached_entry_count ();
           let _evicted = maybe_evict_expired config in
           Ok None
         end else begin
+          if from_legacy then maybe_migrate_legacy_entry config ~key entry;
           let _evicted = maybe_evict_expired config in
           Ok (Some entry)
         end
-      | None -> Ok None
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | e -> Error (Printexc.to_string e)
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | e -> Error (Printexc.to_string e)
 
 (** Delete cache entry - synchronous *)
 let delete config ~key : (bool, string) result =
-  let path = cache_file config key in
-  if not (Sys.file_exists path) then
-    Ok false
-  else
-    try
-      Sys.remove path;
-      ignore (Atomic.fetch_and_add cached_entry_count (-1));
-      Ok true
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | e -> Error (Printexc.to_string e)
+  let primary_path = cache_file config key in
+  let legacy_path = legacy_cache_file config key in
+  try
+    let deleted_primary = remove_file_if_exists primary_path in
+    let deleted_legacy =
+      if String.equal primary_path legacy_path then false
+      else
+        match read_matching_entry legacy_path ~key with
+        | Some _ -> remove_file_if_exists legacy_path
+        | None -> false
+    in
+    if deleted_primary then decrement_cached_entry_count ();
+    if deleted_legacy then decrement_cached_entry_count ();
+    Ok (deleted_primary || deleted_legacy)
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e -> Error (Printexc.to_string e)
 
 (** List all cache entries - synchronous.
     Guarded: concurrent calls return empty list to prevent FD stampede. *)
@@ -319,30 +395,34 @@ let list config ?(tag : string option) () : cache_entry list =
   else
     with_scan_guard ~fallback:[] (fun () ->
       let entries = read_cache_filenames dir in
-      List.filter_map (fun filename ->
+      let deduped = Hashtbl.create (List.length entries) in
+      List.iter (fun filename ->
         let path = Filename.concat dir filename in
         match Safe_ops.read_file_safe path with
-        | Error _ -> None  (* File read error - skip this entry *)
+        | Error _ -> ()
         | Ok content ->
-          match Safe_ops.parse_json_safe ~context:"cache_get_all" content with
-          | Error msg ->
-            Log.Misc.info "%s" msg;
-            None
-          | Ok json ->
-            match entry_of_json json with
-            | Some entry ->
-              if is_expired entry then begin
-                Safe_ops.remove_file_logged ~context:"cache_expire" path;
-                None
-              end else begin
-                match tag with
-                | None -> Some entry
-                | Some t ->
-                  if List.mem t entry.tags then Some entry
-                  else None
-              end
-            | None -> None
-      ) entries)
+            match Safe_ops.parse_json_safe ~context:"cache_get_all" content with
+            | Error msg ->
+                Log.Misc.info "%s" msg
+            | Ok json ->
+                match entry_of_json json with
+                | Some entry ->
+                    if is_expired entry then begin
+                      if remove_file_if_exists path then decrement_cached_entry_count ()
+                    end else begin
+                      let include_entry =
+                        match tag with
+                        | None -> true
+                        | Some t -> List.mem t entry.tags
+                      in
+                      if include_entry then
+                        match Hashtbl.find_opt deduped entry.key with
+                        | Some existing when existing.created_at >= entry.created_at -> ()
+                        | _ -> Hashtbl.replace deduped entry.key entry
+                    end
+                | None -> ()
+      ) entries;
+      Hashtbl.fold (fun _ entry acc -> entry :: acc) deduped [])
 
 (** Clear all cache entries - synchronous *)
 let clear config : (int, string) result =

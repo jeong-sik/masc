@@ -813,6 +813,11 @@
  (libraries masc_test_deps))
 
 (executable
+ (name test_masc_context_injector)
+ (modules test_masc_context_injector)
+ (libraries masc_test_deps))
+
+(executable
  (name tool_matrix_manifest)
  (modules tool_matrix_manifest test_mcp_tool_matrix_cases)
  (libraries masc_test_deps))

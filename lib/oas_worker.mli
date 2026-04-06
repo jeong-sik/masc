@@ -108,6 +108,8 @@ val run_named :
   ?yield_on_tool:bool ->
   ?compact_ratio:float ->
   ?checkpoint_dir:string ->
+  ?context_injector:Oas.Hooks.context_injector ->
+  ?context:Oas.Context.t ->
   ?sw:Eio.Switch.t ->
   ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   unit ->

@@ -234,6 +234,8 @@ let build_agent
     ~(raw_trace : Oas.Raw_trace.t)
     ~(heartbeat_callbacks : Oas.Agent.periodic_callback list)
     ?(gate_config : Eval_gate.gate_config option)
+    ?context_injector
+    ?context
     () : (Oas.Agent.t, string) result =
   let config = agent_config_of_worker_meta meta ~system_prompt in
   let tool_names =
@@ -271,6 +273,14 @@ let build_agent
     |> Oas.Builder.with_periodic_callbacks heartbeat_callbacks
     |> Oas.Builder.with_description (description_of_meta meta)
   in
+  let builder = match context_injector with
+    | Some ci -> Oas.Builder.with_context_injector ci builder
+    | None -> builder
+  in
+  let builder = match context with
+    | Some ctx -> Oas.Builder.with_context ctx builder
+    | None -> builder
+  in
   Oas.Builder.build_safe builder
   |> Result.map_error Oas.Error.to_string
 
@@ -304,9 +314,9 @@ let make_heartbeat_callbacks
       };
     ]
 
-let make_tool_tracking_hooks () =
+let make_tool_tracking_hooks ?context () =
   let tool_names_ref = ref [] in
-  let hooks =
+  let tracking =
     {
       Oas.Hooks.empty with
       pre_tool_use =
@@ -317,6 +327,28 @@ let make_tool_tracking_hooks () =
                 Oas.Hooks.Continue
             | _ -> Oas.Hooks.Continue);
     }
+  in
+  let hooks = match context with
+    | Some ctx ->
+      let temporal =
+        { Oas.Hooks.empty with
+          before_turn_params =
+            Some (function
+              | Oas.Hooks.BeforeTurnParams { current_params; _ } ->
+                (match Masc_context_injector.render_temporal_summary ctx with
+                 | None -> Oas.Hooks.Continue
+                 | Some summary ->
+                   let ctx_str = match current_params.Oas.Hooks.extra_system_context with
+                     | None -> summary
+                     | Some prev -> prev ^ "\n\n" ^ summary
+                   in
+                   Oas.Hooks.AdjustParams { current_params with
+                     extra_system_context = Some ctx_str })
+              | _ -> Oas.Hooks.Continue);
+        }
+      in
+      Oas.Hooks.compose ~outer:temporal ~inner:tracking
+    | None -> tracking
   in
   (tool_names_ref, hooks)
 
@@ -360,10 +392,14 @@ let rec run_worker_via_oas
   let heartbeat_cbs =
     make_heartbeat_callbacks ~sw ~auth_token ~session_id ~worker_name
   in
-  let tool_names_ref, hooks = make_tool_tracking_hooks () in
+  let injector_config = Masc_context_injector.default_config () in
+  let context_injector = Masc_context_injector.make ~config:injector_config () in
+  let shared_context = Oas.Context.create () in
+  let tool_names_ref, hooks = make_tool_tracking_hooks ~context:shared_context () in
   let* agent =
     build_agent ~net ~meta ~provider ~system_prompt ~tools ~hooks
-      ~raw_trace ~heartbeat_callbacks:heartbeat_cbs ?gate_config ()
+      ~raw_trace ~heartbeat_callbacks:heartbeat_cbs ?gate_config
+      ~context_injector ~context:shared_context ()
   in
   let* () =
     Worker_container.save_worker_meta ~base_path
@@ -410,7 +446,8 @@ and resume_worker_via_oas
   let heartbeat_cbs =
     make_heartbeat_callbacks ~sw ~auth_token ~session_id ~worker_name
   in
-  let tool_names_ref, hooks = make_tool_tracking_hooks () in
+  let shared_context = Oas.Context.create () in
+  let tool_names_ref, hooks = make_tool_tracking_hooks ~context:shared_context () in
   let resume_model_id = resume_model_id_of_checkpoint meta checkpoint in
   let* resume_provider =
     oas_provider_of_label (Provider_adapter.make_local_label resume_model_id)

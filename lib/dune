@@ -221,6 +221,7 @@
    mcp_server_eio_resource
    mcp_server_eio_execute
    mcp_server_eio_call_tool
+   masc_context_injector
    masc_error_recovery
    mcp_server_eio_tool_profile
    mcp_server_eio_protocol

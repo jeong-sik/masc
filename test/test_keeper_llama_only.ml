@@ -42,15 +42,20 @@ let make_meta ?(last_model_used = "glm-5.1") () =
   | Ok meta -> meta
   | Error err -> fail ("meta_of_json failed: " ^ err)
 
+(* cascade.json defines keeper_unified_models as ["llama:auto"].
+   The test must match the cascade SSOT, not Env_config_runtime.Llama.default_model
+   which is the local llama-server model id — a different concern. *)
+let cascade_llama_label = "llama:auto"
+
 let test_stale_last_model_is_not_reused_outside_current_cascade () =
   let labels = labels_for_turn (make_meta ()) in
   check (list string) "llama-only cascade excludes stale glm pin"
-    [ Printf.sprintf "llama:%s" Env_config_runtime.Llama.default_model ] labels
+    [ cascade_llama_label ] labels
 
 let test_matching_last_model_is_preserved_when_still_in_cascade () =
-  let labels = labels_for_turn (make_meta ~last_model_used:(Printf.sprintf "llama:%s" Env_config_runtime.Llama.default_model) ()) in
+  let labels = labels_for_turn (make_meta ~last_model_used:cascade_llama_label ()) in
   check (list string) "llama label stays first when still allowed"
-    [ Printf.sprintf "llama:%s" Env_config_runtime.Llama.default_model ] labels
+    [ cascade_llama_label ] labels
 
 let () =
   run "keeper_llama_only"

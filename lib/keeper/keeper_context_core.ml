@@ -302,7 +302,7 @@ let save_oas_checkpoint
     ~(model : string)
     ~(ctx : working_context)
     ~(generation : int)
-  : Agent_sdk.Checkpoint.t =
+  : (Agent_sdk.Checkpoint.t, string) result =
   let checkpoint_context = Agent_sdk.Context.copy ctx.context in
   Agent_sdk.Context.set_scoped checkpoint_context Agent_sdk.Context.Session
     checkpoint_generation_key (`Int generation);
@@ -340,10 +340,11 @@ let save_oas_checkpoint
       ~mcp_clients:[]
       ()
   in
-  (match Keeper_checkpoint_store.save_oas ~session_dir:session.session_dir checkpoint with
-   | Ok () -> ()
-   | Error e -> Log.Keeper.error "save_oas_checkpoint failed: %s" e);
-  checkpoint
+  match Keeper_checkpoint_store.save_oas ~session_dir:session.session_dir checkpoint with
+  | Ok () -> Ok checkpoint
+  | Error e ->
+      Log.Keeper.error "save_oas_checkpoint failed: %s" e;
+      Error e
 
 let checkpoint_generation (cp : Agent_sdk.Checkpoint.t) ~(fallback : int) : int =
   let open Yojson.Safe.Util in
@@ -366,10 +367,20 @@ let checkpoint_generation (cp : Agent_sdk.Checkpoint.t) ~(fallback : int) : int 
 
 let load_context_from_checkpoint ~trace_id ~primary_model_max_tokens ~base_dir =
   let session = create_session ~session_id:trace_id ~base_dir in
-  let oas_checkpoint =
+  let oas_result =
     Keeper_checkpoint_store.load_oas ~session_dir:session.session_dir
       ~session_id:trace_id
   in
+  (* Log non-trivial load errors (Not_found is normal on first boot) *)
+  (match oas_result with
+   | Error (Parse_error detail) ->
+       Log.Keeper.error "keeper:%s OAS checkpoint parse error: %s" trace_id detail
+   | Error (Store_error detail) ->
+       Log.Keeper.error "keeper:%s OAS checkpoint store error: %s" trace_id detail
+   | Error (Io_error detail) ->
+       Log.Keeper.error "keeper:%s OAS checkpoint I/O error: %s" trace_id detail
+   | Error Not_found | Ok _ -> ());
+  let oas_checkpoint = Result.to_option oas_result in
   let legacy_checkpoint =
     try load_latest_checkpoint session
     with ex ->
@@ -406,7 +417,10 @@ let load_context_from_checkpoint ~trace_id ~primary_model_max_tokens ~base_dir =
          Log.Keeper.error "keeper:%s checkpoint restore failed: %s"
            trace_id (Printexc.to_string ex);
          (session, None))
-  | _ -> (session, None)
+  | _ ->
+      (* Both OAS and legacy checkpoints unavailable.
+         Non-trivial OAS errors were already logged above at error level. *)
+      (session, None)
 
 (** Patch an OAS checkpoint: unify session_id and replace the last
     assistant message's text content with [response_text] (which includes

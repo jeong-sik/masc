@@ -69,7 +69,7 @@ val save_oas_checkpoint :
   model:string ->
   ctx:working_context ->
   generation:int ->
-  Agent_sdk.Checkpoint.t
+  (Agent_sdk.Checkpoint.t, string) result
 
 (** {1 Handoff Rollover} *)
 

@@ -342,9 +342,7 @@ let save_oas_checkpoint
   in
   match Keeper_checkpoint_store.save_oas ~session_dir:session.session_dir checkpoint with
   | Ok () -> Ok checkpoint
-  | Error e ->
-      Log.Keeper.error "save_oas_checkpoint failed: %s" e;
-      Error e
+  | Error e -> Error e
 
 let checkpoint_generation (cp : Agent_sdk.Checkpoint.t) ~(fallback : int) : int =
   let open Yojson.Safe.Util in

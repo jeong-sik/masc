@@ -35,15 +35,24 @@ let ensure_keeper_meta config name =
           Option.value ~default:Keeper_config.default_room_signal_prompt_enabled
             defaults.room_signal_prompt_enabled
     in
+    let target_denylist =
+      match defaults.tool_denylist with
+      | Some dl -> dl
+      | None -> meta.tool_denylist
+    in
+    let denylist_changed = meta.tool_denylist <> target_denylist in
     if meta.proactive.enabled <> target_proactive
-       || meta.room_signal_prompt_enabled <> target_room_signal_prompt_enabled then begin
+       || meta.room_signal_prompt_enabled <> target_room_signal_prompt_enabled
+       || denylist_changed then begin
       Log.Keeper.info
-        "ensure_keeper_meta: re-syncing proactive.enabled %b -> %b, room_signal_prompt_enabled %b -> %b for %s"
+        "ensure_keeper_meta: re-syncing proactive.enabled %b -> %b, room_signal_prompt_enabled %b -> %b, denylist_changed %b for %s"
         meta.proactive.enabled target_proactive
-        meta.room_signal_prompt_enabled target_room_signal_prompt_enabled meta.name;
+        meta.room_signal_prompt_enabled target_room_signal_prompt_enabled
+        denylist_changed meta.name;
       let updated = { meta with
         proactive = { meta.proactive with enabled = target_proactive };
         room_signal_prompt_enabled = target_room_signal_prompt_enabled;
+        tool_denylist = target_denylist;
         updated_at = now_iso ();
       } in
       match write_meta config updated with

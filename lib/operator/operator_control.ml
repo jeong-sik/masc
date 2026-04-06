@@ -168,13 +168,19 @@ let execute_team_turn ~ctx ~request ~session_id ~turn_kind ~message ~target_agen
   Ok
     (`Assoc
       [
-        ("delegated_tool", `String "masc_team_session_step");
+        ("tool_name", `String "masc_team_session_step");
         ("result", result);
         ("actor", `String actor_for_session);
         ("operator_override", `Bool operator_override);
       ])
 
 (** {1 Domain-specific action handlers} *)
+
+let room_action_result request result =
+  Ok (`Assoc [
+    ("tool_name", `String (delegated_tool_for request.action_type));
+    ("result", result);
+  ])
 
 let execute_room_action (ctx : 'a context) (request : action_request) =
   match request.action_type with
@@ -186,24 +192,15 @@ let execute_room_action (ctx : 'a context) (request : action_request) =
         | None -> Error "payload.message is required"
       in
       let result = Room.broadcast ctx.config ~from_agent:request.actor ~content:message in
-      Ok
-        (`Assoc
-          [
-            ("delegated_tool", `String "masc_broadcast");
-            ("result", `String result);
-          ])
+      room_action_result request (`String result)
   | "namespace_pause" ->
       let* () = validate_target_type "namespace" request in
       let reason =
         get_string request.payload "reason" "Paused by operator control plane"
       in
       Room.pause ctx.config ~by:request.actor ~reason;
-      Ok
-        (`Assoc
-          [
-            ("delegated_tool", `String "masc_pause");
-            ("result", `Assoc [ ("paused", `Bool true); ("reason", `String reason) ]);
-          ])
+      room_action_result request
+        (`Assoc [ ("paused", `Bool true); ("reason", `String reason) ])
   | "namespace_resume" ->
       let* () = validate_target_type "namespace" request in
       let status =
@@ -211,17 +208,11 @@ let execute_room_action (ctx : 'a context) (request : action_request) =
         | `Resumed -> "resumed"
         | `Already_running -> "already_running"
       in
-      Ok
-        (`Assoc
-          [
-            ("delegated_tool", `String "masc_resume");
-            ("result", `Assoc [ ("status", `String status) ]);
-          ])
+      room_action_result request (`Assoc [ ("status", `String status) ])
   | "social_sweep" ->
-      Ok (`Assoc [
-        ("delegated_tool", `String "social_sweep");
-        ("result", `Assoc [("status", `String "removed"); ("reason", `String "Social runtime removed. Keepers discover board events via proactive turns.")]);
-      ])
+      room_action_result request
+        (`Assoc [("status", `String "removed");
+                 ("reason", `String "Social runtime removed. Keepers discover board events via proactive turns.")])
   | "task_inject" ->
       let* () = validate_target_type "namespace" request in
       let* title =
@@ -234,12 +225,7 @@ let execute_room_action (ctx : 'a context) (request : action_request) =
         get_string request.payload "description" "Injected by operator control plane"
       in
       let result = Room.add_task ctx.config ~title ~priority ~description in
-      Ok
-        (`Assoc
-          [
-            ("delegated_tool", `String "masc_add_task");
-            ("result", `String result);
-          ])
+      room_action_result request (`String result)
   | _ -> Error (Printf.sprintf "not a namespace action: %s" request.action_type)
 
 let execute_team_action (ctx : 'a context) (request : action_request) =
@@ -341,7 +327,7 @@ let execute_team_action (ctx : 'a context) (request : action_request) =
       Ok
         (`Assoc
           [
-            ("delegated_tool", `String "masc_team_session_step");
+            ("tool_name", `String "masc_team_session_step");
             ("result", result_json);
           ])
   | "team_stop" ->
@@ -358,7 +344,7 @@ let execute_team_action (ctx : 'a context) (request : action_request) =
       Ok
         (`Assoc
           [
-            ("delegated_tool", `String "masc_team_session_stop");
+            ("tool_name", `String "masc_team_session_stop");
             ("result", result);
           ])
   | _ -> Error (Printf.sprintf "not a team action: %s" request.action_type)
@@ -387,7 +373,7 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
       Ok
         (`Assoc
           [
-            ("delegated_tool", `String "masc_keeper_status");
+            ("tool_name", `String "masc_keeper_status");
             ( "result",
               `Assoc
                 [
@@ -408,7 +394,7 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
         Ok
           (`Assoc
             [
-              ("delegated_tool", `String "masc_keeper_recover");
+              ("tool_name", `String "masc_keeper_recover");
               ( "result",
                 `Assoc
                   [
@@ -433,7 +419,7 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
         Ok
           (`Assoc
             [
-              ("delegated_tool", `String "masc_keeper_recover");
+              ("tool_name", `String "masc_keeper_recover");
               ( "result",
                 `Assoc
                   [
@@ -506,7 +492,7 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
       Ok
         (`Assoc
           [
-            ("delegated_tool", `String "masc_keeper_msg");
+            ("tool_name", `String "masc_keeper_msg");
             ("result", json_of_dispatch_output body);
           ])
   | _ -> Error (Printf.sprintf "not a keeper action: %s" request.action_type)
@@ -553,7 +539,7 @@ let execute_review_action (ctx : 'a context) (request : action_request) =
     Ok
       (`Assoc
         [
-          ("delegated_tool", `String "review_state");
+          ("tool_name", `String "review_state");
           ( "result",
             `Assoc
               [
@@ -580,18 +566,20 @@ let execute_action (ctx : 'a context) (request : action_request) :
   | "" -> Error "action_type is required"
   | other -> Error (Printf.sprintf "unsupported action_type: %s" other)
 
+(** All known action_types: available_actions plus legacy/unlisted ones. *)
+let known_action_types =
+  let from_registry =
+    List.map
+      (fun (a : Operator_pending_confirm.available_action) -> a.action_type)
+      Operator_pending_confirm.available_actions
+  in
+  from_registry @ [ "social_sweep"; "autonomy_tick"; "team_turn";
+                    "review_resolve"; "review_defer" ]
+
 let validate_request request =
-  match request.action_type with
-  | "broadcast" | "namespace_pause" | "namespace_resume" | "social_sweep"
-  | "autonomy_tick" | "team_turn" | "team_note"
-  | "team_broadcast" | "team_task_inject" | "team_worker_spawn_batch"
-  | "team_stop"
-  | "keeper_message" | "keeper_probe" | "keeper_recover"
-  | "review_resolve" | "review_defer"
-  | "task_inject" ->
-      Ok ()
-  | "" -> Error "action_type is required"
-  | other -> Error (Printf.sprintf "unsupported action_type: %s" other)
+  if request.action_type = "" then Error "action_type is required"
+  else if List.mem request.action_type known_action_types then Ok ()
+  else Error (Printf.sprintf "unsupported action_type: %s" request.action_type)
 
 let action_json ?actor_hint (ctx : _ context) args :
     (Yojson.Safe.t, string) result =
@@ -645,7 +633,7 @@ let action_json ?actor_hint (ctx : _ context) args :
            ("confirm_required", `Bool true);
            ("confirm_token", `String entry.token);
            ("preview", preview);
-           ("delegated_tool", `String delegated_tool);
+           ("tool_name", `String delegated_tool);
            ("expires_at", `String expires_at);
          ]))
   else
@@ -671,7 +659,7 @@ let action_json ?actor_hint (ctx : _ context) args :
          [
            ("trace_id", `String trace_id);
            ("confirm_required", `Bool false);
-           ("delegated_tool", `String delegated_tool);
+           ("tool_name", `String delegated_tool);
            ("result", executed);
          ])
 

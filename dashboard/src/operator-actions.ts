@@ -64,7 +64,6 @@ function logMessageFromResult(result: OperatorActionResult): string {
   }
   return stringifyUnknown(result.result)
     || stringifyUnknown(result.executed_action)
-    || stringifyUnknown(result.delegated_tool_result)
     || result.status
 }
 
@@ -154,7 +153,7 @@ export async function dispatchOperatorAction(request: OperatorActionRequest): Pr
       target_label: targetLabelOf(request),
       outcome: result.confirm_required ? 'preview' : 'executed',
       message: logMessageFromResult(result),
-      delegated_tool: result.delegated_tool,
+      tool_name: result.tool_name,
     })
     await refreshOperatorSnapshot({ force: true })
     await refreshOperatorRoomDigest({ force: true })
@@ -193,7 +192,7 @@ export async function confirmOperatorPendingAction(
       target_label: confirmToken,
       outcome: 'confirmed',
       message: logMessageFromResult(result),
-      delegated_tool: result.delegated_tool,
+      tool_name: result.tool_name,
     })
     await refreshOperatorSnapshot({ force: true })
     await refreshOperatorRoomDigest({ force: true })

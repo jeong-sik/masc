@@ -18,7 +18,7 @@ export interface GovernanceResolvedAction {
 
 export interface GovernanceExecutedRoute {
   action_type?: string
-  delegated_tool?: string | null
+  tool_name?: string | null
   confirmation_state?: string
   created_at?: string | null
 }

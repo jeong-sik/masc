@@ -147,6 +147,35 @@ let error_json ?(fields = []) (message : string) =
 
 let tool_result_or_error (ok, msg) = if ok then msg else error_json msg
 
+let missing_file_error_json ~(config : Room.config) ~(target : string)
+      ~(error : string) =
+  let project_root = Keeper_alerting_path.project_root_of_config config in
+  let parent = Filename.dirname target in
+  let suggestion_dir =
+    if Sys.file_exists parent && Sys.is_directory parent then parent else project_root
+  in
+  let suggested_entries =
+    match Safe_ops.list_dir_safe suggestion_dir with
+    | Ok entries -> entries |> List.sort String.compare |> take 12
+    | Error _ -> []
+  in
+  let message =
+    match suggested_entries with
+    | [] -> error
+    | entries ->
+      Printf.sprintf "%s\nAvailable entries in %s: %s"
+        error suggestion_dir (String.concat ", " entries)
+  in
+  Yojson.Safe.to_string
+    (`Assoc
+        [ "error", `String message
+        ; "path", `String target
+        ; "suggestion_dir", `String suggestion_dir
+        ; ( "suggested_entries"
+          , `List (List.map (fun entry -> `String entry) suggested_entries) )
+        ])
+;;
+
 let assoc_override_string (key : string) (value : string) = function
   | `Assoc fields ->
     let kept_fields = List.filter (fun (k, _) -> k <> key) fields in
@@ -220,13 +249,15 @@ let handle_keeper_fs_read
   | Error e -> error_json e
   | Ok target ->
     (match Safe_ops.read_file_safe target with
+     | Error e when String.starts_with ~prefix:"File not found:" e ->
+       missing_file_error_json ~config ~target ~error:e
      | Error e -> error_json ~fields:[ "path", `String target ] e
      | Ok content ->
        let total = String.length content in
        let truncated = total > max_bytes in
-       let body = if truncated then String.sub content 0 max_bytes else content in
-       Yojson.Safe.to_string
-         (`Assoc
+        let body = if truncated then String.sub content 0 max_bytes else content in
+        Yojson.Safe.to_string
+          (`Assoc
              [ "ok", `Bool true
              ; "path", `String target
              ; "bytes", `Int total

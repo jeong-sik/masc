@@ -35,9 +35,9 @@ let invalidate_status_cache_all () =
 
 (** Hash the status-affecting args so different parameter combos
     get separate cache entries (e.g. fast=true vs fast=false). *)
-let hash_status_args args =
+let hash_status_args ~name args =
   let parts = [
-    get_string args "name" "";
+    name;
     string_of_bool (get_bool args "fast" false);
     string_of_bool (get_bool args "include_context" false);
     string_of_bool (get_bool args "include_metrics_overview" false);
@@ -49,8 +49,13 @@ let hash_status_args args =
   ] in
   Digest.string (String.concat "|" parts) |> Digest.to_hex
 
+let effective_status_name ctx args =
+  match String.trim (get_string args "name" "") with
+  | "" -> String.trim ctx.agent_name
+  | value -> value
+
 let handle_keeper_status ctx args : tool_result =
-  let name = get_string args "name" "" in
+  let name = effective_status_name ctx args in
   if not (validate_name name) then
     (false, "❌ invalid keeper name")
   else
@@ -58,7 +63,7 @@ let handle_keeper_status ctx args : tool_result =
     | Error e -> (false, "❌ " ^ e)
     | Ok None -> (false, Printf.sprintf "❌ keeper not found: %s" name)
     | Ok (Some m) ->
-      let args_hash = hash_status_args args in
+      let args_hash = hash_status_args ~name args in
       (* Cache hit: same updated_at + same args → return cached response *)
       (match Hashtbl.find_opt _cache name with
        | Some entry

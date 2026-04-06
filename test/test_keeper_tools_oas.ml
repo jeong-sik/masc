@@ -140,6 +140,41 @@ let test_error_json_is_returned_as_tool_error () =
             (Option.is_some (Safe_ops.json_string_opt "path" detail))
       | Ok _ -> fail "missing file should be surfaced as tool error")
 
+let test_missing_file_error_includes_directory_suggestions () =
+  let meta = make_test_meta () in
+  let ctx_snapshot = make_test_ctx () in
+  let dir = Filename.concat (Filename.get_temp_dir_name ())
+    (Printf.sprintf "test_keeper_tools_suggest_%d" (Random.int 100000)) in
+  (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  Fun.protect
+    ~finally:(fun () ->
+      (try Sys.readdir dir |> Array.iter (fun f ->
+        Sys.remove (Filename.concat dir f));
+        Unix.rmdir dir with _ -> ()))
+    (fun () ->
+      let existing = Filename.concat dir "known.txt" in
+      Out_channel.with_open_text existing
+        (fun oc -> Out_channel.output_string oc "known");
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let config = Room.default_config dir in
+      let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_snapshot () in
+      let tool = find_tool "keeper_fs_read" tools in
+      match Tool.execute tool (`Assoc [("path", `String "missing.txt")]) with
+      | Error { Agent_sdk.Types.message; _ } ->
+          let json = Yojson.Safe.from_string message in
+          let detail = Yojson.Safe.Util.member "detail" json in
+          let suggestions =
+            match Yojson.Safe.Util.member "suggested_entries" detail with
+            | `List entries ->
+              List.filter_map
+                (function `String value -> Some value | _ -> None)
+                entries
+            | _ -> []
+          in
+          check bool "known file suggested" true (List.mem "known.txt" suggestions)
+      | Ok _ -> fail "missing file should be surfaced as tool error")
+
 let test_repeated_error_results_are_blocked () =
   let meta = make_test_meta () in
   let ctx_snapshot = make_test_ctx () in
@@ -436,6 +471,8 @@ let () =
       test_case "valid schemas" `Quick test_tools_have_valid_schemas;
       test_case "count matches allowed" `Quick test_tool_count_matches_allowed;
       test_case "error json becomes tool error" `Quick test_error_json_is_returned_as_tool_error;
+      test_case "missing file error includes suggestions" `Quick
+        test_missing_file_error_includes_directory_suggestions;
       test_case "repeated errors are blocked" `Quick test_repeated_error_results_are_blocked;
       test_case "failure count resets after success" `Quick test_failure_count_resets_after_success;
       test_case "failure tracking is independent per args" `Quick test_failure_tracking_is_independent_per_args;

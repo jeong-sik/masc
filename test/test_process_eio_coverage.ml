@@ -136,6 +136,21 @@ let test_run_argv_with_status_cwd_override () =
   check bool "cwd is /tmp or /private/tmp"
     (trimmed = "/tmp" || trimmed = "/private/tmp") true
 
+let test_run_argv_with_status_includes_stderr_on_failure () =
+  Eio_main.run @@ fun env ->
+  let proc_mgr = Eio.Stdenv.process_mgr env in
+  let clock = Eio.Stdenv.clock env in
+  let cwd_default = Eio.Stdenv.fs env in
+  Process_eio.init ~cwd_default ~proc_mgr ~clock;
+  let status, output =
+    Process_eio.run_argv_with_status
+      [ "/bin/sh"; "-c"; "printf 'stderr-only\\n' >&2; exit 3" ]
+  in
+  let code = match status with Unix.WEXITED c -> c | _ -> 1 in
+  check int "stderr failure exit code" 3 code;
+  check bool "stderr surfaced in output" true
+    (contains output "stderr-only")
+
 let test_reset_for_testing_clears_runtime () =
   Eio_main.run @@ fun env ->
   let proc_mgr = Eio.Stdenv.process_mgr env in
@@ -173,10 +188,12 @@ let () =
           test_case "run_argv_with_stdin-propagates-cancelled" `Quick
             test_run_argv_with_stdin_propagates_cancelled;
           test_case "run_argv_with_stdin_and_status-propagates-cancelled" `Quick
-            test_run_argv_with_stdin_and_status_propagates_cancelled;
-          test_case "run_argv_with_status-cwd-override" `Quick
-            test_run_argv_with_status_cwd_override;
-          test_case "reset_for_testing-clears-runtime" `Quick
-            test_reset_for_testing_clears_runtime;
-        ] );
+           test_run_argv_with_stdin_and_status_propagates_cancelled;
+           test_case "run_argv_with_status-cwd-override" `Quick
+             test_run_argv_with_status_cwd_override;
+           test_case "run_argv_with_status-includes-stderr-on-failure" `Quick
+             test_run_argv_with_status_includes_stderr_on_failure;
+           test_case "reset_for_testing-clears-runtime" `Quick
+             test_reset_for_testing_clears_runtime;
+         ] );
     ]

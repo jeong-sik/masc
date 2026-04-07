@@ -18,12 +18,6 @@ type context = {
   agent_name: string;
 }
 
-let json_error message =
-  Yojson.Safe.to_string
-    (`Assoc [ ("status", `String "error"); ("message", `String message) ])
-
-let json_ok fields =
-  Yojson.Safe.to_string (`Assoc (("status", `String "ok") :: fields))
 
 (* ================================================================ *)
 (* Handlers (retained in facade)                                    *)

@@ -194,37 +194,23 @@ let parse_ddg_html payload =
   ) results
   |> List.filter (fun (title, url, _snippet) -> title <> "" && valid_search_result_url url)
 
-let json_list_member json path =
-  let open Yojson.Safe.Util in
-  try
-    path json |> to_list
-  with _ -> []
-
-let json_string_member json path =
-  let open Yojson.Safe.Util in
-  try
-    path json |> to_string_option |> Option.bind trim_nonempty
-  with _ -> None
-
-let with_parsed_json payload f =
-  try Yojson.Safe.from_string payload |> f with _ -> []
-
 let parse_json_search_results ~results_path ~title_field ~snippet_field payload =
   let open Yojson.Safe.Util in
-  with_parsed_json payload (fun json ->
-      json_list_member json results_path
-      |> List.filter_map (fun item ->
-             match
-               json_string_member item (member title_field),
-               json_string_member item (member "url")
-             with
-             | Some title, Some url when valid_search_result_url url ->
-                 let snippet =
-                   json_string_member item (member snippet_field)
-                   |> Option.value ~default:""
-                 in
-                 Some (title, url, snippet)
-             | _ -> None))
+  let str_of item key =
+    try Option.bind (member key item |> to_string_option) trim_nonempty
+    with _ -> None
+  in
+  try
+    let root = Yojson.Safe.from_string payload in
+    let items = try results_path root |> to_list with _ -> [] in
+    items
+    |> List.filter_map (fun item ->
+           match str_of item title_field, str_of item "url" with
+           | Some title, Some url when valid_search_result_url url ->
+               let snippet = str_of item snippet_field |> Option.value ~default:"" in
+               Some (title, url, snippet)
+           | _ -> None)
+  with _ -> []
 
 let parse_searxng_json payload =
   parse_json_search_results
@@ -509,7 +495,7 @@ let fetch_bing_rss ~timeout_sec ~query =
   | Ok (None, _) -> Error "search endpoint returned no HTTP status"
 
 let fetch_brave ~timeout_sec ~query ~limit =
-  match Sys.getenv_opt "BRAVE_SEARCH_API_KEY" |> Option.bind trim_nonempty with
+  match Sys.getenv_opt "BRAVE_SEARCH_API_KEY" |> Fun.flip Option.bind trim_nonempty with
   | None -> Error "missing BRAVE_SEARCH_API_KEY"
   | Some api_key ->
       let search_url =
@@ -539,7 +525,7 @@ let fetch_brave ~timeout_sec ~query ~limit =
       | Ok (None, _) -> Error "provider returned no HTTP status"
 
 let fetch_tavily ~timeout_sec ~query ~limit =
-  match Sys.getenv_opt "TAVILY_API_KEY" |> Option.bind trim_nonempty with
+  match Sys.getenv_opt "TAVILY_API_KEY" |> Fun.flip Option.bind trim_nonempty with
   | None -> Error "missing TAVILY_API_KEY"
   | Some api_key ->
       let search_url = "https://api.tavily.com/search" in
@@ -561,8 +547,7 @@ let fetch_tavily ~timeout_sec ~query ~limit =
           ~timeout_sec
           ~headers:[ ("Accept", "application/json") ]
           ~url:search_url
-          ~body_json
-          ()
+          ~body_json ()
       with
       | Error detail ->
           Error (endpoint_error ~fallback:"provider request failed" detail)
@@ -579,7 +564,7 @@ let fetch_tavily ~timeout_sec ~query ~limit =
       | Ok (None, _) -> Error "provider returned no HTTP status"
 
 let fetch_exa ~timeout_sec ~query ~limit =
-  match Sys.getenv_opt "EXA_API_KEY" |> Option.bind trim_nonempty with
+  match Sys.getenv_opt "EXA_API_KEY" |> Fun.flip Option.bind trim_nonempty with
   | None -> Error "missing EXA_API_KEY"
   | Some api_key ->
       let search_url = "https://api.exa.ai/search" in
@@ -598,8 +583,7 @@ let fetch_exa ~timeout_sec ~query ~limit =
           ~headers:
             [ ("Accept", "application/json"); ("x-api-key", api_key) ]
           ~url:search_url
-          ~body_json
-          ()
+          ~body_json ()
       with
       | Error detail ->
           Error (endpoint_error ~fallback:"provider request failed" detail)
@@ -617,9 +601,9 @@ let fetch_exa ~timeout_sec ~query ~limit =
 
 let fetch_bing_api ~timeout_sec ~query ~limit =
   let api_key =
-    match Sys.getenv_opt "BING_SEARCH_API_KEY" |> Option.bind trim_nonempty with
+    match Sys.getenv_opt "BING_SEARCH_API_KEY" |> Fun.flip Option.bind trim_nonempty with
     | Some key -> Some key
-    | None -> Sys.getenv_opt "AZURE_BING_SEARCH_API_KEY" |> Option.bind trim_nonempty
+    | None -> Sys.getenv_opt "AZURE_BING_SEARCH_API_KEY" |> Fun.flip Option.bind trim_nonempty
   in
   match api_key with
   | None -> Error "missing BING_SEARCH_API_KEY or AZURE_BING_SEARCH_API_KEY"

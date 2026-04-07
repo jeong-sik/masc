@@ -1,5 +1,6 @@
 {
-  "default_models": ["ollama:qwen3.5:9b-nvfp4", "glm:auto"],
+  "default_models": ["glm:auto"],
+  "keeper_ollama_models": ["ollama:qwen3.5:9b-nvfp4"],
 
   "_comment": "Only default_models needed. OAS cascade_config falls back to default_models when a named cascade is absent. Per-cascade model overrides can be added as {name}_models when differentiation is needed.",
 

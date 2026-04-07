@@ -92,6 +92,7 @@ let handle_code_search ctx args =
   let path = get_string args "path" "." in
   let file_pattern = get_string args "file_pattern" "" in
   let case_insensitive = get_bool args "case_insensitive" true in
+  let is_regex = get_bool args "is_regex" false in
   let max_results = get_int args "max_results" 50 in
 
   if query = "" then
@@ -120,6 +121,10 @@ let handle_code_search ctx args =
     (* File pattern if specified: -g PATTERN *)
     if file_pattern <> "" then
       rg_args_list := file_pattern :: "-g" :: !rg_args_list;
+
+    (* Fixed-strings mode (default): treat query as literal, not regex *)
+    if not is_regex then
+      rg_args_list := "--fixed-strings" :: !rg_args_list;
 
     (* Case insensitive flag: -i *)
     if case_insensitive then
@@ -329,15 +334,19 @@ let schemas : Types.tool_schema list = [
   (* masc_code_search *)
   {
     name = "masc_code_search";
-    description = "Search code by query using ripgrep with regex, returning structured results (file, line, content). \
-Use when finding function names, patterns, or text across the codebase from within MASC. \
-Pair with masc_code_symbols for file-level symbol outlines or masc_code_read for targeted line ranges.";
+    description = "Search code by query using ripgrep. Default is literal string match; set is_regex=true for regex. \
+Returns structured results (file, line, content).";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
         ("query", `Assoc [
           ("type", `String "string");
-          ("description", `String "Search pattern (supports regex)");
+          ("description", `String "Search pattern (literal by default, regex if is_regex=true)");
+        ]);
+        ("is_regex", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "Treat query as regex instead of literal string (default: false)");
+          ("default", `Bool false);
         ]);
         ("path", `Assoc [
           ("type", `String "string");

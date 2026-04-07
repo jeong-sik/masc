@@ -228,6 +228,7 @@ let make_tools
                 Keeper_registry.record_tool_use ~base_path:config.base_path meta.name ~tool_name:td.name ~success:true;
                 !Keeper_exec_tools.on_keeper_tool_call ~tool_name:td.name ~success:true ~duration_ms;
                 Keeper_exec_tools.notify_tool_call_observers ~tool_name:td.name ~success:true;
+                let ts = Time_compat.now () in
                 (try Sse.broadcast
                   (`Assoc [
                     ("type", `String "keeper_tool_call");
@@ -235,9 +236,22 @@ let make_tools
                     ("tool_name", `String td.name);
                     ("duration_ms", `Int duration_ms);
                     ("success", `Bool true);
-                    ("ts_unix", `Float (Time_compat.now ()));
+                    ("ts_unix", `Float ts);
                   ])
                  with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
+                (try
+                  Keeper_types_support.append_jsonl_line
+                    (Keeper_types_support.keeper_decision_log_path config meta.name)
+                    (`Assoc [
+                      "ts_unix", `Float ts;
+                      "event", `String "tool_exec";
+                      "keeper_name", `String meta.name;
+                      "tool", `String td.name;
+                      "duration_ms", `Int duration_ms;
+                      "result_bytes", `Int (String.length result);
+                      "ok", `Bool true;
+                    ])
+                with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
                 (* Notify session callback (e.g., mark_used for discovered tools) *)
                 (match on_tool_called with Some f -> f td.name | None -> ());
                 (* PR#814 Gap 1: Capture git status delta after successful tool execution.
@@ -271,9 +285,11 @@ let make_tools
                 (true, final_result)
               end
             with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+              let ts = Time_compat.now () in
               let duration_ms =
-                int_of_float ((Time_compat.now () -. t0) *. 1000.0) in
+                int_of_float ((ts -. t0) *. 1000.0) in
               let count = prior_fails + 1 in
+              let error_text = Printexc.to_string exn in
               Hashtbl.replace failure_counts key count;
               Keeper_registry.record_tool_use ~base_path:config.base_path meta.name ~tool_name:td.name ~success:false;
               !Keeper_exec_tools.on_keeper_tool_call ~tool_name:td.name ~success:false ~duration_ms;
@@ -285,10 +301,23 @@ let make_tools
                   ("tool_name", `String td.name);
                   ("duration_ms", `Int duration_ms);
                   ("success", `Bool false);
-                  ("error_text", `String (Printexc.to_string exn));
-                  ("ts_unix", `Float (Time_compat.now ()));
+                  ("error_text", `String error_text);
+                  ("ts_unix", `Float ts);
                 ])
                with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
+              (try
+                Keeper_types_support.append_jsonl_line
+                  (Keeper_types_support.keeper_decision_log_path config meta.name)
+                  (`Assoc [
+                    "ts_unix", `Float ts;
+                    "event", `String "tool_exec";
+                    "keeper_name", `String meta.name;
+                    "tool", `String td.name;
+                    "duration_ms", `Int duration_ms;
+                    "ok", `Bool false;
+                    "error", `String error_text;
+                  ])
+              with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
               let msg = Printf.sprintf "tool %s failed (%d/%d): %s"
                 td.name count max_consecutive_failures
                 (Printexc.to_string exn) in

@@ -49,6 +49,32 @@ let essential_tools = [
     "Overwrite the current task plan with new content.";
 ]
 
+(** Extended tool set covering newly added synonym families. *)
+let extended_tools =
+  essential_tools
+  @ [
+    make_schema "masc_code_search"
+      "Search for symbols and patterns across the codebase.";
+    make_schema "masc_code_read"
+      "Read the contents of a source file.";
+    make_schema "masc_governance_status"
+      "Query the current governance policy status.";
+    make_schema "masc_autoresearch_start"
+      "Start an automated research cycle.";
+    make_schema "masc_team_session_start"
+      "Start a parallel swarm team session.";
+    make_schema "masc_worktree_create"
+      "Create a new git worktree for an isolated branch.";
+    make_schema "masc_worktree_list"
+      "List all active git worktrees.";
+    make_schema "masc_agent_card"
+      "Retrieve the agent card and profile information.";
+    make_schema "masc_auth_status"
+      "Check authentication and token credential status.";
+    make_schema "masc_web_search"
+      "Search the internet for information.";
+  ]
+
 let names_of results =
   List.map (fun (s : Types.tool_schema) -> s.name) results
 
@@ -104,6 +130,52 @@ let test_synonym_claim_next () =
     ~tools:essential_tools ~query:"give me work to do" ~k:3 in
   check bool "synonym: claim_next via 'give me work'" true
     (has_tool "masc_claim_next" result)
+
+(* ================================================================ *)
+(* Tests: new tool family synonym retrieval                         *)
+(* ================================================================ *)
+
+let test_synonym_code_search () =
+  let result = Tool_prefilter.filter
+    ~tools:extended_tools ~query:"search the codebase for a symbol" ~k:3 in
+  check bool "synonym: masc_code_search via 'codebase search'" true
+    (has_tool "masc_code_search" result)
+
+let test_synonym_code_read () =
+  let result = Tool_prefilter.filter
+    ~tools:extended_tools ~query:"read source file contents" ~k:3 in
+  check bool "synonym: masc_code_read via 'read source'" true
+    (has_tool "masc_code_read" result)
+
+let test_synonym_governance_status () =
+  let result = Tool_prefilter.filter
+    ~tools:extended_tools ~query:"check governance policy status" ~k:3 in
+  check bool "synonym: masc_governance_status via 'governance status'" true
+    (has_tool "masc_governance_status" result)
+
+let test_synonym_autoresearch_start () =
+  let result = Tool_prefilter.filter
+    ~tools:extended_tools ~query:"begin auto research" ~k:3 in
+  check bool "synonym: masc_autoresearch_start via 'begin research'" true
+    (has_tool "masc_autoresearch_start" result)
+
+let test_synonym_team_session_start () =
+  let result = Tool_prefilter.filter
+    ~tools:extended_tools ~query:"start a parallel swarm session" ~k:3 in
+  check bool "synonym: masc_team_session_start via 'begin swarm'" true
+    (has_tool "masc_team_session_start" result)
+
+let test_synonym_worktree_create () =
+  let result = Tool_prefilter.filter
+    ~tools:extended_tools ~query:"create a new worktree" ~k:3 in
+  check bool "synonym: masc_worktree_create via 'create worktree'" true
+    (has_tool "masc_worktree_create" result)
+
+let test_synonym_web_search () =
+  let result = Tool_prefilter.filter
+    ~tools:extended_tools ~query:"search the internet for information" ~k:3 in
+  check bool "synonym: masc_web_search via 'search internet'" true
+    (has_tool "masc_web_search" result)
 
 (* ================================================================ *)
 (* Tests: zero-result contract                                      *)
@@ -195,6 +267,13 @@ let () =
           test_case "broadcast via synonym" `Quick test_synonym_broadcast;
           test_case "dashboard via synonym" `Quick test_synonym_dashboard;
           test_case "claim_next via synonym" `Quick test_synonym_claim_next;
+          test_case "code_search via synonym" `Quick test_synonym_code_search;
+          test_case "code_read via synonym" `Quick test_synonym_code_read;
+          test_case "governance_status via synonym" `Quick test_synonym_governance_status;
+          test_case "autoresearch_start via synonym" `Quick test_synonym_autoresearch_start;
+          test_case "team_session_start via synonym" `Quick test_synonym_team_session_start;
+          test_case "worktree_create via synonym" `Quick test_synonym_worktree_create;
+          test_case "web_search via synonym" `Quick test_synonym_web_search;
         ] );
       ( "zero_result",
         [

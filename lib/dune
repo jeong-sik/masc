@@ -447,6 +447,7 @@
    keeper_alerting_path
    keeper_timing
    keeper_tool_registry
+   keeper_tool_diversity
    keeper_tool_policy_config
    keeper_tool_policy
    keeper_discovered_tools

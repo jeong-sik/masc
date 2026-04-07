@@ -196,7 +196,8 @@ let has_room_signal_section
   | None -> false
 
 let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
-    ~(observation : Keeper_world_observation.world_observation) : string * string
+    ~(observation : Keeper_world_observation.world_observation)
+    ?(diversity_hint : string option) () : string * string
     =
   let trait_lines =
     String.concat ""
@@ -443,6 +444,14 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
       (Printf.sprintf "- Cycles total: %d (visible: %d, silent: %d)\n"
          prt.count_total prt.visible_count_total
          (prt.count_total - prt.visible_count_total)));
+  (* Tool diversity hint — deterministic gate from entropy analysis.
+     Injected when normalized entropy is below threshold, prompting the
+     LLM (non-deterministic) to explore underused tools. *)
+  (match diversity_hint with
+   | Some hint ->
+     Buffer.add_string ubuf "\n### Tool Diversity Signal\n";
+     Buffer.add_string ubuf (Printf.sprintf "%s\n" hint)
+   | None -> ());
   (* Peer keepers — show other running keepers so this keeper can @mention them *)
   let peer_keepers =
     Keeper_registry.all ~base_path ()

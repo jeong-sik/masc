@@ -208,6 +208,7 @@ let make_tools
                   if String.length s <= 300 then s
                   else String.sub s 0 300 ^ "..."
                 in
+                let ts = Time_compat.now () in
                 (try Sse.broadcast
                   (`Assoc [
                     ("type", `String "keeper_tool_call");
@@ -216,18 +217,33 @@ let make_tools
                     ("duration_ms", `Int duration_ms);
                     ("success", `Bool false);
                     ("error_text", `String detail);
-                    ("ts_unix", `Float (Time_compat.now ()));
+                    ("ts_unix", `Float ts);
                   ])
                  with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
                 Log.Keeper.warn
                   "tool %s returned error result (%d/%d): %s"
                   td.name count max_consecutive_failures detail;
-                (false, normalize_tool_result ~success:false result)
+                let normalized_error = normalize_tool_result ~success:false result in
+                (try
+                  Keeper_types_support.append_jsonl_line
+                    (Keeper_types_support.keeper_decision_log_path config meta.name)
+                    (`Assoc [
+                      "ts_unix", `Float ts;
+                      "event", `String "tool_exec";
+                      "keeper_name", `String meta.name;
+                      "tool", `String td.name;
+                      "duration_ms", `Int duration_ms;
+                      "result_bytes", `Int (String.length normalized_error);
+                      "ok", `Bool false;
+                    ])
+                with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
+                (false, normalized_error)
               end else begin
                 Hashtbl.remove failure_counts key;
                 Keeper_registry.record_tool_use ~base_path:config.base_path meta.name ~tool_name:td.name ~success:true;
                 !Keeper_exec_tools.on_keeper_tool_call ~tool_name:td.name ~success:true ~duration_ms;
                 Keeper_exec_tools.notify_tool_call_observers ~tool_name:td.name ~success:true;
+                let ts = Time_compat.now () in
                 (try Sse.broadcast
                   (`Assoc [
                     ("type", `String "keeper_tool_call");
@@ -235,7 +251,7 @@ let make_tools
                     ("tool_name", `String td.name);
                     ("duration_ms", `Int duration_ms);
                     ("success", `Bool true);
-                    ("ts_unix", `Float (Time_compat.now ()));
+                    ("ts_unix", `Float ts);
                   ])
                  with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
                 (* Notify session callback (e.g., mark_used for discovered tools) *)
@@ -268,12 +284,27 @@ let make_tools
                        | _ -> normalized
                      with Yojson.Json_error _ -> normalized)
                 in
+                (try
+                  Keeper_types_support.append_jsonl_line
+                    (Keeper_types_support.keeper_decision_log_path config meta.name)
+                    (`Assoc [
+                      "ts_unix", `Float ts;
+                      "event", `String "tool_exec";
+                      "keeper_name", `String meta.name;
+                      "tool", `String td.name;
+                      "duration_ms", `Int duration_ms;
+                      "result_bytes", `Int (String.length final_result);
+                      "ok", `Bool true;
+                    ])
+                with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
                 (true, final_result)
               end
             with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+              let ts = Time_compat.now () in
               let duration_ms =
-                int_of_float ((Time_compat.now () -. t0) *. 1000.0) in
+                int_of_float ((ts -. t0) *. 1000.0) in
               let count = prior_fails + 1 in
+              let error_text = Printexc.to_string exn in
               Hashtbl.replace failure_counts key count;
               Keeper_registry.record_tool_use ~base_path:config.base_path meta.name ~tool_name:td.name ~success:false;
               !Keeper_exec_tools.on_keeper_tool_call ~tool_name:td.name ~success:false ~duration_ms;
@@ -285,14 +316,29 @@ let make_tools
                   ("tool_name", `String td.name);
                   ("duration_ms", `Int duration_ms);
                   ("success", `Bool false);
-                  ("error_text", `String (Printexc.to_string exn));
-                  ("ts_unix", `Float (Time_compat.now ()));
+                  ("error_text", `String error_text);
+                  ("ts_unix", `Float ts);
                 ])
                with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
               let msg = Printf.sprintf "tool %s failed (%d/%d): %s"
                 td.name count max_consecutive_failures
                 (Printexc.to_string exn) in
               Log.Keeper.error "%s" msg;
-              (false, normalize_tool_result ~success:false msg)))
+              let normalized_exn = normalize_tool_result ~success:false msg in
+              (try
+                Keeper_types_support.append_jsonl_line
+                  (Keeper_types_support.keeper_decision_log_path config meta.name)
+                  (`Assoc [
+                    "ts_unix", `Float ts;
+                    "event", `String "tool_exec";
+                    "keeper_name", `String meta.name;
+                    "tool", `String td.name;
+                    "duration_ms", `Int duration_ms;
+                    "result_bytes", `Int (String.length normalized_exn);
+                    "ok", `Bool false;
+                    "error", `String error_text;
+                  ])
+              with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
+              (false, normalized_exn)))
     else None
   ) tool_defs

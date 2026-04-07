@@ -800,6 +800,7 @@ let run_turn
     before_turn_params = Some (fun event ->
       match event with
       | Agent_sdk.Hooks.BeforeTurnParams { turn; current_params; messages; _ } ->
+        let hook_t0 = Time_compat.now () in
         (* Update current_turn_ref so session-scoped callbacks
            (keeper_tool_search, on_tool_called) use the correct turn. *)
         current_turn_ref := turn;
@@ -945,12 +946,14 @@ let run_turn
           end;
           validated
         in
+        let core_count = List.length (Keeper_exec_tools.effective_core_tools ()) in
+        let discovered_count =
+          List.length (Keeper_discovered_tools.active_names !discovered_ref ~turn)
+        in
         if Keeper_types_profile.keeper_debug then
           Log.Keeper.info
             "tool_disclosure keeper=%s core=%d discovered=%d llm_rerank=%b allowed=%d query_len=%d"
-            meta.name
-            (List.length (Keeper_exec_tools.effective_core_tools ()))
-            (List.length (Keeper_discovered_tools.active_names !discovered_ref ~turn))
+            meta.name core_count discovered_count
             (Keeper_config.keeper_llm_rerank_enabled ())
             (List.length all_allowed)
             (String.length query_text);
@@ -1082,6 +1085,31 @@ let run_turn
           else
             Some Agent_sdk.Types.Any  (* all other turns: force tool use *)
         in
+        (* Tool disclosure telemetry: emitted after all allow-list rewrites
+           (boring-tool gate, last-turn intersect, max_tools cap) so that
+           final_visible and hook_ms reflect the actual state sent to AdjustParams.
+           Capture now once so ts_unix and hook_ms are consistent. *)
+        (let now = Time_compat.now () in
+         let hook_elapsed_ms =
+           Keeper_timing.round1 ((now -. hook_t0) *. 1000.0)
+         in
+         let disclosure_json = `Assoc [
+           "ts_unix", `Float now;
+           "event", `String "tool_disclosure";
+           "keeper_name", `String meta.name;
+           "turn", `Int turn;
+           "core_count", `Int core_count;
+           "discovered_count", `Int discovered_count;
+           "final_visible", `Int (List.length all_allowed);
+           "hook_ms", `Float hook_elapsed_ms;
+         ] in
+         (try
+           Keeper_types_support.append_jsonl_line
+             (Keeper_types_support.keeper_decision_log_path config meta.name)
+             disclosure_json
+         with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | _ -> ()));
         (* Yield after CPU-bound tool filtering to let HTTP handlers run.
            Without this, N concurrent keeper fibers starve the Eio scheduler
            during turn setup (tool list construction + prompt building). *)
@@ -1192,6 +1220,7 @@ let run_turn
       with
       | Error e -> Error e
       | Ok result ->
+        let post_turn_t0 = Time_compat.now () in
         (* Checkpoint save is deferred until after [STATE] synthesis so the
            persisted checkpoint includes the synthesized continuity block.
            Without this, read_continuity_summary finds no [STATE] in the
@@ -1389,6 +1418,10 @@ let run_turn
                  ~candidates)
              else None
            in
+           let post_turn_ms =
+             Keeper_timing.round1
+               ((Time_compat.now () -. post_turn_t0) *. 1000.0)
+           in
            let eval_json = `Assoc ([
              "ts_unix", `Float (Time_compat.now ());
              "event", `String "post_turn_eval";
@@ -1397,6 +1430,7 @@ let run_turn
              "goal_alignment", `Float goal_score;
              "tools_used_count", `Int (List.length tool_names);
              "used_memory_search", `Bool used_search;
+             "post_turn_ms", `Float post_turn_ms;
            ] @ (match recall_eval with
                 | Some e -> [
                     "memory_recall_performed", `Bool e.performed;

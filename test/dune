@@ -334,7 +334,8 @@
         test_task_sandbox
         test_governance_yojson_roundtrip
         test_eval_calibration
-        test_goal_janitor)
+        test_goal_janitor
+        test_keeper_pr_workflow)
  (modules
         test_runtime_params
         test_config_dir_resolver
@@ -475,7 +476,8 @@
         test_task_sandbox
         test_governance_yojson_roundtrip
         test_eval_calibration
-        test_goal_janitor)
+        test_goal_janitor
+        test_keeper_pr_workflow)
  (libraries masc_test_deps))
 
 ; ============================================================

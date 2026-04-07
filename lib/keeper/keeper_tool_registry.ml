@@ -37,17 +37,20 @@ let core_always_tools =
 
 (** Core tools always visible to the LLM.  All other tools are
     discoverable on demand via [keeper_tool_search].
-    Aligns with [board_core] preset: get/post/comment/vote/list visible by
-    default; board_extended (stats/search) remain discoverable. *)
+    Includes both read and write tools so keepers can complete full
+    task lifecycles (read → edit → PR → done).  AllowList filtering
+    ensures tools not in the keeper's preset are invisible.
+    22 → 26 tools; 9B handles 21+ tools at 100% accuracy (#5568). *)
 let core_discovery_tools =
   core_always_tools @
   [ "keeper_broadcast"; "keeper_tasks_list";
     "keeper_task_claim"; "keeper_task_done";
     "keeper_memory_search"; "keeper_time_now";
-    "keeper_fs_read";
+    "keeper_fs_read"; "keeper_fs_edit";
     "keeper_board_get"; "keeper_board_post";
     "keeper_board_comment"; "keeper_board_vote"; "keeper_board_list";
-    "masc_web_search"; "keeper_shell_readonly";
+    "masc_web_search"; "keeper_shell_readonly"; "keeper_bash";
+    "keeper_pr_workflow"; "keeper_github";
   ]
 
 let effective_core_tools () = core_discovery_tools

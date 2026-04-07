@@ -622,15 +622,16 @@ let test_compact_if_needed_ts_zero_bypasses_cooldown () =
   check string "ts=0.0 bypasses cooldown, not skipped" "blocked:below_thresholds" decision
 
 let test_compact_if_needed_emergency_bypass_ignores_cooldown () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   (* When ratio >= 0.8 the cooldown gate must be bypassed even if the
-     reflection timestamp is fresh and the cooldown period has not elapsed. *)
+     reflection timestamp is fresh and the cooldown period has not elapsed.
+     Without the emergency bypass, cooldown (3600s) would block compaction
+     because only 60s have elapsed since last reflection. *)
   let now_ts = 10_000.0 in
-  (* last_continuity_update_ts set to 60s ago — cooldown (3600s) not met *)
   let meta =
     make_gate_only_meta ~last_continuity_update_ts:(now_ts -. 60.0) ~cooldown_sec:3600 ()
   in
-  (* Build a context with ratio well above 0.8: messages of emergency_test_text_length
-     chars into a 100-token window easily exceed the 0.8 threshold. *)
   let long_text = String.make emergency_test_text_length 'x' in
   let ctx =
     KEC.create ~system_prompt:"sp" ~max_tokens:100
@@ -641,8 +642,9 @@ let test_compact_if_needed_emergency_bypass_ignores_cooldown () =
   let ratio = KCC.context_ratio ctx in
   check bool "context ratio is above emergency threshold" true (ratio >= 0.8);
   let (_ctx, trigger, decision) = KEC.compact_if_needed ~meta ~now_ts ctx in
-  check (option string) "no compaction triggered (ratio_gate=1.0)" None trigger;
-  check string "emergency bypass ignores cooldown, not skipped" "blocked:below_thresholds" decision
+  (* Emergency ratio bypasses cooldown → compaction fires (ratio >= ratio_gate=1.0) *)
+  check bool "compaction was triggered (emergency bypass)" true (Option.is_some trigger);
+  check bool "decision starts with applied:" true (String.starts_with ~prefix:"applied:" decision)
 
 let () =
   run "keeper_lifecycle"

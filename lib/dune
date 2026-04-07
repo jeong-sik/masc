@@ -479,6 +479,7 @@
    keeper_prompt
    keeper_coordination
    keeper_execution
+   keeper_event_bus
    keeper_keepalive
    keeper_crash_persistence
    keeper_chat_store
@@ -629,6 +630,7 @@
   keeper_turn_up
   keeper_turn_lifecycle
   keeper_msg_async
+  keeper_event_bus
   keeper_file_tracker
   keeper_evidence
   team_session_engine_helpers

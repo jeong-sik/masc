@@ -290,6 +290,7 @@ let test_telemetry_of_run_result_carries_trace_ref () =
           stop_reason = Oas.Types.EndTurn;
           content = [];
           usage = None;
+          telemetry = None;
         };
       checkpoint = None;
       session_id = "session-1";

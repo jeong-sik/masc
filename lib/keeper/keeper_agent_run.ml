@@ -250,6 +250,7 @@ let run_turn
     ?priority
     ?(is_retry = false)
     ?shared_context
+    ?event_bus
     ()
   : (run_result, Oas.Error.sdk_error) result =
   (* 0. Resolve inference parameters via Cascade_inference *)
@@ -1082,6 +1083,7 @@ let run_turn
           ~context:shared_context
           ?slot_id:(Keeper_config.keeper_slot_id meta.name)
           ?oas_checkpoint:raw_oas_checkpoint
+          ?event_bus
           ()
       with
       | Error e -> Error e

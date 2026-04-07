@@ -428,105 +428,118 @@ let claim_task config ~agent_name ~task_id =
     the claim is rejected if the roles do not match. *)
 let claim_task_r config ~agent_name ~task_id
     ?(agent_role = Types_core.Unassigned) () : string Types.masc_result =
-  if not (is_initialized config) then Error Types.NotInitialized
-  else match validate_agent_name_r agent_name, validate_task_id_r task_id with
-  | Error e, _ -> Error e
-  | _, Error e -> Error e
-  | Ok _, Ok _ ->
-    (* BUG-005: Verify agent has joined before allowing claim. *)
-    let actual_name = resolve_agent_name config agent_name in
-    let filename = safe_filename actual_name ^ ".json" in
-    let agent_path = Filename.concat (agents_dir config) filename in
-    let agent_joined = path_exists config agent_path in
-    if not agent_joined then
-      Error (Types.AgentNotJoined actual_name)
-    else
-    let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
-    with_file_lock config backlog_path (fun () ->
-      try
-        let backlog = read_backlog config in
-        (* Check role constraint before attempting claim *)
-        let target_task = List.find_opt (fun t -> t.id = task_id) backlog.tasks in
-        (match target_task with
+  let open Result_syntax in
+  let* () = if not (is_initialized config) then Error Types.NotInitialized else Ok () in
+  let* () =
+    match validate_agent_name_r agent_name, validate_task_id_r task_id with
+    | Error e, _ -> Error e
+    | _, Error e -> Error e
+    | Ok _, Ok _ -> Ok ()
+  in
+  (* BUG-005: Verify agent has joined before allowing claim. *)
+  let actual_name = resolve_agent_name config agent_name in
+  let filename = safe_filename actual_name ^ ".json" in
+  let agent_path = Filename.concat (agents_dir config) filename in
+  let agent_joined = path_exists config agent_path in
+  let* () =
+    if not agent_joined then Error (Types.AgentNotJoined actual_name)
+    else Ok ()
+  in
+  let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
+  with_file_lock config backlog_path (fun () ->
+    try
+      let backlog = read_backlog config in
+      (* Check role constraint before attempting claim *)
+      let target_task = List.find_opt (fun t -> t.id = task_id) backlog.tasks in
+      let* task =
+        match target_task with
         | None -> Error (Types.TaskNotFound task_id)
-        | Some task ->
-          if not (Types_core.role_satisfies
-                    ~required:task.required_role ~agent_role) then
-            Error (Types.TaskRoleMismatch {
-              task_id;
-              required = Types_core.role_to_string task.required_role;
-              actual = Types_core.role_to_string agent_role;
-            })
-          else begin
-            (* fold_left to find+transform in a single pass without mutable refs.
-               Uses polymorphic variants for inline state tracking. *)
-            let claim_state, new_tasks =
-              List.fold_left (fun (state, acc) t ->
-                if t.id = task_id then
-                  match t.task_status with
-                  | Todo ->
-                      let t' = { t with task_status = Claimed { assignee = agent_name; claimed_at = now_iso () } } in
-                      (`Claimed_ok, t' :: acc)
-                  | Claimed { assignee; _ } | InProgress { assignee; _ } when assignee = agent_name ->
-                      (`Already_mine, t :: acc)
-                  | Claimed { assignee; _ } | InProgress { assignee; _ }
-                  | Done { assignee; _ } | Cancelled { cancelled_by = assignee; _ } ->
-                      (`Claimed_by assignee, t :: acc)
-                else
-                  (state, t :: acc)
-              ) (`Not_found, []) backlog.tasks
-            in
-            let new_tasks = List.rev new_tasks in
-            match claim_state with
-            | `Not_found -> Error (Types.TaskNotFound task_id)
-            | `Claimed_by other -> Error (Types.TaskAlreadyClaimed { task_id; by = other })
-            | `Already_mine -> Ok (Printf.sprintf "Task %s is already claimed by you" task_id)
-            | `Claimed_ok ->
-                  let new_backlog = {
-                    tasks = new_tasks;
-                    last_updated = now_iso ();
-                    version = backlog.version + 1;
-                  } in
-                  write_backlog config new_backlog;
-                  let agent_file = Filename.concat (agents_dir config) (safe_filename agent_name ^ ".json") in
-                  if Sys.file_exists agent_file then begin
-                    let json = read_json config agent_file in
-                    match agent_of_yojson json with
-                    | Ok agent ->
-                        let updated = { agent with status = Busy; current_task = Some task_id } in
-                        write_json config agent_file (agent_to_yojson updated)
-                    | Error msg ->
-                        Log.Misc.error "agent state write failed: %s" msg
-                  end;
-                  let _ = broadcast config ~from_agent:agent_name ~content:(Printf.sprintf "📋 Claimed %s" task_id) in
-                  emit_task_activity config ~agent_name ~task_id ~kind:"task.claimed"
-                    ~payload:(`Assoc [ ("task_id", `String task_id) ]);
-                  log_event config
-                    (Yojson.Safe.to_string
-                       (`Assoc
-                         [
-                           ("type", `String "task_claim");
-                           ("agent", `String agent_name);
-                           ("actor_kind", `String (task_actor_kind agent_name));
-                           ("task", `String task_id);
-                           ("ts", `String (now_iso ()));
-                         ]));
-                  observe_task_transition config ~agent_name ~task_id
-                    ~transition:"claim"
-                    ~details:
-                      (task_transition_details ~from_status:Types.Todo
-                         ~to_status:
-                           (Types.Claimed
-                              {
-                                assignee = agent_name;
-                                claimed_at = now_iso ();
-                              })
-                         ());
-                  Ok (Printf.sprintf "✅ %s claimed %s" agent_name task_id)
-          end)
-      with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | e -> Error (Types.IoError (Printexc.to_string e))
+        | Some task -> Ok task
+      in
+      let* () =
+        if not (Types_core.role_satisfies
+                  ~required:task.required_role ~agent_role) then
+          Error (Types.TaskRoleMismatch {
+            task_id;
+            required = Types_core.role_to_string task.required_role;
+            actual = Types_core.role_to_string agent_role;
+          })
+        else Ok ()
+      in
+      (* fold_left to find+transform in a single pass without mutable refs.
+         Uses polymorphic variants for inline state tracking. *)
+      let claim_state, new_tasks =
+        List.fold_left (fun (state, acc) t ->
+          if t.id = task_id then
+            match t.task_status with
+            | Todo ->
+                let t' = { t with task_status = Claimed { assignee = agent_name; claimed_at = now_iso () } } in
+                (`Claimed_ok, t' :: acc)
+            | Claimed { assignee; _ } | InProgress { assignee; _ } when assignee = agent_name ->
+                (`Already_mine, t :: acc)
+            | Claimed { assignee; _ } | InProgress { assignee; _ }
+            | Done { assignee; _ } | Cancelled { cancelled_by = assignee; _ } ->
+                (`Claimed_by assignee, t :: acc)
+          else
+            (state, t :: acc)
+        ) (`Not_found, []) backlog.tasks
+      in
+      let new_tasks = List.rev new_tasks in
+      let* () =
+        match claim_state with
+        | `Not_found -> Error (Types.TaskNotFound task_id)
+        | `Claimed_by other -> Error (Types.TaskAlreadyClaimed { task_id; by = other })
+        | `Already_mine -> Ok ()
+        | `Claimed_ok -> Ok ()
+      in
+      if claim_state = `Already_mine then
+        Ok (Printf.sprintf "Task %s is already claimed by you" task_id)
+      else begin
+        let new_backlog = {
+          tasks = new_tasks;
+          last_updated = now_iso ();
+          version = backlog.version + 1;
+        } in
+        write_backlog config new_backlog;
+        let agent_file = Filename.concat (agents_dir config) (safe_filename agent_name ^ ".json") in
+        if Sys.file_exists agent_file then begin
+          let json = read_json config agent_file in
+          match agent_of_yojson json with
+          | Ok agent ->
+              let updated = { agent with status = Busy; current_task = Some task_id } in
+              write_json config agent_file (agent_to_yojson updated)
+          | Error msg ->
+              Log.Misc.error "agent state write failed: %s" msg
+        end;
+        let _ = broadcast config ~from_agent:agent_name ~content:(Printf.sprintf "📋 Claimed %s" task_id) in
+        emit_task_activity config ~agent_name ~task_id ~kind:"task.claimed"
+          ~payload:(`Assoc [ ("task_id", `String task_id) ]);
+        log_event config
+          (Yojson.Safe.to_string
+             (`Assoc
+               [
+                 ("type", `String "task_claim");
+                 ("agent", `String agent_name);
+                 ("actor_kind", `String (task_actor_kind agent_name));
+                 ("task", `String task_id);
+                 ("ts", `String (now_iso ()));
+               ]));
+        observe_task_transition config ~agent_name ~task_id
+          ~transition:"claim"
+          ~details:
+            (task_transition_details ~from_status:Types.Todo
+               ~to_status:
+                 (Types.Claimed
+                    {
+                      assignee = agent_name;
+                      claimed_at = now_iso ();
+                    })
+               ());
+        Ok (Printf.sprintf "✅ %s claimed %s" agent_name task_id)
+      end
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | e -> Error (Types.IoError (Printexc.to_string e))
     )
 
 (** Unified task transition (single entrypoint).
@@ -535,458 +548,232 @@ let claim_task_r config ~agent_name ~task_id
 let transition_task_r config ~agent_name ~task_id ~action
     ?expected_version ?(notes="") ?(reason="") ?handoff_context
     ?(force=false) () : string Types.masc_result =
-  if not (is_initialized config) then Error Types.NotInitialized
-  else match validate_agent_name_r agent_name, validate_task_id_r task_id with
+  let open Result_syntax in
+  let* () = if not (is_initialized config) then Error Types.NotInitialized else Ok () in
+  let* () =
+    match validate_agent_name_r agent_name, validate_task_id_r task_id with
     | Error e, _ -> Error e
     | _, Error e -> Error e
-    | Ok _, Ok _ ->
-        (* BUG-006: Resolve agent name to canonical form (e.g. "keeper-coder" ->
-           "keeper-coder-agent") so the assignee guard matches the name recorded
-           at claim time.  Only the exact [-agent] suffix form is accepted;
-           broader prefix matches from [resolve_agent_name] are discarded to
-           prevent ambiguous identity mapping across keeper agent files. *)
-        let agent_name = resolve_agent_name_strict config agent_name in
-        let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
-        with_file_lock config backlog_path (fun () ->
-          try
-            let backlog = read_backlog config in
-            (match expected_version with
-             | Some v when backlog.version <> v ->
-                 Error (Types.TaskInvalidState
-                   (Printf.sprintf "Version mismatch (expected %d, got %d)" v backlog.version))
-             | _ ->
-                 let task_opt = List.find_opt (fun t -> t.id = task_id) backlog.tasks in
-                 match task_opt with
-                 | None -> Error (Types.TaskNotFound task_id)
-                 | Some task ->
-                     let now = now_iso () in
-                     let now_ts = Time_compat.now () in
-                     let action_s = Types.task_action_to_string action in
-                     let transition =
-                       match action, task.task_status with
-                       | Types.Claim, Types.Todo ->
-                           Ok (Types.Claimed { assignee = agent_name; claimed_at = now }, Some task_id)
-                       | Types.Claim, (Types.Claimed { assignee; _ } | Types.InProgress { assignee; _ }) when assignee = agent_name ->
-                           (* Idempotent: already claimed by me; do not trigger backlog/activity rewrites. *)
-                           Ok (task.task_status, None)
-                       | Types.Start, Types.Claimed { assignee; _ } when assignee = agent_name ->
-                           Ok (Types.InProgress { assignee = agent_name; started_at = now }, Some task_id)
-                       | Types.Start, Types.InProgress { assignee; _ } when assignee = agent_name ->
-                           (* Idempotent: already in progress by me; do not trigger backlog/activity rewrites. *)
-                           Ok (task.task_status, None)
-                       | (Types.Claim | Types.Start), Types.Done _ ->
-                           (* Idempotent: already done, no-op *)
-                           Ok (task.task_status, None)
-                       | Types.Done_action, Types.Claimed { assignee; _ }
-                       | Types.Done_action, Types.InProgress { assignee; _ } when assignee = agent_name || force ->
-                           Ok (Types.Done {
-                             assignee = agent_name;
-                             completed_at = now;
-                             notes = if notes = "" then None else Some notes;
-                           }, None)
-                       | Types.Done_action, Types.Done _ ->
-                           (* Idempotent: already done, return current state unchanged *)
-                           Ok (task.task_status, None)
-                       | Types.Cancel, Types.Cancelled _ ->
-                           (* Idempotent: already cancelled *)
-                           Ok (task.task_status, None)
-                       | Types.Cancel, Types.Todo ->
-                           Ok (Types.Cancelled {
-                             cancelled_by = agent_name;
-                             cancelled_at = now;
-                             reason = if reason = "" then None else Some reason;
-                           }, None)
-                       | Types.Cancel, Types.Claimed { assignee; _ }
-                       | Types.Cancel, Types.InProgress { assignee; _ } when assignee = agent_name || force ->
-                           Ok (Types.Cancelled {
-                             cancelled_by = agent_name;
-                             cancelled_at = now;
-                             reason = if reason = "" then None else Some reason;
-                           }, None)
-                       | Types.Release, Types.Claimed { assignee; _ }
-                       | Types.Release, Types.InProgress { assignee; _ } when assignee = agent_name || force ->
-                           Ok (Types.Todo, None)
-                       | Types.Start, Types.Claimed { assignee; _ } ->
-                           Error (Types.TaskInvalidState
-                             (Printf.sprintf
-                               "Cannot start %s: claimed by '%s', caller is '%s'"
-                               task_id assignee agent_name))
-                       | _ ->
-                           Error (Types.TaskInvalidState
-                             (Printf.sprintf "Invalid transition: %s -> %s (%s, agent=%s)"
-                               (task_status_to_string task.task_status) action_s task_id agent_name))
-                     in
-                     (match transition with
-                      | Error e -> Error e
-                      | Ok (new_status, None) when new_status = task.task_status ->
-                          (* Idempotent no-op: status unchanged, skip write/events.
-                             Match None explicitly so set_current=Some is never silently dropped. *)
-                          Ok (Printf.sprintf "✅ %s already %s (no-op)" task_id
-                                (task_status_to_string task.task_status))
-                      | Ok (new_status, set_current) ->
-                          let new_tasks = List.map (fun t ->
-                            if t.id = task_id then
-                              {
-                                t with
-                                task_status = new_status;
-                                handoff_context =
-                                  (match action with
-                                  | Types.Release -> handoff_context
-                                  | Types.Claim | Types.Start | Types.Done_action
-                                  | Types.Cancel ->
-                                      None);
-                              }
-                            else
-                              t
-                          ) backlog.tasks in
-                          let new_backlog = {
-                            tasks = new_tasks;
-                            last_updated = now_iso ();
-                            version = backlog.version + 1;
-                          } in
-                          write_backlog config new_backlog;
-                          let agent_file = Filename.concat (agents_dir config) (safe_filename agent_name ^ ".json") in
-                          if Sys.file_exists agent_file then begin
-                            let json = read_json config agent_file in
-                            match agent_of_yojson json with
-                            | Ok agent ->
-                                let updated =
-                                  match set_current with
-                                  | Some _ -> { agent with status = Busy; current_task = Some task_id }
-                                  | None ->
-                                      if agent.current_task = Some task_id then
-                                        { agent with status = Active; current_task = None }
-                                      else
-                                        agent
-                                in
-                                write_json config agent_file (agent_to_yojson updated)
-                            | Error msg ->
-                                Log.Misc.error "agent state write failed: %s" msg
-                          end;
-                          log_event config
-                            (Yojson.Safe.to_string
-                               (`Assoc
-                                 ([
-                                    ("type", `String "task_transition");
-                                    ("agent", `String agent_name);
-                                    ( "actor_kind",
-                                      `String (task_actor_kind agent_name) );
-                                    ("task", `String task_id);
-                                    ("action", `String action_s);
-                                    ( "from",
-                                      `String
-                                        (task_status_to_string task.task_status)
-                                    );
-                                    ( "to",
-                                      `String (task_status_to_string new_status)
-                                    );
-                                    ("ts", `String now);
-                                  ]
-                                 @
-                                 (match trim_opt (Some notes) with
-                                 | Some notes -> [ ("notes", `String notes) ]
-                                 | None -> [])
-                                 @
-                                 (match trim_opt (Some reason) with
-                                 | Some reason -> [ ("reason", `String reason) ]
-                                 | None -> [])
-                                 @
-                                 (match handoff_context with
-                                 | Some handoff_context when action = Types.Release
-                                   ->
-                                     [
-                                       ( "handoff_context",
-                                         Types.task_handoff_context_to_yojson
-                                           handoff_context );
-                                     ]
-                                 | _ -> []))));
-                          (match action with
-                           | Types.Claim ->
-                               emit_task_activity config ~agent_name ~task_id
-                                 ~kind:"task.claimed"
-                                 ~payload:(`Assoc [ ("task_id", `String task_id) ])
-                           | Types.Start ->
-                               emit_task_activity config ~agent_name ~task_id
-                                 ~kind:"task.started"
-                                 ~payload:(`Assoc [ ("task_id", `String task_id) ])
-                           | Types.Done_action ->
-                               emit_task_activity config ~agent_name ~task_id
-                                 ~kind:"task.done"
-                                 ~payload:
-                                   (`Assoc
-                                     [
-                                       ("task_id", `String task_id);
-                                       ("notes", if notes = "" then `Null else `String notes);
-                                     ])
-                           | Types.Cancel ->
-                               emit_task_activity config ~agent_name ~task_id
-                                 ~kind:"task.cancelled"
-                                 ~payload:
-                                   (`Assoc
-                                     [
-                                       ("task_id", `String task_id);
-                                       ("reason", if reason = "" then `Null else `String reason);
-                                     ])
-                           | Types.Release ->
-                               emit_task_activity config ~agent_name ~task_id
-                                 ~kind:"task.released"
-                                 ~payload:
-                                   (`Assoc
-                                     ([
-                                        ("task_id", `String task_id);
-                                      ]
-                                     @
-                                     match handoff_context with
-                                     | Some handoff_context ->
-                                         [
-                                           ( "handoff_context",
-                                             Types
-                                             .task_handoff_context_to_yojson
-                                               handoff_context );
-                                         ]
-                                     | None -> [])));
-                          let duration_ms =
-                            match action with
-                            | Types.Done_action | Types.Cancel ->
-                                Some
-                                  (max 0
-                                     (int_of_float
-                                        ((now_ts
-                                         -. task_started_at_unix task.task_status)
-                                        *. 1000.0)))
-                            | Types.Claim | Types.Start | Types.Release -> None
-                          in
-                          observe_task_transition config ~agent_name ~task_id
-                            ~transition:action_s
-                            ~details:
-                              (task_transition_details
-                                 ~from_status:task.task_status ~to_status:new_status
-                                 ?notes:(if notes = "" then None else Some notes)
-                                 ?reason:(if reason = "" then None else Some reason)
-                                 ?duration_ms ~forced:force ());
-                          Ok (Printf.sprintf "✅ %s %s → %s" task_id
-                                (task_status_to_string task.task_status)
-                                (task_status_to_string new_status))
-                     ))
-          with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | e -> Error (Types.IoError (Printexc.to_string e))
-        )
-
-(** Release task back to backlog - transition wrapper *)
-let release_task_r config ~agent_name ~task_id ?expected_version ?handoff_context
-    () : string Types.masc_result =
-  transition_task_r config ~agent_name ~task_id ~action:Types.Release
-    ?expected_version ?handoff_context ()
-
-(** Force-release a task regardless of assignee. Keeper privilege. *)
-let force_release_task_r config ~agent_name ~task_id ?handoff_context
-    () : string Types.masc_result =
-  transition_task_r config ~agent_name ~task_id ~action:Types.Release
-    ?handoff_context ~force:true ()
-
-(** Force-done a task regardless of assignee. Keeper privilege. *)
-let force_done_task_r config ~agent_name ~task_id ~notes () : string Types.masc_result =
-  transition_task_r config ~agent_name ~task_id ~action:Types.Done_action ~notes ~force:true ()
-
-(** Complete task with file locking *)
-let complete_task config ~agent_name ~task_id ~notes =
-  ensure_initialized config;
+    | Ok _, Ok _ -> Ok ()
+  in
   let agent_name = resolve_agent_name_strict config agent_name in
   let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
   with_file_lock config backlog_path (fun () ->
     try
       let backlog = read_backlog config in
+      let* () =
+        match expected_version with
+        | Some v when backlog.version <> v ->
+            Error (Types.TaskInvalidState
+              (Printf.sprintf "Version mismatch (expected %d, got %d)" v backlog.version))
+        | _ -> Ok ()
+      in
       let task_opt = List.find_opt (fun t -> t.id = task_id) backlog.tasks in
-      match task_opt with
-      | None ->
-          Printf.sprintf "❌ Task %s not found" task_id
-      | Some task ->
-          let can_complete = match task.task_status with
-            | Claimed { assignee; _ } | InProgress { assignee; _ } -> assignee = agent_name
-            | Todo | Done _ | Cancelled _ -> false
-          in
-          if not can_complete then
-            Printf.sprintf "⚠ Task %s is not claimed by %s. Claim it first!" task_id agent_name
-          else begin
-            let new_tasks = List.map (fun t ->
-              if t.id = task_id then
-                { t with task_status = Done {
-                    assignee = agent_name;
-                    completed_at = now_iso ();
-                    notes = if notes = "" then None else Some notes
-                  }
-                }
-              else t
-            ) backlog.tasks in
-            let new_backlog = {
-              tasks = new_tasks;
-              last_updated = now_iso ();
-              version = backlog.version + 1;
-            } in
-            write_backlog config new_backlog;
-            let agent_file = Filename.concat (agents_dir config) (safe_filename agent_name ^ ".json") in
-            if Sys.file_exists agent_file then begin
-              let json = read_json config agent_file in
-              match agent_of_yojson json with
-              | Ok agent ->
-                  let updated = { agent with status = Active; current_task = None } in
-                  write_json config agent_file (agent_to_yojson updated)
-              | Error msg ->
-                  Log.Misc.error "agent state write failed: %s" msg
-            end;
-            let msg = if notes = "" then Printf.sprintf "✅ Completed %s" task_id
-                      else Printf.sprintf "✅ Completed %s - %s" task_id notes in
-            let _ = broadcast config ~from_agent:agent_name ~content:msg in
-            emit_task_activity config ~agent_name ~task_id ~kind:"task.done"
-              ~payload:
-                (`Assoc
-                  [
-                    ("task_id", `String task_id);
-                    ("notes", if notes = "" then `Null else `String notes);
-                  ]);
-              log_event config
-                (Yojson.Safe.to_string
-                   (`Assoc
-                     [
-                       ("type", `String "task_done");
-                       ("agent", `String agent_name);
-                       ("actor_kind", `String (task_actor_kind agent_name));
-                       ("task", `String task_id);
-                       ("notes", if notes = "" then `Null else `String notes);
-                       ("ts", `String (now_iso ()));
-                     ]));
-            observe_task_transition config ~agent_name ~task_id
-              ~transition:"done"
-              ~details:
-                (task_transition_details ~from_status:task.task_status
-                   ~to_status:
-                     (Types.Done
-                        {
-                          assignee = agent_name;
-                          completed_at = now_iso ();
-                          notes = if notes = "" then None else Some notes;
-                        })
-                   ?notes:(if notes = "" then None else Some notes)
-                   ~duration_ms:
-                     (max 0
-                        (int_of_float
-                           ((Time_compat.now ()
-                            -. task_started_at_unix task.task_status)
-                           *. 1000.0)))
-                   ());
-            (* Record task collaboration via hook (async, non-blocking) *)
-            (try
-               let active = (Room_state.read_state config).active_agents in
-               !Room_hooks.relation_on_task_done_fn ~assignee:agent_name ~active_agents:active
-             with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-               Log.RoomTask.error "relation-materializer task hook error: %s"
-                 (Printexc.to_string exn));
-            Printf.sprintf "✅ %s completed %s" agent_name task_id
-          end
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | e ->
-      Printf.sprintf "❌ Error: %s" (Printexc.to_string e)
-  )
-
-(** Result-returning version of complete_task for type-safe error handling *)
-let complete_task_r config ~agent_name ~task_id ~notes : string Types.masc_result =
-  if not (is_initialized config) then Error Types.NotInitialized
-  else
-    (* BUG-006: Same resolve as transition_task_r — only the exact [-agent]
-       suffix form is accepted to prevent ambiguous prefix matches from mapping
-       the caller to a different agent identity. *)
-    let agent_name = resolve_agent_name_strict config agent_name in
-    let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
-    with_file_lock config backlog_path (fun () ->
-      try
-        let backlog = read_backlog config in
-        let task_opt = List.find_opt (fun t -> t.id = task_id) backlog.tasks in
+      let* task =
         match task_opt with
         | None -> Error (Types.TaskNotFound task_id)
-        | Some task ->
-            let completion_error =
-              match task.task_status with
-              | Claimed { assignee; _ } | InProgress { assignee; _ } ->
-                  if assignee = agent_name then
-                    None
-                  else
-                    Some (Types.TaskAlreadyClaimed { task_id; by = assignee })
-              | Todo -> Some (Types.TaskNotClaimed task_id)
-              | Done { assignee; _ } ->
-                  Some
-                    (Types.TaskInvalidState
-                       (Printf.sprintf
-                          "task %s is already done by %s; inspect task history instead of calling masc_done again"
-                          task_id assignee))
-              | Cancelled { cancelled_by; _ } ->
-                  Some
-                    (Types.TaskInvalidState
-                       (Printf.sprintf
-                          "task %s was cancelled by %s; reopen or create a new task instead of calling masc_done"
-                          task_id cancelled_by))
-            in
-            match completion_error with
-            | Some err -> Error err
-            | None -> begin
-              let new_tasks = List.map (fun t ->
-                if t.id = task_id then
-                  { t with task_status = Done { assignee = agent_name; completed_at = now_iso (); notes = if notes = "" then None else Some notes } }
-                else t
-              ) backlog.tasks in
-              let new_backlog = {
-                tasks = new_tasks;
-                last_updated = now_iso ();
-                version = backlog.version + 1;
-              } in
-              write_backlog config new_backlog;
-              let agent_file = Filename.concat (agents_dir config) (safe_filename agent_name ^ ".json") in
-              if Sys.file_exists agent_file then begin
-                let json = read_json config agent_file in
-                match agent_of_yojson json with
-                | Ok agent -> let updated = { agent with status = Active; current_task = None } in write_json config agent_file (agent_to_yojson updated)
-                | Error msg ->
-                    Log.Misc.error "agent state write failed: %s" msg
-              end;
-              let msg = if notes = "" then Printf.sprintf "✅ Completed %s" task_id else Printf.sprintf "✅ Completed %s - %s" task_id notes in
-              let _ = broadcast config ~from_agent:agent_name ~content:msg in
-              emit_task_activity config ~agent_name ~task_id ~kind:"task.done"
-                ~payload:
-                  (`Assoc
-                    [
+        | Some task -> Ok task
+      in
+      let now = now_iso () in
+      let now_ts = Time_compat.now () in
+      let action_s = Types.task_action_to_string action in
+      let* transition =
+        match action, task.task_status with
+        | Types.Claim, Types.Todo ->
+            Ok (Types.Claimed { assignee = agent_name; claimed_at = now }, Some task_id)
+        | Types.Claim, (Types.Claimed { assignee; _ } | Types.InProgress { assignee; _ }) when assignee = agent_name ->
+            (* Idempotent: already claimed by me; do not trigger backlog/activity rewrites. *)
+            Ok (task.task_status, None)
+        | Types.Start, Types.Claimed { assignee; _ } when assignee = agent_name ->
+            Ok (Types.InProgress { assignee = agent_name; started_at = now }, Some task_id)
+        | Types.Start, Types.InProgress { assignee; _ } when assignee = agent_name ->
+            (* Idempotent: already in progress by me; do not trigger backlog/activity rewrites. *)
+            Ok (task.task_status, None)
+        | (Types.Claim | Types.Start), Types.Done _ ->
+            (* Idempotent: already done, no-op *)
+            Ok (task.task_status, None)
+        | Types.Done_action, Types.Claimed { assignee; _ }
+        | Types.Done_action, Types.InProgress { assignee; _ } when assignee = agent_name || force ->
+            Ok (Types.Done {
+              assignee = agent_name;
+              completed_at = now;
+              notes = if notes = "" then None else Some notes;
+            }, None)
+        | Types.Done_action, Types.Done _ ->
+            (* Idempotent: already done, return current state unchanged *)
+            Ok (task.task_status, None)
+        | Types.Cancel, Types.Cancelled _ ->
+            (* Idempotent: already cancelled *)
+            Ok (task.task_status, None)
+        | Types.Cancel, Types.Todo ->
+            Ok (Types.Cancelled {
+              cancelled_by = agent_name;
+              cancelled_at = now;
+              reason = if reason = "" then None else Some reason;
+            }, None)
+        | Types.Cancel, Types.Claimed { assignee; _ }
+        | Types.Cancel, Types.InProgress { assignee; _ } when assignee = agent_name || force ->
+            Ok (Types.Cancelled {
+              cancelled_by = agent_name;
+              cancelled_at = now;
+              reason = if reason = "" then None else Some reason;
+            }, None)
+        | Types.Release, Types.Claimed { assignee; _ }
+        | Types.Release, Types.InProgress { assignee; _ } when assignee = agent_name || force ->
+            Ok (Types.Todo, None)
+        | Types.Start, Types.Claimed { assignee; _ } ->
+            Error (Types.TaskInvalidState
+              (Printf.sprintf
+                "Cannot start %s: claimed by '%s', caller is '%s'"
+                task_id assignee agent_name))
+        | _ ->
+            Error (Types.TaskInvalidState
+              (Printf.sprintf "Invalid transition: %s -> %s (%s, agent=%s)"
+                (task_status_to_string task.task_status) action_s task_id agent_name))
+      in
+      let new_status, set_current = transition in
+      if new_status = task.task_status && set_current = None then
+        (* Idempotent no-op: status unchanged, skip write/events. *)
+        Ok (Printf.sprintf "✅ %s already %s (no-op)" task_id
+              (task_status_to_string task.task_status))
+      else begin
+        let new_tasks = List.map (fun t ->
+          if t.id = task_id then
+            {
+              t with
+              task_status = new_status;
+              handoff_context =
+                (match action with
+                | Types.Release -> handoff_context
+                | Types.Claim | Types.Start | Types.Done_action
+                | Types.Cancel ->
+                    None);
+            }
+          else
+            t
+        ) backlog.tasks in
+        let new_backlog = {
+          tasks = new_tasks;
+          last_updated = now_iso ();
+          version = backlog.version + 1;
+        } in
+        write_backlog config new_backlog;
+        let agent_file = Filename.concat (agents_dir config) (safe_filename agent_name ^ ".json") in
+        if Sys.file_exists agent_file then begin
+          let json = read_json config agent_file in
+          match agent_of_yojson json with
+          | Ok agent ->
+              let updated =
+                match set_current with
+                | Some _ -> { agent with status = Busy; current_task = Some task_id }
+                | None ->
+                    if agent.current_task = Some task_id then
+                      { agent with status = Active; current_task = None }
+                    else
+                      agent
+              in
+              write_json config agent_file (agent_to_yojson updated)
+          | Error msg ->
+              Log.Misc.error "agent state write failed: %s" msg
+        end;
+        log_event config
+          (Yojson.Safe.to_string
+             (`Assoc
+               ([
+                  ("type", `String "task_transition");
+                  ("agent", `String agent_name);
+                  ( "actor_kind",
+                    `String (task_actor_kind agent_name) );
+                  ("task", `String task_id);
+                  ("action", `String action_s);
+                  ( "from",
+                    `String
+                      (task_status_to_string task.task_status)
+                  );
+                  ( "to",
+                    `String (task_status_to_string new_status)
+                  );
+                  ("ts", `String now);
+                ]
+               @
+               (match trim_opt (Some notes) with
+               | Some notes -> [ ("notes", `String notes) ]
+               | None -> [])
+               @
+               (match trim_opt (Some reason) with
+               | Some reason -> [ ("reason", `String reason) ]
+               | None -> [])
+               @
+               (match handoff_context with
+               | Some handoff_context when action = Types.Release
+                 ->
+                   [
+                     ( "handoff_context",
+                       Types.task_handoff_context_to_yojson
+                         handoff_context );
+                   ]
+               | _ -> []))));
+        (match action with
+         | Types.Claim ->
+             emit_task_activity config ~agent_name ~task_id
+               ~kind:"task.claimed"
+               ~payload:(`Assoc [ ("task_id", `String task_id) ])
+         | Types.Start ->
+             emit_task_activity config ~agent_name ~task_id
+               ~kind:"task.started"
+               ~payload:(`Assoc [ ("task_id", `String task_id) ])
+         | Types.Done_action ->
+             emit_task_activity config ~agent_name ~task_id
+               ~kind:"task.done"
+               ~payload:
+                 (`Assoc
+                   [
+                     ("task_id", `String task_id);
+                     ("notes", if notes = "" then `Null else `String notes);
+                   ])
+         | Types.Cancel ->
+             emit_task_activity config ~agent_name ~task_id
+               ~kind:"task.cancelled"
+               ~payload:
+                 (`Assoc
+                   [
+                     ("task_id", `String task_id);
+                     ("reason", if reason = "" then `Null else `String reason);
+                   ])
+         | Types.Release ->
+             emit_task_activity config ~agent_name ~task_id
+               ~kind:"task.released"
+               ~payload:
+                 (`Assoc
+                   ([
                       ("task_id", `String task_id);
-                      ("notes", if notes = "" then `Null else `String notes);
-                    ]);
-              log_event config (Yojson.Safe.to_string (`Assoc [("type", `String "task_done"); ("agent", `String agent_name); ("task", `String task_id); ("notes", if notes = "" then `Null else `String notes); ("ts", `String (now_iso ()))]));
-              observe_task_transition config ~agent_name ~task_id
-                ~transition:"done"
-                ~details:
-                  (task_transition_details ~from_status:task.task_status
-                     ~to_status:
-                       (Types.Done
-                          {
-                            assignee = agent_name;
-                            completed_at = now_iso ();
-                            notes = if notes = "" then None else Some notes;
-                          })
-                     ?notes:(if notes = "" then None else Some notes)
-                     ~duration_ms:
-                       (max 0
-                          (int_of_float
-                             ((Time_compat.now ()
-                              -. task_started_at_unix task.task_status)
-                             *. 1000.0)))
-                     ());
-              (* Agent Economy: earn credits via hook *)
-              !Room_hooks.agent_economy_earn_fn
-                ~base_path:config.base_path ~agent_name
-                ~reason:(Printf.sprintf "completed %s" task_id);
-              Ok (Printf.sprintf "✅ %s completed %s" agent_name task_id)
-            end
-      with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | e -> Error (Types.IoError (Printexc.to_string e))
+                    ]
+                    @
+                    (match handoff_context with
+                    | Some handoff_context ->
+                        [
+                          ( "handoff_context",
+                            Types.task_handoff_context_to_yojson
+                              handoff_context );
+                        ]
+                    | _ -> []))));
+        let msg = Printf.sprintf "✅ %s -> %s"
+          (task_status_to_string task.task_status)
+          (task_status_to_string new_status)
+        in
+        let _ = broadcast config ~from_agent:agent_name ~content:(Printf.sprintf "🔄 Task %s %s" task_id msg) in
+        observe_task_transition config ~agent_name ~task_id
+          ~transition:action_s
+          ~details:
+            (task_transition_details
+               ~from_status:task.task_status
+               ~to_status:new_status
+               ?handoff_context ());
+        Ok msg
+      end
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | e -> Error (Types.IoError (Printexc.to_string e))
     )
 
 (** Cancel a task - A2A compatible *)

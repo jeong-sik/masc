@@ -411,6 +411,23 @@ let result_json ~query ~search_url ~engine hits =
 let provider_error provider message =
   Printf.sprintf "%s: %s" (provider_to_string provider) message
 
+let redact_transport_error_detail message =
+  let rec find_marker i =
+    if i + 5 > String.length message then
+      None
+    else if String.sub message i 5 = " for " then
+      Some i
+    else
+      find_marker (i + 1)
+  in
+  match find_marker 0 with
+  | Some idx -> String.sub message 0 idx
+  | None -> message
+
+let endpoint_error ~fallback detail =
+  let detail = redact_transport_error_detail detail |> String.trim in
+  if detail = "" then fallback else Printf.sprintf "%s (%s)" fallback detail
+
 let searxng_default_url = "http://localhost:8888"
 
 let strip_trailing_slashes s =
@@ -446,7 +463,8 @@ let fetch_searxng ~timeout_sec ~query =
   match
     Tool_local_runtime_http.http_get_text_with_status ~timeout_sec search_url
   with
-  | Error _ -> Error "search endpoint unavailable"
+  | Error detail ->
+      Error (endpoint_error ~fallback:"search endpoint unavailable" detail)
   | Ok (Some 200, payload) -> Ok (search_url, payload)
   | Ok (Some status, _) ->
       Error (Printf.sprintf "search endpoint returned HTTP %d" status)
@@ -459,7 +477,8 @@ let fetch_ddg_html ~timeout_sec ~query =
   match
     Tool_local_runtime_http.http_get_text_with_status ~timeout_sec search_url
   with
-  | Error _ -> Error "search endpoint unavailable"
+  | Error detail ->
+      Error (endpoint_error ~fallback:"search endpoint unavailable" detail)
   | Ok (Some 200, payload) -> Ok (search_url, payload)
   | Ok (Some status, _) ->
       Error (Printf.sprintf "search endpoint returned HTTP %d" status)
@@ -472,7 +491,8 @@ let fetch_bing_rss ~timeout_sec ~query =
   match
     Tool_local_runtime_http.http_get_text_with_status ~timeout_sec search_url
   with
-  | Error _ -> Error "search endpoint unavailable"
+  | Error detail ->
+      Error (endpoint_error ~fallback:"search endpoint unavailable" detail)
   | Ok (Some 200, payload) -> Ok (search_url, payload)
   | Ok (Some status, _) ->
       Error (Printf.sprintf "search endpoint returned HTTP %d" status)
@@ -494,7 +514,8 @@ let fetch_brave ~timeout_sec ~query ~limit =
             [ ("Accept", "application/json"); ("X-Subscription-Token", api_key) ]
           search_url
       with
-      | Error _ -> Error "provider request failed"
+      | Error detail ->
+          Error (endpoint_error ~fallback:"provider request failed" detail)
       | Ok (Some 200, payload) -> (
           try
             let hits =
@@ -531,8 +552,10 @@ let fetch_tavily ~timeout_sec ~query ~limit =
           ~headers:[ ("Accept", "application/json") ]
           ~url:search_url
           ~body_json
+          ()
       with
-      | Error _ -> Error "provider request failed"
+      | Error detail ->
+          Error (endpoint_error ~fallback:"provider request failed" detail)
       | Ok (Some 200, payload) -> (
           try
             let hits =
@@ -566,8 +589,10 @@ let fetch_exa ~timeout_sec ~query ~limit =
             [ ("Accept", "application/json"); ("x-api-key", api_key) ]
           ~url:search_url
           ~body_json
+          ()
       with
-      | Error _ -> Error "provider request failed"
+      | Error detail ->
+          Error (endpoint_error ~fallback:"provider request failed" detail)
       | Ok (Some 200, payload) -> (
           try
             let hits =
@@ -587,7 +612,7 @@ let fetch_bing_api ~timeout_sec ~query ~limit =
     | None -> Sys.getenv_opt "AZURE_BING_SEARCH_API_KEY" |> Option.bind trim_nonempty
   in
   match api_key with
-  | None -> Error "missing BING_SEARCH_API_KEY"
+  | None -> Error "missing BING_SEARCH_API_KEY or AZURE_BING_SEARCH_API_KEY"
   | Some key ->
       let search_url =
         Printf.sprintf
@@ -604,7 +629,8 @@ let fetch_bing_api ~timeout_sec ~query ~limit =
             ]
           search_url
       with
-      | Error _ -> Error "provider request failed"
+      | Error detail ->
+          Error (endpoint_error ~fallback:"provider request failed" detail)
       | Ok (Some 200, payload) -> (
           try
             let hits =

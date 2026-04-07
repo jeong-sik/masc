@@ -118,6 +118,27 @@ let synonyms : (string * string list) list =
     ("keeper_tool_search",
      [ "find tool"; "discover tool"; "search tools"; "what tool";
        "tool for"; "which tool" ]);
+    ("keeper_stay_silent",
+     [ "do nothing"; "skip turn"; "no action"; "stay quiet"; "no response";
+       "silent"; "침묵"; "대기"; "아무것도 안함" ]);
+    ("keeper_tasks_audit",
+     [ "audit tasks"; "orphaned tasks"; "stale tasks"; "zombie tasks";
+       "task cleanup"; "find abandoned"; "고아 태스크"; "방치 태스크"; "태스크 감사" ]);
+    ("keeper_voice_agent",
+     [ "voice settings"; "speech config"; "tts config"; "voice configure";
+       "음성 설정"; "보이스 구성"; "TTS 설정" ]);
+    ("keeper_voice_session_start",
+     [ "start voice session"; "begin voice call"; "open voice channel";
+       "음성 세션 시작"; "보이스 통화 시작" ]);
+    ("keeper_voice_session_end",
+     [ "end voice session"; "close voice call"; "stop voice channel";
+       "음성 세션 종료"; "보이스 통화 종료" ]);
+    ("keeper_voice_sessions",
+     [ "list voice sessions"; "voice session history"; "active calls";
+       "음성 세션 목록"; "보이스 세션" ]);
+    ("keeper_write",
+     [ "write file"; "create file"; "save file"; "new file";
+       "파일 작성"; "파일 저장"; "새 파일" ]);
     (* masc_code_* — code manipulation tools *)
     ("masc_code_search",
      [ "search code"; "find code"; "code lookup"; "grep code"; "find symbol";

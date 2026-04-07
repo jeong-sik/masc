@@ -138,6 +138,7 @@ let merge_tool_selection_boundary
   Keeper_types.dedupe_keep_order (deterministic_floor @ llm_selected)
 
 let keeper_selection_top_k = 10
+let keeper_selection_bm25_prefilter_n = 30
 
 let tool_index_entry_of_tool
     ~(korean_kw_tbl : (string, string) Hashtbl.t)
@@ -662,7 +663,9 @@ let run_turn
     in
     let progressive_tool_index_config =
       { Agent_sdk.Tool_index.default_config with
-        top_k = max 30 (Keeper_config.keeper_max_tools_per_turn ()) }
+        top_k =
+          max keeper_selection_bm25_prefilter_n
+            (Keeper_config.keeper_max_tools_per_turn ()) }
     in
     let preset_tool_entries =
       List.map (tool_index_entry_of_tool ~korean_kw_tbl) preset_tools
@@ -961,7 +964,9 @@ let run_turn
                   ~sw ~net ~named_cascade ~k () in
                 let strategy = Agent_sdk.Tool_selector.TopK_llm {
                   k;
-                  bm25_prefilter_n = min 30 (List.length preset_tools);
+                  bm25_prefilter_n =
+                    min keeper_selection_bm25_prefilter_n
+                      (List.length preset_tools);
                   always_include = core;
                   confidence_threshold = 0.3;
                   rerank_fn;
@@ -977,12 +982,12 @@ let run_turn
                   selected
                  with exn ->
                   Log.Keeper.warn
-                    "keeper:%s TopK_llm failed (%s), falling back to deterministic prefilter"
+                    "keeper:%s TopK_llm failed (%s), using deterministic prefilter only"
                     meta.name (Printexc.to_string exn);
                   [])
               | _ ->
                 Log.Keeper.warn
-                  "keeper:%s TopK_llm: Eio context unavailable, falling back to deterministic prefilter"
+                  "keeper:%s TopK_llm: Eio context unavailable, using deterministic prefilter only"
                   meta.name;
                 []
             | None -> []

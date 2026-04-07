@@ -201,13 +201,18 @@ let test_topk_llm_always_include_survives () =
     true (List.mem "keeper_context_status" selected)
 
 let test_selection_boundary_preserves_deterministic_floor () =
+  let deterministic_prefilter = ["keeper_fs_read"; "keeper_board_post"] in
+  let llm_selected = ["keeper_board_post"] in
   let merged =
     Keeper_agent_run.merge_tool_selection_boundary
       ~core:["keeper_context_status"]
-      ~deterministic_prefilter:["keeper_fs_read"; "keeper_board_post"]
-      ~llm_selected:["keeper_board_post"]
+      ~deterministic_prefilter
+      ~llm_selected
       ~discovered:["keeper_tool_search"]
   in
+  Alcotest.(check bool) "input carries duplicate across boundary" true
+    (List.mem "keeper_board_post" deterministic_prefilter
+     && List.mem "keeper_board_post" llm_selected);
   Alcotest.(check int) "duplicate removed from deterministic floor" 4
     (List.length merged);
   Alcotest.(check (list string))

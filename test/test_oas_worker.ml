@@ -1096,7 +1096,6 @@ let test_overflow_retry_legacy_restore_failure_falls_back_to_oas () =
             Keeper_exec_context.context_of_oas_checkpoint
               ~max_checkpoint_messages:120
               recovery.checkpoint
-              ~primary_model_max_tokens:512
           in
           Alcotest.(check int) "fallback uses OAS generation" 11
             recovery.turn_generation;
@@ -1203,7 +1202,6 @@ let test_overflow_retry_saves_compacted_checkpoint () =
             Keeper_exec_context.context_of_oas_checkpoint
               ~max_checkpoint_messages:120
               recovery.checkpoint
-              ~primary_model_max_tokens:512
           in
           Alcotest.(check bool) "token count reduced" true
             (Keeper_exec_context.token_count recovered_ctx < before_tokens);

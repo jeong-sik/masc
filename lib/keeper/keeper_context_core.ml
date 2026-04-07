@@ -23,8 +23,9 @@ let default_max_checkpoint_messages = 120
 
 (** Conservative context-window fallback used when a checkpoint carries
     neither [max_total_tokens] nor [max_input_tokens].  200K covers every
-    currently-supported large-context model and prevents division-by-zero
-    in [context_ratio] if neither field is populated. *)
+    currently-supported large-context model and provides a nonzero window
+    so [context_ratio] is still meaningful, avoiding a misleading 0.0 that
+    could suppress compaction or handoff decisions when limits are unknown. *)
 let default_context_window_tokens = 200_000
 
 (* ================================================================ *)

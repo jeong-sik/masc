@@ -842,6 +842,12 @@
  (modules tool_matrix_case_runner test_mcp_tool_matrix_cases)
  (libraries masc_test_deps))
 
+; Context Isolation (multi-keeper)
+(test
+ (name test_keeper_context_isolation)
+ (modules test_keeper_context_isolation)
+ (libraries masc_test_deps))
+
 (executable
  (name keeper_tool_matrix_case_runner)
  (modules keeper_tool_matrix_case_runner test_keeper_tool_matrix_cases

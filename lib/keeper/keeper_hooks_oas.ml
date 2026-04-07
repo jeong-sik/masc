@@ -236,6 +236,11 @@ let make_hooks
     [ "keeper_board_post"; "keeper_board_comment"; "keeper_board_vote" ]
   in
   let tool_start_time = ref 0.0 in
+  (* Self-reflection: track consecutive calls to the same tool NAME
+     (regardless of args). When a tool is called too many times,
+     pre_tool_use injects a reflection prompt instead of executing. *)
+  let tool_name_streak = ref ("", 0) in  (* (last_tool_name, count) *)
+  let reflection_threshold = 5 in
   { Agent_sdk.Hooks.empty with
 
     after_turn = Some (fun event ->
@@ -348,6 +353,27 @@ let make_hooks
       | Agent_sdk.Hooks.PreToolUse { tool_name; input; accumulated_cost_usd; _ } ->
         tool_start_time := Time_compat.now ();
         let keeper_name = (!meta_ref).name in
+        (* Self-reflection gate: when the same tool name is called
+           [reflection_threshold]+ times consecutively, override with a
+           reflection prompt so the model evaluates its own progress. *)
+        let prev_name, prev_count = !tool_name_streak in
+        let new_count =
+          if prev_name = tool_name then prev_count + 1 else 1
+        in
+        tool_name_streak := (tool_name, new_count);
+        if new_count = reflection_threshold then begin
+          Log.Keeper.info
+            "keeper:%s self-reflection: %s called %d times consecutively"
+            keeper_name tool_name new_count;
+          Agent_sdk.Hooks.Override
+            (Printf.sprintf
+               "Self-reflection required: You have called %s %d times in a row. \
+                Pause and evaluate: What have you learned so far? \
+                Are you making progress? Decide your next action — \
+                act on what you found, or move on."
+               tool_name new_count)
+        end
+        else
         (* Safety gate 0: Keeper deny list *)
         if List.mem tool_name keeper_denied_tools then begin
           Log.Keeper.warn "keeper:%s deny list: blocked %s"

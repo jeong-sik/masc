@@ -575,8 +575,7 @@ let transition_task_r config ~agent_name ~task_id ~action
         | Some task -> Ok task
       in
       let now = now_iso () in
-      let now_ts = Time_compat.now () in
-      let action_s = Types.task_action_to_string action in
+            let action_s = Types.task_action_to_string action in
       let* transition =
         match action, task.task_status with
         | Types.Claim, Types.Todo ->
@@ -768,7 +767,7 @@ let transition_task_r config ~agent_name ~task_id ~action
             (task_transition_details
                ~from_status:task.task_status
                ~to_status:new_status
-               ?handoff_context ());
+               ());
         Ok msg
       end
     with
@@ -1196,207 +1195,6 @@ let link_task_execution_artifacts_r config ~task_id ?session_id ?operation_id
               Ok (Printf.sprintf "✅ Linked execution artifacts for %s" task_id)
         with
         | Eio.Cancel.Cancelled _ as e -> raise e
-let cancel_task_r config ~agent_name ~task_id ~reason : string Types.masc_result =
-  if not (is_initialized config) then Error Types.NotInitialized
-  else
-    let agent_name = resolve_agent_name_strict config agent_name in
-    let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
-    with_file_lock config backlog_path (fun () ->
-      try
-        let backlog = read_backlog config in
-        let task_opt = List.find_opt (fun t -> t.id = task_id) backlog.tasks in
-        match task_opt with
-        | None -> Error (Types.TaskNotFound task_id)
-        | Some task ->
-            (* Can cancel if: Todo, Claimed by me, or InProgress by me *)
-            let can_cancel = match task.task_status with
-              | Types.Todo -> true
-              | Types.Claimed { assignee; _ } | Types.InProgress { assignee; _ } -> assignee = agent_name
-              | Types.Done _ | Types.Cancelled _ -> false
-            in
-            if not can_cancel then
-              Error (Types.TaskInvalidState (Printf.sprintf "Cannot cancel task %s (already done/cancelled or owned by another agent)" task_id))
-            else begin
-              let new_tasks = List.map (fun t ->
-                if t.id = task_id then
-                  { t with task_status = Types.Cancelled {
-                    cancelled_by = agent_name;
-                    cancelled_at = now_iso ();
-                    reason = if reason = "" then None else Some reason
-                  }}
-                else t
-              ) backlog.tasks in
-              let new_backlog = {
-                tasks = new_tasks;
-                last_updated = now_iso ();
-                version = backlog.version + 1;
-              } in
-              write_backlog config new_backlog;
-              (* Update agent status if they had this task *)
-              let agent_file = Filename.concat (agents_dir config) (safe_filename agent_name ^ ".json") in
-              if Sys.file_exists agent_file then begin
-                let json = read_json config agent_file in
-                match agent_of_yojson json with
-                | Ok agent when agent.current_task = Some task_id ->
-                    let updated = { agent with status = Active; current_task = None } in
-                    write_json config agent_file (agent_to_yojson updated)
-                | _ -> ()
-              end;
-              let msg = if reason = "" then Printf.sprintf "🚫 Cancelled %s" task_id else Printf.sprintf "🚫 Cancelled %s - %s" task_id reason in
-              let _ = broadcast config ~from_agent:agent_name ~content:msg in
-              emit_task_activity config ~agent_name ~task_id
-                ~kind:"task.cancelled"
-                ~payload:
-                  (`Assoc
-                    [
-                      ("task_id", `String task_id);
-                      ("reason", if reason = "" then `Null else `String reason);
-                    ]);
-              log_event config
-                (Yojson.Safe.to_string
-                   (`Assoc
-                     [
-                       ("type", `String "task_cancelled");
-                       ("agent", `String agent_name);
-                       ("actor_kind", `String (task_actor_kind agent_name));
-                       ("task", `String task_id);
-                       ("reason", if reason = "" then `Null else `String reason);
-                       ("ts", `String (now_iso ()));
-                     ]));
-              observe_task_transition config ~agent_name ~task_id
-                ~transition:"cancel"
-                ~details:
-                  (task_transition_details ~from_status:task.task_status
-                     ~to_status:
-                       (Types.Cancelled
-                          {
-                            cancelled_by = agent_name;
-                            cancelled_at = now_iso ();
-                            reason = if reason = "" then None else Some reason;
-                          })
-                     ?reason:(if reason = "" then None else Some reason)
-                     ~duration_ms:
-                       (max 0
-                          (int_of_float
-                             ((Time_compat.now ()
-                              -. task_started_at_unix task.task_status)
-                             *. 1000.0)))
-                     ());
-              Ok (Printf.sprintf "🚫 %s cancelled %s" agent_name task_id)
-            end
-      with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | e -> Error (Types.IoError (Printexc.to_string e))
-    )
+        | e -> Error (Types.IoError (Printexc.to_string e))
+      )
 
-(* Scheduling functions are in Room_task_schedule.
-   Re-export claim_next_result from Types for backward compatibility. *)
-type claim_next_result = Types.claim_next_result =
-  | Claim_next_claimed of {
-      task_id : string;
-      title : string;
-      priority : int;
-      released_task_id : string option;
-      message : string;
-    }
-  | Claim_next_no_unclaimed
-  | Claim_next_no_eligible of { excluded_count : int }
-  | Claim_next_error of string
-
-let link_task_execution_artifacts_r config ~task_id ?session_id ?operation_id
-    ?autoresearch_loop_id () : string Types.masc_result =
-  if not (is_initialized config) then Error Types.NotInitialized
-  else
-    let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
-    with_file_lock config backlog_path (fun () ->
-        try
-          let backlog = read_backlog config in
-          match List.find_opt (fun task -> task.id = task_id) backlog.tasks with
-          | None -> Error (Types.TaskNotFound task_id)
-          | Some task ->
-              let existing_contract =
-                match task.contract with
-                | Some contract -> normalize_task_contract contract
-                | None -> empty_task_contract
-              in
-              let updated_contract =
-                {
-                  existing_contract with
-                  links =
-                    merge_execution_links existing_contract.links ?session_id
-                      ?operation_id ?autoresearch_loop_id ();
-                }
-                |> normalize_task_contract
-              in
-              let new_tasks =
-                List.map
-                  (fun candidate ->
-                    if candidate.id = task_id then
-                      { candidate with contract = Some updated_contract }
-                    else
-                      candidate)
-                  backlog.tasks
-              in
-              let new_backlog =
-                {
-                  tasks = new_tasks;
-                  last_updated = now_iso ();
-                  version = backlog.version + 1;
-                }
-              in
-              write_backlog config new_backlog;
-              emit_task_activity config ~agent_name:"system" ~task_id
-                ~kind:"task.linked"
-                ~payload:
-                  (`Assoc
-                    ([
-                       ("task_id", `String task_id);
-                     ]
-                    @
-                    (match trim_opt session_id with
-                    | Some session_id -> [ ("session_id", `String session_id) ]
-                    | None -> [])
-                    @
-                    (match trim_opt operation_id with
-                    | Some operation_id ->
-                        [ ("operation_id", `String operation_id) ]
-                    | None -> [])
-                    @
-                    (match trim_opt autoresearch_loop_id with
-                    | Some autoresearch_loop_id ->
-                        [
-                          ( "autoresearch_loop_id",
-                            `String autoresearch_loop_id );
-                        ]
-                    | None -> [])));
-              log_event config
-                (Yojson.Safe.to_string
-                   (`Assoc
-                     ([
-                        ("type", `String "task_linked");
-                        ("agent", `String "system");
-                        ("actor_kind", `String "system");
-                        ("task", `String task_id);
-                        ("ts", `String (now_iso ()));
-                      ]
-                     @
-                     (match trim_opt session_id with
-                     | Some session_id -> [ ("session_id", `String session_id) ]
-                     | None -> [])
-                     @
-                     (match trim_opt operation_id with
-                     | Some operation_id ->
-                         [ ("operation_id", `String operation_id) ]
-                     | None -> [])
-                     @
-                     (match trim_opt autoresearch_loop_id with
-                     | Some autoresearch_loop_id ->
-                         [
-                           ( "autoresearch_loop_id",
-                             `String autoresearch_loop_id );
-                         ]
-                     | None -> []))));
-              Ok (Printf.sprintf "✅ Linked execution artifacts for %s" task_id)
-        with
-        | Eio.Cancel.Cancelled _ as e -> raise e
-        | e -> Error (Types.IoError (Printexc.to_string e)))

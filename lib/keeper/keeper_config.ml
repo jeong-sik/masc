@@ -381,6 +381,24 @@ let keeper_bootstrap_stagger_step_sec_rp =
 let keeper_bootstrap_stagger_step_sec () : int =
   Runtime_params.get keeper_bootstrap_stagger_step_sec_rp
 
+let keeper_bootstrap_retry_max_rp =
+  _rp_int ~key:"keeper.bootstrap.retry_max"
+    ~default:(fun () -> int_of_env_default "MASC_KEEPER_BOOTSTRAP_RETRY_MAX"
+                          ~default:5 ~min_v:0 ~max_v:20)
+    ~min_v:0 ~max_v:20
+    ~description:"Maximum retry rounds for keepers that fail initial boot" ()
+let keeper_bootstrap_retry_max () : int =
+  Runtime_params.get keeper_bootstrap_retry_max_rp
+
+let keeper_bootstrap_retry_interval_sec_rp =
+  _rp_int ~key:"keeper.bootstrap.retry_interval_sec"
+    ~default:(fun () -> int_of_env_default "MASC_KEEPER_BOOTSTRAP_RETRY_INTERVAL_SEC"
+                          ~default:30 ~min_v:5 ~max_v:300)
+    ~min_v:5 ~max_v:300
+    ~description:"Delay between autoboot retry rounds (seconds)" ()
+let keeper_bootstrap_retry_interval_sec () : int =
+  Runtime_params.get keeper_bootstrap_retry_interval_sec_rp
+
 let keeper_proactive_min_cooldown_sec_rp =
   _rp_int ~key:"keeper.proactive.min_cooldown_sec"
     ~default:(fun () -> int_of_env_default "MASC_KEEPER_PROACTIVE_MIN_COOLDOWN_SEC"

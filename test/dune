@@ -844,6 +844,12 @@
  (modules test_keeper_context_isolation)
  (libraries masc_test_deps))
 
+; Transport_bridge.seal guard
+(test
+ (name test_transport_bridge_seal)
+ (modules test_transport_bridge_seal)
+ (libraries masc_test_deps))
+
 (executable
  (name keeper_tool_matrix_case_runner)
  (modules keeper_tool_matrix_case_runner test_keeper_tool_matrix_cases

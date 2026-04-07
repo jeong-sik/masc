@@ -291,8 +291,8 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
       Log.Keeper.info "autoboot: initial pass %d/%d keepers started" booted_count total;
       (* Retry loop for keepers that failed initial boot *)
       if booted_count < total then begin
-        let max_retries = 5 in
-        let retry_interval_s = 30.0 in
+        let max_retries = Keeper_config.keeper_bootstrap_retry_max () in
+        let retry_interval_s = Float.of_int (Keeper_config.keeper_bootstrap_retry_interval_sec ()) in
         let rec retry_loop round =
           if round > max_retries then
             Log.Keeper.warn

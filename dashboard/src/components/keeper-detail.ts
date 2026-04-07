@@ -6,7 +6,7 @@ import { html } from 'htm/preact'
 import { isOfflineStatus } from '../lib/status-utils'
 import { keeperDisplayStatus } from '../lib/keeper-runtime-display'
 import { signal } from '@preact/signals'
-import { useRef } from 'preact/hooks'
+import { useRef, useState } from 'preact/hooks'
 import { requestConfirm } from './common/confirm-dialog'
 import { currentDashboardActor, runOperatorAction } from '../api'
 import { bootKeeper, shutdownKeeper } from '../api/keeper'
@@ -276,6 +276,7 @@ export function KeeperDetailOverlay() {
   const closeButtonRef = useRef<HTMLButtonElement>(null)
   const titleId = `keeper-detail-title-${keeper.name}`
   const effectiveStatus = keeperDisplayStatus(keeper)
+  const [diagOpen, setDiagOpen] = useState(false)
 
   return html`
     <${DialogOverlay}
@@ -345,7 +346,7 @@ export function KeeperDetailOverlay() {
         <${MetricsCharts} keeper=${keeper} />
 
         ${'' /* ── Runtime activity summary (promoted from profile) ── */}
-        ${keeper.last_heartbeat || keeper.last_speech_act || keeper.recent_output_preview || (keeper.k2k_count ?? 0) > 0
+        ${keeper.last_heartbeat || keeper.last_speech_act || keeper.recent_output_preview || keeper.memory_recent_note || (keeper.k2k_count ?? 0) > 0
           ? html`
             <div class="flex flex-wrap items-start gap-3 px-1">
               ${keeper.last_heartbeat
@@ -382,7 +383,7 @@ export function KeeperDetailOverlay() {
         <${KeeperCommsPanel} keeper=${keeper} />
 
         ${'' /* ── Runtime diagnostics (supervisor + keeper diagnostics unified) ── */}
-        <details class="rounded-2xl border border-card-border bg-card/40 backdrop-blur-md shadow-sm">
+        <details class="rounded-2xl border border-card-border bg-card/40 backdrop-blur-md shadow-sm" ontoggle=${(e: Event) => setDiagOpen((e.target as HTMLDetailsElement).open)}>
           <summary class="cursor-pointer py-3 px-5 text-[11px] font-semibold uppercase tracking-widest text-text-muted list-none select-none flex items-center gap-2">
             <span class="w-1.5 h-1.5 rounded-full bg-accent/50"></span>
             런타임 진단
@@ -397,7 +398,7 @@ export function KeeperDetailOverlay() {
             />
             <div class="pt-3 border-t border-[var(--border-slate-12)]">
               <h4 class="m-0 mb-3 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">호출 검사기</h4>
-              <${KeeperToolCallInspector} keeperName=${keeper.name} />
+              ${diagOpen ? html`<${KeeperToolCallInspector} keeperName=${keeper.name} />` : null}
             </div>
           </div>
         </details>

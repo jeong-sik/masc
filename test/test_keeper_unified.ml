@@ -1231,7 +1231,13 @@ let test_is_context_overflow_only_for_overflow_errors () =
        (Agent_sdk.Error.Api (NetworkError { message = "Connection_reset" })));
   check bool "Internal does not match" false
     (UT.is_context_overflow
-       (Agent_sdk.Error.Internal "some error"))
+       (Agent_sdk.Error.Internal "some error"));
+  check bool "TokenBudgetExceeded Input matches" true
+    (UT.is_context_overflow
+       (Agent_sdk.Error.Agent (TokenBudgetExceeded { kind = "Input"; used = 204917; limit = 200000 })));
+  check bool "TokenBudgetExceeded Total does not match" false
+    (UT.is_context_overflow
+       (Agent_sdk.Error.Agent (TokenBudgetExceeded { kind = "Total"; used = 300000; limit = 250000 })))
 
 let test_metrics_persist_social_state_fields () =
   let result =

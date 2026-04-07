@@ -899,41 +899,32 @@ let run_turn
         let per_call_turn = turn - start_turn_count in
         let is_last_turn = per_call_turn >= max_turns - 1 in
         let is_warning_zone = per_call_turn >= max_turns - 2 in
+        let append_ctx ctx text =
+          Some (match ctx with None -> text | Some e -> e ^ "\n\n" ^ text)
+        in
         let ctx =
           if is_last_turn then
-            let warning =
-              Printf.sprintf
-                "[LAST TURN] Turn %d/%d. This is your final turn. \
-                 You MUST emit a [STATE]...[/STATE] block now summarizing \
-                 what you accomplished and what the next generation should do. \
-                 Do NOT start new tool work. If you need more turns, call extend_turns."
-                turn max_turns
-            in
-            (match ctx with
-             | None -> Some warning
-             | Some existing -> Some (existing ^ "\n\n" ^ warning))
+            append_ctx ctx
+              (Printf.sprintf
+                 "[LAST TURN] Turn %d/%d. This is your final turn. \
+                  You MUST emit a [STATE]...[/STATE] block now summarizing \
+                  what you accomplished and what the next generation should do. \
+                  Do NOT start new tool work. If you need more turns, call extend_turns."
+                 turn max_turns)
           else if is_retry then
-            let warning =
-              Printf.sprintf
-                "[RETRY] The previous attempt overflowed the model context. \
-                 Stay concise, prefer already-loaded context, and only use the \
-                 smallest essential tool set if a tool call is strictly necessary. \
-                 Current tool budget: %d."
-                max_tools
-            in
-            (match ctx with
-             | None -> Some warning
-             | Some existing -> Some (existing ^ "\n\n" ^ warning))
+            append_ctx ctx
+              (Printf.sprintf
+                 "[RETRY] The previous attempt overflowed the model context. \
+                  Stay concise, prefer already-loaded context, and only use the \
+                  smallest essential tool set if a tool call is strictly necessary. \
+                  Current tool budget: %d."
+                 max_tools)
           else if is_warning_zone then
-            let warning =
-              Printf.sprintf
-                "[BUDGET] %d/%d turns used. Wrap up current work and emit \
-                 a [STATE] block. Call extend_turns if you need more time."
-                turn max_turns
-            in
-            (match ctx with
-             | None -> Some warning
-             | Some existing -> Some (existing ^ "\n\n" ^ warning))
+            append_ctx ctx
+              (Printf.sprintf
+                 "[BUDGET] %d/%d turns used. Wrap up current work and emit \
+                  a [STATE] block. Call extend_turns if you need more time."
+                 turn max_turns)
           else ctx
         in
         (* Boring-tool gate: graduated response to consecutive turns
@@ -945,43 +936,31 @@ let run_turn
         let boring_streak = !boring_consecutive_turns in
         let ctx =
           if boring_streak >= 4 then
-            let warning =
-              Printf.sprintf
-                "[POLLING BLOCKED] %d consecutive turns of only boring \
-                 observation tools (status/heartbeat/task-list/context). \
-                 These tools removed from this turn. Use \
-                 keeper_task_claim, keeper_fs_read, \
-                 keeper_board_post, keeper_shell_readonly — or \
-                 keeper_stay_silent if nothing to do."
-                boring_streak
-            in
-            (match ctx with
-             | None -> Some warning
-             | Some existing -> Some (existing ^ "\n\n" ^ warning))
+            append_ctx ctx
+              (Printf.sprintf
+                 "[POLLING BLOCKED] %d consecutive turns of only boring \
+                  observation tools (status/heartbeat/task-list/context). \
+                  These tools removed from this turn. Use \
+                  keeper_task_claim, keeper_fs_read, \
+                  keeper_board_post, keeper_shell_readonly — or \
+                  keeper_stay_silent if nothing to do."
+                 boring_streak)
           else if boring_streak >= 3 then
-            let warning =
-              Printf.sprintf
-                "[FINAL POLLING WARNING] %d turns of only boring \
-                 observation tools. Next turn without a productive tool \
-                 will REMOVE all boring observation tools \
-                 (status/heartbeat/task-list/context). Call \
-                 keeper_task_claim, keeper_fs_read, or \
-                 keeper_stay_silent NOW."
-                boring_streak
-            in
-            (match ctx with
-             | None -> Some warning
-             | Some existing -> Some (existing ^ "\n\n" ^ warning))
+            append_ctx ctx
+              (Printf.sprintf
+                 "[FINAL POLLING WARNING] %d turns of only boring \
+                  observation tools. Next turn without a productive tool \
+                  will REMOVE all boring observation tools \
+                  (status/heartbeat/task-list/context). Call \
+                  keeper_task_claim, keeper_fs_read, or \
+                  keeper_stay_silent NOW."
+                 boring_streak)
           else if boring_streak >= 2 then
-            let warning =
+            append_ctx ctx
               "[POLLING DETECTED] You spent 2 turns only calling boring \
                observation tools (status/heartbeat/task-list/context). \
                Do productive work: keeper_task_claim, keeper_fs_read, \
                keeper_board_post, or keeper_stay_silent."
-            in
-            (match ctx with
-             | None -> Some warning
-             | Some existing -> Some (existing ^ "\n\n" ^ warning))
           else ctx
         in
         let all_allowed =

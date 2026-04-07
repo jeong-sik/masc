@@ -147,14 +147,12 @@ let suggest_alternatives ~(allowed_tools : string list)
     ~(repeated_tools : string list) ~(max_suggestions : int) : string list =
   let repeated_set = Hashtbl.create (List.length repeated_tools) in
   List.iter (fun t -> Hashtbl.replace repeated_set t ()) repeated_tools;
-  (* Exclude core/meta tools that don't produce useful autonomous actions *)
-  let boring_tools = [ "keeper_time_now"; "keeper_context_status";
-    "keeper_tools_list"; "masc_heartbeat"; "masc_status"; "masc_tool_help" ] in
-  let boring_set = Hashtbl.create (List.length boring_tools) in
-  List.iter (fun t -> Hashtbl.replace boring_set t ()) boring_tools;
+  (* Exclude boring/meta tools — uses Keeper_tool_registry SSOT *)
   allowed_tools
   |> List.filter (fun t ->
-       not (Hashtbl.mem repeated_set t) && not (Hashtbl.mem boring_set t))
+       not (Hashtbl.mem repeated_set t)
+       && not (Keeper_tool_registry.is_boring_tool t)
+       && t <> "keeper_stay_silent")
   |> fun candidates ->
      let len = List.length candidates in
      if len <= max_suggestions then candidates
@@ -314,6 +312,10 @@ let make_hooks
                  ("ts_unix", `Float (Unix.gettimeofday ()));
                ])
          with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
+        (* Reset same-name streak at turn boundary so it doesn't
+           carry across turns (e.g., 4 calls in turn N + 1 in turn N+1
+           should not hit threshold 5). *)
+        tool_name_streak := ("", 0);
         (* Boring-tool gate: update consecutive counter at end of turn.
            If no productive tool was called this turn, increment the
            boring streak; otherwise reset to 0. *)
@@ -361,11 +363,8 @@ let make_hooks
              ~model:(!meta_ref).runtime.usage.last_model_used ()
          with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
         (* Boring-tool gate: mark turn as productive only for genuinely
-           productive tools. Exclude the documented no-op tool
-           [keeper_stay_silent] so it cannot reset boring-turn tracking. *)
-        if (not (Keeper_tool_registry.is_boring_tool tool_name))
-           && tool_name <> "keeper_stay_silent"
-        then
+           productive tools. keeper_stay_silent is in the boring set. *)
+        if not (Keeper_tool_registry.is_boring_tool tool_name) then
           turn_has_productive_tool := true;
         (try on_tool_executed tool_name input output_text
          with Eio.Cancel.Cancelled _ as e -> raise e
@@ -399,11 +398,12 @@ let make_hooks
           broadcast_tool_skipped ~keeper_name ~tool_name
             ~reason_code:"streak_gate";
           Agent_sdk.Hooks.Override
-            (Printf.sprintf
-               "[tool_skipped] tool=%s source=streak_gate code=streak_gate \
-                reason=%s_called_%d_times_consecutively. \
-                Use a DIFFERENT tool or call keeper_stay_silent."
-               tool_name tool_name new_count)
+            (render_inline_skip_reason
+               ~tool_name
+               ~reason_code:"streak_gate"
+               ~reason_text:(Printf.sprintf
+                 "%s called %d times consecutively. Use a DIFFERENT tool or keeper_stay_silent"
+                 tool_name new_count))
         end
         else
         (* Safety gate 0: Keeper deny list *)

@@ -70,11 +70,14 @@ let is_core_always_tool (name : string) : bool =
 
     A tool is "boring" if calling it N times yields the same
     information as calling it once, and it mutates nothing.
+    [keeper_stay_silent] is included: it is a no-op by design
+    and must not reset the boring-turn counter.
     Contrast with [keeper_fs_read] which reads new content, or
     [keeper_board_post] which creates artifacts. *)
 let boring_tools =
   [ "masc_status"; "masc_heartbeat"; "keeper_tasks_list";
-    "keeper_context_status"; "keeper_tools_list" ]
+    "keeper_context_status"; "keeper_tools_list";
+    "keeper_stay_silent" ]
 
 let boring_tools_set : (string, unit) Hashtbl.t =
   let tbl = Hashtbl.create (List.length boring_tools) in

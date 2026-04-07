@@ -2115,9 +2115,9 @@ let () =
           test_case "keeper_task_claim is NOT boring" `Quick (fun () ->
             check bool "keeper_task_claim"
               false (Masc_mcp.Keeper_tool_registry.is_boring_tool "keeper_task_claim"));
-          test_case "keeper_stay_silent is NOT boring" `Quick (fun () ->
+          test_case "keeper_stay_silent IS boring (no-op)" `Quick (fun () ->
             check bool "keeper_stay_silent"
-              false (Masc_mcp.Keeper_tool_registry.is_boring_tool "keeper_stay_silent"));
+              true (Masc_mcp.Keeper_tool_registry.is_boring_tool "keeper_stay_silent"));
           test_case "keeper_bash is NOT boring" `Quick (fun () ->
             check bool "keeper_bash"
               false (Masc_mcp.Keeper_tool_registry.is_boring_tool "keeper_bash"));

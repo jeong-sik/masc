@@ -281,7 +281,6 @@ let legacy_permission_for_tool = function
   | "masc_worktree_list"
   | "masc_task_history" | "masc_operator_snapshot"
   | "masc_operator_digest" | "masc_surface_audit"
-  | "masc_collaboration_evidence"
   | "masc_keeper_status" | "masc_keeper_list"
   | "masc_runtime_verify"
   | "masc_unit_list" | "masc_operation_status"

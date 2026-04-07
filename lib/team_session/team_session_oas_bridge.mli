@@ -6,34 +6,17 @@
 
     Direct: [spawn_agent] -> [name], [spawn_role]/[worker_class] -> [role].
     Closure-captured: [max_turns], [spawn_model] (cascade selection).
-    Preserved in Collaboration.t.metadata["worker_specs"]: the full
-    [planned_worker] record as JSON per worker.
-    Metadata-only at the OAS boundary: 18 fields (runtime_actor,
-    thinking_enabled/budget, timeout_seconds, capsule_mode, lane_id,
-    controller_level, control_domain, supervisor_actor,
-    task_profile, risk_level, routing_confidence/reason/escalated, etc.).
 
     {b session (47 fields) -> swarm_config (12 fields)}
 
     Direct: [goal] -> [prompt], [orchestration_mode] -> [mode],
     [duration_seconds] -> [timeout_sec]/[budget], [planned_workers] -> [entries].
-    Via Collaboration.t: [session_id] -> [id], [status] -> [phase],
-    [planned_workers] -> [participants].
-    Preserved in Collaboration.t.metadata: 21+ session fields as JSON
-    (room_id, created_by, origin_kind, execution_scope, control_profile,
-    scale_profile, model_cascade, fallback_policy, etc.).
-    Dropped: [operation_id], [report_formats], runtime metrics
-    (broadcast_count..cascade_failed), outcome metrics
-    (baseline_done_counts..final_done_delta_by_agent),
-    post-execution fields (generated_report, delivery_contract,
-    latest_delivery_verdict).
-
-    See [PROJECTION_MAP.md] for the complete field-by-field table.
+    Dropped: [operation_id], [report_formats], runtime metrics,
+    outcome metrics, post-execution fields.
 
     OAS remains generic orchestration/runtime substrate; MASC delivery,
-    workflow, and proof semantics stay in team-session state/metadata.
+    workflow, and proof semantics stay in team-session state.
 
-    Phase C-1 of MASC->OAS migration.
     @since 2.124.0 *)
 
 val supported_local_worker_tool_names : string list

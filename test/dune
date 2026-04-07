@@ -598,12 +598,6 @@
           test_operator_control_keeper)
  (libraries masc_test_deps))
 
-; Dashboard Collaboration Evidence (2 modules)
-(test
- (name test_dashboard_collaboration_evidence)
- (modules test_dashboard_collaboration_evidence test_tool_team_session_support)
- (libraries masc_test_deps))
-
 ; Normalized actor (operator_pending_confirm)
 (test
  (name test_normalized_actor)

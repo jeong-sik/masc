@@ -25,7 +25,7 @@ let make_meta_with_preset preset_str =
           ]
       ]) with
   | Ok meta -> meta
-  | Error e -> failwith (Printf.sprintf "make_meta_with_preset(%s) failed: %s" preset_str e)
+  | Error e -> failwith (Printf.sprintf "make_meta_with_preset('%s') failed: %s" preset_str e)
 
 let make_ctx_work () =
   Keeper_exec_context.create ~system_prompt:"test" ~max_tokens:4000
@@ -301,6 +301,34 @@ let test_branch_with_space_rejected () =
     check string "error is branch_contains_invalid_chars"
       "branch_contains_invalid_chars" (json_string "error" json))
 
+let test_branch_with_dollar_paren_rejected () =
+  with_room (fun config ->
+    let meta = make_meta_with_preset "delivery" in
+    let args = `Assoc
+      [ "branch", `String "test$(whoami)"
+      ; "file_path", `String "src/test.ml"
+      ; "commit_message", `String "msg"
+      ; "pr_title", `String "title"
+      ] in
+    let result = call_tool config meta "keeper_pr_workflow" args in
+    let json = parse_json result in
+    check string "error is branch_contains_invalid_chars"
+      "branch_contains_invalid_chars" (json_string "error" json))
+
+let test_branch_with_ampersand_rejected () =
+  with_room (fun config ->
+    let meta = make_meta_with_preset "delivery" in
+    let args = `Assoc
+      [ "branch", `String "test&&echo pwned"
+      ; "file_path", `String "src/test.ml"
+      ; "commit_message", `String "msg"
+      ; "pr_title", `String "title"
+      ] in
+    let result = call_tool config meta "keeper_pr_workflow" args in
+    let json = parse_json result in
+    check string "error is branch_contains_invalid_chars"
+      "branch_contains_invalid_chars" (json_string "error" json))
+
 let test_valid_branch_with_slash_accepted () =
   with_room (fun config ->
     let meta = make_meta_with_preset "delivery" in
@@ -329,10 +357,15 @@ let test_worktree_failure_propagates () =
        The result should be ok=false with a meaningful error. *)
     check bool "ok is false" false (json_bool "ok" json);
     let steps = json_string "steps" json in
-    check bool "steps mentions worktree_create"
-      true (String.length steps > 0);
+    check bool "steps contains worktree_create"
+      true (try ignore (Str.search_forward
+        (Str.regexp_string "worktree_create") steps 0); true
+        with Not_found -> false);
     let error = json_string "error" json in
-    check bool "error is non-empty" true (String.length error > 0))
+    check bool "error mentions worktree"
+      true (try ignore (Str.search_forward
+        (Str.regexp_string "worktree") (String.lowercase_ascii error) 0); true
+        with Not_found -> false))
 
 (* --- Task lifecycle: claim → done --- *)
 
@@ -355,7 +388,7 @@ let test_task_claim_then_done_lifecycle () =
       | None ->
         match Re.exec_opt re_t result_str with
         | Some g -> Re.Group.get g 0
-        | None -> "task-001" (* fallback: first task in room *)
+        | None -> failwith (Printf.sprintf "cannot extract task_id from: %s" result_str)
     in
     (* Mark it done — response is {"ok": bool, "result": "string"} *)
     let done_result = call_tool config meta "keeper_task_done"
@@ -393,10 +426,17 @@ let test_second_claim_on_single_task_returns_no_tasks () =
     let result_b = call_tool config meta_b "keeper_task_claim" (`Assoc []) in
     let json_b = parse_json result_b in
     let result_str = json_string "result" json_b in
-    (* The result should indicate no tasks available (case-insensitive check) *)
+    (* The result should indicate no unclaimed tasks available *)
     let lower = String.lowercase_ascii result_str in
-    check bool "second claim mentions no tasks"
-      true (try ignore (Str.search_forward (Str.regexp_string "no") lower 0); true
+    check bool "second claim indicates no unclaimed tasks"
+      true (try ignore (Str.search_forward
+        (Str.regexp_string "no unclaimed") lower 0); true
+        with Not_found ->
+          try ignore (Str.search_forward
+            (Str.regexp_string "nothing to claim") lower 0); true
+          with Not_found ->
+            try ignore (Str.search_forward
+              (Str.regexp_string "no tasks") lower 0); true
             with Not_found -> false))
 
 let () =
@@ -421,6 +461,8 @@ let () =
       ; test_case "backtick rejected" `Quick test_branch_with_backtick_rejected
       ; test_case "dot-dot rejected" `Quick test_branch_with_dot_dot_rejected
       ; test_case "space rejected" `Quick test_branch_with_space_rejected
+      ; test_case "dollar-paren rejected" `Quick test_branch_with_dollar_paren_rejected
+      ; test_case "ampersand rejected" `Quick test_branch_with_ampersand_rejected
       ; test_case "slash accepted" `Quick test_valid_branch_with_slash_accepted
       ]
     ; "step_propagation",

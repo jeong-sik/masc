@@ -126,6 +126,17 @@ let tool_query_text_of_user_message (text : string) : string =
   in
   loop None [] lines
 
+let merge_tool_selection_boundary
+    ~(core : string list)
+    ~(deterministic_prefilter : string list)
+    ~(llm_selected : string list)
+    ~(discovered : string list) : string list =
+  let deterministic_floor =
+    Keeper_types.dedupe_keep_order
+      (core @ deterministic_prefilter @ discovered)
+  in
+  Keeper_types.dedupe_keep_order (deterministic_floor @ llm_selected)
+
 let log_keeper_proof ~(keeper_name : string) (proof : Agent_sdk.Cdal_proof.t) =
   let status_string =
     Agent_sdk.Cdal_proof.show_result_status proof.result_status
@@ -630,6 +641,24 @@ let run_turn
      Search results are post-filtered to keeper_allowed_tool_names
      so the keeper only sees tools it is actually permitted to call. *)
   let search_index = Agent_sdk.Tool_index.build ~config:tool_index_config tool_entries in
+  let preset_names = Keeper_tool_policy.keeper_preset_universe_tool_names meta in
+  let preset_set = Hashtbl.create (List.length preset_names) in
+  List.iter (fun n -> Hashtbl.replace preset_set n true) preset_names;
+  let preset_tools =
+    List.filter (fun (t : Agent_sdk.Tool.t) -> Hashtbl.mem preset_set t.schema.name)
+      keeper_tools
+  in
+  let progressive_tool_index_config =
+    { Agent_sdk.Tool_index.default_config with
+      top_k = max 30 (Keeper_config.keeper_max_tools_per_turn ()) }
+  in
+  let preset_tool_entries =
+    List.filter (fun entry -> Hashtbl.mem preset_set entry.name) tool_entries
+  in
+  let preset_search_index =
+    Agent_sdk.Tool_index.build ~config:progressive_tool_index_config
+      preset_tool_entries
+  in
   (* Map tool name → OAS schema for search result enrichment.
      Two maps: description (string) and full schema (tool_schema).
      Covers both keeper_* and masc_* tools from the OAS Tool.t list. *)
@@ -881,14 +910,28 @@ let run_turn
            (TopK_llm, gated by MASC_KEEPER_LLM_RERANK env var).
            When LLM rerank is disabled, only tools explicitly discovered
            via keeper_tool_search appear alongside core. *)
-        let effective_selected =
+        let llm_rerank_enabled = Keeper_config.keeper_llm_rerank_enabled () in
+        let effective_selected, deterministic_prefilter_count, llm_selected_count,
+            selection_mode =
           let core = Keeper_exec_tools.effective_core_tools () in
           let discovered =
             Keeper_discovered_tools.active_names !discovered_ref ~turn
           in
           let _ = Keeper_discovered_tools.decay !discovered_ref ~turn in
+          let k = min max_tools 10 in
+          let deterministic_prefilter =
+            if llm_rerank_enabled then
+              (* Keep a deterministic BM25 floor even when TopK_llm is enabled:
+                 the LLM may enrich selection, but it must not be able to
+                 shrink the executable tool universe to below the BM25 floor. *)
+              Agent_sdk.Tool_index.retrieve preset_search_index query_text
+              |> List.filter (fun (name, _) -> not (List.mem name core))
+              |> List.filteri (fun i _ -> i < k)
+              |> List.map fst
+            else []
+          in
           let llm_selected =
-            if Keeper_config.keeper_llm_rerank_enabled () then
+            if llm_rerank_enabled then
               match Eio_context.get_switch_opt (), Eio_context.get_net_opt () with
               | Some sw, Some net ->
                 let rerank_cascade = Keeper_config.keeper_llm_rerank_cascade () in
@@ -896,21 +939,8 @@ let run_turn
                 let config_path = Oas_worker.default_config_path () in
                 let named_cascade = Agent_sdk.Api.named_cascade
                   ?config_path ~name:rerank_cascade ~defaults () in
-                let k = min max_tools 10 in
                 let rerank_fn = Agent_sdk.Tool_selector.default_rerank_fn
                   ~sw ~net ~named_cascade ~k () in
-                (* Preset-scoped tools: filter keeper_tools to the current
-                   preset universe so BM25 ranks within relevant tools only. *)
-                let preset_names =
-                  Keeper_tool_policy.keeper_preset_universe_tool_names meta
-                in
-                let preset_set = Hashtbl.create (List.length preset_names) in
-                List.iter (fun n -> Hashtbl.replace preset_set n true) preset_names;
-                let preset_tools =
-                  List.filter (fun (t : Agent_sdk.Tool.t) ->
-                    Hashtbl.mem preset_set t.schema.name
-                  ) keeper_tools
-                in
                 let strategy = Agent_sdk.Tool_selector.TopK_llm {
                   k;
                   bm25_prefilter_n = min 30 (List.length preset_tools);
@@ -927,20 +957,32 @@ let run_turn
                       meta.name (List.length selected)
                       (String.length query_text) (List.length preset_tools);
                   selected
-                with exn ->
+                 with exn ->
                   Log.Keeper.warn
-                    "keeper:%s TopK_llm failed (%s), falling back to core+discovered"
+                    "keeper:%s TopK_llm failed (%s), falling back to deterministic prefilter"
                     meta.name (Printexc.to_string exn);
                   [])
               | _ ->
                 Log.Keeper.warn
-                  "keeper:%s TopK_llm: Eio context unavailable, falling back"
+                  "keeper:%s TopK_llm: Eio context unavailable, falling back to deterministic prefilter"
                   meta.name;
                 []
             else []
           in
-          Keeper_types.dedupe_keep_order (core @ llm_selected @ discovered)
-          |> Tool_portal.filter_visible_tool_names portal_ctx
+          let merged =
+            merge_tool_selection_boundary
+              ~core
+              ~deterministic_prefilter
+              ~llm_selected
+              ~discovered
+            |> Tool_portal.filter_visible_tool_names portal_ctx
+          in
+          let selection_mode =
+            if llm_rerank_enabled then "deterministic_plus_llm_hint"
+            else "core_plus_discovered"
+          in
+          merged, List.length deterministic_prefilter, List.length llm_selected,
+          selection_mode
         in
         (* Apply runtime tool overlay (masc_tool_grant/revoke) and
            intersect with the full dispatch universe. *)
@@ -983,11 +1025,12 @@ let run_turn
         in
         if Keeper_types_profile.keeper_debug then
           Log.Keeper.info
-            "tool_disclosure keeper=%s core=%d discovered=%d llm_rerank=%b allowed=%d query_len=%d"
-            meta.name core_count discovered_count
-            (Keeper_config.keeper_llm_rerank_enabled ())
+            "tool_disclosure keeper=%s core=%d deterministic_prefilter=%d discovered=%d llm_selected=%d llm_rerank=%b allowed=%d query_len=%d mode=%s"
+            meta.name core_count deterministic_prefilter_count
+            discovered_count llm_selected_count llm_rerank_enabled
             (List.length all_allowed)
-            (String.length query_text);
+            (String.length query_text)
+            selection_mode;
         (* 3. Graceful last-turn: inject budget warnings and restrict
            tools when approaching the turn limit.
            - Warning zone (2 turns before limit): inject budget warning
@@ -1124,16 +1167,19 @@ let run_turn
          let hook_elapsed_ms =
            Keeper_timing.round1 ((now -. hook_t0) *. 1000.0)
          in
-         let disclosure_json = `Assoc [
-           "ts_unix", `Float now;
-           "event", `String "tool_disclosure";
-           "keeper_name", `String meta.name;
-           "turn", `Int turn;
-           "core_count", `Int core_count;
-           "discovered_count", `Int discovered_count;
-           "final_visible", `Int (List.length all_allowed);
-           "hook_ms", `Float hook_elapsed_ms;
-         ] in
+          let disclosure_json = `Assoc [
+            "ts_unix", `Float now;
+            "event", `String "tool_disclosure";
+            "keeper_name", `String meta.name;
+            "turn", `Int turn;
+            "selection_mode", `String selection_mode;
+            "core_count", `Int core_count;
+            "deterministic_prefilter_count", `Int deterministic_prefilter_count;
+            "discovered_count", `Int discovered_count;
+            "llm_selected_count", `Int llm_selected_count;
+            "final_visible", `Int (List.length all_allowed);
+            "hook_ms", `Float hook_elapsed_ms;
+          ] in
          (try
            Keeper_types_support.append_jsonl_line
              (Keeper_types_support.keeper_decision_log_path config meta.name)

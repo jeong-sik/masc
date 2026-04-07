@@ -125,6 +125,7 @@ let string_of_provider_kind
   = function
   | Anthropic -> cn_claude
   | OpenAI_compat -> cn_codex
+  | Ollama -> cn_ollama
   | Gemini -> cn_gemini
   | Glm -> cn_glm
   | Claude_code -> cn_claude

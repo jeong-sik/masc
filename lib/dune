@@ -388,6 +388,7 @@
    heuristic_metrics
    agent_stress
    transport
+   transport_bridge
    transport_read_model
    transport_metrics
    ;; gRPC coordination transport (grpc-direct)
@@ -478,6 +479,7 @@
    keeper_tools_oas
    keeper_hooks_oas
    keeper_extend_turns
+   keeper_llm_bridge
    keeper_agent_run
    keeper_world_observation
    keeper_unified_prompt

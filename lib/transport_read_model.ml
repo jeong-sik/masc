@@ -193,4 +193,8 @@ let transport_status_json (ctx : http_context) =
               [ ("signaling_url", `String (ctx.base_url ^ "/webrtc")) ]
             else
               []) );
+      ("total_sessions", `Int (Transport_bridge.total_session_count ()));
+      ("enabled_protocols", `List (List.map
+        (fun p -> `String (Transport.protocol_to_string p))
+        (Transport_bridge.enabled_protocols ())));
     ]

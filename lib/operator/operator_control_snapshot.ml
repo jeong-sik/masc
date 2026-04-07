@@ -426,6 +426,11 @@ let persistent_agents_json ?keeper_names config =
               | `String status -> status
               | _ -> "unknown"
             in
+            let active_model = Keeper_exec_status.active_model_of_meta meta in
+            let context_max =
+              if String.trim active_model = "" then 0
+              else Oas_model_resolve.max_context_of_label active_model
+            in
             Some
               (`Assoc
                 [
@@ -441,7 +446,7 @@ let persistent_agents_json ?keeper_names config =
                   ("generation", `Int meta.runtime.generation);
                   ("turn_count", `Int meta.runtime.usage.total_turns);
                   ("context_ratio",
-                    (match compute_context_ratio meta with
+                    (match compute_context_ratio ~context_max meta with
                      | Some r -> `Float r
                      | None -> `Null));
                   ("context_tokens", `Int meta.runtime.usage.last_total_tokens);

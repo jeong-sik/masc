@@ -411,6 +411,9 @@ let result_json ~query ~search_url ~engine hits =
 let provider_error provider message =
   Printf.sprintf "%s: %s" (provider_to_string provider) message
 
+(** Truncate transport errors before the " for " suffix that usually prefixes
+    the request URL, so provider failure messages keep the useful curl detail
+    without echoing search queries or other URL payloads. *)
 let redact_transport_error_detail message =
   let len = String.length message in
   let rec find_marker i =

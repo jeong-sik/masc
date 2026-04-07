@@ -26,12 +26,12 @@ export function PipelineStageBar({ stage }: { stage?: PipelineStage | null }) {
   const current = stage ?? 'offline'
   const currentIdx = STAGE_ORDER[current] ?? -1
 
-  if (current === 'offline') {
+  if (current === 'offline' || currentIdx === -1) {
     return html`
       <div class="flex items-center py-1.5">
-        <div class="pipeline-stage-node active stage-offline">
+        <div class="pipeline-stage-node active stage-${current}">
           <span class="pipeline-stage-dot transition-all duration-300"></span>
-          <span class="pipeline-stage-label">offline</span>
+          <span class="pipeline-stage-label">${current}</span>
         </div>
       </div>
     `

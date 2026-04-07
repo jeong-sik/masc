@@ -22,7 +22,8 @@ let handle_keeper_bash
     | _ -> false
   in
   if cmd = ""
-  then error_json "cmd_required"
+  then error_json "cmd is required. Good: cmd='ls -la lib/'. Bad: cmd=''."
+
   else
     let validate =
       if write_enabled then Worker_dev_tools.validate_command_coding

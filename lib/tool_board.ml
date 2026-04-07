@@ -654,6 +654,70 @@ let handle_delete args =
     | Ok () -> (true, Printf.sprintf "Deleted post %s" post_id)
     | Error e -> (false, Printf.sprintf "Delete failed: %s" (board_error_to_string e))
 
+let handle_board_cleanup args =
+  let max_age_hours = get_int args "max_age_hours" 24 |> max 1 in
+  let require_no_comments = get_bool args "require_no_comments" true in
+  let require_no_votes = get_bool args "require_no_votes" true in
+  let dry_run = get_bool args "dry_run" true in
+  let limit = get_int args "limit" 10 |> max 1 |> min 50 in
+  let title_pattern = get_string_opt args "title_pattern" in
+  let author_pattern = get_string_opt args "author_pattern" in
+  let now = Time_compat.now () in
+  let age_threshold = now -. (float_of_int max_age_hours *. 3600.0) in
+  let title_re = Option.map (fun p ->
+    Re.str (String.lowercase_ascii p) |> Re.compile) title_pattern in
+  let author_re = Option.map (fun p ->
+    Re.str (String.lowercase_ascii p) |> Re.compile) author_pattern in
+  let matches_opt re s =
+    match re with
+    | None -> true
+    | Some compiled -> Re.execp compiled (String.lowercase_ascii s)
+  in
+  let all_posts =
+    Board_dispatch.list_posts ~sort_by:Recent ~limit:500 ()
+  in
+  let candidates =
+    List.filter (fun (p : Board.post) ->
+      p.created_at < age_threshold
+      && (not require_no_comments || p.reply_count = 0)
+      && (not require_no_votes || (p.votes_up = 0 && p.votes_down = 0))
+      && matches_opt title_re p.title
+      && matches_opt author_re (Board.Agent_id.to_string p.author))
+      all_posts
+  in
+  let targets = List.filteri (fun i _ -> i < limit) candidates in
+  if dry_run then begin
+    let count = List.length targets in
+    if count = 0 then
+      (true, Printf.sprintf "Scan complete: 0 candidates (scanned %d posts, age>%dh)"
+         (List.length all_posts) max_age_hours)
+    else
+      let lines = List.map (fun (p : Board.post) ->
+        Printf.sprintf "  - %s | %s | by %s | %s | replies=%d votes=%d"
+          (Board.Post_id.to_string p.id)
+          p.title
+          (Board.Agent_id.to_string p.author)
+          (format_timestamp_relative p.created_at)
+          p.reply_count
+          (p.votes_up + p.votes_down))
+        targets
+      in
+      (true, Printf.sprintf "Dry-run: %d candidates (scanned %d, age>%dh):\n%s"
+         count (List.length all_posts) max_age_hours
+         (String.concat "\n" lines))
+  end else begin
+    let deleted = ref 0 in
+    let failed = ref 0 in
+    List.iter (fun (p : Board.post) ->
+      let pid = Board.Post_id.to_string p.id in
+      match Board_dispatch.delete_post ~post_id:pid with
+      | Ok () -> incr deleted
+      | Error _ -> incr failed)
+      targets;
+    (true, Printf.sprintf "Cleanup done: %d deleted, %d failed (scanned %d, age>%dh)"
+       !deleted !failed (List.length all_posts) max_age_hours)
+  end
+
 let tool_delete : Types.tool_schema = {
   name = "masc_board_delete";
   description = "Delete a board post and its associated comments and votes. Use for cleanup of stale, test, or expired posts.";
@@ -663,6 +727,47 @@ let tool_delete : Types.tool_schema = {
       ("post_id", `Assoc [("type", `String "string"); ("description", `String "ID of the post to delete")]);
     ]);
     ("required", `List [`String "post_id"]);
+  ];
+}
+
+let tool_board_cleanup : Types.tool_schema = {
+  name = "masc_board_cleanup";
+  description = "Scan board posts matching filter criteria and delete or report them. \
+Defaults to dry_run=true (report only). Set dry_run=false to delete. \
+Safety: never deletes posts with comments or votes unless filters are overridden.";
+  input_schema = `Assoc [
+    ("type", `String "object");
+    ("properties", `Assoc [
+      ("max_age_hours", `Assoc [
+        ("type", `String "integer");
+        ("description", `String "Only target posts older than this (default: 24)");
+      ]);
+      ("require_no_comments", `Assoc [
+        ("type", `String "boolean");
+        ("description", `String "Only target posts with 0 replies (default: true)");
+      ]);
+      ("require_no_votes", `Assoc [
+        ("type", `String "boolean");
+        ("description", `String "Only target posts with 0 votes (default: true)");
+      ]);
+      ("title_pattern", `Assoc [
+        ("type", `String "string");
+        ("description", `String "Substring filter on post title (case-insensitive)");
+      ]);
+      ("author_pattern", `Assoc [
+        ("type", `String "string");
+        ("description", `String "Substring filter on post author (case-insensitive)");
+      ]);
+      ("dry_run", `Assoc [
+        ("type", `String "boolean");
+        ("description", `String "If true (default), only report candidates without deleting");
+      ]);
+      ("limit", `Assoc [
+        ("type", `String "integer");
+        ("description", `String "Max posts to process (default: 10, max: 50)");
+      ]);
+    ]);
+    ("required", `List []);
   ];
 }
 
@@ -679,6 +784,7 @@ let tools = [
   tool_profile;
   tool_hearth_list;
   tool_delete;
+  tool_board_cleanup;
 ]
 
 (** Tool dispatcher *)
@@ -695,6 +801,7 @@ let handle_tool name args =
   | "masc_board_profile" -> handle_profile args
   | "masc_board_hearths" -> handle_hearth_list args
   | "masc_board_delete" -> handle_delete args
+  | "masc_board_cleanup" -> handle_board_cleanup args
   | _ -> (false, Printf.sprintf "Unknown tool: %s" name)
 
 let register () =

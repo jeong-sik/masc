@@ -186,6 +186,39 @@ expired automation, or other explicitly-approved cleanup cases.";
       ("required", `List [`String "post_id"]);
     ];
   };
+  {
+    name = "keeper_board_cleanup";
+    description = "Batch scan and cleanup board posts matching filter criteria. \
+Defaults to dry_run=true (report candidates only). \
+Set dry_run=false to delete matched posts. \
+Safe defaults: only targets posts older than 24h with no comments and no votes.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("max_age_hours", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Only target posts older than this many hours (default: 24)");
+        ]);
+        ("title_pattern", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Substring filter on post title (case-insensitive)");
+        ]);
+        ("author_pattern", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Substring filter on post author (case-insensitive)");
+        ]);
+        ("dry_run", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "If true (default), report candidates without deleting");
+        ]);
+        ("limit", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Max posts to process (default: 10, max: 50)");
+        ]);
+      ]);
+      ("required", `List []);
+    ];
+  };
 ]
 
 let select_named_schemas (names : string list) (schemas : Types.tool_schema list) :

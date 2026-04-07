@@ -43,7 +43,6 @@ import { PipelineStageBar } from './keeper-pipeline-stage'
 import { AgentJournalStream } from './agent-detail-journal'
 import { DialogOverlay } from './common/dialog'
 import { SessionTraceView } from './session-trace/session-trace-view'
-import { SessionProgressHeader } from './session-progress-header'
 import { KeeperToolTelemetry } from './keeper-tool-telemetry'
 import { statusLabel } from '../lib/status-label'
 import { KeeperToolCallInspector } from './keeper-tool-call-inspector'
@@ -441,7 +440,12 @@ export function KeeperDetailOverlay() {
                   ` : null
                 })()}
               </div>
-              ${keeper.koreanName ? html`<span class="text-xs text-[var(--text-muted)]">${keeper.koreanName}</span>` : null}
+              ${keeper.koreanName || keeper.created_at ? html`
+                <div class="flex items-center gap-2 text-xs text-[var(--text-muted)]">
+                  ${keeper.koreanName ? html`<span>${keeper.koreanName}</span>` : null}
+                  ${keeper.created_at ? html`<span class="font-mono tabular-nums opacity-60"><${TimeAgo} timestamp=${keeper.created_at} /></span>` : null}
+                </div>
+              ` : null}
             </div>
           </div>
           <div class="flex items-center gap-2">
@@ -466,17 +470,11 @@ export function KeeperDetailOverlay() {
         ${'' /* ── Pipeline stage indicator ── */}
         <${PipelineStageBar} stage=${keeper.pipeline_stage} />
 
-        ${'' /* ── Session progress header (Copilot-style) ── */}
-        <${SessionProgressHeader} keeper=${keeper} summary=${null} />
-
         ${'' /* ── KPIs ── */}
         <${KpiGrid} keeper=${keeper} />
 
-        ${'' /* ── Context chart ── */}
-        <${ContextChart} keeper=${keeper} />
-
-        ${'' /* ── Supervisor diagnostics ── */}
-        <${SupervisorDiagnosticsPanel} keeper=${keeper} />
+        ${'' /* ── Context chart (sparkline only — single-point is covered by KpiGrid) ── */}
+        ${(keeper.metrics_series ?? []).length >= 2 ? html`<${ContextChart} keeper=${keeper} />` : null}
 
         ${'' /* ── Latency / Cost / Model charts ── */}
         <${MetricsCharts} keeper=${keeper} />
@@ -487,30 +485,20 @@ export function KeeperDetailOverlay() {
         ${'' /* ── Direct conversation ── */}
         <${KeeperCommsPanel} keeper=${keeper} />
 
-        ${'' /* ── Runtime diagnostics (promoted from comms panel) ── */}
+        ${'' /* ── Runtime diagnostics (supervisor + keeper diagnostics unified) ── */}
         <details class="rounded-2xl border border-card-border bg-card/40 backdrop-blur-md shadow-sm">
           <summary class="cursor-pointer py-3 px-5 text-[11px] font-semibold uppercase tracking-widest text-text-muted list-none select-none flex items-center gap-2">
             <span class="w-1.5 h-1.5 rounded-full bg-accent/50"></span>
             런타임 진단
           </summary>
           <div class="flex flex-col gap-3 px-5 pb-5 pt-2">
+            <${SupervisorDiagnosticsPanel} keeper=${keeper} />
             <${KeeperDiagnosticSummary} keeper=${keeper} />
             <${KeeperRuntimeActions}
               actor=${currentDashboardActor()}
               keeper=${keeper}
               onSocialSweep=${() => { void runSocialSweep() }}
             />
-          </div>
-        </details>
-
-        ${'' /* ── Live journal stream (collapsed by default — verbose) ── */}
-        <details>
-          <summary class="cursor-pointer py-2.5 px-4 text-xs text-[var(--text-muted)] tracking-wider uppercase list-none select-none rounded-lg hover:bg-[var(--white-3)] transition-colors flex items-center gap-2">
-            <span class="w-1.5 h-1.5 rounded-full bg-[var(--text-dim)]"></span>
-            실시간 저널
-          </summary>
-          <div class="mt-2">
-            <${AgentJournalStream} agentName=${keeper.name} />
           </div>
         </details>
 
@@ -547,7 +535,7 @@ export function KeeperDetailOverlay() {
               `
               : null}
 
-            ${'' /* ── Timestamps ── */}
+            ${'' /* ── Timestamps + recent activity (merged) ── */}
             <div class="mt-3 flex flex-col gap-1">
               ${keeper.last_heartbeat
                 ? html`<div class="flex items-center gap-2 text-xs text-[var(--text-muted)]">
@@ -561,55 +549,38 @@ export function KeeperDetailOverlay() {
                     <${TimeAgo} timestamp=${keeper.created_at} />
                   </div>`
                 : null}
+              ${keeper.last_speech_act
+                ? html`<div class="flex items-center gap-2 text-xs text-[var(--text-muted)]">
+                    <span>최근 행동:</span>
+                    <span class="font-mono text-[11px] px-1.5 py-0.5 rounded bg-[var(--white-5)] text-[var(--text-body)]">${keeper.last_speech_act}</span>
+                  </div>`
+                : null}
             </div>
 
-          <//>
+            ${'' /* ── Recent output + K2K + memory note (inline) ── */}
+            ${keeper.recent_output_preview
+              ? html`
+                <div class="mt-3 py-2 px-3 rounded-lg bg-[rgba(71,184,255,0.06)] border border-[rgba(71,184,255,0.12)] text-xs text-[var(--text-body)] leading-relaxed">
+                  <div class="line-clamp-3">${keeper.recent_output_preview}</div>
+                </div>
+              `
+              : null}
+            ${(keeper.k2k_count ?? 0) > 0 || keeper.memory_recent_note
+              ? html`
+                <div class="mt-2 flex flex-wrap items-center gap-2">
+                  ${(keeper.k2k_count ?? 0) > 0
+                    ? html`<span class="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-md bg-[rgba(167,139,250,0.08)] border border-[rgba(167,139,250,0.15)] text-[var(--text-muted)]">
+                        K2K <span class="font-mono font-medium text-[#a78bfa]">${keeper.k2k_count}</span>
+                      </span>`
+                    : null}
+                  ${keeper.memory_recent_note
+                    ? html`<span class="text-[11px] text-[var(--text-muted)] truncate" title=${keeper.memory_recent_note}>${keeper.memory_recent_note}</span>`
+                    : null}
+                </div>
+              `
+              : null}
 
-          ${'' /* ── Recent activity (extracted from profile) ── */}
-          ${keeper.recent_output_preview || (keeper.k2k_count ?? 0) > 0 || (keeper.conversation_tail_count ?? 0) > 0 || keeper.memory_recent_note || keeper.last_speech_act
-            ? html`
-              <${SectionCard} title="최근 활동">
-                ${keeper.recent_output_preview
-                  ? html`
-                    <div class="py-2 px-3 rounded-lg bg-[rgba(71,184,255,0.06)] border border-[rgba(71,184,255,0.12)] text-xs text-[var(--text-body)] leading-relaxed">
-                      <div class="text-[10px] font-semibold text-[var(--accent)] uppercase tracking-wider mb-1">최근 출력</div>
-                      <div class="line-clamp-3">${keeper.recent_output_preview}</div>
-                    </div>
-                  `
-                  : null}
-                ${(keeper.k2k_count ?? 0) > 0 || (keeper.conversation_tail_count ?? 0) > 0
-                  ? html`
-                    <div class="mt-2 flex flex-wrap gap-2">
-                      ${(keeper.k2k_count ?? 0) > 0
-                        ? html`<span class="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-md bg-[rgba(167,139,250,0.08)] border border-[rgba(167,139,250,0.15)] text-[var(--text-muted)]">
-                            K2K 소통 <span class="font-mono font-medium text-[#a78bfa]">${keeper.k2k_count}</span>회
-                          </span>`
-                        : null}
-                      ${(keeper.conversation_tail_count ?? 0) > 0
-                        ? html`<span class="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-md bg-[var(--white-4)] border border-[var(--white-6)] text-[var(--text-muted)]">
-                            대화 <span class="font-mono font-medium">${keeper.conversation_tail_count}</span>건
-                          </span>`
-                        : null}
-                    </div>
-                  `
-                  : null}
-                ${keeper.memory_recent_note
-                  ? html`
-                    <div class="mt-2 py-2 px-3 rounded-lg bg-[rgba(167,139,250,0.06)] border border-[rgba(167,139,250,0.12)] text-xs text-[var(--text-body)] leading-relaxed">
-                      <div class="text-[10px] font-semibold text-[#a78bfa] uppercase tracking-wider mb-1">메모리 노트</div>
-                      ${keeper.memory_recent_note}
-                    </div>
-                  `
-                  : null}
-                ${keeper.last_speech_act
-                  ? html`<div class="flex items-center gap-2 mt-2 text-xs text-[var(--text-muted)]">
-                      <span>최근 행동:</span>
-                      <span class="font-mono text-[11px] px-1.5 py-0.5 rounded bg-[var(--white-5)] text-[var(--text-body)]">${keeper.last_speech_act}</span>
-                    </div>`
-                  : null}
-              <//>
-            `
-            : null}
+          <//>
 
           ${keeper.inventory && keeper.inventory.length > 0
             ? html`
@@ -646,10 +617,10 @@ export function KeeperDetailOverlay() {
 
           <${SectionCard} title="도구 정책 & 감사">
             <${KeeperNeighborhood} keeper=${keeper} />
-          <//>
-
-          <${SectionCard} title="도구 호출 검사기">
-            <${KeeperToolCallInspector} keeperName=${keeper.name} />
+            <div class="mt-4 pt-4 border-t border-[var(--border-slate-12)]">
+              <h4 class="m-0 mb-3 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">호출 검사기</h4>
+              <${KeeperToolCallInspector} keeperName=${keeper.name} />
+            </div>
           <//>
 
           <${SectionCard} title="설정">
@@ -657,11 +628,22 @@ export function KeeperDetailOverlay() {
           <//>
         </div>
 
-        ${'' /* ── Raw Data (Debug) — collapsed by default ── */}
+        ${'' /* ── Debug — journal (separate details to avoid eager mount) ── */}
         <details class="mt-4">
           <summary class="cursor-pointer py-3 px-4 text-[11px] font-semibold uppercase tracking-widest text-[var(--text-muted)] list-none select-none rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] hover:bg-[var(--white-6)] transition-colors flex items-center gap-2">
             <span class="w-1.5 h-1.5 rounded-full bg-[var(--text-dim)]"></span>
-            원시 데이터 (디버그)
+            디버그 (저널)
+          </summary>
+          <div class="mt-2 p-5 rounded-2xl border border-card-border bg-card/40 backdrop-blur-md">
+            <${AgentJournalStream} agentName=${keeper.name} />
+          </div>
+        </details>
+
+        ${'' /* ── Debug — raw data, collapsed ── */}
+        <details class="mt-2">
+          <summary class="cursor-pointer py-3 px-4 text-[11px] font-semibold uppercase tracking-widest text-[var(--text-muted)] list-none select-none rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] hover:bg-[var(--white-6)] transition-colors flex items-center gap-2">
+            <span class="w-1.5 h-1.5 rounded-full bg-[var(--text-dim)]"></span>
+            디버그 (원시 데이터)
           </summary>
           <div class="mt-2 p-5 rounded-2xl border border-card-border bg-card/40 backdrop-blur-md">
             <${RawDataDebug} keeper=${keeper} />

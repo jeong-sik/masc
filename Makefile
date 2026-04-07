@@ -1,7 +1,7 @@
 # masc-mcp Makefile
 # Enterprise-ready development commands
 
-.PHONY: build test test-unit test-contract test-contract-live test-transport test-webrtc-live-env test-all clean coverage coverage-summary coverage-html coverage-percent doc install-deps dev-setup fmt fmt-check health ci dashboard build-all viewer-build viewer-serve harness-game-view-contract harness-streamable-http-contract harness-trpg-session-contract harness-trpg-grimland-smoke viewer-local-e2e-check check-memory-leak
+.PHONY: build test test-unit test-contract test-contract-live test-transport test-webrtc-live-env test-all clean coverage coverage-summary coverage-html coverage-percent doc install-deps dev-setup fmt fmt-check health ci dashboard dev-dashboard build-all viewer-build viewer-serve harness-game-view-contract harness-streamable-http-contract harness-trpg-session-contract harness-trpg-grimland-smoke viewer-local-e2e-check check-memory-leak
 
 # Default target — OCaml + dashboard
 all: build-all
@@ -14,6 +14,10 @@ build:
 # Build dashboard SPA (Vite) — force rebuild
 dashboard:
 	cd dashboard && pnpm install --frozen-lockfile && pnpm run build
+
+# Dashboard dev server (Vite HMR, proxies /api + /sse to MASC :8935)
+dev-dashboard:
+	cd dashboard && pnpm dev
 
 # Build everything (alias for build)
 build-all: build

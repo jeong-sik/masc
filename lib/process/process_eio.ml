@@ -83,9 +83,16 @@ let make_secure_stderr_tempfile () =
   Unix.set_close_on_exec fd;
   (path, fd)
 
+let remove_temp_file_quietly path =
+  try Sys.remove path with
+  | Sys_error _ -> ()
+
 let read_stderr_capture path =
   try In_channel.with_open_bin path In_channel.input_all with
-  | exn -> Printf.sprintf "stderr unavailable: %s" (Printexc.to_string exn)
+  | exn ->
+      Printf.sprintf
+        "stderr capture failed (file read error): %s"
+        (Printexc.to_string exn)
 
 let with_unix_capture ?env ?stdin_content ?(capture_stderr = false)
     (argv : string list)
@@ -112,9 +119,7 @@ let with_unix_capture ?env ?stdin_content ?(capture_stderr = false)
       Option.iter close_quietly !stderr_fd_ref;
       stderr_fd_ref := None;
       Option.iter
-        (fun path ->
-           try Sys.remove path with
-           | _ -> ())
+        remove_temp_file_quietly
         !stderr_path_ref;
       stderr_path_ref := None
     in

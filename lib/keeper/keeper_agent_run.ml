@@ -754,6 +754,10 @@ let run_turn
     "extend_turns"
     :: List.map (fun (t : Agent_sdk.Tool.t) -> t.schema.name) keeper_tools
   in
+  (* Precompute membership table for AllowList validation below.
+     all_tool_names is constant for the session; building universe_set
+     once here avoids O(n) Hashtbl allocation on every turn. *)
+  let universe_set = Keeper_tool_policy.tool_name_set all_tool_names in
   let max_tools_per_turn =
     if is_retry then Keeper_config.keeper_retry_max_tools_per_turn ()
     else Keeper_config.keeper_max_tools_per_turn ()
@@ -865,15 +869,22 @@ let run_turn
              errors and waste a turn.  Filter them out defensively.
              This can happen when core_discovery_tools includes tools
              not covered by the keeper's preset (e.g. minimal). *)
-          let universe_set =
-            Keeper_tool_policy.tool_name_set all_tool_names
+          let validated, dropped_names =
+            List.partition (fun n -> Hashtbl.mem universe_set n) raw
           in
-          let validated = List.filter (fun n -> Hashtbl.mem universe_set n) raw in
-          let dropped = List.length raw - List.length validated in
-          if dropped > 0 then
+          let dropped = List.length dropped_names in
+          if dropped > 0 then begin
+            let max_logged = 10 in
+            let shown = List.filteri (fun i _ -> i < max_logged) dropped_names in
+            let omitted = dropped - List.length shown in
+            let shown_text = String.concat ", " shown in
+            let omitted_suffix =
+              if omitted > 0 then Printf.sprintf " (+%d more)" omitted else ""
+            in
             Log.Keeper.warn
-              "keeper:%s turn:%d AllowList pruned %d tool(s) outside dispatch universe"
-              meta.name turn dropped;
+              "keeper:%s turn:%d AllowList pruned %d tool(s) outside dispatch universe: %s%s"
+              meta.name turn dropped shown_text omitted_suffix
+          end;
           validated
         in
         if Keeper_types_profile.keeper_debug then

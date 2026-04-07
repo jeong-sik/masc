@@ -252,6 +252,7 @@ let run_turn
     ?(is_retry = false)
     ?shared_context
     ?event_bus
+    ?boring_consecutive_turns_ref
     ()
   : (run_result, Oas.Error.sdk_error) result =
   (* 0. Resolve inference parameters via Cascade_inference *)
@@ -801,8 +802,13 @@ let run_turn
   in
   (* Boring-tool gate: shared counter between after_turn (writer) and
      before_turn_params (reader). Tracks consecutive turns where only
-     boring tools (status/heartbeat/tasks_list) were called. *)
-  let boring_consecutive_turns = ref 0 in
+     boring tools (status/heartbeat/tasks_list) were called.
+     When provided externally (from keepalive loop), persists across
+     run_turn calls to detect inter-run polling patterns. *)
+  let boring_consecutive_turns = match boring_consecutive_turns_ref with
+    | Some r -> r
+    | None -> ref 0
+  in
   let base_hooks = Keeper_hooks_oas.make_hooks
     ~config ~meta_ref ~session ~ctx_snapshot ~generation ?max_cost_usd
     ?trajectory_acc ~boring_consecutive_turns

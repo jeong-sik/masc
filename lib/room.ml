@@ -226,9 +226,6 @@ let () = Room_hooks.cleanup_board_artifacts_fn := (fun () ->
          else removed)
        0)
 
-(* Governance stale case purge — retired, no-op *)
-let () = Room_hooks.governance_purge_fn := (fun _base_path -> (0, 0))
-
 (* Subscription auto-subscribe on join — wraps Subscriptions for room_eio *)
 let () = Room_hooks.subscribe_messages_fn := (fun ~subscriber ->
   let _ = Subscriptions.SubscriptionStore.subscribe

@@ -16,14 +16,6 @@ type transition_record = {
 (** Serialize a transition record for JSONL storage. *)
 val to_json : transition_record -> Yojson.Safe.t
 
-(** Given a historical snapshot, re-run [Keeper_guard.evaluate] (when available)
-    and verify the result matches the recorded events.
-    Phase 1: always returns [true] (stub). *)
-val replay_check :
-  Keeper_measurement.measurement_snapshot ->
-  Keeper_state_machine.event list ->
-  bool
-
 (** {1 In-memory Ring Buffer} *)
 
 (** Record a transition in the per-keeper ring buffer (last 50). *)

@@ -9,8 +9,7 @@ open Room_state
 
 (* Callback refs and types are now in Room_hooks. *)
 
-(* Board artifact cleanup and governance purge are now in Room_hooks callbacks.
-   The actual implementations are wired by room.ml at startup. *)
+(* Board artifact cleanup is wired via Room_hooks callbacks at startup. *)
 
 
 (* heartbeat_in_room removed — rooms are flattened (#4638). Use heartbeat. *)
@@ -390,11 +389,8 @@ let gc config ?(days=7) () =
   else
     results := "✅ No team sessions to archive" :: !results;
 
-  (* 7. Hard-delete board/governance artifacts (via hooks) *)
+  (* 7. Hard-delete board artifacts (via hooks) *)
   let board_artifact_count = !Room_hooks.cleanup_board_artifacts_fn () in
-  let governance_test_artifact_count, governance_artifact_count =
-    !Room_hooks.governance_purge_fn config.base_path
-  in
   if board_artifact_count > 0 then
     results :=
       Printf.sprintf "🧽 Removed %d board artifact post(s)"
@@ -402,13 +398,6 @@ let gc config ?(days=7) () =
       :: !results
   else
     results := "✅ No board artifacts" :: !results;
-  if governance_test_artifact_count > 0 || governance_artifact_count > 0 then
-    results :=
-      Printf.sprintf "⚖️ Removed %d governance artifact case(s) and %d stale test case(s)"
-        governance_artifact_count governance_test_artifact_count
-      :: !results
-  else
-    results := "✅ No governance artifacts" :: !results;
 
   (* 8. CP data cleanup (dead units, stale operations, orphaned detachments) *)
   if not !Room_hooks.cp_cleanup_connected then
@@ -442,9 +431,9 @@ let gc config ?(days=7) () =
   results := "✅ Rooms flattened (no room archival needed)" :: !results;
 
   log_event config (Printf.sprintf
-    "{\"type\":\"gc\",\"stale_tasks\":%d,\"old_messages\":%d,\"preserved\":%d,\"pubsub_cleaned\":%d,\"keeper_orphans\":%d,\"sessions_archived\":%d,\"board_artifacts\":%d,\"governance_test_artifacts\":%d,\"governance_artifacts\":%d,\"rooms_archived\":%d,\"cp_cleanup\":%s,\"days\":%d,\"ts\":\"%s\"}"
+    "{\"type\":\"gc\",\"stale_tasks\":%d,\"old_messages\":%d,\"preserved\":%d,\"pubsub_cleaned\":%d,\"keeper_orphans\":%d,\"sessions_archived\":%d,\"board_artifacts\":%d,\"rooms_archived\":%d,\"cp_cleanup\":%s,\"days\":%d,\"ts\":\"%s\"}"
     !stale_count !old_msg_count !preserved_count !pubsub_cleanup_count !keeper_orphan_count !session_archive_count
-    board_artifact_count governance_test_artifact_count governance_artifact_count
+    board_artifact_count
     0 cp_json days (now_iso ()));
 
   String.concat "\n" (List.rev !results)

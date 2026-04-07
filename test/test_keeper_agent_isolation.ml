@@ -53,8 +53,6 @@ let has_keeper_prefix name =
     depends on inject_masc_schemas which runs after module init. *)
 let known_non_keeper_tool_names () : string list =
   List.concat [
-    Tool_shard.governance_tools
-    |> List.map (fun (t : Types.tool_schema) -> t.name);
     Tool_shard.autoresearch_keeper_tools
     |> List.map (fun (t : Types.tool_schema) -> t.name);
     Tool_shard.coding_tools

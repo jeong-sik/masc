@@ -548,34 +548,11 @@ let shard_library : shard = {
   description = "Knowledge library: search, read documents";
 }
 
-let governance_keeper_tool_names : string list =
-  [
-    "masc_cases";
-    "masc_case_status";
-    "masc_ruling_status";
-    "masc_governance_status";
-    "masc_governance_feed";
-    "masc_case_brief_submit";
-    "masc_petition_submit";
-  ]
-
-let governance_tools : Types.tool_schema list =
-  (* Governance compatibility surface retained, but no governance tool schemas are exposed. *)
-  ignore governance_keeper_tool_names;
-  []
-
 let shard_taskboard : shard = {
   name = "taskboard";
   tools = taskboard_tools;
   removable = true;
   description = "Task board management: list, audit, force-release, force-done, broadcast";
-}
-
-let shard_governance : shard = {
-  name = "governance";
-  tools = governance_tools;
-  removable = true;
-  description = "Governance compatibility stub: no governance tools exposed";
 }
 
 (** Autoresearch tools: filtered subset for keeper use (excludes swarm_start). *)
@@ -603,7 +580,6 @@ let default_shard_names : string list = [
   "shell";
   "library";
   "taskboard";
-  "governance";
   "coding";
   "autoresearch";
 ]
@@ -629,7 +605,6 @@ let all_shards : shard StringMap.t =
     shard_voice;
     shard_library;
     shard_taskboard;
-    shard_governance;
     shard_autoresearch;
   ]
 
@@ -688,7 +663,7 @@ let schemas : Types.tool_schema list = [
   {
     name = "masc_tool_grant";
     description = "Grant a capability group to an agent. \
-Groups: base (core), board, filesystem, shell, governance, voice, taskboard, coding, autoresearch.";
+Groups: base (core), board, filesystem, shell, voice, taskboard, coding, autoresearch.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -698,7 +673,7 @@ Groups: base (core), board, filesystem, shell, governance, voice, taskboard, cod
         ]);
         ("shard_name", `Assoc [
           ("type", `String "string");
-          ("description", `String "Group to grant: base, board, filesystem, shell, governance, voice, taskboard, coding, autoresearch");
+          ("description", `String "Group to grant: base, board, filesystem, shell, voice, taskboard, coding, autoresearch");
         ]);
       ]);
       ("required", `List [`String "agent_name"; `String "shard_name"]);
@@ -717,7 +692,7 @@ Cannot revoke 'base' (always present).";
         ]);
         ("shard_name", `Assoc [
           ("type", `String "string");
-          ("description", `String "Group to revoke (must be removable). One of: board, filesystem, shell, governance, voice, taskboard, coding, autoresearch");
+          ("description", `String "Group to revoke (must be removable). One of: board, filesystem, shell, voice, taskboard, coding, autoresearch");
         ]);
       ]);
       ("required", `List [`String "agent_name"; `String "shard_name"]);

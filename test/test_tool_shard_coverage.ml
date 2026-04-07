@@ -47,17 +47,9 @@ let test_shard_shell_exists () =
     Alcotest.(check bool) "has tools" true (List.length s.Tool_shard.tools >= 1)
   | None -> Alcotest.fail "shell shard not found"
 
-let test_shard_governance_exists () =
-  match Tool_shard.get_shard "governance" with
-  | Some s ->
-    Alcotest.(check bool) "removable" true s.Tool_shard.removable;
-    (* Governance shard exists for compatibility but has 0 tools. *)
-    Alcotest.(check int) "no tools after governance tool retirement" 0
-      (List.length s.Tool_shard.tools);
-    Alcotest.(check string) "stub description"
-      "Governance compatibility stub: no governance tools exposed"
-      s.Tool_shard.description
-  | None -> Alcotest.fail "governance shard not found"
+let test_shard_governance_removed () =
+  Alcotest.(check bool) "governance shard removed" true
+    (Tool_shard.get_shard "governance" = None)
 
 let test_shard_coding_exists () =
   match Tool_shard.get_shard "coding" with
@@ -99,10 +91,10 @@ let test_all_shards_count () =
 let test_default_shard_names () =
   let defaults = Tool_shard.default_shard_names in
   (* All shards are now in defaults (mode removal: every keeper gets all tools) *)
-  Alcotest.(check bool) "at least 8 defaults" true (List.length defaults >= 8);
+  Alcotest.(check bool) "at least 7 defaults" true (List.length defaults >= 7);
   Alcotest.(check bool) "base in defaults" true (List.mem "base" defaults);
-  (* governance shard still in defaults but has 0 tools after tool retirement *)
-  Alcotest.(check bool) "governance in defaults" true
+  (* governance shard removed: empty stub deleted *)
+  Alcotest.(check bool) "governance removed from defaults" false
     (List.mem "governance" defaults);
   Alcotest.(check bool) "coding in defaults" true
     (List.mem "coding" defaults);
@@ -330,11 +322,6 @@ let test_board_tools_names () =
   Alcotest.(check bool) "has board_comment" true (List.mem "keeper_board_comment" names);
   Alcotest.(check bool) "has board_vote" true (List.mem "keeper_board_vote" names)
 
-let test_governance_tools_empty () =
-  (* Governance tools are retired, so governance_tools is empty. *)
-  Alcotest.(check int) "governance tools empty after retirement" 0
-    (List.length Tool_shard.governance_tools)
-
 (* ============================================================
    Voice tools content tests (#3: all 5 voice tools present)
    ============================================================ *)
@@ -497,7 +484,7 @@ let () =
       Alcotest.test_case "board" `Quick test_shard_board_exists;
       Alcotest.test_case "filesystem" `Quick test_shard_filesystem_exists;
       Alcotest.test_case "shell" `Quick test_shard_shell_exists;
-      Alcotest.test_case "governance" `Quick test_shard_governance_exists;
+      Alcotest.test_case "governance removed" `Quick test_shard_governance_removed;
       Alcotest.test_case "coding" `Quick test_shard_coding_exists;
       Alcotest.test_case "coding in defaults" `Quick test_coding_in_defaults;
       Alcotest.test_case "voice" `Quick test_shard_voice_exists;
@@ -571,7 +558,6 @@ let () =
     ("tool_content", [
       Alcotest.test_case "base tools" `Quick test_base_tools_names;
       Alcotest.test_case "board tools" `Quick test_board_tools_names;
-      Alcotest.test_case "governance tools empty" `Quick test_governance_tools_empty;
       Alcotest.test_case "voice tools" `Quick test_voice_tools_names;
       Alcotest.test_case "keeper_model excludes voice" `Quick
         test_keeper_model_excludes_voice_tools;

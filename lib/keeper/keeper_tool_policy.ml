@@ -335,20 +335,32 @@ let keeper_preset_universe_tool_names (meta : keeper_meta) : string list =
   in
   dedupe_tool_names (from_preset @ from_core)
 
+(** Shared schema assembly: computes the full tool schema list once.
+    [masc_schemas_fn] selects policy-filtered or universe-filtered MASC schemas
+    depending on the caller's access scope. *)
+let all_keeper_schemas ~(masc_schemas_fn : keeper_meta -> Types.tool_schema list)
+    (meta : keeper_meta) : Types.tool_schema list =
+  (keeper_default_model_tools meta)
+  @ Tool_shard.autoresearch_keeper_tools
+  @ Tool_shard.coding_tools
+  @ Tool_code_write.schemas
+  @ (masc_schemas_fn meta)
+
+(** Filter schemas by a set of allowed names.  Uses Hashtbl for O(1) lookup
+    instead of List.mem (O(n) per schema). *)
+let filter_schemas_by_names (names : string list)
+    (schemas : Types.tool_schema list) : Types.tool_schema list =
+  let name_set = tool_name_set names in
+  schemas
+  |> List.filter (fun (tool : Types.tool_schema) -> Hashtbl.mem name_set tool.name)
+  |> dedupe_tool_schemas
+
 (** Preset-scoped model tool schemas for BM25 indexing.
     Returns schemas only for the preset-scoped universe. *)
 let keeper_preset_universe_model_tools (meta : keeper_meta) : Types.tool_schema list =
   let scoped = keeper_preset_universe_tool_names meta in
-  let all_schemas =
-    (keeper_default_model_tools meta)
-    @ Tool_shard.autoresearch_keeper_tools
-    @ Tool_shard.coding_tools
-    @ Tool_code_write.schemas
-    @ (keeper_universe_masc_tool_schemas meta)
-  in
-  all_schemas
-  |> List.filter (fun tool -> List.mem tool.Types.name scoped)
-  |> dedupe_tool_schemas
+  all_keeper_schemas ~masc_schemas_fn:keeper_universe_masc_tool_schemas meta
+  |> filter_schemas_by_names scoped
 
 let keeper_allowed_model_tools ?(write_done = false) (meta : keeper_meta) :
     Types.tool_schema list =
@@ -356,17 +368,9 @@ let keeper_allowed_model_tools ?(write_done = false) (meta : keeper_meta) :
   if allowed = [] then
     []
   else
-    let all_schemas =
-      (keeper_default_model_tools meta)
-      @ Tool_shard.autoresearch_keeper_tools
-      @ Tool_shard.coding_tools
-      @ Tool_code_write.schemas
-      @ (keeper_masc_tool_schemas meta)
-    in
     let result =
-      all_schemas
-      |> List.filter (fun tool -> List.mem tool.Types.name allowed)
-      |> dedupe_tool_schemas
+      all_keeper_schemas ~masc_schemas_fn:keeper_masc_tool_schemas meta
+      |> filter_schemas_by_names allowed
     in
     let count = List.length result in
     if count > 100 then
@@ -381,16 +385,8 @@ let keeper_allowed_model_tools ?(write_done = false) (meta : keeper_meta) :
     Returns schemas for all universe tools so Agent.run() can call them. *)
 let keeper_universe_model_tools (meta : keeper_meta) : Types.tool_schema list =
   let universe = keeper_universe_tool_names meta in
-  let all_schemas =
-    (keeper_default_model_tools meta)
-    @ Tool_shard.autoresearch_keeper_tools
-    @ Tool_shard.coding_tools
-    @ Tool_code_write.schemas
-    @ (keeper_universe_masc_tool_schemas meta)
-  in
-  all_schemas
-  |> List.filter (fun tool -> List.mem tool.Types.name universe)
-  |> dedupe_tool_schemas
+  all_keeper_schemas ~masc_schemas_fn:keeper_universe_masc_tool_schemas meta
+  |> filter_schemas_by_names universe
 
 (* ── Tool description lookup (for prompt auto-hints) ─────────── *)
 

@@ -544,9 +544,13 @@ let run_turn
     (* masc_broadcast, masc_who, masc_messages require MCP session context
        and fail in keeper. Use keeper_broadcast instead. (#4694) *)
   ] in
-  (* Augment tool descriptions with Korean keywords for bilingual BM25.
-     Tool_selector.select builds its index from Tool.t descriptions, so
-     appending keywords here is equivalent to the old Tool_index aliases. *)
+  (* Convert to Hashtbl for O(1) lookup — used in augment_tool_description
+     and tool_entries aliases.  75 static entries, built once per session. *)
+  let korean_kw_tbl =
+    let tbl = Hashtbl.create 80 in
+    List.iter (fun (k, v) -> Hashtbl.replace tbl k v) korean_keywords;
+    tbl
+  in
   (* Full-universe search index for keeper_tool_search.
      Separate from the preset-scoped Tool_selector used for progressive disclosure:
      search needs access to ALL tools so the keeper can discover beyond its preset.
@@ -583,7 +587,7 @@ let run_turn
       else if String.starts_with ~prefix:"masc_" name then Some "masc_core"
       else None
     in
-    let aliases = match List.assoc_opt name korean_keywords with
+    let aliases = match Hashtbl.find_opt korean_kw_tbl name with
       | Some kw ->
         String.split_on_char ' ' kw
         |> List.filter (fun s -> s <> "")

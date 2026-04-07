@@ -229,8 +229,13 @@ let test_snapshot_lightweight_summary_keeps_paused_keeper_runtime_counters () =
   ensure_fs env;
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
+  let keeper_name = "paused-lightweight" in
   Fun.protect
-    ~finally:(fun () -> cleanup_dir base_dir)
+    ~finally:(fun () ->
+      Keeper_keepalive.stop_keepalive keeper_name;
+      Keeper_registry.clear ();
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
     (fun () ->
       let config = Room.default_config base_dir in
       ignore (Room.init config ~agent_name:(Some "owner"));
@@ -244,10 +249,15 @@ let test_snapshot_lightweight_summary_keeps_paused_keeper_runtime_counters () =
           net = None;
         }
       in
-      let keeper_name = "paused-lightweight" in
       let ok, _ =
         dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_up"
-          ~args:(`Assoc [ ("name", `String keeper_name) ])
+          ~args:
+            (`Assoc
+              [
+                ("name", `String keeper_name);
+                ("goal", `String "Test paused keeper runtime counters");
+                ("proactive_enabled", `Bool false);
+              ])
       in
       Alcotest.(check bool) "keeper up ok" true ok;
       let meta =

@@ -1,6 +1,5 @@
 {
-  "default_models": ["glm:auto"],
-  "keeper_unified_models": ["ollama:auto", "glm:auto"],
+  "default_models": ["glm:auto", "llama:auto"],
 
   "_comment": "Only default_models needed. OAS cascade_config falls back to default_models when a named cascade is absent. Per-cascade model overrides can be added as {name}_models when differentiation is needed.",
 

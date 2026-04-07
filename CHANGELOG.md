@@ -1,6 +1,11 @@
 # Changelog
 
 
+## [2.256.0] - 2026-04-07
+
+### Changed
+- **OAS agent_sdk pin** -- bump 0.110.0 to 0.111.0 (ollama provider).
+
 ## [2.255.0] - 2026-04-07
 
 ### Added

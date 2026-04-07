@@ -330,7 +330,7 @@ export async function editKeeperTools(
 export interface KeeperTransition {
   prev_phase: string
   new_phase: string
-  selected_event: string
+  selected_event: unknown
   wall_clock_at_decision: number
   transition_outcome: string
 }

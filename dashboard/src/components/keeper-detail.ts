@@ -43,10 +43,10 @@ import { PipelineStageBar } from './keeper-pipeline-stage'
 import { AgentJournalStream } from './agent-detail-journal'
 import { DialogOverlay } from './common/dialog'
 import { SessionTraceView } from './session-trace/session-trace-view'
-import { SessionProgressHeader } from './session-progress-header'
 import { KeeperToolTelemetry } from './keeper-tool-telemetry'
 import { statusLabel } from '../lib/status-label'
 import { KeeperToolCallInspector } from './keeper-tool-call-inspector'
+import { SupervisorDiagnosticsPanel } from './keeper-supervisor-diagnostics'
 
 // ── Global overlay state ──────────────────────────────────
 
@@ -267,142 +267,6 @@ function ProfileField({ label, value, color }: { label: string; value: string; c
   `
 }
 
-// ── Supervisor Diagnostics Panel ────────────────────────
-
-function registryStateBadge(state: string | null) {
-  if (!state) return null
-  const colors: Record<string, { bg: string; text: string }> = {
-    Running: { bg: 'bg-[rgba(34,197,94,0.12)]', text: 'text-[var(--ok)]' },
-    Crashed: { bg: 'bg-[rgba(239,68,68,0.15)]', text: 'text-[var(--bad)]' },
-    Dead: { bg: 'bg-[rgba(100,116,139,0.15)]', text: 'text-[#94a3b8]' },
-    Stopped: { bg: 'bg-[rgba(234,179,8,0.12)]', text: 'text-[var(--warn)]' },
-    Paused: { bg: 'bg-[var(--white-10)]', text: 'text-[var(--purple)]' },
-  }
-  const c = colors[state] ?? { bg: 'bg-[rgba(138,163,211,0.1)]', text: 'text-[#86a0cf]' }
-  return html`<span class="inline-flex items-center py-0.5 px-2 rounded text-[10px] font-semibold ${c.bg} ${c.text}">${state}</span>`
-}
-
-function CrashCohortBar({ crash_log }: { crash_log: any[] }) {
-  if (!crash_log || crash_log.length === 0) return null
-  const cohorts: Record<string, number> = {}
-  for (const e of crash_log) {
-    const reason = (e.reason ?? 'unknown') as string
-    const key = reason.startsWith('heartbeat') ? 'heartbeat'
-      : reason.startsWith('turn') ? 'turn'
-      : reason.startsWith('fiber') ? 'fiber'
-      : reason.startsWith('exception') ? 'exception'
-      : 'other'
-    cohorts[key] = (cohorts[key] ?? 0) + 1
-  }
-  const total = crash_log.length
-  const colors: Record<string, string> = {
-    heartbeat: '#f59e0b', turn: '#ef4444', fiber: '#8b5cf6',
-    exception: '#ec4899', other: '#6b7280',
-  }
-  return html`
-    <div>
-      <div class="text-[10px] font-semibold uppercase tracking-widest text-[var(--text-muted)] mb-2">장애 유형 분포</div>
-      <div class="flex w-full h-3 rounded-full overflow-hidden bg-[var(--white-5)]">
-        ${Object.entries(cohorts).map(([key, count]) => html`
-          <div style="width: ${(count / total * 100).toFixed(1)}%; background: ${colors[key] ?? '#6b7280'}"
-               title="${key}: ${count}건 (${(count / total * 100).toFixed(0)}%)"
-               class="h-full"></div>
-        `)}
-      </div>
-      <div class="flex flex-wrap gap-x-3 gap-y-1 mt-1.5">
-        ${Object.entries(cohorts).map(([key, count]) => html`
-          <span class="text-[10px] text-[var(--text-muted)] flex items-center gap-1">
-            <span class="inline-block w-2 h-2 rounded-full" style="background: ${colors[key] ?? '#6b7280'}"></span>
-            ${key} ${count}
-          </span>
-        `)}
-      </div>
-    </div>
-  `
-}
-
-function SpEventsPanel({ sp_events }: { sp_events: any[] }) {
-  if (!sp_events || sp_events.length === 0) return null
-  return html`
-    <div>
-      <div class="text-[10px] font-semibold uppercase tracking-widest text-[var(--text-muted)] mb-2">자기 보호 발동 이력</div>
-      <div class="space-y-1 max-h-28 overflow-y-auto">
-        ${sp_events.slice(0, 10).map((e: any) => html`
-          <div class="flex items-center justify-between py-1 px-2 rounded text-[11px] bg-[rgba(139,92,246,0.06)]">
-            <span class="font-mono text-[var(--text-muted)]">${new Date((e.ts ?? 0) * 1000).toLocaleTimeString()}</span>
-            <span class="text-[#8b5cf6]">${e.suppressed_count}/${e.total} 억제 (${e.dominant_cohort})</span>
-          </div>
-        `)}
-      </div>
-    </div>
-  `
-}
-
-function SupervisorDiagnosticsPanel({ keeper }: { keeper: Keeper }) {
-  const diag = (keeper as any).supervisor_diagnostics
-  if (!diag) return null
-  const { restart_count, max_restarts, crash_log, last_failure_reason, dead_since, sp_events, health_score, dead_eta_sec } = diag
-  const budgetPct = max_restarts > 0 ? Math.min(100, (restart_count / max_restarts) * 100) : 0
-  const budgetColor = budgetPct >= 80 ? '#ef4444' : budgetPct >= 50 ? '#f59e0b' : '#4ade80'
-  const hs = typeof health_score === 'number' ? health_score : 100
-  const hsColor = hs >= 80 ? '#4ade80' : hs >= 50 ? '#f59e0b' : '#ef4444'
-  return html`
-    <${SectionCard} title="감독 진단">
-      <div class="space-y-3">
-        <div class="flex items-center justify-between">
-          <span class="text-xs text-[var(--text-muted)]">건강도</span>
-          <span class="text-sm font-bold font-mono" style="color: ${hsColor}">${hs}</span>
-        </div>
-        <div class="flex items-center justify-between">
-          <span class="text-xs text-[var(--text-muted)]">실행 상태</span>
-          ${registryStateBadge((keeper as any).registry_state)}
-        </div>
-        <div>
-          <div class="flex items-center justify-between mb-1">
-            <span class="text-xs text-[var(--text-muted)]">재시작 예산</span>
-            <span class="text-xs font-mono text-[var(--text-body)]">${restart_count}/${max_restarts}</span>
-          </div>
-          <div class="w-full h-1.5 rounded-full bg-[var(--white-5)] overflow-hidden">
-            <div class="h-full rounded-full transition-all duration-300" style="width: ${budgetPct}%; background: ${budgetColor}"></div>
-          </div>
-        </div>
-        ${typeof dead_eta_sec === 'number' && dead_eta_sec > 0 && dead_since == null ? html`
-          <div class="flex items-center justify-between">
-            <span class="text-xs text-[var(--text-muted)]">종료 예상</span>
-            <span class="text-[11px] font-mono" style="color: ${budgetPct >= 50 ? '#f59e0b' : 'var(--text-body)'}">${dead_eta_sec >= 3600 ? (dead_eta_sec / 3600).toFixed(1) + 'h' : (dead_eta_sec / 60).toFixed(0) + 'm'} 후</span>
-          </div>
-        ` : null}
-        ${last_failure_reason ? html`
-          <div class="flex items-center justify-between">
-            <span class="text-xs text-[var(--text-muted)]">마지막 실패 원인</span>
-            <span class="text-[11px] font-mono text-[#fb7185]">${last_failure_reason}</span>
-          </div>
-        ` : null}
-        ${dead_since ? html`
-          <div class="py-2 px-3 rounded-lg bg-[rgba(239,68,68,0.06)] border border-[rgba(239,68,68,0.15)] text-xs text-[#fb7185]">
-            ${new Date(dead_since * 1000).toLocaleString()} 이후 중단됨. 재기동 필요.
-          </div>
-        ` : null}
-        <${CrashCohortBar} crash_log=${crash_log} />
-        ${crash_log && crash_log.length > 0 ? html`
-          <div>
-            <div class="text-[10px] font-semibold uppercase tracking-widest text-[var(--text-muted)] mb-2">장애 이력</div>
-            <div class="space-y-1 max-h-32 overflow-y-auto">
-              ${crash_log.slice(0, 10).map((e: any) => html`
-                <div class="flex items-center justify-between py-1 px-2 rounded text-[11px] bg-[var(--white-3)]">
-                  <span class="font-mono text-[var(--text-muted)]">${new Date((e.ts ?? 0) * 1000).toLocaleTimeString()}</span>
-                  <span class="text-[#fb7185]">${e.reason ?? 'unknown'}</span>
-                </div>
-              `)}
-            </div>
-          </div>
-        ` : null}
-        <${SpEventsPanel} sp_events=${sp_events} />
-      </div>
-    <//>
-  `
-}
-
 // ── Main Detail Overlay ─────────────────────────────────
 
 export function KeeperDetailOverlay() {
@@ -441,7 +305,12 @@ export function KeeperDetailOverlay() {
                   ` : null
                 })()}
               </div>
-              ${keeper.koreanName ? html`<span class="text-xs text-[var(--text-muted)]">${keeper.koreanName}</span>` : null}
+              ${keeper.koreanName || keeper.created_at ? html`
+                <div class="flex items-center gap-2 text-xs text-[var(--text-muted)]">
+                  ${keeper.koreanName ? html`<span>${keeper.koreanName}</span>` : null}
+                  ${keeper.created_at ? html`<span class="font-mono tabular-nums opacity-60"><${TimeAgo} timestamp=${keeper.created_at} /></span>` : null}
+                </div>
+              ` : null}
             </div>
           </div>
           <div class="flex items-center gap-2">
@@ -466,14 +335,11 @@ export function KeeperDetailOverlay() {
         ${'' /* ── Pipeline stage indicator ── */}
         <${PipelineStageBar} stage=${keeper.pipeline_stage} />
 
-        ${'' /* ── Session progress header (Copilot-style) ── */}
-        <${SessionProgressHeader} keeper=${keeper} summary=${null} />
-
         ${'' /* ── KPIs ── */}
         <${KpiGrid} keeper=${keeper} />
 
-        ${'' /* ── Context chart ── */}
-        <${ContextChart} keeper=${keeper} />
+        ${'' /* ── Context chart (sparkline only — single-point is covered by KpiGrid) ── */}
+        ${(keeper.metrics_series ?? []).length >= 2 ? html`<${ContextChart} keeper=${keeper} />` : null}
 
         ${'' /* ── Latency / Cost / Model charts ── */}
         <${MetricsCharts} keeper=${keeper} />
@@ -534,7 +400,7 @@ export function KeeperDetailOverlay() {
               `
               : null}
 
-            ${'' /* ── Timestamps ── */}
+            ${'' /* ── Timestamps + recent activity (merged) ── */}
             <div class="mt-3 flex flex-col gap-1">
               ${keeper.last_heartbeat
                 ? html`<div class="flex items-center gap-2 text-xs text-[var(--text-muted)]">
@@ -542,61 +408,38 @@ export function KeeperDetailOverlay() {
                     <${TimeAgo} timestamp=${keeper.last_heartbeat} />
                   </div>`
                 : null}
-              ${keeper.created_at
+              ${keeper.last_speech_act
                 ? html`<div class="flex items-center gap-2 text-xs text-[var(--text-muted)]">
-                    <span>생성일:</span>
-                    <${TimeAgo} timestamp=${keeper.created_at} />
+                    <span>최근 행동:</span>
+                    <span class="font-mono text-[11px] px-1.5 py-0.5 rounded bg-[var(--white-5)] text-[var(--text-body)]">${keeper.last_speech_act}</span>
                   </div>`
                 : null}
             </div>
 
-          <//>
+            ${'' /* ── Recent output + K2K + memory note (inline) ── */}
+            ${keeper.recent_output_preview
+              ? html`
+                <div class="mt-3 py-2 px-3 rounded-lg bg-[rgba(71,184,255,0.06)] border border-[rgba(71,184,255,0.12)] text-xs text-[var(--text-body)] leading-relaxed">
+                  <div class="line-clamp-3">${keeper.recent_output_preview}</div>
+                </div>
+              `
+              : null}
+            ${(keeper.k2k_count ?? 0) > 0 || keeper.memory_recent_note
+              ? html`
+                <div class="mt-2 flex flex-wrap items-center gap-2">
+                  ${(keeper.k2k_count ?? 0) > 0
+                    ? html`<span class="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-md bg-[rgba(167,139,250,0.08)] border border-[rgba(167,139,250,0.15)] text-[var(--text-muted)]">
+                        K2K <span class="font-mono font-medium text-[#a78bfa]">${keeper.k2k_count}</span>
+                      </span>`
+                    : null}
+                  ${keeper.memory_recent_note
+                    ? html`<span class="text-[11px] text-[var(--text-muted)] truncate" title=${keeper.memory_recent_note}>${keeper.memory_recent_note}</span>`
+                    : null}
+                </div>
+              `
+              : null}
 
-          ${'' /* ── Recent activity (extracted from profile) ── */}
-          ${keeper.recent_output_preview || (keeper.k2k_count ?? 0) > 0 || (keeper.conversation_tail_count ?? 0) > 0 || keeper.memory_recent_note || keeper.last_speech_act
-            ? html`
-              <${SectionCard} title="최근 활동">
-                ${keeper.recent_output_preview
-                  ? html`
-                    <div class="py-2 px-3 rounded-lg bg-[rgba(71,184,255,0.06)] border border-[rgba(71,184,255,0.12)] text-xs text-[var(--text-body)] leading-relaxed">
-                      <div class="text-[10px] font-semibold text-[var(--accent)] uppercase tracking-wider mb-1">최근 출력</div>
-                      <div class="line-clamp-3">${keeper.recent_output_preview}</div>
-                    </div>
-                  `
-                  : null}
-                ${(keeper.k2k_count ?? 0) > 0 || (keeper.conversation_tail_count ?? 0) > 0
-                  ? html`
-                    <div class="mt-2 flex flex-wrap gap-2">
-                      ${(keeper.k2k_count ?? 0) > 0
-                        ? html`<span class="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-md bg-[rgba(167,139,250,0.08)] border border-[rgba(167,139,250,0.15)] text-[var(--text-muted)]">
-                            K2K 소통 <span class="font-mono font-medium text-[#a78bfa]">${keeper.k2k_count}</span>회
-                          </span>`
-                        : null}
-                      ${(keeper.conversation_tail_count ?? 0) > 0
-                        ? html`<span class="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-md bg-[var(--white-4)] border border-[var(--white-6)] text-[var(--text-muted)]">
-                            대화 <span class="font-mono font-medium">${keeper.conversation_tail_count}</span>건
-                          </span>`
-                        : null}
-                    </div>
-                  `
-                  : null}
-                ${keeper.memory_recent_note
-                  ? html`
-                    <div class="mt-2 py-2 px-3 rounded-lg bg-[rgba(167,139,250,0.06)] border border-[rgba(167,139,250,0.12)] text-xs text-[var(--text-body)] leading-relaxed">
-                      <div class="text-[10px] font-semibold text-[#a78bfa] uppercase tracking-wider mb-1">메모리 노트</div>
-                      ${keeper.memory_recent_note}
-                    </div>
-                  `
-                  : null}
-                ${keeper.last_speech_act
-                  ? html`<div class="flex items-center gap-2 mt-2 text-xs text-[var(--text-muted)]">
-                      <span>최근 행동:</span>
-                      <span class="font-mono text-[11px] px-1.5 py-0.5 rounded bg-[var(--white-5)] text-[var(--text-body)]">${keeper.last_speech_act}</span>
-                    </div>`
-                  : null}
-              <//>
-            `
-            : null}
+          <//>
 
           ${keeper.inventory && keeper.inventory.length > 0
             ? html`
@@ -644,21 +487,25 @@ export function KeeperDetailOverlay() {
           <//>
         </div>
 
-        ${'' /* ── Debug — journal + raw data, collapsed ── */}
+        ${'' /* ── Debug — journal (separate details to avoid eager mount) ── */}
         <details class="mt-4">
           <summary class="cursor-pointer py-3 px-4 text-[11px] font-semibold uppercase tracking-widest text-[var(--text-muted)] list-none select-none rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] hover:bg-[var(--white-6)] transition-colors flex items-center gap-2">
             <span class="w-1.5 h-1.5 rounded-full bg-[var(--text-dim)]"></span>
-            디버그 (저널 · 원시 데이터)
+            디버그 (저널)
           </summary>
-          <div class="mt-2 flex flex-col gap-4 p-5 rounded-2xl border border-card-border bg-card/40 backdrop-blur-md">
-            <div>
-              <h4 class="m-0 mb-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">실시간 저널</h4>
-              <${AgentJournalStream} agentName=${keeper.name} />
-            </div>
-            <div class="border-t border-[var(--border-slate-12)] pt-4">
-              <h4 class="m-0 mb-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">원시 데이터</h4>
-              <${RawDataDebug} keeper=${keeper} />
-            </div>
+          <div class="mt-2 p-5 rounded-2xl border border-card-border bg-card/40 backdrop-blur-md">
+            <${AgentJournalStream} agentName=${keeper.name} />
+          </div>
+        </details>
+
+        ${'' /* ── Debug — raw data, collapsed ── */}
+        <details class="mt-2">
+          <summary class="cursor-pointer py-3 px-4 text-[11px] font-semibold uppercase tracking-widest text-[var(--text-muted)] list-none select-none rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] hover:bg-[var(--white-6)] transition-colors flex items-center gap-2">
+            <span class="w-1.5 h-1.5 rounded-full bg-[var(--text-dim)]"></span>
+            디버그 (원시 데이터)
+          </summary>
+          <div class="mt-2 p-5 rounded-2xl border border-card-border bg-card/40 backdrop-blur-md">
+            <${RawDataDebug} keeper=${keeper} />
           </div>
         </details>
 

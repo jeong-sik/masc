@@ -237,30 +237,22 @@ let test_session_to_swarm_config_health_contract () =
   Alcotest.(check int) "initial telemetry turn_count" 0 telemetry.turn_count;
   Alcotest.(check bool) "initial telemetry usage empty" true
     (Option.is_none telemetry.usage);
-  let collaboration = Option.get swarm_cfg.collaboration in
+  let collaboration = Option.get swarm_cfg.collaboration_context in
+  let open Yojson.Safe.Util in
+  let participants = collaboration |> member "participants" |> to_list in
   Alcotest.(check int) "participants projected" 2
-    (List.length collaboration.Agent_sdk.Collaboration.participants);
-  let first_participant =
-    List.hd collaboration.Agent_sdk.Collaboration.participants
-  in
+    (List.length participants);
+  let first_participant = List.hd participants in
   Alcotest.(check bool) "participant summary present" true
-    (Option.is_some first_participant.Agent_sdk.Collaboration.summary);
-  let worker_specs =
-    match List.assoc_opt "worker_specs" collaboration.metadata with
-    | Some (`List specs) -> specs
-    | _ -> []
-  in
+    (first_participant |> member "summary" |> to_string_option |> Option.is_some);
+  let metadata = collaboration |> member "metadata" in
+  let worker_specs = metadata |> member "worker_specs" |> to_list in
   Alcotest.(check int) "worker specs preserved" 2 (List.length worker_specs);
-  (match List.assoc_opt "execution_scope" collaboration.metadata with
-   | Some (`String scope) ->
-       Alcotest.(check string) "session execution_scope metadata" "autonomous"
-         scope
-   | _ -> Alcotest.fail "expected execution_scope metadata");
-  (match List.assoc_opt "runtime_health" collaboration.metadata with
-   | Some (`Assoc fields) ->
-       Alcotest.(check bool) "runtime health marks ready" true
-         (List.assoc_opt "ready" fields = Some (`Bool true))
-   | _ -> Alcotest.fail "expected runtime_health metadata");
+  let scope = metadata |> member "execution_scope" |> to_string in
+  Alcotest.(check string) "session execution_scope metadata" "autonomous" scope;
+  let health = metadata |> member "runtime_health" in
+  Alcotest.(check bool) "runtime health marks ready" true
+    (health |> member "ready" |> to_bool);
   let resource_ok = Option.get swarm_cfg.resource_check () in
   Alcotest.(check bool) "resource check passes for initialized room" true
     resource_ok;

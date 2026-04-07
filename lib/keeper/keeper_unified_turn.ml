@@ -811,6 +811,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
     ?(channel : Keeper_world_observation.unified_turn_channel = Scheduled_autonomous)
     ?(semaphore_wait_ms = 0)
     ?shared_context
+    ?boring_consecutive_turns_ref
     () : (keeper_meta, Oas.Error.sdk_error) result =
   (* 1. Check API keys *)
   let model_labels = Keeper_coordination.effective_model_labels_for_turn meta in
@@ -919,6 +920,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
               ~is_retry
               ?shared_context
               ?event_bus:(Keeper_event_bus.get ())
+              ?boring_consecutive_turns_ref
               ()
           in
           let rec retry_loop ~run_meta ~max_context ~run_generation

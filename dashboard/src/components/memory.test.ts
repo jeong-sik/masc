@@ -128,6 +128,6 @@ describe('Memory Component', () => {
     ] as any
     render(h(Memory, null))
     expect(screen.queryByText('System Post')).not.toBeInTheDocument()
-    expect(screen.getByText(/시스템 1건 제외/)).toBeInTheDocument()
+    expect(screen.getByText(/시스템 0/)).toBeInTheDocument()
   })
 })

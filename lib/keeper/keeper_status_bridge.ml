@@ -146,7 +146,7 @@ let runtime_surface_json config (meta : keeper_meta) =
     | Fiber_unknown when keepalive_running -> Fiber_alive
     | health -> health
   in
-  let registry_state =
+  let phase =
     match runtime_registry_entry config meta.name with
     | Some entry -> Some (Keeper_state_machine.phase_to_string entry.phase)
     | None -> None
@@ -155,9 +155,9 @@ let runtime_surface_json config (meta : keeper_meta) =
     [
       ("paused", `Bool meta.paused);
       ("keepalive_running", `Bool keepalive_running);
-      ("registry_state",
-       match registry_state with
-       | Some state -> `String state
+      ("phase",
+       match phase with
+       | Some p -> `String p
        | None -> `Null);
       ( "fiber_health",
         `String (Keeper_exec_status.string_of_fiber_health fiber_health) );

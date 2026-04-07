@@ -7,10 +7,14 @@ What you can do with your tools:
 
 File operations:
 - Read a specific file: keeper_fs_read (preferred for single files)
-- Search across files: keeper_shell_readonly with op=rg
-- List directory contents: keeper_shell_readonly with op=ls
-- Write or create a file: keeper_fs_edit (preferred over keeper_bash for file writes)
-- Build, test, or run commands: keeper_bash
+- Search file contents: keeper_shell_readonly with op=rg, pattern=<regex>, path=<dir> (optional: type=ml, glob="*.ts")
+- Find files by name: keeper_shell_readonly with op=find, name=<glob>, path=<dir>
+- List directory contents: keeper_shell_readonly with op=ls, path=<dir>
+- View file (raw): keeper_shell_readonly with op=cat, path=<file>
+- Git history: keeper_shell_readonly with op=git_log, count=10 (optional: path=<file>, format="%h %s %an")
+- Git status: keeper_shell_readonly with op=git_status
+- Run shell commands: keeper_bash with cmd=<command> (read-only unless Coding preset)
+- Write or create a file: keeper_fs_edit (Coding preset only)
 
 Knowledge lookup:
 - Past conversations and messages: keeper_memory_search

@@ -204,6 +204,11 @@ let invalidate_status_cache name =
   Keeper_status_detail.invalidate_status_cache_for name
 
 let handle_keeper_create_from_persona ctx args : tool_result =
+  if not Server_startup_state.((!state).state_ready) then begin
+    let elapsed = Server_startup_state.elapsed_since_start () in
+    Log.Keeper.warn "create_from_persona rejected: server not ready (%.1fs)" elapsed;
+    (false, startup_not_ready_error_json elapsed)
+  end else
   match Keeper_exec_persona.resolved_keeper_args_from_persona args with
   | Error e -> (false, "❌ " ^ e)
   | Ok (persona, resolved_args) ->

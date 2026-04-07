@@ -116,7 +116,9 @@ let mkdir_p path =
 let read_json_local path =
   match Safe_ops.read_json_file_safe path with
   | Ok json -> json
-  | Error _ -> `Assoc []
+  | Error msg ->
+    Log.Misc.warn "[read_json_local] %s" msg;
+    `Assoc []
 
 let write_json_local path json =
   mkdir_p (Filename.dirname path);
@@ -138,9 +140,13 @@ let read_json_root config path =
            if trimmed = "" then `Assoc []
            else match Safe_ops.parse_json_safe ~context:"read_json_root" trimmed with
            | Ok json -> json
-           | Error _ -> `Assoc [])
+           | Error msg ->
+             Log.Misc.warn "[read_json_root] %s" msg;
+             `Assoc [])
       | Ok None -> `Assoc []
-      | Error _ -> `Assoc []
+      | Error e ->
+        Log.Misc.warn "[read_json_root] backend_get failed for %s: %s" key (Backend_types.show_error e);
+        `Assoc []
     end
   | None -> read_json_local path
 
@@ -185,11 +191,15 @@ let read_json config path =
       | Ok (Some content) ->
           (let trimmed = String.trim content in
            if trimmed = "" then `Assoc []
-           else match Safe_ops.parse_json_safe ~context:"read_json_root" trimmed with
+           else match Safe_ops.parse_json_safe ~context:"read_json" trimmed with
            | Ok json -> json
-           | Error _ -> `Assoc [])
+           | Error msg ->
+             Log.Misc.warn "[read_json] %s" msg;
+             `Assoc [])
       | Ok None -> `Assoc []
-      | Error _ -> `Assoc []
+      | Error e ->
+        Log.Misc.warn "[read_json] backend_get failed for %s: %s" key (Backend_types.show_error e);
+        `Assoc []
     end
   | None -> read_json_local path
 
@@ -198,7 +208,10 @@ let read_text config path =
   | Some key -> begin
       match backend_get config ~key with
       | Ok (Some content) -> content
-      | Ok None | Error _ -> ""
+      | Ok None -> ""
+      | Error e ->
+        Log.Misc.warn "[read_text] backend_get failed for %s: %s" key (Backend_types.show_error e);
+        ""
     end
   | None ->
       if Fs_compat.file_exists path then Fs_compat.load_file path
@@ -270,7 +283,10 @@ let append_text config path content =
       let existing =
         match backend_get config ~key with
         | Ok (Some value) -> value
-        | Ok None | Error _ -> ""
+        | Ok None -> ""
+        | Error e ->
+          Log.Misc.warn "[append_text] backend_get failed for %s: %s" key (Backend_types.show_error e);
+          ""
       in
       (match backend_set config ~key ~value:(existing ^ content) with
        | Ok () -> ()
@@ -291,9 +307,13 @@ let read_json_opt config path =
           else (
             match Safe_ops.parse_json_safe ~context:"read_json_opt" trimmed with
             | Ok json -> Some json
-            | Error _ -> None)
+            | Error msg ->
+              Log.Misc.warn "[read_json_opt] %s" msg;
+              None)
       | Ok None -> None
-      | Error _ -> None)
+      | Error e ->
+        Log.Misc.warn "[read_json_opt] backend_get failed for %s: %s" key (Backend_types.show_error e);
+        None)
   | None ->
       if Sys.file_exists path then Some (read_json_local path)
       else None

@@ -573,9 +573,11 @@ let run_turn
      search needs access to ALL tools so the keeper can discover beyond its preset.
      BM25 progressive disclosure is now delegated to OAS Tool_selector.select_names;
      this index serves only the explicit keeper_tool_search tool.
-     top_k=20 for broad coverage; groups enable co-retrieval of related tools. *)
+     top_k from Keeper_config for dashboard tuning; groups enable
+     co-retrieval of related tools. *)
   let tool_index_config =
-    { Agent_sdk.Tool_index.default_config with top_k = 20 } in
+    { Agent_sdk.Tool_index.default_config with
+      top_k = Keeper_config.keeper_tool_search_top_k () } in
   let tool_entries = List.map (fun (t : Agent_sdk.Tool.t) ->
     let name = t.schema.name in
     let group =
@@ -785,9 +787,13 @@ let run_turn
     | Some r -> r
     | None -> ref Agent_sdk.Tool_op.Keep_all
   in
+  (* Boring-tool gate: shared counter between after_turn (writer) and
+     before_turn_params (reader). Tracks consecutive turns where only
+     boring tools (status/heartbeat/tasks_list) were called. *)
+  let boring_consecutive_turns = ref 0 in
   let base_hooks = Keeper_hooks_oas.make_hooks
     ~config ~meta_ref ~session ~ctx_snapshot ~generation ?max_cost_usd
-    ?trajectory_acc
+    ?trajectory_acc ~boring_consecutive_turns
     () in
   (* BM25 Tool_selector removed: discovery mode uses core + keeper_tool_search.
      The search_index (full universe BM25) is still used by keeper_tool_search
@@ -893,42 +899,76 @@ let run_turn
         let per_call_turn = turn - start_turn_count in
         let is_last_turn = per_call_turn >= max_turns - 1 in
         let is_warning_zone = per_call_turn >= max_turns - 2 in
+        let append_ctx ctx text =
+          Some (match ctx with None -> text | Some e -> e ^ "\n\n" ^ text)
+        in
         let ctx =
           if is_last_turn then
-            let warning =
-              Printf.sprintf
-                "[LAST TURN] Turn %d/%d. This is your final turn. \
-                 You MUST emit a [STATE]...[/STATE] block now summarizing \
-                 what you accomplished and what the next generation should do. \
-                 Do NOT start new tool work. If you need more turns, call extend_turns."
-                turn max_turns
-            in
-            (match ctx with
-             | None -> Some warning
-             | Some existing -> Some (existing ^ "\n\n" ^ warning))
+            append_ctx ctx
+              (Printf.sprintf
+                 "[LAST TURN] Turn %d/%d. This is your final turn. \
+                  You MUST emit a [STATE]...[/STATE] block now summarizing \
+                  what you accomplished and what the next generation should do. \
+                  Do NOT start new tool work. If you need more turns, call extend_turns."
+                 turn max_turns)
           else if is_retry then
-            let warning =
-              Printf.sprintf
-                "[RETRY] The previous attempt overflowed the model context. \
-                 Stay concise, prefer already-loaded context, and only use the \
-                 smallest essential tool set if a tool call is strictly necessary. \
-                 Current tool budget: %d."
-                max_tools
-            in
-            (match ctx with
-             | None -> Some warning
-             | Some existing -> Some (existing ^ "\n\n" ^ warning))
+            append_ctx ctx
+              (Printf.sprintf
+                 "[RETRY] The previous attempt overflowed the model context. \
+                  Stay concise, prefer already-loaded context, and only use the \
+                  smallest essential tool set if a tool call is strictly necessary. \
+                  Current tool budget: %d."
+                 max_tools)
           else if is_warning_zone then
-            let warning =
-              Printf.sprintf
-                "[BUDGET] %d/%d turns used. Wrap up current work and emit \
-                 a [STATE] block. Call extend_turns if you need more time."
-                turn max_turns
-            in
-            (match ctx with
-             | None -> Some warning
-             | Some existing -> Some (existing ^ "\n\n" ^ warning))
+            append_ctx ctx
+              (Printf.sprintf
+                 "[BUDGET] %d/%d turns used. Wrap up current work and emit \
+                  a [STATE] block. Call extend_turns if you need more time."
+                 turn max_turns)
           else ctx
+        in
+        (* Boring-tool gate: graduated response to consecutive turns
+           with only non-productive tools (status/heartbeat/tasks_list).
+           This catches the polling loop that bypasses OAS's exact-fingerprint
+           idle detection when keepers alternate boring tools.
+           Level 1 (>=2): warn.  Level 2 (>=3): final warning.
+           Level 3 (>=4): strip boring tools from allow list. *)
+        let boring_streak = !boring_consecutive_turns in
+        let ctx =
+          if boring_streak >= 4 then
+            append_ctx ctx
+              (Printf.sprintf
+                 "[POLLING BLOCKED] %d consecutive turns of only boring \
+                  observation tools (status/heartbeat/task-list/context). \
+                  These tools removed from this turn. Use \
+                  keeper_task_claim, keeper_fs_read, \
+                  keeper_board_post, keeper_shell_readonly — or \
+                  keeper_stay_silent if nothing to do."
+                 boring_streak)
+          else if boring_streak >= 3 then
+            append_ctx ctx
+              (Printf.sprintf
+                 "[FINAL POLLING WARNING] %d turns of only boring \
+                  observation tools. Next turn without a productive tool \
+                  will REMOVE all boring observation tools \
+                  (status/heartbeat/task-list/context). Call \
+                  keeper_task_claim, keeper_fs_read, or \
+                  keeper_stay_silent NOW."
+                 boring_streak)
+          else if boring_streak >= 2 then
+            append_ctx ctx
+              "[POLLING DETECTED] You spent 2 turns only calling boring \
+               observation tools (status/heartbeat/task-list/context). \
+               Do productive work: keeper_task_claim, keeper_fs_read, \
+               keeper_board_post, or keeper_stay_silent."
+          else ctx
+        in
+        let all_allowed =
+          if boring_streak >= 4 then
+            List.filter
+              (fun name -> not (Keeper_tool_registry.is_boring_tool name))
+              all_allowed
+          else all_allowed
         in
         let safe_last_turn_tools =
           Keeper_tool_policy.last_turn_safe_tool_names ()
@@ -1002,21 +1042,20 @@ let run_turn
       ~global_procedure_limit:5
       ()
   in
-  let reducer = Agent_sdk.Context_reducer.dynamic (fun ~turn ~messages:_ ->
-    (* Turn-aware: early turns keep more history for context;
-       later turns prune aggressively to stay within budget. *)
+  let reducer = Agent_sdk.Context_reducer.dynamic (fun ~turn:_ ~messages:_ ->
+    (* Token_budget is the only constraint needed: with 262k context,
+       keeper conversations rarely approach the limit.  The previous
+       Stub_tool_results{keep_recent=3} after turn 5 operated on ALL
+       messages including initial_messages from the checkpoint, wiping
+       tool results from prior turns and destroying the history that
+       lets keepers learn from their own actions.
+       Merge_contiguous collapses adjacent same-role messages.
+       Rescued from orphaned commit db730c58a (post-merge on #5508). *)
     let open Agent_sdk.Context_reducer in
-    if turn <= 5 then
-      Compose [
-        Merge_contiguous;
-        Token_budget max_context;
-      ]
-    else
-      Compose [
-        Merge_contiguous;
-        Stub_tool_results { keep_recent = 3 };
-        Token_budget max_context;
-      ]
+    Compose [
+      Merge_contiguous;
+      Token_budget max_context;
+    ]
   ) in
   (* 8. Run Agent *)
   let contract =

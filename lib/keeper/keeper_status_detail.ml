@@ -664,6 +664,24 @@ let handle_keeper_status ctx args : tool_result =
              ("dataset_export", `String (keeper_dataset_export_path ctx.config m.name));
              ("session_dir", `String session_dir);
              ("history", `String history_path);
+             ("evidence_dir", `String
+               (Filename.concat ctx.config.base_path
+                 (Printf.sprintf ".masc/evidence/%s/%s"
+                   (Room_utils.safe_filename m.name)
+                   (Room_utils.safe_filename m.runtime.trace_id))));
+           ]);
+           ("execution_context", `Assoc [
+             ("playground_path", `String
+               (Keeper_alerting_path.playground_path_of_keeper m.name));
+             ("execution_scope", `String m.execution_scope);
+             ("allowed_paths", string_list_to_json m.allowed_paths);
+             ("last_evidence",
+               match Keeper_evidence.latest_evidence
+                 ~base_path:ctx.config.base_path
+                 ~keeper_name:m.name
+                 ~trace_id:m.runtime.trace_id with
+               | Some ev -> ev
+               | None -> `Null);
            ]);
          ] in
          let response = Yojson.Safe.pretty_to_string json in

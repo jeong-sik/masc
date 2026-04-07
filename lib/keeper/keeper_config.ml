@@ -262,86 +262,151 @@ let float_of_env_default name ~default ~min_v ~max_v =
       in
       max min_v (min max_v v)
 
+(* ================================================================ *)
+(* Runtime_params helpers — serialization/validation for dashboard   *)
+(* ================================================================ *)
+
+let _rp_validate_int ~min ~max key v =
+  if v >= min && v <= max then Ok ()
+  else Error (Printf.sprintf "%s must be in [%d, %d], got %d" key min max v)
+
+let _rp_validate_float ~min ~max key v =
+  if v >= min && v <= max then Ok ()
+  else Error (Printf.sprintf "%s must be in [%g, %g], got %g" key min max v)
+
+let _rp_deser_int json =
+  match json with
+  | `Int i -> Ok i
+  | `Float f ->
+      let i = Float.to_int f in
+      if Float.equal (Float.of_int i) f then Ok i
+      else Error (Printf.sprintf "expected integer, got %g" f)
+  | _ -> Error "expected integer"
+
+let _rp_deser_float json =
+  match json with
+  | `Float f -> Ok f
+  | `Int i -> Ok (float_of_int i)
+  | _ -> Error "expected number"
+
+let _rp_deser_bool json =
+  match json with
+  | `Bool b -> Ok b
+  | _ -> Error "expected boolean"
+
+let _rp_int ~key ~default ~min_v ~max_v ~description () =
+  Runtime_params.register ~key
+    ~default
+    ~validate:(_rp_validate_int ~min:min_v ~max:max_v key)
+    ~serialize:(fun v -> `Int v)
+    ~meta:{ Runtime_params.description; value_type = "int";
+            min_value = Some (`Int min_v); max_value = Some (`Int max_v) }
+    ~deserialize:_rp_deser_int ()
+
+let _rp_float ~key ~default ~min_v ~max_v ~description () =
+  Runtime_params.register ~key
+    ~default
+    ~validate:(_rp_validate_float ~min:min_v ~max:max_v key)
+    ~serialize:(fun v -> `Float v)
+    ~meta:{ Runtime_params.description; value_type = "float";
+            min_value = Some (`Float min_v); max_value = Some (`Float max_v) }
+    ~deserialize:_rp_deser_float ()
+
+let _rp_bool ~key ~default ~description () =
+  Runtime_params.register ~key
+    ~default
+    ~validate:(fun _ -> Ok ())
+    ~serialize:(fun v -> `Bool v)
+    ~meta:{ Runtime_params.description; value_type = "bool";
+            min_value = None; max_value = None }
+    ~deserialize:_rp_deser_bool ()
+
 let keeper_status_fast_default () : bool =
   bool_of_env_default "MASC_KEEPER_STATUS_FAST_DEFAULT" ~default:false
 
+let keeper_compact_ratio_rp =
+  _rp_float ~key:"keeper.compaction.ratio"
+    ~default:(fun () -> float_of_env_default "MASC_KEEPER_COMPACT_RATIO"
+                          ~default:0.5 ~min_v:0.1 ~max_v:0.98)
+    ~min_v:0.1 ~max_v:0.98
+    ~description:"Compaction ratio gate" ()
 let keeper_compact_ratio () : float =
-  float_of_env_default
-    "MASC_KEEPER_COMPACT_RATIO"
-    ~default:0.5
-    ~min_v:0.1
-    ~max_v:0.98
+  Runtime_params.get keeper_compact_ratio_rp
 
+let keeper_compact_max_messages_rp =
+  _rp_int ~key:"keeper.compaction.max_messages"
+    ~default:(fun () -> int_of_env_default "MASC_KEEPER_COMPACT_MAX_MESSAGES"
+                          ~default:0 ~min_v:0 ~max_v:5000)
+    ~min_v:0 ~max_v:5000
+    ~description:"Compaction message gate (0=disabled)" ()
 let keeper_compact_max_messages () : int =
-  int_of_env_default
-    "MASC_KEEPER_COMPACT_MAX_MESSAGES"
-    (* Disabled by default (0 = never trigger on message count alone).
-       Message count is a poor proxy for context pressure: a single
-       tool_call message can be 50 tokens or 5 000 tokens.  Use the
-       token gate instead.  Previous default of 12 fired every turn,
-       destroying conversation history before the model could learn
-       from its own actions. *)
-    ~default:0
-    ~min_v:0
-    ~max_v:5000
+  Runtime_params.get keeper_compact_max_messages_rp
 
+let keeper_compact_max_tokens_rp =
+  _rp_int ~key:"keeper.compaction.max_tokens"
+    ~default:(fun () -> int_of_env_default "MASC_KEEPER_COMPACT_MAX_TOKENS"
+                          ~default:196608 ~min_v:0 ~max_v:5000000)
+    ~min_v:0 ~max_v:5000000
+    ~description:"Compaction token gate (75%% of 262k context)" ()
 let keeper_compact_max_tokens () : int =
-  int_of_env_default
-    "MASC_KEEPER_COMPACT_MAX_TOKENS"
-    (* Gate at 75 % of the 262 144 context window = 196 608 tokens.
-       Keepers accumulate cross-turn history in OAS checkpoints;
-       compaction should only fire when context pressure is real.
-       Previous default of 4 000 fired at 1.5 % utilisation, wiping
-       history so aggressively that keepers could not see their own
-       prior actions and repeated the same board posts every cycle. *)
-    ~default:196608
-    ~min_v:0
-    ~max_v:5000000
+  Runtime_params.get keeper_compact_max_tokens_rp
 
 (** Cooldown between compaction attempts.  Previous default (90s) exceeded
     the proactive heartbeat interval (30s), permanently blocking compaction
     for proactive keepers.  15s allows compaction to fire every other cycle. *)
+let keeper_continuity_compaction_cooldown_sec_rp =
+  _rp_int ~key:"keeper.compaction.cooldown_sec"
+    ~default:(fun () -> int_of_env_default "MASC_KEEPER_CONTINUITY_COMPACTION_COOLDOWN_SEC"
+                          ~default:15 ~min_v:0 ~max_v:172800)
+    ~min_v:0 ~max_v:172800
+    ~description:"Compaction cooldown (seconds)" ()
 let keeper_continuity_compaction_cooldown_sec () : int =
-  int_of_env_default
-    "MASC_KEEPER_CONTINUITY_COMPACTION_COOLDOWN_SEC"
-    ~default:15
-    ~min_v:0
-    ~max_v:172800
+  Runtime_params.get keeper_continuity_compaction_cooldown_sec_rp
 
+let keeper_bootstrap_proactive_warmup_sec_rp =
+  _rp_int ~key:"keeper.proactive.warmup_sec"
+    ~default:(fun () -> int_of_env_default "MASC_KEEPER_BOOTSTRAP_PROACTIVE_WARMUP_SEC"
+                          ~default:60 ~min_v:0 ~max_v:172800)
+    ~min_v:0 ~max_v:172800
+    ~description:"Bootstrap proactive warmup delay (seconds)" ()
 let keeper_bootstrap_proactive_warmup_sec () : int =
-  int_of_env_default
-    "MASC_KEEPER_BOOTSTRAP_PROACTIVE_WARMUP_SEC"
-    ~default:60
-    ~min_v:0
-    ~max_v:172800
+  Runtime_params.get keeper_bootstrap_proactive_warmup_sec_rp
 
+let keeper_bootstrap_stagger_step_sec_rp =
+  _rp_int ~key:"keeper.proactive.stagger_step_sec"
+    ~default:(fun () -> int_of_env_default "MASC_KEEPER_BOOTSTRAP_STAGGER_STEP_SEC"
+                          ~default:15 ~min_v:0 ~max_v:120)
+    ~min_v:0 ~max_v:120
+    ~description:"Bootstrap stagger interval between keepers (seconds)" ()
 let keeper_bootstrap_stagger_step_sec () : int =
-  int_of_env_default
-    "MASC_KEEPER_BOOTSTRAP_STAGGER_STEP_SEC"
-    ~default:15
-    ~min_v:0
-    ~max_v:120
+  Runtime_params.get keeper_bootstrap_stagger_step_sec_rp
 
+let keeper_proactive_min_cooldown_sec_rp =
+  _rp_int ~key:"keeper.proactive.min_cooldown_sec"
+    ~default:(fun () -> int_of_env_default "MASC_KEEPER_PROACTIVE_MIN_COOLDOWN_SEC"
+                          ~default:300 ~min_v:60 ~max_v:1800)
+    ~min_v:60 ~max_v:1800
+    ~description:"Proactive turn minimum cooldown (seconds)" ()
 let keeper_proactive_min_cooldown_sec () : int =
-  int_of_env_default
-    "MASC_KEEPER_PROACTIVE_MIN_COOLDOWN_SEC"
-    ~default:300
-    ~min_v:60
-    ~max_v:1800
+  Runtime_params.get keeper_proactive_min_cooldown_sec_rp
 
+let keeper_proactive_task_cooldown_divisor_rp =
+  _rp_int ~key:"keeper.proactive.task_cooldown_divisor"
+    ~default:(fun () -> int_of_env_default "MASC_KEEPER_PROACTIVE_TASK_COOLDOWN_DIVISOR"
+                          ~default:3 ~min_v:1 ~max_v:12)
+    ~min_v:1 ~max_v:12
+    ~description:"Task cooldown = proactive_cooldown / divisor" ()
 let keeper_proactive_task_cooldown_divisor () : int =
-  int_of_env_default
-    "MASC_KEEPER_PROACTIVE_TASK_COOLDOWN_DIVISOR"
-    ~default:3
-    ~min_v:1
-    ~max_v:12
+  Runtime_params.get keeper_proactive_task_cooldown_divisor_rp
 
+let keeper_proactive_task_min_cooldown_sec_rp =
+  _rp_int ~key:"keeper.proactive.task_min_cooldown_sec"
+    ~default:(fun () -> int_of_env_default "MASC_KEEPER_PROACTIVE_TASK_MIN_COOLDOWN_SEC"
+                          ~default:60 ~min_v:1 ~max_v:1800)
+    ~min_v:1 ~max_v:1800
+    ~description:"Task-triggered proactive minimum cooldown (seconds)" ()
 let keeper_proactive_task_min_cooldown_sec () : int =
-  int_of_env_default
-    "MASC_KEEPER_PROACTIVE_TASK_MIN_COOLDOWN_SEC"
-    ~default:60
-    ~min_v:1
-    ~max_v:1800
+  Runtime_params.get keeper_proactive_task_min_cooldown_sec_rp
 
 let keeper_compaction_policy_from_env () : (float * int * int) =
   ( keeper_compact_ratio (),
@@ -435,46 +500,51 @@ let normalize_proactive_cooldown_sec (v : int) : int =
   clamp_int v ~min_v:0 ~max_v:172800
 
 
+let keeper_batch_limit_rp =
+  _rp_int ~key:"keeper.turn.batch_limit"
+    ~default:(fun () -> int_of_env_default "MASC_KEEPER_BATCH_LIMIT"
+                          ~default:200 ~min_v:10 ~max_v:2000)
+    ~min_v:10 ~max_v:2000
+    ~description:"Max batch size per keeper cycle" ()
 let keeper_batch_limit () : int =
-  int_of_env_default
-    "MASC_KEEPER_BATCH_LIMIT"
-    ~default:200
-    ~min_v:10
-    ~max_v:2000
+  Runtime_params.get keeper_batch_limit_rp
 
+let keeper_tool_cost_max_usd_rp =
+  _rp_float ~key:"keeper.turn.tool_cost_max_usd"
+    ~default:(fun () -> float_of_env_default "MASC_KEEPER_TOOL_COST_MAX_USD"
+                          ~default:0.50 ~min_v:0.01 ~max_v:50.0)
+    ~min_v:0.01 ~max_v:50.0
+    ~description:"Per-tool cost ceiling (USD)" ()
 let keeper_tool_cost_max_usd () : float =
-  float_of_env_default
-    "MASC_KEEPER_TOOL_COST_MAX_USD"
-    ~default:0.50
-    ~min_v:0.01
-    ~max_v:50.0
+  Runtime_params.get keeper_tool_cost_max_usd_rp
 
+let keeper_max_tools_per_turn_rp =
+  _rp_int ~key:"keeper.turn.max_tools_per_turn"
+    ~default:(fun () -> int_of_env_default "MASC_KEEPER_MAX_TOOLS_PER_TURN"
+                          ~default:40 ~min_v:5 ~max_v:200)
+    ~min_v:5 ~max_v:200
+    ~description:"Max tools visible per turn (progressive disclosure cap)" ()
 let keeper_max_tools_per_turn () : int =
-  int_of_env_default
-    "MASC_KEEPER_MAX_TOOLS_PER_TURN"
-    ~default:40
-    ~min_v:5
-    ~max_v:200
+  Runtime_params.get keeper_max_tools_per_turn_rp
 
 let keeper_retry_max_tools_per_turn () : int =
   min 8 (keeper_max_tools_per_turn ())
 
-(** Max board events presented to a keeper per turn.
-    Higher values let keepers see more discussion context but
-    increase prompt size. Env: [MASC_KEEPER_BOARD_EVENT_LIMIT]. *)
+let keeper_board_event_limit_rp =
+  _rp_int ~key:"keeper.turn.board_event_limit"
+    ~default:(fun () -> int_of_env_default "MASC_KEEPER_BOARD_EVENT_LIMIT"
+                          ~default:10 ~min_v:1 ~max_v:50)
+    ~min_v:1 ~max_v:50
+    ~description:"Max board events injected per turn" ()
 let keeper_board_event_limit () : int =
-  int_of_env_default
-    "MASC_KEEPER_BOARD_EVENT_LIMIT"
-    ~default:10
-    ~min_v:1
-    ~max_v:50
+  Runtime_params.get keeper_board_event_limit_rp
 
-(** Enable LLM reranking of BM25 tool retrieval results.
-    When enabled, confident BM25 results are re-ordered by a small LLM
-    call before progressive disclosure. Disabled by default.
-    Env: [MASC_KEEPER_LLM_RERANK]. *)
+let keeper_llm_rerank_enabled_rp =
+  _rp_bool ~key:"keeper.turn.llm_rerank"
+    ~default:(fun () -> bool_of_env_default "MASC_KEEPER_LLM_RERANK" ~default:false)
+    ~description:"Enable LLM reranking of BM25 tool search results" ()
 let keeper_llm_rerank_enabled () : bool =
-  bool_of_env_default "MASC_KEEPER_LLM_RERANK" ~default:false
+  Runtime_params.get keeper_llm_rerank_enabled_rp
 
 (** Named cascade profile for the LLM reranker.
     Env: [MASC_KEEPER_LLM_RERANK_CASCADE]. Default: "tool_rerank". *)
@@ -487,54 +557,68 @@ let keeper_llm_rerank_cascade () : string =
 (* Rule engine thresholds                                           *)
 (* ================================================================ *)
 
+let keeper_rule_reflect_repetition_rp =
+  _rp_float ~key:"keeper.rule.reflect_repetition"
+    ~default:(fun () -> float_of_env_default "MASC_KEEPER_RULE_REFLECT_REPETITION"
+                          ~default:0.86 ~min_v:0.0 ~max_v:1.0)
+    ~min_v:0.0 ~max_v:1.0
+    ~description:"Reflect rule: repetition similarity threshold" ()
 let keeper_rule_reflect_repetition_threshold () : float =
-  float_of_env_default
-    "MASC_KEEPER_RULE_REFLECT_REPETITION"
-    ~default:0.86
-    ~min_v:0.0
-    ~max_v:1.0
+  Runtime_params.get keeper_rule_reflect_repetition_rp
 
+let keeper_rule_plan_goal_alignment_rp =
+  _rp_float ~key:"keeper.rule.plan_goal_alignment_max"
+    ~default:(fun () -> float_of_env_default "MASC_KEEPER_RULE_PLAN_GOAL_ALIGNMENT_MAX"
+                          ~default:0.06 ~min_v:0.0 ~max_v:1.0)
+    ~min_v:0.0 ~max_v:1.0
+    ~description:"Plan rule: goal alignment max distance" ()
 let keeper_rule_plan_goal_alignment_threshold () : float =
-  float_of_env_default
-    "MASC_KEEPER_RULE_PLAN_GOAL_ALIGNMENT_MAX"
-    ~default:0.06
-    ~min_v:0.0
-    ~max_v:1.0
+  Runtime_params.get keeper_rule_plan_goal_alignment_rp
 
+let keeper_rule_plan_response_alignment_rp =
+  _rp_float ~key:"keeper.rule.plan_response_alignment_max"
+    ~default:(fun () -> float_of_env_default "MASC_KEEPER_RULE_PLAN_RESPONSE_ALIGNMENT_MAX"
+                          ~default:0.10 ~min_v:0.0 ~max_v:1.0)
+    ~min_v:0.0 ~max_v:1.0
+    ~description:"Plan rule: response alignment max distance" ()
 let keeper_rule_plan_response_alignment_threshold () : float =
-  float_of_env_default
-    "MASC_KEEPER_RULE_PLAN_RESPONSE_ALIGNMENT_MAX"
-    ~default:0.10
-    ~min_v:0.0
-    ~max_v:1.0
+  Runtime_params.get keeper_rule_plan_response_alignment_rp
 
+let keeper_rule_guardrail_repetition_rp =
+  _rp_float ~key:"keeper.rule.guardrail_repetition"
+    ~default:(fun () -> float_of_env_default "MASC_KEEPER_RULE_GUARDRAIL_REPETITION"
+                          ~default:0.90 ~min_v:0.0 ~max_v:1.0)
+    ~min_v:0.0 ~max_v:1.0
+    ~description:"Guardrail rule: repetition similarity threshold" ()
 let keeper_rule_guardrail_repetition_threshold () : float =
-  float_of_env_default
-    "MASC_KEEPER_RULE_GUARDRAIL_REPETITION"
-    ~default:0.90
-    ~min_v:0.0
-    ~max_v:1.0
+  Runtime_params.get keeper_rule_guardrail_repetition_rp
 
+let keeper_rule_guardrail_goal_alignment_rp =
+  _rp_float ~key:"keeper.rule.guardrail_goal_alignment_max"
+    ~default:(fun () -> float_of_env_default "MASC_KEEPER_RULE_GUARDRAIL_GOAL_ALIGNMENT_MAX"
+                          ~default:0.04 ~min_v:0.0 ~max_v:1.0)
+    ~min_v:0.0 ~max_v:1.0
+    ~description:"Guardrail rule: goal alignment max distance" ()
 let keeper_rule_guardrail_goal_alignment_threshold () : float =
-  float_of_env_default
-    "MASC_KEEPER_RULE_GUARDRAIL_GOAL_ALIGNMENT_MAX"
-    ~default:0.04
-    ~min_v:0.0
-    ~max_v:1.0
+  Runtime_params.get keeper_rule_guardrail_goal_alignment_rp
 
+let keeper_rule_guardrail_response_alignment_rp =
+  _rp_float ~key:"keeper.rule.guardrail_response_alignment_max"
+    ~default:(fun () -> float_of_env_default "MASC_KEEPER_RULE_GUARDRAIL_RESPONSE_ALIGNMENT_MAX"
+                          ~default:0.08 ~min_v:0.0 ~max_v:1.0)
+    ~min_v:0.0 ~max_v:1.0
+    ~description:"Guardrail rule: response alignment max distance" ()
 let keeper_rule_guardrail_response_alignment_threshold () : float =
-  float_of_env_default
-    "MASC_KEEPER_RULE_GUARDRAIL_RESPONSE_ALIGNMENT_MAX"
-    ~default:0.08
-    ~min_v:0.0
-    ~max_v:1.0
+  Runtime_params.get keeper_rule_guardrail_response_alignment_rp
 
+let keeper_rule_guardrail_context_rp =
+  _rp_float ~key:"keeper.rule.guardrail_context_min"
+    ~default:(fun () -> float_of_env_default "MASC_KEEPER_RULE_GUARDRAIL_CONTEXT_MIN"
+                          ~default:0.70 ~min_v:0.0 ~max_v:1.0)
+    ~min_v:0.0 ~max_v:1.0
+    ~description:"Guardrail rule: minimum context ratio" ()
 let keeper_rule_guardrail_context_threshold () : float =
-  float_of_env_default
-    "MASC_KEEPER_RULE_GUARDRAIL_CONTEXT_MIN"
-    ~default:0.70
-    ~min_v:0.0
-    ~max_v:1.0
+  Runtime_params.get keeper_rule_guardrail_context_rp
 
 (* ================================================================ *)
 (* Keeper execution — previously hardcoded magic numbers             *)
@@ -544,27 +628,31 @@ let keeper_rule_guardrail_context_threshold () : float =
 (* Unified Keeper Turn parameters                                   *)
 (* ================================================================ *)
 
-(** Temperature for unified keeper turns.
-    Env: [MASC_KEEPER_UNIFIED_TEMP]. Default: 0.4. *)
+let keeper_unified_temperature_rp =
+  _rp_float ~key:"keeper.turn.temperature"
+    ~default:(fun () -> float_of_env_default "MASC_KEEPER_UNIFIED_TEMP"
+                          ~default:0.4 ~min_v:0.0 ~max_v:2.0)
+    ~min_v:0.0 ~max_v:2.0
+    ~description:"Keeper turn temperature" ()
 let keeper_unified_temperature () : float =
-  float_of_env_default
-    "MASC_KEEPER_UNIFIED_TEMP"
-    ~default:0.4
-    ~min_v:0.0
-    ~max_v:2.0
+  Runtime_params.get keeper_unified_temperature_rp
 
-(** Max output tokens for unified keeper turns.
-    65536 matches OpenHands default and 2x Claude Code's 32k.
-    With 262k context per llama-server slot, 65k output leaves ~197k for
-    input (system prompt + tools + conversation history).
-    Override via [MASC_KEEPER_UNIFIED_MAX_TOKENS].
-    Env: [MASC_KEEPER_UNIFIED_MAX_TOKENS]. Default: 65536. *)
+let keeper_unified_max_tokens_rp =
+  _rp_int ~key:"keeper.turn.max_output_tokens"
+    ~default:(fun () -> int_of_env_default "MASC_KEEPER_UNIFIED_MAX_TOKENS"
+                          ~default:65536 ~min_v:256 ~max_v:262144)
+    ~min_v:256 ~max_v:262144
+    ~description:"Keeper turn max output tokens (65536=OpenHands default)" ()
 let keeper_unified_max_tokens () : int =
-  int_of_env_default
-    "MASC_KEEPER_UNIFIED_MAX_TOKENS"
-    ~default:65536
-    ~min_v:256
-    ~max_v:262144
+  Runtime_params.get keeper_unified_max_tokens_rp
+
+let keeper_tool_search_top_k_rp =
+  _rp_int ~key:"keeper.turn.tool_search_top_k"
+    ~default:(fun () -> 20)
+    ~min_v:3 ~max_v:50
+    ~description:"BM25 tool search top-k results per query" ()
+let keeper_tool_search_top_k () : int =
+  Runtime_params.get keeper_tool_search_top_k_rp
 
 (* max_turns is set in keeper_agent_run.ml (default: 50).
    Known constraints (retain for future tuning):
@@ -574,16 +662,19 @@ let keeper_unified_max_tokens () : int =
    - 10 turns was insufficient for multi-step tasks (PR creation, web search)
    - 50 turns balances completion rate vs resource usage *)
 
-(** Number of llama-server KV cache slots available for keeper pinning.
-    Keepers are assigned slot_id = (hash(name) mod num_slots).
-    0 = disable slot pinning. Must match llama-server --parallel N.
-    Env: [MASC_KEEPER_LLAMA_SLOTS]. Default: 4. *)
+(** Force module initialization to guarantee all runtime params are registered
+    before [Runtime_params.restore]. Call from server bootstrap. *)
+let ensure_runtime_params_init () =
+  ignore (Runtime_params.get keeper_unified_temperature_rp)
+
+let keeper_llama_slots_rp =
+  _rp_int ~key:"keeper.turn.llama_slots"
+    ~default:(fun () -> int_of_env_default "MASC_KEEPER_LLAMA_SLOTS"
+                          ~default:4 ~min_v:0 ~max_v:32)
+    ~min_v:0 ~max_v:32
+    ~description:"llama-server KV cache slots for keeper pinning (0=disabled)" ()
 let keeper_llama_slots () : int =
-  int_of_env_default
-    "MASC_KEEPER_LLAMA_SLOTS"
-    ~default:4
-    ~min_v:0
-    ~max_v:32
+  Runtime_params.get keeper_llama_slots_rp
 
 (** Compute a deterministic slot_id for a keeper name.
     Returns [None] when slot pinning is disabled (num_slots = 0). *)

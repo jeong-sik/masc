@@ -288,6 +288,11 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
             in
             Progress.Tracker.step turn_tracker
               ~message:(Printf.sprintf "Executing Agent.run for %s" name) ();
+            let evidence_before_hash =
+              try Keeper_evidence.snapshot_before_turn
+                ~base_path:ctx.config.base_path ~keeper_name:name
+              with _ -> None
+            in
             let run_result, latency_ms =
               Keeper_exec_context.timed (fun () ->
                   Keeper_agent_run.run_turn
@@ -383,17 +388,40 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                 ~turn_generation:lifecycle.turn_generation
                 ~compaction:lifecycle.compaction
                 ~handoff_json:lifecycle.handoff_json;
+              (* Post-turn evidence: deterministic git before/after delta *)
+              let evidence =
+                try
+                  Keeper_evidence.capture_turn_evidence
+                    ~base_path:ctx.config.base_path
+                    ~keeper_name:name
+                    ~trace_id:updated_meta.runtime.trace_id
+                    ~turn_number:updated_meta.runtime.usage.total_turns
+                    ~tool_calls_made:result.tool_calls_made
+                    ~before_hash:evidence_before_hash
+                    ()
+                with
+                | Eio.Cancel.Cancelled _ as e -> raise e
+                | exn ->
+                  Log.Keeper.warn "post-turn evidence capture failed: %s"
+                    (Printexc.to_string exn);
+                  None
+              in
               start_keepalive ctx updated_meta;
               Progress.Tracker.complete turn_tracker
                 ~message:(Printf.sprintf "Turn completed: %d tool calls" result.tool_calls_made) ();
               let reply_json =
-                `Assoc
-                  [
+                let base = [
                     ("reply", `String result.response_text);
                     ("model", `String result.model_used);
                     ("turns", `Int result.turn_count);
                     ("tool_calls", `Int result.tool_calls_made);
                   ]
+                in
+                let with_evidence = match evidence with
+                  | Some ev -> base @ [("evidence", ev)]
+                  | None -> base
+                in
+                `Assoc with_evidence
               in
               (true, Yojson.Safe.to_string reply_json)
 

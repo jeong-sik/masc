@@ -105,7 +105,8 @@ let capabilities_of_json (json : Yojson.Safe.t) : agent_capabilities =
   | `Assoc _ ->
     (match agent_capabilities_of_yojson json with
      | Ok c -> c
-     | Error _ ->
+     | Error msg ->
+       Log.Misc.warn "[agent_card] capabilities_of_json parse error: %s" msg;
        { streaming = false; push_notifications = false; extended_agent_card = false })
   | `List strs ->
     (* Backward compat: parse old string list format *)
@@ -125,7 +126,9 @@ let signature_to_json = agent_card_signature_to_yojson
 let signature_of_json (json : Yojson.Safe.t) : agent_card_signature option =
   match agent_card_signature_of_yojson json with
   | Ok s -> Some s
-  | Error _ -> None
+  | Error msg ->
+    Log.Misc.warn "[agent_card] signature_of_json parse error: %s" msg;
+    None
 
 (** Convert agent_card to JSON (A2A v0.3 spec format) *)
 let to_json (card : agent_card) : Yojson.Safe.t =
@@ -175,7 +178,9 @@ let from_json (json : Yojson.Safe.t) : (agent_card, string) result =
       | p ->
         match provider_of_yojson p with
         | Ok v -> Some v
-        | Error _ -> None
+        | Error msg ->
+          Log.Misc.warn "[agent_card] provider parse error: %s" msg;
+          None
     in
 
     let protocol_versions =
@@ -192,7 +197,9 @@ let from_json (json : Yojson.Safe.t) : (agent_card, string) result =
       |> List.filter_map (fun s ->
         match skill_of_yojson s with
         | Ok v -> Some v
-        | Error _ -> None)
+        | Error msg ->
+          Log.Misc.warn "[agent_card] skill parse error: %s" msg;
+          None)
     in
 
     (* Accept both "supportedInterfaces" (v0.3) and "bindings" (legacy) *)
@@ -207,7 +214,9 @@ let from_json (json : Yojson.Safe.t) : (agent_card, string) result =
       |> List.filter_map (fun b ->
         match binding_of_yojson b with
         | Ok v -> Some v
-        | Error _ -> None)
+        | Error msg ->
+          Log.Misc.warn "[agent_card] binding parse error: %s" msg;
+          None)
     in
 
     let security_schemes =
@@ -216,7 +225,9 @@ let from_json (json : Yojson.Safe.t) : (agent_card, string) result =
         List.filter_map (fun (k, v) ->
           match security_scheme_of_yojson v with
           | Ok scheme -> Some (k, scheme)
-          | Error _ -> None) pairs
+          | Error msg ->
+            Log.Misc.warn "[agent_card] security_scheme parse error for %s: %s" k msg;
+            None) pairs
       | _ -> []
     in
 

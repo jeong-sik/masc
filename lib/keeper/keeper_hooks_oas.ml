@@ -147,14 +147,12 @@ let suggest_alternatives ~(allowed_tools : string list)
     ~(repeated_tools : string list) ~(max_suggestions : int) : string list =
   let repeated_set = Hashtbl.create (List.length repeated_tools) in
   List.iter (fun t -> Hashtbl.replace repeated_set t ()) repeated_tools;
-  (* Exclude core/meta tools that don't produce useful autonomous actions *)
-  let boring_tools = [ "keeper_time_now"; "keeper_context_status";
-    "keeper_tools_list"; "masc_heartbeat"; "masc_status"; "masc_tool_help" ] in
-  let boring_set = Hashtbl.create (List.length boring_tools) in
-  List.iter (fun t -> Hashtbl.replace boring_set t ()) boring_tools;
+  (* Exclude boring/meta tools — uses Keeper_tool_registry SSOT *)
   allowed_tools
   |> List.filter (fun t ->
-       not (Hashtbl.mem repeated_set t) && not (Hashtbl.mem boring_set t))
+       not (Hashtbl.mem repeated_set t)
+       && not (Keeper_tool_registry.is_boring_tool t)
+       && t <> "keeper_stay_silent")
   |> fun candidates ->
      let len = List.length candidates in
      if len <= max_suggestions then candidates
@@ -229,6 +227,7 @@ let make_hooks
     ?(on_tool_executed : string -> Yojson.Safe.t -> string -> unit =
         fun _ _ _ -> ())
     ?(trajectory_acc : Trajectory.accumulator option)
+    ?(boring_consecutive_turns : int ref = ref 0)
     ()
   : Agent_sdk.Hooks.hooks =
   let sse_turn_complete = "keeper_turn_complete" in
@@ -236,6 +235,21 @@ let make_hooks
     [ "keeper_board_post"; "keeper_board_comment"; "keeper_board_vote" ]
   in
   let tool_start_time = ref 0.0 in
+  (* Boring-tool gate: track whether current turn has any productive tool call.
+     A "boring" tool is one that reads status without side effects
+     (masc_status, masc_heartbeat, keeper_tasks_list, etc.).
+     Alternating boring tools bypasses OAS's exact-fingerprint idle detection.
+     This gate catches the broader pattern: consecutive turns with ONLY
+     boring tools, regardless of which specific boring tool was called. *)
+  let turn_has_productive_tool = ref false in
+  (* Same-name streak gate: track consecutive calls to the same tool
+     name (regardless of args). OAS idle detection requires exact
+     name+args match, so board_get("a") → board_get("b") is never
+     detected. This catches the "same operation, different targets"
+     pattern (e.g., janitor reading 20 board posts one by one).
+     At >= streak_threshold, pre_tool_use blocks the call with Override. *)
+  let tool_name_streak : (string * int) ref = ref ("", 0) in
+  let streak_threshold = 5 in
   { Agent_sdk.Hooks.empty with
 
     after_turn = Some (fun event ->
@@ -298,6 +312,22 @@ let make_hooks
                  ("ts_unix", `Float (Unix.gettimeofday ()));
                ])
          with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
+        (* Reset same-name streak at turn boundary so it doesn't
+           carry across turns (e.g., 4 calls in turn N + 1 in turn N+1
+           should not hit threshold 5). *)
+        tool_name_streak := ("", 0);
+        (* Boring-tool gate: update consecutive counter at end of turn.
+           If no productive tool was called this turn, increment the
+           boring streak; otherwise reset to 0. *)
+        if !turn_has_productive_tool then
+          boring_consecutive_turns := 0
+        else begin
+          incr boring_consecutive_turns;
+          Log.Keeper.info
+            "keeper:%s boring_consecutive=%d (turn=%d had no productive tool)"
+            meta.name !boring_consecutive_turns turn
+        end;
+        turn_has_productive_tool := false;
         Agent_sdk.Hooks.Continue
       | _ -> Agent_sdk.Hooks.Continue);
 
@@ -332,6 +362,10 @@ let make_hooks
              ~success:(outcome = "ok") ~duration_ms
              ~model:(!meta_ref).runtime.usage.last_model_used ()
          with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
+        (* Boring-tool gate: mark turn as productive only for genuinely
+           productive tools. keeper_stay_silent is in the boring set. *)
+        if not (Keeper_tool_registry.is_boring_tool tool_name) then
+          turn_has_productive_tool := true;
         (try on_tool_executed tool_name input output_text
          with Eio.Cancel.Cancelled _ as e -> raise e
             | exn ->
@@ -348,6 +382,30 @@ let make_hooks
       | Agent_sdk.Hooks.PreToolUse { tool_name; input; accumulated_cost_usd; _ } ->
         tool_start_time := Time_compat.now ();
         let keeper_name = (!meta_ref).name in
+        (* Same-name streak gate: block when the same tool name is called
+           streak_threshold+ times consecutively, regardless of args.
+           Returns Override (tool NOT executed) with a directive to switch tools.
+           Uses >= so EVERY call after the threshold is blocked, not just one. *)
+        let prev_name, prev_count = !tool_name_streak in
+        let new_count =
+          if prev_name = tool_name then prev_count + 1 else 1
+        in
+        tool_name_streak := (tool_name, new_count);
+        if new_count >= streak_threshold then begin
+          Log.Keeper.warn
+            "keeper:%s streak_gate: %s called %d times consecutively, blocking"
+            keeper_name tool_name new_count;
+          broadcast_tool_skipped ~keeper_name ~tool_name
+            ~reason_code:"streak_gate";
+          Agent_sdk.Hooks.Override
+            (render_inline_skip_reason
+               ~tool_name
+               ~reason_code:"streak_gate"
+               ~reason_text:(Printf.sprintf
+                 "%s called %d times consecutively. Use a DIFFERENT tool or keeper_stay_silent"
+                 tool_name new_count))
+        end
+        else
         (* Safety gate 0: Keeper deny list *)
         if List.mem tool_name keeper_denied_tools then begin
           Log.Keeper.warn "keeper:%s deny list: blocked %s"

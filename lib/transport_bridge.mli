@@ -34,7 +34,13 @@ end
 
 val register_provider : (module PROVIDER) -> unit
 (** Register a transport provider. Replaces any existing provider
-    with the same name. Called during server bootstrap. *)
+    with the same name. Called during server bootstrap.
+    @raise Failure if called after {!seal}. *)
+
+val seal : unit -> unit
+(** Freeze the registry. Must be called after all providers are
+    registered (end of bootstrap). Post-seal reads from multiple
+    fibers are safe without synchronization. *)
 
 val providers : unit -> (module PROVIDER) list
 (** All registered providers, in registration order. *)

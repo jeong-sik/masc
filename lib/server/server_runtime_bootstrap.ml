@@ -725,6 +725,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
         ]
         let reap_stale () = 0  (* WebRTC has its own ICE timeout *)
       end);
+      Transport_bridge.seal ();
       (* Cold-start warm-cache stagger is handled by warm_delay_s in each
          Proactive_refresh config. Heavy surfaces delay their initial warm
          compute to avoid concurrent CPU/PG contention.  Lightweight surfaces

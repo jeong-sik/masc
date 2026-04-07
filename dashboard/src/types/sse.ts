@@ -17,6 +17,7 @@ export type SSEEventType =
   | 'masc/keeper_compaction'
   | 'keeper_guardrail'
   | 'masc/keeper_guardrail'
+  | 'keeper_phase_changed'
   | 'keeper_tool_call'
   | 'masc/keeper_tool_call'
   | 'keeper_turn_complete'
@@ -76,6 +77,10 @@ export interface SSEEvent {
   saved_tokens?: number
   trigger?: string
   reason?: string
+  // Keeper phase transition fields
+  prev_phase?: string
+  new_phase?: string
+  event?: string
   // Keeper tool call fields
   tool_name?: string
   duration_ms?: number
@@ -99,6 +104,7 @@ export type JournalEventType =
   | 'keeper_handoff'
   | 'keeper_compaction'
   | 'keeper_guardrail'
+  | 'keeper_phase_changed'
   | 'keeper_tool_call'
   | 'oas_keeper_snapshot'
   | 'oas_event'

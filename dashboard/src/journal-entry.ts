@@ -94,6 +94,7 @@ export function classifyJournalKind(entry: JournalEntry): 'board' | 'tasks' | 'k
     case 'keeper_handoff':
     case 'keeper_compaction':
     case 'keeper_guardrail':
+    case 'keeper_phase_changed':
       return 'keepers'
     default:
       return 'system'

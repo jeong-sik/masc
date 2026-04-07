@@ -38,7 +38,7 @@ function eventMatchesFilter(entry: JournalEntry, filter: FilterKind): boolean {
     case 'error':
       return et === 'keeper_guardrail' || isErrorJournalEntry(entry)
     case 'lifecycle':
-      return et === 'agent_joined' || et === 'agent_left' || et === 'keeper_handoff' || et === 'keeper_compaction'
+      return et === 'agent_joined' || et === 'agent_left' || et === 'keeper_handoff' || et === 'keeper_compaction' || et === 'keeper_phase_changed'
     default:
       return true
   }

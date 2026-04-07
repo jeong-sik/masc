@@ -207,6 +207,7 @@ export function eventKindLabel(entry: JournalEntry): string {
   if (type === 'keeper_handoff') return 'handoff'
   if (type === 'keeper_compaction') return 'compact'
   if (type === 'keeper_guardrail') return 'guardrail'
+  if (type === 'keeper_phase_changed') return 'phase'
   if (entry.kind === 'board') return 'board'
   if (entry.kind === 'tasks') return 'task'
   if (entry.kind === 'keepers') return 'keeper'

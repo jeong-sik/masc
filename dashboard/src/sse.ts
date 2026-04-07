@@ -384,6 +384,19 @@ function handleEvent(event: SSEEvent): void {
         },
       )
       break
+    case 'keeper_phase_changed':
+      addTypedJournalEntry(
+        event.name ?? agent,
+        `Phase: ${event.prev_phase ?? '?'} → ${event.new_phase ?? '?'} (${event.event ?? '?'})`,
+        'keepers',
+        'keeper_phase_changed',
+        {
+          severity: (event.new_phase === 'Failing' || event.new_phase === 'Crashed' || event.new_phase === 'Dead') ? 'error' : 'info',
+          source: event.source,
+          narrativeText: `${actorLabel(event.name ?? agent)}의 상태가 ${event.prev_phase ?? '?'}에서 ${event.new_phase ?? '?'}로 전이되었습니다`,
+        },
+      )
+      break
     case 'keeper_tool_call': {
       const toolName = event.tool_name ?? '?'
       const durationMs = event.duration_ms ?? 0

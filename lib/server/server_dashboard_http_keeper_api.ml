@@ -508,6 +508,52 @@ let handle_keeper_get_subroutes state req request reqd =
          ] in
          Http.Response.json ~compress:true ~request:req
            (Yojson.Safe.to_string json) reqd)
+  else if ends_with "/transitions" then
+    let name = extract_name "/transitions" in
+    if String.length name = 0 then
+      Http.Response.json ~status:`Bad_request
+        {|{"error":"keeper name is required"}|} reqd
+    else
+      let limit =
+        Server_utils.int_query_param req "limit" ~default:20
+        |> max 1 |> min 50
+      in
+      let base_path = state.Mcp_server.room_config.base_path in
+      let phase = Keeper_registry.get_phase ~base_path name in
+      let phase_str = match phase with
+        | Some p -> `String (Keeper_state_machine.phase_to_string p)
+        | None -> `Null
+      in
+      let transitions =
+        Keeper_transition_audit.recent_transitions_json
+          ~keeper_name:name ~limit
+      in
+      let json = `Assoc [
+        "keeper", `String name;
+        "current_phase", phase_str;
+        "count", `Int (match transitions with `List l -> List.length l | _ -> 0);
+        "transitions", transitions;
+      ] in
+      Http.Response.json ~compress:true ~request:req
+        (Yojson.Safe.to_string json) reqd
+  else if ends_with "/state-diagram" then
+    let name = extract_name "/state-diagram" in
+    if String.length name = 0 then
+      Http.Response.json ~status:`Bad_request
+        {|{"error":"keeper name is required"}|} reqd
+    else
+      let base_path = state.Mcp_server.room_config.base_path in
+      let phase = Keeper_registry.get_phase ~base_path name in
+      let current = match phase with Some p -> p | None -> Keeper_state_machine.Offline in
+      let mermaid = Keeper_state_machine.phase_to_mermaid ~current in
+      let phase_str = Keeper_state_machine.phase_to_string current in
+      let json = `Assoc [
+        "keeper", `String name;
+        "current_phase", `String phase_str;
+        "mermaid", `String mermaid;
+      ] in
+      Http.Response.json ~compress:true ~request:req
+        (Yojson.Safe.to_string json) reqd
   else
     Http.Response.json ~status:`Not_found
       {|{"error":"not found"}|} reqd

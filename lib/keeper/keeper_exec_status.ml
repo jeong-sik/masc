@@ -241,6 +241,7 @@ let classify_keeper_quiet_reason ~meta ~keepalive_running ~agent_status ~now_ts 
         else None
 
 let keeper_health_state ?(fiber_health = Fiber_unknown)
+    ?(keepalive_interval_s = 300.0)
     ~meta ~keepalive_running ~agent_status ~quiet_reason ~now_ts () =
   (* Supervisor-level health takes priority *)
   match fiber_health with
@@ -267,8 +268,10 @@ let keeper_health_state ?(fiber_health = Fiber_unknown)
   (* H-4 fix: true zombies are stale regardless of keepalive state *)
   else if is_zombie then "stale"
   else if keepalive_running then
-    (* Secondary timeout: if the fiber is stuck and not heartbeating, flag as stale *)
-    if last_seen_ago_s > 2.0 *. stale_threshold_s then "stale"
+    (* Secondary timeout: if the fiber is stuck and not heartbeating, flag as stale.
+       Use 2x the configured keepalive interval (default: max 300s) so that keepers
+       with a long heartbeat cadence are not incorrectly classified. *)
+    if last_seen_ago_s > 2.0 *. keepalive_interval_s then "stale"
     else
       (* Keepalive fiber is alive — trust it over last_seen.
          presence_fresh optimization may skip Room.heartbeat(),

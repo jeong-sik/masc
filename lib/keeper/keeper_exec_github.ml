@@ -15,7 +15,9 @@ let handle_keeper_github
     if cmd <> "" then cmd else if gh_args <> [] then String.concat " " gh_args else ""
   in
   if gh_raw = ""
-  then error_json "cmd_or_args_required"
+  then error_json "cmd is required. \
+                   Good: cmd='pr list --state open'. Bad: cmd=''. \
+                   Single gh subcommand only, no chaining."
   else (
     match Worker_dev_tools.validate_gh_command gh_raw with
     | Error reason ->

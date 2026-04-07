@@ -47,7 +47,7 @@ let handle_keeper_task_tool
     let task_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
     let reason = Safe_ops.json_string ~default:"" "reason" args in
     if task_id = ""
-    then error_json "task_id required"
+    then error_json "task_id is required. Use the task_id from keeper_tasks_list or keeper_tasks_audit."
     else (
       let agent = keeper_agent_sender ~meta in
       let _ =
@@ -66,7 +66,7 @@ let handle_keeper_task_tool
     let task_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
     let notes = Safe_ops.json_string ~default:"" "notes" args in
     if task_id = ""
-    then error_json "task_id required"
+    then error_json "task_id is required. Use the task_id from keeper_tasks_list or keeper_tasks_audit."
     else
       keeper_task_result_json
         (Room.force_done_task_r
@@ -78,7 +78,7 @@ let handle_keeper_task_tool
   | "keeper_broadcast" ->
     let message = Safe_ops.json_string ~default:"" "message" args |> String.trim in
     if message = ""
-    then error_json "message required"
+    then error_json "message is required. Good: message='Build complete, all tests pass.'."
     else (
       let _ =
         Room.broadcast config ~from_agent:(keeper_agent_sender ~meta) ~content:message
@@ -91,7 +91,7 @@ let handle_keeper_task_tool
     let task_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
     let result_text = Safe_ops.json_string ~default:"" "result" args |> String.trim in
     if task_id = ""
-    then error_json "task_id required"
+    then error_json "task_id is required. Use the task_id you got from keeper_task_claim."
     else
       keeper_task_result_json
         (Room.force_done_task_r

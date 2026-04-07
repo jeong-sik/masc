@@ -479,7 +479,7 @@ release to the room. Provide a reason for audit.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
-        ("task_id", `Assoc [("type", `String "string"); ("description", `String "Task ID to force-release")]);
+        ("task_id", `Assoc [("type", `String "string"); ("description", `String "Task ID from keeper_tasks_list or keeper_tasks_audit (REQUIRED)")]);
         ("reason", `Assoc [("type", `String "string"); ("description", `String "Reason for force release")]);
       ]);
       ("required", `List [`String "task_id"]);
@@ -493,7 +493,7 @@ explaining the completion evidence. Broadcasts to room.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
-        ("task_id", `Assoc [("type", `String "string"); ("description", `String "Task ID to force-complete")]);
+        ("task_id", `Assoc [("type", `String "string"); ("description", `String "Task ID from keeper_tasks_list or keeper_tasks_audit (REQUIRED)")]);
         ("notes", `Assoc [("type", `String "string"); ("description", `String "Evidence that the task is actually complete")]);
       ]);
       ("required", `List [`String "task_id"]);
@@ -501,8 +501,11 @@ explaining the completion evidence. Broadcasts to room.";
   };
   {
     name = "keeper_broadcast";
-    description = "Send a message visible to all agents in the MASC room. Use for status \
-updates, announcements, warnings, or coordination. All keepers will see this.";
+    description = "Send a message visible to all agents in the MASC room. \
+message is REQUIRED (non-empty). \
+Good: message='Build complete, all tests pass.'. \
+Bad: message=''. \
+Use for status updates, announcements, warnings, or coordination.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -524,12 +527,13 @@ After claiming, do the work and call keeper_task_done when finished.";
   {
     name = "keeper_task_done";
     description = "Mark your claimed task as complete with a result summary. \
+task_id is REQUIRED. Get task_id from keeper_task_claim response. \
 The task must be claimed by you. Provide a clear summary of what was \
 accomplished so other agents can verify.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
-        ("task_id", `Assoc [("type", `String "string"); ("description", `String "Task ID to complete")]);
+        ("task_id", `Assoc [("type", `String "string"); ("description", `String "Task ID from keeper_task_claim (REQUIRED)")]);
         ("result", `Assoc [("type", `String "string"); ("description", `String "Summary of what was accomplished")]);
       ]);
       ("required", `List [`String "task_id"]);

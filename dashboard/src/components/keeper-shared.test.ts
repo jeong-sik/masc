@@ -1,5 +1,4 @@
 import { html } from 'htm/preact'
-import { waitFor } from '@testing-library/preact'
 import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -54,7 +53,6 @@ vi.mock('./common/toast', () => ({
 import { keeperActionErrors, keeperHydrating, keeperSending, keeperStreamStartedAt, keeperThreads } from '../keeper-runtime'
 import { hydrateKeeperStatus } from '../keeper-runtime'
 import { shellAuthSummary } from '../store'
-import { showToast } from './common/toast'
 import { KeeperConversationPanel, KeeperRuntimeActions } from './keeper-shared'
 
 describe('KeeperConversationPanel', () => {

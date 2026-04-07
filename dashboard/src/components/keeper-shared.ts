@@ -22,7 +22,6 @@ import {
 import { isVisibleDirectConversationEntry } from '../keeper-state'
 import { ChatComposer, ChatTranscript } from './chat/primitives'
 import { showToast } from './common/toast'
-import { signal } from '@preact/signals'
 import { shellAuthSummary } from '../store'
 
 

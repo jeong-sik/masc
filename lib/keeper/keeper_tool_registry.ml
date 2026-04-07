@@ -76,7 +76,7 @@ let keeper_tool_search_schema : Types.tool_schema =
   {
     name = "keeper_tool_search";
     description =
-      "Search for additional tools by describing what you need. \
+      "Search for tools by query describing what you need. \
        Returns tool names, descriptions, and usage guidance. \
        Use when your current tools are insufficient for the task.";
     input_schema =

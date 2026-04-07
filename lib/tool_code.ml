@@ -322,7 +322,7 @@ let schemas : Types.tool_schema list = [
   (* masc_code_search *)
   {
     name = "masc_code_search";
-    description = "Search code using ripgrep with regex support, returning structured results (file, line, content). \
+    description = "Search code by query using ripgrep with regex, returning structured results (file, line, content). \
 Use when finding function names, patterns, or text across the codebase from within MASC. \
 Pair with masc_code_symbols for file-level symbol outlines or masc_code_read for targeted line ranges.";
     input_schema = `Assoc [

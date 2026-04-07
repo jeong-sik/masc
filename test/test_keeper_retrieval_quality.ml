@@ -163,7 +163,7 @@ let assert_retrieves ~label index query expected_tool =
 let test_file_read_en () =
   let idx = build_keeper_index () in
   ignore (assert_retrieves ~label:"file_read_en" idx
-    "read the contents of lib/tool_shard.ml" "keeper_fs_read")
+    "read the contents of lib/types.ml" "keeper_fs_read")
 
 (* Korean queries use exact keyword overlap with BM25 aliases.
    Natural Korean queries like "파일 내용을 확인해봐" fail because

@@ -17,6 +17,7 @@ let schemas : tool_schema list = [
       ("properties", `Assoc [
         ("status", `Assoc [
           ("type", `String "string");
+          ("enum", `List [`String "active"; `String "busy"; `String "listening"; `String "inactive"]);
           ("description", `String "Optional status: active | busy | listening | inactive");
         ]);
         ("capabilities", `Assoc [

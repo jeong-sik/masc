@@ -526,6 +526,11 @@ let transition_task_r config ~agent_name ~task_id ~action
     | Error e, _ -> Error e
     | _, Error e -> Error e
     | Ok _, Ok _ ->
+        (* BUG-006: Resolve agent name to canonical form (e.g. "keeper-coder" ->
+           "keeper-coder-agent") so the assignee guard matches the name recorded
+           at claim time.  Without this, keeper transitions fail with identity
+           mismatch when the caller name differs from the joined agent file name. *)
+        let agent_name = resolve_agent_name config agent_name in
         let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
         with_file_lock config backlog_path (fun () ->
           try
@@ -772,6 +777,7 @@ let force_done_task_r config ~agent_name ~task_id ~notes () : string Types.masc_
 (** Complete task with file locking *)
 let complete_task config ~agent_name ~task_id ~notes =
   ensure_initialized config;
+  let agent_name = resolve_agent_name config agent_name in
   let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
   with_file_lock config backlog_path (fun () ->
     try
@@ -873,6 +879,9 @@ let complete_task config ~agent_name ~task_id ~notes =
 let complete_task_r config ~agent_name ~task_id ~notes : string Types.masc_result =
   if not (is_initialized config) then Error Types.NotInitialized
   else
+    (* BUG-006: Same resolve as transition_task_r — ensures assignee comparison
+       matches the canonical name recorded at claim time. *)
+    let agent_name = resolve_agent_name config agent_name in
     let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
     with_file_lock config backlog_path (fun () ->
       try
@@ -968,6 +977,7 @@ let complete_task_r config ~agent_name ~task_id ~notes : string Types.masc_resul
 let cancel_task_r config ~agent_name ~task_id ~reason : string Types.masc_result =
   if not (is_initialized config) then Error Types.NotInitialized
   else
+    let agent_name = resolve_agent_name config agent_name in
     let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
     with_file_lock config backlog_path (fun () ->
       try

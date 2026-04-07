@@ -6,6 +6,7 @@ import '@testing-library/jest-dom'
 import type { DashboardMissionKeeperBrief, Keeper, KeeperConfig } from '../types'
 import {
   AllowlistPreview,
+  RuntimeSignals,
   resolveAllowlistPreview,
   resolveKeeperCurrentTaskLabel,
 } from './keeper-detail-runtime'
@@ -297,5 +298,36 @@ describe('AllowlistPreview', () => {
     expect(screen.getByText('tool-15')).toBeInTheDocument()
     expect(screen.getByText('접기')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '허용된 도구 접기' })).toHaveAttribute('aria-expanded', 'true')
+  })
+})
+
+describe('RuntimeSignals', () => {
+  it('renders metrics_window top lists as visual distributions', () => {
+    const keeper: Keeper = {
+      name: 'sangsu',
+      status: 'active',
+      metrics_window: {
+        fallback_rate: 0.15,
+        top_tools: [
+          { tool: 'masc_board_post', count: 7 },
+          { tool: 'masc_status', count: 4 },
+        ],
+        top_models: [
+          { model: 'gpt-5', count: 5 },
+        ],
+        top_work_kinds: [
+          { kind: 'planning', count: 3 },
+        ],
+      },
+    }
+
+    render(h(RuntimeSignals, { keeper }))
+
+    expect(screen.getByText('주요 도구')).toBeInTheDocument()
+    expect(screen.getByText('주요 모델')).toBeInTheDocument()
+    expect(screen.getByText('주요 작업 종류')).toBeInTheDocument()
+    expect(screen.getByText('masc_board_post')).toBeInTheDocument()
+    expect(screen.getByText('gpt-5')).toBeInTheDocument()
+    expect(screen.getByText('planning')).toBeInTheDocument()
   })
 })

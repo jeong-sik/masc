@@ -5,6 +5,7 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useEffect, useState } from 'preact/hooks'
+import { DistributionBars, type DistributionItem } from './common/distribution-bars'
 import { TimeAgo } from './common/time-ago'
 import { toolCategory } from './tool-call-shared'
 import type { Keeper } from '../types'
@@ -294,7 +295,17 @@ export function RuntimeSignals({ keeper }: { keeper: Keeper }) {
     }))
     .filter(g => g.rows.length > 0)
 
-  if (visibleGroups.length === 0) return null
+  const topListSections = [
+    topListDistribution(mw?.top_tools, 'tool', '주요 도구'),
+    topListDistribution(mw?.top_models, 'model', '주요 모델'),
+    topListDistribution(mw?.top_work_kinds, 'kind', '주요 작업 종류'),
+  ].filter((section): section is {
+    title: string
+    subtitle: string
+    items: DistributionItem[]
+  } => section !== null)
+
+  if (visibleGroups.length === 0 && topListSections.length === 0) return null
 
   return html`
     <div class="flex flex-col gap-3">
@@ -306,8 +317,59 @@ export function RuntimeSignals({ keeper }: { keeper: Keeper }) {
           </div>
         </div>
       `)}
+      ${topListSections.length > 0
+        ? html`
+            <div class="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-3">
+              ${topListSections.map(section => html`
+                <${DistributionBars}
+                  title=${section.title}
+                  subtitle=${section.subtitle}
+                  items=${section.items}
+                  valueFormatter=${(value: number) => `${value}`}
+                  emptyLabel="집계가 아직 없습니다."
+                />
+              `)}
+            </div>
+          `
+        : null}
     </div>
   `
+}
+
+function topListDistribution(
+  rawItems: unknown,
+  key: 'tool' | 'model' | 'kind',
+  title: string,
+): {
+  title: string
+  subtitle: string
+  items: DistributionItem[]
+} | null {
+  if (!Array.isArray(rawItems)) return null
+  const items: DistributionItem[] = []
+  for (const item of rawItems) {
+    if (typeof item !== 'object' || item === null) continue
+    const label = typeof item[key] === 'string' ? item[key] : null
+    const count = typeof item.count === 'number' && Number.isFinite(item.count) ? item.count : null
+    if (!label || count == null || count <= 0) continue
+    items.push({
+      label,
+      value: count,
+      detail: key === 'tool'
+        ? '최근 sliding window 호출 빈도'
+        : key === 'model'
+          ? '최근 sliding window 사용 빈도'
+          : '최근 sliding window 작업 빈도',
+      tone: key === 'model' ? 'warn' : key === 'kind' ? 'ok' : 'accent',
+    })
+    if (items.length >= 5) break
+  }
+  if (items.length === 0) return null
+  return {
+    title,
+    subtitle: 'metrics_window Top-N 집계를 막대 형태로 표시합니다.',
+    items,
+  }
 }
 
 // ── Neighborhood & Tool Audit ────────────────────────────

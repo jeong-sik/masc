@@ -12,16 +12,14 @@ describe('lab navigation', () => {
       'tools',
       'autoresearch',
       'harness',
-      'features',
-      'config',
+      'inspector',
     ])
 
     expect(labSections.map(item => item.label)).toEqual([
       '도구',
       '오토리서치',
       '세이프티 하네스',
-      '피처 플래그',
-      '서버 설정',
+      '운영 인스펙터',
     ])
   })
 })

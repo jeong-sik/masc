@@ -239,19 +239,6 @@ let make_tools
                     ("ts_unix", `Float ts);
                   ])
                  with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
-                (try
-                  Keeper_types_support.append_jsonl_line
-                    (Keeper_types_support.keeper_decision_log_path config meta.name)
-                    (`Assoc [
-                      "ts_unix", `Float ts;
-                      "event", `String "tool_exec";
-                      "keeper_name", `String meta.name;
-                      "tool", `String td.name;
-                      "duration_ms", `Int duration_ms;
-                      "result_bytes", `Int (String.length result);
-                      "ok", `Bool true;
-                    ])
-                with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
                 (* Notify session callback (e.g., mark_used for discovered tools) *)
                 (match on_tool_called with Some f -> f td.name | None -> ());
                 (* PR#814 Gap 1: Capture git status delta after successful tool execution.
@@ -282,6 +269,19 @@ let make_tools
                        | _ -> normalized
                      with Yojson.Json_error _ -> normalized)
                 in
+                (try
+                  Keeper_types_support.append_jsonl_line
+                    (Keeper_types_support.keeper_decision_log_path config meta.name)
+                    (`Assoc [
+                      "ts_unix", `Float ts;
+                      "event", `String "tool_exec";
+                      "keeper_name", `String meta.name;
+                      "tool", `String td.name;
+                      "duration_ms", `Int duration_ms;
+                      "result_bytes", `Int (String.length final_result);
+                      "ok", `Bool true;
+                    ])
+                with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
                 (true, final_result)
               end
             with Eio.Cancel.Cancelled _ as e -> raise e | exn ->

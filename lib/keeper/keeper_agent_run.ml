@@ -800,7 +800,7 @@ let run_turn
     before_turn_params = Some (fun event ->
       match event with
       | Agent_sdk.Hooks.BeforeTurnParams { turn; current_params; messages; _ } ->
-        let hook_t0 = Unix.gettimeofday () in
+        let hook_t0 = Time_compat.now () in
         (* Update current_turn_ref so session-scoped callbacks
            (keeper_tool_search, on_tool_called) use the correct turn. *)
         current_turn_ref := turn;
@@ -960,7 +960,7 @@ let run_turn
         (* Tool disclosure telemetry: log which tools the keeper sees each turn.
            Deterministic measurement — counts only, no thresholds or judgments. *)
         (let hook_elapsed_ms =
-           Keeper_timing.round1 ((Unix.gettimeofday () -. hook_t0) *. 1000.0)
+           Keeper_timing.round1 ((Time_compat.now () -. hook_t0) *. 1000.0)
          in
          let disclosure_json = `Assoc [
            "ts_unix", `Float (Time_compat.now ());
@@ -972,9 +972,13 @@ let run_turn
            "final_visible", `Int (List.length all_allowed);
            "hook_ms", `Float hook_elapsed_ms;
          ] in
-         Keeper_types_support.append_jsonl_line
-           (Keeper_types_support.keeper_decision_log_path config meta.name)
-           disclosure_json);
+         (try
+           Keeper_types_support.append_jsonl_line
+             (Keeper_types_support.keeper_decision_log_path config meta.name)
+             disclosure_json
+         with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | _ -> ()));
         (* 3. Graceful last-turn: inject budget warnings and restrict
            tools when approaching the turn limit.
            - Warning zone (2 turns before limit): inject budget warning
@@ -1213,7 +1217,7 @@ let run_turn
       with
       | Error e -> Error e
       | Ok result ->
-        let post_turn_t0 = Unix.gettimeofday () in
+        let post_turn_t0 = Time_compat.now () in
         (* Checkpoint save is deferred until after [STATE] synthesis so the
            persisted checkpoint includes the synthesized continuity block.
            Without this, read_continuity_summary finds no [STATE] in the
@@ -1413,7 +1417,7 @@ let run_turn
            in
            let post_turn_ms =
              Keeper_timing.round1
-               ((Unix.gettimeofday () -. post_turn_t0) *. 1000.0)
+               ((Time_compat.now () -. post_turn_t0) *. 1000.0)
            in
            let eval_json = `Assoc ([
              "ts_unix", `Float (Time_compat.now ());

@@ -37,15 +37,18 @@ let core_always_tools =
 
 (** Core tools always visible to the LLM.  All other tools are
     discoverable on demand via [keeper_tool_search].
+    This is a cross-preset discovery baseline, not equivalent to any single
+    preset: board_core get/post/comment/vote/list are visible by default;
+    board_extended (stats/search) remain discoverable via BM25.
     Includes both read and write tools so keepers can complete full
     task lifecycles (read → edit → PR → done).  AllowList filtering
     ensures tools not in the keeper's preset are invisible.
 
     Action symmetry: every observation tool has a corresponding action tool
-    visible by default (fs_read → fs_edit/write, shell_readonly → bash).
+    visible by default (fs_read → fs_edit, shell_readonly → bash).
     This prevents the 9B "read-only polling loop" trap where the model
     repeatedly observes but cannot discover the tools needed to act.
-    26 → 27 tools; 9B handles 21+ tools at 100% accuracy (#5568, #5661). *)
+    26 tools; 9B handles 21+ tools at 100% accuracy (#5568, #5661). *)
 let core_discovery_tools =
   core_always_tools @
   (* Coordination & awareness *)
@@ -53,7 +56,7 @@ let core_discovery_tools =
     "keeper_task_claim"; "keeper_task_done"; "keeper_tasks_audit";
     "keeper_memory_search"; "keeper_time_now";
     (* Filesystem: read + write (action symmetry) *)
-    "keeper_fs_read"; "keeper_fs_edit"; "keeper_write";
+    "keeper_fs_read"; "keeper_fs_edit";
     (* Board: core interaction *)
     "keeper_board_get"; "keeper_board_post";
     "keeper_board_comment"; "keeper_board_vote"; "keeper_board_list";

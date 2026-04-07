@@ -645,6 +645,7 @@ let () = test "dispatch_keeper_create_from_persona_blocked_by_startup_state" (fu
     "tool_preset": "research",
     "policy_voice_enabled": false
   }
+}
 |}
        persona_name);
   with_env "MASC_PERSONAS_DIR" (Some personas_dir) @@ fun () ->

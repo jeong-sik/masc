@@ -1,6 +1,14 @@
 # Changelog
 
 
+## [2.255.0] - 2026-04-07
+
+### Added
+- **TopK_llm tool selection** -- activate OAS Tool_selector.TopK_llm in keeper
+  before_turn_hook. 2-stage selection: BM25 pre-filter then LLM reranking via
+  `default_rerank_fn`. Gated by `MASC_KEEPER_LLM_RERANK=true` (default off).
+  Self-healing fallback to BM25 on LLM failure. 8 new tests.
+
 ## [2.254.0] - 2026-04-07
 
 ### Added

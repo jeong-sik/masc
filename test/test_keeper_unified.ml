@@ -2100,6 +2100,9 @@ let () =
           test_case "keeper_tasks_list is boring" `Quick (fun () ->
             check bool "keeper_tasks_list"
               true (Masc_mcp.Keeper_tool_registry.is_boring_tool "keeper_tasks_list"));
+          test_case "keeper_tools_list is boring" `Quick (fun () ->
+            check bool "keeper_tools_list"
+              true (Masc_mcp.Keeper_tool_registry.is_boring_tool "keeper_tools_list"));
           test_case "keeper_context_status is boring" `Quick (fun () ->
             check bool "keeper_context_status"
               true (Masc_mcp.Keeper_tool_registry.is_boring_tool "keeper_context_status"));

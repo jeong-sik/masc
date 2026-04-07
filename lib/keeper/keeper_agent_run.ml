@@ -945,9 +945,10 @@ let run_turn
           if boring_streak >= 4 then
             let warning =
               Printf.sprintf
-                "[POLLING BLOCKED] %d consecutive turns of pure \
-                 status/heartbeat polling. Boring tools removed from \
-                 this turn. Use keeper_task_claim, keeper_fs_read, \
+                "[POLLING BLOCKED] %d consecutive turns of only boring \
+                 observation tools (status/heartbeat/task-list/context). \
+                 These tools removed from this turn. Use \
+                 keeper_task_claim, keeper_fs_read, \
                  keeper_board_post, keeper_shell_readonly — or \
                  keeper_stay_silent if nothing to do."
                 boring_streak
@@ -958,10 +959,12 @@ let run_turn
           else if boring_streak >= 3 then
             let warning =
               Printf.sprintf
-                "[FINAL POLLING WARNING] %d turns of pure polling. \
-                 Next turn without a productive tool will REMOVE all \
-                 status/heartbeat tools. Call keeper_task_claim, \
-                 keeper_fs_read, or keeper_stay_silent NOW."
+                "[FINAL POLLING WARNING] %d turns of only boring \
+                 observation tools. Next turn without a productive tool \
+                 will REMOVE all boring observation tools \
+                 (status/heartbeat/task-list/context). Call \
+                 keeper_task_claim, keeper_fs_read, or \
+                 keeper_stay_silent NOW."
                 boring_streak
             in
             (match ctx with
@@ -969,10 +972,10 @@ let run_turn
              | Some existing -> Some (existing ^ "\n\n" ^ warning))
           else if boring_streak >= 2 then
             let warning =
-              "[POLLING DETECTED] You spent 2 turns only calling \
-               status/heartbeat tools. Do productive work: \
-               keeper_task_claim, keeper_fs_read, keeper_board_post, \
-               or keeper_stay_silent."
+              "[POLLING DETECTED] You spent 2 turns only calling boring \
+               observation tools (status/heartbeat/task-list/context). \
+               Do productive work: keeper_task_claim, keeper_fs_read, \
+               keeper_board_post, or keeper_stay_silent."
             in
             (match ctx with
              | None -> Some warning

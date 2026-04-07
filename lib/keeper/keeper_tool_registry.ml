@@ -63,8 +63,9 @@ let is_core_always_tool (name : string) : bool =
 
 (** Tools that gather status but produce no side effects.
     Calling only these tools across consecutive turns indicates a
-    polling loop.  The boring-tool gate in [Keeper_hooks_oas]
-    uses this set to detect and break such loops.
+    polling loop.  This shared classification is used both by the
+    boring-tool gate in [Keeper_hooks_oas] to detect and break such
+    loops, and by allowlist gating through [is_boring_tool].
 
     A tool is "boring" if calling it N times yields the same
     information as calling it once, and it mutates nothing.

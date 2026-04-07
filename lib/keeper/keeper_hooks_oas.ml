@@ -352,8 +352,12 @@ let make_hooks
              ~success:(outcome = "ok") ~duration_ms
              ~model:(!meta_ref).runtime.usage.last_model_used ()
          with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
-        (* Boring-tool gate: mark turn as productive if non-boring tool used *)
-        if not (Keeper_tool_registry.is_boring_tool tool_name) then
+        (* Boring-tool gate: mark turn as productive only for genuinely
+           productive tools. Exclude the documented no-op tool
+           [keeper_stay_silent] so it cannot reset boring-turn tracking. *)
+        if (not (Keeper_tool_registry.is_boring_tool tool_name))
+           && tool_name <> "keeper_stay_silent"
+        then
           turn_has_productive_tool := true;
         (try on_tool_executed tool_name input output_text
          with Eio.Cancel.Cancelled _ as e -> raise e

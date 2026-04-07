@@ -209,85 +209,47 @@ let json_string_member json path =
 let with_parsed_json payload f =
   try Yojson.Safe.from_string payload |> f with _ -> []
 
-let parse_searxng_json payload =
+let parse_json_search_results ~results_path ~title_field ~snippet_field payload =
+  let open Yojson.Safe.Util in
   with_parsed_json payload (fun json ->
-      json_list_member json (Yojson.Safe.Util.member "results")
+      json_list_member json results_path
       |> List.filter_map (fun item ->
              match
-               json_string_member item (Yojson.Safe.Util.member "title"),
-               json_string_member item (Yojson.Safe.Util.member "url")
+               json_string_member item (member title_field),
+               json_string_member item (member "url")
              with
              | Some title, Some url when valid_search_result_url url ->
                  let snippet =
-                   json_string_member item (Yojson.Safe.Util.member "content")
+                   json_string_member item (member snippet_field)
                    |> Option.value ~default:""
                  in
                  Some (title, url, snippet)
              | _ -> None))
+
+let parse_searxng_json payload =
+  parse_json_search_results
+    ~results_path:Yojson.Safe.Util.(member "results")
+    ~title_field:"title" ~snippet_field:"content" payload
 
 let parse_brave_json payload =
-  with_parsed_json payload (fun json ->
-      json_list_member json (fun j -> Yojson.Safe.Util.member "web" j |> Yojson.Safe.Util.member "results")
-      |> List.filter_map (fun item ->
-             match
-               json_string_member item (Yojson.Safe.Util.member "title"),
-               json_string_member item (Yojson.Safe.Util.member "url")
-             with
-             | Some title, Some url when valid_search_result_url url ->
-                 let snippet =
-                   json_string_member item (Yojson.Safe.Util.member "description")
-                   |> Option.value ~default:""
-                 in
-                 Some (title, url, snippet)
-             | _ -> None))
+  parse_json_search_results
+    ~results_path:(fun j -> Yojson.Safe.Util.(member "web" j |> member "results"))
+    ~title_field:"title" ~snippet_field:"description" payload
 
 let parse_tavily_json payload =
-  with_parsed_json payload (fun json ->
-      json_list_member json (Yojson.Safe.Util.member "results")
-      |> List.filter_map (fun item ->
-             match
-               json_string_member item (Yojson.Safe.Util.member "title"),
-               json_string_member item (Yojson.Safe.Util.member "url")
-             with
-             | Some title, Some url when valid_search_result_url url ->
-                 let snippet =
-                   json_string_member item (Yojson.Safe.Util.member "content")
-                   |> Option.value ~default:""
-                 in
-                 Some (title, url, snippet)
-             | _ -> None))
+  parse_json_search_results
+    ~results_path:Yojson.Safe.Util.(member "results")
+    ~title_field:"title" ~snippet_field:"content" payload
 
 let parse_exa_json payload =
-  with_parsed_json payload (fun json ->
-      json_list_member json (Yojson.Safe.Util.member "results")
-      |> List.filter_map (fun item ->
-             match
-               json_string_member item (Yojson.Safe.Util.member "title"),
-               json_string_member item (Yojson.Safe.Util.member "url")
-             with
-             | Some title, Some url when valid_search_result_url url ->
-                 let snippet =
-                   json_string_member item (Yojson.Safe.Util.member "text")
-                   |> Option.value ~default:""
-                 in
-                 Some (title, url, snippet)
-             | _ -> None))
+  parse_json_search_results
+    ~results_path:Yojson.Safe.Util.(member "results")
+    ~title_field:"title" ~snippet_field:"text" payload
 
 let parse_bing_search_json payload =
-  with_parsed_json payload (fun json ->
-      json_list_member json (fun j -> Yojson.Safe.Util.member "webPages" j |> Yojson.Safe.Util.member "value")
-      |> List.filter_map (fun item ->
-             match
-               json_string_member item (Yojson.Safe.Util.member "name"),
-               json_string_member item (Yojson.Safe.Util.member "url")
-             with
-             | Some title, Some url when valid_search_result_url url ->
-                 let snippet =
-                   json_string_member item (Yojson.Safe.Util.member "snippet")
-                   |> Option.value ~default:""
-                 in
-                 Some (title, url, snippet)
-             | _ -> None))
+  parse_json_search_results
+    ~results_path:(fun j -> Yojson.Safe.Util.(member "webPages" j |> member "value"))
+    ~title_field:"name" ~snippet_field:"snippet" payload
 
 let looks_like_rss_payload payload =
   let normalized = String.lowercase_ascii payload in

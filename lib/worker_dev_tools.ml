@@ -203,7 +203,7 @@ let validate_command_with_allowlist ~allowed_commands cmd =
   if trimmed = "" then Error "command must not be empty"
   else if contains_forbidden_shell_chars trimmed then
     Error
-      "Shell chaining/redirection is not allowed. Use the workdir field and run a single command, for example command='python3 check.py'."
+      "Shell chaining/redirection is not allowed. Use the workdir field and run a single command, for example command='python3 check.py'. To write files, use masc_code_write instead of shell redirection."
   else
     match extract_command_name trimmed with
     | None -> Error "command must not be empty"

@@ -233,14 +233,15 @@ export function RuntimeSignals({ keeper }: { keeper: Keeper }) {
       ],
     },
     {
-      title: '자율 행동',
+      title: '자율 행동 & 반응',
       rows: [
         { label: '자동 성찰 비율', value: fmtRate(mw?.auto_reflect_rate) },
         { label: '자동 계획 비율', value: fmtRate(mw?.auto_plan_rate) },
         { label: '자동 컴팩션 비율', value: fmtRate(mw?.auto_compact_rate) },
         { label: '자동 핸드오프 비율', value: fmtRate(mw?.auto_handoff_rate) },
         { label: '가드레일 정지', value: fmtCount(mw?.guardrail_stop_count) },
-        { label: '가드레일 비율', value: fmtRate(mw?.guardrail_stop_rate) },
+        { label: '멘션 반응', value: fmtCount(keeper.mention_reactive_turn_count) },
+        { label: '프리뷰 유사도', value: fmtRate(mw?.proactive_preview_similarity_avg) },
       ],
     },
     {
@@ -253,36 +254,15 @@ export function RuntimeSignals({ keeper }: { keeper: Keeper }) {
       ],
     },
     {
-      title: '메모리',
+      title: '메모리 & 컴팩션',
       rows: [
         { label: '메모리 통과율', value: fmtRate(mw?.memory_pass_rate) },
         { label: '메모리 평균 점수', value: fmtFixed(mw?.memory_avg_score) },
         { label: '메모리 교정', value: fmtCount(mw?.memory_corrections) },
         { label: '교정 성공', value: fmtCount(mw?.memory_correction_success) },
-        { label: '날씨 통과율', value: fmtRate(mw?.memory_weather_pass_rate) },
-      ],
-    },
-    {
-      title: '메모리 컴팩션',
-      rows: [
-        { label: '드롭 비율', value: fmtRate(mw?.memory_compaction_drop_ratio) },
-        { label: '평균 드롭', value: fmtFixed(mw?.memory_compaction_drop_avg, 1) },
+        { label: '컴팩션 드롭 비율', value: fmtRate(mw?.memory_compaction_drop_ratio) },
         { label: '컴팩션 절감', value: fmtRate(mw?.compaction_saved_ratio) },
         { label: '평균 절감 토큰', value: fmtFixed(mw?.avg_compaction_saved_tokens, 0) },
-      ],
-    },
-    {
-      title: '프리뷰 유사도',
-      rows: [
-        { label: '평균', value: fmtRate(mw?.proactive_preview_similarity_avg) },
-        { label: '최대', value: fmtRate(mw?.proactive_preview_similarity_max) },
-        { label: '경고', value: typeof mw?.proactive_preview_similarity_warn === 'boolean' ? (mw.proactive_preview_similarity_warn ? 'Y' : 'N') : '-' },
-      ],
-    },
-    {
-      title: '반응',
-      rows: [
-        { label: '멘션 반응', value: fmtCount(keeper.mention_reactive_turn_count) },
       ],
     },
   ]
@@ -500,11 +480,9 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
       />
 
       <${SignalRow} label="도구 호출" value=${typeof toolCallCount === 'number' ? toolCallCount : observedFallback === 'none_recent' ? 0 : metadataFallback} />
-      <${SignalRow} label="관측 계층" value=${observedAudit.source} />
-      <${SignalRow} label="감사 출처" value=${auditSource ?? metadataFallback} />
       <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
-        <span class="text-xs text-[var(--text-muted)]">관측 시점</span>
-        <span class="text-xs font-medium text-[var(--text-strong)]">${auditAt ? html`<${TimeAgo} timestamp=${auditAt} />` : metadataFallback}</span>
+        <span class="text-xs text-[var(--text-muted)]">감사</span>
+        <span class="text-xs font-medium text-[var(--text-strong)]">${auditSource ?? metadataFallback}${auditAt ? html` · <${TimeAgo} timestamp=${auditAt} />` : ''}</span>
       </div>
 
       ${topTools.length > 0

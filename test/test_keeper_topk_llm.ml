@@ -213,8 +213,15 @@ let test_selection_boundary_preserves_deterministic_floor () =
   Alcotest.(check bool) "input carries duplicate across boundary" true
     (List.mem "keeper_board_post" deterministic_prefilter
      && List.mem "keeper_board_post" llm_selected);
+  let board_post_count =
+    List.fold_left (fun acc name ->
+      if name = "keeper_board_post" then acc + 1 else acc
+    ) 0 merged
+  in
   Alcotest.(check int) "duplicate removed from deterministic floor" 4
     (List.length merged);
+  Alcotest.(check int) "duplicate removed from merged result" 1
+    board_post_count;
   Alcotest.(check (list string))
     "deterministic floor survives even when llm omits most tools"
     [ "keeper_context_status";

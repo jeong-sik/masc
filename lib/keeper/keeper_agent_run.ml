@@ -663,9 +663,7 @@ let run_turn
     in
     let progressive_tool_index_config =
       { Agent_sdk.Tool_index.default_config with
-        top_k =
-          max keeper_selection_bm25_prefilter_n
-            (Keeper_config.keeper_max_tools_per_turn ()) }
+        top_k = keeper_selection_bm25_prefilter_n }
     in
     let preset_tool_entries =
       List.map (tool_index_entry_of_tool ~korean_kw_tbl) preset_tools

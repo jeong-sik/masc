@@ -49,7 +49,9 @@ let test_shard_shell_exists () =
 
 let test_shard_governance_removed () =
   Alcotest.(check bool) "governance shard removed"
-    true (Option.is_none (Tool_shard.get_shard "governance"))
+    true (Option.is_none (Tool_shard.get_shard "governance"));
+  Alcotest.(check bool) "governance not in defaults"
+    false (List.mem "governance" Tool_shard.default_shard_names)
 
 let test_shard_coding_exists () =
   match Tool_shard.get_shard "coding" with
@@ -93,8 +95,8 @@ let test_default_shard_names () =
   (* All shards are now in defaults (mode removal: every keeper gets all tools) *)
   Alcotest.(check bool) "at least 7 defaults" true (List.length defaults >= 7);
   Alcotest.(check bool) "base in defaults" true (List.mem "base" defaults);
-  (* governance shard removed: empty stub deleted *)
-  Alcotest.(check bool) "governance removed from defaults" false
+  (* governance shard removed; must not appear in defaults *)
+  Alcotest.(check bool) "governance not in defaults" false
     (List.mem "governance" defaults);
   Alcotest.(check bool) "coding in defaults" true
     (List.mem "coding" defaults);

@@ -275,8 +275,9 @@ let build
   let builder =
     match config.compact_ratio with
     | Some ratio ->
-      let max_tokens = config.max_input_tokens in
-      Oas.Builder.with_context_thresholds ~compact_ratio:ratio ?max_tokens builder
+      let ctx_window = config.max_input_tokens in
+      Oas.Builder.with_context_thresholds ~compact_ratio:ratio
+        ?context_window_tokens:ctx_window builder
     | None -> builder
   in
   let builder = match config.context_injector with

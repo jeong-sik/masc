@@ -45,7 +45,8 @@
       "analyst",
       "애널리스트",
       "분석가",
-      "realist"
+      "realist",
+      "현실주의자"
     ],
     "modes": {
       "text": "config/personas/analyst/"
@@ -65,7 +66,8 @@
       "analyst",
       "애널리스트",
       "분석가",
-      "realist"
+      "realist",
+      "현실주의자"
     ],
     "tool_preset": "research",
     "proactive_enabled": false

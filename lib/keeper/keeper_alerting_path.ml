@@ -120,13 +120,36 @@ let effective_allowed_paths ~(meta : Keeper_types.keeper_meta) : string list =
     | "workspace" ->
       let safe_name = sanitize_keeper_name meta.name in
       [ Printf.sprintf ".masc/keepers/%s/" safe_name;
-        ".masc/traces/";
-        "." ]
+        ".masc/traces/" ]
     | _ -> []
   in
   match meta.allowed_paths with
   | ["*"] -> []
   | explicit -> playground :: workspace_defaults @ explicit
+
+(** Resolve a path for read-only access: allow any path within the
+    project root, regardless of allowed_paths.  Write operations must
+    use {!resolve_keeper_target_path} which enforces allowed_paths. *)
+let resolve_keeper_read_path ~(config : Room.config) ~(raw_path : string)
+    : (string, string) result =
+  let raw = String.trim raw_path in
+  if raw = "" then Error "path_required"
+  else
+    let root = project_root_of_config config in
+    let candidate =
+      if Filename.is_relative raw then Filename.concat root raw else raw
+    in
+    let root_norm = normalize_path_for_check root in
+    let target_norm = normalize_path_for_check candidate in
+    let within_root =
+      target_norm = root_norm
+      || starts_with ~prefix:(root_norm ^ "/") target_norm
+    in
+    if within_root then Ok candidate
+    else
+      Error
+        (Printf.sprintf "path_outside_project_root: %s (root=%s)"
+           target_norm root_norm)
 
 let truncate_tool_output ?(max_len = 12000) (s : string) : string =
   if String.length s <= max_len then s

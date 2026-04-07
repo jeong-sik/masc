@@ -166,6 +166,12 @@ let resolve_keeper_path ~(config : Room.config) ~(meta : keeper_meta) ~(raw_path
     ~raw_path
 ;;
 
+(** Resolve path for read-only tools (fs_read, shell_readonly, etc.).
+    Allows any path within the project root regardless of allowed_paths. *)
+let resolve_keeper_read_path ~(config : Room.config) ~(raw_path : string) =
+  Keeper_alerting_path.resolve_keeper_read_path ~config ~raw_path
+;;
+
 let handle_keeper_board_tool
       ~(meta : keeper_meta)
       ~(name : string)
@@ -212,11 +218,12 @@ let handle_keeper_fs_read
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
   =
+  ignore meta;
   let path = Safe_ops.json_string ~default:"" "path" args in
   let max_bytes =
     Safe_ops.json_int ~default:20000 "max_bytes" args |> fun n -> max 512 (min 200000 n)
   in
-  match resolve_keeper_path ~config ~meta ~raw_path:path with
+  match resolve_keeper_read_path ~config ~raw_path:path with
   | Error e -> error_json e
   | Ok target ->
     (match Safe_ops.read_file_safe target with
@@ -376,13 +383,14 @@ let handle_keeper_shell_readonly
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
   =
+  ignore meta;
   let op =
     Safe_ops.json_string ~default:"" "op" args |> String.trim |> String.lowercase_ascii
   in
   let root = project_root_of_config config in
   let read_target () =
     let raw_path = Safe_ops.json_string ~default:"." "path" args in
-    resolve_keeper_path ~config ~meta ~raw_path
+    resolve_keeper_read_path ~config ~raw_path
   in
   let render_process_result ~cmd argv =
     let st, out = Process_eio.run_argv_with_status ~timeout_sec:30.0 argv in

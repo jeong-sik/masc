@@ -289,7 +289,7 @@ let test_snapshot_lightweight_summary_keeps_paused_keeper_runtime_counters () =
           updated_at = Types.now_iso ();
         }
       in
-      (match Keeper_types.write_meta config mutated with
+      (match Keeper_types.write_meta ~force:true config mutated with
       | Ok () -> ()
       | Error err -> Alcotest.fail ("meta write failed: " ^ err));
       let json =

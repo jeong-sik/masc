@@ -2,16 +2,10 @@ module U = Yojson.Safe.Util
 include Operator_pending_confirm
 include Operator_digest
 
-let compute_context_ratio (meta : Keeper_types.keeper_meta) : float option =
+let compute_context_ratio ~context_max (meta : Keeper_types.keeper_meta) : float option =
   let input_tokens = meta.runtime.usage.last_input_tokens in
-  if input_tokens = 0 then None
-  else
-    let active_model = Keeper_exec_status.active_model_of_meta meta in
-    if active_model = "" then None
-    else
-      let max_ctx = Oas_model_resolve.max_context_of_label active_model in
-      if max_ctx = 0 then None
-      else Some (float_of_int input_tokens /. float_of_int max_ctx)
+  if input_tokens = 0 || context_max <= 0 then None
+  else Some (float_of_int input_tokens /. float_of_int context_max)
 
 type action_result_status = ActionOk | ActionError
 
@@ -257,7 +251,7 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                         ("generation", `Int meta.runtime.generation);
                         ("turn_count", `Int meta.runtime.usage.total_turns);
                         ("context_ratio",
-                          (match compute_context_ratio meta with
+                          (match compute_context_ratio ~context_max meta with
                            | Some r -> `Float r
                            | None -> `Null));
                         ("context_tokens", `Int meta.runtime.usage.last_total_tokens);
@@ -351,7 +345,7 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                         ("generation", `Int meta.runtime.generation);
                         ("turn_count", `Int meta.runtime.usage.total_turns);
                         ("context_ratio",
-                          (match compute_context_ratio meta with
+                          (match compute_context_ratio ~context_max meta with
                            | Some r -> `Float r
                            | None -> `Null));
                         ("context_tokens", `Int meta.runtime.usage.last_total_tokens);

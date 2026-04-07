@@ -24,16 +24,16 @@ let mock_rerank_reverse ~context:_ ~candidates =
 
 (** A mock rerank_fn that always selects tools containing a keyword. *)
 let mock_rerank_keyword keyword ~context:_ ~candidates =
+  let klen = String.length keyword in
   List.filter_map (fun (name, _desc) ->
-    if String.length name >= String.length keyword
-       && let found = ref false in
-          for i = 0 to String.length name - String.length keyword do
-            if String.sub name i (String.length keyword) = keyword then
-              found := true
-          done;
-          !found
-    then Some name
-    else None
+    let nlen = String.length name in
+    if nlen < klen then None
+    else
+      let found = ref false in
+      for i = 0 to nlen - klen do
+        if String.sub name i klen = keyword then found := true
+      done;
+      if !found then Some name else None
   ) candidates
 
 (** A mock rerank_fn that always raises. *)
@@ -163,16 +163,20 @@ let test_topk_llm_keyword_rerank () =
   let selected = Agent_sdk.Tool_selector.select_names
     ~strategy ~context:"board post message" ~tools:test_tools in
   (* All selected should contain "board" *)
+  let contains_board name =
+    let nlen = String.length name in
+    if nlen < 5 then false
+    else
+      let found = ref false in
+      for i = 0 to nlen - 5 do
+        if String.sub name i 5 = "board" then found := true
+      done;
+      !found
+  in
   List.iter (fun name ->
     Alcotest.(check bool)
       (Printf.sprintf "%s contains 'board'" name)
-      true
-      (String.length name >= 5
-       && let found = ref false in
-          for i = 0 to String.length name - 5 do
-            if String.sub name i 5 = "board" then found := true
-          done;
-          !found)
+      true (contains_board name)
   ) selected
 
 let test_topk_llm_always_include_survives () =

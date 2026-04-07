@@ -868,9 +868,11 @@ let run_turn
                 let preset_names =
                   Keeper_tool_policy.keeper_preset_universe_tool_names meta
                 in
+                let preset_set = Hashtbl.create (List.length preset_names) in
+                List.iter (fun n -> Hashtbl.replace preset_set n true) preset_names;
                 let preset_tools =
                   List.filter (fun (t : Agent_sdk.Tool.t) ->
-                    List.mem t.schema.name preset_names
+                    Hashtbl.mem preset_set t.schema.name
                   ) keeper_tools
                 in
                 let strategy = Agent_sdk.Tool_selector.TopK_llm {

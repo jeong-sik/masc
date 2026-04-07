@@ -127,11 +127,19 @@ let resolve_provider_of_label (label : string) : Oas.Provider.config =
     match Llm_provider.Cascade_config.parse_model_string fallback with
     | Some pc -> Oas.Provider.config_of_provider_config pc
     | None ->
-      (* Failsafe: use "auto" sentinel rather than the unparseable label. *)
+      (* Failsafe: resolve model via Discovery or OLLAMA_DEFAULT_MODEL.
+         Ollama rejects literal "auto" — must resolve to a concrete ID. *)
+      let model_id =
+        match Llm_provider.Discovery.first_discovered_model_id () with
+        | Some id -> id
+        | None ->
+          Sys.getenv_opt "OLLAMA_DEFAULT_MODEL"
+          |> Option.value ~default:"auto"
+      in
       Oas.Provider.config_of_provider_config
         (Llm_provider.Provider_config.make
            ~kind:Llm_provider.Provider_config.OpenAI_compat
-           ~model_id:"auto"
+           ~model_id
            ~base_url:(Llm_provider.Provider_registry.next_llama_endpoint ())
            ~request_path:"/v1/chat/completions" ())
 

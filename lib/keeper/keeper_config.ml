@@ -528,7 +528,7 @@ let keeper_max_tools_per_turn () : int =
   Runtime_params.get keeper_max_tools_per_turn_rp
 
 let keeper_retry_max_tools_per_turn () : int =
-  min 8 (keeper_max_tools_per_turn ())
+  min 15 (keeper_max_tools_per_turn ())
 
 let keeper_board_event_limit_rp =
   _rp_int ~key:"keeper.turn.board_event_limit"

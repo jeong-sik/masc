@@ -606,11 +606,11 @@ let transition_task_r config ~agent_name ~task_id ~action
                        | Types.Release, Types.Claimed { assignee; _ }
                        | Types.Release, Types.InProgress { assignee; _ } when assignee = agent_name || force ->
                            Ok (Types.Todo, None)
-                       | Types.Start, Types.Claimed { assignee; _ } ->
-                           Error (Types.TaskInvalidState
-                             (Printf.sprintf
-                               "Cannot start %s: claimed by '%s', caller is '%s'"
-                               task_id assignee agent_name))
+                       | Types.Start, Types.Claimed { assignee; _ } when assignee = agent_name || force ->
+                           Ok (Types.InProgress {
+                             assignee = agent_name;
+                             started_at = now;
+                           }, None)
                        | _ ->
                            Error (Types.TaskInvalidState
                              (Printf.sprintf "Invalid transition: %s -> %s (%s, agent=%s)"

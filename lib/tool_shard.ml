@@ -290,14 +290,15 @@ git_log/git_diff for repo history, bash for curl/jq/env/which.";
 let coding_keeper_bridge_tools : Types.tool_schema list = [
   {
     name = "keeper_bash";
-    description = "Run a single shell command (builds, tests, git). Returns exit_code and output. \
-Single command only: no chaining (&&/||/;), no pipes (|), no redirects (>). \
-For read-only ops use keeper_shell_readonly, \
-for file writes use keeper_fs_edit, for worktree-isolated code use masc_code_shell.";
+    description = "Execute ONE shell command. \
+NO chaining (&&, ||, ;), NO pipes (|), NO redirects (> >>). \
+Violations are blocked. Good: cmd='dune build', cmd='ls -la lib/'. \
+Bad: cmd='cd x && dune build', cmd='rg foo | wc -l'. \
+For read-only ops use keeper_shell_readonly, for file edits use keeper_fs_edit.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
-        ("cmd", `Assoc [("type", `String "string"); ("description", `String "Shell command string to run via zsh -lc")]);
+        ("cmd", `Assoc [("type", `String "string"); ("description", `String "Single command only. No chaining/pipe/redirect. Example: 'dune build', 'rg pattern lib/'")]);
         ("timeout_sec", `Assoc [("type", `String "number"); ("description", `String "Timeout seconds (default: 30, max: 180)")]);
       ]);
       ("required", `List [`String "cmd"]);
@@ -305,9 +306,10 @@ for file writes use keeper_fs_edit, for worktree-isolated code use masc_code_she
   };
   {
     name = "keeper_github";
-    description = "Run gh CLI commands for GitHub operations. Use for creating issues, \
-opening PRs, posting review comments, checking CI status. \
-Returns gh command output. Example: cmd='pr list --state open'.";
+    description = "Run a single gh CLI command. \
+NO chaining (&&/||/;), NO pipes (|), NO redirects (>). \
+Good: cmd='pr list --state open'. Bad: cmd='pr list && echo done'. \
+Use for: issues, PRs, review comments, CI status.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

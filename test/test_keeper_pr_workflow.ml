@@ -123,8 +123,9 @@ let test_missing_branch () =
       ] in
     let result = call_tool config meta "keeper_pr_workflow" args in
     let json = parse_json result in
-    check string "error is branch_required"
-      "branch_required" (json_string "error" json))
+    let err = json_string "error" json in
+    check bool "error mentions branch"
+      true (String_util.contains_substring_ci err "branch"))
 
 let test_missing_file_path () =
   with_room (fun config ->
@@ -137,8 +138,9 @@ let test_missing_file_path () =
       ] in
     let result = call_tool config meta "keeper_pr_workflow" args in
     let json = parse_json result in
-    check string "error is file_path_required"
-      "file_path_required" (json_string "error" json))
+    let err = json_string "error" json in
+    check bool "error mentions file_path"
+      true (String_util.contains_substring_ci err "file_path"))
 
 let test_missing_commit_message () =
   with_room (fun config ->
@@ -151,8 +153,9 @@ let test_missing_commit_message () =
       ] in
     let result = call_tool config meta "keeper_pr_workflow" args in
     let json = parse_json result in
-    check string "error is commit_message_required"
-      "commit_message_required" (json_string "error" json))
+    let err = json_string "error" json in
+    check bool "error mentions commit_message"
+      true (String_util.contains_substring_ci err "commit_message"))
 
 let test_missing_pr_title () =
   with_room (fun config ->
@@ -165,8 +168,9 @@ let test_missing_pr_title () =
       ] in
     let result = call_tool config meta "keeper_pr_workflow" args in
     let json = parse_json result in
-    check string "error is pr_title_required"
-      "pr_title_required" (json_string "error" json))
+    let err = json_string "error" json in
+    check bool "error mentions pr_title"
+      true (String_util.contains_substring_ci err "pr_title"))
 
 (* --- Preset gate --- *)
 

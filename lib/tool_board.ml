@@ -447,6 +447,16 @@ let handle_vote args =
             | Error _ -> ""
       in
       (true, Printf.sprintf "%s Vote recorded. New score: %+d%s" arrow new_score evolution_msg)
+  | Error (Board.Already_voted _) ->
+      (* Idempotent: same-direction duplicate vote is a no-op success.
+         The desired state already exists, so the tool call succeeds. *)
+      (match Board_dispatch.get_post ~post_id with
+       | Ok post ->
+           let score = post.votes_up - post.votes_down in
+           let arrow = if direction = Board.Up then "↑" else "↓" in
+           (true, Printf.sprintf "%s Already voted (idempotent). Score: %+d" arrow score)
+       | Error _ ->
+           (true, "Already voted (idempotent). Score unchanged."))
   | Error e ->
       (false, Printf.sprintf "❌ %s" (board_error_to_string e))
 
@@ -476,6 +486,8 @@ let handle_comment_vote args =
   else
     match Board_dispatch.vote_comment ~voter ~comment_id ~direction with
     | Ok score -> (true, Printf.sprintf "%s 코멘트 투표 완료! 점수: %+d" (if direction_str = "down" then "👎" else "👍") score)
+    | Error (Board.Already_voted _) ->
+        (true, Printf.sprintf "%s Already voted (idempotent)." (if direction_str = "down" then "👎" else "👍"))
     | Error e -> (false, Printf.sprintf "❌ %s" (board_error_to_string e))
 
 (** Agent profile *)

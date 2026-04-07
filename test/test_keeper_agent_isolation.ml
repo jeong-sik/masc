@@ -265,13 +265,13 @@ let test_keeper_agent_sender_plain_name () =
   let meta = make_meta ~name:"sangsu" () in
   Alcotest.(check string)
     "returns meta.agent_name" "sangsu"
-    (Keeper_exec_tools.keeper_agent_sender ~meta)
+    (Masc_mcp.Keeper_exec_shared.keeper_agent_sender ~meta)
 
 let test_keeper_agent_sender_prefixed_name () =
   let meta = make_meta ~name:"keeper-admin" () in
   Alcotest.(check string)
     "returns meta.agent_name" "keeper-admin"
-    (Keeper_exec_tools.keeper_agent_sender ~meta)
+    (Masc_mcp.Keeper_exec_shared.keeper_agent_sender ~meta)
 
 let test_keeper_agent_name_plain () =
   Alcotest.(check string)

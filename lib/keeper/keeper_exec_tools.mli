@@ -1,8 +1,5 @@
 open Keeper_types
 
-val ensure_keeper_board_post_args :
-  author:string -> source:string -> Yojson.Safe.t -> Yojson.Safe.t
-
 val keeper_allowed_tool_names : ?write_done:bool -> keeper_meta -> string list
 val keeper_allowed_model_tools :
   ?write_done:bool -> keeper_meta -> Types.tool_schema list
@@ -90,10 +87,6 @@ val tool_search_fn :
 (** Tag-based dispatch callback for masc_* tools without handler registry entries.
     Set at server init to [Keeper_tag_dispatch.dispatch]. Default: returns None.
     See #4579. *)
-val tag_dispatch_fn :
-  (config:Room.config -> agent_name:string ->
-   tag:Tool_dispatch.module_tag -> name:string ->
-   args:Yojson.Safe.t -> (bool * string) option) ref
 
 (** masc_* tool names available for a keeper (filtered by allowlist/denylist). *)
 val keeper_masc_tool_names : keeper_meta -> string list
@@ -103,7 +96,6 @@ val keeper_masc_tool_schemas : keeper_meta -> Types.tool_schema list
 
 (** Compute the keeper's sender identity for portals and broadcasts.
     Guards against double "keeper-" prefix. See #5104. *)
-val keeper_agent_sender : meta:keeper_meta -> string
 
 val execute_keeper_tool_call :
   config:Room.config ->

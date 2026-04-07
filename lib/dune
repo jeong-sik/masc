@@ -451,6 +451,15 @@
    keeper_discovered_tools
    keeper_tool_affinity
    keeper_tag_dispatch
+   keeper_exec_shared
+   keeper_exec_board
+   keeper_exec_fs
+   keeper_exec_shell
+   keeper_exec_github
+   keeper_exec_task
+   keeper_exec_voice
+   keeper_exec_masc
+   keeper_exec_memory
    keeper_exec_tools
    keeper_voice_local
    keeper_voice_loop
@@ -610,7 +619,16 @@
   keeper_tool_policy
   keeper_discovered_tools
   keeper_tool_affinity
-  keeper_exec_tools
+  keeper_exec_shared
+   keeper_exec_board
+   keeper_exec_fs
+   keeper_exec_shell
+   keeper_exec_github
+   keeper_exec_task
+   keeper_exec_voice
+   keeper_exec_masc
+   keeper_exec_memory
+   keeper_exec_tools
   keeper_exec_status_metrics
   keeper_exec_status
   keeper_status_detail

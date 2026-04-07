@@ -111,7 +111,7 @@ let () =
      Breaks the same Config dependency cycle as on_keeper_tool_call.
      See #4579: keeper_exec_tools uses handler registry (Tool_Board only),
      this callback adds tag-registry dispatch for ~190 more tools. *)
-  Keeper_exec_tools.tag_dispatch_fn := Keeper_tag_dispatch.dispatch;
+  Keeper_exec_shared.tag_dispatch_fn := Keeper_tag_dispatch.dispatch;
   Log.Mcp.info "Tag registry initialized: %d tools registered" (tag_registry_count ());
   (* C-4: Register input schema validation pre-hook.
      Validates tool arguments against their declared input_schema

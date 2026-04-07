@@ -67,23 +67,36 @@ let max_consecutive_failures =
 let keeper_tool_result_is_failure (result : string) : bool =
   try
     let json = Yojson.Safe.from_string result in
-    let has_error_field =
+    (* Policy gate rejections are not tool failures — the tool works correctly,
+       but the keeper's preset denies execution.  Counting these as failures
+       inflates metrics for social-preset keepers that discover tools like
+       keeper_fs_edit or keeper_pr_workflow via core_discovery_tools but
+       cannot execute them.  The LLM still sees the error message and can
+       adapt; only the metric classification changes. *)
+    let is_policy_gate =
       match Safe_ops.json_string_opt "error" json with
-      | Some msg -> String.trim msg <> ""
+      | Some msg -> String.equal (String.trim msg) "tool_not_allowed"
       | None -> false
     in
-    let has_error_status =
-      match Safe_ops.json_string_opt "status" json with
-      | Some status ->
-          String.equal (String.lowercase_ascii (String.trim status)) "error"
-      | None -> false
-    in
-    let has_ok_false =
-      match Safe_ops.json_bool_opt "ok" json with
-      | Some false -> true
-      | Some true | None -> false
-    in
-    has_error_field || has_error_status || has_ok_false
+    if is_policy_gate then false
+    else
+      let has_error_field =
+        match Safe_ops.json_string_opt "error" json with
+        | Some msg -> String.trim msg <> ""
+        | None -> false
+      in
+      let has_error_status =
+        match Safe_ops.json_string_opt "status" json with
+        | Some status ->
+            String.equal (String.lowercase_ascii (String.trim status)) "error"
+        | None -> false
+      in
+      let has_ok_false =
+        match Safe_ops.json_bool_opt "ok" json with
+        | Some false -> true
+        | Some true | None -> false
+      in
+      has_error_field || has_error_status || has_ok_false
   with Yojson.Json_error _ -> false
 
 (** Normalize a raw tool result string into a consistent JSON envelope.

@@ -361,6 +361,11 @@ let handle_post_get args =
   let post_id = get_string args "post_id" "" in
 
   match Board_dispatch.get_post ~post_id with
+  | Error (Board.Post_not_found _) ->
+      (* Idempotent: post no longer exists (deleted/expired/TTL).
+         Return success so keeper tool metrics don't count this as failure.
+         The LLM still sees a clear message that the post is gone. *)
+      (true, Printf.sprintf "📭 Post %s no longer exists (deleted or expired)." post_id)
   | Error e -> (false, Printf.sprintf "❌ %s" (board_error_to_string e))
   | Ok post ->
       match Board_dispatch.get_comments ~post_id with

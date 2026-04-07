@@ -786,7 +786,6 @@ let tools = [
   tool_profile;
   tool_hearth_list;
   tool_delete;
-  tool_board_cleanup;
 ]
 
 (** Tool dispatcher *)

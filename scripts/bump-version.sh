@@ -42,9 +42,8 @@ echo "  README.md badge updated"
 
 # 3) opam metadata (if tracked)
 if [ -f "$ROOT_DIR/masc_mcp.opam" ]; then
-  sedi -E "s/^version: \".*\"/version: \"$NEW_VERSION\"/" \
-    "$ROOT_DIR/masc_mcp.opam"
-  echo "  masc_mcp.opam updated"
+  dune build masc_mcp.opam --root "$ROOT_DIR"
+  echo "  masc_mcp.opam updated (via dune build)"
 fi
 
 # 4) CHANGELOG stub (prepend if missing)

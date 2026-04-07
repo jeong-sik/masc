@@ -187,9 +187,10 @@ let select_named_schemas (names : string list) (schemas : Types.tool_schema list
 let filesystem_tools : Types.tool_schema list = [
   {
     name = "keeper_fs_read";
-    description = "Read a file from the project. Returns file content as text (truncated at max_bytes). \
-Use to inspect source code, configs, logs, or any file before making decisions. \
-For searching across files, use keeper_shell_readonly with op=rg instead.";
+    description = "Read the contents of a file from the project. Returns full file content as text \
+(truncated at max_bytes). The primary tool for reading and inspecting source code files, \
+configs, logs, documentation, or any text file. \
+For searching across multiple files, use keeper_shell_readonly with op=rg instead.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -219,19 +220,21 @@ Mode 'overwrite' replaces the entire file; 'append' adds to the end.";
 let shell_tools : Types.tool_schema list = [
   {
     name = "keeper_shell_readonly";
-    description = "Run a read-only project command. Safe, no side effects. \
-ops: pwd (working dir), ls (directory listing), cat (file content), \
-rg (ripgrep search across files), git_status (repo state). \
-To read a single file, prefer keeper_fs_read (handles truncation). \
-Use this tool for multi-file search (rg), directory listing (ls), or repo state (git_status).";
+    description = "Run a safe project shell command (no side effects). \
+ops: pwd, ls, cat, rg, git_status, find, head, tail, wc, tree, git_log, git_diff, bash. \
+bash op runs arbitrary non-destructive commands (writes/deletes blocked). \
+Use rg for pattern search across directories, find for path discovery, head/tail for line ranges, \
+git_log/git_diff for repo history, bash for curl/jq/env/which.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
-        ("op", `Assoc [("type", `String "string"); ("description", `String "One of: pwd, ls, cat, rg, git_status")]);
-        ("path", `Assoc [("type", `String "string"); ("description", `String "Target path for ls/cat/rg")]);
-        ("pattern", `Assoc [("type", `String "string"); ("description", `String "Search pattern for rg")]);
-        ("limit", `Assoc [("type", `String "integer"); ("description", `String "Result limit for ls/rg")]);
+        ("op", `Assoc [("type", `String "string"); ("description", `String "One of: pwd, ls, cat, rg, git_status, find, head, tail, wc, tree, git_log, git_diff, bash")]);
+        ("path", `Assoc [("type", `String "string"); ("description", `String "Target path for ls/cat/rg/find/head/tail/wc/tree")]);
+        ("pattern", `Assoc [("type", `String "string"); ("description", `String "Search pattern for rg, or name pattern for find")]);
+        ("limit", `Assoc [("type", `String "integer"); ("description", `String "Result limit for ls/rg/find/tree, or line count for git_log")]);
+        ("lines", `Assoc [("type", `String "integer"); ("description", `String "Number of lines for head/tail (default 20, max 200)")]);
         ("max_bytes", `Assoc [("type", `String "integer"); ("description", `String "Max bytes for cat")]);
+        ("command", `Assoc [("type", `String "string"); ("description", `String "Shell command for bash op (read-only, writes blocked)")]);
       ]);
       ("required", `List [`String "op"]);
     ];

@@ -49,5 +49,7 @@ tool_preset = "social"
 tool_also_allow = [
   "keeper_board_delete",
   "keeper_board_cleanup",
+  "keeper_tasks_audit",
+  "keeper_shell_readonly",
   "masc_cleanup_zombies",
 ]

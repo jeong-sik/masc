@@ -118,6 +118,138 @@ let synonyms : (string * string list) list =
     ("keeper_tool_search",
      [ "find tool"; "discover tool"; "search tools"; "what tool";
        "tool for"; "which tool" ]);
+    (* masc_code_* — code manipulation tools *)
+    ("masc_code_search",
+     [ "search code"; "find code"; "code lookup"; "grep code"; "find symbol";
+       "search source"; "codebase search"; "code query"; "소스코드 검색";
+       "코드 찾기"; "심볼 검색" ]);
+    ("masc_code_read",
+     [ "read code"; "view code"; "source file"; "open source"; "code contents";
+       "read source"; "show code"; "코드 읽기"; "소스 보기" ]);
+    ("masc_code_edit",
+     [ "edit code"; "modify code"; "change code"; "update code"; "patch code";
+       "code change"; "코드 편집"; "코드 수정"; "소스 변경" ]);
+    ("masc_code_write",
+     [ "write code"; "create code"; "new file code"; "generate code";
+       "code creation"; "코드 작성"; "파일 생성"; "새 코드" ]);
+    ("masc_code_symbols",
+     [ "code symbols"; "function list"; "class definitions"; "symbol overview";
+       "navigate code"; "code structure"; "함수 목록"; "클래스 정의";
+       "심볼 목록"; "코드 구조" ]);
+    ("masc_code_shell",
+     [ "code shell"; "run code command"; "execute in code"; "code exec";
+       "코드 명령어"; "코드 실행"; "쉘 실행" ]);
+    ("masc_code_git",
+     [ "code git"; "git in code"; "code commit"; "code branch"; "code log";
+       "깃 커밋"; "브랜치"; "이력"; "코드 로그" ]);
+    (* masc_governance_* — policy and rules *)
+    ("masc_governance_status",
+     [ "governance status"; "policy status"; "rules check"; "compliance check";
+       "거버넌스 상태"; "규칙 확인"; "정책 상태" ]);
+    ("masc_governance_feed",
+     [ "governance feed"; "policy events"; "rule changes"; "governance log";
+       "거버넌스 피드"; "정책 이벤트"; "규칙 변경" ]);
+    ("masc_governance_set",
+     [ "set governance"; "change policy"; "update rules"; "configure governance";
+       "거버넌스 설정"; "규칙 변경"; "정책 수정" ]);
+    (* masc_autoresearch_* — automated research *)
+    ("masc_autoresearch_start",
+     [ "start research"; "begin research"; "auto research"; "autoresearch start";
+       "자동연구 시작"; "리서치 시작" ]);
+    ("masc_autoresearch_status",
+     [ "research status"; "autoresearch status"; "research progress";
+       "자동연구 상태"; "리서치 진행" ]);
+    ("masc_autoresearch_stop",
+     [ "stop research"; "cancel research"; "end autoresearch";
+       "자동연구 중지"; "리서치 중지" ]);
+    ("masc_autoresearch_cycle",
+     [ "research cycle"; "run cycle"; "autoresearch cycle"; "execute research";
+       "자동연구 사이클"; "리서치 실행" ]);
+    (* masc_plan_* — project planning *)
+    ("masc_plan_get",
+     [ "get plan"; "view plan"; "show plan"; "current plan"; "roadmap";
+       "계획 조회"; "플랜"; "마일스톤"; "로드맵"; "프로젝트 계획" ]);
+    ("masc_plan_init",
+     [ "init plan"; "create plan"; "new plan"; "setup plan"; "plan setup";
+       "계획 초기화"; "플랜 생성" ]);
+    ("masc_plan_update",
+     [ "update plan"; "modify plan"; "change plan"; "edit plan"; "revise plan";
+       "계획 수정"; "플랜 업데이트" ]);
+    ("masc_plan_set_task",
+     [ "set task in plan"; "assign plan task"; "plan task set"; "current task plan";
+       "계획 태스크 설정"; "플랜 작업 할당" ]);
+    ("masc_plan_get_task",
+     [ "get task from plan"; "plan task"; "current plan task";
+       "계획 태스크 조회"; "플랜 작업 확인" ]);
+    ("masc_plan_clear_task",
+     [ "clear plan task"; "remove plan task"; "unassign plan task";
+       "계획 태스크 해제"; "플랜 작업 제거" ]);
+    (* masc_team_session_* — swarm/team operations *)
+    ("masc_team_session_start",
+     [ "start team session"; "begin swarm"; "team work start"; "parallel session";
+       "팀 세션 시작"; "스웜 시작"; "병렬 작업"; "멀티 에이전트" ]);
+    ("masc_team_session_status",
+     [ "team session status"; "swarm status"; "parallel progress";
+       "팀 세션 상태"; "스웜 현황" ]);
+    ("masc_team_session_step",
+     [ "team step"; "session step"; "swarm step"; "team turn";
+       "팀 세션 단계"; "스웜 스텝" ]);
+    ("masc_team_session_stop",
+     [ "stop team session"; "end swarm"; "finish parallel work";
+       "팀 세션 중지"; "스웜 종료" ]);
+    ("masc_team_session_list",
+     [ "list team sessions"; "swarm list"; "team sessions";
+       "팀 세션 목록"; "스웜 목록" ]);
+    ("masc_team_session_events",
+     [ "team events"; "session timeline"; "swarm events";
+       "팀 세션 이벤트"; "세션 타임라인" ]);
+    ("masc_team_session_prove",
+     [ "prove session"; "verify team work"; "session proof";
+       "팀 세션 증명"; "검증" ]);
+    ("masc_team_session_report",
+     [ "team report"; "session report"; "swarm report";
+       "팀 세션 리포트"; "스웜 보고서" ]);
+    ("masc_team_session_compare",
+     [ "compare sessions"; "diff sessions"; "session compare";
+       "세션 비교"; "팀 세션 비교" ]);
+    ("masc_team_session_finalize",
+     [ "finalize session"; "complete team session"; "wrap up session";
+       "팀 세션 종료"; "세션 마무리" ]);
+    (* masc_worktree_* — git worktree management *)
+    ("masc_worktree_create",
+     [ "create worktree"; "new worktree"; "isolated branch"; "git worktree add";
+       "워크트리 생성"; "작업 공간 생성"; "브랜치 격리" ]);
+    ("masc_worktree_list",
+     [ "list worktrees"; "show worktrees"; "worktree status";
+       "워크트리 목록"; "작업 공간 현황" ]);
+    ("masc_worktree_remove",
+     [ "remove worktree"; "delete worktree"; "cleanup worktree";
+       "워크트리 삭제"; "작업 공간 정리" ]);
+    (* masc_agent_* — agent management *)
+    ("masc_agent_card",
+     [ "agent card"; "agent profile"; "agent info"; "who is agent";
+       "에이전트 카드"; "에이전트 프로필"; "에이전트 정보" ]);
+    ("masc_agent_update",
+     [ "update agent"; "change agent"; "agent modify"; "agent settings";
+       "에이전트 업데이트"; "에이전트 상태변경" ]);
+    ("masc_agent_fitness",
+     [ "agent fitness"; "agent evaluation"; "agent score"; "rate agent";
+       "에이전트 적합도"; "에이전트 평가" ]);
+    (* masc auth *)
+    ("masc_auth_status",
+     [ "auth status"; "authentication"; "token status"; "credentials";
+       "인증 상태"; "토큰 확인" ]);
+    ("masc_auth_refresh",
+     [ "refresh token"; "renew auth"; "auth refresh"; "token refresh";
+       "인증 갱신"; "토큰 갱신" ]);
+    (* masc web search *)
+    ("masc_web_search",
+     [ "web search"; "search internet"; "search online"; "google";
+       "웹 검색"; "인터넷 검색"; "온라인 검색" ]);
+    (* keeper pr workflow *)
+    ("keeper_pr_workflow",
+     [ "create pr"; "new pull request"; "open draft pr"; "one shot pr";
+       "push and pr"; "submit pr"; "PR 생성"; "풀리퀘스트" ]);
   ]
 
 let synonym_lookup =

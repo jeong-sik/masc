@@ -265,21 +265,22 @@ Mode 'overwrite' replaces the entire file; 'append' adds to the end.";
 let shell_tools : Types.tool_schema list = [
   {
     name = "keeper_shell_readonly";
-    description = "Run a safe project shell command (no side effects). \
+    description = "Run a safe READ-ONLY project shell command. No writes, no deletes, no side effects. \
 ops: pwd, ls, cat, rg, git_status, find, head, tail, wc, tree, git_log, git_diff, bash. \
-bash op runs arbitrary non-destructive commands (writes/deletes blocked). \
-Use rg for pattern search across directories, find for path discovery, head/tail for line ranges, \
+find REQUIRES pattern param (e.g. pattern=\"*.ml\"). \
+bash op: single command only, no chaining (&&, ||, |, ; are blocked), no redirects (>, >>). \
+Use rg for pattern search, find for path discovery, head/tail for line ranges, \
 git_log/git_diff for repo history, bash for curl/jq/env/which.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
         ("op", `Assoc [("type", `String "string"); ("enum", `List [`String "pwd"; `String "ls"; `String "cat"; `String "rg"; `String "git_status"; `String "find"; `String "head"; `String "tail"; `String "wc"; `String "tree"; `String "git_log"; `String "git_diff"; `String "bash"]); ("description", `String "Command to run")]);
         ("path", `Assoc [("type", `String "string"); ("description", `String "Target path for ls/cat/rg/find/head/tail/wc/tree")]);
-        ("pattern", `Assoc [("type", `String "string"); ("description", `String "Search pattern for rg, or name pattern for find")]);
+        ("pattern", `Assoc [("type", `String "string"); ("description", `String "Search pattern for rg, or name glob for find (REQUIRED for find, e.g. \"*.ml\")")]);
         ("limit", `Assoc [("type", `String "integer"); ("description", `String "Result limit for ls/rg/find/tree, or line count for git_log")]);
         ("lines", `Assoc [("type", `String "integer"); ("description", `String "Number of lines for head/tail (default 20, max 200)")]);
         ("max_bytes", `Assoc [("type", `String "integer"); ("description", `String "Max bytes for cat")]);
-        ("command", `Assoc [("type", `String "string"); ("description", `String "Shell command for bash op (read-only, writes blocked)")]);
+        ("command", `Assoc [("type", `String "string"); ("description", `String "Single shell command for bash op. No chaining (&&/||/;/|) or redirects (>/>>) allowed. Read-only.")]);
       ]);
       ("required", `List [`String "op"]);
     ];
@@ -289,9 +290,10 @@ git_log/git_diff for repo history, bash for curl/jq/env/which.";
 let coding_keeper_bridge_tools : Types.tool_schema list = [
   {
     name = "keeper_bash";
-    description = "Run a shell command by cmd (builds, tests, git, file edits) — \
-returns exit_code and output. For read-only ops prefer keeper_shell_readonly, \
-for file writes prefer keeper_fs_edit, for worktree-isolated code prefer masc_code_shell.";
+    description = "Run a single shell command (builds, tests, git). Returns exit_code and output. \
+Single command only: no chaining (&&/||/;), no pipes (|), no redirects (>). \
+For read-only ops use keeper_shell_readonly, \
+for file writes use keeper_fs_edit, for worktree-isolated code use masc_code_shell.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

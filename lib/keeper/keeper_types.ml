@@ -37,6 +37,7 @@ type scheduled_autonomous_cycle_outcome = proactive_cycle_outcome
 
 type tool_preset =
   | Minimal
+  | Social
   | Messaging
   | Coding
   | Research
@@ -198,6 +199,7 @@ let migrate_legacy_restricted_tools names =
 
 let tool_preset_to_string = function
   | Minimal -> "minimal"
+  | Social -> "social"
   | Messaging -> "messaging"
   | Coding -> "coding"
   | Research -> "research"
@@ -208,6 +210,7 @@ let tool_preset_to_string = function
 let tool_preset_of_string raw =
   match String.trim (String.lowercase_ascii raw) with
   | "minimal" -> Some Minimal
+  | "social" -> Some Social
   | "messaging" -> Some Messaging
   | "coding" -> Some Coding
   | "research" -> Some Research
@@ -1315,6 +1318,23 @@ let read_meta config name : (keeper_meta option, string) result =
       path
       (Sys.file_exists path);
   read_meta_file_path path
+;;
+
+(** Read keeper meta only if the file's mtime has changed since [last_mtime].
+    Returns [Some (meta, new_mtime)] when the file changed, [None] when
+    unchanged.  Avoids parsing JSON on every heartbeat cycle when no
+    operator has modified the meta file. *)
+let read_meta_if_changed config name ~(last_mtime : float)
+  : (keeper_meta * float) option =
+  let path = keeper_meta_path config name in
+  if not (Sys.file_exists path) then None
+  else
+    let stat = Unix.stat path in
+    if stat.Unix.st_mtime <= last_mtime then None
+    else
+      match read_meta_file_path path with
+      | Ok (Some meta) -> Some (meta, stat.Unix.st_mtime)
+      | _ -> None
 ;;
 
 (* Model selection, path utilities, and JSONL helpers

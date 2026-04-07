@@ -39,6 +39,7 @@ type scheduled_autonomous_cycle_outcome = proactive_cycle_outcome
 
 type tool_preset =
   | Minimal
+  | Social
   | Messaging
   | Coding
   | Research
@@ -222,6 +223,13 @@ val persistent_agent_names : Room.config -> string list
 val fresher_meta : Room.config -> keeper_meta -> keeper_meta
 val write_meta : ?force:bool -> Room.config -> keeper_meta -> (unit, string) result
 val read_meta : Room.config -> string -> (keeper_meta option, string) result
+
+(** Read keeper meta only if the file's mtime changed since [last_mtime].
+    Returns [Some (meta, new_mtime)] on change, [None] when unchanged.
+    Avoids JSON parsing on every heartbeat when no operator modified the file. *)
+val read_meta_if_changed :
+  Room.config -> string -> last_mtime:float ->
+  (keeper_meta * float) option
 
 (** {1 Re-exports from Keeper_types_support} *)
 

@@ -7,6 +7,7 @@ import { TimeAgo } from './common/time-ago'
 import { EmptyState } from './common/empty-state'
 import { FilterChips } from './common/filter-chips'
 import { ActionButton } from './common/button'
+import { DistributionBars, SegmentedBar, type DistributionItem } from './common/distribution-bars'
 import { TextInput } from './common/input'
 import { governanceToneClass } from '../lib/tone'
 import {
@@ -96,6 +97,81 @@ function GovernanceSummaryStrip() {
       <${KpiCard} label="집행 완료" value=${caseTrackingRetired ? retiredValue : (summary?.executed ?? 0)} hint=${caseTrackingRetired ? retiredHint : undefined} />
     </div>
     <${JudgeStatusBar} />
+  `
+}
+
+function governanceCaseDistribution(): DistributionItem[] {
+  const summary = governanceData.value?.summary
+  return [
+    { label: '열린 케이스', value: summary?.cases_open ?? 0, tone: 'accent' },
+    { label: '판정 대기', value: summary?.pending_ruling ?? 0, tone: 'warn' },
+    { label: '자동집행 준비', value: summary?.ready_auto_execute ?? 0, tone: 'ok' },
+    { label: '관리자 승인 대기', value: summary?.needs_human_gate ?? 0, tone: 'warn' },
+    { label: '집행 완료', value: summary?.executed ?? 0, tone: 'ok' },
+    { label: '보류/종결', value: summary?.blocked ?? 0, tone: 'bad' },
+  ]
+}
+
+function governanceStatusSegments(): DistributionItem[] {
+  const items = governanceData.value?.items ?? []
+  const counts = new Map<string, number>()
+  for (const item of items) {
+    const key = item.status?.trim() || 'unknown'
+    counts.set(key, (counts.get(key) ?? 0) + 1)
+  }
+  return [...counts.entries()].map(([label, value]) => ({
+    label,
+    value,
+    tone:
+      label === 'executed'
+        ? 'ok'
+        : label === 'blocked'
+          ? 'bad'
+          : label === 'pending_ruling' || label === 'needs_human_gate'
+            ? 'warn'
+            : 'accent',
+  }))
+}
+
+function judgmentSignalDistribution(): DistributionItem[] {
+  const judgments = governanceData.value?.judgments ?? []
+  const actionRequired = judgments.filter(j => j.guardrail_state?.requires_human_gate).length
+  const executedRoute = judgments.filter(j => Boolean(j.executed_route?.tool_name || j.executed_route?.action_type)).length
+  const confident = judgments.filter(j => (j.confidence ?? 0) >= 0.8).length
+  return [
+    { label: '판단 생성', value: judgments.length, tone: 'accent' },
+    { label: '승인 필요', value: actionRequired, tone: 'warn' },
+    { label: '집행 경로 기록', value: executedRoute, tone: 'ok' },
+    { label: '고신뢰', value: confident, tone: 'ok' },
+  ]
+}
+
+function GovernanceVisualSummary() {
+  const caseTrackingRetired = governanceCaseTrackingRetired()
+  return html`
+    <div class="mb-5 grid grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)] gap-3 max-[960px]:grid-cols-1">
+      <${DistributionBars}
+        title="Case Load Visualized"
+        subtitle=${caseTrackingRetired ? 'retired 상태에서는 judge/live 신호만 유지됩니다.' : '요약 카운트를 막대로 압축해서 보여줍니다.'}
+        items=${governanceCaseDistribution()}
+        valueFormatter=${(value: number) => `${value}건`}
+        emptyLabel="시각화할 케이스 요약이 없습니다."
+      />
+      <div class="grid gap-3">
+        <${SegmentedBar}
+          title="Case Status Mix"
+          subtitle="현재 사건 inbox 상태 비중"
+          items=${governanceStatusSegments()}
+          valueFormatter=${(value: number) => `${value}`}
+        />
+        <${SegmentedBar}
+          title="Judge Signal Mix"
+          subtitle="AI Judge 결과에서 바로 읽을 수 있는 운영 신호"
+          items=${judgmentSignalDistribution()}
+          valueFormatter=${(value: number) => `${value}`}
+        />
+      </div>
+    </div>
   `
 }
 
@@ -309,6 +385,7 @@ export function Governance() {
   return html`
     <div class="flex flex-col gap-0.5">
       <${GovernanceSummaryStrip} />
+      <${GovernanceVisualSummary} />
       <${GovernanceToolbar} />
       <${JudgmentsSection} />
       <div class="governance-layout">

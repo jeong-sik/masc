@@ -1,5 +1,4 @@
 import { html } from 'htm/preact'
-import { waitFor } from '@testing-library/preact'
 import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -54,7 +53,6 @@ vi.mock('./common/toast', () => ({
 import { keeperActionErrors, keeperHydrating, keeperSending, keeperStreamStartedAt, keeperThreads } from '../keeper-runtime'
 import { hydrateKeeperStatus } from '../keeper-runtime'
 import { shellAuthSummary } from '../store'
-import { showToast } from './common/toast'
 import { KeeperConversationPanel, KeeperRuntimeActions } from './keeper-shared'
 
 describe('KeeperConversationPanel', () => {
@@ -147,9 +145,8 @@ describe('KeeperConversationPanel', () => {
     expect(hydrateKeeperStatus).not.toHaveBeenCalled()
   })
 
-  it('keeps lifecycle success visible after boot', async () => {
-    const keeper = { name: 'sangsu', status: 'offline' } as any
-    bootKeeper.mockResolvedValue({ ok: true })
+  it('renders probe and recover buttons in RuntimeActions', async () => {
+    const keeper = { name: 'sangsu', status: 'running' } as any
 
     render(
       html`<${KeeperRuntimeActions}
@@ -160,18 +157,11 @@ describe('KeeperConversationPanel', () => {
       container,
     )
 
-    const bootButton = Array.from(container.querySelectorAll('button')).find(
-      button => button.textContent?.trim() === '기동',
-    )
-    expect(bootButton).not.toBeUndefined()
-    bootButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-
-    await waitFor(() => {
-      expect(bootKeeper).toHaveBeenCalledWith('sangsu')
-    })
-    expect(invalidateDashboardCache).toHaveBeenCalled()
-    expect(refreshDashboard).toHaveBeenCalledWith({ force: true })
-    expect(showToast).toHaveBeenCalledWith('sangsu 기동됨', 'success')
-    expect(showToast).not.toHaveBeenCalledWith('sangsu 기동 실패', 'error')
+    const buttons = Array.from(container.querySelectorAll('button')).map(b => b.textContent?.trim())
+    expect(buttons).toContain('Probe')
+    expect(buttons).toContain('Recover')
+    expect(buttons).toContain('Social sweep')
+    expect(buttons).not.toContain('기동')
+    expect(buttons).not.toContain('종료')
   })
 })

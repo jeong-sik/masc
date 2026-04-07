@@ -24,6 +24,11 @@ async function refreshFeatureHealthSurface(): Promise<void> {
   await refreshFeatureHealth()
 }
 
+async function refreshServerConfigSurface(): Promise<void> {
+  const { refreshServerConfig } = await import('./components/server-config')
+  await refreshServerConfig()
+}
+
 async function refreshGovernanceSurface(): Promise<void> {
   const { refreshGovernance } = await import('./components/governance-store')
   await refreshGovernance()
@@ -39,7 +44,7 @@ export type RefreshTask =
   | 'goals'
   | 'autoresearch'
   | 'harness'
-  | 'featureHealth'
+  | 'inspector'
   | 'operatorSnapshot'
   | 'operatorRoomDigest'
   | 'governance'
@@ -82,8 +87,8 @@ export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params
       if (routeState.params.section === 'harness') {
         return ['harness']
       }
-      if (routeState.params.section === 'features') {
-        return ['featureHealth']
+      if (routeState.params.section === 'inspector') {
+        return ['inspector']
       }
       return []
     case 'logs':
@@ -102,7 +107,10 @@ const REFRESHERS: Record<RefreshTask, () => void> = {
   goals: () => { void refreshGoals() },
   autoresearch: () => { void refreshAutoresearchLabSurface() },
   harness: () => { void refreshHarnessLabSurface() },
-  featureHealth: () => { void refreshFeatureHealthSurface() },
+  inspector: () => {
+    void refreshFeatureHealthSurface()
+    void refreshServerConfigSurface()
+  },
   operatorSnapshot: () => { void refreshOperatorSnapshot({ force: true }) },
   operatorRoomDigest: () => { void refreshOperatorRoomDigest({ force: true }) },
   governance: () => { void refreshGovernanceSurface() },

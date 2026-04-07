@@ -69,6 +69,40 @@ let annotate_keeper_json ~runtime_class json =
       `Assoc (("runtime_class", `String runtime_class) :: fields)
   | other -> other
 
+let startup_not_ready_error_json elapsed =
+  `Assoc
+    [
+      ("error", `String "server_initializing");
+      ( "message",
+        `String
+          (Printf.sprintf
+             "MASC server is still starting (%.0fs elapsed). Retry in a few seconds."
+             elapsed) );
+      ("retry_after_ms", `Int 3000);
+    ]
+  |> Yojson.Safe.pretty_to_string
+
+let with_keeper_startup_gate f =
+  if not Server_startup_state.((!state).state_ready) then begin
+    let elapsed = Server_startup_state.elapsed_since_start () in
+    Log.Keeper.warn "keeper_up rejected: server not ready (%.1fs since start)" elapsed;
+    (false, startup_not_ready_error_json elapsed)
+  end else
+    f ()
+
+let execute_keeper_up ctx args : tool_result =
+  let ok, body = Turn.handle_keeper_up ctx args in
+  if not ok then (ok, body)
+  else
+    let json =
+      try Yojson.Safe.from_string body with Yojson.Json_error _ -> `String body
+    in
+    invalidate_keeper_list_cache ();
+    Keeper_status_detail.invalidate_status_cache_for (get_string args "name" "");
+    (true,
+     Yojson.Safe.pretty_to_string
+       (annotate_keeper_json ~runtime_class:"keeper" json))
+
 let keeper_brief_meta_json (meta : keeper_meta) =
   `Assoc
     [
@@ -170,6 +204,11 @@ let invalidate_status_cache name =
   Keeper_status_detail.invalidate_status_cache_for name
 
 let handle_keeper_create_from_persona ctx args : tool_result =
+  if not Server_startup_state.((!state).state_ready) then begin
+    let elapsed = Server_startup_state.elapsed_since_start () in
+    Log.Keeper.warn "create_from_persona rejected: server not ready (%.1fs)" elapsed;
+    (false, startup_not_ready_error_json elapsed)
+  end else
   match Keeper_exec_persona.resolved_keeper_args_from_persona args with
   | Error e -> (false, "❌ " ^ e)
   | Ok (persona, resolved_args) ->
@@ -185,7 +224,7 @@ let handle_keeper_create_from_persona ctx args : tool_result =
         in
         (true, Yojson.Safe.pretty_to_string json)
       else
-        let ok, body = Turn.handle_keeper_up ctx resolved_args in
+        let (ok, body) = with_keeper_startup_gate (fun () -> execute_keeper_up ctx resolved_args) in
         if not ok then
           (false, body)
         else
@@ -206,17 +245,7 @@ let handle_keeper_create_from_persona ctx args : tool_result =
           (true, Yojson.Safe.pretty_to_string json)
 
 let handle_keeper_up ctx args : tool_result =
-  let ok, body = Turn.handle_keeper_up ctx args in
-  if not ok then (ok, body)
-  else
-    let json =
-      try Yojson.Safe.from_string body with Yojson.Json_error _ -> `String body
-    in
-    invalidate_keeper_list_cache ();
-    invalidate_status_cache (get_string args "name" "");
-    (true,
-     Yojson.Safe.pretty_to_string
-       (annotate_keeper_json ~runtime_class:"keeper" json))
+  with_keeper_startup_gate (fun () -> execute_keeper_up ctx args)
 
 let handle_keeper_status ctx args : tool_result =
   let ok, body = Status.handle_keeper_status ctx args in
@@ -241,18 +270,34 @@ let handle_keeper_msg ctx args : tool_result =
   | Error err -> (false, err)
   | Ok _ ->
       let name = get_string args "name" "" in
-      let ok, body = Turn.handle_keeper_msg ctx args in
-      if not ok then (ok, body)
-      else begin
-        invalidate_keeper_list_cache ();
-        invalidate_status_cache name;
-        let json =
-          try Yojson.Safe.from_string body with Yojson.Json_error _ -> `String body
-        in
-        (true,
-         Yojson.Safe.pretty_to_string
-           (annotate_keeper_json ~runtime_class:"keeper" json))
-      end
+      let request_id = Keeper_msg_async.submit ~sw:ctx.sw
+        ~keeper_name:name
+        ~f:(fun () ->
+          let ok, body = Turn.handle_keeper_msg ctx args in
+          if ok then begin
+            invalidate_keeper_list_cache ();
+            invalidate_status_cache name
+          end;
+          (ok, body))
+      in
+      let json = `Assoc [
+        ("request_id", `String request_id);
+        ("keeper_name", `String name);
+        ("status", `String "queued");
+        ("message", `String "Keeper turn submitted. Poll with keeper_msg_result.");
+      ] in
+      (true, Yojson.Safe.pretty_to_string json)
+
+let handle_keeper_msg_result _ctx args : tool_result =
+  let request_id = get_string args "request_id" "" in
+  if request_id = "" then
+    (false, {|{"error":"request_id is required"}|})
+  else
+    match Keeper_msg_async.poll request_id with
+    | None ->
+      (false, Printf.sprintf {|{"error":"request_id not found","request_id":"%s"}|} request_id)
+    | Some entry ->
+      (true, Yojson.Safe.pretty_to_string (Keeper_msg_async.entry_to_json entry))
 
 let handle_keeper_msg_stream ~on_text_delta ctx args : tool_result =
   match ensure_keeper_exists ctx args with
@@ -467,6 +512,7 @@ let dispatch ctx ~name ~args : tool_result option =
   | "masc_keeper_up" -> Some (handle_keeper_up ctx args)
   | "masc_keeper_status" -> Some (handle_keeper_status ctx args)
   | "masc_keeper_msg" -> Some (handle_keeper_msg ctx args)
+  | "masc_keeper_msg_result" -> Some (handle_keeper_msg_result ctx args)
   | "masc_keeper_repair" -> Some (handle_keeper_repair ctx args)
   | "masc_keeper_down" -> Some (handle_keeper_down ctx args)
   | "masc_keeper_list" -> Some (handle_keeper_list ctx args)

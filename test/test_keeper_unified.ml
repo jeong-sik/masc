@@ -874,7 +874,7 @@ let test_unified_turn_runtime_defaults () =
   with_env "MASC_KEEPER_UNIFIED_MAX_TOKENS" "" (fun () ->
     check (float 0.01) "unified temp default" 0.4
       (KC.keeper_unified_temperature ());
-    check int "unified max_tokens default" 8192
+    check int "unified max_tokens default" 65536
       (KC.keeper_unified_max_tokens ())
     (* max_turns is set in keeper_agent_run.ml (default: 50) *)))
 
@@ -1808,6 +1808,7 @@ let test_on_idle_nudge_at_first_idle () =
   let decision = HK.on_idle_decision_with_threshold
     ~skip_at:3
     ~consecutive_idle_turns:1
+    ~allowed_tools:[]
     ~tool_names:["keeper_board_list"; "keeper_tasks_list"] in
   match decision with
   | Agent_sdk.Hooks.Nudge msg ->
@@ -1823,6 +1824,7 @@ let test_on_idle_final_warning_before_skip () =
   let decision = HK.on_idle_decision_with_threshold
     ~skip_at:3
     ~consecutive_idle_turns:2
+    ~allowed_tools:[]
     ~tool_names:["keeper_board_list"] in
   match decision with
   | Agent_sdk.Hooks.Nudge msg ->
@@ -1839,6 +1841,7 @@ let test_on_idle_skip_at_repeated_idle () =
   let decision = HK.on_idle_decision_with_threshold
     ~skip_at:3
     ~consecutive_idle_turns:3
+    ~allowed_tools:[]
     ~tool_names:["keeper_board_list"] in
   match decision with
   | Agent_sdk.Hooks.Skip -> ()
@@ -1852,6 +1855,7 @@ let test_on_idle_skip_with_custom_threshold () =
   let decision = HK.on_idle_decision_with_threshold
     ~skip_at:2
     ~consecutive_idle_turns:2
+    ~allowed_tools:[]
     ~tool_names:["keeper_board_list"] in
   match decision with
   | Agent_sdk.Hooks.Skip -> ()

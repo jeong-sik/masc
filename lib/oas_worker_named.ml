@@ -143,13 +143,14 @@ let run_named
     ?contract
     ?transport
     ?(allowed_paths = [])
-    ?working_context
+    ?checkpoint_sidecar
     ?(cache_system_prompt = false)
     ?(yield_on_tool = false)
     ?compact_ratio
     ?checkpoint_dir
     ?context_injector
     ?context
+    ?slot_id
     ?oas_checkpoint
     ?sw
     ?net
@@ -192,7 +193,7 @@ let run_named
       description = Some (Printf.sprintf "cascade:%s" cascade_name);
       transport = transport_resolved;
       allowed_paths;
-      working_context;
+      checkpoint_sidecar;
       session_id;
       cache_system_prompt;
       compact_ratio;
@@ -200,6 +201,7 @@ let run_named
       checkpoint_dir;
       context_injector;
       context;
+      slot_id;
     }
   in
   let config = { config with named_cascade = Some named_cascade; initial_messages; raw_trace; yield_on_tool } in

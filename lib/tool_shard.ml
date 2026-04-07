@@ -13,9 +13,23 @@ type shard = {
   description : string;
 }
 
+module StringMap = Map.Make(String)
+
 (** Predefined shards *)
 
 let base_tools : Types.tool_schema list = [
+  (* Stay silent: no-op tool for tool_choice=Any turns.
+     Lets the model explicitly skip a turn without being forced
+     to call a real tool when there is nothing to do. *)
+  {
+    name = "keeper_stay_silent";
+    description = "Do nothing this turn. Call when you have no pending work and no information \
+to share. Costs no resources. Prefer this over calling a tool with no purpose.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc []);
+    ];
+  };
   (* Time *)
   {
     name = "keeper_time_now";
@@ -40,19 +54,17 @@ compact context, extend turns, or hand off to the next generation.";
   (* Memory *)
   {
     name = "keeper_memory_search";
-    description = "Recall what the user said earlier or search your memory for past goals, \
-decisions, progress notes, and conversation history across all generations. \
-Returns scored results with metadata. Use to retrieve earlier instructions, \
-deployment plans, or any prior context. Default searches the structured memory bank. \
+    description = "Search memory for past goals, decisions, progress, or conversation history. \
+Returns scored results with metadata. Default searches the structured memory bank. \
 Use 'kind' to filter (goal, decision, progress, next, open_question, constraints). \
-Use source='history' for raw user message history, source='all' for both.";
+Use source='history' for raw user messages, source='all' for both.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
         ("query", `Assoc [("type", `String "string"); ("description", `String "keyword to search for")]);
-        ("kind", `Assoc [("type", `String "string"); ("description", `String "filter by memory kind: goal, decision, progress, next, open_question, constraints")]);
+        ("kind", `Assoc [("type", `String "string"); ("enum", `List [`String "goal"; `String "decision"; `String "progress"; `String "next"; `String "open_question"; `String "constraints"]); ("description", `String "Filter by memory kind")]);
         ("limit", `Assoc [("type", `String "integer"); ("description", `String "max results (1-10, default 5)")]);
-        ("source", `Assoc [("type", `String "string"); ("description", `String "memory (default, structured notes), history (raw messages), or all")]);
+        ("source", `Assoc [("type", `String "string"); ("enum", `List [`String "memory"; `String "history"; `String "all"]); ("description", `String "Search scope: memory (default, structured notes), history (raw messages), or all")]);
       ]);
       ("required", `List [`String "query"]);
     ];
@@ -87,7 +99,7 @@ timestamp, vote_count, and comment thread.";
   };
   {
     name = "keeper_board_post";
-    description = "Create a new post on the MASC Board. Use hearth to target a topic channel \
+    description = "Create a new board post with content. Use hearth to target a topic channel \
 (e.g. 'code-review', 'research', 'ops'). Use for sharing findings, asking questions, \
 or starting discussions that other keepers should see.";
     input_schema = `Assoc [
@@ -110,13 +122,13 @@ and content preview for each post.";
       ("properties", `Assoc [
         ("hearth", `Assoc [("type", `String "string"); ("description", `String "Filter by topic channel (e.g. code-review, research)")]);
         ("limit", `Assoc [("type", `String "integer"); ("description", `String "Max posts to return (default: 20, max: 50)")]);
-        ("sort_by", `Assoc [("type", `String "string"); ("description", `String "Sort: recent (newest), hot (score+recency), updated (most active)")]);
+        ("sort_by", `Assoc [("type", `String "string"); ("enum", `List [`String "recent"; `String "hot"; `String "updated"]); ("description", `String "Sort order (default: recent)")]);
       ]);
     ];
   };
   {
     name = "keeper_board_comment";
-    description = "Add a comment to an existing board post. Use to respond to questions, \
+    description = "Add a comment to a board post by post_id. Use to respond to questions, \
 provide feedback, or continue a discussion thread.";
     input_schema = `Assoc [
       ("type", `String "object");
@@ -135,7 +147,7 @@ or disagreement with a proposal or finding.";
       ("type", `String "object");
       ("properties", `Assoc [
         ("post_id", `Assoc [("type", `String "string"); ("description", `String "Post ID (format: p-xxxx...). Get from keeper_board_list results.")]);
-        ("direction", `Assoc [("type", `String "string"); ("description", `String "up or down (default: up)")]);
+        ("direction", `Assoc [("type", `String "string"); ("enum", `List [`String "up"; `String "down"]); ("description", `String "Vote direction (default: up)")]);
       ]);
       ("required", `List [`String "post_id"]);
     ];
@@ -164,8 +176,8 @@ Use when looking for specific topics, past discussions, or related prior work.";
   };
   {
     name = "keeper_board_delete";
-    description = "Delete a board post that is clearly safe to remove. \
-Use only for generated garbage, expired automation, or other explicitly-approved cleanup cases.";
+    description = "Delete a board post by post_id. Use only for generated garbage, \
+expired automation, or other explicitly-approved cleanup cases.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -187,9 +199,10 @@ let select_named_schemas (names : string list) (schemas : Types.tool_schema list
 let filesystem_tools : Types.tool_schema list = [
   {
     name = "keeper_fs_read";
-    description = "Read a file from the project. Returns file content as text (truncated at max_bytes). \
-Use to inspect source code, configs, logs, or any file before making decisions. \
-For searching across files, use keeper_shell_readonly with op=rg instead.";
+    description = "Read the contents of a file from the project. Returns full file content as text \
+(truncated at max_bytes). The primary tool for reading and inspecting source code files, \
+configs, logs, documentation, or any text file. \
+For searching across multiple files, use keeper_shell_readonly with op=rg instead.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -209,7 +222,7 @@ Mode 'overwrite' replaces the entire file; 'append' adds to the end.";
       ("properties", `Assoc [
         ("path", `Assoc [("type", `String "string"); ("description", `String "Relative or absolute file path to write")]);
         ("content", `Assoc [("type", `String "string"); ("description", `String "File content to write")]);
-        ("mode", `Assoc [("type", `String "string"); ("description", `String "Write mode: 'overwrite' (default) or 'append'")]);
+        ("mode", `Assoc [("type", `String "string"); ("enum", `List [`String "overwrite"; `String "append"]); ("description", `String "Write mode (default: overwrite)")]);
       ]);
       ("required", `List [`String "path"; `String "content"]);
     ];
@@ -219,19 +232,21 @@ Mode 'overwrite' replaces the entire file; 'append' adds to the end.";
 let shell_tools : Types.tool_schema list = [
   {
     name = "keeper_shell_readonly";
-    description = "Run a read-only project command. Safe, no side effects. \
-ops: pwd (working dir), ls (directory listing), cat (file content), \
-rg (ripgrep search across files), git_status (repo state). \
-To read a single file, prefer keeper_fs_read (handles truncation). \
-Use this tool for multi-file search (rg), directory listing (ls), or repo state (git_status).";
+    description = "Run a safe project shell command (no side effects). \
+ops: pwd, ls, cat, rg, git_status, find, head, tail, wc, tree, git_log, git_diff, bash. \
+bash op runs arbitrary non-destructive commands (writes/deletes blocked). \
+Use rg for pattern search across directories, find for path discovery, head/tail for line ranges, \
+git_log/git_diff for repo history, bash for curl/jq/env/which.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
-        ("op", `Assoc [("type", `String "string"); ("description", `String "One of: pwd, ls, cat, rg, git_status")]);
-        ("path", `Assoc [("type", `String "string"); ("description", `String "Target path for ls/cat/rg")]);
-        ("pattern", `Assoc [("type", `String "string"); ("description", `String "Search pattern for rg")]);
-        ("limit", `Assoc [("type", `String "integer"); ("description", `String "Result limit for ls/rg")]);
+        ("op", `Assoc [("type", `String "string"); ("enum", `List [`String "pwd"; `String "ls"; `String "cat"; `String "rg"; `String "git_status"; `String "find"; `String "head"; `String "tail"; `String "wc"; `String "tree"; `String "git_log"; `String "git_diff"; `String "bash"]); ("description", `String "Command to run")]);
+        ("path", `Assoc [("type", `String "string"); ("description", `String "Target path for ls/cat/rg/find/head/tail/wc/tree")]);
+        ("pattern", `Assoc [("type", `String "string"); ("description", `String "Search pattern for rg, or name pattern for find")]);
+        ("limit", `Assoc [("type", `String "integer"); ("description", `String "Result limit for ls/rg/find/tree, or line count for git_log")]);
+        ("lines", `Assoc [("type", `String "integer"); ("description", `String "Number of lines for head/tail (default 20, max 200)")]);
         ("max_bytes", `Assoc [("type", `String "integer"); ("description", `String "Max bytes for cat")]);
+        ("command", `Assoc [("type", `String "string"); ("description", `String "Shell command for bash op (read-only, writes blocked)")]);
       ]);
       ("required", `List [`String "op"]);
     ];
@@ -241,12 +256,9 @@ Use this tool for multi-file search (rg), directory listing (ls), or repo state 
 let coding_keeper_bridge_tools : Types.tool_schema list = [
   {
     name = "keeper_bash";
-    description = "Run a shell command from project root with full shell access. \
-Use for builds (dune build, make), tests (dune test), git operations, \
-and any command that may modify files. Returns exit_code and output. \
-For read-only exploration, prefer keeper_shell_readonly (safer). \
-To write a file, prefer keeper_fs_edit (path-checked, audited). \
-For worktree-isolated code operations, prefer masc_code_shell (restricted path).";
+    description = "Run a shell command by cmd (builds, tests, git, file edits) — \
+returns exit_code and output. For read-only ops prefer keeper_shell_readonly, \
+for file writes prefer keeper_fs_edit, for worktree-isolated code prefer masc_code_shell.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -272,9 +284,10 @@ Returns gh command output. Example: cmd='pr list --state open'.";
   };
   {
     name = "keeper_pr_workflow";
-    description = "One-shot PR pipeline: creates worktree, writes file, commits, pushes, \
-and opens a draft PR. Use this instead of chaining worktree_create + code_write + code_git + \
-keeper_github manually. Requires delivery or coding preset.";
+    description = "One-shot PR pipeline: creates branch, writes file, commits, pushes, opens draft PR. \
+Provide all 5 required params: branch, file_path, file_content, commit_message, pr_title. \
+Example: branch='fix/typo', file_path='lib/foo.ml', file_content='let x = 1', \
+commit_message='fix typo', pr_title='Fix typo in foo'. Requires coding or delivery preset.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -402,7 +415,7 @@ and priority for each task. Use to see what work is available or in progress.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
-        ("status", `Assoc [("type", `String "string"); ("description", `String "Filter by status (optional). One of: todo, claimed, in_progress, done, cancelled")]);
+        ("status", `Assoc [("type", `String "string"); ("enum", `List [`String "todo"; `String "claimed"; `String "in_progress"; `String "done"; `String "cancelled"]); ("description", `String "Filter by task status")]);
         ("include_done", `Assoc [("type", `String "boolean"); ("description", `String "Include completed tasks (default: false)")]);
       ]);
     ];
@@ -578,7 +591,7 @@ let shard_autoresearch : shard = {
   description = "Autonomous experiment loop: start, cycle, status, inject, stop";
 }
 
-let agent_shards : (string, string list) Hashtbl.t = Hashtbl.create 32
+let agent_shards : string list StringMap.t ref = ref StringMap.empty
 
 (** Default shards for a new keeper.
     All keepers get all shards unconditionally. Safety is handled by
@@ -596,16 +609,18 @@ let default_shard_names : string list = [
 ]
 
 let get_agent_shards (agent_name : string) : string list =
-  Hashtbl.find_opt agent_shards agent_name
+  StringMap.find_opt agent_name !agent_shards
   |> Option.value ~default:default_shard_names
 
 let set_agent_shards (agent_name : string) (shards : string list) : unit =
-  Hashtbl.replace agent_shards agent_name (List.sort_uniq String.compare shards)
+  agent_shards := StringMap.add agent_name (List.sort_uniq String.compare shards) !agent_shards
+
+let remove_agent_shards (agent_name : string) : unit =
+  agent_shards := StringMap.remove agent_name !agent_shards
 
 (** All predefined shards by name *)
-let all_shards : (string, shard) Hashtbl.t =
-  let tbl = Hashtbl.create 16 in
-  List.iter (fun s -> Hashtbl.add tbl s.name s) [
+let all_shards : shard StringMap.t =
+  List.fold_left (fun map s -> StringMap.add s.name s map) StringMap.empty [
     shard_base;
     shard_board;
     shard_filesystem;
@@ -616,17 +631,16 @@ let all_shards : (string, shard) Hashtbl.t =
     shard_taskboard;
     shard_governance;
     shard_autoresearch;
-  ];
-  tbl
+  ]
 
 (** Get a shard by name *)
 let get_shard (name : string) : shard option =
-  Hashtbl.find_opt all_shards name
+  StringMap.find_opt name all_shards
 
 (** Combine tools from multiple shard names *)
 let tools_of_shards (shard_names : string list) : Types.tool_schema list =
   shard_names
-  |> List.filter_map (fun name -> Hashtbl.find_opt all_shards name)
+  |> List.filter_map (fun name -> StringMap.find_opt name all_shards)
   |> List.concat_map (fun (s : shard) -> s.tools)
 
 (** {1 Dynamic Shard Management} *)
@@ -635,7 +649,7 @@ let tools_of_shards (shard_names : string list) : Types.tool_schema list =
     Fails if shard doesn't exist or is already granted. *)
 let grant_shard (active_shards : string list) (shard_name : string) :
   (string list, string) result =
-  match Hashtbl.find_opt all_shards shard_name with
+  match StringMap.find_opt shard_name all_shards with
   | None -> Error (Printf.sprintf "Unknown shard: %s" shard_name)
   | Some _ ->
     if List.mem shard_name active_shards then
@@ -647,7 +661,7 @@ let grant_shard (active_shards : string list) (shard_name : string) :
     Fails if shard is not removable or not currently granted. *)
 let revoke_shard (active_shards : string list) (shard_name : string) :
   (string list, string) result =
-  match Hashtbl.find_opt all_shards shard_name with
+  match StringMap.find_opt shard_name all_shards with
   | None -> Error (Printf.sprintf "Unknown shard: %s" shard_name)
   | Some shard ->
     if not shard.removable then
@@ -659,9 +673,10 @@ let revoke_shard (active_shards : string list) (shard_name : string) :
 
 (** List all available shards with their status *)
 let list_all_shards () : (string * bool * int) list =
-  Hashtbl.fold (fun name (shard : shard) acc ->
+  StringMap.fold (fun name (shard : shard) acc ->
     (name, shard.removable, List.length shard.tools) :: acc
   ) all_shards []
+  |> List.rev
 
 (** Default keeper tool set from [default_shard_names]. *)
 let keeper_model_tools : Types.tool_schema list =
@@ -672,8 +687,8 @@ let keeper_model_tools : Types.tool_schema list =
 let schemas : Types.tool_schema list = [
   {
     name = "masc_tool_grant";
-    description = "Grant a tool shard to an agent. \
-Shards: base (core), board, filesystem, shell, governance, voice, taskboard, coding, autoresearch.";
+    description = "Grant a capability group to an agent. \
+Groups: base (core), board, filesystem, shell, governance, voice, taskboard, coding, autoresearch.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -683,7 +698,7 @@ Shards: base (core), board, filesystem, shell, governance, voice, taskboard, cod
         ]);
         ("shard_name", `Assoc [
           ("type", `String "string");
-          ("description", `String "Shard to grant: base, board, filesystem, shell, governance, voice, taskboard, coding, autoresearch");
+          ("description", `String "Group to grant: base, board, filesystem, shell, governance, voice, taskboard, coding, autoresearch");
         ]);
       ]);
       ("required", `List [`String "agent_name"; `String "shard_name"]);
@@ -691,8 +706,8 @@ Shards: base (core), board, filesystem, shell, governance, voice, taskboard, cod
   };
   {
     name = "masc_tool_revoke";
-    description = "Revoke a tool shard from an agent. \
-Cannot revoke 'base' shard (always present).";
+    description = "Revoke a capability group from an agent. \
+Cannot revoke 'base' (always present).";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -702,7 +717,7 @@ Cannot revoke 'base' shard (always present).";
         ]);
         ("shard_name", `Assoc [
           ("type", `String "string");
-          ("description", `String "Shard to revoke (must be removable). One of: board, filesystem, shell, governance, voice, taskboard, coding, autoresearch");
+          ("description", `String "Group to revoke (must be removable). One of: board, filesystem, shell, governance, voice, taskboard, coding, autoresearch");
         ]);
       ]);
       ("required", `List [`String "agent_name"; `String "shard_name"]);
@@ -710,7 +725,7 @@ Cannot revoke 'base' shard (always present).";
   };
   {
     name = "masc_tool_list";
-    description = "List all available tool shards with their capabilities.";
+    description = "List all available capability groups with their tool counts.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);

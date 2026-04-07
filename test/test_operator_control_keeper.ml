@@ -213,7 +213,7 @@ let test_keeper_status_defaults_name_to_caller () =
 let test_keeper_status_schema_makes_name_optional () =
   let schema =
     List.find
-      (fun (spec : Keeper_types.tool_schema) ->
+      (fun (spec : Types.tool_schema) ->
          String.equal spec.name "masc_keeper_status")
       Tool_keeper.schemas
   in

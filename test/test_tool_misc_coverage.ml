@@ -4,6 +4,7 @@ open Masc_mcp
 
 let () = Random.self_init ()
 let () = Mirage_crypto_rng_unix.use_default ()
+let () = Server_startup_state.mark_state_ready ~backend_mode:"test"
 
 let () = Printf.printf "\n=== Tool_misc Coverage Tests ===\n"
 
@@ -22,6 +23,19 @@ let str_contains s sub =
 let parse_json s =
   try Yojson.Safe.from_string s
   with Yojson.Json_error err -> failwith ("invalid json: " ^ err)
+
+let rec mkdir_p dir =
+  if dir = "" || dir = "." || dir = "/" then ()
+  else if Sys.file_exists dir then ()
+  else begin
+    mkdir_p (Filename.dirname dir);
+    Unix.mkdir dir 0o755
+  end
+
+let write_file path content =
+  let oc = open_out path in
+  output_string oc content;
+  close_out oc
 
 (* Test helper — runs inside Eio context for code paths that use Eio.Mutex *)
 let test name f =
@@ -236,6 +250,98 @@ let () = test "parse_bing_rss_items_drops_non_http_links" (fun () ->
       assert (title = "safe");
       assert (url = "https://example.com/")
   | _ -> failwith "expected one safe parsed item"
+)
+
+let () = test "parse_searxng_json_basic" (fun () ->
+  let payload =
+    {|{
+      "results": [
+        { "title": "OpenAI Research", "url": "https://openai.com/research", "content": "Latest AI research from OpenAI." },
+        { "title": "Example Site", "url": "https://example.com/", "content": "A sample page." }
+      ]
+    }|}
+  in
+  let items = Tool_misc.parse_searxng_json payload in
+  assert (List.length items = 2);
+  match items with
+  | (title1, url1, snippet1) :: (title2, url2, snippet2) :: _ ->
+      assert (title1 = "OpenAI Research");
+      assert (url1 = "https://openai.com/research");
+      assert (snippet1 = "Latest AI research from OpenAI.");
+      assert (title2 = "Example Site");
+      assert (url2 = "https://example.com/");
+      assert (snippet2 = "A sample page.")
+  | _ -> failwith "expected two parsed items"
+)
+
+let () = test "parse_searxng_json_cleans_html" (fun () ->
+  let payload =
+    {|{
+      "results": [
+        {
+          "title": "Result with <b>HTML</b> &amp; entities",
+          "url": "https://example.com/page",
+          "content": "<p>Snippet with <em>markup</em> &amp; detail</p>"
+        }
+      ]
+    }|}
+  in
+  let items = Tool_misc.parse_searxng_json payload in
+  assert (List.length items = 1);
+  match items with
+  | [ (title, _url, snippet) ] ->
+      assert (title = "Result with HTML & entities");
+      assert (not (str_contains snippet "<p>"));
+      assert (not (str_contains snippet "<em>"));
+      assert (str_contains snippet "markup")
+  | _ -> failwith "expected one item"
+)
+
+let () = test "parse_searxng_json_drops_invalid_urls" (fun () ->
+  let payload =
+    {|{
+      "results": [
+        { "title": "Valid", "url": "https://example.com/", "content": "ok" },
+        { "title": "Bad scheme", "url": "javascript:alert(1)", "content": "bad" },
+        { "title": "Valid B", "url": "https://example.com/b", "content": "second valid entry" },
+        { "title": "", "url": "https://example.com/c", "content": "empty title" }
+      ]
+    }|}
+  in
+  let items = Tool_misc.parse_searxng_json payload in
+  assert (List.length items = 2);
+  match items with
+  | (t1, u1, _) :: (t2, u2, _) :: _ ->
+      assert (t1 = "Valid");
+      assert (u1 = "https://example.com/");
+      assert (t2 = "Valid B");
+      assert (u2 = "https://example.com/b")
+  | _ -> failwith "expected two valid items"
+)
+
+let () = test "parse_searxng_json_invalid_payload" (fun () ->
+  assert (Tool_misc.parse_searxng_json "not json" = []);
+  assert (Tool_misc.parse_searxng_json "{}" = []);
+  assert (Tool_misc.parse_searxng_json {|{"results": null}|} = [])
+)
+
+let () = test "dispatch_web_search_cascade_error_includes_backend_details" (fun () ->
+  (* Point SearXNG at a port that refuses connections; both DDG and Bing will
+     also fail in a sandboxed environment. The response error message must
+     contain the SearXNG error detail rather than a bare "all search engines failed". *)
+  with_env "MASC_SEARXNG_URL" (Some "http://127.0.0.1:1") (fun () ->
+    let ctx = make_test_ctx () in
+    let args = `Assoc [ ("query", `String "test query") ] in
+    match Tool_misc.dispatch ctx ~name:"masc_web_search" ~args with
+    | Some (success, result) ->
+        if not success then begin
+          let json = parse_json result in
+          let msg = Yojson.Safe.Util.(json |> member "message" |> to_string) in
+          (* Error message must include the cascade structure *)
+          assert (str_contains msg "searxng:")
+        end
+        (* If somehow a backend succeeds in this environment, that's also fine *)
+    | None -> failwith "dispatch returned None")
 )
 
 let () = test "dispatch_webrtc_offer" (fun () ->
@@ -487,6 +593,88 @@ let () = test "dispatch_tool_admin_update_keeper_policy" (fun () ->
           | None -> failwith "dispatch returned None")
       | Some (false, err) -> failwith err
       | None -> failwith "keeper up dispatch returned None")
+)
+
+let () = test "dispatch_keeper_up_blocked_by_startup_state" (fun () ->
+  Server_startup_state.reset ~backend_mode:"test" ();
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  let ctx = make_test_ctx () in
+  let keeper_ctx : _ Tool_keeper.context =
+    {
+      config = ctx.config;
+      agent_name = "tester";
+      sw;
+      clock = Eio.Stdenv.clock env;
+      proc_mgr = Some (Eio.Stdenv.process_mgr env);
+      net = None;
+    }
+  in
+  match
+    Tool_keeper.dispatch keeper_ctx ~name:"masc_keeper_up"
+      ~args:(`Assoc [ ("name", `String "boot-keeper"); ("goal", `String "startup gate test") ])
+  with
+  | Some (false, result) ->
+      let json = parse_json result in
+      assert (Yojson.Safe.Util.member "error" json = `String "server_initializing");
+      assert (Yojson.Safe.Util.member "retry_after_ms" json = `Int 3000)
+  | Some (true, _) -> failwith "keeper up should be blocked while startup is not ready"
+  | None -> failwith "keeper up dispatch returned None"
+)
+
+let () = test "dispatch_keeper_create_from_persona_blocked_by_startup_state" (fun () ->
+  Server_startup_state.reset ~backend_mode:"test" ();
+  let personas_dir = Filename.concat (Filename.get_temp_dir_name ()) "masc-persona-gate-test" in
+  if not (Sys.file_exists personas_dir) then Unix.mkdir personas_dir 0o755;
+  let persona_name = "boot_probe" in
+  let persona_dir = Filename.concat personas_dir persona_name in
+  mkdir_p persona_dir;
+  write_file
+    (Filename.concat persona_dir "profile.json")
+    (Printf.sprintf
+       {|
+{
+  "name": "%s",
+  "keeper": {
+    "goal": "Startup gate smoke",
+    "short_goal": "Startup gate smoke",
+    "mid_goal": "Startup gate smoke",
+    "long_goal": "Startup gate smoke",
+    "mention_targets": ["boot-probe"],
+    "tool_preset": "research",
+    "policy_voice_enabled": false
+  }
+}
+|}
+       persona_name);
+  with_env "MASC_PERSONAS_DIR" (Some personas_dir) @@ fun () ->
+    Masc_mcp.Config_dir_resolver.reset ();
+    Eio_main.run @@ fun env ->
+    Fs_compat.set_fs (Eio.Stdenv.fs env);
+    Eio.Switch.run @@ fun sw ->
+    let ctx = make_test_ctx () in
+    let keeper_ctx : _ Tool_keeper.context =
+      {
+        config = ctx.config;
+        agent_name = "tester";
+        sw;
+        clock = Eio.Stdenv.clock env;
+        proc_mgr = Some (Eio.Stdenv.process_mgr env);
+        net = None;
+      }
+    in
+    match
+      Tool_keeper.dispatch keeper_ctx ~name:"masc_keeper_create_from_persona"
+        ~args:(`Assoc [ ("persona_name", `String persona_name) ])
+    with
+    | Some (false, result) ->
+        let json = parse_json result in
+        assert (Yojson.Safe.Util.member "error" json = `String "server_initializing");
+        assert (Yojson.Safe.Util.member "retry_after_ms" json = `Int 3000)
+    | Some (true, _) ->
+        failwith "keeper create_from_persona should be blocked while startup is not ready"
+    | None -> failwith "keeper create_from_persona dispatch returned None"
 )
 
 (* Test helper functions *)

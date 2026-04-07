@@ -35,7 +35,7 @@ let invalidate_status_cache_all () =
 
 let normalize_status_name = String.trim
 
-let effective_status_name ctx args =
+let effective_status_name (ctx : _ context) args =
   match normalize_status_name (get_string args "name" "") with
   | "" -> normalize_status_name ctx.agent_name
   | value -> value
@@ -488,6 +488,7 @@ let handle_keeper_status ctx args : tool_result =
         in
 
          let json = `Assoc [
+           ("name", `String name);
            ("meta", meta_to_json m);
            ("goal", `String m.goal);
            ("short_goal", `String m.short_goal);

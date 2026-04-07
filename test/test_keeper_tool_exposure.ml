@@ -467,6 +467,56 @@ let test_path_empty_allowed_permits_all_within_root () =
     check bool "src ok with empty allowed" true (Result.is_ok r2))
 
 (* ============================================================
+   10b. Read-path: resolve_keeper_read_path ignores allowed_paths
+   ============================================================ *)
+
+let test_read_path_ignores_allowed_paths () =
+  let dir = make_path_test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
+    Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+    let config = Room.default_config dir in
+    (* Read path should succeed for any path within root,
+       even when write path would reject it *)
+    let read_lib = Keeper_alerting_path.resolve_keeper_read_path
+      ~config ~raw_path:"lib/foo.ml" in
+    let read_src = Keeper_alerting_path.resolve_keeper_read_path
+      ~config ~raw_path:"src/bar.ml" in
+    check bool "read lib ok" true (Result.is_ok read_lib);
+    check bool "read src ok" true (Result.is_ok read_src))
+
+let test_read_path_rejects_outside_root () =
+  let dir = make_path_test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
+    Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+    let config = Room.default_config dir in
+    let result = Keeper_alerting_path.resolve_keeper_read_path
+      ~config ~raw_path:"/etc/passwd" in
+    check bool "read outside root rejected" true (Result.is_error result))
+
+let test_read_vs_write_path_separation () =
+  let dir = make_path_test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
+    Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+    let config = Room.default_config dir in
+    (* Write: lib allowed, src rejected *)
+    let write_lib = Keeper_alerting_path.resolve_keeper_target_path
+      ~config ~allowed_paths:["lib"] ~raw_path:"lib/foo.ml" in
+    let write_src = Keeper_alerting_path.resolve_keeper_target_path
+      ~config ~allowed_paths:["lib"] ~raw_path:"src/bar.ml" in
+    check bool "write lib ok" true (Result.is_ok write_lib);
+    check bool "write src rejected" true (Result.is_error write_src);
+    (* Read: both allowed *)
+    let read_lib = Keeper_alerting_path.resolve_keeper_read_path
+      ~config ~raw_path:"lib/foo.ml" in
+    let read_src = Keeper_alerting_path.resolve_keeper_read_path
+      ~config ~raw_path:"src/bar.ml" in
+    check bool "read lib ok" true (Result.is_ok read_lib);
+    check bool "read src ok (read ignores allowed_paths)" true (Result.is_ok read_src))
+
+(* ============================================================
    11. Keeper-reported allowed_paths symlink bug
    ============================================================ *)
 
@@ -506,7 +556,7 @@ let test_keeper_reported_nonexistent_subdir () =
       ".masc/playground/goal-default-demo/";
       ".masc/keepers/goal-default-demo/";
       ".masc/traces/";
-      "."
+      "lib/"
     ] in
     let r1 = Keeper_alerting_path.resolve_keeper_target_path
       ~config ~allowed_paths:allowed
@@ -519,7 +569,7 @@ let test_keeper_reported_nonexistent_subdir () =
     let r3 = Keeper_alerting_path.resolve_keeper_target_path
       ~config ~allowed_paths:allowed
       ~raw_path:"lib/foo.ml" in
-    check bool "project file via dot allowed" true (Result.is_ok r3))
+    check bool "project file via allowed explicit path" true (Result.is_ok r3))
 
 let test_keeper_reported_observe_only_scope () =
   let dir = make_masc_path_test_dir () in
@@ -616,6 +666,9 @@ let () =
       test_case "empty path rejected" `Quick test_path_empty_rejected;
       test_case "whitespace only rejected" `Quick test_path_whitespace_only_rejected;
       test_case "empty allowed permits all" `Quick test_path_empty_allowed_permits_all_within_root;
+      test_case "read path ignores allowed_paths" `Quick test_read_path_ignores_allowed_paths;
+      test_case "read path rejects outside root" `Quick test_read_path_rejects_outside_root;
+      test_case "read vs write path separation" `Quick test_read_vs_write_path_separation;
       test_case "keeper-reported nonexistent subdir" `Quick
         test_keeper_reported_nonexistent_subdir;
       test_case "keeper-reported observe_only scope" `Quick

@@ -171,7 +171,9 @@ let protocol_violation_state ~(meta : keeper_meta)
   }
 
 let inferred_tool_surface tools =
-  if List.mem "keeper_board_comment" tools then
+  if tools = [ "keeper_stay_silent" ] then
+    Some (Stay_silent, Silent)
+  else if List.mem "keeper_board_comment" tools then
     Some (Comment_board, Board_comment)
   else if List.mem "keeper_board_post" tools then
     Some (Post_board, Board_post)

@@ -32,19 +32,21 @@ let keeper_voice_tool_schemas =
     retrieval to free ranking budget.  See #4961. *)
 let core_always_tools =
   [ "keeper_context_status"; "keeper_tools_list";
+    "keeper_stay_silent"; "keeper_tool_search";
     "masc_status"; "masc_heartbeat"; "extend_turns" ]
 
 (** Core tools always visible to the LLM.  All other tools are
-    discoverable on demand via [keeper_tool_search]. *)
+    discoverable on demand via [keeper_tool_search].
+    Aligns with [board_core] preset: get/post/comment/vote/list visible by
+    default; board_extended (stats/search) remain discoverable. *)
 let core_discovery_tools =
   core_always_tools @
-  [ "keeper_tool_search";
-    "keeper_broadcast"; "keeper_tasks_list"; "keeper_tasks_audit";
+  [ "keeper_broadcast"; "keeper_tasks_list";
     "keeper_task_claim"; "keeper_task_done";
     "keeper_memory_search"; "keeper_time_now";
     "keeper_fs_read";
-    "keeper_board_get"; "keeper_board_post"; "keeper_board_comment";
-    "keeper_board_list";
+    "keeper_board_get"; "keeper_board_post";
+    "keeper_board_comment"; "keeper_board_vote"; "keeper_board_list";
   ]
 
 let effective_core_tools () = core_discovery_tools
@@ -74,7 +76,7 @@ let keeper_tool_search_schema : Types.tool_schema =
   {
     name = "keeper_tool_search";
     description =
-      "Search for additional tools by describing what you need. \
+      "Search for tools by query describing what you need. \
        Returns tool names, descriptions, and usage guidance. \
        Use when your current tools are insufficient for the task.";
     input_schema =

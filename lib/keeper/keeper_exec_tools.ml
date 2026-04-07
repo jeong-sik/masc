@@ -132,13 +132,27 @@ let shell_readonly_cat_max_bytes args =
   max 256 (min 100000 (Safe_ops.json_int ~default:4000 "max_bytes" args))
 ;;
 
-let lines_to_json ?(limit = max_int) (text : string) : Yojson.Safe.t =
-  let lines =
+let lines_to_json ?(limit = max_int) ?(max_bytes = 32_000) (text : string) : Yojson.Safe.t =
+  let all_lines =
     String.split_on_char '\n' text
     |> List.filter (fun line -> line <> "")
     |> fun rows -> if List.length rows > limit then take limit rows else rows
   in
-  `List (List.map (fun line -> `String line) lines)
+  (* Byte-budget: accumulate lines until max_bytes is reached.
+     This prevents 200 long lines from producing 500KB+ JSON arrays
+     that stall the LLM context window. *)
+  let rec collect acc bytes_used = function
+    | [] -> List.rev acc, 0
+    | line :: rest ->
+      let line_len = String.length line + 4 (* JSON overhead: quotes, comma *) in
+      if bytes_used + line_len > max_bytes && acc <> []
+      then List.rev acc, List.length rest + 1
+      else collect (`String line :: acc) (bytes_used + line_len) rest
+  in
+  let kept, omitted = collect [] 0 all_lines in
+  if omitted > 0
+  then `List (kept @ [ `String (Printf.sprintf "...[%d more lines omitted — narrow your search pattern or add --glob/--type filter]" omitted) ])
+  else `List kept
 ;;
 
 let error_json ?(fields = []) (message : string) =
@@ -201,6 +215,12 @@ let resolve_keeper_path ~(config : Room.config) ~(meta : keeper_meta) ~(raw_path
     ~raw_path
 ;;
 
+(** Resolve path for read-only tools (fs_read, shell_readonly, etc.).
+    Allows any path within the project root regardless of allowed_paths. *)
+let resolve_keeper_read_path ~(config : Room.config) ~(raw_path : string) =
+  Keeper_alerting_path.resolve_keeper_read_path ~config ~raw_path
+;;
+
 let handle_keeper_board_tool
       ~(meta : keeper_meta)
       ~(name : string)
@@ -247,11 +267,12 @@ let handle_keeper_fs_read
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
   =
+  ignore meta;
   let path = Safe_ops.json_string ~default:"" "path" args in
   let max_bytes =
     Safe_ops.json_int ~default:20000 "max_bytes" args |> fun n -> max 512 (min 200000 n)
   in
-  match resolve_keeper_path ~config ~meta ~raw_path:path with
+  match resolve_keeper_read_path ~config ~raw_path:path with
   | Error e -> error_json e
   | Ok target ->
     (match Safe_ops.read_file_safe target with
@@ -395,13 +416,14 @@ let handle_keeper_shell_readonly
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
   =
+  ignore meta;
   let op =
     Safe_ops.json_string ~default:"" "op" args |> String.trim |> String.lowercase_ascii
   in
   let root = project_root_of_config config in
   let read_target () =
     let raw_path = Safe_ops.json_string ~default:"." "path" args in
-    resolve_keeper_path ~config ~meta ~raw_path
+    resolve_keeper_read_path ~config ~raw_path
   in
   let render_process_result ~cmd argv =
     let st, out = Process_eio.run_argv_with_status ~timeout_sec:30.0 argv in
@@ -465,10 +487,16 @@ let handle_keeper_shell_readonly
       | Error e -> error_json ~fields:[ "op", `String op ] e
       | Ok target ->
         let limit = shell_readonly_limit args in
+        (* Optional file-type filter (e.g. "ml", "py", "ts") *)
+        let file_type = Safe_ops.json_string ~default:"" "type" args |> String.trim in
+        (* Optional glob filter (e.g. "*.ml", "lib/**/*.ml") *)
+        let glob = Safe_ops.json_string ~default:"" "glob" args |> String.trim in
+        let base_argv = [ "rg"; "-n"; "-m"; string_of_int limit ] in
+        let type_argv = if file_type <> "" then [ "--type"; file_type ] else [] in
+        let glob_argv = if glob <> "" then [ "--glob"; glob ] else [] in
+        let argv = base_argv @ type_argv @ glob_argv @ [ pattern; target ] in
         let st, out =
-          Process_eio.run_argv_with_status
-            ~timeout_sec:15.0
-            [ "rg"; "-n"; "-m"; string_of_int limit; pattern; target ]
+          Process_eio.run_argv_with_status ~timeout_sec:15.0 argv
         in
         Yojson.Safe.to_string
           (`Assoc
@@ -479,6 +507,148 @@ let handle_keeper_shell_readonly
               ; "status", process_status_to_json st
               ; "matches", lines_to_json ~limit out
               ]))
+  | "git_log" ->
+    let count = max 1 (min 50 (Safe_ops.json_int ~default:10 "count" args)) in
+    let format = Safe_ops.json_string ~default:"%h %s" "format" args in
+    let file_path = Safe_ops.json_string ~default:"" "path" args |> String.trim in
+    let base_argv =
+      [ "git"; "-C"; root; "--no-optional-locks"; "log";
+        Printf.sprintf "--format=%s" format;
+        Printf.sprintf "-%d" count ]
+    in
+    let argv = if file_path <> "" then base_argv @ [ "--"; file_path ] else base_argv in
+    let st, out = Process_eio.run_argv_with_status ~timeout_sec:15.0 argv in
+    Yojson.Safe.to_string
+      (`Assoc
+          [ "ok", `Bool (st = Unix.WEXITED 0)
+          ; "op", `String op
+          ; "count", `Int count
+          ; "status", process_status_to_json st
+          ; "entries", lines_to_json ~limit:50 out
+          ])
+  | "find" ->
+    let name_pattern = Safe_ops.json_string ~default:"" "name" args |> String.trim in
+    if name_pattern = ""
+    then error_json ~fields:[ "op", `String op ] "name_required"
+    else (
+      match read_target () with
+      | Error e -> error_json ~fields:[ "op", `String op ] e
+      | Ok target ->
+        let limit = shell_readonly_limit args in
+        let st, out =
+          Process_eio.run_argv_with_status ~timeout_sec:15.0
+            [ "find"; target; "-maxdepth"; "5"; "-name"; name_pattern;
+              "-not"; "-path"; "*/.git/*";
+              "-not"; "-path"; "*/_build/*";
+              "-not"; "-path"; "*/.masc/*" ]
+        in
+        Yojson.Safe.to_string
+          (`Assoc
+              [ "ok", `Bool (st = Unix.WEXITED 0)
+              ; "op", `String op
+              ; "path", `String target
+              ; "name", `String name_pattern
+              ; "status", process_status_to_json st
+              ; "files", lines_to_json ~limit out
+              ]))
+  | "head" ->
+    (match read_target () with
+     | Error e -> error_json ~fields:[ "op", `String op ] e
+     | Ok target ->
+       let n = Safe_ops.json_int ~default:20 "lines" args |> fun v -> max 1 (min 200 v) in
+       let st, out =
+         Process_eio.run_argv_with_status ~timeout_sec:15.0
+           [ "/usr/bin/head"; "-n"; string_of_int n; target ]
+       in
+       Yojson.Safe.to_string
+         (`Assoc
+             [ "ok", `Bool (st = Unix.WEXITED 0)
+             ; "op", `String op
+             ; "path", `String target
+             ; "lines", `Int n
+             ; "status", process_status_to_json st
+             ; "content", `String (truncate_tool_output out)
+             ]))
+  | "tail" ->
+    (match read_target () with
+     | Error e -> error_json ~fields:[ "op", `String op ] e
+     | Ok target ->
+       let n = Safe_ops.json_int ~default:20 "lines" args |> fun v -> max 1 (min 200 v) in
+       let st, out =
+         Process_eio.run_argv_with_status ~timeout_sec:15.0
+           [ "/usr/bin/tail"; "-n"; string_of_int n; target ]
+       in
+       Yojson.Safe.to_string
+         (`Assoc
+             [ "ok", `Bool (st = Unix.WEXITED 0)
+             ; "op", `String op
+             ; "path", `String target
+             ; "lines", `Int n
+             ; "status", process_status_to_json st
+             ; "content", `String (truncate_tool_output out)
+             ]))
+  | "wc" ->
+    (match read_target () with
+     | Error e -> error_json ~fields:[ "op", `String op ] e
+     | Ok target ->
+       render_process_result ~cmd:"wc" [ "/usr/bin/wc"; "-l"; target ])
+  | "tree" ->
+    (match read_target () with
+     | Error e -> error_json ~fields:[ "op", `String op ] e
+     | Ok target ->
+       let st, out =
+         Process_eio.run_argv_with_status ~timeout_sec:15.0
+           [ "find"; target; "-maxdepth"; "3"; "-print";
+             "-not"; "-path"; "*/.git/*";
+             "-not"; "-path"; "*/_build/*" ]
+       in
+       let limit = shell_readonly_limit args in
+       Yojson.Safe.to_string
+         (`Assoc
+             [ "ok", `Bool (st = Unix.WEXITED 0)
+             ; "op", `String op
+             ; "path", `String target
+             ; "status", process_status_to_json st
+             ; "entries", lines_to_json ~limit out
+             ]))
+  | "git_diff" ->
+    render_process_result
+      ~cmd:"git diff --stat"
+      [ "git"; "-C"; root; "--no-optional-locks"; "diff"; "--stat" ]
+  | "bash" ->
+    let cmd_str = Safe_ops.json_string ~default:"" "command" args |> String.trim in
+    if cmd_str = "" then error_json ~fields:[ "op", `String op ] "command_required"
+    else
+      let dangerous_patterns = [
+        "rm "; "rm\t"; "rmdir"; "> "; ">> "; "| tee "; "mv "; "cp ";
+        "chmod"; "chown"; "kill"; "pkill"; "dd "; "mkfs"; "wget "; "curl.*-o";
+        "git push"; "git reset"; "git checkout"; "git rebase";
+        "pip install"; "npm install"; "opam install";
+      ] in
+      let has_dangerous = List.exists (fun pat ->
+        String_util.contains_substring_ci cmd_str pat
+      ) dangerous_patterns in
+      if has_dangerous then
+        Yojson.Safe.to_string
+          (`Assoc
+              [ "ok", `Bool false
+              ; "op", `String op
+              ; "error", `String "command_blocked_readonly"
+              ; "detail", `String "This shell is read-only. Dangerous patterns detected."
+              ])
+      else
+        let st, out =
+          Process_eio.run_argv_with_status ~timeout_sec:30.0
+            [ "bash"; "-c"; cmd_str ]
+        in
+        Yojson.Safe.to_string
+          (`Assoc
+              [ "ok", `Bool (st = Unix.WEXITED 0)
+              ; "op", `String op
+              ; "command", `String cmd_str
+              ; "status", process_status_to_json st
+              ; "output", `String (truncate_tool_output out)
+              ])
   | _ ->
     Yojson.Safe.to_string
       (`Assoc
@@ -488,7 +658,9 @@ let handle_keeper_shell_readonly
             , `List
                 (List.map
                    (fun name -> `String name)
-                   [ "pwd"; "ls"; "cat"; "rg"; "git_status" ]) )
+                   [ "pwd"; "ls"; "cat"; "rg"; "git_status";
+                     "find"; "head"; "tail"; "wc"; "tree";
+                     "git_log"; "git_diff"; "bash" ]) )
           ])
 ;;
 
@@ -1441,6 +1613,11 @@ let execute_keeper_tool_call
           | None -> !tool_search_fn
         in
         Yojson.Safe.to_string (fn ~query ~max_results)
+    | "keeper_stay_silent" ->
+      (* No-op tool: lets model explicitly skip a turn under tool_choice=Any.
+         Without this, tool_choice=Any forces the model to call a real tool
+         even when there is nothing to do. *)
+      Yojson.Safe.to_string (`Assoc [ "status", `String "silent" ])
     | "keeper_tools_list" -> keeper_tools_list_json ~meta
     | "keeper_time_now" ->
       Yojson.Safe.to_string

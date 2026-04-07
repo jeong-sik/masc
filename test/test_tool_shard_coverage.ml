@@ -227,13 +227,13 @@ let test_get_agent_shards_default () =
   Alcotest.(check int) "matches default count" (List.length defaults) (List.length shards)
 
 let test_set_get_agent_shards () =
-  Hashtbl.remove Tool_shard.agent_shards "test-agent-x";
+  Tool_shard.remove_agent_shards "test-agent-x";
   Tool_shard.set_agent_shards "test-agent-x" ["base"; "shell"];
   let shards = Tool_shard.get_agent_shards "test-agent-x" in
   Alcotest.(check int) "2 shards" 2 (List.length shards);
   Alcotest.(check bool) "sorted" true (shards = List.sort String.compare shards);
   (* Cleanup *)
-  Hashtbl.remove Tool_shard.agent_shards "test-agent-x"
+  Tool_shard.remove_agent_shards "test-agent-x"
 
 (* ============================================================
    execute (MCP dispatch) tests
@@ -251,24 +251,24 @@ let test_execute_tool_list () =
   Alcotest.(check int) "matches list_all_shards" (List.length all) (List.length shards)
 
 let test_execute_tool_list_with_agent () =
-  Hashtbl.remove Tool_shard.agent_shards "test-ex";
+  Tool_shard.remove_agent_shards "test-ex";
   Tool_shard.set_agent_shards "test-ex" ["base"; "board"];
   let (ok, json) = Tool_shard.execute "masc_tool_list"
     (`Assoc [("agent_name", `String "test-ex")]) in
   Alcotest.(check bool) "succeeds" true ok;
   let active = Yojson.Safe.Util.(member "active_shards" json |> to_list) in
   Alcotest.(check int) "2 active" 2 (List.length active);
-  Hashtbl.remove Tool_shard.agent_shards "test-ex"
+  Tool_shard.remove_agent_shards "test-ex"
 
 let test_execute_grant () =
-  Hashtbl.remove Tool_shard.agent_shards "test-grant";
+  Tool_shard.remove_agent_shards "test-grant";
   Tool_shard.set_agent_shards "test-grant" ["base"];
   let (ok, json) = Tool_shard.execute "masc_tool_grant"
     (`Assoc [("agent_name", `String "test-grant"); ("shard_name", `String "board")]) in
   Alcotest.(check bool) "succeeds" true ok;
   let status = Yojson.Safe.Util.(member "status" json |> to_string) in
   Alcotest.(check string) "granted" "granted" status;
-  Hashtbl.remove Tool_shard.agent_shards "test-grant"
+  Tool_shard.remove_agent_shards "test-grant"
 
 let test_execute_grant_missing_params () =
   let (ok, json) = Tool_shard.execute "masc_tool_grant" (`Assoc []) in
@@ -277,24 +277,24 @@ let test_execute_grant_missing_params () =
   Alcotest.(check string) "error status" "error" status
 
 let test_execute_revoke () =
-  Hashtbl.remove Tool_shard.agent_shards "test-revoke";
+  Tool_shard.remove_agent_shards "test-revoke";
   Tool_shard.set_agent_shards "test-revoke" ["base"; "board"; "shell"];
   let (ok, json) = Tool_shard.execute "masc_tool_revoke"
     (`Assoc [("agent_name", `String "test-revoke"); ("shard_name", `String "board")]) in
   Alcotest.(check bool) "succeeds" true ok;
   let status = Yojson.Safe.Util.(member "status" json |> to_string) in
   Alcotest.(check string) "revoked" "revoked" status;
-  Hashtbl.remove Tool_shard.agent_shards "test-revoke"
+  Tool_shard.remove_agent_shards "test-revoke"
 
 let test_execute_revoke_non_removable () =
-  Hashtbl.remove Tool_shard.agent_shards "test-rev-base";
+  Tool_shard.remove_agent_shards "test-rev-base";
   Tool_shard.set_agent_shards "test-rev-base" ["base"; "board"];
   let (ok, json) = Tool_shard.execute "masc_tool_revoke"
     (`Assoc [("agent_name", `String "test-rev-base"); ("shard_name", `String "base")]) in
   Alcotest.(check bool) "fails" false ok;
   let status = Yojson.Safe.Util.(member "status" json |> to_string) in
   Alcotest.(check string) "error" "error" status;
-  Hashtbl.remove Tool_shard.agent_shards "test-rev-base"
+  Tool_shard.remove_agent_shards "test-rev-base"
 
 (* ============================================================
    schemas tests
@@ -460,7 +460,7 @@ let test_empty_defaults_shards_none () =
 let test_set_agent_shards_from_persona () =
   (* Simulate what keeper_persona.ml does after keeper creation:
      when persona specifies shards, set_agent_shards is called. *)
-  Hashtbl.remove Tool_shard.agent_shards "test-persona-shard";
+  Tool_shard.remove_agent_shards "test-persona-shard";
   let persona_shards = ["base"; "board"; "library"] in
   Tool_shard.set_agent_shards "test-persona-shard" persona_shards;
   let active = Tool_shard.get_agent_shards "test-persona-shard" in
@@ -477,11 +477,11 @@ let test_set_agent_shards_from_persona () =
     (List.mem "keeper_board_post" tool_names);
   Alcotest.(check bool) "no keeper_bash" false
     (List.mem "keeper_bash" tool_names);
-  Hashtbl.remove Tool_shard.agent_shards "test-persona-shard"
+  Tool_shard.remove_agent_shards "test-persona-shard"
 
 let test_no_shards_gets_defaults () =
   (* When persona has no shards configured, agent gets all defaults *)
-  Hashtbl.remove Tool_shard.agent_shards "test-no-shard-persona";
+  Tool_shard.remove_agent_shards "test-no-shard-persona";
   let active = Tool_shard.get_agent_shards "test-no-shard-persona" in
   Alcotest.(check int) "matches default count"
     (List.length Tool_shard.default_shard_names) (List.length active)

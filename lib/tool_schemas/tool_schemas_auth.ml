@@ -43,7 +43,8 @@ let schemas : tool_schema list = [
         ]);
         ("role", `Assoc [
           ("type", `String "string");
-          ("description", `String "Agent role: 'reader' (read-only), 'worker' (can claim/lock/broadcast), 'admin' (full access)");
+          ("enum", `List [`String "reader"; `String "worker"; `String "admin"]);
+          ("description", `String "Agent role: reader (read-only), worker (claim/lock/broadcast), admin (full access)");
           ("default", `String "worker");
         ]);
       ]);

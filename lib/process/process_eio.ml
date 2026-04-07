@@ -74,17 +74,14 @@ let output_for_status ~(status : Unix.process_status) ~(stdout : string)
     | out, err -> out ^ "\n" ^ err
 
 (** Create a private stderr capture file for Unix fallback status helpers.
-    Uses [mkstemp] so the file is created atomically with private permissions,
-    then marks the descriptor close-on-exec to avoid descriptor leaks into
-    unrelated child processes. *)
+    Uses [Filename.temp_file] for atomic creation, then opens the file with
+    private permissions and marks the descriptor close-on-exec to avoid
+    descriptor leaks into unrelated child processes. *)
 let create_stderr_tempfile () =
-  let template =
-    Filename.concat
-      (Filename.get_temp_dir_name ())
-      "masc_process_eio_stderr.XXXXXX"
+  let path = Filename.temp_file "masc_process_eio_stderr" ".tmp" in
+  let fd =
+    Unix.openfile path [ Unix.O_WRONLY; Unix.O_TRUNC; Unix.O_CLOEXEC ] 0o600
   in
-  let path, fd = Unix.mkstemp template in
-  Unix.set_close_on_exec fd;
   (path, fd)
 
 let remove_temp_file_quietly path =
@@ -396,28 +393,28 @@ let run_argv_with_status ?(timeout_sec = 60.0) ?env ?cwd (argv : string list) : 
           | Some dir -> Eio.Path.(default_cwd / dir)
         in
         let stdout_buf = Buffer.create 1024 in
-        let stderr_buf = Buffer.create 1024 in
+        let stderr_buf = Buffer.create 256 in
         let label = String.concat " " (List.map Filename.quote argv) in
         try
           Eio.Time.with_timeout_exn clk timeout_sec (fun () ->
               Eio.Switch.run (fun sw ->
                   let proc =
-                     Eio.Process.spawn ~sw pm ~cwd:effective_cwd ?env
-                       ~stdout:(Eio.Flow.buffer_sink stdout_buf)
-                       ~stderr:(Eio.Flow.buffer_sink stderr_buf)
-                       argv
-                   in
-                   let status = Eio.Process.await proc in
-                   let unix_status =
-                     match status with
-                     | `Exited n -> Unix.WEXITED n
-                     | `Signaled n -> Unix.WSIGNALED n
-                   in
-                   ( unix_status
-                   , output_for_status
-                       ~status:unix_status
-                       ~stdout:(Buffer.contents stdout_buf)
-                       ~stderr:(Buffer.contents stderr_buf) )))
+                    Eio.Process.spawn ~sw pm ~cwd:effective_cwd ?env
+                      ~stdout:(Eio.Flow.buffer_sink stdout_buf)
+                      ~stderr:(Eio.Flow.buffer_sink stderr_buf)
+                      argv
+                  in
+                  let status = Eio.Process.await proc in
+                  let unix_status =
+                    match status with
+                    | `Exited n -> Unix.WEXITED n
+                    | `Signaled n -> Unix.WSIGNALED n
+                  in
+                  ( unix_status
+                  , output_for_status
+                      ~status:unix_status
+                      ~stdout:(Buffer.contents stdout_buf)
+                      ~stderr:(Buffer.contents stderr_buf) )))
         with
         | Eio.Time.Timeout ->
             Log.Misc.warn "[Process_eio] Timeout after %.0fs: %s"

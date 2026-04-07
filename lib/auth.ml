@@ -310,7 +310,7 @@ let legacy_permission_for_tool = function
   | "channel_gate"
   | "masc_register_capabilities" | "masc_find_by_capability"
   | "masc_agent_update" | "masc_operator_action"
-  | "masc_keeper_up" | "masc_keeper_down" | "masc_keeper_msg"
+  | "masc_keeper_up" | "masc_keeper_down" | "masc_keeper_msg" | "masc_keeper_msg_result"
   | "masc_keeper_repair"
   | "masc_keeper_create_from_persona"
   | "masc_operator_confirm" | "masc_unit_define"

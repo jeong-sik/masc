@@ -44,9 +44,19 @@ OAS  ──does not know──→ MASC
 |------|--------|-------|
 | Context compaction | Partial complete | `context_compact_oas.ml`는 OAS `Context_reducer`를 사용한다. MASC 전체 context system이 OAS `Context.t`로 통합된 것은 아니다. |
 | Event bus bridge | Complete for current `masc:*` flow | `oas_events.ml` publishes, `oas_sse_bridge.ml` relays to dashboard SSE |
-| Checkpoint integration | Partial complete | OAS checkpoint is used in shared worker/runtime paths, but keeper runtime still persists its own `working_context` / serialized checkpoint path in `lib/keeper/keeper_exec_context.ml` |
+| Checkpoint integration | Partial complete | OAS checkpoint is used in shared worker/runtime paths, and the public OAS worker API now keeps the extra JSON as a neutral checkpoint sidecar. Keeper runtime still persists its own `working_context` / serialized checkpoint path in `lib/keeper/keeper_exec_context.ml` |
 | Memory bridge | Partial complete | long-term + procedural + institution episodic are bridged; broader memory unification is still separate |
 | Team-session swarm | Partial complete | OAS Swarm runner is active, delivery-contract persistence/verdict export now live, but bridge fidelity is still incomplete |
+
+## Boundary Audit Snapshot
+
+| Module / Surface | Classification | Why |
+|------------------|----------------|-----|
+| `lib/oas_worker*.ml`, `lib/worker_oas.ml`, `lib/verifier_oas.ml` | Correct | OAS is consumed as the runtime contract; MASC chooses prompts, tools, policy, and verification usage |
+| `lib/context_compact_oas.ml` | Acceptable but lossy | Runtime compaction delegates to OAS, but message-importance heuristics still depend on MASC text markers |
+| `lib/memory_oas_bridge.ml` | Acceptable but lossy | Correct consumer-side adapter, but seeding/flushing is still imperative instead of hook-first |
+| `lib/team_session/team_session_oas_bridge.ml` | Acceptable but lossy | OAS Swarm is the substrate, while MASC semantics survive via metadata/projections with known fidelity loss |
+| `lib/keeper/keeper_agent_run.ml` + keeper checkpoint/context path | Boundary violation | Keeper still owns duplicate runtime state via `working_context` and relies on raw text markers such as `[STATE]` |
 
 ## Open Structural Gaps
 
@@ -74,6 +84,19 @@ These stay in MASC:
 - room/task/board/operator/governance semantics
 - planner session policy and repair-budget policy
 - proof/report JSON/markdown contracts and coordination-specific evidence rules
+
+## Priority Order
+
+1. **P1 — keeper runtime state ownership**
+   - shrink the MASC-owned `working_context` role until OAS owns runtime context/checkpoint state
+2. **P2 — marker/text leakage**
+   - reduce dependence on raw `[STATE]`, `[GOAL]`, and memory-summary markers in runtime-facing paths
+3. **P3 — team-session bridge fidelity**
+   - keep MASC semantics in metadata/projections while improving OAS Swarm parity
+4. **P4 — memory bridge hardening**
+   - move from imperative seed/flush toward reusable OAS hook/callback seams where generic
+5. **P5 — doc truth alignment**
+   - keep this contract, the implementation spec, and the utilization audit in sync
 
 ## What This Means Practically
 

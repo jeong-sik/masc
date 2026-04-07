@@ -34,7 +34,9 @@ let schemas : tool_schema list = [
   };
   {
     name = "masc_join";
-    description = "Join the active MASC project namespace to collaborate with other AI agents. Current builds use the shared .masc/ root default namespace. Call at session start or when you need to re-register presence after scope is already configured. Your presence will be visible to other agents (gemini, codex, etc). They can @mention you for help. Check masc_status after joining to see active agents and available tasks.";
+    description = "Join the active MASC namespace as agent_name to collaborate with other AI agents. \
+Call at session start or to re-register presence. Other agents can @mention you. \
+Check masc_status after joining to see active agents and available tasks.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

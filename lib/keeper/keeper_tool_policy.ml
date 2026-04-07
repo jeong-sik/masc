@@ -28,6 +28,7 @@ let init_policy_config ~base_path =
 
 let preset_name_of_tool_preset = function
   | Minimal -> "minimal"
+  | Social -> "social"
   | Messaging -> "messaging"
   | Coding -> "coding"
   | Research -> "research"
@@ -394,29 +395,85 @@ let keeper_universe_model_tools (meta : keeper_meta) : Types.tool_schema list =
 (* ── Tool description lookup (for prompt auto-hints) ─────────── *)
 
 (** Extract the first sentence from a tool description.
-    Truncates at the first period+space or 80 chars, whichever is shorter. *)
+    Truncates at the first period followed by space/newline/end, or 150 chars,
+    whichever is shorter. 150 chars preserves op enums and parameter hints
+    that 9B models need to call tools correctly on the first attempt. *)
 let first_sentence desc =
-  let max_len = 80 in
+  let max_len = 150 in
   let len = String.length desc in
   let cutoff =
-    match String.index_opt desc '.' with
-    | Some i when i < max_len -> i + 1
-    | _ -> min len max_len
+    (* Find first '.' followed by space, newline, or end-of-string *)
+    let rec find_stop i =
+      if i >= len then len
+      else if desc.[i] = '.' then
+        if i + 1 >= len then i + 1  (* period at end *)
+        else if desc.[i + 1] = ' ' || desc.[i + 1] = '\n' then i + 1
+        else find_stop (i + 1)
+      else find_stop (i + 1)
+    in
+    let sentence_end = find_stop 0 in
+    min sentence_end max_len
   in
   let s = String.sub desc 0 cutoff in
   if cutoff < len then String.trim s else s
 
+(** Extract enum values from a tool's input_schema.
+    Returns a compact string like "op=pwd|ls|cat|rg|git_status" or "" if no enums found. *)
+let enum_hints_of_schema (schema : Yojson.Safe.t) : string =
+  let module U = Yojson.Safe.Util in
+  let properties = match U.member "properties" schema with
+  | `Assoc props -> props
+  | _ -> []
+  in
+  let enums =
+    properties
+    |> List.filter_map (fun (name, field_schema) ->
+      match U.member "enum" field_schema with
+      | `List values ->
+        let vals = List.filter_map (function
+          | `String v -> Some v
+          | _ -> None
+        ) values in
+        if vals = [] then None
+        else Some (Printf.sprintf "%s=%s" name (String.concat "|" vals))
+      | _ -> None)
+  in
+  String.concat ", " enums
+
+(** Extract required fields from a tool's input_schema.
+    Returns a compact string like "required: path, content" or "" if no required fields. *)
+let required_hints_of_schema (schema : Yojson.Safe.t) : string =
+  let module U = Yojson.Safe.Util in
+  match U.member "required" schema with
+  | `List reqs ->
+    let names = List.filter_map (function
+      | `String v -> Some v
+      | _ -> None
+    ) reqs in
+    if names = [] then ""
+    else "required: " ^ String.concat ", " names
+  | _ -> ""
+
 (** Lookup tool description by name from all available schema sources.
-    Returns [Some first_sentence] if found, [None] otherwise.
+    Returns [Some first_sentence] + optional enum/required hints if found, [None] otherwise.
     Searches shard-resolved tools, inline schemas, injected masc_* schemas,
-    and code-write schemas. *)
+    code-write schemas, voice tools, and tool_search schema. *)
 let tool_hint_of (name : string) : string option =
   let all_schemas =
     Tool_shard.keeper_model_tools
+    @ Keeper_tool_registry.keeper_voice_tool_schemas
+    @ [ Keeper_tool_registry.keeper_tool_search_schema ]
     @ Tool_schemas_inline.schemas
     @ !masc_schemas_ref
     @ Tool_code_write.schemas
   in
   match List.find_opt (fun (s : Types.tool_schema) -> s.name = name) all_schemas with
-  | Some s -> Some (first_sentence s.description)
+  | Some s ->
+    let base = first_sentence s.description in
+    let enums = enum_hints_of_schema s.Types.input_schema in
+    let required = required_hints_of_schema s.Types.input_schema in
+    let parts = ref [base] in
+    if enums <> "" then parts := !parts @ ["[" ^ enums ^ "]"];
+    if required <> "" then parts := !parts @ [required];
+    Some (String.concat " " !parts)
   | None -> None

@@ -15,14 +15,29 @@
 [groups.base]
 tools = ["keeper_time_now", "keeper_context_status", "keeper_memory_search", "keeper_tool_search"]
 
+# Board tools split: core (frequent) vs extended (discoverable via tool_search).
+[groups.board_core]
+tools = ["keeper_board_get", "keeper_board_post", "keeper_board_comment", "keeper_board_vote", "keeper_board_list"]
+
+[groups.board_extended]
+tools = ["keeper_board_stats", "keeper_board_search"]
+
+# Full board group: backward compat alias.
 [groups.board]
 tools = ["keeper_board_get", "keeper_board_post", "keeper_board_comment", "keeper_board_vote", "keeper_board_list", "keeper_board_stats", "keeper_board_search"]
+
+# Coordination split: core (task lifecycle) vs extended (audit, force ops).
+[groups.coordination_core]
+tools = ["keeper_tasks_list", "keeper_task_claim", "keeper_task_done", "keeper_broadcast"]
 
 [groups.coordination]
 tools = ["keeper_tasks_list", "keeper_tasks_audit", "keeper_task_claim", "keeper_task_done", "keeper_broadcast"]
 
 [groups.shell]
-tools = ["keeper_shell_readonly"]
+# keeper_bash: full bash with 3-layer deterministic guard
+#   (validate_command → destructive_guard → write_gate).
+#   Non-coding presets get read-only mode (write_enabled=false).
+tools = ["keeper_shell_readonly", "keeper_bash"]
 
 [groups.filesystem]
 tools = ["keeper_fs_read"]
@@ -62,6 +77,16 @@ tools = ["keeper_board_delete"]
 
 # ── MASC Tool Groups ───────────────────────────────────────────────
 
+# Essential: tools every keeper needs (orientation + web search).
+[masc.essential]
+tools = ["masc_status", "masc_heartbeat", "masc_web_search"]
+
+# Coordination: external agent coordination tools.
+# Only needed by keepers that manage tasks across agents.
+[masc.coordination]
+tools = ["masc_tasks", "masc_claim_next", "masc_transition", "masc_add_task", "masc_batch_add_tasks", "masc_agents", "masc_dashboard", "masc_agent_card", "masc_tool_help"]
+
+# Full core: backward compat alias (essential + coordination).
 [masc.core]
 tools = ["masc_status", "masc_heartbeat", "masc_tasks", "masc_claim_next", "masc_transition", "masc_add_task", "masc_batch_add_tasks", "masc_agents", "masc_dashboard", "masc_agent_card", "masc_tool_help", "masc_web_search"]
 
@@ -81,23 +106,31 @@ allowed_orgs = ["jeong-sik"]
 groups = ["base"]
 masc_tools = ["masc_status", "masc_tool_help"]
 
+# Social: persona keepers that live on the board + web search.
+# ~15 tools. Optimal for 9B tool selection accuracy.
+[presets.social]
+groups = ["base", "board_core", "coordination_core", "filesystem"]
+masc_groups = ["essential"]
+
+# Messaging: social + shell, library, github for broader interaction.
+# ~25 tools.
 [presets.messaging]
-groups = ["base", "board", "coordination", "governance", "github", "library", "shell", "filesystem"]
-masc_groups = ["core"]
+groups = ["base", "board_core", "coordination_core", "shell", "filesystem", "library"]
+masc_groups = ["essential"]
 
 [presets.coding]
-groups = ["base", "board", "filesystem", "filesystem_write", "library", "shell", "coordination", "coding_shard", "coding", "github"]
-masc_groups = ["core", "coding"]
+groups = ["base", "board_core", "filesystem", "filesystem_write", "library", "shell", "coordination", "coding_shard", "coding", "github"]
+masc_groups = ["essential", "coding"]
 
 [presets.research]
-groups = ["base", "filesystem", "library", "shell", "coordination", "board", "governance", "autoresearch"]
-masc_groups = ["core"]
+groups = ["base", "filesystem", "library", "shell", "coordination", "board_core", "autoresearch"]
+masc_groups = ["essential"]
 
 # Delivery preset: research + coding for keepers that need to produce code changes.
 # Use for keepers whose goal involves PRs, issues, or code fixes.
 [presets.delivery]
-groups = ["base", "filesystem", "filesystem_write", "library", "shell", "coordination", "board", "governance", "autoresearch", "coding_shard", "coding", "github"]
-masc_groups = ["core", "coding"]
+groups = ["base", "filesystem", "filesystem_write", "library", "shell", "coordination", "board_core", "autoresearch", "coding_shard", "coding", "github"]
+masc_groups = ["essential", "coordination", "coding"]
 
 [presets.full]
 all_candidates = true

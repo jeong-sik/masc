@@ -26,13 +26,8 @@ let bus_ref : Agent_sdk.Event_bus.t option Atomic.t = Atomic.make None
 let set_bus bus = Atomic.set bus_ref (Some bus)
 let get_bus () = Atomic.get bus_ref
 
-(* Concurrent keeper turn slots. This is NOT the LLM slot count —
-   it is the number of keeper fibers allowed to attempt a turn
-   simultaneously. The LLM's own slot limit (llama-server -np)
-   handles inference queuing. Setting this lower than the keeper
-   count causes starvation: reactive wakeups (explicit mentions)
-   queue behind long autonomous turns and never execute.
-   Default 12 = generous headroom for up to 12 keepers. *)
+(* Global turn slot cap. Safety ceiling for ALL keeper turns (autonomous
+   + reactive). Default 12 = headroom for up to 12 keepers. *)
 let keeper_turn_throttle_limit =
   Keeper_config.int_of_env_default
     "MASC_KEEPER_AUTOBOOT_MAX" ~default:12 ~min_v:1 ~max_v:20
@@ -40,9 +35,32 @@ let keeper_turn_throttle_limit =
 
 let turn_semaphore = Eio.Semaphore.make keeper_turn_throttle_limit
 
-let with_keeper_turn_slot f =
+(* Autonomous turn concurrency cap. Prevents thundering-herd when all
+   keepers fire scheduled turns simultaneously on a shared LLM server.
+   Reactive turns (explicit mentions, board events) bypass this gate
+   so they are never starved by slow autonomous turns.
+   Default 3 = with 27B/8-slot each autonomous turn gets ~2-3 slots
+   of GPU throughput, completing in ~30-60s instead of 5min+. *)
+let autonomous_turn_limit =
+  Keeper_config.int_of_env_default
+    "MASC_KEEPER_AUTONOMOUS_CONCURRENCY" ~default:3 ~min_v:1 ~max_v:12
+;;
+
+let autonomous_turn_semaphore = Eio.Semaphore.make autonomous_turn_limit
+
+let with_keeper_turn_slot ~channel f =
+  let is_autonomous =
+    match channel with
+    | Keeper_world_observation.Scheduled_autonomous -> true
+    | Keeper_world_observation.Reactive -> false
+  in
+  if is_autonomous then Eio.Semaphore.acquire autonomous_turn_semaphore;
   Eio.Semaphore.acquire turn_semaphore;
-  Fun.protect ~finally:(fun () -> Eio.Semaphore.release turn_semaphore) f
+  Fun.protect
+    ~finally:(fun () ->
+      Eio.Semaphore.release turn_semaphore;
+      if is_autonomous then Eio.Semaphore.release autonomous_turn_semaphore)
+    f
 ;;
 
 (** Optional gRPC client + env — WORM Atomic: set at server bootstrap
@@ -685,7 +703,7 @@ let run_keepalive_unified_turn
       then meta_after_triage
       else if should_run_turn
       then (
-        with_keeper_turn_slot (fun () ->
+        with_keeper_turn_slot ~channel:turn_decision.channel (fun () ->
           match
             Keeper_unified_turn.run_unified_turn
               ~config:ctx.config
@@ -942,6 +960,11 @@ let run_heartbeat_loop
      and tool-call counters are recreated inside run_turn and therefore
      do not accumulate for the full keeper lifecycle. *)
   let shared_context = Agent_sdk.Context.create () in
+  (* Mtime-based change detection for keeper meta disk reads.
+     Avoids re-parsing the JSON file on every heartbeat cycle when
+     no operator has modified it.  Initialized to 0.0 so the first
+     cycle always reads. *)
+  let last_meta_mtime = ref 0.0 in
   let rec loop () =
     if Atomic.get stop
     then ()
@@ -953,9 +976,11 @@ let run_heartbeat_loop
       (* Phase 0: timing markers *)
       let t_presence_start = Time_compat.now () in
       let meta_current =
-        match read_meta ctx.config m.name with
-        | Ok (Some latest) -> latest
-        | _ -> m
+        match read_meta_if_changed ctx.config m.name ~last_mtime:!last_meta_mtime with
+        | Some (latest, new_mtime) ->
+          last_meta_mtime := new_mtime;
+          latest
+        | None -> m
       in
       (* Sync disk meta to registry so dashboard reads live values.  #5364.
          Physical inequality: read_meta returns a fresh record when the JSON

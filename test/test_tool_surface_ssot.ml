@@ -23,6 +23,10 @@ let check_set_equal label ~expected ~actual =
   Alcotest.(check bool) (label ^ " sets equal") true
     (SS.equal expected actual)
 
+let raw_schema_by_name name =
+  Config.raw_all_tool_schemas
+  |> List.find_opt (fun (schema : Types.tool_schema) -> String.equal schema.name name)
+
 (* {1 Parity Tests — each compares legacy hardcoded list vs surface SSOT} *)
 
 let test_public_mcp_parity () =
@@ -310,6 +314,21 @@ let test_role_catalogs_drop_stale_entries_when_built () =
   Alcotest.(check bool) "coordinator role excludes portal_open" false
     (List.mem "masc_portal_open" coordinator_tools)
 
+let test_local_worker_compat_passthrough_schemas_match_registry () =
+  List.iter (fun (schema : Types.tool_schema) ->
+    match raw_schema_by_name schema.name with
+    | None ->
+        Alcotest.failf "missing raw schema for passthrough tool %s" schema.name
+    | Some raw_schema ->
+        Alcotest.(check string)
+          (schema.name ^ " passthrough description")
+          raw_schema.description schema.description;
+        Alcotest.(check bool)
+          (schema.name ^ " passthrough input_schema")
+          true
+          (Yojson.Safe.equal raw_schema.input_schema schema.input_schema))
+    Agent_tool_surfaces.local_worker_compat_passthrough_schemas
+
 let () =
   Alcotest.run "tool_surface_ssot"
     [
@@ -349,13 +368,15 @@ let () =
             test_replacement_targets_have_schemas;
           Alcotest.test_case "keeper internal tools have schemas" `Quick
             test_keeper_internal_tools_have_schemas;
-          Alcotest.test_case "workspace_mutating canonical used" `Quick
-            test_workspace_mutating_canonical_used;
-          Alcotest.test_case "role catalogs use only available tools" `Quick
-            test_role_catalogs_only_expose_available_tools;
-          Alcotest.test_case "built role catalogs drop stale entries" `Quick
-            test_role_catalogs_drop_stale_entries_when_built;
-        ] );
+           Alcotest.test_case "workspace_mutating canonical used" `Quick
+             test_workspace_mutating_canonical_used;
+           Alcotest.test_case "role catalogs use only available tools" `Quick
+             test_role_catalogs_only_expose_available_tools;
+           Alcotest.test_case "built role catalogs drop stale entries" `Quick
+             test_role_catalogs_drop_stale_entries_when_built;
+           Alcotest.test_case "local worker passthrough schemas use registry"
+             `Quick test_local_worker_compat_passthrough_schemas_match_registry;
+         ] );
       ( "ssot_validation",
         [
           Alcotest.test_case "no orphaned tools" `Quick

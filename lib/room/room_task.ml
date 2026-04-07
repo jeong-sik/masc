@@ -125,12 +125,44 @@ let observe_task_transition config ~agent_name ~task_id ~transition ~details =
   !Room_hooks.observe_task_transition_fn config ~agent_name
     ~room_id:(activity_room_id config) ~task_id ~transition ~details
 
-(** Add task — file-locked to prevent task ID collision under concurrency *)
+(** Normalize title for deduplication: lowercase, keep only alphanumeric+space.
+    Deterministic string transform — no LLM involved. *)
+let normalize_title_for_dedup (title : string) : string =
+  let buf = Buffer.create (String.length title) in
+  String.iter (fun c ->
+    let lc = Char.lowercase_ascii c in
+    if (lc >= 'a' && lc <= 'z') || (lc >= '0' && lc <= '9') || lc = ' '
+    then Buffer.add_char buf lc
+  ) title;
+  Buffer.contents buf |> String.trim
+
+(** Check if a task with a similar title already exists in the backlog.
+    Returns [Some existing_task_id] if a duplicate is found, [None] otherwise.
+    Uses normalized title comparison — deterministic, no fuzzy matching. *)
+let find_duplicate_task (backlog : backlog) (title : string) : string option =
+  let norm = normalize_title_for_dedup title in
+  if norm = "" then None
+  else
+    List.find_opt (fun (t : task) ->
+      let t_norm = normalize_title_for_dedup t.title in
+      t_norm = norm && (match t.task_status with Done _ | Cancelled _ -> false | _ -> true)
+    ) backlog.tasks
+    |> Option.map (fun t -> t.id)
+
+(** Add task — file-locked to prevent task ID collision under concurrency.
+    Rejects tasks with duplicate titles (exact match after normalization)
+    to prevent the same work from being created multiple times. *)
 let add_task ?contract config ~title ~priority ~description =
   ensure_initialized config;
   let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
   with_file_lock config backlog_path (fun () ->
     let backlog = read_backlog config in
+    (* Dedup guard: reject if an active task with the same normalized title exists *)
+    (match find_duplicate_task backlog title with
+    | Some existing_id ->
+      Printf.sprintf "⚠️ Duplicate rejected: '%s' matches existing %s. Use that task instead."
+        title existing_id
+    | None ->
     let task_id = Printf.sprintf "task-%03d" (next_task_number config backlog) in
     let contract = Option.map normalize_task_contract contract in
 
@@ -171,15 +203,21 @@ let add_task ?contract config ~title ~priority ~description =
 
     !Room_hooks.on_task_mutation_fn ();
     let _ = broadcast config ~from_agent:"system" ~content:(Printf.sprintf "📋 New quest: %s" title) in
-    Printf.sprintf "✅ Added %s: %s" task_id title)
+    Printf.sprintf "✅ Added %s: %s" task_id title))
 
-(** Add task with a required role constraint — file-locked *)
+(** Add task with a required role constraint — file-locked.
+    Same dedup guard as [add_task]. *)
 let add_task_with_role ?contract config ~title ~priority ~description
     ~required_role =
   ensure_initialized config;
   let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
   with_file_lock config backlog_path (fun () ->
     let backlog = read_backlog config in
+    (match find_duplicate_task backlog title with
+    | Some existing_id ->
+      Printf.sprintf "⚠️ Duplicate rejected: '%s' matches existing %s. Use that task instead."
+        title existing_id
+    | None ->
     let task_id = Printf.sprintf "task-%03d" (next_task_number config backlog) in
     let contract = Option.map normalize_task_contract contract in
 
@@ -223,7 +261,7 @@ let add_task_with_role ?contract config ~title ~priority ~description
     let role_str = Types_core.role_to_string required_role in
     let _ = broadcast config ~from_agent:"system"
       ~content:(Printf.sprintf "📋 New quest: %s (requires: %s)" title role_str) in
-    Printf.sprintf "✅ Added %s: %s (required_role: %s)" task_id title role_str)
+    Printf.sprintf "✅ Added %s: %s (required_role: %s)" task_id title role_str))
 
 (** Add multiple tasks in a batch *)
 let batch_add_tasks_internal config tasks =

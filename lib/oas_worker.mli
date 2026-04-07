@@ -103,13 +103,14 @@ val run_named :
   ?contract:Oas.Risk_contract.t ->
   ?transport:Masc_grpc_transport.t ->
   ?allowed_paths:string list ->
-  ?working_context:Yojson.Safe.t ->
+  ?checkpoint_sidecar:Yojson.Safe.t ->
   ?cache_system_prompt:bool ->
   ?yield_on_tool:bool ->
   ?compact_ratio:float ->
   ?checkpoint_dir:string ->
   ?context_injector:Oas.Hooks.context_injector ->
   ?context:Oas.Context.t ->
+  ?slot_id:int ->
   ?oas_checkpoint:Oas.Checkpoint.t ->
   ?sw:Eio.Switch.t ->
   ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->

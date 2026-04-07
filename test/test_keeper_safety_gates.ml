@@ -219,7 +219,8 @@ let test_messaging_preset_tools () =
   check bool "has board tools" true (List.mem "keeper_board_post" tools);
   check bool "has keeper_fs_read" true (List.mem "keeper_fs_read" tools);
   check bool "has keeper_shell_readonly" true (List.mem "keeper_shell_readonly" tools);
-  check bool "has keeper_github" true (List.mem "keeper_github" tools)
+  (* github removed from messaging to reduce surface; available in coding/delivery *)
+  check bool "no keeper_github in messaging" false (List.mem "keeper_github" tools)
 
 let test_all_keepers_have_shell_and_coding () =
   let meta = make_meta ~preset:Keeper_types.Coding () in

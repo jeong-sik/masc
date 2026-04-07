@@ -79,6 +79,7 @@ let worker_only_tools =
     "masc_keeper_up";
     "masc_keeper_down";
     "masc_keeper_msg";
+    "masc_keeper_msg_result";
     "masc_keeper_repair";
     "masc_keeper_create_from_persona";
     (* CanBroadcast — org units *)

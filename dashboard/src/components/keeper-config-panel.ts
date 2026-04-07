@@ -504,7 +504,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       <div class="mt-2">
         <${Callout}
           title="런타임 설정"
-          body="프로액티브, 컴팩션, 핸드오프 섹션은 인라인 편집이 가능합니다. 소스/실행/런타임/조율/드리프트는 읽기 전용입니다."
+          body="프로액티브, 컴팩션, 핸드오프 섹션은 인라인 편집이 가능합니다. 소스/실행/런타임/조율은 읽기 전용입니다."
         />
       </div>
 

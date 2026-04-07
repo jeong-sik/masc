@@ -10,13 +10,11 @@ export type SurfaceSectionId =
   | 'evidence'
   | 'planning'
   | 'goals'
-  | 'worktrees'
   | 'intervene'
   | 'tools'
   | 'autoresearch'
   | 'harness'
-  | 'features'
-  | 'config'
+  | 'inspector'
   | 'telemetry'
 
 type NonHomeTabId = Exclude<TabId, 'overview' | 'logs'>
@@ -176,12 +174,6 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       description: '목표의 부모-자식 계층 구조와 수렴도. 태스크 연결, 에이전트 배정 상태 시각화.',
       params: { section: 'goals' },
     },
-    {
-      id: 'worktrees',
-      label: '워크트리',
-      description: '현재 활성 git worktree 목록. 실제 git worktree list 결과 반영.',
-      params: { section: 'worktrees' },
-    },
   ],
   lab: [
     {
@@ -203,16 +195,10 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       params: { section: 'harness' },
     },
     {
-      id: 'features',
-      label: '피처 플래그',
-      description: '서버 피처 플래그 상태와 헬스 모니터링.',
-      params: { section: 'features' },
-    },
-    {
-      id: 'config',
-      label: '서버 설정',
-      description: '환경변수, 트랜스포트, 추론 모델 등 서버 설정.',
-      params: { section: 'config' },
+      id: 'inspector',
+      label: '운영 인스펙터',
+      description: '피처 플래그와 서버 설정을 한 화면으로 묶은 운영 진단/점검 화면.',
+      params: { section: 'inspector' },
     },
   ],
 }

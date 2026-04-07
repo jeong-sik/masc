@@ -19,6 +19,7 @@ let keeper_internal_tools =
   [
     (* keeper_read removed: dead alias for keeper_fs_read with no schema.
        Dispatch still accepts it for backward compat. See #4120. *)
+    "keeper_stay_silent";
     "keeper_fs_read";
     "keeper_fs_edit";
     "keeper_memory_search";
@@ -122,7 +123,7 @@ let public_mcp_surface_tools =
     (* Heartbeat *)
     "masc_heartbeat";
     (* Keeper interaction *)
-    "masc_keeper_msg"; "masc_keeper_list"; "masc_keeper_status";
+    "masc_keeper_msg"; "masc_keeper_msg_result"; "masc_keeper_list"; "masc_keeper_status";
     "masc_keeper_up"; "masc_keeper_repair"; "masc_keeper_down";
     (* Board *)
     "masc_board_post"; "masc_board_list"; "masc_board_get";

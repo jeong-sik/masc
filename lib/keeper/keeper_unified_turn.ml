@@ -339,6 +339,43 @@ let append_decision_record
                   ("tool_trace_count", `Int (List.length p.tool_trace_refs));
                 ]
           | _ -> `Null );
+        ( "telemetry",
+          match result with
+          | Some r ->
+              let cascade_fields =
+                match r.cascade_observation with
+                | Some co ->
+                    [
+                      ("cascade_name", `String co.cascade_name);
+                      ("primary_model", match co.primary_model with Some m -> `String m | None -> `Null);
+                      ("selected_model", match co.selected_model with Some m -> `String m | None -> `Null);
+                      ("fallback_applied", `Bool co.fallback_applied);
+                      ("fallback_hops", match co.fallback_hops with Some n -> `Int n | None -> `Int 0);
+                      ("candidate_models", `List (List.map (fun s -> `String s) co.candidate_models));
+                    ]
+                | None -> []
+              in
+              let stop_reason_str =
+                match r.stop_reason with
+                | Oas_worker.Completed -> "completed"
+                | Oas_worker.TurnBudgetExhausted { turns_used; limit } ->
+                    Printf.sprintf "turn_budget_exhausted(%d/%d)" turns_used limit
+              in
+              `Assoc ([
+                ("model_used", `String r.model_used);
+                ("turn_count", `Int r.turn_count);
+                ("stop_reason", `String stop_reason_str);
+                ("input_tokens", `Int r.usage.input_tokens);
+                ("output_tokens", `Int r.usage.output_tokens);
+                ("cache_creation_tokens", `Int r.usage.cache_creation_input_tokens);
+                ("cache_read_tokens", `Int r.usage.cache_read_input_tokens);
+                ("cost_usd", match r.usage.cost_usd with Some c -> `Float c | None -> `Null);
+                ("tokens_per_second",
+                  if latency_ms > 0 then
+                    `Float (float_of_int r.usage.output_tokens /. (float_of_int latency_ms /. 1000.0))
+                  else `Null);
+              ] @ cascade_fields)
+          | None -> `Null );
       ]
       @ social_fields)
   in
@@ -682,6 +719,8 @@ let broadcast_lifecycle_events ~(name : string)
 let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
     ~(observation : Keeper_world_observation.world_observation)
     ~(reason : string) ?(is_transient = false) ?social_state () : keeper_meta =
+  ignore is_transient; (* Param retained for caller compatibility; no longer
+                          used internally after zombie-fix #5594. *)
   let now_ts = Time_compat.now () in
   let is_scheduled_autonomous_cycle =
     is_scheduled_autonomous_cycle_of_observation observation
@@ -704,18 +743,24 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
         count_total =
           meta.runtime.proactive_rt.count_total
           + (if is_scheduled_autonomous_cycle then 1 else 0);
+        (* Always update last_ts on scheduled_autonomous attempts,
+           including transient errors. Without this, transient errors
+           (e.g. llama-server down) leave last_ts stale, causing
+           cooldown_elapsed=false permanently → scheduled turns never
+           resume. last_ts tracks attempts, not successes.
+           Root cause of keeper zombie state: #5594. *)
         last_ts =
-          if is_scheduled_autonomous_cycle && not is_transient then now_ts
+          if is_scheduled_autonomous_cycle then now_ts
           else meta.runtime.proactive_rt.last_ts;
         last_outcome =
-          if is_scheduled_autonomous_cycle && not is_transient then Proactive_error
+          if is_scheduled_autonomous_cycle then Proactive_error
           else meta.runtime.proactive_rt.last_outcome;
         last_reason =
-          if is_scheduled_autonomous_cycle && not is_transient
+          if is_scheduled_autonomous_cycle
           then "unified:error:" ^ String.trim reason
           else meta.runtime.proactive_rt.last_reason;
         last_preview =
-          if is_scheduled_autonomous_cycle && not is_transient then preview
+          if is_scheduled_autonomous_cycle then preview
           else meta.runtime.proactive_rt.last_preview;
       };
       last_speech_act =
@@ -893,9 +938,26 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
                 | None -> Error err)
             | Error err -> Error err
           in
-          retry_loop ~run_meta:meta ~max_context:max_cascade_context
-            ~run_generation:generation ~attempt:1
-            ~is_retry:false ~overflow_retry_used:false))
+          (* Wall-clock timeout guards against indefinite TCP-level hangs
+             from upstream LLM providers. Without this, a single stalled
+             connection blocks the keeper fiber forever. *)
+          let timeout_sec =
+            Env_config_keeper.KeeperKeepalive.turn_timeout_sec
+          in
+          (try
+            Eio.Time.with_timeout_exn (Eio_context.get_clock ()) timeout_sec
+              (fun () ->
+                retry_loop ~run_meta:meta ~max_context:max_cascade_context
+                  ~run_generation:generation ~attempt:1
+                  ~is_retry:false ~overflow_retry_used:false)
+          with Eio.Time.Timeout ->
+            let msg =
+              Printf.sprintf
+                "Turn wall-clock timeout after %.0fs (MASC_KEEPER_TURN_TIMEOUT_SEC)"
+                timeout_sec
+            in
+            Log.Keeper.error "%s: %s" meta.name msg;
+            Error (Oas.Error.Internal msg))))
       in
       match run_result with
       | Error err ->
@@ -923,14 +985,26 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
                Log.Keeper.error
                  "write_meta failed after unified turn failure: %s" msg);
           let base_path = config.base_path in
-          Keeper_registry.increment_turn_failures ~base_path meta.name;
+          (* Transient errors (429 rate limit, 503 overloaded, network
+             timeout) do not count toward the consecutive failure threshold.
+             They are already retried at the turn level with backoff; killing
+             the keeper fiber for a transient API blip is an overreaction
+             that causes unnecessary restarts and context loss.
+             Only persistent errors (auth failure, config error, context
+             overflow after compaction) increment the crash counter. *)
+          if not is_transient then
+            Keeper_registry.increment_turn_failures ~base_path meta.name
+          else
+            Log.Keeper.info
+              "%s: transient turn failure (not counted toward crash threshold): %s"
+              meta.name (short_preview e_str);
           let count = Keeper_registry.get_turn_failures ~base_path meta.name in
           let threshold =
             Runtime_params.get Governance_registry.keeper_max_turn_failures
           in
           if count >= threshold then begin
             Log.Keeper.error
-              "%s: %d consecutive turn failures (threshold=%d), escalating to supervisor crash path"
+              "%s: %d consecutive persistent turn failures (threshold=%d), escalating to supervisor crash path"
               meta.name count threshold;
             Keeper_registry.set_failure_reason ~base_path:config.base_path
               meta.name

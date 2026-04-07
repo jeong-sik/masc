@@ -554,14 +554,17 @@ let keeper_unified_temperature () : float =
     ~max_v:2.0
 
 (** Max output tokens for unified keeper turns.
-    8192 allows complex multi-tool reasoning and chain-of-thought per turn.
-    Env: [MASC_KEEPER_UNIFIED_MAX_TOKENS]. Default: 8192. *)
+    65536 matches OpenHands default and 2x Claude Code's 32k.
+    With 262k context per llama-server slot, 65k output leaves ~197k for
+    input (system prompt + tools + conversation history).
+    Override via [MASC_KEEPER_UNIFIED_MAX_TOKENS].
+    Env: [MASC_KEEPER_UNIFIED_MAX_TOKENS]. Default: 65536. *)
 let keeper_unified_max_tokens () : int =
   int_of_env_default
     "MASC_KEEPER_UNIFIED_MAX_TOKENS"
-    ~default:8192
+    ~default:65536
     ~min_v:256
-    ~max_v:32000
+    ~max_v:262144
 
 (* max_turns is set in keeper_agent_run.ml (default: 50).
    Known constraints (retain for future tuning):
@@ -570,3 +573,23 @@ let keeper_unified_max_tokens () : int =
    - 3 turns left keepers unable to do meaningful work (board_post x3 only)
    - 10 turns was insufficient for multi-step tasks (PR creation, web search)
    - 50 turns balances completion rate vs resource usage *)
+
+(** Number of llama-server KV cache slots available for keeper pinning.
+    Keepers are assigned slot_id = (hash(name) mod num_slots).
+    0 = disable slot pinning. Must match llama-server --parallel N.
+    Env: [MASC_KEEPER_LLAMA_SLOTS]. Default: 4. *)
+let keeper_llama_slots () : int =
+  int_of_env_default
+    "MASC_KEEPER_LLAMA_SLOTS"
+    ~default:4
+    ~min_v:0
+    ~max_v:32
+
+(** Compute a deterministic slot_id for a keeper name.
+    Returns [None] when slot pinning is disabled (num_slots = 0). *)
+let keeper_slot_id (name : string) : int option =
+  let num_slots = keeper_llama_slots () in
+  if num_slots <= 0 then None
+  else
+    let h = Hashtbl.hash name in
+    Some (h mod num_slots)

@@ -16,13 +16,6 @@ let local_llm_default_port = 8085
 let local_llm_default_url =
   Printf.sprintf "http://127.0.0.1:%d" local_llm_default_port
 
-(** Default port for Ollama (OpenAI-compatible at /v1). *)
-let ollama_default_port = 11434
-
-(** Default URL for Ollama. *)
-let ollama_default_url =
-  Printf.sprintf "http://127.0.0.1:%d" ollama_default_port
-
 (** Default port for the MASC HTTP server. *)
 let masc_http_default_port = 8935
 

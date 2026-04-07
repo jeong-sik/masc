@@ -173,14 +173,6 @@ end
     continue to compile without changes. *)
 module Llama = Local_runtime
 
-module Ollama = struct
-  let server_url =
-    get_string ~default:Masc_network_defaults.ollama_default_url "OLLAMA_SERVER_URL"
-
-  let default_model =
-    get_string ~default:"" "OLLAMA_DEFAULT_MODEL"
-end
-
 module Glm = struct
   let server_url = Env_config_core.get_string ~default:"https://api.z.ai" "ZAI_BASE_URL"
 end

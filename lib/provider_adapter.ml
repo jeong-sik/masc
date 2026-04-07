@@ -81,7 +81,6 @@ let normalize_label label = String.trim label |> String.lowercase_ascii
 (* ── Canonical adapter names (single definition point) ──────── *)
 
 let cn_llama = "llama"
-let cn_ollama = "ollama"
 let cn_claude = "claude-api"
 let cn_codex = "codex-api"
 let cn_gemini = "gemini-api"
@@ -147,19 +146,6 @@ let direct_adapters =
       default_model_id =
         (let m = Env_config_runtime.Llama.default_model in
          if m = "" || m = "explicit-model-required" then None else Some m);
-    };
-    {
-      canonical_name = cn_ollama;
-      runtime_kind = Local;
-      auth_mode = No_auth;
-      aliases = [ cn_ollama; "ollama-local" ];
-      spawn_key = None;
-      cascade_prefix = "ollama";
-      default_voice = None;
-      endpoint_url = Some Env_config_runtime.Ollama.server_url;
-      default_model_id =
-        (let m = Env_config_runtime.Ollama.default_model in
-         if m = "" then None else Some m);
     };
     {
       canonical_name = cn_claude;
@@ -683,12 +669,10 @@ let auth_kind_for_canonical_name name =
   | None -> "unknown"
 
 let bare_ollama_migration_message () =
-  "Bare `ollama` without a model requires OLLAMA_DEFAULT_MODEL env var. Use `ollama:<model>` for explicit selection."
+  "Bare `ollama` is no longer supported. Use `default` for normal selection, or `llama:<model>` / another explicit provider:model label as an override."
 
 let is_bare_ollama_label label =
-  let normalized = normalize_label label in
-  String.equal normalized "ollama"
-  && Env_config_runtime.Ollama.default_model = ""
+  String.equal (normalize_label label) "ollama"
 
 let explicit_llama_model_id_result () =
   match nonempty_env "LLAMA_DEFAULT_MODEL" with

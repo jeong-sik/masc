@@ -1,6 +1,29 @@
 # Changelog
 
 
+## [2.253.0] - 2026-04-07
+
+### Added
+- **Memory consolidation** -- short-term to long-term memory transfer. (#5588)
+- **SearXNG web search** -- add web search tool for keepers. (#5591)
+- **Slot pinning** -- llama-server KV cache reuse via slot_id. (#5583)
+- **Self-directed autonomy triggers** -- token budget fix and autonomy. (#5594)
+- **Per-turn wall-clock timeout** and slot yield. (#5603)
+
+### Changed
+- **Autonomous multi-step behavior** -- enable keeper multi-step. (#5592)
+- **Default max_turns** -- 50 to 200 for autonomous PR workflow. (#5585)
+
+### Fixed
+- **extend_turns API** -- replace internal Agent.set_state with public API. (#5580)
+- **Transient vs persistent failure** -- separate turn failure counting. (#5584)
+- **stderr capture** -- capture in run_argv_with_status. (#5586)
+- **fs_read hint** -- add parent directory hint on file-not-found. (#5589)
+
+### Performance
+- **Server-side cache** for keeper_status responses. (#5587)
+- **mtime-based guard** -- skip meta disk read when mtime unchanged. (#5590)
+
 ## [2.252.0] - 2026-04-07
 
 ### Added

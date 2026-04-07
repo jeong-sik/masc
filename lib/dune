@@ -499,6 +499,7 @@
    keeper_turn_up
    keeper_turn_lifecycle
    keeper_turn
+   keeper_msg_async
    keeper_status_detail
    keeper_status
    keeper_status_bridge
@@ -625,6 +626,7 @@
   keeper_turn_up_update
   keeper_turn_up
   keeper_turn_lifecycle
+  keeper_msg_async
   team_session_engine_helpers
   team_session_engine_status
   team_session_engine_policy

@@ -8,6 +8,13 @@
 open Keeper_types
 open Keeper_context_core
 
+(** Fraction of context window at which compaction is treated as an
+    emergency, bypassing the continuity-reflection cooldown gate.
+    Distinct from [ratio_gate] (per-keeper compaction threshold) and
+    [handoff_threshold] (handoff gate); this is a safety floor that
+    prevents context overflow regardless of cooldown state (#5634). *)
+let emergency_compact_ratio_threshold = 0.8
+
 let compaction_policy_of_keeper (meta : keeper_meta) : float * int * int =
   (meta.compaction.ratio_gate, meta.compaction.message_gate, meta.compaction.token_gate)
 
@@ -22,13 +29,18 @@ let compact_if_needed
   let ratio_gate, message_gate, token_gate = compaction_policy_of_keeper meta in
   let cooldown = Float.of_int meta.compaction.cooldown_sec in
   let last_reflection_ts = max meta.runtime.last_continuity_update_ts meta.runtime.proactive_rt.last_ts in
+  (* When no reflection has ever happened (ts=0.0), there is nothing to
+     preserve — allow compaction immediately.  Also bypass the cooldown
+     when context pressure is critical (ratio >= emergency_compact_ratio_threshold)
+     to prevent the overflow that killed janitor at 218K/200K (#5634). *)
+  let emergency = ratio >= emergency_compact_ratio_threshold in
   let reflection_ready =
-    last_reflection_ts > 0.0 && now_ts -. last_reflection_ts >= cooldown
+    emergency
+    || last_reflection_ts <= 0.0
+    || (last_reflection_ts > 0.0 && now_ts -. last_reflection_ts >= cooldown)
   in
   let hold_s =
-    if cooldown <= 0.0 then 0.0
-    else if last_reflection_ts <= 0.0 then
-      Float.of_int meta.compaction.cooldown_sec
+    if cooldown <= 0.0 || emergency || last_reflection_ts <= 0.0 then 0.0
     else
       max
         0.0

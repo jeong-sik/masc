@@ -581,6 +581,71 @@ let test_patch_checkpoint_no_assistant_noop () =
   let text = Agent_sdk.Types.text_of_message (List.hd patched.messages) in
   check string "user msg unchanged" "only user" text
 
+(* Regression tests for compaction gate fixes introduced in #5599:
+   - ts=0.0 must not block compaction via the cooldown gate
+   - ratio >= 0.8 (emergency_compact_ratio_threshold) must bypass the cooldown gate
+   Both tests keep ratio_gate=1.0 / message_gate=0 / token_gate=0 so that no
+   actual OAS compaction is triggered — only the gate logic is exercised. *)
+
+(* Large enough to guarantee ratio >= 0.8 when max_tokens=100 (each char ~0.25 tokens
+   via estimate_char_tokens, so 400 chars ≈ 100 tokens per message; two messages
+   easily exceed the 80-token threshold needed for ratio>=0.8 in a 100-token window). *)
+let emergency_test_text_length = 400
+
+let make_gate_only_meta ?(last_continuity_update_ts = 0.0) ?(cooldown_sec = 3600) () =
+  let base = make_keeper_meta () in
+  {
+    base with
+    compaction =
+      {
+        base.compaction with
+        ratio_gate = 1.0;
+        message_gate = 0;
+        token_gate = 0;
+        cooldown_sec;
+      };
+    runtime =
+      {
+        base.runtime with
+        last_continuity_update_ts;
+      };
+  }
+
+let test_compact_if_needed_ts_zero_bypasses_cooldown () =
+  (* When last_reflection_ts=0.0 (keeper has never reflected) the cooldown
+     gate must NOT block compaction even though now_ts - 0.0 < cooldown. *)
+  let meta = make_gate_only_meta ~last_continuity_update_ts:0.0 ~cooldown_sec:3600 () in
+  let ctx = KEC.create ~system_prompt:"sp" ~max_tokens:4096 in
+  let now_ts = 1000.0 in (* well within the 3600s cooldown window *)
+  let (_ctx, trigger, decision) = KEC.compact_if_needed ~meta ~now_ts ctx in
+  check (option string) "no compaction triggered (ratio_gate=1.0)" None trigger;
+  check string "ts=0.0 bypasses cooldown, not skipped" "blocked:below_thresholds" decision
+
+let test_compact_if_needed_emergency_bypass_ignores_cooldown () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  (* When ratio >= 0.8 the cooldown gate must be bypassed even if the
+     reflection timestamp is fresh and the cooldown period has not elapsed.
+     Without the emergency bypass, cooldown (3600s) would block compaction
+     because only 60s have elapsed since last reflection. *)
+  let now_ts = 10_000.0 in
+  let meta =
+    make_gate_only_meta ~last_continuity_update_ts:(now_ts -. 60.0) ~cooldown_sec:3600 ()
+  in
+  let long_text = String.make emergency_test_text_length 'x' in
+  let ctx =
+    KEC.create ~system_prompt:"sp" ~max_tokens:100
+    |> fun c -> KEC.append c (Agent_sdk.Types.user_msg long_text)
+    |> fun c -> KEC.append c (Agent_sdk.Types.assistant_msg long_text)
+    |> KEC.sync_oas_context
+  in
+  let ratio = KCC.context_ratio ctx in
+  check bool "context ratio is above emergency threshold" true (ratio >= 0.8);
+  let (_ctx, trigger, decision) = KEC.compact_if_needed ~meta ~now_ts ctx in
+  (* Emergency ratio bypasses cooldown → compaction fires (ratio >= ratio_gate=1.0) *)
+  check bool "compaction was triggered (emergency bypass)" true (Option.is_some trigger);
+  check bool "decision starts with applied:" true (String.starts_with ~prefix:"applied:" decision)
+
 let () =
   run "keeper_lifecycle"
     [
@@ -617,5 +682,12 @@ let () =
             test_patch_checkpoint_updates_session_id;
           test_case "patch with no assistant is noop" `Quick
             test_patch_checkpoint_no_assistant_noop;
+        ] );
+      ( "compact_policy",
+        [
+          test_case "ts=0.0 bypasses cooldown gate" `Quick
+            test_compact_if_needed_ts_zero_bypasses_cooldown;
+          test_case "emergency ratio bypasses cooldown gate" `Quick
+            test_compact_if_needed_emergency_bypass_ignores_cooldown;
         ] );
     ]

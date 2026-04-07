@@ -72,19 +72,6 @@ function TimeRangeSelector() {
   `
 }
 
-function kindLabel(kind: string): string {
-  switch (kind) {
-    case 'agent': return '에이전트'
-    case 'task': return '작업'
-    case 'decision': return '결정'
-    case 'operation': return '작전'
-    case 'debate': return '토론'
-    case 'post': return '게시글'
-    case 'comment': return '댓글'
-    default: return kind
-  }
-}
-
 function StatsRow({ data }: { data: ActivityGraphResponse }) {
   const s = data.stats
   const h = data.stats_history ?? []
@@ -104,10 +91,9 @@ function StatsRow({ data }: { data: ActivityGraphResponse }) {
 
   return html`
     <div class="stats-grid grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-3 mb-4">
-      ${statCard('노드', s.node_count ?? 0, evSeries, '#94a3b8')}
-      ${statCard('엣지', s.edge_count ?? 0, evSeries, '#64748b')}
-      ${statCard('에이전트', s.agent_count ?? 0, agSeries, '#22d3ee')}
-      ${statCard('활성', s.active_agents ?? 0, agSeries, '#4ade80', true)}
+      ${statCard('노드', s.node_count ?? 0, [], '#94a3b8')}
+      ${statCard('엣지', s.edge_count ?? 0, [], '#64748b')}
+      ${statCard('활성 에이전트', s.active_agents ?? 0, agSeries, '#4ade80', true)}
       ${statCard('작업', s.task_count ?? 0, tdSeries, '#fbbf24')}
       ${statCard('이벤트', s.event_count ?? 0, evSeries, '#a78bfa')}
     </div>
@@ -302,29 +288,6 @@ function NodeLeaderboard({ nodes }: { nodes: ActivityGraphNode[] }) {
   `
 }
 
-function KindBreakdown({ nodes }: { nodes: ActivityGraphNode[] }) {
-  const counts = new Map<string, number>()
-  for (const node of nodes) {
-    counts.set(node.kind, (counts.get(node.kind) ?? 0) + 1)
-  }
-  const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1])
-
-  if (sorted.length === 0) {
-    return html`<${EmptyState} message="분석할 노드 종류가 없습니다." compact />`
-  }
-
-  return html`
-    <div class="flex flex-wrap gap-2">
-      ${sorted.map(([kind, count]) => html`
-        <div class="flex items-center gap-1.5 py-1.5 px-3 bg-[var(--panel-dark-60)] border border-[var(--slate-gray-12)] rounded-lg" key=${kind}>
-          <span class="text-sm text-text-slate-light">${kindLabel(kind)}</span>
-          <span class="text-base font-bold text-[var(--text-near-white)]">${count}</span>
-        </div>
-      `)}
-    </div>
-  `
-}
-
 function EmptyActivityGraph() {
   return html`
     <div class="flex flex-col gap-5">
@@ -398,42 +361,31 @@ export function ActivityGraphSurface() {
         </div>
       <//>
 
-      <${CollapsibleSection} title="에이전트 타임라인" open=${true}>
-        <${ActivitySwimlane} since=${since} />
-      <//>
-
-      <${CollapsibleSection} title="Keeper Phase Timeline" open=${true}>
-        <${KeeperPhaseTimeline} />
-      <//>
-
-      <div class="grid grid-cols-[minmax(0,1.08fr)_minmax(0,0.96fr)_minmax(0,0.88fr)] gap-4">
-        <${Card} title="활동 주체 순위" class="section mb-4" testId="activity_graph.leaderboard">
-          <div class="mb-4">
-            <h2 class="monitor-headline">활동 주체 순위</h2>
-            <p class="monitor-subheadline">의미적 중요도 기준 정렬입니다. 작업 완료, 의사결정, 핸드오프가 단순 입퇴장보다 높게 평가됩니다.</p>
+      <div class="grid grid-cols-1 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)] gap-4">
+        <${Card} title="활동 주체 순위" class="section" testId="activity_graph.leaderboard">
+          <div class="mb-3">
+            <p class="monitor-subheadline">의미적 중요도 기준. 작업 완료, 의사결정, 핸드오프가 단순 입퇴장보다 높게 평가됩니다.</p>
           </div>
           <${NodeLeaderboard} nodes=${data.nodes} />
         <//>
 
-        <${Card} title="노드 종류 분포" class="section mb-4" testId="activity_graph.kinds">
-          <div class="mb-4">
-            <h2 class="monitor-headline">노드 종류</h2>
-            <p class="monitor-subheadline">그래프에 포함된 노드를 종류별로 분류합니다.</p>
+        <${Card} title="액션 타임라인" class="section" testId="activity_graph.timeline">
+          <div class="max-h-[520px] overflow-y-auto">
+            <${ActionTimeline} data=${data} />
           </div>
-          <${KindBreakdown} nodes=${data.nodes} />
-        <//>
-
-        <${Card} title="액션 타임라인" class="section mb-4" testId="activity_graph.timeline">
-          <div class="mb-4">
-            <h2 class="monitor-headline">타임라인</h2>
-            <p class="monitor-subheadline">최근 실행을 액션 단위로 묶고, 필요할 때만 원본 이벤트를 펼쳐 봅니다.</p>
-          </div>
-          <${ActionTimeline} data=${data} />
         <//>
       </div>
 
+      <${CollapsibleSection} title="에이전트 타임라인">
+        <${ActivitySwimlane} since=${since} />
+      <//>
+
+      <${CollapsibleSection} title="키퍼 상태 전환">
+        <${KeeperPhaseTimeline} />
+      <//>
+
       ${data.timeline.length > 0 ? html`
-        <${CollapsibleSection} title="활동 히트맵" open=${false}>
+        <${CollapsibleSection} title="활동 히트맵">
           <${ActivityHeatmap} data=${data} />
         <//>
       ` : null}

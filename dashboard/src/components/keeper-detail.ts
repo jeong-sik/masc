@@ -6,7 +6,7 @@ import { html } from 'htm/preact'
 import { isOfflineStatus } from '../lib/status-utils'
 import { keeperDisplayStatus } from '../lib/keeper-runtime-display'
 import { signal } from '@preact/signals'
-import { useRef } from 'preact/hooks'
+import { useRef, useState } from 'preact/hooks'
 import { requestConfirm } from './common/confirm-dialog'
 import { currentDashboardActor, runOperatorAction } from '../api'
 import { bootKeeper, shutdownKeeper } from '../api/keeper'
@@ -276,6 +276,7 @@ export function KeeperDetailOverlay() {
   const closeButtonRef = useRef<HTMLButtonElement>(null)
   const titleId = `keeper-detail-title-${keeper.name}`
   const effectiveStatus = keeperDisplayStatus(keeper)
+  const [diagOpen, setDiagOpen] = useState(false)
 
   return html`
     <${DialogOverlay}
@@ -344,6 +345,37 @@ export function KeeperDetailOverlay() {
         ${'' /* ── Latency / Cost / Model charts ── */}
         <${MetricsCharts} keeper=${keeper} />
 
+        ${'' /* ── Runtime activity summary (promoted from profile) ── */}
+        ${keeper.last_heartbeat || keeper.last_speech_act || keeper.recent_output_preview || keeper.memory_recent_note || (keeper.k2k_count ?? 0) > 0
+          ? html`
+            <div class="flex flex-wrap items-start gap-3 px-1">
+              ${keeper.last_heartbeat
+                ? html`<span class="inline-flex items-center gap-1.5 text-[11px] text-[var(--text-muted)] px-2.5 py-1 rounded-lg border border-[var(--white-8)] bg-[var(--white-2)]">
+                    하트비트 <${TimeAgo} timestamp=${keeper.last_heartbeat} />
+                  </span>`
+                : null}
+              ${keeper.last_speech_act
+                ? html`<span class="inline-flex items-center gap-1.5 text-[11px] text-[var(--text-muted)] px-2.5 py-1 rounded-lg border border-[var(--white-8)] bg-[var(--white-2)]">
+                    최근 <span class="font-mono text-[var(--text-body)]">${keeper.last_speech_act}</span>
+                  </span>`
+                : null}
+              ${(keeper.k2k_count ?? 0) > 0
+                ? html`<span class="inline-flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-lg bg-[rgba(167,139,250,0.08)] border border-[rgba(167,139,250,0.15)] text-[var(--text-muted)]">
+                    K2K <span class="font-mono font-medium text-[#a78bfa]">${keeper.k2k_count}</span>
+                  </span>`
+                : null}
+              ${keeper.memory_recent_note
+                ? html`<span class="text-[11px] text-[var(--text-muted)] px-2.5 py-1 rounded-lg border border-[var(--white-8)] bg-[var(--white-2)] truncate max-w-[360px]" title=${keeper.memory_recent_note}>${keeper.memory_recent_note}</span>`
+                : null}
+            </div>
+            ${keeper.recent_output_preview
+              ? html`<div class="py-2 px-3 rounded-lg bg-[rgba(71,184,255,0.06)] border border-[rgba(71,184,255,0.12)] text-xs text-[var(--text-body)] leading-relaxed">
+                  <div class="line-clamp-2">${keeper.recent_output_preview}</div>
+                </div>`
+              : null}
+          `
+          : null}
+
         ${'' /* ── Per-keeper tool telemetry ── */}
         <${KeeperToolTelemetry} keeperName=${keeper.name} />
 
@@ -351,7 +383,7 @@ export function KeeperDetailOverlay() {
         <${KeeperCommsPanel} keeper=${keeper} />
 
         ${'' /* ── Runtime diagnostics (supervisor + keeper diagnostics unified) ── */}
-        <details class="rounded-2xl border border-card-border bg-card/40 backdrop-blur-md shadow-sm">
+        <details class="rounded-2xl border border-card-border bg-card/40 backdrop-blur-md shadow-sm" onToggle=${(e: Event) => setDiagOpen((e.currentTarget as HTMLDetailsElement).open)}>
           <summary class="cursor-pointer py-3 px-5 text-[11px] font-semibold uppercase tracking-widest text-text-muted list-none select-none flex items-center gap-2">
             <span class="w-1.5 h-1.5 rounded-full bg-accent/50"></span>
             런타임 진단
@@ -364,6 +396,10 @@ export function KeeperDetailOverlay() {
               keeper=${keeper}
               onSocialSweep=${() => { void runSocialSweep() }}
             />
+            <div class="pt-3 border-t border-[var(--border-slate-12)]">
+              <h4 class="m-0 mb-3 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">호출 검사기</h4>
+              ${diagOpen ? html`<${KeeperToolCallInspector} keeperName=${keeper.name} />` : null}
+            </div>
           </div>
         </details>
 
@@ -400,44 +436,6 @@ export function KeeperDetailOverlay() {
               `
               : null}
 
-            ${'' /* ── Timestamps + recent activity (merged) ── */}
-            <div class="mt-3 flex flex-col gap-1">
-              ${keeper.last_heartbeat
-                ? html`<div class="flex items-center gap-2 text-xs text-[var(--text-muted)]">
-                    <span>마지막 하트비트:</span>
-                    <${TimeAgo} timestamp=${keeper.last_heartbeat} />
-                  </div>`
-                : null}
-              ${keeper.last_speech_act
-                ? html`<div class="flex items-center gap-2 text-xs text-[var(--text-muted)]">
-                    <span>최근 행동:</span>
-                    <span class="font-mono text-[11px] px-1.5 py-0.5 rounded bg-[var(--white-5)] text-[var(--text-body)]">${keeper.last_speech_act}</span>
-                  </div>`
-                : null}
-            </div>
-
-            ${'' /* ── Recent output + K2K + memory note (inline) ── */}
-            ${keeper.recent_output_preview
-              ? html`
-                <div class="mt-3 py-2 px-3 rounded-lg bg-[rgba(71,184,255,0.06)] border border-[rgba(71,184,255,0.12)] text-xs text-[var(--text-body)] leading-relaxed">
-                  <div class="line-clamp-3">${keeper.recent_output_preview}</div>
-                </div>
-              `
-              : null}
-            ${(keeper.k2k_count ?? 0) > 0 || keeper.memory_recent_note
-              ? html`
-                <div class="mt-2 flex flex-wrap items-center gap-2">
-                  ${(keeper.k2k_count ?? 0) > 0
-                    ? html`<span class="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-md bg-[rgba(167,139,250,0.08)] border border-[rgba(167,139,250,0.15)] text-[var(--text-muted)]">
-                        K2K <span class="font-mono font-medium text-[#a78bfa]">${keeper.k2k_count}</span>
-                      </span>`
-                    : null}
-                  ${keeper.memory_recent_note
-                    ? html`<span class="text-[11px] text-[var(--text-muted)] truncate" title=${keeper.memory_recent_note}>${keeper.memory_recent_note}</span>`
-                    : null}
-                </div>
-              `
-              : null}
 
           <//>
 
@@ -474,38 +472,42 @@ export function KeeperDetailOverlay() {
             <${RuntimeSignals} keeper=${keeper} />
           </details>
 
-          <${SectionCard} title="도구 정책 & 감사">
-            <${KeeperNeighborhood} keeper=${keeper} />
-            <div class="mt-4 pt-4 border-t border-[var(--border-slate-12)]">
-              <h4 class="m-0 mb-3 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">호출 검사기</h4>
-              <${KeeperToolCallInspector} keeperName=${keeper.name} />
+          <details class="p-5 rounded-2xl border border-card-border bg-card/40 backdrop-blur-md shadow-sm">
+            <summary class="cursor-pointer text-[11px] font-semibold uppercase tracking-widest text-text-muted list-none select-none flex items-center gap-2">
+              <span class="w-1.5 h-1.5 rounded-full bg-accent/50"></span>
+              도구 정책
+            </summary>
+            <div class="mt-3">
+              <${KeeperNeighborhood} keeper=${keeper} />
             </div>
-          <//>
+          </details>
 
-          <${SectionCard} title="설정">
-            <${KeeperConfigPanel} keeperName=${keeper.name} />
-          <//>
+          <details class="p-5 rounded-2xl border border-card-border bg-card/40 backdrop-blur-md shadow-sm">
+            <summary class="cursor-pointer text-[11px] font-semibold uppercase tracking-widest text-text-muted list-none select-none flex items-center gap-2">
+              <span class="w-1.5 h-1.5 rounded-full bg-accent/50"></span>
+              설정
+            </summary>
+            <div class="mt-4">
+              <${KeeperConfigPanel} keeperName=${keeper.name} />
+            </div>
+          </details>
         </div>
 
-        ${'' /* ── Debug — journal (separate details to avoid eager mount) ── */}
+        ${'' /* ── Debug (journal + raw data) ── */}
         <details class="mt-4">
           <summary class="cursor-pointer py-3 px-4 text-[11px] font-semibold uppercase tracking-widest text-[var(--text-muted)] list-none select-none rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] hover:bg-[var(--white-6)] transition-colors flex items-center gap-2">
             <span class="w-1.5 h-1.5 rounded-full bg-[var(--text-dim)]"></span>
-            디버그 (저널)
+            디버그
           </summary>
-          <div class="mt-2 p-5 rounded-2xl border border-card-border bg-card/40 backdrop-blur-md">
-            <${AgentJournalStream} agentName=${keeper.name} />
-          </div>
-        </details>
-
-        ${'' /* ── Debug — raw data, collapsed ── */}
-        <details class="mt-2">
-          <summary class="cursor-pointer py-3 px-4 text-[11px] font-semibold uppercase tracking-widest text-[var(--text-muted)] list-none select-none rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] hover:bg-[var(--white-6)] transition-colors flex items-center gap-2">
-            <span class="w-1.5 h-1.5 rounded-full bg-[var(--text-dim)]"></span>
-            디버그 (원시 데이터)
-          </summary>
-          <div class="mt-2 p-5 rounded-2xl border border-card-border bg-card/40 backdrop-blur-md">
-            <${RawDataDebug} keeper=${keeper} />
+          <div class="mt-2 flex flex-col gap-4">
+            <div class="p-5 rounded-2xl border border-card-border bg-card/40 backdrop-blur-md">
+              <h4 class="m-0 mb-3 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">저널</h4>
+              <${AgentJournalStream} agentName=${keeper.name} />
+            </div>
+            <div class="p-5 rounded-2xl border border-card-border bg-card/40 backdrop-blur-md">
+              <h4 class="m-0 mb-3 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">원시 데이터</h4>
+              <${RawDataDebug} keeper=${keeper} />
+            </div>
           </div>
         </details>
 

@@ -227,43 +227,23 @@ function SortBar() {
   `
 }
 
-// ── Memory summary stats ───────────────────────────────────────────
+// ── Memory summary stats (compact inline) ────────────────────────
 function MemorySummary() {
-  const sortLabel = SORT_MODES.find(mode => mode.id === boardSortMode.value)?.label ?? boardSortMode.value
   const grouped = splitVisiblePosts(boardPosts.value)
   const visibleCount = grouped.direct.length + grouped.automation.length + grouped.system.length
-  const automationPolicy = grouped.totalAutomation === 0
-    ? '자동화 글 없음'
-    : boardExcludeAutomation.value
-      ? `자동화 ${grouped.hiddenAutomation}건 제외`
-      : `자동화 ${grouped.totalAutomation}건 표시`
-  const systemPolicy = grouped.totalSystem === 0
-    ? '시스템 글 없음'
-    : boardExcludeSystem.value
-      ? `시스템 ${grouped.hiddenSystem}건 제외`
-      : `시스템 ${grouped.totalSystem}건 표시`
   return html`
-    <div class="grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-3 mb-4">
-      <div class="flex flex-col gap-1.5 p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
-        <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">보이는 글</span>
-        <strong class="text-xl font-semibold text-[var(--text-strong)] tabular-nums">${visibleCount}</strong>
-      </div>
-      <div class="flex flex-col gap-1.5 p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
-        <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">정렬</span>
-        <strong class="text-[13px] font-semibold text-[var(--text-strong)]">${sortLabel}</strong>
-      </div>
-      <div class="flex flex-col gap-1.5 p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
-        <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">잡음 필터</span>
-        <strong class="text-[13px] font-semibold text-[var(--text-strong)]">${automationPolicy}</strong>
-      </div>
-      <div class="flex flex-col gap-1.5 p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
-        <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">시스템 글 정책</span>
-        <strong class="text-[13px] font-semibold text-[var(--text-strong)]">${systemPolicy}</strong>
-      </div>
-      <div class="flex flex-col gap-1.5 p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
-        <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">최근 갱신</span>
-        <strong class="text-[13px] font-semibold text-[var(--text-strong)]">${lastBoardRefreshAt.value ? html`<${TimeAgo} timestamp=${lastBoardRefreshAt.value} />` : '아직 불러오지 않음'}</strong>
-      </div>
+    <div class="flex flex-wrap items-center gap-2 mb-4 px-3 py-2.5 rounded-xl border border-[var(--card-border)] bg-[var(--card)] text-[12px] text-[var(--text-muted)]">
+      <span class="font-semibold text-[var(--text-strong)] tabular-nums text-[15px]">${visibleCount}</span>
+      <span>개 표시 중</span>
+      <span class="text-[var(--text-muted)]">·</span>
+      <span>직접 ${grouped.direct.length}</span>
+      <span class="text-[var(--text-muted)]">·</span>
+      <span>자율 ${grouped.automation.length}</span>
+      <span class="text-[var(--text-muted)]">·</span>
+      <span>시스템 ${grouped.system.length}</span>
+      ${lastBoardRefreshAt.value ? html`
+        <span class="ml-auto text-[11px]">갱신 <${TimeAgo} timestamp=${lastBoardRefreshAt.value} /></span>
+      ` : null}
     </div>
   `
 }

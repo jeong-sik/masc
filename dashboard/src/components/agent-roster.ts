@@ -430,14 +430,17 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
               `
             : null}
 
-          <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            ${legendCards.map(card => html`
-              <div class="monitor-muted-panel px-4 py-4 shadow-[0_8px_24px_rgba(0,0,0,0.12)]">
-                <div class="text-[11px] font-semibold text-[var(--text-strong)]">${card.title}</div>
-                <p class="m-0 mt-2 text-[12px] leading-[1.55] text-[var(--text-muted)]">${card.body}</p>
-              </div>
-            `)}
-          </div>
+          <details class="monitor-muted-panel px-4 py-3">
+            <summary class="cursor-pointer text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wider select-none list-none">범례</summary>
+            <div class="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              ${legendCards.map(card => html`
+                <div class="monitor-muted-panel px-3 py-3">
+                  <div class="text-[11px] font-semibold text-[var(--text-strong)]">${card.title}</div>
+                  <p class="m-0 mt-1.5 text-[11px] leading-[1.5] text-[var(--text-muted)]">${card.body}</p>
+                </div>
+              `)}
+            </div>
+          </details>
         </div>
       </section>
 
@@ -454,7 +457,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
 
           return html`
             <button type="button"
-              class="monitor-surface-card monitor-surface-card-medium group flex min-h-[308px] w-full flex-col gap-4 rounded-[22px] p-5 text-left transition-all duration-200 cursor-pointer hover:border-[var(--border-slate-22)] hover:bg-[var(--bg-1)] hover:-translate-y-0.5"
+              class="monitor-surface-card monitor-surface-card-medium group flex w-full flex-col gap-4 rounded-[22px] p-5 text-left transition-all duration-200 cursor-pointer hover:border-[var(--border-slate-22)] hover:bg-[var(--bg-1)] hover:-translate-y-0.5"
               key=${agent.name}
               aria-label=${`${agent.name} 상세 보기`}
               onClick=${() => openAgentDetail(agent.name)}
@@ -485,47 +488,22 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
               </div>
 
               <div class="flex flex-1 flex-col gap-3 border-t border-[var(--border-slate-12)] pt-3">
-                <div class="rounded-2xl border border-[var(--white-6)] bg-[var(--white-2)] px-3 py-3">
-                  <div class="text-[10px] font-semibold tracking-[0.08em] uppercase text-[var(--text-muted)]">현재 하는 일</div>
-                  <p class="mt-1 text-[13px] leading-[1.5] text-[var(--text-strong)] break-words" title=${currentWork ?? ''}>${workPreview}</p>
-                </div>
+                <p class="m-0 text-[13px] leading-[1.5] text-[var(--text-body)] break-words line-clamp-3" title=${currentWork ?? ''}>${workPreview}</p>
 
-                <div class="flex flex-wrap gap-2">
-                  <span class="inline-flex items-center rounded-full border border-[var(--white-8)] bg-[var(--white-2)] px-2.5 py-1 text-[11px] text-[var(--text-muted)]">
-                    최근 활동 ${lastActivityLabel}
+                <div class="flex flex-wrap items-center gap-2 text-[11px] text-[var(--text-muted)]">
+                  <span class="inline-flex items-center rounded-full border border-[var(--white-8)] bg-[var(--white-2)] px-2.5 py-1">
+                    ${lastActivityLabel}
                   </span>
-                  ${isKeeper ? html`
-                    <span class="inline-flex items-center rounded-full border border-[var(--white-8)] bg-[var(--white-2)] px-2.5 py-1 text-[11px] text-[var(--text-muted)]">
-                      컨텍스트 ${ctxPct != null ? `${ctxPct}% 사용` : '대기 중'}
+                  ${isKeeper && ctxPct != null ? html`
+                    <span class="inline-flex items-center gap-1.5 rounded-full border border-[var(--white-8)] bg-[var(--white-2)] px-2.5 py-1">
+                      CTX
+                      <span class="font-mono font-medium ${ctxPct > 85 ? 'text-[var(--bad)]' : ctxPct > 60 ? 'text-[var(--warn)]' : 'text-[var(--text-strong)]'}">${ctxPct}%</span>
+                      <span class="inline-block w-12 h-1.5 rounded-full bg-[var(--white-6)] overflow-hidden">
+                        <span class="block h-full rounded-full ${ctxPct > 85 ? 'bg-[var(--bad)]' : ctxPct > 60 ? 'bg-[var(--warn)]' : 'bg-[var(--ok)]'}" style="width:${ctxPct}%"></span>
+                      </span>
                     </span>
                   ` : null}
                 </div>
-
-                ${isKeeper ? html`
-                  ${ctxPct != null ? html`
-                    <div class="rounded-2xl border border-[var(--white-6)] bg-[var(--white-2)] px-3 py-3">
-                      <div class="mb-2 flex items-center justify-between gap-3 text-[11px]">
-                        <span class="text-[var(--text-muted)]">컨텍스트 사용량</span>
-                        <strong class="text-[var(--text-strong)]">${ctxPct}%</strong>
-                      </div>
-                      <div class="h-2 overflow-hidden rounded-full bg-[var(--white-6)]">
-                        <div
-                          class="h-full rounded-full bg-linear-to-r from-[var(--accent)] to-[var(--ok)]"
-                          style=${{ width: `${ctxPct}%` }}
-                        ></div>
-                      </div>
-                      <p class="mt-2 text-[11px] leading-[1.45] text-[var(--text-muted)]">키퍼가 현재 컨텍스트 창을 얼마나 쓰고 있는지 보여줍니다.</p>
-                    </div>
-                  ` : html`
-                    <div class="rounded-2xl border border-dashed border-[var(--white-8)] bg-[var(--white-2)] px-3 py-3">
-                      <div class="flex items-center justify-between gap-3 text-[11px]">
-                        <span class="text-[var(--text-muted)]">컨텍스트 사용량</span>
-                        <strong class="text-[var(--text-strong)]">대기 중</strong>
-                      </div>
-                      <p class="mt-2 text-[11px] leading-[1.45] text-[var(--text-muted)]">아직 메트릭이 보고되지 않았습니다. 키퍼가 첫 턴을 시작하면 자동으로 갱신됩니다.</p>
-                    </div>
-                  `}
-                ` : null}
               </div>
             </button>
           `

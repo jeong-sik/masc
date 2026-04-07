@@ -30,6 +30,17 @@ let test_run_argv_fallback_preserves_env () =
   check bool "env visible in fallback" true
     (contains output "PROCESS_EIO_TEST_VAR=ok")
 
+let test_run_argv_with_status_fallback_includes_stderr_on_failure () =
+  Process_eio.reset_for_testing ();
+  let status, output =
+    Process_eio.run_argv_with_status
+      [ "/bin/sh"; "-c"; "printf 'stderr-fallback\\n' >&2; exit 4" ]
+  in
+  let code = match status with Unix.WEXITED c -> c | _ -> 1 in
+  check int "fallback stderr exit code" 4 code;
+  check bool "fallback stderr surfaced in output" true
+    (contains output "stderr-fallback")
+
 let test_run_argv_with_stdin_fallback_preserves_input () =
   let output =
     Process_eio.run_argv_with_stdin ~stdin_content:"ping\n" [ "/bin/cat" ]
@@ -174,6 +185,9 @@ let () =
             test_should_retry_unix_fallback_on_cancelled_bind_error;
           test_case "argv-fallback-preserves-env" `Quick
             test_run_argv_fallback_preserves_env;
+          test_case "argv-with-status-fallback-includes-stderr-on-failure"
+            `Quick
+            test_run_argv_with_status_fallback_includes_stderr_on_failure;
           test_case "argv-with-stdin-fallback-preserves-input" `Quick
             test_run_argv_with_stdin_fallback_preserves_input;
           test_case "init-exposes-complete-runtime" `Quick

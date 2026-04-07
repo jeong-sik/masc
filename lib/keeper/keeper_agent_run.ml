@@ -1461,7 +1461,13 @@ let run_turn
              "tools_used_count", `Int (List.length tool_names);
              "used_memory_search", `Bool used_search;
              "post_turn_ms", `Float post_turn_ms;
-           ] @ (match recall_eval with
+           ] @ (match result.response.telemetry with
+                | Some t -> [
+                    "inference_telemetry",
+                    Agent_sdk.Types.inference_telemetry_to_yojson t;
+                  ]
+                | None -> [])
+             @ (match recall_eval with
                 | Some e -> [
                     "memory_recall_performed", `Bool e.performed;
                     "memory_recall_passed", `Bool e.passed;

@@ -87,6 +87,22 @@ function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
         handoffObj
           ? (typeof handoffObj.to_model === 'string' ? handoffObj.to_model : null)
           : (typeof item.handoff_to_model === 'string' ? item.handoff_to_model : null)
+      const rawTel = isRecord(item.inference_telemetry) ? item.inference_telemetry : null
+      const rawTimings = rawTel && isRecord(rawTel.timings) ? rawTel.timings : null
+      const inference_telemetry = rawTel ? {
+        system_fingerprint: typeof rawTel.system_fingerprint === 'string' ? rawTel.system_fingerprint : null,
+        timings: rawTimings ? {
+          prompt_n: asNumber(rawTimings.prompt_n) ?? null,
+          prompt_ms: asNumber(rawTimings.prompt_ms) ?? null,
+          prompt_per_second: asNumber(rawTimings.prompt_per_second) ?? null,
+          predicted_n: asNumber(rawTimings.predicted_n) ?? null,
+          predicted_ms: asNumber(rawTimings.predicted_ms) ?? null,
+          predicted_per_second: asNumber(rawTimings.predicted_per_second) ?? null,
+          cache_n: asNumber(rawTimings.cache_n) ?? null,
+        } : null,
+        reasoning_tokens: asNumber(rawTel.reasoning_tokens) ?? null,
+        request_latency_ms: asNumber(rawTel.request_latency_ms) ?? 0,
+      } : null
       return {
         ts,
         context_ratio: contextRatio,
@@ -103,6 +119,7 @@ function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
         cost_usd: asNumber(item.cost_usd) ?? Number.NaN,
         handoff_to_model: handoffToModel,
         handoff_new_generation: handoffNewGeneration,
+        inference_telemetry,
       }
     })
     .filter((item): item is KeeperMetricPoint => item !== null)

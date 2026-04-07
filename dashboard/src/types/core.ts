@@ -146,6 +146,21 @@ export interface BoardFlair {
 
 // --- Keeper Metrics ---
 
+export interface InferenceTelemetry {
+  system_fingerprint: string | null
+  timings: {
+    prompt_n: number | null
+    prompt_ms: number | null
+    prompt_per_second: number | null
+    predicted_n: number | null
+    predicted_ms: number | null
+    predicted_per_second: number | null
+    cache_n: number | null
+  } | null
+  reasoning_tokens: number | null
+  request_latency_ms: number
+}
+
 export interface KeeperMetricPoint {
   ts: number
   context_ratio: number
@@ -162,6 +177,7 @@ export interface KeeperMetricPoint {
   cost_usd: number
   handoff_to_model: string | null
   handoff_new_generation: number | null
+  inference_telemetry: InferenceTelemetry | null
 }
 
 export type KeeperLifecycleState =

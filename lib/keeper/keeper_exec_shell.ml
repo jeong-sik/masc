@@ -209,9 +209,9 @@ let handle_keeper_shell_readonly
           ; "entries", lines_to_json ~limit:50 out
           ])
   | "find" ->
-    let name_pattern = Safe_ops.json_string ~default:"" "name" args |> String.trim in
+    let name_pattern = Safe_ops.json_string ~default:"" "pattern" args |> String.trim in
     if name_pattern = ""
-    then error_json ~fields:[ "op", `String op ] "name_required"
+    then error_json ~fields:[ "op", `String op ] "pattern_required"
     else (
       match read_target () with
       | Error e -> error_json ~fields:[ "op", `String op ] e
@@ -306,6 +306,7 @@ let handle_keeper_shell_readonly
         "chmod"; "chown"; "kill"; "pkill"; "dd "; "mkfs"; "wget "; "curl.*-o";
         "git push"; "git reset"; "git checkout"; "git rebase";
         "pip install"; "npm install"; "opam install";
+        "&&"; "||"; ";";
       ] in
       let has_dangerous = List.exists (fun pat ->
         String_util.contains_substring_ci cmd_str pat

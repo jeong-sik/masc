@@ -26,6 +26,12 @@
  (modules public_tool_manifest)
  (libraries masc_mcp yojson))
 
+;; TLA+ trace converter: JSONL -> TraceData.tla
+(executable
+ (name trace_to_tla)
+ (modules trace_to_tla)
+ (libraries yojson))
+
 ;; TUI Dashboard - Terminal interface for multi-agent coordination
 (executable
  (name masc_tui)

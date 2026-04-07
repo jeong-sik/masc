@@ -68,6 +68,7 @@ type registry_entry = {
   board_cursor_ts : float;
   board_cursor_post_id : string option;
   tool_usage : tool_call_entry StringMap.t;
+  transition_seq : int;
 }
 
 
@@ -127,6 +128,7 @@ let register ~base_path name meta =
     board_cursor_ts = 0.0;
     board_cursor_post_id = None;
     tool_usage = StringMap.empty;
+    transition_seq = 0;
   } in
   put_entry key entry;
   Atomic.set running_count_atomic (Atomic.get running_count_atomic + 1);
@@ -592,18 +594,37 @@ let dispatch_event ~base_path name (event : Keeper_state_machine.event) =
          | Keeper_state_machine.Dead -> Some now
          | _ -> None
        in
+       let new_seq = entry.transition_seq + 1 in
+       (* TLA+ trace emission (MASC_TLA_TRACE=1) *)
+       if Keeper_trace_emit.enabled () then
+         Keeper_trace_emit.emit_transition
+           ~keeper_name:name ~base_path
+           ~seq:new_seq ~event
+           ~prev_phase:tr.prev_phase ~new_phase:tr.new_phase
+           ~conditions_after:tr.updated_conditions
+           ~restart_count:entry.restart_count;
        put_entry key {
          entry with
          phase = tr.new_phase;
          conditions = tr.updated_conditions;
          dead_since_ts;
+         transition_seq = new_seq;
        };
        Ok tr
      | Ok tr ->
        (* No phase change — still update conditions *)
+       let new_seq = entry.transition_seq + 1 in
+       if Keeper_trace_emit.enabled () then
+         Keeper_trace_emit.emit_transition
+           ~keeper_name:name ~base_path
+           ~seq:new_seq ~event
+           ~prev_phase:tr.prev_phase ~new_phase:tr.new_phase
+           ~conditions_after:tr.updated_conditions
+           ~restart_count:entry.restart_count;
        put_entry key {
          entry with
          conditions = tr.updated_conditions;
+         transition_seq = new_seq;
        };
        Ok tr
      | Error e ->

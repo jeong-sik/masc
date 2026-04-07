@@ -54,6 +54,7 @@ type registry_entry = {
   board_cursor_ts : float;
   board_cursor_post_id : string option;
   tool_usage : Keeper_types.tool_call_entry StringMap.t;
+  transition_seq : int;
 }
 
 (** Register a keeper as running. Returns the new entry. *)

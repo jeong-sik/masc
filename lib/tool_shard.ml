@@ -88,11 +88,12 @@ let board_tools : Types.tool_schema list = [
     name = "keeper_board_get";
     description = "Read a single board post with all its comments and votes. \
 Use before deciding to comment, vote, or escalate. Returns post content, author, \
-timestamp, vote_count, and comment thread.";
+timestamp, vote_count, and comment thread. \
+post_id format: 'p-xxxx'. Get post_id from keeper_board_list results.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
-        ("post_id", `Assoc [("type", `String "string"); ("description", `String "Post ID to inspect")]);
+        ("post_id", `Assoc [("type", `String "string"); ("description", `String "Post ID (format: p-xxxx). Get from keeper_board_list.")]);
       ]);
       ("required", `List [`String "post_id"]);
     ];

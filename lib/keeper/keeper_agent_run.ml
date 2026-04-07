@@ -137,6 +137,8 @@ let merge_tool_selection_boundary
   in
   Keeper_types.dedupe_keep_order (deterministic_floor @ llm_selected)
 
+let keeper_selection_top_k = 10
+
 let tool_index_entry_of_tool
     ~(korean_kw_tbl : (string, string) Hashtbl.t)
     (t : Agent_sdk.Tool.t) : Agent_sdk.Tool_index.entry =
@@ -647,23 +649,35 @@ let run_turn
      Search results are post-filtered to keeper_allowed_tool_names
      so the keeper only sees tools it is actually permitted to call. *)
   let search_index = Agent_sdk.Tool_index.build ~config:tool_index_config tool_entries in
-  let preset_names = Keeper_tool_policy.keeper_preset_universe_tool_names meta in
-  let preset_set = Hashtbl.create (List.length preset_names) in
-  List.iter (fun n -> Hashtbl.replace preset_set n true) preset_names;
-  let preset_tools =
-    List.filter (fun (t : Agent_sdk.Tool.t) -> Hashtbl.mem preset_set t.schema.name)
-      keeper_tools
-  in
-  let progressive_tool_index_config =
-    { Agent_sdk.Tool_index.default_config with
-      top_k = max 30 (Keeper_config.keeper_max_tools_per_turn ()) }
-  in
-  let preset_tool_entries =
-    List.map (tool_index_entry_of_tool ~korean_kw_tbl) preset_tools
-  in
-  let preset_search_index =
-    Agent_sdk.Tool_index.build ~config:progressive_tool_index_config
-      preset_tool_entries
+  let preset_selection_cache_ref = ref None in
+  let ensure_preset_selection_cache () =
+    match !preset_selection_cache_ref with
+    | Some cache -> cache
+    | None ->
+        let preset_names =
+          Keeper_tool_policy.keeper_preset_universe_tool_names meta
+        in
+        let preset_set = Hashtbl.create (List.length preset_names) in
+        List.iter (fun n -> Hashtbl.replace preset_set n true) preset_names;
+        let preset_tools =
+          List.filter
+            (fun (t : Agent_sdk.Tool.t) -> Hashtbl.mem preset_set t.schema.name)
+            keeper_tools
+        in
+        let progressive_tool_index_config =
+          { Agent_sdk.Tool_index.default_config with
+            top_k = max 30 (Keeper_config.keeper_max_tools_per_turn ()) }
+        in
+        let preset_tool_entries =
+          List.map (tool_index_entry_of_tool ~korean_kw_tbl) preset_tools
+        in
+        let cache =
+          (preset_tools,
+           Agent_sdk.Tool_index.build ~config:progressive_tool_index_config
+             preset_tool_entries)
+        in
+        preset_selection_cache_ref := Some cache;
+        cache
   in
   (* Map tool name → OAS schema for search result enrichment.
      Two maps: description (string) and full schema (tool_schema).
@@ -924,9 +938,10 @@ let run_turn
             Keeper_discovered_tools.active_names !discovered_ref ~turn
           in
           let _ = Keeper_discovered_tools.decay !discovered_ref ~turn in
-          let k = min max_tools 10 in
+          let k = min max_tools keeper_selection_top_k in
           let deterministic_prefilter =
             if llm_rerank_enabled then
+              let _, preset_search_index = ensure_preset_selection_cache () in
               (* Keep a deterministic BM25 floor even when TopK_llm is enabled:
                  the LLM may enrich selection, but it must not be able to
                  shrink the executable tool universe to below the BM25 floor. *)
@@ -940,6 +955,7 @@ let run_turn
             if llm_rerank_enabled then
               match Eio_context.get_switch_opt (), Eio_context.get_net_opt () with
               | Some sw, Some net ->
+                let preset_tools, _ = ensure_preset_selection_cache () in
                 let rerank_cascade = Keeper_config.keeper_llm_rerank_cascade () in
                 let defaults = Oas_worker.default_model_strings ~cascade_name:rerank_cascade in
                 let config_path = Oas_worker.default_config_path () in

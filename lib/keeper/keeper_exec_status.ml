@@ -267,10 +267,13 @@ let keeper_health_state ?(fiber_health = Fiber_unknown)
   (* H-4 fix: true zombies are stale regardless of keepalive state *)
   else if is_zombie then "stale"
   else if keepalive_running then
-    (* Keepalive fiber is alive — trust it over last_seen.
-       presence_fresh optimization may skip Room.heartbeat(),
-       causing last_seen to drift without the keeper actually being stale. *)
-    (match quiet_reason with
+    (* Secondary timeout: if the fiber is stuck and not heartbeating, flag as stale *)
+    if last_seen_ago_s > 2.0 *. stale_threshold_s then "stale"
+    else
+      (* Keepalive fiber is alive — trust it over last_seen.
+         presence_fresh optimization may skip Room.heartbeat(),
+         causing last_seen to drift without the keeper actually being stale. *)
+      (match quiet_reason with
     | Some "graphql_error" | Some "model_error" -> "degraded"
     | _ ->
         if meta.runtime.usage.total_turns = 0 && meta.runtime.proactive_rt.count_total = 0 then "idle"

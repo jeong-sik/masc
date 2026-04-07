@@ -6,7 +6,7 @@ import {
   normalizeKeeperConversationDetails,
 } from '../keeper-message'
 import type { KeeperConversationDetails } from '../types'
-import { currentDashboardActor, jsonHeaders, runOperatorAction } from './core'
+import { currentDashboardActor, jsonHeaders, runOperatorAction, fetchWithTimeout, DEFAULT_GET_TIMEOUT_MS } from './core'
 
 // --- Types ---
 
@@ -323,4 +323,47 @@ export async function editKeeperTools(
     throw new Error(`Tool edit failed (${resp.status}): ${text}`)
   }
   return resp.json() as Promise<ToolEditResponse>
+}
+
+// --- Keeper observability API ---
+
+export interface KeeperTransition {
+  prev_phase: string
+  new_phase: string
+  selected_event: string
+  wall_clock_at_decision: number
+  transition_outcome: string
+}
+
+export interface KeeperTransitionsResponse {
+  keeper: string
+  current_phase: string | null
+  count: number
+  transitions: KeeperTransition[]
+}
+
+export interface KeeperStateDiagramResponse {
+  keeper: string
+  current_phase: string
+  mermaid: string
+}
+
+export async function fetchKeeperTransitions(name: string, limit = 20): Promise<KeeperTransitionsResponse> {
+  const resp = await fetchWithTimeout(
+    `/api/v1/keepers/${encodeURIComponent(name)}/transitions?limit=${limit}`,
+    { headers: jsonHeaders() },
+    DEFAULT_GET_TIMEOUT_MS,
+  )
+  if (!resp.ok) throw new Error(`transitions fetch failed: ${resp.status}`)
+  return resp.json() as Promise<KeeperTransitionsResponse>
+}
+
+export async function fetchKeeperStateDiagram(name: string): Promise<KeeperStateDiagramResponse> {
+  const resp = await fetchWithTimeout(
+    `/api/v1/keepers/${encodeURIComponent(name)}/state-diagram`,
+    { headers: jsonHeaders() },
+    DEFAULT_GET_TIMEOUT_MS,
+  )
+  if (!resp.ok) throw new Error(`state-diagram fetch failed: ${resp.status}`)
+  return resp.json() as Promise<KeeperStateDiagramResponse>
 }

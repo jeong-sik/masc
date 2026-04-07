@@ -13,6 +13,7 @@ import { Sparkline } from './common/sparkline'
 import { GraphView } from './activity-graph-view'
 import { ActivitySwimlane } from './activity-swimlane'
 import { ActivityHeatmap } from './activity-heatmap'
+import { KeeperPhaseTimeline } from './keeper-phase-strip'
 import { CollapsibleSection } from './common/collapsible'
 import {
   buildActionTimelineGroups,
@@ -399,6 +400,10 @@ export function ActivityGraphSurface() {
 
       <${CollapsibleSection} title="에이전트 타임라인" open=${true}>
         <${ActivitySwimlane} since=${since} />
+      <//>
+
+      <${CollapsibleSection} title="Keeper Phase Timeline" open=${true}>
+        <${KeeperPhaseTimeline} />
       <//>
 
       <div class="grid grid-cols-[minmax(0,1.08fr)_minmax(0,0.96fr)_minmax(0,0.88fr)] gap-4">

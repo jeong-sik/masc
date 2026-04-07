@@ -164,7 +164,7 @@ let handle_keeper_shell_readonly
   | "rg" ->
     let pattern = Safe_ops.json_string ~default:"" "pattern" args |> String.trim in
     if pattern = ""
-    then error_json ~fields:[ "op", `String op ] "pattern_required"
+    then error_json ~fields:[ "op", `String op ] "pattern is required for rg. Good: pattern='handle_request'. Bad: pattern=''."
     else (
       match read_target () with
       | Error e -> error_json ~fields:[ "op", `String op ] e
@@ -212,7 +212,7 @@ let handle_keeper_shell_readonly
   | "find" ->
     let name_pattern = Safe_ops.json_string ~default:"" "pattern" args |> String.trim in
     if name_pattern = ""
-    then error_json ~fields:[ "op", `String op ] "pattern_required"
+    then error_json ~fields:[ "op", `String op ] "pattern is required for find. Good: pattern='*.ml'. Bad: pattern=''."
     else (
       match read_target () with
       | Error e -> error_json ~fields:[ "op", `String op ] e
@@ -336,7 +336,8 @@ let handle_keeper_shell_readonly
   | _ ->
     Yojson.Safe.to_string
       (`Assoc
-          [ "error", `String "unsupported_op"
+          [ "ok", `Bool false
+          ; "error", `String "unsupported_op"
           ; "op", `String op
           ; ( "supported_ops"
             , `List

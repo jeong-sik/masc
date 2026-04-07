@@ -93,11 +93,10 @@ let remove_temp_file_quietly path =
 
 let read_stderr_capture path =
   try In_channel.with_open_bin path In_channel.input_all with
-  | exn ->
+  | _exn ->
       Printf.sprintf
-        "(stderr capture error) failed to read captured stderr file %s: %s. Check temp-file permissions or available temp storage."
+        "(stderr capture error) failed to read captured stderr file %s. Check temp-file permissions or available temp storage."
         (Filename.basename path)
-        (Printexc.to_string exn)
 
 let captured_stderr_or_empty path_opt =
   match path_opt with
@@ -138,6 +137,9 @@ let with_unix_capture ?env ?stdin_content ?(capture_stderr = false)
        let stdout_r, stdout_w = Unix.pipe ~cloexec:true () in
        stdout_r_ref := Some stdout_r;
        stdout_w_ref := Some stdout_w;
+       (* stderr is captured into a temp file and read back after [waitpid]
+          completes so the parent never blocks the child on an unread stderr
+          pipe in Unix fallback mode. *)
        let stderr_fd =
          if capture_stderr
          then (

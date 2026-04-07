@@ -173,8 +173,15 @@ let handle_code_search ctx args =
           ("results", `List []);
         ] in
         (true, Yojson.Safe.pretty_to_string response)
-    | _, output ->
-        (false, Printf.sprintf "❌ ripgrep failed: %s" output)
+    | status, output ->
+        let code = match status with
+          | Unix.WEXITED n -> Printf.sprintf "exit %d" n
+          | Unix.WSIGNALED n -> Printf.sprintf "signal %d" n
+          | Unix.WSTOPPED n -> Printf.sprintf "stopped %d" n
+        in
+        (false, Printf.sprintf "ripgrep failed (%s): %s" code
+           (if output = "" then "(no output — check rg is in PATH and query is valid)"
+            else output))
   end
 
 (* Handler: masc_code_symbols - Extract file symbols using heuristics *)

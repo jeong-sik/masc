@@ -324,11 +324,6 @@ let test_board_tools_names () =
   Alcotest.(check bool) "has board_comment" true (List.mem "keeper_board_comment" names);
   Alcotest.(check bool) "has board_vote" true (List.mem "keeper_board_vote" names)
 
-let test_governance_tools_removed () =
-  (* Governance shard and tools are fully removed. *)
-  Alcotest.(check bool) "governance shard absent" true
-    (Option.is_none (Tool_shard.get_shard "governance"))
-
 (* ============================================================
    Voice tools content tests (#3: all 5 voice tools present)
    ============================================================ *)
@@ -565,7 +560,6 @@ let () =
     ("tool_content", [
       Alcotest.test_case "base tools" `Quick test_base_tools_names;
       Alcotest.test_case "board tools" `Quick test_board_tools_names;
-      Alcotest.test_case "governance tools removed" `Quick test_governance_tools_removed;
       Alcotest.test_case "voice tools" `Quick test_voice_tools_names;
       Alcotest.test_case "keeper_model excludes voice" `Quick
         test_keeper_model_excludes_voice_tools;

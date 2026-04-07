@@ -98,7 +98,7 @@ let execute_keeper_up ctx args : tool_result =
       try Yojson.Safe.from_string body with Yojson.Json_error _ -> `String body
     in
     invalidate_keeper_list_cache ();
-    invalidate_status_cache (get_string args "name" "");
+    Keeper_status_detail.invalidate_status_cache_for (get_string args "name" "");
     (true,
      Yojson.Safe.pretty_to_string
        (annotate_keeper_json ~runtime_class:"keeper" json))
@@ -219,7 +219,7 @@ let handle_keeper_create_from_persona ctx args : tool_result =
         in
         (true, Yojson.Safe.pretty_to_string json)
       else
-        match with_keeper_startup_gate (fun () -> execute_keeper_up ctx resolved_args) with
+        let (ok, body) = with_keeper_startup_gate (fun () -> execute_keeper_up ctx resolved_args) in
         if not ok then
           (false, body)
         else

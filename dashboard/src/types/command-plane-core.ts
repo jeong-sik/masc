@@ -323,8 +323,6 @@ export interface CommandPlaneTracesResponse {
 }
 
 export type CommandPlaneSurface =
-  | 'orchestra'
-  | 'swarm'
   | 'operations'
   | 'chains'
   | 'control'

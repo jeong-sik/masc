@@ -54,8 +54,8 @@ describe('command-actions', () => {
   })
 
   it('setCommandPlaneSurface updates surface', () => {
-    setCommandPlaneSurface('swarm')
-    expect(commandPlaneSurface.value).toBe('swarm')
+    setCommandPlaneSurface('operations')
+    expect(commandPlaneSurface.value).toBe('operations')
   })
 
   it('pauseCommandPlaneOperation calls api and refreshes', async () => {

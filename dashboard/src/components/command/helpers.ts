@@ -91,8 +91,6 @@ export const COMMAND_SURFACE_GROUPS: Array<{ id: CommandSurfaceGroup; label: str
 ]
 
 export const COMMAND_SURFACE_META: Array<{ id: CommandPlaneSurface; label: string; group: CommandSurfaceGroup }> = [
-  { id: 'orchestra', label: '오케스트라', group: 'status' },
-  { id: 'swarm', label: '스웜', group: 'status' },
   { id: 'operations', label: '작전', group: 'history' },
   { id: 'chains', label: '체인', group: 'history' },
   { id: 'control', label: '제어', group: 'control' },
@@ -126,12 +124,6 @@ export function surfaceRouteParams(surface: CommandPlaneSurface): Record<string,
   if (surface === 'chains') {
     const operationId = commandPlaneChainFocusOperationId.value
     return operationId ? { ...base, operation_id: operationId, target_type: 'operation', target_id: operationId } : base
-  }
-  if (surface === 'swarm' || surface === 'orchestra') {
-    const swarmOperationId = dashboardSwarmOperationId()
-    return swarmOperationId
-      ? { ...base, operation_id: swarmOperationId, target_type: 'operation', target_id: swarmOperationId }
-      : base
   }
   return base
 }

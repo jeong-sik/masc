@@ -554,16 +554,15 @@ let keeper_unified_temperature () : float =
     ~max_v:2.0
 
 (** Max output tokens for unified keeper turns.
-    16384 accommodates BDI headers (~500), STATE blocks (~300), multi-tool
-    reasoning (~4000), and chain-of-thought (~8000) with headroom.
-    131072 caused llama-server slot stalls when 4+ keepers requested
-    simultaneously (total reservation exceeded KV cache budget).
+    65536 matches OpenHands default and 2x Claude Code's 32k.
+    With 262k context per llama-server slot, 65k output leaves ~197k for
+    input (system prompt + tools + conversation history).
     Override via [MASC_KEEPER_UNIFIED_MAX_TOKENS].
-    Env: [MASC_KEEPER_UNIFIED_MAX_TOKENS]. Default: 16384. *)
+    Env: [MASC_KEEPER_UNIFIED_MAX_TOKENS]. Default: 65536. *)
 let keeper_unified_max_tokens () : int =
   int_of_env_default
     "MASC_KEEPER_UNIFIED_MAX_TOKENS"
-    ~default:16384
+    ~default:65536
     ~min_v:256
     ~max_v:262144
 

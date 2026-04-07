@@ -1256,6 +1256,53 @@ let run_turn
          | exn ->
            Log.Keeper.warn "keeper:%s memory_write failed: %s"
              meta.name (Printexc.to_string exn));
+         (* Phase 2: Post-turn quality metrics — goal alignment + memory recall.
+            Logged to decisions.jsonl for feedback loop analysis. *)
+         (try
+           let goal_score =
+             Keeper_memory_recall.goal_alignment_score
+               ~meta ~user_message:None
+               ~assistant_reply:(Some response_text)
+           in
+           let used_search =
+             List.exists (fun t -> t = "keeper_memory_search") tool_names
+           in
+           let recall_eval =
+             if used_search then
+               let bank_path =
+                 Keeper_types_support.keeper_memory_bank_path config meta.name
+               in
+               let candidates =
+                 try
+                   Keeper_memory_recall.load_history_user_messages
+                     ~path:bank_path ~max_n:50
+                 with _ -> []
+               in
+               Some (Keeper_memory_recall.evaluate_memory_recall
+                 ~user_message:"" ~assistant_reply:response_text
+                 ~candidates)
+             else None
+           in
+           let eval_json = `Assoc ([
+             "ts_unix", `Float (Time_compat.now ());
+             "event", `String "post_turn_eval";
+             "keeper_name", `String meta.name;
+             "turn", `Int result.turns;
+             "goal_alignment", `Float goal_score;
+             "tools_used_count", `Int (List.length tool_names);
+             "used_memory_search", `Bool used_search;
+           ] @ (match recall_eval with
+                | Some e -> [
+                    "memory_recall_performed", `Bool e.performed;
+                    "memory_recall_passed", `Bool e.passed;
+                    "memory_recall_score", `Float e.final_score;
+                    "memory_recall_candidates", `Int e.candidate_count;
+                  ]
+                | None -> [])) in
+           Keeper_types_support.append_jsonl_line
+             (Keeper_types_support.keeper_decision_log_path config meta.name)
+             eval_json
+         with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
          Ok {
            response_text;
            model_used = model;

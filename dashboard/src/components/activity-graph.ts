@@ -91,8 +91,8 @@ function StatsRow({ data }: { data: ActivityGraphResponse }) {
 
   return html`
     <div class="stats-grid grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-3 mb-4">
-      ${statCard('노드', s.node_count ?? 0, evSeries, '#94a3b8')}
-      ${statCard('엣지', s.edge_count ?? 0, evSeries, '#64748b')}
+      ${statCard('노드', s.node_count ?? 0, [], '#94a3b8')}
+      ${statCard('엣지', s.edge_count ?? 0, [], '#64748b')}
       ${statCard('활성 에이전트', s.active_agents ?? 0, agSeries, '#4ade80', true)}
       ${statCard('작업', s.task_count ?? 0, tdSeries, '#fbbf24')}
       ${statCard('이벤트', s.event_count ?? 0, evSeries, '#a78bfa')}

@@ -461,9 +461,7 @@ export function KeeperDetailOverlay() {
           <div class="md:col-span-2">
             <${SectionCard} title="세션 활동 로그">
               <div class="text-[11px] text-[var(--text-muted)] mb-3">현재 세션의 도구 호출, 태스크 완료, 메시지 등 이벤트 기록</div>
-              <div class="max-h-[480px] overflow-y-auto">
-                <${SessionTraceView} agentName=${keeper.name} isKeeper=${true} keeperStatus=${keeper.status} keeperGeneration=${keeper.generation} />
-              </div>
+              <${SessionTraceView} agentName=${keeper.name} isKeeper=${true} keeperStatus=${keeper.status} keeperGeneration=${keeper.generation} />
             <//>
           </div>
 

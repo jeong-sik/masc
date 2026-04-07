@@ -253,10 +253,12 @@ module KeeperKeepalive = struct
   (** Wall-clock timeout in seconds for a single unified turn (including all
       retries and cascade fallbacks). Prevents indefinite blocking when an
       upstream LLM hangs at the TCP level.
-      Env: [MASC_KEEPER_TURN_TIMEOUT_SEC]. Default: 600. Range: [60, 1800]. *)
+      Env: [MASC_KEEPER_TURN_TIMEOUT_SEC]. Default: 1200. Range: [60, 3600].
+      Raised from 600 to 1200: keepers using GLM-5.1 + local 27B need more
+      wall-clock time for multi-turn research cycles. *)
   let turn_timeout_sec =
-    Float.max 60.0 (Float.min 1800.0
-      (get_float ~default:600.0 "MASC_KEEPER_TURN_TIMEOUT_SEC"))
+    Float.max 60.0 (Float.min 3600.0
+      (get_float ~default:1200.0 "MASC_KEEPER_TURN_TIMEOUT_SEC"))
 
   (** Consecutive idle tool repetitions before on_idle hook issues Skip.
       Below this: graduated Nudge messages.

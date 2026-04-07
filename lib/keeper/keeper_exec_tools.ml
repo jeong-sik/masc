@@ -132,13 +132,27 @@ let shell_readonly_cat_max_bytes args =
   max 256 (min 100000 (Safe_ops.json_int ~default:4000 "max_bytes" args))
 ;;
 
-let lines_to_json ?(limit = max_int) (text : string) : Yojson.Safe.t =
-  let lines =
+let lines_to_json ?(limit = max_int) ?(max_bytes = 32_000) (text : string) : Yojson.Safe.t =
+  let all_lines =
     String.split_on_char '\n' text
     |> List.filter (fun line -> line <> "")
     |> fun rows -> if List.length rows > limit then take limit rows else rows
   in
-  `List (List.map (fun line -> `String line) lines)
+  (* Byte-budget: accumulate lines until max_bytes is reached.
+     This prevents 200 long lines from producing 500KB+ JSON arrays
+     that stall the LLM context window. *)
+  let rec collect acc bytes_used = function
+    | [] -> List.rev acc, 0
+    | line :: rest ->
+      let line_len = String.length line + 4 (* JSON overhead: quotes, comma *) in
+      if bytes_used + line_len > max_bytes && acc <> []
+      then List.rev acc, List.length rest + 1
+      else collect (`String line :: acc) (bytes_used + line_len) rest
+  in
+  let kept, omitted = collect [] 0 all_lines in
+  if omitted > 0
+  then `List (kept @ [ `String (Printf.sprintf "...[%d more lines omitted — narrow your search pattern or add --glob/--type filter]" omitted) ])
+  else `List kept
 ;;
 
 let error_json ?(fields = []) (message : string) =

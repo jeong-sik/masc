@@ -339,6 +339,43 @@ let append_decision_record
                   ("tool_trace_count", `Int (List.length p.tool_trace_refs));
                 ]
           | _ -> `Null );
+        ( "telemetry",
+          match result with
+          | Some r ->
+              let cascade_fields =
+                match r.cascade_observation with
+                | Some co ->
+                    [
+                      ("cascade_name", `String co.cascade_name);
+                      ("primary_model", match co.primary_model with Some m -> `String m | None -> `Null);
+                      ("selected_model", match co.selected_model with Some m -> `String m | None -> `Null);
+                      ("fallback_applied", `Bool co.fallback_applied);
+                      ("fallback_hops", match co.fallback_hops with Some n -> `Int n | None -> `Int 0);
+                      ("candidate_models", `List (List.map (fun s -> `String s) co.candidate_models));
+                    ]
+                | None -> []
+              in
+              let stop_reason_str =
+                match r.stop_reason with
+                | Oas_worker.Completed -> "completed"
+                | Oas_worker.TurnBudgetExhausted { turns_used; limit } ->
+                    Printf.sprintf "turn_budget_exhausted(%d/%d)" turns_used limit
+              in
+              `Assoc ([
+                ("model_used", `String r.model_used);
+                ("turn_count", `Int r.turn_count);
+                ("stop_reason", `String stop_reason_str);
+                ("input_tokens", `Int r.usage.input_tokens);
+                ("output_tokens", `Int r.usage.output_tokens);
+                ("cache_creation_tokens", `Int r.usage.cache_creation_input_tokens);
+                ("cache_read_tokens", `Int r.usage.cache_read_input_tokens);
+                ("cost_usd", match r.usage.cost_usd with Some c -> `Float c | None -> `Null);
+                ("tokens_per_second",
+                  if latency_ms > 0 then
+                    `Float (float_of_int r.usage.output_tokens /. (float_of_int latency_ms /. 1000.0))
+                  else `Null);
+              ] @ cascade_fields)
+          | None -> `Null );
       ]
       @ social_fields)
   in

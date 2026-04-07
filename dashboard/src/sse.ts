@@ -391,7 +391,7 @@ function handleEvent(event: SSEEvent): void {
         'keepers',
         'keeper_phase_changed',
         {
-          severity: (event.new_phase === 'Failing' || event.new_phase === 'Crashed' || event.new_phase === 'Dead') ? 'error' : 'info',
+          severity: (['failing', 'crashed', 'dead'].includes((event.new_phase ?? '').toLowerCase())) ? 'error' : 'info',
           source: event.source,
           narrativeText: `${actorLabel(event.name ?? agent)}의 상태가 ${event.prev_phase ?? '?'}에서 ${event.new_phase ?? '?'}로 전이되었습니다`,
         },

@@ -1,33 +1,27 @@
-(** Team_context_oas_adapter — OAS Collaboration.t bridge for team context.
+(** Team_context_oas_adapter — collaboration context bridge for team sessions.
 
-    Lossy projection: MASC team_session (47 fields) -> OAS Collaboration.t (12 fields).
-    MASC session_status has no Bootstrapping; planned_worker (16 fields) ->
-    Collaboration.participant (6 fields).
-
-    New code should prefer Collaboration.t for cross-system interop.
-    Existing team_session consumers remain unaffected.
+    Lossy projection: MASC team_session (47 fields) -> collaboration JSON.
+    Produces opaque Yojson.Safe.t for OAS swarm_config.collaboration_context.
 
     @since 2.114.0 *)
 
-let session_status_to_phase
-    (s : Team_session_types.session_status)
-    : Agent_sdk.Collaboration.phase =
+let session_status_to_phase_string
+    (s : Team_session_types.session_status) : string =
   match s with
-  | Running -> Active
-  | Paused -> Waiting_on_participants
-  | Completed -> Completed
-  | Interrupted -> Failed
-  | Failed -> Failed
-  | Cancelled -> Cancelled
+  | Running -> "active"
+  | Paused -> "waiting_on_participants"
+  | Completed -> "completed"
+  | Interrupted -> "failed"
+  | Failed -> "failed"
+  | Cancelled -> "cancelled"
 
-let execution_scope_to_participant_state
-    (scope : Team_session_types.execution_scope option)
-    : Agent_sdk.Collaboration.participant_state =
+let execution_scope_to_participant_state_string
+    (scope : Team_session_types.execution_scope option) : string =
   match scope with
-  | None -> Planned
-  | Some Observe_only -> Joined
-  | Some Limited_code_change -> Working
-  | Some Autonomous -> Working
+  | None -> "planned"
+  | Some Observe_only -> "joined"
+  | Some Limited_code_change -> "working"
+  | Some Autonomous -> "working"
 
 let add_json_string_if_present key value acc =
   match value with
@@ -272,14 +266,17 @@ let replace_metadata_field key value metadata =
   (key, value) :: remaining
 
 let with_runtime_health
-    (collaboration : Agent_sdk.Collaboration.t)
-    (health : runtime_health) : Agent_sdk.Collaboration.t =
-  {
-    collaboration with
-    metadata =
-      replace_metadata_field "runtime_health" (runtime_health_to_json health)
-        collaboration.metadata;
-  }
+    (collaboration : Yojson.Safe.t)
+    (health : runtime_health) : Yojson.Safe.t =
+  match collaboration with
+  | `Assoc fields ->
+    let metadata = match List.assoc_opt "metadata" fields with
+      | Some (`Assoc m) ->
+        `Assoc (replace_metadata_field "runtime_health" (runtime_health_to_json health) m)
+      | _ -> `Assoc [("runtime_health", runtime_health_to_json health)]
+    in
+    `Assoc (replace_metadata_field "metadata" metadata fields)
+  | other -> other
 
 let planned_worker_summary (pw : Team_session_types.planned_worker) : string option =
   let parts = ref [] in
@@ -320,54 +317,44 @@ let planned_worker_summary (pw : Team_session_types.planned_worker) : string opt
   | [] -> None
   | parts -> Some (String.concat "; " parts)
 
-let planned_worker_to_participant
-    (pw : Team_session_types.planned_worker)
-    : Agent_sdk.Collaboration.participant =
-  {
-    name = pw.spawn_agent;
-    role = pw.spawn_role;
-    state = execution_scope_to_participant_state pw.execution_scope;
-    joined_at = None;
-    finished_at = None;
-    summary = planned_worker_summary pw;
-  }
+let planned_worker_to_participant_json
+    (pw : Team_session_types.planned_worker) : Yojson.Safe.t =
+  let fields = [
+    ("name", `String pw.spawn_agent);
+    ("state", `String (execution_scope_to_participant_state_string pw.execution_scope));
+  ] in
+  let fields = match pw.spawn_role with
+    | Some r -> ("role", `String r) :: fields | None -> fields in
+  let fields = match planned_worker_summary pw with
+    | Some s -> ("summary", `String s) :: fields | None -> fields in
+  `Assoc (List.rev fields)
 
-(** Project a MASC team session into an OAS {!Agent_sdk.Collaboration.t}.
+(** Project a MASC team session into opaque collaboration JSON.
 
     This is a lossy projection: planned_worker (16 fields) compresses to
-    participant (6 fields).  MASC has no explicit contributions or artifacts
-    list in the session record, so those are empty.
-
-    [shared_context] is populated from [shared_findings] if available. *)
+    participant (4 fields).  Produces Yojson.Safe.t for OAS
+    swarm_config.collaboration_context. *)
 let collaboration_of_session
     ~base_path
     (session : Team_session_types.session)
-    : Agent_sdk.Collaboration.t =
-  let ctx = Agent_sdk.Context.create () in
-  (* Inject shared findings into context *)
+    : Yojson.Safe.t =
   let findings =
     Team_context.load_findings ~base_path ~team_session_id:session.session_id
   in
-  List.iteri (fun i f ->
-    Agent_sdk.Context.set ctx
-      (Printf.sprintf "finding_%d" i) (`String f)
-  ) findings;
   let projection = projected_session_metadata_of_session session in
-  {
-    id = session.session_id;
-    goal = session.goal;
-    phase = session_status_to_phase session.status;
-    participants =
-      List.map planned_worker_to_participant session.planned_workers;
-    artifacts = [];
-    contributions = [];
-    shared_context = ctx;
-    created_at = session.started_at;
-    updated_at =
-      (match session.last_event_at with
-       | Some t -> t
-       | None -> session.started_at);
-    outcome = session.stop_reason;
-    max_participants = None;
-    metadata = metadata_of_session_projection projection;
-  }
+  `Assoc [
+    ("id", `String session.session_id);
+    ("goal", `String session.goal);
+    ("phase", `String (session_status_to_phase_string session.status));
+    ("participants",
+      `List (List.map planned_worker_to_participant_json session.planned_workers));
+    ("artifacts", `List []);
+    ("contributions", `List []);
+    ("findings", `List (List.map (fun f -> `String f) findings));
+    ("created_at", `Float session.started_at);
+    ("updated_at", `Float (match session.last_event_at with
+       | Some t -> t | None -> session.started_at));
+    ("outcome", match session.stop_reason with
+       | Some r -> `String r | None -> `Null);
+    ("metadata", `Assoc (metadata_of_session_projection projection));
+  ]

@@ -1489,6 +1489,51 @@ let test_heartbeat_concurrent_start_stop () =
   (* List should be empty now *)
   Alcotest.(check int) "list empty after cleanup" 0 (List.length (Heartbeat.list ()))
 
+(** BUG-006: Task transitions should succeed when the caller uses the unsuffixed
+    keeper name (e.g. "keeper-coder") but the task was claimed under the
+    canonical "-agent" form (e.g. "keeper-coder-agent").  Reproduces the
+    identity mismatch: "claimed by 'keeper-X-agent', caller is 'keeper-X'". *)
+let test_bug006_transition_with_unsuffixed_name () =
+  with_test_env (fun config ->
+    (* Join with canonical agent name to establish the identity recorded at claim time *)
+    let _ = Room.join config ~agent_name:"keeper-coder-agent" ~capabilities:["code"] () in
+    let _ = Room.add_task config ~title:"BUG-006 Task" ~priority:1 ~description:"" in
+    (* Claim using the canonical name — assignee is recorded as "keeper-coder-agent" *)
+    (match Room.claim_task_r config ~agent_name:"keeper-coder-agent" ~task_id:"task-001" () with
+     | Ok _ -> ()
+     | Error e -> Alcotest.failf "claim failed: %s" (Types.show_masc_error e));
+    (* Transition (start) using the unsuffixed name — should resolve to "keeper-coder-agent" *)
+    (match Room.transition_task_r config ~agent_name:"keeper-coder" ~task_id:"task-001"
+             ~action:Types.Start () with
+     | Ok _ -> ()
+     | Error e ->
+         Alcotest.failf "start with unsuffixed name failed (BUG-006): %s"
+           (Types.show_masc_error e));
+    (* Complete using the unsuffixed name — same resolution path *)
+    (match Room.complete_task_r config ~agent_name:"keeper-coder" ~task_id:"task-001"
+             ~notes:"done" with
+     | Ok _ -> ()
+     | Error e ->
+         Alcotest.failf "complete with unsuffixed name failed (BUG-006): %s"
+           (Types.show_masc_error e))
+  )
+
+let test_bug006_cancel_with_unsuffixed_name () =
+  with_test_env (fun config ->
+    let _ = Room.join config ~agent_name:"keeper-coder-agent" ~capabilities:["code"] () in
+    let _ = Room.add_task config ~title:"BUG-006 Cancel Task" ~priority:1 ~description:"" in
+    (match Room.claim_task_r config ~agent_name:"keeper-coder-agent" ~task_id:"task-001" () with
+     | Ok _ -> ()
+     | Error e -> Alcotest.failf "claim failed: %s" (Types.show_masc_error e));
+    (* Cancel using the unsuffixed name — should resolve to "keeper-coder-agent" *)
+    (match Room.cancel_task_r config ~agent_name:"keeper-coder" ~task_id:"task-001"
+             ~reason:"test" with
+     | Ok _ -> ()
+     | Error e ->
+         Alcotest.failf "cancel with unsuffixed name failed (BUG-006): %s"
+           (Types.show_masc_error e))
+  )
+
 (* === Idle loop stop signal tests === *)
 
 let test_empty_backlog_stop_signal () =
@@ -1704,6 +1749,12 @@ let () =
       Alcotest.test_case "BUG-4: zombie transitions to inactive" `Quick test_zombie_cleanup_transitions_to_inactive;
       Alcotest.test_case "BUG-5: keeper detection by agent_type" `Quick test_keeper_detection_by_agent_type;
       Alcotest.test_case "BUG-6: heartbeat concurrent start/stop" `Quick test_heartbeat_concurrent_start_stop;
+    ];
+
+    (* === BUG-006: Task identity mismatch (unsuffixed keeper name) === *)
+    "task_identity", [
+      Alcotest.test_case "BUG-006: transition/complete with unsuffixed name" `Quick test_bug006_transition_with_unsuffixed_name;
+      Alcotest.test_case "BUG-006: cancel with unsuffixed name" `Quick test_bug006_cancel_with_unsuffixed_name;
     ];
 
     (* === Idle loop stop signal tests === *)

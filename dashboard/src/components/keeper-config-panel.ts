@@ -227,13 +227,6 @@ function LongText({ text, truncateAt = 200 }: { text: string; truncateAt?: numbe
   return html`<div class="text-[12px] text-text-body whitespace-pre-wrap max-h-[140px] overflow-y-auto custom-scrollbar border border-card-border bg-card/40 backdrop-blur-md p-3 rounded-xl mt-1.5 leading-relaxed shadow-inner hover:bg-card/60 transition-colors">${truncated}</div>`
 }
 
-function formatMaybeNumber(value: number | null, suffix = ''): string {
-  return value === null ? '--' : `${value}${suffix}`
-}
-
-function formatMaybeFloat(value: number | null, digits = 1, suffix = ''): string {
-  return value === null ? '--' : `${value.toFixed(digits)}${suffix}`
-}
 
 function PromptSourceBadge({ source }: { source: string }) {
   const tone =
@@ -708,16 +701,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
         <${ConfigRow} label="비용 예산" value=${c.hooks.cost_budget.active ? '$' + (c.hooks.cost_budget.max_cost_usd ?? 0).toFixed(2) : '비활성'} />
       ` : null}
 
-      <${SectionHeader} title="마지막 호출 성능" />
-      <${ConfigRow} label="총 입력 토큰" value=${formatTokens(c.metrics.total_input_tokens)} />
-      <${ConfigRow} label="총 출력 토큰" value=${formatTokens(c.metrics.total_output_tokens)} />
-      <${ConfigRow} label="마지막 모델" value=${c.metrics.last_model_used || '--'} />
-      <${ConfigRow} label="마지막 입력 토큰" value=${formatTokens(c.metrics.last_input_tokens)} />
-      <${ConfigRow} label="마지막 출력 토큰" value=${formatTokens(c.metrics.last_output_tokens)} />
-      <${ConfigRow} label="마지막 총 토큰" value=${formatTokens(c.metrics.last_total_tokens)} />
-      <${ConfigRow} label="마지막 지연" value=${formatMaybeNumber(c.metrics.last_latency_ms, 'ms')} />
-      <${ConfigRow} label="마지막 처리량" value=${formatMaybeFloat(c.metrics.last_total_tokens_per_sec, 1, ' tok/s')} />
-      <${ConfigRow} label="마지막 출력 처리량" value=${formatMaybeFloat(c.metrics.last_output_tokens_per_sec, 1, ' tok/s')} />
+      ${'' /* Metrics removed — duplicates KpiGrid, MetricsCharts, and header model badge */}
     </div>
   `
 }

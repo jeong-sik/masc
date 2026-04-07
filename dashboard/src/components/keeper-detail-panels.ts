@@ -177,7 +177,9 @@ export function KpiGrid({ keeper }: { keeper: Keeper }) {
         <${KpiCard}
           label="자율 행동"
           value=${keeper.autonomous_action_count ?? 0}
-          hint=${autonomyHint(keeper.autonomous_action_count, keeper.proactive_enabled) ?? '행동 횟수'}
+          hint=${keeper.last_proactive_ago_s != null
+            ? `${formatDuration(keeper.last_proactive_ago_s)} 전${keeper.last_proactive_reason ? ' · ' + keeper.last_proactive_reason : ''}`
+            : autonomyHint(keeper.autonomous_action_count, keeper.proactive_enabled) ?? '행동 횟수'}
         />
         <${KpiCard}
           label="자율 턴"
@@ -195,16 +197,6 @@ export function KpiGrid({ keeper }: { keeper: Keeper }) {
           hint="아무 작업 없는 턴"
         />
       </div>
-      ${'' /* Proactive activity callout */}
-      ${keeper.last_proactive_ago_s != null ? html`
-        <div class="rounded-xl border border-[var(--white-20)] bg-[var(--white-5)] p-3 text-[11px]">
-          <span class="font-semibold text-[var(--purple)]">자율 활동</span>
-          <span class="text-text-muted ml-2">${formatDuration(keeper.last_proactive_ago_s)} 전</span>
-          ${keeper.last_proactive_reason ? html`
-            <span class="text-text-dim ml-2">| ${keeper.last_proactive_reason}</span>
-          ` : null}
-        </div>
-      ` : null}
     </div>
   `
 }

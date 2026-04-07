@@ -367,6 +367,11 @@ export type PipelineStage =
   | 'handoff'
   | 'scheduled_autonomous'
   | 'offline'
+  | 'failing'
+  | 'draining'
+  | 'paused'
+  | 'crashed'
+  | 'restarting'
 
 // Aggregated metrics computed by the backend over a sliding window.
 // Fields mirror dashboard_http_keeper_detail.ml summary output.

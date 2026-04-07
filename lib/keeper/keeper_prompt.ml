@@ -102,8 +102,10 @@ let build_keeper_system_prompt
       "\n\
        \n\
        <continuity>\n\
-       This conversation may be compacted or handed off to a successor.\n\
-       Reply in the user's language. Keep replies concise.\n\
+       Continuity and any end-of-reply STATE formatting requirements apply unless a more specific turn-level mode or output guard disables them.\n\
+       When <direct_reply_mode> is present, follow it instead: do not emit SKILL:, SKILL_REASON:, or [STATE].\n";
+      keeper_constitution ();
+      "\n\
        </continuity>";
     ]
 

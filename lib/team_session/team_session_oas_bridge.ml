@@ -777,7 +777,7 @@ let session_to_swarm_config
     prompt = session.goal; timeout_sec;
     budget = budget_of_session_timeout timeout_sec;
     max_agent_retries = 1;
-    collaboration = Some collaboration;
+    collaboration_context = Some collaboration;
     resource_check = Some (session_runtime_health_check ~config ~session);
     max_concurrent_agents = Some (max 1 (min entry_count slot_aware_cap));
     enable_streaming = false }

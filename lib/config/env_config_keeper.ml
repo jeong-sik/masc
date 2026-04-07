@@ -263,11 +263,13 @@ module KeeperKeepalive = struct
   (** Consecutive idle tool repetitions before on_idle hook issues Skip.
       Below this: graduated Nudge messages.
       With tool_choice=Any, the model always calls tools, so idle
-      detection triggers on repeated tool calls.  8 gives enough
-      room for legitimate exploration before cutting off.
-      Env: [MASC_KEEPER_IDLE_SKIP_THRESHOLD]. Default: 8. *)
+      detection triggers on repeated tool calls.  4 catches loops
+      quickly while still allowing legitimate exploration.
+      (Lowered from 8: combined with the boring-tool gate in
+      keeper_hooks_oas.ml, 4 is sufficient.  See #5617.)
+      Env: [MASC_KEEPER_IDLE_SKIP_THRESHOLD]. Default: 4. *)
   let idle_skip_threshold =
-    max 2 (min 20 (get_int ~default:8 "MASC_KEEPER_IDLE_SKIP_THRESHOLD"))
+    max 2 (min 20 (get_int ~default:4 "MASC_KEEPER_IDLE_SKIP_THRESHOLD"))
 end
 
 (** {1 gRPC Heartbeat Reconnect} *)

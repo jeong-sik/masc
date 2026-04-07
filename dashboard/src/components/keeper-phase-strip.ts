@@ -43,7 +43,10 @@ function phaseBgClass(phase: string): string {
 // selected_event comes as object {type: "...", ...} from the server
 function eventLabel(event: unknown): string {
   if (typeof event === 'string') return event
-  if (event && typeof event === 'object' && 'type' in event) return String((event as Record<string, unknown>).type)
+  if (event && typeof event === 'object' && 'type' in event) {
+    const type = (event as Record<string, unknown>).type
+    if (type != null) return String(type)
+  }
   return '?'
 }
 

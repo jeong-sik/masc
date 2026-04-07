@@ -557,11 +557,6 @@ let handle_step (deps : step_deps) (ctx : _ context) args : result =
               let spawn_result_json =
                 execute_spawn_pipeline env prepared_spawns_result
               in
-              let ( let* ) r f =
-                match r with
-                | Ok v -> f v
-                | Error e -> (false, deps.json_error e)
-              in
               let check_json_error json_opt =
                 match json_opt with
                 | Some (`Assoc fields) -> (
@@ -570,7 +565,9 @@ let handle_step (deps : step_deps) (ctx : _ context) args : result =
                     | _ -> Ok ())
                 | _ -> Ok ()
               in
-              let* () = check_json_error spawn_result_json in
+              (match
+                let open Result_syntax in
+                let* () = check_json_error spawn_result_json in
               let turn_json_result =
                 match turn_kind_opt with
                 | None -> Ok None
@@ -765,4 +762,7 @@ let handle_step (deps : step_deps) (ctx : _ context) args : result =
                              .latest_delivery_verdict)) );
                   ]
               in
-              (true, deps.json_ok [ ("result", response) ]))
+              Ok (true, deps.json_ok [ ("result", response) ])
+              with
+              | Ok v -> v
+              | Error e -> (false, deps.json_error e)))

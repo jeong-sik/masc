@@ -176,84 +176,6 @@ let () =
   register_runtime_meta_write_sync (fun config meta ->
       update_meta ~base_path:config.base_path meta.name meta)
 
-(** Compute conditions from a legacy keeper_state transition.
-    This is a backward-compat shim: it synthesizes conditions so that
-    [derive_phase] returns a phase consistent with the legacy state.
-    Phase 3-4 will migrate callers to [dispatch_event] directly. *)
-(** Compute conditions from a legacy keeper_state transition.
-    This is a backward-compat shim: it synthesizes conditions so that
-    [derive_phase] returns a phase consistent with the legacy state.
-    All core conditions are set explicitly (not inherited from [prev])
-    to prevent stale values from causing incorrect phase derivation.
-    Phase 3-4 will migrate callers to [dispatch_event] directly. *)
-let conditions_of_legacy_state (_prev : Keeper_state_machine.conditions) (state : Keeper_state_machine.phase)
-    : Keeper_state_machine.conditions =
-  let base = Keeper_state_machine.default_conditions in
-  match state with
-  | Running ->
-    { base with
-      Keeper_state_machine.fiber_alive = true;
-      restart_budget_remaining = true;
-      heartbeat_healthy = true;
-      turn_healthy = true;
-    }
-  | Paused ->
-    { base with
-      Keeper_state_machine.fiber_alive = true;
-      restart_budget_remaining = true;
-      operator_paused = true;
-    }
-  | Stopped ->
-    { base with
-      Keeper_state_machine.fiber_alive = false;
-      stop_requested = true;
-      drain_complete = true;
-    }
-  | Crashed ->
-    { base with
-      Keeper_state_machine.fiber_alive = false;
-      restart_budget_remaining = true;
-      backoff_elapsed = false;
-    }
-  | Dead ->
-    { base with
-      Keeper_state_machine.fiber_alive = false;
-      restart_budget_remaining = false;
-    }
-  (* Buffer states map to their parent stable conditions *)
-  | Failing ->
-    { base with
-      Keeper_state_machine.fiber_alive = true;
-      restart_budget_remaining = true;
-      heartbeat_healthy = false;
-    }
-  | Compacting ->
-    { base with
-      Keeper_state_machine.fiber_alive = true;
-      restart_budget_remaining = true;
-      compaction_active = true;
-    }
-  | HandingOff ->
-    { base with
-      Keeper_state_machine.fiber_alive = true;
-      restart_budget_remaining = true;
-      handoff_active = true;
-    }
-  | Draining ->
-    { base with
-      Keeper_state_machine.fiber_alive = true;
-      restart_budget_remaining = true;
-      stop_requested = true;
-    }
-  | Restarting ->
-    { base with
-      Keeper_state_machine.fiber_alive = false;
-      restart_budget_remaining = true;
-      backoff_elapsed = true;
-    }
-  | Offline -> base
-
-
 let mark_dead ~base_path name ~at =
   Log.Keeper.error "registry: marking keeper dead name=%s at=%.0f" name at;
   update_entry ~base_path name (fun entry ->
@@ -263,7 +185,12 @@ let mark_dead ~base_path name ~at =
            Atomic.set running_count_atomic
              (max 0 (Atomic.get running_count_atomic - 1))
        | _ -> ());
-      let conditions = conditions_of_legacy_state entry.conditions Dead in
+      let conditions =
+        { Keeper_state_machine.default_conditions with
+          fiber_alive = false;
+          restart_budget_remaining = false;
+        }
+      in
       let phase = Keeper_state_machine.derive_phase conditions in
       { entry with dead_since_ts = Some at; phase; conditions }
     end else
@@ -639,13 +566,11 @@ let dispatch_event ~base_path name (event : Keeper_state_machine.event) =
          transition_outcome = "applied";
          wall_clock_at_decision = now;
        };
-       (* Update running count based on legacy projection *)
-       let prev_legacy = Keeper_state_compat.to_legacy tr.prev_phase in
-       let new_legacy = Keeper_state_compat.to_legacy tr.new_phase in
-       (match prev_legacy, new_legacy with
-        | Keeper_state_compat.Running, (Keeper_state_compat.Paused | Stopped | Crashed | Dead) ->
+       (* Update running count based on phase transition *)
+       (match tr.prev_phase, tr.new_phase with
+        | Running, phase when phase <> Running ->
           Atomic.set running_count_atomic (max 0 (Atomic.get running_count_atomic - 1))
-        | (Keeper_state_compat.Paused | Stopped | Crashed), Keeper_state_compat.Running ->
+        | phase, Running when phase <> Running ->
           Atomic.set running_count_atomic (Atomic.get running_count_atomic + 1)
         | _ -> ());
        (* Update dead_since_ts: always set to now on Dead transition *)

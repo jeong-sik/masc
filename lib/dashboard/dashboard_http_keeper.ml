@@ -288,11 +288,6 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
           let keepalive_running = runtime_keepalive_running config m in
           let registry_entry =
             Keeper_registry.get ~base_path:config.base_path m.name in
-          let registry_state =
-            match registry_entry with
-            | Some entry -> Some (Keeper_state_machine.phase_to_string entry.phase)
-            | None -> None
-          in
           let phase =
             match registry_entry with
             | Some entry -> Some (Keeper_state_machine.phase_to_string entry.phase)
@@ -463,10 +458,6 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                    Keeper_exec_status.pipeline_stage_of_phase entry.phase
                  | None -> "offline"));
               ("runtime_class", `String "keeper");
-              ("registry_state",
-                match registry_state with
-                | Some state -> `String state
-                | None -> `Null);
               ("phase",
                 match phase with
                 | Some p -> `String p

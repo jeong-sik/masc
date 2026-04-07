@@ -5,21 +5,17 @@
     - apply_event valid/invalid transitions
     - can_transition matrix completeness
     - Terminal state properties (Stopped, Dead)
-    - Backward compatibility (to_legacy)
+    - Guard evaluation
     - Guard evaluation (pure, snapshot-based) *)
 
 open Alcotest
 
 module SM = Masc_mcp.Keeper_state_machine
-module Compat = Masc_mcp.Keeper_state_compat
 module Meas = Masc_mcp.Keeper_measurement
 module Guard = Masc_mcp.Keeper_guard
 
 let phase_t = testable
   (Fmt.of_to_string SM.phase_to_string) (=)
-
-let legacy_t = testable
-  (Fmt.of_to_string Compat.legacy_to_string) (=)
 
 (* ── Helpers ───────────────────────────────────────────── *)
 
@@ -481,36 +477,6 @@ let test_can_transition_paused_to_draining () =
 
 let test_can_transition_paused_to_stopped () =
   check bool "-> Stopped" true (SM.can_transition ~from_phase:SM.Paused ~to_phase:SM.Stopped)
-
-(* ── Backward compat tests ─────────────────────────────── *)
-
-let test_legacy_buffer_states_map_to_running () =
-  List.iter (fun phase ->
-    check legacy_t "maps to Running" Compat.Running (Compat.to_legacy phase)
-  ) [ SM.Failing; SM.Compacting; SM.HandingOff; SM.Draining ]
-
-let test_legacy_restarting_maps_to_crashed () =
-  check legacy_t "Restarting -> Crashed" Compat.Crashed (Compat.to_legacy SM.Restarting)
-
-let test_legacy_offline_maps_to_stopped () =
-  check legacy_t "Offline -> Stopped" Compat.Stopped (Compat.to_legacy SM.Offline)
-
-let test_legacy_stable_states_identity () =
-  check legacy_t "Running" Compat.Running (Compat.to_legacy SM.Running);
-  check legacy_t "Paused" Compat.Paused (Compat.to_legacy SM.Paused);
-  check legacy_t "Stopped" Compat.Stopped (Compat.to_legacy SM.Stopped);
-  check legacy_t "Crashed" Compat.Crashed (Compat.to_legacy SM.Crashed);
-  check legacy_t "Dead" Compat.Dead (Compat.to_legacy SM.Dead)
-
-let test_legacy_roundtrip_string () =
-  List.iter (fun phase ->
-    let legacy = Compat.to_legacy phase in
-    let s = Compat.legacy_to_string legacy in
-    check bool "non-empty" true (String.length s > 0);
-    match Compat.legacy_of_string s with
-    | Some recovered -> check legacy_t "roundtrip" legacy recovered
-    | None -> fail (Printf.sprintf "legacy_of_string failed for %s" s)
-  ) SM.all_phases
 
 (* ── Guard evaluation tests ────────────────────────────── *)
 
@@ -1720,13 +1686,6 @@ let () =
       test_case "Restarting -> Dead" `Quick test_can_transition_restarting_to_dead;
       test_case "Paused -> Draining" `Quick test_can_transition_paused_to_draining;
       test_case "Paused -> Stopped" `Quick test_can_transition_paused_to_stopped;
-    ];
-    "backward_compat", [
-      test_case "buffer -> Running" `Quick test_legacy_buffer_states_map_to_running;
-      test_case "Restarting -> Crashed" `Quick test_legacy_restarting_maps_to_crashed;
-      test_case "Offline -> Stopped" `Quick test_legacy_offline_maps_to_stopped;
-      test_case "stable identity" `Quick test_legacy_stable_states_identity;
-      test_case "string roundtrip" `Quick test_legacy_roundtrip_string;
     ];
     "guard", [
       test_case "healthy = no action events" `Quick test_guard_healthy_no_crash_events;

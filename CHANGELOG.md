@@ -4,28 +4,39 @@
 ## [2.254.0] - 2026-04-07
 
 ### Added
-- **Post-turn evidence capture** -- execution context tracking for keeper decisions. (#5621)
+- **Async keeper_msg** -- fire-and-forget with poll, unblocking MCP server. (#5614)
+- **Proactive compaction** -- watermark-based compaction before context overflow. (oas#681)
 - **Anti-polling gate** -- boring-tool gate to break keeper polling loops. (#5623)
+- **Telemetry block** in decision records and OAS Event Bus. (#5617, #5641)
+- **Evidence capture** -- post-turn execution context tracking. (#5621)
+- **Runtime params dashboard** -- 25 keeper params migrated for tuning. (#5640)
 - **TF-IDF synonym expansion** -- 39 more tool synonyms for prefilter. (#5628)
-- **OAS Event Bus pipeline** -- connect OAS telemetry to keeper Agent.run. (#5641)
-- **Runtime params dashboard** -- migrate 25 keeper params to Runtime_params. (#5640)
 - **Silent failure logging** -- error visibility in hotspots. (#5632)
 
 ### Changed
-- **OAS agent_sdk pin** -- bump 0.109.0 to 0.110.0 (inference telemetry, tool_choice propagation, watermark compaction). (#5639)
-- **tool_shard** -- replace Hashtbl with immutable StringMap. (#5593)
+- **Code search default** -- literal match (--fixed-strings) instead of regex. (#5634)
+- **Tool shard** -- replace Hashtbl with immutable StringMap. (#5593)
+- **Keeper instructions** -- remove hardcoded tool name references. (#5649)
 - **Anti-polling gate simplification** -- per-review refactor. (#5645)
+- **OAS pin** -- bumped to 0.110.0 with inference telemetry. (#5639)
 
 ### Fixed
-- **code_search error messages** -- include exit code in diagnostics. (#5630)
+- **Compaction unblock** -- reflection_ts=0 and emergency ratio bypass cooldown. (#5600)
+- **Keeper_up readiness gate** -- prevent startup race. (#5608)
+- **Code search error** -- include exit code in ripgrep failure messages. (#5630)
 - **Keeper status fallback** -- file-read recovery hints, subprocess stderr. (#5595)
-- **Compaction unblock** -- when reflection_ts=0 or ratio>=0.8. (#5600)
+- **KV cache hardening** -- storage and legacy migration. (#5597)
+- **Silent failure logging** -- error visibility at hotspots. (#5627)
 - **Core discovery tools** -- add masc_web_search and shell_readonly. (#5622)
+- **Task dedup** -- title-based guard prevents duplicate creation. (#5615)
+
+### Performance
+- **Cascade per-model timeout** -- 20min wall-clock prevents hung LLM blocking cascade. (oas#680)
+- **Cache dedup** -- read+parse via read_entry_file. (#5647)
 
 ### Infrastructure
 - **Vite bump** -- 6.4.1 to 6.4.2. (#5624)
 - **.ci_build/ gitignore**. (#5643)
-
 ## [2.253.0] - 2026-04-07
 
 ### Added

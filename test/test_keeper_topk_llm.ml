@@ -208,6 +208,8 @@ let test_selection_boundary_preserves_deterministic_floor () =
       ~llm_selected:["keeper_board_post"]
       ~discovered:["keeper_tool_search"]
   in
+  Alcotest.(check int) "duplicate removed from deterministic floor" 4
+    (List.length merged);
   Alcotest.(check (list string))
     "deterministic floor survives even when llm omits most tools"
     [ "keeper_context_status";
@@ -225,6 +227,8 @@ let test_selection_boundary_appends_llm_only_extras () =
       ~llm_selected:["keeper_bash"; "keeper_fs_read"; "keeper_board_post"]
       ~discovered:["keeper_tool_search"]
   in
+  Alcotest.(check string) "deterministic tool stays ahead of llm extra"
+    "keeper_tool_search" (List.nth merged 2);
   Alcotest.(check (list string))
     "llm extras append after deterministic floor without duplicates"
     [ "keeper_context_status";

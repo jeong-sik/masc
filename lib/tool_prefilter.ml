@@ -231,6 +231,58 @@ let synonyms : (string * string list) list =
     (* masc web search *)
     ("masc_web_search",
      [ "web search"; "search internet"; "search online"; "google" ]);
+    (* masc keeper management — tools available via BM25 but missing from TF-IDF *)
+    ("masc_keeper_up",
+     [ "start keeper"; "launch keeper"; "spawn keeper"; "keeper create" ]);
+    ("masc_keeper_down",
+     [ "stop keeper"; "shutdown keeper"; "kill keeper"; "keeper terminate" ]);
+    ("masc_keeper_list",
+     [ "list keepers"; "show keepers"; "keeper status all"; "active keepers" ]);
+    ("masc_keeper_msg",
+     [ "send keeper message"; "talk to keeper"; "message keeper"; "keeper chat" ]);
+    ("masc_keeper_status",
+     [ "keeper health"; "keeper state"; "keeper check"; "keeper info" ]);
+    (* masc heartbeat — lifecycle tools *)
+    ("masc_heartbeat_start",
+     [ "start heartbeat"; "begin pinging"; "auto ping"; "keep alive" ]);
+    ("masc_heartbeat_stop",
+     [ "stop heartbeat"; "end ping"; "cancel heartbeat"; "halt ping" ]);
+    (* masc core — room operations *)
+    ("masc_claim_next",
+     [ "claim next task"; "pick up task"; "assign me"; "next task"; "give me work"; "take task" ]);
+    ("masc_leave",
+     [ "disconnect"; "go offline"; "exit room"; "sign off"; "leave room" ]);
+    ("masc_dashboard",
+     [ "happening"; "activity"; "overview"; "summary"; "monitor"; "big picture" ]);
+    ("masc_broadcast",
+     [ "notify"; "announce"; "tell"; "inform"; "alert"; "everyone"; "let know" ]);
+    ("masc_messages",
+     [ "chat"; "conversation"; "history"; "log"; "what was said" ]);
+    (* masc plan — clear task *)
+    ("masc_plan_clear_task",
+     [ "clear plan task"; "remove plan task"; "unassign plan task" ]);
+    (* masc agent fitness *)
+    ("masc_agent_fitness",
+     [ "agent fitness"; "agent evaluation"; "agent score"; "rate agent" ]);
+    (* keeper voice listen *)
+    ("keeper_voice_listen",
+     [ "listen"; "microphone"; "speech to text"; "transcribe"; "hear"; "voice input"; "record speech" ]);
+    (* keeper stay silent *)
+    ("keeper_stay_silent",
+     [ "do nothing"; "skip turn"; "no action"; "stay quiet"; "no response"; "silent" ]);
+    (* keeper write *)
+    ("keeper_write",
+     [ "write file"; "create file"; "save file"; "new file" ]);
+    (* keeper board search/delete/stats *)
+    ("keeper_board_search",
+     [ "search board"; "find post"; "search discussion"; "keyword search board" ]);
+    ("keeper_board_delete",
+     [ "delete post"; "remove post"; "trash post" ]);
+    ("keeper_board_stats",
+     [ "board statistics"; "activity stats"; "engagement"; "post count" ]);
+    (* keeper tool search *)
+    ("keeper_tool_search",
+     [ "find tool"; "discover tool"; "search tools"; "what tool"; "tool for"; "which tool" ]);
   ]
 
 let synonym_lookup =

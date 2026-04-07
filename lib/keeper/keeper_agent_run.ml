@@ -476,6 +476,13 @@ let run_turn
     "keeper_board_list", "게시판 목록 최근글";
     "keeper_board_comment", "게시판 댓글 답글 코멘트";
     "keeper_board_vote", "게시판 투표 추천 반대";
+    "keeper_board_search", "게시판 검색 키워드 글찾기";
+    "keeper_board_delete", "게시판 삭제 제거 글삭제";
+    "keeper_board_stats", "게시판 통계 활동 참여 게시글수";
+    "keeper_stay_silent", "침묵 대기 아무것도 안함 넘어가기";
+    "keeper_write", "파일 작성 저장 새파일 생성 쓰기";
+    "keeper_tool_search", "도구 검색 발견 찾기 어떤도구";
+    "keeper_voice_listen", "음성 듣기 마이크 녹음 입력";
     "keeper_fs_read", "파일 읽기 소스코드 설정";
     "keeper_fs_edit", "파일 쓰기 편집 저장 수정 생성";
     "keeper_shell_readonly", "명령어 조회 검색 탐색";
@@ -535,6 +542,12 @@ let run_turn
     "masc_team_session_status", "팀세션 상태 현황";
     "masc_team_session_stop", "팀세션 중지 종료";
     "masc_team_session_step", "팀세션 단계 스텝 실행";
+    "masc_team_session_list", "팀세션 목록 스웜";
+    "masc_team_session_events", "팀세션 이벤트 타임라인";
+    "masc_team_session_prove", "팀세션 증명 검증";
+    "masc_team_session_report", "팀세션 리포트 보고서";
+    "masc_team_session_compare", "팀세션 비교 diff";
+    "masc_team_session_finalize", "팀세션 마감 종료 완료";
     "masc_worktree_create", "워크트리 생성 브랜치";
     "masc_worktree_list", "워크트리 목록 현황";
     "masc_worktree_remove", "워크트리 삭제 정리";
@@ -542,6 +555,18 @@ let run_turn
     "masc_add_task", "태스크 추가 등록 생성";
     "masc_status", "상태 현황 방 룸 요약";
     "masc_heartbeat", "하트비트 살아있음 생존";
+    "masc_dashboard", "대시보드 현황 대시 보드 개요";
+    "masc_plan_clear_task", "계획 태스크 제거 해제 클리어";
+    "masc_agent_fitness", "에이전트 평가 점수 피트니스";
+    "masc_auth_status", "인증 상태 토큰 자격";
+    "masc_auth_refresh", "인증 갱신 토큰 리프레시";
+    "masc_web_search", "웹 검색 인터넷 온라인 구글";
+    "masc_broadcast", "브로드캐스트 방송 알림 공지";
+    "masc_claim_next", "다음태스크 가져오기 할당";
+    "masc_messages", "메시지 대화 채팅 로그";
+    "masc_leave", "퇴장 나가기 오프라인 종료";
+    "masc_heartbeat_start", "하트비트 시작 자동 핑";
+    "masc_heartbeat_stop", "하트비트 중지 핑 종료";
     (* masc_broadcast, masc_who, masc_messages require MCP session context
        and fail in keeper. Use keeper_broadcast instead. (#4694) *)
   ] in

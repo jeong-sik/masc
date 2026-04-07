@@ -101,9 +101,22 @@ let emit_cost_event
     ~(input_tokens : int)
     ~(output_tokens : int)
     ~(cost_usd : float)
-    : unit =
+    ?(telemetry : Agent_sdk.Types.inference_telemetry option)
+    () : unit =
   let path = Filename.concat masc_root "costs.jsonl" in
-  let entry = `Assoc [
+  let telemetry_fields = match telemetry with
+    | Some t ->
+      (match t.reasoning_tokens with
+       | Some n -> [("reasoning_tokens", `Int n)] | None -> [])
+      @ (match t.timings with
+         | Some tm ->
+           (match tm.cache_n with
+            | Some n -> [("cache_n", `Int n)] | None -> [])
+         | None -> [])
+      @ [("request_latency_ms", `Int t.request_latency_ms)]
+    | None -> []
+  in
+  let entry = `Assoc ([
     ("agent", `String agent_name);
     ("task_id", Json_util.string_opt_to_json task_id);
     ("model", `String model);
@@ -112,7 +125,7 @@ let emit_cost_event
     ("cost_usd", `Float cost_usd);
     ("timestamp", `String (Types.now_iso ()));
     ("source", `String "auto_trajectory");
-  ] in
+  ] @ telemetry_fields) in
   let line = Yojson.Safe.to_string entry ^ "\n" in
   (try Fs_compat.append_file path line
    with Eio.Cancel.Cancelled _ as e -> raise e
@@ -287,7 +300,7 @@ let make_hooks
            emit_cost_event ~masc_root:acc.masc_root
              ~agent_name:meta.name ~task_id:acc.task_id
              ~model ~input_tokens:input_tok ~output_tokens:output_tok
-             ~cost_usd:0.0
+             ~cost_usd:0.0 ?telemetry:response.telemetry ()
          | None -> ());
         let text = Agent_sdk.Types.text_of_content response.content in
         let has_state_block =

@@ -39,6 +39,9 @@ let install_pool runtimes =
 
 let test_parse_runtime_env () =
   Local_runtime_pool.reset ();
+  (* OAS 0.112.0 auto-appends Ollama endpoint to LLM_ENDPOINTS.
+     Set OLLAMA_HOST to one of the test endpoints to avoid extra entry. *)
+  with_env "OLLAMA_HOST" (Some "http://127.0.0.1:8085") @@ fun () ->
   with_env "LLM_ENDPOINTS"
     (Some "http://127.0.0.1:8085,http://127.0.0.1:8086")
   @@ fun () ->
@@ -56,6 +59,7 @@ let test_parse_llm_endpoints_env () =
   Local_runtime_pool.reset ();
   with_env "MASC_LOCAL_RUNTIMES_JSON" None @@ fun () ->
   with_env "MASC_LLAMA_RUNTIMES_JSON" None @@ fun () ->
+  with_env "OLLAMA_HOST" (Some "http://127.0.0.1:8085") @@ fun () ->
   with_env "LLM_ENDPOINTS"
     (Some "http://127.0.0.1:8085, http://127.0.0.1:8086")
   @@ fun () ->

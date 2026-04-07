@@ -475,9 +475,6 @@ export function KeeperDetailOverlay() {
         ${'' /* ── Context chart ── */}
         <${ContextChart} keeper=${keeper} />
 
-        ${'' /* ── Supervisor diagnostics ── */}
-        <${SupervisorDiagnosticsPanel} keeper=${keeper} />
-
         ${'' /* ── Latency / Cost / Model charts ── */}
         <${MetricsCharts} keeper=${keeper} />
 
@@ -487,30 +484,20 @@ export function KeeperDetailOverlay() {
         ${'' /* ── Direct conversation ── */}
         <${KeeperCommsPanel} keeper=${keeper} />
 
-        ${'' /* ── Runtime diagnostics (promoted from comms panel) ── */}
+        ${'' /* ── Runtime diagnostics (supervisor + keeper diagnostics unified) ── */}
         <details class="rounded-2xl border border-card-border bg-card/40 backdrop-blur-md shadow-sm">
           <summary class="cursor-pointer py-3 px-5 text-[11px] font-semibold uppercase tracking-widest text-text-muted list-none select-none flex items-center gap-2">
             <span class="w-1.5 h-1.5 rounded-full bg-accent/50"></span>
             런타임 진단
           </summary>
           <div class="flex flex-col gap-3 px-5 pb-5 pt-2">
+            <${SupervisorDiagnosticsPanel} keeper=${keeper} />
             <${KeeperDiagnosticSummary} keeper=${keeper} />
             <${KeeperRuntimeActions}
               actor=${currentDashboardActor()}
               keeper=${keeper}
               onSocialSweep=${() => { void runSocialSweep() }}
             />
-          </div>
-        </details>
-
-        ${'' /* ── Live journal stream (collapsed by default — verbose) ── */}
-        <details>
-          <summary class="cursor-pointer py-2.5 px-4 text-xs text-[var(--text-muted)] tracking-wider uppercase list-none select-none rounded-lg hover:bg-[var(--white-3)] transition-colors flex items-center gap-2">
-            <span class="w-1.5 h-1.5 rounded-full bg-[var(--text-dim)]"></span>
-            실시간 저널
-          </summary>
-          <div class="mt-2">
-            <${AgentJournalStream} agentName=${keeper.name} />
           </div>
         </details>
 
@@ -646,10 +633,10 @@ export function KeeperDetailOverlay() {
 
           <${SectionCard} title="도구 정책 & 감사">
             <${KeeperNeighborhood} keeper=${keeper} />
-          <//>
-
-          <${SectionCard} title="도구 호출 검사기">
-            <${KeeperToolCallInspector} keeperName=${keeper.name} />
+            <div class="mt-4 pt-4 border-t border-[var(--border-slate-12)]">
+              <h4 class="m-0 mb-3 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">호출 검사기</h4>
+              <${KeeperToolCallInspector} keeperName=${keeper.name} />
+            </div>
           <//>
 
           <${SectionCard} title="설정">
@@ -657,14 +644,21 @@ export function KeeperDetailOverlay() {
           <//>
         </div>
 
-        ${'' /* ── Raw Data (Debug) — collapsed by default ── */}
+        ${'' /* ── Debug — journal + raw data, collapsed ── */}
         <details class="mt-4">
           <summary class="cursor-pointer py-3 px-4 text-[11px] font-semibold uppercase tracking-widest text-[var(--text-muted)] list-none select-none rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] hover:bg-[var(--white-6)] transition-colors flex items-center gap-2">
             <span class="w-1.5 h-1.5 rounded-full bg-[var(--text-dim)]"></span>
-            원시 데이터 (디버그)
+            디버그 (저널 · 원시 데이터)
           </summary>
-          <div class="mt-2 p-5 rounded-2xl border border-card-border bg-card/40 backdrop-blur-md">
-            <${RawDataDebug} keeper=${keeper} />
+          <div class="mt-2 flex flex-col gap-4 p-5 rounded-2xl border border-card-border bg-card/40 backdrop-blur-md">
+            <div>
+              <h4 class="m-0 mb-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">실시간 저널</h4>
+              <${AgentJournalStream} agentName=${keeper.name} />
+            </div>
+            <div class="border-t border-[var(--border-slate-12)] pt-4">
+              <h4 class="m-0 mb-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">원시 데이터</h4>
+              <${RawDataDebug} keeper=${keeper} />
+            </div>
           </div>
         </details>
 

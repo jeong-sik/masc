@@ -40,17 +40,29 @@ let core_always_tools =
     Includes both read and write tools so keepers can complete full
     task lifecycles (read → edit → PR → done).  AllowList filtering
     ensures tools not in the keeper's preset are invisible.
-    22 → 26 tools; 9B handles 21+ tools at 100% accuracy (#5568). *)
+
+    Action symmetry: every observation tool has a corresponding action tool
+    visible by default (fs_read → fs_edit/write, shell_readonly → bash).
+    This prevents the 9B "read-only polling loop" trap where the model
+    repeatedly observes but cannot discover the tools needed to act.
+    26 → 27 tools; 9B handles 21+ tools at 100% accuracy (#5568, #5661). *)
 let core_discovery_tools =
   core_always_tools @
+  (* Coordination & awareness *)
   [ "keeper_broadcast"; "keeper_tasks_list";
-    "keeper_task_claim"; "keeper_task_done";
+    "keeper_task_claim"; "keeper_task_done"; "keeper_tasks_audit";
     "keeper_memory_search"; "keeper_time_now";
-    "keeper_fs_read"; "keeper_fs_edit";
+    (* Filesystem: read + write (action symmetry) *)
+    "keeper_fs_read"; "keeper_fs_edit"; "keeper_write";
+    (* Board: core interaction *)
     "keeper_board_get"; "keeper_board_post";
     "keeper_board_comment"; "keeper_board_vote"; "keeper_board_list";
-    "masc_web_search"; "keeper_shell_readonly"; "keeper_bash";
+    (* Shell: readonly + execution (action symmetry) *)
+    "keeper_shell_readonly"; "keeper_bash";
+    (* VCS: essential for coding keepers *)
     "keeper_pr_workflow"; "keeper_github";
+    (* External search *)
+    "masc_web_search";
   ]
 
 let effective_core_tools () = core_discovery_tools

@@ -490,6 +490,7 @@
    keeper_transition_audit
    keeper_invariant_check
    keeper_trace_emit
+   keeper_trace_validate
    keeper_supervisor
    keeper_runtime
    keeper_turn_session

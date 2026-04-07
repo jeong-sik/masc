@@ -168,9 +168,9 @@
 ; ============================================================
 (tests
  (names test_pbt_mention test_pbt_validation test_pbt_text_processing test_pbt_context_overflow
-        test_keeper_state_machine_pbt)
+        test_keeper_state_machine_pbt test_keeper_trace_validate)
  (modules test_pbt_mention test_pbt_validation test_pbt_text_processing test_pbt_context_overflow
-          test_keeper_state_machine_pbt)
+          test_keeper_state_machine_pbt test_keeper_trace_validate)
  (libraries masc_test_deps))
 
 ; ============================================================

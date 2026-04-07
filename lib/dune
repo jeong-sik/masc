@@ -268,7 +268,6 @@
    room
    run_eio
    team_context
-   team_context_oas_adapter
    team_session_store
    team_session_report
    team_session_report_core

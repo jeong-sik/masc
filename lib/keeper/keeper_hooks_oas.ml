@@ -244,6 +244,14 @@ let make_hooks
      This gate catches the broader pattern: consecutive turns with ONLY
      boring tools, regardless of which specific boring tool was called. *)
   let turn_has_productive_tool = ref false in
+  (* Same-name streak gate: track consecutive calls to the same tool
+     name (regardless of args). OAS idle detection requires exact
+     name+args match, so board_get("a") → board_get("b") is never
+     detected. This catches the "same operation, different targets"
+     pattern (e.g., janitor reading 20 board posts one by one).
+     At >= streak_threshold, pre_tool_use blocks the call with Override. *)
+  let tool_name_streak : (string * int) ref = ref ("", 0) in
+  let streak_threshold = 5 in
   { Agent_sdk.Hooks.empty with
 
     after_turn = Some (fun event ->
@@ -375,6 +383,29 @@ let make_hooks
       | Agent_sdk.Hooks.PreToolUse { tool_name; input; accumulated_cost_usd; _ } ->
         tool_start_time := Time_compat.now ();
         let keeper_name = (!meta_ref).name in
+        (* Same-name streak gate: block when the same tool name is called
+           streak_threshold+ times consecutively, regardless of args.
+           Returns Override (tool NOT executed) with a directive to switch tools.
+           Uses >= so EVERY call after the threshold is blocked, not just one. *)
+        let prev_name, prev_count = !tool_name_streak in
+        let new_count =
+          if prev_name = tool_name then prev_count + 1 else 1
+        in
+        tool_name_streak := (tool_name, new_count);
+        if new_count >= streak_threshold then begin
+          Log.Keeper.warn
+            "keeper:%s streak_gate: %s called %d times consecutively, blocking"
+            keeper_name tool_name new_count;
+          broadcast_tool_skipped ~keeper_name ~tool_name
+            ~reason_code:"streak_gate";
+          Agent_sdk.Hooks.Override
+            (Printf.sprintf
+               "[tool_skipped] tool=%s source=streak_gate code=streak_gate \
+                reason=%s_called_%d_times_consecutively. \
+                Use a DIFFERENT tool or call keeper_stay_silent."
+               tool_name tool_name new_count)
+        end
+        else
         (* Safety gate 0: Keeper deny list *)
         if List.mem tool_name keeper_denied_tools then begin
           Log.Keeper.warn "keeper:%s deny list: blocked %s"

@@ -325,7 +325,7 @@ let keeper_schemas : tool_schema list = [
 
   {
     name = "masc_keeper_msg";
-    description = "Send a message to an existing keeper and get a reply. Use masc_keeper_up for keeper creation or persisted updates.";
+    description = "Send a message to a keeper (async). Returns immediately with a request_id. Poll masc_keeper_msg_result for the response.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -351,6 +351,21 @@ let keeper_schemas : tool_schema list = [
         ]);
       ]);
       ("required", `List [`String "name"; `String "message"]);
+    ];
+  };
+
+  {
+    name = "masc_keeper_msg_result";
+    description = "Poll the result of an async keeper_msg request. Returns status (queued/running/done/error) and the result when complete.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("request_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Request ID returned by masc_keeper_msg");
+        ]);
+      ]);
+      ("required", `List [`String "request_id"]);
     ];
   };
 

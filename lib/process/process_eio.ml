@@ -81,7 +81,7 @@ let create_stderr_tempfile () =
   let template =
     Filename.concat
       (Filename.get_temp_dir_name ())
-      "masc_process_eio_stderr_XXXXXX.log"
+      "masc_process_eio_stderr.XXXXXX"
   in
   let path, fd = Unix.mkstemp template in
   Unix.set_close_on_exec fd;
@@ -95,7 +95,8 @@ let read_stderr_capture path =
   try In_channel.with_open_bin path In_channel.input_all with
   | exn ->
       Printf.sprintf
-        "(stderr capture error) failed to read captured stderr: %s. Check temp-file permissions or available temp storage."
+        "(stderr capture error) failed to read captured stderr file %s: %s. Check temp-file permissions or available temp storage."
+        (Filename.basename path)
         (Printexc.to_string exn)
 
 let captured_stderr_or_empty path_opt =

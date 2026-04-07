@@ -627,21 +627,25 @@ export function KeeperDetailOverlay() {
           <//>
         </div>
 
-        ${'' /* ── Debug — journal + raw data, collapsed ── */}
+        ${'' /* ── Debug — journal (separate details to avoid eager mount) ── */}
         <details class="mt-4">
           <summary class="cursor-pointer py-3 px-4 text-[11px] font-semibold uppercase tracking-widest text-[var(--text-muted)] list-none select-none rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] hover:bg-[var(--white-6)] transition-colors flex items-center gap-2">
             <span class="w-1.5 h-1.5 rounded-full bg-[var(--text-dim)]"></span>
-            디버그 (저널 · 원시 데이터)
+            디버그 (저널)
           </summary>
-          <div class="mt-2 flex flex-col gap-4 p-5 rounded-2xl border border-card-border bg-card/40 backdrop-blur-md">
-            <div>
-              <h4 class="m-0 mb-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">실시간 저널</h4>
-              <${AgentJournalStream} agentName=${keeper.name} />
-            </div>
-            <div class="border-t border-[var(--border-slate-12)] pt-4">
-              <h4 class="m-0 mb-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">원시 데이터</h4>
-              <${RawDataDebug} keeper=${keeper} />
-            </div>
+          <div class="mt-2 p-5 rounded-2xl border border-card-border bg-card/40 backdrop-blur-md">
+            <${AgentJournalStream} agentName=${keeper.name} />
+          </div>
+        </details>
+
+        ${'' /* ── Debug — raw data, collapsed ── */}
+        <details class="mt-2">
+          <summary class="cursor-pointer py-3 px-4 text-[11px] font-semibold uppercase tracking-widest text-[var(--text-muted)] list-none select-none rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] hover:bg-[var(--white-6)] transition-colors flex items-center gap-2">
+            <span class="w-1.5 h-1.5 rounded-full bg-[var(--text-dim)]"></span>
+            디버그 (원시 데이터)
+          </summary>
+          <div class="mt-2 p-5 rounded-2xl border border-card-border bg-card/40 backdrop-blur-md">
+            <${RawDataDebug} keeper=${keeper} />
           </div>
         </details>
 

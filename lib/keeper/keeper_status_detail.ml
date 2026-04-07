@@ -682,6 +682,13 @@ let handle_keeper_status ctx args : tool_result =
                  ~trace_id:m.runtime.trace_id with
                | Some ev -> ev
                | None -> `Null);
+             ("evidence_chain_valid",
+               match Keeper_evidence.verify_evidence_chain
+                 ~base_path:ctx.config.base_path
+                 ~keeper_name:m.name
+                 ~trace_id:m.runtime.trace_id with
+               | Ok () -> `Bool true
+               | Error _ -> `Bool false);
            ]);
          ] in
          let response = Yojson.Safe.pretty_to_string json in

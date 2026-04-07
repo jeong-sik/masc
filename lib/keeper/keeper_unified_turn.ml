@@ -890,6 +890,11 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
           side_effect_occurred := true
       in
       Keeper_exec_tools.add_tool_call_observer side_effect_observer;
+      let evidence_before_hash =
+        try Keeper_evidence.snapshot_before_turn
+          ~base_path:config.base_path ~keeper_name:meta.name
+        with _ -> None
+      in
       let run_result, latency_ms =
         Fun.protect ~finally:(fun () ->
           Keeper_exec_tools.remove_tool_call_observer side_effect_observer)
@@ -1158,6 +1163,21 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
             ~selected_mode:(selected_mode_of_result result)
             ~social_state
             ~result:(Some result) ();
+          (* Post-turn evidence: deterministic git before/after delta *)
+          (try
+            ignore (Keeper_evidence.capture_turn_evidence
+              ~base_path:config.base_path
+              ~keeper_name:meta.name
+              ~trace_id:updated_meta.runtime.trace_id
+              ~turn_number:updated_meta.runtime.usage.total_turns
+              ~tool_calls_made:result.tool_calls_made
+              ~before_hash:evidence_before_hash
+              ())
+          with
+          | Eio.Cancel.Cancelled _ as e -> raise e
+          | exn ->
+            Log.Keeper.warn "post-turn evidence capture failed (unified): %s"
+              (Printexc.to_string exn));
           Log.Keeper.info
             "%s: unified turn OK model=%s tokens=%d latency=%dms mode=%s stop=%s"
             updated_meta.name result.model_used

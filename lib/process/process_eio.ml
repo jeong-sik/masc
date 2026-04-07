@@ -91,7 +91,8 @@ let read_stderr_capture path =
   try In_channel.with_open_bin path In_channel.input_all with
   | exn ->
       Printf.sprintf
-        "stderr capture failed (file read error): %s"
+        "stderr capture failed while reading %s: %s"
+        path
         (Printexc.to_string exn)
 
 let with_unix_capture ?env ?stdin_content ?(capture_stderr = false)
@@ -225,7 +226,7 @@ let with_unix_capture ?env ?stdin_content ?(capture_stderr = false)
 
 let run_unix_argv_fallback ?env (argv : string list) : string =
   with_unix_capture ?env argv ~on_error:(fun () -> "")
-    ~on_success:(fun _status output _stderr -> output)
+    ~on_success:(fun _status stdout _stderr -> stdout)
 
 let run_unix_argv_with_status_fallback ?env (argv : string list) :
     Unix.process_status * string =
@@ -237,7 +238,7 @@ let run_unix_argv_with_status_fallback ?env (argv : string list) :
 let run_unix_argv_with_stdin_fallback ?env ~(stdin_content : string)
     (argv : string list) : string =
   with_unix_capture ?env ~stdin_content argv ~on_error:(fun () -> "")
-    ~on_success:(fun _status output _stderr -> output)
+    ~on_success:(fun _status stdout _stderr -> stdout)
 
 let run_unix_argv_with_stdin_and_status_fallback
     ?env

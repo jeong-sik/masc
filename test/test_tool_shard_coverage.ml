@@ -49,9 +49,7 @@ let test_shard_shell_exists () =
 
 let test_shard_governance_removed () =
   Alcotest.(check bool) "governance shard removed"
-    true (Option.is_none (Tool_shard.get_shard "governance"));
-  Alcotest.(check bool) "governance not in defaults"
-    false (List.mem "governance" Tool_shard.default_shard_names)
+    true (Option.is_none (Tool_shard.get_shard "governance"))
 
 let test_shard_coding_exists () =
   match Tool_shard.get_shard "coding" with

@@ -26,13 +26,8 @@ let bus_ref : Agent_sdk.Event_bus.t option Atomic.t = Atomic.make None
 let set_bus bus = Atomic.set bus_ref (Some bus)
 let get_bus () = Atomic.get bus_ref
 
-(* Concurrent keeper turn slots. This is NOT the LLM slot count —
-   it is the number of keeper fibers allowed to attempt a turn
-   simultaneously. The LLM's own slot limit (llama-server -np)
-   handles inference queuing. Setting this lower than the keeper
-   count causes starvation: reactive wakeups (explicit mentions)
-   queue behind long autonomous turns and never execute.
-   Default 12 = generous headroom for up to 12 keepers. *)
+(* Global turn slot cap. Safety ceiling for ALL keeper turns (autonomous
+   + reactive). Default 12 = headroom for up to 12 keepers. *)
 let keeper_turn_throttle_limit =
   Keeper_config.int_of_env_default
     "MASC_KEEPER_AUTOBOOT_MAX" ~default:12 ~min_v:1 ~max_v:20
@@ -40,9 +35,32 @@ let keeper_turn_throttle_limit =
 
 let turn_semaphore = Eio.Semaphore.make keeper_turn_throttle_limit
 
-let with_keeper_turn_slot f =
+(* Autonomous turn concurrency cap. Prevents thundering-herd when all
+   keepers fire scheduled turns simultaneously on a shared LLM server.
+   Reactive turns (explicit mentions, board events) bypass this gate
+   so they are never starved by slow autonomous turns.
+   Default 3 = with 27B/8-slot each autonomous turn gets ~2-3 slots
+   of GPU throughput, completing in ~30-60s instead of 5min+. *)
+let autonomous_turn_limit =
+  Keeper_config.int_of_env_default
+    "MASC_KEEPER_AUTONOMOUS_CONCURRENCY" ~default:3 ~min_v:1 ~max_v:12
+;;
+
+let autonomous_turn_semaphore = Eio.Semaphore.make autonomous_turn_limit
+
+let with_keeper_turn_slot ~channel f =
+  let is_autonomous =
+    match channel with
+    | Keeper_world_observation.Scheduled_autonomous -> true
+    | Keeper_world_observation.Reactive -> false
+  in
+  if is_autonomous then Eio.Semaphore.acquire autonomous_turn_semaphore;
   Eio.Semaphore.acquire turn_semaphore;
-  Fun.protect ~finally:(fun () -> Eio.Semaphore.release turn_semaphore) f
+  Fun.protect
+    ~finally:(fun () ->
+      Eio.Semaphore.release turn_semaphore;
+      if is_autonomous then Eio.Semaphore.release autonomous_turn_semaphore)
+    f
 ;;
 
 (** Optional gRPC client + env — WORM Atomic: set at server bootstrap
@@ -685,7 +703,7 @@ let run_keepalive_unified_turn
       then meta_after_triage
       else if should_run_turn
       then (
-        with_keeper_turn_slot (fun () ->
+        with_keeper_turn_slot ~channel:turn_decision.channel (fun () ->
           match
             Keeper_unified_turn.run_unified_turn
               ~config:ctx.config

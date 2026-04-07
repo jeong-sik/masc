@@ -254,7 +254,7 @@ export function GraphView({ data }: GraphViewProps) {
 
   return html`
     <div class="relative w-full my-3 rounded-xl border border-[var(--card-border)] bg-[#0f1117]">
-      <div ref=${containerRef} class="w-full h-[480px]"></div>
+      <div ref=${containerRef} class="w-full h-[360px]"></div>
     </div>
     <div class="flex flex-wrap gap-x-4 gap-y-1 mt-1 px-1">
       ${[

@@ -534,7 +534,7 @@ export function KeeperDetailOverlay() {
               `
               : null}
 
-            ${'' /* ── Timestamps ── */}
+            ${'' /* ── Timestamps + recent activity (merged) ── */}
             <div class="mt-3 flex flex-col gap-1">
               ${keeper.last_heartbeat
                 ? html`<div class="flex items-center gap-2 text-xs text-[var(--text-muted)]">
@@ -548,55 +548,38 @@ export function KeeperDetailOverlay() {
                     <${TimeAgo} timestamp=${keeper.created_at} />
                   </div>`
                 : null}
+              ${keeper.last_speech_act
+                ? html`<div class="flex items-center gap-2 text-xs text-[var(--text-muted)]">
+                    <span>최근 행동:</span>
+                    <span class="font-mono text-[11px] px-1.5 py-0.5 rounded bg-[var(--white-5)] text-[var(--text-body)]">${keeper.last_speech_act}</span>
+                  </div>`
+                : null}
             </div>
 
-          <//>
+            ${'' /* ── Recent output + K2K + memory note (inline) ── */}
+            ${keeper.recent_output_preview
+              ? html`
+                <div class="mt-3 py-2 px-3 rounded-lg bg-[rgba(71,184,255,0.06)] border border-[rgba(71,184,255,0.12)] text-xs text-[var(--text-body)] leading-relaxed">
+                  <div class="line-clamp-3">${keeper.recent_output_preview}</div>
+                </div>
+              `
+              : null}
+            ${(keeper.k2k_count ?? 0) > 0 || keeper.memory_recent_note
+              ? html`
+                <div class="mt-2 flex flex-wrap items-center gap-2">
+                  ${(keeper.k2k_count ?? 0) > 0
+                    ? html`<span class="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-md bg-[rgba(167,139,250,0.08)] border border-[rgba(167,139,250,0.15)] text-[var(--text-muted)]">
+                        K2K <span class="font-mono font-medium text-[#a78bfa]">${keeper.k2k_count}</span>
+                      </span>`
+                    : null}
+                  ${keeper.memory_recent_note
+                    ? html`<span class="text-[11px] text-[var(--text-muted)] truncate" title=${keeper.memory_recent_note}>${keeper.memory_recent_note}</span>`
+                    : null}
+                </div>
+              `
+              : null}
 
-          ${'' /* ── Recent activity (extracted from profile) ── */}
-          ${keeper.recent_output_preview || (keeper.k2k_count ?? 0) > 0 || (keeper.conversation_tail_count ?? 0) > 0 || keeper.memory_recent_note || keeper.last_speech_act
-            ? html`
-              <${SectionCard} title="최근 활동">
-                ${keeper.recent_output_preview
-                  ? html`
-                    <div class="py-2 px-3 rounded-lg bg-[rgba(71,184,255,0.06)] border border-[rgba(71,184,255,0.12)] text-xs text-[var(--text-body)] leading-relaxed">
-                      <div class="text-[10px] font-semibold text-[var(--accent)] uppercase tracking-wider mb-1">최근 출력</div>
-                      <div class="line-clamp-3">${keeper.recent_output_preview}</div>
-                    </div>
-                  `
-                  : null}
-                ${(keeper.k2k_count ?? 0) > 0 || (keeper.conversation_tail_count ?? 0) > 0
-                  ? html`
-                    <div class="mt-2 flex flex-wrap gap-2">
-                      ${(keeper.k2k_count ?? 0) > 0
-                        ? html`<span class="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-md bg-[rgba(167,139,250,0.08)] border border-[rgba(167,139,250,0.15)] text-[var(--text-muted)]">
-                            K2K 소통 <span class="font-mono font-medium text-[#a78bfa]">${keeper.k2k_count}</span>회
-                          </span>`
-                        : null}
-                      ${(keeper.conversation_tail_count ?? 0) > 0
-                        ? html`<span class="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-md bg-[var(--white-4)] border border-[var(--white-6)] text-[var(--text-muted)]">
-                            대화 <span class="font-mono font-medium">${keeper.conversation_tail_count}</span>건
-                          </span>`
-                        : null}
-                    </div>
-                  `
-                  : null}
-                ${keeper.memory_recent_note
-                  ? html`
-                    <div class="mt-2 py-2 px-3 rounded-lg bg-[rgba(167,139,250,0.06)] border border-[rgba(167,139,250,0.12)] text-xs text-[var(--text-body)] leading-relaxed">
-                      <div class="text-[10px] font-semibold text-[#a78bfa] uppercase tracking-wider mb-1">메모리 노트</div>
-                      ${keeper.memory_recent_note}
-                    </div>
-                  `
-                  : null}
-                ${keeper.last_speech_act
-                  ? html`<div class="flex items-center gap-2 mt-2 text-xs text-[var(--text-muted)]">
-                      <span>최근 행동:</span>
-                      <span class="font-mono text-[11px] px-1.5 py-0.5 rounded bg-[var(--white-5)] text-[var(--text-body)]">${keeper.last_speech_act}</span>
-                    </div>`
-                  : null}
-              <//>
-            `
-            : null}
+          <//>
 
           ${keeper.inventory && keeper.inventory.length > 0
             ? html`

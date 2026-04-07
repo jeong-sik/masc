@@ -687,8 +687,8 @@ let keeper_model_tools : Types.tool_schema list =
 let schemas : Types.tool_schema list = [
   {
     name = "masc_tool_grant";
-    description = "Grant a tool shard to an agent. \
-Shards: base (core), board, filesystem, shell, governance, voice, taskboard, coding, autoresearch.";
+    description = "Grant a capability group to an agent. \
+Groups: base (core), board, filesystem, shell, governance, voice, taskboard, coding, autoresearch.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -698,7 +698,7 @@ Shards: base (core), board, filesystem, shell, governance, voice, taskboard, cod
         ]);
         ("shard_name", `Assoc [
           ("type", `String "string");
-          ("description", `String "Shard to grant: base, board, filesystem, shell, governance, voice, taskboard, coding, autoresearch");
+          ("description", `String "Group to grant: base, board, filesystem, shell, governance, voice, taskboard, coding, autoresearch");
         ]);
       ]);
       ("required", `List [`String "agent_name"; `String "shard_name"]);
@@ -706,8 +706,8 @@ Shards: base (core), board, filesystem, shell, governance, voice, taskboard, cod
   };
   {
     name = "masc_tool_revoke";
-    description = "Revoke a tool shard from an agent. \
-Cannot revoke 'base' shard (always present).";
+    description = "Revoke a capability group from an agent. \
+Cannot revoke 'base' (always present).";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -717,7 +717,7 @@ Cannot revoke 'base' shard (always present).";
         ]);
         ("shard_name", `Assoc [
           ("type", `String "string");
-          ("description", `String "Shard to revoke (must be removable). One of: board, filesystem, shell, governance, voice, taskboard, coding, autoresearch");
+          ("description", `String "Group to revoke (must be removable). One of: board, filesystem, shell, governance, voice, taskboard, coding, autoresearch");
         ]);
       ]);
       ("required", `List [`String "agent_name"; `String "shard_name"]);
@@ -725,7 +725,7 @@ Cannot revoke 'base' shard (always present).";
   };
   {
     name = "masc_tool_list";
-    description = "List all available tool shards with their capabilities.";
+    description = "List all available capability groups with their tool counts.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);

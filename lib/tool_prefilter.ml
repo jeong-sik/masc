@@ -37,6 +37,9 @@ let synonyms : (string * string list) list =
      [ "who is working"; "team members"; "workers"; "collaborators" ]);
     ("masc_status",
      [ "how are things"; "state"; "health"; "situation" ]);
+    ("keeper_fs_read",
+     [ "contents"; "file contents"; "read file"; "file read"; "source code";
+       "open file"; "show file"; "cat file"; "view file"; "file content" ]);
   ]
 
 let synonym_lookup =

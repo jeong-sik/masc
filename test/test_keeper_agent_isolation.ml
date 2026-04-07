@@ -263,17 +263,15 @@ let test_strip_keeper_prefix_double () =
     (Keeper_types.strip_keeper_prefix "keeper-keeper-admin")
 
 let test_keeper_agent_sender_plain_name () =
-  (* keeper_agent_sender now delegates to meta.agent_name for consistency
-     with keeper_task_claim (#5625). make_meta sets agent_name = name. *)
   let meta = make_meta ~name:"sangsu" () in
   Alcotest.(check string)
-    "returns meta.agent_name" "sangsu"
+    "keeper-sangsu" "keeper-sangsu"
     (Keeper_exec_tools.keeper_agent_sender ~meta)
 
 let test_keeper_agent_sender_prefixed_name () =
   let meta = make_meta ~name:"keeper-admin" () in
   Alcotest.(check string)
-    "returns meta.agent_name" "keeper-admin"
+    "no double prefix" "keeper-admin"
     (Keeper_exec_tools.keeper_agent_sender ~meta)
 
 let test_keeper_agent_name_plain () =

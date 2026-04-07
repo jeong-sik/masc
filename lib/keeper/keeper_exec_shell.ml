@@ -300,7 +300,8 @@ let handle_keeper_shell_readonly
       [ "git"; "-C"; root; "--no-optional-locks"; "diff"; "--stat" ]
   | "bash" ->
     let cmd_str = Safe_ops.json_string ~default:"" "command" args |> String.trim in
-    if cmd_str = "" then error_json ~fields:[ "op", `String op ] "command_required"
+    if cmd_str = "" then error_json ~fields:[ "op", `String op ] "command is required for bash op. Good: command='env'. Bad: command=''."
+
     else
       let dangerous_patterns = [
         "rm "; "rm\t"; "rmdir"; "> "; ">> "; "| tee "; "mv "; "cp ";

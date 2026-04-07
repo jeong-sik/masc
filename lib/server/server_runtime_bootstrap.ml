@@ -679,6 +679,52 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
         Server_webrtc_transport.set_connection_starter
           (fun peer_id ->
             Server_webrtc_transport.start_webrtc_connection ~sw ~env peer_id));
+      (* Register transport providers for unified bridge *)
+      Transport_bridge.register_provider (module struct
+        let name = "sse"
+        let protocol = Transport.Sse
+        let is_enabled () = true  (* SSE is always enabled *)
+        let session_count () = Sse.client_count ()
+        let status_json () = `Assoc [
+          "clients", `Int (Sse.client_count ());
+          "external_subscribers", `Int (Sse.external_subscriber_count ());
+        ]
+        let reap_stale () = List.length (Sse.cleanup_stale ())
+      end);
+      Transport_bridge.register_provider (module struct
+        let name = "ws"
+        let protocol = Transport.Ws
+        let is_enabled () = Server_ws_standalone.is_enabled ()
+        let session_count () = Server_mcp_transport_ws.session_count ()
+        let status_json () = `Assoc [
+          "port", `Int (Server_ws_standalone.configured_port ());
+          "sessions", `Int (Server_mcp_transport_ws.session_count ());
+        ]
+        let reap_stale () = 0  (* WS sessions self-clean on disconnect *)
+      end);
+      Transport_bridge.register_provider (module struct
+        let name = "grpc"
+        let protocol = Transport.Grpc
+        let is_enabled () = Masc_grpc_server.is_enabled ()
+        let session_count () = 0  (* gRPC uses per-call, no persistent sessions *)
+        let status_json () = `Assoc [
+          "port", `Int (Masc_grpc_server.configured_port ());
+          "service", `String Masc_grpc_service.service_name;
+        ]
+        let reap_stale () = 0
+      end);
+      Transport_bridge.register_provider (module struct
+        let name = "webrtc"
+        let protocol = Transport.Webrtc
+        let is_enabled () = Server_webrtc_transport.is_enabled ()
+        let session_count () = Server_webrtc_transport.live_webrtc_count ()
+        let status_json () = `Assoc [
+          "active_peers", `Int (Server_webrtc_transport.active_peer_count ());
+          "live_connections", `Int (Server_webrtc_transport.live_webrtc_count ());
+          "connected_channels", `Int (Server_webrtc_transport.connected_channel_count ());
+        ]
+        let reap_stale () = 0  (* WebRTC has its own ICE timeout *)
+      end);
       (* Cold-start warm-cache stagger is handled by warm_delay_s in each
          Proactive_refresh config. Heavy surfaces delay their initial warm
          compute to avoid concurrent CPU/PG contention.  Lightweight surfaces

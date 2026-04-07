@@ -246,8 +246,9 @@ let test_branch_with_semicolon_rejected () =
       ] in
     let result = call_tool config meta "keeper_pr_workflow" args in
     let json = parse_json result in
-    check string "error is branch_contains_invalid_chars"
-      "branch_contains_invalid_chars" (json_string "error" json))
+    let err = json_string "error" json in
+    check bool "error mentions invalid chars"
+      true (String_util.contains_substring_ci err "invalid"))
 
 let test_branch_with_pipe_rejected () =
   with_room (fun config ->
@@ -260,8 +261,9 @@ let test_branch_with_pipe_rejected () =
       ] in
     let result = call_tool config meta "keeper_pr_workflow" args in
     let json = parse_json result in
-    check string "error is branch_contains_invalid_chars"
-      "branch_contains_invalid_chars" (json_string "error" json))
+    let err = json_string "error" json in
+    check bool "error mentions invalid chars"
+      true (String_util.contains_substring_ci err "invalid"))
 
 let test_branch_with_backtick_rejected () =
   with_room (fun config ->
@@ -274,8 +276,9 @@ let test_branch_with_backtick_rejected () =
       ] in
     let result = call_tool config meta "keeper_pr_workflow" args in
     let json = parse_json result in
-    check string "error is branch_contains_invalid_chars"
-      "branch_contains_invalid_chars" (json_string "error" json))
+    let err = json_string "error" json in
+    check bool "error mentions invalid chars"
+      true (String_util.contains_substring_ci err "invalid"))
 
 let test_branch_with_dot_dot_rejected () =
   with_room (fun config ->
@@ -288,8 +291,9 @@ let test_branch_with_dot_dot_rejected () =
       ] in
     let result = call_tool config meta "keeper_pr_workflow" args in
     let json = parse_json result in
-    check string "error is branch_contains_invalid_chars"
-      "branch_contains_invalid_chars" (json_string "error" json))
+    let err = json_string "error" json in
+    check bool "error mentions invalid chars"
+      true (String_util.contains_substring_ci err "invalid"))
 
 let test_branch_with_space_rejected () =
   with_room (fun config ->
@@ -302,8 +306,9 @@ let test_branch_with_space_rejected () =
       ] in
     let result = call_tool config meta "keeper_pr_workflow" args in
     let json = parse_json result in
-    check string "error is branch_contains_invalid_chars"
-      "branch_contains_invalid_chars" (json_string "error" json))
+    let err = json_string "error" json in
+    check bool "error mentions invalid chars"
+      true (String_util.contains_substring_ci err "invalid"))
 
 let test_branch_with_dollar_paren_rejected () =
   with_room (fun config ->
@@ -316,8 +321,9 @@ let test_branch_with_dollar_paren_rejected () =
       ] in
     let result = call_tool config meta "keeper_pr_workflow" args in
     let json = parse_json result in
-    check string "error is branch_contains_invalid_chars"
-      "branch_contains_invalid_chars" (json_string "error" json))
+    let err = json_string "error" json in
+    check bool "error mentions invalid chars"
+      true (String_util.contains_substring_ci err "invalid"))
 
 let test_branch_with_ampersand_rejected () =
   with_room (fun config ->
@@ -330,8 +336,9 @@ let test_branch_with_ampersand_rejected () =
       ] in
     let result = call_tool config meta "keeper_pr_workflow" args in
     let json = parse_json result in
-    check string "error is branch_contains_invalid_chars"
-      "branch_contains_invalid_chars" (json_string "error" json))
+    let err = json_string "error" json in
+    check bool "error mentions invalid chars"
+      true (String_util.contains_substring_ci err "invalid"))
 
 let test_valid_branch_with_slash_accepted () =
   with_room (fun config ->

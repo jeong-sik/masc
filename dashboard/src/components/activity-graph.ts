@@ -363,14 +363,20 @@ export function ActivityGraphSurface() {
         </div>
       <//>
 
-      <${CollapsibleSection} title="활동 주체 순위" open=${true}>
-        <div class="text-[12px] text-[var(--text-muted)] mb-3">의미적 중요도 기준. 작업 완료, 의사결정, 핸드오프가 단순 입퇴장보다 높게 평가됩니다.</div>
-        <${NodeLeaderboard} nodes=${data.nodes} />
-      <//>
+      <div class="grid grid-cols-1 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)] gap-4">
+        <${Card} title="활동 주체 순위" class="section" testId="activity_graph.leaderboard">
+          <div class="mb-3">
+            <p class="monitor-subheadline">의미적 중요도 기준. 작업 완료, 의사결정, 핸드오프가 단순 입퇴장보다 높게 평가됩니다.</p>
+          </div>
+          <${NodeLeaderboard} nodes=${data.nodes} />
+        <//>
 
-      <${CollapsibleSection} title="액션 타임라인" open=${false}>
-        <${ActionTimeline} data=${data} />
-      <//>
+        <${Card} title="액션 타임라인" class="section" testId="activity_graph.timeline">
+          <div class="max-h-[520px] overflow-y-auto">
+            <${ActionTimeline} data=${data} />
+          </div>
+        <//>
+      </div>
 
       <${CollapsibleSection} title="에이전트 타임라인" open=${false}>
         <${ActivitySwimlane} since=${since} />

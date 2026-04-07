@@ -395,6 +395,10 @@ export function KeeperDetailOverlay() {
               keeper=${keeper}
               onSocialSweep=${() => { void runSocialSweep() }}
             />
+            <div class="pt-3 border-t border-[var(--border-slate-12)]">
+              <h4 class="m-0 mb-3 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">호출 검사기</h4>
+              <${KeeperToolCallInspector} keeperName=${keeper.name} />
+            </div>
           </div>
         </details>
 
@@ -467,12 +471,8 @@ export function KeeperDetailOverlay() {
             <${RuntimeSignals} keeper=${keeper} />
           </details>
 
-          <${SectionCard} title="도구 정책 & 감사">
+          <${SectionCard} title="도구 정책">
             <${KeeperNeighborhood} keeper=${keeper} />
-            <div class="mt-4 pt-4 border-t border-[var(--border-slate-12)]">
-              <h4 class="m-0 mb-3 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">호출 검사기</h4>
-              <${KeeperToolCallInspector} keeperName=${keeper.name} />
-            </div>
           <//>
 
           <details class="p-5 rounded-2xl border border-card-border bg-card/40 backdrop-blur-md shadow-sm">

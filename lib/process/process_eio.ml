@@ -73,6 +73,20 @@ let output_for_status ~(status : Unix.process_status) ~(stdout : string)
     | out, "" -> out
     | out, err -> out ^ "\n" ^ err
 
+let make_secure_stderr_tempfile () =
+  let template =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      "masc_process_eio_stderr_XXXXXX.log"
+  in
+  let path, fd = Unix.mkstemp template in
+  Unix.set_close_on_exec fd;
+  (path, fd)
+
+let read_stderr_capture path =
+  try In_channel.with_open_bin path In_channel.input_all with
+  | exn -> Printf.sprintf "stderr unavailable: %s" (Printexc.to_string exn)
+
 let with_unix_capture ?env ?stdin_content ?(capture_stderr = false)
     (argv : string list)
     ~(on_error : unit -> 'a)
@@ -112,13 +126,8 @@ let with_unix_capture ?env ?stdin_content ?(capture_stderr = false)
        let stderr_fd =
          if capture_stderr
          then (
-           let path = Filename.temp_file "masc_process_eio_stderr_" ".log" in
+           let path, fd = make_secure_stderr_tempfile () in
            stderr_path_ref := Some path;
-           let fd =
-             Unix.openfile path
-               [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC; Unix.O_CLOEXEC ]
-               0o600
-           in
            stderr_fd_ref := Some fd;
            fd)
          else
@@ -192,8 +201,7 @@ let with_unix_capture ?env ?stdin_content ?(capture_stderr = false)
                 | Some status ->
                     let stderr =
                       match !stderr_path_ref with
-                      | Some path ->
-                          In_channel.with_open_bin path In_channel.input_all
+                      | Some path -> read_stderr_capture path
                       | None -> ""
                     in
                     (status, stdout, stderr)

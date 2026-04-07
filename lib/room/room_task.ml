@@ -21,6 +21,20 @@ let trim_opt = function
       if trimmed = "" then None else Some trimmed
   | None -> None
 
+(** Tighter variant of [resolve_agent_name] for task ownership guards.
+    Only accepts the resolved identity when it is the exact [-agent] suffix
+    form of the normalised input (e.g. "keeper-coder" -> "keeper-coder-agent").
+    Arbitrary prefix matches from [resolve_agent_name] that do not conform to
+    this pattern are silently discarded and the normalised input is returned
+    unchanged, preventing one caller from being mistakenly mapped to a
+    different agent's identity. *)
+let resolve_agent_name_strict config agent_name =
+  let normalized = String.lowercase_ascii (String.trim agent_name) in
+  let resolved = resolve_agent_name config agent_name in
+  if resolved = normalized then normalized
+  else if resolved = normalized ^ "-agent" then resolved
+  else normalized
+
 let normalize_execution_links (links : Types.task_execution_links) =
   {
     operation_id = trim_opt links.operation_id;
@@ -528,9 +542,10 @@ let transition_task_r config ~agent_name ~task_id ~action
     | Ok _, Ok _ ->
         (* BUG-006: Resolve agent name to canonical form (e.g. "keeper-coder" ->
            "keeper-coder-agent") so the assignee guard matches the name recorded
-           at claim time.  Without this, keeper transitions fail with identity
-           mismatch when the caller name differs from the joined agent file name. *)
-        let agent_name = resolve_agent_name config agent_name in
+           at claim time.  Only the exact [-agent] suffix form is accepted;
+           broader prefix matches from [resolve_agent_name] are discarded to
+           prevent ambiguous identity mapping across keeper agent files. *)
+        let agent_name = resolve_agent_name_strict config agent_name in
         let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
         with_file_lock config backlog_path (fun () ->
           try
@@ -777,7 +792,7 @@ let force_done_task_r config ~agent_name ~task_id ~notes () : string Types.masc_
 (** Complete task with file locking *)
 let complete_task config ~agent_name ~task_id ~notes =
   ensure_initialized config;
-  let agent_name = resolve_agent_name config agent_name in
+  let agent_name = resolve_agent_name_strict config agent_name in
   let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
   with_file_lock config backlog_path (fun () ->
     try
@@ -879,9 +894,10 @@ let complete_task config ~agent_name ~task_id ~notes =
 let complete_task_r config ~agent_name ~task_id ~notes : string Types.masc_result =
   if not (is_initialized config) then Error Types.NotInitialized
   else
-    (* BUG-006: Same resolve as transition_task_r — ensures assignee comparison
-       matches the canonical name recorded at claim time. *)
-    let agent_name = resolve_agent_name config agent_name in
+    (* BUG-006: Same resolve as transition_task_r — only the exact [-agent]
+       suffix form is accepted to prevent ambiguous prefix matches from mapping
+       the caller to a different agent identity. *)
+    let agent_name = resolve_agent_name_strict config agent_name in
     let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
     with_file_lock config backlog_path (fun () ->
       try
@@ -977,7 +993,7 @@ let complete_task_r config ~agent_name ~task_id ~notes : string Types.masc_resul
 let cancel_task_r config ~agent_name ~task_id ~reason : string Types.masc_result =
   if not (is_initialized config) then Error Types.NotInitialized
   else
-    let agent_name = resolve_agent_name config agent_name in
+    let agent_name = resolve_agent_name_strict config agent_name in
     let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
     with_file_lock config backlog_path (fun () ->
       try

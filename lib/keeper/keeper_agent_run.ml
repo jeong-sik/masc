@@ -573,9 +573,11 @@ let run_turn
      search needs access to ALL tools so the keeper can discover beyond its preset.
      BM25 progressive disclosure is now delegated to OAS Tool_selector.select_names;
      this index serves only the explicit keeper_tool_search tool.
-     top_k=20 for broad coverage; groups enable co-retrieval of related tools. *)
+     top_k from Keeper_config for dashboard tuning; groups enable
+     co-retrieval of related tools. *)
   let tool_index_config =
-    { Agent_sdk.Tool_index.default_config with top_k = 20 } in
+    { Agent_sdk.Tool_index.default_config with
+      top_k = Keeper_config.keeper_tool_search_top_k () } in
   let tool_entries = List.map (fun (t : Agent_sdk.Tool.t) ->
     let name = t.schema.name in
     let group =

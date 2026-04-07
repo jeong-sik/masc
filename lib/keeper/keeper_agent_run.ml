@@ -978,7 +978,7 @@ let run_turn
                       meta.name (List.length selected)
                       (String.length query_text) (List.length preset_tools);
                   selected
-                 with exn ->
+                with exn ->
                   Log.Keeper.warn
                     "keeper:%s TopK_llm failed (%s), using deterministic prefilter only"
                     meta.name (Printexc.to_string exn);

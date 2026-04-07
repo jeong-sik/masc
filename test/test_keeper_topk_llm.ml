@@ -218,7 +218,7 @@ let test_selection_boundary_preserves_deterministic_floor () =
       if name = "keeper_board_post" then acc + 1 else acc
     ) 0 merged
   in
-  Alcotest.(check int) "duplicate removed from deterministic floor" 4
+  Alcotest.(check int) "merged list contains 4 unique tools" 4
     (List.length merged);
   Alcotest.(check int) "duplicate removed from merged result" 1
     board_post_count;

@@ -13,7 +13,7 @@ File operations:
 - View file (raw): keeper_shell_readonly with op=cat, path=<file>
 - Git history: keeper_shell_readonly with op=git_log, count=10 (optional: path=<file>, format="%h %s %an")
 - Git status: keeper_shell_readonly with op=git_status
-- Run shell commands: keeper_bash with cmd=<command> (read-only unless Coding preset)
+- Run shell commands: keeper_bash with cmd=<command> (read-only unless Coding/Full preset)
 - Write or create a file: keeper_fs_edit (Coding/Delivery). Writable path: .masc/playground/<your-name>/
 - Create a PR in one step: keeper_pr_workflow (Delivery/Coding/Full). Provide branch, file_path, file_content, commit_message, pr_title. Handles worktree, commit, and draft PR.
 - GitHub CLI: keeper_github with cmd="pr comment 123 --body 'text'"

@@ -517,6 +517,7 @@ let run
         content = [Oas.Types.Text (Printf.sprintf
           "[turn budget exhausted: %d/%d turns used]" r.turns r.limit)];
         usage = None;
+        telemetry = None;
       } in
       Ok
         {

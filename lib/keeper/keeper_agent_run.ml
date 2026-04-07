@@ -410,26 +410,23 @@ let run_turn
      Solves the 9B text_response trap by making proven tools visible at
      turn 0 without requiring keeper_tool_search first.  #5566 *)
   let affinity_k = Keeper_tool_affinity.configured_max_k () in
-  let _affinity_populated =
-    if affinity_k > 0 then begin
-      let masc_root = Filename.concat config.base_path ".masc" in
-      let allowed = Keeper_tool_policy.keeper_allowed_tool_names meta in
-      let core = Keeper_tool_registry.core_discovery_tools in
-      let entries =
-        Keeper_tool_affinity.pre_populate_from_history
-          ~masc_root ~keeper_name:meta.name
-          ~allowed_tool_names:allowed ~core_tool_names:core
-          ~discovered:!discovered_ref ~max_k:affinity_k
-      in
-      if entries <> [] then
-        Log.Keeper.info "keeper:%s affinity pre-populated %d tools: [%s]"
-          meta.name (List.length entries)
-          (String.concat ", "
-             (List.map (fun (e : Keeper_tool_affinity.affinity_entry) ->
-                Printf.sprintf "%s(%.1f)" e.tool_name e.score) entries));
-      entries
-    end else []
-  in
+  if affinity_k > 0 then begin
+    let masc_root = Filename.concat config.base_path ".masc" in
+    let allowed = Keeper_tool_policy.keeper_allowed_tool_names meta in
+    let core = Keeper_tool_registry.core_discovery_tools in
+    let entries =
+      Keeper_tool_affinity.pre_populate_from_history
+        ~masc_root ~keeper_name:meta.name
+        ~allowed_tool_names:allowed ~core_tool_names:core
+        ~discovered:!discovered_ref ~max_k:affinity_k
+    in
+    if entries <> [] then
+      Log.Keeper.info "keeper:%s affinity pre-populated %d tools: [%s]"
+        meta.name (List.length entries)
+        (String.concat ", "
+           (List.map (fun (e : Keeper_tool_affinity.affinity_entry) ->
+              Printf.sprintf "%s(%.1f)" e.tool_name e.score) entries))
+  end;
   let keeper_tools =
     Keeper_tools_oas.make_tools ~config ~meta ~ctx_snapshot
       ~search_fn:(fun ~query ~max_results -> !local_search_fn_ref ~query ~max_results)
@@ -550,25 +547,6 @@ let run_turn
   (* Augment tool descriptions with Korean keywords for bilingual BM25.
      Tool_selector.select builds its index from Tool.t descriptions, so
      appending keywords here is equivalent to the old Tool_index aliases. *)
-  let augment_tool_description (t : Agent_sdk.Tool.t) : Agent_sdk.Tool.t =
-    match List.assoc_opt t.schema.name korean_keywords with
-    | None -> t
-    | Some kw ->
-      let augmented_desc = t.schema.description ^ " " ^ kw in
-      { t with schema = { t.schema with description = augmented_desc } }
-  in
-  (* Preset-scoped tool universe: only include tools within the keeper's
-     preset, not the full 244+ universe.  This reduces BM25 noise and
-     improves ranking quality.  See #4637. *)
-  let preset_scoped_names =
-    Keeper_exec_tools.keeper_preset_universe_tool_names meta
-  in
-  let scoped_tools =
-    List.filter (fun (t : Agent_sdk.Tool.t) ->
-      List.mem t.schema.name preset_scoped_names
-    ) keeper_tools
-    |> List.map augment_tool_description
-  in
   (* Full-universe search index for keeper_tool_search.
      Separate from the preset-scoped Tool_selector used for progressive disclosure:
      search needs access to ALL tools so the keeper can discover beyond its preset.
@@ -756,12 +734,11 @@ let run_turn
       ("hint", `String hint);
     ]
   );
-  (* Visibility measurement (#4961): log universe size vs BM25 scope *)
+  (* Visibility measurement (#4961): log universe size vs search scope *)
   if Keeper_types_profile.keeper_debug then
-    Log.Keeper.debug "keeper:%s tool visibility: total=%d preset_scoped=%d search_indexed=%d"
+    Log.Keeper.debug "keeper:%s tool visibility: total=%d search_indexed=%d"
       meta.name
       (List.length keeper_tools)
-      (List.length scoped_tools)
       (List.length tool_entries);
   (* Layer 0: Core tools — always visible to the LLM regardless of preset.
      Kept to 5 survival-critical tools (#4961).  Other coordination tools
@@ -777,6 +754,10 @@ let run_turn
     "extend_turns"
     :: List.map (fun (t : Agent_sdk.Tool.t) -> t.schema.name) keeper_tools
   in
+  (* Precompute membership table for AllowList validation below.
+     all_tool_names is constant for the session; building universe_set
+     once here avoids O(n) Hashtbl allocation on every turn. *)
+  let universe_set = Keeper_tool_policy.tool_name_set all_tool_names in
   let max_tools_per_turn =
     if is_retry then Keeper_config.keeper_retry_max_tools_per_turn ()
     else Keeper_config.keeper_max_tools_per_turn ()
@@ -874,13 +855,37 @@ let run_turn
         (* Apply runtime tool overlay (masc_tool_grant/revoke) and
            intersect with the full dispatch universe. *)
         let all_allowed =
-          Agent_sdk.Tool_op.apply
-            (Agent_sdk.Tool_op.compose [
-              Agent_sdk.Tool_op.Replace_with effective_selected;
-              !tool_overlay_ref;
-            ])
-            all_tool_names
-          |> Tool_portal.filter_visible_tool_names portal_ctx
+          let raw =
+            Agent_sdk.Tool_op.apply
+              (Agent_sdk.Tool_op.compose [
+                Agent_sdk.Tool_op.Replace_with effective_selected;
+                !tool_overlay_ref;
+              ])
+              all_tool_names
+            |> Tool_portal.filter_visible_tool_names portal_ctx
+          in
+          (* Validate AllowList against dispatch universe: tools visible
+             to the LLM but absent from keeper_tools would cause execution
+             errors and waste a turn.  Filter them out defensively.
+             This can happen when core_discovery_tools includes tools
+             not covered by the keeper's preset (e.g. minimal). *)
+          let validated, dropped_names =
+            List.partition (fun n -> Hashtbl.mem universe_set n) raw
+          in
+          let dropped = List.length dropped_names in
+          if dropped > 0 then begin
+            let max_logged = 10 in
+            let shown = List.filteri (fun i _ -> i < max_logged) dropped_names in
+            let omitted = dropped - List.length shown in
+            let shown_text = String.concat ", " shown in
+            let omitted_suffix =
+              if omitted > 0 then Printf.sprintf " (+%d more)" omitted else ""
+            in
+            Log.Keeper.warn
+              "keeper:%s turn:%d AllowList pruned %d tool(s) outside dispatch universe: %s%s"
+              meta.name turn dropped shown_text omitted_suffix
+          end;
+          validated
         in
         if Keeper_types_profile.keeper_debug then
           Log.Keeper.info

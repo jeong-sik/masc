@@ -177,4 +177,39 @@ describe('normalizeKeepers lifecycle metrics', () => {
       last_activity_ago_s: 42,
     })
   })
+
+  it('keeps paused lightweight keeper counters available to the detail KPI cards', () => {
+    const [keeper] = normalizeKeepers([
+      {
+        name: 'sleepy',
+        status: 'paused',
+        paused: true,
+        generation: 7,
+        turn_count: 89,
+        context_tokens: 2048,
+        context_max: 8192,
+        handoff_count_total: 3,
+        compaction_count: 2,
+        autonomous_action_count: 4,
+        autonomous_turn_count: 5,
+        board_reactive_turn_count: 1,
+        noop_turn_count: 6,
+      },
+    ])
+
+    expect(keeper).toMatchObject({
+      status: 'paused',
+      paused: true,
+      generation: 7,
+      turn_count: 89,
+      context_tokens: 2048,
+      context_max: 8192,
+      handoff_count_total: 3,
+      compaction_count: 2,
+      autonomous_action_count: 4,
+      autonomous_turn_count: 5,
+      board_reactive_turn_count: 1,
+      noop_turn_count: 6,
+    })
+  })
 })

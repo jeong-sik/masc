@@ -22,6 +22,11 @@ let () =
             Test_operator_control_snapshot
             .test_snapshot_lightweight_summary_omits_heavy_activity;
           Alcotest.test_case
+            "snapshot lightweight summary keeps paused keeper runtime counters"
+            `Quick
+            Test_operator_control_snapshot
+            .test_snapshot_lightweight_summary_keeps_paused_keeper_runtime_counters;
+          Alcotest.test_case
             "snapshot lightweight summary caps completed sessions by recency"
             `Quick
             Test_operator_control_snapshot

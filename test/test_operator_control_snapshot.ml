@@ -224,6 +224,112 @@ let test_snapshot_lightweight_summary_omits_heavy_activity () =
       Alcotest.(check int) "lightweight recent_actions omitted" 0
         Yojson.Safe.Util.(json |> member "recent_actions" |> to_list |> List.length))
 
+let test_snapshot_lightweight_summary_keeps_paused_keeper_runtime_counters () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "owner"));
+      let keeper_ctx : _ Tool_keeper.context =
+        {
+          config;
+          agent_name = "owner";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = None;
+        }
+      in
+      let keeper_name = "paused-lightweight" in
+      let ok, _ =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_up"
+          ~args:(`Assoc [ ("name", `String keeper_name) ])
+      in
+      Alcotest.(check bool) "keeper up ok" true ok;
+      let meta =
+        match Keeper_types.read_meta config keeper_name with
+        | Ok (Some meta) -> meta
+        | Ok None -> Alcotest.fail "keeper meta missing"
+        | Error err -> Alcotest.fail ("meta read failed: " ^ err)
+      in
+      let mutated =
+        {
+          meta with
+          paused = true;
+          runtime =
+            {
+              meta.runtime with
+              usage =
+                {
+                  meta.runtime.usage with
+                  total_turns = 89;
+                  last_input_tokens = 1024;
+                  last_total_tokens = 1536;
+                };
+              generation = 7;
+              trace_history = [ "trace-a"; "trace-b"; "trace-c" ];
+              compaction_rt =
+                {
+                  meta.runtime.compaction_rt with
+                  count = 2;
+                  last_before_tokens = 2200;
+                  last_after_tokens = 1400;
+                };
+              autonomous_action_count = 4;
+              autonomous_turn_count = 5;
+              autonomous_text_turn_count = 3;
+              autonomous_tool_turn_count = 2;
+              board_reactive_turn_count = 1;
+              noop_turn_count = 6;
+            };
+          updated_at = Types.now_iso ();
+        }
+      in
+      (match Keeper_types.write_meta config mutated with
+      | Ok () -> ()
+      | Error err -> Alcotest.fail ("meta write failed: " ^ err));
+      let json =
+        Operator_control.snapshot_json ~view:"summary"
+          ~include_keepers:true ~include_messages:false ~include_command_plane:false
+          ~lightweight_summary:true
+          (operator_ctx env sw config "owner")
+      in
+      let keeper =
+        Yojson.Safe.Util.(json |> member "keepers" |> member "items" |> to_list)
+        |> List.find_opt (fun row ->
+               Yojson.Safe.Util.(row |> member "name" |> to_string) = keeper_name)
+      in
+      let keeper =
+        match keeper with
+        | Some row -> row
+        | None -> Alcotest.fail "expected paused keeper in lightweight snapshot"
+      in
+      let open Yojson.Safe.Util in
+      Alcotest.(check string) "paused status kept" "paused"
+        (keeper |> member "status" |> to_string);
+      Alcotest.(check bool) "paused flag kept" true
+        (keeper |> member "paused" |> to_bool);
+      Alcotest.(check int) "generation kept" 7
+        (keeper |> member "generation" |> to_int);
+      Alcotest.(check int) "turn count kept" 89
+        (keeper |> member "turn_count" |> to_int);
+      Alcotest.(check int) "context tokens kept" 1536
+        (keeper |> member "context_tokens" |> to_int);
+      Alcotest.(check int) "handoff count kept" 3
+        (keeper |> member "handoff_count_total" |> to_int);
+      Alcotest.(check int) "compaction count kept" 2
+        (keeper |> member "compaction_count" |> to_int);
+      Alcotest.(check int) "autonomous action count kept" 4
+        (keeper |> member "autonomous_action_count" |> to_int);
+      Alcotest.(check int) "board reactive count kept" 1
+        (keeper |> member "board_reactive_turn_count" |> to_int);
+      Alcotest.(check int) "noop count kept" 6
+        (keeper |> member "noop_turn_count" |> to_int))
+
 let test_snapshot_lightweight_summary_caps_completed_sessions_by_recency () =
   Eio_main.run @@ fun env ->
   ensure_fs env;

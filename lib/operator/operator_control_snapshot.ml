@@ -229,31 +229,70 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
            (fun () ->
          results.(idx) <-
            (try
-             match Keeper_types.read_meta config name with
-             | Error _ | Ok None -> None
-             | Ok (Some meta) when lightweight && meta.paused ->
-                 Some
-                   (`Assoc
-                     [
-                       ("runtime_class", `String "keeper");
-                       ("pipeline_stage", `String "paused");
-                       ("name", `String meta.name);
-                       ("agent_name", `String meta.agent_name);
-                       ("status", `String "paused");
-                       ("paused", `Bool true);
-                       ("goal", `String meta.goal);
-                       ("short_goal", `String meta.short_goal);
-                       ("turn_count", `Int meta.runtime.usage.total_turns);
-                       ("updated_at", `String meta.updated_at);
-                       ("created_at", `String meta.created_at);
-                     ])
-             | Ok (Some meta) ->
-                 let agent_json =
-                   Keeper_exec_status.parse_agent_status config ~agent_name:meta.agent_name
-                 in
-                 let keepalive_running =
-                   Keeper_status_bridge.runtime_keepalive_running config meta
-                 in
+              match Keeper_types.read_meta config name with
+              | Error _ | Ok None -> None
+              | Ok (Some meta) when lightweight && meta.paused ->
+                  let active_model = Keeper_exec_status.active_model_of_meta meta in
+                  let context_max =
+                    if String.trim active_model = "" then 0
+                    else Oas_model_resolve.max_context_of_label active_model
+                  in
+                  let last_compaction_saved_tokens =
+                    max 0
+                      (meta.runtime.compaction_rt.last_before_tokens
+                     - meta.runtime.compaction_rt.last_after_tokens)
+                  in
+                  Some
+                    (`Assoc
+                      [
+                        ("runtime_class", `String "keeper");
+                        ("pipeline_stage", `String "paused");
+                        ("name", `String meta.name);
+                        ("agent_name", `String meta.agent_name);
+                        ("status", `String "paused");
+                        ("paused", `Bool true);
+                        ("goal", `String meta.goal);
+                        ("short_goal", `String meta.short_goal);
+                        ("trace_id", `String meta.runtime.trace_id);
+                        ("generation", `Int meta.runtime.generation);
+                        ("turn_count", `Int meta.runtime.usage.total_turns);
+                        ("context_ratio",
+                          (match compute_context_ratio meta with
+                           | Some r -> `Float r
+                           | None -> `Null));
+                        ("context_tokens", `Int meta.runtime.usage.last_total_tokens);
+                        ("context_max", `Int context_max);
+                        ("last_model_used", `String meta.runtime.usage.last_model_used);
+                        ("active_model", `String active_model);
+                        ("handoff_count_total", `Int (List.length meta.runtime.trace_history));
+                        ("compaction_count", `Int meta.runtime.compaction_rt.count);
+                        ("last_compaction_saved_tokens", `Int last_compaction_saved_tokens);
+                        ("keepalive_running",
+                          `Bool
+                            (Keeper_status_bridge.runtime_keepalive_running config meta));
+                        ("last_autonomous_action_at",
+                          if String.trim meta.runtime.last_autonomous_action_at = "" then `Null
+                          else `String meta.runtime.last_autonomous_action_at);
+                        ("autonomous_action_count", `Int meta.runtime.autonomous_action_count);
+                        ("autonomous_turn_count", `Int meta.runtime.autonomous_turn_count);
+                        ("autonomous_text_turn_count", `Int meta.runtime.autonomous_text_turn_count);
+                        ("autonomous_tool_turn_count", `Int meta.runtime.autonomous_tool_turn_count);
+                        ("board_reactive_turn_count", `Int meta.runtime.board_reactive_turn_count);
+                        ("mention_reactive_turn_count", `Int meta.runtime.mention_reactive_turn_count);
+                        ("noop_turn_count", `Int meta.runtime.noop_turn_count);
+                        ("proactive_enabled", `Bool meta.proactive.enabled);
+                        ("proactive_idle_sec", `Int meta.proactive.idle_sec);
+                        ("proactive_cooldown_sec", `Int meta.proactive.cooldown_sec);
+                        ("updated_at", `String meta.updated_at);
+                        ("created_at", `String meta.created_at);
+                      ])
+              | Ok (Some meta) ->
+                  let agent_json =
+                    Keeper_exec_status.parse_agent_status config ~agent_name:meta.agent_name
+                  in
+                  let keepalive_running =
+                    Keeper_status_bridge.runtime_keepalive_running config meta
+                  in
                  let agent_exists =
                    match agent_json |> U.member "exists" with
                    | `Bool value -> value
@@ -275,45 +314,60 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                    if lightweight then ([], [], None, None, None, None)
                    else keeper_tool_audit_fields config meta
                  in
-                 let agent_status =
-                   if not agent_exists then "offline"
-                   else Keeper_exec_status.keeper_surface_status ~agent_status:agent_json ~diagnostic
-                 in
-                 let pipeline_stage =
-                   match Keeper_registry.get_phase ~base_path:config.base_path meta.name with
-                   | Some phase -> Keeper_exec_status.pipeline_stage_of_phase phase
-                   | None -> "offline"
-                 in
-                 Some
-                   (`Assoc
-                     [
-                       ("runtime_class", `String "keeper");
-                       ("pipeline_stage", `String pipeline_stage);
-                       ("name", `String meta.name);
-                       ("agent_name", `String meta.agent_name);
-                       ("trace_id", `String meta.runtime.trace_id);
+                  let agent_status =
+                    if not agent_exists then "offline"
+                    else Keeper_exec_status.keeper_surface_status ~agent_status:agent_json ~diagnostic
+                  in
+                  let pipeline_stage =
+                    match Keeper_registry.get_phase ~base_path:config.base_path meta.name with
+                    | Some phase -> Keeper_exec_status.pipeline_stage_of_phase phase
+                    | None -> "offline"
+                  in
+                  let active_model = Keeper_exec_status.active_model_of_meta meta in
+                  let context_max =
+                    if String.trim active_model = "" then 0
+                    else Oas_model_resolve.max_context_of_label active_model
+                  in
+                  let last_compaction_saved_tokens =
+                    max 0
+                      (meta.runtime.compaction_rt.last_before_tokens
+                     - meta.runtime.compaction_rt.last_after_tokens)
+                  in
+                  Some
+                    (`Assoc
+                      [
+                        ("runtime_class", `String "keeper");
+                        ("pipeline_stage", `String pipeline_stage);
+                        ("name", `String meta.name);
+                        ("agent_name", `String meta.agent_name);
+                        ("trace_id", `String meta.runtime.trace_id);
                        ("goal", `String meta.goal);
                        ("short_goal", `String meta.short_goal);
                        ("mid_goal", `String meta.mid_goal);
                        ("long_goal", `String meta.long_goal);
-                       ("status", `String agent_status);
-                       ("agent", agent_json);
-                       ("generation", `Int meta.runtime.generation);
-                       ("turn_count", `Int meta.runtime.usage.total_turns);
-                       ("context_ratio",
-                         (match compute_context_ratio meta with
-                          | Some r -> `Float r
-                          | None -> `Null));
-                       ("context_tokens", `Int meta.runtime.usage.last_total_tokens);
-                       ("last_model_used", `String meta.runtime.usage.last_model_used);
-                       ("active_model", `String (Keeper_exec_status.active_model_of_meta meta));
-                       ("keepalive_running", `Bool keepalive_running);
-                       ( "next_model_hint",
-                         string_option_to_json (Keeper_exec_status.next_model_hint_of_meta meta)
-                       );
-                       ( "active_goal_ids",
-                         `List (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids)
-                       );
+                        ("status", `String agent_status);
+                        ("paused", `Bool meta.paused);
+                        ("agent", agent_json);
+                        ("generation", `Int meta.runtime.generation);
+                        ("turn_count", `Int meta.runtime.usage.total_turns);
+                        ("context_ratio",
+                          (match compute_context_ratio meta with
+                           | Some r -> `Float r
+                           | None -> `Null));
+                        ("context_tokens", `Int meta.runtime.usage.last_total_tokens);
+                        ("context_max", `Int context_max);
+                        ("last_model_used", `String meta.runtime.usage.last_model_used);
+                        ("active_model", `String active_model);
+                        ("handoff_count_total", `Int (List.length meta.runtime.trace_history));
+                        ("compaction_count", `Int meta.runtime.compaction_rt.count);
+                        ("last_compaction_saved_tokens", `Int last_compaction_saved_tokens);
+                        ("keepalive_running", `Bool keepalive_running);
+                        ( "next_model_hint",
+                          string_option_to_json (Keeper_exec_status.next_model_hint_of_meta meta)
+                        );
+                        ("active_goal_ids",
+                          `List (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids)
+                        );
                        ( "last_autonomous_action_at",
                          if String.trim meta.runtime.last_autonomous_action_at = "" then `Null
                          else `String meta.runtime.last_autonomous_action_at );

@@ -18,6 +18,7 @@ function normalizeKeeperAgentStatus(value: unknown): Keeper['status'] {
     || raw === 'idle'
     || raw === 'inactive'
     || raw === 'offline'
+    || raw === 'paused'
     || raw === 'unbooted'
     || raw === 'stopped'
   ) {

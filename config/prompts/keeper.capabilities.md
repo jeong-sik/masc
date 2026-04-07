@@ -13,8 +13,14 @@ File operations:
 - View file (raw): keeper_shell_readonly with op=cat, path=<file>
 - Git history: keeper_shell_readonly with op=git_log, count=10 (optional: path=<file>, format="%h %s %an")
 - Git status: keeper_shell_readonly with op=git_status
-- Run shell commands: keeper_bash with cmd=<command> (read-only unless Coding preset)
-- Write or create a file: keeper_fs_edit (Coding preset only)
+- Run shell commands: keeper_bash with cmd=<command> (read-only unless Coding/Full preset)
+- Write or create a file: keeper_fs_edit (Coding/Delivery/Full). Writable path: .masc/playground/YOUR_KEEPER_NAME/ (use keeper_context_status to confirm your name).
+- Create a PR in one step: keeper_pr_workflow (Delivery/Coding/Full). Provide branch, file_path, file_content, commit_message, pr_title (optional: base_branch, default "main"). Handles worktree, commit, and draft PR for a single file.
+- GitHub CLI: keeper_github with cmd="pr list", cmd="pr view 123", cmd="pr comment 123 --body 'text'", cmd="issue create --title 'bug'"
+
+Workspace:
+- Your writable workspace is .masc/playground/YOUR_KEEPER_NAME/. Use keeper_fs_edit to write files there.
+- To produce a PR: use keeper_pr_workflow (single call, handles everything) — this is the preferred path for all coding/delivery keepers.
 
 Knowledge lookup:
 - Past conversations and messages: keeper_memory_search

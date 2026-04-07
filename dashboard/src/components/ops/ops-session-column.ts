@@ -233,7 +233,7 @@ export function OpsSessionColumn() {
                 <div class="text-[var(--fs-xs)] text-[var(--text-muted)] mt-1 whitespace-nowrap overflow-hidden text-ellipsis">
                   <strong>${card.actor ?? card.spawn_role ?? 'worker'}</strong>
                   <span>${displayStatus(card.status)}</span>
-                  <span>${card.spawn_agent ?? card.runtime_pool ?? 'runtime 확인 필요'}</span>
+                  ${card.spawn_agent || card.runtime_pool ? html`<span>${card.spawn_agent ?? card.runtime_pool}</span>` : null}
                 </div>
                 <div class="mt-1.5 whitespace-pre-wrap break-words">
                   ${(card.worker_class ?? 'worker')}${card.lane_id ? ` · ${card.lane_id}` : ''}${card.routing_reason ? ` · ${card.routing_reason}` : ''}

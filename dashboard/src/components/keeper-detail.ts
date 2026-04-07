@@ -45,6 +45,7 @@ import { DialogOverlay } from './common/dialog'
 import { SessionTraceView } from './session-trace/session-trace-view'
 import { SessionProgressHeader } from './session-progress-header'
 import { KeeperToolTelemetry } from './keeper-tool-telemetry'
+import { statusLabel } from '../lib/status-label'
 import { KeeperToolCallInspector } from './keeper-tool-call-inspector'
 
 // ── Global overlay state ──────────────────────────────────
@@ -122,7 +123,7 @@ function KeeperStatusPill({ status }: { status: string }) {
   return html`
     <span class="inline-flex items-center gap-1.5 py-1 px-3 rounded-full text-xs font-medium ${c.bg} ${c.text}">
       <span class="size-2 rounded-full ${c.dot}"></span>
-      ${status}
+      ${statusLabel(status)}
     </span>
   `
 }

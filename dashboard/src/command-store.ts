@@ -15,8 +15,6 @@ export {
   clearCommandPlaneChainRun,
   loadCommandPlaneChainRun,
   refreshCommandPlaneHelp,
-  refreshCommandPlaneSwarm,
-  refreshCommandPlaneOrchestra,
   pauseCommandPlaneOperation,
   resumeCommandPlaneOperation,
   recallCommandPlaneOperation,

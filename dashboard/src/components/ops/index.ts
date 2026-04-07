@@ -47,6 +47,7 @@ import {
   workflowTargetReady,
 } from './helpers'
 import { FlowControlPanel } from '../flow-control/flow-control-panel'
+import { displayStatus } from '../../lib/status-label'
 
 function severityClass(value?: string | null): string {
   switch ((value ?? '').trim().toLowerCase()) {
@@ -293,7 +294,7 @@ function renderTruth(item: OperatorReviewItem | null) {
         <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)]">
           <div class="text-[11px] text-[var(--text-muted)] uppercase tracking-[0.08em]">Keeper</div>
           <strong>${keeper?.name ?? item.target_id ?? 'unknown'}</strong>
-          <div class="text-[12px] text-[var(--text-muted)]">${keeper?.status ?? 'unknown'} · ${keeper?.model ?? 'model 확인 필요'}</div>
+          <div class="text-[12px] text-[var(--text-muted)]">${displayStatus(keeper?.status)}${keeper?.model ? ` · ${keeper.model}` : ''}</div>
         </div>
         <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)]">
           <div class="text-[11px] text-[var(--text-muted)] uppercase tracking-[0.08em]">Context</div>

@@ -3,10 +3,8 @@ import type {
   CommandPlaneChainRunResponse,
   CommandPlaneChainSummary,
   CommandPlaneHelpResponse,
-  CommandPlaneOrchestraResponse,
   CommandPlaneSnapshot,
   CommandPlaneSummarySnapshot,
-  CommandPlaneSwarmResponse,
   CommandPlaneSurface,
 } from './types'
 
@@ -22,12 +20,6 @@ export const commandPlaneSurface = signal<CommandPlaneSurface>('operations')
 export const commandPlaneHelp = signal<CommandPlaneHelpResponse | null>(null)
 export const commandPlaneHelpLoading = signal(false)
 export const commandPlaneHelpError = signal<string | null>(null)
-export const commandPlaneSwarm = signal<CommandPlaneSwarmResponse | null>(null)
-export const commandPlaneSwarmLoading = signal(false)
-export const commandPlaneSwarmError = signal<string | null>(null)
-export const commandPlaneOrchestra = signal<CommandPlaneOrchestraResponse | null>(null)
-export const commandPlaneOrchestraLoading = signal(false)
-export const commandPlaneOrchestraError = signal<string | null>(null)
 export const commandPlaneChainSummary = signal<CommandPlaneChainSummary | null>(null)
 export const commandPlaneChainLoading = signal(false)
 export const commandPlaneChainError = signal<string | null>(null)

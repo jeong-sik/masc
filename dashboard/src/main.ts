@@ -15,7 +15,6 @@ import './styles/ui.css'
 import './styles/agent-monitor.css'
 import './styles/board.css'
 /* chat.css: styles merged into global.css @utility blocks (#3915) */
-import './styles/command-swarm.css'
 import './styles/dashboard.css'
 import './styles/governance.css'
 import './styles/governance-agent.css'

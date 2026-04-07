@@ -14,6 +14,7 @@ export function statusLabel(value?: string | null): string {
     case 'running':
       return '진행 중'
     case 'working':
+    case 'busy':
       return '작업 중'
     case 'watching':
       return '관찰 중'
@@ -105,7 +106,9 @@ export function displayStatus(status?: string | null): string {
   if (normalized === 'active' || normalized === 'running') return '진행 중'
   if (normalized === 'paused') return '일시정지'
   if (normalized === 'done' || normalized === 'ended' || normalized === 'completed') return '완료'
-  if (normalized === 'failed' || normalized === 'error' || normalized === 'stopped') return '문제'
+  if (normalized === 'failed' || normalized === 'error') return '문제'
+  if (normalized === 'stopped') return '중단됨'
+  if (normalized === 'unbooted') return '미기동'
   if (normalized === 'offline') return '오프라인'
   if (normalized === 'idle') return '대기'
   if (normalized === 'unknown') return '확인 필요'

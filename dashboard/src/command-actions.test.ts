@@ -6,16 +6,10 @@ import {
 } from './command-actions'
 import * as api from './api'
 import { commandPlaneSummary, commandPlaneLoading, commandPlaneSurface } from './command-signals'
-// normalizers module is mocked below; no direct usage needed
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-import './command-normalizers-swarm'
 
-// Mock dependencies
 vi.mock('./api', () => ({
   fetchCommandPlaneSummary: vi.fn(),
   fetchCommandPlaneSnapshot: vi.fn(),
-  fetchCommandPlaneSwarm: vi.fn(),
-  fetchCommandPlaneOrchestra: vi.fn(),
   fetchChainSummary: vi.fn(),
   fetchChainRun: vi.fn(),
   fetchCommandPlaneHelp: vi.fn(),
@@ -28,8 +22,6 @@ vi.mock('./command-normalizers-swarm', () => ({
   normalizeChainSummary: vi.fn(x => x),
   normalizeChainRunResponse: vi.fn(x => x),
   normalizeHelp: vi.fn(x => x),
-  normalizeSwarm: vi.fn(x => x),
-  normalizeOrchestra: vi.fn(x => x),
 }))
 
 describe('command-actions', () => {
@@ -54,8 +46,8 @@ describe('command-actions', () => {
   })
 
   it('setCommandPlaneSurface updates surface', () => {
-    setCommandPlaneSurface('swarm')
-    expect(commandPlaneSurface.value).toBe('swarm')
+    setCommandPlaneSurface('operations')
+    expect(commandPlaneSurface.value).toBe('operations')
   })
 
   it('pauseCommandPlaneOperation calls api and refreshes', async () => {

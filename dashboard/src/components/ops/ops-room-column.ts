@@ -189,7 +189,7 @@ export function OpsRoomColumn() {
                 <div class="flex flex-wrap gap-2 text-[var(--text-muted)] text-[var(--fs-xs)]">
                   <strong>${actionTypeLabel(item.action_type)}</strong>
                   <span>${targetTypeLabel(item.target_type)}${item.target_id ? ` · ${item.target_id}` : ''}</span>
-                  <span>${item.delegated_tool ?? '위임 도구 확인 필요'}</span>
+                  ${item.delegated_tool ? html`<span>${item.delegated_tool}</span>` : null}
                   <span>owner ${item.actor ?? 'unknown'}</span>
                 </div>
                 ${item.preview ? html`<${JsonViewerCard} data=${item.preview} title="Preview" />` : null}

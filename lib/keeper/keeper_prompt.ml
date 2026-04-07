@@ -100,9 +100,9 @@ let build_keeper_system_prompt
       profile_policy;
       "\n\
        \n\
-       <continuity>\n\
-       This conversation may be compacted or handed off to a successor.\n\
-       Reply in the user's language. Keep replies concise.\n\
+       <continuity>\n";
+      keeper_constitution ();
+      "\n\
        </continuity>";
     ]
 

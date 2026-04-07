@@ -21,6 +21,12 @@ open Keeper_types
     Per-keeper override via [compaction_policy.max_checkpoint_messages]. *)
 let default_max_checkpoint_messages = 120
 
+(** Conservative context-window fallback used when a checkpoint carries
+    neither [max_total_tokens] nor [max_input_tokens].  200K covers every
+    currently-supported large-context model and prevents division-by-zero
+    in [context_ratio] if neither field is populated. *)
+let default_context_window_tokens = 200_000
+
 (* ================================================================ *)
 (* Working Context Types (re-exported from Keeper_types)             *)
 (* ================================================================ *)
@@ -249,24 +255,20 @@ let log_keeper_exn ~label exn =
 
 let checkpoint_generation_key = "keeper_generation"
 
-let checkpoint_max_tokens (cp : Agent_sdk.Checkpoint.t) ~(fallback : int) : int =
-  let open Yojson.Safe.Util in
+let checkpoint_max_tokens (cp : Agent_sdk.Checkpoint.t) : int =
   match cp.max_total_tokens with
-  | Some value -> value
-  | None -> (
-      match cp.working_context with
-      | Some (`Assoc _ as sidecar) ->
-          sidecar |> member "max_tokens" |> to_int_option
-          |> Option.value ~default:fallback
-      | _ -> fallback)
+  | Some n when n > 0 -> n
+  | _ -> (
+      match cp.max_input_tokens with
+      | Some n when n > 0 -> n
+      | _ -> default_context_window_tokens)
 
 let context_of_oas_checkpoint
     ~(max_checkpoint_messages : int)
-    (cp : Agent_sdk.Checkpoint.t)
-    ~(primary_model_max_tokens : int) : working_context =
+    (cp : Agent_sdk.Checkpoint.t) : working_context =
   let system_prompt = Option.value ~default:"" cp.system_prompt in
   let max_tokens =
-    checkpoint_max_tokens cp ~fallback:primary_model_max_tokens
+    checkpoint_max_tokens cp
   in
   let messages =
     let n = List.length cp.messages in
@@ -399,7 +401,7 @@ let load_context_from_checkpoint ~max_checkpoint_messages ~trace_id ~primary_mod
   match (prefer_legacy, oas_checkpoint, legacy_checkpoint) with
   | (false, Some checkpoint, _) ->
       let ctx =
-        context_of_oas_checkpoint ~max_checkpoint_messages checkpoint ~primary_model_max_tokens
+        context_of_oas_checkpoint ~max_checkpoint_messages checkpoint
       in
       let ctx =
         if primary_model_max_tokens <= 0 then ctx

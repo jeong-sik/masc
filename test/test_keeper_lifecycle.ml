@@ -127,7 +127,7 @@ let test_load_context_prefers_live_primary_max_tokens_over_checkpoint_limit () =
       in
       let checkpoint = save_checkpoint ~base_dir ~meta ~ctx in
       check int "stored checkpoint max preserved in checkpoint helper" 4096
-        (KEC.checkpoint_max_tokens checkpoint ~fallback:32768);
+        (KEC.checkpoint_max_tokens checkpoint);
       match
         load_context ~base_dir ~trace_id:meta.runtime.trace_id
           ~max_tokens:32768

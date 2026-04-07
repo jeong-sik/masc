@@ -98,7 +98,7 @@ let apply_post_turn_lifecycle
         message_count = 0;
       }
   | Some cp ->
-      let ctx = context_of_oas_checkpoint ~max_checkpoint_messages:meta.compaction.max_checkpoint_messages cp ~primary_model_max_tokens in
+      let ctx = context_of_oas_checkpoint ~max_checkpoint_messages:meta.compaction.max_checkpoint_messages cp in
       let current_generation =
         checkpoint_generation cp ~fallback:meta.runtime.generation
       in
@@ -270,7 +270,7 @@ let recover_latest_checkpoint_for_overflow_retry
           checkpoint_generation checkpoint ~fallback:meta.runtime.generation
         in
         Some
-          ( context_of_oas_checkpoint ~max_checkpoint_messages:meta.compaction.max_checkpoint_messages checkpoint ~primary_model_max_tokens,
+          ( context_of_oas_checkpoint ~max_checkpoint_messages:meta.compaction.max_checkpoint_messages checkpoint,
             turn_generation )
     | _, _, Some checkpoint ->
         (try
@@ -291,8 +291,7 @@ let recover_latest_checkpoint_for_overflow_retry
                       ~fallback:meta.runtime.generation
                   in
                   Some
-                    ( context_of_oas_checkpoint ~max_checkpoint_messages:meta.compaction.max_checkpoint_messages checkpoint
-                        ~primary_model_max_tokens,
+                    ( context_of_oas_checkpoint ~max_checkpoint_messages:meta.compaction.max_checkpoint_messages checkpoint,
                       turn_generation )
               | None -> None))
     | _ -> None

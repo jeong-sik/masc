@@ -35,7 +35,7 @@ let maybe_rollover_oas_handoff
         message_count = 0;
       }
   | Some cp ->
-      let ctx = context_of_oas_checkpoint ~max_checkpoint_messages:meta.compaction.max_checkpoint_messages cp ~primary_model_max_tokens in
+      let ctx = context_of_oas_checkpoint ~max_checkpoint_messages:meta.compaction.max_checkpoint_messages cp in
       let current_generation =
         checkpoint_generation cp ~fallback:meta.runtime.generation
       in

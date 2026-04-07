@@ -56,11 +56,11 @@ val save_session_checkpoint : session_context -> checkpoint -> unit
 val log_keeper_exn : label:string -> exn -> unit
 
 val checkpoint_max_tokens :
-  Agent_sdk.Checkpoint.t -> fallback:int -> int
+  Agent_sdk.Checkpoint.t -> int
 
 val context_of_oas_checkpoint :
   max_checkpoint_messages:int ->
-  Agent_sdk.Checkpoint.t -> primary_model_max_tokens:int -> working_context
+  Agent_sdk.Checkpoint.t -> working_context
 
 val checkpoint_model_of_meta : keeper_meta -> string
 

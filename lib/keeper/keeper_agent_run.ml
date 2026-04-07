@@ -34,6 +34,7 @@ type run_result = {
   checkpoint : Agent_sdk.Checkpoint.t option;
   proof : Agent_sdk.Cdal_proof.t option;
   stop_reason : Oas_worker.stop_reason;
+  inference_telemetry : Agent_sdk.Types.inference_telemetry option;
 }
 
 let keeper_tool_usage_snapshot ~base_path ~keeper_name : (string * int) list =
@@ -1355,4 +1356,5 @@ let run_turn
            checkpoint = saved_checkpoint;
            proof = result.proof;
            stop_reason = result.stop_reason;
+           inference_telemetry = result.response.telemetry;
          }))

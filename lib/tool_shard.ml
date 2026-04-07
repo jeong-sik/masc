@@ -232,10 +232,10 @@ let select_named_schemas (names : string list) (schemas : Types.tool_schema list
 let filesystem_tools : Types.tool_schema list = [
   {
     name = "keeper_fs_read";
-    description = "Read the contents of a file from the project. Returns full file content as text \
-(truncated at max_bytes). The primary tool for reading and inspecting source code files, \
-configs, logs, documentation, or any text file. \
-For searching across multiple files, use keeper_shell_readonly with op=rg instead.";
+    description = "Read a file as text (truncated at max_bytes). \
+path is REQUIRED. \
+Good: path='lib/foo.ml'. Bad: path=''. \
+For multi-file search, use keeper_shell_readonly with op=rg.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -247,9 +247,12 @@ For searching across multiple files, use keeper_shell_readonly with op=rg instea
   };
   {
     name = "keeper_fs_edit";
-    description = "Write or append to a file in the project. Use to create new files or update \
-existing ones. For small targeted edits prefer this over keeper_bash with echo/cat. \
-Mode 'overwrite' replaces the entire file; 'append' adds to the end.";
+    description = "Write or append to a file. \
+path and content REQUIRED (both non-empty). \
+mode: 'overwrite' (default) or 'append'. \
+Good: path='lib/foo.ml', content='let x = 1'. \
+Bad: path='', content=''. Bad: mode='create' (use overwrite). \
+Creates parent dirs.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

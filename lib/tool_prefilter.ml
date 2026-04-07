@@ -40,6 +40,84 @@ let synonyms : (string * string list) list =
     ("keeper_fs_read",
      [ "contents"; "file contents"; "read file"; "file read"; "source code";
        "open file"; "show file"; "cat file"; "view file"; "file content" ]);
+    ("keeper_fs_edit",
+     [ "write file"; "create file"; "edit file"; "save file"; "new file";
+       "make file"; "update file"; "overwrite"; "append to file" ]);
+    ("keeper_shell_readonly",
+     [ "run command"; "shell read only"; "safe command"; "grep"; "rg search";
+       "list files"; "directory listing"; "git status"; "find file" ]);
+    ("keeper_bash",
+     [ "run shell"; "execute command"; "build"; "test"; "compile"; "dune build";
+       "npm"; "cargo"; "shell command"; "bash command" ]);
+    ("keeper_github",
+     [ "pull request"; "issue"; "pr"; "github"; "gh cli"; "create pr";
+       "open issue"; "ci status"; "repository"; "git hub" ]);
+    ("keeper_board_get",
+     [ "read post"; "view post"; "get post"; "board post detail";
+       "show post"; "inspect post" ]);
+    ("keeper_board_post",
+     [ "create post"; "new post"; "share finding"; "write post";
+       "publish post"; "board write" ]);
+    ("keeper_board_list",
+     [ "list posts"; "browse board"; "recent posts"; "forum"; "feed";
+       "board posts"; "discussion list" ]);
+    ("keeper_board_comment",
+     [ "reply"; "add comment"; "respond"; "comment on post"; "feedback" ]);
+    ("keeper_board_vote",
+     [ "upvote"; "downvote"; "rate"; "like"; "agree disagree"; "vote on" ]);
+    ("keeper_board_search",
+     [ "search board"; "find post"; "search discussion"; "keyword search board" ]);
+    ("keeper_board_delete",
+     [ "delete post"; "remove post"; "trash post" ]);
+    ("keeper_board_stats",
+     [ "board statistics"; "activity stats"; "engagement"; "post count" ]);
+    ("keeper_tasks_list",
+     [ "backlog"; "todo list"; "task list"; "available tasks"; "task board";
+       "work items"; "assignee" ]);
+    ("keeper_task_claim",
+     [ "claim task"; "pick up task"; "assign me task"; "take task";
+       "next task"; "give me work" ]);
+    ("keeper_task_done",
+     [ "complete task"; "finish task"; "mark done"; "task completed";
+       "task finished"; "done with task" ]);
+    ("keeper_task_force_release",
+     [ "release task"; "unassign task"; "free task"; "orphaned task";
+       "stuck task"; "unclaim task" ]);
+    ("keeper_task_force_done",
+     [ "force complete"; "mark task done by force"; "force finish task" ]);
+    ("keeper_memory_search",
+     [ "remember"; "recall"; "memory"; "past conversation"; "what was said";
+       "search memory"; "find memory"; "previous discussion" ]);
+    ("keeper_library_search",
+     [ "knowledge library"; "docs"; "documentation"; "lookup docs";
+       "search docs"; "reference"; "knowledge base"; "wiki" ]);
+    ("keeper_library_read",
+     [ "read document"; "read docs"; "library topic"; "full document";
+       "knowledge article" ]);
+    ("keeper_tools_list",
+     [ "what can you do"; "capabilities"; "available tools"; "my tools";
+       "list capabilities"; "tool list"; "discover tools" ]);
+    ("keeper_context_status",
+     [ "context window"; "token usage"; "how much space"; "remaining context";
+       "context usage"; "memory status"; "session state" ]);
+    ("keeper_time_now",
+     [ "current time"; "what time"; "timestamp"; "date now"; "clock";
+       "server time"; "time now" ]);
+    ("keeper_broadcast",
+     [ "broadcast"; "announce to all"; "tell everyone"; "notify all";
+       "send message all" ]);
+    ("keeper_voice_speak",
+     [ "speak"; "say out loud"; "talk"; "voice output"; "text to speech";
+       "tts"; "say something" ]);
+    ("keeper_voice_listen",
+     [ "listen"; "microphone"; "speech to text"; "transcribe"; "hear";
+       "voice input"; "record speech" ]);
+    ("keeper_pr_workflow",
+     [ "create pr"; "new pull request"; "open draft pr"; "one shot pr";
+       "push and pr"; "submit pr" ]);
+    ("keeper_tool_search",
+     [ "find tool"; "discover tool"; "search tools"; "what tool";
+       "tool for"; "which tool" ]);
   ]
 
 let synonym_lookup =

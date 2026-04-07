@@ -100,7 +100,9 @@ let build_keeper_system_prompt
       profile_policy;
       "\n\
        \n\
-       <continuity>\n";
+       <continuity>\n\
+       Continuity and any end-of-reply STATE formatting requirements apply unless a more specific turn-level mode or output guard disables them.\n\
+       When <direct_reply_mode> is present, follow it instead: do not emit SKILL:, SKILL_REASON:, or [STATE].\n";
       keeper_constitution ();
       "\n\
        </continuity>";

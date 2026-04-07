@@ -1,6 +1,6 @@
 # Appendix C: Implementation Status Report
 
-> Generated: 2026-03-23 | Baseline: v2.138.0
+> Generated: 2026-03-23 | Updated: 2026-04-08 | Baseline: v2.138.0
 > Method: 코드 존재 + 테스트 존재 + 텔레메트리/상태파일 실사용 증거로 판정
 
 ---
@@ -22,20 +22,20 @@
 |-----------|------|------|------|------|------|------|---------|
 | Room Coordination | 03 | 24 | 0 | 0 | 0 | 100% | 전 기능 운용 |
 | Chain Engine | 04 | - | - | - | - | **Frozen** | 0 production calls, OAS superseded |
-| Keeper Agent | 05 | 24 | 1 | 0 | 0 | 96% | tech debt(meta 100필드) 외 완전 |
-| Command Plane | 06 | 38 | 2 | 0 | 0 | 95% | Intent 도구 사용 빈도 낮음 |
+| Keeper Agent | 05 | 25 | 0 | 0 | 0 | 100% | Memory.t Long_term JSONL-only 완료 (v2.140.0) |
+| Command Plane | 06 | 40 | 0 | 0 | 0 | 100% | Intent 도구 4종 MCP 등록 완료 |
 | Team Session | 07 | 30 | 3 | 0 | 0 | 90% | Auto 모드는 OAS 위임, lossy projection |
 | Governance | 08 | 28 | 0 | 0 | 0 | 100% | 거버넌스 pipeline + dashboard surface 유지 |
-| Server/Transport | 09 | 18 | 5 | 0 | 0 | 78% | HTTP/1.1 canonical + gRPC/WS/WebRTC local harness verified |
-| Dashboard | 10 | 15 | 1 | 0 | 0 | 94% | MDAL surface만 미약 |
+| Server/Transport | 09 | 19 | 4 | 0 | 0 | 83% | SSE rate limit 활성화, HTTP/2 h2c는 opt-in CODE |
+| Dashboard | 10 | 15 | 0 | 0 | 0 | 100% | MDAL 개념 제거 (REMOVED) |
 | Board | 11 | 16 | 1 | 0 | 0 | 94% | Board Listener polling만 CODE |
 | Memory Systems | 12 | 44 | 0 | 0 | 0 | 100% | 4 시스템 전부 운용 |
 | OAS Integration | 13 | 42 | 0 | 0 | 0 | 100% | 단방향 경계 완벽 준수 |
 | Configuration | 14 | 68 | 0 | 0 | 0 | 100% | 80+ env var, 22 카테고리 |
 | Testing | 15 | 92 | 6 | 0 | 0 | 94% | env-gated 6건만 CODE |
-| **TOTAL** | | **436** | **22** | **0** | **0** | **95.2%** | |
+| **TOTAL** | | **441** | **17** | **0** | **0** | **96.3%** | |
 
-**MISS: 0 | STUB: 0 | IMPL 비율: 95.2%**
+**MISS: 0 | STUB: 0 | IMPL 비율: 96.3%**
 
 ---
 
@@ -47,15 +47,15 @@
 |------|----------|-----|---------|
 | **Chain Engine 전체** | 04 | 17K | chain_run_start 0건, orchestration_kind=chain_dsl 0건 |
 | **HTTP/2 (h2c)** | 09 | 740 | opt-in 경로, canonical 기본값은 아님 |
-| **SSE rate limit guard** | 09 | ~50 | 모든 threshold 기본값 0 (비활성) |
+| ~~SSE rate limit guard~~ | 09 | ~50 | **→ IMPL** (기본값 활성화: 1s cooldown, 60s/10 window) |
 | **Board Listener (polling)** | 11 | ~100 | pg_notify 수신 코드, SSE relay 미확인 |
-| **Intent 도구 4종** | 06 | ~200 | 정의됨, 벤치마크에서 미사용 |
-| **Keeper OAS Memory.t 일부** | 05 | ~100 | Long_term 백엔드 연결 부분적 |
-| **Team Session lossy projection** | 07 | ~50 | 47→12 필드 축소, 의도적 gap |
-| **env-gated 테스트 6종** | 15 | ~300 | PG/network/viewer 테스트, CI에서 실행 안 됨 |
-| **MDAL dashboard surface** | 10 | ~50 | 최소한의 노출 |
+| ~~Intent 도구 4종~~ | 06 | ~200 | **→ IMPL** (MCP tool registry 등록 + dispatch 완료) |
+| ~~Keeper OAS Memory.t 일부~~ | 05 | ~100 | **→ IMPL** (v2.140.0 filesystem-first 전환으로 완료) |
+| **Team Session lossy projection** | 07 | ~50 | 47→12 필드 축소, 의도적 gap (Phase C-1, OAS 크로스 레포 작업 필요) |
+| **env-gated 테스트** | 15 | ~300 | E2E 6종은 MASC_E2E_TESTS=true로 CI 활성화됨. PG 1종(test_board_pg)만 PostgreSQL service 미제공으로 CI 미실행 |
+| ~~MDAL dashboard surface~~ | 10 | ~50 | **→ REMOVED** (개념 폐기) |
 
-**합계: ~20K LOC의 CODE** (Chain 17K가 대부분)
+**합계: ~18K LOC의 CODE** (Chain 17K가 대부분, 나머지 ~550 LOC)
 
 ---
 
@@ -92,7 +92,7 @@
 | Proactive | Quality gate + similarity + 3-retry fallback | IMPL | keeper_prompt.ml |
 | Self-Model Drift | will/needs/desires compaction | IMPL | keeper_config.ml |
 | TOML Config | config/keepers/*.toml | IMPL | keeper_toml_loader.ml |
-| OAS Memory.t Bridge | 5-tier mapping (부분적) | CODE | memory_oas_bridge.ml (Long_term 불완전) |
+| OAS Memory.t Bridge | 5-tier JSONL-only mapping | IMPL | memory_oas_bridge.ml (v2.140.0 filesystem-first 완료) |
 
 ### 06-Command Plane (95% IMPL)
 
@@ -106,7 +106,7 @@
 | Orchestra | Node/edge/signal graph synthesis | IMPL | command_plane_orchestra.ml 798 LOC |
 | Policy Decisions | Pending→Approved/Denied/Expired | IMPL | cp_lifecycle_policy.ml 838 LOC |
 | Event Trace | Append-only events.jsonl | IMPL | 58KB, 1000+ entries |
-| Intent Tools | create/status/update/forecast | CODE | 정의됨, 벤치마크 미사용 |
+| Intent Tools | create/status/update/forecast | IMPL | MCP tool registry 등록 + dispatch 연결 완료 |
 
 ### 07-Team Session (90% IMPL)
 
@@ -130,7 +130,7 @@
 | Operator Control | Snapshot, digest, action, judgment | IMPL | operator_control.ml 26K |
 | Governance Judge | Dashboard judgment loop | IMPL | dashboard/dashboard_governance_judge.ml |
 
-### 09-Server/Transport (65% IMPL)
+### 09-Server/Transport (83% IMPL)
 
 | Transport | Status | Evidence |
 |-----------|--------|----------|
@@ -143,12 +143,12 @@
 | WebSocket | **IMPL** | standalone `/ws` discovery + WS frame harness 통과 |
 | gRPC | **IMPL** | Health/Reflection/Subscribe bridge harness 통과 |
 | WebRTC | **IMPL** | local signaling + peer establishment harness 통과, live interop은 `verify_webrtc_live_env.sh` / workflow dispatch로 env-gated |
-| SSE Rate Limit | **CODE** | 기본값 0 (비활성) |
+| SSE Rate Limit | **IMPL** | 기본값 활성화 (1s cooldown, 60s/10 window) |
 
-### 10-Dashboard (94% IMPL)
+### 10-Dashboard (100% IMPL)
 
 핵심 기능 전부 IMPL: Cache SWR(Eio.Mutex), 23 HTTP endpoints, Governance/Execution/Mission/Proof surfaces, Keeper metrics, Preact SPA.
-MDAL surface만 CODE (최소한의 노출).
+MDAL 개념 폐기 (REMOVED).
 
 ### 11-Board (94% IMPL)
 
@@ -198,8 +198,10 @@ env-gated 6종(PG/network/viewer)만 CODE.
 
 | 우선순위 | 항목 | 근거 |
 |---------|------|------|
-| 1 | Server: SSE rate limit 활성화 | 현재 모든 threshold 0 (보안 gap) |
-| 2 | Keeper: OAS Memory.t Long_term 백엔드 완성 | IMPL 96%→100% |
-| 3 | Team Session: lossy projection 해소 | 47→12 필드 축소가 OAS 측 정보 손실 유발 |
+| ~~1~~ | ~~Server: SSE rate limit 활성화~~ | **완료** (기본값 1s/60s-10 활성화) |
+| ~~2~~ | ~~Keeper: OAS Memory.t Long_term 백엔드 완성~~ | **완료** (v2.140.0 filesystem-first 전환) |
+| 1 | Team Session: lossy projection 해소 | 47→12 필드 축소가 OAS 측 정보 손실 유발. OAS Collaboration.t 확장 필요 (크로스 레포) |
+| 2 | Board Listener: 테스트 + 활성화 검증 | pg_notify→SSE relay 경로 테스트 부재 |
+| 3 | Transport: HTTP/2 h2c 테스트 + 벤치마크 | opt-in 경로 검증, canonical 전환 판단 근거 |
 | 4 | Chain Engine: Adapter+Mermaid 유틸리티 추출 후 본체 archive | 17K LOC 유지비 제거 |
 | 5 | Transport: live ICE/TURN/browser interop 증빙 lane 추가 | local smoke는 확보됐고 internet-grade 증빙만 env-gated로 남음 |

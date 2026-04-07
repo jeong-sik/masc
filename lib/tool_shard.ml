@@ -289,8 +289,9 @@ git_log/git_diff for repo history, bash for curl/jq/env/which.";
 let coding_keeper_bridge_tools : Types.tool_schema list = [
   {
     name = "keeper_bash";
-    description = "Run a shell command by cmd (builds, tests, git, file edits) — \
-returns exit_code and output. For read-only ops prefer keeper_shell_readonly, \
+    description = "Run a single shell command by cmd (builds, tests, git, file edits) — \
+returns exit_code and output. ONE command only: no &&, ||, |, ;, or > chaining. \
+For read-only ops prefer keeper_shell_readonly, \
 for file writes prefer keeper_fs_edit, for worktree-isolated code prefer masc_code_shell.";
     input_schema = `Assoc [
       ("type", `String "object");

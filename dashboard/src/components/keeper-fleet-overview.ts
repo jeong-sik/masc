@@ -21,11 +21,16 @@ const STAGE_STYLES: Record<string, StageStyle> = {
   compacting:           { label: '압축',    color: '#a855f7',        bg: 'rgba(168,85,247,0.12)', pulse: true },
   handoff:              { label: '승계',    color: '#ef4444',        bg: 'rgba(239,68,68,0.12)',  pulse: true },
   scheduled_autonomous: { label: '자율',    color: 'var(--accent)',  bg: 'rgba(71,184,255,0.08)', pulse: true },
+  failing:              { label: '오류',    color: 'var(--bad)',     bg: 'rgba(239,68,68,0.12)',  pulse: true },
+  crashed:              { label: '중단',    color: '#ef4444',        bg: 'rgba(239,68,68,0.15)',  pulse: false },
+  restarting:           { label: '재시작',  color: '#38bdf8',        bg: 'rgba(56,189,248,0.12)', pulse: true },
+  draining:             { label: '종료중',  color: '#fb923c',        bg: 'rgba(251,146,60,0.12)', pulse: true },
+  paused:               { label: '일시정지', color: '#a78bfa',       bg: 'rgba(167,139,250,0.12)', pulse: false },
   idle:                 { label: '대기',    color: 'var(--text-dim)', bg: 'var(--white-5)',        pulse: false },
   offline:              { label: '오프',    color: 'var(--text-dim)', bg: 'var(--white-3)',        pulse: false },
 }
 
-const ACTIVE_STAGES = new Set<string>(['thinking', 'tool_use', 'compacting', 'handoff', 'scheduled_autonomous'])
+const ACTIVE_STAGES = new Set<string>(['thinking', 'tool_use', 'compacting', 'handoff', 'scheduled_autonomous', 'failing', 'restarting', 'draining'])
 
 function stageStyle(stage?: PipelineStage): StageStyle {
   if (!stage) return STAGE_STYLES['offline']!

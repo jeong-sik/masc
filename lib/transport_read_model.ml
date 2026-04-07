@@ -193,4 +193,5 @@ let transport_status_json (ctx : http_context) =
               [ ("signaling_url", `String (ctx.base_url ^ "/webrtc")) ]
             else
               []) );
+      ("bridge", Transport_bridge.status_all_json ());
     ]

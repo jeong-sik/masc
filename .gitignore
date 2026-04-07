@@ -59,6 +59,12 @@ dashboard/dist/
 assets/dashboard/
 viewer/dist-build/
 
+# TLC model checker artifacts
+specs/**/states/
+specs/**/*_TTrace_*.tla
+specs/**/TraceData.tla
+*.jar
+
 # Local Claude session scratch
 .claude/
 

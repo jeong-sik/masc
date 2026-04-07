@@ -388,6 +388,7 @@
    heuristic_metrics
    agent_stress
    transport
+   transport_bridge
    transport_read_model
    transport_metrics
    ;; gRPC coordination transport (grpc-direct)

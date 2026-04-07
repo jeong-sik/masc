@@ -548,8 +548,8 @@ let budget_of_session_timeout timeout_sec =
       }
   | None -> Swarm.Swarm_types.no_budget
 
-let session_runtime_health ~(config : Room.config)
-    ~(session : Team_session_types.session) : Team_context_oas_adapter.runtime_health =
+let session_runtime_health_check ~(config : Room.config)
+    ~(session : Team_session_types.session) () =
   let base_path_ok =
     String.trim config.base_path <> "" && Sys.file_exists config.base_path
   in
@@ -562,18 +562,7 @@ let session_runtime_health ~(config : Room.config)
         && String.equal current.room_id session.room_id
     | None -> false
   in
-  {
-    Team_context_oas_adapter.base_path_exists = base_path_ok;
-    room_initialized = room_ready;
-    session_running = session_ready;
-  }
-
-let session_runtime_health_check ~(config : Room.config)
-    ~(session : Team_session_types.session) () =
-  let health = session_runtime_health ~config ~session in
-  health.Team_context_oas_adapter.base_path_exists
-  && health.room_initialized
-  && health.session_running
+  base_path_ok && room_ready && session_ready
 
 (* ── planned_worker -> agent_entry ─────────────────────────────── *)
 
@@ -730,11 +719,6 @@ let session_to_swarm_config
       Hashtbl.replace success_by_agent entry.name false)
     entries;
   let mode = mode_of_orchestration session.orchestration_mode in
-  let runtime_health = session_runtime_health ~config ~session in
-  let collaboration =
-    Team_context_oas_adapter.collaboration_of_session ~base_path:config.base_path session
-    |> fun collab -> Team_context_oas_adapter.with_runtime_health collab runtime_health
-  in
   let entry_count = List.length entries in
   let timeout_sec =
     if session.duration_seconds > 0 then
@@ -777,7 +761,7 @@ let session_to_swarm_config
     prompt = session.goal; timeout_sec;
     budget = budget_of_session_timeout timeout_sec;
     max_agent_retries = 1;
-    collaboration_context = Some collaboration;
+    collaboration_context = None;
     resource_check = Some (session_runtime_health_check ~config ~session);
     max_concurrent_agents = Some (max 1 (min entry_count slot_aware_cap));
     enable_streaming = false }

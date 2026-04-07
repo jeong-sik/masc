@@ -237,22 +237,8 @@ let test_session_to_swarm_config_health_contract () =
   Alcotest.(check int) "initial telemetry turn_count" 0 telemetry.turn_count;
   Alcotest.(check bool) "initial telemetry usage empty" true
     (Option.is_none telemetry.usage);
-  let collaboration = Option.get swarm_cfg.collaboration_context in
-  let open Yojson.Safe.Util in
-  let participants = collaboration |> member "participants" |> to_list in
-  Alcotest.(check int) "participants projected" 2
-    (List.length participants);
-  let first_participant = List.hd participants in
-  Alcotest.(check bool) "participant summary present" true
-    (first_participant |> member "summary" |> to_string_option |> Option.is_some);
-  let metadata = collaboration |> member "metadata" in
-  let worker_specs = metadata |> member "worker_specs" |> to_list in
-  Alcotest.(check int) "worker specs preserved" 2 (List.length worker_specs);
-  let scope = metadata |> member "execution_scope" |> to_string in
-  Alcotest.(check string) "session execution_scope metadata" "autonomous" scope;
-  let health = metadata |> member "runtime_health" in
-  Alcotest.(check bool) "runtime health marks ready" true
-    (health |> member "ready" |> to_bool);
+  Alcotest.(check bool) "collaboration_context is None" true
+    (Option.is_none swarm_cfg.collaboration_context);
   let resource_ok = Option.get swarm_cfg.resource_check () in
   Alcotest.(check bool) "resource check passes for initialized room" true
     resource_ok;

@@ -464,11 +464,6 @@ let test_permission_for_tool_surface_audit () =
   | Some Types.CanReadState -> ()
   | _ -> fail "expected CanReadState"
 
-let test_permission_for_tool_collaboration_evidence () =
-  match Auth.permission_for_tool "masc_collaboration_evidence" with
-  | Some Types.CanReadState -> ()
-  | _ -> fail "expected CanReadState"
-
 let test_permission_for_tool_operator_action () =
   match Auth.permission_for_tool "masc_operator_action" with
   | Some Types.CanBroadcast -> ()
@@ -718,8 +713,6 @@ let () =
       test_case "operator_snapshot" `Quick test_permission_for_tool_operator_snapshot;
       test_case "operator_digest" `Quick test_permission_for_tool_operator_digest;
       test_case "surface_audit" `Quick test_permission_for_tool_surface_audit;
-      test_case "collaboration_evidence" `Quick
-        test_permission_for_tool_collaboration_evidence;
       test_case "operator_action" `Quick test_permission_for_tool_operator_action;
       test_case "operator_confirm" `Quick test_permission_for_tool_operator_confirm;
       test_case "autoresearch_status" `Quick

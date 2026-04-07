@@ -1,6 +1,14 @@
 # Changelog
 
 
+## [2.257.0] - 2026-04-07
+
+### Removed
+- **Collaboration module references** -- OAS boundary violation cleanup. Delete team_context_oas_adapter, dashboard_collaboration_evidence, related tests/harness/routes (-1916 lines).
+
+### Changed
+- **OAS agent_sdk pin** -- bump to >= 0.111.0 (Collaboration.t removed, collaboration_context opaque JSON).
+
 ## [2.256.0] - 2026-04-07
 
 ### Changed

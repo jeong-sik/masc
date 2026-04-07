@@ -119,28 +119,6 @@ let surface_audit_schema ~remote =
         ];
   }
 
-let collaboration_evidence_schema ~remote =
-  {
-    name = "masc_collaboration_evidence";
-    description =
-      if remote then
-        "Read session or namespace collaboration evidence counts, proof verdict, and evidence refs. Use this to verify whether agents actually interacted."
-      else
-        "Read session or namespace collaboration evidence counts, proof verdict, relation-backend state, and evidence refs. Use this instead of inferring collaboration from labels or relation graphs alone.";
-    input_schema =
-      `Assoc
-        [
-          ("type", `String "object");
-          ( "properties",
-            schema_properties
-              [
-                ("session_id", `Assoc [ ("type", `String "string") ]);
-                ("namespace_id", `Assoc [ ("type", `String "string") ]);
-                ("room_id", `Assoc [ ("type", `String "string") ]);
-              ] );
-        ];
-  }
-
 let action_schema ~remote =
   let enum_values =
     if remote then strict_action_enums else strict_action_enums @ legacy_action_alias_enums
@@ -293,18 +271,6 @@ let dispatch (ctx : 'a context) ~name ~args : result option =
   | "masc_surface_audit" ->
       let surface_id = get_string_opt args "surface_id" in
       Some (true, Yojson.Safe.to_string (Dashboard_surface_readiness.json ?surface_id ()))
-  | "masc_collaboration_evidence" ->
-      let session_id = get_string_opt args "session_id" in
-      let room_id =
-        match get_string_opt args "namespace_id" with
-        | Some value when String.trim value <> "" -> Some value
-        | _ -> get_string_opt args "room_id"
-      in
-      Some
-        ( true,
-          Yojson.Safe.to_string
-            (Dashboard_collaboration_evidence.json ?session_id ?room_id
-               ~config:ctx.config ()) )
   | "masc_operator_judgment_write" ->
       Some
         (json_string_of_result (Operator_control.judgment_write_json control_ctx args))
@@ -317,7 +283,6 @@ let schemas : tool_schema list =
     action_schema ~remote:false;
     confirm_schema;
     surface_audit_schema ~remote:false;
-    collaboration_evidence_schema ~remote:false;
     judgment_write_schema;
   ]
 
@@ -328,7 +293,6 @@ let remote_schemas : tool_schema list =
     action_schema ~remote:true;
     confirm_schema;
     surface_audit_schema ~remote:true;
-    collaboration_evidence_schema ~remote:true;
   ]
 
 let remote_tool_names : string list =
@@ -338,7 +302,7 @@ let remote_tool_names : string list =
 (* Tool_spec registration                                           *)
 (* ================================================================ *)
 
-let _tool_spec_read_only = [ "masc_operator_snapshot"; "masc_operator_digest"; "masc_surface_audit"; "masc_collaboration_evidence" ]
+let _tool_spec_read_only = [ "masc_operator_snapshot"; "masc_operator_digest"; "masc_surface_audit" ]
 let _tool_spec_requires_join = [ "masc_operator_action"; "masc_operator_confirm" ]
 
 (* Tools with explicit catalog metadata that must be preserved. *)

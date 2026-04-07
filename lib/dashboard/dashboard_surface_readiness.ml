@@ -99,11 +99,11 @@ let all_entries =
       refs =
         {
           fixture_harness = Some "./scripts/harness_dashboard_mission_smoke.sh";
-          live_spotcheck = Some "./scripts/harness_dashboard_collaboration_evidence_smoke.sh";
+          live_spotcheck = None;
           logs_ref = Some "/api/v1/dashboard/logs";
           metrics_ref = Some "/metrics";
           proof_ref = Some "/api/v1/dashboard/proof";
-          tool_name = Some "masc_collaboration_evidence";
+          tool_name = None;
         };
     };
     {
@@ -139,7 +139,7 @@ let all_entries =
           logs_ref = Some "/api/v1/dashboard/logs";
           metrics_ref = Some "/metrics";
           proof_ref = None;
-          tool_name = Some "masc_collaboration_evidence";
+          tool_name = None;
         };
     };
     {
@@ -208,7 +208,7 @@ let all_entries =
       refs =
         {
           fixture_harness = Some "./scripts/harness_dashboard_execution_smoke.sh";
-          live_spotcheck = Some "./scripts/harness_dashboard_collaboration_evidence_smoke.sh";
+          live_spotcheck = None;
           logs_ref = Some "/api/v1/dashboard/logs";
           metrics_ref = Some "/metrics";
           proof_ref = Some "/api/v1/dashboard/proof";
@@ -226,7 +226,7 @@ let all_entries =
       route_hash = Some "#workspace?section=board";
       refs =
         {
-          fixture_harness = Some "./scripts/harness_dashboard_collaboration_evidence_smoke.sh";
+          fixture_harness = None;
           live_spotcheck = Some "/api/v1/dashboard/board";
           logs_ref = Some "/api/v1/dashboard/logs";
           metrics_ref = Some "/metrics";

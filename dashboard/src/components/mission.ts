@@ -35,8 +35,6 @@ import {
   MissionBriefingCard,
 } from './mission-cards'
 import { ProvenanceStrip } from './common/provenance-strip'
-import { CollaborationEvidencePanel } from './collaboration-evidence'
-
 export function hiddenMissionSectionLabels({
   keeperCount,
   activityCount,
@@ -216,11 +214,6 @@ export function Mission() {
             </div>
           `
         : null}
-
-      <${CollaborationEvidencePanel}
-        sessionId=${activeSessionId}
-        roomId=${focusSession?.namespace ?? mission.summary.namespace ?? mission.summary.namespace_id ?? null}
-      />
 
       <${MissionBriefingCard} />
 

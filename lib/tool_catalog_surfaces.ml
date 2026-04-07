@@ -267,7 +267,7 @@ let system_internal_surface_tools =
     "masc_webrtc_offer"; "masc_webrtc_answer";
     (* Hidden callable tools pruned from user-facing surfaces in #5011. *)
     "masc_archive_view";
-    "masc_collaboration_evidence"; "masc_collaboration_graph";
+    "masc_collaboration_graph";
     "masc_error_add"; "masc_error_resolve";
     "masc_find_by_capability";
     "masc_keeper_tool_catalog";

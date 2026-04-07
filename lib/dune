@@ -65,7 +65,6 @@
    dashboard_attention
    dashboard_cache
    dashboard_tool_host_events
-   dashboard_collaboration_evidence
    dashboard_governance
    dashboard_governance_judge
    dashboard_operator_judge
@@ -268,7 +267,6 @@
    room
    run_eio
    team_context
-   team_context_oas_adapter
    team_session_store
    team_session_report
    team_session_report_core

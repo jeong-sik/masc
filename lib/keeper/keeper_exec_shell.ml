@@ -88,8 +88,19 @@ let handle_keeper_shell_readonly
       ~(args : Yojson.Safe.t)
   =
   ignore meta;
-  let op =
+  let raw_op =
     Safe_ops.json_string ~default:"" "op" args |> String.trim |> String.lowercase_ascii
+  in
+  (* Normalize common aliases so the model's naming variation doesn't cause
+     unsupported_op failures. *)
+  let op = match raw_op with
+    | "git status" | "status" -> "git_status"
+    | "git log" -> "git_log"
+    | "git diff" -> "git_diff"
+    | "read" | "file" | "type" -> "cat"
+    | "grep" | "search" -> "rg"
+    | "dir" | "list" -> "ls"
+    | _ -> raw_op
   in
   let root = Keeper_alerting_path.project_root_of_config config in
   let read_target () =

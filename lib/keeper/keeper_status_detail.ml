@@ -33,11 +33,18 @@ let invalidate_status_cache_for name =
 let invalidate_status_cache_all () =
   Hashtbl.clear _cache
 
+let normalize_status_name = String.trim
+
+let effective_status_name (ctx : _ context) args =
+  match normalize_status_name (get_string args "name" "") with
+  | "" -> normalize_status_name ctx.agent_name
+  | value -> value
+
 (** Hash the status-affecting args so different parameter combos
     get separate cache entries (e.g. fast=true vs fast=false). *)
-let hash_status_args args =
+let hash_status_args ctx args =
   let parts = [
-    get_string args "name" "";
+    effective_status_name ctx args;
     string_of_bool (get_bool args "fast" false);
     string_of_bool (get_bool args "include_context" false);
     string_of_bool (get_bool args "include_metrics_overview" false);
@@ -50,7 +57,7 @@ let hash_status_args args =
   Digest.string (String.concat "|" parts) |> Digest.to_hex
 
 let handle_keeper_status ctx args : tool_result =
-  let name = get_string args "name" "" in
+  let name = effective_status_name ctx args in
   if not (validate_name name) then
     (false, "❌ invalid keeper name")
   else
@@ -58,7 +65,7 @@ let handle_keeper_status ctx args : tool_result =
     | Error e -> (false, "❌ " ^ e)
     | Ok None -> (false, Printf.sprintf "❌ keeper not found: %s" name)
     | Ok (Some m) ->
-      let args_hash = hash_status_args args in
+      let args_hash = hash_status_args ctx args in
       (* Cache hit: same updated_at + same args → return cached response *)
       (match Hashtbl.find_opt _cache name with
        | Some entry
@@ -481,6 +488,7 @@ let handle_keeper_status ctx args : tool_result =
         in
 
          let json = `Assoc [
+           ("name", `String name);
            ("meta", meta_to_json m);
            ("goal", `String m.goal);
            ("short_goal", `String m.short_goal);

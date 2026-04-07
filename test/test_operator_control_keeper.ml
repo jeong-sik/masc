@@ -165,6 +165,66 @@ let test_keeper_status_exposes_summary_and_recoverable () =
       Alcotest.(check bool) "keepalive running false" false
         Yojson.Safe.Util.(status_json |> member "keepalive_running" |> to_bool))
 
+let test_keeper_status_defaults_name_to_caller () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let keeper_name = "self-probe" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_keepalive.stop_keepalive keeper_name;
+      Keeper_registry.clear ();
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some keeper_name));
+      let keeper_ctx : _ Tool_keeper.context =
+        {
+          config;
+          agent_name = keeper_name;
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = None;
+        }
+      in
+      let ok, _ =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_up"
+          ~args:
+            (`Assoc
+              [
+                ("name", `String keeper_name);
+                ("goal", `String "Self inspect");
+                ("proactive_enabled", `Bool false);
+              ])
+      in
+      Alcotest.(check bool) "keeper up ok" true ok;
+      let ok, body =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_status"
+          ~args:(`Assoc [ ("fast", `Bool true) ])
+      in
+      Alcotest.(check bool) "status ok without explicit name" true ok;
+      let status_json = parse_json_exn body in
+      Alcotest.(check string) "status resolved caller keeper" keeper_name
+        Yojson.Safe.Util.(status_json |> member "name" |> to_string))
+
+let test_keeper_status_schema_makes_name_optional () =
+  let schema =
+    List.find
+      (fun (spec : Types.tool_schema) ->
+         String.equal spec.name "masc_keeper_status")
+      Tool_keeper.schemas
+  in
+  let required_has_name =
+    match Yojson.Safe.Util.member "required" schema.input_schema with
+    | `List fields ->
+      List.exists (function `String "name" -> true | _ -> false) fields
+    | _ -> false
+  in
+  Alcotest.(check bool) "name no longer required in schema" false required_has_name
+
 let test_keeper_config_exposes_live_runtime_and_sources () =
   Eio_main.run @@ fun env ->
   ensure_fs env;

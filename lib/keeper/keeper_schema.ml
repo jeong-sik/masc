@@ -276,7 +276,7 @@ let keeper_schemas : tool_schema list = [
       ("properties", `Assoc [
         ("name", `Assoc [
           ("type", `String "string");
-          ("description", `String "Keeper handle");
+          ("description", `String "Keeper handle. Optional; defaults to the caller when omitted.");
         ]);
         ("tail_turns", `Assoc [
           ("type", `String "integer");
@@ -319,7 +319,6 @@ let keeper_schemas : tool_schema list = [
           ("description", `String "Include recent compaction history tail (default: !fast).");
         ]);
       ]);
-      ("required", `List [`String "name"]);
     ];
   };
 

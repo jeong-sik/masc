@@ -111,6 +111,12 @@ let () =
             `Quick
             Test_operator_control_keeper
             .test_keeper_status_exposes_summary_and_recoverable;
+          Alcotest.test_case "keeper status defaults name to caller" `Quick
+            Test_operator_control_keeper
+            .test_keeper_status_defaults_name_to_caller;
+          Alcotest.test_case "keeper status schema makes name optional" `Quick
+            Test_operator_control_keeper
+            .test_keeper_status_schema_makes_name_optional;
           Alcotest.test_case "keeper config exposes live runtime and sources"
             `Quick
             Test_operator_control_keeper

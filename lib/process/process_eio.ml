@@ -6,7 +6,7 @@
     This module is used by tool handlers where we want:
     - Non-blocking execution (Eio fibers)
     - Injection safety (no `sh -c`)
-    - Consistent output capture (stdout only)
+    - Consistent output capture (stdout; status APIs also surface stderr on failures)
 *)
 
 (** ── Global state (initialized once from main_eio.ml) ──────────── *)
@@ -59,130 +59,201 @@ let close_quietly fd =
   try Unix.close fd with
   | Unix.Unix_error _ -> () (* intentional: best-effort cleanup *)
 
-let with_unix_capture ?env ?stdin_content (argv : string list)
+let output_for_status ~(status : Unix.process_status) ~(stdout : string)
+    ~(stderr : string) : string =
+  let succeeded =
+    match status with
+    | Unix.WEXITED 0 -> true
+    | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> false
+  in
+  if succeeded then stdout
+  else
+    match stdout, stderr with
+    | "", err -> err
+    | out, "" -> out
+    | out, err -> out ^ "\n" ^ err
+
+(** Create a private stderr capture file for Unix fallback status helpers.
+    Uses [Filename.temp_file] for atomic creation, then opens the file with
+    private permissions and marks the descriptor close-on-exec to avoid
+    descriptor leaks into unrelated child processes. *)
+let create_stderr_tempfile () =
+  let path = Filename.temp_file "masc_process_eio_stderr" ".tmp" in
+  let fd =
+    Unix.openfile path [ Unix.O_WRONLY; Unix.O_TRUNC; Unix.O_CLOEXEC ] 0o600
+  in
+  (path, fd)
+
+let remove_temp_file_quietly path =
+  try Sys.remove path with
+  | Sys_error _ -> ()
+
+let read_stderr_capture path =
+  try In_channel.with_open_bin path In_channel.input_all with
+  | _exn ->
+      Printf.sprintf
+        "(stderr capture error) failed to read captured stderr file %s. Check temp-file permissions or available temp storage."
+        (Filename.basename path)
+
+let captured_stderr_or_empty path_opt =
+  match path_opt with
+  | Some path -> read_stderr_capture path
+  | None -> ""
+
+let with_unix_capture ?env ?stdin_content ?(capture_stderr = false)
+    (argv : string list)
     ~(on_error : unit -> 'a)
-    ~(on_success : Unix.process_status -> string -> 'a) : 'a =
+    ~(on_success : Unix.process_status -> string -> string -> 'a) : 'a =
   match argv with
   | [] -> on_error ()
   | prog :: _ ->
-      let stdout_r_ref = ref None in
-      let stdout_w_ref = ref None in
-      let stdin_r_ref = ref None in
-      let stdin_w_ref = ref None in
-      (try
-         let env = default_env env in
-         let stdout_r, stdout_w = Unix.pipe ~cloexec:true () in
-         stdout_r_ref := Some stdout_r;
-         stdout_w_ref := Some stdout_w;
-         let stdin_r_opt, stdin_w_opt =
-           match stdin_content with
-           | None -> (None, None)
-           | Some _ ->
-               let r, w = Unix.pipe ~cloexec:true () in
-               (Some r, Some w)
-         in
-         stdin_r_ref := stdin_r_opt;
-         stdin_w_ref := stdin_w_opt;
-         let stdin_fd =
-           match !stdin_r_ref with
-           | Some fd -> fd
-           | None -> Unix.stdin
-         in
-         let pid =
-           Unix.create_process_env prog (Array.of_list argv) env stdin_fd stdout_w
-             Unix.stderr
-         in
-         Option.iter close_quietly !stdin_r_ref;
-         stdin_r_ref := None;
-         Option.iter close_quietly !stdout_w_ref;
-         stdout_w_ref := None;
-         (match (stdin_content, !stdin_w_ref) with
-         | Some content, Some stdin_w ->
-             Fun.protect
-               ~finally:(fun () ->
-                 close_quietly stdin_w;
-                 stdin_w_ref := None)
-               (fun () ->
-                 let rec write_all off =
-                   if off < String.length content then
-                     let n =
-                       Unix.write_substring stdin_w content off
-                         (String.length content - off)
-                     in
-                     write_all (off + n)
-                 in
-                 write_all 0)
-         | _ -> ());
-         (match !stdout_r_ref with
-         | None ->
-             (* stdout pipe already consumed — treat as error *)
-             on_error ()
-         | Some stdout_r ->
-             stdout_r_ref := None;
-             let rec waitpid_retry () =
-               try Unix.waitpid [] pid
-               with Unix.Unix_error (Unix.EINTR, _, _) -> waitpid_retry ()
-             in
-             let status, output =
-               Eio_guard.run_in_systhread (fun () ->
-                 let status_ref = ref None in
-                 let ic = Unix.in_channel_of_descr stdout_r in
-                 let output =
-                   Fun.protect
-                     ~finally:(fun () ->
-                       In_channel.close ic;
-                       let (_pid, status) = waitpid_retry () in
-                       status_ref := Some status)
-                     (fun () -> In_channel.input_all ic)
-                 in
-                 match !status_ref with
-                 | Some status -> (status, output)
-                 | None -> failwith "waitpid status missing after Unix fallback capture")
-             in
-             on_success status output)
-       with
-       | Eio.Cancel.Cancelled _ as exn ->
-           Option.iter close_quietly !stdin_r_ref;
-           stdin_r_ref := None;
-           Option.iter close_quietly !stdin_w_ref;
-           stdin_w_ref := None;
-           Option.iter close_quietly !stdout_r_ref;
-           stdout_r_ref := None;
-           Option.iter close_quietly !stdout_w_ref;
-           stdout_w_ref := None;
-           raise exn
-       | _exn ->
-           Option.iter close_quietly !stdin_r_ref;
-           stdin_r_ref := None;
-           Option.iter close_quietly !stdin_w_ref;
-           stdin_w_ref := None;
-           Option.iter close_quietly !stdout_r_ref;
-           stdout_r_ref := None;
-           Option.iter close_quietly !stdout_w_ref;
-           stdout_w_ref := None;
-           on_error ())
+    let stdout_r_ref = ref None in
+    let stdout_w_ref = ref None in
+    let stderr_fd_ref = ref None in
+    let stderr_path_ref = ref None in
+    let stdin_r_ref = ref None in
+    let stdin_w_ref = ref None in
+    let cleanup () =
+      Option.iter close_quietly !stdin_r_ref;
+      stdin_r_ref := None;
+      Option.iter close_quietly !stdin_w_ref;
+      stdin_w_ref := None;
+      Option.iter close_quietly !stdout_r_ref;
+      stdout_r_ref := None;
+      Option.iter close_quietly !stdout_w_ref;
+      stdout_w_ref := None;
+      Option.iter close_quietly !stderr_fd_ref;
+      stderr_fd_ref := None;
+      Option.iter
+        remove_temp_file_quietly
+        !stderr_path_ref;
+      stderr_path_ref := None
+    in
+    (try
+       let env = default_env env in
+       let stdout_r, stdout_w = Unix.pipe ~cloexec:true () in
+       stdout_r_ref := Some stdout_r;
+       stdout_w_ref := Some stdout_w;
+       (* stderr is captured into a temp file and read back after [waitpid]
+          completes so the parent never blocks the child on an unread stderr
+          pipe in Unix fallback mode. *)
+       let stderr_fd =
+         if capture_stderr
+         then (
+           let path, fd = create_stderr_tempfile () in
+           stderr_path_ref := Some path;
+           stderr_fd_ref := Some fd;
+           fd)
+         else
+           Unix.stderr
+       in
+       let stdin_r_opt, stdin_w_opt =
+         match stdin_content with
+         | None -> (None, None)
+         | Some _ ->
+             let r, w = Unix.pipe ~cloexec:true () in
+             (Some r, Some w)
+       in
+       stdin_r_ref := stdin_r_opt;
+       stdin_w_ref := stdin_w_opt;
+       let stdin_fd =
+         match !stdin_r_ref with
+         | Some fd -> fd
+         | None -> Unix.stdin
+       in
+       let pid =
+         Unix.create_process_env prog (Array.of_list argv) env stdin_fd stdout_w
+           stderr_fd
+       in
+       Option.iter close_quietly !stdin_r_ref;
+       stdin_r_ref := None;
+       Option.iter close_quietly !stdout_w_ref;
+       stdout_w_ref := None;
+       (* The child inherited the descriptor during spawn; the parent no longer
+          needs its copy once the process exits. *)
+       Option.iter close_quietly !stderr_fd_ref;
+       stderr_fd_ref := None;
+       (match (stdin_content, !stdin_w_ref) with
+        | Some content, Some stdin_w ->
+            Fun.protect
+              ~finally:(fun () ->
+                close_quietly stdin_w;
+                stdin_w_ref := None)
+              (fun () ->
+                let rec write_all off =
+                  if off < String.length content then
+                    let n =
+                      Unix.write_substring stdin_w content off
+                        (String.length content - off)
+                    in
+                    write_all (off + n)
+                in
+                write_all 0)
+        | _ -> ());
+       (match !stdout_r_ref with
+        | None ->
+            (* stdout pipe already consumed — treat as error *)
+            cleanup ();
+            on_error ()
+        | Some stdout_r ->
+            stdout_r_ref := None;
+            let rec waitpid_retry () =
+              try Unix.waitpid [] pid
+              with Unix.Unix_error (Unix.EINTR, _, _) -> waitpid_retry ()
+            in
+            let status, stdout, stderr =
+              Eio_guard.run_in_systhread (fun () ->
+                let status_ref = ref None in
+                let ic = Unix.in_channel_of_descr stdout_r in
+                let stdout =
+                  Fun.protect
+                    ~finally:(fun () ->
+                      In_channel.close ic;
+                      let (_pid, status) = waitpid_retry () in
+                      status_ref := Some status)
+                    (fun () -> In_channel.input_all ic)
+                in
+                match !status_ref with
+                | Some status ->
+                    let stderr = captured_stderr_or_empty !stderr_path_ref in
+                    (status, stdout, stderr)
+                | None ->
+                    failwith "waitpid status missing after Unix fallback capture")
+            in
+            cleanup ();
+            on_success status stdout stderr)
+     with
+     | Eio.Cancel.Cancelled _ as exn ->
+         cleanup ();
+         raise exn
+     | _exn ->
+         cleanup ();
+         on_error ())
 
 let run_unix_argv_fallback ?env (argv : string list) : string =
   with_unix_capture ?env argv ~on_error:(fun () -> "")
-    ~on_success:(fun _status output -> output)
+    ~on_success:(fun _status stdout _stderr -> stdout)
 
 let run_unix_argv_with_status_fallback ?env (argv : string list) :
     Unix.process_status * string =
-  with_unix_capture ?env argv ~on_error:(fun () -> (Unix.WEXITED 1, ""))
-    ~on_success:(fun status output -> (status, output))
+  with_unix_capture ?env ~capture_stderr:true argv
+    ~on_error:(fun () -> (Unix.WEXITED 1, ""))
+    ~on_success:(fun status stdout stderr ->
+      (status, output_for_status ~status ~stdout ~stderr))
 
 let run_unix_argv_with_stdin_fallback ?env ~(stdin_content : string)
     (argv : string list) : string =
   with_unix_capture ?env ~stdin_content argv ~on_error:(fun () -> "")
-    ~on_success:(fun _status output -> output)
+    ~on_success:(fun _status stdout _stderr -> stdout)
 
 let run_unix_argv_with_stdin_and_status_fallback
     ?env
     ~(stdin_content : string)
     (argv : string list) : Unix.process_status * string =
-  with_unix_capture ?env ~stdin_content argv
+  with_unix_capture ?env ~stdin_content ~capture_stderr:true argv
     ~on_error:(fun () -> (Unix.WEXITED 1, ""))
-    ~on_success:(fun status output -> (status, output))
+    ~on_success:(fun status stdout stderr ->
+      (status, output_for_status ~status ~stdout ~stderr))
 
 (** ── Eio-native process execution (global refs) ─────────────────── *)
 
@@ -263,29 +334,40 @@ let run_argv_with_stdin_and_status
     | Error _, _, _ | _, Error _, _ | _, _, Error _ ->
         run_unix_argv_with_stdin_and_status_fallback ?env ~stdin_content argv
     | Ok pm, Ok clk, Ok cwd ->
-        let buf = Buffer.create 1024 in
+        let stdout_buf = Buffer.create 1024 in
+        let stderr_buf = Buffer.create 1024 in
         let label = String.concat " " (List.map Filename.quote argv) in
         try
           Eio.Time.with_timeout_exn clk timeout_sec (fun () ->
               Eio.Switch.run (fun sw ->
                   let proc =
                     Eio.Process.spawn ~sw pm ~cwd ?env
-                      ~stdin:(Eio.Flow.string_source stdin_content)
-                      ~stdout:(Eio.Flow.buffer_sink buf)
-                      argv
-                  in
-                  let status = Eio.Process.await proc in
-                  let unix_status =
-                    match status with
-                    | `Exited n -> Unix.WEXITED n
-                    | `Signaled n -> Unix.WSIGNALED n
-                  in
-                  (unix_status, Buffer.contents buf)))
+                       ~stdin:(Eio.Flow.string_source stdin_content)
+                       ~stdout:(Eio.Flow.buffer_sink stdout_buf)
+                       ~stderr:(Eio.Flow.buffer_sink stderr_buf)
+                       argv
+                   in
+                   let status = Eio.Process.await proc in
+                   let unix_status =
+                     match status with
+                     | `Exited n -> Unix.WEXITED n
+                     | `Signaled n -> Unix.WSIGNALED n
+                   in
+                   ( unix_status
+                   , output_for_status
+                       ~status:unix_status
+                       ~stdout:(Buffer.contents stdout_buf)
+                       ~stderr:(Buffer.contents stderr_buf) )))
         with
         | Eio.Time.Timeout ->
             Log.Misc.warn "[Process_eio] Timeout after %.0fs: %s"
               timeout_sec label;
-            (Unix.WSIGNALED Sys.sigterm, Buffer.contents buf)
+            let timeout_status = Unix.WSIGNALED Sys.sigterm in
+            ( timeout_status
+            , output_for_status
+                ~status:timeout_status
+                ~stdout:(Buffer.contents stdout_buf)
+                ~stderr:(Buffer.contents stderr_buf) )
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn ->
             if should_retry_unix_fallback exn then (
@@ -328,28 +410,21 @@ let run_argv_with_status ?(timeout_sec = 60.0) ?env ?cwd (argv : string list) : 
                     | `Exited n -> Unix.WEXITED n
                     | `Signaled n -> Unix.WSIGNALED n
                   in
-                  let output =
-                    let stdout_s = Buffer.contents stdout_buf in
-                    let stderr_s = Buffer.contents stderr_buf in
-                    match unix_status with
-                    | Unix.WEXITED 0 -> stdout_s
-                    | _ ->
-                      if stderr_s = "" then stdout_s
-                      else if stdout_s = "" then stderr_s
-                      else stdout_s ^ "\n" ^ stderr_s
-                  in
-                  (unix_status, output)))
+                  ( unix_status
+                  , output_for_status
+                      ~status:unix_status
+                      ~stdout:(Buffer.contents stdout_buf)
+                      ~stderr:(Buffer.contents stderr_buf) )))
         with
         | Eio.Time.Timeout ->
             Log.Misc.warn "[Process_eio] Timeout after %.0fs: %s"
               timeout_sec label;
-            let partial = Buffer.contents stdout_buf in
-            let err = Buffer.contents stderr_buf in
-            let output = if err = "" then partial
-              else if partial = "" then err
-              else partial ^ "\n" ^ err
-            in
-            (Unix.WSIGNALED Sys.sigterm, output)
+            let timeout_status = Unix.WSIGNALED Sys.sigterm in
+            ( timeout_status
+            , output_for_status
+                ~status:timeout_status
+                ~stdout:(Buffer.contents stdout_buf)
+                ~stderr:(Buffer.contents stderr_buf) )
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn ->
             if should_retry_unix_fallback exn then (

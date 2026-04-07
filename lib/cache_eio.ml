@@ -102,10 +102,14 @@ let entry_of_json (json : Yojson.Safe.t) : cache_entry option =
 
 let read_entry_file path =
   match Safe_ops.read_file_safe path with
-  | Error _ -> None
+  | Error msg ->
+    Log.Misc.warn "[cache_entry_read] failed to read %s: %s" path msg;
+    None
   | Ok content ->
       match Safe_ops.parse_json_safe ~context:"cache_entry_read" content with
-      | Error _ -> None
+      | Error msg ->
+        Log.Misc.warn "[cache_entry_read] %s" msg;
+        None
       | Ok json -> entry_of_json json
 
 let read_matching_entry path ~key =
@@ -200,10 +204,14 @@ let evict_expired config =
     let evicted = List.fold_left (fun count filename ->
       let path = Filename.concat dir filename in
       match Safe_ops.read_file_safe path with
-      | Error _ -> count
+      | Error msg ->
+        Log.Misc.warn "[cache_evict] failed to read %s: %s" path msg;
+        count
       | Ok content ->
         match Safe_ops.parse_json_safe ~context:"cache_evict" content with
-        | Error _ -> count
+        | Error msg ->
+          Log.Misc.warn "[cache_evict] %s" msg;
+          count
         | Ok json ->
           match entry_of_json json with
           | Some entry when is_expired entry ->
@@ -240,10 +248,14 @@ let maybe_evict_expired config =
         let expired_count = List.fold_left (fun acc filename ->
           let path = Filename.concat dir filename in
           match Safe_ops.read_file_safe path with
-          | Error _ -> acc
+          | Error msg ->
+            Log.Misc.warn "[cache_maybe_evict] failed to read %s: %s" path msg;
+            acc
           | Ok content ->
             match Safe_ops.parse_json_safe ~context:"cache_maybe_evict" content with
-            | Error _ -> acc
+            | Error msg ->
+              Log.Misc.warn "[cache_maybe_evict] %s" msg;
+              acc
             | Ok json ->
               match entry_of_json json with
               | Some entry when is_expired entry -> acc + 1
@@ -408,11 +420,12 @@ let list config ?(tag : string option) () : cache_entry list =
       List.iter (fun filename ->
         let path = Filename.concat dir filename in
         match Safe_ops.read_file_safe path with
-        | Error _ -> ()
+        | Error msg ->
+          Log.Misc.warn "[cache_get_all] failed to read %s: %s" path msg
         | Ok content ->
             match Safe_ops.parse_json_safe ~context:"cache_get_all" content with
             | Error msg ->
-                Log.Misc.info "%s" msg
+                Log.Misc.warn "[cache_get_all] %s" msg
             | Ok json ->
                 match entry_of_json json with
                 | Some entry ->
@@ -474,10 +487,14 @@ let stats config : (int * int * float, string) result =
           let file_size = (Unix.stat path).st_size in
           let is_exp =
             match Safe_ops.read_file_safe path with
-            | Error _ -> false
+            | Error msg ->
+              Log.Misc.warn "[cache_stats] failed to read %s: %s" path msg;
+              false
             | Ok content ->
               match Safe_ops.parse_json_safe ~context:"cache_stats" content with
-              | Error _ -> false
+              | Error msg ->
+                Log.Misc.warn "[cache_stats] %s" msg;
+                false
               | Ok json ->
                 match entry_of_json json with
                 | Some entry -> is_expired entry

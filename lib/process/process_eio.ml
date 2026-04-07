@@ -91,9 +91,14 @@ let read_stderr_capture path =
   try In_channel.with_open_bin path In_channel.input_all with
   | exn ->
       Printf.sprintf
-        "(stderr capture error) failed while reading %s: %s"
+        "(stderr capture error) failed while reading %s: %s. Check temp-file permissions or available temp storage."
         path
         (Printexc.to_string exn)
+
+let captured_stderr_or_empty path_opt =
+  match path_opt with
+  | Some path -> read_stderr_capture path
+  | None -> ""
 
 let with_unix_capture ?env ?stdin_content ?(capture_stderr = false)
     (argv : string list)
@@ -205,11 +210,7 @@ let with_unix_capture ?env ?stdin_content ?(capture_stderr = false)
                 in
                 match !status_ref with
                 | Some status ->
-                    let stderr =
-                      match !stderr_path_ref with
-                      | Some path -> read_stderr_capture path
-                      | None -> ""
-                    in
+                    let stderr = captured_stderr_or_empty !stderr_path_ref in
                     (status, stdout, stderr)
                 | None ->
                     failwith "waitpid status missing after Unix fallback capture")

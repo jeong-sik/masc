@@ -910,7 +910,8 @@ let run_turn
                  "[LAST TURN] Turn %d/%d. This is your final turn. \
                   You MUST emit a [STATE]...[/STATE] block now summarizing \
                   what you accomplished and what the next generation should do. \
-                  Do NOT start new tool work. If you need more turns, call extend_turns."
+                  Do NOT start new tool work. If you need more turns, call extend_turns. \
+                  If you claimed a task, call keeper_task_done NOW before session ends."
                  turn max_turns)
           else if is_retry then
             append_ctx ctx

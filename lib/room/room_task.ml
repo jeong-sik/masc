@@ -117,7 +117,7 @@ let task_started_at_unix status =
   | _ -> default_time
 
 let task_transition_details ~from_status ~to_status ?notes ?reason ?duration_ms
-    ?(forced = false) () =
+    ?handoff_context ?(forced = false) () =
   let optional_field name = function
     | Some value -> [ (name, value) ]
     | None -> []
@@ -133,7 +133,9 @@ let task_transition_details ~from_status ~to_status ?notes ?reason ?duration_ms
     @ optional_field "reason"
         (Option.map (fun value -> `String value) reason)
     @ optional_field "duration_ms"
-        (Option.map (fun value -> `Int value) duration_ms))
+        (Option.map (fun value -> `Int value) duration_ms)
+    @ optional_field "handoff_context"
+        (Option.map Types.task_handoff_context_to_yojson handoff_context))
 
 let observe_task_transition config ~agent_name ~task_id ~transition ~details =
   !Room_hooks.observe_task_transition_fn config ~agent_name

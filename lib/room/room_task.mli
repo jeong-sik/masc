@@ -23,6 +23,7 @@ val task_transition_details :
   from_status:Types.task_status ->
   to_status:Types.task_status ->
   ?notes:string -> ?reason:string -> ?duration_ms:int ->
+  ?handoff_context:Types.task_handoff_context ->
   ?forced:bool -> unit -> Yojson.Safe.t
 
 val observe_task_transition :

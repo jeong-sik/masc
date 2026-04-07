@@ -235,11 +235,11 @@ function MemorySummary() {
     <div class="flex flex-wrap items-center gap-2 mb-4 px-3 py-2.5 rounded-xl border border-[var(--card-border)] bg-[var(--card)] text-[12px] text-[var(--text-muted)]">
       <span class="font-semibold text-[var(--text-strong)] tabular-nums text-[15px]">${visibleCount}</span>
       <span>개 표시 중</span>
-      <span class="text-[var(--white-15)]">·</span>
+      <span class="text-[var(--text-muted)]">·</span>
       <span>직접 ${grouped.direct.length}</span>
-      <span class="text-[var(--white-15)]">·</span>
+      <span class="text-[var(--text-muted)]">·</span>
       <span>자율 ${grouped.automation.length}</span>
-      <span class="text-[var(--white-15)]">·</span>
+      <span class="text-[var(--text-muted)]">·</span>
       <span>시스템 ${grouped.system.length}</span>
       ${lastBoardRefreshAt.value ? html`
         <span class="ml-auto text-[11px]">갱신 <${TimeAgo} timestamp=${lastBoardRefreshAt.value} /></span>

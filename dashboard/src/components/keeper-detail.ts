@@ -383,7 +383,7 @@ export function KeeperDetailOverlay() {
         <${KeeperCommsPanel} keeper=${keeper} />
 
         ${'' /* ── Runtime diagnostics (supervisor + keeper diagnostics unified) ── */}
-        <details class="rounded-2xl border border-card-border bg-card/40 backdrop-blur-md shadow-sm" ontoggle=${(e: Event) => setDiagOpen((e.target as HTMLDetailsElement).open)}>
+        <details class="rounded-2xl border border-card-border bg-card/40 backdrop-blur-md shadow-sm" onToggle=${(e: Event) => setDiagOpen((e.currentTarget as HTMLDetailsElement).open)}>
           <summary class="cursor-pointer py-3 px-5 text-[11px] font-semibold uppercase tracking-widest text-text-muted list-none select-none flex items-center gap-2">
             <span class="w-1.5 h-1.5 rounded-full bg-accent/50"></span>
             런타임 진단

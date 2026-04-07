@@ -482,9 +482,15 @@ export function KeeperDetailOverlay() {
             </div>
           <//>
 
-          <${SectionCard} title="설정">
-            <${KeeperConfigPanel} keeperName=${keeper.name} />
-          <//>
+          <details class="p-5 rounded-2xl border border-card-border bg-card/40 backdrop-blur-md shadow-sm">
+            <summary class="cursor-pointer text-[11px] font-semibold uppercase tracking-widest text-text-muted list-none select-none flex items-center gap-2">
+              <span class="w-1.5 h-1.5 rounded-full bg-accent/50"></span>
+              설정
+            </summary>
+            <div class="mt-4">
+              <${KeeperConfigPanel} keeperName=${keeper.name} />
+            </div>
+          </details>
         </div>
 
         ${'' /* ── Debug — journal (separate details to avoid eager mount) ── */}

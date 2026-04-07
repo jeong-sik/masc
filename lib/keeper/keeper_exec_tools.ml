@@ -809,8 +809,8 @@ let handle_keeper_pr_workflow
           Log.Keeper.warn "pr_workflow step %s failed: %s (keeper=%s)" name msg meta.name;
           Error err_msg
       in
-      let ( let* ) = Result.bind in
       let workflow_result =
+        let open Result_syntax in
         (* Step 1: Create worktree *)
         let* worktree_path = run_step "worktree_create" (fun () ->
           match Room.worktree_create_r config ~agent_name ~task_id ~base_branch with

@@ -31,6 +31,10 @@ val read_file_safe : string -> (string, string) result
 val read_json_file_safe : string -> (Yojson.Safe.t, string) result
 (** Read JSON file safely. *)
 
+val read_json_file_logged : label:string -> string -> Yojson.Safe.t option
+(** Read JSON file safely, logging errors instead of silently discarding them.
+    Returns [Some json] on success, [None] on failure with a warning log. *)
+
 val read_json_eio : string -> Yojson.Safe.t
 (** Read JSON file via Eio-native I/O (Fs_compat).
     Drop-in replacement for [Yojson.Safe.from_file] in Eio fiber contexts. *)

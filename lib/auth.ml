@@ -75,7 +75,9 @@ let load_auth_config config : auth_config =
       let json = Yojson.Safe.from_string content in
       match auth_config_of_yojson json with
       | Ok cfg -> cfg
-      | Error _ -> default_auth_config
+      | Error msg ->
+        Log.Auth.warn "[load_auth_config] parse error for %s: %s" file msg;
+        default_auth_config
     with Sys_error _ | Yojson.Json_error _ -> default_auth_config
   else
     default_auth_config
@@ -104,7 +106,9 @@ let load_credential config agent_name : agent_credential option =
       let json = Yojson.Safe.from_string content in
       match agent_credential_of_yojson json with
       | Ok cred -> Some cred
-      | Error _ -> None
+      | Error msg ->
+        Log.Auth.warn "[load_credential] parse error for %s: %s" agent_name msg;
+        None
     with Sys_error _ | Yojson.Json_error _ -> None
   else
     None
@@ -493,7 +497,9 @@ let enable_auth config ~require_token ~agent_name : string * string option =
       write_initial_admin config agent_name;
       match create_token config ~agent_name ~role:Admin with
       | Ok (token, _cred) -> Some token
-      | Error _ -> None
+      | Error e ->
+        Log.Auth.warn "[enable_auth] bootstrap token creation failed for %s: %s" agent_name (Types.show_masc_error e);
+        None
     end else None
   in
   (secret, bootstrap_token)

@@ -10,33 +10,44 @@ import { TimeAgo } from './common/time-ago'
 const transitionData = signal<Map<string, KeeperTransitionsResponse>>(new Map())
 const loading = signal(false)
 
+// Phase names come lowercase from the server (phase_to_string)
 const PHASE_COLORS: Record<string, string> = {
-  Running: 'var(--ok)',
-  Compacting: '#fbbf24',
-  HandingOff: '#22d3ee',
-  Failing: 'var(--bad)',
-  Crashed: '#ef4444',
-  Dead: '#6b7280',
-  Paused: '#a78bfa',
-  Draining: '#fb923c',
-  Restarting: '#38bdf8',
-  Stopped: '#9ca3af',
-  Offline: '#4b5563',
+  running: 'var(--ok)',
+  compacting: '#fbbf24',
+  handing_off: '#22d3ee',
+  failing: 'var(--bad)',
+  crashed: '#ef4444',
+  dead: '#6b7280',
+  paused: '#a78bfa',
+  draining: '#fb923c',
+  restarting: '#38bdf8',
+  stopped: '#9ca3af',
+  offline: '#4b5563',
 }
 
 function phaseColor(phase: string): string {
-  return PHASE_COLORS[phase] ?? '#6b7280'
+  return PHASE_COLORS[phase.toLowerCase()] ?? '#6b7280'
 }
 
 function phaseBgClass(phase: string): string {
-  switch (phase) {
-    case 'Running': return 'bg-[var(--ok)]/15 text-[var(--ok)]'
-    case 'Failing': case 'Crashed': return 'bg-[var(--bad)]/15 text-[var(--bad-light)]'
-    case 'Compacting': return 'bg-[#fbbf24]/15 text-[#fbbf24]'
-    case 'HandingOff': return 'bg-[#22d3ee]/15 text-[#22d3ee]'
-    case 'Paused': return 'bg-[#a78bfa]/15 text-[#a78bfa]'
+  switch (phase.toLowerCase()) {
+    case 'running': return 'bg-[var(--ok)]/15 text-[var(--ok)]'
+    case 'failing': case 'crashed': return 'bg-[var(--bad)]/15 text-[var(--bad-light)]'
+    case 'compacting': return 'bg-[#fbbf24]/15 text-[#fbbf24]'
+    case 'handing_off': return 'bg-[#22d3ee]/15 text-[#22d3ee]'
+    case 'paused': return 'bg-[#a78bfa]/15 text-[#a78bfa]'
     default: return 'bg-[var(--white-6)] text-[var(--text-muted)]'
   }
+}
+
+// selected_event comes as object {type: "...", ...} from the server
+function eventLabel(event: unknown): string {
+  if (typeof event === 'string') return event
+  if (event && typeof event === 'object' && 'type' in event) {
+    const type = (event as Record<string, unknown>).type
+    if (type != null) return String(type)
+  }
+  return '?'
 }
 
 async function loadAll() {
@@ -69,7 +80,7 @@ function TransitionDot({ t, idx }: { t: KeeperTransition; idx: number }) {
       <div class="absolute bottom-full mb-2 hidden group-hover:flex flex-col items-center z-10">
         <div class="rounded-lg border border-[var(--card-border)] bg-[var(--card)] px-3 py-2 shadow-lg text-[11px] whitespace-nowrap">
           <div class="font-semibold">${t.prev_phase} → ${t.new_phase}</div>
-          <div class="text-[var(--text-muted)] mt-0.5">${t.selected_event}</div>
+          <div class="text-[var(--text-muted)] mt-0.5">${eventLabel(t.selected_event)}</div>
           <div class="text-[var(--text-muted)]"><${TimeAgo} timestamp=${t.wall_clock_at_decision * 1000} /></div>
         </div>
       </div>

@@ -797,43 +797,36 @@ let handle_keeper_pr_workflow
       let agent_name = Printf.sprintf "keeper-%s"
         (safe_name (strip_keeper_prefix meta.name)) in
       let steps = Buffer.create 512 in
-      let step_ok = ref true in
-      let step_error = ref "" in
       let run_step name f =
-        if !step_ok then begin
-          match f () with
-          | Ok msg ->
-            Buffer.add_string steps (Printf.sprintf "  %s: ok\n" name);
-            Log.Keeper.info "pr_workflow step %s ok (keeper=%s)" name meta.name;
-            Some msg
-          | Error msg ->
-            step_ok := false;
-            step_error := Printf.sprintf "%s failed: %s" name msg;
-            Buffer.add_string steps (Printf.sprintf "  %s: FAILED — %s\n" name msg);
-            Log.Keeper.warn "pr_workflow step %s failed: %s (keeper=%s)" name msg meta.name;
-            None
-        end else None
-      in
-      (* Step 1: Create worktree *)
-      let worktree_path = ref "" in
-      let _s1 = run_step "worktree_create" (fun () ->
-        match Room.worktree_create_r config ~agent_name ~task_id ~base_branch with
+        match f () with
         | Ok msg ->
-          (* Derive worktree path from known naming convention, then verify it exists *)
-          let wt_dir = Filename.concat root
-            (Printf.sprintf ".worktrees/%s-%s" agent_name task_id) in
-          if Sys.file_exists wt_dir && Sys.is_directory wt_dir then begin
-            worktree_path := wt_dir;
-            Ok msg
-          end else
-            Error (Printf.sprintf "worktree created but path not found: %s" wt_dir)
-        | Error e -> Error (Types.masc_error_to_string e)
-      ) in
-      (* Step 2: Write file — with path traversal guard *)
-      let _s2 = run_step "file_write" (fun () ->
-        if !worktree_path = "" then Error "no worktree path"
-        else begin
-          let abs_path = Filename.concat !worktree_path file_path in
+          Buffer.add_string steps (Printf.sprintf "  %s: ok\n" name);
+          Log.Keeper.info "pr_workflow step %s ok (keeper=%s)" name meta.name;
+          Ok msg
+        | Error msg ->
+          let err_msg = Printf.sprintf "%s failed: %s" name msg in
+          Buffer.add_string steps (Printf.sprintf "  %s: FAILED — %s\n" name msg);
+          Log.Keeper.warn "pr_workflow step %s failed: %s (keeper=%s)" name msg meta.name;
+          Error err_msg
+      in
+      let workflow_result =
+        let open Result_syntax in
+        (* Step 1: Create worktree *)
+        let* worktree_path = run_step "worktree_create" (fun () ->
+          match Room.worktree_create_r config ~agent_name ~task_id ~base_branch with
+          | Ok _msg ->
+            (* Derive worktree path from known naming convention, then verify it exists *)
+            let wt_dir = Filename.concat root
+              (Printf.sprintf ".worktrees/%s-%s" agent_name task_id) in
+            if Sys.file_exists wt_dir && Sys.is_directory wt_dir then
+              Ok wt_dir
+            else
+              Error (Printf.sprintf "worktree created but path not found: %s" wt_dir)
+          | Error e -> Error (Types.masc_error_to_string e)
+        ) in
+        (* Step 2: Write file — with path traversal guard *)
+        let* _s2 = run_step "file_write" (fun () ->
+          let abs_path = Filename.concat worktree_path file_path in
           (* Resolve symlinks and normalize to catch ../.. traversal *)
           let canonical =
             try Some (Unix.realpath abs_path)
@@ -847,7 +840,7 @@ let handle_keeper_pr_workflow
           match canonical with
           | None -> Error (Printf.sprintf "cannot resolve path: %s" file_path)
           | Some resolved ->
-            if not (String.starts_with ~prefix:(!worktree_path ^ "/") resolved) then
+            if not (String.starts_with ~prefix:(worktree_path ^ "/") resolved) then
               Error (Printf.sprintf "path escapes worktree boundary: %s" file_path)
             else begin
               try
@@ -857,15 +850,12 @@ let handle_keeper_pr_workflow
                 Ok (Printf.sprintf "wrote %d bytes to %s" (String.length file_content) file_path)
               with exn -> Error (Printexc.to_string exn)
             end
-        end
-      ) in
-      (* Step 3: Git add + commit + push *)
-      let _s3 = run_step "git_commit_push" (fun () ->
-        if !worktree_path = "" then Error "no worktree path"
-        else begin
+        ) in
+        (* Step 3: Git add + commit + push *)
+        let* _s3 = run_step "git_commit_push" (fun () ->
           let run_git cmd =
             let shell = Printf.sprintf "cd %s && git %s 2>&1"
-              (Filename.quote !worktree_path) cmd in
+              (Filename.quote worktree_path) cmd in
             Process_eio.run_argv_with_status ~timeout_sec:30.0
               [ "/bin/zsh"; "-lc"; shell ]
           in
@@ -886,32 +876,34 @@ let handle_keeper_pr_workflow
                 Ok "committed and pushed"
             end
           end
-        end
-      ) in
-      (* Step 4: Create draft PR — run from worktree for correct branch context *)
-      let pr_url = ref "" in
-      let _s4 = run_step "gh_pr_create" (fun () ->
-        let body = if pr_body = "" then pr_title else pr_body in
-        let gh_cmd = Printf.sprintf
-          "cd %s && gh pr create --draft --title %s --body %s --base %s 2>&1"
-          (Filename.quote !worktree_path) (Filename.quote pr_title) (Filename.quote body)
-          (Filename.quote base_branch) in
-        let st, out =
-          Process_eio.run_argv_with_status ~timeout_sec:30.0
-            [ "/bin/zsh"; "-lc"; gh_cmd ] in
-        if st <> Unix.WEXITED 0 then
-          Error (Printf.sprintf "gh pr create: %s" out)
-        else begin
-          pr_url := String.trim out;
-          Ok (Printf.sprintf "PR created: %s" (String.trim out))
-        end
-      ) in
+        ) in
+        (* Step 4: Create draft PR — run from worktree for correct branch context *)
+        let* pr_url = run_step "gh_pr_create" (fun () ->
+          let body = if pr_body = "" then pr_title else pr_body in
+          let gh_cmd = Printf.sprintf
+            "cd %s && gh pr create --draft --title %s --body %s --base %s 2>&1"
+            (Filename.quote worktree_path) (Filename.quote pr_title) (Filename.quote body)
+            (Filename.quote base_branch) in
+          let st, out =
+            Process_eio.run_argv_with_status ~timeout_sec:30.0
+              [ "/bin/zsh"; "-lc"; gh_cmd ] in
+          if st <> Unix.WEXITED 0 then
+            Error (Printf.sprintf "gh pr create: %s" out)
+          else
+            Ok (String.trim out)
+        ) in
+        Ok pr_url
+      in
+      let is_ok, pr_url, err_msg = match workflow_result with
+        | Ok url -> true, url, ""
+        | Error e -> false, "", e
+      in
       Yojson.Safe.to_string
         (`Assoc
-          [ "ok", `Bool !step_ok
+          [ "ok", `Bool is_ok
           ; "steps", `String (Buffer.contents steps)
-          ; "pr_url", `String !pr_url
-          ; "error", `String !step_error
+          ; "pr_url", `String pr_url
+          ; "error", `String err_msg
           ; "keeper", `String meta.name
           ])
 ;;

@@ -60,11 +60,15 @@ let transient_backoff_sec (attempt : int) : float =
   Float.min 4.0 (1.0 *. Float.of_int (1 lsl (attempt - 1)))
 
 (** Detect context overflow errors via structured OAS error types.
-    Matches [Oas.Error.Api (ContextOverflow _)] directly instead of
-    parsing stringified error messages. *)
+    Matches [ContextOverflow] (API-level) and [TokenBudgetExceeded]
+    for input token budget exceeded.  Both are recoverable
+    via checkpoint compaction + retry.
+
+    @since 2.256.0 also matches TokenBudgetExceeded(Input) *)
 let is_context_overflow (err : Oas.Error.sdk_error) : bool =
   match err with
   | Oas.Error.Api (ContextOverflow _) -> true
+  | Oas.Error.Agent (TokenBudgetExceeded { kind = "Input"; _ }) -> true
   | _ -> false
 
 type overflow_retry_plan = {
@@ -86,6 +90,7 @@ let recover_context_overflow_retry
   let actual_limit =
     match error with
     | Oas.Error.Api (ContextOverflow { limit = Some limit; _ }) -> limit
+    | Oas.Error.Agent (TokenBudgetExceeded { limit; _ }) -> limit
     | _ ->
       (* Overflow detected but limit not available — use 80% of cascade max
          as a conservative fallback. *)
@@ -811,6 +816,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
     ?(channel : Keeper_world_observation.unified_turn_channel = Scheduled_autonomous)
     ?(semaphore_wait_ms = 0)
     ?shared_context
+    ?boring_consecutive_turns_ref
     () : (keeper_meta, Oas.Error.sdk_error) result =
   (* 1. Check API keys *)
   let model_labels = Keeper_coordination.effective_model_labels_for_turn meta in
@@ -919,6 +925,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
               ~is_retry
               ?shared_context
               ?event_bus:(Keeper_event_bus.get ())
+              ?boring_consecutive_turns_ref
               ()
           in
           let rec retry_loop ~run_meta ~max_context ~run_generation

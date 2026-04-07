@@ -557,232 +557,212 @@ let handle_step (deps : step_deps) (ctx : _ context) args : result =
               let spawn_result_json =
                 execute_spawn_pipeline env prepared_spawns_result
               in
-              let spawn_error =
-                match spawn_result_json with
+              let check_json_error json_opt =
+                match json_opt with
                 | Some (`Assoc fields) -> (
                     match List.assoc_opt "error" fields with
-                    | Some (`String e) when String.trim e <> "" -> Some e
-                    | _ -> None)
-                | _ -> None
+                    | Some (`String e) when String.trim e <> "" -> Error e
+                    | _ -> Ok ())
+                | _ -> Ok ()
               in
-              match spawn_error with
-              | Some e -> (false, deps.json_error e)
-              | None ->
-                  let turn_json_result =
-                    match turn_kind_opt with
-                    | None -> Ok None
-                    | Some turn_kind ->
-                        deps.record_session_turn_json ~config:ctx.config ~session_id
-                          ~actor ~turn_kind ~message:base_message
-                          ~target_agent ~task_title ~task_description
-                          ~task_priority
-                        |> Result.map Option.some
-                  in
-                  match turn_json_result with
-                  | Error e -> (false, deps.json_error e)
-                  | Ok turn_json ->
-                      (* Execute delegate pipeline *)
-                      let delegate_result_json =
-                        execute_delegate_pipeline env ~session_opt
-                          ~delegate_prompt ~target_agent
-                          ~has_spawns:(spawn_specs <> [])
+              (match
+                let open Result_syntax in
+                let* () = check_json_error spawn_result_json in
+              let turn_json_result =
+                match turn_kind_opt with
+                | None -> Ok None
+                | Some turn_kind ->
+                    deps.record_session_turn_json ~config:ctx.config ~session_id
+                      ~actor ~turn_kind ~message:base_message
+                      ~target_agent ~task_title ~task_description
+                      ~task_priority
+                    |> Result.map Option.some
+              in
+              let* turn_json = turn_json_result in
+              (* Execute delegate pipeline *)
+              let delegate_result_json =
+                execute_delegate_pipeline env ~session_opt
+                  ~delegate_prompt ~target_agent
+                  ~has_spawns:(spawn_specs <> [])
+              in
+              let* () = check_json_error delegate_result_json in
+              (* Vote pipeline *)
+              let vote_result_json =
+                match get_string_opt args "vote_topic" with
+                | None -> None
+                | Some vote_topic ->
+                    let vote_options = get_string_list args "vote_options" in
+                    if List.length vote_options < 2 then
+                      Some
+                        (`Assoc
+                          [
+                            ("error", `String "vote_options requires at least 2 items");
+                          ])
+                    else
+                      let required_votes = get_int args "vote_required_votes" 2 in
+                      let vote_create_msg =
+                        Room.vote_create ctx.config ~proposer:actor
+                          ~topic:vote_topic ~options:vote_options
+                          ~required_votes
                       in
-                      let delegate_error =
-                        match delegate_result_json with
-                        | Some (`Assoc fields) -> (
-                            match List.assoc_opt "error" fields with
-                            | Some (`String e) when String.trim e <> "" ->
-                                Some e
-                            | _ -> None)
-                        | _ -> None
-                      in
-                      match delegate_error with
-                      | Some e -> (false, deps.json_error e)
-                      | None ->
-                      (* Vote pipeline *)
-                      let vote_result_json =
-                        match get_string_opt args "vote_topic" with
-                        | None -> None
-                        | Some vote_topic ->
-                            let vote_options = get_string_list args "vote_options" in
-                            if List.length vote_options < 2 then
-                              Some
+                      let vote_id = deps.extract_vote_id vote_create_msg in
+                      Team_session_store.append_event ctx.config session_id
+                        ~event_type:"team_vote_created"
+                        ~detail:
+                          (`Assoc
+                            [
+                              ("actor", `String actor);
+                              ("topic", `String vote_topic);
+                              ("required_votes", `Int required_votes);
+                              ("options", `List (List.map (fun o -> `String o) vote_options));
+                              ("vote_id", Option.fold ~none:`Null ~some:(fun s -> `String s) vote_id);
+                              ("result", `String vote_create_msg);
+                              ("ts_iso", `String (Types.now_iso ()));
+                            ]);
+                      let cast_json =
+                        match (vote_id, get_string_opt args "vote_choice") with
+                        | Some vid, Some choice ->
+                            let cast_msg =
+                              Room.vote_cast ctx.config ~agent_name:actor
+                                ~vote_id:vid ~choice
+                            in
+                            Team_session_store.append_event ctx.config session_id
+                              ~event_type:"team_vote_cast"
+                              ~detail:
                                 (`Assoc
                                   [
-                                    ("error", `String "vote_options requires at least 2 items");
-                                  ])
-                            else
-                              let required_votes = get_int args "vote_required_votes" 2 in
-                              let vote_create_msg =
-                                Room.vote_create ctx.config ~proposer:actor
-                                  ~topic:vote_topic ~options:vote_options
-                                  ~required_votes
-                              in
-                              let vote_id = deps.extract_vote_id vote_create_msg in
-                              Team_session_store.append_event ctx.config session_id
-                                ~event_type:"team_vote_created"
+                                    ("actor", `String actor);
+                                    ("vote_id", `String vid);
+                                    ("choice", `String choice);
+                                    ("result", `String cast_msg);
+                                    ("ts_iso", `String (Types.now_iso ()));
+                                  ]);
+                            Some (`Assoc [ ("vote_id", `String vid); ("choice", `String choice); ("result", `String cast_msg) ])
+                        | _ -> None
+                      in
+                      Some
+                        (`Assoc
+                          [
+                            ("created", `String vote_create_msg);
+                            ("vote_id", Option.fold ~none:`Null ~some:(fun s -> `String s) vote_id);
+                            ("cast", Option.fold ~none:`Null ~some:(fun j -> j) cast_json);
+                          ])
+              in
+              let* () = check_json_error vote_result_json in
+              (* Run task pipeline *)
+              let run_json =
+                match get_string_opt args "run_task_id" with
+                | None -> None
+                | Some run_task_id ->
+                    let run_agent = actor in
+                    let init_json =
+                      match
+                        Run_eio.init ctx.config ~task_id:run_task_id
+                          ~agent_name:(Some run_agent)
+                      with
+                      | Ok run -> `Assoc [ ("status", `String "initialized"); ("run", Run_eio.run_record_to_json run) ]
+                      | Error e -> `Assoc [ ("status", `String "init_failed"); ("error", `String e) ]
+                    in
+                    let note_json =
+                      match get_string_opt args "run_note" with
+                      | None -> `Null
+                      | Some note -> (
+                          match Run_eio.append_log ctx.config ~task_id:run_task_id ~note with
+                          | Ok entry -> `Assoc [ ("status", `String "ok"); ("entry", Run_eio.log_entry_to_json entry) ]
+                          | Error e -> `Assoc [ ("status", `String "error"); ("message", `String e) ])
+                    in
+                    let deliverable_json =
+                      match get_string_opt args "run_deliverable" with
+                      | None -> `Null
+                      | Some content -> (
+                          match
+                            Run_eio.set_deliverable ctx.config
+                              ~task_id:run_task_id ~content
+                          with
+                          | Ok run ->
+                              Team_session_store.append_event ctx.config
+                                session_id
+                                ~event_type:"team_run_deliverable"
                                 ~detail:
                                   (`Assoc
                                     [
                                       ("actor", `String actor);
-                                      ("topic", `String vote_topic);
-                                      ("required_votes", `Int required_votes);
-                                      ("options", `List (List.map (fun o -> `String o) vote_options));
-                                      ("vote_id", Option.fold ~none:`Null ~some:(fun s -> `String s) vote_id);
-                                      ("result", `String vote_create_msg);
+                                      ("run_task_id", `String run_task_id);
+                                      ("deliverable_preview", `String (deps.truncate_for_event content));
                                       ("ts_iso", `String (Types.now_iso ()));
                                     ]);
-                              let cast_json =
-                                match (vote_id, get_string_opt args "vote_choice") with
-                                | Some vid, Some choice ->
-                                    let cast_msg =
-                                      Room.vote_cast ctx.config ~agent_name:actor
-                                        ~vote_id:vid ~choice
-                                    in
-                                    Team_session_store.append_event ctx.config session_id
-                                      ~event_type:"team_vote_cast"
-                                      ~detail:
-                                        (`Assoc
-                                          [
-                                            ("actor", `String actor);
-                                            ("vote_id", `String vid);
-                                            ("choice", `String choice);
-                                            ("result", `String cast_msg);
-                                            ("ts_iso", `String (Types.now_iso ()));
-                                          ]);
-                                    Some (`Assoc [ ("vote_id", `String vid); ("choice", `String choice); ("result", `String cast_msg) ])
-                                | _ -> None
-                              in
-                              Some
-                                (`Assoc
-                                  [
-                                    ("created", `String vote_create_msg);
-                                    ("vote_id", Option.fold ~none:`Null ~some:(fun s -> `String s) vote_id);
-                                    ("cast", Option.fold ~none:`Null ~some:(fun j -> j) cast_json);
-                                  ])
+                              `Assoc [ ("status", `String "ok"); ("run", Run_eio.run_record_to_json run) ]
+                          | Error e ->
+                              `Assoc [ ("status", `String "error"); ("message", `String e) ])
+                    in
+                    let task_link_json =
+                      let operation_id =
+                        Team_session_store.operation_id_for_session
+                          ctx.config session_id
                       in
-                      let vote_error =
-                        match vote_result_json with
-                        | Some (`Assoc fields) -> (
-                            match List.assoc_opt "error" fields with
-                            | Some (`String e) when String.trim e <> "" -> Some e
-                            | _ -> None)
-                        | _ -> None
-                      in
-                      match vote_error with
-                      | Some e -> (false, deps.json_error e)
-                      | None ->
-                          (* Run task pipeline *)
-                          let run_json =
-                            match get_string_opt args "run_task_id" with
-                            | None -> None
-                            | Some run_task_id ->
-                                let run_agent = actor in
-                                let init_json =
-                                  match
-                                    Run_eio.init ctx.config ~task_id:run_task_id
-                                      ~agent_name:(Some run_agent)
-                                  with
-                                  | Ok run -> `Assoc [ ("status", `String "initialized"); ("run", Run_eio.run_record_to_json run) ]
-                                  | Error e -> `Assoc [ ("status", `String "init_failed"); ("error", `String e) ]
-                                in
-                                let note_json =
-                                  match get_string_opt args "run_note" with
-                                  | None -> `Null
-                                  | Some note -> (
-                                      match Run_eio.append_log ctx.config ~task_id:run_task_id ~note with
-                                      | Ok entry -> `Assoc [ ("status", `String "ok"); ("entry", Run_eio.log_entry_to_json entry) ]
-                                      | Error e -> `Assoc [ ("status", `String "error"); ("message", `String e) ])
-                                in
-                                let deliverable_json =
-                                  match get_string_opt args "run_deliverable" with
-                                  | None -> `Null
-                                  | Some content -> (
-                                      match
-                                        Run_eio.set_deliverable ctx.config
-                                          ~task_id:run_task_id ~content
-                                      with
-                                      | Ok run ->
-                                          Team_session_store.append_event ctx.config
-                                            session_id
-                                            ~event_type:"team_run_deliverable"
-                                            ~detail:
-                                              (`Assoc
-                                                [
-                                                  ("actor", `String actor);
-                                                  ("run_task_id", `String run_task_id);
-                                                  ("deliverable_preview", `String (deps.truncate_for_event content));
-                                                  ("ts_iso", `String (Types.now_iso ()));
-                                                ]);
-                                          `Assoc [ ("status", `String "ok"); ("run", Run_eio.run_record_to_json run) ]
-                                      | Error e ->
-                                          `Assoc [ ("status", `String "error"); ("message", `String e) ])
-                                in
-                                let task_link_json =
-                                  let operation_id =
-                                    Team_session_store.operation_id_for_session
-                                      ctx.config session_id
-                                  in
-                                  match
-                                    Room.link_task_execution_artifacts_r
-                                      ctx.config ~task_id:run_task_id
-                                      ~session_id ?operation_id ()
-                                  with
-                                  | Ok message ->
-                                      `Assoc
-                                        [
-                                          ("status", `String "ok");
-                                          ("message", `String message);
-                                        ]
-                                  | Error error ->
-                                      `Assoc
-                                        [
-                                          ("status", `String "error");
-                                          ( "message",
-                                            `String
-                                              (Types.masc_error_to_string error)
-                                          );
-                                        ]
-                                in
-                                Some
-                                  (`Assoc
-                                    [
-                                      ("task_id", `String run_task_id);
-                                      ("init", init_json);
-                                      ("note", note_json);
-                                      ("deliverable", deliverable_json);
-                                      ("task_link", task_link_json);
-                                    ])
-                          in
-                          let refreshed_session =
-                            Team_session_store.load_session ctx.config
-                              session_id
-                          in
-                          let response =
-                            `Assoc
-                              [
-                                ("session_id", `String session_id);
-                                ("turn", Option.value ~default:`Null turn_json);
-                                ("spawn", Option.fold ~none:`Null ~some:(fun j -> j) spawn_result_json);
-                                ("delegate", Option.fold ~none:`Null ~some:(fun j -> j) delegate_result_json);
-                                ("vote", Option.fold ~none:`Null ~some:(fun j -> j) vote_result_json);
-                                ("run", Option.fold ~none:`Null ~some:(fun j -> j) run_json);
-                                ( "delivery_contract",
-                                  Option.fold ~none:`Null
-                                    ~some:Team_session_types
-                                      .delivery_contract_to_yojson
-                                    (Option.bind refreshed_session
-                                       (fun session ->
-                                         session.Team_session_types
-                                         .delivery_contract)) );
-                                ( "latest_delivery_verdict",
-                                  Option.fold ~none:`Null
-                                    ~some:Team_session_types
-                                      .delivery_verdict_to_yojson
-                                    (Option.bind refreshed_session
-                                       (fun session ->
-                                         session.Team_session_types
-                                         .latest_delivery_verdict)) );
-                              ]
-                          in
-                          (true, deps.json_ok [ ("result", response) ]))
+                      match
+                        Room.link_task_execution_artifacts_r
+                          ctx.config ~task_id:run_task_id
+                          ~session_id ?operation_id ()
+                      with
+                      | Ok message ->
+                          `Assoc
+                            [
+                              ("status", `String "ok");
+                              ("message", `String message);
+                            ]
+                      | Error error ->
+                          `Assoc
+                            [
+                              ("status", `String "error");
+                              ( "message",
+                                `String
+                                  (Types.masc_error_to_string error)
+                              );
+                            ]
+                    in
+                    Some
+                      (`Assoc
+                        [
+                          ("task_id", `String run_task_id);
+                          ("init", init_json);
+                          ("note", note_json);
+                          ("deliverable", deliverable_json);
+                          ("task_link", task_link_json);
+                        ])
+              in
+              let refreshed_session =
+                Team_session_store.load_session ctx.config
+                  session_id
+              in
+              let response =
+                `Assoc
+                  [
+                    ("session_id", `String session_id);
+                    ("turn", Option.value ~default:`Null turn_json);
+                    ("spawn", Option.fold ~none:`Null ~some:(fun j -> j) spawn_result_json);
+                    ("delegate", Option.fold ~none:`Null ~some:(fun j -> j) delegate_result_json);
+                    ("vote", Option.fold ~none:`Null ~some:(fun j -> j) vote_result_json);
+                    ("run", Option.fold ~none:`Null ~some:(fun j -> j) run_json);
+                    ( "delivery_contract",
+                      Option.fold ~none:`Null
+                        ~some:Team_session_types
+                          .delivery_contract_to_yojson
+                        (Option.bind refreshed_session
+                           (fun session ->
+                             session.Team_session_types
+                             .delivery_contract)) );
+                    ( "latest_delivery_verdict",
+                      Option.fold ~none:`Null
+                        ~some:Team_session_types
+                          .delivery_verdict_to_yojson
+                        (Option.bind refreshed_session
+                           (fun session ->
+                             session.Team_session_types
+                             .latest_delivery_verdict)) );
+                  ]
+              in
+              Ok (true, deps.json_ok [ ("result", response) ])
+              with
+              | Ok v -> v
+              | Error e -> (false, deps.json_error e)))

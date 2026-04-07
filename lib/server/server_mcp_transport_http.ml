@@ -174,22 +174,29 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
     | Operator_remote ->
         deps.verify_operator_mcp_auth ~base_path request
   in
-  match validate_mcp_session_profile ~profile session_id with
-  | Error msg ->
-      let body =
-        Printf.sprintf
-          {|{"jsonrpc":"2.0","error":{"code":-32600,"message":%s},"id":null}|}
-          (Yojson.Safe.to_string (`String msg))
-      in
-      let headers =
-        Httpun.Headers.of_list
-          (("content-length", string_of_int (String.length body))
-          :: json_headers ~deps session_id protocol_version origin)
-      in
-      let response = Httpun.Response.create ~headers `Conflict in
-      Httpun.Reqd.respond_with_string reqd response body
-  | Ok () ->
+  let open Result_syntax in
+  ignore (
+    let* () =
+      match validate_mcp_session_profile ~profile session_id with
+      | Ok () -> Ok ()
+      | Error msg ->
+          let body =
+            Printf.sprintf
+              {|{"jsonrpc":"2.0","error":{"code":-32600,"message":%s},"id":null}|}
+              (Yojson.Safe.to_string (`String msg))
+          in
+          let headers =
+            Httpun.Headers.of_list
+              (("content-length", string_of_int (String.length body))
+              :: json_headers ~deps session_id protocol_version origin)
+          in
+          let response = Httpun.Response.create ~headers `Conflict in
+          Httpun.Reqd.respond_with_string reqd response body;
+          Error ()
+    in
+    let* () =
       match validate_protocol_version_continuity ~session_id request with
+      | Ok () -> Ok ()
       | Error msg ->
           let body =
             Printf.sprintf
@@ -202,74 +209,88 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
               :: json_headers ~deps session_id protocol_version origin)
           in
           let response = Httpun.Response.create ~headers `Bad_request in
-          Httpun.Reqd.respond_with_string reqd response body
-      | Ok () ->
-          remember_mcp_profile session_id profile;
-          match auth_result with
-          | Error msg ->
-              respond_mcp_auth_error ~deps request reqd ~session_id
-                ~protocol_version msg
-          | Ok () ->
-              Http.Request.read_body_async reqd (fun body_str ->
-                  match
-                    validate_session_requirement ~session_was_provided body_str
-                  with
-                  | Error msg ->
-                      let body =
-                        Printf.sprintf
-                          {|{"jsonrpc":"2.0","error":{"code":-32600,"message":%s},"id":null}|}
-                          (Yojson.Safe.to_string (`String msg))
-                      in
-                      let headers =
-                        Httpun.Headers.of_list
-                          (("content-length", string_of_int (String.length body))
-                          :: json_headers ~deps session_id protocol_version
-                               origin)
-                      in
-                      Httpun.Reqd.respond_with_string reqd
-                        (Httpun.Response.create ~headers `Bad_request)
-                        body
-                  | Ok () ->
-                  let accept_mode =
-                    Server_mcp_transport_http_headers.classify_mcp_accept_for_body
-                      request body_str
-                  in
-                  match accept_mode with
-                  | Http_negotiation.Rejected ->
-                      let body =
-                        Yojson.Safe.to_string
-                          (`Assoc
-                            [
-                              ("jsonrpc", `String "2.0");
-                              ( "error",
-                                `Assoc
-                                  [
-                                    ("code", `Int (-32600));
-                                    ( "message",
-                                      `String
-                                        "Invalid Accept header: must include application/json and text/event-stream. Set MASC_ALLOW_LEGACY_ACCEPT=1 for temporary compatibility." );
-                                  ] );
-                            ])
-                      in
-                      let headers =
-                        Httpun.Headers.of_list
-                          (("content-length", string_of_int (String.length body))
-                          :: json_headers ~deps session_id protocol_version origin)
-                      in
-                      let response = Httpun.Response.create ~headers `Bad_request in
-                      Httpun.Reqd.respond_with_string reqd response body
-                  | accept_mode ->
-                      let accept_warn_headers =
-                        legacy_accept_warning_headers accept_mode
-                      in
-                      match request_runtime_result deps with
-                      | Error msg ->
-                          respond_mcp_internal_error ~deps request reqd
-                            ~session_id ~protocol_version msg
-                      | Ok runtime ->
-                          let sw = runtime.sw in
-                          let clock = runtime.clock in
-                          Eio.Fiber.fork ~sw (fun () ->
+          Httpun.Reqd.respond_with_string reqd response body;
+          Error ()
+    in
+    remember_mcp_profile session_id profile;
+    let* () =
+      match auth_result with
+      | Ok () -> Ok ()
+      | Error msg ->
+          respond_mcp_auth_error ~deps request reqd ~session_id
+            ~protocol_version msg;
+          Error ()
+    in
+    Ok (Http.Request.read_body_async reqd (fun body_str ->
+      ignore (
+        let* () =
+        match
+          validate_session_requirement ~session_was_provided body_str
+        with
+        | Ok () -> Ok ()
+        | Error msg ->
+            let body =
+              Printf.sprintf
+                {|{"jsonrpc":"2.0","error":{"code":-32600,"message":%s},"id":null}|}
+                (Yojson.Safe.to_string (`String msg))
+            in
+            let headers =
+              Httpun.Headers.of_list
+                (("content-length", string_of_int (String.length body))
+                :: json_headers ~deps session_id protocol_version
+                     origin)
+            in
+            Httpun.Reqd.respond_with_string reqd
+              (Httpun.Response.create ~headers `Bad_request)
+              body;
+            Error ()
+      in
+      let accept_mode =
+        Server_mcp_transport_http_headers.classify_mcp_accept_for_body
+          request body_str
+      in
+      let* accept_mode =
+        match accept_mode with
+        | Http_negotiation.Rejected ->
+            let body =
+              Yojson.Safe.to_string
+                (`Assoc
+                  [
+                    ("jsonrpc", `String "2.0");
+                    ( "error",
+                      `Assoc
+                        [
+                          ("code", `Int (-32600));
+                          ( "message",
+                            `String
+                              "Invalid Accept header: must include application/json and text/event-stream. Set MASC_ALLOW_LEGACY_ACCEPT=1 for temporary compatibility." );
+                        ] );
+                  ])
+            in
+            let headers =
+              Httpun.Headers.of_list
+                (("content-length", string_of_int (String.length body))
+                :: json_headers ~deps session_id protocol_version origin)
+            in
+            let response = Httpun.Response.create ~headers `Bad_request in
+            Httpun.Reqd.respond_with_string reqd response body;
+            Error ()
+        | _ -> Ok accept_mode
+      in
+      let accept_warn_headers =
+        legacy_accept_warning_headers accept_mode
+      in
+      let* runtime =
+        match request_runtime_result deps with
+        | Ok r -> Ok r
+        | Error msg ->
+            respond_mcp_internal_error ~deps request reqd
+              ~session_id ~protocol_version msg;
+            Error ()
+      in
+      let sw = runtime.sw in
+      let clock = runtime.clock in
+      Ok (Eio.Fiber.fork ~sw (fun () ->
                             let response_protocol_version =
                               match protocol_version_from_body body_str with
                               | Some v ->
@@ -426,7 +447,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                                     respond_mcp_internal_error ~deps request reqd
                                       ~session_id ~protocol_version
                                       ("Internal error: "
-                                     ^ Printexc.to_string exn))))
+                                     ^ Printexc.to_string exn))))))))
 
 let handle_get_mcp ~deps ?legacy_messages_endpoint ?(profile = Full)
     ?(sse_kind = Sse.Coordinator) request reqd =

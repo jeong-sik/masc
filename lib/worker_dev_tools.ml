@@ -214,7 +214,8 @@ let validate_command_with_allowlist ~allowed_commands cmd =
     | Some name ->
       Error
         (Printf.sprintf
-           "Command blocked: %s is not in the approved dev command allowlist"
+           "Command blocked: '%s' is not allowed. Allowed: dune, git, rg, ls, cat, make, node, npm, etc. \
+            For file operations use keeper_fs_read or keeper_fs_edit."
            name)
 
 let validate_command cmd =
@@ -246,7 +247,7 @@ let validate_command_coding cmd =
             | Some name ->
               Error
                 (Printf.sprintf
-                   "Command blocked: %s is not in the approved dev command allowlist"
+                   "Command blocked: '%s' is not allowed. Allowed: dune, git, rg, ls, cat, make, node, npm, etc."
                    name))
       in
       validate_segments segments

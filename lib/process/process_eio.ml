@@ -73,6 +73,10 @@ let output_for_status ~(status : Unix.process_status) ~(stdout : string)
     | out, "" -> out
     | out, err -> out ^ "\n" ^ err
 
+(** Create a private stderr capture file for Unix fallback status helpers.
+    Uses [mkstemp] so the file is created atomically with private permissions,
+    then marks the descriptor close-on-exec to avoid descriptor leaks into
+    unrelated child processes. *)
 let create_stderr_tempfile () =
   let template =
     Filename.concat
@@ -91,8 +95,7 @@ let read_stderr_capture path =
   try In_channel.with_open_bin path In_channel.input_all with
   | exn ->
       Printf.sprintf
-        "(stderr capture error) failed while reading %s: %s. Check temp-file permissions or available temp storage."
-        path
+        "(stderr capture error) failed while reading captured stderr: %s. Check temp-file permissions or available temp storage."
         (Printexc.to_string exn)
 
 let captured_stderr_or_empty path_opt =
@@ -166,6 +169,8 @@ let with_unix_capture ?env ?stdin_content ?(capture_stderr = false)
        stdin_r_ref := None;
        Option.iter close_quietly !stdout_w_ref;
        stdout_w_ref := None;
+       (* The child inherited the descriptor during spawn; the parent no longer
+          needs its copy once the process exists. *)
        Option.iter close_quietly !stderr_fd_ref;
        stderr_fd_ref := None;
        (match (stdin_content, !stdin_w_ref) with

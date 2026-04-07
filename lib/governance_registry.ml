@@ -406,6 +406,59 @@ let surfaces =
         "relay.cost_long_running"; "relay.cost_exploration"; "relay.cost_simple";
       ];
     };
+    {
+      id = "keeper_turn";
+      description = "Keeper LLM turn parameters: temperature, tokens, tools, slots";
+      risk = "medium";
+      param_keys = [
+        "keeper.turn.temperature";
+        "keeper.turn.max_output_tokens";
+        "keeper.turn.max_tools_per_turn";
+        "keeper.turn.board_event_limit";
+        "keeper.turn.tool_cost_max_usd";
+        "keeper.turn.llm_rerank";
+        "keeper.turn.llama_slots";
+        "keeper.turn.tool_search_top_k";
+        "keeper.turn.batch_limit";
+      ];
+    };
+    {
+      id = "keeper_compaction";
+      description = "Keeper context compaction thresholds and cooldown";
+      risk = "medium";
+      param_keys = [
+        "keeper.compaction.ratio";
+        "keeper.compaction.max_messages";
+        "keeper.compaction.max_tokens";
+        "keeper.compaction.cooldown_sec";
+      ];
+    };
+    {
+      id = "keeper_proactive";
+      description = "Keeper proactive turn scheduling and bootstrap timing";
+      risk = "low";
+      param_keys = [
+        "keeper.proactive.warmup_sec";
+        "keeper.proactive.stagger_step_sec";
+        "keeper.proactive.min_cooldown_sec";
+        "keeper.proactive.task_cooldown_divisor";
+        "keeper.proactive.task_min_cooldown_sec";
+      ];
+    };
+    {
+      id = "keeper_rules";
+      description = "Keeper rule engine thresholds (reflect, plan, guardrail)";
+      risk = "low";
+      param_keys = [
+        "keeper.rule.reflect_repetition";
+        "keeper.rule.plan_goal_alignment_max";
+        "keeper.rule.plan_response_alignment_max";
+        "keeper.rule.guardrail_repetition";
+        "keeper.rule.guardrail_goal_alignment_max";
+        "keeper.rule.guardrail_response_alignment_max";
+        "keeper.rule.guardrail_context_min";
+      ];
+    };
   ]
 
 (* ── initialization ─────────────────────────────────────────── *)
@@ -413,7 +466,8 @@ let surfaces =
 (** Force module initialization to guarantee all params are registered
     before [Runtime_params.restore]. Call from server bootstrap. *)
 let ensure_init () =
-  ignore (Runtime_params.get message_max_count)
+  ignore (Runtime_params.get message_max_count);
+  Keeper_config.ensure_runtime_params_init ()
 
 let surfaces_json () =
   `List

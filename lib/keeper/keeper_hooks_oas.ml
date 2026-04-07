@@ -229,6 +229,7 @@ let make_hooks
     ?(on_tool_executed : string -> Yojson.Safe.t -> string -> unit =
         fun _ _ _ -> ())
     ?(trajectory_acc : Trajectory.accumulator option)
+    ?(boring_consecutive_turns : int ref = ref 0)
     ()
   : Agent_sdk.Hooks.hooks =
   let sse_turn_complete = "keeper_turn_complete" in
@@ -236,6 +237,13 @@ let make_hooks
     [ "keeper_board_post"; "keeper_board_comment"; "keeper_board_vote" ]
   in
   let tool_start_time = ref 0.0 in
+  (* Boring-tool gate: track whether current turn has any productive tool call.
+     A "boring" tool is one that reads status without side effects
+     (masc_status, masc_heartbeat, keeper_tasks_list, etc.).
+     Alternating boring tools bypasses OAS's exact-fingerprint idle detection.
+     This gate catches the broader pattern: consecutive turns with ONLY
+     boring tools, regardless of which specific boring tool was called. *)
+  let turn_has_productive_tool = ref false in
   { Agent_sdk.Hooks.empty with
 
     after_turn = Some (fun event ->
@@ -298,6 +306,18 @@ let make_hooks
                  ("ts_unix", `Float (Unix.gettimeofday ()));
                ])
          with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
+        (* Boring-tool gate: update consecutive counter at end of turn.
+           If no productive tool was called this turn, increment the
+           boring streak; otherwise reset to 0. *)
+        if !turn_has_productive_tool then
+          boring_consecutive_turns := 0
+        else begin
+          incr boring_consecutive_turns;
+          Log.Keeper.info
+            "keeper:%s boring_consecutive=%d (turn=%d had no productive tool)"
+            meta.name !boring_consecutive_turns turn
+        end;
+        turn_has_productive_tool := false;
         Agent_sdk.Hooks.Continue
       | _ -> Agent_sdk.Hooks.Continue);
 
@@ -332,6 +352,9 @@ let make_hooks
              ~success:(outcome = "ok") ~duration_ms
              ~model:(!meta_ref).runtime.usage.last_model_used ()
          with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
+        (* Boring-tool gate: mark turn as productive if non-boring tool used *)
+        if not (Keeper_tool_registry.is_boring_tool tool_name) then
+          turn_has_productive_tool := true;
         (try on_tool_executed tool_name input output_text
          with Eio.Cancel.Cancelled _ as e -> raise e
             | exn ->

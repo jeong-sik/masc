@@ -785,9 +785,13 @@ let run_turn
     | Some r -> r
     | None -> ref Agent_sdk.Tool_op.Keep_all
   in
+  (* Boring-tool gate: shared counter between after_turn (writer) and
+     before_turn_params (reader). Tracks consecutive turns where only
+     boring tools (status/heartbeat/tasks_list) were called. *)
+  let boring_consecutive_turns = ref 0 in
   let base_hooks = Keeper_hooks_oas.make_hooks
     ~config ~meta_ref ~session ~ctx_snapshot ~generation ?max_cost_usd
-    ?trajectory_acc
+    ?trajectory_acc ~boring_consecutive_turns
     () in
   (* BM25 Tool_selector removed: discovery mode uses core + keeper_tool_search.
      The search_index (full universe BM25) is still used by keeper_tool_search
@@ -929,6 +933,58 @@ let run_turn
              | None -> Some warning
              | Some existing -> Some (existing ^ "\n\n" ^ warning))
           else ctx
+        in
+        (* Boring-tool gate: graduated response to consecutive turns
+           with only non-productive tools (status/heartbeat/tasks_list).
+           This catches the polling loop that bypasses OAS's exact-fingerprint
+           idle detection when keepers alternate boring tools.
+           Level 1 (>=2): warn.  Level 2 (>=3): final warning.
+           Level 3 (>=4): strip boring tools from allow list. *)
+        let boring_streak = !boring_consecutive_turns in
+        let ctx =
+          if boring_streak >= 4 then
+            let warning =
+              Printf.sprintf
+                "[POLLING BLOCKED] %d consecutive turns of pure \
+                 status/heartbeat polling. Boring tools removed from \
+                 this turn. Use keeper_task_claim, keeper_fs_read, \
+                 keeper_board_post, keeper_shell_readonly — or \
+                 keeper_stay_silent if nothing to do."
+                boring_streak
+            in
+            (match ctx with
+             | None -> Some warning
+             | Some existing -> Some (existing ^ "\n\n" ^ warning))
+          else if boring_streak >= 3 then
+            let warning =
+              Printf.sprintf
+                "[FINAL POLLING WARNING] %d turns of pure polling. \
+                 Next turn without a productive tool will REMOVE all \
+                 status/heartbeat tools. Call keeper_task_claim, \
+                 keeper_fs_read, or keeper_stay_silent NOW."
+                boring_streak
+            in
+            (match ctx with
+             | None -> Some warning
+             | Some existing -> Some (existing ^ "\n\n" ^ warning))
+          else if boring_streak >= 2 then
+            let warning =
+              "[POLLING DETECTED] You spent 2 turns only calling \
+               status/heartbeat tools. Do productive work: \
+               keeper_task_claim, keeper_fs_read, keeper_board_post, \
+               or keeper_stay_silent."
+            in
+            (match ctx with
+             | None -> Some warning
+             | Some existing -> Some (existing ^ "\n\n" ^ warning))
+          else ctx
+        in
+        let all_allowed =
+          if boring_streak >= 4 then
+            List.filter
+              (fun name -> not (Keeper_tool_registry.is_boring_tool name))
+              all_allowed
+          else all_allowed
         in
         let safe_last_turn_tools =
           Keeper_tool_policy.last_turn_safe_tool_names ()

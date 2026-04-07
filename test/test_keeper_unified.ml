@@ -2089,4 +2089,34 @@ let () =
           test_case "is_context_overflow only matches ContextOverflow" `Quick
             test_is_context_overflow_only_for_overflow_errors;
         ] );
+      ( "boring_tool_gate",
+        [
+          test_case "masc_status is boring" `Quick (fun () ->
+            check bool "masc_status"
+              true (Masc_mcp.Keeper_tool_registry.is_boring_tool "masc_status"));
+          test_case "masc_heartbeat is boring" `Quick (fun () ->
+            check bool "masc_heartbeat"
+              true (Masc_mcp.Keeper_tool_registry.is_boring_tool "masc_heartbeat"));
+          test_case "keeper_tasks_list is boring" `Quick (fun () ->
+            check bool "keeper_tasks_list"
+              true (Masc_mcp.Keeper_tool_registry.is_boring_tool "keeper_tasks_list"));
+          test_case "keeper_context_status is boring" `Quick (fun () ->
+            check bool "keeper_context_status"
+              true (Masc_mcp.Keeper_tool_registry.is_boring_tool "keeper_context_status"));
+          test_case "keeper_fs_read is NOT boring" `Quick (fun () ->
+            check bool "keeper_fs_read"
+              false (Masc_mcp.Keeper_tool_registry.is_boring_tool "keeper_fs_read"));
+          test_case "keeper_board_post is NOT boring" `Quick (fun () ->
+            check bool "keeper_board_post"
+              false (Masc_mcp.Keeper_tool_registry.is_boring_tool "keeper_board_post"));
+          test_case "keeper_task_claim is NOT boring" `Quick (fun () ->
+            check bool "keeper_task_claim"
+              false (Masc_mcp.Keeper_tool_registry.is_boring_tool "keeper_task_claim"));
+          test_case "keeper_stay_silent is NOT boring" `Quick (fun () ->
+            check bool "keeper_stay_silent"
+              false (Masc_mcp.Keeper_tool_registry.is_boring_tool "keeper_stay_silent"));
+          test_case "keeper_bash is NOT boring" `Quick (fun () ->
+            check bool "keeper_bash"
+              false (Masc_mcp.Keeper_tool_registry.is_boring_tool "keeper_bash"));
+        ] );
     ]

@@ -43,7 +43,6 @@ import { PipelineStageBar } from './keeper-pipeline-stage'
 import { AgentJournalStream } from './agent-detail-journal'
 import { DialogOverlay } from './common/dialog'
 import { SessionTraceView } from './session-trace/session-trace-view'
-import { SessionProgressHeader } from './session-progress-header'
 import { KeeperToolTelemetry } from './keeper-tool-telemetry'
 import { statusLabel } from '../lib/status-label'
 import { KeeperToolCallInspector } from './keeper-tool-call-inspector'
@@ -441,7 +440,12 @@ export function KeeperDetailOverlay() {
                   ` : null
                 })()}
               </div>
-              ${keeper.koreanName ? html`<span class="text-xs text-[var(--text-muted)]">${keeper.koreanName}</span>` : null}
+              ${keeper.koreanName || keeper.created_at ? html`
+                <div class="flex items-center gap-2 text-xs text-[var(--text-muted)]">
+                  ${keeper.koreanName ? html`<span>${keeper.koreanName}</span>` : null}
+                  ${keeper.created_at ? html`<span class="font-mono tabular-nums opacity-60"><${TimeAgo} timestamp=${keeper.created_at} /></span>` : null}
+                </div>
+              ` : null}
             </div>
           </div>
           <div class="flex items-center gap-2">
@@ -466,14 +470,11 @@ export function KeeperDetailOverlay() {
         ${'' /* ── Pipeline stage indicator ── */}
         <${PipelineStageBar} stage=${keeper.pipeline_stage} />
 
-        ${'' /* ── Session progress header (Copilot-style) ── */}
-        <${SessionProgressHeader} keeper=${keeper} summary=${null} />
-
         ${'' /* ── KPIs ── */}
         <${KpiGrid} keeper=${keeper} />
 
-        ${'' /* ── Context chart ── */}
-        <${ContextChart} keeper=${keeper} />
+        ${'' /* ── Context chart (sparkline only — single-point is covered by KpiGrid) ── */}
+        ${(keeper.metrics_series ?? []).length >= 2 ? html`<${ContextChart} keeper=${keeper} />` : null}
 
         ${'' /* ── Latency / Cost / Model charts ── */}
         <${MetricsCharts} keeper=${keeper} />

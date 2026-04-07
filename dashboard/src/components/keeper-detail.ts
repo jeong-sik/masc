@@ -94,6 +94,7 @@ function statusColor(status: string): { bg: string; text: string; dot: string } 
   switch (status.trim().toLowerCase()) {
     case 'active':
     case 'running':
+    case 'busy':
       return { bg: 'bg-[var(--ok-10)]', text: 'text-[var(--ok)]', dot: 'bg-[var(--ok)]' }
     case 'working':
       return { bg: 'bg-[var(--ok-10)]', text: 'text-[#7ae09a]', dot: 'bg-[#7ae09a]' }

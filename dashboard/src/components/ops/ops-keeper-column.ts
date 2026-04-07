@@ -36,6 +36,26 @@ function openOpsKeeperDetail(opsKeeper: OperatorKeeperSnapshot): void {
   openKeeperDetail(keeper)
 }
 
+function effectiveKeeperStatus(k: OperatorKeeperSnapshot): string {
+  const raw = (k.status ?? '').trim().toLowerCase()
+  if (raw === 'active' || raw === 'busy') return 'active'
+  if (raw === 'listening' || raw === 'idle') return 'idle'
+  if (raw === 'paused') return 'paused'
+  if (raw === 'offline' || raw === 'inactive') {
+    return (k.generation ?? 0) === 0 && (k.turn_count ?? 0) === 0 ? 'unbooted' : 'stopped'
+  }
+  return 'other'
+}
+
+function keeperDotColor(effective: string): string {
+  if (effective === 'active') return 'bg-[var(--ok)]'
+  if (effective === 'idle') return 'bg-[var(--accent)]'
+  if (effective === 'paused') return 'bg-[var(--warn)]'
+  if (effective === 'stopped') return 'bg-[#94a3b8]'
+  if (effective === 'unbooted') return 'bg-[#475569]'
+  return 'bg-[var(--text-muted)]'
+}
+
 export function OpsKeeperColumn() {
   const snapshot = operatorSnapshot.value
   const keepers = snapshot?.keepers ?? []
@@ -44,13 +64,7 @@ export function OpsKeeperColumn() {
   const busy = operatorActionBusy.value
 
   const statusCounts = keepers.reduce((acc: Record<string, number>, k) => {
-    const raw = (k.status ?? '').trim().toLowerCase()
-    const s = raw === 'active' || raw === 'busy' ? 'active'
-      : raw === 'listening' || raw === 'idle' ? 'idle'
-      : raw === 'paused' ? 'paused'
-      : (raw === 'offline' || raw === 'inactive')
-        ? ((k.generation ?? 0) === 0 && (k.turn_count ?? 0) === 0 ? 'unbooted' : 'stopped')
-      : 'other'
+    const s = effectiveKeeperStatus(k)
     acc[s] = (acc[s] ?? 0) + 1
     return acc
   }, {})
@@ -85,8 +99,8 @@ export function OpsKeeperColumn() {
                 <strong class="text-[13px] font-semibold">${keeper.name}</strong>
                 <div class="flex items-center gap-2 ml-auto">
                   <span class="inline-flex items-center gap-1.5 text-[11px]">
-                    <span class="w-2 h-2 rounded-full ${keeper.status === 'active' || keeper.status === 'busy' ? 'bg-[var(--ok)]' : keeper.status === 'idle' || keeper.status === 'listening' ? 'bg-[var(--accent)]' : keeper.status === 'paused' ? 'bg-[var(--warn)]' : 'bg-[var(--text-muted)]'}"></span>
-                    ${displayStatus(keeper.status)}
+                    <span class="w-2 h-2 rounded-full ${keeperDotColor(effectiveKeeperStatus(keeper))}"></span>
+                    ${displayStatus(effectiveKeeperStatus(keeper))}
                   </span>
                   <button type="button"
                     class="text-[11px] py-0.5 px-2 rounded-md border border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--accent)] hover:bg-[var(--accent-20)] cursor-pointer transition-colors"
@@ -149,8 +163,8 @@ export function OpsKeeperColumn() {
             <div class="flex justify-between items-center gap-3 max-[880px]:flex-col max-[880px]:items-start">
               <strong>${selectedKeeper.name}</strong>
               <span class="inline-flex items-center gap-1.5 text-[11px]">
-                <span class="w-2 h-2 rounded-full ${selectedKeeper.status === 'active' || selectedKeeper.status === 'busy' ? 'bg-[var(--ok)]' : selectedKeeper.status === 'idle' || selectedKeeper.status === 'listening' ? 'bg-[var(--accent)]' : selectedKeeper.status === 'paused' ? 'bg-[var(--warn)]' : 'bg-[var(--text-muted)]'}"></span>
-                ${displayStatus(selectedKeeper.status)}
+                <span class="w-2 h-2 rounded-full ${keeperDotColor(effectiveKeeperStatus(selectedKeeper))}"></span>
+                ${displayStatus(effectiveKeeperStatus(selectedKeeper))}
               </span>
             </div>
             <div class="text-[12px] text-[var(--text-muted)] leading-[1.45]">

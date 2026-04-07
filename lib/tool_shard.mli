@@ -24,9 +24,6 @@ val shard_filesystem : shard
 val shard_shell : shard
 (** Structured read-only shell access. *)
 
-val shard_governance : shard
-(** Governance workflow: cases, briefs, petitions, status/feed. *)
-
 (** {1 Lookup} *)
 
 val get_shard : string -> shard option
@@ -36,7 +33,7 @@ val get_shard : string -> shard option
 
 val default_shard_names : string list
 (** Default shards for a new keeper: base, board, filesystem, shell,
-    library, taskboard, governance. *)
+    library, taskboard, coding, autoresearch. *)
 
 val tools_of_shards : string list -> Types.tool_schema list
 (** Combine tools from multiple shard names. *)
@@ -77,9 +74,6 @@ val base_tools : Types.tool_schema list
 
 val board_tools : Types.tool_schema list
 (** Board tools: board_post, board_list, board_comment, board_vote. *)
-
-val governance_tools : Types.tool_schema list
-(** Governance tools exposed to keepers by default. *)
 
 (** {1 MCP Interface} *)
 

@@ -125,12 +125,6 @@ let cleanup_board_artifacts_fn
   : (unit -> int) ref
   = ref (fun () -> 0)
 
-(** Governance stale case purge (retired, no-op stub).
-    Returns (test_cases_purged, artifact_cases_purged). *)
-let governance_purge_fn
-  : (string -> int * int) ref
-  = ref (fun _base_path -> (0, 0))
-
 (** Invalidate dashboard execution cache on task mutation (add, transition).
     Wired by server bootstrap to avoid circular dependency between
     Room sub-modules and server dashboard surfaces. *)

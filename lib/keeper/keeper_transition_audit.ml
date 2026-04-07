@@ -24,10 +24,6 @@ let to_json (r : transition_record) : Yojson.Safe.t =
     "wall_clock_at_decision", `Float r.wall_clock_at_decision;
   ]
 
-(* Phase 1 stub: Keeper_guard not yet wired as consumer.
-   Phase 4 will implement actual replay by calling Keeper_guard.evaluate. *)
-let replay_check _snapshot _expected_events = true
-
 (* ================================================================ *)
 (* In-memory ring buffer for recent transitions                     *)
 (* ================================================================ *)

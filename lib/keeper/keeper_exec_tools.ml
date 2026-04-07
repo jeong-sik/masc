@@ -259,6 +259,7 @@ let handle_keeper_board_tool
   | "keeper_board_stats" -> dispatch "masc_board_stats" args
   | "keeper_board_search" -> dispatch "masc_board_search" args
   | "keeper_board_delete" -> dispatch "masc_board_delete" args
+  | "keeper_board_cleanup" -> dispatch "masc_board_cleanup" args
   | other -> error_json ~fields:[ "tool", `String other ] "unknown_board_tool"
 ;;
 

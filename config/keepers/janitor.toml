@@ -43,5 +43,6 @@ execution_scope = "workspace"
 tool_preset = "social"
 tool_also_allow = [
   "keeper_board_delete",
+  "keeper_board_cleanup",
   "masc_cleanup_zombies",
 ]

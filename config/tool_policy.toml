@@ -73,7 +73,7 @@ tools = ["keeper_board_post", "keeper_board_comment", "keeper_context_status", "
 # Optional tools that require explicit opt-in via also_allow.
 # Excluded from all presets by default; a keeper must list them in also_allow.
 [groups.optional]
-tools = ["keeper_board_delete"]
+tools = ["keeper_board_delete", "keeper_board_cleanup"]
 
 # ── MASC Tool Groups ───────────────────────────────────────────────
 

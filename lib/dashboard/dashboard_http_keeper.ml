@@ -203,14 +203,16 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
 
           let models_resolved =
             `List (List.filter_map (fun label ->
-              match String.split_on_char ':' label with
-              | [provider; model_id] ->
+              match String.index_opt label ':' with
+              | Some i ->
+                  let provider = String.sub label 0 i in
+                  let model_id = String.sub label (i + 1) (String.length label - i - 1) in
                   Some (`Assoc [
                     ("provider", `String provider);
                     ("model_id", `String model_id);
                     ("max_context", `Int 0);
                   ])
-              | _ -> None
+              | None -> None
             ) cascade_models)
           in
 

@@ -201,7 +201,10 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
       ());
   fork_subsystem "session_cleanup" (fun () ->
     Session.start_mcp_session_cleanup_loop ~sw ~clock ());
-  (* Auto-boot keepers from keeper meta and start keepalive loops. *)
+  (* Auto-boot keepers from keeper meta and start keepalive loops.
+     Retries unbooted keepers up to [max_retries] times so transient
+     failures (model resolution, discovery timing) don't permanently
+     block keeper startup.  See #5717. *)
   fork_subsystem "keeper_autoboot" (fun () ->
     if not Env_config.KeeperBootstrap.enabled then
       Log.Keeper.info "autoboot: disabled via MASC_KEEPER_BOOTSTRAP_ENABLED=false"
@@ -237,55 +240,84 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
         "autoboot: %d keeper(s) to boot; concurrent keeper turns throttled to %d via MASC_KEEPER_AUTOBOOT_MAX"
         (List.length names) Keeper_keepalive.keeper_turn_throttle_limit;
       Log.Keeper.info "autoboot: keeper set [%s]" (String.concat ", " names);
-      let booted = ref 0 in
       let base_warmup = Keeper_config.keeper_bootstrap_proactive_warmup_sec () in
       let stagger_step = Keeper_config.keeper_bootstrap_stagger_step_sec () in
-    List.iteri (fun idx name ->
+      (* Attempt to boot a single keeper. Returns true if started. *)
+      let try_boot_one idx name =
         try
           Log.Keeper.info "autoboot: loading meta for %s" name;
           match Keeper_runtime.load_or_materialize_boot_meta keeper_boot_ctx name with
           | Error e ->
-            Log.Keeper.error "autoboot: failed to load meta for %s: %s" name e
+            Log.Keeper.error "autoboot: failed to load meta for %s: %s" name e;
+            false
           | Ok { meta = m; materialized } ->
-            let started_here =
-              if Keeper_registry.is_running ~base_path:config.base_path m.name then (
-                Log.Keeper.info
-                  "autoboot: %s already running%s"
-                  m.name
-                  (if materialized then " (materialized from TOML)" else "");
-                false
-              ) else begin
-                let warmup = base_warmup + (idx * stagger_step) in
-                Log.Keeper.info "autoboot: calling start_keepalive for %s (warmup=%ds)"
-                  name warmup;
-                let ctx : _ Keeper_types.context = {
-                  config;
-                  agent_name = m.agent_name;
-                  sw;
-                  clock;
-                  proc_mgr = Some proc_mgr;
-                  net = state.net;
-                } in
-                Keeper_keepalive.start_keepalive ~proactive_warmup_sec:warmup ctx m;
-                Keeper_registry.is_running ~base_path:config.base_path m.name
-              end
-            in
-            if started_here then begin
-              incr booted;
-              Log.Keeper.info "autoboot: started keepalive for %s" m.name
-            end else
+            if Keeper_registry.is_running ~base_path:config.base_path m.name then (
               Log.Keeper.info
-                "autoboot: keeper %s counted as already available%s"
+                "autoboot: %s already running%s"
                 m.name
-                (if materialized then " after TOML materialization" else "")
+                (if materialized then " (materialized from TOML)" else "");
+              true
+            ) else begin
+              let warmup = base_warmup + (idx * stagger_step) in
+              Log.Keeper.info "autoboot: calling start_keepalive for %s (warmup=%ds)"
+                name warmup;
+              let ctx : _ Keeper_types.context = {
+                config;
+                agent_name = m.agent_name;
+                sw;
+                clock;
+                proc_mgr = Some proc_mgr;
+                net = state.net;
+              } in
+              Keeper_keepalive.start_keepalive ~proactive_warmup_sec:warmup ctx m;
+              let running = Keeper_registry.is_running ~base_path:config.base_path m.name in
+              if running then
+                Log.Keeper.info "autoboot: started keepalive for %s" m.name
+              else
+                Log.Keeper.warn "autoboot: start_keepalive returned but %s not in registry" m.name;
+              running
+            end
         with
         | Eio.Cancel.Cancelled _ as e -> raise e
         | exn ->
           Log.Keeper.error "autoboot: exception for %s: %s" name
-            (Printexc.to_string exn)
-    ) names;
-    Log.Keeper.info "autoboot: %d/%d keepers started"
-      !booted (List.length names)
+            (Printexc.to_string exn);
+          false
+      in
+      (* Initial boot pass *)
+      let booted = List.filteri (fun idx name -> try_boot_one idx name) names in
+      let booted_count = List.length booted in
+      let total = List.length names in
+      Log.Keeper.info "autoboot: initial pass %d/%d keepers started" booted_count total;
+      (* Retry loop for keepers that failed initial boot *)
+      if booted_count < total then begin
+        let max_retries = 5 in
+        let retry_interval_s = 30.0 in
+        let rec retry_loop round =
+          if round > max_retries then
+            Log.Keeper.warn
+              "autoboot: gave up after %d retries; %d/%d keepers remain unbooted"
+              max_retries
+              (total - List.length (List.filter (fun name ->
+                Keeper_registry.is_running ~base_path:config.base_path name) names))
+              total
+          else begin
+            Eio.Time.sleep clock retry_interval_s;
+            let unbooted = List.filter (fun name ->
+              not (Keeper_registry.is_running ~base_path:config.base_path name)
+            ) names in
+            if unbooted = [] then
+              Log.Keeper.info "autoboot: all %d keepers running after %d retry round(s)" total round
+            else begin
+              Log.Keeper.info "autoboot: retry round %d/%d — %d unbooted: [%s]"
+                round max_retries (List.length unbooted) (String.concat ", " unbooted);
+              List.iteri (fun idx name -> ignore (try_boot_one idx name)) unbooted;
+              retry_loop (round + 1)
+            end
+          end
+        in
+        retry_loop 1
+      end
     end);
   (* Phase 5: unified startup subsystem summary *)
   Log.info ~ctx:"startup" "subsystems: keeper loops started"

@@ -88,7 +88,7 @@ val schemas : Types.tool_schema list
 
 val execute : string -> Yojson.Safe.t -> (bool * Yojson.Safe.t)
 (** Execute tool_shard MCP tools (grant, revoke, list).
-    Agent shard state is tracked in-memory via [agent_shards] map. *)
+    Agent shard state is tracked in-memory per agent. *)
 
 val autoresearch_keeper_tools : Types.tool_schema list
 (** Autoresearch tools for keeper use (excludes swarm_start). *)

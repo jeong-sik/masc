@@ -28,8 +28,6 @@ vi.mock('./command-store', () => ({
   commandPlaneSurface: { value: 'overview' },
   refreshCommandPlaneChainSummary: vi.fn(),
   refreshCommandPlaneCurrentSurface: vi.fn(),
-  refreshCommandPlaneOrchestra: vi.fn(),
-  refreshCommandPlaneSwarm: vi.fn(),
 }))
 
 import { refreshPlanForRoute } from './tab-refresh'

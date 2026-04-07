@@ -137,7 +137,13 @@ let merge_tool_selection_boundary
   in
   Keeper_types.dedupe_keep_order (deterministic_floor @ llm_selected)
 
+(* Deterministic selection floor size: keep the executable surface small
+   enough for prompt budgets while still surfacing a handful of relevant
+   tools even before any LLM hinting lands. *)
 let keeper_selection_top_k = 10
+
+(* BM25 candidate pool for TopK_llm: wide enough to give reranking room to
+   improve results, but still bounded and deterministic. *)
 let keeper_selection_bm25_prefilter_n = 30
 
 let tool_index_entry_of_tool
@@ -931,7 +937,9 @@ let run_turn
             Keeper_discovered_tools.active_names !discovered_ref ~turn
           in
           let _ = Keeper_discovered_tools.decay !discovered_ref ~turn in
-          let k = min max_tools keeper_selection_top_k in
+          let selection_limit =
+            min max_tools keeper_selection_top_k
+          in
           let preset_selection_context =
             if llm_rerank_enabled then Some (load_preset_selection_context ())
             else None
@@ -944,7 +952,7 @@ let run_turn
                  shrink the executable tool universe to below the BM25 floor. *)
               Agent_sdk.Tool_index.retrieve preset_search_index query_text
               |> List.filter (fun (name, _) -> not (List.mem name core))
-              |> List.filteri (fun i _ -> i < k)
+              |> List.filteri (fun i _ -> i < selection_limit)
               |> List.map fst
             | None -> []
           in
@@ -959,9 +967,9 @@ let run_turn
                 let named_cascade = Agent_sdk.Api.named_cascade
                   ?config_path ~name:rerank_cascade ~defaults () in
                 let rerank_fn = Agent_sdk.Tool_selector.default_rerank_fn
-                  ~sw ~net ~named_cascade ~k () in
+                  ~sw ~net ~named_cascade ~k:selection_limit () in
                 let strategy = Agent_sdk.Tool_selector.TopK_llm {
-                  k;
+                  k = selection_limit;
                   bm25_prefilter_n =
                     min keeper_selection_bm25_prefilter_n
                       (List.length preset_tools);

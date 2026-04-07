@@ -239,8 +239,20 @@ let test_selection_boundary_appends_llm_only_extras () =
       ~llm_selected:["keeper_bash"; "keeper_fs_read"; "keeper_board_post"]
       ~discovered:["keeper_tool_search"]
   in
-  Alcotest.(check string) "deterministic tool stays ahead of llm extra"
-    "keeper_tool_search" (List.nth merged 2);
+  let index_of name =
+    let rec loop i = function
+      | [] -> None
+      | x :: xs -> if x = name then Some i else loop (i + 1) xs
+    in
+    loop 0 merged
+  in
+  let discovered_ix = index_of "keeper_tool_search" in
+  let llm_extra_ix = index_of "keeper_bash" in
+  Alcotest.(check bool) "deterministic tool stays ahead of llm extra"
+    true
+    (match discovered_ix, llm_extra_ix with
+     | Some d, Some e -> d < e
+     | _ -> false);
   Alcotest.(check (list string))
     "llm extras append after deterministic floor without duplicates"
     [ "keeper_context_status";

@@ -461,11 +461,20 @@ let strip_trailing_slashes s =
   if last < 0 then "" else String.sub s 0 (last + 1)
 
 let searxng_base_url () =
-  match Sys.getenv_opt "MASC_SEARXNG_URL" with
-  | Some raw ->
-      let normalized = raw |> String.trim |> strip_trailing_slashes in
-      if normalized = "" then searxng_default_url else normalized
-  | None -> searxng_default_url
+  let url =
+    match Sys.getenv_opt "MASC_SEARXNG_URL" with
+    | Some raw ->
+        let normalized = raw |> String.trim |> strip_trailing_slashes in
+        if normalized = "" then searxng_default_url else normalized
+    | None -> searxng_default_url
+  in
+  (match Uri.scheme (Uri.of_string url) |> Option.map String.lowercase_ascii with
+   | Some "http" | Some "https" -> ()
+   | _ ->
+       failwith
+         (Printf.sprintf
+            "MASC_SEARXNG_URL must use http or https scheme (got: %s)" url));
+  url
 
 let fetch_searxng ~timeout_sec ~query =
   let base = searxng_base_url () in

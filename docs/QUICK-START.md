@@ -193,9 +193,11 @@ Allowlist SSOT: `lib/tool_catalog.ml` > `public_mcp_tools`
 `masc_web_search` 메모:
 
 - read-only 현재 정보 조회용 도구다.
-- 기본 auto 모드는 공식 provider key가 있으면 `brave`, `tavily`, `exa`, `bing_api` 순으로 먼저 시도한다.
+- `MASC_SEARXNG_URL` 설정 시 self-hosted SearXNG가 최우선 provider로 작동한다.
+- 기본 auto 모드는 공식 provider key가 있으면 `searxng`, `brave`, `tavily`, `exa`, `bing_api` 순으로 먼저 시도한다.
 - 공식 provider가 없거나 실패하면 `duckduckgo`, `bing_rss` 순으로 fallback 한다.
 - env:
+  - `MASC_SEARXNG_URL` (self-hosted SearXNG instance URL)
   - `MASC_WEB_SEARCH_PROVIDER`
   - `MASC_WEB_SEARCH_PROVIDER_ORDER`
   - `MASC_WEB_SEARCH_FALLBACKS`
@@ -204,6 +206,7 @@ Allowlist SSOT: `lib/tool_catalog.ml` > `public_mcp_tools`
   - `MASC_WEB_SEARCH_RATE_LIMIT_WINDOW_SEC`
   - `MASC_WEB_SEARCH_RATE_LIMIT_MAX_CALLS`
 - provider credentials:
+  - `MASC_SEARXNG_URL` (SearXNG, self-hosted)
   - `BRAVE_SEARCH_API_KEY`
   - `TAVILY_API_KEY`
   - `EXA_API_KEY`

@@ -72,7 +72,6 @@ function TimeRangeSelector() {
   `
 }
 
-
 function StatsRow({ data }: { data: ActivityGraphResponse }) {
   const s = data.stats
   const h = data.stats_history ?? []
@@ -288,7 +287,6 @@ function NodeLeaderboard({ nodes }: { nodes: ActivityGraphNode[] }) {
     </div>
   `
 }
-
 
 function EmptyActivityGraph() {
   return html`

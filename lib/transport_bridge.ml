@@ -14,17 +14,28 @@ end
 
 (* ── Registry ─────────────────────────────────────────── *)
 
-(* Providers stored in registration order. *)
+(* Providers stored in registration order.
+   The registry is mutable only during bootstrap (single fiber).
+   After [seal] is called, further registration raises [Failure].
+   Reads from multiple fibers are safe because OCaml ref reads are
+   atomic at the word level, and the list is never mutated post-seal. *)
 let registry : (module PROVIDER) list ref = ref []
+let sealed = ref false
+
+let seal () = sealed := true
 
 let register_provider (p : (module PROVIDER)) =
-  let module P = (val p : PROVIDER) in
-  (* Replace existing with same name *)
-  registry := List.filter (fun m ->
-    let module M = (val m : PROVIDER) in
-    M.name <> P.name
-  ) !registry;
-  registry := !registry @ [ p ]
+  if !sealed then
+    failwith "Transport_bridge: registry sealed after bootstrap"
+  else begin
+    let module P = (val p : PROVIDER) in
+    (* Replace existing with same name *)
+    registry := List.filter (fun m ->
+      let module M = (val m : PROVIDER) in
+      M.name <> P.name
+    ) !registry;
+    registry := !registry @ [ p ]
+  end
 
 let providers () = !registry
 

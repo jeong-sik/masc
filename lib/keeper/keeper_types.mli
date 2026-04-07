@@ -39,6 +39,7 @@ type scheduled_autonomous_cycle_outcome = proactive_cycle_outcome
 
 type tool_preset =
   | Minimal
+  | Social
   | Messaging
   | Coding
   | Research

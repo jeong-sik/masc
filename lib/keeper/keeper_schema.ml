@@ -19,8 +19,8 @@ let tool_access_schema description =
           ("type", `String "string");
           ("enum",
             `List
-              [ `String "minimal"; `String "messaging"; `String "coding";
-                `String "research"; `String "full" ]);
+              [ `String "minimal"; `String "social"; `String "messaging"; `String "coding";
+                `String "research"; `String "delivery"; `String "full" ]);
         ]);
         ("also_allow", string_array_schema);
       ]);

@@ -39,4 +39,4 @@ mention_targets = ["cheolsu", "철수", "sangsu", "coder"]
 proactive_enabled = true
 execution_scope = "workspace"
 
-tool_preset = "messaging"
+tool_preset = "social"

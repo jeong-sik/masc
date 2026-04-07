@@ -16,6 +16,18 @@ type shard = {
 (** Predefined shards *)
 
 let base_tools : Types.tool_schema list = [
+  (* Stay silent: no-op tool for tool_choice=Any turns.
+     Lets the model explicitly skip a turn without being forced
+     to call a real tool when there is nothing to do. *)
+  {
+    name = "keeper_stay_silent";
+    description = "Do nothing this turn. Call when you have no pending work and no information \
+to share. Costs no resources. Prefer this over calling a tool with no purpose.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc []);
+    ];
+  };
   (* Time *)
   {
     name = "keeper_time_now";

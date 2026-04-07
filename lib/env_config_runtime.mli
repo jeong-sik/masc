@@ -170,6 +170,13 @@ module Tools : sig
   val description_budget_opt : unit -> int option
   val readonly_retry_limit : int
   val public_tools_extra_opt : unit -> string option
+  val web_search_provider_opt : unit -> string option
+  val web_search_provider_order_opt : unit -> string option
+  val web_search_fallbacks_opt : unit -> string option
+  val web_search_timeout_sec : unit -> int
+  val web_search_cache_ttl_sec : unit -> float
+  val web_search_rate_limit_window_sec : unit -> float
+  val web_search_rate_limit_max_calls : unit -> int
 end
 
 module Rate_bucket : sig

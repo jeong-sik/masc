@@ -16,19 +16,32 @@ let split_http_body_and_status body =
       in
       (payload, parse_int_opt status_raw)
 
-let http_get_text_with_status ?(timeout_sec = 10) url =
+let append_headers args headers =
+  (* Accumulate header args without repeated list concatenation, then reverse
+     them back so curl sees headers in the same left-to-right order as the
+     input list. *)
+  let header_args_rev =
+    List.fold_left
+      (fun acc (name, value) -> (name ^ ": " ^ value) :: "-H" :: acc)
+      [] headers
+  in
+  List.rev_append header_args_rev args
+
+let http_get_text_with_status_with_headers ?(timeout_sec = 10) ?(headers = []) url =
   let status, body =
     Process_eio.run_argv_with_status
-      [
-        "curl";
-        "-sS";
-        "--http1.1";
-        "--max-time";
-        string_of_int (max 1 timeout_sec);
+      (append_headers
+         [
+         "curl";
+         "-sS";
+         "--http1.1";
+         "--max-time";
+         string_of_int (max 1 timeout_sec);
         "-w";
         "\n%{http_code}";
-        url;
-      ]
+         url;
+       ]
+         headers)
   in
   match status with
   | Unix.WEXITED 0 ->
@@ -40,6 +53,9 @@ let http_get_text_with_status ?(timeout_sec = 10) url =
       Error (Printf.sprintf "curl signal %d for %s" sig_num url)
   | Unix.WSTOPPED sig_num ->
       Error (Printf.sprintf "curl stopped %d for %s" sig_num url)
+
+let http_get_text_with_status ?timeout_sec url =
+  http_get_text_with_status_with_headers ?timeout_sec url
 
 let http_get_json_with_status ?(timeout_sec = 10) url =
   match http_get_text_with_status ~timeout_sec url with
@@ -49,13 +65,14 @@ let http_get_json_with_status ?(timeout_sec = 10) url =
       with Yojson.Json_error msg ->
         Error (Printf.sprintf "invalid json from %s: %s" url msg))
 
-let http_post_json_text_with_status ~timeout_sec ~url ~body_json =
+let http_post_json_text_with_status_with_headers ~timeout_sec ?(headers = []) ~url ~body_json () =
   let status, body =
     Process_eio.run_argv_with_status
-      [
-        "curl";
-        "-sS";
-        "--http1.1";
+      (append_headers
+         [
+         "curl";
+         "-sS";
+         "--http1.1";
         "--max-time";
         string_of_int (max 1 timeout_sec);
         "-H";
@@ -64,8 +81,9 @@ let http_post_json_text_with_status ~timeout_sec ~url ~body_json =
         body_json;
         "-w";
         "\n%{http_code}";
-        url;
-      ]
+         url;
+       ]
+         headers)
   in
   match status with
   | Unix.WEXITED 0 ->
@@ -77,6 +95,9 @@ let http_post_json_text_with_status ~timeout_sec ~url ~body_json =
       Error (Printf.sprintf "curl signal %d for %s" sig_num url)
   | Unix.WSTOPPED sig_num ->
       Error (Printf.sprintf "curl stopped %d for %s" sig_num url)
+
+let http_post_json_text_with_status ~timeout_sec ~url ~body_json =
+  http_post_json_text_with_status_with_headers ~timeout_sec ~url ~body_json ()
 
 let http_post_json_with_status ~timeout_sec ~url ~body_json =
   match http_post_json_text_with_status ~timeout_sec ~url ~body_json with

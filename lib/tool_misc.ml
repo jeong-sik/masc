@@ -247,5 +247,6 @@ let parse_brave_json = Tool_misc_web_search.parse_brave_json
 let parse_tavily_json = Tool_misc_web_search.parse_tavily_json
 let parse_exa_json = Tool_misc_web_search.parse_exa_json
 let parse_bing_search_json = Tool_misc_web_search.parse_bing_search_json
+let redact_transport_error_detail = Tool_misc_web_search.redact_transport_error_detail
 let web_search_provider_plan = Tool_misc_web_search.provider_plan
 let web_search_simulate_for_test = Tool_misc_web_search.simulate_for_test

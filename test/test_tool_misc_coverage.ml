@@ -401,6 +401,20 @@ let () = test "parse_official_provider_json_payloads_tolerate_malformed_json" (f
   assert (Tool_misc.parse_bing_search_json {|{"webPages": "oops"}|} = [])
 )
 
+let () = test "redact_transport_error_detail" (fun () ->
+  assert
+    (Tool_misc.redact_transport_error_detail
+       "curl exit code 6 for https://example.com?q=test"
+     = "curl exit code 6");
+  assert
+    (Tool_misc.redact_transport_error_detail "provider request failed"
+     = "provider request failed");
+  assert (Tool_misc.redact_transport_error_detail "" = "");
+  assert
+    (Tool_misc.redact_transport_error_detail "forbidden response"
+     = "forbidden response")
+)
+
 let () = test "dispatch_webrtc_offer" (fun () ->
   let ctx = make_test_ctx () in
   let args =

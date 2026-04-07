@@ -17,12 +17,14 @@ let split_http_body_and_status body =
       (payload, parse_int_opt status_raw)
 
 let append_headers args headers =
-  let rev_header_args =
+  (* Build header args in reverse for linear-time accumulation, then restore
+     the original curl argv order. *)
+  let header_args_rev =
     List.fold_left
       (fun acc (name, value) -> (name ^ ": " ^ value) :: "-H" :: acc)
       [] headers
   in
-  List.rev_append rev_header_args args
+  List.rev_append header_args_rev args
 
 let http_get_text_with_status_with_headers ?(timeout_sec = 10) ?(headers = []) url =
   let status, body =

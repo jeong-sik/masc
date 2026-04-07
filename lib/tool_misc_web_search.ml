@@ -412,17 +412,22 @@ let provider_error provider message =
   Printf.sprintf "%s: %s" (provider_to_string provider) message
 
 let redact_transport_error_detail message =
+  let len = String.length message in
   let rec find_marker i =
-    if i + 5 > String.length message then
+    if i + 5 > len then
       None
-    else if String.sub message i 5 = " for " then
+    else if
+      message.[i] = ' '
+      && message.[i + 1] = 'f'
+      && message.[i + 2] = 'o'
+      && message.[i + 3] = 'r'
+      && message.[i + 4] = ' '
+    then
       Some i
     else
       find_marker (i + 1)
   in
-  match find_marker 0 with
-  | Some idx -> String.sub message 0 idx
-  | None -> message
+  match find_marker 0 with Some idx -> String.sub message 0 idx | None -> message
 
 let endpoint_error ~fallback detail =
   let detail = redact_transport_error_detail detail |> String.trim in

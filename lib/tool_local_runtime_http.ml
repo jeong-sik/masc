@@ -17,8 +17,9 @@ let split_http_body_and_status body =
       (payload, parse_int_opt status_raw)
 
 let append_headers args headers =
-  (* Accumulate header args without repeated list concatenation, then restore
-     the original curl argv order. *)
+  (* Accumulate header args without repeated list concatenation, then reverse
+     them back so curl sees headers in the same left-to-right order as the
+     input list. *)
   let header_args_rev =
     List.fold_left
       (fun acc (name, value) -> (name ^ ": " ^ value) :: "-H" :: acc)

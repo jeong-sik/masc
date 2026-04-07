@@ -430,7 +430,9 @@ let redact_transport_error_detail message =
     else
       find_marker (i + 1)
   in
-  match find_marker 0 with Some idx -> String.sub message 0 idx | None -> message
+  match find_marker 0 with
+  | Some idx -> String.sub message 0 idx
+  | None -> message
 
 let endpoint_error ~fallback detail =
   let detail = redact_transport_error_detail detail |> String.trim in

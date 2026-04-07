@@ -213,6 +213,15 @@ export interface KeeperGuardrailEvent {
   ts_unix: number
 }
 
+export interface KeeperPhaseChangedEvent {
+  type: 'keeper_phase_changed'
+  name: string
+  prev_phase: string
+  new_phase: string
+  event: string
+  ts_unix: number
+}
+
 export interface Goal {
   id: string
   horizon: 'short' | 'mid' | 'long'

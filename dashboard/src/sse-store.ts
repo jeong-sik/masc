@@ -106,6 +106,7 @@ const SIMPLE_ROUTES: Record<string, SimpleRoute> = {
   keeper_handoff:        { target: 'execution' },
   keeper_compaction:     { target: 'execution' },
   keeper_guardrail:      { target: 'execution' },
+  keeper_phase_changed:  { target: 'execution' },
   // Client input
   client_input_approved:  { target: 'operator', debounceMs: SSE_OPERATOR_DEBOUNCE_MS },
   client_input_rejected:  { target: 'operator', debounceMs: SSE_OPERATOR_DEBOUNCE_MS },
@@ -141,7 +142,7 @@ const REFRESH_FNS: Record<RefreshTarget, () => void> = {
 // --- Named handlers for complex events ---
 
 const KEEPER_LIFECYCLE_EVENTS = new Set([
-  'keeper_handoff', 'keeper_compaction', 'keeper_guardrail', 'keeper_turn_complete',
+  'keeper_handoff', 'keeper_compaction', 'keeper_guardrail', 'keeper_turn_complete', 'keeper_phase_changed',
   'masc/keeper_handoff', 'masc/keeper_compaction', 'masc/keeper_guardrail', 'masc/keeper_turn_complete',
 ])
 

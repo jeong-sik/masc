@@ -566,6 +566,20 @@ let dispatch_event ~base_path name (event : Keeper_state_machine.event) =
          transition_outcome = "applied";
          wall_clock_at_decision = now;
        };
+       (* Broadcast phase transition to SSE subscribers *)
+       (try
+          Sse.broadcast
+            (`Assoc [
+               "type", `String "keeper_phase_changed";
+               "name", `String name;
+               "prev_phase", `String (Keeper_state_machine.phase_to_string tr.prev_phase);
+               "new_phase", `String (Keeper_state_machine.phase_to_string tr.new_phase);
+               "event", `String (Keeper_state_machine.event_to_string event);
+               "ts_unix", `Float now;
+             ])
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | _exn -> ());
        (* Update running count based on phase transition *)
        (match tr.prev_phase, tr.new_phase with
         | Running, phase when phase <> Running ->

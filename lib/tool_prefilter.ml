@@ -118,6 +118,119 @@ let synonyms : (string * string list) list =
     ("keeper_tool_search",
      [ "find tool"; "discover tool"; "search tools"; "what tool";
        "tool for"; "which tool" ]);
+    ("keeper_stay_silent",
+     [ "do nothing"; "skip turn"; "no action"; "stay quiet"; "no response";
+       "silent"; "침묵"; "대기"; "아무것도 안함" ]);
+    ("keeper_tasks_audit",
+     [ "audit tasks"; "orphaned tasks"; "stale tasks"; "zombie tasks";
+       "task cleanup"; "find abandoned"; "고아 태스크"; "방치 태스크"; "태스크 감사" ]);
+    ("keeper_voice_agent",
+     [ "voice settings"; "speech config"; "tts config"; "voice configure";
+       "음성 설정"; "보이스 구성"; "TTS 설정" ]);
+    ("keeper_voice_session_start",
+     [ "start voice session"; "begin voice call"; "open voice channel";
+       "음성 세션 시작"; "보이스 통화 시작" ]);
+    ("keeper_voice_session_end",
+     [ "end voice session"; "close voice call"; "stop voice channel";
+       "음성 세션 종료"; "보이스 통화 종료" ]);
+    ("keeper_voice_sessions",
+     [ "list voice sessions"; "voice session history"; "active calls";
+       "음성 세션 목록"; "보이스 세션" ]);
+    ("keeper_write",
+     [ "write file"; "create file"; "save file"; "new file";
+       "파일 작성"; "파일 저장"; "새 파일" ]);
+    (* masc_code_* — code manipulation tools *)
+    ("masc_code_search",
+     [ "search code"; "find code"; "code lookup"; "grep code"; "find symbol";
+       "search source"; "codebase search"; "code query" ]);
+    ("masc_code_read",
+     [ "read code"; "view code"; "source file"; "open source"; "code contents";
+       "read source"; "show code" ]);
+    ("masc_code_edit",
+     [ "edit code"; "modify code"; "change code"; "update code"; "patch code";
+       "code change" ]);
+    ("masc_code_write",
+     [ "write code"; "create code"; "new file code"; "generate code";
+       "code creation" ]);
+    ("masc_code_symbols",
+     [ "code symbols"; "function list"; "class definitions"; "symbol overview";
+       "navigate code"; "code structure" ]);
+    ("masc_code_shell",
+     [ "code shell"; "run code command"; "execute in code"; "code exec" ]);
+    ("masc_code_git",
+     [ "code git"; "git in code"; "code commit"; "code branch"; "code log" ]);
+    (* masc_governance_* — policy and rules *)
+    ("masc_governance_status",
+     [ "governance status"; "policy status"; "rules check"; "compliance check" ]);
+    ("masc_governance_feed",
+     [ "governance feed"; "policy events"; "rule changes"; "governance log" ]);
+    ("masc_governance_set",
+     [ "set governance"; "change policy"; "update rules"; "configure governance" ]);
+    (* masc_autoresearch_* — automated research *)
+    ("masc_autoresearch_start",
+     [ "start research"; "begin research"; "auto research"; "autoresearch start" ]);
+    ("masc_autoresearch_status",
+     [ "research status"; "autoresearch status"; "research progress" ]);
+    ("masc_autoresearch_stop",
+     [ "stop research"; "cancel research"; "end autoresearch" ]);
+    ("masc_autoresearch_cycle",
+     [ "research cycle"; "run cycle"; "autoresearch cycle"; "execute research" ]);
+    (* masc_plan_* — project planning *)
+    ("masc_plan_get",
+     [ "get plan"; "view plan"; "show plan"; "current plan"; "roadmap" ]);
+    ("masc_plan_init",
+     [ "init plan"; "create plan"; "new plan"; "setup plan"; "plan setup" ]);
+    ("masc_plan_update",
+     [ "update plan"; "modify plan"; "change plan"; "edit plan"; "revise plan" ]);
+    ("masc_plan_set_task",
+     [ "set task in plan"; "assign plan task"; "plan task set"; "current task plan" ]);
+    ("masc_plan_get_task",
+     [ "get task from plan"; "plan task"; "current plan task" ]);
+    ("masc_plan_clear_task",
+     [ "clear plan task"; "remove plan task"; "unassign plan task" ]);
+    (* masc_team_session_* — swarm/team operations *)
+    ("masc_team_session_start",
+     [ "start team session"; "begin swarm"; "team work start"; "parallel session" ]);
+    ("masc_team_session_status",
+     [ "team session status"; "swarm status"; "parallel progress" ]);
+    ("masc_team_session_step",
+     [ "team step"; "session step"; "swarm step"; "team turn" ]);
+    ("masc_team_session_stop",
+     [ "stop team session"; "end swarm"; "finish parallel work" ]);
+    ("masc_team_session_list",
+     [ "list team sessions"; "swarm list"; "team sessions" ]);
+    ("masc_team_session_events",
+     [ "team events"; "session timeline"; "swarm events" ]);
+    ("masc_team_session_prove",
+     [ "prove session"; "verify team work"; "session proof" ]);
+    ("masc_team_session_report",
+     [ "team report"; "session report"; "swarm report" ]);
+    ("masc_team_session_compare",
+     [ "compare sessions"; "diff sessions"; "session compare" ]);
+    ("masc_team_session_finalize",
+     [ "finalize session"; "complete team session"; "wrap up session" ]);
+    (* masc_worktree_* — git worktree management *)
+    ("masc_worktree_create",
+     [ "create worktree"; "new worktree"; "isolated branch"; "git worktree add" ]);
+    ("masc_worktree_list",
+     [ "list worktrees"; "show worktrees"; "worktree status" ]);
+    ("masc_worktree_remove",
+     [ "remove worktree"; "delete worktree"; "cleanup worktree" ]);
+    (* masc_agent_* — agent management *)
+    ("masc_agent_card",
+     [ "agent card"; "agent profile"; "agent info"; "who is agent" ]);
+    ("masc_agent_update",
+     [ "update agent"; "change agent"; "agent modify"; "agent settings" ]);
+    ("masc_agent_fitness",
+     [ "agent fitness"; "agent evaluation"; "agent score"; "rate agent" ]);
+    (* masc auth *)
+    ("masc_auth_status",
+     [ "auth status"; "authentication"; "token status"; "credentials" ]);
+    ("masc_auth_refresh",
+     [ "refresh token"; "renew auth"; "auth refresh"; "token refresh" ]);
+    (* masc web search *)
+    ("masc_web_search",
+     [ "web search"; "search internet"; "search online"; "google" ]);
   ]
 
 let synonym_lookup =

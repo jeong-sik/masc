@@ -888,6 +888,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
               ~max_cost_usd
               ~is_retry
               ?shared_context
+              ?event_bus:(Keeper_event_bus.get ())
               ()
           in
           let rec retry_loop ~run_meta ~max_context ~run_generation

@@ -112,6 +112,7 @@ val run_named :
   ?context:Oas.Context.t ->
   ?slot_id:int ->
   ?oas_checkpoint:Oas.Checkpoint.t ->
+  ?event_bus:Oas.Event_bus.t ->
   ?sw:Eio.Switch.t ->
   ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   unit ->

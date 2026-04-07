@@ -101,16 +101,9 @@ let entry_of_json (json : Yojson.Safe.t) : cache_entry option =
     None
 
 let read_entry_file path =
-  match Safe_ops.read_file_safe path with
-  | Error msg ->
-    Log.Misc.warn "[cache_entry_read] failed to read %s: %s" path msg;
-    None
-  | Ok content ->
-      match Safe_ops.parse_json_safe ~context:"cache_entry_read" content with
-      | Error msg ->
-        Log.Misc.warn "[cache_entry_read] %s" msg;
-        None
-      | Ok json -> entry_of_json json
+  match Safe_ops.read_json_file_logged ~label:"cache_entry" path with
+  | None -> None
+  | Some json -> entry_of_json json
 
 let read_matching_entry path ~key =
   match read_entry_file path with
@@ -203,21 +196,11 @@ let evict_expired config =
     let filenames = read_cache_filenames dir in
     let evicted = List.fold_left (fun count filename ->
       let path = Filename.concat dir filename in
-      match Safe_ops.read_file_safe path with
-      | Error msg ->
-        Log.Misc.warn "[cache_evict] failed to read %s: %s" path msg;
-        count
-      | Ok content ->
-        match Safe_ops.parse_json_safe ~context:"cache_evict" content with
-        | Error msg ->
-          Log.Misc.warn "[cache_evict] %s" msg;
-          count
-        | Ok json ->
-          match entry_of_json json with
-          | Some entry when is_expired entry ->
-              Safe_ops.remove_file_logged ~context:"cache_evict" path;
-              count + 1
-          | _ -> count
+      match read_entry_file path with
+      | Some entry when is_expired entry ->
+          Safe_ops.remove_file_logged ~context:"cache_evict" path;
+          count + 1
+      | _ -> count
     ) 0 filenames in
     (* Refresh cached count after eviction *)
     let remaining = List.length filenames - evicted in
@@ -247,19 +230,9 @@ let maybe_evict_expired config =
         let sample = List.filteri (fun i _ -> i < sample_size) files in
         let expired_count = List.fold_left (fun acc filename ->
           let path = Filename.concat dir filename in
-          match Safe_ops.read_file_safe path with
-          | Error msg ->
-            Log.Misc.warn "[cache_maybe_evict] failed to read %s: %s" path msg;
-            acc
-          | Ok content ->
-            match Safe_ops.parse_json_safe ~context:"cache_maybe_evict" content with
-            | Error msg ->
-              Log.Misc.warn "[cache_maybe_evict] %s" msg;
-              acc
-            | Ok json ->
-              match entry_of_json json with
-              | Some entry when is_expired entry -> acc + 1
-              | _ -> acc
+          match read_entry_file path with
+          | Some entry when is_expired entry -> acc + 1
+          | _ -> acc
         ) 0 sample in
         let ratio = float_of_int expired_count /. float_of_int sample_size in
         if ratio > eviction_sample_threshold then
@@ -419,36 +392,28 @@ let list config ?(tag : string option) () : cache_entry list =
       let deduped = Hashtbl.create (List.length entries) in
       List.iter (fun filename ->
         let path = Filename.concat dir filename in
-        match Safe_ops.read_file_safe path with
-        | Error msg ->
-          Log.Misc.warn "[cache_get_all] failed to read %s: %s" path msg
-        | Ok content ->
-            match Safe_ops.parse_json_safe ~context:"cache_get_all" content with
-            | Error msg ->
-                Log.Misc.warn "[cache_get_all] %s" msg
-            | Ok json ->
-                match entry_of_json json with
-                | Some entry ->
-                    if is_expired entry then begin
-                      if remove_file_if_exists path then decrement_cached_entry_count ()
-                    end else begin
-                      let include_entry =
-                        match tag with
-                        | None -> true
-                        | Some t -> List.mem t entry.tags
-                      in
-                      if include_entry then
-                        let is_primary =
-                          String.equal filename (cache_filename entry.key ^ ".json")
-                        in
-                        match Hashtbl.find_opt deduped entry.key with
-                        | Some (existing, existing_is_primary)
-                          when existing.created_at > entry.created_at
-                            || (existing.created_at = entry.created_at
-                                && (existing_is_primary || not is_primary)) -> ()
-                        | _ -> Hashtbl.replace deduped entry.key (entry, is_primary)
-                    end
-                | None -> ()
+        match read_entry_file path with
+        | Some entry ->
+            if is_expired entry then begin
+              if remove_file_if_exists path then decrement_cached_entry_count ()
+            end else begin
+              let include_entry =
+                match tag with
+                | None -> true
+                | Some t -> List.mem t entry.tags
+              in
+              if include_entry then
+                let is_primary =
+                  String.equal filename (cache_filename entry.key ^ ".json")
+                in
+                match Hashtbl.find_opt deduped entry.key with
+                | Some (existing, existing_is_primary)
+                  when existing.created_at > entry.created_at
+                    || (existing.created_at = entry.created_at
+                        && (existing_is_primary || not is_primary)) -> ()
+                | _ -> Hashtbl.replace deduped entry.key (entry, is_primary)
+            end
+        | None -> ()
       ) entries;
       Hashtbl.fold (fun _ (entry, _) acc -> entry :: acc) deduped [])
 
@@ -486,19 +451,9 @@ let stats config : (int * int * float, string) result =
           let path = Filename.concat dir filename in
           let file_size = (Unix.stat path).st_size in
           let is_exp =
-            match Safe_ops.read_file_safe path with
-            | Error msg ->
-              Log.Misc.warn "[cache_stats] failed to read %s: %s" path msg;
-              false
-            | Ok content ->
-              match Safe_ops.parse_json_safe ~context:"cache_stats" content with
-              | Error msg ->
-                Log.Misc.warn "[cache_stats] %s" msg;
-                false
-              | Ok json ->
-                match entry_of_json json with
-                | Some entry -> is_expired entry
-                | None -> false
+            match read_entry_file path with
+            | Some entry -> is_expired entry
+            | None -> false
           in
           (t + 1, e + (if is_exp then 1 else 0), s +. float_of_int file_size)
         ) (0, 0, 0.0) entries in

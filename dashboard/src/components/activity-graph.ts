@@ -376,16 +376,16 @@ export function ActivityGraphSurface() {
         <//>
       </div>
 
-      <${CollapsibleSection} title="에이전트 타임라인" open=${false}>
+      <${CollapsibleSection} title="에이전트 타임라인">
         <${ActivitySwimlane} since=${since} />
       <//>
 
-      <${CollapsibleSection} title="키퍼 상태 전환" open=${false}>
+      <${CollapsibleSection} title="키퍼 상태 전환">
         <${KeeperPhaseTimeline} />
       <//>
 
       ${data.timeline.length > 0 ? html`
-        <${CollapsibleSection} title="활동 히트맵" open=${false}>
+        <${CollapsibleSection} title="활동 히트맵">
           <${ActivityHeatmap} data=${data} />
         <//>
       ` : null}

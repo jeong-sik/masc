@@ -1,6 +1,31 @@
 # Changelog
 
 
+## [2.254.0] - 2026-04-07
+
+### Added
+- **Post-turn evidence capture** -- execution context tracking for keeper decisions. (#5621)
+- **Anti-polling gate** -- boring-tool gate to break keeper polling loops. (#5623)
+- **TF-IDF synonym expansion** -- 39 more tool synonyms for prefilter. (#5628)
+- **OAS Event Bus pipeline** -- connect OAS telemetry to keeper Agent.run. (#5641)
+- **Runtime params dashboard** -- migrate 25 keeper params to Runtime_params. (#5640)
+- **Silent failure logging** -- error visibility in hotspots. (#5632)
+
+### Changed
+- **OAS agent_sdk pin** -- bump 0.109.0 to 0.110.0 (inference telemetry, tool_choice propagation, watermark compaction). (#5639)
+- **tool_shard** -- replace Hashtbl with immutable StringMap. (#5593)
+- **Anti-polling gate simplification** -- per-review refactor. (#5645)
+
+### Fixed
+- **code_search error messages** -- include exit code in diagnostics. (#5630)
+- **Keeper status fallback** -- file-read recovery hints, subprocess stderr. (#5595)
+- **Compaction unblock** -- when reflection_ts=0 or ratio>=0.8. (#5600)
+- **Core discovery tools** -- add masc_web_search and shell_readonly. (#5622)
+
+### Infrastructure
+- **Vite bump** -- 6.4.1 to 6.4.2. (#5624)
+- **.ci_build/ gitignore**. (#5643)
+
 ## [2.253.0] - 2026-04-07
 
 ### Added

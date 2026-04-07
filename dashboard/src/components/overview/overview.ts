@@ -498,6 +498,8 @@ function ToolCallHealthPanel() {
 
 // --- Overview (Home) ---
 
+const OVERVIEW_CARD = 'rounded-xl border border-card-border/40 bg-card/18 p-4 shadow-sm shadow-black/8'
+
 export function Overview() {
   const snap = missionSnapshot.value
   const roomHealth = snap?.summary?.room_health ?? null
@@ -520,46 +522,29 @@ export function Overview() {
 
       ${metaCognitionCard}
 
-      ${hotSessions
-        ? html`
-            <div class="rounded-xl border border-card-border/40 bg-card/18 p-4 shadow-sm shadow-black/8">
-              ${hotSessions}
-            </div>
-          `
-        : null}
+      ${hotSessions ? html`<div class=${OVERVIEW_CARD}>${hotSessions}</div>` : null}
 
-      ${agentPulse
-        ? html`
-            <div class="rounded-xl border border-card-border/40 bg-card/18 p-4 shadow-sm shadow-black/8">
-              ${agentPulse}
-            </div>
-          `
-        : null}
+      ${agentPulse ? html`<div class=${OVERVIEW_CARD}>${agentPulse}</div>` : null}
 
-      ${toolHealth
-        ? html`
-            <div class="rounded-xl border border-card-border/40 bg-card/18 p-4 shadow-sm shadow-black/8">
-              ${toolHealth}
-            </div>
-          `
-        : null}
+      ${toolHealth ? html`<div class=${OVERVIEW_CARD}>${toolHealth}</div>` : null}
 
-      <div class="grid grid-cols-2 gap-5 max-[1100px]:grid-cols-1">
-        <div class="rounded-xl border border-card-border/40 bg-card/18 p-4 shadow-sm shadow-black/8">
-          <${TransportHealthPanel} />
+      <details class=${OVERVIEW_CARD}>
+        <summary class="cursor-pointer text-xs font-semibold text-[var(--text-strong)] uppercase tracking-wider select-none list-none flex items-center gap-2">
+          인프라 상태
+          <span class="text-[10px] font-normal normal-case tracking-normal text-[var(--text-muted)]">Transport · 성능 · 커넥터</span>
+        </summary>
+        <div class="mt-4 flex flex-col gap-4">
+          <div class="grid grid-cols-2 gap-4 max-[1100px]:grid-cols-1">
+            <${TransportHealthPanel} />
+            <${PerfSnapshotPanel} />
+          </div>
+          <${ConnectorStatusPanel} />
         </div>
-        <div class="rounded-xl border border-card-border/40 bg-card/18 p-4 shadow-sm shadow-black/8">
-          <${PerfSnapshotPanel} />
-        </div>
-      </div>
-
-      <div class="rounded-xl border border-card-border/40 bg-card/18 p-4 shadow-sm shadow-black/8">
-        <${ConnectorStatusPanel} />
-      </div>
+      </details>
 
       ${hasJournal
         ? html`
-            <div class="rounded-xl border border-card-border/40 bg-card/18 p-4 shadow-sm shadow-black/8">
+            <div class=${OVERVIEW_CARD}>
               <${HomeSectionHeader} label="최근 활동" />
               <${NarrativeTimeline} entries=${journalEntries} maxItems=${8} />
             </div>

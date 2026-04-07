@@ -192,6 +192,18 @@ let handle_keeper_pr_workflow
             end
         end
       ) in
+      (* Pre-commit: Version truth check guard *)
+      let _s_ver = run_step "version_truth_check" (fun () ->
+        if !worktree_path = "" then Error "no worktree path"
+        else begin
+          let check_cmd = Printf.sprintf "cd %s && ./scripts/check-version-truth.sh 2>&1" (Filename.quote !worktree_path) in
+          let st, out = Process_eio.run_argv_with_status ~timeout_sec:10.0 [ "/bin/zsh"; "-lc"; check_cmd ] in
+          if st <> Unix.WEXITED 0 then
+            Error (Printf.sprintf "Version truth check failed (run scripts/bump-version.sh instead of editing dune-project manually): %s" out)
+          else Ok "version truth OK"
+        end
+      ) in
+
       (* Step 3: Git add + commit + push *)
       let _s3 = run_step "git_commit_push" (fun () ->
         if !worktree_path = "" then Error "no worktree path"

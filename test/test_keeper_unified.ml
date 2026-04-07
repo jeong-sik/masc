@@ -897,6 +897,7 @@ let make_run_result ~text ~tools ~model ~input_tok ~output_tok
     checkpoint = None;
     proof = None;
     stop_reason = Masc_mcp.Oas_worker.Completed;
+    inference_telemetry = None;
   }
 
 let test_metrics_text_response () =

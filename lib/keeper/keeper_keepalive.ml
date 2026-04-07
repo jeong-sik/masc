@@ -53,13 +53,16 @@ let with_keeper_turn_slot ~channel f =
     | Keeper_world_observation.Scheduled_autonomous -> true
     | Keeper_world_observation.Reactive -> false
   in
+  let t0 = Time_compat.now () in
   if is_autonomous then Eio.Semaphore.acquire autonomous_turn_semaphore;
   Eio.Semaphore.acquire turn_semaphore;
+  let semaphore_wait_ms =
+    int_of_float ((Time_compat.now () -. t0) *. 1000.0) in
   Fun.protect
     ~finally:(fun () ->
       Eio.Semaphore.release turn_semaphore;
       if is_autonomous then Eio.Semaphore.release autonomous_turn_semaphore)
-    f
+    (fun () -> f ~semaphore_wait_ms)
 ;;
 
 (** Optional gRPC client + env — WORM Atomic: set at server bootstrap
@@ -702,7 +705,7 @@ let run_keepalive_unified_turn
       then meta_after_triage
       else if should_run_turn
       then (
-        with_keeper_turn_slot ~channel:turn_decision.channel (fun () ->
+        with_keeper_turn_slot ~channel:turn_decision.channel (fun ~semaphore_wait_ms ->
           match
             Keeper_unified_turn.run_unified_turn
               ~config:ctx.config
@@ -710,6 +713,7 @@ let run_keepalive_unified_turn
               ~observation:obs
               ~generation:meta_after_observe.runtime.generation
               ~channel:turn_decision.channel
+              ~semaphore_wait_ms:semaphore_wait_ms
               ~shared_context
               ()
           with

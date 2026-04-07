@@ -209,6 +209,7 @@ let append_decision_record
     ~(meta : keeper_meta)
     ~(observation : Keeper_world_observation.world_observation)
     ~(latency_ms : int)
+    ?(semaphore_wait_ms : int = 0)
     ~(outcome : string)
     ~(selected_mode : string)
     ?social_state
@@ -279,6 +280,7 @@ let append_decision_record
         ("selected_mode", `String selected_mode);
         ("selected_mode_source", `String "observed_result");
         ("latency_ms", `Int latency_ms);
+        ("semaphore_wait_ms", `Int semaphore_wait_ms);
         ("trigger_signals", `List (List.map (fun s -> `String s) trigger_signals));
         ("observed_affordances", `List (List.map (fun s -> `String s) affordances));
         ( "observation",
@@ -361,6 +363,28 @@ let append_decision_record
                 | Oas_worker.TurnBudgetExhausted { turns_used; limit } ->
                     Printf.sprintf "turn_budget_exhausted(%d/%d)" turns_used limit
               in
+              let inference_fields =
+                match r.inference_telemetry with
+                | Some t ->
+                    let timings_fields =
+                      match t.timings with
+                      | Some ti ->
+                          [
+                            ("prompt_ms", match ti.prompt_ms with Some v -> `Float v | None -> `Null);
+                            ("predicted_ms", match ti.predicted_ms with Some v -> `Float v | None -> `Null);
+                            ("provider_tokens_per_second", match ti.predicted_per_second with Some v -> `Float v | None -> `Null);
+                            ("prompt_per_second", match ti.prompt_per_second with Some v -> `Float v | None -> `Null);
+                            ("cache_n", match ti.cache_n with Some v -> `Int v | None -> `Null);
+                          ]
+                      | None -> []
+                    in
+                    [
+                      ("system_fingerprint", match t.system_fingerprint with Some s -> `String s | None -> `Null);
+                      ("reasoning_tokens", match t.reasoning_tokens with Some n -> `Int n | None -> `Null);
+                      ("request_latency_ms", `Int t.request_latency_ms);
+                    ] @ timings_fields
+                | None -> []
+              in
               `Assoc ([
                 ("model_used", `String r.model_used);
                 ("turn_count", `Int r.turn_count);
@@ -374,7 +398,7 @@ let append_decision_record
                   if latency_ms > 0 then
                     `Float (float_of_int r.usage.output_tokens /. (float_of_int latency_ms /. 1000.0))
                   else `Null);
-              ] @ cascade_fields)
+              ] @ inference_fields @ cascade_fields)
           | None -> `Null );
       ]
       @ social_fields)
@@ -785,6 +809,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
     ~(observation : Keeper_world_observation.world_observation)
     ~(generation : int)
     ?(channel : Keeper_world_observation.unified_turn_channel = Scheduled_autonomous)
+    ?(semaphore_wait_ms = 0)
     ?shared_context
     () : (keeper_meta, Oas.Error.sdk_error) result =
   (* 1. Check API keys *)
@@ -977,7 +1002,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
               ~is_transient ~social_state ()
           in
           append_decision_record ~config ~meta:updated_meta ~observation
-            ~latency_ms ~outcome:"error" ~selected_mode:"error"
+            ~latency_ms ~semaphore_wait_ms ~outcome:"error" ~selected_mode:"error"
             ~social_state
             ~error:e_str ();
           (match write_meta config updated_meta with
@@ -1129,7 +1154,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
             ~compaction:lifecycle.compaction
             ~handoff_json:lifecycle.handoff_json;
           append_decision_record ~config ~meta:updated_meta ~observation
-            ~latency_ms ~outcome:"success"
+            ~latency_ms ~semaphore_wait_ms ~outcome:"success"
             ~selected_mode:(selected_mode_of_result result)
             ~social_state
             ~result:(Some result) ();

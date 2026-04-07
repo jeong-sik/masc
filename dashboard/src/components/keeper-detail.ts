@@ -482,11 +482,6 @@ export function KeeperDetailOverlay() {
         ${'' /* ── Per-keeper tool telemetry ── */}
         <${KeeperToolTelemetry} keeperName=${keeper.name} />
 
-        ${'' /* ── Tool call I/O inspector ── */}
-        <${SectionCard} title="도구 호출 검사기">
-          <${KeeperToolCallInspector} keeperName=${keeper.name} />
-        <//>
-
         ${'' /* ── Direct conversation ── */}
         <${KeeperCommsPanel} keeper=${keeper} />
 
@@ -649,6 +644,10 @@ export function KeeperDetailOverlay() {
 
           <${SectionCard} title="도구 정책 & 감사">
             <${KeeperNeighborhood} keeper=${keeper} />
+          <//>
+
+          <${SectionCard} title="도구 호출 검사기">
+            <${KeeperToolCallInspector} keeperName=${keeper.name} />
           <//>
 
           <${SectionCard} title="설정">

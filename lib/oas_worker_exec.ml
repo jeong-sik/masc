@@ -39,7 +39,7 @@ type config = {
   enable_thinking : bool option;
   transport : Masc_grpc_transport.t;
   allowed_paths : string list;
-  working_context : Yojson.Safe.t option;
+  checkpoint_sidecar : Yojson.Safe.t option;
   cache_system_prompt : bool;
   yield_on_tool : bool;
   compact_ratio : float option;
@@ -72,7 +72,7 @@ let default_config ~name ~provider ~model_id ~system_prompt ~tools : config =
     enable_thinking = None;
     transport = Masc_grpc_transport.from_env ();
     allowed_paths = [];
-    working_context = None;
+    checkpoint_sidecar = None;
     cache_system_prompt = false;
     yield_on_tool = false;
     compact_ratio = None;
@@ -158,8 +158,8 @@ let persist_checkpoint ~dir ~session_id (ckpt : Oas.Checkpoint.t) =
   Fs_compat.mkdir_p dir;
   Fs_compat.save_file path (Oas.Checkpoint.to_string ckpt)
 
-let build_checkpoint ~session_id ?working_context (agent : Oas.Agent.t) =
-  match working_context with
+let build_checkpoint ~session_id ?checkpoint_sidecar (agent : Oas.Agent.t) =
+  match checkpoint_sidecar with
   | None -> Oas.Agent.checkpoint ~session_id agent
   | Some json ->
       Oas.Agent_checkpoint.build_checkpoint
@@ -476,7 +476,10 @@ let run
     in
     (match proof_ref with Some ref_ -> ref_ := proof | None -> ());
     let checkpoint =
-      let ckpt = build_checkpoint ~session_id ?working_context:config.working_context agent in
+      let ckpt =
+        build_checkpoint ~session_id
+          ?checkpoint_sidecar:config.checkpoint_sidecar agent
+      in
       (match config.checkpoint_dir with
        | Some dir ->
          (try persist_checkpoint ~dir ~session_id ckpt

@@ -1,4 +1,5 @@
-(** Memory_oas_bridge — Connect MASC memory systems to OAS Memory.t 5-tier.
+(** Memory_oas_bridge — MASC-side adapter that projects product memory into
+    OAS Memory.t 5-tier primitives.
 
     Tier mapping:
     - {b Long_term} — JSONL files under [.masc/memory/<agent>/<session>.jsonl]
@@ -7,6 +8,9 @@
     - {b Procedural} — [seed_procedures_as_oas] loads [Procedural_memory] entries;
                         [flush_procedures] writes back
     - {b Working/Scratchpad} — managed by OAS in-memory; no backend needed
+
+    OAS stays generic here: this module chooses how MASC institutional,
+    episodic, and procedural stores seed/flush the SDK memory runtime.
 
     Filesystem-first policy: Long_term always uses JSONL, regardless of
     whether a PG pool is available.  PG long_term was removed in 2.140.0.

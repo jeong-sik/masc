@@ -1,4 +1,4 @@
-(** Team_session_oas_bridge — Bridge between MASC team session and OAS Swarm.
+(** Team_session_oas_bridge — MASC-side projection layer over OAS Swarm.
 
     Two lossy projections:
 
@@ -29,6 +29,9 @@
     latest_delivery_verdict).
 
     See [PROJECTION_MAP.md] for the complete field-by-field table.
+
+    OAS remains generic orchestration/runtime substrate; MASC delivery,
+    workflow, and proof semantics stay in team-session state/metadata.
 
     Phase C-1 of MASC->OAS migration.
     @since 2.124.0 *)

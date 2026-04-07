@@ -556,7 +556,7 @@ let test_keeper_reported_nonexistent_subdir () =
       ".masc/playground/goal-default-demo/";
       ".masc/keepers/goal-default-demo/";
       ".masc/traces/";
-      "."
+      "lib/"
     ] in
     let r1 = Keeper_alerting_path.resolve_keeper_target_path
       ~config ~allowed_paths:allowed
@@ -569,7 +569,7 @@ let test_keeper_reported_nonexistent_subdir () =
     let r3 = Keeper_alerting_path.resolve_keeper_target_path
       ~config ~allowed_paths:allowed
       ~raw_path:"lib/foo.ml" in
-    check bool "project file via dot allowed" true (Result.is_ok r3))
+    check bool "project file via allowed explicit path" true (Result.is_ok r3))
 
 let test_keeper_reported_observe_only_scope () =
   let dir = make_masc_path_test_dir () in

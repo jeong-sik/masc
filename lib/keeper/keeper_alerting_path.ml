@@ -100,9 +100,13 @@ let resolve_keeper_target_path ~(config : Room.config)
 
 (** Compute effective allowed_paths from keeper meta.
     Always prepends the keeper's playground path and, for workspace scope,
-    the workspace default dirs (.masc/keepers/<name>/, .masc/traces/, ".").
-    - ["*"]          → [] (full access, explicit opt-in bypasses path checks)
-    - other          → playground :: workspace_defaults @ explicit *)
+    the workspace default dirs:
+    - `.masc/keepers/<name>/`
+    - `.masc/traces/`
+    (project root `.` is no longer included by default; set
+     [`allowed_paths`] explicitly if needed.)
+    - [`*`] → [] (full access, explicit opt-in bypasses path checks)
+    - other  → playground :: workspace_defaults @ explicit *)
 let sanitize_keeper_name (name : string) : string =
   String.map (fun c ->
     if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')

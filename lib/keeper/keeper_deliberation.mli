@@ -15,6 +15,7 @@ type deliberation_trigger =
   | IdleTimeout
   | MetricsAnomaly of string
   | StrategicReview
+  | SelfDirectedExplore
 
 val deliberation_trigger_to_string : deliberation_trigger -> string
 val deliberation_trigger_to_json : deliberation_trigger -> Yojson.Safe.t

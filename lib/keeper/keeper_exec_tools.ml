@@ -446,10 +446,16 @@ let handle_keeper_shell_readonly
       | Error e -> error_json ~fields:[ "op", `String op ] e
       | Ok target ->
         let limit = shell_readonly_limit args in
+        (* Optional file-type filter (e.g. "ml", "py", "ts") *)
+        let file_type = Safe_ops.json_string ~default:"" "type" args |> String.trim in
+        (* Optional glob filter (e.g. "*.ml", "lib/**/*.ml") *)
+        let glob = Safe_ops.json_string ~default:"" "glob" args |> String.trim in
+        let base_argv = [ "rg"; "-n"; "-m"; string_of_int limit ] in
+        let type_argv = if file_type <> "" then [ "--type"; file_type ] else [] in
+        let glob_argv = if glob <> "" then [ "--glob"; glob ] else [] in
+        let argv = base_argv @ type_argv @ glob_argv @ [ pattern; target ] in
         let st, out =
-          Process_eio.run_argv_with_status
-            ~timeout_sec:15.0
-            [ "rg"; "-n"; "-m"; string_of_int limit; pattern; target ]
+          Process_eio.run_argv_with_status ~timeout_sec:15.0 argv
         in
         Yojson.Safe.to_string
           (`Assoc
@@ -460,6 +466,51 @@ let handle_keeper_shell_readonly
               ; "status", process_status_to_json st
               ; "matches", lines_to_json ~limit out
               ]))
+  | "git_log" ->
+    let count = max 1 (min 50 (Safe_ops.json_int ~default:10 "count" args)) in
+    let format = Safe_ops.json_string ~default:"%h %s" "format" args in
+    let file_path = Safe_ops.json_string ~default:"" "path" args |> String.trim in
+    let base_argv =
+      [ "git"; "-C"; root; "--no-optional-locks"; "log";
+        Printf.sprintf "--format=%s" format;
+        Printf.sprintf "-%d" count ]
+    in
+    let argv = if file_path <> "" then base_argv @ [ "--"; file_path ] else base_argv in
+    let st, out = Process_eio.run_argv_with_status ~timeout_sec:15.0 argv in
+    Yojson.Safe.to_string
+      (`Assoc
+          [ "ok", `Bool (st = Unix.WEXITED 0)
+          ; "op", `String op
+          ; "count", `Int count
+          ; "status", process_status_to_json st
+          ; "entries", lines_to_json ~limit:50 out
+          ])
+  | "find" ->
+    (* Find files by name pattern. Safe: no exec, only prints paths. *)
+    let name_pattern = Safe_ops.json_string ~default:"" "name" args |> String.trim in
+    if name_pattern = ""
+    then error_json ~fields:[ "op", `String op ] "name_required"
+    else (
+      match read_target () with
+      | Error e -> error_json ~fields:[ "op", `String op ] e
+      | Ok target ->
+        let limit = shell_readonly_limit args in
+        let st, out =
+          Process_eio.run_argv_with_status ~timeout_sec:15.0
+            [ "find"; target; "-maxdepth"; "5"; "-name"; name_pattern;
+              "-not"; "-path"; "*/.git/*";
+              "-not"; "-path"; "*/_build/*";
+              "-not"; "-path"; "*/.masc/*" ]
+        in
+        Yojson.Safe.to_string
+          (`Assoc
+              [ "ok", `Bool (st = Unix.WEXITED 0)
+              ; "op", `String op
+              ; "path", `String target
+              ; "name", `String name_pattern
+              ; "status", process_status_to_json st
+              ; "files", lines_to_json ~limit out
+              ]))
   | _ ->
     Yojson.Safe.to_string
       (`Assoc
@@ -469,7 +520,7 @@ let handle_keeper_shell_readonly
             , `List
                 (List.map
                    (fun name -> `String name)
-                   [ "pwd"; "ls"; "cat"; "rg"; "git_status" ]) )
+                   [ "pwd"; "ls"; "cat"; "rg"; "git_status"; "git_log"; "find" ]) )
           ])
 ;;
 

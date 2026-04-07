@@ -865,6 +865,177 @@ let test_idle_gate_drives_idle_timeout () =
     check bool "has idle_timeout" true
       (List.exists (fun t -> t = D.IdleTimeout) triggers)
 
+(* ---------- L3 Self-directed trigger tests ---------- *)
+
+let test_triage_self_directed_explore () =
+  (* SelfDirectedExplore fires when active_goal_count = 0 AND idle_seconds > idle_gate * 4 *)
+  let obs =
+    { base_obs with
+      active_goal_count = 0;
+      idle_seconds = 1300;
+      idle_gate = 300;
+    }
+  in
+  match D.triage obs with
+  | D.Skip _ -> fail "expected SelfDirectedExplore trigger"
+  | D.Triggered triggers ->
+      check bool "contains SelfDirectedExplore" true
+        (List.mem D.SelfDirectedExplore triggers)
+
+let test_triage_self_directed_not_with_goals () =
+  (* SelfDirectedExplore should NOT fire when active_goal_count > 0 *)
+  let obs =
+    { base_obs with
+      active_goal_count = 1;
+      idle_seconds = 1300;
+      idle_gate = 300;
+    }
+  in
+  match D.triage obs with
+  | D.Skip _ -> ()
+  | D.Triggered triggers ->
+      check bool "SelfDirectedExplore should not trigger with goals" false
+        (List.mem D.SelfDirectedExplore triggers)
+
+let test_triage_self_directed_not_below_threshold () =
+  (* SelfDirectedExplore should NOT fire when idle_seconds < idle_gate * 4 *)
+  let obs =
+    { base_obs with
+      active_goal_count = 0;
+      idle_seconds = 1100;  (* < 300 * 4 = 1200 *)
+      idle_gate = 300;
+    }
+  in
+  match D.triage obs with
+  | D.Skip _ -> ()
+  | D.Triggered triggers ->
+      check bool "SelfDirectedExplore should not trigger below threshold" false
+        (List.mem D.SelfDirectedExplore triggers)
+
+let test_triage_board_new_posts_without_mention () =
+  (* BoardActivity "new_posts" fires when board_new_post_count > 0
+     AND idle_seconds >= idle_gate / 2 AND board_mention_count = 0 *)
+  let obs =
+    { base_obs with
+      board_new_post_count = 3;
+      board_mention_count = 0;
+      idle_seconds = 200;   (* >= 300 / 2 = 150 *)
+      idle_gate = 300;
+    }
+  in
+  match D.triage obs with
+  | D.Skip _ -> fail "expected BoardActivity trigger for new posts"
+  | D.Triggered triggers ->
+      let has_new_posts =
+        List.exists
+          (function D.BoardActivity "new_posts" -> true | _ -> false)
+          triggers
+      in
+      check bool "contains BoardActivity new_posts" true has_new_posts
+
+let test_triage_board_new_posts_suppressed_by_mention () =
+  (* When board_mention_count > 0, the new_posts trigger is suppressed
+     (the mention trigger handles it instead) *)
+  let obs =
+    { base_obs with
+      board_new_post_count = 3;
+      board_mention_count = 1;
+      idle_seconds = 200;
+      idle_gate = 300;
+    }
+  in
+  match D.triage obs with
+  | D.Skip _ -> fail "expected BoardActivity trigger (from mention)"
+  | D.Triggered triggers ->
+      let has_new_posts =
+        List.exists
+          (function D.BoardActivity "new_posts" -> true | _ -> false)
+          triggers
+      in
+      check bool "new_posts suppressed by mention" false has_new_posts;
+      let has_mention =
+        List.exists
+          (function D.BoardActivity "mentioned_in_post" -> true | _ -> false)
+          triggers
+      in
+      check bool "mention trigger present" true has_mention
+
+let test_triage_board_new_posts_too_soon () =
+  (* new_posts trigger should NOT fire when idle_seconds < idle_gate / 2 *)
+  let obs =
+    { base_obs with
+      board_new_post_count = 3;
+      board_mention_count = 0;
+      idle_seconds = 100;   (* < 300 / 2 = 150 *)
+      idle_gate = 300;
+    }
+  in
+  match D.triage obs with
+  | D.Skip _ -> ()
+  | D.Triggered triggers ->
+      let has_new_posts =
+        List.exists
+          (function D.BoardActivity "new_posts" -> true | _ -> false)
+          triggers
+      in
+      check bool "new_posts should not fire too soon" false has_new_posts
+
+(* ---------- Self-directed legality tests ---------- *)
+
+let test_legality_self_directed_allows_board_post () =
+  (* Self-directed context (no goals, long idle) should allow board_post *)
+  let obs =
+    { base_obs with
+      active_goal_count = 0;
+      idle_seconds = 1300;
+      idle_gate = 300;
+    }
+  in
+  match D.legality_verdict obs
+    (D.BoardPost { content = "Sharing an observation"; hearth = None }) with
+  | D.Legal -> ()
+  | D.Illegal msg -> fail ("board_post should be legal in self-directed: " ^ msg)
+
+let test_legality_self_directed_allows_share_finding () =
+  let obs =
+    { base_obs with
+      active_goal_count = 0;
+      idle_seconds = 1300;
+      idle_gate = 300;
+    }
+  in
+  match D.legality_verdict obs
+    (D.ShareFinding { finding = "test"; source = "board_scan" }) with
+  | D.Legal -> ()
+  | D.Illegal msg -> fail ("share_finding should be legal in self-directed: " ^ msg)
+
+let test_legality_self_directed_allows_start_discussion () =
+  let obs =
+    { base_obs with
+      active_goal_count = 0;
+      idle_seconds = 1300;
+      idle_gate = 300;
+    }
+  in
+  match D.legality_verdict obs
+    (D.StartDiscussion { topic = "test topic"; context = "exploring" }) with
+  | D.Legal -> ()
+  | D.Illegal msg -> fail ("start_discussion should be legal in self-directed: " ^ msg)
+
+let test_legality_not_self_directed_rejects_board_post () =
+  (* Without self-directed context (idle too short), board_post is still illegal *)
+  let obs =
+    { base_obs with
+      active_goal_count = 0;
+      idle_seconds = 500;  (* < 300 * 4 = 1200 *)
+      idle_gate = 300;
+    }
+  in
+  match D.legality_verdict obs
+    (D.BoardPost { content = "test"; hearth = None }) with
+  | D.Legal -> fail "board_post should be illegal without self-directed context"
+  | D.Illegal _ -> ()
+
 let () =
   run "Keeper_deliberation"
     [
@@ -1048,5 +1219,31 @@ let () =
             test_removed_persona_profile_path_rejected;
           test_case "idle_gate drives idle timeout" `Quick
             test_idle_gate_drives_idle_timeout;
+        ] );
+      ( "self_directed_triggers",
+        [
+          test_case "self-directed explore fires" `Quick
+            test_triage_self_directed_explore;
+          test_case "self-directed not with goals" `Quick
+            test_triage_self_directed_not_with_goals;
+          test_case "self-directed not below threshold" `Quick
+            test_triage_self_directed_not_below_threshold;
+          test_case "board new posts without mention" `Quick
+            test_triage_board_new_posts_without_mention;
+          test_case "board new posts suppressed by mention" `Quick
+            test_triage_board_new_posts_suppressed_by_mention;
+          test_case "board new posts too soon" `Quick
+            test_triage_board_new_posts_too_soon;
+        ] );
+      ( "self_directed_legality",
+        [
+          test_case "self-directed allows board_post" `Quick
+            test_legality_self_directed_allows_board_post;
+          test_case "self-directed allows share_finding" `Quick
+            test_legality_self_directed_allows_share_finding;
+          test_case "self-directed allows start_discussion" `Quick
+            test_legality_self_directed_allows_start_discussion;
+          test_case "not self-directed rejects board_post" `Quick
+            test_legality_not_self_directed_rejects_board_post;
         ] );
     ]

@@ -18,7 +18,8 @@ let handle_keeper_voice_tool
     in
     let priority = max 1 (Safe_ops.json_int ~default:1 "priority" args) in
     if message = ""
-    then error_json "message_required"
+    then error_json "message is required. Good: message='Hello team.'. Bad: message=''."
+
     else (
       match
         ( Eio_context.get_switch_opt ()

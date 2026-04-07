@@ -203,7 +203,10 @@ let validate_command_with_allowlist ~allowed_commands cmd =
   if trimmed = "" then Error "command must not be empty"
   else if contains_forbidden_shell_chars trimmed then
     Error
-      "Shell chaining/redirection is not allowed. Use the workdir field and run a single command, for example command='python3 check.py'. To write files, use masc_code_write instead of shell redirection."
+      "Blocked: chaining (&&/||/;) and redirects (|/>) are not allowed. \
+       Run ONE command per call. Example: cmd='dune build'. \
+       Do NOT use: cmd='cd x && dune build' or cmd='rg foo | wc -l'. \
+       To write files, use keeper_fs_edit."
   else
     match extract_command_name trimmed with
     | None -> Error "command must not be empty"
@@ -211,7 +214,8 @@ let validate_command_with_allowlist ~allowed_commands cmd =
     | Some name ->
       Error
         (Printf.sprintf
-           "Command blocked: %s is not in the approved dev command allowlist"
+           "Command blocked: '%s' is not allowed. Allowed: dune, git, rg, ls, cat, make, node, npm, etc. \
+            For file operations use keeper_fs_read or keeper_fs_edit."
            name)
 
 let validate_command cmd =
@@ -243,7 +247,7 @@ let validate_command_coding cmd =
             | Some name ->
               Error
                 (Printf.sprintf
-                   "Command blocked: %s is not in the approved dev command allowlist"
+                   "Command blocked: '%s' is not allowed. Allowed: dune, git, rg, ls, cat, make, node, npm, etc."
                    name))
       in
       validate_segments segments
@@ -452,8 +456,8 @@ let validate_gh_command cmd =
   if trimmed = "" then Error "gh command must not be empty"
   else if contains_forbidden_shell_chars trimmed then
     Error
-      "Shell chaining/redirection is not allowed in gh commands. \
-       Pass a single gh subcommand."
+      "Blocked: chaining/redirect in gh command. Use a single subcommand. \
+       Good: cmd='pr list --state open'. Bad: cmd='pr list && echo done'."
   else
     match extract_gh_command_pair trimmed with
     | (None, _) -> Error "gh command must not be empty"

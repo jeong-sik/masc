@@ -42,6 +42,15 @@ let handle_keeper_fs_edit
   let mode =
     Safe_ops.json_string ~default:"overwrite" "mode" args |> String.lowercase_ascii
   in
+  (* Early validation for 9B models that send empty/missing params *)
+  if String.trim path = "" then
+    error_json "path is required. Good: path='lib/foo.ml'. Bad: path=''."
+  else if String.trim content = "" then
+    error_json "content is required (non-empty). Writing 0 bytes is usually unintended."
+  else if mode <> "overwrite" && mode <> "append" && mode <> "" then
+    error_json (Printf.sprintf
+      "mode must be 'overwrite' or 'append', got '%s'." mode)
+  else
   match resolve_keeper_path ~config ~meta ~raw_path:path with
   | Error e -> error_json e
   | Ok target ->

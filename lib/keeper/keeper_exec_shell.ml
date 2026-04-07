@@ -22,7 +22,8 @@ let handle_keeper_bash
     | _ -> false
   in
   if cmd = ""
-  then error_json "cmd_required"
+  then error_json "cmd is required. Good: cmd='ls -la lib/'. Bad: cmd=''."
+
   else
     let validate =
       if write_enabled then Worker_dev_tools.validate_command_coding
@@ -163,7 +164,7 @@ let handle_keeper_shell_readonly
   | "rg" ->
     let pattern = Safe_ops.json_string ~default:"" "pattern" args |> String.trim in
     if pattern = ""
-    then error_json ~fields:[ "op", `String op ] "pattern_required"
+    then error_json ~fields:[ "op", `String op ] "pattern is required for rg. Good: pattern='handle_request'. Bad: pattern=''."
     else (
       match read_target () with
       | Error e -> error_json ~fields:[ "op", `String op ] e
@@ -211,7 +212,7 @@ let handle_keeper_shell_readonly
   | "find" ->
     let name_pattern = Safe_ops.json_string ~default:"" "pattern" args |> String.trim in
     if name_pattern = ""
-    then error_json ~fields:[ "op", `String op ] "pattern_required"
+    then error_json ~fields:[ "op", `String op ] "pattern is required for find. Good: pattern='*.ml'. Bad: pattern=''."
     else (
       match read_target () with
       | Error e -> error_json ~fields:[ "op", `String op ] e
@@ -299,7 +300,8 @@ let handle_keeper_shell_readonly
       [ "git"; "-C"; root; "--no-optional-locks"; "diff"; "--stat" ]
   | "bash" ->
     let cmd_str = Safe_ops.json_string ~default:"" "command" args |> String.trim in
-    if cmd_str = "" then error_json ~fields:[ "op", `String op ] "command_required"
+    if cmd_str = "" then error_json ~fields:[ "op", `String op ] "command is required for bash op. Good: command='env'. Bad: command=''."
+
     else
       let dangerous_patterns = [
         "rm "; "rm\t"; "rmdir"; "> "; ">> "; "| tee "; "mv "; "cp ";
@@ -335,7 +337,8 @@ let handle_keeper_shell_readonly
   | _ ->
     Yojson.Safe.to_string
       (`Assoc
-          [ "error", `String "unsupported_op"
+          [ "ok", `Bool false
+          ; "error", `String "unsupported_op"
           ; "op", `String op
           ; ( "supported_ops"
             , `List

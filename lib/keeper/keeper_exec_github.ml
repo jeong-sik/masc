@@ -15,7 +15,9 @@ let handle_keeper_github
     if cmd <> "" then cmd else if gh_args <> [] then String.concat " " gh_args else ""
   in
   if gh_raw = ""
-  then error_json "cmd_or_args_required"
+  then error_json "cmd is required. \
+                   Good: cmd='pr list --state open'. Bad: cmd=''. \
+                   Single gh subcommand only, no chaining."
   else (
     match Worker_dev_tools.validate_gh_command gh_raw with
     | Error reason ->
@@ -93,10 +95,11 @@ let handle_keeper_pr_workflow
   let pr_body = Safe_ops.json_string ~default:"" "pr_body" args |> String.trim in
   let base_branch = Safe_ops.json_string ~default:"main" "base_branch" args |> String.trim in
   (* Validate required fields *)
-  if branch = "" then error_json "branch_required"
-  else if file_path = "" then error_json "file_path_required"
-  else if commit_message = "" then error_json "commit_message_required"
-  else if pr_title = "" then error_json "pr_title_required"
+  if branch = "" then error_json "branch is required. Good: branch='fix/typo'. Bad: branch=''."
+  else if file_path = "" then error_json "file_path is required. Good: file_path='lib/foo.ml'. Bad: file_path=''."
+  else if commit_message = "" then error_json "commit_message is required. Good: commit_message='fix typo in foo'. Bad: commit_message=''."
+  else if pr_title = "" then error_json "pr_title is required. Good: pr_title='Fix typo in foo'. Bad: pr_title=''."
+
   else
     (* Check preset: requires delivery or coding *)
     let preset_ok =
@@ -122,7 +125,7 @@ let handle_keeper_pr_workflow
       in
       let branch_safe = safe_name branch in
       if branch_safe <> branch then
-        error_json "branch_contains_invalid_chars"
+        error_json "branch contains invalid chars. Use only a-z, A-Z, 0-9, hyphen, underscore, slash."
       else
       let root = Keeper_alerting_path.project_root_of_config config in
       let task_id = Printf.sprintf "pr-%s"

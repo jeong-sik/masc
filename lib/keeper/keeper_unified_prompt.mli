@@ -18,4 +18,6 @@ val build_prompt :
   meta:Keeper_types.keeper_meta ->
   base_path:string ->
   observation:Keeper_world_observation.world_observation ->
+  ?diversity_hint:string ->
+  unit ->
   string * string

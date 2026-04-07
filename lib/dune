@@ -500,6 +500,7 @@
    keeper_turn_lifecycle
    keeper_turn
    keeper_msg_async
+   keeper_file_tracker
    keeper_evidence
    keeper_status_detail
    keeper_status
@@ -628,6 +629,7 @@
   keeper_turn_up
   keeper_turn_lifecycle
   keeper_msg_async
+  keeper_file_tracker
   keeper_evidence
   team_session_engine_helpers
   team_session_engine_status

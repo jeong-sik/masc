@@ -288,6 +288,11 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
             in
             Progress.Tracker.step turn_tracker
               ~message:(Printf.sprintf "Executing Agent.run for %s" name) ();
+            let evidence_before_hash =
+              try Keeper_evidence.snapshot_before_turn
+                ~base_path:ctx.config.base_path ~keeper_name:name
+              with _ -> None
+            in
             let run_result, latency_ms =
               Keeper_exec_context.timed (fun () ->
                   Keeper_agent_run.run_turn
@@ -383,15 +388,16 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                 ~turn_generation:lifecycle.turn_generation
                 ~compaction:lifecycle.compaction
                 ~handoff_json:lifecycle.handoff_json;
-              (* Post-turn evidence capture: deterministic git snapshot *)
+              (* Post-turn evidence: deterministic git before/after delta *)
               let evidence =
                 try
-                  Keeper_evidence.capture_post_turn_evidence
+                  Keeper_evidence.capture_turn_evidence
                     ~base_path:ctx.config.base_path
                     ~keeper_name:name
                     ~trace_id:updated_meta.runtime.trace_id
                     ~turn_number:updated_meta.runtime.usage.total_turns
                     ~tool_calls_made:result.tool_calls_made
+                    ~before_hash:evidence_before_hash
                     ()
                 with
                 | Eio.Cancel.Cancelled _ as e -> raise e

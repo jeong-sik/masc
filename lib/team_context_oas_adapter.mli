@@ -1,17 +1,14 @@
-(** Team_context_oas_adapter — OAS Collaboration.t bridge for team context.
+(** Team_context_oas_adapter — collaboration context bridge for team sessions.
 
     Lossy projection from MASC team session (47 fields) to
-    OAS {!Agent_sdk.Collaboration.t} (12 fields).
-    MASC votes/artifacts are not in the session record, so those
-    fields are empty in the result.  [shared_context] is populated
-    from shared findings.
+    opaque collaboration JSON for OAS swarm_config.collaboration_context.
 
     @since 2.114.0 *)
 
 val collaboration_of_session :
   base_path:string ->
   Team_session_types.session ->
-  Agent_sdk.Collaboration.t
+  Yojson.Safe.t
 
 type runtime_health = {
   base_path_exists : bool;
@@ -20,6 +17,6 @@ type runtime_health = {
 }
 
 val with_runtime_health :
-  Agent_sdk.Collaboration.t ->
+  Yojson.Safe.t ->
   runtime_health ->
-  Agent_sdk.Collaboration.t
+  Yojson.Safe.t

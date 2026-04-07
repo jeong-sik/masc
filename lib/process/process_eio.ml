@@ -73,7 +73,7 @@ let output_for_status ~(status : Unix.process_status) ~(stdout : string)
     | out, "" -> out
     | out, err -> out ^ "\n" ^ err
 
-let make_secure_stderr_tempfile () =
+let create_stderr_tempfile () =
   let template =
     Filename.concat
       (Filename.get_temp_dir_name ())
@@ -91,7 +91,7 @@ let read_stderr_capture path =
   try In_channel.with_open_bin path In_channel.input_all with
   | exn ->
       Printf.sprintf
-        "stderr capture failed while reading %s: %s"
+        "(stderr capture error) failed while reading %s: %s"
         path
         (Printexc.to_string exn)
 
@@ -132,7 +132,7 @@ let with_unix_capture ?env ?stdin_content ?(capture_stderr = false)
        let stderr_fd =
          if capture_stderr
          then (
-           let path, fd = make_secure_stderr_tempfile () in
+           let path, fd = create_stderr_tempfile () in
            stderr_path_ref := Some path;
            stderr_fd_ref := Some fd;
            fd)

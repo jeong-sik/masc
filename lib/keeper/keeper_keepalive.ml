@@ -659,6 +659,7 @@ let run_keepalive_unified_turn
       ~(stop : bool Atomic.t)
       ~(proactive_warmup_elapsed : bool)
       ~(shared_context : Agent_sdk.Context.t)
+      ~(boring_consecutive_turns_ref : int ref)
   : keeper_meta
   =
   if not proactive_warmup_elapsed
@@ -718,6 +719,7 @@ let run_keepalive_unified_turn
               ~channel:turn_decision.channel
               ~semaphore_wait_ms:semaphore_wait_ms
               ~shared_context
+              ~boring_consecutive_turns_ref
               ()
           with
           | Error err ->
@@ -966,6 +968,11 @@ let run_heartbeat_loop
      and tool-call counters are recreated inside run_turn and therefore
      do not accumulate for the full keeper lifecycle. *)
   let shared_context = Agent_sdk.Context.create () in
+  (* Inter-run boring-tool gate: persists across run_turn calls so
+     the anti-polling gate can detect heartbeat-level polling loops
+     (e.g., every heartbeat calls only masc_status then exits).
+     Intra-run counters reset on each run_turn; this ref does not. *)
+  let boring_consecutive_turns_ref = ref 0 in
   (* Mtime-based change detection for keeper meta disk reads.
      Avoids re-parsing the JSON file on every heartbeat cycle when
      no operator has modified it.  Initialized to 0.0 so the first
@@ -1057,6 +1064,7 @@ let run_heartbeat_loop
             ~stop
             ~proactive_warmup_elapsed
             ~shared_context
+            ~boring_consecutive_turns_ref
         in
         (* Turn failure threshold: registry tracks count (via unified_turn),
                  keepalive raises to terminate the fiber for supervisor restart. *)

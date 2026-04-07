@@ -1495,8 +1495,7 @@ let test_heartbeat_concurrent_start_stop () =
     identity mismatch: "claimed by 'keeper-X-agent', caller is 'keeper-X'". *)
 let test_bug006_transition_with_unsuffixed_name () =
   with_test_env (fun config ->
-    (* "keeper-coder-agent" has 3 dash-separated parts, so is_generated_nickname
-       returns true and join() uses it as-is → creates keeper-coder-agent.json *)
+    (* Join with canonical agent name to establish the identity recorded at claim time *)
     let _ = Room.join config ~agent_name:"keeper-coder-agent" ~capabilities:["code"] () in
     let _ = Room.add_task config ~title:"BUG-006 Task" ~priority:1 ~description:"" in
     (* Claim using the canonical name — assignee is recorded as "keeper-coder-agent" *)

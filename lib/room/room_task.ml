@@ -30,7 +30,7 @@ let trim_opt = function
     different agent's identity. *)
 let resolve_agent_name_strict config agent_name =
   let normalized = String.lowercase_ascii (String.trim agent_name) in
-  let resolved = resolve_agent_name config agent_name in
+  let resolved = resolve_agent_name config normalized in
   if resolved = normalized then normalized
   else if resolved = normalized ^ "-agent" then resolved
   else normalized

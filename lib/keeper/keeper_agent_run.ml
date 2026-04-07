@@ -957,28 +957,6 @@ let run_turn
             (Keeper_config.keeper_llm_rerank_enabled ())
             (List.length all_allowed)
             (String.length query_text);
-        (* Tool disclosure telemetry: log which tools the keeper sees each turn.
-           Deterministic measurement — counts only, no thresholds or judgments. *)
-        (let hook_elapsed_ms =
-           Keeper_timing.round1 ((Time_compat.now () -. hook_t0) *. 1000.0)
-         in
-         let disclosure_json = `Assoc [
-           "ts_unix", `Float (Time_compat.now ());
-           "event", `String "tool_disclosure";
-           "keeper_name", `String meta.name;
-           "turn", `Int turn;
-           "core_count", `Int core_count;
-           "discovered_count", `Int discovered_count;
-           "final_visible", `Int (List.length all_allowed);
-           "hook_ms", `Float hook_elapsed_ms;
-         ] in
-         (try
-           Keeper_types_support.append_jsonl_line
-             (Keeper_types_support.keeper_decision_log_path config meta.name)
-             disclosure_json
-         with
-         | Eio.Cancel.Cancelled _ as e -> raise e
-         | _ -> ()));
         (* 3. Graceful last-turn: inject budget warnings and restrict
            tools when approaching the turn limit.
            - Warning zone (2 turns before limit): inject budget warning
@@ -1107,6 +1085,31 @@ let run_turn
           else
             Some Agent_sdk.Types.Any  (* all other turns: force tool use *)
         in
+        (* Tool disclosure telemetry: emitted after all allow-list rewrites
+           (boring-tool gate, last-turn intersect, max_tools cap) so that
+           final_visible and hook_ms reflect the actual state sent to AdjustParams.
+           Capture now once so ts_unix and hook_ms are consistent. *)
+        (let now = Time_compat.now () in
+         let hook_elapsed_ms =
+           Keeper_timing.round1 ((now -. hook_t0) *. 1000.0)
+         in
+         let disclosure_json = `Assoc [
+           "ts_unix", `Float now;
+           "event", `String "tool_disclosure";
+           "keeper_name", `String meta.name;
+           "turn", `Int turn;
+           "core_count", `Int core_count;
+           "discovered_count", `Int discovered_count;
+           "final_visible", `Int (List.length all_allowed);
+           "hook_ms", `Float hook_elapsed_ms;
+         ] in
+         (try
+           Keeper_types_support.append_jsonl_line
+             (Keeper_types_support.keeper_decision_log_path config meta.name)
+             disclosure_json
+         with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | _ -> ()));
         (* Yield after CPU-bound tool filtering to let HTTP handlers run.
            Without this, N concurrent keeper fibers starve the Eio scheduler
            during turn setup (tool list construction + prompt building). *)

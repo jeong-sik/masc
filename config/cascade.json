@@ -38,8 +38,11 @@
   "spawn_glm_models": ["llama:auto", "glm:auto"],
   "keeper_unified_models": ["llama:auto", "glm:auto"],
   "research_models": ["llama:auto", "glm:auto"],
+  "tool_rerank_models": ["llama:auto", "glm:auto"],
 
   "_comment_inference": "Per-cascade inference parameters (temperature, max_tokens). Falls back to caller defaults when absent.",
+  "tool_rerank_temperature": 0.0,
+  "tool_rerank_max_tokens": 200,
   "keeper_unified_temperature": 0.2,
   "keeper_unified_max_tokens": 65536,
   "keeper_autonomy_temperature": 0.1,

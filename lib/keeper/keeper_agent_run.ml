@@ -844,17 +844,70 @@ let run_turn
         let visible_always_include_tools =
           Tool_portal.filter_visible_tool_names portal_ctx always_include_tools
         in
-        (* Core + discovered tools: the keeper discovers additional tools
-           on demand via keeper_tool_search.  BM25 auto-selection (previously
-           computed here via Tool_selector.select_names) was removed — only
-           tools explicitly requested via keeper_tool_search appear. *)
+        (* Progressive tool disclosure: core tools are always visible;
+           additional tools are selected by BM25 + optional LLM reranking
+           (TopK_llm, gated by MASC_KEEPER_LLM_RERANK env var).
+           When LLM rerank is disabled, only tools explicitly discovered
+           via keeper_tool_search appear alongside core. *)
         let effective_selected =
           let core = Keeper_exec_tools.effective_core_tools () in
           let discovered =
             Keeper_discovered_tools.active_names !discovered_ref ~turn
           in
           let _ = Keeper_discovered_tools.decay !discovered_ref ~turn in
-          Keeper_types.dedupe_keep_order (core @ discovered)
+          let llm_selected =
+            if Keeper_config.keeper_llm_rerank_enabled () then
+              match Eio_context.get_switch_opt (), Eio_context.get_net_opt () with
+              | Some sw, Some net ->
+                let rerank_cascade = Keeper_config.keeper_llm_rerank_cascade () in
+                let defaults = Oas_worker.default_model_strings ~cascade_name:rerank_cascade in
+                let config_path = Oas_worker.default_config_path () in
+                let named_cascade = Agent_sdk.Api.named_cascade
+                  ?config_path ~name:rerank_cascade ~defaults () in
+                let k = min max_tools 10 in
+                let rerank_fn = Agent_sdk.Tool_selector.default_rerank_fn
+                  ~sw ~net ~named_cascade ~k () in
+                (* Preset-scoped tools: filter keeper_tools to the current
+                   preset universe so BM25 ranks within relevant tools only. *)
+                let preset_names =
+                  Keeper_tool_policy.keeper_preset_universe_tool_names meta
+                in
+                let preset_set = Hashtbl.create (List.length preset_names) in
+                List.iter (fun n -> Hashtbl.replace preset_set n true) preset_names;
+                let preset_tools =
+                  List.filter (fun (t : Agent_sdk.Tool.t) ->
+                    Hashtbl.mem preset_set t.schema.name
+                  ) keeper_tools
+                in
+                let strategy = Agent_sdk.Tool_selector.TopK_llm {
+                  k;
+                  bm25_prefilter_n = min 30 (List.length preset_tools);
+                  always_include = core;
+                  confidence_threshold = 0.3;
+                  rerank_fn;
+                } in
+                (try
+                  let selected = Agent_sdk.Tool_selector.select_names
+                    ~strategy ~context:query_text ~tools:preset_tools in
+                  if Keeper_types_profile.keeper_debug then
+                    Log.Keeper.info
+                      "keeper:%s TopK_llm selected %d tools (query_len=%d, candidates=%d)"
+                      meta.name (List.length selected)
+                      (String.length query_text) (List.length preset_tools);
+                  selected
+                with exn ->
+                  Log.Keeper.warn
+                    "keeper:%s TopK_llm failed (%s), falling back to core+discovered"
+                    meta.name (Printexc.to_string exn);
+                  [])
+              | _ ->
+                Log.Keeper.warn
+                  "keeper:%s TopK_llm: Eio context unavailable, falling back"
+                  meta.name;
+                []
+            else []
+          in
+          Keeper_types.dedupe_keep_order (core @ llm_selected @ discovered)
           |> Tool_portal.filter_visible_tool_names portal_ctx
         in
         (* Apply runtime tool overlay (masc_tool_grant/revoke) and
@@ -894,10 +947,11 @@ let run_turn
         in
         if Keeper_types_profile.keeper_debug then
           Log.Keeper.info
-            "tool_disclosure keeper=%s core=%d discovered=%d allowed=%d query_len=%d"
+            "tool_disclosure keeper=%s core=%d discovered=%d llm_rerank=%b allowed=%d query_len=%d"
             meta.name
             (List.length (Keeper_exec_tools.effective_core_tools ()))
             (List.length (Keeper_discovered_tools.active_names !discovered_ref ~turn))
+            (Keeper_config.keeper_llm_rerank_enabled ())
             (List.length all_allowed)
             (String.length query_text);
         (* 3. Graceful last-turn: inject budget warnings and restrict

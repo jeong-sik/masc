@@ -4,6 +4,7 @@ open Masc_mcp
 
 let () = Random.self_init ()
 let () = Mirage_crypto_rng_unix.use_default ()
+let () = Server_startup_state.mark_state_ready ~backend_mode:"test"
 
 let () = Printf.printf "\n=== Tool_misc Coverage Tests ===\n"
 

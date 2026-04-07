@@ -206,6 +206,14 @@ let handle_keeper_create_from_persona ctx args : tool_result =
           (true, Yojson.Safe.pretty_to_string json)
 
 let handle_keeper_up ctx args : tool_result =
+  if not Server_startup_state.((!state).state_ready) then begin
+    let elapsed = Server_startup_state.elapsed_since_start () in
+    Log.Keeper.warn "keeper_up rejected: server not ready (%.1fs since start)" elapsed;
+    (false,
+      Printf.sprintf
+        {|{"error":"server_initializing","message":"MASC server is still starting (%.0fs elapsed). Retry in a few seconds.","retry_after_ms":3000}|}
+        elapsed)
+  end else
   let ok, body = Turn.handle_keeper_up ctx args in
   if not ok then (ok, body)
   else

@@ -1,5 +1,7 @@
 (** Dashboard Execution read-model regression tests. *)
 
+let () = Masc_mcp.Server_startup_state.mark_state_ready ~backend_mode:"test"
+
 module Lib = Masc_mcp
 
 open Alcotest

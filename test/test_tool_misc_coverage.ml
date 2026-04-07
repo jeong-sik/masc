@@ -274,18 +274,61 @@ let () = test "parse_ddg_html" (fun () ->
   | _ -> failwith "expected two parsed items"
 )
 
+let () = test "parse_searxng_json_basic" (fun () ->
+  let payload =
+    {|{"results": [
+        {"title": "OCaml Lang", "url": "https://ocaml.org/", "content": "OCaml programming."},
+        {"title": "Example", "url": "https://example.com/", "content": "A page."}
+      ]}|}
+  in
+  let items = Tool_misc.parse_searxng_json payload in
+  assert (List.length items = 2);
+  match items with
+  | (title1, url1, _) :: (title2, url2, _) :: _ ->
+      assert (title1 = "OCaml Lang");
+      assert (url1 = "https://ocaml.org/");
+      assert (title2 = "Example");
+      assert (url2 = "https://example.com/")
+  | _ -> failwith "expected two parsed items"
+)
+
+let () = test "parse_searxng_json_empty_results" (fun () ->
+  let payload = {|{"results": []}|} in
+  assert (Tool_misc.parse_searxng_json payload = [])
+)
+
+let () = test "parse_searxng_json_malformed" (fun () ->
+  assert (Tool_misc.parse_searxng_json "not json" = [])
+)
+
+let () = test "web_search_provider_plan_includes_searxng_when_configured" (fun () ->
+  with_env "MASC_SEARXNG_URL" (Some "http://localhost:8888") (fun () ->
+    with_env "BRAVE_SEARCH_API_KEY" None (fun () ->
+      with_env "TAVILY_API_KEY" None (fun () ->
+        with_env "EXA_API_KEY" None (fun () ->
+          with_env "BING_SEARCH_API_KEY" None (fun () ->
+            with_env "AZURE_BING_SEARCH_API_KEY" None (fun () ->
+              with_env "MASC_WEB_SEARCH_PROVIDER" None (fun () ->
+                with_env "MASC_WEB_SEARCH_PROVIDER_ORDER" None (fun () ->
+                  with_env "MASC_WEB_SEARCH_FALLBACKS" None (fun () ->
+                    assert
+                      (Tool_misc.web_search_provider_plan ()
+                       = [ "searxng"; "duckduckgo"; "bing_rss" ]))))))))))
+)
+
 let () = test "web_search_provider_plan_defaults_to_scraping_fallbacks" (fun () ->
-  with_env "BRAVE_SEARCH_API_KEY" None (fun () ->
-    with_env "TAVILY_API_KEY" None (fun () ->
-      with_env "EXA_API_KEY" None (fun () ->
-        with_env "BING_SEARCH_API_KEY" None (fun () ->
-          with_env "AZURE_BING_SEARCH_API_KEY" None (fun () ->
-            with_env "MASC_WEB_SEARCH_PROVIDER" None (fun () ->
-              with_env "MASC_WEB_SEARCH_PROVIDER_ORDER" None (fun () ->
-                with_env "MASC_WEB_SEARCH_FALLBACKS" None (fun () ->
-                  assert
-                    (Tool_misc.web_search_provider_plan ()
-                     = [ "duckduckgo"; "bing_rss" ])))))))))
+  with_env "MASC_SEARXNG_URL" None (fun () ->
+    with_env "BRAVE_SEARCH_API_KEY" None (fun () ->
+      with_env "TAVILY_API_KEY" None (fun () ->
+        with_env "EXA_API_KEY" None (fun () ->
+          with_env "BING_SEARCH_API_KEY" None (fun () ->
+            with_env "AZURE_BING_SEARCH_API_KEY" None (fun () ->
+              with_env "MASC_WEB_SEARCH_PROVIDER" None (fun () ->
+                with_env "MASC_WEB_SEARCH_PROVIDER_ORDER" None (fun () ->
+                  with_env "MASC_WEB_SEARCH_FALLBACKS" None (fun () ->
+                    assert
+                      (Tool_misc.web_search_provider_plan ()
+                       = [ "duckduckgo"; "bing_rss" ]))))))))))
 )
 
 let () = test "web_search_provider_plan_prefers_configured_official_provider" (fun () ->

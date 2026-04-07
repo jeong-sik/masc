@@ -10,6 +10,7 @@ type normalized_hit = {
 }
 
 type provider =
+  | Searxng
   | Brave
   | Tavily
   | Exa
@@ -208,6 +209,22 @@ let json_string_member json path =
 let with_parsed_json payload f =
   try Yojson.Safe.from_string payload |> f with _ -> []
 
+let parse_searxng_json payload =
+  with_parsed_json payload (fun json ->
+      json_list_member json (Yojson.Safe.Util.member "results")
+      |> List.filter_map (fun item ->
+             match
+               json_string_member item (Yojson.Safe.Util.member "title"),
+               json_string_member item (Yojson.Safe.Util.member "url")
+             with
+             | Some title, Some url when valid_search_result_url url ->
+                 let snippet =
+                   json_string_member item (Yojson.Safe.Util.member "content")
+                   |> Option.value ~default:""
+                 in
+                 Some (title, url, snippet)
+             | _ -> None))
+
 let parse_brave_json payload =
   with_parsed_json payload (fun json ->
       json_list_member json (fun j -> Yojson.Safe.Util.member "web" j |> Yojson.Safe.Util.member "results")
@@ -278,6 +295,7 @@ let looks_like_rss_payload payload =
   && (Re.execp rss_re normalized || Re.execp channel_re normalized)
 
 let provider_to_string = function
+  | Searxng -> "searxng"
   | Brave -> "brave"
   | Tavily -> "tavily"
   | Exa -> "exa"
@@ -287,6 +305,7 @@ let provider_to_string = function
 
 let provider_of_string raw =
   match String.lowercase_ascii (String.trim raw) with
+  | "searxng" | "searx" -> Some Searxng
   | "brave" -> Some Brave
   | "tavily" -> Some Tavily
   | "exa" -> Some Exa
@@ -310,6 +329,7 @@ let env_present name =
   | _ -> false
 
 let provider_has_credentials = function
+  | Searxng -> env_present "MASC_SEARXNG_URL"
   | Brave -> env_present "BRAVE_SEARCH_API_KEY"
   | Tavily -> env_present "TAVILY_API_KEY"
   | Exa -> env_present "EXA_API_KEY"
@@ -318,7 +338,7 @@ let provider_has_credentials = function
   | Ddg | Bing_rss -> true
 
 let default_provider_order () =
-  [ Brave; Tavily; Exa; Bing_api ]
+  [ Searxng; Brave; Tavily; Exa; Bing_api ]
   |> List.filter provider_has_credentials
   |> fun official -> official @ [ Ddg; Bing_rss ]
 
@@ -428,6 +448,38 @@ let result_json ~query ~search_url ~engine hits =
 
 let provider_error provider message =
   Printf.sprintf "%s: %s" (provider_to_string provider) message
+
+let searxng_default_url = "http://localhost:8888"
+
+let strip_trailing_slashes s =
+  let rec find_last_non_slash i =
+    if i < 0 then -1
+    else if s.[i] = '/' then find_last_non_slash (i - 1)
+    else i
+  in
+  let last = find_last_non_slash (String.length s - 1) in
+  if last < 0 then "" else String.sub s 0 (last + 1)
+
+let searxng_base_url () =
+  match Sys.getenv_opt "MASC_SEARXNG_URL" with
+  | Some raw ->
+      let normalized = raw |> String.trim |> strip_trailing_slashes in
+      if normalized = "" then searxng_default_url else normalized
+  | None -> searxng_default_url
+
+let fetch_searxng ~timeout_sec ~query =
+  let base = searxng_base_url () in
+  let search_url =
+    base ^ "/search?q=" ^ Uri.pct_encode query ^ "&format=json"
+  in
+  match
+    Tool_local_runtime_http.http_get_text_with_status ~timeout_sec search_url
+  with
+  | Error _ -> Error "search endpoint unavailable"
+  | Ok (Some 200, payload) -> Ok (search_url, payload)
+  | Ok (Some status, _) ->
+      Error (Printf.sprintf "search endpoint returned HTTP %d" status)
+  | Ok (None, _) -> Error "search endpoint returned no HTTP status"
 
 let fetch_ddg_html ~timeout_sec ~query =
   let search_url =
@@ -597,6 +649,16 @@ let fetch_bing_api ~timeout_sec ~query ~limit =
 let fetch_provider ~query ~limit provider =
   let timeout_sec = Env_config.Tools.web_search_timeout_sec () in
   match provider with
+  | Searxng -> (
+      match fetch_searxng ~timeout_sec ~query with
+      | Error msg -> Error msg
+      | Ok (search_url, payload) ->
+          let hits =
+            parse_searxng_json payload
+            |> take_results limit
+            |> normalize_hits ~source:(provider_to_string Searxng)
+          in
+          Ok { engine = provider_to_string Searxng; search_url; hits })
   | Brave -> fetch_brave ~timeout_sec ~query ~limit
   | Tavily -> fetch_tavily ~timeout_sec ~query ~limit
   | Exa -> fetch_exa ~timeout_sec ~query ~limit

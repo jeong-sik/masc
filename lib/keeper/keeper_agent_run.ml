@@ -137,6 +137,43 @@ let merge_tool_selection_boundary
   in
   Keeper_types.dedupe_keep_order (deterministic_floor @ llm_selected)
 
+let tool_index_entry_of_tool
+    ~(korean_kw_tbl : (string, string) Hashtbl.t)
+    (t : Agent_sdk.Tool.t) : Agent_sdk.Tool_index.entry =
+  let name = t.schema.name in
+  let group =
+    if String.starts_with ~prefix:"keeper_board_" name then Some "board"
+    else if String.starts_with ~prefix:"keeper_memory_" name
+         || String.starts_with ~prefix:"keeper_library_" name then Some "knowledge"
+    else if String.starts_with ~prefix:"keeper_task" name then Some "tasks"
+    else if String.starts_with ~prefix:"keeper_voice_" name then Some "voice"
+    else if String.starts_with ~prefix:"keeper_fs_" name
+         || name = "keeper_shell_readonly"
+         || name = "keeper_bash"
+         || name = "keeper_write" then Some "filesystem"
+    else if name = "keeper_github" then Some "vcs"
+    else if String.starts_with ~prefix:"masc_board_" name then Some "masc_board"
+    else if String.starts_with ~prefix:"masc_keeper_" name then Some "masc_keeper"
+    else if String.starts_with ~prefix:"masc_plan_" name then Some "masc_plan"
+    else if String.starts_with ~prefix:"masc_team_session_" name then Some "masc_session"
+    else if String.starts_with ~prefix:"masc_worktree_" name then Some "masc_worktree"
+    else if String.starts_with ~prefix:"masc_code_" name then Some "masc_code"
+    else if String.starts_with ~prefix:"masc_governance_" name then Some "masc_governance"
+    else if String.starts_with ~prefix:"masc_autoresearch_" name then Some "masc_autoresearch"
+    else if String.starts_with ~prefix:"masc_agent_" name
+         || name = "masc_agents" then Some "masc_agent"
+    else if String.starts_with ~prefix:"masc_" name then Some "masc_core"
+    else None
+  in
+  let aliases =
+    match Hashtbl.find_opt korean_kw_tbl name with
+    | Some kw ->
+        String.split_on_char ' ' kw
+        |> List.filter (fun s -> s <> "")
+    | None -> []
+  in
+  Agent_sdk.Tool_index.{ name; description = t.schema.description; group; aliases }
+
 let log_keeper_proof ~(keeper_name : string) (proof : Agent_sdk.Cdal_proof.t) =
   let status_string =
     Agent_sdk.Cdal_proof.show_result_status proof.result_status
@@ -599,40 +636,9 @@ let run_turn
   let tool_index_config =
     { Agent_sdk.Tool_index.default_config with
       top_k = Keeper_config.keeper_tool_search_top_k () } in
-  let tool_entries = List.map (fun (t : Agent_sdk.Tool.t) ->
-    let name = t.schema.name in
-    let group =
-      if String.starts_with ~prefix:"keeper_board_" name then Some "board"
-      else if String.starts_with ~prefix:"keeper_memory_" name
-           || String.starts_with ~prefix:"keeper_library_" name then Some "knowledge"
-      else if String.starts_with ~prefix:"keeper_task" name then Some "tasks"
-      else if String.starts_with ~prefix:"keeper_voice_" name then Some "voice"
-      else if String.starts_with ~prefix:"keeper_fs_" name
-           || name = "keeper_shell_readonly"
-           || name = "keeper_bash"
-           || name = "keeper_write" then Some "filesystem"
-      else if name = "keeper_github" then Some "vcs"
-      else if String.starts_with ~prefix:"masc_board_" name then Some "masc_board"
-      else if String.starts_with ~prefix:"masc_keeper_" name then Some "masc_keeper"
-      else if String.starts_with ~prefix:"masc_plan_" name then Some "masc_plan"
-      else if String.starts_with ~prefix:"masc_team_session_" name then Some "masc_session"
-      else if String.starts_with ~prefix:"masc_worktree_" name then Some "masc_worktree"
-      else if String.starts_with ~prefix:"masc_code_" name then Some "masc_code"
-      else if String.starts_with ~prefix:"masc_governance_" name then Some "masc_governance"
-      else if String.starts_with ~prefix:"masc_autoresearch_" name then Some "masc_autoresearch"
-      else if String.starts_with ~prefix:"masc_agent_" name
-           || name = "masc_agents" then Some "masc_agent"
-      else if String.starts_with ~prefix:"masc_" name then Some "masc_core"
-      else None
-    in
-    let aliases = match Hashtbl.find_opt korean_kw_tbl name with
-      | Some kw ->
-        String.split_on_char ' ' kw
-        |> List.filter (fun s -> s <> "")
-      | None -> []
-    in
-    Agent_sdk.Tool_index.{ name; description = t.schema.description; group; aliases }
-  ) keeper_tools in
+  let tool_entries =
+    List.map (tool_index_entry_of_tool ~korean_kw_tbl) keeper_tools
+  in
   (* Full-universe search index for keeper_tool_search.
      Separate from the preset-scoped Tool_selector used for progressive disclosure:
      search needs access to ALL tools so the keeper can discover beyond its preset.
@@ -653,7 +659,7 @@ let run_turn
       top_k = max 30 (Keeper_config.keeper_max_tools_per_turn ()) }
   in
   let preset_tool_entries =
-    List.filter (fun entry -> Hashtbl.mem preset_set entry.name) tool_entries
+    List.map (tool_index_entry_of_tool ~korean_kw_tbl) preset_tools
   in
   let preset_search_index =
     Agent_sdk.Tool_index.build ~config:progressive_tool_index_config

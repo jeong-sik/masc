@@ -25,6 +25,29 @@ let dedupe_schemas (schemas : Types.tool_schema list) =
 let prefixed_tool_names names =
   names |> List.map (fun name -> "mcp__masc__" ^ name)
 
+let lookup_schemas_by_name_exn ~label all_schemas values =
+  let requested =
+    values
+    |> List.map String.trim
+    |> List.filter (fun value -> value <> "")
+    |> unique_preserve_order
+  in
+  let by_name = Hashtbl.create (List.length all_schemas) in
+  List.iter
+    (fun (schema : Types.tool_schema) ->
+      if not (Hashtbl.mem by_name schema.name) then
+        Hashtbl.add by_name schema.name schema)
+    all_schemas;
+  let missing =
+    requested
+    |> List.filter (fun tool_name -> not (Hashtbl.mem by_name tool_name))
+  in
+  if missing <> [] then
+    invalid_arg
+      (Printf.sprintf "%s: unknown tool schema(s): %s" label
+         (String.concat ", " missing));
+  requested |> List.map (Hashtbl.find by_name)
+
 let spawned_agent_public_tool_names : string list =
   Tool_catalog.tools_for_surface Tool_catalog.Spawned_agent
 
@@ -37,107 +60,23 @@ let local_worker_public_tool_names : string list =
 let local_worker_contract_schemas : Types.tool_schema list =
   Sdk_tool_contract.sdk_tool_schemas
 
-let local_worker_compat_passthrough_schemas : Types.tool_schema list =
+let local_worker_compat_passthrough_tool_names =
   [
-    {
-      Types.name = "masc_status";
-      description =
-        "Get the current MASC room status including active agents and task backlog.";
-      input_schema =
-        `Assoc [ ("type", `String "object"); ("properties", `Assoc []) ];
-    };
-    {
-      Types.name = "masc_tasks";
-      description =
-        "List tasks in the backlog with status, assignee, and priority.";
-      input_schema =
-        `Assoc
-          [
-            ("type", `String "object");
-            ( "properties",
-              `Assoc
-                [
-                  ("status", `Assoc [ ("type", `String "string") ]);
-                  ("include_done", `Assoc [ ("type", `String "boolean") ]);
-                  ("include_cancelled", `Assoc [ ("type", `String "boolean") ]);
-                ] );
-          ];
-    };
-    {
-      Types.name = "masc_claim_next";
-      description =
-        "Claim the next available task automatically by priority order.";
-      input_schema =
-        `Assoc
-          [
-            ("type", `String "object");
-            ( "properties",
-              `Assoc [ ("agent_name", `Assoc [ ("type", `String "string") ]) ] );
-            ("required", `List [ `String "agent_name" ]);
-          ];
-    };
-    {
-      Types.name = "masc_transition";
-      description =
-        "Move a task through claim/start/done/cancel/release transitions.";
-      input_schema =
-        `Assoc
-          [
-            ("type", `String "object");
-            ( "properties",
-              `Assoc
-                [
-                  ("agent_name", `Assoc [ ("type", `String "string") ]);
-                  ("task_id", `Assoc [ ("type", `String "string") ]);
-                  ("action", `Assoc [ ("type", `String "string") ]);
-                  ("expected_version", `Assoc [ ("type", `String "integer") ]);
-                  ("notes", `Assoc [ ("type", `String "string") ]);
-                  ("reason", `Assoc [ ("type", `String "string") ]);
-                ] );
-            ( "required",
-              `List
-                [
-                  `String "agent_name";
-                  `String "task_id";
-                  `String "action";
-                ] );
-          ];
-    };
-    {
-      Types.name = "masc_add_task";
-      description = "Add a new task to the MASC backlog.";
-      input_schema =
-        `Assoc
-          [
-            ("type", `String "object");
-            ( "properties",
-              `Assoc
-                [
-                  ("title", `Assoc [ ("type", `String "string") ]);
-                  ("priority", `Assoc [ ("type", `String "integer") ]);
-                  ("description", `Assoc [ ("type", `String "string") ]);
-                ] );
-            ("required", `List [ `String "title" ]);
-          ];
-    };
-    {
-      Types.name = "masc_broadcast";
-      description = "Broadcast a message to all agents in the room.";
-      input_schema =
-        `Assoc
-          [
-            ("type", `String "object");
-            ( "properties",
-              `Assoc
-                [
-                  ("agent_name", `Assoc [ ("type", `String "string") ]);
-                  ("message", `Assoc [ ("type", `String "string") ]);
-                  ("format", `Assoc [ ("type", `String "string") ]);
-                ] );
-            ("required", `List [ `String "agent_name"; `String "message" ]);
-          ];
-    };
+    "masc_status";
+    "masc_tasks";
+    "masc_claim_next";
+    "masc_transition";
+    "masc_add_task";
+    "masc_broadcast";
   ]
+
+let local_worker_compat_passthrough_schemas : Types.tool_schema list =
+  lookup_schemas_by_name_exn
+    ~label:"agent_tool_surfaces.local_worker_compat_passthrough_schemas"
+    (Tool_schemas_room_core.schemas
+     @ Tool_task_schemas.schemas
+     @ Tool_schemas_inline_room.schemas)
+    local_worker_compat_passthrough_tool_names
 
 let local_worker_internal_schemas : Types.tool_schema list =
   [

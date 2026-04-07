@@ -361,7 +361,7 @@ let make_hooks
           if prev_name = tool_name then prev_count + 1 else 1
         in
         tool_name_streak := (tool_name, new_count);
-        if new_count = reflection_threshold then begin
+        if new_count >= reflection_threshold then begin
           Log.Keeper.info
             "keeper:%s self-reflection: %s called %d times consecutively"
             keeper_name tool_name new_count;

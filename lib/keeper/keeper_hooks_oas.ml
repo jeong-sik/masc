@@ -269,7 +269,7 @@ let make_hooks
   (* Self-reflection: track consecutive calls to the same tool NAME
      (regardless of args). The gate fires only after safety gates pass,
      so blocked/denied tools never consume streak slots. *)
-  let tool_name_streak = ref ("", 0) in  (* (last_tool_name, count) *)
+  let tool_name_streak = ref ("", 0) in (* (last_tool_name, count) *)
   let reflection_threshold = 5 in
   { Agent_sdk.Hooks.empty with
 

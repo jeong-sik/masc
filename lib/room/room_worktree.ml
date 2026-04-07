@@ -148,9 +148,13 @@ let worktree_create_r ?(link_task=true) config ~agent_name ~task_id ~base_branch
                   | Some missing ->
                       Printf.sprintf "\n  Note: origin/%s not found; used origin/%s" missing resolved_base
                 in
-                (* Create worktree with new branch from base *)
-                let exit_code =
-                  run_argv_exit
+                (* Create worktree with force-branch (-B) from base.
+                   -B resets the branch if it already exists (stale from a
+                   previous session), avoiding the TOCTOU race of
+                   check-delete-create and the permanent failure when keeper
+                   branches are not cleaned up after worktree removal. *)
+                let exit_code, git_output =
+                  Process_eio.run_argv_with_status ~timeout_sec:30.0
                     [
                       "git";
                       "-C";
@@ -158,13 +162,13 @@ let worktree_create_r ?(link_task=true) config ~agent_name ~task_id ~base_branch
                       "worktree";
                       "add";
                       worktree_path;
-                      "-b";
+                      "-B";
                       branch_name;
                       Printf.sprintf "origin/%s" resolved_base;
                     ]
                 in
 
-                if exit_code = 0 then begin
+                if exit_code = Unix.WEXITED 0 then begin
                   (* Update agent's current_worktree in state *)
                   update_agent_current_task ();
 
@@ -181,7 +185,9 @@ let worktree_create_r ?(link_task=true) config ~agent_name ~task_id ~base_branch
                       worktree_path branch_name repo_name note link_note worktree_path)
                 end
                 else
-                  Error (IoError (Printf.sprintf "Failed to create worktree from origin/%s." resolved_base))
+                  let detail = String.trim git_output in
+                  Error (IoError (Printf.sprintf "Failed to create worktree from origin/%s: %s"
+                    resolved_base (if detail = "" then "(no output)" else detail)))
           end
   end
 

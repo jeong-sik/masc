@@ -85,6 +85,16 @@ let read_json_file_safe path : (Yojson.Safe.t, string) result =
   | Error e -> Error e
   | Ok content -> parse_json_safe ~context:path content
 
+(** Read JSON file safely, logging errors instead of silently discarding them.
+    Returns [Some json] on success, [None] on failure with a warning log.
+    Use this as a drop-in replacement for [read_json_file_safe |> Error _ -> None]. *)
+let read_json_file_logged ~label path : Yojson.Safe.t option =
+  match read_json_file_safe path with
+  | Ok json -> Some json
+  | Error msg ->
+    Log.Misc.warn "[%s] failed to read JSON from %s: %s" label path msg;
+    None
+
 (** Read JSON file via Eio-native I/O (Fs_compat).
     Drop-in replacement for [Yojson.Safe.from_file] in Eio fiber contexts.
     Falls back to blocking I/O when Eio fs is not set. *)

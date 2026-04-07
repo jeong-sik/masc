@@ -341,9 +341,9 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
   match persona_profile_path_opt name with
   | None -> empty_keeper_profile_defaults
   | Some path -> (
-      match Safe_ops.read_json_file_safe path with
-      | Error _ -> empty_keeper_profile_defaults
-      | Ok json ->
+      match Safe_ops.read_json_file_logged ~label:"load_keeper_profile_defaults" path with
+      | None -> empty_keeper_profile_defaults
+      | Some json ->
           let keeper_json = Yojson.Safe.Util.member "keeper" json in
           match keeper_json with
           | `Assoc _ ->
@@ -464,7 +464,9 @@ let load_persona_extended ?(max_chars = persona_description_max_chars) name : st
       let path = Filename.concat (Filename.concat root name) "AGENT.md" in
       if Sys.file_exists path then
         match Safe_ops.read_file_safe path with
-        | Error _ -> None
+        | Error msg ->
+          Log.Keeper.warn "[load_agent_md] failed to read %s: %s" path msg;
+          None
         | Ok content ->
           let trimmed = String.trim content in
           if String.length trimmed = 0 then None
@@ -476,9 +478,9 @@ let load_persona_summary name : persona_summary option =
   match persona_profile_path_opt name with
   | None -> None
   | Some path -> (
-      match Safe_ops.read_json_file_safe path with
-      | Error _ -> None
-      | Ok json ->
+      match Safe_ops.read_json_file_logged ~label:"load_persona_summary" path with
+      | None -> None
+      | Some json ->
           let display_name =
             Safe_ops.json_string_opt "name" json |> Option.value ~default:name
           in
@@ -500,9 +502,9 @@ let load_persona_summary name : persona_summary option =
             })
 
 let load_persona_summary_from_path name profile_path : persona_summary option =
-  match Safe_ops.read_json_file_safe profile_path with
-  | Error _ -> None
-  | Ok json ->
+  match Safe_ops.read_json_file_logged ~label:"load_persona_summary_from_path" profile_path with
+  | None -> None
+  | Some json ->
       let display_name =
         Safe_ops.json_string_opt "name" json |> Option.value ~default:name
       in

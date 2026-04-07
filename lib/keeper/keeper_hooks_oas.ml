@@ -3,10 +3,13 @@
     Maps keeper-specific behaviors (checkpoint, metrics, social events,
     safety gates) to OAS hook events.
 
-    Safety checks in [pre_tool_use]:
+    Safety checks in [pre_tool_use] (evaluated in order):
+    - Deny list: block tools on the keeper-level deny list
     - Cost budget: reject tool calls when accumulated cost exceeds limit
     - Destructive patterns: reject bash/edit tools with dangerous commands
       (rm -rf, drop table, force push, etc.)
+    - Self-reflection gate: after all safety checks pass, override with a
+      reflection prompt when the same tool name is called 5+ times in a row
 
     These checks were previously in [Eval_gate.guarded_execute] and are
     now natively integrated into the Agent.run() hook lifecycle.
@@ -218,6 +221,33 @@ let on_idle_decision ~consecutive_idle_turns ~allowed_tools ~tool_names
   on_idle_decision_with_threshold ~skip_at ~consecutive_idle_turns
     ~allowed_tools ~tool_names
 
+(** Pure helper for the self-reflection streak gate.
+
+    Updates the consecutive-tool-name streak and returns the new streak
+    state along with an optional Override decision.  [streak_state] is
+    [(last_tool_name, consecutive_count)].  Returns
+    [(new_state, Some (Override msg))] when [new_count >= threshold],
+    and [(new_state, None)] when the call should proceed normally.
+
+    Callers are responsible for persisting [new_state] back to their
+    mutable ref. *)
+let streak_reflection_decision ~tool_name ~streak_state ~threshold =
+  let prev_name, prev_count = streak_state in
+  let new_count = if prev_name = tool_name then prev_count + 1 else 1 in
+  let new_state = (tool_name, new_count) in
+  if new_count >= threshold then
+    ( new_state,
+      Some
+        (Agent_sdk.Hooks.Override
+           (Printf.sprintf
+              "Self-reflection required: You have called %s %d times in a row. \
+               Pause and evaluate: What have you learned so far? \
+               Are you making progress? Decide your next action — \
+               act on what you found, or move on."
+              tool_name new_count)) )
+  else
+    (new_state, None)
+
 let make_hooks
     ~config:(_config : Room.config)
     ~(meta_ref : Keeper_types.keeper_meta ref)
@@ -237,8 +267,8 @@ let make_hooks
   in
   let tool_start_time = ref 0.0 in
   (* Self-reflection: track consecutive calls to the same tool NAME
-     (regardless of args). When a tool is called too many times,
-     pre_tool_use injects a reflection prompt instead of executing. *)
+     (regardless of args). The gate fires only after safety gates pass,
+     so blocked/denied tools never consume streak slots. *)
   let tool_name_streak = ref ("", 0) in  (* (last_tool_name, count) *)
   let reflection_threshold = 5 in
   { Agent_sdk.Hooks.empty with
@@ -353,27 +383,6 @@ let make_hooks
       | Agent_sdk.Hooks.PreToolUse { tool_name; input; accumulated_cost_usd; _ } ->
         tool_start_time := Time_compat.now ();
         let keeper_name = (!meta_ref).name in
-        (* Self-reflection gate: when the same tool name is called
-           [reflection_threshold]+ times consecutively, override with a
-           reflection prompt so the model evaluates its own progress. *)
-        let prev_name, prev_count = !tool_name_streak in
-        let new_count =
-          if prev_name = tool_name then prev_count + 1 else 1
-        in
-        tool_name_streak := (tool_name, new_count);
-        if new_count >= reflection_threshold then begin
-          Log.Keeper.info
-            "keeper:%s self-reflection: %s called %d times consecutively"
-            keeper_name tool_name new_count;
-          Agent_sdk.Hooks.Override
-            (Printf.sprintf
-               "Self-reflection required: You have called %s %d times in a row. \
-                Pause and evaluate: What have you learned so far? \
-                Are you making progress? Decide your next action — \
-                act on what you found, or move on."
-               tool_name new_count)
-        end
-        else
         (* Safety gate 0: Keeper deny list *)
         if List.mem tool_name keeper_denied_tools then begin
           Log.Keeper.warn "keeper:%s deny list: blocked %s"
@@ -401,23 +410,44 @@ let make_hooks
                 ~tool_name ~reason_code:"cost_gate" ~reason_text)
          | _ ->
            (* Safety gate 2: Destructive pattern detection *)
-           if destructive_check && List.mem tool_name destructive_check_tools then
-             let cmd = extract_command_from_input input in
-             match Eval_gate.detect_destructive cmd with
-             | Some (pattern, desc) ->
-               let reason_text =
-                 Printf.sprintf "pattern='%s' (%s)" pattern desc
-               in
-               Log.Keeper.warn "keeper:%s destructive pattern in %s: '%s' (%s)"
-                 keeper_name tool_name pattern desc;
-               broadcast_tool_skipped ~keeper_name ~tool_name
-                 ~reason_code:"destructive_guard";
-               Agent_sdk.Hooks.Override
-                 (render_inline_skip_reason
-                    ~tool_name ~reason_code:"destructive_guard" ~reason_text)
-             | None -> Agent_sdk.Hooks.Continue
-           else
-             Agent_sdk.Hooks.Continue)
+           let destructive_override =
+             if destructive_check && List.mem tool_name destructive_check_tools then
+               let cmd = extract_command_from_input input in
+               match Eval_gate.detect_destructive cmd with
+               | Some (pattern, desc) ->
+                 let reason_text =
+                   Printf.sprintf "pattern='%s' (%s)" pattern desc
+                 in
+                 Log.Keeper.warn "keeper:%s destructive pattern in %s: '%s' (%s)"
+                   keeper_name tool_name pattern desc;
+                 broadcast_tool_skipped ~keeper_name ~tool_name
+                   ~reason_code:"destructive_guard";
+                 Some
+                   (render_inline_skip_reason
+                      ~tool_name ~reason_code:"destructive_guard" ~reason_text)
+               | None -> None
+             else
+               None
+           in
+           (match destructive_override with
+            | Some msg -> Agent_sdk.Hooks.Override msg
+            | None ->
+              (* All safety gates passed.  Update the streak and apply the
+                 self-reflection gate so that blocked/denied tools never
+                 consume streak slots or mask enforcement reasons. *)
+              let new_state, reflection_opt =
+                streak_reflection_decision ~tool_name
+                  ~streak_state:!tool_name_streak
+                  ~threshold:reflection_threshold
+              in
+              tool_name_streak := new_state;
+              (match reflection_opt with
+               | Some decision ->
+                 Log.Keeper.info
+                   "keeper:%s self-reflection: %s called %d times consecutively"
+                   keeper_name tool_name (snd new_state);
+                 decision
+               | None -> Agent_sdk.Hooks.Continue)))
       | _ -> Agent_sdk.Hooks.Continue);
 
     on_idle = Some (fun event ->

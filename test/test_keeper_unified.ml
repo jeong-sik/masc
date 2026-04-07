@@ -1864,6 +1864,75 @@ let test_on_idle_skip_with_custom_threshold () =
       (Agent_sdk.Hooks.decision_kind_to_string
         (Agent_sdk.Hooks.classify_decision other)))
 
+(* --- streak_reflection_decision tests --- *)
+
+let test_streak_below_threshold () =
+  (* Calling a tool fewer than threshold times must not trigger a reflection *)
+  let state = ref ("", 0) in
+  for _ = 1 to 4 do
+    let new_state, decision_opt =
+      HK.streak_reflection_decision ~tool_name:"board_get"
+        ~streak_state:!state ~threshold:5
+    in
+    state := new_state;
+    check bool "below threshold: no override" true (decision_opt = None)
+  done
+
+let test_streak_at_threshold () =
+  (* On the 5th consecutive call the helper must return an Override *)
+  let state = ref ("", 0) in
+  let last_opt = ref None in
+  for _ = 1 to 5 do
+    let new_state, decision_opt =
+      HK.streak_reflection_decision ~tool_name:"board_get"
+        ~streak_state:!state ~threshold:5
+    in
+    state := new_state;
+    last_opt := decision_opt
+  done;
+  (match !last_opt with
+   | Some (Agent_sdk.Hooks.Override msg) ->
+     check bool "reflection msg mentions tool name"
+       true (contains_substring msg "board_get")
+   | _ -> fail "expected Override on 5th consecutive call")
+
+let test_streak_above_threshold () =
+  (* Calls 6 and beyond must also return an Override (>= check) *)
+  let state = ref ("", 0) in
+  for _ = 1 to 6 do
+    let new_state, _ =
+      HK.streak_reflection_decision ~tool_name:"board_get"
+        ~streak_state:!state ~threshold:5
+    in
+    state := new_state
+  done;
+  let _, decision_opt =
+    HK.streak_reflection_decision ~tool_name:"board_get"
+      ~streak_state:!state ~threshold:5
+  in
+  (match decision_opt with
+   | Some (Agent_sdk.Hooks.Override _) -> ()
+   | _ -> fail "expected Override on 7th consecutive call (above threshold)")
+
+let test_streak_resets_on_tool_change () =
+  (* Switching tool name must reset the count to 1, with no override *)
+  let state = ref ("", 0) in
+  for _ = 1 to 5 do
+    let new_state, _ =
+      HK.streak_reflection_decision ~tool_name:"board_get"
+        ~streak_state:!state ~threshold:5
+    in
+    state := new_state
+  done;
+  (* After 5 calls of board_get, switch to a different tool *)
+  let new_state, decision_opt =
+    HK.streak_reflection_decision ~tool_name:"board_list"
+      ~streak_state:!state ~threshold:5
+  in
+  state := new_state;
+  check bool "after tool change: no override" true (decision_opt = None);
+  check int "streak reset to 1" 1 (snd !state)
+
 let test_prompt_no_outcome_for_fresh_keeper () =
   let _sys, user = UP.build_prompt ~base_path:"/test" ~meta:minimal_meta ~observation:base_observation in
   check bool "no Last Cycle Outcome for fresh keeper"
@@ -1973,6 +2042,14 @@ let () =
             test_on_idle_skip_at_repeated_idle;
           test_case "on_idle skip with custom threshold" `Quick
             test_on_idle_skip_with_custom_threshold;
+          test_case "streak: below threshold no override" `Quick
+            test_streak_below_threshold;
+          test_case "streak: at threshold returns override" `Quick
+            test_streak_at_threshold;
+          test_case "streak: above threshold still overrides" `Quick
+            test_streak_above_threshold;
+          test_case "streak: tool change resets count" `Quick
+            test_streak_resets_on_tool_change;
         ] );
       ( "config",
         [

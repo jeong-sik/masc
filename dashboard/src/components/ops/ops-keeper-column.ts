@@ -44,11 +44,12 @@ export function OpsKeeperColumn() {
   const busy = operatorActionBusy.value
 
   const statusCounts = keepers.reduce((acc: Record<string, number>, k) => {
-    const s = k.status === 'active' || k.status === 'running' ? 'running'
-      : k.status === 'offline' ? 'offline'
-      : k.status === 'paused' ? 'paused'
-      : k.status === 'crashed' ? 'crashed'
-      : k.status === 'dead' ? 'dead'
+    const raw = (k.status ?? '').trim().toLowerCase()
+    const s = raw === 'active' || raw === 'busy' ? 'active'
+      : raw === 'listening' || raw === 'idle' ? 'idle'
+      : raw === 'paused' ? 'paused'
+      : (raw === 'offline' || raw === 'inactive')
+        ? ((k.generation ?? 0) === 0 && (k.turn_count ?? 0) === 0 ? 'unbooted' : 'stopped')
       : 'other'
     acc[s] = (acc[s] ?? 0) + 1
     return acc
@@ -60,11 +61,11 @@ export function OpsKeeperColumn() {
         <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider pb-2 border-b border-[var(--card-border)]">키퍼 목록</h3>
         ${keepers.length > 0 ? html`
           <div class="flex gap-3 text-[11px] font-mono">
-            ${statusCounts.running ? html`<span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-[var(--ok)]"></span>${statusCounts.running} running</span>` : null}
+            ${statusCounts.active ? html`<span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-[var(--ok)]"></span>${statusCounts.active} active</span>` : null}
+            ${statusCounts.idle ? html`<span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-[var(--accent)]"></span>${statusCounts.idle} idle</span>` : null}
             ${statusCounts.paused ? html`<span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-[var(--warn)]"></span>${statusCounts.paused} paused</span>` : null}
-            ${statusCounts.crashed ? html`<span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-[var(--bad)]"></span>${statusCounts.crashed} crashed</span>` : null}
-            ${statusCounts.dead ? html`<span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-[#6b7280]"></span>${statusCounts.dead} dead</span>` : null}
-            ${statusCounts.offline ? html`<span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-[var(--text-muted)]"></span>${statusCounts.offline} offline</span>` : null}
+            ${statusCounts.stopped ? html`<span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-[#94a3b8]"></span>${statusCounts.stopped} stopped</span>` : null}
+            ${statusCounts.unbooted ? html`<span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-[#475569]"></span>${statusCounts.unbooted} unbooted</span>` : null}
           </div>
         ` : null}
         <p class="text-[12px] text-[var(--text-muted)] leading-[1.45]">keeper를 선택하면 아래에서 메시지를 보내거나 상세 정보를 볼 수 있습니다.</p>
@@ -84,7 +85,7 @@ export function OpsKeeperColumn() {
                 <strong class="text-[13px] font-semibold">${keeper.name}</strong>
                 <div class="flex items-center gap-2 ml-auto">
                   <span class="inline-flex items-center gap-1.5 text-[11px]">
-                    <span class="w-2 h-2 rounded-full ${keeper.status === 'offline' ? 'bg-[var(--text-muted)]' : keeper.status === 'active' || keeper.status === 'running' ? 'bg-[var(--ok)]' : 'bg-[var(--warn)]'}"></span>
+                    <span class="w-2 h-2 rounded-full ${keeper.status === 'active' || keeper.status === 'busy' ? 'bg-[var(--ok)]' : keeper.status === 'idle' || keeper.status === 'listening' ? 'bg-[var(--accent)]' : keeper.status === 'paused' ? 'bg-[var(--warn)]' : 'bg-[var(--text-muted)]'}"></span>
                     ${displayStatus(keeper.status)}
                   </span>
                   <button type="button"
@@ -94,8 +95,8 @@ export function OpsKeeperColumn() {
                 </div>
               </div>
               <div class="text-[11px] text-[var(--text-muted)] mt-1 whitespace-nowrap overflow-hidden text-ellipsis flex gap-2">
-                <span>${keeper.last_model_used ?? keeper.model ?? 'model 확인 필요'}</span>
-                <span>${typeof keeper.context_ratio === 'number' ? `${Math.round(keeper.context_ratio * 100)}% ctx` : typeof keeper.context_tokens === 'number' ? `${Math.round(keeper.context_tokens / 1000)}k tok` : 'ctx 확인 필요'}</span>
+                ${keeper.last_model_used || keeper.model ? html`<span>${keeper.last_model_used ?? keeper.model}</span>` : null}
+                ${typeof keeper.context_ratio === 'number' && Number.isFinite(keeper.context_ratio) ? html`<span>${Math.round(keeper.context_ratio * 100)}% ctx</span>` : typeof keeper.context_tokens === 'number' ? html`<span>${Math.round(keeper.context_tokens / 1000)}k tok</span>` : null}
                 <span>${relativeAge(keeper.last_turn_ago_s)}</span>
               </div>
               ${keeper.short_goal || keeper.goal ? html`
@@ -131,7 +132,7 @@ export function OpsKeeperColumn() {
                   </div>
                   <div class="text-[11px] text-[var(--text-muted)] mt-1 whitespace-nowrap overflow-hidden text-ellipsis flex gap-2">
                     <span>persistent</span>
-                    <span>${agent.model ?? 'model 확인 필요'}</span>
+                    ${agent.model ? html`<span>${agent.model}</span>` : null}
                     <span>${relativeAge(agent.last_turn_ago_s)}</span>
                   </div>
                 </article>
@@ -148,7 +149,7 @@ export function OpsKeeperColumn() {
             <div class="flex justify-between items-center gap-3 max-[880px]:flex-col max-[880px]:items-start">
               <strong>${selectedKeeper.name}</strong>
               <span class="inline-flex items-center gap-1.5 text-[11px]">
-                <span class="w-2 h-2 rounded-full ${selectedKeeper.status === 'offline' ? 'bg-[var(--text-muted)]' : selectedKeeper.status === 'active' || selectedKeeper.status === 'running' ? 'bg-[var(--ok)]' : 'bg-[var(--warn)]'}"></span>
+                <span class="w-2 h-2 rounded-full ${selectedKeeper.status === 'active' || selectedKeeper.status === 'busy' ? 'bg-[var(--ok)]' : selectedKeeper.status === 'idle' || selectedKeeper.status === 'listening' ? 'bg-[var(--accent)]' : selectedKeeper.status === 'paused' ? 'bg-[var(--warn)]' : 'bg-[var(--text-muted)]'}"></span>
                 ${displayStatus(selectedKeeper.status)}
               </span>
             </div>
@@ -156,8 +157,8 @@ export function OpsKeeperColumn() {
               ${keeperPrioritySummary(selectedKeeper)}
             </div>
             <div class="text-[11px] text-[var(--text-muted)] whitespace-nowrap overflow-hidden text-ellipsis flex gap-2">
-              <span>${selectedKeeper.last_model_used ?? selectedKeeper.model ?? 'model 확인 필요'}</span>
-              <span>${typeof selectedKeeper.context_ratio === 'number' ? `${Math.round(selectedKeeper.context_ratio * 100)}% ctx` : typeof selectedKeeper.context_tokens === 'number' ? `${Math.round(selectedKeeper.context_tokens / 1000)}k tok` : 'ctx 확인 필요'}</span>
+              ${selectedKeeper.last_model_used || selectedKeeper.model ? html`<span>${selectedKeeper.last_model_used ?? selectedKeeper.model}</span>` : null}
+              ${typeof selectedKeeper.context_ratio === 'number' && Number.isFinite(selectedKeeper.context_ratio) ? html`<span>${Math.round(selectedKeeper.context_ratio * 100)}% ctx</span>` : typeof selectedKeeper.context_tokens === 'number' ? html`<span>${Math.round(selectedKeeper.context_tokens / 1000)}k tok</span>` : null}
               <span>${relativeAge(selectedKeeper.last_turn_ago_s)}</span>
             </div>
           </article>

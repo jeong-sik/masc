@@ -21,10 +21,9 @@ let board_reactive_debounce_sec = Env_config.KeeperKeepalive.board_debounce_sec
 let max_history_read_bytes = 256 * 1024
 let max_history_read_lines = 200
 
-(* OAS Event_bus — WORM Atomic: set once at server bootstrap. *)
-let bus_ref : Agent_sdk.Event_bus.t option Atomic.t = Atomic.make None
-let set_bus bus = Atomic.set bus_ref (Some bus)
-let get_bus () = Atomic.get bus_ref
+(* OAS Event_bus — delegated to Keeper_event_bus to avoid dependency cycles. *)
+let set_bus bus = Keeper_event_bus.set bus
+let get_bus () = Keeper_event_bus.get ()
 
 (* Global turn slot cap. Safety ceiling for ALL keeper turns (autonomous
    + reactive). Default 12 = headroom for up to 12 keepers. *)
@@ -494,7 +493,7 @@ let write_heartbeat_snapshot
      | Eio.Cancel.Cancelled _ as e -> raise e
      | exn ->
        Log.Keeper.error "heartbeat SSE broadcast failed: %s" (Printexc.to_string exn));
-    (match Atomic.get bus_ref with
+    (match Keeper_event_bus.get () with
      | Some bus ->
        Oas_events.publish_keeper_snapshot
          bus

@@ -1209,44 +1209,46 @@ let run_turn
       | Error e -> Error (Oas.Error.Internal e)
       | Ok oas_allowed_paths ->
         (match
-        Oas_worker.run_named
-          ~cascade_name
-          ~goal:user_message
-          ~priority
-          ~session_id:meta.runtime.trace_id
-          ~system_prompt:turn_system_prompt
-          ~tools
-          ~compact_ratio:meta.compaction.ratio_gate
-          ~initial_messages:history_messages
-          ~hooks
-          ~context_reducer:reducer
-          ~memory
-          (* Keepers rely on turn-level retry (multi-turn loop) rather than
-             per-call retry. Ideally this would be Tool_retry_policy.none, but
-             OAS does not expose a zero-retry variant yet. default_internal
-             (max_retries=1) is acceptable as a minimal fallback. *)
-          ~tool_retry_policy:Oas.Tool_retry_policy.default_internal
-          ~max_turns
-          ~max_idle_turns
-          ~temperature
-          ~max_tokens
-          ?max_cost_usd
-          ?guardrails
-          ?on_event
-          ?on_yield
-          ?on_resume
-          ~agent_ref
-          ?contract
-          ~allowed_paths:oas_allowed_paths
-          ~cache_system_prompt:true
-          ~yield_on_tool
-          ~checkpoint_dir:session_dir
-          ~context_injector
-          ~context:shared_context
-          ?slot_id:(Keeper_config.keeper_slot_id meta.name)
-          ?oas_checkpoint:raw_oas_checkpoint
-          ?event_bus
-          ()
+        Keeper_llm_bridge.run_with_timeout_and_fallback ~timeout_s:45.0 (fun () ->
+          Oas_worker.run_named
+            ~cascade_name
+            ~goal:user_message
+            ~priority
+            ~session_id:meta.runtime.trace_id
+            ~system_prompt:turn_system_prompt
+            ~tools
+            ~compact_ratio:meta.compaction.ratio_gate
+            ~initial_messages:history_messages
+            ~hooks
+            ~context_reducer:reducer
+            ~memory
+            (* Keepers rely on turn-level retry (multi-turn loop) rather than
+               per-call retry. Ideally this would be Tool_retry_policy.none, but
+               OAS does not expose a zero-retry variant yet. default_internal
+               (max_retries=1) is acceptable as a minimal fallback. *)
+            ~tool_retry_policy:Oas.Tool_retry_policy.default_internal
+            ~max_turns
+            ~max_idle_turns
+            ~temperature
+            ~max_tokens
+            ?max_cost_usd
+            ?guardrails
+            ?on_event
+            ?on_yield
+            ?on_resume
+            ~agent_ref
+            ?contract
+            ~allowed_paths:oas_allowed_paths
+            ~cache_system_prompt:true
+            ~yield_on_tool
+            ~checkpoint_dir:session_dir
+            ~context_injector
+            ~context:shared_context
+            ?slot_id:(Keeper_config.keeper_slot_id meta.name)
+            ?oas_checkpoint:raw_oas_checkpoint
+            ?event_bus
+            ()
+        )
       with
       | Error e -> Error e
       | Ok result ->

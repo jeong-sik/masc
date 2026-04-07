@@ -176,7 +176,8 @@ let auth_requirements_of_model_label model_label =
           else
             Error
               "Gemini Docker workers currently require GEMINI_API_KEY; Vertex ADC is unsupported in v1"
-      | Llm_provider.Provider_config.Claude_code -> Ok [])
+      | Llm_provider.Provider_config.Claude_code -> Ok []
+      | Llm_provider.Provider_config.Ollama -> Ok [])
 
 let missing_required_envs keys =
   keys

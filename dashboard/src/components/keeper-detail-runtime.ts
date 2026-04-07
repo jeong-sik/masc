@@ -58,14 +58,6 @@ export function actionDescriptorLabel(actionType?: string): string {
   }
 }
 
-function keeperTopTools(keeper: Keeper): string[] {
-  const metrics = keeper.metrics_window
-  const topTools = Array.isArray(metrics?.top_tools) ? metrics.top_tools : []
-  return topTools
-    .map(item => (typeof item === 'object' && item !== null && 'tool' in item && typeof item.tool === 'string' ? item.tool : null))
-    .filter((item): item is string => item !== null)
-}
-
 export function resolveKeeperCurrentTaskLabel(
   keeper: Keeper | null | undefined,
 ): string {
@@ -363,7 +355,6 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
   const keeperConfig = peekLoadedKeeperConfig(keeper.name)
   const configLoadStatus = peekKeeperConfigLoadStatus(keeper.name)
   const namespaceStatus = operatorSnapshot.value?.namespace ?? {}
-  const topTools = keeperTopTools(keeper)
   const missionBrief = resolveKeeperMissionBrief(keeper)
   const toolPolicy = resolveKeeperToolPolicy(keeperConfig, configLoadStatus)
   const observedAudit = resolveKeeperObservedToolAudit(keeper, missionBrief)
@@ -485,9 +476,6 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
         <span class="text-xs font-medium text-[var(--text-strong)]">${auditSource ?? metadataFallback}${auditAt ? html` · <${TimeAgo} timestamp=${auditAt} />` : ''}</span>
       </div>
 
-      ${topTools.length > 0
-        ? html`<${ToolSection} title="윈도우 상위 도구" tools=${topTools} fallback="" />`
-        : null}
     </div>
   `
 }

@@ -61,10 +61,10 @@ let transient_backoff_sec (attempt : int) : float =
 
 (** Detect context overflow errors via structured OAS error types.
     Matches [ContextOverflow] (API-level) and [TokenBudgetExceeded]
-    for input tokens (cumulative budget exceeded).  Both are recoverable
+    for input token budget exceeded.  Both are recoverable
     via checkpoint compaction + retry.
 
-    @since 2.255.0 also matches TokenBudgetExceeded(Input) *)
+    @since 2.256.0 also matches TokenBudgetExceeded(Input) *)
 let is_context_overflow (err : Oas.Error.sdk_error) : bool =
   match err with
   | Oas.Error.Api (ContextOverflow _) -> true

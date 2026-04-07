@@ -521,6 +521,7 @@ let compute_metrics_window
                     ("memory_compaction_dropped_notes", `Int memory_compaction_dropped_notes_now);
                     ("memory_compaction_invalid_dropped", `Int memory_compaction_invalid_dropped_now);
                     ("memory_expected_topic", Json_util.string_opt_to_json memory_expected_topic);
+                    ("inference_telemetry", j |> member "inference_telemetry");
                   ])
               with
               | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None

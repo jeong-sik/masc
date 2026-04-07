@@ -685,6 +685,11 @@ let append_metrics_snapshot ~(config : Room.config) ~(meta : keeper_meta)
              ("mode_source", `String p.mode_decision_source);
            ]
          | None -> `Null);
+        ("inference_telemetry",
+         match result.inference_telemetry with
+         | Some t ->
+           Agent_sdk.Types.inference_telemetry_to_yojson t
+         | None -> `Null);
       ]
   in
   Dated_jsonl.append metrics_store snapshot

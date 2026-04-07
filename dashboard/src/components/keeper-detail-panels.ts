@@ -274,6 +274,87 @@ function miniSparkline(
   }).join(' ')
 }
 
+export function InferenceTelemetryPanel({ keeper }: { keeper: Keeper }) {
+  const series = keeper.metrics_series ?? []
+  const telemetryPoints = series.filter(
+    (p: KeeperMetricPoint) => p.inference_telemetry?.timings?.predicted_per_second != null,
+  )
+  if (telemetryPoints.length === 0) return null
+
+  const tokPerSec = telemetryPoints.map(
+    (p: KeeperMetricPoint) => p.inference_telemetry?.timings?.predicted_per_second ?? 0,
+  )
+  const latencies = telemetryPoints.map(
+    (p: KeeperMetricPoint) => p.inference_telemetry?.request_latency_ms ?? 0,
+  )
+  const cacheNs = telemetryPoints.map(
+    (p: KeeperMetricPoint) => p.inference_telemetry?.timings?.cache_n ?? 0,
+  )
+  const reasoningTokens = telemetryPoints.map(
+    (p: KeeperMetricPoint) => p.inference_telemetry?.reasoning_tokens ?? 0,
+  )
+
+  const W = SPARKLINE_W, H = SPARKLINE_H
+  const lastTps = tokPerSec[tokPerSec.length - 1] ?? 0
+  const avgTps = tokPerSec.reduce((a, b) => a + b, 0) / tokPerSec.length
+  const lastLatency = latencies[latencies.length - 1] ?? 0
+  const totalCacheN = cacheNs.reduce((a, b) => a + b, 0)
+  const totalReasoning = reasoningTokens.reduce((a, b) => a + b, 0)
+
+  const tpsLine = miniSparkline(tokPerSec)
+  const latencyLine = miniSparkline(latencies)
+
+  const lastFp = telemetryPoints[telemetryPoints.length - 1]?.inference_telemetry?.system_fingerprint
+
+  return html`
+    <div class="mb-5">
+      <div class="flex items-center gap-2 mb-2">
+        <span class="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Inference Telemetry</span>
+        <span class="text-[10px] text-[var(--text-dim)]">${telemetryPoints.length} points</span>
+        ${lastFp ? html`<span class="text-[9px] px-1.5 py-0.5 rounded bg-[var(--white-5)] text-[var(--text-dim)] font-mono">${lastFp}</span>` : null}
+      </div>
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+        ${'' /* tok/s sparkline */}
+        <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)]">
+          <div class="flex items-center justify-between mb-1.5">
+            <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">tok/s</span>
+            <span class="text-xs font-mono tabular-nums text-[var(--good)]">${lastTps.toFixed(1)}</span>
+          </div>
+          <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" style="background:#0b1220;">
+            ${tpsLine ? html`<polyline points="${tpsLine}" fill="none" stroke="#4ade80" stroke-width="1.5"/>` : null}
+          </svg>
+          <div class="text-[9px] text-[var(--text-dim)] mt-1">avg ${avgTps.toFixed(1)}</div>
+        </div>
+
+        ${'' /* request latency */}
+        <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)]">
+          <div class="flex items-center justify-between mb-1.5">
+            <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">API latency</span>
+            <span class="text-xs font-mono tabular-nums text-[var(--accent)]">${lastLatency > 0 ? `${(lastLatency / 1000).toFixed(1)}s` : '-'}</span>
+          </div>
+          <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" style="background:#0b1220;">
+            ${latencyLine ? html`<polyline points="${latencyLine}" fill="none" stroke="#9ad9ff" stroke-width="1.5"/>` : null}
+          </svg>
+        </div>
+
+        ${'' /* cache hits */}
+        <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] flex flex-col justify-between">
+          <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">KV Cache</span>
+          <span class="text-lg font-mono tabular-nums text-[var(--purple)]">${totalCacheN > 0 ? totalCacheN.toLocaleString() : '-'}</span>
+          <span class="text-[9px] text-[var(--text-dim)]">cumulative tokens</span>
+        </div>
+
+        ${'' /* reasoning tokens */}
+        <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] flex flex-col justify-between">
+          <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">Reasoning</span>
+          <span class="text-lg font-mono tabular-nums text-[var(--warn)]">${totalReasoning > 0 ? totalReasoning.toLocaleString() : '-'}</span>
+          <span class="text-[9px] text-[var(--text-dim)]">total tokens</span>
+        </div>
+      </div>
+    </div>
+  `
+}
+
 export function MetricsCharts({ keeper }: { keeper: Keeper }) {
   const series = keeper.metrics_series ?? []
   if (series.length < 2) return null

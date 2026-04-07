@@ -24,6 +24,7 @@ import { showToast } from './common/toast'
 import {
   ContextChart,
   EquipmentList,
+  InferenceTelemetryPanel,
   KpiGrid,
   MetricsCharts,
   RawDataDebug,
@@ -376,6 +377,8 @@ export function KeeperDetailOverlay() {
           `
           : null}
 
+        ${'' /* ── Inference Telemetry (tok/s, cache, reasoning) ── */}
+        <${InferenceTelemetryPanel} keeper=${keeper} />
         ${'' /* ── Per-keeper tool telemetry ── */}
         <${KeeperToolTelemetry} keeperName=${keeper.name} />
 

@@ -16,6 +16,8 @@ type transition_record = {
 (** Serialize a transition record for JSONL storage. *)
 val to_json : transition_record -> Yojson.Safe.t
 
+
+
 (** {1 In-memory Ring Buffer} *)
 
 (** Record a transition in the per-keeper ring buffer (last 50). *)

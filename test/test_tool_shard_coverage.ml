@@ -322,6 +322,8 @@ let test_board_tools_names () =
   Alcotest.(check bool) "has board_comment" true (List.mem "keeper_board_comment" names);
   Alcotest.(check bool) "has board_vote" true (List.mem "keeper_board_vote" names)
 
+
+
 (* ============================================================
    Voice tools content tests (#3: all 5 voice tools present)
    ============================================================ *)

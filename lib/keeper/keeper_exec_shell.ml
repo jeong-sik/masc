@@ -394,25 +394,60 @@ let handle_keeper_shell_readonly
     if cmd_str = "" then error_json ~fields:[ "op", `String op ] "command is required for bash op. Good: command='env'. Bad: command=''."
 
     else
-      let dangerous_patterns = [
-        "rm "; "rm\t"; "rmdir"; "> "; ">> "; "| tee "; "mv "; "cp ";
-        "chmod"; "chown"; "kill"; "pkill"; "dd "; "mkfs"; "wget "; "curl.*-o";
-        "git push"; "git reset"; "git checkout"; "git rebase";
-        "pip install"; "npm install"; "opam install";
-        "&&"; "||"; ";";
-      ] in
-      let has_dangerous = List.exists (fun pat ->
-        String_util.contains_substring_ci cmd_str pat
-      ) dangerous_patterns in
-      if has_dangerous then
+      (* Categorised dangerous-pattern table: (pattern, category, hint).
+         On match the first hit wins, so order matters — put specific
+         patterns before generic ones (e.g. "| tee " before "> "). *)
+      let categorised_patterns =
+        [ (* chaining *)
+          "&&",          "chaining",        "Call the tool multiple times instead of chaining commands."
+        ; "||",          "chaining",        "Call the tool multiple times instead of chaining commands."
+        ; ";",           "chaining",        "Call the tool multiple times instead of chaining commands."
+        (* redirect *)
+        ; "| tee ",      "redirect",        "Redirects are not allowed. Use keeper_fs_edit to write files."
+        ; ">> ",         "redirect",        "Redirects are not allowed. Use keeper_fs_edit to write files."
+        ; "> ",          "redirect",        "Redirects are not allowed. Use keeper_fs_edit to write files."
+        (* git write *)
+        ; "git push",    "git_write",       "Use keeper_bash with coding preset for git write operations."
+        ; "git reset",   "git_write",       "Use keeper_bash with coding preset for git write operations."
+        ; "git checkout","git_write",       "Use keeper_bash with coding preset for git write operations."
+        ; "git rebase",  "git_write",       "Use keeper_bash with coding preset for git write operations."
+        (* package install *)
+        ; "pip install", "package_install", "Package installation requires keeper_bash with coding preset."
+        ; "npm install", "package_install", "Package installation requires keeper_bash with coding preset."
+        ; "opam install","package_install", "Package installation requires keeper_bash with coding preset."
+        (* destructive / write *)
+        ; "rm ",         "destructive",     "Use keeper_bash for write operations, not readonly shell."
+        ; "rm\t",        "destructive",     "Use keeper_bash for write operations, not readonly shell."
+        ; "rmdir",       "destructive",     "Use keeper_bash for write operations, not readonly shell."
+        ; "mv ",         "destructive",     "Use keeper_bash for write operations, not readonly shell."
+        ; "cp ",         "destructive",     "Use keeper_bash for write operations, not readonly shell."
+        ; "chmod",       "destructive",     "Use keeper_bash for write operations, not readonly shell."
+        ; "chown",       "destructive",     "Use keeper_bash for write operations, not readonly shell."
+        ; "kill",        "destructive",     "Use keeper_bash for write operations, not readonly shell."
+        ; "pkill",       "destructive",     "Use keeper_bash for write operations, not readonly shell."
+        ; "dd ",         "destructive",     "Use keeper_bash for write operations, not readonly shell."
+        ; "mkfs",        "destructive",     "Use keeper_bash for write operations, not readonly shell."
+        ; "wget ",       "destructive",     "Use keeper_bash for write operations, not readonly shell."
+        ; "curl.*-o",    "destructive",     "Use keeper_bash for write operations, not readonly shell."
+        ]
+      in
+      let matched =
+        List.find_opt (fun (pat, _cat, _hint) ->
+          String_util.contains_substring_ci cmd_str pat
+        ) categorised_patterns
+      in
+      (match matched with
+      | Some (pat, category, hint) ->
         Yojson.Safe.to_string
           (`Assoc
               [ "ok", `Bool false
               ; "op", `String op
               ; "error", `String "command_blocked_readonly"
-              ; "detail", `String "This shell is read-only. Dangerous patterns detected."
+              ; "blocked_pattern", `String pat
+              ; "category", `String category
+              ; "hint", `String hint
               ])
-      else
+      | None ->
         let st, out =
           Process_eio.run_argv_with_status ~timeout_sec:io_timeout_sec
             [ "bash"; "-c"; cmd_str ]
@@ -424,7 +459,7 @@ let handle_keeper_shell_readonly
               ; "command", `String cmd_str
               ; "status", Keeper_alerting_path.process_status_to_json st
               ; "output", `String (Keeper_alerting_path.truncate_tool_output out)
-              ])
+              ]))
   | _ ->
     Yojson.Safe.to_string
       (`Assoc

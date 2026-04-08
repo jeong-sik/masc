@@ -203,6 +203,16 @@ let rec add_routes ~sw ~clock router =
          Http.Response.json ~compress:true ~request:req
            (Yojson.Safe.to_string json) reqd
        ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/tool-quality" (fun request reqd ->
+       with_public_read (fun _state req reqd ->
+         let n = match Server_utils.query_param req "n" with
+           | Some s -> (try int_of_string s with _ -> 5000)
+           | None -> 5000
+         in
+         let json = Dashboard_http_tool_quality.aggregate ~n () in
+         Http.Response.json ~compress:true ~request:req
+           (Yojson.Safe.to_string json) reqd
+       ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/transport-health" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let json = dashboard_transport_health_http_json ~state in

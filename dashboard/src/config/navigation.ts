@@ -16,6 +16,7 @@ export type SurfaceSectionId =
   | 'harness'
   | 'inspector'
   | 'telemetry'
+  | 'tool-quality'
 
 type NonHomeTabId = Exclude<TabId, 'overview' | 'logs'>
 
@@ -199,6 +200,12 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: '운영 인스펙터',
       description: '피처 플래그와 서버 설정을 한 화면으로 묶은 운영 진단/점검 화면.',
       params: { section: 'inspector' },
+    },
+    {
+      id: 'tool-quality',
+      label: '도구 품질',
+      description: 'Keeper tool call 성공률, 실패 카테고리, keeper별 품질 지표.',
+      params: { section: 'tool-quality' },
     },
   ],
 }

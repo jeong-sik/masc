@@ -166,6 +166,22 @@ let handle_keeper_pr_workflow
       in
       let worktree_dir = ref "" in
       let resolved_base_branch = ref base_branch in
+      let cleanup_worktree () =
+        if !worktree_dir <> "" && Sys.file_exists !worktree_dir then begin
+          let st_rm, _ = run_sh ~cwd:repo_root ~timeout_sec:10.0
+            (Printf.sprintf "git worktree remove --force %s"
+              (Filename.quote !worktree_dir)) in
+          if st_rm <> Unix.WEXITED 0 then
+            Log.Keeper.warn "pr_workflow: failed to clean worktree at %s" !worktree_dir;
+          let st_prune, _ = run_sh ~cwd:repo_root ~timeout_sec:5.0 "git worktree prune" in
+          if st_prune <> Unix.WEXITED 0 then
+            Log.Keeper.warn "pr_workflow: git worktree prune failed after cleaning %s"
+              !worktree_dir
+        end
+      in
+      Fun.protect
+        ~finally:cleanup_worktree
+        (fun () ->
       let _s1 = run_step "worktree_create" (fun () ->
         if not (Room_git.is_git_repo ~base_path:root) then
           Error "Not a git repository. MASC v2 requires .git directory for worktree isolation."
@@ -235,7 +251,7 @@ let handle_keeper_pr_workflow
         if !worktree_dir = "" then Error "no worktree path"
         else begin
           let st, out = run_sh ~cwd:(!worktree_dir) ~timeout_sec:10.0
-            "bash scripts/check-version-truth.sh" in
+            "./scripts/check-version-truth.sh" in
           if st <> Unix.WEXITED 0 then
             Error (Printf.sprintf "Version truth check failed: %s" out)
           else Ok "version truth OK"
@@ -286,15 +302,6 @@ let handle_keeper_pr_workflow
           end
         end
       ) in
-      (* Step 5: Clean up worktree *)
-      (if !worktree_dir <> "" && Sys.file_exists !worktree_dir then begin
-        let st, _ = run_sh ~cwd:repo_root ~timeout_sec:10.0
-          (Printf.sprintf "git worktree remove --force %s"
-            (Filename.quote !worktree_dir)) in
-        if st <> Unix.WEXITED 0 then
-          Log.Keeper.warn "pr_workflow: failed to clean worktree at %s" !worktree_dir;
-        ignore (run_sh ~cwd:repo_root ~timeout_sec:5.0 "git worktree prune")
-      end);
       Yojson.Safe.to_string
         (`Assoc
           [ "ok", `Bool !step_ok
@@ -303,4 +310,5 @@ let handle_keeper_pr_workflow
           ; "error", `String !step_error
           ; "keeper", `String meta.name
           ])
+        )
 ;;

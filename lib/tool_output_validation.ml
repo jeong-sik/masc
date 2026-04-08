@@ -76,9 +76,9 @@ let truncate_json_array (items : Yojson.Safe.t list) ~max_chars : string =
   Buffer.contents buf
 
 (** Truncate a JSON object by finding its largest string/array value
-    and shrinking it. Preserves the envelope structure. *)
+    and shrinking it. Preserves the envelope structure.
+    Falls back to minimal metadata object if budget is too small. *)
 let truncate_json_object (fields : (string * Yojson.Safe.t) list) ~max_chars : string =
-  (* Find the largest field by serialized size *)
   let sized_fields =
     List.map (fun (k, v) ->
       let s = Yojson.Safe.to_string v in
@@ -89,7 +89,6 @@ let truncate_json_object (fields : (string * Yojson.Safe.t) list) ~max_chars : s
   match sorted with
   | [] -> "{}"
   | (largest_key, largest_val, _) :: _ ->
-    (* Truncate the largest field *)
     let truncated_val = match largest_val with
       | `List items ->
         let item_budget = max_chars / 2 in
@@ -106,7 +105,16 @@ let truncate_json_object (fields : (string * Yojson.Safe.t) list) ~max_chars : s
       ("_output_budget_exceeded", `Bool true);
       ("_budget_chars", `Int max_chars);
     ] in
-    Yojson.Safe.to_string (`Assoc with_meta)
+    let candidate = Yojson.Safe.to_string (`Assoc with_meta) in
+    (* Budget guarantee: if still over, fall back to minimal metadata *)
+    if String.length candidate <= max_chars then candidate
+    else
+      let minimal = `Assoc [
+        ("_output_budget_exceeded", `Bool true);
+        ("_budget_chars", `Int max_chars);
+        ("_original_fields", `Int (List.length fields));
+      ] in
+      Yojson.Safe.to_string minimal
 
 (* ── Core validation ─────────────────────────────────────────── *)
 
@@ -154,17 +162,24 @@ let is_already_truncated (data : Yojson.Safe.t) : bool =
 let post_hook (result : Tool_result.t) : Tool_result.t =
   if is_already_truncated result.data then result
   else
-    (* Lazy serialize: only allocate the string if we need to check size *)
-    let serialized = Yojson.Safe.to_string result.data in
     let budget = budget_for result.tool_name in
-    if String.length serialized <= budget then result
-    else
-      let truncated_str = validate_and_truncate ~tool_name:result.tool_name serialized in
-      let new_data =
-        try Yojson.Safe.from_string truncated_str
-        with Yojson.Json_error _ -> `String truncated_str
-      in
-      { result with data = new_data }
+    (* For `String, operate on the raw string directly to avoid
+       JSON encoding overhead (quotes/escaping inflate length). *)
+    match result.data with
+    | `String s when String.length s > budget ->
+      let truncated = validate_and_truncate ~tool_name:result.tool_name s in
+      { result with data = `String truncated }
+    | `List _ | `Assoc _ ->
+      let serialized = Yojson.Safe.to_string result.data in
+      if String.length serialized <= budget then result
+      else
+        let truncated_str = validate_and_truncate ~tool_name:result.tool_name serialized in
+        let new_data =
+          try Yojson.Safe.from_string truncated_str
+          with Yojson.Json_error _ -> `String truncated_str
+        in
+        { result with data = new_data }
+    | _ -> result
 
 (* ── Installation ────────────────────────────────────────────── *)
 

@@ -495,9 +495,11 @@ let test_output_validation_array_aware_truncation () =
     (string_contains ~sub:"_shown" result)
 
 let test_output_validation_default_budget () =
-  let long = String.make 16000 'c' in
-  let result = Tool_output_validation.validate_and_truncate ~tool_name:"unregistered_tool" long in
-  check bool "default truncates 16k" true (String.length result < 16000);
+  (* Use explicit budget to avoid env-var dependency in tests *)
+  Tool_output_validation.set_budget ~tool_name:"test_default" ~max_chars:5000;
+  let long = String.make 10000 'c' in
+  let result = Tool_output_validation.validate_and_truncate ~tool_name:"test_default" long in
+  check bool "truncates over-budget output" true (String.length result < 10000);
   check bool "contains budget metadata" true
     (string_contains ~sub:"_output_budget_exceeded" result)
 

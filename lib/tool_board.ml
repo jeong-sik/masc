@@ -583,7 +583,7 @@ let tool_post_list : Types.tool_schema = {
       ("exclude_automation", `Assoc [("type", `String "boolean"); ("description", `String "Exclude automation posts (heartbeat, probes, etc.) (default: false)")]);
       ("author", `Assoc [("type", `String "string"); ("maxLength", `Int 100); ("description", `String "Filter posts by author name (case-insensitive substring match)")]);
       ("since", `Assoc [("type", `String "number"); ("description", `String "Unix timestamp. Posts with activity after this time show a 🔔 indicator")]);
-      ("compact", `Assoc [("type", `String "boolean"); ("description", `String "Compact one-line per post (default: true). Set false for full body/TTL/visibility")]);
+      ("compact", `Assoc [("type", `String "boolean"); ("default", `Bool true); ("description", `String "Compact one-line per post. Set false for full body/TTL/visibility")]);
     ]);
   ];
 }
@@ -647,7 +647,7 @@ let tool_search : Types.tool_schema = {
     ("properties", `Assoc [
       ("query", `Assoc [("type", `String "string"); ("maxLength", `Int 200); ("description", `String "Search keyword")]);
       ("limit", `Assoc [("type", `String "integer"); ("minimum", `Int 1); ("maximum", `Int 100); ("description", `String "Max results (default: 20)")]);
-      ("compact", `Assoc [("type", `String "boolean"); ("description", `String "Compact one-line per post (default: true). Set false for full body")]);
+      ("compact", `Assoc [("type", `String "boolean"); ("default", `Bool true); ("description", `String "Compact one-line per post. Set false for full body")]);
     ]);
     ("required", `List [`String "query"]);
   ];

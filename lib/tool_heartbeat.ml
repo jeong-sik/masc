@@ -205,7 +205,8 @@ Pair with masc_heartbeat_stop to cancel or masc_cleanup_zombies to reap dead age
       ("properties", `Assoc [
         ("limit", `Assoc [
           ("type", `String "integer");
-          ("description", `String "Max heartbeats to return (default: 20)");
+          ("description", `String "Max heartbeats to return");
+          ("default", `Int 20);
           ("minimum", `Int 1);
           ("maximum", `Int 100);
         ]);

@@ -46,7 +46,7 @@ OAS  ──does not know──→ MASC
 | Event bus bridge | Complete for current `masc:*` flow | `oas_events.ml` publishes, `oas_sse_bridge.ml` relays to dashboard SSE |
 | Checkpoint integration | Partial complete | OAS checkpoint is used in shared worker/runtime paths, and the public OAS worker API now keeps the extra JSON as a neutral checkpoint sidecar. Keeper runtime still persists its own `working_context` / serialized checkpoint path in `lib/keeper/keeper_exec_context.ml` |
 | Memory bridge | Partial complete | long-term + procedural + institution episodic are bridged; broader memory unification is still separate |
-| Team-session swarm | Partial complete | OAS Swarm runner is active, delivery-contract persistence/verdict export now live, but bridge fidelity is still incomplete |
+| Team-session swarm | Partial complete | OAS Swarm runner is active; current bridge uses `swarm_config` / `agent_entry` + worker metadata with `collaboration_context=None`, but fidelity is still incomplete |
 
 ## Boundary Audit Snapshot
 
@@ -103,6 +103,19 @@ These stay in MASC:
 - “Context integration in progress” now means **broader state unification**, not compaction.
 - “Event_bus bridge planned” is no longer true for the current dashboard/SSE path.
 - “team_session pending migration” is no longer true; the correct description is **running on OAS Swarm with an incomplete bridge**.
+
+## Boundary Review Checklist
+
+Use this checklist when reviewing boundary-touching PRs:
+
+1. **OAS가 MASC를 새로 알게 되는가?**
+   - generic runtime/harness primitive가 아니라 room/task/governance/session semantics가 OAS public contract로 새어 나오면 안 된다.
+2. **MASC core가 provider/model 세부를 새로 배우는가?**
+   - model ID, vendor, token/cost detail은 OAS-facing adapter/bridge에 머물러야 한다.
+3. **문서 truth가 코드 truth와 일치하는가?**
+   - 특히 team-session, cascade labels, runtime-health semantics는 구현과 SSOT 문서가 함께 갱신되어야 한다.
+4. **Checked-in cascade labels are explicit enough for stable review**
+   - repository-default `config/cascade.json` entries should prefer explicit `provider:model_id` labels; runtime discovery/failsafe may still resolve local defaults elsewhere, but checked-in defaults should avoid ambiguous `provider:auto` labels.
 
 ## Boundary Rules for Future Work
 

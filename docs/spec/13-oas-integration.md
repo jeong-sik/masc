@@ -180,6 +180,9 @@ Hardcoded fallback (cascade.json 없을 때):
 - `llama:{MASC_DEFAULT_MODEL}` (로컬)
 - `glm:auto` (ZAI_API_KEY 존재 시)
 
+이 fallback은 runtime failsafe다. 저장소에 커밋되는 `config/cascade.json`
+기본값과 동일시하지 않는다.
+
 ### 4.6 MASC Tool Bridge
 
 `run_with_masc_tools`와 `run_named_with_masc_tools`가 MASC 도구 스키마를 OAS `Tool.t`로 변환한다.
@@ -232,13 +235,17 @@ cascade_name (e.g. "keeper", "verifier", "context_router")
 
 ```json
 {
-  "keeper_models": ["llama:qwen3.5", "glm:auto"],
+  "keeper_models": ["llama:qwen3.5", "glm:glm-5.1"],
   "keeper_temperature": 0.7,
   "keeper_max_tokens": 4096,
   "default_temperature": 0.5,
   "default_max_tokens": 2048
 }
 ```
+
+Checked-in cascade defaults should prefer explicit `provider:model_id` labels.
+Provider-specific `auto` aliases are runtime convenience paths, not stable
+repository defaults.
 
 Resolution 순서:
 1. `{name}_temperature` / `{name}_max_tokens`

@@ -44,7 +44,7 @@ Files that explicitly bridge MASC and OAS. Named with `_oas` or `_oas_adapter` s
 | File | Purpose |
 |---|---|
 | `verifier_oas.ml` | Verification verdict to OAS Hooks/Guardrails |
-| `team_context_oas_adapter.ml` | MASC session to OAS Collaboration.t projection |
+| `team_session_oas_bridge.ml` | MASC session / planned_worker projection into OAS Swarm config and agent entries (`collaboration_context=None`) |
 | `context_compact_oas.ml` | Context compaction via OAS Context_reducer |
 | `keeper_hooks_oas.ml` | Keeper lifecycle hooks to OAS hooks |
 

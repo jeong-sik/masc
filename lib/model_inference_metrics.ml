@@ -130,12 +130,19 @@ let read_all_decisions ~base_path ~since_unix : raw_entry list =
                    (match parse_telemetry_entry json ~since_unix with
                     | Some e -> entries := e :: !entries
                     | None -> ())
-                 | exception _ -> ()
+                 | exception (Eio.Cancel.Cancelled _ as exn) ->
+                   let bt = Printexc.get_raw_backtrace () in
+                   Printexc.raise_with_backtrace exn bt
+                 | exception Yojson.Json_error _ -> ()
              done
            with End_of_file -> ());
           !entries
         )
-      with _ -> []
+      with
+      | Eio.Cancel.Cancelled _ as exn ->
+        let bt = Printexc.get_raw_backtrace () in
+        Printexc.raise_with_backtrace exn bt
+      | _ -> []
     ) files
 
 (* ── Aggregate by model ─────────────────────────────────── *)

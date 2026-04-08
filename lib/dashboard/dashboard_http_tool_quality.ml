@@ -83,7 +83,7 @@ let aggregate ?(n = 5000) () : Yojson.Safe.t =
            | exception Yojson.Json_error _ ->
              (* Try after stripping "error: " prefix *)
              let stripped =
-               if String.length output > 7 && String.sub output 0 7 = "error: "
+               if String.length output >= 7 && String.sub output 0 7 = "error: "
                then String.sub output 7 (String.length output - 7)
                else output
              in

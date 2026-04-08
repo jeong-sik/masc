@@ -237,9 +237,10 @@ module Ring = struct
           (try while true do
              let line = input_line ic in
              if String.length line > 0 then
-               match entry_of_json (Yojson.Safe.from_string line) with
-               | Some e -> entries := e :: !entries
-               | None -> ()
+               (match entry_of_json (Yojson.Safe.from_string line) with
+                | Some e -> entries := e :: !entries
+                | None -> ()
+                | exception Yojson.Json_error _ -> ())
            done with End_of_file -> ());
           List.rev !entries
         )

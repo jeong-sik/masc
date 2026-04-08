@@ -16,10 +16,12 @@ module StringMap : Map.S with type key = string
 type failure_reason =
   | Heartbeat_consecutive_failures of int
   | Turn_consecutive_failures of int
+  | Ambiguous_partial_commit of string
   | Fiber_unresolved
   | Exception of string
 
 val failure_reason_to_string : failure_reason -> string
+val failure_reason_requires_manual_reconcile : failure_reason -> bool
 
 (** Pure control-flow signal for immediate fiber termination (RFC-0002).
     Carries no state — failure reason must be pre-stored via

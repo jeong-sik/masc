@@ -1,7 +1,7 @@
 (** Keeper_trace_emit — TLA+ trace validation용 상태 전이 기록.
 
     MASC_TLA_TRACE=1 일 때만 활성.
-    conditions_to_json 재사용으로 13필드 전체 기록. *)
+    conditions_to_json 재사용으로 14필드 전체 기록. *)
 
 module SM = Keeper_state_machine
 

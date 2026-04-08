@@ -28,6 +28,7 @@ let parse_conditions (json : Yojson.Safe.t) : (SM.conditions, string) result =
   let* fiber_alive = get_bool json "fiber_alive" in
   let* heartbeat_healthy = get_bool json "heartbeat_healthy" in
   let* turn_healthy = get_bool json "turn_healthy" in
+  let* manual_reconcile_required = get_bool json "manual_reconcile_required" in
   let* context_within_budget = get_bool json "context_within_budget" in
   let* context_handoff_needed = get_bool json "context_handoff_needed" in
   let* compaction_active = get_bool json "compaction_active" in
@@ -39,7 +40,7 @@ let parse_conditions (json : Yojson.Safe.t) : (SM.conditions, string) result =
   let* guardrail_triggered = get_bool json "guardrail_triggered" in
   let* drain_complete = get_bool json "drain_complete" in
   Ok SM.{
-    fiber_alive; heartbeat_healthy; turn_healthy;
+    fiber_alive; heartbeat_healthy; turn_healthy; manual_reconcile_required;
     context_within_budget; context_handoff_needed;
     compaction_active; handoff_active; operator_paused;
     stop_requested; restart_budget_remaining;

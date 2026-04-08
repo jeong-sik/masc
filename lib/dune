@@ -526,6 +526,7 @@
    ;; Context management (used by keeper agents)
    masc_eio_env
    discovery_cache
+   model_inference_metrics
    observability_redact
    oas_model_resolve
    context_compact_oas

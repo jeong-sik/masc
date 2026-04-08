@@ -67,6 +67,52 @@ let test_keepalive_jitter_range () =
   check bool "jitter >= 0.0" true (v >= 0.0);
   check bool "jitter <= 0.5" true (v <= 0.5)
 
+(* ── OAS adaptive timeout tests ───────────────────────── *)
+
+let adaptive = Cfg.KeeperKeepalive.oas_timeout_for_context
+
+let test_oas_timeout_32k () =
+  let v = adaptive ~max_context:32_000 in
+  check (float 1.0) "32K → ~228s" 228.0 v
+
+let test_oas_timeout_128k () =
+  let v = adaptive ~max_context:128_000 in
+  check (float 1.0) "128K → ~372s" 372.0 v
+
+let test_oas_timeout_262k () =
+  let v = adaptive ~max_context:262_144 in
+  (* 180 + 262.144 * 1.5 = 180 + 393.216 = 573.216, capped at 600 *)
+  check bool "262K → [500, 600]" true (v >= 500.0 && v <= 600.0)
+
+let test_oas_timeout_zero () =
+  let v = adaptive ~max_context:0 in
+  check (float 1.0) "0 context → base 180s" 180.0 v
+
+let test_oas_timeout_monotonic () =
+  let v1 = adaptive ~max_context:32_000 in
+  let v2 = adaptive ~max_context:128_000 in
+  let v3 = adaptive ~max_context:262_144 in
+  check bool "32K < 128K" true (v1 < v2);
+  check bool "128K < 262K" true (v2 < v3)
+
+let test_oas_timeout_cap () =
+  let v = adaptive ~max_context:1_000_000 in
+  check (float 0.1) "1M context → capped at 600" 600.0 v
+
+let test_max_turns_default () =
+  check int "default max_turns_per_call 5" 5
+    Cfg.KeeperKeepalive.oas_max_turns_per_call
+
+let test_max_turns_range () =
+  let v = Cfg.KeeperKeepalive.oas_max_turns_per_call in
+  check bool "max_turns >= 1" true (v >= 1);
+  check bool "max_turns <= 50" true (v <= 50)
+
+let test_oas_timeout_sec_compat () =
+  (* Without env override, oas_timeout_sec returns 300.0 default *)
+  let v = Cfg.KeeperKeepalive.oas_timeout_sec in
+  check (float 1.0) "backward compat default 300s" 300.0 v
+
 (* ── KeeperGrpc config defaults ────────────────────────── *)
 
 let test_grpc_max_reconnect_default () =
@@ -226,6 +272,17 @@ let () =
       test_case "sleep_chunk default" `Quick test_keepalive_sleep_chunk_default;
       test_case "jitter default" `Quick test_keepalive_jitter_default;
       test_case "jitter range" `Quick test_keepalive_jitter_range;
+    ];
+    "oas_timeout_adaptive", [
+      test_case "adaptive 32K context" `Quick test_oas_timeout_32k;
+      test_case "adaptive 128K context" `Quick test_oas_timeout_128k;
+      test_case "adaptive 262K context" `Quick test_oas_timeout_262k;
+      test_case "adaptive 0 context (floor)" `Quick test_oas_timeout_zero;
+      test_case "adaptive monotonic" `Quick test_oas_timeout_monotonic;
+      test_case "adaptive capped at 600" `Quick test_oas_timeout_cap;
+      test_case "max_turns default is 5" `Quick test_max_turns_default;
+      test_case "max_turns range" `Quick test_max_turns_range;
+      test_case "oas_timeout_sec backward compat" `Quick test_oas_timeout_sec_compat;
     ];
     "grpc_config", [
       test_case "max_reconnect default" `Quick test_grpc_max_reconnect_default;

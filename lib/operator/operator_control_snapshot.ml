@@ -389,8 +389,11 @@ let persistent_agents_json ?keeper_names config =
               Keeper_exec_status.parse_agent_status config ~agent_name:meta.agent_name
             in
             let agent_status =
-              match agent_json |> U.member "status" with
-              | `String status -> status
+              match agent_json with
+              | `Assoc _ -> (
+                  match agent_json |> U.member "status" with
+                  | `String status -> status
+                  | _ -> "unknown")
               | _ -> "unknown"
             in
             Some

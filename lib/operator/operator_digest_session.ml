@@ -556,14 +556,30 @@ let normalize_team_health = function
   | "critical" -> "bad"
   | other -> other
 
+let assoc_member json field =
+  match json with
+  | `Assoc _ -> U.member field json
+  | _ -> `Null
+
+let nested_string_member json ~parent ~child =
+  match assoc_member json parent with
+  | `Assoc _ as nested -> (
+      match U.member child nested with
+      | `String value -> Some value
+      | _ -> None)
+  | _ -> None
+
 let build_session_digest ?status_json:cached_status config (session : Team_session_types.session) ~now =
   let status_json =
     match cached_status with
     | Some s -> s
     | None -> Team_session_engine_eio.session_status_json config session
   in
-  let summary = U.member "summary" status_json in
-  let team_health = U.member "team_health" status_json in
+  let summary = assoc_member status_json "summary" in
+  let team_health = assoc_member status_json "team_health" in
+  let summary_member field = assoc_member summary field in
+  let team_health_member field = assoc_member team_health field in
+  let status_member field = assoc_member status_json field in
   let events = Team_session_store.read_events ~max_events:200 config session.session_id in
   let worker_cards = build_worker_cards ~session ~events ~now in
   let attention_items = session_attention_items ~session ~events ~worker_cards ~now in
@@ -571,7 +587,7 @@ let build_session_digest ?status_json:cached_status config (session : Team_sessi
     session_recommendations ~session ~attentions:attention_items ~worker_cards
   in
   let active_agent_count =
-    match U.member "active_agents" summary with
+    match summary_member "active_agents" with
     | `List xs -> List.length xs
     | _ -> 0
   in
@@ -586,22 +602,22 @@ let build_session_digest ?status_json:cached_status config (session : Team_sessi
     session_id = session.session_id;
     goal = session.goal;
     status =
-      (match U.member "session" status_json |> U.member "status" with
-      | `String status -> status
-      | _ -> Team_session_types.status_to_string session.status);
+      (match nested_string_member status_json ~parent:"session" ~child:"status" with
+      | Some status -> status
+      | None -> Team_session_types.status_to_string session.status);
     health =
       (let attention_health = health_from_attention_items attention_items in
        if not (String.equal attention_health "ok") then attention_health
        else
-         match U.member "status" team_health with
+         match team_health_member "status" with
          | `String status -> normalize_team_health status
          | _ -> attention_health);
     scale_profile =
-      (match U.member "scale_profile" summary with
+      (match summary_member "scale_profile" with
       | `String value -> value
       | _ -> Team_session_types.scale_profile_to_string session.scale_profile);
     control_profile =
-      (match U.member "control_profile" summary with
+      (match summary_member "control_profile" with
       | `String value -> value
       | _ ->
           Team_session_types.control_profile_to_string session.control_profile);
@@ -609,68 +625,68 @@ let build_session_digest ?status_json:cached_status config (session : Team_sessi
     active_agent_count;
     last_turn_age_sec;
     worker_class_counts =
-      (match U.member "worker_class_counts" summary with
+      (match summary_member "worker_class_counts" with
       | `Assoc _ as json -> json
       | _ ->
           Team_session_types.worker_class_counts session.planned_workers
           |> Team_session_types.counts_to_json);
     runtime_pool_counts =
-      (match U.member "runtime_pool_counts" summary with
+      (match summary_member "runtime_pool_counts" with
       | `Assoc _ as json -> json
       | _ ->
           Team_session_types.runtime_pool_counts session.planned_workers
           |> Team_session_types.counts_to_json);
     lane_counts =
-      (match U.member "lane_counts" summary with
+      (match summary_member "lane_counts" with
       | `Assoc _ as json -> json
       | _ ->
           Team_session_types.lane_counts session.planned_workers
           |> Team_session_types.counts_to_json);
     controller_counts =
-      (match U.member "controller_counts" summary with
+      (match summary_member "controller_counts" with
       | `Assoc _ as json -> json
       | _ ->
           Team_session_types.controller_level_counts session.planned_workers
           |> Team_session_types.counts_to_json);
     control_domain_counts =
-      (match U.member "control_domain_counts" summary with
+      (match summary_member "control_domain_counts" with
       | `Assoc _ as json -> json
       | _ ->
           Team_session_types.control_domain_counts session.planned_workers
           |> Team_session_types.counts_to_json);
     task_profile_counts =
-      (match U.member "task_profile_counts" summary with
+      (match summary_member "task_profile_counts" with
       | `Assoc _ as json -> json
       | _ ->
           Team_session_types.task_profile_counts session.planned_workers
           |> Team_session_types.counts_to_json);
     escalation_count =
-      (match U.member "escalation_count" summary with
+      (match summary_member "escalation_count" with
       | `Int value -> value
       | `Intlit raw -> (Option.value ~default:0 (int_of_string_opt raw))
       | _ -> Team_session_types.escalation_count session.planned_workers);
     controller_tree =
-      (match U.member "controller_tree" summary with
+      (match summary_member "controller_tree" with
       | `Assoc _ as json -> json
       | _ -> `Assoc []);
     lane_health =
-      (match U.member "lane_health" summary with
+      (match summary_member "lane_health" with
       | `Assoc _ as json -> json
       | _ -> `Assoc []);
     confidence_heatmap =
-      (match U.member "confidence_heatmap" summary with
+      (match summary_member "confidence_heatmap" with
       | `Assoc _ as json -> json
       | _ -> `Assoc []);
     context_pressure_by_lane =
-      (match U.member "context_pressure_by_lane" summary with
+      (match summary_member "context_pressure_by_lane" with
       | `Assoc _ as json -> json
       | _ -> `Assoc []);
     intervention_counters =
-      (match U.member "intervention_counters" summary with
+      (match summary_member "intervention_counters" with
       | `Assoc _ as json -> json
       | _ -> `Assoc []);
     local_runtime =
-      (match U.member "local_runtime" status_json with
+      (match status_member "local_runtime" with
       | `Assoc _ as json -> json
       | `Null as json -> json
       | _ -> `Null);
@@ -679,4 +695,3 @@ let build_session_digest ?status_json:cached_status config (session : Team_sessi
     worker_cards;
     risk_digest = Risk_digest.(compute ~session ~worker_cards |> to_yojson);
   }
-

@@ -224,6 +224,40 @@ let test_snapshot_lightweight_summary_omits_heavy_activity () =
       Alcotest.(check int) "lightweight recent_actions omitted" 0
         Yojson.Safe.Util.(json |> member "recent_actions" |> to_list |> List.length))
 
+let test_digest_team_session_tolerates_null_nested_status () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "owner"));
+      ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
+      let session_id = start_session_exn (team_ctx env sw config "owner") in
+      let session =
+        match Team_session_store.load_session config session_id with
+        | Some session -> session
+        | None -> Alcotest.fail "expected persisted team session"
+      in
+      let digest =
+        Operator_digest.build_session_digest
+          ~status_json:
+            (`Assoc
+              [
+                ("session", `Null);
+                ("summary", `Null);
+                ("team_health", `Null);
+                ("local_runtime", `Null);
+              ])
+          config session ~now:(Time_compat.now ())
+      in
+      Alcotest.(check string) "session status falls back to persisted session state"
+        (Team_session_types.status_to_string session.status)
+        digest.status;
+      Alcotest.(check string) "health falls back to neutral" "ok" digest.health)
+
 let test_snapshot_lightweight_summary_caps_completed_sessions_by_recency () =
   Eio_main.run @@ fun env ->
   ensure_fs env;

@@ -2,6 +2,30 @@
 
 ## [Unreleased]
 
+## [2.262.0] - 2026-04-09
+
+### Added
+- Genuine HITL approval pipeline — Eio.Promise fiber suspension, MCP approval tools (#5907 Phase 1, #5955)
+- Graduated boring-turn guard — 5-level tool_choice escalation to cut idle token waste (#5968)
+- OAS pin drift doctor — local switch validation in Makefile build/test targets (#5958)
+- Spawn stderr capture + cloexec pipes — child process observability and hang prevention (#5960)
+- Approval audit log — persistent JSONL records for pending/resolved/expired events (#5969)
+- Git clone sandboxing in keeper_shell_readonly (#5930)
+
+### Fixed
+- Ollama thinking mode disabled for keepers — unblocked all keeper timeouts (#5948)
+- ToolResult.json field drift — aligned with OAS 0.116.1 (#5948)
+- Hardcoded port 8085 removal — env-driven LLM endpoint discovery (#5962)
+- Keeper name and MCP prefix boundary resolution (#5967)
+- Dashboard null-agent patch guard (#5971)
+- GLM-5-turbo cascade fallback for outage resilience (#5956)
+- Read path validation with bounded suffix resolution and symlink escape prevention (#5930)
+- Approval queue fiber cancellation cleanup — no orphan entries (#5955)
+
+### Changed
+- Named constants for model context thresholds (64k/200k) replacing magic numbers (#5969)
+- Governance risk patterns documented in-code for mandatory review (#5969)
+
 ## [2.261.0] - 2026-04-08
 
 ### Added

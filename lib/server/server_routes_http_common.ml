@@ -305,7 +305,7 @@ let parse_host_port host_header default_host default_port =
           let host = Uri.host uri |> Option.value ~default:default_host in
           let port = Uri.port uri |> Option.value ~default:default_port in
           (host, port)
-        with _ -> (default_host, default_port))
+        with Eio.Cancel.Cancelled _ as e -> raise e | _ -> (default_host, default_port))
 
 (** Utility: string prefix check *)
 let starts_with ~prefix s =

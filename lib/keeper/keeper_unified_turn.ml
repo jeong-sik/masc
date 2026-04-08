@@ -926,7 +926,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
       let evidence_before_hash =
         try Keeper_evidence.snapshot_before_turn
           ~base_path:config.base_path ~keeper_name:meta.name
-        with _ -> None
+        with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None
       in
       let run_result, latency_ms =
         Fun.protect ~finally:(fun () ->

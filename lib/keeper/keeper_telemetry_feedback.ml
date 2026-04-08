@@ -62,6 +62,7 @@ let parse_decision_line (line : string) : parsed_decision option =
     in
     let tools_used = Safe_ops.json_string_list "tools_used" json in
     Some { timestamp_unix; outcome; tool_call_count; tools_used }
+  | exception (Eio.Cancel.Cancelled _ as e) -> raise e
   | exception _ -> None
 
 (* ------------------------------------------------------------------ *)
@@ -87,7 +88,7 @@ let compute_stats ~decision_log_path ~window_hours =
       String.split_on_char '\n' content
       |> List.filter (fun s -> String.trim s <> "")
       |> take_last max_decision_lines
-    with _ -> []
+    with Eio.Cancel.Cancelled _ as e -> raise e | _ -> []
   in
   let decisions =
     lines

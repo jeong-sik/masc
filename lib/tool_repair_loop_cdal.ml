@@ -50,5 +50,5 @@ let emit_advisory_artifacts (state : state) : (string list, string) result =
         Artifact_store.make_ref ~session_id:state.artifact_session_id
           ~kind:Artifact_store.Evidence_bundle ~artifact_id:evidence_id;
       ]
-  with exn ->
+  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Error (Printf.sprintf "repair loop CDAL projection failed: %s" (Printexc.to_string exn))

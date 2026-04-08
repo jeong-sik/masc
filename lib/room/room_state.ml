@@ -450,7 +450,7 @@ let broadcast ?trace_context config ~from_agent ~content =
   emit_message_activity config ~from_agent:safe_agent ~content:safe_content
     ~mention ();
   (try !on_broadcast_mention mention
-   with exn ->
+   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
      Log.Misc.warn "on_broadcast_mention callback failed: %s"
        (Printexc.to_string exn));
   Printf.sprintf "📢 [%s@%s] %s" safe_agent room_id safe_content

@@ -187,7 +187,7 @@ let create_token config ~agent_name ~role : (string * agent_credential, masc_err
   (try
      save_credential config cred;
      Ok (raw_token, cred)  (* Return raw token to user, store hash *)
-   with exn ->
+   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
      let msg = Printf.sprintf "Failed to save agent credential: %s" (Printexc.to_string exn) in
      Log.Auth.error "%s" msg;
      Error (IoError msg))

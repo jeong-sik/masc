@@ -110,7 +110,7 @@ type stats_acc = {
 }
 
 let parse_slow_threshold_ms value =
-  try max 250 (min 120_000 (int_of_string (String.trim value))) with _ -> 10_000
+  try max 250 (min 120_000 (int_of_string (String.trim value))) with Eio.Cancel.Cancelled _ as e -> raise e | _ -> 10_000
 
 let cached_slow_threshold_ms =
   match Sys.getenv_opt "MASC_CHANNEL_GATE_SLOW_MS" with

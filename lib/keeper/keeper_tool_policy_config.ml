@@ -114,7 +114,7 @@ let parse_presets
 
 let project_root_from_executable () =
   let raw_exe =
-    try Sys.executable_name with _ -> ""
+    try Sys.executable_name with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ""
   in
   let exe =
     if String.equal raw_exe "" then ""

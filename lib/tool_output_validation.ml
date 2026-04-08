@@ -14,7 +14,7 @@
 let default_budget =
   let env_val =
     match Sys.getenv_opt "MASC_KEEPER_MAX_TOOL_OUTPUT_CHARS" with
-    | Some s -> (try int_of_string s with _ -> 8000)
+    | Some s -> (try int_of_string s with Eio.Cancel.Cancelled _ as e -> raise e | _ -> 8000)
     | None -> 8000
   in
   max 1000 (min 32000 env_val)

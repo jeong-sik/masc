@@ -79,7 +79,7 @@ let drain_to_store (store : Dated_jsonl.t) : int =
       (try
          Dated_jsonl.append store json;
          incr count
-       with exn ->
+       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
          Log.Metrics.error "tool_metrics_persist: append failed: %s"
            (Printexc.to_string exn));
       drain ()
@@ -123,7 +123,7 @@ let start_flush_fiber ~sw ~clock ~base_path =
       let n = drain_to_store store in
       if n > 0 then
         Log.Metrics.info "tool_metrics_persist: shutdown flush wrote %d records" n
-    with exn ->
+    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
       Log.Metrics.error "tool_metrics_persist: shutdown flush failed: %s"
         (Printexc.to_string exn))
 

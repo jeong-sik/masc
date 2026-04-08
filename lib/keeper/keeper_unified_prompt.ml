@@ -504,7 +504,7 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
            else String.sub title 0 57 ^ "..."
          in
          Printf.sprintf "- \"%s\"" truncated)
-     with _ -> [])
+     with Eio.Cancel.Cancelled _ as e -> raise e | _ -> [])
   in
   if own_recent_posts <> [] then (
     Buffer.add_string ubuf "\n### Your Recent Board Posts\n";

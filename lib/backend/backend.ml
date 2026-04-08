@@ -310,7 +310,7 @@ module FileSystem = struct
            Log.legacy_traceln ~level:Log.Info ~module_name:"Backend"
              (Printf.sprintf "key_index populated: %d keys" len);
          Eio.Promise.resolve_ok r ()
-       with exn ->
+       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
          Mutex.lock t.key_index_mu;
          Fun.protect ~finally:(fun () -> Mutex.unlock t.key_index_mu) (fun () ->
            t.key_index_promise <- None);

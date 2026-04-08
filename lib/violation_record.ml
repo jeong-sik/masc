@@ -44,7 +44,7 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
          | Ok violation_kind ->
              Ok { ts; tool_name; input_summary; effective_mode; violation_kind }
          | Error e -> Error e)
-  with exn -> Error (Printexc.to_string exn)
+  with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Error (Printexc.to_string exn)
 
 let of_json_list (json : Yojson.Safe.t) : (t list, string) result =
   match json with

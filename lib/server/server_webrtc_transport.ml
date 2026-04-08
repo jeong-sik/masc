@@ -380,7 +380,7 @@ let handle_offer_request body =
       |> Option.value ~default:"" in
     let offer_id = create_offer ~from_agent ~ice_candidates ~dtls_fingerprint in
     Ok (Printf.sprintf {|{"offer_id":"%s","status":"pending"}|} offer_id)
-  with exn ->
+  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Error (Printf.sprintf "Invalid offer: %s" (Printexc.to_string exn))
 
 (** Handle POST /webrtc/answer — accept an existing offer.
@@ -417,7 +417,7 @@ let handle_answer_request body =
         ice_ufrag ice_pwd)
     | Error msg ->
       Error msg
-  with exn ->
+  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Error (Printf.sprintf "Invalid answer: %s" (Printexc.to_string exn))
 
 (** {1 Diagnostics} *)

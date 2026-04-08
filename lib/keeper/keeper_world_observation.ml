@@ -613,7 +613,7 @@ let observe ~(pending_board_events : pending_board_event list option)
       (try
          Some (Keeper_telemetry_feedback.compute_stats
                  ~decision_log_path:log_path ~window_hours:window)
-       with _ -> None)
+       with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None)
     | _ -> None
   in
   {

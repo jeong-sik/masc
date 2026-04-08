@@ -26,7 +26,7 @@ let handle_keeper_task_tool
        | `List items ->
          Yojson.Safe.to_string (`List (List.filteri (fun i _ -> i < limit) items))
        | _ -> result
-     with _ -> result)
+     with Eio.Cancel.Cancelled _ as e -> raise e | _ -> result)
   | "keeper_tasks_audit" ->
     let limit = Safe_ops.json_int ~default:20 "limit" args |> max 1 |> min 50 in
     let orphans = Room.audit_orphan_tasks config in

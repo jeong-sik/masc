@@ -145,7 +145,7 @@ let effective_model_labels_for_turn (m : keeper_meta) : string list =
     try
       Llm_provider.Cascade_config.parse_model_strings configured
       |> List.map (fun (c : Llm_provider.Provider_config.t) -> String.trim c.model_id)
-    with _ -> []
+    with Eio.Cancel.Cancelled _ as e -> raise e | _ -> []
   in
   match String.trim (Keeper_exec_status.active_model_of_meta m) with
   | "" -> configured

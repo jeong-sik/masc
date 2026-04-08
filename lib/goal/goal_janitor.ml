@@ -42,7 +42,7 @@ let parse_iso_ts s =
       } in
       let epoch, _ = Unix.mktime tm in
       Some epoch)
-  with _ -> None
+  with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None
 
 let days_since_update (goal : Goal_store.goal) ~now =
   match parse_iso_ts goal.updated_at with

@@ -238,7 +238,7 @@ let rec add_routes ~sw ~clock router =
        with_public_read (fun _state req reqd ->
          let n =
            let raw = match Server_utils.query_param req "n" with
-             | Some s -> (try int_of_string s with _ -> 5000)
+             | Some s -> (try int_of_string s with Eio.Cancel.Cancelled _ as e -> raise e | _ -> 5000)
              | None -> 5000
            in
            max 1 (min 50000 raw)

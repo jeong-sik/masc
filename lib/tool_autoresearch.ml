@@ -145,7 +145,7 @@ let prepare_managed_target_file ~source_workdir ~managed_workdir target_file =
                 Fs_compat.save_file managed_abs
                   (Autoresearch.read_file source_abs);
                 Ok [ "target_file_seeded_from_source" ]
-              with exn ->
+              with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
                 Error
                   (Printf.sprintf
                      "Failed to seed target_file into managed worktree: %s"

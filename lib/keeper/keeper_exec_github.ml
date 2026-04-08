@@ -217,7 +217,7 @@ let handle_keeper_pr_workflow
                 Fs_compat.mkdir_p dir;
                 Fs_compat.save_file resolved file_content;
                 Ok (Printf.sprintf "wrote %d bytes to %s" (String.length file_content) file_path)
-              with exn -> Error (Printexc.to_string exn)
+              with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Error (Printexc.to_string exn)
             end
         end
       ) in

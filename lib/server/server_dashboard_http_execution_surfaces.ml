@@ -96,10 +96,10 @@ let _execution_cache =
     Best-effort: never raises — cache staleness must not break
     the mutation path. *)
 let invalidate_execution_cache () =
-  (try invalidate_cached_surface _execution_cache with exn ->
+  (try invalidate_cached_surface _execution_cache with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
      Log.Dashboard.error "Failed to invalidate execution surface cache: %s"
        (Printexc.to_string exn));
-  (try Dashboard_cache.invalidate "execution:default:light" with exn ->
+  (try Dashboard_cache.invalidate "execution:default:light" with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
      Log.Dashboard.error "Failed to invalidate dashboard execution cache: %s"
        (Printexc.to_string exn))
 

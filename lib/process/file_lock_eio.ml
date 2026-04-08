@@ -20,11 +20,11 @@ type lock_entry = {
     dependency graph, so env var reading is local. *)
 let max_lock_entries =
   (match Sys.getenv_opt "MASC_FILE_LOCK_MAX_ENTRIES" with
-   | Some s -> (try max 64 (min 4096 (int_of_string s)) with _ -> 512)
+   | Some s -> (try max 64 (min 4096 (int_of_string s)) with Eio.Cancel.Cancelled _ as e -> raise e | _ -> 512)
    | None -> 512)
 let stale_lock_seconds =
   (match Sys.getenv_opt "MASC_FILE_LOCK_STALE_SEC" with
-   | Some s -> (try Float.max 60.0 (Float.min 7200.0 (float_of_string s)) with _ -> 600.0)
+   | Some s -> (try Float.max 60.0 (Float.min 7200.0 (float_of_string s)) with Eio.Cancel.Cancelled _ as e -> raise e | _ -> 600.0)
    | None -> 600.0)
 
 let table : (string, lock_entry) Hashtbl.t = Hashtbl.create 64
@@ -88,7 +88,7 @@ let acquire_flock_retry ?clock:(_clock = None) ~lock_path ~mode ~perm
       end
   in
   try acquire max_attempts
-  with exn ->
+  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     (try Unix.close fd with Unix.Unix_error _ -> ());
     raise exn
 
@@ -124,7 +124,7 @@ let acquire_flock_retry_cooperative ?clock ~lock_path ~mode ~perm
       end
   in
   try acquire max_attempts
-  with exn ->
+  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     run_blocking_lock_op (fun () -> try Unix.close fd with Unix.Unix_error _ -> ());
     raise exn
 

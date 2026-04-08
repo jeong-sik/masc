@@ -155,7 +155,7 @@ let get_env_float_logged name ~default =
 (** {2 JSON Value Extraction Helpers}
 
     Safe extraction from Yojson.Safe.t values with proper error handling.
-    These replace `with _ -> default` patterns in JSON parsing code.
+    These replace `with Eio.Cancel.Cancelled _ as e -> raise e | _ -> default` patterns in JSON parsing code.
 *)
 
 (** Safe member access: returns [`Null] for non-[`Assoc] inputs

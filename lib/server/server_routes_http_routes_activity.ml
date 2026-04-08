@@ -449,7 +449,7 @@ let add_routes ~sw ~clock router =
                    Prompt_registry.clear_prompt_override key;
                    (try Prompt_registry.persist_overrides
                           state.Mcp_server.room_config.base_path
-                    with exn ->
+                    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
                       Log.Pages.warn "prompt override persist (clear) failed: %s"
                         (Printexc.to_string exn));
                    Ok "override cleared"
@@ -460,7 +460,7 @@ let add_routes ~sw ~clock router =
                    | Ok () ->
                      (try Prompt_registry.persist_overrides
                             state.Mcp_server.room_config.base_path
-                      with exn ->
+                      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
                         Log.Pages.warn "prompt override persist (set) failed: %s"
                           (Printexc.to_string exn));
                      Ok "override set"

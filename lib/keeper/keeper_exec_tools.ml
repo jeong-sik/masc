@@ -73,6 +73,7 @@ let execute_keeper_tool_call
     in
     Yojson.Safe.to_string
       (`Assoc [
+        ("ok", `Bool false);
         ("error", `String "tool_not_allowed");
         ("tool", `String name);
         ("reason", `String reason);

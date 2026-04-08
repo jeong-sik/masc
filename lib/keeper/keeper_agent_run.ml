@@ -959,7 +959,7 @@ let run_turn
           let llm_selected =
             match preset_selection_context with
             | Some (preset_tools, _) ->
-              match Eio_context.get_switch_opt (), Eio_context.get_net_opt () with
+              begin match Eio_context.get_switch_opt (), Eio_context.get_net_opt () with
               | Some sw, Some net ->
                 let rerank_cascade = Keeper_config.keeper_llm_rerank_cascade () in
                 let defaults = Oas_worker.default_model_strings ~cascade_name:rerank_cascade in
@@ -986,7 +986,9 @@ let run_turn
                       meta.name (List.length selected)
                       (String.length query_text) (List.length preset_tools);
                   selected
-                with exn ->
+                with
+                | Eio.Cancel.Cancelled _ as e -> raise e
+                | exn ->
                   Log.Keeper.warn
                     "keeper:%s TopK_llm failed (%s), using deterministic prefilter only"
                     meta.name (Printexc.to_string exn);
@@ -996,6 +998,7 @@ let run_turn
                   "keeper:%s TopK_llm: Eio context unavailable, using deterministic prefilter only"
                   meta.name;
                 []
+              end
             | None -> []
           in
           let merged =
@@ -1196,19 +1199,19 @@ let run_turn
          let hook_elapsed_ms =
            Keeper_timing.round1 ((now -. hook_t0) *. 1000.0)
          in
-          let disclosure_json = `Assoc [
-            "ts_unix", `Float now;
-            "event", `String "tool_disclosure";
-            "keeper_name", `String meta.name;
-            "turn", `Int turn;
-            "selection_mode", `String selection_mode;
-            "core_count", `Int core_count;
-            "deterministic_prefilter_count", `Int deterministic_prefilter_count;
-            "discovered_count", `Int discovered_count;
-            "llm_selected_count", `Int llm_selected_count;
-            "final_visible", `Int (List.length all_allowed);
-            "hook_ms", `Float hook_elapsed_ms;
-          ] in
+         let disclosure_json = `Assoc [
+           "ts_unix", `Float now;
+           "event", `String "tool_disclosure";
+           "keeper_name", `String meta.name;
+           "turn", `Int turn;
+           "selection_mode", `String selection_mode;
+           "core_count", `Int core_count;
+           "deterministic_prefilter_count", `Int deterministic_prefilter_count;
+           "discovered_count", `Int discovered_count;
+           "llm_selected_count", `Int llm_selected_count;
+           "final_visible", `Int (List.length all_allowed);
+           "hook_ms", `Float hook_elapsed_ms;
+         ] in
          (try
            Keeper_types_support.append_jsonl_line
              (Keeper_types_support.keeper_decision_log_path config meta.name)

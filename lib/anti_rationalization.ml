@@ -71,8 +71,9 @@ let max_excuse_entries = 100
 let parse_excuse_patterns_json (json : Yojson.Safe.t) : ((string * string) list, string) result =
   match json with
   | `List items ->
-    if List.length items > max_excuse_entries then
-      Error (Printf.sprintf "Too many entries: %d (max %d)" (List.length items) max_excuse_entries)
+    let n = List.length items in
+    if n > max_excuse_entries then
+      Error (Printf.sprintf "Too many entries: %d (max %d)" n max_excuse_entries)
     else
       let rec validate acc = function
         | [] -> Ok (List.rev acc)
@@ -98,22 +99,15 @@ let load_excuse_patterns () : (string * string) list =
   | Some p -> p
   | None ->
     let patterns =
-      try
-        let path = excuse_patterns_path () in
-        if Fs_compat.file_exists path then
-          let content = Fs_compat.load_file path in
-          let json = Yojson.Safe.from_string content in
-          match parse_excuse_patterns_json json with
-          | Ok p -> p
-          | Error msg ->
-            Log.Misc.warn "excuse_patterns: parse error, using defaults: %s" msg;
-            default_excuse_patterns
-        else default_excuse_patterns
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn ->
-        Log.Misc.warn "excuse_patterns: load error, using defaults: %s" (Printexc.to_string exn);
-        default_excuse_patterns
+      let path = excuse_patterns_path () in
+      match Safe_ops.read_json_file_safe path with
+      | Error _ -> default_excuse_patterns
+      | Ok json ->
+        match parse_excuse_patterns_json json with
+        | Ok p -> p
+        | Error msg ->
+          Log.Misc.warn "excuse_patterns: parse error, using defaults: %s" msg;
+          default_excuse_patterns
     in
     cached_patterns := Some patterns;
     patterns
@@ -144,17 +138,7 @@ let find_excuse_pattern (notes : string) : (string * string) option =
   let patterns = load_excuse_patterns () in
   let lower = String.lowercase_ascii notes in
   List.find_opt (fun (pat, _reason) ->
-    (* Simple substring search without Str module *)
-    let plen = String.length pat in
-    let nlen = String.length lower in
-    if plen > nlen then false
-    else
-      let rec scan i =
-        if i > nlen - plen then false
-        else if String.sub lower i plen = pat then true
-        else scan (i + 1)
-      in
-      scan 0
+    String_util.contains_substring lower pat
   ) patterns
 
 (* ================================================================ *)
@@ -336,17 +320,7 @@ let default_evaluator_cascade = "cross_verifier"
 let check_contract ~(notes : string) ~(contract : string list) : string list =
   let lower_notes = String.lowercase_ascii notes in
   List.filter (fun item ->
-    let lower_item = String.lowercase_ascii item in
-    let ilen = String.length lower_item in
-    let nlen = String.length lower_notes in
-    if ilen > nlen then true  (* unmet: item longer than notes *)
-    else
-      let rec scan i =
-        if i > nlen - ilen then true  (* not found = unmet *)
-        else if String.sub lower_notes i ilen = lower_item then false  (* found = met *)
-        else scan (i + 1)
-      in
-      scan 0
+    not (String_util.contains_substring_ci lower_notes item)
   ) contract
 
 let review

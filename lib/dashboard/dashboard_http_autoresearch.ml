@@ -333,6 +333,7 @@ let rehydrate_persisted_loop (persisted : Autoresearch_types.persisted_summary) 
     patience = persisted.patience;
     consecutive_discards = persisted.consecutive_discards;
     build_verify_fn = persisted.build_verify_fn;
+    lower_is_better = persisted.lower_is_better;
   }
 
 let load_loop_state ~base_path loop_id =

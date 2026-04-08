@@ -232,11 +232,17 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
              match Keeper_types.read_meta config name with
              | Error _ | Ok None -> None
              | Ok (Some meta) when lightweight && meta.paused ->
+                 let phase_str =
+                   match Keeper_registry.get_phase ~base_path:config.base_path meta.name with
+                   | Some p -> `String (Keeper_state_machine.phase_to_string p)
+                   | None -> `String "paused"
+                 in
                  Some
                    (`Assoc
                      [
                        ("runtime_class", `String "keeper");
                        ("pipeline_stage", `String "paused");
+                       ("phase", phase_str);
                        ("name", `String meta.name);
                        ("agent_name", `String meta.agent_name);
                        ("status", `String "paused");
@@ -279,16 +285,25 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                    if not agent_exists then "offline"
                    else Keeper_exec_status.keeper_surface_status ~agent_status:agent_json ~diagnostic
                  in
+                 let registry_phase =
+                   Keeper_registry.get_phase ~base_path:config.base_path meta.name
+                 in
                  let pipeline_stage =
-                   match Keeper_registry.get_phase ~base_path:config.base_path meta.name with
+                   match registry_phase with
                    | Some phase -> Keeper_exec_status.pipeline_stage_of_phase phase
                    | None -> "offline"
+                 in
+                 let phase_str =
+                   match registry_phase with
+                   | Some p -> `String (Keeper_state_machine.phase_to_string p)
+                   | None -> `Null
                  in
                  Some
                    (`Assoc
                      [
                        ("runtime_class", `String "keeper");
                        ("pipeline_stage", `String pipeline_stage);
+                       ("phase", phase_str);
                        ("name", `String meta.name);
                        ("agent_name", `String meta.agent_name);
                        ("trace_id", `String meta.runtime.trace_id);

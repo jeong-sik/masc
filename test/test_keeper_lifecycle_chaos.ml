@@ -48,11 +48,11 @@ let dispatch name event =
   | Ok tr -> tr
   | Error e -> Alcotest.fail (KSM.transition_error_to_string e)
 
-let dispatch_expect_terminal name event =
+let dispatch_expect_rejected name event =
   match R.dispatch_event ~base_path:bp name event with
-  | Ok _ -> Alcotest.fail "expected terminal error"
+  | Ok _ -> Alcotest.fail "expected rejected transition"
   | Error (KSM.Terminal_state _) -> ()
-  | Error e -> Alcotest.fail ("expected Terminal_state, got: " ^ KSM.transition_error_to_string e)
+  | Error (KSM.Invalid_transition _) -> ()
 
 let setup name =
   R.clear ();
@@ -73,6 +73,8 @@ let restart_keeper name ~attempt =
 
 let test_heartbeat_failure_cascade () =
   setup "hb-fail";
+  (* In the FSM, any heartbeat failure makes the keeper unhealthy immediately.
+     max_allowed is carried for keepalive/supervisor policy and audit context. *)
   let tr = dispatch "hb-fail"
     (KSM.Heartbeat_failed { consecutive = 1; max_allowed = 5 }) in
   check phase_t "1st failure → failing" KSM.Failing tr.new_phase;
@@ -100,10 +102,10 @@ let test_budget_exhaustion_to_dead () =
   let tr = dispatch "budget-dead" KSM.Restart_budget_exhausted in
   check phase_t "dead" KSM.Dead tr.new_phase;
 
-  dispatch_expect_terminal "budget-dead" KSM.Heartbeat_ok;
-  dispatch_expect_terminal "budget-dead"
+  dispatch_expect_rejected "budget-dead" KSM.Heartbeat_ok;
+  dispatch_expect_rejected "budget-dead"
     (KSM.Supervisor_restart_attempt { attempt = 99 });
-  dispatch_expect_terminal "budget-dead" KSM.Fiber_started
+  dispatch_expect_rejected "budget-dead" KSM.Fiber_started
 
 let test_compaction_crash_recovery () =
   setup "compact";
@@ -135,8 +137,8 @@ let test_graceful_shutdown () =
   let tr = dispatch "shutdown" KSM.Drain_complete in
   check phase_t "stopped" KSM.Stopped tr.new_phase;
 
-  dispatch_expect_terminal "shutdown" KSM.Heartbeat_ok;
-  dispatch_expect_terminal "shutdown" KSM.Fiber_started
+  dispatch_expect_rejected "shutdown" KSM.Heartbeat_ok;
+  dispatch_expect_rejected "shutdown" KSM.Fiber_started
 
 let test_handoff_success () =
   setup "handoff";
@@ -175,8 +177,9 @@ let test_full_chaos_sequence () =
   let tr = dispatch "chaos" KSM.Handoff_started in
   check phase_t "handoff" KSM.HandingOff tr.new_phase;
   (* Handoff completes but fiber crashes immediately after *)
-  ignore (dispatch "chaos"
-    (KSM.Handoff_completed { new_trace_id = "trace-fail"; generation = 1 }));
+  let tr = dispatch "chaos"
+    (KSM.Handoff_completed { new_trace_id = "trace-fail"; generation = 1 }) in
+  check phase_t "handoff complete → running" KSM.Running tr.new_phase;
   let tr = dispatch "chaos"
     (KSM.Fiber_terminated { outcome = "handoff target unreachable" }) in
   check phase_t "post-handoff crash" KSM.Crashed tr.new_phase;
@@ -209,14 +212,15 @@ let test_fleet_chaos () =
   check phase_t "B crashed" KSM.Crashed (get_phase "fleet-b");
   check phase_t "C compacting" KSM.Compacting (get_phase "fleet-c");
   check phase_t "D paused" KSM.Paused (get_phase "fleet-d");
-  check int "1 running" 1 (R.count_running ());
+  check int "1 running" 1 (R.count_running ~base_path:bp ());
 
   restart_keeper "fleet-b" ~attempt:1;
-  check int "2 running" 2 (R.count_running ())
+  check int "2 running" 2 (R.count_running ~base_path:bp ())
 
 let test_turn_failure_cascade () =
   setup "turn-fail";
 
+  (* Turn failures follow the same unhealthy-immediately rule as heartbeat failures. *)
   let tr = dispatch "turn-fail"
     (KSM.Turn_failed { consecutive = 3; max_allowed = 5 }) in
   check phase_t "turn fail → failing" KSM.Failing tr.new_phase;

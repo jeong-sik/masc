@@ -1,6 +1,10 @@
 open Keeper_types
 open Keeper_exec_shared
 
+let is_missing_read_path_error (e : string) =
+  String.starts_with ~prefix:"path_not_found:" e
+  || String.starts_with ~prefix:"path_not_found_under_project_root:" e
+
 let handle_keeper_fs_read
       ~(config : Room.config)
       ~(meta : keeper_meta)
@@ -12,7 +16,7 @@ let handle_keeper_fs_read
     Safe_ops.json_int ~default:20000 "max_bytes" args |> fun n -> max 512 (min 200000 n)
   in
   match resolve_keeper_read_path ~config ~raw_path:path with
-  | Error e when String.starts_with ~prefix:"path_not_found:" e ->
+  | Error e when is_missing_read_path_error e ->
     (* Path within root but doesn't exist — use structured error with suggestions *)
     let root = Keeper_alerting_path.project_root_of_config config in
     let target =
@@ -84,4 +88,3 @@ let handle_keeper_fs_edit
      | Unix.Unix_error (err, _, _) ->
        error_json ~fields:[ "path", `String target ] (Unix.error_message err))
 ;;
-

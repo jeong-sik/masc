@@ -368,13 +368,21 @@ let make_hooks
         let duration_ms =
           (Time_compat.now () -. !tool_start_time) *. 1000.0
         in
+        (* Consume truncation info set by keeper_tools_oas before returning
+           the (possibly truncated) result to OAS. Falls back to out_len
+           when no truncation info was set (e.g. OAS-internal tool calls). *)
+        let (original_bytes, truncated_to) =
+          Keeper_tool_call_log.consume_truncation_info
+            ~keeper_name:(!meta_ref).name ()
+        in
+        let result_bytes = if original_bytes > 0 then original_bytes else out_len in
         (try
            Keeper_tool_call_log.log_call
              ~keeper_name:(!meta_ref).name
              ~tool_name ~input ~output_text
              ~success:(outcome = "ok") ~duration_ms
              ~model:(!meta_ref).runtime.usage.last_model_used
-             ~result_bytes:out_len ()
+             ~result_bytes ?truncated_to ()
          with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
         (* Boring-tool gate: mark turn as productive only for genuinely
            productive tools. keeper_stay_silent is in the boring set. *)

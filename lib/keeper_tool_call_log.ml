@@ -14,6 +14,22 @@
 
 let max_output_len = 4000
 
+(** Pre-truncation info, keyed by keeper name.
+    Set by the tool handler wrapper (keeper_tools_oas), consumed by the
+    OAS on_tool_result hook (keeper_hooks_oas).  Per-keeper isolation
+    prevents cross-keeper corruption when multiple keepers call tools
+    concurrently. Within a single keeper's Agent.run, tool calls are
+    sequential so set→consume ordering is guaranteed. *)
+let pending_truncation : (string, int * int option) Hashtbl.t = Hashtbl.create 8
+
+let set_truncation_info ~keeper_name ~original_bytes ?truncated_to () =
+  Hashtbl.replace pending_truncation keeper_name (original_bytes, truncated_to)
+
+let consume_truncation_info ~keeper_name () =
+  match Hashtbl.find_opt pending_truncation keeper_name with
+  | Some info -> Hashtbl.remove pending_truncation keeper_name; info
+  | None -> (0, None)
+
 let store_ref : Dated_jsonl.t option ref = ref None
 
 let init ~base_path =

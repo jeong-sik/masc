@@ -15,11 +15,11 @@ let handle_keeper_bash
   let timeout_sec =
     Safe_ops.json_float ~default:30.0 "timeout_sec" args |> fun n -> max 1.0 (min 180.0 n)
   in
-  (* Coding/Full presets allow write operations and relaxed metachar rules *)
+  (* Write access is config-driven via permissions.shell_write_presets *)
   let write_enabled =
-    match meta.tool_access with
-    | Preset { preset = Coding; _ } | Preset { preset = Full; _ } -> true
-    | _ -> false
+    match Keeper_types.tool_access_preset meta.tool_access with
+    | Some preset -> Keeper_tool_policy.allows_shell_write_for_preset preset
+    | None -> false
   in
   if cmd = ""
   then error_json "cmd is required. Good: cmd='ls -la lib/'. Bad: cmd=''."

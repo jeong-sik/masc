@@ -96,6 +96,7 @@ tools = ["masc_code_search", "masc_code_symbols", "masc_code_read", "masc_worktr
 
 [permissions]
 workflow_presets = ["coding", "delivery", "full"]
+shell_write_presets = ["coding", "delivery", "full"]
 
 # ── Git Clone Policy ────────────────────────────────────────────────
 # GitHub org names allowed for masc_code_git clone action.

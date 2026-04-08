@@ -789,6 +789,20 @@ let run_turn
      all_tool_names is constant for the session; building universe_set
      once here avoids O(n) Hashtbl allocation on every turn. *)
   let universe_set = Keeper_tool_policy.tool_name_set all_tool_names in
+  (* Precompute preset-executable set for AllowList pruning.
+     Prevents tools visible via core_discovery_tools but blocked by
+     preset (e.g. social keeper seeing keeper_fs_edit) from reaching
+     the LLM and triggering tool_not_allowed errors. *)
+  let allowed_exec_names = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  let allowed_exec_set =
+    let set = Keeper_tool_policy.tool_name_set allowed_exec_names in
+    (* Core always-tools bypass candidate_set in can_execute, so they
+       may be absent from keeper_allowed_tool_names.  Add them back to
+       prevent the preset filter from dropping survival-critical tools. *)
+    List.iter (fun name -> Hashtbl.replace set name ())
+      Keeper_tool_registry.core_always_tools;
+    set
+  in
   let max_tools_per_turn =
     if is_retry then Keeper_config.keeper_retry_max_tools_per_turn ()
     else Keeper_config.keeper_max_tools_per_turn ()
@@ -960,7 +974,9 @@ let run_turn
              This can happen when core_discovery_tools includes tools
              not covered by the keeper's preset (e.g. minimal). *)
           let validated, dropped_names =
-            List.partition (fun n -> Hashtbl.mem universe_set n) raw
+            List.partition (fun n ->
+              Hashtbl.mem universe_set n
+              && Hashtbl.mem allowed_exec_set n) raw
           in
           let dropped = List.length dropped_names in
           if dropped > 0 then begin

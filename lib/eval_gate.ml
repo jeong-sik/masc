@@ -262,11 +262,13 @@ let pre_check
                  && Tool_dispatch.is_destructive tool_name then
                 let cmd_str =
                   try
-                    let json = Yojson.Safe.from_string args_json in
-                    (* keeper_bash uses "command", keeper_fs_edit uses "content" *)
-                    match Safe_ops.json_string_opt "command" json with
-                    | Some s -> s
-                    | None -> Safe_ops.json_string ~default:"" "content" json
+                    let rec extract_strings = function
+                      | `String s -> s
+                      | `List lst -> String.concat " " (List.map extract_strings lst)
+                      | `Assoc fields -> String.concat " " (List.map (fun (_, v) -> extract_strings v) fields)
+                      | _ -> ""
+                    in
+                    extract_strings (Yojson.Safe.from_string args_json)
                   with Yojson.Json_error _ -> ""
                 in
                 begin match detect_destructive cmd_str with
@@ -284,10 +286,13 @@ let pre_check
            && Tool_dispatch.is_destructive tool_name then
           let cmd_str =
             try
-              let json = Yojson.Safe.from_string args_json in
-              match Safe_ops.json_string_opt "command" json with
-              | Some s -> s
-              | None -> Safe_ops.json_string ~default:"" "content" json
+              let rec extract_strings = function
+                | `String s -> s
+                | `List lst -> String.concat " " (List.map extract_strings lst)
+                | `Assoc fields -> String.concat " " (List.map (fun (_, v) -> extract_strings v) fields)
+                | _ -> ""
+              in
+              extract_strings (Yojson.Safe.from_string args_json)
             with Yojson.Json_error _ -> ""
           in
           begin match detect_destructive cmd_str with

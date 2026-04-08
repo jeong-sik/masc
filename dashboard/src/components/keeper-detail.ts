@@ -93,10 +93,13 @@ async function refreshAfterRuntimeAction(): Promise<void> {
 
 function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
   const blocker = keeper.last_blocker?.trim()
-  const needsAttention = keeper.paused || Boolean(blocker)
+  const hbTs = keeper.last_heartbeat ? Date.parse(keeper.last_heartbeat) : null
+  const hbAgeMs = hbTs != null && !Number.isNaN(hbTs) ? Date.now() - hbTs : null
+  const hbStale = hbAgeMs != null && hbAgeMs > 300_000 // 5 minutes
+  const needsAttention = keeper.paused || Boolean(blocker) || hbStale
   if (!needsAttention && !keeper.last_autonomous_action_at) return null
 
-  const toneClass = keeper.paused || blocker
+  const toneClass = keeper.paused || blocker || hbStale
     ? 'border-[rgba(251,191,36,0.24)] bg-[rgba(251,191,36,0.08)]'
     : 'border-[var(--card-border)] bg-[var(--white-3)]'
 
@@ -108,6 +111,10 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
           : null}
         ${keeper.paused && keeper.keepalive_running
           ? html`<span>하트비트는 유지되지만 자율 행동은 멈춰 있습니다.</span>`
+          : null}
+        ${hbStale
+          ? html`<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-[rgba(239,68,68,0.14)] text-[var(--bad)]">Heartbeat stale</span>
+            <span>마지막 하트비트: <${TimeAgo} timestamp=${keeper.last_heartbeat} /></span>`
           : null}
         ${blocker
           ? html`<span><strong class="text-[var(--text-strong)]">차단 요인</strong> · ${blocker}</span>`

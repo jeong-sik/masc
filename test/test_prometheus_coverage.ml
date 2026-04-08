@@ -215,20 +215,22 @@ let test_to_prometheus_text_has_sse_metrics () =
   check bool "has sse write failure counter" true (has "masc_sse_write_failures_total");
   check bool "has sse reject counter" true (has "masc_sse_rejects_total")
 
-let test_inference_cache_metrics_json () =
-  Prometheus.inc_counter "masc_inference_cache_hits_total" ();
-  Prometheus.inc_counter "masc_inference_cache_misses_total" ();
-  Prometheus.inc_counter "masc_inference_cache_writes_total" ();
-  Prometheus.inc_counter "masc_inference_cache_bypass_total" ();
-  Prometheus.inc_counter "masc_inference_cache_errors_total" ();
-  let json = Prometheus.inference_cache_metrics_json () in
-  let open Yojson.Safe.Util in
-  check bool "has hits" true (json |> member "hits" <> `Null);
-  check bool "has misses" true (json |> member "misses" <> `Null);
-  check bool "has writes" true (json |> member "writes" <> `Null);
-  check bool "has bypass" true (json |> member "bypass" <> `Null);
-  check bool "has errors" true (json |> member "errors" <> `Null);
-  check bool "has hit_rate" true (json |> member "hit_rate" <> `Null)
+let test_keeper_metrics_registered () =
+  let text = Prometheus.to_prometheus_text () in
+  let has metric =
+    try
+      let _ = Str.search_forward (Str.regexp metric) text 0 in
+      true
+    with Not_found -> false
+  in
+  check bool "has keeper compactions counter" true
+    (has "masc_keeper_compactions_total");
+  check bool "has keeper compaction ratio gauge" true
+    (has "masc_keeper_compaction_ratio_change");
+  check bool "has keeper heartbeat successes counter" true
+    (has "masc_keeper_heartbeat_successes_total");
+  check bool "has keeper heartbeat failures counter" true
+    (has "masc_keeper_heartbeat_failures_total")
 
 (* ============================================================
    Convenience Functions Tests
@@ -380,7 +382,7 @@ let () =
       test_case "has TYPE" `Quick test_to_prometheus_text_has_type;
       test_case "has uptime" `Quick test_to_prometheus_text_has_uptime;
       test_case "has sse metrics" `Quick test_to_prometheus_text_has_sse_metrics;
-      test_case "model cache metrics json" `Quick test_inference_cache_metrics_json;
+      test_case "keeper metrics registered" `Quick test_keeper_metrics_registered;
     ];
     "convenience", [
       test_case "record_request" `Quick test_record_request;

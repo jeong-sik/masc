@@ -82,6 +82,59 @@ function KpiCard({ label, value, hint, tone = 'default', progress }: {
   `
 }
 
+// ── Operational Health ───────────────────────────────────
+
+function OperationalHealth({ keeper }: { keeper: Keeper }) {
+  const mw = keeper.metrics_window
+  const hb = keeper.last_heartbeat
+  const compSavedRatio = mw?.compaction_saved_ratio
+  const avgSaved = mw?.avg_compaction_saved_tokens
+  const dropRatio = mw?.memory_compaction_drop_ratio
+  const lastCompAgo = keeper.last_compaction_ago_s
+
+  const hbTone: KpiTone = !hb ? 'default' : 'ok'
+  const compTone: KpiTone = compSavedRatio == null ? 'default'
+    : compSavedRatio >= 0.4 ? 'ok' : compSavedRatio >= 0.2 ? 'warn' : 'bad'
+  const dropTone: KpiTone = dropRatio == null ? 'default'
+    : dropRatio <= 0.1 ? 'ok' : dropRatio <= 0.3 ? 'warn' : 'bad'
+
+  const hasAny = hb || compSavedRatio != null || dropRatio != null || lastCompAgo != null
+  if (!hasAny) return null
+
+  return html`
+    <div class="rounded-xl border border-[var(--card-border)] bg-[var(--white-2)] p-3">
+      <div class="mb-2 text-[10px] font-semibold tracking-[0.08em] uppercase text-[var(--text-muted)]">운영 건강도</div>
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        ${hb ? html`
+          <div class="p-2 rounded-lg border ${KPI_TONE[hbTone]} flex flex-col gap-0.5">
+            <span class="text-[9px] uppercase tracking-wider text-[var(--text-muted)]">Heartbeat</span>
+            <span class="text-xs font-mono ${KPI_VALUE_TONE[hbTone]}">${hb.replace('T', ' ').slice(0, 19)}</span>
+          </div>
+        ` : null}
+        ${compSavedRatio != null ? html`
+          <div class="p-2 rounded-lg border ${KPI_TONE[compTone]} flex flex-col gap-0.5">
+            <span class="text-[9px] uppercase tracking-wider text-[var(--text-muted)]">압축 절감률</span>
+            <span class="text-sm font-mono tabular-nums ${KPI_VALUE_TONE[compTone]}">${(compSavedRatio * 100).toFixed(1)}%</span>
+            ${avgSaved != null ? html`<span class="text-[9px] text-[var(--text-dim)]">avg ${formatTokens(avgSaved)} saved</span>` : null}
+          </div>
+        ` : null}
+        ${dropRatio != null ? html`
+          <div class="p-2 rounded-lg border ${KPI_TONE[dropTone]} flex flex-col gap-0.5">
+            <span class="text-[9px] uppercase tracking-wider text-[var(--text-muted)]">메모리 손실률</span>
+            <span class="text-sm font-mono tabular-nums ${KPI_VALUE_TONE[dropTone]}">${(dropRatio * 100).toFixed(1)}%</span>
+          </div>
+        ` : null}
+        ${lastCompAgo != null ? html`
+          <div class="p-2 rounded-lg border ${KPI_TONE['default']} flex flex-col gap-0.5">
+            <span class="text-[9px] uppercase tracking-wider text-[var(--text-muted)]">마지막 압축</span>
+            <span class="text-xs font-mono text-[var(--text-strong)]">${formatDuration(lastCompAgo)} 전</span>
+          </div>
+        ` : null}
+      </div>
+    </div>
+  `
+}
+
 // ── KPI Grid ─────────────────────────────────────────────
 
 export function KpiGrid({ keeper }: { keeper: Keeper }) {
@@ -172,6 +225,8 @@ export function KpiGrid({ keeper }: { keeper: Keeper }) {
           ? html`<${KpiCard} label="비용 (USD)" value=${latestCost} />`
           : null}
       </div>
+      ${'' /* Operational Health — heartbeat + compaction quality */}
+      <${OperationalHealth} keeper=${keeper} />
       ${'' /* Autonomy KPIs — always visible for keeper context */}
       <div class="grid grid-cols-4 gap-2">
         <${KpiCard}
@@ -244,9 +299,16 @@ export function ContextChart({ keeper }: { keeper: Keeper }) {
           <line x1="${x.toFixed(1)}" y1="${pad}" x2="${x.toFixed(1)}" y2="${H - pad}" stroke="#ef4444" stroke-width="1.5" opacity="0.7"/>
         `)}
         <polyline points="${polyline}" fill="none" stroke="${lineColor}" stroke-width="1.5"/>
-        ${pts.filter(({ p }) => p.is_compaction).map(({ x, y }) => html`
-          <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2.5" fill="#a855f7"/>
-        `)}
+        ${pts.filter(({ p }) => p.is_compaction).map(({ x, y, p }) => {
+          const trigger = p.compaction_trigger ?? 'unknown'
+          const saved = p.compaction_saved_tokens ?? 0
+          const tip = saved > 0 ? `${trigger} · ${formatTokens(saved)} saved` : trigger
+          return html`
+            <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3" fill="#a855f7" style="cursor:pointer">
+              <title>${tip}</title>
+            </circle>
+          `
+        })}
       </svg>
       <span class="text-sm font-semibold tabular-nums text-[var(--text-strong)]">${lastRatio.toFixed(1)}%</span>
     </div>`

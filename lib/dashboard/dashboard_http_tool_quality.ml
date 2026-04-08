@@ -14,6 +14,8 @@ let aggregate ?(n = 5000) () : Yojson.Safe.t =
   else
   let total = ref 0 in
   let success = ref 0 in
+  (* hourly trend: hour_key -> (calls, successes) *)
+  let hourly_trend : (string, int ref * int ref) Hashtbl.t = Hashtbl.create 48 in
   (* tool -> (calls, successes, total_ms, truncated_count, total_output_chars) *)
   let tool_stats : (string, int ref * int ref * float ref * int ref * int ref) Hashtbl.t =
     Hashtbl.create 64
@@ -64,6 +66,21 @@ let aggregate ?(n = 5000) () : Yojson.Safe.t =
       | _ -> false
     in
     if ok then incr success;
+    (* hourly trend bucketing *)
+    let hour_key =
+      Safe_ops.json_string_opt "ts" record
+      |> Option.map (fun ts ->
+        if String.length ts >= 13 then String.sub ts 0 13 else ts)
+      |> Option.value ~default:"unknown"
+    in
+    let (hc, hs) =
+      match Hashtbl.find_opt hourly_trend hour_key with
+      | Some v -> v
+      | None ->
+        let v = (ref 0, ref 0) in
+        Hashtbl.replace hourly_trend hour_key v; v
+    in
+    incr hc; if ok then incr hs;
     (* tool stats *)
     let (tc, ts, td, ttrunc, tochars) =
       match Hashtbl.find_opt tool_stats tool with
@@ -163,6 +180,24 @@ let aggregate ?(n = 5000) () : Yojson.Safe.t =
     |> List.sort (fun (a, _) (b, _) -> Int.compare b a)
     |> List.map snd
   in
+  let hourly =
+    Hashtbl.fold (fun hour (c, s) acc ->
+      let calls = !c in
+      let successes = !s in
+      let pct = if calls > 0
+        then Float.of_int successes /. Float.of_int calls *. 100.0
+        else 0.0
+      in
+      (hour, `Assoc [
+        ("hour", `String hour);
+        ("calls", `Int calls);
+        ("success", `Int successes);
+        ("success_rate", `Float (Float.round (pct *. 10.0) /. 10.0));
+      ]) :: acc
+    ) hourly_trend []
+    |> List.sort (fun (a, _) (b, _) -> String.compare a b)
+    |> List.map snd
+  in
   `Assoc [
     ("total", `Int total_n);
     ("success", `Int success_n);
@@ -171,4 +206,5 @@ let aggregate ?(n = 5000) () : Yojson.Safe.t =
     ("by_tool", `List by_tool);
     ("by_keeper", `List by_keeper);
     ("failure_categories", `List failure_categories);
+    ("hourly_trend", `List hourly);
   ]

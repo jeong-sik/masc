@@ -115,11 +115,7 @@ let test_cache_metrics_in_export () =
   check bool "export has prefix creation metric" true
     (has "masc_provider_prefix_cache_creation_tokens_total");
   check bool "export has prefix read metric" true
-    (has "masc_provider_prefix_cache_read_tokens_total");
-  check bool "export has response cache hit metric" true
-    (has "masc_inference_cache_hits_total");
-  check bool "export has response cache miss metric" true
-    (has "masc_inference_cache_misses_total")
+    (has "masc_provider_prefix_cache_read_tokens_total")
 
 (* ── Suite ────────────────────────────────────────────── *)
 

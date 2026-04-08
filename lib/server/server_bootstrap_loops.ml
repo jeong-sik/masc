@@ -412,6 +412,10 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
           let buf_reaped = A2a_tools.cleanup_orphan_buffers () in
           if buf_reaped > 0 then
             Log.Server.info "Reaped %d orphan event buffers" buf_reaped;
+          (* A2A: expire subscriptions idle > 24h *)
+          let sub_expired = A2a_tools.cleanup_stale_subscriptions () in
+          if sub_expired > 0 then
+            Log.Server.info "Expired %d stale A2A subscriptions" sub_expired;
           (* Periodic JSONL prune: every 24h, clean dated JSONL files *)
           let now = Unix.gettimeofday () in
           if now -. !last_prune >= 86400.0 then begin

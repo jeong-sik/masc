@@ -89,7 +89,7 @@ let resolved_model_json_of_label label =
           [
             ("provider", `String (provider_name_of_label label));
             ("model_id", `String (raw_model_id_of_label label));
-            ("max_context", `Int 0);
+            ("max_context", `Int (Oas_model_resolve.max_context_of_label label));
           ])
   | Some cfg ->
       Some

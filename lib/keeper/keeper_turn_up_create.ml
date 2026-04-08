@@ -278,6 +278,12 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         team_session_start_count_total = 0;
         paused = false;
         current_task_id = None;
+        work_discovery_enabled = p.profile_defaults.work_discovery_enabled;
+        work_discovery_sources = p.profile_defaults.work_discovery_sources;
+        work_discovery_interval_sec = p.profile_defaults.work_discovery_interval_sec;
+        work_discovery_guidance = p.profile_defaults.work_discovery_guidance;
+        telemetry_feedback_enabled = p.profile_defaults.telemetry_feedback_enabled;
+        telemetry_feedback_window_hours = p.profile_defaults.telemetry_feedback_window_hours;
         runtime = {
           usage = {
             total_turns = 0;
@@ -308,6 +314,8 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             last_outcome = Proactive_never_started;
             last_reason = "";
             last_preview = "";
+            last_work_discovery_ts = 0.0;
+            work_discovery_count = 0;
           };
           generation = 0;
           trace_id;

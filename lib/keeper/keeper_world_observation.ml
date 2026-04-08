@@ -45,6 +45,8 @@ type world_observation = {
   last_tools_used : string list;
     (** Tools used in the previous cycle. Empty on first cycle.
         Used by the unified prompt to generate data-driven anti-repetition hints. *)
+  work_discovery_due : bool;
+  behavioral_stats : Keeper_telemetry_feedback.behavioral_stats option;
 }
 
 type unified_turn_channel =
@@ -585,6 +587,35 @@ let observe ~(pending_board_events : pending_board_event list option)
         in
         events
   in
+  (* Work Discovery: check if scan interval has elapsed *)
+  let work_discovery_due =
+    match meta.work_discovery_enabled with
+    | Some true ->
+      let interval =
+        Option.value ~default:600 meta.work_discovery_interval_sec
+      in
+      let since_last =
+        Time_compat.now () -. meta.runtime.proactive_rt.last_work_discovery_ts
+      in
+      since_last >= float_of_int interval
+    | _ -> false
+  in
+  (* Telemetry Feedback: compute behavioral stats from decision log *)
+  let behavioral_stats =
+    match meta.telemetry_feedback_enabled with
+    | Some true ->
+      let window =
+        Option.value ~default:24 meta.telemetry_feedback_window_hours
+      in
+      let log_path =
+        Keeper_types_support.keeper_decision_log_path config meta.name
+      in
+      (try
+         Some (Keeper_telemetry_feedback.compute_stats
+                 ~decision_log_path:log_path ~window_hours:window)
+       with _ -> None)
+    | _ -> None
+  in
   {
     pending_mentions;
     pending_board_events;
@@ -603,6 +634,8 @@ let observe ~(pending_board_events : pending_board_event list option)
     room_signal_digest_ref;
     last_turn_budget = None;
     last_tools_used = [];
+    work_discovery_due;
+    behavioral_stats;
   }
 
 (** Compute effective scheduled autonomous cooldown with idle decay.

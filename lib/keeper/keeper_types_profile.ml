@@ -143,6 +143,14 @@ type keeper_profile_defaults = {
   tool_preset : string option;
   tool_also_allow : string list option;
   tool_denylist : string list option;
+  (* Work Discovery — config-driven proactive work scanning *)
+  work_discovery_enabled : bool option;
+  work_discovery_sources : string list option;
+  work_discovery_interval_sec : int option;
+  work_discovery_guidance : string option;
+  (* Telemetry Feedback — inject behavioral stats into keeper context *)
+  telemetry_feedback_enabled : bool option;
+  telemetry_feedback_window_hours : int option;
 }
 
 type persona_summary = {
@@ -178,6 +186,12 @@ let empty_keeper_profile_defaults = {
   tool_preset = None;
   tool_also_allow = None;
   tool_denylist = None;
+  work_discovery_enabled = None;
+  work_discovery_sources = None;
+  work_discovery_interval_sec = None;
+  work_discovery_guidance = None;
+  telemetry_feedback_enabled = None;
+  telemetry_feedback_window_hours = None;
 }
 
 let personas_root_opt () =
@@ -290,6 +304,15 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
            | Some raw -> normalize_tool_preset_raw raw);
         tool_also_allow = normalize_name_list_opt (strs "tool_also_allow");
         tool_denylist = normalize_name_list_opt (strs "tool_denylist");
+        work_discovery_enabled = bool_ "work_discovery_enabled";
+        work_discovery_sources =
+          (match strs "work_discovery_sources" with
+           | [] -> None
+           | xs -> Some xs);
+        work_discovery_interval_sec = int_ "work_discovery_interval_sec";
+        work_discovery_guidance = str "work_discovery_guidance";
+        telemetry_feedback_enabled = bool_ "telemetry_feedback_enabled";
+        telemetry_feedback_window_hours = int_ "telemetry_feedback_window_hours";
       })
     result
 
@@ -401,6 +424,20 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
                 tool_denylist =
                   normalize_name_list_opt
                     (Safe_ops.json_string_list "tool_denylist" keeper_json);
+                work_discovery_enabled =
+                  Safe_ops.json_bool_opt "work_discovery_enabled" keeper_json;
+                work_discovery_sources =
+                  (match Safe_ops.json_string_list "work_discovery_sources" keeper_json with
+                   | [] -> None
+                   | xs -> Some xs);
+                work_discovery_interval_sec =
+                  Safe_ops.json_int_opt "work_discovery_interval_sec" keeper_json;
+                work_discovery_guidance =
+                  Safe_ops.json_string_opt "work_discovery_guidance" keeper_json;
+                telemetry_feedback_enabled =
+                  Safe_ops.json_bool_opt "telemetry_feedback_enabled" keeper_json;
+                telemetry_feedback_window_hours =
+                  Safe_ops.json_int_opt "telemetry_feedback_window_hours" keeper_json;
               }
           | _ -> { empty_keeper_profile_defaults with manifest_path = Some path })
 

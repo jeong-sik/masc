@@ -62,6 +62,7 @@
         test_tool_exposure
         test_autonomy_liberation
         test_keeper_unified
+        test_keeper_telemetry_feedback
         test_keeper_toml
         test_keeper_tool_policy_config
         test_keeper_toml_config_validation
@@ -126,6 +127,7 @@
           test_tool_exposure
           test_autonomy_liberation
           test_keeper_unified
+          test_keeper_telemetry_feedback
           test_keeper_toml
           test_keeper_tool_policy_config
           test_keeper_toml_config_validation

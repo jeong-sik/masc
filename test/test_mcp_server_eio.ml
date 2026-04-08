@@ -2472,6 +2472,7 @@ let test_execute_tool_autoresearch_uses_resolved_session_agent () =
                 ("metric_fn", `String "echo");
                 ("target_file", `String "target.txt");
                 ("workdir", `String workdir_path);
+                ("model_model", `String "test:dummy");
                 ("max_cycles", `Int 1);
               ])
       in

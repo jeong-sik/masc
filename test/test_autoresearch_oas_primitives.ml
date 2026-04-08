@@ -327,6 +327,7 @@ let test_start_seeds_source_only_target_file_into_managed_worktree () =
             ("metric_fn", `String "/usr/bin/printf 1.0");
             ("target_file", `String target_file);
             ("workdir", `String repo);
+            ("model_model", `String "test:dummy");
             ("max_cycles", `Int 1);
           ])
   with

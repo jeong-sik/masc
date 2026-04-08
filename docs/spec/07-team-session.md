@@ -50,9 +50,9 @@ Team Session Engine (Eio)
   |      - Markdown + JSON report 생성
   |      - Proof artifact (강한 증거 모드)
   |
-  +--> Team Context
-         - worker 간 공유 컨텍스트 (~500 토큰)
-         - OAS Collaboration.t 투영
+   +--> Team Context
+          - worker 간 공유 컨텍스트 (~500 토큰)
+          - OAS Swarm bridge metadata / prompt projection
 ```
 
 ---
@@ -333,9 +333,13 @@ type team_context = {
 `load_findings`: 이전 worker들의 finding을 `"[worker_name] finding"` 형식으로 로드.
 `to_prompt_section`: team_context를 prompt 삽입용 문자열로 렌더링.
 
-### 10.1. OAS Collaboration Bridge
+### 10.1. Current OAS Swarm Bridge Truth
 
-`collaboration_of_session`은 MASC session(47 fields)을 OAS `Collaboration.t`(12 fields)로 lossy projection한다. MASC votes/artifacts는 session record에 없으므로 빈 값으로 투영된다. `shared_context`는 shared findings에서 생성된다.
+현재 bridge의 핵심은 `Collaboration.t` 투영이 아니라 `session -> swarm_config`, `planned_worker -> agent_entry` 변환이다.
+
+- `team_session_oas_bridge.ml`은 OAS Swarm 실행에 필요한 typed 필드와 `worker_specs` metadata JSON을 구성한다.
+- `collaboration_context`는 현재 `None`으로 고정되어 있으며, `test_team_session_oas_bridge.ml`도 이 truth를 검증한다.
+- session semantics는 prompt, worker metadata, `resource_check`, telemetry/proof surface를 통해 유지되지만 fidelity gap은 아직 남아 있다.
 
 ---
 
@@ -411,7 +415,7 @@ type routing_decision = {
 | tool_team_session 분할 | 원래 4412줄 god file. 현재 9개 모듈로 분할 완료 | Resolved |
 | Legacy spawn field 거부 | `spawn_agent`, `spawn_model`, `model_tier` 직접 사용 불가. migration 에러 반환 | By design |
 | Manual/Assist + Auto 이원 경로 | Auto는 OAS Swarm, Manual/Assist는 기존 engine. 통합 미완 | In progress |
-| session record 47 fields | OAS Collaboration.t(12 fields)로의 lossy projection 시 정보 유실 | Architectural |
+| session record 47 fields | `swarm_config` / `worker_specs` bridge에 일부 fidelity gap이 남아 있음 (`collaboration_context=None`) | Architectural |
 | Checkpoint proof hash | `Proof_strong` 모드의 hash chain 구현 범위가 event log 무결성에 한정 | Enhancement candidate |
 
 ---

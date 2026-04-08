@@ -1,8 +1,9 @@
 {
-  "default_models": ["glm:auto", "ollama:auto"],
-
-  "_comment": "Only default_models needed. OAS cascade_config falls back to default_models when a named cascade is absent. Per-cascade model overrides can be added as {name}_models when differentiation is needed.",
-
+  "default_models": [
+    "glm:auto",
+    "ollama:auto"
+  ],
+  "_comment": "glm:auto = ZAI GLM (primary), ollama:auto = local Ollama MLX (fallback). OAS discovery resolves ollama:auto via /api/tags.",
   "tool_rerank_temperature": 0.0,
   "tool_rerank_max_tokens": 200,
   "keeper_unified_temperature": 0.2,

@@ -61,6 +61,10 @@ let normalize_name_list_opt items =
   | [] -> None
   | xs -> Some xs
 
+let lower_string_list_opt = function
+  | [] -> None
+  | xs -> Some (List.map String.lowercase_ascii xs)
+
 let normalize_tool_preset_raw raw =
   let normalized = String.trim (String.lowercase_ascii raw) in
   match normalized with
@@ -444,10 +448,7 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
                   Safe_ops.json_bool_opt "telemetry_feedback_enabled" keeper_json;
                 telemetry_feedback_window_hours =
                   Safe_ops.json_int_opt "telemetry_feedback_window_hours" keeper_json;
-                allowed_providers =
-                  (match Safe_ops.json_string_list "allowed_providers" keeper_json with
-                   | [] -> None
-                   | xs -> Some (List.map String.lowercase_ascii xs));
+                allowed_providers = lower_string_list_opt (Safe_ops.json_string_list "allowed_providers" keeper_json);
               }
           | _ -> { empty_keeper_profile_defaults with manifest_path = Some path })
 

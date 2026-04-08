@@ -282,6 +282,10 @@ let filter_by_providers (allowed : string list option) (models : string list)
   match allowed with
   | None | Some [] -> models
   | Some providers ->
+    let providers =
+      List.sort_uniq String.compare
+        (List.map String.lowercase_ascii providers)
+    in
     let filtered =
       List.filter
         (fun label ->
@@ -290,4 +294,10 @@ let filter_by_providers (allowed : string list option) (models : string list)
           | None -> false)
         models
     in
-    if filtered = [] then models else filtered
+    if filtered = [] then (
+      Log.warn ~ctx:"OasModelResolve"
+        "filter_by_providers matched no models; falling back to unfiltered \
+         (allowed=[%s] models=[%s])"
+        (String.concat "," providers) (String.concat "," models);
+      models)
+    else filtered

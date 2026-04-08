@@ -118,7 +118,7 @@
 | Swarm Runner | Load→convert→callbacks→run→apply | IMPL | team_session_swarm_runner.ml |
 | Report/Proof | Markdown/JSON, Standard/Strong | IMPL | team_session_report_proof.ml 419 LOC |
 | Tool Surface | 9 handler modules, 4.5K LOC | IMPL | God file 분할 완료 |
-| Lossy Projection | collaboration_context JSON + Prompt_composer | IMPL | OAS #698 opaque JSON, system_prompt 보강 |
+| Session Bridge Fidelity | collaboration_context JSON + Prompt_composer + `worker_specs` projection | IMPL | OAS #698 opaque JSON, fidelity gap remains |
 
 ### 08-Governance (100% IMPL)
 

@@ -88,7 +88,7 @@ let acquire_flock_retry ?clock:(_clock = None) ~lock_path ~mode ~perm
       end
   in
   try acquire max_attempts
-  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+  with exn ->
     (try Unix.close fd with Unix.Unix_error _ -> ());
     raise exn
 
@@ -124,7 +124,7 @@ let acquire_flock_retry_cooperative ?clock ~lock_path ~mode ~perm
       end
   in
   try acquire max_attempts
-  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+  with exn ->
     run_blocking_lock_op (fun () -> try Unix.close fd with Unix.Unix_error _ -> ());
     raise exn
 

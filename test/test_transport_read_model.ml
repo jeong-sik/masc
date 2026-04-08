@@ -71,7 +71,16 @@ let test_transport_status_http_shape_extends_tool_shape () =
     | `Bool _ -> true
     | _ -> false);
   check bool "tool and http transport status match after stripping configured"
-    true (tool_json = strip_configured http_json)
+     true (tool_json = strip_configured http_json)
+
+let test_transport_status_reports_streamable_http_protocol () =
+  let json = TRM.transport_status_json (make_context ()) in
+  let enabled_protocols =
+    Yojson.Safe.Util.(json |> member "enabled_protocols" |> to_list)
+    |> List.map Yojson.Safe.Util.to_string
+  in
+  check bool "enabled_protocols includes canonical json-rpc path" true
+    (List.mem "json-rpc" enabled_protocols)
 
 let test_context_from_env_uses_default_loopback_base_url () =
   with_env "MASC_HTTP_BASE_URL" None (fun () ->
@@ -113,11 +122,13 @@ let () =
     [
       ( "json",
         [
-          test_case "websocket discovery parity" `Quick
-            test_websocket_discovery_http_shape_extends_tool_shape;
-          test_case "transport status parity" `Quick
-            test_transport_status_http_shape_extends_tool_shape;
-        ] );
+           test_case "websocket discovery parity" `Quick
+             test_websocket_discovery_http_shape_extends_tool_shape;
+           test_case "transport status parity" `Quick
+             test_transport_status_http_shape_extends_tool_shape;
+           test_case "transport status includes json-rpc protocol" `Quick
+             test_transport_status_reports_streamable_http_protocol;
+         ] );
       ( "env",
         [
           test_case "default loopback base url" `Quick

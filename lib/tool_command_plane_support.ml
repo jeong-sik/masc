@@ -231,7 +231,7 @@ let run_process_with_timeout ?stdin_content ~clock_opt ~timeout_sec ~prog ~argv 
       close_fd_quietly stderr_fd;
       stderr_fd_opt := None;
       pid
-    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+    with exn ->
       cleanup_setup ();
       raise exn
   in

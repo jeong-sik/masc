@@ -37,6 +37,28 @@ let try_with_default ~default context f =
   | Some v -> v
   | None -> default
 
+(** Cancel-aware Result wrapper.
+    Re-raises [Eio.Cancel.Cancelled] with backtrace; captures other
+    exceptions as [Error exn]. *)
+let try_catch f =
+  try Ok (f ())
+  with
+  | Eio.Cancel.Cancelled _ as e ->
+    let bt = Printexc.get_raw_backtrace () in
+    Printexc.raise_with_backtrace e bt
+  | exn -> Error exn
+
+(** Cancel-aware exception handler.
+    Re-raises [Eio.Cancel.Cancelled] with backtrace; delegates other
+    exceptions to [handler]. *)
+let handle f handler =
+  try f ()
+  with
+  | Eio.Cancel.Cancelled _ as e ->
+    let bt = Printexc.get_raw_backtrace () in
+    Printexc.raise_with_backtrace e bt
+  | exn -> handler exn
+
 (** Parse JSON with detailed error reporting *)
 let parse_json_safe ~context str : (Yojson.Safe.t, string) result =
   try Ok (Yojson.Safe.from_string str)
@@ -155,7 +177,7 @@ let get_env_float_logged name ~default =
 (** {2 JSON Value Extraction Helpers}
 
     Safe extraction from Yojson.Safe.t values with proper error handling.
-    These replace `with Eio.Cancel.Cancelled _ as e -> raise e | _ -> default` patterns in JSON parsing code.
+    Safe extraction from Yojson.Safe.t values without exception handling.
 *)
 
 (** Safe member access: returns [`Null] for non-[`Assoc] inputs

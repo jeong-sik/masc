@@ -301,8 +301,12 @@ let handle_heartbeat
                   tm.tm_hour tm.tm_min tm.tm_sec
               in
               let updated = { agent with Types.last_seen = iso_now } in
-              Fs_compat.save_file agent_file
-                (Yojson.Safe.to_string (Types.agent_to_yojson updated))
+              let content =
+                Yojson.Safe.to_string (Types.agent_to_yojson updated)
+              in
+              let tmp_path = agent_file ^ ".tmp" in
+              Fs_compat.save_file tmp_path content;
+              Unix.rename tmp_path agent_file
             | Error e ->
                 Log.Transport.warn "gRPC heartbeat: invalid agent JSON for %s: %s"
                   ping.agent_name e

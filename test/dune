@@ -98,7 +98,8 @@
         test_tool_prefilter
         test_keeper_state_machine
         test_telemetry_unified
-        test_keeper_topk_llm)
+        test_keeper_topk_llm
+        test_warn_root_causes)
  (modules test_room test_room_state_recovery test_types test_auth test_audit_log test_http_negotiation
           test_sse test_cancellation test_graphql_api
           test_graphql_endpoint
@@ -164,7 +165,8 @@
           test_tool_prefilter
           test_keeper_state_machine
           test_telemetry_unified
-          test_keeper_topk_llm)
+          test_keeper_topk_llm
+          test_warn_root_causes)
  (libraries masc_test_deps))
 
 ; ============================================================

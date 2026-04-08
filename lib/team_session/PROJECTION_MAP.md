@@ -1,10 +1,10 @@
 # Projection Map: MASC Session -> OAS Swarm
 
-Field-by-field mapping for the two lossy projections in `team_session_oas_bridge.ml`.
+Current field map for `team_session_oas_bridge.ml`.
 
-**Key distinction**: data loss vs type loss. Most fields are preserved in
-`Collaboration.t.metadata` as JSON, losing compile-time type safety but
-retaining the values at runtime.
+**Current truth**: the bridge projects into OAS `swarm_config` / `agent_entry`
+and keeps `collaboration_context = None`. Session/worker semantics survive
+mainly through typed swarm fields plus `worker_specs` metadata JSON.
 
 ## planned_worker (23 fields) -> agent_entry (4 fields)
 
@@ -55,41 +55,16 @@ the remaining 18 are metadata-only in `worker_specs`, and 0 are truly dropped.
 | (hardcoded) | max_agent_retries | 1 |
 | (hardcoded) | enable_streaming | false |
 | (runtime) | resource_check | Health check closure |
-| (via Collaboration.t) | collaboration | collaboration_of_session |
+| (constant) | collaboration_context | Always `None` in current bridge |
 
-### Via Collaboration.t
+### Preserved outside typed swarm_config fields
 
-| Session Field | Collaboration.t Field | Notes |
-|--------------|----------------------|-------|
-| session_id | id | Direct |
-| goal | goal | Direct |
-| status | phase | session_status_to_phase |
-| planned_workers | participants | planned_worker_to_participant |
-| started_at | created_at | Direct |
-| last_event_at / started_at | updated_at | Fallback chain |
-| stop_reason | outcome | Direct (may be None) |
+The bridge no longer builds a `Collaboration.t` payload.
 
-### Preserved in Collaboration.t.metadata
+The following session semantics are still carried through other surfaces:
 
 | Key | Session Field |
 |-----|--------------|
-| room_id | room_id |
-| created_by | created_by |
-| origin_kind | origin_kind |
-| execution_scope | execution_scope |
-| orchestration_mode | orchestration_mode |
-| control_profile | control_profile |
-| scale_profile | scale_profile |
-| instruction_profile | instruction_profile |
-| fallback_policy | fallback_policy |
-| communication_mode | communication_mode |
-| alert_channel | alert_channel |
-| duration_seconds | duration_seconds |
-| checkpoint_interval_sec | checkpoint_interval_sec |
-| min_agents | min_agents |
-| auto_resume | auto_resume |
-| planned_worker_count | List.length planned_workers |
-| model_cascade | model_cascade |
 | worker_class_counts | Aggregated from planned_workers |
 | runtime_pool_counts | Aggregated from planned_workers |
 | lane_counts | Aggregated from planned_workers |
@@ -97,6 +72,12 @@ the remaining 18 are metadata-only in `worker_specs`, and 0 are truly dropped.
 | control_domain_counts | Aggregated from planned_workers |
 | model_tier_counts | Aggregated from planned_workers |
 | worker_specs | Full per-worker metadata JSON |
+
+Additional session/runtime semantics survive via:
+
+- `prompt`, `timeout_sec`, `budget`, `convergence`, `resource_check`
+- per-agent telemetry exported by the swarm runner / proof surfaces
+- persisted MASC session state updated by `apply_swarm_result`
 
 ### Dropped (no OAS equivalent)
 
@@ -125,8 +106,8 @@ by apply_swarm_result after swarm execution completes.
 
 ## Compression Summary
 
-| Projection | Source | Target (typed) | In metadata (JSON) | Truly dropped |
-|-----------|--------|----------------|-------------------|---------------|
-| planned_worker -> agent_entry | 24 | 4 | 18 | 0 |
-| session -> swarm_config | 47 | 12 | 24 | 16 (metrics/post-exec) |
-| session -> Collaboration.t | 47 | 7 direct | 24 | 0 (all preserved) |
+| Projection | Source | Target (typed) | In metadata / side surfaces | Truly dropped |
+|-----------|--------|----------------|-----------------------------|---------------|
+| planned_worker -> agent_entry | 24 | 4 | `worker_specs` JSON | 0 |
+| session -> swarm_config | 47 | 12 | worker metadata + runtime/proof/session surfaces | 16 (metrics/post-exec) |
+| collaboration_context | 1 | 0 | none | 1 (`None` in current bridge) |

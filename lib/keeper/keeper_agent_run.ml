@@ -1078,7 +1078,10 @@ let run_turn
            When LLM rerank is disabled, only tools explicitly discovered
            via keeper_tool_search appear alongside core. *)
               let effective_selected =
-                let core = Keeper_exec_tools.effective_core_tools () in
+                let core =
+                  Keeper_exec_tools.effective_core_tools ()
+                  |> List.filter (fun name -> Hashtbl.mem allowed_exec_set name)
+                in
                 let discovered =
                   Keeper_discovered_tools.active_names !discovered_ref ~turn
                 in

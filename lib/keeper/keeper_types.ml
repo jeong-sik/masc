@@ -1120,10 +1120,7 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
              ; work_discovery_guidance = Safe_ops.json_string_opt "work_discovery_guidance" json
              ; telemetry_feedback_enabled = Safe_ops.json_bool_opt "telemetry_feedback_enabled" json
              ; telemetry_feedback_window_hours = Safe_ops.json_int_opt "telemetry_feedback_window_hours" json
-             ; allowed_providers =
-                 (match Safe_ops.json_string_list "allowed_providers" json with
-                  | [] -> None
-                  | xs -> Some (List.map String.lowercase_ascii xs))
+             ; allowed_providers = Keeper_types_profile.lower_string_list_opt (Safe_ops.json_string_list "allowed_providers" json)
              ; runtime = state.ps_runtime
              })
   with

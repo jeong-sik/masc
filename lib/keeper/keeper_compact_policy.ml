@@ -47,6 +47,17 @@ let compact_if_needed
         (Float.of_int meta.compaction.cooldown_sec
        -. (now_ts -. last_reflection_ts))
   in
+  (* Tool-heavy gate: when accumulated tool results bloat context
+     without hitting ratio/message/token gates, stub old tool results
+     to prevent slow inference on local LLMs (#5802).
+     Threshold: messages > 10 * turns_since_last_compaction.
+     This catches the pattern where each turn adds 2-4 messages
+     (user + assistant + tool_use + tool_result) without compaction. *)
+  let tool_heavy =
+    reflection_ready
+    && msg_count > 40
+    && ratio > 0.15
+  in
   let trigger_reason =
     if not reflection_ready then
       Some
@@ -59,6 +70,8 @@ let compact_if_needed
       Some (Printf.sprintf "messages(%d>=%d)" msg_count message_gate)
     else if token_gate > 0 && tok_count >= token_gate then
       Some (Printf.sprintf "tokens(%d>=%d)" tok_count token_gate)
+    else if tool_heavy then
+      Some (Printf.sprintf "tool_heavy(msgs=%d,ratio=%.4f)" msg_count ratio)
     else None
   in
   match trigger_reason with

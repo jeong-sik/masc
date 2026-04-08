@@ -508,6 +508,7 @@ let dispatch ctx ~name ~args : tool_result option =
   maybe_bootstrap_existing_keepalives ctx ~name ~args;
   let ctx = resolve_ctx ctx ~name args in
   match name with
+  | "masc_persona_list" -> Some (Persona.handle_persona_list ctx args)
   | "masc_keeper_create_from_persona" -> Some (handle_keeper_create_from_persona ctx args)
   | "masc_keeper_up" -> Some (handle_keeper_up ctx args)
   | "masc_keeper_status" -> Some (handle_keeper_status ctx args)

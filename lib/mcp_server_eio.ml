@@ -86,6 +86,9 @@ let mcp_context_required_tools_inline =
   |> List.map (fun (schema : Types.tool_schema) -> schema.name)
 
 let () =
+  (* [Keeper_exec_tools.keeper_read_only_tools] is the keeper SSOT.
+     Server bootstrap mirrors that list into Tool_dispatch so protocol
+     annotations and non-keeper callers see the same read-only metadata. *)
   Tool_dispatch.init_read_only_set
     (read_only_tools_inline @ Keeper_exec_tools.keeper_read_only_tools)
 let () = Tool_dispatch.init_requires_join_set requires_join_tools_inline

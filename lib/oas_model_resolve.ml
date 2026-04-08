@@ -276,3 +276,18 @@ let models_of_cascade_name (cascade_name : string) : string list =
       "cascade config resolve failed for %s, using defaults: %s"
       cascade_name (Printexc.to_string exn);
     defaults
+
+let filter_by_providers (allowed : string list option) (models : string list)
+    : string list =
+  match allowed with
+  | None | Some [] -> models
+  | Some providers ->
+    let filtered =
+      List.filter
+        (fun label ->
+          match provider_name_of_label label with
+          | Some pname -> List.mem pname providers
+          | None -> false)
+        models
+    in
+    if filtered = [] then models else filtered

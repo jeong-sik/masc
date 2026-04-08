@@ -189,7 +189,11 @@ let handle_add_task ctx args =
   let title = get_string args "title" "" in
   let priority = get_int args "priority" 3 in
   let description = get_string args "description" "" in
-  let required_preset = Safe_ops.json_string_opt "required_preset" args in
+  let required_preset =
+    match Safe_ops.json_string_opt "required_preset" args with
+    | Some s when String.trim s <> "" -> Some (String.trim s)
+    | _ -> None
+  in
   let contract_result = parse_task_contract args in
   (* BUG-009/010: Validate title and priority *)
   let trimmed_title = String.trim title in
@@ -198,6 +202,17 @@ let handle_add_task ctx args =
   else if priority < 1 || priority > 5 then
     (false, Printf.sprintf "Priority must be between 1 and 5, got %d" priority)
   else
+    (* Validate required_preset against configured preset names *)
+    let preset_valid = match required_preset with
+      | None -> true
+      | Some name ->
+        let known = Keeper_tool_policy.configured_preset_names () in
+        known = [] (* config not loaded yet — accept *) || List.mem name known
+    in
+    if not preset_valid then
+      (false, Printf.sprintf "Unknown required_preset '%s'. Must match a preset in tool_policy.toml."
+        (Option.value ~default:"" required_preset))
+    else
     match contract_result with
     | Error error -> (false, error)
     | Ok contract ->
@@ -295,7 +310,7 @@ let resolve_agent_preset config agent_name =
 let preset_task_filter ~agent_preset (task : Types.task) =
   match task.required_preset, agent_preset with
   | None, _ -> true
-  | Some _, None -> true
+  | Some _required, None -> false  (* agent without preset cannot satisfy preset requirement *)
   | Some required, Some preset ->
     Keeper_tool_policy.preset_can_satisfy ~agent_preset:preset ~required_preset:required
 

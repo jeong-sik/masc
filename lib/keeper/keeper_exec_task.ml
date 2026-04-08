@@ -92,7 +92,7 @@ let handle_keeper_task_tool
     let task_filter (task : Types.task) =
       match task.required_preset, preset_name with
       | None, _ -> true
-      | Some _, None -> true
+      | Some _required, None -> false  (* agent without preset cannot claim preset-required task *)
       | Some required, Some preset ->
         Keeper_tool_policy.preset_can_satisfy ~agent_preset:preset ~required_preset:required
     in

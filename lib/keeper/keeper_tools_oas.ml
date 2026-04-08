@@ -158,13 +158,11 @@ let normalize_tool_result ~(success : bool) (raw : string) : string =
         ("detail", `Null);
       ])
 
-(** Deterministic output validation — delegates to [Tool_output_validation].
-
-    Replaces heuristic [truncate_tool_output] (blind char-cut) with
-    schema-aware validation: array-aware truncation + structured metadata.
+(** Memory-protection cap — delegates to [Tool_output_validation.cap].
+    Context budget management is OAS [context_reducer]'s responsibility.
     Applied to ALL paths (success, error, exception) in [make_tools]. *)
-let validate_output ~tool_name (result : string) : string =
-  Tool_output_validation.validate_and_truncate ~tool_name result
+let validate_output ~tool_name:_ (result : string) : string =
+  Tool_output_validation.cap result
 
 (** Max chars for SSE error preview. Short enough for dashboard display,
     long enough to include the actionable portion of the error. *)
@@ -314,7 +312,7 @@ let make_tools
                 in
                 let original_len = String.length final_result in
                 let truncated_result = validate_output ~tool_name:td.name final_result in
-                let was_truncated = String.length truncated_result < original_len in
+                let was_truncated = original_len > Tool_output_validation.max_output_chars in
                 if was_truncated then
                   Log.Keeper.info "tool %s output truncated: %d -> %d chars"
                     td.name original_len (String.length truncated_result);

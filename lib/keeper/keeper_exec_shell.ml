@@ -118,7 +118,7 @@ let handle_keeper_bash
           (`Assoc
               [ "ok", `Bool (st = Unix.WEXITED 0)
               ; "status", Keeper_alerting_path.process_status_to_json st
-              ; "output", `String (Keeper_alerting_path.truncate_tool_output out)
+              ; "output", `String out
               ]))
 ;;
 
@@ -156,7 +156,7 @@ let handle_keeper_shell_readonly
           ; "op", `String op
           ; "cmd", `String cmd
           ; "status", Keeper_alerting_path.process_status_to_json st
-          ; "output", `String (Keeper_alerting_path.truncate_tool_output out)
+          ; "output", `String out
           ])
   in
   match op with
@@ -293,7 +293,7 @@ let handle_keeper_shell_readonly
              ; "path", `String target
              ; "lines", `Int n
              ; "status", Keeper_alerting_path.process_status_to_json st
-             ; "content", `String (Keeper_alerting_path.truncate_tool_output out)
+             ; "content", `String out
              ]))
   | "tail" ->
     (match read_target () with
@@ -311,7 +311,7 @@ let handle_keeper_shell_readonly
              ; "path", `String target
              ; "lines", `Int n
              ; "status", Keeper_alerting_path.process_status_to_json st
-             ; "content", `String (Keeper_alerting_path.truncate_tool_output out)
+             ; "content", `String out
              ]))
   | "wc" ->
     (match read_target () with
@@ -467,8 +467,8 @@ let handle_keeper_shell_readonly
               ; "op", `String op
               ; "command", `String cmd_str
               ; "status", Keeper_alerting_path.process_status_to_json st
-              ; "output", `String (Keeper_alerting_path.truncate_tool_output out)
-              ]))
+              ; "output", `String out
+              ])
   | _ ->
     Yojson.Safe.to_string
       (`Assoc

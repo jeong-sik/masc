@@ -573,7 +573,7 @@ let tool_post_list : Types.tool_schema = {
   input_schema = `Assoc [
     ("type", `String "object");
     ("properties", `Assoc [
-      ("limit", `Assoc [("type", `String "integer"); ("description", `String "Max posts to return (default: 20)"); ("minimum", `Int 1); ("maximum", `Int 100)]);
+      ("limit", `Assoc [("type", `String "integer"); ("description", `String "Max posts to return"); ("default", `Int 20); ("minimum", `Int 1); ("maximum", `Int 100)]);
       ("visibility", `Assoc [("type", `String "string"); ("enum", `List [`String "public"; `String "unlisted"; `String "internal"; `String "direct"]); ("description", `String "Filter by visibility")]);
       ("hearth", `Assoc [("type", `String "string"); ("maxLength", `Int 100); ("description", `String "Filter by hearth topic (e.g. webrtc, code-review)")]);
       ("random", `Assoc [("type", `String "boolean"); ("description", `String "Shuffle posts randomly (default: false)")]);
@@ -646,7 +646,7 @@ let tool_search : Types.tool_schema = {
     ("type", `String "object");
     ("properties", `Assoc [
       ("query", `Assoc [("type", `String "string"); ("maxLength", `Int 200); ("description", `String "Search keyword")]);
-      ("limit", `Assoc [("type", `String "integer"); ("minimum", `Int 1); ("maximum", `Int 100); ("description", `String "Max results (default: 20)")]);
+      ("limit", `Assoc [("type", `String "integer"); ("default", `Int 20); ("minimum", `Int 1); ("maximum", `Int 100); ("description", `String "Max results")]);
       ("compact", `Assoc [("type", `String "boolean"); ("default", `Bool true); ("description", `String "Compact one-line per post. Set false for full body")]);
     ]);
     ("required", `List [`String "query"]);

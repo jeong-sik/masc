@@ -262,7 +262,22 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
            (try Eio.Fiber.fork ~sw (fun () ->
               try do_bg_compute ()
               with
-              | Eio.Cancel.Cancelled _ as e -> raise e
+              | Eio.Cancel.Cancelled _ as e ->
+                (* Fix: restore stale entry to prevent zombie Computing slot.
+                   Direct Hashtbl mutation — safe in single-domain Eio because
+                   the Cancelled handler runs synchronously with no suspension
+                   point. Eio.Mutex is unavailable (switch being torn down). *)
+                (match Hashtbl.find_opt table key with
+                 | Some (Computing { cond = c; _ }) when c == cond ->
+                   let ts = Time_compat.now () in
+                   let backoff_grace = stale_grace *. bg_revalidate_backoff_factor in
+                   Hashtbl.replace table key
+                     (Ready { value = stale_value;
+                              expires_at = ts;
+                              stale_until = ts +. backoff_grace })
+                 | _ -> ());
+                (try Eio.Condition.broadcast cond with _ -> ());
+                raise e
               | exn ->
                 Log.Dashboard.error "cache revalidation failed: %s"
                   (Printexc.to_string exn))

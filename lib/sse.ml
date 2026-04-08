@@ -467,16 +467,28 @@ let broadcast_impl target json =
   List.iter (fun (session_id, client) ->
     if client_matches_target target client
        && current_event_id > client.last_event_id then begin
-      (try
-        Eio.Stream.add client.event_stream event;
-        client.last_event_id <- current_event_id;
-        client.last_seen_at <- Time_compat.now ()
-      with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | e ->
-          Log.Server.error "Broadcast enqueue failed for session %s: %s"
-            session_id (Printexc.to_string e);
-          failed := session_id :: !failed)
+      (* Pre-check stream capacity to avoid blocking broadcast.
+         No TOCTOU risk: single-domain Eio cooperative scheduling has no
+         yield point between Stream.length and Stream.add, so no other
+         fiber can modify the stream in between.  try/catch kept as
+         defense-in-depth for unexpected failures.
+         See TLA+ SSEBroadcastBlock spec. *)
+      (let queue_len = Eio.Stream.length client.event_stream in
+       if queue_len >= stream_capacity then begin
+         Log.Server.warn "Broadcast skip: session %s stream full (%d/%d)"
+           session_id queue_len stream_capacity;
+         failed := session_id :: !failed
+       end else
+         try
+           Eio.Stream.add client.event_stream event;
+           client.last_event_id <- current_event_id;
+           client.last_seen_at <- Time_compat.now ()
+         with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | e ->
+             Log.Server.error "Broadcast enqueue failed for session %s: %s"
+               session_id (Printexc.to_string e);
+             failed := session_id :: !failed)
     end
   ) clients_snapshot;
   (* Remove failed connections *)

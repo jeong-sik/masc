@@ -197,6 +197,18 @@ let detect_destructive (command : string) : (string * string) option =
     6. Destructive pattern (string scan, only for bash tools)
 
     First rejection wins — remaining checks are skipped. *)
+
+let extract_all_strings_from_json (json_str : string) : string =
+  try
+    let rec go = function
+      | `String s -> s
+      | `List lst -> String.concat " " (List.map go lst)
+      | `Assoc fields -> String.concat " " (List.map (fun (_, v) -> go v) fields)
+      | _ -> ""
+    in
+    go (Yojson.Safe.from_string json_str)
+  with Yojson.Json_error _ -> ""
+
 let pre_check
     ~(config : gate_config)
     ~(accumulated_cost : float)
@@ -260,16 +272,7 @@ let pre_check
               (* 6. Destructive pattern check (bash tools only) *)
               if config.destructive_check_enabled
                  && Tool_dispatch.is_destructive tool_name then
-                let cmd_str =
-                  try
-                    let rec extract_strings = function
-                      | `String s -> s
-                      | `List lst -> String.concat " " (List.map extract_strings lst)
-                      | `Assoc fields -> String.concat " " (List.map (fun (_, v) -> extract_strings v) fields)
-                      | _ -> ""
-                    in
-                    extract_strings (Yojson.Safe.from_string args_json)
-                  with Yojson.Json_error _ -> ""
+                let cmd_str = extract_all_strings_from_json args_json
                 in
                 begin match detect_destructive cmd_str with
                 | Some (pattern, desc) ->

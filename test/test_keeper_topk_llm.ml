@@ -263,6 +263,31 @@ let test_selection_boundary_appends_llm_only_extras () =
     ]
     merged
 
+let test_selection_boundary_sorts_discovered () =
+  (* discovered arrives in Hashtbl.fold order (non-deterministic).
+     merge_tool_selection_boundary must sort it for stable output. *)
+  let merged_ab =
+    Keeper_agent_run.merge_tool_selection_boundary
+      ~core:["core_tool"]
+      ~deterministic_prefilter:[]
+      ~llm_selected:[]
+      ~discovered:["tool_b"; "tool_a"]
+  in
+  let merged_ba =
+    Keeper_agent_run.merge_tool_selection_boundary
+      ~core:["core_tool"]
+      ~deterministic_prefilter:[]
+      ~llm_selected:[]
+      ~discovered:["tool_a"; "tool_b"]
+  in
+  Alcotest.(check (list string))
+    "discovered order is stable regardless of input order"
+    merged_ab merged_ba;
+  Alcotest.(check (list string))
+    "discovered is sorted alphabetically after core"
+    ["core_tool"; "tool_a"; "tool_b"]
+    merged_ab
+
 let test_keeper_config_defaults () =
   (* Default: LLM rerank disabled *)
   Alcotest.(check bool) "llm_rerank disabled by default"
@@ -295,6 +320,8 @@ let () =
         test_selection_boundary_preserves_deterministic_floor;
       Alcotest.test_case "llm extras append after floor" `Quick
         test_selection_boundary_appends_llm_only_extras;
+      Alcotest.test_case "discovered sorted for stable order" `Quick
+        test_selection_boundary_sorts_discovered;
     ];
     "keeper_config", [
       Alcotest.test_case "config defaults" `Quick

@@ -131,9 +131,10 @@ let merge_tool_selection_boundary
     ~(deterministic_prefilter : string list)
     ~(llm_selected : string list)
     ~(discovered : string list) : string list =
+  let sorted_discovered = List.sort String.compare discovered in
   let deterministic_floor =
     Keeper_types.dedupe_keep_order
-      (core @ deterministic_prefilter @ discovered)
+      (core @ deterministic_prefilter @ sorted_discovered)
   in
   Keeper_types.dedupe_keep_order (deterministic_floor @ llm_selected)
 
@@ -990,12 +991,12 @@ let run_turn
                 | Eio.Cancel.Cancelled _ as e -> raise e
                 | exn ->
                   Log.Keeper.warn
-                    "keeper:%s TopK_llm failed (%s), using deterministic prefilter only"
+                    "keeper:%s TopK_llm failed (%s), falling back to core+prefilter+discovered"
                     meta.name (Printexc.to_string exn);
                   [])
               | _ ->
                 Log.Keeper.warn
-                  "keeper:%s TopK_llm: Eio context unavailable, using deterministic prefilter only"
+                  "keeper:%s TopK_llm: Eio context unavailable, falling back to core+prefilter+discovered"
                   meta.name;
                 []
               end
@@ -1013,7 +1014,15 @@ let run_turn
             if llm_rerank_enabled then "deterministic_plus_llm_hint"
             else "core_plus_discovered"
           in
-          merged, List.length deterministic_prefilter, List.length llm_selected,
+          let deterministic_floor_set =
+            Keeper_types.dedupe_keep_order
+              (core @ deterministic_prefilter @ List.sort String.compare discovered)
+          in
+          let llm_only_count =
+            List.length (List.filter (fun n ->
+              not (List.mem n deterministic_floor_set)) llm_selected)
+          in
+          merged, List.length deterministic_prefilter, llm_only_count,
           selection_mode
         in
         (* Apply runtime tool overlay (masc_tool_grant/revoke) and

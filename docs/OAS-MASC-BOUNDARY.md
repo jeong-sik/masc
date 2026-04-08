@@ -38,6 +38,13 @@ OAS  ──does not know──→ MASC
 - MASC 전용 요구가 생겨도, 먼저 MASC adapter/bridge로 해결 가능한지 본다.
 - OAS에 기능을 추가하더라도 MASC 전용 개념을 새 public contract로 밀어넣지 않는다.
 
+## Config Ownership
+
+- `config/cascade.json`은 **OAS cascade contract**를 따르는 설정 파일이다.
+- cascade schema, parsing, label semantics의 owner는 OAS다.
+- MASC는 그 contract를 재정의하지 않고, 이 저장소에 체크인할 repo-level default만 선택한다.
+- 따라서 runtime convenience label(예: `provider:auto`)은 OAS 차원에서 존재할 수 있지만, checked-in repo defaults는 review 안정성을 위해 explicit `provider:model_id`를 선호한다.
+
 ## Current Integration Status
 
 | Area | Status | Notes |

@@ -125,6 +125,14 @@ Notes:
 - Full HTTP / stdio templates live in [docs/MCP-TEMPLATE.md](docs/MCP-TEMPLATE.md).
 - `masc_web_search` is a read-only current-information lookup tool. By default it prefers configured official providers (`brave`, `tavily`, `exa`, `bing_api`) and falls back to `duckduckgo` / `bing_rss` scraping when credentials are absent or providers fail.
 
+## Model Cascade Ownership
+
+- `config/cascade.json` follows the OAS cascade contract.
+- OAS owns cascade schema, parsing, and label semantics.
+- MASC uses that contract to choose repo-level checked-in defaults; it does not redefine cascade semantics.
+- For committed defaults, prefer explicit `provider:model_id` labels. Runtime convenience labels such as `provider:auto` may still exist, but they are not the preferred repo-default policy.
+- See [docs/OAS-MASC-BOUNDARY.md](docs/OAS-MASC-BOUNDARY.md), [docs/spec/13-oas-integration.md](docs/spec/13-oas-integration.md), and [docs/spec/14-configuration.md](docs/spec/14-configuration.md).
+
 ## Safe Starting Paths
 
 ### 1. Repo Coordination

@@ -357,6 +357,27 @@ let test_valid_branch_with_slash_accepted () =
     check bool "error is NOT branch_contains_invalid_chars"
       true (error <> "branch_contains_invalid_chars"))
 
+(* --- Branch slash → task_id hyphen conversion --- *)
+
+let test_branch_slash_converted_to_hyphen_in_task_id () =
+  with_room (fun config ->
+    let meta = make_meta_with_preset "delivery" in
+    let args = `Assoc
+      [ "branch", `String "fix/cascade-glm-auto-model"
+      ; "file_path", `String "src/test.ml"
+      ; "file_content", `String "let x = 1"
+      ; "commit_message", `String "msg"
+      ; "pr_title", `String "title"
+      ] in
+    let result = call_tool config meta "keeper_pr_workflow" args in
+    let json = parse_json result in
+    (* Branch validation should pass (slash is valid in branch names).
+       The error should be at worktree_create step, NOT
+       "Invalid task ID: task_id cannot contain path separators". *)
+    let error = json_string "error" json in
+    check bool "error does NOT mention path separators"
+      false (String_util.contains_substring_ci error "path separator"))
+
 (* --- Worktree step failure propagation --- *)
 
 let test_worktree_failure_propagates () =
@@ -475,6 +496,9 @@ let () =
       ; test_case "dollar-paren rejected" `Quick test_branch_with_dollar_paren_rejected
       ; test_case "ampersand rejected" `Quick test_branch_with_ampersand_rejected
       ; test_case "slash accepted" `Quick test_valid_branch_with_slash_accepted
+      ]
+    ; "task_id_derivation",
+      [ test_case "slash to hyphen" `Quick test_branch_slash_converted_to_hyphen_in_task_id
       ]
     ; "step_propagation",
       [ test_case "worktree failure" `Quick test_worktree_failure_propagates

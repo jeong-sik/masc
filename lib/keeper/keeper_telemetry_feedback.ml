@@ -171,11 +171,14 @@ let refresh_stats ~keeper_name ~decision_log_path ~window_hours =
     Hashtbl.replace stats_caches keeper_name
       { stats; computed_at = Unix.gettimeofday () })
 
-let get_cached_stats ~keeper_name =
+(** Return cached stats for a keeper. Returns [None] if no cache entry exists
+    (first turn before refresh loop has run). Callers should handle [None]
+    by omitting the telemetry block rather than showing "last 0h". *)
+let get_cached_stats ~keeper_name : behavioral_stats option =
   Eio.Mutex.use_ro stats_mu (fun () ->
     match Hashtbl.find_opt stats_caches keeper_name with
-    | Some c -> c.stats
-    | None -> empty_stats ~window_hours:0)
+    | Some c -> Some c.stats
+    | None -> None)
 
 let get_cache_age_sec ~keeper_name =
   Eio.Mutex.use_ro stats_mu (fun () ->
@@ -183,21 +186,22 @@ let get_cache_age_sec ~keeper_name =
     | Some c -> Some (Unix.gettimeofday () -. c.computed_at)
     | None -> None)
 
+(** Start a background fiber that periodically refreshes telemetry stats.
+    The fiber is linked to [sw] — when the keeper's switch is cancelled
+    (stop/crash), the fiber terminates automatically via Eio.Cancel.Cancelled. *)
 let start_refresh_loop ~sw ~clock ~keeper_name ~decision_log_path
     ~window_hours ~interval_sec ~stop =
   Eio.Fiber.fork ~sw (fun () ->
     while not (Atomic.get stop) do
       (try refresh_stats ~keeper_name ~decision_log_path ~window_hours
+<<<<<<< HEAD
        with
        | Eio.Cancel.Cancelled _ as ex ->
            let bt = Printexc.get_raw_backtrace () in
            Printexc.raise_with_backtrace ex bt
        | ex ->
-           let bt = Printexc.get_raw_backtrace () in
-           Printf.eprintf
-             "keeper_telemetry_feedback: refresh failed for keeper %s: %s\n%s%!"
-             keeper_name (Printexc.to_string ex)
-             (Printexc.raw_backtrace_to_string bt));
+           Log.Keeper.warn "telemetry refresh failed for %s: %s"
+             keeper_name (Printexc.to_string ex));
       if not (Atomic.get stop) then
         Eio.Time.sleep clock (float_of_int interval_sec)
     done)

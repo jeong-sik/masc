@@ -113,15 +113,14 @@ let () =
   Sys.remove tmp_path2;
   Printf.printf "PASS: compute_stats window filtering\n";
 
-  (* -- Cache miss: get_cached_stats before any refresh returns window_hours:0 -- *)
+  (* -- Cache miss: get_cached_stats before any refresh returns None -- *)
   Eio_main.run (fun _env ->
     let stats_miss =
       TF.get_cached_stats ~keeper_name:"test-keeper-no-refresh"
     in
-    assert (stats_miss.window_hours = 0);
-    assert (stats_miss.total_turns = 0);
+    assert (stats_miss = None);
     assert (TF.get_cache_age_sec ~keeper_name:"test-keeper-no-refresh" = None);
-    Printf.printf "PASS: cache miss returns empty_stats with window_hours=0\n");
+    Printf.printf "PASS: cache miss returns None\n");
 
   (* -- Cache hit: refresh_stats updates cache, get_cached_stats returns data -- *)
   let tmp_path3 = Filename.temp_file "test_decisions_cache_" ".jsonl" in
@@ -137,9 +136,11 @@ let () =
       ~decision_log_path:tmp_path3
       ~window_hours:24;
     let cached = TF.get_cached_stats ~keeper_name:"test-keeper-cache" in
-    assert (cached.total_turns = 1);
-    assert (cached.window_hours = 24);
-    assert (cached.tool_use_turns = 1);
+    assert (cached <> None);
+    let stats = Option.get cached in
+    assert (stats.total_turns = 1);
+    assert (stats.window_hours = 24);
+    assert (stats.tool_use_turns = 1);
     let age = TF.get_cache_age_sec ~keeper_name:"test-keeper-cache" in
     assert (age <> None);
     assert (Option.get age < 5.0);

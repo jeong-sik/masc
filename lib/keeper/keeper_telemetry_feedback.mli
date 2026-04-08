@@ -30,9 +30,9 @@ val compute_stats :
 (** Read decision log and compute stats for entries within the window.
     Returns [empty_stats] on I/O errors or missing files. *)
 
-val get_cached_stats : keeper_name:string -> behavioral_stats
+val get_cached_stats : keeper_name:string -> behavioral_stats option
 (** Read cached stats for a keeper. O(1), no file I/O.
-    Returns [empty_stats ~window_hours:0] on cache miss. *)
+    Returns [None] on cache miss (before first refresh cycle). *)
 
 val get_cache_age_sec : keeper_name:string -> float option
 (** Seconds since the cache was last refreshed.

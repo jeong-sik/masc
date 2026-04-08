@@ -258,6 +258,20 @@ let test_board_delete_tag_registered () =
   | None ->
       Alcotest.fail "masc_board_delete missing from tag registry"
 
+let test_board_read_only_metadata_registered () =
+  ignore (Masc_mcp.Mcp_server_eio.create_state ~test_mode:true ~base_path:"/tmp/masc-pr5973-board-meta" ());
+  let meta = Masc_mcp.Tool_catalog.metadata "masc_board_list" in
+  Alcotest.(check bool) "board list is read-only in dispatch"
+    true (Masc_mcp.Tool_dispatch.is_read_only "masc_board_list");
+  Alcotest.(check bool) "board list is idempotent in dispatch"
+    true (Masc_mcp.Tool_dispatch.is_idempotent "masc_board_list");
+  Alcotest.(check (option bool)) "board list metadata readonly"
+    (Some true) meta.readonly;
+  Alcotest.(check (option bool)) "board list metadata idempotent"
+    (Some true) meta.idempotent;
+  Alcotest.(check bool) "board post stays mutable"
+    false (Masc_mcp.Tool_dispatch.is_read_only "masc_board_post")
+
 (* ── Test: keeper alias SSOT — capability_registry derives from surfaces ── *)
 
 let test_keeper_alias_ssot_consistency () =
@@ -315,6 +329,8 @@ let () =
             test_no_duplicate_schemas;
           Alcotest.test_case "board delete tag registered" `Quick
             test_board_delete_tag_registered;
+          Alcotest.test_case "board read-only metadata registered" `Quick
+            test_board_read_only_metadata_registered;
           Alcotest.test_case "keeper_backend_tool_name matches keeper_internal_replacement" `Quick
             test_keeper_alias_ssot_consistency;
         ] );

@@ -163,7 +163,6 @@ let retry_safe_fallback_tools =
     "keeper_voice_agent";
     "keeper_voice_sessions";
     "keeper_tool_search";
-    "masc_heartbeat";
     "masc_heartbeat_list";
   ]
 

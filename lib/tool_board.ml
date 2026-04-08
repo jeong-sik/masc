@@ -848,7 +848,7 @@ let handle_tool name args =
   | "masc_board_cleanup" -> handle_board_cleanup args
   | _ -> (false, Printf.sprintf "Unknown tool: %s" name)
 
-let _tool_spec_read_only =
+let tool_spec_read_only =
   [
     "masc_board_list";
     "masc_board_get";
@@ -865,11 +865,11 @@ let register () =
   Tool_dispatch.register_module
     ~schemas:tools
     ~handler:(fun ~name ~args -> Some (handle_tool name args));
-  Tool_dispatch.init_read_only_set _tool_spec_read_only;
-  Tool_dispatch.init_idempotent_set _tool_spec_read_only;
+  Tool_dispatch.init_read_only_set tool_spec_read_only;
+  Tool_dispatch.init_idempotent_set tool_spec_read_only;
   List.iter
     (fun name ->
       let meta = Tool_catalog.metadata name in
       Tool_catalog.register_metadata name
         { meta with readonly = Some true; idempotent = Some true })
-    _tool_spec_read_only
+    tool_spec_read_only

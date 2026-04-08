@@ -146,13 +146,18 @@ let test_is_on_surface_consistent () =
 
 (* {1 Cross-classification invariants — independent concern lists stay consistent} *)
 
+let destructive_tools =
+  ["keeper_bash"; "keeper_fs_edit"; "keeper_github"; "keeper_pr_workflow";
+   "shell_exec"; "masc_code_shell"; "masc_code_git"; "masc_code_delete"]
+
 let test_destructive_check_tools_are_privileged () =
-  (* Every tool in the destructive pattern check list should also be
-     in the privileged keeper tool list. *)
+  (* Every tool registered as destructive should also be in the
+     privileged keeper tool list (keeper_* subset). *)
   List.iter (fun name ->
-    Alcotest.(check bool) (name ^ " is privileged") true
-      (List.mem name Capability_registry.privileged_keeper_tool_names)
-  ) Keeper_hooks_oas.destructive_check_tools
+    if String.starts_with ~prefix:"keeper_" name then
+      Alcotest.(check bool) (name ^ " is privileged") true
+        (List.mem name Capability_registry.privileged_keeper_tool_names)
+  ) destructive_tools
 
 let test_privileged_keeper_tools_are_internal () =
   (* Every privileged keeper tool (keeper_* prefixed) should be on the

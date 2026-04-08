@@ -115,23 +115,34 @@ let handle_keeper_pr_workflow
           ; "reason", `String "keeper_pr_workflow requires delivery, coding, or full preset"
           ])
     else
-      (* Sanitize branch/task_id: reject path traversal chars *)
-      let safe_name s =
+      (* Sanitize branch: allow a-z, A-Z, 0-9, hyphen, underscore, slash *)
+      let safe_branch s =
         String.to_seq s
         |> Seq.filter (fun c ->
           (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
           || (c >= '0' && c <= '9') || c = '-' || c = '_' || c = '/')
         |> String.of_seq
       in
-      let branch_safe = safe_name branch in
+      (* Sanitize task_id: replace '/' with '-' because
+         worktree_create_r rejects path separators in task_id *)
+      let safe_task_id s =
+        String.to_seq s
+        |> Seq.filter_map (fun c ->
+          if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+             || (c >= '0' && c <= '9') || c = '-' || c = '_' then Some c
+          else if c = '/' then Some '-'
+          else None)
+        |> String.of_seq
+      in
+      let branch_safe = safe_branch branch in
       if branch_safe <> branch then
         error_json "branch contains invalid chars. Use only a-z, A-Z, 0-9, hyphen, underscore, slash."
       else
       let root = Keeper_alerting_path.project_root_of_config config in
       let task_id = Printf.sprintf "pr-%s"
-        (safe_name (String.sub branch 0 (min 20 (String.length branch)))) in
+        (safe_task_id (String.sub branch 0 (min 20 (String.length branch)))) in
       let agent_name = Printf.sprintf "keeper-%s"
-        (safe_name (strip_keeper_prefix meta.name)) in
+        (safe_task_id (strip_keeper_prefix meta.name)) in
       let steps = Buffer.create 512 in
       let step_ok = ref true in
       let step_error = ref "" in
@@ -226,8 +237,10 @@ let handle_keeper_pr_workflow
             if st_commit <> Unix.WEXITED 0 then
               Error (Printf.sprintf "git commit: %s" out_commit)
             else begin
+              (* Push using HEAD:<branch> because the worktree's local branch
+                 (agent_name/task_id) differs from the desired remote branch name *)
               let st_push, out_push = run_git
-                (Printf.sprintf "push -u origin %s" (Filename.quote branch)) in
+                (Printf.sprintf "push -u origin HEAD:%s" (Filename.quote branch)) in
               if st_push <> Unix.WEXITED 0 then
                 Error (Printf.sprintf "git push: %s" out_push)
               else

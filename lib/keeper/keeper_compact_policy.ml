@@ -19,9 +19,13 @@ let emergency_compact_ratio_threshold = 0.8
     When message count exceeds [tool_heavy_msg_threshold] AND context
     ratio exceeds [tool_heavy_ratio_floor], trigger compaction to
     stub old tool results. Prevents slow inference on local LLMs
-    when many tool calls accumulate without hitting other gates. *)
-let tool_heavy_msg_threshold = 40
-let tool_heavy_ratio_floor = 0.15
+    when many tool calls accumulate without hitting other gates.
+
+    Lowered from 40/0.15 to 10/0.05 (#5895): local 9B keepers run
+    2-20 msgs/turn at ~7.5% context ratio — original cloud-calibrated
+    thresholds never fired. *)
+let tool_heavy_msg_threshold = 10
+let tool_heavy_ratio_floor = 0.05
 
 let compaction_policy_of_keeper (meta : keeper_meta) : float * int * int =
   (meta.compaction.ratio_gate, meta.compaction.message_gate, meta.compaction.token_gate)

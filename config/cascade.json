@@ -1,5 +1,5 @@
 {
-  "default_models": ["llama:qwen3.5", "glm:glm-5.1"],
+  "default_models": ["ollama:auto", "glm:glm-5.1"],
 
   "_comment": "Checked-in cascade labels should use explicit provider:model_id values. Avoid provider:auto in repo defaults; runtime discovery/failsafe paths may still resolve local defaults separately. OAS cascade_config falls back to default_models when a named cascade is absent.",
 

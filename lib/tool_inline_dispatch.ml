@@ -234,8 +234,8 @@ let dispatch (ctx : context) ~(name : string) : result option =
       in
       let runtime_model_valid =
         match (spawn_agent_name, model_name) with
-        | agent, None when String.equal agent Provider_adapter.cn_llama -> Error "model is required when agent_name=llama"
-        | agent, Some raw when String.equal agent Provider_adapter.cn_llama ->
+        | "llama", None -> Error "model is required when agent_name=llama"
+        | "llama", Some raw ->
             let spec_name =
               if String.contains raw ':' then raw else Provider_adapter.make_local_label raw
             in

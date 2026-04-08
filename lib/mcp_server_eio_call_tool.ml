@@ -265,7 +265,8 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
     if success then None
     else
       let truncated =
-        if String.length message > 200 then String.sub message 0 200 ^ "..."
+        let error_preview_max = 200 in
+        if String.length message > error_preview_max then String.sub message 0 error_preview_max ^ "..."
         else message
       in
       Some (Printf.sprintf "timeout=%d|duration_ms=%d|detail=%s"

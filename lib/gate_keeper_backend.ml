@@ -34,6 +34,14 @@ let extract_reply_text (body : string) : string =
          | None -> body)
   with Eio.Cancel.Cancelled _ as e -> raise e | _ -> body
 
+let extract_structured (body : string) : Yojson.Safe.t option =
+  try
+    let json = Yojson.Safe.from_string body in
+    match Yojson.Safe.Util.member "structured" json with
+    | `Null -> None
+    | v -> Some v
+  with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None
+
 (* ── Dispatch ────────────────────────────────────────────────── *)
 
 let dispatch ~sw ~clock ~proc_mgr ~net ~config
@@ -61,11 +69,12 @@ let dispatch ~sw ~clock ~proc_mgr ~net ~config
         int_of_float ((Unix.gettimeofday () -. start_time) *. 1000.0)
       in
       let reply = extract_reply_text body in
+      let structured = extract_structured body in
       let stats = match extract_turn_stats body with
         | Some s -> Some { s with duration_ms }
         | None -> Some { Gate_protocol.model_used = ""; duration_ms; tokens_used = 0 }
       in
-      Gate_protocol.Reply { content = reply; stats }
+      Gate_protocol.Reply { content = reply; structured; stats }
   | Some (false, err) ->
       Gate_protocol.Keeper_error_result err
   | None ->

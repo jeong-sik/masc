@@ -26,6 +26,8 @@ from .formatters import (
     compose_gate_content,
     format_error_embed,
     format_keeper_embed,
+    markdown_to_structured,
+    render_structured_embeds,
 )
 from .gate_client import BreakerSnapshot, GateClient, GateResponse
 
@@ -247,6 +249,14 @@ class GateBot(discord.Client):
             embed = format_error_embed(response.error)
             await channel.send(embed=embed)
             return
+
+        # Try structured rendering (from gate or auto-parsed markdown)
+        structured = response.structured or markdown_to_structured(response.reply)
+        if structured is not None:
+            embeds = render_structured_embeds(structured)
+            if embeds:
+                await channel.send(embeds=embeds[:10])
+                return
 
         if len(response.reply) > 4096:
             for chunk in chunk_text(response.reply):

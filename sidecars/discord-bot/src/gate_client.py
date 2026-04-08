@@ -35,11 +35,14 @@ class GateResponse:
     duration_ms: int
     tokens_used: int
     error: str
+    structured: dict[str, Any] | None
 
     @staticmethod
     def from_json(data: dict[str, Any]) -> GateResponse:
         raw_stats = data.get("turn_stats")
         stats = cast(dict[str, Any], raw_stats) if isinstance(raw_stats, dict) else {}
+        raw_structured = data.get("structured")
+        structured = cast(dict[str, Any], raw_structured) if isinstance(raw_structured, dict) else None
         return GateResponse(
             ok=bool(data.get("ok", False)),
             keeper_name=str(data.get("keeper_name", "")),
@@ -48,6 +51,7 @@ class GateResponse:
             duration_ms=int(stats.get("duration_ms", 0)),
             tokens_used=int(stats.get("tokens_used", 0)),
             error=str(data.get("error", "")),
+            structured=structured,
         )
 
     @staticmethod
@@ -60,6 +64,7 @@ class GateResponse:
             duration_ms=0,
             tokens_used=0,
             error=msg,
+            structured=None,
         )
 
 

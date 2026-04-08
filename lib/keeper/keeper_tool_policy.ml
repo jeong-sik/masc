@@ -409,6 +409,9 @@ let all_keeper_schemas ~(masc_schemas_fn : keeper_meta -> Types.tool_schema list
   @ Tool_shard.autoresearch_keeper_tools
   @ Tool_shard.coding_tools
   @ Tool_code_write.schemas
+  @ Tool_shard.keeper_pr_submit_tools
+  @ Tool_shard.keeper_preflight_tools
+  @ Tool_shard.keeper_pr_review_tools
   @ (masc_schemas_fn meta)
 
 (** Filter schemas by a set of allowed names.  Uses Hashtbl for O(1) lookup

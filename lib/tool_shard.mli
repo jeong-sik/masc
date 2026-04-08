@@ -94,6 +94,15 @@ val coding_tools : Types.tool_schema list
 (** Coding shard tools (keeper_github/keeper_bash + worktree/code inspection).
     Not in default shards. *)
 
+val keeper_pr_submit_tools : Types.tool_schema list
+(** Multi-file PR submit tool schema. *)
+
+val keeper_preflight_tools : Types.tool_schema list
+(** Pre-flight validation tool schema. *)
+
+val keeper_pr_review_tools : Types.tool_schema list
+(** PR review tools (read, comment, reply) schemas. *)
+
 val shard_coding : shard
 (** Coding shard: github/shell bridge + worktree/code inspection. *)
 

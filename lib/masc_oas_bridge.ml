@@ -19,8 +19,9 @@ let run_safe ~timeout_s fn =
     Log.Misc.warn "masc_oas_bridge: OAS execution timed out after %.1fs" timeout_s;
     Error (Oas.Error.Api (Timeout { message = Printf.sprintf "Execution timed out after %.1fs" timeout_s }))
   | Eio.Cancel.Cancelled _ as exn ->
+    let bt = Printexc.get_raw_backtrace () in
     Log.Misc.warn "masc_oas_bridge: OAS execution cancelled";
-    raise exn
+    Printexc.raise_with_backtrace exn bt
   | exn ->
     let bt = Printexc.get_backtrace () in
     Log.Misc.error "masc_oas_bridge: OAS execution error: %s\n%s" (Printexc.to_string exn) bt;

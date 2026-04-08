@@ -240,7 +240,7 @@ module Ring = struct
                (match entry_of_json (Yojson.Safe.from_string line) with
                 | Some e -> entries := e :: !entries
                 | None -> ()
-                | exception _ -> ())
+                | exception Yojson.Json_error _ -> ())
            done with End_of_file -> ());
           List.rev !entries
         )

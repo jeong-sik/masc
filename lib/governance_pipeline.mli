@@ -62,14 +62,15 @@ val install : config:Room.config -> governance_level:string -> unit
     Called once at server startup. *)
 
 val to_oas_approval_callback :
-  governance_level:string -> Oas.Hooks.approval_callback
-(** Build an OAS-compatible approval callback using governance risk
-    assessment. Wire into Agent Builder via [with_approval] so that
-    autonomous agents are suspended at execution level when invoking
-    tools above the governance threshold.
+  governance_level:string ->
+  keeper_name:string ->
+  Oas.Hooks.approval_callback
+(** Build an OAS approval callback with genuine HITL fiber suspension.
 
-    Pipeline stages:
-    1. risk_classifier — uses {!assess_risk} to set risk_level
-    2. governance_threshold — rejects tools above the confirm threshold
+    When a tool exceeds the governance threshold, the agent fiber
+    suspends via [Keeper_approval_queue.submit_and_await]. An operator
+    resolves the approval via the command plane API, resuming the fiber.
 
-    @since 2.262.0 (#5902) *)
+    Tools below the threshold are auto-approved.
+
+    @since 2.262.0 (#5902, #5907) *)

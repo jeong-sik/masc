@@ -351,48 +351,28 @@ let install ~config ~governance_level =
 
 (* ── OAS Approval Pipeline bridge (#5902) ─────────────────── *)
 
-(** Build an OAS Approval pipeline that uses governance_pipeline risk
-    assessment. This enables execution-level tool approval via
-    OAS Builder.with_approval — agents are actually suspended when
-    a high-risk tool is invoked.
+(** Build an OAS approval callback that uses governance_pipeline risk
+    assessment with genuine HITL fiber suspension.
 
-    The pipeline stages:
-    1. risk_classifier: uses assess_risk to set risk_level on context
-    2. threshold_gate: blocks (Reject) tools above the governance threshold *)
-let to_oas_approval_callback ~governance_level : Oas.Hooks.approval_callback =
-  let risk_classifier_stage =
-    Oas.Approval.risk_classifier (fun tool_name input ->
-      match assess_risk ~tool_name ~input with
-      | Low -> Oas.Approval.Low
-      | Medium -> Oas.Approval.Medium
-      | High -> Oas.Approval.High
-      | Critical -> Oas.Approval.Critical)
-  in
-  let threshold_gate : Oas.Approval.approval_stage =
-    let min_level = match confirm_threshold governance_level with
-      | Some Medium -> Oas.Approval.Medium
-      | Some High -> Oas.Approval.High
-      | Some Critical -> Oas.Approval.Critical
-      | Some Low -> Oas.Approval.Low
-      | None -> Oas.Approval.Critical  (* development: only block critical *)
+    When a tool exceeds the governance threshold, the agent fiber is
+    suspended via [Keeper_approval_queue.submit_and_await] until an
+    operator resolves the approval via the command plane API.
+
+    Tools below the threshold are auto-approved. *)
+let to_oas_approval_callback
+      ~governance_level ~keeper_name : Oas.Hooks.approval_callback =
+  fun ~tool_name ~input ->
+    let risk = assess_risk ~tool_name ~input in
+    let needs_approval =
+      match confirm_threshold governance_level with
+      | Some threshold -> risk_level_to_int risk >= risk_level_to_int threshold
+      | None -> false
     in
-    { name = "governance_threshold";
-      evaluate = (fun ctx ->
-        let ctx_level_int = match ctx.Oas.Approval.risk_level with
-          | Low -> 0 | Medium -> 1 | High -> 2 | Critical -> 3 in
-        let min_int = match min_level with
-          | Low -> 0 | Medium -> 1 | High -> 2 | Critical -> 3 in
-        if ctx_level_int >= min_int then
-          Decided (Oas.Hooks.Reject
-            (Printf.sprintf
-               "governance (%s): %s risk tool %S requires approval"
-               governance_level
-               (Oas.Approval.risk_level_to_string ctx.risk_level)
-               ctx.tool_name))
-        else
-          Pass);
-      timeout_s = None;
-    }
-  in
-  let pipeline = Oas.Approval.create [risk_classifier_stage; threshold_gate] in
-  Oas.Approval.as_callback pipeline
+    if needs_approval then
+      Keeper_approval_queue.submit_and_await
+        ~keeper_name
+        ~tool_name
+        ~input
+        ~risk_level:(risk_level_to_string risk)
+    else
+      Oas.Hooks.Approve

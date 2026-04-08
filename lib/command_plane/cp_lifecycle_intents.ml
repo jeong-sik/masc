@@ -16,7 +16,8 @@ let update_search_stats_for_operation config operation ~outcome =
   in
   write_search_stats config updated
 
-let operation_card_json config units operations (operation : operation_record) =
+let operation_card_json ~search_store ~intents config units operations
+    (operation : operation_record) =
   let unit_label =
     lookup_unit units operation.assigned_unit_id
     |> Option.map (fun (unit : unit_record) -> unit.label)
@@ -25,7 +26,7 @@ let operation_card_json config units operations (operation : operation_record) =
   let intent_json =
     match operation.intent_id with
     | Some intent_id -> (
-        match lookup_intent (read_intents config) intent_id with
+        match lookup_intent intents intent_id with
         | Some intent -> intent_to_json intent
         | None ->
             `Assoc
@@ -40,11 +41,13 @@ let operation_card_json config units operations (operation : operation_record) =
       ("operation", operation_to_json operation);
       ("assigned_unit_label", `String unit_label);
       ("intent", intent_json);
-      ("search", operation_search_json config units operations operation);
+      ("search", operation_search_json ~store:search_store ~intents config units operations operation);
     ]
 
 let list_operations_json_from_state ?operation_id (state : snapshot_state) =
   let units = state.units in
+  let intents = state.intents in
+  let search_store = read_search_stats state.config in
   let operations =
     state.operations
     |> List.filter (fun (operation : operation_record) ->
@@ -90,7 +93,8 @@ let list_operations_json_from_state ?operation_id (state : snapshot_state) =
       ( "operations",
         `List
           (List.map
-             (operation_card_json state.config units state.operations)
+             (operation_card_json ~search_store ~intents state.config units
+                state.operations)
              operations) );
     ]
 
@@ -384,4 +388,3 @@ let update_intent_json config ~(actor : string) json =
       append_cp_event config ~trace_id:(next_trace_id ()) ~event_type:"intent_updated"
         ~actor (`Assoc [ ("intent_id", `String updated.intent_id) ]);
       Ok updated)
-

@@ -730,13 +730,18 @@ let candidate_matches_scope candidate scope =
       len_haystack >= len_term && loop 0)
     terms
 
-let apply_intent_forecast_bias config (operations : operation_record list)
+let apply_intent_forecast_bias ?intents config (operations : operation_record list)
     (operation : operation_record)
     (candidates : Cp_search_fabric.scored_candidate list) =
+  let intents =
+    match intents with
+    | Some intents -> intents
+    | None -> read_intents config
+  in
   match operation.intent_id with
   | None -> candidates
   | Some intent_id -> (
-      match lookup_intent (read_intents config) intent_id with
+      match lookup_intent intents intent_id with
       | None -> candidates
       | Some intent ->
           let unresolved_for_operation (current_operation : operation_record) =
@@ -825,13 +830,17 @@ let apply_intent_forecast_bias config (operations : operation_record list)
                    (right.breakdown.total, right.breakdown.capability_match, right.label)
                    (left.breakdown.total, left.breakdown.capability_match, left.label)))
 
-let operation_search_candidates config units operations
+let operation_search_candidates ?store ?intents config units operations
     (operation : operation_record) =
-  let stats = read_search_stats config in
+  let stats =
+    match store with
+    | Some store -> store
+    | None -> read_search_stats config
+  in
   Cp_search_fabric.score_candidates ~store:stats
     ~operation:(search_operation_descriptor operation)
     ~candidates:(search_candidates_for_operation config units operations operation)
-  |> apply_intent_forecast_bias config operations operation
+  |> apply_intent_forecast_bias ?intents config operations operation
 
 let take_list n xs =
   let rec loop acc remaining count =
@@ -842,13 +851,14 @@ let take_list n xs =
   in
   loop [] xs n
 
-let operation_search_json config units operations (operation : operation_record) =
+let operation_search_json ?store ?intents config units operations
+    (operation : operation_record) =
   let readiness = operation_readiness operations operation in
   let candidates =
     match operation_search_strategy operation with
     | Cp_search_fabric.Legacy -> []
     | Cp_search_fabric.Best_first_v1 ->
-        operation_search_candidates config units operations operation
+        operation_search_candidates ?store ?intents config units operations operation
   in
   let selected_unit_id =
     match candidates with

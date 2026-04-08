@@ -114,6 +114,80 @@ let test_explicit_sessions_bypass () =
     (not (_state1.agents == state2.agents)
      || List.length _state1.agents = 0)
 
+let test_operations_render_uses_snapshot_intents () =
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  reset_section_cache ();
+  let config = Room.default_config base in
+  let _ = Room.init config ~agent_name:None in
+  let now = "2026-04-09T00:00:00Z" in
+  let intent : Cp_types.intent_record =
+    {
+      intent_id = "intent-root-error";
+      title = "Fix root error";
+      owner = "tester";
+      workload_profile = "coding_task";
+      success_metric = None;
+      invariants = [];
+      artifact_priors = [];
+      state = Cp_types.Active_intent;
+      current_focus =
+        {
+          stage = Some "implement";
+          artifact_scope = [];
+          unit_id = None;
+          verification_state = None;
+        };
+      checkpoint_ref = None;
+      source = "managed";
+      created_at = now;
+      updated_at = now;
+    }
+  in
+  let operation : Cp_types.operation_record =
+    {
+      operation_id = "op-root-error";
+      objective = "Fix root error";
+      intent_id = Some intent.intent_id;
+      assigned_unit_id = "company-runtime";
+      policy_class = "default";
+      budget_class = "default";
+      workload_template = None;
+      workload_profile = "coding_task";
+      stage = Some "implement";
+      artifact_scope = [];
+      depends_on_operation_ids = [];
+      search_strategy = "legacy";
+      detachment_session_id = None;
+      trace_id = "trace-root-error";
+      checkpoint_ref = None;
+      active_goal_ids = [];
+      note = None;
+      created_by = "tester";
+      source = "managed";
+      status = Cp_types.Active;
+      created_at = now;
+      updated_at = now;
+    }
+  in
+  Command_plane_v2.write_intents config [ intent ];
+  Command_plane_v2.write_operations config [ operation ];
+  let state = Command_plane_v2.build_snapshot_state config in
+  Unix.sleepf 0.05;
+  Command_plane_v2.write_intents config [];
+  let json = Command_plane_v2.list_operations_json_from_state state in
+  let open Yojson.Safe.Util in
+  Alcotest.(check string) "intent title comes from cached snapshot state"
+    "Fix root error"
+    (json
+     |> member "operations"
+     |> index 0
+     |> member "intent"
+     |> member "title"
+     |> to_string)
+
 let () =
   Alcotest.run "Cp_section_cache"
     [
@@ -126,5 +200,7 @@ let () =
             test_partial_invalidation;
           Alcotest.test_case "explicit sessions bypass" `Quick
             test_explicit_sessions_bypass;
+          Alcotest.test_case "operations render uses snapshot intents" `Quick
+            test_operations_render_uses_snapshot_intents;
         ] );
     ]

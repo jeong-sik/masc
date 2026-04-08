@@ -37,6 +37,12 @@ let eio_test name fn =
 
 let phase_t = testable (Fmt.of_to_string KSM.phase_to_string) ( = )
 
+(** Read-only phase query — no state mutation, unlike dispatching a no-op event. *)
+let get_phase name =
+  match R.get ~base_path:bp name with
+  | None -> Alcotest.fail ("keeper not found: " ^ name)
+  | Some e -> e.phase
+
 let dispatch name event =
   match R.dispatch_event ~base_path:bp name event with
   | Ok tr -> tr
@@ -54,7 +60,8 @@ let setup name =
 
 (** Drives keeper from Running → Failing → Crashed via heartbeat failure + fiber death. *)
 let crash_keeper name =
-  ignore (dispatch name (KSM.Heartbeat_failed { consecutive = 5; max_allowed = 5 }));
+  let tr = dispatch name (KSM.Heartbeat_failed { consecutive = 5; max_allowed = 5 }) in
+  check phase_t "failing" KSM.Failing tr.new_phase;
   let tr = dispatch name (KSM.Fiber_terminated { outcome = "crash" }) in
   check phase_t "crashed" KSM.Crashed tr.new_phase
 
@@ -109,10 +116,10 @@ let test_compaction_crash_recovery () =
   check phase_t "fail → running" KSM.Running tr.new_phase;
 
   let tr = dispatch "compact" KSM.Compaction_started in
-  check phase_t "retry compacting" KSM.Compacting tr.new_phase;
+  check phase_t "2nd compaction" KSM.Compacting tr.new_phase;
   let tr = dispatch "compact"
     (KSM.Compaction_completed { before_tokens = 100000; after_tokens = 30000 }) in
-  check phase_t "retry → running" KSM.Running tr.new_phase;
+  check phase_t "2nd compact → running" KSM.Running tr.new_phase;
 
   let tr = dispatch "compact"
     (KSM.Fiber_terminated { outcome = "cascading OOM" }) in
@@ -198,13 +205,10 @@ let test_fleet_chaos () =
   ignore (dispatch "fleet-c" KSM.Compaction_started);
   ignore (dispatch "fleet-d" KSM.Operator_pause);
 
-  check phase_t "A running" KSM.Running
-    (dispatch "fleet-a" KSM.Heartbeat_ok).new_phase;
-  check phase_t "C compacting" KSM.Compacting
-    (dispatch "fleet-c" KSM.Heartbeat_ok).new_phase;
-  (* C stays compacting because compaction_active overrides heartbeat_healthy.
-     Heartbeat_ok sets heartbeat_healthy=true but derive_phase checks
-     compaction_active first (priority 9 > 10). *)
+  check phase_t "A running" KSM.Running (get_phase "fleet-a");
+  check phase_t "B crashed" KSM.Crashed (get_phase "fleet-b");
+  check phase_t "C compacting" KSM.Compacting (get_phase "fleet-c");
+  check phase_t "D paused" KSM.Paused (get_phase "fleet-d");
   check int "1 running" 1 (R.count_running ());
 
   restart_keeper "fleet-b" ~attempt:1;

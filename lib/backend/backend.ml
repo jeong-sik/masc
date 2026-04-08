@@ -298,7 +298,13 @@ module FileSystem = struct
     match action with
     | `Done -> ()
     | `Wait p ->
-      (match Eio.Promise.await p with Ok () -> () | Error _ -> ())
+      (match Eio.Promise.await p with
+       | Ok () -> ()
+       | Error (Eio.Cancel.Cancelled _ as exn) -> raise exn
+       | Error exn ->
+           Log.legacy_traceln ~level:Log.Debug ~module_name:"Backend"
+             (Printf.sprintf "key_index populate wait failed: %s"
+                (Printexc.to_string exn)))
     | `Populate r ->
       (try
          let keys =

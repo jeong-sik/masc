@@ -307,16 +307,30 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                 let keepers_dir =
                   Filename.concat (Room.masc_root_dir config) "keepers" in
                 let disk_crashes =
-                  (try Keeper_crash_persistence.recent_crashes
-                    ~keepers_dir ~name:m.name ~max_entries:20
-                  with Eio.Cancel.Cancelled _ as e -> raise e | _ -> []) in
+                  (try
+                     Keeper_crash_persistence.recent_crashes
+                       ~keepers_dir ~name:m.name ~max_entries:20
+                   with
+                   | Eio.Cancel.Cancelled _ as exn -> raise exn
+                   | exn ->
+                       Log.Dashboard.warn
+                         "keeper dashboard recent_crashes failed for %s: %s"
+                         m.name (Printexc.to_string exn);
+                       []) in
                 let combined_log = match disk_crashes with
                   | [] -> crash_log
                   | _ -> disk_crashes in
                 let sp_events =
-                  (try Keeper_crash_persistence.recent_sp_events
-                    ~keepers_dir ~max_entries:20
-                  with Eio.Cancel.Cancelled _ as e -> raise e | _ -> []) in
+                  (try
+                     Keeper_crash_persistence.recent_sp_events
+                       ~keepers_dir ~max_entries:20
+                   with
+                   | Eio.Cancel.Cancelled _ as exn -> raise exn
+                   | exn ->
+                       Log.Dashboard.warn
+                         "keeper dashboard recent_sp_events failed: %s"
+                         (Printexc.to_string exn);
+                       []) in
                 let ctx_ratio =
                   match last_metrics with
                   | Some m -> Safe_ops.json_float "context_ratio" m

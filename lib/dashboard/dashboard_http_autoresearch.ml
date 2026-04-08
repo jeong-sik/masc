@@ -501,10 +501,10 @@ let delete_loop_json ~(base_path : string) ~(loop_id : string) :
           (match
              Autoresearch.git_top_level ~workdir:state.source_workdir
            with
-          | Ok repo_root ->
-              let workdir =
-                Autoresearch.managed_worktree_dir ~base_path loop_id
-              in
+           | Ok repo_root ->
+               let workdir =
+                 Autoresearch.managed_worktree_dir ~base_path loop_id
+               in
               if Sys.file_exists workdir then
                 let remove_cmd =
                   Printf.sprintf "cd %s && git worktree remove --force %s 2>&1"
@@ -520,10 +520,12 @@ let delete_loop_json ~(base_path : string) ~(loop_id : string) :
                     (Filename.quote branch)
                 in
                 ignore (Autoresearch.run_capture_lines branch_cmd)
-          | Error _ -> ());
-          let bundle_dir = Autoresearch.results_dir ~base_path loop_id in
-          if Sys.file_exists bundle_dir then rm_rf bundle_dir;
-          Ok
+           | Error msg ->
+               Log.Autoresearch.warn
+                 "delete loop git cleanup skipped for %s: %s" loop_id msg);
+           let bundle_dir = Autoresearch.results_dir ~base_path loop_id in
+           if Sys.file_exists bundle_dir then rm_rf bundle_dir;
+           Ok
             (`Assoc
               [
                 ("ok", `Bool true);

@@ -133,4 +133,6 @@ let handle_ag_ui_events ~deps request reqd =
                 | exn ->
                     Log.Server.error "SSE ping loop exited for session %s: %s" info.session_id (Printexc.to_string exn);
                     stop_sse_session info.session_id)
-      | Error _ -> ())
+      | Error msg ->
+          Log.Server.debug "ag-ui SSE runtime unavailable for session %s: %s"
+            session_id msg)

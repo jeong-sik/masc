@@ -143,6 +143,25 @@ let test_run_dashboard_compute_without_pool_uses_isolated_pg_backend () =
         reused_shared_pool
   | Room_utils.Memory _ | Room_utils.FileSystem _ -> ()
 
+let test_dashboard_shell_http_json_includes_paths () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let json = Lib.Server_dashboard_http_core.dashboard_shell_http_json config in
+  let open Yojson.Safe.Util in
+  let paths = json |> member "paths" in
+  let effective_base_path = paths |> member "effective_base_path" |> to_string in
+  let effective_masc_root = paths |> member "effective_masc_root" |> to_string in
+  let expected_masc_root = Unix.realpath (Filename.concat config.base_path ".masc") in
+  check bool "paths present" true
+    (match paths with `Assoc _ -> true | _ -> false);
+  check string "effective_base_path matches config" (Unix.realpath config.base_path)
+    effective_base_path;
+  check string "effective_masc_root matches config" expected_masc_root
+    effective_masc_root;
+  check bool "paths include cwd" true
+    (match paths |> member "cwd" with
+     | `String value -> String.length value > 0
+     | _ -> false)
+
 let () =
   run "dashboard_http_core"
     [
@@ -154,5 +173,7 @@ let () =
             test_run_dashboard_compute_without_pool_uses_isolated_pg_backend;
           test_case "pool uses executor domain" `Quick
             test_run_dashboard_compute_with_pool_uses_executor_domain;
+          test_case "shell payload includes paths diagnostics" `Quick
+            test_dashboard_shell_http_json_includes_paths;
         ] );
     ]

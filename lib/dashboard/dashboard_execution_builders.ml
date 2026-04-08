@@ -169,6 +169,7 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
     | None -> name
   in
   let audit = tool_audit_snapshot agent_name in
+  let agent = member_assoc "agent" keeper in
   let status = string_field ~default:"unknown" "status" keeper in
   let context_ratio =
     match member_assoc "context_ratio" keeper with
@@ -180,17 +181,23 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
     trim_to_option (string_field "last_autonomous_action_at" keeper)
   in
   let last_heartbeat_at =
-    trim_to_option (string_field "updated_at" keeper)
+    latest_iso_timestamp
+      [
+        trim_to_option (string_field "updated_at" keeper);
+        trim_to_option (string_field "last_seen" agent);
+        audit.tool_audit_at;
+      ]
   in
-  let last_signal_at =
-    match last_action_at with
-    | Some _ -> last_action_at
-    | None -> last_heartbeat_at
-  in
+  let last_signal_at = latest_iso_timestamp [ last_action_at; last_heartbeat_at ] in
   let last_action_ts = parse_iso_opt last_action_at |> Option.value ~default:0.0 in
   let last_signal_ts = parse_iso_opt last_signal_at |> Option.value ~default:0.0 in
   let last_action_age_s =
     if last_action_ts > 0.0 then max 0.0 (now_ts -. last_action_ts)
+    else infinity
+  in
+  let effective_activity_age_s =
+    if last_action_ts > 0.0 then last_action_age_s
+    else if last_signal_ts > 0.0 then max 0.0 (now_ts -. last_signal_ts)
     else infinity
   in
   let autonomous_action_count = int_field "autonomous_action_count" keeper in
@@ -218,9 +225,9 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
     else if autonomous_turn_count = 0 && turn_count > 0 then
       ("warning", Tone_warn,
        Printf.sprintf "자율 턴 없음 (턴 %d회 수행)" turn_count)
-    else if last_action_age_s >= keeper_action_stale_sec then
+    else if effective_activity_age_s >= keeper_action_stale_sec then
       ("warning", Tone_warn,
-       Printf.sprintf "마지막 행동 %.0f시간 전" (last_action_age_s /. 3600.0))
+       Printf.sprintf "마지막 활동 %.0f시간 전" (effective_activity_age_s /. 3600.0))
     else
       ("healthy", Tone_ok, "정상 동작 중")
   in

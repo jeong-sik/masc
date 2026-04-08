@@ -29,23 +29,125 @@ type room_snapshot = {
 
 (* ===== ISO Timestamp Parsing (moved here to break cycle) ===== *)
 
-(** Parse ISO timestamp to Unix time (UTC) *)
+(** Parse dashboard timestamps to Unix time.
+    Accepts canonical UTC timestamps, fractional-second RFC3339 variants,
+    numeric UTC offsets, and bare local timestamps from older read models. *)
 let parse_iso_timestamp (s : string) : float option =
-  try
-    let open Scanf in
-    sscanf s "%d-%d-%dT%d:%d:%d" (fun y m d h min sec ->
-      let tm = {
-        Unix.tm_sec = sec; tm_min = min; tm_hour = h;
-        tm_mday = d; tm_mon = m - 1; tm_year = y - 1900;
-        tm_wday = 0; tm_yday = 0; tm_isdst = false
-      } in
-      let (local_t, _) = Unix.mktime tm in
-      let utc_tm = Unix.gmtime local_t in
-      let (utc_as_local, _) = Unix.mktime utc_tm in
-      let tz_offset = local_t -. utc_as_local in
-      Some (local_t -. tz_offset)
-    )
-  with Scanf.Scan_failure _ | Failure _ | End_of_file -> None
+  let is_digit c = c >= '0' && c <= '9' in
+  let all_digits raw =
+    let len = String.length raw in
+    len > 0 && String.for_all is_digit raw
+  in
+  let parse_tz_offset raw =
+    let len = String.length raw in
+    if len = 0 then None
+    else
+      let sign =
+        match raw.[0] with
+        | '+' -> 1
+        | '-' -> -1
+        | _ -> 0
+      in
+      if sign = 0 then None
+      else
+        match len with
+        | 6 when raw.[3] = ':' ->
+            let hh = String.sub raw 1 2 in
+            let mm = String.sub raw 4 2 in
+            if all_digits hh && all_digits mm then
+              Some (sign * ((int_of_string hh * 3600) + (int_of_string mm * 60)))
+            else
+              None
+        | 5 ->
+            let hh = String.sub raw 1 2 in
+            let mm = String.sub raw 3 2 in
+            if all_digits hh && all_digits mm then
+              Some (sign * ((int_of_string hh * 3600) + (int_of_string mm * 60)))
+            else
+              None
+        | _ -> None
+  in
+  let parse_fraction_seconds raw =
+    if not (all_digits raw) then None
+    else
+      let numerator =
+        String.fold_left
+          (fun acc ch -> (acc *. 10.0) +. float_of_int (Char.code ch - Char.code '0'))
+          0.0 raw
+      in
+      Some (numerator /. (10.0 ** float_of_int (String.length raw)))
+  in
+  let split_timezone raw =
+    let len = String.length raw in
+    if len = 0 then None
+    else
+      match raw.[len - 1] with
+      | 'Z' | 'z' -> Some (String.sub raw 0 (len - 1), Some 0)
+      | _ ->
+          let suffix_opt width =
+            if len > width then Some (String.sub raw (len - width) width) else None
+          in
+          (match Option.bind (suffix_opt 6) parse_tz_offset with
+          | Some offset -> Some (String.sub raw 0 (len - 6), Some offset)
+          | None -> (
+              match Option.bind (suffix_opt 5) parse_tz_offset with
+              | Some offset -> Some (String.sub raw 0 (len - 5), Some offset)
+              | None -> Some (raw, None)))
+  in
+  let split_fraction raw =
+    match String.index_opt raw '.' with
+    | None -> Some (raw, 0.0)
+    | Some dot ->
+        let main = String.sub raw 0 dot in
+        let fraction = String.sub raw (dot + 1) (String.length raw - dot - 1) in
+        if String.length main <> 19 then None
+        else Option.map (fun fraction_s -> (main, fraction_s)) (parse_fraction_seconds fraction)
+  in
+  let parse_main raw =
+    if String.length raw <> 19 then None
+    else
+      try
+        Some
+          (Scanf.sscanf raw "%04d-%02d-%02dT%02d:%02d:%02d"
+             (fun year mon day hour min sec -> (year, mon, day, hour, min, sec)))
+      with
+      | Scanf.Scan_failure _ | Failure _ | End_of_file -> None
+  in
+  let trimmed = String.trim s in
+  if trimmed = "" then None
+  else
+    match split_timezone trimmed with
+    | None -> None
+    | Some (raw_main, source_offset_opt) -> (
+        match split_fraction raw_main with
+        | None -> None
+        | Some (main, fraction_s) -> (
+            match parse_main main with
+            | None -> None
+            | Some (year, mon, day, hour, min, sec) ->
+                let tm =
+                  {
+                    Unix.tm_sec = sec;
+                    tm_min = min;
+                    tm_hour = hour;
+                    tm_mday = day;
+                    tm_mon = mon - 1;
+                    tm_year = year - 1900;
+                    tm_wday = 0;
+                    tm_yday = 0;
+                    tm_isdst = false;
+                  }
+                in
+                let local_epoch, _ = Unix.mktime tm in
+                let utc_tm = Unix.gmtime local_epoch in
+                let utc_as_local, _ = Unix.mktime utc_tm in
+                let local_offset_s = local_epoch -. utc_as_local in
+                let source_offset_s =
+                  match source_offset_opt with
+                  | Some offset -> float_of_int offset
+                  | None -> local_offset_s
+                in
+                Some (local_epoch +. local_offset_s -. source_offset_s +. fraction_s)))
 
 let format_elapsed now timestamp fallback =
   match parse_iso_timestamp timestamp with

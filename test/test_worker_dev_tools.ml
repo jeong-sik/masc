@@ -582,6 +582,30 @@ let () =
         Alcotest.(check bool) "git commit" false
           (Worker_dev_tools.is_destructive_bash_operation "git commit -m 'fix'"));
     ];
+    "gh_pr_merge_target", [
+      Alcotest.test_case "extracts numeric pr id" `Quick (fun () ->
+        Alcotest.(check (option string)) "numeric target" (Some "5934")
+          (Worker_dev_tools.gh_pr_merge_target "pr merge 5934"));
+      Alcotest.test_case "extracts explicit branch target" `Quick (fun () ->
+        Alcotest.(check (option string)) "branch target" (Some "feature/review-gate")
+          (Worker_dev_tools.gh_pr_merge_target "pr merge feature/review-gate"));
+      Alcotest.test_case "extracts explicit url target" `Quick (fun () ->
+        Alcotest.(check (option string)) "url target"
+          (Some "https://github.com/jeong-sik/masc-mcp/pull/5934")
+          (Worker_dev_tools.gh_pr_merge_target
+             "pr merge https://github.com/jeong-sik/masc-mcp/pull/5934"));
+      Alcotest.test_case "skips repo flag value" `Quick (fun () ->
+        Alcotest.(check (option string)) "repo flag skipped" (Some "5934")
+          (Worker_dev_tools.gh_pr_merge_target
+             "pr merge --repo jeong-sik/masc-mcp 5934"));
+      Alcotest.test_case "returns none for current branch merge" `Quick (fun () ->
+        Alcotest.(check (option string)) "implicit current branch" None
+          (Worker_dev_tools.gh_pr_merge_target "pr merge --squash --delete-branch"));
+      Alcotest.test_case "skips match-head-commit value" `Quick (fun () ->
+        Alcotest.(check (option string)) "match-head-commit skipped" (Some "5934")
+          (Worker_dev_tools.gh_pr_merge_target
+             "pr merge --match-head-commit abc123 5934"));
+    ];
     "sanitize_command_for_log", [
       Alcotest.test_case "redacts url credentials" `Quick (fun () ->
         let redacted =

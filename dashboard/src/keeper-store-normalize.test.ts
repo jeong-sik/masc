@@ -1,5 +1,65 @@
 import { describe, expect, it } from 'vitest'
-import { deriveLifecycleState, normalizeKeepers } from './keeper-store-normalize'
+import { deriveLifecycleState, normalizeKeepers, toKeeperPhase } from './keeper-store-normalize'
+
+describe('toKeeperPhase — backend lowercase to PascalCase normalization', () => {
+  it('maps lowercase backend phase strings to PascalCase KeeperPhase', () => {
+    expect(toKeeperPhase('offline')).toBe('Offline')
+    expect(toKeeperPhase('running')).toBe('Running')
+    expect(toKeeperPhase('failing')).toBe('Failing')
+    expect(toKeeperPhase('compacting')).toBe('Compacting')
+    expect(toKeeperPhase('handing_off')).toBe('HandingOff')
+    expect(toKeeperPhase('draining')).toBe('Draining')
+    expect(toKeeperPhase('paused')).toBe('Paused')
+    expect(toKeeperPhase('stopped')).toBe('Stopped')
+    expect(toKeeperPhase('crashed')).toBe('Crashed')
+    expect(toKeeperPhase('restarting')).toBe('Restarting')
+    expect(toKeeperPhase('dead')).toBe('Dead')
+  })
+
+  it('accepts PascalCase input for forward compatibility', () => {
+    expect(toKeeperPhase('Offline')).toBe('Offline')
+    expect(toKeeperPhase('Running')).toBe('Running')
+    expect(toKeeperPhase('HandingOff')).toBe('HandingOff')
+  })
+
+  it('returns null for unknown or empty values', () => {
+    expect(toKeeperPhase(null)).toBeNull()
+    expect(toKeeperPhase(undefined)).toBeNull()
+    expect(toKeeperPhase('')).toBeNull()
+    expect(toKeeperPhase('unknown_phase')).toBeNull()
+    expect(toKeeperPhase('RUNNING')).toBeNull()
+  })
+})
+
+describe('normalizeKeepers phase field', () => {
+  it('normalizes lowercase backend phase to PascalCase KeeperPhase', () => {
+    const [keeper] = normalizeKeepers([
+      { name: 'phase-test', status: 'active', phase: 'running' },
+    ])
+    expect(keeper?.phase).toBe('Running')
+  })
+
+  it('normalizes handing_off to HandingOff', () => {
+    const [keeper] = normalizeKeepers([
+      { name: 'handoff-test', status: 'active', phase: 'handing_off' },
+    ])
+    expect(keeper?.phase).toBe('HandingOff')
+  })
+
+  it('returns null for unknown phase', () => {
+    const [keeper] = normalizeKeepers([
+      { name: 'unknown-test', status: 'active', phase: 'bogus' },
+    ])
+    expect(keeper?.phase).toBeNull()
+  })
+
+  it('returns null when phase is absent', () => {
+    const [keeper] = normalizeKeepers([
+      { name: 'no-phase', status: 'active' },
+    ])
+    expect(keeper?.phase).toBeNull()
+  })
+})
 
 describe('normalizeKeepers lifecycle metrics', () => {
   it('accepts flat backend handoff fields', () => {

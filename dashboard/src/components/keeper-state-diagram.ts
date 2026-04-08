@@ -7,14 +7,16 @@ import { useEffect, useState } from 'preact/hooks'
 import { fetchKeeperStateDiagram } from '../api/keeper'
 import { MermaidGraph } from './common/mermaid-graph'
 import { EmptyState } from './common/empty-state'
+import type { KeeperPhase } from '../types'
 
 interface KeeperStateDiagramProps {
   keeperName: string
-  currentPhase?: string | null
+  currentPhase?: KeeperPhase | string | null
 }
 
 export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStateDiagramProps) {
   const [mermaid, setMermaid] = useState<string | null>(null)
+  const [apiPhase, setApiPhase] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -27,6 +29,7 @@ export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStat
       .then(resp => {
         if (cancelled) return
         setMermaid(resp.mermaid)
+        setApiPhase(resp.current_phase)
         setLoading(false)
       })
       .catch(err => {
@@ -38,10 +41,13 @@ export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStat
     return () => { cancelled = true }
   }, [keeperName])
 
+  // Prefer API response current_phase, fall back to prop
+  const displayPhase = apiPhase ?? currentPhase
+
   if (loading) {
     return html`
       <div class="flex items-center justify-center gap-2 py-6 text-[11px] text-[var(--text-dim)]">
-        <span class="inline-block w-3 h-3 rounded-full border-2 border-[var(--accent)] border-t-transparent" style="animation: spin 0.8s linear infinite;"></span>
+        <span class="inline-block w-3 h-3 rounded-full border-2 border-[var(--accent)] border-t-transparent animate-spin" aria-hidden="true"></span>
         상태 다이어그램 로딩중
       </div>
     `
@@ -53,9 +59,9 @@ export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStat
 
   return html`
     <div>
-      ${currentPhase ? html`
+      ${displayPhase ? html`
         <div class="mb-2 text-[10px] text-[var(--text-dim)]">
-          현재 phase: <span class="font-mono font-medium text-[var(--accent)]">${currentPhase}</span>
+          현재 phase: <span class="font-mono font-medium text-[var(--accent)]">${displayPhase}</span>
         </div>
       ` : null}
       <${MermaidGraph}

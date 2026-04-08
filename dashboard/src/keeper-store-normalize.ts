@@ -10,14 +10,39 @@ import { isOfflineStatus } from './lib/status-utils'
 import { keeperDisplayStatus } from './lib/keeper-runtime-display'
 import { CONTEXT_RATIO_CRITICAL, CONTEXT_RATIO_WARN, CONTEXT_RATIO_COMPACTING } from './config/constants'
 
-const VALID_PHASES = new Set<string>([
-  'Offline', 'Running', 'Failing', 'Compacting', 'HandingOff',
-  'Draining', 'Paused', 'Stopped', 'Crashed', 'Restarting', 'Dead',
-])
+/** Maps lowercase backend phase strings to PascalCase KeeperPhase values.
+ *  Backend (keeper_state_machine.ml) emits lowercase: "offline", "running", "handing_off", etc.
+ *  Frontend KeeperPhase type uses PascalCase: "Offline", "Running", "HandingOff", etc.
+ */
+const BACKEND_PHASE_MAP: Record<string, KeeperPhase> = {
+  offline: 'Offline',
+  running: 'Running',
+  failing: 'Failing',
+  compacting: 'Compacting',
+  handing_off: 'HandingOff',
+  draining: 'Draining',
+  paused: 'Paused',
+  stopped: 'Stopped',
+  crashed: 'Crashed',
+  restarting: 'Restarting',
+  dead: 'Dead',
+  // Also accept PascalCase for forward-compat / test fixtures
+  Offline: 'Offline',
+  Running: 'Running',
+  Failing: 'Failing',
+  Compacting: 'Compacting',
+  HandingOff: 'HandingOff',
+  Draining: 'Draining',
+  Paused: 'Paused',
+  Stopped: 'Stopped',
+  Crashed: 'Crashed',
+  Restarting: 'Restarting',
+  Dead: 'Dead',
+}
 
-function toKeeperPhase(raw: string | null | undefined): KeeperPhase | null {
-  if (!raw || !VALID_PHASES.has(raw)) return null
-  return raw as KeeperPhase
+export function toKeeperPhase(raw: string | null | undefined): KeeperPhase | null {
+  if (!raw) return null
+  return BACKEND_PHASE_MAP[raw] ?? null
 }
 
 function normalizeKeeperAgentStatus(value: unknown): Keeper['status'] {

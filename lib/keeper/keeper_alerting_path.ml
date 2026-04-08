@@ -41,6 +41,100 @@ let normalize_allowed_path_for_check ~(root : string) (path : string) : string o
     let normalized = normalize_path_for_check candidate |> strip_trailing_slashes in
     if normalized = "" then None else Some normalized
 
+let split_relative_components (raw : string) : string list =
+  raw
+  |> String.split_on_char '/'
+  |> List.filter (fun part -> part <> "" && part <> ".")
+
+let has_parent_component (parts : string list) : bool =
+  List.exists (fun part -> part = "..") parts
+
+let join_path_components = function
+  | [] -> "."
+  | hd :: tl -> List.fold_left Filename.concat hd tl
+
+let path_exists (path : string) : bool =
+  Sys.file_exists path
+
+let parent_exists (path : string) : bool =
+  let parent = Filename.dirname path in
+  parent <> path && path_exists parent
+
+let is_within_root_norm ~(root_norm : string) (path : string) : bool =
+  let normalized = normalize_path_for_check path |> strip_trailing_slashes in
+  normalized = root_norm
+  || starts_with ~prefix:(root_norm ^ "/") normalized
+
+let find_suffix_matches_under_root ~root ~anchor ~suffix_rel
+    ?(max_dirs = 2000) ?(max_matches = 8) () : string list =
+  let root_norm = normalize_path_for_check root |> strip_trailing_slashes in
+  let visited : (string, unit) Hashtbl.t = Hashtbl.create 64 in
+  let rec walk ~dirs_seen acc dir =
+    if dirs_seen >= max_dirs || List.length acc >= max_matches then (dirs_seen, acc)
+    else
+      let dir_norm = normalize_path_for_check dir |> strip_trailing_slashes in
+      if not (is_within_root_norm ~root_norm dir)
+         || Hashtbl.mem visited dir_norm
+      then (dirs_seen, acc)
+      else begin
+        Hashtbl.replace visited dir_norm ();
+        let entries =
+          try Sys.readdir dir |> Array.to_list |> List.sort String.compare
+          with Sys_error _ -> []
+        in
+        List.fold_left
+          (fun (dirs_seen, acc) entry ->
+             if dirs_seen >= max_dirs || List.length acc >= max_matches then (dirs_seen, acc)
+             else
+               let path = Filename.concat dir entry in
+               match (try Some (Sys.is_directory path) with Sys_error _ -> None) with
+               | None -> (dirs_seen, acc)
+               | Some is_dir ->
+                   let acc =
+                     if entry = anchor then
+                       let candidate = Filename.concat path suffix_rel in
+                       if path_exists candidate
+                          && is_within_root_norm ~root_norm candidate
+                       then candidate :: acc else acc
+                     else acc
+                   in
+                   if is_dir && is_within_root_norm ~root_norm path
+                   then walk ~dirs_seen:(dirs_seen + 1) acc path
+                   else (dirs_seen, acc))
+          (dirs_seen, acc) entries
+      end
+  in
+  walk ~dirs_seen:0 [] root |> snd |> List.rev
+
+let maybe_resolve_missing_relative_read_path ~(root : string) ~(raw_path : string) :
+    (string option, string) result =
+  let parts = split_relative_components raw_path in
+  match parts with
+  | [] | [_] -> Ok None
+  | _ when has_parent_component parts -> Ok None
+  | anchor :: rest ->
+      let suffix_rel = join_path_components rest in
+      let matches =
+        find_suffix_matches_under_root ~root ~anchor ~suffix_rel ()
+      in
+      (match matches with
+       | [] -> Ok None
+       | [match_path] -> Ok (Some match_path)
+       | many ->
+           Error
+             (Printf.sprintf
+                "ambiguous_relative_read_path: %s (matches: [%s])"
+                raw_path (String.concat ", " many)))
+
+let allows_missing_leaf_read ~(raw : string) ~(candidate : string) : bool =
+  let parts = split_relative_components raw in
+  let trailing_slash =
+    String.length raw > 0 && raw.[String.length raw - 1] = '/'
+  in
+  parent_exists candidate
+  && List.length parts > 1
+  && not trailing_slash
+
 let absolute_allowed_paths ~(config : Room.config) ~(allowed_paths : string list)
     : string list =
   let root = project_root_of_config config in
@@ -149,10 +243,25 @@ let resolve_keeper_read_path ~(config : Room.config) ~(raw_path : string)
       target_norm = root_norm
       || starts_with ~prefix:(root_norm ^ "/") target_norm
     in
-    if within_root then Ok candidate
-    else
+    if not within_root then
       Error
         (Printf.sprintf "path_outside_project_root: %s (root=%s)"
+           target_norm root_norm)
+    else if path_exists candidate || allows_missing_leaf_read ~raw ~candidate then
+      Ok candidate
+    else if Filename.is_relative raw then
+      (match maybe_resolve_missing_relative_read_path ~root ~raw_path:raw with
+       | Ok (Some resolved) -> Ok resolved
+       | Ok None ->
+           Error
+             (Printf.sprintf
+                "path_not_found_under_project_root: %s (root=%s)"
+                raw root_norm)
+       | Error e -> Error e)
+    else
+      Error
+        (Printf.sprintf
+           "path_not_found_under_project_root: %s (root=%s)"
            target_norm root_norm)
 
 let process_status_to_json (st : Unix.process_status) : Yojson.Safe.t =

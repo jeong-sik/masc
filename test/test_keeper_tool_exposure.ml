@@ -264,6 +264,12 @@ let make_path_test_dir () =
   (try Unix.mkdir sub 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
   let sub2 = Filename.concat dir "src" in
   (try Unix.mkdir sub2 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  (* Create test files so resolve_keeper_read_path existence check passes *)
+  let write_file path content =
+    let oc = open_out path in
+    output_string oc content; close_out oc in
+  write_file (Filename.concat sub "foo.ml") "(* test *)";
+  write_file (Filename.concat sub2 "bar.ml") "(* test *)";
   dir
 
 let cleanup_path_test_dir dir =
@@ -517,6 +523,104 @@ let test_read_vs_write_path_separation () =
     check bool "read src ok (read ignores allowed_paths)" true (Result.is_ok read_src))
 
 (* ============================================================
+   10c. Read-path: resolve_keeper_read_path bounded suffix resolution
+   ============================================================ *)
+
+let test_read_path_rejects_nonexistent () =
+  let dir = make_path_test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
+    Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+    let config = Room.default_config dir in
+    (* Path within root but does not exist on disk *)
+    let result = Keeper_alerting_path.resolve_keeper_read_path
+      ~config ~raw_path:"nonexistent-repo/" in
+    check bool "nonexistent path rejected" true (Result.is_error result);
+    let err = Result.get_error result in
+    check bool "error mentions project root miss" true
+      (String_util.contains_substring_ci err "path_not_found_under_project_root"))
+
+let test_read_path_resolves_unique_nested_repo_suffix () =
+  let dir = make_path_test_dir () in
+  let mkdir path =
+    try Unix.mkdir path 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
+  in
+  let workspace = Filename.concat dir "workspace" in
+  let owner = Filename.concat workspace "yousleepwhen" in
+  let repo = Filename.concat owner "masc-mcp" in
+  let lib_dir = Filename.concat repo "lib" in
+  Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
+    mkdir workspace;
+    mkdir owner;
+    mkdir repo;
+    mkdir lib_dir;
+    Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+    let config = Room.default_config dir in
+    let result = Keeper_alerting_path.resolve_keeper_read_path
+      ~config ~raw_path:"masc-mcp/lib" in
+    check bool "unique nested repo suffix resolved" true (Result.is_ok result);
+    check string "resolved to discovered repo lib" lib_dir (Result.get_ok result))
+
+let test_read_path_rejects_ambiguous_nested_repo_suffix () =
+  let dir = make_path_test_dir () in
+  let mkdir path =
+    try Unix.mkdir path 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
+  in
+  let make_repo prefix =
+    let workspace = Filename.concat dir prefix in
+    let repo = Filename.concat workspace "masc-mcp" in
+    let lib_dir = Filename.concat repo "lib" in
+    mkdir workspace;
+    mkdir repo;
+    mkdir lib_dir
+  in
+  Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
+    make_repo "workspace-a";
+    make_repo "workspace-b";
+    Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+    let config = Room.default_config dir in
+    let result = Keeper_alerting_path.resolve_keeper_read_path
+      ~config ~raw_path:"masc-mcp/lib" in
+    check bool "ambiguous nested repo suffix rejected" true (Result.is_error result);
+    let err = Result.get_error result in
+    check bool "error mentions ambiguity" true
+      (String_util.contains_substring_ci err "ambiguous_relative_read_path"))
+
+let test_read_path_does_not_follow_symlink_outside_root () =
+  let dir = make_path_test_dir () in
+  let outside = Filename.concat (Filename.get_temp_dir_name ())
+      (Printf.sprintf "keeper_outside_%d" (Random.int 100000)) in
+  let mkdir path =
+    try Unix.mkdir path 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
+  in
+  let link_path = Filename.concat dir "external-link" in
+  Fun.protect
+    ~finally:(fun () ->
+      (try Unix.unlink link_path with _ -> ());
+      cleanup_path_test_dir dir;
+      cleanup_path_test_dir outside)
+    (fun () ->
+      mkdir outside;
+      let outside_owner = Filename.concat outside "yousleepwhen" in
+      let outside_repo = Filename.concat outside_owner "masc-mcp" in
+      let outside_lib = Filename.concat outside_repo "lib" in
+      mkdir outside_owner;
+      mkdir outside_repo;
+      mkdir outside_lib;
+      Unix.symlink outside link_path;
+      Eio_main.run @@ fun env ->
+    Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let config = Room.default_config dir in
+      let result = Keeper_alerting_path.resolve_keeper_read_path
+        ~config ~raw_path:"masc-mcp/lib" in
+      check bool "symlink escape is rejected" true (Result.is_error result);
+      let err = Result.get_error result in
+      check bool "symlink escape does not resolve outside root" true
+        (String_util.contains_substring_ci err "path_not_found_under_project_root"))
+
+(* ============================================================
    11. Keeper-reported allowed_paths symlink bug
    ============================================================ *)
 
@@ -668,6 +772,13 @@ let () =
       test_case "empty allowed permits all" `Quick test_path_empty_allowed_permits_all_within_root;
       test_case "read path ignores allowed_paths" `Quick test_read_path_ignores_allowed_paths;
       test_case "read path rejects outside root" `Quick test_read_path_rejects_outside_root;
+      test_case "read path rejects nonexistent" `Quick test_read_path_rejects_nonexistent;
+      test_case "read path resolves unique nested repo suffix" `Quick
+        test_read_path_resolves_unique_nested_repo_suffix;
+      test_case "read path rejects ambiguous nested repo suffix" `Quick
+        test_read_path_rejects_ambiguous_nested_repo_suffix;
+      test_case "read path does not follow symlink outside root" `Quick
+        test_read_path_does_not_follow_symlink_outside_root;
       test_case "read vs write path separation" `Quick test_read_vs_write_path_separation;
       test_case "keeper-reported nonexistent subdir" `Quick
         test_keeper_reported_nonexistent_subdir;

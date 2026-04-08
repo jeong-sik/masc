@@ -130,13 +130,16 @@ let mask_tool_result_content ~(tool_name : string option) ~(tool_use_id : string
 let mask_tool_result_message ~(tool_names : (string * string) list)
     (m : Agent_sdk.Types.message) : Agent_sdk.Types.message =
   let content = List.map (function
-    | Agent_sdk.Types.ToolResult { tool_use_id; content; is_error; json } ->
+    | Agent_sdk.Types.ToolResult { tool_use_id; content; is_error; _ } ->
       let tool_name = List.assoc_opt tool_use_id tool_names in
       Agent_sdk.Types.ToolResult {
         tool_use_id;
         content = mask_tool_result_content ~tool_name ~tool_use_id ~content;
         is_error;
-        json;
+        (* Compaction keeps only a small textual stub plus the tool/result
+           pairing. Preserving structured payloads here would bypass the size
+           reduction and leak the full tool output through [json]. *)
+        json = None;
       }
     | other -> other
   ) m.content in

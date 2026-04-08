@@ -1,7 +1,8 @@
 (** Keeper shell tool handlers — bash execution and read-only ops.
 
     Handles [keeper_bash] (write-capable) and [keeper_shell_readonly]
-    (ls, cat, find, grep, head, tail, wc, tree, git-log, git-diff, git-status).
+    (ls, cat, find, grep, head, tail, wc, tree, git-log, git-diff, git-status,
+    git-clone).
 
     Write-capable bash blocks dangerous commands (rm, mv, chmod, etc.)
     and chaining operators (&&, ||, ;) via substring blocklist. *)

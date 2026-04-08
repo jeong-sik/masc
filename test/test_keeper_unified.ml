@@ -1390,7 +1390,7 @@ let test_sanitize_messages_utf8_cleans_history_path () =
                 tool_use_id = "tool\001id";
                 content = "result\127payload";
                 is_error = false;
-                json = None;
+                json = Some (`Assoc [("key\000", `String "value\127")]);
               };
           ];
         name = None;
@@ -1407,7 +1407,12 @@ let test_sanitize_messages_utf8_cleans_history_path () =
       (match tool_msg.Agent_sdk.Types.content with
        | [ Agent_sdk.Types.ToolResult { tool_use_id; content; _ } ] ->
            check string "tool id sanitized" "tool id" tool_use_id;
-           check string "tool payload sanitized" "result payload" content
+           check string "tool payload sanitized" "result payload" content;
+           (match tool_msg.Agent_sdk.Types.content with
+            | [ Agent_sdk.Types.ToolResult { json = Some (`Assoc [ (key, `String value) ]); _ } ] ->
+                check string "tool json key sanitized" "key " key;
+                check string "tool json value sanitized" "value " value
+            | _ -> fail "expected sanitized tool result json")
        | _ -> fail "expected sanitized tool result")
   | _ -> fail "expected two sanitized messages"
 

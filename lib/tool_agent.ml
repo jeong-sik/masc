@@ -13,8 +13,13 @@ let result_to_response = function
   | Error e -> (false, Types.masc_error_to_string e)
 
 (** Handle masc_agents *)
-let handle_agents ctx _args =
+let handle_agents ctx args =
+  let limit = get_int args "limit" 20 |> max 1 |> min 50 in
   let json = Room.get_agents_status ctx.config in
+  let json = match json with
+    | `List items -> `List (List.filteri (fun i _ -> i < limit) items)
+    | other -> other
+  in
   (true, Yojson.Safe.pretty_to_string json)
 
 (** Handle masc_register_capabilities *)
@@ -286,8 +291,10 @@ let handle_select_agent ctx args =
 (** Handle masc_collaboration_graph *)
 let handle_collaboration_graph ctx args =
   let format = get_string args "format" "text" in
+  let limit = get_int args "limit" 20 |> max 1 |> min 100 in
   let (synapses, agents) = Hebbian_eio.get_graph_data ctx.config in
   if format = "json" then
+    let synapses = List.filteri (fun i _ -> i < limit) synapses in
     let json = `Assoc [
       ("agents", `List (List.map (fun a -> `String a) agents));
       ("synapses", `List (List.map Hebbian_eio.synapse_to_json synapses));
@@ -297,6 +304,7 @@ let handle_collaboration_graph ctx args =
     let lines =
       synapses
       |> List.sort (fun a b -> compare b.Hebbian_eio.weight a.Hebbian_eio.weight)
+      |> List.filteri (fun i _ -> i < limit)
       |> List.map (fun s ->
           Printf.sprintf "%s → %s (%.2f, success:%d, failure:%d)"
             s.Hebbian_eio.from_agent s.Hebbian_eio.to_agent
@@ -338,6 +346,7 @@ let handle_agent_card _ctx args =
 (** Handle masc_agent_relations — proxy to Neo4j/GraphQL.
     MASC is a consumer: it queries the GraphQL API, which owns the data. *)
 let handle_agent_relations ctx args =
+  let _limit = get_int args "limit" 20 |> max 1 |> min 50 in
   let target = match get_string_opt args "agent_name" with
     | Some name when name <> "" -> name
     | _ -> ctx.agent_name

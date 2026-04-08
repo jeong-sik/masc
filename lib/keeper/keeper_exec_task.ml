@@ -18,9 +18,19 @@ let handle_keeper_task_tool
   | "keeper_tasks_list" ->
     let status_filter = Safe_ops.json_string_opt "status" args in
     let include_done = Safe_ops.json_bool ~default:false "include_done" args in
-    Room.list_tasks ?status:status_filter ~include_done config
+    let limit = Safe_ops.json_int ~default:50 "limit" args |> max 1 |> min 100 in
+    let result = Room.list_tasks ?status:status_filter ~include_done config in
+    (* Truncate JSON list output if it parses as a list *)
+    (try
+       match Yojson.Safe.from_string result with
+       | `List items ->
+         Yojson.Safe.to_string (`List (List.filteri (fun i _ -> i < limit) items))
+       | _ -> result
+     with _ -> result)
   | "keeper_tasks_audit" ->
+    let limit = Safe_ops.json_int ~default:20 "limit" args |> max 1 |> min 50 in
     let orphans = Room.audit_orphan_tasks config in
+    let orphans = List.filteri (fun i _ -> i < limit) orphans in
     let items =
       List.map
         (fun (task, assignee) ->

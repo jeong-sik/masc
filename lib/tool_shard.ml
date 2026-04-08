@@ -458,6 +458,13 @@ and priority for each task. Use to see what work is available or in progress.";
       ("properties", `Assoc [
         ("status", `Assoc [("type", `String "string"); ("enum", `List [`String "todo"; `String "claimed"; `String "in_progress"; `String "done"; `String "cancelled"]); ("description", `String "Filter by task status")]);
         ("include_done", `Assoc [("type", `String "boolean"); ("description", `String "Include completed tasks (default: false)")]);
+        ("limit", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Max tasks to return (default: 50)");
+          ("minimum", `Int 1);
+          ("maximum", `Int 100);
+          ("default", `Int 50);
+        ]);
       ]);
     ];
   };
@@ -468,7 +475,15 @@ offline (no heartbeat >10 min). Returns orphan list with assignee and last_seen.
 Use keeper_task_force_release to reassign orphaned tasks.";
     input_schema = `Assoc [
       ("type", `String "object");
-      ("properties", `Assoc []);
+      ("properties", `Assoc [
+        ("limit", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Max orphans to return (default: 20)");
+          ("minimum", `Int 1);
+          ("maximum", `Int 50);
+          ("default", `Int 20);
+        ]);
+      ]);
     ];
   };
   {

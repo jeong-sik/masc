@@ -333,6 +333,9 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
       Log.Server.error "metrics_flush fiber crashed: %s"
         (Printexc.to_string exn));
   Shutdown.register ~name:"metrics_flush" ~priority:30 Metrics_store_eio.flush_pending;
+  (* Deterministic output budget enforcement: truncate oversized tool outputs
+     with structured metadata before metrics/OTEL hooks see them. *)
+  Tool_output_validation.install ();
   (* Tool metrics JSONL persistence: flush buffered records to disk periodically.
      Also registers a post-hook so every tool call is enqueued for persistence. *)
   Tool_dispatch.register_post_hook (fun result ->

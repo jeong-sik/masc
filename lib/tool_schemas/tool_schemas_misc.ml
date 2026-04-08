@@ -143,6 +143,8 @@ Use from the answering side after a prior masc_webrtc_offer call.";
           ("type", `String "integer");
           ("description", `String "Number of top tools to return (default: 20)");
           ("default", `Int 20);
+          ("minimum", `Int 1);
+          ("maximum", `Int 100);
         ]);
       ]);
     ];
@@ -177,6 +179,8 @@ Uses configured web-search providers with structured fallback behavior and retur
           ("type", `String "integer");
           ("description", `String "Maximum number of results to return (default 5, max 10)");
           ("default", `Int 5);
+          ("minimum", `Int 1);
+          ("maximum", `Int 10);
         ]);
       ]);
       ("required", `List [`String "query"]);

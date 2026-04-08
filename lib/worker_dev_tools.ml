@@ -261,7 +261,7 @@ let is_write_operation cmd =
   match parts with
   | "git" :: sub :: _ ->
     List.mem sub ["push"; "commit"; "merge"; "rebase"; "reset";
-                  "checkout"; "branch"; "tag"; "stash"]
+                  "checkout"; "branch"; "tag"; "stash"; "clone"; "init"]
   | "dune" :: sub :: _ ->
     List.mem sub ["clean"; "promote"]
   | "make" :: sub :: _ ->

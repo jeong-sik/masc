@@ -299,9 +299,16 @@ export function ContextChart({ keeper }: { keeper: Keeper }) {
           <line x1="${x.toFixed(1)}" y1="${pad}" x2="${x.toFixed(1)}" y2="${H - pad}" stroke="#ef4444" stroke-width="1.5" opacity="0.7"/>
         `)}
         <polyline points="${polyline}" fill="none" stroke="${lineColor}" stroke-width="1.5"/>
-        ${pts.filter(({ p }) => p.is_compaction).map(({ x, y }) => html`
-          <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2.5" fill="#a855f7"/>
-        `)}
+        ${pts.filter(({ p }) => p.is_compaction).map(({ x, y, p }) => {
+          const trigger = p.compaction_trigger ?? 'unknown'
+          const saved = p.compaction_saved_tokens ?? 0
+          const tip = saved > 0 ? `${trigger} · ${formatTokens(saved)} saved` : trigger
+          return html`
+            <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3" fill="#a855f7" style="cursor:pointer">
+              <title>${tip}</title>
+            </circle>
+          `
+        })}
       </svg>
       <span class="text-sm font-semibold tabular-nums text-[var(--text-strong)]">${lastRatio.toFixed(1)}%</span>
     </div>`

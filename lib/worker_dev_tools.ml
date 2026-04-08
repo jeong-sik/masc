@@ -636,6 +636,58 @@ let is_gh_pr_merge cmd =
   | "pr" :: rest -> has_positional_subcmd [ "merge" ] rest
   | _ -> false
 
+let gh_raw_parts cmd =
+  String.split_on_char ' ' (String.trim cmd)
+  |> List.filter (fun s -> s <> "")
+
+let gh_option_takes_value tok =
+  let tok = String.lowercase_ascii tok in
+  not (contains_substring tok "=")
+  && List.mem tok
+       [ "-r"; "--repo";
+         "-b"; "--body";
+         "-f"; "--body-file";
+         "-t"; "--subject";
+         "--match-head-commit";
+         "--author-email" ]
+
+(** Return the explicit target passed to [gh pr merge], if any.
+    Supports numeric PR ids, branch names, and PR URLs. Returns [None]
+    when the merge command targets the current branch's PR. *)
+let gh_pr_merge_target cmd =
+  let raw_parts = gh_raw_parts cmd in
+  let lower_parts = List.map String.lowercase_ascii raw_parts in
+  let rec drop_until_merge raw lower =
+    match raw, lower with
+    | _raw_hd :: raw_tl, lower_hd :: lower_tl ->
+        if lower_hd = "merge" then Some (raw_tl, lower_tl)
+        else drop_until_merge raw_tl lower_tl
+    | _ -> None
+  in
+  let rec find_target raw lower =
+    match raw, lower with
+    | [], [] -> None
+    | raw_hd :: raw_tl, lower_hd :: lower_tl ->
+        if String.length lower_hd > 0 && lower_hd.[0] = '-' then
+          if gh_option_takes_value lower_hd then
+            (match raw_tl, lower_tl with
+             | _value :: raw_rest, _value_lower :: lower_rest ->
+                 find_target raw_rest lower_rest
+             | _ -> None)
+          else
+            find_target raw_tl lower_tl
+        else
+          Some raw_hd
+    | _ -> None
+  in
+  match lower_parts with
+  | "pr" :: _ -> (
+      match drop_until_merge raw_parts lower_parts with
+      | Some (raw_after_merge, lower_after_merge) ->
+          find_target raw_after_merge lower_after_merge
+      | None -> None)
+  | _ -> None
+
 (** Check if a gh command is a dangerous irreversible operation (delete,
     archive, transfer). Always gated regardless of preset. *)
 let is_gh_dangerous_operation cmd =

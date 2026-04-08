@@ -68,26 +68,29 @@ let handle_keeper_github
          cross-agent review. Ref: #5906 *)
       else if Worker_dev_tools.is_gh_pr_merge gh_raw then (
         let root = Keeper_alerting_path.project_root_of_config config in
-        (* Extract PR number from command args *)
-        let pr_number =
-          let parts = String.split_on_char ' ' gh_raw in
-          List.find_opt (fun s ->
-            String.length s > 0 && s.[0] >= '0' && s.[0] <= '9') parts
+        let review_check =
+          let merge_target = Worker_dev_tools.gh_pr_merge_target gh_raw in
+          let target_arg =
+            match merge_target with
+            | Some target -> " " ^ Filename.quote target
+            | None -> ""
+          in
+          let check_cmd = Printf.sprintf
+            "cd %s && gh pr view%s --json reviews --jq '.reviews | map(select(.state != \"DISMISSED\")) | length' 2>&1"
+            (Filename.quote root) target_arg
+          in
+          let st, out = Process_eio.run_argv_with_status ~timeout_sec:10.0
+            [ "/bin/zsh"; "-lc"; check_cmd ]
+          in
+          if st = Unix.WEXITED 0 then
+            let count = String.trim out in
+            if count = "0" || count = "" then `Blocked_no_reviews
+            else `Allowed
+          else
+            `Check_failed (String.trim out)
         in
-        let review_ok = match pr_number with
-          | None -> true (* no PR number found — let gh handle the error *)
-          | Some num ->
-            let check_cmd = Printf.sprintf
-              "cd %s && gh pr view %s --json reviews --jq '[.[] | select(.state != \"DISMISSED\")] | length' 2>&1"
-              (Filename.quote root) num in
-            let st, out = Process_eio.run_argv_with_status ~timeout_sec:10.0
-              [ "/bin/zsh"; "-lc"; check_cmd ] in
-            if st = Unix.WEXITED 0 then
-              let count = String.trim out in
-              count <> "0" && count <> ""
-            else true (* gh failed — let the merge attempt proceed and fail naturally *)
-        in
-        if not review_ok then (
+        match review_check with
+        | `Blocked_no_reviews ->
           Log.Keeper.warn "keeper_github merge-review-gate: blocked %s (keeper=%s, no reviews)"
             gh_raw meta.name;
           Yojson.Safe.to_string
@@ -100,9 +103,28 @@ let handle_keeper_github
                        Every PR requires at least one cross-agent review before merge. \
                        Post a review first, then retry." )
                 ; "cmd", `String ("gh " ^ gh_raw)
-                ]))
-        else (
-          let gh_cmd = "gh " ^ (if cmd <> "" then cmd else String.concat " " (List.map Filename.quote gh_args)) in
+                ])
+        | `Check_failed err ->
+          Log.Keeper.warn
+            "keeper_github merge-review-gate: verification failed %s (keeper=%s, err=%s)"
+            gh_raw meta.name (if err = "" then "<empty>" else err);
+          Yojson.Safe.to_string
+            (`Assoc
+                [ "ok", `Bool false
+                ; "error", `String "merge_review_check_failed"
+                ; ( "reason"
+                  , `String
+                      "Cannot verify PR review state for this merge target. \
+                       Resolve the gh pr view failure or request operator approval, \
+                       then retry." )
+                ; "details", `String err
+                ; "cmd", `String ("gh " ^ gh_raw)
+                ])
+        | `Allowed ->
+          let gh_cmd =
+            "gh "
+            ^ (if cmd <> "" then cmd else String.concat " " (List.map Filename.quote gh_args))
+          in
           let shell_cmd = Printf.sprintf "cd %s && %s 2>&1" (Filename.quote root) gh_cmd in
           let st, out = Process_eio.run_argv_with_status ~timeout_sec [ "/bin/zsh"; "-lc"; shell_cmd ] in
           Yojson.Safe.to_string
@@ -110,7 +132,7 @@ let handle_keeper_github
                 [ "ok", `Bool (st = Unix.WEXITED 0)
                 ; "status", Keeper_alerting_path.process_status_to_json st
                 ; "output", `String out
-                ])))
+                ]))
       else (
         let gh_cmd =
           if cmd <> ""

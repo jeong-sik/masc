@@ -5,12 +5,13 @@ import { Tools } from './tools'
 import { Autoresearch } from './autoresearch'
 import { HarnessHealth } from './harness-health'
 import { LabInspector } from './lab-inspector'
+import { ToolQualityPanel } from './tool-quality-panel'
 
-type LabSection = 'tools' | 'autoresearch' | 'harness' | 'inspector'
+type LabSection = 'tools' | 'autoresearch' | 'harness' | 'inspector' | 'tool-quality'
 
 function currentSection(): LabSection {
   const section = route.value.params.section
-  if (section === 'autoresearch' || section === 'harness' || section === 'inspector') {
+  if (section === 'autoresearch' || section === 'harness' || section === 'inspector' || section === 'tool-quality') {
     return section
   }
   return 'tools'
@@ -37,6 +38,12 @@ export function Lab() {
 
       ${section === 'inspector' ? html`
         <${LabInspector} />
+      ` : null}
+
+      ${section === 'tool-quality' ? html`
+        <${Card} title="도구 품질" class="section mb-4">
+          <${ToolQualityPanel} />
+        <//>
       ` : null}
     </div>
   `

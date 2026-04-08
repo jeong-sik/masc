@@ -26,6 +26,7 @@ type t = {
   masc_groups : (string, string list) Hashtbl.t;
   presets : (string, preset_def) Hashtbl.t;
   workflow_presets : string list;
+  shell_write_presets : string list;
 }
 
 (* ── TOML parsing helpers ─────────────────────────────────────────── *)
@@ -177,6 +178,9 @@ let load ~base_path : (t, string) result =
         let workflow_presets =
           toml_string_list_at doc "permissions" "workflow_presets"
         in
+        let shell_write_presets =
+          toml_string_list_at doc "permissions" "shell_write_presets"
+        in
         (* Validate that each preset's group references are defined *)
         let ref_errors =
           Hashtbl.fold (fun preset_name (def : preset_def) acc ->
@@ -198,7 +202,7 @@ let load ~base_path : (t, string) result =
         | [] ->
           Log.Keeper.info "tool_policy_config: loaded %d groups, %d masc_groups, %d presets from %s"
             (Hashtbl.length groups) (Hashtbl.length masc_groups) (Hashtbl.length presets) path;
-          Ok { groups; masc_groups; presets; workflow_presets })
+          Ok { groups; masc_groups; presets; workflow_presets; shell_write_presets })
 
 (* ── Resolution ───────────────────────────────────────────────────── *)
 
@@ -264,3 +268,6 @@ let all_masc_tools (config : t) : string list =
 
 let allows_workflow (config : t) (preset_name : string) : bool =
   List.mem preset_name config.workflow_presets
+
+let allows_shell_write (config : t) (preset_name : string) : bool =
+  List.mem preset_name config.shell_write_presets

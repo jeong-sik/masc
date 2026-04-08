@@ -44,6 +44,13 @@ let allows_workflow_for_preset (preset : tool_preset) : bool =
     Keeper_tool_policy_config.allows_workflow cfg
       (preset_name_of_tool_preset preset)
 
+let allows_shell_write_for_preset (preset : tool_preset) : bool =
+  match !policy_config with
+  | None -> false
+  | Some cfg ->
+    Keeper_tool_policy_config.allows_shell_write cfg
+      (preset_name_of_tool_preset preset)
+
 (* ── Denied-tool set (O(1) lookup) ────────────────────────────── *)
 
 let keeper_denied_set : (string, unit) Hashtbl.t =

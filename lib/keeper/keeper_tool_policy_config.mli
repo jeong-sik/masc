@@ -51,4 +51,8 @@ val group_names : t -> string list
     (pr merge, pr close, etc.) as configured in [permissions.workflow_presets]. *)
 val allows_workflow : t -> string -> bool
 
+(** Check if a preset allows shell write operations
+    as configured in [permissions.shell_write_presets]. *)
+val allows_shell_write : t -> string -> bool
+
 val resolve_group : t -> string -> string list option

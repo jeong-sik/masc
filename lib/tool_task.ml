@@ -287,7 +287,9 @@ let resolve_agent_preset config agent_name =
         Some (String.sub c plen (String.length c - plen))
       else None
     ) caps
-  with _ -> None
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | _ -> None
 
 (** Build a task_filter closure that checks required_preset against the agent's preset. *)
 let preset_task_filter ~agent_preset (task : Types.task) =

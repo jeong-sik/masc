@@ -24,7 +24,7 @@ let normalize_spawn_agent agent_name =
 let is_local_spawn_agent agent_name =
   match normalize_spawn_agent agent_name with
   | "default" -> true
-  | "llama" -> true
+  | "llama" -> true (* Stable provider name — see Provider_adapter.cn_llama *)
   | _ -> false
 
 let legacy_spawn_fields = [ "spawn_agent"; "spawn_model" ]

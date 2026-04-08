@@ -44,8 +44,13 @@ let risk_level_of_contract_risk = function
 
 (* ── Risk Assessment ────────────────────────────────────────── *)
 
-(** Pattern sets for risk classification.
-    Each pattern is checked against the tool name (case-insensitive substring). *)
+(** {2 Risk pattern sets — security-critical SSOT}
+
+    Each pattern is checked against the tool name (case-insensitive substring).
+    These are intentionally in code (not TOML) because changing risk
+    classification is a security policy change that requires code review.
+    Governance LEVEL (development/production/enterprise/paranoid) is the
+    configurable dial — see [MASC_GOVERNANCE_LEVEL] env var. *)
 
 (** Explicit per-tool risk overrides.
     Checked BEFORE pattern matching. Use this to correct misclassifications

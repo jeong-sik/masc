@@ -58,6 +58,19 @@ let test_parse_iso_timestamp_matches_canonical_utc () =
         (abs_float (actual -. expected) < 0.001)
   | _ -> Alcotest.fail "expected both parsers to accept UTC timestamp"
 
+let test_parse_iso_timestamp_fractional_utc_normalizes () =
+  let ts = "2026-04-08T12:38:15.123Z" in
+  match
+    Lib.Dashboard_labels.parse_iso_timestamp ts,
+    Types.parse_iso8601_opt "2026-04-08T12:38:15Z"
+  with
+  | Some actual, Some expected ->
+      Alcotest.(check bool) "fractional UTC normalizes to canonical parser" true
+        (abs_float (actual -. expected) < 0.001)
+  | _ ->
+      Alcotest.fail
+        "expected dashboard parser to normalize fractional UTC timestamp"
+
 let test_idle_agent () =
   let now = Unix.gettimeofday () in
   let result =
@@ -258,6 +271,7 @@ let () =
           ("working agent", `Quick, test_working_agent);
           ("stuck agent", `Quick, test_stuck_agent);
           ("utc parser matches canonical", `Quick, test_parse_iso_timestamp_matches_canonical_utc);
+          ("fractional utc normalizes", `Quick, test_parse_iso_timestamp_fractional_utc_normalizes);
           ("idle agent", `Quick, test_idle_agent);
           ("offline agent", `Quick, test_offline_agent);
         ] );

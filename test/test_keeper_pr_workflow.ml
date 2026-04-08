@@ -357,9 +357,9 @@ let test_valid_branch_with_slash_accepted () =
     check bool "error is NOT branch_contains_invalid_chars"
       true (error <> "branch_contains_invalid_chars"))
 
-(* --- Branch slash → task_id hyphen conversion --- *)
+(* --- Branch slash → worktree id hyphen conversion --- *)
 
-let test_branch_slash_converted_to_hyphen_in_task_id () =
+let test_branch_slash_converted_to_hyphen_in_worktree_id () =
   with_room (fun config ->
     let meta = make_meta_with_preset "delivery" in
     let args = `Assoc
@@ -372,31 +372,32 @@ let test_branch_slash_converted_to_hyphen_in_task_id () =
     let result = call_tool config meta "keeper_pr_workflow" args in
     let json = parse_json result in
     (* Branch validation should pass (slash is valid in branch names).
-       The error should be at worktree_create step, NOT
-       "Invalid task ID: task_id cannot contain path separators". *)
+       The derived worktree path should replace slashes with hyphens, so the
+       failure (in a non-git room) must happen at worktree_create, not path
+       validation. *)
     let error = json_string "error" json in
     check bool "error does NOT mention path separators"
       false (String_util.contains_substring_ci error "path separator"))
 
-(* --- Clone step failure propagation --- *)
+(* --- Worktree step failure propagation --- *)
 
-let test_clone_failure_propagates () =
+let test_worktree_failure_propagates () =
   with_room (fun config ->
     let meta = make_meta_with_preset "delivery" in
     let result = call_tool config meta "keeper_pr_workflow" valid_pr_args in
     let json = parse_json result in
-    (* Test room is not a git repo, so playground_clone fails.
+    (* Test room is not a git repo, so worktree_create fails.
        The result should be ok=false with a meaningful error. *)
     check bool "ok is false" false (json_bool "ok" json);
     let steps = json_string "steps" json in
-    check bool "steps contains playground_clone"
+    check bool "steps contains worktree_create"
       true (try ignore (Str.search_forward
-        (Str.regexp_string "playground_clone") steps 0); true
+        (Str.regexp_string "worktree_create") steps 0); true
         with Not_found -> false);
     let error = json_string "error" json in
-    check bool "error mentions clone"
+    check bool "error mentions worktree or git repo"
       true (try ignore (Str.search_forward
-        (Str.regexp_string "clone") (String.lowercase_ascii error) 0); true
+        (Str.regexp "worktree\\|git repository") (String.lowercase_ascii error) 0); true
         with Not_found -> false))
 
 (* --- Task lifecycle: claim → done --- *)
@@ -471,10 +472,10 @@ let test_second_claim_on_single_task_returns_no_tasks () =
               (Str.regexp_string "no tasks") lower 0); true
             with Not_found -> false))
 
-(* --- Integration: playground clone on real git repo --- *)
+(* --- Integration: worktree workflow on real git repo --- *)
 
 (** Run a test using the actual masc-mcp repo root as the room base_path.
-    This exercises the real playground clone path instead of the temp-dir
+    This exercises the real worktree path instead of the temp-dir
     fallback that non-git rooms hit. *)
 let with_real_repo_room f =
   Eio_main.run @@ fun env ->
@@ -505,7 +506,22 @@ let with_real_repo_room f =
       (try ignore (Room.init config ~agent_name:(Some "test-integration")) with _ -> ());
       f config repo_root)
 
-let test_playground_clone_creates_clone_and_commits () =
+let derive_worktree_id keeper_name branch =
+  branch
+  |> String.to_seq
+  |> Seq.map (fun c -> if c = '/' || c = '\\' then '-' else c)
+  |> String.of_seq
+  |> Printf.sprintf "%s-%s" keeper_name
+
+let cleanup_test_branch repo_root branch =
+  ignore (Sys.command
+    (Printf.sprintf "cd %s && git worktree prune >/dev/null 2>&1 && git branch -D %s >/dev/null 2>&1"
+      (Filename.quote repo_root) (Filename.quote branch)));
+  ignore (Sys.command
+    (Printf.sprintf "cd %s && git push origin --delete %s >/dev/null 2>&1"
+      (Filename.quote repo_root) (Filename.quote branch)))
+
+let test_worktree_create_writes_and_cleans_up () =
   with_real_repo_room (fun config repo_root ->
     let meta = make_meta_with_preset "delivery" in
     let test_branch = Printf.sprintf "test/integration-%d" (Random.int 100_000) in
@@ -513,40 +529,86 @@ let test_playground_clone_creates_clone_and_commits () =
       [ "branch", `String test_branch
       ; "file_path", `String "test-integration-verify.txt"
       ; "file_content", `String "integration test content"
-      ; "commit_message", `String "test: integration verify playground clone"
+      ; "commit_message", `String "test: integration verify worktree workflow"
       ; "pr_title", `String "test: integration verify"
       ] in
     let result = call_tool config meta "keeper_pr_workflow" args in
     let json = parse_json result in
     let steps = json_string "steps" json in
     let error = json_string "error" json in
-    (* playground_clone step must succeed *)
-    check bool "playground_clone step present"
-      true (String_util.contains_substring_ci steps "playground_clone");
-    check bool "playground_clone ok"
-      true (String_util.contains_substring_ci steps "playground_clone: ok");
+    (* worktree_create step must succeed *)
+    check bool "worktree_create step present"
+      true (String_util.contains_substring_ci steps "worktree_create");
+    check bool "worktree_create ok"
+      true (String_util.contains_substring_ci steps "worktree_create: ok");
     (* file_write step must succeed *)
     check bool "file_write ok"
       true (String_util.contains_substring_ci steps "file_write: ok");
-    (* git_commit_push will fail at push (no network in CI / test branch
-       doesn't exist on remote yet is fine) but commit should succeed.
-       If error mentions "git push" it means clone+write+commit all passed. *)
-    let commit_passed =
-      String_util.contains_substring_ci steps "git_commit_push: ok"
+    (* After file_write, either version_truth_check may fail due repo state,
+       or git_commit_push may run and fail later at push. Both prove the
+       worktree path executed correctly. *)
+    let reached_post_write_gate =
+      String_util.contains_substring_ci steps "version_truth_check: ok"
+      || String_util.contains_substring_ci error "version truth check failed"
+      || String_util.contains_substring_ci steps "git_commit_push: ok"
       || String_util.contains_substring_ci error "git push"
     in
-    check bool "commit reached (clone+write+commit passed)" true commit_passed;
-    (* Verify clone was cleaned up (step 5 runs even on push failure) *)
-    let playground_path = Filename.concat repo_root
-      (Keeper_alerting_path.playground_path_of_keeper meta.name) in
-    let clone_path = Filename.concat playground_path (Filename.basename repo_root) in
-    check bool "clone cleaned up"
-      false (Sys.file_exists clone_path);
+    check bool "workflow reached post-write gate" true reached_post_write_gate;
+    (* Verify worktree was cleaned up (step 5 runs even on failure). *)
+    let worktree_id = derive_worktree_id meta.name test_branch in
+    let worktree_path = Filename.concat repo_root (Filename.concat ".worktrees" worktree_id) in
+    check bool "worktree cleaned up"
+      false (Sys.file_exists worktree_path);
     (* Clean up remote branch if push somehow succeeded *)
     if String_util.contains_substring_ci steps "git_commit_push: ok" then
-      ignore (Sys.command
-        (Printf.sprintf "cd %s && git push origin --delete %s 2>/dev/null"
-          (Filename.quote repo_root) (Filename.quote test_branch))))
+      cleanup_test_branch repo_root test_branch)
+
+let test_existing_worktree_path_is_retried_safely () =
+  with_real_repo_room (fun config repo_root ->
+    let meta = make_meta_with_preset "delivery" in
+    let test_branch = Printf.sprintf "test/retry-%d" (Random.int 100_000) in
+    let worktree_id = derive_worktree_id meta.name test_branch in
+    let worktree_path = Filename.concat repo_root (Filename.concat ".worktrees" worktree_id) in
+    Fun.protect
+      ~finally:(fun () ->
+        ignore (Sys.command
+          (Printf.sprintf "cd %s && git worktree remove --force %s >/dev/null 2>&1"
+            (Filename.quote repo_root) (Filename.quote worktree_path)));
+        cleanup_test_branch repo_root test_branch)
+      (fun () ->
+        let seed_rc = Sys.command
+          (Printf.sprintf "cd %s && git fetch origin >/dev/null 2>&1 && git worktree add -b %s %s %s >/dev/null 2>&1"
+            (Filename.quote repo_root)
+            (Filename.quote test_branch)
+            (Filename.quote worktree_path)
+            (Filename.quote "origin/main")) in
+        check int "seed worktree created" 0 seed_rc;
+        let args = `Assoc
+          [ "branch", `String test_branch
+          ; "file_path", `String "test-integration-retry.txt"
+          ; "file_content", `String "integration retry content"
+          ; "commit_message", `String "test: integration retry worktree workflow"
+          ; "pr_title", `String "test: integration retry"
+          ] in
+        let result = call_tool config meta "keeper_pr_workflow" args in
+        let json = parse_json result in
+        let steps = json_string "steps" json in
+        let error = json_string "error" json in
+        check bool "worktree_create ok after retry"
+          true (String_util.contains_substring_ci steps "worktree_create: ok");
+        check bool "reused existing branch"
+          true (String_util.contains_substring_ci steps "reused existing branch");
+        check bool "file_write ok after retry"
+          true (String_util.contains_substring_ci steps "file_write: ok");
+        let reached_post_write_gate =
+          String_util.contains_substring_ci steps "version_truth_check: ok"
+          || String_util.contains_substring_ci error "version truth check failed"
+          || String_util.contains_substring_ci steps "git_commit_push: ok"
+          || String_util.contains_substring_ci error "git push"
+        in
+        check bool "retry workflow reached post-write gate" true reached_post_write_gate;
+        check bool "retry worktree cleaned up"
+          false (Sys.file_exists worktree_path)))
 
 (* --- keeper_bash branch-switch guard --- *)
 
@@ -642,11 +704,11 @@ let () =
       ; test_case "ampersand rejected" `Quick test_branch_with_ampersand_rejected
       ; test_case "slash accepted" `Quick test_valid_branch_with_slash_accepted
       ]
-    ; "task_id_derivation",
-      [ test_case "slash to hyphen" `Quick test_branch_slash_converted_to_hyphen_in_task_id
+    ; "worktree_id_derivation",
+      [ test_case "slash to hyphen" `Quick test_branch_slash_converted_to_hyphen_in_worktree_id
       ]
     ; "step_propagation",
-      [ test_case "clone failure" `Quick test_clone_failure_propagates
+      [ test_case "worktree failure" `Quick test_worktree_failure_propagates
       ]
     ; "task_lifecycle",
       [ test_case "claim then done" `Quick test_task_claim_then_done_lifecycle
@@ -666,6 +728,7 @@ let () =
       ; test_case "status allowed" `Quick test_bash_git_status_allowed
       ]
     ; "integration",
-      [ test_case "playground clone e2e" `Slow test_playground_clone_creates_clone_and_commits
+      [ test_case "worktree workflow e2e" `Slow test_worktree_create_writes_and_cleans_up
+      ; test_case "existing worktree retried safely" `Slow test_existing_worktree_path_is_retried_safely
       ]
     ]

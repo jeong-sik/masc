@@ -5,6 +5,7 @@
 import { html } from 'htm/preact'
 import { navigate } from '../router'
 import type { Keeper, PipelineStage } from '../types/core'
+import { CONTEXT_RATIO_CRITICAL, CONTEXT_RATIO_FLEET_WARN } from '../config/constants'
 
 // ── Pipeline stage styling ────────────────────────────
 
@@ -135,7 +136,7 @@ function FleetSummary({ keepers }: { keepers: Keeper[] }) {
       ` : null}
       <span class="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-[var(--white-4)] border border-[var(--white-6)]">
         <span class="text-[var(--text-dim)]">평균 컨텍스트</span>
-        <span class="font-mono font-medium ${avgCtx > 0.85 ? 'text-[var(--bad)]' : avgCtx > 0.6 ? 'text-[var(--warn)]' : 'text-[var(--text-strong)]'}">${(avgCtx * 100).toFixed(0)}%</span>
+        <span class="font-mono font-medium ${avgCtx > CONTEXT_RATIO_CRITICAL ? 'text-[var(--bad)]' : avgCtx > CONTEXT_RATIO_FLEET_WARN ? 'text-[var(--warn)]' : 'text-[var(--text-strong)]'}">${(avgCtx * 100).toFixed(0)}%</span>
       </span>
       ${totalTools > 0 ? html`
         <span class="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-[var(--white-4)] border border-[var(--white-6)]">

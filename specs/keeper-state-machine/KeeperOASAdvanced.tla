@@ -95,10 +95,23 @@ FiberHandlesCancellation ==
     /\ context_polluted' = FALSE \* Rollback context via Switch.on_release or try/with
     /\ UNCHANGED <<sys_stop_requested, cascade_turn>>
 
+\* 9. [BUG MODEL] Catch-all absorbs cancellation — fiber returns Error instead
+\*     of propagating Cancelled to the parent switch. This creates a zombie:
+\*     the parent believes the child completed, but the cancel signal is lost.
+CancelledAbsorbed ==
+    /\ fiber_state = "Cancelling"
+    /\ fiber_state' = "Terminated"
+    /\ oas_api_state' = "Idle"
+    \* BUG: keeper_decision becomes a normal result instead of fallback
+    /\ keeper_decision' = "ExecuteSelf"
+    /\ context_polluted' = TRUE  \* Context NOT rolled back — pollution persists
+    /\ UNCHANGED <<sys_stop_requested, cascade_turn>>
+
 TerminatedStutter ==
     /\ fiber_state = "Terminated"
     /\ UNCHANGED vars
 
+\* Correct Next: only well-formed transitions (production code).
 Next ==
     \/ GlobalStopPreempts
     \/ EioTimeoutTriggered
@@ -109,6 +122,13 @@ Next ==
     \/ FinishCascade
     \/ FiberHandlesCancellation
     \/ TerminatedStutter
+
+\* Buggy Next: includes CancelledAbsorbed to demonstrate that
+\* CancelledNeverAbsorbed catches the violation. Use NextBuggy in cfg
+\* to reproduce the bug scenario for regression testing.
+NextBuggy ==
+    \/ Next
+    \/ CancelledAbsorbed
 
 Fairness ==
     \* Weak Fairness for progress operations
@@ -121,6 +141,8 @@ Fairness ==
 
 Spec == Init /\ [][Next]_vars /\ Fairness
 
+SpecBuggy == Init /\ [][NextBuggy]_vars /\ Fairness
+
 \* ── Safety Properties ─────────────────────────────────────
 
 \* 1. A terminated fiber cannot leave a zombie OAS fetch running in the background.
@@ -128,6 +150,14 @@ NoZombieFibers == ((fiber_state = "Terminated") => ~(oas_api_state = "Fetching")
 
 \* 2. If a cascade falls back (due to error or cancel), the context must be rolled back cleanly.
 AtomicCascadeFallback == []( (fiber_state = "Terminated" /\ keeper_decision = "AutonomyFallback") => (context_polluted = FALSE) )
+
+\* 3. Cancellation must never be absorbed — a terminated fiber with polluted
+\*    context must never hold a normal decision (ExecuteSelf/Delegate).
+\*    State predicate (no temporal ops) — usable as INVARIANT.
+\*    Violation means a catch-all swallowed Eio.Cancel.Cancelled.
+CancelledNeverAbsorbed ==
+    (fiber_state = "Terminated" /\ context_polluted = TRUE)
+      => (keeper_decision /= "ExecuteSelf" /\ keeper_decision /= "Delegate")
 
 \* ── Liveness Properties ───────────────────────────────────
 

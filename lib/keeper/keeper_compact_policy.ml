@@ -15,6 +15,14 @@ open Keeper_context_core
     prevents context overflow regardless of cooldown state (#5634). *)
 let emergency_compact_ratio_threshold = 0.8
 
+(** Tool-heavy compaction thresholds.
+    When message count exceeds [tool_heavy_msg_threshold] AND context
+    ratio exceeds [tool_heavy_ratio_floor], trigger compaction to
+    stub old tool results. Prevents slow inference on local LLMs
+    when many tool calls accumulate without hitting other gates. *)
+let tool_heavy_msg_threshold = 40
+let tool_heavy_ratio_floor = 0.15
+
 let compaction_policy_of_keeper (meta : keeper_meta) : float * int * int =
   (meta.compaction.ratio_gate, meta.compaction.message_gate, meta.compaction.token_gate)
 
@@ -50,13 +58,12 @@ let compact_if_needed
   (* Tool-heavy gate: when accumulated tool results bloat context
      without hitting ratio/message/token gates, stub old tool results
      to prevent slow inference on local LLMs (#5802).
-     Threshold: messages > 10 * turns_since_last_compaction.
-     This catches the pattern where each turn adds 2-4 messages
-     (user + assistant + tool_use + tool_result) without compaction. *)
+     Bypasses reflection cooldown like the emergency ratio gate —
+     tool bloat is an operational risk, not a content concern. *)
   let tool_heavy =
-    reflection_ready
-    && msg_count > 40
-    && ratio > 0.15
+    (reflection_ready || emergency)
+    && msg_count > tool_heavy_msg_threshold
+    && ratio > tool_heavy_ratio_floor
   in
   let trigger_reason =
     if not reflection_ready then

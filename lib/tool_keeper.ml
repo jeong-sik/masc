@@ -497,7 +497,7 @@ let maybe_bootstrap_existing_keepalives ctx ~name ~args =
     Skipped for creation tools where the caller's base_path is authoritative. *)
 let resolve_ctx ctx ~name args =
   match name with
-  | "masc_keeper_up" | "masc_keeper_create_from_persona" -> ctx
+  | "masc_keeper_up" | "masc_keeper_create_from_persona" | "masc_persona_list" -> ctx
   | _ ->
     let keeper_name = get_string args "name" "" in
     let config = Keeper_registry.resolve_config ctx.config keeper_name in

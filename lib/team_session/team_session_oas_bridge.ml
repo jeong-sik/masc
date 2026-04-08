@@ -573,6 +573,7 @@ let planned_worker_to_entry_with_state
     ~(masc_tools : Types.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
     ~(success_by_agent : (string, bool) Hashtbl.t)
+    ~(team_ctx : Team_context.team_context)
     ?(delivery_contract : Team_session_types.delivery_contract option)
     (pw : Team_session_types.planned_worker)
   : Swarm.Swarm_types.agent_entry =
@@ -593,9 +594,6 @@ let planned_worker_to_entry_with_state
       (fun (tool : Types.tool_schema) ->
         List.mem tool.name scoped_tool_names)
       masc_tools
-  in
-  let team_ctx =
-    Team_context.build ~base_path:config.base_path ~team_session_id:session_id
   in
   let system_prompt =
     Prompt_composer.compose [
@@ -703,8 +701,12 @@ let planned_worker_to_entry
     (pw : Team_session_types.planned_worker)
   : Swarm.Swarm_types.agent_entry =
   let success_by_agent = Hashtbl.create 1 in
+  let team_ctx =
+    try Team_context.build ~base_path:config.base_path ~team_session_id:session_id
+    with _ -> Team_context.empty
+  in
   planned_worker_to_entry_with_state ~config ~session_id ~session_cascade ~masc_tools
-    ~dispatch ~success_by_agent ?delivery_contract:None pw
+    ~dispatch ~success_by_agent ~team_ctx ?delivery_contract:None pw
 
 (* ── session -> swarm_config ───────────────────────────────────── *)
 
@@ -717,11 +719,16 @@ let session_to_swarm_config
     (session : Team_session_types.session)
   : Swarm.Swarm_types.swarm_config =
   let success_by_agent = Hashtbl.create 8 in
+  let team_ctx =
+    try Team_context.build ~base_path:config.base_path
+          ~team_session_id:session.session_id
+    with _ -> Team_context.empty
+  in
   let entries =
     List.map
       (planned_worker_to_entry_with_state ~config ~session_id:session.session_id
          ~session_cascade:session.model_cascade ~masc_tools ~dispatch
-         ~success_by_agent ?delivery_contract:session.delivery_contract)
+         ~success_by_agent ~team_ctx ?delivery_contract:session.delivery_contract)
       session.planned_workers
   in
   List.iter
@@ -765,13 +772,7 @@ let session_to_swarm_config
               (Printexc.to_string ex);
             entry_count)
   in
-  let collaboration_context =
-    let team_ctx =
-      Team_context.build ~base_path:config.base_path
-        ~team_session_id:session.session_id
-    in
-    Some (Team_context.to_json team_ctx)
-  in
+  let collaboration_context = Some (Team_context.to_json team_ctx) in
   { entries; mode;
     convergence = make_convergence_metric ~entry_count success_by_agent;
     max_parallel = max 1 entry_count;

@@ -78,7 +78,7 @@ let handle_keeper_github
           (`Assoc
               [ "ok", `Bool (st = Unix.WEXITED 0)
               ; "status", Keeper_alerting_path.process_status_to_json st
-              ; "output", `String (Keeper_alerting_path.truncate_tool_output out)
+              ; "output", `String out
               ])))
 ;;
 

@@ -155,10 +155,6 @@ let resolve_keeper_read_path ~(config : Room.config) ~(raw_path : string)
         (Printf.sprintf "path_outside_project_root: %s (root=%s)"
            target_norm root_norm)
 
-let truncate_tool_output ?(max_len = 12000) (s : string) : string =
-  if String.length s <= max_len then s
-  else String.sub s 0 max_len ^ "\n...[truncated]"
-
 let process_status_to_json (st : Unix.process_status) : Yojson.Safe.t =
   match st with
   | Unix.WEXITED code ->

@@ -461,45 +461,33 @@ let test_normalize_failure_plain_text () =
   check bool "ok is false" false (json_bool "ok" json);
   check string "error is raw text" raw (json_string "error" json)
 
-(* ── Tool_output_validation tests ──────────────────────────── *)
+(* ── Tool_output_validation tests (memory cap) ──────────────── *)
 
-let test_output_validation_short_unchanged () =
+let test_cap_short_unchanged () =
   let short = "hello world" in
-  let result = Tool_output_validation.validate_and_truncate ~tool_name:"test" short in
+  let result = Tool_output_validation.cap short in
   check string "short output unchanged" short result
 
-let test_output_validation_exact_limit_unchanged () =
-  Tool_output_validation.set_budget ~tool_name:"test_exact" ~max_chars:100;
-  let exact = String.make 100 'x' in
-  let result = Tool_output_validation.validate_and_truncate ~tool_name:"test_exact" exact in
+let test_cap_exact_limit_unchanged () =
+  let exact = String.make Tool_output_validation.max_output_chars 'x' in
+  let result = Tool_output_validation.cap exact in
   check string "exact limit unchanged" exact result
 
-let test_output_validation_over_budget_truncates () =
-  Tool_output_validation.set_budget ~tool_name:"test_over" ~max_chars:200;
-  let long = String.make 500 'a' in
-  let result = Tool_output_validation.validate_and_truncate ~tool_name:"test_over" long in
-  check bool "result shorter than original" true (String.length result < 500);
-  check bool "contains budget metadata" true
-    (string_contains ~sub:"_output_budget_exceeded" result)
+let test_cap_over_limit () =
+  let long = String.make (Tool_output_validation.max_output_chars + 1000) 'a' in
+  let result = Tool_output_validation.cap long in
+  check bool "result shorter than original" true
+    (String.length result < String.length long);
+  check bool "contains capped marker" true
+    (string_contains ~sub:"[capped:" result)
 
-let test_output_validation_array_aware_truncation () =
-  Tool_output_validation.set_budget ~tool_name:"test_array" ~max_chars:200;
-  let items = List.init 50 (fun i -> `Assoc [("id", `Int i); ("name", `String (Printf.sprintf "item_%d" i))]) in
-  let json = Yojson.Safe.to_string (`List items) in
-  let result = Tool_output_validation.validate_and_truncate ~tool_name:"test_array" json in
-  check bool "result is valid JSON" true
-    (try ignore (Yojson.Safe.from_string result); true with _ -> false);
-  check bool "contains truncated marker" true
-    (string_contains ~sub:"_truncated" result);
-  check bool "contains shown count" true
-    (string_contains ~sub:"_shown" result)
-
-let test_output_validation_default_budget () =
-  let long = String.make 16000 'c' in
-  let result = Tool_output_validation.validate_and_truncate ~tool_name:"unregistered_tool" long in
-  check bool "default truncates 16k" true (String.length result < 16000);
-  check bool "contains budget metadata" true
-    (string_contains ~sub:"_output_budget_exceeded" result)
+let test_cap_preserves_prefix () =
+  let prefix = "HEADER:" in
+  let long = prefix ^ String.make (Tool_output_validation.max_output_chars + 1000) 'z' in
+  let result = Tool_output_validation.cap long in
+  check bool "prefix preserved" true
+    (String.length result >= String.length prefix
+     && String.sub result 0 (String.length prefix) = prefix)
 
 let () =
   let base_path = Masc_test_deps.find_project_root () in
@@ -536,11 +524,10 @@ let () =
       test_case "empty query fails" `Quick test_library_search_empty_query;
       test_case "missing topic fails" `Quick test_library_read_missing_topic;
     ];
-    "output_validation", [
-      test_case "short output unchanged" `Quick test_output_validation_short_unchanged;
-      test_case "exact limit unchanged" `Quick test_output_validation_exact_limit_unchanged;
-      test_case "over budget truncates with metadata" `Quick test_output_validation_over_budget_truncates;
-      test_case "array-aware truncation" `Quick test_output_validation_array_aware_truncation;
-      test_case "default budget for unregistered tool" `Quick test_output_validation_default_budget;
+    "output_cap", [
+      test_case "short output unchanged" `Quick test_cap_short_unchanged;
+      test_case "exact limit unchanged" `Quick test_cap_exact_limit_unchanged;
+      test_case "over limit capped with marker" `Quick test_cap_over_limit;
+      test_case "prefix preserved after cap" `Quick test_cap_preserves_prefix;
     ];
   ]

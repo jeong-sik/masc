@@ -297,8 +297,37 @@ let acquire_pid_lock port =
            pid port pid);
       exit 1
 
+(** Reject base_path that points to the server's own source repo.
+    Detects by checking if the running executable lives under base_path/_build/.
+    Runtime state (.masc/keepers, traces, logs) must not pollute the repo. *)
+let guard_self_repo_base_path base_path =
+  let abs_base =
+    try Unix.realpath base_path with Unix.Unix_error _ -> base_path
+  in
+  let abs_exe =
+    try Unix.realpath Sys.executable_name with Unix.Unix_error _ -> ""
+  in
+  let build_prefix = abs_base ^ "/_build/" in
+  let is_self_repo =
+    abs_exe <> ""
+    && String.length abs_exe > String.length build_prefix
+    && String.sub abs_exe 0 (String.length build_prefix) = build_prefix
+  in
+  if is_self_repo then begin
+    Printf.eprintf
+      "[FATAL] --base-path points to the server's own source repo: %s\n\
+       (executable: %s)\n\
+       Runtime state would pollute the repo. Use a workspace root instead:\n\
+       \  --base-path $ME_ROOT    (recommended)\n\
+       \  --base-path ~/.masc     (alternative)\n\
+       Or start via: sb mcp masc start\n"
+      base_path abs_exe;
+    exit 1
+  end
+
 let run_cmd host port base_path =
   Printexc.record_backtrace true;
+  guard_self_repo_base_path base_path;
   acquire_pid_lock port;
   Log.init_from_env ();
   Unix.putenv "MASC_BASE_PATH" base_path;

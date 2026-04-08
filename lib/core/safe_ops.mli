@@ -16,6 +16,14 @@ val try_with_log : string -> (unit -> 'a) -> 'a option
 val try_with_default : default:'a -> string -> (unit -> 'a) -> 'a
 (** Execute with default value on failure. *)
 
+val try_catch : (unit -> 'a) -> ('a, exn) result
+(** Cancel-aware Result wrapper.
+    Re-raises [Eio.Cancel.Cancelled]; captures any other exception as [Error exn]. *)
+
+val handle : (unit -> 'a) -> (exn -> 'a) -> 'a
+(** Cancel-aware exception handler.
+    Re-raises [Eio.Cancel.Cancelled]; delegates other exceptions to the handler. *)
+
 (** {1 JSON Parsing} *)
 
 val parse_json_safe : context:string -> string -> (Yojson.Safe.t, string) result

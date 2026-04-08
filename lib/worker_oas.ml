@@ -544,20 +544,18 @@ let rec run_worker_via_oas
         (Worker_container_types.leave_worker ~sw ~auth_token
            ~session_id ~worker_name))
     (fun () ->
-      let _ =
-        match
-          Worker_container_types.join_worker ~sw ~auth_token
-            ~session_id ~worker_name
-        with
-        | Ok _ -> ()
-        | Error e -> raise (Failure ("worker join failed: " ^ e))
-      in
-      let workspace_path =
-        if String.trim meta.workspace_path <> "" then meta.workspace_path
-        else base_path
-      in
-      run_existing_worker_agent ~sw ~base_path ~meta ~prompt ~workspace_path
-        ~raw_trace ?worker_run_id ?contract ~tool_names_ref agent)
+      match
+        Worker_container_types.join_worker ~sw ~auth_token
+          ~session_id ~worker_name
+      with
+      | Error e -> Error ("worker join failed: " ^ e)
+      | Ok _ ->
+        let workspace_path =
+          if String.trim meta.workspace_path <> "" then meta.workspace_path
+          else base_path
+        in
+        run_existing_worker_agent ~sw ~base_path ~meta ~prompt ~workspace_path
+          ~raw_trace ?worker_run_id ?contract ~tool_names_ref agent)
 
 and resume_worker_via_oas
     ~(sw : Eio.Switch.t)

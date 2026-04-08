@@ -252,6 +252,82 @@ export function ContextChart({ keeper }: { keeper: Keeper }) {
     </div>`
 }
 
+// ── Token Trend Chart (per-turn input/output tokens) ────
+
+const TOKEN_CHART_W = 200
+const TOKEN_CHART_H = 50
+
+export function TokenTrendChart({ keeper }: { keeper: Keeper }) {
+  const series = keeper.metrics_series ?? []
+  const points = series.filter(
+    (p: KeeperMetricPoint) => p.inference_telemetry?.timings != null,
+  )
+  if (points.length < 2) return null
+
+  const inputTokens = points.map(
+    (p: KeeperMetricPoint) => p.inference_telemetry?.timings?.prompt_n ?? 0,
+  )
+  const outputTokens = points.map(
+    (p: KeeperMetricPoint) => p.inference_telemetry?.timings?.predicted_n ?? 0,
+  )
+  const totalPerTurn = inputTokens.map((inp, i) => inp + (outputTokens[i] ?? 0))
+  const maxVal = Math.max(...totalPerTurn, 1)
+
+  const W = TOKEN_CHART_W, H = TOKEN_CHART_H, pad = 2
+  const n = points.length
+
+  const inputLine = inputTokens.map((v, i) => {
+    const x = pad + (i / (n - 1)) * (W - 2 * pad)
+    const y = H - pad - (v / maxVal) * (H - 2 * pad)
+    return `${x.toFixed(1)},${y.toFixed(1)}`
+  }).join(' ')
+
+  const outputLine = outputTokens.map((v, i) => {
+    const x = pad + (i / (n - 1)) * (W - 2 * pad)
+    const y = H - pad - (v / maxVal) * (H - 2 * pad)
+    return `${x.toFixed(1)},${y.toFixed(1)}`
+  }).join(' ')
+
+  const lastInput = inputTokens[inputTokens.length - 1] ?? 0
+  const lastOutput = outputTokens[outputTokens.length - 1] ?? 0
+  const avgRatio = inputTokens.reduce((a, b) => a + b, 0) / Math.max(outputTokens.reduce((a, b) => a + b, 0), 1)
+
+  return html`
+    <div class="mb-5">
+      <div class="flex items-center gap-2 mb-2">
+        <span class="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Turn Token Trend</span>
+        <span class="text-[10px] text-[var(--text-dim)]">${points.length} turns</span>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+        ${'' /* Dual-line chart: input (cyan) + output (green) */}
+        <div class="md:col-span-2 p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)]">
+          <div class="flex items-center gap-4 mb-1.5">
+            <span class="flex items-center gap-1 text-[10px] text-[var(--text-muted)]">
+              <span class="inline-block w-2.5 h-0.5 rounded bg-[#67e8f9]"></span> input
+              <span class="font-mono text-[var(--cyan)]">${formatTokens(lastInput)}</span>
+            </span>
+            <span class="flex items-center gap-1 text-[10px] text-[var(--text-muted)]">
+              <span class="inline-block w-2.5 h-0.5 rounded bg-[#4ade80]"></span> output
+              <span class="font-mono text-[var(--good)]">${formatTokens(lastOutput)}</span>
+            </span>
+          </div>
+          <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" style="background:#0b1220;">
+            ${inputLine ? html`<polyline points="${inputLine}" fill="none" stroke="#67e8f9" stroke-width="1.5" opacity="0.8"/>` : null}
+            ${outputLine ? html`<polyline points="${outputLine}" fill="none" stroke="#4ade80" stroke-width="1.5" opacity="0.8"/>` : null}
+          </svg>
+        </div>
+
+        ${'' /* Input/Output ratio */}
+        <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] flex flex-col justify-between">
+          <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">In/Out 비율</span>
+          <span class="text-lg font-mono tabular-nums text-[var(--accent)]">${avgRatio.toFixed(1)}x</span>
+          <span class="text-[9px] text-[var(--text-dim)]">${avgRatio > 10 ? '프롬프트 비대 주의' : avgRatio > 5 ? '프롬프트 무거움' : '정상 범위'}</span>
+        </div>
+      </div>
+    </div>
+  `
+}
+
 // ── Metrics Charts (Latency + Cost + Model) ─────────────
 
 const SPARKLINE_W = 200

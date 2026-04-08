@@ -1,0 +1,15 @@
+[
+  ["pre-existing", "claiming the problem already existed"],
+  ["out of scope", "declaring work out of scope"],
+  ["beyond the scope", "declaring work beyond scope"],
+  ["will do later", "deferring work to later"],
+  ["will fix later", "deferring fix to later"],
+  ["will address later", "deferring to later"],
+  ["follow-up", "deferring to a follow-up"],
+  ["follow up", "deferring to a follow-up"],
+  ["works on my end", "unverifiable claim"],
+  ["works on my machine", "unverifiable claim"],
+  ["not reproducible", "dismissing without investigation"],
+  ["not my responsibility", "responsibility deflection"],
+  ["cannot reproduce", "dismissing without investigation"]
+]

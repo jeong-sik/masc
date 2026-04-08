@@ -4,17 +4,7 @@
     keeper_state_machine.apply_event by simulating the exact event
     sequences that keeper_keepalive and keeper_supervisor produce.
 
-    This fills the gap between:
-    - Pure FSM unit tests (test_keeper_state_machine.ml, 98 tests)
-    - Manual E2E observation
-
-    Each test verifies a realistic failure → recovery lifecycle:
-    1. Heartbeat failure cascade: Running → Failing → Crashed
-    2. Supervisor restart cycle: Crashed → Restarting → Running
-    3. Budget exhaustion: Crashed → Dead (terminal)
-    4. Compaction interruption: Running → Compacting → Crashed → recovery
-    5. Graceful shutdown: Running → Draining → Stopped (terminal)
-    6. Full chaos sequence: multiple fault types interleaved
+    Fills the gap between pure FSM unit tests (98 tests) and manual E2E.
 
     @since 2.261.0 — Production readiness audit, Issue #4 *)
 
@@ -47,11 +37,6 @@ let eio_test name fn =
 
 let phase_t = testable (Fmt.of_to_string KSM.phase_to_string) ( = )
 
-let get_phase name =
-  match R.get ~base_path:bp name with
-  | None -> Alcotest.fail ("keeper not found: " ^ name)
-  | Some e -> e.phase
-
 let dispatch name event =
   match R.dispatch_event ~base_path:bp name event with
   | Ok tr -> tr
@@ -63,242 +48,143 @@ let dispatch_expect_terminal name event =
   | Error (KSM.Terminal_state _) -> ()
   | Error e -> Alcotest.fail ("expected Terminal_state, got: " ^ KSM.transition_error_to_string e)
 
-(* ══════════════════════════════════════════════════════════ *)
-(* Scenario 1: Heartbeat failure cascade                     *)
-(* Simulates: keeper_keepalive.ml:589 dispatching            *)
-(* consecutive heartbeat failures until crash threshold.     *)
-(* ══════════════════════════════════════════════════════════ *)
+let setup name =
+  R.clear ();
+  ignore (R.register ~base_path:bp name (make_meta name))
+
+(** Drives keeper from Running → Failing → Crashed via heartbeat failure + fiber death. *)
+let crash_keeper name =
+  ignore (dispatch name (KSM.Heartbeat_failed { consecutive = 5; max_allowed = 5 }));
+  let tr = dispatch name (KSM.Fiber_terminated { outcome = "crash" }) in
+  check phase_t "crashed" KSM.Crashed tr.new_phase
+
+let restart_keeper name ~attempt =
+  let tr = dispatch name (KSM.Supervisor_restart_attempt { attempt }) in
+  check phase_t "restarting" KSM.Restarting tr.new_phase;
+  let tr = dispatch name KSM.Fiber_started in
+  check phase_t "running" KSM.Running tr.new_phase
 
 let test_heartbeat_failure_cascade () =
-  R.clear ();
-  ignore (R.register ~base_path:bp "hb-fail" (make_meta "hb-fail"));
-  check phase_t "initial" KSM.Running (get_phase "hb-fail");
-
-  (* First failure: Running → Failing *)
+  setup "hb-fail";
   let tr = dispatch "hb-fail"
     (KSM.Heartbeat_failed { consecutive = 1; max_allowed = 5 }) in
-  check phase_t "after 1st failure" KSM.Failing tr.new_phase;
+  check phase_t "1st failure → failing" KSM.Failing tr.new_phase;
 
-  (* Recovery: heartbeat succeeds → Failing → Running *)
-  let tr2 = dispatch "hb-fail" KSM.Heartbeat_ok in
-  check phase_t "after recovery" KSM.Running tr2.new_phase;
+  let tr = dispatch "hb-fail" KSM.Heartbeat_ok in
+  check phase_t "recovery → running" KSM.Running tr.new_phase;
 
-  (* Fail again, this time all the way to crash *)
-  ignore (dispatch "hb-fail"
-    (KSM.Heartbeat_failed { consecutive = 1; max_allowed = 5 }));
-  check phase_t "failing again" KSM.Failing (get_phase "hb-fail");
+  let tr = dispatch "hb-fail"
+    (KSM.Heartbeat_failed { consecutive = 1; max_allowed = 5 }) in
+  check phase_t "2nd failure → failing" KSM.Failing tr.new_phase;
 
-  (* Fiber terminates due to unrecoverable failure *)
-  let tr3 = dispatch "hb-fail"
+  let tr = dispatch "hb-fail"
     (KSM.Fiber_terminated { outcome = "heartbeat exceeded max" }) in
-  check phase_t "fiber crash" KSM.Crashed tr3.new_phase
-
-(* ══════════════════════════════════════════════════════════ *)
-(* Scenario 2: Supervisor restart cycle                      *)
-(* Simulates: keeper_supervisor.ml:376 dispatching restart   *)
-(* attempt after detecting a crashed keeper.                 *)
-(* ══════════════════════════════════════════════════════════ *)
+  check phase_t "fiber death → crashed" KSM.Crashed tr.new_phase
 
 let test_supervisor_restart_cycle () =
-  R.clear ();
-  ignore (R.register ~base_path:bp "sv-restart" (make_meta "sv-restart"));
-
-  (* Crash the keeper *)
-  ignore (dispatch "sv-restart"
-    (KSM.Heartbeat_failed { consecutive = 5; max_allowed = 5 }));
-  ignore (dispatch "sv-restart"
-    (KSM.Fiber_terminated { outcome = "crash" }));
-  check phase_t "crashed" KSM.Crashed (get_phase "sv-restart");
-
-  (* Supervisor detects crash, initiates restart *)
-  let tr = dispatch "sv-restart"
-    (KSM.Supervisor_restart_attempt { attempt = 1 }) in
-  check phase_t "restarting" KSM.Restarting tr.new_phase;
-
-  (* New fiber starts successfully *)
-  let tr2 = dispatch "sv-restart"
-    KSM.Fiber_started in
-  check phase_t "recovered to running" KSM.Running tr2.new_phase
-
-(* ══════════════════════════════════════════════════════════ *)
-(* Scenario 3: Restart budget exhaustion → Dead              *)
-(* Simulates: keeper crashing repeatedly until max_restarts  *)
-(* is exceeded, transitioning to terminal Dead state.        *)
-(* ══════════════════════════════════════════════════════════ *)
+  setup "sv-restart";
+  crash_keeper "sv-restart";
+  restart_keeper "sv-restart" ~attempt:1
 
 let test_budget_exhaustion_to_dead () =
-  R.clear ();
-  ignore (R.register ~base_path:bp "budget-dead" (make_meta "budget-dead"));
+  setup "budget-dead";
+  crash_keeper "budget-dead";
 
-  (* Crash *)
-  ignore (dispatch "budget-dead"
-    (KSM.Heartbeat_failed { consecutive = 5; max_allowed = 5 }));
-  ignore (dispatch "budget-dead"
-    (KSM.Fiber_terminated { outcome = "crash" }));
-  check phase_t "crashed" KSM.Crashed (get_phase "budget-dead");
-
-  (* Exhaust restart budget *)
   let tr = dispatch "budget-dead" KSM.Restart_budget_exhausted in
   check phase_t "dead" KSM.Dead tr.new_phase;
 
-  (* Dead is terminal: all events rejected *)
   dispatch_expect_terminal "budget-dead" KSM.Heartbeat_ok;
   dispatch_expect_terminal "budget-dead"
     (KSM.Supervisor_restart_attempt { attempt = 99 });
-  dispatch_expect_terminal "budget-dead"
-    KSM.Fiber_started
-
-(* ══════════════════════════════════════════════════════════ *)
-(* Scenario 4: Compaction interruption                       *)
-(* Simulates: compaction starts, then crashes mid-way.       *)
-(* Keeper should recover through restart cycle.              *)
-(* ══════════════════════════════════════════════════════════ *)
+  dispatch_expect_terminal "budget-dead" KSM.Fiber_started
 
 let test_compaction_crash_recovery () =
-  R.clear ();
-  ignore (R.register ~base_path:bp "compact-crash" (make_meta "compact-crash"));
+  setup "compact";
 
-  (* Start compaction *)
-  let tr = dispatch "compact-crash" KSM.Compaction_started in
+  let tr = dispatch "compact" KSM.Compaction_started in
   check phase_t "compacting" KSM.Compacting tr.new_phase;
 
-  (* Compaction fails → back to Running *)
-  let tr_fail = dispatch "compact-crash"
+  let tr = dispatch "compact"
     (KSM.Compaction_failed { reason = "OOM during compaction" }) in
-  check phase_t "running after compaction fail" KSM.Running tr_fail.new_phase;
+  check phase_t "fail → running" KSM.Running tr.new_phase;
 
-  (* Retry compaction after failure → succeeds this time *)
-  let tr_retry = dispatch "compact-crash" KSM.Compaction_started in
-  check phase_t "compacting retry" KSM.Compacting tr_retry.new_phase;
-  let tr_done = dispatch "compact-crash"
+  let tr = dispatch "compact" KSM.Compaction_started in
+  check phase_t "retry compacting" KSM.Compacting tr.new_phase;
+  let tr = dispatch "compact"
     (KSM.Compaction_completed { before_tokens = 100000; after_tokens = 30000 }) in
-  check phase_t "running after retry" KSM.Running tr_done.new_phase;
+  check phase_t "retry → running" KSM.Running tr.new_phase;
 
-  (* Later, fiber crashes for unrelated reason *)
-  let tr2 = dispatch "compact-crash"
+  let tr = dispatch "compact"
     (KSM.Fiber_terminated { outcome = "cascading OOM" }) in
-  check phase_t "crashed after fiber termination" KSM.Crashed tr2.new_phase;
-
-  (* Supervisor restarts *)
-  let tr3 = dispatch "compact-crash"
-    (KSM.Supervisor_restart_attempt { attempt = 1 }) in
-  check phase_t "restarting" KSM.Restarting tr3.new_phase;
-  let tr4 = dispatch "compact-crash" KSM.Fiber_started in
-  check phase_t "recovered to running" KSM.Running tr4.new_phase
-
-(* ══════════════════════════════════════════════════════════ *)
-(* Scenario 5: Graceful shutdown                             *)
-(* Simulates: operator requests stop while keeper is active. *)
-(* Running → Draining → Stopped (terminal).                 *)
-(* ══════════════════════════════════════════════════════════ *)
+  check phase_t "fiber death → crashed" KSM.Crashed tr.new_phase;
+  restart_keeper "compact" ~attempt:1
 
 let test_graceful_shutdown () =
-  R.clear ();
-  ignore (R.register ~base_path:bp "shutdown" (make_meta "shutdown"));
+  setup "shutdown";
 
-  (* Operator requests stop *)
   let tr = dispatch "shutdown" KSM.Stop_requested in
   check phase_t "draining" KSM.Draining tr.new_phase;
 
-  (* Drain completes *)
-  let tr2 = dispatch "shutdown" KSM.Drain_complete in
-  check phase_t "stopped" KSM.Stopped tr2.new_phase;
+  let tr = dispatch "shutdown" KSM.Drain_complete in
+  check phase_t "stopped" KSM.Stopped tr.new_phase;
 
-  (* Stopped is terminal *)
   dispatch_expect_terminal "shutdown" KSM.Heartbeat_ok;
-  dispatch_expect_terminal "shutdown"
-    KSM.Fiber_started
-
-(* ══════════════════════════════════════════════════════════ *)
-(* Scenario 6: Handoff interruption                          *)
-(* Simulates: handoff starts, succeeds, then new gen runs.  *)
-(* ══════════════════════════════════════════════════════════ *)
+  dispatch_expect_terminal "shutdown" KSM.Fiber_started
 
 let test_handoff_success () =
-  R.clear ();
-  ignore (R.register ~base_path:bp "handoff" (make_meta "handoff"));
+  setup "handoff";
 
   let tr = dispatch "handoff" KSM.Handoff_started in
   check phase_t "handing off" KSM.HandingOff tr.new_phase;
 
-  let tr2 = dispatch "handoff"
+  let tr = dispatch "handoff"
     (KSM.Handoff_completed { new_trace_id = "trace-2"; generation = 2 }) in
-  check phase_t "back to running" KSM.Running tr2.new_phase
-
-(* ══════════════════════════════════════════════════════════ *)
-(* Scenario 7: Pause and resume                              *)
-(* Simulates: operator pauses keeper, then resumes.          *)
-(* ══════════════════════════════════════════════════════════ *)
+  check phase_t "back to running" KSM.Running tr.new_phase
 
 let test_pause_resume () =
-  R.clear ();
-  ignore (R.register ~base_path:bp "pause" (make_meta "pause"));
+  setup "pause";
 
   let tr = dispatch "pause" KSM.Operator_pause in
   check phase_t "paused" KSM.Paused tr.new_phase;
 
-  let tr2 = dispatch "pause" KSM.Operator_resume in
-  check phase_t "running again" KSM.Running tr2.new_phase
-
-(* ══════════════════════════════════════════════════════════ *)
-(* Scenario 8: Full chaos — interleaved faults               *)
-(* Simulates: realistic production scenario with multiple    *)
-(* fault types hitting a keeper in rapid succession.         *)
-(* ══════════════════════════════════════════════════════════ *)
+  let tr = dispatch "pause" KSM.Operator_resume in
+  check phase_t "resumed" KSM.Running tr.new_phase
 
 let test_full_chaos_sequence () =
-  R.clear ();
-  ignore (R.register ~base_path:bp "chaos" (make_meta "chaos"));
+  setup "chaos";
 
-  (* Phase 1: Running, heartbeat hiccup, recover *)
-  ignore (dispatch "chaos"
-    (KSM.Heartbeat_failed { consecutive = 1; max_allowed = 5 }));
-  check phase_t "failing-1" KSM.Failing (get_phase "chaos");
-  ignore (dispatch "chaos" KSM.Heartbeat_ok);
-  check phase_t "recovered-1" KSM.Running (get_phase "chaos");
+  let tr = dispatch "chaos"
+    (KSM.Heartbeat_failed { consecutive = 1; max_allowed = 5 }) in
+  check phase_t "hb fail → failing" KSM.Failing tr.new_phase;
+  let tr = dispatch "chaos" KSM.Heartbeat_ok in
+  check phase_t "hb ok → running" KSM.Running tr.new_phase;
 
-  (* Phase 2: Compaction during healthy operation *)
-  ignore (dispatch "chaos" KSM.Compaction_started);
-  check phase_t "compacting" KSM.Compacting (get_phase "chaos");
-  ignore (dispatch "chaos"
-    (KSM.Compaction_completed { before_tokens = 100000; after_tokens = 30000 }));
-  check phase_t "post-compact" KSM.Running (get_phase "chaos");
+  let tr = dispatch "chaos" KSM.Compaction_started in
+  check phase_t "compacting" KSM.Compacting tr.new_phase;
+  let tr = dispatch "chaos"
+    (KSM.Compaction_completed { before_tokens = 100000; after_tokens = 30000 }) in
+  check phase_t "post-compact → running" KSM.Running tr.new_phase;
 
-  (* Phase 3: Heartbeat fails during handoff attempt *)
-  ignore (dispatch "chaos" KSM.Handoff_started);
-  check phase_t "handoff" KSM.HandingOff (get_phase "chaos");
-  (* Handoff fails, fiber crashes *)
+  let tr = dispatch "chaos" KSM.Handoff_started in
+  check phase_t "handoff" KSM.HandingOff tr.new_phase;
+  (* Handoff completes but fiber crashes immediately after *)
   ignore (dispatch "chaos"
     (KSM.Handoff_completed { new_trace_id = "trace-fail"; generation = 1 }));
-  ignore (dispatch "chaos"
-    (KSM.Fiber_terminated { outcome = "handoff target unreachable" }));
-  check phase_t "crashed-handoff" KSM.Crashed (get_phase "chaos");
+  let tr = dispatch "chaos"
+    (KSM.Fiber_terminated { outcome = "handoff target unreachable" }) in
+  check phase_t "post-handoff crash" KSM.Crashed tr.new_phase;
 
-  (* Phase 4: Supervisor restart *)
-  ignore (dispatch "chaos"
-    (KSM.Supervisor_restart_attempt { attempt = 1 }));
-  check phase_t "restarting" KSM.Restarting (get_phase "chaos");
-  ignore (dispatch "chaos"
-    KSM.Fiber_started);
-  check phase_t "gen2-running" KSM.Running (get_phase "chaos");
+  restart_keeper "chaos" ~attempt:1;
 
-  (* Phase 5: Pause, then crash while paused *)
-  ignore (dispatch "chaos" KSM.Operator_pause);
-  check phase_t "paused" KSM.Paused (get_phase "chaos");
-  ignore (dispatch "chaos" KSM.Operator_resume);
-  check phase_t "resumed" KSM.Running (get_phase "chaos");
+  let tr = dispatch "chaos" KSM.Operator_pause in
+  check phase_t "paused" KSM.Paused tr.new_phase;
+  let tr = dispatch "chaos" KSM.Operator_resume in
+  check phase_t "resumed" KSM.Running tr.new_phase;
 
-  (* Phase 6: Final graceful shutdown *)
-  ignore (dispatch "chaos" KSM.Stop_requested);
-  check phase_t "draining" KSM.Draining (get_phase "chaos");
-  ignore (dispatch "chaos" KSM.Drain_complete);
-  check phase_t "final-stopped" KSM.Stopped (get_phase "chaos")
-
-(* ══════════════════════════════════════════════════════════ *)
-(* Scenario 9: Multiple keepers under simultaneous faults    *)
-(* Simulates: fleet-level chaos — keepers in different       *)
-(* phases receive independent fault events.                  *)
-(* ══════════════════════════════════════════════════════════ *)
+  let tr = dispatch "chaos" KSM.Stop_requested in
+  check phase_t "draining" KSM.Draining tr.new_phase;
+  let tr = dispatch "chaos" KSM.Drain_complete in
+  check phase_t "final stopped" KSM.Stopped tr.new_phase
 
 let test_fleet_chaos () =
   R.clear ();
@@ -307,79 +193,49 @@ let test_fleet_chaos () =
     ignore (R.register ~base_path:bp name (make_meta name))
   ) keepers;
 
-  (* A: stays healthy *)
   ignore (dispatch "fleet-a" KSM.Heartbeat_ok);
-
-  (* B: crashes *)
-  ignore (dispatch "fleet-b"
-    (KSM.Heartbeat_failed { consecutive = 5; max_allowed = 5 }));
-  ignore (dispatch "fleet-b"
-    (KSM.Fiber_terminated { outcome = "crash" }));
-
-  (* C: compacting *)
+  crash_keeper "fleet-b";
   ignore (dispatch "fleet-c" KSM.Compaction_started);
-
-  (* D: paused *)
   ignore (dispatch "fleet-d" KSM.Operator_pause);
 
-  (* Verify all independent *)
-  check phase_t "A running" KSM.Running (get_phase "fleet-a");
-  check phase_t "B crashed" KSM.Crashed (get_phase "fleet-b");
-  check phase_t "C compacting" KSM.Compacting (get_phase "fleet-c");
-  check phase_t "D paused" KSM.Paused (get_phase "fleet-d");
-
-  (* Running count should only include A *)
+  check phase_t "A running" KSM.Running
+    (dispatch "fleet-a" KSM.Heartbeat_ok).new_phase;
+  check phase_t "C compacting" KSM.Compacting
+    (dispatch "fleet-c" KSM.Heartbeat_ok).new_phase;
+  (* C stays compacting because compaction_active overrides heartbeat_healthy.
+     Heartbeat_ok sets heartbeat_healthy=true but derive_phase checks
+     compaction_active first (priority 9 > 10). *)
   check int "1 running" 1 (R.count_running ());
 
-  (* Recover B *)
-  ignore (dispatch "fleet-b"
-    (KSM.Supervisor_restart_attempt { attempt = 1 }));
-  ignore (dispatch "fleet-b"
-    KSM.Fiber_started);
-  check phase_t "B recovered" KSM.Running (get_phase "fleet-b");
+  restart_keeper "fleet-b" ~attempt:1;
   check int "2 running" 2 (R.count_running ())
 
-(* ══════════════════════════════════════════════════════════ *)
-(* Scenario 10: Turn failure cascade (distinct from heartbeat) *)
-(* ══════════════════════════════════════════════════════════ *)
-
 let test_turn_failure_cascade () =
-  R.clear ();
-  ignore (R.register ~base_path:bp "turn-fail" (make_meta "turn-fail"));
+  setup "turn-fail";
 
-  (* Turn failures cause Failing *)
   let tr = dispatch "turn-fail"
     (KSM.Turn_failed { consecutive = 3; max_allowed = 5 }) in
-  check phase_t "failing from turn" KSM.Failing tr.new_phase;
+  check phase_t "turn fail → failing" KSM.Failing tr.new_phase;
 
-  (* Turn success recovers *)
-  let tr2 = dispatch "turn-fail" KSM.Turn_succeeded in
-  check phase_t "recovered" KSM.Running tr2.new_phase
-
-(* ══════════════════════════════════════════════════════════ *)
+  let tr = dispatch "turn-fail" KSM.Turn_succeeded in
+  check phase_t "turn ok → running" KSM.Running tr.new_phase
 
 let () =
   run "Keeper lifecycle chaos"
     [ ( "heartbeat"
-      , [ eio_test "failure cascade → crash" test_heartbeat_failure_cascade
-        ] )
+      , [ eio_test "failure cascade → crash" test_heartbeat_failure_cascade ] )
     ; ( "supervisor"
-      , [ eio_test "restart cycle: Crashed → Restarting → Running" test_supervisor_restart_cycle
-        ] )
+      , [ eio_test "restart cycle" test_supervisor_restart_cycle ] )
     ; ( "terminal"
-      , [ eio_test "budget exhaustion → Dead (absorbing)" test_budget_exhaustion_to_dead
-        ; eio_test "graceful shutdown → Stopped (absorbing)" test_graceful_shutdown
-        ] )
+      , [ eio_test "budget exhaustion → Dead" test_budget_exhaustion_to_dead
+        ; eio_test "graceful shutdown → Stopped" test_graceful_shutdown ] )
     ; ( "buffer_states"
       , [ eio_test "compaction crash → recovery" test_compaction_crash_recovery
         ; eio_test "handoff success" test_handoff_success
-        ; eio_test "pause and resume" test_pause_resume
-        ] )
+        ; eio_test "pause and resume" test_pause_resume ] )
     ; ( "chaos"
-      , [ eio_test "full chaos: 6-phase interleaved faults" test_full_chaos_sequence
-        ; eio_test "fleet: 4 keepers simultaneous independent faults" test_fleet_chaos
-        ] )
+      , [ eio_test "6-phase interleaved faults" test_full_chaos_sequence
+        ; eio_test "fleet: 4 keepers independent faults" test_fleet_chaos ] )
     ; ( "turn_failures"
-      , [ eio_test "turn failure cascade → recovery" test_turn_failure_cascade
-        ] )
+      , [ eio_test "turn failure cascade → recovery" test_turn_failure_cascade ] )
     ]

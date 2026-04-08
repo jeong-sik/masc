@@ -77,8 +77,17 @@ let submit_and_await ~keeper_name ~tool_name ~input ~risk_level
    with
    | Eio.Cancel.Cancelled _ as e -> raise e
    | _ -> ());
-  (* SUSPEND the agent fiber until operator resolves *)
-  Eio.Promise.await promise
+  (* SUSPEND the agent fiber until operator resolves.
+     Fun.protect ensures the pending entry is cleaned up if the fiber
+     is cancelled (e.g. keeper shutdown via Eio.Switch cancellation).
+     Without this, orphan entries accumulate in the hashtbl. (#5949) *)
+  Fun.protect
+    (fun () -> Eio.Promise.await promise)
+    ~finally:(fun () ->
+      (try
+         Eio.Mutex.use_rw ~protect:true mu (fun () ->
+           Hashtbl.remove pending id)
+       with _ -> ()))
 
 (* ── Resolve (operator action) ────────────────────────────── *)
 

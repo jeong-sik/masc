@@ -190,9 +190,12 @@ let handle_keeper_shell_readonly
         let st, out =
           Process_eio.run_argv_with_status ~timeout_sec:15.0 argv
         in
+        (* rg exit codes: 0=matches found, 1=no matches (not an error), 2+=real error.
+           Treat exit 1 as success with empty results — "no match" is a valid answer. *)
+        let is_ok = st = Unix.WEXITED 0 || st = Unix.WEXITED 1 in
         Yojson.Safe.to_string
           (`Assoc
-              [ "ok", `Bool (st = Unix.WEXITED 0)
+              [ "ok", `Bool is_ok
               ; "op", `String op
               ; "path", `String target
               ; "pattern", `String pattern

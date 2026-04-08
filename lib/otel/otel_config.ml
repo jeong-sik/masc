@@ -10,7 +10,7 @@ let enabled =
 
 let endpoint =
   Sys.getenv_opt "OTEL_EXPORTER_OTLP_ENDPOINT"
-  |> Option.value ~default:"http://localhost:4318"
+  |> Option.value ~default:Masc_network_defaults.otel_default_url
 
 let service_name =
   Sys.getenv_opt "OTEL_SERVICE_NAME"

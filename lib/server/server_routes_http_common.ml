@@ -311,16 +311,9 @@ let starts_with ~prefix s =
   let plen = String.length prefix in
   String.length s >= plen && String.sub s 0 plen = prefix
 
-(** Allowed origins for DNS rebinding protection *)
-let allowed_origins = [
-  "http://localhost";
-  "https://localhost";
-  "http://127.0.0.1";
-  "https://127.0.0.1";
-  (* Cloudflare tunnel *)
-  "https://masc.crying.pictures";
-  "https://masc-dev.crying.pictures";
-]
+(** Allowed origins for DNS rebinding protection.
+    SSOT: [Masc_network_defaults.allowed_origins]. *)
+let allowed_origins = Masc_network_defaults.allowed_origins
 
 (** Validate Origin header for DNS rebinding protection *)
 let validate_origin (request : Httpun.Request.t) =

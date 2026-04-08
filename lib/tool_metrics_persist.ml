@@ -57,6 +57,7 @@ let get_or_create_store ~base_path : Dated_jsonl.t =
   | Some (cached_path, s) when String.equal cached_path base_path -> s
   | _ ->
     let dir = Filename.concat base_path "data/tool-metrics" in
+    Fs_compat.mkdir_p dir;
     let s = Dated_jsonl.create ~base_dir:dir () in
     store_ref := Some (base_path, s);
     s

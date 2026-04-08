@@ -862,15 +862,11 @@ let register () =
   Tool_dispatch.register_module
     ~schemas:tools
     ~handler:(fun ~name ~args -> Some (handle_tool name args));
+  Tool_dispatch.init_read_only_set _tool_spec_read_only;
+  Tool_dispatch.init_idempotent_set _tool_spec_read_only;
   List.iter
-    (fun (s : Types.tool_schema) ->
-      Tool_spec.register
-        (Tool_spec.create
-           ~name:s.name
-           ~description:s.description
-           ~module_tag:Tool_dispatch.Mod_misc
-           ~input_schema:s.input_schema
-           ~is_read_only:(List.mem s.name _tool_spec_read_only)
-           ~is_idempotent:(List.mem s.name _tool_spec_read_only)
-           ()))
-    tools
+    (fun name ->
+      let meta = Tool_catalog.metadata name in
+      Tool_catalog.register_metadata name
+        { meta with readonly = Some true; idempotent = Some true })
+    _tool_spec_read_only

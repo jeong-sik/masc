@@ -216,6 +216,9 @@ let handle_keeper_pr_workflow
             None
         end else None
       in
+      let run_argv ~timeout_sec argv =
+        Process_eio.run_argv_with_status ~timeout_sec argv
+      in
       let run_sh ~cwd ~timeout_sec cmd =
         let shell = Printf.sprintf "cd %s && %s 2>&1"
           (Filename.quote cwd) cmd in
@@ -263,6 +266,44 @@ let handle_keeper_pr_workflow
         | Unix.WEXITED 1 -> Ok false
         | _ -> Error (Printf.sprintf "git show-ref: %s" (String.trim out))
       in
+      let normalize_worktree_path path =
+        let stripped =
+          if path <> "" && path.[String.length path - 1] = '/'
+          then String.sub path 0 (String.length path - 1)
+          else path
+        in
+        try Unix.realpath stripped
+        with Unix.Unix_error _ -> stripped
+      in
+      let same_worktree_path left right =
+        String.equal
+          (normalize_worktree_path left)
+          (normalize_worktree_path right)
+      in
+      let find_worktree_path_for_branch branch_name =
+        let target_ref = Printf.sprintf "refs/heads/%s" branch_name in
+        let st, out = run_sh ~cwd:repo_root ~timeout_sec:5.0
+          "git worktree list --porcelain" in
+        if st <> Unix.WEXITED 0 then None
+        else
+          let rec loop current_path = function
+            | [] -> None
+            | raw_line :: rest ->
+              let line = String.trim raw_line in
+              if String.starts_with ~prefix:"worktree " line then
+                let path =
+                  String.sub line 9 (String.length line - 9)
+                in
+                loop (Some path) rest
+              else if line = "" then
+                loop None rest
+              else if line = Printf.sprintf "branch %s" target_ref then
+                current_path
+              else
+                loop current_path rest
+          in
+          loop None (String.split_on_char '\n' out)
+      in
       let cleanup_worktree () =
         if !worktree_dir <> "" && Sys.file_exists !worktree_dir then begin
           match remove_worktree_path !worktree_dir with
@@ -300,6 +341,18 @@ let handle_keeper_pr_workflow
               begin match branch_exists_locally branch with
               | Error msg -> Error msg
               | Ok branch_exists ->
+                let prepare_existing_branch_result =
+                  if not branch_exists then Ok ()
+                  else
+                    match find_worktree_path_for_branch branch with
+                    | Some existing_path when same_worktree_path existing_path worktree_path ->
+                      remove_worktree_path existing_path
+                    | _ -> Ok ()
+                in
+                begin match prepare_existing_branch_result with
+                | Error msg ->
+                  Error (Printf.sprintf "remove existing worktree: %s" msg)
+                | Ok () ->
                 let add_cmd =
                   if branch_exists then
                     Printf.sprintf "git worktree add %s %s"
@@ -311,11 +364,34 @@ let handle_keeper_pr_workflow
                       (Filename.quote worktree_path)
                       (Filename.quote (Printf.sprintf "origin/%s" resolved_base))
                 in
-                let st, out = run_sh ~cwd:repo_root ~timeout_sec:30.0 add_cmd in
-                if st <> Unix.WEXITED 0 then
-                  Error (Printf.sprintf "git worktree add: %s" (String.trim out))
-                else begin
-                  worktree_dir := worktree_path;
+                let add_worktree () =
+                  let st, out = run_sh ~cwd:repo_root ~timeout_sec:30.0 add_cmd in
+                  if st = Unix.WEXITED 0 then Ok ()
+                  else
+                    match find_worktree_path_for_branch branch with
+                    | Some existing_path when same_worktree_path existing_path worktree_path ->
+                      begin match remove_worktree_path existing_path with
+                      | Error msg ->
+                        Error (Printf.sprintf "remove existing worktree: %s" msg)
+                      | Ok () ->
+                        let st_retry, out_retry =
+                          run_sh ~cwd:repo_root ~timeout_sec:30.0 add_cmd
+                        in
+                        if st_retry = Unix.WEXITED 0 then Ok ()
+                        else
+                          Error (Printf.sprintf "git worktree add retry: %s" (String.trim out_retry))
+                      end
+                    | _ ->
+                      Error (Printf.sprintf "git worktree add: %s" (String.trim out))
+                in
+                match add_worktree () with
+                | Error _ as err -> err
+                | Ok () -> begin
+                  let worktree_root =
+                    try Unix.realpath worktree_path
+                    with Unix.Unix_error _ -> worktree_path
+                  in
+                  worktree_dir := worktree_root;
                   let fallback_note =
                     match fallback_from with
                     | None -> ""
@@ -327,7 +403,8 @@ let handle_keeper_pr_workflow
                     if branch_exists then " (reused existing branch)" else ""
                   in
                   Ok (Printf.sprintf "worktree %s on branch %s%s%s"
-                    worktree_path branch branch_note fallback_note)
+                    worktree_root branch branch_note fallback_note)
+                end
                 end
               end
       ) in
@@ -363,8 +440,12 @@ let handle_keeper_pr_workflow
       let _s_ver = run_step "version_truth_check" (fun () ->
         if !worktree_dir = "" then Error "no worktree path"
         else begin
-          let st, out = run_sh ~cwd:(!worktree_dir) ~timeout_sec:10.0
-            "./scripts/check-version-truth.sh" in
+          let check_script = Filename.concat !worktree_dir "scripts/check-version-truth.sh" in
+          if not (Sys.file_exists check_script) then
+            Error "missing version truth script: scripts/check-version-truth.sh"
+          else
+          let st, out = run_argv ~timeout_sec:10.0
+            [ "/bin/bash"; check_script ] in
           if st <> Unix.WEXITED 0 then
             Error (Printf.sprintf "Version truth check failed: %s" out)
           else Ok "version truth OK"
@@ -381,13 +462,19 @@ let handle_keeper_pr_workflow
           if st_add <> Unix.WEXITED 0 then
             Error (Printf.sprintf "git add: %s" out_add)
           else begin
-            let st_commit, out_commit = run_git
-              (Printf.sprintf "commit -m %s" (Filename.quote commit_message)) in
+            let author = Keeper_identity.keeper_git_author ~keeper_name:meta.name in
+            let email = Keeper_identity.keeper_git_email ~keeper_name:meta.name in
+            let st_commit, out_commit = run_sh ~cwd:(!worktree_dir) ~timeout_sec:30.0
+              (Printf.sprintf "GIT_AUTHOR_NAME=%s GIT_AUTHOR_EMAIL=%s GIT_COMMITTER_NAME=%s GIT_COMMITTER_EMAIL=%s git commit -m %s"
+                (Filename.quote author) (Filename.quote email)
+                (Filename.quote author) (Filename.quote email)
+                (Filename.quote commit_message)) in
             if st_commit <> Unix.WEXITED 0 then
               Error (Printf.sprintf "git commit: %s" out_commit)
             else begin
-              let st_push, out_push = run_git
-                (Printf.sprintf "push -u origin %s" (Filename.quote branch)) in
+              let push_timeout = Keeper_tool_policy.push_timeout_sec () in
+              let st_push, out_push = run_sh ~cwd:(!worktree_dir) ~timeout_sec:push_timeout
+                (Printf.sprintf "git push -u origin %s" (Filename.quote branch)) in
               if st_push <> Unix.WEXITED 0 then
                 Error (Printf.sprintf "git push: %s" out_push)
               else
@@ -406,7 +493,8 @@ let handle_keeper_pr_workflow
             "gh pr create --draft --title %s --body %s --base %s --head %s"
             (Filename.quote pr_title) (Filename.quote body)
             (Filename.quote !resolved_base_branch) (Filename.quote branch) in
-          let st, out = run_sh ~cwd:(!worktree_dir) ~timeout_sec:30.0 gh_cmd in
+          let pr_timeout = Keeper_tool_policy.pr_create_timeout_sec () in
+          let st, out = run_sh ~cwd:(!worktree_dir) ~timeout_sec:pr_timeout gh_cmd in
           if st <> Unix.WEXITED 0 then
             Error (Printf.sprintf "gh pr create: %s" out)
           else begin
@@ -418,10 +506,324 @@ let handle_keeper_pr_workflow
       Yojson.Safe.to_string
         (`Assoc
           [ "ok", `Bool !step_ok
+          ; "deprecated", `Bool true
+          ; "migration_hint", `String
+              "Use masc_worktree_create + masc_code_write/masc_code_edit + keeper_pr_submit for multi-file changes."
           ; "steps", `String (Buffer.contents steps)
           ; "pr_url", `String !pr_url
           ; "error", `String !step_error
           ; "keeper", `String meta.name
           ])
         )
+;;
+
+let handle_keeper_pr_submit
+      ~(config : Room.config)
+      ~(meta : keeper_meta)
+      ~(args : Yojson.Safe.t)
+  =
+  let cwd = Safe_ops.json_string ~default:"" "cwd" args |> String.trim in
+  let commit_message = Safe_ops.json_string ~default:"" "commit_message" args |> String.trim in
+  let pr_title = Safe_ops.json_string ~default:"" "pr_title" args |> String.trim in
+  let pr_body = Safe_ops.json_string ~default:"" "pr_body" args |> String.trim in
+  let base_branch = Safe_ops.json_string ~default:"main" "base_branch" args |> String.trim in
+  let draft = Safe_ops.json_bool ~default:true "draft" args in
+  let files = Safe_ops.json_string_list "files" args in
+  (* Validate required fields *)
+  if cwd = "" then error_json "cwd is required (worktree or playground repos path)."
+  else if commit_message = "" then error_json "commit_message is required."
+  else if pr_title = "" then error_json "pr_title is required."
+  else
+    (* Check preset *)
+    let preset_ok =
+      match Keeper_types.tool_access_preset meta.tool_access with
+      | Some (Delivery | Coding | Full) -> true
+      | _ -> false
+    in
+    if not preset_ok then
+      Yojson.Safe.to_string
+        (`Assoc
+          [ "ok", `Bool false
+          ; "error", `String "preset_insufficient"
+          ; "reason", `String "keeper_pr_submit requires delivery, coding, or full preset"
+          ])
+    else
+      let root = Keeper_alerting_path.project_root_of_config config in
+      (* Validate cwd is within .worktrees/ or .masc/playground/ *)
+      let abs_cwd =
+        if Filename.is_relative cwd then Filename.concat root cwd
+        else cwd
+      in
+      let worktrees_prefix = Filename.concat root ".worktrees" in
+      let playground_prefix = Filename.concat root ".masc/playground" in
+      let cwd_ok =
+        String.starts_with ~prefix:(worktrees_prefix ^ "/") abs_cwd
+        || String.starts_with ~prefix:(playground_prefix ^ "/") abs_cwd
+      in
+      if not cwd_ok then
+        Yojson.Safe.to_string
+          (`Assoc
+            [ "ok", `Bool false
+            ; "error", `String "cwd_outside_boundary"
+            ; "reason", `String "cwd must be within .worktrees/ or .masc/playground/"
+            ])
+      else
+        let steps = Buffer.create 512 in
+        let step_ok = ref true in
+        let step_error = ref "" in
+        let run_step name f =
+          if !step_ok then begin
+            match f () with
+            | Ok msg ->
+              Buffer.add_string steps (Printf.sprintf "  %s: ok\n" name);
+              Log.Keeper.info "pr_submit step %s ok (keeper=%s)" name meta.name;
+              Some msg
+            | Error msg ->
+              step_ok := false;
+              step_error := Printf.sprintf "%s failed: %s" name msg;
+              Buffer.add_string steps (Printf.sprintf "  %s: FAILED — %s\n" name msg);
+              Log.Keeper.warn "pr_submit step %s failed: %s (keeper=%s)" name msg meta.name;
+              None
+          end else None
+        in
+        let run_sh_in_cwd ~timeout_sec cmd =
+          let shell = Printf.sprintf "cd %s && %s 2>&1"
+            (Filename.quote abs_cwd) cmd in
+          Process_eio.run_argv_with_status ~timeout_sec
+            [ "/bin/zsh"; "-lc"; shell ]
+        in
+        (* Step 1: git add *)
+        let _s1 = run_step "git_add" (fun () ->
+          let add_cmd =
+            if files = [] then "git add -A"
+            else Printf.sprintf "git add %s"
+              (String.concat " " (List.map Filename.quote files))
+          in
+          let st, out = run_sh_in_cwd ~timeout_sec:15.0 add_cmd in
+          if st <> Unix.WEXITED 0 then Error (Printf.sprintf "git add: %s" out)
+          else Ok "staged"
+        ) in
+        (* Step 2: check for changes *)
+        let _s2 = run_step "diff_check" (fun () ->
+          let st, out = run_sh_in_cwd ~timeout_sec:10.0
+            "git diff --cached --stat" in
+          if st <> Unix.WEXITED 0 then Error (Printf.sprintf "git diff: %s" out)
+          else if String.trim out = "" then Error "no changes staged"
+          else Ok out
+        ) in
+        (* Step 3: commit with keeper identity *)
+        let _s3 = run_step "git_commit" (fun () ->
+          let author = Keeper_identity.keeper_git_author ~keeper_name:meta.name in
+          let email = Keeper_identity.keeper_git_email ~keeper_name:meta.name in
+          let commit_cmd = Printf.sprintf
+            "GIT_AUTHOR_NAME=%s GIT_AUTHOR_EMAIL=%s GIT_COMMITTER_NAME=%s GIT_COMMITTER_EMAIL=%s git commit -m %s"
+            (Filename.quote author) (Filename.quote email)
+            (Filename.quote author) (Filename.quote email)
+            (Filename.quote commit_message) in
+          let st, out = run_sh_in_cwd ~timeout_sec:30.0 commit_cmd in
+          if st <> Unix.WEXITED 0 then Error (Printf.sprintf "git commit: %s" out)
+          else Ok "committed"
+        ) in
+        (* Step 4: determine branch and push *)
+        let branch_name = ref "" in
+        let _s4 = run_step "git_push" (fun () ->
+          let st_branch, out_branch = run_sh_in_cwd ~timeout_sec:5.0
+            "git rev-parse --abbrev-ref HEAD" in
+          if st_branch <> Unix.WEXITED 0 then
+            Error (Printf.sprintf "get branch: %s" out_branch)
+          else begin
+            branch_name := String.trim out_branch;
+            let push_timeout = Keeper_tool_policy.push_timeout_sec () in
+            let st, out = run_sh_in_cwd ~timeout_sec:push_timeout
+              (Printf.sprintf "git push -u origin %s" (Filename.quote !branch_name)) in
+            if st <> Unix.WEXITED 0 then Error (Printf.sprintf "git push: %s" out)
+            else Ok "pushed"
+          end
+        ) in
+        (* Step 5: create PR *)
+        let pr_url = ref "" in
+        let _s5 = run_step "gh_pr_create" (fun () ->
+          let body = if pr_body = "" then pr_title else pr_body in
+          let draft_flag = if draft then " --draft" else "" in
+          let pr_timeout = Keeper_tool_policy.pr_create_timeout_sec () in
+          let gh_cmd = Printf.sprintf
+            "gh pr create%s --title %s --body %s --base %s"
+            draft_flag
+            (Filename.quote pr_title) (Filename.quote body)
+            (Filename.quote base_branch) in
+          let st, out = run_sh_in_cwd ~timeout_sec:pr_timeout gh_cmd in
+          if st <> Unix.WEXITED 0 then Error (Printf.sprintf "gh pr create: %s" out)
+          else begin
+            pr_url := String.trim out;
+            Ok (Printf.sprintf "PR created: %s" (String.trim out))
+          end
+        ) in
+        Yojson.Safe.to_string
+          (`Assoc
+            [ "ok", `Bool !step_ok
+            ; "steps", `String (Buffer.contents steps)
+            ; "pr_url", `String !pr_url
+            ; "branch", `String !branch_name
+            ; "error", `String !step_error
+            ; "keeper", `String meta.name
+            ])
+;;
+
+let handle_keeper_pr_review_read
+      ~(config : Room.config)
+      ~(meta : keeper_meta)
+      ~(args : Yojson.Safe.t)
+  =
+  ignore meta;
+  let pr_number = Safe_ops.json_int ~default:0 "pr_number" args in
+  let repo = Safe_ops.json_string ~default:"" "repo" args |> String.trim in
+  if pr_number = 0 then
+    error_json "pr_number is required. Good: pr_number=123."
+  else
+    let root = Keeper_alerting_path.project_root_of_config config in
+    let repo_flag = if repo <> "" then Printf.sprintf " -R %s" (Filename.quote repo) else "" in
+    (* Get PR metadata *)
+    let meta_cmd = Printf.sprintf
+      "cd %s && gh pr view %d%s --json title,body,state,files,reviews,comments,additions,deletions 2>&1"
+      (Filename.quote root) pr_number repo_flag in
+    let st_meta, out_meta =
+      Process_eio.run_argv_with_status ~timeout_sec:15.0
+        [ "/bin/zsh"; "-lc"; meta_cmd ] in
+    (* Get PR diff (truncated) *)
+    let diff_cmd = Printf.sprintf
+      "cd %s && gh pr diff %d%s 2>&1 | head -c 65536"
+      (Filename.quote root) pr_number repo_flag in
+    let st_diff, out_diff =
+      Process_eio.run_argv_with_status ~timeout_sec:15.0
+        [ "/bin/zsh"; "-lc"; diff_cmd ] in
+    let diff_truncated = String.length out_diff >= 65536 in
+    Yojson.Safe.to_string
+      (`Assoc
+          [ "ok", `Bool (st_meta = Unix.WEXITED 0)
+          ; "pr_number", `Int pr_number
+          ; "metadata", `String out_meta
+          ; "diff", `String out_diff
+          ; "diff_truncated", `Bool diff_truncated
+          ; "diff_status", `Bool (st_diff = Unix.WEXITED 0)
+          ])
+;;
+
+let handle_keeper_pr_review_comment
+      ~(config : Room.config)
+      ~(meta : keeper_meta)
+      ~(args : Yojson.Safe.t)
+  =
+  let pr_number = Safe_ops.json_int ~default:0 "pr_number" args in
+  let body = Safe_ops.json_string ~default:"" "body" args |> String.trim in
+  let event = Safe_ops.json_string ~default:"COMMENT" "event" args |> String.trim |> String.uppercase_ascii in
+  let repo = Safe_ops.json_string ~default:"" "repo" args |> String.trim in
+  if pr_number = 0 then
+    error_json "pr_number is required."
+  else if body = "" then
+    error_json "body is required."
+  else if not (List.mem event ["COMMENT"; "APPROVE"; "REQUEST_CHANGES"]) then
+    error_json "event must be COMMENT, APPROVE, or REQUEST_CHANGES."
+  else
+    (* Check preset: requires delivery/coding/full for mutations *)
+    let preset_ok =
+      match Keeper_types.tool_access_preset meta.tool_access with
+      | Some (Delivery | Coding | Full) -> true
+      | _ -> false
+    in
+    if not preset_ok then
+      Yojson.Safe.to_string
+        (`Assoc
+          [ "ok", `Bool false
+          ; "error", `String "preset_insufficient"
+          ; "reason", `String "keeper_pr_review_comment requires delivery, coding, or full preset"
+          ])
+    else
+      let root = Keeper_alerting_path.project_root_of_config config in
+      let repo_flag = if repo <> "" then Printf.sprintf " -R %s" (Filename.quote repo) else "" in
+      (* Use gh pr review to create a review *)
+      let cmd = Printf.sprintf
+        "cd %s && gh pr review %d%s --body %s %s 2>&1"
+        (Filename.quote root) pr_number repo_flag
+        (Filename.quote body)
+        (match event with
+         | "APPROVE" -> "--approve"
+         | "REQUEST_CHANGES" -> "--request-changes"
+         | _ -> "--comment") in
+      let st, out =
+        Process_eio.run_argv_with_status ~timeout_sec:30.0
+          [ "/bin/zsh"; "-lc"; cmd ] in
+      Log.Keeper.info "pr_review_comment: pr=%d event=%s keeper=%s ok=%b"
+        pr_number event meta.name (st = Unix.WEXITED 0);
+      Yojson.Safe.to_string
+        (`Assoc
+            [ "ok", `Bool (st = Unix.WEXITED 0)
+            ; "pr_number", `Int pr_number
+            ; "event", `String event
+            ; "output", `String out
+            ; "keeper", `String meta.name
+            ])
+;;
+
+let handle_keeper_pr_review_reply
+      ~(config : Room.config)
+      ~(meta : keeper_meta)
+      ~(args : Yojson.Safe.t)
+  =
+  let pr_number = Safe_ops.json_int ~default:0 "pr_number" args in
+  let comment_id = Safe_ops.json_int ~default:0 "comment_id" args in
+  let body = Safe_ops.json_string ~default:"" "body" args |> String.trim in
+  let repo = Safe_ops.json_string ~default:"" "repo" args |> String.trim in
+  if pr_number = 0 then
+    error_json "pr_number is required."
+  else if comment_id = 0 then
+    error_json "comment_id is required."
+  else if body = "" then
+    error_json "body is required."
+  else
+    let preset_ok =
+      match Keeper_types.tool_access_preset meta.tool_access with
+      | Some (Delivery | Coding | Full) -> true
+      | _ -> false
+    in
+    if not preset_ok then
+      Yojson.Safe.to_string
+        (`Assoc
+          [ "ok", `Bool false
+          ; "error", `String "preset_insufficient"
+          ; "reason", `String "keeper_pr_review_reply requires delivery, coding, or full preset"
+          ])
+    else
+      let root = Keeper_alerting_path.project_root_of_config config in
+      (* Determine owner/repo *)
+      let owner_repo =
+        if repo <> "" then repo
+        else
+          let st, out =
+            Process_eio.run_argv_with_status ~timeout_sec:5.0
+              [ "/bin/zsh"; "-lc";
+                Printf.sprintf "cd %s && gh repo view --json nameWithOwner -q .nameWithOwner 2>&1"
+                  (Filename.quote root) ] in
+          if st = Unix.WEXITED 0 then String.trim out else ""
+      in
+      if owner_repo = "" then
+        error_json "Could not determine repository. Provide repo parameter."
+      else
+        let cmd = Printf.sprintf
+          "cd %s && gh api repos/%s/pulls/comments/%d/replies -f body=%s 2>&1"
+          (Filename.quote root)
+          owner_repo comment_id
+          (Filename.quote body) in
+        let st, out =
+          Process_eio.run_argv_with_status ~timeout_sec:15.0
+            [ "/bin/zsh"; "-lc"; cmd ] in
+        Log.Keeper.info "pr_review_reply: pr=%d comment=%d keeper=%s ok=%b"
+          pr_number comment_id meta.name (st = Unix.WEXITED 0);
+        Yojson.Safe.to_string
+          (`Assoc
+              [ "ok", `Bool (st = Unix.WEXITED 0)
+              ; "pr_number", `Int pr_number
+              ; "comment_id", `Int comment_id
+              ; "output", `String out
+              ; "keeper", `String meta.name
+              ])
 ;;

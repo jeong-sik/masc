@@ -49,7 +49,10 @@ tools = ["keeper_fs_edit"]
 tools = ["keeper_library_search", "keeper_library_read"]
 
 [groups.github]
-tools = ["keeper_github", "keeper_pr_workflow"]
+tools = ["keeper_github", "keeper_pr_workflow", "keeper_pr_submit", "keeper_preflight_check"]
+
+[groups.github_review]
+tools = ["keeper_pr_review_read", "keeper_pr_review_comment", "keeper_pr_review_reply"]
 
 # Shard-backed groups: tool names resolved from Tool_shard at runtime.
 [groups.coding_shard]
@@ -106,6 +109,20 @@ shell_write_presets = ["coding", "delivery", "full"]
 allowed_orgs = ["jeong-sik"]
 # Repos blocked even if org is allowed. Format: "org/repo" (lowercase).
 denied_repos = ["jeong-sik/me"]
+# Clone depth: 0 = full clone, N = shallow --depth N.
+default_depth = 0
+# Timeouts for git network operations (seconds).
+clone_timeout_sec = 120
+push_timeout_sec = 60
+pr_create_timeout_sec = 30
+
+# ── Keeper Identity ────────────────────────────────────────────────
+# Git author/committer identity for keeper operations.
+# {name} is replaced with the sanitized keeper name at runtime.
+
+[keeper_identity]
+author_pattern = "{name} (MASC Keeper)"
+email_pattern = "{name}@masc.local"
 
 # ── Presets ─────────────────────────────────────────────────────────
 
@@ -126,7 +143,7 @@ groups = ["base", "board_core", "coordination_core", "shell", "filesystem", "lib
 masc_groups = ["essential"]
 
 [presets.coding]
-groups = ["base", "board_core", "filesystem", "filesystem_write", "library", "shell", "coordination", "coding_shard", "coding", "github"]
+groups = ["base", "board_core", "filesystem", "filesystem_write", "library", "shell", "coordination", "coding_shard", "coding", "github", "github_review"]
 masc_groups = ["essential", "coding"]
 
 [presets.research]
@@ -136,7 +153,7 @@ masc_groups = ["essential"]
 # Delivery preset: research + coding for keepers that need to produce code changes.
 # Use for keepers whose goal involves PRs, issues, or code fixes.
 [presets.delivery]
-groups = ["base", "filesystem", "filesystem_write", "library", "shell", "coordination", "board_core", "autoresearch", "coding_shard", "coding", "github"]
+groups = ["base", "filesystem", "filesystem_write", "library", "shell", "coordination", "board_core", "autoresearch", "coding_shard", "coding", "github", "github_review"]
 masc_groups = ["essential", "coordination", "coding"]
 
 [presets.full]

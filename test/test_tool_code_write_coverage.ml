@@ -93,46 +93,60 @@ let test_org_with_dots () =
 
 (* ── validate_clone_url ──────────────────────────────────────────── *)
 
-let with_cache orgs f =
-  Tool_code_write.clone_allowed_orgs_cache := Some orgs;
-  f ()
+(* Use the real project base_path so config/tool_policy.toml is loaded.
+   Sys.getcwd () returns the project root when tests run via dune. *)
+let project_base_path () =
+  let cwd = Sys.getcwd () in
+  (* dune runs tests from _build/default/test, walk up to project root *)
+  if Sys.file_exists (Filename.concat cwd "config/tool_policy.toml") then cwd
+  else if Sys.file_exists (Filename.concat (Filename.dirname cwd) "config/tool_policy.toml")
+  then Filename.dirname cwd
+  else cwd
 
-let test_allowed_org () = with_cache ["jeong-sik"] @@ fun () ->
+let test_allowed_org () =
+  let bp = project_base_path () in
   (check (result unit string)) "allowed org passes"
     (Ok ())
-    (Tool_code_write.validate_clone_url ~base_path:"/tmp"
+    (Tool_code_write.validate_clone_url ~base_path:bp
        "https://github.com/jeong-sik/masc-mcp.git")
 
-let test_disallowed_org () = with_cache ["jeong-sik"] @@ fun () ->
-  match Tool_code_write.validate_clone_url ~base_path:"/tmp"
+let test_disallowed_org () =
+  let bp = project_base_path () in
+  match Tool_code_write.validate_clone_url ~base_path:bp
     "https://github.com/other-org/repo.git" with
   | Error _ -> ()
   | Ok () -> fail "expected error for disallowed org"
 
-let test_non_github_rejected () = with_cache ["jeong-sik"] @@ fun () ->
-  match Tool_code_write.validate_clone_url ~base_path:"/tmp"
+let test_non_github_rejected () =
+  let bp = project_base_path () in
+  match Tool_code_write.validate_clone_url ~base_path:bp
     "https://gitlab.com/jeong-sik/repo.git" with
   | Error _ -> ()
   | Ok () -> fail "expected error for non-github URL"
 
-let test_ssh_allowed () = with_cache ["jeong-sik"] @@ fun () ->
+let test_ssh_allowed () =
+  let bp = project_base_path () in
   (check (result unit string)) "ssh allowed org passes"
     (Ok ())
-    (Tool_code_write.validate_clone_url ~base_path:"/tmp"
+    (Tool_code_write.validate_clone_url ~base_path:bp
        "git@github.com:jeong-sik/oas.git")
 
-let test_empty_allowlist () = with_cache [] @@ fun () ->
-  match Tool_code_write.validate_clone_url ~base_path:"/tmp"
-    "https://github.com/jeong-sik/repo.git" with
-  | Error msg ->
-    (check bool) "mentions 'No allowed orgs'" true
-      (String.starts_with ~prefix:"No allowed orgs" msg)
-  | Ok () -> fail "expected error for empty allowlist"
+(* test_fallback_config_still_validates: even with a non-existent base_path,
+   CWD fallback finds config/tool_policy.toml — so validation still applies.
+   A disallowed org should be rejected. *)
+let test_fallback_config_still_validates () =
+  Tool_code_write.reset_policy_config_cache ();
+  Fun.protect ~finally:Tool_code_write.reset_policy_config_cache (fun () ->
+    match Tool_code_write.validate_clone_url ~base_path:"/nonexistent"
+      "https://github.com/evil-corp/repo.git" with
+    | Error _msg -> ()
+    | Ok () -> fail "disallowed org should be rejected even with fallback config")
 
-let test_mixed_case_org () = with_cache ["jeong-sik"] @@ fun () ->
+let test_mixed_case_org () =
+  let bp = project_base_path () in
   (check (result unit string)) "mixed-case org passes"
     (Ok ())
-    (Tool_code_write.validate_clone_url ~base_path:"/tmp"
+    (Tool_code_write.validate_clone_url ~base_path:bp
        "https://github.com/Jeong-Sik/repo.git")
 
 (* ── Runner ──────────────────────────────────────────────────────── *)
@@ -162,7 +176,7 @@ let () =
       test_case "disallowed org" `Quick test_disallowed_org;
       test_case "non-github rejected" `Quick test_non_github_rejected;
       test_case "ssh allowed" `Quick test_ssh_allowed;
-      test_case "empty allowlist" `Quick test_empty_allowlist;
+      test_case "fallback config rejects disallowed" `Quick test_fallback_config_still_validates;
       test_case "mixed-case org" `Quick test_mixed_case_org;
     ]);
   ]

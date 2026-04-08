@@ -52,6 +52,38 @@ let allows_shell_write_for_preset (preset : tool_preset) : bool =
     Keeper_tool_policy_config.allows_shell_write cfg
       (preset_name_of_tool_preset preset)
 
+(* ── Git clone config accessors (config-driven) ──────────────── *)
+
+let git_clone_allowed_orgs () : string list =
+  match !policy_config with
+  | None -> []
+  | Some cfg -> Keeper_tool_policy_config.git_clone_allowed_orgs cfg
+
+let git_clone_denied_repos () : string list =
+  match !policy_config with
+  | None -> []
+  | Some cfg -> Keeper_tool_policy_config.git_clone_denied_repos cfg
+
+let clone_depth () : int =
+  match !policy_config with
+  | None -> 0
+  | Some cfg -> Keeper_tool_policy_config.clone_depth cfg
+
+let clone_timeout_sec () : float =
+  match !policy_config with
+  | None -> 120.0
+  | Some cfg -> Keeper_tool_policy_config.clone_timeout_sec cfg
+
+let push_timeout_sec () : float =
+  match !policy_config with
+  | None -> 60.0
+  | Some cfg -> Keeper_tool_policy_config.push_timeout_sec cfg
+
+let pr_create_timeout_sec () : float =
+  match !policy_config with
+  | None -> 30.0
+  | Some cfg -> Keeper_tool_policy_config.pr_create_timeout_sec cfg
+
 (* ── Preset subsumption (config-driven) ──────────────────────── *)
 
 let preset_can_satisfy ~(agent_preset : string) ~(required_preset : string) : bool =

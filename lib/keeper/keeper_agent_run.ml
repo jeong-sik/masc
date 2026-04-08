@@ -1143,40 +1143,64 @@ let run_turn
            with only non-productive tools (status/heartbeat/tasks_list).
            This catches the polling loop that bypasses OAS's exact-fingerprint
            idle detection when keepers alternate boring tools.
-           Level 1 (>=2): warn.  Level 2 (>=3): final warning.
-           Level 3 (>=4): strip boring tools from allow list. *)
+
+           Escalation levels — respect LLM judgment while constraining waste:
+           Level 1 (>=2): context warning — LLM decides.
+           Level 2 (>=3): tool_choice=None_ (no tool calls) + idle directive.
+             LLM still runs but can only produce text. Prompt directs concise
+             idle report. This respects non-deterministic judgment: if new work
+             appeared in context, the LLM can describe it and the next turn
+             (with boring_consecutive reset) will have tools again.
+           Level 3 (>=4): tool_choice=None_ + boring tools stripped + stronger
+             directive. LLM budget is not reduced — quality over cost.
+           Level 4 (>=6): same constraints + explicit exit signal.
+             The prompt tells the LLM this is the last chance to act. *)
               let boring_streak = !boring_consecutive_turns in
               let ctx =
-                if boring_streak >= 4
+                if boring_streak >= 6
                 then
                   append_ctx
                     ctx
                     (Printf.sprintf
-                       "[POLLING BLOCKED] %d consecutive turns of only boring \
-                        observation tools (status/heartbeat/task-list/context). These \
-                        tools removed from this turn. Use keeper_task_claim, \
-                        keeper_fs_read, keeper_board_post, keeper_shell_readonly — or \
-                        keeper_stay_silent if nothing to do."
+                       "[IDLE EXIT] %d consecutive idle turns. You have had no \
+                        productive work for %d turns. If you have genuinely new work \
+                        to report, describe it now in under 30 tokens. Otherwise, \
+                        output a single sentence: your current status and that you \
+                        are idle. This is your final turn before the session pauses."
+                       boring_streak boring_streak)
+                else if boring_streak >= 4
+                then
+                  append_ctx
+                    ctx
+                    (Printf.sprintf
+                       "[IDLE — NO TOOLS] %d consecutive idle turns. Tool calls are \
+                        disabled. You may only respond with text. If there is new work \
+                        in your context (board posts, mentions, tasks), describe what \
+                        you would do in under 100 tokens. If nothing has changed, \
+                        state your idle status in one sentence."
                        boring_streak)
                 else if boring_streak >= 3
                 then
                   append_ctx
                     ctx
                     (Printf.sprintf
-                       "[FINAL POLLING WARNING] %d turns of only boring observation \
-                        tools. Next turn without a productive tool will REMOVE all \
-                        boring observation tools (status/heartbeat/task-list/context). \
-                        Call keeper_task_claim, keeper_fs_read, or keeper_stay_silent \
-                        NOW."
+                       "[IDLE — TEXT ONLY] %d consecutive turns with no productive \
+                        tool calls. Tool calls are now disabled for this turn. \
+                        Review your context: has anything new appeared (board posts, \
+                        mentions, claimed tasks)? If yes, describe what action you \
+                        would take and why — tools will be restored next turn. \
+                        If nothing new, reply in under 50 tokens with your idle \
+                        status. Do not apologize or explain at length."
                        boring_streak)
                 else if boring_streak >= 2
                 then
                   append_ctx
                     ctx
-                    "[POLLING DETECTED] You spent 2 turns only calling boring \
-                     observation tools (status/heartbeat/task-list/context). Do \
-                     productive work: keeper_task_claim, keeper_fs_read, \
-                     keeper_board_post, or keeper_stay_silent."
+                    "[POLLING DETECTED] 2 consecutive turns with only observation \
+                     tool calls (status/heartbeat/task-list). Check if there is \
+                     genuinely new work. If not, use keeper_stay_silent or respond \
+                     briefly. Next turn without productive action will disable tool \
+                     calls."
                 else ctx
               in
               let all_allowed =
@@ -1232,15 +1256,19 @@ let run_turn
                 else all_allowed
               in
               let tool_filter = Agent_sdk.Guardrails.AllowList all_allowed in
-              (* Force tool calling on every turn except the last.
-           tool_choice=Any (→ "required") is deterministic at the API level:
-           the parser enforces tool call format, preventing the "text response
-           trap" where 9B models respond with text instead of calling tools.
-           WHICH tool is called remains non-deterministic (model decides).
-           Last turn uses Auto so the keeper can emit a [STATE] text block.
-           Supersedes L2 turn-0-only approach.  See #5566. *)
+              (* Tool choice: graduated by keeper state.
+           Normal turns: tool_choice=Any forces tool call format (deterministic
+           at API level). WHICH tool is called is non-deterministic (model decides).
+           Last turn: Auto allows [STATE] text block.
+           Boring >= 3: None_ disables tool calls entirely. The LLM can only
+           produce text — respecting its judgment to describe context or idle
+           status without consuming tool execution budget. Tools are restored
+           when boring_consecutive resets to 0 (i.e., after a productive turn).
+           See #5566 for tool_choice=Any rationale. *)
               let tool_choice =
-                if is_last_turn || List.length all_allowed = 0
+                if boring_streak >= 3
+                then Some Agent_sdk.Types.None_  (* idle: text-only response *)
+                else if is_last_turn || List.length all_allowed = 0
                 then current_params.tool_choice (* last turn: Auto for [STATE] block *)
                 else Some Agent_sdk.Types.Any (* all other turns: force tool use *)
               in

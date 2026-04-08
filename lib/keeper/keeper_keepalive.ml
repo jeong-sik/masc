@@ -697,9 +697,29 @@ let run_keepalive_unified_turn
           ~meta:meta_after_triage
           obs
       in
+      (* Boring-turn gate: after 8+ consecutive idle turns on a non-reactive
+         channel, skip the turn entirely. Reactive turns (mentions, board
+         events) always run — new stimulus resets the boring counter.
+         Levels 1-7 are handled inside before_turn_params (graduated prompt
+         escalation + tool_choice=None_ at >=3) to let the LLM judge whether
+         new work appeared. Level 8 is the deterministic hard exit — no LLM
+         call, no token spend. *)
+      let boring_skip =
+        let streak = !boring_consecutive_turns_ref in
+        let is_reactive =
+          turn_decision.channel = Keeper_world_observation.Reactive
+        in
+        if streak >= 8 && not is_reactive then begin
+          Log.Keeper.info
+            "keeper:%s boring_consecutive=%d >= 8, skipping proactive turn (hard gate)"
+            meta_after_triage.name streak;
+          true
+        end else false
+      in
       let should_run_turn =
         (not (Atomic.get stop))
         && turn_decision.should_run
+        && (not boring_skip)
       in
       let meta_after_observe =
         Keeper_world_observation.apply_message_cursor_updates

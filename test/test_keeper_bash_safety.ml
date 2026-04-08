@@ -90,6 +90,8 @@ let test_write_ops_detected () =
     "git reset --hard HEAD~1";
     "git checkout other-branch";
     "git stash pop";
+    "git clone https://github.com/user/repo.git";
+    "git init";
     "dune clean";
     "make deploy";
     "make install";

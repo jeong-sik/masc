@@ -264,6 +264,12 @@ let make_path_test_dir () =
   (try Unix.mkdir sub 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
   let sub2 = Filename.concat dir "src" in
   (try Unix.mkdir sub2 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  (* Create test files so resolve_keeper_read_path existence check passes *)
+  let write_file path content =
+    let oc = open_out path in
+    output_string oc content; close_out oc in
+  write_file (Filename.concat sub "foo.ml") "(* test *)";
+  write_file (Filename.concat sub2 "bar.ml") "(* test *)";
   dir
 
 let cleanup_path_test_dir dir =
@@ -517,6 +523,26 @@ let test_read_vs_write_path_separation () =
     check bool "read src ok (read ignores allowed_paths)" true (Result.is_ok read_src))
 
 (* ============================================================
+   10c. Read-path: resolve_keeper_read_path rejects non-existent paths
+   ============================================================ *)
+
+let test_read_path_rejects_nonexistent () =
+  let dir = make_path_test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
+    Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+    let config = Room.default_config dir in
+    (* Path within root but does not exist on disk *)
+    let result = Keeper_alerting_path.resolve_keeper_read_path
+      ~config ~raw_path:"nonexistent-repo/" in
+    check bool "nonexistent path rejected" true (Result.is_error result);
+    let err = Result.get_error result in
+    check bool "error mentions path_not_found" true
+      (String_util.contains_substring_ci err "path_not_found");
+    check bool "error mentions playground hint" true
+      (String_util.contains_substring_ci err "playground"))
+
+(* ============================================================
    11. Keeper-reported allowed_paths symlink bug
    ============================================================ *)
 
@@ -668,6 +694,7 @@ let () =
       test_case "empty allowed permits all" `Quick test_path_empty_allowed_permits_all_within_root;
       test_case "read path ignores allowed_paths" `Quick test_read_path_ignores_allowed_paths;
       test_case "read path rejects outside root" `Quick test_read_path_rejects_outside_root;
+      test_case "read path rejects nonexistent" `Quick test_read_path_rejects_nonexistent;
       test_case "read vs write path separation" `Quick test_read_vs_write_path_separation;
       test_case "keeper-reported nonexistent subdir" `Quick
         test_keeper_reported_nonexistent_subdir;

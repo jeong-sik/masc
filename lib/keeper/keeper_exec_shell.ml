@@ -127,7 +127,6 @@ let handle_keeper_shell_readonly
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
   =
-  ignore meta;
   let raw_op =
     Safe_ops.json_string ~default:"" "op" args |> String.trim |> String.lowercase_ascii
   in
@@ -141,6 +140,7 @@ let handle_keeper_shell_readonly
     | "read" | "file" | "type" -> "cat"
     | "grep" | "search" -> "rg"
     | "dir" | "list" -> "ls"
+    | "git clone" | "clone" -> "git_clone"
     | _ -> raw_op
   in
   let root = Keeper_alerting_path.project_root_of_config config in
@@ -469,6 +469,67 @@ let handle_keeper_shell_readonly
               ; "status", Keeper_alerting_path.process_status_to_json st
               ; "output", `String out
               ]))
+  | "git_clone" ->
+    (* Clone a repo into this keeper's playground directory.
+       Sandboxed: always targets .masc/playground/<keeper_name>/<repo_name>.
+       Validates against tool_policy.toml git_clone.allowed_orgs. *)
+    let url = Safe_ops.json_string ~default:"" "url" args |> String.trim in
+    if url = "" then
+      error_json ~fields:[ "op", `String op ]
+        "url is required for git_clone. Good: url='https://github.com/org/repo'. Bad: url=''."
+    else
+      let base_path = config.base_path in
+      (match Tool_code_write.validate_clone_url ~base_path url with
+       | Error reason ->
+         Yojson.Safe.to_string
+           (`Assoc
+               [ "ok", `Bool false
+               ; "op", `String op
+               ; "error", `String "clone_blocked"
+               ; "reason", `String reason
+               ; "url", `String url
+               ])
+       | Ok () ->
+         let playground = Filename.concat root
+           (Keeper_alerting_path.playground_path_of_keeper meta.name) in
+         Fs_compat.mkdir_p playground;
+         (* Derive repo name from URL: strip trailing .git and take basename *)
+         let repo_name =
+           let base = Filename.basename url in
+           if String.ends_with ~suffix:".git" base
+           then String.sub base 0 (String.length base - 4)
+           else base
+         in
+         let clone_path = Filename.concat playground repo_name in
+         if Sys.file_exists clone_path then
+           (* Already cloned — pull latest instead *)
+           let st, out =
+             Process_eio.run_argv_with_status ~timeout_sec:60.0
+               [ "git"; "-C"; clone_path; "pull"; "--ff-only" ]
+           in
+           Yojson.Safe.to_string
+             (`Assoc
+                 [ "ok", `Bool (st = Unix.WEXITED 0)
+                 ; "op", `String op
+                 ; "action", `String "pull"
+                 ; "path", `String clone_path
+                 ; "status", Keeper_alerting_path.process_status_to_json st
+                 ; "output", `String out
+                 ])
+         else
+           let st, out =
+             Process_eio.run_argv_with_status ~timeout_sec:120.0
+               [ "git"; "clone"; "--depth"; "1"; url; clone_path ]
+           in
+           Yojson.Safe.to_string
+             (`Assoc
+                 [ "ok", `Bool (st = Unix.WEXITED 0)
+                 ; "op", `String op
+                 ; "action", `String "clone"
+                 ; "path", `String clone_path
+                 ; "status", Keeper_alerting_path.process_status_to_json st
+                 ; "output", `String out
+                 ]))
   | _ ->
     Yojson.Safe.to_string
       (`Assoc
@@ -481,7 +542,8 @@ let handle_keeper_shell_readonly
                    (fun name -> `String name)
                    [ "pwd"; "ls"; "cat"; "rg"; "git_status";
                      "find"; "head"; "tail"; "wc"; "tree";
-                     "git_log"; "git_diff"; "git_worktree"; "bash" ]) )
+                     "git_log"; "git_diff"; "git_worktree"; "bash";
+                     "git_clone" ]) )
           ])
 ;;
 

@@ -269,22 +269,25 @@ Creates parent dirs.";
 let shell_tools : Types.tool_schema list = [
   {
     name = "keeper_shell_readonly";
-    description = "Run a safe READ-ONLY project shell command. No writes, no deletes, no side effects. \
-ops: pwd, ls, cat, rg, git_status, find, head, tail, wc, tree, git_log, git_diff, bash. \
+    description = "Run a safe project shell command. \
+ops: pwd, ls, cat, rg, git_status, find, head, tail, wc, tree, git_log, git_diff, bash, git_clone. \
 find REQUIRES pattern param (e.g. pattern=\"*.ml\"). \
 bash op: single command only, no chaining (&&, ||, |, ; are blocked), no redirects (>, >>). \
+git_clone: clone a repo into your playground (url required, sandboxed to .masc/playground/<name>/). \
+If path not found, clone the repo first with op=git_clone. \
 Use rg for pattern search, find for path discovery, head/tail for line ranges, \
 git_log/git_diff for repo history, bash for curl/jq/env/which.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
-        ("op", `Assoc [("type", `String "string"); ("enum", `List [`String "pwd"; `String "ls"; `String "cat"; `String "rg"; `String "git_status"; `String "find"; `String "head"; `String "tail"; `String "wc"; `String "tree"; `String "git_log"; `String "git_diff"; `String "bash"]); ("description", `String "Command to run")]);
+        ("op", `Assoc [("type", `String "string"); ("enum", `List [`String "pwd"; `String "ls"; `String "cat"; `String "rg"; `String "git_status"; `String "find"; `String "head"; `String "tail"; `String "wc"; `String "tree"; `String "git_log"; `String "git_diff"; `String "bash"; `String "git_clone"]); ("description", `String "Command to run")]);
         ("path", `Assoc [("type", `String "string"); ("description", `String "Target path for ls/cat/rg/find/head/tail/wc/tree")]);
         ("pattern", `Assoc [("type", `String "string"); ("description", `String "Search pattern for rg, or name glob for find (REQUIRED for find, e.g. \"*.ml\")")]);
         ("limit", `Assoc [("type", `String "integer"); ("description", `String "Result limit for ls/rg/find/tree, or line count for git_log")]);
         ("lines", `Assoc [("type", `String "integer"); ("description", `String "Number of lines for head/tail (default 20, max 200)")]);
         ("max_bytes", `Assoc [("type", `String "integer"); ("description", `String "Max bytes for cat")]);
         ("command", `Assoc [("type", `String "string"); ("description", `String "Single shell command for bash op. No chaining (&&/||/;/|) or redirects (>/>>) allowed. Read-only.")]);
+        ("url", `Assoc [("type", `String "string"); ("description", `String "Git repo URL for git_clone op (e.g. 'https://github.com/org/repo'). Clones into .masc/playground/<your_name>/.")]);
       ]);
       ("required", `List [`String "op"]);
     ];

@@ -149,11 +149,33 @@ let resolve_keeper_read_path ~(config : Room.config) ~(raw_path : string)
       target_norm = root_norm
       || starts_with ~prefix:(root_norm ^ "/") target_norm
     in
-    if within_root then Ok candidate
-    else
+    if not within_root then
       Error
         (Printf.sprintf "path_outside_project_root: %s (root=%s)"
            target_norm root_norm)
+    else if not (Sys.file_exists candidate) then
+      (* Early rejection: the path is within root but does not exist on disk.
+         Without this check the underlying tool (rg, find, cat) runs and fails
+         with a system-level error that gives the LLM no actionable hint. *)
+      let parent = Filename.dirname candidate in
+      let nearby =
+        if Sys.file_exists parent && Sys.is_directory parent then
+          match Safe_ops.list_dir_safe parent with
+          | Ok entries ->
+            let limited = List.filteri (fun i _ -> i < 10) entries in
+            Printf.sprintf " Available in %s: [%s]."
+              parent (String.concat ", " limited)
+          | Error _ -> ""
+        else ""
+      in
+      Error
+        (Printf.sprintf
+           "path_not_found: '%s' does not exist.%s \
+            Hint: clone repos into your playground \
+            (.masc/playground/<your_name>/) using op=git_clone, \
+            then read from there."
+           raw nearby)
+    else Ok candidate
 
 let process_status_to_json (st : Unix.process_status) : Yojson.Safe.t =
   match st with

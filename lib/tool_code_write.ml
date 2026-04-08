@@ -130,7 +130,8 @@ let extract_github_org url =
       else
         Some org
 
-(** Extract "org/repo" from a GitHub clone URL (lowercase, .git stripped). *)
+(** Extract "org/repo" from a GitHub clone URL (lowercase, .git and trailing
+    slash stripped). Returns exactly two path segments or None. *)
 let extract_github_org_repo url =
   let lc = String.lowercase_ascii url in
   let prefixes = [
@@ -149,13 +150,22 @@ let extract_github_org_repo url =
   match after_prefix with
   | None -> None
   | Some rest ->
+    (* Strip trailing slash, then .git suffix *)
+    let rest =
+      if String.ends_with ~suffix:"/" rest
+      then String.sub rest 0 (String.length rest - 1)
+      else rest
+    in
     let stripped =
       if String.ends_with ~suffix:".git" rest
       then String.sub rest 0 (String.length rest - 4)
       else rest
     in
-    if String.contains stripped '/' then Some stripped
-    else None
+    (* Validate exactly "org/repo" — two segments, no deeper paths *)
+    match String.split_on_char '/' stripped with
+    | [org; repo] when org <> "" && repo <> "" ->
+      Some (org ^ "/" ^ repo)
+    | _ -> None
 
 let clone_denied_repos_cache : string list option ref = ref None
 

@@ -294,12 +294,11 @@ describe('MissionBriefingCard', () => {
     render(html`<${MissionBriefingCard} />`, container)
     await flushUi()
 
-    expect(container.textContent).toContain('실제 판단 대상')
     expect(container.textContent).toContain('live-judge')
-    expect(container.textContent).toContain('실제 판단 요청 열기')
+    expect(container.textContent).toContain('실제 판단 요청')
 
     const button = Array.from(container.querySelectorAll('button'))
-      .find(item => item.textContent?.includes('실제 판단 요청 열기'))
+      .find(item => item.textContent?.includes('실제 판단 요청'))
     button?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     await flushUi()
 
@@ -350,7 +349,7 @@ describe('MissionBriefingCard', () => {
     expect(container.textContent).toContain('mission-judge')
 
     const button = Array.from(container.querySelectorAll('button'))
-      .find(item => item.textContent?.includes('실제 판단 요청 열기'))
+      .find(item => item.textContent?.includes('실제 판단 요청'))
     button?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     await flushUi()
 

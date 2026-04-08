@@ -122,11 +122,6 @@ if [ -z "$REVIEW_COMMAND" ]; then
   require_cmd curl
 fi
 
-if [ -z "$REVIEW_COMMAND" ] && [ -z "$REVIEW_URL" ]; then
-  echo "set MASC_LOCAL_REVIEW_COMMAND or MASC_LOCAL_REVIEW_URL (OAS/OpenAI-compatible endpoint)" >&2
-  exit 1
-fi
-
 resolve_shared_repo_root() {
   local common_dir
   common_dir="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null || git rev-parse --git-common-dir 2>/dev/null || true)"
@@ -180,6 +175,12 @@ CACHE_KEY="$(
 if [ "$PRINT_CACHE_KEY" -eq 1 ]; then
   printf '%s\n' "$CACHE_KEY"
   exit 0
+fi
+
+# Require a review endpoint only when actually running a review (not --print-cache-key).
+if [ -z "$REVIEW_COMMAND" ] && [ -z "$REVIEW_URL" ]; then
+  echo "set MASC_LOCAL_REVIEW_COMMAND or MASC_LOCAL_REVIEW_URL (OAS/OpenAI-compatible endpoint)" >&2
+  exit 1
 fi
 
 LOCK_ROOT="$CACHE_DIR/locks"

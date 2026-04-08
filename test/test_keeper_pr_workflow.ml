@@ -378,25 +378,25 @@ let test_branch_slash_converted_to_hyphen_in_task_id () =
     check bool "error does NOT mention path separators"
       false (String_util.contains_substring_ci error "path separator"))
 
-(* --- Worktree step failure propagation --- *)
+(* --- Clone step failure propagation --- *)
 
-let test_worktree_failure_propagates () =
+let test_clone_failure_propagates () =
   with_room (fun config ->
     let meta = make_meta_with_preset "delivery" in
     let result = call_tool config meta "keeper_pr_workflow" valid_pr_args in
     let json = parse_json result in
-    (* Test room is not a git repo, so worktree_create fails.
+    (* Test room is not a git repo, so playground_clone fails.
        The result should be ok=false with a meaningful error. *)
     check bool "ok is false" false (json_bool "ok" json);
     let steps = json_string "steps" json in
-    check bool "steps contains worktree_create"
+    check bool "steps contains playground_clone"
       true (try ignore (Str.search_forward
-        (Str.regexp_string "worktree_create") steps 0); true
+        (Str.regexp_string "playground_clone") steps 0); true
         with Not_found -> false);
     let error = json_string "error" json in
-    check bool "error mentions worktree"
+    check bool "error mentions clone"
       true (try ignore (Str.search_forward
-        (Str.regexp_string "worktree") (String.lowercase_ascii error) 0); true
+        (Str.regexp_string "clone") (String.lowercase_ascii error) 0); true
         with Not_found -> false))
 
 (* --- Task lifecycle: claim → done --- *)
@@ -501,7 +501,7 @@ let () =
       [ test_case "slash to hyphen" `Quick test_branch_slash_converted_to_hyphen_in_task_id
       ]
     ; "step_propagation",
-      [ test_case "worktree failure" `Quick test_worktree_failure_propagates
+      [ test_case "clone failure" `Quick test_clone_failure_propagates
       ]
     ; "task_lifecycle",
       [ test_case "claim then done" `Quick test_task_claim_then_done_lifecycle

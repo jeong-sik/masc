@@ -687,6 +687,14 @@ let run_turn
       List.iter (fun n -> Hashtbl.replace tbl n ()) allowed; tbl
     in
     let raw_hit_count = List.length retrieved in
+    (* Samchon principle: "if the tool is already visible, tell the LLM
+       which one" — prevents redundant search→call cycles. *)
+    let matched_core_names =
+      retrieved
+      |> List.filter_map (fun (name, _) ->
+        if List.mem name core || name = "keeper_tool_search"
+        then Some name else None)
+    in
     let after_core_filter =
       retrieved
       |> List.filter (fun (name, _) ->
@@ -743,27 +751,39 @@ let run_turn
         ]
       ) new_discoveries
     in
-    let hint = match results with
-      | [] when raw_hit_count = 0 ->
+    let hint = match results, matched_core_names with
+      | [], [] when raw_hit_count = 0 ->
         "No tools match this query. Try different keywords (e.g., 'worktree', 'board', 'github')."
-      | [] when filtered_by_policy > 0 ->
-        Printf.sprintf "Found %d matches but all filtered (already visible or policy-denied). Your current tools may already cover this need." filtered_by_policy
-      | [] ->
+      | [], _ :: _ when filtered_by_policy = 0 ->
+        Printf.sprintf "Already loaded: %s. Call directly — no search needed."
+          (String.concat ", " matched_core_names)
+      | [], _ when filtered_by_policy > 0 ->
+        let core_part = match matched_core_names with
+          | [] -> ""
+          | names -> Printf.sprintf " Already loaded: %s." (String.concat ", " names)
+        in
+        Printf.sprintf "Found %d matches but all filtered (already visible or policy-denied).%s"
+          (filtered_by_policy + List.length matched_core_names) core_part
+      | [], _ ->
         Printf.sprintf "Found %d raw BM25 hits but all are already in your core tool set." raw_hit_count
-      | _ -> "Call any of these tools by name in this or a future turn."
+      | _, _ -> "Call any of these tools by name in this or a future turn."
     in
-    `Assoc [
+    `Assoc ([
       ("ok", `Bool true);
       ("query", `String query);
       ("results", `List results);
       ("result_count", `Int (List.length results));
+    ] @ (match matched_core_names with
+      | [] -> []
+      | names -> [("already_visible", `List (List.map (fun n -> `String n) names))])
+    @ [
       ("diagnostics", `Assoc [
         ("raw_bm25_hits", `Int raw_hit_count);
         ("filtered_by_core", `Int (raw_hit_count - List.length after_core_filter));
         ("filtered_by_policy", `Int filtered_by_policy);
       ]);
       ("hint", `String hint);
-    ]
+    ])
   );
   (* Visibility measurement (#4961): log universe size vs search scope *)
   if Keeper_types_profile.keeper_debug then

@@ -1531,6 +1531,7 @@ let test_side_effect_reclassification_skips_retry_safe_keeper_observation_tools 
           "keeper_board_list";
           "keeper_shell_readonly";
           "keeper_fs_read";
+          "masc_heartbeat";
         ]
       original
   in

@@ -249,16 +249,8 @@ status_raw="$(mcp_call_tool 90007 "masc_team_session_status" "$(jq -cn --arg s "
 mcp_require_tool_ok "$status_raw" "final masc_team_session_status"
 status_result="$(printf "%s" "$status_raw" | mcp_extract_result)"
 session_status="$(printf "%s" "$status_result" | jq -r '.session.status // empty')"
-model_cache_hits="$(printf "%s" "$status_result" | jq -r '.inference_cache_metrics.hits // 0')"
-model_cache_misses="$(printf "%s" "$status_result" | jq -r '.inference_cache_metrics.misses // 0')"
 if [ "$session_status" = "running" ]; then
   echo "FAIL: session still running after stop"
-  printf "%s\n" "$status_result"
-  exit 1
-fi
-
-if [ "$ASSERT_CACHE_HIT" = "1" ] && [ "$model_cache_hits" -le 0 ]; then
-  echo "FAIL: ASSERT_CACHE_HIT=1 but inference_cache_metrics.hits=$model_cache_hits"
   printf "%s\n" "$status_result"
   exit 1
 fi

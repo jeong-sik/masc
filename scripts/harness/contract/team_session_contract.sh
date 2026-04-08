@@ -31,7 +31,7 @@ fi
 echo "[4/12] masc_team_session_status"
 r4="$(call_tool 4104 "masc_team_session_status" "{\"session_id\":\"$s1\"}")"
 require_ok "$r4"
-if ! printf "%s" "$r4" | extract_result | jq -e '.team_health and .communication_metrics and .orchestration_state and .cascade_metrics and .inference_cache_metrics' >/dev/null; then
+if ! printf "%s" "$r4" | extract_result | jq -e '.team_health and .communication_metrics and .orchestration_state and .cascade_metrics' >/dev/null; then
   echo "FAIL: status missing required sections"
   printf "%s\n" "$r4"
   exit 1

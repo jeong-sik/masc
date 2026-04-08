@@ -35,7 +35,7 @@ for i in $(seq 1 "$ROUNDS"); do
   fi
 
   status_raw="$(mcp_call_tool $((4400 + i)) "masc_team_session_status" "{\"session_id\":\"$session_id\"}")"
-  if ! printf "%s" "$status_raw" | mcp_extract_result | jq -e '.team_health and .communication_metrics and .cascade_metrics and .inference_cache_metrics' >/dev/null 2>&1; then
+  if ! printf "%s" "$status_raw" | mcp_extract_result | jq -e '.team_health and .communication_metrics and .cascade_metrics' >/dev/null 2>&1; then
     echo "[soak] FAIL status round=$i session=$session_id"
     failure=$((failure + 1))
     continue

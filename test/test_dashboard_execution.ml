@@ -75,6 +75,30 @@ let comment_json ~id ~post_id ~author ~content ?(created_at = 1000.0) () =
       ("votes_down", `Int 0);
     ]
 
+let with_execution_cache json f =
+  let surface = Lib.Server_dashboard_http._execution_cache in
+  let original_json = surface.json in
+  let original_last_success_at = surface.last_success_at in
+  let original_last_success_unix = surface.last_success_unix in
+  let original_last_attempt_at = surface.last_attempt_at in
+  let original_last_attempt_unix = surface.last_attempt_unix in
+  let original_last_error = surface.last_error in
+  let original_last_error_at = surface.last_error_at in
+  let original_last_error_unix = surface.last_error_unix in
+  Fun.protect
+    ~finally:(fun () ->
+      surface.json <- original_json;
+      surface.last_success_at <- original_last_success_at;
+      surface.last_success_unix <- original_last_success_unix;
+      surface.last_attempt_at <- original_last_attempt_at;
+      surface.last_attempt_unix <- original_last_attempt_unix;
+      surface.last_error <- original_last_error;
+      surface.last_error_at <- original_last_error_at;
+      surface.last_error_unix <- original_last_error_unix)
+    (fun () ->
+      Lib.Server_dashboard_http_cache.mark_cached_surface_success surface json;
+      f ())
+
 let test_dashboard_execution_fixture () =
   let dir = test_dir () in
   (* Force filesystem backend to prevent PG auto-detection in hermetic tests *)
@@ -461,6 +485,85 @@ let test_dashboard_execution_fresh_join_not_marked_stale () =
           false has_test_agent
       ))
 
+let test_patch_keeper_dependent_caches_tolerates_null_agent () =
+  let execution_json =
+    `Assoc
+      [
+        ("status", `Assoc [("namespace", `String "default")]);
+        ( "keepers",
+          `List
+            [
+              `Assoc
+                [
+                  ("name", `String "sangsu");
+                  ("status", `String "running");
+                  ("agent", `Null);
+                ];
+            ] );
+      ]
+  in
+  with_execution_cache execution_json (fun () ->
+    Lib.Server_dashboard_http.patch_keeper_dependent_caches
+      ~keeper_name:"sangsu" ~event:"started";
+    let open Yojson.Safe.Util in
+    let keepers =
+      Lib.Server_dashboard_http._execution_cache.json
+      |> member "keepers" |> to_list
+    in
+    let row = List.hd keepers in
+    check string "patched status falls back to idle"
+      "idle"
+      (row |> member "status" |> to_string);
+    check bool "keepalive running patched"
+      true
+      (row |> member "keepalive_running" |> to_bool))
+
+let test_patch_surface_json_for_running_keepers_tolerates_null_agent () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let config = Room_utils.default_config dir in
+      ignore (Lib.Room.init config ~agent_name:None);
+      ignore
+        (Lib.Room.join config
+           ~agent_name:"keeper-sangsu-agent"
+           ~agent_type_override:(Some "keeper")
+           ~capabilities:["keeper"]
+           ());
+      Eio.Switch.run (fun sw ->
+        Fun.protect
+          ~finally:(fun () ->
+            Masc_mcp.Keeper_keepalive.stop_keepalive "sangsu")
+          (fun () ->
+            create_keeper env sw config "sangsu";
+            let json =
+              `Assoc
+                [
+                  ( "keepers",
+                    `List
+                      [
+                        `Assoc
+                          [
+                            ("name", `String "sangsu");
+                            ("status", `String "running");
+                            ("agent", `Null);
+                          ];
+                      ] );
+                ]
+            in
+            let patched =
+              Lib.Server_dashboard_http.patch_surface_json_for_running_keepers
+                config json
+            in
+            let open Yojson.Safe.Util in
+            let row = patched |> member "keepers" |> to_list |> List.hd in
+            check string "running keepers patch remains stable"
+              "idle"
+              (row |> member "status" |> to_string))))
+
 let () =
   Alcotest.run "Dashboard Execution"
     [
@@ -482,5 +585,9 @@ let () =
             test_dashboard_shell_excludes_keeper_agents_from_general_count;
           Alcotest.test_case "fresh join is not stale" `Quick
             test_dashboard_execution_fresh_join_not_marked_stale;
+          Alcotest.test_case "lifecycle patch tolerates null agent" `Quick
+            test_patch_keeper_dependent_caches_tolerates_null_agent;
+          Alcotest.test_case "running keeper patch tolerates null agent" `Quick
+            test_patch_surface_json_for_running_keepers_tolerates_null_agent;
         ] );
     ]

@@ -493,12 +493,28 @@ let handle_keeper_shell_readonly
          let playground = Filename.concat root
            (Keeper_alerting_path.playground_path_of_keeper meta.name) in
          Fs_compat.mkdir_p playground;
-         (* Derive repo name from URL: strip trailing .git and take basename *)
+         (* Derive repo name from URL: strip trailing slash, .git, then basename.
+            Guard against empty/traversal names (e.g. url ending with "/" or ".."). *)
          let repo_name =
-           let base = Filename.basename url in
-           if String.ends_with ~suffix:".git" base
-           then String.sub base 0 (String.length base - 4)
-           else base
+           let stripped =
+             let s = String.trim url in
+             if String.ends_with ~suffix:"/" s
+             then String.sub s 0 (String.length s - 1) else s
+           in
+           let base = Filename.basename stripped in
+           let name =
+             if String.ends_with ~suffix:".git" base
+             then String.sub base 0 (String.length base - 4)
+             else base
+           in
+           (* Sanitize: only allow alphanumeric, hyphen, underscore, dot.
+              Reject empty, ".", ".." to prevent traversal. *)
+           let safe = String.map (fun c ->
+             if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+                || (c >= '0' && c <= '9') || c = '-' || c = '_' || c = '.'
+             then c else '_') name
+           in
+           if safe = "" || safe = "." || safe = ".." then "repo" else safe
          in
          let clone_path = Filename.concat playground repo_name in
          if Sys.file_exists clone_path then

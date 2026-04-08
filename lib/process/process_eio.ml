@@ -273,12 +273,19 @@ let spawn_and_drain_stdout ~sw pm ~cwd ?env ?stdin_source argv stdout_buf =
       argv
   in
   Eio.Flow.close stdout_w;
-  Eio.Flow.copy stdout_r (Eio.Flow.buffer_sink stdout_buf);
-  Eio.Flow.close stdout_r;
+  (* Drain to EOF before await — pipe close is switch-managed on cancel. *)
+  (try
+     Eio.Flow.copy stdout_r (Eio.Flow.buffer_sink stdout_buf);
+     Eio.Flow.close stdout_r
+   with Eio.Cancel.Cancelled _ as e ->
+     (try Eio.Flow.close stdout_r with _ -> ());
+     raise e);
   ignore (Eio.Process.await proc : Eio.Process.exit_status)
 
 (** Like [spawn_and_drain_stdout] but captures both stdout and stderr into
-    separate buffers and returns the process exit status. *)
+    separate buffers and returns the process exit status.
+    Drain happens in parallel via [Fiber.both]; [await] is called after
+    both pipes reach EOF, so buffers are guaranteed complete. *)
 let spawn_and_drain_both ~sw pm ~cwd ?env ?stdin_source argv stdout_buf
     stderr_buf =
   let stdout_r, stdout_w = Eio.Process.pipe ~sw pm in
@@ -292,13 +299,18 @@ let spawn_and_drain_both ~sw pm ~cwd ?env ?stdin_source argv stdout_buf
   in
   Eio.Flow.close stdout_w;
   Eio.Flow.close stderr_w;
-  Eio.Fiber.both
-    (fun () ->
-      Eio.Flow.copy stdout_r (Eio.Flow.buffer_sink stdout_buf);
-      Eio.Flow.close stdout_r)
-    (fun () ->
-      Eio.Flow.copy stderr_r (Eio.Flow.buffer_sink stderr_buf);
-      Eio.Flow.close stderr_r);
+  (try
+     Eio.Fiber.both
+       (fun () ->
+         Eio.Flow.copy stdout_r (Eio.Flow.buffer_sink stdout_buf);
+         Eio.Flow.close stdout_r)
+       (fun () ->
+         Eio.Flow.copy stderr_r (Eio.Flow.buffer_sink stderr_buf);
+         Eio.Flow.close stderr_r)
+   with Eio.Cancel.Cancelled _ as e ->
+     (try Eio.Flow.close stdout_r with _ -> ());
+     (try Eio.Flow.close stderr_r with _ -> ());
+     raise e);
   let status = Eio.Process.await proc in
   match status with
   | `Exited n -> Unix.WEXITED n

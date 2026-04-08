@@ -101,6 +101,22 @@ let test_failure_reason_exception () =
   let s = R.failure_reason_to_string (R.Exception "Sys_error(disk full)") in
   check string "exception reason" "exception(Sys_error(disk full))" s
 
+let test_failure_reason_ambiguous_partial_commit () =
+  let s =
+    R.failure_reason_to_string
+      (R.Ambiguous_partial_commit "turn outcome ambiguous")
+  in
+  check string "ambiguous partial commit reason"
+    "ambiguous_partial_commit(turn outcome ambiguous)" s
+
+let test_failure_reason_manual_reconcile_required () =
+  check bool "ambiguous partial commit requires manual reconcile" true
+    (R.failure_reason_requires_manual_reconcile
+       (R.Ambiguous_partial_commit "turn outcome ambiguous"));
+  check bool "turn failures do not require manual reconcile" false
+    (R.failure_reason_requires_manual_reconcile
+       (R.Turn_consecutive_failures 2))
+
 (* ── Config defaults ──────────────────────────────────── *)
 
 let test_self_preservation_ratio_default () =
@@ -237,6 +253,10 @@ let () =
       test_case "heartbeat" `Quick test_failure_reason_heartbeat;
       test_case "fiber_unresolved" `Quick test_failure_reason_fiber;
       test_case "exception" `Quick test_failure_reason_exception;
+      test_case "ambiguous partial commit" `Quick
+        test_failure_reason_ambiguous_partial_commit;
+      test_case "manual reconcile helper" `Quick
+        test_failure_reason_manual_reconcile_required;
     ];
     "config", [
       test_case "ratio default" `Quick test_self_preservation_ratio_default;

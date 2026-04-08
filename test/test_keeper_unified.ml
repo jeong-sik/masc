@@ -1434,6 +1434,52 @@ let test_overflow_detection_and_limit_parsing () =
     (UT.is_context_overflow
        (Agent_sdk.Error.Api (NetworkError { message = "timeout" })))
 
+let test_side_effect_timeout_reclassified_as_persistent () =
+  let original =
+    Agent_sdk.Error.Api
+      (Timeout { message = "Execution cancelled after 300.0s" })
+  in
+  let reclassified =
+    UT.reclassify_error_after_side_effect
+      ~tool_names:["keeper_fs_edit"] original
+  in
+  check bool "marked ambiguous partial" true
+    (UT.is_ambiguous_side_effect_error reclassified);
+  check bool "no longer transient" false
+    (UT.is_transient_network_error reclassified);
+  check bool "mentions tool name" true
+    (contains_substring
+       (Agent_sdk.Error.to_string reclassified)
+       "keeper_fs_edit")
+
+let test_side_effect_reclassification_requires_committed_tools () =
+  let original =
+    Agent_sdk.Error.Api
+      (Timeout { message = "Execution cancelled after 300.0s" })
+  in
+  let reclassified =
+    UT.reclassify_error_after_side_effect
+      ~tool_names:[] original
+  in
+  check bool "no committed tool keeps transient" true
+    (UT.is_transient_network_error reclassified);
+  check bool "not marked ambiguous partial" false
+    (UT.is_ambiguous_side_effect_error reclassified)
+
+let test_side_effect_reclassification_marks_any_post_commit_error () =
+  let original =
+    Agent_sdk.Error.Api
+      (AuthError { message = "Unauthorized" })
+  in
+  let reclassified =
+    UT.reclassify_error_after_side_effect
+      ~tool_names:["keeper_fs_edit"] original
+  in
+  check bool "auth error stays non-transient" false
+    (UT.is_transient_network_error reclassified);
+  check bool "auth error becomes ambiguous partial" true
+    (UT.is_ambiguous_side_effect_error reclassified)
+
 let test_metrics_mixed_response () =
   let result =
     make_run_result ~text:"Done." ~tools:["keeper_fs_read"]
@@ -2090,6 +2136,12 @@ let () =
             check bool "internal" false
               (UT.is_transient_network_error
                  (Agent_sdk.Error.Internal "some error")));
+          test_case "timeout after mutating tool becomes persistent" `Quick
+            test_side_effect_timeout_reclassified_as_persistent;
+          test_case "reclassification requires committed tools" `Quick
+            test_side_effect_reclassification_requires_committed_tools;
+          test_case "any post-commit error becomes ambiguous partial" `Quick
+            test_side_effect_reclassification_marks_any_post_commit_error;
           test_case "overflow detection and limit parsing" `Quick
             test_overflow_detection_and_limit_parsing;
         ] );

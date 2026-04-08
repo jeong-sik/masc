@@ -75,6 +75,17 @@ val broadcast_lifecycle_events :
     Uses structured [Oas.Error.sdk_error] pattern matching. *)
 val is_transient_network_error : Oas.Error.sdk_error -> bool
 
+(** Reclassify any post-commit turn error as a persistent integrity error when
+    mutating tool calls already committed in the same turn. *)
+val reclassify_error_after_side_effect :
+  tool_names:string list ->
+  Oas.Error.sdk_error ->
+  Oas.Error.sdk_error
+
+(** [true] when an error represents an ambiguous partial commit after a
+    mutating tool call succeeded but the turn failed before a clean result. *)
+val is_ambiguous_side_effect_error : Oas.Error.sdk_error -> bool
+
 (** [true] when a structured error indicates context overflow. *)
 val is_context_overflow : Oas.Error.sdk_error -> bool
 

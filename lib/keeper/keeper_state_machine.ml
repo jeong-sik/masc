@@ -53,6 +53,7 @@ type conditions = {
   fiber_alive : bool;
   heartbeat_healthy : bool;
   turn_healthy : bool;
+  manual_reconcile_required : bool;
   context_within_budget : bool;
   context_handoff_needed : bool;
   compaction_active : bool;
@@ -69,6 +70,7 @@ let default_conditions = {
   fiber_alive = false;
   heartbeat_healthy = true;
   turn_healthy = true;
+  manual_reconcile_required = false;
   context_within_budget = true;
   context_handoff_needed = false;
   compaction_active = false;
@@ -98,6 +100,7 @@ type event =
   | Heartbeat_failed of { consecutive : int; max_allowed : int }
   | Turn_succeeded
   | Turn_failed of { consecutive : int; max_allowed : int }
+  | Manual_reconcile_required of { reason : string }
   | Context_measured of {
       context_ratio : float;
       message_count : int;
@@ -128,6 +131,8 @@ let event_to_string = function
   | Turn_succeeded -> "turn_succeeded"
   | Turn_failed r ->
     Printf.sprintf "turn_failed(%d/%d)" r.consecutive r.max_allowed
+  | Manual_reconcile_required r ->
+    Printf.sprintf "manual_reconcile_required(%s)" r.reason
   | Context_measured r ->
     Printf.sprintf "context_measured(ratio=%.3f)" r.context_ratio
   | Compaction_started -> "compaction_started"
@@ -267,7 +272,10 @@ let derive_phase (c : conditions) : phase =
   else if c.handoff_active then HandingOff
   else if c.compaction_active then Compacting
   (* 7. Health degradation *)
-  else if not c.heartbeat_healthy || not c.turn_healthy then Failing
+  else if not c.heartbeat_healthy
+          || not c.turn_healthy
+          || c.manual_reconcile_required
+  then Failing
   (* 8. Healthy running *)
   else if c.fiber_alive then Running
   (* 9. Initial / unreachable fallback *)
@@ -286,10 +294,15 @@ let update_conditions (c : conditions) (ev : event) : conditions =
     let _ = max_allowed in
     { c with heartbeat_healthy = consecutive = 0 }
   | Turn_succeeded ->
-    { c with turn_healthy = true }
+    { c with
+      turn_healthy = true;
+      manual_reconcile_required = false;
+    }
   | Turn_failed { consecutive; max_allowed } ->
     let _ = max_allowed in
     { c with turn_healthy = consecutive = 0 }
+  | Manual_reconcile_required _ ->
+    { c with manual_reconcile_required = true }
   | Context_measured { auto_rules; _ } ->
     { c with
       guardrail_triggered = auto_rules.guardrail_stop;
@@ -335,6 +348,7 @@ let update_conditions (c : conditions) (ev : event) : conditions =
       fiber_alive = true;
       heartbeat_healthy = true;
       turn_healthy = true;
+      manual_reconcile_required = false;
       compaction_active = false;
       handoff_active = false;
       backoff_elapsed = false;
@@ -441,6 +455,7 @@ let conditions_to_json (c : conditions) =
     "fiber_alive", `Bool c.fiber_alive;
     "heartbeat_healthy", `Bool c.heartbeat_healthy;
     "turn_healthy", `Bool c.turn_healthy;
+    "manual_reconcile_required", `Bool c.manual_reconcile_required;
     "context_within_budget", `Bool c.context_within_budget;
     "context_handoff_needed", `Bool c.context_handoff_needed;
     "compaction_active", `Bool c.compaction_active;
@@ -468,6 +483,8 @@ let event_to_json (ev : event) : Yojson.Safe.t =
       "consecutive", `Int r.consecutive;
       "max_allowed", `Int r.max_allowed;
     ]
+  | Manual_reconcile_required r ->
+    obj "manual_reconcile_required" ["reason", `String r.reason]
   | Context_measured r ->
     obj "context_measured" [
       "context_ratio", `Float r.context_ratio;
@@ -542,14 +559,14 @@ let phase_to_mermaid ~(current : phase) : string =
   p "    Offline --> Running : Fiber_started\n";
   p "    Offline --> Draining : stop requested\n";
   p "    Offline --> Stopped : stop while not started\n";
-  p "    Running --> Failing : hb/turn fail\n";
+  p "    Running --> Failing : hb/turn/reconcile fail\n";
   p "    Running --> Compacting : compact start\n";
   p "    Running --> HandingOff : handoff start\n";
   p "    Running --> Draining : stop requested\n";
   p "    Running --> Paused : operator pause\n";
   p "    Running --> Stopped : stop requested\n";
   p "    Running --> Crashed : fiber death\n";
-  p "    Failing --> Running : hb/turn ok\n";
+  p "    Failing --> Running : clean turn recovery\n";
   p "    Failing --> Crashed : fiber death\n";
   p "    Failing --> Draining : stop requested\n";
   p "    Failing --> Paused : operator pause\n";

@@ -64,14 +64,19 @@ let check_step_invariants
   if new_phase = SM.Dead && new_conditions.restart_budget_remaining then
     fail "DeadRequiresNoBudget" "phase=Dead but restart_budget_remaining=true";
 
-  (* 9. DerivePhaseAgreement — derive_phase must agree with recorded phase *)
+  (* 9. RunningClearsManualReconcile — Running implies no sticky reconcile flag *)
+  if new_phase = SM.Running && new_conditions.manual_reconcile_required then
+    fail "RunningClearsManualReconcile"
+      "phase=Running but manual_reconcile_required=true";
+
+  (* 10. DerivePhaseAgreement — derive_phase must agree with recorded phase *)
   let derived = SM.derive_phase new_conditions in
   if derived <> new_phase then
     fail "DerivePhaseAgreement"
       (Printf.sprintf "derive_phase=%s but recorded=%s"
          (SM.phase_to_string derived) (SM.phase_to_string new_phase));
 
-  (* 10. TransitionMatrixAgreement — phase change must be allowed *)
+  (* 11. TransitionMatrixAgreement — phase change must be allowed *)
   if prev_phase <> new_phase
      && not (SM.can_transition ~from_phase:prev_phase ~to_phase:new_phase) then
     fail "TransitionMatrixAgreement"

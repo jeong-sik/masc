@@ -4,7 +4,8 @@
 
 (** Runs a generic Eio execution (usually an OAS Agent.run or Model.call) with a strict
     structural timeout. If the execution is cancelled by a timeout or global stop,
-    the exception is caught, the context mutations are discarded (functional rollback),
+    the exception is caught, OAS-local context mutations are discarded
+    (functional rollback), external tool side effects are not reverted,
     and an OAS timeout error is returned. *)
 let run_with_timeout_and_fallback ~timeout_s fn =
   let do_timeout fn =
@@ -16,13 +17,16 @@ let run_with_timeout_and_fallback ~timeout_s fn =
     do_timeout fn
   with
   | Eio.Time.Timeout ->
-    Log.Keeper.warn "keeper_llm_bridge: OAS execution timed out after %.1fs (structural rollback)" timeout_s;
+    Log.Keeper.warn
+      "keeper_llm_bridge: OAS execution timed out after %.1fs (OAS context rollback only; external tool side effects are not reverted)"
+      timeout_s;
     Error (Oas.Error.Api (Timeout { message = Printf.sprintf "Execution cancelled after %.1fs" timeout_s }))
   | Eio.Cancel.Cancelled _ ->
     (* TLA+: FiberHandlesCancellation -> Rollback context.
        Since Oas_worker_exec returns the new context functionally inside the run_result,
        we inherently discard intermediate state when cancelled here. *)
-    Log.Keeper.warn "keeper_llm_bridge: OAS execution cancelled (structural rollback)";
+    Log.Keeper.warn
+      "keeper_llm_bridge: OAS execution cancelled (OAS context rollback only; external tool side effects are not reverted)";
     Error (Oas.Error.Api (Timeout { message = Printf.sprintf "Execution cancelled after %.1fs" timeout_s }))
   | exn ->
     (* TLA+: HandleError -> Rollback context *)

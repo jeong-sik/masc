@@ -48,6 +48,34 @@ let is_transient_network_error (err : Oas.Error.sdk_error) : bool =
   | Oas.Error.Api (ServerError { status = 503; _ }) -> true
   | _ -> false
 
+let ambiguous_side_effect_error_prefix =
+  "turn outcome ambiguous after committed mutating tool call(s)"
+
+let committed_mutating_tools tool_names =
+  tool_names
+  |> dedupe_keep_order
+  |> List.filter (fun name -> not (Tool_dispatch.is_read_only name))
+
+let is_ambiguous_side_effect_error (err : Oas.Error.sdk_error) : bool =
+  match err with
+  | Oas.Error.Internal msg ->
+      string_contains_substring
+        ~needle:ambiguous_side_effect_error_prefix msg
+  | _ -> false
+
+let reclassify_error_after_side_effect
+    ~(tool_names : string list)
+    (err : Oas.Error.sdk_error) : Oas.Error.sdk_error =
+  let committed_tools = committed_mutating_tools tool_names in
+  if committed_tools = [] || is_ambiguous_side_effect_error err then err
+  else
+    let tools = String.concat ", " committed_tools in
+    let original = short_preview (Oas.Error.to_string err) in
+    Oas.Error.Internal
+        (Printf.sprintf
+         "%s: [%s]; retry disabled to avoid duplicate mutation; original_error=%s"
+         ambiguous_side_effect_error_prefix tools original)
+
 (** Max transient retries (excluding the initial attempt).  Total attempts
     = 1 initial + max_transient_retries.  OAS internal retry is 3 per
     provider; this outer retry covers cases where all providers fail
@@ -939,10 +967,10 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
          wrapping the global [on_keeper_tool_call] ref. Each keeper registers
          an independent observer, so concurrent keepers cannot interfere
          with each other's save/restore lifecycle. *)
-      let side_effect_occurred = ref false in
+      let mutating_tools_committed = ref [] in
       let side_effect_observer ~tool_name ~success =
         if success && not (Tool_dispatch.is_read_only tool_name) then
-          side_effect_occurred := true
+          mutating_tools_committed := tool_name :: !mutating_tools_committed
       in
       Keeper_exec_tools.add_tool_call_observer side_effect_observer;
       let evidence_before_hash =
@@ -982,14 +1010,31 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
               ~overflow_retry_used =
             match do_run ~run_meta ~max_context ~run_generation ~is_retry with
             | Ok _ as ok -> ok
-            | Error err when is_transient_network_error err
-                             && attempt <= max_transient_retries ->
-                if !side_effect_occurred then begin
-                  Log.Keeper.warn
-                    "%s: transient error after side-effecting tool call — skipping retry to prevent duplicate (error: %s)"
-                    meta.name (short_preview (Oas.Error.to_string err));
-                  Error err
-                end else begin
+            | Error err ->
+                let committed_tools =
+                  committed_mutating_tools !mutating_tools_committed
+                in
+                if committed_tools <> [] then begin
+                  let reclassified =
+                    reclassify_error_after_side_effect
+                      ~tool_names:committed_tools err
+                  in
+                  let err_preview = short_preview (Oas.Error.to_string err) in
+                  if is_transient_network_error err then
+                    Log.Keeper.error
+                      "%s: transient provider error after committed mutating tool call(s) [%s] — treating as integrity failure, skipping retry to prevent duplicate (error: %s)"
+                      meta.name
+                      (String.concat ", " committed_tools)
+                      err_preview
+                  else
+                    Log.Keeper.error
+                      "%s: error after committed mutating tool call(s) [%s] — turn outcome is ambiguous and requires reconcile (error: %s)"
+                      meta.name
+                      (String.concat ", " committed_tools)
+                      err_preview;
+                  Error reclassified
+                end else if is_transient_network_error err
+                              && attempt <= max_transient_retries then begin
                   let delay = transient_backoff_sec attempt in
                   Log.Keeper.warn
                     "%s: transient network error cascade=%s max_context=%d retry=%d/%d backoff=%.0fs: %s"
@@ -1000,30 +1045,30 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
                   retry_loop ~run_meta ~max_context ~run_generation
                     ~attempt:(attempt + 1)
                     ~is_retry:true ~overflow_retry_used
-                end
-            | Error err when (not overflow_retry_used)
-                             && is_context_overflow err -> (
-                match
-                  recover_context_overflow_retry ~meta ~base_dir
-                    ~max_cascade_context ~error:err
-                with
-                | Some retry_plan ->
-                    let retry_meta =
-                      if retry_plan.retry_generation = run_meta.runtime.generation
-                      then run_meta
-                      else
-                        map_runtime
-                          (fun rt ->
-                            { rt with generation = retry_plan.retry_generation })
-                          run_meta
-                    in
-                    Eio.Fiber.yield ();
-                    retry_loop ~run_meta:retry_meta
-                      ~max_context:retry_plan.retry_max_context
-                      ~run_generation:retry_plan.retry_generation ~attempt:1
-                      ~is_retry:true ~overflow_retry_used:true
-                | None -> Error err)
-            | Error err -> Error err
+                end else if (not overflow_retry_used)
+                             && is_context_overflow err then (
+                  match
+                    recover_context_overflow_retry ~meta ~base_dir
+                      ~max_cascade_context ~error:err
+                  with
+                  | Some retry_plan ->
+                      let retry_meta =
+                        if retry_plan.retry_generation = run_meta.runtime.generation
+                        then run_meta
+                        else
+                          map_runtime
+                            (fun rt ->
+                              { rt with generation = retry_plan.retry_generation })
+                            run_meta
+                      in
+                      Eio.Fiber.yield ();
+                      retry_loop ~run_meta:retry_meta
+                        ~max_context:retry_plan.retry_max_context
+                        ~run_generation:retry_plan.retry_generation ~attempt:1
+                        ~is_retry:true ~overflow_retry_used:true
+                  | None -> Error err)
+                else
+                  Error err
           in
           (* Wall-clock timeout guards against indefinite TCP-level hangs
              from upstream LLM providers. Without this, a single stalled
@@ -1050,10 +1095,15 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
       | Error err ->
           let e_str = Oas.Error.to_string err in
           let is_transient = is_transient_network_error err in
+          let is_ambiguous_partial = is_ambiguous_side_effect_error err in
           Log.Keeper.error
             "%s: unified turn FAILED cascade=%s max_context=%d latency=%dms%s error=%s"
             meta.name meta.cascade_name max_cascade_context latency_ms
-            (if is_transient then " (transient, cooldown preserved)" else "")
+            (if is_ambiguous_partial then
+               " (ambiguous partial commit)"
+             else if is_transient then
+               " (transient, cooldown preserved)"
+             else "")
             (short_preview e_str);
           let social_state =
             Social.derive_failure_state ~meta ~observation ~reason:e_str
@@ -1062,8 +1112,23 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
             update_metrics_from_failure meta ~latency_ms ~observation ~reason:e_str
               ~is_transient ~social_state ()
           in
+          if is_ambiguous_partial then begin
+            Keeper_registry.set_failure_reason ~base_path:config.base_path
+              meta.name
+              (Some (Keeper_registry.Ambiguous_partial_commit e_str));
+            ignore (Keeper_registry.dispatch_event
+              ~base_path:config.base_path meta.name
+              (Keeper_state_machine.Manual_reconcile_required {
+                reason = short_preview e_str;
+              }))
+          end;
           append_decision_record ~config ~meta:updated_meta ~observation
-            ~latency_ms ~semaphore_wait_ms ~outcome:"error" ~selected_mode:"error"
+            ~latency_ms ~semaphore_wait_ms
+            ~outcome:(if is_ambiguous_partial then "partial" else "error")
+            ~selected_mode:
+              (if is_ambiguous_partial
+               then "ambiguous_side_effect_error"
+               else "error")
             ~social_state
             ~error:e_str ();
           (match write_meta config updated_meta with

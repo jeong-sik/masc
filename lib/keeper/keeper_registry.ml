@@ -26,6 +26,7 @@ module StringMap = Map.Make (String)
 type failure_reason =
   | Heartbeat_consecutive_failures of int
   | Turn_consecutive_failures of int
+  | Ambiguous_partial_commit of string
   | Fiber_unresolved
   | Exception of string
 
@@ -34,8 +35,17 @@ let failure_reason_to_string = function
       Printf.sprintf "heartbeat_consecutive_failures(%d)" n
   | Turn_consecutive_failures n ->
       Printf.sprintf "turn_consecutive_failures(%d)" n
+  | Ambiguous_partial_commit s ->
+      Printf.sprintf "ambiguous_partial_commit(%s)" s
   | Fiber_unresolved -> "fiber_unresolved"
   | Exception s -> Printf.sprintf "exception(%s)" s
+
+let failure_reason_requires_manual_reconcile = function
+  | Ambiguous_partial_commit _ -> true
+  | Heartbeat_consecutive_failures _
+  | Turn_consecutive_failures _
+  | Fiber_unresolved
+  | Exception _ -> false
 
 (** Pure control-flow signal for immediate fiber termination (RFC-0002).
     Carries no state — failure reason must be pre-stored via

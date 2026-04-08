@@ -40,7 +40,6 @@ type gate =
   | Fallback
 
 val gate_to_string : gate -> string
-val gate_of_string : string -> (gate, string) result
 
 (** Structured review result with audit metadata for cross-model tracking. *)
 type review_result = {

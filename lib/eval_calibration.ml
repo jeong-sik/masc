@@ -18,7 +18,7 @@ type verdict_record = {
   task_title : string;
   agent_name : string;
   verdict : string;               (** "approve" | "reject:<reason>" *)
-  gate : string;                  (** "length" | "excuse" | "contract" | "llm" | "fallback" *)
+  gate : string;                  (** Anti_rationalization.gate_to_string output *)
   evaluator_cascade : string;
   generator_cascade : string option;
   fallback_reason : string option; (** Error message when gate="fallback" *)
@@ -298,6 +298,7 @@ let calibration_stats ?(since = "") ?(until = "") () : Yojson.Safe.t =
   let verdict_hashes : (string, string) Hashtbl.t = Hashtbl.create 64 in
   let recent_fallback_reasons : string list ref = ref [] in
   let max_fallback_reasons = 5 in
+  let fallback_tag = Anti_rationalization.gate_to_string Fallback in
   List.iter (fun json ->
     let rt = string_field json "record_type" in
     let hash = string_field json "notes_hash" in
@@ -310,7 +311,7 @@ let calibration_stats ?(since = "") ?(until = "") () : Yojson.Safe.t =
       let prev = try Hashtbl.find gate_counts gate with Not_found -> 0 in
       Hashtbl.replace gate_counts gate (prev + 1);
       Hashtbl.replace verdict_hashes hash v;
-      if gate = "fallback" && List.length !recent_fallback_reasons < max_fallback_reasons then
+      if gate = fallback_tag && List.length !recent_fallback_reasons < max_fallback_reasons then
         (let reason = string_field json "fallback_reason" in
          if reason <> "" then
            recent_fallback_reasons := reason :: !recent_fallback_reasons)
@@ -341,7 +342,8 @@ let calibration_stats ?(since = "") ?(until = "") () : Yojson.Safe.t =
   let gate_json = Hashtbl.fold (fun k v acc ->
     (k, `Int v) :: acc) gate_counts [] in
   let fallback_count =
-    try Hashtbl.find gate_counts "fallback" with Not_found -> 0
+    try Hashtbl.find gate_counts (Anti_rationalization.gate_to_string Fallback)
+    with Not_found -> 0
   in
   `Assoc [
     ("total_verdicts", `Int !total_verdicts);

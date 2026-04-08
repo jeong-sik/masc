@@ -158,12 +158,6 @@ let normalize_tool_result ~(success : bool) (raw : string) : string =
         ("detail", `Null);
       ])
 
-(** Memory-protection cap — delegates to [Tool_output_validation.cap].
-    Context budget management is OAS [context_reducer]'s responsibility.
-    Applied to ALL paths (success, error, exception) in [make_tools]. *)
-let validate_output ~tool_name:_ (result : string) : string =
-  Tool_output_validation.cap result
-
 (** Max chars for SSE error preview. Short enough for dashboard display,
     long enough to include the actionable portion of the error. *)
 let sse_error_preview_max_chars = 300
@@ -263,7 +257,7 @@ let make_tools
                 Keeper_tool_call_log.set_truncation_info
                   ~keeper_name:meta.name
                   ~original_bytes:(String.length normalized_error) ();
-                (false, validate_output ~tool_name:td.name normalized_error)
+                (false, Tool_output_validation.cap normalized_error)
               end else begin
                 Hashtbl.remove failure_counts key;
                 Keeper_registry.record_tool_use ~base_path:config.base_path meta.name ~tool_name:td.name ~success:true;
@@ -311,7 +305,7 @@ let make_tools
                      with Yojson.Json_error _ -> normalized)
                 in
                 let original_len = String.length final_result in
-                let truncated_result = validate_output ~tool_name:td.name final_result in
+                let truncated_result = Tool_output_validation.cap final_result in
                 let was_truncated = original_len > Tool_output_validation.max_output_chars in
                 if was_truncated then
                   Log.Keeper.info "tool %s output truncated: %d -> %d chars"
@@ -382,6 +376,6 @@ let make_tools
               Keeper_tool_call_log.set_truncation_info
                 ~keeper_name:meta.name
                 ~original_bytes:(String.length normalized_exn) ();
-              (false, validate_output ~tool_name:td.name normalized_exn)))
+              (false, Tool_output_validation.cap normalized_exn)))
     else None
   ) tool_defs

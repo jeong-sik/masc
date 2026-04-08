@@ -318,11 +318,6 @@ module KeeperToolExec = struct
       Default: 3. Range: [2, 20]. *)
   let max_consecutive_tool_failures =
     max 2 (min 20 (get_int ~default:3 "MASC_KEEPER_MAX_CONSECUTIVE_TOOL_FAILURES"))
-
-  (** Memory-protection cap for tool output (chars).
-      SSOT: [Tool_output_validation.max_output_chars] (= 65536).
-      Mirrored here to avoid cross-library dependency. *)
-  let max_tool_output_chars = 65_536
 end
 
 (** {1 Context Ratio Hard Cap}

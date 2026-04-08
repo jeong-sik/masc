@@ -38,7 +38,7 @@ type attention_context = Dashboard_mission_assembly.attention_context = {
 }
 
 let active_or_recent_sessions config =
-  let cutoff_unix = Time_compat.now () -. 86400.0 in
+  let cutoff_unix = Time_compat.now () -. Masc_time_constants.day in
   let cutoff_iso = iso_of_unix cutoff_unix in
   let is_active_or_recent (session : Team_session_types.session) =
     match session.status with

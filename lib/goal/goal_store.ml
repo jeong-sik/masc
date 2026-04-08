@@ -412,7 +412,7 @@ let days_until due_date =
       | None -> None
       | Some ts ->
           let diff = ts -. Unix.time () in
-          Some (int_of_float (diff /. 86400.0)))
+          Some (int_of_float (diff /. Masc_time_constants.day)))
 
 let should_refresh_goal mode goal =
   match mode with

@@ -158,11 +158,11 @@ let keeper_dead_ttl_sec =
   Runtime_params.register
     ~key:"keeper.dead_ttl_sec"
     ~default:(fun () -> Env_config_keeper.KeeperSupervisor.dead_ttl_sec)
-    ~validate:(validate_float_range ~min:60.0 ~max:86400.0 "keeper_dead_ttl_sec")
+    ~validate:(validate_float_range ~min:60.0 ~max:Masc_time_constants.day "keeper_dead_ttl_sec")
     ~serialize:(fun v -> `Float v)
     ~meta:{ description = "Dead 상태 유지 시간(초)";
             value_type = "float";
-            min_value = Some (`Float 60.0); max_value = Some (`Float 86400.0) }
+            min_value = Some (`Float 60.0); max_value = Some (`Float Masc_time_constants.day) }
     ~deserialize:deserialize_float
     ()
 

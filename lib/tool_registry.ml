@@ -155,7 +155,7 @@ let stats_to_json (name, (stats : call_stats)) : Yojson.Safe.t =
 let stats_report ~top_n ~all_tool_names : Yojson.Safe.t =
   let bounded_top_n = max 1 (min 100 top_n) in
   let top_tools = get_top_n bounded_top_n in
-  let cutoff_30d = Time_compat.now () -. (30.0 *. 86400.0) in
+  let cutoff_30d = Time_compat.now () -. Masc_time_constants.days_to_seconds 30 in
   let unused_30d = get_unused_since cutoff_30d in
   let never_called = get_never_called all_tool_names in
   `Assoc [

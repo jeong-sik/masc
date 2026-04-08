@@ -14,6 +14,7 @@
  (libraries
  masc_types
   masc_core
+  masc_mcp.config
   masc_process
   masc_compression
   masc_log

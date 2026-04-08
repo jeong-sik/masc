@@ -418,7 +418,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
             Log.Server.info "Expired %d stale A2A subscriptions" sub_expired;
           (* Periodic JSONL prune: every 24h, clean dated JSONL files *)
           let now = Unix.gettimeofday () in
-          if now -. !last_prune >= 86400.0 then begin
+          if now -. !last_prune >= Masc_time_constants.day then begin
             last_prune := now;
             (try
                let days =

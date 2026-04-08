@@ -131,7 +131,7 @@ module KeeperSupervisor = struct
   (** Paused keeper file TTL: seconds before stale paused keeper meta files
       are removed from disk. Default: 86400 (24 hours). *)
   let paused_cleanup_ttl_sec =
-    Float.max 300.0 (get_float ~default:86400.0 "MASC_KEEPER_PAUSED_CLEANUP_TTL_SEC")
+    Float.max 300.0 (get_float ~default:Masc_time_constants.day "MASC_KEEPER_PAUSED_CLEANUP_TTL_SEC")
 end
 
 (** {1 Keeper Runtime Configuration} *)

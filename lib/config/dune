@@ -11,6 +11,7 @@
    env_config_runtime
    env_config_snapshot
    feature_flag_registry
-   masc_network_defaults)
+   masc_network_defaults
+   masc_time_constants)
  (wrapped false)
  (libraries masc_core masc_log yojson uri))

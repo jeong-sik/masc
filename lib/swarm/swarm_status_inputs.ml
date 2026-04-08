@@ -35,7 +35,7 @@ let read_trace_infos ?(limit = timeline_limit) config =
   |> List.filter (fun (trace : trace_info) -> trace.event_id <> "")
 
 let read_session_infos config =
-  let cutoff = Time_compat.now () -. 86400.0 in
+  let cutoff = Time_compat.now () -. Masc_time_constants.day in
   Team_session_store.list_sessions ~since_unix:cutoff ~limit:20 config
   |> List.map session_info_of_session
 

@@ -304,7 +304,7 @@ let calculate_error_rate events =
 (** Get aggregated metrics for last 24 hours *)
 let get_metrics ?fs config : metrics =
   let now = Time_compat.now () in
-  let since_24h = now -. 86400.0 in
+  let since_24h = now -. Masc_time_constants.day in
   let events = read_events_since ?fs config ~since:since_24h in
   {
     active_agents = count_active_agents events;

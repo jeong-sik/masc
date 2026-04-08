@@ -46,7 +46,7 @@ let parse_iso_ts s =
 
 let days_since_update (goal : Goal_store.goal) ~now =
   match parse_iso_ts goal.updated_at with
-  | Some ts -> Some (int_of_float ((now -. ts) /. 86400.0))
+  | Some ts -> Some (int_of_float ((now -. ts) /. Masc_time_constants.day))
   | None -> None
 
 (** Sweep goals: purge old Dropped, stagnate old Active.

@@ -200,7 +200,7 @@ let parse_month_key_from_filename filename =
     | _ -> None
 
 let filter_recent_month_filenames ~now ~days filenames =
-  let cutoff = now -. (float_of_int days *. 86400.0) in
+  let cutoff = now -. Masc_time_constants.days_to_seconds days in
   let min_month = month_key_of_unix cutoff in
   let max_month = month_key_of_unix now in
   List.filter
@@ -213,7 +213,7 @@ let filter_recent_month_filenames ~now ~days filenames =
 (** Get recent metrics for an agent - synchronous *)
 let get_recent config ~agent_id ~days : task_metric list =
   let now = Time_compat.now () in
-  let cutoff = now -. (float_of_int days *. 86400.0) in
+  let cutoff = now -. Masc_time_constants.days_to_seconds days in
   let dir = agent_metrics_dir config agent_id in
   if not (Sys.file_exists dir) then
     []
@@ -240,7 +240,7 @@ let calculate_agent_metrics config ~agent_id ~days : agent_metrics option =
     None
   else
     let now = Time_compat.now () in
-    let period_start = now -. (float_of_int days *. 86400.0) in
+    let period_start = now -. Masc_time_constants.days_to_seconds days in
     let total = List.length metrics in
     let completed = List.filter (fun m -> Option.is_some m.completed_at) metrics in
     let successful = List.filter (fun m -> m.success) completed in

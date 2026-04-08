@@ -115,7 +115,7 @@ let pre_populate_from_history
   else
     let now = Unix.gettimeofday () in
     let lookback_days = configured_lookback_days () in
-    let since = now -. (float_of_int lookback_days *. 86400.0) in
+    let since = now -. Masc_time_constants.days_to_seconds lookback_days in
     let entries =
       Trajectory.read_entries_since ~masc_root ~keeper_name ~since
     in

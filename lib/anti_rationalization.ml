@@ -46,16 +46,6 @@ let gate_to_string = function
   | Format_reject -> "format_reject"
   | Fallback -> "fallback"
 
-let gate_of_string = function
-  | "length" -> Ok Length
-  | "excuse" -> Ok Excuse
-  | "contract" -> Ok Contract
-  | "structured_tool" -> Ok Structured_tool
-  | "llm_text_fallback" -> Ok Llm_text_fallback
-  | "format_reject" -> Ok Format_reject
-  | "fallback" -> Ok Fallback
-  | s -> Error (Printf.sprintf "unknown gate: %S" s)
-
 type review_result = {
   verdict : verdict;
   evaluator_cascade : string;

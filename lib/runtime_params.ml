@@ -160,9 +160,9 @@ let persist ~base_path =
           registry_tbl [])
     in
     let json = `Assoc overrides in
-    let tmp = path ^ ".tmp" in
-    Fs_compat.save_file tmp (Yojson.Safe.pretty_to_string json);
-    Sys.rename tmp path
+    (match Fs_compat.save_file_atomic path (Yojson.Safe.pretty_to_string json) with
+     | Ok () -> ()
+     | Error msg -> Log.Config.error "Runtime_params.persist atomic: %s" msg)
   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Log.Config.error "Runtime_params.persist: %s" (Printexc.to_string exn)
 

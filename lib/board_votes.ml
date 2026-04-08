@@ -24,7 +24,6 @@ let rewrite_vote_log store =
   try
     ensure_masc_dir ();
     let path = vote_log_path () in
-    let tmp_path = path ^ ".tmp" in
     let buf = Buffer.create 4096 in
     Hashtbl.iter
       (fun target direction ->
@@ -45,8 +44,9 @@ let rewrite_vote_log store =
         in
         Buffer.add_string buf (Yojson.Safe.to_string json ^ "\n"))
       store.vote_log;
-    Fs_compat.save_file tmp_path (Buffer.contents buf);
-    Sys.rename tmp_path path
+    (match Fs_compat.save_file_atomic path (Buffer.contents buf) with
+     | Ok () -> ()
+     | Error msg -> Log.BoardLog.error "persist error (rewrite_vote_log): %s" msg)
   with Sys_error msg -> Log.BoardLog.error "persist error (rewrite_vote_log): %s" msg
 
 let vote store ~voter ~post_id ~direction : (int, board_error) result =

@@ -107,9 +107,9 @@ let rewrite_procedures ~agent_name (procs : procedure list) =
     |> String.concat "\n"
     |> fun s -> if s = "" then "" else s ^ "\n"
   in
-  let tmp = path ^ ".tmp" in
-  Fs_compat.save_file tmp content;
-  Sys.rename tmp path
+  match Fs_compat.save_file_atomic path content with
+  | Ok () -> ()
+  | Error msg -> Log.Config.warn "procedural_memory save: %s" msg
 
 (* ================================================================ *)
 (* Procedure Operations                                             *)

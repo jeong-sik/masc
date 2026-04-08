@@ -21,6 +21,10 @@ val load_file : string -> string
 val save_file : string -> string -> unit
 (** Save string to file (overwrite). *)
 
+val save_file_atomic : string -> string -> (unit, string) result
+(** Write content to path via temp file + rename.
+    Returns [Error msg] on I/O failure instead of raising. *)
+
 val append_file : string -> string -> unit
 (** Append string to file. *)
 

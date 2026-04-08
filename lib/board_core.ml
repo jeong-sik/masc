@@ -235,26 +235,26 @@ let rewrite_posts store =
   try
     ensure_masc_dir ();
     let path = persist_path () in
-    let tmp_path = path ^ ".tmp" in
     let buf = Buffer.create 4096 in
     Hashtbl.iter (fun _ (pst : post) ->
       Buffer.add_string buf (Yojson.Safe.to_string (post_to_yojson pst) ^ "\n")
     ) store.posts;
-    Fs_compat.save_file tmp_path (Buffer.contents buf);
-    Sys.rename tmp_path path
+    (match Fs_compat.save_file_atomic path (Buffer.contents buf) with
+     | Ok () -> ()
+     | Error msg -> Log.BoardLog.error "persist error (rewrite_posts): %s" msg)
   with Sys_error msg -> Log.BoardLog.error "persist error (rewrite_posts): %s" msg
 
 let rewrite_comments store =
   try
     ensure_masc_dir ();
     let path = comments_path () in
-    let tmp_path = path ^ ".tmp" in
     let buf = Buffer.create 4096 in
     Hashtbl.iter (fun _ (cmt : comment) ->
       Buffer.add_string buf (Yojson.Safe.to_string (comment_to_yojson cmt) ^ "\n")
     ) store.comments;
-    Fs_compat.save_file tmp_path (Buffer.contents buf);
-    Sys.rename tmp_path path
+    (match Fs_compat.save_file_atomic path (Buffer.contents buf) with
+     | Ok () -> ()
+     | Error msg -> Log.BoardLog.error "persist error (rewrite_comments): %s" msg)
   with Sys_error msg -> Log.BoardLog.error "persist error (rewrite_comments): %s" msg
 
 (** {1 Append Helpers} *)

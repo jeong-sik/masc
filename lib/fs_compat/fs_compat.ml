@@ -97,6 +97,17 @@ let save_file (path : string) (content : string) : unit =
       let eio_path = Eio.Path.(fs / path) in
       Eio.Path.save ~create:(`Or_truncate 0o644) eio_path content)
 
+let save_file_atomic (path : string) (content : string) : (unit, string) result =
+  let dir = Filename.dirname path in
+  let tmp = Filename.temp_file ~temp_dir:dir ".atomic_" ".tmp" in
+  try
+    save_file tmp content;
+    Sys.rename tmp path;
+    Ok ()
+  with exn ->
+    (try Sys.remove tmp with Sys_error _ -> ());
+    Error (Printf.sprintf "save_file_atomic %s: %s" path (Printexc.to_string exn))
+
 (** Append string to file.
     Eio-native when available, fallback to Unix.
     @raises Sys_error on all I/O failures. Eio.Io is normalized internally. *)

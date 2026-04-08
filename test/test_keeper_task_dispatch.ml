@@ -236,7 +236,7 @@ let test_tool_search_uses_provided_search_fn () =
 
 let () =
   let base_path = Masc_test_deps.find_project_root () in
-  Keeper_exec_tools.init_policy_config ~base_path;
+  ignore (Result.get_ok (Keeper_exec_tools.init_policy_config ~base_path));
   Alcotest.run "Keeper_task_dispatch" [
     "claim", [
       test_case "claim returns result" `Quick test_claim_returns_result;

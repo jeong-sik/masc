@@ -22,9 +22,10 @@ let init_policy_config ~base_path =
     policy_config := Some cfg;
     Log.Keeper.info "tool policy config loaded: %d presets, %d groups"
       (List.length (Keeper_tool_policy_config.preset_names cfg))
-      (List.length (Keeper_tool_policy_config.group_names cfg))
+      (List.length (Keeper_tool_policy_config.group_names cfg));
+    Ok ()
   | Error msg ->
-    raise (Failure (Printf.sprintf "tool policy config load failed: %s" msg))
+    Error msg
 
 let preset_name_of_tool_preset = function
   | Minimal -> "minimal"

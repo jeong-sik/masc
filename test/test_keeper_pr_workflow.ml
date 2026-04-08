@@ -48,7 +48,7 @@ let policy_init_once = lazy (
       in
       go (Filename.dirname cwd)
   in
-  Keeper_exec_tools.init_policy_config ~base_path:repo_root
+  Result.get_ok (Keeper_exec_tools.init_policy_config ~base_path:repo_root)
 )
 
 let with_room f =

@@ -14,7 +14,7 @@
 let default_budget =
   let env_val =
     match Sys.getenv_opt "MASC_KEEPER_MAX_TOOL_OUTPUT_CHARS" with
-    | Some s -> (try int_of_string s with Eio.Cancel.Cancelled _ as e -> raise e | _ -> 8000)
+    | Some s -> (try int_of_string s with _ -> 8000)
     | None -> 8000
   in
   max 1000 (min 32000 env_val)
@@ -33,18 +33,12 @@ let budget_for tool_name =
 
 (* ── Array-aware truncation ──────────────────────────────────── *)
 
-(** Estimate metadata JSON length for a given shown/total pair.
-    Avoids hardcoded byte constant — calculates from actual values. *)
-let metadata_json_len ~shown ~total =
-  (* {"_truncated":true,"_shown":NNN,"_total":NNN} + comma + safety margin *)
-  let digits n = if n = 0 then 1 else int_of_float (log10 (float_of_int (abs n))) + 1 in
-  50 + digits shown + digits total
-
 (** Truncate a JSON array to fit within [max_chars], preserving structure.
     Returns the truncated JSON string with a metadata element appended. *)
 let truncate_json_array (items : Yojson.Safe.t list) ~max_chars : string =
   let total = List.length items in
-  let buf = Buffer.create (min max_chars 16384) in
+  (* Binary-search-ish: serialize items one by one until budget exceeded *)
+  let buf = Buffer.create max_chars in
   Buffer.add_char buf '[';
   let shown = ref 0 in
   let first = ref true in
@@ -53,8 +47,7 @@ let truncate_json_array (items : Yojson.Safe.t list) ~max_chars : string =
     if not !done_ then begin
       let s = Yojson.Safe.to_string item in
       let sep = if !first then "" else "," in
-      let meta_reserve = metadata_json_len ~shown:(!shown + 1) ~total in
-      let projected = Buffer.length buf + String.length sep + String.length s + meta_reserve in
+      let projected = Buffer.length buf + String.length sep + String.length s + 80 (* metadata *) in
       if projected > max_chars then
         done_ := true
       else begin
@@ -65,6 +58,7 @@ let truncate_json_array (items : Yojson.Safe.t list) ~max_chars : string =
       end
     end
   ) items;
+  (* Append truncation metadata as last element *)
   if !shown < total then begin
     let meta = Printf.sprintf
       "%s{\"_truncated\":true,\"_shown\":%d,\"_total\":%d}"
@@ -138,33 +132,17 @@ let validate_and_truncate ~tool_name (output : string) : string =
 
 (* ── Post-hook for Tool_dispatch ─────────────────────────────── *)
 
-(** Check if output already has truncation metadata (avoid double-truncation
-    when a keeper_* tool internally dispatches a masc_* tool). *)
-let is_already_truncated (data : Yojson.Safe.t) : bool =
-  match data with
-  | `Assoc fields -> List.mem_assoc "_output_budget_exceeded" fields
-  | `List items ->
-    List.exists (fun item ->
-      match item with
-      | `Assoc fields -> List.mem_assoc "_truncated" fields
-      | _ -> false
-    ) items
-  | _ -> false
-
 let post_hook (result : Tool_result.t) : Tool_result.t =
-  if is_already_truncated result.data then result
+  let budget = budget_for result.tool_name in
+  let serialized = Yojson.Safe.to_string result.data in
+  if String.length serialized <= budget then result
   else
-    (* Lazy serialize: only allocate the string if we need to check size *)
-    let serialized = Yojson.Safe.to_string result.data in
-    let budget = budget_for result.tool_name in
-    if String.length serialized <= budget then result
-    else
-      let truncated_str = validate_and_truncate ~tool_name:result.tool_name serialized in
-      let new_data =
-        try Yojson.Safe.from_string truncated_str
-        with Yojson.Json_error _ -> `String truncated_str
-      in
-      { result with data = new_data }
+    let truncated_str = validate_and_truncate ~tool_name:result.tool_name serialized in
+    let new_data =
+      try Yojson.Safe.from_string truncated_str
+      with Yojson.Json_error _ -> `String truncated_str
+    in
+    { result with data = new_data }
 
 (* ── Installation ────────────────────────────────────────────── *)
 

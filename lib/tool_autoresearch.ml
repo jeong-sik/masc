@@ -77,11 +77,10 @@ let prepare_start_params (ctx : context) args =
   let source_workdir = get_string args "workdir" ctx.base_path in
   let max_cycles = get_int args "max_cycles" 100 in
   let cycle_timeout_s = get_float args "cycle_timeout_s" 300.0 in
-  let default_model =
-    match Provider_adapter.default_model_label_result () with
-    | Ok label -> label
-    | Error _ -> Provider_adapter.cn_llama
-  in
+  let default_model_result = Provider_adapter.default_model_label_result () in
+  match default_model_result with
+  | Error e -> Error (Printf.sprintf "no default model configured: %s" e)
+  | Ok default_model ->
   let model_model = get_string args "model_model" default_model in
   if goal = "" then
     Error "goal is required"

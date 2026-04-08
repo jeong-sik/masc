@@ -219,7 +219,9 @@ let handle_keeper_pr_workflow
                 Error (Printf.sprintf "remove existing worktree: %s" msg)
             else Ok ()
           in
-          prepare_result |> Result.bind (fun () ->
+          match prepare_result with
+          | Error _ as err -> err
+          | Ok () ->
             let _ = run_sh ~cwd:repo_root ~timeout_sec:30.0 "git fetch origin" in
             match Room_git.resolve_base_branch repo_root base_branch with
             | Error e -> Error (Types.masc_error_to_string e)
@@ -257,7 +259,7 @@ let handle_keeper_pr_workflow
                   Ok (Printf.sprintf "worktree %s on branch %s%s%s"
                     worktree_path branch branch_note fallback_note)
                 end
-              end)
+              end
       ) in
       (* Step 2: Write file — with path traversal guard *)
       let _s2 = run_step "file_write" (fun () ->

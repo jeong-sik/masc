@@ -44,3 +44,13 @@ proactive_enabled = true
 execution_scope = "workspace"
 
 tool_preset = "delivery"
+
+# Work Discovery
+work_discovery_enabled = true
+work_discovery_sources = ["github_issues", "lint_errors", "stale_tasks"]
+work_discovery_interval_sec = 600
+work_discovery_guidance = "Focus on code quality issues: lint warnings, TODO comments, failing tests. Create a task for each actionable item found, then claim and work on the highest priority one."
+
+# Telemetry Feedback
+telemetry_feedback_enabled = true
+telemetry_feedback_window_hours = 24

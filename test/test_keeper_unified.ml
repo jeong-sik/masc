@@ -101,6 +101,8 @@ let base_observation : WO.world_observation =
     room_signal_digest_ref = None;
     last_turn_budget = None;
     last_tools_used = [];
+    work_discovery_due = false;
+    behavioral_stats = None;
   }
 
 let sample_board_event : WO.pending_board_event =

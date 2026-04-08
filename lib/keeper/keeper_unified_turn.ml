@@ -535,6 +535,14 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
            else if has_substantive_tools then
              Printf.sprintf "(tools: %s)" (String.concat ", " result.tools_used)
            else rt.proactive_rt.last_preview);
+        last_work_discovery_ts =
+          (if observation.work_discovery_due && has_substantive_tools then
+             now_ts
+           else rt.proactive_rt.last_work_discovery_ts);
+        work_discovery_count =
+          rt.proactive_rt.work_discovery_count
+          + (if observation.work_discovery_due && has_substantive_tools then 1
+             else 0);
       };
       (* Autonomous action tracking from tool calls *)
       autonomous_action_count =

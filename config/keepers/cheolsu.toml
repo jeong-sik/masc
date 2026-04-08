@@ -45,3 +45,7 @@ proactive_enabled = true
 execution_scope = "workspace"
 
 tool_preset = "social"
+
+# Telemetry Feedback
+telemetry_feedback_enabled = true
+telemetry_feedback_window_hours = 24

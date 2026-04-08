@@ -434,6 +434,7 @@
    labeling
    contract_risk
    contract_composer
+   keeper_telemetry_feedback
    keeper_deliberation
    keeper_types_profile
    keeper_types_support

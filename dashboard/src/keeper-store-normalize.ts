@@ -2,12 +2,23 @@ import type {
   Keeper,
   KeeperLifecycleState,
   KeeperMetricPoint,
+  KeeperPhase,
   PipelineStage,
 } from './types'
 import { isRecord, asString, asNumber, asBoolean, asStringArray, toIsoTimestamp } from './components/common/normalize'
 import { isOfflineStatus } from './lib/status-utils'
 import { keeperDisplayStatus } from './lib/keeper-runtime-display'
 import { CONTEXT_RATIO_CRITICAL, CONTEXT_RATIO_WARN, CONTEXT_RATIO_COMPACTING } from './config/constants'
+
+const VALID_PHASES = new Set<string>([
+  'Offline', 'Running', 'Failing', 'Compacting', 'HandingOff',
+  'Draining', 'Paused', 'Stopped', 'Crashed', 'Restarting', 'Dead',
+])
+
+function toKeeperPhase(raw: string | null | undefined): KeeperPhase | null {
+  if (!raw || !VALID_PHASES.has(raw)) return null
+  return raw as KeeperPhase
+}
 
 function normalizeKeeperAgentStatus(value: unknown): Keeper['status'] {
   const raw = typeof value === 'string' ? value.toLowerCase() : ''
@@ -228,6 +239,7 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         name,
         runtime_class: 'keeper' as const,
         pipeline_stage: (asString(row.pipeline_stage) ?? 'idle') as PipelineStage,
+        phase: toKeeperPhase(asString(row.phase)),
         paused: asBoolean(row.paused),
         registered:
           typeof row.registered === 'boolean' ? row.registered : undefined,

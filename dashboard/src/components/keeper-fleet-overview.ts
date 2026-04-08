@@ -6,6 +6,7 @@ import { html } from 'htm/preact'
 import { navigate } from '../router'
 import type { Keeper, PipelineStage } from '../types/core'
 import { CONTEXT_RATIO_CRITICAL, CONTEXT_RATIO_FLEET_WARN } from '../config/constants'
+import { KeeperPhaseBadge } from './keeper-phase-indicator'
 
 // ── Pipeline stage styling ────────────────────────────
 
@@ -78,7 +79,10 @@ function KeeperRow({ keeper }: { keeper: Keeper }) {
       class="flex items-center gap-3 py-2 px-3 rounded-lg cursor-pointer hover:bg-[var(--white-5)] transition-colors ${isActive ? 'ring-1 ring-[var(--accent-30)]' : ''}"
       onClick=${() => navigate('monitoring', { section: 'agents', agent: keeper.name })}
     >
-      ${'' /* Stage badge */}
+      ${'' /* Phase badge (lifecycle) + Stage badge (activity) */}
+      <div class="flex-shrink-0">
+        <${KeeperPhaseBadge} phase=${keeper.phase} compact />
+      </div>
       <div
         class="flex-shrink-0 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider text-center w-12"
         style="color: ${stage.color}; background: ${stage.bg}; ${stage.pulse ? 'animation: loadingPulse 2s ease-in-out infinite;' : ''}"

@@ -436,7 +436,7 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
       c.model_id = result.model_used || c.model_id = used
     ) cfgs with
     | Some c -> c.model_id
-    | None -> (match cfgs with c :: _ -> c.model_id | [] -> result.model_used)
+    | None -> used  (* Use actual API response model, not stale cascade label *)
   in
   let turn_cost =
     let pricing = Llm_provider.Pricing.pricing_for_model used_model_id in

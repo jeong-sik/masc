@@ -472,7 +472,7 @@ let start_operator_digest_refresh_loop ~state ~sw ~clock =
           | Ok json ->
               with_projection_diagnostics ~surface:"operator_digest" ~started_at
                 ~extra:(operator_snapshot_extra sessions) json
-          | Error err -> failwith err)
+          | Error err -> raise (Failure err))
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->

@@ -247,7 +247,7 @@ let create ~sw ~env ~url ~cluster_name ~node_id =
           C.exec q ()
         ) pool with
         | Ok () -> ()
-        | Error err -> failwith (Caqti_error.show err)
+        | Error err -> raise (Failure (Caqti_error.show err))
       in
       (try
         (* Phase 1: create tables in parallel *)

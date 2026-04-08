@@ -40,28 +40,57 @@ type review_result = {
 (* Excuse pattern detection (local, no LLM)                         *)
 (* ================================================================ *)
 
-(** Known avoidance phrases. Matched case-insensitively as substrings. *)
-let excuse_patterns = [
-  ("pre-existing",        "claiming the problem already existed");
-  ("out of scope",        "declaring work out of scope");
-  ("beyond the scope",    "declaring work beyond scope");
-  ("will do later",       "deferring work to later");
-  ("will fix later",      "deferring fix to later");
-  ("will address later",  "deferring to later");
-  ("follow-up",           "deferring to a follow-up");
-  ("follow up",           "deferring to a follow-up");
-  ("works on my end",     "unverifiable claim");
-  ("works on my machine", "unverifiable claim");
-  ("not reproducible",    "dismissing without investigation");
-  ("not my responsibility", "responsibility deflection");
-  ("cannot reproduce",    "dismissing without investigation");
-]
+(** Load excuse patterns dynamically from config/excuse_patterns.json.
+    Returns the default hardcoded list if the file is missing or invalid. *)
+let load_excuse_patterns () : (string * string) list =
+  let default_patterns = [
+    ("pre-existing",        "claiming the problem already existed");
+    ("out of scope",        "declaring work out of scope");
+    ("beyond the scope",    "declaring work beyond scope");
+    ("will do later",       "deferring work to later");
+    ("will fix later",      "deferring fix to later");
+    ("will address later",  "deferring to later");
+    ("follow-up",           "deferring to a follow-up");
+    ("follow up",           "deferring to a follow-up");
+    ("works on my end",     "unverifiable claim");
+    ("works on my machine", "unverifiable claim");
+    ("not reproducible",    "dismissing without investigation");
+    ("not my responsibility", "responsibility deflection");
+    ("cannot reproduce",    "dismissing without investigation");
+  ] in
+  try
+    let config_dir = (Config_dir_resolver.resolve ()).config_root.path in
+    let path = Filename.concat config_dir "excuse_patterns.json" in
+    if Sys.file_exists path then
+      let json = Yojson.Safe.from_file path in
+      match json with
+      | `List items ->
+          List.filter_map (function
+            | `List [`String pat; `String reason] -> Some (pat, reason)
+            | _ -> None
+          ) items
+      | _ -> default_patterns
+    else default_patterns
+  with _ -> default_patterns
+
+(** Save excuse patterns to config/excuse_patterns.json. *)
+let save_excuse_patterns (patterns : (string * string) list) : (unit, string) result =
+  try
+    let config_dir = (Config_dir_resolver.resolve ()).config_root.path in
+    let path = Filename.concat config_dir "excuse_patterns.json" in
+    let json_items = List.map (fun (pat, reason) -> `List [`String pat; `String reason]) patterns in
+    let json = `List json_items in
+    Yojson.Safe.to_file path json;
+    Ok ()
+  with exn ->
+    Error (Printexc.to_string exn)
 
 let min_notes_length = 10
 
 (** Check if notes contain a known excuse pattern.
     Returns [Some (pattern, reason)] on match, [None] otherwise. *)
 let find_excuse_pattern (notes : string) : (string * string) option =
+  let patterns = load_excuse_patterns () in
   let lower = String.lowercase_ascii notes in
   List.find_opt (fun (pat, _reason) ->
     (* Simple substring search without Str module *)
@@ -75,7 +104,7 @@ let find_excuse_pattern (notes : string) : (string * string) option =
         else scan (i + 1)
       in
       scan 0
-  ) excuse_patterns
+  ) patterns
 
 (* ================================================================ *)
 (* LLM verification prompt                                          *)

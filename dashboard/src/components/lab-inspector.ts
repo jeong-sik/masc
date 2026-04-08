@@ -3,6 +3,7 @@ import { signal } from '@preact/signals'
 import { Card } from './common/card'
 import { FeatureHealth } from './feature-health'
 import { ServerConfig } from './server-config'
+import { ExcusePatterns } from './excuse-patterns'
 import { navigate } from '../router'
 
 type InspectorSection = 'overview' | 'features' | 'config'
@@ -126,7 +127,12 @@ export function LabInspector() {
         ? html`<${InspectorOverview} />`
         : current === 'features'
           ? html`<${FeatureHealth} />`
-          : html`<${ServerConfig} />`}
+          : html`
+              <div class="flex flex-col gap-4">
+                <${ServerConfig} />
+                <${ExcusePatterns} />
+              </div>
+            `}
     </div>
   `
 }

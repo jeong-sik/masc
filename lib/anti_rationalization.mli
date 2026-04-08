@@ -70,6 +70,16 @@ val check_contract : notes:string -> contract:string list -> string list
 (** Serialize review result to JSON for logging/calibration. *)
 val review_result_to_json : review_result -> Yojson.Safe.t
 
+(** Load excuse patterns dynamically from config/excuse_patterns.json.
+    Returns the default hardcoded list if the file is missing or invalid.
+    Exposed for dashboard administration. *)
+val load_excuse_patterns : unit -> (string * string) list
+
+(** Save excuse patterns to config/excuse_patterns.json.
+    Returns [Ok ()] on success or [Error msg] on failure.
+    Exposed for dashboard administration. *)
+val save_excuse_patterns : (string * string) list -> (unit, string) result
+
 (** Check notes for known excuse patterns (local, no LLM).
     Returns [Some (pattern, reason)] if a match is found.
     Exposed for testing. *)

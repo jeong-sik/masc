@@ -131,6 +131,38 @@ let rec add_routes ~sw ~clock router =
          let json = Env_config_introspect.to_json () in
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/config/excuse-patterns" (fun request reqd ->
+       with_public_read (fun _state req reqd ->
+         let patterns = Anti_rationalization.load_excuse_patterns () in
+         let json_items = List.map (fun (pat, reason) -> `List [`String pat; `String reason]) patterns in
+         let json = `List json_items in
+         Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+  |> Http.Router.post "/api/v1/dashboard/config/excuse-patterns" (fun request reqd ->
+       with_public_read (fun _state req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let json = Yojson.Safe.from_string body_str in
+             match json with
+             | `List items ->
+                 let patterns = List.filter_map (function
+                   | `List [`String pat; `String reason] -> Some (pat, reason)
+                   | _ -> None
+                 ) items in
+                 (match Anti_rationalization.save_excuse_patterns patterns with
+                 | Ok () ->
+                     Http.Response.json ~request:req {|{"ok":true}|} reqd
+                 | Error msg ->
+                     Http.Response.json ~status:`Internal_server_error ~request:req
+                       (Yojson.Safe.to_string (`Assoc [("ok", `Bool false); ("error", `String msg)])) reqd)
+             | _ ->
+                 Http.Response.json ~status:`Bad_request ~request:req
+                   (Yojson.Safe.to_string (`Assoc [("ok", `Bool false); ("error", `String "expected list of [pattern, reason]")])) reqd
+           with exn ->
+             Http.Response.json ~status:`Bad_request ~request:req
+               (Yojson.Safe.to_string (`Assoc [("ok", `Bool false); ("error", `String (Printexc.to_string exn))])) reqd
+         )
+       ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/namespace-truth" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let json = dashboard_namespace_truth_http_json ~state ~sw ~clock req in

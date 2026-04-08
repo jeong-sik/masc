@@ -16,11 +16,15 @@ val log_call :
   success:bool ->
   duration_ms:float ->
   ?model:string ->
+  ?result_bytes:int ->
+  ?truncated_to:int ->
   unit ->
   unit
 (** [log_call ...] persists a single tool call record with full I/O.
     Output is truncated to 4000 bytes. [model] records which LLM generated
-    the tool call (for 9B vs GLM comparison). Best-effort (failures logged). *)
+    the tool call (for 9B vs GLM comparison). [result_bytes] is the original
+    output size before any truncation. [truncated_to] is present when
+    Tool_output_validation truncated the output. Best-effort (failures logged). *)
 
 val read_recent :
   ?keeper_name:string ->

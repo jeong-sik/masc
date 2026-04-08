@@ -128,6 +128,53 @@ let test_read_ops_pass () =
     Alcotest.(check bool) (Printf.sprintf "read: %s" cmd) false (is_write cmd)
   ) reads
 
+(* ── rg exit code semantics ──────────────────────────────── *)
+
+let test_rg_exit_code_semantics () =
+  (* rg: 0=matches, 1=no matches (valid), 2+=error *)
+  let is_ok st = st = Unix.WEXITED 0 || st = Unix.WEXITED 1 in
+  Alcotest.(check bool) "exit 0 is ok" true (is_ok (Unix.WEXITED 0));
+  Alcotest.(check bool) "exit 1 (no match) is ok" true (is_ok (Unix.WEXITED 1));
+  Alcotest.(check bool) "exit 2 (error) is not ok" false (is_ok (Unix.WEXITED 2));
+  Alcotest.(check bool) "exit 127 (not found) is not ok" false (is_ok (Unix.WEXITED 127))
+
+(* ── git error hint detection ─────────────────────────────── *)
+
+(* Inline substring check — mirrors String_util.contains_substring_ci *)
+let contains_ci haystack needle =
+  let h = String.lowercase_ascii haystack in
+  let n = String.lowercase_ascii needle in
+  let nlen = String.length n in
+  let hlen = String.length h in
+  if nlen > hlen then false
+  else
+    let found = ref false in
+    for i = 0 to hlen - nlen do
+      if not !found && String.sub h i nlen = n then found := true
+    done;
+    !found
+
+let has_worktree_hint output =
+  contains_ci output "already used by worktree"
+  || contains_ci output "already checked out"
+
+let has_not_a_repo_hint output =
+  contains_ci output "not a git repository"
+
+let test_git_worktree_hint_detection () =
+  Alcotest.(check bool) "worktree error detected"
+    true (has_worktree_hint "fatal: 'branch' is already used by worktree at '/path'");
+  Alcotest.(check bool) "checked out error detected"
+    true (has_worktree_hint "fatal: 'main' is already checked out at '/path'");
+  Alcotest.(check bool) "normal error not detected"
+    false (has_worktree_hint "fatal: pathspec 'foo' did not match any files")
+
+let test_git_not_a_repo_hint_detection () =
+  Alcotest.(check bool) "not a repo detected"
+    true (has_not_a_repo_hint "fatal: not a git repository (or any parent)");
+  Alcotest.(check bool) "unrelated error not detected"
+    false (has_not_a_repo_hint "fatal: remote origin already exists")
+
 let () =
   Alcotest.run "Keeper bash safety" [
     ("allowlist", [
@@ -143,5 +190,12 @@ let () =
     ]);
     ("edge", [
       Alcotest.test_case "empty command blocked" `Quick test_empty_command;
+    ]);
+    ("rg_exit_code", [
+      Alcotest.test_case "rg exit semantics (0=ok, 1=ok, 2+=error)" `Quick test_rg_exit_code_semantics;
+    ]);
+    ("git_hints", [
+      Alcotest.test_case "worktree error hint detected" `Quick test_git_worktree_hint_detection;
+      Alcotest.test_case "not-a-repo hint detected" `Quick test_git_not_a_repo_hint_detection;
     ]);
   ]

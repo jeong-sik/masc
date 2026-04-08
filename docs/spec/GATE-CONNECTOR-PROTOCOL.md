@@ -90,12 +90,12 @@ MASC 에이전트 또는 오퍼레이터가 외부 채널의 상태를 제어합
 
 ### 4.1. Voice & Multi-Modal Streaming (음성/멀티모달 상세화)
 - **Voice Chunking:** `audio_blob` 필드를 사용하여 짧은 음성 단편(Chunk)을 전송할 수 있습니다. 100ms~500ms 단위의 Base64 인코딩된 오디오 청크를 SSE나 WebSocket을 통해 지속적으로 주고받음으로써 실시간 음성을 모사합니다.
-- **WebRTC Signaling 브릿지:** 고품질 실시간 음성 통화(Low Latency Audio)가 필요한 경우, WebRTC SDP Offer/Answer 및 ICE Candidate 교환을 지원합니다. 비동기로 도착하는 여러 세션의 엉킴을 방지하기 위해, 모든 WebRTC 관련 페이로드에는 반드시 `webrtc_session_id` (또는 `peer_id`)를 포함하여 명확한 세션 경계(Correlation)를 보장해야 합니다.
+- **WebRTC Signaling 브릿지:** 고품질 실시간 음성 통화(Low Latency Audio)가 필요한 경우, WebRTC SDP Offer/Answer 및 ICE Candidate 교환을 지원합니다. 비동기로 도착하는 여러 세션의 엉킴을 방지하기 위해, 모든 WebRTC 관련 페이로드에는 반드시 `webrtc_session_id` (UUID v4)를 포함하여 명확한 세션 경계(Correlation)를 보장해야 합니다.
 - **멀티모달 락(Lock):** 동시에 여러 미디어가 전송되는 상황을 피하기 위해, "지금 말하는 중(Typing/Speaking Indicator)" 이벤트를 명확히 하여 UI에서 시각적으로 표현할 수 있도록 합니다.
 
 ### 4.2. Control State Management (채널 제어 상태 관리)
 - **Distributed State First:** 로드밸런서 뒤에 다수의 Gate 인스턴스(Scale-out)가 존재하는 환경에서의 TOCTOU(Time-Of-Check to Time-Of-Use) 취약점 및 Rate-limit 우회를 방지하기 위해, Mute 및 Rate-Limit 상태는 Redis(또는 PostgreSQL 기반 Lock) 등 **분산 영속성 저장소에서 일원화하여 관리하는 것을 원칙(Required)**으로 합니다.
-- **In-Memory Fallback:** 단일 인스턴스 환경이거나 분산 저장소 장애 시에만 Gate의 인메모리(RAM) 상태를 Fallback으로 활용합니다. 
+- **Fail-Closed on Store Unavailability:** 분산 저장소(Redis 등)에 접근할 수 없는 경우, Gate는 인메모리 Fallback으로 전환하지 않고 **`503 Service Unavailable`을 반환하여 요청을 거부(Fail-Closed)**합니다. 인메모리 Fallback은 다중 인스턴스 환경에서 Rate-limit 우회를 허용하므로 금지합니다. 단일 인스턴스 개발 환경에서는 `GATE_SINGLE_INSTANCE=true` 플래그로 인메모리 모드를 명시적으로 활성화할 수 있습니다.
 - **Connector 연동:** Gate가 Inbound 요청을 받을 때 상태를 검사하고, Muted 상태거나 한도를 초과하면 즉각 `429 Too Many Requests` 상태 코드를 반환하여 Connector 측이 스스로 메시지를 Drop하도록 유도합니다.
 
 ### 4.3. Connection Stability & Reliability (연결 안정성 및 에러 복구)
@@ -105,7 +105,7 @@ MASC 에이전트 또는 오퍼레이터가 외부 채널의 상태를 제어합
 
 ### 4.4. Large Media Architecture (대용량 미디어 처리: URL TTL 엣지 케이스 방어)
 - **Pre-signed URL Pattern:** 이미지, 비디오, 대용량 파일 등은 **Gate를 직접 통과(Pass-through)하지 않는 것**을 원칙으로 합니다.
-- **TTL (Time-To-Live) 방어:** MASC 에이전트의 처리 지연(비동기 대기열 병목)으로 인해 Connector가 보낸 S3 Pre-signed URL이 만료(Expired)되는 취약점이 존재할 수 있습니다. 이를 방지하기 위해 Connector는 **최소 7일 이상의 만료 시간(TTL)**을 설정하여 URL을 발급해야 하며, 만약 MASC가 403 Expired 오류를 만나면 해당 파일 다운로드 시도를 즉각 포기(Graceful Failure)하도록 정책을 규정합니다.
+- **TTL (Time-To-Live) 방어:** Pre-signed URL의 만료 시간은 **15분~60분**으로 설정합니다. 장기간 유효한 URL(예: 7일)은 유출 시 공격 표면이 크므로 금지합니다. MASC 에이전트의 처리 지연으로 URL이 만료(403 Expired)될 경우, Gate는 Connector에게 **URL 갱신 요청(refresh request)**을 발행하여 새 URL을 수신합니다. 갱신 실패 시 해당 파일 처리를 Graceful Failure로 포기하고, 실패 사유를 DLQ에 기록합니다.
 
 ### 4.5. MASC Internal Data Translation (변환 계층의 데이터 정제 및 스팸 방지)
 - **Decoupled Boundary:** `gate_outbound_bridge.ml`는 MASC의 도메인 모델(`Room_task.t`, `Keep_record` 등)을 범용 `outbound_event` JSON으로 변환합니다.
@@ -115,4 +115,4 @@ MASC 에이전트 또는 오퍼레이터가 외부 채널의 상태를 제어합
 ## 5. Security & Authentication (인증 및 권한 고도화)
 - **Token Rotation & SSE Expiry:** Gate는 `Connector_ID` 별로 단기 토큰(Short-lived JWT)을 발급합니다. 만약 열려있는 SSE 스트림 도중 JWT가 만료되면, Gate는 스트림을 강제로 종료(또는 `401 Unauthorized` 이벤트 전송 후 종료)하여 Connector가 새 토큰을 갱신하고 재연결(Reconnect)하도록 강제합니다.
 - **Scoped Access:** 발급되는 각 토큰에는 자신이 접근할 수 있는 `channel` 이름(e.g., `"discord"`)에 대한 **Scope**가 포함되어야 합니다. 다른 채널로 보내거나 구독하려고 하면 `403 Forbidden`을 반환하여 폭발 반경(Blast Radius)을 최소화합니다.
-- **Webhook Signature Verification (Outbound Auth):** Gate가 Webhook으로 Connector에게 POST를 날릴 때, Connector가 이것이 진짜 Gate의 요청인지 검증할 수 있도록 Gate는 HTTP Header에 페이로드의 **HMAC-SHA256 Signature** (`X-Gate-Signature`)를 반드시 포함시켜야 합니다.
+- **Webhook Signature Verification (Outbound Auth):** Gate가 Webhook으로 Connector에게 POST를 날릴 때, Gate는 HTTP Header에 페이로드의 **HMAC-SHA256 Signature** (`X-Gate-Signature`)와 **타임스탬프** (`X-Gate-Timestamp`, Unix epoch seconds)를 반드시 포함시켜야 합니다. 서명 대상은 `timestamp + "." + payload_body`이며, Connector는 타임스탬프가 **5분 이내**인지 먼저 확인한 후 서명을 검증합니다. 5분 초과 시 replay attack으로 간주하고 `403 Forbidden`을 반환합니다.

@@ -143,6 +143,7 @@ let test_inbound_of_json_normalizes_channel_label () =
 let mock_dispatch_ok ~channel:_ ~channel_user_id:_ ~keeper_name:_ ~content:_ =
   Gate_protocol.Reply {
     content = "mock reply";
+    structured = None;
     stats = Some { Gate_protocol.model_used = "test-model"; duration_ms = 42; tokens_used = 10 };
   }
 

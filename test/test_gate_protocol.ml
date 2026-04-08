@@ -125,6 +125,7 @@ let test_outbound_to_json_roundtrip () =
   let out : Gate_protocol.outbound_message = {
     keeper_name = "luna";
     content = "reply text";
+    structured = None;
     turn_stats = Some { model_used = "m1"; duration_ms = 100; tokens_used = 50 };
   } in
   let json = Gate_protocol.outbound_to_json out in

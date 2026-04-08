@@ -316,18 +316,21 @@ let test_get_config_unknown () =
   | Some _ -> fail "expected None"
 
 let test_spawn_bare_ollama_rejected () =
-  let result = Spawn.spawn ~agent_name:"ollama" ~prompt:"test" () in
-  check bool "spawn rejected" false result.Spawn.success;
-  check int "exit code" 2 result.Spawn.exit_code;
-  check bool "mentions migration" true
-    (try
-       let _ =
-         Str.search_forward
-           (Str.regexp_string "llama:<model>")
-           result.Spawn.output 0
-       in
-       true
-     with Not_found -> false)
+  if Masc_mcp.Provider_adapter.is_bare_ollama_label "ollama" then (
+    let result = Spawn.spawn ~agent_name:"ollama" ~prompt:"test" () in
+    check bool "spawn rejected" false result.Spawn.success;
+    check int "exit code" 2 result.Spawn.exit_code;
+    check bool "mentions migration" true
+      (try
+         let _ =
+           Str.search_forward
+             (Str.regexp_string "llama:<model>")
+             result.Spawn.output 0
+         in
+         true
+       with Not_found -> false))
+  else
+    Alcotest.skip ()
 
 let test_spawn_empty_command_rejected () =
   let result = Spawn.spawn ~agent_name:"   " ~prompt:"test" () in

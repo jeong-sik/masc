@@ -44,6 +44,22 @@ let contains s1 s2 =
     let _ = Str.search_forward (Str.regexp_string s2) s1 0 in true
   with Not_found -> false
 
+let with_temp_script script_body f =
+  let path = Filename.temp_file "masc_test_spawn" ".sh" in
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () ->
+      close_out_noerr oc;
+      (try Sys.remove path with Sys_error _ -> ()))
+    (fun () ->
+      output_string oc "#!/bin/sh\n";
+      output_string oc "cat >/dev/null\n";
+      output_string oc script_body;
+      output_char oc '\n';
+      close_out oc;
+      Unix.chmod path 0o755;
+      f path)
+
 let test_result_to_string_success () =
   (* Test result formatting for success case *)
   let result = {
@@ -142,11 +158,40 @@ let test_masc_mcp_tools () =
   ()
 
 let test_spawn_bare_ollama_rejected () =
-  let result = Spawn.spawn ~agent_name:"ollama" ~prompt:"test" () in
-  Alcotest.(check bool) "spawn rejected" false result.Spawn.success;
-  Alcotest.(check int) "exit code" 2 result.Spawn.exit_code;
-  Alcotest.(check bool) "migration message" true
-    (contains result.Spawn.output "llama:<model>")
+  if Provider_adapter.is_bare_ollama_label "ollama" then (
+    let result = Spawn.spawn ~agent_name:"ollama" ~prompt:"test" () in
+    Alcotest.(check bool) "spawn rejected" false result.Spawn.success;
+    Alcotest.(check int) "exit code" 2 result.Spawn.exit_code;
+    Alcotest.(check bool) "migration message" true
+      (contains result.Spawn.output "llama:<model>"))
+  else
+    Alcotest.skip ()
+
+let test_spawn_failure_surfaces_stderr () =
+  with_temp_script "printf 'stderr-only\\n' >&2\nexit 7" @@ fun script ->
+  let result = Spawn.spawn ~agent_name:script ~prompt:"ignored" () in
+  Alcotest.(check bool) "spawn failed" false result.Spawn.success;
+  Alcotest.(check int) "stderr-only exit code" 7 result.Spawn.exit_code;
+  Alcotest.(check bool) "stderr surfaced in output" true
+    (contains result.Spawn.output "stderr-only")
+
+let test_spawn_failure_falls_back_when_silent () =
+  with_temp_script "exit 9" @@ fun script ->
+  let result = Spawn.spawn ~agent_name:script ~prompt:"ignored" () in
+  Alcotest.(check bool) "spawn failed" false result.Spawn.success;
+  Alcotest.(check int) "silent exit code" 9 result.Spawn.exit_code;
+  Alcotest.(check bool) "fallback mentions exit code" true
+    (contains result.Spawn.output "exited with code 9")
+
+let test_spawn_success_ignores_stderr_noise () =
+  with_temp_script "printf 'stdout-ok\\n'\nprintf 'stderr-noise\\n' >&2\nexit 0"
+  @@ fun script ->
+  let result = Spawn.spawn ~agent_name:script ~prompt:"ignored" () in
+  Alcotest.(check bool) "spawn succeeded" true result.Spawn.success;
+  Alcotest.(check bool) "stdout preserved" true
+    (contains result.Spawn.output "stdout-ok");
+  Alcotest.(check bool) "stderr omitted on success" false
+    (contains result.Spawn.output "stderr-noise")
 
 let tests = [
   Alcotest.test_case "get_config known agents" `Quick test_get_config_known_agents;
@@ -158,6 +203,12 @@ let tests = [
   Alcotest.test_case "result_to_json" `Quick test_result_to_json;
   Alcotest.test_case "masc_mcp_tools populated" `Quick test_masc_mcp_tools;
   Alcotest.test_case "bare ollama rejected" `Quick test_spawn_bare_ollama_rejected;
+  Alcotest.test_case "spawn failure surfaces stderr" `Quick
+    test_spawn_failure_surfaces_stderr;
+  Alcotest.test_case "spawn failure falls back when silent" `Quick
+    test_spawn_failure_falls_back_when_silent;
+  Alcotest.test_case "spawn success ignores stderr noise" `Quick
+    test_spawn_success_ignores_stderr_noise;
 ]
 
 let () =

@@ -11,9 +11,12 @@ let test_adaptive_thinking_disabled () =
       ~current_budget:(Some 100)
   in
   check (option int) "returns current budget when disabled" (Some 100) result
+;;
 
 let test_adaptive_thinking_error_or_retry () =
-  let err_res : Agent_sdk.Types.tool_result = Error { Agent_sdk.Types.message = "fail"; recoverable = true } in
+  let err_res : Agent_sdk.Types.tool_result =
+    Error { Agent_sdk.Types.message = "fail"; recoverable = true }
+  in
   let result1 =
     Masc_mcp.Keeper_agent_run.adaptive_thinking_budget
       ~enabled:true
@@ -34,6 +37,7 @@ let test_adaptive_thinking_error_or_retry () =
       ~current_budget:None
   in
   check (option int) "high thinking for retry" (Some 1500) result2
+;;
 
 let test_adaptive_thinking_complex_task () =
   let result =
@@ -46,6 +50,7 @@ let test_adaptive_thinking_complex_task () =
       ~current_budget:(Some 100)
   in
   check (option int) "max thinking for complex task keywords" (Some 2000) result
+;;
 
 let test_adaptive_thinking_fallback () =
   let result =
@@ -58,14 +63,15 @@ let test_adaptive_thinking_fallback () =
       ~current_budget:(Some 500)
   in
   check (option int) "fallback to current budget" (Some 500) result
+;;
 
 let () =
   let tests =
-    [
-      "disabled", `Quick, test_adaptive_thinking_disabled;
-      "error_or_retry", `Quick, test_adaptive_thinking_error_or_retry;
-      "complex_task", `Quick, test_adaptive_thinking_complex_task;
-      "fallback", `Quick, test_adaptive_thinking_fallback;
+    [ "disabled", `Quick, test_adaptive_thinking_disabled
+    ; "error_or_retry", `Quick, test_adaptive_thinking_error_or_retry
+    ; "complex_task", `Quick, test_adaptive_thinking_complex_task
+    ; "fallback", `Quick, test_adaptive_thinking_fallback
     ]
   in
   Alcotest.run "Keeper_adaptive_thinking" [ "budget_logic", tests ]
+;;

@@ -1378,6 +1378,7 @@ let run_turn
            ~approval:(Governance_pipeline.to_oas_approval_callback
                         ~governance_level:(Env_config_core.governance_level ())
                         ~keeper_name:meta.name)
+            ~enable_thinking:false
            ?oas_checkpoint:raw_oas_checkpoint
            ?event_bus
            ())

@@ -702,3 +702,12 @@ let keeper_slot_id (name : string) : int option =
   else
     let h = Hashtbl.hash name in
     Some (h mod num_slots)
+
+
+let keeper_adaptive_thinking_enabled_rp =
+  _rp_bool ~key:"keeper.turn.adaptive_thinking"
+    ~default:(fun () -> bool_of_env_default "MASC_KEEPER_ADAPTIVE_THINKING" ~default:false)
+    ~description:"Enable pipeline signal-based per-turn adaptive thinking" ()
+
+let keeper_adaptive_thinking_enabled () : bool =
+  Runtime_params.get keeper_adaptive_thinking_enabled_rp

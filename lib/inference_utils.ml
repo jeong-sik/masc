@@ -102,7 +102,7 @@ let rec sanitize_content_blocks_utf8
         | Agent_sdk.Types.Text s ->
             let sanitized = sanitize_text_utf8 s in
             if sanitized == s then block else Agent_sdk.Types.Text sanitized
-        | Agent_sdk.Types.ToolResult { tool_use_id; content; is_error } ->
+        | Agent_sdk.Types.ToolResult { tool_use_id; content; is_error; json } ->
             let sanitized_tool_use_id = sanitize_text_utf8 tool_use_id in
             let sanitized_content = sanitize_text_utf8 content in
             if sanitized_tool_use_id == tool_use_id && sanitized_content == content
@@ -112,6 +112,7 @@ let rec sanitize_content_blocks_utf8
                 tool_use_id = sanitized_tool_use_id;
                 content = sanitized_content;
                 is_error;
+                json;
               }
         | _ -> block
       in

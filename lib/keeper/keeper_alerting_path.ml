@@ -211,8 +211,20 @@ let playground_path_of_keeper (name : string) : string =
   let safe_name = sanitize_keeper_name name in
   Printf.sprintf ".masc/playground/%s/" safe_name
 
+let playground_mind_path (name : string) : string =
+  let safe_name = sanitize_keeper_name name in
+  Printf.sprintf ".masc/playground/%s/mind/" safe_name
+
+let playground_repos_path (name : string) : string =
+  let safe_name = sanitize_keeper_name name in
+  Printf.sprintf ".masc/playground/%s/repos/" safe_name
+
 let effective_allowed_paths ~(meta : Keeper_types.keeper_meta) : string list =
   let playground = playground_path_of_keeper meta.name in
+  let playground_sub = [
+    playground_mind_path meta.name;
+    playground_repos_path meta.name;
+  ] in
   let workspace_defaults =
     match String.lowercase_ascii meta.execution_scope with
     | "workspace" ->
@@ -223,7 +235,7 @@ let effective_allowed_paths ~(meta : Keeper_types.keeper_meta) : string list =
   in
   match meta.allowed_paths with
   | ["*"] -> []
-  | explicit -> playground :: workspace_defaults @ explicit
+  | explicit -> playground :: playground_sub @ workspace_defaults @ explicit
 
 (** Resolve a path for read-only access: allow any path within the
     project root, regardless of allowed_paths.  Write operations must

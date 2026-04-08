@@ -57,4 +57,26 @@ val allows_workflow : t -> string -> bool
     as configured in [permissions.shell_write_presets]. *)
 val allows_shell_write : t -> string -> bool
 
+(** Git clone allowed GitHub org names from [git_clone.allowed_orgs]. *)
+val git_clone_allowed_orgs : t -> string list
+
+(** Repos blocked even if org is allowed, from [git_clone.denied_repos]. *)
+val git_clone_denied_repos : t -> string list
+
+(** Clone depth: 0 = full clone, N = shallow --depth N.
+    From [git_clone.default_depth], default 0. *)
+val clone_depth : t -> int
+
+(** Timeout in seconds for git clone operations.
+    From [git_clone.clone_timeout_sec], default 120.0. *)
+val clone_timeout_sec : t -> float
+
+(** Timeout in seconds for git push operations.
+    From [git_clone.push_timeout_sec], default 60.0. *)
+val push_timeout_sec : t -> float
+
+(** Timeout in seconds for PR creation operations.
+    From [git_clone.pr_create_timeout_sec], default 30.0. *)
+val pr_create_timeout_sec : t -> float
+
 val resolve_group : t -> string -> string list option

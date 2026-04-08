@@ -65,31 +65,25 @@ let truncate_output s =
     String.sub s 0 max_output_bytes ^ "\n... (truncated)"
   else s
 
-(* ── Git clone org allowlist ─────────────────────────────────────── *)
+(* ── Git clone config (cycle-free) ──────────────────────────────── *)
 
-(* Cached clone allowed orgs loaded from config/tool_policy.toml.
-   Loaded once per process; config changes require restart. *)
-let clone_allowed_orgs_cache : string list option ref = ref None
+(* Loads tool_policy.toml config directly via Keeper_tool_policy_config
+   to avoid circular dependency with Keeper_tool_policy (which imports
+   Tool_code_write.schemas for schema assembly). *)
+let _policy_config_cache : Keeper_tool_policy_config.t option ref = ref None
+
+let get_policy_config ~base_path =
+  match !_policy_config_cache with
+  | Some cfg -> Some cfg
+  | None ->
+    match Keeper_tool_policy_config.load ~base_path with
+    | Ok cfg -> _policy_config_cache := Some cfg; Some cfg
+    | Error _ -> None
 
 let load_clone_allowed_orgs ~base_path =
-  match !clone_allowed_orgs_cache with
-  | Some orgs -> orgs
-  | None ->
-    let rel = "config/tool_policy.toml" in
-    let path = Filename.concat base_path rel in
-    let orgs = match Safe_ops.read_file_safe path with
-      | Error msg ->
-        Log.Keeper.warn "git_clone: cannot read %s: %s" path msg;
-        []
-      | Ok content ->
-        match Keeper_toml_loader.parse_toml content with
-        | Error msg ->
-          Log.Keeper.warn "git_clone: TOML parse error in %s: %s" path msg;
-          []
-        | Ok doc -> Keeper_toml_loader.toml_string_list doc "git_clone.allowed_orgs"
-    in
-    clone_allowed_orgs_cache := Some orgs;
-    orgs
+  match get_policy_config ~base_path with
+  | Some cfg -> Keeper_tool_policy_config.git_clone_allowed_orgs cfg
+  | None -> []
 
 (** Extract GitHub org from clone URL (case-normalized to lowercase).
     Strict matching: URL must start with an exact known prefix to prevent
@@ -167,22 +161,10 @@ let extract_github_org_repo url =
       Some (org ^ "/" ^ repo)
     | _ -> None
 
-let clone_denied_repos_cache : string list option ref = ref None
-
 let load_clone_denied_repos ~base_path =
-  match !clone_denied_repos_cache with
-  | Some repos -> repos
-  | None ->
-    let path = Filename.concat base_path "config/tool_policy.toml" in
-    let repos = match Safe_ops.read_file_safe path with
-      | Error _ -> []
-      | Ok content ->
-        match Keeper_toml_loader.parse_toml content with
-        | Error _ -> []
-        | Ok doc -> Keeper_toml_loader.toml_string_list doc "git_clone.denied_repos"
-    in
-    clone_denied_repos_cache := Some repos;
-    repos
+  match get_policy_config ~base_path with
+  | Some cfg -> Keeper_tool_policy_config.git_clone_denied_repos cfg
+  | None -> []
 
 let validate_clone_url ~base_path url =
   let allowed = load_clone_allowed_orgs ~base_path in
@@ -206,7 +188,8 @@ let validate_clone_url ~base_path url =
           Error (Printf.sprintf "Repository '%s' is in the denied list" org_repo)
         | _ -> Ok ()
 
-(** Validate cwd for clone: allows .worktrees/ itself (not just subdirs). *)
+(** Validate cwd for clone: allows .worktrees/ itself (not just subdirs)
+    and .masc/playground/{name}/repos/ directories. *)
 let validate_clone_cwd config cwd =
   match Tool_code.validate_path config cwd with
   | Error e -> Error e
@@ -216,12 +199,34 @@ let validate_clone_cwd config cwd =
     | Some root ->
       let worktree_prefix = Tool_code.normalize_path
         (Filename.concat root ".worktrees") in
-      if canonical_path = worktree_prefix ||
-         String.starts_with ~prefix:(worktree_prefix ^ "/") canonical_path then
+      let playground_prefix = Tool_code.normalize_path
+        (Filename.concat root ".masc/playground") in
+      let in_worktrees =
+        canonical_path = worktree_prefix ||
+        String.starts_with ~prefix:(worktree_prefix ^ "/") canonical_path
+      in
+      let in_playground_repos =
+        (* Match .masc/playground/{name}/repos or subdirs thereof.
+           Path after playground_prefix must be /{name}/repos[/...]. *)
+        if String.starts_with ~prefix:(playground_prefix ^ "/") canonical_path then
+          let suffix = String.sub canonical_path
+            (String.length playground_prefix + 1)
+            (String.length canonical_path - String.length playground_prefix - 1) in
+          match String.index_opt suffix '/' with
+          | None -> false
+          | Some idx ->
+            let after_name = String.sub suffix (idx + 1)
+              (String.length suffix - idx - 1) in
+            after_name = "repos" ||
+            String.starts_with ~prefix:"repos/" after_name
+        else false
+      in
+      if in_worktrees || in_playground_repos then
         Ok canonical_path
       else
         Error (IoError (Printf.sprintf
-          "Clone restricted to .worktrees/ directory (got: %s)" canonical_path))
+          "Clone restricted to .worktrees/ or .masc/playground/*/repos/ directory (got: %s)"
+          canonical_path))
 
 (* Handler: masc_code_write — Create or overwrite a file *)
 let handle_code_write ctx args =
@@ -460,13 +465,26 @@ let handle_code_git ctx args =
         match validate_clone_cwd ctx.config cwd with
         | Error e -> (false, Types.masc_error_to_string e)
         | Ok abs_cwd ->
-          (* Only pass the validated URL — no extra args allowed *)
+          (* Only pass the validated URL — no extra args allowed.
+             Depth and timeout are config-driven via [git_clone] in tool_policy.toml. *)
+          let depth = match get_policy_config ~base_path:ctx.config.Room.base_path with
+            | Some cfg -> Keeper_tool_policy_config.clone_depth cfg
+            | None -> 0
+          in
+          let depth_flag =
+            if depth > 0 then Printf.sprintf " --depth %d" depth else ""
+          in
+          let timeout = match get_policy_config ~base_path:ctx.config.Room.base_path with
+            | Some cfg -> Keeper_tool_policy_config.clone_timeout_sec cfg
+            | None -> 120.0
+          in
           let cmd = ["sh"; "-c";
-                     Printf.sprintf "cd %s && git clone %s"
+                     Printf.sprintf "cd %s && git clone%s %s"
                        (Filename.quote abs_cwd)
+                       depth_flag
                        (Filename.quote url)]
           in
-          match Process_eio.run_argv_with_status ~timeout_sec:120.0 cmd with
+          match Process_eio.run_argv_with_status ~timeout_sec:timeout cmd with
           | Unix.WEXITED code, output ->
             let response = `Assoc [
               ("status", `String (if code = 0 then "ok" else "error"));
@@ -511,7 +529,12 @@ let handle_code_git ctx args =
                      action
                      (String.concat " " (List.map Filename.quote git_args))]
         in
-        match Process_eio.run_argv_with_status ~timeout_sec:30.0 cmd with
+        let env_opt =
+          if action = "commit" then
+            Some (Keeper_identity.git_env_for_keeper ~keeper_name:ctx.agent_name)
+          else None
+        in
+        match Process_eio.run_argv_with_status ~timeout_sec:30.0 ?env:env_opt cmd with
         | Unix.WEXITED code, output ->
           let response = `Assoc [
             ("status", `String (if code = 0 then "ok" else "error"));

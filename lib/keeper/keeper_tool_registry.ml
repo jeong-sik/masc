@@ -63,7 +63,10 @@ let core_discovery_tools =
     (* Shell: readonly + execution (action symmetry) *)
     "keeper_shell_readonly"; "keeper_bash";
     (* VCS: essential for coding keepers *)
-    "keeper_pr_workflow"; "keeper_github";
+    "keeper_pr_workflow"; "keeper_pr_submit"; "keeper_github";
+    "keeper_preflight_check";
+    (* Review *)
+    "keeper_pr_review_read"; "keeper_pr_review_comment"; "keeper_pr_review_reply";
     (* External search *)
     "masc_web_search";
   ]

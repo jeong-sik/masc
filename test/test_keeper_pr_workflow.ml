@@ -548,6 +548,38 @@ let test_playground_clone_creates_clone_and_commits () =
         (Printf.sprintf "cd %s && git push origin --delete %s 2>/dev/null"
           (Filename.quote repo_root) (Filename.quote test_branch))))
 
+(* --- keeper_bash branch-switch guard --- *)
+
+let test_bash_git_checkout_blocked () =
+  with_room (fun config ->
+    let meta = make_meta_with_preset "delivery" in
+    let args = `Assoc [ "cmd", `String "git checkout refactor/some-branch" ] in
+    let result = call_tool config meta "keeper_bash" args in
+    let json = parse_json result in
+    let error = try json_string "error" json with _ -> "" in
+    check bool "checkout blocked"
+      true (error = "branch_switch_blocked"))
+
+let test_bash_git_switch_blocked () =
+  with_room (fun config ->
+    let meta = make_meta_with_preset "delivery" in
+    let args = `Assoc [ "cmd", `String "git switch feature/x" ] in
+    let result = call_tool config meta "keeper_bash" args in
+    let json = parse_json result in
+    let error = try json_string "error" json with _ -> "" in
+    check bool "switch blocked"
+      true (error = "branch_switch_blocked"))
+
+let test_bash_git_status_allowed () =
+  with_room (fun config ->
+    let meta = make_meta_with_preset "delivery" in
+    let args = `Assoc [ "cmd", `String "git status" ] in
+    let result = call_tool config meta "keeper_bash" args in
+    let json = parse_json result in
+    let error = try json_string "error" json with _ -> "" in
+    check bool "git status not blocked as branch_switch"
+      true (error <> "branch_switch_blocked"))
+
 let () =
   run "keeper_pr_workflow"
     [ "required_fields",
@@ -585,6 +617,11 @@ let () =
       ]
     ; "task_dedup",
       [ test_case "second claim no tasks" `Quick test_second_claim_on_single_task_returns_no_tasks
+      ]
+    ; "bash_branch_guard",
+      [ test_case "checkout blocked" `Quick test_bash_git_checkout_blocked
+      ; test_case "switch blocked" `Quick test_bash_git_switch_blocked
+      ; test_case "status allowed" `Quick test_bash_git_status_allowed
       ]
     ; "integration",
       [ test_case "playground clone e2e" `Slow test_playground_clone_creates_clone_and_commits

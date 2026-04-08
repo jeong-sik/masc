@@ -272,6 +272,23 @@ let is_write_operation cmd =
     List.mem cmd_name ["mv"; "cp"; "mkdir"; "touch"; "chmod"]
   | [] -> false
 
+(** Detect git branch-switch commands that would mutate the main repo's HEAD.
+    keeper_bash runs in the repo root, so checkout/switch/branch -b must be
+    redirected to keeper_pr_workflow (playground clone). *)
+let is_git_branch_switch cmd =
+  let parts =
+    String.split_on_char ' ' (String.trim cmd)
+    |> List.filter (fun s -> s <> "")
+  in
+  match parts with
+  | "git" :: "checkout" :: _ -> true
+  | "git" :: "switch" :: _ -> true
+  | "git" :: "branch" :: rest ->
+    (* git branch -b/-B/--create creates a new branch — block.
+       git branch (list) and git branch -d (delete) are safe to allow. *)
+    List.exists (fun a -> a = "-b" || a = "-B" || a = "--create") rest
+  | _ -> false
+
 (** Detect truly destructive commands that must be blocked even for
     Coding/Full preset keepers. Delegates to [Eval_gate.detect_destructive]
     for the full 19-pattern check as a fallback. *)

@@ -282,7 +282,10 @@ let filter_by_providers (allowed : string list option) (models : string list)
   match allowed with
   | None | Some [] -> models
   | Some providers ->
-    let providers = List.map String.lowercase_ascii providers in
+    let providers =
+      List.sort_uniq String.compare
+        (List.map String.lowercase_ascii providers)
+    in
     let filtered =
       List.filter
         (fun label ->

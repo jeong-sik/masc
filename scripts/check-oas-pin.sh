@@ -3,6 +3,36 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+LOCAL_ONLY=0
+
+usage() {
+  cat <<'EOF'
+Usage: scripts/check-oas-pin.sh [--local-only]
+
+Options:
+  --local-only   Skip upstream remote drift lookup and verify only repository
+                 manifests plus the current local opam switch.
+  -h, --help     Show this help.
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --local-only)
+      LOCAL_ONLY=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "unknown argument: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
 
 # GitHub release metadata can lag for this repo. Keep the dependency floor
 # aligned with the pinned SDK's declared opam version, and ratchet the runtime
@@ -12,20 +42,23 @@ source "${SCRIPT_DIR}/oas-agent-sdk-pin.sh"
 min_version_re="${OAS_AGENT_SDK_MIN_VERSION//./\\.}"
 default_pin_source="${OAS_AGENT_SDK_URL}#${OAS_AGENT_SDK_SHA}"
 pin_source="${AGENT_SDK_PIN_URL:-${default_pin_source}}"
+expected_opam_pin_source="git+${OAS_AGENT_SDK_URL}#${OAS_AGENT_SDK_SHA}"
 
 if [[ "${pin_source}" == "${default_pin_source}" ]]; then
-  latest_main_sha="$(
-    git ls-remote "${OAS_AGENT_SDK_URL}" "refs/heads/${OAS_AGENT_SDK_TRACK_REF}" \
-      | awk '{print $1}'
-  )"
+  if [[ "${LOCAL_ONLY}" -eq 0 ]]; then
+    latest_main_sha="$(
+      git ls-remote "${OAS_AGENT_SDK_URL}" "refs/heads/${OAS_AGENT_SDK_TRACK_REF}" \
+        | awk '{print $1}'
+    )"
 
-  if [[ -z "${latest_main_sha}" ]]; then
-    echo "failed to resolve upstream ${OAS_AGENT_SDK_TRACK_REF} SHA" >&2
-    exit 1
-  fi
+    if [[ -z "${latest_main_sha}" ]]; then
+      echo "failed to resolve upstream ${OAS_AGENT_SDK_TRACK_REF} SHA" >&2
+      exit 1
+    fi
 
-  if [[ "${OAS_AGENT_SDK_SHA}" != "${latest_main_sha}" ]]; then
-    echo "::warning::OAS main drift: pinned ${OAS_AGENT_SDK_SHA}, upstream ${latest_main_sha} — update pin when API-compatible"
+    if [[ "${OAS_AGENT_SDK_SHA}" != "${latest_main_sha}" ]]; then
+      echo "::warning::OAS main drift: pinned ${OAS_AGENT_SDK_SHA}, upstream ${latest_main_sha} — update pin when API-compatible"
+    fi
   fi
 else
   echo "OAS pin override in use: ${pin_source}"
@@ -46,6 +79,48 @@ if grep -Eq '0\.81\.0' \
   "${REPO_ROOT}/docs/OAS-UTILIZATION-AUDIT.md"; then
   echo "stale OAS version references remain in keeper/OAS docs" >&2
   exit 1
+fi
+
+if command -v opam >/dev/null 2>&1; then
+  installed_packages="$(opam list --installed --columns=name,version --short 2>/dev/null)"
+  installed_version="$(awk '$1 == "agent_sdk" { print $2 }' <<<"${installed_packages}")"
+  if [[ -z "${installed_version}" ]]; then
+    echo "agent_sdk is not installed in the current opam switch" >&2
+    echo "repair: bash scripts/opam-pin-external-deps.sh && opam install . --deps-only --with-test --with-doc -y" >&2
+    exit 1
+  fi
+  if [[ "${installed_version}" != "${OAS_AGENT_SDK_MIN_VERSION}" ]]; then
+    echo "installed agent_sdk version is ${installed_version}, expected ${OAS_AGENT_SDK_MIN_VERSION}" >&2
+    echo "repair: bash scripts/opam-pin-external-deps.sh && opam install . --deps-only --with-test --with-doc -y" >&2
+    exit 1
+  fi
+
+  pin_list_output="$(opam pin list 2>/dev/null || true)"
+  pin_line="$(awk '$1 ~ /^agent_sdk\./ { print }' <<<"${pin_list_output}")"
+  if [[ -n "${pin_line}" ]]; then
+    installed_pin_source="$(awk '{print $3}' <<<"${pin_line}")"
+    case "${installed_pin_source}" in
+      "${expected_opam_pin_source}")
+        ;;
+      git+file://*)
+        local_pin_path="${installed_pin_source#git+file://}"
+        local_pin_path="${local_pin_path%%#*}"
+        local_pin_head="$(git -C "${local_pin_path}" rev-parse HEAD 2>/dev/null || true)"
+        if [[ "${local_pin_head}" != "${OAS_AGENT_SDK_SHA}" ]]; then
+          echo "local agent_sdk pin points to ${local_pin_path}@${local_pin_head:-unknown}, expected ${OAS_AGENT_SDK_SHA}" >&2
+          echo "repair: bash scripts/opam-pin-external-deps.sh" >&2
+          exit 1
+        fi
+        ;;
+      *)
+        echo "agent_sdk pin source is ${installed_pin_source}, expected ${expected_opam_pin_source}" >&2
+        echo "repair: bash scripts/opam-pin-external-deps.sh" >&2
+        exit 1
+        ;;
+    esac
+  else
+    echo "WARN: could not read agent_sdk pin source from opam; installed version matches ${OAS_AGENT_SDK_MIN_VERSION}" >&2
+  fi
 fi
 
 if [[ "${pin_source}" == "${default_pin_source}" ]]; then

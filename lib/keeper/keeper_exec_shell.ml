@@ -84,12 +84,29 @@ let handle_keeper_bash
         let st, out =
           Process_eio.run_argv_with_status ~timeout_sec [ "/bin/bash"; "-lc"; shell_cmd ]
         in
-        Yojson.Safe.to_string
-          (`Assoc
-              [ "ok", `Bool (st = Unix.WEXITED 0)
-              ; "status", Keeper_alerting_path.process_status_to_json st
-              ; "output", `String (Keeper_alerting_path.truncate_tool_output out)
-              ]))
+        (* Samchon structured feedback: detect common git errors and
+           provide actionable alternatives instead of bare error output. *)
+        let hint =
+          if st <> Unix.WEXITED 0 then
+            let has s = String_util.contains_substring_ci out s in
+            if has "already used by worktree" || has "already checked out"
+            then Some "Branch is in a worktree. Use 'git worktree add .worktrees/<name> <branch>' or 'cd' to the existing worktree path shown in the error."
+            else if has "not a git repository"
+            then Some "Not inside a git repository. Check your working directory."
+            else None
+          else None
+        in
+        let base_fields =
+          [ "ok", `Bool (st = Unix.WEXITED 0)
+          ; "status", Keeper_alerting_path.process_status_to_json st
+          ; "output", `String (Keeper_alerting_path.truncate_tool_output out)
+          ]
+        in
+        let fields = match hint with
+          | Some h -> base_fields @ [ "hint", `String h ]
+          | None -> base_fields
+        in
+        Yojson.Safe.to_string (`Assoc fields))
 ;;
 
 let handle_keeper_shell_readonly

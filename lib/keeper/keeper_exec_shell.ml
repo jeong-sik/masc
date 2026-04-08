@@ -1,6 +1,17 @@
 open Keeper_types
 open Keeper_exec_shared
 
+(** Shell operation timeout constants.
+    - [io_timeout_sec]: commands that may block on network/disk I/O
+      (git status, ls with large dirs, custom bash).
+    - [read_timeout_sec]: fast read-only commands on local files
+      (cat, rg, head, tail, find, git_log, tree).
+    - [user_timeout_max_sec]: upper bound for user-provided timeout_sec
+      in keeper_bash (prevents indefinite blocking). *)
+let io_timeout_sec = 30.0
+let read_timeout_sec = 15.0
+let user_timeout_max_sec = 180.0
+
 let handle_keeper_bash
       ~(config : Room.config)
       ~(meta : keeper_meta)
@@ -13,7 +24,7 @@ let handle_keeper_bash
     |> Worker_dev_tools.truncate_for_log
   in
   let timeout_sec =
-    Safe_ops.json_float ~default:30.0 "timeout_sec" args |> fun n -> max 1.0 (min 180.0 n)
+    Safe_ops.json_float ~default:io_timeout_sec "timeout_sec" args |> fun n -> max 1.0 (min user_timeout_max_sec n)
   in
   (* Write access is config-driven via permissions.shell_write_presets *)
   let write_enabled =
@@ -118,7 +129,7 @@ let handle_keeper_shell_readonly
     resolve_keeper_read_path ~config ~raw_path
   in
   let render_process_result ~cmd argv =
-    let st, out = Process_eio.run_argv_with_status ~timeout_sec:30.0 argv in
+    let st, out = Process_eio.run_argv_with_status ~timeout_sec:io_timeout_sec argv in
     Yojson.Safe.to_string
       (`Assoc
           [ "ok", `Bool (st = Unix.WEXITED 0)
@@ -139,7 +150,7 @@ let handle_keeper_shell_readonly
      | Error e -> error_json ~fields:[ "op", `String op ] e
      | Ok target ->
        let st, out =
-         Process_eio.run_argv_with_status ~timeout_sec:30.0 [ "/bin/ls"; "-la"; target ]
+         Process_eio.run_argv_with_status ~timeout_sec:io_timeout_sec [ "/bin/ls"; "-la"; target ]
        in
        let limit = shell_readonly_limit args in
        Yojson.Safe.to_string
@@ -156,7 +167,7 @@ let handle_keeper_shell_readonly
      | Ok target ->
        let max_bytes = shell_readonly_cat_max_bytes args in
        let st, out =
-         Process_eio.run_argv_with_status ~timeout_sec:15.0 [ "/bin/cat"; target ]
+         Process_eio.run_argv_with_status ~timeout_sec:read_timeout_sec [ "/bin/cat"; target ]
        in
        let body =
          if String.length out > max_bytes then String.sub out 0 max_bytes else out
@@ -188,7 +199,7 @@ let handle_keeper_shell_readonly
         let glob_argv = if glob <> "" then [ "--glob"; glob ] else [] in
         let argv = base_argv @ type_argv @ glob_argv @ [ pattern; target ] in
         let st, out =
-          Process_eio.run_argv_with_status ~timeout_sec:15.0 argv
+          Process_eio.run_argv_with_status ~timeout_sec:read_timeout_sec argv
         in
         (* rg exit codes: 0=matches found, 1=no matches (not an error), 2+=real error.
            Treat exit 1 as success with empty results — "no match" is a valid answer. *)
@@ -212,7 +223,7 @@ let handle_keeper_shell_readonly
         Printf.sprintf "-%d" count ]
     in
     let argv = if file_path <> "" then base_argv @ [ "--"; file_path ] else base_argv in
-    let st, out = Process_eio.run_argv_with_status ~timeout_sec:15.0 argv in
+    let st, out = Process_eio.run_argv_with_status ~timeout_sec:read_timeout_sec argv in
     Yojson.Safe.to_string
       (`Assoc
           [ "ok", `Bool (st = Unix.WEXITED 0)
@@ -231,7 +242,7 @@ let handle_keeper_shell_readonly
       | Ok target ->
         let limit = shell_readonly_limit args in
         let st, out =
-          Process_eio.run_argv_with_status ~timeout_sec:15.0
+          Process_eio.run_argv_with_status ~timeout_sec:read_timeout_sec
             [ "find"; target; "-maxdepth"; "5"; "-name"; name_pattern;
               "-not"; "-path"; "*/.git/*";
               "-not"; "-path"; "*/_build/*";
@@ -252,7 +263,7 @@ let handle_keeper_shell_readonly
      | Ok target ->
        let n = Safe_ops.json_int ~default:20 "lines" args |> fun v -> max 1 (min 200 v) in
        let st, out =
-         Process_eio.run_argv_with_status ~timeout_sec:15.0
+         Process_eio.run_argv_with_status ~timeout_sec:read_timeout_sec
            [ "/usr/bin/head"; "-n"; string_of_int n; target ]
        in
        Yojson.Safe.to_string
@@ -270,7 +281,7 @@ let handle_keeper_shell_readonly
      | Ok target ->
        let n = Safe_ops.json_int ~default:20 "lines" args |> fun v -> max 1 (min 200 v) in
        let st, out =
-         Process_eio.run_argv_with_status ~timeout_sec:15.0
+         Process_eio.run_argv_with_status ~timeout_sec:read_timeout_sec
            [ "/usr/bin/tail"; "-n"; string_of_int n; target ]
        in
        Yojson.Safe.to_string
@@ -292,7 +303,7 @@ let handle_keeper_shell_readonly
      | Error e -> error_json ~fields:[ "op", `String op ] e
      | Ok target ->
        let st, out =
-         Process_eio.run_argv_with_status ~timeout_sec:15.0
+         Process_eio.run_argv_with_status ~timeout_sec:read_timeout_sec
            [ "find"; target; "-maxdepth"; "3"; "-print";
              "-not"; "-path"; "*/.git/*";
              "-not"; "-path"; "*/_build/*" ]
@@ -335,7 +346,7 @@ let handle_keeper_shell_readonly
               ])
       else
         let st, out =
-          Process_eio.run_argv_with_status ~timeout_sec:30.0
+          Process_eio.run_argv_with_status ~timeout_sec:io_timeout_sec
             [ "bash"; "-c"; cmd_str ]
         in
         Yojson.Safe.to_string

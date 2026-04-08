@@ -140,6 +140,21 @@ let format_post (p : Board.post) =
     p.reply_count
     thread_str
 
+(** Compact one-line format for board_list: id, title, author, time, score.
+    Omits body, TTL, visibility, thread to minimize token usage. *)
+let format_post_compact (p : Board.post) =
+  let time_str = format_timestamp_relative p.created_at in
+  let score = p.votes_up - p.votes_down in
+  let hearth_str = match p.hearth with Some h -> Printf.sprintf " [%s]" h | None -> "" in
+  Printf.sprintf "%s · %s%s (by %s, %s, %+d, %d replies)"
+    (Board.Post_id.to_string p.id)
+    p.title
+    hearth_str
+    (Board.Agent_id.to_string p.author)
+    time_str
+    score
+    p.reply_count
+
 let format_comment ?(indent=0) (c : Board.comment) =
   let prefix = String.make indent ' ' in
   let tree_prefix = if indent > 0 then "└─ " else "" in
@@ -279,6 +294,7 @@ let dispatch_sort_of sort_by =
 
 let handle_post_list args =
   let limit = get_int args "limit" 20 |> max 1 |> min 100 in
+  let compact = get_bool args "compact" false in
   let visibility_str = get_string_opt args "visibility" in
   let hearth = get_string_opt args "hearth" in
   let random = get_bool args "random" false in
@@ -311,7 +327,9 @@ let handle_post_list args =
   match sort_by_result with
   | Error msg -> (false, Printf.sprintf "❌ %s" msg)
   | Ok sort_by ->
-      let fetch_limit = limit + offset + 100 in
+      (* Fetch exactly what we need: offset posts to skip + limit posts to show.
+         Board_dispatch.list_posts already applies visibility/hearth/author filters. *)
+      let fetch_limit = limit + offset in
       let sorted_posts =
         Board_dispatch.list_posts ~visibility_filter ?hearth ?author_filter
           ~exclude_system ~exclude_automation
@@ -344,7 +362,8 @@ let handle_post_list args =
         in
         let format_post_with_indicator p =
           let indicator = if has_new_activity p then " 🔔" else "" in
-          format_post p ^ indicator
+          let fmt = if compact then format_post_compact else format_post in
+          fmt p ^ indicator
         in
         let formatted = List.map format_post_with_indicator posts in
         let sort_label = match sort_by with
@@ -354,8 +373,10 @@ let handle_post_list args =
           | Updated -> "🔄 Recently Updated"
           | Discussed -> "💬 Most Discussed"
         in
-        let header = Printf.sprintf "📋 Posts (%d) — %s:" (List.length posts) sort_label in
-        (true, header ^ "\n\n" ^ String.concat "\n\n---\n\n" formatted)
+        let separator = if compact then "\n" else "\n\n---\n\n" in
+        let mode_label = if compact then " (compact)" else "" in
+        let header = Printf.sprintf "📋 Posts (%d) — %s%s:" (List.length posts) sort_label mode_label in
+        (true, header ^ "\n" ^ String.concat separator formatted)
 
 let handle_post_get args =
   let post_id = get_string args "post_id" "" in
@@ -559,6 +580,7 @@ let tool_post_list : Types.tool_schema = {
       ("exclude_automation", `Assoc [("type", `String "boolean"); ("description", `String "Exclude automation posts (heartbeat, probes, etc.) (default: false)")]);
       ("author", `Assoc [("type", `String "string"); ("description", `String "Filter posts by author name (case-insensitive substring match)")]);
       ("since", `Assoc [("type", `String "number"); ("description", `String "Unix timestamp. Posts with activity after this time show a 🔔 indicator")]);
+      ("compact", `Assoc [("type", `String "boolean"); ("description", `String "One-line per post (id, title, author, time, score). Omits body/TTL/visibility. Use for overview scans (default: false)")]);
     ]);
   ];
 }

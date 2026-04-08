@@ -113,6 +113,7 @@ val run_named :
   ?slot_id:int ->
   ?enable_thinking:bool ->
   ?approval:Oas.Hooks.approval_callback ->
+  ?exit_condition:(int -> bool) ->
   ?oas_checkpoint:Oas.Checkpoint.t ->
   ?event_bus:Oas.Event_bus.t ->
   ?sw:Eio.Switch.t ->

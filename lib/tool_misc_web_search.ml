@@ -446,9 +446,8 @@ let searxng_base_url () =
   (match Uri.scheme (Uri.of_string url) |> Option.map String.lowercase_ascii with
    | Some "http" | Some "https" -> ()
    | _ ->
-       failwith
-         (Printf.sprintf
-            "MASC_SEARXNG_URL must use http or https scheme (got: %s)" url));
+       raise (Failure (Printf.sprintf
+            "MASC_SEARXNG_URL must use http or https scheme (got: %s)" url)));
   url
 
 let fetch_searxng ~timeout_sec ~query =

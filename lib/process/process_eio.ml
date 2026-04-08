@@ -218,7 +218,7 @@ let with_unix_capture ?env ?stdin_content ?(capture_stderr = false)
                     let stderr = captured_stderr_or_empty !stderr_path_ref in
                     (status, stdout, stderr)
                 | None ->
-                    failwith "waitpid status missing after Unix fallback capture")
+                    raise (Failure "waitpid status missing after Unix fallback capture"))
             in
             cleanup ();
             on_success status stdout stderr)

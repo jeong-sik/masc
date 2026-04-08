@@ -85,7 +85,9 @@ let handle_keeper_bash
               ; "error", `String "branch_switch_blocked"
               ; ( "reason"
                 , `String
-                    "git checkout/switch/branch is blocked in the main repo. \
+                    "git checkout, git switch, and git branch mutations \
+                     (create/rename/copy) are blocked in the main repo. \
+                     Plain git branch listing is allowed. \
                      Use keeper_pr_workflow to create changes in an isolated clone." )
               ; "cmd", `String cmd_for_log
               ; "hint", `String "keeper_pr_workflow"

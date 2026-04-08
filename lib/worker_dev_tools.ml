@@ -272,21 +272,77 @@ let is_write_operation cmd =
     List.mem cmd_name ["mv"; "cp"; "mkdir"; "touch"; "chmod"]
   | [] -> false
 
+(** Skip git global options (e.g. [-C dir], [--work-tree=...]) to find the
+    actual subcommand. Handles both [-C dir] (two-token) and [--work-tree=x]
+    (single-token) forms. *)
+let rec skip_git_global_options = function
+  | [] -> []
+  | "--" :: rest -> rest
+  | ("-C" | "-c" | "--git-dir" | "--work-tree" | "--namespace"
+    | "--super-prefix" | "--config-env" | "--exec-path") :: _ :: rest ->
+    skip_git_global_options rest
+  | opt :: rest when String.length opt > 1 && opt.[0] = '-' &&
+      (String.starts_with ~prefix:"--git-dir=" opt
+       || String.starts_with ~prefix:"--work-tree=" opt
+       || String.starts_with ~prefix:"--namespace=" opt
+       || String.starts_with ~prefix:"--exec-path=" opt
+       || String.starts_with ~prefix:"-c" opt) ->
+    skip_git_global_options rest
+  | parts -> parts
+
 (** Detect git branch-switch commands that would mutate the main repo's HEAD.
-    keeper_bash runs in the repo root, so checkout/switch/branch -b must be
-    redirected to keeper_pr_workflow (playground clone). *)
+    keeper_bash runs in the repo root, so checkout/switch/branch mutations must
+    be redirected to keeper_pr_workflow (playground clone).
+
+    Handles tab-separated tokens, global git options like [-C dir], and real
+    branch mutation forms (create, rename, copy). Allows read-only listing. *)
 let is_git_branch_switch cmd =
+  (* Tokenize on both space and tab *)
   let parts =
-    String.split_on_char ' ' (String.trim cmd)
-    |> List.filter (fun s -> s <> "")
+    let buf = Buffer.create 64 in
+    let tokens = ref [] in
+    String.iter (fun c ->
+      match c with
+      | ' ' | '\t' ->
+        if Buffer.length buf > 0 then begin
+          tokens := Buffer.contents buf :: !tokens;
+          Buffer.clear buf
+        end
+      | _ -> Buffer.add_char buf c
+    ) (String.trim cmd);
+    if Buffer.length buf > 0 then
+      tokens := Buffer.contents buf :: !tokens;
+    List.rev !tokens
+  in
+  let is_option arg = String.length arg > 0 && arg.[0] = '-' in
+  let has_any_flag flags args = List.exists (fun a -> List.mem a flags) args in
+  let rec first_non_option = function
+    | [] -> None
+    | a :: _ when not (is_option a) -> Some a
+    | _ :: rest -> first_non_option rest
   in
   match parts with
-  | "git" :: "checkout" :: _ -> true
-  | "git" :: "switch" :: _ -> true
-  | "git" :: "branch" :: rest ->
-    (* git branch -b/-B/--create creates a new branch — block.
-       git branch (list) and git branch -d (delete) are safe to allow. *)
-    List.exists (fun a -> a = "-b" || a = "-B" || a = "--create") rest
+  | "git" :: rest ->
+    (match skip_git_global_options rest with
+     | "checkout" :: _ -> true
+     | "switch" :: _ -> true
+     | "branch" :: branch_args ->
+       (* Block branch mutations:
+          - git branch <newname> [<start-point>]
+          - git branch -c/-C/--copy ...
+          - git branch -m/-M/--move ...
+          Allow: listing (-l/--list/-a/--all/-r/--remotes/-v/-vv/--show-current)
+                 and deletion (-d/-D/--delete). *)
+       if branch_args = [] then false
+       else if has_any_flag ["-d"; "-D"; "--delete"] branch_args then false
+       else if has_any_flag
+         ["-l"; "--list"; "-a"; "--all"; "-r"; "--remotes";
+          "--show-current"; "-v"; "-vv"] branch_args
+       then false
+       else if has_any_flag ["-c"; "-C"; "--copy"; "-m"; "-M"; "--move"] branch_args
+       then true
+       else Option.is_some (first_non_option branch_args)
+     | _ -> false)
   | _ -> false
 
 (** Detect truly destructive commands that must be blocked even for

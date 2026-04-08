@@ -550,25 +550,58 @@ let test_playground_clone_creates_clone_and_commits () =
 
 (* --- keeper_bash branch-switch guard --- *)
 
+let assert_branch_switch_blocked config cmd label =
+  let meta = make_meta_with_preset "delivery" in
+  let args = `Assoc [ "cmd", `String cmd ] in
+  let result = call_tool config meta "keeper_bash" args in
+  let json = parse_json result in
+  let error = try json_string "error" json with _ -> "" in
+  check bool (label ^ " blocked")
+    true (error = "branch_switch_blocked")
+
 let test_bash_git_checkout_blocked () =
   with_room (fun config ->
-    let meta = make_meta_with_preset "delivery" in
-    let args = `Assoc [ "cmd", `String "git checkout refactor/some-branch" ] in
-    let result = call_tool config meta "keeper_bash" args in
-    let json = parse_json result in
-    let error = try json_string "error" json with _ -> "" in
-    check bool "checkout blocked"
-      true (error = "branch_switch_blocked"))
+    assert_branch_switch_blocked config "git checkout refactor/some-branch" "checkout")
 
 let test_bash_git_switch_blocked () =
   with_room (fun config ->
+    assert_branch_switch_blocked config "git switch feature/x" "switch")
+
+let test_bash_git_checkout_with_global_opts_blocked () =
+  with_room (fun config ->
+    assert_branch_switch_blocked config "git -C . checkout refactor/x" "checkout -C")
+
+let test_bash_git_tab_separated_blocked () =
+  with_room (fun config ->
+    assert_branch_switch_blocked config "git\tcheckout feature/x" "tab checkout")
+
+let test_bash_git_branch_create_blocked () =
+  with_room (fun config ->
+    assert_branch_switch_blocked config "git branch new-feature" "branch create")
+
+let test_bash_git_branch_rename_blocked () =
+  with_room (fun config ->
+    assert_branch_switch_blocked config "git branch -m old-name new-name" "branch -m")
+
+let test_bash_git_branch_list_allowed () =
+  with_room (fun config ->
     let meta = make_meta_with_preset "delivery" in
-    let args = `Assoc [ "cmd", `String "git switch feature/x" ] in
+    let args = `Assoc [ "cmd", `String "git branch --list" ] in
     let result = call_tool config meta "keeper_bash" args in
     let json = parse_json result in
     let error = try json_string "error" json with _ -> "" in
-    check bool "switch blocked"
-      true (error = "branch_switch_blocked"))
+    check bool "git branch --list not blocked"
+      true (error <> "branch_switch_blocked"))
+
+let test_bash_git_branch_delete_allowed () =
+  with_room (fun config ->
+    let meta = make_meta_with_preset "delivery" in
+    let args = `Assoc [ "cmd", `String "git branch -d old-branch" ] in
+    let result = call_tool config meta "keeper_bash" args in
+    let json = parse_json result in
+    let error = try json_string "error" json with _ -> "" in
+    check bool "git branch -d not blocked as branch_switch"
+      true (error <> "branch_switch_blocked"))
 
 let test_bash_git_status_allowed () =
   with_room (fun config ->
@@ -576,9 +609,12 @@ let test_bash_git_status_allowed () =
     let args = `Assoc [ "cmd", `String "git status" ] in
     let result = call_tool config meta "keeper_bash" args in
     let json = parse_json result in
-    let error = try json_string "error" json with _ -> "" in
-    check bool "git status not blocked as branch_switch"
-      true (error <> "branch_switch_blocked"))
+    let has_status = match json with
+      | `Assoc fields -> List.mem_assoc "status" fields
+      | _ -> false
+    in
+    check bool "git status returns normal execution shape"
+      true has_status)
 
 let () =
   run "keeper_pr_workflow"
@@ -621,6 +657,12 @@ let () =
     ; "bash_branch_guard",
       [ test_case "checkout blocked" `Quick test_bash_git_checkout_blocked
       ; test_case "switch blocked" `Quick test_bash_git_switch_blocked
+      ; test_case "checkout -C blocked" `Quick test_bash_git_checkout_with_global_opts_blocked
+      ; test_case "tab checkout blocked" `Quick test_bash_git_tab_separated_blocked
+      ; test_case "branch create blocked" `Quick test_bash_git_branch_create_blocked
+      ; test_case "branch rename blocked" `Quick test_bash_git_branch_rename_blocked
+      ; test_case "branch list allowed" `Quick test_bash_git_branch_list_allowed
+      ; test_case "branch delete allowed" `Quick test_bash_git_branch_delete_allowed
       ; test_case "status allowed" `Quick test_bash_git_status_allowed
       ]
     ; "integration",

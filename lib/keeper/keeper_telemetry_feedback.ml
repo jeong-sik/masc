@@ -194,7 +194,6 @@ let start_refresh_loop ~sw ~clock ~keeper_name ~decision_log_path
   Eio.Fiber.fork ~sw (fun () ->
     while not (Atomic.get stop) do
       (try refresh_stats ~keeper_name ~decision_log_path ~window_hours
-<<<<<<< HEAD
        with
        | Eio.Cancel.Cancelled _ as ex ->
            let bt = Printexc.get_raw_backtrace () in

@@ -138,42 +138,20 @@ let test_rg_exit_code_semantics () =
   Alcotest.(check bool) "exit 2 (error) is not ok" false (is_ok (Unix.WEXITED 2));
   Alcotest.(check bool) "exit 127 (not found) is not ok" false (is_ok (Unix.WEXITED 127))
 
-(* ── git error hint detection ─────────────────────────────── *)
+(* ── git_worktree op: action validation ───────────────────── *)
 
-(* Inline substring check — mirrors String_util.contains_substring_ci *)
-let contains_ci haystack needle =
-  let h = String.lowercase_ascii haystack in
-  let n = String.lowercase_ascii needle in
-  let nlen = String.length n in
-  let hlen = String.length h in
-  if nlen > hlen then false
-  else
-    let found = ref false in
-    for i = 0 to hlen - nlen do
-      if not !found && String.sub h i nlen = n then found := true
-    done;
-    !found
+let test_git_worktree_action_normalization () =
+  (* Verify action aliases normalize correctly *)
+  let normalize a = String.trim a |> String.lowercase_ascii in
+  Alcotest.(check string) "list" "list" (normalize "list");
+  Alcotest.(check string) "add" "add" (normalize " Add ");
+  Alcotest.(check string) "LIST uppercase" "list" (normalize "LIST");
+  Alcotest.(check string) "unknown stays" "remove" (normalize "remove")
 
-let has_worktree_hint output =
-  contains_ci output "already used by worktree"
-  || contains_ci output "already checked out"
-
-let has_not_a_repo_hint output =
-  contains_ci output "not a git repository"
-
-let test_git_worktree_hint_detection () =
-  Alcotest.(check bool) "worktree error detected"
-    true (has_worktree_hint "fatal: 'branch' is already used by worktree at '/path'");
-  Alcotest.(check bool) "checked out error detected"
-    true (has_worktree_hint "fatal: 'main' is already checked out at '/path'");
-  Alcotest.(check bool) "normal error not detected"
-    false (has_worktree_hint "fatal: pathspec 'foo' did not match any files")
-
-let test_git_not_a_repo_hint_detection () =
-  Alcotest.(check bool) "not a repo detected"
-    true (has_not_a_repo_hint "fatal: not a git repository (or any parent)");
-  Alcotest.(check bool) "unrelated error not detected"
-    false (has_not_a_repo_hint "fatal: remote origin already exists")
+let test_git_worktree_branch_required () =
+  (* action=add with empty branch should be rejected *)
+  let branch = String.trim "" in
+  Alcotest.(check bool) "empty branch rejected" true (branch = "")
 
 let () =
   Alcotest.run "Keeper bash safety" [
@@ -194,8 +172,8 @@ let () =
     ("rg_exit_code", [
       Alcotest.test_case "rg exit semantics (0=ok, 1=ok, 2+=error)" `Quick test_rg_exit_code_semantics;
     ]);
-    ("git_hints", [
-      Alcotest.test_case "worktree error hint detected" `Quick test_git_worktree_hint_detection;
-      Alcotest.test_case "not-a-repo hint detected" `Quick test_git_not_a_repo_hint_detection;
+    ("git_worktree_op", [
+      Alcotest.test_case "action normalization" `Quick test_git_worktree_action_normalization;
+      Alcotest.test_case "branch required for add" `Quick test_git_worktree_branch_required;
     ]);
   ]

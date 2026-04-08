@@ -314,12 +314,6 @@ let make_heartbeat_callbacks
       };
     ]
 
-(** Command-oriented tools that need destructive pattern screening in Workers.
-    Limit screening to tools whose relevant input is a command string, to
-    avoid false positives from file content payloads (for example write/edit
-    tool bodies containing shell snippets in docs or tests). *)
-let worker_destructive_check_tools =
-  [ "shell_exec"; "masc_code_shell"; "masc_code_git"; "masc_code_delete" ]
 
 (** Convert a JSON field value into a string suitable for safety screening. *)
 let string_of_screening_value (value : Yojson.Safe.t) : string =
@@ -433,7 +427,7 @@ let make_tool_tracking_hooks ?gate_config ?context () =
                  else
                  (* Gate 2: Destructive pattern detection *)
                  if gate.destructive_check_enabled
-                    && List.mem tool_name worker_destructive_check_tools
+                    && Tool_dispatch.is_destructive tool_name
                  then
                    let cmd = extract_command_from_input input in
                    (match Eval_gate.detect_destructive cmd with

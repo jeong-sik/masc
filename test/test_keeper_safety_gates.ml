@@ -300,12 +300,11 @@ let test_extract_non_string_command () =
 (* ================================================================ *)
 
 let test_destructive_check_tools_membership () =
-  let tools = Keeper_hooks_oas.destructive_check_tools in
-  check bool "keeper_bash in list" true (List.mem "keeper_bash" tools);
-  check bool "keeper_fs_edit in list" true (List.mem "keeper_fs_edit" tools);
-  check bool "keeper_github in list" true (List.mem "keeper_github" tools);
-  check bool "keeper_fs_read not in list" false (List.mem "keeper_fs_read" tools);
-  check bool "keeper_board_post not in list" false (List.mem "keeper_board_post" tools)
+  check bool "keeper_bash is destructive" true (Tool_dispatch.is_destructive "keeper_bash");
+  check bool "keeper_fs_edit is destructive" true (Tool_dispatch.is_destructive "keeper_fs_edit");
+  check bool "keeper_github is destructive" true (Tool_dispatch.is_destructive "keeper_github");
+  check bool "keeper_fs_read not destructive" false (Tool_dispatch.is_destructive "keeper_fs_read");
+  check bool "keeper_board_post not destructive" false (Tool_dispatch.is_destructive "keeper_board_post")
 
 (* ================================================================ *)
 (* Group 5: Integration — extract + detect combined                  *)

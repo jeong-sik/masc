@@ -14,9 +14,6 @@
     @since Phase 4 — Keeper → Agent.run() migration
     @since Phase 7 — Eval_gate → OAS hooks migration *)
 
-(** Bash-like tools that need destructive pattern screening. *)
-let destructive_check_tools =
-  [ "keeper_bash"; "keeper_fs_edit"; "keeper_github"; "keeper_pr_workflow" ]
 
 (** Keeper deny list — derived from Tool_catalog surface SSOT.
     Administrative/destructive operations that should only be invoked
@@ -455,7 +452,7 @@ let make_hooks
                 ~tool_name ~reason_code:"cost_gate" ~reason_text)
          | _ ->
            (* Safety gate 2: Destructive pattern detection *)
-           if destructive_check && List.mem tool_name destructive_check_tools then
+           if destructive_check && Tool_dispatch.is_destructive tool_name then
              let cmd = extract_command_from_input input in
              match Eval_gate.detect_destructive cmd with
              | Some (pattern, desc) ->
@@ -522,7 +519,7 @@ let hook_introspection_json
     `List (List.map (fun s -> `String s) keeper_denied_tools)
   in
   let destructive_json =
-    `List (List.map (fun s -> `String s) destructive_check_tools)
+    `String "dynamic_boundary (Tool_dispatch.is_destructive)"
   in
   `Assoc [
     ("slots", `Assoc [

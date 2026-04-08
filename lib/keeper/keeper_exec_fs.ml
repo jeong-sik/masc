@@ -12,7 +12,12 @@ let handle_keeper_fs_read
     Safe_ops.json_int ~default:20000 "max_bytes" args |> fun n -> max 512 (min 200000 n)
   in
   match resolve_keeper_read_path ~config ~raw_path:path with
-  | Error e -> error_json e
+  | Error e ->
+    let root = Keeper_alerting_path.project_root_of_config config in
+    let target =
+      if Filename.is_relative path then Filename.concat root path else path
+    in
+    missing_file_error_json ~config ~target ~error:e
   | Ok target ->
     (match Safe_ops.read_file_safe target with
      | Error e when String.starts_with ~prefix:file_not_found_prefix e ->

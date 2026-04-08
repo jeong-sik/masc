@@ -351,19 +351,9 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
   Otel_dispatch_hook.install ();
   Otel_spans.setup_exporter ~sw env;
   Shutdown.register ~name:"otel_exporter" ~priority:20 Otel_spans.shutdown;
-  (match Board_dispatch.get_pg_pool () with
-  | Some pool ->
-      let listener = Board_listener.create pool in
-      Eio.Fiber.fork ~sw (fun () ->
-        try Board_listener.start ~clock listener
-        with
-        | Eio.Cancel.Cancelled _ as e -> raise e
-        | exn ->
-          Log.BoardListener.error "board listener fiber crashed: %s"
-            (Printexc.to_string exn));
-      Log.BoardListener.info "Fiber started for real-time Board events"
-  | None ->
-      Log.BoardListener.info "Skipped (not using PostgreSQL backend)");
+  (* Board_listener removed: filesystem-first principle.
+     JSONL path emits SSE directly via Board_dispatch.emit_board_sse_event.
+     PG path also uses Board_dispatch, making the pg_notify relay redundant. *)
   Eio.Fiber.fork ~sw (fun () ->
       let last_prune = ref (Unix.gettimeofday ()) in
       let rec loop () =

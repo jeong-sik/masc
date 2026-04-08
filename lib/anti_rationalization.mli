@@ -75,7 +75,12 @@ val review_result_to_json : review_result -> Yojson.Safe.t
     Exposed for dashboard administration. *)
 val load_excuse_patterns : unit -> (string * string) list
 
+(** Parse and validate a JSON value into excuse patterns.
+    Rejects malformed entries with [Error msg] instead of silently dropping them. *)
+val parse_excuse_patterns_json : Yojson.Safe.t -> ((string * string) list, string) result
+
 (** Save excuse patterns to config/excuse_patterns.json.
+    Uses atomic write (temp + rename). Invalidates cache on success.
     Returns [Ok ()] on success or [Error msg] on failure.
     Exposed for dashboard administration. *)
 val save_excuse_patterns : (string * string) list -> (unit, string) result

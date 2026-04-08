@@ -139,30 +139,29 @@ let rec add_routes ~sw ~clock router =
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
   |> Http.Router.post "/api/v1/dashboard/config/excuse-patterns" (fun request reqd ->
-       with_public_read (fun _state req reqd ->
-         Http.Request.read_body_async reqd (fun body_str ->
-           try
-             let json = Yojson.Safe.from_string body_str in
-             match json with
-             | `List items ->
-                 let patterns = List.filter_map (function
-                   | `List [`String pat; `String reason] -> Some (pat, reason)
-                   | _ -> None
-                 ) items in
+       with_token_permission_auth ~permission:Types.CanAdmin
+         (fun _state _agent_name req reqd ->
+           Http.Request.read_body_async reqd (fun body_str ->
+             try
+               let json = Yojson.Safe.from_string body_str in
+               match Anti_rationalization.parse_excuse_patterns_json json with
+               | Error msg ->
+                 Http.Response.json ~status:`Bad_request ~request:req
+                   (Yojson.Safe.to_string (`Assoc [("ok", `Bool false); ("error", `String msg)])) reqd
+               | Ok patterns ->
                  (match Anti_rationalization.save_excuse_patterns patterns with
                  | Ok () ->
                      Http.Response.json ~request:req {|{"ok":true}|} reqd
                  | Error msg ->
                      Http.Response.json ~status:`Internal_server_error ~request:req
                        (Yojson.Safe.to_string (`Assoc [("ok", `Bool false); ("error", `String msg)])) reqd)
-             | _ ->
-                 Http.Response.json ~status:`Bad_request ~request:req
-                   (Yojson.Safe.to_string (`Assoc [("ok", `Bool false); ("error", `String "expected list of [pattern, reason]")])) reqd
-           with exn ->
-             Http.Response.json ~status:`Bad_request ~request:req
-               (Yojson.Safe.to_string (`Assoc [("ok", `Bool false); ("error", `String (Printexc.to_string exn))])) reqd
-         )
-       ) request reqd)
+             with
+             | Eio.Cancel.Cancelled _ as exn -> raise exn
+             | _exn ->
+               Http.Response.json ~status:`Bad_request ~request:req
+                 (Yojson.Safe.to_string (`Assoc [("ok", `Bool false); ("error", `String "Invalid JSON body")])) reqd
+           )
+         ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/namespace-truth" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let json = dashboard_namespace_truth_http_json ~state ~sw ~clock req in

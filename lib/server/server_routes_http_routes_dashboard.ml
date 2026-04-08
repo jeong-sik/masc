@@ -278,7 +278,9 @@ let rec add_routes ~sw ~clock router =
   (* ── Telemetry unified view ── *)
   |> Http.Router.get "/api/v1/dashboard/telemetry" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         let base_path = state.Mcp_server.room_config.base_path in
+         let config = state.Mcp_server.room_config in
+         let base_path = config.base_path in
+         let masc_root = Room.masc_root_dir config in
          let n =
            Server_utils.int_query_param req "n" ~default:100
            |> max 1 |> min 500
@@ -293,7 +295,7 @@ let rec add_routes ~sw ~clock router =
               | None -> Telemetry_unified.all_sources)
          in
          let entries =
-           Telemetry_unified.read_unified ~base_path ~sources
+           Telemetry_unified.read_unified ~base_path ~masc_root ~sources
              ?keeper_name ~n ()
          in
          let json = `Assoc [
@@ -306,8 +308,10 @@ let rec add_routes ~sw ~clock router =
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/telemetry/summary" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         let base_path = state.Mcp_server.room_config.base_path in
-         let json = Telemetry_unified.summary_json ~base_path () in
+         let config = state.Mcp_server.room_config in
+         let base_path = config.base_path in
+         let masc_root = Room.masc_root_dir config in
+         let json = Telemetry_unified.summary_json ~base_path ~masc_root () in
          Http.Response.json ~compress:true ~request:req
            (Yojson.Safe.to_string json) reqd
        ) request reqd)

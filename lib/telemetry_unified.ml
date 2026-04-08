@@ -6,12 +6,12 @@
     No existing write paths are modified.  The module creates read-only
     {!Dated_jsonl} handles (no appends, no directory creation).
 
-    Sources:
-    - [.masc/keepers/<name>/metrics/]  — Per-keeper turn metrics (richest data)
-    - [.masc/telemetry/]               — Agent lifecycle + tool call events
-    - [.masc/tool_calls/]              — Full I/O for keeper tool calls
-    - [.masc/tool_usage/]              — System_internal surface tool calls
-    - [data/tool-metrics/]             — Tool duration/success metrics
+    Sources (paths are relative to the cluster-aware [masc_root]):
+    - [<masc_root>/keepers/<name>/metrics/]  — Per-keeper turn metrics
+    - [<masc_root>/telemetry/]               — Agent lifecycle + tool call events
+    - [<masc_root>/tool_calls/]              — Full I/O for keeper tool calls
+    - [<masc_root>/tool_usage/]              — System_internal surface tool calls
+    - [<base_path>/data/tool-metrics/]       — Tool duration/success metrics
 
     @since 2.251.0 *)
 
@@ -41,17 +41,21 @@ let all_sources = [Keeper_metric; Agent_event; Tool_call_io; Tool_usage; Tool_me
 
 (* ── Store paths ────────────────────────────────────── *)
 
-(** Fixed-path sources (single directory per source). *)
-let fixed_store_dir base_path = function
-  | Agent_event  -> Some (Filename.concat base_path ".masc/telemetry")
-  | Tool_call_io -> Some (Filename.concat base_path ".masc/tool_calls")
-  | Tool_usage   -> Some (Filename.concat base_path ".masc/tool_usage")
+(** Fixed-path sources (single directory per source).
+
+    [masc_root] is the cluster-aware .masc directory
+    (e.g. [base_path/.masc] or [base_path/.masc/clusters/<name>]).
+    [base_path] is the project root, used only for [data/] paths. *)
+let fixed_store_dir ~masc_root ~base_path = function
+  | Agent_event  -> Some (Filename.concat masc_root "telemetry")
+  | Tool_call_io -> Some (Filename.concat masc_root "tool_calls")
+  | Tool_usage   -> Some (Filename.concat masc_root "tool_usage")
   | Tool_metric  -> Some (Filename.concat base_path "data/tool-metrics")
   | Keeper_metric -> None  (* per-keeper, handled separately *)
 
-(** Discover all keeper metric directories under [.masc/keepers/]. *)
-let discover_keeper_metric_dirs base_path : (string * string) list =
-  let keepers_dir = Filename.concat base_path ".masc/keepers" in
+(** Discover all keeper metric directories under [masc_root/keepers/]. *)
+let discover_keeper_metric_dirs masc_root : (string * string) list =
+  let keepers_dir = Filename.concat masc_root "keepers" in
   if not (Sys.file_exists keepers_dir) then []
   else
     let entries =
@@ -123,8 +127,8 @@ let read_fixed_source dir source ~n : Yojson.Safe.t list =
 
 (* ── Read keeper metrics (per-keeper directories) ───── *)
 
-let read_keeper_metrics ~base_path ?keeper_name ~n () : Yojson.Safe.t list =
-  let dirs = discover_keeper_metric_dirs base_path in
+let read_keeper_metrics ~masc_root ?keeper_name ~n () : Yojson.Safe.t list =
+  let dirs = discover_keeper_metric_dirs masc_root in
   let dirs = match keeper_name with
     | None -> dirs
     | Some name -> List.filter (fun (k, _) -> String.equal k name) dirs
@@ -135,16 +139,16 @@ let read_keeper_metrics ~base_path ?keeper_name ~n () : Yojson.Safe.t list =
 
 (* ── Unified read ───────────────────────────────────── *)
 
-let read_unified ~base_path ?(sources = all_sources) ?keeper_name
+let read_unified ~base_path ~masc_root ?(sources = all_sources) ?keeper_name
     ?(n = 100) () : Yojson.Safe.t list =
   let per_source = max n (n * 2) in
   let all_entries =
     List.concat_map (fun source ->
       match source with
       | Keeper_metric ->
-        read_keeper_metrics ~base_path ?keeper_name ~n:per_source ()
+        read_keeper_metrics ~masc_root ?keeper_name ~n:per_source ()
       | _ ->
-        match fixed_store_dir base_path source with
+        match fixed_store_dir ~masc_root ~base_path source with
         | Some dir -> read_fixed_source dir source ~n:per_source
         | None -> []
     ) sources
@@ -171,8 +175,8 @@ let read_unified ~base_path ?(sources = all_sources) ?keeper_name
 
 (* ── Summary ────────────────────────────────────────── *)
 
-let count_fixed_source_entries ~base_path source : int =
-  match fixed_store_dir base_path source with
+let count_fixed_source_entries ~masc_root ~base_path source : int =
+  match fixed_store_dir ~masc_root ~base_path source with
   | None -> 0
   | Some dir ->
     if not (Sys.file_exists dir) then 0
@@ -181,8 +185,8 @@ let count_fixed_source_entries ~base_path source : int =
        | store -> List.length (Dated_jsonl.read_recent store 10_000)
        | exception _ -> 0)
 
-let summary_json ~base_path () : Yojson.Safe.t =
-  let keeper_dirs = discover_keeper_metric_dirs base_path in
+let summary_json ~base_path ~masc_root () : Yojson.Safe.t =
+  let keeper_dirs = discover_keeper_metric_dirs masc_root in
   let keeper_total =
     List.fold_left (fun acc (_, dir) ->
       acc +
@@ -205,10 +209,10 @@ let summary_json ~base_path () : Yojson.Safe.t =
         ("entry_count", `Int keeper_total);
       ]
     | _ ->
-      let dir = match fixed_store_dir base_path source with
+      let dir = match fixed_store_dir ~masc_root ~base_path source with
         | Some d -> d | None -> "" in
       let exists = dir <> "" && Sys.file_exists dir in
-      let count = if exists then count_fixed_source_entries ~base_path source else 0 in
+      let count = if exists then count_fixed_source_entries ~masc_root ~base_path source else 0 in
       `Assoc [
         ("source", `String (source_to_string source));
         ("path", `String dir);
@@ -218,7 +222,7 @@ let summary_json ~base_path () : Yojson.Safe.t =
   in
   let fixed_total =
     List.fold_left (fun acc s ->
-      acc + count_fixed_source_entries ~base_path s
+      acc + count_fixed_source_entries ~masc_root ~base_path s
     ) 0 (List.filter (fun s -> s <> Keeper_metric) all_sources)
   in
   `Assoc [

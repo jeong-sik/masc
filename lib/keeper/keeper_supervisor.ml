@@ -274,7 +274,7 @@ let apply_self_preservation ~keepers_dir ~total_keepers to_restart =
     let cohorts = Hashtbl.create 4 in
     List.iter (fun ((entry : Keeper_registry.registry_entry), _msg) ->
       let key = cohort_key_of_reason entry.last_failure_reason in
-      let prev = try Hashtbl.find cohorts key with Not_found -> [] in
+      let prev = Option.value ~default:[] (Hashtbl.find_opt cohorts key) in
       Hashtbl.replace cohorts key ((entry, _msg) :: prev)
     ) to_restart;
     let dominant_key, dominant_entries =

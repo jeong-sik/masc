@@ -92,7 +92,7 @@ let compute_tool_counts (groups : blocked_attempt_group list)
     : (string * int) list =
   let tbl = Hashtbl.create 8 in
   List.iter (fun g ->
-    let prev = try Hashtbl.find tbl g.key.tool_name with Not_found -> 0 in
+    let prev = Option.value ~default:0 (Hashtbl.find_opt tbl g.key.tool_name) in
     Hashtbl.replace tbl g.key.tool_name (prev + g.count)
   ) groups;
   Hashtbl.fold (fun name count acc -> (name, count) :: acc) tbl []

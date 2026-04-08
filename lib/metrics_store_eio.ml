@@ -105,7 +105,7 @@ let flush_pending () =
     match Eio.Stream.take_nonblocking write_queue with
     | None -> ()
     | Some entry ->
-        let prev = try Hashtbl.find batch entry.file with Not_found -> Buffer.create 256 in
+        let prev = Option.value ~default:(Buffer.create 256) (Hashtbl.find_opt batch entry.file) in
         Buffer.add_string prev entry.line;
         Hashtbl.replace batch entry.file prev;
         drain ()

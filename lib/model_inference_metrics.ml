@@ -37,7 +37,7 @@ let percentile (sorted : float array) (p : float) : float =
   if n = 0 then 0.0
   else
     let rank = p /. 100.0 *. Float.of_int (n - 1) in
-    let lo = Float.to_int (Float.round ~direction:`Down rank) in
+    let lo = int_of_float (floor rank) in
     let hi = min (lo + 1) (n - 1) in
     let frac = rank -. Float.of_int lo in
     sorted.(lo) *. (1.0 -. frac) +. sorted.(hi) *. frac

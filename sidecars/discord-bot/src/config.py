@@ -1,4 +1,4 @@
-"""Configuration for MASC Discord Bot.
+"""Configuration for Discord Gate Bot.
 
 Loads and validates all required environment variables.
 Fails fast at startup if any required config is missing.
@@ -37,23 +37,13 @@ class BotConfig(BaseSettings):
     discord_bot_token: str = Field(
         validation_alias=AliasChoices("DISCORD_BOT_TOKEN", "discord_bot_token")
     )
-    masc_mcp_url: str = Field(
+    gate_base_url: str = Field(
         default="http://localhost:8935",
-        validation_alias=AliasChoices(
-            "MASC_MCP_URL",
-            "masc_mcp_url",
-            "GATE_BASE_URL",
-            "gate_base_url",
-        ),
+        validation_alias=AliasChoices("GATE_BASE_URL", "gate_base_url"),
     )
-    masc_api_token: str = Field(
+    gate_api_token: str = Field(
         default="",
-        validation_alias=AliasChoices(
-            "MASC_API_TOKEN",
-            "masc_api_token",
-            "GATE_API_TOKEN",
-            "gate_api_token",
-        )
+        validation_alias=AliasChoices("GATE_API_TOKEN", "gate_api_token"),
     )
 
     # Channel-to-keeper mapping: {"channel_id": "keeper_name"}
@@ -62,14 +52,14 @@ class BotConfig(BaseSettings):
         validation_alias=AliasChoices("DISCORD_KEEPER_MAP", "discord_keeper_map"),
     )
     discord_binding_store_path: str = Field(
-        default=".masc/discord_keeper_bindings.json",
+        default=".gate/discord_bindings.json",
         validation_alias=AliasChoices(
             "DISCORD_BINDING_STORE_PATH",
             "discord_binding_store_path",
         ),
     )
     discord_binding_audit_path: str = Field(
-        default=".masc/discord_keeper_binding_audit.jsonl",
+        default=".gate/discord_binding_audit.jsonl",
         validation_alias=AliasChoices(
             "DISCORD_BINDING_AUDIT_PATH",
             "discord_binding_audit_path",
@@ -122,17 +112,17 @@ class BotConfig(BaseSettings):
             raise ValueError("DISCORD_BOT_TOKEN is required")
         return v.strip()
 
-    @field_validator("masc_api_token")
+    @field_validator("gate_api_token")
     @classmethod
     def normalize_api_token(cls, v: str) -> str:
         return v.strip()
 
     @model_validator(mode="after")
     def validate_gate_auth_mode(self) -> BotConfig:
-        if self.masc_api_token or self.gate_base_url_is_loopback():
+        if self.gate_api_token or self.gate_base_url_is_loopback():
             return self
         raise ValueError(
-            "MASC_API_TOKEN is required unless GATE_BASE_URL/MASC_MCP_URL points at a loopback host"
+            "GATE_API_TOKEN is required unless gate URL points at a loopback host"
         )
 
     @field_validator("discord_keeper_map")
@@ -208,20 +198,12 @@ class BotConfig(BaseSettings):
         return Path.cwd() / path
 
     def gate_message_url(self) -> str:
-        base = self.masc_mcp_url.rstrip("/")
+        base = self.gate_base_url.rstrip("/")
         return f"{base}/api/v1/gate/message"
 
     def gate_health_url(self) -> str:
-        base = self.masc_mcp_url.rstrip("/")
+        base = self.gate_base_url.rstrip("/")
         return f"{base}/api/v1/gate/health"
-
-    @property
-    def gate_base_url(self) -> str:
-        return self.masc_mcp_url
-
-    @property
-    def gate_api_token(self) -> str:
-        return self.masc_api_token
 
     def gate_base_url_is_loopback(self) -> bool:
         parsed = urlparse(self.gate_base_url)

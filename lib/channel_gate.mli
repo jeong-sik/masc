@@ -37,6 +37,7 @@ type turn_stats = Gate_protocol.turn_stats = {
 type outbound_message = Gate_protocol.outbound_message = {
   keeper_name : string;
   content : string;
+  structured : Yojson.Safe.t option;
   turn_stats : turn_stats option;
 }
 

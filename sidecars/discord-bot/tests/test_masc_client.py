@@ -11,7 +11,6 @@ import pytest
 from src import config as config_module
 from src.config import BotConfig
 from src.gate_client import GateClient
-from src.masc_client import GateResponse, MascGateClient
 
 
 @pytest.fixture(autouse=True)
@@ -151,7 +150,7 @@ async def test_loopback_client_uses_origin_fallback_when_token_missing(
     assert response.ok is True
     assert "authorization" not in seen_headers
     assert seen_headers["origin"] == "http://127.0.0.1:8935"
-    assert seen_headers["x-masc-agent"] == "discord-gate-bot"
+    assert seen_headers["x-gate-agent"] == "discord-gate-bot"
 
     await client.aclose()
 
@@ -180,7 +179,7 @@ async def test_client_uses_bearer_auth_when_token_configured() -> None:
 
     assert response.ok is True
     assert seen_headers["authorization"] == "Bearer test-api-token"
-    assert seen_headers["x-masc-agent"] == "discord-gate-bot"
+    assert seen_headers["x-gate-agent"] == "discord-gate-bot"
     assert "origin" not in seen_headers
 
     await client.aclose()
@@ -195,7 +194,7 @@ def test_config_allows_zero_disable_values(monkeypatch: pytest.MonkeyPatch) -> N
 
     cfg = BotConfig(
         discord_bot_token="test-token",
-        masc_api_token="test-api-token",
+        gate_api_token="test-api-token",
         gate_max_retries=0,
         status_cache_ttl_sec=0,
         keeper_cache_ttl_sec=0,
@@ -213,8 +212,8 @@ def test_config_allows_zero_disable_values(monkeypatch: pytest.MonkeyPatch) -> N
 def test_config_allows_blank_token_for_loopback_url() -> None:
     cfg = BotConfig(
         discord_bot_token="test-token",
-        masc_api_token="",
-        masc_mcp_url="http://127.0.0.1:8935",
+        gate_api_token="",
+        gate_base_url="http://127.0.0.1:8935",
     )
 
     assert cfg.gate_api_token == ""
@@ -223,48 +222,12 @@ def test_config_allows_blank_token_for_loopback_url() -> None:
 
 
 def test_config_rejects_blank_token_for_non_loopback_url() -> None:
-    with pytest.raises(ValueError, match="MASC_API_TOKEN is required"):
+    with pytest.raises(ValueError, match="GATE_API_TOKEN"):
         BotConfig(
             discord_bot_token="test-token",
-            masc_api_token="",
-            masc_mcp_url="https://masc.example.com",
+            gate_api_token="",
+            gate_base_url="https://gate.example.com",
         )
-
-
-def test_legacy_env_aliases_still_work(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("GATE_API_TOKEN", raising=False)
-    monkeypatch.delenv("GATE_BASE_URL", raising=False)
-    monkeypatch.setenv("DISCORD_BOT_TOKEN", "test-token")
-    monkeypatch.setenv("MASC_API_TOKEN", "legacy-api-token")
-    monkeypatch.setenv("MASC_MCP_URL", "http://legacy.example")
-    config_module.reset_config_cache()
-
-    cfg = BotConfig()  # type: ignore[call-arg]
-
-    assert cfg.gate_api_token == "legacy-api-token"
-    assert cfg.gate_base_url == "http://legacy.example"
-    assert cfg.masc_api_token == "legacy-api-token"
-    assert cfg.masc_mcp_url == "http://legacy.example"
-
-
-def test_legacy_constructor_aliases_still_work() -> None:
-    cfg = BotConfig(
-        discord_bot_token="test-token",
-        masc_api_token="legacy-api-token",
-        masc_mcp_url="http://legacy.example",
-    )
-
-    assert cfg.gate_api_token == "legacy-api-token"
-    assert cfg.gate_base_url == "http://legacy.example"
-    assert cfg.masc_api_token == "legacy-api-token"
-    assert cfg.masc_mcp_url == "http://legacy.example"
-
-
-def test_legacy_import_shim_reexports_gate_client_surface() -> None:
-    assert MascGateClient is GateClient
-    response = GateResponse.from_error("timeout")
-    assert response.ok is False
-    assert response.error == "timeout"
 
 
 def test_transport_failure_log_mentions_disabled_breaker(

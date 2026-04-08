@@ -27,6 +27,7 @@ type turn_stats = Gate_protocol.turn_stats = {
 type outbound_message = Gate_protocol.outbound_message = {
   keeper_name : string;
   content : string;
+  structured : Yojson.Safe.t option;
   turn_stats : turn_stats option;
 }
 
@@ -161,7 +162,7 @@ let handle_inbound ~dispatch (msg : inbound_message) =
           ~content:(String.trim msg.content)
       in
       (match result with
-       | Gate_protocol.Reply { content = reply; stats } ->
+       | Gate_protocol.Reply { content = reply; structured; stats } ->
            let duration_ms = match stats with
              | Some s -> s.duration_ms
              | None -> 0
@@ -172,7 +173,7 @@ let handle_inbound ~dispatch (msg : inbound_message) =
              ~keeper
              ~duration_ms
              Channel_gate_metrics.Success;
-           Ok { keeper_name = keeper; content = reply; turn_stats = stats }
+           Ok { keeper_name = keeper; content = reply; structured; turn_stats = stats }
        | Gate_protocol.Keeper_error_result err ->
            Channel_gate_metrics.record_attempt
              ~channel

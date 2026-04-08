@@ -242,7 +242,7 @@ let add_routes ~sw ~clock router =
   |> Http.Router.post "/api/v1/tools/masc_board_vote" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_board_vote"
          (fun _state _req reqd ->
-         let agent_name = Option.bind (Httpun.Headers.get request.Httpun.Request.headers "x-masc-agent") (fun s -> if s = "" then None else Some s) |> Option.value ~default:"dashboard" in
+         let agent_name = (let hdr k = Option.bind (Httpun.Headers.get request.Httpun.Request.headers k) (fun s -> if s = "" then None else Some s) in match hdr "x-gate-agent" with Some _ as v -> v | None -> hdr "x-masc-agent") |> Option.value ~default:"dashboard" in
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let ( let* ) r f =
@@ -278,7 +278,7 @@ let add_routes ~sw ~clock router =
   |> Http.Router.post "/api/v1/tools/masc_board_post" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_board_post"
          (fun _state _req reqd ->
-         let agent_name = Option.bind (Httpun.Headers.get request.Httpun.Request.headers "x-masc-agent") (fun s -> if s = "" then None else Some s) |> Option.value ~default:"dashboard" in
+         let agent_name = (let hdr k = Option.bind (Httpun.Headers.get request.Httpun.Request.headers k) (fun s -> if s = "" then None else Some s) in match hdr "x-gate-agent" with Some _ as v -> v | None -> hdr "x-masc-agent") |> Option.value ~default:"dashboard" in
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let ( let* ) r f =
@@ -315,7 +315,7 @@ let add_routes ~sw ~clock router =
   |> Http.Router.post "/api/v1/tools/masc_board_comment" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_board_comment"
          (fun _state _req reqd ->
-         let agent_name = Option.bind (Httpun.Headers.get request.Httpun.Request.headers "x-masc-agent") (fun s -> if s = "" then None else Some s) |> Option.value ~default:"dashboard" in
+         let agent_name = (let hdr k = Option.bind (Httpun.Headers.get request.Httpun.Request.headers k) (fun s -> if s = "" then None else Some s) in match hdr "x-gate-agent" with Some _ as v -> v | None -> hdr "x-masc-agent") |> Option.value ~default:"dashboard" in
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let ( let* ) r f =

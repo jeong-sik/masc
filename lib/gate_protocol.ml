@@ -23,6 +23,7 @@ type turn_stats = {
 type outbound_message = {
   keeper_name : string;
   content : string;
+  structured : Yojson.Safe.t option;
   turn_stats : turn_stats option;
 }
 
@@ -78,7 +79,7 @@ let gate_error_to_string = function
 (* ── Dispatch Result ─────────────────────────────────────────── *)
 
 type dispatch_result =
-  | Reply of { content : string; stats : turn_stats option }
+  | Reply of { content : string; structured : Yojson.Safe.t option; stats : turn_stats option }
   | Keeper_error_result of string
   | Unavailable_result
 
@@ -127,12 +128,17 @@ let outbound_to_json out =
           ("tokens_used", `Int s.tokens_used);
         ]
   in
-  `Assoc [
+  let base = [
     ("ok", `Bool true);
     ("keeper_name", `String out.keeper_name);
     ("reply", `String out.content);
     ("turn_stats", stats_json);
-  ]
+  ] in
+  let with_structured = match out.structured with
+    | None -> base
+    | Some json -> base @ [ ("structured", json) ]
+  in
+  `Assoc with_structured
 
 let error_json msg =
   `Assoc [ ("ok", `Bool false); ("error", `String msg) ]

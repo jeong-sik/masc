@@ -123,7 +123,7 @@ let agent_from_request request =
   let hdr key = Httpun.Headers.get request.Httpun.Request.headers key in
   let qp key = query_param request key in
   let first_some xs = List.find_map Fun.id xs in
-  first_some [ hdr "x-masc-agent"; hdr "x-masc-agent-name"; qp "agent"; qp "agent_name" ]
+  first_some [ hdr "x-gate-agent"; hdr "x-masc-agent"; hdr "x-masc-agent-name"; qp "agent"; qp "agent_name" ]
   |> Option.map Uri.pct_decode
 
 let is_transient_actor_name name =
@@ -236,7 +236,7 @@ let get_origin (request : Httpun.Request.t) =
 (** CORS headers *)
 let cors_allow_headers_value =
   "Content-Type, Accept, Origin, Authorization, Idempotency-Key, Mcp-Session-Id, \
-   Mcp-Protocol-Version, Last-Event-Id, X-MASC-Agent, X-MASC-Agent-Name"
+   Mcp-Protocol-Version, Last-Event-Id, X-Gate-Agent, X-MASC-Agent, X-MASC-Agent-Name"
 
 let cors_headers origin =
   let base = [
@@ -367,7 +367,7 @@ let authorize_permission_request ~base_path ~permission request :
           then
             Error
               (Types.Unauthorized
-                 "Agent name required (X-MASC-Agent or token-bound credential)")
+                 "Agent name required (X-Gate-Agent / X-MASC-Agent or token-bound credential)")
           else
             Auth.check_permission base_path ~agent_name ~token ~permission)
 
@@ -399,7 +399,7 @@ let authorize_tool_request ~base_path ~tool_name request :
           then
             Error
               (Types.Unauthorized
-                 "Agent name required (X-MASC-Agent or token-bound credential)")
+                 "Agent name required (X-Gate-Agent / X-MASC-Agent or token-bound credential)")
           else
             Auth.authorize_tool_v2 base_path ~agent_name ~token ~tool_name))
 

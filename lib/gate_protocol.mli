@@ -36,6 +36,10 @@ type turn_stats = {
 type outbound_message = {
   keeper_name : string;
   content : string;
+  structured : Yojson.Safe.t option;
+      (** Optional structured content blocks (opaque JSON).
+          Gate passes this through without interpretation.
+          See [docs/spec/structured-content-schema.md] for the JSON schema. *)
   turn_stats : turn_stats option;
 }
 
@@ -77,7 +81,7 @@ val gate_error_to_string : gate_error -> string
     Lives here so that [Channel_gate] does not depend on [Gate_keeper_backend]. *)
 
 type dispatch_result =
-  | Reply of { content : string; stats : turn_stats option }
+  | Reply of { content : string; structured : Yojson.Safe.t option; stats : turn_stats option }
   | Keeper_error_result of string
   | Unavailable_result
 

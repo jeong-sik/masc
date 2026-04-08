@@ -1019,7 +1019,7 @@ let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Room.confi
         then
           Error
             (Types.Unauthorized
-               "Agent name required (X-MASC-Agent or token-bound credential)")
+               "Agent name required (X-Gate-Agent / X-MASC-Agent or token-bound credential)")
         else
           Ok (Option.value ~default:"dashboard" agent_name_opt)
   in

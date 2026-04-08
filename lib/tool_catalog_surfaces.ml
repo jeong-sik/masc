@@ -142,6 +142,9 @@ let public_mcp_surface_tools =
     "masc_recall_search";
     "masc_verify_auto"; "masc_verify_handoff"; "masc_verify_pending";
     "masc_verify_request"; "masc_verify_status"; "masc_verify_submit";
+    (* Intent lifecycle *)
+    "masc_intent_create"; "masc_intent_status";
+    "masc_intent_update"; "masc_intent_forecast";
   ]
 
 let spawned_agent_surface_tools =

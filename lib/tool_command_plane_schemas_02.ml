@@ -52,4 +52,70 @@ Pair with masc_operation_status for the operation's current state.";
             ("limit", integer_prop ~default:25 "Maximum events to return.");
           ];
     };
+    {
+      name = "masc_intent_create";
+      description =
+        "Create a strategic intent that groups related operations under a shared objective and workload profile. \
+Use when planning multi-operation campaigns before issuing individual operations. \
+Pair with masc_operation_start (intent_id param) to bind operations to this intent.";
+      input_schema =
+        object_schema ~required:[ "title" ]
+          [
+            ("title", string_prop "Human-readable intent title.");
+            ("owner", string_prop "Owner agent id. Defaults to caller.");
+            ("workload_profile", `Assoc [ ("type", `String "string"); ("enum", `List [ `String "coding_task"; `String "generic"; `String "research_pipeline" ]); ("description", `String "Workload profile for search fabric routing. Default: coding_task.") ]);
+            ("success_metric", `Assoc [ ("type", `String "object"); ("description", `String "Optional JSON object describing the measurable success criteria.") ]);
+            ("invariants", string_array_prop "Invariant constraints that must hold across all bound operations.");
+            ("artifact_priors", string_array_prop "Known artifact paths or references relevant to this intent.");
+            ("state", `Assoc [ ("type", `String "string"); ("enum", `List [ `String "adopted"; `String "active"; `String "paused"; `String "completed"; `String "abandoned" ]); ("description", `String "Initial intent state. Default: adopted.") ]);
+            ("current_focus", `Assoc [ ("type", `String "object"); ("description", `String "Optional focus object with file_path, symbol, and note fields.") ]);
+            ("checkpoint_ref", string_prop "Optional initial checkpoint reference.");
+          ];
+    };
+    {
+      name = "masc_intent_status";
+      description =
+        "List intents with their state, workload profile, and bound operations. \
+Use when reviewing strategic planning or checking which intents are active. \
+Pair with masc_intent_forecast for completion predictions.";
+      input_schema =
+        object_schema
+          [
+            ("intent_id", string_prop "Optional intent id to filter a single intent.");
+          ];
+    };
+    {
+      name = "masc_intent_update";
+      description =
+        "Update an existing intent's title, state, focus, or workload profile. \
+Use when refining strategy mid-execution or transitioning intent state. \
+Pair with masc_intent_status to verify the update took effect.";
+      input_schema =
+        object_schema ~required:[ "intent_id" ]
+          [
+            ("intent_id", string_prop "Intent id to update.");
+            ("title", string_prop "New title.");
+            ("owner", string_prop "New owner agent id.");
+            ("workload_profile", `Assoc [ ("type", `String "string"); ("enum", `List [ `String "coding_task"; `String "generic"; `String "research_pipeline" ]) ]);
+            ("success_metric", `Assoc [ ("type", `String "object"); ("description", `String "Updated success criteria.") ]);
+            ("invariants", string_array_prop "Replacement invariant list.");
+            ("artifact_priors", string_array_prop "Replacement artifact prior list.");
+            ("state", `Assoc [ ("type", `String "string"); ("enum", `List [ `String "adopted"; `String "active"; `String "paused"; `String "completed"; `String "abandoned" ]) ]);
+            ("current_focus", `Assoc [ ("type", `String "object"); ("description", `String "Updated focus object.") ]);
+            ("checkpoint_ref", string_prop "Updated checkpoint reference.");
+          ];
+    };
+    {
+      name = "masc_intent_forecast";
+      description =
+        "Forecast completion likelihood for an intent based on its bound operations' progress and search fabric scoring. \
+Use when assessing whether an intent is on track or needs intervention. \
+Pair with masc_observe_operations for detailed operation-level status.";
+      input_schema =
+        object_schema ~required:[ "intent_id" ]
+          [
+            ("intent_id", string_prop "Intent id to forecast.");
+            ("limit", integer_prop ~default:3 "Maximum forecast entries to return.");
+          ];
+    };
 ]

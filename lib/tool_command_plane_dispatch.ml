@@ -33,4 +33,8 @@ let dispatch (ctx : (_, _) context) ~name ~args : result option =
   | "masc_observe_swarm" -> Some (handle_observe_swarm ctx args)
   | "masc_observe_capacity" -> Some (handle_observe_capacity ctx)
   | "masc_observe_traces" -> Some (handle_observe_traces ctx args)
+  | "masc_intent_create" -> Some (handle_intent_create ctx args)
+  | "masc_intent_status" -> Some (handle_intent_status ctx args)
+  | "masc_intent_update" -> Some (handle_intent_update ctx args)
+  | "masc_intent_forecast" -> Some (handle_intent_forecast ctx args)
   | _ -> None

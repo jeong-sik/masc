@@ -443,27 +443,27 @@ let searxng_base_url () =
         if normalized = "" then searxng_default_url else normalized
     | None -> searxng_default_url
   in
-  (match Uri.scheme (Uri.of_string url) |> Option.map String.lowercase_ascii with
-   | Some "http" | Some "https" -> ()
-   | _ ->
-       raise (Failure (Printf.sprintf
-            "MASC_SEARXNG_URL must use http or https scheme (got: %s)" url)));
-  url
+  match Uri.scheme (Uri.of_string url) |> Option.map String.lowercase_ascii with
+  | Some "http" | Some "https" -> Ok url
+  | _ ->
+      Error (Printf.sprintf "MASC_SEARXNG_URL must use http or https scheme (got: %s)" url)
 
 let fetch_searxng ~timeout_sec ~query =
-  let base = searxng_base_url () in
-  let search_url =
-    base ^ "/search?q=" ^ Uri.pct_encode query ^ "&format=json"
-  in
-  match
-    Tool_local_runtime_http.http_get_text_with_status ~timeout_sec search_url
-  with
-  | Error detail ->
-      Error (endpoint_error ~fallback:"search endpoint unavailable" detail)
-  | Ok (Some 200, payload) -> Ok (search_url, payload)
-  | Ok (Some status, _) ->
-      Error (Printf.sprintf "search endpoint returned HTTP %d" status)
-  | Ok (None, _) -> Error "search endpoint returned no HTTP status"
+  match searxng_base_url () with
+  | Error msg -> Error msg
+  | Ok base ->
+      let search_url =
+        base ^ "/search?q=" ^ Uri.pct_encode query ^ "&format=json"
+      in
+      match
+        Tool_local_runtime_http.http_get_text_with_status ~timeout_sec search_url
+      with
+      | Error detail ->
+          Error (endpoint_error ~fallback:"search endpoint unavailable" detail)
+      | Ok (Some 200, payload) -> Ok (search_url, payload)
+      | Ok (Some status, _) ->
+          Error (Printf.sprintf "search endpoint returned HTTP %d" status)
+      | Ok (None, _) -> Error "search endpoint returned no HTTP status"
 
 let fetch_ddg_html ~timeout_sec ~query =
   let search_url =

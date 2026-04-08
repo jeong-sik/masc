@@ -8,7 +8,7 @@
 
 - 새 benchmark substrate를 추가하지 않는다.
 - 이미 mainline에 들어간 harness를 순차 실행해서 layer별 regression만 분리해 읽는다.
-- canonical control path는 `CPv2 direct`
+- default delivery path는 Team Session + Supervisor이고, 이 문서의 control lane은 managed-operation benchmark proof다
 - scheduling policy는 `Search Fabric V1`
 - implementation/runtime substrate는 `Team Session + local64`
 
@@ -83,7 +83,7 @@ wrapper는 phase별 log와 summary JSON을 남긴다.
 ## Reading Failures
 
 - `control` fail
-  - `CPv2 direct` swarm live proof가 깨진 상태다.
+  - managed-operation swarm live proof가 깨진 상태다.
   - detachment materialization, heartbeat, current task binding, final marker를 먼저 본다.
 - `search` fail
   - `best_first_v1` policy layer regression 가능성이 높다.
@@ -105,7 +105,7 @@ BENCH_WARMUP_ITERATIONS=1 bash ./benchmarks/benchmark.sh all 5
 1. `search`
    - synthetic policy regression 확인
 2. `control,search`
-   - canonical direct path + policy layer 확인
+   - managed-operation proof lane + policy layer 확인
 3. `control,search,local64`
    - merged substrate 전체 확인
 4. 필요 시 model ceiling 확인

@@ -123,7 +123,7 @@ let command_plane_help_http_json () =
                 "Backlog work item. Claim semantics differ by tool: masc_transition(action=claim) leaves planning current_task unset, while masc_claim_next auto-binds it in current builds.";
             concept ~id:"operation" ~title:"Operation"
               ~summary:
-                "Managed CPv2 execution unit owned by company/platoon/squad hierarchy.";
+                "Managed operation record on the experimental command-plane compatibility lane.";
             concept ~id:"detachment" ~title:"Detachment"
               ~summary:
                 "Scheduler/runtime view of active work under an operation. Use it to inspect progress, liveness, and runtime binding.";
@@ -141,7 +141,7 @@ let command_plane_help_http_json () =
               ~summary:
                 "Minimal MCP sequence before doing any real work in the shared project scope."
               ~when_to_use:
-                "Use this before benchmark runs, CPv2 experiments, or ordinary implementation work."
+                "Use this before ordinary implementation work and before any optional managed-operation experiment."
               ~steps:
                 [
                   step ~id:"start" ~title:"Start project onboarding" ~tool:"masc_start"
@@ -181,11 +181,11 @@ let command_plane_help_http_json () =
                     ~pitfalls:
                       [ "without heartbeat an otherwise healthy agent looks zombie/stale" ];
                 ];
-            path ~id:"cpv2_benchmark" ~title:"CPv2 Benchmark / Swarm"
+            path ~id:"cpv2_benchmark" ~title:"Managed Operation Compatibility Lane"
               ~summary:
-                "Canonical benchmark path for company → platoon → squad → agent orchestration."
+                "Experimental managed-operation path for benchmark topology checks and command-plane compatibility coverage."
               ~when_to_use:
-                "Use this for real swarm experiments, benchmarking, long-running command-plane work, and 4→16→64 agent rehearsals."
+                "Use this only when you explicitly need managed operations, detachments, and policy gates. It is not the default delivery front door."
               ~steps:
                 [
                   step ~id:"define-units" ~title:"Define hierarchy" ~tool:"masc_unit_define"
@@ -235,13 +235,13 @@ let command_plane_help_http_json () =
               ~summary:
                 "Guided intervention loop for supervised implementation sessions."
               ~when_to_use:
-                "Use this when a human or supervisor agent steers a team session instead of running direct CPv2 benchmark orchestration."
+                "Use this when a human or supervisor agent steers a team session instead of running the managed-operation compatibility lane directly."
               ~steps:
                 [
                   step ~id:"snapshot" ~title:"Read operator snapshot" ~tool:"masc_operator_snapshot"
                     ~summary:"Read state first from the small operator surface."
                     ~success_signals:[ "summary/full snapshot available" ]
-                    ~pitfalls:[ "this is not the benchmark canonical path" ];
+                    ~pitfalls:[ "this is the default delivery path; do not force managed-operation terminology unless the caller explicitly needs it" ];
                   step ~id:"intervene" ~title:"Preview intervention" ~tool:"masc_operator_action"
                     ~summary:"Prepare a small intervention such as team_note or team_task_inject."
                     ~success_signals:[ "preview token or immediate action result returned" ]
@@ -249,11 +249,11 @@ let command_plane_help_http_json () =
                   step ~id:"confirm" ~title:"Confirm disruptive action" ~tool:"masc_operator_confirm"
                     ~summary:"Execute the previewed intervention once a human approves it."
                     ~success_signals:[ "intervention trace appended"; "team-session reflects the change" ]
-                    ~pitfalls:[ "do not mix this path with CPv2 benchmark commands in the same explanation" ];
+                    ~pitfalls:[ "do not mix this path with managed-operation commands in the same explanation unless the caller explicitly needs both" ];
                 ];
             path ~id:"attached_team_session" ~title:"Attached Team Session"
               ~summary:
-                "Attach a team session to a managed CPv2 operation so execution and truth stay on the same spine."
+                "Attach a team session to a managed operation when you explicitly need both the delivery path and the managed-operation compatibility lane."
               ~when_to_use:
                 "Use this for hybrid execution where a managed operation owns the objective and a team session materializes the worker team."
               ~steps:
@@ -317,7 +317,7 @@ let command_plane_help_http_json () =
                 "Core namespace/task tools every session should use before higher-level workflows."
               ~tools:
                 [ "masc_start"; "masc_join"; "masc_status"; "masc_transition"; "masc_claim_next"; "masc_plan_set_task"; "masc_heartbeat" ];
-            tool_group ~id:"cpv2-core" ~title:"CPv2 Benchmark Core"
+            tool_group ~id:"cpv2-core" ~title:"Managed Operation Core"
               ~description:
                 "Canonical swarm/benchmark tool family."
               ~tools:

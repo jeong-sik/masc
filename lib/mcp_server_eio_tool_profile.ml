@@ -161,11 +161,11 @@ let label_words_from_identifier ident =
     Falls back to auto-generated Title Case when absent. *)
 let custom_tool_titles : (string * string) list = [
   (* Room lifecycle *)
-  ("masc_init", "Initialize Room");
-  ("masc_join", "Join Room");
-  ("masc_leave", "Leave Room");
-  ("masc_status", "Room Status");
-  ("masc_reset", "Reset Room");
+  ("masc_init", "Initialize Project Scope");
+  ("masc_join", "Join Namespace");
+  ("masc_leave", "Leave Namespace");
+  ("masc_status", "Namespace Status");
+  ("masc_reset", "Reset Namespace");
   ("masc_who", "List Online Agents");
   ("masc_check", "Check Preconditions");
   ("masc_workflow_guide", "Workflow Guide");
@@ -187,7 +187,7 @@ let custom_tool_titles : (string * string) list = [
   ("masc_plan_init", "Initialize Plan");
   ("masc_plan_get", "Get Plan");
   ("masc_plan_update", "Update Plan");
-  ("masc_plan_set_task", "Set Current Task");
+  ("masc_plan_set_task", "Bind Current Task");
   ("masc_plan_get_task", "Get Current Task");
   ("masc_plan_clear_task", "Clear Current Task");
   ("masc_note_add", "Add Note");
@@ -242,9 +242,9 @@ let custom_tool_titles : (string * string) list = [
   ("masc_keeper_tool_catalog", "Keeper Tool Catalog");
   (* SDK aliases *)
   ("masc_list_tasks", "List Tasks");
-  ("masc_room_status", "Room Status");
+  ("masc_room_status", "Namespace Status");
   ("masc_claim_task", "Claim Task");
-  ("masc_set_current_task", "Set Current Task");
+  ("masc_set_current_task", "Bind Current Task");
   ("masc_complete_task", "Complete Task");
   ("masc_release_task", "Release Task");
   ("masc_cancel_task", "Cancel Task");

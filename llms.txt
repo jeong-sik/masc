@@ -2,7 +2,7 @@
 
 `masc-mcp` has many tools. Do not start from the full surface.
 
-## Canonical paths
+## Primary paths
 
 1. `Namespace / Task Hygiene`
    - `masc_start`
@@ -11,16 +11,20 @@
    - `masc_plan_set_task` after `masc_transition(action=claim)`
    - `masc_heartbeat`
 
-2. `CPv2 direct`
-   - Use for managed operations, benchmark runs, and large-team orchestration.
-   - Start with `masc_unit_define`, `masc_operation_start`, `masc_dispatch_tick`.
+2. `Supervised Delivery Swarm`
+   - Use for real implementation work.
+   - Start with `masc_team_session_start`, then use `masc_team_session_step` and `/mcp/operator`.
 
 3. `Attached Team Session`
-   - Use when a managed operation needs a worker team.
-   - Start operation first, then call `masc_team_session_start(operation_id=...)`.
+   - Use when an explicit managed operation also needs a worker team.
+   - Start the session with `operation_id=...` only when you intentionally opt into the managed-operation lane.
 
 4. `Supervisor path`
    - Use `/mcp/operator` for `masc_operator_snapshot`, `masc_operator_digest`, `masc_operator_action`, `masc_operator_confirm`.
+
+5. `Managed Operation compatibility lane`
+   - Use only for benchmark topology experiments or command-plane compatibility coverage.
+   - Start with `masc_unit_define`, `masc_operation_start`, `masc_dispatch_tick`.
 
 ## Workload templates
 
@@ -30,7 +34,8 @@
 
 ## Rules
 
-- Prefer `masc_operation_start` over ad-hoc swarm stories.
+- Prefer team-session and supervisor paths for implementation work.
+- Use `masc_operation_start` only when you explicitly need the managed-operation compatibility lane.
 - Prefer `masc_team_session_start(operation_id=...)` over standalone sessions when command-plane truth matters.
 - Treat `masc_set_room` as a compatibility alias only; prefer `masc_start` for onboarding.
 - Treat `Social Board`, `TRPG`, and `RISC` as secondary surfaces unless the task explicitly needs them.

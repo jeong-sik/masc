@@ -156,6 +156,27 @@ let explicit_metadata : (string * metadata) list =
     ( "masc_set_room",
       hidden_active ~canonical_name:"masc_start" ~replacement:"masc_start"
         "Compatibility alias that only selects the project coordination root. Prefer masc_start for truthful namespace onboarding." );
+    ( "masc_room_status",
+      hidden_active ~canonical_name:"masc_status" ~replacement:"masc_status"
+        "Managed-agent compatibility alias. Prefer masc_status for canonical namespace state reads." );
+    ( "masc_list_tasks",
+      hidden_active ~canonical_name:"masc_tasks" ~replacement:"masc_tasks"
+        "Managed-agent compatibility alias. Prefer masc_tasks for canonical backlog reads." );
+    ( "masc_claim_task",
+      hidden_active ~canonical_name:"masc_transition" ~replacement:"masc_transition"
+        "Managed-agent compatibility alias for masc_transition(action=claim)." );
+    ( "masc_set_current_task",
+      hidden_active ~canonical_name:"masc_plan_set_task" ~replacement:"masc_plan_set_task"
+        "Managed-agent compatibility alias that binds current_task. Prefer masc_plan_set_task." );
+    ( "masc_complete_task",
+      hidden_active ~canonical_name:"masc_transition" ~replacement:"masc_transition"
+        "Managed-agent compatibility alias for masc_transition(action=done)." );
+    ( "masc_release_task",
+      hidden_active ~canonical_name:"masc_transition" ~replacement:"masc_transition"
+        "Managed-agent compatibility alias for masc_transition(action=release)." );
+    ( "masc_cancel_task",
+      hidden_active ~canonical_name:"masc_transition" ~replacement:"masc_transition"
+        "Managed-agent compatibility alias for masc_transition(action=cancel)." );
     (* masc_run_get, masc_run_list: migrated to Tool_spec.register (tool_run.ml) *)
     ("masc_execute_dry_run", readonly_tool);
     ( "masc_admin_cleanup",
@@ -312,6 +333,11 @@ let metadata name =
 let implementation_status name =
   let meta = metadata name in
   meta.implementation_status
+
+let canonical_tool_name name =
+  match (metadata name).canonical_name with
+  | Some canonical_name -> canonical_name
+  | None -> name
 
 let is_placeholder name =
   match implementation_status name with

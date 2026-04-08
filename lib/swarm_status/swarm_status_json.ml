@@ -12,7 +12,7 @@ let lane_id = function
   | Supervised -> "supervised"
 
 let lane_label = function
-  | Managed -> "Managed CPv2"
+  | Managed -> "Managed Operation"
   | Projected -> "Projected Swarm"
   | Supervised -> "Supervised Session"
 

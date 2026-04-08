@@ -261,7 +261,7 @@ export MASC_PERSONAS_DIR=/srv/masc/personas
 
 ## References
 
-- `docs/COMMAND-PLANE-RUNBOOK.md` — CPv2 benchmark/swarm path
+- `docs/COMMAND-PLANE-RUNBOOK.md` — managed-operation compatibility lane
 - `docs/BENCHMARK-RUNBOOK.md` — single-agent vs swarm recipes
 - `docs/INTEGRATED-BENCHMARK-RUNBOOK.md` — control/search/local64 wrapper
 - `docs/SUPERVISOR-MODE.md` — supervised team session path

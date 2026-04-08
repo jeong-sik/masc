@@ -26,10 +26,9 @@ let effective_capability_profile (unit : unit_record) =
              | None -> true))
 
 let operation_policy_scope_label ~workload_profile ~stage =
-  let stage_label =
-    normalize_stage stage |> Option.value ~default:"generic"
-  in
-  Printf.sprintf "%s/%s" workload_profile stage_label
+  match normalize_stage stage with
+  | Some stage_label -> Printf.sprintf "%s/%s" workload_profile stage_label
+  | None -> workload_profile
 
 let operation_requires_allowed_tools ~workload_profile ~stage =
   match workload_profile, normalize_stage stage with

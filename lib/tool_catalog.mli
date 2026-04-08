@@ -61,6 +61,7 @@ val full_surface_override : unit -> bool
 
 val metadata : string -> metadata
 val implementation_status : string -> implementation_status
+val canonical_tool_name : string -> string
 val is_placeholder : string -> bool
 val is_visible : ?include_hidden:bool -> ?include_deprecated:bool -> string -> bool
 val allow_direct_call : string -> bool

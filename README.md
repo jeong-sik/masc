@@ -213,7 +213,7 @@ CI_TEST_TIMEOUT_SEC=1200 CI_TEST_HEARTBEAT_SEC=30 \
 
 - [docs/QUICK-START.md](docs/QUICK-START.md) — install, health check, first workflow
 - [docs/MCP-TEMPLATE.md](docs/MCP-TEMPLATE.md) — HTTP / stdio MCP config templates
-- [docs/COMMAND-PLANE-RUNBOOK.md](docs/COMMAND-PLANE-RUNBOOK.md) — benchmark / CPv2 direct path
+- [docs/COMMAND-PLANE-RUNBOOK.md](docs/COMMAND-PLANE-RUNBOOK.md) — managed-operation compatibility lane and command-plane details
 - [docs/BENCHMARK-RUNBOOK.md](docs/BENCHMARK-RUNBOOK.md) — single-agent vs swarm comparison
 - [docs/SUPERVISOR-MODE.md](docs/SUPERVISOR-MODE.md) — supervised team-session / operator workflow
 - [docs/REMOTE-MCP-OPERATOR.md](docs/REMOTE-MCP-OPERATOR.md) — remote-safe operator endpoint and confirm flow

@@ -1,8 +1,8 @@
 # Command Plane Runbook
 
-`masc-mcp`의 canonical usage SSOT.
+`masc-mcp`의 usage SSOT.
 
-이 문서는 `어떤 MCP tool을 어떤 순서로 써야 하는가`를 정리한다. 벤치마크/스웜/장기 지휘는 `CPv2 direct`가 기본 경로고, supervisor/team-session은 별도 경로다.
+이 문서는 `어떤 MCP tool을 어떤 순서로 써야 하는가`를 정리한다. 기본 delivery 경로는 namespace/task hygiene와 supervisor/team-session이고, managed operation은 benchmark/compatibility용 보조 경로다.
 
 merged 기준 전체 구조 요약은 [MERGED-ARCHITECTURE-SSOT.md](./MERGED-ARCHITECTURE-SSOT.md)를 본다.
 
@@ -13,7 +13,7 @@ merged 기준 전체 구조 요약은 [MERGED-ARCHITECTURE-SSOT.md](./MERGED-ARC
 - `task`
   - backlog item. `masc_transition(action="claim")`은 backlog 소유권만 바꾸고 planning `current_task`는 자동으로 안 잡힌다. `masc_claim_next`는 current builds에서 planning `current_task`를 함께 맞춘다.
 - `operation`
-  - Command Plane V2의 관리 단위. 벤치마크/스웜 실행은 여기서 시작한다.
+  - managed-operation compatibility lane의 관리 단위. default delivery path는 아니다.
 - `detachment`
   - scheduler가 materialize한 실행 단위. liveness, runtime binding, heartbeat를 여기서 본다.
 - `policy decision`
@@ -86,9 +86,9 @@ Step-by-step:
 - `masc_plan_get_task`가 `task-058` 반환
 - dashboard에서 claimed task와 current_task가 같은 값으로 보임
 
-## Golden Path 2. CPv2 Benchmark / Swarm
+## Auxiliary Lane 2. Managed Operation / Benchmark Compatibility
 
-이 경로가 benchmark와 swarm의 canonical path다.
+이 경로는 benchmark topology proof와 command-plane compatibility coverage를 위한 보조 경로다. 기본 구현 경로로 취급하지 않는다.
 
 transport truth를 빠르게 분리하고 싶으면 먼저 `./benchmarks/quick-bench.sh` 또는 `./benchmarks/benchmark.sh`를 쓴다.
 이 두 스크립트는 반드시 `initialize -> notifications/initialized -> Mcp-Session-Id 재사용` 순서를 포함하고, `mcp_session_init`과 runtime lane을 분리해서 기록한다.
@@ -251,7 +251,7 @@ Content-Type: application/json
 
 ## Golden Path 3. Supervisor Session
 
-이건 benchmark canonical path가 아니다. supervised implementation path다.
+이건 현재 기본 delivery path다. managed-operation benchmark lane과 분리해서 설명한다.
 
 실제 기능 개발을 `MASC` swarm으로 굴릴 때의 delivery 표준은 별도 문서를 본다:
 
@@ -272,29 +272,29 @@ Content-Type: application/json
 
 언제 안 쓰나:
 
-- CPv2 benchmark
-- direct swarm orchestration
+- managed-operation benchmark proof만 필요한 경우
+- detachments/policy queue만 따로 검증하려는 경우
 
-## Agent Swarm Fleet Mode
+## Team-Session Compat Lane
 
-`agent_swarm_runner`에는 hot-swarm live harness와 별도로 planner -> workers용 fleet mode가 있다.
+hot-swarm live harness와 별도로, `./scripts/harness_team_session_local64_smoke.sh`와 `./scripts/harness_supervisor_team_session.sh`는 team-session/OAS bridge를 검증하는 supporting lane이다.
 
 핵심 차이:
 
-- hot-swarm harness
+- managed-operation live harness
   - deterministic fixture
   - runtime-assisted claim/current_task/done
-  - CPv2 swarm proof와 dashboard truthfulness 검증이 목적
-- fleet mode
-  - planner가 `masc_batch_add_tasks`로 작업을 쪼갠다
-  - workers는 `masc_claim_next`로 task를 가져가고, current builds에서는 planning `current_task`도 함께 맞춰진다
-  - 실험용 planner/worker orchestration이 목적
+  - managed-operation swarm proof와 dashboard truthfulness 검증이 목적
+- team-session compat lane
+  - `masc_team_session_start` / `masc_team_session_step(spawn_batch=...)`를 사용한다
+  - `team_session_swarm_runner.ml`가 OAS swarm 실행을 담당한다
+  - session/proof/operator surface 검증이 목적이다
 
 주의:
 
-- fleet mode는 live harness의 대체가 아니다
-- planner가 task를 만들지 못하면 worker phase는 실제 작업을 못 한다
-- worker가 `masc_transition(action="claim")` 같은 수동 claim path를 썼는데 `masc_plan_set_task`를 생략하면 readiness가 어긋난다
+- team-session compat lane은 managed-operation live harness의 대체가 아니다
+- managed-operation operation/detachment/current_task truth를 검증하려면 live harness/read model 쪽을 본다
+- task claim/current_task binding 자체를 검증하려면 `./scripts/harness_agent_swarm_live.sh`를 사용한다
 
 ## Which Tool Now?
 

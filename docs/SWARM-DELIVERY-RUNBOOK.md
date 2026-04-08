@@ -5,13 +5,13 @@
 핵심 원칙:
 
 - 구현 swarm의 SSOT는 `Team Session + Supervisor Mode`
-- canonical benchmark/swarm path는 여전히 `CPv2 direct`
+- managed-operation benchmark lane은 별도 compat path다
 - model 선택은 항상 explicit
 - 기본 운영 형태는 supervised swarm
 
 관련 문서:
 
-- canonical benchmark / swarm: [COMMAND-PLANE-RUNBOOK.md](./COMMAND-PLANE-RUNBOOK.md)
+- managed-operation benchmark / compat lane: [COMMAND-PLANE-RUNBOOK.md](./COMMAND-PLANE-RUNBOOK.md)
 - supervised implementation loop: [SUPERVISOR-MODE.md](./SUPERVISOR-MODE.md)
 - remote operator surface: [REMOTE-MCP-OPERATOR.md](./REMOTE-MCP-OPERATOR.md)
 - provider/runtime/auth matrix: [PROVIDER-ADAPTER-RUNBOOK.md](./PROVIDER-ADAPTER-RUNBOOK.md)
@@ -26,7 +26,7 @@
 
 이 경로를 기본으로 잡지 않는다:
 
-- canonical CPv2 benchmark 자체를 실험할 때
+- managed-operation benchmark 자체를 실험할 때
 - 완전 무인 autonomous swarm을 바로 검증할 때
 
 ## Default Delivery Topology
@@ -102,10 +102,10 @@ stale pending reviewer PID가 있으면 정리한 뒤 다시 시작한다.
 
 ## Autoresearch Wrapper
 
-Karpathy-style raw `masc_autoresearch_*` loop는 그대로 유지하되, swarm canonical path로 진입할 때는 `masc_autoresearch_swarm_start`를 우선 사용한다.
+Karpathy-style raw `masc_autoresearch_*` loop는 그대로 유지하되, supervised swarm path로 진입할 때는 `masc_autoresearch_swarm_start`를 우선 사용한다.
 
 - raw loop 생성
-- best-effort `research_pipeline/normalize` CPv2 operation 생성
+- best-effort `research_pipeline/normalize` managed operation 생성
 - linked `team session` 시작
 - `research-driver` / `research-auditor` planned worker seed 기록
 - 이후 operator/digest/session status에서 `linked_autoresearch` block으로 상태 확인
@@ -221,5 +221,5 @@ local64 worker batch는 추가로 다음 메타데이터를 권장한다:
 ## Notes
 
 - 이 문서는 implementation substrate SSOT다.
-- benchmark canonical path는 여전히 `CPv2 direct`다.
+- managed-operation benchmark lane은 별도 compat path로 유지된다.
 - worker 품질은 orchestration뿐 아니라 model/runtime 상태에도 크게 좌우된다.

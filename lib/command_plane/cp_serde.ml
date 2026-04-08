@@ -102,7 +102,7 @@ let operation_search_strategy (operation : operation_record) =
   Cp_search_fabric.strategy_of_string (Some operation.search_strategy)
 
 let operation_stage_key (operation : operation_record) =
-  Cp_search_fabric.normalized_stage operation.stage
+  normalize_stage operation.stage
 
 let validate_workload_profile raw =
   match Cp_search_fabric.normalized_workload_profile raw with

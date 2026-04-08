@@ -174,9 +174,9 @@ let test_stats_roundtrip () =
   let store =
     Search.default_store
     |> Search.record_success ~unit_id:"squad-verify"
-         ~workload_profile:"coding_task" ~stage:"verify"
+         ~workload_profile:"coding_task" ~stage:(Some "verify")
     |> Search.record_failure ~unit_id:"squad-verify"
-         ~workload_profile:"coding_task" ~stage:"verify"
+         ~workload_profile:"coding_task" ~stage:(Some "verify")
   in
   Fun.protect
     ~finally:(fun () -> try Sys.remove tmp with _ -> ())
@@ -185,7 +185,7 @@ let test_stats_roundtrip () =
       let reloaded = Search.load_store tmp in
       let stats =
         Search.lookup_stats reloaded ~unit_id:"squad-verify"
-          ~workload_profile:"coding_task" ~stage:"verify"
+          ~workload_profile:"coding_task" ~stage:(Some "verify")
       in
       check (float 0.01) "alpha" 2.0 stats.Search.alpha;
       check (float 0.01) "beta" 2.0 stats.Search.beta)
@@ -196,7 +196,7 @@ let test_legacy_generic_stats_upgrade_to_coding_task () =
       {
         Search.unit_id = "squad-verify";
         workload_profile = "generic";
-        stage = "verify";
+        stage = Some "verify";
         alpha = 2.0;
         beta = 1.0;
         updated_at = "2026-03-08T00:00:00Z";
@@ -205,14 +205,36 @@ let test_legacy_generic_stats_upgrade_to_coding_task () =
   in
   let upgraded =
     Search.record_success legacy_store ~unit_id:"squad-verify"
-      ~workload_profile:"coding_task" ~stage:"verify"
+      ~workload_profile:"coding_task" ~stage:(Some "verify")
   in
   let stats =
     Search.lookup_stats upgraded ~unit_id:"squad-verify"
-      ~workload_profile:"coding_task" ~stage:"verify"
+      ~workload_profile:"coding_task" ~stage:(Some "verify")
   in
   check string "workload upgraded" "coding_task" stats.Search.workload_profile;
   check (float 0.01) "alpha increments" 3.0 stats.Search.alpha;
+  check (float 0.01) "beta preserved" 1.0 stats.Search.beta
+
+let test_legacy_generic_stage_upgrades_to_unset () =
+  let legacy_store =
+    [
+      {
+        Search.unit_id = "squad-plan";
+        workload_profile = "coding_task";
+        stage = Some "generic";
+        alpha = 2.0;
+        beta = 1.0;
+        updated_at = "2026-03-08T00:00:00Z";
+      };
+    ]
+  in
+  let stats =
+    Search.lookup_stats legacy_store ~unit_id:"squad-plan"
+      ~workload_profile:"coding_task" ~stage:None
+  in
+  check (option string) "legacy generic stage normalizes to unset" None
+    stats.Search.stage;
+  check (float 0.01) "alpha preserved" 2.0 stats.Search.alpha;
   check (float 0.01) "beta preserved" 1.0 stats.Search.beta
 
 let () =
@@ -239,5 +261,7 @@ let () =
           test_case "roundtrip" `Quick test_stats_roundtrip;
           test_case "legacy generic stats upgrade to coding_task" `Quick
             test_legacy_generic_stats_upgrade_to_coding_task;
+          test_case "legacy generic stage upgrades to unset" `Quick
+            test_legacy_generic_stage_upgrades_to_unset;
         ] );
     ]

@@ -32,7 +32,7 @@ Pair with masc_team_session_step to record turns and masc_team_session_finalize 
                         ("type", `String "string");
                         ( "description",
                           `String
-                            "Optional managed CPv2 operation id to attach this team session to. When provided, the operation detachment_session_id is updated to this session." );
+                            "Optional managed operation id to attach this team session to. When provided, the operation detachment_session_id is updated to this session." );
                       ] );
                   ( "duration_seconds",
                     `Assoc

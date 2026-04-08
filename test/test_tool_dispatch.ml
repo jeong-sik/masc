@@ -2,6 +2,7 @@
 
 module Tool_dispatch = Masc_mcp.Tool_dispatch
 module Mcp_eio = Masc_mcp.Mcp_server_eio
+module KE = Masc_mcp.Keeper_exec_tools
 module Types = Types
 
 (** Helper: create a minimal tool_schema for registration. *)
@@ -111,6 +112,21 @@ let () =
                 (Tool_dispatch.is_read_only "masc_broadcast");
               check bool "masc_add_task not read_only" false
                 (Tool_dispatch.is_read_only "masc_add_task"));
+          test_case "keeper read-only tools use shipped registry policy" `Quick (fun () ->
+              ignore (Mcp_eio.get_clock_opt ());
+              check bool "keeper_tasks_list read_only" true
+                (Tool_dispatch.is_read_only "keeper_tasks_list");
+              check bool "keeper_memory_search read_only" true
+                (Tool_dispatch.is_read_only "keeper_memory_search"));
+          test_case "keeper read-only helper matches canonical list" `Quick (fun () ->
+              check bool "tasks_list helper" true
+                (KE.is_keeper_read_only_tool "keeper_tasks_list");
+              check bool "memory_search helper" true
+                (KE.is_keeper_read_only_tool "keeper_memory_search");
+              check bool "fs_edit helper false" false
+                (KE.is_keeper_read_only_tool "keeper_fs_edit");
+              check bool "effective helper keeps mutating false" false
+                (KE.is_effectively_read_only_tool "keeper_fs_edit"));
         ] );
       ( "requires_join_set",
         [

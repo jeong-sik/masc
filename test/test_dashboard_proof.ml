@@ -22,6 +22,9 @@ let cleanup_dir dir =
   in
   rm dir
 
+let request target =
+  Httpun.Request.create ~headers:(Httpun.Headers.of_list []) `GET target
+
 let sample_session ?(min_agents = 2) ?(agent_names = [ "worker-a"; "worker-b" ]) now session_id =
   let open Team_session_types in
   {
@@ -306,6 +309,46 @@ let seed_worker_run_meta config session_id =
             ] );
       ])
 
+let seed_raw_only_worker_run_meta config session_id =
+  Lib.Team_session_store.save_worker_run_meta_json config session_id
+    "wr-raw-only"
+    (`Assoc
+      [
+        ("worker_run_id", `String "wr-raw-only");
+        ("worker_name", `String "worker-raw");
+        ("status", `String "completed");
+        ("mode", `String "swarm");
+        ("wait_mode", `String "background");
+        ("trace_capability", `String "raw");
+        ("success", `Bool true);
+        ("proof_present", `Bool false);
+        ("proof_run_id", `Null);
+        ("proof_status", `Null);
+        ("proof_risk_class", `Null);
+        ("proof_execution_mode", `Null);
+        ("proof_evidence_count", `Null);
+        ("resolved_runtime", `String "oas_swarm");
+        ("resolved_model", `String "glm:auto");
+        ("output_preview", `String "Raw trace completed without proof.");
+        ( "trace_ref",
+          `Assoc
+            [
+              ("worker_run_id", `String "wr-raw-only");
+              ("start_seq", `Int 1);
+              ("end_seq", `Int 4);
+              ("agent_name", `String "worker-raw");
+              ("session_id", `String session_id);
+            ] );
+        ("trace_summary", `Null);
+        ("trace_validation", `Null);
+        ("tool_surface_status", `String "available");
+        ("tool_surface_source", `String "swarm_masc_tools");
+        ("tool_surface_names", `List [ `String "masc_status" ]);
+        ("tool_surface_masc_names", `List [ `String "masc_status" ]);
+        ("tool_surface_shell_names", `List []);
+        ("ts_iso", `String "2026-04-08T00:00:00Z");
+      ])
+
 let test_dashboard_proof_projection () =
   let dir = test_dir () in
   Fun.protect
@@ -416,6 +459,111 @@ let test_dashboard_proof_exposes_validated_worker_run_evidence () =
         ((worker_proof |> U.member "proof_path") = `Null);
       check bool "worker proof evidence meta path hidden" true
         ((worker_proof |> U.member "meta_path") = `Null))
+
+let test_dashboard_proof_exposes_raw_only_worker_run_evidence () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let config = Lib.Room.default_config dir in
+      ignore (Lib.Room.init config ~agent_name:(Some "fixture-root"));
+      let session_id = "ts-proof-raw-only-worker-run" in
+      seed_session_artifacts config session_id;
+      seed_raw_only_worker_run_meta config session_id;
+      let json = Lib.Dashboard_proof.json ~config ~session_id () in
+      check int "raw trace run count" 1
+        (json |> U.member "summary" |> U.member "raw_trace_run_count" |> U.to_int);
+      let worker_proofs = json |> U.member "worker_proof_evidence" |> U.to_list in
+      check int "worker proof evidence absent without proof" 0
+        (List.length worker_proofs);
+      let worker_runs = json |> U.member "worker_run_evidence" |> U.to_list in
+      check int "worker run evidence count" 1 (List.length worker_runs);
+      let worker = List.hd worker_runs in
+      check string "worker run id" "wr-raw-only"
+        (worker |> U.member "worker_run_id" |> U.to_string);
+      check string "output preview surfaced" "Raw trace completed without proof."
+        (worker |> U.member "output_preview" |> U.to_string);
+      check bool "proof_present false preserved" false
+        (worker |> U.member "proof_present" |> U.to_bool);
+      check bool "proof run id omitted in summary" true
+        (worker |> U.member "proof_run_id" = `Null))
+
+let test_dashboard_proof_http_cache_isolation_by_selection () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      let session_a = "ts-proof-cache-a" in
+      let session_b = "ts-proof-cache-b" in
+      Eio_main.run @@ fun env ->
+      Eio_guard.enable ();
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let config = Lib.Room.default_config dir in
+      ignore (Lib.Room.init config ~agent_name:(Some "fixture-root"));
+      seed_session_artifacts config session_a;
+      seed_session_artifacts config session_b;
+      Lib.Dashboard_cache.invalidate_all ();
+      let state =
+        Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir ()
+      in
+      let json_a =
+        Lib.Server_dashboard_http.dashboard_proof_http_json
+          ~state
+          (request
+             "/api/v1/dashboard/proof?session_id=ts-proof-cache-a&operation_id=op-cache-a")
+      in
+      let json_b =
+        Lib.Server_dashboard_http.dashboard_proof_http_json
+          ~state
+          (request
+             "/api/v1/dashboard/proof?session_id=ts-proof-cache-b&operation_id=op-cache-b")
+      in
+      let open Yojson.Safe.Util in
+      check string "first selection keeps session a" session_a
+        (json_a |> member "session_id" |> to_string);
+      check string "first selection keeps operation a" "op-cache-a"
+        (json_a |> member "operation_id" |> to_string);
+      check string "second selection keeps session b" session_b
+        (json_b |> member "session_id" |> to_string);
+      check string "second selection keeps operation b" "op-cache-b"
+        (json_b |> member "operation_id" |> to_string))
+
+let test_dashboard_proof_http_cache_invalidates_on_worker_run_write () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      let session_id = "ts-proof-cache-refresh" in
+      Eio_main.run @@ fun env ->
+      Eio_guard.enable ();
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let config = Lib.Room.default_config dir in
+      ignore (Lib.Room.init config ~agent_name:(Some "fixture-root"));
+      seed_session_artifacts config session_id;
+      Lib.Dashboard_cache.invalidate_all ();
+      let state =
+        Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir ()
+      in
+      let proof_request =
+        request ("/api/v1/dashboard/proof?session_id=" ^ session_id)
+      in
+      let json_before =
+        Lib.Server_dashboard_http.dashboard_proof_http_json ~state
+          proof_request
+      in
+      check int "initial worker run evidence empty" 0
+        (json_before |> U.member "worker_run_evidence" |> U.to_list
+        |> List.length);
+      seed_raw_only_worker_run_meta config session_id;
+      let json_after =
+        Lib.Server_dashboard_http.dashboard_proof_http_json ~state
+          proof_request
+      in
+      check int "worker run evidence refreshed after write" 1
+        (json_after |> U.member "worker_run_evidence" |> U.to_list
+        |> List.length))
 
 let test_dashboard_proof_prefers_attached_session_operation_id () =
   let dir = test_dir () in
@@ -707,6 +855,12 @@ let () =
           test_case "builds collaboration proof projection" `Quick test_dashboard_proof_projection;
           test_case "exposes validated worker run evidence" `Quick
             test_dashboard_proof_exposes_validated_worker_run_evidence;
+          test_case "exposes raw-only worker run evidence" `Quick
+            test_dashboard_proof_exposes_raw_only_worker_run_evidence;
+          test_case "http cache isolates proof selections" `Quick
+            test_dashboard_proof_http_cache_isolation_by_selection;
+          test_case "http cache refreshes after worker run write" `Quick
+            test_dashboard_proof_http_cache_invalidates_on_worker_run_write;
           test_case "prefers attached session operation id" `Quick
             test_dashboard_proof_prefers_attached_session_operation_id;
           test_case "projects worker proof metadata into session proof" `Quick

@@ -47,6 +47,11 @@ val invalidate : string -> unit
 (** Remove a single cache entry.  If the key is currently being computed,
     waiting fibers are woken and will recompute. *)
 
+val invalidate_prefix : string -> unit
+(** Remove all cache entries whose key starts with the given prefix.  If any
+    matching entry is currently being computed, waiting fibers are woken and
+    will recompute. *)
+
 val invalidate_all : unit -> unit
 (** Remove all cache entries. Useful after mutations that change dashboard state. *)
 

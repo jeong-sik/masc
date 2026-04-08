@@ -7,7 +7,9 @@ let event_actor json =
   let detail = detail_of_event json in
   match string_field "actor" detail with
   | Some actor -> Some actor
-  | None -> string_field "runtime_actor" detail
+  | None ->
+      string_field "runtime_actor" detail
+      |> option_or_else (fun () -> string_field "agent" detail)
 
 let event_related_actor json =
   let detail = detail_of_event json in
@@ -24,6 +26,7 @@ let event_summary json =
       string_field "title" detail;
       string_field "reason" detail;
       string_field "result" detail;
+      string_field "output_preview" detail;
       string_field "content" detail;
       string_field "task_description" detail;
       string_field "goal" detail;
@@ -59,6 +62,7 @@ let event_output_preview json =
       string_field "summary" detail;
       string_field "content" detail;
       string_field "result" detail;
+      string_field "output_preview" detail;
     ]
   in
   match List.find_opt Option.is_some candidates with

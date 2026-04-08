@@ -345,7 +345,6 @@ let trace_ref_to_json (trace_ref : Oas.Raw_trace.run_ref) =
   `Assoc
     [
       ("worker_run_id", `String trace_ref.worker_run_id);
-      ("path", `String trace_ref.path);
       ("start_seq", `Int trace_ref.start_seq);
       ("end_seq", `Int trace_ref.end_seq);
       ("agent_name", `String trace_ref.agent_name);
@@ -371,6 +370,19 @@ let worker_name_of_planned_worker ~(fallback : string)
   | Some actor when String.trim actor <> "" -> String.trim actor
   | _ -> fallback
 
+let sanitize_worker_run_component value =
+  let buf = Buffer.create (String.length value) in
+  String.iter
+    (function
+      | ('A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '.' | '_' | '-') as ch ->
+          Buffer.add_char buf ch
+      | _ -> ())
+    value;
+  let sanitized = Buffer.contents buf in
+  if sanitized = "" then "worker"
+  else if String.length sanitized <= 48 then sanitized
+  else String.sub sanitized 0 48
+
 let is_safe_worker_run_id value =
   let len = String.length value in
   len > 0
@@ -382,7 +394,45 @@ let is_safe_worker_run_id value =
          | _ -> false)
        value
 
-let persist_worker_run_proof_if_present ~(config : Room.config)
+let fallback_worker_run_id ~(fallback_name : string) =
+  Printf.sprintf "swarm-%s-%Ld"
+    (sanitize_worker_run_component fallback_name)
+    (Int64.of_float (Time_compat.now () *. 1000.0))
+
+let valid_worker_run_id_opt ~(label : string) value_opt =
+  match value_opt with
+  | Some value when is_safe_worker_run_id value -> Some value
+  | Some value ->
+      Log.Session.warn
+        "team_session_oas_bridge: ignoring unsafe %s %S" label value;
+      None
+  | None -> None
+
+let worker_run_id_of_artifacts ~(fallback_name : string)
+    ~(trace_ref : Oas.Raw_trace.run_ref option)
+    (proof_opt : Oas.Cdal_proof.t option) =
+  let trace_worker_run_id =
+    valid_worker_run_id_opt ~label:"trace_ref.worker_run_id"
+      (Option.map
+         (fun (trace : Oas.Raw_trace.run_ref) -> trace.worker_run_id)
+         trace_ref)
+  in
+  let proof_run_id =
+    valid_worker_run_id_opt ~label:"proof.run_id"
+      (Option.map (fun (proof : Oas.Cdal_proof.t) -> proof.run_id) proof_opt)
+  in
+  match trace_worker_run_id, proof_run_id with
+  | Some trace_worker_run_id, Some proof_run_id
+    when not (String.equal trace_worker_run_id proof_run_id) ->
+      Log.Session.warn
+        "team_session_oas_bridge: worker_run_id mismatch trace=%s proof=%s; using trace worker_run_id"
+        trace_worker_run_id proof_run_id;
+      trace_worker_run_id
+  | Some worker_run_id, _ -> worker_run_id
+  | None, Some worker_run_id -> worker_run_id
+  | None, None -> fallback_worker_run_id ~fallback_name
+
+let persist_worker_run_artifacts ~(config : Room.config)
     ~(session_id : string)
     ~(fallback_name : string)
     ~(planned_worker : Team_session_types.planned_worker)
@@ -392,130 +442,169 @@ let persist_worker_run_proof_if_present ~(config : Room.config)
     ~(output_preview : string option)
     ~(error : string option)
     (proof_opt : Oas.Cdal_proof.t option) =
-  match proof_opt with
-  | None -> ()
-  | Some proof ->
-      if not (is_safe_worker_run_id proof.run_id) then
-        Log.Session.warn
-          "team_session_oas_bridge: skipping proof persistence for unsafe worker run id %S"
-          proof.run_id
-      else
-        let effective_execution_scope =
-          Team_session_types.effective_execution_scope_of_planned_worker
-            planned_worker
-        in
-        let tool_surface_masc_names =
-          supported_local_worker_tool_names_for_scope
-            (Some effective_execution_scope)
-          |> Team_session_types.dedup_strings |> List.sort String.compare
-        in
-        let tool_surface_names =
-          Team_session_types.dedup_strings
-            (proof.capability_snapshot.tools @ tool_surface_masc_names)
-          |> List.sort String.compare
-        in
-        let tool_surface_status =
-          if tool_surface_names <> [] then `String "available" else `String "missing"
-        in
-        let tool_surface_source =
-          if tool_surface_names <> [] then `String "swarm_masc_tools" else `Null
-        in
-        let worker_run_id = proof.run_id in
-        let worker_name =
-          worker_name_of_planned_worker ~fallback:fallback_name planned_worker
-        in
+  let worker_run_id =
+    worker_run_id_of_artifacts ~fallback_name ~trace_ref proof_opt
+  in
+  let effective_execution_scope =
+    Team_session_types.effective_execution_scope_of_planned_worker
+      planned_worker
+  in
+  let tool_surface_masc_names =
+    supported_local_worker_tool_names_for_scope
+      (Some effective_execution_scope)
+    |> Team_session_types.dedup_strings |> List.sort String.compare
+  in
+  let proof_tool_names =
+    match proof_opt with
+    | Some proof -> proof.capability_snapshot.tools
+    | None -> []
+  in
+  let tool_surface_names =
+    Team_session_types.dedup_strings
+      (proof_tool_names @ tool_surface_masc_names)
+    |> List.sort String.compare
+  in
+  let tool_surface_status =
+    if tool_surface_names <> [] then `String "available" else `String "missing"
+  in
+  let tool_surface_source =
+    if tool_surface_names <> [] then `String "swarm_masc_tools" else `Null
+  in
+  let worker_name =
+    worker_name_of_planned_worker ~fallback:fallback_name planned_worker
+  in
+  let proof_fields =
+    let null_fields =
+      [
+        ("cdal_run_id", `Null);
+        ("contract_id", `Null);
+        ("requested_execution_mode", `Null);
+        ("effective_execution_mode", `Null);
+        ("risk_class", `Null);
+        ("result_status", `Null);
+        ("tool_trace_refs", `List []);
+        ("raw_evidence_refs", `List []);
+        ("checkpoint_ref", `Null);
+        ("proof_path", `Null);
+        ("proof_present", `Bool false);
+        ("proof_run_id", `Null);
+        ("proof_status", `Null);
+        ("proof_risk_class", `Null);
+        ("proof_execution_mode", `Null);
+        ("proof_evidence_count", `Null);
+      ]
+    in
+    match proof_opt with
+    | Some proof when is_safe_worker_run_id proof.run_id ->
         let proof_path =
           Team_session_store.worker_run_proof_path config session_id worker_run_id
         in
         Team_session_store.save_worker_run_proof_json config session_id
           worker_run_id (Oas.Cdal_proof.to_json proof);
-        Team_session_store.save_worker_run_meta_json config session_id
-          worker_run_id
-          (`Assoc
-            [
-              ("worker_run_id", `String worker_run_id);
-              ("worker_name", `String worker_name);
-              ("mode", `String "swarm");
-              ("status", `String (if success then "completed" else "failed"));
-              ("wait_mode", `String "background");
-              ( "trace_capability",
-                `String
-                  (if Option.is_some trace_ref then "raw" else "summary_only")
-              );
-              ("success", `Bool success);
-              ( "execution_scope",
-                Option.fold ~none:`Null
-                  ~some:(fun scope ->
-                    `String
-                      (Team_session_types.execution_scope_to_string scope))
-                  planned_worker.execution_scope );
-              ("tool_surface_status", tool_surface_status);
-              ("tool_surface_source", tool_surface_source);
-              ( "tool_surface_names",
-                `List
-                  (List.map (fun value -> `String value) tool_surface_names)
-              );
-              ( "tool_surface_masc_names",
-                `List
-                  (List.map
-                     (fun value -> `String value)
-                     tool_surface_masc_names) );
-              ("tool_surface_shell_names", `List []);
-              ( "requested_worker_class",
-                Option.fold ~none:`Null
-                  ~some:(fun kind ->
-                    `String
-                      (Team_session_types.worker_class_to_string kind))
-                  planned_worker.worker_class );
-              ("resolved_runtime", `String "oas_swarm");
-              ( "resolved_model",
-                Option.fold ~none:`Null ~some:(fun value -> `String value)
-                  resolved_model );
-              ( "routing_reason",
-                Option.fold ~none:`Null ~some:(fun value -> `String value)
-                  planned_worker.routing_reason );
-              ( "output_preview",
-                Option.fold ~none:`Null ~some:(fun value -> `String value)
-                  output_preview );
-              ("error", Option.fold ~none:`Null ~some:(fun value -> `String value) error);
-              ( "trace_ref",
-                Option.fold ~none:`Null ~some:trace_ref_to_json trace_ref );
-              ("trace_summary", `Null);
-              ("trace_validation", `Null);
-              ("evidence_session_id", `Null);
-              ("oas_worker_run", `Null);
-              ("session_conformance", `Null);
-              ("validated", `Null);
-              ("final_text", Option.fold ~none:`Null ~some:(fun value -> `String value) output_preview);
-              ("stop_reason", `Null);
-              ("failure_reason", Option.fold ~none:`Null ~some:(fun value -> `String value) error);
-              ("ts_iso", `String (Types.now_iso ()));
-              ("cdal_run_id", `String proof.run_id);
-              ("contract_id", `String proof.contract_id);
-              ( "requested_execution_mode",
-                `String
-                  (Oas.Execution_mode.to_string proof.requested_execution_mode)
-              );
-              ( "effective_execution_mode",
-                `String
-                  (Oas.Execution_mode.to_string proof.effective_execution_mode)
-              );
-              ("risk_class", `String (Oas.Risk_class.to_string proof.risk_class));
-              ("result_status", `String (proof_result_status_to_string proof.result_status));
-              ( "tool_trace_refs",
-                `List
-                  (List.map (fun ref_ -> `String ref_) proof.tool_trace_refs)
-              );
-              ( "raw_evidence_refs",
-                `List
-                  (List.map (fun ref_ -> `String ref_) proof.raw_evidence_refs)
-              );
-              ( "checkpoint_ref",
-                Option.fold ~none:`Null ~some:(fun ref_ -> `String ref_)
-                  proof.checkpoint_ref );
-              ("proof_path", `String proof_path);
-              ("proof_present", `Bool true);
-            ])
+        [
+          ("cdal_run_id", `String proof.run_id);
+          ("contract_id", `String proof.contract_id);
+          ( "requested_execution_mode",
+            `String
+              (Oas.Execution_mode.to_string proof.requested_execution_mode)
+          );
+          ( "effective_execution_mode",
+            `String
+              (Oas.Execution_mode.to_string proof.effective_execution_mode)
+          );
+          ("risk_class", `String (Oas.Risk_class.to_string proof.risk_class));
+          ("result_status", `String (proof_result_status_to_string proof.result_status));
+          ( "tool_trace_refs",
+            `List
+              (List.map (fun ref_ -> `String ref_) proof.tool_trace_refs)
+          );
+          ( "raw_evidence_refs",
+            `List
+              (List.map (fun ref_ -> `String ref_) proof.raw_evidence_refs)
+          );
+          ( "checkpoint_ref",
+            Option.fold ~none:`Null ~some:(fun ref_ -> `String ref_)
+              proof.checkpoint_ref );
+          ("proof_path", `String proof_path);
+          ("proof_present", `Bool true);
+          ("proof_run_id", `String proof.run_id);
+          ("proof_status", `String (proof_result_status_to_string proof.result_status));
+          ("proof_risk_class", `String (Oas.Risk_class.to_string proof.risk_class));
+          ( "proof_execution_mode",
+            `String
+              (Oas.Execution_mode.to_string proof.effective_execution_mode)
+          );
+          ("proof_evidence_count", `Int (List.length proof.raw_evidence_refs));
+        ]
+    | Some proof ->
+        Log.Session.warn
+          "team_session_oas_bridge: skipping proof persistence for unsafe worker run id %S"
+          proof.run_id;
+        null_fields
+    | None -> null_fields
+  in
+  Team_session_store.save_worker_run_meta_json config session_id
+    worker_run_id
+    (`Assoc
+      ([
+        ("worker_run_id", `String worker_run_id);
+        ("worker_name", `String worker_name);
+        ("mode", `String "swarm");
+        ("status", `String (if success then "completed" else "failed"));
+        ("wait_mode", `String "background");
+        ( "trace_capability",
+          `String
+            (if Option.is_some trace_ref then "raw" else "summary_only")
+        );
+        ("success", `Bool success);
+        ( "execution_scope",
+          Option.fold ~none:`Null
+            ~some:(fun scope ->
+              `String
+                (Team_session_types.execution_scope_to_string scope))
+            planned_worker.execution_scope );
+        ("tool_surface_status", tool_surface_status);
+        ("tool_surface_source", tool_surface_source);
+        ( "tool_surface_names",
+          `List
+            (List.map (fun value -> `String value) tool_surface_names)
+        );
+        ( "tool_surface_masc_names",
+          `List
+            (List.map
+               (fun value -> `String value)
+               tool_surface_masc_names) );
+        ("tool_surface_shell_names", `List []);
+        ( "requested_worker_class",
+          Option.fold ~none:`Null
+            ~some:(fun kind ->
+              `String
+                (Team_session_types.worker_class_to_string kind))
+            planned_worker.worker_class );
+        ("resolved_runtime", `String "oas_swarm");
+        ( "resolved_model",
+          Option.fold ~none:`Null ~some:(fun value -> `String value)
+            resolved_model );
+        ( "routing_reason",
+          Option.fold ~none:`Null ~some:(fun value -> `String value)
+            planned_worker.routing_reason );
+        ( "output_preview",
+          Option.fold ~none:`Null ~some:(fun value -> `String value)
+            output_preview );
+        ("error", Option.fold ~none:`Null ~some:(fun value -> `String value) error);
+        ( "trace_ref",
+          Option.fold ~none:`Null ~some:trace_ref_to_json trace_ref );
+        ("trace_summary", `Null);
+        ("trace_validation", `Null);
+        ("evidence_session_id", `Null);
+        ("oas_worker_run", `Null);
+        ("session_conformance", `Null);
+        ("validated", `Null);
+        ("final_text", Option.fold ~none:`Null ~some:(fun value -> `String value) output_preview);
+        ("stop_reason", `Null);
+        ("failure_reason", Option.fold ~none:`Null ~some:(fun value -> `String value) error);
+        ("ts_iso", `String (Types.now_iso ()));
+      ] @ proof_fields))
 
 let make_convergence_metric ~(entry_count : int)
     (success_by_agent : (string, bool) Hashtbl.t) :
@@ -676,7 +765,7 @@ let planned_worker_to_entry_with_state
         let proof_opt =
           match result.proof with Some _ as proof -> proof | None -> !proof_ref
         in
-        persist_worker_run_proof_if_present ~config ~session_id
+        persist_worker_run_artifacts ~config ~session_id
           ~fallback_name:name ~planned_worker:pw
           ~resolved_model:(Some result.response.model)
           ~trace_ref:result.trace_ref ~success:true ~output_preview
@@ -686,7 +775,7 @@ let planned_worker_to_entry_with_state
         let e_str = Oas.Error.to_string err in
         Hashtbl.replace success_by_agent name false;
         telemetry_ref := Swarm.Swarm_types.empty_telemetry;
-        persist_worker_run_proof_if_present ~config ~session_id
+        persist_worker_run_artifacts ~config ~session_id
           ~fallback_name:name ~planned_worker:pw ~resolved_model:None
           ~trace_ref:None ~success:false
           ~output_preview:(preview_text_opt e_str) ~error:(Some e_str) !proof_ref;
@@ -822,11 +911,10 @@ let apply_swarm_result
   : Team_session_types.session =
   let final_status, stop_reason = final_outcome_of_swarm_result result in
   let now = Time_compat.now () in
+  let iteration_turns = List.length result.iterations in
   { session with
     status = final_status;
-    turn_count = session.turn_count +
-      List.fold_left (fun acc (r : Swarm.Swarm_types.iteration_record) ->
-        acc + List.length r.agent_results) 0 result.iterations;
+    turn_count = session.turn_count + iteration_turns;
     stopped_at = Some now;
     last_event_at = Some now;
     updated_at_iso = Types.now_iso ();

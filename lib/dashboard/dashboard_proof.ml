@@ -153,18 +153,18 @@ let json ?actor:_ ?session_id ?operation_id ~config () =
     || checkpoints_count > 0
   in
   let worker_run_meta = Dashboard_proof_actors.worker_run_meta_jsons config session_id in
-  let stored_worker_proof_count =
+  let worker_run_evidence_count =
     worker_run_meta
     |> List.fold_left
          (fun acc json ->
-           match U.member "proof_present" json with
-           | `Bool true -> acc + 1
+           match Dashboard_proof_actors.worker_run_trace_capability json with
+           | Some "raw" | Some "summary_only" -> acc + 1
            | _ -> acc)
          0
   in
   let evidence_present =
     tool_evidence_count > 0 || deliverable_count > 0 || checkpoints_count > 0
-    || Option.is_some proof_doc || stored_worker_proof_count > 0
+    || Option.is_some proof_doc || worker_run_evidence_count > 0
   in
   let raw_trace_run_count =
     worker_run_meta
@@ -254,7 +254,7 @@ let json ?actor:_ ?session_id ?operation_id ~config () =
           ~interaction_count
           ~evidence_count:
             (tool_evidence_count + deliverable_count + checkpoints_count
-           + stored_worker_proof_count)
+           + worker_run_evidence_count)
           ~cp_trace_count ~raw_trace_run_count ~validated_worker_run_count
           ~live_verdict ~historical_verdict ~verdict_basis );
       ("timeline", Dashboard_proof_verdict.timeline_json ?session_id ?operation_id events cp_traces);

@@ -12,6 +12,31 @@ open Server_utils
 let () =
   Room_hooks.on_task_mutation_fn := invalidate_execution_cache
 
+let invalidate_team_session_dashboard_caches config ~session_id:_ =
+  let invalidate_prefix prefix =
+    try
+      Dashboard_cache.invalidate_prefix
+        (room_scoped_cache_key config prefix "")
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn ->
+        Log.Dashboard.error "Failed to invalidate %s cache prefix: %s"
+          prefix (Printexc.to_string exn)
+  in
+  (try invalidate_cached_surface _mission_cache
+   with
+   | Eio.Cancel.Cancelled _ as e -> raise e
+   | exn ->
+       Log.Dashboard.error "Failed to invalidate mission cached surface: %s"
+         (Printexc.to_string exn));
+  invalidate_prefix "mission";
+  invalidate_prefix "mission_briefing";
+  invalidate_prefix "proof"
+
+let () =
+  Room_hooks.on_team_session_mutation_fn :=
+    invalidate_team_session_dashboard_caches
+
 let dashboard_namespace_truth_focus_json =
   Server_dashboard_http_namespace_truth_support.dashboard_namespace_truth_focus_json
 

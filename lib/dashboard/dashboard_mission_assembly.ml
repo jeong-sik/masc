@@ -566,6 +566,10 @@ let session_timeline_json session_json =
              ("id", `String (Printf.sprintf "event-%d" idx));
              ("timestamp", member_assoc "ts_iso" event_json);
              ("event_type", member_assoc "event_type" event_json);
-             ("actor", json_string_option (trim_to_option (string_field "actor" detail)));
+             ( "actor",
+               json_string_option
+                 (match trim_to_option (string_field "actor" detail) with
+                 | Some value -> Some value
+                 | None -> trim_to_option (string_field "agent" detail)) );
              ("summary", `String (event_summary event_json));
            ])

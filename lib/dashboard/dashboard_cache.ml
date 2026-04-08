@@ -402,6 +402,53 @@ let invalidate key =
     Option.iter Eio.Condition.broadcast cond_opt
   else Hashtbl.remove table key
 
+let invalidate_prefix prefix =
+  if String.trim prefix = "" then
+    if Eio_guard.is_ready () then
+      let conds =
+        Eio.Mutex.use_rw ~protect:true mu (fun () ->
+          let cs =
+            Hashtbl.fold
+              (fun _key slot acc ->
+                match slot with Computing { cond; _ } -> cond :: acc | _ -> acc)
+              table []
+          in
+          Hashtbl.clear table;
+          cs)
+      in
+      List.iter Eio.Condition.broadcast conds
+    else
+      Hashtbl.clear table
+  else if Eio_guard.is_ready () then
+    let conds =
+      Eio.Mutex.use_rw ~protect:true mu (fun () ->
+        let keys, conds =
+          Hashtbl.fold
+            (fun key slot (keys_acc, conds_acc) ->
+              if String.starts_with ~prefix key then
+                let conds_acc =
+                  match slot with
+                  | Computing { cond; _ } -> cond :: conds_acc
+                  | _ -> conds_acc
+                in
+                (key :: keys_acc, conds_acc)
+              else
+                (keys_acc, conds_acc))
+            table ([], [])
+        in
+        List.iter (fun key -> Hashtbl.remove table key) keys;
+        conds)
+    in
+    List.iter Eio.Condition.broadcast conds
+  else
+    let keys =
+      Hashtbl.fold
+        (fun key _ acc ->
+          if String.starts_with ~prefix key then key :: acc else acc)
+        table []
+    in
+    List.iter (fun key -> Hashtbl.remove table key) keys
+
 let invalidate_all () =
   if Eio_guard.is_ready () then
     let conds =

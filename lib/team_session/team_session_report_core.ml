@@ -268,7 +268,7 @@ let mcp_improvements (session : Team_session_types.session) events checkpoints_c
   in
   let with_turns =
     if session.turn_count > 0 then
-      "Turn-level orchestration evidence exists via team_turn session events."
+      "Turn-level orchestration evidence exists in the session history."
       :: with_fallback
     else with_fallback
   in
@@ -703,7 +703,7 @@ let markdown_of_report ~(session : Team_session_types.session)
       "## Communication/Cascade Metrics";
       Printf.sprintf "- Broadcast count: %d" broadcast_count;
       Printf.sprintf "- Portal signal count: %d" portal_count;
-      Printf.sprintf "- Recorded turns: %d" turn_count;
+      Printf.sprintf "- Recorded orchestration turns: %d" turn_count;
       Printf.sprintf "- Alerts emitted: %d" alert_count;
       Printf.sprintf "- Cascade attempted: %d" cascade_attempted;
       Printf.sprintf "- Cascade failed: %d" cascade_failed;

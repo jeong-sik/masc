@@ -47,6 +47,17 @@ let test_stuck_agent () =
        true
      with Not_found -> false)
 
+let test_parse_iso_timestamp_matches_canonical_utc () =
+  let ts = "2026-04-08T12:38:15Z" in
+  match
+    Lib.Dashboard_labels.parse_iso_timestamp ts,
+    Types.parse_iso8601_opt ts
+  with
+  | Some actual, Some expected ->
+      Alcotest.(check bool) "dashboard parser matches canonical UTC parser" true
+        (abs_float (actual -. expected) < 0.001)
+  | _ -> Alcotest.fail "expected both parsers to accept UTC timestamp"
+
 let test_idle_agent () =
   let now = Unix.gettimeofday () in
   let result =
@@ -246,6 +257,7 @@ let () =
         [
           ("working agent", `Quick, test_working_agent);
           ("stuck agent", `Quick, test_stuck_agent);
+          ("utc parser matches canonical", `Quick, test_parse_iso_timestamp_matches_canonical_utc);
           ("idle agent", `Quick, test_idle_agent);
           ("offline agent", `Quick, test_offline_agent);
         ] );

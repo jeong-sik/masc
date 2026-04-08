@@ -29,23 +29,22 @@ type room_snapshot = {
 
 (* ===== ISO Timestamp Parsing (moved here to break cycle) ===== *)
 
-(** Parse ISO timestamp to Unix time (UTC) *)
+(** Parse dashboard timestamps as UTC.
+    Dashboard surfaces mostly emit whole-second ISO8601 timestamps, but a few
+    read models still append fractional seconds. Strip the fractional suffix so
+    we stay aligned with the canonical UTC parser used elsewhere in the repo. *)
 let parse_iso_timestamp (s : string) : float option =
-  try
-    let open Scanf in
-    sscanf s "%d-%d-%dT%d:%d:%d" (fun y m d h min sec ->
-      let tm = {
-        Unix.tm_sec = sec; tm_min = min; tm_hour = h;
-        tm_mday = d; tm_mon = m - 1; tm_year = y - 1900;
-        tm_wday = 0; tm_yday = 0; tm_isdst = false
-      } in
-      let (local_t, _) = Unix.mktime tm in
-      let utc_tm = Unix.gmtime local_t in
-      let (utc_as_local, _) = Unix.mktime utc_tm in
-      let tz_offset = local_t -. utc_as_local in
-      Some (local_t -. tz_offset)
-    )
-  with Scanf.Scan_failure _ | Failure _ | End_of_file -> None
+  let normalized =
+    let trimmed = String.trim s in
+    let len = String.length trimmed in
+    if len = 0 then None
+    else
+      match String.index_opt trimmed '.' with
+      | Some dot when dot > 0 && trimmed.[len - 1] = 'Z' ->
+          Some (String.sub trimmed 0 dot ^ "Z")
+      | _ -> Some trimmed
+  in
+  Option.bind normalized Types.parse_iso8601_opt
 
 let format_elapsed now timestamp fallback =
   match parse_iso_timestamp timestamp with

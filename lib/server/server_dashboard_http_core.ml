@@ -946,6 +946,16 @@ let dashboard_shell_timeout_s =
   float_of_env_default "MASC_DASHBOARD_SHELL_TIMEOUT_S"
     ~default:8.0 ~min_v:2.0 ~max_v:30.0
 
+let dashboard_shell_paths_json (config : Room.config) : Yojson.Safe.t =
+  Server_base_path_diagnostics.detect
+    ?input_base_path:(Env_config_core.base_path_opt ())
+    ?env_masc_base_path:(Env_config_core.base_path_opt ())
+    ?env_me_root:(Env_config_core.me_root_opt ())
+    ~effective_base_path:config.base_path
+    ~effective_masc_root:(Room.masc_root_dir config)
+    ()
+  |> Server_base_path_diagnostics.to_yojson
+
 let dashboard_shell_payload_json (config : Room.config) : Yojson.Safe.t =
   let current_room = dashboard_current_room_id config in
   let canonical_namespace = Room.default_namespace_id in
@@ -970,6 +980,7 @@ let dashboard_shell_payload_json (config : Room.config) : Yojson.Safe.t =
     [
       ("generated_at", `String (Types.now_iso ()));
       ("status", status_json);
+      ("paths", dashboard_shell_paths_json config);
       ( "counts",
         `Assoc
           [

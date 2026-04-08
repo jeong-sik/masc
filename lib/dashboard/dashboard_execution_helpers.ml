@@ -130,6 +130,23 @@ let compact_text ?(max_len = 160) raw =
 let parse_iso_opt = Dashboard_utils.parse_iso_opt
 let string_list_of_json = Dashboard_utils.string_list_of_json
 
+let latest_iso_timestamp values =
+  let pick_latest best candidate =
+    match candidate with
+    | None -> best
+    | Some candidate -> (
+        match parse_iso_opt (Some candidate) with
+        | None -> best
+        | Some candidate_ts -> (
+            match best with
+            | Some (best_value, best_ts) when best_ts >= candidate_ts ->
+                Some (best_value, best_ts)
+            | _ -> Some (candidate, candidate_ts)))
+  in
+  values
+  |> List.fold_left pick_latest None
+  |> Option.map fst
+
 let string_list_json values =
   `List (List.map (fun value -> `String value) values)
 

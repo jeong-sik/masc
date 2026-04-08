@@ -91,6 +91,31 @@ let json_float_opt key json =
   | `Int value -> Some (float_of_int value)
   | _ -> None
 
+let agent_status_text agent_status =
+  json_string_opt "status" agent_status
+  |> Option.value ~default:"unknown"
+  |> String.lowercase_ascii
+
+let agent_last_seen_ts_opt agent_status =
+  match json_string_opt "last_seen" agent_status with
+  | Some value -> Resilience.Time.parse_iso8601_opt value
+  | None -> None
+
+let agent_last_seen_ago_s agent_status =
+  json_float_opt "last_seen_ago_s" agent_status |> Option.value ~default:max_float
+
+let agent_runtime_has_live_signal agent_status =
+  match agent_status_text agent_status with
+  | "active" | "busy" | "listening" | "idle" ->
+      agent_last_seen_ago_s agent_status <= 120.0
+  | _ -> false
+
+let agent_runtime_has_live_work agent_status =
+  match agent_status_text agent_status with
+  | "active" | "busy" | "listening" ->
+      agent_last_seen_ago_s agent_status <= 120.0
+  | _ -> false
+
 let string_contains_ci haystack needle =
   let haystack = String.lowercase_ascii haystack in
   let needle = String.lowercase_ascii needle in
@@ -191,12 +216,24 @@ let keeper_error_hint ~agent_status ~meta =
 let classify_keeper_quiet_reason ~meta ~keepalive_running ~agent_status ~now_ts =
   let quiet_active = quiet_hours_active () in
   let agent_exists = json_bool "exists" agent_status false in
-  let agent_status_text =
-    json_string_opt "status" agent_status
-    |> Option.value ~default:"unknown"
-    |> String.lowercase_ascii
+  let agent_status_text = agent_status_text agent_status in
+  let live_signal_supersedes_persisted_error =
+    keepalive_running
+    && agent_exists
+    && agent_runtime_has_live_signal agent_status
+    &&
+    match agent_last_seen_ts_opt agent_status with
+    | Some last_seen_ts ->
+        let persisted_error_ts =
+          max meta.runtime.proactive_rt.last_ts meta.runtime.usage.last_turn_ts
+        in
+        last_seen_ts > persisted_error_ts
+    | None -> false
   in
-  let error_hint = keeper_error_hint ~agent_status ~meta in
+  let error_hint =
+    if live_signal_supersedes_persisted_error then None
+    else keeper_error_hint ~agent_status ~meta
+  in
   if not meta.proactive.enabled then
     Some "disabled"
   else if not keepalive_running then
@@ -217,8 +254,10 @@ let classify_keeper_quiet_reason ~meta ~keepalive_running ~agent_status ~now_ts 
     Some "quiet_hours"
   else
     match error_hint with
-    | Some reason when string_contains_ci reason "graphql" -> Some "graphql_error"
-    | Some reason when looks_error_like reason -> Some "model_error"
+    | Some reason when string_contains_ci reason "graphql" ->
+        Some "graphql_error"
+    | Some reason when looks_error_like reason ->
+        Some "model_error"
     | Some _ -> Some "unknown"
     | None ->
         let last_turn_ago_s =
@@ -229,12 +268,21 @@ let classify_keeper_quiet_reason ~meta ~keepalive_running ~agent_status ~now_ts 
           if meta.runtime.proactive_rt.last_ts <= 0.0 then None
           else Some (max 0.0 (now_ts -. meta.runtime.proactive_rt.last_ts))
         in
+        let effective_activity_ago_s =
+          match last_turn_ago_s with
+          | Some age when agent_runtime_has_live_work agent_status ->
+              Some (min age (agent_last_seen_ago_s agent_status))
+          | Some _ as age -> age
+          | None when agent_runtime_has_live_work agent_status ->
+              Some (agent_last_seen_ago_s agent_status)
+          | None -> None
+        in
         if meta.proactive.enabled then
           match last_proactive_ago_s with
           | Some age when age < float_of_int meta.proactive.cooldown_sec ->
               Some "min_gap"
           | _ -> (
-              match last_turn_ago_s with
+              match effective_activity_ago_s with
               | Some age when age < float_of_int meta.proactive.idle_sec ->
                   Some "no_recent_activity"
               | _ -> None)
@@ -263,6 +311,12 @@ let keeper_health_state ?(fiber_health = Fiber_unknown)
     if meta.runtime.usage.last_turn_ts <= 0.0 then max_float
     else max 0.0 (now_ts -. meta.runtime.usage.last_turn_ts)
   in
+  let effective_activity_ago_s =
+    if agent_runtime_has_live_work agent_status then
+      min last_turn_ago_s last_seen_ago_s
+    else
+      last_turn_ago_s
+  in
   if not agent_exists || agent_status_text = "offline" || agent_status_text = "inactive"
   then "offline"
   (* H-4 fix: true zombies are stale regardless of keepalive state *)
@@ -280,7 +334,7 @@ let keeper_health_state ?(fiber_health = Fiber_unknown)
     | Some "graphql_error" | Some "model_error" -> "degraded"
     | _ ->
         if meta.runtime.usage.total_turns = 0 && meta.runtime.proactive_rt.count_total = 0 then "idle"
-        else if last_turn_ago_s > float_of_int (max meta.proactive.idle_sec 900)
+        else if effective_activity_ago_s > float_of_int (max meta.proactive.idle_sec 900)
         then "idle"
         else "healthy")
   (* Keepalive NOT running — fall back to last_seen for stale detection *)

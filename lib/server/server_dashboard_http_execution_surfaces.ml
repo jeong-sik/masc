@@ -126,19 +126,55 @@ let keepalive_running_of_lifecycle_event = function
   | "stopped" | "crashed" | "dead" -> Some false
   | _ -> None
 
-let patch_keeper_row ~keeper_name ~keepalive_running = function
+let phase_of_lifecycle_event = function
+  | "started" | "restarted" | "reconciled" -> Some "running"
+  | "stopped" -> Some "stopped"
+  | "crashed" -> Some "crashed"
+  | "dead" -> Some "dead"
+  | _ -> None
+
+let pipeline_stage_of_lifecycle_event = function
+  | "started" | "restarted" | "reconciled" -> Some "idle"
+  | "stopped" | "dead" -> Some "offline"
+  | "crashed" -> Some "crashed"
+  | _ -> None
+
+let patched_keeper_status row ~keepalive_running =
+  if not keepalive_running then
+    `String "offline"
+  else
+    match Yojson.Safe.Util.member "agent" row |> Yojson.Safe.Util.member "status" with
+    | `String (("busy" | "active" | "listening" | "idle") as status) ->
+        `String status
+    | `String ("offline" | "inactive") -> `String "offline"
+    | _ -> `String "idle"
+
+let patch_keeper_row ~keeper_name ~event ~keepalive_running = function
   | `Assoc fields as row -> (
       match Yojson.Safe.Util.member "name" row with
       | `String name when String.equal name keeper_name ->
           let row_fields : (string * Yojson.Safe.t) list = fields in
-          `Assoc
-            (row_fields
-            |> upsert_assoc_field "keepalive_running" (`Bool keepalive_running))
+          let row_fields =
+            row_fields
+            |> upsert_assoc_field "keepalive_running" (`Bool keepalive_running)
+            |> upsert_assoc_field "status" (patched_keeper_status row ~keepalive_running)
+          in
+          let row_fields =
+            match phase_of_lifecycle_event event with
+            | Some phase -> upsert_assoc_field "phase" (`String phase) row_fields
+            | None -> row_fields
+          in
+          let row_fields =
+            match pipeline_stage_of_lifecycle_event event with
+            | Some stage -> upsert_assoc_field "pipeline_stage" (`String stage) row_fields
+            | None -> row_fields
+          in
+          `Assoc row_fields
       | _ -> row)
   | other -> other
 
-let patch_keeper_rows ~keeper_name ~keepalive_running rows =
-  List.map (patch_keeper_row ~keeper_name ~keepalive_running) rows
+let patch_keeper_rows ~keeper_name ~event ~keepalive_running rows =
+  List.map (patch_keeper_row ~keeper_name ~event ~keepalive_running) rows
 
 let running_keeper_names (config : Room.config) =
   Keeper_types.keeper_names config
@@ -157,7 +193,8 @@ let patch_surface_json_for_running_keepers (config : Room.config) = function
         let patch_rows rows =
           List.fold_left
             (fun acc keeper_name ->
-              patch_keeper_rows ~keeper_name ~keepalive_running:true acc)
+              patch_keeper_rows ~keeper_name ~event:"reconciled"
+                ~keepalive_running:true acc)
             rows running
         in
         (match List.assoc_opt "keepers" fields with
@@ -177,7 +214,7 @@ let patch_surface_json_for_running_keepers (config : Room.config) = function
          | _ -> json)
   | other -> other
 
-let patch_execution_cache_for_keeper ~keeper_name ~keepalive_running =
+let patch_execution_cache_for_keeper ~keeper_name ~event ~keepalive_running =
   match _execution_cache.json with
   | `Assoc fields -> (
       match List.assoc_opt "keepers" fields with
@@ -185,12 +222,12 @@ let patch_execution_cache_for_keeper ~keeper_name ~keepalive_running =
           _execution_cache.json <-
             `Assoc
               (upsert_assoc_field "keepers"
-                 (`List (patch_keeper_rows ~keeper_name ~keepalive_running rows))
+                 (`List (patch_keeper_rows ~keeper_name ~event ~keepalive_running rows))
                  fields)
       | _ -> ())
   | _ -> ()
 
-let patch_operator_snapshot_cache_for_keeper ~keeper_name ~keepalive_running =
+let patch_operator_snapshot_cache_for_keeper ~keeper_name ~event ~keepalive_running =
   match _operator_snapshot_cache.json with
   | `Assoc fields -> (
       match List.assoc_opt "keepers" fields with
@@ -199,7 +236,7 @@ let patch_operator_snapshot_cache_for_keeper ~keeper_name ~keepalive_running =
           | Some (`List rows) ->
               let keeper_fields =
                 upsert_assoc_field "items"
-                  (`List (patch_keeper_rows ~keeper_name ~keepalive_running rows))
+                  (`List (patch_keeper_rows ~keeper_name ~event ~keepalive_running rows))
                   keeper_fields
               in
               _operator_snapshot_cache.json <-
@@ -213,8 +250,8 @@ let patch_keeper_dependent_caches ~keeper_name ~event =
   match keepalive_running_of_lifecycle_event event with
   | None -> ()
   | Some keepalive_running ->
-      patch_execution_cache_for_keeper ~keeper_name ~keepalive_running;
-      patch_operator_snapshot_cache_for_keeper ~keeper_name ~keepalive_running
+      patch_execution_cache_for_keeper ~keeper_name ~event ~keepalive_running;
+      patch_operator_snapshot_cache_for_keeper ~keeper_name ~event ~keepalive_running
 
 (** Late-bound broadcast hook. Set after [broadcast_namespace_truth_snapshot]
     is defined in [Server_dashboard_http_namespace_truth]. *)

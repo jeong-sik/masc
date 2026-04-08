@@ -104,6 +104,8 @@ shell_write_presets = ["coding", "delivery", "full"]
 
 [git_clone]
 allowed_orgs = ["jeong-sik"]
+# Repos blocked even if org is allowed. Format: "org/repo" (lowercase).
+denied_repos = ["jeong-sik/me"]
 
 # ── Presets ─────────────────────────────────────────────────────────
 

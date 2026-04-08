@@ -647,7 +647,7 @@ let build_session_digest ?status_json:cached_status config (session : Team_sessi
     escalation_count =
       (match U.member "escalation_count" summary with
       | `Int value -> value
-      | `Intlit raw -> (try int_of_string raw with Failure _ -> 0)
+      | `Intlit raw -> (Option.value ~default:0 (int_of_string_opt raw))
       | _ -> Team_session_types.escalation_count session.planned_workers);
     controller_tree =
       (match U.member "controller_tree" summary with

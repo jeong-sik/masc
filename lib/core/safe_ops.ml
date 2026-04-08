@@ -80,9 +80,7 @@ let read_file_safe path : (string, string) result =
       Error (Printf.sprintf "Failed to read %s: %s" path (Printexc.to_string e))
 
 (** Safe integer parsing *)
-let int_of_string_safe str =
-  try Some (int_of_string str)
-  with Failure _ -> None
+let int_of_string_safe str = int_of_string_opt str
 
 (** Integer parsing with default *)
 let int_of_string_with_default ~default str =

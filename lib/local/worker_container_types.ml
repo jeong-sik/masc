@@ -118,7 +118,9 @@ let request_id_matches request_id json =
   match member "id" json with
   | `Int value -> value = request_id
   | `Intlit value -> (
-      try int_of_string value = request_id with Failure _ -> false)
+      match int_of_string_opt value with
+      | Some v -> v = request_id
+      | None -> false)
   | `String value -> String.equal value (string_of_int request_id)
   | _ -> false
 

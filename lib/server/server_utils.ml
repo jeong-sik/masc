@@ -7,7 +7,7 @@ let query_param request key =
 let int_query_param request key ~default =
   match query_param request key with
   | None -> default
-  | Some s -> (try int_of_string s with Failure _ -> default)
+  | Some s -> (Option.value ~default:default (int_of_string_opt s))
 
 let bool_query_param request key ~default =
   match query_param request key with

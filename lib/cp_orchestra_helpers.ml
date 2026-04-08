@@ -18,7 +18,7 @@ let string_opt json key =
 let int_opt json key =
   match U.member key json with
   | `Int value -> Some value
-  | `Intlit value -> (try Some (int_of_string value) with Failure _ -> None)
+  | `Intlit value -> (int_of_string_opt (value))
   | `Float value -> Some (int_of_float value)
   | _ -> None
 

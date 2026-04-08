@@ -110,7 +110,7 @@ let with_pool_lock f = Eio_guard.with_mutex pool_mu f
 let reset () = with_pool_lock (fun () -> pool := empty_pool)
 
 let parse_int_opt raw =
-  try Some (int_of_string (String.trim raw)) with Failure _ -> None
+  int_of_string_opt ((String.trim raw))
 
 let int_of_env_default name ~default =
   match Sys.getenv_opt name with

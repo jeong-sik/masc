@@ -22,7 +22,7 @@ let int_of_env_default name ~default ~min_v ~max_v =
     match Sys.getenv_opt name with
     | None -> default
     | Some s ->
-        (try int_of_string (String.trim s) with Failure _ -> default)
+        (Option.value ~default:default (int_of_string_opt (String.trim s)))
   in
   max min_v (min max_v v)
 
@@ -129,7 +129,7 @@ let json_list_field key json =
 let json_int_field key json ~default =
   match Yojson.Safe.Util.member key json with
   | `Int value -> value
-  | `Intlit raw -> (try int_of_string raw with Failure _ -> default)
+  | `Intlit raw -> (Option.value ~default:default (int_of_string_opt raw))
   | _ -> default
 
 let json_string_field_opt key json =

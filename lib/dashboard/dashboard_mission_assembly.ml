@@ -31,7 +31,7 @@ let keeper_tool_audit_json_fields config registry_lookup keeper agent_name =
   let fallback_count =
     match member_assoc "latest_tool_call_count" keeper with
     | `Int value -> Some value
-    | `Intlit raw -> (try Some (int_of_string raw) with Failure _ -> None)
+    | `Intlit raw -> (int_of_string_opt (raw))
     | _ -> None
   in
   let fallback_source =

@@ -121,7 +121,7 @@ let sse_ping_interval_s = 30.0
 let get_last_event_id (request : Httpun.Request.t) =
   match Httpun.Headers.get request.headers "last-event-id" with
   | Some id -> (
-      try Some (int_of_string id) with Failure _ -> None)
+      int_of_string_opt (id))
   | None -> None
 
 let mcp_headers session_id protocol_version =

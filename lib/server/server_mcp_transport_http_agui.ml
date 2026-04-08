@@ -37,7 +37,7 @@ let handle_ag_ui_events ~deps request reqd =
   let room_id = Option.value ~default:"default" (query_param request "room") in
   let last_event_id =
     match Httpun.Headers.get (request : Httpun.Request.t).headers "last-event-id" with
-    | Some id -> (try Some (int_of_string id) with Failure _ -> None)
+    | Some id -> (int_of_string_opt (id))
     | None -> None
   in
   match check_sse_connect_guard session_id with

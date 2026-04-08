@@ -42,7 +42,7 @@ let mu = Eio.Mutex.create ()
     Evicts expired entries first, then oldest stale entries. *)
 let max_entries =
   match Sys.getenv_opt "MASC_DASHBOARD_CACHE_MAX_ENTRIES" with
-  | Some s -> (try max 16 (min 512 (int_of_string (String.trim s))) with Failure _ -> 64)
+  | Some s -> (match int_of_string_opt (String.trim s) with Some v -> max 16 (min 512 v) | None -> 64)
   | None -> 64
 
 (** Evict one expired or stale entry when table exceeds max_entries.

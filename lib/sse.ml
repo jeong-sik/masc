@@ -44,7 +44,7 @@ let max_clients = 200
     A client that falls this far behind should reconnect. *)
 let stream_capacity =
   match Sys.getenv_opt "MASC_SSE_STREAM_CAPACITY" with
-  | Some s -> (try max 8 (min 1024 (int_of_string (String.trim s))) with Failure _ -> 64)
+  | Some s -> (match int_of_string_opt (String.trim s) with Some v -> max 8 (min 1024 v) | None -> 64)
   | None -> 64
 
 (** SSE client state.

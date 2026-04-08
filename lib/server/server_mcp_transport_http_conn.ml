@@ -36,7 +36,7 @@ let env_int_or ~name ~default =
   match Sys.getenv_opt name with
   | None -> default
   | Some raw -> (
-      try int_of_string raw with Failure _ -> default)
+      Option.value ~default:default (int_of_string_opt raw))
 
 let sse_reconnect_min_interval_s =
   env_float_or ~name:"MASC_SSE_RECONNECT_MIN_INTERVAL_S" ~default:1.0

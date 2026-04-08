@@ -73,7 +73,7 @@ let run_audio_http_request_to_file ~url ~headers ~body_json ~output_file =
       match status with
       | Unix.WEXITED 0 ->
           let http_code =
-            try int_of_string (String.trim http_code_str) with Failure _ -> 0
+            Option.value ~default:0 (int_of_string_opt (String.trim http_code_str))
           in
           if http_code >= 200 && http_code < 300 then
             let file_size =

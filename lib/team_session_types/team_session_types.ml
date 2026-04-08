@@ -170,7 +170,7 @@ let assoc_int_of_json json =
           match v with
           | `Int n -> Some (k, n)
           | `Intlit s -> (
-              try Some (k, int_of_string s) with Failure _ -> None)
+              match int_of_string_opt s with Some v -> Some (k, v) | None -> None)
           | _ -> None)
         fields
   | _ -> []
@@ -296,7 +296,7 @@ let delivery_contract_of_yojson (json : Yojson.Safe.t) =
                   (match Yojson.Safe.Util.member "repair_budget" json with
                   | `Int value -> max 0 value
                   | `Intlit raw -> (
-                      try max 0 (int_of_string raw) with Failure _ -> 0)
+                      match int_of_string_opt raw with Some v -> max 0 v | None -> 0)
                   | _ -> 0);
                 generator_roles =
                   non_empty_strings_of_json
@@ -612,7 +612,7 @@ let session_of_yojson json =
     let get_int_default key default =
       match member key json with
       | `Int n -> n
-      | `Intlit s -> (try int_of_string s with Failure _ -> default)
+      | `Intlit s -> (Option.value ~default:default (int_of_string_opt s))
       | _ -> default
     in
     let get_float_default key default =
@@ -717,7 +717,7 @@ let session_of_yojson json =
         final_done_delta_total =
           (match member "final_done_delta_total" json with
            | `Int n -> Some n
-           | `Intlit s -> (try Some (int_of_string s) with Failure _ -> None)
+           | `Intlit s -> (int_of_string_opt (s))
            | _ -> None);
         final_done_delta_by_agent =
           (match member "final_done_delta_by_agent" json with

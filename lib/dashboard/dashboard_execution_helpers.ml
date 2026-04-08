@@ -103,7 +103,7 @@ let take n lst = List.filteri (fun i _ -> i < n) lst
 let int_field ?(default = 0) key json =
   match member_assoc key json with
   | `Int value -> value
-  | `Intlit raw -> (try int_of_string raw with Failure _ -> default)
+  | `Intlit raw -> (Option.value ~default:default (int_of_string_opt raw))
   | `Float value -> int_of_float value
   | _ -> default
 

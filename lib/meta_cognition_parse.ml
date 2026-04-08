@@ -20,7 +20,7 @@ let json_string_opt = function
 let json_int_opt = function
   | `Int value -> Some value
   | `Intlit raw -> (
-      try Some (int_of_string raw) with Failure _ -> None)
+      int_of_string_opt (raw))
   | _ -> None
 
 let json_float_opt = function

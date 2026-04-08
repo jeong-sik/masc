@@ -466,9 +466,38 @@ let make_hooks
                Agent_sdk.Hooks.Override
                  (render_inline_skip_reason
                     ~tool_name ~reason_code:"destructive_guard" ~reason_text)
-             | None -> Agent_sdk.Hooks.Continue
+             | None ->
+               (* Governance approval gate: check risk level and request
+                  approval for high-risk tools via OAS ApprovalRequired.
+                  The approval_callback (Keeper_approval_queue) will
+                  suspend the fiber until operator resolves. (#5907) *)
+               let governance_level = Env_config_core.governance_level () in
+               let risk = Governance_pipeline.assess_risk ~tool_name ~input in
+               let needs_approval =
+                 match Governance_pipeline.confirm_threshold governance_level with
+                 | Some threshold ->
+                   Governance_pipeline.risk_level_to_int risk
+                   >= Governance_pipeline.risk_level_to_int threshold
+                 | None -> false
+               in
+               if needs_approval then
+                 Agent_sdk.Hooks.ApprovalRequired
+               else
+                 Agent_sdk.Hooks.Continue
            else
-             Agent_sdk.Hooks.Continue)
+             let governance_level = Env_config_core.governance_level () in
+             let risk = Governance_pipeline.assess_risk ~tool_name ~input in
+             let needs_approval =
+               match Governance_pipeline.confirm_threshold governance_level with
+               | Some threshold ->
+                 Governance_pipeline.risk_level_to_int risk
+                 >= Governance_pipeline.risk_level_to_int threshold
+               | None -> false
+             in
+             if needs_approval then
+               Agent_sdk.Hooks.ApprovalRequired
+             else
+               Agent_sdk.Hooks.Continue)
       | _ -> Agent_sdk.Hooks.Continue);
 
     on_idle = Some (fun event ->

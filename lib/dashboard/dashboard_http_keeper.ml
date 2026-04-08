@@ -295,6 +295,17 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
             | Some entry -> Some (Keeper_state_machine.phase_to_string entry.phase)
             | None -> None
           in
+          let reconcile_status =
+            match registry_entry with
+            | Some entry when
+                entry.turn_consecutive_failures > 0
+                && (match entry.last_failure_reason with
+                    | Some reason ->
+                        Keeper_registry.failure_reason_requires_manual_reconcile reason
+                    | None -> false) ->
+                Some "manual_reconcile_required"
+            | _ -> None
+          in
           let supervisor_diagnostics =
             let max_restarts =
               Runtime_params.get Governance_registry.keeper_supervisor_max_restarts in
@@ -307,16 +318,30 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                 let keepers_dir =
                   Filename.concat (Room.masc_root_dir config) "keepers" in
                 let disk_crashes =
-                  (try Keeper_crash_persistence.recent_crashes
-                    ~keepers_dir ~name:m.name ~max_entries:20
-                  with Eio.Cancel.Cancelled _ as e -> raise e | _ -> []) in
+                  (try
+                     Keeper_crash_persistence.recent_crashes
+                       ~keepers_dir ~name:m.name ~max_entries:20
+                   with
+                   | Eio.Cancel.Cancelled _ as exn -> raise exn
+                   | exn ->
+                       Log.Dashboard.warn
+                         "keeper dashboard recent_crashes failed for %s: %s"
+                         m.name (Printexc.to_string exn);
+                       []) in
                 let combined_log = match disk_crashes with
                   | [] -> crash_log
                   | _ -> disk_crashes in
                 let sp_events =
-                  (try Keeper_crash_persistence.recent_sp_events
-                    ~keepers_dir ~max_entries:20
-                  with Eio.Cancel.Cancelled _ as e -> raise e | _ -> []) in
+                  (try
+                     Keeper_crash_persistence.recent_sp_events
+                       ~keepers_dir ~max_entries:20
+                   with
+                   | Eio.Cancel.Cancelled _ as exn -> raise exn
+                   | exn ->
+                       Log.Dashboard.warn
+                         "keeper dashboard recent_sp_events failed: %s"
+                         (Printexc.to_string exn);
+                       []) in
                 let ctx_ratio =
                   match last_metrics with
                   | Some m -> Safe_ops.json_float "context_ratio" m
@@ -463,6 +488,10 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
               ("phase",
                 match phase with
                 | Some p -> `String p
+                | None -> `Null);
+              ("reconcile_status",
+                match reconcile_status with
+                | Some status -> `String status
                 | None -> `Null);
               ("supervisor_diagnostics", supervisor_diagnostics);
               ("agent_name", `String m.agent_name);

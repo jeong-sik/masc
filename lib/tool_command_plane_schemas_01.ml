@@ -5,8 +5,8 @@ let schemas : tool_schema list = [
     {
       name = "masc_unit_define";
       description =
-        "Create or update a managed unit (company/platoon/squad/agent) in the Command Plane V2 hierarchy. \
-Use when setting up organizational structure before starting operations (CPv2 benchmark step 1). \
+        "Create or update a managed unit (company/platoon/squad/agent) in the managed-operation hierarchy. \
+Use when setting up organizational structure before starting managed operations. \
 Pair with masc_operation_start to run operations on defined units.";
       input_schema =
         object_schema ~required:[ "kind"; "label" ]
@@ -25,7 +25,7 @@ Pair with masc_operation_start to run operations on defined units.";
     {
       name = "masc_unit_list";
       description =
-        "Read managed and effective CPv2 units including auto-generated topology for unassigned agents. \
+        "Read managed and effective units including auto-generated topology for unassigned agents. \
 Use when inspecting the organizational hierarchy or verifying unit definitions. \
 Pair with masc_observe_topology for a richer view with health and operation counts.";
       input_schema = object_schema [];
@@ -60,7 +60,7 @@ Pair with masc_observe_topology to verify roster changes took effect.";
     {
       name = "masc_operation_start";
       description =
-        "Start a managed operation on a unit after leadership, roster, and capacity checks pass (CPv2 benchmark step 2). \
+        "Start a managed operation on a unit after leadership, roster, and capacity checks pass. \
 Use when launching work on a defined unit with budget and policy controls. \
 After masc_unit_define; follow with masc_dispatch_tick to materialize detachments.";
       input_schema =
@@ -72,11 +72,11 @@ After masc_unit_define; follow with masc_dispatch_tick to materialize detachment
             ("policy_class", string_prop "Policy class name.");
             ("budget_class", string_prop "Budget class name.");
             ("workload_template", `Assoc [ ("type", `String "string"); ("enum", `List [ `String "coding_team"; `String "research_team"; `String "ops_governance_team" ]); ("description", `String "Optional high-level team template. Defaults: coding_team -> coding_task/decompose, research_team -> research_pipeline/normalize, ops_governance_team -> research_pipeline/audit. If workload_profile is also provided, it must match the template family.") ]);
-            ("workload_profile", `Assoc [ ("type", `String "string"); ("enum", `List [ `String "coding_task"; `String "generic"; `String "research_pipeline" ]); ("description", `String "Workload profile used by CPv2 search fabric. Default: coding_task. generic is a deprecated alias for coding_task.") ]);
+            ("workload_profile", `Assoc [ ("type", `String "string"); ("enum", `List [ `String "coding_task"; `String "generic"; `String "research_pipeline" ]); ("description", `String "Workload profile used by managed-operation search fabric. Default: coding_task. generic is a deprecated alias for coding_task.") ]);
             ("stage", string_prop "Optional stage label. coding_task: decompose, inspect, implement, verify, review. research_pipeline: normalize, verify, curate, rank, audit.");
             ("artifact_scope", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]); ("description", `String "Optional file or directory scope inherited across coding-task stages.") ]);
             ("depends_on_operation_ids", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]); ("description", `String "Optional upstream operation ids that must complete or checkpoint before this operation can issue.") ]);
-            ("search_strategy", `Assoc [ ("type", `String "string"); ("enum", `List [ `String "legacy"; `String "best_first_v1" ]); ("description", `String "Optional CPv2 routing strategy. Default: best_first_v1. legacy remains available as an explicit opt-out.") ]);
+            ("search_strategy", `Assoc [ ("type", `String "string"); ("enum", `List [ `String "legacy"; `String "best_first_v1" ]); ("description", `String "Optional managed-operation routing strategy. Default: best_first_v1. legacy remains available as an explicit opt-out.") ]);
             ("detachment_session_id", string_prop "Optional backing team-session id.");
             ("checkpoint_ref", string_prop "Optional initial checkpoint reference.");
             ("active_goal_ids", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]);
@@ -87,7 +87,7 @@ After masc_unit_define; follow with masc_dispatch_tick to materialize detachment
     {
       name = "masc_operation_status";
       description =
-        "Read CPv2 operations with their current state, detachments, and trace lineage. \
+        "Read managed operations with their current state, detachments, and trace lineage. \
 Use when triaging operations after start or monitoring progress during execution. \
 After masc_operation_start; pair with masc_observe_operations for a combined view.";
       input_schema =
@@ -97,7 +97,7 @@ After masc_operation_start; pair with masc_observe_operations for a combined vie
     {
       name = "masc_operation_checkpoint";
       description =
-        "Attach or update a checkpoint reference for a managed CPv2 operation, appending a trace event. \
+        "Attach or update a checkpoint reference for a managed operation, appending a trace event. \
 Use when saving durable resume pointers at key milestones during an operation. \
 Pair with masc_operation_resume to restart from the saved checkpoint.";
       input_schema =
@@ -227,7 +227,7 @@ Pair with masc_operation_resume to re-activate when ready.";
     {
       name = "masc_dispatch_tick";
       description =
-        "Run one deterministic reconcile tick to materialize detachments, process failovers, approvals, alerts, and traces (CPv2 step 3). \
+        "Run one deterministic reconcile tick to materialize detachments, process failovers, approvals, alerts, and traces. \
 Use when operations need their detachments materialized or the control plane needs reconciliation. \
 After masc_operation_start or masc_dispatch_assign; run repeatedly until stable.";
       input_schema =

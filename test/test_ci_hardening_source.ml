@@ -126,10 +126,26 @@ let test_route_auth_contracts () =
     (file_contains_pattern
        "lib/server/server_auth.ml"
        {|String.equal path "/api/v1/gate/events"|});
+  check bool "discord gate status route stays public read" true
+    (file_contains_pattern
+       "lib/server/server_auth.ml"
+       {|String.equal path "/api/v1/gate/discord/status"|});
   check bool "channel gate health route is registered" true
     (file_contains_pattern
         "lib/server/server_routes_http_routes_channel_gate.ml"
-        {|Http.Router.get "/api/v1/gate/health"|})
+        {|Http.Router.get "/api/v1/gate/health"|});
+  check bool "discord gate status route is registered" true
+    (file_contains_pattern
+       "lib/server/server_routes_http_routes_channel_gate.ml"
+       {|Http.Router.get "/api/v1/gate/discord/status"|});
+  check bool "discord gate bind route is registered" true
+    (file_contains_pattern
+       "lib/server/server_routes_http_routes_channel_gate.ml"
+       {|Http.Router.post "/api/v1/gate/discord/bind"|});
+  check bool "discord gate unbind route is registered" true
+    (file_contains_pattern
+       "lib/server/server_routes_http_routes_channel_gate.ml"
+       {|Http.Router.post "/api/v1/gate/discord/unbind"|})
 
 let test_http_write_auth_contracts () =
   check bool "server auth no longer accepts query token fallback" true

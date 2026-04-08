@@ -174,16 +174,16 @@ let manual_help_entry name =
         {
           name;
           short_description =
-            "Start an autoresearch loop through the swarm-facing team-session and command-plane surfaces.";
+            "Start an autoresearch loop through the swarm-facing team-session surface and optional managed-operation lane.";
           when_to_use =
             "Use when you want Karpathy-style autoresearch to show up in the normal supervised swarm workflow instead of living as a standalone ecosystem loop.";
           key_constraints =
             [
               "Requires goal, metric_fn, and target_file.";
-              "Needs local team-session runtime context; CPv2 operation launch is best-effort and may degrade to session-only with warnings.";
+              "Needs local team-session runtime context; managed-operation launch is best-effort and may degrade to session-only with warnings.";
             ];
           details_markdown =
-            "Creates the raw autoresearch loop first, then links it to a supervised team session and, when possible, a research_pipeline command-plane operation. Team-session status will expose a linked_autoresearch block and team-session stop will stop the linked loop.";
+            "Creates the raw autoresearch loop first, then links it to a supervised team session and, when possible, a research_pipeline managed operation on the compatibility lane. Team-session status exposes a linked_autoresearch block and team-session stop stops the linked loop.";
           doc_refs =
             [
               "docs/SWARM-DELIVERY-RUNBOOK.md";
@@ -199,7 +199,7 @@ let manual_help_entry name =
         {
           name;
           short_description =
-            "Start a repo-synthesis run through CPv2 operation, attached team session, and proof surfaces.";
+            "Start a repo-synthesis run through the managed-operation compatibility lane, attached team session, and proof surfaces.";
           when_to_use =
             "Use when Codex/TUI needs one MCP front door for repo-scoped synthesis questions before dropping to raw command-plane or team-session tools.";
           key_constraints =
@@ -208,7 +208,7 @@ let manual_help_entry name =
               "Seeds planned worker roles and writes a benchmark run record, but dashboard remains read-only.";
             ];
           details_markdown =
-            "Creates a managed coding_task inspect-stage operation on the repo-synthesis platoon, starts an attached team session, registers planned worker roles, stores benchmark metadata under .masc/repo-synthesis-benchmarks, and returns proof/report artifact paths plus recommended next tools.";
+            "Creates a managed coding_task inspect-stage operation on the repo-synthesis platoon, starts an attached team session, registers planned worker roles, stores benchmark metadata under .masc/repo-synthesis-benchmarks, and returns proof/report artifact paths plus recommended next tools. The attached team session remains the default operator-visible execution path.";
           doc_refs =
             [
               "docs/COMMAND-PLANE-RUNBOOK.md";
@@ -224,15 +224,15 @@ let manual_help_entry name =
       Some
         {
           name;
-          short_description = "Start a managed CPv2 operation on a selected unit.";
-          when_to_use = "Use when you need a durable managed execution record instead of an ad-hoc swarm action.";
+          short_description = "Start a managed operation on a selected unit.";
+          when_to_use = "Use when you explicitly need the managed-operation compatibility lane for benchmarking or topology experiments.";
           key_constraints =
             [
               "Requires assigned_unit_id and objective.";
               "Managed operation state is later advanced through checkpoint/finalize/policy tools.";
             ];
           details_markdown =
-            "Creates the canonical command-plane execution record, binds it to a unit, and seeds the trace/checkpoint path used by operator and proof surfaces.";
+            "Creates the managed-operation record on the experimental command-plane lane, binds it to a unit, and seeds the trace/checkpoint path used by operator and proof surfaces.";
           doc_refs =
             [
               "docs/COMMAND-PLANE-RUNBOOK.md";
@@ -279,7 +279,7 @@ let manual_help_entry name =
               "Unit tool/model allowlists now affect command-plane routing and assignment when capability tags are present; worker-runtime per-tool enforcement is still a follow-up slice.";
             ];
           details_markdown =
-            "Delegates to the existing truthful write paths: Config mode updates, Auth config persistence, CPv2 unit policy updates, and keeper meta policy updates. Command-plane unit policy now feeds routing/assignment gates; deeper worker-runtime enforcement remains a separate step.";
+            "Delegates to the existing truthful write paths: Config mode updates, Auth config persistence, managed-operation unit policy updates, and keeper meta policy updates. Command-plane unit policy now feeds routing/assignment gates; deeper worker-runtime enforcement remains a separate step.";
           doc_refs =
             [
               "docs/COMMAND-PLANE-RUNBOOK.md";

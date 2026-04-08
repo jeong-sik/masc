@@ -19,6 +19,13 @@ let make_meta ?(name = "keeper-exec-status-test")
   | Ok meta -> meta
   | Error err -> fail ("meta_of_json failed: " ^ err)
 
+let iso_of_seconds_ago age_s =
+  let ts = Time_compat.now () -. age_s in
+  let tm = Unix.gmtime ts in
+  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
+    (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
+    tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
+
 let test_keeper_surface_status_preserves_live_agent_states () =
   let status =
     ES.keeper_surface_status
@@ -76,6 +83,7 @@ let make_agent_status ?(exists = true) ?(status = "active")
   `Assoc [
     ("exists", `Bool exists);
     ("status", `String status);
+    ("last_seen", `String (iso_of_seconds_ago last_seen_ago_s));
     ("last_seen_ago_s", `Float last_seen_ago_s);
     ("is_zombie", `Bool is_zombie);
   ]
@@ -159,6 +167,32 @@ let test_health_keepalive_running_fresh_is_healthy () =
   in
   check string "keepalive + fresh + turns → healthy" "healthy" health
 
+let test_health_keepalive_running_recent_live_signal_avoids_idle () =
+  let now_ts = Time_compat.now () in
+  let meta =
+    let base = make_meta () in
+    {
+      base with
+      runtime =
+        {
+          base.runtime with
+          usage =
+            {
+              base.runtime.usage with
+              total_turns = 5;
+              last_turn_ts = now_ts -. 3600.0;
+            };
+        };
+    }
+  in
+  let agent_status = make_agent_status ~status:"active" ~last_seen_ago_s:10.0 () in
+  let health =
+    ES.keeper_health_state ~meta ~keepalive_running:true
+      ~agent_status ~quiet_reason:None ~now_ts ()
+  in
+  check string "fresh live signal keeps keeper healthy despite stale last turn"
+    "healthy" health
+
 let test_health_keepalive_not_running_not_stale_is_offline () =
   let meta = make_meta () in
   let agent_status = make_agent_status ~last_seen_ago_s:50.0 () in
@@ -167,6 +201,46 @@ let test_health_keepalive_not_running_not_stale_is_offline () =
       ~agent_status ~quiet_reason:None ~now_ts:(Time_compat.now ()) ()
   in
   check string "no keepalive + not stale → offline" "offline" health
+
+let test_diagnostic_ignores_stale_error_when_live_signal_is_newer () =
+  let now_ts = Time_compat.now () in
+  let base = make_meta () in
+  let stale_error_ts = now_ts -. 1800.0 in
+  let meta =
+    {
+      base with
+      updated_at = iso_of_seconds_ago 1800.0;
+      runtime =
+        {
+          base.runtime with
+          usage =
+            {
+              base.runtime.usage with
+              total_turns = 5;
+              last_turn_ts = stale_error_ts;
+            };
+          proactive_rt =
+            {
+              base.runtime.proactive_rt with
+              count_total = 5;
+              last_ts = stale_error_ts;
+              last_outcome = KT.Proactive_error;
+              last_reason =
+                "unified:error:Timeout: Execution cancelled after 300.0s";
+              last_preview = "Timeout: Execution cancelled after 300.0s";
+            };
+        };
+    }
+  in
+  let diagnostic =
+    ES.keeper_diagnostic_json ~meta ~keepalive_running:true
+      ~agent_status:(make_agent_status ~status:"busy" ~last_seen_ago_s:10.0 ())
+      ~history_items:[] ~now_ts
+  in
+  let open Yojson.Safe.Util in
+  check string "fresh live signal suppresses stale degraded status"
+    "healthy"
+    (diagnostic |> member "health_state" |> to_string)
 
 let () =
   run "keeper_exec_status"
@@ -187,8 +261,12 @@ let () =
             test_health_zombie_overrides_keepalive;
           test_case "keepalive + fresh turns → healthy" `Quick
             test_health_keepalive_running_fresh_is_healthy;
+          test_case "keepalive + recent live signal avoids idle" `Quick
+            test_health_keepalive_running_recent_live_signal_avoids_idle;
           test_case "no keepalive + not stale → offline" `Quick
             test_health_keepalive_not_running_not_stale_is_offline;
+          test_case "fresh live signal suppresses stale error degradation" `Quick
+            test_diagnostic_ignores_stale_error_when_live_signal_is_newer;
         ] );
       ( "surface_status",
         [

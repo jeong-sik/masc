@@ -1,9 +1,8 @@
-(** Workflow Guidance — encodes Golden Path sequences.
+(** Workflow Guidance — encodes front-door and auxiliary sequences.
 
-    Three canonical paths are encoded:
-    1. Namespace/Task Hygiene (prerequisite for all work)
-    2. CPv2 Direct (benchmark / swarm)
-    3. Team Session / Supervisor
+    1. Namespace/Task Hygiene (default front door)
+    2. Managed Operations (experimental/compatibility lane)
+    3. Team Session / Supervisor (delivery lane)
 
     @since 2.89.0 *)
 
@@ -29,6 +28,13 @@ let transition_action args =
   match args |> member "action" |> to_string_option with
   | Some action -> Some (String.lowercase_ascii (String.trim action))
   | None -> None
+
+let guidance_tool_name name =
+  match name with
+  | "masc_set_current_task"
+  | "masc_room_status"
+  | "masc_list_tasks" -> Tool_catalog.canonical_tool_name name
+  | _ -> name
 
 (* ── Golden Path 1: Namespace/Task Hygiene ──────────────────────── *)
 
@@ -227,7 +233,7 @@ let after_done ~success =
       preconditions = [ "room_set"; "joined" ];
       common_mistakes = [] }
 
-(* ── Golden Path 2: CPv2 Direct ──────────────────────────────────── *)
+(* ── Auxiliary Lane: Managed Operations ──────────────────────────── *)
 
 let after_operation_start ~success =
   if success then
@@ -360,22 +366,23 @@ let after_operator_digest ~success =
 (* ── Main dispatch ───────────────────────────────────────────────── *)
 
 let next_steps ~tool_name ~success =
+  let tool_name = guidance_tool_name tool_name in
   match tool_name with
-  (* Golden Path 1: Namespace/Task Hygiene *)
+  (* Front Door: Namespace/Task Hygiene *)
   | "masc_start" -> after_start ~success
   | "masc_set_room" -> after_set_room ~success
   | "masc_join" -> after_join ~success
   | "masc_status" -> after_status ~success
   | "masc_claim_next" -> after_claim_auto_bound ~success
   | "masc_add_task" | "masc_batch_add_tasks" -> after_add_task ~success
-  | "masc_plan_set_task" | "masc_set_current_task" -> after_plan_set_task ~success
+  | "masc_plan_set_task" -> after_plan_set_task ~success
   | "masc_heartbeat" -> after_heartbeat ~success
   | "masc_done" -> after_done ~success
   | "masc_transition" -> after_transition_generic ~success
-  (* Golden Path 2: CPv2 *)
+  (* Auxiliary Lane: Managed Operations *)
   | "masc_operation_start" -> after_operation_start ~success
   | "masc_dispatch_tick" -> after_dispatch_tick ~success
-  (* Golden Path 3: Team Session *)
+  (* Delivery Lane: Team Session *)
   | "masc_team_session_start" -> after_team_session_start ~success
   | "masc_team_session_step" -> after_team_session_step ~success
   | "masc_team_session_prove" -> after_team_session_prove ~success
@@ -388,7 +395,7 @@ let next_steps ~tool_name ~success =
   | _ -> empty
 
 let next_steps_for_call ~tool_name ~args ~success =
-  match tool_name with
+  match guidance_tool_name tool_name with
   | "masc_transition" -> (
       match transition_action args with
       | Some "claim" -> after_transition_claim ~success
@@ -427,12 +434,13 @@ let guidance_to_json g =
 (** Returns (before_tools, after_tools, common_mistakes) for a given tool.
     Used by tool_help_registry to enrich help responses. *)
 let workflow_context ~tool_name =
+  let tool_name = guidance_tool_name tool_name in
   let before = match tool_name with
     | "masc_join" -> [ "masc_start" ]
     | "masc_status" -> [ "masc_start"; "masc_join" ]
     | "masc_claim_next" ->
         [ "masc_join"; "masc_status" ]
-    | "masc_plan_set_task" | "masc_set_current_task" ->
+    | "masc_plan_set_task" ->
         [ "masc_transition" ]
     | "masc_worktree_create" ->
         [ "masc_plan_set_task" ]

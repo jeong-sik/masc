@@ -45,6 +45,9 @@ type conditions = {
   (** [consecutive_failures < max_hb_failures] *)
   turn_healthy : bool;
   (** [turn_consecutive_failures < max_turn_failures] *)
+  manual_reconcile_required : bool;
+  (** A prior turn committed an external side effect and ended ambiguously;
+      only a later clean turn may clear this sticky condition. *)
   context_within_budget : bool;
   (** [context_ratio < compaction.ratio_gate] *)
   context_handoff_needed : bool;
@@ -91,6 +94,7 @@ type event =
   | Heartbeat_failed of { consecutive : int; max_allowed : int }
   | Turn_succeeded
   | Turn_failed of { consecutive : int; max_allowed : int }
+  | Manual_reconcile_required of { reason : string }
   | Context_measured of {
       context_ratio : float;
       message_count : int;
@@ -161,7 +165,7 @@ val transition_error_to_string : transition_error -> string
     7. Paused (operator_paused)
     8. HandingOff (handoff_active)
     9. Compacting (compaction_active)
-    10. Failing (heartbeat or turn unhealthy)
+    10. Failing (heartbeat degraded, turn degraded, or manual reconcile required)
     11. Running (fiber_alive)
     12. Offline (default) *)
 val derive_phase : conditions -> phase

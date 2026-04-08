@@ -27,15 +27,16 @@ VARIABLES
     tool_calls,         \* Number of tool calls made so far
     has_side_effect,    \* Whether a side-effecting tool was called
     compaction_needed,  \* Whether compaction should be applied
-    turn_outcome        \* "none" | "success" | "error" | "timeout"
+    turn_outcome,       \* "none" | "success" | "error" | "timeout" | "partial"
+    reconcile_required  \* Sticky until a later successful turn verifies clean recovery
 
 vars == <<turn_phase, retry_count, tool_calls,
-          has_side_effect, compaction_needed, turn_outcome>>
+          has_side_effect, compaction_needed, turn_outcome, reconcile_required>>
 
 TurnPhases == {"idle", "planning", "executing", "tool_call",
                "side_effect", "compacting", "done"}
 
-Outcomes == {"none", "success", "error", "timeout"}
+Outcomes == {"none", "success", "error", "timeout", "partial"}
 
 (***************************************************************************)
 (* Type invariant                                                          *)
@@ -48,6 +49,7 @@ TypeOK ==
     /\ has_side_effect \in BOOLEAN
     /\ compaction_needed \in BOOLEAN
     /\ turn_outcome \in Outcomes
+    /\ reconcile_required \in BOOLEAN
 
 (***************************************************************************)
 (* Initial state                                                           *)
@@ -60,6 +62,7 @@ Init ==
     /\ has_side_effect = FALSE
     /\ compaction_needed = FALSE
     /\ turn_outcome = "none"
+    /\ reconcile_required = FALSE
 
 (***************************************************************************)
 (* Turn trigger: Idle → Planning                                           *)
@@ -70,7 +73,7 @@ TurnTrigger ==
     /\ turn_phase = "idle"
     /\ turn_phase' = "planning"
     /\ UNCHANGED <<retry_count, tool_calls, has_side_effect,
-                    compaction_needed, turn_outcome>>
+                    compaction_needed, turn_outcome, reconcile_required>>
 
 (***************************************************************************)
 (* Planning phase: verify keys, build prompt, resolve params.              *)
@@ -81,14 +84,14 @@ PlanningSucceeds ==
     /\ turn_phase = "planning"
     /\ turn_phase' = "executing"
     /\ UNCHANGED <<retry_count, tool_calls, has_side_effect,
-                    compaction_needed, turn_outcome>>
+                    compaction_needed, turn_outcome, reconcile_required>>
 
 PlanningFails ==
     /\ turn_phase = "planning"
     /\ turn_phase' = "done"
     /\ turn_outcome' = "error"
     /\ UNCHANGED <<retry_count, tool_calls, has_side_effect,
-                    compaction_needed>>
+                    compaction_needed, reconcile_required>>
 
 (***************************************************************************)
 (* Executing → ToolCall: model produces a tool call.                       *)
@@ -100,7 +103,7 @@ MakeToolCall ==
     /\ turn_phase' = "tool_call"
     /\ tool_calls' = tool_calls + 1
     /\ UNCHANGED <<retry_count, has_side_effect,
-                    compaction_needed, turn_outcome>>
+                    compaction_needed, turn_outcome, reconcile_required>>
 
 (***************************************************************************)
 (* ToolCall → SideEffect: tool call is a side-effecting operation.         *)
@@ -112,7 +115,7 @@ ToolCallWithSideEffect ==
     /\ turn_phase' = "side_effect"
     /\ has_side_effect' = TRUE
     /\ UNCHANGED <<retry_count, tool_calls,
-                    compaction_needed, turn_outcome>>
+                    compaction_needed, turn_outcome, reconcile_required>>
 
 (***************************************************************************)
 (* ToolCall → Executing: tool call completes (no side effect or            *)
@@ -123,7 +126,7 @@ ToolCallCompletes ==
     /\ turn_phase = "tool_call"
     /\ turn_phase' = "executing"
     /\ UNCHANGED <<retry_count, tool_calls, has_side_effect,
-                    compaction_needed, turn_outcome>>
+                    compaction_needed, turn_outcome, reconcile_required>>
 
 (***************************************************************************)
 (* SideEffect → Executing: side-effecting tool completes.                  *)
@@ -133,7 +136,7 @@ SideEffectCompletes ==
     /\ turn_phase = "side_effect"
     /\ turn_phase' = "executing"
     /\ UNCHANGED <<retry_count, tool_calls, has_side_effect,
-                    compaction_needed, turn_outcome>>
+                    compaction_needed, turn_outcome, reconcile_required>>
 
 (***************************************************************************)
 (* Executing → Compacting: agent run completes successfully.               *)
@@ -145,19 +148,19 @@ ExecutionSucceeds ==
     /\ turn_phase' = "compacting"
     /\ turn_outcome' = "success"
     /\ UNCHANGED <<retry_count, tool_calls, has_side_effect,
-                    compaction_needed>>
+                    compaction_needed, reconcile_required>>
 
 (***************************************************************************)
-(* Executing → Compacting: transient error but side-effect occurred.       *)
-(* Cannot retry — proceed to compacting with error outcome.                *)
-(* OCaml: keeper_unified_turn.ml line 943.                                 *)
+(* Executing → Compacting: any error after a committed mutating tool call. *)
+(* Cannot retry — the turn outcome is partial and needs explicit reconcile.*)
 (***************************************************************************)
 
-TransientErrorAfterSideEffect ==
+ErrorAfterSideEffect ==
     /\ turn_phase = "executing"
     /\ has_side_effect = TRUE
     /\ turn_phase' = "compacting"
-    /\ turn_outcome' = "error"
+    /\ turn_outcome' = "partial"
+    /\ reconcile_required' = TRUE
     /\ UNCHANGED <<retry_count, tool_calls, has_side_effect,
                     compaction_needed>>
 
@@ -172,7 +175,7 @@ TransientErrorRetry ==
     /\ retry_count < MaxRetries
     /\ retry_count' = retry_count + 1
     /\ UNCHANGED <<turn_phase, tool_calls, has_side_effect,
-                    compaction_needed, turn_outcome>>
+                    compaction_needed, turn_outcome, reconcile_required>>
 
 (***************************************************************************)
 (* Executing → Compacting: persistent error or retries exhausted.          *)
@@ -180,22 +183,36 @@ TransientErrorRetry ==
 
 PersistentError ==
     /\ turn_phase = "executing"
-    /\ \/ (has_side_effect = FALSE /\ retry_count >= MaxRetries)
+    /\ has_side_effect = FALSE
+    /\ \/ retry_count >= MaxRetries
        \/ turn_outcome = "error"  \* already marked as error
     /\ turn_phase' = "compacting"
     /\ turn_outcome' = "error"
     /\ UNCHANGED <<retry_count, tool_calls, has_side_effect,
-                    compaction_needed>>
+                    compaction_needed, reconcile_required>>
 
 (***************************************************************************)
-(* Timeout: any active phase → Compacting with timeout outcome.            *)
-(* OCaml: 120s wall-clock timeout.                                         *)
+(* Timeout before any committed mutation stays a plain timeout.            *)
 (***************************************************************************)
 
-Timeout ==
+TimeoutBeforeSideEffect ==
     /\ turn_phase \in {"executing", "tool_call", "side_effect"}
+    /\ has_side_effect = FALSE
     /\ turn_phase' = "compacting"
     /\ turn_outcome' = "timeout"
+    /\ UNCHANGED <<retry_count, tool_calls, has_side_effect,
+                    compaction_needed, reconcile_required>>
+
+(***************************************************************************)
+(* Timeout after a committed mutation is also a partial outcome.           *)
+(***************************************************************************)
+
+TimeoutAfterSideEffect ==
+    /\ turn_phase \in {"executing", "tool_call", "side_effect"}
+    /\ has_side_effect = TRUE
+    /\ turn_phase' = "compacting"
+    /\ turn_outcome' = "partial"
+    /\ reconcile_required' = TRUE
     /\ UNCHANGED <<retry_count, tool_calls, has_side_effect,
                     compaction_needed>>
 
@@ -207,7 +224,7 @@ CompactionDecision ==
     /\ turn_phase = "compacting"
     /\ turn_phase' = "done"
     /\ UNCHANGED <<retry_count, tool_calls, has_side_effect,
-                    compaction_needed, turn_outcome>>
+                    compaction_needed, turn_outcome, reconcile_required>>
 
 (***************************************************************************)
 (* Done → Idle: turn cycle completes, keeper returns to idle.              *)
@@ -222,6 +239,8 @@ TurnCompletes ==
     /\ has_side_effect' = FALSE
     /\ compaction_needed' = FALSE
     /\ turn_outcome' = "none"
+    /\ reconcile_required' =
+         IF turn_outcome = "success" THEN FALSE ELSE reconcile_required
 
 (***************************************************************************)
 (* Next-state relation                                                     *)
@@ -236,10 +255,11 @@ Next ==
     \/ ToolCallCompletes
     \/ SideEffectCompletes
     \/ ExecutionSucceeds
-    \/ TransientErrorAfterSideEffect
+    \/ ErrorAfterSideEffect
     \/ TransientErrorRetry
     \/ PersistentError
-    \/ Timeout
+    \/ TimeoutBeforeSideEffect
+    \/ TimeoutAfterSideEffect
     \/ CompactionDecision
     \/ TurnCompletes
 
@@ -257,6 +277,11 @@ NoDirectExecutingToIdle ==
 
 (* S2: SideEffect is only reachable from ToolCall.                         *)
 (*     (Enforced by transition structure, verifiable by model checking.)   *)
+
+(* S3: Partial outcome is sticky evidence that explicit reconcile is still
+       required until a later successful turn clears it.                   *)
+PartialOutcomeRequiresReconcile ==
+    (turn_outcome = "partial") => reconcile_required
 
 (* S3: No retry after side-effect with transient error.                    *)
 (*     If has_side_effect is TRUE, retry_count must not increase.          *)
@@ -291,6 +316,7 @@ Safety ==
     /\ RetryBounded
     /\ DoneHasOutcome
     /\ IdleIsClear
+    /\ PartialOutcomeRequiresReconcile
 
 (***************************************************************************)
 (* Liveness properties                                                     *)

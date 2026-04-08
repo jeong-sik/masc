@@ -535,17 +535,32 @@ let maybe_recover_from_failing ~(ctx : _ context) ~(meta : keeper_meta) =
       ~base_path:ctx.config.base_path meta.name
   in
   if stale_turn_failures > 0 then begin
-    Keeper_registry.reset_turn_failures
-      ~base_path:ctx.config.base_path meta.name;
-    ignore (Keeper_registry.dispatch_event
-      ~base_path:ctx.config.base_path meta.name
-      Keeper_state_machine.Heartbeat_ok);
-    ignore (Keeper_registry.dispatch_event
-      ~base_path:ctx.config.base_path meta.name
-      Keeper_state_machine.Turn_succeeded);
-    Log.Keeper.info
-      "heartbeat recovery: reset %d stale turn failures for %s"
-      stale_turn_failures meta.name
+    let sticky_manual_reconcile =
+      match Keeper_registry.get ~base_path:ctx.config.base_path meta.name with
+      | Some entry ->
+          (match entry.last_failure_reason with
+           | Some reason ->
+               Keeper_registry.failure_reason_requires_manual_reconcile reason
+           | None -> false)
+      | None -> false
+    in
+    if sticky_manual_reconcile then
+      Log.Keeper.warn
+        "heartbeat recovery: preserving %d turn failures for %s because manual reconcile is still required"
+        stale_turn_failures meta.name
+    else begin
+      Keeper_registry.reset_turn_failures
+        ~base_path:ctx.config.base_path meta.name;
+      ignore (Keeper_registry.dispatch_event
+        ~base_path:ctx.config.base_path meta.name
+        Keeper_state_machine.Heartbeat_ok);
+      ignore (Keeper_registry.dispatch_event
+        ~base_path:ctx.config.base_path meta.name
+        Keeper_state_machine.Turn_succeeded);
+      Log.Keeper.info
+        "heartbeat recovery: reset %d stale turn failures for %s"
+        stale_turn_failures meta.name
+    end
   end
 
 let sync_keeper_presence

@@ -73,110 +73,7 @@ type run_result =
   ; inference_telemetry : Agent_sdk.Types.inference_telemetry option
   }
 
-let keeper_tool_usage_snapshot ~base_path ~keeper_name : (string * int) list =
-  Keeper_registry.tool_usage_of ~base_path keeper_name
-  |> List.map (fun (tool_name, entry) -> tool_name, entry.Keeper_types.count)
-  |> List.sort (fun (left, _) (right, _) -> String.compare left right)
-;;
-
-let tool_usage_delta ~(before : (string * int) list) ~(after : (string * int) list)
-  : string list
-  =
-  let before_counts = Hashtbl.create 16 in
-  List.iter
-    (fun (tool_name, count) -> Hashtbl.replace before_counts tool_name count)
-    before;
-  after
-  |> List.concat_map (fun (tool_name, after_count) ->
-    let before_count =
-      Option.value ~default:0 (Hashtbl.find_opt before_counts tool_name)
-    in
-    List.init (max 0 (after_count - before_count)) (fun _ -> tool_name))
-;;
-
-let merge_reported_and_observed_tool_names
-      ~(reported_tool_names : string list)
-      ~(observed_tool_names : string list)
-  : string list
-  =
-  match observed_tool_names with
-  | [] -> reported_tool_names
-  | _ ->
-    let observed = Hashtbl.create 16 in
-    List.iter (fun tool_name -> Hashtbl.replace observed tool_name ()) observed_tool_names;
-    observed_tool_names
-    @ List.filter
-        (fun tool_name -> not (Hashtbl.mem observed tool_name))
-        reported_tool_names
-;;
-
-let normalize_response_text ~(text : string) ~(tool_names : string list) ()
-  : (string, string) result
-  =
-  let trimmed = String.trim text in
-  if trimmed <> ""
-  then Ok text
-  else (
-    match tool_names with
-    | [] -> Error "keeper turn completed with no textual reply"
-    | _ ->
-      Ok
-        (Printf.sprintf
-           "Completed without a textual reply. Tools used: %s."
-           (String.concat ", " tool_names)))
-;;
-
-let tool_query_text_of_user_message (text : string) : string =
-  let allowed_sections =
-    [ "### Pending Mentions"
-    ; "### Scope Messages"
-    ; "### Active Goals"
-    ; "### Namespace State"
-    ; "### Board Activity"
-    ; "### Actionable Routes"
-    ; "### Live Worktree Delta"
-    ]
-  in
-  let is_allowed_section section =
-    List.exists
-      (fun allowed -> String.starts_with ~prefix:allowed section)
-      allowed_sections
-  in
-  let lines = String.split_on_char '\n' text in
-  let rec loop current_section kept = function
-    | [] ->
-      let filtered = List.rev kept |> String.concat "\n" |> String.trim in
-      if filtered <> "" then filtered else String.trim text
-    | line :: rest ->
-      let trimmed = String.trim line in
-      let current_section =
-        if String.starts_with ~prefix:"### " trimmed
-        then Some trimmed
-        else current_section
-      in
-      let keep_line =
-        match current_section with
-        | None -> String.starts_with ~prefix:"## Current World State" trimmed
-        | Some section -> is_allowed_section section
-      in
-      if keep_line
-      then loop current_section (line :: kept) rest
-      else loop current_section kept rest
-  in
-  loop None [] lines
-;;
-
-let merge_tool_selection_boundary
-    ~(core : string list)
-    ~(deterministic_prefilter : string list)
-    ~(llm_selected : string list)
-    ~(discovered : string list) : string list =
-  let sorted_discovered = List.sort String.compare discovered in
-  let deterministic_floor =
-    Keeper_types.dedupe_keep_order
-      (core @ deterministic_prefilter @ sorted_discovered)
-  in
-  Keeper_types.dedupe_keep_order (deterministic_floor @ llm_selected)
+(* Tool selection & disclosure — extracted to Keeper_tool_disclosure (#5732) *)
 
 (* Deterministic selection floor size: keep the executable surface small
    enough for prompt budgets while still surfacing a handful of relevant
@@ -224,112 +121,7 @@ let tool_index_entry_of_tool
   in
   Agent_sdk.Tool_index.{ name; description = t.schema.description; group; aliases }
 
-let log_keeper_proof ~(keeper_name : string) (proof : Agent_sdk.Cdal_proof.t) =
-  let status_string =
-    Agent_sdk.Cdal_proof.show_result_status proof.result_status
-    |> fun raw ->
-    match String.rindex_opt raw '.' with
-    | Some idx when idx + 1 < String.length raw ->
-      String.sub raw (idx + 1) (String.length raw - idx - 1)
-    | _ -> raw |> String.lowercase_ascii
-  in
-  match proof.result_status with
-  | Agent_sdk.Cdal_proof.Completed ->
-    if Keeper_types_profile.keeper_debug
-    then
-      Log.Keeper.debug
-        "keeper:%s proof: run_id=%s mode=%s status=%s evidence_refs=%d"
-        keeper_name
-        proof.run_id
-        (Agent_sdk.Execution_mode.to_string proof.effective_execution_mode)
-        status_string
-        (List.length proof.raw_evidence_refs)
-  | _ ->
-    Log.Keeper.warn
-      "keeper:%s proof: run_id=%s mode=%s status=%s evidence_refs=%d"
-      keeper_name
-      proof.run_id
-      (Agent_sdk.Execution_mode.to_string proof.effective_execution_mode)
-      status_string
-      (List.length proof.raw_evidence_refs)
-;;
-
-let log_keeper_contract_verdict
-      ~(keeper_name : string)
-      (verdict : Cdal_types.contract_verdict)
-  =
-  match verdict.status with
-  | Cdal_types.Satisfied ->
-    if Keeper_types_profile.keeper_debug
-    then
-      Log.Keeper.debug
-        "keeper:%s contract_verdict: status=%s scope=%s hash=%s"
-        keeper_name
-        (Cdal_types.contract_status_to_string verdict.status)
-        verdict.claim_scope
-        verdict.judgment_hash
-  | Cdal_types.Violated | Cdal_types.Inconclusive ->
-    Log.Keeper.warn
-      "keeper:%s contract_verdict: status=%s scope=%s hash=%s"
-      keeper_name
-      (Cdal_types.contract_status_to_string verdict.status)
-      verdict.claim_scope
-      verdict.judgment_hash
-;;
-
-let log_keeper_friction
-      ~(keeper_name : string)
-      (fp : Cdal_friction_projection.friction_projection)
-  =
-  let blocked = fp.blocked_attempt_count in
-  let groups = List.length fp.blocked_attempt_groups in
-  let tripwires = List.length fp.review_tripwires in
-  if tripwires > 0
-  then
-    Log.Keeper.warn
-      "keeper:%s friction: blocked=%d groups=%d tripwires=%d"
-      keeper_name
-      blocked
-      groups
-      tripwires
-  else if blocked > 0 || groups > 0
-  then
-    Log.Keeper.debug
-      "keeper:%s friction: blocked=%d groups=%d tripwires=%d"
-      keeper_name
-      blocked
-      groups
-      tripwires
-  else if Keeper_types_profile.keeper_debug
-  then
-    Log.Keeper.debug
-      "keeper:%s friction: blocked=%d groups=%d tripwires=%d"
-      keeper_name
-      blocked
-      groups
-      tripwires
-;;
-
-let log_keeper_memory_write
-      ~(keeper_name : string)
-      ~(notes_written : int)
-      ~(kinds_written : string list)
-  =
-  if notes_written >= 10
-  then
-    Log.Keeper.info
-      "keeper:%s memory_write: %d notes, kinds=[%s]"
-      keeper_name
-      notes_written
-      (String.concat "," kinds_written)
-  else if Keeper_types_profile.keeper_debug
-  then
-    Log.Keeper.debug
-      "keeper:%s memory_write: %d notes, kinds=[%s]"
-      keeper_name
-      notes_written
-      (String.concat "," kinds_written)
-;;
+(* Post-turn telemetry logging — extracted to Keeper_turn_telemetry (#5732) *)
 
 (** Run a single keeper turn via OAS Agent.run().
 
@@ -582,7 +374,7 @@ let run_turn
   let extend_turns_tool = Keeper_extend_turns.make ~agent_ref ~max_turns () in
   let tools = extend_turns_tool :: keeper_tools in
   let tool_usage_before =
-    keeper_tool_usage_snapshot ~base_path:config.base_path ~keeper_name:meta.name
+    Keeper_tool_disclosure.keeper_tool_usage_snapshot ~base_path:config.base_path ~keeper_name:meta.name
   in
   (* Progressive tool disclosure via OAS Tool_selector.
      Delegates BM25 retrieval, confidence gating, fallback, and optional
@@ -1095,7 +887,7 @@ let run_turn
               in
               let query_text =
                 (if String.trim last_user_text <> "" then last_user_text else user_message)
-                |> tool_query_text_of_user_message
+                |> Keeper_tool_disclosure.tool_query_text_of_user_message
               in
               let max_tools = max_tools_per_turn in
               let portal_ctx : Tool_portal.context = { config; agent_name = meta.name } in
@@ -1210,7 +1002,7 @@ let run_turn
                   | None -> []
                 in
                 let merged =
-                  merge_tool_selection_boundary
+                  Keeper_tool_disclosure.merge_tool_selection_boundary
                     ~core
                     ~deterministic_prefilter
                     ~llm_selected
@@ -1583,6 +1375,9 @@ let run_turn
            ~context_injector
            ~context:shared_context
            ?slot_id:(Keeper_config.keeper_slot_id meta.name)
+           ~approval:(Governance_pipeline.to_oas_approval_callback
+                        ~governance_level:(Env_config_core.governance_level ())
+                        ~keeper_name:meta.name)
            ?oas_checkpoint:raw_oas_checkpoint
            ?event_bus
            ())
@@ -1666,16 +1461,16 @@ let run_turn
            result.response.content
        in
        let tool_usage_after =
-         keeper_tool_usage_snapshot ~base_path:config.base_path ~keeper_name:meta.name
+         Keeper_tool_disclosure.keeper_tool_usage_snapshot ~base_path:config.base_path ~keeper_name:meta.name
        in
        let observed_tool_names =
-         tool_usage_delta ~before:tool_usage_before ~after:tool_usage_after
+         Keeper_tool_disclosure.tool_usage_delta ~before:tool_usage_before ~after:tool_usage_after
        in
        let tool_names =
-         merge_reported_and_observed_tool_names ~reported_tool_names ~observed_tool_names
+         Keeper_tool_disclosure.merge_reported_and_observed_tool_names ~reported_tool_names ~observed_tool_names
        in
        let usage = Keeper_exec_context.usage_of_response result.response in
-       (match normalize_response_text ~text ~tool_names () with
+       (match Keeper_tool_disclosure.normalize_response_text ~text ~tool_names () with
         | Error e -> Error (Oas.Error.Internal e)
         | Ok response_text ->
           (* Ensure every generation has a [STATE] block for continuity.
@@ -1741,12 +1536,12 @@ let run_turn
           in
           (match result.proof with
            | Some p ->
-             log_keeper_proof ~keeper_name:meta.name p;
+             Keeper_turn_telemetry.log_keeper_proof ~keeper_name:meta.name p;
              let store = Agent_sdk.Proof_store.default_config in
              let outcome = Cdal_eval_v1.evaluate ~store p in
              let verdict = Cdal_eval_v1.verdict_of_outcome outcome in
              Cdal_eval_v1.persist verdict;
-             log_keeper_contract_verdict ~keeper_name:meta.name verdict;
+             Keeper_turn_telemetry.log_keeper_contract_verdict ~keeper_name:meta.name verdict;
              (match outcome with
               | Cdal_eval_v1.Load_failure (err, _) ->
                 Log.Keeper.warn
@@ -1755,7 +1550,7 @@ let run_turn
                   (Cdal_loader.load_error_to_string err)
               | Cdal_eval_v1.Verdict (_, _) -> ());
              (match Cdal_eval_v1.friction_of_outcome outcome with
-              | Some fp -> log_keeper_friction ~keeper_name:meta.name fp
+              | Some fp -> Keeper_turn_telemetry.log_keeper_friction ~keeper_name:meta.name fp
               | None -> ())
            | None -> ());
           (* Post-turn deterministic memory write.
@@ -1771,7 +1566,7 @@ let run_turn
              in
              if notes_written > 0
              then
-               log_keeper_memory_write
+               Keeper_turn_telemetry.log_keeper_memory_write
                  ~keeper_name:meta.name
                  ~notes_written
                  ~kinds_written

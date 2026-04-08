@@ -16,10 +16,12 @@ module StringMap : Map.S with type key = string
 type failure_reason =
   | Heartbeat_consecutive_failures of int
   | Turn_consecutive_failures of int
+  | Ambiguous_partial_commit of string
   | Fiber_unresolved
   | Exception of string
 
 val failure_reason_to_string : failure_reason -> string
+val failure_reason_requires_manual_reconcile : failure_reason -> bool
 
 (** Pure control-flow signal for immediate fiber termination (RFC-0002).
     Carries no state — failure reason must be pre-stored via
@@ -55,6 +57,9 @@ type registry_entry = {
   board_cursor_post_id : string option;
   tool_usage : Keeper_types.tool_call_entry StringMap.t;
   transition_seq : int;
+  waiting_for_inference : bool Atomic.t;
+      (** Ephemeral flag: true when keeper is blocked in admission queue.
+          Does not affect state machine phase derivation. *)
 }
 
 (** Register a keeper as running. Returns the new entry. *)

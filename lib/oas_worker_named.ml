@@ -74,6 +74,7 @@ let config_for_label
     ?enable_thinking
     ?compact_ratio
     ?contract
+    ?approval
     ~(description : string option)
     () : Oas_worker_exec.config =
   let provider = Oas_worker_exec.resolve_provider_of_label model_label in
@@ -103,6 +104,7 @@ let config_for_label
     contract;
     description;
     compact_ratio;
+    approval;
   }
 
 (** Run a single Agent.run() call with cascade model fallback.
@@ -151,6 +153,7 @@ let run_named
     ?context_injector
     ?context
     ?slot_id
+    ?approval
     ?oas_checkpoint
     ?event_bus
     ?sw
@@ -204,9 +207,16 @@ let run_named
       context;
       slot_id;
       event_bus;
+      approval;
     }
   in
   let config = { config with named_cascade = Some named_cascade; initial_messages; raw_trace; yield_on_tool } in
+  let queue_priority =
+    Option.value priority ~default:Llm_provider.Request_priority.Proactive
+  in
+  Admission_queue.with_permit
+    ~priority:queue_priority ~keeper_name:name ~cascade_name
+    (fun () ->
   match Oas_worker_exec.run ~sw ~net ~config ?oas_checkpoint ?on_event ?on_yield ?on_resume ?agent_ref ?proof_ref ?contract goal with
   | Ok result when accept result.response ->
     let observation =
@@ -232,7 +242,7 @@ let run_named
         ~candidate_cfgs ~selected_model_raw:None ~capture
     in
     Oas_worker_cascade.record_cascade ~cascade_name ~outcome:`Failure ~observation:(Some observation);
-    Error e
+    Error e)
 
 (** Run a single Agent.run() using a model label string (e.g. "llama:qwen3.5").
     Validates the label parses before attempting execution. *)
@@ -285,7 +295,12 @@ let run_model_by_label
             ()
         in
         let config = { config with transport = transport_resolved } in
-        (match Oas_worker_exec.run ~sw ~net ~config ?on_event ?contract goal with
+        Admission_queue.with_permit
+          ~priority:Llm_provider.Request_priority.Proactive
+          ~keeper_name:"oas-label-model"
+          ~cascade_name:model_label
+          (fun () ->
+        match Oas_worker_exec.run ~sw ~net ~config ?on_event ?contract goal with
         | Ok result when accept result.response -> Ok result
         | Ok _ ->
             Error (Oas.Error.Internal
@@ -376,5 +391,10 @@ let run_model_with_masc_tools
           ()
       in
       let config = { config with raw_trace; transport = transport_resolved } in
+      Admission_queue.with_permit
+        ~priority:Llm_provider.Request_priority.Proactive
+        ~keeper_name:"oas-explicit-model"
+        ~cascade_name:model_label
+        (fun () ->
       Oas_worker_exec.run_with_masc_tools ~sw ~net ~config ~masc_tools ~dispatch ?contract ?on_event
-        goal
+        goal)

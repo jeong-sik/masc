@@ -154,6 +154,18 @@ let test_claim_next_alias () =
   let g = WG.next_steps ~tool_name:"masc_claim_next" ~success:true in
   check_has_tool g.next_steps "masc_worktree_create"
 
+let test_set_current_task_alias_matches_canonical () =
+  let alias_steps =
+    WG.next_steps ~tool_name:"masc_set_current_task" ~success:true
+    |> fun g -> List.map (fun (s : WG.step) -> s.tool) g.next_steps
+  in
+  let canonical_steps =
+    WG.next_steps ~tool_name:"masc_plan_set_task" ~success:true
+    |> fun g -> List.map (fun (s : WG.step) -> s.tool) g.next_steps
+  in
+  check (list string) "alias guidance matches canonical guidance"
+    canonical_steps alias_steps
+
 let test_complete_task_removed () =
   (* masc_complete_task was a ghost tool — it no longer routes to guidance *)
   let g = WG.next_steps ~tool_name:"masc_complete_task" ~success:true in
@@ -232,6 +244,8 @@ let () =
       test_case "claim success" `Quick test_claim_success;
       test_case "plan_set_task success" `Quick test_plan_set_task_success;
       test_case "done success" `Quick test_done_success;
+      test_case "set_current_task alias matches canonical" `Quick
+        test_set_current_task_alias_matches_canonical;
     ];
     "golden_path_2", [
       test_case "operation_start success" `Quick test_operation_start_success;

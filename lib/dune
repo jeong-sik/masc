@@ -6,6 +6,8 @@
  (modules
    a2a_types
    a2a_tools
+   admission_queue
+   admission_queue_metrics
    agent_card
    agent_economy
    agent_health
@@ -33,6 +35,7 @@
    cancellation
    channel_gate
    channel_gate_metrics
+   channel_gate_discord_state
    gate_protocol
    gate_keeper_backend
    command_plane_v2
@@ -483,6 +486,9 @@
    keeper_hooks_oas
    keeper_extend_turns
    keeper_llm_bridge
+   keeper_tool_disclosure
+   keeper_turn_telemetry
+   keeper_approval_queue
    keeper_agent_run
    keeper_world_observation
    keeper_unified_prompt
@@ -649,7 +655,10 @@
   keeper_context_core
   keeper_compact_policy
   keeper_rollover
+  keeper_approval_queue
   keeper_post_turn
+  keeper_tool_disclosure
+  keeper_turn_telemetry
   keeper_exec_context
   keeper_turn_session
   keeper_turn_setup

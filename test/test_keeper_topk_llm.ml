@@ -204,7 +204,7 @@ let test_selection_boundary_preserves_deterministic_floor () =
   let deterministic_prefilter = ["keeper_fs_read"; "keeper_board_post"] in
   let llm_selected = ["keeper_board_post"] in
   let merged =
-    Keeper_agent_run.merge_tool_selection_boundary
+    Keeper_tool_disclosure.merge_tool_selection_boundary
       ~core:["keeper_context_status"]
       ~deterministic_prefilter
       ~llm_selected
@@ -233,7 +233,7 @@ let test_selection_boundary_preserves_deterministic_floor () =
 
 let test_selection_boundary_appends_llm_only_extras () =
   let merged =
-    Keeper_agent_run.merge_tool_selection_boundary
+    Keeper_tool_disclosure.merge_tool_selection_boundary
       ~core:["keeper_context_status"]
       ~deterministic_prefilter:["keeper_fs_read"]
       ~llm_selected:["keeper_bash"; "keeper_fs_read"; "keeper_board_post"]
@@ -267,14 +267,14 @@ let test_selection_boundary_sorts_discovered () =
   (* discovered arrives in Hashtbl.fold order (non-deterministic).
      merge_tool_selection_boundary must sort it for stable output. *)
   let merged_ab =
-    Keeper_agent_run.merge_tool_selection_boundary
+    Keeper_tool_disclosure.merge_tool_selection_boundary
       ~core:["core_tool"]
       ~deterministic_prefilter:[]
       ~llm_selected:[]
       ~discovered:["tool_b"; "tool_a"]
   in
   let merged_ba =
-    Keeper_agent_run.merge_tool_selection_boundary
+    Keeper_tool_disclosure.merge_tool_selection_boundary
       ~core:["core_tool"]
       ~deterministic_prefilter:[]
       ~llm_selected:[]

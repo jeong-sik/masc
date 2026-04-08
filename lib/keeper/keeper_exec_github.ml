@@ -63,6 +63,76 @@ let handle_keeper_github
                      or request operator approval." )
               ; "cmd", `String ("gh " ^ gh_raw)
               ]))
+      (* Pre-merge review gate: verify PR has at least one non-dismissed review
+         before allowing gh pr merge. Prevents agents from self-merging without
+         cross-agent review. Ref: #5906 *)
+      else if Worker_dev_tools.is_gh_pr_merge gh_raw then (
+        let root = Keeper_alerting_path.project_root_of_config config in
+        let review_check =
+          let merge_target = Worker_dev_tools.gh_pr_merge_target gh_raw in
+          let target_arg =
+            match merge_target with
+            | Some target -> " " ^ Filename.quote target
+            | None -> ""
+          in
+          let check_cmd = Printf.sprintf
+            "cd %s && gh pr view%s --json reviews --jq '.reviews | map(select(.state != \"DISMISSED\")) | length' 2>&1"
+            (Filename.quote root) target_arg
+          in
+          let st, out = Process_eio.run_argv_with_status ~timeout_sec:10.0
+            [ "/bin/zsh"; "-lc"; check_cmd ]
+          in
+          if st = Unix.WEXITED 0 then
+            let count = String.trim out in
+            if count = "0" || count = "" then `Blocked_no_reviews
+            else `Allowed
+          else
+            `Check_failed (String.trim out)
+        in
+        match review_check with
+        | `Blocked_no_reviews ->
+          Log.Keeper.warn "keeper_github merge-review-gate: blocked %s (keeper=%s, no reviews)"
+            gh_raw meta.name;
+          Yojson.Safe.to_string
+            (`Assoc
+                [ "ok", `Bool false
+                ; "error", `String "merge_blocked_no_reviews"
+                ; ( "reason"
+                  , `String
+                      "Cannot merge: PR has no non-dismissed reviews. \
+                       Every PR requires at least one cross-agent review before merge. \
+                       Post a review first, then retry." )
+                ; "cmd", `String ("gh " ^ gh_raw)
+                ])
+        | `Check_failed err ->
+          Log.Keeper.warn
+            "keeper_github merge-review-gate: verification failed %s (keeper=%s, err=%s)"
+            gh_raw meta.name (if err = "" then "<empty>" else err);
+          Yojson.Safe.to_string
+            (`Assoc
+                [ "ok", `Bool false
+                ; "error", `String "merge_review_check_failed"
+                ; ( "reason"
+                  , `String
+                      "Cannot verify PR review state for this merge target. \
+                       Resolve the gh pr view failure or request operator approval, \
+                       then retry." )
+                ; "details", `String err
+                ; "cmd", `String ("gh " ^ gh_raw)
+                ])
+        | `Allowed ->
+          let gh_cmd =
+            "gh "
+            ^ (if cmd <> "" then cmd else String.concat " " (List.map Filename.quote gh_args))
+          in
+          let shell_cmd = Printf.sprintf "cd %s && %s 2>&1" (Filename.quote root) gh_cmd in
+          let st, out = Process_eio.run_argv_with_status ~timeout_sec [ "/bin/zsh"; "-lc"; shell_cmd ] in
+          Yojson.Safe.to_string
+            (`Assoc
+                [ "ok", `Bool (st = Unix.WEXITED 0)
+                ; "status", Keeper_alerting_path.process_status_to_json st
+                ; "output", `String out
+                ]))
       else (
         let gh_cmd =
           if cmd <> ""
@@ -152,52 +222,120 @@ let handle_keeper_pr_workflow
         Process_eio.run_argv_with_status ~timeout_sec
           [ "/bin/zsh"; "-lc"; shell ]
       in
-      (* Step 1: Shallow clone into keeper playground.
-         Fully isolated from main repo — no shared git index. *)
-      let clone_dir = ref "" in
-      let _s1 = run_step "playground_clone" (fun () ->
-        let playground = Filename.concat root
-          (Keeper_alerting_path.playground_path_of_keeper meta.name) in
-        Fs_compat.mkdir_p playground;
-        let repo_name = Filename.basename root in
-        let clone_path = Filename.concat playground repo_name in
-        (* Clean up any previous clone *)
-        if Sys.file_exists clone_path then begin
-          let st, _ = run_sh ~cwd:playground ~timeout_sec:10.0
-            (Printf.sprintf "rm -rf %s" (Filename.quote repo_name)) in
-          if st <> Unix.WEXITED 0 then
-            Log.Keeper.warn "pr_workflow: failed to clean previous clone at %s" clone_path
-        end;
-        (* Shallow clone with single branch for speed *)
-        let origin_url =
-          let st, out = run_sh ~cwd:root ~timeout_sec:5.0
-            "git remote get-url origin" in
-          if st = Unix.WEXITED 0 then String.trim out
-          else root (* fallback to local path *)
-        in
-        let st, out = run_sh ~cwd:playground ~timeout_sec:120.0
-          (Printf.sprintf "git clone --depth 1 --branch %s %s %s"
-            (Filename.quote base_branch)
-            (Filename.quote origin_url)
-            (Filename.quote repo_name)) in
-        if st <> Unix.WEXITED 0 then
-          Error (Printf.sprintf "git clone: %s" out)
-        else begin
-          clone_dir := clone_path;
-          (* Create the feature branch *)
-          let st2, out2 = run_sh ~cwd:clone_path ~timeout_sec:5.0
-            (Printf.sprintf "git checkout -b %s" (Filename.quote branch)) in
-          if st2 <> Unix.WEXITED 0 then
-            Error (Printf.sprintf "git checkout -b: %s" out2)
-          else
-            Ok (Printf.sprintf "cloned to %s, branch %s" clone_path branch)
+      let repo_root =
+        match Room_git.git_root ~base_path:root with
+        | Some path -> path
+        | None -> root
+      in
+      let worktree_id =
+        branch
+        |> String.to_seq
+        |> Seq.map (fun c -> if c = '/' || c = '\\' then '-' else c)
+        |> String.of_seq
+        |> Printf.sprintf "%s-%s" meta.name
+      in
+      let worktree_dir = ref "" in
+      let resolved_base_branch = ref base_branch in
+      let remove_worktree_path worktree_path =
+        try
+          let st_rm, out_rm = run_sh ~cwd:repo_root ~timeout_sec:10.0
+            (Printf.sprintf "git worktree remove --force %s"
+              (Filename.quote worktree_path)) in
+          if st_rm <> Unix.WEXITED 0 then
+            Error (Printf.sprintf "git worktree remove: %s" (String.trim out_rm))
+          else begin
+            let st_prune, out_prune = run_sh ~cwd:repo_root ~timeout_sec:5.0
+              "git worktree prune" in
+            if st_prune <> Unix.WEXITED 0 then
+              Log.Keeper.warn "pr_workflow: git worktree prune failed after cleaning %s: %s"
+                worktree_path (String.trim out_prune);
+            Ok ()
+          end
+        with exn ->
+          Error (Printexc.to_string exn)
+      in
+      let branch_exists_locally branch_name =
+        let st, out = run_sh ~cwd:repo_root ~timeout_sec:5.0
+          (Printf.sprintf "git show-ref --verify --quiet %s"
+            (Filename.quote (Printf.sprintf "refs/heads/%s" branch_name))) in
+        match st with
+        | Unix.WEXITED 0 -> Ok true
+        | Unix.WEXITED 1 -> Ok false
+        | _ -> Error (Printf.sprintf "git show-ref: %s" (String.trim out))
+      in
+      let cleanup_worktree () =
+        if !worktree_dir <> "" && Sys.file_exists !worktree_dir then begin
+          match remove_worktree_path !worktree_dir with
+          | Ok () -> ()
+          | Error msg ->
+            Log.Keeper.warn "pr_workflow: cleanup failed for %s: %s" !worktree_dir msg
         end
+      in
+      Fun.protect
+        ~finally:cleanup_worktree
+        (fun () ->
+      let _s1 = run_step "worktree_create" (fun () ->
+        if not (Room_git.is_git_repo ~base_path:root) then
+          Error "Not a git repository. MASC v2 requires .git directory for worktree isolation."
+        else
+          let worktrees_dir = Filename.concat repo_root ".worktrees" in
+          let worktree_path = Filename.concat worktrees_dir worktree_id in
+          Fs_compat.mkdir_p worktrees_dir;
+          let prepare_result =
+            if Sys.file_exists worktree_path then
+              match remove_worktree_path worktree_path with
+              | Ok () -> Ok ()
+              | Error msg ->
+                Error (Printf.sprintf "remove existing worktree: %s" msg)
+            else Ok ()
+          in
+          match prepare_result with
+          | Error _ as err -> err
+          | Ok () ->
+            let _ = run_sh ~cwd:repo_root ~timeout_sec:30.0 "git fetch origin" in
+            match Room_git.resolve_base_branch repo_root base_branch with
+            | Error e -> Error (Types.masc_error_to_string e)
+            | Ok (resolved_base, fallback_from) ->
+              resolved_base_branch := resolved_base;
+              begin match branch_exists_locally branch with
+              | Error msg -> Error msg
+              | Ok branch_exists ->
+                let add_cmd =
+                  if branch_exists then
+                    Printf.sprintf "git worktree add %s %s"
+                      (Filename.quote worktree_path)
+                      (Filename.quote branch)
+                  else
+                    Printf.sprintf "git worktree add -b %s %s %s"
+                      (Filename.quote branch)
+                      (Filename.quote worktree_path)
+                      (Filename.quote (Printf.sprintf "origin/%s" resolved_base))
+                in
+                let st, out = run_sh ~cwd:repo_root ~timeout_sec:30.0 add_cmd in
+                if st <> Unix.WEXITED 0 then
+                  Error (Printf.sprintf "git worktree add: %s" (String.trim out))
+                else begin
+                  worktree_dir := worktree_path;
+                  let fallback_note =
+                    match fallback_from with
+                    | None -> ""
+                    | Some missing ->
+                      Printf.sprintf " (origin/%s missing, used origin/%s)"
+                        missing resolved_base
+                  in
+                  let branch_note =
+                    if branch_exists then " (reused existing branch)" else ""
+                  in
+                  Ok (Printf.sprintf "worktree %s on branch %s%s%s"
+                    worktree_path branch branch_note fallback_note)
+                end
+              end
       ) in
       (* Step 2: Write file — with path traversal guard *)
       let _s2 = run_step "file_write" (fun () ->
-        if !clone_dir = "" then Error "no clone path"
+        if !worktree_dir = "" then Error "no worktree path"
         else begin
-          let abs_path = Filename.concat !clone_dir file_path in
+          let abs_path = Filename.concat !worktree_dir file_path in
           let canonical =
             try Some (Unix.realpath abs_path)
             with Unix.Unix_error _ ->
@@ -209,8 +347,8 @@ let handle_keeper_pr_workflow
           match canonical with
           | None -> Error (Printf.sprintf "cannot resolve path: %s" file_path)
           | Some resolved ->
-            if not (String.starts_with ~prefix:(!clone_dir ^ "/") resolved) then
-              Error (Printf.sprintf "path escapes clone boundary: %s" file_path)
+            if not (String.starts_with ~prefix:(!worktree_dir ^ "/") resolved) then
+              Error (Printf.sprintf "path escapes worktree boundary: %s" file_path)
             else begin
               try
                 let dir = Filename.dirname resolved in
@@ -223,12 +361,10 @@ let handle_keeper_pr_workflow
       ) in
       (* Pre-commit: Version truth check guard *)
       let _s_ver = run_step "version_truth_check" (fun () ->
-        if !clone_dir = "" then Error "no clone path"
+        if !worktree_dir = "" then Error "no worktree path"
         else begin
-          let check_cmd = Printf.sprintf "cd %s && ./scripts/check-version-truth.sh 2>&1"
-            (Filename.quote !clone_dir) in
-          let st, out = Process_eio.run_argv_with_status ~timeout_sec:10.0
-            [ "/bin/zsh"; "-lc"; check_cmd ] in
+          let st, out = run_sh ~cwd:(!worktree_dir) ~timeout_sec:10.0
+            "./scripts/check-version-truth.sh" in
           if st <> Unix.WEXITED 0 then
             Error (Printf.sprintf "Version truth check failed: %s" out)
           else Ok "version truth OK"
@@ -236,9 +372,9 @@ let handle_keeper_pr_workflow
       ) in
       (* Step 3: Git add + commit + push *)
       let _s3 = run_step "git_commit_push" (fun () ->
-        if !clone_dir = "" then Error "no clone path"
+        if !worktree_dir = "" then Error "no worktree path"
         else begin
-          let run_git cmd = run_sh ~cwd:(!clone_dir) ~timeout_sec:30.0
+          let run_git cmd = run_sh ~cwd:(!worktree_dir) ~timeout_sec:30.0
             (Printf.sprintf "git %s" cmd) in
           let st_add, out_add = run_git
             (Printf.sprintf "add %s" (Filename.quote file_path)) in
@@ -263,16 +399,14 @@ let handle_keeper_pr_workflow
       (* Step 4: Create draft PR *)
       let pr_url = ref "" in
       let _s4 = run_step "gh_pr_create" (fun () ->
-        if !clone_dir = "" then Error "no clone path"
+        if !worktree_dir = "" then Error "no worktree path"
         else begin
           let body = if pr_body = "" then pr_title else pr_body in
           let gh_cmd = Printf.sprintf
-            "cd %s && gh pr create --draft --title %s --body %s --base %s 2>&1"
-            (Filename.quote !clone_dir) (Filename.quote pr_title) (Filename.quote body)
-            (Filename.quote base_branch) in
-          let st, out =
-            Process_eio.run_argv_with_status ~timeout_sec:30.0
-              [ "/bin/zsh"; "-lc"; gh_cmd ] in
+            "gh pr create --draft --title %s --body %s --base %s --head %s"
+            (Filename.quote pr_title) (Filename.quote body)
+            (Filename.quote !resolved_base_branch) (Filename.quote branch) in
+          let st, out = run_sh ~cwd:(!worktree_dir) ~timeout_sec:30.0 gh_cmd in
           if st <> Unix.WEXITED 0 then
             Error (Printf.sprintf "gh pr create: %s" out)
           else begin
@@ -281,13 +415,6 @@ let handle_keeper_pr_workflow
           end
         end
       ) in
-      (* Step 5: Clean up clone *)
-      (if !clone_dir <> "" && Sys.file_exists !clone_dir then begin
-        let st, _ = run_sh ~cwd:(Filename.dirname !clone_dir) ~timeout_sec:10.0
-          (Printf.sprintf "rm -rf %s" (Filename.quote (Filename.basename !clone_dir))) in
-        if st <> Unix.WEXITED 0 then
-          Log.Keeper.warn "pr_workflow: failed to clean clone at %s" !clone_dir
-      end);
       Yojson.Safe.to_string
         (`Assoc
           [ "ok", `Bool !step_ok
@@ -296,5 +423,5 @@ let handle_keeper_pr_workflow
           ; "error", `String !step_error
           ; "keeper", `String meta.name
           ])
+        )
 ;;
-

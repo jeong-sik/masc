@@ -1,9 +1,10 @@
 {
   "default_models": [
     "glm:auto",
+    "glm:glm-5-turbo",
     "ollama:auto"
   ],
-  "_comment": "glm:auto = ZAI GLM (primary), ollama:auto = local Ollama MLX (fallback). OAS discovery resolves ollama:auto via /api/tags.",
+  "_comment": "glm:auto = GLM-5.1 (primary), glm:glm-5-turbo = fast ZAI fallback when 5.1 is down, ollama:auto = local Ollama MLX (last resort). OAS discovery resolves ollama:auto via /api/tags.",
   "tool_rerank_temperature": 0.0,
   "tool_rerank_max_tokens": 200,
   "keeper_unified_temperature": 0.2,

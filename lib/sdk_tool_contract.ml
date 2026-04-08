@@ -78,7 +78,7 @@ let sdk_bindings : sdk_tool_binding list =
       sdk_name = "masc_repo_synthesis_swarm_start";
       canonical_operation = "masc_repo_synthesis_swarm_start";
       description =
-        "Start a repo-synthesis benchmark or case-study run through CPv2 operation, attached team session, and proof surfaces.";
+        "Start a repo-synthesis benchmark or case-study run through the managed-operation compatibility lane, attached team session, and proof surfaces.";
       input_schema =
         object_schema ~required:[ "goal"; "question"; "repo_root" ]
           [

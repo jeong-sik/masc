@@ -47,6 +47,89 @@ let test_stuck_agent () =
        true
      with Not_found -> false)
 
+let test_parse_iso_timestamp_matches_canonical_utc () =
+  let ts = "2026-04-08T12:38:15Z" in
+  match
+    Lib.Dashboard_labels.parse_iso_timestamp ts,
+    Types.parse_iso8601_opt ts
+  with
+  | Some actual, Some expected ->
+      Alcotest.(check bool) "dashboard parser matches canonical UTC parser" true
+        (abs_float (actual -. expected) < 0.001)
+  | _ -> Alcotest.fail "expected both parsers to accept UTC timestamp"
+
+let test_parse_iso_timestamp_fractional_utc_normalizes () =
+  let ts = "2026-04-08T12:38:15.123Z" in
+  match
+    Lib.Dashboard_labels.parse_iso_timestamp ts,
+    Types.parse_iso8601_opt "2026-04-08T12:38:15Z"
+  with
+  | Some actual, Some expected ->
+      Alcotest.(check bool) "fractional UTC keeps sub-second precision" true
+        (abs_float (actual -. (expected +. 0.123)) < 0.001)
+  | _ ->
+      Alcotest.fail
+        "expected dashboard parser to preserve fractional UTC timestamp"
+
+let test_parse_iso_timestamp_offset_matches_utc () =
+  let ts = "2026-04-08T21:38:15+09:00" in
+  match
+    Lib.Dashboard_labels.parse_iso_timestamp ts,
+    Types.parse_iso8601_opt "2026-04-08T12:38:15Z"
+  with
+  | Some actual, Some expected ->
+      Alcotest.(check bool) "numeric offset normalizes to UTC" true
+        (abs_float (actual -. expected) < 0.001)
+  | _ -> Alcotest.fail "expected dashboard parser to accept timezone offsets"
+
+let test_parse_iso_timestamp_fractional_offset_matches_utc () =
+  let ts = "2026-04-08T21:38:15.250+09:00" in
+  match
+    Lib.Dashboard_labels.parse_iso_timestamp ts,
+    Types.parse_iso8601_opt "2026-04-08T12:38:15Z"
+  with
+  | Some actual, Some expected ->
+      Alcotest.(check bool) "fractional offset keeps sub-second precision" true
+        (abs_float (actual -. (expected +. 0.250)) < 0.001)
+  | _ ->
+      Alcotest.fail
+        "expected dashboard parser to preserve fractional timezone offsets"
+
+let test_parse_iso_timestamp_local_without_timezone_is_supported () =
+  let ts = "2026-04-08T12:38:15.125" in
+  match Lib.Dashboard_labels.parse_iso_timestamp ts with
+  | Some actual ->
+      let tm =
+        {
+          Unix.tm_sec = 15;
+          tm_min = 38;
+          tm_hour = 12;
+          tm_mday = 8;
+          tm_mon = 3;
+          tm_year = 126;
+          tm_wday = 0;
+          tm_yday = 0;
+          tm_isdst = false;
+        }
+      in
+      let expected, _ = Unix.mktime tm in
+      Alcotest.(check bool) "bare local timestamps stay parseable" true
+        (abs_float (actual -. (expected +. 0.125)) < 0.001)
+  | None ->
+      Alcotest.fail "expected dashboard parser to accept bare local timestamps"
+
+let test_parse_iso_timestamp_empty_rejected () =
+  Alcotest.(check (option (float 0.001))) "empty timestamps are rejected" None
+    (Lib.Dashboard_labels.parse_iso_timestamp "")
+
+let test_parse_iso_timestamp_garbage_rejected () =
+  Alcotest.(check (option (float 0.001))) "garbage timestamps are rejected" None
+    (Lib.Dashboard_labels.parse_iso_timestamp "garbage")
+
+let test_parse_iso_timestamp_partial_rejected () =
+  Alcotest.(check (option (float 0.001))) "partial timestamps are rejected" None
+    (Lib.Dashboard_labels.parse_iso_timestamp "2026-04-08")
+
 let test_idle_agent () =
   let now = Unix.gettimeofday () in
   let result =
@@ -246,6 +329,19 @@ let () =
         [
           ("working agent", `Quick, test_working_agent);
           ("stuck agent", `Quick, test_stuck_agent);
+          ("utc parser matches canonical", `Quick, test_parse_iso_timestamp_matches_canonical_utc);
+          ("fractional utc normalizes", `Quick, test_parse_iso_timestamp_fractional_utc_normalizes);
+          ("numeric offset normalizes", `Quick, test_parse_iso_timestamp_offset_matches_utc);
+          ("fractional offset normalizes", `Quick,
+            test_parse_iso_timestamp_fractional_offset_matches_utc);
+          ("bare local timestamp", `Quick,
+            test_parse_iso_timestamp_local_without_timezone_is_supported);
+          ("empty timestamp rejected", `Quick,
+            test_parse_iso_timestamp_empty_rejected);
+          ("garbage timestamp rejected", `Quick,
+            test_parse_iso_timestamp_garbage_rejected);
+          ("partial timestamp rejected", `Quick,
+            test_parse_iso_timestamp_partial_rejected);
           ("idle agent", `Quick, test_idle_agent);
           ("offline agent", `Quick, test_offline_agent);
         ] );

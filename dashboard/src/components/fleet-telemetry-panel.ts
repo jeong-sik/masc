@@ -59,7 +59,7 @@ async function fetchFleetData() {
     for (let i = 0; i < keeperNames.length; i++) {
       const settled = configs[i]
       if (settled && settled.status === 'fulfilled') {
-        const cfg = settled.value as Record<string, unknown>
+        const cfg = settled.value as unknown as Record<string, unknown>
         const m = cfg.metrics as KeeperConfigMetrics | undefined
         if (m) {
           const cascadeName = (cfg.cascade_name as string) ?? ''

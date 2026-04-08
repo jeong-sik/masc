@@ -651,6 +651,65 @@ let with_personas_dir f =
       Masc_mcp.Config_dir_resolver.reset ();
       f personas_dir)
 
+let test_filter_by_providers_none () =
+  let models = [ "glm:auto"; "ollama:auto" ] in
+  let result = Masc_mcp.Oas_model_resolve.filter_by_providers None models in
+  check (list string) "None returns all" models result
+
+let test_filter_by_providers_empty () =
+  let models = [ "glm:auto"; "ollama:auto" ] in
+  let result = Masc_mcp.Oas_model_resolve.filter_by_providers (Some []) models in
+  check (list string) "empty list returns all" models result
+
+let test_filter_by_providers_single () =
+  let result =
+    Masc_mcp.Oas_model_resolve.filter_by_providers
+      (Some [ "ollama" ]) [ "glm:auto"; "ollama:auto" ]
+  in
+  check (list string) "single match" [ "ollama:auto" ] result
+
+let test_filter_by_providers_no_match () =
+  let models = [ "glm:auto"; "ollama:auto" ] in
+  let result =
+    Masc_mcp.Oas_model_resolve.filter_by_providers (Some [ "nonexistent" ]) models
+  in
+  check (list string) "no match falls back to all" models result
+
+let test_filter_by_providers_multi () =
+  let result =
+    Masc_mcp.Oas_model_resolve.filter_by_providers
+      (Some [ "glm"; "ollama" ]) [ "glm:auto"; "ollama:auto"; "claude:opus" ]
+  in
+  check (list string) "multi match" [ "glm:auto"; "ollama:auto" ] result
+
+let test_profile_allowed_providers () =
+  let input = {|
+[keeper]
+goal = "test"
+allowed_providers = ["Ollama", "GLM"]
+|} in
+  match TL.parse_toml input with
+  | Error e -> fail e
+  | Ok doc ->
+    (match KTP.profile_defaults_of_toml doc with
+     | Error e -> fail e
+     | Ok d ->
+       check (option (list string)) "lowercased"
+         (Some [ "ollama"; "glm" ]) d.allowed_providers)
+
+let test_profile_allowed_providers_absent () =
+  let input = {|
+[keeper]
+goal = "test"
+|} in
+  match TL.parse_toml input with
+  | Error e -> fail e
+  | Ok doc ->
+    (match KTP.profile_defaults_of_toml doc with
+     | Error e -> fail e
+     | Ok d ->
+       check (option (list string)) "absent" None d.allowed_providers)
+
 let test_persona_resolver_defaults_to_research_tool_preset () =
   with_personas_dir @@ fun personas_dir ->
   let persona_dir = Filename.concat personas_dir "probe" in
@@ -745,6 +804,18 @@ let () =
             test_profile_rejects_removed_model_keys;
           test_case "rejects removed initiative keys" `Quick
             test_profile_rejects_removed_initiative_keys;
+          test_case "allowed_providers parsed" `Quick
+            test_profile_allowed_providers;
+          test_case "allowed_providers absent" `Quick
+            test_profile_allowed_providers_absent;
+        ] );
+      ( "filter_by_providers",
+        [
+          test_case "None returns all" `Quick test_filter_by_providers_none;
+          test_case "empty returns all" `Quick test_filter_by_providers_empty;
+          test_case "single match" `Quick test_filter_by_providers_single;
+          test_case "no match falls back" `Quick test_filter_by_providers_no_match;
+          test_case "multi match" `Quick test_filter_by_providers_multi;
         ] );
       ( "file_loading",
         [

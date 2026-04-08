@@ -189,7 +189,10 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         ~fallback_message:env_message_gate
         ~fallback_token:env_token_gate
     in
-    let cascade_models = Oas_model_resolve.models_of_cascade_name Keeper_config.default_cascade_name in
+    let cascade_models =
+      Oas_model_resolve.models_of_cascade_name Keeper_config.default_cascade_name
+      |> Oas_model_resolve.filter_by_providers p.profile_defaults.allowed_providers
+    in
     ignore (Oas_model_resolve.refresh_local_discovery_if_possible cascade_models);
     let primary_max_context =
       match p.max_context_override_opt with
@@ -284,6 +287,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         work_discovery_guidance = p.profile_defaults.work_discovery_guidance;
         telemetry_feedback_enabled = p.profile_defaults.telemetry_feedback_enabled;
         telemetry_feedback_window_hours = p.profile_defaults.telemetry_feedback_window_hours;
+        allowed_providers = p.profile_defaults.allowed_providers;
         runtime = {
           usage = {
             total_turns = 0;

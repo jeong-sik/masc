@@ -69,16 +69,21 @@ let parse_decision_line (line : string) : parsed_decision option =
 (* Stats computation                                                   *)
 (* ------------------------------------------------------------------ *)
 
-(* Bound file parsing to last N lines. Decision logs are append-only
-   so the most recent entries are at the end. 2000 lines covers ~16h
-   at 2 turns/min, well within any configured window. *)
-let max_decision_lines = 2000
+(* Scale the tail-read limit to the configured window so we never drop
+   in-window entries due to truncation.  At up to 3 turns/min, one hour
+   produces at most 180 lines; multiply by window_hours and add a small
+   buffer.  Hard floor 500 (tiny or zero windows), hard ceiling 10_000
+   (memory safety).  window_hours <= 0 is treated as window_hours = 0 and
+   falls through to the 500-line floor. *)
+let tail_limit_for ~window_hours =
+  max 500 (min 10_000 (window_hours * 180 + 200))
 
 let compute_stats ~decision_log_path ~window_hours =
   let now_ts = Unix.gettimeofday () in
   let window_start = now_ts -. (float_of_int window_hours *. 3600.0) in
   let lines =
-    try Dated_jsonl.load_tail_lines decision_log_path ~max_lines:max_decision_lines
+    try Dated_jsonl.load_tail_lines decision_log_path
+          ~max_lines:(tail_limit_for ~window_hours)
     with Eio.Cancel.Cancelled _ as e -> raise e | _ -> []
   in
   let decisions =

@@ -28,7 +28,10 @@ val compute_stats :
   window_hours:int ->
   behavioral_stats
 (** Read decision log and compute stats for entries within the window.
-    Returns [empty_stats] on I/O errors or missing files. *)
+    Reads a tail of the file sized to [window_hours] (≈3 turns/min × 60 min/h
+    × window_hours + buffer, capped at 10 000 lines) to bound I/O, then
+    filters parsed entries by timestamp.  Entries older than the window are
+    excluded.  Returns [empty_stats] on I/O errors or missing files. *)
 
 val get_cached_stats : keeper_name:string -> behavioral_stats option
 (** Read cached stats for a keeper. O(1), no file I/O.

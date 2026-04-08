@@ -535,6 +535,11 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
            else if has_substantive_tools then
              Printf.sprintf "(tools: %s)" (String.concat ", " result.tools_used)
            else rt.proactive_rt.last_preview);
+        (* Work discovery timestamp only advances when the keeper
+           actually used tools in response to the nudge. This is
+           intentional: the "Work Discovery Due" prompt block keeps
+           being injected until the keeper takes visible action,
+           preventing silent cycles from consuming the scan interval. *)
         last_work_discovery_ts =
           (if observation.work_discovery_due && has_substantive_tools then
              now_ts

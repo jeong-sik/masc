@@ -14,7 +14,7 @@ type behavioral_stats = {
   tool_use_turns : int;
   text_response_turns : int;
   unique_tools_used : string list;
-  tool_success_rate : float;
+  tool_utilization_rate : float;
   last_visible_action_age_sec : int;
   pr_workflow_attempts : int;
   work_discovery_count : int;
@@ -28,52 +28,11 @@ let empty_stats ~window_hours =
     tool_use_turns = 0;
     text_response_turns = 0;
     unique_tools_used = [];
-    tool_success_rate = 0.0;
+    tool_utilization_rate = 0.0;
     last_visible_action_age_sec = 0;
     pr_workflow_attempts = 0;
     work_discovery_count = 0;
   }
-
-(* ------------------------------------------------------------------ *)
-(* JSON field extraction helpers                                       *)
-(* ------------------------------------------------------------------ *)
-
-let json_float_opt key (json : Yojson.Safe.t) : float option =
-  match json with
-  | `Assoc fields ->
-    (match List.assoc_opt key fields with
-     | Some (`Float f) -> Some f
-     | Some (`Int i) -> Some (float_of_int i)
-     | _ -> None)
-  | _ -> None
-
-let json_string_opt key (json : Yojson.Safe.t) : string option =
-  match json with
-  | `Assoc fields ->
-    (match List.assoc_opt key fields with
-     | Some (`String s) -> Some s
-     | _ -> None)
-  | _ -> None
-
-let json_int_opt key (json : Yojson.Safe.t) : int option =
-  match json with
-  | `Assoc fields ->
-    (match List.assoc_opt key fields with
-     | Some (`Int i) -> Some i
-     | Some (`Float f) -> Some (int_of_float f)
-     | _ -> None)
-  | _ -> None
-
-let json_string_list key (json : Yojson.Safe.t) : string list =
-  match json with
-  | `Assoc fields ->
-    (match List.assoc_opt key fields with
-     | Some (`List items) ->
-       List.filter_map (function
-         | `String s -> Some s
-         | _ -> None) items
-     | _ -> [])
-  | _ -> []
 
 (* ------------------------------------------------------------------ *)
 (* Decision log parsing                                                *)
@@ -90,24 +49,34 @@ let parse_decision_line (line : string) : parsed_decision option =
   match Yojson.Safe.from_string line with
   | json ->
     let timestamp_unix =
-      json_float_opt "timestamp_unix" json
+      Safe_ops.json_float_opt "timestamp_unix" json
       |> Option.value ~default:0.0
     in
     let outcome =
-      json_string_opt "outcome" json
+      Safe_ops.json_string_opt "outcome" json
       |> Option.value ~default:"unknown"
     in
     let tool_call_count =
-      json_int_opt "tool_call_count" json
+      Safe_ops.json_int_opt "tool_call_count" json
       |> Option.value ~default:0
     in
-    let tools_used = json_string_list "tools_used" json in
+    let tools_used = Safe_ops.json_string_list "tools_used" json in
     Some { timestamp_unix; outcome; tool_call_count; tools_used }
   | exception _ -> None
 
 (* ------------------------------------------------------------------ *)
 (* Stats computation                                                   *)
 (* ------------------------------------------------------------------ *)
+
+(* Bound file parsing to last N lines. Decision logs are append-only
+   so the most recent entries are at the end. 2000 lines covers ~16h
+   at 2 turns/min, well within any configured window. *)
+let max_decision_lines = 2000
+
+let take_last n lst =
+  let len = List.length lst in
+  if len <= n then lst
+  else List.filteri (fun i _ -> i >= len - n) lst
 
 let compute_stats ~decision_log_path ~window_hours =
   let now_ts = Unix.gettimeofday () in
@@ -117,6 +86,7 @@ let compute_stats ~decision_log_path ~window_hours =
       let content = Fs_compat.load_file decision_log_path in
       String.split_on_char '\n' content
       |> List.filter (fun s -> String.trim s <> "")
+      |> take_last max_decision_lines
     with _ -> []
   in
   let decisions =
@@ -173,7 +143,7 @@ let compute_stats ~decision_log_path ~window_hours =
     let silent_ratio =
       float_of_int silent_turns /. float_of_int total_turns
     in
-    let tool_success_rate =
+    let tool_utilization_rate =
       if total_tool_calls > 0 then
         float_of_int tool_use_turns /. float_of_int total_turns
       else 0.0
@@ -185,7 +155,7 @@ let compute_stats ~decision_log_path ~window_hours =
       tool_use_turns;
       text_response_turns;
       unique_tools_used = unique_tools;
-      tool_success_rate;
+      tool_utilization_rate;
       last_visible_action_age_sec;
       pr_workflow_attempts;
       work_discovery_count = 0;
@@ -219,7 +189,7 @@ let render_feedback_block ~(stats : behavioral_stats) =
       "### Behavioral Self-Assessment (last %dh)\n\
        - Turns: %d total (%d silent, %d active)\n\
        - Silent ratio: %.1f%%\n\
-       - Tool use turns: %d (success rate: %.1f%%)\n\
+       - Tool use turns: %d (utilization: %.1f%%)\n\
        - Text-only response turns: %d\n\
        - Last visible action: %s ago\n\
        - PR workflow attempts: %d\n\
@@ -228,7 +198,7 @@ let render_feedback_block ~(stats : behavioral_stats) =
       stats.total_turns stats.silent_turns
       (stats.total_turns - stats.silent_turns)
       (stats.silent_ratio *. 100.0)
-      stats.tool_use_turns (stats.tool_success_rate *. 100.0)
+      stats.tool_use_turns (stats.tool_utilization_rate *. 100.0)
       stats.text_response_turns
       (format_age_sec stats.last_visible_action_age_sec)
       stats.pr_workflow_attempts

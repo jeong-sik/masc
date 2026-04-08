@@ -14,7 +14,7 @@ type behavioral_stats = {
   tool_use_turns : int;
   text_response_turns : int;
   unique_tools_used : string list;
-  tool_success_rate : float;
+  tool_utilization_rate : float;
   last_visible_action_age_sec : int;
   pr_workflow_attempts : int;
   work_discovery_count : int;

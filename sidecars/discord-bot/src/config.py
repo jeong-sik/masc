@@ -39,21 +39,11 @@ class BotConfig(BaseSettings):
     )
     gate_base_url: str = Field(
         default="http://localhost:8935",
-        validation_alias=AliasChoices(
-            "GATE_BASE_URL",
-            "gate_base_url",
-            "MASC_MCP_URL",  # legacy env compat
-            "masc_mcp_url",  # legacy env compat
-        ),
+        validation_alias=AliasChoices("GATE_BASE_URL", "gate_base_url"),
     )
     gate_api_token: str = Field(
         default="",
-        validation_alias=AliasChoices(
-            "GATE_API_TOKEN",
-            "gate_api_token",
-            "MASC_API_TOKEN",  # legacy env compat
-            "masc_api_token",  # legacy env compat
-        ),
+        validation_alias=AliasChoices("GATE_API_TOKEN", "gate_api_token"),
     )
 
     # Channel-to-keeper mapping: {"channel_id": "keeper_name"}
@@ -62,14 +52,14 @@ class BotConfig(BaseSettings):
         validation_alias=AliasChoices("DISCORD_KEEPER_MAP", "discord_keeper_map"),
     )
     discord_binding_store_path: str = Field(
-        default=".masc/discord_keeper_bindings.json",
+        default=".gate/discord_bindings.json",
         validation_alias=AliasChoices(
             "DISCORD_BINDING_STORE_PATH",
             "discord_binding_store_path",
         ),
     )
     discord_binding_audit_path: str = Field(
-        default=".masc/discord_keeper_binding_audit.jsonl",
+        default=".gate/discord_binding_audit.jsonl",
         validation_alias=AliasChoices(
             "DISCORD_BINDING_AUDIT_PATH",
             "discord_binding_audit_path",
@@ -132,7 +122,7 @@ class BotConfig(BaseSettings):
         if self.gate_api_token or self.gate_base_url_is_loopback():
             return self
         raise ValueError(
-            "GATE_API_TOKEN (or MASC_API_TOKEN) is required unless gate URL points at a loopback host"
+            "GATE_API_TOKEN is required unless gate URL points at a loopback host"
         )
 
     @field_validator("discord_keeper_map")
@@ -177,20 +167,6 @@ class BotConfig(BaseSettings):
         if v < 0:
             raise ValueError("connector timing values must be non-negative")
         return v
-
-    # --- Legacy compat properties ---
-    # Python kwargs use the field name (gate_base_url, gate_api_token).
-    # These properties allow code that reads self.masc_mcp_url to keep working.
-
-    @property
-    def masc_mcp_url(self) -> str:
-        """Legacy alias for gate_base_url."""
-        return self.gate_base_url
-
-    @property
-    def masc_api_token(self) -> str:
-        """Legacy alias for gate_api_token."""
-        return self.gate_api_token
 
     def keeper_map(self) -> dict[str, str]:
         """Parse DISCORD_KEEPER_MAP JSON into dict.

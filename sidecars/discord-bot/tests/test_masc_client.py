@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import warnings
 from collections.abc import Iterator
 
 import httpx
@@ -11,7 +10,7 @@ import pytest
 
 from src import config as config_module
 from src.config import BotConfig
-from src.gate_client import GateClient, GateResponse
+from src.gate_client import GateClient
 
 
 @pytest.fixture(autouse=True)
@@ -229,56 +228,6 @@ def test_config_rejects_blank_token_for_non_loopback_url() -> None:
             gate_api_token="",
             gate_base_url="https://gate.example.com",
         )
-
-
-def test_legacy_env_aliases_still_work(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Legacy env vars MASC_API_TOKEN and MASC_MCP_URL are still accepted."""
-    monkeypatch.delenv("GATE_API_TOKEN", raising=False)
-    monkeypatch.delenv("GATE_BASE_URL", raising=False)
-    monkeypatch.setenv("DISCORD_BOT_TOKEN", "test-token")
-    monkeypatch.setenv("MASC_API_TOKEN", "legacy-api-token")
-    monkeypatch.setenv("MASC_MCP_URL", "http://legacy.example")
-    config_module.reset_config_cache()
-
-    cfg = BotConfig()  # type: ignore[call-arg]
-
-    assert cfg.gate_api_token == "legacy-api-token"
-    assert cfg.gate_base_url == "http://legacy.example"
-    # Legacy properties still readable
-    assert cfg.masc_api_token == "legacy-api-token"
-    assert cfg.masc_mcp_url == "http://legacy.example"
-
-
-def test_legacy_compat_properties_mirror_gate_fields() -> None:
-    """Legacy properties masc_mcp_url and masc_api_token mirror the gate fields."""
-    cfg = BotConfig(
-        discord_bot_token="test-token",
-        gate_api_token="new-token",
-        gate_base_url="http://new.example",
-    )
-
-    assert cfg.masc_api_token == "new-token"
-    assert cfg.masc_mcp_url == "http://new.example"
-
-
-def test_legacy_import_shim_emits_deprecation_warning() -> None:
-    import sys
-
-    # Evict cached module so the top-level warnings.warn fires again.
-    sys.modules.pop("src.masc_client", None)
-
-    with warnings.catch_warnings(record=True) as w:
-        warnings.simplefilter("always")
-        import importlib
-        import src.masc_client as _mc  # noqa: F811
-        importlib.reload(_mc)  # force re-execution if still cached
-        dep_warnings = [x for x in w if issubclass(x.category, DeprecationWarning)]
-        assert len(dep_warnings) >= 1
-        assert "deprecated" in str(dep_warnings[0].message).lower()
-    assert _mc.MascGateClient is GateClient
-    response = _mc.GateResponse.from_error("timeout")
-    assert response.ok is False
-    assert response.error == "timeout"
 
 
 def test_transport_failure_log_mentions_disabled_breaker(

@@ -35,9 +35,6 @@ cp .env.example .env
 can omit it when the server keeps `require_token=false`; in that mode the
 connector falls back to same-origin auth headers against `127.0.0.1`/`localhost`.
 
-Legacy env vars `MASC_MCP_URL` and `MASC_API_TOKEN` are accepted as aliases
-for `GATE_BASE_URL` and `GATE_API_TOKEN` respectively.
-
 ### 3. Run
 
 ```bash
@@ -72,7 +69,7 @@ Use the `/keeper-ask` slash command to talk to any keeper from any channel.
 ## Durable Runtime Bindings
 
 `/keeper-bind` and `/keeper-unbind` now persist the effective channel map to
-`DISCORD_BINDING_STORE_PATH` (default: `.masc/discord_keeper_bindings.json`).
+`DISCORD_BINDING_STORE_PATH` (default: `.gate/discord_bindings.json`).
 
 - If the store file does not exist, the bot starts from `DISCORD_KEEPER_MAP`
 - Once an operator persists a runtime bind/unbind, the store file becomes the
@@ -80,7 +77,7 @@ Use the `/keeper-ask` slash command to talk to any keeper from any channel.
 - `/keeper-map` shows the active binding source and store path for operators
 - successful bind/unbind operations also append an audit record to
   `DISCORD_BINDING_AUDIT_PATH` (default:
-  `.masc/discord_keeper_binding_audit.jsonl`)
+  `.gate/discord_binding_audit.jsonl`)
 
 ## Operations Upgrades
 

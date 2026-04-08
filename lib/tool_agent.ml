@@ -47,13 +47,15 @@ let handle_find_by_capability ctx args =
 
 (** Handle masc_get_metrics *)
 let handle_get_metrics ctx args =
-  let target = get_string args "agent_name" "" in
+  let ( let*! ) = Tool_args.( let*! ) in
+  let*! target = get_string_required args "agent_name" in
   let days = get_int args "days" 7 in
   match Metrics_store_eio.calculate_agent_metrics ctx.config ~agent_id:target ~days with
   | Some metrics ->
       (true, Yojson.Safe.pretty_to_string (Metrics_store_eio.agent_metrics_to_yojson metrics))
   | None ->
-      (false, Printf.sprintf "❌ No metrics found for agent: %s" target)
+      error_result_typed ~code:Not_found
+        (Printf.sprintf "no metrics found for agent: %s" target)
 
 (** Create default metrics for agent *)
 let create_default_metrics ~agent_id ~days =
@@ -219,14 +221,23 @@ let pick_random = function
 
 (** Handle masc_select_agent *)
 let handle_select_agent ctx args =
-  let available = match Yojson.Safe.Util.member "available_agents" args with
-    | `List items -> List.filter_map (function `String s -> Some s | _ -> None) items
+  let available =
+    match Yojson.Safe.Util.member "available_agents" args with
+    | `List items ->
+        List.filter_map
+          (function
+            | `String s ->
+                let trimmed = String.trim s in
+                if trimmed = "" then None else Some trimmed
+            | _ -> None)
+          items
     | _ -> []
   in
   let strategy = get_string args "strategy" "capability_first" in
   let days = get_int args "days" 7 in
   if available = [] then
-    (false, "❌ available_agents required")
+    error_result_typed ~code:Validation_error
+      "available_agents must contain at least one non-empty agent name"
   else
     let metrics_list = List.map (fun a -> (a, metrics_for ctx ~days a)) available in
     let min_avg = min_avg_time metrics_list in

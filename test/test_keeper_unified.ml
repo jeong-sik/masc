@@ -4,6 +4,7 @@ module WO = Masc_mcp.Keeper_world_observation
 module UP = Masc_mcp.Keeper_unified_prompt
 module UT = Masc_mcp.Keeper_unified_turn
 module KAR = Masc_mcp.Keeper_agent_run
+module KTD = Masc_mcp.Keeper_tool_disclosure
 module KEC = Masc_mcp.Keeper_exec_context
 module KSM = Masc_mcp.Keeper_social_model
 module KD = Masc_mcp.Keeper_deliberation
@@ -1459,12 +1460,12 @@ let test_metrics_mixed_response () =
      in found)
 
 let test_normalize_response_text_passthrough () =
-  match KAR.normalize_response_text ~text:"All good." ~tool_names:[] () with
+  match KTD.normalize_response_text ~text:"All good." ~tool_names:[] () with
   | Ok text -> check string "keeps text" "All good." text
   | Error e -> fail ("unexpected error: " ^ e)
 
 let test_normalize_response_text_tool_only_synthesizes () =
-  match KAR.normalize_response_text
+  match KTD.normalize_response_text
           ~text:""
           ~tool_names:["keeper_board_post"; "keeper_board_comment"]
           ()
@@ -1487,7 +1488,7 @@ let test_normalize_response_text_tool_only_synthesizes () =
   | Error e -> fail ("unexpected error: " ^ e)
 
 let test_normalize_response_text_empty_without_tools_errors () =
-  match KAR.normalize_response_text ~text:"" ~tool_names:[] () with
+  match KTD.normalize_response_text ~text:"" ~tool_names:[] () with
   | Ok text -> fail ("expected error, got: " ^ text)
   | Error e ->
       check bool "error mentions textual reply" true
@@ -1519,7 +1520,7 @@ let test_tool_usage_delta_uses_registry_counts () =
   in
   check (list string) "delta tracks repeated calls"
     [ "keeper_fs_read"; "keeper_voice_agent"; "keeper_voice_agent" ]
-    (KAR.tool_usage_delta ~before ~after)
+    (KTD.tool_usage_delta ~before ~after)
 
 let test_tool_usage_delta_ignores_removed_tools () =
   let before =
@@ -1535,11 +1536,11 @@ let test_tool_usage_delta_ignores_removed_tools () =
   in
   check (list string) "no phantom tools when counts drop"
     []
-    (KAR.tool_usage_delta ~before ~after)
+    (KTD.tool_usage_delta ~before ~after)
 
 let test_merge_reported_and_observed_tool_names_preserves_synthetic_tools () =
   let merged =
-    KAR.merge_reported_and_observed_tool_names
+    KTD.merge_reported_and_observed_tool_names
       ~reported_tool_names:[ "keeper_board_post" ]
       ~observed_tool_names:[ "keeper_voice_agent"; "keeper_voice_agent" ]
   in
@@ -1554,7 +1555,7 @@ let test_tool_query_text_of_user_message_strips_continuity_noise () =
   let user_message =
     "## Current World State\n\n### Namespace State\n- Failed tasks: 5\n\n### Actionable Routes\n- Failed tasks: audit them with keeper_tasks_audit before deciding there is nothing meaningful to do.\n\n### Autonomous Trigger\n- Scheduler: scheduled autonomous keepalive turn.\n\n### Continuity\nDONE: 하트비트 갱신\nNEXT: 대기 유지\n\n### Live Worktree Delta\n<git_status_change>\n?? lib/example.ml\n</git_status_change>\n"
   in
-  let query = KAR.tool_query_text_of_user_message user_message in
+  let query = KTD.tool_query_text_of_user_message user_message in
   check bool "continuity heading stripped" false
     (contains_substring query "### Continuity");
   check bool "heartbeat residue stripped" false
@@ -1578,7 +1579,7 @@ let test_tool_query_text_of_user_message_keeps_counted_headers () =
     }
   in
   let _sys, user = UP.build_prompt ~base_path:"/test" ~meta:minimal_meta ~observation:obs () in
-  let query = KAR.tool_query_text_of_user_message user in
+  let query = KTD.tool_query_text_of_user_message user in
   check bool "keeps counted pending mentions header" true
     (contains_substring query "### Pending Mentions (1)");
   check bool "keeps mention content" true
@@ -1775,7 +1776,7 @@ let test_normalize_override_passthrough () =
     "[tool_skipped] tool=keeper_bash source=keeper_hook code=keeper_deny \
      reason=tool%20is%20on%20the%20keeper%20deny%20list"
   in
-  match KAR.normalize_response_text
+  match KTD.normalize_response_text
           ~text:override_text
           ~tool_names:["keeper_bash"]
           ()

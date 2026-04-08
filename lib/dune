@@ -483,6 +483,8 @@
    keeper_hooks_oas
    keeper_extend_turns
    keeper_llm_bridge
+   keeper_tool_disclosure
+   keeper_turn_telemetry
    keeper_agent_run
    keeper_world_observation
    keeper_unified_prompt
@@ -650,6 +652,8 @@
   keeper_compact_policy
   keeper_rollover
   keeper_post_turn
+  keeper_tool_disclosure
+  keeper_turn_telemetry
   keeper_exec_context
   keeper_turn_session
   keeper_turn_setup

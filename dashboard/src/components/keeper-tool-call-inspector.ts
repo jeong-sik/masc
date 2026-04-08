@@ -31,7 +31,7 @@ function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
 
   return html`
     <div
-      class="border-b border-[var(--border)] hover:bg-[var(--bg-hover)] transition-colors"
+      class="border-b border-[var(--card-border)] hover:bg-[var(--bg-panel-hover)] transition-colors"
     >
       <div
         class="flex items-center gap-2 px-3 py-2 text-xs cursor-pointer"
@@ -47,15 +47,15 @@ function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
         }}
       >
         <span class="font-mono ${cat.color} w-4 text-center flex-shrink-0">${cat.icon}</span>
-        <span class="font-mono text-[var(--fg)] flex-shrink-0 w-16">${formatTimestamp(entry.ts)}</span>
-        <span class="font-mono font-medium text-[var(--fg)] truncate flex-1" title=${entry.tool}>${entry.tool}</span>
+        <span class="font-mono text-[var(--text-strong)] flex-shrink-0 w-16">${formatTimestamp(entry.ts)}</span>
+        <span class="font-mono font-medium text-[var(--text-strong)] truncate flex-1" title=${entry.tool}>${entry.tool}</span>
         <span class=${`font-mono flex-shrink-0 w-16 text-right ${durationColor(entry.duration_ms)}`}>
           ${formatDuration(entry.duration_ms)}
         </span>
         <span class=${`flex-shrink-0 w-5 text-center ${entry.success ? 'text-[var(--ok)]' : 'text-[var(--bad)]'}`}>
           ${entry.success ? 'O' : 'X'}
         </span>
-        <span class="flex-shrink-0 w-4 text-[var(--fg-dim)] text-center">
+        <span class="flex-shrink-0 w-4 text-[var(--text-muted)] text-center">
           ${expanded.value ? '-' : '+'}
         </span>
       </div>
@@ -63,15 +63,15 @@ function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
       ${expanded.value ? html`
         <div class="px-3 pb-3 space-y-2">
           ${entry.model ? html`
-            <div class="text-[10px] text-[var(--fg-dim)]">model: <span class="text-[var(--fg)] font-mono">${entry.model}</span></div>
+            <div class="text-[10px] text-[var(--text-muted)]">model: <span class="text-[var(--text-strong)] font-mono">${entry.model}</span></div>
           ` : null}
           <div>
-            <div class="text-[10px] text-[var(--fg-dim)] uppercase tracking-wider mb-1">Input</div>
-            <pre class="text-xs font-mono bg-[var(--bg-deep)] rounded p-2 overflow-x-auto max-h-48 whitespace-pre-wrap text-[var(--fg)]">${formatInput(entry.input)}</pre>
+            <div class="text-[10px] text-[var(--text-muted)] uppercase tracking-wider mb-1">Input</div>
+            <pre class="text-xs font-mono bg-[var(--bg-deep)] rounded p-2 overflow-x-auto max-h-48 whitespace-pre-wrap text-[var(--text-strong)]">${formatInput(entry.input)}</pre>
           </div>
           <div>
-            <div class="text-[10px] text-[var(--fg-dim)] uppercase tracking-wider mb-1">Output</div>
-            <pre class="text-xs font-mono bg-[var(--bg-deep)] rounded p-2 overflow-x-auto max-h-64 whitespace-pre-wrap text-[var(--fg)]">${entry.output || '(empty)'}</pre>
+            <div class="text-[10px] text-[var(--text-muted)] uppercase tracking-wider mb-1">Output</div>
+            <pre class="text-xs font-mono bg-[var(--bg-deep)] rounded p-2 overflow-x-auto max-h-64 whitespace-pre-wrap text-[var(--text-strong)]">${entry.output || '(empty)'}</pre>
           </div>
         </div>
       ` : null}
@@ -111,7 +111,7 @@ export function KeeperToolCallInspector({ keeperName }: { keeperName: string }) 
   const sorted = useMemo(() => [...filtered].reverse(), [filtered])
 
   if (loading.value) {
-    return html`<div class="text-xs text-[var(--fg-dim)] p-4">Loading tool calls...</div>`
+    return html`<div class="text-xs text-[var(--text-muted)] p-4">Loading tool calls...</div>`
   }
 
   if (error.value) {
@@ -119,7 +119,7 @@ export function KeeperToolCallInspector({ keeperName }: { keeperName: string }) 
   }
 
   if (entries.value.length === 0) {
-    return html`<div class="text-xs text-[var(--fg-dim)] p-4">No tool call data yet. Data is recorded after server restart with this update.</div>`
+    return html`<div class="text-xs text-[var(--text-muted)] p-4">No tool call data yet. Data is recorded after server restart with this update.</div>`
   }
 
   // Summary stats
@@ -132,7 +132,7 @@ export function KeeperToolCallInspector({ keeperName }: { keeperName: string }) 
   return html`
     <div class="space-y-3">
       <div class="flex items-center justify-between gap-3">
-        <div class="flex gap-4 text-xs text-[var(--fg-dim)]">
+        <div class="flex gap-4 text-xs text-[var(--text-muted)]">
           <span>${totalCalls} calls</span>
           <span>${uniqueTools} tools</span>
           <span class=${successRate < 80 ? 'text-[var(--warn)]' : ''}>${successRate}% ok</span>
@@ -140,14 +140,14 @@ export function KeeperToolCallInspector({ keeperName }: { keeperName: string }) 
         <input
           type="text"
           placeholder="Filter tool..."
-          class="text-xs font-mono bg-[var(--bg-deep)] border border-[var(--border)] rounded px-2 py-1 w-40 text-[var(--fg)]"
+          class="text-xs font-mono bg-[var(--bg-deep)] border border-[var(--card-border)] rounded px-2 py-1 w-40 text-[var(--text-strong)]"
           value=${filterTool.value}
           onInput=${(e: Event) => { filterTool.value = (e.target as HTMLInputElement).value }}
         />
       </div>
 
-      <div class="border border-[var(--border)] rounded overflow-hidden max-h-[500px] overflow-y-auto">
-        <div class="flex items-center gap-2 px-3 py-1.5 bg-[var(--bg-deep)] text-[10px] uppercase tracking-wider text-[var(--fg-dim)] border-b border-[var(--border)]">
+      <div class="border border-[var(--card-border)] rounded overflow-hidden max-h-[500px] overflow-y-auto">
+        <div class="flex items-center gap-2 px-3 py-1.5 bg-[var(--bg-deep)] text-[10px] uppercase tracking-wider text-[var(--text-muted)] border-b border-[var(--card-border)]">
           <span class="w-4"></span>
           <span class="w-16">Time</span>
           <span class="flex-1">Tool</span>

@@ -56,19 +56,19 @@ function SummaryCard({ src }: { src: TelemetrySourceSummary }) {
   const hasData = src.entry_count > 0
 
   return html`
-    <div class="rounded-lg border border-[var(--border)] bg-[rgba(255,255,255,0.02)] p-3 min-w-[140px]">
+    <div class="rounded-lg border border-[var(--card-border)] bg-[rgba(255,255,255,0.02)] p-3 min-w-[140px]">
       <div class="flex items-center gap-2 mb-1">
         <span class="font-mono font-bold ${meta.color}">${meta.icon}</span>
-        <span class="text-xs font-medium text-[var(--fg)]">${meta.label}</span>
+        <span class="text-xs font-medium text-[var(--text-strong)]">${meta.label}</span>
       </div>
-      <div class="text-2xl font-bold ${hasData ? 'text-[var(--fg)]' : 'text-[var(--fg-dim)]'}">
+      <div class="text-2xl font-bold ${hasData ? 'text-[var(--text-strong)]' : 'text-[var(--text-muted)]'}">
         ${src.entry_count.toLocaleString()}
       </div>
       ${src.keeper_count != null ? html`
-        <div class="text-xs text-[var(--fg-dim)]">${src.keeper_count} keepers</div>
+        <div class="text-xs text-[var(--text-muted)]">${src.keeper_count} keepers</div>
       ` : null}
       ${src.exists === false ? html`
-        <div class="text-xs text-[var(--fg-dim)] italic">store not found</div>
+        <div class="text-xs text-[var(--text-muted)] italic">store not found</div>
       ` : null}
     </div>
   `
@@ -119,7 +119,7 @@ function EntryRow({ entry }: { entry: TelemetryEntry }) {
   const success = entry.success as boolean | undefined
 
   return html`
-    <div class="border-b border-[var(--border)] hover:bg-[var(--bg-hover)] transition-colors">
+    <div class="border-b border-[var(--card-border)] hover:bg-[var(--bg-panel-hover)] transition-colors">
       <div
         class="flex items-center gap-2 px-3 py-1.5 text-xs cursor-pointer select-none"
         role="button"
@@ -133,7 +133,7 @@ function EntryRow({ entry }: { entry: TelemetryEntry }) {
         }}
       >
         <span class="font-mono font-bold ${meta.color} w-4 text-center flex-shrink-0">${meta.icon}</span>
-        <span class="font-mono text-[var(--fg-dim)] w-28 flex-shrink-0" title=${formatTs(ts)}>
+        <span class="font-mono text-[var(--text-muted)] w-28 flex-shrink-0" title=${formatTs(ts)}>
           ${timeAgo(ts)}
         </span>
         ${success != null ? html`
@@ -141,14 +141,14 @@ function EntryRow({ entry }: { entry: TelemetryEntry }) {
             ${success ? 'O' : 'X'}
           </span>
         ` : html`<span class="w-4"></span>`}
-        <span class="font-mono text-[var(--fg)] truncate flex-1" title=${entryPreview(entry)}>
+        <span class="font-mono text-[var(--text-strong)] truncate flex-1" title=${entryPreview(entry)}>
           ${entryPreview(entry)}
         </span>
-        <span class="flex-shrink-0 w-4 text-[var(--fg-dim)]">${expanded.value ? '-' : '+'}</span>
+        <span class="flex-shrink-0 w-4 text-[var(--text-muted)]">${expanded.value ? '-' : '+'}</span>
       </div>
       ${expanded.value ? html`
         <div class="px-3 pb-2">
-          <pre class="text-[10px] font-mono text-[var(--fg-dim)] bg-[rgba(0,0,0,0.3)] rounded p-2 overflow-x-auto max-h-[300px] overflow-y-auto whitespace-pre-wrap break-all">
+          <pre class="text-[10px] font-mono text-[var(--text-muted)] bg-[rgba(0,0,0,0.3)] rounded p-2 overflow-x-auto max-h-[300px] overflow-y-auto whitespace-pre-wrap break-all">
 ${JSON.stringify(entry, null, 2)}</pre>
         </div>
       ` : null}
@@ -214,16 +214,16 @@ export function TelemetryUnified() {
       <!-- Summary cards -->
       <div class="flex flex-wrap gap-3">
         ${summary.map(src => html`<${SummaryCard} src=${src} />`)}
-        <div class="rounded-lg border border-[var(--border)] bg-[rgba(255,255,255,0.02)] p-3 min-w-[140px]">
-          <div class="text-xs font-medium text-[var(--fg-dim)] mb-1">Total</div>
-          <div class="text-2xl font-bold text-[var(--fg)]">${totalEntries.toLocaleString()}</div>
+        <div class="rounded-lg border border-[var(--card-border)] bg-[rgba(255,255,255,0.02)] p-3 min-w-[140px]">
+          <div class="text-xs font-medium text-[var(--text-muted)] mb-1">Total</div>
+          <div class="text-2xl font-bold text-[var(--text-strong)]">${totalEntries.toLocaleString()}</div>
         </div>
       </div>
 
       <!-- Filters -->
       <div class="flex items-center gap-3 flex-wrap">
         <select
-          class="rounded border border-[var(--border)] bg-[var(--bg-0)] px-2 py-1 text-xs text-[var(--fg)]"
+          class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-2 py-1 text-xs text-[var(--text-strong)]"
           value=${sourceFilter.value}
           onChange=${(e: Event) => { sourceFilter.value = (e.target as HTMLSelectElement).value as TelemetrySource | '' }}
         >
@@ -235,12 +235,12 @@ export function TelemetryUnified() {
         <input
           type="text"
           placeholder="Keeper name..."
-          class="rounded border border-[var(--border)] bg-[var(--bg-0)] px-2 py-1 text-xs text-[var(--fg)] w-32"
+          class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-2 py-1 text-xs text-[var(--text-strong)] w-32"
           value=${keeperFilter.value}
           onInput=${(e: Event) => { keeperFilter.value = (e.target as HTMLInputElement).value }}
         />
         <select
-          class="rounded border border-[var(--border)] bg-[var(--bg-0)] px-2 py-1 text-xs text-[var(--fg)]"
+          class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-2 py-1 text-xs text-[var(--text-strong)]"
           value=${String(limit.value)}
           onChange=${(e: Event) => { limit.value = Number((e.target as HTMLSelectElement).value) }}
         >
@@ -250,12 +250,12 @@ export function TelemetryUnified() {
           <option value="500">500</option>
         </select>
         <button
-          class="rounded border border-[var(--border)] bg-[var(--bg-0)] px-3 py-1 text-xs text-[var(--fg)] hover:bg-[var(--bg-hover)]"
+          class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-3 py-1 text-xs text-[var(--text-strong)] hover:bg-[var(--bg-panel-hover)]"
           onClick=${() => void load()}
         >
           Refresh
         </button>
-        ${loading ? html`<span class="text-xs text-[var(--fg-dim)]">loading...</span>` : null}
+        ${loading ? html`<span class="text-xs text-[var(--text-muted)]">loading...</span>` : null}
       </div>
 
       <!-- Error -->
@@ -266,15 +266,15 @@ export function TelemetryUnified() {
       ` : null}
 
       <!-- Entry list -->
-      <div class="rounded-lg border border-[var(--border)] bg-[rgba(255,255,255,0.02)] overflow-hidden">
-        <div class="flex items-center gap-2 px-3 py-2 text-[10px] uppercase tracking-wider text-[var(--fg-dim)] border-b border-[var(--border)] bg-[rgba(0,0,0,0.2)]">
+      <div class="rounded-lg border border-[var(--card-border)] bg-[rgba(255,255,255,0.02)] overflow-hidden">
+        <div class="flex items-center gap-2 px-3 py-2 text-[10px] uppercase tracking-wider text-[var(--text-muted)] border-b border-[var(--card-border)] bg-[rgba(0,0,0,0.2)]">
           <span class="w-4">Src</span>
           <span class="w-28">Time</span>
           <span class="w-4">Ok</span>
           <span class="flex-1">Detail</span>
         </div>
         ${entries.length === 0 && !loading ? html`
-          <div class="px-3 py-8 text-center text-xs text-[var(--fg-dim)]">
+          <div class="px-3 py-8 text-center text-xs text-[var(--text-muted)]">
             No telemetry entries found
           </div>
         ` : null}

@@ -131,15 +131,16 @@ let test_ssh_allowed () =
     (Tool_code_write.validate_clone_url ~base_path:bp
        "git@github.com:jeong-sik/oas.git")
 
-(* test_empty_allowlist: uses a non-existent base_path so config load fails
-   and falls back to empty orgs list. *)
-let test_empty_allowlist () =
-  match Tool_code_write.validate_clone_url ~base_path:"/nonexistent"
-    "https://github.com/jeong-sik/repo.git" with
-  | Error msg ->
-    (check bool) "mentions 'No allowed orgs'" true
-      (String.starts_with ~prefix:"No allowed orgs" msg)
-  | Ok () -> fail "expected error for empty allowlist"
+(* test_fallback_config_still_validates: even with a non-existent base_path,
+   CWD fallback finds config/tool_policy.toml — so validation still applies.
+   A disallowed org should be rejected. *)
+let test_fallback_config_still_validates () =
+  Tool_code_write.reset_policy_config_cache ();
+  Fun.protect ~finally:Tool_code_write.reset_policy_config_cache (fun () ->
+    match Tool_code_write.validate_clone_url ~base_path:"/nonexistent"
+      "https://github.com/evil-corp/repo.git" with
+    | Error _msg -> ()
+    | Ok () -> fail "disallowed org should be rejected even with fallback config")
 
 let test_mixed_case_org () =
   let bp = project_base_path () in
@@ -175,7 +176,7 @@ let () =
       test_case "disallowed org" `Quick test_disallowed_org;
       test_case "non-github rejected" `Quick test_non_github_rejected;
       test_case "ssh allowed" `Quick test_ssh_allowed;
-      test_case "empty allowlist" `Quick test_empty_allowlist;
+      test_case "fallback config rejects disallowed" `Quick test_fallback_config_still_validates;
       test_case "mixed-case org" `Quick test_mixed_case_org;
     ]);
   ]

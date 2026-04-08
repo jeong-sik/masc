@@ -72,6 +72,9 @@ let truncate_output s =
    Tool_code_write.schemas for schema assembly). *)
 let _policy_config_cache : Keeper_tool_policy_config.t option ref = ref None
 
+(** Reset internal config cache — for test isolation only. *)
+let reset_policy_config_cache () = _policy_config_cache := None
+
 let get_policy_config ~base_path =
   match !_policy_config_cache with
   | Some cfg -> Some cfg

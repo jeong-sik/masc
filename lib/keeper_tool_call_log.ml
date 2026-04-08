@@ -21,7 +21,7 @@ let init ~base_path =
   (try
      let store = Dated_jsonl.create ~base_dir:dir () in
      store_ref := Some store
-   with exn ->
+   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
      Log.Misc.warn "keeper_tool_call_log: init failed: %s"
        (Printexc.to_string exn))
 
@@ -70,7 +70,7 @@ let log_call ~keeper_name ~tool_name ~(input : Yojson.Safe.t)
           ] @ model_field @ result_bytes_field @ truncated_to_field)
       in
       (try Dated_jsonl.append store json
-       with exn ->
+       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
          Log.Misc.warn "keeper_tool_call_log: append failed for %s/%s: %s"
            keeper_name tool_name (Printexc.to_string exn))
 

@@ -55,7 +55,7 @@ let snapshot_before_turn ~base_path ~keeper_name:_ : string option =
     let root = repo_root ~base_path in
     let lines = git_status_lines ~repo_root:root in
     Some (hash_lines lines)
-  with _ -> None
+  with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None
 
 (** Capture turn evidence after a turn completes.
     Compares before_hash with current state to detect delta. *)
@@ -235,4 +235,4 @@ let latest_evidence ~base_path ~keeper_name ~trace_id
         let path = Filename.concat evidence_dir latest in
         let content = Fs_compat.load_file path in
         Some (Yojson.Safe.from_string content)
-    with _ -> None
+    with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None

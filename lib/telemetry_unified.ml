@@ -60,7 +60,7 @@ let discover_keeper_metric_dirs masc_root : (string * string) list =
   else
     let entries =
       try Array.to_list (Sys.readdir keepers_dir)
-      with _ -> []
+      with Eio.Cancel.Cancelled _ as e -> raise e | _ -> []
     in
     List.filter_map (fun name ->
       let metrics_dir = Filename.concat keepers_dir (name ^ "/metrics") in
@@ -123,6 +123,7 @@ let read_fixed_source dir source ~n : Yojson.Safe.t list =
     | store ->
       let entries = Dated_jsonl.read_recent store n in
       List.map (tag_entry source) entries
+    | exception (Eio.Cancel.Cancelled _ as e) -> raise e
     | exception _ -> []
 
 (* ── Read keeper metrics (per-keeper directories) ───── *)
@@ -183,6 +184,7 @@ let count_fixed_source_entries ~masc_root ~base_path source : int =
     else
       (match Dated_jsonl.create ~base_dir:dir () with
        | store -> List.length (Dated_jsonl.read_recent store 10_000)
+       | exception (Eio.Cancel.Cancelled _ as e) -> raise e
        | exception _ -> 0)
 
 let summary_json ~base_path ~masc_root () : Yojson.Safe.t =
@@ -192,6 +194,7 @@ let summary_json ~base_path ~masc_root () : Yojson.Safe.t =
       acc +
       (match Dated_jsonl.create ~base_dir:dir () with
        | store -> List.length (Dated_jsonl.read_recent store 10_000)
+       | exception (Eio.Cancel.Cancelled _ as e) -> raise e
        | exception _ -> 0)
     ) 0 keeper_dirs
   in

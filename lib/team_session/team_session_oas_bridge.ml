@@ -705,7 +705,7 @@ let planned_worker_to_entry
   let success_by_agent = Hashtbl.create 1 in
   let team_ctx =
     try Team_context.build ~base_path:config.base_path ~team_session_id:session_id
-    with _ -> Team_context.empty
+    with Eio.Cancel.Cancelled _ as e -> raise e | _ -> Team_context.empty
   in
   planned_worker_to_entry_with_state ~config ~session_id ~session_cascade ~masc_tools
     ~dispatch ~success_by_agent ~team_ctx ?delivery_contract:None pw
@@ -724,7 +724,7 @@ let session_to_swarm_config
   let team_ctx =
     try Team_context.build ~base_path:config.base_path
           ~team_session_id:session.session_id
-    with _ -> Team_context.empty
+    with Eio.Cancel.Cancelled _ as e -> raise e | _ -> Team_context.empty
   in
   let entries =
     List.map

@@ -166,7 +166,7 @@ let record_verdict
   match on_harness_verdict with
   | Some cb ->
     (try cb (to_harness_verdict record)
-     with exn ->
+     with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
        Log.Harness.warn "[eval_calibration] on_harness_verdict callback failed: %s"
          (Printexc.to_string exn))
   | None -> ()

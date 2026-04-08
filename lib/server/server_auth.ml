@@ -152,7 +152,7 @@ let host_port_scheme_of_origin origin =
     | Some host ->
         Some (String.trim host |> String.lowercase_ascii,
               Uri.port uri, Uri.scheme uri)
-  with exn ->
+  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Log.Auth.debug "host_port_scheme_of_origin: parse failed for %S: %s"
       origin (Printexc.to_string exn);
     None
@@ -167,7 +167,7 @@ let host_port_of_request request =
         | None -> None
         | Some host ->
             Some (String.trim host |> String.lowercase_ascii, Uri.port uri)
-      with exn ->
+      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
         Log.Auth.debug "host_port_of_request: parse failed for %S: %s"
           host_header (Printexc.to_string exn);
         None)

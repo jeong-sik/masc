@@ -40,6 +40,6 @@ let emit_transition
     ] in
     let path = trace_path ~base_path ~keeper_name in
     try Keeper_types_support.append_jsonl_line path json
-    with exn ->
+    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
       Printf.eprintf "trace_emit: %s: %s\n%!"
         keeper_name (Printexc.to_string exn)

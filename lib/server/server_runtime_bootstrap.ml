@@ -228,7 +228,7 @@ let legacy_room_candidates rooms_dir =
                    None
            else
              None)
-    with _ -> []
+    with Eio.Cancel.Cancelled _ as e -> raise e | _ -> []
 
 let infer_current_room_from_legacy_dirs rooms_dir =
   match legacy_room_candidates rooms_dir with
@@ -642,7 +642,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
               let client = Masc_grpc_client.create_from_env ~sw ~env in
               Keeper_keepalive.set_grpc_client ~env client;
               Log.Server.info "gRPC keeper client initialized"
-            with exn ->
+            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
               Log.Server.warn "gRPC keeper client init failed: %s"
                 (Printexc.to_string exn))
        | _ -> ());

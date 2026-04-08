@@ -266,7 +266,7 @@ let create ~sw ~env ~url ~cluster_name ~node_id =
         Log.Backend.info "[EioPG] connected and schema ready";
         at_exit (fun () ->
           try Caqti_eio.Pool.drain pool
-          with exn ->
+          with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
             Log.Backend.warn "[EioPG] pool drain failed: %s"
               (Printexc.to_string exn));
         Ok { pool; namespace = cluster_name; node_id }

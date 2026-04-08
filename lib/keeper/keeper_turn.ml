@@ -297,7 +297,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
             let evidence_before_hash =
               try Keeper_evidence.snapshot_before_turn
                 ~base_path:ctx.config.base_path ~keeper_name:name
-              with _ -> None
+              with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None
             in
             let run_result, latency_ms =
               Keeper_exec_context.timed (fun () ->

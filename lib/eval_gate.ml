@@ -154,7 +154,7 @@ let detect_evasion (command : string) : (string * string) option =
     try
       let re = Re.Pcre.re pattern |> Re.compile in
       Re.execp re cmd_lower
-    with _ -> false
+    with Eio.Cancel.Cancelled _ as e -> raise e | _ -> false
   ) evasion_indicators
 
 (** Check if a bash command contains destructive patterns.

@@ -32,7 +32,7 @@ let read_json (config : Agent_sdk.Proof_store.config)
   | Ok path ->
     if Sys.file_exists path then
       (try Ok (Yojson.Safe.from_file path)
-       with exn -> Error (Printf.sprintf "JSON parse error in %s: %s"
+       with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Error (Printf.sprintf "JSON parse error in %s: %s"
                             path (Printexc.to_string exn)))
     else
       Error (Printf.sprintf "artifact not found: %s" path)

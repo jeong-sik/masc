@@ -264,7 +264,7 @@ let should_backoff ~sw ~net =
     in
     capacity.all_discovered && capacity.endpoints_found > 0
     && capacity.process_available <= 0
-  with exn ->
+  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Eio.traceln
       "[operator] capacity check failed in should_backoff: %s"
       (Printexc.to_string exn);

@@ -113,7 +113,7 @@ let flush_pending () =
   drain ();
   Hashtbl.iter (fun file buf ->
     (try Fs_compat.append_file file (Buffer.contents buf)
-     with exn ->
+     with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
        Log.Metrics.error "flush_pending: append failed for %s: %s"
          file (Printexc.to_string exn))
   ) batch

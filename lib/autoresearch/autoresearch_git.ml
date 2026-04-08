@@ -103,7 +103,7 @@ let git_restore_head ~workdir =
     match status with
     | Unix.WEXITED 0 -> ()
     | _ -> Log.Autoresearch.warn "git restore HEAD non-zero exit in %s" workdir
-   with exn -> Log.Autoresearch.warn "git restore HEAD failed in %s: %s" workdir (Printexc.to_string exn))
+   with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Autoresearch.warn "git restore HEAD failed in %s: %s" workdir (Printexc.to_string exn))
 
 (** Reset to HEAD~1, discarding the last commit. *)
 let git_reset_last ~workdir =
@@ -117,7 +117,7 @@ let git_reset_last ~workdir =
     match status with
     | Unix.WEXITED 0 -> ()
     | _ -> Log.Autoresearch.warn "git reset HEAD~1 non-zero exit in %s" workdir
-   with exn -> Log.Autoresearch.warn "git reset HEAD~1 failed in %s: %s" workdir (Printexc.to_string exn))
+   with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Autoresearch.warn "git reset HEAD~1 failed in %s: %s" workdir (Printexc.to_string exn))
 
 (** Commit with autoresearch-formatted message. *)
 let git_commit_cycle ~workdir ~cycle ~hypothesis ~baseline =
@@ -140,7 +140,7 @@ let git_tag_best ~workdir ~cycle ~score =
     (Filename.quote workdir) (Filename.quote tag) in
   (try ignore (Process_eio.run_argv_with_status ~timeout_sec:10.0
     ["sh"; "-c"; cmd])
-   with exn -> Log.Autoresearch.warn "git tag failed in %s: %s" workdir (Printexc.to_string exn))
+   with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Autoresearch.warn "git tag failed in %s: %s" workdir (Printexc.to_string exn))
 
 (** Get the git top-level directory for a workdir. *)
 let git_top_level ~workdir =

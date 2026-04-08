@@ -148,7 +148,7 @@ let inject_agent_name_into_body ~agent_name body_str =
           in
           Yojson.Safe.to_string new_json
     | _ -> body_str
-  with _ -> body_str
+  with Eio.Cancel.Cancelled _ as e -> raise e | _ -> body_str
 
 let handle_post_mcp ~deps ?(profile = Full) request reqd =
   (* Readiness gate: reject before session/auth if server state is not ready *)

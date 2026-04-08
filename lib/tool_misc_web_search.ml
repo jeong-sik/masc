@@ -109,7 +109,7 @@ let decode_html_entities text =
            |> Uchar.of_int
            |> Buffer.add_utf_8_uchar buf;
            "")
-    with _ -> None
+    with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None
   in
   let rec loop index =
     if index >= len then
@@ -198,11 +198,11 @@ let parse_json_search_results ~results_path ~title_field ~snippet_field payload 
   let open Yojson.Safe.Util in
   let str_of item key =
     try Option.bind (member key item |> to_string_option) trim_nonempty
-    with _ -> None
+    with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None
   in
   try
     let root = Yojson.Safe.from_string payload in
-    let items = try results_path root |> to_list with _ -> [] in
+    let items = try results_path root |> to_list with Eio.Cancel.Cancelled _ as e -> raise e | _ -> [] in
     items
     |> List.filter_map (fun item ->
            match str_of item title_field, str_of item "url" with
@@ -210,7 +210,7 @@ let parse_json_search_results ~results_path ~title_field ~snippet_field payload 
                let snippet = str_of item snippet_field |> Option.value ~default:"" in
                Some (title, url, snippet)
            | _ -> None)
-  with _ -> []
+  with Eio.Cancel.Cancelled _ as e -> raise e | _ -> []
 
 let parse_searxng_json payload =
   parse_json_search_results
@@ -519,7 +519,7 @@ let fetch_brave ~timeout_sec ~query ~limit =
               |> normalize_hits ~source:(provider_to_string Brave)
             in
             Ok { engine = provider_to_string Brave; search_url; hits }
-          with _ -> Error "provider returned invalid JSON")
+          with Eio.Cancel.Cancelled _ as e -> raise e | _ -> Error "provider returned invalid JSON")
       | Ok (Some status, _) -> Error (Printf.sprintf "provider returned HTTP %d" status)
       | Ok (None, _) -> Error "provider returned no HTTP status"
 
@@ -558,7 +558,7 @@ let fetch_tavily ~timeout_sec ~query ~limit =
               |> normalize_hits ~source:(provider_to_string Tavily)
             in
             Ok { engine = provider_to_string Tavily; search_url; hits }
-          with _ -> Error "provider returned invalid JSON")
+          with Eio.Cancel.Cancelled _ as e -> raise e | _ -> Error "provider returned invalid JSON")
       | Ok (Some status, _) -> Error (Printf.sprintf "provider returned HTTP %d" status)
       | Ok (None, _) -> Error "provider returned no HTTP status"
 
@@ -594,7 +594,7 @@ let fetch_exa ~timeout_sec ~query ~limit =
               |> normalize_hits ~source:(provider_to_string Exa)
             in
             Ok { engine = provider_to_string Exa; search_url; hits }
-          with _ -> Error "provider returned invalid JSON")
+          with Eio.Cancel.Cancelled _ as e -> raise e | _ -> Error "provider returned invalid JSON")
       | Ok (Some status, _) -> Error (Printf.sprintf "provider returned HTTP %d" status)
       | Ok (None, _) -> Error "provider returned no HTTP status"
 
@@ -632,7 +632,7 @@ let fetch_bing_api ~timeout_sec ~query ~limit =
               |> normalize_hits ~source:(provider_to_string Bing_api)
             in
             Ok { engine = provider_to_string Bing_api; search_url; hits }
-          with _ -> Error "provider returned invalid JSON")
+          with Eio.Cancel.Cancelled _ as e -> raise e | _ -> Error "provider returned invalid JSON")
       | Ok (Some status, _) -> Error (Printf.sprintf "provider returned HTTP %d" status)
       | Ok (None, _) -> Error "provider returned no HTTP status"
 

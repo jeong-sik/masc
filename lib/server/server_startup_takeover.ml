@@ -130,7 +130,7 @@ let read_pid_file path =
     Fun.protect
       ~finally:(fun () -> close_in_noerr ic)
       (fun () -> Some (In_channel.input_all ic))
-  with _ -> None
+  with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None
 
 let parsed_pid path =
   match read_pid_file path with
@@ -143,7 +143,7 @@ let parsed_pid path =
 let register_pid_cleanup ~path ~pid =
   at_exit (fun () ->
       match parsed_pid path with
-      | Some current when current = pid -> (try Sys.remove path with _ -> ())
+      | Some current when current = pid -> (try Sys.remove path with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ())
       | _ -> ())
 
 let write_pid_file path pid =
@@ -187,14 +187,14 @@ let acquire_pid_lock
                 (Printf.sprintf
                    "[WARN] PID %d alive but unresponsive on port %d; sending SIGTERM to reclaim"
                    pid port);
-              (try Unix.kill pid Sys.sigterm with _ -> ());
+              (try Unix.kill pid Sys.sigterm with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
               if not (wait_for_pid_exit ~poll_interval_sec
                         ~timeout_sec:term_timeout_sec pid)
               then begin
                 Log.legacy_stderr ~level:Log.Warn ~module_name:"Server"
                   (Printf.sprintf
                      "[WARN] PID %d did not exit; sending SIGKILL" pid);
-                (try Unix.kill pid Sys.sigkill with _ -> ());
+                (try Unix.kill pid Sys.sigkill with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
                 if not (wait_for_pid_exit ~poll_interval_sec
                           ~timeout_sec:kill_wait_sec pid)
                 then

@@ -247,8 +247,7 @@ let int_of_env_default name ~default ~min_v ~max_v =
   | None -> default
   | Some raw ->
       let v =
-        try int_of_string (String.trim raw)
-        with Failure _ -> default
+        Option.value ~default:default (int_of_string_opt (String.trim raw))
       in
       clamp_int v ~min_v ~max_v
 

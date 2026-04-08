@@ -26,15 +26,13 @@ let get_string_with_default json ~key ~default =
 let get_int : Yojson.Safe.t -> string -> int option = fun json key ->
   match Yojson.Safe.Util.member key json with
   | `Int n -> Some n
-  | `Intlit s -> (
-      try Some (int_of_string s) with Failure _ -> None)
+  | `Intlit s -> int_of_string_opt s
   | _ -> None
 
 let get_int_with_default json ~key ~default =
   match Yojson.Safe.Util.member key json with
   | `Int n -> n
-  | `Intlit s -> (
-      try int_of_string s with Failure _ -> default)
+  | `Intlit s -> Option.value ~default (int_of_string_opt s)
   | _ -> default
 
 let get_float : Yojson.Safe.t -> string -> float option = fun json key ->

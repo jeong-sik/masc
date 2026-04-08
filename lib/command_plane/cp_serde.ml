@@ -65,7 +65,7 @@ let get_string_default json key default =
 let get_int_default json key default =
   match U.member key json with
   | `Int value -> value
-  | `Intlit value -> (try int_of_string value with Failure _ -> default)
+  | `Intlit value -> (Option.value ~default:default (int_of_string_opt value))
   | _ -> default
 
 let get_float_default json key default =

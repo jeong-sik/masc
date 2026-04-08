@@ -460,7 +460,7 @@ let json_string_list_member key json =
 let json_int_opt_member key json =
   match Yojson.Safe.Util.member key json with
   | `Int value -> Some value
-  | `Intlit raw -> (try Some (int_of_string raw) with Failure _ -> None)
+  | `Intlit raw -> (int_of_string_opt (raw))
   | `Float value -> Some (int_of_float value)
   | _ -> None
 

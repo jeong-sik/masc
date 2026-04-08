@@ -78,7 +78,7 @@ let parse_spawn_spec_from_object ?(default_timeout = 300)
   let get_timeout key =
     match member key json with
     | `Int n -> max 1 n
-    | `Intlit s -> (try max 1 (int_of_string s) with Failure _ -> default_timeout)
+    | `Intlit s -> (match int_of_string_opt s with Some v -> max 1 v | None -> default_timeout)
     | _ -> default_timeout
   in
   let worker_policy =
@@ -111,7 +111,7 @@ let parse_spawn_spec_from_object ?(default_timeout = 300)
     | Some value -> (
         match value with
         | `Int value -> Some (max 1 value)
-        | `Intlit raw -> (try Some (max 1 (int_of_string raw)) with Failure _ -> None)
+        | `Intlit raw -> (int_of_string_opt (raw))
         | _ -> None)
     | None -> None
   in
@@ -161,7 +161,7 @@ let parse_step_spawn_specs args =
   let default_batch_timeout =
     match Yojson.Safe.Util.member "spawn_timeout_seconds" args with
     | `Int value -> max 1 value
-    | `Intlit raw -> (try max 1 (int_of_string raw) with Failure _ -> 300)
+    | `Intlit raw -> (match int_of_string_opt raw with Some v -> max 1 v | None -> 300)
     | _ -> max 1 (get_int args "spawn_timeout_seconds" 300)
   in
   let batch_specs_result =
@@ -217,7 +217,7 @@ let parse_step_spawn_specs args =
               | Some obj -> (
                   match Yojson.Safe.Util.member key obj with
                   | `Int value -> Some (max 1 value)
-                  | `Intlit raw -> (try Some (max 1 (int_of_string raw)) with Failure _ -> None)
+                  | `Intlit raw -> (int_of_string_opt (raw))
                   | _ -> None)
               | None -> None
             in

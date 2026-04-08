@@ -63,7 +63,7 @@ let add_agent_api_routes router =
            in
            let limit =
              match Server_utils.query_param req "limit" with
-             | Some l -> (try int_of_string l with Failure _ -> 20)
+             | Some l -> (Option.value ~default:20 (int_of_string_opt l))
              | None -> 20
            in
            let json =

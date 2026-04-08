@@ -33,8 +33,7 @@ let int_option_of_yojson = function
   | `Null -> Ok None
   | `Int value -> Ok (Some value)
   | `Intlit value -> (
-      try Ok (Some (int_of_string value))
-      with Failure _ -> Error "invalid int option in worker helper payload")
+      match int_of_string_opt value with Some v -> Ok (Some v) | None -> Error "invalid int option in worker helper payload")
   | _ -> Error "invalid int option in worker helper payload"
 
 let float_option_of_yojson = function

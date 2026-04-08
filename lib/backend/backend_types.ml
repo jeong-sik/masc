@@ -108,7 +108,7 @@ let pool_stats_to_yojson (s : pool_stats) : Yojson.Safe.t =
 
 let configured_max_pool_size () =
   match Sys.getenv_opt "MASC_PG_POOL_SIZE" with
-  | Some s -> (try int_of_string s with Failure _ -> 5)
+  | Some s -> (Option.value ~default:5 (int_of_string_opt s))
   | None -> 5
 
 (* ============================================ *)

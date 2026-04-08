@@ -36,7 +36,7 @@ let parse_timeout_ms json =
   | `Null -> None
   | `Int value -> Some (max 1 value)
   | `Intlit value -> (
-      try Some (max 1 (int_of_string value)) with Failure _ -> None)
+      int_of_string_opt (value))
   | _ -> None
 
 let report_of_yojson ?fallback_agent (json : Yojson.Safe.t) :

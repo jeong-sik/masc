@@ -488,7 +488,7 @@ let policy_violations_add violations entry =
 let parse_summary_int key (json : Yojson.Safe.t) =
   match Yojson.Safe.Util.member key json with
   | `Int n -> n
-  | `Intlit s -> (try int_of_string s with Failure _ -> 0)
+  | `Intlit s -> (Option.value ~default:0 (int_of_string_opt s))
   | `Float v -> int_of_float v
   | _ -> 0
 

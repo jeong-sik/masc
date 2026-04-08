@@ -38,7 +38,7 @@ let string_opt_to_json = Json_util.string_opt_to_json
 let float_opt_to_json = Json_util.float_opt_to_json
 
 let parse_int_opt value =
-  try Some (int_of_string (String.trim value)) with Failure _ -> None
+  int_of_string_opt ((String.trim value))
 
 let unique_preserve_order = Json_util.dedupe_keep_order
 

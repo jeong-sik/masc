@@ -365,8 +365,7 @@ let split_csv_row line =
   | _ -> None
 
 let int_of_string_opt raw =
-  try Some (int_of_string (String.trim raw))
-  with Failure _ -> None
+  int_of_string_opt ((String.trim raw))
 
 let load_benchmark_rows path =
   let lines =

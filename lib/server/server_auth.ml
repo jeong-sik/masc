@@ -501,7 +501,7 @@ let serve_agent_card ~host ~port request reqd =
             | [ host_name ] -> (host_name, port)
             | host_name :: port_str :: _ ->
                 let resolved_port =
-                  try int_of_string port_str with Failure _ -> port
+                  Option.value ~default:port (int_of_string_opt port_str)
                 in
                 (host_name, resolved_port)
             | _ -> (host, port))

@@ -349,7 +349,7 @@ let parse_delivery_contract_update args ~actor
         match List.assoc_opt key fields with
         | Some (`Int value) -> max 0 value
         | Some (`Intlit raw) -> (
-            try max 0 (int_of_string raw) with Failure _ -> fallback)
+            match int_of_string_opt raw with Some v -> max 0 v | None -> fallback)
         | _ -> fallback
       in
       let pick_opt_string key fallback =

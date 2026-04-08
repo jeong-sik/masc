@@ -372,7 +372,8 @@ let make_hooks
            the (possibly truncated) result to OAS. Falls back to out_len
            when no truncation info was set (e.g. OAS-internal tool calls). *)
         let (original_bytes, truncated_to) =
-          Keeper_tool_call_log.consume_truncation_info ()
+          Keeper_tool_call_log.consume_truncation_info
+            ~keeper_name:(!meta_ref).name ()
         in
         let result_bytes = if original_bytes > 0 then original_bytes else out_len in
         (try

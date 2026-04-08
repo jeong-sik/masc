@@ -6,19 +6,25 @@
     @since 2.249.0 *)
 
 val set_truncation_info :
+  keeper_name:string ->
   original_bytes:int ->
   ?truncated_to:int ->
   unit ->
   unit
-(** [set_truncation_info ~original_bytes ?truncated_to ()] records
-    pre-truncation output size. Called by the tool handler wrapper
-    before returning the (possibly truncated) result to OAS.
-    The OAS on_tool_result hook consumes this via {!consume_truncation_info}. *)
+(** [set_truncation_info ~keeper_name ~original_bytes ?truncated_to ()]
+    records pre-truncation output size for the given keeper. Called by
+    the tool handler wrapper before returning the (possibly truncated)
+    result to OAS. Per-keeper isolation prevents cross-keeper corruption
+    under concurrent tool execution. *)
 
-val consume_truncation_info : unit -> int * int option
-(** [consume_truncation_info ()] returns [(original_bytes, truncated_to)]
-    and resets the pending state. Returns [(0, None)] when no truncation
-    info was set (e.g. tool call didn't go through the handler wrapper). *)
+val consume_truncation_info :
+  keeper_name:string ->
+  unit ->
+  int * int option
+(** [consume_truncation_info ~keeper_name ()] returns
+    [(original_bytes, truncated_to)] for the given keeper and clears
+    the pending state. Returns [(0, None)] when no truncation info
+    was set (e.g. OAS-internal tool call that bypassed the wrapper). *)
 
 val init : base_path:string -> unit
 (** [init ~base_path] creates the Dated_jsonl store. Call once at startup. *)

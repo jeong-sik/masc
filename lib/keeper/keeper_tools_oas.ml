@@ -263,6 +263,7 @@ let make_tools
                     ])
                 with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
                 Keeper_tool_call_log.set_truncation_info
+                  ~keeper_name:meta.name
                   ~original_bytes:(String.length normalized_error) ();
                 (false, validate_output ~tool_name:td.name normalized_error)
               end else begin
@@ -334,6 +335,7 @@ let make_tools
                 with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
                 (* Publish truncation info for OAS hook's tool_call_log *)
                 Keeper_tool_call_log.set_truncation_info
+                  ~keeper_name:meta.name
                   ~original_bytes:original_len
                   ?truncated_to:(if was_truncated
                     then Some (String.length truncated_result) else None) ();
@@ -380,6 +382,7 @@ let make_tools
                   ])
               with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
               Keeper_tool_call_log.set_truncation_info
+                ~keeper_name:meta.name
                 ~original_bytes:(String.length normalized_exn) ();
               (false, validate_output ~tool_name:td.name normalized_exn)))
     else None

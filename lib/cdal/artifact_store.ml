@@ -39,9 +39,7 @@ let kind_of_string = function
   | other -> Error (Printf.sprintf "unknown artifact kind: %s" other)
 
 let default_config ~session_id =
-  let home =
-    try Sys.getenv "HOME" with Not_found -> "/tmp"
-  in
+  let home = Option.value ~default:"/tmp" (Sys.getenv_opt "HOME") in
   { base_dir = Filename.concat home (Printf.sprintf ".masc/sessions/%s/artifacts" session_id) }
 
 (* --- Filesystem helpers --- *)

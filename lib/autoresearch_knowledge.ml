@@ -89,7 +89,7 @@ let finding_of_yojson (json : Yojson.Safe.t) : (finding, string) result =
 
 let findings_dir () =
   let base = match Env_config_core.me_root_opt () with
-    | Some r -> r | None -> Sys.getenv "HOME" ^ "/me"
+    | Some r -> r | None -> (Option.value ~default:"/tmp" (Sys.getenv_opt "HOME")) ^ "/me"
   in
   Filename.concat base ".masc/autoresearch/findings"
 

@@ -81,10 +81,13 @@ let friction_of_outcome = function
    be set before this module is loaded. Safe in practice because the
    server sets all env vars at process startup. *)
 let default_base_path =
-  let root = try Sys.getenv "MASC_DATA_DIR"
-    with Not_found ->
-      try Filename.concat (Sys.getenv "ME_ROOT") "data"
-      with Not_found -> "data"
+  let root =
+    match Sys.getenv_opt "MASC_DATA_DIR" with
+    | Some dir -> dir
+    | None ->
+      match Sys.getenv_opt "ME_ROOT" with
+      | Some root -> Filename.concat root "data"
+      | None -> "data"
   in
   Filename.concat root "cdal_verdicts"
 

@@ -55,7 +55,11 @@ type calibration_example = {
 let store_ref : Dated_jsonl.t option ref = ref None
 
 let base_path () =
-  let me = try Sys.getenv "ME_ROOT" with Not_found -> Sys.getenv "HOME" ^ "/me" in
+  let me =
+    match Sys.getenv_opt "ME_ROOT" with
+    | Some p -> p
+    | None -> (Option.value ~default:"/tmp" (Sys.getenv_opt "HOME")) ^ "/me"
+  in
   Filename.concat me "data/verdicts"
 
 let get_store () =

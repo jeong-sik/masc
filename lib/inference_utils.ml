@@ -91,6 +91,34 @@ let sanitize_text_utf8 (s : string) : string =
     loop 0;
     Buffer.contents buf
 
+let rec sanitize_json_utf8 (json : Yojson.Safe.t) : Yojson.Safe.t =
+  match json with
+  | `String s ->
+      let sanitized = sanitize_text_utf8 s in
+      if sanitized == s then json else `String sanitized
+  | `Assoc fields ->
+      let changed = ref false in
+      let sanitized_fields =
+        List.map (fun (key, value) ->
+          let sanitized_key = sanitize_text_utf8 key in
+          let sanitized_value = sanitize_json_utf8 value in
+          if sanitized_key != key || sanitized_value != value then changed := true;
+          (sanitized_key, sanitized_value)
+        ) fields
+      in
+      if !changed then `Assoc sanitized_fields else json
+  | `List items ->
+      let changed = ref false in
+      let sanitized_items =
+        List.map (fun item ->
+          let sanitized = sanitize_json_utf8 item in
+          if sanitized != item then changed := true;
+          sanitized
+        ) items
+      in
+      if !changed then `List sanitized_items else json
+  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _) as other -> other
+
 let rec sanitize_content_blocks_utf8
     (blocks : Agent_sdk.Types.content_block list)
   : Agent_sdk.Types.content_block list =
@@ -105,14 +133,23 @@ let rec sanitize_content_blocks_utf8
         | Agent_sdk.Types.ToolResult { tool_use_id; content; is_error; json } ->
             let sanitized_tool_use_id = sanitize_text_utf8 tool_use_id in
             let sanitized_content = sanitize_text_utf8 content in
-            if sanitized_tool_use_id == tool_use_id && sanitized_content == content
+            let sanitized_json, json_changed =
+              match json with
+              | None -> (None, false)
+              | Some value ->
+                  let sanitized = sanitize_json_utf8 value in
+                  (Some sanitized, sanitized != value)
+            in
+            if sanitized_tool_use_id == tool_use_id
+               && sanitized_content == content
+               && not json_changed
             then block
             else
               Agent_sdk.Types.ToolResult {
                 tool_use_id = sanitized_tool_use_id;
                 content = sanitized_content;
                 is_error;
-                json;
+                json = sanitized_json;
               }
         | _ -> block
       in

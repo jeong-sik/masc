@@ -136,6 +136,9 @@ let mask_tool_result_message ~(tool_names : (string * string) list)
         tool_use_id;
         content = mask_tool_result_content ~tool_name ~tool_use_id ~content;
         is_error;
+        (* Compaction keeps only a small textual stub plus the tool/result
+           pairing. Preserving structured payloads here would bypass the size
+           reduction and leak the full tool output through [json]. *)
         json = None;
       }
     | other -> other

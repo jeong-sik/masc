@@ -141,7 +141,7 @@ repo 질문을 바로 `operation + session + proof` spine에 올리고 싶으면
 
 실행 순서:
 
-1. 로컬 `llama.cpp`를 `qwen35-hot` 프로파일로 `127.0.0.1:8085`에서 띄운다.
+1. 로컬 OpenAI-compatible runtime endpoint를 준비하고 `LLAMA_SERVER_URL` 또는 `OAS_LOCAL_LLM_URL`로 노출한다.
 2. `anthropic-proxy` 또는 호환 local provider를 `127.0.0.1:3034`에 둔다.
 3. repo root에서 아래를 실행한다.
 

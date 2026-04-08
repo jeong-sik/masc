@@ -3,18 +3,15 @@
     All hardcoded network defaults live here. Other modules reference
     these constants instead of inlining magic strings/numbers.
 
-    The [local_llm_default_url] must match
-    [Llm_provider.Discovery.default_endpoint] in OAS by contract.
+    The [local_llm_default_url] follows the same env override chain that OAS
+    discovery uses before falling back to the current local runtime URL.
 
     @since 2.241.0 *)
 
-(** Default port for the local llama-server (OpenAI-compatible). *)
-let local_llm_default_port = 8085
-
-(** Default URL for the local llama-server.
-    Contract: must equal [Llm_provider.Discovery.default_endpoint] in OAS. *)
-let local_llm_default_url =
-  Printf.sprintf "http://127.0.0.1:%d" local_llm_default_port
+let nonempty_env name =
+  match Sys.getenv_opt name with
+  | Some value when String.trim value <> "" -> Some (String.trim value)
+  | _ -> None
 
 (** Default port for Ollama (OpenAI-compatible at /v1). *)
 let ollama_default_port = 11434
@@ -22,6 +19,14 @@ let ollama_default_port = 11434
 (** Default URL for Ollama. *)
 let ollama_default_url =
   Printf.sprintf "http://127.0.0.1:%d" ollama_default_port
+
+(** Default URL for the local OpenAI-compatible runtime.
+    Override order: OAS_LOCAL_LLM_URL -> OAS_LOCAL_QWEN_URL -> local runtime. *)
+let local_llm_default_url =
+  match nonempty_env "OAS_LOCAL_LLM_URL", nonempty_env "OAS_LOCAL_QWEN_URL" with
+  | Some value, _ -> value
+  | _, Some value -> value
+  | _ -> ollama_default_url
 
 (** Default port for the MASC HTTP server. *)
 let masc_http_default_port = 8935

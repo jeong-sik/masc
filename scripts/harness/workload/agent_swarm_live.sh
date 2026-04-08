@@ -12,7 +12,7 @@ MCP_URL="${MCP_URL:-${MASC_URL}/mcp}"
 MCP_SESSION_ID="${MCP_SESSION_ID:-agent-swarm-live-${RUN_ID}-$$}"
 BASE_PATH="${BASE_PATH:-/tmp/masc-agent-swarm-live-${RUN_ID}}"
 PROVIDER_BASE_URL="${PROVIDER_BASE_URL:-http://127.0.0.1:3034}"
-SLOT_URL="${SLOT_URL:-http://127.0.0.1:8085}"
+SLOT_URL="${SLOT_URL:-${OAS_LOCAL_LLM_URL:-${LLAMA_SERVER_URL:-}}}"
 MODEL_ID="${MODEL_ID:-qwen3.5-35b-a3b-ud-q8-xl}"
 HARNESS_AGENT="${HARNESS_AGENT:-swarm-harness}"
 WORKER_COUNT="${WORKER_COUNT:-12}"
@@ -49,6 +49,11 @@ EXIT_STATUS=0
 
 if ! command -v jq >/dev/null 2>&1; then
   echo "jq is required" >&2
+  exit 1
+fi
+
+if [ -z "$SLOT_URL" ]; then
+  echo "SLOT_URL is required. Set SLOT_URL or OAS_LOCAL_LLM_URL/LLAMA_SERVER_URL." >&2
   exit 1
 fi
 

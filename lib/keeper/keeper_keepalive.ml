@@ -709,10 +709,11 @@ let run_keepalive_unified_turn
         let is_reactive =
           turn_decision.channel = Keeper_world_observation.Reactive
         in
-        if streak >= 8 && not is_reactive then begin
+        let boring_threshold = Keeper_config.keeper_boring_exit_threshold () in
+        if streak >= boring_threshold && not is_reactive then begin
           Log.Keeper.info
-            "keeper:%s boring_consecutive=%d >= 8, skipping proactive turn (hard gate)"
-            meta_after_triage.name streak;
+            "keeper:%s boring_consecutive=%d >= %d, skipping proactive turn (hard gate)"
+            meta_after_triage.name streak boring_threshold;
           true
         end else false
       in

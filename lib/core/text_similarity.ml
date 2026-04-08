@@ -85,13 +85,12 @@ let jaccard_similarity (a : string) (b : string) : float =
     let inter = ref 0 in
     let uniq_b = ref 0 in
     List.iter (fun w ->
-      if Hashtbl.mem h w then begin
-        if not (Hashtbl.find h w) then begin
+      match Hashtbl.find_opt h w with
+      | Some false ->
           incr inter;
           Hashtbl.replace h w true
-        end
-      end else
-        incr uniq_b
+      | Some true -> ()
+      | None -> incr uniq_b
     ) tb;
     let union = (List.length ta) + !uniq_b in
     if union = 0 then 0.0 else float_of_int !inter /. float_of_int union

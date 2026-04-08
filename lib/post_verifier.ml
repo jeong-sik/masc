@@ -103,7 +103,7 @@ let is_repetitive_tokens s =
     let tbl = Hashtbl.create 16 in
     List.iter (fun t ->
       let lower = String.lowercase_ascii t in
-      let prev = try Hashtbl.find tbl lower with Not_found -> 0 in
+      let prev = Option.value ~default:0 (Hashtbl.find_opt tbl lower) in
       Hashtbl.replace tbl lower (prev + 1)
     ) tokens;
     let max_count = Hashtbl.fold (fun _ v acc -> max v acc) tbl 0 in

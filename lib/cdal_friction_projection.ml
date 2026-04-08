@@ -76,7 +76,7 @@ let group_violations (violations : Violation_record.t list)
   let tbl = H.create 16 in
   List.iter (fun v ->
     let k = key_of_violation v in
-    let prev = try H.find tbl k with Not_found -> 0 in
+    let prev = Option.value ~default:0 (H.find_opt tbl k) in
     H.replace tbl k (prev + 1)
   ) violations;
   H.fold (fun key count acc -> { key; count } :: acc) tbl []
@@ -92,7 +92,7 @@ let compute_tool_counts (groups : blocked_attempt_group list)
     : (string * int) list =
   let tbl = Hashtbl.create 8 in
   List.iter (fun g ->
-    let prev = try Hashtbl.find tbl g.key.tool_name with Not_found -> 0 in
+    let prev = Option.value ~default:0 (Hashtbl.find_opt tbl g.key.tool_name) in
     Hashtbl.replace tbl g.key.tool_name (prev + g.count)
   ) groups;
   Hashtbl.fold (fun name count acc -> (name, count) :: acc) tbl []
@@ -223,7 +223,7 @@ let merge_groups (all_groups : blocked_attempt_group list list)
   let tbl = H.create 32 in
   List.iter (fun groups ->
     List.iter (fun (g : blocked_attempt_group) ->
-      let prev = try H.find tbl g.key with Not_found -> 0 in
+      let prev = Option.value ~default:0 (H.find_opt tbl g.key) in
       H.replace tbl g.key (prev + g.count)
     ) groups
   ) all_groups;

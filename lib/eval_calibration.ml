@@ -312,7 +312,7 @@ let calibration_stats ?(since = "") ?(until = "") () : Yojson.Safe.t =
       if v = "approve" then incr approve_count
       else incr reject_count;
       let gate = string_field json "gate" in
-      let prev = try Hashtbl.find gate_counts gate with Not_found -> 0 in
+      let prev = Option.value ~default:0 (Hashtbl.find_opt gate_counts gate) in
       Hashtbl.replace gate_counts gate (prev + 1);
       Hashtbl.replace verdict_hashes hash v;
       if gate = fallback_tag && List.length !recent_fallback_reasons < max_fallback_reasons then
@@ -346,8 +346,8 @@ let calibration_stats ?(since = "") ?(until = "") () : Yojson.Safe.t =
   let gate_json = Hashtbl.fold (fun k v acc ->
     (k, `Int v) :: acc) gate_counts [] in
   let fallback_count =
-    try Hashtbl.find gate_counts (Anti_rationalization.gate_to_string Fallback)
-    with Not_found -> 0
+    Option.value ~default:0
+      (Hashtbl.find_opt gate_counts (Anti_rationalization.gate_to_string Fallback))
   in
   `Assoc [
     ("total_verdicts", `Int !total_verdicts);

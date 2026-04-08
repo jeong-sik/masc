@@ -46,6 +46,7 @@ let lookup_schemas_by_name_exn ~label all_schemas values =
     invalid_arg
       (Printf.sprintf "%s: unknown tool schema(s): %s" label
          (String.concat ", " missing));
+  (* Guard above ensures all names exist — use List.map to preserve _exn contract *)
   requested |> List.map (Hashtbl.find by_name)
 
 let spawned_agent_public_tool_names : string list =

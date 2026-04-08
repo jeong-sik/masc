@@ -51,6 +51,8 @@ let dispatch name event =
 let dispatch_expect_rejected name event =
   match R.dispatch_event ~base_path:bp name event with
   | Ok _ -> Alcotest.fail "expected rejected transition"
+  (* R.dispatch_event returns a closed transition_error type:
+     rejected terminal keepers yield either Terminal_state or Invalid_transition. *)
   | Error (KSM.Terminal_state _) -> ()
   | Error (KSM.Invalid_transition _) -> ()
 

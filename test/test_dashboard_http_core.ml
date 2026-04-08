@@ -148,12 +148,15 @@ let test_dashboard_shell_http_json_includes_paths () =
   let json = Lib.Server_dashboard_http_core.dashboard_shell_http_json config in
   let open Yojson.Safe.Util in
   let paths = json |> member "paths" in
+  let effective_base_path = paths |> member "effective_base_path" |> to_string in
+  let effective_masc_root = paths |> member "effective_masc_root" |> to_string in
+  let expected_masc_root = Unix.realpath (Filename.concat config.base_path ".masc") in
   check bool "paths present" true
     (match paths with `Assoc _ -> true | _ -> false);
-  check bool "paths include effective_base_path" true
-    (match paths |> member "effective_base_path" with
-     | `String value -> String.length value > 0
-     | _ -> false);
+  check string "effective_base_path matches config" (Unix.realpath config.base_path)
+    effective_base_path;
+  check string "effective_masc_root matches config" expected_masc_root
+    effective_masc_root;
   check bool "paths include cwd" true
     (match paths |> member "cwd" with
      | `String value -> String.length value > 0

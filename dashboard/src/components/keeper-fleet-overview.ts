@@ -121,6 +121,11 @@ function FleetSummary({ keepers }: { keepers: Keeper[] }) {
   const offline = keepers.length - active - idle
   const avgCtx = keepers.reduce((s, k) => s + (k.context_ratio ?? 0), 0) / (keepers.length || 1)
   const totalTools = keepers.reduce((s, k) => s + (k.latest_tool_call_count ?? k.metrics_window?.tool_call_count ?? 0), 0)
+  const totalCompactions = keepers.reduce((s, k) => s + (k.compaction_count ?? 0), 0)
+  const compactKeepers = keepers.filter(k => k.metrics_window?.compaction_saved_ratio != null)
+  const avgSavedRatio = compactKeepers.length > 0
+    ? compactKeepers.reduce((s, k) => s + (k.metrics_window?.compaction_saved_ratio ?? 0), 0) / compactKeepers.length
+    : null
 
   return html`
     <div class="flex gap-3 flex-wrap text-[11px] mb-3">
@@ -146,6 +151,16 @@ function FleetSummary({ keepers }: { keepers: Keeper[] }) {
         <span class="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-[var(--white-4)] border border-[var(--white-6)]">
           <span class="font-mono font-medium text-[var(--text-strong)]">${totalTools}</span>
           <span class="text-[var(--text-dim)]">총 도구 호출</span>
+        </span>
+      ` : null}
+      ${totalCompactions > 0 ? html`
+        <span class="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-[var(--white-4)] border border-[var(--white-6)]">
+          <span class="font-mono font-medium text-[#a855f7]">${totalCompactions}</span>
+          <span class="text-[var(--text-dim)]">압축</span>
+          ${avgSavedRatio != null ? html`
+            <span class="font-mono font-medium ${avgSavedRatio >= 0.4 ? 'text-[var(--ok)]' : avgSavedRatio >= 0.2 ? 'text-[var(--warn)]' : 'text-[var(--bad)]'}">${(avgSavedRatio * 100).toFixed(0)}%</span>
+            <span class="text-[var(--text-dim)]">절감</span>
+          ` : null}
         </span>
       ` : null}
     </div>

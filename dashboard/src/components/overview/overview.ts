@@ -475,13 +475,25 @@ function ToolCallHealthPanel() {
   const rateColor = hasRate ? (rate > 0.1 ? 'text-bad-light' : rate > 0.03 ? 'text-warn' : 'text-ok') : 'text-text-dim'
   const ratePct = hasRate ? `${(rate * 100).toFixed(1)}%` : '-'
 
+  const successRate = hasRate ? ((1 - rate) * 100) : null
+  const successColor = successRate != null
+    ? (successRate >= 95 ? 'text-ok' : successRate >= 90 ? 'text-warn' : 'text-bad-light')
+    : 'text-text-dim'
+  const barColor = successRate != null
+    ? (successRate >= 95 ? 'bg-emerald-500' : successRate >= 90 ? 'bg-yellow-500' : 'bg-red-500')
+    : 'bg-gray-500'
+
   return html`
     <div>
-      <${HomeSectionHeader} label="도구 호출" linkLabel="도구 목록 ->" linkTab="monitoring" linkParams=${{ section: 'tools' }} />
-      <div class="grid grid-cols-3 gap-3 max-[640px]:grid-cols-1">
+      <${HomeSectionHeader} label="도구 호출" linkLabel="품질 분석 ->" linkTab="lab" linkParams=${{ section: 'tool-quality' }} />
+      <div class="grid grid-cols-4 gap-3 max-[640px]:grid-cols-2">
         <div class="rounded-lg border border-card-border/30 bg-card/40 p-3 text-center">
           <div class="text-[22px] font-bold text-text-strong">${health.tool_calls.toLocaleString()}</div>
           <div class="text-[11px] text-text-muted mt-1">호출 (${health.window_hours}h)</div>
+        </div>
+        <div class="rounded-lg border border-card-border/30 bg-card/40 p-3 text-center">
+          <div class="text-[22px] font-bold ${successColor}">${successRate != null ? `${successRate.toFixed(1)}%` : '-'}</div>
+          <div class="text-[11px] text-text-muted mt-1">성공률</div>
         </div>
         <div class="rounded-lg border border-card-border/30 bg-card/40 p-3 text-center">
           <div class="text-[22px] font-bold text-text-strong">${health.failures}</div>
@@ -492,6 +504,11 @@ function ToolCallHealthPanel() {
           <div class="text-[11px] text-text-muted mt-1">실패율</div>
         </div>
       </div>
+      ${successRate != null ? html`
+        <div class="mt-2 h-1.5 rounded-full overflow-hidden bg-[var(--white-6)]">
+          <div class="${barColor} h-full rounded-full transition-all" style="width:${Math.min(successRate, 100)}%" />
+        </div>
+      ` : null}
     </div>
   `
 }

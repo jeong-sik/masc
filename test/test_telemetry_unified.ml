@@ -36,18 +36,20 @@ let test_source_of_string_unknown () =
 
 (* ── Empty base_path ─────────────────────────────── *)
 
+let masc_root dir = Filename.concat dir ".masc"
+
 let test_empty_returns_empty () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "telem_empty" in
-  let entries = Telemetry_unified.read_unified ~base_path:dir () in
+  let entries = Telemetry_unified.read_unified ~base_path:dir ~masc_root:(masc_root dir) () in
   Alcotest.(check int) "no entries" 0 (List.length entries)
 
 let test_summary_empty () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "telem_sum_empty" in
-  let json = Telemetry_unified.summary_json ~base_path:dir () in
+  let json = Telemetry_unified.summary_json ~base_path:dir ~masc_root:(masc_root dir) () in
   match json with
   | `Assoc fields ->
     let total = match List.assoc_opt "total_entries" fields with
@@ -68,7 +70,7 @@ let test_agent_event_source () =
     `Assoc [("timestamp", `Float 2000.0); ("event", `String "test2")];
   ];
   let entries =
-    Telemetry_unified.read_unified ~base_path:dir
+    Telemetry_unified.read_unified ~base_path:dir ~masc_root:(masc_root dir)
       ~sources:[Telemetry_unified.Agent_event] ()
   in
   Alcotest.(check int) "two entries" 2 (List.length entries);
@@ -99,11 +101,11 @@ let test_keeper_metrics_per_keeper () =
             ("channel", `String "turn")];
   ];
   (* All keepers *)
-  let all = Telemetry_unified.read_unified ~base_path:dir
+  let all = Telemetry_unified.read_unified ~base_path:dir ~masc_root:(masc_root dir)
       ~sources:[Telemetry_unified.Keeper_metric] () in
   Alcotest.(check int) "two keeper entries" 2 (List.length all);
   (* Filter by keeper *)
-  let cheolsu_only = Telemetry_unified.read_unified ~base_path:dir
+  let cheolsu_only = Telemetry_unified.read_unified ~base_path:dir ~masc_root:(masc_root dir)
       ~sources:[Telemetry_unified.Keeper_metric]
       ~keeper_name:"cheolsu" () in
   Alcotest.(check int) "one cheolsu entry" 1 (List.length cheolsu_only)
@@ -122,7 +124,7 @@ let test_sorted_newest_first () =
     `Assoc [("timestamp", `Float 2000.0); ("event", `String "mid")];
   ];
   let entries =
-    Telemetry_unified.read_unified ~base_path:dir
+    Telemetry_unified.read_unified ~base_path:dir ~masc_root:(masc_root dir)
       ~sources:[Telemetry_unified.Agent_event] ()
   in
   Alcotest.(check int) "three entries" 3 (List.length entries);
@@ -146,7 +148,7 @@ let test_n_limits_output () =
       `Assoc [("timestamp", `Float (Float.of_int (i * 100))); ("i", `Int i)])
   );
   let entries =
-    Telemetry_unified.read_unified ~base_path:dir
+    Telemetry_unified.read_unified ~base_path:dir ~masc_root:(masc_root dir)
       ~sources:[Telemetry_unified.Agent_event] ~n:10 ()
   in
   Alcotest.(check int) "limited to 10" 10 (List.length entries)
@@ -162,7 +164,7 @@ let test_summary_with_data () =
   write_jsonl telemetry_dir [
     `Assoc [("timestamp", `Float 1000.0); ("event", `String "test")];
   ];
-  let json = Telemetry_unified.summary_json ~base_path:dir () in
+  let json = Telemetry_unified.summary_json ~base_path:dir ~masc_root:(masc_root dir) () in
   match json with
   | `Assoc fields ->
     let total = match List.assoc_opt "total_entries" fields with

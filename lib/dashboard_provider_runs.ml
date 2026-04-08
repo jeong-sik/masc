@@ -344,15 +344,17 @@ let execute_single_agent_run ~sw ~net ~provider ~model ~prompt =
                provider)
         else (
           match
-            Oas_worker.run_model_by_label ~model_label:label ~goal:prompt
-              ~system_prompt:(run_system_prompt provider)
-              ~max_turns:4
-              ~max_tokens:(Cascade_inference.resolve_max_tokens
-                ~cascade_name:"provider_benchmark" ~fallback:(fun () -> 2048))
-              ~temperature:(Cascade_inference.resolve_temperature
-                ~cascade_name:"provider_benchmark" ~fallback:(fun () -> 0.2))
-              ~sw ?net
-              ()
+            Masc_oas_bridge.run_safe ~timeout_s:60.0 (fun () ->
+              Oas_worker.run_model_by_label ~model_label:label ~goal:prompt
+                ~system_prompt:(run_system_prompt provider)
+                ~max_turns:4
+                ~max_tokens:(Cascade_inference.resolve_max_tokens
+                  ~cascade_name:"provider_benchmark" ~fallback:(fun () -> 2048))
+                ~temperature:(Cascade_inference.resolve_temperature
+                  ~cascade_name:"provider_benchmark" ~fallback:(fun () -> 0.2))
+                ~sw ?net
+                ()
+            )
           with
           | Ok result ->
               Ok (response_text_of_api_response result.response)

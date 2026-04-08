@@ -536,6 +536,7 @@
    oas_worker_cascade
    oas_worker_exec
    oas_worker_named
+   masc_oas_bridge
    oas_sse_bridge
    env_config_introspect
    runtime_params

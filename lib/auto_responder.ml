@@ -161,10 +161,12 @@ let call_model_direct_sync ~agent_type ~prompt =
   let cascade_name = cascade_name_for_agent_type agent_type in
   try
     match
-      Oas_worker.run_named ~cascade_name
-        ~goal:prompt ~max_turns:1
-        ~accept:model_response_is_valid ~max_tokens:500
-        ()
+      Masc_oas_bridge.run_safe ~timeout_s:60.0 (fun () ->
+        Oas_worker.run_named ~cascade_name
+          ~goal:prompt ~max_turns:1
+          ~accept:model_response_is_valid ~max_tokens:500
+          ()
+      )
     with
     | Ok result ->
         let resp = result.Oas_worker.response in

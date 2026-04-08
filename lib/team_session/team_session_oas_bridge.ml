@@ -645,17 +645,19 @@ let planned_worker_to_entry_with_state
         ~execution_scope:pw.execution_scope ~tool_names
     ) delivery_contract in
     match
-      Oas_worker.run_named_with_masc_tools
-        ~cascade_name ~goal:prompt ~system_prompt
-        ~masc_tools:scoped_masc_tools ~dispatch:dispatch_with_defaults
-        ~max_turns
-        ~hooks:progressive_hooks
-        ~temperature:(Cascade_inference.resolve_temperature
-          ~cascade_name ~fallback:(fun () -> 0.3))
-        ~max_tokens:(Cascade_inference.resolve_max_tokens
-          ~cascade_name ~fallback:(fun () -> 4096))
-        ?raw_trace ~proof_ref ?contract ~sw
-        ()
+      Masc_oas_bridge.run_safe ~timeout_s:180.0 (fun () ->
+        Oas_worker.run_named_with_masc_tools
+          ~cascade_name ~goal:prompt ~system_prompt
+          ~masc_tools:scoped_masc_tools ~dispatch:dispatch_with_defaults
+          ~max_turns
+          ~hooks:progressive_hooks
+          ~temperature:(Cascade_inference.resolve_temperature
+            ~cascade_name ~fallback:(fun () -> 0.3))
+          ~max_tokens:(Cascade_inference.resolve_max_tokens
+            ~cascade_name ~fallback:(fun () -> 4096))
+          ?raw_trace ~proof_ref ?contract ~sw
+          ()
+      )
     with
     | Ok result ->
         Hashtbl.replace success_by_agent name true;

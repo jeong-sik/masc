@@ -1209,7 +1209,7 @@ let run_turn
       | Error e -> Error (Oas.Error.Internal e)
       | Ok oas_allowed_paths ->
         (match
-        Keeper_llm_bridge.run_with_timeout_and_fallback ~timeout_s:45.0 (fun () ->
+        Keeper_llm_bridge.run_with_timeout_and_fallback ~timeout_s:Env_config_keeper.KeeperKeepalive.oas_timeout_sec (fun () ->
           Oas_worker.run_named
             ~cascade_name
             ~goal:user_message

@@ -818,3 +818,15 @@ export function fetchTelemetry(opts?: {
 export function fetchTelemetrySummary(): Promise<TelemetrySummaryResponse> {
   return get<TelemetrySummaryResponse>('/api/v1/dashboard/telemetry/summary')
 }
+
+// --- Excuse Patterns ---
+
+export type ExcusePattern = [string, string]
+
+export function fetchExcusePatterns(): Promise<ExcusePattern[]> {
+  return get<ExcusePattern[]>('/api/v1/dashboard/config/excuse-patterns')
+}
+
+export function updateExcusePatterns(patterns: ExcusePattern[]): Promise<{ ok: boolean }> {
+  return post<{ ok: boolean }>('/api/v1/dashboard/config/excuse-patterns', patterns)
+}

@@ -501,6 +501,35 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           let json = Env_config_introspect.to_json () in
           h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
 
+      | `GET, "/api/v1/dashboard/config/excuse-patterns" ->
+          let patterns = Anti_rationalization.load_excuse_patterns () in
+          let json_items = List.map (fun (pat, reason) -> `List [`String pat; `String reason]) patterns in
+          let json = `List json_items in
+          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+
+      | `POST, "/api/v1/dashboard/config/excuse-patterns" ->
+          h2_read_body h2_reqd (fun body_str ->
+            try
+               let json = Yojson.Safe.from_string body_str in
+               match Anti_rationalization.parse_excuse_patterns_json json with
+               | Error msg ->
+                   let err_json = Yojson.Safe.to_string (`Assoc [("ok", `Bool false); ("error", `String msg)]) in
+                   h2_respond_json h2_reqd err_json ~status:`Bad_request ~extra_headers:cors
+               | Ok patterns ->
+                   (match Anti_rationalization.save_excuse_patterns patterns with
+                   | Ok () ->
+                       h2_respond_json h2_reqd {|{"ok":true}|} ~extra_headers:cors
+                   | Error msg ->
+                       let err_json = Yojson.Safe.to_string (`Assoc [("ok", `Bool false); ("error", `String msg)]) in
+                       h2_respond_json h2_reqd err_json ~status:`Internal_server_error ~extra_headers:cors)
+             with
+             | Eio.Cancel.Cancelled _ as exn -> raise exn
+             | _exn ->
+               h2_respond_json h2_reqd
+                 {|{"ok":false,"error":"Invalid JSON body"}|}
+                 ~status:`Bad_request ~extra_headers:cors
+          )
+
       | `GET, "/api/v1/dashboard/namespace-truth"
       | `GET, "/api/v1/dashboard/room-truth" ->
           let state = get_server_state () in

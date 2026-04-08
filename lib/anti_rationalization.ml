@@ -40,8 +40,7 @@ type review_result = {
 (* Excuse pattern detection (local, no LLM)                         *)
 (* ================================================================ *)
 
-(** Known avoidance phrases. Matched case-insensitively as substrings. *)
-let excuse_patterns = [
+let default_excuse_patterns = [
   ("pre-existing",        "claiming the problem already existed");
   ("out of scope",        "declaring work out of scope");
   ("beyond the scope",    "declaring work beyond scope");
@@ -57,11 +56,90 @@ let excuse_patterns = [
   ("cannot reproduce",    "dismissing without investigation");
 ]
 
+(** Cached patterns. Loaded once from disk; invalidated by [save_excuse_patterns]. *)
+let cached_patterns : (string * string) list option ref = ref None
+
+let excuse_patterns_path () =
+  let config_dir = (Config_dir_resolver.resolve ()).config_root.path in
+  Filename.concat config_dir "excuse_patterns.json"
+
+(** Parse a JSON value into a validated pattern list.
+    Returns [Error msg] if any item is malformed (no silent drops). *)
+let max_excuse_pattern_len = 500
+let max_excuse_entries = 100
+
+let parse_excuse_patterns_json (json : Yojson.Safe.t) : ((string * string) list, string) result =
+  match json with
+  | `List items ->
+    if List.length items > max_excuse_entries then
+      Error (Printf.sprintf "Too many entries: %d (max %d)" (List.length items) max_excuse_entries)
+    else
+      let rec validate acc = function
+        | [] -> Ok (List.rev acc)
+        | `List [`String pat; `String reason] :: rest ->
+          if pat = "" || reason = "" then
+            Error "Pattern and reason must be non-empty strings"
+          else if String.length pat > max_excuse_pattern_len
+               || String.length reason > max_excuse_pattern_len then
+            Error (Printf.sprintf "String too long (max %d chars)" max_excuse_pattern_len)
+          else
+            validate ((pat, reason) :: acc) rest
+        | item :: _ ->
+          Error (Printf.sprintf "Invalid pattern entry: expected [string, string], got %s"
+            (Yojson.Safe.to_string item))
+      in
+      validate [] items
+  | _ -> Error "Expected JSON array of [pattern, reason] pairs"
+
+(** Load excuse patterns from config/excuse_patterns.json.
+    Returns cached value if available. Falls back to defaults on missing file. *)
+let load_excuse_patterns () : (string * string) list =
+  match !cached_patterns with
+  | Some p -> p
+  | None ->
+    let patterns =
+      try
+        let path = excuse_patterns_path () in
+        if Sys.file_exists path then
+          let json = Yojson.Safe.from_file path in
+          match parse_excuse_patterns_json json with
+          | Ok p -> p
+          | Error msg ->
+            Log.Misc.warn "excuse_patterns: parse error, using defaults: %s" msg;
+            default_excuse_patterns
+        else default_excuse_patterns
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn ->
+        Log.Misc.warn "excuse_patterns: load error, using defaults: %s" (Printexc.to_string exn);
+        default_excuse_patterns
+    in
+    cached_patterns := Some patterns;
+    patterns
+
+(** Save excuse patterns to config/excuse_patterns.json.
+    Uses atomic write (write-to-temp + rename) to prevent corruption.
+    Invalidates the in-memory cache on success. *)
+let save_excuse_patterns (patterns : (string * string) list) : (unit, string) result =
+  try
+    let path = excuse_patterns_path () in
+    let json_items = List.map (fun (pat, reason) -> `List [`String pat; `String reason]) patterns in
+    let json = `List json_items in
+    let tmp = path ^ ".tmp" in
+    Yojson.Safe.to_file tmp json;
+    Sys.rename tmp path;
+    cached_patterns := Some patterns;
+    Ok ()
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | _exn -> Error "Failed to save excuse patterns"
+
 let min_notes_length = 10
 
 (** Check if notes contain a known excuse pattern.
     Returns [Some (pattern, reason)] on match, [None] otherwise. *)
 let find_excuse_pattern (notes : string) : (string * string) option =
+  let patterns = load_excuse_patterns () in
   let lower = String.lowercase_ascii notes in
   List.find_opt (fun (pat, _reason) ->
     (* Simple substring search without Str module *)
@@ -75,7 +153,7 @@ let find_excuse_pattern (notes : string) : (string * string) option =
         else scan (i + 1)
       in
       scan 0
-  ) excuse_patterns
+  ) patterns
 
 (* ================================================================ *)
 (* LLM verification prompt                                          *)

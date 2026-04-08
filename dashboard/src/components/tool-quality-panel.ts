@@ -47,13 +47,22 @@ const error: Signal<string | null> = signal(null)
 async function fetchToolQuality() {
   loading.value = true
   error.value = null
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 15_000)
   try {
-    const resp = await fetch('/api/v1/dashboard/tool-quality?n=5000')
+    const resp = await fetch('/api/v1/dashboard/tool-quality?n=5000', { signal: controller.signal })
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
-    data.value = await resp.json()
+    const json = await resp.json()
+    if (typeof json?.total !== 'number') throw new Error('unexpected response shape')
+    data.value = json as ToolQualityData
   } catch (e) {
-    error.value = e instanceof Error ? e.message : 'fetch failed'
+    if (e instanceof DOMException && e.name === 'AbortError') {
+      error.value = 'request timeout (15s)'
+    } else {
+      error.value = e instanceof Error ? e.message : 'fetch failed'
+    }
   } finally {
+    clearTimeout(timeout)
     loading.value = false
   }
 }
@@ -214,10 +223,11 @@ export function ToolQualityPanel() {
         <button
           class="text-[10px] px-2 py-0.5 rounded bg-[var(--bg-subtle)] text-[var(--text-dim)] hover:text-[var(--text)]"
           onClick=${fetchToolQuality}
+          aria-label="Refresh tool quality metrics"
         >Refresh</button>
       </div>
 
-      <div class="grid grid-cols-3 gap-3">
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div class="text-center">
           <div class="text-lg font-mono ${successColor.value}">${d.success_rate.toFixed(1)}%</div>
           <div class="text-[9px] text-[var(--text-dim)] uppercase">Success Rate</div>

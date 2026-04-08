@@ -14,6 +14,7 @@
 type lock_entry = {
   mu : Eio.Mutex.t;
   mutable last_used : float;
+  mutable active : int;   (** Number of fibers currently holding or waiting on this mutex *)
 }
 
 (** Self-contained config. [masc_process] is below [masc_config] in the
@@ -36,27 +37,40 @@ let prune_stale_entries () =
   if Hashtbl.length table > max_lock_entries then begin
     let now = Time_compat.now () in
     Hashtbl.filter_map_inplace (fun _path entry ->
-      if now -. entry.last_used > stale_lock_seconds then None
+      if entry.active > 0 then Some entry  (* in use — never prune *)
+      else if now -. entry.last_used > stale_lock_seconds then None
       else Some entry
     ) table
   end
 
-(** Get or create a mutex for the given file path.
+(** Get or create a lock entry for the given file path.
+    Increments [active] to prevent prune_stale_entries from removing
+    in-use entries (see TLA+ FileLockStarvation spec).
     Falls back to direct Hashtbl access when no Eio context is available
     (e.g. in unit tests that don't use Eio_main.run). *)
-let get_lock path =
+let get_entry path =
   let f () =
     prune_stale_entries ();
-    match Hashtbl.find_opt table path with
-    | Some entry ->
-      entry.last_used <- Time_compat.now ();
-      entry.mu
-    | None ->
-      let entry = { mu = Eio.Mutex.create (); last_used = Time_compat.now () } in
-      Hashtbl.replace table path entry;
-      entry.mu
+    let entry =
+      match Hashtbl.find_opt table path with
+      | Some entry ->
+        entry.last_used <- Time_compat.now ();
+        entry
+      | None ->
+        let entry = { mu = Eio.Mutex.create (); last_used = Time_compat.now (); active = 0 } in
+        Hashtbl.replace table path entry;
+        entry
+    in
+    entry.active <- entry.active + 1;
+    entry
   in
   Eio_guard.with_mutex table_mu f
+
+let release_entry entry =
+  let f () = entry.active <- max 0 (entry.active - 1) in
+  Eio_guard.with_mutex table_mu f
+
+let get_lock path = (get_entry path).mu
 
 let run_blocking_lock_op f = Eio_guard.run_in_systhread f
 
@@ -142,8 +156,10 @@ let release_flock_fd fd =
     Use this for in-memory backends that need single-process fiber
     serialization but do not have a real filesystem artifact to flock. *)
 let with_mutex path f =
-  let mu = get_lock path in
-  Eio_guard.with_mutex mu f
+  let entry = get_entry path in
+  Common.protect ~module_name:"file_lock_eio" ~finally_label:"release_entry"
+    ~finally:(fun () -> release_entry entry)
+    (fun () -> Eio_guard.with_mutex entry.mu f)
 
 (** Run [f] while holding both the cooperative Eio.Mutex and an
     OS-level flock on [path].lock. The flock uses non-blocking F_TLOCK

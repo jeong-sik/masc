@@ -331,7 +331,7 @@ let handle_leave (ctx : context) : result option =
   let _pushed = Session.push_notification_to_active_agents registry ~event:leave_event in
   Mcp_server.sse_broadcast state leave_event;
   let result = Room.leave config ~agent_name in
-  Session.unregister_sync registry ~agent_name;
+  Session.unregister registry ~agent_name;
   if Option.is_none mcp_session_id then begin
     let session_id = Option.value ~default:"default" (Sys.getenv_opt "TERM_SESSION_ID") in
     let agent_file = Printf.sprintf "/tmp/.masc_agent_%s" session_id in

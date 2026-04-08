@@ -57,17 +57,18 @@ async function fetchFleetData() {
       keeperNames.map(name => fetchKeeperConfig(name))
     )
     for (let i = 0; i < keeperNames.length; i++) {
-      const result = configs[i]
-      if (result.status === 'fulfilled') {
-        const cfg = result.value
-        const m = (cfg as any).metrics as KeeperConfigMetrics | undefined
+      const settled = configs[i]
+      if (settled && settled.status === 'fulfilled') {
+        const cfg = settled.value as Record<string, unknown>
+        const m = cfg.metrics as KeeperConfigMetrics | undefined
         if (m) {
+          const cascadeName = (cfg.cascade_name as string) ?? ''
           entries.push({
-            name: keeperNames[i],
+            name: keeperNames[i] ?? 'unknown',
             metrics: m,
-            cascade_name: (cfg as any).cascade_name ?? '',
-            model_used: m.last_model_used || (cfg as any).cascade_name || '',
-            context_ratio: (cfg as any).context?.ratio ?? 0,
+            cascade_name: cascadeName,
+            model_used: m.last_model_used || cascadeName || '',
+            context_ratio: ((cfg.context as Record<string, unknown>)?.ratio as number) ?? 0,
             compaction_count: m.compaction_count ?? 0,
           })
         }

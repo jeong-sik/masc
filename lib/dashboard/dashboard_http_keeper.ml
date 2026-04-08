@@ -69,37 +69,6 @@ let tokens_per_sec_json ~tokens ~latency_ms =
   if tokens <= 0 || latency_ms <= 0 then `Null
   else `Float ((float_of_int tokens *. 1000.0) /. float_of_int latency_ms)
 
-let provider_name_of_label label =
-  match String.index_opt label ':' with
-  | Some idx when idx > 0 ->
-      String.sub label 0 idx |> String.trim |> String.lowercase_ascii
-  | _ -> "unknown"
-
-let raw_model_id_of_label label =
-  match String.index_opt label ':' with
-  | Some idx when idx + 1 < String.length label ->
-      String.sub label (idx + 1) (String.length label - idx - 1) |> String.trim
-  | _ -> String.trim label
-
-let resolved_model_json_of_label label =
-  match Llm_provider.Cascade_config.parse_model_string label with
-  | None ->
-      Some
-        (`Assoc
-          [
-            ("provider", `String (provider_name_of_label label));
-            ("model_id", `String (raw_model_id_of_label label));
-            ("max_context", `Int (Oas_model_resolve.max_context_of_label label));
-          ])
-  | Some cfg ->
-      Some
-        (`Assoc
-          [
-            ("provider", `String (provider_name_of_label label));
-            ("model_id", `String cfg.model_id);
-            ("max_context", `Int (Oas_model_resolve.max_context_of_label label));
-          ])
-
 let keeper_names (config : Room.config) =
   Keeper_types.keeper_names config
 

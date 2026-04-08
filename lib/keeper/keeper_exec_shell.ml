@@ -468,7 +468,7 @@ let handle_keeper_shell_readonly
               ; "command", `String cmd_str
               ; "status", Keeper_alerting_path.process_status_to_json st
               ; "output", `String out
-              ])
+              ]))
   | _ ->
     Yojson.Safe.to_string
       (`Assoc

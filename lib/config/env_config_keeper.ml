@@ -262,12 +262,46 @@ module KeeperKeepalive = struct
 
   (** Per-call timeout in seconds for a single OAS Agent.run execution.
       Guards against indefinite LLM response waits within a turn.
-      Local LLMs with large context (200k+) can take 120-180s per call;
-      the previous hardcoded 45s was too short for local inference.
-      Env: [MASC_KEEPER_OAS_TIMEOUT_SEC]. Default: 300. Range: [30, 600]. *)
+      With large context (200k+), each LLM call takes 60-120s, so
+      a 5-turn Agent.run can need 300-600s.
+
+      When [MASC_KEEPER_OAS_TIMEOUT_SEC] is set, that value is used directly.
+      Otherwise, {!oas_timeout_for_context} computes an adaptive timeout
+      based on max_context tokens: base 180s + 1.5s per 1K context tokens,
+      capped at [30, 600].
+
+      Env: [MASC_KEEPER_OAS_TIMEOUT_SEC]. Default: adaptive. Range: [30, 600]. *)
+  let oas_timeout_sec_override =
+    match Sys.getenv_opt "MASC_KEEPER_OAS_TIMEOUT_SEC" with
+    | Some raw ->
+      Some (Float.max 30.0 (Float.min 600.0
+        (Option.value ~default:300.0 (Float.of_string_opt (String.trim raw)))))
+    | None -> None
+
+  let oas_timeout_for_context ~(max_context : int) : float =
+    match oas_timeout_sec_override with
+    | Some v -> v
+    | None ->
+      let base = 180.0 in
+      let per_1k = 1.5 in
+      let extra = Float.of_int max_context /. 1000.0 *. per_1k in
+      Float.max 30.0 (Float.min 600.0 (base +. extra))
+
+  (** Backward-compatible accessor: returns the env override or 300s default.
+      Prefer {!oas_timeout_for_context} when max_context is available. *)
   let oas_timeout_sec =
-    Float.max 30.0 (Float.min 600.0
-      (get_float ~default:300.0 "MASC_KEEPER_OAS_TIMEOUT_SEC"))
+    Option.value ~default:300.0 oas_timeout_sec_override
+
+  (** Maximum turns per single OAS Agent.run call.
+      Keeper resumes via checkpoint in the next keepalive cycle when
+      {!Oas_worker.TurnBudgetExhausted} is returned.
+      Previous default of 200 caused "ambiguous partial commit" errors:
+      the 300s timeout would fire mid-turn after tools had already executed,
+      leaving the keeper in an ambiguous state. With 5 turns per call and
+      adaptive timeout, each turn gets a realistic time budget.
+      Env: [MASC_KEEPER_OAS_MAX_TURNS_PER_CALL]. Default: 5. Range: [1, 50]. *)
+  let oas_max_turns_per_call =
+    max 1 (min 50 (get_int ~default:5 "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL"))
 
   (** Consecutive idle tool repetitions before on_idle hook issues Skip.
       Below this: graduated Nudge messages.

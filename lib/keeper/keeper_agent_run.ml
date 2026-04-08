@@ -162,8 +162,8 @@ let run_turn
       ~(user_message : string)
       ~(cascade_name : string)
       ~(generation : int)
-      ?(max_turns : int = 200)
-      (* large budget: keeper needs research + code + PR in one cycle *)
+      ?(max_turns : int = Env_config_keeper.KeeperKeepalive.oas_max_turns_per_call)
+      (* Per-call turn budget. Keeper resumes via checkpoint if exhausted. *)
       ?(max_idle_turns : int = 3)
       ?(history_user_source = "direct_user")
       ?(history_assistant_source = "direct_assistant")
@@ -1365,7 +1365,7 @@ let run_turn
   with
   | Error e -> Error (Oas.Error.Internal e)
   | Ok oas_allowed_paths ->
-    let timeout_s = Env_config_keeper.KeeperKeepalive.oas_timeout_sec in
+    let timeout_s = Env_config_keeper.KeeperKeepalive.oas_timeout_for_context ~max_context in
     (match
        Keeper_llm_bridge.run_with_timeout_and_fallback ~timeout_s (fun () ->
          Oas_worker.run_named

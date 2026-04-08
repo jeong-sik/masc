@@ -153,6 +153,7 @@ let run_named
     ?context_injector
     ?context
     ?slot_id
+    ?enable_thinking
     ?approval
     ?oas_checkpoint
     ?event_bus
@@ -206,6 +207,7 @@ let run_named
       context_injector;
       context;
       slot_id;
+      enable_thinking;
       event_bus;
       approval;
     }

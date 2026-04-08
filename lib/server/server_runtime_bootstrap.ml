@@ -67,7 +67,11 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
   Heuristic_metrics.init ~base_path;
   Agent_stress.init ~base_path;
   (* Load tool policy presets from config/tool_policy.toml *)
-  Keeper_exec_tools.init_policy_config ~base_path;
+  (match Keeper_exec_tools.init_policy_config ~base_path with
+   | Ok () -> ()
+   | Error msg ->
+       Log.Server.error "Fatal tool policy config load failure: %s" msg;
+       exit 1);
   let state =
     Mcp_eio.create_state_eio ~sw ~env:caqti_env ~proc_mgr ~fs ~clock
       ~mono_clock ~net
@@ -224,7 +228,7 @@ let legacy_room_candidates rooms_dir =
                    None
            else
              None)
-    with _ -> []
+    with Eio.Cancel.Cancelled _ as e -> raise e | _ -> []
 
 let infer_current_room_from_legacy_dirs rooms_dir =
   match legacy_room_candidates rooms_dir with
@@ -444,6 +448,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
   (* Initialize Eio environment for MODEL HTTP calls (cohttp-eio via OAS Provider) *)
   Masc_eio_env.init ~sw ~net ~clock ();
   Discovery_cache.set_env ~sw ~net;
+  Discovery_cache.set_base_path base_path;
   (* Start global rate-limit bucket cleanup loop to prevent unbounded growth of
      per-client buckets.  The loop is a background fiber that wakes periodically
      and removes stale entries according to MASC_RATE_LIMIT_ENTRY_MAX_AGE_SEC. *)
@@ -637,7 +642,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
               let client = Masc_grpc_client.create_from_env ~sw ~env in
               Keeper_keepalive.set_grpc_client ~env client;
               Log.Server.info "gRPC keeper client initialized"
-            with exn ->
+            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
               Log.Server.warn "gRPC keeper client init failed: %s"
                 (Printexc.to_string exn))
        | _ -> ());

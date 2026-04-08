@@ -219,14 +219,11 @@ Board 변경 시 `SELECT pg_notify('masc_board', payload)` 실행. Payload는 JS
 | `comment_added` | post_id, comment_id, author |
 | `comment_voted` | comment_id, voter, direction |
 
-### 7.2 Board_listener
+### 7.2 SSE Dispatch (formerly Board_listener)
 
-Caqti는 PostgreSQL LISTEN을 지원하지 않으므로 `masc_pubsub` 테이블 폴링 방식 사용.
-
-- 폴링 간격: 0.5초
-- 배치 크기: 최대 10건 (`DELETE ... FOR UPDATE SKIP LOCKED RETURNING`)
-- 이벤트를 `Sse.broadcast`로 SSE 클라이언트에 전파
-- 연속 에러 시 exponential backoff (최대 30초)
+`Board_listener` (pg_notify polling) is removed. SSE events are now emitted
+directly via `Board_dispatch` at write time — no polling, no PG dependency
+for real-time updates.
 
 ---
 
@@ -324,9 +321,7 @@ Board (JSONL)     Board_pg (PostgreSQL)
   Board_core        Board_pg_queries
   Board_types       Caqti_eio.Pool
   Board_votes
-                  Board_listener (pg_notify -> SSE)
-                       |
-                    Sse.broadcast
+                  Board_dispatch -> Sse.broadcast
 ```
 
 외부 의존: `Thompson_sampling` (투표 피드백), `Agent_economy` (credit 부여), `Room` (vote tools).

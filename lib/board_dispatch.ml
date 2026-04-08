@@ -132,9 +132,9 @@ let backend () =
         Log.BoardLog.info "JSONL backend initialized";
         (match !backend_state with
          | Active backend -> backend
-         | Uninitialized -> failwith "[Board_dispatch] auto-init failed to activate backend"))
+         | Uninitialized -> raise (Failure "[Board_dispatch] auto-init failed to activate backend")))
 
-(** Get PostgreSQL pool if PG backend is active (for Board_listener) *)
+(** Get PostgreSQL pool if PG backend is active *)
 let get_pg_pool () =
   with_board_ro (fun () ->
     match !backend_state with

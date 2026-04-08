@@ -156,7 +156,7 @@ let record_verdict
     task_title = req.task_title;
     agent_name = req.agent_name;
     verdict = verdict_str;
-    gate = result.gate;
+    gate = Anti_rationalization.gate_to_string result.gate;
     evaluator_cascade = result.evaluator_cascade;
     generator_cascade = result.generator_cascade;
     fallback_reason = result.fallback_reason;
@@ -166,7 +166,7 @@ let record_verdict
   match on_harness_verdict with
   | Some cb ->
     (try cb (to_harness_verdict record)
-     with exn ->
+     with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
        Log.Harness.warn "[eval_calibration] on_harness_verdict callback failed: %s"
          (Printexc.to_string exn))
   | None -> ()

@@ -362,7 +362,7 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
       (* Catch all exceptions including Cancelled — this function is called
          from Switch.on_release where re-raising would mask the original exn. *)
       (try Httpun.Body.Writer.close writer
-       with exn ->
+       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
          Log.Misc.warn "keeper_stream writer close: %s"
            (Printexc.to_string exn))
     end

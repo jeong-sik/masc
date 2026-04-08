@@ -196,7 +196,8 @@ let has_room_signal_section
   | None -> false
 
 let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
-    ~(observation : Keeper_world_observation.world_observation) : string * string
+    ~(observation : Keeper_world_observation.world_observation)
+    ?(diversity_hint : string option) () : string * string
     =
   let trait_lines =
     String.concat ""
@@ -392,7 +393,9 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
      in instructions. *)
   let allowed_tools = Keeper_tool_policy.keeper_allowed_tool_names meta in
   if allowed_tools <> [] then (
-    Buffer.add_string ubuf "\n### Available Tools\n";
+    Buffer.add_string ubuf "\n### Available Tools\n\
+      These tools are already loaded. Call them directly — no keeper_tool_search needed.\n\
+      Use keeper_tool_search ONLY for tools NOT listed here.\n";
     List.iter (fun name ->
       match Keeper_tool_policy.tool_hint_of name with
       | Some hint ->
@@ -443,6 +446,14 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
       (Printf.sprintf "- Cycles total: %d (visible: %d, silent: %d)\n"
          prt.count_total prt.visible_count_total
          (prt.count_total - prt.visible_count_total)));
+  (* Tool diversity hint — deterministic gate from entropy analysis.
+     Injected when normalized entropy is below threshold, prompting the
+     LLM (non-deterministic) to explore underused tools. *)
+  (match diversity_hint with
+   | Some hint ->
+     Buffer.add_string ubuf "\n### Tool Diversity Signal\n";
+     Buffer.add_string ubuf (Printf.sprintf "%s\n" hint)
+   | None -> ());
   (* Peer keepers — show other running keepers so this keeper can @mention them *)
   let peer_keepers =
     Keeper_registry.all ~base_path ()
@@ -493,7 +504,7 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
            else String.sub title 0 57 ^ "..."
          in
          Printf.sprintf "- \"%s\"" truncated)
-     with _ -> [])
+     with Eio.Cancel.Cancelled _ as e -> raise e | _ -> [])
   in
   if own_recent_posts <> [] then (
     Buffer.add_string ubuf "\n### Your Recent Board Posts\n";
@@ -502,6 +513,32 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
        do something genuinely different this turn.\n";
     Buffer.add_string ubuf (String.concat "\n" own_recent_posts);
     Buffer.add_string ubuf "\n");
+  (* Work Discovery — nudge keeper to scan for actionable work *)
+  if observation.work_discovery_due then (
+    Buffer.add_string ubuf "\n### Work Discovery Due\n";
+    Buffer.add_string ubuf
+      "No work discovery scan in the configured interval. \
+       Use your available tools to scan for actionable work.\n";
+    (match meta.work_discovery_sources with
+     | Some sources ->
+       Buffer.add_string ubuf "Configured sources to check:\n";
+       List.iter (fun src ->
+         Buffer.add_string ubuf (Printf.sprintf "- %s\n" src)) sources
+     | None -> ());
+    (match meta.work_discovery_guidance with
+     | Some guide ->
+       Buffer.add_string ubuf (Printf.sprintf "Guidance: %s\n" guide)
+     | None -> ());
+    Buffer.add_string ubuf
+      "If you find actionable items, create tasks or claim existing ones. \
+       If nothing found, record what you checked.\n");
+  (* Behavioral Self-Assessment — telemetry feedback from decision log *)
+  (match observation.behavioral_stats with
+   | Some stats ->
+     Buffer.add_string ubuf "\n";
+     Buffer.add_string ubuf
+       (Keeper_telemetry_feedback.render_feedback_block ~stats)
+   | None -> ());
   let routes = actionable_routes ~allowed_tools observation in
   if routes <> [] then (
     Buffer.add_string ubuf "\n### Actionable Routes\n";

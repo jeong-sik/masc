@@ -13,8 +13,13 @@ let result_to_response = function
   | Error e -> (false, Types.masc_error_to_string e)
 
 (** Handle masc_agents *)
-let handle_agents ctx _args =
+let handle_agents ctx args =
+  let limit = get_int args "limit" 20 |> max 1 |> min 50 in
   let json = Room.get_agents_status ctx.config in
+  let json = match json with
+    | `List items -> `List (List.filteri (fun i _ -> i < limit) items)
+    | other -> other
+  in
   (true, Yojson.Safe.pretty_to_string json)
 
 (** Handle masc_register_capabilities *)
@@ -42,13 +47,15 @@ let handle_find_by_capability ctx args =
 
 (** Handle masc_get_metrics *)
 let handle_get_metrics ctx args =
-  let target = get_string args "agent_name" "" in
+  let ( let*! ) = Tool_args.( let*! ) in
+  let*! target = get_string_required args "agent_name" in
   let days = get_int args "days" 7 in
   match Metrics_store_eio.calculate_agent_metrics ctx.config ~agent_id:target ~days with
   | Some metrics ->
       (true, Yojson.Safe.pretty_to_string (Metrics_store_eio.agent_metrics_to_yojson metrics))
   | None ->
-      (false, Printf.sprintf "❌ No metrics found for agent: %s" target)
+      error_result_typed ~code:Not_found
+        (Printf.sprintf "no metrics found for agent: %s" target)
 
 (** Create default metrics for agent *)
 let create_default_metrics ~agent_id ~days =
@@ -214,14 +221,23 @@ let pick_random = function
 
 (** Handle masc_select_agent *)
 let handle_select_agent ctx args =
-  let available = match Yojson.Safe.Util.member "available_agents" args with
-    | `List items -> List.filter_map (function `String s -> Some s | _ -> None) items
+  let available =
+    match Yojson.Safe.Util.member "available_agents" args with
+    | `List items ->
+        List.filter_map
+          (function
+            | `String s ->
+                let trimmed = String.trim s in
+                if trimmed = "" then None else Some trimmed
+            | _ -> None)
+          items
     | _ -> []
   in
   let strategy = get_string args "strategy" "capability_first" in
   let days = get_int args "days" 7 in
   if available = [] then
-    (false, "❌ available_agents required")
+    error_result_typed ~code:Validation_error
+      "available_agents must contain at least one non-empty agent name"
   else
     let metrics_list = List.map (fun a -> (a, metrics_for ctx ~days a)) available in
     let min_avg = min_avg_time metrics_list in
@@ -286,8 +302,10 @@ let handle_select_agent ctx args =
 (** Handle masc_collaboration_graph *)
 let handle_collaboration_graph ctx args =
   let format = get_string args "format" "text" in
+  let limit = get_int args "limit" 20 |> max 1 |> min 100 in
   let (synapses, agents) = Hebbian_eio.get_graph_data ctx.config in
   if format = "json" then
+    let synapses = List.filteri (fun i _ -> i < limit) synapses in
     let json = `Assoc [
       ("agents", `List (List.map (fun a -> `String a) agents));
       ("synapses", `List (List.map Hebbian_eio.synapse_to_json synapses));
@@ -297,6 +315,7 @@ let handle_collaboration_graph ctx args =
     let lines =
       synapses
       |> List.sort (fun a b -> compare b.Hebbian_eio.weight a.Hebbian_eio.weight)
+      |> List.filteri (fun i _ -> i < limit)
       |> List.map (fun s ->
           Printf.sprintf "%s → %s (%.2f, success:%d, failure:%d)"
             s.Hebbian_eio.from_agent s.Hebbian_eio.to_agent
@@ -338,6 +357,7 @@ let handle_agent_card _ctx args =
 (** Handle masc_agent_relations — proxy to Neo4j/GraphQL.
     MASC is a consumer: it queries the GraphQL API, which owns the data. *)
 let handle_agent_relations ctx args =
+  let _limit = get_int args "limit" 20 |> max 1 |> min 50 in
   let target = match get_string_opt args "agent_name" with
     | Some name when name <> "" -> name
     | _ -> ctx.agent_name

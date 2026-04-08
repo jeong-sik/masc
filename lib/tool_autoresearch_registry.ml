@@ -12,7 +12,7 @@ let pending_hypotheses : (string, string) Hashtbl.t =
 (** Code generator type for test injection.
     Returns Ok (hypothesis, new_code) or Error reason. *)
 type code_generator =
-  goal:string -> baseline:float ->
+  goal:string -> baseline:float -> lower_is_better:bool ->
   history:Autoresearch.cycle_record list ->
   insights:string list ->
   target_file:string -> file_content:string ->

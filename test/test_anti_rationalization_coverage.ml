@@ -146,11 +146,11 @@ let () = test "substantive_notes_no_pattern_match" (fun () ->
 
 let () = test "review_result_gate_field_length" (fun () ->
   let r = Anti_rationalization.review (make_request "") in
-  assert (r.gate = "length"))
+  assert (r.gate = Anti_rationalization.Length))
 
 let () = test "review_result_gate_field_excuse" (fun () ->
   let r = Anti_rationalization.review (make_request "This is out of scope entirely") in
-  assert (r.gate = "excuse"))
+  assert (r.gate = Anti_rationalization.Excuse))
 
 let () = test "review_result_evaluator_cascade_default" (fun () ->
   let r = Anti_rationalization.review (make_request "") in
@@ -175,7 +175,7 @@ let () = test "contract_unmet_rejects" (fun () ->
   let r = Anti_rationalization.review
     ~completion_contract:["test coverage"; "migration"]
     (make_request "Applied fix to the login flow.") in
-  assert (r.gate = "contract");
+  assert (r.gate = Anti_rationalization.Contract);
   assert_reject r)
 
 let () = test "contract_unmet_lists_items" (fun () ->

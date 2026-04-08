@@ -45,6 +45,8 @@ type world_observation = {
   last_tools_used : string list;
     (** Tools used in the previous cycle. Empty on first cycle.
         Used by the unified prompt to generate data-driven anti-repetition hints. *)
+  work_discovery_due : bool;
+  behavioral_stats : Keeper_telemetry_feedback.behavioral_stats option;
 }
 
 type unified_turn_channel =
@@ -263,7 +265,10 @@ let board_signal_match
 (** Read context ratio from checkpoint if available. *)
 let read_context_ratio ~(config : Room.config) ~(meta : keeper_meta) : float =
   try
-    let cascade_models = Oas_model_resolve.models_of_cascade_name meta.cascade_name in
+    let cascade_models =
+      Oas_model_resolve.models_of_cascade_name meta.cascade_name
+      |> Oas_model_resolve.filter_by_providers meta.allowed_providers
+    in
     let primary_max_context =
       Oas_model_resolve.resolve_max_cascade_context cascade_models
     in
@@ -285,7 +290,10 @@ let read_context_ratio ~(config : Room.config) ~(meta : keeper_meta) : float =
 let read_continuity_summary ~(config : Room.config) ~(meta : keeper_meta)
     : string =
   try
-    let cascade_models = Oas_model_resolve.models_of_cascade_name meta.cascade_name in
+    let cascade_models =
+      Oas_model_resolve.models_of_cascade_name meta.cascade_name
+      |> Oas_model_resolve.filter_by_providers meta.allowed_providers
+    in
     let primary_max_context =
       Oas_model_resolve.resolve_max_cascade_context cascade_models
     in
@@ -585,6 +593,26 @@ let observe ~(pending_board_events : pending_board_event list option)
         in
         events
   in
+  (* Work Discovery: check if scan interval has elapsed *)
+  let work_discovery_due =
+    match meta.work_discovery_enabled with
+    | Some true ->
+      let interval =
+        Option.value ~default:600 meta.work_discovery_interval_sec
+      in
+      let since_last =
+        Time_compat.now () -. meta.runtime.proactive_rt.last_work_discovery_ts
+      in
+      since_last >= float_of_int interval
+    | _ -> false
+  in
+  (* Telemetry Feedback: read cached behavioral stats (proactive refresh) *)
+  let behavioral_stats =
+    match meta.telemetry_feedback_enabled with
+    | Some true ->
+      Keeper_telemetry_feedback.get_cached_stats ~keeper_name:meta.name
+    | _ -> None
+  in
   {
     pending_mentions;
     pending_board_events;
@@ -603,6 +631,8 @@ let observe ~(pending_board_events : pending_board_event list option)
     room_signal_digest_ref;
     last_turn_budget = None;
     last_tools_used = [];
+    work_discovery_due;
+    behavioral_stats;
   }
 
 (** Compute effective scheduled autonomous cooldown with idle decay.

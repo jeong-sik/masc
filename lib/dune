@@ -26,7 +26,6 @@
    board_pg_notify
    board_pg_admin
    board_dispatch
-   board_listener
    capability_registry
    bounded
    cache_eio
@@ -96,6 +95,7 @@
    dashboard_http_keeper_metrics
    dashboard_http_keeper_detail
    dashboard_http_keeper
+   dashboard_http_tool_quality
    dashboard_http_autoresearch
    dashboard_harness_health
    dashboard_goals
@@ -368,6 +368,7 @@
    tool_prefilter
    tool_metrics
    tool_metrics_persist
+   tool_output_validation
    tool_usage_log
    keeper_tool_call_log
    tool_inline_dispatch_types
@@ -434,6 +435,7 @@
    labeling
    contract_risk
    contract_composer
+   keeper_telemetry_feedback
    keeper_deliberation
    keeper_types_profile
    keeper_types_support
@@ -447,6 +449,7 @@
    keeper_alerting_path
    keeper_timing
    keeper_tool_registry
+   keeper_tool_diversity
    keeper_tool_policy_config
    keeper_tool_policy
    keeper_discovered_tools
@@ -523,6 +526,8 @@
    ;; Context management (used by keeper agents)
    masc_eio_env
    discovery_cache
+   discovery_history
+   model_inference_metrics
    observability_redact
    oas_model_resolve
    context_compact_oas
@@ -534,6 +539,7 @@
    oas_worker_cascade
    oas_worker_exec
    oas_worker_named
+   masc_oas_bridge
    oas_sse_bridge
    env_config_introspect
    runtime_params
@@ -562,6 +568,7 @@
 (private_modules
  dashboard_http_keeper_metrics
  dashboard_http_keeper_detail
+ dashboard_http_tool_quality
  board_core
  board_votes
  cp_snapshot_core

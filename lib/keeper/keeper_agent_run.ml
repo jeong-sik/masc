@@ -1,3 +1,40 @@
+let adaptive_thinking_budget
+      ~enabled
+      ~is_retry
+      ~last_tool_results
+      ~user_message
+      ~dynamic_context
+      ~current_budget
+  =
+  if not enabled
+  then current_budget
+  else (
+    (* 1) Structured tool errors in last tools -> High thinking *)
+    let had_error =
+      List.exists
+        (fun (r : Agent_sdk.Types.tool_result) ->
+           match r with
+           | Error _ -> true
+           | Ok _ -> false)
+        last_tool_results
+    in
+    if is_retry || had_error
+    then Some 1500
+    else (
+      (* 2) Task complexity keywords -> Max thinking *)
+      let haystack = user_message ^ " " ^ dynamic_context in
+      let complex_task =
+        List.exists
+          (fun needle -> String_util.contains_substring_ci haystack needle)
+          [ "분석"; "설계"; "plan"; "architecture"; "complex"; "investigate" ]
+      in
+      if complex_task
+      then Some 2000
+      else
+        (* Otherwise fallback to default or OFF (None) *)
+        current_budget))
+;;
+
 (** Keeper_agent_run — Run a single keeper turn via OAS Agent.run().
 
     Owns the full context lifecycle: checkpoint loading, context creation,
@@ -10,90 +47,94 @@
 
     @since Phase 5 — Keeper Agent.run encapsulation *)
 
-
 (** Structured prompt result from [build_turn_prompt] callback.
     [system_prompt] contains hard constraints (identity, policy guards,
     tool guidance, direct-reply mode) that must stay in the system prompt.
     [dynamic_context] contains soft context (continuity, skill route,
     worktree changes, turn instructions) injected via OAS
     [extra_system_context] — prepended as a User message after reduction. *)
-type turn_prompt = {
-  system_prompt : string;
-  dynamic_context : string;
-}
+type turn_prompt =
+  { system_prompt : string
+  ; dynamic_context : string
+  }
 
 (** Result of a single Agent.run() keeper turn. *)
-type run_result = {
-  response_text : string;
-  model_used : string;
-  cascade_observation : Oas_worker.cascade_observation option;
-  turn_count : int;
-  tool_calls_made : int;
-  usage : Agent_sdk.Types.api_usage;
-  tools_used : string list;
-  checkpoint : Agent_sdk.Checkpoint.t option;
-  proof : Agent_sdk.Cdal_proof.t option;
-  stop_reason : Oas_worker.stop_reason;
-  inference_telemetry : Agent_sdk.Types.inference_telemetry option;
-}
+type run_result =
+  { response_text : string
+  ; model_used : string
+  ; cascade_observation : Oas_worker.cascade_observation option
+  ; turn_count : int
+  ; tool_calls_made : int
+  ; usage : Agent_sdk.Types.api_usage
+  ; tools_used : string list
+  ; checkpoint : Agent_sdk.Checkpoint.t option
+  ; proof : Agent_sdk.Cdal_proof.t option
+  ; stop_reason : Oas_worker.stop_reason
+  ; inference_telemetry : Agent_sdk.Types.inference_telemetry option
+  }
 
 let keeper_tool_usage_snapshot ~base_path ~keeper_name : (string * int) list =
   Keeper_registry.tool_usage_of ~base_path keeper_name
-  |> List.map (fun (tool_name, entry) -> (tool_name, entry.Keeper_types.count))
+  |> List.map (fun (tool_name, entry) -> tool_name, entry.Keeper_types.count)
   |> List.sort (fun (left, _) (right, _) -> String.compare left right)
+;;
 
-let tool_usage_delta
-    ~(before : (string * int) list)
-    ~(after : (string * int) list) : string list =
+let tool_usage_delta ~(before : (string * int) list) ~(after : (string * int) list)
+  : string list
+  =
   let before_counts = Hashtbl.create 16 in
   List.iter
     (fun (tool_name, count) -> Hashtbl.replace before_counts tool_name count)
     before;
   after
   |> List.concat_map (fun (tool_name, after_count) ->
-         let before_count =
-           Option.value ~default:0 (Hashtbl.find_opt before_counts tool_name)
-         in
-         List.init (max 0 (after_count - before_count)) (fun _ -> tool_name))
+    let before_count =
+      Option.value ~default:0 (Hashtbl.find_opt before_counts tool_name)
+    in
+    List.init (max 0 (after_count - before_count)) (fun _ -> tool_name))
+;;
 
 let merge_reported_and_observed_tool_names
-    ~(reported_tool_names : string list)
-    ~(observed_tool_names : string list) : string list =
+      ~(reported_tool_names : string list)
+      ~(observed_tool_names : string list)
+  : string list
+  =
   match observed_tool_names with
   | [] -> reported_tool_names
   | _ ->
-      let observed = Hashtbl.create 16 in
-      List.iter (fun tool_name -> Hashtbl.replace observed tool_name ()) observed_tool_names;
-      observed_tool_names
-      @ List.filter
-          (fun tool_name -> not (Hashtbl.mem observed tool_name))
-          reported_tool_names
+    let observed = Hashtbl.create 16 in
+    List.iter (fun tool_name -> Hashtbl.replace observed tool_name ()) observed_tool_names;
+    observed_tool_names
+    @ List.filter
+        (fun tool_name -> not (Hashtbl.mem observed tool_name))
+        reported_tool_names
+;;
 
-let normalize_response_text
-    ~(text : string)
-    ~(tool_names : string list)
-    () :
-    (string, string) result =
+let normalize_response_text ~(text : string) ~(tool_names : string list) ()
+  : (string, string) result
+  =
   let trimmed = String.trim text in
-  if trimmed <> "" then Ok text
-  else
+  if trimmed <> ""
+  then Ok text
+  else (
     match tool_names with
     | [] -> Error "keeper turn completed with no textual reply"
     | _ ->
-        Ok
-          (Printf.sprintf "Completed without a textual reply. Tools used: %s."
-             (String.concat ", " tool_names))
+      Ok
+        (Printf.sprintf
+           "Completed without a textual reply. Tools used: %s."
+           (String.concat ", " tool_names)))
+;;
 
 let tool_query_text_of_user_message (text : string) : string =
   let allowed_sections =
-    [
-      "### Pending Mentions";
-      "### Scope Messages";
-      "### Active Goals";
-      "### Namespace State";
-      "### Board Activity";
-      "### Actionable Routes";
-      "### Live Worktree Delta";
+    [ "### Pending Mentions"
+    ; "### Scope Messages"
+    ; "### Active Goals"
+    ; "### Namespace State"
+    ; "### Board Activity"
+    ; "### Actionable Routes"
+    ; "### Live Worktree Delta"
     ]
   in
   let is_allowed_section section =
@@ -104,27 +145,26 @@ let tool_query_text_of_user_message (text : string) : string =
   let lines = String.split_on_char '\n' text in
   let rec loop current_section kept = function
     | [] ->
-        let filtered = List.rev kept |> String.concat "\n" |> String.trim in
-        if filtered <> "" then filtered else String.trim text
+      let filtered = List.rev kept |> String.concat "\n" |> String.trim in
+      if filtered <> "" then filtered else String.trim text
     | line :: rest ->
-        let trimmed = String.trim line in
-        let current_section =
-          if String.starts_with ~prefix:"### " trimmed then Some trimmed
-          else current_section
-        in
-        let keep_line =
-          match current_section with
-          | None ->
-              String.starts_with ~prefix:"## Current World State" trimmed
-          | Some section ->
-              is_allowed_section section
-        in
-        if keep_line then
-          loop current_section (line :: kept) rest
-        else
-          loop current_section kept rest
+      let trimmed = String.trim line in
+      let current_section =
+        if String.starts_with ~prefix:"### " trimmed
+        then Some trimmed
+        else current_section
+      in
+      let keep_line =
+        match current_section with
+        | None -> String.starts_with ~prefix:"## Current World State" trimmed
+        | Some section -> is_allowed_section section
+      in
+      if keep_line
+      then loop current_section (line :: kept) rest
+      else loop current_section kept rest
   in
   loop None [] lines
+;;
 
 let merge_tool_selection_boundary
     ~(core : string list)
@@ -190,69 +230,106 @@ let log_keeper_proof ~(keeper_name : string) (proof : Agent_sdk.Cdal_proof.t) =
     |> fun raw ->
     match String.rindex_opt raw '.' with
     | Some idx when idx + 1 < String.length raw ->
-        String.sub raw (idx + 1) (String.length raw - idx - 1)
-    | _ -> raw
-    |> String.lowercase_ascii
+      String.sub raw (idx + 1) (String.length raw - idx - 1)
+    | _ -> raw |> String.lowercase_ascii
   in
   match proof.result_status with
   | Agent_sdk.Cdal_proof.Completed ->
-      if Keeper_types_profile.keeper_debug then
-        Log.Keeper.debug "keeper:%s proof: run_id=%s mode=%s status=%s evidence_refs=%d"
-          keeper_name proof.run_id
-          (Agent_sdk.Execution_mode.to_string proof.effective_execution_mode)
-          status_string
-          (List.length proof.raw_evidence_refs)
-  | _ ->
-      Log.Keeper.warn "keeper:%s proof: run_id=%s mode=%s status=%s evidence_refs=%d"
-        keeper_name proof.run_id
+    if Keeper_types_profile.keeper_debug
+    then
+      Log.Keeper.debug
+        "keeper:%s proof: run_id=%s mode=%s status=%s evidence_refs=%d"
+        keeper_name
+        proof.run_id
         (Agent_sdk.Execution_mode.to_string proof.effective_execution_mode)
         status_string
         (List.length proof.raw_evidence_refs)
+  | _ ->
+    Log.Keeper.warn
+      "keeper:%s proof: run_id=%s mode=%s status=%s evidence_refs=%d"
+      keeper_name
+      proof.run_id
+      (Agent_sdk.Execution_mode.to_string proof.effective_execution_mode)
+      status_string
+      (List.length proof.raw_evidence_refs)
+;;
 
 let log_keeper_contract_verdict
-    ~(keeper_name : string)
-    (verdict : Cdal_types.contract_verdict) =
+      ~(keeper_name : string)
+      (verdict : Cdal_types.contract_verdict)
+  =
   match verdict.status with
   | Cdal_types.Satisfied ->
-      if Keeper_types_profile.keeper_debug then
-        Log.Keeper.debug "keeper:%s contract_verdict: status=%s scope=%s hash=%s"
-          keeper_name
-          (Cdal_types.contract_status_to_string verdict.status)
-          verdict.claim_scope
-          verdict.judgment_hash
-  | Cdal_types.Violated | Cdal_types.Inconclusive ->
-      Log.Keeper.warn "keeper:%s contract_verdict: status=%s scope=%s hash=%s"
+    if Keeper_types_profile.keeper_debug
+    then
+      Log.Keeper.debug
+        "keeper:%s contract_verdict: status=%s scope=%s hash=%s"
         keeper_name
         (Cdal_types.contract_status_to_string verdict.status)
         verdict.claim_scope
         verdict.judgment_hash
+  | Cdal_types.Violated | Cdal_types.Inconclusive ->
+    Log.Keeper.warn
+      "keeper:%s contract_verdict: status=%s scope=%s hash=%s"
+      keeper_name
+      (Cdal_types.contract_status_to_string verdict.status)
+      verdict.claim_scope
+      verdict.judgment_hash
+;;
 
 let log_keeper_friction
-    ~(keeper_name : string)
-    (fp : Cdal_friction_projection.friction_projection) =
+      ~(keeper_name : string)
+      (fp : Cdal_friction_projection.friction_projection)
+  =
   let blocked = fp.blocked_attempt_count in
   let groups = List.length fp.blocked_attempt_groups in
   let tripwires = List.length fp.review_tripwires in
-  if tripwires > 0 then
-    Log.Keeper.warn "keeper:%s friction: blocked=%d groups=%d tripwires=%d"
-      keeper_name blocked groups tripwires
-  else if blocked > 0 || groups > 0 then
-    Log.Keeper.debug "keeper:%s friction: blocked=%d groups=%d tripwires=%d"
-      keeper_name blocked groups tripwires
-  else if Keeper_types_profile.keeper_debug then
-    Log.Keeper.debug "keeper:%s friction: blocked=%d groups=%d tripwires=%d"
-      keeper_name blocked groups tripwires
+  if tripwires > 0
+  then
+    Log.Keeper.warn
+      "keeper:%s friction: blocked=%d groups=%d tripwires=%d"
+      keeper_name
+      blocked
+      groups
+      tripwires
+  else if blocked > 0 || groups > 0
+  then
+    Log.Keeper.debug
+      "keeper:%s friction: blocked=%d groups=%d tripwires=%d"
+      keeper_name
+      blocked
+      groups
+      tripwires
+  else if Keeper_types_profile.keeper_debug
+  then
+    Log.Keeper.debug
+      "keeper:%s friction: blocked=%d groups=%d tripwires=%d"
+      keeper_name
+      blocked
+      groups
+      tripwires
+;;
 
 let log_keeper_memory_write
-    ~(keeper_name : string)
-    ~(notes_written : int)
-    ~(kinds_written : string list) =
-  if notes_written >= 10 then
-    Log.Keeper.info "keeper:%s memory_write: %d notes, kinds=[%s]"
-      keeper_name notes_written (String.concat "," kinds_written)
-  else if Keeper_types_profile.keeper_debug then
-    Log.Keeper.debug "keeper:%s memory_write: %d notes, kinds=[%s]"
-      keeper_name notes_written (String.concat "," kinds_written)
+      ~(keeper_name : string)
+      ~(notes_written : int)
+      ~(kinds_written : string list)
+  =
+  if notes_written >= 10
+  then
+    Log.Keeper.info
+      "keeper:%s memory_write: %d notes, kinds=[%s]"
+      keeper_name
+      notes_written
+      (String.concat "," kinds_written)
+  else if Keeper_types_profile.keeper_debug
+  then
+    Log.Keeper.debug
+      "keeper:%s memory_write: %d notes, kinds=[%s]"
+      keeper_name
+      notes_written
+      (String.concat "," kinds_written)
+;;
 
 (** Run a single keeper turn via OAS Agent.run().
 
@@ -284,49 +361,49 @@ let log_keeper_memory_write
            working context without persisting it again, so transient retry
            attempts do not duplicate the user entry in session history *)
 let run_turn
-    ~(config : Room.config)
-    ~(meta : Keeper_types.keeper_meta)
-    ~(base_dir : string)
-    ~(max_context : int)
-    ~(build_turn_prompt :
-        base_system_prompt:string ->
-        messages:Agent_sdk.Types.message list ->
-        turn_prompt)
-    ~(user_message : string)
-    ~(cascade_name : string)
-    ~(generation : int)
-    ?(max_turns : int = 200) (* large budget: keeper needs research + code + PR in one cycle *)
-    ?(max_idle_turns : int = 3)
-    ?(history_user_source = "direct_user")
-    ?(history_assistant_source = "direct_assistant")
-    ?guardrails
-    ?temperature
-    ?max_tokens
-    ?max_cost_usd
-    ?on_event
-    ?(trajectory_acc : Trajectory.accumulator option)
-    ?(tool_overlay : Agent_sdk.Tool_op.t ref option)
-    ?priority
-    ?(is_retry = false)
-    ?shared_context
-    ?event_bus
-    ?boring_consecutive_turns_ref
-    ()
-  : (run_result, Oas.Error.sdk_error) result =
+      ~(config : Room.config)
+      ~(meta : Keeper_types.keeper_meta)
+      ~(base_dir : string)
+      ~(max_context : int)
+      ~(build_turn_prompt :
+         base_system_prompt:string -> messages:Agent_sdk.Types.message list -> turn_prompt)
+      ~(user_message : string)
+      ~(cascade_name : string)
+      ~(generation : int)
+      ?(max_turns : int = 200)
+      (* large budget: keeper needs research + code + PR in one cycle *)
+      ?(max_idle_turns : int = 3)
+      ?(history_user_source = "direct_user")
+      ?(history_assistant_source = "direct_assistant")
+      ?guardrails
+      ?temperature
+      ?max_tokens
+      ?max_cost_usd
+      ?on_event
+      ?(trajectory_acc : Trajectory.accumulator option)
+      ?(tool_overlay : Agent_sdk.Tool_op.t ref option)
+      ?priority
+      ?(is_retry = false)
+      ?shared_context
+      ?event_bus
+      ?boring_consecutive_turns_ref
+      ()
+  : (run_result, Oas.Error.sdk_error) result
+  =
   (* 0. Resolve inference parameters via Cascade_inference *)
-  let temperature = match temperature with
+  let temperature =
+    match temperature with
     | Some t -> t
     | None ->
-      Cascade_inference.resolve_temperature
-        ~cascade_name
-        ~fallback:(fun () -> 0.3)
+      Cascade_inference.resolve_temperature ~cascade_name ~fallback:(fun () -> 0.3)
   in
-  let max_tokens = match max_tokens with
+  let max_tokens =
+    match max_tokens with
     | Some t -> t
     | None ->
       Cascade_inference.resolve_max_tokens
         ~cascade_name
-        (* 8192 allows complex multi-tool reasoning per turn.
+          (* 8192 allows complex multi-tool reasoning per turn.
            Cloudflare tunnel 100s is no longer a constraint with
            streaming responses. *)
         ~fallback:(fun () -> 8192)
@@ -342,7 +419,8 @@ let run_turn
      across turns merely by sharing [~shared_context]. Callers that manage
      a persistent lifecycle (keeper heartbeat loop) should pass a long-lived
      [~shared_context] when they need cross-turn OAS context continuity. *)
-  let shared_context = match shared_context with
+  let shared_context =
+    match shared_context with
     | Some ctx -> ctx
     | None -> Oas.Context.create ()
   in
@@ -354,7 +432,7 @@ let run_turn
   let session_dir = Filename.concat base_dir meta.runtime.trace_id in
   Keeper_types.mkdir_p session_dir;
   (* 2. Load checkpoint *)
-  let (session, ctx_opt) =
+  let session, ctx_opt =
     Keeper_exec_context.load_context_from_checkpoint
       ~max_checkpoint_messages:meta.compaction.max_checkpoint_messages
       ~trace_id:meta.runtime.trace_id
@@ -365,22 +443,24 @@ let run_turn
      Preserves turn_count, usage_stats, and lifecycle state across turns.
      Falls back to fresh build when unavailable (first turn, rollover). *)
   let raw_oas_checkpoint =
-    match Keeper_checkpoint_store.load_oas
-            ~session_dir:session.session_dir
-            ~session_id:meta.runtime.trace_id with
+    match
+      Keeper_checkpoint_store.load_oas
+        ~session_dir:session.session_dir
+        ~session_id:meta.runtime.trace_id
+    with
     | Ok cp -> Some cp
     | Error _ -> None
   in
   (* Starting turn count for per-call budget calculation in hooks.
      With Agent.resume, turn count is cumulative from checkpoint. *)
-  let start_turn_count = match raw_oas_checkpoint with
+  let start_turn_count =
+    match raw_oas_checkpoint with
     | Some cp -> cp.turn_count
     | None -> 0
   in
   (* 3. Build base system prompt from meta *)
   let persona_extended =
-    Keeper_types_profile.load_persona_extended meta.name
-    |> Option.value ~default:""
+    Keeper_types_profile.load_persona_extended meta.name |> Option.value ~default:""
   in
   let base_system_prompt =
     Keeper_prompt.build_keeper_system_prompt
@@ -400,29 +480,22 @@ let run_turn
     match ctx_opt with
     | Some c -> c
     | None ->
-      Keeper_exec_context.create
-        ~system_prompt:base_system_prompt
-        ~max_tokens:max_context
+      Keeper_exec_context.create ~system_prompt:base_system_prompt ~max_tokens:max_context
   in
   let ctx_work =
-    Keeper_exec_context.set_system_prompt base_ctx
-      ~system_prompt:base_system_prompt
+    Keeper_exec_context.set_system_prompt base_ctx ~system_prompt:base_system_prompt
   in
   (* 5. Build final turn system prompt via caller callback.
      Hard constraints stay in system_prompt; soft context is injected
      via OAS extra_system_context (prepended as User message after reduction). *)
   let { system_prompt = turn_system_prompt; dynamic_context } =
-    build_turn_prompt
-      ~base_system_prompt
-      ~messages:ctx_work.messages
+    build_turn_prompt ~base_system_prompt ~messages:ctx_work.messages
   in
   (* Defense in depth: unified prompt builders sanitize their own output,
      but run_turn is shared by other callers and is the final boundary before
      handing prompts/history to OAS. Keep this sanitization here even when
      upstream builders already cleaned their strings. *)
-  let turn_system_prompt =
-    Inference_utils.sanitize_text_utf8 turn_system_prompt
-  in
+  let turn_system_prompt = Inference_utils.sanitize_text_utf8 turn_system_prompt in
   let user_message = Inference_utils.sanitize_text_utf8 user_message in
   (* 6. Append user message and persist.
      On retry (is_retry=true), the user message was already persisted by the
@@ -433,12 +506,10 @@ let run_turn
   (* Capture history BEFORE appending the current user_msg.
      OAS Agent.run appends user_msg from ~goal internally, so passing it
      in initial_messages would cause duplication. *)
-  let history_messages =
-    Inference_utils.sanitize_messages_utf8 ctx_work.messages
-  in
+  let history_messages = Inference_utils.sanitize_messages_utf8 ctx_work.messages in
   let ctx_work = Keeper_exec_context.append ctx_work user_msg in
-  if not is_retry then
-    Keeper_exec_context.persist_message ~source:history_user_source session user_msg;
+  if not is_retry
+  then Keeper_exec_context.persist_message ~source:history_user_source session user_msg;
   (* 7. Set up agent *)
   let ctx_snapshot = ctx_work in
   let agent_name = meta.agent_name in
@@ -451,7 +522,7 @@ let run_turn
      This makes keeper_tool_search session-scoped and race-free: each keeper
      session owns its own ref; concurrent sessions never touch each other's state. *)
   let local_search_fn_ref : (query:string -> max_results:int -> Yojson.Safe.t) ref =
-    ref (fun ~query:_ ~max_results:_ -> `Assoc [ ("results", `List []) ])
+    ref (fun ~query:_ ~max_results:_ -> `Assoc [ "results", `List [] ])
   in
   (* Track current agent turn so Keeper_discovered_tools.add/mark_used
      use the real turn rather than a constant 0.  Updated at the start of
@@ -462,7 +533,9 @@ let run_turn
      Defined here (before make_tools) so on_tool_called can capture it. *)
   let decay_turns =
     match Sys.getenv_opt "MASC_KEEPER_TOOL_DECAY_TURNS" with
-    | Some s -> (try max 1 (int_of_string s) with _ -> 5)
+    | Some s ->
+      (try max 1 (int_of_string s) with
+       | _ -> 5)
     | None -> 5
   in
   let discovered_ref = ref (Keeper_discovered_tools.create ~decay_turns) in
@@ -470,29 +543,40 @@ let run_turn
      Solves the 9B text_response trap by making proven tools visible at
      turn 0 without requiring keeper_tool_search first.  #5566 *)
   let affinity_k = Keeper_tool_affinity.configured_max_k () in
-  if affinity_k > 0 then begin
+  if affinity_k > 0
+  then (
     let masc_root = Filename.concat config.base_path ".masc" in
     let allowed = Keeper_tool_policy.keeper_allowed_tool_names meta in
     let core = Keeper_tool_registry.core_discovery_tools in
     let entries =
       Keeper_tool_affinity.pre_populate_from_history
-        ~masc_root ~keeper_name:meta.name
-        ~allowed_tool_names:allowed ~core_tool_names:core
-        ~discovered:!discovered_ref ~max_k:affinity_k
+        ~masc_root
+        ~keeper_name:meta.name
+        ~allowed_tool_names:allowed
+        ~core_tool_names:core
+        ~discovered:!discovered_ref
+        ~max_k:affinity_k
     in
-    if entries <> [] then
-      Log.Keeper.info "keeper:%s affinity pre-populated %d tools: [%s]"
-        meta.name (List.length entries)
-        (String.concat ", "
-           (List.map (fun (e : Keeper_tool_affinity.affinity_entry) ->
-              Printf.sprintf "%s(%.1f)" e.tool_name e.score) entries))
-  end;
+    if entries <> []
+    then
+      Log.Keeper.info
+        "keeper:%s affinity pre-populated %d tools: [%s]"
+        meta.name
+        (List.length entries)
+        (String.concat
+           ", "
+           (List.map
+              (fun (e : Keeper_tool_affinity.affinity_entry) ->
+                 Printf.sprintf "%s(%.1f)" e.tool_name e.score)
+              entries)));
   let keeper_tools =
-    Keeper_tools_oas.make_tools ~config ~meta ~ctx_snapshot
+    Keeper_tools_oas.make_tools
+      ~config
+      ~meta
+      ~ctx_snapshot
       ~search_fn:(fun ~query ~max_results -> !local_search_fn_ref ~query ~max_results)
       ~on_tool_called:(fun name ->
-          Keeper_discovered_tools.mark_used !discovered_ref
-            ~turn:!current_turn_ref ~name)
+        Keeper_discovered_tools.mark_used !discovered_ref ~turn:!current_turn_ref ~name)
       ()
   in
   let extend_turns_tool = Keeper_extend_turns.make ~agent_ref ~max_turns () in
@@ -523,112 +607,112 @@ let run_turn
      TODO(OAS): Add Tool_selector.select_with_index that accepts a
      pre-built Tool_index.t to support aliases, groups, and index reuse.
      When that lands, this code can drop the description augmentation. *)
-
   (* Korean keyword map for bilingual BM25 matching.
      Tool descriptions are English; Korean users issue Korean queries.
      Appending Korean keywords to descriptions gives BM25 term overlap
      across languages.
      Keys must match actual tool names from keeper_tools. *)
-  let korean_keywords = [
-    "keeper_board_post", "게시판 글 작성 올리기 포스트";
-    "keeper_board_get", "게시판 글 읽기 조회 확인";
-    "keeper_board_list", "게시판 목록 최근글";
-    "keeper_board_comment", "게시판 댓글 답글 코멘트";
-    "keeper_board_vote", "게시판 투표 추천 반대";
-    "keeper_board_search", "게시판 검색 키워드 글찾기";
-    "keeper_board_delete", "게시판 삭제 제거 글삭제";
-    "keeper_board_stats", "게시판 통계 활동 참여 게시글수";
-    "keeper_stay_silent", "침묵 대기 아무것도 안함 넘어가기";
-    "keeper_write", "파일 작성 저장 새파일 생성 쓰기";
-    "keeper_tool_search", "도구 검색 발견 찾기 어떤도구";
-    "keeper_voice_listen", "음성 듣기 마이크 녹음 입력";
-    "keeper_fs_read", "파일 읽기 소스코드 설정";
-    "keeper_fs_edit", "파일 쓰기 편집 저장 수정 생성";
-    "keeper_shell_readonly", "명령어 조회 검색 탐색";
-    "keeper_bash", "명령어 실행 쉘 빌드 테스트";
-    "keeper_github", "깃허브 이슈 풀리퀘스트 PR CI";
-    "keeper_pr_workflow", "PR 생성 워크트리 커밋 푸시 풀리퀘스트 원���";
-    "keeper_memory_search", "기억 검색 대화 이전 메시지";
-    "keeper_library_search", "라이브러리 지식 문서 검색";
-    "keeper_library_read", "라이브러리 문서 읽기 지식";
-    "keeper_time_now", "시간 현재 타임스탬프";
-    "keeper_context_status", "컨텍스트 상태 토큰 사용량";
-    "keeper_tools_list", "도구 목록 기능 할수있는것 능력";
-    "keeper_broadcast", "브로드캐스트 알림 공지 전달";
-    "keeper_tasks_list", "태스크 목록 할일 백로그";
-    "keeper_tasks_audit", "태스크 감사 고아 방치";
-    "keeper_task_claim", "태스크 가져오기 할당";
-    "keeper_task_done", "태스크 완료 마감";
-    "keeper_task_force_release", "태스크 강제해제 반환";
-    "keeper_task_force_done", "태스크 강제완료";
-    "keeper_voice_speak", "음성 말하기 보이스";
-    "keeper_voice_agent", "음성 설정 보이스";
-    "keeper_voice_sessions", "음성 세션 목록";
-    "keeper_voice_session_start", "음성 세션 시작";
-    "keeper_voice_session_end", "음성 세션 종료";
-    (* masc_* tools: Korean keywords for cross-language BM25 retrieval.
+  let korean_keywords =
+    [ "keeper_board_post", "게시판 글 작성 올리기 포스트"
+    ; "keeper_board_get", "게시판 글 읽기 조회 확인"
+    ; "keeper_board_list", "게시판 목록 최근글"
+    ; "keeper_board_comment", "게시판 댓글 답글 코멘트"
+    ; "keeper_board_vote", "게시판 투표 추천 반대"
+    ; "keeper_board_search", "게시판 검색 키워드 글찾기"
+    ; "keeper_board_delete", "게시판 삭제 제거 글삭제"
+    ; "keeper_board_stats", "게시판 통계 활동 참여 게시글수"
+    ; "keeper_stay_silent", "침묵 대기 아무것도 안함 넘어가기"
+    ; "keeper_write", "파일 작성 저장 새파일 생성 쓰기"
+    ; "keeper_tool_search", "도구 검색 발견 찾기 어떤도구"
+    ; "keeper_voice_listen", "음성 듣기 마이크 녹음 입력"
+    ; "keeper_fs_read", "파일 읽기 소스코드 설정"
+    ; "keeper_fs_edit", "파일 쓰기 편집 저장 수정 생성"
+    ; "keeper_shell_readonly", "명령어 조회 검색 탐색"
+    ; "keeper_bash", "명령어 실행 쉘 빌드 테스트"
+    ; "keeper_github", "깃허브 이슈 풀리퀘스트 PR CI"
+    ; "keeper_pr_workflow", "PR 생성 워크트리 커밋 푸시 풀리퀘스트 원���"
+    ; "keeper_memory_search", "기억 검색 대화 이전 메시지"
+    ; "keeper_library_search", "라이브러리 지식 문서 검색"
+    ; "keeper_library_read", "라이브러리 문서 읽기 지식"
+    ; "keeper_time_now", "시간 현재 타임스탬프"
+    ; "keeper_context_status", "컨텍스트 상태 토큰 사용량"
+    ; "keeper_tools_list", "도구 목록 기능 할수있는것 능력"
+    ; "keeper_broadcast", "브로드캐스트 알림 공지 전달"
+    ; "keeper_tasks_list", "태스크 목록 할일 백로그"
+    ; "keeper_tasks_audit", "태스크 감사 고아 방치"
+    ; "keeper_task_claim", "태스크 가져오기 할당"
+    ; "keeper_task_done", "태스크 완료 마감"
+    ; "keeper_task_force_release", "태스크 강제해제 반환"
+    ; "keeper_task_force_done", "태스크 강제완료"
+    ; "keeper_voice_speak", "음성 말하기 보이스"
+    ; "keeper_voice_agent", "음성 설정 보이스"
+    ; "keeper_voice_sessions", "음성 세션 목록"
+    ; "keeper_voice_session_start", "음성 세션 시작"
+    ; "keeper_voice_session_end", "음성 세션 종료"
+    ; (* masc_* tools: Korean keywords for cross-language BM25 retrieval.
        Without these, Korean queries like "코드 검색" only match keeper_*
        tools that have Korean aliases, systematically deprioritizing
        masc_* tools.  See #4520. *)
-    "masc_code_search", "코드 검색 소스코드 찾기 심볼";
-    "masc_code_read", "코드 읽기 파일 소스코드";
-    "masc_code_edit", "코드 편집 수정 파일 변경";
-    "masc_code_write", "코드 작성 파일 생성 쓰기";
-    "masc_code_symbols", "코드 심볼 함수 클래스 정의";
-    "masc_code_shell", "코드 명령어 쉘 실행";
-    "masc_code_git", "깃 커밋 브랜치 로그 이력";
-    "masc_governance_status", "거버넌스 상태 규칙 정책";
-    "masc_governance_feed", "거버넌스 피드 이벤트 로그";
-    "masc_governance_set", "거버넌스 설정 규칙 변경";
-    "masc_autoresearch_start", "자동연구 리서치 시작";
-    "masc_autoresearch_status", "자동연구 리서치 상태";
-    "masc_autoresearch_stop", "자동연구 리서치 중지";
-    "masc_autoresearch_cycle", "자동연구 리서치 사이클 실행";
-    "masc_plan_get", "계획 플랜 마일스톤 로드맵 프로젝트 전략";
-    "masc_plan_update", "계획 플랜 수정 업데이트";
-    "masc_plan_init", "계획 플랜 초기화 생성";
-    "masc_plan_set_task", "계획 태스크 설정 할당";
-    "masc_plan_get_task", "계획 태스크 조회";
-    "masc_agent_card", "에이전트 카드 프로필 정보";
-    "masc_agents", "에이전트 목록 현황 누구";
-    "masc_agent_update", "에이전트 업데이트 상태변경";
-    "masc_keeper_up", "키퍼 시작 기동 생성";
-    "masc_keeper_down", "키퍼 중지 종료";
-    "masc_keeper_list", "키퍼 목록 현황";
-    "masc_keeper_msg", "키퍼 메시지 전달 대화";
-    "masc_keeper_status", "키퍼 상태 확인";
-    "masc_team_session_start", "팀 세션 병렬 작업 스웜 멀티 에이전트 시작";
-    "masc_team_session_status", "팀세션 상태 현황";
-    "masc_team_session_stop", "팀세션 중지 종료";
-    "masc_team_session_step", "팀세션 단계 스텝 실행";
-    "masc_team_session_list", "팀세션 목록 스웜";
-    "masc_team_session_events", "팀세션 이벤트 타임라인";
-    "masc_team_session_prove", "팀세션 증명 검증";
-    "masc_team_session_report", "팀세션 리포트 보고서";
-    "masc_team_session_compare", "팀세션 비교 diff";
-    "masc_team_session_finalize", "팀세션 마감 종료 완료";
-    "masc_worktree_create", "워크트리 생성 브랜치";
-    "masc_worktree_list", "워크트리 목록 현황";
-    "masc_worktree_remove", "워크트리 삭제 정리";
-    "masc_tasks", "태스크 목록 할일 작업";
-    "masc_add_task", "태스크 추가 등록 생성";
-    "masc_status", "상태 현황 방 룸 요약";
-    "masc_heartbeat", "하트비트 살아있음 생존";
-    "masc_dashboard", "대시보드 현황 대시 보드 개요";
-    "masc_plan_clear_task", "계획 태스크 제거 해제 클리어";
-    "masc_agent_fitness", "에이전트 평가 점수 피트니스";
-    "masc_auth_status", "인증 상태 토큰 자격";
-    "masc_auth_refresh", "인증 갱신 토큰 리프레시";
-    "masc_web_search", "웹 검색 인터넷 온라인 구글";
-    "masc_broadcast", "브로드캐스트 방송 알림 공지";
-    "masc_claim_next", "다음태스크 가져오기 할당";
-    "masc_messages", "메시지 대화 채팅 로그";
-    "masc_leave", "퇴장 나가기 오프라인 종료";
-    "masc_heartbeat_start", "하트비트 시작 자동 핑";
-    "masc_heartbeat_stop", "하트비트 중지 핑 종료";
-    (* masc_broadcast, masc_who, masc_messages require MCP session context
+      "masc_code_search", "코드 검색 소스코드 찾기 심볼"
+    ; "masc_code_read", "코드 읽기 파일 소스코드"
+    ; "masc_code_edit", "코드 편집 수정 파일 변경"
+    ; "masc_code_write", "코드 작성 파일 생성 쓰기"
+    ; "masc_code_symbols", "코드 심볼 함수 클래스 정의"
+    ; "masc_code_shell", "코드 명령어 쉘 실행"
+    ; "masc_code_git", "깃 커밋 브랜치 로그 이력"
+    ; "masc_governance_status", "거버넌스 상태 규칙 정책"
+    ; "masc_governance_feed", "거버넌스 피드 이벤트 로그"
+    ; "masc_governance_set", "거버넌스 설정 규칙 변경"
+    ; "masc_autoresearch_start", "자동연구 리서치 시작"
+    ; "masc_autoresearch_status", "자동연구 리서치 상태"
+    ; "masc_autoresearch_stop", "자동연구 리서치 중지"
+    ; "masc_autoresearch_cycle", "자동연구 리서치 사이클 실행"
+    ; "masc_plan_get", "계획 플랜 마일스톤 로드맵 프로젝트 전략"
+    ; "masc_plan_update", "계획 플랜 수정 업데이트"
+    ; "masc_plan_init", "계획 플랜 초기화 생성"
+    ; "masc_plan_set_task", "계획 태스크 설정 할당"
+    ; "masc_plan_get_task", "계획 태스크 조회"
+    ; "masc_agent_card", "에이전트 카드 프로필 정보"
+    ; "masc_agents", "에이전트 목록 현황 누구"
+    ; "masc_agent_update", "에이전트 업데이트 상태변경"
+    ; "masc_keeper_up", "키퍼 시작 기동 생성"
+    ; "masc_keeper_down", "키퍼 중지 종료"
+    ; "masc_keeper_list", "키퍼 목록 현황"
+    ; "masc_keeper_msg", "키퍼 메시지 전달 대화"
+    ; "masc_keeper_status", "키퍼 상태 확인"
+    ; "masc_team_session_start", "팀 세션 병렬 작업 스웜 멀티 에이전트 시작"
+    ; "masc_team_session_status", "팀세션 상태 현황"
+    ; "masc_team_session_stop", "팀세션 중지 종료"
+    ; "masc_team_session_step", "팀세션 단계 스텝 실행"
+    ; "masc_team_session_list", "팀세션 목록 스웜"
+    ; "masc_team_session_events", "팀세션 이벤트 타임라인"
+    ; "masc_team_session_prove", "팀세션 증명 검증"
+    ; "masc_team_session_report", "팀세션 리포트 보고서"
+    ; "masc_team_session_compare", "팀세션 비교 diff"
+    ; "masc_team_session_finalize", "팀세션 마감 종료 완료"
+    ; "masc_worktree_create", "워크트리 생성 브랜치"
+    ; "masc_worktree_list", "워크트리 목록 현황"
+    ; "masc_worktree_remove", "워크트리 삭제 정리"
+    ; "masc_tasks", "태스크 목록 할일 작업"
+    ; "masc_add_task", "태스크 추가 등록 생성"
+    ; "masc_status", "상태 현황 방 룸 요약"
+    ; "masc_heartbeat", "하트비트 살아있음 생존"
+    ; "masc_dashboard", "대시보드 현황 대시 보드 개요"
+    ; "masc_plan_clear_task", "계획 태스크 제거 해제 클리어"
+    ; "masc_agent_fitness", "에이전트 평가 점수 피트니스"
+    ; "masc_auth_status", "인증 상태 토큰 자격"
+    ; "masc_auth_refresh", "인증 갱신 토큰 리프레시"
+    ; "masc_web_search", "웹 검색 인터넷 온라인 구글"
+    ; "masc_broadcast", "브로드캐스트 방송 알림 공지"
+    ; "masc_claim_next", "다음태스크 가져오기 할당"
+    ; "masc_messages", "메시지 대화 채팅 로그"
+    ; "masc_leave", "퇴장 나가기 오프라인 종료"
+    ; "masc_heartbeat_start", "하트비트 시작 자동 핑"
+    ; "masc_heartbeat_stop", "하트비트 중지 핑 종료"
+      (* masc_broadcast, masc_who, masc_messages require MCP session context
        and fail in keeper. Use keeper_broadcast instead. (#4694) *)
-  ] in
+    ]
+  in
   (* Convert to Hashtbl for O(1) lookup — used in augment_tool_description
      and tool_entries aliases.  75 static entries, built once per session. *)
   let korean_kw_tbl =
@@ -645,7 +729,9 @@ let run_turn
      co-retrieval of related tools. *)
   let tool_index_config =
     { Agent_sdk.Tool_index.default_config with
-      top_k = Keeper_config.keeper_tool_search_top_k () } in
+      top_k = Keeper_config.keeper_tool_search_top_k ()
+    }
+  in
   let tool_entries =
     List.map (tool_index_entry_of_tool ~korean_kw_tbl) keeper_tools
   in
@@ -684,139 +770,192 @@ let run_turn
      Covers both keeper_* and masc_* tools from the OAS Tool.t list. *)
   let oas_description_map =
     let tbl = Hashtbl.create (List.length keeper_tools) in
-    List.iter (fun (t : Agent_sdk.Tool.t) ->
-      Hashtbl.replace tbl t.schema.name t.schema.description
-    ) keeper_tools;
+    List.iter
+      (fun (t : Agent_sdk.Tool.t) ->
+         Hashtbl.replace tbl t.schema.name t.schema.description)
+      keeper_tools;
     tbl
   in
   (* Map tool name → OAS input_schema JSON for keeper_tool_search enrichment.
      Covers keeper_* tools that don't appear in masc_schemas_ref. *)
   let oas_input_schema_map =
     let tbl = Hashtbl.create (List.length keeper_tools) in
-    List.iter (fun (t : Agent_sdk.Tool.t) ->
-      let param_type_str (pt : Agent_sdk.Types.param_type) = match pt with
-        | String -> "string" | Integer -> "integer" | Number -> "number"
-        | Boolean -> "boolean" | Array -> "array" | Object -> "object"
-      in
-      let props =
-        List.map (fun (p : Agent_sdk.Types.tool_param) ->
-          (p.name, `Assoc [
-            ("type", `String (param_type_str p.param_type));
-            ("description", `String p.description);
-          ])
-        ) t.schema.parameters
-      in
-      let required =
-        t.schema.parameters
-        |> List.filter (fun (p : Agent_sdk.Types.tool_param) -> p.required)
-        |> List.map (fun (p : Agent_sdk.Types.tool_param) -> `String p.name)
-      in
-      let schema = `Assoc [
-        ("type", `String "object");
-        ("properties", `Assoc props);
-        ("required", `List required);
-      ] in
-      Hashtbl.replace tbl t.schema.name schema
-    ) keeper_tools;
+    List.iter
+      (fun (t : Agent_sdk.Tool.t) ->
+         let param_type_str (pt : Agent_sdk.Types.param_type) =
+           match pt with
+           | String -> "string"
+           | Integer -> "integer"
+           | Number -> "number"
+           | Boolean -> "boolean"
+           | Array -> "array"
+           | Object -> "object"
+         in
+         let props =
+           List.map
+             (fun (p : Agent_sdk.Types.tool_param) ->
+                ( p.name
+                , `Assoc
+                    [ "type", `String (param_type_str p.param_type)
+                    ; "description", `String p.description
+                    ] ))
+             t.schema.parameters
+         in
+         let required =
+           t.schema.parameters
+           |> List.filter (fun (p : Agent_sdk.Types.tool_param) -> p.required)
+           |> List.map (fun (p : Agent_sdk.Types.tool_param) -> `String p.name)
+         in
+         let schema =
+           `Assoc
+             [ "type", `String "object"
+             ; "properties", `Assoc props
+             ; "required", `List required
+             ]
+         in
+         Hashtbl.replace tbl t.schema.name schema)
+      keeper_tools;
     tbl
   in
   (* Wire keeper_tool_search: update session-local ref with the real BM25 impl.
      Filtering excludes already-visible tools (core_discovery_tools in discovery
      mode, core_always_tools otherwise) so results are genuinely additional. *)
-  local_search_fn_ref := (fun ~query ~max_results ->
-    let core = Keeper_exec_tools.effective_core_tools () in
-    let retrieved = Agent_sdk.Tool_index.retrieve search_index query in
-    (* Pre-filter: exclude core tools, the search tool itself, and
+  (local_search_fn_ref
+   := fun ~query ~max_results ->
+        let core = Keeper_exec_tools.effective_core_tools () in
+        let retrieved = Agent_sdk.Tool_index.retrieve search_index query in
+        (* Pre-filter: exclude core tools, the search tool itself, and
        policy-denied tools.  Samchon principle: "if you can verify, you
        converge" — only return tools the keeper can actually call,
        preventing hallucinated attempts. *)
-    let allowed = Keeper_exec_tools.keeper_allowed_tool_names meta in
-    let allowed_set =
-      let tbl = Hashtbl.create (List.length allowed) in
-      List.iter (fun n -> Hashtbl.replace tbl n ()) allowed; tbl
-    in
-    let raw_hit_count = List.length retrieved in
-    let after_core_filter =
-      retrieved
-      |> List.filter (fun (name, _) ->
-        not (List.mem name core)
-        && name <> "keeper_tool_search")
-    in
-    let after_policy_filter =
-      after_core_filter
-      |> List.filter (fun (name, _) -> Hashtbl.mem allowed_set name)
-    in
-    let new_discoveries =
-      after_policy_filter
-      |> List.filteri (fun i _ -> i < max_results)
-    in
-    let filtered_by_policy = List.length after_core_filter - List.length after_policy_filter in
-    (* Register discovered tools for discovery-mode before_turn_hook
+        let allowed = Keeper_exec_tools.keeper_allowed_tool_names meta in
+        let allowed_set =
+          let tbl = Hashtbl.create (List.length allowed) in
+          List.iter (fun n -> Hashtbl.replace tbl n ()) allowed;
+          tbl
+        in
+        let raw_hit_count = List.length retrieved in
+        (* Samchon principle: "if the tool is already visible, tell the LLM
+       which one" — prevents redundant search→call cycles. *)
+        let matched_core_names =
+          retrieved
+          |> List.filter_map (fun (name, _) ->
+            if List.mem name core || name = "keeper_tool_search" then Some name else None)
+        in
+        let after_core_filter =
+          retrieved
+          |> List.filter (fun (name, _) ->
+            (not (List.mem name core)) && name <> "keeper_tool_search")
+        in
+        let after_policy_filter =
+          after_core_filter |> List.filter (fun (name, _) -> Hashtbl.mem allowed_set name)
+        in
+        let new_discoveries =
+          after_policy_filter |> List.filteri (fun i _ -> i < max_results)
+        in
+        let filtered_by_policy =
+          List.length after_core_filter - List.length after_policy_filter
+        in
+        (* Register discovered tools for discovery-mode before_turn_hook
        using the actual current turn so decay/visibility stay aligned. *)
-    let discovered_names = List.map fst new_discoveries in
-    Keeper_discovered_tools.add !discovered_ref ~turn:!current_turn_ref ~names:discovered_names;
-    (* Try MASC help_entry (from injected schemas), fall back to OAS description *)
-    let masc_schemas = !Keeper_exec_tools.masc_schemas_ref in
-    let results =
-      List.map (fun (name, score) ->
-        let help_opt = Tool_help_registry.find_entry masc_schemas name in
-        let desc = match help_opt with
-          | Some e -> `String e.short_description
-          | None ->
-            (match Hashtbl.find_opt oas_description_map name with
-             | Some d -> `String d
-             | None -> `Null)
-        in
-        let when_to_use = match help_opt with
-          | Some e -> `String e.when_to_use
-          | None -> `Null
-        in
-        (* Samchon verification principle: include full input_schema so
+        let discovered_names = List.map fst new_discoveries in
+        Keeper_discovered_tools.add
+          !discovered_ref
+          ~turn:!current_turn_ref
+          ~names:discovered_names;
+        (* Try MASC help_entry (from injected schemas), fall back to OAS description *)
+        let masc_schemas = !Keeper_exec_tools.masc_schemas_ref in
+        let results =
+          List.map
+            (fun (name, score) ->
+               let help_opt = Tool_help_registry.find_entry masc_schemas name in
+               let desc =
+                 match help_opt with
+                 | Some e -> `String e.short_description
+                 | None ->
+                   (match Hashtbl.find_opt oas_description_map name with
+                    | Some d -> `String d
+                    | None -> `Null)
+               in
+               let when_to_use =
+                 match help_opt with
+                 | Some e -> `String e.when_to_use
+                 | None -> `Null
+               in
+               (* Samchon verification principle: include full input_schema so
            the LLM can construct a correct call on the first attempt.
            "Schema drives both LLM guidance and validation."
            Fallback chain: MASC injected schema → OAS tool schema. *)
-        let input_schema =
-          match List.find_opt (fun (s : Types.tool_schema) -> s.name = name) masc_schemas with
-          | Some s -> s.input_schema
-          | None ->
-            (match Hashtbl.find_opt oas_input_schema_map name with
-             | Some j -> j
-             | None -> `Null)
+               let input_schema =
+                 match
+                   List.find_opt
+                     (fun (s : Types.tool_schema) -> s.name = name)
+                     masc_schemas
+                 with
+                 | Some s -> s.input_schema
+                 | None ->
+                   (match Hashtbl.find_opt oas_input_schema_map name with
+                    | Some j -> j
+                    | None -> `Null)
+               in
+               `Assoc
+                 [ "name", `String name
+                 ; "score", `Float score
+                 ; "description", desc
+                 ; "when_to_use", when_to_use
+                 ; "input_schema", input_schema
+                 ])
+            new_discoveries
         in
-        `Assoc [
-          ("name", `String name);
-          ("score", `Float score);
-          ("description", desc);
-          ("when_to_use", when_to_use);
-          ("input_schema", input_schema);
-        ]
-      ) new_discoveries
-    in
-    let hint = match results with
-      | [] when raw_hit_count = 0 ->
-        "No tools match this query. Try different keywords (e.g., 'worktree', 'board', 'github')."
-      | [] when filtered_by_policy > 0 ->
-        Printf.sprintf "Found %d matches but all filtered (already visible or policy-denied). Your current tools may already cover this need." filtered_by_policy
-      | [] ->
-        Printf.sprintf "Found %d raw BM25 hits but all are already in your core tool set." raw_hit_count
-      | _ -> "Call any of these tools by name in this or a future turn."
-    in
-    `Assoc [
-      ("ok", `Bool true);
-      ("query", `String query);
-      ("results", `List results);
-      ("result_count", `Int (List.length results));
-      ("diagnostics", `Assoc [
-        ("raw_bm25_hits", `Int raw_hit_count);
-        ("filtered_by_core", `Int (raw_hit_count - List.length after_core_filter));
-        ("filtered_by_policy", `Int filtered_by_policy);
-      ]);
-      ("hint", `String hint);
-    ]
-  );
+        let hint =
+          match results, matched_core_names with
+          | [], [] when raw_hit_count = 0 ->
+            "No tools match this query. Try different keywords (e.g., 'worktree', \
+             'board', 'github')."
+          | [], _ :: _ when filtered_by_policy = 0 ->
+            Printf.sprintf
+              "Already loaded: %s. Call directly — no search needed."
+              (String.concat ", " matched_core_names)
+          | [], _ when filtered_by_policy > 0 ->
+            let core_part =
+              match matched_core_names with
+              | [] -> ""
+              | names -> Printf.sprintf " Already loaded: %s." (String.concat ", " names)
+            in
+            Printf.sprintf
+              "Found %d matches but all filtered (already visible or policy-denied).%s"
+              (filtered_by_policy + List.length matched_core_names)
+              core_part
+          | [], _ ->
+            Printf.sprintf
+              "Found %d raw BM25 hits but all are already in your core tool set."
+              raw_hit_count
+          | _, _ -> "Call any of these tools by name in this or a future turn."
+        in
+        `Assoc
+          ([ "ok", `Bool true
+           ; "query", `String query
+           ; "results", `List results
+           ; "result_count", `Int (List.length results)
+           ]
+           @ (match matched_core_names with
+              | [] -> []
+              | names ->
+                [ "already_visible", `List (List.map (fun n -> `String n) names) ])
+           @ [ ( "diagnostics"
+               , `Assoc
+                   [ "raw_bm25_hits", `Int raw_hit_count
+                   ; ( "filtered_by_core"
+                     , `Int (raw_hit_count - List.length after_core_filter) )
+                   ; "filtered_by_policy", `Int filtered_by_policy
+                   ] )
+             ; "hint", `String hint
+             ]));
   (* Visibility measurement (#4961): log universe size vs search scope *)
-  if Keeper_types_profile.keeper_debug then
-    Log.Keeper.debug "keeper:%s tool visibility: total=%d search_indexed=%d"
+  if Keeper_types_profile.keeper_debug
+  then
+    Log.Keeper.debug
+      "keeper:%s tool visibility: total=%d search_indexed=%d"
       meta.name
       (List.length keeper_tools)
       (List.length tool_entries);
@@ -831,21 +970,37 @@ let run_turn
      this includes all candidate tools minus denied.  BM25 retrieval
      and Tool_op.Add operate within this scope. *)
   let all_tool_names =
-    "extend_turns"
-    :: List.map (fun (t : Agent_sdk.Tool.t) -> t.schema.name) keeper_tools
+    "extend_turns" :: List.map (fun (t : Agent_sdk.Tool.t) -> t.schema.name) keeper_tools
   in
   (* Precompute membership table for AllowList validation below.
      all_tool_names is constant for the session; building universe_set
      once here avoids O(n) Hashtbl allocation on every turn. *)
   let universe_set = Keeper_tool_policy.tool_name_set all_tool_names in
+  (* Precompute preset-executable set for AllowList pruning.
+     Prevents tools visible via core_discovery_tools but blocked by
+     preset (e.g. social keeper seeing keeper_fs_edit) from reaching
+     the LLM and triggering tool_not_allowed errors. *)
+  let allowed_exec_names = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  let allowed_exec_set =
+    let set = Keeper_tool_policy.tool_name_set allowed_exec_names in
+    (* Core always-tools bypass candidate_set in can_execute, so they
+       may be absent from keeper_allowed_tool_names.  Add them back to
+       prevent the preset filter from dropping survival-critical tools. *)
+    List.iter
+      (fun name -> Hashtbl.replace set name ())
+      Keeper_tool_registry.core_always_tools;
+    set
+  in
   let max_tools_per_turn =
-    if is_retry then Keeper_config.keeper_retry_max_tools_per_turn ()
+    if is_retry
+    then Keeper_config.keeper_retry_max_tools_per_turn ()
     else Keeper_config.keeper_max_tools_per_turn ()
   in
   (* Runtime tool overlay: external callers (masc_tool_grant/revoke)
      push Tool_op.t values here. The hook applies them each turn.
      If caller provides one, use it; otherwise create a local one. *)
-  let tool_overlay_ref = match tool_overlay with
+  let tool_overlay_ref =
+    match tool_overlay with
     | Some r -> r
     | None -> ref Agent_sdk.Tool_op.Keep_all
   in
@@ -854,14 +1009,23 @@ let run_turn
      boring tools (status/heartbeat/tasks_list) were called.
      When provided externally (from keepalive loop), persists across
      run_turn calls to detect inter-run polling patterns. *)
-  let boring_consecutive_turns = match boring_consecutive_turns_ref with
+  let boring_consecutive_turns =
+    match boring_consecutive_turns_ref with
     | Some r -> r
     | None -> ref 0
   in
-  let base_hooks = Keeper_hooks_oas.make_hooks
-    ~config ~meta_ref ~session ~ctx_snapshot ~generation ?max_cost_usd
-    ?trajectory_acc ~boring_consecutive_turns
-    () in
+  let base_hooks =
+    Keeper_hooks_oas.make_hooks
+      ~config
+      ~meta_ref
+      ~session
+      ~ctx_snapshot
+      ~generation
+      ?max_cost_usd
+      ?trajectory_acc
+      ~boring_consecutive_turns
+      ()
+  in
   (* BM25 Tool_selector removed: discovery mode uses core + keeper_tool_search.
      The search_index (full universe BM25) is still used by keeper_tool_search
      for explicit on-demand discovery. *)
@@ -875,373 +1039,461 @@ let run_turn
      each turn selects the top-k tools most relevant to the current
      context, with confidence-gated fallback and optional LLM rerank.
      This replaces ~120 lines of manual Tool_index calls. *)
-  let before_turn_hook : Agent_sdk.Hooks.hooks = {
-    Agent_sdk.Hooks.empty with
-    before_turn_params = Some (fun event ->
-      match event with
-      | Agent_sdk.Hooks.BeforeTurnParams { turn; current_params; messages; _ } ->
-        let hook_t0 = Time_compat.now () in
-        (* Update current_turn_ref so session-scoped callbacks
+  let before_turn_hook : Agent_sdk.Hooks.hooks =
+    { Agent_sdk.Hooks.empty with
+      before_turn_params =
+        Some
+          (fun event ->
+            match event with
+            | Agent_sdk.Hooks.BeforeTurnParams
+                { turn; current_params; messages; last_tool_results; _ } ->
+              let hook_t0 = Time_compat.now () in
+              (* Update current_turn_ref so session-scoped callbacks
            (keeper_tool_search, on_tool_called) use the correct turn. *)
-        current_turn_ref := turn;
-        (* 1. Dynamic context injection *)
-        let ctx =
-          if String.trim dynamic_context = "" then
-            current_params.extra_system_context
-          else
-            match current_params.extra_system_context with
-            | None -> Some dynamic_context
-            | Some existing -> Some (existing ^ "\n\n" ^ dynamic_context)
-        in
-        (* 1b. Temporal context from context_injector (turn 1+) *)
-        let ctx =
-          match Masc_context_injector.render_temporal_summary shared_context with
-          | None -> ctx
-          | Some temporal ->
-            (match ctx with
-             | None -> Some temporal
-             | Some existing -> Some (existing ^ "\n\n" ^ temporal))
-        in
-        (* 2. Progressive tool disclosure via OAS Tool_selector.
+              current_turn_ref := turn;
+              (* Adaptive thinking override based on turn signals *)
+              let adaptive_thinking_budget =
+                adaptive_thinking_budget
+                  ~enabled:(Keeper_config.keeper_adaptive_thinking_enabled ())
+                  ~is_retry
+                  ~last_tool_results
+                  ~user_message
+                  ~dynamic_context
+                  ~current_budget:current_params.thinking_budget
+              in
+              let current_params =
+                { current_params with thinking_budget = adaptive_thinking_budget }
+              in
+              (* 1. Dynamic context injection *)
+              let ctx =
+                if String.trim dynamic_context = ""
+                then current_params.extra_system_context
+                else (
+                  match current_params.extra_system_context with
+                  | None -> Some dynamic_context
+                  | Some existing -> Some (existing ^ "\n\n" ^ dynamic_context))
+              in
+              (* 1b. Temporal context from context_injector (turn 1+) *)
+              let ctx =
+                match Masc_context_injector.render_temporal_summary shared_context with
+                | None -> ctx
+                | Some temporal ->
+                  (match ctx with
+                   | None -> Some temporal
+                   | Some existing -> Some (existing ^ "\n\n" ^ temporal))
+              in
+              (* 2. Progressive tool disclosure via OAS Tool_selector.
            Extract context from last user message for relevance scoring. *)
-        let last_user_text =
-          List.fold_left (fun acc (m : Agent_sdk.Types.message) ->
-            match m.role with
-            | Agent_sdk.Types.User ->
-              Agent_sdk.Types.text_of_content m.content
-            | _ -> acc
-          ) "" messages
-        in
-        let query_text =
-          (if String.trim last_user_text <> "" then last_user_text
-           else user_message)
-          |> tool_query_text_of_user_message
-        in
-        let max_tools = max_tools_per_turn in
-        let portal_ctx : Tool_portal.context = {
-          config;
-          agent_name = meta.name;
-        } in
-        let visible_always_include_tools =
-          Tool_portal.filter_visible_tool_names portal_ctx always_include_tools
-        in
-        (* Progressive tool disclosure: core tools are always visible;
+              let last_user_text =
+                List.fold_left
+                  (fun acc (m : Agent_sdk.Types.message) ->
+                     match m.role with
+                     | Agent_sdk.Types.User -> Agent_sdk.Types.text_of_content m.content
+                     | _ -> acc)
+                  ""
+                  messages
+              in
+              let query_text =
+                (if String.trim last_user_text <> "" then last_user_text else user_message)
+                |> tool_query_text_of_user_message
+              in
+              let max_tools = max_tools_per_turn in
+              let portal_ctx : Tool_portal.context = { config; agent_name = meta.name } in
+              let visible_always_include_tools =
+                Tool_portal.filter_visible_tool_names portal_ctx always_include_tools
+              in
+              (* Progressive tool disclosure: core tools are always visible;
            additional tools are selected by BM25 + optional LLM reranking
            (TopK_llm, gated by MASC_KEEPER_LLM_RERANK env var).
            When LLM rerank is disabled, only tools explicitly discovered
            via keeper_tool_search appear alongside core. *)
-        let llm_rerank_enabled = Keeper_config.keeper_llm_rerank_enabled () in
-        let effective_selected, deterministic_prefilter_count, llm_selected_count,
-            selection_mode =
-          let core = Keeper_exec_tools.effective_core_tools () in
-          let discovered =
-            Keeper_discovered_tools.active_names !discovered_ref ~turn
-          in
-          let _ = Keeper_discovered_tools.decay !discovered_ref ~turn in
-          let selection_limit =
-            min max_tools keeper_selection_top_k
-          in
-          let preset_selection_context =
-            if llm_rerank_enabled then Some (load_preset_selection_context ())
-            else None
-          in
-          let deterministic_prefilter =
-            match preset_selection_context with
-            | Some (_, preset_search_index) ->
-              (* Keep a deterministic BM25 floor even when TopK_llm is enabled:
-                 the LLM may enrich selection, but it must not be able to
-                 shrink the executable tool universe to below the BM25 floor. *)
-              Agent_sdk.Tool_index.retrieve preset_search_index query_text
-              |> List.filter (fun (name, _) -> not (List.mem name core))
-              |> List.filteri (fun i _ -> i < selection_limit)
-              |> List.map fst
-            | None -> []
-          in
-          let llm_selected =
-            match preset_selection_context with
-            | Some (preset_tools, _) ->
-              begin match Eio_context.get_switch_opt (), Eio_context.get_net_opt () with
-              | Some sw, Some net ->
-                let rerank_cascade = Keeper_config.keeper_llm_rerank_cascade () in
-                let defaults = Oas_worker.default_model_strings ~cascade_name:rerank_cascade in
-                let config_path = Oas_worker.default_config_path () in
-                let named_cascade = Agent_sdk.Api.named_cascade
-                  ?config_path ~name:rerank_cascade ~defaults () in
-                let rerank_fn = Agent_sdk.Tool_selector.default_rerank_fn
-                  ~sw ~net ~named_cascade ~k:selection_limit () in
-                let strategy = Agent_sdk.Tool_selector.TopK_llm {
-                  k = selection_limit;
-                  bm25_prefilter_n =
-                    min keeper_selection_bm25_prefilter_n
-                      (List.length preset_tools);
-                  always_include = core;
-                  confidence_threshold = 0.3;
-                  rerank_fn;
-                } in
-                (try
-                  let selected = Agent_sdk.Tool_selector.select_names
-                    ~strategy ~context:query_text ~tools:preset_tools in
-                  if Keeper_types_profile.keeper_debug then
-                    Log.Keeper.info
-                      "keeper:%s TopK_llm selected %d tools (query_len=%d, candidates=%d)"
-                      meta.name (List.length selected)
-                      (String.length query_text) (List.length preset_tools);
-                  selected
-                with
-                | Eio.Cancel.Cancelled _ as e -> raise e
-                | exn ->
-                  Log.Keeper.warn
-                    "keeper:%s TopK_llm failed (%s), falling back to core+prefilter+discovered"
-                    meta.name (Printexc.to_string exn);
-                  [])
-              | _ ->
-                Log.Keeper.warn
-                  "keeper:%s TopK_llm: Eio context unavailable, falling back to core+prefilter+discovered"
-                  meta.name;
-                []
-              end
-            | None -> []
-          in
-          let merged =
-            merge_tool_selection_boundary
-              ~core
-              ~deterministic_prefilter
-              ~llm_selected
-              ~discovered
-            |> Tool_portal.filter_visible_tool_names portal_ctx
-          in
-          let selection_mode =
-            if llm_rerank_enabled then "deterministic_plus_llm_hint"
-            else "core_plus_discovered"
-          in
-          let deterministic_floor_set =
-            Keeper_types.dedupe_keep_order
-              (core @ deterministic_prefilter @ List.sort String.compare discovered)
-          in
-          let llm_only_count =
-            List.length (List.filter (fun n ->
-              not (List.mem n deterministic_floor_set)) llm_selected)
-          in
-          merged, List.length deterministic_prefilter, llm_only_count,
-          selection_mode
-        in
-        (* Apply runtime tool overlay (masc_tool_grant/revoke) and
+              let llm_rerank_enabled = Keeper_config.keeper_llm_rerank_enabled () in
+              let effective_selected, deterministic_prefilter_count, llm_selected_count,
+                  selection_mode =
+                let core =
+                  Keeper_exec_tools.effective_core_tools ()
+                  |> List.filter (fun name -> Hashtbl.mem allowed_exec_set name)
+                in
+                let discovered =
+                  Keeper_discovered_tools.active_names !discovered_ref ~turn
+                in
+                let _ = Keeper_discovered_tools.decay !discovered_ref ~turn in
+                let selection_limit = min max_tools keeper_selection_top_k in
+                let preset_selection_context =
+                  if llm_rerank_enabled
+                  then Some (load_preset_selection_context ())
+                  else None
+                in
+                let deterministic_prefilter =
+                  match preset_selection_context with
+                  | Some (_, preset_search_index) ->
+                    (* Keep a deterministic BM25 floor even when TopK_llm is enabled:
+                       the LLM may enrich selection, but it must not be able to
+                       shrink the executable tool universe to below the BM25 floor. *)
+                    Agent_sdk.Tool_index.retrieve preset_search_index query_text
+                    |> List.filter (fun (name, _) -> not (List.mem name core))
+                    |> List.filteri (fun i _ -> i < selection_limit)
+                    |> List.map fst
+                  | None -> []
+                in
+                let llm_selected =
+                  match preset_selection_context with
+                  | Some (preset_tools, _) ->
+                    (match Eio_context.get_switch_opt (), Eio_context.get_net_opt () with
+                     | Some sw, Some net ->
+                       let rerank_cascade =
+                         Keeper_config.keeper_llm_rerank_cascade ()
+                       in
+                       let defaults =
+                         Oas_worker.default_model_strings ~cascade_name:rerank_cascade
+                       in
+                       let config_path = Oas_worker.default_config_path () in
+                       let named_cascade =
+                         Agent_sdk.Api.named_cascade
+                           ?config_path
+                           ~name:rerank_cascade
+                           ~defaults
+                           ()
+                       in
+                       let rerank_fn =
+                         Agent_sdk.Tool_selector.default_rerank_fn
+                           ~sw
+                           ~net
+                           ~named_cascade
+                           ~k:selection_limit
+                           ()
+                       in
+                       let strategy =
+                         Agent_sdk.Tool_selector.TopK_llm
+                           { k = selection_limit
+                           ; bm25_prefilter_n =
+                               min
+                                 keeper_selection_bm25_prefilter_n
+                                 (List.length preset_tools)
+                           ; always_include = core
+                           ; confidence_threshold = 0.3
+                           ; rerank_fn
+                           }
+                       in
+                       (try
+                          let selected =
+                            Agent_sdk.Tool_selector.select_names
+                              ~strategy
+                              ~context:query_text
+                              ~tools:preset_tools
+                          in
+                          if Keeper_types_profile.keeper_debug
+                          then
+                            Log.Keeper.info
+                              "keeper:%s TopK_llm selected %d tools (query_len=%d, \
+                               candidates=%d)"
+                              meta.name
+                              (List.length selected)
+                              (String.length query_text)
+                              (List.length preset_tools);
+                          selected
+                        with
+                        | Eio.Cancel.Cancelled _ as e -> raise e
+                        | exn ->
+                          Log.Keeper.warn
+                            "keeper:%s TopK_llm failed (%s), falling back to \
+                             core+prefilter+discovered"
+                            meta.name
+                            (Printexc.to_string exn);
+                          [])
+                     | _ ->
+                       Log.Keeper.warn
+                         "keeper:%s TopK_llm: Eio context unavailable, falling back \
+                          to core+prefilter+discovered"
+                         meta.name;
+                       [])
+                  | None -> []
+                in
+                let merged =
+                  merge_tool_selection_boundary
+                    ~core
+                    ~deterministic_prefilter
+                    ~llm_selected
+                    ~discovered
+                  |> Tool_portal.filter_visible_tool_names portal_ctx
+                in
+                let selection_mode =
+                  if llm_rerank_enabled
+                  then "deterministic_plus_llm_hint"
+                  else "core_plus_discovered"
+                in
+                let deterministic_floor_set =
+                  Keeper_types.dedupe_keep_order
+                    (core @ deterministic_prefilter @ List.sort String.compare discovered)
+                in
+                let llm_only_count =
+                  List.length
+                    (List.filter
+                       (fun n -> not (List.mem n deterministic_floor_set))
+                       llm_selected)
+                in
+                merged, List.length deterministic_prefilter, llm_only_count,
+                selection_mode
+              in
+              (* Apply runtime tool overlay (masc_tool_grant/revoke) and
            intersect with the full dispatch universe. *)
-        let all_allowed =
-          let raw =
-            Agent_sdk.Tool_op.apply
-              (Agent_sdk.Tool_op.compose [
-                Agent_sdk.Tool_op.Replace_with effective_selected;
-                !tool_overlay_ref;
-              ])
-              all_tool_names
-            |> Tool_portal.filter_visible_tool_names portal_ctx
-          in
-          (* Validate AllowList against dispatch universe: tools visible
+              let all_allowed =
+                let raw =
+                  Agent_sdk.Tool_op.apply
+                    (Agent_sdk.Tool_op.compose
+                       [ Agent_sdk.Tool_op.Replace_with effective_selected
+                       ; !tool_overlay_ref
+                       ])
+                    all_tool_names
+                  |> Tool_portal.filter_visible_tool_names portal_ctx
+                in
+                (* Validate AllowList against dispatch universe: tools visible
              to the LLM but absent from keeper_tools would cause execution
              errors and waste a turn.  Filter them out defensively.
              This can happen when core_discovery_tools includes tools
              not covered by the keeper's preset (e.g. minimal). *)
-          let validated, dropped_names =
-            List.partition (fun n -> Hashtbl.mem universe_set n) raw
-          in
-          let dropped = List.length dropped_names in
-          if dropped > 0 then begin
-            let max_logged = 10 in
-            let shown = List.filteri (fun i _ -> i < max_logged) dropped_names in
-            let omitted = dropped - List.length shown in
-            let shown_text = String.concat ", " shown in
-            let omitted_suffix =
-              if omitted > 0 then Printf.sprintf " (+%d more)" omitted else ""
-            in
-            Log.Keeper.warn
-              "keeper:%s turn:%d AllowList pruned %d tool(s) outside dispatch universe: %s%s"
-              meta.name turn dropped shown_text omitted_suffix
-          end;
-          validated
-        in
-        let core_count = List.length (Keeper_exec_tools.effective_core_tools ()) in
-        let discovered_count =
-          List.length (Keeper_discovered_tools.active_names !discovered_ref ~turn)
-        in
-        if Keeper_types_profile.keeper_debug then
-          Log.Keeper.info
-            "tool_disclosure keeper=%s core=%d deterministic_prefilter=%d discovered=%d llm_selected=%d llm_rerank=%b allowed=%d query_len=%d mode=%s"
-            meta.name core_count deterministic_prefilter_count
-            discovered_count llm_selected_count llm_rerank_enabled
-            (List.length all_allowed)
-            (String.length query_text)
-            selection_mode;
-        (* 3. Graceful last-turn: inject budget warnings and restrict
+                let validated, dropped_names =
+                  List.partition
+                    (fun n ->
+                       Hashtbl.mem universe_set n && Hashtbl.mem allowed_exec_set n)
+                    raw
+                in
+                let dropped = List.length dropped_names in
+                if dropped > 0
+                then (
+                  let max_logged = 10 in
+                  let shown = List.filteri (fun i _ -> i < max_logged) dropped_names in
+                  let omitted = dropped - List.length shown in
+                  let shown_text = String.concat ", " shown in
+                  let omitted_suffix =
+                    if omitted > 0 then Printf.sprintf " (+%d more)" omitted else ""
+                  in
+                  Log.Keeper.warn
+                    "keeper:%s turn:%d AllowList pruned %d tool(s) outside dispatch \
+                     universe: %s%s"
+                    meta.name
+                    turn
+                    dropped
+                    shown_text
+                    omitted_suffix);
+                validated
+              in
+              let core_count = List.length (Keeper_exec_tools.effective_core_tools ()) in
+              let discovered_count =
+                List.length (Keeper_discovered_tools.active_names !discovered_ref ~turn)
+              in
+              if Keeper_types_profile.keeper_debug
+              then
+                Log.Keeper.info
+                  "tool_disclosure keeper=%s core=%d deterministic_prefilter=%d \
+                   discovered=%d llm_selected=%d llm_rerank=%b allowed=%d query_len=%d \
+                   mode=%s"
+                  meta.name
+                  core_count
+                  deterministic_prefilter_count
+                  discovered_count
+                  llm_selected_count
+                  llm_rerank_enabled
+                  (List.length all_allowed)
+                  (String.length query_text)
+                  selection_mode;
+              (* 3. Graceful last-turn: inject budget warnings and restrict
            tools when approaching the turn limit.
            - Warning zone (2 turns before limit): inject budget warning
            - Last turn (1 turn before limit): restrict to safe tools + force [STATE]
            The keeper can still call extend_turns to escape the limit. *)
-        (* With Agent.resume, turn is cumulative from checkpoint.
+              (* With Agent.resume, turn is cumulative from checkpoint.
            Use per-call turn count for budget calculations. *)
-        let per_call_turn = turn - start_turn_count in
-        let is_last_turn = per_call_turn >= max_turns - 1 in
-        let is_warning_zone = per_call_turn >= max_turns - 2 in
-        let append_ctx ctx text =
-          Some (match ctx with None -> text | Some e -> e ^ "\n\n" ^ text)
-        in
-        let ctx =
-          if is_last_turn then
-            append_ctx ctx
-              (Printf.sprintf
-                 "[LAST TURN] Turn %d/%d. This is your final turn. \
-                  You MUST emit a [STATE]...[/STATE] block now summarizing \
-                  what you accomplished and what the next generation should do. \
-                  Do NOT start new tool work. If you need more turns, call extend_turns. \
-                  If you claimed a task, call keeper_task_done NOW before session ends."
-                 turn max_turns)
-          else if is_retry then
-            append_ctx ctx
-              (Printf.sprintf
-                 "[RETRY] The previous attempt overflowed the model context. \
-                  Stay concise, prefer already-loaded context, and only use the \
-                  smallest essential tool set if a tool call is strictly necessary. \
-                  Current tool budget: %d."
-                 max_tools)
-          else if is_warning_zone then
-            append_ctx ctx
-              (Printf.sprintf
-                 "[BUDGET] %d/%d turns used. Wrap up current work and emit \
-                  a [STATE] block. Call extend_turns if you need more time."
-                 turn max_turns)
-          else ctx
-        in
-        (* Boring-tool gate: graduated response to consecutive turns
+              let per_call_turn = turn - start_turn_count in
+              let is_last_turn = per_call_turn >= max_turns - 1 in
+              let is_warning_zone = per_call_turn >= max_turns - 2 in
+              let append_ctx ctx text =
+                Some
+                  (match ctx with
+                   | None -> text
+                   | Some e -> e ^ "\n\n" ^ text)
+              in
+              let ctx =
+                if is_last_turn
+                then
+                  append_ctx
+                    ctx
+                    (Printf.sprintf
+                       "[LAST TURN] Turn %d/%d. This is your final turn. You MUST emit a \
+                        [STATE]...[/STATE] block now summarizing what you accomplished \
+                        and what the next generation should do. Do NOT start new tool \
+                        work. If you need more turns, call extend_turns. If you claimed \
+                        a task, call keeper_task_done NOW before session ends."
+                       turn
+                       max_turns)
+                else if is_retry
+                then
+                  append_ctx
+                    ctx
+                    (Printf.sprintf
+                       "[RETRY] The previous attempt overflowed the model context. Stay \
+                        concise, prefer already-loaded context, and only use the \
+                        smallest essential tool set if a tool call is strictly \
+                        necessary. Current tool budget: %d."
+                       max_tools)
+                else if is_warning_zone
+                then
+                  append_ctx
+                    ctx
+                    (Printf.sprintf
+                       "[BUDGET] %d/%d turns used. Wrap up current work and emit a \
+                        [STATE] block. Call extend_turns if you need more time."
+                       turn
+                       max_turns)
+                else ctx
+              in
+              (* Boring-tool gate: graduated response to consecutive turns
            with only non-productive tools (status/heartbeat/tasks_list).
            This catches the polling loop that bypasses OAS's exact-fingerprint
            idle detection when keepers alternate boring tools.
            Level 1 (>=2): warn.  Level 2 (>=3): final warning.
            Level 3 (>=4): strip boring tools from allow list. *)
-        let boring_streak = !boring_consecutive_turns in
-        let ctx =
-          if boring_streak >= 4 then
-            append_ctx ctx
-              (Printf.sprintf
-                 "[POLLING BLOCKED] %d consecutive turns of only boring \
-                  observation tools (status/heartbeat/task-list/context). \
-                  These tools removed from this turn. Use \
-                  keeper_task_claim, keeper_fs_read, \
-                  keeper_board_post, keeper_shell_readonly — or \
-                  keeper_stay_silent if nothing to do."
-                 boring_streak)
-          else if boring_streak >= 3 then
-            append_ctx ctx
-              (Printf.sprintf
-                 "[FINAL POLLING WARNING] %d turns of only boring \
-                  observation tools. Next turn without a productive tool \
-                  will REMOVE all boring observation tools \
-                  (status/heartbeat/task-list/context). Call \
-                  keeper_task_claim, keeper_fs_read, or \
-                  keeper_stay_silent NOW."
-                 boring_streak)
-          else if boring_streak >= 2 then
-            append_ctx ctx
-              "[POLLING DETECTED] You spent 2 turns only calling boring \
-               observation tools (status/heartbeat/task-list/context). \
-               Do productive work: keeper_task_claim, keeper_fs_read, \
-               keeper_board_post, or keeper_stay_silent."
-          else ctx
-        in
-        let all_allowed =
-          if boring_streak >= 4 then
-            List.filter
-              (fun name -> not (Keeper_tool_registry.is_boring_tool name))
-              all_allowed
-          else all_allowed
-        in
-        let safe_last_turn_tools =
-          Keeper_tool_policy.last_turn_safe_tool_names ()
-        in
-        let all_allowed =
-          if is_last_turn then
-            Agent_sdk.Tool_op.apply
-              (Agent_sdk.Tool_op.Intersect_with safe_last_turn_tools)
-              all_allowed
-          else all_allowed
-        in
-        if is_warning_zone then
-          Log.Keeper.info
-            "keeper:%s turn_budget turn=%d/%d last_turn=%b"
-            meta.name turn max_turns is_last_turn;
-        (* Context overflow guard: Tool_selector.select already respects
+              let boring_streak = !boring_consecutive_turns in
+              let ctx =
+                if boring_streak >= 4
+                then
+                  append_ctx
+                    ctx
+                    (Printf.sprintf
+                       "[POLLING BLOCKED] %d consecutive turns of only boring \
+                        observation tools (status/heartbeat/task-list/context). These \
+                        tools removed from this turn. Use keeper_task_claim, \
+                        keeper_fs_read, keeper_board_post, keeper_shell_readonly — or \
+                        keeper_stay_silent if nothing to do."
+                       boring_streak)
+                else if boring_streak >= 3
+                then
+                  append_ctx
+                    ctx
+                    (Printf.sprintf
+                       "[FINAL POLLING WARNING] %d turns of only boring observation \
+                        tools. Next turn without a productive tool will REMOVE all \
+                        boring observation tools (status/heartbeat/task-list/context). \
+                        Call keeper_task_claim, keeper_fs_read, or keeper_stay_silent \
+                        NOW."
+                       boring_streak)
+                else if boring_streak >= 2
+                then
+                  append_ctx
+                    ctx
+                    "[POLLING DETECTED] You spent 2 turns only calling boring \
+                     observation tools (status/heartbeat/task-list/context). Do \
+                     productive work: keeper_task_claim, keeper_fs_read, \
+                     keeper_board_post, or keeper_stay_silent."
+                else ctx
+              in
+              let all_allowed =
+                if boring_streak >= 4
+                then
+                  List.filter
+                    (fun name -> not (Keeper_tool_registry.is_boring_tool name))
+                    all_allowed
+                else all_allowed
+              in
+              let safe_last_turn_tools =
+                Keeper_tool_policy.last_turn_safe_tool_names ()
+              in
+              let all_allowed =
+                if is_last_turn
+                then
+                  Agent_sdk.Tool_op.apply
+                    (Agent_sdk.Tool_op.Intersect_with safe_last_turn_tools)
+                    all_allowed
+                else all_allowed
+              in
+              if is_warning_zone
+              then
+                Log.Keeper.info
+                  "keeper:%s turn_budget turn=%d/%d last_turn=%b"
+                  meta.name
+                  turn
+                  max_turns
+                  is_last_turn;
+              (* Context overflow guard: Tool_selector.select already respects
            the k limit, but overlays can grow the visible set beyond
            max_tools.  Cap the post-overlay set to stay inside small-model
            context windows. Configurable via MASC_KEEPER_MAX_TOOLS_PER_TURN. *)
-        let all_allowed =
-          if List.length all_allowed > max_tools then begin
-            Log.Keeper.info
-              "context overflow guard: %d tools > max %d, truncating"
-              (List.length all_allowed) max_tools;
-            let essential = List.filter
-              (fun name -> List.mem name visible_always_include_tools) all_allowed in
-            let non_essential = List.filter
-              (fun name -> not (List.mem name visible_always_include_tools)) all_allowed in
-            let budget = max_tools - List.length essential in
-            essential @ (List.filteri (fun i _ -> i < budget) non_essential)
-          end else
-            all_allowed
-        in
-        let tool_filter = Agent_sdk.Guardrails.AllowList all_allowed in
-        (* Force tool calling on every turn except the last.
+              let all_allowed =
+                if List.length all_allowed > max_tools
+                then (
+                  Log.Keeper.info
+                    "context overflow guard: %d tools > max %d, truncating"
+                    (List.length all_allowed)
+                    max_tools;
+                  let essential =
+                    List.filter
+                      (fun name -> List.mem name visible_always_include_tools)
+                      all_allowed
+                  in
+                  let non_essential =
+                    List.filter
+                      (fun name -> not (List.mem name visible_always_include_tools))
+                      all_allowed
+                  in
+                  let budget = max_tools - List.length essential in
+                  essential @ List.filteri (fun i _ -> i < budget) non_essential)
+                else all_allowed
+              in
+              let tool_filter = Agent_sdk.Guardrails.AllowList all_allowed in
+              (* Force tool calling on every turn except the last.
            tool_choice=Any (→ "required") is deterministic at the API level:
            the parser enforces tool call format, preventing the "text response
            trap" where 9B models respond with text instead of calling tools.
            WHICH tool is called remains non-deterministic (model decides).
            Last turn uses Auto so the keeper can emit a [STATE] text block.
            Supersedes L2 turn-0-only approach.  See #5566. *)
-        let tool_choice =
-          if is_last_turn || List.length all_allowed = 0 then
-            current_params.tool_choice  (* last turn: Auto for [STATE] block *)
-          else
-            Some Agent_sdk.Types.Any  (* all other turns: force tool use *)
-        in
-        (* Tool disclosure telemetry: emitted after all allow-list rewrites
+              let tool_choice =
+                if is_last_turn || List.length all_allowed = 0
+                then current_params.tool_choice (* last turn: Auto for [STATE] block *)
+                else Some Agent_sdk.Types.Any (* all other turns: force tool use *)
+              in
+              (* Tool disclosure telemetry: emitted after all allow-list rewrites
            (boring-tool gate, last-turn intersect, max_tools cap) so that
            final_visible and hook_ms reflect the actual state sent to AdjustParams.
            Capture now once so ts_unix and hook_ms are consistent. *)
-        (let now = Time_compat.now () in
-         let hook_elapsed_ms =
-           Keeper_timing.round1 ((now -. hook_t0) *. 1000.0)
-         in
-         let disclosure_json = `Assoc [
-           "ts_unix", `Float now;
-           "event", `String "tool_disclosure";
-           "keeper_name", `String meta.name;
-           "turn", `Int turn;
-           "selection_mode", `String selection_mode;
-           "core_count", `Int core_count;
-           "deterministic_prefilter_count", `Int deterministic_prefilter_count;
-           "discovered_count", `Int discovered_count;
-           "llm_selected_count", `Int llm_selected_count;
-           "final_visible", `Int (List.length all_allowed);
-           "hook_ms", `Float hook_elapsed_ms;
-         ] in
-         (try
-           Keeper_types_support.append_jsonl_line
-             (Keeper_types_support.keeper_decision_log_path config meta.name)
-             disclosure_json
-         with
-         | Eio.Cancel.Cancelled _ as e -> raise e
-         | _ -> ()));
-        (* Yield after CPU-bound tool filtering to let HTTP handlers run.
+              (let now = Time_compat.now () in
+               let hook_elapsed_ms = Keeper_timing.round1 ((now -. hook_t0) *. 1000.0) in
+               let disclosure_json =
+                 `Assoc
+                   [ "ts_unix", `Float now
+                   ; "event", `String "tool_disclosure"
+                   ; "keeper_name", `String meta.name
+                   ; "turn", `Int turn
+                   ; "selection_mode", `String selection_mode
+                   ; "core_count", `Int core_count
+                   ; "deterministic_prefilter_count", `Int deterministic_prefilter_count
+                   ; "discovered_count", `Int discovered_count
+                   ; "llm_selected_count", `Int llm_selected_count
+                   ; "final_visible", `Int (List.length all_allowed)
+                   ; "hook_ms", `Float hook_elapsed_ms
+                   ]
+               in
+               try
+                 Keeper_types_support.append_jsonl_line
+                   (Keeper_types_support.keeper_decision_log_path config meta.name)
+                   disclosure_json
+               with
+               | Eio.Cancel.Cancelled _ as e -> raise e
+               | _ -> ());
+              (* Yield after CPU-bound tool filtering to let HTTP handlers run.
            Without this, N concurrent keeper fibers starve the Eio scheduler
            during turn setup (tool list construction + prompt building). *)
-        Eio.Fiber.yield ();
-        Agent_sdk.Hooks.AdjustParams
-          { current_params with
-            extra_system_context = ctx;
-            tool_choice;
-            tool_filter_override = Some tool_filter }
-      | _ -> Agent_sdk.Hooks.Continue)
-  } in
-  let hooks =
-    Agent_sdk.Hooks.compose ~outer:before_turn_hook ~inner:base_hooks
+              Eio.Fiber.yield ();
+              Agent_sdk.Hooks.AdjustParams
+                { current_params with
+                  extra_system_context = ctx
+                ; tool_choice
+                ; tool_filter_override = Some tool_filter
+                }
+            | _ -> Agent_sdk.Hooks.Continue)
+    }
   in
+  let hooks = Agent_sdk.Hooks.compose ~outer:before_turn_hook ~inner:base_hooks in
   let base_dir = Filename.concat config.base_path ".masc" in
   let memory =
     Memory_oas_bridge.create_memory_full
@@ -1254,8 +1506,9 @@ let run_turn
       ~global_procedure_limit:5
       ()
   in
-  let reducer = Agent_sdk.Context_reducer.dynamic (fun ~turn:_ ~messages:_ ->
-    (* Token_budget is the only constraint needed: with 262k context,
+  let reducer =
+    Agent_sdk.Context_reducer.dynamic (fun ~turn:_ ~messages:_ ->
+      (* Token_budget is the only constraint needed: with 262k context,
        keeper conversations rarely approach the limit.  The previous
        Stub_tool_results{keep_recent=3} after turn 5 operated on ALL
        messages including initial_messages from the checkpoint, wiping
@@ -1263,321 +1516,351 @@ let run_turn
        lets keepers learn from their own actions.
        Merge_contiguous collapses adjacent same-role messages.
        Rescued from orphaned commit db730c58a (post-merge on #5508). *)
-    let open Agent_sdk.Context_reducer in
-    Compose [
-      Merge_contiguous;
-      Token_budget max_context;
-    ]
-  ) in
+      let open Agent_sdk.Context_reducer in
+      Compose [ Merge_contiguous; Token_budget max_context ])
+  in
   (* 8. Run Agent *)
   let contract =
-    if Env_config.Cdal.enabled ()
-    then Keeper_cdal_contract.of_keeper_meta meta
-    else None
+    if Env_config.Cdal.enabled () then Keeper_cdal_contract.of_keeper_meta meta else None
   in
   let yield_on_tool = Env_config.Slot.yield_enabled () in
-  let on_yield = if yield_on_tool then Some (fun () ->
-    Log.Misc.debug "keeper %s: slot yielded (tool execution)" meta.name
-  ) else None in
-  let on_resume = if yield_on_tool then Some (fun () ->
-    Log.Misc.debug "keeper %s: slot resumed (next LLM turn)" meta.name
-  ) else None in
-  let priority =
-    Option.value priority ~default:Llm_provider.Request_priority.Proactive
+  let on_yield =
+    if yield_on_tool
+    then
+      Some (fun () -> Log.Misc.debug "keeper %s: slot yielded (tool execution)" meta.name)
+    else None
   in
-  let effective_allowed_paths =
-    Keeper_alerting_path.effective_allowed_paths ~meta
+  let on_resume =
+    if yield_on_tool
+    then
+      Some (fun () -> Log.Misc.debug "keeper %s: slot resumed (next LLM turn)" meta.name)
+    else None
   in
+  let priority = Option.value priority ~default:Llm_provider.Request_priority.Proactive in
+  let effective_allowed_paths = Keeper_alerting_path.effective_allowed_paths ~meta in
   match
-        Keeper_alerting_path.absolute_allowed_paths_result
-          ~config
-          ~allowed_paths:effective_allowed_paths
-      with
-      | Error e -> Error (Oas.Error.Internal e)
-      | Ok oas_allowed_paths ->
-        (match
-        Keeper_llm_bridge.run_with_timeout_and_fallback ~timeout_s:45.0 (fun () ->
-          Oas_worker.run_named
-            ~cascade_name
-            ~goal:user_message
-            ~priority
-            ~session_id:meta.runtime.trace_id
-            ~system_prompt:turn_system_prompt
-            ~tools
-            ~compact_ratio:meta.compaction.ratio_gate
-            ~initial_messages:history_messages
-            ~hooks
-            ~context_reducer:reducer
-            ~memory
-            (* Keepers rely on turn-level retry (multi-turn loop) rather than
+    Keeper_alerting_path.absolute_allowed_paths_result
+      ~config
+      ~allowed_paths:effective_allowed_paths
+  with
+  | Error e -> Error (Oas.Error.Internal e)
+  | Ok oas_allowed_paths ->
+    let timeout_s = Env_config_keeper.KeeperKeepalive.oas_timeout_sec in
+    (match
+       Keeper_llm_bridge.run_with_timeout_and_fallback ~timeout_s (fun () ->
+         Oas_worker.run_named
+           ~cascade_name
+           ~goal:user_message
+           ~priority
+           ~session_id:meta.runtime.trace_id
+           ~system_prompt:turn_system_prompt
+           ~tools
+           ~compact_ratio:meta.compaction.ratio_gate
+           ~initial_messages:history_messages
+           ~hooks
+           ~context_reducer:reducer
+           ~memory
+             (* Keepers rely on turn-level retry (multi-turn loop) rather than
                per-call retry. Ideally this would be Tool_retry_policy.none, but
                OAS does not expose a zero-retry variant yet. default_internal
                (max_retries=1) is acceptable as a minimal fallback. *)
-            ~tool_retry_policy:Oas.Tool_retry_policy.default_internal
-            ~max_turns
-            ~max_idle_turns
-            ~temperature
-            ~max_tokens
-            ?max_cost_usd
-            ?guardrails
-            ?on_event
-            ?on_yield
-            ?on_resume
-            ~agent_ref
-            ?contract
-            ~allowed_paths:oas_allowed_paths
-            ~cache_system_prompt:true
-            ~yield_on_tool
-            ~checkpoint_dir:session_dir
-            ~context_injector
-            ~context:shared_context
-            ?slot_id:(Keeper_config.keeper_slot_id meta.name)
-            ?oas_checkpoint:raw_oas_checkpoint
-            ?event_bus
-            ()
-        )
-      with
-      | Error e -> Error e
-      | Ok result ->
-        let post_turn_t0 = Time_compat.now () in
-        (* Checkpoint save is deferred until after [STATE] synthesis so the
+           ~tool_retry_policy:Oas.Tool_retry_policy.default_internal
+           ~max_turns
+           ~max_idle_turns
+           ~temperature
+           ~max_tokens
+           ?max_cost_usd
+           ?guardrails
+           ?on_event
+           ?on_yield
+           ?on_resume
+           ~agent_ref
+           ?contract
+           ~allowed_paths:oas_allowed_paths
+           ~cache_system_prompt:true
+           ~yield_on_tool
+           ~checkpoint_dir:session_dir
+           ~context_injector
+           ~context:shared_context
+           ?slot_id:(Keeper_config.keeper_slot_id meta.name)
+           ?oas_checkpoint:raw_oas_checkpoint
+           ?event_bus
+           ())
+     with
+     | Error e -> Error e
+     | Ok result ->
+       let post_turn_t0 = Time_compat.now () in
+       (* Checkpoint save is deferred until after [STATE] synthesis so the
            persisted checkpoint includes the synthesized continuity block.
            Without this, read_continuity_summary finds no [STATE] in the
            checkpoint messages and returns empty — causing keepers to lose
            context across turns.  See #5431. *)
-        let _flushed = Memory_oas_bridge.flush_all ~memory ~agent_name in
-        let text = Agent_sdk.Types.text_of_content result.response.content in
-        let model = result.response.model in
-        (* Extract and persist thinking blocks to trajectory JSONL.
+       let _flushed = Memory_oas_bridge.flush_all ~memory ~agent_name in
+       let text = Agent_sdk.Types.text_of_content result.response.content in
+       let model = result.response.model in
+       (* Extract and persist thinking blocks to trajectory JSONL.
            NOTE: turn = acc.turn stays at 0 in the keeper path because
            Trajectory.increment_turn is never called here — the keeper
            uses OAS Agent.run which manages its own internal call count.
            Consumers should treat turn=0 as "turn not tracked in keeper path". *)
-        (match trajectory_acc with
-         | Some acc ->
-           let now = Time_compat.now () in
-           let now_iso = Types.now_iso () in
-           List.iter (function
-             | Agent_sdk.Types.Thinking { content; _ } ->
-               let entry : Trajectory.thinking_entry = {
-                 ts = now;
-                 ts_iso = now_iso;
-                 turn = acc.Trajectory.turn;
-                 content;
-                 content_length = String.length content;
-                 redacted = false;
-               } in
-               (try Trajectory.append_thinking
-                      ~masc_root:acc.Trajectory.masc_root
-                      ~keeper_name:acc.Trajectory.keeper_name
-                      ~trace_id:acc.Trajectory.trace_id entry
-                with Eio.Cancel.Cancelled _ as e -> raise e
-                | exn ->
-                  Log.Keeper.error "keeper:%s thinking persist failed: %s"
-                    meta.name (Printexc.to_string exn))
-             | Agent_sdk.Types.RedactedThinking _ ->
-               let entry : Trajectory.thinking_entry = {
-                 ts = now;
-                 ts_iso = now_iso;
-                 turn = acc.Trajectory.turn;
-                 content = "[redacted]";
-                 content_length = 0;
-                 redacted = true;
-               } in
-               (try Trajectory.append_thinking
-                      ~masc_root:acc.Trajectory.masc_root
-                      ~keeper_name:acc.Trajectory.keeper_name
-                      ~trace_id:acc.Trajectory.trace_id entry
-                with Eio.Cancel.Cancelled _ as e -> raise e
-                | exn ->
-                  Log.Keeper.error "keeper:%s redacted thinking persist failed: %s"
-                    meta.name (Printexc.to_string exn))
-             | _ -> ())
-             result.response.content
-         | None -> ());
-        let reported_tool_names =
-          List.filter_map (function
-            | Agent_sdk.Types.ToolUse { name; _ } -> Some name | _ -> None)
+       (match trajectory_acc with
+        | Some acc ->
+          let now = Time_compat.now () in
+          let now_iso = Types.now_iso () in
+          List.iter
+            (function
+              | Agent_sdk.Types.Thinking { content; _ } ->
+                let entry : Trajectory.thinking_entry =
+                  { ts = now
+                  ; ts_iso = now_iso
+                  ; turn = acc.Trajectory.turn
+                  ; content
+                  ; content_length = String.length content
+                  ; redacted = false
+                  }
+                in
+                (try
+                   Trajectory.append_thinking
+                     ~masc_root:acc.Trajectory.masc_root
+                     ~keeper_name:acc.Trajectory.keeper_name
+                     ~trace_id:acc.Trajectory.trace_id
+                     entry
+                 with
+                 | Eio.Cancel.Cancelled _ as e -> raise e
+                 | exn ->
+                   Log.Keeper.error
+                     "keeper:%s thinking persist failed: %s"
+                     meta.name
+                     (Printexc.to_string exn))
+              | Agent_sdk.Types.RedactedThinking _ ->
+                let entry : Trajectory.thinking_entry =
+                  { ts = now
+                  ; ts_iso = now_iso
+                  ; turn = acc.Trajectory.turn
+                  ; content = "[redacted]"
+                  ; content_length = 0
+                  ; redacted = true
+                  }
+                in
+                (try
+                   Trajectory.append_thinking
+                     ~masc_root:acc.Trajectory.masc_root
+                     ~keeper_name:acc.Trajectory.keeper_name
+                     ~trace_id:acc.Trajectory.trace_id
+                     entry
+                 with
+                 | Eio.Cancel.Cancelled _ as e -> raise e
+                 | exn ->
+                   Log.Keeper.error
+                     "keeper:%s redacted thinking persist failed: %s"
+                     meta.name
+                     (Printexc.to_string exn))
+              | _ -> ())
             result.response.content
-        in
-        let tool_usage_after =
-          keeper_tool_usage_snapshot ~base_path:config.base_path
-            ~keeper_name:meta.name
-        in
-        let observed_tool_names =
-          tool_usage_delta ~before:tool_usage_before ~after:tool_usage_after
-        in
-        let tool_names =
-          merge_reported_and_observed_tool_names
-            ~reported_tool_names ~observed_tool_names
-        in
-        let usage = Keeper_exec_context.usage_of_response result.response in
-        (match normalize_response_text ~text ~tool_names () with
-         | Error e -> Error (Oas.Error.Internal e)
-         | Ok response_text ->
-             (* Ensure every generation has a [STATE] block for continuity.
+        | None -> ());
+       let reported_tool_names =
+         List.filter_map
+           (function
+             | Agent_sdk.Types.ToolUse { name; _ } -> Some name
+             | _ -> None)
+           result.response.content
+       in
+       let tool_usage_after =
+         keeper_tool_usage_snapshot ~base_path:config.base_path ~keeper_name:meta.name
+       in
+       let observed_tool_names =
+         tool_usage_delta ~before:tool_usage_before ~after:tool_usage_after
+       in
+       let tool_names =
+         merge_reported_and_observed_tool_names ~reported_tool_names ~observed_tool_names
+       in
+       let usage = Keeper_exec_context.usage_of_response result.response in
+       (match normalize_response_text ~text ~tool_names () with
+        | Error e -> Error (Oas.Error.Internal e)
+        | Ok response_text ->
+          (* Ensure every generation has a [STATE] block for continuity.
                 If the model omitted it, synthesize one deterministically
                 from tool usage and stop reason. *)
-             let response_text =
-               match Keeper_memory_policy.find_state_block response_text with
-               | Some _ -> response_text
-               | None ->
-                 let stop_reason_str =
-                   match result.stop_reason with
-                   | Oas_worker.Completed -> "completed"
-                   | Oas_worker.TurnBudgetExhausted _ -> "budget_exhausted"
-                 in
-                 let synth =
-                   Keeper_memory_policy.synthesize_state_from_run_result
-                     ~goal:meta.goal
-                     ~tools_used:tool_names
-                     ~stop_reason:stop_reason_str
-                     ~response_text
-                 in
-                 let block = Keeper_memory_policy.render_state_block synth in
-                 Log.Keeper.info
-                   "keeper:%s [STATE] missing, synthesized from %d tools (stop=%s)"
-                   meta.name (List.length tool_names) stop_reason_str;
-                 response_text ^ "\n" ^ block
-             in
-             let assistant_msg = Agent_sdk.Types.assistant_msg response_text in
-             Keeper_exec_context.persist_message
-               ~source:history_assistant_source
-               session assistant_msg;
-             (* ctx_snapshot is immutable — assistant message is persisted
+          let response_text =
+            match Keeper_memory_policy.find_state_block response_text with
+            | Some _ -> response_text
+            | None ->
+              let stop_reason_str =
+                match result.stop_reason with
+                | Oas_worker.Completed -> "completed"
+                | Oas_worker.TurnBudgetExhausted _ -> "budget_exhausted"
+              in
+              let synth =
+                Keeper_memory_policy.synthesize_state_from_run_result
+                  ~goal:meta.goal
+                  ~tools_used:tool_names
+                  ~stop_reason:stop_reason_str
+                  ~response_text
+              in
+              let block = Keeper_memory_policy.render_state_block synth in
+              Log.Keeper.info
+                "keeper:%s [STATE] missing, synthesized from %d tools (stop=%s)"
+                meta.name
+                (List.length tool_names)
+                stop_reason_str;
+              response_text ^ "\n" ^ block
+          in
+          let assistant_msg = Agent_sdk.Types.assistant_msg response_text in
+          Keeper_exec_context.persist_message
+            ~source:history_assistant_source
+            session
+            assistant_msg;
+          (* ctx_snapshot is immutable — assistant message is persisted
                 via checkpoint (OAS) and persist_message (history file).
                 No in-memory mutation needed; next turn reconstructs
                 context from checkpoint. *)
-             (* Save checkpoint AFTER [STATE] synthesis.  Patch the last
+          (* Save checkpoint AFTER [STATE] synthesis.  Patch the last
                 assistant message in the OAS checkpoint so that the persisted
                 checkpoint contains the [STATE] block.  Without this patch,
                 read_continuity_summary would find no [STATE] in checkpoint
                 messages and return empty, causing context loss.  #5431 *)
-             let saved_checkpoint =
-               match result.checkpoint with
-               | Some checkpoint ->
-                   let patched =
-                     Keeper_context_core.patch_checkpoint_last_assistant
-                       checkpoint ~session_id:meta.runtime.trace_id
-                       ~response_text
-                   in
-                   (match Keeper_checkpoint_store.save_oas
-                       ~session_dir:session.session_dir patched with
-                   | Ok () -> ()
-                   | Error e ->
-                       Log.Keeper.error
-                         "keeper:%s OAS checkpoint save failed: %s"
-                         meta.name e);
-                   Some patched
-               | None ->
-                   Log.Keeper.warn
-                     "keeper:%s missing OAS checkpoint after run"
-                     meta.name;
-                   None
-             in
-             (match result.proof with
-             | Some p ->
-                log_keeper_proof ~keeper_name:meta.name p;
-                let store = Agent_sdk.Proof_store.default_config in
-                let outcome = Cdal_eval_v1.evaluate ~store p in
-                let verdict = Cdal_eval_v1.verdict_of_outcome outcome in
-                Cdal_eval_v1.persist verdict;
-                log_keeper_contract_verdict ~keeper_name:meta.name verdict;
-                (match outcome with
-                 | Cdal_eval_v1.Load_failure (err, _) ->
-                   Log.Keeper.warn "keeper:%s contract_verdict load failure: %s"
-                     meta.name (Cdal_loader.load_error_to_string err)
-             | Cdal_eval_v1.Verdict (_, _) -> ());
-            (match Cdal_eval_v1.friction_of_outcome outcome with
-             | Some fp ->
-               log_keeper_friction ~keeper_name:meta.name fp
-             | None -> ())
-          | None -> ());
-         (* Post-turn deterministic memory write.
+          let saved_checkpoint =
+            match result.checkpoint with
+            | Some checkpoint ->
+              let patched =
+                Keeper_context_core.patch_checkpoint_last_assistant
+                  checkpoint
+                  ~session_id:meta.runtime.trace_id
+                  ~response_text
+              in
+              (match
+                 Keeper_checkpoint_store.save_oas ~session_dir:session.session_dir patched
+               with
+               | Ok () -> ()
+               | Error e ->
+                 Log.Keeper.error "keeper:%s OAS checkpoint save failed: %s" meta.name e);
+              Some patched
+            | None ->
+              Log.Keeper.warn "keeper:%s missing OAS checkpoint after run" meta.name;
+              None
+          in
+          (match result.proof with
+           | Some p ->
+             log_keeper_proof ~keeper_name:meta.name p;
+             let store = Agent_sdk.Proof_store.default_config in
+             let outcome = Cdal_eval_v1.evaluate ~store p in
+             let verdict = Cdal_eval_v1.verdict_of_outcome outcome in
+             Cdal_eval_v1.persist verdict;
+             log_keeper_contract_verdict ~keeper_name:meta.name verdict;
+             (match outcome with
+              | Cdal_eval_v1.Load_failure (err, _) ->
+                Log.Keeper.warn
+                  "keeper:%s contract_verdict load failure: %s"
+                  meta.name
+                  (Cdal_loader.load_error_to_string err)
+              | Cdal_eval_v1.Verdict (_, _) -> ());
+             (match Cdal_eval_v1.friction_of_outcome outcome with
+              | Some fp -> log_keeper_friction ~keeper_name:meta.name fp
+              | None -> ())
+           | None -> ());
+          (* Post-turn deterministic memory write.
             Uses meta-based fallback when [STATE] parsing fails.
             See RFC #3646 Section 3: Det/NonDet boundary. *)
-         (try
-           let (notes_written, kinds_written) =
-             Keeper_memory_bank.append_memory_notes_from_reply
-               config meta ~turn:result.turns ~reply:response_text
-           in
-           if notes_written > 0 then
-             log_keeper_memory_write
-               ~keeper_name:meta.name
-               ~notes_written
-               ~kinds_written
-         with
-         | exn ->
-           Log.Keeper.warn "keeper:%s memory_write failed: %s"
-             meta.name (Printexc.to_string exn));
-         (* Phase 2: Post-turn quality metrics — goal alignment + memory recall.
+          (try
+             let notes_written, kinds_written =
+               Keeper_memory_bank.append_memory_notes_from_reply
+                 config
+                 meta
+                 ~turn:result.turns
+                 ~reply:response_text
+             in
+             if notes_written > 0
+             then
+               log_keeper_memory_write
+                 ~keeper_name:meta.name
+                 ~notes_written
+                 ~kinds_written
+           with
+           | exn ->
+             Log.Keeper.warn
+               "keeper:%s memory_write failed: %s"
+               meta.name
+               (Printexc.to_string exn));
+          (* Phase 2: Post-turn quality metrics — goal alignment + memory recall.
             Logged to decisions.jsonl for feedback loop analysis. *)
-         (try
-           let goal_score =
-             Keeper_memory_recall.goal_alignment_score
-               ~meta ~user_message:None
-               ~assistant_reply:(Some response_text)
-           in
-           let used_search =
-             List.exists (fun t -> t = "keeper_memory_search") tool_names
-           in
-           let recall_eval =
-             if used_search then
-               let bank_path =
-                 Keeper_types_support.keeper_memory_bank_path config meta.name
-               in
-               let candidates =
-                 try
-                   Keeper_memory_recall.load_history_user_messages
-                     ~path:bank_path ~max_n:50
-                 with _ -> []
-               in
-               Some (Keeper_memory_recall.evaluate_memory_recall
-                 ~user_message:"" ~assistant_reply:response_text
-                 ~candidates)
-             else None
-           in
-           let post_turn_ms =
-             Keeper_timing.round1
-               ((Time_compat.now () -. post_turn_t0) *. 1000.0)
-           in
-           let eval_json = `Assoc ([
-             "ts_unix", `Float (Time_compat.now ());
-             "event", `String "post_turn_eval";
-             "keeper_name", `String meta.name;
-             "turn", `Int result.turns;
-             "goal_alignment", `Float goal_score;
-             "tools_used_count", `Int (List.length tool_names);
-             "used_memory_search", `Bool used_search;
-             "post_turn_ms", `Float post_turn_ms;
-           ] @ (match result.response.telemetry with
-                | Some t -> [
-                    "inference_telemetry",
-                    Agent_sdk.Types.inference_telemetry_to_yojson t;
+          (try
+             let goal_score =
+               Keeper_memory_recall.goal_alignment_score
+                 ~meta
+                 ~user_message:None
+                 ~assistant_reply:(Some response_text)
+             in
+             let used_search =
+               List.exists (fun t -> t = "keeper_memory_search") tool_names
+             in
+             let recall_eval =
+               if used_search
+               then (
+                 let bank_path =
+                   Keeper_types_support.keeper_memory_bank_path config meta.name
+                 in
+                 let candidates =
+                   try
+                     Keeper_memory_recall.load_history_user_messages
+                       ~path:bank_path
+                       ~max_n:50
+                   with
+                   | _ -> []
+                 in
+                 Some
+                   (Keeper_memory_recall.evaluate_memory_recall
+                      ~user_message:""
+                      ~assistant_reply:response_text
+                      ~candidates))
+               else None
+             in
+             let post_turn_ms =
+               Keeper_timing.round1 ((Time_compat.now () -. post_turn_t0) *. 1000.0)
+             in
+             let eval_json =
+               `Assoc
+                 ([ "ts_unix", `Float (Time_compat.now ())
+                  ; "event", `String "post_turn_eval"
+                  ; "keeper_name", `String meta.name
+                  ; "turn", `Int result.turns
+                  ; "goal_alignment", `Float goal_score
+                  ; "tools_used_count", `Int (List.length tool_names)
+                  ; "used_memory_search", `Bool used_search
+                  ; "post_turn_ms", `Float post_turn_ms
                   ]
-                | None -> [])
-             @ (match recall_eval with
-                | Some e -> [
-                    "memory_recall_performed", `Bool e.performed;
-                    "memory_recall_passed", `Bool e.passed;
-                    "memory_recall_score", `Float e.final_score;
-                    "memory_recall_candidates", `Int e.candidate_count;
-                  ]
-                | None -> [])) in
-           Keeper_types_support.append_jsonl_line
-             (Keeper_types_support.keeper_decision_log_path config meta.name)
-             eval_json
-         with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
-         Ok {
-           response_text;
-           model_used = model;
-           cascade_observation = result.cascade_observation;
-           turn_count = result.turns;
-           tool_calls_made = List.length tool_names;
-           usage;
-           tools_used = tool_names;
-           checkpoint = saved_checkpoint;
-           proof = result.proof;
-           stop_reason = result.stop_reason;
-           inference_telemetry = result.response.telemetry;
-         }))
+                  @ (match result.response.telemetry with
+                     | Some t ->
+                       [ ( "inference_telemetry"
+                         , Agent_sdk.Types.inference_telemetry_to_yojson t )
+                       ]
+                     | None -> [])
+                  @
+                  match recall_eval with
+                  | Some e ->
+                    [ "memory_recall_performed", `Bool e.performed
+                    ; "memory_recall_passed", `Bool e.passed
+                    ; "memory_recall_score", `Float e.final_score
+                    ; "memory_recall_candidates", `Int e.candidate_count
+                    ]
+                  | None -> [])
+             in
+             Keeper_types_support.append_jsonl_line
+               (Keeper_types_support.keeper_decision_log_path config meta.name)
+               eval_json
+           with
+           | Eio.Cancel.Cancelled _ as e -> raise e
+           | _ -> ());
+          Ok
+            { response_text
+            ; model_used = model
+            ; cascade_observation = result.cascade_observation
+            ; turn_count = result.turns
+            ; tool_calls_made = List.length tool_names
+            ; usage
+            ; tools_used = tool_names
+            ; checkpoint = saved_checkpoint
+            ; proof = result.proof
+            ; stop_reason = result.stop_reason
+            ; inference_telemetry = result.response.telemetry
+            }))
+;;

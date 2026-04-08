@@ -88,11 +88,12 @@ let board_tools : Types.tool_schema list = [
     name = "keeper_board_get";
     description = "Read a single board post with all its comments and votes. \
 Use before deciding to comment, vote, or escalate. Returns post content, author, \
-timestamp, vote_count, and comment thread.";
+timestamp, vote_count, and comment thread. \
+post_id format: 'p-xxxx'. Get post_id from keeper_board_list results.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
-        ("post_id", `Assoc [("type", `String "string"); ("description", `String "Post ID to inspect")]);
+        ("post_id", `Assoc [("type", `String "string"); ("description", `String "Post ID (format: p-xxxx). Get from keeper_board_list.")]);
       ]);
       ("required", `List [`String "post_id"]);
     ];
@@ -232,10 +233,10 @@ let select_named_schemas (names : string list) (schemas : Types.tool_schema list
 let filesystem_tools : Types.tool_schema list = [
   {
     name = "keeper_fs_read";
-    description = "Read the contents of a file from the project. Returns full file content as text \
-(truncated at max_bytes). The primary tool for reading and inspecting source code files, \
-configs, logs, documentation, or any text file. \
-For searching across multiple files, use keeper_shell_readonly with op=rg instead.";
+    description = "Read a file as text (truncated at max_bytes). \
+path is REQUIRED. \
+Good: path='lib/foo.ml'. Bad: path=''. \
+For multi-file search, use keeper_shell_readonly with op=rg.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -247,9 +248,12 @@ For searching across multiple files, use keeper_shell_readonly with op=rg instea
   };
   {
     name = "keeper_fs_edit";
-    description = "Write or append to a file in the project. Use to create new files or update \
-existing ones. For small targeted edits prefer this over keeper_bash with echo/cat. \
-Mode 'overwrite' replaces the entire file; 'append' adds to the end.";
+    description = "Write or append to a file. \
+path and content REQUIRED (both non-empty). \
+mode: 'overwrite' (default) or 'append'. \
+Good: path='lib/foo.ml', content='let x = 1'. \
+Bad: path='', content=''. Bad: mode='create' (use overwrite). \
+Creates parent dirs.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -265,21 +269,22 @@ Mode 'overwrite' replaces the entire file; 'append' adds to the end.";
 let shell_tools : Types.tool_schema list = [
   {
     name = "keeper_shell_readonly";
-    description = "Run a safe project shell command (no side effects). \
+    description = "Run a safe READ-ONLY project shell command. No writes, no deletes, no side effects. \
 ops: pwd, ls, cat, rg, git_status, find, head, tail, wc, tree, git_log, git_diff, bash. \
-bash op runs arbitrary non-destructive commands (writes/deletes blocked). \
-Use rg for pattern search across directories, find for path discovery, head/tail for line ranges, \
+find REQUIRES pattern param (e.g. pattern=\"*.ml\"). \
+bash op: single command only, no chaining (&&, ||, |, ; are blocked), no redirects (>, >>). \
+Use rg for pattern search, find for path discovery, head/tail for line ranges, \
 git_log/git_diff for repo history, bash for curl/jq/env/which.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
         ("op", `Assoc [("type", `String "string"); ("enum", `List [`String "pwd"; `String "ls"; `String "cat"; `String "rg"; `String "git_status"; `String "find"; `String "head"; `String "tail"; `String "wc"; `String "tree"; `String "git_log"; `String "git_diff"; `String "bash"]); ("description", `String "Command to run")]);
         ("path", `Assoc [("type", `String "string"); ("description", `String "Target path for ls/cat/rg/find/head/tail/wc/tree")]);
-        ("pattern", `Assoc [("type", `String "string"); ("description", `String "Search pattern for rg, or name pattern for find")]);
+        ("pattern", `Assoc [("type", `String "string"); ("description", `String "Search pattern for rg, or name glob for find (REQUIRED for find, e.g. \"*.ml\")")]);
         ("limit", `Assoc [("type", `String "integer"); ("description", `String "Result limit for ls/rg/find/tree, or line count for git_log")]);
         ("lines", `Assoc [("type", `String "integer"); ("description", `String "Number of lines for head/tail (default 20, max 200)")]);
         ("max_bytes", `Assoc [("type", `String "integer"); ("description", `String "Max bytes for cat")]);
-        ("command", `Assoc [("type", `String "string"); ("description", `String "Shell command for bash op (read-only, writes blocked)")]);
+        ("command", `Assoc [("type", `String "string"); ("description", `String "Single shell command for bash op. No chaining (&&/||/;/|) or redirects (>/>>) allowed. Read-only.")]);
       ]);
       ("required", `List [`String "op"]);
     ];
@@ -289,13 +294,15 @@ git_log/git_diff for repo history, bash for curl/jq/env/which.";
 let coding_keeper_bridge_tools : Types.tool_schema list = [
   {
     name = "keeper_bash";
-    description = "Run a shell command by cmd (builds, tests, git, file edits) — \
-returns exit_code and output. For read-only ops prefer keeper_shell_readonly, \
-for file writes prefer keeper_fs_edit, for worktree-isolated code prefer masc_code_shell.";
+    description = "Execute ONE shell command. \
+NO chaining (&&, ||, ;), NO pipes (|), NO redirects (> >>). \
+Violations are blocked. Good: cmd='dune build', cmd='ls -la lib/'. \
+Bad: cmd='cd x && dune build', cmd='rg foo | wc -l'. \
+For read-only ops use keeper_shell_readonly, for file edits use keeper_fs_edit.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
-        ("cmd", `Assoc [("type", `String "string"); ("description", `String "Shell command string to run via zsh -lc")]);
+        ("cmd", `Assoc [("type", `String "string"); ("description", `String "Single command only. No chaining/pipe/redirect. Example: 'dune build', 'rg pattern lib/'")]);
         ("timeout_sec", `Assoc [("type", `String "number"); ("description", `String "Timeout seconds (default: 30, max: 180)")]);
       ]);
       ("required", `List [`String "cmd"]);
@@ -303,9 +310,10 @@ for file writes prefer keeper_fs_edit, for worktree-isolated code prefer masc_co
   };
   {
     name = "keeper_github";
-    description = "Run gh CLI commands for GitHub operations. Use for creating issues, \
-opening PRs, posting review comments, checking CI status. \
-Returns gh command output. Example: cmd='pr list --state open'.";
+    description = "Run a single gh CLI command. \
+NO chaining (&&/||/;), NO pipes (|), NO redirects (>). \
+Good: cmd='pr list --state open'. Bad: cmd='pr list && echo done'. \
+Use for: issues, PRs, review comments, CI status.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -450,6 +458,13 @@ and priority for each task. Use to see what work is available or in progress.";
       ("properties", `Assoc [
         ("status", `Assoc [("type", `String "string"); ("enum", `List [`String "todo"; `String "claimed"; `String "in_progress"; `String "done"; `String "cancelled"]); ("description", `String "Filter by task status")]);
         ("include_done", `Assoc [("type", `String "boolean"); ("description", `String "Include completed tasks (default: false)")]);
+        ("limit", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Max tasks to return (default: 50)");
+          ("minimum", `Int 1);
+          ("maximum", `Int 100);
+          ("default", `Int 50);
+        ]);
       ]);
     ];
   };
@@ -460,7 +475,15 @@ offline (no heartbeat >10 min). Returns orphan list with assignee and last_seen.
 Use keeper_task_force_release to reassign orphaned tasks.";
     input_schema = `Assoc [
       ("type", `String "object");
-      ("properties", `Assoc []);
+      ("properties", `Assoc [
+        ("limit", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Max orphans to return (default: 20)");
+          ("minimum", `Int 1);
+          ("maximum", `Int 50);
+          ("default", `Int 20);
+        ]);
+      ]);
     ];
   };
   {
@@ -471,7 +494,7 @@ release to the room. Provide a reason for audit.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
-        ("task_id", `Assoc [("type", `String "string"); ("description", `String "Task ID to force-release")]);
+        ("task_id", `Assoc [("type", `String "string"); ("description", `String "Task ID from keeper_tasks_list or keeper_tasks_audit (REQUIRED)")]);
         ("reason", `Assoc [("type", `String "string"); ("description", `String "Reason for force release")]);
       ]);
       ("required", `List [`String "task_id"]);
@@ -485,7 +508,7 @@ explaining the completion evidence. Broadcasts to room.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
-        ("task_id", `Assoc [("type", `String "string"); ("description", `String "Task ID to force-complete")]);
+        ("task_id", `Assoc [("type", `String "string"); ("description", `String "Task ID from keeper_tasks_list or keeper_tasks_audit (REQUIRED)")]);
         ("notes", `Assoc [("type", `String "string"); ("description", `String "Evidence that the task is actually complete")]);
       ]);
       ("required", `List [`String "task_id"]);
@@ -493,8 +516,11 @@ explaining the completion evidence. Broadcasts to room.";
   };
   {
     name = "keeper_broadcast";
-    description = "Send a message visible to all agents in the MASC room. Use for status \
-updates, announcements, warnings, or coordination. All keepers will see this.";
+    description = "Send a message visible to all agents in the MASC room. \
+message is REQUIRED (non-empty). \
+Good: message='Build complete, all tests pass.'. \
+Bad: message=''. \
+Use for status updates, announcements, warnings, or coordination.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -516,12 +542,13 @@ After claiming, do the work and call keeper_task_done when finished.";
   {
     name = "keeper_task_done";
     description = "Mark your claimed task as complete with a result summary. \
+task_id is REQUIRED. Get task_id from keeper_task_claim response. \
 The task must be claimed by you. Provide a clear summary of what was \
 accomplished so other agents can verify.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
-        ("task_id", `Assoc [("type", `String "string"); ("description", `String "Task ID to complete")]);
+        ("task_id", `Assoc [("type", `String "string"); ("description", `String "Task ID from keeper_task_claim (REQUIRED)")]);
         ("result", `Assoc [("type", `String "string"); ("description", `String "Summary of what was accomplished")]);
       ]);
       ("required", `List [`String "task_id"]);

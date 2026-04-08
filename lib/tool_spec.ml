@@ -86,6 +86,11 @@ let register (spec : t) =
   (* 3. Requires-join set *)
   if spec.requires_join then
     Tool_dispatch.init_requires_join_set [ spec.name ];
+  (* Add destructive and idempotent sets *)
+  if spec.is_destructive then
+    Tool_dispatch.init_destructive_set [ spec.name ];
+  if spec.is_idempotent then
+    Tool_dispatch.init_idempotent_set [ spec.name ];
   (* 4. Catalog metadata — enforce Hidden for System_internal tools *)
   let is_system_internal =
     Tool_catalog_surfaces.is_on_surface System_internal spec.name

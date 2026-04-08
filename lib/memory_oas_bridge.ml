@@ -390,7 +390,7 @@ let seed_episodes ~(memory : Agent_sdk.Memory.t) ~(agent_name : string)
   List.iter
     (fun episode ->
       (try Agent_sdk.Memory.store_episode memory (oas_episode_of_institution episode)
-       with exn -> Logs.warn (fun m -> m "Failed to store episode memory: %s" (Printexc.to_string exn))))
+       with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Logs.warn (fun m -> m "Failed to store episode memory: %s" (Printexc.to_string exn))))
     episodes;
   List.length episodes
 
@@ -452,7 +452,7 @@ let seed_procedures_as_oas ~(memory : Agent_sdk.Memory.t)
   let procs = top_procedures_cached ~agent_name ~limit in
   List.iter (fun p ->
     (try Agent_sdk.Memory.store_procedure memory (oas_procedure_of_masc p)
-     with exn -> Logs.warn (fun m -> m "Failed to store procedure memory: %s" (Printexc.to_string exn)))
+     with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Logs.warn (fun m -> m "Failed to store procedure memory: %s" (Printexc.to_string exn)))
   ) procs;
   List.length procs
 
@@ -462,7 +462,7 @@ let seed_all_procedures_as_oas ~(memory : Agent_sdk.Memory.t)
   List.iter
     (fun p ->
       try Agent_sdk.Memory.store_procedure memory (oas_procedure_of_masc p)
-      with exn ->
+      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
         Logs.warn (fun m ->
           m "Failed to store procedure memory: %s" (Printexc.to_string exn)))
     procs;

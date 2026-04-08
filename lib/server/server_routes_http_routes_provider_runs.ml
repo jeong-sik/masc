@@ -12,6 +12,15 @@ let add_routes ~sw router =
          Http.Response.json ~compress:true ~request:req
            (Yojson.Safe.to_string json) reqd
        ) request reqd)
+  |> Http.Router.get "/api/v1/models/metrics" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let window = int_query_param req "window" ~default:30 in
+         let agg = Model_inference_metrics.compute
+           ~base_path:state.Mcp_server.room_config.base_path
+           ~window_minutes:window in
+         Http.Response.json ~compress:true ~request:req
+           (Yojson.Safe.to_string (Model_inference_metrics.to_json agg)) reqd
+       ) request reqd)
   |> Http.Router.post "/api/v1/agent-runs" (fun request reqd ->
        with_token_permission_auth ~permission:Types.CanAdmin
          (fun state _agent_name _req reqd ->

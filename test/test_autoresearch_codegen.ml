@@ -17,6 +17,7 @@ let test_prompt_requires_strict_json () =
     Lib.Autoresearch.build_code_change_prompt
       ~goal:"Improve throughput"
       ~baseline:1.25
+      ~lower_is_better:false
       ~history:[]
       ~insights:[]
       ~file_content:"let batch = 32\n"

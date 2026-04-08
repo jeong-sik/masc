@@ -130,6 +130,60 @@ let extract_github_org url =
       else
         Some org
 
+(** Extract "org/repo" from a GitHub clone URL (lowercase, .git and trailing
+    slash stripped). Returns exactly two path segments or None. *)
+let extract_github_org_repo url =
+  let lc = String.lowercase_ascii url in
+  let prefixes = [
+    "https://github.com/";
+    "git@github.com:";
+    "ssh://git@github.com/";
+  ] in
+  let after_prefix =
+    List.find_map (fun prefix ->
+      if String.starts_with ~prefix lc then
+        Some (String.sub lc (String.length prefix)
+                (String.length lc - String.length prefix))
+      else None
+    ) prefixes
+  in
+  match after_prefix with
+  | None -> None
+  | Some rest ->
+    (* Strip trailing slash, then .git suffix *)
+    let rest =
+      if String.ends_with ~suffix:"/" rest
+      then String.sub rest 0 (String.length rest - 1)
+      else rest
+    in
+    let stripped =
+      if String.ends_with ~suffix:".git" rest
+      then String.sub rest 0 (String.length rest - 4)
+      else rest
+    in
+    (* Validate exactly "org/repo" — two segments, no deeper paths *)
+    match String.split_on_char '/' stripped with
+    | [org; repo] when org <> "" && repo <> "" ->
+      Some (org ^ "/" ^ repo)
+    | _ -> None
+
+let clone_denied_repos_cache : string list option ref = ref None
+
+let load_clone_denied_repos ~base_path =
+  match !clone_denied_repos_cache with
+  | Some repos -> repos
+  | None ->
+    let path = Filename.concat base_path "config/tool_policy.toml" in
+    let repos = match Safe_ops.read_file_safe path with
+      | Error _ -> []
+      | Ok content ->
+        match Keeper_toml_loader.parse_toml content with
+        | Error _ -> []
+        | Ok doc -> Keeper_toml_loader.toml_string_list doc "git_clone.denied_repos"
+    in
+    clone_denied_repos_cache := Some repos;
+    repos
+
 let validate_clone_url ~base_path url =
   let allowed = load_clone_allowed_orgs ~base_path in
   if allowed = [] then
@@ -139,11 +193,18 @@ let validate_clone_url ~base_path url =
     | None ->
       Error (Printf.sprintf "Cannot parse GitHub org from URL: %s" url)
     | Some org ->
-      (* Case-insensitive comparison: org is already lowercase from extract *)
       let allowed_lc = List.map String.lowercase_ascii allowed in
-      if List.mem org allowed_lc then Ok ()
-      else Error (Printf.sprintf
-        "GitHub org '%s' not in allowed list: %s" org (String.concat ", " allowed))
+      if not (List.mem org allowed_lc) then
+        Error (Printf.sprintf
+          "GitHub org '%s' not in allowed list: %s" org (String.concat ", " allowed))
+      else
+        (* Check repo-level deny list *)
+        let denied = load_clone_denied_repos ~base_path in
+        let denied_lc = List.map String.lowercase_ascii denied in
+        match extract_github_org_repo url with
+        | Some org_repo when List.mem org_repo denied_lc ->
+          Error (Printf.sprintf "Repository '%s' is in the denied list" org_repo)
+        | _ -> Ok ()
 
 (** Validate cwd for clone: allows .worktrees/ itself (not just subdirs). *)
 let validate_clone_cwd config cwd =

@@ -436,7 +436,7 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
       c.model_id = result.model_used || c.model_id = used
     ) cfgs with
     | Some c -> c.model_id
-    | None -> (match cfgs with c :: _ -> c.model_id | [] -> result.model_used)
+    | None -> used  (* Use actual API response model, not stale cascade label *)
   in
   let turn_cost =
     let pricing = Llm_provider.Pricing.pricing_for_model used_model_id in
@@ -535,6 +535,19 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
            else if has_substantive_tools then
              Printf.sprintf "(tools: %s)" (String.concat ", " result.tools_used)
            else rt.proactive_rt.last_preview);
+        (* Work discovery timestamp only advances when the keeper
+           actually used tools in response to the nudge. This is
+           intentional: the "Work Discovery Due" prompt block keeps
+           being injected until the keeper takes visible action,
+           preventing silent cycles from consuming the scan interval. *)
+        last_work_discovery_ts =
+          (if observation.work_discovery_due && has_substantive_tools then
+             now_ts
+           else rt.proactive_rt.last_work_discovery_ts);
+        work_discovery_count =
+          rt.proactive_rt.work_discovery_count
+          + (if observation.work_discovery_due && has_substantive_tools then 1
+             else 0);
       };
       (* Autonomous action tracking from tool calls *)
       autonomous_action_count =
@@ -848,9 +861,24 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
          can service HTTP handlers between keeper turn setups. *)
       Eio.Fiber.yield ();
       (* 2. Build unified prompt *)
+      let diversity_hint =
+        let entries =
+          Keeper_registry.tool_usage_of ~base_path:config.base_path meta.name
+        in
+        if entries = [] then None
+        else
+          let stats = Keeper_tool_diversity.stats_of_registry_entries entries in
+          let available_tools =
+            Keeper_tool_policy.keeper_allowed_tool_names meta
+          in
+          let summary =
+            Keeper_tool_diversity.compute_diversity ~available_tools stats
+          in
+          Keeper_tool_diversity.diversity_hint summary
+      in
       let system_prompt, user_message =
         Keeper_unified_prompt.build_prompt ~meta ~base_path:config.base_path
-          ~observation
+          ~observation ?diversity_hint ()
       in
       Eio.Fiber.yield ();
       let base_dir = session_base_dir config in
@@ -890,21 +918,15 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
          an independent observer, so concurrent keepers cannot interfere
          with each other's save/restore lifecycle. *)
       let side_effect_occurred = ref false in
-      let side_effect_tools =
-        [ "keeper_board_post"; "keeper_board_comment"; "keeper_board_vote";
-          "keeper_board_delete";
-          "keeper_bash"; "keeper_fs_edit"; "keeper_github";
-          "keeper_pr_workflow" ]
-      in
       let side_effect_observer ~tool_name ~success =
-        if success && List.mem tool_name side_effect_tools then
+        if success && not (Tool_dispatch.is_read_only tool_name) then
           side_effect_occurred := true
       in
       Keeper_exec_tools.add_tool_call_observer side_effect_observer;
       let evidence_before_hash =
         try Keeper_evidence.snapshot_before_turn
           ~base_path:config.base_path ~keeper_name:meta.name
-        with _ -> None
+        with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None
       in
       let run_result, latency_ms =
         Fun.protect ~finally:(fun () ->

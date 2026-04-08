@@ -47,6 +47,7 @@ let persisted_summary_json (summary : Autoresearch.persisted_summary) =
       ("patience", `Int summary.patience);
       ("consecutive_discards", `Int summary.consecutive_discards);
       ("build_verify_fn", Json_util.string_opt_to_json summary.build_verify_fn);
+      ("lower_is_better", `Bool summary.lower_is_better);
       ("error", Json_util.string_opt_to_json summary.error_message);
     ]
 
@@ -66,6 +67,7 @@ type start_params = {
   baseline_override : float option;
   patience : int option;
   build_verify_fn : string option;
+  lower_is_better : bool;
 }
 
 let prepare_start_params (ctx : context) args =
@@ -116,6 +118,7 @@ let prepare_start_params (ctx : context) args =
           baseline_override = get_float_opt args "baseline";
           patience = get_int_opt args "patience";
           build_verify_fn;
+          lower_is_better = get_bool args "lower_is_better" false;
         }
 
 let register_loop (ctx : context) state =
@@ -145,7 +148,7 @@ let prepare_managed_target_file ~source_workdir ~managed_workdir target_file =
                 Fs_compat.save_file managed_abs
                   (Autoresearch.read_file source_abs);
                 Ok [ "target_file_seeded_from_source" ]
-              with exn ->
+              with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
                 Error
                   (Printf.sprintf
                      "Failed to seed target_file into managed worktree: %s"
@@ -157,6 +160,7 @@ let setup_running_loop (ctx : context) (params : start_params) =
       ~model_model:params.model_model ~target_file:params.target_file
       ~cycle_timeout_s:params.cycle_timeout_s ~max_cycles:params.max_cycles
       ?patience:params.patience ?build_verify_fn:params.build_verify_fn
+      ~lower_is_better:params.lower_is_better
       ~workdir:params.source_workdir ()
   in
   match

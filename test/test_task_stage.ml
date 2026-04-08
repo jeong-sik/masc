@@ -66,7 +66,7 @@ let test_task_with_stage () =
     id = "T-001"; title = "test"; description = "";
     task_status = Todo; priority = 3; files = [];
     created_at = "2026-01-01T00:00:00Z";
-    worktree = None; required_role = Unassigned;
+    worktree = None; required_role = Unassigned; required_preset = None;
     stage = Some Task_stage.Implement;
     contract = None; handoff_context = None;
   } in
@@ -82,7 +82,7 @@ let test_task_without_stage () =
     id = "T-002"; title = "no stage"; description = "";
     task_status = Todo; priority = 3; files = [];
     created_at = "2026-01-01T00:00:00Z";
-    worktree = None; required_role = Unassigned;
+    worktree = None; required_role = Unassigned; required_preset = None;
     stage = None;
     contract = None; handoff_context = None;
   } in

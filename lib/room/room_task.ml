@@ -166,7 +166,7 @@ let find_duplicate_task (backlog : backlog) (title : string) : string option =
 (** Add task — file-locked to prevent task ID collision under concurrency.
     Rejects tasks with duplicate titles (exact match after normalization)
     to prevent the same work from being created multiple times. *)
-let add_task ?contract config ~title ~priority ~description =
+let add_task ?contract ?required_preset config ~title ~priority ~description =
   ensure_initialized config;
   let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
   with_file_lock config backlog_path (fun () ->
@@ -190,6 +190,7 @@ let add_task ?contract config ~title ~priority ~description =
       created_at = now_iso ();
       worktree = None;
       required_role = Types_core.Unassigned;
+      required_preset;
       stage = None;
       contract;
       handoff_context = None;
@@ -245,6 +246,7 @@ let add_task_with_role ?contract config ~title ~priority ~description
       created_at = now_iso ();
       worktree = None;
       required_role;
+      required_preset = None;
       stage = None;
       contract;
       handoff_context = None;
@@ -299,6 +301,7 @@ let batch_add_tasks_internal config tasks =
           created_at = now_iso ();
           worktree = None;
           required_role = Types_core.Unassigned;
+          required_preset = None;
           stage = None;
           contract;
           handoff_context = None;
@@ -1106,7 +1109,7 @@ type claim_next_result = Types.claim_next_result =
       message : string;
     }
   | Claim_next_no_unclaimed
-  | Claim_next_no_eligible of { excluded_count : int }
+  | Claim_next_no_eligible of { excluded_count : int; preset_filtered : int }
   | Claim_next_error of string
 
 let link_task_execution_artifacts_r config ~task_id ?session_id ?operation_id

@@ -84,6 +84,7 @@ let state_to_yojson (s : loop_state) : Yojson.Safe.t =
     ("patience", `Int s.patience);
     ("consecutive_discards", `Int s.consecutive_discards);
     ("build_verify_fn", Json_util.string_opt_to_json s.build_verify_fn);
+    ("lower_is_better", `Bool s.lower_is_better);
     ("error", Json_util.string_opt_to_json s.error_message);
   ]
 
@@ -138,6 +139,7 @@ let state_of_yojson (json : Yojson.Safe.t) : persisted_summary =
     patience = int_ "patience" ~default:(max 3 (int_ "max_cycles" ~default:10 / 3));
     consecutive_discards = int_ "consecutive_discards" ~default:0;
     build_verify_fn = json |> member "build_verify_fn" |> to_string_option;
+    lower_is_better = Safe_ops.json_bool ~default:false "lower_is_better" json;
   }
 
 let swarm_link_to_yojson (link : swarm_link) : Yojson.Safe.t =

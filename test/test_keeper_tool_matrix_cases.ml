@@ -78,7 +78,9 @@ let voice_guard_fragments =
 let init_keeper_bridge () =
   Masc_test_deps.init_keeper_tool_registry ();
   ignore (Masc_mcp.Mcp_server_eio.get_clock_opt ());
-  KET.init_policy_config ~base_path:(Sys.getcwd ());
+  (match KET.init_policy_config ~base_path:(Sys.getcwd ()) with
+   | Ok () -> ()
+   | Error err -> Printf.eprintf "[WARN] init_policy_config failed: %s\n" err);
   Masc_mcp.Keeper_exec_shared.tag_dispatch_fn := Masc_mcp.Keeper_tag_dispatch.dispatch;
   KET.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas
 

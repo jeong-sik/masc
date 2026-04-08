@@ -573,6 +573,7 @@ let planned_worker_to_entry_with_state
     ~(masc_tools : Types.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
     ~(success_by_agent : (string, bool) Hashtbl.t)
+    ~(team_ctx : Team_context.team_context)
     ?(delivery_contract : Team_session_types.delivery_contract option)
     (pw : Team_session_types.planned_worker)
   : Swarm.Swarm_types.agent_entry =
@@ -595,9 +596,16 @@ let planned_worker_to_entry_with_state
       masc_tools
   in
   let system_prompt =
-    Printf.sprintf "You are agent '%s' in a team session (room: %s). Your role: %s."
-      name config.base_path
-      (match pw.spawn_role with Some r -> r | None -> "execute")
+    Prompt_composer.compose [
+      Prompt_composer.Identity {
+        name;
+        role = (match pw.spawn_role with Some r -> r | None -> "execute");
+        model = cascade_name;
+      };
+      Prompt_composer.TeamContext team_ctx;
+      Prompt_composer.FreeText
+        (Printf.sprintf "Room: %s | Session: %s" config.base_path session_id);
+    ]
   in
   (* BM25 progressive tool disclosure: build once, reuse across turns.
      Synonym-enriched descriptions bridge user vocabulary to tool names.
@@ -645,17 +653,19 @@ let planned_worker_to_entry_with_state
         ~execution_scope:pw.execution_scope ~tool_names
     ) delivery_contract in
     match
-      Oas_worker.run_named_with_masc_tools
-        ~cascade_name ~goal:prompt ~system_prompt
-        ~masc_tools:scoped_masc_tools ~dispatch:dispatch_with_defaults
-        ~max_turns
-        ~hooks:progressive_hooks
-        ~temperature:(Cascade_inference.resolve_temperature
-          ~cascade_name ~fallback:(fun () -> 0.3))
-        ~max_tokens:(Cascade_inference.resolve_max_tokens
-          ~cascade_name ~fallback:(fun () -> 4096))
-        ?raw_trace ~proof_ref ?contract ~sw
-        ()
+      Masc_oas_bridge.run_safe ~timeout_s:180.0 (fun () ->
+        Oas_worker.run_named_with_masc_tools
+          ~cascade_name ~goal:prompt ~system_prompt
+          ~masc_tools:scoped_masc_tools ~dispatch:dispatch_with_defaults
+          ~max_turns
+          ~hooks:progressive_hooks
+          ~temperature:(Cascade_inference.resolve_temperature
+            ~cascade_name ~fallback:(fun () -> 0.3))
+          ~max_tokens:(Cascade_inference.resolve_max_tokens
+            ~cascade_name ~fallback:(fun () -> 4096))
+          ?raw_trace ~proof_ref ?contract ~sw
+          ()
+      )
     with
     | Ok result ->
         Hashtbl.replace success_by_agent name true;
@@ -693,8 +703,12 @@ let planned_worker_to_entry
     (pw : Team_session_types.planned_worker)
   : Swarm.Swarm_types.agent_entry =
   let success_by_agent = Hashtbl.create 1 in
+  let team_ctx =
+    try Team_context.build ~base_path:config.base_path ~team_session_id:session_id
+    with Eio.Cancel.Cancelled _ as e -> raise e | _ -> Team_context.empty
+  in
   planned_worker_to_entry_with_state ~config ~session_id ~session_cascade ~masc_tools
-    ~dispatch ~success_by_agent ?delivery_contract:None pw
+    ~dispatch ~success_by_agent ~team_ctx ?delivery_contract:None pw
 
 (* ── session -> swarm_config ───────────────────────────────────── *)
 
@@ -707,11 +721,16 @@ let session_to_swarm_config
     (session : Team_session_types.session)
   : Swarm.Swarm_types.swarm_config =
   let success_by_agent = Hashtbl.create 8 in
+  let team_ctx =
+    try Team_context.build ~base_path:config.base_path
+          ~team_session_id:session.session_id
+    with Eio.Cancel.Cancelled _ as e -> raise e | _ -> Team_context.empty
+  in
   let entries =
     List.map
       (planned_worker_to_entry_with_state ~config ~session_id:session.session_id
          ~session_cascade:session.model_cascade ~masc_tools ~dispatch
-         ~success_by_agent ?delivery_contract:session.delivery_contract)
+         ~success_by_agent ~team_ctx ?delivery_contract:session.delivery_contract)
       session.planned_workers
   in
   List.iter
@@ -755,13 +774,14 @@ let session_to_swarm_config
               (Printexc.to_string ex);
             entry_count)
   in
+  let collaboration_context = Some (Team_context.to_json team_ctx) in
   { entries; mode;
     convergence = make_convergence_metric ~entry_count success_by_agent;
     max_parallel = max 1 entry_count;
     prompt = session.goal; timeout_sec;
     budget = budget_of_session_timeout timeout_sec;
     max_agent_retries = 1;
-    collaboration_context = None;
+    collaboration_context;
     resource_check = Some (session_runtime_health_check ~config ~session);
     max_concurrent_agents = Some (max 1 (min entry_count slot_aware_cap));
     enable_streaming = false }

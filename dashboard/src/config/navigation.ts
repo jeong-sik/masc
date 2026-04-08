@@ -16,6 +16,7 @@ export type SurfaceSectionId =
   | 'harness'
   | 'inspector'
   | 'telemetry'
+  | 'tool-quality'
 
 type NonHomeTabId = Exclude<TabId, 'overview' | 'logs'>
 
@@ -58,7 +59,7 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
     id: 'monitoring',
     label: '모니터링',
     icon: '📡',
-    description: '세션, 프로젝트 범위, 에이전트/키퍼 현황 관찰',
+    description: '세션, 에이전트/키퍼 현황 관찰',
     defaultTab: 'monitoring',
     defaultParams: { section: 'sessions' },
     tabs: ['monitoring'],
@@ -112,8 +113,8 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
   monitoring: [
     {
       id: 'sessions',
-      label: '세션 & 프로젝트 범위',
-      description: '세션 = SSE로 연결된 실시간 작업 단위. 프로젝트 범위 = 같은 .masc/ 폴더를 공유하는 에이전트 조정 공간.',
+      label: '세션',
+      description: '실시간 세션 상태와 주의 신호.',
       params: { section: 'sessions' },
     },
     {
@@ -199,6 +200,12 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: '운영 인스펙터',
       description: '피처 플래그와 서버 설정을 한 화면으로 묶은 운영 진단/점검 화면.',
       params: { section: 'inspector' },
+    },
+    {
+      id: 'tool-quality',
+      label: '도구 품질',
+      description: 'Keeper tool call 성공률, 실패 카테고리, keeper별 품질 지표.',
+      params: { section: 'tool-quality' },
     },
   ],
 }

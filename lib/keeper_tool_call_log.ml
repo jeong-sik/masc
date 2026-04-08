@@ -14,6 +14,22 @@
 
 let max_output_len = 4000
 
+(** Pre-truncation info, keyed by keeper name.
+    Set by the tool handler wrapper (keeper_tools_oas), consumed by the
+    OAS on_tool_result hook (keeper_hooks_oas).  Per-keeper isolation
+    prevents cross-keeper corruption when multiple keepers call tools
+    concurrently. Within a single keeper's Agent.run, tool calls are
+    sequential so set→consume ordering is guaranteed. *)
+let pending_truncation : (string, int * int option) Hashtbl.t = Hashtbl.create 8
+
+let set_truncation_info ~keeper_name ~original_bytes ?truncated_to () =
+  Hashtbl.replace pending_truncation keeper_name (original_bytes, truncated_to)
+
+let consume_truncation_info ~keeper_name () =
+  match Hashtbl.find_opt pending_truncation keeper_name with
+  | Some info -> Hashtbl.remove pending_truncation keeper_name; info
+  | None -> (0, None)
+
 let store_ref : Dated_jsonl.t option ref = ref None
 
 let init ~base_path =
@@ -21,7 +37,7 @@ let init ~base_path =
   (try
      let store = Dated_jsonl.create ~base_dir:dir () in
      store_ref := Some store
-   with exn ->
+   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
      Log.Misc.warn "keeper_tool_call_log: init failed: %s"
        (Printexc.to_string exn))
 
@@ -39,7 +55,7 @@ let input_to_json (input : Yojson.Safe.t) : Yojson.Safe.t =
 
 let log_call ~keeper_name ~tool_name ~(input : Yojson.Safe.t)
     ~(output_text : string) ~(success : bool) ~(duration_ms : float)
-    ?(model : string = "") () =
+    ?(model : string = "") ?result_bytes ?truncated_to () =
   if Observability_redact.is_denied_tool ~tool_name then ()
   else
     match !store_ref with
@@ -47,6 +63,14 @@ let log_call ~keeper_name ~tool_name ~(input : Yojson.Safe.t)
     | Some store ->
       let model_field =
         if model = "" then [] else [("model", `String model)]
+      in
+      let result_bytes_field = match result_bytes with
+        | Some n -> [("result_bytes", `Int n)]
+        | None -> []
+      in
+      let truncated_to_field = match truncated_to with
+        | Some n -> [("truncated_to", `Int n)]
+        | None -> []
       in
       let safe_input = input_to_json (Observability_redact.redact_json_value input) in
       let safe_output = Observability_redact.redact_preview ~max_len:max_output_len output_text in
@@ -59,10 +83,10 @@ let log_call ~keeper_name ~tool_name ~(input : Yojson.Safe.t)
           ; ("output", `String safe_output)
           ; ("success", `Bool success)
           ; ("duration_ms", `Float duration_ms)
-          ] @ model_field)
+          ] @ model_field @ result_bytes_field @ truncated_to_field)
       in
       (try Dated_jsonl.append store json
-       with exn ->
+       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
          Log.Misc.warn "keeper_tool_call_log: append failed for %s/%s: %s"
            keeper_name tool_name (Printexc.to_string exn))
 

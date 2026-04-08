@@ -1,3 +1,12 @@
+type discovery_info = {
+  discovered_model : string option;
+  ctx_size : int option;
+  total_slots : int option;
+  busy_slots : int option;
+  idle_slots : int option;
+  healthy : bool;
+}
+
 type provider_snapshot = {
   provider : string;
   kind : string;
@@ -11,6 +20,7 @@ type provider_snapshot = {
   source : string;
   endpoint_url : string option;
   note : string option;
+  discovery : discovery_info option;
 }
 
 type run_status =
@@ -162,6 +172,28 @@ let llama_snapshot () =
     dedupe_keep_order
       (discovered_models @ Option.to_list (default_model_for_provider "llama"))
   in
+  (* Merge OAS Discovery probe data for richer observability.
+     Discovery_cache.get_cached_or_refresh is TTL-gated (30s),
+     so this does not trigger extra network calls. *)
+  let discovery =
+    let endpoints = Discovery_cache.get_cached_or_refresh () in
+    match endpoints with
+    | [] -> None
+    | ep :: _ ->
+      let open Llm_provider.Discovery in
+      Some {
+        discovered_model = (match ep.props with
+          | Some p when p.model <> "" -> Some p.model
+          | _ -> (match ep.models with
+                  | m :: _ -> Some m.id
+                  | [] -> None));
+        ctx_size = (match ep.props with Some p -> Some p.ctx_size | None -> None);
+        total_slots = (match ep.props with Some p -> Some p.total_slots | None -> None);
+        busy_slots = (match ep.slots with Some s -> Some s.busy | None -> None);
+        idle_slots = (match ep.slots with Some s -> Some s.idle | None -> None);
+        healthy = ep.healthy;
+      }
+  in
   {
     provider = "llama";
     kind = "local";
@@ -175,6 +207,7 @@ let llama_snapshot () =
     source = "masc/local-runtime";
     endpoint_url = (Provider_adapter.auth_detail_of_provider "llama").endpoint_url;
     note;
+    discovery;
   }
 
 (** Build snapshot for any direct-API provider.
@@ -196,6 +229,7 @@ let direct_provider_snapshot provider =
     source = "masc/provider-adapter";
     endpoint_url = detail.endpoint_url;
     note = detail.note;
+    discovery = None;
   }
 
 let provider_snapshots () : provider_snapshot list =
@@ -214,23 +248,39 @@ let provider_snapshot_by_name name =
   |> List.find_opt (fun (snapshot : provider_snapshot) ->
          String.equal snapshot.provider name)
 
+let discovery_info_to_json (d : discovery_info) : (string * Yojson.Safe.t) list =
+  let opt_int k = function Some n -> [(k, `Int n)] | None -> [] in
+  let opt_str k = function Some s -> [(k, `String s)] | None -> [] in
+  [("discovery", `Assoc (
+    [("healthy", `Bool d.healthy)]
+    @ opt_str "discovered_model" d.discovered_model
+    @ opt_int "ctx_size" d.ctx_size
+    @ opt_int "total_slots" d.total_slots
+    @ opt_int "busy_slots" d.busy_slots
+    @ opt_int "idle_slots" d.idle_slots
+  ))]
+
 let provider_snapshot_to_json (snapshot : provider_snapshot) =
-  `Assoc
-    [
-      ("provider", `String snapshot.provider);
-      ("kind", `String snapshot.kind);
-      ("runtime_kind", `String snapshot.runtime_kind);
-      ("auth_kind", `String snapshot.auth_kind);
-      ("status", `String snapshot.status);
-      ("available", `Bool snapshot.available);
-      ("supports_single_agent_run", `Bool snapshot.supports_single_agent_run);
-      ("default_model", Json_util.string_opt_to_json snapshot.default_model);
-      ("model_count", `Int (List.length snapshot.models));
-      ("models", `List (List.map (fun model -> `String model) snapshot.models));
-      ("source", `String snapshot.source);
-      ("endpoint_url", Json_util.string_opt_to_json snapshot.endpoint_url);
-      ("note", Json_util.string_opt_to_json snapshot.note);
-    ]
+  let base = [
+    ("provider", `String snapshot.provider);
+    ("kind", `String snapshot.kind);
+    ("runtime_kind", `String snapshot.runtime_kind);
+    ("auth_kind", `String snapshot.auth_kind);
+    ("status", `String snapshot.status);
+    ("available", `Bool snapshot.available);
+    ("supports_single_agent_run", `Bool snapshot.supports_single_agent_run);
+    ("default_model", Json_util.string_opt_to_json snapshot.default_model);
+    ("model_count", `Int (List.length snapshot.models));
+    ("models", `List (List.map (fun model -> `String model) snapshot.models));
+    ("source", `String snapshot.source);
+    ("endpoint_url", Json_util.string_opt_to_json snapshot.endpoint_url);
+    ("note", Json_util.string_opt_to_json snapshot.note);
+  ] in
+  let disc = match snapshot.discovery with
+    | Some d -> discovery_info_to_json d
+    | None -> []
+  in
+  `Assoc (base @ disc)
 
 let provider_inventory_json () =
   let snapshots = provider_snapshots () in
@@ -344,15 +394,17 @@ let execute_single_agent_run ~sw ~net ~provider ~model ~prompt =
                provider)
         else (
           match
-            Oas_worker.run_model_by_label ~model_label:label ~goal:prompt
-              ~system_prompt:(run_system_prompt provider)
-              ~max_turns:4
-              ~max_tokens:(Cascade_inference.resolve_max_tokens
-                ~cascade_name:"provider_benchmark" ~fallback:(fun () -> 2048))
-              ~temperature:(Cascade_inference.resolve_temperature
-                ~cascade_name:"provider_benchmark" ~fallback:(fun () -> 0.2))
-              ~sw ?net
-              ()
+            Masc_oas_bridge.run_safe ~timeout_s:60.0 (fun () ->
+              Oas_worker.run_model_by_label ~model_label:label ~goal:prompt
+                ~system_prompt:(run_system_prompt provider)
+                ~max_turns:4
+                ~max_tokens:(Cascade_inference.resolve_max_tokens
+                  ~cascade_name:"provider_benchmark" ~fallback:(fun () -> 2048))
+                ~temperature:(Cascade_inference.resolve_temperature
+                  ~cascade_name:"provider_benchmark" ~fallback:(fun () -> 0.2))
+                ~sw ?net
+                ()
+            )
           with
           | Ok result ->
               Ok (response_text_of_api_response result.response)

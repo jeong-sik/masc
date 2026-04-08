@@ -22,7 +22,7 @@ let tool_call_health_json ?(now_ts = Unix.gettimeofday ()) (config : Room.config
   let since = now_ts -. (window_hours *. 3600.0) in
   let entries =
     try Audit_log.read_entries ~n:50_000 config
-    with exn ->
+    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
       Log.Dashboard.warn "tool_call_health: read_entries failed: %s"
         (Printexc.to_string exn);
       []

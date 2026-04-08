@@ -56,7 +56,7 @@ let parse_line (line : string) : chat_message option =
     let open Yojson.Safe.Util in
     let role = member "role" json |> to_string_option |> Option.value ~default:"" in
     let content = member "content" json |> to_string_option |> Option.value ~default:"" in
-    let ts = (try member "ts" json |> to_float with _ -> 0.0) in
+    let ts = (try member "ts" json |> to_float with Eio.Cancel.Cancelled _ as e -> raise e | _ -> 0.0) in
     if role = "" || content = "" then None
     else Some { role; content; ts }
   with Yojson.Json_error _ -> None

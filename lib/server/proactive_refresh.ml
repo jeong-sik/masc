@@ -137,7 +137,7 @@ let start ~sw ~clock ~config ~compute ~on_result =
              notify_error config timeout_exn;
              log_refresh_failure ~config ~consecutive_failures ~current_interval
                ~dt timeout_exn
-       with exn ->
+       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
          if should_reraise_cancel exn then raise exn;
          let dt = Time_compat.now () -. t0 in
          notify_error config exn;

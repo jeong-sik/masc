@@ -67,23 +67,36 @@ let max_consecutive_failures =
 let keeper_tool_result_is_failure (result : string) : bool =
   try
     let json = Yojson.Safe.from_string result in
-    let has_error_field =
+    (* Policy gate rejections are not tool failures — the tool works correctly,
+       but the keeper's preset denies execution.  Counting these as failures
+       inflates metrics for social-preset keepers that discover tools like
+       keeper_fs_edit or keeper_pr_workflow via core_discovery_tools but
+       cannot execute them.  The LLM still sees the error message and can
+       adapt; only the metric classification changes. *)
+    let is_policy_gate =
       match Safe_ops.json_string_opt "error" json with
-      | Some msg -> String.trim msg <> ""
+      | Some msg -> String.equal (String.trim msg) "tool_not_allowed"
       | None -> false
     in
-    let has_error_status =
-      match Safe_ops.json_string_opt "status" json with
-      | Some status ->
-          String.equal (String.lowercase_ascii (String.trim status)) "error"
-      | None -> false
-    in
-    let has_ok_false =
-      match Safe_ops.json_bool_opt "ok" json with
-      | Some false -> true
-      | Some true | None -> false
-    in
-    has_error_field || has_error_status || has_ok_false
+    if is_policy_gate then false
+    else
+      let has_error_field =
+        match Safe_ops.json_string_opt "error" json with
+        | Some msg -> String.trim msg <> ""
+        | None -> false
+      in
+      let has_error_status =
+        match Safe_ops.json_string_opt "status" json with
+        | Some status ->
+            String.equal (String.lowercase_ascii (String.trim status)) "error"
+        | None -> false
+      in
+      let has_ok_false =
+        match Safe_ops.json_bool_opt "ok" json with
+        | Some false -> true
+        | Some true | None -> false
+      in
+      has_error_field || has_error_status || has_ok_false
   with Yojson.Json_error _ -> false
 
 (** Normalize a raw tool result string into a consistent JSON envelope.
@@ -145,6 +158,10 @@ let normalize_tool_result ~(success : bool) (raw : string) : string =
         ("detail", `Null);
       ])
 
+(** Max chars for SSE error preview. Short enough for dashboard display,
+    long enough to include the actionable portion of the error. *)
+let sse_error_preview_max_chars = 300
+
 let make_tools
     ~(config : Room.config)
     ~(meta : Keeper_types.keeper_meta)
@@ -205,8 +222,8 @@ let make_tools
                 Keeper_exec_tools.notify_tool_call_observers ~tool_name:td.name ~success:false;
                 let detail =
                   let s = String.trim result in
-                  if String.length s <= 300 then s
-                  else String.sub s 0 300 ^ "..."
+                  if String.length s <= sse_error_preview_max_chars then s
+                  else String.sub s 0 sse_error_preview_max_chars ^ "..."
                 in
                 let ts = Time_compat.now () in
                 (try Sse.broadcast
@@ -237,7 +254,10 @@ let make_tools
                       "ok", `Bool false;
                     ])
                 with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
-                (false, normalized_error)
+                Keeper_tool_call_log.set_truncation_info
+                  ~keeper_name:meta.name
+                  ~original_bytes:(String.length normalized_error) ();
+                (false, Tool_output_validation.cap normalized_error)
               end else begin
                 Hashtbl.remove failure_counts key;
                 Keeper_registry.record_tool_use ~base_path:config.base_path meta.name ~tool_name:td.name ~success:true;
@@ -284,20 +304,34 @@ let make_tools
                        | _ -> normalized
                      with Yojson.Json_error _ -> normalized)
                 in
+                let original_len = String.length final_result in
+                let truncated_result = Tool_output_validation.cap final_result in
+                let was_truncated = original_len > Tool_output_validation.max_output_chars in
+                if was_truncated then
+                  Log.Keeper.info "tool %s output truncated: %d -> %d chars"
+                    td.name original_len (String.length truncated_result);
                 (try
                   Keeper_types_support.append_jsonl_line
                     (Keeper_types_support.keeper_decision_log_path config meta.name)
-                    (`Assoc [
+                    (`Assoc ([
                       "ts_unix", `Float ts;
                       "event", `String "tool_exec";
                       "keeper_name", `String meta.name;
                       "tool", `String td.name;
                       "duration_ms", `Int duration_ms;
-                      "result_bytes", `Int (String.length final_result);
+                      "result_bytes", `Int original_len;
                       "ok", `Bool true;
-                    ])
+                    ] @ (if was_truncated then
+                      ["truncated_to", `Int (String.length truncated_result)]
+                    else [])))
                 with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
-                (true, final_result)
+                (* Publish truncation info for OAS hook's tool_call_log *)
+                Keeper_tool_call_log.set_truncation_info
+                  ~keeper_name:meta.name
+                  ~original_bytes:original_len
+                  ?truncated_to:(if was_truncated
+                    then Some (String.length truncated_result) else None) ();
+                (true, truncated_result)
               end
             with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
               let ts = Time_compat.now () in
@@ -339,6 +373,9 @@ let make_tools
                     "error", `String error_text;
                   ])
               with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
-              (false, normalized_exn)))
+              Keeper_tool_call_log.set_truncation_info
+                ~keeper_name:meta.name
+                ~original_bytes:(String.length normalized_exn) ();
+              (false, Tool_output_validation.cap normalized_exn)))
     else None
   ) tool_defs

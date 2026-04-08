@@ -32,7 +32,10 @@ let resolved_model_id_for_result ~(meta : keeper_meta)
     else s
   in
   let used = strip_latest result.model_used in
-  let cascade_models = Oas_model_resolve.models_of_cascade_name meta.cascade_name in
+  let cascade_models =
+    Oas_model_resolve.models_of_cascade_name meta.cascade_name
+    |> Oas_model_resolve.filter_by_providers meta.allowed_providers
+  in
   let cfgs = Llm_provider.Cascade_config.parse_model_strings cascade_models in
   match
     List.find_opt
@@ -105,6 +108,8 @@ let direct_turn_observation (meta : keeper_meta) :
     room_signal_digest_ref = None;
     last_turn_budget = None;
     last_tools_used = [];
+    work_discovery_due = false;
+    behavioral_stats = None;
   }
 
 (* -- handle_keeper_msg: orchestrator ---------------------------------------- *)
@@ -164,6 +169,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
       let effective_models =
         if direct_reply then
           Oas_model_resolve.models_of_cascade_name turn_cascade_name
+          |> Oas_model_resolve.filter_by_providers meta.allowed_providers
         else
           effective_model_labels_for_turn meta
       in
@@ -291,7 +297,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
             let evidence_before_hash =
               try Keeper_evidence.snapshot_before_turn
                 ~base_path:ctx.config.base_path ~keeper_name:name
-              with _ -> None
+              with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None
             in
             let run_result, latency_ms =
               Keeper_exec_context.timed (fun () ->

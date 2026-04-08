@@ -15,6 +15,14 @@ open Keeper_context_core
     prevents context overflow regardless of cooldown state (#5634). *)
 let emergency_compact_ratio_threshold = 0.8
 
+(** Tool-heavy compaction thresholds.
+    When message count exceeds [tool_heavy_msg_threshold] AND context
+    ratio exceeds [tool_heavy_ratio_floor], trigger compaction to
+    stub old tool results. Prevents slow inference on local LLMs
+    when many tool calls accumulate without hitting other gates. *)
+let tool_heavy_msg_threshold = 40
+let tool_heavy_ratio_floor = 0.15
+
 let compaction_policy_of_keeper (meta : keeper_meta) : float * int * int =
   (meta.compaction.ratio_gate, meta.compaction.message_gate, meta.compaction.token_gate)
 
@@ -47,6 +55,16 @@ let compact_if_needed
         (Float.of_int meta.compaction.cooldown_sec
        -. (now_ts -. last_reflection_ts))
   in
+  (* Tool-heavy gate: when accumulated tool results bloat context
+     without hitting ratio/message/token gates, stub old tool results
+     to prevent slow inference on local LLMs (#5802).
+     Bypasses reflection cooldown like the emergency ratio gate —
+     tool bloat is an operational risk, not a content concern. *)
+  let tool_heavy =
+    (reflection_ready || emergency)
+    && msg_count > tool_heavy_msg_threshold
+    && ratio > tool_heavy_ratio_floor
+  in
   let trigger_reason =
     if not reflection_ready then
       Some
@@ -59,6 +77,8 @@ let compact_if_needed
       Some (Printf.sprintf "messages(%d>=%d)" msg_count message_gate)
     else if token_gate > 0 && tok_count >= token_gate then
       Some (Printf.sprintf "tokens(%d>=%d)" tok_count token_gate)
+    else if tool_heavy then
+      Some (Printf.sprintf "tool_heavy(msgs=%d,ratio=%.4f)" msg_count ratio)
     else None
   in
   match trigger_reason with

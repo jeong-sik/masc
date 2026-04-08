@@ -627,7 +627,7 @@ let broadcast config ~from_agent ~content =
 
       (* Notify keepers about the mention *)
       (try !on_broadcast_mention msg.mention
-       with exn ->
+       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
          Log.Room.warn "on_broadcast_mention callback failed: %s"
            (Printexc.to_string exn));
       Ok msg

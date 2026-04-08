@@ -20,7 +20,7 @@ let extract_turn_stats (body : string) : Gate_protocol.turn_stats option =
               |> Option.value ~default:0 in
     if model = "" && dur = 0 && tok = 0 then None
     else Some { Gate_protocol.model_used = model; duration_ms = dur; tokens_used = tok }
-  with _ -> None
+  with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None
 
 let extract_reply_text (body : string) : string =
   try
@@ -32,7 +32,7 @@ let extract_reply_text (body : string) : string =
         (match json |> member "text" |> to_string_option with
          | Some t -> t
          | None -> body)
-  with _ -> body
+  with Eio.Cancel.Cancelled _ as e -> raise e | _ -> body
 
 (* ── Dispatch ────────────────────────────────────────────────── *)
 

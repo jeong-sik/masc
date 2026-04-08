@@ -118,6 +118,23 @@ let build ~base_path ~team_session_id =
         task_tree;
       }
 
+let task_summary_to_json (t : task_summary) : Yojson.Safe.t =
+  `Assoc
+    ([ ("task_id", `String t.task_id);
+       ("title", `String t.title);
+       ("status", `String t.status) ]
+     @ (match t.assignee with
+        | Some a -> [ ("assignee", `String a) ]
+        | None -> []))
+
+let to_json (ctx : team_context) : Yojson.Safe.t =
+  `Assoc
+    [ ("team_goal", `String ctx.team_goal);
+      ("prior_decisions", `List (List.map (fun s -> `String s) ctx.prior_decisions));
+      ("shared_findings", `List (List.map (fun s -> `String s) ctx.shared_findings));
+      ("active_workers", `List (List.map (fun s -> `String s) ctx.active_workers));
+      ("task_tree", `List (List.map task_summary_to_json ctx.task_tree)) ]
+
 let truncate_list n lst =
   List.filteri (fun i _ -> i < n) lst
 

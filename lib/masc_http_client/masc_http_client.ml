@@ -28,7 +28,7 @@ let make_closing_client ~sw ~net ~https =
           (Uri.host_with_default ~default:"localhost" uri)
       with
       | ip :: _ -> ip
-      | [] -> failwith "failed to resolve hostname"
+      | [] -> raise (Failure "failed to resolve hostname")
     in
     let sock = Eio.Net.connect ~sw:conn_sw net addr in
     last_sock := Some sock;
@@ -39,7 +39,7 @@ let make_closing_client ~sw ~net ~https =
         | Some wrap ->
             (wrap uri sock
               :> [ `Close | `Flow | `R | `Shutdown | `W ] Eio.Resource.t)
-        | None -> failwith "HTTPS requested but not enabled")
+        | None -> raise (Failure "HTTPS requested but not enabled"))
     | _ -> (sock :> [ `Close | `Flow | `R | `Shutdown | `W ] Eio.Resource.t)
   in
   let client = Cohttp_eio.Client.make_generic connect in

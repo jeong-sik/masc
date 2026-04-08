@@ -2,12 +2,48 @@ import type {
   Keeper,
   KeeperLifecycleState,
   KeeperMetricPoint,
+  KeeperPhase,
   PipelineStage,
 } from './types'
 import { isRecord, asString, asNumber, asBoolean, asStringArray, toIsoTimestamp } from './components/common/normalize'
 import { isOfflineStatus } from './lib/status-utils'
 import { keeperDisplayStatus } from './lib/keeper-runtime-display'
-import { CONTEXT_RATIO_CRITICAL, CONTEXT_RATIO_WARN } from './config/constants'
+import { CONTEXT_RATIO_CRITICAL, CONTEXT_RATIO_WARN, CONTEXT_RATIO_COMPACTING } from './config/constants'
+
+/** Maps lowercase backend phase strings to PascalCase KeeperPhase values.
+ *  Backend (keeper_state_machine.ml) emits lowercase: "offline", "running", "handing_off", etc.
+ *  Frontend KeeperPhase type uses PascalCase: "Offline", "Running", "HandingOff", etc.
+ */
+const BACKEND_PHASE_MAP: Record<string, KeeperPhase> = {
+  offline: 'Offline',
+  running: 'Running',
+  failing: 'Failing',
+  compacting: 'Compacting',
+  handing_off: 'HandingOff',
+  draining: 'Draining',
+  paused: 'Paused',
+  stopped: 'Stopped',
+  crashed: 'Crashed',
+  restarting: 'Restarting',
+  dead: 'Dead',
+  // Also accept PascalCase for forward-compat / test fixtures
+  Offline: 'Offline',
+  Running: 'Running',
+  Failing: 'Failing',
+  Compacting: 'Compacting',
+  HandingOff: 'HandingOff',
+  Draining: 'Draining',
+  Paused: 'Paused',
+  Stopped: 'Stopped',
+  Crashed: 'Crashed',
+  Restarting: 'Restarting',
+  Dead: 'Dead',
+}
+
+export function toKeeperPhase(raw: string | null | undefined): KeeperPhase | null {
+  if (!raw) return null
+  return BACKEND_PHASE_MAP[raw] ?? null
+}
 
 function normalizeKeeperAgentStatus(value: unknown): Keeper['status'] {
   const raw = typeof value === 'string' ? value.toLowerCase() : ''
@@ -43,7 +79,7 @@ export function deriveLifecycleState(keeper: Keeper): KeeperLifecycleState {
   const ratio = latest.context_ratio
   if (ratio > CONTEXT_RATIO_CRITICAL) return 'handoff-imminent'
   if (ratio > CONTEXT_RATIO_WARN) return 'preparing'
-  if (ratio > 0.50) return 'compacting'
+  if (ratio > CONTEXT_RATIO_COMPACTING) return 'compacting'
   return 'active'
 }
 
@@ -103,6 +139,9 @@ function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
         reasoning_tokens: asNumber(rawTel.reasoning_tokens) ?? null,
         request_latency_ms: asNumber(rawTel.request_latency_ms) ?? 0,
       } : null
+      const cascadeObj = isRecord(item.cascade) ? item.cascade : null
+      const fallbackEvents = cascadeObj && Array.isArray(cascadeObj.fallback_events) ? cascadeObj.fallback_events : []
+      const firstFallback = fallbackEvents.length > 0 && isRecord(fallbackEvents[0]) ? fallbackEvents[0] : null
       return {
         ts,
         context_ratio: contextRatio,
@@ -120,6 +159,11 @@ function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
         handoff_to_model: handoffToModel,
         handoff_new_generation: handoffNewGeneration,
         inference_telemetry,
+        fallback_applied: cascadeObj ? cascadeObj.fallback_applied === true : false,
+        fallback_hops: cascadeObj ? (asNumber(cascadeObj.fallback_hops) ?? 0) : 0,
+        fallback_from: firstFallback && typeof firstFallback.from_model_id === 'string' ? firstFallback.from_model_id : null,
+        fallback_to: firstFallback && typeof firstFallback.to_model_id === 'string' ? firstFallback.to_model_id : null,
+        fallback_reason: firstFallback && typeof firstFallback.reason === 'string' ? firstFallback.reason : null,
       }
     })
     .filter((item): item is KeeperMetricPoint => item !== null)
@@ -228,6 +272,7 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         name,
         runtime_class: 'keeper' as const,
         pipeline_stage: (asString(row.pipeline_stage) ?? 'idle') as PipelineStage,
+        phase: toKeeperPhase(asString(row.phase)),
         paused: asBoolean(row.paused),
         registered:
           typeof row.registered === 'boolean' ? row.registered : undefined,

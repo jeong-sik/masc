@@ -49,5 +49,17 @@ tool_preset = "social"
 tool_also_allow = [
   "keeper_board_delete",
   "keeper_board_cleanup",
+  "keeper_tasks_audit",
+  "keeper_shell_readonly",
   "masc_cleanup_zombies",
 ]
+
+# Work Discovery
+work_discovery_enabled = true
+work_discovery_sources = ["stale_tasks", "board_cleanup"]
+work_discovery_interval_sec = 1800
+work_discovery_guidance = "Look for zombie board posts, orphan tasks, and stale data to clean up."
+
+# Telemetry Feedback
+telemetry_feedback_enabled = true
+telemetry_feedback_window_hours = 24

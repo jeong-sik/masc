@@ -95,7 +95,11 @@ function isLongContent(text: string): boolean {
 // ── Diff renderer ─────────────────────────────────────
 
 function DiffBlock({ text }: { text: string }) {
-  const lines = text.split('\n')
+  const allLines = text.split('\n')
+  const MAX_LINES = 500
+  const lines = allLines.length > MAX_LINES ? allLines.slice(0, MAX_LINES) : allLines
+  const truncatedCount = allLines.length - lines.length
+
   return html`
     <div class="font-mono text-[11px] leading-[1.6] overflow-x-auto">
       ${lines.map((line: string) => {
@@ -106,6 +110,11 @@ function DiffBlock({ text }: { text: string }) {
           : 'text-[var(--text-body)]'
         return html`<div class="${cls} px-2 min-h-[1.6em]">${line || ' '}</div>`
       })}
+      ${truncatedCount > 0 ? html`
+        <div class="px-2 py-2 text-[var(--text-muted)] italic text-center border-t border-[var(--white-6)]">
+          ... ${truncatedCount} lines truncated for performance ...
+        </div>
+      ` : null}
     </div>
   `
 }
@@ -122,6 +131,10 @@ function ResultViewer({ text, hint, isError: isErr }: { text: string; hint: Cont
   const borderColor = isErr ? 'border-[rgba(239,68,68,0.2)]' : 'border-[var(--white-8)]'
   const bgColor = isErr ? 'bg-[rgba(239,68,68,0.04)]' : 'bg-[var(--white-3)]'
 
+  const MAX_TEXT_LEN = 100000
+  const isTruncatedPlain = hint === 'plain' && text.length > MAX_TEXT_LEN
+  const displayText = isTruncatedPlain ? text.slice(0, MAX_TEXT_LEN) + '\n\n... (Output truncated for performance) ...' : text
+
   return html`
     <div>
       <div class="flex items-center justify-between mb-1">
@@ -135,7 +148,7 @@ function ResultViewer({ text, hint, isError: isErr }: { text: string; hint: Cont
              style=${shouldCollapse ? `max-height: ${RESULT_COLLAPSED_MAX_HEIGHT}px` : ''}>
           ${hint === 'diff' ? html`<${DiffBlock} text=${text} />`
             : hint === 'json' ? html`<${JsonViewerCard} title=${titleLabel} data=${parseJsonLikeData(text)} />`
-            : html`<pre class="m-0 text-[11px] font-mono ${isErr ? 'text-[var(--bad)]' : 'text-[var(--text-body)]'} p-3 overflow-x-auto whitespace-pre-wrap break-all leading-relaxed">${text}</pre>`}
+            : html`<pre class="m-0 text-[11px] font-mono ${isErr ? 'text-[var(--bad)]' : 'text-[var(--text-body)]'} p-3 overflow-x-auto whitespace-pre-wrap break-all leading-relaxed">${displayText}</pre>`}
           ${shouldCollapse ? html`
             <div class="absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t ${isErr ? 'from-[rgba(239,68,68,0.08)]' : 'from-[var(--white-3)]'} to-transparent pointer-events-none"></div>
           ` : null}
@@ -299,8 +312,15 @@ export function SessionTraceEntry({ event }: { event: UnifiedTraceEvent }) {
   if (!hasDetail) return row
 
   return html`
-    <details class="rounded-lg hover:bg-[var(--white-3)] transition-colors">
-      <summary class="list-none cursor-pointer">${row}</summary>
+    <details class="rounded-lg hover:bg-[var(--white-3)] transition-colors group">
+      <summary class="list-none cursor-pointer relative pr-8">
+        ${row}
+        <div class="absolute right-3 top-1/2 -translate-y-1/2 opacity-40 group-hover:opacity-100 transition-opacity">
+          <svg class="w-4 h-4 text-[var(--text-muted)] group-open:rotate-90 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+          </svg>
+        </div>
+      </summary>
       <div class="px-3 pb-3 pl-13">
         ${event.kind === 'tool_call' ? html`<${ToolCallDetail} event=${event} />` : null}
         ${event.kind === 'broadcast' ? html`<${BroadcastDetail} event=${event} />` : null}

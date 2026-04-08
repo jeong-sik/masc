@@ -114,29 +114,6 @@ let tool_allowed_in_profile state profile tool_name =
                  String.equal schema.name tool_name))
   | Operator_remote -> List.mem tool_name Tool_operator.remote_tool_names
 
-let is_destructive_tool_name name =
-  let lowered = String.lowercase_ascii name in
-  List.exists
-    (fun fragment ->
-      let len = String.length fragment in
-      let lowered_len = String.length lowered in
-      let rec loop idx =
-        if idx + len > lowered_len then false
-        else if String.sub lowered idx len = fragment then true
-        else loop (idx + 1)
-      in
-      loop 0)
-    [ "delete"; "remove"; "reset"; "revoke"; "disable"; "kill_switch"; "retire" ]
-
-let is_idempotent_tool_name name =
-  let lowered = String.lowercase_ascii name in
-  List.exists
-    (fun prefix ->
-      let prefix_len = String.length prefix in
-      String.length lowered >= prefix_len
-      && String.sub lowered 0 prefix_len = prefix)
-    [ "masc_status"; "masc_get_"; "masc_list"; "masc_tool_"; "masc_keeper_tool_catalog" ]
-
 let tool_annotations_for_profile _profile tool_name =
   let meta = Tool_catalog.metadata tool_name in
   let read_only =
@@ -147,12 +124,12 @@ let tool_annotations_for_profile _profile tool_name =
   let destructive =
     match meta.destructive with
     | Some v -> v
-    | None -> is_destructive_tool_name tool_name
+    | None -> Tool_dispatch.is_destructive tool_name
   in
   let idempotent =
     match meta.idempotent with
     | Some v -> v
-    | None -> is_idempotent_tool_name tool_name || read_only
+    | None -> Tool_dispatch.is_idempotent tool_name || read_only
   in
   let is_deprecated = meta.lifecycle = Tool_catalog.Deprecated in
   let fields =

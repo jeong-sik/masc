@@ -359,16 +359,12 @@ let test_shell_exec_rejects_shell_metacharacters () =
   (match result with
    | Error { Agent_sdk.Types.message = msg; _ } ->
        let normalized = String.lowercase_ascii msg in
-       let needle = "workdir" in
-       let needle_len = String.length needle in
-       let hay_len = String.length normalized in
-       let rec contains idx =
-         if idx + needle_len > hay_len then false
-         else if String.sub normalized idx needle_len = needle then true
-         else contains (idx + 1)
-       in
-       Alcotest.(check bool) "mentions workdir guidance" true
-         (contains 0)
+       (* The error message must mention "blocked" or "chaining" to confirm
+          the right rejection path fired. *)
+       let has_blocked = String_util.contains_substring_ci normalized "blocked" in
+       let has_chaining = String_util.contains_substring_ci normalized "chaining" in
+       Alcotest.(check bool) "mentions blocking guidance" true
+         (has_blocked || has_chaining)
    | Ok _ -> Alcotest.fail "should reject shell metacharacters")
 
 let test_shell_exec_nonexistent_cmd () =

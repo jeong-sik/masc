@@ -47,6 +47,7 @@ type loop_state = {
   patience : int;  (** Max consecutive discards before early stop *)
   consecutive_discards : int;  (** Counter for consecutive discards without improvement *)
   build_verify_fn : string option;  (** Optional shell command that must exit 0 for a Keep to succeed *)
+  lower_is_better : bool;  (** When true, lower metric scores are better (e.g., val_bpb, loss) *)
 }
 
 type swarm_link = {
@@ -86,4 +87,5 @@ type persisted_summary = {
   patience : int;
   consecutive_discards : int;
   build_verify_fn : string option;
+  lower_is_better : bool;
 }

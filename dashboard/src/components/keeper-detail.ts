@@ -29,6 +29,7 @@ import {
   MetricsCharts,
   RawDataDebug,
   RelationshipList,
+  TokenTrendChart,
   TraitsList,
 } from './keeper-detail-panels'
 import {
@@ -41,11 +42,12 @@ import {
   resetKeeperConfig,
 } from './keeper-config-panel'
 import { PipelineStageBar } from './keeper-pipeline-stage'
+import { KeeperPhaseAndStage } from './keeper-phase-indicator'
+import { KeeperStateDiagramPanel } from './keeper-state-diagram'
 import { AgentJournalStream } from './agent-detail-journal'
 import { DialogOverlay } from './common/dialog'
 import { SessionTraceView } from './session-trace/session-trace-view'
 import { KeeperToolTelemetry } from './keeper-tool-telemetry'
-import { statusLabel } from '../lib/status-label'
 import { KeeperToolCallInspector } from './keeper-tool-call-inspector'
 import { SupervisorDiagnosticsPanel } from './keeper-supervisor-diagnostics'
 
@@ -87,47 +89,6 @@ async function runSocialSweep(): Promise<void> {
 async function refreshAfterRuntimeAction(): Promise<void> {
   invalidateDashboardCache()
   await refreshDashboard({ force: true })
-}
-
-// ── Status Badge (colored pill) ──────────────────────────
-
-function statusColor(status: string): { bg: string; text: string; dot: string } {
-  switch (status.trim().toLowerCase()) {
-    case 'active':
-    case 'running':
-    case 'busy':
-      return { bg: 'bg-[var(--ok-10)]', text: 'text-[var(--ok)]', dot: 'bg-[var(--ok)]' }
-    case 'working':
-      return { bg: 'bg-[var(--ok-10)]', text: 'text-[#7ae09a]', dot: 'bg-[#7ae09a]' }
-    case 'idle':
-    case 'quiet':
-      return { bg: 'bg-[rgba(251,191,36,0.12)]', text: 'text-[var(--warn)]', dot: 'bg-[#fbbf24]' }
-    case 'paused':
-    case 'blocked':
-      return { bg: 'bg-[rgba(251,191,36,0.12)]', text: 'text-[var(--warn)]', dot: 'bg-[#fbbf24]' }
-    case 'offline':
-    case 'inactive':
-      return { bg: 'bg-[rgba(148,163,184,0.12)]', text: 'text-[#94a3b8]', dot: 'bg-[#64748b]' }
-    case 'unbooted':
-      return { bg: 'bg-[rgba(148,163,184,0.08)]', text: 'text-[#64748b]', dot: 'bg-[#475569]' }
-    case 'stopped':
-      return { bg: 'bg-[rgba(148,163,184,0.12)]', text: 'text-[#94a3b8]', dot: 'bg-[#64748b]' }
-    case 'error':
-    case 'critical':
-      return { bg: 'bg-[rgba(239,68,68,0.12)]', text: 'text-[var(--bad)]', dot: 'bg-[var(--bad)]' }
-    default:
-      return { bg: 'bg-[rgba(138,163,211,0.1)]', text: 'text-[#86a0cf]', dot: 'bg-[#86a0cf]' }
-  }
-}
-
-function KeeperStatusPill({ status }: { status: string }) {
-  const c = statusColor(status)
-  return html`
-    <span class="inline-flex items-center gap-1.5 py-1 px-3 rounded-full text-xs font-medium ${c.bg} ${c.text}">
-      <span class="size-2 rounded-full ${c.dot}"></span>
-      ${statusLabel(status)}
-    </span>
-  `
 }
 
 function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
@@ -295,7 +256,7 @@ export function KeeperDetailOverlay() {
             <div class="flex flex-col gap-0.5">
               <div class="flex items-center gap-2.5">
                 <h2 id=${titleId} class="m-0 text-lg font-semibold text-[var(--text-strong)]">${keeper.name}</h2>
-                <${KeeperStatusPill} status=${effectiveStatus} />
+                <${KeeperPhaseAndStage} phase=${keeper.phase} pipelineStage=${keeper.pipeline_stage} />
                 ${(() => {
                   const series = keeper.metrics_series ?? []
                   const lastUsed = series.length > 0 ? series[series.length - 1]?.model_used : null
@@ -334,8 +295,17 @@ export function KeeperDetailOverlay() {
         ${'' /* ── Body ── */}
         <div class="p-6 flex flex-col gap-6">
 
-        ${'' /* ── Pipeline stage indicator ── */}
+        ${'' /* ── Pipeline stage + Phase state diagram ── */}
         <${PipelineStageBar} stage=${keeper.pipeline_stage} />
+        <details class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)]">
+          <summary class="cursor-pointer py-2 px-4 text-[10px] font-semibold uppercase tracking-widest text-[var(--text-muted)] list-none select-none flex items-center gap-2">
+            <span class="w-1.5 h-1.5 rounded-full bg-[rgba(71,184,255,0.5)]"></span>
+            Phase State Machine
+          </summary>
+          <div class="px-4 pb-4 pt-1">
+            <${KeeperStateDiagramPanel} keeperName=${keeper.name} currentPhase=${keeper.phase} />
+          </div>
+        </details>
 
         ${'' /* ── KPIs ── */}
         <${KpiGrid} keeper=${keeper} />
@@ -376,6 +346,9 @@ export function KeeperDetailOverlay() {
               : null}
           `
           : null}
+
+        ${'' /* ── Per-turn token trend (input vs output) ── */}
+        <${TokenTrendChart} keeper=${keeper} />
 
         ${'' /* ── Inference Telemetry (tok/s, cache, reasoning) ── */}
         <${InferenceTelemetryPanel} keeper=${keeper} />

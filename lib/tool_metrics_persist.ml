@@ -57,6 +57,7 @@ let get_or_create_store ~base_path : Dated_jsonl.t =
   | Some (cached_path, s) when String.equal cached_path base_path -> s
   | _ ->
     let dir = Filename.concat base_path "data/tool-metrics" in
+    Fs_compat.mkdir_p dir;
     let s = Dated_jsonl.create ~base_dir:dir () in
     store_ref := Some (base_path, s);
     s
@@ -78,7 +79,7 @@ let drain_to_store (store : Dated_jsonl.t) : int =
       (try
          Dated_jsonl.append store json;
          incr count
-       with exn ->
+       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
          Log.Metrics.error "tool_metrics_persist: append failed: %s"
            (Printexc.to_string exn));
       drain ()
@@ -122,7 +123,7 @@ let start_flush_fiber ~sw ~clock ~base_path =
       let n = drain_to_store store in
       if n > 0 then
         Log.Metrics.info "tool_metrics_persist: shutdown flush wrote %d records" n
-    with exn ->
+    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
       Log.Metrics.error "tool_metrics_persist: shutdown flush failed: %s"
         (Printexc.to_string exn))
 

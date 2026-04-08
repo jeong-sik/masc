@@ -53,7 +53,7 @@ val inject_masc_schemas : Types.tool_schema list -> unit
     Raises [Failure] if the config file is missing or malformed.
     For preset-scoped allowlist filtering to include injected [masc_*]
     schemas, call [inject_masc_schemas] before the first preset resolution. *)
-val init_policy_config : base_path:string -> unit
+val init_policy_config : base_path:string -> (unit, string) result
 
 (** Check if a tool name is in the Keeper_denied surface (Tool_catalog).
     Denied tools are excluded from both the schema list sent to the LLM

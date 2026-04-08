@@ -26,9 +26,10 @@ let store_ref : Dated_jsonl.t option ref = ref None
 let init ~base_path =
   let dir = Filename.concat base_path ".masc/tool_usage" in
   (try
+     Fs_compat.mkdir_p dir;
      let store = Dated_jsonl.create ~base_dir:dir () in
      store_ref := Some store
-   with exn ->
+   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
      Log.Misc.warn "tool_usage_log: init failed: %s" (Printexc.to_string exn))
 
 (* -- Record format -- *)
@@ -56,7 +57,7 @@ let log_call ~tool_name ~success ~caller =
   | Some store ->
       let json = record_to_json ~tool_name ~success ~caller in
       (try Dated_jsonl.append store json
-       with exn ->
+       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
          Log.Misc.warn "tool_usage_log: append failed for %s: %s"
            tool_name (Printexc.to_string exn))
 

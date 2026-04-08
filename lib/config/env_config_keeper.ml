@@ -260,6 +260,15 @@ module KeeperKeepalive = struct
     Float.max 60.0 (Float.min 3600.0
       (get_float ~default:1200.0 "MASC_KEEPER_TURN_TIMEOUT_SEC"))
 
+  (** Per-call timeout in seconds for a single OAS Agent.run execution.
+      Guards against indefinite LLM response waits within a turn.
+      Local LLMs with large context (200k+) can take 120-180s per call;
+      the previous hardcoded 45s was too short for local inference.
+      Env: [MASC_KEEPER_OAS_TIMEOUT_SEC]. Default: 300. Range: [30, 600]. *)
+  let oas_timeout_sec =
+    Float.max 30.0 (Float.min 600.0
+      (get_float ~default:300.0 "MASC_KEEPER_OAS_TIMEOUT_SEC"))
+
   (** Consecutive idle tool repetitions before on_idle hook issues Skip.
       Below this: graduated Nudge messages.
       With tool_choice=Any, the model always calls tools, so idle

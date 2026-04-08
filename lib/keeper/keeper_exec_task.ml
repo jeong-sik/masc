@@ -18,9 +18,19 @@ let handle_keeper_task_tool
   | "keeper_tasks_list" ->
     let status_filter = Safe_ops.json_string_opt "status" args in
     let include_done = Safe_ops.json_bool ~default:false "include_done" args in
-    Room.list_tasks ?status:status_filter ~include_done config
+    let limit = Safe_ops.json_int ~default:50 "limit" args |> max 1 |> min 100 in
+    let result = Room.list_tasks ?status:status_filter ~include_done config in
+    (match Yojson.Safe.from_string result with
+     | `List items ->
+       Yojson.Safe.to_string (`List (List.filteri (fun i _ -> i < limit) items))
+     | _ -> result
+     | exception Yojson.Json_error _ ->
+       let lines = String.split_on_char '\n' result in
+       String.concat "\n" (List.filteri (fun i _ -> i < limit + 2) lines))
   | "keeper_tasks_audit" ->
+    let limit = Safe_ops.json_int ~default:20 "limit" args |> max 1 |> min 50 in
     let orphans = Room.audit_orphan_tasks config in
+    let orphans = List.filteri (fun i _ -> i < limit) orphans in
     let items =
       List.map
         (fun (task, assignee) ->
@@ -47,7 +57,7 @@ let handle_keeper_task_tool
     let task_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
     let reason = Safe_ops.json_string ~default:"" "reason" args in
     if task_id = ""
-    then error_json "task_id required"
+    then error_json "task_id is required. Use the task_id from keeper_tasks_list or keeper_tasks_audit."
     else (
       let agent = keeper_agent_sender ~meta in
       let _ =
@@ -66,7 +76,7 @@ let handle_keeper_task_tool
     let task_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
     let notes = Safe_ops.json_string ~default:"" "notes" args in
     if task_id = ""
-    then error_json "task_id required"
+    then error_json "task_id is required. Use the task_id from keeper_tasks_list or keeper_tasks_audit."
     else
       keeper_task_result_json
         (Room.force_done_task_r
@@ -78,20 +88,40 @@ let handle_keeper_task_tool
   | "keeper_broadcast" ->
     let message = Safe_ops.json_string ~default:"" "message" args |> String.trim in
     if message = ""
-    then error_json "message required"
+    then error_json "message is required. Good: message='Build complete, all tests pass.'."
     else (
       let _ =
         Room.broadcast config ~from_agent:(keeper_agent_sender ~meta) ~content:message
       in
       Yojson.Safe.to_string (`Assoc [ "ok", `Bool true; "broadcast", `String message ]))
   | "keeper_task_claim" ->
-    let result = Room.claim_next config ~agent_name:meta.agent_name in
-    Yojson.Safe.to_string (`Assoc [ "result", `String result ])
+    let preset_name = match Keeper_types.tool_access_preset meta.tool_access with
+      | Some p -> Some (Keeper_types.tool_preset_to_string p)
+      | None -> None
+    in
+    let task_filter (task : Types.task) =
+      match task.required_preset, preset_name with
+      | None, _ -> true
+      | Some _required, None -> false  (* agent without preset cannot claim preset-required task *)
+      | Some required, Some preset ->
+        Keeper_tool_policy.preset_can_satisfy ~agent_preset:preset ~required_preset:required
+    in
+    let result = Room.claim_next_r config ~agent_name:meta.agent_name ~task_filter () in
+    let message = match result with
+      | Room.Claim_next_claimed { message; _ } -> message
+      | Room.Claim_next_no_unclaimed -> "📋 No unclaimed tasks. ACTION: Stop task-checking — nothing to claim."
+      | Room.Claim_next_no_eligible { preset_filtered; _ } when preset_filtered > 0 ->
+        Printf.sprintf "📋 No eligible tasks (preset mismatch: %d tasks require different preset, you have '%s')"
+          preset_filtered (Option.value ~default:"unknown" preset_name)
+      | Room.Claim_next_no_eligible _ -> "📋 No unclaimed tasks. ACTION: Stop task-checking — nothing to claim."
+      | Room.Claim_next_error e -> Printf.sprintf "❌ Error: %s" e
+    in
+    Yojson.Safe.to_string (`Assoc [ "result", `String message ])
   | "keeper_task_done" ->
     let task_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
     let result_text = Safe_ops.json_string ~default:"" "result" args |> String.trim in
     if task_id = ""
-    then error_json "task_id required"
+    then error_json "task_id is required. Use the task_id you got from keeper_task_claim."
     else
       keeper_task_result_json
         (Room.force_done_task_r

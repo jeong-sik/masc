@@ -189,7 +189,10 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         ~fallback_message:env_message_gate
         ~fallback_token:env_token_gate
     in
-    let cascade_models = Oas_model_resolve.models_of_cascade_name Keeper_config.default_cascade_name in
+    let cascade_models =
+      Oas_model_resolve.models_of_cascade_name Keeper_config.default_cascade_name
+      |> Oas_model_resolve.filter_by_providers p.profile_defaults.allowed_providers
+    in
     ignore (Oas_model_resolve.refresh_local_discovery_if_possible cascade_models);
     let primary_max_context =
       match p.max_context_override_opt with
@@ -278,6 +281,13 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         team_session_start_count_total = 0;
         paused = false;
         current_task_id = None;
+        work_discovery_enabled = p.profile_defaults.work_discovery_enabled;
+        work_discovery_sources = p.profile_defaults.work_discovery_sources;
+        work_discovery_interval_sec = p.profile_defaults.work_discovery_interval_sec;
+        work_discovery_guidance = p.profile_defaults.work_discovery_guidance;
+        telemetry_feedback_enabled = p.profile_defaults.telemetry_feedback_enabled;
+        telemetry_feedback_window_hours = p.profile_defaults.telemetry_feedback_window_hours;
+        allowed_providers = p.profile_defaults.allowed_providers;
         runtime = {
           usage = {
             total_turns = 0;
@@ -308,6 +318,8 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             last_outcome = Proactive_never_started;
             last_reason = "";
             last_preview = "";
+            last_work_discovery_ts = 0.0;
+            work_discovery_count = 0;
           };
           generation = 0;
           trace_id;

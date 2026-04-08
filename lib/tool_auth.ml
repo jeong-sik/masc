@@ -105,7 +105,7 @@ Pass this token in requests to authenticate.
           let err_msg = Types.masc_error_to_string e in
           Log.Auth.error "Token creation failed for agent '%s': %s" target_agent err_msg;
           (false, Printf.sprintf "Auth token creation failed: %s" err_msg)
-    with exn ->
+    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
       Hashtbl.replace create_token_failures target_agent (failures + 1);
       let trace = Printexc.get_backtrace () in
       Log.Auth.error "Token creation crashed for agent '%s': %s" target_agent (Printexc.to_string exn);

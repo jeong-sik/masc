@@ -141,6 +141,7 @@ let canonical_base_path path =
   match find_git_root normalized with
   | Some git_root -> git_root
   | None -> normalized
+  | exception (Eio.Cancel.Cancelled _ as e) -> raise e
   | exception _ -> normalized
 
 let path_has_masc_dir path =

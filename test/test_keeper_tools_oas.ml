@@ -461,10 +461,38 @@ let test_normalize_failure_plain_text () =
   check bool "ok is false" false (json_bool "ok" json);
   check string "error is raw text" raw (json_string "error" json)
 
+(* ── Tool_output_validation tests (memory cap) ──────────────── *)
+
+let test_cap_short_unchanged () =
+  let short = "hello world" in
+  let result = Tool_output_validation.cap short in
+  check string "short output unchanged" short result
+
+let test_cap_exact_limit_unchanged () =
+  let exact = String.make Tool_output_validation.max_output_chars 'x' in
+  let result = Tool_output_validation.cap exact in
+  check string "exact limit unchanged" exact result
+
+let test_cap_over_limit () =
+  let long = String.make (Tool_output_validation.max_output_chars + 1000) 'a' in
+  let result = Tool_output_validation.cap long in
+  check bool "result shorter than original" true
+    (String.length result < String.length long);
+  check bool "contains capped marker" true
+    (string_contains ~sub:"[capped:" result)
+
+let test_cap_preserves_prefix () =
+  let prefix = "HEADER:" in
+  let long = prefix ^ String.make (Tool_output_validation.max_output_chars + 1000) 'z' in
+  let result = Tool_output_validation.cap long in
+  check bool "prefix preserved" true
+    (String.length result >= String.length prefix
+     && String.sub result 0 (String.length prefix) = prefix)
+
 let () =
   let base_path = Masc_test_deps.find_project_root () in
   Keeper_exec_tools.inject_masc_schemas Config.raw_all_tool_schemas;
-  Keeper_exec_tools.init_policy_config ~base_path;
+  ignore (Result.get_ok (Keeper_exec_tools.init_policy_config ~base_path));
   run "Keeper_tools_oas" [
     "make_tools", [
       test_case "returns nonempty" `Quick test_make_tools_returns_nonempty;
@@ -495,5 +523,11 @@ let () =
       test_case "search returns results" `Quick test_library_search_returns_results;
       test_case "empty query fails" `Quick test_library_search_empty_query;
       test_case "missing topic fails" `Quick test_library_read_missing_topic;
+    ];
+    "output_cap", [
+      test_case "short output unchanged" `Quick test_cap_short_unchanged;
+      test_case "exact limit unchanged" `Quick test_cap_exact_limit_unchanged;
+      test_case "over limit capped with marker" `Quick test_cap_over_limit;
+      test_case "prefix preserved after cap" `Quick test_cap_preserves_prefix;
     ];
   ]

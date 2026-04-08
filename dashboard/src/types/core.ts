@@ -178,6 +178,11 @@ export interface KeeperMetricPoint {
   handoff_to_model: string | null
   handoff_new_generation: number | null
   inference_telemetry: InferenceTelemetry | null
+  fallback_applied: boolean
+  fallback_hops: number
+  fallback_from: string | null
+  fallback_to: string | null
+  fallback_reason: string | null
 }
 
 export type KeeperLifecycleState =
@@ -514,9 +519,23 @@ export interface MetricsWindow {
   [key: string]: unknown
 }
 
+export type KeeperPhase =
+  | 'Offline'
+  | 'Running'
+  | 'Failing'
+  | 'Compacting'
+  | 'HandingOff'
+  | 'Draining'
+  | 'Paused'
+  | 'Stopped'
+  | 'Crashed'
+  | 'Restarting'
+  | 'Dead'
+
 export interface Keeper {
   name: string
   pipeline_stage?: PipelineStage
+  phase?: KeeperPhase | null
   runtime_class?: 'keeper'
   paused?: boolean
   registered?: boolean

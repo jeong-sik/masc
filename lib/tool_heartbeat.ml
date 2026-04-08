@@ -102,8 +102,10 @@ let handle_heartbeat_stop _ctx args =
   else
     (false, Printf.sprintf "❌ Heartbeat not found: %s" hb_id)
 
-let handle_heartbeat_list _ctx _args =
+let handle_heartbeat_list _ctx args =
+  let limit = get_int args "limit" 20 |> max 1 |> min 100 in
   let hbs = Heartbeat.list () in
+  let hbs = List.filteri (fun i _ -> i < limit) hbs in
   let fmt_hb hb =
     let uptime = int_of_float (Time_compat.now () -. hb.Heartbeat.created_at) in
     Printf.sprintf "  • %s: agent=%s interval=%ds message=\"%s\" uptime=%ds"
@@ -200,7 +202,15 @@ Use when debugging presence issues or looking for orphaned heartbeats before cle
 Pair with masc_heartbeat_stop to cancel or masc_cleanup_zombies to reap dead agents.";
     input_schema = `Assoc [
       ("type", `String "object");
-      ("properties", `Assoc []);
+      ("properties", `Assoc [
+        ("limit", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Max heartbeats to return");
+          ("default", `Int 20);
+          ("minimum", `Int 1);
+          ("maximum", `Int 100);
+        ]);
+      ]);
     ];
   };
 

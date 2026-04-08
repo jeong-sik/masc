@@ -28,13 +28,27 @@ type verdict =
   | Approve
   | Reject of string
 
+(** Which gate produced the verdict. Variant type prevents typos that
+    would silently compile with a stringly-typed field. *)
+type gate =
+  | Length
+  | Excuse
+  | Contract
+  | Structured_tool
+  | Llm_text_fallback
+  | Format_reject
+  | Fallback
+
+val gate_to_string : gate -> string
+val gate_of_string : string -> (gate, string) result
+
 (** Structured review result with audit metadata for cross-model tracking. *)
 type review_result = {
   verdict : verdict;
   evaluator_cascade : string;
   generator_cascade : string option;
-  gate : string;
-  fallback_reason : string option;  (** Error message when gate="fallback" *)
+  gate : gate;
+  fallback_reason : string option;  (** Error message when gate=Fallback *)
 }
 
 (** Review a task completion claim with optional cross-model separation.
@@ -69,6 +83,21 @@ val check_contract : notes:string -> contract:string list -> string list
 
 (** Serialize review result to JSON for logging/calibration. *)
 val review_result_to_json : review_result -> Yojson.Safe.t
+
+(** Load excuse patterns dynamically from config/excuse_patterns.json.
+    Returns the default hardcoded list if the file is missing or invalid.
+    Exposed for dashboard administration. *)
+val load_excuse_patterns : unit -> (string * string) list
+
+(** Parse and validate a JSON value into excuse patterns.
+    Rejects malformed entries with [Error msg] instead of silently dropping them. *)
+val parse_excuse_patterns_json : Yojson.Safe.t -> ((string * string) list, string) result
+
+(** Save excuse patterns to config/excuse_patterns.json.
+    Uses atomic write (temp + rename). Invalidates cache on success.
+    Returns [Ok ()] on success or [Error msg] on failure.
+    Exposed for dashboard administration. *)
+val save_excuse_patterns : (string * string) list -> (unit, string) result
 
 (** Check notes for known excuse patterns (local, no LLM).
     Returns [Some (pattern, reason)] if a match is found.

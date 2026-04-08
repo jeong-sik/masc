@@ -39,14 +39,14 @@ let env_int_or ~name ~default =
       try int_of_string raw with Failure _ -> default)
 
 let sse_reconnect_min_interval_s =
-  env_float_or ~name:"MASC_SSE_RECONNECT_MIN_INTERVAL_S" ~default:0.0
+  env_float_or ~name:"MASC_SSE_RECONNECT_MIN_INTERVAL_S" ~default:1.0
   |> Float.max 0.0
 
 let sse_connect_window_s =
-  env_float_or ~name:"MASC_SSE_CONNECT_WINDOW_S" ~default:0.0 |> Float.max 0.0
+  env_float_or ~name:"MASC_SSE_CONNECT_WINDOW_S" ~default:60.0 |> Float.max 0.0
 
 let sse_connect_max_in_window =
-  env_int_or ~name:"MASC_SSE_CONNECT_MAX_IN_WINDOW" ~default:0 |> max 0
+  env_int_or ~name:"MASC_SSE_CONNECT_MAX_IN_WINDOW" ~default:10 |> max 0
 
 (** Register an SSE connection under [sse_registry_mutex].
     All call sites must use this instead of direct [Hashtbl.replace]. *)

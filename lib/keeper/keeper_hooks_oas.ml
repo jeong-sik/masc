@@ -14,9 +14,6 @@
     @since Phase 4 — Keeper → Agent.run() migration
     @since Phase 7 — Eval_gate → OAS hooks migration *)
 
-(** Bash-like tools that need destructive pattern screening. *)
-let destructive_check_tools =
-  [ "keeper_bash"; "keeper_fs_edit"; "keeper_github"; "keeper_pr_workflow" ]
 
 (** Keeper deny list — derived from Tool_catalog surface SSOT.
     Administrative/destructive operations that should only be invoked
@@ -270,9 +267,10 @@ let make_hooks
       | Agent_sdk.Hooks.AfterTurn { turn; response } ->
         let meta = !meta_ref in
         let model = response.model in
-        let input_tok, output_tok = match response.usage with
-          | Some u -> (u.input_tokens, u.output_tokens)
-          | None -> (0, 0)
+        let input_tok, output_tok, turn_cost_usd = match response.usage with
+          | Some u -> (u.input_tokens, u.output_tokens,
+                       Option.value ~default:0.0 u.cost_usd)
+          | None -> (0, 0, 0.0)
         in
         let total_tok = input_tok + output_tok in
         (* Provider prefix cache token tracking (Anthropic).
@@ -293,14 +291,13 @@ let make_hooks
         Log.Keeper.info "keeper:%s turn=%d total_turns=%d model=%s tokens=%d"
           meta.name turn meta.runtime.usage.total_turns model total_tok;
         (* Emit per-turn cost event for task attribution.
-           cost_usd is 0.0 until OAS cascade provides actual cost
-           (see oas#393). Token counts are the primary data for now. *)
+           cost_usd from OAS Pricing.annotate_response_cost (oas#393 resolved). *)
         (match trajectory_acc with
          | Some acc ->
            emit_cost_event ~masc_root:acc.masc_root
              ~agent_name:meta.name ~task_id:acc.task_id
              ~model ~input_tokens:input_tok ~output_tokens:output_tok
-             ~cost_usd:0.0 ?telemetry:response.telemetry ()
+             ~cost_usd:turn_cost_usd ?telemetry:response.telemetry ()
          | None -> ());
         let text = Agent_sdk.Types.text_of_content response.content in
         let has_state_block =
@@ -368,12 +365,21 @@ let make_hooks
         let duration_ms =
           (Time_compat.now () -. !tool_start_time) *. 1000.0
         in
+        (* Consume truncation info set by keeper_tools_oas before returning
+           the (possibly truncated) result to OAS. Falls back to out_len
+           when no truncation info was set (e.g. OAS-internal tool calls). *)
+        let (original_bytes, truncated_to) =
+          Keeper_tool_call_log.consume_truncation_info
+            ~keeper_name:(!meta_ref).name ()
+        in
+        let result_bytes = if original_bytes > 0 then original_bytes else out_len in
         (try
            Keeper_tool_call_log.log_call
              ~keeper_name:(!meta_ref).name
              ~tool_name ~input ~output_text
              ~success:(outcome = "ok") ~duration_ms
-             ~model:(!meta_ref).runtime.usage.last_model_used ()
+             ~model:(!meta_ref).runtime.usage.last_model_used
+             ~result_bytes ?truncated_to ()
          with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
         (* Boring-tool gate: mark turn as productive only for genuinely
            productive tools. keeper_stay_silent is in the boring set. *)
@@ -446,7 +452,7 @@ let make_hooks
                 ~tool_name ~reason_code:"cost_gate" ~reason_text)
          | _ ->
            (* Safety gate 2: Destructive pattern detection *)
-           if destructive_check && List.mem tool_name destructive_check_tools then
+           if destructive_check && Tool_dispatch.is_destructive tool_name then
              let cmd = extract_command_from_input input in
              match Eval_gate.detect_destructive cmd with
              | Some (pattern, desc) ->
@@ -513,7 +519,7 @@ let hook_introspection_json
     `List (List.map (fun s -> `String s) keeper_denied_tools)
   in
   let destructive_json =
-    `List (List.map (fun s -> `String s) destructive_check_tools)
+    `String "dynamic_boundary (Tool_dispatch.is_destructive)"
   in
   `Assoc [
     ("slots", `Assoc [

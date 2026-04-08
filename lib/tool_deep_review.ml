@@ -104,13 +104,15 @@ let handle_deep_review (config : Room.config) args : bool * string =
         ]))
     | Ok prompt ->
         match
-          Oas_worker.run_named
-            ~cascade_name:"adversarial_reviewer"
-            ~goal:prompt
-            ~max_turns:1
-            ~temperature:0.5
-            ~max_tokens:500
-            ()
+          Masc_oas_bridge.run_safe ~timeout_s:180.0 (fun () ->
+            Oas_worker.run_named
+              ~cascade_name:"adversarial_reviewer"
+              ~goal:prompt
+              ~max_turns:1
+              ~temperature:0.5
+              ~max_tokens:500
+              ()
+          )
         with
         | Ok result ->
             let text = Oas_response.text_of_response result.response in

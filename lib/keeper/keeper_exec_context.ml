@@ -140,12 +140,15 @@ let keeper_action_kind_of_tool_names tool_names =
 
 
 let effective_model_labels_for_turn (m : keeper_meta) : string list =
-  let configured = Oas_model_resolve.models_of_cascade_name m.cascade_name in
+  let configured =
+    Oas_model_resolve.models_of_cascade_name m.cascade_name
+    |> Oas_model_resolve.filter_by_providers m.allowed_providers
+  in
   let configured_ids =
     try
       Llm_provider.Cascade_config.parse_model_strings configured
       |> List.map (fun (c : Llm_provider.Provider_config.t) -> String.trim c.model_id)
-    with _ -> []
+    with Eio.Cancel.Cancelled _ as e -> raise e | _ -> []
   in
   match String.trim (Keeper_exec_status.active_model_of_meta m) with
   | "" -> configured
@@ -188,9 +191,13 @@ let ensure_keeper_room_presence config (meta : keeper_meta) : keeper_meta =
                  ~agent_name:meta.agent_name)
           then begin
             Room.ensure_room_bootstrap config room_id;
+            let preset_cap = match Keeper_types.tool_access_preset meta.tool_access with
+              | Some p -> ["preset:" ^ Keeper_types.tool_preset_to_string p]
+              | None -> []
+            in
             ignore
               (Room.join config ~agent_name:meta.agent_name
-                 ~capabilities:[ "keeper" ] ())
+                 ~capabilities:(["keeper"] @ preset_cap) ())
           end;
           ignore
             (Room.heartbeat config ~agent_name:meta.agent_name);

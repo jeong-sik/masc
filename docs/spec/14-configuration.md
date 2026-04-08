@@ -295,10 +295,10 @@ JSON 파일로 CASCADE별 모델 순서를 정의한다. 키 패턴: `{cascade_n
 
 ```json
 {
-  "default_models": ["ollama:auto", "glm:auto"],
-  "keeper_turn_models": ["ollama:auto", "glm:auto"],
-  "briefing_models": ["ollama:auto", "glm:auto", "gemini:auto"],
-  "auto_responder_claude_models": ["claude:auto", "glm:auto"],
+  "default_models": ["llama:qwen3.5", "glm:glm-5.1"],
+  "keeper_turn_models": ["llama:qwen3.5", "glm:glm-5.1"],
+  "briefing_models": ["llama:qwen3.5", "glm:glm-5.1", "gemini:gemini-2.5-pro"],
+  "auto_responder_claude_models": ["claude:sonnet", "glm:glm-5.1"],
   "keeper_unified_temperature": 0.4,
   "keeper_unified_max_tokens": 2048
 }
@@ -306,7 +306,10 @@ JSON 파일로 CASCADE별 모델 순서를 정의한다. 키 패턴: `{cascade_n
 
 ### 7.2 모델 식별자 형식
 
-`{provider}:{model_id}` 형식. `auto`는 해당 provider의 env_config 기본 모델을 사용한다.
+`{provider}:{model_id}` 형식.
+
+- checked-in repo defaults는 explicit label을 사용한다.
+- `auto`는 provider-specific runtime convenience일 수 있지만, repo에 커밋되는 cascade 기본값으로는 권장하지 않는다.
 
 | Provider | Env Config 모듈 | 기본 모델 |
 |----------|----------------|----------|

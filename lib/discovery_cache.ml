@@ -11,10 +11,14 @@
 
 let sw_ref : Eio.Switch.t option Atomic.t = Atomic.make None
 let net_ref : [`Generic | `Unix] Eio.Net.ty Eio.Resource.t option Atomic.t = Atomic.make None
+let base_path_ref : string option Atomic.t = Atomic.make None
 
 let set_env ~sw ~(net : [`Generic | `Unix] Eio.Net.ty Eio.Resource.t) =
   Atomic.set sw_ref (Some sw);
   Atomic.set net_ref (Some net)
+
+let set_base_path path =
+  Atomic.set base_path_ref (Some path)
 
 (* ── Cache state (Eio.Mutex-protected) ───────────────────── *)
 
@@ -31,7 +35,11 @@ let refresh_cache_unlocked () =
     let endpoints = Llm_provider.Provider_registry.active_llama_endpoints () in
     let results = Llm_provider.Discovery.discover ~sw ~net ~endpoints in
     cached_endpoints := results;
-    Atomic.set cache_updated_at (Time_compat.now ())
+    Atomic.set cache_updated_at (Time_compat.now ());
+    (* Persist probe snapshot for time-series history *)
+    (match Atomic.get base_path_ref with
+     | Some bp -> Discovery_history.record_probe ~base_path:bp results
+     | None -> ())
   | _ ->
     ()
 

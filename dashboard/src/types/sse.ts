@@ -20,6 +20,7 @@ export type SSEEventType =
   | 'keeper_phase_changed'
   | 'keeper_tool_call'
   | 'masc/keeper_tool_call'
+  | 'keeper_tool_skipped'
   | 'keeper_turn_complete'
   | 'masc/keeper_turn_complete'
   | 'client_input_approved'
@@ -81,11 +82,12 @@ export interface SSEEvent {
   prev_phase?: string
   new_phase?: string
   event?: string
-  // Keeper tool call fields
+  // Keeper tool call / tool skip fields
   tool_name?: string
   duration_ms?: number
   success?: boolean
   error_text?: string
+  reason_code?: string
   // OAS bridge payload (generic container for Event_bus events)
   payload?: Record<string, unknown>
 }

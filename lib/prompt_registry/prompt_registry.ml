@@ -846,6 +846,6 @@ let restore_overrides base_path =
           | _ -> ()
         ) pairs
       | _ -> ()
-    with exn ->
+    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
       Log.Misc.warn "prompt override restore failed: %s" (Printexc.to_string exn)
   end

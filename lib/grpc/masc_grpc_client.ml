@@ -41,7 +41,7 @@ let call_unary_safe t ~sw ~env ~method_ ~request ~decode =
   with
   | Ok bytes -> (
     try Ok (decode bytes)
-    with exn ->
+    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
       Error (Printf.sprintf "decode error for %s: %s" method_
         (Printexc.to_string exn)))
   | Error status ->
@@ -96,7 +96,7 @@ let subscribe t ~sw ~env ~agent_name ~session_id ~event_types ~since_seq =
       | Ok bytes ->
         (try
           Grpc_eio.Stream.add typed_stream (Ok (T.Event.of_bytes bytes))
-        with exn ->
+        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
           Grpc_eio.Stream.add typed_stream
             (Error (Printf.sprintf "event decode error: %s"
               (Printexc.to_string exn))));
@@ -138,7 +138,7 @@ let heartbeat_stream t ~sw ~env =
     match Grpc_eio.Stream.take raw_responses with
     | Ok bytes ->
       (try Ok (T.HeartbeatAck.of_bytes bytes)
-       with exn ->
+       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
          Error (Printf.sprintf "ack decode error: %s"
            (Printexc.to_string exn)))
     | Error status ->

@@ -50,12 +50,14 @@ let handle_handover_create ctx args =
 
 let handle_handover_list ctx args =
   let pending_only = get_bool args "pending_only" false in
+  let limit = get_int args "limit" 20 |> max 1 |> min 50 in
   match ctx.fs with
   | Some fs ->
       let handovers =
         if pending_only then Handover_eio.get_pending_handovers ~fs ctx.config
         else Handover_eio.list_handovers ~fs ctx.config
       in
+      let handovers = List.filteri (fun i _ -> i < limit) handovers in
       let json = `List (List.map Handover_eio.handover_to_json handovers) in
       (true, Yojson.Safe.pretty_to_string json)
   | None -> (false, "❌ Filesystem not available")
@@ -192,6 +194,13 @@ After finding a handover, call masc_handover_get for details, then masc_handover
           ("type", `String "boolean");
           ("description", `String "If true, only show unclaimed handovers");
           ("default", `Bool false);
+        ]);
+        ("limit", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Max handovers to return (default: 20)");
+          ("minimum", `Int 1);
+          ("maximum", `Int 50);
+          ("default", `Int 20);
         ]);
       ]);
     ];

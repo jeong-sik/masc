@@ -108,7 +108,7 @@ let make_req ?(title = "Task") ?(notes = "Detailed completion notes") () :
     agent_name = "codex";
   }
 
-let make_result ?(verdict = AR.Approve) ?(gate = "llm")
+let make_result ?(verdict = AR.Approve) ?(gate = AR.Structured_tool)
     ?fallback_reason () : AR.review_result =
   {
     verdict;
@@ -242,7 +242,7 @@ let test_overview_warns_when_evaluator_falls_back () =
   with_test_stores @@ fun config ->
   let req = make_req ~title:"Fallback task" () in
   let result =
-    make_result ~gate:"fallback" ~fallback_reason:"judge timeout" ()
+    make_result ~gate:AR.Fallback ~fallback_reason:"judge timeout" ()
   in
   Cal.record_verdict ~task_id:"task-1" ~req ~result ();
   let json =

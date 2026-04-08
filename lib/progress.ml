@@ -90,8 +90,8 @@ module Tracker = struct
       Call at server startup to catch initialization ordering bugs early. *)
   let assert_wired () =
     if not !wired then
-      failwith "Progress.Tracker.notify_ref was never wired up. \
-                Ensure Progress module initialization runs before use."
+      raise (Failure "Progress.Tracker.notify_ref was never wired up. \
+                Ensure Progress module initialization runs before use.")
 
   let create ~task_id ?(total_steps=100) () = {
     task_id;

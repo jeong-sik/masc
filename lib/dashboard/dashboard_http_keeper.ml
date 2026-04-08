@@ -203,14 +203,16 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
 
           let models_resolved =
             `List (List.filter_map (fun label ->
-              match String.split_on_char ':' label with
-              | [provider; model_id] ->
+              match String.index_opt label ':' with
+              | Some i ->
+                  let provider = String.sub label 0 i in
+                  let model_id = String.sub label (i + 1) (String.length label - i - 1) in
                   Some (`Assoc [
                     ("provider", `String provider);
                     ("model_id", `String model_id);
                     ("max_context", `Int 0);
                   ])
-              | _ -> None
+              | None -> None
             ) cascade_models)
           in
 
@@ -307,14 +309,14 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                 let disk_crashes =
                   (try Keeper_crash_persistence.recent_crashes
                     ~keepers_dir ~name:m.name ~max_entries:20
-                  with _ -> []) in
+                  with Eio.Cancel.Cancelled _ as e -> raise e | _ -> []) in
                 let combined_log = match disk_crashes with
                   | [] -> crash_log
                   | _ -> disk_crashes in
                 let sp_events =
                   (try Keeper_crash_persistence.recent_sp_events
                     ~keepers_dir ~max_entries:20
-                  with _ -> []) in
+                  with Eio.Cancel.Cancelled _ as e -> raise e | _ -> []) in
                 let ctx_ratio =
                   match last_metrics with
                   | Some m -> Safe_ops.json_float "context_ratio" m

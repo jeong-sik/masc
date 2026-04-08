@@ -53,7 +53,7 @@ let git_capture_output ~repo_root args =
     match Unix.close_process_full channels with
     | Unix.WEXITED 0 -> Some output
     | _ -> None
-  with exn ->
+  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     ignore (try Unix.close_process_full channels with Unix.Unix_error _ -> Unix.WEXITED 1);
     raise exn
 let git_probe_from_root repo_root =

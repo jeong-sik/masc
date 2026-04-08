@@ -21,7 +21,7 @@ let extract_text_from_stt (json : Yojson.Safe.t) : string option =
         (match member "text" json with
         | `String s when String.trim s <> "" -> Some (String.trim s)
         | _ -> None)
-  with _ -> None
+  with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None
 
 (** Extract reply text from keeper_msg tool_result.
     The result_str is JSON with ["reply"]. *)
@@ -31,7 +31,7 @@ let extract_reply_text (result_str : string) : string option =
     match Yojson.Safe.Util.member "reply" json with
     | `String s when String.trim s <> "" -> Some (String.trim s)
     | _ -> None
-  with _ -> None
+  with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None
 
 let parse_reply_text (result_str : string) : (string, string) result =
   try

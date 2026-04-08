@@ -38,11 +38,12 @@ let turn_semaphore = Eio.Semaphore.make keeper_turn_throttle_limit
    keepers fire scheduled turns simultaneously on a shared LLM server.
    Reactive turns (explicit mentions, board events) bypass this gate
    so they are never starved by slow autonomous turns.
-   Default 3 = with 27B/8-slot each autonomous turn gets ~2-3 slots
-   of GPU throughput, completing in ~30-60s instead of 5min+. *)
+   Default 1 = with 1-slot llama-server, only one request can be in-flight
+   at a time. Higher values cause queue buildup and TCP keepalive timeouts.
+   For 8-slot servers, set MASC_KEEPER_AUTONOMOUS_CONCURRENCY=3-4. *)
 let autonomous_turn_limit =
   Keeper_config.int_of_env_default
-    "MASC_KEEPER_AUTONOMOUS_CONCURRENCY" ~default:3 ~min_v:1 ~max_v:12
+    "MASC_KEEPER_AUTONOMOUS_CONCURRENCY" ~default:1 ~min_v:1 ~max_v:8
 ;;
 
 let autonomous_turn_semaphore = Eio.Semaphore.make autonomous_turn_limit
@@ -243,6 +244,7 @@ let write_heartbeat_snapshot
   let metrics_store = keeper_metrics_store ctx.config meta_current.name in
   let cascade_models =
     Oas_model_resolve.models_of_cascade_name meta_current.cascade_name
+    |> Oas_model_resolve.filter_by_providers meta_current.allowed_providers
   in
   let max_cascade_context =
     let min_keeper_context = 65_536 in
@@ -1490,6 +1492,23 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
     let live_meta = bootstrap_live_keeper_meta ~ctx m in
     Keeper_registry.update_meta ~base_path:ctx.config.base_path m.name live_meta;
     publish_keeper_started ~live_meta;
+    (* Start telemetry feedback proactive cache refresh loop *)
+    (match live_meta.telemetry_feedback_enabled with
+     | Some true ->
+       let window =
+         Option.value ~default:24 live_meta.telemetry_feedback_window_hours
+       in
+       let decision_log_path =
+         Keeper_types_support.keeper_decision_log_path ctx.config live_meta.name
+       in
+       Keeper_telemetry_feedback.start_refresh_loop
+         ~sw:ctx.sw ~clock:ctx.clock
+         ~keeper_name:live_meta.name
+         ~decision_log_path
+         ~window_hours:window
+         ~interval_sec:60
+         ~stop
+     | _ -> ());
     Eio.Fiber.fork ~sw:ctx.sw (fun () ->
       let record_crash failure_reason =
         record_keeper_crashed

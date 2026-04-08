@@ -48,6 +48,20 @@ let tool_access_schema description =
 
 let keeper_schemas : tool_schema list = [
   {
+    name = "masc_persona_list";
+    description = "List available persona profiles that can be used to create keepers via masc_keeper_create_from_persona.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("detailed", `Assoc [
+          ("type", `String "boolean");
+          ("default", `Bool true);
+          ("description", `String "If true, return full persona summaries. If false, return names only.");
+        ]);
+      ]);
+    ];
+  };
+  {
     name = "masc_keeper_create_from_persona";
     description = "Create or dry-run a keeper configuration from a persona profile.json. Keepers are durable and auto-start on server boot.";
     input_schema = `Assoc [

@@ -14,7 +14,7 @@ let enabled () = Lazy.force enabled_cache
 
 let trace_path ~base_path ~keeper_name =
   Filename.concat
-    (Filename.concat base_path "keepers")
+    (Filename.concat (Filename.concat base_path ".masc") "keepers")
     (keeper_name ^ ".tla-trace.jsonl")
 
 let emit_transition
@@ -39,4 +39,7 @@ let emit_transition
       "restart_count", `Int restart_count;
     ] in
     let path = trace_path ~base_path ~keeper_name in
-    Keeper_types_support.append_jsonl_line path json
+    try Keeper_types_support.append_jsonl_line path json
+    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+      Printf.eprintf "trace_emit: %s: %s\n%!"
+        keeper_name (Printexc.to_string exn)

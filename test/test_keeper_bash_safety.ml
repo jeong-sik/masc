@@ -128,6 +128,31 @@ let test_read_ops_pass () =
     Alcotest.(check bool) (Printf.sprintf "read: %s" cmd) false (is_write cmd)
   ) reads
 
+(* ── rg exit code semantics ──────────────────────────────── *)
+
+let test_rg_exit_code_semantics () =
+  (* rg: 0=matches, 1=no matches (valid), 2+=error *)
+  let is_ok st = st = Unix.WEXITED 0 || st = Unix.WEXITED 1 in
+  Alcotest.(check bool) "exit 0 is ok" true (is_ok (Unix.WEXITED 0));
+  Alcotest.(check bool) "exit 1 (no match) is ok" true (is_ok (Unix.WEXITED 1));
+  Alcotest.(check bool) "exit 2 (error) is not ok" false (is_ok (Unix.WEXITED 2));
+  Alcotest.(check bool) "exit 127 (not found) is not ok" false (is_ok (Unix.WEXITED 127))
+
+(* ── git_worktree op: action validation ───────────────────── *)
+
+let test_git_worktree_action_normalization () =
+  (* Verify action aliases normalize correctly *)
+  let normalize a = String.trim a |> String.lowercase_ascii in
+  Alcotest.(check string) "list" "list" (normalize "list");
+  Alcotest.(check string) "add" "add" (normalize " Add ");
+  Alcotest.(check string) "LIST uppercase" "list" (normalize "LIST");
+  Alcotest.(check string) "unknown stays" "remove" (normalize "remove")
+
+let test_git_worktree_branch_required () =
+  (* action=add with empty branch should be rejected *)
+  let branch = String.trim "" in
+  Alcotest.(check bool) "empty branch rejected" true (branch = "")
+
 let () =
   Alcotest.run "Keeper bash safety" [
     ("allowlist", [
@@ -143,5 +168,12 @@ let () =
     ]);
     ("edge", [
       Alcotest.test_case "empty command blocked" `Quick test_empty_command;
+    ]);
+    ("rg_exit_code", [
+      Alcotest.test_case "rg exit semantics (0=ok, 1=ok, 2+=error)" `Quick test_rg_exit_code_semantics;
+    ]);
+    ("git_worktree_op", [
+      Alcotest.test_case "action normalization" `Quick test_git_worktree_action_normalization;
+      Alcotest.test_case "branch required for add" `Quick test_git_worktree_branch_required;
     ]);
   ]

@@ -25,6 +25,7 @@ val augment_keeper_diagnostic_json :
 
 val keeper_health_state :
   ?fiber_health:fiber_health ->
+  ?keepalive_interval_s:float ->
   meta:keeper_meta ->
   keepalive_running:bool ->
   agent_status:Yojson.Safe.t ->

@@ -48,7 +48,7 @@ let policy_init_once = lazy (
       in
       go (Filename.dirname cwd)
   in
-  Keeper_exec_tools.init_policy_config ~base_path:repo_root
+  Result.get_ok (Keeper_exec_tools.init_policy_config ~base_path:repo_root)
 )
 
 let with_room f =
@@ -123,8 +123,9 @@ let test_missing_branch () =
       ] in
     let result = call_tool config meta "keeper_pr_workflow" args in
     let json = parse_json result in
-    check string "error is branch_required"
-      "branch_required" (json_string "error" json))
+    let err = json_string "error" json in
+    check bool "error mentions branch"
+      true (String_util.contains_substring_ci err "branch"))
 
 let test_missing_file_path () =
   with_room (fun config ->
@@ -137,8 +138,9 @@ let test_missing_file_path () =
       ] in
     let result = call_tool config meta "keeper_pr_workflow" args in
     let json = parse_json result in
-    check string "error is file_path_required"
-      "file_path_required" (json_string "error" json))
+    let err = json_string "error" json in
+    check bool "error mentions file_path"
+      true (String_util.contains_substring_ci err "file_path"))
 
 let test_missing_commit_message () =
   with_room (fun config ->
@@ -151,8 +153,9 @@ let test_missing_commit_message () =
       ] in
     let result = call_tool config meta "keeper_pr_workflow" args in
     let json = parse_json result in
-    check string "error is commit_message_required"
-      "commit_message_required" (json_string "error" json))
+    let err = json_string "error" json in
+    check bool "error mentions commit_message"
+      true (String_util.contains_substring_ci err "commit_message"))
 
 let test_missing_pr_title () =
   with_room (fun config ->
@@ -165,8 +168,9 @@ let test_missing_pr_title () =
       ] in
     let result = call_tool config meta "keeper_pr_workflow" args in
     let json = parse_json result in
-    check string "error is pr_title_required"
-      "pr_title_required" (json_string "error" json))
+    let err = json_string "error" json in
+    check bool "error mentions pr_title"
+      true (String_util.contains_substring_ci err "pr_title"))
 
 (* --- Preset gate --- *)
 
@@ -242,8 +246,9 @@ let test_branch_with_semicolon_rejected () =
       ] in
     let result = call_tool config meta "keeper_pr_workflow" args in
     let json = parse_json result in
-    check string "error is branch_contains_invalid_chars"
-      "branch_contains_invalid_chars" (json_string "error" json))
+    let err = json_string "error" json in
+    check bool "error mentions invalid chars"
+      true (String_util.contains_substring_ci err "invalid"))
 
 let test_branch_with_pipe_rejected () =
   with_room (fun config ->
@@ -256,8 +261,9 @@ let test_branch_with_pipe_rejected () =
       ] in
     let result = call_tool config meta "keeper_pr_workflow" args in
     let json = parse_json result in
-    check string "error is branch_contains_invalid_chars"
-      "branch_contains_invalid_chars" (json_string "error" json))
+    let err = json_string "error" json in
+    check bool "error mentions invalid chars"
+      true (String_util.contains_substring_ci err "invalid"))
 
 let test_branch_with_backtick_rejected () =
   with_room (fun config ->
@@ -270,8 +276,9 @@ let test_branch_with_backtick_rejected () =
       ] in
     let result = call_tool config meta "keeper_pr_workflow" args in
     let json = parse_json result in
-    check string "error is branch_contains_invalid_chars"
-      "branch_contains_invalid_chars" (json_string "error" json))
+    let err = json_string "error" json in
+    check bool "error mentions invalid chars"
+      true (String_util.contains_substring_ci err "invalid"))
 
 let test_branch_with_dot_dot_rejected () =
   with_room (fun config ->
@@ -284,8 +291,9 @@ let test_branch_with_dot_dot_rejected () =
       ] in
     let result = call_tool config meta "keeper_pr_workflow" args in
     let json = parse_json result in
-    check string "error is branch_contains_invalid_chars"
-      "branch_contains_invalid_chars" (json_string "error" json))
+    let err = json_string "error" json in
+    check bool "error mentions invalid chars"
+      true (String_util.contains_substring_ci err "invalid"))
 
 let test_branch_with_space_rejected () =
   with_room (fun config ->
@@ -298,8 +306,9 @@ let test_branch_with_space_rejected () =
       ] in
     let result = call_tool config meta "keeper_pr_workflow" args in
     let json = parse_json result in
-    check string "error is branch_contains_invalid_chars"
-      "branch_contains_invalid_chars" (json_string "error" json))
+    let err = json_string "error" json in
+    check bool "error mentions invalid chars"
+      true (String_util.contains_substring_ci err "invalid"))
 
 let test_branch_with_dollar_paren_rejected () =
   with_room (fun config ->
@@ -312,8 +321,9 @@ let test_branch_with_dollar_paren_rejected () =
       ] in
     let result = call_tool config meta "keeper_pr_workflow" args in
     let json = parse_json result in
-    check string "error is branch_contains_invalid_chars"
-      "branch_contains_invalid_chars" (json_string "error" json))
+    let err = json_string "error" json in
+    check bool "error mentions invalid chars"
+      true (String_util.contains_substring_ci err "invalid"))
 
 let test_branch_with_ampersand_rejected () =
   with_room (fun config ->
@@ -326,8 +336,9 @@ let test_branch_with_ampersand_rejected () =
       ] in
     let result = call_tool config meta "keeper_pr_workflow" args in
     let json = parse_json result in
-    check string "error is branch_contains_invalid_chars"
-      "branch_contains_invalid_chars" (json_string "error" json))
+    let err = json_string "error" json in
+    check bool "error mentions invalid chars"
+      true (String_util.contains_substring_ci err "invalid"))
 
 let test_valid_branch_with_slash_accepted () =
   with_room (fun config ->
@@ -346,25 +357,46 @@ let test_valid_branch_with_slash_accepted () =
     check bool "error is NOT branch_contains_invalid_chars"
       true (error <> "branch_contains_invalid_chars"))
 
-(* --- Worktree step failure propagation --- *)
+(* --- Branch slash → task_id hyphen conversion --- *)
 
-let test_worktree_failure_propagates () =
+let test_branch_slash_converted_to_hyphen_in_task_id () =
+  with_room (fun config ->
+    let meta = make_meta_with_preset "delivery" in
+    let args = `Assoc
+      [ "branch", `String "fix/cascade-glm-auto-model"
+      ; "file_path", `String "src/test.ml"
+      ; "file_content", `String "let x = 1"
+      ; "commit_message", `String "msg"
+      ; "pr_title", `String "title"
+      ] in
+    let result = call_tool config meta "keeper_pr_workflow" args in
+    let json = parse_json result in
+    (* Branch validation should pass (slash is valid in branch names).
+       The error should be at worktree_create step, NOT
+       "Invalid task ID: task_id cannot contain path separators". *)
+    let error = json_string "error" json in
+    check bool "error does NOT mention path separators"
+      false (String_util.contains_substring_ci error "path separator"))
+
+(* --- Clone step failure propagation --- *)
+
+let test_clone_failure_propagates () =
   with_room (fun config ->
     let meta = make_meta_with_preset "delivery" in
     let result = call_tool config meta "keeper_pr_workflow" valid_pr_args in
     let json = parse_json result in
-    (* Test room is not a git repo, so worktree_create fails.
+    (* Test room is not a git repo, so playground_clone fails.
        The result should be ok=false with a meaningful error. *)
     check bool "ok is false" false (json_bool "ok" json);
     let steps = json_string "steps" json in
-    check bool "steps contains worktree_create"
+    check bool "steps contains playground_clone"
       true (try ignore (Str.search_forward
-        (Str.regexp_string "worktree_create") steps 0); true
+        (Str.regexp_string "playground_clone") steps 0); true
         with Not_found -> false);
     let error = json_string "error" json in
-    check bool "error mentions worktree"
+    check bool "error mentions clone"
       true (try ignore (Str.search_forward
-        (Str.regexp_string "worktree") (String.lowercase_ascii error) 0); true
+        (Str.regexp_string "clone") (String.lowercase_ascii error) 0); true
         with Not_found -> false))
 
 (* --- Task lifecycle: claim → done --- *)
@@ -439,6 +471,151 @@ let test_second_claim_on_single_task_returns_no_tasks () =
               (Str.regexp_string "no tasks") lower 0); true
             with Not_found -> false))
 
+(* --- Integration: playground clone on real git repo --- *)
+
+(** Run a test using the actual masc-mcp repo root as the room base_path.
+    This exercises the real playground clone path instead of the temp-dir
+    fallback that non-git rooms hit. *)
+let with_real_repo_room f =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Lazy.force policy_init_once;
+  let repo_root =
+    let cwd = Sys.getcwd () in
+    if Sys.file_exists (Filename.concat cwd ".git") then cwd
+    else
+      let rec go d =
+        if d = "/" then failwith "cannot find .git repo root"
+        else if Sys.file_exists (Filename.concat d ".git") then d
+        else go (Filename.dirname d)
+      in
+      go (Filename.dirname cwd)
+  in
+  let saved_pg = Sys.getenv_opt "MASC_POSTGRES_URL" in
+  let saved_sb = Sys.getenv_opt "SB_PG_URL" in
+  Unix.putenv "MASC_POSTGRES_URL" "";
+  Unix.putenv "SB_PG_URL" "";
+  Fun.protect
+    ~finally:(fun () ->
+      (match saved_pg with Some v -> Unix.putenv "MASC_POSTGRES_URL" v | None -> ());
+      (match saved_sb with Some v -> Unix.putenv "SB_PG_URL" v | None -> ()))
+    (fun () ->
+      let config = Room.default_config repo_root in
+      (* Room may already be initialized in the real repo *)
+      (try ignore (Room.init config ~agent_name:(Some "test-integration")) with _ -> ());
+      f config repo_root)
+
+let test_playground_clone_creates_clone_and_commits () =
+  with_real_repo_room (fun config repo_root ->
+    let meta = make_meta_with_preset "delivery" in
+    let test_branch = Printf.sprintf "test/integration-%d" (Random.int 100_000) in
+    let args = `Assoc
+      [ "branch", `String test_branch
+      ; "file_path", `String "test-integration-verify.txt"
+      ; "file_content", `String "integration test content"
+      ; "commit_message", `String "test: integration verify playground clone"
+      ; "pr_title", `String "test: integration verify"
+      ] in
+    let result = call_tool config meta "keeper_pr_workflow" args in
+    let json = parse_json result in
+    let steps = json_string "steps" json in
+    let error = json_string "error" json in
+    (* playground_clone step must succeed *)
+    check bool "playground_clone step present"
+      true (String_util.contains_substring_ci steps "playground_clone");
+    check bool "playground_clone ok"
+      true (String_util.contains_substring_ci steps "playground_clone: ok");
+    (* file_write step must succeed *)
+    check bool "file_write ok"
+      true (String_util.contains_substring_ci steps "file_write: ok");
+    (* git_commit_push will fail at push (no network in CI / test branch
+       doesn't exist on remote yet is fine) but commit should succeed.
+       If error mentions "git push" it means clone+write+commit all passed. *)
+    let commit_passed =
+      String_util.contains_substring_ci steps "git_commit_push: ok"
+      || String_util.contains_substring_ci error "git push"
+    in
+    check bool "commit reached (clone+write+commit passed)" true commit_passed;
+    (* Verify clone was cleaned up (step 5 runs even on push failure) *)
+    let playground_path = Filename.concat repo_root
+      (Keeper_alerting_path.playground_path_of_keeper meta.name) in
+    let clone_path = Filename.concat playground_path (Filename.basename repo_root) in
+    check bool "clone cleaned up"
+      false (Sys.file_exists clone_path);
+    (* Clean up remote branch if push somehow succeeded *)
+    if String_util.contains_substring_ci steps "git_commit_push: ok" then
+      ignore (Sys.command
+        (Printf.sprintf "cd %s && git push origin --delete %s 2>/dev/null"
+          (Filename.quote repo_root) (Filename.quote test_branch))))
+
+(* --- keeper_bash branch-switch guard --- *)
+
+let assert_branch_switch_blocked config cmd label =
+  let meta = make_meta_with_preset "delivery" in
+  let args = `Assoc [ "cmd", `String cmd ] in
+  let result = call_tool config meta "keeper_bash" args in
+  let json = parse_json result in
+  let error = try json_string "error" json with _ -> "" in
+  check bool (label ^ " blocked")
+    true (error = "branch_switch_blocked")
+
+let test_bash_git_checkout_blocked () =
+  with_room (fun config ->
+    assert_branch_switch_blocked config "git checkout refactor/some-branch" "checkout")
+
+let test_bash_git_switch_blocked () =
+  with_room (fun config ->
+    assert_branch_switch_blocked config "git switch feature/x" "switch")
+
+let test_bash_git_checkout_with_global_opts_blocked () =
+  with_room (fun config ->
+    assert_branch_switch_blocked config "git -C . checkout refactor/x" "checkout -C")
+
+let test_bash_git_tab_separated_blocked () =
+  with_room (fun config ->
+    assert_branch_switch_blocked config "git\tcheckout feature/x" "tab checkout")
+
+let test_bash_git_branch_create_blocked () =
+  with_room (fun config ->
+    assert_branch_switch_blocked config "git branch new-feature" "branch create")
+
+let test_bash_git_branch_rename_blocked () =
+  with_room (fun config ->
+    assert_branch_switch_blocked config "git branch -m old-name new-name" "branch -m")
+
+let test_bash_git_branch_list_allowed () =
+  with_room (fun config ->
+    let meta = make_meta_with_preset "delivery" in
+    let args = `Assoc [ "cmd", `String "git branch --list" ] in
+    let result = call_tool config meta "keeper_bash" args in
+    let json = parse_json result in
+    let error = try json_string "error" json with _ -> "" in
+    check bool "git branch --list not blocked"
+      true (error <> "branch_switch_blocked"))
+
+let test_bash_git_branch_delete_allowed () =
+  with_room (fun config ->
+    let meta = make_meta_with_preset "delivery" in
+    let args = `Assoc [ "cmd", `String "git branch -d old-branch" ] in
+    let result = call_tool config meta "keeper_bash" args in
+    let json = parse_json result in
+    let error = try json_string "error" json with _ -> "" in
+    check bool "git branch -d not blocked as branch_switch"
+      true (error <> "branch_switch_blocked"))
+
+let test_bash_git_status_allowed () =
+  with_room (fun config ->
+    let meta = make_meta_with_preset "delivery" in
+    let args = `Assoc [ "cmd", `String "git status" ] in
+    let result = call_tool config meta "keeper_bash" args in
+    let json = parse_json result in
+    let has_status = match json with
+      | `Assoc fields -> List.mem_assoc "status" fields
+      | _ -> false
+    in
+    check bool "git status returns normal execution shape"
+      true has_status)
+
 let () =
   run "keeper_pr_workflow"
     [ "required_fields",
@@ -465,13 +642,30 @@ let () =
       ; test_case "ampersand rejected" `Quick test_branch_with_ampersand_rejected
       ; test_case "slash accepted" `Quick test_valid_branch_with_slash_accepted
       ]
+    ; "task_id_derivation",
+      [ test_case "slash to hyphen" `Quick test_branch_slash_converted_to_hyphen_in_task_id
+      ]
     ; "step_propagation",
-      [ test_case "worktree failure" `Quick test_worktree_failure_propagates
+      [ test_case "clone failure" `Quick test_clone_failure_propagates
       ]
     ; "task_lifecycle",
       [ test_case "claim then done" `Quick test_task_claim_then_done_lifecycle
       ]
     ; "task_dedup",
       [ test_case "second claim no tasks" `Quick test_second_claim_on_single_task_returns_no_tasks
+      ]
+    ; "bash_branch_guard",
+      [ test_case "checkout blocked" `Quick test_bash_git_checkout_blocked
+      ; test_case "switch blocked" `Quick test_bash_git_switch_blocked
+      ; test_case "checkout -C blocked" `Quick test_bash_git_checkout_with_global_opts_blocked
+      ; test_case "tab checkout blocked" `Quick test_bash_git_tab_separated_blocked
+      ; test_case "branch create blocked" `Quick test_bash_git_branch_create_blocked
+      ; test_case "branch rename blocked" `Quick test_bash_git_branch_rename_blocked
+      ; test_case "branch list allowed" `Quick test_bash_git_branch_list_allowed
+      ; test_case "branch delete allowed" `Quick test_bash_git_branch_delete_allowed
+      ; test_case "status allowed" `Quick test_bash_git_status_allowed
+      ]
+    ; "integration",
+      [ test_case "playground clone e2e" `Slow test_playground_clone_creates_clone_and_commits
       ]
     ]

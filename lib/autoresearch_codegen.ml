@@ -8,7 +8,7 @@
 include Autoresearch_types
 
 (** Build prompt for MODEL code change. Exported for testing. *)
-let build_code_change_prompt ~goal ~baseline ~history ~insights
+let build_code_change_prompt ~goal ~baseline ~lower_is_better ~history ~insights
     ~file_content ~target_file =
   let recent = List.filteri (fun i _ -> i < 5) history in
   let history_lines = List.map (fun (r : cycle_record) ->
@@ -16,10 +16,11 @@ let build_code_change_prompt ~goal ~baseline ~history ~insights
       r.cycle r.hypothesis r.delta (Autoresearch_serde.decision_to_string r.decision)
   ) recent in
   let insight_lines = List.map (fun s -> "  - " ^ s) insights in
+  let polarity = if lower_is_better then "lower is better" else "higher is better" in
   String.concat "\n" ([
     "You are an autonomous research assistant optimizing code.";
     Printf.sprintf "Goal: %s" goal;
-    Printf.sprintf "Current baseline score: %.4f (higher is better)" baseline;
+    Printf.sprintf "Current baseline score: %.4f (%s)" baseline polarity;
     Printf.sprintf "Target file: %s" target_file;
   ] @ (if history_lines <> [] then
     [""; "Recent experiment history:"] @ history_lines
@@ -130,22 +131,24 @@ let has_background_capacity () =
 
 (** Generate code change via Cascade "autoresearch" profile.
     Returns Ok (hypothesis, new_code) or Error reason. *)
-let generate_code_change ~goal ~baseline ~history ~insights
+let generate_code_change ~goal ~baseline ~lower_is_better ~history ~insights
     ~target_file ~file_content =
   if not (has_background_capacity ()) then begin
     Eio.traceln "[autoresearch] backoff: local slots saturated, skipping cycle";
     Result.error "autoresearch: local slots saturated, skipping cycle"
   end else
-  let prompt = build_code_change_prompt ~goal ~baseline ~history ~insights
+  let prompt = build_code_change_prompt ~goal ~baseline ~lower_is_better ~history ~insights
     ~file_content ~target_file in
   match
-    Oas_worker.run_named ~cascade_name:"autoresearch"
-      ~goal:prompt ~max_turns:1
-      ~temperature:(Cascade_inference.resolve_temperature
-        ~cascade_name:"autoresearch" ~fallback:(fun () -> 0.7))
-      ~max_tokens:(Cascade_inference.resolve_max_tokens
-        ~cascade_name:"autoresearch" ~fallback:(fun () -> 4096))
-      ()
+    Masc_oas_bridge.run_safe ~timeout_s:120.0 (fun () ->
+      Oas_worker.run_named ~cascade_name:"autoresearch"
+        ~goal:prompt ~max_turns:1
+        ~temperature:(Cascade_inference.resolve_temperature
+          ~cascade_name:"autoresearch" ~fallback:(fun () -> 0.7))
+        ~max_tokens:(Cascade_inference.resolve_max_tokens
+          ~cascade_name:"autoresearch" ~fallback:(fun () -> 4096))
+        ()
+    )
   with
   | Error e -> Result.error (Printf.sprintf "MODEL call failed: %s" (Oas.Error.to_string e))
   | Ok result -> parse_model_code_response (Oas_response.text_of_response result.Oas_worker.response)

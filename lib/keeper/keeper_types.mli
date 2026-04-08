@@ -72,6 +72,8 @@ type proactive_runtime = {
   last_outcome: proactive_cycle_outcome;
   last_reason: string;
   last_preview: string;
+  last_work_discovery_ts : float;
+  work_discovery_count : int;
 }
 
 type scheduled_autonomous_runtime = proactive_runtime
@@ -159,6 +161,13 @@ type keeper_meta = {
   paused: bool;
   current_task_id: string option;
   (** Currently claimed task ID for cost attribution. *)
+  work_discovery_enabled : bool option;
+  work_discovery_sources : string list option;
+  work_discovery_interval_sec : int option;
+  work_discovery_guidance : string option;
+  telemetry_feedback_enabled : bool option;
+  telemetry_feedback_window_hours : int option;
+  allowed_providers : string list option;
   runtime: agent_runtime_state;
 }
 

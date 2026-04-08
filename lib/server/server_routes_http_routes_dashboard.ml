@@ -131,6 +131,37 @@ let rec add_routes ~sw ~clock router =
          let json = Env_config_introspect.to_json () in
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/config/excuse-patterns" (fun request reqd ->
+       with_public_read (fun _state req reqd ->
+         let patterns = Anti_rationalization.load_excuse_patterns () in
+         let json_items = List.map (fun (pat, reason) -> `List [`String pat; `String reason]) patterns in
+         let json = `List json_items in
+         Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+  |> Http.Router.post "/api/v1/dashboard/config/excuse-patterns" (fun request reqd ->
+       with_token_permission_auth ~permission:Types.CanAdmin
+         (fun _state _agent_name req reqd ->
+           Http.Request.read_body_async reqd (fun body_str ->
+             try
+               let json = Yojson.Safe.from_string body_str in
+               match Anti_rationalization.parse_excuse_patterns_json json with
+               | Error msg ->
+                 Http.Response.json ~status:`Bad_request ~request:req
+                   (Yojson.Safe.to_string (`Assoc [("ok", `Bool false); ("error", `String msg)])) reqd
+               | Ok patterns ->
+                 (match Anti_rationalization.save_excuse_patterns patterns with
+                 | Ok () ->
+                     Http.Response.json ~request:req {|{"ok":true}|} reqd
+                 | Error msg ->
+                     Http.Response.json ~status:`Internal_server_error ~request:req
+                       (Yojson.Safe.to_string (`Assoc [("ok", `Bool false); ("error", `String msg)])) reqd)
+             with
+             | Eio.Cancel.Cancelled _ as exn -> raise exn
+             | _exn ->
+               Http.Response.json ~status:`Bad_request ~request:req
+                 (Yojson.Safe.to_string (`Assoc [("ok", `Bool false); ("error", `String "Invalid JSON body")])) reqd
+           )
+         ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/namespace-truth" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let json = dashboard_namespace_truth_http_json ~state ~sw ~clock req in
@@ -203,6 +234,19 @@ let rec add_routes ~sw ~clock router =
          Http.Response.json ~compress:true ~request:req
            (Yojson.Safe.to_string json) reqd
        ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/tool-quality" (fun request reqd ->
+       with_public_read (fun _state req reqd ->
+         let n =
+           let raw = match Server_utils.query_param req "n" with
+             | Some s -> (try int_of_string s with Eio.Cancel.Cancelled _ as e -> raise e | _ -> 5000)
+             | None -> 5000
+           in
+           max 1 (min 50000 raw)
+         in
+         let json = Dashboard_http_tool_quality.aggregate ~n () in
+         Http.Response.json ~compress:true ~request:req
+           (Yojson.Safe.to_string json) reqd
+       ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/transport-health" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let json = dashboard_transport_health_http_json ~state in
@@ -234,7 +278,9 @@ let rec add_routes ~sw ~clock router =
   (* ── Telemetry unified view ── *)
   |> Http.Router.get "/api/v1/dashboard/telemetry" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         let base_path = state.Mcp_server.room_config.base_path in
+         let config = state.Mcp_server.room_config in
+         let base_path = config.base_path in
+         let masc_root = Room.masc_root_dir config in
          let n =
            Server_utils.int_query_param req "n" ~default:100
            |> max 1 |> min 500
@@ -249,7 +295,7 @@ let rec add_routes ~sw ~clock router =
               | None -> Telemetry_unified.all_sources)
          in
          let entries =
-           Telemetry_unified.read_unified ~base_path ~sources
+           Telemetry_unified.read_unified ~base_path ~masc_root ~sources
              ?keeper_name ~n ()
          in
          let json = `Assoc [
@@ -262,8 +308,10 @@ let rec add_routes ~sw ~clock router =
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/telemetry/summary" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         let base_path = state.Mcp_server.room_config.base_path in
-         let json = Telemetry_unified.summary_json ~base_path () in
+         let config = state.Mcp_server.room_config in
+         let base_path = config.base_path in
+         let masc_root = Room.masc_root_dir config in
+         let json = Telemetry_unified.summary_json ~base_path ~masc_root () in
          Http.Response.json ~compress:true ~request:req
            (Yojson.Safe.to_string json) reqd
        ) request reqd)

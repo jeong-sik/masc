@@ -55,19 +55,29 @@ let execute_keeper_tool_call
   let lookup = tool_access_lookup_of_meta meta in
   if not (can_execute ~lookup name)
   then
-    let reason =
+    let reason, hint =
       if not (Hashtbl.mem lookup.candidate_set name)
-      then "not_in_candidate_set"
+      then
+        ( "tool does not exist or is not available to your preset"
+        , Printf.sprintf
+            "'%s' is not a recognized tool. Check spelling or use keeper_tools_list to see available tools." name )
       else if Hashtbl.mem lookup.deny_set name
-      then "denied_by_policy"
-      else "not_in_allow_set"
+      then
+        ( "denied_by_policy"
+        , Printf.sprintf
+            "'%s' is blocked by your current policy. Ask operator to grant access." name )
+      else
+        ( "not_in_allow_set"
+        , Printf.sprintf
+            "'%s' exists but your preset does not allow it. Use keeper_tools_list to see available tools." name )
     in
     Yojson.Safe.to_string
       (`Assoc [
+        ("ok", `Bool false);
         ("error", `String "tool_not_allowed");
         ("tool", `String name);
         ("reason", `String reason);
-        ("hint", `String "Use keeper_tool_search to find allowed alternatives.");
+        ("hint", `String hint);
       ])
   else (
     match name with
@@ -79,7 +89,8 @@ let execute_keeper_tool_call
         min 10 (max 1 (Safe_ops.json_int ~default:5 "max_results" args))
       in
       if query = "" then
-        error_json "query is required"
+        error_json "query is required. Good: query='read file'. Bad: query=''."
+
       else
         let fn = match search_fn with
           | Some f -> f

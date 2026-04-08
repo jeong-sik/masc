@@ -33,6 +33,7 @@ val observe_task_transition :
 
 val add_task :
   ?contract:Types.task_contract ->
+  ?required_preset:string ->
   config -> title:string -> priority:int -> description:string -> string
 
 val add_task_with_role :
@@ -107,5 +108,5 @@ type claim_next_result = Types.claim_next_result =
       message : string;
     }
   | Claim_next_no_unclaimed
-  | Claim_next_no_eligible of { excluded_count : int }
+  | Claim_next_no_eligible of { excluded_count : int; preset_filtered : int }
   | Claim_next_error of string

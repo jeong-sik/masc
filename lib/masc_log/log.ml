@@ -233,15 +233,17 @@ module Ring = struct
       if Sys.file_exists path then begin
         let ic = open_in path in
         let entries = ref [] in
-        (try while true do
-           let line = input_line ic in
-           if String.length line > 0 then
-             match entry_of_json (Yojson.Safe.from_string line) with
-             | Some e -> entries := e :: !entries
-             | None -> ()
-         done with End_of_file -> ());
-        close_in ic;
-        List.rev !entries
+        Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
+          (try while true do
+             let line = input_line ic in
+             if String.length line > 0 then
+               (match entry_of_json (Yojson.Safe.from_string line) with
+                | Some e -> entries := e :: !entries
+                | None -> ()
+                | exception Yojson.Json_error _ -> ())
+           done with End_of_file -> ());
+          List.rev !entries
+        )
       end else []
     in
     let yesterday_entries = load_file (log_file_path dir yesterday) in
@@ -508,7 +510,6 @@ module Inline = Make(struct let name = "Inline" end)
 module Protocol = Make(struct let name = "Protocol" end)
 module AlwaysOn = Make(struct let name = "AlwaysOn" end)
 module KeeperExec = Make(struct let name = "KeeperExec" end)
-module BoardListener = Make(struct let name = "BoardListener" end)
 module LocalWorker = Make(struct let name = "LocalWorker" end)
 module Sse = Make(struct let name = "SSE" end)
 module Verifier = Make(struct let name = "Verifier" end)
@@ -516,3 +517,4 @@ module Planner = Make(struct let name = "Planner" end)
 module CodeSwarm = Make(struct let name = "CodeSwarm" end)
 module Compact = Make(struct let name = "Compact" end)
 module Harness = Make(struct let name = "Harness" end)
+module Discovery = Make(struct let name = "Discovery" end)

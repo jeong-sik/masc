@@ -14,6 +14,11 @@ open Alcotest
 module WO = Masc_mcp.Worker_oas
 module EG = Masc_mcp.Eval_gate
 
+(* Populate destructive set — in production this is done by mcp_server_eio.ml *)
+let () = Masc_mcp.Tool_dispatch.init_destructive_set
+  ["keeper_bash"; "keeper_fs_edit"; "keeper_github"; "keeper_pr_workflow";
+   "shell_exec"; "masc_code_shell"; "masc_code_git"; "masc_code_delete"]
+
 (* ── Helpers ──────────────────────────────────── *)
 
 let dummy_schedule : Agent_sdk.Hooks.tool_schedule = {

@@ -71,7 +71,7 @@ let handle_join (room_config : Room_utils_backend_setup.config) (bytes : string)
                     Option.value ~default:"" agent.current_task;
                 } : T.agent_info)
               | _ -> None
-            with exn -> Log.Transport.debug "agent parse skip: %s" (Printexc.to_string exn); None)
+            with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Transport.debug "agent parse skip: %s" (Printexc.to_string exn); None)
         else []
       in
       T.JoinResponse.{
@@ -80,7 +80,7 @@ let handle_join (room_config : Room_utils_backend_setup.config) (bytes : string)
         session_id = Printf.sprintf "grpc-%s-%Ld" req.agent_name (now_ms ());
         active_agents;
       }
-    with exn ->
+    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
       T.JoinResponse.{
         success = false;
         message = Printf.sprintf "Join failed: %s" (Printexc.to_string exn);
@@ -97,7 +97,7 @@ let handle_leave (room_config : Room_utils_backend_setup.config) (bytes : string
     try
       let msg = Room.leave room_config ~agent_name:req.agent_name in
       T.LeaveResponse.{ success = true; message = msg }
-    with exn ->
+    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
       T.LeaveResponse.{
         success = false;
         message = Printf.sprintf "Leave failed: %s" (Printexc.to_string exn);
@@ -124,7 +124,7 @@ let handle_broadcast (room_config : Room_utils_backend_setup.config) (bytes : st
           ~from_agent:req.agent_name ~content
       in
       T.BroadcastResponse.{ success = true; seq = now_ms () }
-    with exn ->
+    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
       Log.Transport.error "gRPC broadcast failed: %s" (Printexc.to_string exn);
       T.BroadcastResponse.{ success = false; seq = 0L }
   in
@@ -156,7 +156,7 @@ let handle_get_status (room_config : Room_utils_backend_setup.config) (_bytes : 
                 Option.value ~default:"" agent.current_task;
             } : T.agent_info)
           | _ -> None
-        with exn ->
+        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
           Log.Transport.debug "gRPC status: agent parse skip: %s"
             (Printexc.to_string exn);
           None)
@@ -180,7 +180,7 @@ let handle_get_status (room_config : Room_utils_backend_setup.config) (_bytes : 
             assigned_to = json |> member "assigned_to" |> to_string_option |> Option.value ~default:"";
             priority = (try json |> member "priority" |> to_int with Yojson.Safe.Util.Type_error _ -> 0);
           } : T.task_info)
-        with exn -> Log.Transport.debug "task parse skip: %s" (Printexc.to_string exn); None)
+        with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Transport.debug "task parse skip: %s" (Printexc.to_string exn); None)
     else []
   in
   T.StatusResponse.(to_bytes {
@@ -301,13 +301,17 @@ let handle_heartbeat
                   tm.tm_hour tm.tm_min tm.tm_sec
               in
               let updated = { agent with Types.last_seen = iso_now } in
-              Fs_compat.save_file agent_file
-                (Yojson.Safe.to_string (Types.agent_to_yojson updated))
+              let content =
+                Yojson.Safe.to_string (Types.agent_to_yojson updated)
+              in
+              let tmp_path = agent_file ^ ".tmp" in
+              Fs_compat.save_file tmp_path content;
+              Unix.rename tmp_path agent_file
             | Error e ->
                 Log.Transport.warn "gRPC heartbeat: invalid agent JSON for %s: %s"
                   ping.agent_name e
           end
-        with exn -> Log.Transport.error "gRPC heartbeat update failed: %s" (Printexc.to_string exn));
+        with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Transport.error "gRPC heartbeat update failed: %s" (Printexc.to_string exn));
         (* Count active agents and pending tasks *)
         let masc_dir = Filename.concat room_config.base_path ".masc" in
         let agents_dir = Filename.concat masc_dir "agents" in

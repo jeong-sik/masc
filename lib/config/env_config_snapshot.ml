@@ -243,6 +243,16 @@ let dashboard_entries =
       "Execution refresh timeout";
     entry ~default:"8" "MASC_DASHBOARD_TRANSPORT_HEALTH_TIMEOUT_S"
       "Transport health timeout";
+    entry ~default:"0.85" "MASC_DASHBOARD_CTX_HANDOFF_IMMINENT"
+      "Context ratio threshold: handoff-imminent";
+    entry ~default:"0.70" "MASC_DASHBOARD_CTX_PREPARING"
+      "Context ratio threshold: preparing";
+    entry ~default:"0.50" "MASC_DASHBOARD_CTX_COMPACTING"
+      "Context ratio threshold: compacting";
+    entry ~default:"0.9" "MASC_DASHBOARD_HEALTH_CTX_CRITICAL"
+      "Health scoring: context ratio critical threshold";
+    entry ~default:"0.8" "MASC_DASHBOARD_HEALTH_CTX_WARN"
+      "Health scoring: context ratio warning threshold";
   ]
 
 let all_categories () =

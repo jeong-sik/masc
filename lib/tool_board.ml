@@ -140,6 +140,21 @@ let format_post (p : Board.post) =
     p.reply_count
     thread_str
 
+(** Compact one-line format for board_list: id, title, author, time, score.
+    Omits body, TTL, visibility, thread to minimize token usage. *)
+let format_post_compact (p : Board.post) =
+  let time_str = format_timestamp_relative p.created_at in
+  let score = p.votes_up - p.votes_down in
+  let hearth_str = match p.hearth with Some h -> Printf.sprintf " [%s]" h | None -> "" in
+  Printf.sprintf "%s · %s%s (by %s, %s, %+d, %d replies)"
+    (Board.Post_id.to_string p.id)
+    p.title
+    hearth_str
+    (Board.Agent_id.to_string p.author)
+    time_str
+    score
+    p.reply_count
+
 let format_comment ?(indent=0) (c : Board.comment) =
   let prefix = String.make indent ' ' in
   let tree_prefix = if indent > 0 then "└─ " else "" in
@@ -279,6 +294,7 @@ let dispatch_sort_of sort_by =
 
 let handle_post_list args =
   let limit = get_int args "limit" 20 |> max 1 |> min 100 in
+  let compact = get_bool args "compact" true in
   let visibility_str = get_string_opt args "visibility" in
   let hearth = get_string_opt args "hearth" in
   let random = get_bool args "random" false in
@@ -311,7 +327,9 @@ let handle_post_list args =
   match sort_by_result with
   | Error msg -> (false, Printf.sprintf "❌ %s" msg)
   | Ok sort_by ->
-      let fetch_limit = limit + offset + 100 in
+      (* Fetch exactly what we need: offset posts to skip + limit posts to show.
+         Board_dispatch.list_posts already applies visibility/hearth/author filters. *)
+      let fetch_limit = limit + offset in
       let sorted_posts =
         Board_dispatch.list_posts ~visibility_filter ?hearth ?author_filter
           ~exclude_system ~exclude_automation
@@ -344,7 +362,8 @@ let handle_post_list args =
         in
         let format_post_with_indicator p =
           let indicator = if has_new_activity p then " 🔔" else "" in
-          format_post p ^ indicator
+          let fmt = if compact then format_post_compact else format_post in
+          fmt p ^ indicator
         in
         let formatted = List.map format_post_with_indicator posts in
         let sort_label = match sort_by with
@@ -354,13 +373,20 @@ let handle_post_list args =
           | Updated -> "🔄 Recently Updated"
           | Discussed -> "💬 Most Discussed"
         in
-        let header = Printf.sprintf "📋 Posts (%d) — %s:" (List.length posts) sort_label in
-        (true, header ^ "\n\n" ^ String.concat "\n\n---\n\n" formatted)
+        let separator = if compact then "\n" else "\n\n---\n\n" in
+        let mode_label = if compact then " (compact)" else "" in
+        let header = Printf.sprintf "📋 Posts (%d) — %s%s:" (List.length posts) sort_label mode_label in
+        (true, header ^ "\n" ^ String.concat separator formatted)
 
 let handle_post_get args =
   let post_id = get_string args "post_id" "" in
 
   match Board_dispatch.get_post ~post_id with
+  | Error (Board.Post_not_found _) ->
+      (* Idempotent: post no longer exists (deleted/expired/TTL).
+         Return success so keeper tool metrics don't count this as failure.
+         The LLM still sees a clear message that the post is gone. *)
+      (true, Printf.sprintf "📭 Post %s no longer exists (deleted or expired)." post_id)
   | Error e -> (false, Printf.sprintf "❌ %s" (board_error_to_string e))
   | Ok post ->
       match Board_dispatch.get_comments ~post_id with
@@ -447,6 +473,16 @@ let handle_vote args =
             | Error _ -> ""
       in
       (true, Printf.sprintf "%s Vote recorded. New score: %+d%s" arrow new_score evolution_msg)
+  | Error (Board.Already_voted _) ->
+      (* Idempotent: same-direction duplicate vote is a no-op success.
+         The desired state already exists, so the tool call succeeds. *)
+      (match Board_dispatch.get_post ~post_id with
+       | Ok post ->
+           let score = post.votes_up - post.votes_down in
+           let arrow = if direction = Board.Up then "↑" else "↓" in
+           (true, Printf.sprintf "%s Already voted (idempotent). Score: %+d" arrow score)
+       | Error _ ->
+           (true, "Already voted (idempotent). Score unchanged."))
   | Error e ->
       (false, Printf.sprintf "❌ %s" (board_error_to_string e))
 
@@ -458,13 +494,16 @@ let handle_stats _args =
 let handle_search args =
   let query = get_string args "query" "" in
   let limit = get_int args "limit" 20 |> max 1 |> min 100 in
+  let compact = get_bool args "compact" true in
   if query = "" then (false, "❌ query required")
   else
     let results = Board_dispatch.search ~query ~limit in
     if results = [] then (true, Printf.sprintf "🔍 '%s' 검색 결과 없음" query)
     else
-      let formatted = List.map format_post results in
-      (true, Printf.sprintf "🔍 '%s' 검색 결과 (%d개):\n\n%s" query (List.length results) (String.concat "\n---\n" formatted))
+      let fmt = if compact then format_post_compact else format_post in
+      let formatted = List.map fmt results in
+      let separator = if compact then "\n" else "\n---\n" in
+      (true, Printf.sprintf "🔍 '%s' 검색 결과 (%d개):\n\n%s" query (List.length results) (String.concat separator formatted))
 
 (** Vote on comment *)
 let handle_comment_vote args =
@@ -476,6 +515,8 @@ let handle_comment_vote args =
   else
     match Board_dispatch.vote_comment ~voter ~comment_id ~direction with
     | Ok score -> (true, Printf.sprintf "%s 코멘트 투표 완료! 점수: %+d" (if direction_str = "down" then "👎" else "👍") score)
+    | Error (Board.Already_voted _) ->
+        (true, Printf.sprintf "%s Already voted (idempotent)." (if direction_str = "down" then "👎" else "👍"))
     | Error e -> (false, Printf.sprintf "❌ %s" (board_error_to_string e))
 
 (** Agent profile *)
@@ -532,16 +573,17 @@ let tool_post_list : Types.tool_schema = {
   input_schema = `Assoc [
     ("type", `String "object");
     ("properties", `Assoc [
-      ("limit", `Assoc [("type", `String "integer"); ("description", `String "Max posts to return (default: 20, max: 100)")]);
-      ("visibility", `Assoc [("type", `String "string"); ("description", `String "Filter by visibility: public|unlisted|internal|direct")]);
-      ("hearth", `Assoc [("type", `String "string"); ("description", `String "Filter by hearth topic (e.g. webrtc, code-review)")]);
+      ("limit", `Assoc [("type", `String "integer"); ("description", `String "Max posts to return"); ("default", `Int 20); ("minimum", `Int 1); ("maximum", `Int 100)]);
+      ("visibility", `Assoc [("type", `String "string"); ("enum", `List [`String "public"; `String "unlisted"; `String "internal"; `String "direct"]); ("description", `String "Filter by visibility")]);
+      ("hearth", `Assoc [("type", `String "string"); ("maxLength", `Int 100); ("description", `String "Filter by hearth topic (e.g. webrtc, code-review)")]);
       ("random", `Assoc [("type", `String "boolean"); ("description", `String "Shuffle posts randomly (default: false)")]);
-      ("offset", `Assoc [("type", `String "integer"); ("description", `String "Skip first N posts (default: 0)")]);
-      ("sort_by", `Assoc [("type", `String "string"); ("description", `String "Sort order: hot (score+recency), trending (engagement/age), recent (newest first), updated (most recently active), discussed (most comments)")]);
+      ("offset", `Assoc [("type", `String "integer"); ("description", `String "Skip first N posts (default: 0)"); ("minimum", `Int 0); ("maximum", `Int 1000)]);
+      ("sort_by", `Assoc [("type", `String "string"); ("enum", `List [`String "hot"; `String "trending"; `String "recent"; `String "updated"; `String "discussed"]); ("description", `String "Sort order (default: hot)")]);
       ("exclude_system", `Assoc [("type", `String "boolean"); ("description", `String "Exclude system posts like Activity Reports (default: false)")]);
       ("exclude_automation", `Assoc [("type", `String "boolean"); ("description", `String "Exclude automation posts (heartbeat, probes, etc.) (default: false)")]);
-      ("author", `Assoc [("type", `String "string"); ("description", `String "Filter posts by author name (case-insensitive substring match)")]);
+      ("author", `Assoc [("type", `String "string"); ("maxLength", `Int 100); ("description", `String "Filter posts by author name (case-insensitive substring match)")]);
       ("since", `Assoc [("type", `String "number"); ("description", `String "Unix timestamp. Posts with activity after this time show a 🔔 indicator")]);
+      ("compact", `Assoc [("type", `String "boolean"); ("default", `Bool true); ("description", `String "Compact one-line per post. Set false for full body/TTL/visibility")]);
     ]);
   ];
 }
@@ -565,7 +607,7 @@ let tool_comment_add : Types.tool_schema = {
     ("type", `String "object");
     ("properties", `Assoc [
       ("post_id", `Assoc [("type", `String "string"); ("description", `String "Post ID (format: p-xxxx...). Get from keeper_board_list results.")]);
-      ("content", `Assoc [("type", `String "string"); ("description", `String "Comment content")]);
+      ("content", `Assoc [("type", `String "string"); ("maxLength", `Int 4000); ("description", `String "Comment content")]);
       ("author", `Assoc [("type", `String "string"); ("description", `String "Author name")]);
       ("parent_id", `Assoc [("type", `String "string"); ("description", `String "Parent comment ID for replies (optional)")]);
       ("ttl_hours", `Assoc [("type", `String "integer"); ("description", `String "Time-to-live in hours")]);
@@ -603,8 +645,9 @@ let tool_search : Types.tool_schema = {
   input_schema = `Assoc [
     ("type", `String "object");
     ("properties", `Assoc [
-      ("query", `Assoc [("type", `String "string"); ("description", `String "Search keyword")]);
-      ("limit", `Assoc [("type", `String "integer"); ("description", `String "Max results (default: 20)")]);
+      ("query", `Assoc [("type", `String "string"); ("maxLength", `Int 200); ("description", `String "Search keyword")]);
+      ("limit", `Assoc [("type", `String "integer"); ("default", `Int 20); ("minimum", `Int 1); ("maximum", `Int 100); ("description", `String "Max results")]);
+      ("compact", `Assoc [("type", `String "boolean"); ("default", `Bool true); ("description", `String "Compact one-line per post. Set false for full body")]);
     ]);
     ("required", `List [`String "query"]);
   ];

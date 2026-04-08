@@ -13,7 +13,7 @@ open Keeper_tool_registry
 (* -- Config-driven preset resolution -------------------------------- *)
 
 (* Loaded by init_policy_config at server startup.
-   None = config not yet loaded or load failed (graceful degradation). *)
+   None = config not yet loaded (init_policy_config not yet called). *)
 let policy_config : Keeper_tool_policy_config.t option ref = ref None
 
 let init_policy_config ~base_path =
@@ -22,9 +22,10 @@ let init_policy_config ~base_path =
     policy_config := Some cfg;
     Log.Keeper.info "tool policy config loaded: %d presets, %d groups"
       (List.length (Keeper_tool_policy_config.preset_names cfg))
-      (List.length (Keeper_tool_policy_config.group_names cfg))
+      (List.length (Keeper_tool_policy_config.group_names cfg));
+    Ok ()
   | Error msg ->
-    Log.Keeper.error "tool policy config load failed: %s" msg
+    Error msg
 
 let preset_name_of_tool_preset = function
   | Minimal -> "minimal"
@@ -34,6 +35,38 @@ let preset_name_of_tool_preset = function
   | Research -> "research"
   | Delivery -> "delivery"
   | Full -> "full"
+
+(* ── Workflow permission (config-driven) ─────────────────────── *)
+
+let allows_workflow_for_preset (preset : tool_preset) : bool =
+  match !policy_config with
+  | None -> false
+  | Some cfg ->
+    Keeper_tool_policy_config.allows_workflow cfg
+      (preset_name_of_tool_preset preset)
+
+let allows_shell_write_for_preset (preset : tool_preset) : bool =
+  match !policy_config with
+  | None -> false
+  | Some cfg ->
+    Keeper_tool_policy_config.allows_shell_write cfg
+      (preset_name_of_tool_preset preset)
+
+(* ── Preset subsumption (config-driven) ──────────────────────── *)
+
+let preset_can_satisfy ~(agent_preset : string) ~(required_preset : string) : bool =
+  match !policy_config with
+  | None -> false
+  | Some cfg ->
+    Keeper_tool_policy_config.preset_can_satisfy cfg ~agent_preset ~required_preset
+
+(** Return configured preset names (excluding "full") for schema enum generation. *)
+let configured_preset_names () : string list =
+  match !policy_config with
+  | None -> []
+  | Some cfg ->
+    Keeper_tool_policy_config.preset_names cfg
+    |> List.filter (fun n -> not (String.equal n "full"))
 
 (* ── Denied-tool set (O(1) lookup) ────────────────────────────── *)
 
@@ -181,8 +214,8 @@ let preset_allowlist preset =
       keeper_base_candidate_tool_names ()
     | Some (Keeper_tool_policy_config.Subset tools) -> dedupe_tool_names tools
     | None ->
-      invalid_arg
-        (Printf.sprintf "preset '%s' not defined in config/tool_policy.toml" name)
+      Log.Keeper.warn "preset '%s' not defined in config/tool_policy.toml, returning empty" name;
+      []
 
 let tool_policy_of_meta (meta : keeper_meta) =
   let allow =

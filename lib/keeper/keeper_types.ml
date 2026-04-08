@@ -70,6 +70,8 @@ type proactive_runtime =
   ; last_outcome : proactive_cycle_outcome
   ; last_reason : string
   ; last_preview : string
+  ; last_work_discovery_ts : float
+  ; work_discovery_count : int
   }
 
 type scheduled_autonomous_runtime = proactive_runtime
@@ -161,6 +163,13 @@ type keeper_meta =
     (** Currently claimed task ID for cost attribution.
       Set when keeper claims a task; cleared on masc_done.
       Propagated to trajectory accumulator for per-task cost tracking. *)
+  ; work_discovery_enabled : bool option
+  ; work_discovery_sources : string list option
+  ; work_discovery_interval_sec : int option
+  ; work_discovery_guidance : string option
+  ; telemetry_feedback_enabled : bool option
+  ; telemetry_feedback_window_hours : int option
+  ; allowed_providers : string list option
   ; (* -- Agent runtime state (usage, tracing, autonomy metrics) -- *)
     runtime : agent_runtime_state
   }
@@ -589,6 +598,8 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
       , `String (proactive_cycle_outcome_to_string rt.proactive_rt.last_outcome) )
     ; "last_proactive_reason", `String rt.proactive_rt.last_reason
     ; "last_proactive_preview", `String rt.proactive_rt.last_preview
+    ; "last_work_discovery_ts", `Float rt.proactive_rt.last_work_discovery_ts
+    ; "work_discovery_count", `Int rt.proactive_rt.work_discovery_count
     ; "last_compaction_check_ts", `Float rt.compaction_rt.last_check_ts
     ; "last_compaction_decision", `String rt.compaction_rt.last_decision
     ; "last_continuity_update_ts", `Float rt.last_continuity_update_ts
@@ -614,6 +625,19 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; "paused", `Bool m.paused
     ; "current_task_id", Json_util.string_opt_to_json m.current_task_id
     ; "max_context_override", Json_util.int_opt_to_json m.max_context_override
+    ; "work_discovery_enabled", Json_util.bool_opt_to_json m.work_discovery_enabled
+    ; "work_discovery_sources"
+      , (match m.work_discovery_sources with
+         | Some xs -> `List (List.map (fun s -> `String s) xs)
+         | None -> `Null)
+    ; "work_discovery_interval_sec", Json_util.int_opt_to_json m.work_discovery_interval_sec
+    ; "work_discovery_guidance", Json_util.string_opt_to_json m.work_discovery_guidance
+    ; "telemetry_feedback_enabled", Json_util.bool_opt_to_json m.telemetry_feedback_enabled
+    ; "telemetry_feedback_window_hours", Json_util.int_opt_to_json m.telemetry_feedback_window_hours
+    ; "allowed_providers"
+      , (match m.allowed_providers with
+         | Some xs -> `List (List.map (fun s -> `String s) xs)
+         | None -> `Null)
     ]
 ;;
 
@@ -911,6 +935,10 @@ let parse_proactive_runtime (json : Yojson.Safe.t) : proactive_runtime =
       |> proactive_cycle_outcome_of_string
   ; last_reason = Safe_ops.json_string ~default:"" "last_proactive_reason" json
   ; last_preview = Safe_ops.json_string ~default:"" "last_proactive_preview" json
+  ; last_work_discovery_ts =
+      Safe_ops.json_float ~default:0.0 "last_work_discovery_ts" json
+  ; work_discovery_count =
+      Safe_ops.json_int ~default:0 "work_discovery_count" json
   }
 ;;
 
@@ -1078,6 +1106,21 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
              ; paused = state.ps_paused
              ; current_task_id = state.ps_current_task_id
              ; max_context_override = state.ps_max_context_override
+             ; work_discovery_enabled = Safe_ops.json_bool_opt "work_discovery_enabled" json
+             ; work_discovery_sources =
+                 (match json with
+                  | `Assoc fields ->
+                    (match List.assoc_opt "work_discovery_sources" fields with
+                     | Some (`List items) ->
+                       Some (List.filter_map (function
+                         | `String s -> Some s | _ -> None) items)
+                     | _ -> None)
+                  | _ -> None)
+             ; work_discovery_interval_sec = Safe_ops.json_int_opt "work_discovery_interval_sec" json
+             ; work_discovery_guidance = Safe_ops.json_string_opt "work_discovery_guidance" json
+             ; telemetry_feedback_enabled = Safe_ops.json_bool_opt "telemetry_feedback_enabled" json
+             ; telemetry_feedback_window_hours = Safe_ops.json_int_opt "telemetry_feedback_window_hours" json
+             ; allowed_providers = Keeper_types_profile.lower_string_list_opt (Safe_ops.json_string_list "allowed_providers" json)
              ; runtime = state.ps_runtime
              })
   with
@@ -1151,6 +1194,8 @@ let fallback_canonical_keeper_meta_key_names =
   ; "last_proactive_outcome"
   ; "last_proactive_reason"
   ; "last_proactive_preview"
+  ; "last_work_discovery_ts"
+  ; "work_discovery_count"
   ; "last_compaction_check_ts"
   ; "last_compaction_decision"
   ; "last_continuity_update_ts"
@@ -1173,6 +1218,13 @@ let fallback_canonical_keeper_meta_key_names =
   ; "paused"
   ; "current_task_id"
   ; "max_context_override"
+  ; "work_discovery_enabled"
+  ; "work_discovery_sources"
+  ; "work_discovery_interval_sec"
+  ; "work_discovery_guidance"
+  ; "telemetry_feedback_enabled"
+  ; "telemetry_feedback_window_hours"
+  ; "allowed_providers"
   ]
 ;;
 

@@ -424,6 +424,31 @@ function handleEvent(event: SSEEvent): void {
       }
       break
     }
+    case 'keeper_tool_skipped': {
+      const toolName = event.tool_name ?? '?'
+      const reasonCode = event.reason_code ?? 'unknown'
+      addTypedJournalEntry(
+        event.name ?? agent,
+        `Tool skipped: ${toolName} (${reasonCode})`,
+        'keepers',
+        'keeper_tool_call',
+        {
+          severity: 'warn',
+          source: event.source,
+          narrativeText: `${actorLabel(event.name ?? agent)}의 ${toolName} 도구가 차단되었습니다 (${reasonCode})`,
+        },
+      )
+      if (event.name) {
+        appendLiveToolCall(event.name, {
+          toolName,
+          durationMs: 0,
+          success: false,
+          error: `skipped: ${reasonCode}`,
+          tsUnix: typeof event.ts_unix === 'number' ? event.ts_unix : Date.now() / 1000,
+        })
+      }
+      break
+    }
     // OAS bridge events
     case 'oas:masc:autonomy:agent_selected': {
       const p = (event.payload ?? {}) as Record<string, unknown>

@@ -1,6 +1,17 @@
 open Keeper_types
 open Keeper_exec_shared
 
+(** Shell operation timeout constants.
+    - [io_timeout_sec]: commands that may block on network/disk I/O
+      (git status, ls with large dirs, custom bash).
+    - [read_timeout_sec]: fast read-only commands on local files
+      (cat, rg, head, tail, find, git_log, tree).
+    - [user_timeout_max_sec]: upper bound for user-provided timeout_sec
+      in keeper_bash (prevents indefinite blocking). *)
+let io_timeout_sec = 30.0
+let read_timeout_sec = 15.0
+let user_timeout_max_sec = 180.0
+
 let handle_keeper_bash
       ~(config : Room.config)
       ~(meta : keeper_meta)
@@ -13,16 +24,17 @@ let handle_keeper_bash
     |> Worker_dev_tools.truncate_for_log
   in
   let timeout_sec =
-    Safe_ops.json_float ~default:30.0 "timeout_sec" args |> fun n -> max 1.0 (min 180.0 n)
+    Safe_ops.json_float ~default:io_timeout_sec "timeout_sec" args |> fun n -> max 1.0 (min user_timeout_max_sec n)
   in
-  (* Coding/Full presets allow write operations and relaxed metachar rules *)
+  (* Write access is config-driven via permissions.shell_write_presets *)
   let write_enabled =
-    match meta.tool_access with
-    | Preset { preset = Coding; _ } | Preset { preset = Full; _ } -> true
-    | _ -> false
+    match Keeper_types.tool_access_preset meta.tool_access with
+    | Some preset -> Keeper_tool_policy.allows_shell_write_for_preset preset
+    | None -> false
   in
   if cmd = ""
-  then error_json "cmd_required"
+  then error_json "cmd is required. Good: cmd='ls -la lib/'. Bad: cmd=''."
+
   else
     let validate =
       if write_enabled then Worker_dev_tools.validate_command_coding
@@ -31,11 +43,20 @@ let handle_keeper_bash
     match validate cmd with
     | Error reason ->
       Log.Keeper.warn "keeper_bash blocked: %s (cmd=%s)" reason cmd_for_log;
+      let hint =
+        if String.length reason > 0 &&
+           (Re.execp (Re.Pcre.re "chain|redirect|pipe|semicolon" |> Re.compile) (String.lowercase_ascii reason))
+        then "Use separate tool calls instead of chaining. Call keeper_bash once per command."
+        else if Re.execp (Re.Pcre.re "inject|symbol" |> Re.compile) (String.lowercase_ascii reason)
+        then "Avoid shell metacharacters. Use keeper_shell_readonly with a specific op (rg, find, ls) instead."
+        else "Check the command for blocked patterns. Use keeper_shell_readonly for safe read-only ops."
+      in
       Yojson.Safe.to_string
         (`Assoc
             [ "ok", `Bool false
             ; "error", `String "command_blocked"
             ; "reason", `String reason
+            ; "hint", `String hint
             ])
     | Ok () ->
       (* Destructive guard: always active regardless of preset *)
@@ -51,6 +72,25 @@ let handle_keeper_bash
                     "This command is destructive (force push, push to main, rm -rf, \
                      etc.) and is blocked for all presets." )
               ; "cmd", `String cmd_for_log
+              ]))
+      (* Branch-switch guard: keeper_bash runs in the main repo root.
+         git checkout/switch/branch -b would mutate main's HEAD or create
+         branches in the shared repo. Use keeper_pr_workflow instead. *)
+      else if Worker_dev_tools.is_git_branch_switch cmd
+      then (
+        Log.Keeper.info "keeper_bash branch-switch blocked: %s (keeper=%s)" cmd_for_log meta.name;
+        Yojson.Safe.to_string
+          (`Assoc
+              [ "ok", `Bool false
+              ; "error", `String "branch_switch_blocked"
+              ; ( "reason"
+                , `String
+                    "git checkout, git switch, and git branch mutations \
+                     (create/rename/copy) are blocked in the main repo. \
+                     Plain git branch listing is allowed. \
+                     Use keeper_pr_workflow to create changes in an isolated clone." )
+              ; "cmd", `String cmd_for_log
+              ; "hint", `String "keeper_pr_workflow"
               ]))
       (* Write gate: only for non-coding presets *)
       else if (not write_enabled) && Worker_dev_tools.is_write_operation cmd
@@ -78,7 +118,7 @@ let handle_keeper_bash
           (`Assoc
               [ "ok", `Bool (st = Unix.WEXITED 0)
               ; "status", Keeper_alerting_path.process_status_to_json st
-              ; "output", `String (Keeper_alerting_path.truncate_tool_output out)
+              ; "output", `String out
               ]))
 ;;
 
@@ -88,8 +128,20 @@ let handle_keeper_shell_readonly
       ~(args : Yojson.Safe.t)
   =
   ignore meta;
-  let op =
+  let raw_op =
     Safe_ops.json_string ~default:"" "op" args |> String.trim |> String.lowercase_ascii
+  in
+  (* Normalize common aliases so the model's naming variation doesn't cause
+     unsupported_op failures. *)
+  let op = match raw_op with
+    | "git status" | "status" -> "git_status"
+    | "git log" -> "git_log"
+    | "git diff" -> "git_diff"
+    | "git worktree" | "worktree" -> "git_worktree"
+    | "read" | "file" | "type" -> "cat"
+    | "grep" | "search" -> "rg"
+    | "dir" | "list" -> "ls"
+    | _ -> raw_op
   in
   let root = Keeper_alerting_path.project_root_of_config config in
   let read_target () =
@@ -97,14 +149,14 @@ let handle_keeper_shell_readonly
     resolve_keeper_read_path ~config ~raw_path
   in
   let render_process_result ~cmd argv =
-    let st, out = Process_eio.run_argv_with_status ~timeout_sec:30.0 argv in
+    let st, out = Process_eio.run_argv_with_status ~timeout_sec:io_timeout_sec argv in
     Yojson.Safe.to_string
       (`Assoc
           [ "ok", `Bool (st = Unix.WEXITED 0)
           ; "op", `String op
           ; "cmd", `String cmd
           ; "status", Keeper_alerting_path.process_status_to_json st
-          ; "output", `String (Keeper_alerting_path.truncate_tool_output out)
+          ; "output", `String out
           ])
   in
   match op with
@@ -118,7 +170,7 @@ let handle_keeper_shell_readonly
      | Error e -> error_json ~fields:[ "op", `String op ] e
      | Ok target ->
        let st, out =
-         Process_eio.run_argv_with_status ~timeout_sec:30.0 [ "/bin/ls"; "-la"; target ]
+         Process_eio.run_argv_with_status ~timeout_sec:io_timeout_sec [ "/bin/ls"; "-la"; target ]
        in
        let limit = shell_readonly_limit args in
        Yojson.Safe.to_string
@@ -135,7 +187,7 @@ let handle_keeper_shell_readonly
      | Ok target ->
        let max_bytes = shell_readonly_cat_max_bytes args in
        let st, out =
-         Process_eio.run_argv_with_status ~timeout_sec:15.0 [ "/bin/cat"; target ]
+         Process_eio.run_argv_with_status ~timeout_sec:read_timeout_sec [ "/bin/cat"; target ]
        in
        let body =
          if String.length out > max_bytes then String.sub out 0 max_bytes else out
@@ -152,13 +204,13 @@ let handle_keeper_shell_readonly
   | "rg" ->
     let pattern = Safe_ops.json_string ~default:"" "pattern" args |> String.trim in
     if pattern = ""
-    then error_json ~fields:[ "op", `String op ] "pattern_required"
+    then error_json ~fields:[ "op", `String op ] "pattern is required for rg. Good: pattern='handle_request'. Bad: pattern=''."
     else (
       match read_target () with
       | Error e -> error_json ~fields:[ "op", `String op ] e
       | Ok target ->
         let limit = shell_readonly_limit args in
-        (* Optional file-type filter (e.g. "ml", "py", "ts") *)
+        (* Optional file-type filter (e.g. "ml", "py") *)
         let file_type = Safe_ops.json_string ~default:"" "type" args |> String.trim in
         (* Optional glob filter (e.g. "*.ml", "lib/**/*.ml") *)
         let glob = Safe_ops.json_string ~default:"" "glob" args |> String.trim in
@@ -167,11 +219,14 @@ let handle_keeper_shell_readonly
         let glob_argv = if glob <> "" then [ "--glob"; glob ] else [] in
         let argv = base_argv @ type_argv @ glob_argv @ [ pattern; target ] in
         let st, out =
-          Process_eio.run_argv_with_status ~timeout_sec:15.0 argv
+          Process_eio.run_argv_with_status ~timeout_sec:read_timeout_sec argv
         in
+        (* rg exit codes: 0=matches found, 1=no matches (not an error), 2+=real error.
+           Treat exit 1 as success with empty results — "no match" is a valid answer. *)
+        let is_ok = st = Unix.WEXITED 0 || st = Unix.WEXITED 1 in
         Yojson.Safe.to_string
           (`Assoc
-              [ "ok", `Bool (st = Unix.WEXITED 0)
+              [ "ok", `Bool is_ok
               ; "op", `String op
               ; "path", `String target
               ; "pattern", `String pattern
@@ -188,7 +243,7 @@ let handle_keeper_shell_readonly
         Printf.sprintf "-%d" count ]
     in
     let argv = if file_path <> "" then base_argv @ [ "--"; file_path ] else base_argv in
-    let st, out = Process_eio.run_argv_with_status ~timeout_sec:15.0 argv in
+    let st, out = Process_eio.run_argv_with_status ~timeout_sec:read_timeout_sec argv in
     Yojson.Safe.to_string
       (`Assoc
           [ "ok", `Bool (st = Unix.WEXITED 0)
@@ -198,16 +253,16 @@ let handle_keeper_shell_readonly
           ; "entries", lines_to_json ~limit:50 out
           ])
   | "find" ->
-    let name_pattern = Safe_ops.json_string ~default:"" "name" args |> String.trim in
+    let name_pattern = Safe_ops.json_string ~default:"" "pattern" args |> String.trim in
     if name_pattern = ""
-    then error_json ~fields:[ "op", `String op ] "name_required"
+    then error_json ~fields:[ "op", `String op ] "pattern is required for find. Good: pattern='*.ml'. Bad: pattern=''."
     else (
       match read_target () with
       | Error e -> error_json ~fields:[ "op", `String op ] e
       | Ok target ->
         let limit = shell_readonly_limit args in
         let st, out =
-          Process_eio.run_argv_with_status ~timeout_sec:15.0
+          Process_eio.run_argv_with_status ~timeout_sec:read_timeout_sec
             [ "find"; target; "-maxdepth"; "5"; "-name"; name_pattern;
               "-not"; "-path"; "*/.git/*";
               "-not"; "-path"; "*/_build/*";
@@ -228,7 +283,7 @@ let handle_keeper_shell_readonly
      | Ok target ->
        let n = Safe_ops.json_int ~default:20 "lines" args |> fun v -> max 1 (min 200 v) in
        let st, out =
-         Process_eio.run_argv_with_status ~timeout_sec:15.0
+         Process_eio.run_argv_with_status ~timeout_sec:read_timeout_sec
            [ "/usr/bin/head"; "-n"; string_of_int n; target ]
        in
        Yojson.Safe.to_string
@@ -238,7 +293,7 @@ let handle_keeper_shell_readonly
              ; "path", `String target
              ; "lines", `Int n
              ; "status", Keeper_alerting_path.process_status_to_json st
-             ; "content", `String (Keeper_alerting_path.truncate_tool_output out)
+             ; "content", `String out
              ]))
   | "tail" ->
     (match read_target () with
@@ -246,7 +301,7 @@ let handle_keeper_shell_readonly
      | Ok target ->
        let n = Safe_ops.json_int ~default:20 "lines" args |> fun v -> max 1 (min 200 v) in
        let st, out =
-         Process_eio.run_argv_with_status ~timeout_sec:15.0
+         Process_eio.run_argv_with_status ~timeout_sec:read_timeout_sec
            [ "/usr/bin/tail"; "-n"; string_of_int n; target ]
        in
        Yojson.Safe.to_string
@@ -256,7 +311,7 @@ let handle_keeper_shell_readonly
              ; "path", `String target
              ; "lines", `Int n
              ; "status", Keeper_alerting_path.process_status_to_json st
-             ; "content", `String (Keeper_alerting_path.truncate_tool_output out)
+             ; "content", `String out
              ]))
   | "wc" ->
     (match read_target () with
@@ -268,7 +323,7 @@ let handle_keeper_shell_readonly
      | Error e -> error_json ~fields:[ "op", `String op ] e
      | Ok target ->
        let st, out =
-         Process_eio.run_argv_with_status ~timeout_sec:15.0
+         Process_eio.run_argv_with_status ~timeout_sec:read_timeout_sec
            [ "find"; target; "-maxdepth"; "3"; "-print";
              "-not"; "-path"; "*/.git/*";
              "-not"; "-path"; "*/_build/*" ]
@@ -286,30 +341,124 @@ let handle_keeper_shell_readonly
     render_process_result
       ~cmd:"git diff --stat"
       [ "git"; "-C"; root; "--no-optional-locks"; "diff"; "--stat" ]
+  | "git_worktree" ->
+    let action =
+      Safe_ops.json_string ~default:"list" "action" args
+      |> String.trim |> String.lowercase_ascii
+    in
+    (match action with
+     | "list" ->
+       render_process_result ~cmd:"git worktree list"
+         [ "git"; "-C"; root; "worktree"; "list" ]
+     | "add" ->
+       let branch = Safe_ops.json_string ~default:"" "branch" args |> String.trim in
+       let base = Safe_ops.json_string ~default:"origin/main" "base" args |> String.trim in
+       if branch = "" then
+         error_json ~fields:[ "op", `String op ]
+           "branch is required. Good: action='add', branch='feature/my-task'. Bad: branch=''."
+       else
+         (* Schema-level validation: check if branch is already in a worktree BEFORE running *)
+         let _st, wt_out =
+           Process_eio.run_argv_with_status ~timeout_sec:5.0
+             [ "git"; "-C"; root; "worktree"; "list"; "--porcelain" ]
+         in
+         if String_util.contains_substring_ci wt_out branch then
+           let existing_path =
+             String.split_on_char '\n' wt_out
+             |> List.find_map (fun line ->
+               if String_util.contains_substring_ci line "worktree" &&
+                  String_util.contains_substring_ci wt_out branch
+               then Some (String.trim line) else None)
+             |> Option.value ~default:"(unknown)"
+           in
+           Yojson.Safe.to_string
+             (`Assoc
+                 [ "ok", `Bool false
+                 ; "op", `String op
+                 ; "error", `String "branch_already_in_worktree"
+                 ; "branch", `String branch
+                 ; "existing_worktree", `String existing_path
+                 ; "hint", `String "Branch is already in a worktree. Use 'cd' to the existing path, or choose a different branch name."
+                 ])
+         else
+           let wt_path = Printf.sprintf ".worktrees/%s"
+             (String.map (fun c -> if c = '/' then '-' else c) branch) in
+           render_process_result
+             ~cmd:(Printf.sprintf "git worktree add %s -b %s %s" wt_path branch base)
+             [ "git"; "-C"; root; "worktree"; "add"; wt_path; "-b"; branch; base ]
+     | other ->
+       error_json ~fields:[ "op", `String op ]
+         (Printf.sprintf "Unknown git_worktree action '%s'. Use: list, add." other))
   | "bash" ->
     let cmd_str = Safe_ops.json_string ~default:"" "command" args |> String.trim in
-    if cmd_str = "" then error_json ~fields:[ "op", `String op ] "command_required"
+    if cmd_str = "" then error_json ~fields:[ "op", `String op ] "command is required for bash op. Good: command='env'. Bad: command=''."
+
     else
-      let dangerous_patterns = [
-        "rm "; "rm\t"; "rmdir"; "> "; ">> "; "| tee "; "mv "; "cp ";
-        "chmod"; "chown"; "kill"; "pkill"; "dd "; "mkfs"; "wget "; "curl.*-o";
-        "git push"; "git reset"; "git checkout"; "git rebase";
-        "pip install"; "npm install"; "opam install";
-      ] in
-      let has_dangerous = List.exists (fun pat ->
-        String_util.contains_substring_ci cmd_str pat
-      ) dangerous_patterns in
-      if has_dangerous then
+      (* Non-overridable deny layer (runs after preset gate).
+         First match wins — specific patterns before generic. *)
+      let hint_of_category = function
+        | "chaining"        -> "Call the tool multiple times instead of chaining commands."
+        | "redirect"        -> "Redirects are not allowed. Use keeper_fs_edit to write files."
+        | "git_write"       -> "Use keeper_bash with coding preset for git write operations."
+        | "package_install" -> "Package installation requires keeper_bash with coding preset."
+        | "destructive"     -> "Use keeper_bash for write operations, not readonly shell."
+        | _                 -> "This operation is not allowed in readonly shell."
+      in
+      let deny_patterns =
+        [ (* chaining *)
+          "&&", "chaining"
+        ; "||", "chaining"
+        ; ";", "chaining"
+        (* redirect *)
+        ; "| tee ", "redirect"
+        ; ">> ", "redirect"
+        ; "> ", "redirect"
+        (* git write *)
+        ; "git push", "git_write"
+        ; "git reset", "git_write"
+        ; "git checkout", "git_write"
+        ; "git rebase", "git_write"
+        (* package install *)
+        ; "pip install", "package_install"
+        ; "npm install", "package_install"
+        ; "opam install", "package_install"
+        (* destructive / write *)
+        ; "rm ", "destructive"
+        ; "rm\t", "destructive"
+        ; "rmdir", "destructive"
+        ; "mv ", "destructive"
+        ; "cp ", "destructive"
+        ; "chmod", "destructive"
+        ; "chown", "destructive"
+        ; "kill", "destructive"
+        ; "pkill", "destructive"
+        ; "dd ", "destructive"
+        ; "mkfs", "destructive"
+        ; "wget ", "destructive"
+        ; "curl -o", "destructive"
+        ; "curl --output", "destructive"
+        ]
+      in
+      let matched =
+        List.find_opt (fun (pat, _cat) ->
+          String_util.contains_substring_ci cmd_str pat
+        ) deny_patterns
+      in
+      (match matched with
+      | Some (pat, category) ->
+        let hint = hint_of_category category in
         Yojson.Safe.to_string
           (`Assoc
               [ "ok", `Bool false
               ; "op", `String op
               ; "error", `String "command_blocked_readonly"
-              ; "detail", `String "This shell is read-only. Dangerous patterns detected."
+              ; "blocked_pattern", `String pat
+              ; "category", `String category
+              ; "hint", `String hint
               ])
-      else
+      | None ->
         let st, out =
-          Process_eio.run_argv_with_status ~timeout_sec:30.0
+          Process_eio.run_argv_with_status ~timeout_sec:io_timeout_sec
             [ "bash"; "-c"; cmd_str ]
         in
         Yojson.Safe.to_string
@@ -318,12 +467,13 @@ let handle_keeper_shell_readonly
               ; "op", `String op
               ; "command", `String cmd_str
               ; "status", Keeper_alerting_path.process_status_to_json st
-              ; "output", `String (Keeper_alerting_path.truncate_tool_output out)
-              ])
+              ; "output", `String out
+              ]))
   | _ ->
     Yojson.Safe.to_string
       (`Assoc
-          [ "error", `String "unsupported_op"
+          [ "ok", `Bool false
+          ; "error", `String "unsupported_op"
           ; "op", `String op
           ; ( "supported_ops"
             , `List
@@ -331,7 +481,7 @@ let handle_keeper_shell_readonly
                    (fun name -> `String name)
                    [ "pwd"; "ls"; "cat"; "rg"; "git_status";
                      "find"; "head"; "tail"; "wc"; "tree";
-                     "git_log"; "git_diff"; "bash" ]) )
+                     "git_log"; "git_diff"; "git_worktree"; "bash" ]) )
           ])
 ;;
 

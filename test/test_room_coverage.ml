@@ -976,7 +976,7 @@ let test_append_archive_tasks () =
       files = [];
       created_at = "2026-01-01T00:00:00Z";
       worktree = None;
-      required_role = Types_core.Unassigned; stage = None;
+      required_role = Types_core.Unassigned; required_preset = None; stage = None;
       contract = None; handoff_context = None;
     } in
     Room.append_archive_tasks config [task];

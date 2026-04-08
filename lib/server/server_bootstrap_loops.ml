@@ -291,8 +291,8 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
       Log.Keeper.info "autoboot: initial pass %d/%d keepers started" booted_count total;
       (* Retry loop for keepers that failed initial boot *)
       if booted_count < total then begin
-        let max_retries = 5 in
-        let retry_interval_s = 30.0 in
+        let max_retries = Keeper_config.keeper_bootstrap_retry_max () in
+        let retry_interval_s = Float.of_int (Keeper_config.keeper_bootstrap_retry_interval_sec ()) in
         let rec retry_loop round =
           if round > max_retries then
             Log.Keeper.warn
@@ -333,6 +333,9 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
       Log.Server.error "metrics_flush fiber crashed: %s"
         (Printexc.to_string exn));
   Shutdown.register ~name:"metrics_flush" ~priority:30 Metrics_store_eio.flush_pending;
+  (* Deterministic output budget enforcement: truncate oversized tool outputs
+     with structured metadata before metrics/OTEL hooks see them. *)
+  Tool_output_validation.install ();
   (* Tool metrics JSONL persistence: flush buffered records to disk periodically.
      Also registers a post-hook so every tool call is enqueued for persistence. *)
   Tool_dispatch.register_post_hook (fun result ->
@@ -348,19 +351,9 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
   Otel_dispatch_hook.install ();
   Otel_spans.setup_exporter ~sw env;
   Shutdown.register ~name:"otel_exporter" ~priority:20 Otel_spans.shutdown;
-  (match Board_dispatch.get_pg_pool () with
-  | Some pool ->
-      let listener = Board_listener.create pool in
-      Eio.Fiber.fork ~sw (fun () ->
-        try Board_listener.start ~clock listener
-        with
-        | Eio.Cancel.Cancelled _ as e -> raise e
-        | exn ->
-          Log.BoardListener.error "board listener fiber crashed: %s"
-            (Printexc.to_string exn));
-      Log.BoardListener.info "Fiber started for real-time Board events"
-  | None ->
-      Log.BoardListener.info "Skipped (not using PostgreSQL backend)");
+  (* Board_listener removed: filesystem-first principle.
+     JSONL path emits SSE directly via Board_dispatch.emit_board_sse_event.
+     PG path also uses Board_dispatch, making the pg_notify relay redundant. *)
   Eio.Fiber.fork ~sw (fun () ->
       let last_prune = ref (Unix.gettimeofday ()) in
       let rec loop () =

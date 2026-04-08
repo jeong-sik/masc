@@ -34,9 +34,14 @@ export const SSE_RECONNECT_RETRY_MS = 3_000
 export const PERIODIC_REFRESH_DEV_MS = 180_000
 export const PERIODIC_REFRESH_PROD_MS = 120_000
 
-// --- Context ratio thresholds (SSOT: backend env_config_runtime.ml:496-499) ---
-export const CONTEXT_RATIO_CRITICAL = 0.85
-export const CONTEXT_RATIO_WARN = 0.70
+// --- Context ratio thresholds ---
+// Lifecycle state thresholds (SSOT: lib/config/env_config_runtime.ml Dashboard module)
+// Env vars: MASC_DASHBOARD_CTX_HANDOFF_IMMINENT, MASC_DASHBOARD_CTX_PREPARING, MASC_DASHBOARD_CTX_COMPACTING
+export const CONTEXT_RATIO_CRITICAL = 0.85  // handoff-imminent
+export const CONTEXT_RATIO_WARN = 0.70      // preparing
+export const CONTEXT_RATIO_COMPACTING = 0.50 // compacting
+// Fleet overview coloring (intermediate between warn and compacting)
+export const CONTEXT_RATIO_FLEET_WARN = 0.60
 
 // --- Trajectory timeline ---
 export const TRAJECTORY_HEARTBEAT_STALE_MS = 30_000

@@ -159,7 +159,7 @@ let write_json_root config path json =
        | Error e -> Log.Misc.warn "write_json_root backend_set failed for %s: %s" key (Backend_types.show_error e));
       (* Dual-write: mirror to local filesystem so PG-timeout fallback reads fresh data *)
       (try write_json_local path json
-       with exn ->
+       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
          Log.Misc.warn "write_json_root: local mirror write failed for %s: %s"
            path (Printexc.to_string exn))
   | None -> write_json_local path json
@@ -232,7 +232,7 @@ let write_json config path json =
       if should_dual_write_local config then
         (* Keep a plaintext mirror for non-filesystem backends so local fallback reads stay fresh. *)
         (try write_json_local path json
-         with exn ->
+         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
            Log.Misc.warn "write_json: local mirror write failed for %s: %s"
              path (Printexc.to_string exn))
   | None -> write_json_local path json
@@ -254,7 +254,7 @@ let write_text config path content =
       if should_dual_write_local config then
         (* Keep a plaintext mirror for non-filesystem backends so local fallback reads stay fresh. *)
         (try write_text_local path content
-         with exn ->
+         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
            Log.Misc.warn "write_text: local mirror write failed for %s: %s"
              path (Printexc.to_string exn))
   | None -> write_text_local path content

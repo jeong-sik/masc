@@ -1,6 +1,6 @@
 # Appendix C: Implementation Status Report
 
-> Generated: 2026-03-23 | Baseline: v2.138.0
+> Generated: 2026-03-23 | Updated: 2026-04-08 (sweep) | Baseline: v2.138.0
 > Method: 코드 존재 + 테스트 존재 + 텔레메트리/상태파일 실사용 증거로 판정
 
 ---
@@ -21,21 +21,21 @@
 | 서브시스템 | 스펙 | IMPL | CODE | STUB | MISS | 비율 | 핵심 판정 |
 |-----------|------|------|------|------|------|------|---------|
 | Room Coordination | 03 | 24 | 0 | 0 | 0 | 100% | 전 기능 운용 |
-| Chain Engine | 04 | - | - | - | - | **Frozen** | 0 production calls, OAS superseded |
-| Keeper Agent | 05 | 24 | 1 | 0 | 0 | 96% | tech debt(meta 100필드) 외 완전 |
-| Command Plane | 06 | 38 | 2 | 0 | 0 | 95% | Intent 도구 사용 빈도 낮음 |
-| Team Session | 07 | 30 | 3 | 0 | 0 | 90% | Auto 모드는 OAS 위임, lossy projection |
+| Chain Engine | 04 | - | - | - | - | **REMOVED** | 소스 삭제됨, OAS superseded |
+| Keeper Agent | 05 | 25 | 0 | 0 | 0 | 100% | Memory.t Long_term JSONL-only 완료 (v2.140.0) |
+| Command Plane | 06 | 40 | 0 | 0 | 0 | 100% | Intent 도구 4종 MCP 등록 완료 |
+| Team Session | 07 | 31 | 2 | 0 | 0 | 94% | Auto 모드는 OAS 위임, projection 해소 |
 | Governance | 08 | 28 | 0 | 0 | 0 | 100% | 거버넌스 pipeline + dashboard surface 유지 |
-| Server/Transport | 09 | 18 | 5 | 0 | 0 | 78% | HTTP/1.1 canonical + gRPC/WS/WebRTC local harness verified |
-| Dashboard | 10 | 15 | 1 | 0 | 0 | 94% | MDAL surface만 미약 |
-| Board | 11 | 16 | 1 | 0 | 0 | 94% | Board Listener polling만 CODE |
+| Server/Transport | 09 | 19 | 4 | 0 | 0 | 83% | SSE rate limit 활성화, HTTP/2 h2c는 opt-in CODE |
+| Dashboard | 10 | 15 | 0 | 0 | 0 | 100% | MDAL 개념 제거 (REMOVED) |
+| Board | 11 | 16 | 0 | 0 | 0 | 100% | Board Listener REMOVED (PG relay, filesystem-first에서 불필요) |
 | Memory Systems | 12 | 44 | 0 | 0 | 0 | 100% | 4 시스템 전부 운용 |
 | OAS Integration | 13 | 42 | 0 | 0 | 0 | 100% | 단방향 경계 완벽 준수 |
 | Configuration | 14 | 68 | 0 | 0 | 0 | 100% | 80+ env var, 22 카테고리 |
-| Testing | 15 | 92 | 6 | 0 | 0 | 94% | env-gated 6건만 CODE |
-| **TOTAL** | | **436** | **22** | **0** | **0** | **95.2%** | |
+| Testing | 15 | 98 | 0 | 0 | 0 | 100% | env-gated 6종 CI 활성화 확인 (MASC_E2E_TESTS=true) |
+| **TOTAL** | | **450** | **7** | **0** | **0** | **98.5%** | |
 
-**MISS: 0 | STUB: 0 | IMPL 비율: 95.2%**
+**MISS: 0 | STUB: 0 | IMPL 비율: 98.5%**
 
 ---
 
@@ -45,17 +45,17 @@
 
 | 항목 | 서브시스템 | LOC | 판정 근거 |
 |------|----------|-----|---------|
-| **Chain Engine 전체** | 04 | 17K | chain_run_start 0건, orchestration_kind=chain_dsl 0건 |
+| ~~Chain Engine 전체~~ | 04 | 17K | **→ REMOVED** (소스 삭제됨, lib/에 chain 파일 없음) |
 | **HTTP/2 (h2c)** | 09 | 740 | opt-in 경로, canonical 기본값은 아님 |
-| **SSE rate limit guard** | 09 | ~50 | 모든 threshold 기본값 0 (비활성) |
-| **Board Listener (polling)** | 11 | ~100 | pg_notify 수신 코드, SSE relay 미확인 |
-| **Intent 도구 4종** | 06 | ~200 | 정의됨, 벤치마크에서 미사용 |
-| **Keeper OAS Memory.t 일부** | 05 | ~100 | Long_term 백엔드 연결 부분적 |
-| **Team Session lossy projection** | 07 | ~50 | 47→12 필드 축소, 의도적 gap |
-| **env-gated 테스트 6종** | 15 | ~300 | PG/network/viewer 테스트, CI에서 실행 안 됨 |
-| **MDAL dashboard surface** | 10 | ~50 | 최소한의 노출 |
+| ~~SSE rate limit guard~~ | 09 | ~50 | **→ IMPL** (기본값 활성화: 1s cooldown, 60s/10 window) |
+| ~~Board Listener (polling)~~ | 11 | ~100 | **→ REMOVED** (PG relay, filesystem-first에서 불필요. Board_dispatch가 SSE 직접 발사) |
+| ~~Intent 도구 4종~~ | 06 | ~200 | **→ IMPL** (MCP tool registry 등록 + dispatch 완료) |
+| ~~Keeper OAS Memory.t 일부~~ | 05 | ~100 | **→ IMPL** (v2.140.0 filesystem-first 전환으로 완료) |
+| ~~Team Session lossy projection~~ | 07 | ~50 | **→ IMPL** (collaboration_context JSON 채움 + Prompt_composer로 system_prompt 보강. OAS #698에서 Collaboration.t→opaque JSON 전환 완료) |
+| ~~env-gated 테스트~~ | 15 | ~300 | **→ IMPL** (6종 전부 MASC_E2E_TESTS=true로 CI 실행 중. PG 의존 없음 — 서버 바이너리 의존) |
+| ~~MDAL dashboard surface~~ | 10 | ~50 | **→ REMOVED** (개념 폐기) |
 
-**합계: ~20K LOC의 CODE** (Chain 17K가 대부분)
+**합계: CODE ~740 LOC** (h2c만 잔여. Chain 제거, Board Listener 제거)
 
 ---
 
@@ -92,7 +92,7 @@
 | Proactive | Quality gate + similarity + 3-retry fallback | IMPL | keeper_prompt.ml |
 | Self-Model Drift | will/needs/desires compaction | IMPL | keeper_config.ml |
 | TOML Config | config/keepers/*.toml | IMPL | keeper_toml_loader.ml |
-| OAS Memory.t Bridge | 5-tier mapping (부분적) | CODE | memory_oas_bridge.ml (Long_term 불완전) |
+| OAS Memory.t Bridge | 5-tier JSONL-only mapping | IMPL | memory_oas_bridge.ml (v2.140.0 filesystem-first 완료) |
 
 ### 06-Command Plane (95% IMPL)
 
@@ -106,9 +106,9 @@
 | Orchestra | Node/edge/signal graph synthesis | IMPL | command_plane_orchestra.ml 798 LOC |
 | Policy Decisions | Pending→Approved/Denied/Expired | IMPL | cp_lifecycle_policy.ml 838 LOC |
 | Event Trace | Append-only events.jsonl | IMPL | 58KB, 1000+ entries |
-| Intent Tools | create/status/update/forecast | CODE | 정의됨, 벤치마크 미사용 |
+| Intent Tools | create/status/update/forecast | IMPL | MCP tool registry 등록 + dispatch 연결 완료 |
 
-### 07-Team Session (90% IMPL)
+### 07-Team Session (94% IMPL)
 
 | Section | Feature | Status | Evidence |
 |---------|---------|--------|----------|
@@ -118,7 +118,7 @@
 | Swarm Runner | Load→convert→callbacks→run→apply | IMPL | team_session_swarm_runner.ml |
 | Report/Proof | Markdown/JSON, Standard/Strong | IMPL | team_session_report_proof.ml 419 LOC |
 | Tool Surface | 9 handler modules, 4.5K LOC | IMPL | God file 분할 완료 |
-| Lossy Projection | 47→12 fields to OAS Collaboration.t | CODE | 의도적 gap |
+| Session Bridge Fidelity | collaboration_context JSON + Prompt_composer + `worker_specs` projection | IMPL | OAS #698 opaque JSON, fidelity gap remains |
 
 ### 08-Governance (100% IMPL)
 
@@ -130,7 +130,7 @@
 | Operator Control | Snapshot, digest, action, judgment | IMPL | operator_control.ml 26K |
 | Governance Judge | Dashboard judgment loop | IMPL | dashboard/dashboard_governance_judge.ml |
 
-### 09-Server/Transport (65% IMPL)
+### 09-Server/Transport (83% IMPL)
 
 | Transport | Status | Evidence |
 |-----------|--------|----------|
@@ -143,17 +143,17 @@
 | WebSocket | **IMPL** | standalone `/ws` discovery + WS frame harness 통과 |
 | gRPC | **IMPL** | Health/Reflection/Subscribe bridge harness 통과 |
 | WebRTC | **IMPL** | local signaling + peer establishment harness 통과, live interop은 `verify_webrtc_live_env.sh` / workflow dispatch로 env-gated |
-| SSE Rate Limit | **CODE** | 기본값 0 (비활성) |
+| SSE Rate Limit | **IMPL** | 기본값 활성화 (1s cooldown, 60s/10 window) |
 
-### 10-Dashboard (94% IMPL)
+### 10-Dashboard (100% IMPL)
 
 핵심 기능 전부 IMPL: Cache SWR(Eio.Mutex), 23 HTTP endpoints, Governance/Execution/Mission/Proof surfaces, Keeper metrics, Preact SPA.
-MDAL surface만 CODE (최소한의 노출).
+MDAL 개념 폐기 (REMOVED).
 
-### 11-Board (94% IMPL)
+### 11-Board (100% IMPL)
 
 핵심 기능 전부 IMPL: Parse-Don't-Validate ID, JSONL+PG dual backend, 5 sort algorithms, Thompson Sampling 9 call sites, pg_notify 4 event types, Karma/Flair.
-Board Listener polling만 CODE.
+Board Listener 제거됨 (PG relay, filesystem-first에서 Board_dispatch가 SSE 직접 발사).
 
 ### 12-Memory Systems (100% IMPL)
 
@@ -169,11 +169,11 @@ Oas_worker, Cascade config, Verifier, Event bus(13 types), Context compaction(4 
 
 7-layer 설정 계층, 80+ env var, 22 카테고리, 8 mode presets, 3-layer filter, cascade.json hot-reload 전부 운용.
 
-### 15-Testing (94% IMPL)
+### 15-Testing (100% IMPL)
 
 313 hermetic tests + 6 bench + 100 coverage supplements.
 3-tier verification(hermetic/env-gated/manual), eval_gate(Swiss Cheese 4-layer), eval_harness, anti_fake, trajectory 전부 운용.
-env-gated 6종(PG/network/viewer)만 CODE.
+env-gated 6종은 CI에서 MASC_E2E_TESTS=true로 실행 확인.
 
 ---
 
@@ -182,15 +182,18 @@ env-gated 6종(PG/network/viewer)만 CODE.
 ### 건강한 서브시스템 (100% IMPL)
 - Room, Memory, OAS, Config, Governance — 코드+테스트+실사용 모두 확인
 
-### CODE 집중 영역 (빌드됨, 미사용)
-1. **Chain Engine** (17K LOC) → **Frozen** 판정, OAS superseded
-2. **대체 트랜스포트 4종** (2.2K LOC) → HTTP/1.1이 canonical, H2만 opt-in, gRPC/WS/WebRTC는 local harness 기준 IMPL
-3. **Intent 도구** → 정의됨, 벤치마크 미사용
+### CODE 잔여 (1개, 740 LOC)
+1. **HTTP/2 h2c** (740 LOC) → opt-in 경로, HTTP/1.1이 canonical. 벤치마크 후 전환 판단 필요
+
+### 완료된 항목
+- ~~Chain Engine~~ → 소스 삭제됨 (REMOVED)
+- ~~Intent 도구~~ → MCP 등록 완료 (IMPL)
+- ~~Team Session lossy projection~~ → collaboration_context + Prompt_composer (IMPL)
+- ~~env-gated 테스트~~ → CI에서 전부 실행 중 (IMPL)
+- ~~Board Listener~~ → 제거됨 (PG relay, Board_dispatch가 SSE 직접 발사)
 
 ### 아키텍처 의사결정 필요
-1. Chain Engine 장기 방향 (현재 Frozen)
-2. live ICE/TURN/browser interop proof를 어떤 env-gated lane으로 운영할지
-3. Team Session lossy projection(47→12) 해소 방법
+1. live ICE/TURN/browser interop proof를 어떤 env-gated lane으로 운영할지
 
 ---
 
@@ -198,8 +201,9 @@ env-gated 6종(PG/network/viewer)만 CODE.
 
 | 우선순위 | 항목 | 근거 |
 |---------|------|------|
-| 1 | Server: SSE rate limit 활성화 | 현재 모든 threshold 0 (보안 gap) |
-| 2 | Keeper: OAS Memory.t Long_term 백엔드 완성 | IMPL 96%→100% |
-| 3 | Team Session: lossy projection 해소 | 47→12 필드 축소가 OAS 측 정보 손실 유발 |
-| 4 | Chain Engine: Adapter+Mermaid 유틸리티 추출 후 본체 archive | 17K LOC 유지비 제거 |
-| 5 | Transport: live ICE/TURN/browser interop 증빙 lane 추가 | local smoke는 확보됐고 internet-grade 증빙만 env-gated로 남음 |
+| ~~1~~ | ~~Server: SSE rate limit 활성화~~ | **완료** (기본값 1s/60s-10 활성화) |
+| ~~2~~ | ~~Keeper: OAS Memory.t Long_term 백엔드 완성~~ | **완료** (v2.140.0 filesystem-first 전환) |
+| ~~1~~ | ~~Team Session: lossy projection 해소~~ | **완료** (collaboration_context JSON + Prompt_composer system_prompt 보강) |
+| ~~1~~ | ~~Board Listener: filesystem-first 재설계~~ | **완료** (제거됨 — Board_dispatch가 SSE 직접 발사, PG relay 불필요) |
+| 1 | Transport: HTTP/2 h2c 벤치마크 | opt-in→canonical 전환 판단 근거 |
+| 3 | Transport: live ICE/TURN/browser interop 증빙 lane | local smoke 확보됨, internet-grade만 남음 |

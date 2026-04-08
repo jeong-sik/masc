@@ -25,6 +25,8 @@ type t = {
   groups : (string, group_source) Hashtbl.t;
   masc_groups : (string, string list) Hashtbl.t;
   presets : (string, preset_def) Hashtbl.t;
+  workflow_presets : string list;
+  shell_write_presets : string list;
 }
 
 (* ── TOML parsing helpers ─────────────────────────────────────────── *)
@@ -112,7 +114,7 @@ let parse_presets
 
 let project_root_from_executable () =
   let raw_exe =
-    try Sys.executable_name with _ -> ""
+    try Sys.executable_name with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ""
   in
   let exe =
     if String.equal raw_exe "" then ""
@@ -173,6 +175,12 @@ let load ~base_path : (t, string) result =
       | Ok groups ->
         let masc_groups = parse_masc_groups doc in
         let presets = parse_presets doc in
+        let workflow_presets =
+          toml_string_list_at doc "permissions" "workflow_presets"
+        in
+        let shell_write_presets =
+          toml_string_list_at doc "permissions" "shell_write_presets"
+        in
         (* Validate that each preset's group references are defined *)
         let ref_errors =
           Hashtbl.fold (fun preset_name (def : preset_def) acc ->
@@ -189,12 +197,25 @@ let load ~base_path : (t, string) result =
             List.rev_append bad_groups (List.rev_append bad_masc_groups acc)
           ) presets []
         in
-        (match ref_errors with
-        | _ :: _ -> Error (Printf.sprintf "in %s: %s" path (String.concat "; " ref_errors))
+        (* Validate that permission preset names reference defined presets *)
+        let validate_perm_presets label perm_list =
+          List.filter_map (fun name ->
+            if Hashtbl.mem presets name then None
+            else Some (Printf.sprintf
+              "permissions.%s: preset '%s' has no [presets.%s] entry" label name name)
+          ) perm_list
+        in
+        let perm_errors =
+          validate_perm_presets "workflow_presets" workflow_presets
+          @ validate_perm_presets "shell_write_presets" shell_write_presets
+        in
+        let all_errors = ref_errors @ perm_errors in
+        (match all_errors with
+        | _ :: _ -> Error (Printf.sprintf "in %s: %s" path (String.concat "; " all_errors))
         | [] ->
           Log.Keeper.info "tool_policy_config: loaded %d groups, %d masc_groups, %d presets from %s"
             (Hashtbl.length groups) (Hashtbl.length masc_groups) (Hashtbl.length presets) path;
-          Ok { groups; masc_groups; presets })
+          Ok { groups; masc_groups; presets; workflow_presets; shell_write_presets })
 
 (* ── Resolution ───────────────────────────────────────────────────── *)
 
@@ -205,8 +226,8 @@ let resolve_group_source = function
     | Some shard ->
       shard.tools |> List.map (fun (t : Types.tool_schema) -> t.name)
     | None ->
-      invalid_arg
-        (Printf.sprintf "tool_policy_config: shard '%s' not found" shard_name)
+      Log.Keeper.warn "tool_policy_config: shard '%s' not found, returning empty" shard_name;
+      []
 
 let resolve_group (config : t) (name : string) : string list option =
   match Hashtbl.find_opt config.groups name with
@@ -257,3 +278,28 @@ let all_group_tools (config : t) : string list =
 
 let all_masc_tools (config : t) : string list =
   Hashtbl.fold (fun _ tools acc -> tools @ acc) config.masc_groups []
+
+(** Check if [agent_preset]'s resolved tool set covers [required_preset]'s.
+    Derived from config — adding a new preset to tool_policy.toml automatically
+    updates the subsumption graph.  No hardcoded hierarchy. *)
+let preset_can_satisfy (config : t) ~(agent_preset : string) ~(required_preset : string) : bool =
+  if String.equal agent_preset required_preset then true
+  else
+    let resolve name =
+      match resolve_preset config name ~masc_filter:(fun _ -> true) () with
+      | Some All_candidates -> `Full
+      | Some (Subset tools) -> `Tools (List.sort_uniq String.compare tools)
+      | None -> `Unknown
+    in
+    match resolve agent_preset, resolve required_preset with
+    | `Unknown, _ | _, `Unknown -> false  (* unknown preset — can't verify, reject *)
+    | `Full, _ -> true                     (* agent has full access *)
+    | _, `Full -> false                    (* required is full, agent isn't *)
+    | `Tools agent_tools, `Tools req_tools ->
+      List.for_all (fun t -> List.mem t agent_tools) req_tools
+
+let allows_workflow (config : t) (preset_name : string) : bool =
+  List.mem preset_name config.workflow_presets
+
+let allows_shell_write (config : t) (preset_name : string) : bool =
+  List.mem preset_name config.shell_write_presets

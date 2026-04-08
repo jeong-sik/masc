@@ -235,20 +235,20 @@ let tool_call_events (config : Room.config) ~agent_name ~limit :
        let open Yojson.Safe.Util in
        let tool_name =
          try e.payload |> member "tool_name" |> to_string
-         with _ -> "unknown"
+         with Eio.Cancel.Cancelled _ as e -> raise e | _ -> "unknown"
        in
        let success =
          try e.payload |> member "success" |> to_bool
-         with _ -> true
+         with Eio.Cancel.Cancelled _ as e -> raise e | _ -> true
        in
        let duration_ms =
          try e.payload |> member "duration_ms" |> to_int
-         with _ -> 0
+         with Eio.Cancel.Cancelled _ as e -> raise e | _ -> 0
        in
        let error_str =
          try match e.payload |> member "error" with
              | `String s -> Some s | _ -> None
-         with _ -> None
+         with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None
        in
        Some
          {

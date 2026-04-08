@@ -84,6 +84,9 @@ type world_observation = {
   last_tools_used : string list;
   (** Tools used in the previous cycle. Empty on first cycle or when unavailable.
       Used by the prompt builder to generate data-driven anti-repetition hints. *)
+
+  work_discovery_due : bool;
+  behavioral_stats : Keeper_telemetry_feedback.behavioral_stats option;
 }
 
 type unified_turn_channel =

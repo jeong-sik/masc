@@ -203,7 +203,10 @@ let validate_command_with_allowlist ~allowed_commands cmd =
   if trimmed = "" then Error "command must not be empty"
   else if contains_forbidden_shell_chars trimmed then
     Error
-      "Shell chaining/redirection is not allowed. Use the workdir field and run a single command, for example command='python3 check.py'. To write files, use masc_code_write instead of shell redirection."
+      "Blocked: chaining (&&/||/;) and redirects (|/>) are not allowed. \
+       Run ONE command per call. Example: cmd='dune build'. \
+       Do NOT use: cmd='cd x && dune build' or cmd='rg foo | wc -l'. \
+       To write files, use keeper_fs_edit."
   else
     match extract_command_name trimmed with
     | None -> Error "command must not be empty"
@@ -211,7 +214,8 @@ let validate_command_with_allowlist ~allowed_commands cmd =
     | Some name ->
       Error
         (Printf.sprintf
-           "Command blocked: %s is not in the approved dev command allowlist"
+           "Command blocked: '%s' is not allowed. Allowed: dune, git, rg, ls, cat, make, node, npm, etc. \
+            For file operations use keeper_fs_read or keeper_fs_edit."
            name)
 
 let validate_command cmd =
@@ -243,7 +247,7 @@ let validate_command_coding cmd =
             | Some name ->
               Error
                 (Printf.sprintf
-                   "Command blocked: %s is not in the approved dev command allowlist"
+                   "Command blocked: '%s' is not allowed. Allowed: dune, git, rg, ls, cat, make, node, npm, etc."
                    name))
       in
       validate_segments segments
@@ -267,6 +271,79 @@ let is_write_operation cmd =
   | cmd_name :: _ ->
     List.mem cmd_name ["mv"; "cp"; "mkdir"; "touch"; "chmod"]
   | [] -> false
+
+(** Skip git global options (e.g. [-C dir], [--work-tree=...]) to find the
+    actual subcommand. Handles both [-C dir] (two-token) and [--work-tree=x]
+    (single-token) forms. *)
+let rec skip_git_global_options = function
+  | [] -> []
+  | "--" :: rest -> rest
+  | ("-C" | "-c" | "--git-dir" | "--work-tree" | "--namespace"
+    | "--super-prefix" | "--config-env" | "--exec-path") :: _ :: rest ->
+    skip_git_global_options rest
+  | opt :: rest when String.length opt > 1 && opt.[0] = '-' &&
+      (String.starts_with ~prefix:"--git-dir=" opt
+       || String.starts_with ~prefix:"--work-tree=" opt
+       || String.starts_with ~prefix:"--namespace=" opt
+       || String.starts_with ~prefix:"--exec-path=" opt
+       || String.starts_with ~prefix:"-c" opt) ->
+    skip_git_global_options rest
+  | parts -> parts
+
+(** Detect git branch-switch commands that would mutate the main repo's HEAD.
+    keeper_bash runs in the repo root, so checkout/switch/branch mutations must
+    be redirected to keeper_pr_workflow (playground clone).
+
+    Handles tab-separated tokens, global git options like [-C dir], and real
+    branch mutation forms (create, rename, copy). Allows read-only listing. *)
+let is_git_branch_switch cmd =
+  (* Tokenize on both space and tab *)
+  let parts =
+    let buf = Buffer.create 64 in
+    let tokens = ref [] in
+    String.iter (fun c ->
+      match c with
+      | ' ' | '\t' ->
+        if Buffer.length buf > 0 then begin
+          tokens := Buffer.contents buf :: !tokens;
+          Buffer.clear buf
+        end
+      | _ -> Buffer.add_char buf c
+    ) (String.trim cmd);
+    if Buffer.length buf > 0 then
+      tokens := Buffer.contents buf :: !tokens;
+    List.rev !tokens
+  in
+  let is_option arg = String.length arg > 0 && arg.[0] = '-' in
+  let has_any_flag flags args = List.exists (fun a -> List.mem a flags) args in
+  let rec first_non_option = function
+    | [] -> None
+    | a :: _ when not (is_option a) -> Some a
+    | _ :: rest -> first_non_option rest
+  in
+  match parts with
+  | "git" :: rest ->
+    (match skip_git_global_options rest with
+     | "checkout" :: _ -> true
+     | "switch" :: _ -> true
+     | "branch" :: branch_args ->
+       (* Block branch mutations:
+          - git branch <newname> [<start-point>]
+          - git branch -c/-C/--copy ...
+          - git branch -m/-M/--move ...
+          Allow: listing (-l/--list/-a/--all/-r/--remotes/-v/-vv/--show-current)
+                 and deletion (-d/-D/--delete). *)
+       if branch_args = [] then false
+       else if has_any_flag ["-d"; "-D"; "--delete"] branch_args then false
+       else if has_any_flag
+         ["-l"; "--list"; "-a"; "--all"; "-r"; "--remotes";
+          "--show-current"; "-v"; "-vv"] branch_args
+       then false
+       else if has_any_flag ["-c"; "-C"; "--copy"; "-m"; "-M"; "--move"] branch_args
+       then true
+       else Option.is_some (first_non_option branch_args)
+     | _ -> false)
+  | _ -> false
 
 (** Detect truly destructive commands that must be blocked even for
     Coding/Full preset keepers. Delegates to [Eval_gate.detect_destructive]
@@ -452,8 +529,8 @@ let validate_gh_command cmd =
   if trimmed = "" then Error "gh command must not be empty"
   else if contains_forbidden_shell_chars trimmed then
     Error
-      "Shell chaining/redirection is not allowed in gh commands. \
-       Pass a single gh subcommand."
+      "Blocked: chaining/redirect in gh command. Use a single subcommand. \
+       Good: cmd='pr list --state open'. Bad: cmd='pr list && echo done'."
   else
     match extract_gh_command_pair trimmed with
     | (None, _) -> Error "gh command must not be empty"
@@ -739,9 +816,17 @@ let make_shell_exec_with_allowlist ~workdir ~on_exec ~proc_mgr ~clock ~allowed_c
                  let status, output =
                    Eio.Time.with_timeout_exn clock timeout (fun () ->
                      Eio.Switch.run @@ fun sw ->
+                     let stdout_r, stdout_w = Eio.Process.pipe ~sw proc_mgr in
                      let proc = Eio.Process.spawn ~sw proc_mgr
-                       ~stdout:(Eio.Flow.buffer_sink buf)
+                       ~stdout:stdout_w
                        ["sh"; "-c"; wrapped_command ^ " 2>&1"] in
+                     Eio.Flow.close stdout_w;
+                     (try
+                        Eio.Flow.copy stdout_r (Eio.Flow.buffer_sink buf);
+                        Eio.Flow.close stdout_r
+                      with Eio.Cancel.Cancelled _ as e ->
+                        (try Eio.Flow.close stdout_r with _ -> ());
+                        raise e);
                      let status = Eio.Process.await proc in
                      (status, Buffer.contents buf))
                  in

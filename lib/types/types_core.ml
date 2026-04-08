@@ -508,6 +508,7 @@ type task = {
   created_at: string;
   worktree: worktree_info option; [@default None]  (* linked worktree info *)
   required_role: role; [@default Unassigned]  (** Role required to claim this task *)
+  required_preset: string option; [@default None]  (** Tool preset required to claim this task *)
   stage: Task_stage.t option; [@default None]  (** Coding task stage gate *)
   contract: task_contract option; [@default None]
   handoff_context: task_handoff_context option; [@default None]
@@ -534,10 +535,15 @@ let task_to_yojson t =
     | Unassigned -> with_worktree
     | role -> with_worktree @ [("required_role", role_to_yojson role)]
   in
+  (* Add required_preset if present *)
+  let with_preset = match t.required_preset with
+    | None -> with_role
+    | Some p -> with_role @ [("required_preset", `String p)]
+  in
   (* Add stage if present *)
   let with_stage = match t.stage with
-    | None -> with_role
-    | Some s -> with_role @ [("stage", Task_stage.to_yojson s)]
+    | None -> with_preset
+    | Some s -> with_preset @ [("stage", Task_stage.to_yojson s)]
   in
   let with_contract = match t.contract with
     | None -> with_stage
@@ -580,6 +586,7 @@ let task_of_yojson json =
       | Some s -> role_of_string s
       | None -> Unassigned
     in
+    let required_preset = json |> member "required_preset" |> to_string_option in
     (* Parse optional stage field *)
     let stage = match json |> member "stage" |> to_string_option with
       | Some s -> (match Task_stage.of_string s with Ok st -> Some st | Error _ -> None)
@@ -612,6 +619,7 @@ let task_of_yojson json =
             created_at;
             worktree;
             required_role;
+            required_preset;
             stage;
             contract;
             handoff_context;
@@ -913,5 +921,5 @@ type claim_next_result =
       message : string;
     }
   | Claim_next_no_unclaimed
-  | Claim_next_no_eligible of { excluded_count : int }
+  | Claim_next_no_eligible of { excluded_count : int; preset_filtered : int }
   | Claim_next_error of string

@@ -28,20 +28,47 @@ type verdict =
   | Approve
   | Reject of string
 
+type gate =
+  | Length
+  | Excuse
+  | Contract
+  | Structured_tool
+  | Llm_text_fallback
+  | Format_reject
+  | Fallback
+
+let gate_to_string = function
+  | Length -> "length"
+  | Excuse -> "excuse"
+  | Contract -> "contract"
+  | Structured_tool -> "structured_tool"
+  | Llm_text_fallback -> "llm_text_fallback"
+  | Format_reject -> "format_reject"
+  | Fallback -> "fallback"
+
+let gate_of_string = function
+  | "length" -> Ok Length
+  | "excuse" -> Ok Excuse
+  | "contract" -> Ok Contract
+  | "structured_tool" -> Ok Structured_tool
+  | "llm_text_fallback" -> Ok Llm_text_fallback
+  | "format_reject" -> Ok Format_reject
+  | "fallback" -> Ok Fallback
+  | s -> Error (Printf.sprintf "unknown gate: %S" s)
+
 type review_result = {
   verdict : verdict;
   evaluator_cascade : string;
   generator_cascade : string option;
-  gate : string;  (** Which gate produced this verdict: "length", "excuse", "llm", "fallback" *)
-  fallback_reason : string option;  (** Error message when gate="fallback" — aids debugging *)
+  gate : gate;
+  fallback_reason : string option;
 }
 
 (* ================================================================ *)
 (* Excuse pattern detection (local, no LLM)                         *)
 (* ================================================================ *)
 
-(** Known avoidance phrases. Matched case-insensitively as substrings. *)
-let excuse_patterns = [
+let default_excuse_patterns = [
   ("pre-existing",        "claiming the problem already existed");
   ("out of scope",        "declaring work out of scope");
   ("beyond the scope",    "declaring work beyond scope");
@@ -57,25 +84,90 @@ let excuse_patterns = [
   ("cannot reproduce",    "dismissing without investigation");
 ]
 
+(** Cached patterns. Loaded once from disk; invalidated by [save_excuse_patterns]. *)
+let cached_patterns : (string * string) list option ref = ref None
+
+let excuse_patterns_path () =
+  let config_dir = (Config_dir_resolver.resolve ()).config_root.path in
+  Filename.concat config_dir "excuse_patterns.json"
+
+(** Parse a JSON value into a validated pattern list.
+    Returns [Error msg] if any item is malformed (no silent drops). *)
+let max_excuse_pattern_len = 500
+let max_excuse_entries = 100
+
+let parse_excuse_patterns_json (json : Yojson.Safe.t) : ((string * string) list, string) result =
+  match json with
+  | `List items ->
+    let n = List.length items in
+    if n > max_excuse_entries then
+      Error (Printf.sprintf "Too many entries: %d (max %d)" n max_excuse_entries)
+    else
+      let rec validate acc = function
+        | [] -> Ok (List.rev acc)
+        | `List [`String pat; `String reason] :: rest ->
+          if pat = "" || reason = "" then
+            Error "Pattern and reason must be non-empty strings"
+          else if String.length pat > max_excuse_pattern_len
+               || String.length reason > max_excuse_pattern_len then
+            Error (Printf.sprintf "String too long (max %d chars)" max_excuse_pattern_len)
+          else
+            validate ((pat, reason) :: acc) rest
+        | item :: _ ->
+          Error (Printf.sprintf "Invalid pattern entry: expected [string, string], got %s"
+            (Yojson.Safe.to_string item))
+      in
+      validate [] items
+  | _ -> Error "Expected JSON array of [pattern, reason] pairs"
+
+(** Load excuse patterns from config/excuse_patterns.json.
+    Returns cached value if available. Falls back to defaults on missing file. *)
+let load_excuse_patterns () : (string * string) list =
+  match !cached_patterns with
+  | Some p -> p
+  | None ->
+    let patterns =
+      let path = excuse_patterns_path () in
+      match Safe_ops.read_json_file_safe path with
+      | Error _ -> default_excuse_patterns
+      | Ok json ->
+        match parse_excuse_patterns_json json with
+        | Ok p -> p
+        | Error msg ->
+          Log.Misc.warn "excuse_patterns: parse error, using defaults: %s" msg;
+          default_excuse_patterns
+    in
+    cached_patterns := Some patterns;
+    patterns
+
+(** Save excuse patterns to config/excuse_patterns.json.
+    Uses atomic write (write-to-temp + rename) to prevent corruption.
+    Invalidates the in-memory cache on success. *)
+let save_excuse_patterns (patterns : (string * string) list) : (unit, string) result =
+  try
+    let path = excuse_patterns_path () in
+    let json_items = List.map (fun (pat, reason) -> `List [`String pat; `String reason]) patterns in
+    let json = `List json_items in
+    let tmp = path ^ ".tmp" in
+    let content = Yojson.Safe.pretty_to_string json in
+    Fs_compat.save_file tmp content;
+    Sys.rename tmp path;
+    cached_patterns := Some patterns;
+    Ok ()
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error (Printf.sprintf "Failed to save excuse patterns: %s" (Printexc.to_string exn))
+
 let min_notes_length = 10
 
 (** Check if notes contain a known excuse pattern.
     Returns [Some (pattern, reason)] on match, [None] otherwise. *)
 let find_excuse_pattern (notes : string) : (string * string) option =
+  let patterns = load_excuse_patterns () in
   let lower = String.lowercase_ascii notes in
   List.find_opt (fun (pat, _reason) ->
-    (* Simple substring search without Str module *)
-    let plen = String.length pat in
-    let nlen = String.length lower in
-    if plen > nlen then false
-    else
-      let rec scan i =
-        if i > nlen - plen then false
-        else if String.sub lower i plen = pat then true
-        else scan (i + 1)
-      in
-      scan 0
-  ) excuse_patterns
+    String_util.contains_substring lower pat
+  ) patterns
 
 (* ================================================================ *)
 (* LLM verification prompt                                          *)
@@ -256,17 +348,7 @@ let default_evaluator_cascade = "cross_verifier"
 let check_contract ~(notes : string) ~(contract : string list) : string list =
   let lower_notes = String.lowercase_ascii notes in
   List.filter (fun item ->
-    let lower_item = String.lowercase_ascii item in
-    let ilen = String.length lower_item in
-    let nlen = String.length lower_notes in
-    if ilen > nlen then true  (* unmet: item longer than notes *)
-    else
-      let rec scan i =
-        if i > nlen - ilen then true  (* not found = unmet *)
-        else if String.sub lower_notes i ilen = lower_item then false  (* found = met *)
-        else scan (i + 1)
-      in
-      scan 0
+    not (String_util.contains_substring_ci lower_notes item)
   ) contract
 
 let review
@@ -286,7 +368,7 @@ let review
   if String.length notes_trimmed < min_notes_length then
     emit { verdict = Reject (sprintf "completion notes too short (%d chars, minimum %d)"
                           (String.length notes_trimmed) min_notes_length);
-      evaluator_cascade; generator_cascade; gate = "length"; fallback_reason = None }
+      evaluator_cascade; generator_cascade; gate = Length; fallback_reason = None }
   else
   (* Gate 2: local excuse pattern detection *)
   match find_excuse_pattern notes_trimmed with
@@ -295,7 +377,7 @@ let review
       req.agent_name req.task_title pattern;
     emit { verdict = Reject (sprintf "avoidance pattern detected: \"%s\" (%s). Revise your notes to describe actual completed work."
                           pattern reason);
-      evaluator_cascade; generator_cascade; gate = "excuse"; fallback_reason = None }
+      evaluator_cascade; generator_cascade; gate = Excuse; fallback_reason = None }
   | None ->
   (* Gate 2.5: contract verification (local, no LLM) *)
   let contract_rejection =
@@ -314,7 +396,7 @@ let review
   match contract_rejection with
   | Some reason ->
     emit { verdict = Reject reason;
-      evaluator_cascade; generator_cascade; gate = "contract"; fallback_reason = None }
+      evaluator_cascade; generator_cascade; gate = Contract; fallback_reason = None }
   | None ->
     (* Gate 3: LLM review via evaluator cascade (structured tool output, ADR D3) *)
     let prompt = build_prompt ~few_shot_block req in
@@ -334,34 +416,36 @@ let review
         (false, sprintf "Invalid verdict format: %s" msg)
     in
     (match
-       Oas_worker.run_named_with_masc_tools
-         ~cascade_name:evaluator_cascade
-         ~goal:prompt
-         ~masc_tools:[report_review_verdict_schema]
-         ~dispatch
-         ~max_turns:1
-         ~temperature:Oas_worker_cascade.deterministic_temperature
-         ~max_tokens:200
-         ?sw
-         ()
+       Masc_oas_bridge.run_safe ~timeout_s:180.0 (fun () ->
+         Oas_worker.run_named_with_masc_tools
+           ~cascade_name:evaluator_cascade
+           ~goal:prompt
+           ~masc_tools:[report_review_verdict_schema]
+           ~dispatch
+           ~max_turns:1
+           ~temperature:Oas_worker_cascade.deterministic_temperature
+           ~max_tokens:200
+           ?sw
+           ()
+       )
      with
      | Ok result ->
        let (v, gate, fallback_reason) = match !verdict_ref with
          | Some v ->
            Log.Task.info "[anti-rationalization] verdict via structured tool call";
-           (v, "structured_tool", None)
+           (v, Structured_tool, None)
          | None ->
            (* LLM responded with text — lenient fallback *)
            let text = Oas_response.text_of_response result.response in
            Log.Task.info "[anti-rationalization] verdict via text fallback";
            (match parse_verdict text with
-            | Ok v -> (v, "llm_text_fallback", None)
+            | Ok v -> (v, Llm_text_fallback, None)
             | Error parse_err ->
               (* ADR D3: parse failure is NOT silently approved.
                  Use Reject instead of Approve for unknown format. *)
               Log.Task.warn "[anti-rationalization] verdict parse failed: %s (rejecting)" parse_err;
               ( Reject (sprintf "review format unrecognized: %s" parse_err),
-                "format_reject",
+                Format_reject,
                 Some parse_err ))
        in
        (match v with
@@ -376,7 +460,7 @@ let review
        (* Liveness > correctness: if LLM is unavailable, approve *)
        let msg = Oas.Error.to_string err in
        Log.Task.warn "[anti-rationalization] LLM unavailable: %s (approving by default)" msg;
-       emit { verdict = Approve; evaluator_cascade; generator_cascade; gate = "fallback"; fallback_reason = Some msg })
+       emit { verdict = Approve; evaluator_cascade; generator_cascade; gate = Fallback; fallback_reason = Some msg })
 
 (** Backward-compatible wrapper that returns only the verdict.
     Use [review] directly for structured results with audit metadata. *)
@@ -388,7 +472,7 @@ let review_result_to_json (r : review_result) : Yojson.Safe.t =
     ("verdict", `String (match r.verdict with Approve -> "approve" | Reject s -> "reject:" ^ s));
     ("evaluator_cascade", `String r.evaluator_cascade);
     ("generator_cascade", Json_util.string_opt_to_json r.generator_cascade);
-    ("gate", `String r.gate);
+    ("gate", `String (gate_to_string r.gate));
   ] in
   let extra = match r.fallback_reason with
     | Some reason -> [("fallback_reason", `String reason)]

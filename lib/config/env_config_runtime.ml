@@ -416,7 +416,7 @@ module Tools = struct
     if v < 1.0 then 1.0 else v
 
   let web_search_rate_limit_max_calls () =
-    let v = get_int ~default:10 "MASC_WEB_SEARCH_RATE_LIMIT_MAX_CALLS" in
+    let v = get_int ~default:30 "MASC_WEB_SEARCH_RATE_LIMIT_MAX_CALLS" in
     max 1 v
 end
 

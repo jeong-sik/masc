@@ -45,6 +45,16 @@ val preset_names : t -> string list
 (** List all defined group names. *)
 val group_names : t -> string list
 
-(** Resolve a single group name to tool names.
-    Returns [None] if the group is not defined. *)
+(** Check if [agent_preset]'s tool set covers [required_preset]'s.
+    Config-derived — no hardcoded hierarchy. *)
+val preset_can_satisfy : t -> agent_preset:string -> required_preset:string -> bool
+
+(** Check if a preset is allowed to execute workflow mutations
+    (pr merge, pr close, etc.) as configured in [permissions.workflow_presets]. *)
+val allows_workflow : t -> string -> bool
+
+(** Check if a preset allows shell write operations
+    as configured in [permissions.shell_write_presets]. *)
+val allows_shell_write : t -> string -> bool
+
 val resolve_group : t -> string -> string list option

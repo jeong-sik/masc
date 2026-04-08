@@ -178,6 +178,19 @@ let handle_code_search ctx args =
           ("results", `List []);
         ] in
         (true, Yojson.Safe.pretty_to_string response)
+    | Unix.WEXITED 2, output ->
+        (* rg error: invalid regex, missing file, etc. Provide actionable help. *)
+        let hint =
+          if is_regex then
+            "Regex error: check your pattern syntax, or set is_regex=false for literal search."
+          else
+            "Literal search failed. If your query contains regex chars (*+?[](){}^$|.\\), \
+             try simplifying the query or set is_regex=true with a valid regex."
+        in
+        (false, Printf.sprintf "❌ %s\nrg output: %s" hint
+           (if output = "" then "(empty)" else
+             let s = String.trim output in
+             if String.length s > 300 then String.sub s 0 300 ^ "..." else s))
     | status, output ->
         let code = match status with
           | Unix.WEXITED n -> Printf.sprintf "exit %d" n
@@ -334,8 +347,9 @@ let schemas : Types.tool_schema list = [
   (* masc_code_search *)
   {
     name = "masc_code_search";
-    description = "Search code by query using ripgrep. Default is literal string match; set is_regex=true for regex. \
-Returns structured results (file, line, content).";
+    description = "Search code using ripgrep. Literal match by default (is_regex=false). \
+Use simple words/phrases as query. Example: query='handle_request', file_pattern='*.ml'. \
+Set is_regex=true only for patterns like 'foo.*bar' or 'class \\w+'.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

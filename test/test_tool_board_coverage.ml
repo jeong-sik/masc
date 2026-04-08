@@ -478,8 +478,9 @@ let test_post_get_not_found () =
   cleanup ();
   let ok, body = dispatch "masc_board_get"
     (make_args [("post_id", `String "nonexistent-id")]) in
-  Alcotest.(check bool) "not found fails" false ok;
-  Alcotest.(check bool) "error msg" true (String.length body > 0)
+  Alcotest.(check bool) "not found is idempotent success" true ok;
+  Alcotest.(check bool) "body mentions gone" true
+    (String_util.contains_substring_ci body "no longer exists")
 
 (** {2 Group 4: Voting} *)
 

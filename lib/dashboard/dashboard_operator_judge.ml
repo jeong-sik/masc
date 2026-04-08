@@ -236,12 +236,14 @@ let compute_judgments
     ~(masc_tools : Types.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
     ~facts_json =
-  let _timeout_sec = Env_config.Inference.operator_judge_timeout_seconds in
+  let timeout_s = Float.of_int Env_config.Inference.operator_judge_timeout_seconds in
   let prompt = prompt_for_facts facts_json in
   match
-    Oas_worker.run_named_with_masc_tools ~cascade_name:"operator_judge"
-      ~goal:prompt ~masc_tools ~dispatch ~max_turns:3
-      ()
+    Masc_oas_bridge.run_safe ~timeout_s (fun () ->
+      Oas_worker.run_named_with_masc_tools ~cascade_name:"operator_judge"
+        ~goal:prompt ~masc_tools ~dispatch ~max_turns:3
+        ()
+    )
   with
   | Error err -> Error (Oas.Error.to_string err)
   | Ok result -> (
@@ -262,7 +264,7 @@ let should_backoff ~sw ~net =
     in
     capacity.all_discovered && capacity.endpoints_found > 0
     && capacity.process_available <= 0
-  with exn ->
+  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Eio.traceln
       "[operator] capacity check failed in should_backoff: %s"
       (Printexc.to_string exn);

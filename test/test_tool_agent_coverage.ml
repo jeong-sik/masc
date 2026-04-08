@@ -214,8 +214,26 @@ let test_find_by_capability () =
 let test_get_metrics_no_data () =
   with_ctx (fun ctx ->
   let args = `Assoc [("agent_name", `String "nonexistent"); ("days", `Int 7)] in
-  let (_ok, msg) = dispatch_exn ctx ~name:"masc_get_metrics" ~args in
-  Alcotest.(check bool) "has response" true (String.length msg > 0);
+  let (ok, msg) = dispatch_exn ctx ~name:"masc_get_metrics" ~args in
+  Alcotest.(check bool) "no data fails" false ok;
+  let open Yojson.Safe.Util in
+  let json = Yojson.Safe.from_string msg in
+  Alcotest.(check string) "error_code" "not_found"
+    (json |> member "error_code" |> to_string);
+  Alcotest.(check string) "message" "no metrics found for agent: nonexistent"
+    (json |> member "message" |> to_string);
+  )
+
+let test_get_metrics_missing_agent_name () =
+  with_ctx (fun ctx ->
+  let (ok, msg) = dispatch_exn ctx ~name:"masc_get_metrics" ~args:(`Assoc []) in
+  Alcotest.(check bool) "missing agent_name fails" false ok;
+  let open Yojson.Safe.Util in
+  let json = Yojson.Safe.from_string msg in
+  Alcotest.(check string) "status" "error"
+    (json |> member "status" |> to_string);
+  Alcotest.(check string) "message" "agent_name is required"
+    (json |> member "message" |> to_string);
   )
 
 (* ============================================================
@@ -243,8 +261,15 @@ let test_agent_fitness_specific () =
 
 let test_select_agent_missing_agents () =
   with_ctx (fun ctx ->
-  let (ok, _msg) = Tool_agent.handle_select_agent ctx (`Assoc []) in
+  let (ok, msg) = Tool_agent.handle_select_agent ctx (`Assoc []) in
   Alcotest.(check bool) "missing agents fails" false ok;
+  let open Yojson.Safe.Util in
+  let json = Yojson.Safe.from_string msg in
+  Alcotest.(check string) "error_code" "validation_error"
+    (json |> member "error_code" |> to_string);
+  Alcotest.(check string) "message"
+    "available_agents must contain at least one non-empty agent name"
+    (json |> member "message" |> to_string);
   )
 
 let test_select_agent_capability_first () =
@@ -537,6 +562,8 @@ let () =
     ]);
     ("get_metrics", [
       Alcotest.test_case "no data" `Quick test_get_metrics_no_data;
+      Alcotest.test_case "missing agent_name" `Quick
+        test_get_metrics_missing_agent_name;
     ]);
     ("agent_fitness", [
       Alcotest.test_case "no agents" `Quick test_agent_fitness_no_agents;

@@ -1,0 +1,50 @@
+(** Tool_output_validation — Memory-protection cap.
+
+    Context budget management belongs to OAS [context_reducer].
+    This module only prevents OOM from unbounded tool output
+    (e.g. a shell command that dumps a large file).
+
+    The cap is intentionally generous (64 KB): it guards against
+    runaway allocations, not against context window pressure.
+    OAS handles context-level truncation via its compression phases.
+
+    @since #5807 — originally JSON-aware; simplified to boundary-
+    respecting cap in #5821. *)
+
+(* ── Cap ────────────────────────────────────────────────────── *)
+
+(** Hard cap: any tool output beyond this is an OOM risk, not a
+    context budget concern.  64 KB covers any reasonable structured
+    result while preventing multi-MB shell dumps from persisting
+    in the message list. *)
+let max_output_chars = 65_536
+
+let cap (output : string) : string =
+  let len = String.length output in
+  if len <= max_output_chars then output
+  else
+    let kept = String.sub output 0 max_output_chars in
+    Printf.sprintf "%s\n[capped: %d/%d chars]" kept max_output_chars len
+
+(* ── Post-hook for Tool_dispatch ────────────────────────────── *)
+
+let post_hook (result : Tool_result.t) : Tool_result.t =
+  match result.data with
+  | `String s when String.length s > max_output_chars ->
+    { result with data = `String (cap s) }
+  | `List _ | `Assoc _ ->
+    let serialized = Yojson.Safe.to_string result.data in
+    if String.length serialized <= max_output_chars then result
+    else
+      { result with data = `String (cap serialized) }
+  | _ -> result
+
+(* ── Installation ───────────────────────────────────────────── *)
+
+let installed = ref false
+
+let install () =
+  if not !installed then begin
+    Tool_dispatch.register_post_hook post_hook;
+    installed := true
+  end

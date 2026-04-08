@@ -22,12 +22,12 @@ let recency_lambda = 0.01
 
 let configured_max_k () =
   match Sys.getenv_opt "MASC_KEEPER_TOOL_AFFINITY_K" with
-  | Some s -> (try max 0 (min 20 (int_of_string s)) with _ -> default_max_k)
+  | Some s -> (try max 0 (min 20 (int_of_string s)) with Eio.Cancel.Cancelled _ as e -> raise e | _ -> default_max_k)
   | None -> default_max_k
 
 let configured_lookback_days () =
   match Sys.getenv_opt "MASC_KEEPER_TOOL_AFFINITY_LOOKBACK_DAYS" with
-  | Some s -> (try max 1 (min 30 (int_of_string s)) with _ -> default_lookback_days)
+  | Some s -> (try max 1 (min 30 (int_of_string s)) with Eio.Cancel.Cancelled _ as e -> raise e | _ -> default_lookback_days)
   | None -> default_lookback_days
 
 (* ================================================================ *)
@@ -67,7 +67,7 @@ let unix_of_iso8601 (s : string) : float option =
         } in
         let (ts, _) = Unix.mktime tm in
         Some (ts -. utc_offset_sec))
-  with _ -> None
+  with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None
 
 (* ================================================================ *)
 (* Scoring                                                           *)

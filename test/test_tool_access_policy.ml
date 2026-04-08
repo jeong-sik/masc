@@ -624,7 +624,7 @@ let test_registered_inline_board_tool_survives_filter () =
 
 let () =
   let base_path = Masc_test_deps.find_project_root () in
-  Keeper_exec_tools.init_policy_config ~base_path;
+  ignore (Result.get_ok (Keeper_exec_tools.init_policy_config ~base_path));
   run "Tool_access_policy"
     [
       ( "selector_basics",

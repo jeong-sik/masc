@@ -12,14 +12,28 @@ type result = bool * string
 
 (* Individual handlers *)
 let handle_worktree_create ctx args =
+  (* LLM may omit agent_name in args; fall back to context agent_name.
+     This prevents Validation.Agent_id failures when the 9B model
+     sends empty or missing agent_name. *)
+  let agent_name =
+    let from_args = get_string args "agent_name" "" in
+    if from_args = "" then ctx.agent_name else from_args
+  in
   let task_id = get_string args "task_id" "" in
   let base_branch = get_string args "base_branch" "develop" in
-  match Room.worktree_create_r ctx.config ~agent_name:ctx.agent_name ~task_id ~base_branch with
+  if task_id = "" then
+    (false, "task_id is required. Example: task_id='fix-login', task_id='feature/auth'. \
+             Use a short descriptive name for your task.")
+  else
+  match Room.worktree_create_r ctx.config ~agent_name ~task_id ~base_branch with
   | Ok msg -> (true, msg)
   | Error e -> (false, Types.masc_error_to_string e)
 
 let handle_worktree_remove ctx args =
   let task_id = get_string args "task_id" "" in
+  if task_id = "" then
+    (false, "task_id is required. Use the same task_id you passed to masc_worktree_create.")
+  else
   match Room.worktree_remove_r ctx.config ~agent_name:ctx.agent_name ~task_id with
   | Ok msg -> (true, msg)
   | Error e -> (false, Types.masc_error_to_string e)

@@ -37,22 +37,6 @@ let register_module ~(schemas : Types.tool_schema list) ~(handler : handler) =
         Hashtbl.replace registry schema.name handler)
       schemas)
 
-(** O(1) dispatch.  Returns [Some (success, message)] when a handler is
-    found, [None] when the tool name is unknown to the registry.
-    Handler exceptions are caught and returned as error tuples so the
-    caller gets a consistent result shape. *)
-let dispatch ~(token : Tool_token.t) ~args : (bool * string) option =
-  let name = token.name in
-  match Hashtbl.find_opt registry name with
-  | Some handler -> (
-      try handler ~name ~args
-      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-        Some
-          ( false,
-            Printf.sprintf "dispatch_v2 handler error for %s: %s" name
-              (Printexc.to_string exn) ))
-  | None -> None
-
 (** {2 Dispatch Hooks}
 
     Pre-hooks run before the handler; post-hooks run after.
@@ -106,25 +90,52 @@ let run_pre_hooks ~name ~args =
 let run_post_hooks result =
   List.fold_left (fun r hook -> hook r) result !post_hooks
 
+(** O(1) dispatch.  Returns [Some (success, message)] when a handler is
+    found, [None] when the tool name is unknown to the registry.
+    Handler exceptions are caught and returned as error tuples so the
+    caller gets a consistent result shape.
+
+    Post-hooks fire as a side-effect after the handler completes,
+    enabling tool metrics and usage logging for all dispatch paths
+    (keeper, MCP, tag-dispatch). *)
+let dispatch ~(token : Tool_token.t) ~args : (bool * string) option =
+  let name = token.name in
+  match Hashtbl.find_opt registry name with
+  | Some handler ->
+    let start_time = Time_compat.now () in
+    let result =
+      try handler ~name ~args
+      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+        Some
+          ( false,
+            Printf.sprintf "dispatch_v2 handler error for %s: %s" name
+              (Printexc.to_string exn) )
+    in
+    (match result with
+     | Some (success, message) ->
+       let tr = Tool_result.wrap ~tool_name:name ~start_time (success, message) in
+       let tr' = run_post_hooks tr in
+       Some (Tool_result.to_legacy tr')
+     | None -> None)
+  | None -> None
+
 (** Structured dispatch with hook support.
 
-    Execution order: pre-hooks → handler → post-hooks.
+    Execution order: pre-hooks → handler (with post-hooks) → result wrapping.
 
-    If a pre-hook short-circuits, the handler and post-hooks are skipped
-    and the pre-hook's result is returned directly.
+    Post-hooks are already fired inside [dispatch], so this function only
+    adds pre-hook gating and [Tool_result.t] wrapping.
 
     Returns [None] when the tool is unknown to the registry. *)
 let dispatch_structured ~(token : Tool_token.t) ~args : Tool_result.t option =
   let name = token.name in
-  (* Pre-hooks: may short-circuit or coerce args *)
   match run_pre_hooks ~name ~args with
   | (Some _ as blocked, _) -> blocked
   | (None, coerced_args) ->
     let start_time = Time_compat.now () in
     (match dispatch ~token ~args:coerced_args with
      | Some (success, message) ->
-       let result = Tool_result.wrap ~tool_name:name ~start_time (success, message) in
-       Some (run_post_hooks result)
+       Some (Tool_result.wrap ~tool_name:name ~start_time (success, message))
      | None -> None)
 
 (** Feature flag: use the new dispatch path.
@@ -142,6 +153,8 @@ let is_registered name = Hashtbl.mem registry name
 let read_only_set : (string, unit) Hashtbl.t = Hashtbl.create 32
 let requires_join_set : (string, unit) Hashtbl.t = Hashtbl.create 64
 let mcp_context_required_set : (string, unit) Hashtbl.t = Hashtbl.create 64
+let destructive_set : (string, unit) Hashtbl.t = Hashtbl.create 16
+let idempotent_set : (string, unit) Hashtbl.t = Hashtbl.create 32
 
 let init_read_only_set (names : string list) =
   with_dispatch_rw (fun () ->
@@ -155,10 +168,20 @@ let init_mcp_context_required_set (names : string list) =
   with_dispatch_rw (fun () ->
     List.iter (fun name -> Hashtbl.replace mcp_context_required_set name ()) names)
 
+let init_destructive_set (names : string list) =
+  with_dispatch_rw (fun () ->
+    List.iter (fun name -> Hashtbl.replace destructive_set name ()) names)
+
+let init_idempotent_set (names : string list) =
+  with_dispatch_rw (fun () ->
+    List.iter (fun name -> Hashtbl.replace idempotent_set name ()) names)
+
 let is_read_only name = with_dispatch_ro (fun () -> Hashtbl.mem read_only_set name)
 let is_join_required name = with_dispatch_ro (fun () -> Hashtbl.mem requires_join_set name)
 let is_mcp_context_required name =
   with_dispatch_ro (fun () -> Hashtbl.mem mcp_context_required_set name)
+let is_destructive name = with_dispatch_ro (fun () -> Hashtbl.mem destructive_set name)
+let is_idempotent name = with_dispatch_ro (fun () -> Hashtbl.mem idempotent_set name)
 
 (** {2 Module Tag Dispatch — O(1) two-level dispatch}
 

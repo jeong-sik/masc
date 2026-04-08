@@ -139,7 +139,7 @@ let generate_code_change = Autoresearch_codegen.generate_code_change
 (* Loop State Management                                             *)
 (* ================================================================ *)
 
-let create_state ~goal ~metric_fn ?(model_model = "glm") ~target_file ~cycle_timeout_s ~max_cycles ?patience ?build_verify_fn ~workdir () =
+let create_state ~goal ~metric_fn ?(model_model = "glm") ~target_file ~cycle_timeout_s ~max_cycles ?patience ?build_verify_fn ?(lower_is_better = false) ~workdir () =
   let now = Time_compat.now () in
   let patience = match patience with
     | Some p -> p
@@ -173,6 +173,7 @@ let create_state ~goal ~metric_fn ?(model_model = "glm") ~target_file ~cycle_tim
     patience;
     consecutive_discards = 0;
     build_verify_fn;
+    lower_is_better;
   }
 
 (** Append an insight, maintaining FIFO max 10 entries.
@@ -193,8 +194,13 @@ let record_cycle (state : loop_state) ~hypothesis ~score_before ~score_after
     ~commit_hash ~elapsed_ms ~model_used =
   let delta = score_after -. score_before in
   (* Compare against the maintained baseline, not score_before which can dip
-     below baseline due to metric noise -- preventing ratchet-down regressions *)
-  let decision = if score_after > state.baseline then Keep else Discard in
+     below baseline due to metric noise -- preventing ratchet-down regressions.
+     Polarity: lower_is_better inverts the comparison direction. *)
+  let is_improvement =
+    if state.lower_is_better then score_after < state.baseline
+    else score_after > state.baseline
+  in
+  let decision = if is_improvement then Keep else Discard in
   let now = Time_compat.now () in
   let record = {
     cycle = state.current_cycle;
@@ -215,8 +221,12 @@ let record_cycle (state : loop_state) ~hypothesis ~score_before ~score_after
       let state = { state with
         total_keeps = state.total_keeps + 1;
         baseline = score_after } in
+      let is_new_best =
+        if state.lower_is_better then score_after < state.best_score
+        else score_after > state.best_score
+      in
       let state =
-        if score_after > state.best_score then
+        if is_new_best then
           { state with best_score = score_after; best_cycle = state.current_cycle }
         else state
       in
@@ -282,6 +292,7 @@ let stop_loop ~base_path ?reason loop_id =
                 patience = persisted.patience;
                 consecutive_discards = persisted.consecutive_discards;
                 build_verify_fn = persisted.build_verify_fn;
+                lower_is_better = persisted.lower_is_better;
               }
             in
             Some (stop_state state)))

@@ -34,9 +34,9 @@ let activity_graph_http_json ~sw ~clock ~state request =
 let json_upsert_string_field name value = function
   | `Assoc fields ->
       let fields = List.filter (fun (k, _) -> k <> name) fields in
-      `Assoc ((name, `String value) :: fields)
+      Ok (`Assoc ((name, `String value) :: fields))
   | _non_object ->
-      failwith (Printf.sprintf "json_upsert_string_field: expected JSON object, got non-object for field %S" name)
+      Error (Printf.sprintf "json_upsert_string_field: expected JSON object, got non-object for field %S" name)
 
 let json_ensure_meta_source source = function
   | `Assoc fields ->
@@ -49,9 +49,9 @@ let json_ensure_meta_source source = function
         | _ -> `Assoc [ ("source", `String source) ]
       in
       let fields = ("meta", meta_json) :: List.filter (fun (k, _) -> k <> "meta") fields in
-      `Assoc fields
+      Ok (`Assoc fields)
   | _non_object ->
-      failwith "json_ensure_meta_source: expected JSON object"
+      Error "json_ensure_meta_source: expected JSON object"
 
 let governance_surface_for_param_key param_key =
   Governance_registry.surfaces
@@ -245,10 +245,21 @@ let add_routes ~sw ~clock router =
          let agent_name = Option.bind (Httpun.Headers.get request.Httpun.Request.headers "x-masc-agent") (fun s -> if s = "" then None else Some s) |> Option.value ~default:"dashboard" in
          Http.Request.read_body_async reqd (fun body_str ->
            try
-             let args =
-               Yojson.Safe.from_string body_str
-               |> json_upsert_string_field "voter" agent_name
+             let ( let* ) r f =
+               match r with
+               | Ok v -> f v
+               | Error msg ->
+                   respond_json_with_cors ~status:`Bad_request request reqd
+                     (Yojson.Safe.to_string (`Assoc [
+                       ("ok", `Bool false);
+                       ("message", `String msg)
+                     ]))
              in
+             let* args =
+               try Ok (Yojson.Safe.from_string body_str)
+               with Yojson.Json_error msg -> Error ("Invalid JSON: " ^ msg)
+             in
+             let* args = json_upsert_string_field "voter" agent_name args in
              let (ok, msg) = Tool_board.handle_tool "masc_board_vote" args in
              let status = if ok then `OK else `Bad_request in
              respond_json_with_cors ~status request reqd
@@ -270,11 +281,22 @@ let add_routes ~sw ~clock router =
          let agent_name = Option.bind (Httpun.Headers.get request.Httpun.Request.headers "x-masc-agent") (fun s -> if s = "" then None else Some s) |> Option.value ~default:"dashboard" in
          Http.Request.read_body_async reqd (fun body_str ->
            try
-             let args =
-               Yojson.Safe.from_string body_str
-               |> json_upsert_string_field "author" agent_name
-               |> json_ensure_meta_source "dashboard_board_post"
+             let ( let* ) r f =
+               match r with
+               | Ok v -> f v
+               | Error msg ->
+                   respond_json_with_cors ~status:`Bad_request request reqd
+                     (Yojson.Safe.to_string (`Assoc [
+                       ("ok", `Bool false);
+                       ("message", `String msg)
+                     ]))
              in
+             let* args =
+               try Ok (Yojson.Safe.from_string body_str)
+               with Yojson.Json_error msg -> Error ("Invalid JSON: " ^ msg)
+             in
+             let* args = json_upsert_string_field "author" agent_name args in
+             let* args = json_ensure_meta_source "dashboard_board_post" args in
              let (ok, msg) = Tool_board.handle_tool "masc_board_post" args in
              let status = if ok then `Created else `Bad_request in
              respond_json_with_cors ~status request reqd
@@ -296,10 +318,21 @@ let add_routes ~sw ~clock router =
          let agent_name = Option.bind (Httpun.Headers.get request.Httpun.Request.headers "x-masc-agent") (fun s -> if s = "" then None else Some s) |> Option.value ~default:"dashboard" in
          Http.Request.read_body_async reqd (fun body_str ->
            try
-             let args =
-               Yojson.Safe.from_string body_str
-               |> json_upsert_string_field "author" agent_name
+             let ( let* ) r f =
+               match r with
+               | Ok v -> f v
+               | Error msg ->
+                   respond_json_with_cors ~status:`Bad_request request reqd
+                     (Yojson.Safe.to_string (`Assoc [
+                       ("ok", `Bool false);
+                       ("message", `String msg)
+                     ]))
              in
+             let* args =
+               try Ok (Yojson.Safe.from_string body_str)
+               with Yojson.Json_error msg -> Error ("Invalid JSON: " ^ msg)
+             in
+             let* args = json_upsert_string_field "author" agent_name args in
              let (ok, msg) = Tool_board.handle_tool "masc_board_comment" args in
              let status = if ok then `Created else `Bad_request in
              respond_json_with_cors ~status request reqd
@@ -416,7 +449,7 @@ let add_routes ~sw ~clock router =
                    Prompt_registry.clear_prompt_override key;
                    (try Prompt_registry.persist_overrides
                           state.Mcp_server.room_config.base_path
-                    with exn ->
+                    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
                       Log.Pages.warn "prompt override persist (clear) failed: %s"
                         (Printexc.to_string exn));
                    Ok "override cleared"
@@ -427,7 +460,7 @@ let add_routes ~sw ~clock router =
                    | Ok () ->
                      (try Prompt_registry.persist_overrides
                             state.Mcp_server.room_config.base_path
-                      with exn ->
+                      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
                         Log.Pages.warn "prompt override persist (set) failed: %s"
                           (Printexc.to_string exn));
                      Ok "override set"

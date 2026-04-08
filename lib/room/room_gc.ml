@@ -77,7 +77,7 @@ let cleanup_zombies
                     (should_dual_write_local), explicitly remove the local file
                     as well to avoid repeated GC warnings on each scan cycle. *)
                  (try Sys.remove path with Sys_error _ -> ())
-               with exn ->
+               with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
                  Log.Gc.warn "failed to remove broken agent %s: %s"
                    path (Printexc.to_string exn))
         end

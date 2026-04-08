@@ -1,13 +1,13 @@
 # masc-mcp Makefile
 # Enterprise-ready development commands
 
-.PHONY: build test test-unit test-contract test-contract-live test-transport test-webrtc-live-env test-all clean coverage coverage-summary coverage-html coverage-percent doc install-deps dev-setup fmt fmt-check health ci dashboard dev-dashboard build-all viewer-build viewer-serve harness-game-view-contract harness-streamable-http-contract harness-trpg-session-contract harness-trpg-grimland-smoke viewer-local-e2e-check check-memory-leak
+.PHONY: build test test-unit test-contract test-contract-live test-transport test-webrtc-live-env test-all clean coverage coverage-summary coverage-html coverage-percent doc install-deps pin-external-deps doctor-oas-pin dev-setup fmt fmt-check health ci dashboard dev-dashboard build-all viewer-build viewer-serve harness-game-view-contract harness-streamable-http-contract harness-trpg-session-contract harness-trpg-grimland-smoke viewer-local-e2e-check check-memory-leak
 
 # Default target — OCaml + dashboard
 all: build-all
 
 # Build OCaml + dashboard (dashboard rebuilds only when sources changed)
-build:
+build: doctor-oas-pin
 	dune build --root .
 	@scripts/build-dashboard-if-needed.sh
 
@@ -23,11 +23,10 @@ dev-dashboard:
 build-all: build
 
 # Run tests (alias for test-unit)
-test:
-	scripts/ci-run-tests.sh "opam exec -- dune test --root ."
+test: test-unit
 
 # Unit tests only (no server required)
-test-unit:
+test-unit: doctor-oas-pin
 	scripts/ci-run-tests.sh "opam exec -- dune test --root ."
 
 # Contract harness (self-bootstrapping, hermetic local server)
@@ -83,8 +82,16 @@ doc:
 install-deps:
 	opam install . --deps-only --with-test --with-doc -y
 
+# Align first-party opam pins (agent_sdk, grpc-direct, etc.) to repo SSOT.
+pin-external-deps:
+	bash scripts/opam-pin-external-deps.sh
+
+# Fast local-only doctor for OAS/agent_sdk pin drift in the current switch.
+doctor-oas-pin:
+	bash scripts/check-oas-pin.sh --local-only
+
 # Development setup
-dev-setup: install-deps
+dev-setup: pin-external-deps install-deps
 	@echo "Development environment ready!"
 
 # Format code (if ocamlformat is installed)

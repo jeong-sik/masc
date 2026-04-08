@@ -200,6 +200,94 @@ let test_topk_llm_always_include_survives () =
   Alcotest.(check bool) "always_include[1] present"
     true (List.mem "keeper_context_status" selected)
 
+let test_selection_boundary_preserves_deterministic_floor () =
+  let deterministic_prefilter = ["keeper_fs_read"; "keeper_board_post"] in
+  let llm_selected = ["keeper_board_post"] in
+  let merged =
+    Keeper_agent_run.merge_tool_selection_boundary
+      ~core:["keeper_context_status"]
+      ~deterministic_prefilter
+      ~llm_selected
+      ~discovered:["keeper_tool_search"]
+  in
+  Alcotest.(check bool) "input carries duplicate across boundary" true
+    (List.mem "keeper_board_post" deterministic_prefilter
+     && List.mem "keeper_board_post" llm_selected);
+  let board_post_count =
+    List.fold_left (fun acc name ->
+      if name = "keeper_board_post" then acc + 1 else acc
+    ) 0 merged
+  in
+  Alcotest.(check int) "merged list contains 4 unique tools" 4
+    (List.length merged);
+  Alcotest.(check int) "duplicate removed from merged result" 1
+    board_post_count;
+  Alcotest.(check (list string))
+    "deterministic floor survives even when llm omits most tools"
+    [ "keeper_context_status";
+      "keeper_fs_read";
+      "keeper_board_post";
+      "keeper_tool_search";
+    ]
+    merged
+
+let test_selection_boundary_appends_llm_only_extras () =
+  let merged =
+    Keeper_agent_run.merge_tool_selection_boundary
+      ~core:["keeper_context_status"]
+      ~deterministic_prefilter:["keeper_fs_read"]
+      ~llm_selected:["keeper_bash"; "keeper_fs_read"; "keeper_board_post"]
+      ~discovered:["keeper_tool_search"]
+  in
+  let index_of name =
+    let rec loop i = function
+      | [] -> None
+      | x :: xs -> if x = name then Some i else loop (i + 1) xs
+    in
+    loop 0 merged
+  in
+  let discovered_ix = index_of "keeper_tool_search" in
+  let llm_extra_ix = index_of "keeper_bash" in
+  Alcotest.(check bool) "deterministic tool stays ahead of llm extra"
+    true
+    (match discovered_ix, llm_extra_ix with
+     | Some d, Some e -> d < e
+     | _ -> false);
+  Alcotest.(check (list string))
+    "llm extras append after deterministic floor without duplicates"
+    [ "keeper_context_status";
+      "keeper_fs_read";
+      "keeper_tool_search";
+      "keeper_bash";
+      "keeper_board_post";
+    ]
+    merged
+
+let test_selection_boundary_sorts_discovered () =
+  (* discovered arrives in Hashtbl.fold order (non-deterministic).
+     merge_tool_selection_boundary must sort it for stable output. *)
+  let merged_ab =
+    Keeper_agent_run.merge_tool_selection_boundary
+      ~core:["core_tool"]
+      ~deterministic_prefilter:[]
+      ~llm_selected:[]
+      ~discovered:["tool_b"; "tool_a"]
+  in
+  let merged_ba =
+    Keeper_agent_run.merge_tool_selection_boundary
+      ~core:["core_tool"]
+      ~deterministic_prefilter:[]
+      ~llm_selected:[]
+      ~discovered:["tool_a"; "tool_b"]
+  in
+  Alcotest.(check (list string))
+    "discovered order is stable regardless of input order"
+    merged_ab merged_ba;
+  Alcotest.(check (list string))
+    "discovered is sorted alphabetically after core"
+    ["core_tool"; "tool_a"; "tool_b"]
+    merged_ab
+
 let test_keeper_config_defaults () =
   (* Default: LLM rerank disabled *)
   Alcotest.(check bool) "llm_rerank disabled by default"
@@ -228,6 +316,12 @@ let () =
         test_topk_llm_keyword_rerank;
       Alcotest.test_case "always_include survives" `Quick
         test_topk_llm_always_include_survives;
+      Alcotest.test_case "deterministic floor preserved" `Quick
+        test_selection_boundary_preserves_deterministic_floor;
+      Alcotest.test_case "llm extras append after floor" `Quick
+        test_selection_boundary_appends_llm_only_extras;
+      Alcotest.test_case "discovered sorted for stable order" `Quick
+        test_selection_boundary_sorts_discovered;
     ];
     "keeper_config", [
       Alcotest.test_case "config defaults" `Quick

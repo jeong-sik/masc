@@ -606,20 +606,11 @@ let observe ~(pending_board_events : pending_board_event list option)
       since_last >= float_of_int interval
     | _ -> false
   in
-  (* Telemetry Feedback: compute behavioral stats from decision log *)
+  (* Telemetry Feedback: read cached behavioral stats (proactive refresh) *)
   let behavioral_stats =
     match meta.telemetry_feedback_enabled with
     | Some true ->
-      let window =
-        Option.value ~default:24 meta.telemetry_feedback_window_hours
-      in
-      let log_path =
-        Keeper_types_support.keeper_decision_log_path config meta.name
-      in
-      (try
-         Some (Keeper_telemetry_feedback.compute_stats
-                 ~decision_log_path:log_path ~window_hours:window)
-       with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None)
+      Keeper_telemetry_feedback.get_cached_stats ~keeper_name:meta.name
     | _ -> None
   in
   {

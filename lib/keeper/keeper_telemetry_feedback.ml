@@ -69,25 +69,21 @@ let parse_decision_line (line : string) : parsed_decision option =
 (* Stats computation                                                   *)
 (* ------------------------------------------------------------------ *)
 
-(* Bound file parsing to last N lines. Decision logs are append-only
-   so the most recent entries are at the end. 2000 lines covers ~16h
-   at 2 turns/min, well within any configured window. *)
-let max_decision_lines = 2000
-
-let take_last n lst =
-  let len = List.length lst in
-  if len <= n then lst
-  else List.filteri (fun i _ -> i >= len - n) lst
+(* Scale the tail-read limit to the configured window so we never drop
+   in-window entries due to truncation.  At up to 3 turns/min, one hour
+   produces at most 180 lines; multiply by window_hours and add a small
+   buffer.  Hard floor 500 (tiny or zero windows), hard ceiling 10_000
+   (memory safety).  window_hours <= 0 is treated as window_hours = 0 and
+   falls through to the 500-line floor. *)
+let tail_limit_for ~window_hours =
+  max 500 (min 10_000 (window_hours * 180 + 200))
 
 let compute_stats ~decision_log_path ~window_hours =
   let now_ts = Unix.gettimeofday () in
   let window_start = now_ts -. (float_of_int window_hours *. 3600.0) in
   let lines =
-    try
-      let content = Fs_compat.load_file decision_log_path in
-      String.split_on_char '\n' content
-      |> List.filter (fun s -> String.trim s <> "")
-      |> take_last max_decision_lines
+    try Dated_jsonl.load_tail_lines decision_log_path
+          ~max_lines:(tail_limit_for ~window_hours)
     with Eio.Cancel.Cancelled _ as e -> raise e | _ -> []
   in
   let decisions =
@@ -161,6 +157,58 @@ let compute_stats ~decision_log_path ~window_hours =
       pr_workflow_attempts;
       work_discovery_count = 0;
     }
+
+(* ------------------------------------------------------------------ *)
+(* Proactive cache layer                                               *)
+(* ------------------------------------------------------------------ *)
+
+type stats_cache = {
+  stats : behavioral_stats;
+  computed_at : float;
+}
+
+let stats_caches : (string, stats_cache) Hashtbl.t = Hashtbl.create 8
+let stats_mu = Eio.Mutex.create ()
+
+let refresh_stats ~keeper_name ~decision_log_path ~window_hours =
+  let stats = compute_stats ~decision_log_path ~window_hours in
+  Eio.Mutex.use_rw ~protect:true stats_mu (fun () ->
+    Hashtbl.replace stats_caches keeper_name
+      { stats; computed_at = Unix.gettimeofday () })
+
+(** Return cached stats for a keeper. Returns [None] if no cache entry exists
+    (first turn before refresh loop has run). Callers should handle [None]
+    by omitting the telemetry block rather than showing "last 0h". *)
+let get_cached_stats ~keeper_name : behavioral_stats option =
+  Eio.Mutex.use_ro stats_mu (fun () ->
+    match Hashtbl.find_opt stats_caches keeper_name with
+    | Some c -> Some c.stats
+    | None -> None)
+
+let get_cache_age_sec ~keeper_name =
+  Eio.Mutex.use_ro stats_mu (fun () ->
+    match Hashtbl.find_opt stats_caches keeper_name with
+    | Some c -> Some (Unix.gettimeofday () -. c.computed_at)
+    | None -> None)
+
+(** Start a background fiber that periodically refreshes telemetry stats.
+    The fiber is linked to [sw] — when the keeper's switch is cancelled
+    (stop/crash), the fiber terminates automatically via Eio.Cancel.Cancelled. *)
+let start_refresh_loop ~sw ~clock ~keeper_name ~decision_log_path
+    ~window_hours ~interval_sec ~stop =
+  Eio.Fiber.fork ~sw (fun () ->
+    while not (Atomic.get stop) do
+      (try refresh_stats ~keeper_name ~decision_log_path ~window_hours
+       with
+       | Eio.Cancel.Cancelled _ as ex ->
+           let bt = Printexc.get_raw_backtrace () in
+           Printexc.raise_with_backtrace ex bt
+       | ex ->
+           Log.Keeper.warn "telemetry refresh failed for %s: %s"
+             keeper_name (Printexc.to_string ex));
+      if not (Atomic.get stop) then
+        Eio.Time.sleep clock (float_of_int interval_sec)
+    done)
 
 (* ------------------------------------------------------------------ *)
 (* Prompt rendering                                                    *)

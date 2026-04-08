@@ -6,6 +6,8 @@
  (modules
    a2a_types
    a2a_tools
+   admission_queue
+   admission_queue_metrics
    agent_card
    agent_economy
    agent_health

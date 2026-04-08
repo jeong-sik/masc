@@ -79,6 +79,10 @@ type registry_entry = {
   board_cursor_post_id : string option;
   tool_usage : tool_call_entry StringMap.t;
   transition_seq : int;
+  waiting_for_inference : bool Atomic.t;
+      (** Ephemeral flag: true when keeper is blocked in admission queue.
+          Set/cleared around [Admission_queue.with_permit].
+          Does not affect state machine phase derivation. *)
 }
 
 
@@ -139,6 +143,7 @@ let register ~base_path name meta =
     board_cursor_post_id = None;
     tool_usage = StringMap.empty;
     transition_seq = 0;
+    waiting_for_inference = Atomic.make false;
   } in
   put_entry key entry;
   Atomic.set running_count_atomic (Atomic.get running_count_atomic + 1);

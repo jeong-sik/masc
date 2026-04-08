@@ -172,7 +172,20 @@ let init () =
   register_histogram ~name:"masc_full_checkpoint_size_bytes"
     ~help:"Size in bytes of serialized full checkpoint" ();
   register_gauge ~name:"masc_delta_size_ratio"
-    ~help:"Ratio of delta size to full checkpoint size (last observation)" ()
+    ~help:"Ratio of delta size to full checkpoint size (last observation)" ();
+  (* Inference admission queue metrics *)
+  add "masc_inference_queue_inflight"
+    "Concurrent inference calls holding an admission permit" Gauge;
+  add "masc_inference_queue_depth"
+    "Callers waiting in the admission queue" Gauge;
+  add "masc_inference_queue_max_concurrent"
+    "Configured max concurrent admission permits" Gauge;
+  add "masc_inference_queue_acquired_total"
+    "Total admission permits acquired" Counter;
+  add "masc_inference_queue_cancelled_total"
+    "Total admission waits cancelled by fiber cancellation" Counter;
+  register_histogram ~name:"masc_inference_queue_wait_seconds"
+    ~help:"Time waiting in admission queue before acquiring permit" ()
 
 let start_time = Time_compat.now ()
 

@@ -57,6 +57,9 @@ type registry_entry = {
   board_cursor_post_id : string option;
   tool_usage : Keeper_types.tool_call_entry StringMap.t;
   transition_seq : int;
+  waiting_for_inference : bool Atomic.t;
+      (** Ephemeral flag: true when keeper is blocked in admission queue.
+          Does not affect state machine phase derivation. *)
 }
 
 (** Register a keeper as running. Returns the new entry. *)

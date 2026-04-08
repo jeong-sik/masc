@@ -13,7 +13,7 @@ open Keeper_tool_registry
 (* -- Config-driven preset resolution -------------------------------- *)
 
 (* Loaded by init_policy_config at server startup.
-   None = config not yet loaded or load failed (graceful degradation). *)
+   None = config not yet loaded (init_policy_config not yet called). *)
 let policy_config : Keeper_tool_policy_config.t option ref = ref None
 
 let init_policy_config ~base_path =
@@ -24,7 +24,7 @@ let init_policy_config ~base_path =
       (List.length (Keeper_tool_policy_config.preset_names cfg))
       (List.length (Keeper_tool_policy_config.group_names cfg))
   | Error msg ->
-    Log.Keeper.error "tool policy config load failed: %s" msg
+    failwith (Printf.sprintf "tool policy config load failed: %s" msg)
 
 let preset_name_of_tool_preset = function
   | Minimal -> "minimal"

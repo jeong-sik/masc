@@ -202,7 +202,7 @@ let load ~base_path : (t, string) result =
           List.filter_map (fun name ->
             if Hashtbl.mem presets name then None
             else Some (Printf.sprintf
-              "permissions.%s: preset '%s' is not defined in [presets]" label name)
+              "permissions.%s: preset '%s' is not defined under [presets.*]" label name)
           ) perm_list
         in
         let perm_errors =

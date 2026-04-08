@@ -144,11 +144,16 @@ let init () =
   add "masc_sse_capacity_evictions_total" "Total SSE clients evicted due to max client capacity" Counter;
   add "masc_sse_write_failures_total" "Total SSE write failures by reason" Counter;
   add "masc_sse_rejects_total" "Total SSE connections rejected by storm guard" Counter;
-  add "masc_inference_cache_hits_total" "Total inference cache hits" Counter;
-  add "masc_inference_cache_misses_total" "Total inference cache misses" Counter;
-  add "masc_inference_cache_writes_total" "Total inference cache writes" Counter;
-  add "masc_inference_cache_bypass_total" "Total inference cache bypass decisions" Counter;
-  add "masc_inference_cache_errors_total" "Total inference cache errors" Counter;
+  (* Keeper compaction metrics — emitted by keeper_compact_policy.ml *)
+  add "masc_keeper_compactions_total"
+    "Total keeper compactions performed" Counter;
+  add "masc_keeper_compaction_ratio_change"
+    "Context ratio change after compaction (pre - post)" Gauge;
+  (* Keeper heartbeat metrics — emitted by keeper_keepalive.ml *)
+  add "masc_keeper_heartbeat_successes_total"
+    "Total keeper heartbeat successes" Counter;
+  add "masc_keeper_heartbeat_failures_total"
+    "Total keeper heartbeat failures" Counter;
   add "masc_provider_prefix_cache_creation_tokens_total"
     "Total provider prefix cache creation tokens (Anthropic)" Counter;
   add "masc_provider_prefix_cache_read_tokens_total"
@@ -231,24 +236,6 @@ let set_active_agents count =
 
 let set_pending_tasks count =
   set_gauge "masc_pending_tasks" (float_of_int count)
-
-let inference_cache_metrics_json () =
-  let hits = int_of_float (metric_value_or_zero "masc_inference_cache_hits_total" ()) in
-  let misses = int_of_float (metric_value_or_zero "masc_inference_cache_misses_total" ()) in
-  let writes = int_of_float (metric_value_or_zero "masc_inference_cache_writes_total" ()) in
-  let bypass = int_of_float (metric_value_or_zero "masc_inference_cache_bypass_total" ()) in
-  let errors = int_of_float (metric_value_or_zero "masc_inference_cache_errors_total" ()) in
-  let total_lookups = max 1 (hits + misses) in
-  let hit_rate = float_of_int hits /. float_of_int total_lookups in
-  `Assoc
-    [
-      ("hits", `Int hits);
-      ("misses", `Int misses);
-      ("writes", `Int writes);
-      ("bypass", `Int bypass);
-      ("errors", `Int errors);
-      ("hit_rate", `Float hit_rate);
-    ]
 
 (** Reconcile active_agents gauge with existing agent files on disk.
     Call after Room/server initialization to sync Prometheus state. *)

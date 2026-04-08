@@ -118,6 +118,7 @@ let test_subscription_to_json_with_filter () =
     agent_filter = Some "claude";
     event_types = [A2a_tools.TaskUpdate; A2a_tools.Broadcast];
     created_at = "2026-01-27T00:00:00Z";
+    last_polled_at = 0.0;
   } in
   let json = A2a_tools.subscription_to_json sub in
   match json with
@@ -130,6 +131,7 @@ let test_subscription_to_json_no_filter () =
     agent_filter = None;
     event_types = [A2a_tools.Completion];
     created_at = "2026-01-27T00:00:00Z";
+    last_polled_at = 0.0;
   } in
   let json = A2a_tools.subscription_to_json sub in
   let open Yojson.Safe.Util in
@@ -393,6 +395,7 @@ let test_subscription_to_json_empty_events () =
     agent_filter = None;
     event_types = [];
     created_at = "2026-01-27T00:00:00Z";
+    last_polled_at = 0.0;
   } in
   let json = A2a_tools.subscription_to_json sub in
   let open Yojson.Safe.Util in
@@ -407,6 +410,7 @@ let test_subscription_to_json_all_events () =
     event_types = [A2a_tools.TaskUpdate; A2a_tools.Broadcast;
                    A2a_tools.Completion; A2a_tools.Error];
     created_at = "2026-01-27T00:00:00Z";
+    last_polled_at = 0.0;
   } in
   let json = A2a_tools.subscription_to_json sub in
   let open Yojson.Safe.Util in
@@ -420,6 +424,7 @@ let test_subscription_to_json_has_all_fields () =
     agent_filter = Some "claude";
     event_types = [A2a_tools.TaskUpdate];
     created_at = "2026-01-27T12:00:00Z";
+    last_polled_at = 0.0;
   } in
   let json = A2a_tools.subscription_to_json sub in
   match json with
@@ -594,6 +599,7 @@ let test_subscription_show () =
     agent_filter = Some "test";
     event_types = [A2a_tools.TaskUpdate];
     created_at = "2026-01-27T00:00:00Z";
+    last_polled_at = 0.0;
   } in
   let s = A2a_tools.show_subscription sub in
   check bool "show not empty" true (String.length s > 0)

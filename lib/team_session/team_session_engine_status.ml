@@ -400,7 +400,6 @@ let session_status_json (config : Room.config) (session : Team_session_types.ses
   let runtime_running =
     with_runtimes_lock (fun () -> Hashtbl.mem runtimes session.session_id)
   in
-  let inference_cache_metrics = Prometheus.inference_cache_metrics_json () in
   let local_runtime =
     match session.scale_profile with
     | Team_session_types.Scale_local64 -> Tool_local_runtime.runtime_status_json ()
@@ -430,7 +429,6 @@ let session_status_json (config : Room.config) (session : Team_session_types.ses
       ("orchestration_state", orchestration_state);
       ("cascade_metrics", cascade_metrics);
       ("local_runtime", local_runtime);
-      ("inference_cache_metrics", inference_cache_metrics);
       ("worker_runs", worker_run_summary);
       ( "command_plane",
         `Assoc
@@ -625,7 +623,6 @@ let list_sessions ~(config : Room.config) ~(requester_agent : string option)
               ("team_health", team_health);
               ("communication_metrics", communication_metrics);
               ("cascade_metrics", cascade_metrics);
-              ("inference_cache_metrics", Prometheus.inference_cache_metrics_json ());
             ])
         sessions
     in

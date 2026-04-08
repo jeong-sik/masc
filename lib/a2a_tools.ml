@@ -12,6 +12,7 @@ type subscription = {
   agent_filter: string option;  (* None = all agents *)
   event_types: event_type list;
   created_at: string;
+  mutable last_polled_at: float;  (* Unix timestamp, updated on poll_events *)
 } [@@deriving show]
 
 (* Global subscription store — immutable map + mutex for fiber safety *)
@@ -38,6 +39,7 @@ let subscription_to_json (sub : subscription) : Yojson.Safe.t =
       | Some a -> `String a);
     ("event_types", `List (List.map (fun e -> `String (event_type_to_string e)) sub.event_types));
     ("created_at", `String sub.created_at);
+    ("last_polled_at", `Float sub.last_polled_at);
   ]
 
 (** Subscription from JSON *)
@@ -52,7 +54,11 @@ let subscription_of_json (json : Yojson.Safe.t) : subscription option =
            | `String s -> (match event_type_of_string s with Ok e -> Some e | Error _ -> None)
            | _ -> None)
     in
-    Some { id; agent_filter; event_types; created_at }
+    let last_polled_at =
+      Safe_ops.json_float_opt "last_polled_at" json
+      |> Option.value ~default:0.0
+    in
+    Some { id; agent_filter; event_types; created_at; last_polled_at }
   | _ ->
     Log.Misc.warn "subscription_of_json: missing required fields";
     None
@@ -453,11 +459,13 @@ let subscribe ?(agent_filter : string option) ~(events : string list) ()
   | Error e -> Error e
   | Ok event_types ->
     let sub_id = generate_uuid () in
+    let now = Time_compat.now () in
     let sub = {
       id = sub_id;
       agent_filter;
       event_types = List.rev event_types;
       created_at = now_iso8601 ();
+      last_polled_at = now;
     } in
     Eio.Mutex.use_rw ~protect:true subscriptions_mutex (fun () ->
       subscriptions := SMap.add sub_id sub !subscriptions);
@@ -534,8 +542,10 @@ let list_subscriptions () : Yojson.Safe.t =
 *)
 let poll_events ~subscription_id ?(clear = true) ()
     : (Yojson.Safe.t, string) result =
-  let mem = Eio.Mutex.use_ro subscriptions_mutex (fun () ->
-    SMap.mem subscription_id !subscriptions) in
+  let mem = Eio.Mutex.use_rw ~protect:true subscriptions_mutex (fun () ->
+    match SMap.find_opt subscription_id !subscriptions with
+    | None -> false
+    | Some sub -> sub.last_polled_at <- Time_compat.now (); true) in
   if not mem then
     Error (Printf.sprintf "Subscription '%s' not found" subscription_id)
   else
@@ -797,3 +807,31 @@ let cleanup_orphan_buffers () =
       event_buffers := SMap.remove sub_id !event_buffers
     ) orphans;
     List.length orphans)
+
+(** Max idle time before a subscription is expired (24 hours). *)
+let subscription_max_idle_sec = 86400.0
+
+(** Remove subscriptions that have not been polled within [subscription_max_idle_sec].
+    Also removes their event buffers. Returns count of expired subscriptions. *)
+let cleanup_stale_subscriptions () =
+  let now = Time_compat.now () in
+  let stale_ids = Eio.Mutex.use_ro subscriptions_mutex (fun () ->
+    SMap.fold (fun sub_id sub acc ->
+      if now -. sub.last_polled_at > subscription_max_idle_sec then
+        sub_id :: acc
+      else acc
+    ) !subscriptions []) in
+  if stale_ids <> [] then begin
+    Eio.Mutex.use_rw ~protect:true subscriptions_mutex (fun () ->
+      List.iter (fun sub_id ->
+        subscriptions := SMap.remove sub_id !subscriptions
+      ) stale_ids);
+    Eio.Mutex.use_rw ~protect:true event_buffers_mutex (fun () ->
+      List.iter (fun sub_id ->
+        event_buffers := SMap.remove sub_id !event_buffers
+      ) stale_ids);
+    save_subscriptions ();
+    Log.Misc.info "[a2a] expired %d stale subscriptions (idle > %.0fs)"
+      (List.length stale_ids) subscription_max_idle_sec
+  end;
+  List.length stale_ids

@@ -43,6 +43,7 @@ let dispatch ~sw ~clock ~proc_mgr ~net ~config
     `Assoc [
       ("name", `String (String.trim keeper_name));
       ("message", `String (String.trim content));
+      ("direct_reply", `Bool true);
     ]
   in
   let keeper_ctx : _ Tool_keeper.context = {

@@ -24,7 +24,7 @@
 | Chain Engine | 04 | - | - | - | - | **Frozen** | 0 production calls, OAS superseded |
 | Keeper Agent | 05 | 25 | 0 | 0 | 0 | 100% | Memory.t Long_term JSONL-only 완료 (v2.140.0) |
 | Command Plane | 06 | 40 | 0 | 0 | 0 | 100% | Intent 도구 4종 MCP 등록 완료 |
-| Team Session | 07 | 30 | 3 | 0 | 0 | 90% | Auto 모드는 OAS 위임, lossy projection |
+| Team Session | 07 | 31 | 2 | 0 | 0 | 94% | Auto 모드는 OAS 위임, projection 해소 |
 | Governance | 08 | 28 | 0 | 0 | 0 | 100% | 거버넌스 pipeline + dashboard surface 유지 |
 | Server/Transport | 09 | 19 | 4 | 0 | 0 | 83% | SSE rate limit 활성화, HTTP/2 h2c는 opt-in CODE |
 | Dashboard | 10 | 15 | 0 | 0 | 0 | 100% | MDAL 개념 제거 (REMOVED) |
@@ -33,9 +33,9 @@
 | OAS Integration | 13 | 42 | 0 | 0 | 0 | 100% | 단방향 경계 완벽 준수 |
 | Configuration | 14 | 68 | 0 | 0 | 0 | 100% | 80+ env var, 22 카테고리 |
 | Testing | 15 | 92 | 6 | 0 | 0 | 94% | env-gated 6건만 CODE |
-| **TOTAL** | | **441** | **17** | **0** | **0** | **96.3%** | |
+| **TOTAL** | | **442** | **16** | **0** | **0** | **96.5%** | |
 
-**MISS: 0 | STUB: 0 | IMPL 비율: 96.3%**
+**MISS: 0 | STUB: 0 | IMPL 비율: 96.5%**
 
 ---
 
@@ -51,7 +51,7 @@
 | **Board Listener (polling)** | 11 | ~100 | pg_notify 수신 코드, SSE relay 미확인 |
 | ~~Intent 도구 4종~~ | 06 | ~200 | **→ IMPL** (MCP tool registry 등록 + dispatch 완료) |
 | ~~Keeper OAS Memory.t 일부~~ | 05 | ~100 | **→ IMPL** (v2.140.0 filesystem-first 전환으로 완료) |
-| **Team Session lossy projection** | 07 | ~50 | 47→12 필드 축소, 의도적 gap (Phase C-1, OAS 크로스 레포 작업 필요) |
+| ~~Team Session lossy projection~~ | 07 | ~50 | **→ IMPL** (collaboration_context JSON 채움 + Prompt_composer로 system_prompt 보강. OAS #698에서 Collaboration.t→opaque JSON 전환 완료) |
 | **env-gated 테스트** | 15 | ~300 | E2E 6종은 MASC_E2E_TESTS=true로 CI 활성화됨. PG 1종(test_board_pg)만 PostgreSQL service 미제공으로 CI 미실행 |
 | ~~MDAL dashboard surface~~ | 10 | ~50 | **→ REMOVED** (개념 폐기) |
 
@@ -108,7 +108,7 @@
 | Event Trace | Append-only events.jsonl | IMPL | 58KB, 1000+ entries |
 | Intent Tools | create/status/update/forecast | IMPL | MCP tool registry 등록 + dispatch 연결 완료 |
 
-### 07-Team Session (90% IMPL)
+### 07-Team Session (94% IMPL)
 
 | Section | Feature | Status | Evidence |
 |---------|---------|--------|----------|
@@ -118,7 +118,7 @@
 | Swarm Runner | Load→convert→callbacks→run→apply | IMPL | team_session_swarm_runner.ml |
 | Report/Proof | Markdown/JSON, Standard/Strong | IMPL | team_session_report_proof.ml 419 LOC |
 | Tool Surface | 9 handler modules, 4.5K LOC | IMPL | God file 분할 완료 |
-| Lossy Projection | 47→12 fields to OAS Collaboration.t | CODE | 의도적 gap |
+| Lossy Projection | collaboration_context JSON + Prompt_composer | IMPL | OAS #698 opaque JSON, system_prompt 보강 |
 
 ### 08-Governance (100% IMPL)
 
@@ -190,7 +190,7 @@ env-gated 6종(PG/network/viewer)만 CODE.
 ### 아키텍처 의사결정 필요
 1. Chain Engine 장기 방향 (현재 Frozen)
 2. live ICE/TURN/browser interop proof를 어떤 env-gated lane으로 운영할지
-3. Team Session lossy projection(47→12) 해소 방법
+3. ~~Team Session lossy projection(47→12) 해소 방법~~ → 해소됨 (OAS #698 + MASC projection 구현)
 
 ---
 
@@ -200,7 +200,7 @@ env-gated 6종(PG/network/viewer)만 CODE.
 |---------|------|------|
 | ~~1~~ | ~~Server: SSE rate limit 활성화~~ | **완료** (기본값 1s/60s-10 활성화) |
 | ~~2~~ | ~~Keeper: OAS Memory.t Long_term 백엔드 완성~~ | **완료** (v2.140.0 filesystem-first 전환) |
-| 1 | Team Session: lossy projection 해소 | 47→12 필드 축소가 OAS 측 정보 손실 유발. OAS Collaboration.t 확장 필요 (크로스 레포) |
+| ~~1~~ | ~~Team Session: lossy projection 해소~~ | **완료** (collaboration_context JSON + Prompt_composer system_prompt 보강) |
 | 2 | Board Listener: 테스트 + 활성화 검증 | pg_notify→SSE relay 경로 테스트 부재 |
 | 3 | Transport: HTTP/2 h2c 테스트 + 벤치마크 | opt-in 경로 검증, canonical 전환 판단 근거 |
 | 4 | Chain Engine: Adapter+Mermaid 유틸리티 추출 후 본체 archive | 17K LOC 유지비 제거 |

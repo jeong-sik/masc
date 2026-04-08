@@ -594,10 +594,20 @@ let planned_worker_to_entry_with_state
         List.mem tool.name scoped_tool_names)
       masc_tools
   in
+  let team_ctx =
+    Team_context.build ~base_path:config.base_path ~team_session_id:session_id
+  in
   let system_prompt =
-    Printf.sprintf "You are agent '%s' in a team session (room: %s). Your role: %s."
-      name config.base_path
-      (match pw.spawn_role with Some r -> r | None -> "execute")
+    Prompt_composer.compose [
+      Prompt_composer.Identity {
+        name;
+        role = (match pw.spawn_role with Some r -> r | None -> "execute");
+        model = cascade_name;
+      };
+      Prompt_composer.TeamContext team_ctx;
+      Prompt_composer.FreeText
+        (Printf.sprintf "Room: %s | Session: %s" config.base_path session_id);
+    ]
   in
   (* BM25 progressive tool disclosure: build once, reuse across turns.
      Synonym-enriched descriptions bridge user vocabulary to tool names.
@@ -755,13 +765,20 @@ let session_to_swarm_config
               (Printexc.to_string ex);
             entry_count)
   in
+  let collaboration_context =
+    let team_ctx =
+      Team_context.build ~base_path:config.base_path
+        ~team_session_id:session.session_id
+    in
+    Some (Team_context.to_json team_ctx)
+  in
   { entries; mode;
     convergence = make_convergence_metric ~entry_count success_by_agent;
     max_parallel = max 1 entry_count;
     prompt = session.goal; timeout_sec;
     budget = budget_of_session_timeout timeout_sec;
     max_agent_retries = 1;
-    collaboration_context = None;
+    collaboration_context;
     resource_check = Some (session_runtime_health_check ~config ~session);
     max_concurrent_agents = Some (max 1 (min entry_count slot_aware_cap));
     enable_streaming = false }

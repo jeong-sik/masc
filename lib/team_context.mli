@@ -37,6 +37,9 @@ val build :
     Output is capped to stay within ~500 tokens. *)
 val to_prompt_section : team_context -> string
 
+(** Serialize the team context to JSON for [collaboration_context]. *)
+val to_json : team_context -> Yojson.Safe.t
+
 (** Record a shared finding from a completed worker.
     [finding] should be 1-2 sentences summarizing the key result. *)
 val add_finding :

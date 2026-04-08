@@ -14,8 +14,8 @@ let aggregate ?(n = 5000) () : Yojson.Safe.t =
   else
   let total = ref 0 in
   let success = ref 0 in
-  (* tool -> (calls, successes, total_ms) *)
-  let tool_stats : (string, int ref * int ref * float ref) Hashtbl.t =
+  (* tool -> (calls, successes, total_ms, truncated_count, total_output_chars) *)
+  let tool_stats : (string, int ref * int ref * float ref * int ref * int ref) Hashtbl.t =
     Hashtbl.create 64
   in
   (* keeper -> (calls, successes) *)
@@ -48,16 +48,33 @@ let aggregate ?(n = 5000) () : Yojson.Safe.t =
          | _ -> 0.0)
       | _ -> 0.0
     in
+    let output_chars = match record with
+      | `Assoc fields ->
+        (match List.assoc_opt "result_bytes" fields with
+         | Some (`Int i) -> i
+         | _ ->
+           (* Fallback: use output string length for old entries *)
+           (match List.assoc_opt "output" fields with
+            | Some (`String s) -> String.length s
+            | _ -> 0))
+      | _ -> 0
+    in
+    let was_truncated = match record with
+      | `Assoc fields -> List.assoc_opt "truncated_to" fields <> None
+      | _ -> false
+    in
     if ok then incr success;
     (* tool stats *)
-    let (tc, ts, td) =
+    let (tc, ts, td, ttrunc, tochars) =
       match Hashtbl.find_opt tool_stats tool with
       | Some v -> v
       | None ->
-        let v = (ref 0, ref 0, ref 0.0) in
+        let v = (ref 0, ref 0, ref 0.0, ref 0, ref 0) in
         Hashtbl.replace tool_stats tool v; v
     in
     incr tc; if ok then incr ts; td := !td +. dur;
+    tochars := !tochars + output_chars;
+    if was_truncated then incr ttrunc;
     (* keeper stats *)
     let (kc, ks) =
       match Hashtbl.find_opt keeper_stats keeper with
@@ -109,7 +126,7 @@ let aggregate ?(n = 5000) () : Yojson.Safe.t =
   in
   (* Sort by call count descending *)
   let by_tool =
-    Hashtbl.fold (fun name (c, s, d) acc ->
+    Hashtbl.fold (fun name (c, s, d, ttrunc, tochars) acc ->
       let calls = !c in
       let successes = !s in
       let avg_ms = if calls > 0 then !d /. Float.of_int calls else 0.0 in
@@ -117,11 +134,17 @@ let aggregate ?(n = 5000) () : Yojson.Safe.t =
         then Float.of_int successes /. Float.of_int calls *. 100.0
         else 0.0
       in
+      let avg_output = if calls > 0
+        then Float.of_int !tochars /. Float.of_int calls
+        else 0.0
+      in
       (calls, `Assoc [
         ("name", `String name);
         ("calls", `Int calls);
         ("success_pct", `Float pct);
         ("avg_ms", `Float (Float.round (avg_ms *. 10.0) /. 10.0));
+        ("output_truncated_count", `Int !ttrunc);
+        ("avg_output_chars", `Float (Float.round (avg_output *. 10.0) /. 10.0));
       ]) :: acc
     ) tool_stats []
     |> List.sort (fun (a, _) (b, _) -> Int.compare b a)

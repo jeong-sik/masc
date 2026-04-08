@@ -39,7 +39,7 @@ let input_to_json (input : Yojson.Safe.t) : Yojson.Safe.t =
 
 let log_call ~keeper_name ~tool_name ~(input : Yojson.Safe.t)
     ~(output_text : string) ~(success : bool) ~(duration_ms : float)
-    ?(model : string = "") () =
+    ?(model : string = "") ?result_bytes ?truncated_to () =
   if Observability_redact.is_denied_tool ~tool_name then ()
   else
     match !store_ref with
@@ -47,6 +47,14 @@ let log_call ~keeper_name ~tool_name ~(input : Yojson.Safe.t)
     | Some store ->
       let model_field =
         if model = "" then [] else [("model", `String model)]
+      in
+      let result_bytes_field = match result_bytes with
+        | Some n -> [("result_bytes", `Int n)]
+        | None -> []
+      in
+      let truncated_to_field = match truncated_to with
+        | Some n -> [("truncated_to", `Int n)]
+        | None -> []
       in
       let safe_input = input_to_json (Observability_redact.redact_json_value input) in
       let safe_output = Observability_redact.redact_preview ~max_len:max_output_len output_text in
@@ -59,7 +67,7 @@ let log_call ~keeper_name ~tool_name ~(input : Yojson.Safe.t)
           ; ("output", `String safe_output)
           ; ("success", `Bool success)
           ; ("duration_ms", `Float duration_ms)
-          ] @ model_field)
+          ] @ model_field @ result_bytes_field @ truncated_to_field)
       in
       (try Dated_jsonl.append store json
        with exn ->

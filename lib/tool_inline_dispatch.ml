@@ -163,7 +163,7 @@ let dispatch (ctx : context) ~(name : string) : result option =
             Error (Printf.sprintf "Unknown action: %s" other)
       in
       (match response with
-       | Ok json -> Some (true, Yojson.Safe.pretty_to_string json)
+       | Ok json -> Some (true, Yojson.Safe.to_string json)
        | Error e -> Some (false, e))
 
   (* ── Infrastructure tools ───────────────────────────────────── *)
@@ -196,7 +196,7 @@ let dispatch (ctx : context) ~(name : string) : result option =
           ("anomaly_detection", `Bool g.anomaly_detection);
         ]);
       ] in
-      Some (true, Yojson.Safe.pretty_to_string json)
+      Some (true, Yojson.Safe.to_string json)
 
   | "masc_spawn" ->
       let spawn_agent_name = arg_get_string "agent_name" "" in

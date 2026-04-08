@@ -252,7 +252,7 @@ let handle_code_write ctx args =
           ("bytes_written", `Int (String.length content));
           ("agent", `String ctx.agent_name);
         ] in
-        (true, Yojson.Safe.pretty_to_string response)
+        (true, Yojson.Safe.to_string response)
       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
         (false, Printf.sprintf "Write failed: %s" (Printexc.to_string exn))
   end
@@ -340,7 +340,7 @@ let handle_code_edit ctx args =
               ("replacements", `Int !count);
               ("agent", `String ctx.agent_name);
             ] in
-            (true, Yojson.Safe.pretty_to_string response)
+            (true, Yojson.Safe.to_string response)
           end
         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
           (false, Printf.sprintf "Edit failed: %s" (Printexc.to_string exn))
@@ -368,7 +368,7 @@ let handle_code_delete ctx args =
             ("path", `String path);
             ("agent", `String ctx.agent_name);
           ] in
-          (true, Yojson.Safe.pretty_to_string response)
+          (true, Yojson.Safe.to_string response)
         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
           (false, Printf.sprintf "Delete failed: %s" (Printexc.to_string exn))
       end

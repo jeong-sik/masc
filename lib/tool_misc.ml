@@ -55,7 +55,7 @@ let handle_verify_handoff _ctx args =
       Drift_guard.verify_handoff ~original ~received ~threshold ()
       |> Drift_guard.result_to_json
     in
-    (true, Yojson.Safe.pretty_to_string result)
+    (true, Yojson.Safe.to_string result)
 
 let handle_gc ctx args =
   let days_raw = get_int args "days" 7 in
@@ -85,7 +85,7 @@ let handle_tool_stats _ctx args =
       Config.all_tool_schemas
   in
   let report = Tool_registry.stats_report ~top_n ~all_tool_names in
-  (true, Yojson.Safe.pretty_to_string report)
+  (true, Yojson.Safe.to_string report)
 
 let handle_tool_help _ctx args =
   let tool_name = String.trim (get_string args "tool_name" "") in
@@ -95,7 +95,7 @@ let handle_tool_help _ctx args =
     match Tool_help_registry.find_entry Config.raw_all_tool_schemas tool_name with
     | None -> (false, Printf.sprintf "❌ unknown tool: %s" tool_name)
     | Some entry ->
-        (true, Yojson.Safe.pretty_to_string (Tool_help_registry.entry_json entry))
+        (true, Yojson.Safe.to_string (Tool_help_registry.entry_json entry))
 
 let handle_web_search _ctx args =
   Tool_misc_web_search.handle args
@@ -167,7 +167,7 @@ let handle_keeper_tool_catalog _ctx args =
             Config.raw_all_tool_schemas );
       ]
   in
-  (true, Yojson.Safe.pretty_to_string json)
+  (true, Yojson.Safe.to_string json)
 
 (* ================================================================ *)
 (* Public re-exports from sub-modules                               *)

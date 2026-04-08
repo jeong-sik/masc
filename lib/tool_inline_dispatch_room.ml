@@ -152,7 +152,7 @@ let handle_lock (ctx : context) : result option =
                ("acquired_at", `Float now);
                ("expires_at", `Float expires_at);
              ] in
-             Some (true, Yojson.Safe.pretty_to_string payload)
+             Some (true, Yojson.Safe.to_string payload)
          | Ok false ->
              Some (false, Printf.sprintf "Lock busy: %s" expanded)
          | Error e ->
@@ -189,7 +189,7 @@ let handle_unlock (ctx : context) : result option =
                ("key", `String key);
                ("owner", `String agent_name);
              ] in
-             Some (true, Yojson.Safe.pretty_to_string payload)
+             Some (true, Yojson.Safe.to_string payload)
          | Ok false ->
              Some (false, Printf.sprintf "Lock not held by %s: %s" agent_name expanded)
          | Error e ->

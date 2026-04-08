@@ -40,7 +40,7 @@ let handle_worktree_remove ctx args =
 
 let handle_worktree_list ctx _args =
   let json = Room.worktree_list ctx.config in
-  (true, Yojson.Safe.pretty_to_string json)
+  (true, Yojson.Safe.to_string json)
 
 (* Dispatch function - returns None if tool not handled *)
 let dispatch ctx ~name ~args : result option =

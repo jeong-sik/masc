@@ -424,4 +424,4 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           ("auto_handoff", `Bool meta.auto_handoff);
           ("handoff_threshold", `Float meta.handoff_threshold);
         ] in
-        (true, Yojson.Safe.pretty_to_string json)
+        (true, Yojson.Safe.to_string json)

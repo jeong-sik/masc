@@ -35,7 +35,7 @@ let handle_keeper_list ctx args : tool_result =
         ("count", `Int (List.length keeper_names));
         ("keepers", `List (List.map (fun k -> `String k) keeper_names));
       ] in
-      (true, Yojson.Safe.pretty_to_string json)
+      (true, Yojson.Safe.to_string json)
     else
       let now_ts = Time_compat.now () in
       let keepers =
@@ -281,7 +281,7 @@ let handle_keeper_list ctx args : tool_result =
         ("count", `Int (List.length keepers));
         ("keepers", `List keepers);
       ] in
-      (true, Yojson.Safe.pretty_to_string json)
+      (true, Yojson.Safe.to_string json)
 
 let handle_keeper_trajectory ctx args : tool_result =
   let name = get_string args "name" "" in
@@ -317,7 +317,7 @@ let handle_keeper_trajectory ctx args : tool_result =
           ("showing", `Int (List.length recent));
           ("entries", `List json_list);
         ] in
-        (true, Yojson.Safe.pretty_to_string json)
+        (true, Yojson.Safe.to_string json)
 
 let handle_keeper_eval ctx args : tool_result =
   let name = get_string args "name" "" in
@@ -380,4 +380,4 @@ let handle_keeper_eval ctx args : tool_result =
           ("scenario_file", scenario_info);
           ("autonomous_action_count", `Int m.runtime.autonomous_action_count);
         ] in
-        (true, Yojson.Safe.pretty_to_string json)
+        (true, Yojson.Safe.to_string json)

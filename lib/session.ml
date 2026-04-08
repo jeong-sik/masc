@@ -540,20 +540,20 @@ let handle_mcp_session_tool (arguments : Yojson.Safe.t) : (bool * string) =
     (match get_string "session_id" with
      | Some id ->
        (match McpSessionStore.get id with
-        | Some s -> (true, Yojson.Safe.pretty_to_string (McpSessionStore.to_json s))
+        | Some s -> (true, Yojson.Safe.to_string (McpSessionStore.to_json s))
         | None -> (false, Printf.sprintf "MCP session '%s' not found" id))
      | None -> (false, "session_id required"))
   | Some "create" ->
     let agent_name = get_string "agent_name" in
     let s = McpSessionStore.create ?agent_name () in
-    (true, Yojson.Safe.pretty_to_string (McpSessionStore.to_json s))
+    (true, Yojson.Safe.to_string (McpSessionStore.to_json s))
   | Some "list" ->
     let sessions = McpSessionStore.list_all () in
     let json = `Assoc [
       ("count", `Int (List.length sessions));
       ("sessions", `List (List.map McpSessionStore.to_json sessions));
     ] in
-    (true, Yojson.Safe.pretty_to_string json)
+    (true, Yojson.Safe.to_string json)
   | Some "cleanup" ->
     let removed = McpSessionStore.cleanup_stale () in
     (true, Printf.sprintf "Removed %d stale MCP sessions" removed)

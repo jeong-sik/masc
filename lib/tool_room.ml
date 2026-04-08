@@ -398,7 +398,7 @@ let handle_reset ctx args =
   end
 
 let handle_room_strategy_get ctx _args =
-  (true, Yojson.Safe.pretty_to_string (room_strategy_json ctx.config))
+  (true, Yojson.Safe.to_string (room_strategy_json ctx.config))
 
 let handle_room_strategy_set ctx args =
   let search_strategy_raw = get_string_opt args "search_strategy_default" in
@@ -511,7 +511,7 @@ let handle_workflow_guide ctx _args =
       ("guidance", Workflow_guide.guidance_to_json guidance);
     ]
   in
-  (true, Yojson.Safe.pretty_to_string result)
+  (true, Yojson.Safe.to_string result)
 
 (* ── State check (assertion-based verification) ────────────────── *)
 
@@ -574,7 +574,7 @@ let handle_check ctx args =
       ("fix_hint", fix_hint);
     ]
   in
-  (true, Yojson.Safe.pretty_to_string result)
+  (true, Yojson.Safe.to_string result)
 
 (* Dispatch function *)
 let dispatch ctx ~name ~args : result option =

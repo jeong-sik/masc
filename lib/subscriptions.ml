@@ -233,7 +233,7 @@ let handle_subscription_tool (arguments : Yojson.Safe.t) : (bool * string) =
        let resource = resource_type_of_string resource_str in
        let filter = get_string "filter" in
        let sub = SubscriptionStore.subscribe ~subscriber ~resource ?filter () in
-       (true, Yojson.Safe.pretty_to_string (subscription_to_json sub))
+       (true, Yojson.Safe.to_string (subscription_to_json sub))
      | _ -> (false, "subscriber and resource required"))
 
   | Some "unsubscribe" ->
@@ -253,14 +253,14 @@ let handle_subscription_tool (arguments : Yojson.Safe.t) : (bool * string) =
          ("count", `Int (List.length subs));
          ("subscriptions", `List (List.map subscription_to_json subs));
        ] in
-       (true, Yojson.Safe.pretty_to_string json)
+       (true, Yojson.Safe.to_string json)
      | None ->
        let subs = SubscriptionStore.list_all () in
        let json = `Assoc [
          ("count", `Int (List.length subs));
          ("subscriptions", `List (List.map subscription_to_json subs));
        ] in
-       (true, Yojson.Safe.pretty_to_string json))
+       (true, Yojson.Safe.to_string json))
 
   | Some "poll" ->
     (match get_string "subscription_id" with
@@ -270,7 +270,7 @@ let handle_subscription_tool (arguments : Yojson.Safe.t) : (bool * string) =
          ("count", `Int (List.length notifs));
          ("notifications", `List (List.map notification_to_json notifs));
        ] in
-       (true, Yojson.Safe.pretty_to_string json)
+       (true, Yojson.Safe.to_string json)
      | None -> (false, "subscription_id required"))
 
   | Some other -> (false, Printf.sprintf "Unknown action: %s" other)

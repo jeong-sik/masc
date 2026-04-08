@@ -27,7 +27,7 @@ let handle_plan_init ctx args : result =
         ("task_id", `String task_id);
         ("message", `String (Printf.sprintf "Planning context created for %s" task_id));
       ] in
-      (true, Yojson.Safe.pretty_to_string response)
+      (true, Yojson.Safe.to_string response)
   | Error e ->
       (false, Printf.sprintf "❌ Failed to init planning: %s" e)
 
@@ -42,7 +42,7 @@ let handle_plan_update ctx args : result =
         ("task_id", `String task_id);
         ("updated_at", `String plan_ctx.Planning_eio.updated_at);
       ] in
-      (true, Yojson.Safe.pretty_to_string response)
+      (true, Yojson.Safe.to_string response)
   | Error e ->
       (false, Printf.sprintf "❌ Failed to update plan: %s" e)
 
@@ -57,7 +57,7 @@ let handle_note_add ctx args : result =
         ("task_id", `String task_id);
         ("note_count", `Int (List.length plan_ctx.Planning_eio.notes));
       ] in
-      (true, Yojson.Safe.pretty_to_string response)
+      (true, Yojson.Safe.to_string response)
   | Error e ->
       (false, Printf.sprintf "❌ Failed to add note: %s" e)
 
@@ -78,7 +78,7 @@ let handle_deliver ctx args : result =
         ("task_id", `String task_id);
         ("updated_at", `String plan_ctx.Planning_eio.updated_at);
       ] in
-      (true, Yojson.Safe.pretty_to_string response)
+      (true, Yojson.Safe.to_string response)
   | Error e ->
       (false, Printf.sprintf "❌ Failed to set deliverable: %s" e)
 
@@ -96,7 +96,7 @@ let handle_plan_get ctx args : result =
             ("context", Planning_eio.planning_context_to_yojson plan_ctx);
             ("markdown", `String markdown);
           ] in
-          (true, Yojson.Safe.pretty_to_string response)
+          (true, Yojson.Safe.to_string response)
       | Error e ->
           (false, Printf.sprintf "❌ Planning context not found: %s" e)
 
@@ -116,7 +116,7 @@ let handle_error_add ctx args : result =
         ("total_errors", `Int (List.length plan_ctx.errors));
         ("unresolved_count", `Int unresolved_count);
       ] in
-      (true, Yojson.Safe.pretty_to_string response)
+      (true, Yojson.Safe.to_string response)
   | Error e ->
       (false, Printf.sprintf "❌ Failed to add error: %s" e)
 
@@ -133,7 +133,7 @@ let handle_error_resolve ctx args : result =
         ("error_index", `Int error_index);
         ("remaining_unresolved", `Int unresolved_count);
       ] in
-      (true, Yojson.Safe.pretty_to_string response)
+      (true, Yojson.Safe.to_string response)
   | Error e ->
       (false, Printf.sprintf "❌ Failed to resolve error: %s" e)
 
@@ -147,7 +147,7 @@ let handle_plan_set_task ctx args : result =
       ("status", `String "set");
       ("current_task", `String task_id);
     ] in
-    (true, Yojson.Safe.pretty_to_string response)
+    (true, Yojson.Safe.to_string response)
   end
 
 let handle_plan_get_task ctx _args : result =
@@ -156,13 +156,13 @@ let handle_plan_get_task ctx _args : result =
       let response = `Assoc [
         ("current_task", `String task_id);
       ] in
-      (true, Yojson.Safe.pretty_to_string response)
+      (true, Yojson.Safe.to_string response)
   | None ->
       let response = `Assoc [
         ("current_task", `Null);
         ("message", `String "No current task set. Use masc_plan_set_task first.");
       ] in
-      (true, Yojson.Safe.pretty_to_string response)
+      (true, Yojson.Safe.to_string response)
 
 let handle_plan_clear_task ctx _args : result =
   Planning_eio.clear_current_task ctx.config;
@@ -170,7 +170,7 @@ let handle_plan_clear_task ctx _args : result =
     ("status", `String "cleared");
     ("message", `String "Current task cleared");
   ] in
-  (true, Yojson.Safe.pretty_to_string response)
+  (true, Yojson.Safe.to_string response)
 
 (** {1 Dispatcher} *)
 

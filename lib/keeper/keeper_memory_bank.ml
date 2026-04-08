@@ -277,7 +277,6 @@ let memory_row_key (row : keeper_memory_row_raw) : string =
 let write_memory_bank_rows
     (path : string)
     (rows : keeper_memory_row_raw list) : (unit, string) result =
-  let tmp = path ^ ".tmp" in
   try
     let content =
       rows
@@ -286,11 +285,8 @@ let write_memory_bank_rows
       |> String.concat "\n"
     in
     let content = if content <> "" then content ^ "\n" else content in
-    Fs_compat.save_file tmp content;
-    Sys.rename tmp path;
-    Ok ()
+    Fs_compat.save_file_atomic path content
   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-    Safe_ops.remove_file_logged ~context:"memory_compaction" tmp;
     Error (Printf.sprintf "failed to rewrite memory bank: %s" (Printexc.to_string exn))
 
 let compact_memory_bank_if_needed

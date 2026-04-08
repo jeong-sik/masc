@@ -442,7 +442,7 @@ let handle_agent_timeline (ctx : context) args : result =
       build_timeline ctx.config ~agent_name ~since_hours ~limit ~include_tasks
         ~include_board ~include_tool_calls
     in
-    (true, Yojson.Safe.pretty_to_string json)
+    (true, Yojson.Safe.to_string json)
 
 (* Dispatch *)
 let dispatch (ctx : context) ~name ~args : result option =

@@ -59,7 +59,7 @@ let handle_handover_list ctx args =
       in
       let handovers = List.filteri (fun i _ -> i < limit) handovers in
       let json = `List (List.map Handover_eio.handover_to_json handovers) in
-      (true, Yojson.Safe.pretty_to_string json)
+      (true, Yojson.Safe.to_string json)
   | None -> (false, "❌ Filesystem not available")
 
 let handle_handover_claim ctx args =

@@ -143,7 +143,7 @@ let handle_suspend ctx args =
       ("is_self_suspend", `Bool is_self);
       ("blacklisted_until", `Float until);
     ] in
-    (true, Yojson.Safe.pretty_to_string json)
+    (true, Yojson.Safe.to_string json)
 
 (** Handle masc_circuit_status *)
 let handle_circuit_status ctx args =
@@ -170,7 +170,7 @@ let handle_circuit_status ctx args =
     ("circuit_breaker", Circuit_breaker.status_to_json status);
     ("blacklist", blacklist_info);
   ] in
-  (true, Yojson.Safe.pretty_to_string json)
+  (true, Yojson.Safe.to_string json)
 
 let schemas : Types.tool_schema list = [
   {

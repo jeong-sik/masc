@@ -130,6 +130,19 @@ let websocket_discovery_json (ctx : http_context) =
   in
   `Assoc fields
 
+let enabled_protocols_json () =
+  let protocols =
+    List.fold_left
+      (fun acc protocol ->
+        if List.mem protocol acc then acc else acc @ [ protocol ])
+      [ Transport.JsonRpc ]
+      (Transport_bridge.enabled_protocols ())
+  in
+  `List
+    (List.map
+       (fun protocol -> `String (Transport.protocol_to_string protocol))
+       protocols)
+
 let transport_status_json (ctx : http_context) =
   let grpc_enabled = Masc_grpc_server.is_enabled () in
   let grpc_port = Masc_grpc_server.configured_port () in
@@ -190,11 +203,9 @@ let transport_status_json (ctx : http_context) =
              ("connected_channels", `Int (Server_webrtc_transport.connected_channel_count ()));
            ]
           @ if webrtc_enabled then
-              [ ("signaling_url", `String (ctx.base_url ^ "/webrtc")) ]
-            else
-              []) );
+               [ ("signaling_url", `String (ctx.base_url ^ "/webrtc")) ]
+             else
+               []) );
       ("total_sessions", `Int (Transport_bridge.total_session_count ()));
-      ("enabled_protocols", `List (List.map
-        (fun p -> `String (Transport.protocol_to_string p))
-        (Transport_bridge.enabled_protocols ())));
+      ("enabled_protocols", enabled_protocols_json ());
     ]

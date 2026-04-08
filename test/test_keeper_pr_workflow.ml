@@ -506,6 +506,21 @@ let with_real_repo_room f =
       (try ignore (Room.init config ~agent_name:(Some "test-integration")) with _ -> ());
       f config repo_root)
 
+let derive_worktree_id keeper_name branch =
+  branch
+  |> String.to_seq
+  |> Seq.map (fun c -> if c = '/' || c = '\\' then '-' else c)
+  |> String.of_seq
+  |> Printf.sprintf "%s-%s" keeper_name
+
+let cleanup_test_branch repo_root branch =
+  ignore (Sys.command
+    (Printf.sprintf "cd %s && git worktree prune >/dev/null 2>&1 && git branch -D %s >/dev/null 2>&1"
+      (Filename.quote repo_root) (Filename.quote branch)));
+  ignore (Sys.command
+    (Printf.sprintf "cd %s && git push origin --delete %s >/dev/null 2>&1"
+      (Filename.quote repo_root) (Filename.quote branch)))
+
 let test_worktree_create_writes_and_cleans_up () =
   with_real_repo_room (fun config repo_root ->
     let meta = make_meta_with_preset "delivery" in
@@ -540,21 +555,60 @@ let test_worktree_create_writes_and_cleans_up () =
     in
     check bool "workflow reached post-write gate" true reached_post_write_gate;
     (* Verify worktree was cleaned up (step 5 runs even on failure). *)
-    let worktree_id =
-      test_branch
-      |> String.to_seq
-      |> Seq.map (fun c -> if c = '/' || c = '\\' then '-' else c)
-      |> String.of_seq
-      |> Printf.sprintf "%s-%s" meta.name
-    in
+    let worktree_id = derive_worktree_id meta.name test_branch in
     let worktree_path = Filename.concat repo_root (Filename.concat ".worktrees" worktree_id) in
     check bool "worktree cleaned up"
       false (Sys.file_exists worktree_path);
     (* Clean up remote branch if push somehow succeeded *)
     if String_util.contains_substring_ci steps "git_commit_push: ok" then
-      ignore (Sys.command
-        (Printf.sprintf "cd %s && git push origin --delete %s 2>/dev/null"
-          (Filename.quote repo_root) (Filename.quote test_branch))))
+      cleanup_test_branch repo_root test_branch)
+
+let test_existing_worktree_path_is_retried_safely () =
+  with_real_repo_room (fun config repo_root ->
+    let meta = make_meta_with_preset "delivery" in
+    let test_branch = Printf.sprintf "test/retry-%d" (Random.int 100_000) in
+    let worktree_id = derive_worktree_id meta.name test_branch in
+    let worktree_path = Filename.concat repo_root (Filename.concat ".worktrees" worktree_id) in
+    Fun.protect
+      ~finally:(fun () ->
+        ignore (Sys.command
+          (Printf.sprintf "cd %s && git worktree remove --force %s >/dev/null 2>&1"
+            (Filename.quote repo_root) (Filename.quote worktree_path)));
+        cleanup_test_branch repo_root test_branch)
+      (fun () ->
+        let seed_rc = Sys.command
+          (Printf.sprintf "cd %s && git fetch origin >/dev/null 2>&1 && git worktree add -b %s %s %s >/dev/null 2>&1"
+            (Filename.quote repo_root)
+            (Filename.quote test_branch)
+            (Filename.quote worktree_path)
+            (Filename.quote "origin/main")) in
+        check int "seed worktree created" 0 seed_rc;
+        let args = `Assoc
+          [ "branch", `String test_branch
+          ; "file_path", `String "test-integration-retry.txt"
+          ; "file_content", `String "integration retry content"
+          ; "commit_message", `String "test: integration retry worktree workflow"
+          ; "pr_title", `String "test: integration retry"
+          ] in
+        let result = call_tool config meta "keeper_pr_workflow" args in
+        let json = parse_json result in
+        let steps = json_string "steps" json in
+        let error = json_string "error" json in
+        check bool "worktree_create ok after retry"
+          true (String_util.contains_substring_ci steps "worktree_create: ok");
+        check bool "reused existing branch"
+          true (String_util.contains_substring_ci steps "reused existing branch");
+        check bool "file_write ok after retry"
+          true (String_util.contains_substring_ci steps "file_write: ok");
+        let reached_post_write_gate =
+          String_util.contains_substring_ci steps "version_truth_check: ok"
+          || String_util.contains_substring_ci error "version truth check failed"
+          || String_util.contains_substring_ci steps "git_commit_push: ok"
+          || String_util.contains_substring_ci error "git push"
+        in
+        check bool "retry workflow reached post-write gate" true reached_post_write_gate;
+        check bool "retry worktree cleaned up"
+          false (Sys.file_exists worktree_path)))
 
 (* --- keeper_bash branch-switch guard --- *)
 
@@ -675,5 +729,6 @@ let () =
       ]
     ; "integration",
       [ test_case "worktree workflow e2e" `Slow test_worktree_create_writes_and_cleans_up
+      ; test_case "existing worktree retried safely" `Slow test_existing_worktree_path_is_retried_safely
       ]
     ]

@@ -166,17 +166,39 @@ let handle_keeper_pr_workflow
       in
       let worktree_dir = ref "" in
       let resolved_base_branch = ref base_branch in
+      let remove_worktree_path worktree_path =
+        try
+          let st_rm, out_rm = run_sh ~cwd:repo_root ~timeout_sec:10.0
+            (Printf.sprintf "git worktree remove --force %s"
+              (Filename.quote worktree_path)) in
+          if st_rm <> Unix.WEXITED 0 then
+            Error (Printf.sprintf "git worktree remove: %s" (String.trim out_rm))
+          else begin
+            let st_prune, out_prune = run_sh ~cwd:repo_root ~timeout_sec:5.0
+              "git worktree prune" in
+            if st_prune <> Unix.WEXITED 0 then
+              Log.Keeper.warn "pr_workflow: git worktree prune failed after cleaning %s: %s"
+                worktree_path (String.trim out_prune);
+            Ok ()
+          end
+        with exn ->
+          Error (Printexc.to_string exn)
+      in
+      let branch_exists_locally branch_name =
+        let st, out = run_sh ~cwd:repo_root ~timeout_sec:5.0
+          (Printf.sprintf "git show-ref --verify --quiet %s"
+            (Filename.quote (Printf.sprintf "refs/heads/%s" branch_name))) in
+        match st with
+        | Unix.WEXITED 0 -> Ok true
+        | Unix.WEXITED 1 -> Ok false
+        | _ -> Error (Printf.sprintf "git show-ref: %s" (String.trim out))
+      in
       let cleanup_worktree () =
         if !worktree_dir <> "" && Sys.file_exists !worktree_dir then begin
-          let st_rm, _ = run_sh ~cwd:repo_root ~timeout_sec:10.0
-            (Printf.sprintf "git worktree remove --force %s"
-              (Filename.quote !worktree_dir)) in
-          if st_rm <> Unix.WEXITED 0 then
-            Log.Keeper.warn "pr_workflow: failed to clean worktree at %s" !worktree_dir;
-          let st_prune, _ = run_sh ~cwd:repo_root ~timeout_sec:5.0 "git worktree prune" in
-          if st_prune <> Unix.WEXITED 0 then
-            Log.Keeper.warn "pr_workflow: git worktree prune failed after cleaning %s"
-              !worktree_dir
+          match remove_worktree_path !worktree_dir with
+          | Ok () -> ()
+          | Error msg ->
+            Log.Keeper.warn "pr_workflow: cleanup failed for %s: %s" !worktree_dir msg
         end
       in
       Fun.protect
@@ -189,34 +211,53 @@ let handle_keeper_pr_workflow
           let worktrees_dir = Filename.concat repo_root ".worktrees" in
           let worktree_path = Filename.concat worktrees_dir worktree_id in
           Fs_compat.mkdir_p worktrees_dir;
-          if Sys.file_exists worktree_path then
-            Error (Printf.sprintf "worktree already exists: %s" worktree_path)
-          else begin
+          let prepare_result =
+            if Sys.file_exists worktree_path then
+              match remove_worktree_path worktree_path with
+              | Ok () -> Ok ()
+              | Error msg ->
+                Error (Printf.sprintf "remove existing worktree: %s" msg)
+            else Ok ()
+          in
+          prepare_result |> Result.bind (fun () ->
             let _ = run_sh ~cwd:repo_root ~timeout_sec:30.0 "git fetch origin" in
             match Room_git.resolve_base_branch repo_root base_branch with
             | Error e -> Error (Types.masc_error_to_string e)
             | Ok (resolved_base, fallback_from) ->
               resolved_base_branch := resolved_base;
-              let st, out = run_sh ~cwd:repo_root ~timeout_sec:30.0
-                (Printf.sprintf "git worktree add %s -B %s %s"
-                  (Filename.quote worktree_path)
-                  (Filename.quote branch)
-                  (Filename.quote (Printf.sprintf "origin/%s" resolved_base))) in
-              if st <> Unix.WEXITED 0 then
-                Error (Printf.sprintf "git worktree add: %s" out)
-              else begin
-                worktree_dir := worktree_path;
-                let fallback_note =
-                  match fallback_from with
-                  | None -> ""
-                  | Some missing ->
-                    Printf.sprintf " (origin/%s missing, used origin/%s)"
-                      missing resolved_base
+              begin match branch_exists_locally branch with
+              | Error msg -> Error msg
+              | Ok branch_exists ->
+                let add_cmd =
+                  if branch_exists then
+                    Printf.sprintf "git worktree add %s %s"
+                      (Filename.quote worktree_path)
+                      (Filename.quote branch)
+                  else
+                    Printf.sprintf "git worktree add -b %s %s %s"
+                      (Filename.quote branch)
+                      (Filename.quote worktree_path)
+                      (Filename.quote (Printf.sprintf "origin/%s" resolved_base))
                 in
-                Ok (Printf.sprintf "worktree %s on branch %s%s"
-                  worktree_path branch fallback_note)
-              end
-          end
+                let st, out = run_sh ~cwd:repo_root ~timeout_sec:30.0 add_cmd in
+                if st <> Unix.WEXITED 0 then
+                  Error (Printf.sprintf "git worktree add: %s" (String.trim out))
+                else begin
+                  worktree_dir := worktree_path;
+                  let fallback_note =
+                    match fallback_from with
+                    | None -> ""
+                    | Some missing ->
+                      Printf.sprintf " (origin/%s missing, used origin/%s)"
+                        missing resolved_base
+                  in
+                  let branch_note =
+                    if branch_exists then " (reused existing branch)" else ""
+                  in
+                  Ok (Printf.sprintf "worktree %s on branch %s%s%s"
+                    worktree_path branch branch_note fallback_note)
+                end
+              end)
       ) in
       (* Step 2: Write file — with path traversal guard *)
       let _s2 = run_step "file_write" (fun () ->

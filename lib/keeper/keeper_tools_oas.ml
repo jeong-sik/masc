@@ -130,13 +130,16 @@ let normalize_tool_result ~(success : bool) (raw : string) : string =
         match Safe_ops.json_string_opt "error" json with
         | Some msg when String.trim msg <> "" -> msg
         | _ ->
-          match Safe_ops.json_string_opt "message" json with
+          match Safe_ops.json_string_opt "output" json with
           | Some msg when String.trim msg <> "" -> msg
           | _ ->
-            match Safe_ops.json_string_opt "status" json with
-            | Some s when String.lowercase_ascii (String.trim s) = "error" ->
-              "tool returned error status"
-            | _ -> "tool call failed"
+            match Safe_ops.json_string_opt "message" json with
+            | Some msg when String.trim msg <> "" -> msg
+            | _ ->
+              match Safe_ops.json_string_opt "status" json with
+              | Some s when String.lowercase_ascii (String.trim s) = "error" ->
+                "tool returned error status"
+              | _ -> "tool call failed"
       in
       Yojson.Safe.to_string (`Assoc [
         ("ok", `Bool false);

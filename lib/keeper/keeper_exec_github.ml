@@ -74,15 +74,12 @@ let handle_keeper_github
         let st, out =
           Process_eio.run_argv_with_status ~timeout_sec [ "/bin/zsh"; "-lc"; shell_cmd ]
         in
-        let is_ok = st = Unix.WEXITED 0 in
-        let fields =
-          [ "ok", `Bool is_ok
-          ; "status", Keeper_alerting_path.process_status_to_json st
-          ; "output", `String out
-          ]
-        in
-        let fields = if is_ok then fields else ("error", `String out) :: fields in
-        Yojson.Safe.to_string (`Assoc fields)))
+        Yojson.Safe.to_string
+          (`Assoc
+              [ "ok", `Bool (st = Unix.WEXITED 0)
+              ; "status", Keeper_alerting_path.process_status_to_json st
+              ; "output", `String out
+              ])))
 ;;
 
 let handle_keeper_pr_workflow

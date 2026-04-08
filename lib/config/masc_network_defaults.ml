@@ -37,3 +37,29 @@ let masc_http_default_port_s =
 
 (** Default host for the MASC HTTP server. *)
 let masc_http_default_host = "127.0.0.1"
+
+(** Default port for SearXNG local search. *)
+let searxng_default_port = 8888
+
+(** Default URL for SearXNG. *)
+let searxng_default_url =
+  Printf.sprintf "http://localhost:%d" searxng_default_port
+
+(** Default port for OpenTelemetry OTLP HTTP exporter. *)
+let otel_default_port = 4318
+
+(** Default URL for OpenTelemetry OTLP HTTP endpoint. *)
+let otel_default_url =
+  Printf.sprintf "http://localhost:%d" otel_default_port
+
+(** Allowed origins for DNS rebinding / CORS protection.
+    Update here; [server_routes_http_common.ml] reads this list. *)
+let allowed_origins = [
+  "http://localhost";
+  "https://localhost";
+  "http://127.0.0.1";
+  "https://127.0.0.1";
+  (* Cloudflare tunnel *)
+  "https://masc.crying.pictures";
+  "https://masc-dev.crying.pictures";
+]

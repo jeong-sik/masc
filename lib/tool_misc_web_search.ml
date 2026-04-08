@@ -424,7 +424,7 @@ let endpoint_error ~fallback detail =
   let detail = redact_transport_error_detail detail |> String.trim in
   if detail = "" then fallback else Printf.sprintf "%s (%s)" fallback detail
 
-let searxng_default_url = "http://localhost:8888"
+let searxng_default_url = Masc_network_defaults.searxng_default_url
 
 let strip_trailing_slashes s =
   let rec find_last_non_slash i =

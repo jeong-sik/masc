@@ -33,6 +33,9 @@ let compact_if_needed
     working_context * string option * string =
   let ratio = context_ratio ctx in
   let msg_count = message_count ctx in
+  (* NOTE(boundary): tok_count is raw infrastructure — ideally ratio alone
+     suffices.  token_gate is kept for backward compat; most profiles
+     default token_gate=0 which disables this gate.  See keeper_guard.ml. *)
   let tok_count = token_count ctx in
   let ratio_gate, message_gate, token_gate = compaction_policy_of_keeper meta in
   let cooldown = Float.of_int meta.compaction.cooldown_sec in

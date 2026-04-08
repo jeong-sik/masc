@@ -57,7 +57,13 @@ let evaluate (s : measurement_snapshot) : event list =
       max_allowed = t.max_consecutive_turn_failures;
     });
 
-  (* 4. Compaction: any of 3 gates *)
+  (* 4. Compaction: any of 3 gates.
+     NOTE(boundary): compact_tok uses raw token_count — ideally MASC would
+     use only ratio-based checks (compact_ratio). The token_gate remains
+     because it is a user-configurable compaction parameter persisted in
+     keeper meta, exposed via dashboard config panel, and referenced in 30+
+     sites. Removing it requires a cross-cutting migration. Until then,
+     token_gate=0 (the default for most profiles) disables this gate. *)
   let compact_ratio = s.context.context_ratio >= t.compaction_ratio_gate in
   let compact_msg = s.context.message_count >= t.compaction_message_gate in
   let compact_tok = s.context.token_count >= t.compaction_token_gate in

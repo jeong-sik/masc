@@ -80,7 +80,7 @@ let prepare_start_params (ctx : context) args =
   let default_model =
     match Provider_adapter.default_model_label_result () with
     | Ok label -> label
-    | Error _ -> "llama"
+    | Error _ -> Provider_adapter.cn_llama
   in
   let model_model = get_string args "model_model" default_model in
   if goal = "" then

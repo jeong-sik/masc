@@ -53,7 +53,6 @@ let evaluator_stale_after_s = 12. *. 3600.
 (** Runtime health warning thresholds. Distinct from compaction thresholds.
     Values sourced from [Env_config_keeper.DashboardHealth]. *)
 let runtime_warning_ctx_ratio = Env_config_keeper.DashboardHealth.runtime_warning_ctx_ratio
-let runtime_warning_token_count = Env_config_keeper.DashboardHealth.runtime_warning_token_count
 
 let pre_compact_store_ref : Dated_jsonl.t option ref = ref None
 
@@ -311,7 +310,11 @@ let pre_compact_status (latest_event : pre_compact_event option) =
   | None -> Idle
   | Some event ->
       if is_stale ~threshold_s:runtime_stale_after_s event.timestamp then Stale
-      else if event.context_ratio >= runtime_warning_ctx_ratio || event.token_count >= runtime_warning_token_count then Warning
+      (* Boundary: use ratio-based check only. Raw token_count is an OAS
+         infrastructure concern — MASC operates on abstract ratio (0.0–1.0).
+         The context_ratio threshold already accounts for model-specific
+         context windows, making absolute token thresholds redundant. *)
+      else if event.context_ratio >= runtime_warning_ctx_ratio then Warning
       else Healthy
 
 let handoff_status (latest_event : handoff_event option) =
@@ -395,9 +398,7 @@ let overview_json
 let record_pre_compact_at ~timestamp ~keeper_name ~context_ratio ~message_count
     ~token_count ~strategies ~context_window ~is_local_model ~trigger =
   let model_family =
-    if is_local_model && context_window < 64_000 then "small_local"
-    else if context_window >= 200_000 then "large_cloud"
-    else "medium_cloud"
+    Provider_adapter.classify_model_family ~is_local:is_local_model ~context_window
   in
   let event =
     {

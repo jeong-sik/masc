@@ -703,6 +703,14 @@ let keeper_slot_id (name : string) : int option =
     Some (h mod num_slots)
 
 
+let keeper_enable_thinking_rp =
+  _rp_bool ~key:"keeper.turn.enable_thinking"
+    ~default:(fun () -> bool_of_env_default "MASC_KEEPER_ENABLE_THINKING" ~default:false)
+    ~description:"Pass enable_thinking to OAS (default: false; Ollama+Qwen3.5 consumes all tokens in thinking mode)" ()
+
+let keeper_enable_thinking () : bool =
+  Runtime_params.get keeper_enable_thinking_rp
+
 let keeper_adaptive_thinking_enabled_rp =
   _rp_bool ~key:"keeper.turn.adaptive_thinking"
     ~default:(fun () -> bool_of_env_default "MASC_KEEPER_ADAPTIVE_THINKING" ~default:false)

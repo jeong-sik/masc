@@ -167,6 +167,32 @@ let test_health_keepalive_running_fresh_is_healthy () =
   in
   check string "keepalive + fresh + turns → healthy" "healthy" health
 
+let test_health_keepalive_running_recent_live_signal_avoids_idle () =
+  let now_ts = Time_compat.now () in
+  let meta =
+    let base = make_meta () in
+    {
+      base with
+      runtime =
+        {
+          base.runtime with
+          usage =
+            {
+              base.runtime.usage with
+              total_turns = 5;
+              last_turn_ts = now_ts -. 3600.0;
+            };
+        };
+    }
+  in
+  let agent_status = make_agent_status ~status:"active" ~last_seen_ago_s:10.0 () in
+  let health =
+    ES.keeper_health_state ~meta ~keepalive_running:true
+      ~agent_status ~quiet_reason:None ~now_ts ()
+  in
+  check string "fresh live signal keeps keeper healthy despite stale last turn"
+    "healthy" health
+
 let test_health_keepalive_not_running_not_stale_is_offline () =
   let meta = make_meta () in
   let agent_status = make_agent_status ~last_seen_ago_s:50.0 () in
@@ -235,6 +261,8 @@ let () =
             test_health_zombie_overrides_keepalive;
           test_case "keepalive + fresh turns → healthy" `Quick
             test_health_keepalive_running_fresh_is_healthy;
+          test_case "keepalive + recent live signal avoids idle" `Quick
+            test_health_keepalive_running_recent_live_signal_avoids_idle;
           test_case "no keepalive + not stale → offline" `Quick
             test_health_keepalive_not_running_not_stale_is_offline;
           test_case "fresh live signal suppresses stale error degradation" `Quick

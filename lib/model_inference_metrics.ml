@@ -120,20 +120,21 @@ let read_all_decisions ~base_path ~since_unix : raw_entry list =
       try
         let ic = open_in path in
         let entries = ref [] in
-        (try
-           while true do
-             let line = input_line ic in
-             if String.length line > 2 then
-               match Yojson.Safe.from_string line with
-               | json ->
-                 (match parse_telemetry_entry json ~since_unix with
-                  | Some e -> entries := e :: !entries
-                  | None -> ())
-               | exception _ -> ()
-           done
-         with End_of_file -> ());
-        close_in_noerr ic;
-        !entries
+        Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
+          (try
+             while true do
+               let line = input_line ic in
+               if String.length line > 2 then
+                 match Yojson.Safe.from_string line with
+                 | json ->
+                   (match parse_telemetry_entry json ~since_unix with
+                    | Some e -> entries := e :: !entries
+                    | None -> ())
+                 | exception _ -> ()
+             done
+           with End_of_file -> ());
+          !entries
+        )
       with _ -> []
     ) files
 

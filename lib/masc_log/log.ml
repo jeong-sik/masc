@@ -233,15 +233,16 @@ module Ring = struct
       if Sys.file_exists path then begin
         let ic = open_in path in
         let entries = ref [] in
-        (try while true do
-           let line = input_line ic in
-           if String.length line > 0 then
-             match entry_of_json (Yojson.Safe.from_string line) with
-             | Some e -> entries := e :: !entries
-             | None -> ()
-         done with End_of_file -> ());
-        close_in ic;
-        List.rev !entries
+        Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
+          (try while true do
+             let line = input_line ic in
+             if String.length line > 0 then
+               match entry_of_json (Yojson.Safe.from_string line) with
+               | Some e -> entries := e :: !entries
+               | None -> ()
+           done with End_of_file -> ());
+          List.rev !entries
+        )
       end else []
     in
     let yesterday_entries = load_file (log_file_path dir yesterday) in

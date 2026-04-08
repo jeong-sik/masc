@@ -7,6 +7,8 @@ interface ToolStat {
   calls: number
   success_pct: number
   avg_ms: number
+  output_truncated_count: number
+  avg_output_chars: number
 }
 
 interface KeeperStat {
@@ -81,6 +83,7 @@ function ToolTable({ tools }: { tools: ToolStat[] }) {
             <th class="text-right py-1 font-normal">Calls</th>
             <th class="text-right py-1 font-normal">Success</th>
             <th class="text-right py-1 font-normal">Avg ms</th>
+            <th class="text-right py-1 font-normal">Output</th>
           </tr>
         </thead>
         <tbody>
@@ -93,6 +96,11 @@ function ToolTable({ tools }: { tools: ToolStat[] }) {
                 <td class="text-right py-0.5 text-[var(--text-dim)]">${t.calls}</td>
                 <td class="text-right py-0.5 font-mono ${color}">${t.success_pct.toFixed(0)}%</td>
                 <td class="text-right py-0.5 text-[var(--text-dim)]">${t.avg_ms.toFixed(0)}</td>
+                <td class="text-right py-0.5 font-mono ${t.output_truncated_count > 0 ? 'text-amber-400' : 'text-[var(--text-dim)]'}">${
+                  t.output_truncated_count > 0
+                    ? `${(t.avg_output_chars / 1000).toFixed(1)}k ✂${t.output_truncated_count}`
+                    : `${(t.avg_output_chars / 1000).toFixed(1)}k`
+                }</td>
               </tr>
             `
           })}

@@ -114,9 +114,9 @@ let dispatch ~(token : Tool_token.t) ~args : (bool * string) option =
     (match result with
      | Some (success, message) ->
        let tr = Tool_result.wrap ~tool_name:name ~start_time (success, message) in
-       ignore (run_post_hooks tr)
-     | None -> ());
-    result
+       let tr' = run_post_hooks tr in
+       Some (Tool_result.to_legacy tr')
+     | None -> None)
   | None -> None
 
 (** Structured dispatch with hook support.

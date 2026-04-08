@@ -111,6 +111,7 @@ val run_named :
   ?context_injector:Oas.Hooks.context_injector ->
   ?context:Oas.Context.t ->
   ?slot_id:int ->
+  ?approval:Oas.Hooks.approval_callback ->
   ?oas_checkpoint:Oas.Checkpoint.t ->
   ?event_bus:Oas.Event_bus.t ->
   ?sw:Eio.Switch.t ->

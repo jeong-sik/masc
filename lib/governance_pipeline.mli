@@ -60,3 +60,16 @@ val install : config:Room.config -> governance_level:string -> unit
 (** Register the governance pipeline as a Tool_dispatch pre_hook.
     Reads governance level from the [governance_level] argument.
     Called once at server startup. *)
+
+val to_oas_approval_callback :
+  governance_level:string -> Oas.Hooks.approval_callback
+(** Build an OAS-compatible approval callback using governance risk
+    assessment. Wire into Agent Builder via [with_approval] so that
+    autonomous agents are suspended at execution level when invoking
+    tools above the governance threshold.
+
+    Pipeline stages:
+    1. risk_classifier — uses {!assess_risk} to set risk_level
+    2. governance_threshold — rejects tools above the confirm threshold
+
+    @since 2.262.0 (#5902) *)

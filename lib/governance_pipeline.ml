@@ -348,3 +348,51 @@ let install ~config ~governance_level =
   let hook = make_pre_hook ~config ~governance_level in
   Tool_dispatch.register_pre_hook hook;
   Log.Governance.info "pipeline installed: level=%s" governance_level
+
+(* ── OAS Approval Pipeline bridge (#5902) ─────────────────── *)
+
+(** Build an OAS Approval pipeline that uses governance_pipeline risk
+    assessment. This enables execution-level tool approval via
+    OAS Builder.with_approval — agents are actually suspended when
+    a high-risk tool is invoked.
+
+    The pipeline stages:
+    1. risk_classifier: uses assess_risk to set risk_level on context
+    2. threshold_gate: blocks (Reject) tools above the governance threshold *)
+let to_oas_approval_callback ~governance_level : Oas.Hooks.approval_callback =
+  let risk_classifier_stage =
+    Oas.Approval.risk_classifier (fun tool_name input ->
+      match assess_risk ~tool_name ~input with
+      | Low -> Oas.Approval.Low
+      | Medium -> Oas.Approval.Medium
+      | High -> Oas.Approval.High
+      | Critical -> Oas.Approval.Critical)
+  in
+  let threshold_gate : Oas.Approval.approval_stage =
+    let min_level = match confirm_threshold governance_level with
+      | Some Medium -> Oas.Approval.Medium
+      | Some High -> Oas.Approval.High
+      | Some Critical -> Oas.Approval.Critical
+      | Some Low -> Oas.Approval.Low
+      | None -> Oas.Approval.Critical  (* development: only block critical *)
+    in
+    { name = "governance_threshold";
+      evaluate = (fun ctx ->
+        let ctx_level_int = match ctx.Oas.Approval.risk_level with
+          | Low -> 0 | Medium -> 1 | High -> 2 | Critical -> 3 in
+        let min_int = match min_level with
+          | Low -> 0 | Medium -> 1 | High -> 2 | Critical -> 3 in
+        if ctx_level_int >= min_int then
+          Decided (Oas.Hooks.Reject
+            (Printf.sprintf
+               "governance (%s): %s risk tool %S requires approval"
+               governance_level
+               (Oas.Approval.risk_level_to_string ctx.risk_level)
+               ctx.tool_name))
+        else
+          Pass);
+      timeout_s = None;
+    }
+  in
+  let pipeline = Oas.Approval.create [risk_classifier_stage; threshold_gate] in
+  Oas.Approval.as_callback pipeline

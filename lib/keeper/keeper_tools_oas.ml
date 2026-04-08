@@ -162,19 +162,30 @@ let normalize_tool_result ~(success : bool) (raw : string) : string =
 
     Large tool outputs (e.g. board_list returning 15KB) cause the LLM to
     time out on local models where generation speed drops with context size.
-    Truncation preserves the first [max_chars] of the result and appends
-    metadata so the LLM knows information was elided.
+
+    [max_chars] is a hard cap on total returned length. Space is reserved
+    for the metadata suffix; the preserved prefix is shortened accordingly.
 
     Only applies to success results — error messages are typically short
     and should always be visible in full for debugging. *)
 let truncate_tool_output ?(max_chars = Env_config_keeper.KeeperToolExec.max_tool_output_chars) (result : string) : string =
   let len = String.length result in
-  if len <= max_chars then result
+  if max_chars <= 0 then ""
+  else if len <= max_chars then result
   else begin
-    let truncated = String.sub result 0 max_chars in
     let pct = Float.of_int (len - max_chars) *. 100.0 /. Float.of_int len in
-    Printf.sprintf "%s\n[truncated: %d/%d chars shown (%.0f%% elided). Use more specific query params to reduce output.]"
-      truncated max_chars len pct
+    let suffix =
+      Printf.sprintf
+        "\n[truncated: showing %d/%d chars (%.0f%% elided). Use more specific query params to reduce output.]"
+        max_chars len pct
+    in
+    let suffix_len = String.length suffix in
+    if suffix_len >= max_chars then
+      String.sub suffix 0 max_chars
+    else
+      let prefix_len = max_chars - suffix_len in
+      let prefix = String.sub result 0 prefix_len in
+      prefix ^ suffix
   end
 
 (** Max chars for SSE error preview. Short enough for dashboard display,
@@ -320,9 +331,10 @@ let make_tools
                        | _ -> normalized
                      with Yojson.Json_error _ -> normalized)
                 in
+                let max_chars = Env_config_keeper.KeeperToolExec.max_tool_output_chars in
                 let original_len = String.length final_result in
-                let truncated_result = truncate_tool_output final_result in
-                let was_truncated = String.length truncated_result < original_len in
+                let truncated_result = truncate_tool_output ~max_chars final_result in
+                let was_truncated = original_len > max_chars in
                 if was_truncated then
                   Log.Keeper.info "tool %s output truncated: %d -> %d chars"
                     td.name original_len (String.length truncated_result);

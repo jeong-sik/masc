@@ -4,7 +4,6 @@ import { Card } from './common/card'
 import { EmptyState } from './common/empty-state'
 import { LoadingState } from './common/feedback-state'
 import { CountBadge } from './common/badge'
-import { navigate } from '../router'
 import {
   missionError,
   missionSessionDetail,
@@ -18,34 +17,28 @@ import {
   selectedAttentionId,
   selectedSessionId,
   sessionLookupById,
-  enrichedKeeperRow,
   clearMissionSelection,
   toneClass,
   relativeTime,
   statusLabel,
 } from './mission-utils'
 import {
-  MissionContextBar,
   SummaryStat,
   AttentionCard,
   SessionBriefCard,
   SessionDetailCard,
-  KeeperBriefCard,
   InternalSignalCard,
   MissionBriefingCard,
 } from './mission-cards'
 import { ProvenanceStrip } from './common/provenance-strip'
 export function hiddenMissionSectionLabels({
-  keeperCount,
   activityCount,
   attentionCount,
 }: {
-  keeperCount: number
   activityCount: number
   attentionCount: number
 }): string[] {
   return [
-    keeperCount > 0 ? null : '키퍼 연속성',
     activityCount > 0 ? null : '최근 활동',
     attentionCount > 0 ? null : '세션 우선순위',
   ].filter((label): label is string => label != null)
@@ -53,18 +46,15 @@ export function hiddenMissionSectionLabels({
 
 export function missionJumpNavItems({
   sessionCount,
-  keeperCount,
   activityCount,
   attentionCount,
 }: {
   sessionCount: number
-  keeperCount: number
   activityCount: number
   attentionCount: number
 }): Array<{ id: string, label: string, count: number }> {
   return [
     { id: 'mission-sessions', label: '세션', count: sessionCount, visible: true },
-    { id: 'mission-keepers', label: '키퍼', count: keeperCount, visible: keeperCount > 0 },
     { id: 'mission-output', label: '활동', count: activityCount, visible: activityCount > 0 },
     { id: 'mission-attention', label: '우선순위', count: attentionCount, visible: attentionCount > 0 },
   ]
@@ -109,7 +99,6 @@ export function Mission() {
   const activeSessionId = activeSelectedSessionId ?? attentionSessionId ?? sessionRows[0]?.session_id ?? null
   const sessionLookup = sessionLookupById()
   const focusSession = sessionRows.find(item => item.session_id === activeSessionId) ?? null
-  const keeperRows = mission.keeper_briefs.slice(0, 6).map(enrichedKeeperRow)
   const attentionQueue = mission.attention_queue
     .filter(item => item.related_session_ids.length > 0)
     .slice(0, 6)
@@ -118,29 +107,21 @@ export function Mission() {
     row.top_attention != null || row.related_attention_count > 0
   ).length
   const blockerSessions = sessionRows.filter(row => Boolean(row.blocker_summary)).length
-  const keeperStatusWarnings = keeperRows.filter(row => {
-    const status = (row.brief.status ?? '').trim().toLowerCase()
-    return status !== '' && status !== 'ok'
-  }).length
   const focusSessionOutputs = ((focusSession?.member_previews ?? []) as Array<{
     agent_name?: string | null
     role?: string | null
     recent_output_preview?: string | null
     status?: string | null
   }>).filter(row => row.recent_output_preview)
-  const keeperOutputRows = keeperRows.filter(row => row.recentOutput).slice(0, 4)
-  const activityCount = focusSessionOutputs.length + keeperOutputRows.length
-  const hasKeepers = keeperRows.length > 0
+  const activityCount = focusSessionOutputs.length
   const hasActivity = activityCount > 0
   const hasAttentionQueue = attentionQueue.length > 0
   const hiddenSectionLabels = hiddenMissionSectionLabels({
-    keeperCount: keeperRows.length,
     activityCount,
     attentionCount: attentionQueue.length,
   })
   const jumpNavItems = missionJumpNavItems({
     sessionCount: sessionRows.length,
-    keeperCount: keeperRows.length,
     activityCount,
     attentionCount: attentionQueue.length,
   })
@@ -158,13 +139,6 @@ export function Mission() {
         </span>
         <span class="text-[10px] text-[var(--text-muted)]">${mission.generated_at ? relativeTime(mission.generated_at) : ''}</span>
       </div>
-
-      <${MissionContextBar}
-        cluster=${mission.summary.cluster}
-        project=${mission.summary.project}
-        namespace=${mission.summary.namespace ?? mission.summary.namespace_id}
-        generatedAt=${mission.generated_at}
-      />
 
       <!-- Summary stats row -->
       <div class="grid grid-cols-[repeat(auto-fit,minmax(120px,1fr))] gap-3">
@@ -185,12 +159,6 @@ export function Mission() {
           value=${blockerSessions}
           detail="blocker"
           tone=${blockerSessions > 0 ? 'warn' : 'ok'}
-        />
-        <${SummaryStat}
-          label="키퍼 주의"
-          value=${keeperStatusWarnings}
-          detail=${`${keeperRows.length}명 중`}
-          tone=${keeperStatusWarnings > 0 ? 'warn' : 'ok'}
         />
       </div>
 
@@ -246,31 +214,6 @@ export function Mission() {
       />
 
       <!-- Keepers -->
-      ${hasKeepers
-        ? html`
-            <details open id="mission-keepers" class="rounded-lg border border-[var(--card-border)] overflow-hidden">
-              <summary class="mission-collapsible-summary flex items-center gap-2 px-4 py-3 cursor-pointer text-sm font-medium text-[var(--text-strong)]">
-                키퍼 연속성
-                <${CountBadge}>${keeperRows.length}<//>
-                ${keeperStatusWarnings > 0 ? html`<span class="text-[10px] px-1.5 py-px rounded bg-[var(--warn-12)] text-[var(--warn)] tabular-nums">${keeperStatusWarnings} 주의</span>` : null}
-              </summary>
-              <div class="p-4 pt-0">
-                <div class="mb-3">
-                  <p class="m-0 text-xs text-[var(--text-muted)]">키퍼는 세션과 별개로 보고, 연속성과 장기 행위자 상태를 관찰합니다.</p>
-                  <${ProvenanceStrip} items=${[{ kind: 'truth' }]} />
-                </div>
-                <div class="flex flex-col gap-3">
-                  ${keeperRows.map(row => html`<${KeeperBriefCard} key=${row.brief.name} row=${row} />`)}
-                </div>
-                <div class="flex gap-2 flex-wrap mt-3">
-                  <button type="button" class="px-2.5 py-1 rounded border border-[var(--card-border)] bg-transparent text-[10px] text-[var(--text-muted)] cursor-pointer hover:bg-[var(--white-6)]" onClick=${() => navigate('monitoring', { section: 'sessions' })}>세션 상세 보기</button>
-                  <button type="button" class="px-2.5 py-1 rounded border border-[var(--card-border)] bg-transparent text-[10px] text-[var(--text-muted)] cursor-pointer hover:bg-[var(--white-6)]" onClick=${() => navigate('command', { section: 'intervene' })}>운영 개입 열기</button>
-                </div>
-              </div>
-            </details>
-          `
-        : null}
-
       <!-- Activity -->
       ${hasActivity
         ? html`
@@ -285,26 +228,16 @@ export function Mission() {
                   <${ProvenanceStrip} items=${[{ kind: 'truth' }]} />
                 </div>
                 <div class="flex flex-col gap-3">
-                  ${focusSessionOutputs.length > 0
-                    ? focusSessionOutputs.slice(0, 4).map(row => html`
-                        <div class="flex flex-col gap-1 p-3 rounded-lg border border-[var(--white-6)] bg-[var(--white-3)]">
-                          <div class="flex items-center gap-2">
-                            <span class="text-xs font-medium text-[var(--text-strong)]">${row.agent_name ?? 'unknown'}</span>
-                            ${row.role ? html`<span class="text-[10px] text-[var(--text-muted)]">${row.role}</span>` : null}
-                            ${row.status ? html`<span class="text-[10px] text-[var(--text-muted)]">${statusLabel(row.status)}</span>` : null}
-                          </div>
-                          <div class="text-xs text-[var(--text-body)] leading-relaxed">${row.recent_output_preview}</div>
-                        </div>
-                      `)
-                    : null}
-                  ${keeperOutputRows.length > 0
-                    ? keeperOutputRows.map(row => html`
-                        <div class="flex flex-col gap-1 p-3 rounded-lg border border-[var(--white-6)] bg-[var(--white-3)]">
-                          <span class="text-xs font-medium text-[var(--text-strong)]">${row.brief.name}</span>
-                          <div class="text-xs text-[var(--text-body)] leading-relaxed">${row.recentOutput}</div>
-                        </div>
-                      `)
-                    : null}
+                  ${focusSessionOutputs.slice(0, 4).map(row => html`
+                    <div class="flex flex-col gap-1 p-3 rounded-lg border border-[var(--white-6)] bg-[var(--white-3)]">
+                      <div class="flex items-center gap-2">
+                        <span class="text-xs font-medium text-[var(--text-strong)]">${row.agent_name ?? 'unknown'}</span>
+                        ${row.role ? html`<span class="text-[10px] text-[var(--text-muted)]">${row.role}</span>` : null}
+                        ${row.status ? html`<span class="text-[10px] text-[var(--text-muted)]">${statusLabel(row.status)}</span>` : null}
+                      </div>
+                      <div class="text-xs text-[var(--text-body)] leading-relaxed">${row.recent_output_preview}</div>
+                    </div>
+                  `)}
                 </div>
               </div>
             </details>

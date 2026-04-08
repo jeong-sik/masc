@@ -87,13 +87,21 @@ let handle_tool_stats _ctx args =
   let report = Tool_registry.stats_report ~top_n ~all_tool_names in
   (true, Yojson.Safe.to_string report)
 
+let strip_mcp_prefix name =
+  let prefix = "mcp__masc__" in
+  let plen = String.length prefix in
+  if String.length name > plen && String.sub name 0 plen = prefix
+  then String.sub name plen (String.length name - plen)
+  else name
+
 let handle_tool_help _ctx args =
-  let tool_name = String.trim (get_string args "tool_name" "") in
-  if tool_name = "" then
+  let raw_name = String.trim (get_string args "tool_name" "") in
+  if raw_name = "" then
     (false, "❌ tool_name is required")
   else
+    let tool_name = strip_mcp_prefix raw_name in
     match Tool_help_registry.find_entry Config.raw_all_tool_schemas tool_name with
-    | None -> (false, Printf.sprintf "❌ unknown tool: %s" tool_name)
+    | None -> (false, Printf.sprintf "❌ unknown tool: %s" raw_name)
     | Some entry ->
         (true, Yojson.Safe.to_string (Tool_help_registry.entry_json entry))
 

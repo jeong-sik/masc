@@ -471,6 +471,83 @@ let test_second_claim_on_single_task_returns_no_tasks () =
               (Str.regexp_string "no tasks") lower 0); true
             with Not_found -> false))
 
+(* --- Integration: playground clone on real git repo --- *)
+
+(** Run a test using the actual masc-mcp repo root as the room base_path.
+    This exercises the real playground clone path instead of the temp-dir
+    fallback that non-git rooms hit. *)
+let with_real_repo_room f =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Lazy.force policy_init_once;
+  let repo_root =
+    let cwd = Sys.getcwd () in
+    if Sys.file_exists (Filename.concat cwd ".git") then cwd
+    else
+      let rec go d =
+        if d = "/" then failwith "cannot find .git repo root"
+        else if Sys.file_exists (Filename.concat d ".git") then d
+        else go (Filename.dirname d)
+      in
+      go (Filename.dirname cwd)
+  in
+  let saved_pg = Sys.getenv_opt "MASC_POSTGRES_URL" in
+  let saved_sb = Sys.getenv_opt "SB_PG_URL" in
+  Unix.putenv "MASC_POSTGRES_URL" "";
+  Unix.putenv "SB_PG_URL" "";
+  Fun.protect
+    ~finally:(fun () ->
+      (match saved_pg with Some v -> Unix.putenv "MASC_POSTGRES_URL" v | None -> ());
+      (match saved_sb with Some v -> Unix.putenv "SB_PG_URL" v | None -> ()))
+    (fun () ->
+      let config = Room.default_config repo_root in
+      (* Room may already be initialized in the real repo *)
+      (try ignore (Room.init config ~agent_name:(Some "test-integration")) with _ -> ());
+      f config repo_root)
+
+let test_playground_clone_creates_clone_and_commits () =
+  with_real_repo_room (fun config repo_root ->
+    let meta = make_meta_with_preset "delivery" in
+    let test_branch = Printf.sprintf "test/integration-%d" (Random.int 100_000) in
+    let args = `Assoc
+      [ "branch", `String test_branch
+      ; "file_path", `String "test-integration-verify.txt"
+      ; "file_content", `String "integration test content"
+      ; "commit_message", `String "test: integration verify playground clone"
+      ; "pr_title", `String "test: integration verify"
+      ] in
+    let result = call_tool config meta "keeper_pr_workflow" args in
+    let json = parse_json result in
+    let steps = json_string "steps" json in
+    let error = json_string "error" json in
+    (* playground_clone step must succeed *)
+    check bool "playground_clone step present"
+      true (String_util.contains_substring_ci steps "playground_clone");
+    check bool "playground_clone ok"
+      true (String_util.contains_substring_ci steps "playground_clone: ok");
+    (* file_write step must succeed *)
+    check bool "file_write ok"
+      true (String_util.contains_substring_ci steps "file_write: ok");
+    (* git_commit_push will fail at push (no network in CI / test branch
+       doesn't exist on remote yet is fine) but commit should succeed.
+       If error mentions "git push" it means clone+write+commit all passed. *)
+    let commit_passed =
+      String_util.contains_substring_ci steps "git_commit_push: ok"
+      || String_util.contains_substring_ci error "git push"
+    in
+    check bool "commit reached (clone+write+commit passed)" true commit_passed;
+    (* Verify clone was cleaned up (step 5 runs even on push failure) *)
+    let playground_path = Filename.concat repo_root
+      (Keeper_alerting_path.playground_path_of_keeper meta.name) in
+    let clone_path = Filename.concat playground_path (Filename.basename repo_root) in
+    check bool "clone cleaned up"
+      false (Sys.file_exists clone_path);
+    (* Clean up remote branch if push somehow succeeded *)
+    if String_util.contains_substring_ci steps "git_commit_push: ok" then
+      ignore (Sys.command
+        (Printf.sprintf "cd %s && git push origin --delete %s 2>/dev/null"
+          (Filename.quote repo_root) (Filename.quote test_branch))))
+
 let () =
   run "keeper_pr_workflow"
     [ "required_fields",
@@ -508,5 +585,8 @@ let () =
       ]
     ; "task_dedup",
       [ test_case "second claim no tasks" `Quick test_second_claim_on_single_task_returns_no_tasks
+      ]
+    ; "integration",
+      [ test_case "playground clone e2e" `Slow test_playground_clone_creates_clone_and_commits
       ]
     ]

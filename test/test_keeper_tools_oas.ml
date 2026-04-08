@@ -474,17 +474,19 @@ let test_truncate_exact_limit_unchanged () =
   check string "exact limit unchanged" exact result
 
 let test_truncate_over_limit_is_truncated () =
-  let long = String.make 200 'a' in
-  let result = Keeper_tools_oas.truncate_tool_output ~max_chars:100 long in
-  check bool "result shorter than original" true (String.length result < 200);
-  check bool "starts with original prefix" true
-    (String.sub result 0 100 = String.make 100 'a');
+  let max_chars = 200 in
+  let long = String.make 400 'a' in
+  let result = Keeper_tools_oas.truncate_tool_output ~max_chars long in
+  (* Total output must be <= max_chars (hard cap) *)
+  check bool "result at most max_chars" true (String.length result <= max_chars);
   check bool "contains truncation marker" true
     (string_contains ~sub:"[truncated:" result)
 
 let test_truncate_metadata_shows_correct_stats () =
   let long = String.make 10000 'b' in
   let result = Keeper_tools_oas.truncate_tool_output ~max_chars:2000 long in
+  (* Total output is hard-capped at max_chars *)
+  check bool "result at most max_chars" true (String.length result <= 2000);
   check bool "mentions original size" true
     (string_contains ~sub:"10000" result);
   check bool "mentions kept size" true
@@ -493,10 +495,11 @@ let test_truncate_metadata_shows_correct_stats () =
     (string_contains ~sub:"80%" result)
 
 let test_truncate_default_uses_env_config () =
-  (* Default max_chars from env config (8000). A 16000-char string should be truncated. *)
-  let long = String.make 16000 'c' in
+  let max_chars = Env_config_keeper.KeeperToolExec.max_tool_output_chars in
+  let long = String.make (max_chars + 1) 'c' in
   let result = Keeper_tools_oas.truncate_tool_output long in
-  check bool "default truncates 16k" true (String.length result < 16000);
+  check bool "default truncates output longer than configured max" true
+    (String.length result <= max_chars);
   check bool "contains truncation marker" true
     (string_contains ~sub:"[truncated:" result)
 

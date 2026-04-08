@@ -98,7 +98,7 @@ Team Session Engine (Eio)
 
 | Field | Type | 설명 |
 |-------|------|------|
-| `turn_count` | int | 누적 turn 수 |
+| `turn_count` | int | 누적 session orchestration turn 수 (`team_turn` + swarm iteration) |
 | `agent_names` | string list | 참여 agent 목록 |
 | `planned_workers` | planned_worker list | 계획된 worker 사양 |
 | `broadcast_count` | int | broadcast 횟수 |

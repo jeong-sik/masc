@@ -146,9 +146,25 @@ let test_agent_done_event_includes_telemetry () =
   Alcotest.(check string) "trace ref worker_run_id" "run-telemetry"
     (detail |> member "telemetry" |> member "trace_ref"
      |> member "worker_run_id" |> to_string);
+  Alcotest.(check string) "top-level worker_run_id" "run-telemetry"
+    (detail |> member "worker_run_id" |> to_string);
+  Alcotest.(check string) "top-level trace ref worker_run_id" "run-telemetry"
+    (detail |> member "trace_ref" |> member "worker_run_id" |> to_string);
+  Alcotest.(check bool) "trace path omitted from event detail" true
+    (detail |> member "trace_ref" |> member "path" = `Null);
+  Alcotest.(check (list string)) "evidence refs use worker-run ref"
+    [ "worker-run:run-telemetry" ]
+    (detail |> member "evidence_refs" |> to_list |> List.map to_string);
   Alcotest.(check int) "usage api_calls" 2
     (detail |> member "telemetry" |> member "usage" |> member "api_calls"
-     |> to_int)
+     |> to_int);
+  Alcotest.(check (option string)) "proof events parse agent from swarm callback"
+    (Some "agent-a") (Dashboard_proof_events.event_actor event);
+  Alcotest.(check (option string)) "proof events parse output preview"
+    (Some "completed")
+    (Dashboard_proof_events.event_output_preview event);
+  Alcotest.(check string) "proof events use output preview in summary"
+    "completed" (Dashboard_proof_events.event_summary event)
 
 (* ================================================================ *)
 (* apply_swarm_result tests                                         *)
@@ -231,8 +247,66 @@ let test_apply_partial_result () =
   let updated = Team_session_oas_bridge.apply_swarm_result session result in
   Alcotest.(check string) "status interrupted"
     "interrupted" (Team_session_types.status_to_string updated.status);
+  Alcotest.(check int) "turn_count increments by iteration count" 1
+    updated.turn_count;
   Alcotest.(check string) "stop_reason partial"
     "swarm_partial_completion" (Option.get updated.stop_reason)
+
+let test_apply_result_counts_iterations_as_turns () =
+  let session = { (make_test_session "s-turns") with turn_count = 4 } in
+  let result : Swarm.Swarm_types.swarm_result = {
+    iterations = [
+      {
+        Swarm.Swarm_types.iteration = 1;
+        metric_value = Some 0.2;
+        agent_results = [
+          ( "agent-1",
+            Swarm.Swarm_types.Done_ok
+              {
+                elapsed = 0.8;
+                text = "done";
+                telemetry = Swarm.Swarm_types.empty_telemetry;
+              } );
+          ( "agent-2",
+            Swarm.Swarm_types.Done_ok
+              {
+                elapsed = 0.9;
+                text = "done";
+                telemetry = Swarm.Swarm_types.empty_telemetry;
+              } );
+        ];
+        elapsed = 1.8;
+        timestamp = Time_compat.now ();
+        trace_refs = [];
+      };
+      {
+        Swarm.Swarm_types.iteration = 2;
+        metric_value = Some 0.4;
+        agent_results = [
+          ( "agent-1",
+            Swarm.Swarm_types.Done_ok
+              {
+                elapsed = 1.0;
+                text = "done";
+                telemetry = Swarm.Swarm_types.empty_telemetry;
+              } );
+        ];
+        elapsed = 1.0;
+        timestamp = Time_compat.now ();
+        trace_refs = [];
+      };
+    ];
+    final_metric = Some 0.4;
+    converged = false;
+    total_elapsed = 2.8;
+    total_usage = { Agent_sdk.Types.total_input_tokens = 0;
+      total_output_tokens = 0; total_cache_creation_input_tokens = 0;
+      total_cache_read_input_tokens = 0; api_calls = 0;
+      estimated_cost_usd = 0.0 };
+  } in
+  let updated = Team_session_oas_bridge.apply_swarm_result session result in
+  Alcotest.(check int) "turn_count adds iteration count, not agent results" 6
+    updated.turn_count
 
 let test_apply_all_agents_failed_result () =
   let session = make_test_session "s-all-failed" in
@@ -409,6 +483,8 @@ let () =
         test_apply_exhausted_result;
       Alcotest.test_case "partial result" `Quick
         test_apply_partial_result;
+      Alcotest.test_case "counts iterations as turns" `Quick
+        test_apply_result_counts_iterations_as_turns;
       Alcotest.test_case "all agents failed result" `Quick
         test_apply_all_agents_failed_result;
       Alcotest.test_case "updates stopped_at" `Quick

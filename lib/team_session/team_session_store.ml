@@ -145,10 +145,14 @@ let write_artifact_text config path content =
 let append_artifact_text config path content =
   Room_utils.append_text config path content
 
+let notify_team_session_mutation config ~session_id =
+  !Room_hooks.on_team_session_mutation_fn config ~session_id
+
 let save_session config (session : Team_session_types.session) =
   let path = session_json_path config session.session_id in
   with_file_lock config path (fun () ->
-      write_json config path (Team_session_types.session_to_yojson session))
+      write_json config path (Team_session_types.session_to_yojson session));
+  notify_team_session_mutation config ~session_id:session.session_id
 
 let load_session config session_id : Team_session_types.session option =
   let path = session_json_path config session_id in
@@ -212,18 +216,33 @@ let trace_ref_json_session_worker ~session_id ~worker_run_id json =
              (option_or_else (fun () -> Some session_id)
                 (json_string_member_opt "session_id" json))
         |> assoc_put_opt_string "worker_run_id"
-             (json_string_member_opt "worker_run_id" json
+                (json_string_member_opt "worker_run_id" json
              |> option_or_else (fun () -> Some worker_run_id)))
   | _ -> json
 
+let trace_ref_json_of_json json =
+  match U.member "trace_ref" json with
+  | `Assoc _ as trace_ref -> Some trace_ref
+  | _ -> (
+      match U.member "telemetry" json with
+      | `Assoc _ as telemetry -> (
+          match U.member "trace_ref" telemetry with
+          | `Assoc _ as trace_ref -> Some trace_ref
+          | _ -> None)
+      | _ -> None)
+
+let worker_run_id_of_json json =
+  json_string_member_opt "worker_run_id" json
+  |> option_or_else (fun () ->
+         match trace_ref_json_of_json json with
+         | Some trace_ref -> json_string_member_opt "worker_run_id" trace_ref
+         | None -> None)
+
 let evidence_refs_of_json json =
-  let trace_ref_path =
-    match U.member "trace_ref" json with
-    | `Assoc _ as trace_ref -> (
-        match json_string_member_opt "path" trace_ref with
-        | Some path -> [ path ]
-        | None -> [])
-    | _ -> []
+  let worker_run_refs =
+    match worker_run_id_of_json json with
+    | Some worker_run_id -> [ "worker-run:" ^ worker_run_id ]
+    | None -> []
   in
   Team_session_types.dedup_strings
     (json_string_list_member "evidence_refs" json
@@ -233,7 +252,7 @@ let evidence_refs_of_json json =
     (match json_string_member_opt "checkpoint_ref" json with
     | Some value -> [ value ]
     | None -> [])
-    @ trace_ref_path)
+    @ worker_run_refs)
 
 let normalize_session_event_detail config ~session_id detail =
   let detail =
@@ -245,13 +264,7 @@ let normalize_session_event_detail config ~session_id detail =
     json_string_member_opt "operation_id" detail
     |> option_or_else (fun () -> operation_id_for_session config session_id)
   in
-  let worker_run_id =
-    json_string_member_opt "worker_run_id" detail
-    |> option_or_else (fun () ->
-           match U.member "trace_ref" detail with
-           | `Assoc _ as trace_ref -> json_string_member_opt "worker_run_id" trace_ref
-           | _ -> None)
-  in
+  let worker_run_id = worker_run_id_of_json detail in
   let evidence_refs = evidence_refs_of_json detail in
   match detail with
   | `Assoc fields ->
@@ -392,7 +405,8 @@ let append_event config session_id ~(event_type : string) ~(detail : Yojson.Safe
   let line = Yojson.Safe.to_string (Team_session_types.event_entry_to_yojson entry) ^ "\n" in
   let path = events_jsonl_path config session_id in
   with_file_lock config path (fun () -> append_artifact_text config path line);
-  emit_activity_event config ~session_id ~event_type ~detail
+  emit_activity_event config ~session_id ~event_type ~detail;
+  notify_team_session_mutation config ~session_id
 
 let take_last n lst =
   if n <= 0 then []
@@ -496,24 +510,31 @@ let read_events ?max_events config session_id : Yojson.Safe.t list =
 let write_checkpoint config session_id (checkpoint : Team_session_types.checkpoint) =
   let filename = Printf.sprintf "%Ld.json" (Int64.of_float (checkpoint.ts *. 1000.0)) in
   let path = Filename.concat (checkpoints_dir config session_id) filename in
-  write_json config path (Team_session_types.checkpoint_to_yojson checkpoint)
+  with_file_lock config path (fun () ->
+      write_json config path (Team_session_types.checkpoint_to_yojson checkpoint));
+  notify_team_session_mutation config ~session_id
 
 let save_worker_run_json config session_id worker_run_id json =
   let path = worker_run_json_path config session_id worker_run_id in
-  write_json config path json
+  with_file_lock config path (fun () -> write_json config path json);
+  notify_team_session_mutation config ~session_id
 
 let save_worker_run_checkpoint_text config session_id worker_run_id content =
   let path = worker_run_checkpoint_path config session_id worker_run_id in
-  write_text_file path content
+  with_file_lock config path (fun () -> write_text_file path content);
+  notify_team_session_mutation config ~session_id
 
 let save_worker_run_meta_json config session_id worker_run_id json =
   let path = worker_run_meta_path config session_id worker_run_id in
-  write_json config path
-    (normalize_worker_run_meta_json config ~session_id ~worker_run_id json)
+  with_file_lock config path (fun () ->
+      write_json config path
+        (normalize_worker_run_meta_json config ~session_id ~worker_run_id json));
+  notify_team_session_mutation config ~session_id
 
 let save_worker_run_proof_json config session_id worker_run_id json =
   let path = worker_run_proof_path config session_id worker_run_id in
-  write_json config path json
+  with_file_lock config path (fun () -> write_json config path json);
+  notify_team_session_mutation config ~session_id
 
 let immediate_dir_entries config dir =
   Room_utils.list_dir config dir

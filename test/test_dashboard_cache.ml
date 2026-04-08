@@ -69,6 +69,44 @@ let test_invalidate () =
   Alcotest.(check int) "recompute after invalidate" 2 !counter;
   check_json "new value" (`Int 2) v
 
+let test_invalidate_prefix () =
+  Dashboard_cache.invalidate_all ();
+  let proof_counter = ref 0 in
+  let mission_counter = ref 0 in
+  ignore
+    (Dashboard_cache.get_or_compute "proof:room-a:default:one" ~ttl:5.0
+       (fun () ->
+         incr proof_counter;
+         `Int !proof_counter));
+  ignore
+    (Dashboard_cache.get_or_compute "proof:room-a:default:two" ~ttl:5.0
+       (fun () ->
+         incr proof_counter;
+         `Int !proof_counter));
+  ignore
+    (Dashboard_cache.get_or_compute "mission:room-a:default:one" ~ttl:5.0
+       (fun () ->
+         incr mission_counter;
+         `Int !mission_counter));
+  Dashboard_cache.invalidate_prefix "proof:room-a:default:";
+  ignore
+    (Dashboard_cache.get_or_compute "proof:room-a:default:one" ~ttl:5.0
+       (fun () ->
+         incr proof_counter;
+         `Int !proof_counter));
+  ignore
+    (Dashboard_cache.get_or_compute "proof:room-a:default:two" ~ttl:5.0
+       (fun () ->
+         incr proof_counter;
+         `Int !proof_counter));
+  ignore
+    (Dashboard_cache.get_or_compute "mission:room-a:default:one" ~ttl:5.0
+       (fun () ->
+         incr mission_counter;
+         `Int !mission_counter));
+  Alcotest.(check int) "proof entries recomputed" 4 !proof_counter;
+  Alcotest.(check int) "non-matching prefix preserved" 1 !mission_counter
+
 (* -- 5. Stats reports active + computing ------------------------------------ *)
 
 let test_stats () =
@@ -272,6 +310,7 @@ let () =
         [
           test_case "cache hit" `Quick test_cache_hit;
           test_case "invalidate" `Quick test_invalidate;
+          test_case "invalidate_prefix" `Quick test_invalidate_prefix;
           test_case "stats" `Quick test_stats;
           test_case "exception recovery" `Quick test_exception_recovery;
           test_case "invalidate_all wakes waiters" `Quick

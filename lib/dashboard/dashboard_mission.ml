@@ -104,7 +104,11 @@ let event_summary event_json =
     trim_to_option (string_field "event_type" event_json)
     |> Option.value ~default:"event"
   in
-  let actor = trim_to_option (string_field "actor" detail) in
+  let actor =
+    match trim_to_option (string_field "actor" detail) with
+    | Some value -> Some value
+    | None -> trim_to_option (string_field "agent" detail)
+  in
   let task_title =
     match trim_to_option (string_field "task_title" detail) with
     | Some value -> Some value
@@ -112,13 +116,18 @@ let event_summary event_json =
   in
   let result = trim_to_option (compact_text (string_field "result" detail)) in
   let reason = trim_to_option (compact_text (string_field "reason" detail)) in
-  match task_title, result, reason with
-  | Some title, _, _ ->
+  let output_preview =
+    trim_to_option (compact_text (string_field "output_preview" detail))
+  in
+  match task_title, result, reason, output_preview with
+  | Some title, _, _, _ ->
       compact_text
         (Printf.sprintf "%s%s" (match actor with Some value -> value ^ " · " | None -> "") title)
-  | None, Some value, _ -> value
-  | None, None, Some value -> value
-  | None, None, None -> String.map (fun ch -> if ch = '_' then ' ' else ch) event_type
+  | None, Some value, _, _ -> value
+  | None, None, Some value, _ -> value
+  | None, None, None, Some value -> value
+  | None, None, None, None ->
+      String.map (fun ch -> if ch = '_' then ' ' else ch) event_type
 
 let session_origin_kind session_meta =
   let created_by =

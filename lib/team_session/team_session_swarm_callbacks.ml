@@ -23,7 +23,6 @@ let trace_ref_to_json (trace_ref : Agent_sdk.Raw_trace.run_ref) =
   `Assoc
     [
       ("worker_run_id", `String trace_ref.worker_run_id);
-      ("path", `String trace_ref.path);
       ("start_seq", `Int trace_ref.start_seq);
       ("end_seq", `Int trace_ref.end_seq);
       ("agent_name", `String trace_ref.agent_name);
@@ -97,6 +96,21 @@ let make_callbacks ~(config : Room.config) ~(session_id : string)
       | Working -> ("working", 0.0, "", Swarm.Swarm_types.empty_telemetry)
       | Idle -> ("idle", 0.0, "", Swarm.Swarm_types.empty_telemetry)
     in
+    let trace_ref =
+      match telemetry.trace_ref with
+      | Some trace_ref -> trace_ref_to_json trace_ref
+      | None -> `Null
+    in
+    let worker_run_id =
+      match telemetry.trace_ref with
+      | Some trace_ref -> `String trace_ref.worker_run_id
+      | None -> `Null
+    in
+    let evidence_refs =
+      match telemetry.trace_ref with
+      | Some trace_ref -> `List [ `String ("worker-run:" ^ trace_ref.worker_run_id) ]
+      | None -> `List []
+    in
     Team_session_store.append_event config session_id
       ~event_type:"swarm_agent_done"
       ~detail:(`Assoc [
@@ -104,6 +118,9 @@ let make_callbacks ~(config : Room.config) ~(session_id : string)
         ("status", `String status_str);
         ("elapsed", `Float elapsed);
         ("output_preview", `String output_preview);
+        ("worker_run_id", worker_run_id);
+        ("trace_ref", trace_ref);
+        ("evidence_refs", evidence_refs);
         ("telemetry", telemetry_to_json telemetry);
       ])
   in

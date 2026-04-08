@@ -139,14 +139,26 @@ let pipeline_stage_of_lifecycle_event = function
   | "crashed" -> Some "crashed"
   | _ -> None
 
+let keeper_agent_status_opt row =
+  let open Yojson.Safe.Util in
+  match member "agent" row with
+  | `Assoc _ as agent -> (
+      match member "status" agent with
+      | `String status -> Some status
+      | _ -> None)
+  | _ -> (
+      match member "status" row with
+      | `String status -> Some status
+      | _ -> None)
+
 let patched_keeper_status row ~keepalive_running =
   if not keepalive_running then
     `String "offline"
   else
-    match Yojson.Safe.Util.member "agent" row |> Yojson.Safe.Util.member "status" with
-    | `String (("busy" | "active" | "listening" | "idle") as status) ->
+    match keeper_agent_status_opt row with
+    | Some (("busy" | "active" | "listening" | "idle") as status) ->
         `String status
-    | `String ("offline" | "inactive") -> `String "offline"
+    | Some ("offline" | "inactive") -> `String "offline"
     | _ -> `String "idle"
 
 let patch_keeper_row ~keeper_name ~event ~keepalive_running = function

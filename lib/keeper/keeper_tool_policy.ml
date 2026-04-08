@@ -51,6 +51,14 @@ let allows_shell_write_for_preset (preset : tool_preset) : bool =
     Keeper_tool_policy_config.allows_shell_write cfg
       (preset_name_of_tool_preset preset)
 
+(* ── Preset subsumption (config-driven) ──────────────────────── *)
+
+let preset_can_satisfy ~(agent_preset : string) ~(required_preset : string) : bool =
+  match !policy_config with
+  | None -> false
+  | Some cfg ->
+    Keeper_tool_policy_config.preset_can_satisfy cfg ~agent_preset ~required_preset
+
 (* ── Denied-tool set (O(1) lookup) ────────────────────────────── *)
 
 let keeper_denied_set : (string, unit) Hashtbl.t =

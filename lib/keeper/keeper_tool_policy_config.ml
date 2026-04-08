@@ -266,6 +266,26 @@ let all_group_tools (config : t) : string list =
 let all_masc_tools (config : t) : string list =
   Hashtbl.fold (fun _ tools acc -> tools @ acc) config.masc_groups []
 
+(** Check if [agent_preset]'s resolved tool set covers [required_preset]'s.
+    Derived from config — adding a new preset to tool_policy.toml automatically
+    updates the subsumption graph.  No hardcoded hierarchy. *)
+let preset_can_satisfy (config : t) ~(agent_preset : string) ~(required_preset : string) : bool =
+  if String.equal agent_preset required_preset then true
+  else
+    let resolve name =
+      match resolve_preset config name ~masc_filter:(fun _ -> true) () with
+      | Some All_candidates -> None
+      | Some (Subset tools) -> Some (List.sort_uniq String.compare tools)
+      | None -> Some []
+    in
+    match resolve agent_preset with
+    | None -> true
+    | Some agent_tools ->
+      match resolve required_preset with
+      | None -> false
+      | Some req_tools ->
+        List.for_all (fun t -> List.mem t agent_tools) req_tools
+
 let allows_workflow (config : t) (preset_name : string) : bool =
   List.mem preset_name config.workflow_presets
 

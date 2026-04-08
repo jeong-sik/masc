@@ -28,6 +28,11 @@ Example: masc_add_task({title: 'Fix login bug', priority: 1, description: 'Users
           ("type", `String "string");
           ("description", `String "Task description");
         ]);
+        ("required_preset", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Tool preset required to claim this task (e.g., 'delivery', 'coding'). Omit for any agent.");
+          ("enum", `List [`String "minimal"; `String "social"; `String "messaging"; `String "coding"; `String "research"; `String "delivery"]);
+        ]);
         ("contract", `Assoc [
           ("type", `String "object");
           ("description", `String "Optional persisted task contract for strict deterministic completion gating.");

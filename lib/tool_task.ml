@@ -189,6 +189,7 @@ let handle_add_task ctx args =
   let title = get_string args "title" "" in
   let priority = get_int args "priority" 3 in
   let description = get_string args "description" "" in
+  let required_preset = Safe_ops.json_string_opt "required_preset" args in
   let contract_result = parse_task_contract args in
   (* BUG-009/010: Validate title and priority *)
   let trimmed_title = String.trim title in
@@ -201,7 +202,7 @@ let handle_add_task ctx args =
     | Error error -> (false, error)
     | Ok contract ->
         ( true,
-          Room.add_task ?contract ctx.config ~title:trimmed_title ~priority
+          Room.add_task ?contract ?required_preset ctx.config ~title:trimmed_title ~priority
             ~description )
 
 let handle_batch_add_tasks ctx args =
@@ -273,17 +274,43 @@ let handle_claim ctx args =
    | Error e -> Log.Task.debug "task claim failed for %s: %s" task_id (Types.masc_error_to_string e));
   result_to_response result
 
+(** Extract agent's preset from capabilities list (e.g., ["keeper", "preset:delivery"] -> Some "delivery"). *)
+let resolve_agent_preset config agent_name =
+  let agent_file = Filename.concat (Room.agents_dir config) (Room.safe_filename agent_name ^ ".json") in
+  try
+    let json = Room.read_json config agent_file in
+    let caps = Yojson.Safe.Util.(json |> member "capabilities" |> to_list |> List.map to_string) in
+    List.find_map (fun c ->
+      let prefix = "preset:" in
+      let plen = String.length prefix in
+      if String.length c > plen && String.sub c 0 plen = prefix then
+        Some (String.sub c plen (String.length c - plen))
+      else None
+    ) caps
+  with _ -> None
+
+(** Build a task_filter closure that checks required_preset against the agent's preset. *)
+let preset_task_filter ~agent_preset (task : Types.task) =
+  match task.required_preset, agent_preset with
+  | None, _ -> true
+  | Some _, None -> true
+  | Some required, Some preset ->
+    Keeper_tool_policy.preset_can_satisfy ~agent_preset:preset ~required_preset:required
+
 let handle_claim_next ctx _args =
   if not (try Room.is_agent_joined ctx.config ~agent_name:ctx.agent_name with Sys_error _ | Not_found -> false) then
     (false, Printf.sprintf "Agent '%s' is not a member of this room" ctx.agent_name)
   else
-  let result = Room.claim_next_r ctx.config ~agent_name:ctx.agent_name () in
+  let agent_preset = resolve_agent_preset ctx.config ctx.agent_name in
+  let task_filter = preset_task_filter ~agent_preset in
+  let result = Room.claim_next_r ctx.config ~agent_name:ctx.agent_name ~task_filter () in
   let message = match result with
     | Room.Claim_next_claimed { task_id; message; _ } ->
-        (* Auto-set current_task so planning tools pick it up immediately *)
         Planning_eio.set_current_task ctx.config ~task_id;
         message
     | Room.Claim_next_no_unclaimed -> "📋 No unclaimed tasks available"
+    | Room.Claim_next_no_eligible { preset_filtered; _ } when preset_filtered > 0 ->
+        Printf.sprintf "📋 No eligible tasks (preset mismatch: %d tasks require different preset)" preset_filtered
     | Room.Claim_next_no_eligible _ -> "📋 No unclaimed tasks available"
     | Room.Claim_next_error e -> Printf.sprintf "❌ Error: %s" e
   in

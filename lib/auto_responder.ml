@@ -26,7 +26,7 @@ let is_enabled () = get_mode () <> Disabled
 
 let activity_log_file () =
   match Env_config.me_root_opt () with
-  | Some root -> root ^ "/logs/auto-responder.log"
+  | Some root -> root ^ "/.masc/logs/auto-responder.log"
   | None -> "/tmp/auto-responder.log"
 
 let debug_log msg =

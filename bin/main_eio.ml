@@ -302,10 +302,26 @@ let run_cmd host port base_path =
   acquire_pid_lock port;
   Log.init_from_env ();
   Unix.putenv "MASC_BASE_PATH" base_path;
-  (* Persist logs to .masc/logs/ so they survive restarts *)
-  let log_dir = Filename.concat base_path "logs" in
-  Fs_compat.mkdir_p base_path;
+  (* Persist logs inside .masc/logs/ — colocated with state, not a sibling.
+     Previous code wrote to base_path/logs/ which diverged from .masc/ when
+     base_path differed from the repo checkout directory. *)
+  let masc_dir = Filename.concat base_path ".masc" in
+  let log_dir = Filename.concat masc_dir "logs" in
+  Fs_compat.mkdir_p masc_dir;
   Fs_compat.mkdir_p log_dir;
+  (* Migration: move .jsonl files from old base_path/logs/ if they exist *)
+  let old_log_dir = Filename.concat base_path "logs" in
+  (if Sys.file_exists old_log_dir && Sys.is_directory old_log_dir then
+     let files = try Sys.readdir old_log_dir with Sys_error _ -> [||] in
+     Array.iter (fun fname ->
+       if Filename.check_suffix fname ".jsonl" then begin
+         let src = Filename.concat old_log_dir fname in
+         let dst = Filename.concat log_dir fname in
+         if not (Sys.file_exists dst) then
+           (try Sys.rename src dst;
+                Log.info "log migration: moved %s -> .masc/logs/" fname
+            with Sys_error _ -> ())
+       end) files);
   Log.Ring.init_file_sink log_dir;
   Log.Ring.cleanup_old_files log_dir;
   Eio_main.run @@ fun env ->

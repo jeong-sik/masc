@@ -70,8 +70,6 @@ let release_entry entry =
   let f () = entry.active <- max 0 (entry.active - 1) in
   Eio_guard.with_mutex table_mu f
 
-let get_lock path = (get_entry path).mu
-
 let run_blocking_lock_op f = Eio_guard.run_in_systhread f
 
 (** Acquire a non-blocking Unix file lock (F_TLOCK) with retry.

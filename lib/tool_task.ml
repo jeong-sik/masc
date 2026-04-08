@@ -733,13 +733,13 @@ let handle_task_history ctx args =
     | x :: rest -> x :: take (n - 1) rest
   in
   let events = parsed |> List.filter matches_task |> take limit in
-  (true, Yojson.Safe.pretty_to_string (`List events))
+  (true, Yojson.Safe.to_string (`List events))
 
 let handle_archive_view ctx args =
   let limit = get_int args "limit" 20 in
   let archive_path = Room_utils.archive_path ctx.config in
   if not (Room_utils.path_exists ctx.config archive_path) then
-    (true, Yojson.Safe.pretty_to_string (`Assoc [("count", `Int 0); ("tasks", `List [])]))
+    (true, Yojson.Safe.to_string (`Assoc [("count", `Int 0); ("tasks", `List [])]))
   else
     let json = Room_utils.read_json ctx.config archive_path in
     let tasks =
@@ -768,7 +768,7 @@ let handle_archive_view ctx args =
       ("total", `Int total);
       ("tasks", `List tasks);
     ] in
-    (true, Yojson.Safe.pretty_to_string response)
+    (true, Yojson.Safe.to_string response)
 
 include Tool_task_schemas
 (* Dispatch function *)

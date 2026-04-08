@@ -37,7 +37,7 @@ let handle_transport_status _args : result =
       ~allow_legacy_accept:(env_flag_enabled "MASC_ALLOW_LEGACY_ACCEPT") ()
   in
   let json = Transport_read_model.transport_status_json ctx in
-  (true, Yojson.Safe.pretty_to_string json)
+  (true, Yojson.Safe.to_string json)
 
 let handle_websocket_discovery _args : result =
   let ctx =
@@ -45,7 +45,7 @@ let handle_websocket_discovery _args : result =
       ~allow_legacy_accept:(env_flag_enabled "MASC_ALLOW_LEGACY_ACCEPT") ()
   in
   let json = Transport_read_model.websocket_discovery_json ctx in
-  (true, Yojson.Safe.pretty_to_string json)
+  (true, Yojson.Safe.to_string json)
 
 let handle_webrtc_offer args : result =
   if not (Server_webrtc_transport.is_enabled ()) then

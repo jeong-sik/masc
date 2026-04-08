@@ -76,4 +76,4 @@ let handle_keeper_down ctx args : tool_result =
         ("remove_meta", `Bool remove_meta);
         ("remove_session", `Bool remove_session);
       ] in
-      (true, Yojson.Safe.pretty_to_string json)
+      (true, Yojson.Safe.to_string json)

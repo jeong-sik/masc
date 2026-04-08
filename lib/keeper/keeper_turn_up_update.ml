@@ -209,4 +209,4 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
    | Ok () ->
      stop_keepalive updated.name;
      start_keepalive ctx updated;
-     (true, Yojson.Safe.pretty_to_string (meta_to_json updated)))
+     (true, Yojson.Safe.to_string (meta_to_json updated)))

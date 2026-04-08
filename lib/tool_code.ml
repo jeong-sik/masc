@@ -170,14 +170,14 @@ let handle_code_search ctx args =
           ("count", `Int (List.length matches));
           ("results", `List matches);
         ] in
-        (true, Yojson.Safe.pretty_to_string response)
+        (true, Yojson.Safe.to_string response)
     | Unix.WEXITED 1, _ ->
         (* No matches *)
         let response = `Assoc [
           ("count", `Int 0);
           ("results", `List []);
         ] in
-        (true, Yojson.Safe.pretty_to_string response)
+        (true, Yojson.Safe.to_string response)
     | Unix.WEXITED 2, output ->
         (* rg error: invalid regex, missing file, etc. Provide actionable help. *)
         let hint =
@@ -273,7 +273,7 @@ let handle_code_symbols ctx args =
                 ("count", `Int (List.length symbols));
                 ("symbols", `List symbols_json);
               ] in
-              (true, Yojson.Safe.pretty_to_string response)
+              (true, Yojson.Safe.to_string response)
             with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
               (false, Printf.sprintf "❌ Failed to read file: %s" (Printexc.to_string exn))
           end
@@ -328,7 +328,7 @@ let handle_code_read ctx args =
                 ("total_lines", `Int total_lines);
                 ("lines", `List (List.map (fun s -> `String s) result_lines));
               ] in
-              (true, Yojson.Safe.pretty_to_string response)
+              (true, Yojson.Safe.to_string response)
             with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
               (false, Printf.sprintf "❌ Failed to read file: %s" (Printexc.to_string exn))
           end

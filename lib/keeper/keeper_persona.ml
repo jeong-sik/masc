@@ -23,7 +23,7 @@ let handle_persona_list _ctx args : tool_result =
         ("personas", payload);
       ]
   in
-  (true, Yojson.Safe.pretty_to_string json)
+  (true, Yojson.Safe.to_string json)
 
 let handle_keeper_create_from_persona ctx args : tool_result =
   match resolved_keeper_args_from_persona args with
@@ -41,7 +41,7 @@ let handle_keeper_create_from_persona ctx args : tool_result =
               ("resolved_args", resolved_args);
             ]
         in
-        (true, Yojson.Safe.pretty_to_string json)
+        (true, Yojson.Safe.to_string json)
       else if errors <> [] then
         ( false,
           Yojson.Safe.pretty_to_string
@@ -76,5 +76,5 @@ let handle_keeper_create_from_persona ctx args : tool_result =
                 ("resolved_args", resolved_args);
               ]
           in
-          (true, Yojson.Safe.pretty_to_string json)
+          (true, Yojson.Safe.to_string json)
         end

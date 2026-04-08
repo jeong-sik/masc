@@ -19,7 +19,7 @@ let handle_poll_events _ctx args =
   else
   let clear = get_bool args "clear" true in
   match A2a_tools.poll_events ~subscription_id ~clear () with
-  | Ok json -> (true, Yojson.Safe.pretty_to_string json)
+  | Ok json -> (true, Yojson.Safe.to_string json)
   | Error e -> (false, Printf.sprintf "Poll events failed: %s" e)
 
 (** A2A Worker submits heartbeat task result *)
@@ -47,7 +47,7 @@ let handle_heartbeat_result _ctx args =
         ~tool_call_count ~tool_names ~decision_reason ~decision_confidence
         ?failure_reason ()
     with
-    | Ok json -> (true, Yojson.Safe.pretty_to_string json)
+    | Ok json -> (true, Yojson.Safe.to_string json)
     | Error e -> (false, Printf.sprintf "Submit result failed: %s" e)
 
 (* Dispatch function - returns None if tool not handled *)

@@ -61,7 +61,7 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
 
       (match state.Mcp_server.env with
        | None ->
-           Some (true, Yojson.Safe.pretty_to_string (`Assoc [
+           Some (true, Yojson.Safe.to_string (`Assoc [
              ("success", `Bool false);
              ("error", `String "Database environment not available");
              ("suggestion", `String "Ensure runtime environment is initialized");
@@ -107,7 +107,7 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
                ("message", `String (Printf.sprintf "Found %d relevant items for query: %s"
                  (List.length result.items) query));
              ] in
-             Some (true, Yojson.Safe.pretty_to_string response))
+             Some (true, Yojson.Safe.to_string response))
 
   | "masc_board_post" ->
       let (success, message) as result = Tool_board.handle_tool name arguments in

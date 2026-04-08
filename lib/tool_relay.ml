@@ -34,7 +34,7 @@ let handle_relay_status ctx args =
     ("should_relay", `Bool should_relay);
     ("calibration", Relay.get_calibration_info ());
   ] in
-  (true, Yojson.Safe.pretty_to_string json)
+  (true, Yojson.Safe.to_string json)
 
 let handle_relay_checkpoint ctx args =
   let*! summary = get_string_required args "summary" in
@@ -59,7 +59,7 @@ let handle_relay_checkpoint ctx args =
     ("estimated_tokens", `Int metrics.Relay.estimated_tokens);
     ("calibration", Relay.get_calibration_info ());
   ] in
-  (true, Yojson.Safe.pretty_to_string json)
+  (true, Yojson.Safe.to_string json)
 
 let handle_relay_now ctx args =
   let summary = get_string args "summary" "" in
@@ -111,7 +111,7 @@ let handle_relay_now ctx args =
     ("generation", `Int (generation + 1));
     ("output_preview", `String output_preview);
   ] in
-  (true, Yojson.Safe.pretty_to_string json)
+  (true, Yojson.Safe.to_string json)
 
 let handle_relay_smart_check ctx args =
   let messages = get_int args "messages" 0 in
@@ -140,7 +140,7 @@ let handle_relay_smart_check ctx args =
     ("estimated_tokens", `Int metrics.Relay.estimated_tokens);
     ("max_tokens", `Int metrics.Relay.max_tokens);
   ] in
-  (true, Yojson.Safe.pretty_to_string json)
+  (true, Yojson.Safe.to_string json)
 
 let schemas : Types.tool_schema list = [
   {

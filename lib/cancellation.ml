@@ -198,7 +198,7 @@ let handle_cancellation_tool (arguments : Yojson.Safe.t) : (bool * string) =
   match get_string "action" with
   | Some "create" ->
     let token = TokenStore.create () in
-    (true, Yojson.Safe.pretty_to_string (token_to_json token))
+    (true, Yojson.Safe.to_string (token_to_json token))
 
   | Some "cancel" ->
     (match get_string "token_id" with
@@ -214,7 +214,7 @@ let handle_cancellation_tool (arguments : Yojson.Safe.t) : (bool * string) =
     (match get_string "token_id" with
      | Some id ->
        (match TokenStore.get id with
-        | Some token -> (true, Yojson.Safe.pretty_to_string (token_to_json token))
+        | Some token -> (true, Yojson.Safe.to_string (token_to_json token))
         | None -> (false, Printf.sprintf "Token '%s' not found" id))
      | None -> (false, "token_id required"))
 
@@ -224,7 +224,7 @@ let handle_cancellation_tool (arguments : Yojson.Safe.t) : (bool * string) =
       ("count", `Int (List.length tokens));
       ("tokens", `List (List.map token_to_json tokens));
     ] in
-    (true, Yojson.Safe.pretty_to_string json)
+    (true, Yojson.Safe.to_string json)
 
   | Some "cleanup" ->
     let removed = TokenStore.cleanup ~max_age:Env_config.Cancellation.token_max_age_seconds in

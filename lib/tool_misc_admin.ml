@@ -228,12 +228,12 @@ let handle_feature_flags args : result =
     ("deprecated_tools", `Int (List.length deprecated_tools));
     ("deprecated_tool_names", `List (List.map (fun (name, _) -> `String name) deprecated_tools));
   ] in
-  (true, Yojson.Safe.pretty_to_string json)
+  (true, Yojson.Safe.to_string json)
 
 let handle_config args : result =
   let cat = get_string_opt args "category" in
   let json = Env_config_introspect.to_json_filtered ?cat () in
-  (true, Yojson.Safe.pretty_to_string json)
+  (true, Yojson.Safe.to_string json)
 
 let handle_tool_admin_snapshot ctx args =
   let include_hidden = get_bool args "include_hidden" true in
@@ -254,7 +254,7 @@ let handle_tool_admin_snapshot ctx args =
           tool_inventory_json ctx ~include_hidden ~include_deprecated );
       ]
   in
-  (true, Yojson.Safe.pretty_to_string payload)
+  (true, Yojson.Safe.to_string payload)
 
 let handle_tool_admin_update ctx args =
   let section =
@@ -319,7 +319,7 @@ let handle_tool_admin_update ctx args =
                 ("result", auth_snapshot_json ctx);
               ]
           in
-          (true, Yojson.Safe.pretty_to_string payload))
+          (true, Yojson.Safe.to_string payload))
   | "unit_policy" ->
       (match Command_plane_v2.policy_update_json ctx.config ~actor:ctx.agent_name args with
       | Error err -> (false, Yojson.Safe.to_string (`Assoc [ ("status", `String "error"); ("message", `String err) ]))
@@ -362,6 +362,6 @@ let handle_tool_admin_update ctx args =
                 ("result", json);
               ]
           in
-          (true, Yojson.Safe.pretty_to_string payload))
+          (true, Yojson.Safe.to_string payload))
   | _ ->
       (false, "section must be one of: auth | unit_policy")

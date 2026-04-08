@@ -222,7 +222,7 @@ let handle_keeper_create_from_persona ctx args : tool_result =
               ("resolved_args", resolved_args);
             ]
         in
-        (true, Yojson.Safe.pretty_to_string json)
+        (true, Yojson.Safe.to_string json)
       else
         let (ok, body) = with_keeper_startup_gate (fun () -> execute_keeper_up ctx resolved_args) in
         if not ok then
@@ -242,7 +242,7 @@ let handle_keeper_create_from_persona ctx args : tool_result =
           in
           invalidate_keeper_list_cache ();
           invalidate_status_cache (get_string resolved_args "name" "");
-          (true, Yojson.Safe.pretty_to_string json)
+          (true, Yojson.Safe.to_string json)
 
 let handle_keeper_up ctx args : tool_result =
   with_keeper_startup_gate (fun () -> execute_keeper_up ctx args)
@@ -286,7 +286,7 @@ let handle_keeper_msg ctx args : tool_result =
         ("status", `String "queued");
         ("message", `String "Keeper turn submitted. Poll with keeper_msg_result.");
       ] in
-      (true, Yojson.Safe.pretty_to_string json)
+      (true, Yojson.Safe.to_string json)
 
 let handle_keeper_msg_result _ctx args : tool_result =
   let request_id = get_string args "request_id" "" in
@@ -297,7 +297,7 @@ let handle_keeper_msg_result _ctx args : tool_result =
     | None ->
       (false, Printf.sprintf {|{"error":"request_id not found","request_id":"%s"}|} request_id)
     | Some entry ->
-      (true, Yojson.Safe.pretty_to_string (Keeper_msg_async.entry_to_json entry))
+      (true, Yojson.Safe.to_string (Keeper_msg_async.entry_to_json entry))
 
 let handle_keeper_msg_stream ~on_text_delta ctx args : tool_result =
   match ensure_keeper_exists ctx args with

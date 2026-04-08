@@ -20,7 +20,7 @@ let handle_agents ctx args =
     | `List items -> `List (List.filteri (fun i _ -> i < limit) items)
     | other -> other
   in
-  (true, Yojson.Safe.pretty_to_string json)
+  (true, Yojson.Safe.to_string json)
 
 (** Handle masc_register_capabilities *)
 let handle_register_capabilities ctx args =
@@ -43,7 +43,7 @@ let handle_find_by_capability ctx args =
   let ( let*! ) = Tool_args.( let*! ) in
   let*! capability = get_string_required args "capability" in
   let json = Room.find_agents_by_capability ctx.config ~capability in
-  (true, Yojson.Safe.pretty_to_string json)
+  (true, Yojson.Safe.to_string json)
 
 (** Handle masc_get_metrics *)
 let handle_get_metrics ctx args =
@@ -52,7 +52,7 @@ let handle_get_metrics ctx args =
   let days = get_int args "days" 7 in
   match Metrics_store_eio.calculate_agent_metrics ctx.config ~agent_id:target ~days with
   | Some metrics ->
-      (true, Yojson.Safe.pretty_to_string (Metrics_store_eio.agent_metrics_to_yojson metrics))
+      (true, Yojson.Safe.to_string (Metrics_store_eio.agent_metrics_to_yojson metrics))
   | None ->
       error_result_typed ~code:Not_found
         (Printf.sprintf "no metrics found for agent: %s" target)
@@ -182,7 +182,7 @@ let handle_agent_fitness ctx args =
       List.sort_uniq String.compare (metrics_agents @ room_agents)
   in
   if agents = [] then
-    (true, Yojson.Safe.pretty_to_string (`Assoc [("count", `Int 0); ("agents", `List [])]))
+    (true, Yojson.Safe.to_string (`Assoc [("count", `Int 0); ("agents", `List [])]))
   else
     let metrics_list = List.map (fun a -> (a, metrics_for ctx ~days a)) agents in
     let min_avg = min_avg_time metrics_list in
@@ -208,7 +208,7 @@ let handle_agent_fitness ctx args =
       ("count", `Int (List.length agents_json));
       ("agents", `List agents_json);
     ] in
-    (true, Yojson.Safe.pretty_to_string json)
+    (true, Yojson.Safe.to_string json)
 
 (** Pick random from list *)
 let pick_random = function
@@ -297,7 +297,7 @@ let handle_select_agent ctx args =
       ("strategy", `String strategy);
       ("scores", scores_json);
     ] in
-    (true, Yojson.Safe.pretty_to_string json)
+    (true, Yojson.Safe.to_string json)
 
 (** Handle masc_collaboration_graph *)
 let handle_collaboration_graph ctx args =
@@ -310,7 +310,7 @@ let handle_collaboration_graph ctx args =
       ("agents", `List (List.map (fun a -> `String a) agents));
       ("synapses", `List (List.map Hebbian_eio.synapse_to_json synapses));
     ] in
-    (true, Yojson.Safe.pretty_to_string json)
+    (true, Yojson.Safe.to_string json)
   else
     let lines =
       synapses
@@ -352,7 +352,7 @@ let handle_agent_card _ctx args =
           ("legacy_endpoint", `String "/.well-known/agent-card.json");
         ]
   in
-  (true, Yojson.Safe.pretty_to_string response)
+  (true, Yojson.Safe.to_string response)
 
 (** Handle masc_agent_relations — proxy to Neo4j/GraphQL.
     MASC is a consumer: it queries the GraphQL API, which owns the data. *)
@@ -363,14 +363,14 @@ let handle_agent_relations ctx args =
     | _ -> ctx.agent_name
   in
   let json = Dashboard_agent_relations.json ~agent_name:target () in
-  (true, Yojson.Safe.pretty_to_string json)
+  (true, Yojson.Safe.to_string json)
 
 (** Handle masc_meta_cognition_snapshot — deterministic room-level read model. *)
 let handle_meta_cognition_snapshot ctx args =
   let limit = get_int args "limit" 5 |> max 1 |> min 20 in
   let hearth = get_string_opt args "hearth" in
   let json = Meta_cognition.snapshot_json ?hearth ~limit ctx.config in
-  (true, Yojson.Safe.pretty_to_string json)
+  (true, Yojson.Safe.to_string json)
 
 (** Dispatch handler. Returns Some (success, result) if handled, None otherwise *)
 let dispatch ctx ~name ~args =

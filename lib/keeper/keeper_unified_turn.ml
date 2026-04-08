@@ -918,14 +918,8 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
          an independent observer, so concurrent keepers cannot interfere
          with each other's save/restore lifecycle. *)
       let side_effect_occurred = ref false in
-      let side_effect_tools =
-        [ "keeper_board_post"; "keeper_board_comment"; "keeper_board_vote";
-          "keeper_board_delete";
-          "keeper_bash"; "keeper_fs_edit"; "keeper_github";
-          "keeper_pr_workflow" ]
-      in
       let side_effect_observer ~tool_name ~success =
-        if success && List.mem tool_name side_effect_tools then
+        if success && not (Tool_dispatch.is_read_only tool_name) then
           side_effect_occurred := true
       in
       Keeper_exec_tools.add_tool_call_observer side_effect_observer;

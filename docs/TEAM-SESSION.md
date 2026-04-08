@@ -30,7 +30,7 @@
 입력:
 
 - `goal` (required)
-- `operation_id` (optional, managed CPv2 operation attachment)
+- `operation_id` (optional, managed operation attachment)
 - `duration_seconds` (default `3600`)
 - `execution_scope` (`observe_only` | `limited_code_change`, default `observe_only`)
 - `checkpoint_interval_sec` (default `60`)
@@ -64,7 +64,7 @@
 
 ### Attached Session Mode
 
-`masc_team_session_start(operation_id="op-...")`를 사용하면 team session이 managed CPv2 operation에 연결됩니다.
+`masc_team_session_start(operation_id="op-...")`를 사용하면 team session이 managed operation에 연결됩니다.
 
 - operation의 `detachment_session_id`가 session id로 갱신됩니다.
 - `masc_team_session_status`의 `command_plane.operation_id` / `operation_path`로 연결 상태를 읽을 수 있습니다.

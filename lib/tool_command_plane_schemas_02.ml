@@ -63,7 +63,7 @@ Pair with masc_operation_start (intent_id param) to bind operations to this inte
           [
             ("title", string_prop "Human-readable intent title.");
             ("owner", string_prop "Owner agent id. Defaults to caller.");
-            ("workload_profile", `Assoc [ ("type", `String "string"); ("enum", `List [ `String "coding_task"; `String "generic"; `String "research_pipeline" ]); ("description", `String "Workload profile for search fabric routing. Default: coding_task.") ]);
+            ("workload_profile", `Assoc [ ("type", `String "string"); ("enum", `List [ `String "coding_task"; `String "generic"; `String "research_pipeline" ]); ("description", `String "Workload profile for search fabric routing. Default: coding_task. generic is a deprecated alias for coding_task.") ]);
             ("success_metric", `Assoc [ ("type", `String "object"); ("description", `String "Optional JSON object describing the measurable success criteria.") ]);
             ("invariants", string_array_prop "Invariant constraints that must hold across all bound operations.");
             ("artifact_priors", string_array_prop "Known artifact paths or references relevant to this intent.");
@@ -96,7 +96,7 @@ Pair with masc_intent_status to verify the update took effect.";
             ("intent_id", string_prop "Intent id to update.");
             ("title", string_prop "New title.");
             ("owner", string_prop "New owner agent id.");
-            ("workload_profile", `Assoc [ ("type", `String "string"); ("enum", `List [ `String "coding_task"; `String "generic"; `String "research_pipeline" ]) ]);
+            ("workload_profile", `Assoc [ ("type", `String "string"); ("enum", `List [ `String "coding_task"; `String "generic"; `String "research_pipeline" ]); ("description", `String "Workload profile for search fabric routing. coding_task is canonical; generic remains accepted only as a deprecated alias.") ]);
             ("success_metric", `Assoc [ ("type", `String "object"); ("description", `String "Updated success criteria.") ]);
             ("invariants", string_array_prop "Replacement invariant list.");
             ("artifact_priors", string_array_prop "Replacement artifact prior list.");

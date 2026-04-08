@@ -6,19 +6,19 @@ Public MCP surface boundaries, compatibility aliases, and internal prompt-plane 
 
 ## Goal
 
-Use `CPv2 command plane` as the single source of execution truth. Other orchestration surfaces should attach to it instead of bypassing it.
+Use namespace/task coordination plus Team Session and Supervisor as the default execution truth. The managed-operation command plane remains an internal or experimental compatibility lane.
 
 ## Primary entities
 
-- `room`: repo-root coordination scope
+- `namespace`: repo-root coordination scope
 - `task`: backlog work item
-- `operation`: managed execution unit
+- `operation`: managed execution unit on the compatibility lane
 - `detachment`: runtime materialization of an operation
 - `team session`: long-running worker capsule that can attach to an operation
 - `policy decision`: approval gate for strict actions
 - `trace`: lineage across operation, dispatch, checkpoint, and policy events
 
-## Canonical golden paths
+## Primary paths
 
 ### 1. Namespace / task hygiene
 
@@ -32,9 +32,30 @@ Use this before any real work:
 
 `masc_set_room` remains callable as a compatibility alias, but it only selects project scope and should not be treated as the primary onboarding path.
 
-### 2. Managed large-team orchestration
+### 2. Supervised delivery swarm
 
-Use this for benchmark runs or large autonomous teams:
+Use this for real implementation work:
+
+1. `masc_team_session_start`
+2. `masc_team_session_step`
+3. `masc_operator_snapshot` / `masc_operator_digest`
+4. `masc_operator_action` and `masc_operator_confirm` when intervention is needed
+5. `masc_team_session_report` / `masc_team_session_prove`
+
+### 3. Attached team session
+
+Use this when a managed operation explicitly needs a worker team:
+
+1. Start operation with `masc_operation_start`
+2. Start session with `masc_team_session_start(operation_id="op-...")`
+3. Record work through `masc_team_session_step`
+4. Monitor with `masc_team_session_status`
+5. Use `/mcp/operator` for guided intervention when needed
+6. Finalize operation and session artifacts
+
+### 4. Managed operation compatibility lane
+
+Use this only for benchmark runs, topology experiments, or compatibility coverage:
 
 1. `masc_unit_define`
 2. `masc_operation_start`
@@ -44,17 +65,6 @@ Use this for benchmark runs or large autonomous teams:
 6. `masc_policy_approve` or `masc_policy_deny` when blocked
 7. `masc_operation_checkpoint`
 8. `masc_operation_finalize`
-
-### 3. Attached team session
-
-Use this when a managed operation needs a real worker team:
-
-1. Start operation with `masc_operation_start`
-2. Start session with `masc_team_session_start(operation_id="op-...")`
-3. Record work through `masc_team_session_step`
-4. Monitor with `masc_team_session_status`
-5. Use `/mcp/operator` for guided intervention when needed
-6. Finalize operation and session artifacts
 
 ## Workload templates
 
@@ -82,6 +92,7 @@ Use this when a managed operation needs a real worker team:
 - An operation can only attach to one team session at a time.
 - `claim` does not set `current_task`; call `masc_plan_set_task`.
 - `dispatch_tick` is required after starting an operation.
+- Managed operations are optional; default delivery does not require them.
 - `team_session` without `operation_id` is valid, but it will be treated as a projected session rather than a managed attached session.
 
 ## Operator surface

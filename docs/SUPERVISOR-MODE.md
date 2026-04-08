@@ -2,9 +2,9 @@
 
 Supervisor Mode is the interactive TUI operating model for steering a MASC team session through MCP.
 
-Canonical benchmark / swarm path는 이 문서가 아니다.
+현재 기본 delivery path는 이 문서와 Team Session 쪽이다. managed-operation benchmark 문서는 별도 compat lane으로 유지한다.
 
-- CPv2 benchmark / swarm: [COMMAND-PLANE-RUNBOOK.md](./COMMAND-PLANE-RUNBOOK.md)
+- managed-operation benchmark / compat lane: [COMMAND-PLANE-RUNBOOK.md](./COMMAND-PLANE-RUNBOOK.md)
 - benchmark compare recipe: [BENCHMARK-RUNBOOK.md](./BENCHMARK-RUNBOOK.md)
 - swarm-driven implementation delivery: [SWARM-DELIVERY-RUNBOOK.md](./SWARM-DELIVERY-RUNBOOK.md)
 
@@ -290,4 +290,4 @@ two-worker llama batch spawn, and verifies:
 - Supervisor Mode is a workflow, not a new broad MCP namespace.
 - `/mcp/operator` stays intentionally small.
 - Team Session remains the authoritative substrate for supervised implementation sessions.
-- It is not the canonical benchmark/swarm control path; that role belongs to CPv2 direct.
+- Managed-operation benchmarking is a separate compatibility lane; it is not required for supervised delivery.

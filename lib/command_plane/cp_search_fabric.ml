@@ -42,7 +42,7 @@ type candidate_input = {
 type stats_entry = {
   unit_id : string;
   workload_profile : string;
-  stage : string;
+  stage : string option;
   alpha : float;
   beta : float;
   updated_at : string;
@@ -90,8 +90,8 @@ let normalized_workload_profile raw =
 let normalized_stage = function
   | Some raw ->
       let lowered = String.trim raw |> String.lowercase_ascii in
-      if lowered = "" then "generic" else lowered
-  | None -> "generic"
+      if lowered = "" || lowered = "generic" then None else Some lowered
+  | None -> None
 
 let default_store = []
 
@@ -108,7 +108,7 @@ let stats_entry_to_json (entry : stats_entry) =
     [
       ("unit_id", `String entry.unit_id);
       ("workload_profile", `String entry.workload_profile);
-      ("stage", `String entry.stage);
+      ("stage", Json_util.string_opt_to_json entry.stage);
       ("alpha", `Float entry.alpha);
       ("beta", `Float entry.beta);
       ("updated_at", `String entry.updated_at);
@@ -119,15 +119,18 @@ let stats_entry_of_json json =
     let unit_id = json |> U.member "unit_id" |> U.to_string in
     let workload_profile =
       json |> U.member "workload_profile" |> U.to_string_option
-      |> Option.value ~default:"generic"
+      |> Option.value ~default:"coding_task"
+      |> normalized_workload_profile
     in
-    let stage = json |> U.member "stage" |> U.to_string in
+    let stage =
+      json |> U.member "stage" |> U.to_string_option |> normalized_stage
+    in
     let alpha = json |> U.member "alpha" |> U.to_float in
     let beta = json |> U.member "beta" |> U.to_float in
     let updated_at =
       json |> U.member "updated_at" |> U.to_string_option |> Option.value ~default:(now_iso ())
     in
-    if unit_id = "" || stage = "" then
+    if unit_id = "" then
       None
     else
       Some { unit_id; workload_profile; stage; alpha; beta; updated_at }
@@ -156,43 +159,30 @@ let save_store path (store : stats_store) =
         ("entries", `List (List.map stats_entry_to_json store));
       ])
 
+let same_stage left right =
+  Option.equal String.equal (normalized_stage left) (normalized_stage right)
+
 let lookup_stats (store : stats_store) ~unit_id ~workload_profile ~stage =
   let workload_profile = normalized_workload_profile workload_profile in
-  let stage = normalized_stage (Some stage) in
-  let exact_match =
+  let stage = normalized_stage stage in
+  match
     store
     |> List.find_opt (fun (entry : stats_entry) ->
            String.equal entry.unit_id unit_id
            && String.equal (normalized_workload_profile entry.workload_profile)
                 workload_profile
-           && String.equal entry.stage stage)
-  in
-  let legacy_match =
-    store
-    |> List.find_opt (fun (entry : stats_entry) ->
-           String.equal entry.unit_id unit_id
-           && String.equal entry.workload_profile "generic"
-           && String.equal entry.stage stage)
-  in
-  match exact_match with
-  | Some entry ->
-      if String.equal entry.workload_profile workload_profile then
-        entry
-      else
-        { entry with workload_profile; stage }
-  | None -> (
-      match legacy_match with
-      | Some entry ->
-          { entry with workload_profile; stage }
-      | None ->
-          {
-            unit_id;
-            workload_profile;
-            stage;
-            alpha = 1.0;
-            beta = 1.0;
-            updated_at = now_iso ();
-          })
+           && same_stage entry.stage stage)
+  with
+  | Some entry -> { entry with workload_profile; stage }
+  | None ->
+      {
+        unit_id;
+        workload_profile;
+        stage;
+        alpha = 1.0;
+        beta = 1.0;
+        updated_at = now_iso ();
+      }
 
 let upsert_stats (store : stats_store) (entry : stats_entry) =
   entry
@@ -202,7 +192,7 @@ let upsert_stats (store : stats_store) (entry : stats_entry) =
            (String.equal current.unit_id entry.unit_id
             && String.equal (normalized_workload_profile current.workload_profile)
                  (normalized_workload_profile entry.workload_profile)
-            && String.equal current.stage entry.stage))
+            && same_stage current.stage entry.stage))
        store
 
 let record_success (store : stats_store) ~unit_id ~workload_profile ~stage =
@@ -499,7 +489,7 @@ let artifact_locality_score (operation : operation_descriptor)
   match scope_keywords with
   | [] -> (
       match workload_profile, normalized_stage operation.stage with
-      | "coding_task", "decompose" -> 10.0
+      | "coding_task", Some "decompose" -> 10.0
       | _ -> 0.0)
   | _ -> min 20.0 (keyword_overlap scope_keywords (candidate_keywords candidate) *. 20.0)
 
@@ -513,9 +503,10 @@ let runtime_fit_score (operation : operation_descriptor)
     +. if model_tags <> [] then 7.5 else 0.0
   in
   match normalized_workload_profile operation.workload_profile, normalized_stage operation.stage with
-  | "coding_task", ("implement" | "verify") when tool_tags <> [] ->
+  | "coding_task", Some ("implement" | "verify") when tool_tags <> [] ->
       min 15.0 (base +. 3.0)
-  | "coding_task", ("inspect" | "review") when runtime_tags <> [] && model_tags <> [] ->
+  | "coding_task", Some ("inspect" | "review")
+    when runtime_tags <> [] && model_tags <> [] ->
       15.0
   | _ -> min 15.0 base
 

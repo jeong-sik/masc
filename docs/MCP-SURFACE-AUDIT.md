@@ -42,7 +42,7 @@ The key split is intentional:
 | Group | Public Discovery Path | Canonical Examples | Notes |
 |------|------------------------|--------------------|-------|
 | Canonical MCP tools | `tools/list` | `masc_transition`, `masc_team_session_step`, `decision.create`, `experiment.start`, `trpg.dice.roll` | Default surface for normal clients |
-| Managed agent MCP | `/mcp/managed` | `masc_room_status`, `masc_list_tasks`, `masc_claim_task`, `masc_set_current_task` | Internal managed-agent surface with SDK aliases + curated passthrough tools |
+| Managed agent MCP | `/mcp/managed` | `masc_room_status`, `masc_list_tasks`, `masc_claim_task`, `masc_plan_set_task` | Internal managed-agent surface with SDK aliases such as `masc_set_current_task` plus curated passthrough tools |
 | Compatibility aliases | Deprecated and excluded from default `tools/list` | `masc_claim`, `experiment_start`, `masc_trpg_dice_roll` | Still callable for compatibility; not part of the truthful default inventory |
 | MCP prompts | `prompts/list`, `prompts/get` | `tool_help`, `team_session_proof`, `command_truth` | Explanation/proof layer, not runtime prompt registry |
 | MCP resources | `resources/list/read` | `masc://status`, `masc://tasks`, `masc://tool-help-index` | Snapshot/read layer |
@@ -70,7 +70,7 @@ flowchart TD
   TL --> Canon[Canonical tool surface]
   TL --> Hidden[Hidden aliases not listed]
 
-  Canon --> Core[Room task session CPv2]
+  Canon --> Core[Namespace task session managed-op]
   Canon --> GameView[decision.* experiment.* trpg.* client.*]
   Canon --> Ecosystem[keeper always-on autonomy]
 
@@ -91,7 +91,7 @@ flowchart TD
 flowchart LR
   Start[masc_start] --> Status[masc_status]
   Status --> Claim[masc_transition or masc_claim_next]
-  Claim --> Plan[masc_plan_set_task]
+  Claim --> Plan[masc_plan_set_task when needed]
   Plan --> Worktree[masc_worktree_create]
   Worktree --> Heartbeat[masc_heartbeat]
   Heartbeat --> Done[masc_transition done]
@@ -124,7 +124,7 @@ flowchart LR
 
 ```mermaid
 flowchart TD
-  Runtime[Runtime substrate<br/>local64 llama pool voice storage] --> Control[CPv2 command plane]
+  Runtime[Runtime substrate<br/>local64 llama pool voice storage] --> Control[Managed-operation command plane]
   Control --> Orchestration[Native chain plane]
   Orchestration --> Workflow[Team Session and Supervisor]
   Workflow --> Operator[Operator digest and confirm flow]
@@ -184,10 +184,10 @@ flowchart TD
 
 - Fundamentally, the design is good enough to explain and operate.
 - The main weakness is not missing architecture; it is overlapping explanation layers.
-- The repo already has a real canonical spine:
-  - `CPv2 command plane`
-  - `native chain plane`
+- The repo already has a real operating spine:
+  - `Namespace / task hygiene`
   - `Team Session + Supervisor`
+  - optional managed-operation compatibility lane
   - optional dotted game-view aliases
 - The biggest remaining risk is documentation drift, not core protocol shape.
 

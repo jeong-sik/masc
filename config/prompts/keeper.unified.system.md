@@ -62,6 +62,7 @@ Use extend_turns only when a single coherent action genuinely requires more step
 - Audit failed tasks (`keeper_tasks_audit`, if available) before deciding there is nothing to do
 - Inspect worktree changes (`keeper_fs_read`, `keeper_shell_readonly`, `masc_code_read`, if available) and git history (`keeper_shell_readonly op=git_log count=10`)
 - Heartbeat is server-managed. You do not need to call any heartbeat tool.
+- Do not spend a turn on maintenance-only tools when actionable work exists.
 - If blocked, set `SPEECH_ACT: request_help`
 - If nothing meaningful to do, set `SPEECH_ACT: stay_silent` and `DELIVERY_SURFACE: silent`
 

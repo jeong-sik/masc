@@ -1471,6 +1471,20 @@ let test_side_effect_reclassification_requires_committed_tools () =
   check bool "not marked ambiguous partial" false
     (UT.is_ambiguous_side_effect_error reclassified)
 
+let test_side_effect_reclassification_ignores_heartbeat_only () =
+  let original =
+    Agent_sdk.Error.Api
+      (Timeout { message = "Execution cancelled after 300.0s" })
+  in
+  let reclassified =
+    UT.reclassify_error_after_side_effect
+      ~tool_names:["masc_heartbeat"; "keeper_board_list"] original
+  in
+  check bool "heartbeat-only timeout stays transient" true
+    (UT.is_transient_network_error reclassified);
+  check bool "heartbeat-only timeout not ambiguous partial" false
+    (UT.is_ambiguous_side_effect_error reclassified)
+
 let test_side_effect_reclassification_marks_any_post_commit_error () =
   let original =
     Agent_sdk.Error.Api
@@ -1699,7 +1713,7 @@ let test_social_model_silences_skip_only_turn () =
       check string "visible response suppressed" "" routed.response_text;
       check (list string) "no synthetic tools" [] routed.tools_used)
 
-let test_social_model_requires_explicit_headers () =
+let test_social_model_infers_visible_reply_without_headers () =
   let result =
     make_run_result ~text:"I think I should ask for help." ~tools:[]
       ~model:"test-model" ~input_tok:20 ~output_tok:5
@@ -1712,14 +1726,32 @@ let test_social_model_requires_explicit_headers () =
         KSM.apply_to_result ~meta:minimal_meta
           ~observation:base_observation result
       in
-      check string "speech act" "defer"
+      check string "speech act" "inform"
         (KSM.speech_act_to_string state.speech_act);
-      check string "delivery surface" "silent"
+      check string "delivery surface" "visible_reply"
         (KSM.delivery_surface_to_string state.delivery_surface);
-      check (option string) "blocker notes protocol violation"
-        (Some "no tool calls and no social headers") state.blocker;
-      check string "visible response suppressed" "" routed.response_text;
+      check (option string) "no blocker persisted" None state.blocker;
+      check string "visible response preserved"
+        "I think I should ask for help." routed.response_text;
       check (list string) "no synthetic tools" [] routed.tools_used)
+
+let test_social_model_empty_text_without_headers_stays_silent () =
+  let result =
+    make_run_result ~text:"" ~tools:[]
+      ~model:"test-model" ~input_tok:20 ~output_tok:5
+  in
+  let routed, state =
+    KSM.apply_to_result ~meta:minimal_meta
+      ~observation:base_observation result
+  in
+  check string "speech act" "defer"
+    (KSM.speech_act_to_string state.speech_act);
+  check string "delivery surface" "silent"
+    (KSM.delivery_surface_to_string state.delivery_surface);
+  check (option string) "blocker notes empty protocol violation"
+    (Some "no tool calls and no social headers") state.blocker;
+  check string "visible response suppressed" "" routed.response_text;
+  check (list string) "no synthetic tools" [] routed.tools_used
 
 let test_social_model_routes_blocker_to_board_post () =
   let result =
@@ -1799,6 +1831,13 @@ let test_social_model_infers_board_comment_from_tool_use () =
   check string "visible response empty" "" routed.response_text;
   check (list string) "tool list preserved"
     ["keeper_board_comment"; "masc_status"] routed.tools_used
+
+let test_keeper_allowed_tools_exclude_heartbeat () =
+  let allowed =
+    Masc_mcp.Keeper_exec_tools.keeper_allowed_tool_names minimal_policy_meta
+  in
+  check bool "masc_heartbeat hidden from keeper tool surface" false
+    (List.mem "masc_heartbeat" allowed)
 
 (* ---------- render_inline_skip_reason tests ---------- *)
 
@@ -2116,8 +2155,10 @@ let () =
             test_tool_query_text_of_user_message_keeps_counted_headers;
           test_case "social model silences skip-only turn" `Quick
             test_social_model_silences_skip_only_turn;
-          test_case "social model requires explicit headers" `Quick
-            test_social_model_requires_explicit_headers;
+          test_case "social model infers visible reply without headers" `Quick
+            test_social_model_infers_visible_reply_without_headers;
+          test_case "social model empty text without headers stays silent" `Quick
+            test_social_model_empty_text_without_headers_stays_silent;
           test_case "social model routes blocker to board post" `Quick
             test_social_model_routes_blocker_to_board_post;
           test_case "social model tool-only turn skips protocol violation" `Quick
@@ -2179,6 +2220,8 @@ let () =
             test_side_effect_timeout_reclassified_as_persistent;
           test_case "reclassification requires committed tools" `Quick
             test_side_effect_reclassification_requires_committed_tools;
+          test_case "heartbeat-only timeouts stay transient" `Quick
+            test_side_effect_reclassification_ignores_heartbeat_only;
           test_case "any post-commit error becomes ambiguous partial" `Quick
             test_side_effect_reclassification_marks_any_post_commit_error;
           test_case "read-only keeper tools do not become ambiguous partial" `Quick
@@ -2227,5 +2270,7 @@ let () =
           test_case "keeper_bash is NOT boring" `Quick (fun () ->
             check bool "keeper_bash"
               false (Masc_mcp.Keeper_tool_registry.is_boring_tool "keeper_bash"));
+          test_case "keeper allowed tools exclude heartbeat" `Quick
+            test_keeper_allowed_tools_exclude_heartbeat;
         ] );
     ]

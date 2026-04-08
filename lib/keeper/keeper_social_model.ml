@@ -170,6 +170,19 @@ let protocol_violation_state ~(meta : keeper_meta)
     delivery_surface = Silent;
   }
 
+let inferred_text_reply_state ~(meta : keeper_meta)
+    ~(observation : Keeper_world_observation.world_observation) =
+  {
+    social_model = meta.social_model;
+    belief_summary = belief_summary_of_observation observation;
+    active_desire = None;
+    current_intention = None;
+    blocker = None;
+    need = None;
+    speech_act = Inform;
+    delivery_surface = Visible_reply;
+  }
+
 let inferred_tool_surface tools =
   if tools = [ "keeper_stay_silent" ] then
     Some (Stay_silent, Silent)
@@ -314,6 +327,7 @@ let apply_to_result ~(meta : keeper_meta)
     ~(observation : Keeper_world_observation.world_observation)
     (result : Keeper_agent_run.run_result) =
   let headers, response_body = parse_header_block result.response_text in
+  let has_text_reply = String.trim response_body <> "" in
   let state =
     (* Tool calls are the authoritative record of action.
        When tools are present, infer social state from tool calls regardless
@@ -323,7 +337,18 @@ let apply_to_result ~(meta : keeper_meta)
     if result.tools_used <> [] then
       tool_only_state ~meta ~observation ~result
     else if headers <> [] then
-      social_state_of_headers ~meta ~observation headers
+      let state = social_state_of_headers ~meta ~observation headers in
+      if has_text_reply
+         &&
+         match state.blocker with
+         | Some "missing social headers" | Some "invalid social headers" -> true
+         | _ -> false
+      then
+        inferred_text_reply_state ~meta ~observation
+      else
+        state
+    else if has_text_reply then
+      inferred_text_reply_state ~meta ~observation
     else
       protocol_violation_state ~meta ~observation
         ~reason:"no tool calls and no social headers"

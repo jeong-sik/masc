@@ -32,11 +32,20 @@ let handle_keeper_bash
     match validate cmd with
     | Error reason ->
       Log.Keeper.warn "keeper_bash blocked: %s (cmd=%s)" reason cmd_for_log;
+      let hint =
+        if String.length reason > 0 &&
+           (Re.execp (Re.Pcre.re "chain|redirect|pipe|semicolon" |> Re.compile) (String.lowercase_ascii reason))
+        then "Use separate tool calls instead of chaining. Call keeper_bash once per command."
+        else if Re.execp (Re.Pcre.re "inject|symbol" |> Re.compile) (String.lowercase_ascii reason)
+        then "Avoid shell metacharacters. Use keeper_shell_readonly with a specific op (rg, find, ls) instead."
+        else "Check the command for blocked patterns. Use keeper_shell_readonly for safe read-only ops."
+      in
       Yojson.Safe.to_string
         (`Assoc
             [ "ok", `Bool false
             ; "error", `String "command_blocked"
             ; "reason", `String reason
+            ; "hint", `String hint
             ])
     | Ok () ->
       (* Destructive guard: always active regardless of preset *)

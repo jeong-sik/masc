@@ -383,6 +383,8 @@ let sanitize_worker_run_component value =
   else if String.length sanitized <= 48 then sanitized
   else String.sub sanitized 0 48
 
+let fallback_worker_run_seq = Atomic.make 0
+
 let is_safe_worker_run_id value =
   let len = String.length value in
   len > 0
@@ -395,9 +397,11 @@ let is_safe_worker_run_id value =
        value
 
 let fallback_worker_run_id ~(fallback_name : string) =
-  Printf.sprintf "swarm-%s-%Ld"
+  let seq = Atomic.fetch_and_add fallback_worker_run_seq 1 in
+  Printf.sprintf "swarm-%s-%Ld-%d"
     (sanitize_worker_run_component fallback_name)
     (Int64.of_float (Time_compat.now () *. 1000.0))
+    seq
 
 let valid_worker_run_id_opt ~(label : string) value_opt =
   match value_opt with

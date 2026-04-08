@@ -79,7 +79,7 @@ repo-managed config는 별도 규칙을 가진다: `MASC_CONFIG_DIR` -> `<MASC_B
 | `MASC_SPAWN_TIMEOUT_SEC` | float | 600.0 | 스폰 기본 타임아웃 (10분) |
 | `MASC_SPAWN_CODING_TIMEOUT_SEC` | float | 7200.0 | 코딩 모드 타임아웃 (2시간) |
 | `MASC_SPAWN_GRACE_PERIOD_SEC` | float | 60.0 | SIGTERM 유예 기간 |
-| `LLAMA_SERVER_URL` | string | `http://127.0.0.1:8085` | 로컬 LLM 서버 URL |
+| `LLAMA_SERVER_URL` | string | `Agent_sdk.Defaults.local_llm_url` | 로컬 OpenAI-compatible runtime URL |
 | `LLAMA_DEFAULT_MODEL` | string | `explicit-model-required` | 로컬 기본 모델 |
 | `MASC_LOCAL_MAX_TOKENS` | int | 32768 | 로컬 LLM max_tokens 상한 (fallback: `MASC_LLAMA_MAX_TOKENS`) |
 | `MASC_CANCELLATION_TOKEN_MAX_AGE_SEC` | float | 3600.0 | 취소 토큰 최대 수명 |
@@ -314,7 +314,7 @@ JSON 파일로 CASCADE별 모델 순서를 정의한다. 키 패턴: `{cascade_n
 | Provider | Env Config 모듈 | 기본 모델 |
 |----------|----------------|----------|
 | `ollama` | `Local_runtime` | `OLLAMA_DEFAULT_MODEL` (port 11434, 262k context) |
-| `llama` | `Local_runtime` | `LLAMA_DEFAULT_MODEL` (legacy llama-server, port 8085) |
+| `llama` | `Local_runtime` | `LLAMA_DEFAULT_MODEL` (legacy local OpenAI-compatible runtime) |
 | `glm` | `Glm` | `MASC_GLM_DEFAULT_MODEL` |
 | `gemini` | `Gemini` | `MASC_GEMINI_DEFAULT_MODEL` |
 | `claude` | `Claude` | `MASC_CLAUDE_DEFAULT_MODEL` |

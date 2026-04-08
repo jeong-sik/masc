@@ -206,7 +206,7 @@ Command Plane 안으로 흡수된 오케스트레이션 substrate.
 | Langfuse | Cloud API | HTTP | LLM 호출 tracing, cost attribution | 선택적 활성화. |
 | GraphQL API | Railway (`second-brain-graphql-production.up.railway.app`) | HTTP | Agent 정보 로드, collaboration edge 기록 | `$GRAPHQL_API_KEY` 인증. Query cost limit 2000. |
 | Cloudflare Tunnel | `masc.crying.pictures` | HTTP -> HTTPS | 원격 dashboard 접근 | Origin HTTP/1.1. Cloudflare가 HTTP/2 변환. |
-| llama-server | localhost:8085 | OpenAI-compatible API | 로컬 LLM 추론 (Cascade 1순위) | Qwen3.5-35B-A3B Q4_K_XL. |
+| local runtime | configured local endpoint | OpenAI-compatible API | 로컬 LLM 추론 (Cascade 1순위) | OAS discovery endpoint. |
 | GLM Cloud | ZAI API | HTTP | Cloud LLM 추론 (Cascade 2순위) | `sb glm-text` 경로. |
 
 ## 9. Invariants (System-Level)

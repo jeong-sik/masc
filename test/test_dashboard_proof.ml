@@ -245,7 +245,7 @@ let seed_worker_run_meta config session_id =
           `List [ `String "masc_status"; `String "masc_team_session_step" ] );
         ( "tool_surface_shell_names",
           `List [ `String "file_read"; `String "file_write"; `String "shell_exec" ] );
-        ("resolved_runtime", `String "llama-8085");
+        ("resolved_runtime", `String "llama-primary");
         ("resolved_model", `String "qwen3.5-35b-a3b-ud-q8-xl");
         ("routing_reason", `String "explicit_task_profile");
         ("proof_run_id", `String "proof-run-123");
@@ -427,7 +427,7 @@ let test_dashboard_proof_exposes_validated_worker_run_evidence () =
         (worker |> U.member "trace_capability" |> U.to_string);
       check bool "worker run validated" true
         (worker |> U.member "trace_validated" |> U.to_bool);
-      check string "worker resolved runtime" "llama-8085"
+      check string "worker resolved runtime" "llama-primary"
         (worker |> U.member "resolved_runtime" |> U.to_string);
       check string "worker resolved model" "qwen3.5-35b-a3b-ud-q8-xl"
         (worker |> U.member "resolved_model" |> U.to_string);

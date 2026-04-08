@@ -122,7 +122,7 @@ let test_worker_runtime_helper_protocol_roundtrip () =
   let run_result : Lib.Worker_container_types.run_result =
     {
       output = "ok";
-      model_used = "custom:test@http://127.0.0.1:8085";
+      model_used = "custom:test@http://127.0.0.1:19001";
       input_tokens = Some 11;
       output_tokens = Some 7;
       cost_usd = Some 0.01;
@@ -171,10 +171,10 @@ let test_worker_runtime_invalid_config_fails_closed () =
 let test_rewrite_custom_model_label_for_container () =
   let rewritten =
     Lib.Worker_runtime_docker.rewrite_model_label_for_container
-      "custom:qwen-test@http://127.0.0.1:8085"
+      "custom:qwen-test@http://127.0.0.1:19001"
   in
   check string "loopback custom label rewritten to host alias"
-    "custom:qwen-test@http://host.docker.internal:8085" rewritten
+    "custom:qwen-test@http://host.docker.internal:19001" rewritten
 
 let test_run_process_with_timeout_returns_124_on_timeout () =
   with_eio @@ fun env ->

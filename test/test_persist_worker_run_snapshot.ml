@@ -162,7 +162,7 @@ let persist_snapshot ?proof step_env =
     ~wait_mode:Team_session_types.Wait_blocking
     ~execution_scope:Team_session_types.Limited_code_change
     ~status:`Completed
-    ~resolved_runtime:"llama-8085"
+    ~resolved_runtime:"llama-primary"
     ~resolved_model:"glm-5"
     ~success:true
     ~output_preview:"ok"

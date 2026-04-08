@@ -51,13 +51,13 @@ let test_runtime_verify_prefers_oas_discovery_cache () =
     (fun () ->
       Masc_mcp.Discovery_cache.cached_endpoints :=
         [
-          make_endpoint ~url:"http://127.0.0.1:8085"
+          make_endpoint ~url:"http://127.0.0.1:19001"
             ~model_id:"qwen3.5-35b-a3b-ud-q4-xl" ~ctx_size:262144
             ~total_slots:4 ~busy:0;
-          make_endpoint ~url:"http://127.0.0.1:8086"
+          make_endpoint ~url:"http://127.0.0.1:19002"
             ~model_id:"qwen3.5-35b-a3b-ud-q4-xl" ~ctx_size:262144
             ~total_slots:4 ~busy:1;
-          make_endpoint ~url:"http://127.0.0.1:8087"
+          make_endpoint ~url:"http://127.0.0.1:19003"
             ~model_id:"qwen3.5-35b-a3b-ud-q4-xl" ~ctx_size:262144
             ~total_slots:4 ~busy:1;
         ];

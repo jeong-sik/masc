@@ -128,7 +128,7 @@ Karpathy-style raw `masc_autoresearch_*` loop는 그대로 유지하되, supervi
 기본 bootstrap harness:
 
 ```bash
-LLAMA_SERVER_URL=http://127.0.0.1:8085 \
+LLAMA_SERVER_URL="${OAS_LOCAL_LLM_URL}" \
 LLAMA_SWARM_MODEL=<exact-model-id-from-masc_llama_models> \
 HTTP_TIMEOUT_SEC=120 \
 ./scripts/harness_swarm_delivery.sh
@@ -157,7 +157,7 @@ LOCAL64_MODEL_MATRIX_FILE=./scripts/harness/local64-model-matrix.example.json \
 ./scripts/harness_local64_model_matrix.sh
 ```
 
-각 run은 별도 seed port / MCP port / artifact 디렉토리를 사용하므로, 기존 `8085` seed를 건드리지 않고도 `q8`, `1bit`, 다른 GGUF를 순차 비교할 수 있다.
+각 run은 별도 seed port / MCP port / artifact 디렉토리를 사용하므로, 기존 primary seed를 건드리지 않고도 `q8`, `1bit`, 다른 GGUF를 순차 비교할 수 있다.
 
 기본 출력:
 

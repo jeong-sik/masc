@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_VERSION="local-review-v1"
+SCRIPT_VERSION="local-review-v2"
 DEFAULT_MODEL="qwen3.5-35b-a3b-ud-q4-xl"
-DEFAULT_URL="http://127.0.0.1:8085/v1/chat/completions"
+DEFAULT_URL=""
 DEFAULT_CACHE_SUBDIR=".masc/review-cache/local-review"
 DEFAULT_PROMPT_VERSION="v1"
 DEFAULT_CHUNK_BYTES=40000
@@ -49,7 +49,7 @@ Options:
 
 Environment:
   MASC_LOCAL_REVIEW_COMMAND   Optional local command override. Receives prompt on stdin.
-  MASC_LOCAL_REVIEW_URL       OpenAI-compatible review endpoint.
+  MASC_LOCAL_REVIEW_URL       Optional OAS/OpenAI-compatible review endpoint.
   MASC_LOCAL_REVIEW_CACHE_DIR Cache root (default: <shared-repo-root>/.masc/review-cache/local-review)
   MASC_LOCAL_REVIEW_CHUNK_BYTES
   MASC_LOCAL_REVIEW_MAX_TOKENS
@@ -120,6 +120,11 @@ require_cmd jq
 require_cmd shasum
 if [ -z "$REVIEW_COMMAND" ]; then
   require_cmd curl
+fi
+
+if [ -z "$REVIEW_COMMAND" ] && [ -z "$REVIEW_URL" ]; then
+  echo "set MASC_LOCAL_REVIEW_COMMAND or MASC_LOCAL_REVIEW_URL (OAS/OpenAI-compatible endpoint)" >&2
+  exit 1
 fi
 
 resolve_shared_repo_root() {
@@ -422,11 +427,18 @@ else
   fi
 fi
 
+if [ -n "$REVIEW_COMMAND" ]; then
+  REVIEW_TARGET_DESC="custom command"
+else
+  REVIEW_TARGET_DESC="OAS/OpenAI-compatible endpoint \`${REVIEW_URL}\`"
+fi
+
 MARKDOWN_RESULT="$(
   cat <<EOF
 Cross-model review evidence
 
-- Reviewer model: local \`llama-server\` target \`${MODEL}\`
+- Reviewer model: \`${MODEL}\`
+- Reviewer target: ${REVIEW_TARGET_DESC}
 - Timestamp: $(now_iso)
 - Prompt version: \`${PROMPT_VERSION}\`
 - Cache: $([ "$NO_CACHE" -eq 0 ] && printf 'miss' || printf 'disabled')

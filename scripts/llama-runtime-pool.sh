@@ -2,7 +2,6 @@
 set -euo pipefail
 
 STATE_DIR="${MASC_LOCAL_RUNTIME_POOL_STATE_DIR:-${MASC_LLAMA_RUNTIME_POOL_STATE_DIR:-${TMPDIR:-/tmp}/masc-local-runtime-pool}}"
-SEED_PORT="${LLAMA_POOL_SEED_PORT:-8085}"
 TARGET_SHARDS="${LLAMA_POOL_TARGET_SHARDS:-6}"
 BASE_HOST="${LLAMA_POOL_HOST:-127.0.0.1}"
 DEFAULT_PARALLEL="${LLAMA_POOL_PARALLEL:-12}"
@@ -12,6 +11,22 @@ DEFAULT_UBATCH="${LLAMA_POOL_UBATCH_SIZE:-1024}"
 DEFAULT_CHAT_TEMPLATE="${LLAMA_POOL_CHAT_TEMPLATE:-chatml}"
 DEFAULT_CHAT_TEMPLATE_KWARGS="${LLAMA_POOL_CHAT_TEMPLATE_KWARGS:-{\"enable_thinking\":false}}"
 SEED_BINARY=""
+
+extract_port_from_url() {
+  local url="${1:-}"
+  local host_port=""
+  if [ -z "$url" ]; then
+    return 0
+  fi
+  host_port="${url#*://}"
+  host_port="${host_port%%/*}"
+  if [[ "$host_port" == *:* ]]; then
+    printf '%s\n' "${host_port##*:}"
+  fi
+}
+
+DEFAULT_SEED_PORT="$(extract_port_from_url "${LLAMA_POOL_SEED_URL:-${OAS_LOCAL_LLM_URL:-${LLAMA_SERVER_URL:-}}}")"
+SEED_PORT="${LLAMA_POOL_SEED_PORT:-$DEFAULT_SEED_PORT}"
 
 if ! command -v jq >/dev/null 2>&1; then
   echo "error: jq is required but not found in PATH" >&2
@@ -26,8 +41,15 @@ Usage: scripts/llama-runtime-pool.sh <start|status|stop|print-env|bench> [option
 
 Options:
   --target-shards N   Total runtime count including the seed port (default: 6)
-  --seed-port PORT    Seed runtime port to clone from (default: 8085)
+  --seed-port PORT    Seed runtime port to clone from
 EOF
+}
+
+require_seed_port() {
+  if [ -z "${SEED_PORT:-}" ]; then
+    echo "Missing seed runtime port. Set LLAMA_POOL_SEED_PORT or LLAMA_POOL_SEED_URL/OAS_LOCAL_LLM_URL/LLAMA_SERVER_URL." >&2
+    exit 1
+  fi
 }
 
 extract_flag_value() {
@@ -65,6 +87,7 @@ seed_command() {
 }
 
 resolve_seed_args() {
+  require_seed_port
   local seed_cmd
   seed_cmd="$(seed_command || true)"
   if [ -n "$seed_cmd" ]; then
@@ -271,6 +294,7 @@ start_shard() {
 }
 
 print_env_value() {
+  require_seed_port
   resolve_seed_args
   local max_port=$((SEED_PORT + TARGET_SHARDS - 1))
   local endpoints=()
@@ -301,6 +325,7 @@ print_env_value() {
 }
 
 start_pool() {
+  require_seed_port
   resolve_seed_args
   local max_port=$((SEED_PORT + TARGET_SHARDS - 1))
   local failures=0
@@ -315,6 +340,7 @@ start_pool() {
 }
 
 status_pool() {
+  require_seed_port
   resolve_seed_args
   local port contract_status
   local max_port=$((SEED_PORT + TARGET_SHARDS - 1))

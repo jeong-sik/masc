@@ -86,7 +86,7 @@ let sample_meta ?(trace_capability = `String "raw")
         `List [ `String "masc_status"; `String "masc_team_session_step" ] );
       ( "tool_surface_shell_names",
         `List [ `String "file_read"; `String "file_write"; `String "shell_exec" ] );
-      ("resolved_runtime", `String "llama-8085");
+      ("resolved_runtime", `String "llama-primary");
       ("resolved_model", `String "qwen3.5-35b-a3b-ud-q8-xl");
       ("routing_reason", `String "explicit_task_profile");
       ("tool_names", `List [ `String "file_write"; `String "shell_exec" ]);

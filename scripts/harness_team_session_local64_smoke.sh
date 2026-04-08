@@ -11,7 +11,20 @@ PORT="${MASC_LOCAL64_PORT:-8945}"
 BASE_PATH="${MASC_LOCAL64_BASE_PATH:-$(mktemp -d "${TMPDIR:-/tmp}/masc-local64-smoke.XXXXXX")}"
 LOG_FILE="${MASC_LOCAL64_LOG_FILE:-$BASE_PATH/server.log}"
 POOL_SHARDS="${LOCAL64_POOL_TARGET_SHARDS:-1}"
-SEED_PORT="${LLAMA_POOL_SEED_PORT:-8085}"
+extract_port_from_url() {
+  local url="${1:-}"
+  local host_port=""
+  if [ -z "$url" ]; then
+    return 0
+  fi
+  host_port="${url#*://}"
+  host_port="${host_port%%/*}"
+  if [[ "$host_port" == *:* ]]; then
+    printf '%s\n' "${host_port##*:}"
+  fi
+}
+DEFAULT_SEED_PORT="$(extract_port_from_url "${LLAMA_POOL_SEED_URL:-${OAS_LOCAL_LLM_URL:-${LLAMA_SERVER_URL:-}}}")"
+SEED_PORT="${LLAMA_POOL_SEED_PORT:-$DEFAULT_SEED_PORT}"
 POOL_FORCE_START="${LOCAL64_POOL_FORCE_START:-false}"
 POOL_STARTED="false"
 SERVER_PID=""
@@ -72,6 +85,10 @@ elif [ -n "${LLAMA_MODEL_PATH:-}" ] && [ -z "${LLM_ENDPOINTS:-}" ]; then
 fi
 
 if [ "$need_pool_start" = "true" ]; then
+  if [ -z "$SEED_PORT" ]; then
+    echo "Need LLAMA_POOL_SEED_PORT or LLAMA_POOL_SEED_URL/OAS_LOCAL_LLM_URL/LLAMA_SERVER_URL to start the local runtime pool." >&2
+    exit 1
+  fi
   LLM_ENDPOINTS="$("$ROOT_DIR/scripts/llama-runtime-pool.sh" start --target-shards "$POOL_SHARDS" --seed-port "$SEED_PORT")"
   export LLM_ENDPOINTS
   POOL_STARTED="true"

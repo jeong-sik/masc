@@ -71,7 +71,7 @@ Repo-synthesis workflow에서는 이 분리를 그대로 유지한다.
 Environment:
 
 - `LLAMA_SERVER_URL`
-  - default: `http://127.0.0.1:8085`
+  - default: OAS local runtime endpoint (`OAS_LOCAL_LLM_URL` -> `OAS_LOCAL_QWEN_URL` -> OAS default)
 
 Selection policy for this slice is size-based:
 
@@ -248,7 +248,7 @@ What it does:
 Run it against a real local llama team:
 
 ```bash
-LLAMA_SERVER_URL=http://127.0.0.1:8085 \
+LLAMA_SERVER_URL="${OAS_LOCAL_LLM_URL}" \
 LLAMA_SWARM_MODEL=<exact-model-id-from-masc_llama_models> \
 ./scripts/harness_supervisor_team_session.sh
 ```

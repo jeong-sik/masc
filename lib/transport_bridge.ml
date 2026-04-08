@@ -26,7 +26,7 @@ let seal () = sealed := true
 
 let register_provider (p : (module PROVIDER)) =
   if !sealed then
-    failwith "Transport_bridge: registry sealed after bootstrap"
+    raise (Failure "Transport_bridge: registry sealed after bootstrap")
   else begin
     let module P = (val p : PROVIDER) in
     (* Replace existing with same name *)

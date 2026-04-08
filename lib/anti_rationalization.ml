@@ -65,18 +65,30 @@ let excuse_patterns_path () =
 
 (** Parse a JSON value into a validated pattern list.
     Returns [Error msg] if any item is malformed (no silent drops). *)
+let max_excuse_pattern_len = 500
+let max_excuse_entries = 100
+
 let parse_excuse_patterns_json (json : Yojson.Safe.t) : ((string * string) list, string) result =
   match json with
   | `List items ->
-    let rec validate acc = function
-      | [] -> Ok (List.rev acc)
-      | `List [`String pat; `String reason] :: rest ->
-        validate ((pat, reason) :: acc) rest
-      | item :: _ ->
-        Error (Printf.sprintf "Invalid pattern entry: expected [string, string], got %s"
-          (Yojson.Safe.to_string item))
-    in
-    validate [] items
+    if List.length items > max_excuse_entries then
+      Error (Printf.sprintf "Too many entries: %d (max %d)" (List.length items) max_excuse_entries)
+    else
+      let rec validate acc = function
+        | [] -> Ok (List.rev acc)
+        | `List [`String pat; `String reason] :: rest ->
+          if pat = "" || reason = "" then
+            Error "Pattern and reason must be non-empty strings"
+          else if String.length pat > max_excuse_pattern_len
+               || String.length reason > max_excuse_pattern_len then
+            Error (Printf.sprintf "String too long (max %d chars)" max_excuse_pattern_len)
+          else
+            validate ((pat, reason) :: acc) rest
+        | item :: _ ->
+          Error (Printf.sprintf "Invalid pattern entry: expected [string, string], got %s"
+            (Yojson.Safe.to_string item))
+      in
+      validate [] items
   | _ -> Error "Expected JSON array of [pattern, reason] pairs"
 
 (** Load excuse patterns from config/excuse_patterns.json.

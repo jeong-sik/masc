@@ -127,7 +127,12 @@ let resolve_provider_of_label (label : string) : Oas.Provider.config =
     match Llm_provider.Cascade_config.parse_model_string fallback with
     | Some pc -> Oas.Provider.config_of_provider_config pc
     | None ->
-      (* Failsafe: resolve model via Discovery or OLLAMA_DEFAULT_MODEL.
+      (* Failsafe: direct Provider_config construction — cascade bypass.
+         This is the last-resort path when BOTH the requested label AND the
+         default fallback label fail Cascade_config parsing.  That happens
+         only when no cascade TOML/env is configured at all, which is a
+         valid startup state for fresh installs.  Raw infrastructure values
+         (endpoint, request_path) are passed to OAS, which owns them.
          Ollama rejects literal "auto" — must resolve to a concrete ID. *)
       let model_id =
         match Llm_provider.Discovery.first_discovered_model_id () with

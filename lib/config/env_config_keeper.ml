@@ -367,7 +367,6 @@ module DashboardHealth = struct
   let penalty_critical = get_float ~default:20.0 "MASC_DASHBOARD_HEALTH_PENALTY_CRITICAL"
   let penalty_warn = get_float ~default:10.0 "MASC_DASHBOARD_HEALTH_PENALTY_WARN"
   let runtime_warning_ctx_ratio = get_float ~default:0.95 "MASC_DASHBOARD_RUNTIME_WARNING_CTX_RATIO"
-  let runtime_warning_token_count = get_int ~default:50_000 "MASC_DASHBOARD_RUNTIME_WARNING_TOKEN_COUNT"
 end
 
 (** Print configuration summary for debugging *)

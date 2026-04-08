@@ -794,6 +794,11 @@
  (modules test_board_pg)
  (libraries masc_test_deps caqti caqti-eio.unix caqti-driver-postgresql))
 
+(test
+ (name test_board_pg_notify)
+ (modules test_board_pg_notify)
+ (libraries masc_test_deps))
+
 ; ============================================================
 ; Executables (benchmarks, distributed tests, tools)
 ; ============================================================

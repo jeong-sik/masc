@@ -1389,7 +1389,6 @@ let test_sanitize_messages_utf8_cleans_history_path () =
                 tool_use_id = "tool\001id";
                 content = "result\127payload";
                 is_error = false;
-                json = None;
               };
           ];
         name = None;

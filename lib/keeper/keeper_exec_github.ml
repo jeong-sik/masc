@@ -146,6 +146,9 @@ let handle_keeper_pr_workflow
             None
         end else None
       in
+      let run_argv ~timeout_sec argv =
+        Process_eio.run_argv_with_status ~timeout_sec argv
+      in
       let run_sh ~cwd ~timeout_sec cmd =
         let shell = Printf.sprintf "cd %s && %s 2>&1"
           (Filename.quote cwd) cmd in
@@ -193,6 +196,44 @@ let handle_keeper_pr_workflow
         | Unix.WEXITED 1 -> Ok false
         | _ -> Error (Printf.sprintf "git show-ref: %s" (String.trim out))
       in
+      let normalize_worktree_path path =
+        let stripped =
+          if path <> "" && path.[String.length path - 1] = '/'
+          then String.sub path 0 (String.length path - 1)
+          else path
+        in
+        try Unix.realpath stripped
+        with Unix.Unix_error _ -> stripped
+      in
+      let same_worktree_path left right =
+        String.equal
+          (normalize_worktree_path left)
+          (normalize_worktree_path right)
+      in
+      let find_worktree_path_for_branch branch_name =
+        let target_ref = Printf.sprintf "refs/heads/%s" branch_name in
+        let st, out = run_sh ~cwd:repo_root ~timeout_sec:5.0
+          "git worktree list --porcelain" in
+        if st <> Unix.WEXITED 0 then None
+        else
+          let rec loop current_path = function
+            | [] -> None
+            | raw_line :: rest ->
+              let line = String.trim raw_line in
+              if String.starts_with ~prefix:"worktree " line then
+                let path =
+                  String.sub line 9 (String.length line - 9)
+                in
+                loop (Some path) rest
+              else if line = "" then
+                loop None rest
+              else if line = Printf.sprintf "branch %s" target_ref then
+                current_path
+              else
+                loop current_path rest
+          in
+          loop None (String.split_on_char '\n' out)
+      in
       let cleanup_worktree () =
         if !worktree_dir <> "" && Sys.file_exists !worktree_dir then begin
           match remove_worktree_path !worktree_dir with
@@ -230,6 +271,18 @@ let handle_keeper_pr_workflow
               begin match branch_exists_locally branch with
               | Error msg -> Error msg
               | Ok branch_exists ->
+                let prepare_existing_branch_result =
+                  if not branch_exists then Ok ()
+                  else
+                    match find_worktree_path_for_branch branch with
+                    | Some existing_path when same_worktree_path existing_path worktree_path ->
+                      remove_worktree_path existing_path
+                    | _ -> Ok ()
+                in
+                begin match prepare_existing_branch_result with
+                | Error msg ->
+                  Error (Printf.sprintf "remove existing worktree: %s" msg)
+                | Ok () ->
                 let add_cmd =
                   if branch_exists then
                     Printf.sprintf "git worktree add %s %s"
@@ -241,11 +294,34 @@ let handle_keeper_pr_workflow
                       (Filename.quote worktree_path)
                       (Filename.quote (Printf.sprintf "origin/%s" resolved_base))
                 in
-                let st, out = run_sh ~cwd:repo_root ~timeout_sec:30.0 add_cmd in
-                if st <> Unix.WEXITED 0 then
-                  Error (Printf.sprintf "git worktree add: %s" (String.trim out))
-                else begin
-                  worktree_dir := worktree_path;
+                let add_worktree () =
+                  let st, out = run_sh ~cwd:repo_root ~timeout_sec:30.0 add_cmd in
+                  if st = Unix.WEXITED 0 then Ok ()
+                  else
+                    match find_worktree_path_for_branch branch with
+                    | Some existing_path when same_worktree_path existing_path worktree_path ->
+                      begin match remove_worktree_path existing_path with
+                      | Error msg ->
+                        Error (Printf.sprintf "remove existing worktree: %s" msg)
+                      | Ok () ->
+                        let st_retry, out_retry =
+                          run_sh ~cwd:repo_root ~timeout_sec:30.0 add_cmd
+                        in
+                        if st_retry = Unix.WEXITED 0 then Ok ()
+                        else
+                          Error (Printf.sprintf "git worktree add retry: %s" (String.trim out_retry))
+                      end
+                    | _ ->
+                      Error (Printf.sprintf "git worktree add: %s" (String.trim out))
+                in
+                match add_worktree () with
+                | Error _ as err -> err
+                | Ok () -> begin
+                  let worktree_root =
+                    try Unix.realpath worktree_path
+                    with Unix.Unix_error _ -> worktree_path
+                  in
+                  worktree_dir := worktree_root;
                   let fallback_note =
                     match fallback_from with
                     | None -> ""
@@ -257,7 +333,8 @@ let handle_keeper_pr_workflow
                     if branch_exists then " (reused existing branch)" else ""
                   in
                   Ok (Printf.sprintf "worktree %s on branch %s%s%s"
-                    worktree_path branch branch_note fallback_note)
+                    worktree_root branch branch_note fallback_note)
+                end
                 end
               end
       ) in
@@ -293,8 +370,12 @@ let handle_keeper_pr_workflow
       let _s_ver = run_step "version_truth_check" (fun () ->
         if !worktree_dir = "" then Error "no worktree path"
         else begin
-          let st, out = run_sh ~cwd:(!worktree_dir) ~timeout_sec:10.0
-            "./scripts/check-version-truth.sh" in
+          let check_script = Filename.concat !worktree_dir "scripts/check-version-truth.sh" in
+          if not (Sys.file_exists check_script) then
+            Error "missing version truth script: scripts/check-version-truth.sh"
+          else
+          let st, out = run_argv ~timeout_sec:10.0
+            [ "/bin/bash"; check_script ] in
           if st <> Unix.WEXITED 0 then
             Error (Printf.sprintf "Version truth check failed: %s" out)
           else Ok "version truth OK"

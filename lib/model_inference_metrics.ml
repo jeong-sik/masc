@@ -130,12 +130,15 @@ let read_all_decisions ~base_path ~since_unix : raw_entry list =
                    (match parse_telemetry_entry json ~since_unix with
                     | Some e -> entries := e :: !entries
                     | None -> ())
+                 | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
                  | exception _ -> ()
              done
            with End_of_file -> ());
           !entries
         )
-      with _ -> []
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | _ -> []
     ) files
 
 (* ── Aggregate by model ─────────────────────────────────── *)

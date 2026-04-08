@@ -2,8 +2,10 @@
 (** Centralized boundary between MASC subsystems and the OAS Agent SDK.
     Enforces strict structural timeouts, cancellation safety, and type isolation. *)
 
-(** Safe execution of a generic OAS operation with a mandatory timeout.
-    Catches [Eio.Time.Timeout] and [Eio.Cancel.Cancelled] to perform functional rollback. *)
+(** Safe execution of a generic OAS operation.
+    Applies timeout handling when an Eio clock is available, and converts
+    [Eio.Time.Timeout] into an error result.
+    [Eio.Cancel.Cancelled] is always re-raised to preserve structured concurrency. *)
 let run_safe ~timeout_s fn =
   let do_timeout fn =
     match (Masc_eio_env.get ()).clock with
@@ -15,10 +17,10 @@ let run_safe ~timeout_s fn =
   with
   | Eio.Time.Timeout ->
     Log.Misc.warn "masc_oas_bridge: OAS execution timed out after %.1fs" timeout_s;
-    Error (Oas.Error.Api (Timeout { message = Printf.sprintf "Execution cancelled after %.1fs" timeout_s }))
-  | Eio.Cancel.Cancelled _ ->
-    Log.Misc.warn "masc_oas_bridge: OAS execution cancelled (structural rollback)";
-    Error (Oas.Error.Api (Timeout { message = Printf.sprintf "Execution cancelled after %.1fs" timeout_s }))
+    Error (Oas.Error.Api (Timeout { message = Printf.sprintf "Execution timed out after %.1fs" timeout_s }))
+  | Eio.Cancel.Cancelled _ as exn ->
+    Log.Misc.warn "masc_oas_bridge: OAS execution cancelled";
+    raise exn
   | exn ->
     let bt = Printexc.get_backtrace () in
     Log.Misc.error "masc_oas_bridge: OAS execution error: %s\n%s" (Printexc.to_string exn) bt;

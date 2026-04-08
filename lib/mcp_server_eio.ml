@@ -87,6 +87,10 @@ let mcp_context_required_tools_inline =
 let () = Tool_dispatch.init_read_only_set read_only_tools_inline
 let () = Tool_dispatch.init_requires_join_set requires_join_tools_inline
 let () = Tool_dispatch.init_mcp_context_required_set mcp_context_required_tools_inline
+(* Tools whose arguments contain executable commands subject to
+   destructive pattern scanning (eval_gate step 6). *)
+let () = Tool_dispatch.init_destructive_set
+  [ "keeper_bash"; "keeper_fs_edit" ]
 
 (* Tag registry initialization.
    Most modules register via Tool_spec.register at module load time.

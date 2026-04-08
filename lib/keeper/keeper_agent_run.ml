@@ -225,6 +225,26 @@ let log_keeper_memory_write
     @param is_retry When [true], replays the current user message into the
            working context without persisting it again, so transient retry
            attempts do not duplicate the user entry in session history *)
+let adaptive_thinking_budget ~enabled ~is_retry ~last_tool_results ~user_message ~dynamic_context ~current_budget =
+  if not enabled then
+    current_budget
+  else
+    (* 1) Structured tool errors in last tools -> High thinking *)
+    let had_error = List.exists (fun (r : Agent_sdk.Types.tool_result) ->
+      match r with
+      | Error _ -> true
+      | Ok _ -> false
+    ) last_tool_results in
+    if is_retry || had_error then Some 1500
+    else
+    (* 2) Task complexity keywords -> Max thinking *)
+    let complex_task = List.exists (fun needle -> String_util.contains_substring_ci (user_message ^ " " ^ dynamic_context) needle)
+      ["분석"; "설계"; "plan"; "architecture"; "complex"; "investigate"] in
+    if complex_task then Some 2000
+    else
+      (* Otherwise fallback to default or OFF (None) *)
+      current_budget
+
 let run_turn
     ~(config : Room.config)
     ~(meta : Keeper_types.keeper_meta)
@@ -869,26 +889,16 @@ let run_turn
         (* Update current_turn_ref so session-scoped callbacks
            (keeper_tool_search, on_tool_called) use the correct turn. *)
         current_turn_ref := turn;
-                (* Adaptive thinking override based on turn signals *)
+
+        (* Adaptive thinking override based on turn signals *)
         let adaptive_thinking_budget =
-          if not (Keeper_config.keeper_adaptive_thinking_enabled ()) then
-            current_params.thinking_budget
-          else
-            (* 1) Error or Retry in last tools -> High thinking *)
-            let had_error = List.exists (fun (r : Agent_sdk.Types.tool_result) ->
-              match r with
-              | Error _ -> true
-              | Ok { content } -> String_util.contains_substring_ci content "error" || String_util.contains_substring_ci content "fail"
-            ) last_tool_results in
-            if had_error then Some 1500
-            else
-            (* 2) Task complexity keywords -> Max thinking *)
-            let complex_task = List.exists (fun needle -> String_util.contains_substring_ci (user_message ^ " " ^ dynamic_context) needle)
-              ["분석"; "설계"; "plan"; "architecture"; "complex"; "investigate"] in
-            if complex_task then Some 2000
-            else
-              (* Otherwise fallback to default or OFF (None) *)
-              current_params.thinking_budget
+          adaptive_thinking_budget
+            ~enabled:(Keeper_config.keeper_adaptive_thinking_enabled ())
+            ~is_retry
+            ~last_tool_results
+            ~user_message
+            ~dynamic_context
+            ~current_budget:current_params.thinking_budget
         in
 
         let current_params = { current_params with thinking_budget = adaptive_thinking_budget } in

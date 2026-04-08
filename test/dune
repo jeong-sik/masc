@@ -48,6 +48,7 @@
         test_swarm_checkpoint test_swarm_goal_loop
         test_keeper_memory
         test_keeper_exec_status
+          test_keeper_adaptive_thinking
         test_keeper_lifecycle
         test_keeper_deliberation
         test_keeper_registry
@@ -113,6 +114,7 @@
           test_swarm_checkpoint test_swarm_goal_loop
           test_keeper_memory
           test_keeper_exec_status
+          test_keeper_adaptive_thinking
           test_keeper_lifecycle
           test_keeper_deliberation
           test_keeper_registry

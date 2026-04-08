@@ -3,7 +3,6 @@
 import { showToast } from '../common/toast'
 import { prettyJson, displayStatus, statusLabel } from '../../lib/status-label'
 import type {
-  OperatorAttentionItem,
   OperatorDigest,
   OperatorGuidanceSummary,
   OperatorKeeperSnapshot,
@@ -177,16 +176,6 @@ export function sessionOutcomeLabel(session: OperatorSessionSnapshot): string {
   return `${session.done_delta_total ?? 0}건 완료`
 }
 
-export function sessionPriorityTone(session: OperatorSessionSnapshot): OpsPriorityTone {
-  const status = normalizeStatus(session.status)
-  if (status === 'paused') return 'bad'
-  if (status === '' || status === 'unknown') return 'warn'
-  const health = normalizeStatus(session.team_health?.status)
-  if (health && health !== 'ok' && health !== 'healthy' && health !== 'green') return 'warn'
-  if (status && status !== 'active' && status !== 'running' && status !== 'ended') return 'warn'
-  return 'ok'
-}
-
 export function keeperPriorityReasons(keeper: OperatorKeeperSnapshot): KeeperPriorityReason[] {
   const status = normalizeStatus(keeper.status)
   if (status === 'offline' || status === 'inactive' || status === 'error') return ['offline']
@@ -230,20 +219,6 @@ export function keeperPriorityTone(keeper: OperatorKeeperSnapshot): OpsPriorityT
 
 export function keeperPrioritySummary(keeper: OperatorKeeperSnapshot): string {
   return keeperPriorityInfo(keeper).summary
-}
-
-export function attentionTone(items: OperatorAttentionItem[]): OpsPriorityTone {
-  if (items.some(item => normalizeStatus(item.severity) === 'bad')) return 'bad'
-  if (items.length > 0) return 'warn'
-  return 'ok'
-}
-
-export function isSessionAttention(item: OperatorAttentionItem): boolean {
-  return item.target_type === 'team_session'
-}
-
-export function isKeeperAttention(item: OperatorAttentionItem): boolean {
-  return item.target_type === 'keeper'
 }
 
 export function actionTypeLabel(value?: string | null): string {

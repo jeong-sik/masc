@@ -5,6 +5,7 @@ import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { useSignal } from '@preact/signals'
 import { fetchTelemetry, fetchTelemetrySummary } from '../api/dashboard'
+import { formatTimeAgo } from '../lib/format-time'
 import type {
   TelemetryEntry,
   TelemetrySource,
@@ -42,11 +43,7 @@ function formatTs(ts: number): string {
 
 function timeAgo(ts: number): string {
   if (ts === 0) return ''
-  const diff = Date.now() / 1000 - ts
-  if (diff < 60) return `${Math.floor(diff)}s ago`
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
-  return `${Math.floor(diff / 86400)}d ago`
+  return formatTimeAgo(ts)
 }
 
 // ── Summary card ─────────────────────────────────────

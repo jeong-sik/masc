@@ -36,12 +36,13 @@ export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStat
       })
 
     return () => { cancelled = true }
-  }, [keeperName, currentPhase])
+  }, [keeperName])
 
   if (loading) {
     return html`
-      <div class="flex items-center justify-center py-8 text-[11px] text-[var(--text-dim)]">
-        상태 다이어그램 로딩중...
+      <div class="flex items-center justify-center gap-2 py-6 text-[11px] text-[var(--text-dim)]">
+        <span class="inline-block w-3 h-3 rounded-full border-2 border-[var(--accent)] border-t-transparent" style="animation: spin 0.8s linear infinite;"></span>
+        상태 다이어그램 로딩중
       </div>
     `
   }
@@ -51,19 +52,17 @@ export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStat
   }
 
   return html`
-    <div class="space-y-2">
-      <div class="flex items-center gap-2">
-        <span class="text-[10px] font-semibold uppercase tracking-widest text-[var(--text-muted)]">
-          Phase State Machine
-        </span>
-        ${currentPhase ? html`
-          <span class="text-[10px] font-mono text-[var(--accent)]">${currentPhase}</span>
-        ` : null}
-      </div>
+    <div>
+      ${currentPhase ? html`
+        <div class="mb-2 text-[10px] text-[var(--text-dim)]">
+          현재 phase: <span class="font-mono font-medium text-[var(--accent)]">${currentPhase}</span>
+        </div>
+      ` : null}
       <${MermaidGraph}
         source=${mermaid}
         prefix="keeper-state-diagram"
-        diagramClass="[&_svg]:max-w-full"
+        diagramClass="[&_svg]:max-w-full [&_svg]:mx-auto"
+        minHeightClass="min-h-[120px]"
       />
     </div>
   `

@@ -81,7 +81,7 @@ function KeeperRow({ keeper }: { keeper: Keeper }) {
     >
       ${'' /* Phase badge (lifecycle) + Stage badge (activity) */}
       <div class="flex-shrink-0">
-        <${KeeperPhaseBadge} phase=${keeper.phase} />
+        <${KeeperPhaseBadge} phase=${keeper.phase} compact />
       </div>
       <div
         class="flex-shrink-0 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider text-center w-12"

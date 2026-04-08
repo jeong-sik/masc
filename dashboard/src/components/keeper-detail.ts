@@ -298,7 +298,7 @@ export function KeeperDetailOverlay() {
         <${PipelineStageBar} stage=${keeper.pipeline_stage} />
         <details class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)]">
           <summary class="cursor-pointer py-2 px-4 text-[10px] font-semibold uppercase tracking-widest text-[var(--text-muted)] list-none select-none flex items-center gap-2">
-            <span class="w-1.5 h-1.5 rounded-full bg-[var(--accent)]/50"></span>
+            <span class="w-1.5 h-1.5 rounded-full bg-[rgba(71,184,255,0.5)]"></span>
             Phase State Machine
           </summary>
           <div class="px-4 pb-4 pt-1">

@@ -259,8 +259,7 @@ let pre_check
           | None ->
               (* 6. Destructive pattern check (bash tools only) *)
               if config.destructive_check_enabled
-                 && (tool_name = "keeper_bash"
-                     || tool_name = "keeper_fs_edit") then
+                 && Tool_dispatch.is_destructive tool_name then
                 let cmd_str =
                   try
                     let json = Yojson.Safe.from_string args_json in
@@ -282,8 +281,7 @@ let pre_check
     | None ->
         (* No trajectory accumulator — skip entropy and turn-limit checks *)
         if config.destructive_check_enabled
-           && (tool_name = "keeper_bash"
-               || tool_name = "keeper_fs_edit") then
+           && Tool_dispatch.is_destructive tool_name then
           let cmd_str =
             try
               let json = Yojson.Safe.from_string args_json in

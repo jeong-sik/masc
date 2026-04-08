@@ -441,6 +441,8 @@ let invalidate_prefix prefix =
     in
     List.iter Eio.Condition.broadcast conds
   else
+    (* Non-Eio fallback matches [get_or_compute_simple]: no fibers, no shared
+       concurrent mutation, so direct Hashtbl removal is sufficient. *)
     let keys =
       Hashtbl.fold
         (fun key _ acc ->

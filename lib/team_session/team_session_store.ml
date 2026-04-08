@@ -510,28 +510,30 @@ let read_events ?max_events config session_id : Yojson.Safe.t list =
 let write_checkpoint config session_id (checkpoint : Team_session_types.checkpoint) =
   let filename = Printf.sprintf "%Ld.json" (Int64.of_float (checkpoint.ts *. 1000.0)) in
   let path = Filename.concat (checkpoints_dir config session_id) filename in
-  write_json config path (Team_session_types.checkpoint_to_yojson checkpoint);
+  with_file_lock config path (fun () ->
+      write_json config path (Team_session_types.checkpoint_to_yojson checkpoint));
   notify_team_session_mutation config ~session_id
 
 let save_worker_run_json config session_id worker_run_id json =
   let path = worker_run_json_path config session_id worker_run_id in
-  write_json config path json;
+  with_file_lock config path (fun () -> write_json config path json);
   notify_team_session_mutation config ~session_id
 
 let save_worker_run_checkpoint_text config session_id worker_run_id content =
   let path = worker_run_checkpoint_path config session_id worker_run_id in
-  write_text_file path content;
+  with_file_lock config path (fun () -> write_text_file path content);
   notify_team_session_mutation config ~session_id
 
 let save_worker_run_meta_json config session_id worker_run_id json =
   let path = worker_run_meta_path config session_id worker_run_id in
-  write_json config path
-    (normalize_worker_run_meta_json config ~session_id ~worker_run_id json);
+  with_file_lock config path (fun () ->
+      write_json config path
+        (normalize_worker_run_meta_json config ~session_id ~worker_run_id json));
   notify_team_session_mutation config ~session_id
 
 let save_worker_run_proof_json config session_id worker_run_id json =
   let path = worker_run_proof_path config session_id worker_run_id in
-  write_json config path json;
+  with_file_lock config path (fun () -> write_json config path json);
   notify_team_session_mutation config ~session_id
 
 let immediate_dir_entries config dir =

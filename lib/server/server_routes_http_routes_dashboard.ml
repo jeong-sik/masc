@@ -205,9 +205,12 @@ let rec add_routes ~sw ~clock router =
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/tool-quality" (fun request reqd ->
        with_public_read (fun _state req reqd ->
-         let n = match Server_utils.query_param req "n" with
-           | Some s -> (try int_of_string s with _ -> 5000)
-           | None -> 5000
+         let n =
+           let raw = match Server_utils.query_param req "n" with
+             | Some s -> (try int_of_string s with _ -> 5000)
+             | None -> 5000
+           in
+           max 1 (min 50000 raw)
          in
          let json = Dashboard_http_tool_quality.aggregate ~n () in
          Http.Response.json ~compress:true ~request:req

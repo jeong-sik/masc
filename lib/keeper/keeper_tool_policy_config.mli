@@ -47,4 +47,8 @@ val group_names : t -> string list
 
 (** Resolve a single group name to tool names.
     Returns [None] if the group is not defined. *)
+(** Check if a preset is allowed to execute workflow mutations
+    (pr merge, pr close, etc.) as configured in [permissions.workflow_presets]. *)
+val allows_workflow : t -> string -> bool
+
 val resolve_group : t -> string -> string list option

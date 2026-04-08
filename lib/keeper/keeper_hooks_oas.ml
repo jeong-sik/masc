@@ -267,9 +267,10 @@ let make_hooks
       | Agent_sdk.Hooks.AfterTurn { turn; response } ->
         let meta = !meta_ref in
         let model = response.model in
-        let input_tok, output_tok = match response.usage with
-          | Some u -> (u.input_tokens, u.output_tokens)
-          | None -> (0, 0)
+        let input_tok, output_tok, turn_cost_usd = match response.usage with
+          | Some u -> (u.input_tokens, u.output_tokens,
+                       Option.value ~default:0.0 u.cost_usd)
+          | None -> (0, 0, 0.0)
         in
         let total_tok = input_tok + output_tok in
         (* Provider prefix cache token tracking (Anthropic).
@@ -290,14 +291,13 @@ let make_hooks
         Log.Keeper.info "keeper:%s turn=%d total_turns=%d model=%s tokens=%d"
           meta.name turn meta.runtime.usage.total_turns model total_tok;
         (* Emit per-turn cost event for task attribution.
-           cost_usd is 0.0 until OAS cascade provides actual cost
-           (see oas#393). Token counts are the primary data for now. *)
+           cost_usd from OAS Pricing.annotate_response_cost (oas#393 resolved). *)
         (match trajectory_acc with
          | Some acc ->
            emit_cost_event ~masc_root:acc.masc_root
              ~agent_name:meta.name ~task_id:acc.task_id
              ~model ~input_tokens:input_tok ~output_tokens:output_tok
-             ~cost_usd:0.0 ?telemetry:response.telemetry ()
+             ~cost_usd:turn_cost_usd ?telemetry:response.telemetry ()
          | None -> ());
         let text = Agent_sdk.Types.text_of_content response.content in
         let has_state_block =

@@ -139,6 +139,9 @@ function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
         reasoning_tokens: asNumber(rawTel.reasoning_tokens) ?? null,
         request_latency_ms: asNumber(rawTel.request_latency_ms) ?? 0,
       } : null
+      const cascadeObj = isRecord(item.cascade) ? item.cascade : null
+      const fallbackEvents = cascadeObj && Array.isArray(cascadeObj.fallback_events) ? cascadeObj.fallback_events : []
+      const firstFallback = fallbackEvents.length > 0 && isRecord(fallbackEvents[0]) ? fallbackEvents[0] : null
       return {
         ts,
         context_ratio: contextRatio,
@@ -156,6 +159,11 @@ function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
         handoff_to_model: handoffToModel,
         handoff_new_generation: handoffNewGeneration,
         inference_telemetry,
+        fallback_applied: cascadeObj ? cascadeObj.fallback_applied === true : false,
+        fallback_hops: cascadeObj ? (asNumber(cascadeObj.fallback_hops) ?? 0) : 0,
+        fallback_from: firstFallback && typeof firstFallback.from_model_id === 'string' ? firstFallback.from_model_id : null,
+        fallback_to: firstFallback && typeof firstFallback.to_model_id === 'string' ? firstFallback.to_model_id : null,
+        fallback_reason: firstFallback && typeof firstFallback.reason === 'string' ? firstFallback.reason : null,
       }
     })
     .filter((item): item is KeeperMetricPoint => item !== null)

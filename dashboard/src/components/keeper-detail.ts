@@ -29,6 +29,7 @@ import {
   MetricsCharts,
   RawDataDebug,
   RelationshipList,
+  TokenTrendChart,
   TraitsList,
 } from './keeper-detail-panels'
 import {
@@ -345,6 +346,9 @@ export function KeeperDetailOverlay() {
               : null}
           `
           : null}
+
+        ${'' /* ── Per-turn token trend (input vs output) ── */}
+        <${TokenTrendChart} keeper=${keeper} />
 
         ${'' /* ── Inference Telemetry (tok/s, cache, reasoning) ── */}
         <${InferenceTelemetryPanel} keeper=${keeper} />

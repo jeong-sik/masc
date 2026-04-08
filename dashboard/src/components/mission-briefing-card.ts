@@ -255,9 +255,12 @@ export function MissionBriefingCard() {
               label=${`${liveJudge.name}${liveJudge.model ? ' · ' + liveJudge.model : ''}`}
               tone=${liveJudgeTone}
             />`
-          : null}
+          : html`<${StatusChip} label="판단 대상 미확인" tone="warn" />`}
         ${liveJudge
-          ? html`<${StatusChip} label=${liveJudge.online ? '온라인' : '확인 필요'} tone=${liveJudgeTone} />`
+          ? html`
+              <${StatusChip} label=${liveJudge.online ? '온라인' : '확인 필요'} tone=${liveJudgeTone} />
+              <${StatusChip} label=${liveJudge.source === 'judge_runtime' ? 'runtime' : 'fallback'} />
+            `
           : null}
         ${briefing?.model ? html`<${StatusChip} label=${briefing.model} />` : null}
         ${briefing?.generated_at ? html`<${StatusChip} label=${relativeTime(briefing.generated_at)} />` : null}

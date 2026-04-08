@@ -162,19 +162,29 @@ let test_compaction_crash_recovery () =
   let tr = dispatch "compact-crash" KSM.Compaction_started in
   check phase_t "compacting" KSM.Compacting tr.new_phase;
 
-  (* Compaction fails → fiber crashes *)
-  ignore (dispatch "compact-crash"
-    (KSM.Compaction_completed { before_tokens = 100000; after_tokens = 90000 }));
+  (* Compaction fails → back to Running *)
+  let tr_fail = dispatch "compact-crash"
+    (KSM.Compaction_failed { reason = "OOM during compaction" }) in
+  check phase_t "running after compaction fail" KSM.Running tr_fail.new_phase;
+
+  (* Retry compaction after failure → succeeds this time *)
+  let tr_retry = dispatch "compact-crash" KSM.Compaction_started in
+  check phase_t "compacting retry" KSM.Compacting tr_retry.new_phase;
+  let tr_done = dispatch "compact-crash"
+    (KSM.Compaction_completed { before_tokens = 100000; after_tokens = 30000 }) in
+  check phase_t "running after retry" KSM.Running tr_done.new_phase;
+
+  (* Later, fiber crashes for unrelated reason *)
   let tr2 = dispatch "compact-crash"
-    (KSM.Fiber_terminated { outcome = "compaction OOM" }) in
-  check phase_t "crashed after compaction fail" KSM.Crashed tr2.new_phase;
+    (KSM.Fiber_terminated { outcome = "cascading OOM" }) in
+  check phase_t "crashed after fiber termination" KSM.Crashed tr2.new_phase;
 
   (* Supervisor restarts *)
-  ignore (dispatch "compact-crash"
-    (KSM.Supervisor_restart_attempt { attempt = 1 }));
   let tr3 = dispatch "compact-crash"
-    KSM.Fiber_started in
-  check phase_t "recovered" KSM.Running tr3.new_phase
+    (KSM.Supervisor_restart_attempt { attempt = 1 }) in
+  check phase_t "restarting" KSM.Restarting tr3.new_phase;
+  let tr4 = dispatch "compact-crash" KSM.Fiber_started in
+  check phase_t "recovered to running" KSM.Running tr4.new_phase
 
 (* ══════════════════════════════════════════════════════════ *)
 (* Scenario 5: Graceful shutdown                             *)

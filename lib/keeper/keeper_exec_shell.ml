@@ -210,7 +210,7 @@ let handle_keeper_shell_readonly
       | Error e -> error_json ~fields:[ "op", `String op ] e
       | Ok target ->
         let limit = shell_readonly_limit args in
-        (* Optional file-type filter (e.g. "ml", "py", "ts") *)
+        (* Optional file-type filter (e.g. "ml", "py") *)
         let file_type = Safe_ops.json_string ~default:"" "type" args |> String.trim in
         (* Optional glob filter (e.g. "*.ml", "lib/**/*.ml") *)
         let glob = Safe_ops.json_string ~default:"" "glob" args |> String.trim in
@@ -394,50 +394,59 @@ let handle_keeper_shell_readonly
     if cmd_str = "" then error_json ~fields:[ "op", `String op ] "command is required for bash op. Good: command='env'. Bad: command=''."
 
     else
-      (* Categorised dangerous-pattern table: (pattern, category, hint).
-         On match the first hit wins, so order matters — put specific
-         patterns before generic ones (e.g. "| tee " before "> "). *)
-      let categorised_patterns =
+      (* Non-overridable deny layer (runs after preset gate).
+         First match wins — specific patterns before generic. *)
+      let hint_of_category = function
+        | "chaining"        -> "Call the tool multiple times instead of chaining commands."
+        | "redirect"        -> "Redirects are not allowed. Use keeper_fs_edit to write files."
+        | "git_write"       -> "Use keeper_bash with coding preset for git write operations."
+        | "package_install" -> "Package installation requires keeper_bash with coding preset."
+        | "destructive"     -> "Use keeper_bash for write operations, not readonly shell."
+        | _                 -> "This operation is not allowed in readonly shell."
+      in
+      let deny_patterns =
         [ (* chaining *)
-          "&&",          "chaining",        "Call the tool multiple times instead of chaining commands."
-        ; "||",          "chaining",        "Call the tool multiple times instead of chaining commands."
-        ; ";",           "chaining",        "Call the tool multiple times instead of chaining commands."
+          "&&", "chaining"
+        ; "||", "chaining"
+        ; ";", "chaining"
         (* redirect *)
-        ; "| tee ",      "redirect",        "Redirects are not allowed. Use keeper_fs_edit to write files."
-        ; ">> ",         "redirect",        "Redirects are not allowed. Use keeper_fs_edit to write files."
-        ; "> ",          "redirect",        "Redirects are not allowed. Use keeper_fs_edit to write files."
+        ; "| tee ", "redirect"
+        ; ">> ", "redirect"
+        ; "> ", "redirect"
         (* git write *)
-        ; "git push",    "git_write",       "Use keeper_bash with coding preset for git write operations."
-        ; "git reset",   "git_write",       "Use keeper_bash with coding preset for git write operations."
-        ; "git checkout","git_write",       "Use keeper_bash with coding preset for git write operations."
-        ; "git rebase",  "git_write",       "Use keeper_bash with coding preset for git write operations."
+        ; "git push", "git_write"
+        ; "git reset", "git_write"
+        ; "git checkout", "git_write"
+        ; "git rebase", "git_write"
         (* package install *)
-        ; "pip install", "package_install", "Package installation requires keeper_bash with coding preset."
-        ; "npm install", "package_install", "Package installation requires keeper_bash with coding preset."
-        ; "opam install","package_install", "Package installation requires keeper_bash with coding preset."
+        ; "pip install", "package_install"
+        ; "npm install", "package_install"
+        ; "opam install", "package_install"
         (* destructive / write *)
-        ; "rm ",         "destructive",     "Use keeper_bash for write operations, not readonly shell."
-        ; "rm\t",        "destructive",     "Use keeper_bash for write operations, not readonly shell."
-        ; "rmdir",       "destructive",     "Use keeper_bash for write operations, not readonly shell."
-        ; "mv ",         "destructive",     "Use keeper_bash for write operations, not readonly shell."
-        ; "cp ",         "destructive",     "Use keeper_bash for write operations, not readonly shell."
-        ; "chmod",       "destructive",     "Use keeper_bash for write operations, not readonly shell."
-        ; "chown",       "destructive",     "Use keeper_bash for write operations, not readonly shell."
-        ; "kill",        "destructive",     "Use keeper_bash for write operations, not readonly shell."
-        ; "pkill",       "destructive",     "Use keeper_bash for write operations, not readonly shell."
-        ; "dd ",         "destructive",     "Use keeper_bash for write operations, not readonly shell."
-        ; "mkfs",        "destructive",     "Use keeper_bash for write operations, not readonly shell."
-        ; "wget ",       "destructive",     "Use keeper_bash for write operations, not readonly shell."
-        ; "curl.*-o",    "destructive",     "Use keeper_bash for write operations, not readonly shell."
+        ; "rm ", "destructive"
+        ; "rm\t", "destructive"
+        ; "rmdir", "destructive"
+        ; "mv ", "destructive"
+        ; "cp ", "destructive"
+        ; "chmod", "destructive"
+        ; "chown", "destructive"
+        ; "kill", "destructive"
+        ; "pkill", "destructive"
+        ; "dd ", "destructive"
+        ; "mkfs", "destructive"
+        ; "wget ", "destructive"
+        ; "curl -o", "destructive"
+        ; "curl --output", "destructive"
         ]
       in
       let matched =
-        List.find_opt (fun (pat, _cat, _hint) ->
+        List.find_opt (fun (pat, _cat) ->
           String_util.contains_substring_ci cmd_str pat
-        ) categorised_patterns
+        ) deny_patterns
       in
       (match matched with
-      | Some (pat, category, hint) ->
+      | Some (pat, category) ->
+        let hint = hint_of_category category in
         Yojson.Safe.to_string
           (`Assoc
               [ "ok", `Bool false

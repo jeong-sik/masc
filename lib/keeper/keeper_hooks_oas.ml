@@ -346,8 +346,7 @@ let make_hooks
       | Agent_sdk.Hooks.PostToolUse { tool_name; input; output; _ } ->
         let output_text = match output with
           | Ok { Agent_sdk.Types.content; _ } -> content
-          | Error { Agent_sdk.Types.message; _ } ->
-            Printf.sprintf "error: %s" message
+          | Error { Agent_sdk.Types.message; _ } -> message
         in
         let input_keys = match input with
           | `Assoc pairs -> String.concat "," (List.map fst pairs)

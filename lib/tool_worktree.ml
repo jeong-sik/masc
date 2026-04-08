@@ -19,12 +19,18 @@ let handle_worktree_create ctx args =
     let from_args = get_string args "agent_name" "" in
     if from_args = "" then ctx.agent_name else from_args
   in
-  let task_id = get_string args "task_id" "" in
+  let raw_task_id = get_string args "task_id" "" in
   let base_branch = get_string args "base_branch" "develop" in
-  if task_id = "" then
-    (false, "task_id is required. Example: task_id='fix-login', task_id='feature/auth'. \
-             Use a short descriptive name for your task.")
+  if raw_task_id = "" then
+    (false, "task_id is required. Example: task_id='fix-login', task_id='add-auth'. \
+             Use a-z, 0-9, hyphen, underscore only. No slashes.")
   else
+  (* Normalize: replace / and \ with - so LLMs can use branch-style names *)
+  let task_id =
+    String.to_seq raw_task_id
+    |> Seq.map (fun c -> if c = '/' || c = '\\' then '-' else c)
+    |> String.of_seq
+  in
   match Room.worktree_create_r ctx.config ~agent_name ~task_id ~base_branch with
   | Ok msg -> (true, msg)
   | Error e -> (false, Types.masc_error_to_string e)

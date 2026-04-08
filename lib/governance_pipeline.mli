@@ -24,6 +24,11 @@ type governance_decision = {
 }
 
 val risk_level_to_string : risk_level -> string
+val risk_level_to_int : risk_level -> int
+
+val confirm_threshold : string -> risk_level option
+(** Minimum risk level that requires confirmation for the given governance level.
+    Returns [None] for "development" (no confirmation needed). *)
 
 val assess_risk : tool_name:string -> input:Yojson.Safe.t -> risk_level
 (** Classify tool risk using, in order:

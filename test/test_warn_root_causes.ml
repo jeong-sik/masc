@@ -135,7 +135,8 @@ let test_concurrent_atomic_writes_never_empty () =
       let json =
         `Assoc [ ("name", `String (Printf.sprintf "v%d" i)) ]
       in
-      Room_utils.write_json_local path json
+      Room_utils.write_json_local path json;
+      Eio.Fiber.yield ()
     done);
   (* Reader fiber: read concurrently *)
   Eio.Fiber.fork ~sw (fun () ->
@@ -143,7 +144,8 @@ let test_concurrent_atomic_writes_never_empty () =
       (try
          let content = Fs_compat.load_file path in
          if String.trim content = "" then empty_seen := true
-       with _ -> ())
+       with _ -> ());
+      Eio.Fiber.yield ()
     done);
   check bool "concurrent reads never see empty file" false !empty_seen;
   (try Unix.unlink path with _ -> ());

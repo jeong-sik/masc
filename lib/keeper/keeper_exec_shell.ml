@@ -62,6 +62,23 @@ let handle_keeper_bash
                      etc.) and is blocked for all presets." )
               ; "cmd", `String cmd_for_log
               ]))
+      (* Branch-switch guard: keeper_bash runs in the main repo root.
+         git checkout/switch/branch -b would mutate main's HEAD or create
+         branches in the shared repo. Use keeper_pr_workflow instead. *)
+      else if Worker_dev_tools.is_git_branch_switch cmd
+      then (
+        Log.Keeper.info "keeper_bash branch-switch blocked: %s (keeper=%s)" cmd_for_log meta.name;
+        Yojson.Safe.to_string
+          (`Assoc
+              [ "ok", `Bool false
+              ; "error", `String "branch_switch_blocked"
+              ; ( "reason"
+                , `String
+                    "git checkout/switch/branch is blocked in the main repo. \
+                     Use keeper_pr_workflow to create changes in an isolated clone." )
+              ; "cmd", `String cmd_for_log
+              ; "hint", `String "keeper_pr_workflow"
+              ]))
       (* Write gate: only for non-coding presets *)
       else if (not write_enabled) && Worker_dev_tools.is_write_operation cmd
       then (

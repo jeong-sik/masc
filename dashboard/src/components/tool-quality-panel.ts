@@ -136,7 +136,7 @@ function FailureList({ categories }: { categories: FailureCategory[] }) {
 }
 
 export function ToolQualityPanel() {
-  useEffect(() => { fetchToolQuality() }, [])
+  useEffect(() => { void fetchToolQuality() }, [])
 
   const d = data.value
   if (loading.value && !d) return html`<div class="p-4 text-[11px] text-[var(--text-dim)]">Loading tool quality...</div>`

@@ -859,6 +859,9 @@ let _tool_spec_read_only =
   ]
 
 let register () =
+  Tool_dispatch.register_module_tag
+    ~schemas:tools
+    ~tag:Tool_dispatch.Mod_inline;
   Tool_dispatch.register_module
     ~schemas:tools
     ~handler:(fun ~name ~args -> Some (handle_tool name args));

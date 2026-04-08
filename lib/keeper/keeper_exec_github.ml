@@ -312,8 +312,40 @@ let handle_keeper_pr_workflow
                       (Filename.quote (Printf.sprintf "origin/%s" resolved_base))
                 in
                 let st, out = run_sh ~cwd:repo_root ~timeout_sec:30.0 add_cmd in
-                if st <> Unix.WEXITED 0 then
-                  Error (Printf.sprintf "git worktree add: %s" (String.trim out))
+                if st <> Unix.WEXITED 0 then begin
+                  (* Recovery: if "already used by worktree", prune stale
+                     entries and retry once (#5954) *)
+                  let trimmed_out = String.trim out in
+                  let contains_substr s sub =
+                    let sub_len = String.length sub in
+                    let s_len = String.length s in
+                    if sub_len > s_len then false
+                    else
+                      let rec check i =
+                        if i + sub_len > s_len then false
+                        else if String.sub s i sub_len = sub then true
+                        else check (i + 1)
+                      in check 0
+                  in
+                  if contains_substr trimmed_out "already used by worktree"
+                  then begin
+                    let _ = run_sh ~cwd:repo_root ~timeout_sec:10.0
+                      "git worktree prune" in
+                    let st2, out2 = run_sh ~cwd:repo_root ~timeout_sec:30.0
+                      add_cmd in
+                    if st2 <> Unix.WEXITED 0 then
+                      Error (Printf.sprintf
+                        "git worktree add (after prune): %s"
+                        (String.trim out2))
+                    else begin
+                      worktree_dir := worktree_path;
+                      Ok (Printf.sprintf "worktree %s (recovered after prune)"
+                        worktree_path)
+                    end
+                  end
+                  else
+                    Error (Printf.sprintf "git worktree add: %s" trimmed_out)
+                end
                 else begin
                   worktree_dir := worktree_path;
                   let fallback_note =
@@ -363,8 +395,10 @@ let handle_keeper_pr_workflow
       let _s_ver = run_step "version_truth_check" (fun () ->
         if !worktree_dir = "" then Error "no worktree path"
         else begin
+          let script_path =
+            Filename.concat repo_root "scripts/check-version-truth.sh" in
           let st, out = run_sh ~cwd:(!worktree_dir) ~timeout_sec:10.0
-            "./scripts/check-version-truth.sh" in
+            (Filename.quote script_path) in
           if st <> Unix.WEXITED 0 then
             Error (Printf.sprintf "Version truth check failed: %s" out)
           else Ok "version truth OK"

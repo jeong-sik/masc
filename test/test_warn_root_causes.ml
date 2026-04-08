@@ -11,7 +11,7 @@ open Masc_mcp
 let init_registry () =
   Masc_test_deps.init_keeper_tool_registry ();
   let base_path = Masc_test_deps.find_project_root () in
-  Keeper_tool_policy.init_policy_config ~base_path
+  ignore (Keeper_tool_policy.init_policy_config ~base_path)
 
 let make_meta ?(name = "test-keeper") () : Keeper_types.keeper_meta =
   match Keeper_types.meta_of_json

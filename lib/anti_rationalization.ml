@@ -120,7 +120,6 @@ let save_excuse_patterns (patterns : (string * string) list) : (unit, string) re
     let path = excuse_patterns_path () in
     let json_items = List.map (fun (pat, reason) -> `List [`String pat; `String reason]) patterns in
     let json = `List json_items in
-    let content = Yojson.Safe.to_string json in
     let tmp = path ^ ".tmp" in
     let content = Yojson.Safe.pretty_to_string json in
     Fs_compat.save_file tmp content;

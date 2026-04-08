@@ -1411,12 +1411,11 @@ let run_turn
            ?event_bus
            ~exit_condition:(fun _turn ->
              (* OAS checks this predicate before each internal turn.
-                When boring_consecutive >= 8, the keeper has had no productive
-                work for 8+ turns — exit Agent.run early to avoid further
-                token spend. This complements the keepalive-level hard skip
-                (which prevents turn start) by catching mid-session boring
-                accumulation when Agent.run has multiple internal turns. *)
-             !boring_consecutive_turns >= 8)
+                When boring_consecutive >= threshold, the keeper has had no
+                productive work — exit Agent.run early to avoid further
+                token spend. Threshold configurable via Runtime_params
+                "keeper.turn.boring_exit_threshold" (default: 8). *)
+             !boring_consecutive_turns >= Keeper_config.keeper_boring_exit_threshold ())
            ())
      with
      | Error e -> Error e

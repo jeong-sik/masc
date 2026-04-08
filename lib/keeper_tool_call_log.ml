@@ -14,6 +14,19 @@
 
 let max_output_len = 4000
 
+(** Pre-truncation info, set by tool handler wrapper (keeper_tools_oas),
+    consumed by the OAS on_tool_result hook (keeper_hooks_oas).
+    Sequential tool execution within Agent.run guarantees no race. *)
+let pending_truncation : (int * int option) ref = ref (0, None)
+
+let set_truncation_info ~original_bytes ?truncated_to () =
+  pending_truncation := (original_bytes, truncated_to)
+
+let consume_truncation_info () =
+  let info = !pending_truncation in
+  pending_truncation := (0, None);
+  info
+
 let store_ref : Dated_jsonl.t option ref = ref None
 
 let init ~base_path =

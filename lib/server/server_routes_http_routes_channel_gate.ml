@@ -202,6 +202,18 @@ let handle_gate_status _state request reqd =
   respond_json_with_cors ~status:`OK request reqd
     (Yojson.Safe.to_string json)
 
+(** GET /api/v1/gate/discord/status
+
+    Dashboard-facing live connector status sourced from the Discord bot's
+    status file plus the durable binding/audit stores. *)
+let handle_gate_discord_status _state request reqd =
+  let limit =
+    int_query_param request "audit_limit" ~default:10
+    |> fun value -> max 1 (min 50 value)
+  in
+  respond_json_with_cors ~status:`OK request reqd
+    (Yojson.Safe.to_string (Channel_gate_discord_state.status_json ~audit_limit:limit ()))
+
 let gate_keeper_ctx ~sw ~clock state =
   {
     Tool_keeper.config = state.Mcp_server.room_config;
@@ -211,6 +223,20 @@ let gate_keeper_ctx ~sw ~clock state =
     proc_mgr = state.Mcp_server.proc_mgr;
     net = state.Mcp_server.net;
   }
+
+let keeper_exists ~sw ~clock state keeper_name =
+  let args = `Assoc [ ("name", `String keeper_name) ] in
+  match
+    Tool_keeper.dispatch (gate_keeper_ctx ~sw ~clock state)
+      ~name:"masc_keeper_status" ~args
+  with
+  | Some (true, _) -> Ok true
+  | Some (false, err) ->
+      if String_util.contains_substring
+           (String.lowercase_ascii err) "keeper not found"
+      then Ok false
+      else Error err
+  | None -> Error "keeper dispatch unavailable"
 
 let respond_keeper_tool_json ~sw ~clock state request reqd ~tool_name ~args =
   match
@@ -275,6 +301,95 @@ let handle_gate_keeper_status ~sw ~clock state request reqd =
         (Yojson.Safe.to_string
            (Channel_gate.error_json "name is required"))
 
+let handle_gate_discord_bind ~sw ~clock state request reqd =
+  Http.Request.read_body_async reqd (fun body_str ->
+    try
+      let json = Yojson.Safe.from_string body_str in
+      let channel_id =
+        json |> Yojson.Safe.Util.member "channel_id"
+        |> Yojson.Safe.Util.to_string_option
+        |> Option.value ~default:""
+        |> String.trim
+      in
+      let keeper_name =
+        json |> Yojson.Safe.Util.member "keeper_name"
+        |> Yojson.Safe.Util.to_string_option
+        |> Option.value ~default:""
+        |> String.trim
+      in
+      if channel_id = "" then
+        respond_json_with_cors ~status:`Bad_request request reqd
+          (Yojson.Safe.to_string
+             (Channel_gate.error_json "channel_id is required"))
+      else if keeper_name = "" then
+        respond_json_with_cors ~status:`Bad_request request reqd
+          (Yojson.Safe.to_string
+             (Channel_gate.error_json "keeper_name is required"))
+      else
+        match keeper_exists ~sw ~clock state keeper_name with
+        | Error err ->
+            respond_json_with_cors ~status:`Service_unavailable request reqd
+              (Yojson.Safe.to_string (Channel_gate.error_json err))
+        | Ok false ->
+            respond_json_with_cors ~status:`Not_found request reqd
+              (Yojson.Safe.to_string
+                 (Channel_gate.error_json ("unknown keeper: " ^ keeper_name)))
+        | Ok true -> (
+            let actor_name =
+              agent_from_request request
+              |> Option.value ~default:"dashboard"
+              |> String.trim
+            in
+            match
+              Channel_gate_discord_state.bind ~channel_id ~keeper_name ~actor_name
+            with
+            | Ok payload ->
+                respond_json_with_cors ~status:`OK request reqd
+                  (Yojson.Safe.to_string payload)
+            | Error err ->
+                respond_json_with_cors ~status:`Internal_server_error request reqd
+                  (Yojson.Safe.to_string (Channel_gate.error_json err)) ) 
+    with
+    | Yojson.Json_error _ ->
+        respond_json_with_cors ~status:`Bad_request request reqd
+          (Yojson.Safe.to_string (Channel_gate.error_json "invalid json")) )
+
+let handle_gate_discord_unbind ~sw:_ ~clock:_ _state request reqd =
+  Http.Request.read_body_async reqd (fun body_str ->
+    try
+      let json = Yojson.Safe.from_string body_str in
+      let channel_id =
+        json |> Yojson.Safe.Util.member "channel_id"
+        |> Yojson.Safe.Util.to_string_option
+        |> Option.value ~default:""
+        |> String.trim
+      in
+      if channel_id = "" then
+        respond_json_with_cors ~status:`Bad_request request reqd
+          (Yojson.Safe.to_string
+             (Channel_gate.error_json "channel_id is required"))
+      else
+        let actor_name =
+          agent_from_request request
+          |> Option.value ~default:"dashboard"
+          |> String.trim
+        in
+        match Channel_gate_discord_state.unbind ~channel_id ~actor_name with
+        | Ok payload ->
+            respond_json_with_cors ~status:`OK request reqd
+              (Yojson.Safe.to_string payload)
+        | Error "binding not found" ->
+            respond_json_with_cors ~status:`Not_found request reqd
+              (Yojson.Safe.to_string
+                 (Channel_gate.error_json "binding not found"))
+        | Error err ->
+            respond_json_with_cors ~status:`Internal_server_error request reqd
+              (Yojson.Safe.to_string (Channel_gate.error_json err))
+    with
+    | Yojson.Json_error _ ->
+        respond_json_with_cors ~status:`Bad_request request reqd
+          (Yojson.Safe.to_string (Channel_gate.error_json "invalid json")) )
+
 (** Register all gate routes on the router. *)
 let add_routes ~sw ~clock router =
   router
@@ -293,6 +408,11 @@ let add_routes ~sw ~clock router =
           handle_gate_status state request reqd
         ) request reqd)
 
+  |> Http.Router.get "/api/v1/gate/discord/status" (fun request reqd ->
+       with_public_read (fun state _req reqd ->
+         handle_gate_discord_status state request reqd
+       ) request reqd)
+
   |> Http.Router.get "/api/v1/gate/events" (fun request reqd ->
        with_public_read (fun state _req reqd ->
          handle_gate_events state request reqd
@@ -306,4 +426,14 @@ let add_routes ~sw ~clock router =
   |> Http.Router.get "/api/v1/gate/keeper-status" (fun request reqd ->
        with_tool_auth ~tool_name:"channel_gate" (fun state _req reqd ->
          handle_gate_keeper_status ~sw ~clock state request reqd
+       ) request reqd)
+
+  |> Http.Router.post "/api/v1/gate/discord/bind" (fun request reqd ->
+       with_tool_auth ~tool_name:"channel_gate" (fun state _req reqd ->
+         handle_gate_discord_bind ~sw ~clock state request reqd
+       ) request reqd)
+
+  |> Http.Router.post "/api/v1/gate/discord/unbind" (fun request reqd ->
+       with_tool_auth ~tool_name:"channel_gate" (fun state _req reqd ->
+         handle_gate_discord_unbind ~sw ~clock state request reqd
        ) request reqd)

@@ -4,9 +4,12 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
-import { get } from '../api/core'
+import { get, post } from '../api/core'
 import { lastEvent } from '../sse'
 import { StatCard } from './common/stat-card'
+import { ActionButton } from './common/button'
+import { TextInput } from './common/input'
+import { showToast } from './common/toast'
 
 interface ChannelInfo {
   channel: string
@@ -48,6 +51,46 @@ interface GateStatusData {
   uptime_seconds: number
 }
 
+interface DiscordConfiguredBinding {
+  channel_id: string
+  keeper_name: string
+}
+
+interface DiscordAuditEntry {
+  timestamp: string
+  action: string
+  guild_id: string
+  channel_id: string
+  keeper_name: string
+  actor_id: string
+  actor_name: string
+  previous_keeper: string
+}
+
+interface DiscordLiveStatusData {
+  available: boolean
+  connected: boolean
+  stale: boolean
+  stale_after_sec: number
+  error: string
+  status_path: string
+  binding_store_path: string
+  audit_path: string
+  updated_at: string
+  last_ready_at: string
+  bot_user_name: string
+  bot_user_id: string
+  guild_count: number
+  gate_base_url: string
+  gate_healthy: boolean | null
+  gate_health_checked_at: string
+  binding_source: string
+  runtime_bindings_count: number
+  pid: number
+  configured_bindings: DiscordConfiguredBinding[]
+  recent_audit: DiscordAuditEntry[]
+}
+
 interface BindingInfo {
   channel: string
   room_id: string
@@ -81,8 +124,13 @@ interface GateEventInfo {
 }
 
 const data = signal<GateStatusData | null>(null)
+const discordLive = signal<DiscordLiveStatusData | null>(null)
 const loading = signal(false)
 const error = signal<string | null>(null)
+const liveError = signal<string | null>(null)
+const actionLoading = signal(false)
+const channelDraft = signal('')
+const keeperDraft = signal('')
 
 let inflightRequest: Promise<void> | null = null
 
@@ -91,11 +139,24 @@ async function refresh() {
   loading.value = true
   inflightRequest = (async () => {
     try {
-      const result = await get<GateStatusData>('/api/v1/gate/status')
-      data.value = result
+      const gateResult = await get<GateStatusData>('/api/v1/gate/status')
+      data.value = gateResult
       error.value = null
     } catch (e) {
       error.value = e instanceof Error ? e.message : 'fetch failed'
+    }
+    try {
+      const liveResult = await get<DiscordLiveStatusData>('/api/v1/gate/discord/status')
+      discordLive.value = liveResult
+      liveError.value = null
+      if (!channelDraft.value && liveResult.configured_bindings.length > 0) {
+        channelDraft.value = liveResult.configured_bindings[0]?.channel_id ?? ''
+      }
+      if (!keeperDraft.value && liveResult.configured_bindings.length > 0) {
+        keeperDraft.value = liveResult.configured_bindings[0]?.keeper_name ?? ''
+      }
+    } catch (e) {
+      liveError.value = e instanceof Error ? e.message : 'fetch failed'
     } finally {
       loading.value = false
       inflightRequest = null
@@ -127,8 +188,10 @@ function formatUptime(seconds: number): string {
 }
 
 function timeAgo(iso: string): string {
+  if (!iso.trim()) return 'unknown'
   if (iso === 'never') return 'never'
   const diff = (Date.now() - new Date(iso).getTime()) / 1000
+  if (Number.isNaN(diff)) return 'unknown'
   if (diff < 60) return 'just now'
   if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
   if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
@@ -180,6 +243,267 @@ function truncateMiddle(value: string, limit = 18): string {
   const tail = Math.max(4, Math.floor(budget / 3))
   const head = Math.max(2, budget - tail)
   return `${trimmed.slice(0, head)}…${trimmed.slice(-tail)}`
+}
+
+function uniqueStrings(values: string[]): string[] {
+  const seen = new Set<string>()
+  const ordered: string[] = []
+  values.forEach(value => {
+    const trimmed = value.trim()
+    if (!trimmed || seen.has(trimmed)) return
+    seen.add(trimmed)
+    ordered.push(trimmed)
+  })
+  return ordered
+}
+
+function discordStateLabel(live: DiscordLiveStatusData | null): string {
+  if (!live?.available) return 'offline'
+  if (live.stale) return 'stale'
+  if (live.connected) return 'connected'
+  return 'disconnected'
+}
+
+function discordStateTone(live: DiscordLiveStatusData | null): string {
+  const label = discordStateLabel(live)
+  if (label === 'connected') {
+    return 'border-emerald-400/30 bg-emerald-500/12 text-emerald-100'
+  }
+  if (label === 'disconnected') {
+    return 'border-rose-400/30 bg-rose-500/12 text-rose-100'
+  }
+  return 'border-amber-400/30 bg-amber-500/12 text-amber-100'
+}
+
+async function bindDiscordChannel() {
+  const channelId = channelDraft.value.trim()
+  const keeperName = keeperDraft.value.trim()
+  if (!channelId || !keeperName) return
+
+  actionLoading.value = true
+  try {
+    await post('/api/v1/gate/discord/bind', { channel_id: channelId, keeper_name: keeperName })
+    await refresh()
+    showToast(`Bound ${channelId} -> ${keeperName}`, 'success')
+  } catch (err) {
+    showToast(err instanceof Error ? err.message : 'bind failed', 'error')
+  } finally {
+    actionLoading.value = false
+  }
+}
+
+async function unbindDiscordChannel(channelIdOverride?: string) {
+  const channelId = (channelIdOverride ?? channelDraft.value).trim()
+  if (!channelId) return
+
+  actionLoading.value = true
+  try {
+    await post('/api/v1/gate/discord/unbind', { channel_id: channelId })
+    if (channelDraft.value.trim() === channelId) {
+      channelDraft.value = ''
+    }
+    await refresh()
+    showToast(`Unbound ${channelId}`, 'success')
+  } catch (err) {
+    showToast(err instanceof Error ? err.message : 'unbind failed', 'error')
+  } finally {
+    actionLoading.value = false
+  }
+}
+
+function DiscordLivePanel({
+  live,
+  gate,
+}: {
+  live: DiscordLiveStatusData | null
+  gate: GateStatusData | null
+}) {
+  const configuredBindings = live?.configured_bindings ?? []
+  const audit = live?.recent_audit ?? []
+  const observedRooms = uniqueStrings([
+    ...(gate?.bindings ?? [])
+      .filter(binding => binding.channel === 'discord')
+      .map(binding => binding.room_id),
+    ...(gate?.recent_events ?? [])
+      .filter(event => event.channel === 'discord')
+      .map(event => event.room_id),
+    ...configuredBindings.map(binding => binding.channel_id),
+  ])
+  const suggestedKeepers = uniqueStrings([
+    ...(gate?.bindings ?? [])
+      .filter(binding => binding.channel === 'discord')
+      .map(binding => binding.keeper),
+    ...(gate?.recent_events ?? [])
+      .filter(event => event.channel === 'discord')
+      .map(event => event.keeper),
+    ...configuredBindings.map(binding => binding.keeper_name),
+  ])
+  const directLabel = discordStateLabel(live)
+  const directTone = discordStateTone(live)
+
+  return html`
+    <div class="mb-4 rounded-xl border border-[var(--white-8)] bg-[linear-gradient(135deg,rgba(88,101,242,0.16),rgba(88,101,242,0.04))] p-4">
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div class="min-w-0">
+          <div class="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-dim)]">Discord Direct</div>
+          <div class="mt-1 flex flex-wrap items-center gap-2">
+            <span class=${`rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] ${directTone}`}>
+              ${directLabel}
+            </span>
+            <span class="text-[13px] font-medium text-[var(--text-body)]">
+              ${live?.bot_user_name ? `${live.bot_user_name} · ${truncateMiddle(live.bot_user_id, 24)}` : 'No live bot identity yet'}
+            </span>
+          </div>
+          <div class="mt-2 flex flex-wrap gap-3 text-[11px] text-[var(--text-dim)]">
+            <span>heartbeat ${timeAgo(live?.updated_at ?? '')}</span>
+            <span>ready ${timeAgo(live?.last_ready_at ?? '')}</span>
+            <span>guilds ${live?.guild_count ?? 0}</span>
+            <span>runtime bindings ${live?.runtime_bindings_count ?? configuredBindings.length}</span>
+            <span>source ${live?.binding_source || 'unknown'}</span>
+            <span>
+              gate ${live?.gate_healthy == null ? 'unknown' : live.gate_healthy ? 'healthy' : 'unhealthy'}
+            </span>
+          </div>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <${ActionButton} variant="ghost" size="sm" disabled=${loading.value || actionLoading.value} onClick=${() => { void refresh() }}>Refresh<//>
+          <${ActionButton}
+            variant="primary"
+            size="sm"
+            disabled=${actionLoading.value || channelDraft.value.trim().length === 0 || keeperDraft.value.trim().length === 0}
+            onClick=${() => { void bindDiscordChannel() }}
+          >
+            ${actionLoading.value ? 'Applying...' : 'Bind'}
+          <//>
+          <${ActionButton}
+            variant="danger"
+            size="sm"
+            disabled=${actionLoading.value || channelDraft.value.trim().length === 0}
+            onClick=${() => { void unbindDiscordChannel() }}
+          >
+            Unbind
+          <//>
+        </div>
+      </div>
+
+      ${liveError.value || live?.error
+        ? html`<div class="mt-3 rounded-md border border-amber-400/20 bg-amber-500/8 px-3 py-2 text-[11px] text-amber-100">${liveError.value ?? live?.error}</div>`
+        : null}
+
+      ${live
+        ? html`
+            <div class="mt-3 flex flex-wrap gap-3 text-[10px] text-[var(--text-dim)]">
+              <span>status ${live.status_path || '-'}</span>
+              <span>bindings ${live.binding_store_path || '-'}</span>
+              <span>audit ${live.audit_path || '-'}</span>
+            </div>
+          `
+        : null}
+
+      <div class="mt-4 grid grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)] gap-4 max-[980px]:grid-cols-1">
+        <div class="space-y-3">
+          <div>
+            <div class="mb-1 text-[10px] uppercase tracking-[0.16em] text-[var(--text-dim)]">Channel ID</div>
+            <${TextInput}
+              value=${channelDraft.value}
+              placeholder="Discord channel snowflake"
+              ariaLabel="Discord channel id"
+              onInput=${(e: Event) => { channelDraft.value = (e.target as HTMLInputElement).value }}
+            />
+          </div>
+          <div>
+            <div class="mb-1 text-[10px] uppercase tracking-[0.16em] text-[var(--text-dim)]">Keeper</div>
+            <${TextInput}
+              value=${keeperDraft.value}
+              placeholder="keeper name"
+              ariaLabel="Keeper name"
+              onInput=${(e: Event) => { keeperDraft.value = (e.target as HTMLInputElement).value }}
+            />
+          </div>
+          ${observedRooms.length > 0
+            ? html`
+                <div>
+                  <div class="mb-1 text-[10px] uppercase tracking-[0.16em] text-[var(--text-dim)]">Observed rooms</div>
+                  <div class="flex flex-wrap gap-2">
+                    ${observedRooms.slice(0, 8).map(roomId => html`
+                      <button
+                        type="button"
+                        class="rounded-full border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-1 text-[10px] text-[var(--text-body)] cursor-pointer hover:bg-[var(--white-8)]"
+                        onClick=${() => { channelDraft.value = roomId }}
+                      >
+                        ${truncateMiddle(roomId, 22)}
+                      </button>
+                    `)}
+                  </div>
+                </div>
+              `
+            : null}
+          ${suggestedKeepers.length > 0
+            ? html`
+                <div>
+                  <div class="mb-1 text-[10px] uppercase tracking-[0.16em] text-[var(--text-dim)]">Suggested keepers</div>
+                  <div class="flex flex-wrap gap-2">
+                    ${suggestedKeepers.slice(0, 8).map(name => html`
+                      <button
+                        type="button"
+                        class="rounded-full border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-1 text-[10px] text-[var(--text-body)] cursor-pointer hover:bg-[var(--white-8)]"
+                        onClick=${() => { keeperDraft.value = name }}
+                      >
+                        ${name}
+                      </button>
+                    `)}
+                  </div>
+                </div>
+              `
+            : null}
+        </div>
+
+        <div class="space-y-3">
+          <div>
+            <div class="mb-1 text-[10px] uppercase tracking-[0.16em] text-[var(--text-dim)]">Configured bindings</div>
+            ${configuredBindings.length === 0
+              ? html`<div class="rounded-md border border-dashed border-[var(--white-8)] px-3 py-4 text-xs text-[var(--text-dim)]">No persisted Discord bindings yet</div>`
+              : html`
+                  <div class="space-y-2">
+                    ${configuredBindings.map(binding => html`
+                      <div class="rounded-md border border-[var(--white-8)] bg-[var(--white-4)] px-3 py-2">
+                        <div class="flex items-start justify-between gap-3">
+                          <div class="min-w-0">
+                            <div class="text-xs font-medium text-[var(--text-body)]">${truncateMiddle(binding.channel_id, 26)}</div>
+                            <div class="text-[10px] uppercase tracking-[0.16em] text-[var(--text-dim)]">keeper ${binding.keeper_name}</div>
+                          </div>
+                          <div class="flex gap-2">
+                            <${ActionButton} variant="ghost" size="sm" onClick=${() => {
+                              channelDraft.value = binding.channel_id
+                              keeperDraft.value = binding.keeper_name
+                            }}>Use<//>
+                            <${ActionButton} variant="danger" size="sm" disabled=${actionLoading.value} onClick=${() => { void unbindDiscordChannel(binding.channel_id) }}>Unbind<//>
+                          </div>
+                        </div>
+                      </div>
+                    `)}
+                  </div>
+                `}
+          </div>
+          ${audit.length > 0
+            ? html`
+                <div>
+                  <div class="mb-1 text-[10px] uppercase tracking-[0.16em] text-[var(--text-dim)]">Recent binding audit</div>
+                  <div class="space-y-2">
+                    ${audit.slice(0, 4).map(entry => html`
+                      <div class="rounded-md border border-[var(--white-8)] bg-[var(--white-4)] px-3 py-2 text-[11px] text-[var(--text-dim)]">
+                        <div class="font-medium text-[var(--text-body)]">${entry.action} · ${truncateMiddle(entry.channel_id, 22)} · ${entry.keeper_name}</div>
+                        <div class="mt-1">${entry.actor_name || 'dashboard'} · ${timeAgo(entry.timestamp)}</div>
+                      </div>
+                    `)}
+                  </div>
+                </div>
+              `
+            : null}
+        </div>
+      </div>
+    </div>
+  `
 }
 
 function ChannelCard({ ch }: { ch: ChannelInfo }) {
@@ -359,77 +683,104 @@ export function ConnectorStatusPanel() {
   }, [lastEvent.value])
 
   const d = data.value
+  const live = discordLive.value
 
-  if (loading.value && !d) {
+  if (loading.value && !d && !live) {
     return html`<div class="text-xs text-[var(--text-dim)]">Loading connector status...</div>`
   }
 
-  if (error.value && !d) {
+  if (error.value && !d && !live) {
     return html`<div class="text-xs text-[var(--red)]">Gate: ${error.value}</div>`
   }
 
-  if (!d) return null
+  if (!d && !live) return null
 
   return html`
     <div>
       <div class="mb-3 flex items-center justify-between gap-3">
-        <h3 class="text-sm font-semibold text-[var(--text-body)]">Channel Gate</h3>
-        <div class="text-[10px] uppercase tracking-[0.16em] text-[var(--text-dim)]">
-          success ${d.success_rate_pct}% · uptime ${formatUptime(d.uptime_seconds)}
-        </div>
-      </div>
-
-      <div class="mb-3 grid grid-cols-4 gap-2 max-[720px]:grid-cols-2">
-        <${StatCard} label="Messages" value=${d.total_messages} />
-        <${StatCard} label="Success" value=${d.total_success} />
-        <${StatCard} label="Errors" value=${d.total_errors} />
-        <${StatCard} label="Dedup Keys" value=${d.dedup_table_size} />
-      </div>
-
-      <div class="mb-4 grid grid-cols-2 gap-2 text-[11px] text-[var(--text-dim)] max-[720px]:grid-cols-1">
-        <div class="rounded-md border border-[var(--white-8)] bg-[var(--white-4)] px-3 py-2">
-          duplicate suppressions
-          <span class="ml-2 font-mono text-[var(--text-body)]">${d.total_duplicates}</span>
-        </div>
-        <div class="rounded-md border border-[var(--white-8)] bg-[var(--white-4)] px-3 py-2">
-          active connectors
-          <span class="ml-2 font-mono text-[var(--text-body)]">${d.channels.length}</span>
-        </div>
-      </div>
-
-      <div class="mb-4 grid grid-cols-2 gap-3 max-[900px]:grid-cols-1">
         <div>
-          <div class="mb-2 text-[10px] uppercase tracking-[0.16em] text-[var(--text-dim)]">
-            Channel bindings
+          <h3 class="text-sm font-semibold text-[var(--text-body)]">Connector Operations</h3>
+          <div class="mt-1 text-[11px] text-[var(--text-dim)]">
+            Discord direct runtime + Gate-observed traffic in one surface.
           </div>
-          ${d.bindings.length === 0
-            ? html`<div class="rounded-md border border-dashed border-[var(--white-8)] px-3 py-4 text-xs text-[var(--text-dim)]">No observed room bindings yet</div>`
-            : html`
-                <div class="space-y-2">
-                  ${d.bindings.slice(0, 6).map(binding => html`<${BindingRow} binding=${binding} />`)}
-                </div>
-              `}
         </div>
-
-        <div>
-          <div class="mb-2 text-[10px] uppercase tracking-[0.16em] text-[var(--text-dim)]">
-            Recent gate events
-          </div>
-          ${d.recent_events.length === 0
-            ? html`<div class="rounded-md border border-dashed border-[var(--white-8)] px-3 py-4 text-xs text-[var(--text-dim)]">No connector events recorded yet</div>`
-            : html`
-                <div class="space-y-2">
-                  ${d.recent_events.slice(0, 8).map(event => html`<${EventRow} event=${event} />`)}
-                </div>
-              `}
+        <div class="text-right text-[10px] uppercase tracking-[0.16em] text-[var(--text-dim)]">
+          <div>${d ? `success ${d.success_rate_pct}%` : `direct ${discordStateLabel(live)}`}</div>
+          <div>${d ? `uptime ${formatUptime(d.uptime_seconds)}` : 'gate metrics unavailable'}</div>
         </div>
       </div>
 
-      ${d.channels.length === 0
-        ? html`<div class="py-4 text-center text-xs text-[var(--text-dim)]">No active connectors</div>`
+      <${DiscordLivePanel} live=${live} gate=${d} />
+
+      ${error.value
+        ? html`
+            <div class="mb-4 rounded-md border border-amber-400/20 bg-amber-500/8 px-3 py-2 text-[11px] text-amber-100">
+              Gate metrics unavailable: ${error.value}
+            </div>
+          `
+        : null}
+
+      ${!d
+        ? html`
+            <div class="rounded-md border border-dashed border-[var(--white-8)] px-3 py-4 text-xs text-[var(--text-dim)]">
+              Direct Discord runtime is visible, but Gate-observed traffic is not available yet.
+            </div>
+          `
         : html`
-            <div class="grid grid-cols-2 gap-2 max-[900px]:grid-cols-1">
-              ${d.channels.map(ch => html`<${ChannelCard} ch=${ch} />`)}
+            <div>
+              <div class="mb-3 grid grid-cols-4 gap-2 max-[720px]:grid-cols-2">
+                <${StatCard} label="Messages" value=${d.total_messages} />
+                <${StatCard} label="Success" value=${d.total_success} />
+                <${StatCard} label="Errors" value=${d.total_errors} />
+                <${StatCard} label="Dedup Keys" value=${d.dedup_table_size} />
+              </div>
+
+              <div class="mb-4 grid grid-cols-2 gap-2 text-[11px] text-[var(--text-dim)] max-[720px]:grid-cols-1">
+                <div class="rounded-md border border-[var(--white-8)] bg-[var(--white-4)] px-3 py-2">
+                  duplicate suppressions
+                  <span class="ml-2 font-mono text-[var(--text-body)]">${d.total_duplicates}</span>
+                </div>
+                <div class="rounded-md border border-[var(--white-8)] bg-[var(--white-4)] px-3 py-2">
+                  active connectors
+                  <span class="ml-2 font-mono text-[var(--text-body)]">${d.channels.length}</span>
+                </div>
+              </div>
+
+              <div class="mb-4 grid grid-cols-2 gap-3 max-[900px]:grid-cols-1">
+                <div>
+                  <div class="mb-2 text-[10px] uppercase tracking-[0.16em] text-[var(--text-dim)]">
+                    Observed room bindings
+                  </div>
+                  ${d.bindings.length === 0
+                    ? html`<div class="rounded-md border border-dashed border-[var(--white-8)] px-3 py-4 text-xs text-[var(--text-dim)]">No observed room bindings yet</div>`
+                    : html`
+                        <div class="space-y-2">
+                          ${d.bindings.slice(0, 6).map(binding => html`<${BindingRow} binding=${binding} />`)}
+                        </div>
+                      `}
+                </div>
+
+                <div>
+                  <div class="mb-2 text-[10px] uppercase tracking-[0.16em] text-[var(--text-dim)]">
+                    Recent gate events
+                  </div>
+                  ${d.recent_events.length === 0
+                    ? html`<div class="rounded-md border border-dashed border-[var(--white-8)] px-3 py-4 text-xs text-[var(--text-dim)]">No connector events recorded yet</div>`
+                    : html`
+                        <div class="space-y-2">
+                          ${d.recent_events.slice(0, 8).map(event => html`<${EventRow} event=${event} />`)}
+                        </div>
+                      `}
+                </div>
+              </div>
+
+              ${d.channels.length === 0
+                ? html`<div class="py-4 text-center text-xs text-[var(--text-dim)]">No active connectors</div>`
+                : html`
+                    <div class="grid grid-cols-2 gap-2 max-[900px]:grid-cols-1">
+                      ${d.channels.map(ch => html`<${ChannelCard} ch=${ch} />`)}
+                    </div>
+                  `}
             </div>
           `}
     </div>
@@ -438,7 +789,12 @@ export function ConnectorStatusPanel() {
 
 export function resetConnectorStatusState() {
   data.value = null
+  discordLive.value = null
   loading.value = false
   error.value = null
+  liveError.value = null
+  actionLoading.value = false
+  channelDraft.value = ''
+  keeperDraft.value = ''
   inflightRequest = null
 }

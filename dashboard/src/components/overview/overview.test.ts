@@ -74,6 +74,9 @@ async function loadOverview() {
   vi.doMock('../perf-snapshot', () => ({
     PerfSnapshotPanel: () => html`<div>Perf</div>`,
   }))
+  vi.doMock('../connector-status', () => ({
+    ConnectorStatusPanel: () => html`<div>Connector Panel</div>`,
+  }))
   return import('./overview')
 }
 
@@ -122,6 +125,7 @@ describe('Overview freshness strip', () => {
     vi.doUnmock('./agent-avatar')
     vi.doUnmock('../transport-health')
     vi.doUnmock('../perf-snapshot')
+    vi.doUnmock('../connector-status')
   })
 
   it('shows a stale warning when the oldest overview snapshot is over 5 minutes old', async () => {
@@ -153,6 +157,14 @@ describe('Overview freshness strip', () => {
 
     expect(refreshNamespaceTruth).toHaveBeenCalledWith({ force: true })
     expect(refreshMissionSnapshot).toHaveBeenCalledWith({ force: true })
+  }, 15000)
+
+  it('renders the connector operations card as a top-level overview section', async () => {
+    const { Overview } = await loadOverview()
+    render(html`<${Overview} />`, container)
+    await flushUi()
+
+    expect(container.textContent).toContain('Connector Panel')
   }, 15000)
 
   it('renders the meta-cognition summary card when shell data is available', async () => {
@@ -267,6 +279,7 @@ describe('ToolCallHealthPanel', () => {
     vi.doUnmock('./agent-avatar')
     vi.doUnmock('../transport-health')
     vi.doUnmock('../perf-snapshot')
+    vi.doUnmock('../connector-status')
   })
 
   it('hides the panel when serverStatus is null', async () => {

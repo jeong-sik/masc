@@ -78,6 +78,11 @@ Use the `/keeper-ask` slash command to talk to any keeper from any channel.
 - successful bind/unbind operations also append an audit record to
   `DISCORD_BINDING_AUDIT_PATH` (default:
   `.gate/discord_binding_audit.jsonl`)
+- the bot also writes a direct runtime snapshot to `DISCORD_STATUS_PATH`
+  (default: `.gate/discord_status.json`) every `STATUS_HEARTBEAT_SEC`
+  seconds so the dashboard can show live Discord connection state
+- runtime binding changes written by the dashboard are hot-reloaded by the bot
+  without a process restart
 
 ## Operations Upgrades
 

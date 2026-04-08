@@ -62,6 +62,7 @@ Example: masc_batch_add_tasks({tasks: [{title: 'Task A', priority: 2}, {title: '
       ("properties", `Assoc [
         ("tasks", `Assoc [
           ("type", `String "array");
+          ("maxItems", `Int 20);
           ("items", `Assoc [
             ("type", `String "object");
             ("properties", `Assoc [

@@ -294,7 +294,7 @@ let dispatch_sort_of sort_by =
 
 let handle_post_list args =
   let limit = get_int args "limit" 20 |> max 1 |> min 100 in
-  let compact = get_bool args "compact" false in
+  let compact = get_bool args "compact" true in
   let visibility_str = get_string_opt args "visibility" in
   let hearth = get_string_opt args "hearth" in
   let random = get_bool args "random" false in
@@ -494,13 +494,16 @@ let handle_stats _args =
 let handle_search args =
   let query = get_string args "query" "" in
   let limit = get_int args "limit" 20 |> max 1 |> min 100 in
+  let compact = get_bool args "compact" true in
   if query = "" then (false, "❌ query required")
   else
     let results = Board_dispatch.search ~query ~limit in
     if results = [] then (true, Printf.sprintf "🔍 '%s' 검색 결과 없음" query)
     else
-      let formatted = List.map format_post results in
-      (true, Printf.sprintf "🔍 '%s' 검색 결과 (%d개):\n\n%s" query (List.length results) (String.concat "\n---\n" formatted))
+      let fmt = if compact then format_post_compact else format_post in
+      let formatted = List.map fmt results in
+      let separator = if compact then "\n" else "\n---\n" in
+      (true, Printf.sprintf "🔍 '%s' 검색 결과 (%d개):\n%s" query (List.length results) (String.concat separator formatted))
 
 (** Vote on comment *)
 let handle_comment_vote args =
@@ -570,17 +573,17 @@ let tool_post_list : Types.tool_schema = {
   input_schema = `Assoc [
     ("type", `String "object");
     ("properties", `Assoc [
-      ("limit", `Assoc [("type", `String "integer"); ("description", `String "Max posts to return (default: 20, max: 100)")]);
-      ("visibility", `Assoc [("type", `String "string"); ("description", `String "Filter by visibility: public|unlisted|internal|direct")]);
-      ("hearth", `Assoc [("type", `String "string"); ("description", `String "Filter by hearth topic (e.g. webrtc, code-review)")]);
+      ("limit", `Assoc [("type", `String "integer"); ("description", `String "Max posts to return (default: 20)"); ("minimum", `Int 1); ("maximum", `Int 100)]);
+      ("visibility", `Assoc [("type", `String "string"); ("enum", `List [`String "public"; `String "unlisted"; `String "internal"; `String "direct"]); ("description", `String "Filter by visibility")]);
+      ("hearth", `Assoc [("type", `String "string"); ("maxLength", `Int 100); ("description", `String "Filter by hearth topic (e.g. webrtc, code-review)")]);
       ("random", `Assoc [("type", `String "boolean"); ("description", `String "Shuffle posts randomly (default: false)")]);
-      ("offset", `Assoc [("type", `String "integer"); ("description", `String "Skip first N posts (default: 0)")]);
-      ("sort_by", `Assoc [("type", `String "string"); ("description", `String "Sort order: hot (score+recency), trending (engagement/age), recent (newest first), updated (most recently active), discussed (most comments)")]);
+      ("offset", `Assoc [("type", `String "integer"); ("description", `String "Skip first N posts (default: 0)"); ("minimum", `Int 0); ("maximum", `Int 1000)]);
+      ("sort_by", `Assoc [("type", `String "string"); ("enum", `List [`String "hot"; `String "trending"; `String "recent"; `String "updated"; `String "discussed"]); ("description", `String "Sort order (default: hot)")]);
       ("exclude_system", `Assoc [("type", `String "boolean"); ("description", `String "Exclude system posts like Activity Reports (default: false)")]);
       ("exclude_automation", `Assoc [("type", `String "boolean"); ("description", `String "Exclude automation posts (heartbeat, probes, etc.) (default: false)")]);
-      ("author", `Assoc [("type", `String "string"); ("description", `String "Filter posts by author name (case-insensitive substring match)")]);
+      ("author", `Assoc [("type", `String "string"); ("maxLength", `Int 100); ("description", `String "Filter posts by author name (case-insensitive substring match)")]);
       ("since", `Assoc [("type", `String "number"); ("description", `String "Unix timestamp. Posts with activity after this time show a 🔔 indicator")]);
-      ("compact", `Assoc [("type", `String "boolean"); ("description", `String "One-line per post (id, title, author, time, score). Omits body/TTL/visibility. Use for overview scans (default: false)")]);
+      ("compact", `Assoc [("type", `String "boolean"); ("description", `String "Compact one-line per post (default: true). Set false for full body/TTL/visibility")]);
     ]);
   ];
 }
@@ -604,7 +607,7 @@ let tool_comment_add : Types.tool_schema = {
     ("type", `String "object");
     ("properties", `Assoc [
       ("post_id", `Assoc [("type", `String "string"); ("description", `String "Post ID (format: p-xxxx...). Get from keeper_board_list results.")]);
-      ("content", `Assoc [("type", `String "string"); ("description", `String "Comment content")]);
+      ("content", `Assoc [("type", `String "string"); ("maxLength", `Int 4000); ("description", `String "Comment content")]);
       ("author", `Assoc [("type", `String "string"); ("description", `String "Author name")]);
       ("parent_id", `Assoc [("type", `String "string"); ("description", `String "Parent comment ID for replies (optional)")]);
       ("ttl_hours", `Assoc [("type", `String "integer"); ("description", `String "Time-to-live in hours")]);
@@ -642,8 +645,9 @@ let tool_search : Types.tool_schema = {
   input_schema = `Assoc [
     ("type", `String "object");
     ("properties", `Assoc [
-      ("query", `Assoc [("type", `String "string"); ("description", `String "Search keyword")]);
-      ("limit", `Assoc [("type", `String "integer"); ("description", `String "Max results (default: 20)")]);
+      ("query", `Assoc [("type", `String "string"); ("maxLength", `Int 200); ("description", `String "Search keyword")]);
+      ("limit", `Assoc [("type", `String "integer"); ("minimum", `Int 1); ("maximum", `Int 100); ("description", `String "Max results (default: 20)")]);
+      ("compact", `Assoc [("type", `String "boolean"); ("description", `String "Compact one-line per post (default: true). Set false for full body")]);
     ]);
     ("required", `List [`String "query"]);
   ];

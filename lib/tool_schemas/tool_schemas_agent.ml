@@ -6,7 +6,15 @@ let schemas : tool_schema list = [
     description = "Get detailed status of all agents: zombie detection, current tasks, capabilities, last seen time.";
     input_schema = `Assoc [
       ("type", `String "object");
-      ("properties", `Assoc []);
+      ("properties", `Assoc [
+        ("limit", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Max agents to return (default: 20)");
+          ("minimum", `Int 1);
+          ("maximum", `Int 50);
+          ("default", `Int 20);
+        ]);
+      ]);
     ];
   };
   {
@@ -133,6 +141,13 @@ let schemas : tool_schema list = [
           ("description", `String "Output format (default: text)");
           ("default", `String "text");
         ]);
+        ("limit", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Max edges to return (default: 20)");
+          ("minimum", `Int 1);
+          ("maximum", `Int 100);
+          ("default", `Int 20);
+        ]);
       ]);
     ];
   };
@@ -166,6 +181,8 @@ let schemas : tool_schema list = [
           ("type", `String "integer");
           ("description", `String "Number of days of history (default: 7)");
           ("default", `Int 7);
+          ("minimum", `Int 1);
+          ("maximum", `Int 90);
         ]);
       ]);
       ("required", `List [`String "agent_name"]);
@@ -181,6 +198,13 @@ let schemas : tool_schema list = [
         ("agent_name", `Assoc [
           ("type", `String "string");
           ("description", `String "Agent name to query. Defaults to calling agent if omitted.");
+        ]);
+        ("limit", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Max relations to return (default: 20)");
+          ("minimum", `Int 1);
+          ("maximum", `Int 50);
+          ("default", `Int 20);
         ]);
       ]);
     ];

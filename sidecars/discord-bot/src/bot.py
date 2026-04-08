@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import sys
+import time
 from typing import Any, cast
 
 import discord
@@ -184,12 +185,62 @@ class GateBot(discord.Client):
             return False
         return any(str(role.id) == role_id for role in member.roles)
 
+    async def _stream_to_channel(
+        self,
+        channel: discord.abc.Messageable,
+        keeper_name: str,
+        content: str,
+    ) -> bool:
+        """Stream a keeper response with progressive Discord message edits.
+
+        Returns True if streaming succeeded, False if caller should fall back
+        to the batch send_message path.
+        """
+        accumulated = ""
+        reply_msg: discord.Message | None = None
+        last_edit = 0.0
+        edit_interval = 1.5  # seconds, Discord rate limit: 5 edits / 5s
+
+        async for delta in self.gate.stream_message(
+            keeper_name=keeper_name,
+            content=content,
+        ):
+            accumulated += delta
+
+            now = time.monotonic()
+            if now - last_edit < edit_interval:
+                continue
+
+            display = accumulated[:4000]
+            if reply_msg is None:
+                reply_msg = await channel.send(display + " ...")
+            else:
+                try:
+                    await reply_msg.edit(content=display + " ...")
+                except discord.HTTPException:
+                    pass
+            last_edit = now
+
+        if not accumulated:
+            return False
+
+        # Final edit with complete text
+        display = accumulated[:4000]
+        if reply_msg is None:
+            await channel.send(display)
+        else:
+            try:
+                await reply_msg.edit(content=display)
+            except discord.HTTPException:
+                pass
+        return True
+
     async def _send_response(
         self,
         channel: discord.abc.Messageable,
         response: GateResponse,
     ) -> None:
-        """Send a gate response to a Discord channel."""
+        """Send a gate response to a Discord channel (batch fallback)."""
         if not response.ok:
             if response.error == "duplicate message":
                 return
@@ -210,7 +261,7 @@ class GateBot(discord.Client):
             await channel.send(embed=embed)
 
     async def on_message(self, message: discord.Message) -> None:
-        """Route channel messages to the mapped keeper."""
+        """Route channel messages to the mapped keeper via streaming."""
         if message.author == self.user or message.author.bot:
             return
         if not message.guild:
@@ -225,7 +276,15 @@ class GateBot(discord.Client):
             logger.info("Skipping empty Discord message %s", message.id)
             return
 
+        # Try streaming first, fall back to batch
         async with message.channel.typing():
+            streamed = await self._stream_to_channel(
+                message.channel, keeper_name, content,
+            )
+            if streamed:
+                return
+
+            # Fallback: batch request via gate/message
             response = await self.gate.send_message(
                 keeper_name=keeper_name,
                 content=content,
@@ -380,12 +439,48 @@ async def keeper_ask(
     keeper: str,
     message: str,
 ) -> None:
-    """Send a message to a named keeper."""
+    """Send a message to a named keeper with streaming."""
     await interaction.response.defer(thinking=True)
 
     bot = interaction.client
     assert isinstance(bot, GateBot)
 
+    # Try streaming first
+    accumulated = ""
+    followup_msg: discord.WebhookMessage | None = None
+    last_edit = 0.0
+    edit_interval = 1.5
+
+    async for delta in bot.gate.stream_message(
+        keeper_name=keeper,
+        content=message.strip(),
+    ):
+        accumulated += delta
+        now = time.monotonic()
+        if now - last_edit < edit_interval:
+            continue
+        display = accumulated[:4000]
+        if followup_msg is None:
+            followup_msg = await interaction.followup.send(display + " ...", wait=True)
+        else:
+            try:
+                await followup_msg.edit(content=display + " ...")
+            except discord.HTTPException:
+                pass
+        last_edit = now
+
+    if accumulated:
+        display = accumulated[:4000]
+        if followup_msg is None:
+            await interaction.followup.send(display)
+        else:
+            try:
+                await followup_msg.edit(content=display)
+            except discord.HTTPException:
+                pass
+        return
+
+    # Fallback: batch request
     response = await bot.gate.send_message(
         keeper_name=keeper,
         content=message.strip(),

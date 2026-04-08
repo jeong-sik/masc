@@ -9,9 +9,13 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
+from collections.abc import AsyncIterator
 from typing import Any, cast
 
+import json as json_mod
+
 import httpx
+import httpx_sse
 
 from .config import get_config
 
@@ -84,6 +88,7 @@ class GateClient:
         self._status_url = f"{base}/api/v1/gate/status"
         self._keepers_url = f"{base}/api/v1/gate/keepers"
         self._keeper_status_url = f"{base}/api/v1/gate/keeper-status"
+        self._stream_url = f"{base}/api/v1/keepers/chat/stream"
         self._timeout = cfg.gate_timeout_sec
         self._max_retries = cfg.gate_max_retries
         self._status_cache_ttl = cfg.status_cache_ttl_sec
@@ -351,6 +356,64 @@ class GateClient:
                     names.append(item.strip())
         self._keeper_names_cache = (self._now(), names)
         return names
+
+    async def stream_message(
+        self,
+        *,
+        keeper_name: str,
+        content: str,
+    ) -> AsyncIterator[str]:
+        """Stream a message to a keeper via SSE, yielding text deltas.
+
+        Uses POST /api/v1/keepers/chat/stream which returns AG-UI SSE events.
+        Only TEXT_MESSAGE_CONTENT deltas are yielded as strings.
+        Falls back to send_message on transport error (caller gets nothing streamed).
+        """
+        if self._breaker_is_open():
+            return
+
+        payload = {"name": keeper_name, "message": content}
+        client = self._get_client()
+
+        try:
+            async with httpx_sse.aconnect_sse(
+                client,
+                "POST",
+                self._stream_url,
+                json=payload,
+                timeout=httpx.Timeout(timeout=300.0, connect=10.0),
+            ) as event_source:
+                if event_source.response.status_code >= 400:
+                    self._note_transport_failure(
+                        f"stream returned {event_source.response.status_code}"
+                    )
+                    return
+                self._note_success()
+                async for sse in event_source.aiter_sse():
+                    if not sse.data:
+                        continue
+                    try:
+                        event = json_mod.loads(sse.data)
+                    except json_mod.JSONDecodeError:
+                        continue
+                    if not isinstance(event, dict):
+                        continue
+                    event_type = event.get("type", "")
+                    if event_type == "TEXT_MESSAGE_CONTENT":
+                        delta = event.get("delta", "")
+                        if delta:
+                            yield delta
+                    elif event_type == "RUN_ERROR":
+                        custom = event.get("customValue", {})
+                        err = custom.get("message", "") if isinstance(custom, dict) else ""
+                        logger.warning("Keeper stream error: %s", err)
+                        return
+        except httpx.TimeoutException:
+            self._note_transport_failure(f"stream timeout after 300s")
+        except httpx.HTTPError as e:
+            self._note_transport_failure(f"stream http error: {e}")
+        except Exception as e:  # pragma: no cover
+            self._note_transport_failure(f"stream error: {e}")
 
     async def keeper_status(
         self,

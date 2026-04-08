@@ -290,7 +290,7 @@ let test_keeper_agent_name_prefixed () =
 let () =
   let base_path = Masc_test_deps.find_project_root () in
   Keeper_exec_tools.inject_masc_schemas Config.raw_all_tool_schemas;
-  Keeper_exec_tools.init_policy_config ~base_path;
+  ignore (Result.get_ok (Keeper_exec_tools.init_policy_config ~base_path));
   Alcotest.run "Keeper_agent_isolation" [
     ("non_research_prefix", [
       Alcotest.test_case "heuristic only keeper_*" `Quick test_heuristic_only_keeper_prefixed;

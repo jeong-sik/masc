@@ -598,7 +598,7 @@ let test_keeper_reported_observe_only_scope () =
 let () =
   let base_path = Masc_test_deps.find_project_root () in
   Keeper_exec_tools.inject_masc_schemas Config.raw_all_tool_schemas;
-  Keeper_exec_tools.init_policy_config ~base_path;
+  ignore (Result.get_ok (Keeper_exec_tools.init_policy_config ~base_path));
   run "Keeper_tool_exposure" [
     ("write_done", [
       test_case "blocks all tools" `Quick test_write_done_blocks_all_tools;

@@ -504,7 +504,7 @@ let test_output_validation_default_budget () =
 let () =
   let base_path = Masc_test_deps.find_project_root () in
   Keeper_exec_tools.inject_masc_schemas Config.raw_all_tool_schemas;
-  Keeper_exec_tools.init_policy_config ~base_path;
+  ignore (Result.get_ok (Keeper_exec_tools.init_policy_config ~base_path));
   run "Keeper_tools_oas" [
     "make_tools", [
       test_case "returns nonempty" `Quick test_make_tools_returns_nonempty;

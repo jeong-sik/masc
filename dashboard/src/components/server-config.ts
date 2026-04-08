@@ -57,7 +57,7 @@ function EntryRow({ entry }: { entry: ConfigEntry }) {
       : 'text-[var(--accent-primary)] font-medium'
 
   return html`
-    <div class="flex items-start gap-3 py-2 px-3 rounded hover:bg-[var(--bg-hover)] transition-colors">
+    <div class="flex items-start gap-3 py-2 px-3 rounded hover:bg-[var(--bg-panel-hover)] transition-colors">
       <div class="flex-1 min-w-0">
         <div class="flex items-center gap-2">
           <code class="text-xs font-mono text-[var(--text-primary)]">${entry.env}</code>
@@ -95,7 +95,7 @@ function CategoryPanel({ name, entries }: { name: string; entries: ConfigEntry[]
   return html`
     <div class="border border-[var(--border-subtle)] rounded-lg overflow-hidden mb-3">
       <button
-        class="w-full flex items-center justify-between px-4 py-2.5 bg-[var(--bg-surface)] hover:bg-[var(--bg-hover)] transition-colors text-left"
+        class="w-full flex items-center justify-between px-4 py-2.5 bg-[var(--bg-surface)] hover:bg-[var(--bg-panel-hover)] transition-colors text-left"
         onClick=${() => toggleCategory(name)}
       >
         <div class="flex items-center gap-2">
@@ -166,7 +166,7 @@ export function ServerConfig() {
           onInput=${(e: Event) => { searchQuery.value = (e.target as HTMLInputElement).value }}
         />
         <button
-          class="px-3 py-1.5 text-xs rounded-lg bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
+          class="px-3 py-1.5 text-xs rounded-lg bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-panel-hover)] transition-colors"
           onClick=${() => void refreshServerConfig()}
           disabled=${loading}
         >

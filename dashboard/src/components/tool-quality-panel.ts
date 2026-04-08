@@ -78,7 +78,7 @@ function ToolTable({ tools }: { tools: ToolStat[] }) {
     <div class="overflow-x-auto">
       <table class="w-full text-[11px]">
         <thead>
-          <tr class="text-[var(--text-dim)] border-b border-[var(--border)]">
+          <tr class="text-[var(--text-dim)] border-b border-[var(--card-border)]">
             <th class="text-left py-1 font-normal">Tool</th>
             <th class="text-right py-1 font-normal">Calls</th>
             <th class="text-right py-1 font-normal">Success</th>
@@ -91,7 +91,7 @@ function ToolTable({ tools }: { tools: ToolStat[] }) {
             const color = t.success_pct >= 95 ? 'text-emerald-400'
               : t.success_pct >= 80 ? 'text-yellow-400' : 'text-red-400'
             return html`
-              <tr class="border-b border-[var(--border)] border-opacity-30">
+              <tr class="border-b border-[var(--card-border)] border-opacity-30">
                 <td class="py-0.5 font-mono">${t.name.replace('keeper_', '').replace('masc_', 'm:')}</td>
                 <td class="text-right py-0.5 text-[var(--text-dim)]">${t.calls}</td>
                 <td class="text-right py-0.5 font-mono ${color}">${t.success_pct.toFixed(0)}%</td>

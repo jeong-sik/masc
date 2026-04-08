@@ -145,6 +145,46 @@ let boring_tools_set : (string, unit) Hashtbl.t =
 let is_boring_tool (name : string) : bool =
   Hashtbl.mem boring_tools_set name
 
+(* ── Retry-safe tools (read-only or harmless to replay) ───────── *)
+
+let retry_safe_fallback_tools =
+  boring_tools @
+  [ "keeper_fs_read";
+    "keeper_memory_search";
+    "keeper_library_search";
+    "keeper_library_read";
+    "keeper_time_now";
+    "keeper_tasks_audit";
+    "keeper_board_get";
+    "keeper_board_list";
+    "keeper_board_stats";
+    "keeper_board_search";
+    "keeper_shell_readonly";
+    "keeper_voice_agent";
+    "keeper_voice_sessions";
+    "keeper_tool_search";
+    "masc_heartbeat_list";
+  ]
+
+let retry_safe_fallback_set : (string, unit) Hashtbl.t =
+  let tbl = Hashtbl.create (List.length retry_safe_fallback_tools) in
+  List.iter (fun name -> Hashtbl.replace tbl name ()) retry_safe_fallback_tools;
+  tbl
+
+let has_registered_retry_safe_metadata (name : string) : bool =
+  Tool_dispatch.is_read_only name || Tool_dispatch.is_idempotent name
+
+let is_retry_safe_tool (name : string) : bool =
+  has_registered_retry_safe_metadata name
+  || Hashtbl.mem retry_safe_fallback_set name
+  ||
+  match Tool_catalog_surfaces.keeper_internal_replacement name with
+  | Some replacement -> has_registered_retry_safe_metadata replacement
+  | None -> false
+
+let has_retry_unsafe_side_effect (name : string) : bool =
+  not (is_retry_safe_tool name)
+
 (* ── Dynamic schema injection (masc_* tools) ──────────────────── *)
 
 let masc_schemas_ref : Types.tool_schema list ref = ref []

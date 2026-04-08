@@ -564,6 +564,29 @@ let test_patch_surface_json_for_running_keepers_tolerates_null_agent () =
               "idle"
               (row |> member "status" |> to_string))))
 
+let test_patch_keeper_row_tolerates_null_agent_shape () =
+  let row =
+    `Assoc
+      [
+        ("name", `String "keeper-alpha");
+        ("agent", `Null);
+        ("status", `String "unknown");
+      ]
+  in
+  let patched =
+    Lib.Server_dashboard_http.patch_keeper_row
+      ~keeper_name:"keeper-alpha"
+      ~event:"reconciled"
+      ~keepalive_running:true row
+  in
+  let open Yojson.Safe.Util in
+  check string "null agent falls back to idle"
+    "idle"
+    (patched |> member "status" |> to_string);
+  check string "phase still patched"
+    "running"
+    (patched |> member "phase" |> to_string)
+
 let () =
   Alcotest.run "Dashboard Execution"
     [
@@ -589,5 +612,7 @@ let () =
             test_patch_keeper_dependent_caches_tolerates_null_agent;
           Alcotest.test_case "running keeper patch tolerates null agent" `Quick
             test_patch_surface_json_for_running_keepers_tolerates_null_agent;
+          Alcotest.test_case "patch keeper row tolerates null agent shape" `Quick
+            test_patch_keeper_row_tolerates_null_agent_shape;
         ] );
     ]

@@ -1507,6 +1507,7 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
          ~decision_log_path
          ~window_hours:window
          ~interval_sec:60
+         ~stop
      | _ -> ());
     Eio.Fiber.fork ~sw:ctx.sw (fun () ->
       let record_crash failure_reason =

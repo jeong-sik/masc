@@ -52,9 +52,12 @@ val start_refresh_loop :
   decision_log_path:string ->
   window_hours:int ->
   interval_sec:int ->
+  stop:bool Atomic.t ->
   unit
 (** Fork a background fiber that refreshes cached stats at a fixed interval.
-    Exceptions during refresh are caught; the loop continues. *)
+    The loop exits when [stop] is set to [true].
+    [Eio.Cancel.Cancelled] is re-raised; other exceptions are logged and the
+    loop continues. *)
 
 val render_feedback_block : stats:behavioral_stats -> string
 (** Render a "### Behavioral Self-Assessment" prompt block.

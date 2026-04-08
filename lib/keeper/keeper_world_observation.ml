@@ -610,7 +610,10 @@ let observe ~(pending_board_events : pending_board_event list option)
   let behavioral_stats =
     match meta.telemetry_feedback_enabled with
     | Some true ->
-      Some (Keeper_telemetry_feedback.get_cached_stats ~keeper_name:meta.name)
+      let stats =
+        Keeper_telemetry_feedback.get_cached_stats ~keeper_name:meta.name
+      in
+      if stats.window_hours > 0 then Some stats else None
     | _ -> None
   in
   {

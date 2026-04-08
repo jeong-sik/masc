@@ -74,20 +74,11 @@ let parse_decision_line (line : string) : parsed_decision option =
    at 2 turns/min, well within any configured window. *)
 let max_decision_lines = 2000
 
-let take_last n lst =
-  let len = List.length lst in
-  if len <= n then lst
-  else List.filteri (fun i _ -> i >= len - n) lst
-
 let compute_stats ~decision_log_path ~window_hours =
   let now_ts = Unix.gettimeofday () in
   let window_start = now_ts -. (float_of_int window_hours *. 3600.0) in
   let lines =
-    try
-      let content = Fs_compat.load_file decision_log_path in
-      String.split_on_char '\n' content
-      |> List.filter (fun s -> String.trim s <> "")
-      |> take_last max_decision_lines
+    try Dated_jsonl.load_tail_lines decision_log_path ~max_lines:max_decision_lines
     with Eio.Cancel.Cancelled _ as e -> raise e | _ -> []
   in
   let decisions =
@@ -193,12 +184,22 @@ let get_cache_age_sec ~keeper_name =
     | None -> None)
 
 let start_refresh_loop ~sw ~clock ~keeper_name ~decision_log_path
-    ~window_hours ~interval_sec =
+    ~window_hours ~interval_sec ~stop =
   Eio.Fiber.fork ~sw (fun () ->
-    while true do
+    while not (Atomic.get stop) do
       (try refresh_stats ~keeper_name ~decision_log_path ~window_hours
-       with _ -> ());
-      Eio.Time.sleep clock (float_of_int interval_sec)
+       with
+       | Eio.Cancel.Cancelled _ as ex ->
+           let bt = Printexc.get_raw_backtrace () in
+           Printexc.raise_with_backtrace ex bt
+       | ex ->
+           let bt = Printexc.get_raw_backtrace () in
+           Printf.eprintf
+             "keeper_telemetry_feedback: refresh failed for keeper %s: %s\n%s%!"
+             keeper_name (Printexc.to_string ex)
+             (Printexc.raw_backtrace_to_string bt));
+      if not (Atomic.get stop) then
+        Eio.Time.sleep clock (float_of_int interval_sec)
     done)
 
 (* ------------------------------------------------------------------ *)

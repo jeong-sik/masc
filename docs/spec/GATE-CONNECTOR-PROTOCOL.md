@@ -1,4 +1,4 @@
-# Gate-Connector Protocol Specification
+# Gate-Connector Protocol Specification (Refined)
 
 ## 1. Overview
 이 문서는 **Gate**와 외부 **Connector**(Discord, Telegram, Slack 등) 및 **MASC** 간의 양방향/멀티모달 통신을 위한 통합 프로토콜 스펙을 정의합니다.
@@ -82,30 +82,28 @@ MASC 에이전트 또는 오퍼레이터가 외부 채널의 상태를 제어합
 }
 ```
 
-## 4. Transport Interfaces
+## 4. Deep Dives & Refinements
 
-### 4.1. HTTP REST (Inbound & Sync Reply)
-- **Endpoint:** `POST /api/v1/gate/message`
-- **Description:** Connector가 텍스트나 메타데이터를 단발성으로 전송합니다. (현재 구현된 방식의 확장)
+### 4.1. Voice & Multi-Modal Streaming (음성/멀티모달 상세화)
+- **Voice Chunking:** `audio_blob` 필드를 사용하여 짧은 음성 단편(Chunk)을 전송할 수 있습니다. 100ms~500ms 단위의 Base64 인코딩된 오디오 청크를 SSE나 WebSocket을 통해 지속적으로 주고받음으로써 실시간 음성을 모사합니다.
+- **WebRTC Signaling 브릿지:** 고품질 실시간 음성 통화(Low Latency Audio)가 필요한 경우, `Gate_protocol` 내부에 WebRTC SDP Offer/Answer 및 ICE Candidate 교환을 위한 별도 페이로드 타입을 정의합니다. (e.g., `type: "webrtc_signal"`).
+- **멀티모달 락(Lock):** 동시에 여러 미디어가 전송되는 상황을 피하기 위해, "지금 말하는 중(Typing/Speaking Indicator)" 이벤트를 명확히 하여 UI에서 시각적으로 표현할 수 있도록 합니다.
 
-### 4.2. SSE (Outbound Streaming)
-- **Endpoint:** `GET /api/v1/gate/stream?channel=discord`
-- **Description:** Connector 봇이 시작될 때 이 엔드포인트에 연결합니다. Gate는 해당 채널(예: `discord`)로 향하는 모든 `Outbound Event`와 `Control Event`를 SSE 스트림으로 푸시합니다.
+### 4.2. Control State Management (채널 제어 상태 관리)
+- **Gate In-Memory State:** Mute(음소거) 및 Rate-Limit 상태는 우선적으로 **Gate의 인메모리(RAM)**에서 관리됩니다. TTL(Time-To-Live) 기반으로 `duration_sec`이 지나면 자동 해제됩니다.
+- **Redis/PostgreSQL Persistence (Optional):** 다중 Gate 인스턴스(Scale-out) 환경이나 영속성이 보장되어야 하는 강력한 글로벌 Mute의 경우, Redis나 PostgreSQL 테이블(`channel_control_state`)을 활용하여 동기화합니다.
+- **Connector 연동:** Gate가 Inbound 요청을 받을 때 먼저 상태를 검사하고, Muted 상태라면 `429 Too Many Requests` 상태 코드를 반환하여 Connector 측이 스스로 메시지를 Drop하거나 사용자에게 피드백을 줄 수 있도록 합니다.
 
-### 4.3. Webhook (Outbound Push)
-- **Endpoint:** `POST /api/v1/gate/webhooks/register`
-- **Description:** 서버리스 환경이나 클라우드 기반 Connector(예: Slack App)를 위해, Connector가 자신의 Webhook URL을 Gate에 등록합니다. Gate는 이벤트 발생 시 해당 URL로 POST 요청을 보냅니다.
+### 4.3. Connection Stability & Reliability (연결 안정성 및 에러 복구)
+- **SSE Reconnect & Last-Event-ID:** Connector는 SSE 연결 시 `Last-Event-ID`를 명시하여 재연결을 시도합니다. Gate 내부의 SSE 버퍼 모듈(현재 `Sse.ml` 활용)이 보관 중인 누락 이벤트를 즉시 재전송합니다.
+- **Webhook Retry Policy:** Webhook 방식으로 설정된 Connector가 응답하지 않는 경우(예: 5xx 에러 또는 타임아웃), Gate는 지수 백오프(Exponential Backoff) 방식으로 최대 3회 재시도합니다.
+- **Deduplication:** Inbound 메시지는 기존의 `idempotency_key`를 활용하여 중복을 필터링하며, Outbound 이벤트 역시 `event_id`를 기준으로 Connector가 자체적으로 중복 수신(Idempotent 처리)을 하도록 명세합니다.
 
-### 4.4. WebSocket / WebRTC (Bi-directional & Low Latency Audio)
-- **Endpoint:** `WS /api/v1/gate/ws` / `POST /api/v1/gate/webrtc/offer`
-- **Description:** 실시간 음성(Voice) 대화나 연속적인 바이너리 스트리밍이 필요할 때 사용합니다. WebRTC의 경우 Gate 내부에 Media Server 브릿지를 두어 오디오 트랙을 중계합니다.
+### 4.4. MASC Internal Event Mapping (내부 이벤트 맵핑)
+- **Event Bus Subscription:** Gate는 MASC의 메인 Event Bus나 `Board`의 새 게시물 이벤트를 구독합니다.
+- **Filtering Logic:** 구독된 이벤트 중에서 `agent_name = "gate:<channel_name>:*"` 형태이거나 `target_channel` 속성이 명시된 브로드캐스트 이벤트만을 필터링합니다.
+- **Data Translation:** MASC 내부에서 쓰이는 `Room_task.t`나 `Keep_record` 등의 데이터 구조를 Connector가 소비할 수 있는 순수한 `outbound_event` JSON으로 맵핑(Translation)하는 어댑터 레이어(`gate_outbound_bridge.ml`)를 거칩니다.
 
-## 5. MASC Integration (Gate Internals)
-
-- **Subscription:** Gate의 `gate_outbound_bridge.ml`(가칭)가 MASC의 `Event_bus`나 `Board` 이벤트를 구독합니다.
-- **Routing Logic:** 이벤트의 목적지가 `gate:<channel>:<room>` 규칙에 일치하는 경우, 등록된 Transport (SSE, Webhook 등)를 통해 Connector로 라우팅합니다.
-- **Control Enforcement:** Gate 자체적으로 `Rate Limiter`와 `Mute State`를 메모리에 유지합니다. Muted 상태인 채널/룸에서 들어오는 `Inbound Event`는 즉시 429(Too Many Requests) 또는 무시(Drop) 처리되며, MASC로 전달되지 않습니다.
-
-## 6. Security & Authentication
+## 5. Security & Authentication
 - 모든 Gate 엔드포인트는 `Authorization: Bearer <GATE_API_TOKEN>` 헤더를 요구합니다.
 - 각 Connector는 고유한 Channel Name과 Token을 가지며, 자신이 권한을 가진 채널의 이벤트만 구독/수신할 수 있습니다.

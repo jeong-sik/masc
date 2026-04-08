@@ -588,6 +588,38 @@ let test_read_path_rejects_ambiguous_nested_repo_suffix () =
     check bool "error mentions ambiguity" true
       (String_util.contains_substring_ci err "ambiguous_relative_read_path"))
 
+let test_read_path_does_not_follow_symlink_outside_root () =
+  let dir = make_path_test_dir () in
+  let outside = Filename.concat (Filename.get_temp_dir_name ())
+      (Printf.sprintf "keeper_outside_%d" (Random.int 100000)) in
+  let mkdir path =
+    try Unix.mkdir path 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
+  in
+  let link_path = Filename.concat dir "external-link" in
+  Fun.protect
+    ~finally:(fun () ->
+      (try Unix.unlink link_path with _ -> ());
+      cleanup_path_test_dir dir;
+      cleanup_path_test_dir outside)
+    (fun () ->
+      mkdir outside;
+      let outside_owner = Filename.concat outside "yousleepwhen" in
+      let outside_repo = Filename.concat outside_owner "masc-mcp" in
+      let outside_lib = Filename.concat outside_repo "lib" in
+      mkdir outside_owner;
+      mkdir outside_repo;
+      mkdir outside_lib;
+      Unix.symlink outside link_path;
+      Eio_main.run @@ fun env ->
+    Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let config = Room.default_config dir in
+      let result = Keeper_alerting_path.resolve_keeper_read_path
+        ~config ~raw_path:"masc-mcp/lib" in
+      check bool "symlink escape is rejected" true (Result.is_error result);
+      let err = Result.get_error result in
+      check bool "symlink escape does not resolve outside root" true
+        (String_util.contains_substring_ci err "path_not_found_under_project_root"))
+
 (* ============================================================
    11. Keeper-reported allowed_paths symlink bug
    ============================================================ *)
@@ -745,6 +777,8 @@ let () =
         test_read_path_resolves_unique_nested_repo_suffix;
       test_case "read path rejects ambiguous nested repo suffix" `Quick
         test_read_path_rejects_ambiguous_nested_repo_suffix;
+      test_case "read path does not follow symlink outside root" `Quick
+        test_read_path_does_not_follow_symlink_outside_root;
       test_case "read vs write path separation" `Quick test_read_vs_write_path_separation;
       test_case "keeper-reported nonexistent subdir" `Quick
         test_keeper_reported_nonexistent_subdir;

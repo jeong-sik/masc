@@ -60,32 +60,49 @@ let parent_exists (path : string) : bool =
   let parent = Filename.dirname path in
   parent <> path && path_exists parent
 
+let is_within_root_norm ~(root_norm : string) (path : string) : bool =
+  let normalized = normalize_path_for_check path |> strip_trailing_slashes in
+  normalized = root_norm
+  || starts_with ~prefix:(root_norm ^ "/") normalized
+
 let find_suffix_matches_under_root ~root ~anchor ~suffix_rel
     ?(max_dirs = 2000) ?(max_matches = 8) () : string list =
+  let root_norm = normalize_path_for_check root |> strip_trailing_slashes in
+  let visited : (string, unit) Hashtbl.t = Hashtbl.create 64 in
   let rec walk ~dirs_seen acc dir =
     if dirs_seen >= max_dirs || List.length acc >= max_matches then (dirs_seen, acc)
     else
-      let entries =
-        try Sys.readdir dir |> Array.to_list |> List.sort String.compare
-        with Sys_error _ -> []
-      in
-      List.fold_left
-        (fun (dirs_seen, acc) entry ->
-           if dirs_seen >= max_dirs || List.length acc >= max_matches then (dirs_seen, acc)
-           else
-             let path = Filename.concat dir entry in
-             match (try Some (Sys.is_directory path) with Sys_error _ -> None) with
-             | None -> (dirs_seen, acc)
-             | Some is_dir ->
-                 let acc =
-                   if entry = anchor then
-                     let candidate = Filename.concat path suffix_rel in
-                     if path_exists candidate then candidate :: acc else acc
-                   else acc
-                 in
-                 if is_dir then walk ~dirs_seen:(dirs_seen + 1) acc path
-                 else (dirs_seen, acc))
-        (dirs_seen, acc) entries
+      let dir_norm = normalize_path_for_check dir |> strip_trailing_slashes in
+      if not (is_within_root_norm ~root_norm dir)
+         || Hashtbl.mem visited dir_norm
+      then (dirs_seen, acc)
+      else begin
+        Hashtbl.replace visited dir_norm ();
+        let entries =
+          try Sys.readdir dir |> Array.to_list |> List.sort String.compare
+          with Sys_error _ -> []
+        in
+        List.fold_left
+          (fun (dirs_seen, acc) entry ->
+             if dirs_seen >= max_dirs || List.length acc >= max_matches then (dirs_seen, acc)
+             else
+               let path = Filename.concat dir entry in
+               match (try Some (Sys.is_directory path) with Sys_error _ -> None) with
+               | None -> (dirs_seen, acc)
+               | Some is_dir ->
+                   let acc =
+                     if entry = anchor then
+                       let candidate = Filename.concat path suffix_rel in
+                       if path_exists candidate
+                          && is_within_root_norm ~root_norm candidate
+                       then candidate :: acc else acc
+                     else acc
+                   in
+                   if is_dir && is_within_root_norm ~root_norm path
+                   then walk ~dirs_seen:(dirs_seen + 1) acc path
+                   else (dirs_seen, acc))
+          (dirs_seen, acc) entries
+      end
   in
   walk ~dirs_seen:0 [] root |> snd |> List.rev
 
@@ -108,6 +125,15 @@ let maybe_resolve_missing_relative_read_path ~(root : string) ~(raw_path : strin
              (Printf.sprintf
                 "ambiguous_relative_read_path: %s (matches: [%s])"
                 raw_path (String.concat ", " many)))
+
+let allows_missing_leaf_read ~(raw : string) ~(candidate : string) : bool =
+  let parts = split_relative_components raw in
+  let trailing_slash =
+    String.length raw > 0 && raw.[String.length raw - 1] = '/'
+  in
+  parent_exists candidate
+  && List.length parts > 1
+  && not trailing_slash
 
 let absolute_allowed_paths ~(config : Room.config) ~(allowed_paths : string list)
     : string list =
@@ -221,7 +247,7 @@ let resolve_keeper_read_path ~(config : Room.config) ~(raw_path : string)
       Error
         (Printf.sprintf "path_outside_project_root: %s (root=%s)"
            target_norm root_norm)
-    else if path_exists candidate || parent_exists candidate then
+    else if path_exists candidate || allows_missing_leaf_read ~raw ~candidate then
       Ok candidate
     else if Filename.is_relative raw then
       (match maybe_resolve_missing_relative_read_path ~root ~raw_path:raw with

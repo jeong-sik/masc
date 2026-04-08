@@ -130,12 +130,13 @@ let mask_tool_result_content ~(tool_name : string option) ~(tool_use_id : string
 let mask_tool_result_message ~(tool_names : (string * string) list)
     (m : Agent_sdk.Types.message) : Agent_sdk.Types.message =
   let content = List.map (function
-    | Agent_sdk.Types.ToolResult { tool_use_id; content; is_error } ->
+    | Agent_sdk.Types.ToolResult { tool_use_id; content; is_error; json } ->
       let tool_name = List.assoc_opt tool_use_id tool_names in
       Agent_sdk.Types.ToolResult {
         tool_use_id;
         content = mask_tool_result_content ~tool_name ~tool_use_id ~content;
         is_error;
+        json;
       }
     | other -> other
   ) m.content in

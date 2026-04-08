@@ -1,6 +1,21 @@
 # Changelog
 
 
+## [2.260.0] - 2026-04-08
+
+### Fixed
+- Eio.Cancel.Cancelled re-raised instead of swallowed in bridge, dashboard, and metrics modules (#5810)
+- truncate_tool_output now enforces hard cap on total output length (#5814)
+- autonomous_turn_limit default set to 1 for single-slot servers (#5806)
+- Yojson.Json_error catch narrowed in dashboard tool-quality (#5812)
+- Branch-switch guard hardened with tab tokenization, global git options, and precise mutation detection (#5813)
+- useEffect void prefix for floating promise lint (#5816)
+
+### Changed
+- All remaining failwith usages replaced with explicit raise (Failure ...) (#5811, #5817)
+- Excuse patterns decoupled into configurable JSON file (#5808)
+- Adaptive thinking review: retry triggers high thinking, soft-error scan removed from Ok variants (#5815)
+
 ## [2.259.0] - 2026-04-08
 
 ### Added

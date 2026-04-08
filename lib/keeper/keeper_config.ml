@@ -6,6 +6,10 @@ open Tool_args
     reference this constant instead of using the string literal. *)
 let default_cascade_name = "keeper_unified"
 
+(** Minimum context window (tokens) for any keeper turn.
+    Prevents running with a context too small for effective reasoning. *)
+let min_keeper_context_tokens = 65_536
+
 let bool_default_true_of_env name =
   match Sys.getenv_opt name with
   | None -> true

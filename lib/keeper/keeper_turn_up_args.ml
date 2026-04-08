@@ -185,7 +185,7 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
     let voice_agent_id_opt = get_string_opt args "voice_agent_id" in
     let mention_targets_in = get_string_list args "mention_targets" in
     let max_context_override_opt =
-      let min_keeper_context = 65_536 in
+      let min_keeper_context = Keeper_config.min_keeper_context_tokens in
       match Safe_ops.json_int_opt "max_context_override" args with
       | None -> None
       | Some v when v >= min_keeper_context && v <= 1_000_000 -> Some v

@@ -905,7 +905,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
   | Ok () ->
       ignore (Oas_model_resolve.refresh_local_discovery_if_possible model_labels);
       let max_cascade_context =
-        let min_keeper_context = 65_536 in
+        let min_keeper_context = Keeper_config.min_keeper_context_tokens in
         let raw =
           match meta.max_context_override with
           | Some v ->

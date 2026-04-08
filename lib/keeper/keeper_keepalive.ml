@@ -247,7 +247,7 @@ let write_heartbeat_snapshot
     |> Oas_model_resolve.filter_by_providers meta_current.allowed_providers
   in
   let max_cascade_context =
-    let min_keeper_context = 65_536 in
+    let min_keeper_context = Keeper_config.min_keeper_context_tokens in
     let raw = match meta_current.max_context_override with
       | Some v -> v
       | None -> Oas_model_resolve.resolve_max_cascade_context cascade_models

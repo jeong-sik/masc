@@ -97,18 +97,7 @@ let aggregate ?(n = 5000) () : Yojson.Safe.t =
            | j ->
              Safe_ops.json_string_opt "error" j
              |> Option.value ~default:"unknown_error"
-           | exception Yojson.Json_error _ ->
-             (* Try after stripping "error: " prefix *)
-             let stripped =
-               if String.length output >= 7 && String.sub output 0 7 = "error: "
-               then String.sub output 7 (String.length output - 7)
-               else output
-             in
-             (match Yojson.Safe.from_string stripped with
-              | j ->
-                Safe_ops.json_string_opt "error" j
-                |> Option.value ~default:"parse_error"
-              | exception Yojson.Json_error _ -> "parse_error"))
+           | exception Yojson.Json_error _ -> "parse_error")
         else "empty_output"
       in
       let r = match Hashtbl.find_opt failure_cats cat with

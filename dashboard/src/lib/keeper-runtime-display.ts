@@ -1,6 +1,9 @@
 import type { Keeper } from '../types'
 import { relativeTime } from './format-time'
 
+/** Max seconds since last heartbeat to consider the keeper process alive. */
+const HEARTBEAT_ALIVE_THRESHOLD_S = 120
+
 export function keeperDisplayStatus(keeper: Keeper | null | undefined, fallbackStatus?: string | null): string {
   if (keeper?.paused) return 'paused'
   const status = keeper?.status ?? fallbackStatus
@@ -14,9 +17,19 @@ export function keeperDisplayStatus(keeper: Keeper | null | undefined, fallbackS
   return status && status.trim() !== '' ? status : 'unknown'
 }
 
-/** Distinguish "never booted" from "was running but stopped" keepers. */
+/** Distinguish "never booted" from "was running but stopped" keepers.
+ *  Reconciles heartbeat liveness with agent registration status:
+ *  if heartbeat is recent but agent is offline, shows phase instead of "offline". */
 function refineOfflineStatus(keeper: Keeper | null | undefined): string {
   if (!keeper) return 'offline'
+
+  // Heartbeat alive but agent offline — keepalive fiber is running.
+  // Show actual phase instead of misleading "offline".
+  if (keeper.last_heartbeat && isHeartbeatAlive(keeper.last_heartbeat)) {
+    const phase = keeper.phase?.trim().toLowerCase()
+    if (phase && phase !== 'offline' && phase !== 'inactive') return phase
+    return 'idle'
+  }
 
   const generation = keeper.generation ?? 0
   const turnCount = keeper.turn_count ?? 0
@@ -33,6 +46,12 @@ function refineOfflineStatus(keeper: Keeper | null | undefined): string {
   }
 
   return 'offline'
+}
+
+function isHeartbeatAlive(heartbeat: string): boolean {
+  const ts = new Date(heartbeat).getTime()
+  if (Number.isNaN(ts)) return false
+  return (Date.now() - ts) / 1000 < HEARTBEAT_ALIVE_THRESHOLD_S
 }
 
 export function keeperRecentHeartbeatLabel(keeper: Keeper | null | undefined): string {

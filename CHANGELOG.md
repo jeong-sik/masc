@@ -1,6 +1,24 @@
 # Changelog
 
 
+## [2.259.0] - 2026-04-08
+
+### Added
+- **Discovery time-series** -- record each probe result to `.masc/discovery/YYYY-MM/DD.jsonl` via Dated_jsonl. (#5781)
+- **Per-model inference metrics** -- `GET /api/v1/models/metrics?window=30` aggregates tok/s, latency, tokens by model from decisions.jsonl. (#5784)
+- **Provider discovery merge** -- `/api/v1/providers` now includes OAS Discovery probe data (model, ctx_size, slots, health). (#5778)
+- **Config-driven shell write gate** -- `permissions.shell_write_presets` in tool_policy.toml replaces hardcoded variant match. (#5782)
+- **Config-driven workflow gate** -- `permissions.workflow_presets` in tool_policy.toml replaces hardcoded variant match. (#5777)
+- **Log.Discovery** -- structured logging module for discovery subsystem.
+
+### Fixed
+- **Team session projection** -- `collaboration_context` and `Prompt_composer` fill lossy 47-to-12 field gap. (#5783)
+
+### Changed
+- **OAS pin** -- bumped to v0.114.0 for cascade failover parse crash fix. (#5785, #5786, #5788)
+- **Gate-Connector RFC** -- refined transport interfaces to deep-dive format. (#5780)
+- **Tool search** -- returns `already_visible` tool names in response. (#5779)
+
 ## [2.258.0] - 2026-04-08
 
 ### Added

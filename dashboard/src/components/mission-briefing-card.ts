@@ -4,7 +4,6 @@ import { Card } from './common/card'
 import { EmptyState } from './common/empty-state'
 import { TagBadge } from './common/tag-badge'
 import { ActionBar, ActionBtn } from './common/action-bar'
-import { ProvenanceStrip } from './common/provenance-strip'
 import { StatusChip } from './common/status-chip'
 import {
   missionSnapshot,
@@ -249,67 +248,23 @@ export function MissionBriefingCard() {
 
   return html`
     <${Card} title="판단 레이어" class="mission-briefing-card rounded-xl">
-      <div class="grid gap-1.5 mb-4">
-        <h3>왜 그렇게 보이나</h3>
-        <p>사회 truth를 읽은 뒤에만 별도 판단 결과를 참고하고, 근거는 접어서 둡니다.</p>
-        <p class="text-[12px] text-[var(--text-muted)] leading-[1.5]">
-          이 카드는 화면용 deterministic 브리핑입니다.
-          ${liveJudge
-            ? html`실제 판단은 <strong class="text-[var(--text-strong)]">${liveJudge.name}</strong>에게 별도 상황 보고를 보내서 받아야 합니다.`
-            : '실제 판단 대상 keeper를 아직 찾지 못했습니다.'}
-        </p>
-        <${ProvenanceStrip}
-          items=${[
-            { kind: 'narrative' },
-            { kind: 'fallback', label: 'fallback on failure' },
-          ]}
-        />
-      </div>
-
-      <div class="flex gap-3 flex-wrap mb-4">
+      <div class="flex items-center gap-2 flex-wrap mb-4">
         <${StatusChip} label=${statusLabel(briefing?.status ?? (missionBriefingError.value ? 'error' : 'loading'))} tone=${briefingTone} />
+        ${liveJudge
+          ? html`<${StatusChip}
+              label=${`${liveJudge.name}${liveJudge.model ? ' · ' + liveJudge.model : ''}`}
+              tone=${liveJudgeTone}
+            />`
+          : null}
+        ${liveJudge
+          ? html`<${StatusChip} label=${liveJudge.online ? '온라인' : '확인 필요'} tone=${liveJudgeTone} />`
+          : null}
         ${briefing?.model ? html`<${StatusChip} label=${briefing.model} />` : null}
         ${briefing?.generated_at ? html`<${StatusChip} label=${relativeTime(briefing.generated_at)} />` : null}
         ${briefing?.cached ? html`<${StatusChip} label="캐시" />` : null}
         ${briefing?.stale ? html`<${StatusChip} label="오래됨" tone="warn" />` : null}
         ${briefing?.refreshing ? html`<${StatusChip} label="갱신 중" tone="warn" />` : null}
       </div>
-
-      ${liveJudge
-        ? html`
-            <section class="grid gap-2 mb-4 rounded-xl border border-[var(--white-8)] bg-[var(--white-3)] p-4">
-              <div class="flex items-center justify-between gap-3 flex-wrap">
-                <strong class="text-[var(--text-strong)]">실제 판단 대상</strong>
-                <div class="flex gap-2 flex-wrap">
-                  <${StatusChip}
-                    label=${liveJudge.source === 'judge_runtime' ? 'judge runtime' : 'live keeper (fallback)'}
-                    tone=${liveJudgeTone}
-                  />
-                  <${StatusChip}
-                    label=${liveJudge.online ? '온라인' : '확인 필요'}
-                    tone=${liveJudgeTone}
-                  />
-                  ${liveJudge.model ? html`<${StatusChip} label=${liveJudge.model} />` : null}
-                </div>
-              </div>
-              <p class="m-0 text-[13px] text-[var(--text-body)] leading-[1.55]">
-                ${liveJudge.name}에게 현재 상황 요약을 보낸 뒤, rendering용 브리핑과 다른 live 판단이 있는지 확인할 수 있습니다.
-              </p>
-              ${liveJudgeReport
-                ? html`
-                    <details class="pt-1">
-                      <summary>보고 프리뷰</summary>
-                      <pre class="m-0 mt-3 whitespace-pre-wrap rounded-lg border border-[var(--white-6)] bg-[var(--white-2)] p-3 text-[12px] leading-[1.55] text-[var(--text-muted)]">${liveJudgeReport}</pre>
-                    </details>
-                  `
-                : null}
-            </section>
-          `
-        : html`
-            <div class="mb-4">
-              <${EmptyState} message="실제 판단 대상 keeper를 아직 찾지 못했습니다. namespace-truth와 operator snapshot이 들어오면 상황 보고 버튼이 활성화됩니다." compact />
-            </div>
-          `}
 
       ${missionBriefingError.value ? html`<${EmptyState} message=${missionBriefingError.value} compact />` : null}
       ${briefing?.error ? html`<${EmptyState} message=${briefing.error} compact />` : null}
@@ -375,9 +330,18 @@ export function MissionBriefingCard() {
           `
         : null}
 
+      ${liveJudgeReport
+        ? html`
+            <details class="pt-2 border-t border-[var(--white-6)] mt-4">
+              <summary class="text-xs text-[var(--text-muted)] cursor-pointer">상황 보고 프리뷰</summary>
+              <pre class="m-0 mt-2 whitespace-pre-wrap rounded-lg border border-[var(--white-6)] bg-[var(--white-2)] p-3 text-[12px] leading-[1.55] text-[var(--text-muted)]">${liveJudgeReport}</pre>
+            </details>
+          `
+        : null}
+
       <${ActionBar}>
         <${ActionBtn}
-          label=${liveJudge ? '실제 판단 요청 열기' : '실제 판단 대상 없음'}
+          label=${liveJudge ? '실제 판단 요청' : '판단 대상 없음'}
           onClick=${openLiveJudgeIntervene}
           disabled=${!liveJudge}
         />

@@ -258,18 +258,33 @@ let handle_keeper_status ctx args : tool_result =
      Yojson.Safe.pretty_to_string
        (annotate_keeper_json ~runtime_class:"keeper" json))
 
-let ensure_keeper_exists ctx args =
+let name_from_agent_name agent_name =
+  let prefix = "keeper-" and suffix = "-agent" in
+  let plen = String.length prefix and slen = String.length suffix in
+  let alen = String.length agent_name in
+  if alen > plen + slen
+     && String.sub agent_name 0 plen = prefix
+     && String.sub agent_name (alen - slen) slen = suffix
+  then Some (String.sub agent_name plen (alen - plen - slen))
+  else None
+
+let resolve_keeper_name ctx args =
   let name = get_string args "name" "" in
   match read_meta ctx.config name with
-  | Ok (Some _) -> Ok ()
-  | Ok None -> Error (Printf.sprintf "❌ keeper not found: %s" name)
+  | Ok (Some _) -> Ok name
+  | Ok None ->
+    (match name_from_agent_name name with
+     | Some stripped ->
+       (match read_meta ctx.config stripped with
+        | Ok (Some _) -> Ok stripped
+        | _ -> Error (Printf.sprintf "❌ keeper not found: %s (also tried %s)" name stripped))
+     | None -> Error (Printf.sprintf "❌ keeper not found: %s" name))
   | Error err -> Error (Printf.sprintf "❌ %s" err)
 
 let handle_keeper_msg ctx args : tool_result =
-  match ensure_keeper_exists ctx args with
+  match resolve_keeper_name ctx args with
   | Error err -> (false, err)
-  | Ok _ ->
-      let name = get_string args "name" "" in
+  | Ok name ->
       let request_id = Keeper_msg_async.submit ~sw:ctx.sw
         ~keeper_name:name
         ~f:(fun () ->
@@ -300,10 +315,9 @@ let handle_keeper_msg_result _ctx args : tool_result =
       (true, Yojson.Safe.to_string (Keeper_msg_async.entry_to_json entry))
 
 let handle_keeper_msg_stream ~on_text_delta ctx args : tool_result =
-  match ensure_keeper_exists ctx args with
+  match resolve_keeper_name ctx args with
   | Error err -> (false, err)
-  | Ok _ ->
-      let name = get_string args "name" "" in
+  | Ok name ->
       let ok, body = Turn.handle_keeper_msg ~on_text_delta ctx args in
       if not ok then (ok, body)
       else begin

@@ -84,16 +84,22 @@ let handle_keeper_bash
         let st, out =
           Process_eio.run_argv_with_status ~timeout_sec [ "/bin/bash"; "-lc"; shell_cmd ]
         in
-        (* Samchon structured feedback: detect common git errors and
-           provide actionable alternatives instead of bare error output. *)
+        (* Samchon structured feedback: detect common errors and provide
+           actionable alternatives. Pattern→hint pairs are data, not logic. *)
         let hint =
           if st <> Unix.WEXITED 0 then
-            let has s = String_util.contains_substring_ci out s in
-            if has "already used by worktree" || has "already checked out"
-            then Some "Branch is in a worktree. Use 'git worktree add .worktrees/<name> <branch>' or 'cd' to the existing worktree path shown in the error."
-            else if has "not a git repository"
-            then Some "Not inside a git repository. Check your working directory."
-            else None
+            let error_hints = [
+              [ "already used by worktree"; "already checked out" ],
+                "Branch is in a worktree. Use 'git worktree add .worktrees/<name> <branch>' or 'cd' to the existing worktree path shown in the error.";
+              [ "not a git repository" ],
+                "Not inside a git repository. Check your working directory.";
+              [ "permission denied" ],
+                "Permission denied. Check file ownership or run from an allowed directory.";
+            ] in
+            List.find_map (fun (patterns, h) ->
+              if List.exists (fun p -> String_util.contains_substring_ci out p) patterns
+              then Some h else None
+            ) error_hints
           else None
         in
         let base_fields =

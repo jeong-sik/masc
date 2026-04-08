@@ -14,6 +14,7 @@ describe('lab navigation', () => {
       'harness',
       'inspector',
       'tool-quality',
+      'fleet',
     ])
 
     expect(labSections.map(item => item.label)).toEqual([
@@ -22,6 +23,7 @@ describe('lab navigation', () => {
       '세이프티 하네스',
       '운영 인스펙터',
       '도구 품질',
+      'Fleet 텔레메트리',
     ])
   })
 })

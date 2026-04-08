@@ -404,7 +404,29 @@ let append_decision_record
                     `Float (float_of_int r.usage.output_tokens /. (float_of_int latency_ms /. 1000.0))
                   else `Null);
               ] @ inference_fields @ cascade_fields)
-          | None -> `Null );
+          | None ->
+              (* Partial telemetry for error turns: record what we know.
+                 Without this, 90%+ of turns have no telemetry at all. *)
+              let cascade_models =
+                Oas_model_resolve.models_of_cascade_name meta.cascade_name
+              in
+              let error_category =
+                match error with
+                | Some e when String.length e > 0 ->
+                  let e_lower = String.lowercase_ascii e in
+                  if String.length e_lower >= 15 && String.sub e_lower 0 15 = "invalid request" then "invalid_request"
+                  else if String.length e_lower >= 13 && String.sub e_lower 0 13 = "network error" then "network_error"
+                  else if String.length e_lower >= 14 && String.sub e_lower 0 14 = "internal error" then "internal_error"
+                  else if String.length e_lower >= 8 && String.sub e_lower 0 8 = "input to" then "input_budget_exceeded"
+                  else "other"
+                | _ -> "unknown"
+              in
+              `Assoc [
+                ("cascade_name", `String meta.cascade_name);
+                ("candidate_models", `List (List.map (fun s -> `String s) cascade_models));
+                ("error_category", `String error_category);
+                ("outcome", `String "error");
+              ] );
       ]
       @ social_fields)
   in

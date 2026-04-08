@@ -378,7 +378,8 @@ let make_hooks
              ~keeper_name:(!meta_ref).name
              ~tool_name ~input ~output_text
              ~success:(outcome = "ok") ~duration_ms
-             ~model:(!meta_ref).runtime.usage.last_model_used
+             ~model:(let m = (!meta_ref).runtime.usage.last_model_used in
+                     if m = "" then (!meta_ref).cascade_name else m)
              ~result_bytes ?truncated_to ()
          with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
         (* Boring-tool gate: mark turn as productive only for genuinely

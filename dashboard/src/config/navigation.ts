@@ -17,6 +17,7 @@ export type SurfaceSectionId =
   | 'inspector'
   | 'telemetry'
   | 'tool-quality'
+  | 'fleet'
 
 type NonHomeTabId = Exclude<TabId, 'overview' | 'logs'>
 
@@ -206,6 +207,12 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: '도구 품질',
       description: 'Keeper tool call 성공률, 실패 카테고리, keeper별 품질 지표.',
       params: { section: 'tool-quality' },
+    },
+    {
+      id: 'fleet',
+      label: 'Fleet 텔레메트리',
+      description: 'Keeper 전체 비교: tok/sec, latency, error 분류, model 분포, compaction.',
+      params: { section: 'fleet' },
     },
   ],
 }

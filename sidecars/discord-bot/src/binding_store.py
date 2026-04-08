@@ -36,6 +36,12 @@ class BindingStore:
     def __init__(self, path: Path) -> None:
         self.path = path
 
+    def modified_time_ns(self) -> int | None:
+        try:
+            return self.path.stat().st_mtime_ns
+        except FileNotFoundError:
+            return None
+
     def load(self) -> dict[str, str] | None:
         """Return persisted bindings, or None when no valid store exists."""
         if not self.path.exists():

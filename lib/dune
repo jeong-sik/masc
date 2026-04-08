@@ -33,6 +33,7 @@
    cancellation
    channel_gate
    channel_gate_metrics
+   channel_gate_discord_state
    gate_protocol
    gate_keeper_backend
    command_plane_v2

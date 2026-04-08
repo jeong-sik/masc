@@ -3,7 +3,7 @@ import { render } from 'preact'
 import { signal } from '@preact/signals'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-function sampleResponse(overrides?: Partial<Record<string, unknown>>) {
+function sampleGateResponse(overrides?: Partial<Record<string, unknown>>) {
   return {
     channels: [
       {
@@ -78,6 +78,49 @@ function sampleResponse(overrides?: Partial<Record<string, unknown>>) {
   }
 }
 
+function sampleLiveResponse(overrides?: Partial<Record<string, unknown>>) {
+  return {
+    available: true,
+    connected: true,
+    stale: false,
+    stale_after_sec: 30,
+    error: '',
+    status_path: '/tmp/discord_status.json',
+    binding_store_path: '/tmp/discord_bindings.json',
+    audit_path: '/tmp/discord_binding_audit.jsonl',
+    updated_at: '2026-04-03T00:00:00Z',
+    last_ready_at: '2026-04-03T00:00:00Z',
+    bot_user_name: 'sangsu',
+    bot_user_id: '1489985300729172039',
+    guild_count: 2,
+    gate_base_url: 'http://localhost:8935',
+    gate_healthy: true,
+    gate_health_checked_at: '2026-04-03T00:00:00Z',
+    binding_source: 'persisted',
+    runtime_bindings_count: 1,
+    pid: 4242,
+    configured_bindings: [
+      {
+        channel_id: '123456',
+        keeper_name: 'luna',
+      },
+    ],
+    recent_audit: [
+      {
+        timestamp: '2026-04-03T00:00:00Z',
+        action: 'bind',
+        guild_id: 'guild-1',
+        channel_id: '123456',
+        keeper_name: 'luna',
+        actor_id: 'dashboard',
+        actor_name: 'dashboard',
+        previous_keeper: '',
+      },
+    ],
+    ...overrides,
+  }
+}
+
 async function flushUi(): Promise<void> {
   for (let i = 0; i < 4; i += 1) {
     await Promise.resolve()
@@ -87,14 +130,20 @@ async function flushUi(): Promise<void> {
 
 async function loadComponentWithApi(api: {
   get: (path: string) => Promise<unknown>
+  post?: (path: string, body: unknown) => Promise<unknown>
   lastEvent: { value: unknown }
+  showToast?: (message: string, type?: string) => void
 }) {
   vi.resetModules()
   vi.doMock('../api/core', () => ({
     get: api.get,
+    post: api.post ?? vi.fn().mockResolvedValue({ ok: true }),
   }))
   vi.doMock('../sse', () => ({
     lastEvent: api.lastEvent,
+  }))
+  vi.doMock('./common/toast', () => ({
+    showToast: api.showToast ?? vi.fn(),
   }))
   const module = await import('./connector-status')
   module.resetConnectorStatusState()
@@ -118,12 +167,15 @@ describe('ConnectorStatusPanel', () => {
     vi.clearAllMocks()
     vi.doUnmock('../api/core')
     vi.doUnmock('../sse')
+    vi.doUnmock('./common/toast')
   })
 
-  it('renders enriched connector health details from gate status', async () => {
-    const get = vi.fn<(path: string) => Promise<unknown>>().mockResolvedValue(
-      sampleResponse(),
-    )
+  it('renders direct Discord runtime and gate-observed health together', async () => {
+    const get = vi.fn<(path: string) => Promise<unknown>>().mockImplementation(async path => {
+      if (path === '/api/v1/gate/status') return sampleGateResponse()
+      if (path === '/api/v1/gate/discord/status') return sampleLiveResponse()
+      throw new Error(`unexpected path: ${path}`)
+    })
 
     const { ConnectorStatusPanel } = await loadComponentWithApi({
       get,
@@ -135,16 +187,93 @@ describe('ConnectorStatusPanel', () => {
     const text = container.textContent?.replace(/\s+/g, ' ').trim() ?? ''
 
     expect(get).toHaveBeenCalledWith('/api/v1/gate/status')
-    expect(text).toContain('Channel Gate')
-    expect(text).toContain('success 91%')
-    expect(text).toContain('duplicates')
-    expect(text).toMatch(/namespaces\s*2/)
-    expect(text).toContain('last namespace 123456')
-    expect(text).toContain('Channel bindings')
-    expect(text).toContain('room 123456')
+    expect(get).toHaveBeenCalledWith('/api/v1/gate/discord/status')
+    expect(text).toContain('Connector Operations')
+    expect(text).toContain('Discord Direct')
+    expect(text).toContain('connected')
+    expect(text).toContain('sangsu')
+    expect(text).toContain('Observed room bindings')
+    expect(text).toContain('Recent binding audit')
     expect(text).toContain('Recent gate events')
     expect(text).toContain('keeper_error')
-    expect(text).toContain('upstream timeout')
-    expect(container.innerHTML).toContain('degraded')
+    expect(text).toContain('/tmp/discord_status.json')
+  })
+
+  it('still renders direct runtime when gate metrics are unavailable', async () => {
+    const get = vi.fn<(path: string) => Promise<unknown>>().mockImplementation(async path => {
+      if (path === '/api/v1/gate/status') throw new Error('GET /api/v1/gate/status: 503 Service Unavailable')
+      if (path === '/api/v1/gate/discord/status') return sampleLiveResponse({ connected: false, stale: true })
+      throw new Error(`unexpected path: ${path}`)
+    })
+
+    const { ConnectorStatusPanel } = await loadComponentWithApi({
+      get,
+      lastEvent: signal(null),
+    })
+
+    render(html`<${ConnectorStatusPanel} />`, container)
+    await flushUi()
+    const text = container.textContent?.replace(/\s+/g, ' ').trim() ?? ''
+
+    expect(text).toContain('Discord Direct')
+    expect(text).toContain('stale')
+    expect(text).toContain('Gate metrics unavailable')
+    expect(text).toContain('Direct Discord runtime is visible')
+  })
+
+  it('posts bind and unbind actions through the dashboard endpoints', async () => {
+    const get = vi.fn<(path: string) => Promise<unknown>>().mockImplementation(async path => {
+      if (path === '/api/v1/gate/status') return sampleGateResponse()
+      if (path === '/api/v1/gate/discord/status') return sampleLiveResponse()
+      throw new Error(`unexpected path: ${path}`)
+    })
+    const post = vi.fn<(path: string, body: unknown) => Promise<unknown>>().mockResolvedValue({ ok: true })
+    const showToast = vi.fn()
+
+    const { ConnectorStatusPanel } = await loadComponentWithApi({
+      get,
+      post,
+      lastEvent: signal(null),
+      showToast,
+    })
+
+    render(html`<${ConnectorStatusPanel} />`, container)
+    await flushUi()
+
+    const channelInput = container.querySelector('input[aria-label="Discord channel id"]') as HTMLInputElement | null
+    const keeperInput = container.querySelector('input[aria-label="Keeper name"]') as HTMLInputElement | null
+    expect(channelInput).not.toBeNull()
+    expect(keeperInput).not.toBeNull()
+
+    if (!channelInput || !keeperInput) {
+      throw new Error('expected bind form inputs to exist')
+    }
+
+    channelInput.value = '999999'
+    channelInput.dispatchEvent(new Event('input', { bubbles: true }))
+    keeperInput.value = 'nova'
+    keeperInput.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushUi()
+
+    const bindButton = Array.from(container.querySelectorAll('button'))
+      .find(candidate => candidate.textContent?.trim() === 'Bind')
+    bindButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flushUi()
+
+    expect(post).toHaveBeenCalledWith('/api/v1/gate/discord/bind', {
+      channel_id: '999999',
+      keeper_name: 'nova',
+    })
+    expect(showToast).toHaveBeenCalledWith('Bound 999999 -> nova', 'success')
+
+    const unbindButton = Array.from(container.querySelectorAll('button'))
+      .find(candidate => candidate.textContent?.trim() === 'Unbind')
+    unbindButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flushUi()
+
+    expect(post).toHaveBeenCalledWith('/api/v1/gate/discord/unbind', {
+      channel_id: '999999',
+    })
+    expect(showToast).toHaveBeenCalledWith('Unbound 999999', 'success')
   })
 })

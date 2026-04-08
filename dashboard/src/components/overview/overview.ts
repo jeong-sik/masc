@@ -545,17 +545,20 @@ export function Overview() {
 
       ${toolHealth ? html`<div class=${OVERVIEW_CARD}>${toolHealth}</div>` : null}
 
+      <div class=${OVERVIEW_CARD}>
+        <${ConnectorStatusPanel} />
+      </div>
+
       <details class=${OVERVIEW_CARD}>
         <summary class="cursor-pointer text-xs font-semibold text-[var(--text-strong)] uppercase tracking-wider select-none list-none flex items-center gap-2">
           인프라 상태
-          <span class="text-[10px] font-normal normal-case tracking-normal text-[var(--text-muted)]">Transport · 성능 · 커넥터</span>
+          <span class="text-[10px] font-normal normal-case tracking-normal text-[var(--text-muted)]">Transport · 성능</span>
         </summary>
         <div class="mt-4 flex flex-col gap-4">
           <div class="grid grid-cols-2 gap-4 max-[1100px]:grid-cols-1">
             <${TransportHealthPanel} />
             <${PerfSnapshotPanel} />
           </div>
-          <${ConnectorStatusPanel} />
         </div>
       </details>
 

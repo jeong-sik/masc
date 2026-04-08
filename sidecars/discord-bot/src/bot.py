@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import sys
 import time
 from typing import Any, cast
@@ -30,6 +31,7 @@ from .formatters import (
     render_structured_embeds,
 )
 from .gate_client import BreakerSnapshot, GateClient, GateResponse
+from .status_store import ConnectorRuntimeStatus, StatusStore
 
 logging.basicConfig(
     level=logging.INFO,
@@ -78,6 +80,7 @@ class GateBot(discord.Client):
         self.cfg = get_config()
         self.binding_store = BindingStore(self.cfg.binding_store_path())
         self.audit_store = BindingAuditStore(self.cfg.binding_audit_path())
+        self.status_store = StatusStore(self.cfg.status_path())
         persisted_bindings = self.binding_store.load()
         if persisted_bindings is None:
             self.keeper_bindings = self.cfg.keeper_map()
@@ -85,6 +88,12 @@ class GateBot(discord.Client):
         else:
             self.keeper_bindings = persisted_bindings
             self.binding_source = "persisted"
+        self._binding_store_mtime_ns = self.binding_store.modified_time_ns()
+        self._last_gate_health: bool | None = None
+        self._last_gate_health_at = ""
+        self._last_ready_at = ""
+        self._status_task: asyncio.Task[None] | None = None
+        self._write_runtime_status(connected_override=False)
 
     async def setup_hook(self) -> None:
         """Register slash commands on startup."""
@@ -95,15 +104,26 @@ class GateBot(discord.Client):
         self.tree.add_command(keeper_map)  # pyright: ignore[reportUnknownArgumentType]
         self.tree.add_command(keeper_audit)  # pyright: ignore[reportUnknownArgumentType]
         await self.tree.sync()
+        self._status_task = asyncio.create_task(self._status_heartbeat_loop())
+        self._write_runtime_status()
         logger.info("Slash commands synced")
 
     async def close(self) -> None:
         """Release resources on shutdown."""
+        if self._status_task is not None:
+            self._status_task.cancel()
+            try:
+                await self._status_task
+            except asyncio.CancelledError:
+                pass
+            self._status_task = None
+        self._write_runtime_status(connected_override=False)
         await self.gate.aclose()
         await super().close()
 
     async def on_ready(self) -> None:
         assert self.user is not None
+        self._last_ready_at = utc_now_iso()
         logger.info("Bot ready: %s (id=%s)", self.user.name, self.user.id)
         logger.info(
             "Keeper map (%s @ %s, audit %s): %s",
@@ -114,12 +134,15 @@ class GateBot(discord.Client):
         )
 
         healthy = await self.gate.health_check()
+        self._note_gate_health(healthy)
+        self._write_runtime_status()
         if healthy:
             logger.info("Gate health check: OK")
         else:
             logger.warning("Gate health check: FAILED (bot will retry on messages)")
 
     def _resolve_keeper_for_channel(self, channel: discord.abc.Snowflake) -> str | None:
+        self._maybe_reload_bindings()
         channel_id = str(channel.id)
         direct = self.keeper_bindings.get(channel_id)
         if direct is not None:
@@ -129,6 +152,7 @@ class GateBot(discord.Client):
         return None
 
     def channel_binding_debug(self, channel: discord.abc.Snowflake) -> tuple[str | None, str]:
+        self._maybe_reload_bindings()
         channel_id = str(channel.id)
         direct = self.keeper_bindings.get(channel_id)
         if direct is not None:
@@ -150,6 +174,8 @@ class GateBot(discord.Client):
     def persist_bindings(self) -> None:
         self.binding_store.save(self.keeper_bindings)
         self.binding_source = "persisted"
+        self._binding_store_mtime_ns = self.binding_store.modified_time_ns()
+        self._write_runtime_status()
 
     def append_binding_audit(
         self,
@@ -175,6 +201,77 @@ class GateBot(discord.Client):
 
     def _compose_gate_content(self, message: discord.Message) -> str:
         return compose_gate_content(message.content, attachment_lines(message))
+
+    def _note_gate_health(self, healthy: bool) -> None:
+        self._last_gate_health = healthy
+        self._last_gate_health_at = utc_now_iso()
+
+    def _maybe_reload_bindings(self) -> None:
+        current_mtime = self.binding_store.modified_time_ns()
+        if current_mtime == self._binding_store_mtime_ns:
+            return
+
+        if current_mtime is None:
+            self._binding_store_mtime_ns = None
+            return
+
+        persisted_bindings = self.binding_store.load()
+        self._binding_store_mtime_ns = current_mtime
+        if persisted_bindings is None:
+            return
+
+        if persisted_bindings != self.keeper_bindings:
+            logger.info(
+                "Reloaded %d Discord binding(s) from %s",
+                len(persisted_bindings),
+                self.binding_store.path,
+            )
+            self.keeper_bindings = persisted_bindings
+            self.binding_source = "persisted"
+            self._write_runtime_status()
+
+    def _write_runtime_status(self, *, connected_override: bool | None = None) -> None:
+        user_name = self.user.name if self.user is not None else ""
+        user_id = str(self.user.id) if self.user is not None else ""
+        connected = (
+            connected_override
+            if connected_override is not None
+            else self.is_ready() and not self.is_closed()
+        )
+        status = ConnectorRuntimeStatus(
+            updated_at=utc_now_iso(),
+            connected=connected,
+            bot_user_name=user_name,
+            bot_user_id=user_id,
+            guild_count=len(self.guilds),
+            gate_base_url=self.cfg.gate_base_url,
+            gate_healthy=self._last_gate_health,
+            gate_health_checked_at=self._last_gate_health_at,
+            last_ready_at=self._last_ready_at,
+            binding_source=self.binding_source,
+            runtime_bindings_count=len(self.keeper_bindings),
+            binding_store_path=str(self.binding_store.path),
+            audit_store_path=str(self.audit_store.path),
+            pid=os.getpid(),
+        )
+        try:
+            self.status_store.write(status)
+        except OSError as exc:
+            logger.warning("Failed to write Discord status store %s: %s", self.status_store.path, exc)
+
+    async def _status_heartbeat_loop(self) -> None:
+        interval = max(5, self.cfg.status_heartbeat_sec)
+        while True:
+            try:
+                self._maybe_reload_bindings()
+                healthy = await self.gate.health_check()
+                self._note_gate_health(healthy)
+                self._write_runtime_status()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.warning("Discord status heartbeat failed: %s", exc)
+            await asyncio.sleep(interval)
 
     def is_admin(self, interaction: discord.Interaction) -> bool:
         member = interaction.user
@@ -277,6 +374,7 @@ class GateBot(discord.Client):
         if not message.guild:
             return
 
+        self._maybe_reload_bindings()
         keeper_name = self._resolve_keeper_for_channel(message.channel)
         if keeper_name is None:
             return

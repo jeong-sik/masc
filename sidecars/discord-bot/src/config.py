@@ -65,6 +65,13 @@ class BotConfig(BaseSettings):
             "discord_binding_audit_path",
         ),
     )
+    discord_status_path: str = Field(
+        default=".gate/discord_status.json",
+        validation_alias=AliasChoices(
+            "DISCORD_STATUS_PATH",
+            "discord_status_path",
+        ),
+    )
 
     # Optional
     discord_admin_role_id: str = Field(
@@ -104,6 +111,10 @@ class BotConfig(BaseSettings):
         default=30,
         validation_alias=AliasChoices("GATE_BREAKER_RESET_SEC", "gate_breaker_reset_sec"),
     )
+    status_heartbeat_sec: int = Field(
+        default=10,
+        validation_alias=AliasChoices("STATUS_HEARTBEAT_SEC", "status_heartbeat_sec"),
+    )
 
     @field_validator("discord_bot_token")
     @classmethod
@@ -141,7 +152,11 @@ class BotConfig(BaseSettings):
             raise ValueError(f"DISCORD_KEEPER_MAP is not valid JSON: {e}") from e
         return v
 
-    @field_validator("discord_binding_store_path", "discord_binding_audit_path")
+    @field_validator(
+        "discord_binding_store_path",
+        "discord_binding_audit_path",
+        "discord_status_path",
+    )
     @classmethod
     def validate_non_empty_path(cls, v: str) -> str:
         if not v.strip():
@@ -161,6 +176,7 @@ class BotConfig(BaseSettings):
         "keeper_cache_ttl_sec",
         "gate_breaker_failure_threshold",
         "gate_breaker_reset_sec",
+        "status_heartbeat_sec",
     )
     @classmethod
     def validate_non_negative_ints(cls, v: int) -> int:
@@ -193,6 +209,12 @@ class BotConfig(BaseSettings):
 
     def binding_audit_path(self) -> Path:
         path = Path(self.discord_binding_audit_path).expanduser()
+        if path.is_absolute():
+            return path
+        return Path.cwd() / path
+
+    def status_path(self) -> Path:
+        path = Path(self.discord_status_path).expanduser()
         if path.is_absolute():
             return path
         return Path.cwd() / path

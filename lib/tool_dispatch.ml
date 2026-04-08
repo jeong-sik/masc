@@ -37,22 +37,6 @@ let register_module ~(schemas : Types.tool_schema list) ~(handler : handler) =
         Hashtbl.replace registry schema.name handler)
       schemas)
 
-(** O(1) dispatch.  Returns [Some (success, message)] when a handler is
-    found, [None] when the tool name is unknown to the registry.
-    Handler exceptions are caught and returned as error tuples so the
-    caller gets a consistent result shape. *)
-let dispatch ~(token : Tool_token.t) ~args : (bool * string) option =
-  let name = token.name in
-  match Hashtbl.find_opt registry name with
-  | Some handler -> (
-      try handler ~name ~args
-      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-        Some
-          ( false,
-            Printf.sprintf "dispatch_v2 handler error for %s: %s" name
-              (Printexc.to_string exn) ))
-  | None -> None
-
 (** {2 Dispatch Hooks}
 
     Pre-hooks run before the handler; post-hooks run after.
@@ -106,25 +90,52 @@ let run_pre_hooks ~name ~args =
 let run_post_hooks result =
   List.fold_left (fun r hook -> hook r) result !post_hooks
 
+(** O(1) dispatch.  Returns [Some (success, message)] when a handler is
+    found, [None] when the tool name is unknown to the registry.
+    Handler exceptions are caught and returned as error tuples so the
+    caller gets a consistent result shape.
+
+    Post-hooks fire as a side-effect after the handler completes,
+    enabling tool metrics and usage logging for all dispatch paths
+    (keeper, MCP, tag-dispatch). *)
+let dispatch ~(token : Tool_token.t) ~args : (bool * string) option =
+  let name = token.name in
+  match Hashtbl.find_opt registry name with
+  | Some handler ->
+    let start_time = Time_compat.now () in
+    let result =
+      try handler ~name ~args
+      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+        Some
+          ( false,
+            Printf.sprintf "dispatch_v2 handler error for %s: %s" name
+              (Printexc.to_string exn) )
+    in
+    (match result with
+     | Some (success, message) ->
+       let tr = Tool_result.wrap ~tool_name:name ~start_time (success, message) in
+       ignore (run_post_hooks tr)
+     | None -> ());
+    result
+  | None -> None
+
 (** Structured dispatch with hook support.
 
-    Execution order: pre-hooks → handler → post-hooks.
+    Execution order: pre-hooks → handler (with post-hooks) → result wrapping.
 
-    If a pre-hook short-circuits, the handler and post-hooks are skipped
-    and the pre-hook's result is returned directly.
+    Post-hooks are already fired inside [dispatch], so this function only
+    adds pre-hook gating and [Tool_result.t] wrapping.
 
     Returns [None] when the tool is unknown to the registry. *)
 let dispatch_structured ~(token : Tool_token.t) ~args : Tool_result.t option =
   let name = token.name in
-  (* Pre-hooks: may short-circuit or coerce args *)
   match run_pre_hooks ~name ~args with
   | (Some _ as blocked, _) -> blocked
   | (None, coerced_args) ->
     let start_time = Time_compat.now () in
     (match dispatch ~token ~args:coerced_args with
      | Some (success, message) ->
-       let result = Tool_result.wrap ~tool_name:name ~start_time (success, message) in
-       Some (run_post_hooks result)
+       Some (Tool_result.wrap ~tool_name:name ~start_time (success, message))
      | None -> None)
 
 (** Feature flag: use the new dispatch path.

@@ -38,6 +38,13 @@ OAS  ──does not know──→ MASC
 - MASC 전용 요구가 생겨도, 먼저 MASC adapter/bridge로 해결 가능한지 본다.
 - OAS에 기능을 추가하더라도 MASC 전용 개념을 새 public contract로 밀어넣지 않는다.
 
+## Config Ownership
+
+- `config/cascade.json`은 **OAS cascade contract**를 따르는 설정 파일이다.
+- cascade schema, parsing, label semantics의 owner는 OAS다.
+- MASC는 그 contract를 재정의하지 않고, 이 저장소에 체크인할 repo-level default만 선택한다.
+- 따라서 runtime convenience label(예: `provider:auto`)은 OAS 차원에서 존재할 수 있지만, checked-in repo defaults는 review 안정성을 위해 explicit `provider:model_id`를 선호한다.
+
 ## Current Integration Status
 
 | Area | Status | Notes |
@@ -46,7 +53,7 @@ OAS  ──does not know──→ MASC
 | Event bus bridge | Complete for current `masc:*` flow | `oas_events.ml` publishes, `oas_sse_bridge.ml` relays to dashboard SSE |
 | Checkpoint integration | Partial complete | OAS checkpoint is used in shared worker/runtime paths, and the public OAS worker API now keeps the extra JSON as a neutral checkpoint sidecar. Keeper runtime still persists its own `working_context` / serialized checkpoint path in `lib/keeper/keeper_exec_context.ml` |
 | Memory bridge | Partial complete | long-term + procedural + institution episodic are bridged; broader memory unification is still separate |
-| Team-session swarm | Partial complete | OAS Swarm runner is active, delivery-contract persistence/verdict export now live, but bridge fidelity is still incomplete |
+| Team-session swarm | Partial complete | OAS Swarm runner is active; current bridge uses `swarm_config` / `agent_entry` + worker metadata with `collaboration_context=None`, but fidelity is still incomplete |
 
 ## Boundary Audit Snapshot
 
@@ -103,6 +110,19 @@ These stay in MASC:
 - “Context integration in progress” now means **broader state unification**, not compaction.
 - “Event_bus bridge planned” is no longer true for the current dashboard/SSE path.
 - “team_session pending migration” is no longer true; the correct description is **running on OAS Swarm with an incomplete bridge**.
+
+## Boundary Review Checklist
+
+Use this checklist when reviewing boundary-touching PRs:
+
+1. **OAS가 MASC를 새로 알게 되는가?**
+   - generic runtime/harness primitive가 아니라 room/task/governance/session semantics가 OAS public contract로 새어 나오면 안 된다.
+2. **MASC core가 provider/model 세부를 새로 배우는가?**
+   - model ID, vendor, token/cost detail은 OAS-facing adapter/bridge에 머물러야 한다.
+3. **문서 truth가 코드 truth와 일치하는가?**
+   - 특히 team-session, cascade labels, runtime-health semantics는 구현과 SSOT 문서가 함께 갱신되어야 한다.
+4. **Checked-in cascade labels are explicit enough for stable review**
+   - repository-default `config/cascade.json` entries should prefer explicit `provider:model_id` labels; runtime discovery/failsafe may still resolve local defaults elsewhere, but checked-in defaults should avoid ambiguous `provider:auto` labels.
 
 ## Boundary Rules for Future Work
 

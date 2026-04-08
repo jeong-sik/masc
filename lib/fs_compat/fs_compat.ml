@@ -104,7 +104,11 @@ let save_file_atomic (path : string) (content : string) : (unit, string) result 
     save_file tmp content;
     Sys.rename tmp path;
     Ok ()
-  with exn ->
+  with
+  | Eio.Cancel.Cancelled _ as e ->
+    (try Sys.remove tmp with Sys_error _ -> ());
+    raise e
+  | exn ->
     (try Sys.remove tmp with Sys_error _ -> ());
     Error (Printf.sprintf "save_file_atomic %s: %s" path (Printexc.to_string exn))
 

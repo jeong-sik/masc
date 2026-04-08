@@ -483,6 +483,7 @@
    keeper_hooks_oas
    keeper_extend_turns
    keeper_llm_bridge
+   keeper_tool_disclosure
    keeper_turn_telemetry
    keeper_agent_run
    keeper_world_observation

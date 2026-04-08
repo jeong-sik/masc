@@ -73,110 +73,7 @@ type run_result =
   ; inference_telemetry : Agent_sdk.Types.inference_telemetry option
   }
 
-let keeper_tool_usage_snapshot ~base_path ~keeper_name : (string * int) list =
-  Keeper_registry.tool_usage_of ~base_path keeper_name
-  |> List.map (fun (tool_name, entry) -> tool_name, entry.Keeper_types.count)
-  |> List.sort (fun (left, _) (right, _) -> String.compare left right)
-;;
-
-let tool_usage_delta ~(before : (string * int) list) ~(after : (string * int) list)
-  : string list
-  =
-  let before_counts = Hashtbl.create 16 in
-  List.iter
-    (fun (tool_name, count) -> Hashtbl.replace before_counts tool_name count)
-    before;
-  after
-  |> List.concat_map (fun (tool_name, after_count) ->
-    let before_count =
-      Option.value ~default:0 (Hashtbl.find_opt before_counts tool_name)
-    in
-    List.init (max 0 (after_count - before_count)) (fun _ -> tool_name))
-;;
-
-let merge_reported_and_observed_tool_names
-      ~(reported_tool_names : string list)
-      ~(observed_tool_names : string list)
-  : string list
-  =
-  match observed_tool_names with
-  | [] -> reported_tool_names
-  | _ ->
-    let observed = Hashtbl.create 16 in
-    List.iter (fun tool_name -> Hashtbl.replace observed tool_name ()) observed_tool_names;
-    observed_tool_names
-    @ List.filter
-        (fun tool_name -> not (Hashtbl.mem observed tool_name))
-        reported_tool_names
-;;
-
-let normalize_response_text ~(text : string) ~(tool_names : string list) ()
-  : (string, string) result
-  =
-  let trimmed = String.trim text in
-  if trimmed <> ""
-  then Ok text
-  else (
-    match tool_names with
-    | [] -> Error "keeper turn completed with no textual reply"
-    | _ ->
-      Ok
-        (Printf.sprintf
-           "Completed without a textual reply. Tools used: %s."
-           (String.concat ", " tool_names)))
-;;
-
-let tool_query_text_of_user_message (text : string) : string =
-  let allowed_sections =
-    [ "### Pending Mentions"
-    ; "### Scope Messages"
-    ; "### Active Goals"
-    ; "### Namespace State"
-    ; "### Board Activity"
-    ; "### Actionable Routes"
-    ; "### Live Worktree Delta"
-    ]
-  in
-  let is_allowed_section section =
-    List.exists
-      (fun allowed -> String.starts_with ~prefix:allowed section)
-      allowed_sections
-  in
-  let lines = String.split_on_char '\n' text in
-  let rec loop current_section kept = function
-    | [] ->
-      let filtered = List.rev kept |> String.concat "\n" |> String.trim in
-      if filtered <> "" then filtered else String.trim text
-    | line :: rest ->
-      let trimmed = String.trim line in
-      let current_section =
-        if String.starts_with ~prefix:"### " trimmed
-        then Some trimmed
-        else current_section
-      in
-      let keep_line =
-        match current_section with
-        | None -> String.starts_with ~prefix:"## Current World State" trimmed
-        | Some section -> is_allowed_section section
-      in
-      if keep_line
-      then loop current_section (line :: kept) rest
-      else loop current_section kept rest
-  in
-  loop None [] lines
-;;
-
-let merge_tool_selection_boundary
-    ~(core : string list)
-    ~(deterministic_prefilter : string list)
-    ~(llm_selected : string list)
-    ~(discovered : string list) : string list =
-  let sorted_discovered = List.sort String.compare discovered in
-  let deterministic_floor =
-    Keeper_types.dedupe_keep_order
-      (core @ deterministic_prefilter @ sorted_discovered)
-  in
-  Keeper_types.dedupe_keep_order (deterministic_floor @ llm_selected)
+(* Tool selection & disclosure — extracted to Keeper_tool_disclosure (#5732) *)
 
 (* Deterministic selection floor size: keep the executable surface small
    enough for prompt budgets while still surfacing a handful of relevant
@@ -477,7 +374,7 @@ let run_turn
   let extend_turns_tool = Keeper_extend_turns.make ~agent_ref ~max_turns () in
   let tools = extend_turns_tool :: keeper_tools in
   let tool_usage_before =
-    keeper_tool_usage_snapshot ~base_path:config.base_path ~keeper_name:meta.name
+    Keeper_tool_disclosure.keeper_tool_usage_snapshot ~base_path:config.base_path ~keeper_name:meta.name
   in
   (* Progressive tool disclosure via OAS Tool_selector.
      Delegates BM25 retrieval, confidence gating, fallback, and optional
@@ -990,7 +887,7 @@ let run_turn
               in
               let query_text =
                 (if String.trim last_user_text <> "" then last_user_text else user_message)
-                |> tool_query_text_of_user_message
+                |> Keeper_tool_disclosure.tool_query_text_of_user_message
               in
               let max_tools = max_tools_per_turn in
               let portal_ctx : Tool_portal.context = { config; agent_name = meta.name } in
@@ -1105,7 +1002,7 @@ let run_turn
                   | None -> []
                 in
                 let merged =
-                  merge_tool_selection_boundary
+                  Keeper_tool_disclosure.merge_tool_selection_boundary
                     ~core
                     ~deterministic_prefilter
                     ~llm_selected
@@ -1561,16 +1458,16 @@ let run_turn
            result.response.content
        in
        let tool_usage_after =
-         keeper_tool_usage_snapshot ~base_path:config.base_path ~keeper_name:meta.name
+         Keeper_tool_disclosure.keeper_tool_usage_snapshot ~base_path:config.base_path ~keeper_name:meta.name
        in
        let observed_tool_names =
-         tool_usage_delta ~before:tool_usage_before ~after:tool_usage_after
+         Keeper_tool_disclosure.tool_usage_delta ~before:tool_usage_before ~after:tool_usage_after
        in
        let tool_names =
-         merge_reported_and_observed_tool_names ~reported_tool_names ~observed_tool_names
+         Keeper_tool_disclosure.merge_reported_and_observed_tool_names ~reported_tool_names ~observed_tool_names
        in
        let usage = Keeper_exec_context.usage_of_response result.response in
-       (match normalize_response_text ~text ~tool_names () with
+       (match Keeper_tool_disclosure.normalize_response_text ~text ~tool_names () with
         | Error e -> Error (Oas.Error.Internal e)
         | Ok response_text ->
           (* Ensure every generation has a [STATE] block for continuity.

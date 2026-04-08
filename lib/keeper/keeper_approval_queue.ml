@@ -29,6 +29,42 @@ type decision = Oas.Hooks.approval_decision
 let mu = Eio.Mutex.create ()
 let pending : (string, pending_approval) Hashtbl.t = Hashtbl.create 8
 
+(* ── Persistent audit log ────────────────────────────────── *)
+
+(** Dated JSONL audit trail for approval events.
+    Stored at [<base_path>/.masc/audit-approvals/YYYY-MM/DD.jsonl].
+    Independent of Room.config — approval is a global resource. *)
+let audit_store_ref : Dated_jsonl.t option ref = ref None
+
+let get_audit_store () =
+  match !audit_store_ref with
+  | Some s -> Some s
+  | None ->
+    let base = Env_config_core.base_path () in
+    let dir = Filename.concat base ".masc/audit-approvals" in
+    (match Dated_jsonl.create ~base_dir:dir () with
+     | store ->
+       audit_store_ref := Some store;
+       Some store
+     | exception _ -> None)
+
+let audit_approval_event ~event_type ~id ~keeper_name ~tool_name
+    ~risk_level ?(decision="") () =
+  match get_audit_store () with
+  | None -> ()
+  | Some store ->
+    let json = `Assoc [
+      ("ts", `Float (Unix.gettimeofday ()));
+      ("event", `String event_type);
+      ("id", `String id);
+      ("keeper", `String keeper_name);
+      ("tool", `String tool_name);
+      ("risk", `String risk_level);
+      ("decision", `String decision);
+    ] in
+    (try Dated_jsonl.append store json
+     with _ -> ())
+
 let generate_id () =
   let entropy =
     Printf.sprintf "appr|%d|%.6f|%d"
@@ -56,6 +92,8 @@ let submit_and_await ~keeper_name ~tool_name ~input ~risk_level
   Log.Keeper.info
     "HITL_APPROVAL_PENDING: id=%s keeper=%s tool=%s risk=%s"
     id keeper_name tool_name risk_level;
+  audit_approval_event ~event_type:"pending" ~id ~keeper_name
+    ~tool_name ~risk_level ();
   (* Broadcast SSE event so dashboard picks it up *)
   (try
      Sse.broadcast
@@ -107,6 +145,9 @@ let resolve ~id ~(decision : Oas.Hooks.approval_decision) : (unit, string) resul
       Log.Keeper.info
         "HITL_APPROVAL_RESOLVED: id=%s keeper=%s tool=%s decision=%s"
         entry.id entry.keeper_name entry.tool_name decision_str;
+      audit_approval_event ~event_type:"resolved" ~id:entry.id
+        ~keeper_name:entry.keeper_name ~tool_name:entry.tool_name
+        ~risk_level:entry.risk_level ~decision:decision_str ();
       Eio.Promise.resolve entry.resolver decision;
       (* Broadcast resolution *)
       (try
@@ -165,5 +206,8 @@ let expire_stale ~max_wait_s =
         "approval timed out after %.0fs" (now -. entry.requested_at) in
       Log.Keeper.warn "HITL_APPROVAL_EXPIRED: id=%s keeper=%s tool=%s"
         id entry.keeper_name entry.tool_name;
+      audit_approval_event ~event_type:"expired" ~id
+        ~keeper_name:entry.keeper_name ~tool_name:entry.tool_name
+        ~risk_level:entry.risk_level ~decision:("reject:" ^ reason) ();
       Eio.Promise.resolve entry.resolver (Oas.Hooks.Reject reason)
     ) stale)

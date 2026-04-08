@@ -234,6 +234,7 @@ let dispatch (ctx : context) ~(name : string) : result option =
       in
       let runtime_model_valid =
         match (spawn_agent_name, model_name) with
+        (* Stable provider name — see Provider_adapter.cn_llama *)
         | "llama", None -> Error "model is required when agent_name=llama"
         | "llama", Some raw ->
             let spec_name =

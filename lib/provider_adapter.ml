@@ -968,9 +968,13 @@ let auth_detail_of_provider provider =
 
 (** Classify a model into a family bucket based on locality and context window.
     Shared SSOT to avoid duplication across oas_events and dashboard modules. *)
+
+let small_local_context_ceiling = 64_000
+let large_cloud_context_floor = 200_000
+
 let classify_model_family ~is_local ~context_window =
-  if is_local && context_window < 64_000 then "small_local"
-  else if context_window >= 200_000 then "large_cloud"
+  if is_local && context_window < small_local_context_ceiling then "small_local"
+  else if context_window >= large_cloud_context_floor then "large_cloud"
   else "medium_cloud"
 
 (* is_spawnable removed: use is_spawnable_agent directly. *)

@@ -600,12 +600,14 @@ let handle_get_mcp ~deps ?legacy_messages_endpoint ?(profile = Full)
                          stop_sse_session info.session_id);
                       loop ())
                   in
-                  try loop () with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-                    if is_cancelled exn then ()
-                    else
-                      Log.Server.error "ping loop error: %s"
-                        (Printexc.to_string exn))
-          | Error _ -> ());
+                   try loop () with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+                     if is_cancelled exn then ()
+                     else
+                       Log.Server.error "ping loop error: %s"
+                         (Printexc.to_string exn))
+          | Error msg ->
+              Log.Server.debug "SSE runtime unavailable for session %s: %s"
+                session_id msg);
           let client_count = Sse.client_count () in
           if client_count > Sse.max_clients / 2 then
             Log.Server.info "SSE connected: %s (active: %d/%d)"
@@ -748,14 +750,17 @@ let handle_delete_mcp ~deps ?(profile = Full) request reqd =
                   in
                   Httpun.Reqd.respond_with_string reqd response body
               | Ok () ->
-              stop_sse_session session_id;
-              Sse.unregister session_id;
-              (match request_runtime_result deps with
-              | Ok runtime ->
-                  runtime.clear_resource_subscriptions_for_session session_id
-              | Error _ -> ());
-              forget_mcp_session session_id;
-              Log.info ~ctx:"mcp_transport" "Session terminated: %s" session_id;
+               stop_sse_session session_id;
+               Sse.unregister session_id;
+               (match request_runtime_result deps with
+               | Ok runtime ->
+                   runtime.clear_resource_subscriptions_for_session session_id
+               | Error msg ->
+                   Log.Server.debug
+                     "skip resource subscription cleanup for session %s: %s"
+                     session_id msg);
+               forget_mcp_session session_id;
+               Log.info ~ctx:"mcp_transport" "Session terminated: %s" session_id;
               let headers =
                 Httpun.Headers.of_list
                   (("content-length", "0")

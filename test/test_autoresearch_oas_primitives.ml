@@ -161,7 +161,7 @@ let test_cycle_reinjects_diff_guard_lesson () =
     }
   in
   Lib.Tool_autoresearch_registry.set_generator state.loop_id
-    (fun ~goal:_ ~baseline:_ ~history:_ ~insights:_ ~target_file:_ ~file_content:_ ->
+    (fun ~goal:_ ~baseline:_ ~lower_is_better:_ ~history:_ ~insights:_ ~target_file:_ ~file_content:_ ->
        Ok ("tighten main", "changed\n"));
   write_file (Filename.concat repo "notes.txt") "drifted\n";
   let first =
@@ -180,7 +180,7 @@ let test_cycle_reinjects_diff_guard_lesson () =
   write_file (Filename.concat repo "notes.txt") "notes\n";
   let captured_goal = ref None in
   Lib.Tool_autoresearch_registry.set_generator state.loop_id
-    (fun ~goal ~baseline:_ ~history:_ ~insights:_ ~target_file:_ ~file_content ->
+    (fun ~goal ~baseline:_ ~lower_is_better:_ ~history:_ ~insights:_ ~target_file:_ ~file_content ->
        captured_goal := Some goal;
        Ok ("reuse lesson", file_content));
   let second =
@@ -238,7 +238,7 @@ let test_build_verify_downgrade_rewrites_history () =
     }
   in
   Lib.Tool_autoresearch_registry.set_generator state.loop_id
-    (fun ~goal:_ ~baseline:_ ~history:_ ~insights:_ ~target_file:_ ~file_content:_ ->
+    (fun ~goal:_ ~baseline:_ ~lower_is_better:_ ~history:_ ~insights:_ ~target_file:_ ~file_content:_ ->
        Ok ("optimistic keep", "changed-once\n"));
   let first =
     Lib.Tool_autoresearch_cycle.handle_cycle ctx
@@ -270,7 +270,7 @@ let test_build_verify_downgrade_rewrites_history () =
     (Lib.Autoresearch.decision_to_string history_head.decision);
   let captured_history = ref None in
   Lib.Tool_autoresearch_registry.set_generator state.loop_id
-    (fun ~goal:_ ~baseline:_ ~history ~insights:_ ~target_file:_ ~file_content:_ ->
+    (fun ~goal:_ ~baseline:_ ~lower_is_better:_ ~history ~insights:_ ~target_file:_ ~file_content:_ ->
        captured_history := Some history;
        Ok ("second pass", "changed-twice\n"));
   let second =
@@ -397,7 +397,7 @@ let test_cycle_restores_ignored_target_after_empty_diff () =
     }
   in
   Lib.Tool_autoresearch_registry.set_generator state.loop_id
-    (fun ~goal:_ ~baseline:_ ~history:_ ~insights:_ ~target_file:_ ~file_content:_ ->
+    (fun ~goal:_ ~baseline:_ ~lower_is_better:_ ~history:_ ~insights:_ ~target_file:_ ~file_content:_ ->
        Ok ("ignored file edit", "changed\n"));
   let result =
     Lib.Tool_autoresearch_cycle.handle_cycle ctx

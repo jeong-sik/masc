@@ -312,6 +312,7 @@ let handle_cycle (ctx : Tool_autoresearch_repo_synthesis.context) args =
             generate
               ~goal:(Printf.sprintf "%s\n\nApply this hypothesis: %s" goal_with_feedback h)
               ~baseline:state.baseline
+              ~lower_is_better:state.lower_is_better
               ~history:state.history
               ~insights:state.insights
               ~target_file
@@ -321,6 +322,7 @@ let handle_cycle (ctx : Tool_autoresearch_repo_synthesis.context) args =
             generate
               ~goal:goal_with_feedback
               ~baseline:state.baseline
+              ~lower_is_better:state.lower_is_better
               ~history:state.history
               ~insights:state.insights
               ~target_file
@@ -568,7 +570,11 @@ let handle_cycle (ctx : Tool_autoresearch_repo_synthesis.context) args =
                            check_patience_limit state
                          | Autoresearch.Keep ->
                            let state = { state with consecutive_discards = 0 } in
-                           if score_after >= state.best_score then
+                           let is_tag_worthy =
+                             if state.lower_is_better then score_after <= state.best_score
+                             else score_after >= state.best_score
+                           in
+                           if is_tag_worthy then
                              Autoresearch.git_tag_best ~workdir
                                ~cycle:state.current_cycle ~score:score_after;
                            state

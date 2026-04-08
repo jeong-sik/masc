@@ -11,7 +11,8 @@ let schemas : Types.tool_schema list = [
 a metric. Each cycle: read file -> LLM generates change -> measure -> keep if improved, \
 discard if not. Runs autonomously until max_cycles or stopped. Returns loop_id. \
 For team-coordinated research with multiple workers, use masc_autoresearch_swarm_start. \
-Requires: goal, metric_fn (shell command outputting a float), target_file.";
+Requires: goal, metric_fn (shell command outputting a float), target_file. \
+Set lower_is_better=true for metrics where lower values are better (e.g., loss, BPB).";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -22,7 +23,7 @@ Requires: goal, metric_fn (shell command outputting a float), target_file.";
         ("metric_fn", `Assoc [
           ("type", `String "string");
           ("description", `String "Shell command that outputs a single float on its last line \
-(e.g. 'python eval.py --metric accuracy'). Higher is better.");
+(e.g. 'python eval.py --metric accuracy'). Higher is better by default; set lower_is_better=true to invert.");
         ]);
         ("workdir", `Assoc [
           ("type", `String "string");
@@ -44,6 +45,10 @@ Requires: goal, metric_fn (shell command outputting a float), target_file.";
         ("model_model", `Assoc [
           ("type", `String "string");
           ("description", `String "Model label for code change generation (uses cascade default)");
+        ]);
+        ("lower_is_better", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "When true, lower metric values are better (e.g., loss, BPB). Default: false (higher is better).");
         ]);
         ("target_file", `Assoc [
           ("type", `String "string");
@@ -104,6 +109,10 @@ session tools.";
         ("model_model", `Assoc [
           ("type", `String "string");
           ("description", `String "Model label for code change generation (uses cascade default)");
+        ]);
+        ("lower_is_better", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "When true, lower metric values are better (e.g., loss, BPB). Default: false.");
         ]);
       ]);
       ("required", `List [`String "goal"; `String "metric_fn"; `String "target_file"]);

@@ -171,14 +171,14 @@ Next ==
         \/ TurnTimeout(k)
     \/ \E p \in P : HealthToggle(p)
 
-\* Fairness on keeper actions only — HealthToggle is an environment action.
-\* WF on TurnTimeout ensures stuck keepers eventually time out.
-KeeperActions(k) ==
+\* Fairness on progress actions only.
+\* TurnTimeout and HealthToggle are environment/adversary actions — NOT fair.
+\* TurnTimeout models a wall-clock timer that MAY fire, not one that MUST.
+ProgressActions(k) ==
     \/ Admit(k) \/ TryProvider(k) \/ TryLastProvider(k) \/ Unblock(k)
     \/ ProviderOk(k) \/ ProviderErrorCascade(k) \/ ProviderErrorFinal(k)
-    \/ TurnTimeout(k)
 
-Fairness == \A k \in K : WF_vars(KeeperActions(k))
+Fairness == \A k \in K : WF_vars(ProgressActions(k))
 
 Spec == Init /\ [][Next]_vars /\ Fairness
 
@@ -201,9 +201,17 @@ AdmittedOK ==
 
 \* ── Liveness ───────────────────────────────────────────
 
-\* Every keeper eventually terminates
+\* Every keeper eventually terminates.
+\* Requires SF on TurnTimeout: stuck keepers are rescued by wall-clock timeout.
+\* WF on ProgressActions alone is insufficient because a keeper waiting on an
+\* unhealthy last provider has no enabled progress action.
 EventualTermination ==
     \A k \in K : kstate[k] = "idle" ~> kstate[k] \in {"done", "timeout"}
+
+\* Spec with liveness: progress actions are fair, AND timeouts eventually fire
+\* for continuously stuck keepers (SF = strong fairness).
+FairnessWithTimeout == Fairness /\ (\A k \in K : SF_vars(TurnTimeout(k)))
+SpecLive == Init /\ [][Next]_vars /\ FairnessWithTimeout
 
 \* ── Bug Model: Timeout without slot release ────────────
 
@@ -226,12 +234,11 @@ NextBuggy ==
         \/ BuggyTurnTimeout(k)
     \/ \E p \in P : HealthToggle(p)
 
-BuggyKeeperActions(k) ==
+BuggyProgressActions(k) ==
     \/ Admit(k) \/ TryProvider(k) \/ TryLastProvider(k) \/ Unblock(k)
     \/ ProviderOk(k) \/ ProviderErrorCascade(k) \/ ProviderErrorFinal(k)
-    \/ BuggyTurnTimeout(k)
 
-FairnessBuggy == \A k \in K : WF_vars(BuggyKeeperActions(k))
+FairnessBuggy == \A k \in K : WF_vars(BuggyProgressActions(k))
 
 SpecBuggy == Init /\ [][NextBuggy]_vars /\ FairnessBuggy
 

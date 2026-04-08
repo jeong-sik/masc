@@ -393,7 +393,9 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
      in instructions. *)
   let allowed_tools = Keeper_tool_policy.keeper_allowed_tool_names meta in
   if allowed_tools <> [] then (
-    Buffer.add_string ubuf "\n### Available Tools\n";
+    Buffer.add_string ubuf "\n### Available Tools\n\
+      These tools are already loaded. Call them directly — no keeper_tool_search needed.\n\
+      Use keeper_tool_search ONLY for tools NOT listed here.\n";
     List.iter (fun name ->
       match Keeper_tool_policy.tool_hint_of name with
       | Some hint ->

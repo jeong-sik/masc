@@ -215,12 +215,9 @@ let masc_call ~sw:_ ~tool_name ~(args : Yojson.Safe.t) : (string, string) result
           (* Extract MCP tool text: result.content[0].text *)
           try
             let json = Yojson.Safe.from_string body_str in
-            let txt =
-              match json |> member "result" |> member "content" |> to_list with
-              | item :: _ -> item |> member "text" |> to_string
-              | [] -> raise (Failure "empty content list")
-            in
-            Ok txt
+            match json |> member "result" |> member "content" |> to_list with
+            | item :: _ -> Ok (item |> member "text" |> to_string)
+            | [] -> Error "empty content list"
           with
           | Eio.Cancel.Cancelled _ as e -> raise e
           | exn ->

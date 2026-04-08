@@ -262,14 +262,21 @@ def test_legacy_compat_properties_mirror_gate_fields() -> None:
 
 
 def test_legacy_import_shim_emits_deprecation_warning() -> None:
+    import sys
+
+    # Evict cached module so the top-level warnings.warn fires again.
+    sys.modules.pop("src.masc_client", None)
+
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
-        from src.masc_client import GateResponse as _GR, MascGateClient  # noqa: F811
+        import importlib
+        import src.masc_client as _mc  # noqa: F811
+        importlib.reload(_mc)  # force re-execution if still cached
         dep_warnings = [x for x in w if issubclass(x.category, DeprecationWarning)]
         assert len(dep_warnings) >= 1
         assert "deprecated" in str(dep_warnings[0].message).lower()
-    assert MascGateClient is GateClient
-    response = _GR.from_error("timeout")
+    assert _mc.MascGateClient is GateClient
+    response = _mc.GateResponse.from_error("timeout")
     assert response.ok is False
     assert response.error == "timeout"
 

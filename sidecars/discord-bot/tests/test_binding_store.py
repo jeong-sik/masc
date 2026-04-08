@@ -39,7 +39,7 @@ def test_binding_store_ignores_invalid_json(tmp_path: Path) -> None:
 def test_config_resolves_relative_binding_store_path(tmp_path: Path) -> None:
     cfg = BotConfig(
         discord_bot_token="test-token",
-        masc_api_token="test-api-token",
+        gate_api_token="test-api-token",
         discord_binding_store_path="state/discord.json",
         discord_binding_audit_path="audit/discord.jsonl",
     )

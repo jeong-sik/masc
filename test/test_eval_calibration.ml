@@ -37,7 +37,7 @@ let make_req ?(title = "Fix auth bug") ?(desc = "Fix the login issue")
     completion_notes = notes; agent_name = agent }
 
 let make_result ?(verdict = AR.Approve) ?(cascade = "verifier")
-    ?gen_cascade ?(gate = "llm") ?fallback_reason () : AR.review_result =
+    ?gen_cascade ?(gate = AR.Structured_tool) ?fallback_reason () : AR.review_result =
   { verdict; evaluator_cascade = cascade;
     generator_cascade = gen_cascade; gate; fallback_reason }
 
@@ -85,7 +85,7 @@ let test_record_verdict_reject () =
   let dir = tmpdir () in
   Cal.set_store_for_testing ~base_dir:dir;
   let req = make_req () in
-  let result = make_result ~verdict:(AR.Reject "vague notes") ~gate:"excuse" () in
+  let result = make_result ~verdict:(AR.Reject "vague notes") ~gate:AR.Excuse () in
   Cal.record_verdict ~task_id:"task-2" ~req ~result ();
   let store = Cal.get_store () in
   let records = Dated_jsonl.read_recent store 10 in
@@ -142,7 +142,7 @@ let test_find_divergences_false_positive () =
   let dir = tmpdir () in
   Cal.set_store_for_testing ~base_dir:dir;
   let req = make_req ~title:"FP task" ~notes:"looks ok but not" () in
-  let result = make_result ~verdict:AR.Approve ~gate:"llm" () in
+  let result = make_result ~verdict:AR.Approve ~gate:AR.Structured_tool () in
   Cal.record_verdict ~task_id:"t1" ~req ~result ();
   let hash = Cal.notes_hash ~task_title:"FP task" ~notes:"looks ok but not" in
   Cal.record_human_label
@@ -161,7 +161,7 @@ let test_find_divergences_false_negative () =
   let dir = tmpdir () in
   Cal.set_store_for_testing ~base_dir:dir;
   let req = make_req ~title:"FN task" ~notes:"actually good work" () in
-  let result = make_result ~verdict:(AR.Reject "unclear") ~gate:"excuse" () in
+  let result = make_result ~verdict:(AR.Reject "unclear") ~gate:AR.Excuse () in
   Cal.record_verdict ~task_id:"t2" ~req ~result ();
   let hash = Cal.notes_hash ~task_title:"FN task" ~notes:"actually good work" in
   Cal.record_human_label
@@ -263,13 +263,13 @@ let test_calibration_stats () =
   (* 2 approvals, 1 rejection *)
   let req1 = make_req ~title:"t1" ~notes:"n1" () in
   Cal.record_verdict ~task_id:"id1" ~req:req1
-    ~result:(make_result ~verdict:AR.Approve ~gate:"llm" ()) ();
+    ~result:(make_result ~verdict:AR.Approve ~gate:AR.Structured_tool ()) ();
   let req2 = make_req ~title:"t2" ~notes:"n2" () in
   Cal.record_verdict ~task_id:"id2" ~req:req2
-    ~result:(make_result ~verdict:AR.Approve ~gate:"length" ()) ();
+    ~result:(make_result ~verdict:AR.Approve ~gate:AR.Length ()) ();
   let req3 = make_req ~title:"t3" ~notes:"n3" () in
   Cal.record_verdict ~task_id:"id3" ~req:req3
-    ~result:(make_result ~verdict:(AR.Reject "bad") ~gate:"excuse" ()) ();
+    ~result:(make_result ~verdict:(AR.Reject "bad") ~gate:AR.Excuse ()) ();
   let stats = Cal.calibration_stats () in
   let total = Yojson.Safe.Util.(stats |> member "total_verdicts" |> to_int) in
   let approves = Yojson.Safe.Util.(stats |> member "approve_count" |> to_int) in

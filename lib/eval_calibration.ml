@@ -156,7 +156,7 @@ let record_verdict
     task_title = req.task_title;
     agent_name = req.agent_name;
     verdict = verdict_str;
-    gate = result.gate;
+    gate = Anti_rationalization.gate_to_string result.gate;
     evaluator_cascade = result.evaluator_cascade;
     generator_cascade = result.generator_cascade;
     fallback_reason = result.fallback_reason;

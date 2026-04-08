@@ -28,13 +28,27 @@ type verdict =
   | Approve
   | Reject of string
 
+(** Which gate produced the verdict. Variant type prevents typos that
+    would silently compile with a stringly-typed field. *)
+type gate =
+  | Length
+  | Excuse
+  | Contract
+  | Structured_tool
+  | Llm_text_fallback
+  | Format_reject
+  | Fallback
+
+val gate_to_string : gate -> string
+val gate_of_string : string -> (gate, string) result
+
 (** Structured review result with audit metadata for cross-model tracking. *)
 type review_result = {
   verdict : verdict;
   evaluator_cascade : string;
   generator_cascade : string option;
-  gate : string;
-  fallback_reason : string option;  (** Error message when gate="fallback" *)
+  gate : gate;
+  fallback_reason : string option;  (** Error message when gate=Fallback *)
 }
 
 (** Review a task completion claim with optional cross-model separation.

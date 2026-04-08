@@ -67,6 +67,16 @@ let parse_iso_timestamp (s : string) : float option =
               None
         | _ -> None
   in
+  let parse_fraction_seconds raw =
+    if not (all_digits raw) then None
+    else
+      let numerator =
+        String.fold_left
+          (fun acc ch -> (acc *. 10.0) +. float_of_int (Char.code ch - Char.code '0'))
+          0.0 raw
+      in
+      Some (numerator /. (10.0 ** float_of_int (String.length raw)))
+  in
   let split_timezone raw =
     let len = String.length raw in
     if len = 0 then None
@@ -74,20 +84,15 @@ let parse_iso_timestamp (s : string) : float option =
       match raw.[len - 1] with
       | 'Z' | 'z' -> Some (String.sub raw 0 (len - 1), Some 0)
       | _ ->
-          let rec find idx =
-            if idx < 19 then None
-            else
-              match raw.[idx] with
-              | '+' | '-' -> Some idx
-              | _ -> find (idx - 1)
+          let suffix_opt width =
+            if len > width then Some (String.sub raw (len - width) width) else None
           in
-          (match find (len - 1) with
-          | Some idx -> (
-              match parse_tz_offset (String.sub raw idx (len - idx)) with
-              | Some offset ->
-                  Some (String.sub raw 0 idx, Some offset)
-              | None -> None)
-          | None -> Some (raw, None))
+          (match Option.bind (suffix_opt 6) parse_tz_offset with
+          | Some offset -> Some (String.sub raw 0 (len - 6), Some offset)
+          | None -> (
+              match Option.bind (suffix_opt 5) parse_tz_offset with
+              | Some offset -> Some (String.sub raw 0 (len - 5), Some offset)
+              | None -> Some (raw, None)))
   in
   let split_fraction raw =
     match String.index_opt raw '.' with
@@ -95,8 +100,8 @@ let parse_iso_timestamp (s : string) : float option =
     | Some dot ->
         let main = String.sub raw 0 dot in
         let fraction = String.sub raw (dot + 1) (String.length raw - dot - 1) in
-        if String.length main <> 19 || not (all_digits fraction) then None
-        else Some (main, float_of_string ("0." ^ fraction))
+        if String.length main <> 19 then None
+        else Option.map (fun fraction_s -> (main, fraction_s)) (parse_fraction_seconds fraction)
   in
   let parse_main raw =
     if String.length raw <> 19 then None

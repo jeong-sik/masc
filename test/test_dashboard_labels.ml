@@ -118,6 +118,18 @@ let test_parse_iso_timestamp_local_without_timezone_is_supported () =
   | None ->
       Alcotest.fail "expected dashboard parser to accept bare local timestamps"
 
+let test_parse_iso_timestamp_empty_rejected () =
+  Alcotest.(check (option (float 0.001))) "empty timestamps are rejected" None
+    (Lib.Dashboard_labels.parse_iso_timestamp "")
+
+let test_parse_iso_timestamp_garbage_rejected () =
+  Alcotest.(check (option (float 0.001))) "garbage timestamps are rejected" None
+    (Lib.Dashboard_labels.parse_iso_timestamp "garbage")
+
+let test_parse_iso_timestamp_partial_rejected () =
+  Alcotest.(check (option (float 0.001))) "partial timestamps are rejected" None
+    (Lib.Dashboard_labels.parse_iso_timestamp "2026-04-08")
+
 let test_idle_agent () =
   let now = Unix.gettimeofday () in
   let result =
@@ -324,6 +336,12 @@ let () =
             test_parse_iso_timestamp_fractional_offset_matches_utc);
           ("bare local timestamp", `Quick,
             test_parse_iso_timestamp_local_without_timezone_is_supported);
+          ("empty timestamp rejected", `Quick,
+            test_parse_iso_timestamp_empty_rejected);
+          ("garbage timestamp rejected", `Quick,
+            test_parse_iso_timestamp_garbage_rejected);
+          ("partial timestamp rejected", `Quick,
+            test_parse_iso_timestamp_partial_rejected);
           ("idle agent", `Quick, test_idle_agent);
           ("offline agent", `Quick, test_offline_agent);
         ] );

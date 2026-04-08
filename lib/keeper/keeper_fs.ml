@@ -44,35 +44,18 @@ let clear_dir_cache () : unit =
 (* ================================================================ *)
 
 (** Atomically save [content] to [path].
-    Writes to a temporary file first, then renames. On POSIX systems
-    rename(2) is atomic within the same filesystem, so readers never
-    see a partially-written file.
+    Delegates to {!Fs_compat.save_file_atomic} (Eio-aware, re-raises
+    [Eio.Cancel.Cancelled]).  Ensures the parent directory exists first.
 
     @raises Sys_error on I/O failure *)
 let save_atomic (path : string) (content : string) : unit =
   let dir = Filename.dirname path in
   ignore (ensure_dir dir);
-  let tmp_path, oc =
-    Filename.open_temp_file ~temp_dir:dir (Filename.basename path ^ ".") ".tmp"
-  in
-  let closed = ref false in
-  let renamed = ref false in
-  Fun.protect ~finally:(fun () ->
-    if not !closed then begin
-      close_out_noerr oc;
-      closed := true
-    end;
-    if not !renamed then begin
-      Log.Keeper.warn "keeper_fs: save_atomic failed path=%s tmp=%s"
-        path tmp_path;
-      try Sys.remove tmp_path with Sys_error _ -> ()
-    end)
-    (fun () ->
-      output_string oc content;
-      close_out oc;
-      closed := true;
-      Unix.rename tmp_path path;
-      renamed := true)
+  match Fs_compat.save_file_atomic path content with
+  | Ok () -> ()
+  | Error msg ->
+    Log.Keeper.warn "keeper_fs: save_atomic failed path=%s error=%s" path msg;
+    raise (Sys_error msg)
 
 (** Atomically save a Yojson value as pretty-printed JSON. *)
 let save_json_atomic (path : string) (json : Yojson.Safe.t) : unit =

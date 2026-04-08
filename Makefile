@@ -7,7 +7,7 @@
 all: build-all
 
 # Build OCaml + dashboard (dashboard rebuilds only when sources changed)
-build:
+build: doctor-oas-pin
 	dune build --root .
 	@scripts/build-dashboard-if-needed.sh
 
@@ -23,11 +23,10 @@ dev-dashboard:
 build-all: build
 
 # Run tests (alias for test-unit)
-test:
-	scripts/ci-run-tests.sh "opam exec -- dune test --root ."
+test: test-unit
 
 # Unit tests only (no server required)
-test-unit:
+test-unit: doctor-oas-pin
 	scripts/ci-run-tests.sh "opam exec -- dune test --root ."
 
 # Contract harness (self-bootstrapping, hermetic local server)

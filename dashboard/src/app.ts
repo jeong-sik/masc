@@ -76,7 +76,7 @@ export function App() {
     <div class="flex min-h-screen h-screen flex-col overflow-hidden bg-[var(--bg-0)] bg-[radial-gradient(ellipse_at_top,rgba(25,40,70,0.3)_0%,rgba(11,18,32,1)_80%)] text-[var(--text-body)]">
       <header class="relative z-10 shrink-0 border-b border-[rgba(255,255,255,0.06)] bg-[rgba(8,14,26,0.44)] px-4 py-2 backdrop-blur-xl">
         <div class="absolute inset-x-0 bottom-0 h-[1px] bg-gradient-to-r from-transparent via-[rgba(71,184,255,0.15)] to-transparent"></div>
-        <div class="mx-auto flex w-full max-w-[1600px] items-center justify-between gap-4 max-[860px]:flex-col max-[860px]:items-stretch">
+        <div class="flex w-full items-center justify-between gap-4 max-[860px]:flex-col max-[860px]:items-stretch">
           <div class="min-w-0">
             <div class="flex items-center gap-4">
               <button type="button"
@@ -123,7 +123,7 @@ export function App() {
         </aside>
 
         <main class="min-w-0 flex-1 overflow-hidden rounded-xl border border-[rgba(255,255,255,0.06)] bg-[rgba(10,15,26,0.68)] backdrop-blur-lg max-[1100px]:min-h-0">
-          <div class="mx-auto h-full max-w-[1600px] overflow-y-auto p-4">
+          <div class="h-full overflow-y-auto p-4">
             <${DashboardMain} />
           </div>
         </main>

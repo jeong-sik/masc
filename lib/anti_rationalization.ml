@@ -100,8 +100,9 @@ let load_excuse_patterns () : (string * string) list =
     let patterns =
       try
         let path = excuse_patterns_path () in
-        if Sys.file_exists path then
-          let json = Yojson.Safe.from_file path in
+        if Fs_compat.file_exists path then
+          let content = Fs_compat.load_file path in
+          let json = Yojson.Safe.from_string content in
           match parse_excuse_patterns_json json with
           | Ok p -> p
           | Error msg ->
@@ -126,13 +127,14 @@ let save_excuse_patterns (patterns : (string * string) list) : (unit, string) re
     let json_items = List.map (fun (pat, reason) -> `List [`String pat; `String reason]) patterns in
     let json = `List json_items in
     let tmp = path ^ ".tmp" in
-    Yojson.Safe.to_file tmp json;
+    let content = Yojson.Safe.pretty_to_string json in
+    Fs_compat.save_file tmp content;
     Sys.rename tmp path;
     cached_patterns := Some patterns;
     Ok ()
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | _exn -> Error "Failed to save excuse patterns"
+  | exn -> Error (Printf.sprintf "Failed to save excuse patterns: %s" (Printexc.to_string exn))
 
 let min_notes_length = 10
 

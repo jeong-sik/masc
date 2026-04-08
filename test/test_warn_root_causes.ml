@@ -44,7 +44,7 @@ let write_vcs_tools =
 (* ── Test 1: Core discovery tools respect preset ──────────────── *)
 
 let test_core_tools_filtered_by_research_preset () =
-  init_registry ();
+  ignore (init_registry ());
   let meta =
     { (make_meta ~name:"test-research" ()) with
       tool_access = Preset { preset = Research; also_allow = [] };
@@ -68,7 +68,7 @@ let test_core_tools_filtered_by_research_preset () =
   ) Keeper_tool_registry.core_always_tools
 
 let test_core_tools_filtered_by_social_preset () =
-  init_registry ();
+  ignore (init_registry ());
   let meta =
     { (make_meta ~name:"test-social" ()) with
       tool_access = Preset { preset = Social; also_allow = [] };
@@ -79,7 +79,7 @@ let test_core_tools_filtered_by_social_preset () =
     fail "keeper_fs_edit should be excluded for social preset"
 
 let test_core_tools_include_write_for_coding_preset () =
-  init_registry ();
+  ignore (init_registry ());
   let meta =
     { (make_meta ~name:"test-coding" ()) with
       tool_access = Preset { preset = Coding; also_allow = [] };

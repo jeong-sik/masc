@@ -764,7 +764,7 @@ let tool_result_msg ?(id = "tool-1") text : Agent_sdk.Types.message =
     content =
       [
         Agent_sdk.Types.ToolResult
-          { tool_use_id = id; content = text; is_error = false};
+          { tool_use_id = id; content = text; is_error = false; json = None };
       ];
     name = None;
     tool_call_id = None;

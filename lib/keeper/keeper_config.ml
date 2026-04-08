@@ -442,7 +442,7 @@ let normalize_compaction_token_gate (v : int) : int =
 let normalize_continuity_compaction_cooldown_sec (v : int) : int =
   clamp_int v ~min_v:0 ~max_v:172800
 
-let default_compaction_profile = "custom"
+let default_compaction_profile = "balanced"
 
 let canonical_compaction_profile raw =
   match String.lowercase_ascii (String.trim raw) with

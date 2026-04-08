@@ -20,7 +20,7 @@ let emergency_compact_ratio_threshold = 0.8
     ratio exceeds [tool_heavy_ratio_floor], trigger compaction to
     stub old tool results. Prevents slow inference on local LLMs
     when many tool calls accumulate without hitting other gates. *)
-let tool_heavy_msg_threshold = 40
+let tool_heavy_msg_threshold = 20
 let tool_heavy_ratio_floor = 0.15
 
 let compaction_policy_of_keeper (meta : keeper_meta) : float * int * int =

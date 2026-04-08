@@ -315,7 +315,7 @@ export function SessionTraceEntry({ event }: { event: UnifiedTraceEvent }) {
     <details class="rounded-lg hover:bg-[var(--white-3)] transition-colors group">
       <summary class="list-none cursor-pointer relative pr-8">
         ${row}
-        <div class="absolute right-3 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div class="absolute right-3 top-1/2 -translate-y-1/2 opacity-40 group-hover:opacity-100 transition-opacity">
           <svg class="w-4 h-4 text-[var(--text-muted)] group-open:rotate-90 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
           </svg>

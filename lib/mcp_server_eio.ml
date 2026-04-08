@@ -67,12 +67,13 @@ type mcp_session_record = Mcp_server_eio_governance.mcp_session_record = {
 let mcp_session_to_json = Mcp_server_eio_governance.mcp_session_to_json
 let mcp_session_of_json = Mcp_server_eio_governance.mcp_session_of_json
 
-(** {1 Tool Lists — inline sub-library tools only}
+(** {1 Tool Lists — inline sub-library tools plus keeper read-only fallback}
 
     Most tools register read_only/requires_join via Tool_spec.register
     in their own modules. These lists cover only tools from
     Tool_schemas_inline (lib/tool_schemas/ sub-library) which cannot
-    depend on Tool_spec. *)
+    depend on Tool_spec, plus keeper read-only tools declared via
+    Tool_shard schemas. *)
 
 let read_only_tools_inline =
   ["masc_status"; "masc_who"; "masc_messages"]
@@ -84,7 +85,9 @@ let mcp_context_required_tools_inline =
   Tool_schemas_inline.schemas
   |> List.map (fun (schema : Types.tool_schema) -> schema.name)
 
-let () = Tool_dispatch.init_read_only_set read_only_tools_inline
+let () =
+  Tool_dispatch.init_read_only_set
+    (read_only_tools_inline @ Keeper_exec_tools.keeper_read_only_tools)
 let () = Tool_dispatch.init_requires_join_set requires_join_tools_inline
 let () = Tool_dispatch.init_mcp_context_required_set mcp_context_required_tools_inline
 (* Tools whose arguments contain executable commands subject to

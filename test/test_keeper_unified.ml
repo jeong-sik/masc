@@ -1480,6 +1480,40 @@ let test_side_effect_reclassification_marks_any_post_commit_error () =
   check bool "auth error becomes ambiguous partial" true
     (UT.is_ambiguous_side_effect_error reclassified)
 
+let test_side_effect_reclassification_ignores_keeper_read_only_tools () =
+  let original =
+    Agent_sdk.Error.Api
+      (Timeout { message = "Execution cancelled after 300.0s" })
+  in
+  let reclassified =
+    UT.reclassify_error_after_side_effect
+      ~tool_names:["keeper_tasks_list"; "keeper_memory_search"] original
+  in
+  check bool "read-only keeper tools stay transient" true
+    (UT.is_transient_network_error reclassified);
+  check bool "read-only keeper tools are not ambiguous" false
+    (UT.is_ambiguous_side_effect_error reclassified)
+
+let test_side_effect_reclassification_drops_keeper_read_only_tools_from_mixed_set () =
+  let original =
+    Agent_sdk.Error.Api
+      (Timeout { message = "Execution cancelled after 300.0s" })
+  in
+  let reclassified =
+    UT.reclassify_error_after_side_effect
+      ~tool_names:["keeper_tasks_list"; "keeper_fs_edit"; "keeper_memory_search"]
+      original
+  in
+  let rendered = Agent_sdk.Error.to_string reclassified in
+  check bool "mixed set is ambiguous" true
+    (UT.is_ambiguous_side_effect_error reclassified);
+  check bool "keeps mutating tool" true
+    (contains_substring rendered "keeper_fs_edit");
+  check bool "drops tasks_list from ambiguous set" false
+    (contains_substring rendered "keeper_tasks_list");
+  check bool "drops memory_search from ambiguous set" false
+    (contains_substring rendered "keeper_memory_search")
+
 let test_metrics_mixed_response () =
   let result =
     make_run_result ~text:"Done." ~tools:["keeper_fs_read"]
@@ -2142,6 +2176,10 @@ let () =
             test_side_effect_reclassification_requires_committed_tools;
           test_case "any post-commit error becomes ambiguous partial" `Quick
             test_side_effect_reclassification_marks_any_post_commit_error;
+          test_case "read-only keeper tools do not become ambiguous partial" `Quick
+            test_side_effect_reclassification_ignores_keeper_read_only_tools;
+          test_case "mixed tool sets only keep mutating keeper tools" `Quick
+            test_side_effect_reclassification_drops_keeper_read_only_tools_from_mixed_set;
           test_case "overflow detection and limit parsing" `Quick
             test_overflow_detection_and_limit_parsing;
         ] );

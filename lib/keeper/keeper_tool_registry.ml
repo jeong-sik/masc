@@ -78,6 +78,43 @@ let core_always_set : (string, unit) Hashtbl.t =
 let is_core_always_tool (name : string) : bool =
   Hashtbl.mem core_always_set name
 
+(* ── Read-only keeper tools ───────────────────────────────────── *)
+
+(** Keeper-only tools are declared via [Tool_shard] schemas, so many never
+    flow through [Tool_spec.register]. Keep a local read-only SSOT for
+    integrity checks that run before or outside full MCP server bootstrap. *)
+let keeper_read_only_tools =
+  [
+    "keeper_stay_silent";
+    "keeper_time_now";
+    "keeper_context_status";
+    "keeper_memory_search";
+    "keeper_tools_list";
+    "keeper_tool_search";
+    "keeper_board_get";
+    "keeper_board_list";
+    "keeper_board_stats";
+    "keeper_board_search";
+    "keeper_fs_read";
+    "keeper_shell_readonly";
+    "keeper_library_search";
+    "keeper_library_read";
+    "keeper_tasks_list";
+    "keeper_tasks_audit";
+    "keeper_voice_sessions";
+  ]
+
+let keeper_read_only_set : (string, unit) Hashtbl.t =
+  let tbl = Hashtbl.create (List.length keeper_read_only_tools) in
+  List.iter (fun name -> Hashtbl.replace tbl name ()) keeper_read_only_tools;
+  tbl
+
+let is_keeper_read_only_tool (name : string) : bool =
+  Hashtbl.mem keeper_read_only_set name
+
+let is_effectively_read_only_tool (name : string) : bool =
+  Tool_dispatch.is_read_only name || is_keeper_read_only_tool name
+
 (* ── Boring tools (non-productive observation/polling) ─────── *)
 
 (** Tools that gather status but produce no side effects.

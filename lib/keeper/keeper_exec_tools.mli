@@ -31,6 +31,15 @@ val core_discovery_tools : string list
 (** Returns [core_discovery_tools].  Discovery mode is the default. *)
 val effective_core_tools : unit -> string list
 
+(** Keeper-local read-only tools that do not always flow through Tool_spec. *)
+val keeper_read_only_tools : string list
+
+(** [true] when a keeper-only tool is inherently read-only. *)
+val is_keeper_read_only_tool : string -> bool
+
+(** Read-only classification with keeper-local fallback. *)
+val is_effectively_read_only_tool : string -> bool
+
 (** Schema for the keeper_tool_search tool. *)
 val keeper_tool_search_schema : Types.tool_schema
 

@@ -111,6 +111,12 @@ let () =
                 (Tool_dispatch.is_read_only "masc_broadcast");
               check bool "masc_add_task not read_only" false
                 (Tool_dispatch.is_read_only "masc_add_task"));
+          test_case "keeper read-only tools use shipped registry policy" `Quick (fun () ->
+              ignore (Mcp_eio.get_clock_opt ());
+              check bool "keeper_tasks_list read_only" true
+                (Tool_dispatch.is_read_only "keeper_tasks_list");
+              check bool "keeper_memory_search read_only" true
+                (Tool_dispatch.is_read_only "keeper_memory_search"));
         ] );
       ( "requires_join_set",
         [

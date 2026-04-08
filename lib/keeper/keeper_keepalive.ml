@@ -38,11 +38,12 @@ let turn_semaphore = Eio.Semaphore.make keeper_turn_throttle_limit
    keepers fire scheduled turns simultaneously on a shared LLM server.
    Reactive turns (explicit mentions, board events) bypass this gate
    so they are never starved by slow autonomous turns.
-   Default 3 = with 27B/8-slot each autonomous turn gets ~2-3 slots
-   of GPU throughput, completing in ~30-60s instead of 5min+. *)
+   Default 1 = with 1-slot llama-server, only one request can be in-flight
+   at a time. Higher values cause queue buildup and TCP keepalive timeouts.
+   For 8-slot servers, set MASC_KEEPER_AUTONOMOUS_CONCURRENCY=3-4. *)
 let autonomous_turn_limit =
   Keeper_config.int_of_env_default
-    "MASC_KEEPER_AUTONOMOUS_CONCURRENCY" ~default:3 ~min_v:1 ~max_v:12
+    "MASC_KEEPER_AUTONOMOUS_CONCURRENCY" ~default:1 ~min_v:1 ~max_v:8
 ;;
 
 let autonomous_turn_semaphore = Eio.Semaphore.make autonomous_turn_limit

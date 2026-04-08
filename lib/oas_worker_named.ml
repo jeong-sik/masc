@@ -155,6 +155,7 @@ let run_named
     ?slot_id
     ?enable_thinking
     ?approval
+    ?exit_condition
     ?oas_checkpoint
     ?event_bus
     ?sw
@@ -210,6 +211,7 @@ let run_named
       enable_thinking;
       event_bus;
       approval;
+      exit_condition;
     }
   in
   let config = { config with named_cascade = Some named_cascade; initial_messages; raw_trace; yield_on_tool } in

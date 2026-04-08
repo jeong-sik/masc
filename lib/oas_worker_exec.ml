@@ -47,6 +47,7 @@ type config = {
   context : Oas.Context.t option;
   slot_id : int option;
   approval : Oas.Hooks.approval_callback option;
+  exit_condition : (int -> bool) option;
 }
 
 let default_config ~name ~provider ~model_id ~system_prompt ~tools : config =
@@ -81,6 +82,7 @@ let default_config ~name ~provider ~model_id ~system_prompt ~tools : config =
     context = None;
     slot_id = None;
     approval = None;
+    exit_condition = None;
   }
 
 (* ================================================================ *)
@@ -307,6 +309,10 @@ let build
   in
   let builder = match config.approval with
     | Some cb -> Oas.Builder.with_approval cb builder
+    | None -> builder
+  in
+  let builder = match config.exit_condition with
+    | Some cond -> Oas.Builder.with_exit_condition cond builder
     | None -> builder
   in
   Oas.Builder.build_safe builder

@@ -15,6 +15,17 @@ let force_jsonl_fallback_env () =
 let requested_backend_mode () =
   Env_config_core.storage_type ()
 
+let ensure_default_oas_cascade_timeout_env () =
+  match Sys.getenv_opt "OAS_CASCADE_MODEL_TIMEOUT_SEC" |> Env_config_core.trim_opt with
+  | Some _ -> ()
+  | None ->
+      let keeper_oas_timeout_s = Env_config_keeper.KeeperKeepalive.oas_timeout_sec in
+      let derived_timeout_s =
+        Float.max 30.0 (Float.min 120.0 (keeper_oas_timeout_s /. 5.0))
+      in
+      Unix.putenv "OAS_CASCADE_MODEL_TIMEOUT_SEC"
+        (Printf.sprintf "%.0f" derived_timeout_s)
+
 (* GC tuning for long-running server with bursty allocation.
 
    Dashboard refresh loops create 2GB+ transient allocations per cycle.
@@ -54,6 +65,7 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
   Eio_context.set_net net;
   Eio_context.set_clock clock;
   Eio_context.set_mono_clock mono_clock;
+  ensure_default_oas_cascade_timeout_env ();
   Process_eio.init ~cwd_default:Eio.Path.(fs / base_path) ~proc_mgr ~clock;
   let caqti_env : Caqti_eio.stdenv =
     object

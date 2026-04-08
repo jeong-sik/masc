@@ -230,8 +230,8 @@ let test_get_metrics_missing_agent_name () =
   Alcotest.(check bool) "missing agent_name fails" false ok;
   let open Yojson.Safe.Util in
   let json = Yojson.Safe.from_string msg in
-  Alcotest.(check string) "error_code" "validation_error"
-    (json |> member "error_code" |> to_string);
+  Alcotest.(check string) "status" "error"
+    (json |> member "status" |> to_string);
   Alcotest.(check string) "message" "agent_name is required"
     (json |> member "message" |> to_string);
   )

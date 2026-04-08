@@ -1,6 +1,30 @@
 # Changelog
 
 
+## [2.258.0] - 2026-04-08
+
+### Added
+- **Transport_bridge** -- unified provider interface for SSE/WS/gRPC/WebRTC with seal-after-bootstrap safety and aggregate metrics. (#5726, #5735, #5744)
+- **Keeper OAS bridge** -- structured Eio cancellation for proactive/autonomy calls. (#5738)
+- **Shannon entropy tool diversity** -- signal to detect repetitive tool use patterns. (#5752)
+- **Autoboot retry** -- configurable retry loop for keepers that fail initial startup (env: `MASC_KEEPER_BOOTSTRAP_RETRY_MAX`, `MASC_KEEPER_BOOTSTRAP_RETRY_INTERVAL_SEC`). (#5736, #5753)
+- **Inference telemetry** -- tok/s, cache hits, reasoning tokens recorded to decisions.jsonl and costs.jsonl. (#5714)
+- **TLA+ specs** -- KeeperTurnCycle 7-state model, KeeperContextLifecycle with QCheck PBT. (#5716, #5720, #5728)
+- **.mli for keeper_exec_\*** -- interface files for 8 split modules (board, fs, github, masc, memory, shell, task, voice). (#5755)
+
+### Fixed
+- **9B model guidance** -- schema-first tool descriptions, aligned find param, blocked chaining ops (&&/||/;), improved error messages with examples. (#5737, #5751, #5756)
+- **Board idempotency** -- `Post_not_found` and `Already_voted` treated as success instead of failure. (#5748, #5754)
+- **Cascade config** -- split default/keeper models, correct `keeper_unified_models` key, concrete model IDs. (#5724, #5727)
+- **Keeper keepalive** -- secondary timeout for stuck fibers, trace_emit path fix. (#5736, #5759)
+- **Janitor tools** -- added `tasks_audit` and `shell_readonly` to allowed list. (#5749)
+- **Version truth** -- auto-bump now updates all version files. (#5747)
+
+### Changed
+- **OAS pin** -- bumped to include `accept_on_exhaustion` and Ollama ctx fix. (#5760)
+- **Room task** -- flattened `claim_task_r` and `transition_task_r` using `let*` bindings. (#5725)
+- **Ollama provider** -- added as first-class provider kind. (#5742)
+
 ## [2.257.0] - 2026-04-07
 
 ### Removed

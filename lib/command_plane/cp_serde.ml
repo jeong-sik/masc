@@ -101,6 +101,12 @@ let operation_workload_profile (operation : operation_record) =
 let operation_search_strategy (operation : operation_record) =
   Cp_search_fabric.strategy_of_string (Some operation.search_strategy)
 
+let normalize_stage = function
+  | Some value ->
+      let trimmed = String.trim value |> String.lowercase_ascii in
+      if trimmed = "" then None else Some trimmed
+  | None -> None
+
 let operation_stage_key (operation : operation_record) =
   normalize_stage operation.stage
 
@@ -128,12 +134,6 @@ let workload_template_defaults = function
   | "research_team" -> Some ("research_pipeline", Some "normalize")
   | "ops_governance_team" -> Some ("research_pipeline", Some "audit")
   | _ -> None
-
-let normalize_stage = function
-  | Some value ->
-      let trimmed = String.trim value |> String.lowercase_ascii in
-      if trimmed = "" then None else Some trimmed
-  | None -> None
 
 let validate_stage_for_workload ~workload_profile stage =
   let stage = normalize_stage stage in

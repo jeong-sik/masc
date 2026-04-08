@@ -61,7 +61,7 @@ let review_completion_notes
                        ("task_id", `String task_id);
                        ("task_title", `String ar_req.task_title);
                        ("agent_name", `String ar_req.agent_name);
-                       ("gate", `String result.gate);
+                       ("gate", `String (Anti_rationalization.gate_to_string result.gate));
                        ("verdict", `String (verdict_to_string result));
                        ( "evaluator_cascade",
                          `String result.evaluator_cascade );

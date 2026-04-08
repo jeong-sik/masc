@@ -28,12 +28,40 @@ type verdict =
   | Approve
   | Reject of string
 
+type gate =
+  | Length
+  | Excuse
+  | Contract
+  | Structured_tool
+  | Llm_text_fallback
+  | Format_reject
+  | Fallback
+
+let gate_to_string = function
+  | Length -> "length"
+  | Excuse -> "excuse"
+  | Contract -> "contract"
+  | Structured_tool -> "structured_tool"
+  | Llm_text_fallback -> "llm_text_fallback"
+  | Format_reject -> "format_reject"
+  | Fallback -> "fallback"
+
+let gate_of_string = function
+  | "length" -> Ok Length
+  | "excuse" -> Ok Excuse
+  | "contract" -> Ok Contract
+  | "structured_tool" -> Ok Structured_tool
+  | "llm_text_fallback" -> Ok Llm_text_fallback
+  | "format_reject" -> Ok Format_reject
+  | "fallback" -> Ok Fallback
+  | s -> Error (Printf.sprintf "unknown gate: %S" s)
+
 type review_result = {
   verdict : verdict;
   evaluator_cascade : string;
   generator_cascade : string option;
-  gate : string;  (** Which gate produced this verdict: "length", "excuse", "llm", "fallback" *)
-  fallback_reason : string option;  (** Error message when gate="fallback" — aids debugging *)
+  gate : gate;
+  fallback_reason : string option;
 }
 
 (* ================================================================ *)
@@ -340,7 +368,7 @@ let review
   if String.length notes_trimmed < min_notes_length then
     emit { verdict = Reject (sprintf "completion notes too short (%d chars, minimum %d)"
                           (String.length notes_trimmed) min_notes_length);
-      evaluator_cascade; generator_cascade; gate = "length"; fallback_reason = None }
+      evaluator_cascade; generator_cascade; gate = Length; fallback_reason = None }
   else
   (* Gate 2: local excuse pattern detection *)
   match find_excuse_pattern notes_trimmed with
@@ -349,7 +377,7 @@ let review
       req.agent_name req.task_title pattern;
     emit { verdict = Reject (sprintf "avoidance pattern detected: \"%s\" (%s). Revise your notes to describe actual completed work."
                           pattern reason);
-      evaluator_cascade; generator_cascade; gate = "excuse"; fallback_reason = None }
+      evaluator_cascade; generator_cascade; gate = Excuse; fallback_reason = None }
   | None ->
   (* Gate 2.5: contract verification (local, no LLM) *)
   let contract_rejection =
@@ -368,7 +396,7 @@ let review
   match contract_rejection with
   | Some reason ->
     emit { verdict = Reject reason;
-      evaluator_cascade; generator_cascade; gate = "contract"; fallback_reason = None }
+      evaluator_cascade; generator_cascade; gate = Contract; fallback_reason = None }
   | None ->
     (* Gate 3: LLM review via evaluator cascade (structured tool output, ADR D3) *)
     let prompt = build_prompt ~few_shot_block req in
@@ -405,19 +433,19 @@ let review
        let (v, gate, fallback_reason) = match !verdict_ref with
          | Some v ->
            Log.Task.info "[anti-rationalization] verdict via structured tool call";
-           (v, "structured_tool", None)
+           (v, Structured_tool, None)
          | None ->
            (* LLM responded with text — lenient fallback *)
            let text = Oas_response.text_of_response result.response in
            Log.Task.info "[anti-rationalization] verdict via text fallback";
            (match parse_verdict text with
-            | Ok v -> (v, "llm_text_fallback", None)
+            | Ok v -> (v, Llm_text_fallback, None)
             | Error parse_err ->
               (* ADR D3: parse failure is NOT silently approved.
                  Use Reject instead of Approve for unknown format. *)
               Log.Task.warn "[anti-rationalization] verdict parse failed: %s (rejecting)" parse_err;
               ( Reject (sprintf "review format unrecognized: %s" parse_err),
-                "format_reject",
+                Format_reject,
                 Some parse_err ))
        in
        (match v with
@@ -432,7 +460,7 @@ let review
        (* Liveness > correctness: if LLM is unavailable, approve *)
        let msg = Oas.Error.to_string err in
        Log.Task.warn "[anti-rationalization] LLM unavailable: %s (approving by default)" msg;
-       emit { verdict = Approve; evaluator_cascade; generator_cascade; gate = "fallback"; fallback_reason = Some msg })
+       emit { verdict = Approve; evaluator_cascade; generator_cascade; gate = Fallback; fallback_reason = Some msg })
 
 (** Backward-compatible wrapper that returns only the verdict.
     Use [review] directly for structured results with audit metadata. *)
@@ -444,7 +472,7 @@ let review_result_to_json (r : review_result) : Yojson.Safe.t =
     ("verdict", `String (match r.verdict with Approve -> "approve" | Reject s -> "reject:" ^ s));
     ("evaluator_cascade", `String r.evaluator_cascade);
     ("generator_cascade", Json_util.string_opt_to_json r.generator_cascade);
-    ("gate", `String r.gate);
+    ("gate", `String (gate_to_string r.gate));
   ] in
   let extra = match r.fallback_reason with
     | Some reason -> [("fallback_reason", `String reason)]

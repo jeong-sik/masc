@@ -629,6 +629,13 @@ let is_gh_workflow_operation cmd =
          [ "/merge"; "/merges"; "state=closed"; "state=\"closed\""; "state='closed'" ]
   | _ -> false
 
+(** Check if a gh command is specifically [gh pr merge]. *)
+let is_gh_pr_merge cmd =
+  let parts = gh_op_parts cmd in
+  match parts with
+  | "pr" :: rest -> has_positional_subcmd [ "merge" ] rest
+  | _ -> false
+
 (** Check if a gh command is a dangerous irreversible operation (delete,
     archive, transfer). Always gated regardless of preset. *)
 let is_gh_dangerous_operation cmd =

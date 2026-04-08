@@ -63,6 +63,54 @@ let handle_keeper_github
                      or request operator approval." )
               ; "cmd", `String ("gh " ^ gh_raw)
               ]))
+      (* Pre-merge review gate: verify PR has at least one non-dismissed review
+         before allowing gh pr merge. Prevents agents from self-merging without
+         cross-agent review. Ref: #5906 *)
+      else if Worker_dev_tools.is_gh_pr_merge gh_raw then (
+        let root = Keeper_alerting_path.project_root_of_config config in
+        (* Extract PR number from command args *)
+        let pr_number =
+          let parts = String.split_on_char ' ' gh_raw in
+          List.find_opt (fun s ->
+            String.length s > 0 && s.[0] >= '0' && s.[0] <= '9') parts
+        in
+        let review_ok = match pr_number with
+          | None -> true (* no PR number found — let gh handle the error *)
+          | Some num ->
+            let check_cmd = Printf.sprintf
+              "cd %s && gh pr view %s --json reviews --jq '[.[] | select(.state != \"DISMISSED\")] | length' 2>&1"
+              (Filename.quote root) num in
+            let st, out = Process_eio.run_argv_with_status ~timeout_sec:10.0
+              [ "/bin/zsh"; "-lc"; check_cmd ] in
+            if st = Unix.WEXITED 0 then
+              let count = String.trim out in
+              count <> "0" && count <> ""
+            else true (* gh failed — let the merge attempt proceed and fail naturally *)
+        in
+        if not review_ok then (
+          Log.Keeper.warn "keeper_github merge-review-gate: blocked %s (keeper=%s, no reviews)"
+            gh_raw meta.name;
+          Yojson.Safe.to_string
+            (`Assoc
+                [ "ok", `Bool false
+                ; "error", `String "merge_blocked_no_reviews"
+                ; ( "reason"
+                  , `String
+                      "Cannot merge: PR has no non-dismissed reviews. \
+                       Every PR requires at least one cross-agent review before merge. \
+                       Post a review first, then retry." )
+                ; "cmd", `String ("gh " ^ gh_raw)
+                ]))
+        else (
+          let gh_cmd = "gh " ^ (if cmd <> "" then cmd else String.concat " " (List.map Filename.quote gh_args)) in
+          let shell_cmd = Printf.sprintf "cd %s && %s 2>&1" (Filename.quote root) gh_cmd in
+          let st, out = Process_eio.run_argv_with_status ~timeout_sec [ "/bin/zsh"; "-lc"; shell_cmd ] in
+          Yojson.Safe.to_string
+            (`Assoc
+                [ "ok", `Bool (st = Unix.WEXITED 0)
+                ; "status", Keeper_alerting_path.process_status_to_json st
+                ; "output", `String out
+                ])))
       else (
         let gh_cmd =
           if cmd <> ""

@@ -208,6 +208,30 @@ let test_approval_resolve_nonexistent () =
       (String.length msg > 0)
   | Ok () -> Alcotest.fail "expected error for nonexistent id"
 
+let test_approval_queue_cancel_cleans_up () =
+  Eio_main.run @@ fun _env ->
+  (* Simulate: agent fiber is cancelled (Switch closes) while awaiting.
+     The pending entry must be cleaned up from the hashtbl. (#5949) *)
+  let initial_count = AQ.pending_count () in
+  (try
+     Eio.Switch.run @@ fun sw ->
+     Eio.Fiber.fork ~sw (fun () ->
+       let _decision =
+         AQ.submit_and_await
+           ~keeper_name:"cancel-test"
+           ~tool_name:"masc_dangerous"
+           ~input:(`Assoc [])
+           ~risk_level:"critical"
+       in
+       ());
+     Eio.Fiber.yield ();
+     (* Cancel the switch — this cancels the awaiting fiber *)
+     Eio.Switch.fail sw (Failure "simulated shutdown")
+   with Failure _ -> ());
+  (* After cancellation, the pending entry should be cleaned up *)
+  let final_count = AQ.pending_count () in
+  Alcotest.(check int) "no orphan entries" initial_count final_count
+
 (* ── 4. Approval callback integration ────────────────────── *)
 
 let test_callback_approves_low_risk () =
@@ -241,6 +265,7 @@ let () =
       Alcotest.test_case "submit and reject" `Quick test_approval_queue_reject;
       Alcotest.test_case "expire stale" `Quick test_approval_queue_expire_stale;
       Alcotest.test_case "resolve nonexistent" `Quick test_approval_resolve_nonexistent;
+      Alcotest.test_case "cancel cleans up" `Quick test_approval_queue_cancel_cleans_up;
     ]);
     ("callback_integration", [
       Alcotest.test_case "low risk auto-approved" `Quick test_callback_approves_low_risk;

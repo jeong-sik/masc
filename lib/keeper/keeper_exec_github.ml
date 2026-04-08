@@ -237,8 +237,10 @@ let handle_keeper_pr_workflow
             if st_commit <> Unix.WEXITED 0 then
               Error (Printf.sprintf "git commit: %s" out_commit)
             else begin
+              (* Push using HEAD:<branch> because the worktree's local branch
+                 (agent_name/task_id) differs from the desired remote branch name *)
               let st_push, out_push = run_git
-                (Printf.sprintf "push -u origin %s" (Filename.quote branch)) in
+                (Printf.sprintf "push -u origin HEAD:%s" (Filename.quote branch)) in
               if st_push <> Unix.WEXITED 0 then
                 Error (Printf.sprintf "git push: %s" out_push)
               else

@@ -182,7 +182,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
          Progress.Tracker.step turn_tracker ~message:"Building turn prompt" ();
          ignore (Oas_model_resolve.refresh_local_discovery_if_possible effective_models);
          let max_cascade_context =
-           let min_keeper_context = 65_536 in
+           let min_keeper_context = Keeper_config.min_keeper_context_tokens in
            let raw =
              match meta.max_context_override with
              | Some v ->

@@ -32,9 +32,12 @@ let protect ~module_name ~finally_label ~finally f =
              ~during_exception:true ~backtrace:bt2 ex2);
       Printexc.raise_with_backtrace ex bt
 
+(** Maximum output bytes for tool responses. SSOT for the 64KB cap. *)
+let max_tool_output_bytes = 65_536
+
 (** BUG-016: Truncate large tool responses to prevent MCP transport overload.
     Default max: 64KB. Appends truncation metadata when trimmed. *)
-let truncate_response ?(max_bytes=65536) ~total_count response =
+let truncate_response ?(max_bytes=max_tool_output_bytes) ~total_count response =
   let len = String.length response in
   if len <= max_bytes then response
   else

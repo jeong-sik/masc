@@ -691,12 +691,12 @@ let handle_keeper_pr_review_read
         [ "/bin/zsh"; "-lc"; meta_cmd ] in
     (* Get PR diff (truncated) *)
     let diff_cmd = Printf.sprintf
-      "cd %s && gh pr diff %d%s 2>&1 | head -c 65536"
-      (Filename.quote root) pr_number repo_flag in
+      "cd %s && gh pr diff %d%s 2>&1 | head -c %d"
+      (Filename.quote root) pr_number repo_flag Common.max_tool_output_bytes in
     let st_diff, out_diff =
       Process_eio.run_argv_with_status ~timeout_sec:15.0
         [ "/bin/zsh"; "-lc"; diff_cmd ] in
-    let diff_truncated = String.length out_diff >= 65536 in
+    let diff_truncated = String.length out_diff >= Common.max_tool_output_bytes in
     Yojson.Safe.to_string
       (`Assoc
           [ "ok", `Bool (st_meta = Unix.WEXITED 0)

@@ -17,7 +17,7 @@
     context budget concern.  64 KB covers any reasonable structured
     result while preventing multi-MB shell dumps from persisting
     in the message list. *)
-let max_output_chars = 65_536
+let max_output_chars = Common.max_tool_output_bytes
 
 let cap (output : string) : string =
   let len = String.length output in

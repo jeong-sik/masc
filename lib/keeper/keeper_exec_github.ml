@@ -31,8 +31,8 @@ let handle_keeper_github
     | Ok () ->
       let preset_allows_workflow =
         match Keeper_types.tool_access_preset meta.tool_access with
-        | Some (Coding | Full) -> true
-        | _ -> false
+        | Some preset -> Keeper_tool_policy.allows_workflow_for_preset preset
+        | None -> false
       in
       if Worker_dev_tools.is_gh_dangerous_operation gh_raw
       then (

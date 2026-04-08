@@ -244,6 +244,7 @@ let row_to_task (((id, title, description), (priority, status, assignee),
     id; title; description; priority; files; created_at;
     worktree = None;  (* Worktree loaded separately if needed *)
     required_role;
+    required_preset = None;
     stage = None;
     contract = None;
     handoff_context = None;

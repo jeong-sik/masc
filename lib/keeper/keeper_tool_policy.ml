@@ -51,6 +51,22 @@ let allows_shell_write_for_preset (preset : tool_preset) : bool =
     Keeper_tool_policy_config.allows_shell_write cfg
       (preset_name_of_tool_preset preset)
 
+(* ── Preset subsumption (config-driven) ──────────────────────── *)
+
+let preset_can_satisfy ~(agent_preset : string) ~(required_preset : string) : bool =
+  match !policy_config with
+  | None -> false
+  | Some cfg ->
+    Keeper_tool_policy_config.preset_can_satisfy cfg ~agent_preset ~required_preset
+
+(** Return configured preset names (excluding "full") for schema enum generation. *)
+let configured_preset_names () : string list =
+  match !policy_config with
+  | None -> []
+  | Some cfg ->
+    Keeper_tool_policy_config.preset_names cfg
+    |> List.filter (fun n -> not (String.equal n "full"))
+
 (* ── Denied-tool set (O(1) lookup) ────────────────────────────── *)
 
 let keeper_denied_set : (string, unit) Hashtbl.t =
@@ -197,8 +213,8 @@ let preset_allowlist preset =
       keeper_base_candidate_tool_names ()
     | Some (Keeper_tool_policy_config.Subset tools) -> dedupe_tool_names tools
     | None ->
-      invalid_arg
-        (Printf.sprintf "preset '%s' not defined in config/tool_policy.toml" name)
+      Log.Keeper.warn "preset '%s' not defined in config/tool_policy.toml, returning empty" name;
+      []
 
 let tool_policy_of_meta (meta : keeper_meta) =
   let allow =

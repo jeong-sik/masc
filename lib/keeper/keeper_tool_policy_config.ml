@@ -213,8 +213,8 @@ let resolve_group_source = function
     | Some shard ->
       shard.tools |> List.map (fun (t : Types.tool_schema) -> t.name)
     | None ->
-      invalid_arg
-        (Printf.sprintf "tool_policy_config: shard '%s' not found" shard_name)
+      Log.Keeper.warn "tool_policy_config: shard '%s' not found, returning empty" shard_name;
+      []
 
 let resolve_group (config : t) (name : string) : string list option =
   match Hashtbl.find_opt config.groups name with
@@ -265,6 +265,25 @@ let all_group_tools (config : t) : string list =
 
 let all_masc_tools (config : t) : string list =
   Hashtbl.fold (fun _ tools acc -> tools @ acc) config.masc_groups []
+
+(** Check if [agent_preset]'s resolved tool set covers [required_preset]'s.
+    Derived from config — adding a new preset to tool_policy.toml automatically
+    updates the subsumption graph.  No hardcoded hierarchy. *)
+let preset_can_satisfy (config : t) ~(agent_preset : string) ~(required_preset : string) : bool =
+  if String.equal agent_preset required_preset then true
+  else
+    let resolve name =
+      match resolve_preset config name ~masc_filter:(fun _ -> true) () with
+      | Some All_candidates -> `Full
+      | Some (Subset tools) -> `Tools (List.sort_uniq String.compare tools)
+      | None -> `Unknown
+    in
+    match resolve agent_preset, resolve required_preset with
+    | `Unknown, _ | _, `Unknown -> false  (* unknown preset — can't verify, reject *)
+    | `Full, _ -> true                     (* agent has full access *)
+    | _, `Full -> false                    (* required is full, agent isn't *)
+    | `Tools agent_tools, `Tools req_tools ->
+      List.for_all (fun t -> List.mem t agent_tools) req_tools
 
 let allows_workflow (config : t) (preset_name : string) : bool =
   List.mem preset_name config.workflow_presets

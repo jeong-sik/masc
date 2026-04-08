@@ -14,7 +14,7 @@ include Room_state
     - Auto-releases any previous claim held by this agent (BUG-004)
     - Applies starvation prevention: tasks waiting >24h get priority boost
     - Within same effective priority, prefers older tasks (FIFO) *)
-let claim_next_r config ~agent_name ?(exclude_task_ids=[]) () =
+let claim_next_r config ~agent_name ?(exclude_task_ids=[]) ?(task_filter=fun (_:Types.task) -> true) () =
   ensure_initialized config;
 
   let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
@@ -92,6 +92,14 @@ let claim_next_r config ~agent_name ?(exclude_task_ids=[]) () =
       in
       let eligible = List.filter (fun t -> not (List.mem t.id all_excluded)) unclaimed in
 
+      (* Preset-aware filtering *)
+      let preset_ok = List.filter task_filter eligible in
+      let preset_filtered = List.length eligible - List.length preset_ok in
+      if preset_filtered > 0 then
+        log_event config (Printf.sprintf
+          "{\"type\":\"task_claim_preset_skip\",\"agent\":\"%s\",\"skipped\":%d,\"ts\":\"%s\"}"
+          agent_name preset_filtered (now_iso ()));
+
       (* Helper: clear agent current_task and reset status after auto-release
          when no replacement task can be claimed. *)
       let clear_agent_state_after_release () =
@@ -110,7 +118,7 @@ let claim_next_r config ~agent_name ?(exclude_task_ids=[]) () =
         | None -> ()
       in
 
-      match unclaimed, eligible with
+      match unclaimed, preset_ok with
       | [], _ ->
           (* Even if we released a task, there may be nothing else to claim.
              Write the release if it happened. *)
@@ -138,7 +146,7 @@ let claim_next_r config ~agent_name ?(exclude_task_ids=[]) () =
                observe_auto_release ()
            | None -> ());
           clear_agent_state_after_release ();
-          Claim_next_no_eligible { excluded_count = List.length exclude_task_ids }
+          Claim_next_no_eligible { excluded_count = List.length exclude_task_ids; preset_filtered }
       | _ :: _, task :: _ ->
           (* Claim this task *)
           let new_tasks = List.map (fun t ->

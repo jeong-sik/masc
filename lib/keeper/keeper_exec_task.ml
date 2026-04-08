@@ -95,8 +95,28 @@ let handle_keeper_task_tool
       in
       Yojson.Safe.to_string (`Assoc [ "ok", `Bool true; "broadcast", `String message ]))
   | "keeper_task_claim" ->
-    let result = Room.claim_next config ~agent_name:meta.agent_name in
-    Yojson.Safe.to_string (`Assoc [ "result", `String result ])
+    let preset_name = match Keeper_types.tool_access_preset meta.tool_access with
+      | Some p -> Some (Keeper_types.tool_preset_to_string p)
+      | None -> None
+    in
+    let task_filter (task : Types.task) =
+      match task.required_preset, preset_name with
+      | None, _ -> true
+      | Some _required, None -> false  (* agent without preset cannot claim preset-required task *)
+      | Some required, Some preset ->
+        Keeper_tool_policy.preset_can_satisfy ~agent_preset:preset ~required_preset:required
+    in
+    let result = Room.claim_next_r config ~agent_name:meta.agent_name ~task_filter () in
+    let message = match result with
+      | Room.Claim_next_claimed { message; _ } -> message
+      | Room.Claim_next_no_unclaimed -> "📋 No unclaimed tasks. ACTION: Stop task-checking — nothing to claim."
+      | Room.Claim_next_no_eligible { preset_filtered; _ } when preset_filtered > 0 ->
+        Printf.sprintf "📋 No eligible tasks (preset mismatch: %d tasks require different preset, you have '%s')"
+          preset_filtered (Option.value ~default:"unknown" preset_name)
+      | Room.Claim_next_no_eligible _ -> "📋 No unclaimed tasks. ACTION: Stop task-checking — nothing to claim."
+      | Room.Claim_next_error e -> Printf.sprintf "❌ Error: %s" e
+    in
+    Yojson.Safe.to_string (`Assoc [ "result", `String message ])
   | "keeper_task_done" ->
     let task_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
     let result_text = Safe_ops.json_string ~default:"" "result" args |> String.trim in

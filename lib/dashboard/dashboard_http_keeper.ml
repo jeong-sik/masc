@@ -75,9 +75,22 @@ let provider_name_of_label label =
       String.sub label 0 idx |> String.trim |> String.lowercase_ascii
   | _ -> "unknown"
 
+let raw_model_id_of_label label =
+  match String.index_opt label ':' with
+  | Some idx when idx + 1 < String.length label ->
+      String.sub label (idx + 1) (String.length label - idx - 1) |> String.trim
+  | _ -> String.trim label
+
 let resolved_model_json_of_label label =
   match Llm_provider.Cascade_config.parse_model_string label with
-  | None -> None
+  | None ->
+      Some
+        (`Assoc
+          [
+            ("provider", `String (provider_name_of_label label));
+            ("model_id", `String (raw_model_id_of_label label));
+            ("max_context", `Int 0);
+          ])
   | Some cfg ->
       Some
         (`Assoc

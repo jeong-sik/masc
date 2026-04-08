@@ -14,7 +14,7 @@ type t = {
   pool: (Caqti_eio.connection, Caqti_error.t) Caqti_eio.Pool.t;
 }
 
-(** Get pool for Board_listener pub/sub bridge *)
+(** Get pool for PG queries *)
 let get_pool t = t.pool
 
 (** Convert Caqti errors to board_error *)

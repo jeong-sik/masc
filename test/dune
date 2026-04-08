@@ -711,11 +711,6 @@
  (libraries alcotest unix str))
 
 (test
- (name test_board_listener)
- (modules test_board_listener)
- (libraries masc_test_deps))
-
-(test
  (name test_channel_gate)
  (modules test_channel_gate)
  (libraries masc_test_deps))
@@ -798,6 +793,11 @@
  (name test_board_pg)
  (modules test_board_pg)
  (libraries masc_test_deps caqti caqti-eio.unix caqti-driver-postgresql))
+
+(test
+ (name test_board_pg_notify)
+ (modules test_board_pg_notify)
+ (libraries masc_test_deps))
 
 ; ============================================================
 ; Executables (benchmarks, distributed tests, tools)

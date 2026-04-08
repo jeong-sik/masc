@@ -28,7 +28,7 @@
 | Governance | 08 | 28 | 0 | 0 | 0 | 100% | 거버넌스 pipeline + dashboard surface 유지 |
 | Server/Transport | 09 | 19 | 4 | 0 | 0 | 83% | SSE rate limit 활성화, HTTP/2 h2c는 opt-in CODE |
 | Dashboard | 10 | 15 | 0 | 0 | 0 | 100% | MDAL 개념 제거 (REMOVED) |
-| Board | 11 | 16 | 1 | 0 | 0 | 94% | Board Listener polling만 CODE |
+| Board | 11 | 16 | 0 | 0 | 0 | 100% | Board Listener REMOVED (PG relay, filesystem-first에서 불필요) |
 | Memory Systems | 12 | 44 | 0 | 0 | 0 | 100% | 4 시스템 전부 운용 |
 | OAS Integration | 13 | 42 | 0 | 0 | 0 | 100% | 단방향 경계 완벽 준수 |
 | Configuration | 14 | 68 | 0 | 0 | 0 | 100% | 80+ env var, 22 카테고리 |
@@ -48,14 +48,14 @@
 | ~~Chain Engine 전체~~ | 04 | 17K | **→ REMOVED** (소스 삭제됨, lib/에 chain 파일 없음) |
 | **HTTP/2 (h2c)** | 09 | 740 | opt-in 경로, canonical 기본값은 아님 |
 | ~~SSE rate limit guard~~ | 09 | ~50 | **→ IMPL** (기본값 활성화: 1s cooldown, 60s/10 window) |
-| **Board Listener (polling)** | 11 | ~100 | pg_notify 수신 코드, SSE relay 미확인 |
+| ~~Board Listener (polling)~~ | 11 | ~100 | **→ REMOVED** (PG relay, filesystem-first에서 불필요. Board_dispatch가 SSE 직접 발사) |
 | ~~Intent 도구 4종~~ | 06 | ~200 | **→ IMPL** (MCP tool registry 등록 + dispatch 완료) |
 | ~~Keeper OAS Memory.t 일부~~ | 05 | ~100 | **→ IMPL** (v2.140.0 filesystem-first 전환으로 완료) |
 | ~~Team Session lossy projection~~ | 07 | ~50 | **→ IMPL** (collaboration_context JSON 채움 + Prompt_composer로 system_prompt 보강. OAS #698에서 Collaboration.t→opaque JSON 전환 완료) |
 | ~~env-gated 테스트~~ | 15 | ~300 | **→ IMPL** (6종 전부 MASC_E2E_TESTS=true로 CI 실행 중. PG 의존 없음 — 서버 바이너리 의존) |
 | ~~MDAL dashboard surface~~ | 10 | ~50 | **→ REMOVED** (개념 폐기) |
 
-**합계: CODE ~840 LOC** (h2c 740 + Board Listener 100. Chain 제거됨)
+**합계: CODE ~740 LOC** (h2c만 잔여. Chain 제거, Board Listener 제거)
 
 ---
 
@@ -150,10 +150,10 @@
 핵심 기능 전부 IMPL: Cache SWR(Eio.Mutex), 23 HTTP endpoints, Governance/Execution/Mission/Proof surfaces, Keeper metrics, Preact SPA.
 MDAL 개념 폐기 (REMOVED).
 
-### 11-Board (94% IMPL)
+### 11-Board (100% IMPL)
 
 핵심 기능 전부 IMPL: Parse-Don't-Validate ID, JSONL+PG dual backend, 5 sort algorithms, Thompson Sampling 9 call sites, pg_notify 4 event types, Karma/Flair.
-Board Listener polling만 CODE.
+Board Listener 제거됨 (PG relay, filesystem-first에서 Board_dispatch가 SSE 직접 발사).
 
 ### 12-Memory Systems (100% IMPL)
 
@@ -182,19 +182,18 @@ env-gated 6종은 CI에서 MASC_E2E_TESTS=true로 실행 확인.
 ### 건강한 서브시스템 (100% IMPL)
 - Room, Memory, OAS, Config, Governance — 코드+테스트+실사용 모두 확인
 
-### CODE 잔여 (2개, 840 LOC)
+### CODE 잔여 (1개, 740 LOC)
 1. **HTTP/2 h2c** (740 LOC) → opt-in 경로, HTTP/1.1이 canonical. 벤치마크 후 전환 판단 필요
-2. **Board Listener polling** (~100 LOC) → PG 의존, filesystem-first 전환 필요
 
 ### 완료된 항목
 - ~~Chain Engine~~ → 소스 삭제됨 (REMOVED)
 - ~~Intent 도구~~ → MCP 등록 완료 (IMPL)
 - ~~Team Session lossy projection~~ → collaboration_context + Prompt_composer (IMPL)
 - ~~env-gated 테스트~~ → CI에서 전부 실행 중 (IMPL)
+- ~~Board Listener~~ → 제거됨 (PG relay, Board_dispatch가 SSE 직접 발사)
 
 ### 아키텍처 의사결정 필요
 1. live ICE/TURN/browser interop proof를 어떤 env-gated lane으로 운영할지
-2. Board Listener를 filesystem-first로 재설계할지 vs PG 옵션으로 유지할지
 
 ---
 
@@ -205,6 +204,6 @@ env-gated 6종은 CI에서 MASC_E2E_TESTS=true로 실행 확인.
 | ~~1~~ | ~~Server: SSE rate limit 활성화~~ | **완료** (기본값 1s/60s-10 활성화) |
 | ~~2~~ | ~~Keeper: OAS Memory.t Long_term 백엔드 완성~~ | **완료** (v2.140.0 filesystem-first 전환) |
 | ~~1~~ | ~~Team Session: lossy projection 해소~~ | **완료** (collaboration_context JSON + Prompt_composer system_prompt 보강) |
-| 1 | Board Listener: filesystem-first 재설계 | PG 의존 → jsonl/inotify 기반 전환 |
-| 2 | Transport: HTTP/2 h2c 벤치마크 | opt-in→canonical 전환 판단 근거 |
+| ~~1~~ | ~~Board Listener: filesystem-first 재설계~~ | **완료** (제거됨 — Board_dispatch가 SSE 직접 발사, PG relay 불필요) |
+| 1 | Transport: HTTP/2 h2c 벤치마크 | opt-in→canonical 전환 판단 근거 |
 | 3 | Transport: live ICE/TURN/browser interop 증빙 lane | local smoke 확보됨, internet-grade만 남음 |

@@ -26,7 +26,6 @@
    board_pg_notify
    board_pg_admin
    board_dispatch
-   board_listener
    capability_registry
    bounded
    cache_eio

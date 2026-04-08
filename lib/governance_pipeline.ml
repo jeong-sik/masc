@@ -348,3 +348,31 @@ let install ~config ~governance_level =
   let hook = make_pre_hook ~config ~governance_level in
   Tool_dispatch.register_pre_hook hook;
   Log.Governance.info "pipeline installed: level=%s" governance_level
+
+(* ── OAS Approval Pipeline bridge (#5902) ─────────────────── *)
+
+(** Build an OAS approval callback that uses governance_pipeline risk
+    assessment with genuine HITL fiber suspension.
+
+    When a tool exceeds the governance threshold, the agent fiber is
+    suspended via [Keeper_approval_queue.submit_and_await] until an
+    operator resolves the approval via the command plane API.
+
+    Tools below the threshold are auto-approved. *)
+let to_oas_approval_callback
+      ~governance_level ~keeper_name : Oas.Hooks.approval_callback =
+  fun ~tool_name ~input ->
+    let risk = assess_risk ~tool_name ~input in
+    let needs_approval =
+      match confirm_threshold governance_level with
+      | Some threshold -> risk_level_to_int risk >= risk_level_to_int threshold
+      | None -> false
+    in
+    if needs_approval then
+      Keeper_approval_queue.submit_and_await
+        ~keeper_name
+        ~tool_name
+        ~input
+        ~risk_level:(risk_level_to_string risk)
+    else
+      Oas.Hooks.Approve

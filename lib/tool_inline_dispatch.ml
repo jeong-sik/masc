@@ -95,6 +95,27 @@ let dispatch (ctx : context) ~(name : string) : result option =
   | "masc_listen" -> Tool_inline_dispatch_comm.handle_listen ctx
   | "masc_who" -> Tool_inline_dispatch_comm.handle_who ctx
 
+  (* ── HITL Approval Queue (#5907) ─────────────────────────────── *)
+  | "masc_approval_pending" ->
+      let json = Keeper_approval_queue.list_pending_json () in
+      Some (true, Yojson.Safe.to_string json)
+  | "masc_approval_resolve" ->
+      let id = arg_get_string "id" "" in
+      let decision_str = arg_get_string "decision" "approve" in
+      if id = "" then Some (false, "id is required")
+      else
+        let decision = match String.lowercase_ascii decision_str with
+          | "approve" -> Oas.Hooks.Approve
+          | "reject" ->
+            let reason = arg_get_string "reason" "operator rejected" in
+            Oas.Hooks.Reject reason
+          | _ -> Oas.Hooks.Reject (Printf.sprintf "unknown decision: %s" decision_str)
+        in
+        (match Keeper_approval_queue.resolve ~id ~decision with
+         | Ok () ->
+           Some (true, Printf.sprintf "{\"resolved\":\"%s\",\"decision\":\"%s\"}" id decision_str)
+         | Error msg -> Some (false, msg))
+
   (* ── Verification ───────────────────────────────────────────── *)
   | "masc_verify_request" | "masc_verify_submit" | "masc_verify_status"
   | "masc_verify_pending" | "masc_verify_auto" ->

@@ -24,6 +24,11 @@ type governance_decision = {
 }
 
 val risk_level_to_string : risk_level -> string
+val risk_level_to_int : risk_level -> int
+
+val confirm_threshold : string -> risk_level option
+(** Minimum risk level that requires confirmation for the given governance level.
+    Returns [None] for "development" (no confirmation needed). *)
 
 val assess_risk : tool_name:string -> input:Yojson.Safe.t -> risk_level
 (** Classify tool risk using, in order:
@@ -60,3 +65,17 @@ val install : config:Room.config -> governance_level:string -> unit
 (** Register the governance pipeline as a Tool_dispatch pre_hook.
     Reads governance level from the [governance_level] argument.
     Called once at server startup. *)
+
+val to_oas_approval_callback :
+  governance_level:string ->
+  keeper_name:string ->
+  Oas.Hooks.approval_callback
+(** Build an OAS approval callback with genuine HITL fiber suspension.
+
+    When a tool exceeds the governance threshold, the agent fiber
+    suspends via [Keeper_approval_queue.submit_and_await]. An operator
+    resolves the approval via the command plane API, resuming the fiber.
+
+    Tools below the threshold are auto-approved.
+
+    @since 2.262.0 (#5902, #5907) *)

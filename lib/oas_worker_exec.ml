@@ -46,6 +46,7 @@ type config = {
   context_injector : Oas.Hooks.context_injector option;
   context : Oas.Context.t option;
   slot_id : int option;
+  approval : Oas.Hooks.approval_callback option;
 }
 
 let default_config ~name ~provider ~model_id ~system_prompt ~tools : config =
@@ -79,6 +80,7 @@ let default_config ~name ~provider ~model_id ~system_prompt ~tools : config =
     context_injector = None;
     context = None;
     slot_id = None;
+    approval = None;
   }
 
 (* ================================================================ *)
@@ -301,6 +303,10 @@ let build
   in
   let builder = match config.slot_id with
     | Some id -> Oas.Builder.with_slot_id id builder
+    | None -> builder
+  in
+  let builder = match config.approval with
+    | Some cb -> Oas.Builder.with_approval cb builder
     | None -> builder
   in
   Oas.Builder.build_safe builder

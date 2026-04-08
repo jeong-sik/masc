@@ -74,6 +74,7 @@ let config_for_label
     ?enable_thinking
     ?compact_ratio
     ?contract
+    ?approval
     ~(description : string option)
     () : Oas_worker_exec.config =
   let provider = Oas_worker_exec.resolve_provider_of_label model_label in
@@ -103,6 +104,7 @@ let config_for_label
     contract;
     description;
     compact_ratio;
+    approval;
   }
 
 (** Run a single Agent.run() call with cascade model fallback.
@@ -151,6 +153,7 @@ let run_named
     ?context_injector
     ?context
     ?slot_id
+    ?approval
     ?oas_checkpoint
     ?event_bus
     ?sw
@@ -204,6 +207,7 @@ let run_named
       context;
       slot_id;
       event_bus;
+      approval;
     }
   in
   let config = { config with named_cascade = Some named_cascade; initial_messages; raw_trace; yield_on_tool } in

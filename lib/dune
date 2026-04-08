@@ -96,6 +96,7 @@
    dashboard_http_keeper_metrics
    dashboard_http_keeper_detail
    dashboard_http_keeper
+   dashboard_http_tool_quality
    dashboard_http_autoresearch
    dashboard_harness_health
    dashboard_goals
@@ -563,6 +564,7 @@
 (private_modules
  dashboard_http_keeper_metrics
  dashboard_http_keeper_detail
+ dashboard_http_tool_quality
  board_core
  board_votes
  cp_snapshot_core

@@ -180,6 +180,20 @@ let test_force_jsonl_fallback_env () =
       Alcotest.(check string)
         "MASC_POSTGRES_URL cleared" "" (Sys.getenv "MASC_POSTGRES_URL"))
 
+let test_default_oas_cascade_timeout_tracks_keeper_timeout () =
+  with_env "OAS_CASCADE_MODEL_TIMEOUT_SEC" None @@ fun () ->
+  with_env "MASC_KEEPER_OAS_TIMEOUT_SEC" (Some "300") @@ fun () ->
+  Server_runtime_bootstrap.ensure_default_oas_cascade_timeout_env ();
+  Alcotest.(check string) "derived timeout reserves room for fallbacks" "60"
+    (Sys.getenv "OAS_CASCADE_MODEL_TIMEOUT_SEC")
+
+let test_default_oas_cascade_timeout_keeps_explicit_override () =
+  with_env "OAS_CASCADE_MODEL_TIMEOUT_SEC" (Some "45") @@ fun () ->
+  with_env "MASC_KEEPER_OAS_TIMEOUT_SEC" (Some "300") @@ fun () ->
+  Server_runtime_bootstrap.ensure_default_oas_cascade_timeout_env ();
+  Alcotest.(check string) "explicit override wins" "45"
+    (Sys.getenv "OAS_CASCADE_MODEL_TIMEOUT_SEC")
+
 let test_constructor_is_pure () =
   with_temp_dir "startup-pure" (fun dir ->
       let agents_dir = Room.agents_dir (Room.default_config dir) in
@@ -636,6 +650,12 @@ let () =
         [
           Alcotest.test_case "force_jsonl_fallback_env clears pg envs" `Quick
             test_force_jsonl_fallback_env;
+          Alcotest.test_case
+            "default OAS cascade timeout tracks keeper timeout"
+            `Quick test_default_oas_cascade_timeout_tracks_keeper_timeout;
+          Alcotest.test_case
+            "default OAS cascade timeout keeps explicit override"
+            `Quick test_default_oas_cascade_timeout_keeps_explicit_override;
           Alcotest.test_case "constructors stay pure" `Quick
             test_constructor_is_pure;
           Alcotest.test_case "restore_persisted_sessions uses flat agents dir"

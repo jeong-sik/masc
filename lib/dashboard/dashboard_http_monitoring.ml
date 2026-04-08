@@ -134,7 +134,7 @@ let board_monitoring_json ~(now_ts : float) : Yojson.Safe.t * bool =
       "MASC_DASHBOARD_BOARD_SLO_SEC"
       ~default:900
       ~min_v:30
-      ~max_v:86400
+      ~max_v:Masc_time_constants.day_int
   in
   try
     let posts = Board_dispatch.list_posts ~sort_by:Board_dispatch.Updated ~limit:200 () in
@@ -251,7 +251,7 @@ let slot_monitoring_json () : Yojson.Safe.t =
 
 let executor_outcomes_json (config : Room.config) : Yojson.Safe.t =
   try
-    let since = Time_compat.now () -. 86400.0 in
+    let since = Time_compat.now () -. Masc_time_constants.day in
     let events = Telemetry_eio.read_events_since config ~since in
     let total = ref 0 in
     let successes = ref 0 in

@@ -45,7 +45,7 @@ let dashboard_session_list_timeout_s () =
 
 let operator_snapshot_session_window_seconds () =
   float_of_env_default "MASC_OPERATOR_SNAPSHOT_SESSION_WINDOW_SECONDS"
-    ~default:86400.0 ~min_v:300.0 ~max_v:(7.0 *. 86400.0)
+    ~default:Masc_time_constants.day ~min_v:300.0 ~max_v:(Masc_time_constants.days_to_seconds 7)
 
 let operator_snapshot_session_limit () =
   int_of_env_default "MASC_OPERATOR_SNAPSHOT_SESSION_LIMIT"

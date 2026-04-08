@@ -44,7 +44,7 @@ let cleanup_result_to_json (r : cleanup_result) =
 (** Compute ISO cutoff string for N days ago *)
 let cutoff_iso ~days =
   let now = Time_compat.now () in
-  let cutoff_time = now -. (float_of_int days *. 86400.0) in
+  let cutoff_time = now -. Masc_time_constants.days_to_seconds days in
   let tm = Unix.gmtime cutoff_time in
   Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
     (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday

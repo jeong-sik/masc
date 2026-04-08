@@ -159,7 +159,7 @@ let dispatch (ctx : context) ~(name : string) : result option =
               ("sessions", `List (List.map Mcp_server_eio_governance.mcp_session_to_json sessions));
             ])
         | "cleanup" ->
-            let cutoff = now -. (7.0 *. 86400.0) in
+            let cutoff = now -. Masc_time_constants.days_to_seconds 7 in
             let remaining = List.filter (fun (s : Mcp_server_eio_governance.mcp_session_record) -> s.last_seen >= cutoff) sessions in
             let removed = List.length sessions - List.length remaining in
             save remaining;

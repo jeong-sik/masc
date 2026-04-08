@@ -132,7 +132,7 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
          This avoids reading all 1400+ historical session files on each poll.
          Active sessions are preserved by list_sessions ~since_unix which does a
          lightweight status check on mtime-excluded dirs (avoids full JSON load). *)
-      let cutoff_unix = Time_compat.now () -. 86400.0 in
+      let cutoff_unix = Time_compat.now () -. Masc_time_constants.day in
       let all_sessions =
         if Room.is_initialized config then
           (match
@@ -282,7 +282,7 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
         ]
       in
       let now = Time_compat.now () in
-      let recent_cutoff = now -. 86400.0 in (* 24 hours *)
+      let recent_cutoff = now -. Masc_time_constants.day in (* 24 hours *)
       let active_tasks = List.filter (fun (t : Types.task) ->
         match t.task_status with
         | Types.Done _ | Types.Cancelled _ -> false

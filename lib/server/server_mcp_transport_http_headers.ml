@@ -129,8 +129,8 @@ let mcp_headers session_id protocol_version =
 
 let session_cookie_header session_id =
   ( "set-cookie",
-    Printf.sprintf "mcp-session-id=%s; Path=/; Max-Age=86400; SameSite=Lax"
-      session_id )
+    Printf.sprintf "mcp-session-id=%s; Path=/; Max-Age=%d; SameSite=Lax"
+      session_id Masc_time_constants.day_int )
 
 let sse_headers ~(deps : deps) session_id protocol_version origin =
   [

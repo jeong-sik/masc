@@ -409,7 +409,7 @@ module Pure = struct
     if total = 0 then 0.0
     else
       let ratio = float_of_int p.effectiveness_used /. float_of_int total in
-      let decay_constant = 30.0 *. 86400.0 in
+      let decay_constant = Masc_time_constants.days_to_seconds 30 in
       let elapsed = now -. p.last_used in
       let decay = exp (-. elapsed /. decay_constant) in
       ratio *. decay

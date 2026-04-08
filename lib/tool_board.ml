@@ -50,8 +50,8 @@ let format_timestamp_relative ts =
   let diff = now -. ts in
   if diff < 60.0 then "just now"
   else if diff < 3600.0 then Printf.sprintf "%dm ago" (int_of_float (diff /. 60.0))
-  else if diff < 86400.0 then Printf.sprintf "%dh ago" (int_of_float (diff /. 3600.0))
-  else Printf.sprintf "%dd ago" (int_of_float (diff /. 86400.0))
+  else if diff < Masc_time_constants.day then Printf.sprintf "%dh ago" (int_of_float (diff /. 3600.0))
+  else Printf.sprintf "%dd ago" (int_of_float (diff /. Masc_time_constants.day))
 
 let format_ttl_remaining expires_at =
   if expires_at = 0.0 then "permanent"
@@ -60,8 +60,8 @@ let format_ttl_remaining expires_at =
   let remaining = expires_at -. now in
   if remaining <= 0.0 then "expired"
   else if remaining < 3600.0 then Printf.sprintf "%dm left" (int_of_float (remaining /. 60.0))
-  else if remaining < 86400.0 then Printf.sprintf "%dh left" (int_of_float (remaining /. 3600.0))
-  else Printf.sprintf "%dd left" (int_of_float (remaining /. 86400.0))
+  else if remaining < Masc_time_constants.day then Printf.sprintf "%dh left" (int_of_float (remaining /. 3600.0))
+  else Printf.sprintf "%dd left" (int_of_float (remaining /. Masc_time_constants.day))
 
 let board_error_to_string = function
   | Board.Invalid_id s -> Printf.sprintf "Invalid ID: %s" s

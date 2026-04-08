@@ -809,7 +809,7 @@ let cleanup_orphan_buffers () =
     List.length orphans)
 
 (** Max idle time before a subscription is expired (24 hours). *)
-let subscription_max_idle_sec = 86400.0
+let subscription_max_idle_sec = Masc_time_constants.day
 
 (** Remove subscriptions that have not been polled within [subscription_max_idle_sec].
     Also removes their event buffers. Returns count of expired subscriptions. *)

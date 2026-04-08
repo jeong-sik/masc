@@ -93,7 +93,7 @@ let dashboard_proof_cache_selector ?session_id ?operation_id () =
     (value_or_star operation_id)
 
 let dashboard_active_or_recent_sessions ~clock config =
-  let cutoff_unix = Time_compat.now () -. 86400.0 in
+  let cutoff_unix = Time_compat.now () -. Masc_time_constants.day in
   let cutoff_iso = Dashboard_utils.iso_of_unix cutoff_unix in
   let limit = dashboard_session_list_limit () in
   let sessions =
@@ -205,7 +205,7 @@ let dashboard_batch_json ?(compact = false) (config : Room.config) : Yojson.Safe
       "MASC_DASHBOARD_ALERT_TOAST_COOLDOWN_SEC"
       ~default:300
       ~min_v:10
-      ~max_v:86400
+      ~max_v:Masc_time_constants.day_int
   in
   let canonical_namespace = Room.default_namespace_id in
   let status_json =

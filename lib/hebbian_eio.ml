@@ -269,12 +269,12 @@ let consolidate config ?params ~decay_after_days () : int =
   let params = Option.value params ~default:(default_params ()) in
   let graph = load_graph config in
   let now = Time_compat.now () in
-  let cutoff = now -. (float_of_int decay_after_days *. 86400.0) in
+  let cutoff = now -. Masc_time_constants.days_to_seconds decay_after_days in
 
   let (decayed, pruned_count) = List.fold_left (fun (acc, count) synapse ->
     if synapse.last_updated < cutoff then
       (* Apply decay *)
-      let days_since = (now -. synapse.last_updated) /. 86400.0 in
+      let days_since = (now -. synapse.last_updated) /. Masc_time_constants.day in
       let decay = params.decay_rate *. days_since in
       let new_weight = max 0.0 (synapse.weight -. decay) in
       if new_weight < params.min_weight then

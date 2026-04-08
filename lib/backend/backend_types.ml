@@ -119,7 +119,7 @@ let configured_max_pool_size () =
     Returns sanitized TTL (minimum 1, maximum 86400 = 24h) *)
 let validate_ttl ttl_seconds =
   if ttl_seconds <= 0 then 1
-  else if ttl_seconds > 86400 then 86400
+  else if ttl_seconds > Masc_time_constants.day_int then Masc_time_constants.day_int
   else ttl_seconds
 
 (** Acquire exclusive file lock using Unix.lockf.

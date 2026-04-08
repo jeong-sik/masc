@@ -139,13 +139,15 @@ let generate_code_change ~goal ~baseline ~history ~insights
   let prompt = build_code_change_prompt ~goal ~baseline ~history ~insights
     ~file_content ~target_file in
   match
-    Oas_worker.run_named ~cascade_name:"autoresearch"
-      ~goal:prompt ~max_turns:1
-      ~temperature:(Cascade_inference.resolve_temperature
-        ~cascade_name:"autoresearch" ~fallback:(fun () -> 0.7))
-      ~max_tokens:(Cascade_inference.resolve_max_tokens
-        ~cascade_name:"autoresearch" ~fallback:(fun () -> 4096))
-      ()
+    Masc_oas_bridge.run_safe ~timeout_s:120.0 (fun () ->
+      Oas_worker.run_named ~cascade_name:"autoresearch"
+        ~goal:prompt ~max_turns:1
+        ~temperature:(Cascade_inference.resolve_temperature
+          ~cascade_name:"autoresearch" ~fallback:(fun () -> 0.7))
+        ~max_tokens:(Cascade_inference.resolve_max_tokens
+          ~cascade_name:"autoresearch" ~fallback:(fun () -> 4096))
+        ()
+    )
   with
   | Error e -> Result.error (Printf.sprintf "MODEL call failed: %s" (Oas.Error.to_string e))
   | Ok result -> parse_model_code_response (Oas_response.text_of_response result.Oas_worker.response)

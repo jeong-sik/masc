@@ -334,16 +334,18 @@ let review
         (false, sprintf "Invalid verdict format: %s" msg)
     in
     (match
-       Oas_worker.run_named_with_masc_tools
-         ~cascade_name:evaluator_cascade
-         ~goal:prompt
-         ~masc_tools:[report_review_verdict_schema]
-         ~dispatch
-         ~max_turns:1
-         ~temperature:Oas_worker_cascade.deterministic_temperature
-         ~max_tokens:200
-         ?sw
-         ()
+       Masc_oas_bridge.run_safe ~timeout_s:180.0 (fun () ->
+         Oas_worker.run_named_with_masc_tools
+           ~cascade_name:evaluator_cascade
+           ~goal:prompt
+           ~masc_tools:[report_review_verdict_schema]
+           ~dispatch
+           ~max_turns:1
+           ~temperature:Oas_worker_cascade.deterministic_temperature
+           ~max_tokens:200
+           ?sw
+           ()
+       )
      with
      | Ok result ->
        let (v, gate, fallback_reason) = match !verdict_ref with

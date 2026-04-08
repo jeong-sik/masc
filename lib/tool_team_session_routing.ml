@@ -403,11 +403,13 @@ let model_judge_routing ~spawn_prompt ~spawn_role ~worker_class =
           worker_class_text role_text spawn_prompt
       in
       (match
-        Oas_worker.run_named ~cascade_name:(Env_config.Model_defaults.routing_cascade ())
-          ~system_prompt:"You are a routing judge for a hybrid swarm. Output only JSON."
-          ~goal:prompt ~max_turns:1
-          ~temperature:Oas_worker_cascade.deterministic_temperature ~max_tokens:220
-          ()
+        Masc_oas_bridge.run_safe ~timeout_s:180.0 (fun () ->
+          Oas_worker.run_named ~cascade_name:(Env_config.Model_defaults.routing_cascade ())
+            ~system_prompt:"You are a routing judge for a hybrid swarm. Output only JSON."
+            ~goal:prompt ~max_turns:1
+            ~temperature:Oas_worker_cascade.deterministic_temperature ~max_tokens:220
+            ()
+        )
       with
       | Ok result -> (
           try

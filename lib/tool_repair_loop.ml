@@ -167,10 +167,12 @@ let generate_or_repair_code (ctx : _ context) (state : state) :
           ~validator_output:(validator_output_of_attempt previous_attempt)
       in
       let result =
-        Oas_worker.run_model_by_label ~model_label:state.model_label
-          ~goal:prompt ~system_prompt:Ocaml.system_prompt ~max_turns:1
-          ~temperature:Oas_worker_cascade.deterministic_temperature ~max_tokens:1024 ~enable_thinking:false
-          ?sw:ctx.sw ()
+        Masc_oas_bridge.run_safe ~timeout_s:180.0 (fun () ->
+          Oas_worker.run_model_by_label ~model_label:state.model_label
+            ~goal:prompt ~system_prompt:Ocaml.system_prompt ~max_turns:1
+            ~temperature:Oas_worker_cascade.deterministic_temperature ~max_tokens:1024 ~enable_thinking:false
+            ?sw:ctx.sw ()
+        )
       in
       result
       |> Result.map_error Oas.Error.to_string

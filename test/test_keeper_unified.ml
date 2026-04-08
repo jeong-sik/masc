@@ -1538,6 +1538,7 @@ let test_side_effect_reclassification_skips_retry_safe_keeper_observation_tools 
     (UT.is_transient_network_error reclassified);
   check bool "retry-safe observation tools do not become ambiguous partial" false
     (UT.is_ambiguous_side_effect_error reclassified)
+
 let test_metrics_mixed_response () =
   let result =
     make_run_result ~text:"Done." ~tools:["keeper_fs_read"]

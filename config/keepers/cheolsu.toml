@@ -47,6 +47,9 @@ execution_scope = "workspace"
 tool_preset = "social"
 also_allow = ["keeper_github", "keeper_fs_read", "keeper_shell_readonly"]
 
+# Ollama-only: test local LLM slot queuing (2026-04-09)
+allowed_providers = ["ollama"]
+
 # Telemetry Feedback
 telemetry_feedback_enabled = true
 telemetry_feedback_window_hours = 24

@@ -318,6 +318,15 @@ module KeeperToolExec = struct
       Default: 3. Range: [2, 20]. *)
   let max_consecutive_tool_failures =
     max 2 (min 20 (get_int ~default:3 "MASC_KEEPER_MAX_CONSECUTIVE_TOOL_FAILURES"))
+
+  (** Maximum characters in a single tool output before truncation.
+      Large tool outputs (e.g. board_list returning 15KB+) bloat the
+      LLM context and cause OAS timeout on local 9B models.
+      Truncated outputs include metadata (original size, truncation ratio)
+      so the LLM knows information was elided.
+      Env: [MASC_KEEPER_MAX_TOOL_OUTPUT_CHARS]. Default: 8000. Range: [1000, 32000]. *)
+  let max_tool_output_chars =
+    max 1000 (min 32000 (get_int ~default:8000 "MASC_KEEPER_MAX_TOOL_OUTPUT_CHARS"))
 end
 
 (** {1 Context Ratio Hard Cap}

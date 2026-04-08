@@ -461,6 +461,45 @@ let test_normalize_failure_plain_text () =
   check bool "ok is false" false (json_bool "ok" json);
   check string "error is raw text" raw (json_string "error" json)
 
+(* ── truncate_tool_output tests ──────────────────────────── *)
+
+let test_truncate_short_output_unchanged () =
+  let short = "hello world" in
+  let result = Keeper_tools_oas.truncate_tool_output ~max_chars:100 short in
+  check string "short output unchanged" short result
+
+let test_truncate_exact_limit_unchanged () =
+  let exact = String.make 100 'x' in
+  let result = Keeper_tools_oas.truncate_tool_output ~max_chars:100 exact in
+  check string "exact limit unchanged" exact result
+
+let test_truncate_over_limit_is_truncated () =
+  let long = String.make 200 'a' in
+  let result = Keeper_tools_oas.truncate_tool_output ~max_chars:100 long in
+  check bool "result shorter than original" true (String.length result < 200);
+  check bool "starts with original prefix" true
+    (String.sub result 0 100 = String.make 100 'a');
+  check bool "contains truncation marker" true
+    (string_contains ~sub:"[truncated:" result)
+
+let test_truncate_metadata_shows_correct_stats () =
+  let long = String.make 10000 'b' in
+  let result = Keeper_tools_oas.truncate_tool_output ~max_chars:2000 long in
+  check bool "mentions original size" true
+    (string_contains ~sub:"10000" result);
+  check bool "mentions kept size" true
+    (string_contains ~sub:"2000" result);
+  check bool "mentions elided percentage" true
+    (string_contains ~sub:"80%" result)
+
+let test_truncate_default_uses_env_config () =
+  (* Default max_chars from env config (8000). A 16000-char string should be truncated. *)
+  let long = String.make 16000 'c' in
+  let result = Keeper_tools_oas.truncate_tool_output long in
+  check bool "default truncates 16k" true (String.length result < 16000);
+  check bool "contains truncation marker" true
+    (string_contains ~sub:"[truncated:" result)
+
 let () =
   let base_path = Masc_test_deps.find_project_root () in
   Keeper_exec_tools.inject_masc_schemas Config.raw_all_tool_schemas;
@@ -495,5 +534,12 @@ let () =
       test_case "search returns results" `Quick test_library_search_returns_results;
       test_case "empty query fails" `Quick test_library_search_empty_query;
       test_case "missing topic fails" `Quick test_library_read_missing_topic;
+    ];
+    "truncate_tool_output", [
+      test_case "short output unchanged" `Quick test_truncate_short_output_unchanged;
+      test_case "exact limit unchanged" `Quick test_truncate_exact_limit_unchanged;
+      test_case "over limit is truncated" `Quick test_truncate_over_limit_is_truncated;
+      test_case "metadata shows correct stats" `Quick test_truncate_metadata_shows_correct_stats;
+      test_case "default uses env config" `Quick test_truncate_default_uses_env_config;
     ];
   ]

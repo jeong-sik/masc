@@ -158,6 +158,29 @@ let normalize_tool_result ~(success : bool) (raw : string) : string =
         ("detail", `Null);
       ])
 
+(** Truncate tool output that exceeds [max_chars] to prevent context bloat.
+
+    Large tool outputs (e.g. board_list returning 15KB) cause the LLM to
+    time out on local models where generation speed drops with context size.
+    Truncation preserves the first [max_chars] of the result and appends
+    metadata so the LLM knows information was elided.
+
+    Only applies to success results — error messages are typically short
+    and should always be visible in full for debugging. *)
+let truncate_tool_output ?(max_chars = Env_config_keeper.KeeperToolExec.max_tool_output_chars) (result : string) : string =
+  let len = String.length result in
+  if len <= max_chars then result
+  else begin
+    let truncated = String.sub result 0 max_chars in
+    let pct = Float.of_int (len - max_chars) *. 100.0 /. Float.of_int len in
+    Printf.sprintf "%s\n[truncated: %d/%d chars shown (%.0f%% elided). Use more specific query params to reduce output.]"
+      truncated max_chars len pct
+  end
+
+(** Max chars for SSE error preview. Short enough for dashboard display,
+    long enough to include the actionable portion of the error. *)
+let sse_error_preview_max_chars = 300
+
 let make_tools
     ~(config : Room.config)
     ~(meta : Keeper_types.keeper_meta)
@@ -218,8 +241,8 @@ let make_tools
                 Keeper_exec_tools.notify_tool_call_observers ~tool_name:td.name ~success:false;
                 let detail =
                   let s = String.trim result in
-                  if String.length s <= 300 then s
-                  else String.sub s 0 300 ^ "..."
+                  if String.length s <= sse_error_preview_max_chars then s
+                  else String.sub s 0 sse_error_preview_max_chars ^ "..."
                 in
                 let ts = Time_compat.now () in
                 (try Sse.broadcast
@@ -297,20 +320,28 @@ let make_tools
                        | _ -> normalized
                      with Yojson.Json_error _ -> normalized)
                 in
+                let original_len = String.length final_result in
+                let truncated_result = truncate_tool_output final_result in
+                let was_truncated = String.length truncated_result < original_len in
+                if was_truncated then
+                  Log.Keeper.info "tool %s output truncated: %d -> %d chars"
+                    td.name original_len (String.length truncated_result);
                 (try
                   Keeper_types_support.append_jsonl_line
                     (Keeper_types_support.keeper_decision_log_path config meta.name)
-                    (`Assoc [
+                    (`Assoc ([
                       "ts_unix", `Float ts;
                       "event", `String "tool_exec";
                       "keeper_name", `String meta.name;
                       "tool", `String td.name;
                       "duration_ms", `Int duration_ms;
-                      "result_bytes", `Int (String.length final_result);
+                      "result_bytes", `Int original_len;
                       "ok", `Bool true;
-                    ])
+                    ] @ (if was_truncated then
+                      ["truncated_to", `Int (String.length truncated_result)]
+                    else [])))
                 with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
-                (true, final_result)
+                (true, truncated_result)
               end
             with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
               let ts = Time_compat.now () in

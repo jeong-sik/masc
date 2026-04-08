@@ -135,6 +135,7 @@ let handle_keeper_shell_readonly
     | "git status" | "status" -> "git_status"
     | "git log" -> "git_log"
     | "git diff" -> "git_diff"
+    | "git worktree" | "worktree" -> "git_worktree"
     | "read" | "file" | "type" -> "cat"
     | "grep" | "search" -> "rg"
     | "dir" | "list" -> "ls"
@@ -338,6 +339,54 @@ let handle_keeper_shell_readonly
     render_process_result
       ~cmd:"git diff --stat"
       [ "git"; "-C"; root; "--no-optional-locks"; "diff"; "--stat" ]
+  | "git_worktree" ->
+    let action =
+      Safe_ops.json_string ~default:"list" "action" args
+      |> String.trim |> String.lowercase_ascii
+    in
+    (match action with
+     | "list" ->
+       render_process_result ~cmd:"git worktree list"
+         [ "git"; "-C"; root; "worktree"; "list" ]
+     | "add" ->
+       let branch = Safe_ops.json_string ~default:"" "branch" args |> String.trim in
+       let base = Safe_ops.json_string ~default:"origin/main" "base" args |> String.trim in
+       if branch = "" then
+         error_json ~fields:[ "op", `String op ]
+           "branch is required. Good: action='add', branch='feature/my-task'. Bad: branch=''."
+       else
+         (* Schema-level validation: check if branch is already in a worktree BEFORE running *)
+         let _st, wt_out =
+           Process_eio.run_argv_with_status ~timeout_sec:5.0
+             [ "git"; "-C"; root; "worktree"; "list"; "--porcelain" ]
+         in
+         if String_util.contains_substring_ci wt_out branch then
+           let existing_path =
+             String.split_on_char '\n' wt_out
+             |> List.find_map (fun line ->
+               if String_util.contains_substring_ci line "worktree" &&
+                  String_util.contains_substring_ci wt_out branch
+               then Some (String.trim line) else None)
+             |> Option.value ~default:"(unknown)"
+           in
+           Yojson.Safe.to_string
+             (`Assoc
+                 [ "ok", `Bool false
+                 ; "op", `String op
+                 ; "error", `String "branch_already_in_worktree"
+                 ; "branch", `String branch
+                 ; "existing_worktree", `String existing_path
+                 ; "hint", `String "Branch is already in a worktree. Use 'cd' to the existing path, or choose a different branch name."
+                 ])
+         else
+           let wt_path = Printf.sprintf ".worktrees/%s"
+             (String.map (fun c -> if c = '/' then '-' else c) branch) in
+           render_process_result
+             ~cmd:(Printf.sprintf "git worktree add %s -b %s %s" wt_path branch base)
+             [ "git"; "-C"; root; "worktree"; "add"; wt_path; "-b"; branch; base ]
+     | other ->
+       error_json ~fields:[ "op", `String op ]
+         (Printf.sprintf "Unknown git_worktree action '%s'. Use: list, add." other))
   | "bash" ->
     let cmd_str = Safe_ops.json_string ~default:"" "command" args |> String.trim in
     if cmd_str = "" then error_json ~fields:[ "op", `String op ] "command is required for bash op. Good: command='env'. Bad: command=''."
@@ -386,7 +435,7 @@ let handle_keeper_shell_readonly
                    (fun name -> `String name)
                    [ "pwd"; "ls"; "cat"; "rg"; "git_status";
                      "find"; "head"; "tail"; "wc"; "tree";
-                     "git_log"; "git_diff"; "bash" ]) )
+                     "git_log"; "git_diff"; "git_worktree"; "bash" ]) )
           ])
 ;;
 

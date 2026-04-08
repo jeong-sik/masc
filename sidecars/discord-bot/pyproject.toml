@@ -1,5 +1,5 @@
 [project]
-name = "masc-discord-bot"
+name = "discord-gate-bot"
 version = "0.1.0"
 description = "Discord bot consumer for the Channel Gate"
 requires-python = ">=3.11"

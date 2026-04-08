@@ -35,6 +35,9 @@ cp .env.example .env
 can omit it when the server keeps `require_token=false`; in that mode the
 connector falls back to same-origin auth headers against `127.0.0.1`/`localhost`.
 
+Legacy env vars `MASC_MCP_URL` and `MASC_API_TOKEN` are accepted as aliases
+for `GATE_BASE_URL` and `GATE_API_TOKEN` respectively.
+
 ### 3. Run
 
 ```bash

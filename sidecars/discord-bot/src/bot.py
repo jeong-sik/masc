@@ -247,7 +247,7 @@ def breaker_summary(snapshot: BreakerSnapshot) -> str:
 
 
 def keeper_status_embed(keeper_name: str, data: dict[str, Any]) -> discord.Embed:
-    """Build a compact embed from masc_keeper_status JSON."""
+    """Build a compact embed from gate keeper-status JSON."""
     embed = discord.Embed(
         title=f"Keeper: {keeper_name}",
         color=0x5865F2,
@@ -684,9 +684,6 @@ def main() -> None:
     except KeyboardInterrupt:
         logger.info("Shutting down")
         sys.exit(0)
-
-
-MascBot = GateBot
 
 
 if __name__ == "__main__":

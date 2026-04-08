@@ -102,7 +102,7 @@ class GateClient:
     def _build_headers(self, cfg: Any) -> dict[str, str]:
         headers = {
             "Content-Type": "application/json",
-            "X-MASC-Agent": CONNECTOR_AGENT_NAME,
+            "X-Gate-Agent": CONNECTOR_AGENT_NAME,
         }
         if cfg.gate_api_token:
             headers["Authorization"] = f"Bearer {cfg.gate_api_token}"

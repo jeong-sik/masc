@@ -30,6 +30,32 @@ val compute_stats :
 (** Read decision log and compute stats for entries within the window.
     Returns [empty_stats] on I/O errors or missing files. *)
 
+val get_cached_stats : keeper_name:string -> behavioral_stats
+(** Read cached stats for a keeper. O(1), no file I/O.
+    Returns [empty_stats ~window_hours:0] on cache miss. *)
+
+val get_cache_age_sec : keeper_name:string -> float option
+(** Seconds since the cache was last refreshed.
+    Returns [None] if no cache entry exists. *)
+
+val refresh_stats :
+  keeper_name:string ->
+  decision_log_path:string ->
+  window_hours:int ->
+  unit
+(** Refresh a keeper's stats and store in cache. *)
+
+val start_refresh_loop :
+  sw:Eio.Switch.t ->
+  clock:_ Eio.Time.clock ->
+  keeper_name:string ->
+  decision_log_path:string ->
+  window_hours:int ->
+  interval_sec:int ->
+  unit
+(** Fork a background fiber that refreshes cached stats at a fixed interval.
+    Exceptions during refresh are caught; the loop continues. *)
+
 val render_feedback_block : stats:behavioral_stats -> string
 (** Render a "### Behavioral Self-Assessment" prompt block.
     Presents data without judgment — the model interprets the numbers. *)

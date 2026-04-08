@@ -163,6 +163,45 @@ let compute_stats ~decision_log_path ~window_hours =
     }
 
 (* ------------------------------------------------------------------ *)
+(* Proactive cache layer                                               *)
+(* ------------------------------------------------------------------ *)
+
+type stats_cache = {
+  stats : behavioral_stats;
+  computed_at : float;
+}
+
+let stats_caches : (string, stats_cache) Hashtbl.t = Hashtbl.create 8
+let stats_mu = Eio.Mutex.create ()
+
+let refresh_stats ~keeper_name ~decision_log_path ~window_hours =
+  let stats = compute_stats ~decision_log_path ~window_hours in
+  Eio.Mutex.use_rw ~protect:true stats_mu (fun () ->
+    Hashtbl.replace stats_caches keeper_name
+      { stats; computed_at = Unix.gettimeofday () })
+
+let get_cached_stats ~keeper_name =
+  Eio.Mutex.use_ro stats_mu (fun () ->
+    match Hashtbl.find_opt stats_caches keeper_name with
+    | Some c -> c.stats
+    | None -> empty_stats ~window_hours:0)
+
+let get_cache_age_sec ~keeper_name =
+  Eio.Mutex.use_ro stats_mu (fun () ->
+    match Hashtbl.find_opt stats_caches keeper_name with
+    | Some c -> Some (Unix.gettimeofday () -. c.computed_at)
+    | None -> None)
+
+let start_refresh_loop ~sw ~clock ~keeper_name ~decision_log_path
+    ~window_hours ~interval_sec =
+  Eio.Fiber.fork ~sw (fun () ->
+    while true do
+      (try refresh_stats ~keeper_name ~decision_log_path ~window_hours
+       with _ -> ());
+      Eio.Time.sleep clock (float_of_int interval_sec)
+    done)
+
+(* ------------------------------------------------------------------ *)
 (* Prompt rendering                                                    *)
 (* ------------------------------------------------------------------ *)
 

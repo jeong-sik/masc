@@ -848,7 +848,29 @@ let handle_tool name args =
   | "masc_board_cleanup" -> handle_board_cleanup args
   | _ -> (false, Printf.sprintf "Unknown tool: %s" name)
 
+let _tool_spec_read_only =
+  [
+    "masc_board_list";
+    "masc_board_get";
+    "masc_board_stats";
+    "masc_board_search";
+    "masc_board_profile";
+    "masc_board_hearths";
+  ]
+
 let register () =
   Tool_dispatch.register_module
     ~schemas:tools
-    ~handler:(fun ~name ~args -> Some (handle_tool name args))
+    ~handler:(fun ~name ~args -> Some (handle_tool name args));
+  List.iter
+    (fun (s : Types.tool_schema) ->
+      Tool_spec.register
+        (Tool_spec.create
+           ~name:s.name
+           ~description:s.description
+           ~module_tag:Tool_dispatch.Mod_misc
+           ~input_schema:s.input_schema
+           ~is_read_only:(List.mem s.name _tool_spec_read_only)
+           ~is_idempotent:(List.mem s.name _tool_spec_read_only)
+           ()))
+    tools

@@ -22,6 +22,13 @@ interface FailureCategory {
   count: number
 }
 
+interface HourlyPoint {
+  hour: string
+  calls: number
+  success: number
+  success_rate: number
+}
+
 interface ToolQualityData {
   total: number
   success: number
@@ -30,6 +37,7 @@ interface ToolQualityData {
   by_tool: ToolStat[]
   by_keeper: KeeperStat[]
   failure_categories: FailureCategory[]
+  hourly_trend?: HourlyPoint[]
 }
 
 const data: Signal<ToolQualityData | null> = signal(null)
@@ -110,17 +118,65 @@ function ToolTable({ tools }: { tools: ToolStat[] }) {
   `
 }
 
-function KeeperGrid({ keepers }: { keepers: KeeperStat[] }) {
+function TrendSparkline({ points }: { points: HourlyPoint[] }) {
+  if (points.length < 2) return null
+  const W = 200, H = 40, pad = 2
+  const n = points.length
+  const maxCalls = Math.max(...points.map(p => p.calls), 1)
+
+  // Success rate line
+  const rateLine = points.map((p, i) => {
+    const x = pad + (i / (n - 1)) * (W - 2 * pad)
+    const y = H - pad - (p.success_rate / 100) * (H - 2 * pad)
+    return `${x.toFixed(1)},${y.toFixed(1)}`
+  }).join(' ')
+
+  // Call volume bars
+  const barW = Math.max(1, ((W - 2 * pad) / n) * 0.6)
+  const bars = points.map((p, i) => {
+    const x = pad + (i / (n - 1)) * (W - 2 * pad) - barW / 2
+    const barH = (p.calls / maxCalls) * (H - 2 * pad)
+    return { x, y: H - pad - barH, w: barW, h: barH, failures: p.calls - p.success }
+  })
+
+  const lastRate = points[points.length - 1]?.success_rate ?? 0
+  const lineColor = lastRate >= 95 ? '#4ade80' : lastRate >= 90 ? '#fbbf24' : '#ef4444'
+
   return html`
-    <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+    <div class="rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] p-3">
+      <div class="flex items-center justify-between mb-1.5">
+        <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">Success Rate Trend</span>
+        <span class="text-xs font-mono" style="color:${lineColor}">${lastRate.toFixed(1)}%</span>
+      </div>
+      <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" style="background:#0b1220;">
+        ${bars.map(b => html`
+          <rect x="${b.x.toFixed(1)}" y="${b.y.toFixed(1)}" width="${b.w.toFixed(1)}" height="${b.h.toFixed(1)}" fill="${b.failures > 0 ? 'rgba(239,68,68,0.3)' : 'rgba(74,222,128,0.15)'}" rx="0.5" />
+        `)}
+        <polyline points="${rateLine}" fill="none" stroke="${lineColor}" stroke-width="1.5"/>
+      </svg>
+      <div class="flex justify-between mt-1 text-[8px] text-[var(--text-dim)] font-mono">
+        <span>${points[0]?.hour?.slice(5) ?? ''}</span>
+        <span>${points[points.length - 1]?.hour?.slice(5) ?? ''}</span>
+      </div>
+    </div>
+  `
+}
+
+function KeeperRateBars({ keepers }: { keepers: KeeperStat[] }) {
+  if (keepers.length === 0) return null
+  return html`
+    <div class="flex flex-col gap-1.5">
       ${keepers.map(k => {
-        const color = k.success_pct >= 95 ? 'border-emerald-500/30'
-          : k.success_pct >= 90 ? 'border-yellow-500/30' : 'border-red-500/30'
+        const color = k.success_pct >= 95 ? 'bg-emerald-500' : k.success_pct >= 90 ? 'bg-yellow-500' : 'bg-red-500'
+        const textColor = k.success_pct >= 95 ? 'text-emerald-400' : k.success_pct >= 90 ? 'text-yellow-400' : 'text-red-400'
         return html`
-          <div class="px-2 py-1.5 rounded border ${color} bg-[var(--bg-subtle)]">
-            <div class="text-[10px] text-[var(--text-dim)] truncate">${k.name}</div>
-            <div class="text-xs font-mono">${k.success_pct.toFixed(1)}%</div>
-            <div class="text-[9px] text-[var(--text-dim)]">${k.calls} calls</div>
+          <div class="flex items-center gap-2 text-[11px]">
+            <span class="w-24 truncate text-[var(--text-dim)] font-mono" title=${k.name}>${k.name}</span>
+            <div class="flex-1 h-1.5 bg-[var(--bg-subtle)] rounded-full overflow-hidden">
+              <div class="${color} h-full rounded-full transition-all" style="width:${Math.min(k.success_pct, 100)}%" />
+            </div>
+            <span class="w-12 text-right font-mono ${textColor}">${k.success_pct.toFixed(1)}%</span>
+            <span class="w-10 text-right text-[var(--text-dim)]">${k.calls}</span>
           </div>
         `
       })}
@@ -178,9 +234,13 @@ export function ToolQualityPanel() {
 
       <${RateGauge} rate=${d.success_rate} label="Overall" />
 
+      ${d.hourly_trend && d.hourly_trend.length >= 2 ? html`
+        <${TrendSparkline} points=${d.hourly_trend} />
+      ` : null}
+
       <div>
         <div class="text-[10px] text-[var(--text-dim)] uppercase tracking-wider mb-1">Per Keeper</div>
-        <${KeeperGrid} keepers=${d.by_keeper} />
+        <${KeeperRateBars} keepers=${d.by_keeper} />
       </div>
 
       <div>

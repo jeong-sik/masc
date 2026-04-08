@@ -461,47 +461,45 @@ let test_normalize_failure_plain_text () =
   check bool "ok is false" false (json_bool "ok" json);
   check string "error is raw text" raw (json_string "error" json)
 
-(* ── truncate_tool_output tests ──────────────────────────── *)
+(* ── Tool_output_validation tests ──────────────────────────── *)
 
-let test_truncate_short_output_unchanged () =
+let test_output_validation_short_unchanged () =
   let short = "hello world" in
-  let result = Keeper_tools_oas.truncate_tool_output ~max_chars:100 short in
+  let result = Tool_output_validation.validate_and_truncate ~tool_name:"test" short in
   check string "short output unchanged" short result
 
-let test_truncate_exact_limit_unchanged () =
+let test_output_validation_exact_limit_unchanged () =
+  Tool_output_validation.set_budget ~tool_name:"test_exact" ~max_chars:100;
   let exact = String.make 100 'x' in
-  let result = Keeper_tools_oas.truncate_tool_output ~max_chars:100 exact in
+  let result = Tool_output_validation.validate_and_truncate ~tool_name:"test_exact" exact in
   check string "exact limit unchanged" exact result
 
-let test_truncate_over_limit_is_truncated () =
-  let max_chars = 200 in
-  let long = String.make 400 'a' in
-  let result = Keeper_tools_oas.truncate_tool_output ~max_chars long in
-  (* Total output must be <= max_chars (hard cap) *)
-  check bool "result at most max_chars" true (String.length result <= max_chars);
-  check bool "contains truncation marker" true
-    (string_contains ~sub:"[truncated:" result)
+let test_output_validation_over_budget_truncates () =
+  Tool_output_validation.set_budget ~tool_name:"test_over" ~max_chars:200;
+  let long = String.make 500 'a' in
+  let result = Tool_output_validation.validate_and_truncate ~tool_name:"test_over" long in
+  check bool "result shorter than original" true (String.length result < 500);
+  check bool "contains budget metadata" true
+    (string_contains ~sub:"_output_budget_exceeded" result)
 
-let test_truncate_metadata_shows_correct_stats () =
-  let long = String.make 10000 'b' in
-  let result = Keeper_tools_oas.truncate_tool_output ~max_chars:2000 long in
-  (* Total output is hard-capped at max_chars *)
-  check bool "result at most max_chars" true (String.length result <= 2000);
-  check bool "mentions original size" true
-    (string_contains ~sub:"10000" result);
-  check bool "mentions kept size" true
-    (string_contains ~sub:"2000" result);
-  check bool "mentions elided percentage" true
-    (string_contains ~sub:"80%" result)
+let test_output_validation_array_aware_truncation () =
+  Tool_output_validation.set_budget ~tool_name:"test_array" ~max_chars:200;
+  let items = List.init 50 (fun i -> `Assoc [("id", `Int i); ("name", `String (Printf.sprintf "item_%d" i))]) in
+  let json = Yojson.Safe.to_string (`List items) in
+  let result = Tool_output_validation.validate_and_truncate ~tool_name:"test_array" json in
+  check bool "result is valid JSON" true
+    (try ignore (Yojson.Safe.from_string result); true with _ -> false);
+  check bool "contains truncated marker" true
+    (string_contains ~sub:"_truncated" result);
+  check bool "contains shown count" true
+    (string_contains ~sub:"_shown" result)
 
-let test_truncate_default_uses_env_config () =
-  let max_chars = Env_config_keeper.KeeperToolExec.max_tool_output_chars in
-  let long = String.make (max_chars + 1) 'c' in
-  let result = Keeper_tools_oas.truncate_tool_output long in
-  check bool "default truncates output longer than configured max" true
-    (String.length result <= max_chars);
-  check bool "contains truncation marker" true
-    (string_contains ~sub:"[truncated:" result)
+let test_output_validation_default_budget () =
+  let long = String.make 16000 'c' in
+  let result = Tool_output_validation.validate_and_truncate ~tool_name:"unregistered_tool" long in
+  check bool "default truncates 16k" true (String.length result < 16000);
+  check bool "contains budget metadata" true
+    (string_contains ~sub:"_output_budget_exceeded" result)
 
 let () =
   let base_path = Masc_test_deps.find_project_root () in
@@ -538,11 +536,11 @@ let () =
       test_case "empty query fails" `Quick test_library_search_empty_query;
       test_case "missing topic fails" `Quick test_library_read_missing_topic;
     ];
-    "truncate_tool_output", [
-      test_case "short output unchanged" `Quick test_truncate_short_output_unchanged;
-      test_case "exact limit unchanged" `Quick test_truncate_exact_limit_unchanged;
-      test_case "over limit is truncated" `Quick test_truncate_over_limit_is_truncated;
-      test_case "metadata shows correct stats" `Quick test_truncate_metadata_shows_correct_stats;
-      test_case "default uses env config" `Quick test_truncate_default_uses_env_config;
+    "output_validation", [
+      test_case "short output unchanged" `Quick test_output_validation_short_unchanged;
+      test_case "exact limit unchanged" `Quick test_output_validation_exact_limit_unchanged;
+      test_case "over budget truncates with metadata" `Quick test_output_validation_over_budget_truncates;
+      test_case "array-aware truncation" `Quick test_output_validation_array_aware_truncation;
+      test_case "default budget for unregistered tool" `Quick test_output_validation_default_budget;
     ];
   ]

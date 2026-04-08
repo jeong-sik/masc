@@ -158,35 +158,13 @@ let normalize_tool_result ~(success : bool) (raw : string) : string =
         ("detail", `Null);
       ])
 
-(** Truncate tool output that exceeds [max_chars] to prevent context bloat.
+(** Deterministic output validation — delegates to [Tool_output_validation].
 
-    Large tool outputs (e.g. board_list returning 15KB) cause the LLM to
-    time out on local models where generation speed drops with context size.
-
-    [max_chars] is a hard cap on total returned length. Space is reserved
-    for the metadata suffix; the preserved prefix is shortened accordingly.
-
-    Only applies to success results — error messages are typically short
-    and should always be visible in full for debugging. *)
-let truncate_tool_output ?(max_chars = Env_config_keeper.KeeperToolExec.max_tool_output_chars) (result : string) : string =
-  let len = String.length result in
-  if max_chars <= 0 then ""
-  else if len <= max_chars then result
-  else begin
-    let pct = Float.of_int (len - max_chars) *. 100.0 /. Float.of_int len in
-    let suffix =
-      Printf.sprintf
-        "\n[truncated: showing %d/%d chars (%.0f%% elided). Use more specific query params to reduce output.]"
-        max_chars len pct
-    in
-    let suffix_len = String.length suffix in
-    if suffix_len >= max_chars then
-      String.sub suffix 0 max_chars
-    else
-      let prefix_len = max_chars - suffix_len in
-      let prefix = String.sub result 0 prefix_len in
-      prefix ^ suffix
-  end
+    Replaces heuristic [truncate_tool_output] (blind char-cut) with
+    schema-aware validation: array-aware truncation + structured metadata.
+    Applied to ALL paths (success, error, exception) in [make_tools]. *)
+let validate_output ~tool_name (result : string) : string =
+  Tool_output_validation.validate_and_truncate ~tool_name result
 
 (** Max chars for SSE error preview. Short enough for dashboard display,
     long enough to include the actionable portion of the error. *)
@@ -284,7 +262,7 @@ let make_tools
                       "ok", `Bool false;
                     ])
                 with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
-                (false, normalized_error)
+                (false, validate_output ~tool_name:td.name normalized_error)
               end else begin
                 Hashtbl.remove failure_counts key;
                 Keeper_registry.record_tool_use ~base_path:config.base_path meta.name ~tool_name:td.name ~success:true;
@@ -331,10 +309,9 @@ let make_tools
                        | _ -> normalized
                      with Yojson.Json_error _ -> normalized)
                 in
-                let max_chars = Env_config_keeper.KeeperToolExec.max_tool_output_chars in
                 let original_len = String.length final_result in
-                let truncated_result = truncate_tool_output ~max_chars final_result in
-                let was_truncated = original_len > max_chars in
+                let truncated_result = validate_output ~tool_name:td.name final_result in
+                let was_truncated = String.length truncated_result < original_len in
                 if was_truncated then
                   Log.Keeper.info "tool %s output truncated: %d -> %d chars"
                     td.name original_len (String.length truncated_result);
@@ -395,6 +372,6 @@ let make_tools
                     "error", `String error_text;
                   ])
               with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
-              (false, normalized_exn)))
+              (false, validate_output ~tool_name:td.name normalized_exn)))
     else None
   ) tool_defs

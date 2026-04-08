@@ -452,15 +452,29 @@ export function MetricsCharts({ keeper }: { keeper: Keeper }) {
   const latencyLine = miniSparkline(latencies)
   const costLine = miniSparkline(costs)
 
+  // Fallback markers on latency chart
+  const n = series.length
+  const fallbackIndices = series
+    .map((p: KeeperMetricPoint, i: number) => p.fallback_applied ? i : -1)
+    .filter((i: number) => i >= 0)
+  const fallbackCount = fallbackIndices.length
+
   return html`
     <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-5">
-      ${'' /* Latency */}
+      ${'' /* Latency + fallback markers */}
       <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)]">
         <div class="flex items-center justify-between mb-1.5">
           <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">지연 시간</span>
-          <span class="text-xs font-mono tabular-nums text-[var(--accent)]">${lastLatency > 0 ? `${(lastLatency / 1000).toFixed(1)}s` : '-'}</span>
+          <span class="flex items-center gap-2">
+            ${fallbackCount > 0 ? html`<span class="text-[9px] px-1.5 py-0.5 rounded bg-[rgba(239,68,68,0.15)] text-[var(--bad)] font-mono">FB ${fallbackCount}</span>` : null}
+            <span class="text-xs font-mono tabular-nums text-[var(--accent)]">${lastLatency > 0 ? `${(lastLatency / 1000).toFixed(1)}s` : '-'}</span>
+          </span>
         </div>
         <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" style="background:#0b1220;">
+          ${fallbackIndices.map((idx: number) => {
+            const x = SPARKLINE_PAD + (idx / Math.max(n - 1, 1)) * (W - 2 * SPARKLINE_PAD)
+            return html`<line x1="${x.toFixed(1)}" y1="${SPARKLINE_PAD}" x2="${x.toFixed(1)}" y2="${H - SPARKLINE_PAD}" stroke="#ef4444" stroke-width="1.5" opacity="0.6"/>`
+          })}
           ${latencyLine ? html`<polyline points="${latencyLine}" fill="none" stroke="#9ad9ff" stroke-width="1.5"/>` : null}
         </svg>
       </div>
@@ -487,6 +501,23 @@ export function MetricsCharts({ keeper }: { keeper: Keeper }) {
             ${modelSwitches.map(s => html`
               <span class="text-[10px] px-2 py-0.5 rounded-full bg-[var(--warn-10)] text-[var(--warn)] border border-[var(--warn-20)] font-mono">
                 T${s.index} -> ${s.model.length > MODEL_NAME_MAX_LEN ? s.model.slice(0, MODEL_NAME_MAX_LEN) + '...' : s.model}
+              </span>
+            `)}
+          </div>
+        </div>
+      ` : null}
+
+      ${'' /* Cascade fallback events */}
+      ${fallbackCount > 0 ? html`
+        <div class="md:col-span-2 p-3 rounded-xl border border-[rgba(239,68,68,0.2)] bg-[rgba(239,68,68,0.04)]">
+          <div class="flex items-center justify-between mb-1.5">
+            <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">Cascade Fallback</span>
+            <span class="text-[10px] text-[var(--bad)]">${fallbackCount}회</span>
+          </div>
+          <div class="flex flex-wrap gap-1.5">
+            ${series.filter((p: KeeperMetricPoint) => p.fallback_applied).slice(-10).map((p: KeeperMetricPoint) => html`
+              <span class="text-[10px] px-2 py-0.5 rounded-full bg-[rgba(239,68,68,0.1)] text-[var(--bad)] border border-[rgba(239,68,68,0.2)] font-mono">
+                ${p.fallback_from ?? '?'} -> ${p.fallback_to ?? p.model_used}${p.fallback_reason ? ` (${p.fallback_reason.length > 20 ? p.fallback_reason.slice(0, 20) + '...' : p.fallback_reason})` : ''}
               </span>
             `)}
           </div>

@@ -348,6 +348,96 @@ commit_message='fix typo', pr_title='Fix typo in foo'. Requires coding or delive
   };
 ]
 
+(** Keeper PR submit — multi-file commit + push + draft PR creation.
+    Supersedes keeper_pr_workflow for multi-file changes. *)
+let keeper_pr_submit_tools : Types.tool_schema list = [
+  {
+    name = "keeper_pr_submit";
+    description = "Commit staged changes with keeper identity, push, and open a draft PR. \
+Works in any worktree or playground repos directory. \
+Provide cwd (worktree path), commit_message, pr_title. \
+Optional: pr_body, base_branch (default: main), draft (default: true), files (array, default: git add -A).";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("cwd", `Assoc [("type", `String "string"); ("description", `String "Working directory — must be inside .worktrees/ or .masc/playground/")]);
+        ("commit_message", `Assoc [("type", `String "string"); ("description", `String "Git commit message")]);
+        ("pr_title", `Assoc [("type", `String "string"); ("description", `String "Pull request title")]);
+        ("pr_body", `Assoc [("type", `String "string"); ("description", `String "PR description (defaults to pr_title)")]);
+        ("base_branch", `Assoc [("type", `String "string"); ("description", `String "Target branch (default: main)")]);
+        ("draft", `Assoc [("type", `String "boolean"); ("description", `String "Open as draft PR (default: true)")]);
+        ("files", `Assoc [("type", `String "array"); ("items", `Assoc [("type", `String "string")]); ("description", `String "Specific files to stage (default: git add -A)")]);
+      ]);
+      ("required", `List [`String "cwd"; `String "commit_message"; `String "pr_title"]);
+    ];
+  };
+]
+
+(** Pre-flight validation for keeper autonomous work. *)
+let keeper_preflight_tools : Types.tool_schema list = [
+  {
+    name = "keeper_preflight_check";
+    description = "Validate prerequisites before starting autonomous work: \
+gh auth, repo access, keeper identity, preset level, clone target path. \
+Returns structured JSON with all check results. Read-only, no side effects.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("repo", `Assoc [("type", `String "string"); ("description", `String "GitHub repo (owner/name) to check access for")]);
+      ]);
+      ("required", `List [`String "repo"]);
+    ];
+  };
+]
+
+(** PR review tools — read diffs, leave comments, approve/request changes. *)
+let keeper_pr_review_tools : Types.tool_schema list = [
+  {
+    name = "keeper_pr_review_read";
+    description = "Read PR metadata, diff, reviews, and comments. \
+Returns title, body, changed files, review threads, and truncated diff (max 64KB). Read-only.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("repo", `Assoc [("type", `String "string"); ("description", `String "GitHub repo (owner/name)")]);
+        ("number", `Assoc [("type", `String "integer"); ("description", `String "PR number")]);
+      ]);
+      ("required", `List [`String "repo"; `String "number"]);
+    ];
+  };
+  {
+    name = "keeper_pr_review_comment";
+    description = "Submit a PR review with optional inline comments. \
+Events: COMMENT, APPROVE, REQUEST_CHANGES. Requires delivery or coding preset.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("repo", `Assoc [("type", `String "string"); ("description", `String "GitHub repo (owner/name)")]);
+        ("number", `Assoc [("type", `String "integer"); ("description", `String "PR number")]);
+        ("body", `Assoc [("type", `String "string"); ("description", `String "Review body text")]);
+        ("event", `Assoc [("type", `String "string"); ("enum", `List [`String "COMMENT"; `String "APPROVE"; `String "REQUEST_CHANGES"]); ("description", `String "Review event type")]);
+        ("path", `Assoc [("type", `String "string"); ("description", `String "File path for inline comment (optional)")]);
+        ("line", `Assoc [("type", `String "integer"); ("description", `String "Line number for inline comment (optional)")]);
+      ]);
+      ("required", `List [`String "repo"; `String "number"; `String "body"; `String "event"]);
+    ];
+  };
+  {
+    name = "keeper_pr_review_reply";
+    description = "Reply to a specific PR review comment. Requires delivery or coding preset.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("repo", `Assoc [("type", `String "string"); ("description", `String "GitHub repo (owner/name)")]);
+        ("number", `Assoc [("type", `String "integer"); ("description", `String "PR number")]);
+        ("comment_id", `Assoc [("type", `String "integer"); ("description", `String "Comment ID to reply to")]);
+        ("body", `Assoc [("type", `String "string"); ("description", `String "Reply body text")]);
+      ]);
+      ("required", `List [`String "repo"; `String "number"; `String "comment_id"; `String "body"]);
+    ];
+  };
+]
+
 let coding_workspace_tool_names : string list =
   [ "masc_worktree_create"; "masc_worktree_list"; "masc_code_search";
     "masc_code_symbols"; "masc_code_read" ]

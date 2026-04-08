@@ -197,8 +197,21 @@ let load ~base_path : (t, string) result =
             List.rev_append bad_groups (List.rev_append bad_masc_groups acc)
           ) presets []
         in
-        (match ref_errors with
-        | _ :: _ -> Error (Printf.sprintf "in %s: %s" path (String.concat "; " ref_errors))
+        (* Validate that permission preset names reference defined presets *)
+        let validate_perm_presets label perm_list =
+          List.filter_map (fun name ->
+            if Hashtbl.mem presets name then None
+            else Some (Printf.sprintf
+              "permissions.%s: preset '%s' is not defined in [presets]" label name)
+          ) perm_list
+        in
+        let perm_errors =
+          validate_perm_presets "workflow_presets" workflow_presets
+          @ validate_perm_presets "shell_write_presets" shell_write_presets
+        in
+        let all_errors = ref_errors @ perm_errors in
+        (match all_errors with
+        | _ :: _ -> Error (Printf.sprintf "in %s: %s" path (String.concat "; " all_errors))
         | [] ->
           Log.Keeper.info "tool_policy_config: loaded %d groups, %d masc_groups, %d presets from %s"
             (Hashtbl.length groups) (Hashtbl.length masc_groups) (Hashtbl.length presets) path;

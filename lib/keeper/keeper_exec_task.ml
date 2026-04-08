@@ -20,7 +20,6 @@ let handle_keeper_task_tool
     let include_done = Safe_ops.json_bool ~default:false "include_done" args in
     let limit = Safe_ops.json_int ~default:50 "limit" args |> max 1 |> min 100 in
     let result = Room.list_tasks ?status:status_filter ~include_done config in
-    (* Truncate JSON list output if it parses as a list *)
     (try
        match Yojson.Safe.from_string result with
        | `List items ->

@@ -503,7 +503,7 @@ let handle_search args =
       let fmt = if compact then format_post_compact else format_post in
       let formatted = List.map fmt results in
       let separator = if compact then "\n" else "\n---\n" in
-      (true, Printf.sprintf "🔍 '%s' 검색 결과 (%d개):\n\n%s" query (List.length results) (String.concat separator formatted))
+      (true, Printf.sprintf "🔍 '%s' 검색 결과 (%d개):\n%s" query (List.length results) (String.concat separator formatted))
 
 (** Vote on comment *)
 let handle_comment_vote args =

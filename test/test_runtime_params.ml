@@ -271,6 +271,63 @@ let () =
       true (has "keeper.dead_ttl_sec")
   in
 
+  let test_keeper_boring_exit_threshold_registered () =
+    Governance_registry.ensure_init ();
+    let entries = Runtime_params.registry () in
+    let entry =
+      List.find_opt
+        (fun (k, _, _, _, _) -> k = "keeper.turn.boring_exit_threshold")
+        entries
+    in
+    match entry with
+    | Some (_, current, default_json, has_override, Some meta) ->
+        Alcotest.(check string) "default value" "8"
+          (Yojson.Safe.to_string default_json);
+        Alcotest.(check string) "current value" "8"
+          (Yojson.Safe.to_string current);
+        Alcotest.(check bool) "no override by default" false has_override;
+        Alcotest.(check string) "value_type" "int" meta.value_type;
+        Alcotest.(check (option string)) "min_value"
+          (Some "2")
+          (Option.map Yojson.Safe.to_string meta.min_value);
+        Alcotest.(check (option string)) "max_value"
+          (Some "50")
+          (Option.map Yojson.Safe.to_string meta.max_value)
+    | Some (_, _, _, _, None) ->
+        Alcotest.fail "keeper.turn.boring_exit_threshold meta missing"
+    | None ->
+        Alcotest.fail "keeper.turn.boring_exit_threshold not registered"
+  in
+
+  let test_keeper_boring_exit_threshold_env_clamps () =
+    let key = "MASC_KEEPER_BORING_EXIT_THRESHOLD" in
+    let original = Sys.getenv_opt key in
+    let restore_env () =
+      match original with
+      | Some value -> Unix.putenv key value
+      (* OCaml stdlib lacks Unix.unsetenv; empty string is sufficient here
+         because int_of_env_default treats invalid/empty values as default. *)
+      | None -> Unix.putenv key ""
+    in
+    Fun.protect
+      ~finally:(fun () ->
+        Runtime_params.clear Keeper_config.keeper_boring_exit_threshold_rp;
+        restore_env ())
+      (fun () ->
+        Runtime_params.clear Keeper_config.keeper_boring_exit_threshold_rp;
+        Unix.putenv key "1";
+        Alcotest.(check int) "clamps env below min" 2
+          (Keeper_config.keeper_boring_exit_threshold ());
+        Runtime_params.clear Keeper_config.keeper_boring_exit_threshold_rp;
+        Unix.putenv key "100";
+        Alcotest.(check int) "clamps env above max" 50
+          (Keeper_config.keeper_boring_exit_threshold ());
+        Runtime_params.clear Keeper_config.keeper_boring_exit_threshold_rp;
+        Unix.putenv key "bogus";
+        Alcotest.(check int) "invalid env falls back to default" 8
+          (Keeper_config.keeper_boring_exit_threshold ()))
+  in
+
   let test_keeper_lifecycle_surface () =
     let surfaces = Governance_registry.surfaces in
     let keeper_surface =
@@ -424,6 +481,10 @@ let () =
         [
           Alcotest.test_case "keeper params registered" `Quick
             test_keeper_params_registered;
+          Alcotest.test_case "keeper boring exit threshold registered" `Quick
+            test_keeper_boring_exit_threshold_registered;
+          Alcotest.test_case "keeper boring exit threshold env clamps" `Quick
+            test_keeper_boring_exit_threshold_env_clamps;
           Alcotest.test_case "keeper_lifecycle surface" `Quick
             test_keeper_lifecycle_surface;
           Alcotest.test_case "keeper params meta shape" `Quick

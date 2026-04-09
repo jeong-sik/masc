@@ -710,9 +710,8 @@ let keeper_slot_id (name : string) : int option =
 let keeper_boring_exit_threshold_rp =
   _rp_int ~key:"keeper.turn.boring_exit_threshold"
     ~default:(fun () ->
-      match Sys.getenv_opt "MASC_KEEPER_BORING_EXIT_THRESHOLD" with
-      | Some s -> (try int_of_string s with _ -> 8)
-      | None -> 8)
+      int_of_env_default "MASC_KEEPER_BORING_EXIT_THRESHOLD"
+        ~default:8 ~min_v:2 ~max_v:50)
     ~min_v:2 ~max_v:50
     ~description:"Consecutive boring turns before exit_condition triggers and keepalive skips proactive turns" ()
 

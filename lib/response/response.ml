@@ -58,6 +58,12 @@ let severity_of_string_default ?(default=Info) s =
   | Ok sev -> sev
   | Error _ -> default
 
+(** Coerce to canonical [Severity.t] for cross-module communication. *)
+let to_severity : severity -> Severity.t = function
+  | Fatal -> Critical
+  | Warning -> Warning
+  | Info -> Info
+
 (** Error detail to JSON *)
 let error_to_json (e : error_detail) : Yojson.Safe.t =
   `Assoc [

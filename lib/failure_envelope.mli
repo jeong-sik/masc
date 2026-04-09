@@ -22,6 +22,7 @@ type t = {
 
 val tool_host_log_module_name : string
 val severity_to_string : severity -> string
+val to_severity : severity -> Severity.t
 val recoverability_to_string : recoverability -> string
 val to_yojson : t -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> (t, string) result

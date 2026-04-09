@@ -97,6 +97,9 @@ val severity_of_error : t -> severity
 
 val string_of_severity : severity -> string
 
+val to_severity : severity -> Severity.t
+(** Coerce to canonical {!Severity.t} for cross-module communication. *)
+
 (** {1 Migration Bridge} *)
 
 val to_masc_error : t -> Types_auth.masc_error

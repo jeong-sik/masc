@@ -105,6 +105,7 @@ Notes:
 - Check the default port for a target: `scripts/run-local.sh --print-port --target-dir /path/to/project`
 - To use a fixed port: `scripts/run-local.sh --target-dir /path/to/project --port 94xx`
 - For shared repo/full-runtime paths, continue using `./start-masc-mcp.sh --http`
+- For a full boot/path/state inventory, see [docs/BOOT-ENV-STATE-INVENTORY.md](docs/BOOT-ENV-STATE-INVENTORY.md)
 
 Other start modes:
 

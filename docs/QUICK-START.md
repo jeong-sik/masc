@@ -265,6 +265,8 @@ export MASC_PERSONAS_DIR=/srv/masc/personas
 
 상세: `docs/KEEPER-USER-MANUAL.md`
 
+Boot/path/state inventory: `docs/BOOT-ENV-STATE-INVENTORY.md`
+
 호환성 참고:
 - 전체 부트스트랩 단축 경로 없이 에이전트만 연결하려는 경우에도 명시적 join 흐름을 계속 지원한다: `masc_join(agent_name="codex")`
 

@@ -63,23 +63,7 @@ let run_cmd argv =
   Sys.command cmd
 
 let policy_init_once = lazy (
-  (* Load tool_policy.toml from the repo root so presets resolve correctly.
-     The repo root is derived by walking up from the test executable's location. *)
-  let repo_root =
-    let cwd = Sys.getcwd () in
-    (* dune runs tests from the repo root *)
-    if Sys.file_exists (Filename.concat cwd "config/tool_policy.toml")
-    then cwd
-    else
-      (* fallback: try parent dirs *)
-      let rec go d =
-        if d = "/" then failwith "cannot find config/tool_policy.toml"
-        else if Sys.file_exists (Filename.concat d "config/tool_policy.toml")
-        then d
-        else go (Filename.dirname d)
-      in
-      go (Filename.dirname cwd)
-  in
+  let repo_root = Masc_test_deps.find_project_root () in
   Result.get_ok (Keeper_exec_tools.init_policy_config ~base_path:repo_root)
 )
 

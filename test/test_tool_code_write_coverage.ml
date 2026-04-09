@@ -93,15 +93,9 @@ let test_org_with_dots () =
 
 (* ── validate_clone_url ──────────────────────────────────────────── *)
 
-(* Use the real project base_path so config/tool_policy.toml is loaded.
-   Sys.getcwd () returns the project root when tests run via dune. *)
-let project_base_path () =
-  let cwd = Sys.getcwd () in
-  (* dune runs tests from _build/default/test, walk up to project root *)
-  if Sys.file_exists (Filename.concat cwd "config/tool_policy.toml") then cwd
-  else if Sys.file_exists (Filename.concat (Filename.dirname cwd) "config/tool_policy.toml")
-  then Filename.dirname cwd
-  else cwd
+(* Use the shared project-root resolver so isolated build dirs such as
+   [.ci_build/default/test] still find config/tool_policy.toml reliably. *)
+let project_base_path () = Masc_test_deps.find_project_root ()
 
 let test_allowed_org () =
   let bp = project_base_path () in

@@ -542,6 +542,14 @@ let test_full_keeper_model_tools_exclude_repo_synthesis_front_door () =
   check bool "repo synthesis swarm start excluded from keeper model tools" false
     (List.mem "masc_repo_synthesis_swarm_start" allowed)
 
+let test_autoresearch_keeper_tools_exclude_repo_synthesis_front_door () =
+  let names =
+    Tool_shard.autoresearch_keeper_tools
+    |> List.map (fun (schema : Types.tool_schema) -> schema.name)
+  in
+  check bool "repo synthesis swarm start excluded from autoresearch shard" false
+    (List.mem "masc_repo_synthesis_swarm_start" names)
+
 (* ================================================================ *)
 (* Preset-scoped universe (#4637)                                    *)
 (* ================================================================ *)
@@ -773,6 +781,8 @@ let () =
             test_universe_superset_of_policy;
           test_case "minimal preset includes core masc" `Quick
             test_minimal_preset_includes_core_masc;
+          test_case "autoresearch keeper tools exclude repo synthesis front door" `Quick
+            test_autoresearch_keeper_tools_exclude_repo_synthesis_front_door;
           test_case "full keeper model tools exclude repo synthesis front door" `Quick
             test_full_keeper_model_tools_exclude_repo_synthesis_front_door;
           test_case "registered inline board tool survives filter" `Quick

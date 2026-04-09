@@ -23,7 +23,7 @@ let count_event_type events expected =
 let turn_actor_of_event (json : Yojson.Safe.t) =
   if has_event_type json "team_turn" then
     match
-      Yojson.Safe.Util.member "detail" json |> Yojson.Safe.Util.member "actor"
+      detail_member "actor" json
     with
     | `String actor ->
         let actor = String.trim actor in
@@ -35,7 +35,7 @@ let turn_actor_of_event (json : Yojson.Safe.t) =
 let turn_kind_of_event (json : Yojson.Safe.t) =
   if has_event_type json "team_turn" then
     match
-      Yojson.Safe.Util.member "detail" json |> Yojson.Safe.Util.member "kind"
+      detail_member "kind" json
     with
     | `String kind -> Some (String.lowercase_ascii (String.trim kind))
     | _ -> None
@@ -45,7 +45,7 @@ let turn_kind_of_event (json : Yojson.Safe.t) =
 let turn_message_of_event (json : Yojson.Safe.t) =
   if has_event_type json "team_turn" then
     match
-      Yojson.Safe.Util.member "detail" json |> Yojson.Safe.Util.member "message"
+      detail_member "message" json
     with
     | `String message ->
         let message = String.trim message in

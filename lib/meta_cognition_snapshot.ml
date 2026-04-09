@@ -420,8 +420,9 @@ let snapshot_json ?hearth ~limit config =
   let all_contested =
     all_beliefs
     |> List.filter (fun json ->
-           json |> Yojson.Safe.Util.member "status" |> Yojson.Safe.Util.to_string
-           |> String.equal "contested")
+           (match Yojson.Safe.Util.member "status" json with
+            | `String s -> String.equal s "contested"
+            | _ -> false))
   in
   let total_contested_belief_count = List.length all_contested in
   let contested_beliefs = take limit all_contested in

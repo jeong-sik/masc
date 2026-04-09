@@ -197,8 +197,8 @@ let movement_reason_summary = function
   | "recent_worker_progress" -> "Recent worker progress is visible in the freshness window."
   | "recent_detachment_event" -> "A detachment event moved this lane recently."
   | "operation_updated" -> "The lane changed because its operation record was updated."
-  | "session_event" -> "The lane changed because the team session recorded a new event."
-  | "session_updated" -> "The team session metadata was updated recently."
+  | "session_event" -> "The lane changed because the execution session recorded a new event."
+  | "session_updated" -> "The execution session metadata was updated recently."
   | "detachment_updated" -> "The detachment metadata was updated recently."
   | "no_active_data" -> "No active lane data is currently present."
   | "missing_runtime_progress" -> "No fresh runtime progress is currently visible."
@@ -218,7 +218,7 @@ let gap_guidance ~lane_ids code =
   | "missing_worker_binding" ->
       ( "A supervised session with no worker binding cannot produce meaningful collaboration evidence.",
         "masc_team_session_status",
-        "Inspect the team session and attach or restart a worker before reading proof." )
+        "Inspect the execution session and attach or restart a worker before reading proof." )
   | "projected_only" ->
       ( "Projected swarm state shows intent, but not a live runtime.",
         "masc_operation_start",

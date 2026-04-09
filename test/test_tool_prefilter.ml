@@ -62,7 +62,7 @@ let extended_tools =
     make_schema "masc_autoresearch_start"
       "Start an automated research cycle.";
     make_schema "masc_team_session_start"
-      "Start a parallel swarm team session.";
+      "Start a supervised execution session.";
     make_schema "masc_worktree_create"
       "Create a new git worktree for an isolated branch.";
     make_schema "masc_worktree_list"
@@ -80,6 +80,17 @@ let names_of results =
 
 let has_tool name results =
   List.mem name (names_of results)
+
+let contains_substring haystack needle =
+  let hay_len = String.length haystack in
+  let needle_len = String.length needle in
+  let rec loop idx =
+    if needle_len = 0 then true
+    else if idx + needle_len > hay_len then false
+    else if String.sub haystack idx needle_len = needle then true
+    else loop (idx + 1)
+  in
+  loop 0
 
 (* ================================================================ *)
 (* Tests: recall                                                    *)
@@ -161,8 +172,8 @@ let test_synonym_autoresearch_start () =
 
 let test_synonym_team_session_start () =
   let result = Tool_prefilter.filter
-    ~tools:extended_tools ~query:"start a parallel swarm session" ~k:3 in
-  check bool "synonym: masc_team_session_start via 'begin swarm'" true
+    ~tools:extended_tools ~query:"start a supervised execution session" ~k:3 in
+  check bool "synonym: masc_team_session_start via 'start supervised execution'" true
     (has_tool "masc_team_session_start" result)
 
 let test_synonym_worktree_create () =
@@ -248,6 +259,11 @@ let test_synonym_text_enriches_description () =
   check bool "enriched longer than base" true
     (String.length enriched > String.length base)
 
+let test_synonym_text_team_session_runtime_keywords () =
+  let text = Tool_prefilter.synonym_text "masc_team_session_start" in
+  check bool "team session synonyms include execution wording" true
+    (contains_substring text "start supervised execution")
+
 (* ================================================================ *)
 (* Test runner                                                      *)
 (* ================================================================ *)
@@ -293,5 +309,7 @@ let () =
           test_case "known tool returns keywords" `Quick test_synonym_text_known;
           test_case "unknown tool returns empty" `Quick test_synonym_text_unknown;
           test_case "enriches description" `Quick test_synonym_text_enriches_description;
+          test_case "team session runtime keywords" `Quick
+            test_synonym_text_team_session_runtime_keywords;
         ] );
     ]

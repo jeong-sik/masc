@@ -1,8 +1,8 @@
 # Supervisor Mode
 
-Supervisor Mode is the interactive TUI operating model for steering a MASC team session through MCP.
+Supervisor Mode is the interactive TUI operating model for steering a MASC supervised execution session through MCP.
 
-현재 기본 delivery path는 이 문서와 Team Session 쪽이다. managed-operation benchmark 문서는 별도 compat lane으로 유지한다.
+현재 기본 delivery path는 이 문서와 OAS-backed supervised execution 쪽이다. managed-operation benchmark 문서는 별도 compat lane으로 유지한다.
 
 - managed-operation benchmark / compat lane: [COMMAND-PLANE-RUNBOOK.md](./COMMAND-PLANE-RUNBOOK.md)
 - benchmark compare recipe: [BENCHMARK-RUNBOOK.md](./BENCHMARK-RUNBOOK.md)
@@ -25,8 +25,8 @@ Supervisor Mode v1 is built on top of the existing operator surface.
   - `masc_operator_digest`
   - `masc_operator_action`
   - `masc_operator_confirm`
-- Worker substrate:
-  - `masc_team_session_*`
+- Worker runtime:
+  - `masc_team_session_*` (current tool family name)
   - `masc_join`
   - `masc_leave`
 
@@ -44,11 +44,11 @@ Codex / Claude TUI
         | MCP
         v
   /mcp/operator    -> supervisor snapshot + interventions
-  /mcp             -> worker joins, team turns, status, events, proof
+  /mcp             -> worker joins, session turns, status, events, proof
 ```
 
 Use `/mcp/operator` when you want a small, deterministic control surface.
-Use `/mcp` when an agent needs the full room and team-session tool inventory.
+Use `/mcp` when an agent needs the full room and supervised-execution tool inventory.
 
 Repo-synthesis workflow에서는 이 분리를 그대로 유지한다.
 
@@ -65,7 +65,7 @@ Repo-synthesis workflow에서는 이 분리를 그대로 유지한다.
 
 `masc-mcp` can run a worker directly on the hidden local worker backend.
 
-- canonical team-session spawn path: `masc_team_session_step(spawn_role="...", worker_class="...", worker_size="...", spawn_prompt="...")`
+- canonical supervised-execution spawn path: `masc_team_session_step(spawn_role="...", worker_class="...", worker_size="...", spawn_prompt="...")`
 - implementation detail: local worker on the configured local runtime
 
 Environment:
@@ -106,7 +106,8 @@ Default policy:
 Recommended loop for Codex or Claude Code in a TUI:
 
 1. Call `masc_operator_snapshot` with `view="summary"` for low-cost polling.
-2. Call `masc_operator_digest` for the room or a specific team session.
+2. Call `masc_operator_digest` for the room or a specific execution session.
+   - current tool ids still use `team_session`; operator narrative should treat it as a session/runtime detail, not a separate product concept.
 3. Diagnose using:
    - digest `health`
    - prioritized `attention_items`
@@ -129,7 +130,7 @@ This keeps the TUI workflow usable without turning the supervisor into an unchec
 
 ## Worker Roles
 
-The recommended Team Session shape is fixed for v1.
+The recommended supervised execution shape is fixed for v1.
 
 - `supervisor`: monitors, diagnoses, and intervenes
 - `planner`: decomposes work into concrete tasks and acceptance criteria
@@ -156,7 +157,7 @@ The supervisor should avoid editing unless intervention requires a direct correc
 ### Supervisor Prompt
 
 ```text
-You are the supervisor for a MASC team session.
+You are the supervisor for a MASC supervised execution session.
 Read state first. Do not guess.
 Prefer the smallest intervention that corrects direction.
 Use team_note before team_task_inject.
@@ -168,7 +169,7 @@ After any intervention, re-check snapshot and session events.
 ### Planner Prompt
 
 ```text
-You are the planner inside a MASC team session.
+You are the planner inside a supervised MASC execution session.
 Turn the current goal into concrete tasks, acceptance criteria, and risks.
 Write short, executable team notes.
 Do not stop at analysis; leave the room with work that implementers can claim.
@@ -177,7 +178,7 @@ Do not stop at analysis; leave the room with work that implementers can claim.
 ### Implementer Prompt
 
 ```text
-You are an implementer inside a supervised MASC team session.
+You are an implementer inside a supervised MASC execution session.
 Stay inside the assigned task.
 Report progress through team_session turns.
 If the supervisor corrects direction, adapt immediately and acknowledge the new plan.
@@ -221,7 +222,7 @@ Recommended pattern:
 2. read digest
 3. issue one structured action
 4. wait for confirm when required
-5. re-check team-session evidence through `/mcp`
+5. re-check session evidence through `/mcp`
 
 ## Harness
 
@@ -237,11 +238,11 @@ What it does:
 2. bootstraps supervisor auth
 3. reads the llama inventory through `masc_llama_models`
 4. validates an explicit `LLAMA_SWARM_MODEL`
-5. starts a real team session
+5. starts a real execution session
 6. spawns a full llama worker team (`planner`, `implementer-a`, `implementer-b`)
 7. records the explicit model-selection note in the session
 8. passes the same note into every spawned worker prompt
-9. requires every worker to leave a non-empty team-session note turn via `masc_team_session_step`
+9. requires every worker to leave a non-empty session note turn via `masc_team_session_step`
 10. performs supervisor interventions over `/mcp/operator`
 11. stops the session and generates proof artifacts
 
@@ -281,7 +282,6 @@ two-worker llama batch spawn, and verifies:
 
 - `docs/SWARM-DELIVERY-RUNBOOK.md`
 - `docs/REMOTE-MCP-OPERATOR.md`
-- `docs/TEAM-SESSION.md`
 - `scripts/harness_supervisor_team_session.sh`
 - `scripts/harness_team_session_failed_batch_spawn.sh`
 
@@ -289,5 +289,5 @@ two-worker llama batch spawn, and verifies:
 
 - Supervisor Mode is a workflow, not a new broad MCP namespace.
 - `/mcp/operator` stays intentionally small.
-- Team Session remains the authoritative substrate for supervised implementation sessions.
+- OAS-backed session execution remains the authoritative runtime substrate for supervised implementation sessions.
 - Managed-operation benchmarking is a separate compatibility lane; it is not required for supervised delivery.

@@ -153,37 +153,37 @@ let manual_help_entry name =
       Some
         {
           name;
-          short_description = "Record a structured team-session turn, checkpoint, or worker spawn.";
-          when_to_use = "Use when a supervisor needs to append auditable session activity without bypassing the session ledger.";
+          short_description = "Record a structured session turn, checkpoint, or worker spawn.";
+          when_to_use = "Use when a supervisor needs to append auditable execution activity without bypassing the session ledger.";
           key_constraints =
             [
               "Requires a valid session_id.";
               "Write semantics depend on turn_kind and optional spawn/task fields.";
             ];
           details_markdown =
-            "This is the canonical write entrypoint for team-session activity. It records a turn, optional run-note or deliverable, and can spawn workers through the supervised session lane.";
+            "This is the canonical write entrypoint for supervised execution activity. It records a turn, optional run-note or deliverable, and can spawn workers through the session runtime lane.";
           doc_refs =
             [
               "docs/TEAM-SESSION-ARCHITECTURE.md";
               "docs/SUPERVISOR-MODE.md";
             ];
-          prompt_hints = [ "Use prompt 'team_session_proof' to read the resulting collaboration evidence." ];
+          prompt_hints = [ "Use prompt 'team_session_proof' to read the resulting execution evidence." ];
         }
   | "masc_autoresearch_swarm_start" ->
       Some
         {
           name;
           short_description =
-            "Start an autoresearch loop through the swarm-facing team-session surface and optional managed-operation lane.";
+            "Start an autoresearch loop through the swarm-facing session runtime surface and optional managed-operation lane.";
           when_to_use =
             "Use when you want Karpathy-style autoresearch to show up in the normal supervised swarm workflow instead of living as a standalone ecosystem loop.";
           key_constraints =
             [
               "Requires goal, metric_fn, and target_file.";
-              "Needs local team-session runtime context; managed-operation launch is best-effort and may degrade to session-only with warnings.";
+              "Needs local session-runtime context; managed-operation launch is best-effort and may degrade to session-only with warnings.";
             ];
           details_markdown =
-            "Creates the raw autoresearch loop first, then links it to a supervised team session and, when possible, a research_pipeline managed operation on the compatibility lane. Team-session status exposes a linked_autoresearch block and team-session stop stops the linked loop.";
+            "Creates the raw autoresearch loop first, then links it to a supervised execution session and, when possible, a research_pipeline managed operation on the compatibility lane. Session status exposes a linked_autoresearch block and session stop stops the linked loop.";
           doc_refs =
             [
               "docs/SWARM-DELIVERY-RUNBOOK.md";
@@ -199,16 +199,16 @@ let manual_help_entry name =
         {
           name;
           short_description =
-            "Start a repo-synthesis run through the managed-operation compatibility lane, attached team session, and proof surfaces.";
+            "Start a repo-synthesis run through the managed-operation compatibility lane, attached execution session, and proof surfaces.";
           when_to_use =
-            "Use when Codex/TUI needs one MCP front door for repo-scoped synthesis questions before dropping to raw command-plane or team-session tools.";
+            "Use when Codex/TUI needs one MCP front door for repo-scoped synthesis questions before dropping to raw command-plane or session-runtime tools.";
           key_constraints =
             [
               "Requires goal, question, and repo_root.";
               "Seeds planned worker roles and writes a benchmark run record, but dashboard remains read-only.";
             ];
           details_markdown =
-            "Creates a managed coding_task inspect-stage operation on the repo-synthesis platoon, starts an attached team session, registers planned worker roles, stores benchmark metadata under .masc/repo-synthesis-benchmarks, and returns proof/report artifact paths plus recommended next tools. The attached team session remains the default operator-visible execution path.";
+            "Creates a managed coding_task inspect-stage operation on the repo-synthesis platoon, starts an attached execution session, registers planned worker roles, stores benchmark metadata under .masc/repo-synthesis-benchmarks, and returns proof/report artifact paths plus recommended next tools. The attached execution session remains the default operator-visible execution path.";
           doc_refs =
             [
               "docs/COMMAND-PLANE-RUNBOOK.md";

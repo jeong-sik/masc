@@ -26,7 +26,7 @@
   `masc_detachment_*`, `masc_observe_*`, `masc_policy_*`
 - SSOT 문서: [COMMAND-PLANE-RUNBOOK.md](./COMMAND-PLANE-RUNBOOK.md)
 
-### 2. Team Session + Supervisor
+### 2. Supervised Execution + Supervisor
 
 기능 구현을 swarm으로 굴릴 때의 기본 경로다.
 
@@ -86,7 +86,7 @@
 
 ### Layer 5. Implementation swarm
 
-- `Team Session + Supervisor`
+- `Supervised execution + Supervisor`
 - 역할: 기능 슬라이스 구현, report/proof, operator intervention
 - runtime substrate와 command-plane 위에서 동작한다.
 
@@ -115,7 +115,7 @@
 | 영역 | 현재 상태 | 비고 |
 |------|-----------|------|
 | `CPv2 direct` | Canonical | 기본 swarm / benchmark 경로 |
-| `Team Session + Supervisor` | Canonical | 기능 구현 경로 |
+| `Supervised execution + Supervisor` | Canonical | 기능 구현 경로 |
 | `native chain plane` | Canonical substrate | command-plane 안으로 흡수됨 |
 | `local64 runtime pool` | Canonical substrate | local llama path |
 | `Search Fabric V1` | Mainline policy | 기본 `coding_task`, explicit `research_pipeline` |

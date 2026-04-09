@@ -14,6 +14,14 @@ let list_field key json =
   | Some (`List rows) -> rows
   | _ -> []
 
+let find_list_row_by_id rows id =
+  List.find_opt
+    (fun row ->
+      match string_field "id" row with
+      | Some value -> String.equal value id
+      | None -> false)
+    rows
+
 let test_help_includes_attached_session_and_templates () =
   let json = Server_command_plane_http.command_plane_help_http_json () in
   let docs = list_field "docs" json in
@@ -30,6 +38,22 @@ let test_help_includes_attached_session_and_templates () =
   in
   Alcotest.(check bool) "attached team session path present" true
     (List.mem "attached_team_session" path_ids);
+  let supervisor_path =
+    match find_list_row_by_id golden_paths "supervisor_session" with
+    | Some row -> row
+    | None -> Alcotest.fail "supervisor_session path missing"
+  in
+  let attached_path =
+    match find_list_row_by_id golden_paths "attached_team_session" with
+    | Some row -> row
+    | None -> Alcotest.fail "attached_team_session path missing"
+  in
+  Alcotest.(check (option string)) "supervisor path title"
+    (Some "Supervisor / Session Runtime")
+    (string_field "title" supervisor_path);
+  Alcotest.(check (option string)) "attached path title"
+    (Some "Attached Execution Session")
+    (string_field "title" attached_path);
   let templates = list_field "workload_templates" json in
   let template_ids =
     templates |> List.filter_map (fun row -> string_field "id" row)

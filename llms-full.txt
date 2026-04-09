@@ -6,7 +6,7 @@ Public MCP surface boundaries, compatibility aliases, and internal prompt-plane 
 
 ## Goal
 
-Use namespace/task coordination plus Team Session and Supervisor as the default execution truth. The managed-operation command plane remains an internal or experimental compatibility lane.
+Use namespace/task coordination plus supervised execution and Supervisor as the default execution truth. The managed-operation command plane remains an internal or experimental compatibility lane.
 
 ## Primary entities
 
@@ -14,7 +14,7 @@ Use namespace/task coordination plus Team Session and Supervisor as the default 
 - `task`: backlog work item
 - `operation`: managed execution unit on the compatibility lane
 - `detachment`: runtime materialization of an operation
-- `team session`: long-running worker capsule that can attach to an operation
+- `session`: long-running worker execution capsule that can attach to an operation. Current tool family name remains `masc_team_session_*`.
 - `policy decision`: approval gate for strict actions
 - `trace`: lineage across operation, dispatch, checkpoint, and policy events
 
@@ -42,7 +42,7 @@ Use this for real implementation work:
 4. `masc_operator_action` and `masc_operator_confirm` when intervention is needed
 5. `masc_team_session_report` / `masc_team_session_prove`
 
-### 3. Attached team session
+### 3. Attached execution session
 
 Use this when a managed operation explicitly needs a worker team:
 
@@ -89,11 +89,11 @@ Use this only for benchmark runs, topology experiments, or compatibility coverag
 ## Important constraints
 
 - `workload_template` and explicit `workload_profile` must belong to the same family.
-- An operation can only attach to one team session at a time.
+- An operation can only attach to one execution session at a time.
 - `claim` does not set `current_task`; call `masc_plan_set_task`.
 - `dispatch_tick` is required after starting an operation.
 - Managed operations are optional; default delivery does not require them.
-- `team_session` without `operation_id` is valid, but it will be treated as a projected session rather than a managed attached session.
+- `team_session` without `operation_id` is valid, but it will be treated as a projected execution session rather than a managed attached session.
 
 ## Operator surface
 

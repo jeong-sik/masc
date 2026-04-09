@@ -264,6 +264,6 @@ export MASC_PERSONAS_DIR=/srv/masc/personas
 - `docs/COMMAND-PLANE-RUNBOOK.md` — managed-operation compatibility lane
 - `docs/BENCHMARK-RUNBOOK.md` — single-agent vs swarm recipes
 - `docs/INTEGRATED-BENCHMARK-RUNBOOK.md` — control/search/local64 wrapper
-- `docs/SUPERVISOR-MODE.md` — supervised team session path
+- `docs/SUPERVISOR-MODE.md` — supervised execution path
 - `docs/SWARM-DELIVERY-RUNBOOK.md` — implementation delivery path
 - `README.md` — canonical public overview

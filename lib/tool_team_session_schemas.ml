@@ -10,7 +10,7 @@ let schemas : tool_schema list =
     {
       name = "masc_team_session_start";
       description =
-        "Start a supervised team collaboration session with periodic checkpoints and final report artifacts. \
+        "Start a supervised execution session with periodic checkpoints and final report artifacts. \
 Use when orchestrating multi-agent work that needs progress tracking and proof generation. \
 Pair with masc_team_session_step to record turns and masc_team_session_finalize to end.";
       input_schema =
@@ -32,7 +32,7 @@ Pair with masc_team_session_step to record turns and masc_team_session_finalize 
                         ("type", `String "string");
                         ( "description",
                           `String
-                            "Optional managed operation id to attach this team session to. When provided, the operation detachment_session_id is updated to this session." );
+                            "Optional managed operation id to attach this execution session to. When provided, the operation detachment_session_id is updated to this session." );
                       ] );
                   ( "duration_seconds",
                     `Assoc
@@ -192,7 +192,7 @@ Pair with masc_team_session_step to record turns and masc_team_session_finalize 
     };
     {
       name = "masc_team_session_status";
-      description = "Get the current status, progress summary, and health metrics for a team session. \
+      description = "Get the current status, progress summary, and health metrics for an execution session. \
 Use when checking session progress mid-execution or after a checkpoint. \
 After masc_team_session_start; pair with masc_team_session_events for detailed timeline.";
       input_schema =
@@ -208,7 +208,7 @@ After masc_team_session_start; pair with masc_team_session_events for detailed t
     {
       name = "masc_team_session_step";
       description =
-        "Record a turn (note/broadcast/portal/task/checkpoint) in a team session, optionally spawning workers or attaching vote/run evidence. \
+        "Record a turn (note/broadcast/portal/task/checkpoint) in an execution session, optionally spawning workers or attaching vote/run evidence. \
 Use when advancing session progress with notes, delegating work, or recording checkpoints. \
 After masc_team_session_start; the primary write path for all session activity.";
       input_schema =
@@ -342,7 +342,7 @@ After masc_team_session_start; the primary write path for all session activity."
                         ("type", `String "object");
                         ( "description",
                           `String
-                            "Create or update the persisted delivery contract for this session. Planner turns should write acceptance checks here so later worker verification, report, and proof use the same contract." );
+                            "Create or update the persisted delivery contract for this execution session. Planner turns should write acceptance checks here so later worker verification, report, and proof use the same contract." );
                         ( "properties",
                           `Assoc
                             [
@@ -537,7 +537,7 @@ After masc_team_session_start; the primary write path for all session activity."
     {
       name = "masc_team_session_finalize";
       description =
-        "Stop a team session, wait for terminal status, then optionally generate report and proof artifacts in one call. \
+        "Stop an execution session, wait for terminal status, then optionally generate report and proof artifacts in one call. \
 Use when ending a session and you want both the stop and artifact generation done atomically. \
 Alternative to calling masc_team_session_stop then masc_team_session_report separately.";
       input_schema =
@@ -565,7 +565,7 @@ Alternative to calling masc_team_session_stop then masc_team_session_report sepa
     {
       name = "masc_team_session_stop";
       description =
-        "Request graceful stop for a team session and optionally generate report artifacts. \
+        "Request graceful stop for an execution session and optionally generate report artifacts. \
 Use when the session goal is achieved or time is up. \
 After masc_team_session_step turns are complete; follow with masc_team_session_prove for proof.";
       input_schema =
@@ -584,7 +584,7 @@ After masc_team_session_step turns are complete; follow with masc_team_session_p
     };
     {
       name = "masc_team_session_report";
-      description = "Generate or regenerate report artifacts (markdown summary, metrics) for a team session. \
+      description = "Generate or regenerate report artifacts (markdown summary, metrics) for an execution session. \
 Use when you need fresh reports after additional evidence or a re-run. \
 After masc_team_session_stop; pair with masc_team_session_prove for verifiable proof.";
       input_schema =
@@ -603,7 +603,7 @@ After masc_team_session_stop; pair with masc_team_session_prove for verifiable p
     {
       name = "masc_team_session_list";
       description =
-        "List recent team sessions with optional status filter and health/cascade summary. \
+        "List recent execution sessions with optional status filter and health/cascade summary. \
 Use when finding past sessions to compare, resume, or audit. \
 Pair with masc_team_session_compare to diff two sessions.";
       input_schema =
@@ -626,7 +626,7 @@ Pair with masc_team_session_compare to diff two sessions.";
     {
       name = "masc_team_session_compare";
       description =
-        "Compare two team sessions side by side, returning throughput, policy, and communication deltas. \
+        "Compare two execution sessions side by side, returning throughput, policy, and communication deltas. \
 Use when evaluating whether a configuration change improved session outcomes. \
 After masc_team_session_list identifies the two session IDs.";
       input_schema =
@@ -645,7 +645,7 @@ After masc_team_session_list identifies the two session IDs.";
     {
       name = "masc_team_session_events";
       description =
-        "Read the team session event timeline with optional event type and timestamp filters. \
+        "Read the execution session event timeline with optional event type and timestamp filters. \
 Use when reviewing what happened during a session or debugging a specific time range. \
 After masc_team_session_start; the most-called session tool for progress monitoring.";
       input_schema =
@@ -671,7 +671,7 @@ After masc_team_session_start; the most-called session tool for progress monitor
     {
       name = "masc_team_session_prove";
       description =
-        "Generate verifiable proof artifacts (proof.json/proof.md) for a team session based on timeline evidence. \
+        "Generate verifiable proof artifacts (proof.json/proof.md) for an execution session based on timeline evidence. \
 Use when session work needs an auditable proof trail with evidence hashes. \
 After masc_team_session_stop or masc_team_session_report.";
       input_schema =

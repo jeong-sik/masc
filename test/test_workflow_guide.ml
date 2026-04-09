@@ -65,7 +65,7 @@ let test_dispatch_tick_success () =
   let g = WG.next_steps ~tool_name:"masc_dispatch_tick" ~success:true in
   check_has_tool g.next_steps "masc_observe_operations"
 
-(* ── Golden Path 3: Team Session ─────────────────────────────────── *)
+(* ── Golden Path 3: Supervised Execution ────────────────────────── *)
 
 let test_team_session_start_success () =
   let g = WG.next_steps ~tool_name:"masc_team_session_start" ~success:true in

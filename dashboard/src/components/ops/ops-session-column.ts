@@ -148,7 +148,7 @@ export function OpsSessionColumn() {
           <div class="pb-2 border-b border-[var(--card-border)] mb-1">
             <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider">Session 개입</h3>
           </div>
-          <div class="p-3 rounded-xl border border-dashed border-[var(--card-border)] text-[var(--text-muted)] text-[13px]">활성 team session이 없습니다. keeper가 독립 운영 중입니다.</div>
+          <div class="p-3 rounded-xl border border-dashed border-[var(--card-border)] text-[var(--text-muted)] text-[13px]">활성 세션이 없습니다. keeper가 독립 운영 중입니다.</div>
         </section>
       </div>
     `
@@ -169,7 +169,7 @@ export function OpsSessionColumn() {
           </div>
           <div class="flex items-center justify-between gap-3 text-[var(--fs-sm)] text-[var(--text-muted)]">
             ${liveSessions.length === 0
-              ? html`<div class="p-3 rounded-xl border border-dashed border-[var(--card-border)] text-[var(--text-muted)] text-[13px]">지금 바로 개입할 live team session이 없습니다.</div>`
+              ? html`<div class="p-3 rounded-xl border border-dashed border-[var(--card-border)] text-[var(--text-muted)] text-[13px]">지금 바로 개입할 live 세션이 없습니다.</div>`
               : liveSessions.map(session => renderSessionCard(session))}
           </div>
         </div>

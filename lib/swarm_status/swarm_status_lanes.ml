@@ -161,7 +161,7 @@ let choose_recommendation lanes =
               | Some lane ->
                   {
                     tool = "masc_team_session_status";
-                    label = "Inspect the team session";
+                    label = "Inspect the execution session";
                     reason = "The supervised lane is stale and needs a session status check.";
                     lane_id = Some lane.lane_id;
                   }
@@ -194,4 +194,3 @@ let choose_recommendation lanes =
                         reason = "The swarm is moving; trace review is the next high-signal step.";
                         lane_id = None;
                       }))))
-

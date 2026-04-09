@@ -2,7 +2,7 @@
 
 `masc-mcp`의 usage SSOT.
 
-이 문서는 `어떤 MCP tool을 어떤 순서로 써야 하는가`를 정리한다. 기본 delivery 경로는 namespace/task hygiene와 supervisor/team-session이고, managed operation은 benchmark/compatibility용 보조 경로다.
+이 문서는 `어떤 MCP tool을 어떤 순서로 써야 하는가`를 정리한다. 기본 delivery 경로는 namespace/task hygiene와 supervisor-driven supervised execution이고, managed operation은 benchmark/compatibility용 보조 경로다.
 
 merged 기준 전체 구조 요약은 [MERGED-ARCHITECTURE-SSOT.md](./MERGED-ARCHITECTURE-SSOT.md)를 본다.
 
@@ -14,6 +14,8 @@ merged 기준 전체 구조 요약은 [MERGED-ARCHITECTURE-SSOT.md](./MERGED-ARC
   - backlog item. `masc_transition(action="claim")`은 backlog 소유권만 바꾸고 planning `current_task`는 자동으로 안 잡힌다. `masc_claim_next`는 current builds에서 planning `current_task`를 함께 맞춘다.
 - `operation`
   - managed-operation compatibility lane의 관리 단위. default delivery path는 아니다.
+- `session`
+  - supervised implementation execution unit. 현재 MCP tool family 이름은 아직 `masc_team_session_*`이지만, 제품 개념으로는 별도 `team-session`을 전면에 두지 않는다.
 - `detachment`
   - scheduler가 materialize한 실행 단위. liveness, runtime binding, heartbeat를 여기서 본다.
 - `policy decision`
@@ -126,7 +128,7 @@ repo 질문을 바로 `operation + session + proof` spine에 올리고 싶으면
 
 - wrapper path:
   - managed `coding_task/inspect` operation 생성
-  - attached team session 시작
+  - attached supervised execution session 시작
   - planned worker roles seed
   - benchmark run metadata를 `.masc/repo-synthesis-benchmarks/`에 저장
 - read path:
@@ -249,7 +251,7 @@ Content-Type: application/json
 - `masc_detachment_list`에 detachment가 생김
 - dashboard `Operations`에서 detachment card가 보임
 
-## Golden Path 3. Supervisor Session
+## Golden Path 3. Supervised Execution
 
 이건 현재 기본 delivery path다. managed-operation benchmark lane과 분리해서 설명한다.
 
@@ -259,7 +261,7 @@ Content-Type: application/json
 
 1. `masc_operator_snapshot`
 2. `masc_operator_digest`
-   - namespace/team-session 상태를 operator-friendly하게 요약한다.
+   - namespace/session 상태를 operator-friendly하게 요약한다.
    - command-plane search/microarch signal은 여기서 먼저 읽고, 더 자세한 정보가 필요할 때만 full command-plane surface로 내려간다.
 3. `masc_operator_action`
 4. `masc_operator_confirm`
@@ -268,16 +270,16 @@ Content-Type: application/json
 언제 쓰나:
 
 - human/supervisor가 intervention loop를 돌릴 때
-- team-session을 guided하게 운영할 때
+- supervised execution session을 guided하게 운영할 때
 
 언제 안 쓰나:
 
 - managed-operation benchmark proof만 필요한 경우
 - detachments/policy queue만 따로 검증하려는 경우
 
-## Team-Session Compat Lane
+## Session Runtime Compat Lane
 
-hot-swarm live harness와 별도로, `./scripts/harness_team_session_local64_smoke.sh`와 `./scripts/harness_supervisor_team_session.sh`는 team-session/OAS bridge를 검증하는 supporting lane이다.
+hot-swarm live harness와 별도로, `./scripts/harness_team_session_local64_smoke.sh`와 `./scripts/harness_supervisor_team_session.sh`는 current `masc_team_session_*` tool family와 OAS runtime bridge를 검증하는 supporting lane이다.
 
 핵심 차이:
 
@@ -285,14 +287,14 @@ hot-swarm live harness와 별도로, `./scripts/harness_team_session_local64_smo
   - deterministic fixture
   - runtime-assisted claim/current_task/done
   - managed-operation swarm proof와 dashboard truthfulness 검증이 목적
-- team-session compat lane
+- session runtime compat lane
   - `masc_team_session_start` / `masc_team_session_step(spawn_batch=...)`를 사용한다
   - `team_session_swarm_runner.ml`가 OAS swarm 실행을 담당한다
   - session/proof/operator surface 검증이 목적이다
 
 주의:
 
-- team-session compat lane은 managed-operation live harness의 대체가 아니다
+- session runtime compat lane은 managed-operation live harness의 대체가 아니다
 - managed-operation operation/detachment/current_task truth를 검증하려면 live harness/read model 쪽을 본다
 - task claim/current_task binding 자체를 검증하려면 `./scripts/harness_agent_swarm_live.sh`를 사용한다
 

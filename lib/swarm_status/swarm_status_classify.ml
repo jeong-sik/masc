@@ -190,11 +190,11 @@ let lane_current_step kind ~present ~phase ~motion_state ~approvals ~detachments
       else if approvals > 0 then "Resolve manual approval before converting projection"
       else "Convert projection into managed runtime"
   | Supervised ->
-      if not present then "No supervised team session is active"
+      if not present then "No supervised execution session is active"
       else if approvals > 0 then "Confirm the pending operator action"
       else if workers = 0 then "Bind runtime workers to the session"
       else if String.equal motion_state "stalled" then "Inspect session status and recent events"
-      else "Observe team-session progress"
+      else "Observe session progress"
 
 let lane_blockers kind ~phase ~motion_state ~approvals ~workers ~flags =
   let base = [] in

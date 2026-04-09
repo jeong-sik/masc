@@ -26,6 +26,17 @@ describe('workerRunEvidence helpers', () => {
     expect(workerRunEvidenceMeta(item)).toContain('도구 3')
   })
 
+  it('marks unvalidated raw traces as warn', () => {
+    const item = {
+      worker_run_id: 'worker-raw-observed',
+      trace_capability: 'raw',
+      trace_validated: false,
+    }
+
+    expect(workerRunEvidenceTone(item)).toBe('warn')
+    expect(workerRunEvidenceLabel(item)).toBe('raw observed')
+  })
+
   it('marks missing tool surface explicitly in meta', () => {
     const item = {
       worker_run_id: 'worker-surface-missing',

@@ -85,9 +85,9 @@ let artifact_ref_json kind path =
     ]
 
 let proof_verdict ~active_actor_count ~interaction_present ~evidence_present
-    ~artifact_present =
+    ~artifact_present ~validated_worker_run_count =
   if active_actor_count >= 2 && interaction_present && evidence_present
-     && artifact_present
+     && artifact_present && validated_worker_run_count > 0
   then
     "proven"
   else if active_actor_count >= 1

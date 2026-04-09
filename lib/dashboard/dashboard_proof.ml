@@ -186,7 +186,7 @@ let json ?actor:_ ?session_id ?operation_id ~config () =
   in
   let live_verdict =
     Dashboard_proof_verdict.proof_verdict ~active_actor_count ~interaction_present:(interaction_count > 0)
-      ~evidence_present ~artifact_present
+      ~evidence_present ~artifact_present ~validated_worker_run_count
   in
   let historical_verdict =
     Option.bind proof_doc Dashboard_proof_verdict.historical_verdict_of_proof_doc

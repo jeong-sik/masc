@@ -15,6 +15,7 @@ export type SurfaceSectionId =
   | 'autoresearch'
   | 'harness'
   | 'inspector'
+  | 'runtime'
   | 'telemetry'
   | 'tool-quality'
   | 'fleet'
@@ -133,9 +134,15 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       params: { section: 'activity' },
     },
     {
+      id: 'runtime',
+      label: '런타임',
+      description: 'provider health, 슬롯 용량, model inference snapshot.',
+      params: { section: 'runtime' },
+    },
+    {
       id: 'telemetry',
       label: '텔레메트리',
-      description: '도구 호출, keeper 메트릭, 에이전트 이벤트 통합 뷰.',
+      description: 'append-only 이벤트 기록. runtime snapshot은 별도 런타임 탭에서 봅니다.',
       params: { section: 'telemetry' },
     },
   ],

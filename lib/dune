@@ -275,6 +275,7 @@
    team_session_report_core
    team_session_report_proof_helpers
    team_session_report_proof
+   team_session_worker_run_meta
    team_session_engine_helpers
    team_session_engine_status
    team_session_engine_policy
@@ -688,6 +689,7 @@
   team_session_report_core
   team_session_report_proof_helpers
   team_session_report_proof
+  team_session_worker_run_meta
   ;; godsplit-phase1: file split sub-modules
   tool_team_session_step_exec
   keeper_status_bridge

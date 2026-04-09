@@ -226,6 +226,7 @@ function EntryRow({
         class="flex flex-wrap items-start gap-3 px-3 py-3 text-xs cursor-pointer select-none"
         role="button"
         tabIndex=${0}
+        aria-expanded=${expanded.value}
         onClick=${() => { expanded.value = !expanded.value }}
         onKeyDown=${(event: KeyboardEvent) => {
           if (event.key === 'Enter' || event.key === ' ') {

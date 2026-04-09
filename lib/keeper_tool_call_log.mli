@@ -26,6 +26,24 @@ val consume_truncation_info :
     the pending state. Returns [(0, None)] when no truncation info
     was set (e.g. OAS-internal tool call that bypassed the wrapper). *)
 
+val set_turn_context :
+  keeper_name:string ->
+  ?lane:string ->
+  ?tool_choice:string ->
+  ?thinking_enabled:bool ->
+  ?thinking_budget:int ->
+  unit ->
+  unit
+(** [set_turn_context ...] stores the current effective turn policy for
+    subsequent tool-call logs emitted by the keeper during this turn. *)
+
+val get_turn_context :
+  keeper_name:string ->
+  unit ->
+  string option * string option * bool option * int option
+(** Returns [(lane, tool_choice, thinking_enabled, thinking_budget)] for
+    the keeper, or [None] values when no turn context has been recorded. *)
+
 val init : base_path:string -> unit
 (** [init ~base_path] creates the Dated_jsonl store. Call once at startup. *)
 
@@ -37,15 +55,21 @@ val log_call :
   success:bool ->
   duration_ms:float ->
   ?model:string ->
+  ?lane:string ->
+  ?tool_choice:string ->
+  ?thinking_enabled:bool ->
+  ?thinking_budget:int ->
   ?result_bytes:int ->
   ?truncated_to:int ->
   unit ->
   unit
 (** [log_call ...] persists a single tool call record with full I/O.
     Output is truncated to 4000 bytes. [model] records which LLM generated
-    the tool call (for 9B vs GLM comparison). [result_bytes] is the original
-    output size before any truncation. [truncated_to] is present when
-    Tool_output_validation truncated the output. Best-effort (failures logged). *)
+    the tool call. Turn-policy fields ([lane], [tool_choice],
+    [thinking_enabled], [thinking_budget]) capture the effective tool
+    selection context. [result_bytes] is the original output size before
+    any truncation. [truncated_to] is present when Tool_output_validation
+    truncated the output. Best-effort (failures logged). *)
 
 val read_recent :
   ?keeper_name:string ->

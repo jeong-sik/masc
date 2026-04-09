@@ -283,11 +283,14 @@ NoDirectExecutingToIdle ==
 PartialOutcomeRequiresReconcile ==
     (turn_outcome = "partial") => reconcile_required
 
-(* S3: No retry after side-effect with transient error.                    *)
-(*     If has_side_effect is TRUE, retry_count must not increase.          *)
-NoRetryAfterSideEffect ==
+(* S3b: Once a side effect has committed, later executing steps may fail   *)
+(*      or compact, but they may not increase retry_count.                 *)
+SideEffectRetryAction ==
     (has_side_effect = TRUE /\ turn_phase = "executing") =>
         retry_count' <= retry_count
+
+NoRetryAfterSideEffectStep ==
+    [][SideEffectRetryAction]_vars
 
 (* S4: Tool calls are bounded.                                             *)
 ToolCallsBounded ==
@@ -337,5 +340,6 @@ TurnCycleLive ==
 Liveness ==
     /\ TurnEventuallyDone
     /\ DoneEventuallyIdle
+    /\ TurnCycleLive
 
 ====

@@ -259,6 +259,12 @@ let update_state state result =
   state.cost_usd <- state.cost_usd +.
     (Option.value result.cost_usd ~default:0.0)
 
+let format_agent_failure ~agent ~turn ~attempts ~msg =
+  let attempt_word = if attempts = 1 then "attempt" else "attempts" in
+  Printf.sprintf
+    "Agent '%s' failed before completing turn %d after %d %s: %s"
+    agent turn attempts attempt_word msg
+
 (** Main bounded execution loop *)
 let bounded_run ~constraints ~goal ~agents ~prompt ~spawn_fn =
   (* Pre-check: empty agents *)
@@ -331,9 +337,11 @@ let bounded_run ~constraints ~goal ~agents ~prompt ~spawn_fn =
                     state.total_retries <- state.total_retries + 1;
                     try_spawn (attempt + 1)
                   end else
-                    Error
-                      (Printf.sprintf "Agent failed after %d attempts: %s"
-                         (attempt + 1) err_msg)
+                    Error (format_agent_failure
+                      ~agent
+                      ~turn:(state.turns + 1)
+                      ~attempts:(attempt + 1)
+                      ~msg:err_msg)
               | Error msg ->
                   (* Exception during spawn *)
                   if attempt < constraints.retry.max_retries
@@ -344,10 +352,11 @@ let bounded_run ~constraints ~goal ~agents ~prompt ~spawn_fn =
                     state.total_retries <- state.total_retries + 1;
                     try_spawn (attempt + 1)
                   end else
-                    Error
-                      (Printf.sprintf
-                         "Agent execution failed after %d attempts: %s"
-                         (attempt + 1) msg)
+                    Error (format_agent_failure
+                      ~agent
+                      ~turn:(state.turns + 1)
+                      ~attempts:(attempt + 1)
+                      ~msg)
             in
 
             match try_spawn 0 with

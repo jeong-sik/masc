@@ -50,7 +50,13 @@ let ensure_keeper_meta config name =
       | Some dl -> dl
       | None -> meta.tool_denylist
     in
+    let target_cascade_name =
+      match defaults.cascade_name with
+      | Some name -> name
+      | None -> meta.cascade_name
+    in
     let denylist_changed = meta.tool_denylist <> target_denylist in
+    let cascade_changed = meta.cascade_name <> target_cascade_name in
     let proactive_timers_changed =
       meta.proactive.idle_sec <> target_idle_sec
       || meta.proactive.cooldown_sec <> target_cooldown_sec
@@ -58,14 +64,17 @@ let ensure_keeper_meta config name =
     if meta.proactive.enabled <> target_proactive
        || proactive_timers_changed
        || meta.room_signal_prompt_enabled <> target_room_signal_prompt_enabled
-       || denylist_changed then begin
+       || denylist_changed
+       || cascade_changed then begin
       Log.Keeper.info
-        "ensure_keeper_meta: re-syncing proactive.enabled %b -> %b, idle_sec %d -> %d, cooldown_sec %d -> %d, room_signal_prompt_enabled %b -> %b, denylist_changed %b for %s"
+        "ensure_keeper_meta: re-syncing proactive.enabled %b -> %b, idle_sec %d -> %d, cooldown_sec %d -> %d, room_signal_prompt_enabled %b -> %b, denylist_changed %b, cascade %s -> %s for %s"
         meta.proactive.enabled target_proactive
         meta.proactive.idle_sec target_idle_sec
         meta.proactive.cooldown_sec target_cooldown_sec
         meta.room_signal_prompt_enabled target_room_signal_prompt_enabled
-        denylist_changed meta.name;
+        denylist_changed
+        meta.cascade_name target_cascade_name
+        meta.name;
       let updated = { meta with
         proactive = {
           enabled = target_proactive;
@@ -74,6 +83,7 @@ let ensure_keeper_meta config name =
         };
         room_signal_prompt_enabled = target_room_signal_prompt_enabled;
         tool_denylist = target_denylist;
+        cascade_name = target_cascade_name;
         updated_at = now_iso ();
       } in
       match write_meta config updated with

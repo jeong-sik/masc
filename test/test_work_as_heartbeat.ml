@@ -99,6 +99,10 @@ let test_oas_timeout_cap () =
   let v = adaptive ~max_context:1_000_000 in
   check (float 0.1) "1M context → capped at turn timeout 1200" 1200.0 v
 
+let test_turn_timeout_default () =
+  check (float 0.1) "default turn timeout 1200s" 1200.0
+    Cfg.KeeperKeepalive.turn_timeout_sec
+
 let test_max_turns_default () =
   check int "default max_turns_per_call 5" 5
     Cfg.KeeperKeepalive.oas_max_turns_per_call
@@ -277,9 +281,10 @@ let () =
       test_case "adaptive 32K context" `Quick test_oas_timeout_32k;
       test_case "adaptive 128K context" `Quick test_oas_timeout_128k;
       test_case "adaptive 262K context" `Quick test_oas_timeout_262k;
-      test_case "adaptive 0 context (floor)" `Quick test_oas_timeout_zero;
+      test_case "adaptive 0 context" `Quick test_oas_timeout_zero;
       test_case "adaptive monotonic" `Quick test_oas_timeout_monotonic;
-      test_case "adaptive capped at 600" `Quick test_oas_timeout_cap;
+      test_case "turn timeout default is 1200" `Quick test_turn_timeout_default;
+      test_case "adaptive capped at turn timeout" `Quick test_oas_timeout_cap;
       test_case "max_turns default is 5" `Quick test_max_turns_default;
       test_case "max_turns range" `Quick test_max_turns_range;
       test_case "oas_timeout_sec backward compat" `Quick test_oas_timeout_sec_compat;

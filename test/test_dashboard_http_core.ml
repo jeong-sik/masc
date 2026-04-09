@@ -152,7 +152,11 @@ let test_dashboard_shell_http_json_includes_paths () =
     | `Assoc fields -> fields
     | _ -> Alcotest.fail "dashboard shell payload must be an object"
   in
-  let paths = List.assoc "paths" fields in
+  let paths =
+    match List.assoc_opt "paths" fields with
+    | Some value -> value
+    | None -> Alcotest.fail "paths key missing from dashboard shell payload"
+  in
   let config_resolution =
     List.assoc_opt "config_resolution" fields
     |> Option.value ~default:`Null
@@ -166,6 +170,8 @@ let test_dashboard_shell_http_json_includes_paths () =
   let expected_masc_root = Unix.realpath (Filename.concat config.base_path ".masc") in
   check bool "paths present" true
     (match paths with `Assoc _ -> true | _ -> false);
+  check bool "paths key present" true
+    (List.mem_assoc "paths" fields);
   check bool "config_resolution key present" true
     (List.mem_assoc "config_resolution" fields);
   check bool "runtime_resolution key present" true

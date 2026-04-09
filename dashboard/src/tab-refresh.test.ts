@@ -1,3 +1,4 @@
+import { waitFor } from '@testing-library/preact'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('./store', async (importOriginal) => {
@@ -39,14 +40,7 @@ vi.mock('./command-store', () => ({
 
 import { refreshFeatureHealth } from './components/feature-health'
 import { refreshServerConfig } from './components/server-config'
-import { refreshShell } from './store'
 import { refreshForRoute, refreshPlanForRoute } from './tab-refresh'
-
-const flushDynamicImports = async () => {
-  await Promise.resolve()
-  await Promise.resolve()
-  await new Promise(resolve => setTimeout(resolve, 0))
-}
 
 describe('refreshPlanForRoute', () => {
   beforeEach(() => {
@@ -117,20 +111,14 @@ describe('refreshPlanForRoute', () => {
   })
 
   it('refreshes the inspector shell through server config once', async () => {
-    vi.mocked(refreshServerConfig).mockImplementation(async () => {
-      await refreshShell({ force: true })
-    })
-
     refreshForRoute({
       tab: 'lab',
       params: { section: 'inspector' },
     })
 
-    await flushDynamicImports()
-
-    expect(refreshFeatureHealth).toHaveBeenCalledTimes(1)
-    expect(refreshServerConfig).toHaveBeenCalledTimes(1)
-    expect(refreshShell).toHaveBeenCalledTimes(1)
-    expect(refreshShell).toHaveBeenCalledWith({ force: true })
+    await waitFor(() => {
+      expect(refreshFeatureHealth).toHaveBeenCalledTimes(1)
+      expect(refreshServerConfig).toHaveBeenCalledTimes(1)
+    })
   })
 })

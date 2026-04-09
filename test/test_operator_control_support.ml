@@ -44,16 +44,6 @@ let operator_ctx ?mcp_session_id env sw config agent_name :
     mcp_session_id;
   }
 
-(** Team session context stub — team session tools are removed.
-    Uses unit type to satisfy callers that still reference team_ctx. *)
-let team_ctx _env _sw _config _agent_name = ()
-
-let dispatch_team_exn _ctx ~name ~args:_ =
-  failwith ("team session tools removed: " ^ name)
-
-let start_session_exn _ctx =
-  failwith "team session tools removed: cannot start session"
-
 let dispatch_keeper_exn ctx ~name ~args =
   match Tool_keeper.dispatch ctx ~name ~args with
   | Some result -> result

@@ -673,8 +673,8 @@ let handle_keeper_shell
                       ; "output", `String out
                       ]))))
   | "git_clone" ->
-    (* Clone a repo into this keeper's playground directory.
-       Sandboxed: always targets .masc/playground/<keeper_name>/<repo_name>.
+    (* Clone a repo into this keeper's playground repos directory.
+       Sandboxed: always targets .masc/playground/<keeper_name>/repos/<repo_name>.
        Validates against tool_policy.toml git_clone.allowed_orgs. *)
     let url = Safe_ops.json_string ~default:"" "url" args |> String.trim in
     if url = "" then
@@ -693,9 +693,11 @@ let handle_keeper_shell
                ; "url", `String url
                ])
        | Ok () ->
+         ignore (Keeper_alerting_path.ensure_playground_bundle ~config ~name:meta.name);
          let playground = Filename.concat root
            (Keeper_alerting_path.playground_path_of_keeper meta.name) in
-         Fs_compat.mkdir_p playground;
+         let repos_dir = Filename.concat root
+           (Keeper_alerting_path.playground_repos_path meta.name) in
          (* Derive repo name from URL: strip trailing slash, .git, then basename.
             Guard against empty/traversal names (e.g. url ending with "/" or ".."). *)
          let repo_name =
@@ -719,7 +721,7 @@ let handle_keeper_shell
            in
            if safe = "" || safe = "." || safe = ".." then "repo" else safe
          in
-         let clone_path = Filename.concat playground repo_name in
+         let clone_path = Filename.concat repos_dir repo_name in
          if Sys.file_exists clone_path then
            (* Already cloned — pull latest instead *)
            let st, out =

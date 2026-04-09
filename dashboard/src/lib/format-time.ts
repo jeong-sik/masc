@@ -80,6 +80,34 @@ export function formatTimestampKo(ts: number): string {
   })
 }
 
+// ── Time-only formatters (no date) ──
+
+const timeHhMm = new Intl.DateTimeFormat('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false })
+
+/** Format millisecond timestamp as "HH:MM" (24h, ko-KR). */
+export function formatTimeOnly(tsMs: number): string {
+  return timeHhMm.format(new Date(tsMs))
+}
+
+/** Format unix-seconds timestamp as "HH:MM:SS" (24h, ko-KR). */
+export function formatTimeHms(tsUnixSec: number): string {
+  return new Date(tsUnixSec * 1000).toLocaleTimeString('ko-KR', {
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  })
+}
+
+/** Format ISO timestamp as English relative time — "just now", "5m ago", "2h ago". */
+export function formatTimeAgoEn(iso: string): string {
+  if (!iso.trim()) return 'unknown'
+  if (iso === 'never') return 'never'
+  const diff = (Date.now() - new Date(iso).getTime()) / 1000
+  if (Number.isNaN(diff)) return 'unknown'
+  if (diff < 60) return 'just now'
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
+  return `${Math.floor(diff / 86400)}d ago`
+}
+
 /** Format a numeric delta with sign prefix. */
 export function formatDelta(delta: number, decimals = 4): string {
   const sign = delta >= 0 ? '+' : ''

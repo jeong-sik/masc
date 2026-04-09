@@ -98,16 +98,7 @@ let build_keeper_index () =
     "masc_keeper_list", "키퍼 목록 현황";
     "masc_keeper_msg", "키퍼 메시지 전달 대화";
     "masc_keeper_status", "키퍼 상태 확인";
-    "masc_team_session_start", "팀 세션 병렬 작업 스웜 멀티 에이전트 시작";
-    "masc_team_session_status", "팀세션 상태 현황";
-    "masc_team_session_stop", "팀세션 중지 종료";
-    "masc_team_session_step", "팀세션 단계 스텝 실행";
-    "masc_team_session_list", "팀세션 목록 스웜";
-    "masc_team_session_events", "팀세션 이벤트 타임라인";
-    "masc_team_session_prove", "팀세션 증명 검증";
-    "masc_team_session_report", "팀세션 리포트 보고서";
-    "masc_team_session_compare", "팀세션 비교 diff";
-    "masc_team_session_finalize", "팀세션 마감 종료 완료";
+    (* team session tool entries removed — team session cleanup *)
     "masc_worktree_create", "워크트리 생성 브랜치";
     "masc_worktree_list", "워크트리 목록 현황";
     "masc_worktree_remove", "워크트리 삭제 정리";
@@ -137,7 +128,7 @@ let build_keeper_index () =
       else if String.starts_with ~prefix:"masc_board_" name then Some "masc_board"
       else if String.starts_with ~prefix:"masc_keeper_" name then Some "masc_keeper"
       else if String.starts_with ~prefix:"masc_plan_" name then Some "masc_plan"
-      else if String.starts_with ~prefix:"masc_team_session_" name then Some "masc_session"
+
       else if String.starts_with ~prefix:"masc_worktree_" name then Some "masc_worktree"
       else if String.starts_with ~prefix:"masc_code_" name then Some "masc_code"
       else if String.starts_with ~prefix:"masc_governance_" name then Some "masc_governance"
@@ -331,10 +322,10 @@ let test_masc_autoresearch_kr () =
   ignore (assert_retrieves ~label:"autoresearch_kr" idx
     "자동연구 리서치 사이클" "masc_autoresearch_cycle")
 
-(* masc_plan_get and masc_team_session_start are not retrievable via BM25
-   with Korean queries: "계획", "플랜", "팀", "세션" are common terms that
-   produce no BM25 match against 350+ tool descriptions, even with Korean
-   aliases. Needs embedding-based retrieval — tracked in #4331.
+(* masc_plan_get is not retrievable via BM25 with Korean queries:
+   "계획", "플랜" are common terms that produce no BM25 match against
+   350+ tool descriptions, even with Korean aliases.
+   Needs embedding-based retrieval — tracked in #4331.
    These tools ARE always-included via category anchors, so they remain
    accessible regardless of BM25 ranking. *)
 

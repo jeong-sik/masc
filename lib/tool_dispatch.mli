@@ -107,7 +107,7 @@ val is_idempotent : string -> bool
 
 type module_tag =
   | Mod_plan | Mod_operator | Mod_command_plane
-  | Mod_local_runtime | Mod_team_session
+  | Mod_local_runtime
   | Mod_worktree
   | Mod_code | Mod_code_write
   | Mod_a2a | Mod_handover

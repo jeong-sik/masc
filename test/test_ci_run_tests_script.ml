@@ -77,7 +77,7 @@ let make_fake_dune dir =
     {|#!/bin/sh
 set -eu
 log_file="${FAKE_DUNE_LOG:?}"
-printf '%s|%s\n' "${1:-}" "${DUNE_BUILD_DIR:-}" >>"$log_file"
+printf '%s|%s|%s\n' "${1:-}" "${DUNE_BUILD_DIR:-}" "$(pwd)" >>"$log_file"
 if [ "${1:-}" = "--version" ]; then
   printf '3.21.0\n'
   exit 0
@@ -100,6 +100,8 @@ exit 0
 
 let test_rpc_retry_uses_isolated_build_dir () =
   with_temp_dir "ci-run-tests-retry" (fun dir ->
+      let repo_dir = Filename.concat dir "repo" in
+      Unix.mkdir repo_dir 0o755;
       let fake_log = Filename.concat dir "fake-dune.log" in
       let ci_log = Filename.concat dir "ci-run-tests.log" in
       let fake_bin = make_fake_dune dir in
@@ -121,7 +123,8 @@ let test_rpc_retry_uses_isolated_build_dir () =
       let code, stdout, stderr =
         run_shell ~cwd:dir ~env
           (Printf.sprintf "%s %s" (quote (script_path ()))
-             (quote "dune test --root ."))
+             (quote
+                (Printf.sprintf "cd %s && dune test --root ." (quote repo_dir))))
       in
       if code <> 0 then
         failf "ci-run-tests failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout
@@ -135,7 +138,7 @@ let test_rpc_retry_uses_isolated_build_dir () =
            "detected dune RPC/lock failure; retrying once with isolated build dir .ci_build");
       check bool "isolated command exports build dir" true
         (contains_substring observed_output
-           "isolated_command: env DUNE_BUILD_DIR=.ci_build");
+           "isolated_command: export DUNE_BUILD_DIR=.ci_build; unset DUNE_RPC;");
       check bool "success message present" true
         (contains_substring stdout "tests completed successfully");
       let log_lines =
@@ -145,10 +148,12 @@ let test_rpc_retry_uses_isolated_build_dir () =
       in
       match log_lines with
       | [ first; second ] ->
-          check string "first attempt uses default build dir" "test|"
+          check string "first attempt uses default build dir and repo cwd"
+            (Printf.sprintf "test||%s" repo_dir)
             first;
-          check string "second attempt uses isolated build dir"
-            "test|.ci_build" second
+          check string "second attempt uses isolated build dir and repo cwd"
+            (Printf.sprintf "test|.ci_build|%s" repo_dir)
+            second
       | _ ->
           failf "expected exactly two dune invocations, got:\n%s"
             (String.concat "\n" log_lines))

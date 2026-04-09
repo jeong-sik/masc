@@ -16,9 +16,17 @@ type audit_event = {
   previous_keeper : string;
 }
 
-let default_status_path = "sidecars/discord-bot/.gate/discord_status.json"
-let default_binding_store_path = "sidecars/discord-bot/.gate/discord_bindings.json"
-let default_binding_audit_path =
+let connector_id = "discord"
+let connector_display_name = "Discord"
+let connector_channel = "discord"
+
+let default_status_path = ".masc/connectors/discord/status.json"
+let default_binding_store_path = ".masc/connectors/discord/bindings.json"
+let default_binding_audit_path = ".masc/connectors/discord/binding_audit.jsonl"
+
+let legacy_status_path = "sidecars/discord-bot/.gate/discord_status.json"
+let legacy_binding_store_path = "sidecars/discord-bot/.gate/discord_bindings.json"
+let legacy_binding_audit_path =
   "sidecars/discord-bot/.gate/discord_binding_audit.jsonl"
 
 let stale_after_sec () =
@@ -30,21 +38,43 @@ let resolve_path raw_path =
   else
     raw_path
 
-let configured_path env_name ~default =
+let configured_write_path env_name ~default =
   match Sys.getenv_opt env_name |> Env_config_core.trim_opt with
   | Some raw -> resolve_path raw
   | None -> resolve_path default
 
+let configured_read_path env_name ~default ~legacy =
+  match Sys.getenv_opt env_name |> Env_config_core.trim_opt with
+  | Some raw -> resolve_path raw
+  | None ->
+      let preferred = resolve_path default in
+      let legacy = resolve_path legacy in
+      if Sys.file_exists preferred then preferred
+      else if Sys.file_exists legacy then legacy
+      else preferred
+
 let status_path () =
-  configured_path "MASC_DISCORD_STATUS_PATH" ~default:default_status_path
+  configured_read_path "MASC_DISCORD_STATUS_PATH" ~default:default_status_path
+    ~legacy:legacy_status_path
+
+let status_write_path () =
+  configured_write_path "MASC_DISCORD_STATUS_PATH" ~default:default_status_path
 
 let binding_store_path () =
-  configured_path "MASC_DISCORD_BINDING_STORE_PATH"
+  configured_write_path "MASC_DISCORD_BINDING_STORE_PATH"
     ~default:default_binding_store_path
 
+let binding_store_read_path () =
+  configured_read_path "MASC_DISCORD_BINDING_STORE_PATH"
+    ~default:default_binding_store_path ~legacy:legacy_binding_store_path
+
 let binding_audit_path () =
-  configured_path "MASC_DISCORD_BINDING_AUDIT_PATH"
+  configured_write_path "MASC_DISCORD_BINDING_AUDIT_PATH"
     ~default:default_binding_audit_path
+
+let binding_audit_read_path () =
+  configured_read_path "MASC_DISCORD_BINDING_AUDIT_PATH"
+    ~default:default_binding_audit_path ~legacy:legacy_binding_audit_path
 
 let read_json_file_opt path =
   if not (Sys.file_exists path) then
@@ -71,7 +101,7 @@ let normalize_bindings_json (json : Yojson.Safe.t) : binding list =
   | _ -> []
 
 let read_bindings () : binding list =
-  match read_json_file_opt (binding_store_path ()) with
+  match read_json_file_opt (binding_store_read_path ()) with
   | Some json -> normalize_bindings_json json
   | None -> []
 
@@ -140,7 +170,7 @@ let rec drop_left n xs =
     | _ :: tl -> drop_left (n - 1) tl
 
 let read_recent_audit ~limit =
-  let path = binding_audit_path () in
+  let path = binding_audit_read_path () in
   if limit <= 0 || not (Sys.file_exists path) then
     []
   else
@@ -183,9 +213,17 @@ let stale_of_updated_at updated_at =
   | Some ts -> Unix.gettimeofday () -. ts > float_of_int (stale_after_sec ())
   | None -> true
 
+let connector_state_label ~available ~connected ~stale =
+  if not available then "offline"
+  else if stale then "stale"
+  else if connected then "connected"
+  else "disconnected"
+
 let status_json ?(audit_limit = 10) () =
   let status_path = status_path () in
   let live_status = read_json_file_opt status_path in
+  let binding_store_path = binding_store_read_path () in
+  let audit_path = binding_audit_read_path () in
   let configured_bindings = read_bindings () in
   let recent_audit = read_recent_audit ~limit:audit_limit in
   let available = Option.is_some live_status in
@@ -215,10 +253,11 @@ let status_json ?(audit_limit = 10) () =
       ("connected", `Bool connected);
       ("stale", `Bool stale);
       ("stale_after_sec", `Int (stale_after_sec ()));
+      ("status", `String (connector_state_label ~available ~connected ~stale));
       ("error", `String error);
       ("status_path", `String status_path);
-      ("binding_store_path", `String (binding_store_path ()));
-      ("audit_path", `String (binding_audit_path ()));
+      ("binding_store_path", `String binding_store_path);
+      ("audit_path", `String audit_path);
       ("updated_at", `String updated_at);
       ( "last_ready_at",
         `String (status_field "last_ready_at" string_member "") );
@@ -244,6 +283,135 @@ let status_json ?(audit_limit = 10) () =
       ( "configured_bindings",
         `List (List.map binding_json configured_bindings) );
       ("recent_audit", `List recent_audit);
+    ]
+
+let list_assoc_field key = function
+  | `Assoc fields -> List.assoc_opt key fields
+  | _ -> None
+
+let find_assoc_by_string_field ~field ~value = function
+  | `List rows ->
+      List.find_map
+        (function
+          | (`Assoc _ as row) -> (
+              match list_assoc_field field row with
+              | Some (`String candidate) when String.equal candidate value ->
+                  Some row
+              | _ -> None)
+          | _ -> None)
+        rows
+  | _ -> None
+
+let connector_json ?gate_status_json ?(audit_limit = 10) () =
+  let status = status_json ~audit_limit () in
+  let observed_channel =
+    match gate_status_json with
+    | None -> `Null
+    | Some json -> (
+        match list_assoc_field "channels" json with
+        | Some channels -> (
+            match
+              find_assoc_by_string_field ~field:"channel" ~value:connector_channel
+                channels
+            with
+            | Some row -> row
+            | None -> `Null)
+        | None -> `Null)
+  in
+  let storage_paths =
+    `Assoc
+      [
+        ("status_path", `String (string_member status "status_path"));
+        ( "binding_store_path",
+          `String (string_member status "binding_store_path") );
+        ("audit_path", `String (string_member status "audit_path"));
+      ]
+  in
+  let runtime_summary =
+    `Assoc
+      [
+        ("available", `Bool (bool_member status "available"));
+        ("connected", `Bool (bool_member status "connected"));
+        ("stale", `Bool (bool_member status "stale"));
+        ("stale_after_sec", `Int (int_member status "stale_after_sec"));
+        ("status", `String (string_member status "status"));
+        ("error", `String (string_member status "error"));
+        ("updated_at", `String (string_member status "updated_at"));
+        ("last_ready_at", `String (string_member status "last_ready_at"));
+        ("bot_user_name", `String (string_member status "bot_user_name"));
+        ("bot_user_id", `String (string_member status "bot_user_id"));
+        ("guild_count", `Int (int_member status "guild_count"));
+        ("gate_base_url", `String (string_member status "gate_base_url"));
+        ( "gate_healthy",
+          Option.value ~default:`Null
+            (Option.map (fun value -> `Bool value)
+               (bool_option_member status "gate_healthy")) );
+        ( "gate_health_checked_at",
+          `String (string_member status "gate_health_checked_at") );
+        ("pid", `Int (int_member status "pid"));
+      ]
+  in
+  let binding_summary =
+    `Assoc
+      [
+        ("binding_source", `String (string_member status "binding_source"));
+        ( "runtime_bindings_count",
+          `Int (int_member status "runtime_bindings_count") );
+        ( "configured_bindings_count",
+          `Int
+            (status |> U.member "configured_bindings" |> U.to_list |> List.length)
+        );
+      ]
+  in
+  `Assoc
+    [
+      ("connector_id", `String connector_id);
+      ("display_name", `String connector_display_name);
+      ("channel", `String connector_channel);
+      ("capabilities", `List [ `String "runtime_status"; `String "bindings"; `String "audit" ]);
+      ("status", `String (string_member status "status"));
+      ("available", `Bool (bool_member status "available"));
+      ("connected", `Bool (bool_member status "connected"));
+      ("stale", `Bool (bool_member status "stale"));
+      ("stale_after_sec", `Int (int_member status "stale_after_sec"));
+      ("error", `String (string_member status "error"));
+      ("status_path", `String (string_member status "status_path"));
+      ("binding_store_path", `String (string_member status "binding_store_path"));
+      ("audit_path", `String (string_member status "audit_path"));
+      ("updated_at", `String (string_member status "updated_at"));
+      ("last_ready_at", `String (string_member status "last_ready_at"));
+      ("bot_user_name", `String (string_member status "bot_user_name"));
+      ("bot_user_id", `String (string_member status "bot_user_id"));
+      ("guild_count", `Int (int_member status "guild_count"));
+      ("gate_base_url", `String (string_member status "gate_base_url"));
+      ( "gate_healthy",
+        Option.value ~default:`Null
+          (Option.map (fun value -> `Bool value)
+             (bool_option_member status "gate_healthy")) );
+      ( "gate_health_checked_at",
+        `String (string_member status "gate_health_checked_at") );
+      ("binding_source", `String (string_member status "binding_source"));
+      ("runtime_bindings_count", `Int (int_member status "runtime_bindings_count"));
+      ("pid", `Int (int_member status "pid"));
+      ("configured_bindings", status |> U.member "configured_bindings");
+      ("recent_audit", status |> U.member "recent_audit");
+      ("storage_paths", storage_paths);
+      ("runtime_summary", runtime_summary);
+      ("binding_summary", binding_summary);
+      ("observed_channel", observed_channel);
+    ]
+
+let connectors_json ?gate_status_json ?(audit_limit = 10) () =
+  let connector = connector_json ?gate_status_json ~audit_limit () in
+  let active_count =
+    if bool_member connector "available" then 1 else 0
+  in
+  `Assoc
+    [
+      ("connectors", `List [ connector ]);
+      ("total", `Int 1);
+      ("active_count", `Int active_count);
+      ("generated_at", `String (Server_utils.iso8601_of_unix (Unix.gettimeofday ())));
     ]
 
 let rollback_bindings original_bindings =

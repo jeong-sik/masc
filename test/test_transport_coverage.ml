@@ -471,6 +471,26 @@ let test_rest_tool_to_endpoint_broadcast () =
   check string "method" "POST" (Transport.Rest.method_to_string m);
   check string "path" "/api/v1/broadcast" path
 
+let test_rest_tool_to_endpoint_operator_snapshot () =
+  let (m, path) = Transport.Rest.tool_to_endpoint "masc_operator_snapshot" in
+  check string "method" "GET" (Transport.Rest.method_to_string m);
+  check string "path" "/api/v1/operator" path
+
+let test_rest_tool_to_endpoint_operator_digest () =
+  let (m, path) = Transport.Rest.tool_to_endpoint "masc_operator_digest" in
+  check string "method" "GET" (Transport.Rest.method_to_string m);
+  check string "path" "/api/v1/operator/digest" path
+
+let test_rest_tool_to_endpoint_operator_action () =
+  let (m, path) = Transport.Rest.tool_to_endpoint "masc_operator_action" in
+  check string "method" "POST" (Transport.Rest.method_to_string m);
+  check string "path" "/api/v1/operator/action" path
+
+let test_rest_tool_to_endpoint_operator_confirm () =
+  let (m, path) = Transport.Rest.tool_to_endpoint "masc_operator_confirm" in
+  check string "method" "POST" (Transport.Rest.method_to_string m);
+  check string "path" "/api/v1/operator/confirm" path
+
 let test_rest_tool_to_endpoint_agent_card () =
   let (m, path) = Transport.Rest.tool_to_endpoint "masc_agent_card" in
   check string "method" "GET" (Transport.Rest.method_to_string m);
@@ -507,6 +527,37 @@ let test_rest_parse_request_tasks () =
 let test_rest_parse_request_agents () =
   let req = Transport.Rest.parse_request ~http_method:"GET" ~path:"/api/v1/agents" ~query_params:[] ~body:"" in
   check string "method_name" "masc_who" req.method_name
+
+let test_rest_parse_request_operator_snapshot () =
+  let req =
+    Transport.Rest.parse_request ~http_method:"GET" ~path:"/api/v1/operator"
+      ~query_params:[] ~body:""
+  in
+  check string "method_name" "masc_operator_snapshot" req.method_name
+
+let test_rest_parse_request_operator_digest () =
+  let req =
+    Transport.Rest.parse_request ~http_method:"GET"
+      ~path:"/api/v1/operator/digest"
+      ~query_params:[ ("target_type", `String "namespace") ] ~body:""
+  in
+  check string "method_name" "masc_operator_digest" req.method_name
+
+let test_rest_parse_request_operator_action () =
+  let req =
+    Transport.Rest.parse_request ~http_method:"POST"
+      ~path:"/api/v1/operator/action" ~query_params:[]
+      ~body:"{\"action_type\":\"namespace_pause\"}"
+  in
+  check string "method_name" "masc_operator_action" req.method_name
+
+let test_rest_parse_request_operator_confirm () =
+  let req =
+    Transport.Rest.parse_request ~http_method:"POST"
+      ~path:"/api/v1/operator/confirm" ~query_params:[]
+      ~body:"{\"confirm_token\":\"token-1\"}"
+  in
+  check string "method_name" "masc_operator_confirm" req.method_name
 
 let test_rest_parse_request_agent_card () =
   let req = Transport.Rest.parse_request ~http_method:"GET" ~path:"/.well-known/agent-card.json" ~query_params:[] ~body:"" in
@@ -846,6 +897,14 @@ let () =
       test_case "join" `Quick test_rest_tool_to_endpoint_join;
       test_case "leave" `Quick test_rest_tool_to_endpoint_leave;
       test_case "broadcast" `Quick test_rest_tool_to_endpoint_broadcast;
+      test_case "operator snapshot" `Quick
+        test_rest_tool_to_endpoint_operator_snapshot;
+      test_case "operator digest" `Quick
+        test_rest_tool_to_endpoint_operator_digest;
+      test_case "operator action" `Quick
+        test_rest_tool_to_endpoint_operator_action;
+      test_case "operator confirm" `Quick
+        test_rest_tool_to_endpoint_operator_confirm;
       test_case "agent_card" `Quick test_rest_tool_to_endpoint_agent_card;
       test_case "websocket_discovery" `Quick test_rest_tool_to_endpoint_websocket_discovery;
       test_case "webrtc_offer" `Quick test_rest_tool_to_endpoint_webrtc_offer;
@@ -856,6 +915,14 @@ let () =
       test_case "status" `Quick test_rest_parse_request_status;
       test_case "tasks" `Quick test_rest_parse_request_tasks;
       test_case "agents" `Quick test_rest_parse_request_agents;
+      test_case "operator snapshot" `Quick
+        test_rest_parse_request_operator_snapshot;
+      test_case "operator digest" `Quick
+        test_rest_parse_request_operator_digest;
+      test_case "operator action" `Quick
+        test_rest_parse_request_operator_action;
+      test_case "operator confirm" `Quick
+        test_rest_parse_request_operator_confirm;
       test_case "agent_card" `Quick test_rest_parse_request_agent_card;
       test_case "agent_card canonical" `Quick
         test_rest_parse_request_agent_card_canonical;

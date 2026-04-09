@@ -178,7 +178,7 @@ export function KeeperChatPanel({ name }: { name: string }) {
       : entries
 
   return html`
-    <div class="overflow-hidden rounded-[24px] border border-[var(--card-border)] bg-[linear-gradient(180deg,rgba(11,18,34,0.95),rgba(6,11,22,0.92))] shadow-[0_24px_56px_rgba(0,0,0,0.24)]">
+    <div class="overflow-hidden rounded-[var(--radius-xl)] border border-[var(--card-border)] bg-[linear-gradient(180deg,rgba(11,18,34,0.95),rgba(6,11,22,0.92))] shadow-[0_24px_56px_rgba(0,0,0,0.24)]">
       <div class="flex flex-wrap items-start justify-between gap-3 border-b border-[rgba(148,163,184,0.12)] px-4 py-4">
         <div class="min-w-[220px] flex-1">
           <div class="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">직접 대화</div>

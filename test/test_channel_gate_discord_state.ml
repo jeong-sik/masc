@@ -91,6 +91,61 @@ let test_unbind_removes_existing_binding () =
         check string "latest audit action" "unbind"
           (List.hd audit |> U.member "action" |> U.to_string))
 
+let test_connectors_json_advertises_gate_connector_descriptor () =
+  with_temp_dir @@ fun dir ->
+  with_discord_paths dir (fun () ->
+    ignore
+      (Discord_state.bind ~channel_id:"1234567890" ~keeper_name:"luna"
+         ~actor_name:"dashboard");
+    let status_path = Filename.concat dir "status.json" in
+    Yojson.Safe.to_file status_path
+      (`Assoc
+        [
+          ("updated_at", `String "2026-04-09T00:00:00Z");
+          ("connected", `Bool true);
+          ("bot_user_name", `String "keeper-gateway");
+          ("bot_user_id", `String "bot-1");
+          ("guild_count", `Int 2);
+          ("gate_base_url", `String "http://127.0.0.1:8935");
+          ("gate_healthy", `Bool true);
+          ("gate_health_checked_at", `String "2026-04-09T00:00:00Z");
+          ("last_ready_at", `String "2026-04-09T00:00:00Z");
+          ("binding_source", `String "persisted");
+          ("runtime_bindings_count", `Int 1);
+          ("pid", `Int 4242);
+        ]);
+    let gate_status_json =
+      `Assoc
+        [
+          ( "channels",
+            `List
+              [
+                `Assoc
+                  [
+                    ("channel", `String "discord");
+                    ("message_count", `Int 3);
+                    ("success_rate_pct", `Int 100);
+                  ];
+              ] );
+        ]
+    in
+    let json = Discord_state.connectors_json ~gate_status_json () in
+    let connectors = json |> U.member "connectors" |> U.to_list in
+    check int "one connector" 1 (List.length connectors);
+    let connector = List.hd connectors in
+    check string "connector id" "discord"
+      (connector |> U.member "connector_id" |> U.to_string);
+    check string "display name" "Discord"
+      (connector |> U.member "display_name" |> U.to_string);
+    check bool "bindings capability exposed" true
+      (connector |> U.member "capabilities" |> U.to_list
+       |> List.exists (function
+            | `String "bindings" -> true
+            | _ -> false));
+    check string "observed channel surfaced" "discord"
+      (connector |> U.member "observed_channel" |> U.member "channel"
+       |> U.to_string))
+
 let () =
   Random.self_init ();
   run "channel_gate_discord_state"
@@ -103,5 +158,7 @@ let () =
             test_bind_persists_binding_and_audit;
           test_case "unbind removes binding" `Quick
             test_unbind_removes_existing_binding;
+          test_case "connectors json advertises connector descriptor" `Quick
+            test_connectors_json_advertises_gate_connector_descriptor;
         ] );
     ]

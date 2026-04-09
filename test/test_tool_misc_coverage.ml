@@ -354,13 +354,18 @@ let () = test "web_search_provider_plan_defaults_to_scraping_fallbacks" (fun () 
 )
 
 let () = test "web_search_provider_plan_prefers_configured_official_provider" (fun () ->
-  with_env "BRAVE_SEARCH_API_KEY" (Some "brave-key") (fun () ->
-    with_env "MASC_WEB_SEARCH_PROVIDER" (Some "brave") (fun () ->
-      with_env "MASC_WEB_SEARCH_FALLBACKS" (Some "ddg,bing_rss") (fun () ->
-        with_env "MASC_WEB_SEARCH_PROVIDER_ORDER" None (fun () ->
-          assert
-            (Tool_misc.web_search_provider_plan ()
-             = [ "brave"; "duckduckgo"; "bing_rss" ])))))
+  with_env "MASC_SEARXNG_URL" None (fun () ->
+    with_env "BRAVE_SEARCH_API_KEY" (Some "brave-key") (fun () ->
+      with_env "TAVILY_API_KEY" None (fun () ->
+        with_env "EXA_API_KEY" None (fun () ->
+          with_env "BING_SEARCH_API_KEY" None (fun () ->
+            with_env "AZURE_BING_SEARCH_API_KEY" None (fun () ->
+              with_env "MASC_WEB_SEARCH_PROVIDER" (Some "brave") (fun () ->
+                with_env "MASC_WEB_SEARCH_FALLBACKS" (Some "ddg,bing_rss") (fun () ->
+                  with_env "MASC_WEB_SEARCH_PROVIDER_ORDER" None (fun () ->
+                    assert
+                      (Tool_misc.web_search_provider_plan ()
+                       = [ "brave"; "duckduckgo"; "bing_rss" ]))))))))))
 )
 
 let () = test "web_search_simulate_for_test_falls_back_after_error" (fun () ->

@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { useSignal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
+import { LoadingState } from './common/feedback-state'
 import {
   fetchDashboardExecution,
   fetchTelemetrySummary,
@@ -9,20 +10,15 @@ import {
   type ToolQualityResponse,
 } from '../api/dashboard'
 import { normalizeKeepers } from '../keeper-store-normalize'
+import { telemetrySourceLabel } from '../config/telemetry-sources'
 import { formatElapsedCompact, formatTimeAgo } from '../lib/format-time'
 import type { Keeper } from '../types'
 
+// Fleet-level thresholds (lower than individual keeper thresholds in config/constants)
+// because fleet view highlights keepers that are approaching limits, not yet at them
 const PRESSURE_HOT_RATIO = 0.75
 const PRESSURE_WARN_RATIO = 0.5
 const STALE_ACTIVITY_SEC = 900
-
-const SOURCE_LABELS: Record<string, string> = {
-  keeper_metric: 'Keeper metrics',
-  agent_event: 'Agent events',
-  tool_call_io: 'Tool call I/O',
-  tool_usage: 'Tool usage',
-  tool_metric: 'Tool metrics',
-}
 
 interface FleetRow {
   name: string
@@ -73,9 +69,8 @@ function emptyState(): FleetTelemetryState {
   }
 }
 
-function sourceLabel(source: string): string {
-  return SOURCE_LABELS[source] ?? source
-}
+// Delegated to config/telemetry-sources (SSOT)
+const sourceLabel = telemetrySourceLabel
 
 function errorMessage(reason: unknown): string {
   return reason instanceof Error ? reason.message : 'unknown error'
@@ -343,7 +338,7 @@ function PressureWatchlist({ rows }: { rows: FleetRow[] }) {
 
 function FleetComparisonTable({ rows }: { rows: FleetRow[] }) {
   if (rows.length === 0) {
-    return html`<div class="text-[11px] text-[var(--text-dim)]">No keeper fleet data available.</div>`
+    return html`<div class="text-[11px] text-[var(--text-dim)]">키퍼 fleet 데이터 없음.</div>`
   }
 
   return html`
@@ -418,7 +413,7 @@ function TelemetrySourcesPanel({ sources }: { sources: TelemetrySourceSummary[] 
 
 function FailureCategoryPanel({ toolQuality }: { toolQuality: ToolQualityResponse }) {
   if (toolQuality.failure_categories.length === 0) {
-    return html`<div class="text-[11px] text-[var(--text-dim)]">No recent failure categories.</div>`
+    return html`<div class="text-[11px] text-[var(--text-dim)]">최근 실패 카테고리 없음.</div>`
   }
 
   const top = toolQuality.failure_categories.slice(0, 8)
@@ -523,7 +518,7 @@ export function FleetTelemetryPanel() {
   const sourcesWithData = value.telemetry_sources.filter(source => source.entry_count > 0).length
 
   if (value.loading && value.rows.length === 0) {
-    return html`<div class="p-4 text-[11px] text-[var(--text-dim)]">Loading fleet telemetry...</div>`
+    return html`<${LoadingState}>Fleet 텔레메트리 불러오는 중...<//>`
   }
 
   if (value.error) {
@@ -542,8 +537,8 @@ export function FleetTelemetryPanel() {
         <button
           class="rounded bg-[var(--bg-subtle)] px-2 py-0.5 text-[10px] text-[var(--text-dim)] hover:text-[var(--text)]"
           onClick=${() => { void loadFleetTelemetry() }}
-          aria-label="Refresh fleet telemetry"
-        >Refresh</button>
+          aria-label="Fleet 텔레메트리 새로고침"
+        >새로고침</button>
       </div>
 
       <${WarningBanner} warnings=${value.warnings} />

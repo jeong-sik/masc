@@ -1,11 +1,11 @@
 /* MASC Dashboard — Design Tokens (Tailwind v4 @theme) */
 
 @theme {
-  --color-bg-0: #0b1220;
-  --color-bg-1: #111a2e;
-  --color-bg-2: #16213c;
-  --color-card: rgba(16, 24, 42, 0.92);
-  --color-card-border: rgba(138, 163, 211, 0.2);
+  --color-bg-0: #0c1424;
+  --color-bg-1: #121c30;
+  --color-bg-2: #17233e;
+  --color-card: rgba(18, 27, 46, 0.94);
+  --color-card-border: rgba(138, 163, 211, 0.22);
   --color-text-strong: #eaf1ff;
   --color-text-body: #c0d2f2;
   --color-text-muted: #a8bfdf;
@@ -32,6 +32,7 @@
   /* Tone variants */
   --bad-light: #f87171;
   --warn-bright: #f97316;
+  --radius-xl: 24px;
   --radius-lg: 12px;
   --radius-md: 8px;
   --radius-sm: 6px;

@@ -229,12 +229,21 @@ let playground_repos_path (name : string) : string =
   let safe_name = sanitize_keeper_name name in
   Printf.sprintf ".masc/playground/%s/repos/" safe_name
 
+let playground_bundle_paths (name : string) : string list =
+  [
+    playground_path_of_keeper name;
+    playground_mind_path name;
+    playground_repos_path name;
+  ]
+
+let ensure_playground_bundle ~(config : Room.config) ~(name : string) : string list =
+  let root = project_root_of_config config in
+  playground_bundle_paths name
+  |> List.map (Filename.concat root)
+  |> List.map Keeper_fs.ensure_dir
+
 let effective_allowed_paths ~(meta : Keeper_types.keeper_meta) : string list =
-  let playground = playground_path_of_keeper meta.name in
-  let playground_sub = [
-    playground_mind_path meta.name;
-    playground_repos_path meta.name;
-  ] in
+  let playground_paths = playground_bundle_paths meta.name in
   let workspace_defaults =
     match String.lowercase_ascii meta.execution_scope with
     | "workspace" ->
@@ -245,7 +254,7 @@ let effective_allowed_paths ~(meta : Keeper_types.keeper_meta) : string list =
   in
   match meta.allowed_paths with
   | ["*"] -> []
-  | explicit -> playground :: playground_sub @ workspace_defaults @ explicit
+  | explicit -> playground_paths @ workspace_defaults @ explicit
 
 (** Resolve a path for read-only access within the keeper's effective
     allowlist. The allowlist is usually the keeper playground bundle

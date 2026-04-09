@@ -78,6 +78,7 @@ let strict_success_names =
     "masc_plan_init";
     "masc_plan_set_task";
     "masc_plan_update";
+    "masc_repo_synthesis_swarm_start";
     "masc_start";
     "masc_status";
     "masc_tool_help";
@@ -835,7 +836,7 @@ let guard_fragments_for_name name =
         "masc_repo_synthesis_";
         "masc_runtime_";
         "masc_spawn";
-        "masc_team_session_";
+
         "masc_voice_";
       ]
   then

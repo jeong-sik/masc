@@ -202,6 +202,25 @@ let handle_gate_status _state request reqd =
   respond_json_with_cors ~status:`OK request reqd
     (Yojson.Safe.to_string json)
 
+(** GET /api/v1/gate/connectors
+
+    Generic connector descriptor surface for dashboard/ops consumers.
+    The gate advertises which connectors exist and their current runtime
+    snapshots without requiring the caller to hardcode vendor-specific
+    knowledge. *)
+let handle_gate_connectors _state request reqd =
+  let audit_limit =
+    int_query_param request "audit_limit" ~default:10
+    |> fun value -> max 1 (min 50 value)
+  in
+  let gate_status = Channel_gate_metrics.snapshot_json () in
+  let json =
+    Channel_gate_discord_state.connectors_json ~gate_status_json:gate_status
+      ~audit_limit ()
+  in
+  respond_json_with_cors ~status:`OK request reqd
+    (Yojson.Safe.to_string json)
+
 (** GET /api/v1/gate/discord/status
 
     Dashboard-facing live connector status sourced from the Discord bot's
@@ -407,6 +426,11 @@ let add_routes ~sw ~clock router =
         with_public_read (fun state _req reqd ->
           handle_gate_status state request reqd
         ) request reqd)
+
+  |> Http.Router.get "/api/v1/gate/connectors" (fun request reqd ->
+       with_public_read (fun state _req reqd ->
+         handle_gate_connectors state request reqd
+       ) request reqd)
 
   |> Http.Router.get "/api/v1/gate/discord/status" (fun request reqd ->
        with_public_read (fun state _req reqd ->

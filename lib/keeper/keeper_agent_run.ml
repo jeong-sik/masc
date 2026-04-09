@@ -415,7 +415,11 @@ let run_turn
     match Sys.getenv_opt "MASC_KEEPER_TOOL_DECAY_TURNS" with
     | Some s ->
       (try max 1 (int_of_string s) with
-       | _ -> 5)
+       | Failure _ ->
+         Log.Keeper.warn
+           "keeper: MASC_KEEPER_TOOL_DECAY_TURNS=%S is not a valid integer, using default 5"
+           s;
+         5)
     | None -> 5
   in
   let discovered_ref = ref (Keeper_discovered_tools.create ~decay_turns) in
@@ -1386,7 +1390,11 @@ let run_turn
                    disclosure_json
                with
                | Eio.Cancel.Cancelled _ as e -> raise e
-               | _ -> ());
+               | exn ->
+                 Log.Keeper.warn
+                   "keeper:%s tool_disclosure jsonl append failed: %s"
+                   meta.name
+                   (Printexc.to_string exn));
               (* Yield after CPU-bound tool filtering to let HTTP handlers run.
            Without this, N concurrent keeper fibers starve the Eio scheduler
            during turn setup (tool list construction + prompt building). *)
@@ -1444,6 +1452,7 @@ let run_turn
     else None
   in
   let priority = Option.value priority ~default:Llm_provider.Request_priority.Proactive in
+  ignore (Keeper_alerting_path.ensure_playground_bundle ~config ~name:meta.name);
   let effective_allowed_paths = Keeper_alerting_path.effective_allowed_paths ~meta in
   match
     Keeper_alerting_path.absolute_allowed_paths_result
@@ -1724,7 +1733,13 @@ let run_turn
                        ~path:bank_path
                        ~max_n:50
                    with
-                   | _ -> []
+                   | Eio.Cancel.Cancelled _ as e -> raise e
+                   | exn ->
+                     Log.Keeper.warn
+                       "keeper:%s memory recall history load failed: %s"
+                       meta.name
+                       (Printexc.to_string exn);
+                     []
                  in
                  Some
                    (Keeper_memory_recall.evaluate_memory_recall
@@ -1768,7 +1783,11 @@ let run_turn
                eval_json
            with
            | Eio.Cancel.Cancelled _ as e -> raise e
-           | _ -> ());
+           | exn ->
+             Log.Keeper.warn
+               "keeper:%s post_turn_eval jsonl append failed: %s"
+               meta.name
+               (Printexc.to_string exn));
           Ok
             { response_text
             ; model_used = model

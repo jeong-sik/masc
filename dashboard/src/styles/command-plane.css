@@ -1,7 +1,7 @@
-/* Command Plane — cmd-* utilities, gauge, signal, tone, responsive breakpoints.
-   Extracted from global.css for #3915. */
-
-/* ── Command Plane utilities (migrated from command.css) ──── */
+/* Command Plane — cmd-* utilities used by active components.
+   Dead utilities pruned: cmd-focus-banner, cmd-entry-card, cmd-readiness-row,
+   cmd-surface-tab, cmd-orch-card, cmd-alert, cmd-chain-item, cmd-chain-graph,
+   cmd-tag, cmd-tag-row, cmd-gauge-*, cmd-signal-*, tone-border-*, tone-bg-*. */
 
 @utility cmd-stat-card {
   &.highlight {
@@ -19,20 +19,6 @@
   }
   & strong { font-size: 28px; line-height: 1; }
   & small { color: var(--text-dim); font-size: var(--fs-sm); }
-}
-
-@utility cmd-focus-banner {
-  background: linear-gradient(180deg, rgba(34,211,238,0.1), var(--white-3));
-}
-
-@utility cmd-entry-card {
-  & strong {
-    color: var(--text-near-white);
-    font-size: 18px;
-    line-height: 1.2;
-    word-break: break-word;
-  }
-  & p { margin: 0; color: var(--text-body); line-height: 1.5; }
 }
 
 @utility cmd-hero {
@@ -83,48 +69,6 @@
   & p { margin: 10px 0 0; color: var(--text-body); line-height: 1.5; }
 }
 
-@utility cmd-readiness-row {
-  & p { margin: 8px 0 0; color: var(--text-body); line-height: 1.5; }
-}
-
-@utility cmd-surface-tab {
-  &.active {
-    background: var(--cyan-16);
-    color: #67e8f9;
-    border-color: rgba(34,211,238,0.38);
-  }
-}
-
-@utility cmd-orch-card {
-  background: linear-gradient(180deg, var(--white-5), var(--white-3h));
-  border-color: rgba(148,163,184,0.18);
-  &.ok { border-color: var(--ok-24); }
-  &.warn { border-color: rgba(251,191,36,0.22); }
-  &.bad { border-color: rgba(248,113,113,0.26); }
-}
-
-@utility cmd-alert {
-  & p {
-    margin: 10px 0 0;
-    color: var(--text-body);
-    line-height: 1.5;
-    overflow-wrap: anywhere;
-    word-break: break-word;
-  }
-}
-
-@utility cmd-chain-item {
-  &.selected {
-    border-color: rgba(34,211,238,0.38);
-    box-shadow: 0 0 0 1px rgba(34,211,238,0.2) inset;
-    background: linear-gradient(180deg, var(--cyan-12), var(--white-3));
-  }
-}
-
-@utility cmd-chain-graph {
-  & svg { display: block; min-width: 100%; height: auto; }
-}
-
 @utility cmd-chip {
   display: inline-flex;
   align-items: center;
@@ -143,98 +87,3 @@
   &.bad { background: rgba(248,113,113,0.14); color: var(--bad-light); border-color: rgba(248,113,113,0.25); }
   &.muted { background: var(--white-6); color: var(--text-dim); border-color: var(--white-8); }
 }
-
-@utility cmd-tag {
-  display: inline-flex;
-  align-items: center;
-  padding: 3px 8px;
-  font-size: var(--fs-2xs);
-  font-weight: 500;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  border-radius: 6px;
-  background: var(--white-8);
-  color: var(--text-body);
-  white-space: nowrap;
-  &.ok { background: rgba(74,222,128,0.12); color: var(--ok); }
-  &.warn { background: rgba(251,191,36,0.12); color: var(--warn); }
-  &.bad { background: rgba(248,113,113,0.12); color: var(--bad-light); }
-  &.muted { background: var(--white-6); color: var(--text-dim); }
-}
-
-@utility cmd-tag-row {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-top: 8px;
-  color: var(--text-muted);
-  font-size: var(--fs-sm);
-}
-
-/* ── Command Gauge + Signal ───────────────────────────────── */
-
-@utility cmd-gauge-ring {
-  width: 88px;
-  height: 88px;
-  padding: 9px;
-  border-radius: 50%;
-  background: conic-gradient(var(--gauge-color) 0deg var(--gauge-angle), var(--white-8) var(--gauge-angle) 360deg);
-  box-shadow: inset 0 0 0 1px var(--white-4);
-}
-
-@utility cmd-gauge-core {
-  & strong {
-    color: var(--text-near-white);
-    font-size: 18px;
-    line-height: 1.1;
-  }
-  & span { color: rgba(148, 163, 184, 0.88); font-size: var(--fs-xs); margin-top: 4px; }
-}
-
-@utility cmd-gauge-copy {
-  & span { color: var(--text-muted); font-size: var(--fs-sm); letter-spacing: 0.08em; text-transform: uppercase; }
-  & small { color: var(--text-body); line-height: 1.5; }
-}
-
-@utility cmd-signal-rail {
-  &.ok { border-color: var(--ok-18); }
-  &.warn { border-color: var(--warn-20); }
-  &.bad { border-color: rgba(248,113,113,0.22); }
-  & small { color: var(--text-body); line-height: 1.5; }
-}
-
-@utility cmd-signal-copy {
-  & strong {
-    color: var(--text-near-white);
-    font-size: 18px;
-    line-height: 1.1;
-  }
-  & span {
-    color: var(--text-muted);
-    font-size: var(--fs-sm);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-  }
-}
-
-@utility cmd-signal-bar {
-  & span {
-    display: block;
-    height: 100%;
-    background: linear-gradient(90deg, rgba(103,232,249,0.86), rgba(74,222,128,0.9));
-  }
-  & span.warn {
-    background: linear-gradient(90deg, rgba(251,191,36,0.88), rgba(249,115,22,0.9));
-  }
-  & span.bad {
-    background: linear-gradient(90deg, rgba(248,113,113,0.9), rgba(244,63,94,0.9));
-  }
-}
-
-/* State tone utilities */
-@utility tone-border-ok { border-color: var(--ok-24); }
-@utility tone-border-warn { border-color: rgba(251,191,36,0.22); }
-@utility tone-border-bad { border-color: rgba(248,113,113,0.26); }
-@utility tone-bg-ok { background: var(--ok-soft); color: var(--ok); }
-@utility tone-bg-warn { background: rgba(251,191,36,0.16); color: var(--warn); }
-@utility tone-bg-bad { background: rgba(248,113,113,0.16); color: var(--bad-light); }

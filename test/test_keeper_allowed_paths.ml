@@ -124,6 +124,30 @@ let test_playground_always_present () =
       true (List.mem ".masc/playground/abc/" effective)
   ) scopes
 
+let test_ensure_playground_bundle_creates_subdirs () =
+  let dir = Filename.concat (Filename.get_temp_dir_name ())
+      (Printf.sprintf "keeper_playground_bundle_%d" (Random.bits ())) in
+  Unix.mkdir dir 0o755;
+  Fun.protect ~finally:(fun () ->
+    let rec rm path =
+      if Sys.file_exists path then
+        if Sys.is_directory path then begin
+          Sys.readdir path |> Array.iter (fun f -> rm (Filename.concat path f));
+          Unix.rmdir path
+        end else Sys.remove path
+    in
+    rm dir
+  ) (fun () ->
+    Eio_main.run @@ fun env ->
+    Fs_compat.set_fs (Eio.Stdenv.fs env);
+    let config = Masc_mcp.Room.default_config dir in
+    let created = KAP.ensure_playground_bundle ~config ~name:"abc" in
+    check int "bundle size" 3 (List.length created);
+    List.iter (fun path ->
+      check bool ("exists: " ^ path) true (Sys.file_exists path);
+      check bool ("is_dir: " ^ path) true (Sys.is_directory path)
+    ) created)
+
 (* ── Runner ── *)
 
 let () =
@@ -156,5 +180,7 @@ let () =
             test_playground_path_sanitizes_name;
           test_case "playground always in allowed_paths" `Quick
             test_playground_always_present;
+          test_case "ensure playground bundle creates subdirs" `Quick
+            test_ensure_playground_bundle_creates_subdirs;
         ] );
     ]

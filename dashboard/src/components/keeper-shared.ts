@@ -2,6 +2,7 @@ import { html } from 'htm/preact'
 import { Markdown } from "./common/markdown"
 import { useState } from 'preact/hooks'
 import { keeperDirectChatAccess } from '../lib/keeper-chat-access'
+import { relativeTime } from '../lib/format-time'
 import type { Keeper, KeeperDiagnostic } from '../types'
 import {
   abortKeeperThreadMessage,
@@ -111,11 +112,11 @@ function continuityStateLabel(state?: KeeperDiagnostic['continuity_state']): str
   }
 }
 
+// Delegated to lib/format-time (SSOT) — returns Korean relative time
 function formatTime(timestamp?: string | null): string | null {
   if (!timestamp) return null
-  const value = new Date(timestamp)
-  if (Number.isNaN(value.getTime())) return null
-  return value.toLocaleTimeString()
+  const result = relativeTime(timestamp)
+  return result === '정보 없음' ? null : result
 }
 
 function formatEligible(seconds?: number | null): string | null {
@@ -289,7 +290,7 @@ export function KeeperConversationPanel({
 
   return html`
     <div class="flex flex-col gap-3">
-      <div class="overflow-hidden rounded-[24px] border border-[var(--card-border)] bg-[linear-gradient(180deg,rgba(9,15,28,0.96),rgba(5,10,20,0.94))] shadow-[0_24px_56px_rgba(0,0,0,0.28)]">
+      <div class="overflow-hidden rounded-[var(--radius-xl)] border border-[var(--card-border)] bg-[linear-gradient(180deg,rgba(9,15,28,0.96),rgba(5,10,20,0.94))] shadow-[0_24px_56px_rgba(0,0,0,0.28)]">
         <div class="flex flex-wrap items-start justify-between gap-3 border-b border-[rgba(148,163,184,0.12)] px-4 py-4">
           <div class="min-w-[220px] flex-1">
             <div class="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">직접 대화</div>

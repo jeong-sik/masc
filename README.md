@@ -213,6 +213,15 @@ For planner / implementer / supervisor separation:
 
 The dashboard is a read-heavy UI for repo coordination and keeper/runtime visibility. Canonical write paths remain MCP tools.
 
+For external channel adapters, treat the Channel Gate as the boundary owner:
+
+- write/traffic path: `/api/v1/gate/message`
+- read/descriptor path: `/api/v1/gate/connectors`
+- per-channel metrics path: `/api/v1/gate/status`
+
+The dashboard should learn connector type and status from the gate descriptor
+surface instead of hardcoding vendor-specific assumptions.
+
 - `scripts/run-local.sh` does not build the dashboard automatically. Append `--build-dashboard` only when needed.
 - `start-masc-mcp.sh` automatically builds the dashboard SPA if `pnpm` or `corepack pnpm` is available.
 - To run the dev server separately, use:

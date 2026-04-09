@@ -441,6 +441,237 @@ let test_operator_keeper_recover_accepts_agent_name_alias () =
       Alcotest.(check bool) "recover reports after diagnostic" true
         Yojson.Safe.Util.(delegated_result |> member "after" <> `Null))
 
+let test_keeper_list_scoped_to_current_base_path () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir_a = temp_dir () in
+  let base_dir_b = temp_dir () in
+  let keeper_name_a = "alpha-scope" in
+  let keeper_name_b = "beta-scope" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_keepalive.stop_keepalive keeper_name_a;
+      Keeper_keepalive.stop_keepalive keeper_name_b;
+      Keeper_registry.clear ();
+      Keeper_runtime.reset_test_state base_dir_a;
+      Keeper_runtime.reset_test_state base_dir_b;
+      cleanup_dir base_dir_a;
+      cleanup_dir base_dir_b)
+    (fun () ->
+      let config_a = Room.default_config base_dir_a in
+      let config_b = Room.default_config base_dir_b in
+      ignore (Room.init config_a ~agent_name:(Some "operator-a"));
+      ignore (Room.init config_b ~agent_name:(Some "operator-b"));
+      let keeper_ctx_a : _ Tool_keeper.context =
+        {
+          config = config_a;
+          agent_name = "operator-a";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = None;
+        }
+      in
+      let keeper_ctx_b : _ Tool_keeper.context =
+        {
+          config = config_b;
+          agent_name = "operator-b";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = None;
+        }
+      in
+      let ok, _ =
+        dispatch_keeper_exn keeper_ctx_a ~name:"masc_keeper_up"
+          ~args:
+            (`Assoc
+              [
+                ("name", `String keeper_name_a);
+                ("goal", `String "Scoped to base path A");
+                ("proactive_enabled", `Bool false);
+              ])
+      in
+      Alcotest.(check bool) "keeper up ok in base path A" true ok;
+      let ok, _ =
+        dispatch_keeper_exn keeper_ctx_b ~name:"masc_keeper_up"
+          ~args:
+            (`Assoc
+              [
+                ("name", `String keeper_name_b);
+                ("goal", `String "Scoped to base path B");
+                ("proactive_enabled", `Bool false);
+              ])
+      in
+      Alcotest.(check bool) "keeper up ok in base path B" true ok;
+      let ok, body =
+        dispatch_keeper_exn keeper_ctx_a ~name:"masc_keeper_list"
+          ~args:(`Assoc [ ("limit", `Int 10) ])
+      in
+      Alcotest.(check bool) "keeper list ok" true ok;
+      let list_json = parse_json_exn body in
+      let open Yojson.Safe.Util in
+      let keeper_names =
+        list_json |> member "keepers" |> to_list |> List.map to_string
+      in
+      Alcotest.(check (list string)) "list only includes current base path keeper"
+        [ keeper_name_a ] keeper_names;
+      let listed_items = list_json |> member "items" |> to_list in
+      Alcotest.(check int) "list item count scoped to current base path" 1
+        (List.length listed_items);
+      Alcotest.(check string) "listed item name stays local" keeper_name_a
+        (listed_items |> List.hd |> member "name" |> to_string))
+
+let test_keeper_status_does_not_cross_base_path () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir_a = temp_dir () in
+  let base_dir_b = temp_dir () in
+  let keeper_name = "remote-scope" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_keepalive.stop_keepalive keeper_name;
+      Keeper_registry.clear ();
+      Keeper_runtime.reset_test_state base_dir_a;
+      Keeper_runtime.reset_test_state base_dir_b;
+      cleanup_dir base_dir_a;
+      cleanup_dir base_dir_b)
+    (fun () ->
+      let config_a = Room.default_config base_dir_a in
+      let config_b = Room.default_config base_dir_b in
+      ignore (Room.init config_a ~agent_name:(Some "operator-a"));
+      ignore (Room.init config_b ~agent_name:(Some "operator-b"));
+      let keeper_ctx_a : _ Tool_keeper.context =
+        {
+          config = config_a;
+          agent_name = "operator-a";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = None;
+        }
+      in
+      let keeper_ctx_b : _ Tool_keeper.context =
+        {
+          config = config_b;
+          agent_name = "operator-b";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = None;
+        }
+      in
+      let ok, _ =
+        dispatch_keeper_exn keeper_ctx_b ~name:"masc_keeper_up"
+          ~args:
+            (`Assoc
+              [
+                ("name", `String keeper_name);
+                ("goal", `String "Only exists in base path B");
+                ("proactive_enabled", `Bool false);
+              ])
+      in
+      Alcotest.(check bool) "keeper up ok in base path B" true ok;
+      match
+        Masc_mcp.Tool_keeper.dispatch keeper_ctx_a ~name:"masc_keeper_status"
+          ~args:(`Assoc [ ("name", `String keeper_name); ("fast", `Bool true) ])
+      with
+      | Some (false, err) ->
+          Alcotest.(check bool) "status reports keeper missing outside current base path"
+            true (contains_substring err ("keeper not found: " ^ keeper_name))
+      | Some (true, body) ->
+          Alcotest.failf "keeper status unexpectedly crossed base path: %s" body
+      | None -> Alcotest.fail "missing keeper status dispatch")
+
+let test_keeper_down_only_pauses_current_base_path () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir_a = temp_dir () in
+  let base_dir_b = temp_dir () in
+  let keeper_name = "shared-scope" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_keepalive.stop_keepalive keeper_name;
+      Keeper_registry.clear ();
+      Keeper_runtime.reset_test_state base_dir_a;
+      Keeper_runtime.reset_test_state base_dir_b;
+      cleanup_dir base_dir_a;
+      cleanup_dir base_dir_b)
+    (fun () ->
+      let config_a = Room.default_config base_dir_a in
+      let config_b = Room.default_config base_dir_b in
+      ignore (Room.init config_a ~agent_name:(Some "operator-a"));
+      ignore (Room.init config_b ~agent_name:(Some "operator-b"));
+      let keeper_ctx_a : _ Tool_keeper.context =
+        {
+          config = config_a;
+          agent_name = "operator-a";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = None;
+        }
+      in
+      let keeper_ctx_b : _ Tool_keeper.context =
+        {
+          config = config_b;
+          agent_name = "operator-b";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = None;
+        }
+      in
+      let ok, _ =
+        dispatch_keeper_exn keeper_ctx_a ~name:"masc_keeper_up"
+          ~args:
+            (`Assoc
+              [
+                ("name", `String keeper_name);
+                ("goal", `String "Shared name in base path A");
+                ("proactive_enabled", `Bool false);
+              ])
+      in
+      Alcotest.(check bool) "keeper up ok in base path A" true ok;
+      let ok, _ =
+        dispatch_keeper_exn keeper_ctx_b ~name:"masc_keeper_up"
+          ~args:
+            (`Assoc
+              [
+                ("name", `String keeper_name);
+                ("goal", `String "Shared name in base path B");
+                ("proactive_enabled", `Bool false);
+              ])
+      in
+      Alcotest.(check bool) "keeper up ok in base path B" true ok;
+      let ok, body =
+        dispatch_keeper_exn keeper_ctx_a ~name:"masc_keeper_down"
+          ~args:(`Assoc [ ("name", `String keeper_name) ])
+      in
+      Alcotest.(check bool) "keeper down ok in base path A" true ok;
+      let down_json = parse_json_exn body in
+      Alcotest.(check string) "down returns scoped keeper name" keeper_name
+        Yojson.Safe.Util.(down_json |> member "name" |> to_string);
+      let meta_a =
+        match Masc_mcp.Keeper_types.read_meta config_a keeper_name with
+        | Ok (Some meta) -> meta
+        | Ok None -> Alcotest.fail "keeper meta missing in base path A"
+        | Error err -> Alcotest.fail ("meta read failed in base path A: " ^ err)
+      in
+      let meta_b =
+        match Masc_mcp.Keeper_types.read_meta config_b keeper_name with
+        | Ok (Some meta) -> meta
+        | Ok None -> Alcotest.fail "keeper meta missing in base path B"
+        | Error err -> Alcotest.fail ("meta read failed in base path B: " ^ err)
+      in
+      Alcotest.(check bool) "base path A keeper paused" true meta_a.paused;
+      Alcotest.(check bool) "base path B keeper unchanged" false meta_b.paused;
+      Alcotest.(check bool) "base path B keeper remains running" true
+        (Keeper_registry.is_running ~base_path:config_b.base_path keeper_name))
+
 let test_keeper_status_schema_makes_name_optional () =
   let schema =
     List.find
@@ -870,22 +1101,8 @@ let test_keeper_msg_auto_team_session_bridge () =
         Alcotest.(check string) "session goal" first_message session.goal;
         Alcotest.(check string) "session status" "running"
           (Team_session_types.status_to_string session.status);
-        let team_ctx : _ Tool_team_session.context =
-          {
-            config;
-            agent_name = "operator";
-            sw;
-            clock = Eio.Stdenv.clock env;
-            proc_mgr = None;
-            net = None;
-          }
-        in
-        let team_status_ok, _ =
-          dispatch_team_exn team_ctx ~name:"masc_team_session_status"
-            ~args:(`Assoc [ ("session_id", `String session_id) ])
-        in
-        Alcotest.(check bool) "caller can access suggested team session tools" true
-          team_status_ok;
+        (* Team session tools removed — skip team_session_status dispatch test *)
+        ignore (config, sw, env, session_id);
         Alcotest.(check bool) "spawn_error surfaced" true
           (first_json |> member "spawn_error" <> `Null);
         let status_ok, status_body =

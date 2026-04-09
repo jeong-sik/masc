@@ -49,93 +49,6 @@ let saturate_repo_synthesis_platoon config ~actor =
         | Error message -> fail message
       done
 
-let test_repo_synthesis_swarm_start_creates_operation_session_and_run () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let clock = Eio.Stdenv.clock env in
-  Eio.Switch.run @@ fun sw ->
-  with_temp_base @@ fun base_path ->
-  let config = Lib.Room.default_config base_path in
-  ignore (Lib.Room.init config ~agent_name:(Some "owner"));
-  ignore (Lib.Room.join config ~agent_name:"owner" ~capabilities:[ "ocaml"; "docs" ] ());
-  let start_team_session ~goal ~operation_id ~loop_id:_ ~target_file:_ ~program_note:_ =
-    Lib.Team_session_engine_eio.start_session
-      ~sw
-      ~env
-      ~config
-      ~created_by:"owner"
-      ~goal
-      ~duration_seconds:300
-      ~execution_scope:Team_session_types.Limited_code_change
-      ~checkpoint_interval_sec:30
-      ~min_agents:1
-      ~scale_profile:Team_session_types.Scale_standard
-      ~control_profile:Team_session_types.Control_hierarchical_quality_v1
-      ~orchestration_mode:Team_session_types.Assist
-      ~communication_mode:Team_session_types.Comm_broadcast
-      ~model_cascade:[]
-      ~fallback_policy:Team_session_types.Fallback_cascade_then_task
-      ~instruction_profile:Team_session_types.Profile_strict
-      ~alert_channel:Team_session_types.Alert_broadcast
-      ~auto_resume:true
-      ~report_formats:[ Team_session_types.Markdown; Team_session_types.Json ]
-      ~agent_names:[]
-      ~operation_id
-  in
-  let ctx : Lib.Tool_autoresearch.context =
-    {
-      base_path;
-      agent_name = Some "owner";
-      start_operation = None;
-      start_team_session = Some start_team_session;
-      config = Some config;
-      sw = Some sw;
-      clock = Some clock;
-    }
-  in
-  let args =
-    `Assoc
-      [
-        ("goal", `String "Improve repo answer quality");
-        ("question", `String "What is the canonical benchmark path?");
-        ("repo_root", `String base_path);
-        ("artifact_scope", `List [ `String "docs/COMMAND-PLANE-RUNBOOK.md" ]);
-        ("max_workers", `Int 4);
-      ]
-  in
-  match
-    Lib.Tool_autoresearch.dispatch ctx ~name:"masc_repo_synthesis_swarm_start"
-      ~args
-  with
-  | None -> fail "dispatch returned None"
-  | Some (false, msg) -> fail msg
-  | Some (true, payload) ->
-      let json = Yojson.Safe.from_string payload in
-      let run_id =
-        Yojson.Safe.Util.(json |> member "benchmark_run_id" |> to_string)
-      in
-      let session_id =
-        Yojson.Safe.Util.(json |> member "session_id" |> to_string)
-      in
-      let operation_id =
-        Yojson.Safe.Util.(json |> member "operation_id" |> to_string)
-      in
-      check bool "run saved" true
-        (Sys.file_exists
-           (Lib.Repo_synthesis_benchmark.run_json_path ~base_path run_id));
-      check bool "session saved" true
-        (Sys.file_exists (Lib.Team_session_store.session_json_path config session_id));
-      check bool "operation present" true (String.trim operation_id <> "");
-      let session_json =
-        match Lib.Team_session_engine_eio.status_session ~config ~session_id with
-        | Ok json -> json
-        | Error msg -> fail msg
-      in
-      check int "planned workers registered" 4
-        Yojson.Safe.Util.(
-          session_json |> member "session" |> member "planned_workers" |> to_list
-          |> List.length)
-
 let test_repo_synthesis_swarm_start_avoids_saturated_platoon_cap () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -212,8 +125,6 @@ let () =
     [
       ("tool_repo_synthesis",
        [
-         test_case "swarm_start creates operation session and run" `Quick
-           test_repo_synthesis_swarm_start_creates_operation_session_and_run;
          test_case "swarm_start avoids saturated platoon cap" `Quick
            test_repo_synthesis_swarm_start_avoids_saturated_platoon_cap;
        ]);

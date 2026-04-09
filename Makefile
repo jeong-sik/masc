@@ -1,7 +1,7 @@
 # masc-mcp Makefile
 # Enterprise-ready development commands
 
-.PHONY: build test test-unit test-contract test-contract-live test-transport test-webrtc-live-env test-all clean coverage coverage-summary coverage-html coverage-percent doc install-deps pin-external-deps doctor-oas-pin dev-setup fmt fmt-check health ci dashboard dev-dashboard build-all viewer-build viewer-serve harness-game-view-contract harness-streamable-http-contract harness-trpg-session-contract harness-trpg-grimland-smoke viewer-local-e2e-check check-memory-leak
+.PHONY: build test test-unit test-contract test-contract-live test-transport test-webrtc-live-env test-all clean coverage coverage-summary coverage-html coverage-percent doc install-deps pin-external-deps sync-oas-pin-docs doctor-oas-pin dev-setup fmt fmt-check health ci dashboard dev-dashboard build-all viewer-build viewer-serve harness-game-view-contract harness-streamable-http-contract harness-trpg-session-contract harness-trpg-grimland-smoke viewer-local-e2e-check check-memory-leak
 
 # Default target — OCaml + dashboard
 all: build-all
@@ -85,6 +85,9 @@ install-deps:
 # Align first-party opam pins (agent_sdk, grpc-direct, etc.) to repo SSOT.
 pin-external-deps:
 	bash scripts/opam-pin-external-deps.sh
+
+sync-oas-pin-docs:
+	bash scripts/sync-oas-pin-docs.sh
 
 # Fast local-only doctor for OAS/agent_sdk pin drift in the current switch.
 doctor-oas-pin:

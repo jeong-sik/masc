@@ -401,9 +401,7 @@ export interface DashboardProofWorkerRunEvidence {
   stop_reason?: string | null
   failure_reason?: string | null
   error?: string | null
-  proof_status?: string | null
   proof_evidence_status?: string | null
-  evidence_session_id?: string | null
   evidence_refs?: string[]
   ts_iso?: string | null
 }

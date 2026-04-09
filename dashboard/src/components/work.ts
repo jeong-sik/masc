@@ -1,5 +1,5 @@
 // MASC Dashboard — Work Tab
-// Absorbs: memory(board) + governance + proof + planning + goals into pill-switched sections.
+// Absorbs: memory(board) + proof + planning + goals into pill-switched sections.
 
 import { html } from 'htm/preact'
 import { route } from '../router'

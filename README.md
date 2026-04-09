@@ -165,8 +165,7 @@ The canonical runbooks are [docs/SWARM-DELIVERY-RUNBOOK.md](docs/SWARM-DELIVERY-
 Common entrypoints:
 
 - Monitoring: `http://127.0.0.1:<PORT>/dashboard#monitoring/sessions`
-- Intervention: `http://127.0.0.1:<PORT>/dashboard#command/intervene`
-- Governance: `http://127.0.0.1:<PORT>/dashboard#command/governance`
+- Ops Queue: `http://127.0.0.1:<PORT>/dashboard#command/intervene`
 
 The dashboard is a read / operate UI. Canonical write and control paths remain MCP tools.
 

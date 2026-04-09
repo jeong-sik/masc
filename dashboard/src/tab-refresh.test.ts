@@ -61,7 +61,7 @@ describe('refreshPlanForRoute', () => {
     expect(refreshPlanForRoute({
       tab: 'command',
       params: { section: 'governance' },
-    })).toEqual(['namespaceTruth', 'governance'])
+    })).toEqual(['namespaceTruth', 'operatorSnapshot', 'operatorRoomDigest'])
   })
 
   it('refreshes the new workspace and lab sections only where store-backed data is needed', () => {

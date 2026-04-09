@@ -27,11 +27,11 @@ const FOCUS_SURFACES: FocusSurface[] = [
     params: { section: 'agents' },
   },
   {
-    title: 'Governance',
-    description: '자동 판단, 승인 대기, 실행 경로를 즉시 확인하고 개입할 수 있습니다.',
-    action: '거버넌스로 이동',
+    title: 'Ops Queue',
+    description: '자동 판단, review queue, 승인 대기, 실행 경로를 한 화면에서 확인합니다.',
+    action: '운영 큐로 이동',
     tab: 'command',
-    params: { section: 'governance' },
+    params: { section: 'intervene' },
   },
   {
     title: 'Board & Evidence',

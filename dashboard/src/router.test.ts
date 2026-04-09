@@ -21,4 +21,10 @@ describe('navigate', () => {
     expect(route.value.params.section).toBe('intervene')
     expect(route.value.params.surface).toBeUndefined()
   })
+
+  it('normalizes legacy governance params into the ops queue', () => {
+    navigate('command', { section: 'governance' })
+    expect(route.value.tab).toBe('command')
+    expect(route.value.params.section).toBe('intervene')
+  })
 })

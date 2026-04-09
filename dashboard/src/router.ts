@@ -64,11 +64,7 @@ function parseSegments(
   if (segments[0] === 'command' && segments[1]) {
     const nextParams = { ...params }
     const second = decodeSafe(segments[1])
-    if (second === 'intervene' || second === 'governance') {
-      nextParams.section = second
-    } else {
-      nextParams.section = 'intervene'
-    }
+    nextParams.section = second === 'intervene' ? 'intervene' : 'intervene'
     return {
       tab: 'command',
       params: normalizeRouteParams('command', nextParams),

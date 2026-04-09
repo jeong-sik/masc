@@ -6,7 +6,6 @@ export type SurfaceSectionId =
   | 'agents'
   | 'activity'
   | 'board'
-  | 'governance'
   | 'evidence'
   | 'planning'
   | 'goals'
@@ -67,9 +66,9 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
   },
   {
     id: 'command',
-    label: '운영 개입',
+    label: '운영 큐',
     icon: '🎛️',
-    description: '실시간 개입과 운영 제어',
+    description: 'review queue 기반 판단, 승인, 최소 개입',
     defaultTab: 'command',
     defaultParams: { section: 'intervene' },
     tabs: ['command'],
@@ -140,15 +139,9 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
   command: [
     {
       id: 'intervene',
-      label: '실시간 개입',
-      description: '프로젝트 일시정지, 세션 중단, 키퍼 재시작 등 운영 개입.',
+      label: '운영 큐',
+      description: 'review queue, 추천 액션, 승인 대기, 최소 개입을 한 화면에서 처리합니다.',
       params: { section: 'intervene' },
-    },
-    {
-      id: 'governance',
-      label: '거버넌스',
-      description: '에이전트 자율 결정의 검토/승인 기록. 위험 행동 방지 레이어.',
-      params: { section: 'governance' },
     },
   ],
   workspace: [

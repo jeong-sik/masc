@@ -146,12 +146,12 @@ let test_masc_mcp_tools_omits_relay_status () =
   check bool "omits relay_status" false
     (List.mem "mcp__masc__masc_relay_status" Spawn.masc_mcp_tools)
 
-let test_masc_mcp_tools_has_team_session_step () =
-  check bool "has team_session_step" true
+let test_masc_mcp_tools_omits_team_session_step () =
+  check bool "omits team_session_step" false
     (List.mem "mcp__masc__masc_team_session_step" Spawn.masc_mcp_tools)
 
-let test_masc_mcp_tools_has_team_session_finalize () =
-  check bool "has team_session_finalize" true
+let test_masc_mcp_tools_omits_team_session_finalize () =
+  check bool "omits team_session_finalize" false
     (List.mem "mcp__masc__masc_team_session_finalize" Spawn.masc_mcp_tools)
 
 let test_masc_mcp_tools_omits_a2a_delegate () =
@@ -738,8 +738,8 @@ let () =
       test_case "has worktree" `Quick test_masc_mcp_tools_has_worktree;
       test_case "has handover" `Quick test_masc_mcp_tools_has_handover;
       test_case "omits relay_status" `Quick test_masc_mcp_tools_omits_relay_status;
-      test_case "has team_session_step" `Quick test_masc_mcp_tools_has_team_session_step;
-      test_case "has team_session_finalize" `Quick test_masc_mcp_tools_has_team_session_finalize;
+      test_case "omits team_session_step" `Quick test_masc_mcp_tools_omits_team_session_step;
+      test_case "omits team_session_finalize" `Quick test_masc_mcp_tools_omits_team_session_finalize;
       test_case "omits a2a_delegate" `Quick test_masc_mcp_tools_omits_a2a_delegate;
       test_case "has run_deliverable" `Quick test_masc_mcp_tools_has_run_deliverable;
       test_case "omits tool_stats" `Quick test_masc_mcp_tools_has_tool_stats;

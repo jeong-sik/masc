@@ -11,21 +11,34 @@ let dedupe_schemas (schemas : Types.tool_schema list) =
         true))
     schemas
 
+let retired_front_door_schema_names =
+  [
+    "masc_collaboration_graph";
+    "masc_autoresearch_swarm_start";
+    "masc_repo_synthesis_swarm_start";
+  ]
+
+let filter_retired_front_door_schemas (schemas : Types.tool_schema list) =
+  List.filter
+    (fun (schema : Types.tool_schema) ->
+      not (List.mem schema.name retired_front_door_schema_names))
+    schemas
+
 let raw_all_tool_schemas : Types.tool_schema list =
-  dedupe_schemas
-    (Tools.raw_schemas
-    @ Tool_schemas_control.schemas
-    @ Tool_schemas_a2a.schemas
-    @ Tool_schemas_misc.schemas
-    @ Tool_board.tools
-    @ Tool_keeper.schemas
-    @ Tool_local_runtime.schemas
-    @ Tool_autoresearch.schemas
-    @ Tool_compact.schemas
-    @ Tool_repair_loop.schemas
-    @ Tool_agent_timeline.schemas
-    @ Tool_shard.schemas
-    )
+  filter_retired_front_door_schemas
+    (dedupe_schemas
+       (Tools.raw_schemas
+       @ Tool_schemas_control.schemas
+       @ Tool_schemas_a2a.schemas
+       @ Tool_schemas_misc.schemas
+       @ Tool_board.tools
+       @ Tool_keeper.schemas
+       @ Tool_local_runtime.schemas
+       @ Tool_autoresearch.schemas
+       @ Tool_compact.schemas
+       @ Tool_repair_loop.schemas
+       @ Tool_agent_timeline.schemas
+       @ Tool_shard.schemas))
 
 (** Validate tool schemas at module initialization time.
     Logs warnings for: duplicate names, empty names/descriptions,

@@ -55,15 +55,7 @@
   display: inline-block;
 }
 
-@media (max-width: 960px) {
-  .monitor-row-header {
-    grid-template-columns: auto minmax(0, 1fr);
-  }
-}
-
 /* board-post content-visibility: folded into @utility board-post below */
-
-/* control-input/textarea :focus: folded into @utility blocks above */
 
 /* ── Mission Status Dot ── */
 @utility mission-status-dot {
@@ -88,31 +80,6 @@
   opacity: 0.85;
 }
 
-/* ── Tab pill bar (GCP-style segmented control) ── */
-@utility tab-pill-bar {
-  display: flex;
-  gap: 4px;
-  background: var(--white-3);
-  padding: 4px;
-  border-radius: 10px;
-}
-@utility tab-pill-btn {
-  padding: 6px 14px;
-  border-radius: 8px;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--text-muted);
-  cursor: pointer;
-  transition-property: background-color, color;
-  transition-duration: 0.15s;
-  transition-timing-function: ease;
-  border: none;
-  background: transparent;
-  white-space: nowrap;
-  &:hover { color: var(--text-body); background: var(--white-6); }
-  &.active { color: var(--accent); background: var(--accent-soft); cursor: default; }
-}
-
 /* ── Empty state (standardized) ── */
 @utility empty-state {
   display: flex;
@@ -121,21 +88,6 @@
   justify-content: center;
   padding: 48px 16px;
   text-align: center;
-}
-@utility empty-state-icon {
-  font-size: 1.875rem;
-  margin-bottom: 12px;
-  opacity: 0.5;
-}
-@utility empty-state-title {
-  font-size: var(--fs-sm);
-  font-weight: 500;
-  color: var(--text-body);
-  margin-bottom: 4px;
-}
-@utility empty-state-desc {
-  font-size: var(--fs-xs);
-  color: var(--text-muted);
 }
 
 /* ── Loading state (standardized) ── */
@@ -146,14 +98,6 @@
   padding: 48px 16px;
   font-size: var(--fs-sm);
   color: var(--text-muted);
-}
-/* @keyframes loadingPulse → keyframes.css (canonical) */
-@utility loading-pulse {
-  animation: loadingPulse 1.5s ease-in-out infinite;
-}
-
-@utility tab-collapsible__summary {
-  &:hover { color: var(--text-strong); }
 }
 
 /* ── Responsive (layout) ── */
@@ -169,41 +113,11 @@
   }
 }
 
-/* ── Mitosis Ring ── */
-@utility mitosis-ring-bg { fill: none; stroke: var(--white-10); }
-@utility mitosis-ring-fg { fill: none; stroke-linecap: round; transition: stroke-dashoffset 0.5s ease-out, stroke 0.3s ease; }
-@utility mitosis-safe { stroke: var(--ok); color: var(--ok); }
-@utility mitosis-warn { stroke: var(--warn); color: var(--warn); }
-@utility mitosis-critical { stroke: var(--bad); color: var(--bad); animation: pulse-ring 2s infinite; }
 /* ── Agent card hover ── */
 .agent-card:hover {
   box-shadow: 0 2px 8px rgba(0,0,0,0.2);
   transform: translateY(-2px);
   border-color: var(--accent);
-}
-
-/* ── Kanban (pseudo-elements require raw CSS) ── */
-.kanban-card {
-  transition-property: transform, box-shadow, border-color;
-  transition-duration: 0.3s;
-  transition-timing-function: cubic-bezier(0.25, 0.8, 0.25, 1);
-  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
-}
-.kanban-card::before {
-  content: "";
-  position: absolute;
-  top: 0; left: 0;
-  width: 4px; height: 100%;
-  background: var(--text-muted);
-}
-.kanban-card.p1::before { background: var(--bad); box-shadow: 0 0 8px var(--bad); }
-.kanban-card.p2::before { background: var(--warn); box-shadow: 0 0 8px var(--warn); }
-.kanban-card.p3::before { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
-
-.kanban-card:hover {
-  transform: translateY(-4px) scale(1.01);
-  border-color: var(--accent);
-  box-shadow: 0 4px 12px rgba(0, 240, 255, 0.1);
 }
 
 .logs-module-input::placeholder {
@@ -215,11 +129,6 @@
 @utility logs-row { &:hover { background: var(--white-3); } }
 
 /* ── Board (Posts) ─────────────────────────────────────────── */
-
-@utility board-sort-btn {
-  &:hover { background: var(--white-8); color: #ccc; }
-  &.active { background: var(--ok-soft); color: var(--ok); border-color: var(--ok-30); }
-}
 
 @utility board-post {
   border-color: var(--card-border);
@@ -277,25 +186,6 @@
 }
 
 /* ── Goals ────────────────────────────────────── */
-
-@utility goal-filter-btn {
-  transition-property: background-color, color, border-color;
-  transition-duration: 0.15s;
-  &:hover { background: var(--white-10); color: var(--text-near-white); }
-  &.active { background: rgba(99,102,241,0.2); border-color: rgba(99,102,241,0.4); color: #818cf8; }
-}
-
-/* -- Priority badge (inline P1-P4) -- */
-@utility priority-badge--p1 { background: rgba(248, 113, 113, 0.2); color: var(--bad-light); border: 1px solid rgba(248, 113, 113, 0.35); }
-@utility priority-badge--p2 { background: var(--warn-20); color: var(--warn); border: 1px solid rgba(251, 191, 36, 0.35); }
-@utility priority-badge--p3 { background: var(--blue-400-15); color: var(--accent); border: 1px solid rgba(96, 165, 250, 0.25); }
-@utility priority-badge--p4 { background: var(--white-5); color: var(--text-dim); border: 1px solid var(--white-8); }
-
-/* -- Task description preview (truncated, expandable) -- */
-@utility task-description-preview {
-  transition: color 0.15s;
-  &:hover { color: var(--text-body); }
-}
 
 /* ── Mission ─────────────────────────────────── */
 

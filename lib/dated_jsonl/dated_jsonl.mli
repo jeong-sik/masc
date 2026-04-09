@@ -34,9 +34,14 @@ val prune : t -> days:int -> int
 (** [prune t ~days] deletes day-files older than [days] days ago.
     Returns the number of files deleted.  Removes empty month directories. *)
 
+(* OCaml 5.3 emits warning 32 on this exported signature item under
+   [warn-error=+a] even though the implementation and internal call sites are
+   present. Keep the suppression scoped to this declaration only. *)
+[@@@warning "-32"]
 val count_entries : t -> int
-(** [count_entries t] returns the total number of non-empty lines across all
-    day-files.  Scans files by counting newlines without JSON parsing. *)
+[@@@warning "+32"]
+(* [count_entries t] returns the total number of non-empty lines across all
+   day-files. Scans files by counting newlines without JSON parsing. *)
 
 val load_tail_lines : string -> max_lines:int -> string list
 (** [load_tail_lines file ~max_lines] efficiently reads the last [max_lines]

@@ -392,7 +392,19 @@ let observation_summary = function
     - Large-context cloud (>= 500K): quality-preserving with summarization
     - Normal: standard DropLowImportance *)
 
-(** Context ratio thresholds for dynamic strategy selection.
+(** {1 Dynamic Strategy Selection}
+
+    @boundary-contract
+    - MASC owns: world-aware strategy resolution (which strategies to apply
+      based on agent count, task focus, model class, context ratio).
+      All thresholds are env-configurable, not hardcoded.
+    - OAS owns: strategy execution (PruneToolOutputs, MergeContiguous are
+      OAS built-ins), context_reducer pipeline, compaction algorithm.
+    - Neither may: MASC must not execute compaction directly (only select
+      strategies); OAS must not select strategies based on world state
+      (it has no world awareness).
+
+    Context ratio thresholds for dynamic strategy selection.
     Distinct from Dashboard.ctx_* (display) — these drive compaction behavior. *)
 let dynamic_multi_agent_ctx = Env_config.ContextCompact.dynamic_multi_agent_ratio
 let dynamic_focused_ctx = Env_config.ContextCompact.dynamic_focused_ratio

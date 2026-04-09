@@ -37,6 +37,17 @@ let string_contains_substring_ci ~(needle : string) (haystack : string) : bool =
     ~needle:(String.lowercase_ascii needle)
     (String.lowercase_ascii haystack)
 
+(** {1 Retry & Side-Effect Safety}
+
+    @boundary-contract
+    - MASC owns: side-effect detection (blocking retry after mutating tools),
+      cross-provider retry (2 attempts after all OAS per-provider retries
+      exhaust), error reclassification for ambiguous outcomes.
+    - OAS owns: per-provider retry (3 attempts), HTTP backoff, timeout
+      handling, provider failover within a single cascade call.
+    - Neither may: retry silently after a mutating tool succeeded (integrity
+      over availability); duplicate OAS per-provider retry counts. *)
+
 (** Detect transient network errors that warrant retry with short backoff.
     Uses structured [Oas.Error.sdk_error] pattern matching instead of
     substring matching on stringified error messages. *)
@@ -109,7 +120,15 @@ type overflow_retry_plan = {
     Extracts the token limit directly from the structured [ContextOverflow]
     error instead of re-parsing stringified error messages.
     No local token-budget math — OAS owns context budgeting.
-    MASC only decides whether to compact and retry. *)
+    MASC only decides whether to compact and retry.
+
+    @boundary-contract
+    - MASC owns: "compact & retry?" decision (at most once per turn),
+      extracting the limit from OAS structured errors, generation tracking.
+    - OAS owns: context overflow detection, ContextOverflow/TokenBudgetExceeded
+      error emission, checkpoint compaction algorithm, token budget enforcement.
+    - Neither may: MASC must not invent token limits or run its own budget
+      math; OAS must not auto-retry on overflow (MASC needs to decide). *)
 let recover_context_overflow_retry
     ~(meta : keeper_meta)
     ~(base_dir : string)

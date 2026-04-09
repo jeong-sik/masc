@@ -362,7 +362,17 @@ let enrich_idle_detail (detail : string) (messages : Oas.Types.message list) : s
 
     [max_turns] and [max_cost_usd] are adjusted to account for
     cumulative values in the checkpoint — the keeper's per-call budget
-    is added on top of the checkpoint's accumulated state. *)
+    is added on top of the checkpoint's accumulated state.
+
+    @boundary-contract
+    - MASC owns: per-turn config selection (model, temperature, tools,
+      system_prompt), per-turn budget allocation, checkpoint field patching
+      to align MASC intent with OAS resume semantics.
+    - OAS owns: cumulative token/cost accounting, turn_count tracking,
+      Agent.resume state restoration, loop guard enforcement.
+    - Neither may: MASC must not set [max_total_tokens] (OAS SSOT for
+      cumulative budgets); OAS must not override MASC model/temperature
+      selection after resume. *)
 let resume_from_checkpoint
     ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
     ~(config : config)

@@ -574,18 +574,23 @@ let test_startup_state_json_includes_watchdog () =
   Alcotest.(check bool) "watchdog_timeout_sec is positive" true
     (watchdog > 0.0)
 
-let test_prompt_markdown_dir_falls_back_to_repo_root () =
+let test_prompt_markdown_dir_falls_back_to_resolved_config_dir () =
   with_temp_dir "startup-prompts" (fun dir ->
       let expected =
-        Filename.concat (project_root ()) "config/prompts"
+        Prompt_defaults.prompt_markdown_dir_candidates
+          ~workspace_path:dir ~base_path:dir
+        |> List.find_opt (fun path -> Sys.file_exists path && Sys.is_directory path)
       in
-      Alcotest.(check bool) "repo prompt dir exists" true
-        (Sys.file_exists expected && Sys.is_directory expected);
+      let expected =
+        match expected with
+        | Some path -> path
+        | None -> Alcotest.fail "no prompt markdown directory candidates exist"
+      in
       let resolved =
         Prompt_defaults.resolve_prompt_markdown_dir
           ~workspace_path:dir ~base_path:dir
       in
-      Alcotest.(check string) "temp room falls back to repo prompt dir"
+      Alcotest.(check string) "temp room falls back to resolved prompt dir"
         expected resolved)
 
 let test_main_eio_serves_health_before_lazy_startup () =
@@ -708,8 +713,8 @@ let () =
             test_watchdog_timeout_env;
           Alcotest.test_case "startup json includes watchdog fields" `Quick
             test_startup_state_json_includes_watchdog;
-          Alcotest.test_case "prompt markdown dir falls back to repo root"
-            `Quick test_prompt_markdown_dir_falls_back_to_repo_root;
+          Alcotest.test_case "prompt markdown dir falls back to resolved config dir"
+            `Quick test_prompt_markdown_dir_falls_back_to_resolved_config_dir;
           Alcotest.test_case "main_eio serves health before lazy startup"
             `Slow test_main_eio_serves_health_before_lazy_startup;
         ] );

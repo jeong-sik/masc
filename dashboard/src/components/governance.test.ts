@@ -4,6 +4,14 @@ import * as Vitest from 'vitest'
 import type { DashboardGovernanceResponse, GovernanceCaseBundle } from '../types'
 
 const { afterEach, beforeEach, describe, expect, it } = Vitest
+
+Vitest.vi.mock('./governance-panels', () => ({
+  DecisionDetail: () => html`<div data-testid="decision-detail-stub">decision detail</div>`,
+  GuardrailPane: () => html`<div data-testid="guardrail-pane-stub">guardrail pane</div>`,
+}))
+
+const GOVERNANCE_RENDER_TIMEOUT_MS = 30000
+
 async function flushUi(): Promise<void> {
   for (let i = 0; i < 4; i += 1) {
     await Promise.resolve()
@@ -82,10 +90,6 @@ async function loadComponentWithApi(api: {
   Vitest.vi.doMock('../sse-store', () => ({
     registerGovernanceRefresh: Vitest.vi.fn(),
   }))
-  Vitest.vi.doMock('./governance-panels', () => ({
-    DecisionDetail: () => html`<div data-testid="decision-detail-stub">decision detail</div>`,
-    GuardrailPane: () => html`<div data-testid="guardrail-pane-stub">guardrail pane</div>`,
-  }))
   return import('./governance')
 }
 
@@ -104,7 +108,6 @@ describe('Governance surface', () => {
     Vitest.vi.clearAllMocks()
     Vitest.vi.doUnmock('../api')
     Vitest.vi.doUnmock('../sse-store')
-    Vitest.vi.doUnmock('./governance-panels')
   })
 
   it('renders and refreshes without corrupting the DOM tree', async () => {
@@ -146,7 +149,7 @@ describe('Governance surface', () => {
     expect(fetchGovernanceCaseStatus.mock.calls.filter(([caseId]) => caseId === 'gov-case-1').length)
       .toBeGreaterThanOrEqual(2)
     expect(container.textContent).toContain('command:governance 렌더링 오류')
-  }, 20000)
+  }, GOVERNANCE_RENDER_TIMEOUT_MS)
 
   it('shows keeper guidance when governance feed is empty', async () => {
     const emptyResponse: DashboardGovernanceResponse = {

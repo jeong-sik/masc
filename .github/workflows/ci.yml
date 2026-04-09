@@ -400,5 +400,10 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
+      - name: Download tla2tools.jar
+        run: |
+          curl -fsSL -o specs/keeper-state-machine/tla2tools.jar \
+            https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar
+
       - name: Run TLA+ model checking
         run: make -C specs check-all

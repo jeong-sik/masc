@@ -290,7 +290,7 @@ export function KeeperConversationPanel({
 
   return html`
     <div class="flex flex-col gap-3">
-      <div class="overflow-hidden rounded-[24px] border border-[var(--card-border)] bg-[linear-gradient(180deg,rgba(9,15,28,0.96),rgba(5,10,20,0.94))] shadow-[0_24px_56px_rgba(0,0,0,0.28)]">
+      <div class="overflow-hidden rounded-[var(--radius-xl)] border border-[var(--card-border)] bg-[linear-gradient(180deg,rgba(9,15,28,0.96),rgba(5,10,20,0.94))] shadow-[0_24px_56px_rgba(0,0,0,0.28)]">
         <div class="flex flex-wrap items-start justify-between gap-3 border-b border-[rgba(148,163,184,0.12)] px-4 py-4">
           <div class="min-w-[220px] flex-1">
             <div class="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">직접 대화</div>

@@ -59,62 +59,30 @@
   --white-50: rgba(255, 255, 255, 0.50);
   --white-80: rgba(255, 255, 255, 0.80);
 
-  /* Legacy Compatibility Variables */
+  /* Legacy Compatibility Variables — only aliases with active references kept.
+     Dead aliases pruned: accent-8/12/14/18, ok-8/12/18/22/24/25/30/35/40/48,
+     bad-8/12/15/30, warn-12/15/28/30, white-3h/25/30/35/40/45/55/56/60/68/72/78/82,
+     border-slate-18. */
   --bg-0: var(--bg-root);
   --bg-1: var(--bg-panel-hover);
   --card: var(--bg-panel);
   --card-border: var(--border-base);
-  --accent-8: var(--accent-10);
-  --accent-12: var(--accent-10);
-  --accent-14: var(--accent-10);
-  --accent-18: var(--accent-20);
-  --ok-8: var(--ok-10);
-  --ok-12: var(--ok-10);
-  --ok-18: var(--ok-20);
-  --ok-22: var(--ok-20);
-  --ok-24: var(--ok-20);
-  --ok-25: var(--ok-20);
-  --ok-30: rgba(74, 222, 128, 0.30);
-  --ok-35: rgba(74, 222, 128, 0.30);
-  --ok-40: rgba(74, 222, 128, 0.40);
-  --ok-48: rgba(74, 222, 128, 0.50);
-  --bad-8: var(--bad-10);
-  --bad-12: var(--bad-10);
-  --bad-15: var(--bad-10);
-  --bad-30: rgba(248, 113, 113, 0.3);
-  --warn-12: var(--warn-10);
-  --warn-15: var(--warn-10);
-  --warn-28: var(--warn-30);
-  --warn-30: rgba(251, 191, 36, 0.3);
   --white-2: var(--white-3);
-  --white-3h: var(--white-3);
   --white-4: var(--white-5);
   --white-6: var(--white-5);
   --white-8: var(--white-10);
   --white-12: var(--white-10);
-  --white-25: var(--white-20);
-  --white-30: rgba(255, 255, 255, 0.30);
-  --white-35: rgba(255, 255, 255, 0.35);
-  --white-40: rgba(255, 255, 255, 0.40);
-  --white-45: rgba(255, 255, 255, 0.45);
-  --white-55: var(--white-50);
-  --white-56: var(--white-50);
-  --white-60: rgba(255, 255, 255, 0.60);
-  --white-68: rgba(255, 255, 255, 0.68);
   --white-70: rgba(255, 255, 255, 0.70);
-  --white-72: rgba(255, 255, 255, 0.72);
-  --white-78: var(--white-80);
-  --white-82: var(--white-80);
   --white-90: rgba(255, 255, 255, 0.9);
   --border-slate-8: var(--border-subtle);
   --border-slate-12: var(--border-subtle);
   --border-slate-16: var(--border-base);
-  --border-slate-18: var(--border-base);
   --border-slate-22: var(--border-base);
   --border-slate-30: var(--border-strong);
   --border-slate-35: var(--border-strong);
 
   /* Layout & Sizing */
+  --radius-xl: 24px;
   --radius-lg: 12px;
   --radius-md: 8px;
   --radius-sm: 6px;

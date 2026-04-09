@@ -44,15 +44,4 @@
   }
 }
 
-@media (max-width: 1200px) {
-  .ops-workbench {
-    grid-template-columns: 1fr;
-  }
-}
-
-@media (max-width: 880px) {
-  .ops-actor-input {
-    min-width: 0;
-    flex: 1;
-  }
-}
+/* Dead .ops-workbench and .ops-actor-input media queries removed — classes not in use. */

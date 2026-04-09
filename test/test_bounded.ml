@@ -2,6 +2,7 @@
 
 open Alcotest
 module Bounded = Masc_mcp.Bounded
+module Comm = Masc_mcp.Tool_inline_dispatch_comm
 
 (* ============================================ *)
 (* Constraint checking tests                    *)
@@ -203,10 +204,76 @@ let test_bounded_run_spawn_exception () =
   let spawn_fn _ _ = failwith "Simulated spawn error" in
   let result = Bounded.bounded_run ~constraints ~goal ~agents:["test"] ~prompt:"test" ~spawn_fn in
   check bool "should be error" true (result.status = `Error);
+  check int "turns remain zero on pre-turn exception" 0 result.stats.turns;
+  check bool "reason includes execution failure wording" true
+    (try
+       let _ =
+         Str.search_forward
+           (Str.regexp_string "execution failed before completing turn 1")
+           result.reason 0
+       in
+       true
+     with Not_found -> false);
+  check bool "reason includes agent" true
+    (try
+       let _ =
+         Str.search_forward (Str.regexp_string "Agent 'test'") result.reason 0
+       in
+       true
+     with Not_found -> false);
   check bool "reason mentions error" true
     (String.lowercase_ascii result.reason |> fun s ->
      try let _ = Str.search_forward (Str.regexp "error\\|fail") s 0 in true
      with Not_found -> false)
+
+let test_bounded_run_failure_reason_names_agent_and_turn () =
+  let constraints = Bounded.default_constraints in
+  let goal = { Bounded.path = "$.x"; condition = Bounded.Eq (`Bool true) } in
+  let spawn_fn _ _ =
+    mock_spawn_result ~success:false ~output:"spawn command is empty for agent 'bogus'" ()
+  in
+  let result =
+    Bounded.bounded_run
+      ~constraints ~goal ~agents:["bogus"] ~prompt:"test" ~spawn_fn
+  in
+  check bool "should be error" true (result.status = `Error);
+  check int "turns remain zero on pre-turn failure" 0 result.stats.turns;
+  check bool "reason includes agent" true
+    (try
+       let _ =
+         Str.search_forward (Str.regexp_string "Agent 'bogus'") result.reason 0
+       in
+       true
+     with Not_found -> false);
+  check bool "reason includes turn number" true
+    (try
+       let _ =
+         Str.search_forward
+           (Str.regexp_string "before completing turn 1")
+           result.reason 0
+       in
+       true
+     with Not_found -> false)
+
+let test_invalid_bounded_agents_filters_unknown_names () =
+  check (list string) "unknown agent only"
+    ["bogus"]
+    (Comm.invalid_bounded_agents ["claude"; " bogus "; "gemini"])
+
+let test_invalid_bounded_agents_rejects_empty_names () =
+  check (list string) "empty names invalid"
+    [""]
+    (Comm.invalid_bounded_agents ["claude"; "   "; "gemini"])
+
+let test_invalid_bounded_agents_dedupes_results () =
+  check (list string) "dedupes invalid names"
+    [""; "bogus"]
+    (Comm.invalid_bounded_agents ["bogus"; " "; "bogus"; "  "])
+
+let test_invalid_bounded_agents_all_valid_returns_empty () =
+  check (list string) "all valid"
+    []
+    (Comm.invalid_bounded_agents ["claude"; "gemini"; "codex"])
 
 (* ============================================ *)
 (* Retry logic tests                            *)
@@ -346,6 +413,16 @@ let bounded_run_tests = [
   "token tracking", `Quick, test_bounded_run_token_tracking;
   "round robin agents", `Quick, test_bounded_run_round_robin;
   "spawn exception", `Quick, test_bounded_run_spawn_exception;
+  "failure reason names agent and turn", `Quick,
+    test_bounded_run_failure_reason_names_agent_and_turn;
+  "invalid bounded agents filter", `Quick,
+    test_invalid_bounded_agents_filters_unknown_names;
+  "invalid bounded agents rejects empty names", `Quick,
+    test_invalid_bounded_agents_rejects_empty_names;
+  "invalid bounded agents dedupes results", `Quick,
+    test_invalid_bounded_agents_dedupes_results;
+  "invalid bounded agents all valid", `Quick,
+    test_invalid_bounded_agents_all_valid_returns_empty;
 ]
 
 let retry_tests = [

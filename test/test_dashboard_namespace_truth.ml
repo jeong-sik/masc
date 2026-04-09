@@ -542,6 +542,40 @@ let test_last_good_shell_fallback_preserves_counts () =
       (* Restore warmed state for subsequent tests. *)
       Lib.Server_dashboard_http._shell_warmed := true)
 
+let test_namespace_truth_snapshot_hash_ignores_generated_at () =
+  Fun.protect
+    ~finally:(fun () ->
+      Lib.Server_dashboard_http._last_namespace_truth_snapshot_hash := None)
+    (fun () ->
+      Eio_main.run @@ fun _env ->
+      let snapshot ~generated_at ~active_sessions =
+        `Assoc
+          [
+            ("generated_at", `String generated_at);
+            ( "namespace",
+              `Assoc [ ("status", `String "ready"); ("counts", `Assoc [("agents", `Int 1)]) ]
+            );
+            ( "execution",
+              `Assoc
+                [
+                  ( "summary",
+                    `Assoc [("active_sessions", `Int active_sessions)] );
+                ] );
+          ]
+      in
+      check bool "first snapshot broadcasts"
+        true
+        (Lib.Server_dashboard_http.should_broadcast_namespace_truth_snapshot
+           (snapshot ~generated_at:"2026-04-09T00:00:00Z" ~active_sessions:1));
+      check bool "generated_at-only changes stay deduped"
+        false
+        (Lib.Server_dashboard_http.should_broadcast_namespace_truth_snapshot
+           (snapshot ~generated_at:"2026-04-09T00:00:05Z" ~active_sessions:1));
+      check bool "semantic changes still broadcast"
+        true
+        (Lib.Server_dashboard_http.should_broadcast_namespace_truth_snapshot
+           (snapshot ~generated_at:"2026-04-09T00:00:10Z" ~active_sessions:2)))
+
 let () =
   Alcotest.run "Dashboard Namespace Truth"
     [
@@ -565,5 +599,7 @@ let () =
             test_dashboard_namespace_truth_cold_cache_falls_back_to_partial_truth;
           test_case "last-good shell fallback preserves namespace counts" `Quick
             test_last_good_shell_fallback_preserves_counts;
+          test_case "snapshot hash ignores generated_at churn" `Quick
+            test_namespace_truth_snapshot_hash_ignores_generated_at;
         ] );
     ]

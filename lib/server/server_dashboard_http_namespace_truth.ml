@@ -173,8 +173,23 @@ let _last_namespace_truth_snapshot_hash : Digestif.SHA256.t option ref =
 
 let _namespace_truth_snapshot_hash_mu = Eio.Mutex.create ()
 
+let rec normalize_namespace_truth_snapshot_for_hash (json : Yojson.Safe.t) :
+    Yojson.Safe.t =
+  match json with
+  | `Assoc fields ->
+      `Assoc
+        (fields
+        |> List.filter_map (fun (key, value) ->
+               if String.equal key "generated_at" then None
+               else Some (key, normalize_namespace_truth_snapshot_for_hash value)))
+  | `List values ->
+      `List (List.map normalize_namespace_truth_snapshot_for_hash values)
+  | other -> other
+
 let should_broadcast_namespace_truth_snapshot (snapshot : Yojson.Safe.t) =
-  let serialized = Yojson.Safe.to_string snapshot in
+  let serialized =
+    snapshot |> normalize_namespace_truth_snapshot_for_hash |> Yojson.Safe.to_string
+  in
   let hash = Digestif.SHA256.digest_string serialized in
   Eio.Mutex.use_rw ~protect:true _namespace_truth_snapshot_hash_mu (fun () ->
       match !_last_namespace_truth_snapshot_hash with

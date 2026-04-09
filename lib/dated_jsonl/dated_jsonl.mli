@@ -38,10 +38,6 @@ val prune : t -> days:int -> int
 (** [prune t ~days] deletes day-files older than [days] days ago.
     Returns the number of files deleted.  Removes empty month directories. *)
 
-val count_entries : t -> int
-(** [count_entries t] returns the total number of non-empty lines across all
-    day-files.  Scans files by counting newlines without JSON parsing. *)
-
 val load_tail_lines : string -> max_lines:int -> string list
 (** [load_tail_lines file ~max_lines] efficiently reads the last [max_lines]
     from a large file without loading the whole file into memory.

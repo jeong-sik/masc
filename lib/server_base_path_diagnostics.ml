@@ -7,7 +7,6 @@ type t = {
   effective_base_path : string;
   effective_masc_root : string;
   env_masc_base_path : string option;
-  env_me_root : string option;
   cwd_masc_root : string;
   cwd_has_masc_dir : bool;
   effective_has_masc_dir : bool;
@@ -51,7 +50,7 @@ let fail_fast_env_enabled () =
       | _ -> false)
   | None -> false
 
-let detect ?cwd ?env_masc_base_path ?env_me_root ?strict ?input_base_path
+let detect ?cwd ?env_masc_base_path ?strict ?input_base_path
     ~effective_base_path ~effective_masc_root () =
   let cwd =
     match cwd with
@@ -91,7 +90,6 @@ let detect ?cwd ?env_masc_base_path ?env_me_root ?strict ?input_base_path
     effective_base_path = effective_base_norm;
     effective_masc_root = effective_masc_norm;
     env_masc_base_path = trim_opt env_masc_base_path;
-    env_me_root = trim_opt env_me_root;
     cwd_masc_root;
     cwd_has_masc_dir;
     effective_has_masc_dir;
@@ -114,9 +112,6 @@ let startup_lines (diag : t) =
        | _ -> None);
       (match diag.env_masc_base_path with
        | Some path -> Some (Printf.sprintf "   MASC_BASE_PATH(env): %s" path)
-       | None -> None);
-      (match diag.env_me_root with
-       | Some path -> Some (Printf.sprintf "   ME_ROOT(env): %s" path)
        | None -> None);
       (match diag.warning with
        | Some message -> Some (Printf.sprintf "   Path warning: %s" message)
@@ -164,6 +159,5 @@ let to_yojson (diag : t) =
         [
           option_field "input_base_path" diag.input_base_path;
           option_field "env_masc_base_path" diag.env_masc_base_path;
-          option_field "env_me_root" diag.env_me_root;
           option_field "warning" diag.warning;
         ])

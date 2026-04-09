@@ -86,7 +86,6 @@ let health_path_diagnostics () =
       Server_base_path_diagnostics.detect
         ?input_base_path:(Env_config_core.base_path_opt ())
         ?env_masc_base_path:(Env_config_core.base_path_opt ())
-        ?env_me_root:(Env_config_core.me_root_opt ())
         ~effective_base_path:state.room_config.base_path
         ~effective_masc_root:(Room.masc_root_dir state.room_config)
         ()
@@ -96,7 +95,6 @@ let health_path_diagnostics () =
       Server_base_path_diagnostics.detect
         ?input_base_path:(Env_config_core.base_path_opt ())
         ?env_masc_base_path:(Env_config_core.base_path_opt ())
-        ?env_me_root:(Env_config_core.me_root_opt ())
         ~effective_base_path ~effective_masc_root ()
 
 let make_health_json ?(listener = "http/1.1") request =

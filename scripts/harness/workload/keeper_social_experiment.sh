@@ -5,7 +5,8 @@
 
 set -euo pipefail
 
-ROOT_DIR="${ME_ROOT:-$HOME/me}/workspace/yousleepwhen/masc-mcp"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 MASC_URL="${MASC_URL:-http://127.0.0.1:8935}"
 MCP_URL="${MCP_URL:-${MASC_URL%/}/mcp}"
 

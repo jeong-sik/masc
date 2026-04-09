@@ -17,7 +17,7 @@ set -euo pipefail
 
 ITERATION="${1:-1}"
 : "${MCP_URL:=http://127.0.0.1:8935/mcp}"
-RESULTS_DIR="${ME_ROOT:-$HOME/me}/.masc/eval_results"
+RESULTS_DIR="${MASC_BASE_PATH:-$HOME/me}/.masc/eval_results"
 RESULT_FILE="${RESULTS_DIR}/iteration_${ITERATION}.json"
 
 mkdir -p "$RESULTS_DIR"

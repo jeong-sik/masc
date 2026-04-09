@@ -33,7 +33,7 @@ type confidence_calibration = {
 
 (* NEW storage *)
 let calibration_history_path () =
-  Filename.concat (me_root ()) ".masc/calibration_history.jsonl"
+  Filename.concat (base_path ()) ".masc/calibration_history.jsonl"
 
 (* NEW functions *)
 val record_calibration : agent_name:string -> post_id:string ->

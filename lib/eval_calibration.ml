@@ -55,12 +55,7 @@ type calibration_example = {
 let store_ref : Dated_jsonl.t option ref = ref None
 
 let base_path () =
-  let me =
-    match Env_config_core.me_root_opt () with
-    | Some p -> p
-    | None -> (Option.value ~default:"/tmp" (Env_config_core.home_dir_opt ())) ^ "/me"
-  in
-  Filename.concat me "data/verdicts"
+  Filename.concat (Env_config_core.base_path ()) "data/verdicts"
 
 let get_store () =
   match !store_ref with

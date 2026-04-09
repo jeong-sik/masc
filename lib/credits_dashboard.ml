@@ -13,17 +13,13 @@
     @since 2026-01
 *)
 
-(** Get ME_ROOT path *)
-let me_root () =
-  match Env_config_core.me_root_opt () with
-  | Some path -> path
-  | None ->
-      let home = Option.value ~default:"/tmp" (Sys.getenv_opt "HOME") in
-      Filename.concat home "me"
+(** Get base path for local dashboard data *)
+let base_path () =
+  Env_config_core.base_path ()
 
 (** Credits JSON path *)
 let credits_json_path () =
-  Filename.concat (me_root ()) "data/state/credits.json"
+  Filename.concat (base_path ()) "data/state/credits.json"
 
 (** Read credits.json *)
 let read_credits_json () : Yojson.Safe.t option =

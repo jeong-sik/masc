@@ -115,8 +115,8 @@ def main() -> int:
     parser.add_argument("--format", type=str, default="text", choices=["text", "json"], help="Output format")
     args = parser.parse_args()
 
-    me_root = os.environ.get("ME_ROOT", os.path.expanduser("~/me"))
-    traces_dir = os.path.join(me_root, ".masc", "traces")
+    base_path = os.environ.get("MASC_BASE_PATH", os.path.expanduser("~/me"))
+    traces_dir = os.path.join(base_path, ".masc", "traces")
 
     start_ts, end_ts = ts_range_from_args(args.days, args.since, args.until)
 

@@ -264,9 +264,9 @@ spawn 시 인자로 직접 설정하는 필드.
 
 ### 4.1 매니페스트 JSON 스키마
 
-매니페스트 파일 위치: `{ME_ROOT}/personas/{name}/profile.json`
+매니페스트 파일 위치: `{MASC_PERSONAS_DIR}/{name}/profile.json` 또는 `resolved config root/personas/{name}/profile.json`
 
-> personas_root는 `ME_ROOT` (또는 `MASC_WORKSPACE_ROOT`, `DUNE_SOURCEROOT`) 경로의 `personas/` 하위 디렉토리다.
+> personas_root는 `MASC_PERSONAS_DIR`가 설정되면 그 디렉토리이고, 아니면 resolved config root의 `personas/` 하위 디렉토리다.
 
 ```json
 {

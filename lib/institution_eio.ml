@@ -627,8 +627,7 @@ let load_and_format_for_welcome ~fs:_ (config : config) : string =
     Storage: .masc/institution_episodes.jsonl *)
 
 let episodes_jsonl_path () =
-  let me_root = Env_config.me_root () in
-  Filename.concat me_root ".masc/institution_episodes.jsonl"
+  Filename.concat (Env_config.base_path ()) ".masc/institution_episodes.jsonl"
 
 (** Record an episode to JSONL without Eio context.
     This is the primary entry point for Keeper autonomy integration. *)

@@ -92,8 +92,8 @@ let test_cwd_fallback () =
 
 let test_home_masc_fallback () =
   with_temp_dir "config-dir-home" @@ fun home ->
-  let home_root = Filename.concat home ".masc" in
-  let config = make_config_root home_root in
+  let home_masc_root = Filename.concat home ".masc" in
+  let config = make_config_root home_masc_root in
   let resolution =
     Lib.Config_dir_resolver.resolve_with
       (make_inputs ~env_home:home ~cwd:"/tmp/missing-cwd"

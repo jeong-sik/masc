@@ -94,7 +94,6 @@ obs_start_server() {
   local server_exe="$1" port="$2" base_path="$3" log_file="$4"
   mkdir -p "$base_path"
   env \
-    ME_ROOT="$base_path" \
     MASC_BASE_PATH="$base_path" \
     MASC_STORAGE_TYPE="filesystem" \
     MASC_AUTONOMY_ENABLED="0" \

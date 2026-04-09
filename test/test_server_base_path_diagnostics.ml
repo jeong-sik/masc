@@ -58,7 +58,6 @@ let test_detects_dual_masc_roots () =
     Server_base_path_diagnostics.detect ~cwd
       ~input_base_path:effective
       ~env_masc_base_path:effective
-      ~env_me_root:root
       ~effective_base_path:effective
       ~effective_masc_root:(Filename.concat effective ".masc")
       ()
@@ -93,7 +92,6 @@ let test_to_yojson_exposes_effective_paths () =
     Server_base_path_diagnostics.detect ~cwd:"/tmp/repo"
       ~input_base_path:"/tmp/workspace"
       ~env_masc_base_path:"/tmp/workspace"
-      ~env_me_root:"/tmp"
       ~effective_base_path:"/tmp/workspace"
       ~effective_masc_root:"/tmp/workspace/.masc"
       ()
@@ -109,33 +107,31 @@ let test_to_yojson_exposes_effective_paths () =
 
 let test_default_base_path_sanitizes_inherited_dual_roots () =
   with_temp_dir "base-path-default" @@ fun root ->
-  let me_root = Filename.concat root "me" in
-  let repo = Filename.concat me_root "workspace/yousleepwhen/masc-mcp" in
+  let base_path = Filename.concat root "base" in
+  let repo = Filename.concat base_path "workspace/yousleepwhen/masc-mcp" in
   mkdir_p repo;
-  Unix.mkdir (Filename.concat me_root ".masc") 0o755;
+  Unix.mkdir (Filename.concat base_path ".masc") 0o755;
   Unix.mkdir (Filename.concat repo ".masc") 0o755;
   with_cwd repo @@ fun () ->
-  with_env "ME_ROOT" (Some me_root) @@ fun () ->
-  with_env "MASC_BASE_PATH" (Some me_root) @@ fun () ->
+  with_env "MASC_BASE_PATH" (Some base_path) @@ fun () ->
   with_env "MASC_ALLOW_INHERITED_BASE_PATH" (Some "") @@ fun () ->
-  (* ancestor explicit path wins: me_root is parent of repo *)
+  (* ancestor explicit path wins: base_path is parent of repo *)
   Alcotest.(check string) "default base path preserves ancestor explicit path"
-    (canonical_path me_root)
+    (canonical_path base_path)
     (Server_mcp_transport_http.default_base_path () |> canonical_path)
 
 let test_default_base_path_respects_opt_in_for_inherited_root () =
   with_temp_dir "base-path-default-optin" @@ fun root ->
-  let me_root = Filename.concat root "me" in
-  let repo = Filename.concat me_root "workspace/yousleepwhen/masc-mcp" in
+  let base_path = Filename.concat root "base" in
+  let repo = Filename.concat base_path "workspace/yousleepwhen/masc-mcp" in
   mkdir_p repo;
-  Unix.mkdir (Filename.concat me_root ".masc") 0o755;
+  Unix.mkdir (Filename.concat base_path ".masc") 0o755;
   Unix.mkdir (Filename.concat repo ".masc") 0o755;
   with_cwd repo @@ fun () ->
-  with_env "ME_ROOT" (Some me_root) @@ fun () ->
-  with_env "MASC_BASE_PATH" (Some me_root) @@ fun () ->
+  with_env "MASC_BASE_PATH" (Some base_path) @@ fun () ->
   with_env "MASC_ALLOW_INHERITED_BASE_PATH" (Some "1") @@ fun () ->
   Alcotest.(check string) "opt-in keeps inherited root"
-    (canonical_path me_root)
+    (canonical_path base_path)
     (Server_mcp_transport_http.default_base_path () |> canonical_path)
 
 let () =

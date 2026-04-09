@@ -32,8 +32,7 @@ type procedure = {
 (* ================================================================ *)
 
 let procedures_dir ~agent_name =
-  let me_root = Env_config.me_root () in
-  sprintf "%s/.masc/procedures/%s" me_root agent_name
+  sprintf "%s/.masc/procedures/%s" (Env_config.base_path ()) agent_name
 
 let procedures_path ~agent_name =
   sprintf "%s/procedures.jsonl" (procedures_dir ~agent_name)

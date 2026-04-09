@@ -20,10 +20,7 @@ let resolved_base_path_opt () =
 let masc_base_dir () =
   match resolved_base_path_opt () with
   | Some base_path -> Filename.concat base_path ".masc"
-  | None -> (
-      match trim_opt (Env_config_core.me_root_opt ()) with
-      | Some root -> Filename.concat root ".masc"
-      | None -> ".masc")
+  | None -> ".masc"
 
 (** Singleton session manager, lazily initialized.
     Thread-safety: safe under single Eio domain — all fibers share one

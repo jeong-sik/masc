@@ -719,6 +719,7 @@ let test_prompt_markdown_dir_prefers_resolved_config_dir_over_cwd () =
           Alcotest.(check string)
             "resolved config prompts win over cwd fallback"
             resolved_prompts resolved))
+
 let test_main_eio_serves_health_before_lazy_startup () =
   with_temp_dir "startup-health" (fun dir ->
       let exe = find_main_eio_exe () in
@@ -730,7 +731,6 @@ let test_main_eio_serves_health_before_lazy_startup () =
       let env =
         merge_env_overrides
           [
-            ("ME_ROOT", dir);
             ("MASC_BASE_PATH", dir);
             ("MASC_STORAGE_TYPE", "filesystem");
             ("MASC_POSTGRES_URL", "");

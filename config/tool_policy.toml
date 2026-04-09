@@ -79,7 +79,8 @@ tools = ["keeper_board_delete", "keeper_board_cleanup"]
 
 # Essential: tools every keeper needs (orientation + web search).
 [masc.essential]
-tools = ["masc_status", "masc_heartbeat", "masc_web_search"]
+tools = ["masc_status", "masc_web_search"]
+# masc_heartbeat removed: background fiber handles keepalive; LLM tool call is redundant.
 
 # Coordination: external agent coordination tools.
 # Only needed by keepers that manage tasks across agents.
@@ -88,7 +89,7 @@ tools = ["masc_tasks", "masc_claim_next", "masc_transition", "masc_add_task", "m
 
 # Full core: backward compat alias (essential + coordination).
 [masc.core]
-tools = ["masc_status", "masc_heartbeat", "masc_tasks", "masc_claim_next", "masc_transition", "masc_add_task", "masc_batch_add_tasks", "masc_agents", "masc_dashboard", "masc_agent_card", "masc_tool_help", "masc_web_search"]
+tools = ["masc_status", "masc_tasks", "masc_claim_next", "masc_transition", "masc_add_task", "masc_batch_add_tasks", "masc_agents", "masc_dashboard", "masc_agent_card", "masc_tool_help", "masc_web_search"]
 
 [masc.coding]
 tools = ["masc_code_search", "masc_code_symbols", "masc_code_read", "masc_worktree_create", "masc_worktree_remove", "masc_worktree_list"]

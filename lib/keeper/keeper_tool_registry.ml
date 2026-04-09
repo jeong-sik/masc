@@ -33,7 +33,10 @@ let keeper_voice_tool_schemas =
 let core_always_tools =
   [ "keeper_context_status"; "keeper_tools_list";
     "keeper_stay_silent"; "keeper_tool_search";
-    "masc_status"; "masc_heartbeat"; "extend_turns" ]
+    "masc_status"; "extend_turns" ]
+  (* masc_heartbeat removed: background fiber handles keepalive
+     automatically; LLM calling it wastes turns and triggers
+     streak_gate blocks (398 WARN/day observed). *)
 
 (** Core tools always visible to the LLM.  All other tools are
     discoverable on demand via [keeper_tool_search].
@@ -124,7 +127,7 @@ let is_effectively_read_only_tool (name : string) : bool =
     Contrast with [keeper_fs_read] which reads new content, or
     [keeper_board_post] which creates artifacts. *)
 let boring_tools =
-  [ "masc_status"; "masc_heartbeat"; "keeper_tasks_list";
+  [ "masc_status"; "keeper_tasks_list";
     "keeper_context_status"; "keeper_tools_list";
     "keeper_stay_silent" ]
 

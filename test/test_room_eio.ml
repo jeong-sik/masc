@@ -146,74 +146,6 @@ let test_get_message () =
       | Error e ->
           Alcotest.failf "get_message failed: %s" e
 
-(** {1 Task Tests} *)
-
-let test_create_task () =
-  with_eio_env @@ fun config ->
-  match Room_eio.create_task config ~description:"Implement feature X" () with
-  | Ok task ->
-      Alcotest.(check bool) "has id" true (String.length task.id > 0);
-      Alcotest.(check string) "description" "Implement feature X" task.description
-  | Error e ->
-      Alcotest.failf "create_task failed: %s" e
-
-let test_claim_task () =
-  with_eio_env @@ fun config ->
-  (* Create task *)
-  let task = match Room_eio.create_task config ~description:"Review PR" () with
-    | Ok t -> t
-    | Error e -> Alcotest.failf "create_task failed: %s" e
-  in
-
-  (* Claim task *)
-  match Room_eio.claim_task config ~task_id:task.id ~agent:"claude" with
-  | Ok claimed ->
-      (match claimed.status with
-       | Room_eio.InProgress agent ->
-           Alcotest.(check string) "claimed by claude" "claude" agent
-       | _ ->
-           Alcotest.fail "task should be in_progress")
-  | Error e ->
-      Alcotest.failf "claim_task failed: %s" e
-
-let test_complete_task () =
-  with_eio_env @@ fun config ->
-  (* Create and claim *)
-  let task = match Room_eio.create_task config ~description:"Fix bug" () with
-    | Ok t -> t
-    | Error e -> Alcotest.failf "create_task failed: %s" e
-  in
-  let _ = Room_eio.claim_task config ~task_id:task.id ~agent:"claude" in
-
-  (* Complete *)
-  match Room_eio.complete_task config ~task_id:task.id ~agent:"claude" with
-  | Ok completed ->
-      (match completed.status with
-       | Room_eio.Completed agent ->
-           Alcotest.(check string) "completed by claude" "claude" agent
-       | _ ->
-           Alcotest.fail "task should be completed")
-  | Error e ->
-      Alcotest.failf "complete_task failed: %s" e
-
-let test_task_workflow () =
-  with_eio_env @@ fun config ->
-  (* Full workflow: create -> claim -> complete *)
-  let task = match Room_eio.create_task config ~description:"E2E task" ~priority:2 () with
-    | Ok t -> t
-    | Error e -> Alcotest.failf "create failed: %s" e
-  in
-
-  Alcotest.(check int) "priority" 2 task.priority;
-
-  (* Another agent tries to claim completed task *)
-  let _ = Room_eio.claim_task config ~task_id:task.id ~agent:"claude" in
-  let _ = Room_eio.complete_task config ~task_id:task.id ~agent:"claude" in
-
-  match Room_eio.claim_task config ~task_id:task.id ~agent:"gemini" with
-  | Error _ -> ()  (* Expected: can't claim completed task *)
-  | Ok _ -> Alcotest.fail "should not claim completed task"
-
 (** {1 State Tests} *)
 
 let test_room_state () =
@@ -263,12 +195,6 @@ let () =
       Alcotest.test_case "broadcast message" `Quick test_broadcast_message;
       Alcotest.test_case "mention extraction" `Quick test_mention_extraction;
       Alcotest.test_case "get message" `Quick test_get_message;
-    ];
-    "task", [
-      Alcotest.test_case "create task" `Quick test_create_task;
-      Alcotest.test_case "claim task" `Quick test_claim_task;
-      Alcotest.test_case "complete task" `Quick test_complete_task;
-      Alcotest.test_case "task workflow" `Quick test_task_workflow;
     ];
     "state", [
       Alcotest.test_case "room state" `Quick test_room_state;

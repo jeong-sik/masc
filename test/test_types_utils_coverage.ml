@@ -734,8 +734,6 @@ let test_room_eio_event_type_to_string () =
   check string "AgentJoin" "agent_join" (Room_eio.event_type_to_string Room_eio.AgentJoin);
   check string "AgentLeave" "agent_leave" (Room_eio.event_type_to_string Room_eio.AgentLeave);
   check string "Broadcast" "broadcast" (Room_eio.event_type_to_string Room_eio.Broadcast);
-  check string "TaskClaim" "task_claim" (Room_eio.event_type_to_string Room_eio.TaskClaim);
-  check string "TaskDone" "task_done" (Room_eio.event_type_to_string Room_eio.TaskDone);
   check string "LockAcquire" "lock_acquire" (Room_eio.event_type_to_string Room_eio.LockAcquire);
   check string "LockRelease" "lock_release" (Room_eio.event_type_to_string Room_eio.LockRelease)
 
@@ -846,100 +844,6 @@ let test_room_eio_message_no_mention () =
   let json = Room_eio.message_to_json msg in
   let result = Room_eio.message_of_json json in
   check bool "roundtrip ok" true (is_ok result)
-
-(* ============================================================ *)
-(* Room_eio.task_status JSON Tests                               *)
-(* ============================================================ *)
-
-let test_room_eio_task_status_pending () =
-  let status = Room_eio.Pending in
-  let json = Room_eio.task_status_to_json status in
-  let result = Room_eio.task_status_of_json json in
-  check bool "roundtrip ok" true (is_ok result)
-
-let test_room_eio_task_status_in_progress () =
-  let status = Room_eio.InProgress "claude" in
-  let json = Room_eio.task_status_to_json status in
-  let result = Room_eio.task_status_of_json json in
-  check bool "roundtrip ok" true (is_ok result)
-
-let test_room_eio_task_status_completed () =
-  let status = Room_eio.Completed "gemini" in
-  let json = Room_eio.task_status_to_json status in
-  let result = Room_eio.task_status_of_json json in
-  check bool "roundtrip ok" true (is_ok result)
-
-let test_room_eio_task_status_failed () =
-  let status = Room_eio.Failed ("codex", "Test failed") in
-  let json = Room_eio.task_status_to_json status in
-  let result = Room_eio.task_status_of_json json in
-  check bool "roundtrip ok" true (is_ok result)
-
-let test_room_eio_task_status_unknown () =
-  let json = `Assoc [("type", `String "unknown_type")] in
-  let result = Room_eio.task_status_of_json json in
-  check bool "is error" true (is_error result)
-
-(* ============================================================ *)
-(* Room_eio.task JSON Tests                                      *)
-(* ============================================================ *)
-
-let test_room_eio_task_roundtrip () =
-  let task = Room_eio.{
-    id = "task-123";
-    description = "Implement feature X";
-    status = InProgress "claude";
-    created_at = 1704067200.0;
-    updated_at = 1704070800.0;
-    priority = 2;
-    parent_task_id = None;
-    goal_id = None;
-    complexity_estimate = None;
-  } in
-  let json = Room_eio.task_to_json task in
-  let result = Room_eio.task_of_json json in
-  check bool "roundtrip ok" true (is_ok result)
-
-let test_room_eio_task_with_goal_metadata () =
-  let task = Room_eio.{
-    id = "task-456";
-    description = "Sub-task: implement login";
-    status = Pending;
-    created_at = 1704067200.0;
-    updated_at = 1704067200.0;
-    priority = 1;
-    parent_task_id = Some "task-123";
-    goal_id = Some "goal-auth";
-    complexity_estimate = Some { estimated_turns = 5; reversibility = 0.8 };
-  } in
-  let json = Room_eio.task_to_json task in
-  let result = Room_eio.task_of_json json in
-  match result with
-  | Ok t ->
-    check bool "parent preserved" true (t.parent_task_id = Some "task-123");
-    check bool "goal preserved" true (t.goal_id = Some "goal-auth");
-    check bool "complexity preserved" true
-      (match t.complexity_estimate with
-       | Some c -> c.estimated_turns = 5 && c.reversibility = 0.8
-       | None -> false)
-  | Error e -> fail (Printf.sprintf "unexpected error: %s" e)
-
-let test_room_eio_task_backward_compat () =
-  (* Old JSON without new fields should still parse *)
-  let old_json = `Assoc [
-    ("id", `String "task-old");
-    ("description", `String "legacy task");
-    ("status", `Assoc [("type", `String "pending")]);
-    ("created_at", `Float 1704067200.0);
-    ("updated_at", `Float 1704067200.0);
-    ("priority", `Int 1);
-  ] in
-  match Room_eio.task_of_json old_json with
-  | Ok t ->
-    check bool "parent is none" true (t.parent_task_id = None);
-    check bool "goal is none" true (t.goal_id = None);
-    check bool "complexity is none" true (t.complexity_estimate = None)
-  | Error e -> fail (Printf.sprintf "backward compat failed: %s" e)
 
 (* ============================================================ *)
 (* Test Suite                                                    *)
@@ -1117,20 +1021,6 @@ let room_eio_message_tests = [
   "message no mention", `Quick, test_room_eio_message_no_mention;
 ]
 
-let room_eio_task_status_tests = [
-  "pending", `Quick, test_room_eio_task_status_pending;
-  "in_progress", `Quick, test_room_eio_task_status_in_progress;
-  "completed", `Quick, test_room_eio_task_status_completed;
-  "failed", `Quick, test_room_eio_task_status_failed;
-  "unknown error", `Quick, test_room_eio_task_status_unknown;
-]
-
-let room_eio_task_tests = [
-  "task roundtrip", `Quick, test_room_eio_task_roundtrip;
-  "task with goal metadata", `Quick, test_room_eio_task_with_goal_metadata;
-  "task backward compat", `Quick, test_room_eio_task_backward_compat;
-]
-
 let () =
   run "Types & Utils Coverage" [
     "Agent_id", agent_id_tests;
@@ -1160,6 +1050,4 @@ let () =
     "Room_eio.agent", room_eio_agent_tests;
     "Room_eio.lock", room_eio_lock_tests;
     "Room_eio.message", room_eio_message_tests;
-    "Room_eio.task_status", room_eio_task_status_tests;
-    "Room_eio.task", room_eio_task_tests;
   ]

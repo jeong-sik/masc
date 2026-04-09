@@ -571,6 +571,21 @@ let test_env_flag_overrides_all () =
         check bool "env flag forces strict regardless" true
           (SA.http_auth_strict_enabled ()))))
 
+let test_public_read_path_allows_generic_connector_status () =
+  let module SA = Masc_mcp.Server_auth in
+  check bool "generic connector status is public read" true
+    (SA.is_public_read_path "/api/v1/gate/connector/status")
+
+let test_public_read_path_rejects_generic_connector_bind () =
+  let module SA = Masc_mcp.Server_auth in
+  check bool "generic connector bind is not public read" false
+    (SA.is_public_read_path "/api/v1/gate/connector/bind")
+
+let test_public_read_path_rejects_generic_connector_unbind () =
+  let module SA = Masc_mcp.Server_auth in
+  check bool "generic connector unbind is not public read" false
+    (SA.is_public_read_path "/api/v1/gate/connector/unbind")
+
 let test_permission_for_tool_unknown () =
   match Auth.permission_for_tool "unknown_tool_xyz" with
   | None -> ()
@@ -760,5 +775,11 @@ let () =
         test_base_url_unset_loopback_no_strict;
       test_case "env flag overrides all" `Quick
         test_env_flag_overrides_all;
+      test_case "generic connector status is public read" `Quick
+        test_public_read_path_allows_generic_connector_status;
+      test_case "generic connector bind is not public read" `Quick
+        test_public_read_path_rejects_generic_connector_bind;
+      test_case "generic connector unbind is not public read" `Quick
+        test_public_read_path_rejects_generic_connector_unbind;
     ];
   ]

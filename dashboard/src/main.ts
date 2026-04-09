@@ -12,7 +12,6 @@ import './styles/global.css'
 
 // Component-specific styles
 import './styles/ui.css'
-import './styles/agent-monitor.css'
 import './styles/board.css'
 /* chat.css: styles merged into global.css @utility blocks (#3915) */
 import './styles/dashboard.css'

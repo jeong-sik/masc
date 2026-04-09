@@ -222,7 +222,6 @@ let handle_gate_connectors _state request reqd =
     (Yojson.Safe.to_string json)
 
 (** GET /api/v1/gate/discord/status
-
     Dashboard-facing live connector status sourced from the Discord bot's
     status file plus the durable binding/audit stores. *)
 let handle_gate_discord_status _state request reqd =
@@ -232,6 +231,28 @@ let handle_gate_discord_status _state request reqd =
   in
   respond_json_with_cors ~status:`OK request reqd
     (Yojson.Safe.to_string (Channel_gate_discord_state.status_json ~audit_limit:limit ()))
+
+(** Generic connector validation for the current single-connector surface.
+
+    Until multiple connector backends exist, only [channel=discord] is valid. *)
+let resolve_connector_channel request =
+  match query_param request "channel" |> Option.map String.trim with
+  | None | Some "" -> Error "channel is required"
+  | Some raw ->
+      let channel = String.lowercase_ascii raw in
+      if String.equal channel "discord" then Ok channel
+      else Error ("unsupported channel: " ^ channel)
+
+(** GET /api/v1/gate/connector/status?channel=discord
+
+    Generic alias for the current connector status surface. *)
+let handle_gate_connector_status state request reqd =
+  match resolve_connector_channel request with
+  | Error err ->
+      respond_json_with_cors ~status:`Bad_request request reqd
+        (Yojson.Safe.to_string (Channel_gate.error_json err))
+  | Ok "discord" -> handle_gate_discord_status state request reqd
+  | Ok _ -> assert false
 
 let gate_keeper_ctx ~sw ~clock state =
   {
@@ -367,7 +388,7 @@ let handle_gate_discord_bind ~sw ~clock state request reqd =
                   (Yojson.Safe.to_string payload)
             | Error err ->
                 respond_json_with_cors ~status:`Internal_server_error request reqd
-                  (Yojson.Safe.to_string (Channel_gate.error_json err)) ) 
+                  (Yojson.Safe.to_string (Channel_gate.error_json err)) )
     with
     | Yojson.Json_error _ ->
         respond_json_with_cors ~status:`Bad_request request reqd
@@ -409,6 +430,22 @@ let handle_gate_discord_unbind ~sw:_ ~clock:_ _state request reqd =
         respond_json_with_cors ~status:`Bad_request request reqd
           (Yojson.Safe.to_string (Channel_gate.error_json "invalid json")) )
 
+let handle_gate_connector_bind ~sw ~clock state request reqd =
+  match resolve_connector_channel request with
+  | Error err ->
+      respond_json_with_cors ~status:`Bad_request request reqd
+        (Yojson.Safe.to_string (Channel_gate.error_json err))
+  | Ok "discord" -> handle_gate_discord_bind ~sw ~clock state request reqd
+  | Ok _ -> assert false
+
+let handle_gate_connector_unbind ~sw ~clock state request reqd =
+  match resolve_connector_channel request with
+  | Error err ->
+      respond_json_with_cors ~status:`Bad_request request reqd
+        (Yojson.Safe.to_string (Channel_gate.error_json err))
+  | Ok "discord" -> handle_gate_discord_unbind ~sw ~clock state request reqd
+  | Ok _ -> assert false
+
 (** Register all gate routes on the router. *)
 let add_routes ~sw ~clock router =
   router
@@ -430,6 +467,11 @@ let add_routes ~sw ~clock router =
   |> Http.Router.get "/api/v1/gate/connectors" (fun request reqd ->
        with_public_read (fun state _req reqd ->
          handle_gate_connectors state request reqd
+       ) request reqd)
+
+  |> Http.Router.get "/api/v1/gate/connector/status" (fun request reqd ->
+       with_public_read (fun state _req reqd ->
+         handle_gate_connector_status state request reqd
        ) request reqd)
 
   |> Http.Router.get "/api/v1/gate/discord/status" (fun request reqd ->
@@ -460,4 +502,14 @@ let add_routes ~sw ~clock router =
   |> Http.Router.post "/api/v1/gate/discord/unbind" (fun request reqd ->
        with_tool_auth ~tool_name:"channel_gate" (fun state _req reqd ->
          handle_gate_discord_unbind ~sw ~clock state request reqd
+       ) request reqd)
+
+  |> Http.Router.post "/api/v1/gate/connector/bind" (fun request reqd ->
+       with_tool_auth ~tool_name:"channel_gate" (fun state _req reqd ->
+         handle_gate_connector_bind ~sw ~clock state request reqd
+       ) request reqd)
+
+  |> Http.Router.post "/api/v1/gate/connector/unbind" (fun request reqd ->
+       with_tool_auth ~tool_name:"channel_gate" (fun state _req reqd ->
+         handle_gate_connector_unbind ~sw ~clock state request reqd
        ) request reqd)

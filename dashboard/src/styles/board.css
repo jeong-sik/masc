@@ -2,11 +2,6 @@
 
 /* ── Board (Posts) ─────────────────────────────────────────── */
 
-@utility board-sort-btn {
-  &:hover { background: var(--white-8); color: #ccc; }
-  &.active { background: var(--ok-soft); color: var(--ok); border-color: var(--ok-30); }
-}
-
 @utility board-post {
   border-color: var(--card-border);
   content-visibility: auto;

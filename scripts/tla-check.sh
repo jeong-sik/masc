@@ -52,20 +52,40 @@ run_tlc() {
   echo ""
 }
 
+ensure_trace_data() {
+  local trace_data="$REPO_ROOT/specs/keeper-state-machine/TraceData.tla"
+  local trace_source="${MASC_TLA_TRACE_JSONL:-$REPO_ROOT/specs/keeper-state-machine/synthetic.tla-trace.jsonl}"
+
+  if [ -f "$trace_data" ]; then
+    return 0
+  fi
+
+  if [ ! -f "$trace_source" ]; then
+    echo "SKIP KeeperTraceSpec.tla (no trace source: $trace_source)"
+    return 1
+  fi
+
+  echo "Generating TraceData.tla from $(basename "$trace_source")..."
+  dune exec --root "$REPO_ROOT" ./bin/trace_to_tla.exe -- "$trace_source" "$trace_data"
+}
+
 # Run all keeper state machine specs
 run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperStateMachine.tla"
+run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperTurnCycle.tla"
 run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperOASBridge.tla"
 run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperOASAdvanced.tla"
-run_tlc "$REPO_ROOT/specs/masc-ecosystem" "MASCEcosystem.tla"
 
 # Optional: run TraceSpec if --trace flag provided
 if [ "${1:-}" = "--trace" ]; then
   TRACE_SPEC="$REPO_ROOT/specs/keeper-state-machine/KeeperTraceSpec.tla"
-  if [ -f "$TRACE_SPEC" ]; then
+  TRACE_DATA="$REPO_ROOT/specs/keeper-state-machine/TraceData.tla"
+  if [ -f "$TRACE_SPEC" ] && ensure_trace_data && [ -f "$TRACE_DATA" ]; then
     run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperTraceSpec.tla"
   else
-    echo "SKIP KeeperTraceSpec.tla (not yet created)"
+    echo "SKIP KeeperTraceSpec.tla (TraceData.tla unavailable)"
   fi
 fi
+
+run_tlc "$REPO_ROOT/specs/masc-ecosystem" "MASCEcosystem.tla"
 
 echo "All TLA+ checks passed."

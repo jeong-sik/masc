@@ -173,6 +173,104 @@ describe('Overview freshness strip', () => {
     expect(container.textContent).toContain('Connector Panel')
   }, 15000)
 
+  it('hides the config truth card when shell truth is unavailable', async () => {
+    shellConfigResolution.value = null
+    shellRuntimeResolution.value = null
+
+    const { Overview } = await loadOverview()
+    render(html`<${Overview} />`, container)
+    await flushUi()
+
+    expect(container.textContent).not.toContain('설정 Truth')
+    expect(container.textContent).not.toContain('config root')
+  }, 15000)
+
+  it('renders the config truth card with warnings from shell truth', async () => {
+    shellConfigResolution.value = {
+      status: 'warn',
+      warnings: ['Resolved config child is missing: keepers'],
+      config_root: {
+        path: '/Users/dancer/me/workspace/yousleepwhen/masc-mcp/config',
+        exists: true,
+        source: 'env',
+      },
+      cascade: {
+        path: '/Users/dancer/me/workspace/yousleepwhen/masc-mcp/config/cascade.json',
+        exists: true,
+        source: 'config_root',
+      },
+      prompts: {
+        path: '/Users/dancer/me/workspace/yousleepwhen/masc-mcp/config/prompts',
+        exists: true,
+        source: 'config_root',
+      },
+      keepers: {
+        path: '/Users/dancer/me/workspace/yousleepwhen/masc-mcp/config/keepers',
+        exists: false,
+        source: 'config_root',
+      },
+      personas: {
+        path: '/Users/dancer/me/workspace/yousleepwhen/masc-mcp/config/personas',
+        exists: true,
+        source: 'config_root',
+      },
+    }
+    shellRuntimeResolution.value = {
+      status: 'warn',
+      warnings: ['Runtime build commit (deadbee) differs from workspace HEAD (cafef00d).'],
+      base_path: {
+        path: '/Users/dancer/me',
+        exists: true,
+        source: 'input',
+      },
+      workspace_path: {
+        path: '/Users/dancer/me/workspace/yousleepwhen/masc-mcp',
+        exists: true,
+        source: 'workspace',
+      },
+      resolved_base_path: {
+        path: '/Users/dancer/me',
+        exists: true,
+        source: 'resolved_base',
+      },
+      data_root: {
+        path: '/Users/dancer/me/.masc',
+        exists: true,
+        source: 'runtime_data',
+      },
+      prompt_markdown_dir: {
+        path: '/Users/dancer/me/workspace/yousleepwhen/masc-mcp/config/prompts',
+        exists: true,
+        source: 'prompt_registry',
+      },
+      workspace_git_commit: 'cafef00d',
+      resolved_base_git_commit: 'deadbee',
+      source_mismatch: true,
+      diagnostics: [],
+      build: {
+        release_version: 'test',
+        commit: 'deadbee',
+        started_at: '2026-03-26T12:00:00Z',
+        uptime_seconds: 12,
+      },
+    }
+
+    const { Overview } = await loadOverview()
+    render(html`<${Overview} />`, container)
+    await flushUi()
+
+    expect(container.textContent).toContain('설정 Truth')
+    expect(container.textContent).toContain('warning 3')
+    expect(container.textContent).toContain('config root')
+    expect(container.textContent).toContain('/Users/dancer/me/workspace/yousleepwhen/masc-mcp/config')
+    expect(container.textContent).toContain('runtime root')
+    expect(container.textContent).toContain('/Users/dancer/me/.masc')
+    expect(container.textContent).toContain('personas')
+    expect(container.textContent).toContain('Resolved config child is missing: keepers')
+    expect(container.textContent).toContain('Runtime build commit (deadbee) differs from workspace HEAD (cafef00d).')
+    expect(container.textContent).toContain('workspace와 runtime build source가 다릅니다.')
+  }, 15000)
+
   it('renders the operations hub card and routes to governance', async () => {
     namespaceTruth.value = {
       generated_at: '2026-03-26T12:08:00Z',

@@ -994,6 +994,14 @@ let dashboard_shell_payload_json (config : Room.config) : Yojson.Safe.t =
     let elapsed_ms = int_of_float ((Unix.gettimeofday () -. t0) *. 1000.0) in
     (value, elapsed_ms)
   in
+  let measure_json_projection label f =
+    measure_ms (fun () ->
+        try f ()
+        with exn ->
+          Log.Server.warn "dashboard shell %s projection failed: %s" label
+            (Printexc.to_string exn);
+          `Null)
+  in
   let status_json, status_ms = measure_ms (fun () -> dashboard_shell_status_json config) in
   let agents, agents_ms = measure_ms (fun () -> dashboard_agents_safe config) in
   let general_agents = dashboard_general_agent_count agents in
@@ -1005,10 +1013,11 @@ let dashboard_shell_payload_json (config : Room.config) : Yojson.Safe.t =
     measure_ms (fun () -> Meta_cognition.summary_json config)
   in
   let config_resolution_json, config_resolution_ms =
-    measure_ms (fun () -> Config_dir_resolver.(resolve () |> to_json))
+    measure_json_projection "config_resolution" (fun () ->
+        Config_dir_resolver.(resolve () |> to_json))
   in
   let runtime_resolution_json, runtime_resolution_ms =
-    measure_ms
+    measure_json_projection "runtime_resolution"
       (fun () -> Server_dashboard_http_runtime_info.runtime_resolution_json config)
   in
   `Assoc

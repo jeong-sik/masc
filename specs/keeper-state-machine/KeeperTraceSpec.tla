@@ -4,21 +4,44 @@
 
 EXTENDS Naturals
 
+PhaseNames ==
+    {"Offline", "Running", "Failing", "Compacting", "HandingOff",
+     "Draining", "Paused", "Stopped", "Crashed", "Restarting", "Dead"}
+
+CanTransition(from, to) ==
+    CASE from = "Stopped" -> FALSE
+      [] from = "Dead" -> FALSE
+      [] from = "Offline" -> to \in {"Running", "Stopped", "Draining"}
+      [] from = "Running" -> to \in {"Failing", "Compacting", "HandingOff",
+                                     "Draining", "Paused", "Stopped", "Crashed"}
+      [] from = "Failing" -> to \in {"Running", "Crashed", "Draining", "Paused"}
+      [] from = "Compacting" -> to \in {"Running", "Failing", "Crashed", "Draining"}
+      [] from = "HandingOff" -> to \in {"Running", "Failing", "Crashed", "Draining"}
+      [] from = "Draining" -> to \in {"Stopped", "Crashed"}
+      [] from = "Paused" -> to \in {"Running", "Draining", "Stopped", "Crashed"}
+      [] from = "Crashed" -> to \in {"Restarting", "Dead"}
+      [] from = "Restarting" -> to \in {"Running", "Crashed", "Dead",
+                                        "Draining", "Paused"}
+      [] OTHER -> FALSE
+
 CONSTANTS MaxRestarts
 
 VARIABLES
-    fiber_alive, heartbeat_healthy, turn_healthy,
+    fiber_alive, heartbeat_healthy, turn_healthy, manual_reconcile_required,
+    context_within_budget, context_handoff_needed,
     compaction_active, handoff_active, operator_paused,
     stop_requested, restart_budget_remaining, backoff_elapsed,
-    guardrail_triggered, drain_complete, restart_count,
+    guardrail_triggered, drain_complete, restart_count, recorded_phase,
     trace_idx
 
 INSTANCE TraceData
 
-vars == <<fiber_alive, heartbeat_healthy, turn_healthy,
+vars == <<fiber_alive, heartbeat_healthy, turn_healthy, manual_reconcile_required,
+          context_within_budget, context_handoff_needed,
           compaction_active, handoff_active, operator_paused,
           stop_requested, restart_budget_remaining, backoff_elapsed,
-          guardrail_triggered, drain_complete, restart_count, trace_idx>>
+          guardrail_triggered, drain_complete, restart_count,
+          recorded_phase, trace_idx>>
 
 \* ── Phase Derivation (copied from KeeperStateMachine) ────
 
@@ -33,7 +56,7 @@ DerivePhase ==
     ELSE IF operator_paused THEN "Paused"
     ELSE IF handoff_active THEN "HandingOff"
     ELSE IF compaction_active THEN "Compacting"
-    ELSE IF ~heartbeat_healthy \/ ~turn_healthy THEN "Failing"
+    ELSE IF ~heartbeat_healthy \/ ~turn_healthy \/ manual_reconcile_required THEN "Failing"
     ELSE IF fiber_alive THEN "Running"
     ELSE "Offline"
 
@@ -44,6 +67,9 @@ TraceInit ==
     /\ fiber_alive = Trace[1].fiber_alive
     /\ heartbeat_healthy = Trace[1].heartbeat_healthy
     /\ turn_healthy = Trace[1].turn_healthy
+    /\ manual_reconcile_required = Trace[1].manual_reconcile_required
+    /\ context_within_budget = Trace[1].context_within_budget
+    /\ context_handoff_needed = Trace[1].context_handoff_needed
     /\ compaction_active = Trace[1].compaction_active
     /\ handoff_active = Trace[1].handoff_active
     /\ operator_paused = Trace[1].operator_paused
@@ -53,6 +79,7 @@ TraceInit ==
     /\ guardrail_triggered = Trace[1].guardrail_triggered
     /\ drain_complete = Trace[1].drain_complete
     /\ restart_count = Trace[1].restart_count
+    /\ recorded_phase = Trace[1].recorded_phase
 
 \* ── Trace Next: step through trace ───────────────────────
 
@@ -62,6 +89,9 @@ TraceNext ==
     /\ fiber_alive' = Trace[trace_idx + 1].fiber_alive
     /\ heartbeat_healthy' = Trace[trace_idx + 1].heartbeat_healthy
     /\ turn_healthy' = Trace[trace_idx + 1].turn_healthy
+    /\ manual_reconcile_required' = Trace[trace_idx + 1].manual_reconcile_required
+    /\ context_within_budget' = Trace[trace_idx + 1].context_within_budget
+    /\ context_handoff_needed' = Trace[trace_idx + 1].context_handoff_needed
     /\ compaction_active' = Trace[trace_idx + 1].compaction_active
     /\ handoff_active' = Trace[trace_idx + 1].handoff_active
     /\ operator_paused' = Trace[trace_idx + 1].operator_paused
@@ -71,8 +101,17 @@ TraceNext ==
     /\ guardrail_triggered' = Trace[trace_idx + 1].guardrail_triggered
     /\ drain_complete' = Trace[trace_idx + 1].drain_complete
     /\ restart_count' = Trace[trace_idx + 1].restart_count
+    /\ recorded_phase' = Trace[trace_idx + 1].recorded_phase
 
-TraceSpec == TraceInit /\ [][TraceNext]_vars
+TerminalStutter ==
+    /\ trace_idx = TraceLength
+    /\ UNCHANGED vars
+
+TraceStep ==
+    \/ TraceNext
+    \/ TerminalStutter
+
+TraceSpec == TraceInit /\ [][TraceStep]_vars
 
 \* ── Safety Invariants ────────────────────────────────────
 
@@ -80,6 +119,9 @@ TypeOK ==
     /\ fiber_alive \in BOOLEAN
     /\ heartbeat_healthy \in BOOLEAN
     /\ turn_healthy \in BOOLEAN
+    /\ manual_reconcile_required \in BOOLEAN
+    /\ context_within_budget \in BOOLEAN
+    /\ context_handoff_needed \in BOOLEAN
     /\ compaction_active \in BOOLEAN
     /\ handoff_active \in BOOLEAN
     /\ operator_paused \in BOOLEAN
@@ -89,16 +131,27 @@ TypeOK ==
     /\ guardrail_triggered \in BOOLEAN
     /\ drain_complete \in BOOLEAN
     /\ restart_count \in 0..MaxRestarts+10
+    /\ recorded_phase \in PhaseNames
     /\ trace_idx \in 1..TraceLength
 
 RunningRequiresFiber == DerivePhase = "Running" => fiber_alive
+RunningClearsManualReconcile == DerivePhase = "Running" => ~manual_reconcile_required
 StoppedRequiresDrain == DerivePhase = "Stopped" => (stop_requested /\ drain_complete)
 DeadRequiresNoBudget == DerivePhase = "Dead" => ~restart_budget_remaining
+DerivePhaseAgreement == recorded_phase = DerivePhase
 
 \* Monotonicity: restart_count never decreases
 RestartCountMonotonic == [][restart_count' >= restart_count]_vars
 
 \* Budget never revives
 BudgetNeverRevives == [](~restart_budget_remaining => [](~restart_budget_remaining))
+
+\* Recorded phases must either stay the same or follow the keeper transition matrix.
+TransitionStepAllowed ==
+    (trace_idx < TraceLength) =>
+        (recorded_phase' = recorded_phase
+         \/ CanTransition(recorded_phase, recorded_phase'))
+
+TransitionMatrixAgreement == [][TransitionStepAllowed]_vars
 
 ====

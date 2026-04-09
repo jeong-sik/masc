@@ -15,13 +15,35 @@ let get_int json key =
   | `Int n -> n
   | _ -> 0
 
+let get_string json key =
+  match Yojson.Safe.Util.member key json with
+  | `String s -> s
+  | _ -> ""
+
+let tla_phase = function
+  | "offline" -> "Offline"
+  | "running" -> "Running"
+  | "failing" -> "Failing"
+  | "compacting" -> "Compacting"
+  | "handing_off" -> "HandingOff"
+  | "draining" -> "Draining"
+  | "paused" -> "Paused"
+  | "stopped" -> "Stopped"
+  | "crashed" -> "Crashed"
+  | "restarting" -> "Restarting"
+  | "dead" -> "Dead"
+  | other -> other
+
 let emit_record oc json =
   let c = Yojson.Safe.Util.member "conditions_after" json in
   Printf.fprintf oc
-    "  [fiber_alive |-> %s, heartbeat_healthy |-> %s, turn_healthy |-> %s, compaction_active |-> %s, handoff_active |-> %s, operator_paused |-> %s, stop_requested |-> %s, restart_budget_remaining |-> %s, backoff_elapsed |-> %s, guardrail_triggered |-> %s, drain_complete |-> %s, restart_count |-> %d]"
+    "  [fiber_alive |-> %s, heartbeat_healthy |-> %s, turn_healthy |-> %s, manual_reconcile_required |-> %s, context_within_budget |-> %s, context_handoff_needed |-> %s, compaction_active |-> %s, handoff_active |-> %s, operator_paused |-> %s, stop_requested |-> %s, restart_budget_remaining |-> %s, backoff_elapsed |-> %s, guardrail_triggered |-> %s, drain_complete |-> %s, restart_count |-> %d, recorded_phase |-> %S]"
     (bool_to_tla (get_bool c "fiber_alive"))
     (bool_to_tla (get_bool c "heartbeat_healthy"))
     (bool_to_tla (get_bool c "turn_healthy"))
+    (bool_to_tla (get_bool c "manual_reconcile_required"))
+    (bool_to_tla (get_bool c "context_within_budget"))
+    (bool_to_tla (get_bool c "context_handoff_needed"))
     (bool_to_tla (get_bool c "compaction_active"))
     (bool_to_tla (get_bool c "handoff_active"))
     (bool_to_tla (get_bool c "operator_paused"))
@@ -31,6 +53,7 @@ let emit_record oc json =
     (bool_to_tla (get_bool c "guardrail_triggered"))
     (bool_to_tla (get_bool c "drain_complete"))
     (get_int json "restart_count")
+    (tla_phase (get_string json "new_phase"))
 
 let () =
   let args = Sys.argv in

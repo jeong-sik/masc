@@ -76,6 +76,11 @@ let with_room f =
   let dir = Filename.concat (Filename.get_temp_dir_name ())
     (Printf.sprintf "test_keeper_pr_%s" (fresh_nonce ())) in
   (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  Process_eio.reset_for_testing ();
+  Process_eio.init
+    ~cwd_default:Eio.Path.(Eio.Stdenv.fs env / dir)
+    ~proc_mgr:(Eio.Stdenv.process_mgr env)
+    ~clock:(Eio.Stdenv.clock env);
   let saved_pg = Sys.getenv_opt "MASC_POSTGRES_URL" in
   let saved_sb = Sys.getenv_opt "SB_PG_URL" in
   Unix.putenv "MASC_POSTGRES_URL" "";
@@ -88,6 +93,7 @@ let with_room f =
       (match saved_sb with
        | Some v -> Unix.putenv "SB_PG_URL" v
        | None -> (try Unix.putenv "SB_PG_URL" "" with _ -> ()));
+      Process_eio.reset_for_testing ();
       (try rm_rf dir with _ -> ()))
     (fun () ->
       let config = Room.default_config dir in
@@ -108,6 +114,9 @@ let json_string key json =
 
 let json_bool key json =
   Yojson.Safe.Util.(member key json |> to_bool)
+
+let json_float key json =
+  Yojson.Safe.Util.(member key json |> to_float)
 
 (* --- Required field validation --- *)
 
@@ -879,6 +888,120 @@ let test_readonly_bash_blocks_quoted_absolute_path_outside_playground () =
     check bool "quoted readonly absolute path blocked" true
       (String.starts_with ~prefix:"Path syntax blocked:" (json_string "error" json)))
 
+let test_readonly_bash_allows_masc_mcp_argument () =
+  with_room (fun config ->
+    let meta = make_meta_with_preset "delivery" in
+    let result =
+      call_tool config meta "keeper_shell"
+        (`Assoc
+          [ "op", `String "bash"
+          ; "command", `String "echo masc-mcp remote"
+          ])
+    in
+    let json = parse_json result in
+    check bool "command allowed" true (json_bool "ok" json);
+    check string "output preserved" "masc-mcp remote\n" (json_string "output" json))
+
+let test_readonly_bash_surfaces_timeout_error () =
+  with_room (fun config ->
+    let meta = make_meta_with_preset "delivery" in
+    let result =
+      call_tool config meta "keeper_shell"
+        (`Assoc
+          [ "op", `String "bash"
+          ; "command", `String "python3 -c \"import time\ntime.sleep(2)\""
+          ; "timeout_sec", `Float 1.0
+          ])
+    in
+    let json = parse_json result in
+    check bool "timeout returns failure" false (json_bool "ok" json);
+    check string "timeout error surfaced" "command_timed_out" (json_string "error" json);
+    check (float 0.001) "timeout echoed" 1.0 (json_float "timeout_sec" json);
+    check string "status kind is timeout" "timeout"
+      Yojson.Safe.Util.(json |> member "status" |> member "kind" |> to_string))
+
+let test_shell_readonly_ls_defaults_path_to_cwd () =
+  with_room (fun config ->
+    let meta = make_meta_with_preset "delivery" in
+    let expected_cwd =
+      Filename.concat
+        (Keeper_alerting_path.project_root_of_config config)
+        (Keeper_alerting_path.playground_path_of_keeper meta.name)
+    in
+    let file_path = Filename.concat expected_cwd "notes.txt" in
+    write_text_file file_path "hello from cwd default\n";
+    let result =
+      call_tool config meta "keeper_shell"
+        (`Assoc
+          [ "op", `String "ls"
+          ; "cwd", `String expected_cwd
+          ])
+    in
+    let json = parse_json result in
+    check bool "ls ok" true (json_bool "ok" json);
+    check string "ls path uses cwd" expected_cwd (json_string "path" json);
+    check bool "ls lists file from cwd" true
+      (match Yojson.Safe.Util.member "entries" json with
+       | `List entries ->
+         List.exists (function
+           | `String line -> String_util.contains_substring line "notes.txt"
+           | _ -> false) entries
+       | _ -> false))
+
+let test_shell_readonly_cat_resolves_relative_path_from_cwd () =
+  with_room (fun config ->
+    let meta = make_meta_with_preset "delivery" in
+    let expected_cwd =
+      Filename.concat
+        (Keeper_alerting_path.project_root_of_config config)
+        (Keeper_alerting_path.playground_path_of_keeper meta.name)
+    in
+    let nested_file = Filename.concat expected_cwd "repo/lib/approval.ml" in
+    write_text_file nested_file "let approval = true\n";
+    let result =
+      call_tool config meta "keeper_shell"
+        (`Assoc
+          [ "op", `String "cat"
+          ; "cwd", `String expected_cwd
+          ; "path", `String "repo/lib/approval.ml"
+          ])
+    in
+    let json = parse_json result in
+    check bool "relative cat ok" true (json_bool "ok" json);
+    check string "relative cat path uses cwd" nested_file (json_string "path" json);
+    check string "relative cat content" "let approval = true\n" (json_string "content" json))
+
+let test_shell_readonly_rg_resolves_dot_path_from_cwd () =
+  with_room (fun config ->
+    let meta = make_meta_with_preset "delivery" in
+    let expected_cwd =
+      Filename.concat
+        (Keeper_alerting_path.project_root_of_config config)
+        (Keeper_alerting_path.playground_path_of_keeper meta.name)
+    in
+    let nested_file = Filename.concat expected_cwd "repo/lib/approval.ml" in
+    write_text_file nested_file "let keeper_path_fix = true\n";
+    let result =
+      call_tool config meta "keeper_shell"
+        (`Assoc
+          [ "op", `String "rg"
+          ; "cwd", `String expected_cwd
+          ; "path", `String "."
+          ; "pattern", `String "keeper_path_fix"
+          ])
+    in
+    let json = parse_json result in
+    check bool "rg ok" true (json_bool "ok" json);
+    check string "rg path uses cwd" (Filename.concat expected_cwd ".")
+      (json_string "path" json);
+    check bool "rg finds nested file" true
+      (match Yojson.Safe.Util.member "matches" json with
+       | `List matches ->
+         List.exists (function
+           | `String line -> String_util.contains_substring line "keeper_path_fix"
+           | _ -> false) matches
+       | _ -> false))
+
 let () =
   run "keeper_pr_workflow"
     [ "required_fields",
@@ -939,6 +1062,16 @@ let () =
           test_bash_blocks_quoted_absolute_path_outside_playground
       ; test_case "readonly bash blocks quoted absolute path outside playground" `Quick
           test_readonly_bash_blocks_quoted_absolute_path_outside_playground
+      ; test_case "readonly bash allows masc-mcp argument" `Quick
+          test_readonly_bash_allows_masc_mcp_argument
+      ; test_case "readonly bash surfaces timeout error" `Quick
+          test_readonly_bash_surfaces_timeout_error
+      ; test_case "readonly ls defaults path to cwd" `Quick
+          test_shell_readonly_ls_defaults_path_to_cwd
+      ; test_case "readonly cat resolves relative path from cwd" `Quick
+          test_shell_readonly_cat_resolves_relative_path_from_cwd
+      ; test_case "readonly rg resolves dot path from cwd" `Quick
+          test_shell_readonly_rg_resolves_dot_path_from_cwd
       ]
     ; "integration",
       [ test_case "worktree workflow e2e" `Slow test_worktree_create_writes_and_cleans_up

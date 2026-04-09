@@ -200,6 +200,27 @@ let () = test "dispatch_web_search_rejects_secret_like_query" (fun () ->
   | None -> failwith "dispatch returned None"
 )
 
+let () = test "validate_web_search_allows_task_id_with_sk_substring" (fun () ->
+  match
+    Tool_misc_web_search.validate_query
+      "task-352 destructive check tools hardcoded"
+  with
+  | Ok query -> assert (query = "task-352 destructive check tools hardcoded")
+  | Error message -> failwith message
+)
+
+let () = test "validate_web_search_rejects_sk_prefixed_secret_token" (fun () ->
+  match
+    Tool_misc_web_search.validate_query
+      "investigate leaked key sk-1234567890abcdefghijklmnop"
+  with
+  | Ok _ -> failwith "expected secret-like query to be rejected"
+  | Error message ->
+      assert
+        (message
+         = "query looks like it may contain secrets; refine it before using web search")
+)
+
 let () = test "parse_bing_rss_items" (fun () ->
   let payload =
     {|<?xml version="1.0" encoding="utf-8" ?>

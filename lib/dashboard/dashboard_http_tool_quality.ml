@@ -9,6 +9,54 @@
     Strips known prefixes ("error: ", "tool_error: ") before JSON parsing
     so prefixed outputs like ["error: {\"ok\":false,\"error\":\"msg\"}"]
     yield the actual error key instead of "parse_error". *)
+let normalize_failure_text (text : string) : string =
+  let trimmed = String.trim text in
+  let lowered = String.lowercase_ascii trimmed in
+  let prefix_rules =
+    [
+      ("path_not_in_allowed_paths:", "path_not_in_allowed_paths");
+      ("path_not_found_under_allowed_roots:", "path_not_found_under_allowed_roots");
+      ("path_outside_project_root:", "path_outside_project_root");
+      ("allowed_paths_normalized_empty:", "allowed_paths_normalized_empty");
+      ("ambiguous_relative_read_path:", "ambiguous_relative_read_path");
+      ("cwd_not_directory:", "cwd_not_directory");
+      ("path blocked:", "path_blocked");
+      ("path syntax blocked:", "path_syntax_blocked");
+      ("query looks like it may contain secrets", "query_secret_like");
+      ("web search rate limit exceeded", "web_search_rate_limit");
+      ("all web search providers failed", "web_search_provider_failure");
+      ("query must be at most", "query_too_long");
+      ("query is required", "query_required");
+    ]
+  in
+  match List.find_opt (fun (prefix, _category) ->
+    String.starts_with ~prefix lowered
+  ) prefix_rules with
+  | Some (_, category) -> category
+  | None when trimmed = "" -> "empty_output"
+  | None -> trimmed
+
+let classify_process_status (json : Yojson.Safe.t) : string option =
+  match Yojson.Safe.Util.member "status" json with
+  | `Assoc _ as status ->
+    let kind = Safe_ops.json_string_opt "kind" status |> Option.value ~default:"unknown" in
+    let op = Safe_ops.json_string_opt "op" json |> Option.value ~default:"tool" in
+    begin match kind with
+    | "timeout" ->
+      Some (Printf.sprintf "%s_timeout" op)
+    | "signaled" ->
+      let signal = Safe_ops.json_int ~default:(-1) "signal" status in
+      Some (Printf.sprintf "%s_signaled_%d" op signal)
+    | "stopped" ->
+      let signal = Safe_ops.json_int ~default:(-1) "signal" status in
+      Some (Printf.sprintf "%s_stopped_%d" op signal)
+    | "exit" ->
+      let code = Safe_ops.json_int ~default:0 "code" status in
+      if code = 0 then None else Some (Printf.sprintf "%s_exit_%d" op code)
+    | _ -> None
+    end
+  | _ -> None
+
 let classify_failure_output (output : string) : string =
   if String.length output = 0 then "empty_output"
   else
@@ -24,8 +72,19 @@ let classify_failure_output (output : string) : string =
     in
     match Yojson.Safe.from_string json_str with
     | j ->
-      Safe_ops.json_string_opt "error" j
-      |> Option.value ~default:"unknown_error"
+      (match Safe_ops.json_string_opt "error" j |> Option.map String.trim with
+       | Some "command_blocked_readonly" ->
+         let category =
+           Safe_ops.json_string_opt "category" j |> Option.value ~default:"unknown"
+         in
+         Printf.sprintf "command_blocked_readonly:%s" category
+       | Some error when error <> "" -> normalize_failure_text error
+       | _ ->
+         match Safe_ops.json_string_opt "message" j |> Option.map String.trim with
+         | Some message when message <> "" -> normalize_failure_text message
+         | _ ->
+           classify_process_status j
+           |> Option.value ~default:"unknown_error")
     | exception Yojson.Json_error _ -> "parse_error"
 
 let aggregate ?(n = 5000) () : Yojson.Safe.t =

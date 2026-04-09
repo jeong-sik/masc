@@ -15,6 +15,13 @@ val default_cascade_name : string
 (** Minimum context window (tokens) for any keeper turn. *)
 val min_keeper_context_tokens : int
 
+val alert_error_detail_max_chars : int
+val alert_excerpt_min_chars : int
+val alert_message_preview_max_chars : int
+val alert_reply_preview_max_chars : int
+val tool_policy_count_warn_threshold : int
+val tool_first_sentence_max_chars : int
+
 val default_execution_scope : string
 val default_proactive_enabled : bool
 val default_proactive_idle_sec : int

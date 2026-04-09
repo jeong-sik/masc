@@ -548,7 +548,7 @@ let run
         }
     | Error (Oas.Error.Agent (Oas.Error.MaxTurnsExceeded r)) ->
       let partial_response : Oas.Types.api_response = {
-        id = session_id; model = "turn-exhausted";
+        id = session_id; model = config.model_id;
         stop_reason = Oas.Types.EndTurn;
         content = [Oas.Types.Text (Printf.sprintf
           "[turn budget exhausted: %d/%d turns used]" r.turns r.limit)];

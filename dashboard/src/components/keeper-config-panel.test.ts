@@ -56,6 +56,15 @@ const mocks = vi.hoisted(() => ({
       threshold: 0.85,
       cooldown_sec: 300,
     },
+    hooks: {
+      slots: {},
+      deny_list: [],
+      deny_list_count: 0,
+      destructive_check_tools: 'dynamic_boundary (Tool_dispatch.is_destructive)',
+      cost_budget: {
+        active: false,
+      },
+    },
     runtime: {
       paused: false,
       registered: true,
@@ -139,6 +148,7 @@ describe('KeeperConfigPanel', () => {
     expect(container.textContent).toContain('활성 모델')
     expect(container.textContent).toContain('레지스트리 상태')
     expect(container.textContent).toContain('running')
+    expect(container.textContent).toContain('dynamic_boundary (Tool_dispatch.is_destructive)')
 
     const editButton = Array.from(container.querySelectorAll('button')).find(button =>
       button.textContent?.includes('편집'),

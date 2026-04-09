@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { fetchDashboardTools, fetchToolQuality } from './dashboard'
+import { fetchDashboardTools, fetchKeeperConfig, fetchToolQuality } from './dashboard'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -102,5 +102,152 @@ describe('fetchToolQuality', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/tool-quality?n=250')
     expect(result.total).toBe(1)
+  })
+})
+
+describe('fetchKeeperConfig', () => {
+  it('normalizes singleton string, numeric string, and boolean string fields', async () => {
+    const rawResponse = {
+      name: 'keeper-sangsu',
+      execution_scope: 'workspace',
+      allowed_paths: '/tmp/workspace',
+      effective_allowed_paths: ['/tmp/workspace'],
+      prompt: {
+        goal: 'Ship stable keeper ops',
+        short_goal: 'Diagnose agent liveness',
+        mid_goal: 'Reduce restart confusion',
+        long_goal: 'Keep command plane stable',
+        will: 'Stay on call',
+        needs: 'Accurate runtime state',
+        desires: 'Clear operator feedback',
+        instructions: 'Prefer direct remediation',
+        system_prompt_blocks: {
+          constitution: { key: 'keeper.constitution', source: 'file', text: 'constitution text' },
+          world: { key: 'keeper.world', source: 'override', text: 'world text' },
+          capabilities: { key: 'keeper.capabilities', source: 'file', text: 'capabilities text' },
+        },
+        effective_system_prompt: 'full prompt',
+      },
+      execution: {
+        models: 'llama:test-balanced',
+        active_model: 'llama:test-balanced',
+        verify: 'true',
+      },
+      compaction: {
+        profile: 'balanced',
+        ratio_gate: '0.85',
+        message_gate: '16',
+        token_gate: '24000',
+        cooldown_sec: '120',
+      },
+      proactive: {
+        enabled: 'true',
+        idle_sec: '900',
+        cooldown_sec: '1800',
+      },
+      drift: {
+        status: 'wired',
+        enabled: 'true',
+        min_turn_gap: '4',
+        count_total: '2',
+        last_reason: 'board quiet',
+      },
+      auto_team_session: {
+        status: 'source_only',
+        enabled: null,
+      },
+      handoff: {
+        auto: 'true',
+        threshold: '0.85',
+        cooldown_sec: '300',
+      },
+      hooks: {
+        slots: {
+          pre_tool_use: {
+            active: 'true',
+            source: 'keeper_hooks_oas',
+            gates: 'keeper_deny_list',
+          },
+        },
+        deny_list: 'keeper_bash',
+        deny_list_count: '1',
+        destructive_check_tools: 'dynamic_boundary (Tool_dispatch.is_destructive)',
+        cost_budget: {
+          active: 'false',
+        },
+      },
+      runtime: {
+        paused: 'false',
+        registered: 'true',
+        keepalive_running: 'true',
+        registry_state: 'running',
+        fiber_health: 'healthy',
+        presence_keepalive: 'true',
+        presence_keepalive_sec: '30',
+        runtime_blocker_manual_reconcile: 'false',
+      },
+      coordination: {
+        room_scope: 'global',
+        scope_kind: 'global',
+        mention_targets: 'sangsu',
+        joined_room_ids: 'default',
+      },
+      tools: {
+        tool_access: { kind: 'preset', preset: 'coding' },
+        tool_policy_mode: 'preset',
+        tool_preset: 'coding',
+        tool_also_allow: 'keeper_board_post',
+        tool_custom_allowlist: [],
+        resolved_allowlist: 'keeper_fs_read',
+        tool_denylist: 'keeper_bash',
+        active_masc_tool_count: '1',
+        active_keeper_tool_count: '2',
+        total_active: '3',
+      },
+      sources: {
+        live_meta_path: '/tmp/.masc/keepers/keeper-sangsu/live.json',
+        default_manifest_path: null,
+        default_source_kind: 'toml',
+        precedence: 'live_meta',
+        has_live_override: 'true',
+        override_fields: 'goal',
+      },
+      metrics: {
+        generation: '3',
+        total_turns: '12',
+        total_input_tokens: '1200',
+        total_output_tokens: '800',
+        total_tokens: '2000',
+        total_cost_usd: '0.12',
+        last_model_used: 'llama:test-balanced',
+        last_input_tokens: '120',
+        last_output_tokens: '80',
+        last_total_tokens: '200',
+        last_latency_ms: '2400',
+        last_total_tokens_per_sec: '22.4',
+        last_output_tokens_per_sec: '11.2',
+        compaction_count: '1',
+      },
+    }
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(rawResponse), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchKeeperConfig('keeper-sangsu')
+
+    expect(result.allowed_paths).toEqual(['/tmp/workspace'])
+    expect(result.execution.models).toEqual(['llama:test-balanced'])
+    expect(result.execution.verify).toBe(true)
+    expect(result.hooks?.destructive_check_tools).toEqual(['dynamic_boundary (Tool_dispatch.is_destructive)'])
+    expect(result.hooks?.slots.pre_tool_use?.gates).toEqual(['keeper_deny_list'])
+    expect(result.tools.tool_also_allow).toEqual(['keeper_board_post'])
+    expect(result.sources.precedence).toEqual(['live_meta'])
+    expect(result.metrics.total_cost_usd).toBe(0.12)
+    expect(result.runtime.presence_keepalive_sec).toBe(30)
   })
 })

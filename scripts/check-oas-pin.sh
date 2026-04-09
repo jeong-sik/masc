@@ -134,6 +134,8 @@ if command -v opam >/dev/null 2>&1; then
         exit 1
         ;;
     esac
+  elif [[ "${LOCAL_ONLY}" -eq 0 ]]; then
+    echo "WARN: could not read agent_sdk pin source from opam; installed version matches ${OAS_AGENT_SDK_MIN_VERSION}" >&2
   fi
 fi
 

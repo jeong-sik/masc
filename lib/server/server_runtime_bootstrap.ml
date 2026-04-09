@@ -83,6 +83,9 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
    | Error msg ->
        Log.Server.error "Fatal tool policy config load failure: %s" msg;
        exit 1);
+  (* Validate Tool_spec <-> TOML coverage *)
+  let validation = Tool_registration_check.validate () in
+  Tool_registration_check.log_validation_result validation;
   let state =
     Mcp_eio.create_state_eio ~sw ~env:caqti_env ~proc_mgr ~fs ~clock
       ~mono_clock ~net

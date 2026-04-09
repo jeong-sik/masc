@@ -27,49 +27,26 @@ import { openAgentDetail } from './agent-detail'
 import { formatDuration, trimText } from './mission-utils'
 import { namespaceTruth } from '../namespace-truth-store'
 import {
+  keeperPhaseForDisplay,
+  runtimeBandMeta,
+  runtimeBandMetaForAgent,
+  summarizeKeeperMonitoring,
+  type RuntimeBand,
+} from '../lib/monitoring-runtime'
+import { KeeperPhaseBadge } from './keeper-phase-indicator'
+import {
   resolveRuntimeCounts,
   runtimeCountSourceLabel,
   shouldShowExecutionFallbackState,
 } from '../runtime-counts'
 
-type StatusFilter = 'all' | 'active' | 'idle' | 'offline'
+type StatusFilter = 'all' | RuntimeBand
 
-function statusCategory(status: string | undefined): StatusFilter {
-  if (!status) return 'idle'
-  const s = status.toLowerCase()
-  if (s === 'active' || s === 'busy' || s === 'listening' || s === 'working') return 'active'
-  if (s === 'offline' || s === 'inactive') return 'offline'
-  return 'idle'
-}
-
-function statusLabel(status: string | undefined): string {
-  if (!status) return '상태 미수집'
-  const labels: Record<string, string> = {
-    active: '온라인', busy: '처리 중', listening: '응답 대기', working: '작업 실행 중',
-    idle: '대기', offline: '오프라인', inactive: '종료됨',
-  }
-  return labels[status.toLowerCase()] ?? status
-}
-
-function statusDescription(status: string | undefined): string {
-  if (!status) return '런타임 상태를 아직 받지 못했습니다.'
-  const descriptions: Record<string, string> = {
-    active: '연결되어 있고 요청을 받을 수 있는 상태입니다.',
-    busy: '지금 응답이나 작업을 처리하고 있습니다.',
-    listening: '연결된 상태에서 입력이나 다음 지시를 기다리고 있습니다.',
-    working: '현재 작업을 수행 중입니다.',
-    idle: '연결은 유지되지만 지금 표시할 작업은 없습니다.',
-    offline: '하트비트가 없어 현재 접근할 수 없습니다. 수동으로 내렸거나 연결이 끊겼을 수 있습니다.',
-    inactive: '등록은 남아 있지만 명시적으로 내려간 상태입니다.',
-  }
-  return descriptions[status.toLowerCase()] ?? '정의되지 않은 상태값입니다.'
-}
-
-function statusBadgeClass(status: string | undefined): string {
-  const cat = statusCategory(status)
-  if (cat === 'active') return 'roster-badge--active'
-  if (cat === 'offline') return 'roster-badge--offline'
-  return 'roster-badge--idle'
+function runtimeBadgeClass(band: RuntimeBand): string {
+  if (band === 'active') return 'border-[rgba(52,211,153,0.2)] bg-[rgba(52,211,153,0.12)] text-[var(--ok)]'
+  if (band === 'attention') return 'border-[rgba(251,191,36,0.2)] bg-[rgba(251,191,36,0.12)] text-[var(--warn)]'
+  if (band === 'paused') return 'border-[rgba(167,139,250,0.2)] bg-[rgba(167,139,250,0.12)] text-[#a78bfa]'
+  return 'border-[var(--white-8)] bg-[var(--white-4)] text-[var(--text-dim)]'
 }
 
 interface KeeperInfo {
@@ -98,6 +75,20 @@ function findKeeper(agentName: string, keeperList: Keeper[], keeperBriefs: Dashb
   return null
 }
 
+function findKeeperRuntime(agentName: string, keeperList: Keeper[]): Keeper | null {
+  for (const keeper of keeperList) {
+    if (
+      keeper.name === agentName
+      || keeper.agent_name === agentName
+      || agentName.includes(keeper.name)
+      || keeper.name.includes(agentName)
+    ) {
+      return keeper
+    }
+  }
+  return null
+}
+
 type KeeperFilterMode = 'all' | 'agent-only' | 'keeper-only'
 
 function expectedCountForKeeperFilter(
@@ -115,16 +106,20 @@ const FILTER_META: Record<StatusFilter, { label: string; description: string }> 
     description: '등록된 런타임 전체를 보여줍니다.',
   },
   active: {
-    label: '온라인',
-    description: 'active, busy, listening, working 상태를 묶어 보여줍니다.',
+    label: '가동중',
+    description: '운영자 개입 없이 흐름을 지켜봐도 되는 상태를 묶어 보여줍니다.',
   },
-  idle: {
-    label: '작업 없음',
-    description: '연결은 살아 있지만 현재 잡힌 작업이 없는 상태입니다.',
+  attention: {
+    label: '주의 필요',
+    description: '오류, 복구, 승계, stale heartbeat, blocker 등 운영 확인이 필요한 상태입니다.',
+  },
+  paused: {
+    label: '일시정지',
+    description: '운영자가 멈춰 둔 상태를 따로 모아 봅니다.',
   },
   offline: {
-    label: '연결 끊김',
-    description: 'offline, inactive 상태를 묶어 보여줍니다.',
+    label: '오프라인',
+    description: '프로세스가 내려갔거나 아직 기동되지 않은 상태입니다.',
   },
 }
 
@@ -220,13 +215,25 @@ export function buildAgentRoster(
   return Array.from(roster.values())
 }
 
-export function countAgentsByStatus(agentList: Agent[]): Record<StatusFilter, number> {
-  return {
+export function countAgentsByStatus(
+  agentList: Agent[],
+  keeperList: Keeper[],
+): Record<StatusFilter, number> {
+  const counts: Record<StatusFilter, number> = {
     all: agentList.length,
-    active: agentList.filter((agent: Agent) => statusCategory(agent.status) === 'active').length,
-    idle: agentList.filter((agent: Agent) => statusCategory(agent.status) === 'idle').length,
-    offline: agentList.filter((agent: Agent) => statusCategory(agent.status) === 'offline').length,
+    active: 0,
+    attention: 0,
+    paused: 0,
+    offline: 0,
   }
+
+  for (const agent of agentList) {
+    const keeperRuntime = findKeeperRuntime(agent.name, keeperList)
+    const band = runtimeBandMetaForAgent(agent, keeperRuntime).key
+    counts[band] += 1
+  }
+
+  return counts
 }
 
 export function countRuntimeKinds(
@@ -275,6 +282,9 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     keeperFilter !== 'agent-only'
     && (keeperList.length > 0 || keeperBriefs.length > 0 || runtimeCounts.keepers > 0)
   const scopedAgents = scopeAgentsByKeeperFilter(rosterAgents, keeperList, keeperBriefs, keeperFilter)
+  const bandByAgent = new Map(
+    scopedAgents.map(agent => [agent.name, runtimeBandMetaForAgent(agent, findKeeperRuntime(agent.name, keeperList))] as const),
+  )
   const pageTitle = keeperFilter === 'keeper-only'
     ? '키퍼 런타임'
     : keeperFilter === 'agent-only'
@@ -288,24 +298,25 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
 
   const filtered = scopedAgents
     .filter((a: Agent) => {
-      if (filter !== 'all' && statusCategory(a.status) !== filter) return false
+      if (filter !== 'all' && bandByAgent.get(a.name)?.key !== filter) return false
       if (search && !a.name.toLowerCase().includes(search.toLowerCase())) return false
       return true
     })
     .sort((a: Agent, b: Agent) => {
       const order: Record<StatusFilter, number> = {
         all: 0,
-        active: 0,
-        idle: 1,
-        offline: 2,
+        attention: 0,
+        active: 1,
+        paused: 2,
+        offline: 3,
       }
-      const aOrder = order[statusCategory(a.status)]
-      const bOrder = order[statusCategory(b.status)]
+      const aOrder = order[bandByAgent.get(a.name)?.key ?? 'attention']
+      const bOrder = order[bandByAgent.get(b.name)?.key ?? 'attention']
       if (aOrder !== bOrder) return aOrder - bOrder
       return a.name.localeCompare(b.name)
     })
 
-  const counts = countAgentsByStatus(scopedAgents)
+  const counts = countAgentsByStatus(scopedAgents, keeperList)
   const showExecutionFallbackState = shouldShowExecutionFallbackState({
     executionLoaded: executionLoaded.value,
     executionLoading: executionLoading.value,
@@ -325,7 +336,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
             ? `${filtered.length}개 표시 중`
             : `${filtered.length} / ${scopedAgents.length}개 표시 중`
         )
-  const statusChips = (['all', 'active', 'idle', 'offline'] as StatusFilter[]).map(key => ({
+  const statusChips = (['all', 'attention', 'active', 'paused', 'offline'] as StatusFilter[]).map(key => ({
     key,
     label: FILTER_META[key].label,
     count: executionLoaded.value || scopedAgents.length > 0 ? counts[key] : null,
@@ -350,16 +361,16 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
         : `${countSourceLabel} 기준 ${scopeLabel}가 등록되어 있습니다. execution 상세 projection이 올라오면 상태별 분류와 카드가 채워집니다.`
   const legendCards = [
     {
-      title: '온라인',
-      body: '응답을 받을 수 있는 연결 상태입니다. active, busy, listening, working 값을 한데 묶습니다.',
+      title: '운영 상태',
+      body: '가장 먼저 보는 값입니다. 가동중 / 주의 필요 / 일시정지 / 오프라인으로 운영 우선순위를 보여줍니다.',
     },
     {
-      title: '작업 없음',
-      body: '연결은 살아 있지만 지금 카드에 보여줄 현재 작업이 없는 상태입니다.',
+      title: 'Phase',
+      body: 'TLA lifecycle state입니다. Running, Failing, Paused, Restarting 같은 전이 근거를 그대로 보여줍니다.',
     },
     {
-      title: '연결 끊김',
-      body: '하트비트가 없거나 런타임이 내려간 상태입니다.',
+      title: 'Stage',
+      body: '현재 턴에서 무엇을 하는지 보여주는 세부 활동 단계입니다. idle, thinking, tool, handoff를 분리해서 봅니다.',
     },
     ...(hasKeeperRuntime
       ? [{
@@ -399,8 +410,8 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
           <div class="monitor-muted-panel p-3.5 md:p-4">
             <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div class="flex flex-col gap-1">
-                <div class="text-[11px] font-semibold tracking-[0.08em] text-[var(--text-strong)] uppercase">연결 상태</div>
-                <p class="m-0 text-[12px] leading-[1.5] text-[var(--text-muted)]">상태별로 카드를 좁혀 보면서 현재 응답 가능 런타임과 유휴 런타임을 구분합니다.</p>
+                <div class="text-[11px] font-semibold tracking-[0.08em] text-[var(--text-strong)] uppercase">운영 상태</div>
+                <p class="m-0 text-[12px] leading-[1.5] text-[var(--text-muted)]">phase와 stage를 운영 관점으로 한 번 더 요약한 밴드입니다. 먼저 이상 신호를 모으고, 그다음 phase와 stage를 확인합니다.</p>
               </div>
               <${FilterChips}
                 chips=${statusChips}
@@ -448,6 +459,9 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
         ${filtered.map((agent: Agent) => {
           const brief = briefMap.get(agent.name)
           const keeper = findKeeper(agent.name, keeperList, keeperBriefs)
+          const keeperRuntime = findKeeperRuntime(agent.name, keeperList)
+          const band = bandByAgent.get(agent.name) ?? runtimeBandMeta('attention')
+          const keeperMonitoring = keeperRuntime ? summarizeKeeperMonitoring(keeperRuntime) : null
           const isKeeper = keeper != null
           const currentWork = keeper?.current_work ?? brief?.current_work ?? agent.current_task ?? null
           const lastActivity = keeper?.last_turn_ago_s ?? brief?.last_activity_age_sec ?? null
@@ -478,9 +492,11 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                   <strong class="mb-2 min-w-0 overflow-hidden text-[17px] text-[var(--text-strong)] font-semibold leading-[1.3] group-hover:text-[var(--accent)] transition-colors [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] [overflow-wrap:anywhere]">${agent.name}</strong>
                   
                   <div class="flex items-center gap-1.5 flex-wrap mt-1">
-                    <span class="roster-badge ${statusBadgeClass(agent.status)}" title=${statusDescription(agent.status)}>${statusLabel(agent.status)}</span>
+                    <span class="inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${runtimeBadgeClass(band.key)}" title=${band.description}>${band.label}</span>
                     <span class="text-[11px] text-[var(--text-muted)] bg-[var(--white-4)] border border-[var(--card-border)] px-2 py-0.5 rounded-full">${isKeeper ? '키퍼 런타임' : '일반 에이전트'}</span>
                     ${agent.synthetic ? html`<span class="text-[10px] text-[var(--text-muted)] bg-[var(--white-6)] border border-dashed border-[var(--card-border)] px-1.5 py-px rounded italic" title="키퍼 데이터에서 파생된 합성 엔트리입니다.">파생</span>` : null}
+                    ${keeperMonitoring ? html`<${KeeperPhaseBadge} phase=${keeperRuntime ? keeperPhaseForDisplay(keeperRuntime) : null} compact />` : null}
+                    ${keeperMonitoring ? html`<span class="inline-flex items-center rounded-full border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5 text-[10px] font-medium text-[var(--text-muted)]" title=${keeperMonitoring.stage.description}>stage ${keeperMonitoring.stage.label}</span>` : null}
                     ${keeper?.model ? html`<span class="font-mono text-[10px] text-[var(--text-muted)] bg-[var(--white-4)] border border-[var(--card-border)] px-1.5 py-px rounded">${keeper.model}</span>` : null}
                     ${keeper?.generation != null ? html`<span class="text-[11px] text-[var(--accent)] font-medium bg-[var(--accent-10)] px-1.5 py-px rounded border border-[var(--accent-10)]" title="키퍼 핸드오프가 일어날 때 올라가는 런타임 세대입니다.">세대 ${keeper.generation}</span>` : null}
                   </div>
@@ -488,7 +504,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
               </div>
 
               <div class="flex flex-1 flex-col gap-3 border-t border-[var(--border-slate-12)] pt-3">
-                <p class="m-0 text-[13px] leading-[1.5] text-[var(--text-body)] break-words line-clamp-3" title=${currentWork ?? ''}>${workPreview}</p>
+                <p class="m-0 text-[13px] leading-[1.5] text-[var(--text-body)] break-words line-clamp-3" title=${currentWork ?? ''}>${keeperMonitoring?.hint ?? workPreview}</p>
 
                 <div class="flex flex-wrap items-center gap-2 text-[11px] text-[var(--text-muted)]">
                   <span class="inline-flex items-center rounded-full border border-[var(--white-8)] bg-[var(--white-2)] px-2.5 py-1">

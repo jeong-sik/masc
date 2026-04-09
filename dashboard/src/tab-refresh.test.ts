@@ -15,11 +15,6 @@ vi.mock('./namespace-truth-store', () => ({
   requestNamespaceTruth: vi.fn(),
 }))
 
-vi.mock('./operator-store', () => ({
-  refreshOperatorRoomDigest: vi.fn(),
-  refreshOperatorSnapshot: vi.fn(),
-}))
-
 vi.mock('./mission-store', () => ({
   refreshMissionSnapshot: vi.fn(),
 }))
@@ -52,16 +47,16 @@ describe('refreshPlanForRoute', () => {
     })).toEqual(['execution', 'activityGraph'])
   })
 
-  it('uses the current command sections', () => {
+  it('retires the command surface refresh plan', () => {
     expect(refreshPlanForRoute({
       tab: 'command',
       params: { section: 'intervene' },
-    })).toEqual(['namespaceTruth', 'operatorSnapshot', 'operatorRoomDigest'])
+    })).toEqual([])
 
     expect(refreshPlanForRoute({
       tab: 'command',
       params: { section: 'governance' },
-    })).toEqual(['namespaceTruth', 'governance'])
+    })).toEqual([])
   })
 
   it('refreshes the new workspace and lab sections only where store-backed data is needed', () => {

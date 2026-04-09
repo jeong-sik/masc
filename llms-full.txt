@@ -6,17 +6,13 @@ Public MCP surface boundaries, compatibility aliases, and internal prompt-plane 
 
 ## Goal
 
-Use namespace/task coordination plus supervised execution and Supervisor as the default execution truth. The managed-operation command plane remains an internal or experimental compatibility lane.
+Use namespace/task coordination as the default front door. Keepers run on the OAS-backed runtime. Team-session, operator, and command-plane lanes are legacy compatibility surfaces, not supported front-door workflows.
 
 ## Primary entities
 
 - `namespace`: repo-root coordination scope
 - `task`: backlog work item
-- `operation`: managed execution unit on the compatibility lane
-- `detachment`: runtime materialization of an operation
-- `session`: long-running worker execution capsule that can attach to an operation. Current tool family name remains `masc_team_session_*`.
-- `policy decision`: approval gate for strict actions
-- `trace`: lineage across operation, dispatch, checkpoint, and policy events
+- `trace`: keeper/runtime lineage across turns and checkpoints
 
 ## Primary paths
 
@@ -32,79 +28,19 @@ Use this before any real work:
 
 `masc_set_room` remains callable as a compatibility alias, but it only selects project scope and should not be treated as the primary onboarding path.
 
-### 2. Supervised delivery swarm
+### 2. Keeper runtime
 
-Use this for real implementation work:
+Use this when long-running autonomous execution is needed:
 
-1. `masc_team_session_start`
-2. `masc_team_session_step`
-3. `masc_operator_snapshot` / `masc_operator_digest`
-4. `masc_operator_action` and `masc_operator_confirm` when intervention is needed
-5. `masc_team_session_report` / `masc_team_session_prove`
-
-### 3. Attached execution session
-
-Use this when a managed operation explicitly needs a worker team:
-
-1. Start operation with `masc_operation_start`
-2. Start session with `masc_team_session_start(operation_id="op-...")`
-3. Record work through `masc_team_session_step`
-4. Monitor with `masc_team_session_status`
-5. Use `/mcp/operator` for guided intervention when needed
-6. Finalize operation and session artifacts
-
-### 4. Managed operation compatibility lane
-
-Use this only for benchmark runs, topology experiments, or compatibility coverage:
-
-1. `masc_unit_define`
-2. `masc_operation_start`
-3. `masc_dispatch_tick`
-4. `masc_detachment_status`
-5. `masc_observe_topology` / `masc_observe_operations` / `masc_observe_traces`
-6. `masc_policy_approve` or `masc_policy_deny` when blocked
-7. `masc_operation_checkpoint`
-8. `masc_operation_finalize`
-
-## Workload templates
-
-### `coding_team`
-
-- normalized workload profile: `coding_task`
-- default stage: `decompose`
-- intended use: planner / implementer / verifier / reviewer teams
-
-### `research_team`
-
-- normalized workload profile: `research_pipeline`
-- default stage: `normalize`
-- intended use: collect / verify / curate / rank / audit teams
-
-### `ops_governance_team`
-
-- normalized workload profile: `research_pipeline`
-- default stage: `audit`
-- intended use: operator-heavy audit, intervention, approval, and governance flows
+1. `masc_keeper_up`
+2. `masc_keeper_msg`
+3. `masc_keeper_status`
+4. `masc_keeper_down`
 
 ## Important constraints
 
-- `workload_template` and explicit `workload_profile` must belong to the same family.
-- An operation can only attach to one execution session at a time.
 - `claim` does not set `current_task`; call `masc_plan_set_task`.
-- `dispatch_tick` is required after starting an operation.
-- Managed operations are optional; default delivery does not require them.
-- `team_session` without `operation_id` is valid, but it will be treated as a projected execution session rather than a managed attached session.
-
-## Operator surface
-
-Use `/mcp/operator` when you want:
-
-- a small tool surface
-- read-first supervision
-- preview/confirm intervention
-- safer human-in-the-loop control
-
-Do not mix operator explanations with benchmark explanations in the same response unless the user explicitly asks for both.
+- Keepers use the OAS-backed runtime; do not route them through team-session or operator compatibility surfaces.
 
 ## Secondary surfaces
 
@@ -117,5 +53,5 @@ Treat these as secondary unless the task explicitly calls for them:
 
 ## Discoverability
 
-- `/api/v1/command-plane/help` exposes current concepts, golden paths, templates, examples, and pitfalls.
 - `tools/list` may hide low-value or deprecated tools; prefer canonical replacements.
+- Retired compatibility surfaces may still exist in code or historical docs, but they are not supported front-door paths.

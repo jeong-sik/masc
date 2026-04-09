@@ -44,14 +44,7 @@ let print_startup_banner ~(config : Http.config) ~resolved_base ~base_path
      %!";
   Printf.printf "   DELETE /mcp → Session termination\n%!";
   Printf.printf
-    "   GET  /mcp/operator → Remote operator MCP stream (bearer token required)\n\
-     %!";
-  Printf.printf
-    "   POST /mcp/operator → Remote operator JSON-RPC (4 curated tools only)\n\
-     %!";
-  Printf.printf
-    "   DELETE /mcp/operator → Remote operator session termination\n%!";
-  Printf.printf "   POST /graphql → GraphQL (read-only)\n%!";
+    "   POST /graphql → GraphQL (read-only)\n%!";
   Printf.printf "   GET  /sse → legacy SSE stream (deprecated; use /mcp)\n%!";
   Printf.printf "   GET  /api/v1/activity/events → Activity replay API\n%!";
   Printf.printf "   GET  /api/v1/activity/graph → Activity graph snapshot\n%!";

@@ -4,14 +4,14 @@
 
 `masc-mcp` is an OCaml 5.x + Eio MCP server that keeps multiple coding agents coordinated inside one repository.
 
-It is built for repo-local, single-machine, trusted-network workflows where several AI agents need shared coordination state in the default project namespace, task ownership, broadcasts, worktrees, and supervisor-visible proof instead of ad-hoc terminal coordination.
+It is built for repo-local, single-machine, trusted-network workflows where several AI agents need shared coordination state in the default project namespace, task ownership, broadcasts, worktrees, and OAS-backed keeper execution instead of ad-hoc terminal coordination.
 
 Current product posture:
 
 - Front-door promise: repo coordination for coding workflows
-- Advanced path: supervised delivery swarm through the OAS-backed execution runtime + Supervisor
-- Supporting surface: dashboard and remote-safe operator tools
-- Experimental or secondary: wider transport matrix, research modules, and non-canonical legacy surfaces
+- Runtime substrate: OAS-backed keeper execution
+- Supporting surface: dashboard, activity views, and keeper status
+- Legacy or secondary: wider transport matrix, research modules, and retired compatibility surfaces
 
 Use `masc-mcp` when you need to reduce:
 
@@ -59,7 +59,7 @@ Notes:
 - To use a fixed port: `scripts/run-local.sh --target-dir /path/to/project --port 94xx`
 - For shared repo/full-runtime paths, continue using `./start-masc-mcp.sh --http`.
 
-If you bind to a non-loopback address such as `0.0.0.0`, treat that as a remote exposure path and configure auth first. See [docs/REMOTE-MCP-OPERATOR.md](docs/REMOTE-MCP-OPERATOR.md) and [docs/spec/09-server-transport.md](docs/spec/09-server-transport.md).
+If you bind to a non-loopback address such as `0.0.0.0`, treat that as a remote exposure path and configure auth first. See [docs/spec/09-server-transport.md](docs/spec/09-server-transport.md).
 
 ## Local Development Guide
 
@@ -121,7 +121,6 @@ For a dir-local `local-dev` environment, replace `8935` with the output of `scri
 Notes:
 
 - Normal local use starts with `/mcp`.
-- Remote supervision uses bearer-token `/mcp/operator` and the reduced operator profile.
 - Full HTTP / stdio templates live in [docs/MCP-TEMPLATE.md](docs/MCP-TEMPLATE.md).
 - `masc_web_search` is a read-only current-information lookup tool. By default it prefers configured official providers (`brave`, `tavily`, `exa`, `bing_api`) and falls back to `duckduckgo` / `bing_rss` scraping when credentials are absent or providers fail.
 
@@ -151,24 +150,15 @@ Canonical namespace/task hygiene:
 - `masc_plan_set_task` when needed
 - `masc_heartbeat`
 
-### 2. Supervised Delivery Swarm
-
-Use this when a feature slice needs planner / implementer / supervisor separation:
-
-- Runtime path: `masc_team_session_*` (current tool family name for supervised execution)
-- Supervisor path: `/mcp/operator` with `masc_operator_snapshot`, `masc_operator_digest`, `masc_operator_action`, `masc_operator_confirm`
-
-The canonical runbooks are [docs/SWARM-DELIVERY-RUNBOOK.md](docs/SWARM-DELIVERY-RUNBOOK.md) and [docs/SUPERVISOR-MODE.md](docs/SUPERVISOR-MODE.md).
-
-### 3. Dashboard and Operator Surfaces
+### 2. Dashboard and Keeper Surfaces
 
 Common entrypoints:
 
 - Monitoring: `http://127.0.0.1:<PORT>/dashboard#monitoring/sessions`
-- Intervention: `http://127.0.0.1:<PORT>/dashboard#command/intervene`
-- Governance: `http://127.0.0.1:<PORT>/dashboard#command/governance`
+- Workspace: `http://127.0.0.1:<PORT>/dashboard#workspace/board`
+- Lab: `http://127.0.0.1:<PORT>/dashboard#lab/tools`
 
-The dashboard is a read / operate UI. Canonical write and control paths remain MCP tools.
+The dashboard is a read-heavy UI for repo coordination and keeper/runtime visibility. Canonical write paths remain MCP tools.
 
 - `scripts/run-local.sh` does not build the dashboard automatically. Append `--build-dashboard` only when needed.
 - `start-masc-mcp.sh` automatically builds the dashboard SPA if `pnpm` or `corepack pnpm` is available.
@@ -198,8 +188,7 @@ CI_TEST_TIMEOUT_SEC=1200 CI_TEST_HEARTBEAT_SEC=30 \
 - Legacy `/sse` and `/messages` endpoints are deprecated.
 - Binding to `0.0.0.0` or `::` enables strict auth on MCP routes.
 - Local `/mcp` is the full MCP surface and should be treated as local-first. On non-loopback bind it fails closed unless MASC auth is enabled with `require_token=true`.
-- `/mcp/operator` is bearer-token only and intentionally exposes a smaller remote-safe surface.
-- Remote-safe exposure means `/mcp/operator` only. Do not expose the full `/mcp` surface to external clients unless you intentionally want the full coordination tool inventory behind bearer auth.
+- Retired compatibility surfaces such as command-plane/operator routes are no longer part of the supported front door.
 
 ## Product and Planning Docs
 
@@ -213,10 +202,8 @@ CI_TEST_TIMEOUT_SEC=1200 CI_TEST_HEARTBEAT_SEC=30 \
 
 - [docs/QUICK-START.md](docs/QUICK-START.md) — install, health check, first workflow
 - [docs/MCP-TEMPLATE.md](docs/MCP-TEMPLATE.md) — HTTP / stdio MCP config templates
-- [docs/COMMAND-PLANE-RUNBOOK.md](docs/COMMAND-PLANE-RUNBOOK.md) — managed-operation compatibility lane and command-plane details
-- [docs/BENCHMARK-RUNBOOK.md](docs/BENCHMARK-RUNBOOK.md) — single-agent vs swarm comparison
-- [docs/SUPERVISOR-MODE.md](docs/SUPERVISOR-MODE.md) — supervised execution / operator workflow
-- [docs/REMOTE-MCP-OPERATOR.md](docs/REMOTE-MCP-OPERATOR.md) — remote-safe operator endpoint and confirm flow
+- [docs/COMMAND-PLANE-RUNBOOK.md](docs/COMMAND-PLANE-RUNBOOK.md) — historical compatibility lane details
+- [docs/BENCHMARK-RUNBOOK.md](docs/BENCHMARK-RUNBOOK.md) — benchmark and comparison harnesses
 - [docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md](docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md) — local admin bearer bootstrap, base-path checks, and dashboard keeper lifecycle control
 - [docs/KEEPER-USER-MANUAL.md](docs/KEEPER-USER-MANUAL.md) — keeper lifecycle and troubleshooting
 - [docs/spec/SPEC-INDEX.md](docs/spec/SPEC-INDEX.md) — spec suite front door

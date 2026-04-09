@@ -514,7 +514,6 @@
    keeper_trace_validate
    keeper_supervisor
    keeper_runtime
-   keeper_turn_session
    keeper_turn_setup
    keeper_turn_up_args
    keeper_turn_up_create
@@ -662,7 +661,6 @@
   keeper_tool_disclosure
   keeper_turn_telemetry
   keeper_exec_context
-  keeper_turn_session
   keeper_turn_setup
   keeper_turn_up_args
   keeper_turn_up_create

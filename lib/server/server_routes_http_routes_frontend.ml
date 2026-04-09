@@ -203,13 +203,10 @@ let add_routes ~port ~host router =
          ) request reqd
        else
          with_read_auth (fun _state req reqd -> handle_get_mcp req reqd) request reqd)
-  |> Http.Router.get "/mcp/operator" handle_get_operator_mcp
   |> Http.Router.post "/" handle_post_mcp
   |> Http.Router.post "/mcp" handle_post_mcp
   |> Http.Router.post "/mcp/managed"
        (handle_post_mcp ~profile:Server_mcp_transport_http.Managed_agent)
-  |> Http.Router.post "/mcp/operator"
-       (handle_post_mcp ~profile:Server_mcp_transport_http.Operator_remote)
   |> Http.Router.post "/webrtc/offer"
        (webrtc_signaling_handler
           ~tool_name:"masc_webrtc_offer"

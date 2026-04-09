@@ -1,7 +1,6 @@
 import type { RouteState } from './types'
 import { refreshExecution, refreshBoard, refreshGoals, refreshShell } from './store'
 import { requestNamespaceTruth } from './namespace-truth-store'
-import { refreshOperatorRoomDigest, refreshOperatorSnapshot } from './operator-store'
 import { refreshMissionSnapshot } from './mission-store'
 
 async function refreshActivityGraphSurface(): Promise<void> {
@@ -29,11 +28,6 @@ async function refreshServerConfigSurface(): Promise<void> {
   await refreshServerConfig()
 }
 
-async function refreshGovernanceSurface(): Promise<void> {
-  const { refreshGovernance } = await import('./components/governance-store')
-  await refreshGovernance()
-}
-
 export type RefreshTask =
   | 'shell'
   | 'namespaceTruth'
@@ -45,9 +39,6 @@ export type RefreshTask =
   | 'autoresearch'
   | 'harness'
   | 'inspector'
-  | 'operatorSnapshot'
-  | 'operatorRoomDigest'
-  | 'governance'
 
 export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params'>): RefreshTask[] {
   switch (routeState.tab) {
@@ -62,12 +53,6 @@ export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params
       }
       return ['namespaceTruth', 'missionSnapshot']
     case 'command':
-      if (routeState.params.section === 'intervene') {
-        return ['namespaceTruth', 'operatorSnapshot', 'operatorRoomDigest']
-      }
-      if (routeState.params.section === 'governance') {
-        return ['namespaceTruth', 'governance']
-      }
       return []
     case 'workspace':
       if (routeState.params.section === 'planning') {
@@ -111,9 +96,6 @@ const REFRESHERS: Record<RefreshTask, () => void> = {
     void refreshFeatureHealthSurface()
     void refreshServerConfigSurface()
   },
-  operatorSnapshot: () => { void refreshOperatorSnapshot({ force: true }) },
-  operatorRoomDigest: () => { void refreshOperatorRoomDigest({ force: true }) },
-  governance: () => { void refreshGovernanceSurface() },
 }
 
 // --- Tab visit counter (localStorage-persisted) ---

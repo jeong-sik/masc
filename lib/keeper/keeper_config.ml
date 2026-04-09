@@ -98,7 +98,13 @@ let removed_keeper_msg_input_key_names =
   ]
 
 let removed_keeper_meta_key_names =
-  "persona_profile_path" :: removed_keeper_input_key_names
+  [
+    "persona_profile_path";
+    "active_team_session_id";
+    "last_team_session_started_at";
+    "team_session_start_count_total";
+  ]
+  @ removed_keeper_input_key_names
 
 let present_json_keys (keys : string list) (json : Yojson.Safe.t) : string list =
   match json with

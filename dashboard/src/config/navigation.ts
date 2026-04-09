@@ -29,6 +29,7 @@ export interface DashboardNavGroup {
   defaultTab: TabId
   defaultParams?: Record<string, string>
   tabs: TabId[]
+  hidden?: boolean
 }
 
 export interface DashboardNavItem {
@@ -69,10 +70,11 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
     id: 'command',
     label: '운영 개입',
     icon: '🎛️',
-    description: '실시간 개입과 운영 제어',
+    description: 'Retired compatibility surface kept only for old deep links.',
     defaultTab: 'command',
     defaultParams: { section: 'intervene' },
     tabs: ['command'],
+    hidden: true,
   },
   {
     id: 'workspace',

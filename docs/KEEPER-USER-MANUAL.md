@@ -641,6 +641,6 @@ dir-local 실행에서 shared keeper 상태가 보이지 않는 것은 정상이
 | 문서 | 용도 |
 |------|------|
 | [GLOSSARY.md](./GLOSSARY.md) | 용어 정의 |
-| [COMMAND-PLANE-RUNBOOK.md](./COMMAND-PLANE-RUNBOOK.md) | Room/Task 운영 |
-| [SUPERVISOR-MODE.md](./SUPERVISOR-MODE.md) | 감독 모드 운영 |
+| [QUICK-START.md](./QUICK-START.md) | repo coordination 시작 경로 |
+| [COMMAND-PLANE-RUNBOOK.md](./COMMAND-PLANE-RUNBOOK.md) | historical compatibility lane |
 | [MERGED-ARCHITECTURE-SSOT.md](./MERGED-ARCHITECTURE-SSOT.md) | 아키텍처 SSOT |

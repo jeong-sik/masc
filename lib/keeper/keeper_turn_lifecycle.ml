@@ -5,7 +5,6 @@
 open Tool_args
 open Keeper_types
 open Keeper_keepalive
-open Keeper_turn_session
 
 type tool_result = Keeper_types.tool_result
 
@@ -21,17 +20,6 @@ let handle_keeper_down ctx args : tool_result =
     | Error e -> (false, "❌ " ^ e)
     | Ok None -> (true, Printf.sprintf "keeper already absent: %s" name)
     | Ok (Some m) ->
-      let stop_linked_session session_id =
-        match
-          Team_session_engine_eio.stop_session ~config:ctx.config ~session_id
-            ~reason:"keeper_down" ~generate_report:false
-        with
-        | Ok _ -> ()
-        | Error err ->
-            Log.Keeper.error "linked team session stop failed: %s"
-              err
-      in
-      Option.iter stop_linked_session m.active_team_session_id;
       ignore
         (Operator_pending_confirm.remove_pending_confirms_by_target ctx.config
            ~target_type:"keeper" ~target_id:(Some name));
@@ -43,13 +31,14 @@ let handle_keeper_down ctx args : tool_result =
          let retained =
            {
              m with
-             active_team_session_id = None;
-             last_team_session_started_at = "";
              updated_at = now_iso ();
              paused = true;
            }
          in
-         (write_meta_logged ctx.config retained;
+         ((match write_meta ctx.config retained with
+           | Ok () -> ()
+           | Error err ->
+               Log.Keeper.error "keeper_down write_meta failed: %s" err);
           Keeper_registry.update_meta ~base_path:ctx.config.base_path name retained;
           ignore (Keeper_registry.dispatch_event ~base_path:ctx.config.base_path name
             Keeper_state_machine.Operator_pause)));

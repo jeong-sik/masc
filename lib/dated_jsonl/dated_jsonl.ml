@@ -303,36 +303,3 @@ let prune t ~days =
     ) months;
     !deleted
   end
-
-let count_lines_in_file path =
-  if not (Fs_compat.file_exists path) then 0
-  else
-    let ic = open_in_bin path in
-    Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
-      let count = ref 0 in
-      let buf = Bytes.create 8192 in
-      let rec loop () =
-        let n = input ic buf 0 8192 in
-        if n = 0 then ()
-        else begin
-          for i = 0 to n - 1 do
-            if Bytes.get buf i = '\n' then incr count
-          done;
-          loop ()
-        end
-      in
-      loop ();
-      !count)
-
-let count_entries t =
-  let total = ref 0 in
-  let months = list_month_dirs t.base_dir in
-  List.iter (fun m ->
-    let month_path = Filename.concat t.base_dir m in
-    let days = list_day_files month_path in
-    List.iter (fun d ->
-      let path = Filename.concat month_path d in
-      total := !total + count_lines_in_file path
-    ) days
-  ) months;
-  !total

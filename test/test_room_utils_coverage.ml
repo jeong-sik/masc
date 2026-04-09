@@ -187,6 +187,30 @@ let test_resolve_masc_base_path_allows_dual_root_opt_in () =
           check string "opt-in preserves explicit dual-root env" explicit
             (Room_utils.resolve_masc_base_path requested)))
 
+let test_resolve_masc_base_path_preserves_ancestor_explicit_path () =
+  let scratch = Filename.temp_dir "room-utils-ancestor" "" in
+  let explicit = scratch in
+  let sub_repo = Filename.concat scratch "workspace/sub-repo" in
+  let rec mkdirs path =
+    if not (Sys.file_exists path) then begin
+      mkdirs (Filename.dirname path);
+      Unix.mkdir path 0o755
+    end
+  in
+  mkdirs sub_repo;
+  Unix.mkdir (Filename.concat explicit ".masc") 0o755;
+  Unix.mkdir (Filename.concat sub_repo ".masc") 0o755;
+  Fun.protect
+    ~finally:(fun () -> rm_rf scratch)
+    (fun () ->
+      with_envs
+        [ ("MASC_BASE_PATH", Some explicit);
+          ("MASC_ALLOW_INHERITED_BASE_PATH", None);
+          ("MASC_TEST_ALLOW_INHERITED_BASE_PATH", None) ]
+        (fun () ->
+          check string "ancestor explicit path wins over sub-repo" explicit
+            (Room_utils.resolve_masc_base_path sub_repo)))
+
 let test_default_config_syncs_test_base_path_env () =
   let requested =
     Filename.concat (Filename.get_temp_dir_name ()) "room-utils-sync-env"
@@ -618,6 +642,8 @@ let () =
         test_resolve_masc_base_path_ignores_dual_masc_roots_outside_test_override;
       test_case "allows dual-root opt-in" `Quick
         test_resolve_masc_base_path_allows_dual_root_opt_in;
+      test_case "preserves ancestor explicit path" `Quick
+        test_resolve_masc_base_path_preserves_ancestor_explicit_path;
       test_case "default config syncs test base env" `Quick
         test_default_config_syncs_test_base_path_env;
     ];

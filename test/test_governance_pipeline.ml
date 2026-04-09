@@ -743,6 +743,116 @@ let test_case_insensitive_matching () =
   Alcotest.(check string) "uppercase delete is critical"
     "critical" (Gp.risk_level_to_string risk)
 
+(* ── Lethal Trifecta Tests ─────────────────────────────────── *)
+
+let test_trifecta_all_three_classes () =
+  let (count, ext, sens, state) =
+    Gp.assess_trifecta ~active_tool_names:[
+      "masc_web_search";     (* External_input *)
+      "keeper_fs_read";      (* Sensitive_access *)
+      "keeper_fs_edit";      (* State_modification *)
+    ]
+  in
+  Alcotest.(check int) "3 classes" 3 count;
+  Alcotest.(check bool) "has external" true ext;
+  Alcotest.(check bool) "has sensitive" true sens;
+  Alcotest.(check bool) "has state_mod" true state
+
+let test_trifecta_two_classes_no_escalation () =
+  let (count, _, _, _) =
+    Gp.assess_trifecta ~active_tool_names:[
+      "keeper_fs_read";      (* Sensitive_access *)
+      "keeper_fs_edit";      (* State_modification *)
+    ]
+  in
+  Alcotest.(check int) "2 classes" 2 count
+
+let test_trifecta_one_class () =
+  let (count, _, _, _) =
+    Gp.assess_trifecta ~active_tool_names:[
+      "keeper_fs_read";      (* Sensitive_access *)
+      "keeper_memory_search"; (* Sensitive_access *)
+    ]
+  in
+  Alcotest.(check int) "1 class" 1 count
+
+let test_trifecta_empty () =
+  let (count, _, _, _) =
+    Gp.assess_trifecta ~active_tool_names:[]
+  in
+  Alcotest.(check int) "0 classes" 0 count
+
+let test_trifecta_bash_spans_all () =
+  (* keeper_bash alone has all 3 classes *)
+  let (count, ext, sens, state) =
+    Gp.assess_trifecta ~active_tool_names:["keeper_bash"]
+  in
+  Alcotest.(check int) "bash alone = 3 classes" 3 count;
+  Alcotest.(check bool) "has external" true ext;
+  Alcotest.(check bool) "has sensitive" true sens;
+  Alcotest.(check bool) "has state_mod" true state
+
+let test_trifecta_unclassified_tools_ignored () =
+  let (count, _, _, _) =
+    Gp.assess_trifecta ~active_tool_names:[
+      "keeper_time_now";       (* not in classification *)
+      "keeper_context_status"; (* not in classification *)
+    ]
+  in
+  Alcotest.(check int) "unclassified = 0" 0 count
+
+let test_escalation_state_mod_in_trifecta () =
+  (* keeper_fs_edit is normally High (contains "modify"/"set" pattern).
+     With trifecta, state_modification tools escalate to at least High. *)
+  let escalated =
+    Gp.combinatorial_risk_escalation
+      ~trifecta_active:true
+      ~tool_name:"keeper_fs_edit"
+      ~base_risk:Gp.Medium
+  in
+  Alcotest.(check string) "escalated to high"
+    "high" (Gp.risk_level_to_string escalated)
+
+let test_escalation_keeps_higher_risk () =
+  (* If base_risk is already Critical, escalation doesn't downgrade *)
+  let escalated =
+    Gp.combinatorial_risk_escalation
+      ~trifecta_active:true
+      ~tool_name:"keeper_fs_edit"
+      ~base_risk:Gp.Critical
+  in
+  Alcotest.(check string) "stays critical"
+    "critical" (Gp.risk_level_to_string escalated)
+
+let test_escalation_no_trifecta_no_change () =
+  let unchanged =
+    Gp.combinatorial_risk_escalation
+      ~trifecta_active:false
+      ~tool_name:"keeper_fs_edit"
+      ~base_risk:Gp.Low
+  in
+  Alcotest.(check string) "stays low without trifecta"
+    "low" (Gp.risk_level_to_string unchanged)
+
+let test_escalation_non_state_mod_unchanged () =
+  (* Non-state_modification tools are not escalated even in trifecta *)
+  let unchanged =
+    Gp.combinatorial_risk_escalation
+      ~trifecta_active:true
+      ~tool_name:"keeper_fs_read"
+      ~base_risk:Gp.Low
+  in
+  Alcotest.(check string) "read-only stays low"
+    "low" (Gp.risk_level_to_string unchanged)
+
+let test_tool_capabilities_known () =
+  let caps = Gp.tool_capabilities "keeper_bash" in
+  Alcotest.(check int) "bash has 3 capabilities" 3 (List.length caps)
+
+let test_tool_capabilities_unknown () =
+  let caps = Gp.tool_capabilities "unknown_tool" in
+  Alcotest.(check int) "unknown has 0 capabilities" 0 (List.length caps)
+
 (* ── Runner ─────────────────────────────────────────────────── *)
 
 let () =
@@ -818,6 +928,29 @@ let () =
       Alcotest.test_case "contract beats low override" `Quick
         test_risk_contract_beats_low_override;
       Alcotest.test_case "case insensitive" `Quick test_case_insensitive_matching;
+    ];
+    "lethal_trifecta", [
+      Alcotest.test_case "all 3 classes detected" `Quick
+        test_trifecta_all_three_classes;
+      Alcotest.test_case "2 classes no escalation" `Quick
+        test_trifecta_two_classes_no_escalation;
+      Alcotest.test_case "1 class only" `Quick test_trifecta_one_class;
+      Alcotest.test_case "empty tool set" `Quick test_trifecta_empty;
+      Alcotest.test_case "bash spans all 3" `Quick test_trifecta_bash_spans_all;
+      Alcotest.test_case "unclassified tools ignored" `Quick
+        test_trifecta_unclassified_tools_ignored;
+      Alcotest.test_case "escalation: state_mod in trifecta" `Quick
+        test_escalation_state_mod_in_trifecta;
+      Alcotest.test_case "escalation: keeps higher risk" `Quick
+        test_escalation_keeps_higher_risk;
+      Alcotest.test_case "escalation: no trifecta no change" `Quick
+        test_escalation_no_trifecta_no_change;
+      Alcotest.test_case "escalation: non-state_mod unchanged" `Quick
+        test_escalation_non_state_mod_unchanged;
+      Alcotest.test_case "capabilities: known tool" `Quick
+        test_tool_capabilities_known;
+      Alcotest.test_case "capabilities: unknown tool" `Quick
+        test_tool_capabilities_unknown;
     ];
     "governance_levels", [
       Alcotest.test_case "development allows all" `Quick

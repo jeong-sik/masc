@@ -42,6 +42,83 @@ let risk_level_of_contract_risk = function
   | Agent_sdk.Risk_class.High -> High
   | Agent_sdk.Risk_class.Critical -> Critical
 
+(* ── Lethal Trifecta — Combinatorial Risk Assessment ─────────
+   Simon Willison's "Lethal Trifecta": an agent simultaneously holding
+   (1) untrusted external input, (2) sensitive data access, and
+   (3) state modification capability = security incident.
+
+   Meta AI's "Rule of Two": restrict to max 2 of 3 simultaneously.
+   When all 3 are present, escalate state_modification tool risk.
+
+   Classification is in code (not TOML) for the same reason as risk
+   patterns: security policy changes require code review. *)
+
+type capability_class =
+  | External_input      (** Receives data from untrusted external sources *)
+  | Sensitive_access    (** Can read potentially sensitive data *)
+  | State_modification  (** Can modify system state *)
+
+(** Per-tool capability classification.
+    A tool may belong to multiple classes (e.g. keeper_bash spans all 3). *)
+let capability_classification : (string * capability_class list) list = [
+  (* External input sources *)
+  ("masc_web_search",          [External_input]);
+  ("masc_web_fetch",           [External_input]);
+  (* Shell can curl/wget external data AND read secrets AND execute *)
+  ("keeper_bash",              [External_input; Sensitive_access; State_modification]);
+  ("keeper_shell_readonly",    [External_input; Sensitive_access]);
+  (* Sensitive data access *)
+  ("keeper_fs_read",           [Sensitive_access]);
+  ("keeper_memory_search",     [Sensitive_access]);
+  ("keeper_library_search",    [Sensitive_access]);
+  ("keeper_library_read",      [Sensitive_access]);
+  (* State modification *)
+  ("keeper_fs_edit",           [State_modification]);
+  ("keeper_pr_submit",         [State_modification]);
+  ("keeper_pr_workflow",       [State_modification]);
+  ("keeper_github",            [State_modification]);
+]
+
+let tool_capabilities name =
+  match List.assoc_opt name capability_classification with
+  | Some caps -> caps
+  | None -> []
+
+let has_capability cls caps =
+  List.mem cls caps
+
+(** Compute trifecta status from a set of active tool names.
+    Returns (class_count, has_external, has_sensitive, has_state_mod). *)
+let assess_trifecta ~active_tool_names =
+  let has_ext = ref false in
+  let has_sens = ref false in
+  let has_mod = ref false in
+  List.iter (fun name ->
+    let caps = tool_capabilities name in
+    if has_capability External_input caps then has_ext := true;
+    if has_capability Sensitive_access caps then has_sens := true;
+    if has_capability State_modification caps then has_mod := true;
+  ) active_tool_names;
+  let count =
+    (if !has_ext then 1 else 0)
+    + (if !has_sens then 1 else 0)
+    + (if !has_mod then 1 else 0)
+  in
+  (count, !has_ext, !has_sens, !has_mod)
+
+(** When trifecta is active (all 3 classes present), escalate risk
+    of state_modification tools to at least High.
+    This ensures HITL gates fire at lower governance levels. *)
+let combinatorial_risk_escalation ~trifecta_active ~tool_name ~base_risk =
+  if trifecta_active then
+    let caps = tool_capabilities tool_name in
+    if has_capability State_modification caps then
+      max_risk_level base_risk High
+    else
+      base_risk
+  else
+    base_risk
+
 (* ── Risk Assessment ────────────────────────────────────────── *)
 
 (** {2 Risk pattern sets — security-critical SSOT}
@@ -366,8 +443,26 @@ let install ~config ~governance_level =
     Tools below the threshold are auto-approved. *)
 let to_oas_approval_callback
       ~governance_level ~keeper_name : Oas.Hooks.approval_callback =
+  (* Pre-compute trifecta status from keeper's active shard tool set.
+     Computed once per keeper session, captured by the closure. *)
+  let active_shards = Tool_shard.get_agent_shards keeper_name in
+  let active_tool_names =
+    Tool_shard.tools_of_shards active_shards
+    |> List.map (fun (s : Types.tool_schema) -> s.name)
+  in
+  let (trifecta_count, _, _, _) = assess_trifecta ~active_tool_names in
+  let trifecta_active = trifecta_count >= 3 in
+  if trifecta_active then
+    Log.Governance.warn
+      "lethal trifecta: keeper=%s has all 3 capability classes \
+       (external_input + sensitive_access + state_modification). \
+       State-modifying tools will be escalated to High+ risk."
+      keeper_name;
   fun ~tool_name ~input ->
-    let risk = assess_risk ~tool_name ~input in
+    let base_risk = assess_risk ~tool_name ~input in
+    let risk =
+      combinatorial_risk_escalation ~trifecta_active ~tool_name ~base_risk
+    in
     let needs_approval =
       match confirm_threshold governance_level with
       | Some threshold -> risk_level_to_int risk >= risk_level_to_int threshold

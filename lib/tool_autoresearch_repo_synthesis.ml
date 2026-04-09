@@ -314,22 +314,17 @@ let handle_repo_synthesis_swarm_start ctx args =
                                 let run_id =
                                   Repo_synthesis_benchmark.make_run_id ()
                                 in
-                                let _session_dir =
-                                  Filename.concat
-                                    (Filename.concat (Room.masc_dir config) "team-sessions")
-                                    session_id
-                                in
                                 let report_json_path =
-                                  Filename.concat _session_dir "report.json"
+                                  Filename.concat artifacts_dir "report.json"
                                 in
                                 let report_md_path =
-                                  Filename.concat _session_dir "report.md"
+                                  Filename.concat artifacts_dir "report.md"
                                 in
                                 let proof_json_path =
-                                  Filename.concat _session_dir "proof.json"
+                                  Filename.concat artifacts_dir "proof.json"
                                 in
                                 let proof_md_path =
-                                  Filename.concat _session_dir "proof.md"
+                                  Filename.concat artifacts_dir "proof.md"
                                 in
                                 let planned_worker_roles =
                                   planned_workers

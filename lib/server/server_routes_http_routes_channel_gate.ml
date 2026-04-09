@@ -221,29 +221,6 @@ let handle_gate_connectors _state request reqd =
   respond_json_with_cors ~status:`OK request reqd
     (Yojson.Safe.to_string json)
 
-(** GET /api/v1/gate/connector/status?name=<connector>&audit_limit=<n>
-
-    Single connector status by name.  Returns 404 if the connector
-    is not registered. *)
-let handle_gate_connector_status _state request reqd =
-  match query_param request "name" with
-  | None | Some "" ->
-      respond_json_with_cors ~status:`Bad_request request reqd
-        (Yojson.Safe.to_string (Channel_gate.error_json "name is required"))
-  | Some name -> (
-      match Channel_gate_connector.find name with
-      | None ->
-          respond_json_with_cors ~status:`Not_found request reqd
-            (Yojson.Safe.to_string
-               (Channel_gate.error_json ("unknown connector: " ^ name)))
-      | Some (module C) ->
-          let audit_limit =
-            int_query_param request "audit_limit" ~default:10
-            |> fun value -> max 1 (min 50 value)
-          in
-          respond_json_with_cors ~status:`OK request reqd
-            (Yojson.Safe.to_string (C.status_json ~audit_limit ())))
-
 (** GET /api/v1/gate/discord/status
     Dashboard-facing live connector status sourced from the Discord bot's
     status file plus the durable binding/audit stores. *)

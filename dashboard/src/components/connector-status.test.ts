@@ -344,7 +344,7 @@ describe('ConnectorStatusPanel', () => {
     bindButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     await flushUi()
 
-    expect(post).toHaveBeenCalledWith('/api/v1/gate/discord/bind', {
+    expect(post).toHaveBeenCalledWith('/api/v1/gate/connector/bind?name=discord', {
       channel_id: '999999',
       keeper_name: 'nova',
     })
@@ -355,7 +355,7 @@ describe('ConnectorStatusPanel', () => {
     unbindButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     await flushUi()
 
-    expect(post).toHaveBeenCalledWith('/api/v1/gate/discord/unbind', {
+    expect(post).toHaveBeenCalledWith('/api/v1/gate/connector/unbind?name=discord', {
       channel_id: '999999',
     })
     expect(showToast).toHaveBeenCalledWith('Unbound 999999', 'success')

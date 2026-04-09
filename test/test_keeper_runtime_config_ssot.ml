@@ -147,6 +147,71 @@ policy_voice_enabled = false
       check string "room_scope" "current" updated.room_scope;
       check bool "policy_voice_enabled" false updated.policy_voice_enabled
 
+(** Test: TOML tool policy and allowed_paths overwrite stale runtime JSON values. *)
+let test_tool_policy_resync () =
+  with_temp_dir "keeper-config-ssot-room" @@ fun room_dir ->
+  with_config_dir @@ fun config_dir ->
+  Fs_compat.clear_fs ();
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let keeper_name = "tool-policy-resync-test" in
+  let keepers_toml_dir = Filename.concat config_dir "keepers" in
+  Unix.mkdir keepers_toml_dir 0o755;
+  write_file
+    (Filename.concat keepers_toml_dir (keeper_name ^ ".toml"))
+    {|[keeper]
+goal = "test"
+execution_scope = "workspace"
+allowed_paths = ["workspace/yousleepwhen/masc-mcp"]
+tool_preset = "social"
+also_allow = ["keeper_github", "keeper_shell"]
+|};
+  let config = Room.default_config room_dir in
+  let initial_meta =
+    match
+      Keeper_types.meta_of_json
+        (`Assoc
+          [
+            ("name", `String keeper_name);
+            ("agent_name", `String keeper_name);
+            ("trace_id", `String "trace-tool-policy-resync");
+            ("execution_scope", `String "workspace");
+            ("allowed_paths", `List [ `String ".masc/playground/old" ]);
+            ( "tool_access",
+              `Assoc
+                [
+                  ("kind", `String "preset");
+                  ("preset", `String "delivery");
+                  ("also_allow", `List [ `String "masc_board_post" ]);
+                ] );
+          ])
+    with
+    | Ok meta -> meta
+    | Error e -> fail ("meta_of_json failed: " ^ e)
+  in
+  (match Keeper_types.write_meta ~force:true config initial_meta with
+  | Error e -> fail ("write_meta failed: " ^ e)
+  | Ok () -> ());
+  match Keeper_runtime.ensure_keeper_meta config keeper_name with
+  | Error e -> fail ("ensure_keeper_meta failed: " ^ e)
+  | Ok updated ->
+      let preset =
+        match Keeper_types.tool_access_preset updated.Keeper_types.tool_access with
+        | Some preset -> Keeper_types.tool_preset_to_string preset
+        | None -> fail "expected preset-based tool_access"
+      in
+      check string "tool_preset" "social" preset;
+      check
+        (list string)
+        "tool_also_allow"
+        [ "keeper_github"; "keeper_shell" ]
+        (Keeper_types.tool_access_also_allowlist updated.tool_access);
+      check
+        (list string)
+        "allowed_paths"
+        [ "workspace/yousleepwhen/masc-mcp" ]
+        updated.allowed_paths
+
 (** Test: fields absent from TOML (None) preserve runtime JSON values. *)
 let test_none_preserves_runtime () =
   with_temp_dir "keeper-config-ssot-room" @@ fun room_dir ->
@@ -316,6 +381,10 @@ let () =
             "TOML policy fields overwrite stale runtime JSON"
             `Quick
             test_policy_resync;
+          test_case
+            "TOML tool policy fields overwrite stale runtime JSON"
+            `Quick
+            test_tool_policy_resync;
         ] );
       ( "none_preserve",
         [

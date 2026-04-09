@@ -58,6 +58,10 @@ let with_temp_dir prefix f =
   Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
 
 let run_shell ?(env = []) ~cwd cmd =
+  let env =
+    if List.mem_assoc "MASC_ALLOW_PORT_REUSE" env then env
+    else ("MASC_ALLOW_PORT_REUSE", "1") :: env
+  in
   let env_prefix =
     env
     |> List.map (fun (k, v) -> Printf.sprintf "%s=%s" k (quote v))

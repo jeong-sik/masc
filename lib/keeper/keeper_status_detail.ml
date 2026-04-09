@@ -673,15 +673,14 @@ let handle_keeper_status ctx args : tool_result =
                    (Room_utils.safe_filename m.name)
                    (Room_utils.safe_filename m.runtime.trace_id))));
            ]);
-           ("execution_context", `Assoc [
-             ("playground_path", `String
-               (Keeper_alerting_path.playground_path_of_keeper m.name));
+           (let playground_rel = Keeper_alerting_path.playground_path_of_keeper m.name in
+           let playground_abs = Filename.concat ctx.config.base_path playground_rel in
+           "execution_context", `Assoc [
+             ("playground_path", `String playground_rel);
              ("execution_scope", `String m.execution_scope);
              ("allowed_paths", string_list_to_json m.allowed_paths);
              ("playground_repos",
-               let cache_path = Filename.concat
-                 (Filename.concat ctx.config.base_path
-                   (Keeper_alerting_path.playground_path_of_keeper m.name))
+               let cache_path = Filename.concat playground_abs
                  ".playground_state.json" in
                try
                  match Yojson.Safe.from_file cache_path with
@@ -692,21 +691,12 @@ let handle_keeper_status ctx args : tool_result =
                  | _ -> `List []
                with Sys_error _ | Yojson.Json_error _ -> `List []);
              ("pr_history",
-               let pr_path = Filename.concat
-                 (Filename.concat ctx.config.base_path
-                   (Keeper_alerting_path.playground_path_of_keeper m.name))
+               let pr_path = Filename.concat playground_abs
                  ".playground_pr_history.jsonl" in
                try
                  let entries = Fs_compat.load_jsonl pr_path in
-                 (* Last 10 PRs, most recent first.
-                    Rev first, then take up to 10 — O(N) single pass. *)
-                 let rev = List.rev entries in
-                 let rec take n acc = function
-                   | [] -> List.rev acc
-                   | _ when n <= 0 -> List.rev acc
-                   | x :: rest -> take (n - 1) (x :: acc) rest
-                 in
-                 `List (take 10 [] rev)
+                 (* Last 10 PRs, most recent first *)
+                 `List (List.take 10 (List.rev entries))
                with Sys_error _ -> `List []);
              ("active_worktrees",
                let worktrees_dir = Filename.concat ctx.config.base_path ".worktrees" in

@@ -395,6 +395,7 @@ export function KeeperDetailOverlay() {
                 ${(() => {
                   const preset = peekLoadedKeeperConfig(keeper.name)?.tools?.tool_preset
                   if (!preset) return null
+                  // SSOT: config/tool_policy.toml [git_clone.workflow_presets]
                   const canPR = ['coding', 'delivery', 'full'].includes(preset)
                   return html`
                     <span class="inline-flex items-center py-0.5 px-2 rounded text-[10px] font-semibold uppercase tracking-wide

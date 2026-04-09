@@ -507,7 +507,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
 
           return html`
             <button type="button"
-              class="monitor-surface-card monitor-surface-card-medium group flex w-full flex-col gap-4 rounded-[22px] p-5 text-left transition-all duration-200 cursor-pointer hover:border-[var(--border-slate-22)] hover:bg-[var(--bg-1)] hover:-translate-y-0.5"
+              class="monitor-surface-card monitor-surface-card-medium group flex w-full flex-col gap-4 rounded-[var(--radius-xl)] p-5 text-left transition-all duration-200 cursor-pointer hover:border-[var(--border-slate-22)] hover:bg-[var(--bg-1)] hover:-translate-y-0.5"
               key=${agent.name}
               aria-label=${detailLabel}
               onClick=${openDetail}
@@ -596,7 +596,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
           `
         })}
         ${filtered.length === 0 ? html`
-          <div class="col-span-full rounded-[24px] border border-dashed border-[var(--ff-border-subtle)] bg-[var(--white-2)] px-6 py-10">
+          <div class="col-span-full rounded-[var(--radius-xl)] border border-dashed border-[var(--ff-border-subtle)] bg-[var(--white-2)] px-6 py-10">
             <${EmptyState}
               message=${showExecutionFallbackState && expectedScopedCount > 0
                 ? `${fallbackStateTitle}: ${countSourceLabel} 기준 ${scopeLabel}가 보이지만, 현재 조건에 맞는 상세 카드는 아직 없습니다.`

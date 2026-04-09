@@ -134,7 +134,7 @@ export function ChatMessageBubble({
     <article
       class=${`chat-bubble ${tone} flex w-full flex-col border backdrop-blur-sm ${
         isMessenger
-          ? 'max-w-[82%] gap-2.5 rounded-[24px] px-4 py-3.5'
+          ? 'max-w-[82%] gap-2.5 rounded-[var(--radius-xl)] px-4 py-3.5'
           : 'max-w-[90%] gap-3 rounded-[20px] px-4 py-3'
       }`}
       data-chat-variant=${variant}
@@ -326,7 +326,7 @@ export function ChatTranscript({
       class=${`chat-transcript flex min-h-[300px] max-h-[520px] flex-col overflow-y-auto border border-[rgba(148,163,184,0.14)] shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] ${
         variant === 'messenger'
           ? 'gap-4 rounded-[26px] px-4 py-5 sm:px-5'
-          : 'gap-3 rounded-[22px] px-3 py-4'
+          : 'gap-3 rounded-[var(--radius-xl)] px-3 py-4'
       }`}
       data-chat-variant=${variant}
       ref=${scrollerRef}

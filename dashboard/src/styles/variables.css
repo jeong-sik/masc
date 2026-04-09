@@ -115,6 +115,7 @@
   --border-slate-35: var(--border-strong);
 
   /* Layout & Sizing */
+  --radius-xl: 24px;
   --radius-lg: 12px;
   --radius-md: 8px;
   --radius-sm: 6px;

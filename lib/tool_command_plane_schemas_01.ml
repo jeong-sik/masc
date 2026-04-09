@@ -77,7 +77,7 @@ After masc_unit_define; follow with masc_dispatch_tick to materialize detachment
             ("artifact_scope", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]); ("description", `String "Optional file or directory scope inherited across coding-task stages.") ]);
             ("depends_on_operation_ids", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]); ("description", `String "Optional upstream operation ids that must complete or checkpoint before this operation can issue.") ]);
             ("search_strategy", `Assoc [ ("type", `String "string"); ("enum", `List [ `String "legacy"; `String "best_first_v1" ]); ("description", `String "Optional managed-operation routing strategy. Default: best_first_v1. legacy remains available as an explicit opt-out.") ]);
-            ("detachment_session_id", string_prop "Optional backing team-session id.");
+            ("detachment_session_id", string_prop "Optional backing session id from the existing masc_team_session_* runtime. Current ids still use the established ts-* format; this field was not renamed.");
             ("checkpoint_ref", string_prop "Optional initial checkpoint reference.");
             ("active_goal_ids", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]);
             ("note", string_prop "Optional operator note.");

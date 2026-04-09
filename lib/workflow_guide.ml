@@ -2,7 +2,7 @@
 
     1. Namespace/Task Hygiene (default front door)
     2. Managed Operations (experimental/compatibility lane)
-    3. Team Session / Supervisor (delivery lane)
+    3. Supervised Execution / Supervisor (delivery lane)
 
     @since 2.89.0 *)
 
@@ -263,7 +263,7 @@ let after_dispatch_tick ~success =
       preconditions = [ "room_set"; "joined" ];
       common_mistakes = [] }
 
-(* ── Golden Path 3: Team Session / Supervisor ────────────────────── *)
+(* ── Golden Path 3: Supervised Execution / Supervisor ───────────── *)
 
 let after_team_session_start ~success =
   if success then
@@ -382,7 +382,7 @@ let next_steps ~tool_name ~success =
   (* Auxiliary Lane: Managed Operations *)
   | "masc_operation_start" -> after_operation_start ~success
   | "masc_dispatch_tick" -> after_dispatch_tick ~success
-  (* Delivery Lane: Team Session *)
+  (* Delivery Lane: Supervised Execution *)
   | "masc_team_session_start" -> after_team_session_start ~success
   | "masc_team_session_step" -> after_team_session_step ~success
   | "masc_team_session_prove" -> after_team_session_prove ~success

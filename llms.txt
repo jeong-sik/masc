@@ -14,8 +14,9 @@
 2. `Supervised Delivery Swarm`
    - Use for real implementation work.
    - Start with `masc_team_session_start`, then use `masc_team_session_step` and `/mcp/operator`.
+   - Treat `masc_team_session_*` as the current tool family name for supervised execution, not a separate product concept.
 
-3. `Attached Team Session`
+3. `Attached execution session`
    - Use when an explicit managed operation also needs a worker team.
    - Start the session with `operation_id=...` only when you intentionally opt into the managed-operation lane.
 
@@ -34,7 +35,7 @@
 
 ## Rules
 
-- Prefer team-session and supervisor paths for implementation work.
+- Prefer supervised execution and supervisor paths for implementation work.
 - Use `masc_operation_start` only when you explicitly need the managed-operation compatibility lane.
 - Prefer `masc_team_session_start(operation_id=...)` over standalone sessions when command-plane truth matters.
 - Treat `masc_set_room` as a compatibility alias only; prefer `masc_start` for onboarding.

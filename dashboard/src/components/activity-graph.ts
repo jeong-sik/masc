@@ -296,7 +296,7 @@ function EmptyActivityGraph() {
           <h2 class="monitor-headline">활동 그래프가 비어 있습니다</h2>
           <p class="monitor-subheadline">이 뷰는 런타임 실행 이벤트를 읽어 그래프를 그립니다. 지금은 기록된 이벤트가 없어 화면이 비어 있습니다.</p>
         </div>
-        <${EmptyState} message="아직 claim, broadcast, team-session, board 같은 실행 이벤트가 activity feed에 기록되지 않았습니다." compact />
+        <${EmptyState} message="아직 claim, broadcast, session runtime, board 같은 실행 이벤트가 activity feed에 기록되지 않았습니다." compact />
       <//>
     </div>
   `

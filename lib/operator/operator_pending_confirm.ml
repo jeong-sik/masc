@@ -272,19 +272,19 @@ let available_actions : available_action list =
       ~description:"Inject a backlog task into the namespace.";
     make_available_action ~action_type:"team_note" ~tool_name:"masc_team_session_step"
       ~target_type:"team_session"
-      ~description:"Append an operator note to a team session.";
+      ~description:"Append an operator note to an execution session on the existing team_session control surface.";
     make_available_action ~action_type:"team_broadcast" ~tool_name:"masc_team_session_step"
       ~target_type:"team_session"
-      ~description:"Broadcast-style orchestration turn in a team session.";
+      ~description:"Broadcast-style orchestration turn in an execution session on the existing team_session control surface.";
     make_available_action ~action_type:"team_task_inject" ~tool_name:"masc_team_session_step"
       ~target_type:"team_session"
-      ~description:"Inject a task into a running team session.";
+      ~description:"Inject a task into a running execution session on the existing team_session control surface.";
     make_available_action ~action_type:"team_worker_spawn_batch" ~tool_name:"masc_team_session_step"
       ~target_type:"team_session"
-      ~description:"Spawn or replace team-session workers.";
+      ~description:"Spawn or replace workers in an execution session on the existing team_session control surface.";
     make_available_action ~action_type:"team_stop" ~tool_name:"masc_team_session_stop"
       ~target_type:"team_session"
-      ~description:"Stop a running team session.";
+      ~description:"Stop a running execution session on the existing team_session control surface.";
     make_available_action ~action_type:"keeper_message" ~tool_name:"masc_keeper_msg"
       ~target_type:"keeper"
       ~description:"Send a direct operator message to a keeper.";

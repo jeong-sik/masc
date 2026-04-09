@@ -9,7 +9,7 @@ It is built for repo-local, single-machine, trusted-network workflows where seve
 Current product posture:
 
 - Front-door promise: repo coordination for coding workflows
-- Advanced path: supervised delivery swarm through Team Session + Supervisor
+- Advanced path: supervised delivery swarm through the OAS-backed execution runtime + Supervisor
 - Supporting surface: dashboard and remote-safe operator tools
 - Experimental or secondary: wider transport matrix, research modules, and non-canonical legacy surfaces
 
@@ -155,7 +155,7 @@ Canonical namespace/task hygiene:
 
 Use this when a feature slice needs planner / implementer / supervisor separation:
 
-- Team session path: `masc_team_session_*`
+- Runtime path: `masc_team_session_*` (current tool family name for supervised execution)
 - Supervisor path: `/mcp/operator` with `masc_operator_snapshot`, `masc_operator_digest`, `masc_operator_action`, `masc_operator_confirm`
 
 The canonical runbooks are [docs/SWARM-DELIVERY-RUNBOOK.md](docs/SWARM-DELIVERY-RUNBOOK.md) and [docs/SUPERVISOR-MODE.md](docs/SUPERVISOR-MODE.md).
@@ -215,7 +215,7 @@ CI_TEST_TIMEOUT_SEC=1200 CI_TEST_HEARTBEAT_SEC=30 \
 - [docs/MCP-TEMPLATE.md](docs/MCP-TEMPLATE.md) — HTTP / stdio MCP config templates
 - [docs/COMMAND-PLANE-RUNBOOK.md](docs/COMMAND-PLANE-RUNBOOK.md) — managed-operation compatibility lane and command-plane details
 - [docs/BENCHMARK-RUNBOOK.md](docs/BENCHMARK-RUNBOOK.md) — single-agent vs swarm comparison
-- [docs/SUPERVISOR-MODE.md](docs/SUPERVISOR-MODE.md) — supervised team-session / operator workflow
+- [docs/SUPERVISOR-MODE.md](docs/SUPERVISOR-MODE.md) — supervised execution / operator workflow
 - [docs/REMOTE-MCP-OPERATOR.md](docs/REMOTE-MCP-OPERATOR.md) — remote-safe operator endpoint and confirm flow
 - [docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md](docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md) — local admin bearer bootstrap, base-path checks, and dashboard keeper lifecycle control
 - [docs/KEEPER-USER-MANUAL.md](docs/KEEPER-USER-MANUAL.md) — keeper lifecycle and troubleshooting

@@ -209,14 +209,17 @@ let custom_tool_titles : (string * string) list = [
   ("masc_operator_digest", "Operator Digest");
   ("masc_operator_action", "Operator Action");
   ("masc_operator_confirm", "Operator Confirm");
-  (* Team sessions *)
-  ("masc_team_session_start", "Start Team Session");
-  ("masc_team_session_step", "Team Session Step");
-  ("masc_team_session_status", "Team Session Status");
-  ("masc_team_session_stop", "Stop Team Session");
-  ("masc_team_session_list", "List Team Sessions");
-  ("masc_team_session_events", "Team Session Events");
-  ("masc_team_session_finalize", "Finalize Team Session");
+  (* Session runtime *)
+  ("masc_team_session_start", "Start Execution Session");
+  ("masc_team_session_step", "Session Step");
+  ("masc_team_session_status", "Session Status");
+  ("masc_team_session_stop", "Stop Execution Session");
+  ("masc_team_session_list", "List Execution Sessions");
+  ("masc_team_session_events", "Session Events");
+  ("masc_team_session_report", "Session Report");
+  ("masc_team_session_prove", "Session Proof");
+  ("masc_team_session_compare", "Compare Sessions");
+  ("masc_team_session_finalize", "Finalize Execution Session");
   (* Command plane *)
   ("masc_operation_start", "Start Operation");
   ("masc_operation_status", "Operation Status");

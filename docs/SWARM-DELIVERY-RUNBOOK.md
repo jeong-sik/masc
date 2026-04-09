@@ -4,7 +4,7 @@
 
 핵심 원칙:
 
-- 구현 swarm의 SSOT는 `Team Session + Supervisor Mode`
+- 구현 swarm의 SSOT는 `OAS-backed supervised execution + Supervisor Mode`
 - managed-operation benchmark lane은 별도 compat path다
 - model 선택은 항상 explicit
 - 기본 운영 형태는 supervised swarm
@@ -65,7 +65,7 @@
 4. explicit model 선택
    - `LLAMA_SWARM_MODEL=<exact-id>`
 5. `masc_team_session_start`
-   - 목표와 orchestration policy를 가진 session을 시작한다.
+   - 목표와 orchestration policy를 가진 execution session을 시작한다.
 6. `masc_team_session_step`
    - `turn_kind="note"`로 model selection rationale을 남긴다.
 7. `masc_team_session_step(spawn_batch=...)`
@@ -106,7 +106,7 @@ Karpathy-style raw `masc_autoresearch_*` loop는 그대로 유지하되, supervi
 
 - raw loop 생성
 - best-effort `research_pipeline/normalize` managed operation 생성
-- linked `team session` 시작
+- linked execution session 시작
 - `research-driver` / `research-auditor` planned worker seed 기록
 - 이후 operator/digest/session status에서 `linked_autoresearch` block으로 상태 확인
 
@@ -222,4 +222,5 @@ local64 worker batch는 추가로 다음 메타데이터를 권장한다:
 
 - 이 문서는 implementation substrate SSOT다.
 - managed-operation benchmark lane은 별도 compat path로 유지된다.
+- current MCP tool family name is still `masc_team_session_*`, but that naming is an implementation detail.
 - worker 품질은 orchestration뿐 아니라 model/runtime 상태에도 크게 좌우된다.

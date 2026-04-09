@@ -1,4 +1,4 @@
-(** MCP tools for long-running team sessions (1h orchestration).
+(** MCP tools for long-running supervised execution sessions (1h orchestration).
 
     Thin facade that re-exports types from [Tool_team_session_support],
     delegates dispatch to [Tool_team_session_handlers], and includes

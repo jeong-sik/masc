@@ -63,10 +63,10 @@ The MODEL receives the full file, generates a modified version, and writes it ba
   {
     name = "masc_autoresearch_swarm_start";
     description = "Start an experiment loop with team coordination. Same experiment logic \
-as masc_autoresearch_start but also creates a team session, seeds worker roles, and \
+as masc_autoresearch_start but also creates an execution session, seeds worker roles, and \
 links loop status to the team. Use when multiple agents should collaborate on the \
-research. Returns loop_id and team_session_id. Other agents can monitor via team \
-session tools.";
+research. Returns loop_id and team_session_id. Other agents can monitor via session \
+runtime tools.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -123,7 +123,7 @@ session tools.";
     name = "masc_repo_synthesis_swarm_start";
     description = "Start a repository-scoped code synthesis task with team coordination. \
 Use for questions about a codebase (e.g. 'Generate a DB schema from these requirements'). \
-Creates a team session and seeds workers to answer the question collaboratively. \
+Creates an execution session and seeds workers to answer the question collaboratively. \
 Unlike autoresearch (metric-driven loops), this is question-driven with artifact output. \
 Returns synthesis_id and team_session_id.";
     input_schema = `Assoc [
@@ -164,7 +164,7 @@ Returns synthesis_id and team_session_id.";
         ]);
         ("max_workers", `Assoc [
           ("type", `String "integer");
-          ("description", `String "Maximum planned worker count to seed into the attached team session (default: 6).");
+          ("description", `String "Maximum planned worker count to seed into the attached execution session (default: 6).");
         ]);
         ("baseline_label", `Assoc [
           ("type", `String "string");

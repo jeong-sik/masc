@@ -223,7 +223,7 @@ export function Proof() {
         <${Card} title="협업 타임라인">
           <div class="grid gap-1 mb-3">
             <h3 class="text-[14px] font-semibold text-[var(--text-strong)]">협업 타임라인</h3>
-            <p class="text-[12px] text-[var(--text-muted)] leading-relaxed">team-session과 command-plane에서 같은 사건이 보이면 한 줄로 묶어 읽습니다.</p>
+            <p class="text-[12px] text-[var(--text-muted)] leading-relaxed">세션 런타임과 command-plane에서 같은 사건이 보이면 한 줄로 묶어 읽습니다.</p>
           </div>
           <div class="flex flex-col gap-3">
             ${dedupedTimeline.length > 0

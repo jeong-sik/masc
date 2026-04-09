@@ -6,38 +6,25 @@ import { useEffect } from 'preact/hooks'
 import { keepers } from '../store'
 import { fetchKeeperTransitions, type KeeperTransition, type KeeperTransitionsResponse } from '../api/keeper'
 import { TimeAgo } from './common/time-ago'
+import { getPhaseStyle } from './keeper-phase-indicator'
 
 const transitionData = signal<Map<string, KeeperTransitionsResponse>>(new Map())
 const loading = signal(false)
 
-// Phase names come lowercase from the server (phase_to_string)
-const PHASE_COLORS: Record<string, string> = {
-  running: 'var(--ok)',
-  compacting: '#fbbf24',
-  handing_off: '#22d3ee',
-  failing: 'var(--bad)',
-  crashed: '#ef4444',
-  dead: '#6b7280',
-  paused: '#a78bfa',
-  draining: '#fb923c',
-  restarting: '#38bdf8',
-  stopped: '#9ca3af',
-  offline: '#4b5563',
+// Server sends lowercase (e.g. "running", "handing_off"); PHASE_STYLES uses PascalCase
+function toPascalPhase(phase: string): string {
+  return phase.toLowerCase()
+    .replace(/_([a-z])/g, (_, c: string) => c.toUpperCase())
+    .replace(/^./, s => s.toUpperCase())
 }
 
 function phaseColor(phase: string): string {
-  return PHASE_COLORS[phase.toLowerCase()] ?? '#6b7280'
+  return getPhaseStyle(toPascalPhase(phase)).color
 }
 
-function phaseBgClass(phase: string): string {
-  switch (phase.toLowerCase()) {
-    case 'running': return 'bg-[var(--ok)]/15 text-[var(--ok)]'
-    case 'failing': case 'crashed': return 'bg-[var(--bad)]/15 text-[var(--bad-light)]'
-    case 'compacting': return 'bg-[#fbbf24]/15 text-[#fbbf24]'
-    case 'handing_off': return 'bg-[#22d3ee]/15 text-[#22d3ee]'
-    case 'paused': return 'bg-[#a78bfa]/15 text-[#a78bfa]'
-    default: return 'bg-[var(--white-6)] text-[var(--text-muted)]'
-  }
+function phaseInlineStyle(phase: string): string {
+  const style = getPhaseStyle(toPascalPhase(phase))
+  return `color: ${style.color}; background: ${style.bg}; border: 1px solid ${style.border};`
 }
 
 // selected_event comes as object {type: "...", ...} from the server
@@ -96,8 +83,11 @@ function KeeperStrip({ name, data }: { name: string; data: KeeperTransitionsResp
     <div class="flex items-center gap-3 py-2 px-3 rounded-lg border border-[var(--white-6)] bg-[var(--white-3)]">
       <div class="w-24 shrink-0">
         <div class="text-[13px] font-semibold text-[var(--text-strong)] truncate">${name}</div>
-        <div class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium mt-1 ${phaseBgClass(phase)}">
-          ${phase}
+        <div
+          class="inline-flex items-center rounded-md px-2 py-0.5 text-[10px] font-semibold tracking-wide mt-1"
+          style="${phaseInlineStyle(phase)}"
+        >
+          ${getPhaseStyle(toPascalPhase(phase)).icon} ${getPhaseStyle(toPascalPhase(phase)).label}
         </div>
       </div>
       <div class="flex-1 flex items-center gap-1.5 overflow-x-auto min-h-[24px]">

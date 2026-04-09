@@ -208,6 +208,7 @@ let () =
            ~description:s.description
            ~module_tag:Tool_dispatch.Mod_compact
            ~input_schema:s.input_schema
+           ~handler_binding:Tag_dispatch
            ~visibility:Tool_catalog.Hidden
            ~allow_direct_call_when_hidden:true
            ()))

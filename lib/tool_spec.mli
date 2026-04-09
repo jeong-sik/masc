@@ -22,11 +22,19 @@
 
 (** {1 Types} *)
 
+(** How a tool's handler is bound to the dispatch registry. *)
+type handler_binding =
+  | Direct of Tool_dispatch.handler
+  | Shared of Tool_dispatch.handler
+  | Tag_dispatch
+  | Match_chain
+
 type t = {
   name : string;
   description : string;
   input_schema : Yojson.Safe.t;
   module_tag : Tool_dispatch.module_tag;
+  handler_binding : handler_binding;
   is_read_only : bool;
   requires_join : bool;
   is_destructive : bool;
@@ -49,6 +57,7 @@ val create :
   description:string ->
   module_tag:Tool_dispatch.module_tag ->
   input_schema:Yojson.Safe.t ->
+  handler_binding:handler_binding ->
   ?is_read_only:bool ->
   ?requires_join:bool ->
   ?is_destructive:bool ->
@@ -63,7 +72,7 @@ val create :
   ?title:string ->
   ?required_permission:Types.permission ->
   unit -> t
-(** Build a tool spec. The first four arguments are required (compile error
+(** Build a tool spec. The first five arguments are required (compile error
     if omitted). All optional arguments default to fail-closed values:
     booleans to [false], options to [None], visibility to [Default],
     lifecycle to [Active], implementation_status to [Real]. *)
@@ -90,6 +99,9 @@ val to_tool_schema : t -> Types.tool_schema
 (** {1 Boot-time verification} *)
 
 val verify_handler_coverage : unit -> string list
-(** Returns tool names that were registered via [register] but have no
-    handler in [Tool_dispatch]. Call after server initialization completes.
-    Empty list means full coverage. *)
+(** Returns tool names that were registered via [register] with [Direct] or
+    [Shared] binding but have no handler in [Tool_dispatch]. [Tag_dispatch]
+    and [Match_chain] bindings are excluded. Call after server initialization
+    completes. Empty list means full coverage. *)
+
+val all_registered_names : unit -> string list

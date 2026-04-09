@@ -607,6 +607,7 @@ let () =
            ~description:s.description
            ~module_tag:Tool_dispatch.Mod_room
            ~input_schema:s.input_schema
+           ~handler_binding:Tag_dispatch
            ~is_read_only:(List.mem s.name _tool_spec_read_only)
            ~is_idempotent:(List.mem s.name _tool_spec_read_only)
            ~visibility:(if is_system then Tool_catalog.Hidden else Tool_catalog.Default)

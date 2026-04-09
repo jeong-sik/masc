@@ -239,6 +239,7 @@ let () =
            ~description:s.description
            ~module_tag:Tool_dispatch.Mod_suspend
            ~input_schema:s.input_schema
+           ~handler_binding:Tag_dispatch
            ~requires_join:(List.mem s.name _tool_spec_requires_join)
            ~visibility:Tool_catalog.Hidden
            ~allow_direct_call_when_hidden:true

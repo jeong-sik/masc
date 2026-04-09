@@ -35,6 +35,7 @@ let () =
            ~description:s.description
            ~module_tag:Tool_dispatch.Mod_command_plane
            ~input_schema:s.input_schema
+           ~handler_binding:Tag_dispatch
            ~is_destructive
            ()))
     schemas

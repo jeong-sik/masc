@@ -12,6 +12,72 @@ let io_timeout_sec = 30.0
 let read_timeout_sec = 15.0
 let user_timeout_max_sec = 180.0
 
+let clamp_shell_timeout ?(min_sec = 1.0) ~default args =
+  Safe_ops.json_float ~default "timeout_sec" args
+  |> fun n -> max min_sec (min user_timeout_max_sec n)
+
+let lowercase_shell_words text =
+  text
+  |> String.map (function '\t' | '\r' | '\n' -> ' ' | c -> c)
+  |> String.lowercase_ascii
+  |> String.split_on_char ' '
+  |> List.filter (fun token -> token <> "")
+
+let git_global_option_takes_value = function
+  | "-c" | "-C" | "--exec-path" | "--git-dir" | "--work-tree"
+  | "--namespace" | "--super-prefix" | "--config-env" -> true
+  | _ -> false
+
+let git_global_option_has_inline_value token =
+  List.exists (fun prefix -> String.starts_with ~prefix token)
+    [ "--exec-path="; "--git-dir="; "--work-tree="; "--namespace="; "--config-env=" ]
+
+let rec first_git_subcommand = function
+  | [] -> None
+  | token :: rest when git_global_option_takes_value token ->
+      (match rest with
+       | _value :: tail -> first_git_subcommand tail
+       | [] -> None)
+  | token :: rest when git_global_option_has_inline_value token ->
+      first_git_subcommand rest
+  | token :: rest when String.starts_with ~prefix:"-" token ->
+      first_git_subcommand rest
+  | token :: _rest -> Some token
+
+let readonly_shell_token_match tokens =
+  match tokens with
+  | [] -> None
+  | "git" :: rest ->
+      (match first_git_subcommand rest with
+       | Some "push" -> Some ("git push", "git_write")
+       | Some "reset" -> Some ("git reset", "git_write")
+       | Some "checkout" -> Some ("git checkout", "git_write")
+       | Some "rebase" -> Some ("git rebase", "git_write")
+       | _ -> None)
+  | "pip" :: "install" :: _ -> Some ("pip install", "package_install")
+  | "npm" :: "install" :: _ -> Some ("npm install", "package_install")
+  | "opam" :: "install" :: _ -> Some ("opam install", "package_install")
+  | "rm" :: _ -> Some ("rm ", "destructive")
+  | "rmdir" :: _ -> Some ("rmdir", "destructive")
+  | "mv" :: _ -> Some ("mv ", "destructive")
+  | "cp" :: _ -> Some ("cp ", "destructive")
+  | "chmod" :: _ -> Some ("chmod", "destructive")
+  | "chown" :: _ -> Some ("chown", "destructive")
+  | "kill" :: _ -> Some ("kill", "destructive")
+  | "pkill" :: _ -> Some ("pkill", "destructive")
+  | "dd" :: _ -> Some ("dd ", "destructive")
+  | "mkfs" :: _ -> Some ("mkfs", "destructive")
+  | "wget" :: _ -> Some ("wget ", "destructive")
+  | "curl" :: rest when List.exists (String.equal "-o") rest ->
+      Some ("curl -o", "destructive")
+  | "curl" :: rest when List.exists (String.equal "--output") rest ->
+      Some ("curl --output", "destructive")
+  | _ -> None
+
+let process_status_is_timeout = function
+  | Unix.WSIGNALED sig_num -> sig_num = Sys.sigterm
+  | _ -> false
+
 (** Write playground repo state cache after successful clone/pull.
     Reads git metadata from [repo_path] and upserts into
     [playground_dir/.playground_state.json]. Best-effort: failures are logged
@@ -96,6 +162,28 @@ let resolve_keeper_shell_write_cwd
   | Ok cwd when Sys.file_exists cwd && Sys.is_directory cwd -> Ok cwd
   | Ok cwd -> Error (Printf.sprintf "cwd_not_directory: %s" cwd)
 
+let resolve_keeper_shell_read_path
+      ~(config : Room.config)
+      ~(meta : keeper_meta)
+      ~(args : Yojson.Safe.t)
+  =
+  let raw_path = Safe_ops.json_string ~default:"" "path" args |> String.trim in
+  match resolve_keeper_shell_read_cwd ~config ~meta ~args with
+  | Error _ as err when raw_path = "" -> err
+  | Error _ ->
+    let fallback_path = if raw_path = "" then "." else raw_path in
+    resolve_keeper_read_path ~config ~meta ~raw_path:fallback_path
+  | Ok cwd ->
+    let resolved_raw_path =
+      if raw_path = "" then
+        cwd
+      else if Filename.is_relative raw_path then
+        Filename.concat cwd raw_path
+      else
+        raw_path
+    in
+    resolve_keeper_read_path ~config ~meta ~raw_path:resolved_raw_path
+
 let handle_keeper_bash
       ~(config : Room.config)
       ~(meta : keeper_meta)
@@ -107,9 +195,7 @@ let handle_keeper_bash
     |> Worker_dev_tools.sanitize_command_for_log
     |> Worker_dev_tools.truncate_for_log
   in
-  let timeout_sec =
-    Safe_ops.json_float ~default:io_timeout_sec "timeout_sec" args |> fun n -> max 1.0 (min user_timeout_max_sec n)
-  in
+  let timeout_sec = clamp_shell_timeout ~default:io_timeout_sec args in
   (* Write access is config-driven via permissions.shell_write_presets *)
   let write_enabled =
     match Keeper_types.tool_access_preset meta.tool_access with
@@ -234,10 +320,7 @@ let handle_keeper_shell
     | _ -> raw_op
   in
   let root = Keeper_alerting_path.project_root_of_config config in
-  let read_target () =
-    let raw_path = Safe_ops.json_string ~default:"." "path" args in
-    resolve_keeper_read_path ~config ~meta ~raw_path
-  in
+  let read_target () = resolve_keeper_shell_read_path ~config ~meta ~args in
   let cwd_target () = resolve_keeper_shell_read_cwd ~config ~meta ~args in
   let render_process_result ?cwd ~cmd argv =
     let st, out =
@@ -511,6 +594,7 @@ let handle_keeper_shell
     end
   | "bash" ->
     let cmd_str = Safe_ops.json_string ~default:"" "command" args |> String.trim in
+    let timeout_sec = clamp_shell_timeout ~default:io_timeout_sec args in
     if cmd_str = "" then error_json ~fields:[ "op", `String op ] "command is required for bash op. Good: command='env'. Bad: command=''."
 
     else
@@ -524,7 +608,7 @@ let handle_keeper_shell
         | "destructive"     -> "Use keeper_bash for write operations, not readonly shell."
         | _                 -> "This operation is not allowed in readonly shell."
       in
-      let deny_patterns =
+      let substring_rules =
         [ (* chaining *)
           "&&", "chaining"
         ; "||", "chaining"
@@ -533,36 +617,14 @@ let handle_keeper_shell
         ; "| tee ", "redirect"
         ; ">> ", "redirect"
         ; "> ", "redirect"
-        (* git write *)
-        ; "git push", "git_write"
-        ; "git reset", "git_write"
-        ; "git checkout", "git_write"
-        ; "git rebase", "git_write"
-        (* package install *)
-        ; "pip install", "package_install"
-        ; "npm install", "package_install"
-        ; "opam install", "package_install"
-        (* destructive / write *)
-        ; "rm ", "destructive"
-        ; "rm\t", "destructive"
-        ; "rmdir", "destructive"
-        ; "mv ", "destructive"
-        ; "cp ", "destructive"
-        ; "chmod", "destructive"
-        ; "chown", "destructive"
-        ; "kill", "destructive"
-        ; "pkill", "destructive"
-        ; "dd ", "destructive"
-        ; "mkfs", "destructive"
-        ; "wget ", "destructive"
-        ; "curl -o", "destructive"
-        ; "curl --output", "destructive"
         ]
       in
       let matched =
-        List.find_opt (fun (pat, _cat) ->
+        match List.find_opt (fun (pat, _cat) ->
           String_util.contains_substring_ci cmd_str pat
-        ) deny_patterns
+        ) substring_rules with
+        | Some (pat, category) -> Some (pat, category)
+        | None -> readonly_shell_token_match (lowercase_shell_words cmd_str)
       in
       (match matched with
       | Some (pat, category) ->
@@ -584,18 +646,32 @@ let handle_keeper_shell
             | Error e -> error_json ~fields:[ "op", `String op ] e
             | Ok () ->
               let st, out =
-                Process_eio.run_argv_with_status ~cwd ~timeout_sec:io_timeout_sec
+                Process_eio.run_argv_with_status ~cwd ~timeout_sec
                   [ "bash"; "-lc"; cmd_str ^ " 2>&1" ]
               in
-              Yojson.Safe.to_string
-                (`Assoc
-                    [ "ok", `Bool (st = Unix.WEXITED 0)
-                    ; "op", `String op
-                    ; "cwd", `String cwd
-                    ; "command", `String cmd_str
-                    ; "status", Keeper_alerting_path.process_status_to_json st
-                    ; "output", `String out
-                    ]))))
+              if process_status_is_timeout st then
+                Yojson.Safe.to_string
+                  (`Assoc
+                      [ "ok", `Bool false
+                      ; "op", `String op
+                      ; "cwd", `String cwd
+                      ; "command", `String cmd_str
+                      ; "error", `String "command_timed_out"
+                      ; "timeout_sec", `Float timeout_sec
+                      ; "status", Keeper_alerting_path.process_status_to_json st
+                      ; "output", `String out
+                      ; "hint", `String "Narrow the scope or use structured ops like rg/find/ls instead of broad bash scans."
+                      ])
+              else
+                Yojson.Safe.to_string
+                  (`Assoc
+                      [ "ok", `Bool (st = Unix.WEXITED 0)
+                      ; "op", `String op
+                      ; "cwd", `String cwd
+                      ; "command", `String cmd_str
+                      ; "status", Keeper_alerting_path.process_status_to_json st
+                      ; "output", `String out
+                      ]))))
   | "git_clone" ->
     (* Clone a repo into this keeper's playground repos directory.
        Sandboxed: always targets .masc/playground/<keeper_name>/repos/<repo_name>.

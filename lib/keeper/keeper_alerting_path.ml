@@ -337,6 +337,8 @@ let process_status_to_json (st : Unix.process_status) : Yojson.Safe.t =
   match st with
   | Unix.WEXITED code ->
       `Assoc [("kind", `String "exit"); ("code", `Int code)]
+  | Unix.WSIGNALED sig_num when sig_num = Sys.sigterm ->
+      `Assoc [("kind", `String "timeout")]
   | Unix.WSIGNALED sig_num ->
       `Assoc [("kind", `String "signaled"); ("signal", `Int sig_num)]
   | Unix.WSTOPPED sig_num ->

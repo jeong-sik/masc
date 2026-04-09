@@ -315,6 +315,34 @@ let provider_order () =
 let provider_plan () =
   provider_order () |> List.map provider_to_string
 
+let is_secret_token_char = function
+  | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '-' -> true
+  | _ -> false
+
+let contains_secret_token_prefix ~prefix ~min_suffix_len query =
+  let lowered = String.lowercase_ascii query in
+  let prefix_len = String.length prefix in
+  let query_len = String.length lowered in
+  let rec count_suffix_chars idx count =
+    if idx + count >= query_len then
+      count
+    else if is_secret_token_char lowered.[idx + count] then
+      count_suffix_chars idx (count + 1)
+    else
+      count
+  in
+  let rec loop idx =
+    if idx + prefix_len > query_len then
+      false
+    else if String.sub lowered idx prefix_len = prefix then
+      let boundary_ok = idx = 0 || not (is_secret_token_char lowered.[idx - 1]) in
+      let suffix_len = count_suffix_chars (idx + prefix_len) 0 in
+      if boundary_ok && suffix_len >= min_suffix_len then true else loop (idx + 1)
+    else
+      loop (idx + 1)
+  in
+  loop 0
+
 let query_contains_secret_like_content query =
   let lowered = String.lowercase_ascii query in
   let markers =
@@ -325,12 +353,20 @@ let query_contains_secret_like_content query =
       "x-api-key:";
       "api_key=";
       "token=";
-      "ghp_";
-      "github_pat_";
-      "sk-";
+    ]
+  in
+  let secret_prefixes =
+    [
+      ("ghp_", 8);
+      ("github_pat_", 8);
+      ("sk-", 10);
     ]
   in
   List.exists (fun marker -> String_util.contains_substring lowered marker) markers
+  || List.exists
+       (fun (prefix, min_suffix_len) ->
+         contains_secret_token_prefix ~prefix ~min_suffix_len query)
+       secret_prefixes
 
 let validate_query query =
   let normalized = normalize_spaces query in

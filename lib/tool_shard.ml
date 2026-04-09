@@ -290,6 +290,7 @@ git_log/git_diff for repo history, bash for curl/jq/env/which.";
         ("lines", `Assoc [("type", `String "integer"); ("description", `String "Number of lines for head/tail (default 20, max 200)")]);
         ("max_bytes", `Assoc [("type", `String "integer"); ("description", `String "Max bytes for cat")]);
         ("command", `Assoc [("type", `String "string"); ("description", `String "Single shell command for bash op. No chaining (&&/||/;/|) or redirects (>/>>) allowed. Read-only.")]);
+        ("timeout_sec", `Assoc [("type", `String "number"); ("description", `String "Timeout seconds for bash op (default: 30, max: 180)")]);
         ("url", `Assoc [("type", `String "string"); ("description", `String "Git repo URL for git_clone op (e.g. 'https://github.com/org/repo'). Clones into .masc/playground/<your_name>/.")]);
       ]);
       ("required", `List [`String "op"]);

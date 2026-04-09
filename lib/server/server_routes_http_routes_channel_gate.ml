@@ -225,11 +225,21 @@ let handle_gate_connectors _state request reqd =
 
     Generic connector status. Accepts the current [name=<connector>] form and
     also tolerates legacy [channel=<connector>] callers. *)
+let resolve_connector_status_name ?name ?channel () =
+  match Option.map String.trim name with
+  | Some name when name <> "" -> Some name
+  | _ -> (
+      match Option.map String.trim channel with
+      | Some legacy when legacy <> "" ->
+          Some (String.lowercase_ascii legacy)
+      | _ -> None)
+
 let handle_gate_connector_status _state request reqd =
   let connector_name =
-    match query_param request "name" |> Option.map String.trim with
-    | Some name when name <> "" -> Some name
-    | _ -> query_param request "channel" |> Option.map String.trim
+    resolve_connector_status_name
+      ?name:(query_param request "name")
+      ?channel:(query_param request "channel")
+      ()
   in
   match connector_name with
   | None | Some "" ->

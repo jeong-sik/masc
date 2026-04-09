@@ -498,8 +498,11 @@ let handle_keeper_status ctx args : tool_result =
           Keeper_types.tool_access_custom_allowlist m.tool_access
           |> Option.value ~default:[]
         in
+        let runtime_blocker_fields =
+          runtime_blocker_fields_json ctx.config m
+        in
 
-         let json = `Assoc [
+         let json = `Assoc ([
            ("name", `String name);
            ("meta", meta_to_json m);
            ("goal", `String m.goal);
@@ -621,6 +624,7 @@ let handle_keeper_status ctx args : tool_result =
                then `Null
                else `String m.runtime.last_need);
           ]);
+        ] @ runtime_blocker_fields @ [
            ("compaction_policy", `Assoc [
              ("profile", `String m.compaction.profile);
              ("ratio_gate", `Float compact_ratio_gate);
@@ -727,7 +731,7 @@ let handle_keeper_status ctx args : tool_result =
                | Ok () -> `Bool true
                | Error _ -> `Bool false);
            ]);
-         ] in
+         ]) in
          let response = Yojson.Safe.pretty_to_string json in
          Hashtbl.replace _cache name
            { updated_at = m.updated_at; args_hash; response };

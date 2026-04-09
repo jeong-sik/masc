@@ -163,7 +163,10 @@ let handle_keeper_list ctx args : tool_result =
                         ("authoritative", `Bool false);
 	                  ]
 	            in
-	            Some (`Assoc [
+              let runtime_blocker_fields =
+                runtime_blocker_fields_json ctx.config m
+              in
+	            Some (`Assoc ([
               ("name", `String m.name);
               ("agent_name", `String m.agent_name);
               ("trace_id", `String m.runtime.trace_id);
@@ -231,6 +234,7 @@ let handle_keeper_list ctx args : tool_result =
                 if String.trim m.runtime.last_need = ""
                 then `Null
                 else `String m.runtime.last_need);
+            ] @ runtime_blocker_fields @ [
               ("continuity_summary",
                 if String.trim m.continuity_summary = ""
                 then `Null
@@ -265,7 +269,7 @@ let handle_keeper_list ctx args : tool_result =
                 ("session_dir", `String (keeper_session_dir ctx.config m.runtime.trace_id));
                 ("history", `String (keeper_history_path ctx.config m.runtime.trace_id));
               ]);
-            ])
+            ]))
         ) keeper_names
       in
       let json = `Assoc [

@@ -82,6 +82,9 @@ val reclassify_error_after_side_effect :
   Oas.Error.sdk_error ->
   Oas.Error.sdk_error
 
+val post_commit_failure_kind_of_error :
+  Oas.Error.sdk_error -> Keeper_registry.ambiguous_partial_commit_kind
+
 (** [true] when an error represents an ambiguous partial commit after a
     mutating tool call succeeded but the turn failed before a clean result. *)
 val is_ambiguous_side_effect_error : Oas.Error.sdk_error -> bool

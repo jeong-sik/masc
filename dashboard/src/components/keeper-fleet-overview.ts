@@ -145,7 +145,9 @@ function KeeperRow({ keeper }: { keeper: Keeper }) {
         <${MetricPill} label="Gen" value=${keeper.generation ?? 0} />
         <${MetricPill} label="Turn" value=${keeper.turn_count ?? 0} />
         <${MetricPill} label="Tool" value=${toolCount > 0 ? toolCount : '-'} />
-        ${keeper.last_blocker ? html`<${MetricPill} label="Blocker" value="yes" tone="warn" />` : null}
+        ${keeper.runtime_blocker_class || keeper.last_blocker
+          ? html`<${MetricPill} label="Blocker" value="yes" tone="warn" />`
+          : null}
         ${summary.band.key === 'paused' ? html`<${MetricPill} label="Pause" value="on" tone="paused" />` : null}
       </div>
     </button>

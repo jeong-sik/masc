@@ -144,11 +144,11 @@ let all_entries =
     };
     {
       id = "command.intervene";
-      label = "실시간 개입";
+      label = "운영 큐";
       exposure_status = "main";
       hidden_from_nav = false;
       meets_main_gate = true;
-      rationale = "namespace/session/keeper 액션은 운영자 개입 surface로 메인에 유지합니다.";
+      rationale = "review queue, 추천 액션, 승인 대기를 한 화면에서 처리하는 canonical operator surface라 메인에 유지합니다.";
       route_hash = Some "#command?section=intervene";
       refs =
         {
@@ -182,11 +182,11 @@ let all_entries =
     {
       id = "command.governance";
       label = "거버넌스";
-      exposure_status = "main";
-      hidden_from_nav = false;
-      meets_main_gate = true;
-      rationale = "거버넌스는 메인 운영 판단 surface로 유지합니다.";
-      route_hash = Some "#command?section=governance";
+      exposure_status = "lab";
+      hidden_from_nav = true;
+      meets_main_gate = false;
+      rationale = "거버넌스 전용 화면은 judge-only 보조 surface로 축소하고, 메인 운영 판단/개입은 command.intervene의 ops queue에 수렴합니다.";
+      route_hash = None;
       refs =
         {
           fixture_harness = None;

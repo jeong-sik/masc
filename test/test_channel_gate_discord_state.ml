@@ -21,7 +21,7 @@ let with_temp_dir f =
   incr temp_dir_counter;
   let base =
     Filename.concat (Filename.get_temp_dir_name ())
-      (Printf.sprintf "discord-state-%06d" !temp_dir_counter)
+      (Printf.sprintf "discord-state-%d-%06d" (Unix.getpid ()) !temp_dir_counter)
   in
   Unix.mkdir base 0o755;
   Fun.protect

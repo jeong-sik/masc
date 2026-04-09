@@ -251,9 +251,41 @@ let has_substantive_tool_calls (tools_used : string list) : bool =
   List.exists (fun name ->
     not (Keeper_tool_registry.is_boring_tool name)) tools_used
 
+let visible_run_validation (result : Keeper_agent_run.run_result) :
+    Agent_sdk.Raw_trace.run_validation option =
+  match result.run_validation with
+  | Some v when v.ok && (v.evidence <> [] || v.has_file_write) -> Some v
+  | _ -> None
+
+let has_visible_tool_signal (result : Keeper_agent_run.run_result) : bool =
+  has_substantive_tool_calls result.tools_used
+  || Option.is_some (visible_run_validation result)
+
+let validated_evidence_preview
+    (v : Agent_sdk.Raw_trace.run_validation) : string =
+  if v.has_file_write then "(validated evidence: file_write)"
+  else
+    match v.tool_names with
+    | [] -> "(validated evidence)"
+    | names ->
+      Printf.sprintf "(validated evidence: %s)"
+        (String.concat ", " names)
+
+let scheduled_autonomous_outcome_for_result
+    (result : Keeper_agent_run.run_result) :
+    scheduled_autonomous_cycle_outcome =
+  scheduled_autonomous_outcome_of_result
+    ~has_text:(String.trim result.response_text <> "")
+    ~has_tool_calls:(has_visible_tool_signal result)
+
+let work_kind_of_result (result : Keeper_agent_run.run_result) : string =
+  if has_visible_tool_signal result then "tool_use"
+  else if String.trim result.response_text <> "" then "text_turn"
+  else "noop"
+
 let selected_mode_of_result (result : Keeper_agent_run.run_result) : string =
   let text = String.trim result.response_text in
-  if has_substantive_tool_calls result.tools_used then "tool_use"
+  if has_visible_tool_signal result then "tool_use"
   else if text = "" then "noop"
   else if String.starts_with ~prefix:"SKIP:" text then "skip_text"
   else "text_response"
@@ -570,10 +602,10 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
   in
   let has_substantive_tools = has_substantive_tool_calls result.tools_used in
   let has_text = String.trim result.response_text <> "" in
-  let has_validated_evidence =
-    match result.run_validation with
-    | Some v -> v.ok && (v.evidence <> [] || v.has_file_write)
-    | None -> false
+  let validated_evidence = visible_run_validation result in
+  let has_validated_evidence = Option.is_some validated_evidence in
+  let has_visible_tool_signal =
+    has_substantive_tools || has_validated_evidence
   in
   let is_scheduled_autonomous_cycle =
     is_scheduled_autonomous_cycle_of_observation observation
@@ -627,19 +659,19 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
           rt.proactive_rt.visible_count_total
           + (if update_proactive_rt
                && is_scheduled_autonomous_cycle
-               && (has_text || has_substantive_tools || has_validated_evidence)
+               && (has_text || has_visible_tool_signal)
              then 1
              else 0);
         last_visible_ts =
           (if update_proactive_rt
               && is_scheduled_autonomous_cycle
-              && (has_text || has_substantive_tools || has_validated_evidence)
+              && (has_text || has_visible_tool_signal)
            then now_ts
            else rt.proactive_rt.last_visible_ts);
         last_outcome =
           (if update_proactive_rt && is_scheduled_autonomous_cycle then
              scheduled_autonomous_outcome_of_result ~has_text
-               ~has_tool_calls:has_substantive_tools
+               ~has_tool_calls:has_visible_tool_signal
            else rt.proactive_rt.last_outcome);
         last_reason =
           (if not update_proactive_rt || not is_scheduled_autonomous_cycle
@@ -648,7 +680,7 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
              Printf.sprintf "unified:tools=[%s]"
                (String.concat "," result.tools_used)
            else if has_validated_evidence then
-             (match result.run_validation with
+             (match validated_evidence with
               | Some v ->
                 Printf.sprintf "unified:validated_evidence(ok=%b,file_write=%b,evidence=%d)"
                   v.ok v.has_file_write (List.length v.evidence)
@@ -664,7 +696,11 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
            else if has_text then short_preview result.response_text
            else if has_substantive_tools then
              Printf.sprintf "(tools: %s)" (String.concat ", " result.tools_used)
-           else rt.proactive_rt.last_preview);
+           else
+             (match validated_evidence with
+              | Some v -> validated_evidence_preview v
+              | None -> rt.proactive_rt.last_preview)
+          );
         (* Work discovery timestamp only advances when the keeper
            actually used tools in response to the nudge. This is
            intentional: the "Work Discovery Due" prompt block keeps
@@ -699,8 +735,11 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
         rt.noop_turn_count
         + (if is_autonomous_turn && not has_text && not has_substantive_tools
               && not has_validated_evidence then 1 else 0);
+      (* This timestamp stays scoped to substantive tool actions.
+         Validated evidence affects proactive visibility, but it does not
+         redefine the autonomous action counter semantics. *)
       last_autonomous_action_at =
-        (if is_autonomous_turn && (has_substantive_tools || has_validated_evidence)
+        (if is_autonomous_turn && has_substantive_tools
          then now_iso ()
          else rt.last_autonomous_action_at);
       last_speech_act = Social.speech_act_to_string social_state.speech_act;
@@ -725,17 +764,10 @@ let append_metrics_snapshot ~(config : Room.config) ~(meta : keeper_meta)
     ?deliberation_execution () : unit =
   let now_ts = Time_compat.now () in
   let _observation = observation in
-  let work_kind =
-    if has_substantive_tool_calls result.tools_used then "tool_use"
-    else if String.trim result.response_text <> "" then "text_turn"
-    else "noop"
-  in
+  let work_kind = work_kind_of_result result in
   let scheduled_autonomous_outcome =
     if is_scheduled_autonomous_channel channel then
-      Some
-        (scheduled_autonomous_outcome_of_result
-           ~has_text:(String.trim result.response_text <> "")
-           ~has_tool_calls:(has_substantive_tool_calls result.tools_used))
+      Some (scheduled_autonomous_outcome_for_result result)
     else None
   in
   let metrics_store = keeper_metrics_store config meta.name in

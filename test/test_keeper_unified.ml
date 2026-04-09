@@ -981,6 +981,8 @@ let test_metrics_tool_response () =
      = Masc_mcp.Keeper_types.Proactive_tool_use);
   check int "autonomous_action +2" (minimal_meta.runtime.autonomous_action_count + 2)
     updated.runtime.autonomous_action_count;
+  check bool "last autonomous action ts updated" true
+    (String.trim updated.runtime.last_autonomous_action_at <> "");
   check int "latency_ms" 500 updated.runtime.usage.last_latency_ms
 
 let test_metrics_noop_response () =
@@ -1031,9 +1033,21 @@ let test_metrics_validated_evidence_counts_as_visible () =
   check int "proactive visible_count +1"
     (minimal_meta.runtime.proactive_rt.visible_count_total + 1)
     updated.runtime.proactive_rt.visible_count_total;
+  check bool "validated evidence outcome is tool_use" true
+    (updated.runtime.proactive_rt.last_outcome
+     = Masc_mcp.Keeper_types.Proactive_tool_use);
+  check string "validated evidence preview"
+    "(validated evidence: keeper_fs_read)"
+    updated.runtime.proactive_rt.last_preview;
   check int "noop unchanged"
     minimal_meta.runtime.noop_turn_count
     updated.runtime.noop_turn_count;
+  check int "autonomous action unchanged"
+    minimal_meta.runtime.autonomous_action_count
+    updated.runtime.autonomous_action_count;
+  check string "last autonomous action ts unchanged"
+    minimal_meta.runtime.last_autonomous_action_at
+    updated.runtime.last_autonomous_action_at;
   check bool "last_reason contains validated_evidence" true
     (String.length updated.runtime.proactive_rt.last_reason > 0
      && (let r = updated.runtime.proactive_rt.last_reason in
@@ -1086,9 +1100,21 @@ let test_metrics_file_write_evidence_counts_as_visible () =
   check int "proactive visible_count +1"
     (minimal_meta.runtime.proactive_rt.visible_count_total + 1)
     updated.runtime.proactive_rt.visible_count_total;
+  check bool "file write evidence outcome is tool_use" true
+    (updated.runtime.proactive_rt.last_outcome
+     = Masc_mcp.Keeper_types.Proactive_tool_use);
+  check string "file write evidence preview"
+    "(validated evidence: file_write)"
+    updated.runtime.proactive_rt.last_preview;
   check int "noop unchanged"
     minimal_meta.runtime.noop_turn_count
-    updated.runtime.noop_turn_count
+    updated.runtime.noop_turn_count;
+  check int "autonomous action unchanged"
+    minimal_meta.runtime.autonomous_action_count
+    updated.runtime.autonomous_action_count;
+  check string "last autonomous action ts unchanged"
+    minimal_meta.runtime.last_autonomous_action_at
+    updated.runtime.last_autonomous_action_at
 
 let test_metrics_heartbeat_only_tool_response_is_maintenance_only () =
   let result =
@@ -1354,6 +1380,68 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
         Yojson.Safe.Util.(
           json |> member "prompt" |> member "user_message"
           |> member "fingerprint" |> to_string))
+
+let test_append_metrics_snapshot_treats_validated_evidence_as_tool_use () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc_mcp.Room.default_config base_dir in
+      let validation : Agent_sdk.Raw_trace.run_validation = {
+        run_ref = sample_run_ref; ok = true;
+        checks = []; evidence = ["tool_paired:keeper_fs_read"];
+        paired_tool_result_count = 1; has_file_write = false;
+        verification_pass_after_file_write = false;
+        final_text = None; tool_names = ["keeper_fs_read"];
+        stop_reason = None; failure_reason = None;
+      } in
+      let result =
+        make_run_result ~text:"" ~tools:[]
+          ~model:"openai:qwen3.5-35b" ~input_tok:40 ~output_tok:20
+          ~run_validation:validation ()
+      in
+      UT.append_metrics_snapshot
+        ~config
+        ~meta:minimal_meta
+        ~observation:base_observation
+        ~result
+        ~latency_ms:123
+        ~turn_cost:0.01
+        ~turn_generation:1
+        ~channel:"scheduled_autonomous"
+        ~snapshot_source:"test"
+        ~context_ratio:0.1
+        ~context_tokens:10
+        ~context_max:100
+        ~message_count:2
+        ~compaction:
+          {
+            Masc_mcp.Keeper_exec_context.applied = false;
+            trigger = None;
+            decision = "no_compaction";
+            before_tokens = 0;
+            after_tokens = 0;
+            saved_tokens = 0;
+          }
+        ~handoff_json:None
+        ();
+      let metrics_store =
+        Masc_mcp.Keeper_types.keeper_metrics_store config minimal_meta.name
+      in
+      let line =
+        match Dated_jsonl.read_recent_lines metrics_store 1 with
+        | [ line ] -> line
+        | _ -> fail "expected one metrics line"
+      in
+      let json = Yojson.Safe.from_string line in
+      check string "work kind persisted as tool_use" "tool_use"
+        Yojson.Safe.Util.(json |> member "work_kind" |> to_string);
+      check string "scheduled autonomous outcome persisted as tool_use"
+        "tool_use"
+        Yojson.Safe.Util.(
+          json |> member "scheduled_autonomous_outcome" |> to_string))
 
 (* context_overflow_limit is now in OAS as Retry.extract_context_limit.
    These tests verify the OAS SSOT API is accessible from MASC. *)
@@ -2305,6 +2393,8 @@ let () =
             test_meta_migration_does_not_infer_visible_proactive_fields;
           test_case "snapshot includes cascade observation" `Quick
             test_append_metrics_snapshot_includes_cascade_observation;
+          test_case "snapshot treats validated evidence as tool use" `Quick
+            test_append_metrics_snapshot_treats_validated_evidence_as_tool_use;
           test_case "social fields" `Quick
             test_metrics_persist_social_state_fields;
           test_case "failure response" `Quick test_metrics_failure_response;

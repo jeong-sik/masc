@@ -533,9 +533,14 @@ let handle_keeper_shell_readonly
                  ; "output", `String out
                  ])
          else
+           let depth = Keeper_tool_policy.clone_depth () |> max 0 in
+           let depth_args =
+             if depth > 0 then ["--depth"; string_of_int depth] else []
+           in
            let st, out =
-             Process_eio.run_argv_with_status ~timeout_sec:120.0
-               [ "git"; "clone"; "--depth"; "1"; url; clone_path ]
+             Process_eio.run_argv_with_status
+               ~timeout_sec:(Keeper_tool_policy.clone_timeout_sec ())
+               ("git" :: "clone" :: depth_args @ [ url; clone_path ])
            in
            Yojson.Safe.to_string
              (`Assoc

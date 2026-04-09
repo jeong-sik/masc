@@ -166,7 +166,6 @@ type keeper_meta =
   ; work_discovery_guidance : string option
   ; telemetry_feedback_enabled : bool option
   ; telemetry_feedback_window_hours : int option
-  ; allowed_providers : string list option
   ; (* -- Agent runtime state (usage, tracing, autonomy metrics) -- *)
     runtime : agent_runtime_state
   }
@@ -624,10 +623,6 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; "work_discovery_guidance", Json_util.string_opt_to_json m.work_discovery_guidance
     ; "telemetry_feedback_enabled", Json_util.bool_opt_to_json m.telemetry_feedback_enabled
     ; "telemetry_feedback_window_hours", Json_util.int_opt_to_json m.telemetry_feedback_window_hours
-    ; "allowed_providers"
-      , (match m.allowed_providers with
-         | Some xs -> `List (List.map (fun s -> `String s) xs)
-         | None -> `Null)
     ]
 ;;
 
@@ -1092,7 +1087,6 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
              ; work_discovery_guidance = Safe_ops.json_string_opt "work_discovery_guidance" json
              ; telemetry_feedback_enabled = Safe_ops.json_bool_opt "telemetry_feedback_enabled" json
              ; telemetry_feedback_window_hours = Safe_ops.json_int_opt "telemetry_feedback_window_hours" json
-             ; allowed_providers = Keeper_types_profile.lower_string_list_opt (Safe_ops.json_string_list "allowed_providers" json)
              ; runtime = state.ps_runtime
              })
   with
@@ -1193,7 +1187,6 @@ let fallback_canonical_keeper_meta_key_names =
   ; "work_discovery_guidance"
   ; "telemetry_feedback_enabled"
   ; "telemetry_feedback_window_hours"
-  ; "allowed_providers"
   ]
 ;;
 
@@ -1218,7 +1211,13 @@ let canonical_keeper_meta_key_names =
 ;;
 
 let compatibility_keeper_meta_key_names =
-  [ "tool_preset"; "tool_also_allow"; "tool_custom_allowlist"; "tool_allowlist" ]
+  [
+    "tool_preset";
+    "tool_also_allow";
+    "tool_custom_allowlist";
+    "tool_allowlist";
+    "allowed_providers";
+  ]
 ;;
 
 let warn_unknown_keeper_meta_keys ~path (json : Yojson.Safe.t) =

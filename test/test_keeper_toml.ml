@@ -651,14 +651,15 @@ let with_personas_dir f =
       Masc_mcp.Config_dir_resolver.reset ();
       f personas_dir)
 
-(* filter_by_providers tests removed — filtering now in OAS cascade.
-   See masc-mcp#6001, oas#740. *)
+(* Legacy allowed_providers is accepted for compatibility but ignored.
+   Provider ownership now lives with OAS cascade resolution. *)
 
-let test_profile_allowed_providers () =
+let test_profile_ignores_legacy_allowed_providers () =
   let input = {|
 [keeper]
 goal = "test"
 allowed_providers = ["Ollama", "GLM"]
+cascade_name = "local_only"
 |} in
   match TL.parse_toml input with
   | Error e -> fail e
@@ -666,21 +667,8 @@ allowed_providers = ["Ollama", "GLM"]
     (match KTP.profile_defaults_of_toml doc with
      | Error e -> fail e
      | Ok d ->
-       check (option (list string)) "lowercased"
-         (Some [ "ollama"; "glm" ]) d.allowed_providers)
-
-let test_profile_allowed_providers_absent () =
-  let input = {|
-[keeper]
-goal = "test"
-|} in
-  match TL.parse_toml input with
-  | Error e -> fail e
-  | Ok doc ->
-    (match KTP.profile_defaults_of_toml doc with
-     | Error e -> fail e
-     | Ok d ->
-       check (option (list string)) "absent" None d.allowed_providers)
+       check (option string) "cascade preserved"
+         (Some "local_only") d.cascade_name)
 
 let test_persona_resolver_defaults_to_research_tool_preset () =
   with_personas_dir @@ fun personas_dir ->
@@ -776,10 +764,8 @@ let () =
             test_profile_rejects_removed_model_keys;
           test_case "rejects removed initiative keys" `Quick
             test_profile_rejects_removed_initiative_keys;
-          test_case "allowed_providers parsed" `Quick
-            test_profile_allowed_providers;
-          test_case "allowed_providers absent" `Quick
-            test_profile_allowed_providers_absent;
+          test_case "legacy allowed_providers ignored" `Quick
+            test_profile_ignores_legacy_allowed_providers;
         ] );
       ( "file_loading",
         [

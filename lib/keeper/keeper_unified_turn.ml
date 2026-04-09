@@ -1029,7 +1029,6 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
             Keeper_agent_run.run_turn ~config ~meta:run_meta ~base_dir
               ~max_context ~build_turn_prompt
               ~user_message ~cascade_name:Keeper_config.default_cascade_name
-              ?provider_filter:run_meta.allowed_providers
               ~generation:run_generation ~max_idle_turns
               ~history_user_source:"world_state_prompt"
               ~history_assistant_source:"internal_assistant"

@@ -131,7 +131,7 @@ let wait_until_terminal ctx session_id =
   loop 200
 
 let oas_trace_session_root base_dir =
-  Filename.concat (Filename.concat base_dir ".masc") "oas-runtime"
+  Worker_container.oas_trace_session_root ~base_path:base_dir
 
 let oas_trace_file_path base_dir ~session_id ~worker_name =
   Filename.concat

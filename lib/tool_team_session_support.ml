@@ -245,7 +245,8 @@ let load_worker_run_meta config session_id worker_run_id =
     Ok (Room_utils.read_json config path)
 
 let oas_trace_session_root config =
-  Filename.concat (Room_utils.masc_dir config) "oas-runtime"
+  let base_path = Filename.dirname (Room_utils.masc_dir config) in
+  Worker_container.oas_trace_session_root ~base_path
 
 type trace_run_locator = {
   worker_run_id : string;

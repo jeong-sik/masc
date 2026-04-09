@@ -115,6 +115,10 @@ export async function refreshToolQuality() {
   await runToolQualityRefresh()
 }
 
+function handleRefreshToolQualityClick() {
+  void refreshToolQuality()
+}
+
 const successColor = computed(() => {
   const rate = data.value?.success_rate ?? 0
   if (rate >= 95) return 'text-emerald-400'
@@ -285,7 +289,7 @@ export function ToolQualityPanel() {
         <h2 class="text-sm font-medium">도구 호출 품질</h2>
         <button
           class="text-[10px] px-2 py-0.5 rounded bg-[var(--bg-subtle)] text-[var(--text-dim)] hover:text-[var(--text)]"
-          onClick=${refreshToolQuality}
+          onClick=${handleRefreshToolQualityClick}
           aria-label="도구 품질 새로고침"
         >새로고침</button>
         <span class="text-[10px] text-[var(--text-dim)]">${formatAutoRefreshLabel(TELEMETRY_AUTO_REFRESH_MS)}</span>

@@ -110,7 +110,7 @@ let is_pending_task (task : Types.task) : bool =
 
 (** Calculate adaptive tempo based on task urgency *)
 let calculate_adaptive_tempo (tasks : Types.task list) : float * string =
-  if List.length tasks = 0 then
+  if tasks = [] then
     (default_config.max_interval_s, "idle - no pending tasks")
   else
     let urgent_count = List.filter (fun t -> t.Types.priority <= 2) tasks |> List.length in

@@ -1,22 +1,32 @@
-(** Tool_registration_check — Startup validation of Tool_spec ↔ TOML coverage.
+(** Tool_registration_check — Startup validation of keeper tool policy coverage.
 
-    Detects drift between registered Tool_spec tools and config/tool_policy.toml
-    group definitions. Called once after init_policy_config succeeds. *)
+    Detects drift between the runtime keeper tool universe and
+    config/tool_policy.toml group definitions.
+    Called once after init_policy_config succeeds. *)
 
 type validation_result = {
   orphan_toml : string list;
   uncovered : string list;
 }
 
-let validate () : validation_result =
-  let registered =
-    let tbl = Hashtbl.create 256 in
-    List.iter (fun n -> Hashtbl.replace tbl n ()) (Tool_spec.all_registered_names ());
-    tbl
+let add_names names tbl =
+  List.iter (fun name -> Hashtbl.replace tbl name ()) names;
+  tbl
+
+let runtime_keeper_tool_names () =
+  let schema_names =
+    Config.raw_all_tool_schemas
+    |> List.map (fun (schema : Types.tool_schema) -> schema.name)
   in
+  Hashtbl.create 512
+  |> add_names schema_names
+  |> add_names Keeper_exec_tools.core_always_tools
+
+let validate () : validation_result =
   match Keeper_tool_policy.policy_config_for_validation () with
   | None -> { orphan_toml = []; uncovered = [] }
   | Some cfg ->
+    let runtime_keeper_tools = runtime_keeper_tool_names () in
     let configured =
       let tbl = Hashtbl.create 256 in
       List.iter (fun n -> Hashtbl.replace tbl n ())
@@ -26,24 +36,22 @@ let validate () : validation_result =
     in
     let orphan_toml =
       Hashtbl.fold (fun name () acc ->
-        if not (Hashtbl.mem registered name) then name :: acc else acc
+        if not (Hashtbl.mem runtime_keeper_tools name) then name :: acc else acc
       ) configured []
       |> List.sort String.compare
     in
-    let uncovered =
-      Hashtbl.fold (fun name () acc ->
-        if not (Hashtbl.mem configured name) then name :: acc else acc
-      ) registered []
-      |> List.sort String.compare
-    in
+    (* tool_policy.toml describes the keeper-facing subset, not the full MCP
+       registry, so reverse "coverage" against all registered tools is noisy
+       and not actionable as a startup warning. *)
+    let uncovered = [] in
     { orphan_toml; uncovered }
 
 let log_validation_result (r : validation_result) =
   if r.orphan_toml <> [] then
-    Log.Server.warn "TOML->Tool_spec orphans (%d): %s"
+    Log.Server.warn "tool_policy unknown tool names (%d): %s"
       (List.length r.orphan_toml)
       (String.concat ", " (List.filteri (fun i _ -> i < 10) r.orphan_toml));
   if r.uncovered <> [] then
-    Log.Server.warn "Tool_spec->TOML uncovered (%d): %s"
+    Log.Server.info "tool_policy reverse coverage (%d): %s"
       (List.length r.uncovered)
       (String.concat ", " (List.filteri (fun i _ -> i < 10) r.uncovered))

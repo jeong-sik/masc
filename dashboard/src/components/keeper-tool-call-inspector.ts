@@ -6,12 +6,12 @@ import { useEffect, useMemo } from 'preact/hooks'
 import { useSignal } from '@preact/signals'
 import { fetchKeeperToolCalls } from '../api/dashboard'
 import type { ToolCallEntry } from '../api/dashboard'
+import { formatTimeHms } from '../lib/format-time'
+import { LoadingState } from './common/feedback-state'
 import { toolCategory, formatDuration, durationColor } from './tool-call-shared'
 
-function formatTimestamp(ts: number): string {
-  const d = new Date(ts * 1000)
-  return d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-}
+// Delegated to lib/format-time (SSOT)
+const formatTimestamp = formatTimeHms
 
 function formatInput(input: unknown): string {
   if (input == null) return '-'
@@ -111,7 +111,7 @@ export function KeeperToolCallInspector({ keeperName }: { keeperName: string }) 
   const sorted = useMemo(() => [...filtered].reverse(), [filtered])
 
   if (loading.value) {
-    return html`<div class="text-xs text-[var(--text-muted)] p-4">Loading tool calls...</div>`
+    return html`<${LoadingState}>도구 호출 불러오는 중...<//>`
   }
 
   if (error.value) {
@@ -119,7 +119,7 @@ export function KeeperToolCallInspector({ keeperName }: { keeperName: string }) 
   }
 
   if (entries.value.length === 0) {
-    return html`<div class="text-xs text-[var(--text-muted)] p-4">No tool call data yet. Data is recorded after server restart with this update.</div>`
+    return html`<div class="text-xs text-[var(--text-muted)] p-4">도구 호출 데이터 없음. 서버 재시작 후 기록됩니다.</div>`
   }
 
   // Summary stats

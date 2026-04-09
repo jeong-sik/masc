@@ -194,32 +194,6 @@ let manual_help_entry name =
               "Use when you want raw masc_autoresearch_* behavior but need operator-visible session/proof surfaces.";
             ];
         }
-  | "masc_repo_synthesis_swarm_start" ->
-      Some
-        {
-          name;
-          short_description =
-            "Start a repo-synthesis run through the managed-operation compatibility lane, attached execution session, and proof surfaces.";
-          when_to_use =
-            "Use when Codex/TUI needs one MCP front door for repo-scoped synthesis questions before dropping to raw command-plane or session-runtime tools.";
-          key_constraints =
-            [
-              "Requires goal, question, and repo_root.";
-              "Seeds planned worker roles and writes a benchmark run record, but dashboard remains read-only.";
-            ];
-          details_markdown =
-            "Creates a managed coding_task inspect-stage operation on the repo-synthesis platoon, starts an attached execution session, registers planned worker roles, stores benchmark metadata under .masc/repo-synthesis-benchmarks, and returns proof/report artifact paths plus recommended next tools. The attached execution session remains the default operator-visible execution path.";
-          doc_refs =
-            [
-              "docs/COMMAND-PLANE-RUNBOOK.md";
-              "docs/BENCHMARK-RUNBOOK.md";
-              "docs/SUPERVISOR-MODE.md";
-            ];
-          prompt_hints =
-            [
-              "Use when you want MCP write/control plus dashboard read/proof for repo questions.";
-            ];
-        }
   | "masc_operation_start" ->
       Some
         {

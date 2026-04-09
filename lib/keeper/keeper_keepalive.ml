@@ -99,16 +99,24 @@ let interruptible_sleep ~clock ~stop ~wakeup duration =
 (** Wake up a specific keeper immediately, causing it to skip the rest of
     its sleep and run the next heartbeat cycle. Used by broadcast notification
     when a @mention targets a running keeper. *)
-let wakeup_keeper name =
-  Keeper_registry.all ()
+let wakeup_keeper ?base_path name =
+  Keeper_registry.all ?base_path ()
   |> List.iter (fun (entry : Keeper_registry.registry_entry) ->
     if String.equal entry.name name && entry.phase = Keeper_state_machine.Running
     then Keeper_registry.wakeup ~base_path:entry.base_path name)
 ;;
 
 (** Wake up all running keepers — used when a broadcast mentions @@all
-    or when a system-wide event requires immediate attention. *)
-let wakeup_all_keepers () = Keeper_registry.wakeup_all ()
+    or when a system-wide event requires immediate attention.
+    [None] preserves the legacy global wakeup behavior. *)
+let wakeup_all_keepers ?base_path () =
+  match base_path with
+  | None -> Keeper_registry.wakeup_all ()
+  | Some expected ->
+      Keeper_registry.all ~base_path:expected ()
+      |> List.iter (fun (entry : Keeper_registry.registry_entry) ->
+           if entry.phase = Keeper_state_machine.Running then
+             Keeper_registry.wakeup ~base_path:entry.base_path entry.name)
 
 let board_reactive_wakeup_allowed ~base_path ~keeper_name ~post_id =
   Keeper_registry.board_wakeup_allowed
@@ -123,7 +131,7 @@ let wakeup_relevant_keeper_for_board_signal
       (signal : Board_dispatch.keeper_board_signal)
   =
   let running_names =
-    Keeper_registry.all ()
+    Keeper_registry.all ~base_path:config.base_path ()
     |> List.filter_map (fun (e : Keeper_registry.registry_entry) ->
       if e.phase = Keeper_state_machine.Running then Some e.name else None)
   in
@@ -161,7 +169,7 @@ let wakeup_relevant_keeper_for_board_signal
         ~keeper_name:meta.name
         ~post_id:signal.post_id
     then (
-      wakeup_keeper meta.name;
+      wakeup_keeper ~base_path:config.base_path meta.name;
       Log.Keeper.info
         "board signal wakeup: keeper=%s reason=%s post=%s"
         meta.name
@@ -562,6 +570,15 @@ let maybe_recover_from_failing ~(ctx : _ context) ~(meta : keeper_meta) =
     end
   end
 
+let keeper_requires_manual_reconcile ~base_path ~keeper_name =
+  match Keeper_registry.get ~base_path keeper_name with
+  | Some entry ->
+      (match entry.last_failure_reason with
+       | Some reason ->
+           Keeper_registry.failure_reason_requires_manual_reconcile reason
+       | None -> false)
+  | None -> false
+
 let sync_keeper_presence
       ~(ctx : _ context)
       ~(meta_current : keeper_meta)
@@ -716,16 +733,30 @@ let run_keepalive_unified_turn
           true
         end else false
       in
+      let manual_reconcile_pending =
+        keeper_requires_manual_reconcile
+          ~base_path:ctx.config.base_path
+          ~keeper_name:meta_after_triage.name
+      in
       let should_run_turn =
         (not (Atomic.get stop))
         && turn_decision.should_run
         && (not boring_skip)
+        && (not manual_reconcile_pending)
       in
       let meta_after_observe =
         Keeper_world_observation.apply_message_cursor_updates
           meta_after_triage
           obs.message_cursor_updates
       in
+      if manual_reconcile_pending && turn_decision.should_run then
+        Log.Keeper.info
+          "keepalive turn skipped for %s: manual reconcile pending channel=%s reasons=%s"
+          meta_after_triage.name
+          (match turn_decision.channel with
+           | Keeper_world_observation.Reactive -> "reactive"
+           | Keeper_world_observation.Scheduled_autonomous -> "scheduled_autonomous")
+          (String.concat "," turn_decision.reasons);
       if should_run_turn then
         Log.Keeper.info
           "keepalive turn scheduled for %s: channel=%s reasons=%s"
@@ -1207,7 +1238,7 @@ let wakeup_keeper_by_agent_name ~agent_name =
     ~agent_name
     ~on_missing:(fun () ->
       Log.Keeper.warn "directive wakeup: agent %s not in registry" agent_name)
-    (fun entry -> wakeup_keeper entry.name)
+    (fun entry -> wakeup_keeper ~base_path:entry.base_path entry.name)
 ;;
 
 let assign_keeper_task_from_directive ~agent_name ~task_id =
@@ -1220,7 +1251,7 @@ let assign_keeper_task_from_directive ~agent_name ~task_id =
          ~base_path:entry.base_path
          entry.name
          { entry.meta with current_task_id = Some task_id };
-       wakeup_keeper entry.name)
+       wakeup_keeper ~base_path:entry.base_path entry.name)
 ;;
 
 (** Process a single directive received from a gRPC HeartbeatAck.
@@ -1595,10 +1626,11 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
           Keeper_registry.cleanup_tracking ~base_path:ctx.config.base_path live_meta.name)))
 ;;
 
-let stop_keepalive name =
+let stop_keepalive ?base_path name =
   let entries =
-    Keeper_registry.all ()
-    |> List.filter (fun (e : Keeper_registry.registry_entry) -> String.equal e.name name)
+    Keeper_registry.all ?base_path ()
+    |> List.filter (fun (e : Keeper_registry.registry_entry) ->
+         String.equal e.name name)
   in
   List.iter
     (fun (entry : Keeper_registry.registry_entry) ->

@@ -164,6 +164,10 @@ module Rest = struct
     | "masc_tasks" -> [ (GET, "/api/v1/tasks") ]
     | "masc_who" -> [ (GET, "/api/v1/agents") ]
     | "masc_messages" -> [ (GET, "/api/v1/messages") ]
+    | "masc_operator_snapshot" -> [ (GET, "/api/v1/operator") ]
+    | "masc_operator_digest" -> [ (GET, "/api/v1/operator/digest") ]
+    | "masc_operator_action" -> [ (POST, "/api/v1/operator/action") ]
+    | "masc_operator_confirm" -> [ (POST, "/api/v1/operator/confirm") ]
     | "masc_websocket_discovery" -> [ (GET, "/ws") ]
     | "masc_webrtc_offer" -> [ (POST, "/webrtc/offer") ]
     | "masc_webrtc_answer" -> [ (POST, "/webrtc/answer") ]
@@ -526,6 +530,10 @@ module Rest = struct
       | "POST", "/webrtc/answer" -> "masc_webrtc_answer"
       | "GET", "/api/v1/tasks" -> "masc_tasks"
       | "GET", "/api/v1/agents" -> "masc_who"
+      | "GET", "/api/v1/operator" -> "masc_operator_snapshot"
+      | "GET", "/api/v1/operator/digest" -> "masc_operator_digest"
+      | "POST", "/api/v1/operator/action" -> "masc_operator_action"
+      | "POST", "/api/v1/operator/confirm" -> "masc_operator_confirm"
       | "POST", "/api/v1/broadcast" | "POST", "/broadcast" -> "masc_broadcast"
       | "GET", "/.well-known/agent.json"
       | "GET", "/.well-known/agent-card.json" -> "masc_agent_card"

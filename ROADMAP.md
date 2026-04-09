@@ -1,7 +1,7 @@
 # masc-mcp Roadmap
 
-> Current package version: v0.2.0
-> Latest release: v0.2.0 (2026-04-09)
+> Current package version: v0.3.0
+> Latest release: v0.3.0 (2026-04-09)
 > Updated: 2026-04-09
 
 This roadmap is the 6-8 week operating view for `masc-mcp`.
@@ -88,7 +88,7 @@ See [CHANGELOG.md](CHANGELOG.md) for release-by-release details.
 
 | Version | Theme | Key deliverables |
 |--------|-------|------------------|
-| v0.2.0 | Release line reset | restart SemVer at pre-1.0, skip already-used `v0.1.x`, freeze legacy `v2.*` line, and teach release automation about the new series |
+| v0.3.0 | Release line reset | restart SemVer at pre-1.0, skip already-used `v0.1.x`, freeze legacy `v2.*` line, and teach release automation about the new series |
 
 Legacy `v2.*` reference points:
 

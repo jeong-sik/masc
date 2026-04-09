@@ -134,7 +134,7 @@ describe('FleetTelemetryPanel', () => {
     expect(container.textContent).toContain('1/2 keepers emitted recent tool telemetry.')
     expect(container.textContent).toContain('keeper-alpha')
     expect(container.textContent).toContain('keeper-beta')
-    expect(container.textContent).toContain('Keeper metrics')
+    expect(container.textContent).toContain('Keeper 턴 로그')
     expect(container.textContent).toContain('Failure Categories')
   })
 

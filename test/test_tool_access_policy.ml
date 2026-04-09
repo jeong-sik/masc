@@ -521,12 +521,32 @@ let test_minimal_preset_includes_core_masc () =
   let universe = Keeper_exec_tools.keeper_universe_tool_names meta in
   check bool "masc_status in universe" true
     (List.mem "masc_status" universe);
-  check bool "masc_heartbeat in universe (MCP-injected, but not executable)" true
+  check bool "masc_heartbeat removed from universe" false
     (List.mem "masc_heartbeat" universe);
   check bool "masc_tool_help in universe" true
     (List.mem "masc_tool_help" universe);
   check bool "masc_broadcast excluded from universe" false
     (List.mem "masc_broadcast" universe)
+
+let test_autoresearch_keeper_tools_exclude_repo_synthesis_front_door () =
+  let raw_names =
+    Tool_autoresearch_schemas.schemas
+    |> List.map (fun (schema : Types.tool_schema) -> schema.name)
+  in
+  let names =
+    Tool_shard.autoresearch_keeper_tools
+    |> List.map (fun (schema : Types.tool_schema) -> schema.name)
+  in
+  check bool "autoresearch swarm start exists in raw autoresearch schemas" true
+    (List.mem "masc_autoresearch_swarm_start" raw_names);
+  check bool "repo synthesis swarm start exists in raw autoresearch schemas" true
+    (List.mem "masc_repo_synthesis_swarm_start" raw_names);
+  check bool "solo autoresearch start survives filtered shard" true
+    (List.mem "masc_autoresearch_start" names);
+  check bool "autoresearch swarm start excluded from autoresearch shard" false
+    (List.mem "masc_autoresearch_swarm_start" names);
+  check bool "repo synthesis swarm start excluded from autoresearch shard" false
+    (List.mem "masc_repo_synthesis_swarm_start" names)
 
 (* ================================================================ *)
 (* Preset-scoped universe (#4637)                                    *)
@@ -759,6 +779,8 @@ let () =
             test_universe_superset_of_policy;
           test_case "minimal preset includes core masc" `Quick
             test_minimal_preset_includes_core_masc;
+          test_case "autoresearch keeper tools exclude repo synthesis front door" `Quick
+            test_autoresearch_keeper_tools_exclude_repo_synthesis_front_door;
           test_case "registered inline board tool survives filter" `Quick
             test_registered_inline_board_tool_survives_filter;
         ] );

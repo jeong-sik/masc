@@ -107,9 +107,22 @@ let test_route_auth_contracts () =
   check bool "h2 gateway dispatch tick uses tool auth" true
     (file_contains_pattern "lib/server/server_h2_gateway_routes_cp.ml"
        {|h2_authorize_tool state ~tool_name:"masc_dispatch_tick"|});
+  check bool "h2 gateway operator action uses tool auth" true
+    (file_contains_pattern "lib/server/server_h2_gateway_routes_cp.ml"
+       {|h2_authorize_tool state ~tool_name:"masc_operator_action"|});
   check bool "h2 gateway operator confirm uses tool auth" true
     (file_contains_pattern "lib/server/server_h2_gateway_routes_cp.ml"
        {|h2_authorize_tool state ~tool_name:"masc_operator_confirm"|});
+  check bool "h2 gateway operator snapshot read route honors read auth" true
+    (file_contains_pattern "lib/server/server_h2_gateway_routes_cp.ml"
+       {|`GET, "/api/v1/operator" ->
+          let state = get_server_state () in
+          (match h2_authorize_read_if_needed state with|});
+  check bool "h2 gateway operator digest read route honors read auth" true
+    (file_contains_pattern "lib/server/server_h2_gateway_routes_cp.ml"
+       {|`GET, "/api/v1/operator/digest" ->
+          let state = get_server_state () in
+          (match h2_authorize_read_if_needed state with|});
   check bool "channel gate message route uses tool auth" true
     (file_contains_pattern
        "lib/server/server_routes_http_routes_channel_gate.ml"
@@ -247,6 +260,33 @@ let test_http_read_surface_contracts () =
     (file_contains_pattern "lib/server/server_routes_http_routes_provider_runs.ml"
        {|"/api/v1/agent-runs/" (fun request reqd ->
        with_read_auth|})
+
+let test_operator_surface_route_contracts () =
+  check bool "http router registers command-plane read routes" true
+    (file_contains_pattern "lib/server/server_routes_http.ml"
+       "Server_routes_http_routes_command_plane_read.add_routes");
+  check bool "http router registers command-plane write routes" true
+    (file_contains_pattern "lib/server/server_routes_http.ml"
+       "Server_routes_http_routes_command_plane_write.add_routes ~sw ~clock");
+  check bool "h2 cp routes expose operator snapshot" true
+    (file_contains_pattern "lib/server/server_h2_gateway_routes_cp.ml"
+       {|`GET, "/api/v1/operator" ->|});
+  check bool "h2 cp routes expose operator digest" true
+    (file_contains_pattern "lib/server/server_h2_gateway_routes_cp.ml"
+       {|`GET, "/api/v1/operator/digest" ->|});
+  check bool "h2 gateway no longer removes operator read surface" true
+    (file_not_contains_pattern "lib/server/server_h2_gateway.ml"
+       {|`GET, "/api/v1/operator"
+      | `GET, "/api/v1/operator/digest" ->
+          h2_respond_removed_surface|});
+  check bool "h2 gateway no longer removes operator write surface" true
+    (file_not_contains_pattern "lib/server/server_h2_gateway.ml"
+       {|`POST, "/api/v1/operator/action"
+      | `POST, "/api/v1/operator/confirm" ->
+          h2_respond_removed_surface|});
+  check bool "h2 gateway still delegates command-plane and operator routes" true
+    (file_contains_pattern "lib/server/server_h2_gateway.ml"
+       "Server_h2_gateway_routes_cp.dispatch ~sw ~clock ~h2_reqd ~httpun_request ~cors ~path httpun_meth")
 
 let test_input_validation_contracts () =
   (* Bug #1602: broadcast must reject empty messages *)
@@ -725,6 +765,8 @@ let () =
            test_case "dashboard warm hydration contracts" `Quick
              test_dashboard_warm_hydration_contracts;
            test_case "http read surface contracts" `Quick test_http_read_surface_contracts;
+           test_case "operator surface route contracts" `Quick
+             test_operator_surface_route_contracts;
            test_case "input validation contracts" `Quick test_input_validation_contracts;
            test_case "room current validation contracts" `Quick
              test_room_current_validation_contracts;

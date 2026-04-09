@@ -6,7 +6,10 @@
   "local_only_models": [
     "ollama:auto"
   ],
-  "_comment": "default: GLM primary + Ollama fallback. local_only: Ollama only (no cloud). OAS discovery resolves ollama:auto via /api/tags.",
+  "keeper_unified_models": [
+    "ollama:qwen3.5:27b-nvfp4"
+  ],
+  "_comment": "default: GLM primary + Ollama fallback. local_only: Ollama only (no cloud). keeper_unified: specific model for unified turns. OAS discovery resolves ollama:auto via /api/tags.",
   "tool_rerank_temperature": 0.0,
   "tool_rerank_max_tokens": 200,
   "keeper_unified_temperature": 0.2,

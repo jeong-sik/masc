@@ -83,6 +83,24 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
   let series_points = 120 in
   let names = keeper_names config in
   let now_ts = Time_compat.now () in
+  let max_restarts =
+    Runtime_params.get Governance_registry.keeper_supervisor_max_restarts
+  in
+  let keepers_dir =
+    Filename.concat (Room.masc_root_dir config) "keepers"
+  in
+  let shared_sp_events =
+    try
+      Keeper_crash_persistence.recent_sp_events
+        ~keepers_dir ~max_entries:20
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn ->
+        Log.Dashboard.warn
+          "keeper dashboard recent_sp_events failed: %s"
+          (Printexc.to_string exn);
+        []
+  in
   (* Parallel keeper I/O: each keeper's metadata + metrics reads run concurrently.
      Results are collected into a shared ref array, then filter_map'd. *)
   let results = Array.make (List.length names) None in
@@ -310,16 +328,12 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
             runtime_blocker_fields_json config m
           in
           let supervisor_diagnostics =
-            let max_restarts =
-              Runtime_params.get Governance_registry.keeper_supervisor_max_restarts in
             match registry_entry with
             | Some entry ->
                 let crash_log =
                   List.map (fun (ts, reason) ->
                     `Assoc [("ts", `Float ts); ("reason", `String reason)]
                   ) entry.crash_log in
-                let keepers_dir =
-                  Filename.concat (Room.masc_root_dir config) "keepers" in
                 let disk_crashes =
                   (try
                      Keeper_crash_persistence.recent_crashes
@@ -334,17 +348,6 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                 let combined_log = match disk_crashes with
                   | [] -> crash_log
                   | _ -> disk_crashes in
-                let sp_events =
-                  (try
-                     Keeper_crash_persistence.recent_sp_events
-                       ~keepers_dir ~max_entries:20
-                   with
-                   | Eio.Cancel.Cancelled _ as exn -> raise exn
-                   | exn ->
-                       Log.Dashboard.warn
-                         "keeper dashboard recent_sp_events failed: %s"
-                         (Printexc.to_string exn);
-                       []) in
                 let ctx_ratio =
                   match last_metrics with
                   | Some m -> Safe_ops.json_float "context_ratio" m
@@ -367,7 +370,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                     match entry.dead_since_ts with
                     | Some ts -> `Float ts
                     | None -> `Null);
-                  ("sp_events", `List sp_events);
+                  ("sp_events", `List shared_sp_events);
                   ("health_score", `Int health_score);
                   ("dead_eta_sec",
                     match estimate_dead_eta_sec

@@ -92,7 +92,8 @@ val execute : string -> Yojson.Safe.t -> (bool * Yojson.Safe.t)
     Agent shard state is tracked in-memory per agent. *)
 
 val autoresearch_keeper_tools : Types.tool_schema list
-(** Autoresearch tools for keeper use (excludes swarm_start). *)
+(** Autoresearch tools for keeper use.
+    Excludes team-session swarm-start front doors. *)
 
 val shard_autoresearch : shard
 (** Autoresearch shard: start, cycle, status, inject, stop. *)

@@ -51,7 +51,7 @@ export function ExcusePatterns() {
   if (s.status === 'loading') {
     return html`
       <${Card} title="Anti-Rationalization Excuse Patterns">
-        <div class="p-4 text-[var(--text-muted)]">Loading excuse patterns...</div>
+        <div class="p-4 text-[var(--text-muted)]">핑계 패턴 로딩 중...</div>
       </Card>
     `
   }

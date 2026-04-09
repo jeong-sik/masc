@@ -132,4 +132,34 @@ describe('ToolQualityPanel', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
+
+  it('aborts an in-flight request when the panel unmounts', async () => {
+    let activeSignal: AbortSignal | undefined
+    const fetchMock = vi.fn().mockImplementation((_url: string, init?: RequestInit) => new Promise((_resolve, reject) => {
+      activeSignal = init?.signal as AbortSignal | undefined
+      activeSignal?.addEventListener('abort', () => {
+        reject(new DOMException('panel unmounted', 'AbortError'))
+      }, { once: true })
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    const { ToolQualityPanel } = await import('./tool-quality-panel')
+
+    await act(async () => {
+      render(html`<${ToolQualityPanel} />`, container)
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(activeSignal?.aborted).toBe(false)
+    expect(container.textContent).toContain('도구 품질 불러오는 중')
+
+    await act(async () => {
+      render(null, container)
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    expect(activeSignal?.aborted).toBe(true)
+  })
 })

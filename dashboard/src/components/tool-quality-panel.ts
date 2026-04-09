@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { signal, computed, type Signal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
+import { fetchToolQuality, type ToolQualityResponse } from '../api/dashboard'
 import { TELEMETRY_AUTO_REFRESH_MS } from '../config/constants'
 import { formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../lib/auto-refresh'
 import { LoadingState } from './common/feedback-state'
@@ -32,55 +33,64 @@ interface HourlyPoint {
   success_rate: number
 }
 
-interface ToolQualityData {
-  total: number
-  success: number
-  failure: number
-  success_rate: number
-  by_tool: ToolStat[]
-  by_keeper: KeeperStat[]
-  failure_categories: FailureCategory[]
-  hourly_trend?: HourlyPoint[]
-}
+type ToolQualityData = ToolQualityResponse
 
 const data: Signal<ToolQualityData | null> = signal(null)
 const loading: Signal<boolean> = signal(false)
 const error: Signal<string | null> = signal(null)
 let latestRequestId = 0
 let activeController: AbortController | null = null
-let activeTimeout: ReturnType<typeof setTimeout> | null = null
+type RefreshToolQualityOptions = {
+  signal?: AbortSignal
+}
 
-export async function refreshToolQuality() {
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError'
+}
+
+function cancelActiveToolQualityRequest() {
+  latestRequestId += 1
+  activeController?.abort()
+  activeController = null
+  loading.value = false
+}
+
+export async function refreshToolQuality(opts: RefreshToolQualityOptions = {}) {
   const requestId = ++latestRequestId
   activeController?.abort()
-  if (activeTimeout !== null) {
-    clearTimeout(activeTimeout)
-    activeTimeout = null
-  }
   loading.value = true
   error.value = null
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 15_000)
   activeController = controller
-  activeTimeout = timeout
+  const abortFromUpstream = () => controller.abort()
+
+  if (opts.signal) {
+    if (opts.signal.aborted) {
+      controller.abort()
+    } else {
+      opts.signal.addEventListener('abort', abortFromUpstream, { once: true })
+    }
+  }
+
   try {
-    const resp = await fetch('/api/v1/dashboard/tool-quality?n=5000', { signal: controller.signal })
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
-    const json = await resp.json()
-    if (typeof json?.total !== 'number') throw new Error('unexpected response shape')
+    const json = await fetchToolQuality({ n: 5000, signal: controller.signal })
     if (requestId !== latestRequestId) return
-    data.value = json as ToolQualityData
+    data.value = json
   } catch (e) {
     if (requestId !== latestRequestId) return
-    if (e instanceof DOMException && e.name === 'AbortError') {
+    if (isAbortError(e)) {
+      return
+    }
+    if (e instanceof Error && /timeout after \d+ms/i.test(e.message)) {
       error.value = 'request timeout (15s)'
     } else {
       error.value = e instanceof Error ? e.message : 'fetch failed'
     }
   } finally {
-    clearTimeout(timeout)
-    if (activeController === controller) activeController = null
-    if (activeTimeout === timeout) activeTimeout = null
+    opts.signal?.removeEventListener('abort', abortFromUpstream)
+    if (activeController === controller) {
+      activeController = null
+    }
     if (requestId !== latestRequestId) return
     loading.value = false
   }
@@ -229,8 +239,20 @@ function FailureList({ categories }: { categories: FailureCategory[] }) {
 
 export function ToolQualityPanel() {
   useEffect(() => {
-    void refreshToolQuality()
-    return setupVisibleAutoRefresh(refreshToolQuality, TELEMETRY_AUTO_REFRESH_MS)
+    const lifecycleController = new AbortController()
+    const runRefresh = () => refreshToolQuality({ signal: lifecycleController.signal })
+
+    void runRefresh()
+    const disposeAutoRefresh = setupVisibleAutoRefresh(() => {
+      if (lifecycleController.signal.aborted) return
+      void runRefresh()
+    }, TELEMETRY_AUTO_REFRESH_MS)
+
+    return () => {
+      lifecycleController.abort()
+      cancelActiveToolQualityRequest()
+      disposeAutoRefresh()
+    }
   }, [])
 
   const d = data.value

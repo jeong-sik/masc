@@ -96,14 +96,16 @@ async function refreshAfterRuntimeAction(): Promise<void> {
 }
 
 function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
+  const runtimeBlockerClass = keeper.runtime_blocker_class
+  const runtimeBlocker = keeper.runtime_blocker_summary?.trim()
   const blocker = keeper.last_blocker?.trim()
   const hbTs = keeper.last_heartbeat ? Date.parse(keeper.last_heartbeat) : null
   const hbAgeMs = hbTs != null && !Number.isNaN(hbTs) ? Date.now() - hbTs : null
   const hbStale = hbAgeMs != null && hbAgeMs > 300_000 // 5 minutes
-  const needsAttention = keeper.paused || Boolean(blocker) || hbStale
+  const needsAttention = keeper.paused || Boolean(runtimeBlocker) || Boolean(blocker) || hbStale
   if (!needsAttention && !keeper.last_autonomous_action_at) return null
 
-  const toneClass = keeper.paused || blocker || hbStale
+  const toneClass = keeper.paused || runtimeBlocker || blocker || hbStale
     ? 'border-[rgba(251,191,36,0.24)] bg-[rgba(251,191,36,0.08)]'
     : 'border-[var(--card-border)] bg-[var(--white-3)]'
 
@@ -119,6 +121,16 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
         ${hbStale
           ? html`<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-[rgba(239,68,68,0.14)] text-[var(--bad)]">Heartbeat stale</span>
             <span>마지막 하트비트: <${TimeAgo} timestamp=${keeper.last_heartbeat} /></span>`
+          : null}
+        ${runtimeBlockerClass
+          ? html`
+              <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-[rgba(239,68,68,0.14)] text-[var(--bad)]">
+                ${runtimeBlockerClass === 'ambiguous_post_commit_timeout' ? 'Post-commit timeout' : 'Post-commit failure'}
+              </span>
+            `
+          : null}
+        ${runtimeBlocker
+          ? html`<span><strong class="text-[var(--text-strong)]">런타임 차단</strong> · ${runtimeBlocker}</span>`
           : null}
         ${blocker
           ? html`<span><strong class="text-[var(--text-strong)]">차단 요인</strong> · ${blocker}</span>`

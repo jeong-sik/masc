@@ -263,6 +263,10 @@ describe('normalizeKeepers lifecycle metrics', () => {
         status: 'idle',
         paused: true,
         keepalive_running: true,
+        runtime_blocker_class: 'ambiguous_post_commit_timeout',
+        runtime_blocker_summary:
+          'Mutating tools [keeper_fs_edit] committed before the turn timed out.',
+        runtime_blocker_manual_reconcile: true,
         last_blocker: 'missing social headers',
         last_speech_act: 'defer',
         last_need: '현재 대화 맥락',
@@ -276,6 +280,10 @@ describe('normalizeKeepers lifecycle metrics', () => {
     expect(keeper).toMatchObject({
       paused: true,
       keepalive_running: true,
+      runtime_blocker_class: 'ambiguous_post_commit_timeout',
+      runtime_blocker_summary:
+        'Mutating tools [keeper_fs_edit] committed before the turn timed out.',
+      runtime_blocker_manual_reconcile: true,
       last_blocker: 'missing social headers',
       last_speech_act: 'defer',
       last_need: '현재 대화 맥락',

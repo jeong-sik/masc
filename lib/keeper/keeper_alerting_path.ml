@@ -116,10 +116,8 @@ let maybe_resolve_missing_relative_read_path ~(roots : string list) ~(raw_path :
       let suffix_rel = join_path_components rest in
       let matches =
         roots
-        |> List.fold_left
-             (fun acc root ->
-                acc @ find_suffix_matches_under_root ~root ~anchor ~suffix_rel ())
-             []
+        |> List.concat_map (fun root ->
+             find_suffix_matches_under_root ~root ~anchor ~suffix_rel ())
         |> List.sort_uniq String.compare
       in
       (match matches with

@@ -1,17 +1,11 @@
 # masc-mcp
 
-[![OCaml](https://img.shields.io/badge/OCaml-5.x-orange.svg)](https://ocaml.org/)
+[![OCaml](https://img.shields.io/badge/OCaml-5.4+-orange.svg)](https://ocaml.org/)
+[![OAS](https://img.shields.io/badge/agent__sdk-%E2%89%A50.118.0-blue.svg)](https://github.com/jeong-sik/oas)
 
-`masc-mcp` is an OCaml 5.x + Eio MCP server that keeps multiple coding agents coordinated inside one repository.
+Multi-Agent Streaming Coordination server built on OCaml 5.x + Eio. Keeps multiple coding agents coordinated inside one repository through shared namespace, task ownership, broadcasts, worktrees, and supervisor-visible proof.
 
-It is built for repo-local, single-machine, trusted-network workflows where several AI agents need shared coordination state in the default project namespace, task ownership, broadcasts, worktrees, and supervisor-visible proof instead of ad-hoc terminal coordination.
-
-Current product posture:
-
-- Front-door promise: repo coordination for coding workflows
-- Advanced path: supervised delivery swarm through the OAS-backed execution runtime + Supervisor
-- Supporting surface: dashboard and remote-safe operator tools
-- Experimental or secondary: wider transport matrix, research modules, and non-canonical legacy surfaces
+Built for repo-local, single-machine, trusted-network workflows. Not a multi-tenant SaaS platform, generic scheduler, or model-serving runtime.
 
 Use `masc-mcp` when you need to reduce:
 
@@ -20,12 +14,52 @@ Use `masc-mcp` when you need to reduce:
 - stale context between parallel workers
 - invisible ownership, heartbeat, and intervention state
 
-Do not start with `masc-mcp` if you need:
+## Architecture
 
-- multi-tenant SaaS isolation
-- a generic workflow scheduler
-- a model-serving platform
-- a stable promise for every merged experimental surface
+```
+┌──────────────────────────────────────────────────┐
+│              Consumer / Client                    │
+│       (Claude, Gemini, Codex, Local Agent)        │
+└────────────────┬─────────────────────────────────┘
+                 │  MCP (JSON-RPC)
+┌────────────────▼─────────────────────────────────┐
+│            MASC-MCP  (coordination)               │
+│                                                   │
+│  Room/Board  Keeper   Team-Session  Governance    │
+│  Tasks       Command-Plane         Dashboard      │
+│                                                   │
+│         ┌── OAS bridges ──┐                       │
+└─────────┤                 ├───────────────────────┘
+          │                 │
+┌─────────▼─────────────────▼──────────────────────┐
+│         OAS / agent_sdk  (agent runtime)          │
+│  Agent.run  Builder  Hooks  Checkpoint  Memory    │
+│  Context_reducer  Tool_selector  Cascade          │
+└──────────────────────────────────────────────────┘
+```
+
+**MASC** decides when, why, and which agent to run. **OAS** handles single-agent execution, tool dispatch, context management, and LLM provider cascading. MASC depends on OAS; OAS does not know about MASC.
+
+### Transport
+
+All protocols run concurrently from a single Eio fiber pool:
+
+| Protocol | Default | Notes |
+|----------|---------|-------|
+| HTTP/1.1 + HTTP/2 | `:8935` | Primary MCP endpoint at `/mcp` |
+| SSE | `:8935` | Unlimited streams per h2 connection |
+| gRPC | `:8936` | Keeper queries and subscriptions |
+| WebSocket | `:8937` | Standalone + discovery via `/ws` |
+| WebRTC | `:8935/webrtc` | Signaling at `/offer` and `/answer` |
+
+### Tech Stack
+
+- **OCaml 5.4+** with Eio structured concurrency (no Lwt)
+- **agent_sdk** >= 0.118.0 (OAS agent runtime)
+- **mcp_protocol** >= 1.3.0 (MCP JSON-RPC contract)
+- **h2-eio** (HTTP/2), **grpc-direct** (gRPC), **ocaml-webrtc** (WebRTC)
+- **caqti** + PostgreSQL (optional), **sqlite3** (fallback), **neo4j_bolt** (optional graph)
+- **opentelemetry** (OTLP tracing)
 
 ## Quick Start
 
@@ -33,77 +67,28 @@ Do not start with `masc-mcp` if you need:
 git clone https://github.com/jeong-sik/masc-mcp.git
 cd masc-mcp
 
-chmod +x scripts/opam-pin-external-deps.sh
+# Pin private dependencies (OAS, mcp_protocol, etc.)
 scripts/opam-pin-external-deps.sh
-
 opam install . --deps-only
-dune build --root .
+dune build
 
-scripts/run-local.sh --target-dir "$PWD"
-PORT="$(scripts/run-local.sh --print-port --target-dir "$PWD")"
-curl "http://127.0.0.1:${PORT}/health"
-```
-
-Defaults:
-
-- local-dev HTTP / MCP port: `9100-9999` 범위에서 target path 기준 자동 파생
-- 기본 bind host: `127.0.0.1`
-- local-dev data root: `<target>/.masc/`
-- local-dev config root: `<target>/.masc/config`
-- local-dev personas root: `<target>/.masc/config/personas`
-- local-dev transports: HTTP on, gRPC/WS/WebRTC off
-
-Notes:
-
-- Check the default port for a target: `scripts/run-local.sh --print-port --target-dir /path/to/project`
-- To use a fixed port: `scripts/run-local.sh --target-dir /path/to/project --port 94xx`
-- For shared repo/full-runtime paths, continue using `./start-masc-mcp.sh --http`.
-
-If you bind to a non-loopback address such as `0.0.0.0`, treat that as a remote exposure path and configure auth first. See [docs/REMOTE-MCP-OPERATOR.md](docs/REMOTE-MCP-OPERATOR.md) and [docs/spec/09-server-transport.md](docs/spec/09-server-transport.md).
-
-## Local Development Guide
-
-If you run a single `masc-mcp` instance on one machine, the simplest local-dev path is:
-
-```bash
-cd /path/to/masc-mcp
+# Start (loopback, no keeper autoboot)
 scripts/start-loopback.sh
+curl http://127.0.0.1:8935/health
 ```
 
-This path is the easiest default when you want local MCP development plus transport testing on the same box.
+Other start modes:
 
-- shortcut script: `scripts/start-loopback.sh`
-- keep the server loopback-only with `--host 127.0.0.1`
-- keep keeper autoboot off by default on this shortcut path; override with `MASC_KEEPER_BOOTSTRAP_ENABLED=true scripts/start-loopback.sh` when you intentionally want bootstrap scan on local 8935
-- keep the fixed default ports when you are not juggling multiple instances:
-  - HTTP / MCP: `127.0.0.1:8935`
-  - gRPC: `127.0.0.1:8936`
-  - WebSocket discovery: `http://127.0.0.1:8935/ws`
-  - standalone WebSocket: `ws://127.0.0.1:8937/`
-  - WebRTC signaling: `http://127.0.0.1:8935/webrtc/offer` and `/webrtc/answer`
-- prefer `./start-masc-mcp.sh --http` over `scripts/run-local.sh` when you want the shared/full-runtime transport surface; `run-local.sh` is for dir-local isolation and disables gRPC / WS / WebRTC by default
+| Mode | Command | Use case |
+|------|---------|----------|
+| Loopback | `scripts/start-loopback.sh` | Local dev, fixed port 8935, keepers off |
+| Dir-local | `scripts/run-local.sh --target-dir /path` | Per-project isolation, auto port |
+| Full runtime | `./start-masc-mcp.sh --http` | All transports, keeper autoboot, dashboard |
+| Direct binary | `./_build/default/bin/main_eio.exe --port 8935 --base-path .` | Manual control |
 
-Minimal smoke checks:
-
-```bash
-curl -sS http://127.0.0.1:8935/health
-curl -sS http://127.0.0.1:8935/ws
-grpcurl -plaintext 127.0.0.1:8936 grpc.health.v1.Health/Check
-MASC_HTTP_PORT=8935 MASC_GRPC_PORT=8936 MASC_WS_PORT=8937 MASC_TRANSPORT_AUTOSTART=0 bash scripts/harness/transport/verify_ws.sh
-MASC_HTTP_PORT=8935 MASC_GRPC_PORT=8936 MASC_WS_PORT=8937 MASC_TRANSPORT_AUTOSTART=0 bash scripts/harness/transport/verify_grpc_subscribe.sh
-MASC_HTTP_PORT=8935 MASC_GRPC_PORT=8936 MASC_WS_PORT=8937 MASC_TRANSPORT_AUTOSTART=0 bash scripts/harness/transport/verify_webrtc_signaling.sh
-```
-
-Things to watch:
-
-- do not bind `0.0.0.0` or `::` for routine local development; that moves you onto the remote-exposure path and auth requirements become stricter
-- do not point `MASC_HTTP_BASE_URL` at a public host when you only want local development
-- if you only need target-scoped `.masc/` isolation and do not need gRPC / WS / WebRTC, use `scripts/run-local.sh` instead
-- `scripts/start-loopback.sh` is a thin wrapper over `MASC_KEEPER_BOOTSTRAP_ENABLED=false ./start-masc-mcp.sh --http --host 127.0.0.1 --port 8935`; pass extra args after it only when you intentionally want to override the defaults
+Check auto-derived port for a target: `scripts/run-local.sh --print-port --target-dir /path`
 
 ## MCP Client Setup
-
-Local full-surface MCP example:
 
 ```json
 {
@@ -116,110 +101,119 @@ Local full-surface MCP example:
 }
 ```
 
-For a dir-local `local-dev` environment, replace `8935` with the output of `scripts/run-local.sh --print-port --target-dir ...`.
+- `/mcp` — full coordination surface (local-first)
+- `/mcp/operator` — bearer-token only, remote-safe reduced surface
+- Full config templates: [docs/MCP-TEMPLATE.md](docs/MCP-TEMPLATE.md)
 
-Notes:
+## Keeper System
 
-- Normal local use starts with `/mcp`.
-- Remote supervision uses bearer-token `/mcp/operator` and the reduced operator profile.
-- Full HTTP / stdio templates live in [docs/MCP-TEMPLATE.md](docs/MCP-TEMPLATE.md).
-- `masc_web_search` is a read-only current-information lookup tool. By default it prefers configured official providers (`brave`, `tavily`, `exa`, `bing_api`) and falls back to `duckduckgo` / `bing_rss` scraping when credentials are absent or providers fail.
+Keepers are long-running autonomous agents that maintain repo continuity. They run as Eio fibers with heartbeat loops, checkpoint/resume, and supervised restart.
 
-## Model Cascade Ownership
+### Lifecycle
+
+Keepers follow an 11-state deterministic state machine:
+
+```
+Offline → Running → [Failing|Compacting|HandingOff|Draining]
+       → Paused/Stopped/Crashed → Restarting → Dead
+```
+
+### Autoboot
+
+Keeper definitions live in `config/keepers/*.toml`. When `MASC_KEEPER_BOOTSTRAP_ENABLED=true`, the server discovers and starts all keepers on boot with staggered warmup delays.
+
+### Turn Budget
+
+Each keeper call to `Agent.run` is limited to `MASC_KEEPER_OAS_MAX_TURNS_PER_CALL` turns (default: 5). When exhausted, the keeper saves a checkpoint and resumes in the next heartbeat cycle. The keeper can call `extend_turns` to request more turns up to an absolute ceiling (200).
+
+Adaptive OAS timeout: `base 180s + 1.5s per 1K context tokens`, capped at [30, 600]s.
+
+### Key Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MASC_KEEPER_BOOTSTRAP_ENABLED` | `false` | Enable keeper autoboot |
+| `MASC_KEEPER_HEARTBEAT_INTERVAL_SEC` | `30` | Heartbeat cadence (5-300s) |
+| `MASC_KEEPER_OAS_MAX_TURNS_PER_CALL` | `5` | Turns per Agent.run call (1-50) |
+| `MASC_KEEPER_OAS_TIMEOUT_SEC` | adaptive | Override OAS timeout (30-600s) |
+| `MASC_KEEPER_TURN_TIMEOUT_SEC` | `1200` | Wall-clock turn guard (60-3600s) |
+| `MASC_KEEPER_SUPERVISOR_MAX_RESTARTS` | `5` | Restart attempts before Dead |
+| `MASC_KEEPER_IDLE_SKIP_THRESHOLD` | `4` | Consecutive idle calls before Skip |
+
+Full list: `lib/config/env_config_keeper.ml`. Per-keeper config: `config/keepers/*.toml`.
+
+## Model Cascade
 
 - `config/cascade.json` follows the OAS cascade contract.
 - OAS owns cascade schema, parsing, and label semantics.
-- MASC uses that contract to choose repo-level checked-in defaults; it does not redefine cascade semantics.
-- For committed defaults, prefer explicit `provider:model_id` labels. Runtime convenience labels such as `provider:auto` may still exist, but they are not the preferred repo-default policy.
-- See [docs/OAS-MASC-BOUNDARY.md](docs/OAS-MASC-BOUNDARY.md), [docs/spec/13-oas-integration.md](docs/spec/13-oas-integration.md), and [docs/spec/14-configuration.md](docs/spec/14-configuration.md).
+- MASC chooses repo-level defaults; each keeper can override via `cascade_name` in its TOML.
+- See [docs/OAS-MASC-BOUNDARY.md](docs/OAS-MASC-BOUNDARY.md) and [docs/spec/13-oas-integration.md](docs/spec/13-oas-integration.md).
 
 ## Safe Starting Paths
 
 ### 1. Repo Coordination
 
-The shortest reliable entry path is still:
-
 ```text
 masc_start(path="/your/project", task_title="My first task")
 ```
 
-Canonical namespace/task hygiene:
+Canonical tool sequence:
 
-- `masc_start`
-- `masc_status`
-- `masc_transition(action="claim")` or `masc_claim_next`
-- `masc_plan_set_task` when needed
-- `masc_heartbeat`
+- `masc_start` → `masc_status` → `masc_transition(action="claim")` or `masc_claim_next`
+- `masc_plan_set_task` → `masc_heartbeat` → work → `masc_done`
 
 ### 2. Supervised Delivery Swarm
 
-Use this when a feature slice needs planner / implementer / supervisor separation:
+For planner / implementer / supervisor separation:
 
-- Runtime path: `masc_team_session_*` (current tool family name for supervised execution)
-- Supervisor path: `/mcp/operator` with `masc_operator_snapshot`, `masc_operator_digest`, `masc_operator_action`, `masc_operator_confirm`
+- Runtime: `masc_team_session_*` tools
+- Supervisor: `/mcp/operator` with `masc_operator_snapshot`, `masc_operator_digest`, `masc_operator_action`, `masc_operator_confirm`
+- Runbooks: [docs/SWARM-DELIVERY-RUNBOOK.md](docs/SWARM-DELIVERY-RUNBOOK.md), [docs/SUPERVISOR-MODE.md](docs/SUPERVISOR-MODE.md)
 
-The canonical runbooks are [docs/SWARM-DELIVERY-RUNBOOK.md](docs/SWARM-DELIVERY-RUNBOOK.md) and [docs/SUPERVISOR-MODE.md](docs/SUPERVISOR-MODE.md).
+### 3. Dashboard
 
-### 3. Dashboard and Operator Surfaces
+- Monitoring: `http://127.0.0.1:8935/dashboard#monitoring/sessions`
+- Intervention: `http://127.0.0.1:8935/dashboard#command/intervene`
+- Governance: `http://127.0.0.1:8935/dashboard#command/governance`
 
-Common entrypoints:
-
-- Monitoring: `http://127.0.0.1:<PORT>/dashboard#monitoring/sessions`
-- Intervention: `http://127.0.0.1:<PORT>/dashboard#command/intervene`
-- Governance: `http://127.0.0.1:<PORT>/dashboard#command/governance`
-
-The dashboard is a read / operate UI. Canonical write and control paths remain MCP tools.
-
-- `scripts/run-local.sh` does not build the dashboard automatically. Append `--build-dashboard` only when needed.
-- `start-masc-mcp.sh` automatically builds the dashboard SPA if `pnpm` or `corepack pnpm` is available.
-- To run the dev server separately: 
-  `PORT="$(scripts/run-local.sh --print-port --target-dir "$PWD")"`
-  `cd dashboard && MASC_DASHBOARD_PROXY_TARGET="http://127.0.0.1:${PORT}" pnpm run dev`
-- For manual rebuilds, run `cd dashboard && pnpm run build`.
-- For local admin bearer bootstrap and dashboard keeper lifecycle control, see [docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md](docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md).
+The dashboard is a read/operate UI. `start-masc-mcp.sh` builds it automatically if `pnpm` is available. Manual: `cd dashboard && pnpm run build`.
 
 ## Verification
 
 ```bash
-make test
-make ci
+make test           # Unit tests (no server needed)
+make ci             # Full CI suite
 ```
 
-To reproduce CI-style test output with heartbeat logs locally:
+Smoke checks (with running server):
 
 ```bash
-CI_TEST_TIMEOUT_SEC=1200 CI_TEST_HEARTBEAT_SEC=30 \
-  scripts/ci-run-tests.sh "opam exec -- dune test --root ."
+curl -sS http://127.0.0.1:8935/health
+grpcurl -plaintext 127.0.0.1:8936 grpc.health.v1.Health/Check
 ```
 
-## Transport and Auth Notes
+## Transport and Auth
 
 - `POST /mcp` expects `Accept: application/json, text/event-stream`.
 - Legacy `/sse` and `/messages` endpoints are deprecated.
-- Binding to `0.0.0.0` or `::` enables strict auth on MCP routes.
-- Local `/mcp` is the full MCP surface and should be treated as local-first. On non-loopback bind it fails closed unless MASC auth is enabled with `require_token=true`.
-- `/mcp/operator` is bearer-token only and intentionally exposes a smaller remote-safe surface.
-- Remote-safe exposure means `/mcp/operator` only. Do not expose the full `/mcp` surface to external clients unless you intentionally want the full coordination tool inventory behind bearer auth.
-
-## Product and Planning Docs
-
-- [docs/PRODUCT-OPERATING-PLAN.md](docs/PRODUCT-OPERATING-PLAN.md) — product promise, GitHub operating model, 6-8 week execution tracks
-- [ROADMAP.md](ROADMAP.md) — current package version, latest release truth, active tracks
-- [docs/PRODUCT-REVIEW.md](docs/PRODUCT-REVIEW.md) — current product posture by promise level
-- [docs/design/keeper-continuity-product-rfc.md](docs/design/keeper-continuity-product-rfc.md) — bounded keeper continuity contract and promise level
-- [docs/KEEPER-CONTINUITY-PRODUCTION-RUNBOOK.md](docs/KEEPER-CONTINUITY-PRODUCTION-RUNBOOK.md) — release gate, evidence, monitoring, and rollback for keeper continuity
+- Binding to `0.0.0.0` enables strict auth; local `/mcp` fails closed unless `require_token=true`.
+- `/mcp/operator` is bearer-token only with a remote-safe surface. Do not expose full `/mcp` externally.
+- See [docs/REMOTE-MCP-OPERATOR.md](docs/REMOTE-MCP-OPERATOR.md) and [docs/spec/09-server-transport.md](docs/spec/09-server-transport.md).
 
 ## Document Map
 
-- [docs/QUICK-START.md](docs/QUICK-START.md) — install, health check, first workflow
-- [docs/MCP-TEMPLATE.md](docs/MCP-TEMPLATE.md) — HTTP / stdio MCP config templates
-- [docs/COMMAND-PLANE-RUNBOOK.md](docs/COMMAND-PLANE-RUNBOOK.md) — managed-operation compatibility lane and command-plane details
-- [docs/BENCHMARK-RUNBOOK.md](docs/BENCHMARK-RUNBOOK.md) — single-agent vs swarm comparison
-- [docs/SUPERVISOR-MODE.md](docs/SUPERVISOR-MODE.md) — supervised execution / operator workflow
-- [docs/REMOTE-MCP-OPERATOR.md](docs/REMOTE-MCP-OPERATOR.md) — remote-safe operator endpoint and confirm flow
-- [docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md](docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md) — local admin bearer bootstrap, base-path checks, and dashboard keeper lifecycle control
-- [docs/KEEPER-USER-MANUAL.md](docs/KEEPER-USER-MANUAL.md) — keeper lifecycle and troubleshooting
-- [docs/spec/SPEC-INDEX.md](docs/spec/SPEC-INDEX.md) — spec suite front door
-- `llms.txt` / `llms-full.txt` — compressed front door for language models
-
-Historical and archived documents remain in the repository, but the front-door SSOT is the README, the product operating plan, the roadmap, and the current spec suite.
+| Document | Description |
+|----------|-------------|
+| [docs/QUICK-START.md](docs/QUICK-START.md) | Install, health check, first workflow |
+| [docs/MCP-TEMPLATE.md](docs/MCP-TEMPLATE.md) | HTTP / stdio MCP config templates |
+| [docs/KEEPER-USER-MANUAL.md](docs/KEEPER-USER-MANUAL.md) | Keeper lifecycle and troubleshooting |
+| [docs/SUPERVISOR-MODE.md](docs/SUPERVISOR-MODE.md) | Supervised execution / operator workflow |
+| [docs/SWARM-DELIVERY-RUNBOOK.md](docs/SWARM-DELIVERY-RUNBOOK.md) | Single-agent vs swarm delivery |
+| [docs/REMOTE-MCP-OPERATOR.md](docs/REMOTE-MCP-OPERATOR.md) | Remote-safe operator endpoint |
+| [docs/OAS-MASC-BOUNDARY.md](docs/OAS-MASC-BOUNDARY.md) | OAS/MASC ownership boundary |
+| [docs/COMMAND-PLANE-RUNBOOK.md](docs/COMMAND-PLANE-RUNBOOK.md) | Command-plane operations |
+| [docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md](docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md) | Dashboard auth bootstrap |
+| [docs/spec/SPEC-INDEX.md](docs/spec/SPEC-INDEX.md) | Spec suite (19 specs) |
+| [ROADMAP.md](ROADMAP.md) | Version, release truth, active tracks |
+| [docs/PRODUCT-OPERATING-PLAN.md](docs/PRODUCT-OPERATING-PLAN.md) | Product promise, execution tracks |
+| [llms.txt](llms.txt) / [llms-full.txt](llms-full.txt) | Compressed front door for language models |

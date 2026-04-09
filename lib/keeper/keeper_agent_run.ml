@@ -151,9 +151,36 @@ type run_result =
   ; tools_used : string list
   ; checkpoint : Agent_sdk.Checkpoint.t option
   ; proof : Agent_sdk.Cdal_proof.t option
+  ; run_validation : Agent_sdk.Raw_trace.run_validation option
   ; stop_reason : Oas_worker.stop_reason
   ; inference_telemetry : Agent_sdk.Types.inference_telemetry option
   }
+
+let nonempty_trimmed raw =
+  let trimmed = String.trim raw in
+  if trimmed = "" then None else Some trimmed
+
+let surface_model_used (result : run_result) : string =
+  let attempt_surface_model (attempt : Oas_worker.cascade_attempt) =
+    match Option.bind attempt.model_label nonempty_trimmed with
+    | Some label -> Some label
+    | None -> nonempty_trimmed attempt.model_id
+  in
+  let observation_surface_model (obs : Oas_worker.cascade_observation) =
+    match
+      obs.attempts
+      |> List.rev
+      |> List.find_map attempt_surface_model
+    with
+    | Some model -> Some model
+    | None -> (
+        match Option.bind obs.selected_model nonempty_trimmed with
+        | Some model -> Some model
+        | None -> Option.bind obs.primary_model nonempty_trimmed)
+  in
+  match Option.bind result.cascade_observation observation_surface_model with
+  | Some model -> model
+  | None -> Option.value ~default:"" (nonempty_trimmed result.model_used)
 
 (* Tool selection & disclosure — extracted to Keeper_tool_disclosure (#5732) *)
 
@@ -1721,6 +1748,7 @@ let run_turn
             ; tools_used = tool_names
             ; checkpoint = saved_checkpoint
             ; proof = result.proof
+            ; run_validation = result.run_validation
             ; stop_reason = result.stop_reason
             ; inference_telemetry = result.response.telemetry
             }))

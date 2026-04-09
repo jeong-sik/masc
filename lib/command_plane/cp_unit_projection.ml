@@ -83,7 +83,7 @@ let projected_team_session_operations ?sessions config units managed_operations 
   let all_sessions =
     match sessions with
     | Some s -> s
-    | None -> Team_session_store.list_sessions config
+    | None -> []
   in
   all_sessions
   |> List.filter (fun (session : Team_session_types.session) ->
@@ -198,7 +198,7 @@ let operation_by_id operations operation_id =
     (fun (operation : operation_record) -> String.equal operation.operation_id operation_id)
     operations
 
-let projected_team_session_detachments ?sessions config operations =
+let projected_team_session_detachments ?sessions _config operations =
   let find_session session_id =
     match sessions with
     | Some cached ->
@@ -206,7 +206,7 @@ let projected_team_session_detachments ?sessions config operations =
           (fun (s : Team_session_types.session) ->
             String.equal s.session_id session_id)
           cached
-    | None -> Team_session_store.load_session config session_id
+    | None -> None
   in
   operations
   |> List.filter_map (fun (operation : operation_record) ->

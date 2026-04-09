@@ -41,7 +41,7 @@ let json ?run_id:_ ?operation_id:_ (ctx : _ Operator_control.context) =
     list_member (assoc_or_empty operator_snapshot "keepers") "items"
     @ list_member (assoc_or_empty operator_snapshot "persistent_agents") "items"
   in
-  let sessions = Team_session_store.list_sessions config in
+  let sessions = [] in
   let summary_json = Command_plane_v2.summary_json config in
   let alerts_json = Command_plane_v2.list_alerts_json config in
   let alerts = list_member alerts_json "alerts" in

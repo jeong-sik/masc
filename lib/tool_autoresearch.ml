@@ -455,22 +455,12 @@ let handle_stop (ctx : context) args =
     match Autoresearch.stop_loop ~base_path:ctx.base_path ~reason id with
     | None -> `Assoc [("error", `String (Printf.sprintf "Loop %s not found" id))]
     | Some state ->
-        let config = Room.default_config ctx.base_path in
+        let _config = Room.default_config ctx.base_path in
         broadcast_loop_lifecycle "autoresearch_stopped" state;
         (match Autoresearch.load_swarm_link_by_loop ~base_path:ctx.base_path id with
-        | Some link ->
-            (try
-               Team_session_store.append_event config link.session_id
-                 ~event_type:"linked_autoresearch_stopped"
-                 ~detail:
-                   (`Assoc
-                     [
-                       ("loop_id", `String id);
-                       ("reason", `String reason);
-                       ("status", `String (Autoresearch.status_to_string state.status));
-                     ])
-             with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-               Log.Autoresearch.warn "stop event append failed: %s" (Printexc.to_string exn))
+        | Some _link ->
+            (* Team_session_store removed — skip event append *)
+            ()
         | None -> ());
         `Assoc [
           ("loop_id", `String id);

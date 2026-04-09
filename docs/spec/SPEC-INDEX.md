@@ -54,7 +54,6 @@ graph TB
 | `04-chain-engine.md` | Chain Engine | Multi-step chain DSL, execution, snapshot | Draft |
 | `05-keeper-agent.md` | Keeper Engine | 자율 에이전트 루프, succession, context 관리 | Draft |
 | `06-command-plane.md` | Command Plane v2 | Units, operations, search fabric, detachments, policy, orchestra | Draft |
-| `07-team-session.md` | Team Session | Supervised collaboration, OAS swarm bridge, worker dispatch, proof | Draft |
 | `09-server-transport.md` | Server and Transport | HTTP transport, SSE, JSON-RPC dispatch, routing | Draft |
 | `10-dashboard.md` | Dashboard | Web UI, API endpoints, SSE real-time updates | Draft |
 | `11-board.md` | Board System | Posts, comments, votes, PG/JSONL backend | Draft |

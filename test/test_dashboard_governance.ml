@@ -274,6 +274,60 @@ let test_governance_dir_created_before_read () =
       let items = json |> member "items" |> to_list in
       check int "items empty after dir init" 0 (List.length items))
 
+let test_dashboard_exposes_keeper_approval_queue () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      with_test_fs env @@ fun () ->
+      let config = Room_utils.default_config dir in
+      ignore (Lib.Room.init config ~agent_name:(Some "dashboard"));
+      Eio.Switch.run @@ fun sw ->
+      let decision_result = ref None in
+      Eio.Fiber.fork ~sw (fun () ->
+        let decision =
+          Lib.Keeper_approval_queue.submit_and_await
+            ~keeper_name:"dashboard-keeper"
+            ~tool_name:"masc_code_delete"
+            ~input:(`Assoc [ ("path", `String "/tmp/danger") ])
+            ~risk_level:"critical"
+        in
+        decision_result := Some decision);
+      Eio.Fiber.yield ();
+      let json =
+        Lib.Dashboard_governance.dashboard_json ~base_path:dir ~limit:20 ~offset:0
+          ~status_filter:None
+      in
+      let open Yojson.Safe.Util in
+      let summary = json |> member "summary" in
+      check int "needs_human_gate reflects queue" 1
+        (summary |> member "needs_human_gate" |> to_int);
+      let approval_queue = json |> member "approval_queue" |> to_list in
+      check int "approval_queue length" 1 (List.length approval_queue);
+      let approval = List.hd approval_queue in
+      check string "approval keeper name" "dashboard-keeper"
+        (approval |> member "keeper_name" |> to_string);
+      check string "approval tool name" "masc_code_delete"
+        (approval |> member "tool_name" |> to_string);
+      check string "approval risk level" "critical"
+        (approval |> member "risk_level" |> to_string);
+      check string "approval preview"
+        {|{"path":"/tmp/danger"}|}
+        (approval |> member "input_preview" |> to_string);
+      let id = approval |> member "id" |> to_string in
+      (match Lib.Keeper_approval_queue.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
+       | Ok () -> ()
+       | Error msg -> fail ("resolve failed: " ^ msg));
+      Eio.Fiber.yield ();
+      match !decision_result with
+      | Some Agent_sdk.Hooks.Approve -> ()
+      | Some (Agent_sdk.Hooks.Reject reason) ->
+        fail ("expected approval resume, got reject: " ^ reason)
+      | Some (Agent_sdk.Hooks.Edit _) ->
+        fail "expected approval resume, got edit"
+      | None -> fail "approval fiber did not resume")
+
 let () =
   run "dashboard_governance"
     [
@@ -289,6 +343,8 @@ let () =
             test_runtime_timestamps_fallback_to_unix_values;
           test_case "monitoring uses live runtime" `Quick
             test_governance_monitoring_uses_live_runtime;
+          test_case "dashboard exposes keeper approval queue" `Quick
+            test_dashboard_exposes_keeper_approval_queue;
         ] );
       ( "init",
         [

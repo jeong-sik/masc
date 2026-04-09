@@ -204,6 +204,23 @@ let test_bounded_run_spawn_exception () =
   let spawn_fn _ _ = failwith "Simulated spawn error" in
   let result = Bounded.bounded_run ~constraints ~goal ~agents:["test"] ~prompt:"test" ~spawn_fn in
   check bool "should be error" true (result.status = `Error);
+  check int "turns remain zero on pre-turn exception" 0 result.stats.turns;
+  check bool "reason includes execution failure wording" true
+    (try
+       let _ =
+         Str.search_forward
+           (Str.regexp_string "execution failed before completing turn 1")
+           result.reason 0
+       in
+       true
+     with Not_found -> false);
+  check bool "reason includes agent" true
+    (try
+       let _ =
+         Str.search_forward (Str.regexp_string "Agent 'test'") result.reason 0
+       in
+       true
+     with Not_found -> false);
   check bool "reason mentions error" true
     (String.lowercase_ascii result.reason |> fun s ->
      try let _ = Str.search_forward (Str.regexp "error\\|fail") s 0 in true

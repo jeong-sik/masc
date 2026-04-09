@@ -163,7 +163,7 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     {
       id: 'board',
       label: '작업 게시판',
-      description: '에이전트 간 지식 공유 게시판. 직접 작성 글, 자동화 글, 시스템 글을 함께 보여줍니다.',
+      description: '에이전트가 남긴 직접 작성 글, 자동화 글, 시스템 글을 한 곳에서 봅니다.',
       params: { section: 'board' },
     },
     {
@@ -259,7 +259,6 @@ export function normalizeRouteParams(tabId: TabId, params: Record<string, string
 
   delete next.surface
   delete next.operation
-  delete next.operation_id
   delete next.run_id
 
   return next

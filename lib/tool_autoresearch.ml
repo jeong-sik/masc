@@ -608,6 +608,7 @@ let () =
            ~description:s.description
            ~module_tag:Tool_dispatch.Mod_autoresearch
            ~input_schema:s.input_schema
+           ~handler_binding:Tag_dispatch
            ~visibility:(if is_system then Tool_catalog.Hidden else Tool_catalog.Default)
            ~allow_direct_call_when_hidden:is_system
            ()))

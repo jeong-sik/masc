@@ -12,7 +12,6 @@
     - [<masc_root>/tool_calls/]              — Full I/O for keeper tool calls
     - [<masc_root>/tool_usage/]              — System_internal surface tool calls
     - [<base_path>/data/tool-metrics/]       — Tool duration/success metrics
-
     @since 2.251.0 *)
 
 type source =
@@ -51,7 +50,7 @@ let fixed_store_dir ~masc_root ~base_path = function
   | Tool_call_io -> Some (Filename.concat masc_root "tool_calls")
   | Tool_usage   -> Some (Filename.concat masc_root "tool_usage")
   | Tool_metric  -> Some (Filename.concat base_path "data/tool-metrics")
-  | Keeper_metric -> None  (* per-keeper, handled separately *)
+  | Keeper_metric -> None  (* handled separately *)
 
 (** Discover all keeper metric directories under [masc_root/keepers/]. *)
 let discover_keeper_metric_dirs masc_root : (string * string) list =
@@ -88,7 +87,11 @@ let extract_ts (json : Yojson.Safe.t) : float =
        | None ->
          match try_field "timestamp" with
          | Some f -> f
-         | None -> 0.0)
+         | None ->
+           (match List.assoc_opt "ts_iso" fields with
+            | Some (`String iso) ->
+                Option.value ~default:0.0 (Types.parse_iso8601_opt iso)
+            | _ -> 0.0))
   | _ -> 0.0
 
 (* ── Entry tagging ──────────────────────────────────── *)
@@ -113,6 +116,24 @@ let matches_keeper name (json : Yojson.Safe.t) : bool =
     (* keeper_metric: "name" field; tool_call_io: "keeper"; tool_usage: "caller" *)
     check "name" || check "keeper" || check "caller" || check "agent_id"
   | _ -> false
+
+let matches_string_field field expected (json : Yojson.Safe.t) : bool =
+  match json with
+  | `Assoc fields -> (
+      match List.assoc_opt field fields with
+      | Some (`String value) -> String.equal value expected
+      | _ -> false)
+  | _ -> false
+
+let matches_scope ?session_id ?operation_id ?worker_run_id (json : Yojson.Safe.t) :
+    bool =
+  let matches field = function
+    | None -> true
+    | Some expected -> matches_string_field field expected json
+  in
+  matches "session_id" session_id
+  && matches "operation_id" operation_id
+  && matches "worker_run_id" worker_run_id
 
 (* ── Read from a single fixed-path source ───────────── *)
 
@@ -141,7 +162,8 @@ let read_keeper_metrics ~masc_root ?keeper_name ~n () : Yojson.Safe.t list =
 (* ── Unified read ───────────────────────────────────── *)
 
 let read_unified ~base_path ~masc_root ?(sources = all_sources) ?keeper_name
-    ?(n = 100) () : Yojson.Safe.t list =
+    ?session_id ?operation_id ?worker_run_id ?(n = 100) () :
+    Yojson.Safe.t list =
   let per_source = max n (n * 2) in
   let all_entries =
     List.concat_map (fun source ->
@@ -166,6 +188,11 @@ let read_unified ~base_path ~masc_root ?(sources = all_sources) ?keeper_name
            | _ -> matches_keeper name json)
         | _ -> true
       ) all_entries
+  in
+  let filtered =
+    List.filter
+      (fun json -> matches_scope ?session_id ?operation_id ?worker_run_id json)
+      filtered
   in
   (* Sort by timestamp descending (newest first) *)
   let sorted = List.sort (fun a b ->

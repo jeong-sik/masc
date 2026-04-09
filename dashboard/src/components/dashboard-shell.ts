@@ -323,6 +323,7 @@ export function DashboardMain() {
     route.value.params.section,
     route.value.params.session_id,
     route.value.params.operation_id,
+    route.value.params.worker_run_id,
   ]
     .filter(Boolean)
     .join(':')

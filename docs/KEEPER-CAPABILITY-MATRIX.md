@@ -16,7 +16,7 @@ such as preset selection, shard assignment, and tool access, not through a
 | **base** | `keeper_time_now`, `keeper_context_status`, `keeper_memory_search` | 3 | No |
 | **board** | `keeper_board_{get,post,list,comment,vote}` | 5 | Yes |
 | **filesystem** | `keeper_fs_read` | 1 | Yes |
-| **shell** | `keeper_shell_readonly` | 1 | Yes |
+| **shell** | `keeper_shell` | 1 | Yes |
 | **library** | `keeper_library_{search,read}` | 2 | Yes |
 | **taskboard** | `keeper_tasks_{list,audit}`, `keeper_task_{force_release,force_done,claim,done}`, `keeper_broadcast` | 7 | Yes |
 | **governance** | `masc_{cases,case_status,ruling_status,governance_status,governance_feed,case_brief_submit,petition_submit}` | 7 | Yes |

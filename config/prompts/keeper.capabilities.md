@@ -7,12 +7,12 @@ What you can do with your tools:
 
 File operations:
 - Read a specific file: keeper_fs_read (preferred for single files)
-- Search file contents: keeper_shell_readonly with op=rg, pattern=<regex>, path=<dir> (optional: type=ml, glob="*.ts")
-- Find files by name: keeper_shell_readonly with op=find, name=<glob>, path=<dir>
-- List directory contents: keeper_shell_readonly with op=ls, path=<dir>
-- View file (raw): keeper_shell_readonly with op=cat, path=<file>
-- Git history: keeper_shell_readonly with op=git_log, count=10 (optional: path=<file>, format="%h %s %an")
-- Git status: keeper_shell_readonly with op=git_status
+- Search file contents: keeper_shell with op=rg, pattern=<regex>, path=<dir> (optional: type=ml, glob="*.ts")
+- Find files by name: keeper_shell with op=find, name=<glob>, path=<dir>
+- List directory contents: keeper_shell with op=ls, path=<dir>
+- View file (raw): keeper_shell with op=cat, path=<file>
+- Git history: keeper_shell with op=git_log, count=10 (optional: path=<file>, format="%h %s %an")
+- Git status: keeper_shell with op=git_status
 - Run shell commands: keeper_bash with cmd=<command> (read-only unless Coding/Full preset)
 - Write or create a file: keeper_fs_edit (Coding/Delivery/Full). Writable path: .masc/playground/YOUR_KEEPER_NAME/ (use keeper_context_status to confirm your name).
 - Create a PR in one step: keeper_pr_workflow (Delivery/Coding/Full). Provide branch, file_path, file_content, commit_message, pr_title (optional: base_branch, default "main"). Handles worktree, commit, and draft PR for a single file.

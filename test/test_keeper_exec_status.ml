@@ -1,7 +1,10 @@
 open Alcotest
 
 module ES = Masc_mcp.Keeper_exec_status
+module KSB = Masc_mcp.Keeper_status_bridge
+module KR = Masc_mcp.Keeper_registry
 module KT = Masc_mcp.Keeper_types
+module Room = Masc_mcp.Room
 
 let make_meta ?(name = "keeper-exec-status-test")
     ?(trace_id = "trace-keeper-exec-status") () =
@@ -242,6 +245,29 @@ let test_diagnostic_ignores_stale_error_when_live_signal_is_newer () =
     "healthy"
     (diagnostic |> member "health_state" |> to_string)
 
+let test_runtime_surface_exposes_post_commit_timeout_blocker () =
+  KR.clear ();
+  let meta = make_meta ~name:"runtime-blocker-test" () in
+  let config = Room.default_config "/tmp/test-keeper-exec-status-runtime" in
+  ignore (KR.register ~base_path:config.base_path meta.name meta);
+  KR.set_failure_reason ~base_path:config.base_path meta.name
+    (Some
+       (KR.Ambiguous_partial_commit
+          {
+            kind = KR.Post_commit_timeout;
+            detail = "Mutating tools [keeper_fs_edit] committed before the turn timed out.";
+          }));
+  let runtime = KSB.runtime_surface_json config meta in
+  let open Yojson.Safe.Util in
+  check string "runtime blocker class"
+    "ambiguous_post_commit_timeout"
+    (runtime |> member "runtime_blocker_class" |> to_string);
+  check bool "manual reconcile required" true
+    (runtime |> member "runtime_blocker_manual_reconcile" |> to_bool);
+  check string "runtime blocker summary"
+    "Mutating tools [keeper_fs_edit] committed before the turn timed out."
+    (runtime |> member "runtime_blocker_summary" |> to_string)
+
 let () =
   run "keeper_exec_status"
     [
@@ -280,5 +306,7 @@ let () =
             test_keeper_surface_status_maps_zombie_to_inactive;
           test_case "maps dead to inactive" `Quick
             test_keeper_surface_status_maps_dead_to_inactive;
+          test_case "runtime surface exposes post-commit blocker" `Quick
+            test_runtime_surface_exposes_post_commit_timeout_blocker;
         ] );
     ]

@@ -155,6 +155,7 @@ Canonical namespace/task hygiene:
 Common entrypoints:
 
 - Monitoring: `http://127.0.0.1:<PORT>/dashboard#monitoring/sessions`
+- Ops Queue: `http://127.0.0.1:<PORT>/dashboard#command/intervene`
 - Workspace: `http://127.0.0.1:<PORT>/dashboard#workspace/board`
 - Lab: `http://127.0.0.1:<PORT>/dashboard#lab/tools`
 

@@ -14,6 +14,7 @@ import { bootKeeper, shutdownKeeper } from '../api/keeper'
 import { TimeAgo } from './common/time-ago'
 import type { Keeper } from '../types'
 import { invalidateDashboardCache, refreshDashboard } from '../store'
+import { fetchCascadeProfiles, updateKeeperCascade } from '../api/dashboard'
 import { selectKeeper } from '../keeper-runtime'
 import { keeperStatusDetails } from '../keeper-state'
 import { findKeeper } from '../lib/keeper-utils'
@@ -29,6 +30,7 @@ import {
   InferenceTelemetryPanel,
   KpiGrid,
   MetricsCharts,
+  PromptTelemetryPanel,
   RawDataDebug,
   RelationshipList,
   TokenTrendChart,
@@ -95,14 +97,16 @@ async function refreshAfterRuntimeAction(): Promise<void> {
 }
 
 function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
+  const runtimeBlockerClass = keeper.runtime_blocker_class
+  const runtimeBlocker = keeper.runtime_blocker_summary?.trim()
   const blocker = keeper.last_blocker?.trim()
   const hbTs = keeper.last_heartbeat ? Date.parse(keeper.last_heartbeat) : null
   const hbAgeMs = hbTs != null && !Number.isNaN(hbTs) ? Date.now() - hbTs : null
   const hbStale = hbAgeMs != null && hbAgeMs > 300_000 // 5 minutes
-  const needsAttention = keeper.paused || Boolean(blocker) || hbStale
+  const needsAttention = keeper.paused || Boolean(runtimeBlocker) || Boolean(blocker) || hbStale
   if (!needsAttention && !keeper.last_autonomous_action_at) return null
 
-  const toneClass = keeper.paused || blocker || hbStale
+  const toneClass = keeper.paused || runtimeBlocker || blocker || hbStale
     ? 'border-[rgba(251,191,36,0.24)] bg-[rgba(251,191,36,0.08)]'
     : 'border-[var(--card-border)] bg-[var(--white-3)]'
 
@@ -118,6 +122,16 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
         ${hbStale
           ? html`<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-[rgba(239,68,68,0.14)] text-[var(--bad)]">Heartbeat stale</span>
             <span>마지막 하트비트: <${TimeAgo} timestamp=${keeper.last_heartbeat} /></span>`
+          : null}
+        ${runtimeBlockerClass
+          ? html`
+              <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-[rgba(239,68,68,0.14)] text-[var(--bad)]">
+                ${runtimeBlockerClass === 'ambiguous_post_commit_timeout' ? 'Post-commit timeout' : 'Post-commit failure'}
+              </span>
+            `
+          : null}
+        ${runtimeBlocker
+          ? html`<span><strong class="text-[var(--text-strong)]">런타임 차단</strong> · ${runtimeBlocker}</span>`
           : null}
         ${blocker
           ? html`<span><strong class="text-[var(--text-strong)]">차단 요인</strong> · ${blocker}</span>`
@@ -259,6 +273,31 @@ function isPlaygroundRepo(r: unknown): r is PlaygroundRepo {
     && typeof r.last_action === 'string'
 }
 
+interface PlaygroundPR {
+  pr_url: string
+  branch: string
+  title: string
+  draft: boolean
+}
+
+function isPlaygroundPR(r: unknown): r is PlaygroundPR {
+  if (!isRecord(r)) return false
+  return typeof r.pr_url === 'string'
+    && typeof r.branch === 'string'
+    && typeof r.title === 'string'
+    && typeof r.draft === 'boolean'
+}
+
+interface PlaygroundWorktree {
+  name: string
+  path: string
+}
+
+function isPlaygroundWorktree(r: unknown): r is PlaygroundWorktree {
+  if (!isRecord(r)) return false
+  return typeof r.name === 'string' && typeof r.path === 'string'
+}
+
 function PlaygroundReposPanel({ keeperName }: { keeperName: string }) {
   const detail = keeperStatusDetails.value[keeperName]
   if (!detail?.rawStatus) return null
@@ -266,27 +305,63 @@ function PlaygroundReposPanel({ keeperName }: { keeperName: string }) {
   if (!isRecord(raw)) return null
   const execCtx = raw.execution_context
   if (!isRecord(execCtx)) return null
-  const repos = Array.isArray(execCtx.playground_repos) ? execCtx.playground_repos : []
-  if (repos.length === 0) return null
 
-  const items = repos.filter(isPlaygroundRepo)
+  const repos = (Array.isArray(execCtx.playground_repos) ? execCtx.playground_repos : []).filter(isPlaygroundRepo)
+  const prs = (Array.isArray(execCtx.pr_history) ? execCtx.pr_history : []).filter(isPlaygroundPR)
+  const worktrees = (Array.isArray(execCtx.active_worktrees) ? execCtx.active_worktrees : []).filter(isPlaygroundWorktree)
+
+  if (repos.length === 0 && prs.length === 0 && worktrees.length === 0) return null
 
   return html`
-    <${SectionCard} title="Playground (${items.length})">
-      <div class="flex flex-col gap-2">
-        ${items.map(r => html`
-          <div class="flex items-center gap-3 px-3 py-2 rounded-lg border border-[var(--white-8)] bg-[var(--white-2)]">
-            <div class="flex-1 min-w-0">
-              <div class="flex items-center gap-2">
-                <span class="text-xs font-medium text-[var(--text-strong)] truncate">${r.name}</span>
-                <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--accent)] border border-[rgba(71,184,255,0.15)]">${r.branch}</span>
-                ${r.shallow ? html`<span class="text-[9px] px-1 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">shallow</span>` : null}
-              </div>
-              <div class="text-[10px] text-[var(--text-muted)] font-mono mt-0.5 truncate">${r.latest_commit}</div>
+    <${SectionCard} title="Playground">
+      <div class="flex flex-col gap-3">
+        ${repos.length > 0 ? html`
+          <div>
+            <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1.5">Repos (${repos.length})</div>
+            <div class="flex flex-col gap-1.5">
+              ${repos.map(r => html`
+                <div class="flex items-center gap-3 px-3 py-2 rounded-lg border border-[var(--white-8)] bg-[var(--white-2)]">
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2">
+                      <span class="text-xs font-medium text-[var(--text-strong)] truncate">${r.name}</span>
+                      <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--accent)] border border-[rgba(71,184,255,0.15)]">${r.branch}</span>
+                      ${r.shallow ? html`<span class="text-[9px] px-1 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">shallow</span>` : null}
+                    </div>
+                    <div class="text-[10px] text-[var(--text-muted)] font-mono mt-0.5 truncate">${r.latest_commit}</div>
+                  </div>
+                  <span class="text-[10px] text-[var(--text-dim)] flex-shrink-0">${r.last_action}</span>
+                </div>
+              `)}
             </div>
-            <span class="text-[10px] text-[var(--text-dim)] flex-shrink-0">${r.last_action}</span>
           </div>
-        `)}
+        ` : null}
+
+        ${prs.length > 0 ? html`
+          <div>
+            <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1.5">PRs (${prs.length})</div>
+            <div class="flex flex-col gap-1.5">
+              ${prs.map(pr => html`
+                <div class="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[var(--white-8)] bg-[var(--white-2)]">
+                  <span class="text-xs text-[var(--text-strong)] truncate flex-1">${pr.title}</span>
+                  <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--accent)] border border-[rgba(71,184,255,0.15)]">${pr.branch}</span>
+                  ${pr.draft ? html`<span class="text-[9px] px-1 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">draft</span>` : null}
+                  <a href=${pr.pr_url} target="_blank" rel="noopener" class="text-[10px] text-[var(--accent)] hover:underline flex-shrink-0">PR</a>
+                </div>
+              `)}
+            </div>
+          </div>
+        ` : null}
+
+        ${worktrees.length > 0 ? html`
+          <div>
+            <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1.5">Worktrees (${worktrees.length})</div>
+            <div class="flex flex-wrap gap-1.5">
+              ${worktrees.map(w => html`
+                <span class="text-[10px] font-mono px-2 py-1 rounded-lg border border-[var(--white-8)] bg-[var(--white-2)] text-[var(--text-muted)]" title=${w.path}>${w.name}</span>
+              `)}
+            </div>
+          </div>
+        ` : null}
       </div>
     <//>
   `
@@ -333,6 +408,7 @@ export function KeeperDetailOverlay() {
                 ${(() => {
                   const preset = peekLoadedKeeperConfig(keeper.name)?.tools?.tool_preset
                   if (!preset) return null
+                  // SSOT: config/tool_policy.toml [git_clone.workflow_presets]
                   const canPR = ['coding', 'delivery', 'full'].includes(preset)
                   return html`
                     <span class="inline-flex items-center py-0.5 px-2 rounded text-[10px] font-semibold uppercase tracking-wide
@@ -342,6 +418,30 @@ export function KeeperDetailOverlay() {
                       }"
                       title=${`Tool preset: ${preset}${canPR ? ' (clone/PR 가능)' : ''}`}
                     >${preset}</span>
+                  `
+                })()}
+                ${(() => {
+                  const [profiles, setProfiles] = useState<string[]>([])
+                  const [currentCascade, setCurrentCascade] = useState(keeper.cascade_name || 'default')
+                  if (profiles.length === 0) {
+                    fetchCascadeProfiles().then(r => setProfiles(r.profiles)).catch(() => {})
+                  }
+                  if (profiles.length <= 1) return null
+                  return html`
+                    <select
+                      class="py-0.5 px-1 rounded text-[10px] font-mono bg-[var(--white-5)] text-[var(--text-muted)] border border-[var(--white-8)] cursor-pointer"
+                      title="Cascade profile"
+                      value=${currentCascade}
+                      onChange=${(e: Event) => {
+                        const val = (e.target as HTMLSelectElement).value
+                        setCurrentCascade(val)
+                        updateKeeperCascade(keeper.name, val).then(() => {
+                          refreshDashboard()
+                        })
+                      }}
+                    >
+                      ${profiles.map(p => html`<option value=${p}>${p}</option>`)}
+                    </select>
                   `
                 })()}
               </div>
@@ -426,6 +526,9 @@ export function KeeperDetailOverlay() {
 
         ${'' /* ── Per-turn token trend (input vs output) ── */}
         <${TokenTrendChart} keeper=${keeper} />
+
+        ${'' /* ── Prompt fingerprint / segment telemetry ── */}
+        <${PromptTelemetryPanel} keeper=${keeper} />
 
         ${'' /* ── Inference Telemetry (tok/s, cache, reasoning) ── */}
         <${InferenceTelemetryPanel} keeper=${keeper} />

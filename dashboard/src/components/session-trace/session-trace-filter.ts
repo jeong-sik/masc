@@ -11,6 +11,9 @@ type FilterKey = TraceEventKind | 'all'
 const CHIP_DEFS: Array<{ key: FilterKey; label: string }> = [
   { key: 'all',        label: '전체' },
   { key: 'tool_call',  label: '도구 호출' },
+  { key: 'oas_tool',   label: 'OAS 도구' },
+  { key: 'oas_turn',   label: 'OAS 턴' },
+  { key: 'oas_context', label: 'OAS 압축' },
   { key: 'thinking',   label: '내부 사고' },
   { key: 'broadcast',  label: '브로드캐스트' },
   { key: 'task',       label: '태스크' },

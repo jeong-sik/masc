@@ -45,11 +45,13 @@ async function flushUi(): Promise<void> {
 async function loadPanel(
   fetchTelemetry: () => Promise<TelemetryResponse>,
   fetchTelemetrySummary: () => Promise<TelemetrySummaryResponse>,
+  fetchDashboardProof: () => Promise<null> = vi.fn().mockResolvedValue(null),
 ) {
   vi.resetModules()
   vi.doMock('../api/dashboard', () => ({
     fetchTelemetry,
     fetchTelemetrySummary,
+    fetchDashboardProof,
   }))
   return import('./telemetry-unified')
 }
@@ -80,7 +82,7 @@ describe('TelemetryUnified', () => {
     }
   })
 
-  it('polls automatically after the initial load', async () => {
+  it('does not poll automatically after the initial load', async () => {
     const fetchTelemetry = vi.fn().mockResolvedValue(baseTelemetry)
     const fetchTelemetrySummary = vi.fn().mockResolvedValue(baseSummary)
     const { TelemetryUnified } = await loadPanel(fetchTelemetry, fetchTelemetrySummary)
@@ -97,11 +99,11 @@ describe('TelemetryUnified', () => {
     await vi.advanceTimersByTimeAsync(15_000)
     await flushUi()
 
-    expect(fetchTelemetry).toHaveBeenCalledTimes(2)
-    expect(fetchTelemetrySummary).toHaveBeenCalledTimes(2)
+    expect(fetchTelemetry).toHaveBeenCalledTimes(1)
+    expect(fetchTelemetrySummary).toHaveBeenCalledTimes(1)
   })
 
-  it('renders local and UTC snapshot metadata for operators', async () => {
+  it('renders runtime diagnosis metadata for operators', async () => {
     const fetchTelemetry = vi.fn().mockResolvedValue(baseTelemetry)
     const fetchTelemetrySummary = vi.fn().mockResolvedValue(baseSummary)
     const { TelemetryUnified } = await loadPanel(fetchTelemetry, fetchTelemetrySummary)
@@ -112,11 +114,11 @@ describe('TelemetryUnified', () => {
     })
     await flushUi()
 
-    expect(container.textContent).toContain('Telemetry Stream')
-    expect(container.textContent).toContain('Auto 15s ON')
-    expect(container.textContent).toContain('Local')
-    expect(container.textContent).toContain('UTC')
-    expect(container.textContent).toContain('Latest Entries')
+    expect(container.textContent).toContain('Runtime Diagnosis')
+    expect(container.textContent).toContain('MASC telemetry store')
+    expect(container.textContent).toContain('Refresh')
+    expect(container.textContent).toContain('OAS Proof Bridge')
+    expect(container.textContent).toContain('MASC telemetry store entries')
     expect(container.textContent).toContain('mcp__masc__masc_status')
   })
 })

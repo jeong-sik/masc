@@ -7,6 +7,10 @@ type keeper_chat_stream_request = {
   name : string;
   message : string;
   timeout_sec : int option;
+  channel : string;
+  channel_user_id : string;
+  channel_user_name : string;
+  channel_room_id : string;
 }
 
 let keeper_chat_stream_error_json message =
@@ -113,6 +117,29 @@ let parse_keeper_chat_stream_request body_str =
         json |> member "message" |> to_string_option |> Option.value ~default:""
         |> String.trim
       in
+      let channel =
+        json |> member "channel" |> to_string_option |> Option.value ~default:""
+        |> String.trim
+      in
+      let channel_user_id =
+        json |> member "channel_user_id" |> to_string_option
+        |> Option.value ~default:""
+        |> String.trim
+      in
+      let channel_user_name =
+        json |> member "channel_user_name" |> to_string_option
+        |> Option.value ~default:""
+        |> String.trim
+      in
+      let channel_room_id =
+        json |> member "channel_room_id" |> to_string_option
+        |> Option.value ~default:""
+        |> String.trim
+      in
+      let has_connector_context =
+        channel <> "" || channel_user_id <> ""
+        || channel_user_name <> "" || channel_room_id <> ""
+      in
       let legacy_models_present =
         match json |> member "models" with
         | `Null -> false
@@ -131,12 +158,27 @@ let parse_keeper_chat_stream_request body_str =
         Error "name is required"
       else if message = "" then
         Error "message is required"
+      else if has_connector_context
+              && (channel = "" || channel_user_id = "" || channel_room_id = "")
+      then
+        Error
+          "channel, channel_user_id, and channel_room_id are required when connector context is supplied"
       else if legacy_models_present then
         Error
           "legacy keeper model args removed for masc_keeper_msg: models. Keepers now use cascade_name and last_model_used only."
       else
         match timeout_sec with
-        | Ok timeout_sec -> Ok { name; message; timeout_sec }
+        | Ok timeout_sec ->
+            Ok
+              {
+                name;
+                message;
+                timeout_sec;
+                channel;
+                channel_user_id;
+                channel_user_name;
+                channel_room_id;
+              }
         | Error err -> Error err
   with Yojson.Json_error e ->
     Error ("invalid json: " ^ e)
@@ -386,16 +428,36 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
                  make_event ~thread_id ~run_id:(Some run_id)
                    ~message_id:(Some message_id)
                    ~role:(Some Assistant) Text_message_start));
+          let has_connector_context =
+            payload.channel <> "" && payload.channel_user_id <> ""
+          in
+          let message =
+            if has_connector_context then
+              Gate_keeper_backend.contextualize_message
+                ~channel:payload.channel
+                ~channel_user_id:payload.channel_user_id
+                ~channel_user_name:payload.channel_user_name
+                ~channel_room_id:payload.channel_room_id
+                ~content:payload.message
+            else
+              payload.message
+          in
           let args =
             `Assoc
               [ ("name", `String payload.name);
-                ("message", `String payload.message);
+                ("message", `String message);
                 ("direct_reply", `Bool true) ]
           in
           let agent_name =
-            match agent_from_request request with
-            | Some raw when String.trim raw <> "" -> String.trim raw
-            | _ -> "unknown"
+            if has_connector_context then
+              Gate_keeper_backend.agent_name_for_channel_actor
+                ~channel:payload.channel
+                ~channel_room_id:payload.channel_room_id
+                ~channel_user_id:payload.channel_user_id
+            else
+              match agent_from_request request with
+              | Some raw when String.trim raw <> "" -> String.trim raw
+              | _ -> "unknown"
           in
           (* Track whether any text deltas were streamed to the client.
              When streaming is active, the MODEL text is sent token-by-token

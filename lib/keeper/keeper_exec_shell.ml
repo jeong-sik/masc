@@ -132,8 +132,8 @@ let handle_keeper_bash
            (Re.execp (Re.Pcre.re "chain|redirect|pipe|semicolon" |> Re.compile) (String.lowercase_ascii reason))
         then "Use separate tool calls instead of chaining. Call keeper_bash once per command."
         else if Re.execp (Re.Pcre.re "inject|symbol" |> Re.compile) (String.lowercase_ascii reason)
-        then "Avoid shell metacharacters. Use keeper_shell_readonly with a specific op (rg, find, ls) instead."
-        else "Check the command for blocked patterns. Use keeper_shell_readonly for safe read-only ops."
+        then "Avoid shell metacharacters. Use keeper_shell with a specific op (rg, find, ls) instead."
+        else "Check the command for blocked patterns. Use keeper_shell for structured ops (rg, ls, find)."
       in
       Yojson.Safe.to_string
         (`Assoc
@@ -212,7 +212,7 @@ let handle_keeper_bash
                    ])))
 ;;
 
-let handle_keeper_shell_readonly
+let handle_keeper_shell
       ~(config : Room.config)
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)

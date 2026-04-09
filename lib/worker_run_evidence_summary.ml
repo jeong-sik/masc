@@ -166,6 +166,8 @@ let summary_json json =
       ("execution_scope", U.member "execution_scope" json);
       ("requested_worker_class", U.member "requested_worker_class" json);
       ("requested_worker_size", U.member "requested_worker_size" json);
+      ("requested_runtime", U.member "requested_runtime" json);
+      ("requested_model", U.member "requested_model" json);
       ("resolved_runtime", U.member "resolved_runtime" json);
       ("resolved_model", U.member "resolved_model" json);
       ("routing_reason", U.member "routing_reason" json);

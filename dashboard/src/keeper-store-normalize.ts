@@ -4,6 +4,7 @@ import type {
   KeeperMetricPoint,
   KeeperPhase,
   PipelineStage,
+  PromptTelemetry,
 } from './types'
 import { isRecord, asString, asNumber, asBoolean, asStringArray, toIsoTimestamp } from './components/common/normalize'
 import { isOfflineStatus } from './lib/status-utils'
@@ -123,6 +124,35 @@ function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
         handoffObj
           ? (typeof handoffObj.to_model === 'string' ? handoffObj.to_model : null)
           : (typeof item.handoff_to_model === 'string' ? item.handoff_to_model : null)
+      const rawPrompt = isRecord(item.prompt) ? item.prompt : null
+      const promptSegments: NonNullable<PromptTelemetry['segments']> = {}
+      if (rawPrompt) {
+        for (const [key, value] of Object.entries(rawPrompt)) {
+          if (key === 'fingerprint' || key === 'estimated_total_tokens' || key === 'estimated_cacheable_tokens') continue
+          if (!isRecord(value)) continue
+          const bytes = asNumber(value.bytes)
+          const estimatedTokens = asNumber(value.estimated_tokens)
+          const fingerprint = typeof value.fingerprint === 'string' ? value.fingerprint : null
+          if (bytes == null && estimatedTokens == null && fingerprint == null) continue
+          promptSegments[key] = {
+            bytes: bytes ?? 0,
+            estimated_tokens: estimatedTokens ?? 0,
+            fingerprint,
+          }
+        }
+      }
+      const promptFingerprint =
+        (typeof item.prompt_fingerprint === 'string' ? item.prompt_fingerprint : null)
+        ?? (rawPrompt && typeof rawPrompt.fingerprint === 'string' ? rawPrompt.fingerprint : null)
+      const prompt_metrics =
+        promptFingerprint != null || rawPrompt != null || Object.keys(promptSegments).length > 0
+          ? {
+              fingerprint: promptFingerprint,
+              estimated_total_tokens: rawPrompt ? (asNumber(rawPrompt.estimated_total_tokens) ?? null) : null,
+              estimated_cacheable_tokens: rawPrompt ? (asNumber(rawPrompt.estimated_cacheable_tokens) ?? null) : null,
+              segments: promptSegments,
+            }
+          : null
       const rawTel = isRecord(item.inference_telemetry) ? item.inference_telemetry : null
       const rawTimings = rawTel && isRecord(rawTel.timings) ? rawTel.timings : null
       const inference_telemetry = rawTel ? {
@@ -158,6 +188,8 @@ function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
         cost_usd: asNumber(item.cost_usd) ?? Number.NaN,
         handoff_to_model: handoffToModel,
         handoff_new_generation: handoffNewGeneration,
+        prompt_fingerprint: promptFingerprint,
+        prompt_metrics,
         inference_telemetry,
         fallback_applied: cascadeObj ? cascadeObj.fallback_applied === true : false,
         fallback_hops: cascadeObj ? (asNumber(cascadeObj.fallback_hops) ?? 0) : 0,
@@ -295,6 +327,13 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
           typeof row.proactive_enabled === 'boolean' ? row.proactive_enabled : undefined,
         proactive_idle_sec: asNumber(row.proactive_idle_sec),
         proactive_cooldown_sec: asNumber(row.proactive_cooldown_sec),
+        runtime_blocker_class:
+          (asString(row.runtime_blocker_class) as Keeper['runtime_blocker_class']) ?? null,
+        runtime_blocker_summary: asString(row.runtime_blocker_summary) ?? null,
+        runtime_blocker_manual_reconcile:
+          typeof row.runtime_blocker_manual_reconcile === 'boolean'
+            ? row.runtime_blocker_manual_reconcile
+            : null,
         created_at: toIsoTimestamp(row.created_at) ?? asString(row.created_at),
         updated_at: toIsoTimestamp(row.updated_at) ?? asString(row.updated_at),
         last_heartbeat: asString(row.last_heartbeat) ?? asString(agentRaw?.last_seen),

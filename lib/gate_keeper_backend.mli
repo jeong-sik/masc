@@ -18,9 +18,31 @@ val dispatch :
   config:Room.config ->
   channel:string ->
   channel_user_id:string ->
+  channel_user_name:string ->
+  channel_room_id:string ->
   keeper_name:string ->
   content:string ->
   Gate_protocol.dispatch_result
 (** Build a keeper context, call [Tool_keeper.dispatch], and parse
     the response.  The [channel] and [channel_user_id] are used to
-    construct the agent name ([gate:<channel>:<user_id>]). *)
+    construct the agent name ([gate:<channel>:<room_id>:<user_id>]).  The other
+    connector fields are injected into the keeper-visible message body so
+    external user identity survives memory and handoff boundaries. *)
+
+val agent_name_for_channel_actor :
+  channel:string ->
+  channel_room_id:string ->
+  channel_user_id:string ->
+  string
+(** Deterministic keeper session key for one external actor inside one
+    external room/thread. *)
+
+val contextualize_message :
+  channel:string ->
+  channel_user_id:string ->
+  channel_user_name:string ->
+  channel_room_id:string ->
+  content:string ->
+  string
+(** Render a stable external-channel context envelope ahead of the raw
+    user message so keeper memory can retain actor/channel metadata. *)

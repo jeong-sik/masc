@@ -75,6 +75,8 @@ export function keeperRecentActionLabel(
 
 export function keeperRuntimeHint(keeper: Keeper | null | undefined): string | null {
   if (!keeper) return null
+  const runtimeBlocker = keeper.runtime_blocker_summary?.trim()
+  if (runtimeBlocker) return runtimeBlocker
   const blocker = keeper.last_blocker?.trim()
   if (keeper.paused && blocker) return `일시정지 · ${blocker}`
   if (keeper.paused && keeper.keepalive_running) return '일시정지 · 하트비트만 유지 중'

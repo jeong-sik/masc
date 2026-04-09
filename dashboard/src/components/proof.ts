@@ -115,6 +115,7 @@ export function Proof() {
       <div class="flex items-center justify-end gap-2 flex-wrap px-1">
         <span class="px-3 py-1.5 rounded-full text-[11px] font-bold border shadow-sm ${verdictTone(verdict)}">${verdictChipLabel(verdict)}</span>
         ${snapshot?.session_id ? html`<span class="px-2.5 py-1 rounded-md bg-white/5 border border-white/10 text-text-muted text-[11px] font-mono shadow-sm">${snapshot.session_id}</span>` : null}
+        ${snapshot?.operation_id ? html`<span class="px-2.5 py-1 rounded-md bg-white/5 border border-white/10 text-text-muted text-[11px] font-mono shadow-sm">${snapshot.operation_id}</span>` : null}
         ${snapshot?.generated_at ? html`<span class="px-2.5 py-1 rounded-md bg-white/5 border border-white/10 text-text-muted text-[11px] font-mono shadow-sm">${relativeTime(snapshot.generated_at)}</span>` : null}
       </div>
 

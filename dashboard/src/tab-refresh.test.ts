@@ -47,16 +47,16 @@ describe('refreshPlanForRoute', () => {
     })).toEqual(['execution', 'activityGraph'])
   })
 
-  it('retires the command surface refresh plan', () => {
+  it('keeps the hidden command surface hydrated for ops queue deep links', () => {
     expect(refreshPlanForRoute({
       tab: 'command',
       params: { section: 'intervene' },
-    })).toEqual([])
+    })).toEqual(['namespaceTruth', 'operatorSnapshot', 'operatorRoomDigest'])
 
     expect(refreshPlanForRoute({
       tab: 'command',
       params: { section: 'governance' },
-    })).toEqual([])
+    })).toEqual(['namespaceTruth', 'operatorSnapshot', 'operatorRoomDigest'])
   })
 
   it('refreshes the new workspace and lab sections only where store-backed data is needed', () => {

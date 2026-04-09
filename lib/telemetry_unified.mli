@@ -31,13 +31,17 @@ val read_unified :
   masc_root:string ->
   ?sources:source list ->
   ?keeper_name:string ->
+  ?session_id:string ->
+  ?operation_id:string ->
+  ?worker_run_id:string ->
   ?n:int ->
   unit ->
   Yojson.Safe.t list
-(** [read_unified ~base_path ~masc_root ?sources ?keeper_name ?n ()]
+(** [read_unified ~base_path ~masc_root ?sources ?keeper_name ?session_id
+      ?operation_id ?worker_run_id ?n ()]
     reads entries from [sources] (default: all five), optionally filtered
-    by [keeper_name], and returns at most [n] entries (default 100)
-    sorted by timestamp descending (newest first).
+    by [keeper_name] and generic correlation keys, and returns at most [n]
+    entries (default 100) sorted by timestamp descending (newest first).
 
     [masc_root] is the cluster-aware .masc directory (use
     [Room.masc_root_dir config] to obtain it).  [base_path] is the

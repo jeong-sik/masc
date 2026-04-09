@@ -368,7 +368,6 @@
    tool_token
    tool_dispatch
    tool_input_validation
-   tool_tag_init
    tool_prefilter
    tool_metrics
    tool_metrics_persist
@@ -383,6 +382,7 @@
    tool_unified
    tool_help_registry
    tool_registry
+   tool_registration_check
    tool_code
    tool_code_write
    tool_suspend

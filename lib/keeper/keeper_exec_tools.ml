@@ -127,7 +127,7 @@ let execute_keeper_tool_call
     | "keeper_fs_read" -> Keeper_exec_fs.handle_keeper_fs_read ~config ~meta ~args
     | "keeper_fs_edit" -> Keeper_exec_fs.handle_keeper_fs_edit ~config ~meta ~args
     | "keeper_bash" -> Keeper_exec_shell.handle_keeper_bash ~config ~meta ~args
-    | "keeper_shell_readonly" -> Keeper_exec_shell.handle_keeper_shell_readonly ~config ~meta ~args
+    | "keeper_shell" -> Keeper_exec_shell.handle_keeper_shell ~config ~meta ~args
     | "keeper_voice_speak"
     | "keeper_voice_listen"
     | "keeper_voice_agent"

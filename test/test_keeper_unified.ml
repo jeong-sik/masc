@@ -3,6 +3,7 @@ open Alcotest
 module WO = Masc_mcp.Keeper_world_observation
 module UP = Masc_mcp.Keeper_unified_prompt
 module UT = Masc_mcp.Keeper_unified_turn
+module KR = Masc_mcp.Keeper_registry
 module KAR = Masc_mcp.Keeper_agent_run
 module KTD = Masc_mcp.Keeper_tool_disclosure
 module KEC = Masc_mcp.Keeper_exec_context
@@ -887,11 +888,18 @@ let test_meta_defaults_social_model () =
 
 (* ---------- Metrics observation tests ---------- *)
 
+let sample_prompt_metrics ?(system_prompt = "You are a keeper.")
+    ?(dynamic_context = "")
+    ?(user_message = "Check the board.")
+    () =
+  KAR.build_prompt_metrics ~system_prompt ~dynamic_context ~user_message
+
 let make_run_result ~text ~tools ~model ~input_tok ~output_tok
     : Masc_mcp.Keeper_agent_run.run_result =
   {
     response_text = text;
     model_used = model;
+    prompt_metrics = sample_prompt_metrics ();
     cascade_observation = None;
     turn_count = 1;
     tool_calls_made = List.length tools;
@@ -902,6 +910,32 @@ let make_run_result ~text ~tools ~model ~input_tok ~output_tok
     stop_reason = Masc_mcp.Oas_worker.Completed;
     inference_telemetry = None;
   }
+
+let test_prompt_metrics_fingerprint_is_deterministic () =
+  let metrics_a =
+    sample_prompt_metrics ~system_prompt:"sys" ~dynamic_context:"ctx"
+      ~user_message:"user" ()
+  in
+  let metrics_b =
+    sample_prompt_metrics ~system_prompt:"sys" ~dynamic_context:"ctx"
+      ~user_message:"user" ()
+  in
+  let metrics_c =
+    sample_prompt_metrics ~system_prompt:"sys" ~dynamic_context:"ctx"
+      ~user_message:"changed user" ()
+  in
+  check string "same inputs -> same fingerprint"
+    metrics_a.fingerprint metrics_b.fingerprint;
+  check bool "different prompt inputs -> different fingerprint" true
+    (metrics_a.fingerprint <> metrics_c.fingerprint);
+  check int "cacheable tokens follow system prompt"
+    metrics_a.system_prompt_segment.estimated_tokens
+    metrics_a.estimated_cacheable_tokens;
+  check int "total estimated tokens are additive"
+    (metrics_a.system_prompt_segment.estimated_tokens
+     + metrics_a.dynamic_context_segment.estimated_tokens
+     + metrics_a.user_message_segment.estimated_tokens)
+    metrics_a.estimated_total_tokens
 
 let test_metrics_text_response () =
   let result =
@@ -1100,6 +1134,12 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
           (make_run_result ~text:"Observed" ~tools:[]
              ~model:"openai:qwen3.5-35b" ~input_tok:40 ~output_tok:20)
           with
+          prompt_metrics =
+            sample_prompt_metrics
+              ~system_prompt:"You are a keeper focused on triage."
+              ~dynamic_context:"Pending mentions: 2"
+              ~user_message:"Review the board and decide what to do next."
+              ();
           cascade_observation =
             Some
               {
@@ -1207,7 +1247,26 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
       check string "nested deliberation execution source persisted" "baseline"
         Yojson.Safe.Util.(
           json |> member "deliberation_execution" |> member "action_source"
-          |> to_string))
+          |> to_string);
+      check string "top-level prompt fingerprint persisted"
+        result.prompt_metrics.fingerprint
+        Yojson.Safe.Util.(json |> member "prompt_fingerprint" |> to_string);
+      check int "prompt total tokens persisted"
+        result.prompt_metrics.estimated_total_tokens
+        Yojson.Safe.Util.(
+          json |> member "prompt" |> member "estimated_total_tokens"
+          |> to_int);
+      check int "system prompt bytes persisted"
+        result.prompt_metrics.system_prompt_segment.bytes
+        Yojson.Safe.Util.(
+          json |> member "prompt" |> member "system_prompt" |> member "bytes"
+          |> to_int);
+      check string "user message fingerprint persisted"
+        (Option.value ~default:""
+           result.prompt_metrics.user_message_segment.fingerprint)
+        Yojson.Safe.Util.(
+          json |> member "prompt" |> member "user_message"
+          |> member "fingerprint" |> to_string))
 
 (* context_overflow_limit is now in OAS as Retry.extract_context_limit.
    These tests verify the OAS SSOT API is accessible from MASC. *)
@@ -1484,6 +1543,24 @@ let test_side_effect_reclassification_marks_any_post_commit_error () =
     (UT.is_transient_network_error reclassified);
   check bool "auth error becomes ambiguous partial" true
     (UT.is_ambiguous_side_effect_error reclassified)
+
+let test_post_commit_failure_kind_marks_timeouts () =
+  let timeout_error =
+    Agent_sdk.Error.Api
+      (Timeout { message = "Execution cancelled after 300.0s" })
+  in
+  check string "timeout kind" "post_commit_timeout"
+    (KR.ambiguous_partial_commit_kind_to_string
+       (UT.post_commit_failure_kind_of_error timeout_error))
+
+let test_post_commit_failure_kind_marks_non_timeouts_as_failures () =
+  let auth_error =
+    Agent_sdk.Error.Api
+      (AuthError { message = "Unauthorized" })
+  in
+  check string "failure kind" "post_commit_failure"
+    (KR.ambiguous_partial_commit_kind_to_string
+       (UT.post_commit_failure_kind_of_error auth_error))
 
 let test_side_effect_reclassification_ignores_keeper_read_only_tools () =
   let original =
@@ -2079,6 +2156,8 @@ let () =
         ] );
       ( "metrics_observation",
         [
+          test_case "prompt metrics fingerprint" `Quick
+            test_prompt_metrics_fingerprint_is_deterministic;
           test_case "text response" `Quick test_metrics_text_response;
           test_case "tool response" `Quick test_metrics_tool_response;
           test_case "noop response" `Quick test_metrics_noop_response;
@@ -2181,6 +2260,10 @@ let () =
             test_side_effect_reclassification_requires_committed_tools;
           test_case "any post-commit error becomes ambiguous partial" `Quick
             test_side_effect_reclassification_marks_any_post_commit_error;
+          test_case "timeout classified as post-commit timeout" `Quick
+            test_post_commit_failure_kind_marks_timeouts;
+          test_case "non-timeout classified as post-commit failure" `Quick
+            test_post_commit_failure_kind_marks_non_timeouts_as_failures;
           test_case "read-only keeper tools do not become ambiguous partial" `Quick
             test_side_effect_reclassification_ignores_keeper_read_only_tools;
           test_case "mixed tool sets only keep mutating keeper tools" `Quick

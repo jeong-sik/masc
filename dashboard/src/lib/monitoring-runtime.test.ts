@@ -73,6 +73,25 @@ describe('summarizeKeeperMonitoring', () => {
     expect(summary.hint).toContain('오류')
   })
 
+  it('prioritizes structured runtime blockers over generic social blockers', () => {
+    const summary = summarizeKeeperMonitoring(
+      makeKeeper({
+        status: 'busy',
+        phase: 'Running',
+        pipeline_stage: 'idle',
+        runtime_blocker_class: 'ambiguous_post_commit_timeout',
+        runtime_blocker_summary:
+          'Mutating tools [keeper_fs_edit] committed before the turn timed out.',
+        last_blocker: 'missing social headers',
+      }),
+    )
+
+    expect(summary.band.key).toBe('attention')
+    expect(summary.hint).toBe(
+      'Mutating tools [keeper_fs_edit] committed before the turn timed out.',
+    )
+  })
+
   it('keeps never-booted keepers in the offline band', () => {
     const summary = summarizeKeeperMonitoring(
       makeKeeper({

@@ -161,6 +161,19 @@ export interface InferenceTelemetry {
   request_latency_ms: number
 }
 
+export interface PromptSegmentTelemetry {
+  bytes: number
+  estimated_tokens: number
+  fingerprint: string | null
+}
+
+export interface PromptTelemetry {
+  fingerprint: string | null
+  estimated_total_tokens: number | null
+  estimated_cacheable_tokens: number | null
+  segments: Record<string, PromptSegmentTelemetry>
+}
+
 export interface KeeperMetricPoint {
   ts: number
   context_ratio: number
@@ -177,6 +190,8 @@ export interface KeeperMetricPoint {
   cost_usd: number
   handoff_to_model: string | null
   handoff_new_generation: number | null
+  prompt_fingerprint: string | null
+  prompt_metrics: PromptTelemetry | null
   inference_telemetry: InferenceTelemetry | null
   fallback_applied: boolean
   fallback_hops: number
@@ -548,6 +563,7 @@ export interface Keeper {
   primary_model?: string
   active_model?: string
   next_model_hint?: string | null
+  cascade_name?: string
   status: string
   presence_keepalive?: boolean
   presence_keepalive_sec?: number
@@ -555,6 +571,9 @@ export interface Keeper {
   proactive_enabled?: boolean
   proactive_idle_sec?: number
   proactive_cooldown_sec?: number
+  runtime_blocker_class?: 'ambiguous_post_commit_timeout' | 'ambiguous_post_commit_failure' | null
+  runtime_blocker_summary?: string | null
+  runtime_blocker_manual_reconcile?: boolean | null
   active_goal_ids?: string[]
   last_autonomous_action_at?: string | null
   autonomous_action_count?: number
@@ -720,6 +739,9 @@ export interface KeeperConfigRuntime {
   fiber_health: string
   presence_keepalive: boolean
   presence_keepalive_sec: number
+  runtime_blocker_class?: 'ambiguous_post_commit_timeout' | 'ambiguous_post_commit_failure' | null
+  runtime_blocker_summary?: string | null
+  runtime_blocker_manual_reconcile?: boolean | null
 }
 
 export interface KeeperConfigCoordination {

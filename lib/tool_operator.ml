@@ -321,6 +321,7 @@ let () =
            ~description:s.description
            ~module_tag:Tool_dispatch.Mod_operator
            ~input_schema:s.input_schema
+           ~handler_binding:Tag_dispatch
            ~is_read_only:(List.mem s.name _tool_spec_read_only)
            ~is_idempotent:(List.mem s.name _tool_spec_read_only)
            ~requires_join:(List.mem s.name _tool_spec_requires_join)

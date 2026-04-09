@@ -22,11 +22,16 @@ let dispatch_keeper_json (ctx : 'a context) ~tool_name ~args =
   | Some (false, err) -> Error err
   | None -> Error (Printf.sprintf "%s dispatch unavailable" tool_name)
 
-let keeper_diagnostic_for_name (ctx : 'a context) ~(name : string) =
-  match Keeper_types.read_meta ctx.config name with
+let resolve_keeper_meta_for_name (ctx : 'a context) ~(name : string) =
+  match Keeper_types.read_meta_resolved ctx.config name with
   | Error err -> Error err
   | Ok None -> Error (Printf.sprintf "keeper not found: %s" name)
-  | Ok (Some meta) ->
+  | Ok (Some (resolved_name, meta)) -> Ok (resolved_name, meta)
+
+let keeper_diagnostic_for_name (ctx : 'a context) ~(name : string) =
+  match resolve_keeper_meta_for_name ctx ~name with
+  | Error err -> Error err
+  | Ok (_resolved_name, meta) ->
       let keepalive_running =
         Keeper_status_bridge.runtime_keepalive_running ctx.config meta
       in
@@ -384,7 +389,10 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
   | "keeper_recover" ->
       let* () = validate_target_type "keeper" request in
       let* name = require_target_id request in
-      let* before_diagnostic = keeper_diagnostic_for_name ctx ~name in
+      let* (resolved_name, _meta) =
+        resolve_keeper_meta_for_name ctx ~name
+      in
+      let* before_diagnostic = keeper_diagnostic_for_name ctx ~name:resolved_name in
       let recoverable =
         match U.member "recoverable" before_diagnostic with
         | `Bool value -> value
@@ -406,13 +414,13 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
       else
         let* down_result =
           dispatch_keeper_json ctx ~tool_name:"masc_keeper_down"
-            ~args:(`Assoc [ ("name", `String name) ])
+            ~args:(`Assoc [ ("name", `String resolved_name) ])
         in
         let* up_result =
           dispatch_keeper_json ctx ~tool_name:"masc_keeper_up"
-            ~args:(`Assoc [ ("name", `String name) ])
+            ~args:(`Assoc [ ("name", `String resolved_name) ])
         in
-        let* after_diagnostic = keeper_diagnostic_for_name ctx ~name in
+        let* after_diagnostic = keeper_diagnostic_for_name ctx ~name:resolved_name in
         let recovered, skipped_reason =
           keeper_recovery_outcome after_diagnostic
         in

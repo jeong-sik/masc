@@ -2,6 +2,7 @@ import type { RouteState } from './types'
 import { refreshExecution, refreshBoard, refreshGoals, refreshShell } from './store'
 import { requestNamespaceTruth } from './namespace-truth-store'
 import { refreshMissionSnapshot } from './mission-store'
+import { refreshOperatorRoomDigest, refreshOperatorSnapshot } from './operator-store'
 
 async function refreshActivityGraphSurface(): Promise<void> {
   const { refreshActivityGraph } = await import('./components/activity-graph')
@@ -39,6 +40,8 @@ export type RefreshTask =
   | 'autoresearch'
   | 'harness'
   | 'inspector'
+  | 'operatorSnapshot'
+  | 'operatorRoomDigest'
 
 export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params'>): RefreshTask[] {
   switch (routeState.tab) {
@@ -53,7 +56,7 @@ export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params
       }
       return ['namespaceTruth', 'missionSnapshot']
     case 'command':
-      return []
+      return ['namespaceTruth', 'operatorSnapshot', 'operatorRoomDigest']
     case 'workspace':
       if (routeState.params.section === 'planning') {
         return ['goals', 'execution']
@@ -96,6 +99,8 @@ const REFRESHERS: Record<RefreshTask, () => void> = {
     void refreshFeatureHealthSurface()
     void refreshServerConfigSurface()
   },
+  operatorSnapshot: () => { void refreshOperatorSnapshot({ force: true }) },
+  operatorRoomDigest: () => { void refreshOperatorRoomDigest({ force: true }) },
 }
 
 // --- Tab visit counter (localStorage-persisted) ---

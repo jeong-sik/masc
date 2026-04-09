@@ -48,6 +48,8 @@ type gate_error = Gate_protocol.gate_error =
 type dispatch_fn =
   channel:string ->
   channel_user_id:string ->
+  channel_user_name:string ->
+  channel_room_id:string ->
   keeper_name:string ->
   content:string ->
   Gate_protocol.dispatch_result
@@ -158,6 +160,8 @@ let handle_inbound ~dispatch (msg : inbound_message) =
         dispatch
           ~channel
           ~channel_user_id:msg.channel_user_id
+          ~channel_user_name:msg.channel_user_name
+          ~channel_room_id:msg.channel_room_id
           ~keeper_name:keeper
           ~content:(String.trim msg.content)
       in

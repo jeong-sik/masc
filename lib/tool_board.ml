@@ -859,17 +859,14 @@ let tool_spec_read_only =
   ]
 
 let register () =
-  Tool_dispatch.register_module_tag
-    ~schemas:tools
-    ~tag:Tool_dispatch.Mod_inline;
-  Tool_dispatch.register_module
-    ~schemas:tools
-    ~handler:(fun ~name ~args -> Some (handle_tool name args));
-  Tool_dispatch.init_read_only_set tool_spec_read_only;
-  Tool_dispatch.init_idempotent_set tool_spec_read_only;
-  List.iter
-    (fun name ->
-      let meta = Tool_catalog.metadata name in
-      Tool_catalog.register_metadata name
-        { meta with readonly = Some true; idempotent = Some true })
-    tool_spec_read_only
+  let handler = fun ~name ~args -> Some (handle_tool name args) in
+  let make_spec (s : Types.tool_schema) =
+    let ro = List.mem s.name tool_spec_read_only in
+    Tool_spec.create
+      ~name:s.name ~description:s.description
+      ~module_tag:Tool_dispatch.Mod_inline ~input_schema:s.input_schema
+      ~handler_binding:(Shared handler)
+      ~is_read_only:ro ~is_idempotent:ro
+      ()
+  in
+  Tool_spec.register_all (List.map make_spec tools)

@@ -25,6 +25,7 @@ import type {
   DashboardNamespaceTruthResponse,
   DashboardShellResponse,
   BoardSortMode,
+  GovernanceCaseBundle,
   GovernanceDecisionItem,
   GovernanceJudgment,
   KeeperApprovalQueueItem,
@@ -335,6 +336,33 @@ export function resolveGovernanceApproval(
     decision,
     reason,
   })
+}
+
+export function fetchGovernanceCaseStatus(caseId: string): Promise<GovernanceCaseBundle> {
+  return get(`/api/v1/governance/cases/${encodeURIComponent(caseId)}`)
+}
+
+function governanceCasesRetiredError(): Error {
+  return new Error('Governance case write APIs are retired; use live judge and HITL approvals instead.')
+}
+
+export async function submitGovernancePetition(_title: string): Promise<{ case: { id: string } }> {
+  throw governanceCasesRetiredError()
+}
+
+export async function submitGovernanceCaseBrief(
+  _caseId: string,
+  _stance: 'support' | 'oppose' | 'neutral',
+  _summary: string,
+): Promise<GovernanceCaseBundle> {
+  throw governanceCasesRetiredError()
+}
+
+export async function decideGovernanceExecutionOrder(
+  _caseId: string,
+  _decision: 'confirm' | 'deny',
+): Promise<void> {
+  throw governanceCasesRetiredError()
 }
 
 export interface RuntimeParamMeta {
@@ -858,13 +886,19 @@ export function fetchKeeperToolCalls(
 
 // ── Unified telemetry ──────────────────────────────────
 
-export type TelemetrySource = 'keeper_metric' | 'agent_event' | 'tool_call_io' | 'tool_usage' | 'tool_metric'
+export type TelemetrySource =
+  | 'keeper_metric'
+  | 'agent_event'
+  | 'tool_call_io'
+  | 'tool_usage'
+  | 'tool_metric'
 
 export type TelemetryEntry = Record<string, unknown> & {
   source: TelemetrySource
   ts?: number
   ts_unix?: number
   timestamp?: number
+  ts_iso?: string
 }
 
 export type TelemetryResponse = {
@@ -891,11 +925,17 @@ export type TelemetrySummaryResponse = {
 export function fetchTelemetry(opts?: {
   source?: TelemetrySource
   keeper?: string
+  session_id?: string
+  operation_id?: string
+  worker_run_id?: string
   n?: number
 }): Promise<TelemetryResponse> {
   const params = new URLSearchParams()
   if (opts?.source) params.set('source', opts.source)
   if (opts?.keeper) params.set('keeper', opts.keeper)
+  if (opts?.session_id) params.set('session_id', opts.session_id)
+  if (opts?.operation_id) params.set('operation_id', opts.operation_id)
+  if (opts?.worker_run_id) params.set('worker_run_id', opts.worker_run_id)
   if (opts?.n) params.set('n', String(opts.n))
   const qs = params.toString()
   return get<TelemetryResponse>(`/api/v1/dashboard/telemetry${qs ? '?' + qs : ''}`)
@@ -915,4 +955,14 @@ export function fetchExcusePatterns(): Promise<ExcusePattern[]> {
 
 export function updateExcusePatterns(patterns: ExcusePattern[]): Promise<{ ok: boolean }> {
   return post<{ ok: boolean }>('/api/v1/dashboard/config/excuse-patterns', patterns)
+}
+
+// --- Keeper Cascade Config ---
+
+export function fetchCascadeProfiles(): Promise<{ profiles: string[] }> {
+  return get<{ profiles: string[] }>('/api/v1/keeper/cascades')
+}
+
+export function updateKeeperCascade(keeper: string, cascade_name: string): Promise<{ ok: boolean }> {
+  return post<{ ok: boolean }>('/api/v1/keeper/cascade', { keeper, cascade_name })
 }

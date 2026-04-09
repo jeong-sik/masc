@@ -155,7 +155,6 @@ type keeper_profile_defaults = {
   (* Telemetry Feedback — inject behavioral stats into keeper context *)
   telemetry_feedback_enabled : bool option;
   telemetry_feedback_window_hours : int option;
-  allowed_providers : string list option;
   cascade_name : string option;
 }
 
@@ -198,7 +197,6 @@ let empty_keeper_profile_defaults = {
   work_discovery_guidance = None;
   telemetry_feedback_enabled = None;
   telemetry_feedback_window_hours = None;
-  allowed_providers = None;
   cascade_name = None;
 }
 
@@ -321,10 +319,6 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         work_discovery_guidance = str "work_discovery_guidance";
         telemetry_feedback_enabled = bool_ "telemetry_feedback_enabled";
         telemetry_feedback_window_hours = int_ "telemetry_feedback_window_hours";
-        allowed_providers =
-          (match strs "allowed_providers" with
-           | [] -> None
-           | xs -> Some (List.map String.lowercase_ascii xs));
         cascade_name = str "cascade_name";
       })
     result
@@ -451,7 +445,6 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
                   Safe_ops.json_bool_opt "telemetry_feedback_enabled" keeper_json;
                 telemetry_feedback_window_hours =
                   Safe_ops.json_int_opt "telemetry_feedback_window_hours" keeper_json;
-                allowed_providers = lower_string_list_opt (Safe_ops.json_string_list "allowed_providers" keeper_json);
                 cascade_name = Safe_ops.json_string_opt "cascade_name" keeper_json;
               }
           | _ -> { empty_keeper_profile_defaults with manifest_path = Some path })

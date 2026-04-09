@@ -23,20 +23,35 @@ module StringMap = Map.Make (String)
 
 (** Structured failure reason for cohort detection in self-preservation.
     ADT matching replaces string prefix matching for crash_msg grouping. *)
+type ambiguous_partial_commit_kind =
+  | Post_commit_timeout
+  | Post_commit_failure
+
+type ambiguous_partial_commit = {
+  kind : ambiguous_partial_commit_kind;
+  detail : string;
+}
+
 type failure_reason =
   | Heartbeat_consecutive_failures of int
   | Turn_consecutive_failures of int
-  | Ambiguous_partial_commit of string
+  | Ambiguous_partial_commit of ambiguous_partial_commit
   | Fiber_unresolved
   | Exception of string
+
+let ambiguous_partial_commit_kind_to_string = function
+  | Post_commit_timeout -> "post_commit_timeout"
+  | Post_commit_failure -> "post_commit_failure"
 
 let failure_reason_to_string = function
   | Heartbeat_consecutive_failures n ->
       Printf.sprintf "heartbeat_consecutive_failures(%d)" n
   | Turn_consecutive_failures n ->
       Printf.sprintf "turn_consecutive_failures(%d)" n
-  | Ambiguous_partial_commit s ->
-      Printf.sprintf "ambiguous_partial_commit(%s)" s
+  | Ambiguous_partial_commit { kind; detail } ->
+      Printf.sprintf "ambiguous_partial_commit(%s:%s)"
+        (ambiguous_partial_commit_kind_to_string kind)
+        detail
   | Fiber_unresolved -> "fiber_unresolved"
   | Exception s -> Printf.sprintf "exception(%s)" s
 

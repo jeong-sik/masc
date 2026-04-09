@@ -366,7 +366,14 @@ export function setupSSEReaction(): () => void {
       || event.type === 'approval:pending'
       || event.type === 'approval:resolved'
     ) {
-      scheduleRefresh('governance', () => void handleGovernance())
+      if (route.value.tab === 'command') {
+        scheduleRefresh('command_route', () => {
+          void refreshActiveRoute()
+        })
+      }
+      if (_refreshGovernanceFn) {
+        scheduleRefresh('governance', () => void handleGovernance())
+      }
     }
   })
 

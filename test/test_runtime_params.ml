@@ -305,6 +305,8 @@ let () =
     let restore_env () =
       match original with
       | Some value -> Unix.putenv key value
+      (* OCaml stdlib lacks Unix.unsetenv; empty string is sufficient here
+         because int_of_env_default treats invalid/empty values as default. *)
       | None -> Unix.putenv key ""
     in
     Fun.protect

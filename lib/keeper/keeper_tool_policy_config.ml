@@ -146,61 +146,27 @@ let parse_git_clone (doc : Keeper_toml_loader.toml_doc) : git_clone_config =
   { allowed_orgs; denied_repos; default_depth;
     clone_timeout_sec; push_timeout_sec; pr_create_timeout_sec }
 
-let project_root_from_executable () =
-  let raw_exe =
-    try Sys.executable_name with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ""
-  in
-  let exe =
-    if String.equal raw_exe "" then ""
-    else
-      try Unix.realpath raw_exe
-      with Unix.Unix_error _ | Sys_error _ | Invalid_argument _ ->
-        raw_exe
-  in
-  if String.equal exe "" then None
-  else
-    let rec walk_up dir =
-      let parent = Filename.dirname dir in
-      if String.equal parent dir then None
-      else if String.equal (Filename.basename dir) "_build" then Some parent
-      else walk_up parent
-    in
-    walk_up (Filename.dirname exe)
+let config_root_for_base_path ~base_path =
+  let inputs = Config_dir_resolver.inputs_from_env () in
+  let inputs = { inputs with env_base_path = Some base_path } in
+  let resolution = Config_dir_resolver.resolve_with inputs in
+  (resolution.Config_dir_resolver.config_root.path, resolution.warnings)
 
 let load ~base_path : (t, string) result =
-  let rel = "config/tool_policy.toml" in
-  let base_candidate = Filename.concat base_path rel in
-  let cwd_candidate = Filename.concat (Sys.getcwd ()) rel in
-  let exe_candidate = match project_root_from_executable () with
-    | Some root -> Some (Filename.concat root rel)
-    | None -> None
-  in
-  let candidates =
-    [ base_candidate; cwd_candidate ]
-    @ (match exe_candidate with Some c -> [ c ] | None -> [])
-    |> List.fold_left (fun acc x ->
-      if List.exists (String.equal x) acc then acc else x :: acc
-    ) []
-    |> List.rev
-  in
-  let rec try_candidates failures = function
-    | [] ->
-      let detail =
-        failures
-        |> List.rev_map (fun (p, m) -> Printf.sprintf "%s: %s" p m)
-        |> String.concat "; "
+  let config_root, resolution_warnings = config_root_for_base_path ~base_path in
+  let path = Filename.concat config_root "tool_policy.toml" in
+  match Safe_ops.read_file_safe path with
+  | Error msg ->
+      let warning_detail =
+        match resolution_warnings with
+        | [] -> ""
+        | warnings -> Printf.sprintf " warnings: %s" (String.concat " | " warnings)
       in
       Error
         (Printf.sprintf
-           "tool policy config not found in base directory or current working directory. %s" detail)
-    | path :: rest ->
-      (match Safe_ops.read_file_safe path with
-       | Ok content -> Ok (path, content)
-       | Error msg -> try_candidates ((path, msg) :: failures) rest)
-  in
-  match try_candidates [] candidates with
-  | Error _ as e -> e
-  | Ok (path, content) ->
+           "tool policy config not found at resolved config root %s (%s).%s"
+           path msg warning_detail)
+  | Ok content ->
     match Keeper_toml_loader.parse_toml content with
     | Error msg -> Error (Printf.sprintf "tool policy config parse error in %s: %s" path msg)
     | Ok doc ->

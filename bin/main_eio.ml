@@ -315,10 +315,10 @@ let guard_self_repo_base_path base_path =
   in
   if is_self_repo then begin
     Printf.eprintf
-      "[FATAL] --base-path points to the server's own source repo: %s\n\
+       "[FATAL] --base-path points to the server's own source repo: %s\n\
        (executable: %s)\n\
        Runtime state would pollute the repo. Use a workspace root instead:\n\
-       \  --base-path $ME_ROOT    (recommended)\n\
+       \  --base-path $MASC_BASE_PATH    (recommended)\n\
        \  --base-path ~/.masc     (alternative)\n\
        Or start via: sb mcp masc start\n"
       base_path abs_exe;

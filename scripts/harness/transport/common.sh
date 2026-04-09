@@ -79,8 +79,6 @@ ensure_server() {
   TRANSPORT_SERVER_LOG_FILE="$(harness_mktemp_file "masc-transport-server" ".log")"
 
   # shellcheck disable=SC2031
-  export ME_ROOT="${TRANSPORT_SERVER_BASE_PATH}"
-  # shellcheck disable=SC2031
   export MASC_BASE_PATH="${TRANSPORT_SERVER_BASE_PATH}"
   export MASC_GRPC_ENABLED="${MASC_GRPC_ENABLED:-1}"
   export MASC_GRPC_PORT

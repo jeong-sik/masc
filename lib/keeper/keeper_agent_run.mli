@@ -103,8 +103,7 @@ val adaptive_thinking_budget :
     @param priority Optional priority for scheduling
     @param is_retry When [true], replays current user message without persisting
     @param shared_context Optional shared OAS context for cross-turn state
-    @param event_bus Optional MASC event bus
-    @param boring_consecutive_turns_ref Mutable counter for idle-turn detection *)
+    @param event_bus Optional MASC event bus *)
 val run_turn :
      config:Room.config
   -> meta:Keeper_types.keeper_meta
@@ -133,6 +132,5 @@ val run_turn :
   -> ?is_retry:bool
   -> ?shared_context:Agent_sdk.Context.t
   -> ?event_bus:Agent_sdk.Event_bus.t
-  -> ?boring_consecutive_turns_ref:int ref
   -> unit
   -> (run_result, Oas.Error.sdk_error) result

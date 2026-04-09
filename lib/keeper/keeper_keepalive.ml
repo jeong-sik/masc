@@ -553,11 +553,20 @@ let maybe_recover_from_failing ~(ctx : _ context) ~(meta : keeper_meta) =
            | None -> false)
       | None -> false
     in
-    if sticky_manual_reconcile then
+    if sticky_manual_reconcile then begin
+      let reason_str =
+        match Keeper_registry.get ~base_path:ctx.config.base_path meta.name with
+        | Some entry ->
+            (match entry.last_failure_reason with
+             | Some reason -> Keeper_registry.failure_reason_to_string reason
+             | None -> "none")
+        | None -> "no_entry"
+      in
       Log.Keeper.warn
-        "heartbeat recovery: preserving %d turn failures for %s because manual reconcile is still required"
-        stale_turn_failures meta.name
-    else begin
+        "heartbeat recovery: auto-clearing %d turn failures for %s (reason=%s). Cursors already advanced — re-trigger risk is low."
+        stale_turn_failures meta.name reason_str
+    end;
+    begin
       Keeper_registry.reset_turn_failures
         ~base_path:ctx.config.base_path meta.name;
       ignore (Keeper_registry.dispatch_event
@@ -694,7 +703,6 @@ let run_keepalive_unified_turn
       ~(stop : bool Atomic.t)
       ~(proactive_warmup_elapsed : bool)
       ~(shared_context : Agent_sdk.Context.t)
-      ~(boring_consecutive_turns_ref : int ref)
   : keeper_meta
   =
   if not proactive_warmup_elapsed
@@ -715,26 +723,6 @@ let run_keepalive_unified_turn
           ~meta:meta_after_triage
           obs
       in
-      (* Boring-turn gate: once the non-reactive idle streak reaches the
-         configured threshold, skip the turn entirely. Reactive turns
-         (mentions, board events) always run — new stimulus resets the boring
-         counter. Lower streaks are handled inside before_turn_params
-         (graduated prompt escalation + tool_choice=None_ at >=3) to let the
-         LLM judge whether new work appeared. Crossing the configured threshold
-         is the deterministic hard exit — no LLM call, no token spend. *)
-      let boring_skip =
-        let streak = !boring_consecutive_turns_ref in
-        let is_reactive =
-          turn_decision.channel = Keeper_world_observation.Reactive
-        in
-        let boring_threshold = Keeper_config.keeper_boring_exit_threshold () in
-        if streak >= boring_threshold && not is_reactive then begin
-          Log.Keeper.info
-            "keeper:%s boring_consecutive=%d >= %d, skipping proactive turn (hard gate)"
-            meta_after_triage.name streak boring_threshold;
-          true
-        end else false
-      in
       let manual_reconcile_pending =
         keeper_requires_manual_reconcile
           ~base_path:ctx.config.base_path
@@ -743,7 +731,6 @@ let run_keepalive_unified_turn
       let should_run_turn =
         (not (Atomic.get stop))
         && turn_decision.should_run
-        && (not boring_skip)
         && (not manual_reconcile_pending)
       in
       let meta_after_observe =
@@ -759,6 +746,19 @@ let run_keepalive_unified_turn
            | Keeper_world_observation.Reactive -> "reactive"
            | Keeper_world_observation.Scheduled_autonomous -> "scheduled_autonomous")
           (String.concat "," turn_decision.reasons);
+      if (not should_run_turn) && (not manual_reconcile_pending) then
+        Log.Keeper.info
+          "keepalive turn not scheduled for %s: should_run=%b channel=%s reasons=[%s] since_last=%s idle_gate=%s"
+          meta_after_triage.name
+          turn_decision.should_run
+          (match turn_decision.channel with
+           | Keeper_world_observation.Reactive -> "reactive"
+           | Keeper_world_observation.Scheduled_autonomous -> "scheduled_autonomous")
+          (String.concat "," turn_decision.reasons)
+          (match turn_decision.since_last_scheduled_autonomous with
+           | Some s -> string_of_int s | None -> "-")
+          (match turn_decision.idle_gate_sec with
+           | Some s -> string_of_int s | None -> "-");
       if should_run_turn then
         Log.Keeper.info
           "keepalive turn scheduled for %s: channel=%s reasons=%s"
@@ -789,7 +789,6 @@ let run_keepalive_unified_turn
               ~channel:turn_decision.channel
               ~semaphore_wait_ms:semaphore_wait_ms
               ~shared_context
-              ~boring_consecutive_turns_ref
               ()
           with
           | Error err ->
@@ -1045,11 +1044,6 @@ let run_heartbeat_loop
      and tool-call counters are recreated inside run_turn and therefore
      do not accumulate for the full keeper lifecycle. *)
   let shared_context = Agent_sdk.Context.create () in
-  (* Inter-run boring-tool gate: persists across run_turn calls so
-     the anti-polling gate can detect heartbeat-level polling loops
-     (e.g., every heartbeat calls only masc_status then exits).
-     Intra-run counters reset on each run_turn; this ref does not. *)
-  let boring_consecutive_turns_ref = ref 0 in
   (* Mtime-based change detection for keeper meta disk reads.
      Avoids re-parsing the JSON file on every heartbeat cycle when
      no operator has modified it.  Initialized to 0.0 so the first
@@ -1141,7 +1135,6 @@ let run_heartbeat_loop
             ~stop
             ~proactive_warmup_elapsed
             ~shared_context
-            ~boring_consecutive_turns_ref
         in
         (* Turn failure threshold: registry tracks count (via unified_turn),
                  keepalive raises to terminate the fiber for supervisor restart. *)

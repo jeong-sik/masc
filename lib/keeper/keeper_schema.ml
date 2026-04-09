@@ -69,7 +69,7 @@ let keeper_schemas : tool_schema list = [
       ("properties", `Assoc [
         ("persona_name", `Assoc [
           ("type", `String "string");
-          ("description", `String "Persona handle under ME_ROOT/personas/<persona_name>/profile.json");
+          ("description", `String "Persona handle resolved from MASC_PERSONAS_DIR or the resolved config root personas/<persona_name>/profile.json");
         ]);
         ("name", `Assoc [
           ("type", `String "string");

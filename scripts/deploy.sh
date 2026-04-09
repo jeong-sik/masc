@@ -20,8 +20,8 @@ RELEASE_DIR="$REPO_DIR/releases"
 PID_FILE="$REPO_DIR/masc-prod.pid"
 PROD_PORT=8945
 HEALTH_URL="http://127.0.0.1:$PROD_PORT/health"
-BASE_PATH="${MASC_BASE_PATH:-${ME_ROOT:-${HOME}/me}}"
-LOG_DIR="${ME_ROOT:-${HOME}/me}/logs"
+BASE_PATH="${MASC_BASE_PATH:-${HOME}/me}"
+LOG_DIR="${BASE_PATH}/logs"
 LAUNCHD_LABEL="com.jeong-sik.masc-mcp-prod"
 LAUNCHD_PLIST="$HOME/Library/LaunchAgents/${LAUNCHD_LABEL}.plist"
 

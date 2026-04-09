@@ -9,6 +9,54 @@
     Strips known prefixes ("error: ", "tool_error: ") before JSON parsing
     so prefixed outputs like ["error: {\"ok\":false,\"error\":\"msg\"}"]
     yield the actual error key instead of "parse_error". *)
+let normalize_failure_text (text : string) : string =
+  let trimmed = String.trim text in
+  let lowered = String.lowercase_ascii trimmed in
+  let prefix_rules =
+    [
+      ("path_not_in_allowed_paths:", "path_not_in_allowed_paths");
+      ("path_not_found_under_allowed_roots:", "path_not_found_under_allowed_roots");
+      ("path_outside_project_root:", "path_outside_project_root");
+      ("allowed_paths_normalized_empty:", "allowed_paths_normalized_empty");
+      ("ambiguous_relative_read_path:", "ambiguous_relative_read_path");
+      ("cwd_not_directory:", "cwd_not_directory");
+      ("path blocked:", "path_blocked");
+      ("path syntax blocked:", "path_syntax_blocked");
+      ("query looks like it may contain secrets", "query_secret_like");
+      ("web search rate limit exceeded", "web_search_rate_limit");
+      ("all web search providers failed", "web_search_provider_failure");
+      ("query must be at most", "query_too_long");
+      ("query is required", "query_required");
+    ]
+  in
+  match List.find_opt (fun (prefix, _category) ->
+    String.starts_with ~prefix lowered
+  ) prefix_rules with
+  | Some (_, category) -> category
+  | None when trimmed = "" -> "empty_output"
+  | None -> trimmed
+
+let classify_process_status (json : Yojson.Safe.t) : string option =
+  match Yojson.Safe.Util.member "status" json with
+  | `Assoc _ as status ->
+    let kind = Safe_ops.json_string_opt "kind" status |> Option.value ~default:"unknown" in
+    let op = Safe_ops.json_string_opt "op" json |> Option.value ~default:"tool" in
+    begin match kind with
+    | "timeout" ->
+      Some (Printf.sprintf "%s_timeout" op)
+    | "signaled" ->
+      let signal = Safe_ops.json_int ~default:(-1) "signal" status in
+      Some (Printf.sprintf "%s_signaled_%d" op signal)
+    | "stopped" ->
+      let signal = Safe_ops.json_int ~default:(-1) "signal" status in
+      Some (Printf.sprintf "%s_stopped_%d" op signal)
+    | "exit" ->
+      let code = Safe_ops.json_int ~default:0 "code" status in
+      if code = 0 then None else Some (Printf.sprintf "%s_exit_%d" op code)
+    | _ -> None
+    end
+  | _ -> None
+
 let classify_failure_output (output : string) : string =
   if String.length output = 0 then "empty_output"
   else
@@ -24,16 +72,92 @@ let classify_failure_output (output : string) : string =
     in
     match Yojson.Safe.from_string json_str with
     | j ->
-      Safe_ops.json_string_opt "error" j
-      |> Option.value ~default:"unknown_error"
+      (match Safe_ops.json_string_opt "error" j |> Option.map String.trim with
+       | Some "command_blocked_readonly" ->
+         let category =
+           Safe_ops.json_string_opt "category" j |> Option.value ~default:"unknown"
+         in
+         Printf.sprintf "command_blocked_readonly:%s" category
+       | Some error when error <> "" -> normalize_failure_text error
+       | _ ->
+         match Safe_ops.json_string_opt "message" j |> Option.map String.trim with
+         | Some message when message <> "" -> normalize_failure_text message
+         | _ ->
+           classify_process_status j
+           |> Option.value ~default:"unknown_error")
     | exception Yojson.Json_error _ -> "parse_error"
+
+let bucket_key record field ~default =
+  Safe_ops.json_string_opt field record |> Option.value ~default
+
+let thinking_mode_of_record record =
+  match record with
+  | `Assoc fields ->
+    (match List.assoc_opt "thinking_enabled" fields with
+     | Some (`Bool true) -> "enabled"
+     | Some (`Bool false) -> "disabled"
+     | _ -> "unknown")
+  | _ -> "unknown"
+
+let hour_key_of_record record =
+  let hour_of_unix ts =
+    let tm = Unix.gmtime ts in
+    Printf.sprintf "%04d-%02d-%02dT%02d"
+      (tm.Unix.tm_year + 1900)
+      (tm.Unix.tm_mon + 1)
+      tm.Unix.tm_mday
+      tm.Unix.tm_hour
+  in
+  match record with
+  | `Assoc fields ->
+    (match List.assoc_opt "ts" fields with
+     | Some (`Float f) -> hour_of_unix f
+     | Some (`Int i) -> hour_of_unix (Float.of_int i)
+     | Some (`String s) when String.length s >= 13 -> String.sub s 0 13
+     | Some (`String s) -> s
+     | _ -> "unknown")
+  | _ -> "unknown"
+
+let update_rate_table table key ok =
+  let key = if String.trim key = "" then "unknown" else key in
+  let calls, successes =
+    match Hashtbl.find_opt table key with
+    | Some counts -> counts
+    | None ->
+      let counts = (ref 0, ref 0) in
+      Hashtbl.replace table key counts;
+      counts
+  in
+  incr calls;
+  if ok then incr successes
+
+let render_rate_table ~field table =
+  Hashtbl.fold (fun name (c, s) acc ->
+    let calls = !c in
+    let successes = !s in
+    let pct =
+      if calls > 0
+      then Float.of_int successes /. Float.of_int calls *. 100.0
+      else 0.0
+    in
+    (calls, `Assoc [
+      (field, `String name);
+      ("calls", `Int calls);
+      ("success_pct", `Float pct);
+    ]) :: acc
+  ) table []
+  |> List.sort (fun (a, _) (b, _) -> Int.compare b a)
+  |> List.map snd
 
 let aggregate ?(n = 5000) () : Yojson.Safe.t =
   let records = Keeper_tool_call_log.read_recent ~n () in
   if records = [] then
-    `Assoc [("total", `Int 0); ("success_rate", `Float 0.0);
+    `Assoc [("total", `Int 0); ("success", `Int 0); ("failure", `Int 0);
+            ("success_rate", `Float 0.0);
             ("by_tool", `List []); ("by_keeper", `List []);
-            ("failure_categories", `List [])]
+            ("by_model", `List []); ("by_lane", `List []);
+            ("by_thinking_mode", `List []); ("by_tool_choice", `List []);
+            ("failure_categories", `List []); ("hourly_trend", `List [])]
   else
   let total = ref 0 in
   let success = ref 0 in
@@ -46,6 +170,19 @@ let aggregate ?(n = 5000) () : Yojson.Safe.t =
   (* keeper -> (calls, successes) *)
   let keeper_stats : (string, int ref * int ref) Hashtbl.t =
     Hashtbl.create 16
+  in
+  (* model/lane/thinking/tool_choice -> (calls, successes) *)
+  let model_stats : (string, int ref * int ref) Hashtbl.t =
+    Hashtbl.create 16
+  in
+  let lane_stats : (string, int ref * int ref) Hashtbl.t =
+    Hashtbl.create 8
+  in
+  let thinking_mode_stats : (string, int ref * int ref) Hashtbl.t =
+    Hashtbl.create 4
+  in
+  let tool_choice_stats : (string, int ref * int ref) Hashtbl.t =
+    Hashtbl.create 8
   in
   (* error category -> count *)
   let failure_cats : (string, int ref) Hashtbl.t = Hashtbl.create 32 in
@@ -90,12 +227,7 @@ let aggregate ?(n = 5000) () : Yojson.Safe.t =
     in
     if ok then incr success;
     (* hourly trend bucketing *)
-    let hour_key =
-      Safe_ops.json_string_opt "ts" record
-      |> Option.map (fun ts ->
-        if String.length ts >= 13 then String.sub ts 0 13 else ts)
-      |> Option.value ~default:"unknown"
-    in
+    let hour_key = hour_key_of_record record in
     let (hc, hs) =
       match Hashtbl.find_opt hourly_trend hour_key with
       | Some v -> v
@@ -124,6 +256,11 @@ let aggregate ?(n = 5000) () : Yojson.Safe.t =
         Hashtbl.replace keeper_stats keeper v; v
     in
     incr kc; if ok then incr ks;
+    update_rate_table model_stats (bucket_key record "model" ~default:"unknown") ok;
+    update_rate_table lane_stats (bucket_key record "lane" ~default:"unknown") ok;
+    update_rate_table thinking_mode_stats (thinking_mode_of_record record) ok;
+    update_rate_table tool_choice_stats
+      (bucket_key record "tool_choice" ~default:"unknown") ok;
     (* failure category *)
     if not ok then begin
       let output =
@@ -172,21 +309,15 @@ let aggregate ?(n = 5000) () : Yojson.Safe.t =
     |> List.map snd
   in
   let by_keeper =
-    Hashtbl.fold (fun name (c, s) acc ->
-      let calls = !c in
-      let successes = !s in
-      let pct = if calls > 0
-        then Float.of_int successes /. Float.of_int calls *. 100.0
-        else 0.0
-      in
-      (calls, `Assoc [
-        ("name", `String name);
-        ("calls", `Int calls);
-        ("success_pct", `Float pct);
-      ]) :: acc
-    ) keeper_stats []
-    |> List.sort (fun (a, _) (b, _) -> Int.compare b a)
-    |> List.map snd
+    render_rate_table ~field:"name" keeper_stats
+  in
+  let by_model = render_rate_table ~field:"name" model_stats in
+  let by_lane = render_rate_table ~field:"name" lane_stats in
+  let by_thinking_mode =
+    render_rate_table ~field:"name" thinking_mode_stats
+  in
+  let by_tool_choice =
+    render_rate_table ~field:"name" tool_choice_stats
   in
   let failure_categories =
     Hashtbl.fold (fun cat r acc ->
@@ -220,6 +351,10 @@ let aggregate ?(n = 5000) () : Yojson.Safe.t =
     ("success_rate", `Float (Float.round (rate *. 100.0) /. 100.0));
     ("by_tool", `List by_tool);
     ("by_keeper", `List by_keeper);
+    ("by_model", `List by_model);
+    ("by_lane", `List by_lane);
+    ("by_thinking_mode", `List by_thinking_mode);
+    ("by_tool_choice", `List by_tool_choice);
     ("failure_categories", `List failure_categories);
     ("hourly_trend", `List hourly);
   ]

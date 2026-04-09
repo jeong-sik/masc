@@ -261,7 +261,6 @@ let run_turn
       ?(is_retry = false)
       ?shared_context
       ?event_bus
-      ?boring_consecutive_turns_ref
       ()
   : (run_result, Oas.Error.sdk_error) result
   =
@@ -887,16 +886,6 @@ let run_turn
     | Some r -> r
     | None -> ref Agent_sdk.Tool_op.Keep_all
   in
-  (* Boring-tool gate: shared counter between after_turn (writer) and
-     before_turn_params (reader). Tracks consecutive turns where only
-     boring tools (status/heartbeat/tasks_list) were called.
-     When provided externally (from keepalive loop), persists across
-     run_turn calls to detect inter-run polling patterns. *)
-  let boring_consecutive_turns =
-    match boring_consecutive_turns_ref with
-    | Some r -> r
-    | None -> ref 0
-  in
   let base_hooks =
     Keeper_hooks_oas.make_hooks
       ~config
@@ -906,7 +895,6 @@ let run_turn
       ~generation
       ?max_cost_usd
       ?trajectory_acc
-      ~boring_consecutive_turns
       ()
   in
   (* BM25 Tool_selector removed: discovery mode uses core + keeper_tool_search.
@@ -1230,78 +1218,6 @@ let run_turn
                        max_turns)
                 else ctx
               in
-              (* Boring-tool gate: graduated response to consecutive turns
-           with only non-productive tools (status/heartbeat/tasks_list).
-           This catches the polling loop that bypasses OAS's exact-fingerprint
-           idle detection when keepers alternate boring tools.
-
-           Escalation levels — respect LLM judgment while constraining waste:
-           Level 1 (>=2): context warning — LLM decides.
-           Level 2 (>=3): tool_choice=None_ (no tool calls) + idle directive.
-             LLM still runs but can only produce text. Prompt directs concise
-             idle report. This respects non-deterministic judgment: if new work
-             appeared in context, the LLM can describe it and the next turn
-             (with boring_consecutive reset) will have tools again.
-           Level 3 (>=4): tool_choice=None_ + boring tools stripped + stronger
-             directive. LLM budget is not reduced — quality over cost.
-           Level 4 (>=6): same constraints + explicit exit signal.
-             The prompt tells the LLM this is the last chance to act. *)
-              let boring_streak = !boring_consecutive_turns in
-              let ctx =
-                if boring_streak >= 6
-                then
-                  append_ctx
-                    ctx
-                    (Printf.sprintf
-                       "[IDLE EXIT] %d consecutive idle turns. You have had no \
-                        productive work for %d turns. If you have genuinely new work \
-                        to report, describe it now in under 30 tokens. Otherwise, \
-                        output a single sentence: your current status and that you \
-                        are idle. This is your final turn before the session pauses."
-                       boring_streak boring_streak)
-                else if boring_streak >= 4
-                then
-                  append_ctx
-                    ctx
-                    (Printf.sprintf
-                       "[IDLE — NO TOOLS] %d consecutive idle turns. Tool calls are \
-                        disabled. You may only respond with text. If there is new work \
-                        in your context (board posts, mentions, tasks), describe what \
-                        you would do in under 100 tokens. If nothing has changed, \
-                        state your idle status in one sentence."
-                       boring_streak)
-                else if boring_streak >= 3
-                then
-                  append_ctx
-                    ctx
-                    (Printf.sprintf
-                       "[IDLE — TEXT ONLY] %d consecutive turns with no productive \
-                        tool calls. Tool calls are now disabled for this turn. \
-                        Review your context: has anything new appeared (board posts, \
-                        mentions, claimed tasks)? If yes, describe what action you \
-                        would take and why — tools will be restored next turn. \
-                        If nothing new, reply in under 50 tokens with your idle \
-                        status. Do not apologize or explain at length."
-                       boring_streak)
-                else if boring_streak >= 2
-                then
-                  append_ctx
-                    ctx
-                    "[POLLING DETECTED] 2 consecutive turns with only observation \
-                     tool calls (status/heartbeat/task-list). Check if there is \
-                     genuinely new work. If not, use keeper_stay_silent or respond \
-                     briefly. Next turn without productive action will disable tool \
-                     calls."
-                else ctx
-              in
-              let all_allowed =
-                if boring_streak >= 4
-                then
-                  List.filter
-                    (fun name -> not (Keeper_tool_registry.is_boring_tool name))
-                    all_allowed
-                else all_allowed
-              in
               let safe_last_turn_tools =
                 Keeper_tool_policy.last_turn_safe_tool_names ()
               in
@@ -1347,24 +1263,37 @@ let run_turn
                 else all_allowed
               in
               let tool_filter = Agent_sdk.Guardrails.AllowList all_allowed in
-              (* Tool choice: graduated by keeper state.
+              (* Tool choice: graduated by turn budget.
            Normal turns: tool_choice=Any forces tool call format (deterministic
            at API level). WHICH tool is called is non-deterministic (model decides).
            Last turn: Auto allows [STATE] text block.
-           Boring >= 3: None_ disables tool calls entirely. The LLM can only
-           produce text — respecting its judgment to describe context or idle
-           status without consuming tool execution budget. Tools are restored
-           when boring_consecutive resets to 0 (i.e., after a productive turn).
            See #5566 for tool_choice=Any rationale. *)
               let tool_choice =
-                if boring_streak >= 3
-                then Some Agent_sdk.Types.None_  (* idle: text-only response *)
-                else if is_last_turn || List.length all_allowed = 0
+                if is_last_turn || List.length all_allowed = 0
                 then current_params.tool_choice (* last turn: Auto for [STATE] block *)
                 else Some Agent_sdk.Types.Any (* all other turns: force tool use *)
               in
+              let lane =
+                if is_retry then "retry"
+                else (
+                  match tool_choice with
+                  | Some Agent_sdk.Types.Any -> "tool_required"
+                  | Some Agent_sdk.Types.None_ -> "tool_disabled"
+                  | _ -> "tool_optional")
+              in
+              Keeper_tool_call_log.set_turn_context
+                ~keeper_name:meta.name
+                ~lane
+                ?tool_choice:(Option.map
+                  (fun choice ->
+                    Yojson.Safe.to_string
+                      (Agent_sdk.Types.tool_choice_to_json choice))
+                  tool_choice)
+                ~thinking_enabled:(Keeper_config.keeper_enable_thinking ())
+                ?thinking_budget:current_params.thinking_budget
+                ();
               (* Tool disclosure telemetry: emitted after all allow-list rewrites
-           (boring-tool gate, last-turn intersect, max_tools cap) so that
+           (last-turn intersect, max_tools cap) so that
            final_visible and hook_ms reflect the actual state sent to AdjustParams.
            Capture now once so ts_unix and hook_ms are consistent. *)
               (let now = Time_compat.now () in
@@ -1506,13 +1435,6 @@ let run_turn
             ~enable_thinking:(Keeper_config.keeper_enable_thinking ())
            ?oas_checkpoint:raw_oas_checkpoint
            ?event_bus
-           ~exit_condition:(fun _turn ->
-             (* OAS checks this predicate before each internal turn.
-                When boring_consecutive >= threshold, the keeper has had no
-                productive work — exit Agent.run early to avoid further
-                token spend. Threshold configurable via Runtime_params
-                "keeper.turn.boring_exit_threshold" (default: 8). *)
-             !boring_consecutive_turns >= Keeper_config.keeper_boring_exit_threshold ())
            ())
      with
      | Error e -> Error e

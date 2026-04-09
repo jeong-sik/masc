@@ -76,20 +76,11 @@ let test_get_bool_default_false () =
   let result = Env_config.get_bool ~default:false "NONEXISTENT_VAR_XYZ_12345" in
   check bool "default false" false result
 
-let test_me_root_prefers_env () =
-  with_env "ME_ROOT" "/tmp/masc-custom-root" (fun () ->
-    check (option string) "me_root_opt" (Some "/tmp/masc-custom-root") (Env_config.me_root_opt ());
-    check (result string string) "me_root_result" (Ok "/tmp/masc-custom-root")
-      (Env_config.me_root_result ());
-    check string "me_root" "/tmp/masc-custom-root" (Env_config.me_root ()))
-
-let test_me_root_prefers_explicit_workspace_root () =
-  with_env "MASC_WORKSPACE_ROOT" "/tmp/masc-workspace-root" (fun () ->
-    with_env "ME_ROOT" "" (fun () ->
-      check (option string) "me_root_opt explicit" (Some "/tmp/masc-workspace-root") (Env_config.me_root_opt ());
-      check (result string string) "me_root_result explicit"
-        (Ok "/tmp/masc-workspace-root") (Env_config.me_root_result ());
-      check string "me_root explicit" "/tmp/masc-workspace-root" (Env_config.me_root ())))
+let test_base_path_prefers_env () =
+  with_env "MASC_BASE_PATH" "/tmp/masc-custom-root" (fun () ->
+    check (option string) "base_path_opt" (Some "/tmp/masc-custom-root")
+      (Env_config.base_path_opt ());
+    check string "base_path" "/tmp/masc-custom-root" (Env_config.base_path ()))
 
 let test_masc_http_base_url_prefers_env_and_trims () =
   with_env "MASC_HTTP_BASE_URL" "http://example.test:9911/" (fun () ->
@@ -108,10 +99,9 @@ let test_masc_http_base_url_uses_explicit_host_and_port () =
         check string "base url from host+port" "http://masc.example.test:7777" (Env_config.masc_http_base_url ()))))
 
 let test_sb_path_result_missing_is_error () =
-  with_env "MASC_WORKSPACE_ROOT" "" (fun () ->
-    with_env "ME_ROOT" "" (fun () ->
-      check bool "sb path result is error" true
-        (match Env_config.sb_path_result () with Error _ -> true | Ok _ -> false)))
+  with_env "MASC_BASE_PATH" "" (fun () ->
+    check bool "sb path result is error" true
+      (match Env_config.sb_path_result () with Error _ -> true | Ok _ -> false))
 
 let test_masc_host_prefers_primary_over_deprecated () =
   with_env "MASC_HOST" "primary.example.test" (fun () ->
@@ -396,8 +386,7 @@ let () =
       test_case "default false" `Quick test_get_bool_default_false;
     ];
     "path_helpers", [
-      test_case "me_root prefers env" `Quick test_me_root_prefers_env;
-      test_case "me_root prefers explicit workspace root" `Quick test_me_root_prefers_explicit_workspace_root;
+      test_case "base_path prefers env" `Quick test_base_path_prefers_env;
       test_case "base url prefers env and trims" `Quick test_masc_http_base_url_prefers_env_and_trims;
       test_case "base url uses explicit host+port" `Quick test_masc_http_base_url_uses_explicit_host_and_port;
       test_case "sb_path_result missing is error" `Quick test_sb_path_result_missing_is_error;

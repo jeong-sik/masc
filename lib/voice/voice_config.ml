@@ -84,10 +84,6 @@ let repo_voice_config_path_opt () =
   in
   Some (Filename.concat root ".masc/voice_config.json")
 
-let me_root_voice_config_path_opt () =
-  trim_opt (Env_config_core.me_root_opt ())
-  |> Option.map (fun root -> Filename.concat root ".masc/voice_config.json")
-
 let fallback_voice_config_path () =
   let root =
     match Env_config_core.base_path_opt () with
@@ -100,7 +96,6 @@ let config_path_candidates () =
   [
     base_path_voice_config_path_opt ();
     repo_voice_config_path_opt ();
-    me_root_voice_config_path_opt ();
     Some (fallback_voice_config_path ());
   ]
   |> List.filter_map Fun.id

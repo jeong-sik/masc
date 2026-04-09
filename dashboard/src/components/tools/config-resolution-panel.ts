@@ -32,8 +32,6 @@ function sourceLabel(source: string): string {
       return 'exe fallback'
     case 'cwd':
       return 'cwd fallback'
-    case 'legacy_me_root':
-      return 'legacy fallback'
     case 'input':
       return 'input'
     case 'workspace':

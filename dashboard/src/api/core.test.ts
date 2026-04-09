@@ -41,6 +41,26 @@ describe('post', () => {
 })
 
 describe('get bootstrap warm-up mapping', () => {
+  it('preserves upstream abort signals instead of reporting them as timeouts', async () => {
+    const fetchMock = vi.fn().mockImplementation((_path: string, init?: RequestInit) => (
+      new Promise((_resolve, reject) => {
+        const signal = init?.signal as AbortSignal | undefined
+        signal?.addEventListener('abort', () => {
+          reject(new DOMException('superseded request', 'AbortError'))
+        })
+      })
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const controller = new AbortController()
+    const request = get('/api/v1/dashboard/namespace-truth', { signal: controller.signal })
+    controller.abort()
+
+    await expect(request).rejects.toMatchObject({
+      name: 'AbortError',
+    })
+  })
+
   it('maps dashboard namespace-truth not-initialized errors to initializing payloads', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response('{"error":"not initialized"}', {

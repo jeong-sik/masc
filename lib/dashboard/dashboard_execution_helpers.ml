@@ -307,19 +307,15 @@ let extract_persona_name (agent_name : string) : string =
   s
 
 (** Try loading agent profile from local persona profile.json.
-    Path: $ME_ROOT/personas/<persona_name>/profile.json *)
+    Path: resolved personas root / <persona_name> / profile.json *)
 let load_persona_profile (persona_name : string) : agent_profile option =
-  let me_root =
-    try Env_config.me_root ()
-    with Eio.Cancel.Cancelled _ as e -> raise e | _ -> (
-      match Sys.getenv_opt "HOME" with
-      | Some home -> Filename.concat home "me"
-      | None -> "/tmp")
-  in
   let path =
-    Filename.concat
-      (Filename.concat (Filename.concat me_root "personas") persona_name)
-      "profile.json"
+    match Config_dir_resolver.personas_dir_opt () with
+    | Some personas_root ->
+        Filename.concat
+          (Filename.concat personas_root persona_name)
+          "profile.json"
+    | None -> ""
   in
   if not (Sys.file_exists path) then None
   else

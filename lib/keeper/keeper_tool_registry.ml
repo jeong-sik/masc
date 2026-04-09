@@ -118,18 +118,44 @@ let is_effectively_read_only_tool (name : string) : bool =
 let has_mutating_side_effect (name : string) : bool =
   not (is_effectively_read_only_tool name)
 
+(* ── Reconcile-safe tools (mutating but idempotent enough) ─── *)
+
+(** Tools that produce side effects but are safe to leave un-reconciled
+    after a transient failure or timeout.  Board mutations (post, comment,
+    vote) are not strictly idempotent — retries may create duplicate
+    content — but duplicate posts are an acceptable cost vs. a permanently
+    stuck keeper.  When ALL committed tools in a failed turn belong to
+    this set AND the failure is transient, manual_reconcile is skipped.
+
+    Read-only tools (board_list, board_get) are excluded: they never
+    appear in [committed_mutating_tools] so including them here would
+    be misleading dead entries. *)
+let reconcile_safe_tools =
+  [ "keeper_board_post"; "keeper_board_comment";
+    "keeper_board_vote"; "keeper_board_comment_vote" ]
+
+let reconcile_safe_set : (string, unit) Hashtbl.t =
+  let tbl = Hashtbl.create (List.length reconcile_safe_tools) in
+  List.iter (fun name -> Hashtbl.replace tbl name ()) reconcile_safe_tools;
+  tbl
+
+let is_reconcile_safe_tool (name : string) : bool =
+  Hashtbl.mem reconcile_safe_set name
+
+let all_tools_reconcile_safe (names : string list) : bool =
+  names <> [] && List.for_all is_reconcile_safe_tool names
+
 (* ── Boring tools (non-productive observation/polling) ─────── *)
 
 (** Tools that gather status but produce no side effects.
     Calling only these tools across consecutive turns indicates a
-    polling loop.  This shared classification is used both by the
-    boring-tool gate in [Keeper_hooks_oas] to detect and break such
-    loops, and by allowlist gating through [is_boring_tool].
+    polling loop. This shared classification is still useful for
+    prompt shaping, telemetry, and tool-diversity heuristics.
 
     A tool is "boring" if calling it N times yields the same
     information as calling it once, and it mutates nothing.
     [keeper_stay_silent] is included: it is a no-op by design
-    and must not reset the boring-turn counter.
+    and should not be treated as productive work.
     Contrast with [keeper_fs_read] which reads new content, or
     [keeper_board_post] which creates artifacts. *)
 let boring_tools =

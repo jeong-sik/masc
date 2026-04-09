@@ -1,15 +1,19 @@
 {
   "default_models": [
     "glm:auto",
-    "ollama:auto"
+    "ollama:qwen3.5:35b-a3b-coding-nvfp4",
+    "ollama:qwen3.5:35b-a3b-nvfp4"
   ],
   "local_only_models": [
-    "ollama:auto"
+    "ollama:qwen3.5:35b-a3b-coding-nvfp4",
+    "ollama:qwen3.5:35b-a3b-nvfp4"
   ],
   "keeper_unified_models": [
-    "ollama:qwen3.5:27b-nvfp4"
+    "glm:auto",
+    "ollama:qwen3.5:35b-a3b-coding-nvfp4",
+    "ollama:qwen3.5:35b-a3b-nvfp4"
   ],
-  "_comment": "default: GLM primary + Ollama fallback. local_only: Ollama only (no cloud). keeper_unified: specific model for unified turns. OAS discovery resolves ollama:auto via /api/tags.",
+  "_comment": "GLM first for keeper_unified. local_only = 35B-A3B coding first, general fallback. 27B replaced by 35B-A3B (MoE, 3B active).",
   "tool_rerank_temperature": 0.0,
   "tool_rerank_max_tokens": 200,
   "keeper_unified_temperature": 0.2,

@@ -5,7 +5,6 @@ type source =
   | Invalid_env
   | Exe_relative
   | Cwd
-  | Legacy_me_root
   | Missing
 
 type status =
@@ -37,9 +36,6 @@ type inputs = {
   env_config_dir : string option;
   env_personas_dir : string option;
   env_home : string option;
-  env_me_root : string option;
-  env_workspace_root : string option;
-  env_dune_sourceroot : string option;
 }
 
 let trim_opt = Env_config_core.trim_opt
@@ -59,7 +55,6 @@ let source_to_string = function
   | Invalid_env -> "invalid_env"
   | Exe_relative -> "exe_relative"
   | Cwd -> "cwd"
-  | Legacy_me_root -> "legacy_me_root"
   | Missing -> "missing"
 
 let status_to_string = function
@@ -131,18 +126,6 @@ let path_from_local_masc (inputs : inputs) =
       let candidate = Filename.concat (Filename.concat base_path ".masc") "config" in
       if config_signature_exists candidate then Some candidate else None
 
-let legacy_me_root_candidates (inputs : inputs) =
-  [ inputs.env_me_root; inputs.env_workspace_root; inputs.env_dune_sourceroot ]
-  |> List.filter_map trim_opt
-  |> List.map (fun root ->
-         Filename.concat
-           (Filename.concat root "workspace/yousleepwhen/masc-mcp")
-           "config")
-
-let path_from_legacy_me_root inputs =
-  legacy_me_root_candidates inputs
-  |> List.find_opt config_signature_exists
-
 let default_missing_root (inputs : inputs) =
   match trim_opt inputs.env_home with
   | Some home -> Filename.concat home ".masc/config"
@@ -173,18 +156,11 @@ let config_root_resolution (inputs : inputs) =
                   match path_from_executable ~cwd:inputs.cwd inputs.executable_name with
                   | Some path -> ({ path; exists = true; source = Exe_relative }, [])
                   | None ->
-                      match path_from_legacy_me_root inputs with
-                      | Some path ->
-                          ( { path; exists = true; source = Legacy_me_root },
-                            [ Printf.sprintf
-                                "Using legacy config fallback from ME_ROOT-style path: %s"
-                                path ] )
-                      | None ->
-                          let path = default_missing_root inputs in
-                          ( { path; exists = false; source = Missing },
-                            [ Printf.sprintf
-                                "Unable to resolve config directory; set MASC_CONFIG_DIR (current fallback candidate: %s)"
-                                path ] )
+                      let path = default_missing_root inputs in
+                      ( { path; exists = false; source = Missing },
+                        [ Printf.sprintf
+                            "Unable to resolve config directory; set MASC_CONFIG_DIR (current fallback candidate: %s)"
+                            path ] )
 
 let child_item (root : path_item) name =
   let path = Filename.concat root.path name in
@@ -216,9 +192,6 @@ let inputs_from_env () =
     env_config_dir = Env_config_core.config_dir_opt ();
     env_personas_dir = Env_config_core.personas_dir_opt ();
     env_home = Sys.getenv_opt "HOME";
-    env_me_root = Env_config_core.me_root_opt ();
-    env_workspace_root = Env_config_core.me_root_opt ();
-    env_dune_sourceroot = Sys.getenv_opt "DUNE_SOURCEROOT";
   }
 
 let resolve_with inputs =
@@ -240,7 +213,7 @@ let resolve_with inputs =
     match config_root.source with
     | Invalid_env -> Invalid_env_status
     | Missing -> Missing_status
-    | Env | Local_masc | Home_masc | Exe_relative | Cwd | Legacy_me_root ->
+    | Env | Local_masc | Home_masc | Exe_relative | Cwd ->
         if warnings = [] then Ready else Warn
   in
   { status; warnings; config_root; cascade; prompts; keepers; personas }
@@ -284,29 +257,14 @@ let personas_dirs_with inputs resolution =
     if resolution.personas.exists then [ resolution.personas.path ] else []
   in
   let explicit_personas_dir_override = trim_opt inputs.env_personas_dir in
-  (* inputs.env_personas_dir is populated only from MASC_PERSONAS_DIR, so
-     only that explicit override becomes sole-source. A generic config-root
-     env override still leaves HOME/base personas discovery enabled. *)
+  (* Persona resolution is intentionally single-source:
+     - MASC_PERSONAS_DIR when explicitly set
+     - otherwise the resolved config root's personas/
+     Hidden secondary searches (~/.masc/personas, $MASC_BASE_PATH/.masc/personas)
+     make the dashboard/config panel lie about the actual source of truth. *)
   match explicit_personas_dir_override with
   | Some _ -> dedupe_paths primary
-  | _ ->
-    let extra_candidates =
-      (* $HOME/.masc/personas *)
-      (match trim_opt inputs.env_home with
-       | Some home ->
-           let p = Filename.concat home ".masc/personas" in
-           if existing_dir p then [ p ] else []
-       | None -> [])
-      @
-      (* $MASC_BASE_PATH/.masc/personas *)
-      (match trim_opt inputs.env_base_path with
-       | Some base ->
-           let base = absolute_path_from ~cwd:inputs.cwd base in
-           let p = Filename.concat (Filename.concat base ".masc") "personas" in
-           if existing_dir p then [ p ] else []
-       | None -> [])
-    in
-    dedupe_paths (primary @ extra_candidates)
+  | None -> dedupe_paths primary
 
 let personas_dirs () =
   let resolution = resolve () in

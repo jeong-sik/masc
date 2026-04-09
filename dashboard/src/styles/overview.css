@@ -2,54 +2,8 @@
 
 /* ── Overview / Home (merged from overview.css) ────────── */
 
-@utility situation-banner--ok { border-left-color: var(--ok); }
-@utility situation-banner--warn { border-left-color: var(--gold, var(--ff-gold)); }
-@utility situation-banner--bad { border-left-color: var(--bad); }
-
-@utility attention-spotlight__card {
-  animation: fadeSlide 0.3s ease both;
-  &.ok { border-color: var(--ok-30); }
-  &.warn { border-color: var(--warn-30); }
-  &.bad { border-color: var(--bad-30); }
-  &.ok .attention-spotlight__bar { background: var(--agent-working); }
-  &.warn .attention-spotlight__bar { background: var(--agent-busy); }
-  &.bad .attention-spotlight__bar { background: var(--bad); }
-}
-
 @utility narrative-timeline {
   scrollbar-width: thin;
   scrollbar-color: rgba(138, 163, 211, 0.15) transparent;
 }
 
-@utility narrative-event__raw {
-  & summary { cursor: pointer; color: var(--text-muted); font-size: var(--fs-2xs); }
-  & span {
-    display: block;
-    color: var(--text-muted);
-    font-size: var(--fs-xs);
-    padding: 4px 8px;
-    background: var(--white-2);
-    margin-top: 2px;
-    line-height: 1.4;
-  }
-}
-
-
-@utility hot-session-card__context {
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  color: var(--text-muted);
-  font-size: var(--fs-sm);
-  line-height: 1.45;
-  margin-top: 2px;
-}
-
-@utility agent-pulse-card--working { border-left: 2px solid var(--ok); }
-@utility agent-pulse-card--watching { border-left: 2px solid var(--accent); }
-@utility agent-pulse-card--quiet { border-left: 2px solid var(--text-muted, var(--text-slate)); }
-@utility agent-pulse-card--offline {
-  border-left: 2px solid var(--text-muted, var(--text-slate));
-  opacity: 0.4;
-}

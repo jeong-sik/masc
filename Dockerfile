@@ -34,7 +34,6 @@ COPY config/cascade.json /app/config/cascade.json
 
 ENV PORT=8080
 ENV MASC_BASE_PATH=/app
-ENV MASC_WORKSPACE_ROOT=/app
 ENV MASC_CONFIG_DIR=/app/config
 
 EXPOSE 8080

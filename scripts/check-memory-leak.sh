@@ -196,7 +196,6 @@ echo "[memory-leak] port=${PORT}" >&2
 echo "[memory-leak] base_path=${BASE_PATH}" >&2
 
 (
-  export ME_ROOT="${BASE_PATH}"
   export MASC_BASE_PATH="${BASE_PATH}"
   export MASC_STORAGE_TYPE="filesystem"
   export MASC_AUTONOMY_ENABLED="0"

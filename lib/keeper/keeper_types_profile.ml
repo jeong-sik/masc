@@ -221,10 +221,10 @@ let persona_profile_path_opt name =
         Log.Keeper.warn "personas_dirs unexpected: %s" (Printexc.to_string exn);
         []
   in
-  (* Search all persona dirs; later dirs (local) override earlier (repo).
-     We reverse so local ~/.masc/personas wins over config/personas. *)
+  (* Search the resolved persona roots only.
+     Config_dir_resolver.personas_dirs now returns a single source of truth:
+     explicit MASC_PERSONAS_DIR or resolved CONFIG_ROOT/personas. *)
   dirs
-  |> List.rev
   |> List.find_map (fun root ->
          let path = Filename.concat (Filename.concat root name) "profile.json" in
          if Sys.file_exists path then Some path else None)
@@ -308,7 +308,12 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
           (match str "tool_preset" with
            | None -> None
            | Some raw -> normalize_tool_preset_raw raw);
-        tool_also_allow = normalize_name_list_opt (strs "tool_also_allow");
+        tool_also_allow =
+          (match normalize_name_list_opt (strs "tool_also_allow") with
+           | Some _ as explicit -> explicit
+           | None ->
+               (* Backward-compat alias kept in some live keeper TOMLs. *)
+               normalize_name_list_opt (strs "also_allow"));
         tool_denylist = normalize_name_list_opt (strs "tool_denylist");
         work_discovery_enabled = bool_ "work_discovery_enabled";
         work_discovery_sources =

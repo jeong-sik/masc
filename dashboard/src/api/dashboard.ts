@@ -1,6 +1,6 @@
 // MASC Dashboard — Dashboard projections, resource fetchers, tool metrics
 
-import { isRecord, asInt } from '../components/common/normalize'
+import { isRecord, asBoolean, asInt, asNumber, asStringArray } from '../components/common/normalize'
 import {
   asNullableIsoTimestamp,
   normalizeGovernanceDecisionItem,
@@ -13,6 +13,8 @@ import {
 import { get, post, patch, withRetries, NAMESPACE_TRUTH_GET_TIMEOUT_MS } from './core'
 import type {
   KeeperConfig,
+  KeeperFeatureStatus,
+  KeeperHookSlot,
   DashboardExecutionResponse,
   DashboardGovernanceResponse,
   DashboardMemoryResponse,
@@ -40,8 +42,12 @@ import type {
 
 // --- Dashboard projections ---
 
-export function fetchDashboardShell(): Promise<DashboardShellResponse> {
-  return get('/api/v1/dashboard/shell')
+type AbortableRequestOptions = {
+  signal?: AbortSignal
+}
+
+export function fetchDashboardShell(opts?: AbortableRequestOptions): Promise<DashboardShellResponse> {
+  return get('/api/v1/dashboard/shell', { signal: opts?.signal })
 }
 
 // --- System logs ---
@@ -178,12 +184,15 @@ export function fetchDashboardConfig(): Promise<DashboardConfigResponse> {
   return get('/api/v1/dashboard/config')
 }
 
-export function fetchDashboardNamespaceTruth(): Promise<DashboardNamespaceTruthResponse> {
-  return get('/api/v1/dashboard/namespace-truth', { timeoutMs: NAMESPACE_TRUTH_GET_TIMEOUT_MS })
+export function fetchDashboardNamespaceTruth(opts?: AbortableRequestOptions): Promise<DashboardNamespaceTruthResponse> {
+  return get('/api/v1/dashboard/namespace-truth', {
+    timeoutMs: NAMESPACE_TRUTH_GET_TIMEOUT_MS,
+    signal: opts?.signal,
+  })
 }
 
-export function fetchDashboardExecution(): Promise<DashboardExecutionResponse> {
-  return get('/api/v1/dashboard/execution')
+export function fetchDashboardExecution(opts?: AbortableRequestOptions): Promise<DashboardExecutionResponse> {
+  return get('/api/v1/dashboard/execution', { signal: opts?.signal })
 }
 
 export type ToolQualityToolStat = {
@@ -224,11 +233,11 @@ export type ToolQualityResponse = {
   hourly_trend?: ToolQualityHourlyPoint[]
 }
 
-export function fetchToolQuality(opts?: { n?: number }): Promise<ToolQualityResponse> {
+export function fetchToolQuality(opts?: { n?: number; signal?: AbortSignal }): Promise<ToolQualityResponse> {
   const params = new URLSearchParams()
   if (opts?.n != null) params.set('n', String(opts.n))
   const qs = params.toString()
-  return get<ToolQualityResponse>(`/api/v1/dashboard/tool-quality${qs ? `?${qs}` : ''}`)
+  return get<ToolQualityResponse>(`/api/v1/dashboard/tool-quality${qs ? `?${qs}` : ''}`, { signal: opts?.signal })
 }
 
 export interface DashboardPerfRow {
@@ -677,8 +686,8 @@ export function fetchToolMetrics(): Promise<ToolMetricsResponse> {
   return get('/api/v1/tool-metrics')
 }
 
-export async function fetchDashboardTools(): Promise<DashboardToolsResponse> {
-  const raw = await get<DashboardToolsResponse>('/api/v1/dashboard/tools')
+export async function fetchDashboardTools(opts?: AbortableRequestOptions): Promise<DashboardToolsResponse> {
+  const raw = await get<DashboardToolsResponse>('/api/v1/dashboard/tools', { signal: opts?.signal })
   const normalizedTools = raw.tool_inventory?.tools?.map(t => ({
     ...t,
     category: t.category ?? 'uncategorized',
@@ -738,6 +747,281 @@ export function clearPromptOverride(key: string): Promise<PromptMutationResponse
   return post('/api/v1/prompts', { action: 'clear', key })
 }
 
+function asNullableString(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  return trimmed !== '' ? trimmed : null
+}
+
+function asLooseBoolean(value: unknown, fallback = false): boolean {
+  const booleanValue = asBoolean(value)
+  if (booleanValue !== undefined) return booleanValue
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase()
+    if (normalized === 'true') return true
+    if (normalized === 'false') return false
+  }
+  return fallback
+}
+
+function asLooseNumber(value: unknown): number | undefined {
+  const direct = asNumber(value)
+  if (direct !== undefined) return direct
+  if (typeof value !== 'string') return undefined
+  const parsed = Number.parseFloat(value.trim())
+  return Number.isFinite(parsed) ? parsed : undefined
+}
+
+function asLooseNullableNumber(value: unknown): number | null {
+  return asLooseNumber(value) ?? null
+}
+
+function normalizeStringList(value: unknown): string[] {
+  const array = asStringArray(value)
+  if (array.length > 0) return array
+  const single = asNullableString(value)
+  return single ? [single] : []
+}
+
+function normalizeKeeperFeatureStatus(value: unknown): KeeperFeatureStatus {
+  const status = asNullableString(value)
+  switch (status) {
+    case 'wired':
+    case 'source_only':
+    case 'unwired':
+      return status
+    default:
+      return 'unwired'
+  }
+}
+
+function normalizeKeeperHookSlot(raw: unknown): KeeperHookSlot | null {
+  if (!isRecord(raw)) return null
+  return {
+    active: asLooseBoolean(raw.active),
+    source: asNullableString(raw.source) ?? 'unknown',
+    gates: normalizeStringList(raw.gates),
+    effects: normalizeStringList(raw.effects),
+    features: normalizeStringList(raw.features),
+  }
+}
+
+function normalizeKeeperHookSlots(raw: unknown): Record<string, KeeperHookSlot> {
+  if (!isRecord(raw)) return {}
+  const slots: Record<string, KeeperHookSlot> = {}
+  for (const [name, value] of Object.entries(raw)) {
+    const slot = normalizeKeeperHookSlot(value)
+    if (slot) slots[name] = slot
+  }
+  return slots
+}
+
+function normalizePromptBlock(raw: unknown, fallbackKey: string): { key: string; source: string; text: string } {
+  if (!isRecord(raw)) {
+    return {
+      key: fallbackKey,
+      source: 'unknown',
+      text: '',
+    }
+  }
+  return {
+    key: asNullableString(raw.key) ?? fallbackKey,
+    source: asNullableString(raw.source) ?? 'unknown',
+    text: asNullableString(raw.text) ?? '',
+  }
+}
+
+function normalizeToolPreset(value: unknown): KeeperConfig['tools']['tool_preset'] {
+  const preset = asNullableString(value)
+  switch (preset) {
+    case 'minimal':
+    case 'messaging':
+    case 'coding':
+    case 'research':
+    case 'full':
+      return preset
+    default:
+      return null
+  }
+}
+
+function normalizeDefaultSourceKind(value: unknown): KeeperConfig['sources']['default_source_kind'] {
+  const sourceKind = asNullableString(value)
+  switch (sourceKind) {
+    case 'toml':
+    case 'persona':
+      return sourceKind
+    default:
+      return null
+  }
+}
+
+function normalizeRuntimeBlockerClass(value: unknown): KeeperConfig['runtime']['runtime_blocker_class'] {
+  const blockerClass = asNullableString(value)
+  switch (blockerClass) {
+    case 'ambiguous_post_commit_timeout':
+    case 'ambiguous_post_commit_failure':
+      return blockerClass
+    default:
+      return null
+  }
+}
+
+function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfig {
+  const data = isRecord(raw) ? raw : {}
+  const prompt = isRecord(data.prompt) ? data.prompt : {}
+  const promptBlocks = isRecord(prompt.system_prompt_blocks) ? prompt.system_prompt_blocks : {}
+  const execution = isRecord(data.execution) ? data.execution : {}
+  const compaction = isRecord(data.compaction) ? data.compaction : {}
+  const proactive = isRecord(data.proactive) ? data.proactive : {}
+  const drift = isRecord(data.drift) ? data.drift : {}
+  const autoTeamSession = isRecord(data.auto_team_session) ? data.auto_team_session : {}
+  const handoff = isRecord(data.handoff) ? data.handoff : {}
+  const hooks = isRecord(data.hooks) ? data.hooks : null
+  const runtime = isRecord(data.runtime) ? data.runtime : {}
+  const coordination = isRecord(data.coordination) ? data.coordination : {}
+  const tools = isRecord(data.tools) ? data.tools : {}
+  const sources = isRecord(data.sources) ? data.sources : {}
+  const metrics = isRecord(data.metrics) ? data.metrics : {}
+
+  return {
+    name: asNullableString(data.name) ?? requestedName,
+    execution_scope: asNullableString(data.execution_scope) ?? 'workspace',
+    allowed_paths: normalizeStringList(data.allowed_paths),
+    effective_allowed_paths: normalizeStringList(data.effective_allowed_paths),
+    prompt: {
+      goal: asNullableString(prompt.goal) ?? '',
+      short_goal: asNullableString(prompt.short_goal) ?? '',
+      mid_goal: asNullableString(prompt.mid_goal) ?? '',
+      long_goal: asNullableString(prompt.long_goal) ?? '',
+      will: asNullableString(prompt.will) ?? '',
+      needs: asNullableString(prompt.needs) ?? '',
+      desires: asNullableString(prompt.desires) ?? '',
+      instructions: asNullableString(prompt.instructions) ?? '',
+      system_prompt_blocks: {
+        constitution: normalizePromptBlock(promptBlocks.constitution, 'keeper.constitution'),
+        world: normalizePromptBlock(promptBlocks.world, 'keeper.world'),
+        capabilities: normalizePromptBlock(promptBlocks.capabilities, 'keeper.capabilities'),
+      },
+      effective_system_prompt: asNullableString(prompt.effective_system_prompt) ?? '',
+    },
+    execution: {
+      models: normalizeStringList(execution.models),
+      active_model: asNullableString(execution.active_model) ?? '',
+      verify: asLooseBoolean(execution.verify),
+    },
+    compaction: {
+      profile: asNullableString(compaction.profile) ?? 'balanced',
+      ratio_gate: asLooseNumber(compaction.ratio_gate) ?? 0.85,
+      message_gate: asInt(compaction.message_gate) ?? 0,
+      token_gate: asInt(compaction.token_gate) ?? 0,
+      cooldown_sec: asInt(compaction.cooldown_sec) ?? 0,
+    },
+    proactive: {
+      enabled: asLooseBoolean(proactive.enabled),
+      idle_sec: asInt(proactive.idle_sec) ?? 0,
+      cooldown_sec: asInt(proactive.cooldown_sec) ?? 0,
+    },
+    drift: {
+      status: normalizeKeeperFeatureStatus(drift.status),
+      enabled:
+        typeof drift.enabled === 'boolean'
+          ? drift.enabled
+          : (typeof drift.enabled === 'string'
+              ? asLooseBoolean(drift.enabled)
+              : null),
+      min_turn_gap: asInt(drift.min_turn_gap) ?? null,
+      count_total: asInt(drift.count_total) ?? null,
+      last_reason: asNullableString(drift.last_reason),
+    },
+    auto_team_session: {
+      status: normalizeKeeperFeatureStatus(autoTeamSession.status),
+      enabled:
+        typeof autoTeamSession.enabled === 'boolean'
+          ? autoTeamSession.enabled
+          : (typeof autoTeamSession.enabled === 'string'
+              ? asLooseBoolean(autoTeamSession.enabled)
+              : null),
+    },
+    handoff: {
+      auto: asLooseBoolean(handoff.auto),
+      threshold: asLooseNumber(handoff.threshold) ?? 0.85,
+      cooldown_sec: asInt(handoff.cooldown_sec) ?? 0,
+    },
+    hooks: hooks
+      ? {
+          slots: normalizeKeeperHookSlots(hooks.slots),
+          deny_list: normalizeStringList(hooks.deny_list),
+          deny_list_count: asInt(hooks.deny_list_count) ?? 0,
+          destructive_check_tools: normalizeStringList(hooks.destructive_check_tools),
+          cost_budget: {
+            max_cost_usd: asLooseNullableNumber(isRecord(hooks.cost_budget) ? hooks.cost_budget.max_cost_usd : undefined),
+            active: asLooseBoolean(isRecord(hooks.cost_budget) ? hooks.cost_budget.active : undefined),
+          },
+        }
+      : undefined,
+    runtime: {
+      paused: asLooseBoolean(runtime.paused),
+      registered: asLooseBoolean(runtime.registered),
+      keepalive_running: asLooseBoolean(runtime.keepalive_running),
+      registry_state: asNullableString(runtime.registry_state),
+      fiber_health: asNullableString(runtime.fiber_health) ?? 'unknown',
+      presence_keepalive: asLooseBoolean(runtime.presence_keepalive),
+      presence_keepalive_sec: asInt(runtime.presence_keepalive_sec) ?? 0,
+      runtime_blocker_class: normalizeRuntimeBlockerClass(runtime.runtime_blocker_class),
+      runtime_blocker_summary: asNullableString(runtime.runtime_blocker_summary),
+      runtime_blocker_manual_reconcile:
+        typeof runtime.runtime_blocker_manual_reconcile === 'boolean'
+          ? runtime.runtime_blocker_manual_reconcile
+          : (typeof runtime.runtime_blocker_manual_reconcile === 'string'
+              ? asLooseBoolean(runtime.runtime_blocker_manual_reconcile)
+              : null),
+    },
+    coordination: {
+      room_scope: asNullableString(coordination.room_scope) ?? 'current',
+      scope_kind: asNullableString(coordination.scope_kind) ?? 'current',
+      mention_targets: normalizeStringList(coordination.mention_targets),
+      joined_room_ids: normalizeStringList(coordination.joined_room_ids),
+    },
+    tools: {
+      tool_access: tools.tool_access ?? {},
+      tool_policy_mode: asNullableString(tools.tool_policy_mode) ?? 'preset',
+      tool_preset: normalizeToolPreset(tools.tool_preset),
+      tool_also_allow: normalizeStringList(tools.tool_also_allow),
+      tool_custom_allowlist: normalizeStringList(tools.tool_custom_allowlist),
+      resolved_allowlist: normalizeStringList(tools.resolved_allowlist),
+      tool_denylist: normalizeStringList(tools.tool_denylist),
+      active_masc_tool_count: asInt(tools.active_masc_tool_count) ?? 0,
+      active_keeper_tool_count: asInt(tools.active_keeper_tool_count) ?? 0,
+      total_active: asInt(tools.total_active) ?? 0,
+    },
+    sources: {
+      live_meta_path: asNullableString(sources.live_meta_path) ?? '',
+      default_manifest_path: asNullableString(sources.default_manifest_path),
+      default_source_kind: normalizeDefaultSourceKind(sources.default_source_kind),
+      precedence: normalizeStringList(sources.precedence),
+      has_live_override: asLooseBoolean(sources.has_live_override),
+      override_fields: normalizeStringList(sources.override_fields),
+    },
+    metrics: {
+      generation: asInt(metrics.generation) ?? 0,
+      total_turns: asInt(metrics.total_turns) ?? 0,
+      total_input_tokens: asInt(metrics.total_input_tokens) ?? 0,
+      total_output_tokens: asInt(metrics.total_output_tokens) ?? 0,
+      total_tokens: asInt(metrics.total_tokens) ?? 0,
+      total_cost_usd: asLooseNumber(metrics.total_cost_usd) ?? 0,
+      last_model_used: asNullableString(metrics.last_model_used) ?? '',
+      last_input_tokens: asInt(metrics.last_input_tokens) ?? 0,
+      last_output_tokens: asInt(metrics.last_output_tokens) ?? 0,
+      last_total_tokens: asInt(metrics.last_total_tokens) ?? 0,
+      last_latency_ms: asInt(metrics.last_latency_ms) ?? 0,
+      last_total_tokens_per_sec: asLooseNullableNumber(metrics.last_total_tokens_per_sec),
+      last_output_tokens_per_sec: asLooseNullableNumber(metrics.last_output_tokens_per_sec),
+      compaction_count: asInt(metrics.compaction_count) ?? 0,
+    },
+  }
+}
+
 // --- Command Plane ---
 
 export function fetchCommandPlaneSnapshot(): Promise<CommandPlaneSnapshot> {
@@ -769,7 +1053,8 @@ export function runCommandPlaneAction(
 // --- Keeper config (structured read-only view) ---
 
 export function fetchKeeperConfig(name: string): Promise<KeeperConfig> {
-  return get<KeeperConfig>(`/api/v1/keepers/${encodeURIComponent(name)}/config`)
+  return get<unknown>(`/api/v1/keepers/${encodeURIComponent(name)}/config`)
+    .then(raw => normalizeKeeperConfig(raw, name))
 }
 
 export type KeeperConfigUpdatePayload = {
@@ -804,10 +1089,10 @@ export function patchKeeperConfig(
   name: string,
   payload: KeeperConfigUpdatePayload,
 ): Promise<KeeperConfig> {
-  return patch<KeeperConfig>(
+  return patch<unknown>(
     `/api/v1/keepers/${encodeURIComponent(name)}/config`,
     payload,
-  )
+  ).then(raw => normalizeKeeperConfig(raw, name))
 }
 
 // --- Keeper trajectory (tool call history) ---
@@ -974,6 +1259,7 @@ export function fetchTelemetry(opts?: {
   operation_id?: string
   worker_run_id?: string
   n?: number
+  signal?: AbortSignal
 }): Promise<TelemetryResponse> {
   const params = new URLSearchParams()
   if (opts?.source) params.set('source', opts.source)
@@ -983,11 +1269,11 @@ export function fetchTelemetry(opts?: {
   if (opts?.worker_run_id) params.set('worker_run_id', opts.worker_run_id)
   if (opts?.n) params.set('n', String(opts.n))
   const qs = params.toString()
-  return get<TelemetryResponse>(`/api/v1/dashboard/telemetry${qs ? '?' + qs : ''}`)
+  return get<TelemetryResponse>(`/api/v1/dashboard/telemetry${qs ? '?' + qs : ''}`, { signal: opts?.signal })
 }
 
-export function fetchTelemetrySummary(): Promise<TelemetrySummaryResponse> {
-  return get<TelemetrySummaryResponse>('/api/v1/dashboard/telemetry/summary')
+export function fetchTelemetrySummary(opts?: AbortableRequestOptions): Promise<TelemetrySummaryResponse> {
+  return get<TelemetrySummaryResponse>('/api/v1/dashboard/telemetry/summary', { signal: opts?.signal })
 }
 
 // --- Excuse Patterns ---

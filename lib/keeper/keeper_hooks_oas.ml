@@ -237,7 +237,6 @@ let make_hooks
     ?(on_tool_executed : string -> Yojson.Safe.t -> string -> unit =
         fun _ _ _ -> ())
     ?(trajectory_acc : Trajectory.accumulator option)
-    ?(boring_consecutive_turns : int ref = ref 0)
     ()
   : Agent_sdk.Hooks.hooks =
   let sse_turn_complete = "keeper_turn_complete" in
@@ -245,13 +244,6 @@ let make_hooks
     [ "keeper_board_post"; "keeper_board_comment"; "keeper_board_vote" ]
   in
   let tool_start_time = ref 0.0 in
-  (* Boring-tool gate: track whether current turn has any productive tool call.
-     A "boring" tool is one that reads status without side effects
-     (masc_status, masc_heartbeat, keeper_tasks_list, etc.).
-     Alternating boring tools bypasses OAS's exact-fingerprint idle detection.
-     This gate catches the broader pattern: consecutive turns with ONLY
-     boring tools, regardless of which specific boring tool was called. *)
-  let turn_has_productive_tool = ref false in
   (* Same-name streak gate: track consecutive calls to the same tool
      name (regardless of args). OAS idle detection requires exact
      name+args match, so board_get("a") → board_get("b") is never
@@ -326,24 +318,12 @@ let make_hooks
            carry across turns (e.g., 4 calls in turn N + 1 in turn N+1
            should not hit threshold 5). *)
         tool_name_streak := ("", 0);
-        (* Boring-tool gate: update consecutive counter at end of turn.
-           If no productive tool was called this turn, increment the
-           boring streak; otherwise reset to 0. *)
-        if !turn_has_productive_tool then
-          boring_consecutive_turns := 0
-        else begin
-          incr boring_consecutive_turns;
-          Log.Keeper.info
-            "keeper:%s boring_consecutive=%d (turn=%d had no productive tool)"
-            meta.name !boring_consecutive_turns turn
-        end;
-        turn_has_productive_tool := false;
         Agent_sdk.Hooks.Continue
       | _ -> Agent_sdk.Hooks.Continue);
 
     post_tool_use = Some (fun event ->
       match event with
-      | Agent_sdk.Hooks.PostToolUse { tool_name; input; output; _ } ->
+      | Agent_sdk.Hooks.PostToolUse { tool_name; input; output; duration_ms = hook_duration_ms; _ } ->
         let output_text = match output with
           | Ok { Agent_sdk.Types.content; _ } -> content
           | Error { Agent_sdk.Types.message; _ } -> message
@@ -362,7 +342,9 @@ let make_hooks
            tool_start_time is keeper-local (one ref per make_hooks call).
            Tool calls within Agent.run are sequential, so no race. *)
         let duration_ms =
-          (Time_compat.now () -. !tool_start_time) *. 1000.0
+          if hook_duration_ms > 0.0
+          then hook_duration_ms
+          else (Time_compat.now () -. !tool_start_time) *. 1000.0
         in
         (* Consume truncation info set by keeper_tools_oas before returning
            the (possibly truncated) result to OAS. Falls back to out_len
@@ -372,6 +354,10 @@ let make_hooks
             ~keeper_name:(!meta_ref).name ()
         in
         let result_bytes = if original_bytes > 0 then original_bytes else out_len in
+        let lane, tool_choice, thinking_enabled, thinking_budget =
+          Keeper_tool_call_log.get_turn_context
+            ~keeper_name:(!meta_ref).name ()
+        in
         (try
            Keeper_tool_call_log.log_call
              ~keeper_name:(!meta_ref).name
@@ -379,12 +365,9 @@ let make_hooks
              ~success:(outcome = "ok") ~duration_ms
              ~model:(let m = (!meta_ref).runtime.usage.last_model_used in
                      if m = "" then (!meta_ref).cascade_name else m)
+             ?lane ?tool_choice ?thinking_enabled ?thinking_budget
              ~result_bytes ?truncated_to ()
          with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
-        (* Boring-tool gate: mark turn as productive only for genuinely
-           productive tools. keeper_stay_silent is in the boring set. *)
-        if not (Keeper_tool_registry.is_boring_tool tool_name) then
-          turn_has_productive_tool := true;
         (try on_tool_executed tool_name input output_text
          with Eio.Cancel.Cancelled _ as e -> raise e
             | exn ->

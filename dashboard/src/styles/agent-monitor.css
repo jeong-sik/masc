@@ -1,9 +1,0 @@
-/* Agent Monitor — runtime strip, live timeline, event kind badge variants.
-   Extracted from global.css for #3915.
-   Runtime strip + ctx-fill + event badges → canonical definitions in ui.css. */
-
-/* ── Agent Monitor — runtime strip + live timeline ──────────── */
-
-/* agent-runtime-strip, agent-runtime-ctx-fill, agent-event-badge--* → ui.css (single definition) */
-
-/* ── Live Timeline — timeline styles are in ui.css alongside runtime strip ── */

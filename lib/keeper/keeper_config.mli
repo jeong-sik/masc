@@ -28,7 +28,6 @@ val alert_reply_preview_max_chars : int
 
 val tool_policy_count_warn_threshold : int
 val tool_first_sentence_max_chars : int
-
 val default_execution_scope : string
 val default_proactive_enabled : bool
 val default_proactive_idle_sec : int
@@ -200,15 +199,12 @@ val keeper_llama_slots : unit -> int
     Returns [None] when slot pinning is disabled. *)
 val keeper_slot_id : string -> int option
 
-val keeper_boring_exit_threshold : unit -> int
 val keeper_enable_thinking : unit -> bool
 val keeper_adaptive_thinking_enabled : unit -> bool
 
 (** {1 Runtime Param Handles}
 
     Exposed for test use only (e.g. [Runtime_params.clear]). *)
-
-val keeper_boring_exit_threshold_rp : int Runtime_params.param
 
 (** Room signal prompt enabled override from env var. *)
 val keeper_room_signal_prompt_enabled_override : unit -> bool option

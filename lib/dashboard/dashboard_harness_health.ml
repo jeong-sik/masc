@@ -66,23 +66,8 @@ let trim_recent (type a) max_items (values : a list) : a list =
   if List.length values <= max_items then values
   else List.filteri (fun idx _ -> idx < max_items) values
 
-let trimmed_env_opt key =
-  match Sys.getenv_opt key with
-  | Some value ->
-      let value = String.trim value in
-      if String.equal value "" then None else Some value
-  | None -> None
-
-let me_root () =
-  match Env_config.me_root_opt () with
-  | Some root -> root
-  | None -> (
-      match trimmed_env_opt "HOME" with
-      | Some home -> Filename.concat home "me"
-      | None -> Env_config.me_root ())
-
 let pre_compact_store_base_dir () =
-  Filename.concat (me_root ()) "data/harness-pre-compact"
+  Filename.concat (Env_config.base_path ()) "data/harness-pre-compact"
 
 let get_or_create_store store_ref base_dir_fn =
   match !store_ref with

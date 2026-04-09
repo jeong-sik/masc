@@ -264,9 +264,9 @@ spawn 시 인자로 직접 설정하는 필드.
 
 ### 4.1 매니페스트 JSON 스키마
 
-매니페스트 파일 위치: `{ME_ROOT}/personas/{name}/profile.json`
+매니페스트 파일 위치: `{MASC_PERSONAS_DIR}/{name}/profile.json` 또는 `resolved config root/personas/{name}/profile.json`
 
-> personas_root는 `ME_ROOT` (또는 `MASC_WORKSPACE_ROOT`, `DUNE_SOURCEROOT`) 경로의 `personas/` 하위 디렉토리다.
+> personas_root는 `MASC_PERSONAS_DIR`가 설정되면 그 디렉토리이고, 아니면 resolved config root의 `personas/` 하위 디렉토리다.
 
 ```json
 {
@@ -609,7 +609,7 @@ Keeper 설정은 아래 소스에서 공급된다. 상세 우선순위는 `docs/
 
 별도 keepalive 등록 레지스트리는 없다. keeper의 선언과 런타임 상태는 `.masc/keepers/<name>.json`에 함께 저장되고, keeper는 durable always-on으로 취급된다. 멈춤은 설정값이 아니라 `paused` 또는 `keeper_down` 상태 전이로 표현한다.
 
-repo-managed config root는 `MASC_CONFIG_DIR`가 있으면 그 디렉토리를 우선 사용하고, 없으면 `<MASC_BASE_PATH>/.masc/config`, 그 다음 `~/.masc/config`, 마지막으로 repo `config/` fallback chain을 사용한다. `MASC_PERSONAS_DIR`는 persona만 별도 override한다. 즉 웹/대시보드는 파일을 직접 읽지 않고, 서버가 해석한 config root와 persona root를 사용한다.
+repo-managed config root는 `MASC_CONFIG_DIR`가 있으면 그 디렉토리를 우선 사용하고, 없으면 `<MASC_BASE_PATH>/.masc/config`를 먼저 초기화/사용한다. 그 다음 `~/.masc/config`, 마지막으로 repo `config/` fallback chain을 사용한다. `MASC_PERSONAS_DIR`는 persona만 별도 override한다. 즉 웹/대시보드는 파일을 직접 읽지 않고, 서버가 해석한 config root와 persona root를 사용한다.
 
 ### 8.2 Template 변경 반영
 

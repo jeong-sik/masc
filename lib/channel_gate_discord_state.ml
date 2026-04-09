@@ -17,8 +17,12 @@ type audit_event = {
 }
 
 let connector_id = "discord"
-let connector_display_name = "Discord"
-let connector_channel = "discord"
+let display_name = "Discord"
+let channel = "discord"
+
+(* Backward-compatible aliases used internally *)
+let connector_display_name = display_name
+let connector_channel = channel
 
 let default_status_path = ".masc/connectors/discord/status.json"
 let default_binding_store_path = ".masc/connectors/discord/bindings.json"
@@ -226,6 +230,7 @@ let status_json ?(audit_limit = 10) () =
   let audit_path = binding_audit_read_path () in
   let configured_bindings = read_bindings () in
   let recent_audit = read_recent_audit ~limit:audit_limit in
+  let channel = "discord" in
   let available = Option.is_some live_status in
   let updated_at =
     match live_status with
@@ -238,10 +243,7 @@ let status_json ?(audit_limit = 10) () =
     | Some json -> bool_member json "connected" && not stale
     | None -> false
   in
-  let error =
-    if available then ""
-    else "discord connector status file not found"
-  in
+  let error = if available then "" else "connector status file not found" in
   let status_field key f default =
     match live_status with
     | Some json -> f json key
@@ -249,6 +251,7 @@ let status_json ?(audit_limit = 10) () =
   in
   `Assoc
     [
+      ("channel", `String channel);
       ("available", `Bool available);
       ("connected", `Bool connected);
       ("stale", `Bool stale);
@@ -401,18 +404,7 @@ let connector_json ?gate_status_json ?(audit_limit = 10) () =
       ("observed_channel", observed_channel);
     ]
 
-let connectors_json ?gate_status_json ?(audit_limit = 10) () =
-  let connector = connector_json ?gate_status_json ~audit_limit () in
-  let active_count =
-    if bool_member connector "available" then 1 else 0
-  in
-  `Assoc
-    [
-      ("connectors", `List [ connector ]);
-      ("total", `Int 1);
-      ("active_count", `Int active_count);
-      ("generated_at", `String (Server_utils.iso8601_of_unix (Unix.gettimeofday ())));
-    ]
+(* connectors_json removed — use Channel_gate_connector.connectors_json instead *)
 
 let rollback_bindings original_bindings =
   try save_bindings original_bindings with

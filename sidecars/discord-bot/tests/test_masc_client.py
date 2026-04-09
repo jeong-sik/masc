@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import json
+import logging
 from collections.abc import Iterator
 
 import httpx
-import logging
 import pytest
 
 from src import config as config_module
@@ -116,6 +117,44 @@ async def test_send_message_does_not_retry_non_replay_safe_post() -> None:
     assert response.ok is False
     assert response.error == "gate returned 503"
     assert attempts == 1
+
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_stream_message_sends_discord_context_payload() -> None:
+    seen_payload: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal seen_payload
+        seen_payload = json.loads(request.content.decode("utf-8"))
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            content=b'data: {"type":"TEXT_MESSAGE_CONTENT","delta":"pong"}\n\n',
+        )
+
+    client = make_client(httpx.MockTransport(handler))
+    deltas = [
+        delta
+        async for delta in client.stream_message(
+            keeper_name="luna",
+            content="hello",
+            channel_user_id="u1",
+            channel_user_name="alice",
+            channel_room_id="room-7",
+        )
+    ]
+
+    assert deltas == ["pong"]
+    assert seen_payload == {
+        "name": "luna",
+        "message": "hello",
+        "channel": "discord",
+        "channel_user_id": "u1",
+        "channel_user_name": "alice",
+        "channel_room_id": "room-7",
+    }
 
     await client.aclose()
 

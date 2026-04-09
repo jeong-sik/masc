@@ -16,12 +16,19 @@ File operations:
 - Run shell commands: keeper_bash with cmd=<command> (read-only unless Coding/Delivery/Full preset)
   IMPORTANT: keeper_bash runs ONE command per call. No pipes (|), no chaining (&&, ||, ;), no redirects (>, >>). Split into separate tool calls instead.
 - Write or create a file: keeper_fs_edit (Coding/Delivery/Full). Writable path: .masc/playground/YOUR_KEEPER_NAME/ (use keeper_context_status to confirm your name).
-- Create a PR in one step: keeper_pr_workflow (Delivery/Coding/Full). Provide branch, file_path, file_content, commit_message, pr_title (optional: base_branch, default "main"). Handles worktree, commit, and draft PR for a single file.
 - GitHub CLI: keeper_github with cmd="pr list", cmd="pr view 123", cmd="pr comment 123 --body 'text'", cmd="issue create --title 'bug'"
 
 Workspace:
 - Your writable workspace is .masc/playground/YOUR_KEEPER_NAME/. Use keeper_fs_edit to write files there.
-- To produce a PR: use keeper_pr_workflow (single call, handles everything) — this is the preferred path for all coding/delivery keepers.
+- Do NOT use keeper_pr_workflow. It is broken and deprecated.
+- To create a PR from your playground clone:
+  1. keeper_shell op=git_clone, url=https://github.com/jeong-sik/masc-mcp
+  2. keeper_bash cmd="git checkout -b my-branch", cwd=.masc/playground/YOUR_NAME/repos/masc-mcp
+  3. keeper_fs_edit to create/modify files in the cloned repo
+  4. keeper_bash cmd="git add FILE", cwd=... (same repo path)
+  5. keeper_bash cmd="git commit -m 'description'", cwd=...
+  6. keeper_bash cmd="git push -u origin my-branch", cwd=...
+  7. keeper_github cmd="pr create --repo jeong-sik/masc-mcp --head my-branch --title 'title' --draft"
 
 Knowledge lookup:
 - Past conversations and messages: keeper_memory_search
@@ -45,6 +52,11 @@ Context:
 - Token usage and session state: keeper_context_status
 
 When asked about Board content, room status, files, or any information you do not already know, call the appropriate tool first. Do not guess or fabricate answers.
+
+Critical rules:
+- NEVER guess PR numbers, issue numbers, or task IDs. Always query first (keeper_github, keeper_tasks_list).
+- NEVER invent repository names. The project repo is jeong-sik/masc-mcp.
+- When a tool call fails, read the error message carefully before retrying with different parameters.
 
 Critical rules:
 - NEVER guess PR numbers, issue numbers, or task IDs. Always query first (keeper_github, keeper_tasks_list).

@@ -42,7 +42,9 @@ let test_governance_surface_is_demoted_to_lab () =
       check bool "hidden_from_nav" true
         Yojson.Safe.Util.(surface |> member "hidden_from_nav" |> to_bool);
       check bool "meets_main_gate" false
-        Yojson.Safe.Util.(surface |> member "meets_main_gate" |> to_bool)
+        Yojson.Safe.Util.(surface |> member "meets_main_gate" |> to_bool);
+      check bool "route_hash is null" true
+        Yojson.Safe.Util.(surface |> member "route_hash" = `Null)
 
 let test_live_spotcheck_serializes_route_values_as_routes () =
   let json = Dashboard_surface_readiness.json ~surface_id:"overview" () in

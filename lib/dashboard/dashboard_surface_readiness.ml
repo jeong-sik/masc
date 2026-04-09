@@ -186,7 +186,7 @@ let all_entries =
       hidden_from_nav = true;
       meets_main_gate = false;
       rationale = "거버넌스 전용 화면은 judge-only 보조 surface로 축소하고, 메인 운영 판단/개입은 command.intervene의 ops queue에 수렴합니다.";
-      route_hash = Some "#command?section=governance";
+      route_hash = None;
       refs =
         {
           fixture_harness = None;

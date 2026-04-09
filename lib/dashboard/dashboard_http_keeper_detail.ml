@@ -480,6 +480,8 @@ let compute_metrics_window
                     ("latency_ms", `Int latency_ms);
                     ("cost_usd", `Float cost_usd);
                     ("model_used", `String model_used);
+                    ("prompt_fingerprint", j |> member "prompt_fingerprint");
+                    ("prompt", j |> member "prompt");
                     ("compaction_before_tokens", `Int before_tokens);
                     ("compaction_after_tokens", `Int after_tokens);
                     ("compaction_saved_tokens", `Int saved_tokens);

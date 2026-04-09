@@ -390,6 +390,114 @@ export function TokenTrendChart({ keeper }: { keeper: Keeper }) {
   `
 }
 
+function formatFingerprint(value: string | null | undefined): string {
+  if (!value) return '-'
+  return value.length > 16 ? `${value.slice(0, 16)}…` : value
+}
+
+function formatSegmentLabel(key: string): string {
+  return key.replace(/[_-]+/g, ' ')
+}
+
+export function PromptTelemetryPanel({ keeper }: { keeper: Keeper }) {
+  const series = keeper.metrics_series ?? []
+  const promptPoints = series.filter(
+    (p: KeeperMetricPoint) => p.prompt_metrics != null || p.prompt_fingerprint != null,
+  )
+  if (promptPoints.length === 0) return null
+
+  const latest = promptPoints[promptPoints.length - 1] ?? null
+  const latestPrompt = latest?.prompt_metrics ?? null
+  const latestSegments = Object.entries(latestPrompt?.segments ?? {})
+    .sort(([left], [right]) => left.localeCompare(right))
+  const promptTotals = promptPoints.map(
+    (p: KeeperMetricPoint) => p.prompt_metrics?.estimated_total_tokens ?? 0,
+  )
+  const latestTotal = latestPrompt?.estimated_total_tokens ?? null
+  const latestCacheable = latestPrompt?.estimated_cacheable_tokens ?? null
+  const cacheableRatio =
+    latestTotal && latestCacheable != null && latestTotal > 0
+      ? latestCacheable / latestTotal
+      : null
+
+  const fingerprints = promptPoints
+    .map((p: KeeperMetricPoint) => p.prompt_fingerprint ?? p.prompt_metrics?.fingerprint ?? null)
+    .filter((value): value is string => Boolean(value))
+  const uniqueFingerprintCount = new Set(fingerprints).size
+  let fingerprintTransitions = 0
+  let lastFingerprint: string | null = null
+  for (const current of fingerprints) {
+    if (lastFingerprint != null && current !== lastFingerprint) fingerprintTransitions += 1
+    lastFingerprint = current
+  }
+
+  const W = SPARKLINE_W, H = SPARKLINE_H
+  const totalLine = miniSparkline(promptTotals)
+
+  return html`
+    <div class="mb-5">
+      <div class="flex items-center gap-2 mb-2">
+        <span class="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Prompt Fingerprint</span>
+        <span class="text-[10px] text-[var(--text-dim)]">${promptPoints.length} snapshots</span>
+        ${latest?.prompt_fingerprint
+          ? html`<span class="text-[9px] px-1.5 py-0.5 rounded bg-[var(--white-5)] text-[var(--text-dim)] font-mono" title=${latest.prompt_fingerprint}>${formatFingerprint(latest.prompt_fingerprint)}</span>`
+          : null}
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
+        <div class="md:col-span-2 p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)]">
+          <div class="flex items-center justify-between mb-1.5">
+            <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">estimated prompt tokens</span>
+            <span class="text-xs font-mono tabular-nums text-[var(--accent)]">${latestTotal != null ? formatTokens(latestTotal) : '-'}</span>
+          </div>
+          <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" style="background:#0b1220;">
+            ${totalLine ? html`<polyline points="${totalLine}" fill="none" stroke="#f59e0b" stroke-width="1.5"/>` : null}
+          </svg>
+          <div class="mt-1 flex flex-wrap gap-2 text-[9px] text-[var(--text-dim)]">
+            <span>latest ${latestTotal != null ? formatTokens(latestTotal) : '-'}</span>
+            <span>cacheable ${latestCacheable != null ? formatTokens(latestCacheable) : '-'}</span>
+            ${cacheableRatio != null ? html`<span>${Math.round(cacheableRatio * 100)}% cacheable</span>` : null}
+          </div>
+        </div>
+
+        <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] flex flex-col justify-between">
+          <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">fingerprint revisions</span>
+          <span class="text-lg font-mono tabular-nums text-[var(--warn)]">${fingerprintTransitions}</span>
+          <span class="text-[9px] text-[var(--text-dim)]">${uniqueFingerprintCount} unique</span>
+        </div>
+
+        <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] flex flex-col justify-between">
+          <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">latest fingerprint</span>
+          <span class="text-sm font-mono break-all text-[var(--text-strong)]">${latest?.prompt_fingerprint ? formatFingerprint(latest.prompt_fingerprint) : '-'}</span>
+          <span class="text-[9px] text-[var(--text-dim)]">${latestSegments.length} segments</span>
+        </div>
+      </div>
+
+      ${latestSegments.length > 0 ? html`
+        <div class="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+          ${latestSegments.map(([segmentKey, segment]) => html`
+            <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)]">
+              <div class="flex items-center justify-between gap-2 mb-2">
+                <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">${formatSegmentLabel(segmentKey)}</span>
+                <span class="text-[9px] font-mono text-[var(--text-dim)]" title=${segment.fingerprint ?? ''}>${formatFingerprint(segment.fingerprint)}</span>
+              </div>
+              <div class="grid grid-cols-2 gap-2 text-xs">
+                <div class="rounded-lg border border-[var(--white-8)] bg-[var(--white-2)] px-2.5 py-2">
+                  <div class="text-[9px] uppercase tracking-wider text-[var(--text-dim)]">tokens</div>
+                  <div class="mt-1 font-mono tabular-nums text-[var(--accent)]">${formatTokens(segment.estimated_tokens)}</div>
+                </div>
+                <div class="rounded-lg border border-[var(--white-8)] bg-[var(--white-2)] px-2.5 py-2">
+                  <div class="text-[9px] uppercase tracking-wider text-[var(--text-dim)]">bytes</div>
+                  <div class="mt-1 font-mono tabular-nums text-[var(--text-strong)]">${segment.bytes.toLocaleString()}</div>
+                </div>
+              </div>
+            </div>
+          `)}
+        </div>
+      ` : null}
+    </div>
+  `
+}
+
 // ── Metrics Charts (Latency + Cost + Model) ─────────────
 
 const SPARKLINE_W = 200

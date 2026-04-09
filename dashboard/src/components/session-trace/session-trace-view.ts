@@ -23,10 +23,20 @@ import type { TraceSummary } from './session-trace-state'
 
 function TraceSummaryBar({ summary }: { summary: TraceSummary }) {
   const s = summary
-  if (s.tool_call_count === 0 && s.broadcast_count === 0 && s.task_completed_count === 0) return null
+  if (
+    s.tool_call_count === 0
+    && s.oas_tool_count === 0
+    && s.oas_turn_count === 0
+    && s.oas_context_count === 0
+    && s.broadcast_count === 0
+    && s.task_completed_count === 0
+  ) return null
 
   const items: string[] = []
   if (s.tool_call_count > 0) items.push(`도구 ${s.tool_call_count}회`)
+  if (s.oas_tool_count > 0) items.push(`OAS 도구 ${s.oas_tool_count}회`)
+  if (s.oas_turn_count > 0) items.push(`OAS 턴 ${s.oas_turn_count}건`)
+  if (s.oas_context_count > 0) items.push(`OAS 압축 ${s.oas_context_count}건`)
   if (s.task_completed_count > 0) items.push(`완료 ${s.task_completed_count}건`)
   if (s.task_claimed_count > 0) items.push(`할당 ${s.task_claimed_count}건`)
   if (s.broadcast_count > 0) items.push(`메시지 ${s.broadcast_count}건`)

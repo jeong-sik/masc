@@ -4,11 +4,18 @@
 
     @since 2.196.0 *)
 
+type handler_binding =
+  | Direct of Tool_dispatch.handler
+  | Shared of Tool_dispatch.handler
+  | Tag_dispatch
+  | Match_chain
+
 type t = {
   name : string;
   description : string;
   input_schema : Yojson.Safe.t;
   module_tag : Tool_dispatch.module_tag;
+  handler_binding : handler_binding;
   is_read_only : bool;
   requires_join : bool;
   is_destructive : bool;
@@ -33,6 +40,7 @@ let create
     ~description
     ~module_tag
     ~input_schema
+    ~handler_binding
     ?(is_read_only = false)
     ?(requires_join = false)
     ?(is_destructive = false)
@@ -47,7 +55,7 @@ let create
     ?title
     ?required_permission
     () =
-  { name; description; module_tag; input_schema;
+  { name; description; module_tag; input_schema; handler_binding;
     is_read_only; requires_join; is_destructive; is_idempotent;
     visibility; lifecycle; implementation_status;
     canonical_name; replacement; reason;
@@ -67,6 +75,7 @@ let to_tool_schema (spec : t) : Types.tool_schema =
 (* ================================================================ *)
 
 let registered_names : (string, unit) Hashtbl.t = Hashtbl.create 256
+let expects_handler : (string, unit) Hashtbl.t = Hashtbl.create 256
 
 (* ================================================================ *)
 (* Registration                                                     *)
@@ -114,7 +123,13 @@ let register (spec : t) =
       readonly = Some spec.is_read_only;
       destructive = Some spec.is_destructive;
       idempotent = Some spec.is_idempotent;
-      required_permission = spec.required_permission }
+      required_permission = spec.required_permission };
+  (* 5. Handler binding — auto-register Direct/Shared into Tool_dispatch *)
+  (match spec.handler_binding with
+   | Direct h | Shared h ->
+     Tool_dispatch.register ~tool_name:spec.name ~handler:h;
+     Hashtbl.replace expects_handler spec.name ()
+   | Tag_dispatch | Match_chain -> ())
 
 let register_all (specs : t list) =
   List.iter register specs
@@ -128,5 +143,8 @@ let verify_handler_coverage () =
   Hashtbl.iter (fun name () ->
     if not (Tool_dispatch.is_registered name) then
       missing := name :: !missing
-  ) registered_names;
+  ) expects_handler;
   !missing
+
+let all_registered_names () =
+  Hashtbl.fold (fun name () acc -> name :: acc) registered_names []

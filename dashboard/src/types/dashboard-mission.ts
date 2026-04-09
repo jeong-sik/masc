@@ -374,12 +374,15 @@ export interface DashboardProofWorkerRunEvidence {
   mode?: string | null
   wait_mode?: string | null
   trace_capability?: string | null
+  trace_evidence_status?: string | null
   trace_validated?: boolean | null
   validation_failures?: string[]
   success?: boolean | null
   execution_scope?: string | null
   requested_worker_class?: string | null
   requested_worker_size?: string | null
+  requested_runtime?: string | null
+  requested_model?: string | null
   tool_surface_status?: string | null
   tool_surface_source?: string | null
   tool_surface_names?: string[]
@@ -398,6 +401,7 @@ export interface DashboardProofWorkerRunEvidence {
   stop_reason?: string | null
   failure_reason?: string | null
   error?: string | null
+  proof_evidence_status?: string | null
   evidence_refs?: string[]
   ts_iso?: string | null
 }

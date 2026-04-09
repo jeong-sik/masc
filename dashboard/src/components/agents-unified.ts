@@ -101,13 +101,20 @@ export function AgentsUnified() {
       </div>
 
       <details class="rounded-lg border border-card-border/30 bg-card/12 overflow-hidden">
-        <summary class="px-3 py-2 cursor-pointer text-[11px] text-text-muted hover:text-text-body transition-colors">에이전트 상태 안내</summary>
-        <div class="px-3 pb-2.5 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-[11px] text-text-muted">
-          <span class="font-mono text-text-body">working</span><span>LLM이 현재 응답을 생성 중 (도구 실행 또는 텍스트 생성)</span>
-          <span class="font-mono text-text-body">busy</span><span>작업 중이지만 LLM 응답 대기 아닌 상태 (I/O, 파일 처리 등)</span>
-          <span class="font-mono text-text-body">listening</span><span>실시간 스트림 연결 상태. 작업 대기 중</span>
-          <span class="font-mono text-text-body">idle</span><span>최근 활동 없음. 하트비트는 유지 중</span>
-          <span class="font-mono text-text-body">offline</span><span>하트비트 끊김. 프로세스 종료됨</span>
+        <summary class="px-3 py-2 cursor-pointer text-[11px] text-text-muted hover:text-text-body transition-colors">모니터링 읽는 법</summary>
+        <div class="px-3 pb-3 grid gap-3 text-[11px] text-text-muted md:grid-cols-3">
+          <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2.5">
+            <div class="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-strong)]">운영 상태</div>
+            <p class="m-0 mt-1 leading-[1.5]">운영자가 먼저 볼 신호입니다. 가동중, 주의 필요, 일시정지, 오프라인으로 요약합니다.</p>
+          </div>
+          <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2.5">
+            <div class="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-strong)]">Phase</div>
+            <p class="m-0 mt-1 leading-[1.5]">keeper_state_machine의 TLA 라이프사이클 상태입니다. Running, Failing, Paused 같은 전이 근거를 보여줍니다.</p>
+          </div>
+          <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2.5">
+            <div class="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-strong)]">Stage</div>
+            <p class="m-0 mt-1 leading-[1.5]">현재 턴에서 무엇을 하는지 보여주는 활동 단계입니다. idle, thinking, tool, handoff를 분리해서 봅니다.</p>
+          </div>
         </div>
       </details>
 

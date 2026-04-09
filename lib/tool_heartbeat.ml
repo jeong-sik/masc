@@ -234,6 +234,7 @@ let () =
            ~description:s.description
            ~module_tag:Tool_dispatch.Mod_heartbeat
            ~input_schema:s.input_schema
+           ~handler_binding:Tag_dispatch
            ~requires_join:(List.mem s.name _tool_spec_requires_join)
            ~visibility:(if is_system then Tool_catalog.Hidden else Tool_catalog.Default)
            ~allow_direct_call_when_hidden:is_system

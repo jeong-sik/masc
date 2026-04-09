@@ -25,6 +25,7 @@ function sampleToolCallEvent(overrides: Partial<UnifiedTraceEvent> = {}): Unifie
     ts: 1,
     ts_iso: '2026-04-03T00:00:00Z',
     kind: 'tool_call',
+    sourceLane: 'masc',
     summary: 'tool summary',
     detail: {},
     toolArgs: '*literal* `ticks`',

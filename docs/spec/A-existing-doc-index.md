@@ -36,8 +36,6 @@
 | File | Status | Notes |
 |------|--------|-------|
 | `docs/MCP-SURFACE-AUDIT.md` | Maintained Reference | public/hidden tool surface audit |
-| `docs/TEAM-SESSION.md` | Maintained Reference | still referenced by help registry and fixtures |
-| `docs/TEAM-SESSION-ARCHITECTURE.md` | Maintained Reference | still referenced by help registry |
 | `docs/VERIFICATION-MATRIX.md` | Maintained Reference | verification tier SSOT |
 | `docs/VERSIONED-ROADMAP.md` | Maintained Reference | release train and intake policy |
 | `docs/CAPABILITY-REGISTRY-SSOT.md` | Maintained Reference | MCP vs internal capability mapping |

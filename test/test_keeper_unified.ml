@@ -572,8 +572,8 @@ let test_prompt_includes_operational_tool_guidance () =
     (contains_substring sys "Tool-first principle");
   check bool "mentions worktree inspection guidance" true
     (contains_substring sys "masc_code_read");
-  check bool "mentions heartbeat maintenance guidance" true
-    (contains_substring sys "masc_heartbeat")
+  check bool "mentions server-managed heartbeat" true
+    (contains_substring sys "Heartbeat is server-managed")
 
 let test_prompt_includes_autonomous_trigger_section () =
   let meta =
@@ -971,7 +971,7 @@ let test_metrics_noop_response () =
 
 let test_metrics_heartbeat_only_tool_response_is_maintenance_only () =
   let result =
-    make_run_result ~text:"" ~tools:["masc_heartbeat"]
+    make_run_result ~text:"" ~tools:[]
       ~model:"test-model" ~input_tok:40 ~output_tok:0
   in
   let updated =
@@ -1519,41 +1519,6 @@ let test_side_effect_reclassification_drops_keeper_read_only_tools_from_mixed_se
   check bool "drops memory_search from ambiguous set" false
     (contains_substring rendered "keeper_memory_search")
 
-let test_side_effect_reclassification_skips_retry_safe_keeper_observation_tools () =
-  let original =
-    Agent_sdk.Error.Api
-      (Timeout { message = "Execution cancelled after 300.0s" })
-  in
-  let reclassified =
-    UT.reclassify_error_after_side_effect
-      ~tool_names:
-        [ "keeper_tasks_list";
-          "keeper_board_list";
-          "keeper_shell_readonly";
-          "keeper_fs_read";
-          "masc_heartbeat";
-        ]
-      original
-  in
-  check bool "retry-safe observation tools keep transient classification" true
-    (UT.is_transient_network_error reclassified);
-  check bool "retry-safe observation tools do not become ambiguous partial" false
-    (UT.is_ambiguous_side_effect_error reclassified)
-
-let test_retry_safe_tool_registry_uses_metadata_and_fallbacks () =
-  let dir = temp_dir () in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir dir)
-    (fun () ->
-      ignore (Masc_mcp.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir ());
-      check bool "masc_board_list is retry-safe via metadata"
-        true (Masc_mcp.Keeper_tool_registry.is_retry_safe_tool "masc_board_list");
-      check bool "keeper_fs_read is retry-safe via fallback"
-        true (Masc_mcp.Keeper_tool_registry.is_retry_safe_tool "keeper_fs_read");
-      check bool "keeper_fs_edit stays retry-unsafe"
-        true
-        (Masc_mcp.Keeper_tool_registry.has_retry_unsafe_side_effect "keeper_fs_edit"))
-
 let test_metrics_mixed_response () =
   let result =
     make_run_result ~text:"Done." ~tools:["keeper_fs_read"]
@@ -1802,7 +1767,7 @@ let test_social_model_routes_blocker_to_board_post () =
 
 let test_social_model_tool_only_turn_skips_protocol_violation () =
   let result =
-    make_run_result ~text:"" ~tools:["masc_heartbeat"]
+    make_run_result ~text:"" ~tools:["masc_status"]
       ~model:"test-model" ~input_tok:10 ~output_tok:1
   in
   let routed, state =
@@ -1815,11 +1780,11 @@ let test_social_model_tool_only_turn_skips_protocol_violation () =
     (KSM.delivery_surface_to_string state.delivery_surface);
   check (option string) "no protocol violation blocker" None state.blocker;
   check string "visible response suppressed" "" routed.response_text;
-  check (list string) "tool list preserved" ["masc_heartbeat"] routed.tools_used
+  check (list string) "tool list preserved" ["masc_status"] routed.tools_used
 
 let test_social_model_infers_board_comment_from_tool_use () =
   let result =
-    make_run_result ~text:"" ~tools:["keeper_board_comment"; "masc_heartbeat"]
+    make_run_result ~text:"" ~tools:["keeper_board_comment"; "masc_status"]
       ~model:"test-model" ~input_tok:10 ~output_tok:1
   in
   let routed, state =
@@ -1833,7 +1798,7 @@ let test_social_model_infers_board_comment_from_tool_use () =
   check (option string) "no protocol violation blocker" None state.blocker;
   check string "visible response empty" "" routed.response_text;
   check (list string) "tool list preserved"
-    ["keeper_board_comment"; "masc_heartbeat"] routed.tools_used
+    ["keeper_board_comment"; "masc_status"] routed.tools_used
 
 (* ---------- render_inline_skip_reason tests ---------- *)
 
@@ -2220,10 +2185,6 @@ let () =
             test_side_effect_reclassification_ignores_keeper_read_only_tools;
           test_case "mixed tool sets only keep mutating keeper tools" `Quick
             test_side_effect_reclassification_drops_keeper_read_only_tools_from_mixed_set;
-          test_case "retry-safe keeper observation tools stay retryable" `Quick
-            test_side_effect_reclassification_skips_retry_safe_keeper_observation_tools;
-          test_case "retry-safe registry uses metadata and fallbacks" `Quick
-            test_retry_safe_tool_registry_uses_metadata_and_fallbacks;
           test_case "overflow detection and limit parsing" `Quick
             test_overflow_detection_and_limit_parsing;
         ] );
@@ -2239,9 +2200,9 @@ let () =
           test_case "masc_status is boring" `Quick (fun () ->
             check bool "masc_status"
               true (Masc_mcp.Keeper_tool_registry.is_boring_tool "masc_status"));
-          test_case "masc_heartbeat is boring" `Quick (fun () ->
+          test_case "masc_heartbeat is NOT boring (removed from keeper)" `Quick (fun () ->
             check bool "masc_heartbeat"
-              true (Masc_mcp.Keeper_tool_registry.is_boring_tool "masc_heartbeat"));
+              false (Masc_mcp.Keeper_tool_registry.is_boring_tool "masc_heartbeat"));
           test_case "keeper_tasks_list is boring" `Quick (fun () ->
             check bool "keeper_tasks_list"
               true (Masc_mcp.Keeper_tool_registry.is_boring_tool "keeper_tasks_list"));

@@ -199,7 +199,6 @@ let legacy_session_min_tool_names =
     "masc_transition";
     "masc_add_task";
     "masc_broadcast";
-    "masc_heartbeat";
   ]
 
 let migrate_legacy_restricted_tools names =

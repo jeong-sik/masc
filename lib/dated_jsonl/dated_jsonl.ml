@@ -233,7 +233,6 @@ let count_entries t =
         month_total + count_non_empty_lines path
       ) 0 days
   ) 0 months
-
 let read_range t ~since ~until =
   match parse_date since, parse_date until with
   | None, _ | _, None -> []

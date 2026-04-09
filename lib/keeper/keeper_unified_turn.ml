@@ -65,7 +65,7 @@ let ambiguous_side_effect_error_prefix =
 let committed_mutating_tools tool_names =
   tool_names
   |> dedupe_keep_order
-  |> List.filter Keeper_tool_registry.has_retry_unsafe_side_effect
+  |> List.filter (fun name -> not (Keeper_exec_tools.is_effectively_read_only_tool name))
 
 let is_ambiguous_side_effect_error (err : Oas.Error.sdk_error) : bool =
   match err with
@@ -200,7 +200,8 @@ let scheduled_autonomous_outcome_of_result
   | true, true -> Proactive_mixed_response
 
 let has_substantive_tool_calls (tools_used : string list) : bool =
-  List.exists (fun tool_name -> tool_name <> "masc_heartbeat") tools_used
+  List.exists (fun name ->
+    not (Keeper_tool_registry.is_boring_tool name)) tools_used
 
 let selected_mode_of_result (result : Keeper_agent_run.run_result) : string =
   let text = String.trim result.response_text in
@@ -515,7 +516,8 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
   in
   let substantive_tool_call_count =
     result.tools_used
-    |> List.filter (fun tool_name -> tool_name <> "masc_heartbeat")
+    |> List.filter (fun name ->
+         not (Keeper_tool_registry.is_boring_tool name))
     |> List.length
   in
   let has_substantive_tools = has_substantive_tool_calls result.tools_used in
@@ -1000,7 +1002,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
          with each other's save/restore lifecycle. *)
       let mutating_tools_committed = ref [] in
       let side_effect_observer ~tool_name ~success =
-        if success && Keeper_tool_registry.has_retry_unsafe_side_effect tool_name then
+        if success && not (Keeper_exec_tools.is_effectively_read_only_tool tool_name) then
           mutating_tools_committed := tool_name :: !mutating_tools_committed
       in
       Keeper_exec_tools.add_tool_call_observer side_effect_observer;
@@ -1025,6 +1027,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
             Keeper_agent_run.run_turn ~config ~meta:run_meta ~base_dir
               ~max_context ~build_turn_prompt
               ~user_message ~cascade_name:Keeper_config.default_cascade_name
+              ?provider_filter:run_meta.allowed_providers
               ~generation:run_generation ~max_idle_turns
               ~history_user_source:"world_state_prompt"
               ~history_assistant_source:"internal_assistant"

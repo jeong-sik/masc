@@ -177,7 +177,7 @@ flowchart TD
 | What resources exist? | `resources/list`, `resources/templates/list`, [mcp_server.ml](../lib/mcp_server.ml) |
 | What is the canonical architecture? | [MERGED-ARCHITECTURE-SSOT.md](./MERGED-ARCHITECTURE-SSOT.md) |
 | What is the canonical managed-operation flow? | [COMMAND-PLANE-RUNBOOK.md](./COMMAND-PLANE-RUNBOOK.md) |
-| What is the canonical implementation-swarm flow? | [SUPERVISOR-MODE.md](./SUPERVISOR-MODE.md), [TEAM-SESSION-ARCHITECTURE.md](./TEAM-SESSION-ARCHITECTURE.md) |
+| What is the canonical implementation-swarm flow? | [SUPERVISOR-MODE.md](./SUPERVISOR-MODE.md) |
 | What is safe to expose remotely? | [REMOTE-MCP-OPERATOR.md](./REMOTE-MCP-OPERATOR.md) |
 
 ## Design Judgment

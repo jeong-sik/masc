@@ -14,6 +14,18 @@ let arg_get_string ctx key default =
 let arg_get_int ctx key default =
   Safe_ops.json_int ~default key ctx.arguments
 
+(** masc_bounded_run only accepts configured spawnable agent labels.
+    Arbitrary executables are valid for [Spawn.spawn] test helpers, but not for
+    user-facing bounded runs where we want deterministic validation errors. *)
+let invalid_bounded_agents (agents : string list) : string list =
+  let invalid =
+    agents
+    |> List.map String.trim
+    |> List.filter (fun name ->
+      name = "" || not (Provider_adapter.is_spawnable_agent name))
+  in
+  List.sort_uniq String.compare invalid
+
 (** masc_bounded_run — run a bounded multi-agent execution *)
 let handle_bounded_run (ctx : context) : result option =
   let module U = Yojson.Safe.Util in
@@ -28,18 +40,34 @@ let handle_bounded_run (ctx : context) : result option =
   if String.trim prompt = "" then
     Some (false, Tool_args.error_response "prompt is required")
   else
-  let constraints_json = arguments |> U.member "constraints" in
-  let goal_json = arguments |> U.member "goal" in
-  let constraints = Bounded.constraints_of_json constraints_json in
-  let goal = Bounded.goal_of_json goal_json in
-  ignore (state, sw);
-  let spawn_fn agent_name prompt =
-    Spawn.spawn ~agent_name ~prompt
-      ~timeout_seconds:Env_config.Spawn.timeout_seconds ()
-  in
-  let result = Bounded.bounded_run ~constraints ~goal ~agents ~prompt ~spawn_fn in
-  let json = Bounded.result_to_json result in
-  Some (result.Bounded.status = `Goal_reached, Yojson.Safe.pretty_to_string json)
+    match invalid_bounded_agents agents with
+    | invalid :: rest ->
+      let invalid_names = String.concat ", " (invalid :: rest) in
+      let allowed =
+        Provider_adapter.spawnable_canonical_names ()
+        |> List.sort_uniq String.compare
+        |> String.concat ", "
+      in
+      Some
+        ( false,
+          Tool_args.error_response_typed
+            ~code:Tool_args.Validation_error
+            (Printf.sprintf
+               "invalid agent name(s): %s. Use configured spawnable agents: %s"
+               invalid_names allowed) )
+    | [] ->
+      let constraints_json = arguments |> U.member "constraints" in
+      let goal_json = arguments |> U.member "goal" in
+      let constraints = Bounded.constraints_of_json constraints_json in
+      let goal = Bounded.goal_of_json goal_json in
+      ignore (state, sw);
+      let spawn_fn agent_name prompt =
+        Spawn.spawn ~agent_name ~prompt
+          ~timeout_seconds:Env_config.Spawn.timeout_seconds ()
+      in
+      let result = Bounded.bounded_run ~constraints ~goal ~agents ~prompt ~spawn_fn in
+      let json = Bounded.result_to_json result in
+      Some (result.Bounded.status = `Goal_reached, Yojson.Safe.pretty_to_string json)
 
 (** masc_broadcast — broadcast a message to the room *)
 let handle_broadcast (ctx : context) : result option =

@@ -161,6 +161,7 @@ let run_turn
          base_system_prompt:string -> messages:Agent_sdk.Types.message list -> turn_prompt)
       ~(user_message : string)
       ~(cascade_name : string)
+      ?provider_filter
       ~(generation : int)
       ?(max_turns : int = Env_config_keeper.KeeperKeepalive.oas_max_turns_per_call)
       (* Per-call turn budget. Keeper resumes via checkpoint if exhausted. *)
@@ -488,7 +489,6 @@ let run_turn
     ; "masc_tasks", "태스크 목록 할일 작업"
     ; "masc_add_task", "태스크 추가 등록 생성"
     ; "masc_status", "상태 현황 방 룸 요약"
-    ; "masc_heartbeat", "하트비트 살아있음 생존"
     ; "masc_dashboard", "대시보드 현황 대시 보드 개요"
     ; "masc_plan_clear_task", "계획 태스크 제거 해제 클리어"
     ; "masc_agent_fitness", "에이전트 평가 점수 피트니스"
@@ -1370,6 +1370,7 @@ let run_turn
        Keeper_llm_bridge.run_with_timeout_and_fallback ~timeout_s (fun () ->
          Oas_worker.run_named
            ~cascade_name
+           ?provider_filter
            ~goal:user_message
            ~priority
            ~session_id:meta.runtime.trace_id

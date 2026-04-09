@@ -34,7 +34,6 @@ let resolved_model_id_for_result ~(meta : keeper_meta)
   let used = strip_latest result.model_used in
   let cascade_models =
     Oas_model_resolve.models_of_cascade_name meta.cascade_name
-    |> Oas_model_resolve.filter_by_providers meta.allowed_providers
   in
   let cfgs = Llm_provider.Cascade_config.parse_model_strings cascade_models in
   match
@@ -169,8 +168,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
       let effective_models =
         if direct_reply then
           Oas_model_resolve.models_of_cascade_name turn_cascade_name
-          |> Oas_model_resolve.filter_by_providers meta.allowed_providers
-        else
+              else
           effective_model_labels_for_turn meta
       in
       Progress.Tracker.step turn_tracker ~message:"Validating API keys" ();

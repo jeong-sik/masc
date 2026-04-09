@@ -279,7 +279,6 @@ docs/spec/ 체계에서 아직 다루지 않는 영역.
 04-chain-engine.md          -- Chain/Cascade 엔진
 05-keeper-agent.md          -- Keeper 에이전트
 06-command-plane.md         -- Command Plane
-07-team-session.md          -- Team Session
 09-server-transport.md      -- 서버/전송
 10-dashboard.md             -- Dashboard
 11-board.md                 -- Board 시스템

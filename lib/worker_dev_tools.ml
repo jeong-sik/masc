@@ -299,10 +299,21 @@ let looks_like_path_token token =
    || String.starts_with ~prefix:"~/" token
    || String.contains token '/')
 
+let has_path_rewrite_syntax cmd =
+  String.exists
+    (function
+      | '\'' | '"' | '\\' | '*' | '?' | '[' | ']' | '{' | '}' -> true
+      | _ -> false)
+    cmd
+
 let validate_command_paths ?workdir cmd =
   match workdir with
   | None -> Ok ()
   | Some _ ->
+    if String.contains cmd '/' && has_path_rewrite_syntax cmd then
+      Error
+        "Path syntax blocked: shell quoting, globbing, brace expansion, and backslash escapes are not allowed for path-bearing keeper commands. Use plain unquoted paths and explicit cwd."
+    else
     let rec loop expect_path_value = function
       | [] -> Ok ()
       | token :: rest ->

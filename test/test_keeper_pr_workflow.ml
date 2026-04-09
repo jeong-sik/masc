@@ -867,6 +867,44 @@ let test_bash_blocks_absolute_path_outside_playground () =
     check bool "absolute path blocked" true
       (String.starts_with ~prefix:"Path blocked:" (json_string "error" json)))
 
+let test_bash_blocks_quoted_absolute_path_outside_playground () =
+  with_room (fun config ->
+    let meta = make_meta_with_preset "delivery" in
+    let shared_file =
+      Filename.concat (Keeper_alerting_path.project_root_of_config config)
+        "workspace/yousleepwhen/oas/lib/approval.ml"
+    in
+    write_text_file shared_file "let approval = true\n";
+    let quoted_cmd = Printf.sprintf "cat \"%s\"" shared_file in
+    let result =
+      call_tool config meta "keeper_bash"
+        (`Assoc [ "cmd", `String quoted_cmd ])
+    in
+    let json = parse_json result in
+    check bool "returns path syntax blocked error" true
+      (match json with `Assoc fields -> List.mem_assoc "error" fields | _ -> false);
+    check bool "quoted absolute path blocked" true
+      (String.starts_with ~prefix:"Path syntax blocked:" (json_string "error" json)))
+
+let test_readonly_bash_blocks_quoted_absolute_path_outside_playground () =
+  with_room (fun config ->
+    let meta = make_meta_with_preset "delivery" in
+    let shared_file =
+      Filename.concat (Keeper_alerting_path.project_root_of_config config)
+        "workspace/yousleepwhen/oas/lib/approval.ml"
+    in
+    write_text_file shared_file "let approval = true\n";
+    let quoted_cmd = Printf.sprintf "cat \"%s\"" shared_file in
+    let result =
+      call_tool config meta "keeper_shell_readonly"
+        (`Assoc [ "op", `String "bash"; "command", `String quoted_cmd ])
+    in
+    let json = parse_json result in
+    check bool "returns path syntax blocked error" true
+      (match json with `Assoc fields -> List.mem_assoc "error" fields | _ -> false);
+    check bool "quoted readonly absolute path blocked" true
+      (String.starts_with ~prefix:"Path syntax blocked:" (json_string "error" json)))
+
 let () =
   run "keeper_pr_workflow"
     [ "required_fields",
@@ -923,6 +961,10 @@ let () =
           test_fs_read_allows_explicit_custom_path
       ; test_case "bash blocks absolute path outside playground" `Quick
           test_bash_blocks_absolute_path_outside_playground
+      ; test_case "bash blocks quoted absolute path outside playground" `Quick
+          test_bash_blocks_quoted_absolute_path_outside_playground
+      ; test_case "readonly bash blocks quoted absolute path outside playground" `Quick
+          test_readonly_bash_blocks_quoted_absolute_path_outside_playground
       ]
     ; "integration",
       [ test_case "worktree workflow e2e" `Slow test_worktree_create_writes_and_cleans_up

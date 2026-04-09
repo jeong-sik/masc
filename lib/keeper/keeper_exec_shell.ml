@@ -78,6 +78,13 @@ let process_status_is_timeout = function
   | Unix.WSIGNALED sig_num -> sig_num = Sys.sigterm
   | _ -> false
 
+let shell_command_available name =
+  let probe =
+    Printf.sprintf "command -v %s >/dev/null 2>&1" (Filename.quote name)
+  in
+  match Process_eio.run_argv_with_status ~timeout_sec:2.0 [ "/bin/sh"; "-c"; probe ] with
+  | Unix.WEXITED 0, _ -> true
+  | _ -> false
 (** Write playground repo state cache after successful clone/pull.
     Reads git metadata from [repo_path] and upserts into
     [playground_dir/.playground_state.json]. Best-effort: failures are logged
@@ -400,10 +407,27 @@ let handle_keeper_shell
         let file_type = Safe_ops.json_string ~default:"" "type" args |> String.trim in
         (* Optional glob filter (e.g. "*.ml", "lib/**/*.ml") *)
         let glob = Safe_ops.json_string ~default:"" "glob" args |> String.trim in
-        let base_argv = [ "rg"; "-n"; "-m"; string_of_int limit ] in
-        let type_argv = if file_type <> "" then [ "--type"; file_type ] else [] in
-        let glob_argv = if glob <> "" then [ "--glob"; glob ] else [] in
-        let argv = base_argv @ type_argv @ glob_argv @ [ pattern; target ] in
+        let rg_available = shell_command_available "rg" in
+        let grep_available = shell_command_available "grep" in
+        let argv =
+          if rg_available then
+            let base_argv = [ "rg"; "-n"; "-m"; string_of_int limit ] in
+            let type_argv = if file_type <> "" then [ "--type"; file_type ] else [] in
+            let glob_argv = if glob <> "" then [ "--glob"; glob ] else [] in
+            Ok (base_argv @ type_argv @ glob_argv @ [ pattern; target ])
+          else if not grep_available then
+            Error "rg executable not found, and grep fallback is unavailable"
+          else if file_type <> "" || glob <> "" then
+            Error
+              "rg executable not found; grep fallback only supports pattern and path"
+          else
+            (* Keep readonly rg usable in lean CI images that do not ship ripgrep. *)
+            Ok
+              [ "grep"; "-R"; "-n"; "-I"; "-m"; string_of_int limit; "--"; pattern; target ]
+        in
+        match argv with
+        | Error e -> error_json ~fields:[ "op", `String op ] e
+        | Ok argv ->
         let st, out =
           Process_eio.run_argv_with_status ~timeout_sec:read_timeout_sec argv
         in

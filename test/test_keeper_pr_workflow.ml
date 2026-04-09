@@ -1034,6 +1034,85 @@ let test_shell_readonly_rg_resolves_dot_path_from_cwd () =
            | _ -> false) matches
        | _ -> false))
 
+let with_grep_only_path expected_cwd f =
+  let grep_path =
+    let st, out =
+      Process_eio.run_argv_with_status ~timeout_sec:2.0
+        [ "/bin/sh"; "-c"; "command -v grep" ]
+    in
+    if st <> Unix.WEXITED 0 then failwith "grep not available for fallback test";
+    String.trim out
+  in
+  let fake_bin = Filename.concat expected_cwd "fake-bin" in
+  Fs_compat.mkdir_p fake_bin;
+  Unix.symlink grep_path (Filename.concat fake_bin "grep");
+  let saved_path = Sys.getenv_opt "PATH" in
+  Fun.protect
+    ~finally:(fun () ->
+      match saved_path with
+      | Some path -> Unix.putenv "PATH" path
+      | None -> Unix.putenv "PATH" "")
+    (fun () ->
+      Unix.putenv "PATH" fake_bin;
+      f ())
+
+let test_shell_readonly_rg_falls_back_to_grep_when_rg_missing () =
+  with_room (fun config ->
+    let meta = make_meta_with_preset "delivery" in
+    let expected_cwd =
+      Filename.concat
+        (Keeper_alerting_path.project_root_of_config config)
+        (Keeper_alerting_path.playground_path_of_keeper meta.name)
+    in
+    let nested_file = Filename.concat expected_cwd "repo/lib/approval.ml" in
+    write_text_file nested_file "let keeper_path_fix = true\n";
+    with_grep_only_path expected_cwd (fun () ->
+        let result =
+          call_tool config meta "keeper_shell"
+            (`Assoc
+              [ "op", `String "rg"
+              ; "cwd", `String expected_cwd
+              ; "path", `String "."
+              ; "pattern", `String "keeper_path_fix"
+              ])
+        in
+        let json = parse_json result in
+        check bool "rg fallback ok" true (json_bool "ok" json);
+        check string "rg fallback path uses cwd" (Filename.concat expected_cwd ".")
+          (json_string "path" json);
+        check bool "rg fallback finds nested file" true
+          (match Yojson.Safe.Util.member "matches" json with
+           | `List matches ->
+             List.exists (function
+               | `String line -> String_util.contains_substring line "keeper_path_fix"
+               | _ -> false) matches
+           | _ -> false)))
+
+let test_shell_readonly_rg_reports_filter_limit_when_rg_missing () =
+  with_room (fun config ->
+    let meta = make_meta_with_preset "delivery" in
+    let expected_cwd =
+      Filename.concat
+        (Keeper_alerting_path.project_root_of_config config)
+        (Keeper_alerting_path.playground_path_of_keeper meta.name)
+    in
+    write_text_file (Filename.concat expected_cwd "repo/lib/approval.ml")
+      "let keeper_path_fix = true\n";
+    with_grep_only_path expected_cwd (fun () ->
+        let result =
+          call_tool config meta "keeper_shell"
+            (`Assoc
+              [ "op", `String "rg"
+              ; "cwd", `String expected_cwd
+              ; "path", `String "."
+              ; "pattern", `String "keeper_path_fix"
+              ; "type", `String "ml"
+              ])
+        in
+        let json = parse_json result in
+        check string "rg fallback filter error"
+          "rg executable not found; grep fallback only supports pattern and path"
+          (json_string "error" json)))
 let () =
   run "keeper_pr_workflow"
     [ "required_fields",
@@ -1108,6 +1187,10 @@ let () =
           test_shell_readonly_cat_resolves_relative_path_from_cwd
       ; test_case "readonly rg resolves dot path from cwd" `Quick
           test_shell_readonly_rg_resolves_dot_path_from_cwd
+      ; test_case "readonly rg falls back to grep when rg missing" `Quick
+          test_shell_readonly_rg_falls_back_to_grep_when_rg_missing
+      ; test_case "readonly rg rejects filters when rg missing" `Quick
+          test_shell_readonly_rg_reports_filter_limit_when_rg_missing
       ]
     ; "integration",
       [ test_case "worktree workflow e2e" `Slow test_worktree_create_writes_and_cleans_up

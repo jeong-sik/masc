@@ -19,6 +19,11 @@ async function refreshHarnessLabSurface(): Promise<void> {
   await refreshHarnessSurface()
 }
 
+async function refreshToolQualityLabSurface(): Promise<void> {
+  const { refreshToolQuality } = await import('./components/tool-quality-panel')
+  await refreshToolQuality()
+}
+
 async function refreshFeatureHealthSurface(): Promise<void> {
   const { refreshFeatureHealth } = await import('./components/feature-health')
   await refreshFeatureHealth()
@@ -39,6 +44,7 @@ export type RefreshTask =
   | 'goals'
   | 'autoresearch'
   | 'harness'
+  | 'toolQuality'
   | 'inspector'
   | 'operatorSnapshot'
   | 'operatorRoomDigest'
@@ -75,6 +81,9 @@ export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params
       if (routeState.params.section === 'harness') {
         return ['harness']
       }
+      if (routeState.params.section === 'tool-quality') {
+        return ['toolQuality']
+      }
       if (routeState.params.section === 'inspector') {
         return ['inspector']
       }
@@ -95,6 +104,7 @@ const REFRESHERS: Record<RefreshTask, () => void> = {
   goals: () => { void refreshGoals() },
   autoresearch: () => { void refreshAutoresearchLabSurface() },
   harness: () => { void refreshHarnessLabSurface() },
+  toolQuality: () => { void refreshToolQualityLabSurface() },
   inspector: () => {
     void refreshShell({ force: true })
     void refreshFeatureHealthSurface()

@@ -408,7 +408,7 @@ async function unbindConnector(connectorId: string, channelIdOverride?: string) 
   }
 }
 
-function DiscordLivePanel({
+function ConnectorLivePanel({
   connector,
   gate,
 }: {
@@ -440,8 +440,9 @@ function DiscordLivePanel({
   const selectedKeeper = keeperByName.get(keeperDraft.value.trim()) ?? null
   const directLabel = connectorStateLabel(connector)
   const directTone = connectorStateTone(connector)
+  const connectorId = connector?.connector_id ?? ''
   const bindingActionsEnabled =
-    connector?.connector_id === 'discord' && connector.capabilities.includes('bindings')
+    connectorId !== '' && connector?.capabilities.includes('bindings')
   const connectorName = connector?.display_name || 'Connector'
   const channelInputLabel = `${connectorName} channel id`
 
@@ -480,7 +481,7 @@ function DiscordLivePanel({
                   variant="primary"
                   size="sm"
                   disabled=${actionLoading.value || channelDraft.value.trim().length === 0 || keeperDraft.value.trim().length === 0}
-                  onClick=${() => { void bindConnector('discord') }}
+                  onClick=${() => { void bindConnector(connectorId) }}
                 >
                   ${actionLoading.value ? 'Applying...' : 'Bind'}
                 <//>
@@ -488,7 +489,7 @@ function DiscordLivePanel({
                   variant="danger"
                   size="sm"
                   disabled=${actionLoading.value || channelDraft.value.trim().length === 0}
-                  onClick=${() => { void unbindConnector('discord') }}
+                  onClick=${() => { void unbindConnector(connectorId) }}
                 >
                   Unbind
                 <//>
@@ -630,7 +631,7 @@ function DiscordLivePanel({
                               keeperDraft.value = binding.keeper_name
                             }}>Use<//>
                             ${bindingActionsEnabled
-                              ? html`<${ActionButton} variant="danger" size="sm" disabled=${actionLoading.value} onClick=${() => { void unbindConnector('discord', binding.channel_id) }}>Unbind<//>`
+                              ? html`<${ActionButton} variant="danger" size="sm" disabled=${actionLoading.value} onClick=${() => { void unbindConnector(connectorId, binding.channel_id) }}>Unbind<//>`
                               : null}
                           </div>
                         </div>
@@ -880,7 +881,7 @@ export function ConnectorStatusPanel() {
         </div>
       </div>
 
-      <${DiscordLivePanel} connector=${live} gate=${d} />
+      <${ConnectorLivePanel} connector=${live} gate=${d} />
 
       ${error.value
         ? html`

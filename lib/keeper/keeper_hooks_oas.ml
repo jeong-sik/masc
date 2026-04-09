@@ -323,7 +323,7 @@ let make_hooks
 
     post_tool_use = Some (fun event ->
       match event with
-      | Agent_sdk.Hooks.PostToolUse { tool_name; input; output; _ } ->
+      | Agent_sdk.Hooks.PostToolUse { tool_name; input; output; duration_ms = hook_duration_ms; _ } ->
         let output_text = match output with
           | Ok { Agent_sdk.Types.content; _ } -> content
           | Error { Agent_sdk.Types.message; _ } -> message
@@ -342,7 +342,9 @@ let make_hooks
            tool_start_time is keeper-local (one ref per make_hooks call).
            Tool calls within Agent.run are sequential, so no race. *)
         let duration_ms =
-          (Time_compat.now () -. !tool_start_time) *. 1000.0
+          if hook_duration_ms > 0.0
+          then hook_duration_ms
+          else (Time_compat.now () -. !tool_start_time) *. 1000.0
         in
         (* Consume truncation info set by keeper_tools_oas before returning
            the (possibly truncated) result to OAS. Falls back to out_len
@@ -352,6 +354,10 @@ let make_hooks
             ~keeper_name:(!meta_ref).name ()
         in
         let result_bytes = if original_bytes > 0 then original_bytes else out_len in
+        let lane, tool_choice, thinking_enabled, thinking_budget =
+          Keeper_tool_call_log.get_turn_context
+            ~keeper_name:(!meta_ref).name ()
+        in
         (try
            Keeper_tool_call_log.log_call
              ~keeper_name:(!meta_ref).name
@@ -359,6 +365,7 @@ let make_hooks
              ~success:(outcome = "ok") ~duration_ms
              ~model:(let m = (!meta_ref).runtime.usage.last_model_used in
                      if m = "" then (!meta_ref).cascade_name else m)
+             ?lane ?tool_choice ?thinking_enabled ?thinking_budget
              ~result_bytes ?truncated_to ()
          with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
         (try on_tool_executed tool_name input output_text

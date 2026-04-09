@@ -34,6 +34,7 @@
    cascade_inference
    cancellation
    channel_gate
+   channel_gate_connector
    channel_gate_metrics
    channel_gate_discord_state
    gate_protocol

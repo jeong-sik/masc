@@ -19,6 +19,10 @@ vi.mock('./mission-store', () => ({
   refreshMissionSnapshot: vi.fn(),
 }))
 
+vi.mock('./components/tool-quality-panel', () => ({
+  refreshToolQuality: vi.fn(),
+}))
+
 vi.mock('./command-store', () => ({
   commandPlaneSurface: { value: 'overview' },
   refreshCommandPlaneChainSummary: vi.fn(),
@@ -79,6 +83,11 @@ describe('refreshPlanForRoute', () => {
       tab: 'lab',
       params: { section: 'harness' },
     })).toEqual(['harness'])
+
+    expect(refreshPlanForRoute({
+      tab: 'lab',
+      params: { section: 'tool-quality' },
+    })).toEqual(['toolQuality'])
 
     expect(refreshPlanForRoute({
       tab: 'lab',

@@ -124,7 +124,17 @@ class ApiRequestError extends Error {
 
 export async function fetchWithTimeout(path: string, init: RequestInit, timeoutMs: number): Promise<Response> {
   const controller = new AbortController()
+  const upstreamSignal = init.signal
+  const abortFromUpstream = () => controller.abort()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
+
+  if (upstreamSignal) {
+    if (upstreamSignal.aborted) {
+      controller.abort()
+    } else {
+      upstreamSignal.addEventListener('abort', abortFromUpstream, { once: true })
+    }
+  }
 
   try {
     return await fetch(path, {
@@ -133,6 +143,9 @@ export async function fetchWithTimeout(path: string, init: RequestInit, timeoutM
     })
   } catch (err) {
     if (err instanceof Error && err.name === 'AbortError') {
+      if (upstreamSignal?.aborted) {
+        throw err
+      }
       const method = typeof init.method === 'string' ? init.method.toUpperCase() : 'GET'
       throw new ApiRequestError({
         method,
@@ -144,6 +157,7 @@ export async function fetchWithTimeout(path: string, init: RequestInit, timeoutM
     throw err
   } finally {
     clearTimeout(timer)
+    upstreamSignal?.removeEventListener('abort', abortFromUpstream)
   }
 }
 
@@ -277,12 +291,16 @@ export function defaultBoardVoter(): string {
 export type GetOptions = {
   timeoutMs?: number
   includeActorHeader?: boolean
+  signal?: AbortSignal
 }
 
 export async function get<T>(path: string, opts: GetOptions = {}): Promise<T> {
   const res = await fetchWithTimeout(
     path,
-    { headers: authHeaders({ includeActor: opts.includeActorHeader }) },
+    {
+      headers: authHeaders({ includeActor: opts.includeActorHeader }),
+      signal: opts.signal,
+    },
     opts.timeoutMs ?? DEFAULT_GET_TIMEOUT_MS,
   )
   if (!res.ok) {

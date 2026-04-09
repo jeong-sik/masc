@@ -20,7 +20,7 @@
 @import "./keyframes.css";
 
 /* ── Feature imports (alphabetical, a11y.css last for cascade) ── */
-@import "./agent-monitor.css";
+
 @import "./board.css";
 @import "./chat.css";
 @import "./command-plane.css";
@@ -35,7 +35,6 @@
 @import "./overview.css";
 @import "./pipeline.css";
 @import "./pixel-avatar.css";
-@import "./roster-detail.css";
 @import "./tools.css";
 @import "./ui.css";
 @import "./responsive.css";

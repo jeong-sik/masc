@@ -136,7 +136,7 @@ button.monitor-row {
   &.bad { background: var(--bad-light); }
 }
 
-/* ── Live Timeline — see agent-monitor.css ─────────────────── */
+/* ── Live Timeline ─────────────────── */
 
 /* Event kind badge variants */
 @utility agent-event-badge--heartbeat { background: var(--ok-12); color: var(--ok); }

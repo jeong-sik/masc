@@ -70,6 +70,25 @@ let remote_confirm_ttl_seconds = 900.0
 
 let iso_of_unix = Dashboard_utils.iso_of_unix
 
+let align_keeper_runtime_status
+    ~(surface_status : string)
+    ~(agent_status_json : Yojson.Safe.t)
+    ~(keepalive_running : bool) : string =
+  if not keepalive_running then
+    surface_status
+  else
+    let normalized_surface =
+      String.lowercase_ascii (String.trim surface_status)
+    in
+    let runtime_status =
+      match U.member "status" agent_status_json with
+      | `String (("active" | "busy" | "listening" | "idle") as status) -> Some status
+      | _ -> None
+    in
+    match (normalized_surface, runtime_status) with
+    | ("inactive" | "offline"), Some status -> status
+    | _ -> surface_status
+
 let remote_client_type_of_context (ctx : 'a context) =
   match ctx.mcp_session_id with
   | Some _ -> "mcp_remote"
@@ -284,6 +303,10 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                  let agent_status =
                    if not agent_exists then "offline"
                    else Keeper_exec_status.keeper_surface_status ~agent_status:agent_json ~diagnostic
+                 in
+                 let agent_status =
+                   align_keeper_runtime_status ~surface_status:agent_status
+                     ~agent_status_json:agent_json ~keepalive_running
                  in
                  let registry_phase =
                    Keeper_registry.get_phase ~base_path:config.base_path meta.name

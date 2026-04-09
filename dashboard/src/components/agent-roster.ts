@@ -23,6 +23,11 @@ import { FilterChips } from './common/filter-chips'
 import { TextInput } from './common/input'
 import { EmptyState } from './common/empty-state'
 import { TimeAgo } from './common/time-ago'
+import {
+  keeperIdentitySearchTerms,
+  keeperPrimaryName,
+  runtimeAgentName,
+} from './common/keeper-identity'
 import { AgentAvatar } from './overview/agent-avatar'
 import { openAgentDetail } from './agent-detail'
 import { openKeeperDetail } from './keeper-detail'
@@ -53,6 +58,8 @@ function runtimeBadgeClass(band: RuntimeBand): string {
 }
 
 interface KeeperInfo {
+  name?: string
+  agent_name?: string | null
   generation?: number | null
   context_ratio?: number | null
   model?: string | null
@@ -119,7 +126,7 @@ const FILTER_META: Record<StatusFilter, { label: string; description: string }> 
   },
   attention: {
     label: '주의 필요',
-    description: '오류, 복구, 승계, stale heartbeat, blocker 등 운영 확인이 필요한 상태입니다.',
+    description: '응답 지연, 오류, 복구, 승계 등으로 상태 확인이 필요한 항목입니다.',
   },
   paused: {
     label: '일시정지',
@@ -305,20 +312,29 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     scopedAgents.map(agent => [agent.name, runtimeBandMetaForAgent(agent, findKeeperRuntime(agent.name, keeperList))] as const),
   )
   const pageTitle = keeperFilter === 'keeper-only'
-    ? '키퍼 런타임'
+    ? '키퍼 목록'
     : keeperFilter === 'agent-only'
       ? '일반 에이전트'
-      : '통합 런타임 목록'
+      : '에이전트 & 키퍼 목록'
   const pageDescription = keeperFilter === 'keeper-only'
-    ? '키퍼 런타임만 따로 봅니다.'
+    ? '키퍼만 따로 보고, 런타임 이름은 보조 정보로 확인합니다.'
     : keeperFilter === 'agent-only'
       ? '키퍼가 연결되지 않은 일반 에이전트만 봅니다.'
-      : '에이전트와 키퍼를 한 목록에서 봅니다.'
+      : '에이전트와 키퍼를 한 목록에서 보고, 운영 상태는 배지로 구분합니다.'
 
   const filtered = scopedAgents
     .filter((a: Agent) => {
       if (filter !== 'all' && bandByAgent.get(a.name)?.key !== filter) return false
-      if (search && !a.name.toLowerCase().includes(search.toLowerCase())) return false
+      if (search) {
+        const keeper = findKeeper(a.name, keeperList, keeperBriefs)
+        const terms = keeperIdentitySearchTerms(
+          keeper?.name ?? null,
+          keeper?.agent_name ?? a.name,
+        )
+        if (!terms.some(term => term.toLowerCase().includes(search.toLowerCase()))) {
+          return false
+        }
+      }
       return true
     })
     .sort((a: Agent, b: Agent) => {
@@ -365,19 +381,19 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     ? `키퍼 ${expectedScopedCount}개`
     : keeperFilter === 'agent-only'
       ? `일반 에이전트 ${expectedScopedCount}개`
-      : `런타임 ${expectedScopedCount}개`
+      : `에이전트/키퍼 ${expectedScopedCount}개`
   const fallbackStateTitle =
     executionError.value
-      ? 'execution 상세 불러오기 실패'
+      ? '상세 상태 불러오기 실패'
       : executionLoaded.value
-        ? '상세 runtime 부분 동기화'
-        : '상세 runtime 동기화 중'
+        ? '상세 상태 부분 동기화'
+        : '상세 상태 동기화 중'
   const fallbackStateMessage =
     executionError.value
-      ? `${countSourceLabel} 기준 ${scopeLabel}가 등록되어 있지만 execution 상세 projection을 아직 가져오지 못했습니다.`
+      ? `${countSourceLabel} 기준 ${scopeLabel}가 등록되어 있지만 상세 상태 정보를 아직 가져오지 못했습니다.`
       : executionLoaded.value
         ? `${countSourceLabel} 기준 ${scopeLabel}가 등록되어 있고 일부만 상세 목록에 반영됐습니다.`
-        : `${countSourceLabel} 기준 ${scopeLabel}가 등록되어 있습니다. execution 상세 projection이 올라오면 상태별 분류와 카드가 채워집니다.`
+        : `${countSourceLabel} 기준 ${scopeLabel}가 등록되어 있습니다. 상세 상태 정보가 올라오면 상태별 분류와 카드가 채워집니다.`
 
   return html`
     <div class="agent-page flex w-full flex-col gap-5 px-0 py-1">
@@ -410,7 +426,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
             <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div class="flex flex-col gap-1">
                 <div class="text-[11px] font-semibold tracking-[0.08em] text-[var(--text-strong)] uppercase">운영 상태</div>
-                <p class="m-0 text-[12px] leading-[1.5] text-[var(--text-muted)]">먼저 운영 상태로 걸러 보고, 필요할 때만 phase와 현재 활동 근거를 확인합니다.</p>
+                <p class="m-0 text-[12px] leading-[1.5] text-[var(--text-muted)]">먼저 운영 상태로 걸러 보고, 필요할 때만 세부 상태와 최근 근거를 확인합니다.</p>
               </div>
               <${FilterChips}
                 chips=${statusChips}
@@ -494,9 +510,18 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
             ?? keeper?.tool_audit_at
             ?? keeperRuntime?.tool_audit_at
             ?? null
+          const displayName =
+            keeperPrimaryName(
+              keeperRuntime?.name ?? keeper?.name ?? null,
+              keeperRuntime?.agent_name ?? keeper?.agent_name ?? agent.name,
+            )
+            ?? agent.name
+          const runtimeName = isKeeper
+            ? runtimeAgentName(displayName, keeperRuntime?.agent_name ?? keeper?.agent_name ?? agent.name)
+            : null
           const model = keeperRuntime?.model ?? keeper?.model
           const generation = keeperRuntime?.generation ?? keeper?.generation ?? null
-          const detailLabel = keeperRuntime ? `${agent.name} keeper 상세 보기` : `${agent.name} 상세 보기`
+          const detailLabel = keeperRuntime ? `${displayName} keeper 상세 보기` : `${displayName} 상세 보기`
           const openDetail = () => {
             if (keeperRuntime) {
               openKeeperDetail(keeperRuntime)
@@ -525,11 +550,12 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                 </div>
                 
                 <div class="flex flex-col min-w-0 flex-1 justify-center py-1">
-                  <strong class="mb-2 min-w-0 overflow-hidden text-[17px] text-[var(--text-strong)] font-semibold leading-[1.3] group-hover:text-[var(--accent)] transition-colors [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] [overflow-wrap:anywhere]">${agent.name}</strong>
+                  <strong class="mb-2 min-w-0 overflow-hidden text-[17px] text-[var(--text-strong)] font-semibold leading-[1.3] group-hover:text-[var(--accent)] transition-colors [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] [overflow-wrap:anywhere]">${displayName}</strong>
                   
                   <div class="flex items-center gap-1.5 flex-wrap mt-1">
                     <span class="inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${runtimeBadgeClass(band.key)}" title=${band.description}>${band.label}</span>
-                    <span class="text-[11px] text-[var(--text-muted)] bg-[var(--white-4)] border border-[var(--card-border)] px-2 py-0.5 rounded-full">${isKeeper ? '키퍼 런타임' : '일반 에이전트'}</span>
+                    <span class="text-[11px] text-[var(--text-muted)] bg-[var(--white-4)] border border-[var(--card-border)] px-2 py-0.5 rounded-full">${isKeeper ? '키퍼' : '일반 에이전트'}</span>
+                    ${runtimeName ? html`<span class="font-mono text-[10px] text-[var(--text-muted)] bg-[var(--white-4)] border border-[var(--card-border)] px-1.5 py-px rounded">${runtimeName}</span>` : null}
                     ${agent.synthetic ? html`<span class="text-[10px] text-[var(--text-muted)] bg-[var(--white-6)] border border-dashed border-[var(--card-border)] px-1.5 py-px rounded italic" title="키퍼 데이터에서 파생된 합성 엔트리입니다.">파생</span>` : null}
                     ${monitoringEvidence?.phase && keeperRuntime ? html`<${KeeperPhaseBadge} phase=${keeperPhaseForDisplay(keeperRuntime)} compact />` : null}
                     ${monitoringEvidence?.stage ? html`<span class="inline-flex items-center rounded-full border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5 text-[10px] font-medium text-[var(--text-muted)]" title=${monitoringEvidence.stage.description}>활동 ${monitoringEvidence.stage.label}</span>` : null}

@@ -7,15 +7,11 @@
 
     After a cached value expires, it is still served as stale data for
     [ttl * 3] additional seconds while a background fiber recomputes.
-    This prevents slow endpoints from blocking HTTP responses. *)
+    This prevents slow endpoints from blocking HTTP responses.
 
-val set_clock : _ Eio.Time.clock -> unit
-(** No-op since #4948 (Time_compat.sleep is the sole sleep path).
-    Retained for backward compatibility with existing callers. *)
-
-val set_sw : Eio.Switch.t -> unit
-(** Register the server switch for background revalidation fibers.
-    Call inside the main [Eio.Switch.run]. *)
+    {b Runtime prerequisites}: callers must initialise [Time_compat.set_clock]
+    and [Eio_context.set_switch] before using the cache. Background
+    stale-while-revalidate fibers are forked via [Eio_context.get_switch_opt]. *)
 
 val get_or_compute : string -> ttl:float -> (unit -> Yojson.Safe.t) -> Yojson.Safe.t
 (** [get_or_compute key ~ttl f] returns a cached value if [key] exists and
@@ -24,7 +20,7 @@ val get_or_compute : string -> ttl:float -> (unit -> Yojson.Safe.t) -> Yojson.Sa
 
     If the entry is expired but within the stale grace period ([ttl * 3]),
     the stale value is returned immediately and [f] runs in a background
-    fiber (requires [set_sw] to have been called).
+    fiber (requires [Eio_context.set_switch] to have been called).
 
     Safe to nest: [f] may call [get_or_compute] for a different key without
     deadlocking.  Concurrent requests for the same key are serialised — only

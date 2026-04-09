@@ -5,7 +5,9 @@ open Alcotest
 
 module Tool_code_write = Masc_mcp.Tool_code_write
 
-let with_env name value f =
+(* OCaml's Unix module does not expose unsetenv; for config overrides that are
+   read via Env_config_core.trim_opt, an empty string is equivalent to unset. *)
+let with_trimmed_env name value f =
   let saved = Sys.getenv_opt name in
   (match value with
    | Some v -> Unix.putenv name v
@@ -140,7 +142,12 @@ let test_ssh_allowed () =
 let test_missing_base_path_without_config_fails_closed () =
   Tool_code_write.reset_policy_config_cache ();
   Fun.protect ~finally:Tool_code_write.reset_policy_config_cache (fun () ->
-    with_env "MASC_CONFIG_DIR" None @@ fun () ->
+    with_trimmed_env "MASC_CONFIG_DIR" None @@ fun () ->
+    check
+      (option string)
+      "blank override trims to None"
+      None
+      (Env_config.config_dir_opt ());
     match Tool_code_write.validate_clone_url ~base_path:"/nonexistent"
       "https://github.com/evil-corp/repo.git" with
     | Error _ -> ()
@@ -151,7 +158,12 @@ let test_explicit_config_dir_override_still_validates () =
   let config_dir = Filename.concat project_root "config" in
   Tool_code_write.reset_policy_config_cache ();
   Fun.protect ~finally:Tool_code_write.reset_policy_config_cache (fun () ->
-    with_env "MASC_CONFIG_DIR" (Some config_dir) @@ fun () ->
+    with_trimmed_env "MASC_CONFIG_DIR" (Some config_dir) @@ fun () ->
+    check
+      (option string)
+      "explicit override survives trimming"
+      (Some config_dir)
+      (Env_config.config_dir_opt ());
     match Tool_code_write.validate_clone_url ~base_path:"/nonexistent"
       "https://github.com/evil-corp/repo.git" with
     | Error _ -> ()

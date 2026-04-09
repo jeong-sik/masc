@@ -451,7 +451,7 @@ let keeper_allowed_model_tools ?(write_done = false) (meta : keeper_meta) :
       |> filter_schemas_by_names allowed
     in
     let count = List.length result in
-    if count > 100 then
+    if count > Keeper_config.tool_policy_count_warn_threshold then
       Log.Keeper.warn
         "tool policy allows %d schemas (~%dKB). Progressive disclosure \
          limits actual LLM context to ~20-40, but universe build cost scales \
@@ -469,11 +469,10 @@ let keeper_universe_model_tools (meta : keeper_meta) : Types.tool_schema list =
 (* ── Tool description lookup (for prompt auto-hints) ─────────── *)
 
 (** Extract the first sentence from a tool description.
-    Truncates at the first period followed by space/newline/end, or 150 chars,
-    whichever is shorter. 150 chars preserves op enums and parameter hints
-    that 9B models need to call tools correctly on the first attempt. *)
+    Truncates at the first period followed by space/newline/end, or
+    [Keeper_config.tool_first_sentence_max_chars] chars, whichever is shorter. *)
 let first_sentence desc =
-  let max_len = 150 in
+  let max_len = Keeper_config.tool_first_sentence_max_chars in
   let len = String.length desc in
   let cutoff =
     (* Find first '.' followed by space, newline, or end-of-string *)

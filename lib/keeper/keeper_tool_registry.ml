@@ -109,7 +109,14 @@ let is_keeper_read_only_tool (name : string) : bool =
   Hashtbl.mem keeper_read_only_set name
 
 let is_effectively_read_only_tool (name : string) : bool =
-  Tool_dispatch.is_read_only name || is_keeper_read_only_tool name
+  (* Keeper-local check first (bare Hashtbl, no mutex) before
+     Tool_dispatch (requires Eio.Mutex acquire). *)
+  is_keeper_read_only_tool name
+  || Tool_dispatch.is_read_only name
+  || Tool_dispatch.is_idempotent name
+
+let has_mutating_side_effect (name : string) : bool =
+  not (is_effectively_read_only_tool name)
 
 (* ── Boring tools (non-productive observation/polling) ─────── *)
 

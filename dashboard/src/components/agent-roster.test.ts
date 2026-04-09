@@ -91,10 +91,11 @@ describe('countAgentsByStatus', () => {
       'agent-only',
     )
 
-    expect(countAgentsByStatus(scoped)).toEqual({
+    expect(countAgentsByStatus(scoped, KEEPERS)).toEqual({
       all: 2,
       active: 1,
-      idle: 1,
+      attention: 1,
+      paused: 0,
       offline: 0,
     })
   })

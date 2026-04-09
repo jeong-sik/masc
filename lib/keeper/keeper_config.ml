@@ -11,6 +11,8 @@ let default_cascade_name = "keeper_unified"
 let min_keeper_context_tokens = 65_536
 
 (* ── Alert preview truncation lengths ─────────────────────── *)
+(* Invariant: excerpt_min < message_max < reply_max.
+   Violating this makes the min/max logic in keeper_alerting.ml degenerate. *)
 
 (** Error detail truncation for alert messages. *)
 let alert_error_detail_max_chars = 280

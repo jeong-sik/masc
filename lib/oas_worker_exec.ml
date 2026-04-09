@@ -539,7 +539,10 @@ let run
       | Some ref_ ->
         (match Oas.Raw_trace_query.validate_run ref_ with
          | Ok v -> Some v
-         | Error _ -> None)
+         | Error err ->
+           Log.Misc.warn "oas_worker: run_validation failed: %s"
+             (Oas.Error.to_string err);
+           None)
       | None -> None
     in
     (match result with

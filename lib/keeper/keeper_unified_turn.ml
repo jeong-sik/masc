@@ -648,9 +648,11 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
              Printf.sprintf "unified:tools=[%s]"
                (String.concat "," result.tools_used)
            else if has_validated_evidence then
-             (let v = Option.get result.run_validation in
-              Printf.sprintf "unified:validated_evidence(ok=%b,file_write=%b,evidence=%d)"
-                v.ok v.has_file_write (List.length v.evidence))
+             (match result.run_validation with
+              | Some v ->
+                Printf.sprintf "unified:validated_evidence(ok=%b,file_write=%b,evidence=%d)"
+                  v.ok v.has_file_write (List.length v.evidence)
+              | None -> "unified:validated_evidence(unreachable)")
            else if not has_text then
              "unified:"
              ^ scheduled_autonomous_cycle_outcome_to_string Proactive_silent
@@ -698,7 +700,8 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
         + (if is_autonomous_turn && not has_text && not has_substantive_tools
               && not has_validated_evidence then 1 else 0);
       last_autonomous_action_at =
-        (if is_autonomous_turn && has_substantive_tools then now_iso ()
+        (if is_autonomous_turn && (has_substantive_tools || has_validated_evidence)
+         then now_iso ()
          else rt.last_autonomous_action_at);
       last_speech_act = Social.speech_act_to_string social_state.speech_act;
       last_blocker = Option.value ~default:"" social_state.blocker;

@@ -37,8 +37,8 @@ let make_config_root root =
   write_file (Filename.concat config "cascade.json") "{}";
   config
 
-let make_inputs ?env_base_path ?env_config_dir ?env_personas_dir ?env_me_root ?env_workspace_root
-    ?env_dune_sourceroot ?env_home ?(cwd = "/tmp/cwd") ?(executable_name = "/tmp/bin/masc-mcp") () =
+let make_inputs ?env_base_path ?env_config_dir ?env_personas_dir
+    ?env_home ?(cwd = "/tmp/cwd") ?(executable_name = "/tmp/bin/masc-mcp") () =
   Lib.Config_dir_resolver.
     {
       cwd;
@@ -47,9 +47,6 @@ let make_inputs ?env_base_path ?env_config_dir ?env_personas_dir ?env_me_root ?e
       env_config_dir;
       env_personas_dir;
       env_home;
-      env_me_root;
-      env_workspace_root;
-      env_dune_sourceroot;
     }
 
 let test_env_override_valid () =
@@ -126,21 +123,19 @@ let test_local_masc_fallback_precedes_home_masc () =
     (Lib.Config_dir_resolver.source_to_string resolution.config_root.source);
   check string "root path" local_config resolution.config_root.path
 
-let test_legacy_me_root_fallback () =
-  with_temp_dir "config-dir-legacy" @@ fun me_root ->
-  let repo_root =
+let test_no_legacy_me_root_fallback () =
+  with_temp_dir "config-dir-no-legacy" @@ fun me_root ->
+  let _repo_root =
     Filename.concat me_root "workspace/yousleepwhen/masc-mcp"
   in
-  let _config = make_config_root repo_root in
   let resolution =
     Lib.Config_dir_resolver.resolve_with
       (make_inputs ~cwd:"/tmp/missing-cwd"
-         ~executable_name:"/tmp/nonexistent-masc"
-         ~env_me_root:me_root ())
+         ~executable_name:"/tmp/nonexistent-masc" ())
   in
-  check string "status" "warn"
+  check string "status" "missing"
     (Lib.Config_dir_resolver.status_to_string resolution.status);
-  check string "root source" "legacy_me_root"
+  check string "root source" "missing"
     (Lib.Config_dir_resolver.source_to_string resolution.config_root.source);
   check bool "warning present" true (resolution.warnings <> [])
 
@@ -157,7 +152,7 @@ let test_personas_dirs_default_repo_only () =
   check (list string) "repo personas only"
     [ Filename.concat config "personas" ] dirs
 
-let test_personas_dirs_includes_home () =
+let test_personas_dirs_ignores_home_fallback () =
   with_temp_dir "pd-home" @@ fun root ->
   let config = make_config_root root in
   let home = Filename.concat root "home" in
@@ -166,8 +161,8 @@ let test_personas_dirs_includes_home () =
   let inputs = make_inputs ~env_config_dir:config ~env_home:home () in
   let resolution = Lib.Config_dir_resolver.resolve_with inputs in
   let dirs = Lib.Config_dir_resolver.personas_dirs_with inputs resolution in
-  check (list string) "repo + home personas"
-    [ Filename.concat config "personas"; home_personas ] dirs
+  check (list string) "repo personas only despite HOME fallback"
+    [ Filename.concat config "personas" ] dirs
 
 let test_personas_dirs_env_override_is_sole_source () =
   with_temp_dir "pd-env" @@ fun root ->
@@ -182,34 +177,23 @@ let test_personas_dirs_env_override_is_sole_source () =
   (* MASC_PERSONAS_DIR overrides: only the env dir, no home dir *)
   check (list string) "env override only" [ env_personas ] dirs
 
-let test_personas_dirs_dedup_overlapping () =
-  with_temp_dir "pd-dedup" @@ fun root ->
+let test_personas_dirs_ignores_base_path_fallback () =
+  with_temp_dir "pd-base" @@ fun root ->
   let config_root = Filename.concat root "config" in
   mkdir_p (Filename.concat config_root "prompts");
   mkdir_p (Filename.concat config_root "keepers");
   mkdir_p (Filename.concat config_root "personas");
   write_file (Filename.concat config_root "cascade.json") "{}";
-  (* Set HOME so that $HOME/.masc/personas points to the same config dir.
-     config_root = root/config, so home = root means
-     $HOME/.masc/personas does NOT exist (different path).
-     Instead, make them overlap by pointing MASC_BASE_PATH so that
-     $MASC_BASE_PATH/.masc/personas == config/personas *)
   let base = Filename.dirname config_root in
-  (* base/.masc/personas must exist for overlap *)
   let base_personas = Filename.concat (Filename.concat base ".masc") "personas" in
   mkdir_p base_personas;
-  (* Make config/personas and base/.masc/personas the same via symlink *)
   let config_personas = Filename.concat config_root "personas" in
   let inputs = make_inputs ~env_config_dir:config_root ~env_base_path:base
       ~cwd:root () in
   let resolution = Lib.Config_dir_resolver.resolve_with inputs in
   let dirs = Lib.Config_dir_resolver.personas_dirs_with inputs resolution in
-  (* Both config_personas and base_personas are different paths, so both appear *)
-  check bool "no exact duplicates"
-    (List.length dirs = List.length (List.sort_uniq String.compare dirs))
-    true;
-  check bool "config personas present"
-    (List.mem config_personas dirs) true
+  check (list string) "base path fallback ignored"
+    [ config_personas ] dirs
 
 let () =
   run "config_dir_resolver"
@@ -223,18 +207,18 @@ let () =
           test_case "local masc fallback precedes home masc" `Quick
             test_local_masc_fallback_precedes_home_masc;
           test_case "home masc fallback" `Quick test_home_masc_fallback;
-          test_case "legacy me_root fallback" `Quick
-            test_legacy_me_root_fallback;
+          test_case "does not fallback to legacy me_root repo path" `Quick
+            test_no_legacy_me_root_fallback;
         ] );
       ( "personas_dirs",
         [
           test_case "default returns repo personas only" `Quick
             test_personas_dirs_default_repo_only;
-          test_case "includes HOME .masc/personas" `Quick
-            test_personas_dirs_includes_home;
+          test_case "ignores HOME .masc/personas fallback" `Quick
+            test_personas_dirs_ignores_home_fallback;
           test_case "MASC_PERSONAS_DIR overrides as sole source" `Quick
             test_personas_dirs_env_override_is_sole_source;
-          test_case "dedup overlapping paths" `Quick
-            test_personas_dirs_dedup_overlapping;
+          test_case "ignores base_path .masc/personas fallback" `Quick
+            test_personas_dirs_ignores_base_path_fallback;
         ] );
     ]

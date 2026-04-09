@@ -106,7 +106,7 @@ let find_suffix_matches_under_root ~root ~anchor ~suffix_rel
   in
   walk ~dirs_seen:0 [] root |> snd |> List.rev
 
-let maybe_resolve_missing_relative_read_path ~(root : string) ~(raw_path : string) :
+let maybe_resolve_missing_relative_read_path ~(roots : string list) ~(raw_path : string) :
     (string option, string) result =
   let parts = split_relative_components raw_path in
   match parts with
@@ -115,7 +115,12 @@ let maybe_resolve_missing_relative_read_path ~(root : string) ~(raw_path : strin
   | anchor :: rest ->
       let suffix_rel = join_path_components rest in
       let matches =
-        find_suffix_matches_under_root ~root ~anchor ~suffix_rel ()
+        roots
+        |> List.fold_left
+             (fun acc root ->
+                acc @ find_suffix_matches_under_root ~root ~anchor ~suffix_rel ())
+             []
+        |> List.sort_uniq String.compare
       in
       (match matches with
        | [] -> Ok None
@@ -134,6 +139,13 @@ let allows_missing_leaf_read ~(raw : string) ~(candidate : string) : bool =
   parent_exists candidate
   && List.length parts > 1
   && not trailing_slash
+
+let is_within_allowed_norms ~(target_norm : string) (allowed_norms : string list) : bool =
+  List.exists
+    (fun allowed_norm ->
+       target_norm = allowed_norm
+       || starts_with ~prefix:(allowed_norm ^ "/") target_norm)
+    allowed_norms
 
 let absolute_allowed_paths ~(config : Room.config) ~(allowed_paths : string list)
     : string list =
@@ -237,10 +249,12 @@ let effective_allowed_paths ~(meta : Keeper_types.keeper_meta) : string list =
   | ["*"] -> []
   | explicit -> playground :: playground_sub @ workspace_defaults @ explicit
 
-(** Resolve a path for read-only access: allow any path within the
-    project root, regardless of allowed_paths.  Write operations must
-    use {!resolve_keeper_target_path} which enforces allowed_paths. *)
-let resolve_keeper_read_path ~(config : Room.config) ~(raw_path : string)
+(** Resolve a path for read-only access within the keeper's effective
+    allowlist. The allowlist is usually the keeper playground bundle
+    plus any explicit custom paths; explicit ["*"] still means full
+    project-root access. *)
+let resolve_keeper_read_path ~(config : Room.config)
+    ~(allowed_paths : string list) ~(raw_path : string)
     : (string, string) result =
   let raw = String.trim raw_path in
   if raw = "" then Error "path_required"
@@ -259,22 +273,58 @@ let resolve_keeper_read_path ~(config : Room.config) ~(raw_path : string)
       Error
         (Printf.sprintf "path_outside_project_root: %s (root=%s)"
            target_norm root_norm)
-    else if path_exists candidate || allows_missing_leaf_read ~raw ~candidate then
-      Ok candidate
-    else if Filename.is_relative raw then
-      (match maybe_resolve_missing_relative_read_path ~root ~raw_path:raw with
-       | Ok (Some resolved) -> Ok resolved
-       | Ok None ->
-           Error
-             (Printf.sprintf
-                "path_not_found_under_project_root: %s (root=%s)"
-                raw root_norm)
-       | Error e -> Error e)
     else
-      Error
-        (Printf.sprintf
-           "path_not_found_under_project_root: %s (root=%s)"
-           target_norm root_norm)
+      let allowed_norms =
+        if allowed_paths = [] then []
+        else
+          allowed_paths
+          |> List.filter_map (normalize_allowed_path_for_check ~root:root_norm)
+      in
+      if allowed_paths <> [] && allowed_norms = [] then
+        Error
+          (Printf.sprintf
+             "allowed_paths_normalized_empty: [%s]"
+             (String.concat ", " allowed_paths))
+      else
+      let within_allowed =
+        allowed_norms = [] || is_within_allowed_norms ~target_norm allowed_norms
+      in
+      let search_roots =
+        if allowed_norms = [] then [root_norm] else allowed_norms
+      in
+      if not within_allowed then
+        if Filename.is_relative raw then
+          (match maybe_resolve_missing_relative_read_path ~roots:search_roots ~raw_path:raw with
+           | Ok (Some resolved) -> Ok resolved
+           | Ok None ->
+               Error
+                 (Printf.sprintf
+                    "path_not_in_allowed_paths: %s (allowed: [%s])"
+                    raw (String.concat ", " allowed_norms))
+           | Error e -> Error e)
+        else
+          Error
+            (Printf.sprintf
+               "path_not_in_allowed_paths: %s (allowed: [%s])"
+               raw (String.concat ", " allowed_norms))
+      else if path_exists candidate || allows_missing_leaf_read ~raw ~candidate then
+        Ok candidate
+      else if Filename.is_relative raw then
+        (match maybe_resolve_missing_relative_read_path ~roots:search_roots ~raw_path:raw with
+         | Ok (Some resolved) -> Ok resolved
+         | Ok None ->
+             Error
+               (Printf.sprintf
+                  "path_not_found_under_allowed_roots: %s (roots=[%s])"
+                  raw (String.concat ", " search_roots))
+         | Error e -> Error e)
+      else
+        Error
+          (Printf.sprintf
+             "path_not_found_under_allowed_roots: %s (roots=[%s])"
+             target_norm
+             (String.concat ", "
+                (if allowed_norms = [] then [root_norm] else allowed_norms)))
 
 let process_status_to_json (st : Unix.process_status) : Yojson.Safe.t =
   match st with

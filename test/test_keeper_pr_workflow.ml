@@ -12,6 +12,15 @@
 open Alcotest
 open Masc_mcp
 
+let fresh_nonce =
+  let counter = ref 0 in
+  fun () ->
+    incr counter;
+    Printf.sprintf "%d-%d-%d"
+      (Unix.getpid ())
+      (int_of_float (Unix.gettimeofday () *. 1_000_000.))
+      !counter
+
 let make_meta_with_preset preset_str =
   match Keeper_types.meta_of_json
     (`Assoc
@@ -49,6 +58,10 @@ let run_cmd_exn argv =
   | 0 -> ()
   | code -> failwith (Printf.sprintf "command failed (%d): %s" code cmd)
 
+let run_cmd argv =
+  let cmd = String.concat " " (List.map Filename.quote argv) in
+  Sys.command cmd
+
 let policy_init_once = lazy (
   (* Load tool_policy.toml from the repo root so presets resolve correctly.
      The repo root is derived by walking up from the test executable's location. *)
@@ -75,7 +88,7 @@ let with_room f =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Lazy.force policy_init_once;
   let dir = Filename.concat (Filename.get_temp_dir_name ())
-    (Printf.sprintf "test_keeper_pr_%d" (Random.int 1_000_000)) in
+    (Printf.sprintf "test_keeper_pr_%s" (fresh_nonce ())) in
   (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
   let saved_pg = Sys.getenv_opt "MASC_POSTGRES_URL" in
   let saved_sb = Sys.getenv_opt "SB_PG_URL" in
@@ -520,7 +533,7 @@ let with_local_git_repo_room f =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Lazy.force policy_init_once;
   let dir = Filename.concat (Filename.get_temp_dir_name ())
-    (Printf.sprintf "test_keeper_pr_git_%d" (Random.int 1_000_000)) in
+    (Printf.sprintf "test_keeper_pr_git_%s" (fresh_nonce ())) in
   let remote_dir = Filename.concat dir ".remote.git" in
   (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
   let saved_pg = Sys.getenv_opt "MASC_POSTGRES_URL" in
@@ -583,7 +596,7 @@ let test_worktree_create_writes_and_cleans_up () =
   with_real_repo_room (fun config repo_root ->
     let meta = make_meta_with_preset "delivery" in
     let workflow_root = workflow_repo_root config in
-    let test_branch = Printf.sprintf "test/integration-%d" (Random.int 100_000) in
+    let test_branch = Printf.sprintf "test/integration-%s" (fresh_nonce ()) in
     let args = `Assoc
       [ "branch", `String test_branch
       ; "file_path", `String "test-integration-verify.txt"
@@ -628,7 +641,7 @@ let test_existing_worktree_path_is_retried_safely () =
   with_real_repo_room (fun config repo_root ->
     let meta = make_meta_with_preset "delivery" in
     let workflow_root = workflow_repo_root config in
-    let test_branch = Printf.sprintf "test/retry-%d" (Random.int 100_000) in
+    let test_branch = Printf.sprintf "test/retry-%s" (fresh_nonce ()) in
     let worktree_id = derive_worktree_id meta.name test_branch in
     let worktree_path = Filename.concat workflow_root (Filename.concat ".worktrees" worktree_id) in
     Fun.protect
@@ -639,12 +652,21 @@ let test_existing_worktree_path_is_retried_safely () =
         ignore repo_root;
         cleanup_test_branch workflow_root test_branch)
       (fun () ->
-        let seed_rc = Sys.command
-          (Printf.sprintf "cd %s && git fetch origin >/dev/null 2>&1 && git worktree add -b %s %s %s >/dev/null 2>&1"
-            (Filename.quote workflow_root)
-            (Filename.quote test_branch)
-            (Filename.quote worktree_path)
-            (Filename.quote "origin/main")) in
+        ignore (run_cmd [ "/usr/bin/git"; "-C"; workflow_root; "worktree"; "remove"; "--force"; worktree_path ]);
+        cleanup_test_branch workflow_root test_branch;
+        let seed_rc =
+          run_cmd
+            [ "/usr/bin/git"
+            ; "-C"
+            ; workflow_root
+            ; "worktree"
+            ; "add"
+            ; "-b"
+            ; test_branch
+            ; worktree_path
+            ; "HEAD"
+            ]
+        in
         check int "seed worktree created" 0 seed_rc;
         let args = `Assoc
           [ "branch", `String test_branch
@@ -675,7 +697,7 @@ let test_local_repo_worktree_runs_truth_via_absolute_bash () =
   with_local_git_repo_room (fun config repo_root ->
     let meta = make_meta_with_preset "delivery" in
     let workflow_root = workflow_repo_root config in
-    let test_branch = Printf.sprintf "test/local-%d" (Random.int 100_000) in
+    let test_branch = Printf.sprintf "test/local-%s" (fresh_nonce ()) in
     let worktree_id = derive_worktree_id meta.name test_branch in
     let worktree_path = Filename.concat workflow_root (Filename.concat ".worktrees" worktree_id) in
     let args = `Assoc
@@ -772,6 +794,79 @@ let test_bash_git_status_allowed () =
     check bool "git status returns normal execution shape"
       true has_status)
 
+let test_shell_readonly_pwd_defaults_to_playground () =
+  with_room (fun config ->
+    let meta = make_meta_with_preset "delivery" in
+    let expected_cwd =
+      Filename.concat
+        (Keeper_alerting_path.project_root_of_config config)
+        (Keeper_alerting_path.playground_path_of_keeper meta.name)
+    in
+    Fs_compat.mkdir_p expected_cwd;
+    let result =
+      call_tool config meta "keeper_shell_readonly"
+        (`Assoc [ "op", `String "pwd" ])
+    in
+    let json = parse_json result in
+    check bool "pwd ok" true (json_bool "ok" json);
+    check string "pwd cwd" expected_cwd (json_string "cwd" json))
+
+let test_fs_read_blocks_shared_repo_by_default () =
+  with_room (fun config ->
+    let meta = make_meta_with_preset "delivery" in
+    let shared_file =
+      Filename.concat (Keeper_alerting_path.project_root_of_config config)
+        "workspace/yousleepwhen/oas/lib/approval.ml"
+    in
+    write_text_file shared_file "let approval = true\n";
+    let result =
+      call_tool config meta "keeper_fs_read"
+        (`Assoc [ "path", `String "workspace/yousleepwhen/oas/lib/approval.ml" ])
+    in
+    let json = parse_json result in
+    check bool "returns error payload" true
+      (match json with `Assoc fields -> List.mem_assoc "error" fields | _ -> false);
+    check bool "reports allowed path boundary" true
+      (String.starts_with ~prefix:"path_not_in_allowed_paths" (json_string "error" json)))
+
+let test_fs_read_allows_explicit_custom_path () =
+  with_room (fun config ->
+    let meta =
+      { (make_meta_with_preset "delivery") with
+        allowed_paths = [ "workspace/yousleepwhen/oas/" ] }
+    in
+    let shared_file =
+      Filename.concat (Keeper_alerting_path.project_root_of_config config)
+        "workspace/yousleepwhen/oas/lib/approval.ml"
+    in
+    write_text_file shared_file "let approval = true\n";
+    let result =
+      call_tool config meta "keeper_fs_read"
+        (`Assoc [ "path", `String "workspace/yousleepwhen/oas/lib/approval.ml" ])
+    in
+    let json = parse_json result in
+    check bool "explicit custom path read ok" true (json_bool "ok" json);
+    check bool "content included" true
+      (String.starts_with ~prefix:"let approval" (json_string "content" json)))
+
+let test_bash_blocks_absolute_path_outside_playground () =
+  with_room (fun config ->
+    let meta = make_meta_with_preset "delivery" in
+    let shared_file =
+      Filename.concat (Keeper_alerting_path.project_root_of_config config)
+        "workspace/yousleepwhen/oas/lib/approval.ml"
+    in
+    write_text_file shared_file "let approval = true\n";
+    let result =
+      call_tool config meta "keeper_bash"
+        (`Assoc [ "cmd", `String (Printf.sprintf "cat %s" shared_file) ])
+    in
+    let json = parse_json result in
+    check bool "returns path blocked error" true
+      (match json with `Assoc fields -> List.mem_assoc "error" fields | _ -> false);
+    check bool "absolute path blocked" true
+      (String.starts_with ~prefix:"Path blocked:" (json_string "error" json)))
+
 let () =
   run "keeper_pr_workflow"
     [ "required_fields",
@@ -820,6 +915,14 @@ let () =
       ; test_case "branch list allowed" `Quick test_bash_git_branch_list_allowed
       ; test_case "branch delete allowed" `Quick test_bash_git_branch_delete_allowed
       ; test_case "status allowed" `Quick test_bash_git_status_allowed
+      ; test_case "readonly pwd defaults to playground" `Quick
+          test_shell_readonly_pwd_defaults_to_playground
+      ; test_case "fs read blocks shared repo by default" `Quick
+          test_fs_read_blocks_shared_repo_by_default
+      ; test_case "fs read allows explicit custom path" `Quick
+          test_fs_read_allows_explicit_custom_path
+      ; test_case "bash blocks absolute path outside playground" `Quick
+          test_bash_blocks_absolute_path_outside_playground
       ]
     ; "integration",
       [ test_case "worktree workflow e2e" `Slow test_worktree_create_writes_and_cleans_up

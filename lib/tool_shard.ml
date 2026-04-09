@@ -272,6 +272,7 @@ let shell_tools : Types.tool_schema list = [
     name = "keeper_shell_readonly";
     description = "Run a safe project shell command. \
 ops: pwd, ls, cat, rg, git_status, find, head, tail, wc, tree, git_log, git_diff, bash, git_clone. \
+Defaults to the keeper playground; use cwd to target an explicit allowed directory or cloned repo. \
 find REQUIRES pattern param (e.g. pattern=\"*.ml\"). \
 bash op: single command only, no chaining (&&, ||, |, ; are blocked), no redirects (>, >>). \
 git_clone: clone a repo into your playground (url required, sandboxed to .masc/playground/<name>/). \
@@ -283,6 +284,7 @@ git_log/git_diff for repo history, bash for curl/jq/env/which.";
       ("properties", `Assoc [
         ("op", `Assoc [("type", `String "string"); ("enum", `List [`String "pwd"; `String "ls"; `String "cat"; `String "rg"; `String "git_status"; `String "find"; `String "head"; `String "tail"; `String "wc"; `String "tree"; `String "git_log"; `String "git_diff"; `String "bash"; `String "git_clone"]); ("description", `String "Command to run")]);
         ("path", `Assoc [("type", `String "string"); ("description", `String "Target path for ls/cat/rg/find/head/tail/wc/tree")]);
+        ("cwd", `Assoc [("type", `String "string"); ("description", `String "Optional working directory for pwd/git_status/git_log/git_diff/git_worktree/bash. Must stay within keeper playground or an explicit allowed path.")]);
         ("pattern", `Assoc [("type", `String "string"); ("description", `String "Search pattern for rg, or name glob for find (REQUIRED for find, e.g. \"*.ml\")")]);
         ("limit", `Assoc [("type", `String "integer"); ("description", `String "Result limit for ls/rg/find/tree, or line count for git_log")]);
         ("lines", `Assoc [("type", `String "integer"); ("description", `String "Number of lines for head/tail (default 20, max 200)")]);
@@ -302,11 +304,13 @@ let coding_keeper_bridge_tools : Types.tool_schema list = [
 NO chaining (&&, ||, ;), NO pipes (|), NO redirects (> >>). \
 Violations are blocked. Good: cmd='dune build', cmd='ls -la lib/'. \
 Bad: cmd='cd x && dune build', cmd='rg foo | wc -l'. \
+Runs in the keeper playground by default; use cwd to target an explicit allowed directory. \
 For read-only ops use keeper_shell_readonly, for file edits use keeper_fs_edit.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
         ("cmd", `Assoc [("type", `String "string"); ("description", `String "Single command only. No chaining/pipe/redirect. Example: 'dune build', 'rg pattern lib/'")]);
+        ("cwd", `Assoc [("type", `String "string"); ("description", `String "Optional working directory for the command. Must stay within keeper playground or an explicit allowed path.")]);
         ("timeout_sec", `Assoc [("type", `String "number"); ("description", `String "Timeout seconds (default: 30, max: 180)")]);
       ]);
       ("required", `List [`String "cmd"]);

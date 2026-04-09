@@ -679,6 +679,37 @@ let handle_keeper_status ctx args : tool_result =
                     | repos -> repos)
                  | _ -> `List []
                with Sys_error _ | Yojson.Json_error _ -> `List []);
+             ("pr_history",
+               let pr_path = Filename.concat
+                 (Filename.concat ctx.config.base_path
+                   (Keeper_alerting_path.playground_path_of_keeper m.name))
+                 ".playground_pr_history.jsonl" in
+               try
+                 let entries = Fs_compat.load_jsonl pr_path in
+                 (* Last 10 PRs, most recent first.
+                    Rev first, then take up to 10 — O(N) single pass. *)
+                 let rev = List.rev entries in
+                 let rec take n acc = function
+                   | [] -> List.rev acc
+                   | _ when n <= 0 -> List.rev acc
+                   | x :: rest -> take (n - 1) (x :: acc) rest
+                 in
+                 `List (take 10 [] rev)
+               with Sys_error _ -> `List []);
+             ("active_worktrees",
+               let worktrees_dir = Filename.concat ctx.config.base_path ".worktrees" in
+               try
+                 let entries = Sys.readdir worktrees_dir |> Array.to_list in
+                 let keeper_prefix = Keeper_alerting_path.sanitize_keeper_name m.name in
+                 let matching = List.filter (fun name ->
+                   String.starts_with ~prefix:(keeper_prefix ^ "-") name
+                   || String.starts_with ~prefix:(keeper_prefix ^ "/") name
+                   || name = keeper_prefix) entries in
+                 `List (List.map (fun name -> `Assoc [
+                   "name", `String name;
+                   "path", `String (Filename.concat ".worktrees" name);
+                 ]) matching)
+               with Sys_error _ -> `List []);
              ("last_evidence",
                match Keeper_evidence.latest_evidence
                  ~base_path:ctx.config.base_path

@@ -260,6 +260,31 @@ function isPlaygroundRepo(r: unknown): r is PlaygroundRepo {
     && typeof r.last_action === 'string'
 }
 
+interface PlaygroundPR {
+  pr_url: string
+  branch: string
+  title: string
+  draft: boolean
+}
+
+function isPlaygroundPR(r: unknown): r is PlaygroundPR {
+  if (!isRecord(r)) return false
+  return typeof r.pr_url === 'string'
+    && typeof r.branch === 'string'
+    && typeof r.title === 'string'
+    && typeof r.draft === 'boolean'
+}
+
+interface PlaygroundWorktree {
+  name: string
+  path: string
+}
+
+function isPlaygroundWorktree(r: unknown): r is PlaygroundWorktree {
+  if (!isRecord(r)) return false
+  return typeof r.name === 'string' && typeof r.path === 'string'
+}
+
 function PlaygroundReposPanel({ keeperName }: { keeperName: string }) {
   const detail = keeperStatusDetails.value[keeperName]
   if (!detail?.rawStatus) return null
@@ -267,27 +292,63 @@ function PlaygroundReposPanel({ keeperName }: { keeperName: string }) {
   if (!isRecord(raw)) return null
   const execCtx = raw.execution_context
   if (!isRecord(execCtx)) return null
-  const repos = Array.isArray(execCtx.playground_repos) ? execCtx.playground_repos : []
-  if (repos.length === 0) return null
 
-  const items = repos.filter(isPlaygroundRepo)
+  const repos = (Array.isArray(execCtx.playground_repos) ? execCtx.playground_repos : []).filter(isPlaygroundRepo)
+  const prs = (Array.isArray(execCtx.pr_history) ? execCtx.pr_history : []).filter(isPlaygroundPR)
+  const worktrees = (Array.isArray(execCtx.active_worktrees) ? execCtx.active_worktrees : []).filter(isPlaygroundWorktree)
+
+  if (repos.length === 0 && prs.length === 0 && worktrees.length === 0) return null
 
   return html`
-    <${SectionCard} title="Playground (${items.length})">
-      <div class="flex flex-col gap-2">
-        ${items.map(r => html`
-          <div class="flex items-center gap-3 px-3 py-2 rounded-lg border border-[var(--white-8)] bg-[var(--white-2)]">
-            <div class="flex-1 min-w-0">
-              <div class="flex items-center gap-2">
-                <span class="text-xs font-medium text-[var(--text-strong)] truncate">${r.name}</span>
-                <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--accent)] border border-[rgba(71,184,255,0.15)]">${r.branch}</span>
-                ${r.shallow ? html`<span class="text-[9px] px-1 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">shallow</span>` : null}
-              </div>
-              <div class="text-[10px] text-[var(--text-muted)] font-mono mt-0.5 truncate">${r.latest_commit}</div>
+    <${SectionCard} title="Playground">
+      <div class="flex flex-col gap-3">
+        ${repos.length > 0 ? html`
+          <div>
+            <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1.5">Repos (${repos.length})</div>
+            <div class="flex flex-col gap-1.5">
+              ${repos.map(r => html`
+                <div class="flex items-center gap-3 px-3 py-2 rounded-lg border border-[var(--white-8)] bg-[var(--white-2)]">
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2">
+                      <span class="text-xs font-medium text-[var(--text-strong)] truncate">${r.name}</span>
+                      <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--accent)] border border-[rgba(71,184,255,0.15)]">${r.branch}</span>
+                      ${r.shallow ? html`<span class="text-[9px] px-1 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">shallow</span>` : null}
+                    </div>
+                    <div class="text-[10px] text-[var(--text-muted)] font-mono mt-0.5 truncate">${r.latest_commit}</div>
+                  </div>
+                  <span class="text-[10px] text-[var(--text-dim)] flex-shrink-0">${r.last_action}</span>
+                </div>
+              `)}
             </div>
-            <span class="text-[10px] text-[var(--text-dim)] flex-shrink-0">${r.last_action}</span>
           </div>
-        `)}
+        ` : null}
+
+        ${prs.length > 0 ? html`
+          <div>
+            <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1.5">PRs (${prs.length})</div>
+            <div class="flex flex-col gap-1.5">
+              ${prs.map(pr => html`
+                <div class="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[var(--white-8)] bg-[var(--white-2)]">
+                  <span class="text-xs text-[var(--text-strong)] truncate flex-1">${pr.title}</span>
+                  <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--accent)] border border-[rgba(71,184,255,0.15)]">${pr.branch}</span>
+                  ${pr.draft ? html`<span class="text-[9px] px-1 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">draft</span>` : null}
+                  <a href=${pr.pr_url} target="_blank" rel="noopener" class="text-[10px] text-[var(--accent)] hover:underline flex-shrink-0">PR</a>
+                </div>
+              `)}
+            </div>
+          </div>
+        ` : null}
+
+        ${worktrees.length > 0 ? html`
+          <div>
+            <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1.5">Worktrees (${worktrees.length})</div>
+            <div class="flex flex-wrap gap-1.5">
+              ${worktrees.map(w => html`
+                <span class="text-[10px] font-mono px-2 py-1 rounded-lg border border-[var(--white-8)] bg-[var(--white-2)] text-[var(--text-muted)]" title=${w.path}>${w.name}</span>
+              `)}
+            </div>
+          </div>
+        ` : null}
       </div>
     <//>
   `

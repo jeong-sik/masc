@@ -313,6 +313,22 @@ let test_startup_config_resolution_preserves_explicit_override () =
       Alcotest.(check (option string)) "env override unchanged" (Some explicit)
         (Sys.getenv_opt "MASC_CONFIG_DIR"))
 
+let test_bootstrap_base_path_config_root_collapses_masc_input () =
+  with_temp_dir "startup-config-collapse" (fun dir ->
+      let repo = Filename.concat dir "repo" in
+      mkdir_p repo;
+      ignore (make_config_root repo);
+      let base_path = Filename.concat dir "base" in
+      mkdir_p (Filename.concat base_path ".masc");
+      with_env "MASC_CONFIG_DIR" None @@ fun () ->
+      with_cwd repo @@ fun () ->
+      Server_runtime_bootstrap.bootstrap_base_path_config_root
+        ~base_path:(Filename.concat base_path ".masc");
+      Alcotest.(check bool) "config root created under parent .masc" true
+        (Sys.file_exists (Filename.concat base_path ".masc/config/cascade.json"));
+      Alcotest.(check bool) "nested .masc/.masc config not created" false
+        (Sys.file_exists
+           (Filename.concat base_path ".masc/.masc/config/cascade.json")))
 let test_constructor_is_pure () =
   with_temp_dir "startup-pure" (fun dir ->
       let agents_dir = Room.agents_dir (Room.default_config dir) in
@@ -900,6 +916,9 @@ let () =
           Alcotest.test_case
             "startup config resolution preserves explicit override"
             `Quick test_startup_config_resolution_preserves_explicit_override;
+          Alcotest.test_case
+            "bootstrap base-path config collapses .masc input path"
+            `Quick test_bootstrap_base_path_config_root_collapses_masc_input;
           Alcotest.test_case "constructors stay pure" `Quick
             test_constructor_is_pure;
           Alcotest.test_case "restore_persisted_sessions uses flat agents dir"

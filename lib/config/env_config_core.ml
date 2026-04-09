@@ -61,6 +61,27 @@ let strip_trailing_slashes value =
   in
   loop (String.length value)
 
+let strip_path_trailing_slashes value =
+  let trimmed = String.trim value in
+  let rec loop current =
+    let len = String.length current in
+    if len > 1 && current.[len - 1] = '/' then
+      loop (String.sub current 0 (len - 1))
+    else
+      current
+  in
+  if trimmed = "" then "" else loop trimmed
+
+let normalize_masc_base_path_input path =
+  let normalized = strip_path_trailing_slashes path in
+  if normalized = "" then ""
+  else if String.equal (Filename.basename normalized) ".masc" then
+    match Filename.dirname normalized with
+    | "" -> "."
+    | parent -> parent
+  else
+    normalized
+
 let existing_dir path =
   Sys.file_exists path && Sys.is_directory path
 
@@ -196,8 +217,11 @@ let get_port ~default name =
     Used by board, checkpoint, thompson_sampling, voice, keeper.
     Set at startup; may be overridden via Unix.putenv before use.
     Returns None when MASC_BASE_PATH is unset or empty. *)
-let base_path_opt () =
+let base_path_raw_opt () =
   Sys.getenv_opt "MASC_BASE_PATH" |> trim_opt
+
+let base_path_opt () =
+  base_path_raw_opt () |> Option.map normalize_masc_base_path_input
 
 (** Project base path with "." fallback when unset. *)
 let base_path () =

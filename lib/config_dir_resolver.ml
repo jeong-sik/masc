@@ -122,7 +122,11 @@ let path_from_local_masc (inputs : inputs) =
   match trim_opt inputs.env_base_path with
   | None -> None
   | Some base_path ->
-      let base_path = absolute_path_from ~cwd:inputs.cwd base_path in
+      let base_path =
+        base_path
+        |> Env_config_core.normalize_masc_base_path_input
+        |> absolute_path_from ~cwd:inputs.cwd
+      in
       let candidate = Filename.concat (Filename.concat base_path ".masc") "config" in
       if config_signature_exists candidate then Some candidate else None
 

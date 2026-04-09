@@ -131,7 +131,7 @@ let rec find_git_root path =
 let bool_env name = Env_config_core.get_bool ~default:false name
 
 let normalize_base_path path =
-  let trimmed = String.trim path in
+  let trimmed = Env_config_core.normalize_masc_base_path_input path in
   if trimmed = "" then ""
   else if Filename.is_relative trimmed then Filename.concat (Sys.getcwd ()) trimmed
   else trimmed
@@ -199,13 +199,14 @@ let sync_test_base_path_env resolved_path =
           resolved_path (Filename.basename Sys.executable_name)
 
 let resolve_requested_base_path path =
-  match find_git_root path with
+  let requested = normalize_base_path path in
+  match find_git_root requested with
   | Some git_root ->
-      Log.Room.info "MASC base resolved: %s → %s (git root)" path git_root;
+      Log.Room.info "MASC base resolved: %s → %s (git root)" requested git_root;
       git_root
   | None ->
-      Log.Room.info "MASC base: %s (no git root found)" path;
-      path
+      Log.Room.info "MASC base: %s (no git root found)" requested;
+      requested
 
 (** Resolve base_path: when MASC_BASE_PATH is explicitly set, use it
     directly unless a test executable intentionally ignores an inherited

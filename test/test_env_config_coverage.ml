@@ -82,6 +82,17 @@ let test_base_path_prefers_env () =
       (Env_config.base_path_opt ());
     check string "base_path" "/tmp/masc-custom-root" (Env_config.base_path ()))
 
+let test_base_path_collapses_masc_dir_env () =
+  with_env "MASC_BASE_PATH" "/tmp/masc-custom-root/.masc" (fun () ->
+    check (option string) "raw base path keeps original env"
+      (Some "/tmp/masc-custom-root/.masc")
+      (Env_config.base_path_raw_opt ());
+    check (option string) "base_path_opt collapses .masc leaf"
+      (Some "/tmp/masc-custom-root")
+      (Env_config.base_path_opt ());
+    check string "base_path collapses .masc leaf"
+      "/tmp/masc-custom-root" (Env_config.base_path ()))
+
 let test_masc_http_base_url_prefers_env_and_trims () =
   with_env "MASC_HTTP_BASE_URL" "http://example.test:9911/" (fun () ->
     check (result string string) "base url result trimmed"
@@ -387,6 +398,8 @@ let () =
     ];
     "path_helpers", [
       test_case "base_path prefers env" `Quick test_base_path_prefers_env;
+      test_case "base_path collapses .masc env input" `Quick
+        test_base_path_collapses_masc_dir_env;
       test_case "base url prefers env and trims" `Quick test_masc_http_base_url_prefers_env_and_trims;
       test_case "base url uses explicit host+port" `Quick test_masc_http_base_url_uses_explicit_host_and_port;
       test_case "sb_path_result missing is error" `Quick test_sb_path_result_missing_is_error;

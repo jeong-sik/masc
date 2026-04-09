@@ -97,6 +97,7 @@ let rec copy_missing_tree ~src ~dst =
     copy_file_if_missing ~src ~dst
 
 let bootstrap_base_path_config_root ~base_path =
+  let base_path = Env_config_core.normalize_masc_base_path_input base_path in
   if Option.is_some (Env_config_core.config_dir_opt ()) then
     ()
   else
@@ -166,6 +167,7 @@ let init_runtime_context env =
 
 let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
     : Mcp_server.server_state =
+  let base_path = Env_config_core.normalize_masc_base_path_input base_path in
   Fs_compat.set_fs fs;
   Mcp_eio.set_net net;
   Mcp_eio.set_clock clock;
@@ -220,7 +222,7 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
 let runtime_path_diagnostics ?input_base_path (state : Mcp_server.server_state) =
   Server_base_path_diagnostics.detect
     ?input_base_path
-    ?env_masc_base_path:(Env_config_core.base_path_opt ())
+    ?env_masc_base_path:(Env_config_core.base_path_raw_opt ())
     ~effective_base_path:state.room_config.base_path
     ~effective_masc_root:(Room.masc_root_dir state.room_config)
     ()

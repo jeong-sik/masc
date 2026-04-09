@@ -996,11 +996,12 @@ let dashboard_shell_payload_json (config : Room.config) : Yojson.Safe.t =
   in
   let measure_json_projection label f =
     measure_ms (fun () ->
-        try f ()
-        with exn ->
-          Log.Server.warn "dashboard shell %s projection failed: %s" label
-            (Printexc.to_string exn);
-          `Null)
+        try f () with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn ->
+            Log.Server.warn "dashboard shell %s projection failed: %s" label
+              (Printexc.to_string exn);
+            `Null)
   in
   let status_json, status_ms = measure_ms (fun () -> dashboard_shell_status_json config) in
   let agents, agents_ms = measure_ms (fun () -> dashboard_agents_safe config) in

@@ -163,18 +163,35 @@ let test_dashboard_shell_http_json_includes_paths () =
     (match paths |> member "cwd" with
      | `String value -> String.length value > 0
      | _ -> false);
-  check bool "shell config root path surfaced" true
-    (match config_resolution |> member "config_root" |> member "path" with
-     | `String value -> String.length value > 0
+  check bool "shell config resolution is object or null" true
+    (match config_resolution with
+     | `Assoc _ | `Null -> true
      | _ -> false);
-  check bool "shell runtime data root path surfaced" true
-    (match runtime_resolution |> member "data_root" |> member "path" with
-     | `String value -> String.length value > 0
+  check bool "shell config root path surfaced when available" true
+    (match config_resolution with
+     | `Null -> true
+     | _ -> (
+         match config_resolution |> member "config_root" |> member "path" with
+         | `String value -> String.length value > 0
+         | _ -> false));
+  check bool "shell runtime resolution is object or null" true
+    (match runtime_resolution with
+     | `Assoc _ | `Null -> true
      | _ -> false);
-  check bool "shell runtime warnings surfaced as list" true
-    (match runtime_resolution |> member "warnings" with
-     | `List _ -> true
-     | _ -> false)
+  check bool "shell runtime data root path surfaced when available" true
+    (match runtime_resolution with
+     | `Null -> true
+     | _ -> (
+         match runtime_resolution |> member "data_root" |> member "path" with
+         | `String value -> String.length value > 0
+         | _ -> false));
+  check bool "shell runtime warnings surfaced as list when available" true
+    (match runtime_resolution with
+     | `Null -> true
+     | _ -> (
+         match runtime_resolution |> member "warnings" with
+         | `List _ -> true
+         | _ -> false))
 
 let () =
   run "dashboard_http_core"

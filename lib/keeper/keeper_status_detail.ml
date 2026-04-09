@@ -40,11 +40,28 @@ let effective_status_name (ctx : _ context) args =
   | "" -> normalize_status_name ctx.agent_name
   | value -> value
 
+let resolve_status_target (ctx : _ context) args =
+  let requested_name = effective_status_name ctx args in
+  if not (validate_name requested_name) then
+    Error "❌ invalid keeper name"
+  else
+    match read_meta_resolved ctx.config requested_name with
+    | Error e -> Error ("❌ " ^ e)
+    | Ok (Some (resolved_name, meta)) -> Ok (resolved_name, meta)
+    | Ok None ->
+        (match keeper_name_from_agent_name requested_name with
+         | Some stripped_name ->
+             Error
+               (Printf.sprintf
+                  "❌ keeper not found: %s (also tried %s)"
+                  requested_name stripped_name)
+         | None -> Error (Printf.sprintf "❌ keeper not found: %s" requested_name))
+
 (** Hash the status-affecting args so different parameter combos
     get separate cache entries (e.g. fast=true vs fast=false). *)
-let hash_status_args ctx args =
+let hash_status_args resolved_name args =
   let parts = [
-    effective_status_name ctx args;
+    resolved_name;
     string_of_bool (get_bool args "fast" false);
     string_of_bool (get_bool args "include_context" false);
     string_of_bool (get_bool args "include_metrics_overview" false);
@@ -57,15 +74,10 @@ let hash_status_args ctx args =
   Digest.string (String.concat "|" parts) |> Digest.to_hex
 
 let handle_keeper_status ctx args : tool_result =
-  let name = effective_status_name ctx args in
-  if not (validate_name name) then
-    (false, "❌ invalid keeper name")
-  else
-    match read_meta ctx.config name with
-    | Error e -> (false, "❌ " ^ e)
-    | Ok None -> (false, Printf.sprintf "❌ keeper not found: %s" name)
-    | Ok (Some m) ->
-      let args_hash = hash_status_args ctx args in
+  match resolve_status_target ctx args with
+  | Error err -> (false, err)
+  | Ok (name, m) ->
+      let args_hash = hash_status_args name args in
       (* Cache hit: same updated_at + same args → return cached response *)
       (match Hashtbl.find_opt _cache name with
        | Some entry

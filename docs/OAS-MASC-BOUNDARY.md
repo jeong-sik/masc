@@ -46,6 +46,7 @@ OAS  ──does not know──→ MASC
 - OAS가 소유한 설정 결과를 MASC가 소비하는 것은 허용된다. 다만 MASC는 provider allowlist, cascade parsing rule, proof-store layout 같은 OAS-owned shape를 자체 meta/profile schema로 다시 소유하면 안 된다.
 - 따라서 runtime convenience label(예: `provider:auto`)은 OAS 차원에서 존재할 수 있지만, checked-in repo defaults는 review 안정성을 위해 explicit `provider:model_id`를 선호한다.
 - legacy `allowed_providers` keeper TOML/meta fields는 compatibility input일 뿐이며, active runtime policy로 취급하지 않는다.
+- persisted legacy keeper meta tool-policy fields are scrubbed into canonical `tool_access` on read; direct `meta_of_json` callers must use canonical keeper meta keys.
 
 ## Current Integration Status
 

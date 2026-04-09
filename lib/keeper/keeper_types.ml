@@ -292,12 +292,6 @@ let json_member_present key (json : Yojson.Safe.t) =
   | _ -> false
 ;;
 
-let json_object_member_present key (json : Yojson.Safe.t) =
-  match Yojson.Safe.Util.member key json with
-  | `Assoc _ -> true
-  | _ -> false
-;;
-
 let string_list_field_result ?label ~field_name (json : Yojson.Safe.t) =
   let label = Option.value ~default:field_name label in
   match Yojson.Safe.Util.member field_name json with
@@ -329,7 +323,11 @@ let parse_tool_preset_projection (json : Yojson.Safe.t) =
   | _ -> Error "keeper tool_preset must be a string"
 ;;
 
-let tool_access_projection_of_meta_json (json : Yojson.Safe.t) =
+let default_tool_access_of_meta_json () =
+  migrate_legacy_restricted_tools legacy_session_min_tool_names
+;;
+
+let legacy_tool_access_projection_of_meta_json (json : Yojson.Safe.t) =
   let custom_present = json_member_present "tool_custom_allowlist" json in
   let preset_present = json_member_present "tool_preset" json in
   let also_allow_present = json_member_present "tool_also_allow" json in
@@ -352,12 +350,12 @@ let tool_access_projection_of_meta_json (json : Yojson.Safe.t) =
     match string_list_field_result ~field_name:"tool_allowlist" json with
     | Ok names -> Ok (migrate_legacy_restricted_tools names)
     | Error msg -> Error msg)
-  else Ok (migrate_legacy_restricted_tools legacy_session_min_tool_names)
+  else Ok (default_tool_access_of_meta_json ())
 ;;
 
-let tool_access_of_meta_json (json : Yojson.Safe.t) =
+let legacy_tool_access_of_meta_json (json : Yojson.Safe.t) =
   match Yojson.Safe.Util.member "tool_access" json with
-  | `Null -> tool_access_projection_of_meta_json json
+  | `Null -> legacy_tool_access_projection_of_meta_json json
   | `Assoc _ as access_json ->
     let kind =
       Yojson.Safe.Util.member "kind" access_json |> Yojson.Safe.Util.to_string_option
@@ -374,6 +372,47 @@ let tool_access_of_meta_json (json : Yojson.Safe.t) =
         with
         | Ok tools -> Ok (migrate_legacy_restricted_tools tools)
         | Error msg -> Error msg)
+     | Some "preset" ->
+       let preset_raw =
+         Yojson.Safe.Util.member "preset" access_json |> Yojson.Safe.Util.to_string_option
+       in
+       (match preset_raw with
+        | None -> Error "keeper tool_access.preset required"
+        | Some raw ->
+          (match tool_preset_of_string raw with
+           | None -> Error (Printf.sprintf "invalid keeper tool_access.preset: %s" raw)
+           | Some preset ->
+             (match
+                string_list_field_opt_result
+                  ~field_name:"also_allow"
+                  ~label:"tool_access.also_allow"
+                  access_json
+              with
+              | Ok also_allow ->
+                Ok (normalize_tool_access (Preset { preset; also_allow }))
+              | Error msg -> Error msg)))
+     | Some "custom" ->
+       (match
+          string_list_field_result
+            ~field_name:"tools"
+            ~label:"tool_access.tools"
+            access_json
+        with
+        | Ok tools -> Ok (normalize_tool_access (Custom tools))
+        | Error msg -> Error msg)
+     | Some other -> Error (Printf.sprintf "invalid keeper tool_access.kind: %s" other)
+     | None -> Error "keeper tool_access.kind required")
+  | _ -> Error "keeper tool_access must be an object"
+;;
+
+let tool_access_of_meta_json (json : Yojson.Safe.t) =
+  match Yojson.Safe.Util.member "tool_access" json with
+  | `Null -> Ok (default_tool_access_of_meta_json ())
+  | `Assoc _ as access_json ->
+    let kind =
+      Yojson.Safe.Util.member "kind" access_json |> Yojson.Safe.Util.to_string_option
+    in
+    (match kind with
      | Some "preset" ->
        let preset_raw =
          Yojson.Safe.Util.member "preset" access_json |> Yojson.Safe.Util.to_string_option
@@ -477,15 +516,83 @@ let reject_removed_keeper_meta_fields (json : Yojson.Safe.t) =
     Error (Printf.sprintf "removed keeper meta fields: %s" (String.concat ", " fields))
 ;;
 
+let legacy_keeper_meta_tool_policy_key_names =
+  [ "tool_preset"; "tool_also_allow"; "tool_custom_allowlist"; "tool_allowlist" ]
+;;
+
+let legacy_keeper_meta_key_names =
+  "allowed_providers" :: legacy_keeper_meta_tool_policy_key_names
+;;
+
+let reject_legacy_keeper_meta_fields (json : Yojson.Safe.t) =
+  let present = present_json_keys legacy_keeper_meta_key_names json in
+  match present with
+  | [] -> Ok ()
+  | fields ->
+    Error
+      (Printf.sprintf
+         "legacy keeper meta fields require scrub via read_meta_file_path: %s"
+         (String.concat ", " fields))
+;;
+
+let legacy_tool_access_kind_needs_scrub (json : Yojson.Safe.t) =
+  match Yojson.Safe.Util.member "tool_access" json with
+  | `Assoc _ as access_json ->
+    (match
+       Yojson.Safe.Util.member "kind" access_json |> Yojson.Safe.Util.to_string_option
+     with
+     | Some "restricted" | Some "unrestricted" -> true
+     | _ -> false)
+  | _ -> false
+;;
+
+let scrub_legacy_tool_policy_meta_json (json : Yojson.Safe.t) : Yojson.Safe.t * string list =
+  let present = present_json_keys legacy_keeper_meta_key_names json in
+  let missing_tool_access = not (json_member_present "tool_access" json) in
+  let legacy_tool_access_kind = legacy_tool_access_kind_needs_scrub json in
+  let needs_tool_access_rewrite =
+    present <> [] || missing_tool_access || legacy_tool_access_kind
+  in
+  if not needs_tool_access_rewrite
+  then json, []
+  else
+    match legacy_tool_access_of_meta_json json with
+    | Error _ ->
+      let dropped =
+        present |> List.filter (fun key -> String.equal key "allowed_providers")
+      in
+      if dropped = []
+      then json, []
+      else
+        (drop_assoc_keys dropped json, dropped)
+    | Ok tool_access ->
+      let rewrite_reasons =
+        (if missing_tool_access then [ "tool_access(defaulted)" ] else [])
+        @ (if legacy_tool_access_kind then [ "tool_access(legacy-kind)" ] else [])
+        @ present
+      in
+      let base = drop_assoc_keys legacy_keeper_meta_key_names json in
+      let scrubbed =
+        match base with
+        | `Assoc fields ->
+          `Assoc
+            (("tool_access", tool_access_to_json tool_access)
+             :: List.remove_assoc "tool_access" fields)
+        | _ -> base
+      in
+      scrubbed, rewrite_reasons
+;;
+
 let scrub_persisted_keeper_meta_json ~path (json : Yojson.Safe.t) : Yojson.Safe.t * bool =
+  let json, legacy_tool_policy_rewrites = scrub_legacy_tool_policy_meta_json json in
   match json with
   | `Assoc fields ->
-    let present =
+    let removed_present =
       fields
       |> List.filter_map (fun (key, _) ->
         if List.mem key removed_keeper_meta_key_names then Some key else None)
     in
-    if present = []
+    if removed_present = [] && legacy_tool_policy_rewrites = []
     then json, false
     else (
       let migrate_legacy_disabled_keepalive =
@@ -505,9 +612,9 @@ let scrub_persisted_keeper_meta_json ~path (json : Yojson.Safe.t) : Yojson.Safe.
       (try
          Fs_compat.save_file path content;
          Log.Keeper.info
-           "scrubbed removed keeper meta fields for %s: %s%s"
+           "scrubbed legacy keeper meta fields for %s: %s%s"
            path
-           (String.concat ", " present)
+           (String.concat ", " (legacy_tool_policy_rewrites @ removed_present))
            (if migrate_legacy_disabled_keepalive
             then " (migrated presence_keepalive=false to paused=true)"
             else "")
@@ -1009,7 +1116,10 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
   try
     match reject_removed_keeper_meta_fields json with
     | Error e -> Error e
-    | Ok () ->
+    | Ok () -> (
+      match reject_legacy_keeper_meta_fields json with
+      | Error e -> Error e
+      | Ok () ->
       let identity = parse_keeper_identity json in
       (match parse_keeper_policy json ~keeper_name:identity.pk_name with
        | Error _ as e -> e
@@ -1089,6 +1199,7 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
              ; telemetry_feedback_window_hours = Safe_ops.json_int_opt "telemetry_feedback_window_hours" json
              ; runtime = state.ps_runtime
              })
+      )
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn -> Error (Printf.sprintf "meta parse error: %s" (Printexc.to_string exn))
@@ -1210,26 +1321,13 @@ let canonical_keeper_meta_key_names =
     fallback_canonical_keeper_meta_key_names
 ;;
 
-let compatibility_keeper_meta_key_names =
-  [
-    "tool_preset";
-    "tool_also_allow";
-    "tool_custom_allowlist";
-    "tool_allowlist";
-    "allowed_providers";
-  ]
-;;
-
 let warn_unknown_keeper_meta_keys ~path (json : Yojson.Safe.t) =
   match json with
   | `Assoc fields ->
-    let known_keeper_meta_key_names =
-      canonical_keeper_meta_key_names @ compatibility_keeper_meta_key_names
-    in
     let unknown =
       fields
       |> List.filter_map (fun (key, _) ->
-        if List.mem key known_keeper_meta_key_names then None else Some key)
+        if List.mem key canonical_keeper_meta_key_names then None else Some key)
       |> dedupe_keep_order
     in
     if unknown <> []
@@ -1241,27 +1339,6 @@ let warn_unknown_keeper_meta_keys ~path (json : Yojson.Safe.t) =
   | _ -> ()
 ;;
 
-let warn_tool_access_compat_keys ~path (json : Yojson.Safe.t) =
-  let compat_present =
-    compatibility_keeper_meta_key_names
-    |> List.filter (fun key -> json_member_present key json)
-  in
-  match compat_present with
-  | [] -> ()
-  | fields ->
-    if json_object_member_present "tool_access" json
-    then
-      Log.Keeper.warn
-        "keeper meta %s has tool_access plus compatibility tool keys; ignoring %s"
-        path
-        (String.concat ", " fields)
-    else
-      Log.Keeper.warn
-        "keeper meta %s uses compatibility tool keys (%s); prefer canonical tool_access"
-        path
-        (String.concat ", " fields)
-;;
-
 let read_meta_file_path path : (keeper_meta option, string) result =
   if not (Sys.file_exists path)
   then Ok None
@@ -1271,7 +1348,6 @@ let read_meta_file_path path : (keeper_meta option, string) result =
     | Ok json ->
       let json, _scrubbed = scrub_persisted_keeper_meta_json ~path json in
       warn_unknown_keeper_meta_keys ~path json;
-      warn_tool_access_compat_keys ~path json;
       (match meta_of_json json with
        | Ok meta -> Ok (Some meta)
        | Error e ->

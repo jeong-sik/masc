@@ -58,6 +58,9 @@ The main remaining problems are no longer “missing migration” at large. They
 - path/layout ownership is narrower.
   - `cdal_loader` now resolves proof-store contract paths through `proof_artifact_reader`
   - team-session evidence readers now reuse the shared `oas-runtime` session-root helper
+- keeper meta compatibility is narrower.
+  - persisted legacy tool-policy fields are scrubbed into canonical `tool_access`
+  - direct keeper meta parsing now rejects legacy compatibility keys instead of silently carrying them forward
 - this work also exposed and fixed a real pre-existing bug:
   - `Institution_eio.load_recent_episodes_jsonl` ignored `limit` when the log was larger than the requested window
 

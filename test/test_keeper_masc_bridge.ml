@@ -10,6 +10,32 @@ let prime_keeper_bridge () =
   ignore (Masc_mcp.Mcp_server_eio.get_clock_opt ());
   KET.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas
 
+let temp_dir () =
+  let path = Filename.temp_file "keeper_meta_bridge_" "" in
+  Sys.remove path;
+  Unix.mkdir path 0o755;
+  path
+
+let cleanup_dir dir =
+  let rec rm path =
+    if Sys.file_exists path then
+      if Sys.is_directory path then (
+        Sys.readdir path
+        |> Array.iter (fun name -> rm (Filename.concat path name));
+        Unix.rmdir path)
+      else
+        Unix.unlink path
+  in
+  try rm dir with _ -> ()
+
+let write_json_file path json =
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out oc)
+    (fun () -> output_string oc (Yojson.Safe.pretty_to_string json))
+
+let read_json_file path = Yojson.Safe.from_file path
+
 
 let make_meta ?tool_access ?(tool_denylist = []) () =
   let tool_access =
@@ -221,104 +247,109 @@ let test_tool_access_missing_migrates_legacy_standard_policy () =
   Alcotest.(check bool) "does not silently expand to full" false
     (List.mem "masc_autoresearch_cycle" names)
 
-let test_tool_access_legacy_unrestricted_maps_to_full () =
-  let names =
-    allowed_names_of_json
-      (`Assoc
-        [
-          ("name", `String "legacy-unrestricted");
-          ("agent_name", `String "legacy-unrestricted");
-          ("trace_id", `String "legacy-unrestricted-trace");
-          ("tool_access", `Assoc [ ("kind", `String "unrestricted") ]);
-        ])
-  in
-  Alcotest.(check bool) "full keeps keeper internal tool" true
-    (List.mem "keeper_fs_edit" names);
-  Alcotest.(check bool) "full keeps autoresearch tool" true
-    (List.mem "masc_autoresearch_cycle" names)
+let test_read_meta_file_scrubs_compat_tool_keys () =
+  let dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      let path = Filename.concat dir "compat-preset.json" in
+      write_json_file path
+        (`Assoc
+          [
+            ("name", `String "compat-preset");
+            ("agent_name", `String "compat-preset");
+            ("trace_id", `String "compat-preset-trace");
+            ("tool_preset", `String "coding");
+            ("tool_also_allow", `List [ `String "masc_governance_status" ]);
+            ("allowed_providers", `List [ `String "glm" ]);
+          ]);
+      match Masc_mcp.Keeper_types.read_meta_file_path path with
+      | Error e -> Alcotest.fail e
+      | Ok None -> Alcotest.fail "expected keeper meta"
+      | Ok (Some meta) ->
+          (match meta.Masc_mcp.Keeper_types.tool_access with
+           | Masc_mcp.Keeper_types.Preset
+               { preset = Masc_mcp.Keeper_types.Coding; also_allow } ->
+               Alcotest.(check (list string))
+                 "compat preset scrub keeps also_allow"
+                 [ "masc_governance_status" ] also_allow
+           | _ -> Alcotest.fail "expected coding preset after scrub");
+          let scrubbed = read_json_file path in
+          Alcotest.(check bool) "tool_access persisted" true
+            (Yojson.Safe.Util.member "tool_access" scrubbed <> `Null);
+          Alcotest.(check bool) "tool_preset removed" true
+            (Yojson.Safe.Util.member "tool_preset" scrubbed = `Null);
+          Alcotest.(check bool) "tool_also_allow removed" true
+            (Yojson.Safe.Util.member "tool_also_allow" scrubbed = `Null);
+          Alcotest.(check bool) "allowed_providers removed" true
+            (Yojson.Safe.Util.member "allowed_providers" scrubbed = `Null))
 
-let test_tool_access_legacy_restricted_keeps_internal_and_listed_tools () =
-  let names =
-    allowed_names_of_json
-      (`Assoc
-        [
-          ("name", `String "legacy-restricted");
-          ("agent_name", `String "legacy-restricted");
-          ("trace_id", `String "legacy-restricted-trace");
-          ( "tool_access",
-            `Assoc
-              [
-                ("kind", `String "restricted");
-                ("tools", `List [ `String "masc_status" ]);
-              ] );
-        ])
-  in
-  Alcotest.(check bool) "restricted keeps keeper internal tool" true
-    (List.mem "keeper_time_now" names);
-  Alcotest.(check bool) "restricted keeps listed masc tool" true
-    (List.mem "masc_status" names);
-  Alcotest.(check bool) "restricted does not unlock unrelated masc tool" false
-    (List.mem "masc_autoresearch_cycle" names)
+let test_read_meta_file_scrubs_legacy_tool_access_kind () =
+  let dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      let path = Filename.concat dir "legacy-unrestricted.json" in
+      write_json_file path
+        (`Assoc
+          [
+            ("name", `String "legacy-unrestricted");
+            ("agent_name", `String "legacy-unrestricted");
+            ("trace_id", `String "legacy-unrestricted-trace");
+            ("tool_access", `Assoc [ ("kind", `String "unrestricted") ]);
+          ]);
+      match Masc_mcp.Keeper_types.read_meta_file_path path with
+      | Error e -> Alcotest.fail e
+      | Ok None -> Alcotest.fail "expected keeper meta"
+      | Ok (Some meta) ->
+          let names = KET.keeper_allowed_tool_names meta in
+          Alcotest.(check bool) "full keeps keeper internal tool" true
+            (List.mem "keeper_fs_edit" names);
+          Alcotest.(check bool) "full keeps autoresearch tool" true
+            (List.mem "masc_autoresearch_cycle" names);
+          let scrubbed = read_json_file path in
+          Alcotest.(check string) "legacy kind rewritten"
+            "preset"
+            (Yojson.Safe.Util.member "tool_access" scrubbed
+             |> Yojson.Safe.Util.member "kind"
+             |> Yojson.Safe.Util.to_string))
 
-let test_tool_access_projection_preset_keys_loaded () =
-  let meta =
-    match Masc_mcp.Keeper_types.meta_of_json
-      (`Assoc
-        [
-          ("name", `String "compat-preset");
-          ("agent_name", `String "compat-preset");
-          ("trace_id", `String "compat-preset-trace");
-          ("tool_preset", `String "coding");
-          ("tool_also_allow", `List [ `String "masc_governance_status" ]);
-        ])
-    with
-    | Ok meta -> meta
-    | Error e -> failwith e
-  in
-  match meta.Masc_mcp.Keeper_types.tool_access with
-  | Masc_mcp.Keeper_types.Preset
-      { preset = Masc_mcp.Keeper_types.Coding; also_allow } ->
-      Alcotest.(check (list string))
-        "compat preset keeps also_allow"
-        [ "masc_governance_status" ] also_allow
-  | _ -> Alcotest.fail "expected coding preset from compatibility keys"
+let test_read_meta_file_scrubs_missing_tool_access_default () =
+  let dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      let path = Filename.concat dir "legacy-standard.json" in
+      write_json_file path
+        (`Assoc
+          [
+            ("name", `String "legacy-standard");
+            ("agent_name", `String "legacy-standard");
+            ("trace_id", `String "legacy-standard-trace");
+          ]);
+      match Masc_mcp.Keeper_types.read_meta_file_path path with
+      | Error e -> Alcotest.fail e
+      | Ok None -> Alcotest.fail "expected keeper meta"
+      | Ok (Some _meta) ->
+          let scrubbed = read_json_file path in
+          Alcotest.(check bool) "default tool_access persisted" true
+            (Yojson.Safe.Util.member "tool_access" scrubbed <> `Null))
 
-let test_tool_access_projection_custom_allowlist_loaded () =
-  let meta =
-    match Masc_mcp.Keeper_types.meta_of_json
-      (`Assoc
-        [
-          ("name", `String "compat-custom");
-          ("agent_name", `String "compat-custom");
-          ("trace_id", `String "compat-custom-trace");
-          ("tool_custom_allowlist", `List [ `String "masc_status" ]);
-        ])
-    with
-    | Ok meta -> meta
-    | Error e -> failwith e
-  in
-  match meta.Masc_mcp.Keeper_types.tool_access with
-  | Masc_mcp.Keeper_types.Custom names ->
-      Alcotest.(check (list string))
-        "compat custom allowlist preserved"
-        [ "masc_status" ] names
-  | _ -> Alcotest.fail "expected Custom allowlist from compatibility keys"
-
-let test_tool_access_projection_invalid_preset_rejected () =
+let test_meta_of_json_rejects_legacy_tool_policy_keys () =
   match Masc_mcp.Keeper_types.meta_of_json
     (`Assoc
       [
-        ("name", `String "compat-invalid-preset");
-        ("agent_name", `String "compat-invalid-preset");
-        ("trace_id", `String "compat-invalid-preset-trace");
-        ("tool_preset", `String "bogus");
+        ("name", `String "compat-preset");
+        ("agent_name", `String "compat-preset");
+        ("trace_id", `String "compat-preset-trace");
+        ("tool_preset", `String "coding");
       ])
   with
-  | Ok _ -> Alcotest.fail "expected invalid compatibility preset to fail"
+  | Ok _ -> Alcotest.fail "expected legacy tool policy key rejection"
   | Error e ->
       Alcotest.(check string)
-        "invalid compatibility preset error"
-        "meta parse error: invalid keeper tool_preset: bogus"
+        "legacy direct parse rejected"
+        "legacy keeper meta fields require scrub via read_meta_file_path: tool_preset"
         e
 
 let test_tool_access_preset_empty_json_preserved () =
@@ -601,18 +632,16 @@ let () =
         ] );
       ( "meta_json",
         [
-          Alcotest.test_case "missing tool_access migrates legacy standard policy" `Quick
+          Alcotest.test_case "missing tool_access defaults standard policy" `Quick
             test_tool_access_missing_migrates_legacy_standard_policy;
-          Alcotest.test_case "legacy unrestricted maps to full" `Quick
-            test_tool_access_legacy_unrestricted_maps_to_full;
-          Alcotest.test_case "legacy restricted keeps internal tools" `Quick
-            test_tool_access_legacy_restricted_keeps_internal_and_listed_tools;
-          Alcotest.test_case "compat preset keys load preset policy" `Quick
-            test_tool_access_projection_preset_keys_loaded;
-          Alcotest.test_case "compat custom allowlist loads custom policy" `Quick
-            test_tool_access_projection_custom_allowlist_loaded;
-          Alcotest.test_case "compat invalid preset rejected" `Quick
-            test_tool_access_projection_invalid_preset_rejected;
+          Alcotest.test_case "read_meta scrub compat keys to tool_access" `Quick
+            test_read_meta_file_scrubs_compat_tool_keys;
+          Alcotest.test_case "read_meta scrub legacy tool_access kind" `Quick
+            test_read_meta_file_scrubs_legacy_tool_access_kind;
+          Alcotest.test_case "read_meta scrub missing tool_access" `Quick
+            test_read_meta_file_scrubs_missing_tool_access_default;
+          Alcotest.test_case "direct meta_of_json rejects legacy tool keys" `Quick
+            test_meta_of_json_rejects_legacy_tool_policy_keys;
           Alcotest.test_case "preset empty json preserved" `Quick
             test_tool_access_preset_empty_json_preserved;
           Alcotest.test_case "custom empty json preserved" `Quick

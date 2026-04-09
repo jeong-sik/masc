@@ -207,6 +207,9 @@ let () = test "handle_add_task_persists_contract" (fun () ->
 )
 
 let () = test "handle_done_uses_persisted_contract_gate" (fun () ->
+  (* Task_contract_gate removed — persisted_contract_rejection always returns
+     None, so handle_done succeeds immediately without the gate rejection.
+     Verify that completion works without the gate. *)
   let ctx = make_test_ctx () in
   let _ =
     Tool_task.handle_add_task ctx
@@ -224,20 +227,6 @@ let () = test "handle_done_uses_persisted_contract_gate" (fun () ->
         ])
   in
   let _ = Tool_task.handle_claim ctx (`Assoc [ ("task_id", `String "task-001") ]) in
-  let success_missing, result_missing =
-    Tool_task.handle_done ctx
-      (`Assoc
-        [
-          ("task_id", `String "task-001");
-          ("notes", `String "deliverable-ready");
-        ])
-  in
-  assert (not success_missing);
-  assert (str_contains result_missing "persisted task contract gate");
-  ignore (Run_eio.init ctx.config ~task_id:"task-001" ~agent_name:(Some "test-agent"));
-  ignore
-    (Run_eio.set_deliverable ctx.config ~task_id:"task-001"
-       ~content:"deliverable-ready");
   let success_done, result_done =
     Tool_task.handle_done ctx
       (`Assoc
@@ -246,6 +235,7 @@ let () = test "handle_done_uses_persisted_contract_gate" (fun () ->
           ("notes", `String "deliverable-ready");
         ])
   in
+  (* With gate removed, completion succeeds directly *)
   if not success_done then failwith result_done
 )
 

@@ -806,7 +806,7 @@ let digest_json ?actor ?target_type ?target_id ?include_workers ?sessions
     let tracked_sessions =
       match sessions with
       | Some s -> s
-      | None -> Team_session_store.list_sessions config
+      | None -> []
     in
     let room_state_json = room_state_json config in
     let command_plane_digest_json =
@@ -906,7 +906,8 @@ let digest_json ?actor ?target_type ?target_id ?include_workers ?sessions
         match target_id with
         | None -> Error "target_id is required when target_type=team_session"
         | Some session_id -> (
-            match Team_session_store.load_session config session_id with
+            (* Team_session_store removed *)
+            match (None : Team_session_types.session option) with
             | None ->
                 Error (Printf.sprintf "team session not found: %s" session_id)
             | Some session ->

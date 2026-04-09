@@ -374,7 +374,10 @@ async function bindConnector(connectorId: string) {
 
   actionLoading.value = true
   try {
-    await post(`/api/v1/gate/connector/bind?name=${encodeURIComponent(connectorId)}`, { channel_id: channelId, keeper_name: keeperName })
+    await post(`/api/v1/gate/connector/bind?name=${encodeURIComponent(connectorId)}`, {
+      channel_id: channelId,
+      keeper_name: keeperName,
+    })
     await refresh()
     showToast(`Bound ${channelId} -> ${keeperName}`, 'success')
   } catch (err) {
@@ -390,7 +393,9 @@ async function unbindConnector(connectorId: string, channelIdOverride?: string) 
 
   actionLoading.value = true
   try {
-    await post(`/api/v1/gate/connector/unbind?name=${encodeURIComponent(connectorId)}`, { channel_id: channelId })
+    await post(`/api/v1/gate/connector/unbind?name=${encodeURIComponent(connectorId)}`, {
+      channel_id: channelId,
+    })
     if (channelDraft.value.trim() === channelId) {
       channelDraft.value = ''
     }

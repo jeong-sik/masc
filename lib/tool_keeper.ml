@@ -436,9 +436,9 @@ let handle_keeper_repair ctx args : tool_result =
                     | None -> fields
                   in
                   let ok, body =
-                    Team_session_oas_bridge.run_repair_loop_until_terminal
-                      ~sw:ctx.sw ~clock:ctx.clock ~config:ctx.config
-                      (`Assoc fields)
+                    (* Team_session_oas_bridge removed *)
+                    ignore (ctx.sw, ctx.clock, ctx.config, fields);
+                    (false, {|{"error":"team session oas bridge removed"}|})
                   in
                   invalidate_status_cache meta.name;
                   (ok, annotate_keeper_repair_json ~keeper_name:meta.name body)

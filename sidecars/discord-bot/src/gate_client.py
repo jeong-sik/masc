@@ -179,6 +179,20 @@ class GateClient:
     def _cache_fresh(self, cache: tuple[float, Any] | None, ttl: int) -> bool:
         return cache is not None and (self._now() - cache[0]) < ttl
 
+    def _discord_context(
+        self,
+        *,
+        channel_user_id: str,
+        channel_user_name: str,
+        channel_room_id: str,
+    ) -> dict[str, str]:
+        return {
+            "channel": "discord",
+            "channel_user_id": channel_user_id,
+            "channel_user_name": channel_user_name,
+            "channel_room_id": channel_room_id,
+        }
+
     def _get_client(self) -> httpx.AsyncClient:
         """Return the shared client, lazily creating it on first use."""
         if self._client is None or self._client.is_closed:
@@ -255,10 +269,11 @@ class GateClient:
             return GateResponse.from_error(self._breaker_error())
 
         payload = {
-            "channel": "discord",
-            "channel_user_id": channel_user_id,
-            "channel_user_name": channel_user_name,
-            "channel_room_id": channel_room_id,
+            **self._discord_context(
+                channel_user_id=channel_user_id,
+                channel_user_name=channel_user_name,
+                channel_room_id=channel_room_id,
+            ),
             "keeper_name": keeper_name,
             "content": content,
             "idempotency_key": f"discord-msg-{message_id}",
@@ -367,6 +382,9 @@ class GateClient:
         *,
         keeper_name: str,
         content: str,
+        channel_user_id: str,
+        channel_user_name: str,
+        channel_room_id: str,
     ) -> AsyncIterator[str]:
         """Stream a message to a keeper via SSE, yielding text deltas.
 
@@ -377,7 +395,15 @@ class GateClient:
         if self._breaker_is_open():
             return
 
-        payload = {"name": keeper_name, "message": content}
+        payload = {
+            "name": keeper_name,
+            "message": content,
+            **self._discord_context(
+                channel_user_id=channel_user_id,
+                channel_user_name=channel_user_name,
+                channel_room_id=channel_room_id,
+            ),
+        }
         client = self._get_client()
 
         try:
@@ -403,18 +429,20 @@ class GateClient:
                         continue
                     if not isinstance(event, dict):
                         continue
-                    event_type = event.get("type", "")
+                    event_data = cast(dict[str, Any], event)
+                    event_type = str(event_data.get("type", ""))
                     if event_type == "TEXT_MESSAGE_CONTENT":
-                        delta = event.get("delta", "")
+                        delta = str(event_data.get("delta", ""))
                         if delta:
                             yield delta
                     elif event_type == "RUN_ERROR":
-                        custom = event.get("customValue", {})
-                        err = custom.get("message", "") if isinstance(custom, dict) else ""
+                        custom_raw = event_data.get("customValue", {})
+                        custom = cast(dict[str, Any], custom_raw) if isinstance(custom_raw, dict) else {}
+                        err = str(custom.get("message", ""))
                         logger.warning("Keeper stream error: %s", err)
                         return
         except httpx.TimeoutException:
-            self._note_transport_failure(f"stream timeout after 300s")
+            self._note_transport_failure("stream timeout after 300s")
         except httpx.HTTPError as e:
             self._note_transport_failure(f"stream http error: {e}")
         except Exception as e:  # pragma: no cover

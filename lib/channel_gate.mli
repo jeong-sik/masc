@@ -84,6 +84,8 @@ val gate_error_to_string : gate_error -> string
 type dispatch_fn =
   channel:string ->
   channel_user_id:string ->
+  channel_user_name:string ->
+  channel_room_id:string ->
   keeper_name:string ->
   content:string ->
   Gate_protocol.dispatch_result

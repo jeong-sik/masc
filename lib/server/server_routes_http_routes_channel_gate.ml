@@ -255,7 +255,7 @@ let handle_gate_discord_status _state request reqd =
     Until multiple connector backends exist, only [channel=discord] is valid. *)
 let resolve_connector_channel request =
   match query_param request "channel" |> Option.map String.trim with
-  | None | Some "" -> Error "channel is required"
+  | None | Some "" -> Error "name or channel is required"
   | Some raw ->
       let channel = String.lowercase_ascii raw in
       if String.equal channel "discord" then Ok channel

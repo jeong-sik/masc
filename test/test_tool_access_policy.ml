@@ -547,6 +547,8 @@ let test_autoresearch_keeper_tools_exclude_repo_synthesis_front_door () =
     Tool_shard.autoresearch_keeper_tools
     |> List.map (fun (schema : Types.tool_schema) -> schema.name)
   in
+  check bool "autoresearch swarm start excluded from autoresearch shard" false
+    (List.mem "masc_autoresearch_swarm_start" names);
   check bool "repo synthesis swarm start excluded from autoresearch shard" false
     (List.mem "masc_repo_synthesis_swarm_start" names)
 

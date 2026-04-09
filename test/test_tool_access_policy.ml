@@ -521,7 +521,7 @@ let test_minimal_preset_includes_core_masc () =
   let universe = Keeper_exec_tools.keeper_universe_tool_names meta in
   check bool "masc_status in universe" true
     (List.mem "masc_status" universe);
-  check bool "masc_heartbeat in universe (MCP-injected, but not executable)" true
+  check bool "masc_heartbeat removed from universe" false
     (List.mem "masc_heartbeat" universe);
   check bool "masc_tool_help in universe" true
     (List.mem "masc_tool_help" universe);

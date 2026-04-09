@@ -118,6 +118,16 @@ let () =
           Alcotest.test_case "keeper status defaults name to caller" `Quick
             Test_operator_control_keeper
             .test_keeper_status_defaults_name_to_caller;
+          Alcotest.test_case "keeper status accepts agent alias" `Quick
+            Test_operator_control_keeper
+            .test_keeper_status_accepts_agent_name_alias;
+          Alcotest.test_case "keeper down accepts agent alias" `Quick
+            Test_operator_control_keeper
+            .test_keeper_down_accepts_agent_name_alias;
+          Alcotest.test_case "operator keeper probe accepts agent alias"
+            `Quick
+            Test_operator_control_keeper
+            .test_operator_keeper_probe_accepts_agent_name_alias;
           Alcotest.test_case "keeper status schema makes name optional" `Quick
             Test_operator_control_keeper
             .test_keeper_status_schema_makes_name_optional;

@@ -9,17 +9,17 @@ open Keeper_keepalive
 type tool_result = Keeper_types.tool_result
 
 let handle_keeper_down ctx args : tool_result =
-  let name = get_string args "name" "" in
-  if not (validate_name name) then
+  let requested_name = String.trim (get_string args "name" "") in
+  if not (validate_name requested_name) then
     (false, "❌ invalid keeper name")
   else
     let remove_meta = get_bool args "remove_meta" false in
     let remove_session = get_bool args "remove_session" false in
-    stop_keepalive name;
-    match read_meta ctx.config name with
+    match read_meta_resolved ctx.config requested_name with
     | Error e -> (false, "❌ " ^ e)
-    | Ok None -> (true, Printf.sprintf "keeper already absent: %s" name)
-    | Ok (Some m) ->
+    | Ok None -> (true, Printf.sprintf "keeper already absent: %s" requested_name)
+    | Ok (Some (name, m)) ->
+      stop_keepalive name;
       ignore
         (Operator_pending_confirm.remove_pending_confirms_by_target ctx.config
            ~target_type:"keeper" ~target_id:(Some name));

@@ -455,7 +455,7 @@ export function TelemetryUnified() {
           <div class="text-[12px] font-semibold uppercase tracking-wider text-amber-300">OAS Runtime Bridge</div>
           <div class="mt-2 grid gap-2">
             ${proofWorkerRuns.map(item => html`
-              <div class="rounded-lg border border-white/10 bg-black/10 p-3">
+              <div key=${item.worker_run_id} class="rounded-lg border border-white/10 bg-black/10 p-3">
                 <div class="flex flex-wrap items-center gap-2">
                   <span class="text-[12px] font-semibold text-[var(--text-strong)]">${item.worker_name ?? item.worker_run_id}</span>
                   <span class="rounded bg-white/5 px-1.5 py-0.5 text-[10px] font-mono text-[var(--text-dim)]">${item.worker_run_id}</span>
@@ -486,7 +486,7 @@ export function TelemetryUnified() {
         </div>
         <div class="max-h-[600px] overflow-y-auto">
           ${entries.length > 0
-            ? entries.map(entry => html`<${EntryRow} entry=${entry} />`)
+            ? entries.map((entry, index) => html`<${EntryRow} key=${`${entry.source}-${entryTimestamp(entry)}-${index}`} entry=${entry} />`)
             : html`<div class="px-4 py-6 text-sm text-[var(--text-muted)]">선택한 scope에 해당하는 MASC telemetry entry가 없습니다.</div>`}
         </div>
       </div>

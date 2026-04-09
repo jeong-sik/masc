@@ -81,6 +81,7 @@ const liveTraceFeeds = signal<Record<string, UnifiedTraceEvent[]>>({})
 const EMPTY_SLOT: TraceSlot = { events: [], loading: false, error: null, filter: 'all', fetchToken: 0 }
 
 const LIVE_TRACE_LIMIT = 120
+let liveTraceSeq = 0
 
 function getSlot(agent: string): TraceSlot {
   return traceSlots.value[agent] ?? EMPTY_SLOT
@@ -425,7 +426,16 @@ export function appendLiveOasEvent(
 export function appendLiveTraceEvent(agentName: string, event: UnifiedTraceEvent): void {
   if (!traceSlots.value[agentName] && !liveTraceFeeds.value[agentName]) return
   const prev = liveTraceFeeds.value[agentName] ?? []
-  const next = [...prev, event]
+  const historical = traceSlots.value[agentName]?.events ?? []
+  const seenIds = new Set([
+    ...historical.map(item => item.id),
+    ...prev.map(item => item.id),
+  ])
+  const uniqueEvent =
+    seenIds.has(event.id)
+      ? { ...event, id: `${event.id}-${++liveTraceSeq}` }
+      : event
+  const next = [...prev, uniqueEvent]
   const pruned =
     next.length > LIVE_TRACE_LIMIT
       ? next.slice(next.length - LIVE_TRACE_LIMIT)

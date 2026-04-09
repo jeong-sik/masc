@@ -60,6 +60,9 @@ function eventKindBadgeClass(entry: JournalEntry): string {
       return 'agent-event-badge--task'
     case 'oas_context':
       return 'agent-event-badge--keeper'
+    case 'oas_event':
+    case 'oas_task':
+      return 'agent-event-badge--lifecycle'
     case 'agent_joined':
     case 'agent_left':
       return 'agent-event-badge--lifecycle'
@@ -87,6 +90,7 @@ function eventKindLabel(eventType: JournalEventType | undefined): string {
     case 'oas_turn': return 'TURN'
     case 'oas_tool': return 'TOOL'
     case 'oas_context': return 'CTX'
+    case 'oas_event': return 'OAS'
     case 'oas_task': return 'TASK'
     case 'agent_joined': return 'JOIN'
     case 'agent_left': return 'LEFT'

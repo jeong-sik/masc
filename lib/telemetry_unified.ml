@@ -183,7 +183,7 @@ let count_fixed_source_entries ~masc_root ~base_path source : int =
     if not (Sys.file_exists dir) then 0
     else
       (match Dated_jsonl.create ~base_dir:dir () with
-       | store -> List.length (Dated_jsonl.read_recent store 10_000)
+       | store -> Dated_jsonl.count_entries store
        | exception (Eio.Cancel.Cancelled _ as e) -> raise e
        | exception _ -> 0)
 
@@ -193,7 +193,7 @@ let summary_json ~base_path ~masc_root () : Yojson.Safe.t =
     List.fold_left (fun acc (_, dir) ->
       acc +
       (match Dated_jsonl.create ~base_dir:dir () with
-       | store -> List.length (Dated_jsonl.read_recent store 10_000)
+       | store -> Dated_jsonl.count_entries store
        | exception (Eio.Cancel.Cancelled _ as e) -> raise e
        | exception _ -> 0)
     ) 0 keeper_dirs

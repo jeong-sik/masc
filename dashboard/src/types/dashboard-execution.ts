@@ -1,7 +1,7 @@
 import type { Agent, BoardPost } from './core'
 import type { OperatorAttentionItem, OperatorRecommendedAction } from './dashboard-mission'
 import type { CommandPlaneSurface } from './command-plane'
-import type { BoardMonitoring, GovernanceMonitoring, GovernanceDecisionItem, GovernanceTimelineEvent, GovernanceJudgeSummary, GovernanceJudgment, PendingConfirmation, PendingConfirmSummary } from './governance'
+import type { BoardMonitoring, GovernanceMonitoring, GovernanceDecisionItem, GovernanceTimelineEvent, GovernanceJudgeSummary, GovernanceJudgment, KeeperApprovalQueueItem, PendingConfirmation, PendingConfirmSummary } from './governance'
 
 // --- Dashboard projection responses ---
 
@@ -351,6 +351,7 @@ export interface DashboardGovernanceResponse {
   judge?: GovernanceJudgeSummary
   judgments?: GovernanceJudgment[]
   pending_actions?: PendingConfirmation[]
+  approval_queue?: KeeperApprovalQueueItem[]
 }
 
 export interface DashboardPlanningResponse {

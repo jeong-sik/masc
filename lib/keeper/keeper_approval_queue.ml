@@ -73,6 +73,19 @@ let generate_id () =
   let digest = Digestif.SHA256.(digest_string entropy |> to_hex) in
   "appr_" ^ String.sub digest 0 12
 
+let input_preview_of_json (json : Yojson.Safe.t) =
+  let raw = Yojson.Safe.to_string json in
+  String.sub raw 0 (min 200 (String.length raw))
+
+let sort_entries_by_requested_at entries =
+  List.sort
+    (fun left right ->
+      let ts_of_json json =
+        Yojson.Safe.Util.(member "requested_at" json |> to_float)
+      in
+      Float.compare (ts_of_json left) (ts_of_json right))
+    entries
+
 (* ── Submit & await ───────────────────────────────────────── *)
 
 (** Submit a tool call for approval and suspend the calling fiber.
@@ -105,11 +118,7 @@ let submit_and_await ~keeper_name ~tool_name ~input ~risk_level
              ("tool_name", `String tool_name);
              ("risk_level", `String risk_level);
              ("requested_at", `Float entry.requested_at);
-             ("input_preview",
-              `String (String.sub
-                         (Yojson.Safe.to_string input)
-                         0
-                         (min 200 (String.length (Yojson.Safe.to_string input)))));
+             ("input_preview", `String (input_preview_of_json input));
            ]);
         ])
    with
@@ -179,11 +188,24 @@ let list_pending_json () : Yojson.Safe.t =
         ("waiting_s", `Float (Unix.gettimeofday () -. entry.requested_at));
       ] :: acc
     ) pending [] in
-    `List (List.sort (fun a b ->
-      let ts_a = Yojson.Safe.Util.(member "requested_at" a |> to_float) in
-      let ts_b = Yojson.Safe.Util.(member "requested_at" b |> to_float) in
-      Float.compare ts_a ts_b
-    ) entries))
+    `List (sort_entries_by_requested_at entries))
+
+let list_pending_dashboard_json () : Yojson.Safe.t =
+  Eio.Mutex.use_ro mu (fun () ->
+    let entries = Hashtbl.fold (fun _id entry acc ->
+      `Assoc [
+        ("id", `String entry.id);
+        ("keeper_name", `String entry.keeper_name);
+        ("tool_name", `String entry.tool_name);
+        ("risk_level", `String entry.risk_level);
+        ("requested_at", `Float entry.requested_at);
+        ("requested_at_iso", `String (Types.iso8601_of_unix_seconds entry.requested_at));
+        ("waiting_s", `Float (Unix.gettimeofday () -. entry.requested_at));
+        ("input", entry.input);
+        ("input_preview", `String (input_preview_of_json entry.input));
+      ] :: acc
+    ) pending [] in
+    `List (sort_entries_by_requested_at entries))
 
 let pending_count () : int =
   Eio.Mutex.use_ro mu (fun () -> Hashtbl.length pending)

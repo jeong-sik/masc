@@ -5,6 +5,7 @@ import { Card } from './common/card'
 import { KpiCard } from './common/stat-row'
 import { TimeAgo } from './common/time-ago'
 import { EmptyState } from './common/empty-state'
+import { JsonViewerCard } from './common/json-viewer'
 import { FilterChips } from './common/filter-chips'
 import { ActionButton } from './common/button'
 import { DistributionBars, SegmentedBar, type DistributionItem } from './common/distribution-bars'
@@ -16,9 +17,11 @@ import {
   governanceFilter,
   governanceLoading,
   governanceStarting,
+  governanceApprovalActing,
   governanceTopicInput,
   refreshGovernance,
   respondToExecutionOrder,
+  respondToKeeperApproval,
   selectDecision,
   selectedDecisionKey,
   submitBrief,
@@ -60,8 +63,13 @@ function GovernanceSummaryStrip() {
   const itemCount = data?.items?.length ?? 0
   const activityCount = data?.activity?.length ?? 0
   const judgmentCount = data?.judgments?.length ?? 0
+  const approvalCount = data?.approval_queue?.length ?? summary?.needs_human_gate ?? 0
   const retiredValue = '-'
   const retiredHint = 'retired'
+  const judgeOnlyLabel =
+    approvalCount > 0
+      ? `judge-only / 최근 판단 ${judgmentCount}건 / 승인 ${approvalCount}건`
+      : `judge-only / 최근 판단 ${judgmentCount}건`
 
   return html`
     ${caseTrackingRetired ? html`
@@ -84,7 +92,7 @@ function GovernanceSummaryStrip() {
       <div class="flex items-center gap-3">
         <h2 class="text-lg font-bold text-text-strong tracking-wide">거버넌스</h2>
         <span class="rounded-md border border-white/5 bg-white/5 px-2 py-0.5 text-[11px] font-medium text-text-muted">
-          ${caseTrackingRetired ? `judge-only / 최근 판단 ${judgmentCount}건` : `진행 중 ${itemCount}건 / 활동 ${activityCount}건`}
+          ${caseTrackingRetired ? judgeOnlyLabel : `진행 중 ${itemCount}건 / 활동 ${activityCount}건`}
         </span>
       </div>
       ${data?.generated_at ? html`<span class="text-[11px] text-text-dim font-mono">${data.generated_at}</span>` : null}
@@ -93,7 +101,7 @@ function GovernanceSummaryStrip() {
       <${KpiCard} label="열린 케이스" value=${caseTrackingRetired ? retiredValue : (summary?.cases_open ?? itemCount)} hint=${caseTrackingRetired ? retiredHint : undefined} />
       <${KpiCard} label="판정 대기" value=${caseTrackingRetired ? retiredValue : (summary?.pending_ruling ?? 0)} hint=${caseTrackingRetired ? retiredHint : undefined} />
       <${KpiCard} label="자동집행 준비" value=${caseTrackingRetired ? retiredValue : (summary?.ready_auto_execute ?? 0)} hint=${caseTrackingRetired ? retiredHint : undefined} />
-      <${KpiCard} label="관리자 승인 대기" value=${caseTrackingRetired ? retiredValue : (summary?.needs_human_gate ?? 0)} hint=${caseTrackingRetired ? retiredHint : undefined} />
+      <${KpiCard} label="관리자 승인 대기" value=${summary?.needs_human_gate ?? approvalCount} hint=${caseTrackingRetired ? 'live' : undefined} />
       <${KpiCard} label="집행 완료" value=${caseTrackingRetired ? retiredValue : (summary?.executed ?? 0)} hint=${caseTrackingRetired ? retiredHint : undefined} />
     </div>
     <${JudgeStatusBar} />
@@ -376,6 +384,85 @@ function JudgmentsSection() {
   `
 }
 
+function approvalRiskToneClass(riskLevel: string): string {
+  const normalized = riskLevel.trim().toLowerCase()
+  if (normalized === 'critical') return 'border-bad/30 bg-bad/10 text-bad'
+  if (normalized === 'high') return 'border-warn/30 bg-warn/10 text-warn'
+  if (normalized === 'medium') return 'border-accent/30 bg-[var(--accent-10)] text-accent'
+  return 'border-white/10 bg-white/5 text-text-muted'
+}
+
+function KeeperApprovalQueueSection() {
+  const items = governanceData.value?.approval_queue ?? []
+  const actingId = governanceApprovalActing.value
+  return html`
+    <${Card} title="Keeper HITL 승인 대기" class="section mb-5" variant="compact">
+      <div class="mb-3 flex items-center justify-between gap-3">
+        <div class="text-[12px] text-text-muted">
+          위험도가 threshold를 넘은 keeper tool call이 여기서 대기합니다.
+        </div>
+        <span class="rounded-md border border-warn/20 bg-warn/10 px-2 py-0.5 text-[11px] font-bold text-warn">
+          ${items.length}건 대기
+        </span>
+      </div>
+      ${items.length === 0
+        ? html`<${EmptyState} message="현재 대시보드에서 처리할 keeper 승인 요청이 없습니다." compact />`
+        : html`
+            <div class="flex flex-col gap-3.5" data-testid="governance-approval-queue">
+              ${items.map(item => {
+                const disabled = actingId === item.id
+                return html`
+                  <div class="rounded-xl border border-card-border bg-card/34 p-4 shadow-sm" data-testid="governance-approval-item">
+                    <div class="flex flex-wrap items-start gap-2.5">
+                      <span class="inline-flex items-center rounded-md border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-bold text-text-muted">
+                        keeper ${item.keeper_name}
+                      </span>
+                      <span class="inline-flex items-center rounded-md border border-accent/20 bg-[var(--accent-10)] px-2 py-0.5 text-[10px] font-bold text-accent">
+                        ${item.tool_name}
+                      </span>
+                      <span class="inline-flex items-center rounded-md border px-2 py-0.5 text-[10px] font-bold ${approvalRiskToneClass(item.risk_level)}">
+                        ${item.risk_level}
+                      </span>
+                      <span class="ml-auto text-[11px] text-text-dim">
+                        ${item.requested_at ? html`요청 <${TimeAgo} timestamp=${item.requested_at} />` : null}
+                        ${item.waiting_s != null ? ` · 대기 ${Math.max(0, Math.round(item.waiting_s))}s` : ''}
+                      </span>
+                    </div>
+                    ${item.input_preview
+                      ? html`<div class="mt-2 text-[12px] leading-relaxed text-text-muted break-words">${item.input_preview}</div>`
+                      : null}
+                    <div class="mt-3 grid gap-3 min-[1100px]:grid-cols-[minmax(0,1fr)_auto]">
+                      <${JsonViewerCard} data=${item.input ?? {}} title="Approval Input" />
+                      <div class="flex min-[1100px]:flex-col gap-2 min-[1100px]:justify-start">
+                        <${ActionButton}
+                          variant="primary"
+                          size="md"
+                          class="min-w-[110px]"
+                          onClick=${() => void respondToKeeperApproval(item.id, 'approve')}
+                          disabled=${Boolean(actingId)}
+                        >
+                          ${disabled ? '처리 중...' : '승인'}
+                        <//>
+                        <${ActionButton}
+                          variant="danger"
+                          size="md"
+                          class="min-w-[110px]"
+                          onClick=${() => void respondToKeeperApproval(item.id, 'reject')}
+                          disabled=${Boolean(actingId)}
+                        >
+                          ${disabled ? '처리 중...' : '거부'}
+                        <//>
+                      </div>
+                    </div>
+                  </div>
+                `
+              })}
+            </div>
+          `}
+    <//>
+  `
+}
+
 export function Governance() {
   useEffect(() => {
     void refreshGovernance()
@@ -387,6 +474,7 @@ export function Governance() {
       <${GovernanceSummaryStrip} />
       <${GovernanceVisualSummary} />
       <${GovernanceToolbar} />
+      <${KeeperApprovalQueueSection} />
       <${JudgmentsSection} />
       <div class="governance-layout">
         <${DecisionInbox} />

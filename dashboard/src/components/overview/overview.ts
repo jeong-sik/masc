@@ -513,6 +513,84 @@ function ToolCallHealthPanel() {
   `
 }
 
+function OperationsHubCard() {
+  const truth = namespaceTruth.value
+  const pendingApprovals = truth?.command?.pending_approvals ?? 0
+  const pendingConfirms =
+    truth?.operator?.pending_confirm_summary?.visible_count
+    ?? truth?.operator?.pending_confirm_summary?.total_count
+    ?? 0
+  const attentionCount = truth?.operator?.attention_summary?.count ?? 0
+  const focus =
+    truth?.focus?.suggested_tab === 'command'
+      ? truth.focus
+      : null
+
+  return html`
+    <div>
+      <${HomeSectionHeader}
+        label="운영 허브"
+        linkLabel="거버넌스 열기 ->"
+        linkTab="command"
+        linkParams=${{ section: 'governance' }}
+      />
+      <div class="grid grid-cols-[minmax(0,1fr)_auto] gap-4 max-[900px]:grid-cols-1">
+        <div class="rounded-xl border border-card-border/40 bg-card/40 p-4">
+          <div class="text-[13px] leading-[1.7] text-[var(--text-body)]">
+            판단 검토, 승인 대기, 운영자 개입을 한 화면군으로 묶었습니다.
+            위험한 행동은 <strong class="text-[var(--text-strong)]">거버넌스</strong>에서 검토하고,
+            즉시 조작은 <strong class="text-[var(--text-strong)]">실시간 개입</strong>에서 처리합니다.
+          </div>
+          ${focus
+            ? html`
+                <div class="mt-3 rounded-xl border border-accent/20 bg-accent/8 px-3 py-2 text-[12px] text-[var(--text-body)]">
+                  <span class="font-semibold text-[var(--text-strong)]">${focus.label}</span>
+                  <span class="ml-2">${focus.reason}</span>
+                </div>
+              `
+            : null}
+          <div class="mt-4 grid grid-cols-3 gap-3 max-[720px]:grid-cols-1">
+            <div class="rounded-lg border border-card-border/35 bg-card/55 p-3">
+              <div class="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">정책 승인</div>
+              <div class="mt-1 text-[24px] font-bold text-[var(--text-strong)]">${pendingApprovals}</div>
+              <div class="mt-1 text-[11px] text-[var(--text-muted)]">command-plane pending approvals</div>
+            </div>
+            <div class="rounded-lg border border-card-border/35 bg-card/55 p-3">
+              <div class="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">운영 확인</div>
+              <div class="mt-1 text-[24px] font-bold text-[var(--text-strong)]">${pendingConfirms}</div>
+              <div class="mt-1 text-[11px] text-[var(--text-muted)]">operator confirm queue</div>
+            </div>
+            <div class="rounded-lg border border-card-border/35 bg-card/55 p-3">
+              <div class="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">주의 신호</div>
+              <div class="mt-1 text-[24px] font-bold text-[var(--text-strong)]">${attentionCount}</div>
+              <div class="mt-1 text-[11px] text-[var(--text-muted)]">operator attention summary</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex flex-col gap-2">
+          <${RouteLink}
+            tab="command"
+            params=${{ section: 'governance' }}
+            class="rounded-xl border border-accent/25 bg-[var(--accent-10)] px-4 py-3 text-[13px] font-semibold text-accent transition-colors hover:bg-accent/18"
+            title="거버넌스 열기"
+          >
+            거버넌스 열기
+          <//>
+          <${RouteLink}
+            tab="command"
+            params=${{ section: 'intervene' }}
+            class="rounded-xl border border-card-border/45 bg-card/45 px-4 py-3 text-[13px] font-semibold text-[var(--text-strong)] transition-colors hover:bg-card"
+            title="실시간 개입 열기"
+          >
+            실시간 개입
+          <//>
+        </div>
+      </div>
+    </div>
+  `
+}
+
 // --- Overview (Home) ---
 
 const OVERVIEW_CARD = 'rounded-xl border border-card-border/40 bg-card/18 p-4 shadow-sm shadow-black/8'
@@ -536,6 +614,10 @@ export function Overview() {
       <${OverviewFreshnessStrip} />
       <${SituationBanner} snap=${snap} roomHealth=${roomHealth} />
       <${AttentionSpotlight} snap=${snap} />
+
+      <div class=${OVERVIEW_CARD}>
+        <${OperationsHubCard} />
+      </div>
 
       ${metaCognitionCard}
 

@@ -19,6 +19,7 @@ export const governanceData = computed(() => getData(governanceResource.state.va
 export const governanceStarting = signal(false)
 export const governanceActing = signal(false)
 export const governanceBriefSubmitting = signal(false)
+export const governanceApprovalActing = signal<string | null>(null)
 
 // ── Form inputs ──
 export const governanceTopicInput = signal('')

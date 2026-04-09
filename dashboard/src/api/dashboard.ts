@@ -7,6 +7,7 @@ import {
   normalizeGovernanceTimelineEvent,
   normalizeGovernanceJudgeSummary,
   normalizeGovernanceJudgment,
+  normalizeKeeperApprovalQueueItem,
   normalizePendingConfirmation,
 } from './board'
 import { get, post, patch, withRetries, NAMESPACE_TRUTH_GET_TIMEOUT_MS } from './core'
@@ -26,6 +27,7 @@ import type {
   BoardSortMode,
   GovernanceDecisionItem,
   GovernanceJudgment,
+  KeeperApprovalQueueItem,
   GovernanceTimelineEvent,
   PendingConfirmation,
   CommandPlaneHelpResponse,
@@ -271,6 +273,11 @@ export function fetchDashboardGovernance(): Promise<DashboardGovernanceResponse>
           .map(item => normalizePendingConfirmation(item))
           .filter((item): item is PendingConfirmation => item !== null)
       : []
+    const approvalQueue = Array.isArray(raw.approval_queue)
+      ? raw.approval_queue
+          .map(item => normalizeKeeperApprovalQueueItem(item))
+          .filter((item): item is KeeperApprovalQueueItem => item !== null)
+      : []
     return {
       generated_at: asNullableIsoTimestamp(raw.generated_at) ?? undefined,
       case_tracking_available:
@@ -313,7 +320,20 @@ export function fetchDashboardGovernance(): Promise<DashboardGovernanceResponse>
             .filter((item): item is GovernanceJudgment => item !== null)
         : [],
       pending_actions: pendingActions,
+      approval_queue: approvalQueue,
     }
+  })
+}
+
+export function resolveGovernanceApproval(
+  id: string,
+  decision: 'approve' | 'reject',
+  reason?: string,
+): Promise<{ ok: boolean; id: string; decision: 'approve' | 'reject' }> {
+  return post('/api/v1/dashboard/governance/approvals/resolve', {
+    id,
+    decision,
+    reason,
   })
 }
 

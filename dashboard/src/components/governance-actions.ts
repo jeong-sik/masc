@@ -5,6 +5,7 @@ import {
   fetchGovernanceCaseStatus,
   fetchParamAudit,
   fetchRuntimeParams,
+  resolveGovernanceApproval,
   submitGovernanceCaseBrief,
   submitGovernancePetition,
 } from '../api'
@@ -16,6 +17,7 @@ import {
   governanceStarting,
   governanceActing,
   governanceBriefSubmitting,
+  governanceApprovalActing,
   governanceError,
   governanceTopicInput,
   governanceBriefInput,
@@ -121,6 +123,22 @@ export async function respondToExecutionOrder(decision: 'confirm' | 'deny') {
     showToast(message, 'error')
   } finally {
     governanceActing.value = false
+  }
+}
+
+export async function respondToKeeperApproval(id: string, decision: 'approve' | 'reject') {
+  if (!id) return
+  governanceApprovalActing.value = id
+  try {
+    await resolveGovernanceApproval(id, decision)
+    showToast(decision === 'approve' ? 'keeper 승인 요청을 승인했습니다' : 'keeper 승인 요청을 거부했습니다', 'success')
+    await refreshGovernance()
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'keeper 승인 요청을 처리하지 못했습니다'
+    governanceError.value = message
+    showToast(message, 'error')
+  } finally {
+    governanceApprovalActing.value = null
   }
 }
 

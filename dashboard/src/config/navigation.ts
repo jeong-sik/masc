@@ -69,13 +69,12 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
   },
   {
     id: 'command',
-    label: '운영 개입',
+    label: '운영',
     icon: '🎛️',
-    description: 'Retired compatibility surface kept only for old deep links.',
+    description: '실시간 개입과 거버넌스 판단/승인 운영 화면',
     defaultTab: 'command',
     defaultParams: { section: 'intervene' },
     tabs: ['command'],
-    hidden: true,
   },
   {
     id: 'workspace',

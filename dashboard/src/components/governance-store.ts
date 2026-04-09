@@ -5,6 +5,7 @@ export {
   governanceStarting,
   governanceActing,
   governanceBriefSubmitting,
+  governanceApprovalActing,
   governanceError,
   governanceTopicInput,
   governanceBriefInput,
@@ -26,6 +27,7 @@ export {
   submitPetition,
   submitBrief,
   respondToExecutionOrder,
+  respondToKeeperApproval,
   loadRuntimeParams,
   loadParamAudit,
 } from './governance-actions'

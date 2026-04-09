@@ -65,10 +65,17 @@ export function CommandPalette() {
       },
       {
         id: 'nav-command',
-        title: '운영 개입으로 이동 (Command Plane)',
+        title: '운영 화면으로 이동 (Operations)',
         section: 'Navigation',
-        keywords: 'control admin ops',
+        keywords: 'control admin ops governance intervene',
         handler: () => navigate('command')
+      },
+      {
+        id: 'nav-governance',
+        title: '거버넌스로 이동 (Governance)',
+        section: 'Navigation',
+        keywords: 'approval review hitl judge',
+        handler: () => navigate('command', { section: 'governance' })
       },
       {
         id: 'nav-lab',

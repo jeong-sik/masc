@@ -360,7 +360,12 @@ export function setupSSEReaction(): () => void {
     }
 
     // 6. Governance events
-    if (event.type.startsWith('decision_') || event.type === 'governance_param_changed') {
+    if (
+      event.type.startsWith('decision_')
+      || event.type === 'governance_param_changed'
+      || event.type === 'approval:pending'
+      || event.type === 'approval:resolved'
+    ) {
       scheduleRefresh('governance', () => void handleGovernance())
     }
   })

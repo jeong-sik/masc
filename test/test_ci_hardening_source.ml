@@ -141,6 +141,10 @@ let test_route_auth_contracts () =
     (file_contains_pattern
        "lib/server/server_auth.ml"
        {|String.equal path "/api/v1/gate/discord/status"|});
+  check bool "generic connector status route stays public read" true
+    (file_contains_pattern
+       "lib/server/server_auth.ml"
+       {|String.equal path "/api/v1/gate/connector/status"|});
   check bool "channel gate health route is registered" true
     (file_contains_pattern
         "lib/server/server_routes_http_routes_channel_gate.ml"
@@ -149,6 +153,10 @@ let test_route_auth_contracts () =
     (file_contains_pattern
        "lib/server/server_routes_http_routes_channel_gate.ml"
        {|Http.Router.get "/api/v1/gate/discord/status"|});
+  check bool "generic connector status route is registered" true
+    (file_contains_pattern
+       "lib/server/server_routes_http_routes_channel_gate.ml"
+       {|Http.Router.get "/api/v1/gate/connector/status"|});
   check bool "channel gate connectors route is registered" true
     (file_contains_pattern
        "lib/server/server_routes_http_routes_channel_gate.ml"
@@ -157,10 +165,18 @@ let test_route_auth_contracts () =
     (file_contains_pattern
        "lib/server/server_routes_http_routes_channel_gate.ml"
        {|Http.Router.post "/api/v1/gate/discord/bind"|});
+  check bool "generic connector bind route is registered" true
+    (file_contains_pattern
+       "lib/server/server_routes_http_routes_channel_gate.ml"
+       {|Http.Router.post "/api/v1/gate/connector/bind"|});
   check bool "discord gate unbind route is registered" true
     (file_contains_pattern
        "lib/server/server_routes_http_routes_channel_gate.ml"
-       {|Http.Router.post "/api/v1/gate/discord/unbind"|})
+       {|Http.Router.post "/api/v1/gate/discord/unbind"|});
+  check bool "generic connector unbind route is registered" true
+    (file_contains_pattern
+       "lib/server/server_routes_http_routes_channel_gate.ml"
+       {|Http.Router.post "/api/v1/gate/connector/unbind"|})
 
 let test_http_write_auth_contracts () =
   check bool "server auth no longer accepts query token fallback" true

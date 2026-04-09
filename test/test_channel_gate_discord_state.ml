@@ -15,10 +15,13 @@ let with_env name value f =
       | None -> Unix.putenv name "")
     f
 
+let temp_dir_counter = ref 0
+
 let with_temp_dir f =
+  incr temp_dir_counter;
   let base =
     Filename.concat (Filename.get_temp_dir_name ())
-      (Printf.sprintf "discord-state-%06x" (Random.bits ()))
+      (Printf.sprintf "discord-state-%d-%06d" (Unix.getpid ()) !temp_dir_counter)
   in
   Unix.mkdir base 0o755;
   Fun.protect
@@ -46,12 +49,16 @@ let test_status_json_reports_missing_live_status () =
   with_temp_dir @@ fun dir ->
   with_discord_paths dir (fun () ->
     let json = Discord_state.status_json () in
+    check string "channel" "discord"
+      (json |> U.member "channel" |> U.to_string);
     check bool "available false" false
       (json |> U.member "available" |> U.to_bool);
     check bool "connected false" false
       (json |> U.member "connected" |> U.to_bool);
     check bool "stale true" true
       (json |> U.member "stale" |> U.to_bool);
+    check string "generic missing-status error" "connector status file not found"
+      (json |> U.member "error" |> U.to_string);
     check int "no configured bindings" 0
       (json |> U.member "configured_bindings" |> U.to_list |> List.length))
 
@@ -147,7 +154,6 @@ let test_connectors_json_advertises_gate_connector_descriptor () =
        |> U.to_string))
 
 let () =
-  Random.self_init ();
   run "channel_gate_discord_state"
     [
       ( "status",

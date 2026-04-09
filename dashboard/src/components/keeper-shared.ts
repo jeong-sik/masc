@@ -2,6 +2,7 @@ import { html } from 'htm/preact'
 import { Markdown } from "./common/markdown"
 import { useState } from 'preact/hooks'
 import { keeperDirectChatAccess } from '../lib/keeper-chat-access'
+import { relativeTime } from '../lib/format-time'
 import type { Keeper, KeeperDiagnostic } from '../types'
 import {
   abortKeeperThreadMessage,
@@ -111,11 +112,11 @@ function continuityStateLabel(state?: KeeperDiagnostic['continuity_state']): str
   }
 }
 
+// Delegated to lib/format-time (SSOT) — returns Korean relative time
 function formatTime(timestamp?: string | null): string | null {
   if (!timestamp) return null
-  const value = new Date(timestamp)
-  if (Number.isNaN(value.getTime())) return null
-  return value.toLocaleTimeString()
+  const result = relativeTime(timestamp)
+  return result === '정보 없음' ? null : result
 }
 
 function formatEligible(seconds?: number | null): string | null {

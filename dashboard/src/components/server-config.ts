@@ -6,6 +6,8 @@ import { TransportHealthPanel } from './transport-health'
 import { fetchDashboardConfig } from '../api/dashboard'
 import type { DashboardConfigResponse, ConfigEntry } from '../api/dashboard'
 import { createAsyncResource } from '../lib/async-state'
+import { formatElapsedCompact } from '../lib/format-time'
+import { LoadingState } from './common/feedback-state'
 
 const configResource = createAsyncResource<DashboardConfigResponse>()
 const searchQuery = signal('')
@@ -29,14 +31,8 @@ function toggleCategory(name: string) {
   expandedCategories.value = next
 }
 
-function formatUptime(seconds: number): string {
-  const h = Math.floor(seconds / 3600)
-  const m = Math.floor((seconds % 3600) / 60)
-  const s = Math.floor(seconds % 60)
-  if (h > 0) return `${h}h ${m}m ${s}s`
-  if (m > 0) return `${m}m ${s}s`
-  return `${s}s`
-}
+// Delegated to lib/format-time (SSOT)
+const formatUptime = formatElapsedCompact
 
 function matchesSearch(entry: ConfigEntry, query: string): boolean {
   if (!query) return true
@@ -170,7 +166,7 @@ export function ServerConfig() {
           onClick=${() => void refreshServerConfig()}
           disabled=${loading}
         >
-          ${loading ? '...' : 'Refresh'}
+          ${loading ? '...' : '새로고침'}
         </button>
       </div>
 
@@ -179,7 +175,7 @@ export function ServerConfig() {
       ` : null}
 
       ${loading && !data ? html`
-        <div class="text-sm text-[var(--text-muted)] py-8 text-center">Loading...</div>
+        <${LoadingState}>설정 불러오는 중...<//>
       ` : null}
 
       ${data ? html`

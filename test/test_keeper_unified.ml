@@ -1531,7 +1531,6 @@ let test_side_effect_reclassification_skips_retry_safe_keeper_observation_tools 
           "keeper_board_list";
           "keeper_shell_readonly";
           "keeper_fs_read";
-          "masc_heartbeat";
         ]
       original
   in
@@ -2239,9 +2238,9 @@ let () =
           test_case "masc_status is boring" `Quick (fun () ->
             check bool "masc_status"
               true (Masc_mcp.Keeper_tool_registry.is_boring_tool "masc_status"));
-          test_case "masc_heartbeat is boring" `Quick (fun () ->
+          test_case "masc_heartbeat removed from boring" `Quick (fun () ->
             check bool "masc_heartbeat"
-              true (Masc_mcp.Keeper_tool_registry.is_boring_tool "masc_heartbeat"));
+              false (Masc_mcp.Keeper_tool_registry.is_boring_tool "masc_heartbeat"));
           test_case "keeper_tasks_list is boring" `Quick (fun () ->
             check bool "keeper_tasks_list"
               true (Masc_mcp.Keeper_tool_registry.is_boring_tool "keeper_tasks_list"));

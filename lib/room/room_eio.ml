@@ -111,14 +111,12 @@ let test_config ~fs base_path =
 (** {1 Key Utilities} *)
 
 let agents_key = "agents"
-let tasks_key = "tasks"
 let messages_key = "messages"
 let locks_key = "locks"
 let state_key = "state"
 let events_key = "events"
 
 let agent_key name = Printf.sprintf "%s:%s" agents_key name
-let task_key id = Printf.sprintf "%s:%s" tasks_key id
 let message_key seq = Printf.sprintf "%s:%06d" messages_key seq
 let lock_key resource = Printf.sprintf "%s:%s" locks_key resource
 let event_key seq = Printf.sprintf "%s:%06d" events_key seq
@@ -130,8 +128,6 @@ type event_type =
   | AgentJoin
   | AgentLeave
   | Broadcast
-  | TaskClaim
-  | TaskDone
   | LockAcquire
   | LockRelease
 
@@ -139,8 +135,6 @@ let event_type_to_string = function
   | AgentJoin -> "agent_join"
   | AgentLeave -> "agent_leave"
   | Broadcast -> "broadcast"
-  | TaskClaim -> "task_claim"
-  | TaskDone -> "task_done"
   | LockAcquire -> "lock_acquire"
   | LockRelease -> "lock_release"
 
@@ -650,206 +644,6 @@ let get_message config ~seq =
       Error (match e with
         | Backend.IOError msg -> msg
         | _ -> "Failed to get message")
-
-(** {1 Task Operations} *)
-
-type task_status =
-  | Pending
-  | InProgress of string  (* agent_id *)
-  | Completed of string   (* agent_id *)
-  | Failed of string * string  (* agent_id, reason *)
-
-type complexity = {
-  estimated_turns: int;
-  reversibility: float;
-}
-
-type task = {
-  id: string;
-  description: string;
-  status: task_status;
-  created_at: float;
-  updated_at: float;
-  priority: int;
-  parent_task_id: string option;
-  goal_id: string option;
-  complexity_estimate: complexity option;
-}
-
-let complexity_to_json c =
-  `Assoc [
-    ("estimated_turns", `Int c.estimated_turns);
-    ("reversibility", `Float c.reversibility);
-  ]
-
-let complexity_of_json json =
-  let open Yojson.Safe.Util in
-  { estimated_turns = json |> member "estimated_turns" |> to_int;
-    reversibility = json |> member "reversibility" |> to_number }
-
-let task_status_to_json = function
-  | Pending -> `Assoc [("type", `String "pending")]
-  | InProgress agent -> `Assoc [("type", `String "in_progress"); ("agent", `String agent)]
-  | Completed agent -> `Assoc [("type", `String "completed"); ("agent", `String agent)]
-  | Failed (agent, reason) -> `Assoc [("type", `String "failed"); ("agent", `String agent); ("reason", `String reason)]
-
-let task_status_of_json json =
-  let open Yojson.Safe.Util in
-  match json |> member "type" |> to_string with
-  | "pending" -> Ok Pending
-  | "in_progress" -> Ok (InProgress (json |> member "agent" |> to_string))
-  | "completed" -> Ok (Completed (json |> member "agent" |> to_string))
-  | "failed" -> Ok (Failed (json |> member "agent" |> to_string, json |> member "reason" |> to_string))
-  | s -> Error ("Unknown task status: " ^ s)
-
-let json_string_opt_field name value =
-  match value with Some s -> [(name, `String s)] | None -> []
-
-let task_to_json task =
-  let base = [
-    ("id", `String task.id);
-    ("description", `String task.description);
-    ("status", task_status_to_json task.status);
-    ("created_at", `Float task.created_at);
-    ("updated_at", `Float task.updated_at);
-    ("priority", `Int task.priority);
-  ] in
-  let opt_fields =
-    json_string_opt_field "parent_task_id" task.parent_task_id
-    @ json_string_opt_field "goal_id" task.goal_id
-    @ (match task.complexity_estimate with
-       | Some c -> [("complexity_estimate", complexity_to_json c)]
-       | None -> [])
-  in
-  `Assoc (base @ opt_fields)
-
-let task_of_json json =
-  let open Yojson.Safe.Util in
-  try
-    match task_status_of_json (json |> member "status") with
-    | Error e -> Error e
-    | Ok status ->
-        let str_opt key = match json |> member key with
-          | `String s -> Some s | _ -> None
-        in
-        let complexity_opt = match json |> member "complexity_estimate" with
-          | `Assoc _ as j -> Some (complexity_of_json j)
-          | _ -> None
-        in
-        Ok {
-          id = json |> member "id" |> to_string;
-          description = json |> member "description" |> to_string;
-          status;
-          created_at = json |> member "created_at" |> to_float;
-          updated_at = json |> member "updated_at" |> to_float;
-          priority = json |> member "priority" |> to_int;
-          parent_task_id = str_opt "parent_task_id";
-          goal_id = str_opt "goal_id";
-          complexity_estimate = complexity_opt;
-        }
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | e -> Error (Printexc.to_string e)
-
-(** Create a new task *)
-let create_task config ~description ?(priority=1) ?parent_task_id ?goal_id ?complexity_estimate () =
-  let id = Printf.sprintf "task_%d_%04x" (int_of_float (Time_compat.now () *. 1000.)) (Hashtbl.hash (Unix.gettimeofday ()) land 0xFFFF) in
-  let now = Time_compat.now () in
-  let task = {
-    id;
-    description;
-    status = Pending;
-    created_at = now;
-    updated_at = now;
-    priority;
-    parent_task_id;
-    goal_id;
-    complexity_estimate;
-  } in
-  let json_str = Yojson.Safe.to_string (task_to_json task) in
-  match Backend.FileSystem.set config.backend (task_key id) json_str with
-  | Ok () -> Ok task
-  | Error e ->
-      Error (match e with
-        | Backend.IOError msg -> msg
-        | _ -> "Failed to create task")
-
-(** Claim a task (set to in_progress) *)
-let claim_task config ~task_id ~agent =
-  match Backend.FileSystem.get config.backend (task_key task_id) with
-  | Error (Backend.NotFound _) -> Error "Task not found"
-  | Error e -> Error (match e with Backend.IOError msg -> msg | _ -> "Get failed")
-  | Ok json_str ->
-      (try
-        let json = Yojson.Safe.from_string json_str in
-        match task_of_json json with
-        | Error e -> Error e
-        | Ok task ->
-            match task.status with
-            | Pending ->
-                let updated = { task with
-                  status = InProgress agent;
-                  updated_at = Time_compat.now ();
-                } in
-                let new_json = Yojson.Safe.to_string (task_to_json updated) in
-                (match Backend.FileSystem.set config.backend (task_key task_id) new_json with
-                 | Ok () -> Ok updated
-                 | Error _ -> Error "Failed to update task")
-            | InProgress other when other = agent ->
-                Ok task  (* Already claimed by this agent *)
-            | InProgress _ ->
-                Error "Task already claimed by another agent"
-            | Completed _ ->
-                Error "Task already completed"
-            | Failed _ ->
-                Error "Task failed"
-      with Eio.Cancel.Cancelled _ as e -> raise e | e -> Error (Printexc.to_string e))
-
-(** Complete a task *)
-let complete_task config ~task_id ~agent =
-  match Backend.FileSystem.get config.backend (task_key task_id) with
-  | Error (Backend.NotFound _) -> Error "Task not found"
-  | Error e -> Error (match e with Backend.IOError msg -> msg | _ -> "Get failed")
-  | Ok json_str ->
-      (try
-        let json = Yojson.Safe.from_string json_str in
-        match task_of_json json with
-        | Error e -> Error e
-        | Ok task ->
-            match task.status with
-            | InProgress claimer when claimer = agent ->
-                let updated = { task with
-                  status = Completed agent;
-                  updated_at = Time_compat.now ();
-                } in
-                let new_json = Yojson.Safe.to_string (task_to_json updated) in
-                (match Backend.FileSystem.set config.backend (task_key task_id) new_json with
-                 | Ok () -> Ok updated
-                 | Error _ -> Error "Failed to update task")
-            | InProgress _ ->
-                Error "Task claimed by another agent"
-            | Pending ->
-                Error "Task not claimed"
-            | Completed _ ->
-                Error "Task already completed"
-            | Failed _ ->
-                Error "Task failed"
-      with Eio.Cancel.Cancelled _ as e -> raise e | e -> Error (Printexc.to_string e))
-
-(** Get task by ID *)
-let get_task config ~task_id =
-  match Backend.FileSystem.get config.backend (task_key task_id) with
-  | Ok json_str ->
-      (try
-        let json = Yojson.Safe.from_string json_str in
-        task_of_json json
-      with Eio.Cancel.Cancelled _ as e -> raise e | e -> Error (Printexc.to_string e))
-  | Error (Backend.NotFound _) ->
-      Error "Task not found"
-  | Error e ->
-      Error (match e with
-        | Backend.IOError msg -> msg
-        | _ -> "Failed to get task")
 
 (** {1 Health Check} *)
 

@@ -44,8 +44,6 @@ type event_type =
   | AgentJoin
   | AgentLeave
   | Broadcast
-  | TaskClaim
-  | TaskDone
   | LockAcquire
   | LockRelease
 
@@ -75,34 +73,6 @@ type message = {
   timestamp: float;
 }
 
-(** Task lifecycle status. *)
-type task_status =
-  | Pending
-  | InProgress of string  (** agent_id *)
-  | Completed of string   (** agent_id *)
-  | Failed of string * string  (** agent_id, reason *)
-
-(** Task complexity estimate for goal decomposition.
-    @since 2.223.0 *)
-type complexity = {
-  estimated_turns: int;
-  reversibility: float;
-}
-
-(** A coordination task with optional goal decomposition metadata.
-    New fields default to None for backward-compatible JSON deserialization. *)
-type task = {
-  id: string;
-  description: string;
-  status: task_status;
-  created_at: float;
-  updated_at: float;
-  priority: int;
-  parent_task_id: string option;
-  goal_id: string option;
-  complexity_estimate: complexity option;
-}
-
 (** {1 Helpers} *)
 
 (** Current time as ISO-8601 string (UTC, millisecond precision). *)
@@ -121,9 +91,6 @@ val test_config : fs:Eio.Fs.dir_ty Eio.Path.t -> string -> config
 (** Key prefix for agents namespace. *)
 val agents_key : string
 
-(** Key prefix for tasks namespace. *)
-val tasks_key : string
-
 (** Key prefix for messages namespace. *)
 val messages_key : string
 
@@ -138,9 +105,6 @@ val events_key : string
 
 (** Key for a specific agent. *)
 val agent_key : string -> string
-
-(** Key for a specific task. *)
-val task_key : string -> string
 
 (** Key for a specific message by sequence. *)
 val message_key : int -> string
@@ -237,38 +201,6 @@ val broadcast :
 
 (** Retrieve a message by sequence number. *)
 val get_message : config -> seq:int -> (message, string) result
-
-(** {1 Task Operations} *)
-
-(** Serialize task status to JSON. *)
-val task_status_to_json : task_status -> Yojson.Safe.t
-
-(** Deserialize task status from JSON. *)
-val task_status_of_json : Yojson.Safe.t -> (task_status, string) result
-
-(** Serialize a task to JSON. *)
-val task_to_json : task -> Yojson.Safe.t
-
-(** Deserialize a task from JSON. *)
-val task_of_json : Yojson.Safe.t -> (task, string) result
-
-(** Create a new task with the given description and optional priority. *)
-val create_task :
-  config -> description:string -> ?priority:int ->
-  ?parent_task_id:string -> ?goal_id:string ->
-  ?complexity_estimate:complexity -> unit ->
-  (task, string) result
-
-(** Claim a pending task for [agent].  Fails if already claimed. *)
-val claim_task :
-  config -> task_id:string -> agent:string -> (task, string) result
-
-(** Mark a claimed task as completed by [agent]. *)
-val complete_task :
-  config -> task_id:string -> agent:string -> (task, string) result
-
-(** Retrieve a task by ID. *)
-val get_task : config -> task_id:string -> (task, string) result
 
 (** {1 Event Log} *)
 

@@ -5,17 +5,17 @@ let iso_of_unix = Dashboard_utils.iso_of_unix
 let file_fingerprint path =
   try
     let stats = Unix.stat path in
-    Some (stats.st_mtime, stats.st_size)
+    Some (stats.st_mtime, stats.st_ctime, stats.st_size)
   with Unix.Unix_error _ -> None
 
 let file_mtime path =
   match file_fingerprint path with
-  | Some (mtime, _) -> Some mtime
+  | Some (mtime, _, _) -> Some mtime
   | None -> None
 
 type default_trace_cache_entry = {
-  cp_events_fingerprint : (float * int) option;
-  operator_log_fingerprint : (float * int) option;
+  cp_events_fingerprint : (float * float * int) option;
+  operator_log_fingerprint : (float * float * int) option;
   events : Yojson.Safe.t list;
 }
 
@@ -24,6 +24,17 @@ let default_trace_cache :
   Hashtbl.create 8
 
 let max_default_trace_cache_entries = 16
+
+let evict_default_trace_cache_entry () =
+  let victim = ref None in
+  Hashtbl.iter (fun key _ ->
+      match !victim with
+      | Some _ -> ()
+      | None -> victim := Some key)
+    default_trace_cache;
+  match !victim with
+  | Some key -> Hashtbl.remove default_trace_cache key
+  | None -> ()
 
 let default_trace_cache_key config ~limit =
   (Room.masc_dir config, limit)
@@ -52,7 +63,7 @@ let store_default_trace_events config ~limit ~events =
   if
     Hashtbl.length default_trace_cache >= max_default_trace_cache_entries
     && not (Hashtbl.mem default_trace_cache key)
-  then Hashtbl.reset default_trace_cache;
+  then evict_default_trace_cache_entry ();
   Hashtbl.replace default_trace_cache key
     { cp_events_fingerprint; operator_log_fingerprint; events }
 

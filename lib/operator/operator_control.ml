@@ -77,7 +77,10 @@ let keeper_recovery_outcome after_diagnostic =
 
 let resolve_team_turn_actor _config ~requested_actor:_ ~session_id =
   (* Team_session_store removed *)
-  Error (Printf.sprintf "team session not found: %s" session_id)
+  Error
+    (Printf.sprintf
+       "team session actions are no longer supported (team session layer removed; session_id=%s)"
+       session_id)
 
 let execute_team_turn ~ctx ~request ~session_id ~turn_kind ~message ~target_agent
     ~task_title ~task_description ~task_priority =

@@ -82,7 +82,7 @@ let build ~base_path ~team_session_id =
     (None : Team_session_types.session option)
   in
   match session_opt with
-  | None -> { empty with team_goal = "(session not found)" }
+  | None -> empty
   | Some session ->
       let team_goal = session.Team_session_types.goal in
       let active_workers =

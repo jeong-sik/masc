@@ -25,6 +25,19 @@ let with_temp_base f =
   let dir = test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () -> f dir)
 
+let contains_substring haystack needle =
+  let haystack_len = String.length haystack in
+  let needle_len = String.length needle in
+  let rec loop idx =
+    if idx + needle_len > haystack_len then
+      false
+    else if String.sub haystack idx needle_len = needle then
+      true
+    else
+      loop (idx + 1)
+  in
+  needle_len = 0 || loop 0
+
 let saturate_repo_synthesis_platoon config ~actor =
   match
     Lib.Tool_autoresearch_repo_synthesis.ensure_repo_synthesis_units config
@@ -104,9 +117,9 @@ let test_repo_synthesis_swarm_start_avoids_saturated_platoon_cap () =
         "company-repo-synthesis"
         (operations |> member "operations" |> index 0 |> member "operation"
          |> member "assigned_unit_id" |> to_string)
-  | Some (false, _msg) ->
-      (* Expected: team session engine removed, swarm start returns error *)
-      ()
+  | Some (false, msg) ->
+      check bool "returns removed-engine reason" true
+        (contains_substring msg "team session engine removed")
 
 let () =
   run "tool_repo_synthesis"

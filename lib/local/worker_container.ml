@@ -74,6 +74,7 @@ let oas_trace_session_root ~base_path =
 
 let ensure_worker_container_dirs ~base_path ~team_session_id ~worker_name =
   let dir = worker_container_dir ~base_path ~team_session_id ~worker_name in
+  Fs_compat.mkdir_p dir;
   Fs_compat.save_file (Filename.concat dir ".keep") "";
   (try Sys.remove (Filename.concat dir ".keep") with Sys_error _ -> ())
 

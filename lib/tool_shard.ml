@@ -9,6 +9,7 @@
 type shard = {
   name : string;
   tools : Types.tool_schema list;
+  read_only_tools : string list;
   removable : bool;  (** true = can be revoked at runtime *)
   description : string;
 }
@@ -654,13 +655,21 @@ accomplished so other agents can verify.";
 let shard_base : shard = {
   name = "base";
   tools = base_tools;
-  removable = false;  (* Always present *)
+  read_only_tools = [
+    "keeper_stay_silent"; "keeper_time_now"; "keeper_context_status";
+    "keeper_memory_search"; "keeper_tools_list";
+  ];
+  removable = false;
   description = "Core tools: time, context, memory";
 }
 
 let shard_board : shard = {
   name = "board";
   tools = board_tools;
+  read_only_tools = [
+    "keeper_board_get"; "keeper_board_list";
+    "keeper_board_stats"; "keeper_board_search";
+  ];
   removable = true;
   description = "MASC Board: post, list, comment";
 }
@@ -668,6 +677,7 @@ let shard_board : shard = {
 let shard_filesystem : shard = {
   name = "filesystem";
   tools = filesystem_tools;
+  read_only_tools = ["keeper_fs_read"];
   removable = true;
   description = "File I/O: read and write";
 }
@@ -675,6 +685,7 @@ let shard_filesystem : shard = {
 let shard_shell : shard = {
   name = "shell";
   tools = shell_tools;
+  read_only_tools = ["keeper_shell_readonly"];
   removable = true;
   description = "Read-only shell: pwd, ls, cat, rg, git_status";
 }
@@ -682,6 +693,7 @@ let shard_shell : shard = {
 let shard_coding : shard = {
   name = "coding";
   tools = coding_tools;
+  read_only_tools = [];
   removable = true;
   description =
     "Coding tools: github/shell bridge + worktree/code inspection";
@@ -690,6 +702,7 @@ let shard_coding : shard = {
 let shard_voice : shard = {
   name = "voice";
   tools = voice_tools;
+  read_only_tools = ["keeper_voice_sessions"];
   removable = true;
   description = "Voice bridge speak output";
 }
@@ -697,6 +710,7 @@ let shard_voice : shard = {
 let shard_library : shard = {
   name = "library";
   tools = library_tools;
+  read_only_tools = ["keeper_library_search"; "keeper_library_read"];
   removable = true;
   description = "Knowledge library: search, read documents";
 }
@@ -704,6 +718,7 @@ let shard_library : shard = {
 let shard_taskboard : shard = {
   name = "taskboard";
   tools = taskboard_tools;
+  read_only_tools = ["keeper_tasks_list"; "keeper_tasks_audit"];
   removable = true;
   description = "Task board management: list, audit, force-release, force-done, broadcast";
 }
@@ -717,6 +732,7 @@ let autoresearch_keeper_tools : Types.tool_schema list =
 let shard_autoresearch : shard = {
   name = "autoresearch";
   tools = autoresearch_keeper_tools;
+  read_only_tools = [];
   removable = true;
   description = "Autonomous experiment loop: start, cycle, status, inject, stop";
 }
@@ -760,6 +776,12 @@ let all_shards : shard StringMap.t =
     shard_taskboard;
     shard_autoresearch;
   ]
+
+let all_read_only_keeper_tools () : string list =
+  StringMap.fold (fun _name shard acc ->
+    shard.read_only_tools @ acc
+  ) all_shards []
+  |> List.sort_uniq String.compare
 
 (** Get a shard by name *)
 let get_shard (name : string) : shard option =

@@ -83,29 +83,20 @@ let is_core_always_tool (name : string) : bool =
 
 (* ── Read-only keeper tools ───────────────────────────────────── *)
 
-(** Keeper-only tools are declared via [Tool_shard] schemas, so many never
-    flow through [Tool_spec.register]. Keep a local read-only SSOT for
-    integrity checks that run before or outside full MCP server bootstrap. *)
+(** Derived from [Tool_shard.shard.read_only_tools] metadata.
+    Each shard declares which of its tools are read-only at the
+    definition site, eliminating drift between tool schemas and
+    read-only classification.
+
+    Non-shard tools (injected outside Tool_shard, e.g. keeper_tool_search)
+    are listed explicitly below. *)
+let non_shard_read_only_tools = [
+  "keeper_tool_search";  (* injected by Keeper_tool_policy, not in any shard *)
+]
+
 let keeper_read_only_tools =
-  [
-    "keeper_stay_silent";
-    "keeper_time_now";
-    "keeper_context_status";
-    "keeper_memory_search";
-    "keeper_tools_list";
-    "keeper_tool_search";
-    "keeper_board_get";
-    "keeper_board_list";
-    "keeper_board_stats";
-    "keeper_board_search";
-    "keeper_fs_read";
-    "keeper_shell_readonly";
-    "keeper_library_search";
-    "keeper_library_read";
-    "keeper_tasks_list";
-    "keeper_tasks_audit";
-    "keeper_voice_sessions";
-  ]
+  Tool_shard.all_read_only_keeper_tools () @ non_shard_read_only_tools
+  |> List.sort_uniq String.compare
 
 let keeper_read_only_set : (string, unit) Hashtbl.t =
   let tbl = Hashtbl.create (List.length keeper_read_only_tools) in

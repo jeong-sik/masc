@@ -6,6 +6,10 @@
 type shard = {
   name : string;
   tools : Types.tool_schema list;
+  read_only_tools : string list;
+  (** Tool names within this shard that have no side effects.
+      Used by [Keeper_tool_registry] to derive the read-only set
+      instead of maintaining a separate hardcoded list. *)
   removable : bool;
   description : string;
 }
@@ -51,6 +55,9 @@ val revoke_shard : string list -> string -> (string list, string) result
     @param active_shards Current list of granted shard names
     @param shard_name Shard to revoke (must be removable)
     @return Ok new_list on success, Error msg on failure *)
+
+val all_read_only_keeper_tools : unit -> string list
+(** Collect read_only_tools from all shards. *)
 
 val list_all_shards : unit -> (string * bool * int) list
 (** List all available shards with their status.

@@ -243,6 +243,21 @@ let test_invalid_bounded_agents_filters_unknown_names () =
     ["bogus"]
     (Comm.invalid_bounded_agents ["claude"; " bogus "; "gemini"])
 
+let test_invalid_bounded_agents_rejects_empty_names () =
+  check (list string) "empty names invalid"
+    [""]
+    (Comm.invalid_bounded_agents ["claude"; "   "; "gemini"])
+
+let test_invalid_bounded_agents_dedupes_results () =
+  check (list string) "dedupes invalid names"
+    [""; "bogus"]
+    (Comm.invalid_bounded_agents ["bogus"; " "; "bogus"; "  "])
+
+let test_invalid_bounded_agents_all_valid_returns_empty () =
+  check (list string) "all valid"
+    []
+    (Comm.invalid_bounded_agents ["claude"; "gemini"; "codex"])
+
 (* ============================================ *)
 (* Retry logic tests                            *)
 (* ============================================ *)
@@ -385,6 +400,12 @@ let bounded_run_tests = [
     test_bounded_run_failure_reason_names_agent_and_turn;
   "invalid bounded agents filter", `Quick,
     test_invalid_bounded_agents_filters_unknown_names;
+  "invalid bounded agents rejects empty names", `Quick,
+    test_invalid_bounded_agents_rejects_empty_names;
+  "invalid bounded agents dedupes results", `Quick,
+    test_invalid_bounded_agents_dedupes_results;
+  "invalid bounded agents all valid", `Quick,
+    test_invalid_bounded_agents_all_valid_returns_empty;
 ]
 
 let retry_tests = [

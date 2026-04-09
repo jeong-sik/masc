@@ -22,7 +22,7 @@ let invalid_bounded_agents (agents : string list) : string list =
     agents
     |> List.map String.trim
     |> List.filter (fun name ->
-      name <> "" && not (Provider_adapter.is_spawnable_agent name))
+      name = "" || not (Provider_adapter.is_spawnable_agent name))
   in
   List.sort_uniq String.compare invalid
 

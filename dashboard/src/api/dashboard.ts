@@ -838,13 +838,19 @@ export function fetchKeeperToolCalls(
 
 // ── Unified telemetry ──────────────────────────────────
 
-export type TelemetrySource = 'keeper_metric' | 'agent_event' | 'tool_call_io' | 'tool_usage' | 'tool_metric'
+export type TelemetrySource =
+  | 'keeper_metric'
+  | 'agent_event'
+  | 'tool_call_io'
+  | 'tool_usage'
+  | 'tool_metric'
 
 export type TelemetryEntry = Record<string, unknown> & {
   source: TelemetrySource
   ts?: number
   ts_unix?: number
   timestamp?: number
+  ts_iso?: string
 }
 
 export type TelemetryResponse = {
@@ -871,11 +877,17 @@ export type TelemetrySummaryResponse = {
 export function fetchTelemetry(opts?: {
   source?: TelemetrySource
   keeper?: string
+  session_id?: string
+  operation_id?: string
+  worker_run_id?: string
   n?: number
 }): Promise<TelemetryResponse> {
   const params = new URLSearchParams()
   if (opts?.source) params.set('source', opts.source)
   if (opts?.keeper) params.set('keeper', opts.keeper)
+  if (opts?.session_id) params.set('session_id', opts.session_id)
+  if (opts?.operation_id) params.set('operation_id', opts.operation_id)
+  if (opts?.worker_run_id) params.set('worker_run_id', opts.worker_run_id)
   if (opts?.n) params.set('n', String(opts.n))
   const qs = params.toString()
   return get<TelemetryResponse>(`/api/v1/dashboard/telemetry${qs ? '?' + qs : ''}`)

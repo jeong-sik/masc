@@ -260,7 +260,6 @@ export function normalizeRouteParams(tabId: TabId, params: Record<string, string
 
   delete next.surface
   delete next.operation
-  delete next.operation_id
   delete next.run_id
 
   return next

@@ -11,12 +11,14 @@ import {
   getTraceLoading,
   getTraceError,
   buildTraceEvents,
+  _liveTraceFeeds as liveTraceFeeds,
   _traceSlots as traceSlots,
 } from './session-trace-state'
 
 // Reset trace slots before each test
 beforeEach(() => {
   traceSlots.value = {}
+  liveTraceFeeds.value = {}
 })
 
 describe('appendLiveToolCall', () => {
@@ -125,6 +127,7 @@ describe('appendLiveToolCall', () => {
           ts: 1712399000000,
           ts_iso: '2024-04-06T10:00:00.000Z',
           kind: 'broadcast',
+          sourceLane: 'masc',
           summary: 'hello',
           detail: {},
         }],
@@ -190,9 +193,9 @@ describe('getTraceSummary', () => {
     traceSlots.value = {
       'keeper-a': {
         events: [
-          { id: '1', ts: 1000, ts_iso: '', kind: 'tool_call', summary: 'read', detail: {}, cost_usd: 0.01 },
-          { id: '2', ts: 2000, ts_iso: '', kind: 'tool_call', summary: 'edit', detail: {}, cost_usd: 0.02 },
-          { id: '3', ts: 3000, ts_iso: '', kind: 'broadcast', summary: 'hello', detail: {} },
+          { id: '1', ts: 1000, ts_iso: '', kind: 'tool_call', sourceLane: 'masc', summary: 'read', detail: {}, cost_usd: 0.01 },
+          { id: '2', ts: 2000, ts_iso: '', kind: 'tool_call', sourceLane: 'masc', summary: 'edit', detail: {}, cost_usd: 0.02 },
+          { id: '3', ts: 3000, ts_iso: '', kind: 'broadcast', sourceLane: 'masc', summary: 'hello', detail: {} },
         ],
         loading: false,
         error: null,
@@ -213,9 +216,9 @@ describe('getKindCounts', () => {
     traceSlots.value = {
       'keeper-a': {
         events: [
-          { id: '1', ts: 1000, ts_iso: '', kind: 'tool_call', summary: '', detail: {} },
-          { id: '2', ts: 2000, ts_iso: '', kind: 'tool_call', summary: '', detail: {} },
-          { id: '3', ts: 3000, ts_iso: '', kind: 'heartbeat', summary: '', detail: {} },
+          { id: '1', ts: 1000, ts_iso: '', kind: 'tool_call', sourceLane: 'masc', summary: '', detail: {} },
+          { id: '2', ts: 2000, ts_iso: '', kind: 'tool_call', sourceLane: 'masc', summary: '', detail: {} },
+          { id: '3', ts: 3000, ts_iso: '', kind: 'heartbeat', sourceLane: 'masc', summary: '', detail: {} },
         ],
         loading: false,
         error: null,
@@ -237,8 +240,8 @@ describe('filter', () => {
     traceSlots.value = {
       'keeper-a': {
         events: [
-          { id: '1', ts: 1000, ts_iso: '', kind: 'tool_call', summary: '', detail: {} },
-          { id: '2', ts: 2000, ts_iso: '', kind: 'broadcast', summary: '', detail: {} },
+          { id: '1', ts: 1000, ts_iso: '', kind: 'tool_call', sourceLane: 'masc', summary: '', detail: {} },
+          { id: '2', ts: 2000, ts_iso: '', kind: 'broadcast', sourceLane: 'masc', summary: '', detail: {} },
         ],
         loading: false,
         error: null,
@@ -259,7 +262,7 @@ describe('closeSessionTrace', () => {
   it('removes the agent slot', () => {
     traceSlots.value = {
       'keeper-a': {
-        events: [{ id: '1', ts: 1000, ts_iso: '', kind: 'tool_call', summary: '', detail: {} }],
+        events: [{ id: '1', ts: 1000, ts_iso: '', kind: 'tool_call', sourceLane: 'masc', summary: '', detail: {} }],
         loading: false,
         error: null,
         filter: 'all',

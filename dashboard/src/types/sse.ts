@@ -36,6 +36,14 @@ export type SSEEventType =
   | 'oas:masc:keeper:lifecycle'
   | 'oas:masc:trust_updated'
   | 'oas:masc:reputation_changed'
+  | 'oas:agent_started'
+  | 'oas:agent_completed'
+  | 'oas:tool_called'
+  | 'oas:tool_completed'
+  | 'oas:turn_started'
+  | 'oas:turn_completed'
+  | 'oas:context_compacted'
+  | 'oas:task_state_changed'
   // Harness observability events (#3165)
   | 'oas:masc:harness:verdict_recorded'
   | 'oas:masc:harness:pre_compact'
@@ -88,6 +96,13 @@ export interface SSEEvent {
   success?: boolean
   error_text?: string
   reason_code?: string
+  turn?: number
+  phase?: string
+  from_state?: string
+  to_state?: string
+  session_id?: string
+  operation_id?: string
+  worker_run_id?: string
   // OAS bridge payload (generic container for Event_bus events)
   payload?: Record<string, unknown>
 }
@@ -109,6 +124,10 @@ export type JournalEventType =
   | 'keeper_phase_changed'
   | 'keeper_tool_call'
   | 'oas_keeper_snapshot'
+  | 'oas_tool'
+  | 'oas_turn'
+  | 'oas_context'
+  | 'oas_task'
   | 'oas_event'
   | 'unknown'
 
@@ -124,6 +143,9 @@ export interface JournalEntry {
   author?: string
   preview?: string
   postId?: string
+  sessionId?: string
+  operationId?: string
+  workerRunId?: string
 }
 
 // --- Sort modes ---

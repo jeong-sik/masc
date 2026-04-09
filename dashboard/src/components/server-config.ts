@@ -7,6 +7,7 @@ import { fetchDashboardConfig } from '../api/dashboard'
 import type { DashboardConfigResponse, ConfigEntry } from '../api/dashboard'
 import { createAsyncResource } from '../lib/async-state'
 import { formatElapsedCompact } from '../lib/format-time'
+import { LoadingState } from './common/feedback-state'
 
 const configResource = createAsyncResource<DashboardConfigResponse>()
 const searchQuery = signal('')
@@ -174,7 +175,7 @@ export function ServerConfig() {
       ` : null}
 
       ${loading && !data ? html`
-        <div class="text-sm text-[var(--text-muted)] py-8 text-center">로딩 중...</div>
+        <${LoadingState}>설정 불러오는 중...<//>
       ` : null}
 
       ${data ? html`

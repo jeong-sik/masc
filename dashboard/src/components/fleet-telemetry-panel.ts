@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { useSignal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
+import { LoadingState } from './common/feedback-state'
 import {
   fetchDashboardExecution,
   fetchTelemetrySummary,
@@ -507,7 +508,7 @@ export function FleetTelemetryPanel() {
   const sourcesWithData = value.telemetry_sources.filter(source => source.entry_count > 0).length
 
   if (value.loading && value.rows.length === 0) {
-    return html`<div class="p-4 text-[11px] text-[var(--text-dim)]">Fleet 텔레메트리 로딩 중...</div>`
+    return html`<${LoadingState}>Fleet 텔레메트리 불러오는 중...<//>`
   }
 
   if (value.error) {

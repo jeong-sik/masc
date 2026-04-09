@@ -7,6 +7,7 @@ import { useSignal } from '@preact/signals'
 import { fetchKeeperToolCalls } from '../api/dashboard'
 import type { ToolCallEntry } from '../api/dashboard'
 import { formatTimeHms } from '../lib/format-time'
+import { LoadingState } from './common/feedback-state'
 import { toolCategory, formatDuration, durationColor } from './tool-call-shared'
 
 // Delegated to lib/format-time (SSOT)
@@ -110,7 +111,7 @@ export function KeeperToolCallInspector({ keeperName }: { keeperName: string }) 
   const sorted = useMemo(() => [...filtered].reverse(), [filtered])
 
   if (loading.value) {
-    return html`<div class="text-xs text-[var(--text-muted)] p-4">도구 호출 로딩 중...</div>`
+    return html`<${LoadingState}>도구 호출 불러오는 중...<//>`
   }
 
   if (error.value) {

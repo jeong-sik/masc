@@ -6,6 +6,7 @@ import { signal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
 import { get, post } from '../api/core'
 import { formatElapsedCompact, formatTimeAgoEn } from '../lib/format-time'
+import { LoadingState } from './common/feedback-state'
 import { lastEvent } from '../sse'
 import { StatCard } from './common/stat-card'
 import { ActionButton } from './common/button'
@@ -781,7 +782,7 @@ export function ConnectorStatusPanel() {
   const live = discordLive.value
 
   if (loading.value && !d && !live) {
-    return html`<div class="text-xs text-[var(--text-dim)]">커넥터 상태 로딩 중...</div>`
+    return html`<${LoadingState}>커넥터 상태 불러오는 중...<//>`
   }
 
   if (error.value && !d && !live) {

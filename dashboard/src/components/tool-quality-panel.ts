@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { signal, computed, type Signal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
+import { LoadingState } from './common/feedback-state'
 
 interface ToolStat {
   name: string
@@ -212,7 +213,7 @@ export function ToolQualityPanel() {
   useEffect(() => { void fetchToolQuality() }, [])
 
   const d = data.value
-  if (loading.value && !d) return html`<div class="p-4 text-[11px] text-[var(--text-dim)]">도구 품질 로딩 중...</div>`
+  if (loading.value && !d) return html`<${LoadingState}>도구 품질 불러오는 중...<//>`
   if (error.value) return html`<div class="p-4 text-[11px] text-red-400">오류: ${error.value}</div>`
   if (!d || d.total === 0) return html`<div class="p-4 text-[11px] text-[var(--text-dim)]">도구 호출 데이터 없음</div>`
 

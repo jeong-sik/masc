@@ -23,6 +23,28 @@ let apply_default opt current = match opt with Some v -> v | None -> current
 (** Same as [apply_default] but both TOML and meta are option-typed. *)
 let apply_default_opt opt current = match opt with Some _ -> opt | None -> current
 
+let resynced_tool_access
+    (defaults : Keeper_types_profile.keeper_profile_defaults)
+    (meta : keeper_meta) =
+  let current_preset =
+    match meta.tool_access with
+    | Preset { preset; _ } -> Some preset
+    | Custom _ -> None
+  in
+  let current_also_allow = tool_access_also_allowlist meta.tool_access in
+  let target_preset =
+    match defaults.tool_preset with
+    | Some raw -> tool_preset_of_string raw
+    | None -> current_preset
+  in
+  let target_also_allow =
+    apply_default defaults.tool_also_allow current_also_allow
+  in
+  match target_preset with
+  | Some preset ->
+      Preset { preset; also_allow = target_also_allow }
+  | None -> meta.tool_access
+
 let ensure_keeper_meta config name =
   match read_meta config name with
   | Ok (Some meta) ->
@@ -48,6 +70,7 @@ let ensure_keeper_meta config name =
     in
     let target_denylist = apply_default defaults.tool_denylist meta.tool_denylist in
     let target_cascade_name = apply_default defaults.cascade_name meta.cascade_name in
+    let target_tool_access = resynced_tool_access defaults meta in
 
     (* --- Personality --- *)
     let target_goal = apply_default defaults.goal meta.goal in
@@ -110,6 +133,7 @@ let ensure_keeper_meta config name =
       || meta.room_scope <> target_room_scope
       || meta.scope_kind <> target_scope_kind
       || meta.mention_targets <> target_mention_targets
+      || meta.tool_access <> target_tool_access
       || meta.execution_scope <> target_execution_scope
       || meta.allowed_paths <> target_allowed_paths in
     let discovery_changed =
@@ -161,6 +185,7 @@ let ensure_keeper_meta config name =
         room_scope = target_room_scope;
         scope_kind = target_scope_kind;
         mention_targets = target_mention_targets;
+        tool_access = target_tool_access;
         execution_scope = target_execution_scope;
         allowed_paths = target_allowed_paths;
         work_discovery_enabled = target_wd_enabled;

@@ -100,6 +100,5 @@ val run_unified_turn :
   ?channel:Keeper_world_observation.unified_turn_channel ->
   ?semaphore_wait_ms:int ->
   ?shared_context:Agent_sdk.Context.t ->
-  ?boring_consecutive_turns_ref:int ref ->
   unit ->
   (Keeper_types.keeper_meta, Oas.Error.sdk_error) result

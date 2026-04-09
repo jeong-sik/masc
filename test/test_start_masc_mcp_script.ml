@@ -58,6 +58,10 @@ let with_temp_dir prefix f =
   Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
 
 let run_shell ?(env = []) ~cwd cmd =
+  let env =
+    if List.mem_assoc "MASC_ALLOW_PORT_REUSE" env then env
+    else ("MASC_ALLOW_PORT_REUSE", "1") :: env
+  in
   let env_prefix =
     env
     |> List.map (fun (k, v) -> Printf.sprintf "%s=%s" k (quote v))
@@ -83,6 +87,14 @@ let run_shell ?(env = []) ~cwd cmd =
 
 let copy_script src dst =
   write_executable dst (read_file src)
+
+let make_config_root root =
+  let config = Filename.concat root "config" in
+  mkdir_p (Filename.concat config "prompts");
+  mkdir_p (Filename.concat config "keepers");
+  mkdir_p (Filename.concat config "personas");
+  write_file (Filename.concat config "cascade.json") "{\"seed\":\"repo\"}";
+  config
 
 let write_fake_eio_exe exe_path ~marker =
   mkdir_p (Filename.dirname exe_path);
@@ -148,14 +160,17 @@ let test_explicit_env_overrides_repo_env_files () =
       check bool "explicit config dir preserved" true
         (contains_substring captured ("MASC_CONFIG_DIR=" ^ Filename.concat dir "config")))
 
-let test_realtime_transports_default_enabled_and_preserve_override () =
+let test_realtime_transports_default_to_base_path_config_and_preserve_override ()
+    =
   with_temp_dir "start-masc-script" (fun dir ->
       let script = Filename.concat dir "start-masc-mcp.sh" in
       copy_script (script_path ()) script;
+      ignore (make_config_root dir);
       make_fake_eio_exe dir;
       let home_dir = Filename.concat dir "home" in
       mkdir_p (Filename.concat home_dir ".masc/config/prompts");
       write_file (Filename.concat home_dir ".masc/config/cascade.json") "{}";
+      let bootstrapped_config = Filename.concat dir ".masc/config" in
       let capture_default = Filename.concat dir "captured-default.txt" in
       let code_default, stdout_default, stderr_default =
         run_shell ~cwd:dir
@@ -177,9 +192,11 @@ let test_realtime_transports_default_enabled_and_preserve_override () =
         (contains_substring captured_default "MASC_WS_ENABLED=1");
       check bool "webrtc enabled by default" true
         (contains_substring captured_default "MASC_WEBRTC_ENABLED=1");
-      check bool "config dir defaults to home masc config when present" true
+      check bool "config dir defaults to base path config" true
         (contains_substring captured_default
-           ("MASC_CONFIG_DIR=" ^ Filename.concat home_dir ".masc/config"));
+           ("MASC_CONFIG_DIR=" ^ bootstrapped_config));
+      check bool "base path config bootstrapped" true
+        (Sys.file_exists (Filename.concat bootstrapped_config "cascade.json"));
       let capture_override = Filename.concat dir "captured-override.txt" in
       let code_override, stdout_override, stderr_override =
         run_shell ~cwd:dir
@@ -206,11 +223,13 @@ let test_realtime_transports_default_enabled_and_preserve_override () =
       check bool "webrtc override preserved" true
         (contains_substring captured_override "MASC_WEBRTC_ENABLED=0"))
 
-let test_realtime_transports_fall_back_to_repo_config_when_home_missing () =
+let test_bootstraps_base_path_config_from_repo_when_unset () =
   with_temp_dir "start-masc-script" (fun dir ->
       let script = Filename.concat dir "start-masc-mcp.sh" in
       copy_script (script_path ()) script;
+      ignore (make_config_root dir);
       make_fake_eio_exe dir;
+      let bootstrapped_config = Filename.concat dir ".masc/config" in
       let capture = Filename.concat dir "captured-fallback.txt" in
       let code, stdout, stderr =
         run_shell ~cwd:dir
@@ -228,9 +247,11 @@ let test_realtime_transports_fall_back_to_repo_config_when_home_missing () =
         failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s"
           code stdout stderr;
       let captured = read_file capture in
-      check bool "falls back to repo-local config" true
+      check bool "defaults to base path config" true
         (contains_substring captured
-           ("MASC_CONFIG_DIR=" ^ Filename.concat dir "config")))
+           ("MASC_CONFIG_DIR=" ^ bootstrapped_config));
+      check bool "repo config copied to base path config" true
+        (Sys.file_exists (Filename.concat bootstrapped_config "cascade.json")))
 
 let test_inherited_base_path_with_dual_masc_roots_is_sanitized () =
   with_temp_dir "start-masc-script" (fun dir ->
@@ -446,12 +467,12 @@ let () =
         [
           test_case "explicit env overrides repo env files" `Quick
             test_explicit_env_overrides_repo_env_files;
-          test_case "realtime transports default enabled and preserve override"
+          test_case
+            "realtime transports default to base path config and preserve override"
             `Quick
-            test_realtime_transports_default_enabled_and_preserve_override;
-          test_case "realtime transports fall back to repo config when home missing"
-            `Quick
-            test_realtime_transports_fall_back_to_repo_config_when_home_missing;
+            test_realtime_transports_default_to_base_path_config_and_preserve_override;
+          test_case "bootstraps base path config from repo when unset" `Quick
+            test_bootstraps_base_path_config_from_repo_when_unset;
           test_case "inherited base path with dual .masc roots is sanitized" `Quick
             test_inherited_base_path_with_dual_masc_roots_is_sanitized;
           test_case "parent project inherited base path is sanitized" `Quick

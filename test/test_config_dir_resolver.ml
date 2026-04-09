@@ -123,10 +123,10 @@ let test_local_masc_fallback_precedes_home_masc () =
     (Lib.Config_dir_resolver.source_to_string resolution.config_root.source);
   check string "root path" local_config resolution.config_root.path
 
-let test_no_legacy_repo_path_fallback () =
-  with_temp_dir "config-dir-no-legacy" @@ fun legacy_root ->
+let test_no_legacy_me_root_fallback () =
+  with_temp_dir "config-dir-no-legacy" @@ fun me_root ->
   let _repo_root =
-    Filename.concat legacy_root "workspace/yousleepwhen/masc-mcp"
+    Filename.concat me_root "workspace/yousleepwhen/masc-mcp"
   in
   let resolution =
     Lib.Config_dir_resolver.resolve_with
@@ -207,8 +207,8 @@ let () =
           test_case "local masc fallback precedes home masc" `Quick
             test_local_masc_fallback_precedes_home_masc;
           test_case "home masc fallback" `Quick test_home_masc_fallback;
-          test_case "does not fallback to legacy repo path" `Quick
-            test_no_legacy_repo_path_fallback;
+          test_case "does not fallback to legacy me_root repo path" `Quick
+            test_no_legacy_me_root_fallback;
         ] );
       ( "personas_dirs",
         [

@@ -113,7 +113,6 @@ harness_start_server() {
 
   mkdir -p "$base_path"
   (
-    export ME_ROOT="$base_path"
     export MASC_BASE_PATH="$base_path"
     export MASC_STORAGE_TYPE="filesystem"
     export MASC_AUTONOMY_ENABLED="0"

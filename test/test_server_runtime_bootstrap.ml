@@ -593,6 +593,25 @@ let test_prompt_markdown_dir_falls_back_to_resolved_config_dir () =
       Alcotest.(check string) "temp room falls back to resolved prompt dir"
         expected resolved)
 
+let test_prompt_markdown_dir_honors_masc_config_dir_override () =
+  with_temp_dir "startup-prompts-override" (fun dir ->
+      let workspace_prompts = Filename.concat dir "config/prompts" in
+      let override_root = Filename.concat dir "override-config" in
+      let override_prompts = Filename.concat override_root "prompts" in
+      Fs_compat.mkdir_p workspace_prompts;
+      Fs_compat.mkdir_p override_prompts;
+      with_env "MASC_CONFIG_DIR" (Some override_root) @@ fun () ->
+      Config_dir_resolver.reset ();
+      let resolved =
+        Fun.protect
+          ~finally:(fun () -> Config_dir_resolver.reset ())
+          (fun () ->
+             Prompt_defaults.resolve_prompt_markdown_dir
+               ~workspace_path:dir ~base_path:dir)
+      in
+      Alcotest.(check string) "resolved config root wins over workspace prompts"
+        override_prompts resolved)
+
 let test_main_eio_serves_health_before_lazy_startup () =
   with_temp_dir "startup-health" (fun dir ->
       let exe = find_main_eio_exe () in
@@ -604,7 +623,6 @@ let test_main_eio_serves_health_before_lazy_startup () =
       let env =
         merge_env_overrides
           [
-            ("ME_ROOT", dir);
             ("MASC_BASE_PATH", dir);
             ("MASC_STORAGE_TYPE", "filesystem");
             ("MASC_POSTGRES_URL", "");
@@ -715,6 +733,8 @@ let () =
             test_startup_state_json_includes_watchdog;
           Alcotest.test_case "prompt markdown dir falls back to resolved config dir"
             `Quick test_prompt_markdown_dir_falls_back_to_resolved_config_dir;
+          Alcotest.test_case "prompt markdown dir honors MASC_CONFIG_DIR override"
+            `Quick test_prompt_markdown_dir_honors_masc_config_dir_override;
           Alcotest.test_case "main_eio serves health before lazy startup"
             `Slow test_main_eio_serves_health_before_lazy_startup;
         ] );

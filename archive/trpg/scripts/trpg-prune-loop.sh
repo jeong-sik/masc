@@ -16,7 +16,7 @@ Options:
   --session <name>       tmux session name (default: masc-trpg-prune)
   --interval-sec <n>     loop interval seconds for start (default: 300)
   --room-id <id>         TRPG room id (default: default)
-  --base-path <path>     Base path containing trpg/events.sqlite3 (default: $ME_ROOT or $HOME/me)
+  --base-path <path>     Base path containing trpg/events.sqlite3 (default: $MASC_BASE_PATH or $HOME/me)
   --keep-sessions <n>    Keep last N room.created sessions (default: 1)
   --vacuum               Run VACUUM on each prune pass
   --help                 Show this help
@@ -41,7 +41,7 @@ fi
 SESSION_NAME="masc-trpg-prune"
 INTERVAL_SEC=300
 ROOM_ID="default"
-BASE_PATH="${ME_ROOT:-${HOME}/me}"
+BASE_PATH="${MASC_BASE_PATH:-${HOME}/me}"
 KEEP_SESSIONS=1
 VACUUM=0
 

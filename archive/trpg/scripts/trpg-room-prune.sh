@@ -8,7 +8,7 @@ Usage:
 
 Options:
   --room-id <id>         TRPG room id to prune (default: default)
-  --base-path <path>     Base path containing trpg/events.sqlite3 (default: $ME_ROOT or $HOME/me)
+  --base-path <path>     Base path containing trpg/events.sqlite3 (default: $MASC_BASE_PATH or $HOME/me)
   --db-path <path>       Explicit sqlite db path (overrides --base-path)
   --keep-sessions <n>    Keep last N room.created sessions (default: 1)
   --apply                Apply deletion (default: dry-run)
@@ -22,7 +22,7 @@ EOF
 }
 
 ROOM_ID="default"
-BASE_PATH="${ME_ROOT:-${HOME}/me}"
+BASE_PATH="${MASC_BASE_PATH:-${HOME}/me}"
 DB_PATH=""
 KEEP_SESSIONS=1
 APPLY=0

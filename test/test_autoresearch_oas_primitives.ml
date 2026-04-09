@@ -50,14 +50,14 @@ let with_temp_dir prefix f =
   let dir = temp_dir prefix in
   Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () -> f dir)
 
-let with_me_root root f =
-  let previous = Sys.getenv_opt "ME_ROOT" in
-  Unix.putenv "ME_ROOT" root;
+let with_base_path root f =
+  let previous = Sys.getenv_opt "MASC_BASE_PATH" in
+  Unix.putenv "MASC_BASE_PATH" root;
   Fun.protect
     ~finally:(fun () ->
       match previous with
-      | Some value -> Unix.putenv "ME_ROOT" value
-      | None -> Unix.putenv "ME_ROOT" "")
+      | Some value -> Unix.putenv "MASC_BASE_PATH" value
+      | None -> Unix.putenv "MASC_BASE_PATH" "")
     f
 
 let run_in_dir dir cmd =
@@ -129,7 +129,7 @@ let test_measure_metric_rejects_shell_metacharacters () =
 
 let test_cycle_reinjects_diff_guard_lesson () =
   with_temp_dir "masc_cycle_oas" @@ fun root ->
-  with_me_root root @@ fun () ->
+  with_base_path root @@ fun () ->
   with_eio @@ fun ~sw ~clock ->
   with_clean_state @@ fun () ->
   let repo = Filename.concat root "repo" in
@@ -204,7 +204,7 @@ let test_cycle_reinjects_diff_guard_lesson () =
 
 let test_build_verify_downgrade_rewrites_history () =
   with_temp_dir "masc_cycle_build_verify" @@ fun root ->
-  with_me_root root @@ fun () ->
+  with_base_path root @@ fun () ->
   with_eio @@ fun ~sw ~clock ->
   with_clean_state @@ fun () ->
   let repo = Filename.concat root "repo" in
@@ -298,7 +298,7 @@ let test_build_verify_downgrade_rewrites_history () =
 
 let test_start_seeds_source_only_target_file_into_managed_worktree () =
   with_temp_dir "masc_autoresearch_seed" @@ fun root ->
-  with_me_root root @@ fun () ->
+  with_base_path root @@ fun () ->
   with_eio @@ fun ~sw ~clock ->
   with_clean_state @@ fun () ->
   let repo = Filename.concat root "repo" in
@@ -359,7 +359,7 @@ let test_resolve_target_file_path_reports_realpath_errors () =
 
 let test_cycle_restores_ignored_target_after_empty_diff () =
   with_temp_dir "masc_autoresearch_restore" @@ fun root ->
-  with_me_root root @@ fun () ->
+  with_base_path root @@ fun () ->
   with_eio @@ fun ~sw ~clock ->
   with_clean_state @@ fun () ->
   let repo = Filename.concat root "repo" in

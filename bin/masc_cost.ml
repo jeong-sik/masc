@@ -17,10 +17,12 @@ type cost_entry = {
 
 (** Get MASC root directory *)
 let get_masc_root () =
-  let me_root = try Sys.getenv "ME_ROOT" with Not_found ->
-    Filename.concat (Sys.getenv "HOME") "me"
+  let base_path =
+    match Sys.getenv_opt "MASC_BASE_PATH" with
+    | Some path when String.trim path <> "" -> String.trim path
+    | _ -> Sys.getcwd ()
   in
-  Filename.concat me_root ".masc"
+  Filename.concat base_path ".masc"
 
 (** Get costs file path *)
 let costs_file () = Filename.concat (get_masc_root ()) "costs.jsonl"

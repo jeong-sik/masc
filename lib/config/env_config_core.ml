@@ -12,7 +12,7 @@
       let lock_timeout = Env_config.Lock.timeout_seconds
 *)
 
-(** Raised by convenience functions ([me_root], [sb_path],
+(** Raised by convenience functions ([sb_path],
     [masc_http_base_url]) when a required environment variable is missing.
     Prefer the [_result] variants for structured error handling. *)
 exception Config_error of string
@@ -70,26 +70,6 @@ let existing_file path =
 let home_dir_opt () =
   Sys.getenv_opt "HOME" |> trim_opt
 
-let me_root_opt () =
-  match Sys.getenv_opt "MASC_WORKSPACE_ROOT" |> trim_opt with
-  | Some path -> Some path
-  | None -> (
-      match Sys.getenv_opt "ME_ROOT" |> trim_opt with
-      | Some path -> Some path
-      | None -> Sys.getenv_opt "DUNE_SOURCEROOT" |> trim_opt)
-
-let me_root_result () =
-  match me_root_opt () with
-  | Some path -> Ok path
-  | None ->
-      Error
-        "MASC_WORKSPACE_ROOT or ME_ROOT is required (tests may use DUNE_SOURCEROOT)"
-
-let me_root () =
-  match me_root_result () with
-  | Ok path -> path
-  | Error msg -> raise (Config_error msg)
-
 (** Log a deprecation warning when a legacy env var is set.
     Called once per legacy var at startup/first-read. *)
 let deprecation_warned = Hashtbl.create 8
@@ -136,25 +116,6 @@ let get_bool_deprecated ~default ~primary ~deprecated =
        | "false" | "0" | "no" -> false
        | _ -> default)
   | None -> default
-
-let sb_path_opt () =
-  match me_root_opt () with
-  | Some root ->
-      let path = Filename.concat root "scripts/sb" in
-      if existing_file path then Some path else None
-  | None -> None
-
-let sb_path_result () =
-  match sb_path_opt () with
-  | Some path -> Ok path
-  | None ->
-      Error
-        "Unable to resolve scripts/sb. Set MASC_WORKSPACE_ROOT or ME_ROOT."
-
-let sb_path () =
-  match sb_path_result () with
-  | Ok path -> path
-  | Error msg -> raise (Config_error msg)
 
 let default_http_port = Masc_network_defaults.masc_http_default_port_s
 let default_http_port_int = Masc_network_defaults.masc_http_default_port
@@ -243,6 +204,25 @@ let base_path () =
   match base_path_opt () with
   | Some path -> path
   | None -> "."
+
+let sb_path_opt () =
+  match base_path_opt () with
+  | Some root ->
+      let path = Filename.concat root "scripts/sb" in
+      if existing_file path then Some path else None
+  | None -> None
+
+let sb_path_result () =
+  match sb_path_opt () with
+  | Some path -> Ok path
+  | None ->
+      Error
+        "Unable to resolve scripts/sb. Set MASC_BASE_PATH."
+
+let sb_path () =
+  match sb_path_result () with
+  | Ok path -> path
+  | Error msg -> raise (Config_error msg)
 
 (** Storage backend type. Set at runtime by server_runtime_bootstrap.
     Valid: "filesystem", "postgres-native". *)

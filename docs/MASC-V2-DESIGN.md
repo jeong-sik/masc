@@ -67,8 +67,8 @@ MASC supports three coordination modes:
 
 | Variable | Purpose |
 |----------|---------|
-| `ME_ROOT` | Base path (determines `.masc/` location) |
-| `MASC_CLUSTER_NAME` | Cluster name (defaults to `basename($ME_ROOT)`) |
+| `MASC_BASE_PATH` | Base path (determines `.masc/` location) |
+| `MASC_CLUSTER_NAME` | Cluster name override |
 | `MASC_STORAGE_TYPE` | `fs`, `redis`, or `postgres` |
 | `MASC_REDIS_URL` | Redis connection URL |
 | `MASC_POSTGRES_URL` | PostgreSQL connection URL (caqti-eio) |
@@ -87,7 +87,7 @@ MASC에서 가장 혼동하기 쉬운 개념이 **Cluster**와 **Room**입니다
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │  Cluster: "me"                                                       │
-│  (MASC_CLUSTER_NAME 또는 basename($ME_ROOT))                         │
+│  (MASC_CLUSTER_NAME 또는 기본 label)                                  │
 │                                                                      │
 │  ┌─────────────────────────────────────────────────────────────┐    │
 │  │  Room: "default"                                             │    │
@@ -115,7 +115,7 @@ MASC에서 가장 혼동하기 쉬운 개념이 **Cluster**와 **Room**입니다
 
 | 용어 | 설명 | 예시 |
 |------|------|------|
-| **Cluster** | 서버/인스턴스 식별자. `MASC_CLUSTER_NAME` 또는 `basename($ME_ROOT)` | `"me"` (~/me 프로젝트) |
+| **Cluster** | 서버/인스턴스 식별자. `MASC_CLUSTER_NAME` 또는 기본 label | `"default"` |
 | **Room** | 실제 협업 공간. 같은 Room = 같은 Task Board, Messages, Agents | `"default"` (기본 Room) |
 | **Agent** | Room 내에서 작업하는 개별 MODEL 인스턴스 | `claude-rare-koala`, `gemini-fierce-zebra` |
 

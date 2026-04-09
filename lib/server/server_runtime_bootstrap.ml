@@ -97,7 +97,6 @@ let runtime_path_diagnostics ?input_base_path (state : Mcp_server.server_state) 
   Server_base_path_diagnostics.detect
     ?input_base_path
     ?env_masc_base_path:(Env_config_core.base_path_opt ())
-    ?env_me_root:(Env_config_core.me_root_opt ())
     ~effective_base_path:state.room_config.base_path
     ~effective_masc_root:(Room.masc_root_dir state.room_config)
     ()
@@ -326,11 +325,11 @@ let bootstrap_prompt_state (state : Mcp_server.server_state) =
       ~workspace_path:state.room_config.workspace_path
       ~base_path:state.room_config.base_path
   in
-  if prompt_markdown_dir
-     <> Filename.concat state.room_config.workspace_path "config/prompts"
-  then
-    Log.Misc.info "prompt markdown dir resolved outside room base: %s"
-      prompt_markdown_dir;
+  let expected_prompt_dir = Config_dir_resolver.prompts_dir () in
+  if prompt_markdown_dir <> expected_prompt_dir then
+    Log.Misc.warn
+      "prompt markdown dir diverges from resolved config root: %s (expected %s)"
+      prompt_markdown_dir expected_prompt_dir;
   let missing_prompt_files = Prompt_registry.validate_required_prompt_files () in
   if missing_prompt_files <> [] then
     Log.Misc.error "required prompt files missing: %s"

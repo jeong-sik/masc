@@ -51,12 +51,12 @@ let generate_session_id () =
     Preference order:
     1. Explicit [base_dir]
     2. Room-scoped [.masc] under [config.base_path]
-    3. Legacy global [ME_ROOT/.masc] fallback *)
+    3. Process-scoped [.masc] under [MASC_BASE_PATH] (or cwd fallback) *)
 let resolve_base_dir ?(base_dir : string option) ?(config : Room_utils.config option) () =
   match base_dir, config with
   | Some dir, _ -> dir
   | None, Some cfg -> Filename.concat cfg.base_path ".masc"
-  | None, None -> Filename.concat (Env_config.me_root ()) ".masc"
+  | None, None -> Filename.concat (Env_config.base_path ()) ".masc"
 
 type file_stamp = float * int
 

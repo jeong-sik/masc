@@ -100,16 +100,16 @@ let parse_args () =
 
   let specs = [
     ("--port", Arg.Set_int port, Printf.sprintf "MASC server port (default: %d)" (Env_config_core.masc_http_port_int ()));
-    ("--room", Arg.Set_string room, "Room name (default: from ME_ROOT)");
+    ("--room", Arg.Set_string room, "Room name (default: from base path)");
     ("--refresh", Arg.Set_float refresh, "Refresh interval in seconds (default: 2)");
-    ("--base", Arg.Set_string base_path, "Base path (default: ME_ROOT or cwd)");
+    ("--base", Arg.Set_string base_path, "Base path (default: MASC_BASE_PATH or cwd)");
   ] in
 
   Arg.parse specs (fun _ -> ()) "masc-tui [OPTIONS]";
 
   (* Resolve base path *)
   let base = if !base_path <> "" then !base_path
-    else match Sys.getenv_opt "ME_ROOT" with
+    else match Sys.getenv_opt "MASC_BASE_PATH" with
       | Some p -> p
       | None -> Sys.getcwd ()
   in

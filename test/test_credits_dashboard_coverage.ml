@@ -3,7 +3,7 @@
     Tests for AI Service Usage Monitoring dashboard:
     - color_class: percentage to CSS class
     - balance_class: balance to CSS class
-    - me_root: ME_ROOT path resolution
+    - base_path: MASC_BASE_PATH path resolution
     - credits_json_path: JSON file path
 *)
 
@@ -74,16 +74,24 @@ let test_balance_class_negative () =
   check string "-10 red" "red" (Credits_dashboard.balance_class (-10.0))
 
 (* ============================================================
-   me_root Tests
+   base_path Tests
    ============================================================ *)
 
-let test_me_root_nonempty () =
-  let root = Credits_dashboard.me_root () in
+let test_base_path_nonempty () =
+  let root = Credits_dashboard.base_path () in
   check bool "nonempty" true (String.length root > 0)
 
-let test_me_root_absolute () =
-  let root = Credits_dashboard.me_root () in
-  check bool "absolute path" true (root.[0] = '/')
+let test_base_path_nonempty_fallback () =
+  let previous = Sys.getenv_opt "MASC_BASE_PATH" in
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some value -> Unix.putenv "MASC_BASE_PATH" value
+      | None -> Unix.putenv "MASC_BASE_PATH" "")
+    (fun () ->
+      Unix.putenv "MASC_BASE_PATH" "/tmp/credits-dashboard-root";
+      let root = Credits_dashboard.base_path () in
+      check string "explicit base path" "/tmp/credits-dashboard-root" root)
 
 (* ============================================================
    credits_json_path Tests
@@ -162,9 +170,9 @@ let () =
       test_case "red zero" `Quick test_balance_class_red_zero;
       test_case "negative" `Quick test_balance_class_negative;
     ];
-    "me_root", [
-      test_case "nonempty" `Quick test_me_root_nonempty;
-      test_case "absolute" `Quick test_me_root_absolute;
+    "base_path", [
+      test_case "nonempty" `Quick test_base_path_nonempty;
+      test_case "nonempty fallback" `Quick test_base_path_nonempty_fallback;
     ];
     "credits_json_path", [
       test_case "format" `Quick test_credits_json_path_format;

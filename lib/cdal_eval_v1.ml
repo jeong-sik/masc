@@ -77,17 +77,14 @@ let friction_of_outcome = function
 (* JSONL persistence                                                *)
 (* ================================================================ *)
 
-(* Evaluated at module init time (eager). MASC_DATA_DIR / ME_ROOT must
+(* Evaluated at module init time (eager). MASC_DATA_DIR / MASC_BASE_PATH must
    be set before this module is loaded. Safe in practice because the
    server sets all env vars at process startup. *)
 let default_base_path =
   let root =
     match Sys.getenv_opt "MASC_DATA_DIR" with
     | Some dir -> dir
-    | None ->
-      match Sys.getenv_opt "ME_ROOT" with
-      | Some root -> Filename.concat root "data"
-      | None -> "data"
+    | None -> Filename.concat (Env_config_core.base_path ()) "data"
   in
   Filename.concat root "cdal_verdicts"
 

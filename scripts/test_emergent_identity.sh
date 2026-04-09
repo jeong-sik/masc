@@ -14,7 +14,8 @@ set -euo pipefail
 DURATION_HOURS="${1:-24}"
 DURATION_SECS=$((DURATION_HOURS * 3600))
 TEST_AGENTS=("dreamer" "connector" "historian")
-LOG_DIR="${ME_ROOT:-$HOME/me}/logs/emergent_identity_test"
+BASE_PATH="${MASC_BASE_PATH:-${HOME}/me}"
+LOG_DIR="${BASE_PATH}/logs/emergent_identity_test"
 METRICS_FILE="$LOG_DIR/metrics_$(date +%Y%m%d_%H%M%S).json"
 
 mkdir -p "$LOG_DIR"
@@ -45,7 +46,7 @@ collect_metrics() {
     echo "[$(date +%H:%M:%S)] Collecting metrics..."
 
     # Get reaction counts per agent
-    local reaction_file="${ME_ROOT:-$HOME/me}/.masc/reaction_history.jsonl"
+    local reaction_file="${BASE_PATH}/.masc/reaction_history.jsonl"
 
     if [[ -f "$reaction_file" ]]; then
         local metrics_json=$(cat "$reaction_file" | \

@@ -979,7 +979,6 @@ let dashboard_shell_paths_json (config : Room.config) : Yojson.Safe.t =
   Server_base_path_diagnostics.detect
     ?input_base_path:(Env_config_core.base_path_opt ())
     ?env_masc_base_path:(Env_config_core.base_path_opt ())
-    ?env_me_root:(Env_config_core.me_root_opt ())
     ~effective_base_path:config.base_path
     ~effective_masc_root:(Room.masc_root_dir config)
     ()

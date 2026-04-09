@@ -67,7 +67,7 @@ type run_result = {
 val cascade_metrics_json : unit -> Yojson.Safe.t
 val cascade_observation_to_json : cascade_observation -> Yojson.Safe.t
 
-(** Locate config/cascade.json via CWD or ME_ROOT.
+(** Locate config/cascade.json via the resolved config root.
     Delegates to {!Model_spec.cascade_config_path}. *)
 val default_config_path : unit -> string option
 

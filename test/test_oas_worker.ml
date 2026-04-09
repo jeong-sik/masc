@@ -246,8 +246,8 @@ let test_default_model_strings_unknown () =
   Alcotest.(check bool) "unknown cascade has fallback" true (models <> [])
 
 (** Test default_config_path with a controlled fixture so the result
-    is deterministic regardless of CWD or ME_ROOT.
-    Creates a temp directory with config/cascade.json, sets ME_ROOT
+    is deterministic regardless of CWD or inherited env.
+    Creates a temp directory with .masc/config/cascade.json, sets MASC_BASE_PATH
     to point there, and verifies the function finds the file. *)
 let test_default_config_path () =
   let base = temp_dir "test_config_path" in
@@ -258,26 +258,23 @@ let test_default_config_path () =
       Unix.mkdir dir 0o755
     end
   in
-  let masc_config_dir = Filename.concat
-    (Filename.concat base "workspace/yousleepwhen/masc-mcp")
-    "config"
-  in
+  let masc_config_dir = Filename.concat base ".masc/config" in
   mkdir_p masc_config_dir;
   let cascade_path = Filename.concat masc_config_dir "cascade.json" in
   let oc = open_out cascade_path in
   output_string oc "{}";
   close_out oc;
-  (* Save and override ME_ROOT *)
-  let old_me_root = Sys.getenv_opt "ME_ROOT" in
-  Unix.putenv "ME_ROOT" base;
+  (* Save and override MASC_BASE_PATH *)
+  let old_base_path = Sys.getenv_opt "MASC_BASE_PATH" in
+  Unix.putenv "MASC_BASE_PATH" base;
   Fun.protect
     ~finally:(fun () ->
-      (match old_me_root with
-       | Some v -> Unix.putenv "ME_ROOT" v
+      (match old_base_path with
+       | Some v -> Unix.putenv "MASC_BASE_PATH" v
        | None ->
            (* OCaml stdlib has no unsetenv; set to empty string
               which env_opt treats as absent. *)
-           Unix.putenv "ME_ROOT" "");
+           Unix.putenv "MASC_BASE_PATH" "");
       cleanup_dir base)
     (fun () ->
       match Oas_worker.default_config_path () with
@@ -288,7 +285,7 @@ let test_default_config_path () =
         Alcotest.(check bool) "file exists" true (Sys.file_exists path)
       | None ->
         Alcotest.fail
-          "default_config_path returned None despite fixture at ME_ROOT")
+          "default_config_path returned None despite fixture at MASC_BASE_PATH/.masc/config")
 
 let test_cascade_names_produce_models () =
   let cascades = [

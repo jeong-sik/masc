@@ -12,6 +12,8 @@ import { normalizeKeepers } from '../keeper-store-normalize'
 import { formatElapsedCompact, formatTimeAgo } from '../lib/format-time'
 import type { Keeper } from '../types'
 
+// Fleet-level thresholds (lower than individual keeper thresholds in config/constants)
+// because fleet view highlights keepers that are approaching limits, not yet at them
 const PRESSURE_HOT_RATIO = 0.75
 const PRESSURE_WARN_RATIO = 0.5
 const STALE_ACTIVITY_SEC = 900

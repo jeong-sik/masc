@@ -107,3 +107,4 @@
 - Board votes now use stable post content hash instead of monotonic counter (#5817)
 - K2K preset routing refined with forbidden_tools and improved score penalty (#5819)
 - Deterministic read-only boundary enforcement for shell/gh tools (#5822)
+ 

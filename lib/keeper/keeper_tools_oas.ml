@@ -223,6 +223,9 @@ let make_tools
                 Keeper_registry.record_tool_use ~base_path:config.base_path meta.name ~tool_name:td.name ~success:false;
                 !Keeper_exec_tools.on_keeper_tool_call ~tool_name:td.name ~success:false ~duration_ms;
                 Keeper_exec_tools.notify_tool_call_observers ~tool_name:td.name ~success:false;
+                (let tr = Tool_result.{ tool_name = td.name; success = false;
+                    duration_ms = Float.of_int duration_ms; data = `Null } in
+                 ignore (Tool_dispatch.run_post_hooks tr));
                 let detail =
                   let s = String.trim result in
                   if String.length s <= sse_error_preview_max_chars then s
@@ -266,6 +269,9 @@ let make_tools
                 Keeper_registry.record_tool_use ~base_path:config.base_path meta.name ~tool_name:td.name ~success:true;
                 !Keeper_exec_tools.on_keeper_tool_call ~tool_name:td.name ~success:true ~duration_ms;
                 Keeper_exec_tools.notify_tool_call_observers ~tool_name:td.name ~success:true;
+                (let tr = Tool_result.{ tool_name = td.name; success = true;
+                    duration_ms = Float.of_int duration_ms; data = `Null } in
+                 ignore (Tool_dispatch.run_post_hooks tr));
                 let ts = Time_compat.now () in
                 (try Sse.broadcast
                   (`Assoc [

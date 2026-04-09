@@ -66,11 +66,43 @@ val install : config:Room.config -> governance_level:string -> unit
     Reads governance level from the [governance_level] argument.
     Called once at server startup. *)
 
+(** {1 Combinatorial Risk — Lethal Trifecta}
+
+    Simon Willison's "Lethal Trifecta": an agent simultaneously holding
+    untrusted input + sensitive access + state modification = security risk.
+    When all 3 classes are present, state-modifying tools get risk escalation.
+
+    @since 2.264.0 *)
+
+type capability_class =
+  | External_input      (** Receives data from untrusted external sources *)
+  | Sensitive_access    (** Can read potentially sensitive data *)
+  | State_modification  (** Can modify system state *)
+
+val tool_capabilities : string -> capability_class list
+(** Return capability classes for a tool name. Empty for unclassified tools. *)
+
+val assess_trifecta :
+  active_tool_names:string list -> int * bool * bool * bool
+(** Compute trifecta status from active tool names.
+    Returns [(class_count, has_external, has_sensitive, has_state_mod)]. *)
+
+val combinatorial_risk_escalation :
+  trifecta_active:bool ->
+  tool_name:string ->
+  base_risk:risk_level ->
+  risk_level
+(** If trifecta is active and the tool is a state_modification tool,
+    escalate risk to at least High. Otherwise return base_risk unchanged. *)
+
 val to_oas_approval_callback :
   governance_level:string ->
   keeper_name:string ->
   Oas.Hooks.approval_callback
 (** Build an OAS approval callback with genuine HITL fiber suspension.
+
+    Pre-computes trifecta status from the keeper's active shard tool set.
+    When trifecta is active, state-modifying tools get risk escalation.
 
     When a tool exceeds the governance threshold, the agent fiber
     suspends via [Keeper_approval_queue.submit_and_await]. An operator

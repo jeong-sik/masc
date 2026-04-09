@@ -521,7 +521,9 @@ let write_heartbeat_snapshot
        Keeper_registry.flush_tool_usage ~base_path:ctx.config.base_path meta_current.name
      with
      | Eio.Cancel.Cancelled _ as e -> raise e
-     | _ -> ())
+     | exn ->
+       Log.Keeper.warn "keeper:%s flush_tool_usage failed: %s"
+         meta_current.name (Printexc.to_string exn))
 ;;
 
 let keeper_agent_status (meta : keeper_meta) =
@@ -805,7 +807,14 @@ let run_keepalive_unified_turn
             end;
             (match read_meta ctx.config meta_after_observe.name with
              | Ok (Some latest) -> latest
-             | _ -> meta_after_observe)
+             | Ok None ->
+               Log.Keeper.warn "keeper:%s read_meta returned None after turn failure, using stale meta"
+                 meta_after_observe.name;
+               meta_after_observe
+             | Error e ->
+               Log.Keeper.warn "keeper:%s read_meta failed after turn failure (%s), using stale meta"
+                 meta_after_observe.name e;
+               meta_after_observe)
           | Ok updated -> updated))
       else if (not has_message_signal) && obs.message_cursor_updates <> [] then
         meta_after_observe

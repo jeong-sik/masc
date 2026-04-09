@@ -5,6 +5,7 @@ import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
 import { get, post } from '../api/core'
+import { formatElapsedCompact, formatTimeAgoEn } from '../lib/format-time'
 import { lastEvent } from '../sse'
 import { StatCard } from './common/stat-card'
 import { ActionButton } from './common/button'
@@ -207,24 +208,9 @@ function channelIcon(ch: string): string {
   return CHANNEL_ICONS[ch] ?? '\u{1F517}'
 }
 
-function formatUptime(seconds: number): string {
-  if (seconds < 60) return `${seconds}s`
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`
-  const h = Math.floor(seconds / 3600)
-  const m = Math.floor((seconds % 3600) / 60)
-  return m > 0 ? `${h}h ${m}m` : `${h}h`
-}
-
-function timeAgo(iso: string): string {
-  if (!iso.trim()) return 'unknown'
-  if (iso === 'never') return 'never'
-  const diff = (Date.now() - new Date(iso).getTime()) / 1000
-  if (Number.isNaN(diff)) return 'unknown'
-  if (diff < 60) return 'just now'
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
-  return `${Math.floor(diff / 86400)}d ago`
-}
+// Time formatting delegated to lib/format-time (SSOT)
+const formatUptime = formatElapsedCompact
+const timeAgo = formatTimeAgoEn
 
 function healthTone(health: string): { dot: string; badge: string; label: string } {
   switch (health) {

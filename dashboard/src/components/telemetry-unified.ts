@@ -78,9 +78,8 @@ function formatTs(ts: number): string {
   })
 }
 
-function timeAgo(ts: number): string {
-  if (ts === 0) return ''
-  return formatTimeAgo(ts)
+function timeAgoSafe(ts: number): string {
+  return ts === 0 ? '' : formatTimeAgo(ts)
 }
 
 function normalizeText(value: unknown): string | null {
@@ -210,7 +209,7 @@ function EntryRow({ entry }: { entry: TelemetryEntry }) {
       >
         <span class="font-mono font-bold ${meta.color} w-4 text-center flex-shrink-0">${meta.icon}</span>
         <span class="font-mono text-[var(--text-muted)] w-28 flex-shrink-0" title=${formatTs(ts)}>
-          ${timeAgo(ts)}
+          ${timeAgoSafe(ts)}
         </span>
         ${success != null ? html`
           <span class="flex-shrink-0 w-4 ${success ? 'text-green-400' : 'text-red-400'}">

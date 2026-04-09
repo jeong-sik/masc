@@ -63,17 +63,8 @@ function decisionLabel(decision: string): string {
   return decision === 'keep' ? '유지' : '삭제'
 }
 
-function formatTimestamp(ts: number): string {
-  return formatTimestampKo(ts)
-}
-
 function liveLabel(loop: Pick<AutoresearchLoopSummary, 'live'>): string {
   return loop.live ? '실시간' : '저장됨'
-}
-
-function formatUpdatedAt(ts: number | null): string {
-  if (ts == null) return '알 수 없음'
-  return formatTimestamp(ts)
 }
 
 // --- Sub-components ---
@@ -137,7 +128,7 @@ function LoopOverview({ loop }: { loop: AutoresearchLoopSummary }) {
           </div>
           <div>
             <div class="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-0.5">최근 갱신</div>
-            <div class="text-[var(--text-body)] text-sm font-mono">${formatUpdatedAt(loop.updated_at)}</div>
+            <div class="text-[var(--text-body)] text-sm font-mono">${loop.updated_at != null ? formatTimestampKo(loop.updated_at) : '알 수 없음'}</div>
           </div>
         </div>
       </div>
@@ -227,7 +218,7 @@ function CycleHistoryTable({ cycles }: { cycles: AutoresearchCycleRecord[] }) {
                     : 'bg-[var(--bad-soft)] text-[var(--bad)] border border-[var(--bad-20)]'
                 }">${decisionLabel(c.decision)}</span>
               </td>
-              <td class="py-2 px-3 text-right text-[var(--text-muted)] font-mono">${formatTimestamp(c.timestamp)}</td>
+              <td class="py-2 px-3 text-right text-[var(--text-muted)] font-mono">${formatTimestampKo(c.timestamp)}</td>
             </tr>
           `)}
         </tbody>
@@ -268,7 +259,7 @@ function WarningsList({ warnings }: { warnings: string[] }) {
 }
 
 function ResearchBrief({ loop }: { loop: AutoresearchLoopSummary }) {
-  const linkedAt = loop.linked_at != null ? formatTimestamp(loop.linked_at) : '미연결'
+  const linkedAt = loop.linked_at != null ? formatTimestampKo(loop.linked_at) : '미연결'
 
   return html`
     <${SurfaceCard} variant="compact">

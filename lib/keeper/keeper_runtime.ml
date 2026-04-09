@@ -349,6 +349,23 @@ let start_supervisor_sweep ctx =
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              Log.Keeper.error "supervisor sweep failed: %s"
                (Printexc.to_string exn));
+          (* TOML hot-reload: re-sync declarative fields for running keepers.
+             Runs after sweep_and_recover so TOML edits take effect within
+             one sweep cycle (~30s) without server restart. *)
+          (try
+            Keeper_registry.all ~base_path ()
+            |> List.iter (fun (entry : Keeper_registry.registry_entry) ->
+              match entry.phase with
+              | Keeper_state_machine.Running ->
+                  (match ensure_keeper_meta ctx.config entry.name with
+                   | Ok _meta -> ()
+                   | Error e ->
+                       Log.Keeper.warn "TOML reconcile failed for %s: %s"
+                         entry.name e)
+              | _ -> ())
+           with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+             Log.Keeper.error "TOML reconcile sweep failed: %s"
+               (Printexc.to_string exn));
           Ok ()
       end)
     in

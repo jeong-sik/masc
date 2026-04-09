@@ -39,6 +39,7 @@ import {
 import {
   KeeperConfigPanel,
   loadKeeperConfig,
+  peekLoadedKeeperConfig,
   resetKeeperConfig,
 } from './keeper-config-panel'
 import { PipelineStageBar } from './keeper-pipeline-stage'
@@ -273,6 +274,20 @@ export function KeeperDetailOverlay() {
                       title=${lastUsed && keeper.model ? `마지막 호출: ${lastUsed}\n설정: ${keeper.model}` : ''}
                     >${display}</span>
                   ` : null
+                })()}
+                ${(() => {
+                  const preset = peekLoadedKeeperConfig(keeper.name)?.tools?.tool_preset
+                  if (!preset) return null
+                  const canPR = ['coding', 'delivery', 'full'].includes(preset)
+                  return html`
+                    <span class="inline-flex items-center py-0.5 px-2 rounded text-[10px] font-semibold uppercase tracking-wide
+                      ${canPR
+                        ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                        : 'bg-[var(--white-5)] text-[var(--text-muted)] border border-[var(--white-8)]'
+                      }"
+                      title=${`Tool preset: ${preset}${canPR ? ' (clone/PR 가능)' : ''}`}
+                    >${preset}</span>
+                  `
                 })()}
               </div>
               ${keeper.koreanName || keeper.created_at ? html`

@@ -73,20 +73,20 @@ let adaptive = Cfg.KeeperKeepalive.oas_timeout_for_context
 
 let test_oas_timeout_32k () =
   let v = adaptive ~max_context:32_000 in
-  check (float 1.0) "32K → ~228s" 228.0 v
+  check (float 1.0) "32K → ~768s" 768.0 v
 
 let test_oas_timeout_128k () =
   let v = adaptive ~max_context:128_000 in
-  check (float 1.0) "128K → ~372s" 372.0 v
+  check (float 1.0) "128K → ~912s" 912.0 v
 
 let test_oas_timeout_262k () =
   let v = adaptive ~max_context:262_144 in
-  (* 180 + 262.144 * 1.5 = 180 + 393.216 = 573.216, capped at 600 *)
-  check bool "262K → [500, 600]" true (v >= 500.0 && v <= 600.0)
+  (* 120 + 262.144 * 1.5 + 20 * 30 = 1113.216, capped at turn_timeout_sec. *)
+  check bool "262K → [1100, 1200]" true (v >= 1100.0 && v <= 1200.0)
 
 let test_oas_timeout_zero () =
   let v = adaptive ~max_context:0 in
-  check (float 1.0) "0 context → base 180s" 180.0 v
+  check (float 1.0) "0 context → base+turn budget 720s" 720.0 v
 
 let test_oas_timeout_monotonic () =
   let v1 = adaptive ~max_context:32_000 in
@@ -97,7 +97,7 @@ let test_oas_timeout_monotonic () =
 
 let test_oas_timeout_cap () =
   let v = adaptive ~max_context:1_000_000 in
-  check (float 0.1) "1M context → capped at 600" 600.0 v
+  check (float 0.1) "1M context → capped at turn timeout 1200" 1200.0 v
 
 let test_max_turns_default () =
   check int "default max_turns_per_call 5" 5

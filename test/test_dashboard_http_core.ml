@@ -147,14 +147,29 @@ let test_dashboard_shell_http_json_includes_paths () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   let json = Lib.Server_dashboard_http_core.dashboard_shell_http_json config in
   let open Yojson.Safe.Util in
-  let paths = json |> member "paths" in
-  let config_resolution = json |> member "config_resolution" in
-  let runtime_resolution = json |> member "runtime_resolution" in
+  let fields =
+    match json with
+    | `Assoc fields -> fields
+    | _ -> Alcotest.fail "dashboard shell payload must be an object"
+  in
+  let paths = List.assoc "paths" fields in
+  let config_resolution =
+    List.assoc_opt "config_resolution" fields
+    |> Option.value ~default:`Null
+  in
+  let runtime_resolution =
+    List.assoc_opt "runtime_resolution" fields
+    |> Option.value ~default:`Null
+  in
   let effective_base_path = paths |> member "effective_base_path" |> to_string in
   let effective_masc_root = paths |> member "effective_masc_root" |> to_string in
   let expected_masc_root = Unix.realpath (Filename.concat config.base_path ".masc") in
   check bool "paths present" true
     (match paths with `Assoc _ -> true | _ -> false);
+  check bool "config_resolution key present" true
+    (List.mem_assoc "config_resolution" fields);
+  check bool "runtime_resolution key present" true
+    (List.mem_assoc "runtime_resolution" fields);
   check string "effective_base_path matches config" (Unix.realpath config.base_path)
     effective_base_path;
   check string "effective_masc_root matches config" expected_masc_root

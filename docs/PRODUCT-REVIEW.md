@@ -103,7 +103,7 @@ Current security-sensitive areas requiring attention:
 
 Security posture remains appropriate for trusted-network, repo-local use. Remote exposure requires explicit auth configuration and hardening.
 
-See `docs/REMOTE-MCP-OPERATOR.md` for remote-safe configuration guidance.
+See `docs/spec/09-server-transport.md` for remote auth semantics and `docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md` for the current operator auth bootstrap path.
 
 ## Judgment
 

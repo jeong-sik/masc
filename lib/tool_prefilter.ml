@@ -43,7 +43,7 @@ let synonyms : (string * string list) list =
     ("keeper_fs_edit",
      [ "write file"; "create file"; "edit file"; "save file"; "new file";
        "make file"; "update file"; "overwrite"; "append to file" ]);
-    ("keeper_shell_readonly",
+    ("keeper_shell",
      [ "run command"; "shell read only"; "safe command"; "grep"; "rg search";
        "list files"; "directory listing"; "git status"; "find file" ]);
     ("keeper_bash",

@@ -188,6 +188,23 @@ let rec add_routes ~sw ~clock router =
          let json = dashboard_governance_http_json req ~base_path in
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
+  |> Http.Router.post "/api/v1/dashboard/governance/approvals/resolve" (fun request reqd ->
+       with_tool_auth ~tool_name:"masc_operator_confirm" (fun _state _req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let args = Yojson.Safe.from_string body_str in
+             match dashboard_governance_approval_resolve_http_json ~args with
+             | Ok json ->
+                 respond_json_with_cors request reqd (Yojson.Safe.to_string json)
+             | Error message ->
+                 respond_json_with_cors ~status:`Bad_request request reqd
+                   (Yojson.Safe.to_string (operator_error_json message))
+           with Yojson.Json_error msg ->
+             respond_json_with_cors ~status:`Bad_request request reqd
+               (Yojson.Safe.to_string
+                  (operator_error_json (Printf.sprintf "invalid json: %s" msg)))
+         )
+       ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/planning" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let json = dashboard_planning_http_json ~config:state.Mcp_server.room_config in
@@ -573,4 +590,79 @@ and add_repo_synthesis_routes router =
                Http.Response.json ~status:`Not_found
                  (Printf.sprintf {|{"error":"%s"}|} (String.escaped msg))
                  reqd
+       ) request reqd)
+
+  (* ── Keeper cascade config API ──────────────────────────────── *)
+
+  |> Http.Router.get "/api/v1/keeper/cascades" (fun request reqd ->
+       with_public_read (fun _state _req reqd ->
+         let config_path = Oas_model_resolve.cascade_config_path () in
+         let profiles =
+           match config_path with
+           | None -> ["default"]
+           | Some path ->
+             match Yojson.Safe.from_file path with
+             | `Assoc fields ->
+               "default" ::
+               (List.filter_map (fun (k, _) ->
+                 if String.length k > 7
+                    && String.sub k (String.length k - 7) 7 = "_models"
+                 then Some (String.sub k 0 (String.length k - 7))
+                 else None
+               ) fields)
+             | _ -> ["default"]
+             | exception Yojson.Json_error msg ->
+               Log.Keeper.warn "cascade config parse error: %s" msg;
+               ["default"]
+             | exception Sys_error msg ->
+               Log.Keeper.warn "cascade config read error: %s" msg;
+               ["default"]
+         in
+         Http.Response.json ~request:request
+           (Yojson.Safe.to_string (`Assoc [
+             ("profiles", `List (List.map (fun s -> `String s) profiles));
+           ])) reqd
+       ) request reqd)
+
+  |> Http.Router.post "/api/v1/keeper/cascade" (fun request reqd ->
+       with_tool_auth ~tool_name:"masc_status" (fun _state req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           match Yojson.Safe.from_string body_str with
+           | exception Yojson.Json_error _ ->
+             Http.Response.json ~status:`Bad_request ~request:req
+               {|{"ok":false,"error":"invalid JSON body"}|} reqd
+           | json ->
+             let keeper_name = Safe_ops.json_string_opt "keeper" json in
+             let cascade_name = Safe_ops.json_string_opt "cascade_name" json in
+             match keeper_name, cascade_name with
+             | None, _ | _, None ->
+               Http.Response.json ~status:`Bad_request ~request:req
+                 {|{"ok":false,"error":"requires {\"keeper\":\"...\",\"cascade_name\":\"...\"}"}|}
+                 reqd
+             | Some name, Some cascade ->
+               (* TOML-first: write to config/keepers/<name>.toml (SSOT).
+                  The supervisor sweep will pick up the change within ~30s
+                  and sync it to runtime JSON via ensure_keeper_meta. *)
+               match Config_dir_resolver.keeper_toml_path_opt name with
+               | None ->
+                 Http.Response.json ~status:`Not_found ~request:req
+                   (Printf.sprintf
+                     {|{"ok":false,"error":"no TOML config for keeper %s"}|}
+                     (String.escaped name))
+                   reqd
+               | Some toml_path ->
+                 match Keeper_toml_loader.update_keeper_toml_field
+                         ~path:toml_path ~key:"cascade_name" ~value:cascade with
+                 | Error e ->
+                   Http.Response.json ~status:`Internal_server_error ~request:req
+                     (Printf.sprintf {|{"ok":false,"error":"%s"}|}
+                       (String.escaped e))
+                     reqd
+                 | Ok () ->
+                   Http.Response.json ~request:req
+                     (Printf.sprintf
+                       {|{"ok":true,"keeper":"%s","cascade_name":"%s","source":"toml"}|}
+                       (String.escaped name) (String.escaped cascade))
+                     reqd
+         )
        ) request reqd)

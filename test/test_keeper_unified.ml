@@ -3,6 +3,7 @@ open Alcotest
 module WO = Masc_mcp.Keeper_world_observation
 module UP = Masc_mcp.Keeper_unified_prompt
 module UT = Masc_mcp.Keeper_unified_turn
+module KR = Masc_mcp.Keeper_registry
 module KAR = Masc_mcp.Keeper_agent_run
 module KTD = Masc_mcp.Keeper_tool_disclosure
 module KEC = Masc_mcp.Keeper_exec_context
@@ -1557,6 +1558,24 @@ let test_side_effect_reclassification_marks_any_post_commit_error () =
   check bool "auth error becomes ambiguous partial" true
     (UT.is_ambiguous_side_effect_error reclassified)
 
+let test_post_commit_failure_kind_marks_timeouts () =
+  let timeout_error =
+    Agent_sdk.Error.Api
+      (Timeout { message = "Execution cancelled after 300.0s" })
+  in
+  check string "timeout kind" "post_commit_timeout"
+    (KR.ambiguous_partial_commit_kind_to_string
+       (UT.post_commit_failure_kind_of_error timeout_error))
+
+let test_post_commit_failure_kind_marks_non_timeouts_as_failures () =
+  let auth_error =
+    Agent_sdk.Error.Api
+      (AuthError { message = "Unauthorized" })
+  in
+  check string "failure kind" "post_commit_failure"
+    (KR.ambiguous_partial_commit_kind_to_string
+       (UT.post_commit_failure_kind_of_error auth_error))
+
 let test_side_effect_reclassification_ignores_keeper_read_only_tools () =
   let original =
     Agent_sdk.Error.Api
@@ -2284,6 +2303,10 @@ let () =
             test_side_effect_reclassification_ignores_read_only_tools;
           test_case "any post-commit error becomes ambiguous partial" `Quick
             test_side_effect_reclassification_marks_any_post_commit_error;
+          test_case "timeout classified as post-commit timeout" `Quick
+            test_post_commit_failure_kind_marks_timeouts;
+          test_case "non-timeout classified as post-commit failure" `Quick
+            test_post_commit_failure_kind_marks_non_timeouts_as_failures;
           test_case "read-only keeper tools do not become ambiguous partial" `Quick
             test_side_effect_reclassification_ignores_keeper_read_only_tools;
           test_case "mixed tool sets only keep mutating keeper tools" `Quick

@@ -29,3 +29,17 @@ val toml_string_opt : toml_doc -> string -> string option
 val toml_int_opt : toml_doc -> string -> int option
 val toml_bool_opt : toml_doc -> string -> bool option
 val toml_string_list : toml_doc -> string -> string list
+
+(** {1 TOML writer} *)
+
+(** Update or insert a key under a [\[table\]] in a TOML string.
+    Preserves comments, formatting, and other fields.
+    Returns [Ok new_content] or [Error reason] if the table is not found. *)
+val update_field_in_content :
+  table:string -> key:string -> value:string -> string -> (string, string) result
+
+(** Update a field in a keeper TOML file on disk.
+    Reads the file, modifies the field under [\[keeper\]], and writes back.
+    Returns [Ok ()] on success or [Error reason] on failure. *)
+val update_keeper_toml_field :
+  path:string -> key:string -> value:string -> (unit, string) result

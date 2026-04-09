@@ -182,8 +182,8 @@ function SortBar() {
         </button>
         <input
           type="text"
-          placeholder="Author"
-          aria-label="Filter posts by author"
+          placeholder="작성자"
+          aria-label="작성자 필터"
           value=${boardAuthorFilter.value}
           class="px-2.5 py-1 rounded-lg text-[11px] font-medium border bg-transparent text-[var(--text)] border-[var(--border-slate-16)] placeholder:text-[var(--text-muted)] w-28 focus:outline-none focus:border-[var(--accent)]"
           onKeyDown=${(e: KeyboardEvent) => {
@@ -236,9 +236,9 @@ function MemorySummary() {
       <span class="font-semibold text-[var(--text-strong)] tabular-nums text-[15px]">${visibleCount}</span>
       <span>개 표시 중</span>
       <span class="text-[var(--text-muted)]">·</span>
-      <span>직접 ${grouped.direct.length}</span>
+      <span>직접 작성 ${grouped.direct.length}</span>
       <span class="text-[var(--text-muted)]">·</span>
-      <span>자율 ${grouped.automation.length}</span>
+      <span>자동화 ${grouped.automation.length}</span>
       <span class="text-[var(--text-muted)]">·</span>
       <span>시스템 ${grouped.system.length}</span>
       ${lastBoardRefreshAt.value ? html`
@@ -414,7 +414,7 @@ export function Memory() {
           ? html`<${EmptyState} message="아직 게시글이 없습니다. 에이전트가 활동하면 소통과 지식 공유 글이 여기에 나타납니다." compact />`
           : html`
               ${renderSection('직접 작성 글', grouped.direct, visibleLimit)}
-              ${renderSection('자율 글', grouped.automation, automationVisibleLimit)}
+              ${renderSection('자동화 글', grouped.automation, automationVisibleLimit)}
               ${renderSection('시스템 글', grouped.system, systemVisibleLimit)}
             `}
     </div>

@@ -1,9 +1,20 @@
 // MASC Dashboard — Dashboard projections, resource fetchers, tool metrics
 
-import { get, post, patch, NAMESPACE_TRUTH_GET_TIMEOUT_MS } from './core'
+import { isRecord, asInt } from '../components/common/normalize'
+import {
+  asNullableIsoTimestamp,
+  normalizeGovernanceDecisionItem,
+  normalizeGovernanceTimelineEvent,
+  normalizeGovernanceJudgeSummary,
+  normalizeGovernanceJudgment,
+  normalizeKeeperApprovalQueueItem,
+  normalizePendingConfirmation,
+} from './board'
+import { get, post, patch, withRetries, NAMESPACE_TRUTH_GET_TIMEOUT_MS } from './core'
 import type {
   KeeperConfig,
   DashboardExecutionResponse,
+  DashboardGovernanceResponse,
   DashboardMemoryResponse,
   DashboardMissionBriefingResponse,
   DashboardMissionResponse,
@@ -14,6 +25,12 @@ import type {
   DashboardNamespaceTruthResponse,
   DashboardShellResponse,
   BoardSortMode,
+  GovernanceCaseBundle,
+  GovernanceDecisionItem,
+  GovernanceJudgment,
+  KeeperApprovalQueueItem,
+  GovernanceTimelineEvent,
+  PendingConfirmation,
   CommandPlaneHelpResponse,
   CommandPlaneChainRunResponse,
   CommandPlaneChainSummary,
@@ -169,6 +186,51 @@ export function fetchDashboardExecution(): Promise<DashboardExecutionResponse> {
   return get('/api/v1/dashboard/execution')
 }
 
+export type ToolQualityToolStat = {
+  name: string
+  calls: number
+  success_pct: number
+  avg_ms: number
+  output_truncated_count?: number
+  avg_output_chars?: number
+}
+
+export type ToolQualityKeeperStat = {
+  name: string
+  calls: number
+  success_pct: number
+}
+
+export type ToolQualityFailureCategory = {
+  category: string
+  count: number
+}
+
+export type ToolQualityHourlyPoint = {
+  hour: string
+  calls: number
+  success: number
+  success_rate: number
+}
+
+export type ToolQualityResponse = {
+  total: number
+  success: number
+  failure: number
+  success_rate: number
+  by_tool: ToolQualityToolStat[]
+  by_keeper: ToolQualityKeeperStat[]
+  failure_categories: ToolQualityFailureCategory[]
+  hourly_trend?: ToolQualityHourlyPoint[]
+}
+
+export function fetchToolQuality(opts?: { n?: number }): Promise<ToolQualityResponse> {
+  const params = new URLSearchParams()
+  if (opts?.n != null) params.set('n', String(opts.n))
+  const qs = params.toString()
+  return get<ToolQualityResponse>(`/api/v1/dashboard/tool-quality${qs ? `?${qs}` : ''}`)
+}
+
 export interface DashboardPerfRow {
   benchmark: string
   avg_ms: number
@@ -242,6 +304,110 @@ export function fetchDashboardMemory(
   if (opts?.excludeAutomation) params.set('exclude_automation', 'true')
   if (opts?.author) params.set('author', opts.author)
   return get(`/api/v1/dashboard/board${params.toString() ? `?${params}` : ''}`)
+}
+
+export function fetchDashboardGovernance(): Promise<DashboardGovernanceResponse> {
+  return withRetries('fetchDashboardGovernance', async () => {
+    const raw = await get<Record<string, unknown>>('/api/v1/dashboard/governance')
+    const items = Array.isArray(raw.items)
+      ? raw.items
+          .map(item => normalizeGovernanceDecisionItem(item))
+          .filter((item): item is GovernanceDecisionItem => item !== null)
+      : []
+    const pendingActions = Array.isArray(raw.pending_actions)
+      ? raw.pending_actions
+          .map(item => normalizePendingConfirmation(item))
+          .filter((item): item is PendingConfirmation => item !== null)
+      : []
+    const approvalQueue = Array.isArray(raw.approval_queue)
+      ? raw.approval_queue
+          .map(item => normalizeKeeperApprovalQueueItem(item))
+          .filter((item): item is KeeperApprovalQueueItem => item !== null)
+      : []
+    return {
+      generated_at: asNullableIsoTimestamp(raw.generated_at) ?? undefined,
+      case_tracking_available:
+        typeof raw.case_tracking_available === 'boolean' ? raw.case_tracking_available : undefined,
+      note: typeof raw.note === 'string' && raw.note.trim() !== '' ? raw.note.trim() : undefined,
+      summary: isRecord(raw.summary)
+        ? {
+            cases_open: asInt(raw.summary.cases_open) ?? undefined,
+            pending_ruling: asInt(raw.summary.pending_ruling) ?? undefined,
+            ready_auto_execute: asInt(raw.summary.ready_auto_execute) ?? undefined,
+            needs_human_gate: asInt(raw.summary.needs_human_gate) ?? undefined,
+            executed: asInt(raw.summary.executed) ?? undefined,
+            blocked: asInt(raw.summary.blocked) ?? undefined,
+            ready_to_execute: asInt(raw.summary.ready_to_execute) ?? undefined,
+            oldest_open_case_age_s:
+              typeof raw.summary.oldest_open_case_age_s === 'number'
+                ? raw.summary.oldest_open_case_age_s
+                : null,
+            last_activity_age_s:
+              typeof raw.summary.last_activity_age_s === 'number'
+                ? raw.summary.last_activity_age_s
+                : null,
+            judge_online:
+              typeof raw.summary.judge_online === 'boolean'
+                ? raw.summary.judge_online
+                : undefined,
+            judge_last_seen_at: asNullableIsoTimestamp(raw.summary.judge_last_seen_at),
+          }
+        : undefined,
+      items,
+      activity: Array.isArray(raw.activity)
+        ? raw.activity
+            .map(item => normalizeGovernanceTimelineEvent(item))
+            .filter((item): item is GovernanceTimelineEvent => item !== null)
+        : [],
+      judge: normalizeGovernanceJudgeSummary(raw.judge),
+      judgments: Array.isArray(raw.judgments)
+        ? raw.judgments
+            .map(item => normalizeGovernanceJudgment(item))
+            .filter((item): item is GovernanceJudgment => item !== null)
+        : [],
+      pending_actions: pendingActions,
+      approval_queue: approvalQueue,
+    }
+  })
+}
+
+export function resolveGovernanceApproval(
+  id: string,
+  decision: 'approve' | 'reject',
+  reason?: string,
+): Promise<{ ok: boolean; id: string; decision: 'approve' | 'reject' }> {
+  return post('/api/v1/dashboard/governance/approvals/resolve', {
+    id,
+    decision,
+    reason,
+  })
+}
+
+export function fetchGovernanceCaseStatus(caseId: string): Promise<GovernanceCaseBundle> {
+  return get(`/api/v1/governance/cases/${encodeURIComponent(caseId)}`)
+}
+
+function governanceCasesRetiredError(): Error {
+  return new Error('Governance case write APIs are retired; use live judge and HITL approvals instead.')
+}
+
+export async function submitGovernancePetition(_title: string): Promise<{ case: { id: string } }> {
+  throw governanceCasesRetiredError()
+}
+
+export async function submitGovernanceCaseBrief(
+  _caseId: string,
+  _stance: 'support' | 'oppose' | 'neutral',
+  _summary: string,
+): Promise<GovernanceCaseBundle> {
+  throw governanceCasesRetiredError()
+}
+
+export async function decideGovernanceExecutionOrder(
+  _caseId: string,
+  _decision: 'confirm' | 'deny',
+): Promise<void> {
+  throw governanceCasesRetiredError()
 }
 
 export interface RuntimeParamMeta {
@@ -834,4 +1000,14 @@ export function fetchExcusePatterns(): Promise<ExcusePattern[]> {
 
 export function updateExcusePatterns(patterns: ExcusePattern[]): Promise<{ ok: boolean }> {
   return post<{ ok: boolean }>('/api/v1/dashboard/config/excuse-patterns', patterns)
+}
+
+// --- Keeper Cascade Config ---
+
+export function fetchCascadeProfiles(): Promise<{ profiles: string[] }> {
+  return get<{ profiles: string[] }>('/api/v1/keeper/cascades')
+}
+
+export function updateKeeperCascade(keeper: string, cascade_name: string): Promise<{ ok: boolean }> {
+  return post<{ ok: boolean }>('/api/v1/keeper/cascade', { keeper, cascade_name })
 }

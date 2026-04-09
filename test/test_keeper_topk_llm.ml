@@ -48,7 +48,7 @@ let test_tools = [
   make_tool "keeper_board_list" "List recent board posts";
   make_tool "keeper_fs_read" "Read a file from the filesystem";
   make_tool "keeper_fs_edit" "Edit a file on the filesystem";
-  make_tool "keeper_shell_readonly" "Execute a read-only shell command";
+  make_tool "keeper_shell" "Execute a read-only shell command";
   make_tool "keeper_bash" "Execute a shell command";
   make_tool "keeper_github" "Interact with GitHub API";
   make_tool "keeper_memory_search" "Search agent memory";

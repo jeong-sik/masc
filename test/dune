@@ -41,6 +41,7 @@
         test_dashboard
         test_dashboard_perf
         test_dashboard_tool_host_events
+        test_gate_keeper_backend
         test_transport_read_model
         test_multi_room test_worktree_detection test_bounded test_mention
         test_heartbeat_qw test_sse_qw test_sse_stream test_agent_health
@@ -110,6 +111,7 @@
           test_dashboard
           test_dashboard_perf
           test_dashboard_tool_host_events
+          test_gate_keeper_backend
           test_transport_read_model
           test_multi_room test_worktree_detection test_bounded test_mention
           test_heartbeat_qw test_sse_qw test_sse_stream test_agent_health
@@ -275,6 +277,7 @@
         test_keeper_tools_oas
         test_keeper_tool_exposure
         test_keeper_runtime_denylist
+        test_keeper_runtime_config_ssot
         test_keeper_voice_loop
         test_keeper_task_dispatch
         test_keeper_tag_dispatch
@@ -418,6 +421,7 @@
         test_keeper_tools_oas
         test_keeper_tool_exposure
         test_keeper_runtime_denylist
+        test_keeper_runtime_config_ssot
         test_keeper_voice_loop
         test_keeper_task_dispatch
         test_keeper_tag_dispatch

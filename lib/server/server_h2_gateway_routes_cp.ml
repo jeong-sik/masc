@@ -575,5 +575,31 @@ let dispatch ~sw ~clock ~h2_reqd ~httpun_request ~cors ~path
                         (operator_error_json (Printf.sprintf "invalid json: %s" msg)))
                      ~status:`Bad_request ~extra_headers:cors))
 
+      | `POST, "/api/v1/dashboard/governance/approvals/resolve" ->
+          let state = get_server_state () in
+          (match h2_authorize_tool state ~tool_name:"masc_operator_confirm" with
+           | Error err ->
+               let status = http_status_of_auth_error err in
+               h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors
+           | Ok () ->
+               h2_read_body h2_reqd (fun body_str ->
+                 try
+                   let args = Yojson.Safe.from_string body_str in
+                   (match
+                      dashboard_governance_approval_resolve_http_json ~args
+                    with
+                    | Ok json ->
+                        h2_respond_json h2_reqd (Yojson.Safe.to_string json)
+                          ~extra_headers:cors
+                    | Error message ->
+                        h2_respond_json h2_reqd
+                          (Yojson.Safe.to_string (operator_error_json message))
+                          ~status:`Bad_request ~extra_headers:cors)
+                 with Yojson.Json_error msg ->
+                   h2_respond_json h2_reqd
+                     (Yojson.Safe.to_string
+                        (operator_error_json (Printf.sprintf "invalid json: %s" msg)))
+                     ~status:`Bad_request ~extra_headers:cors))
+
       | _ -> handled := false);
   !handled

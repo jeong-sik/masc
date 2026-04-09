@@ -432,6 +432,97 @@ let toml_string_list (doc : toml_doc) (key : string) : string list =
   | Some (Toml_string_array xs) -> xs
   | _ -> []
 
+(* ================================================================ *)
+(* TOML writer — line-level field update                            *)
+(* ================================================================ *)
+
+(** Update or insert a key under a [table] in a TOML file.
+    Preserves comments, formatting, and other fields.
+    Returns [Ok new_content] or [Error reason]. *)
+let update_field_in_content ~(table : string) ~(key : string)
+    ~(value : string) (content : string) : (string, string) result =
+  let lines = String.split_on_char '\n' content in
+  let table_header = Printf.sprintf "[%s]" table in
+  let key_prefix = key ^ " " in
+  let key_prefix_eq = key ^ "=" in
+  let in_target_table = ref false in
+  let found = ref false in
+  let result_lines = ref [] in
+  let insert_before_next_table = ref false in
+  List.iter (fun raw_line ->
+    let line = strip_trailing_cr raw_line in
+    let trimmed = String.trim line in
+    if !insert_before_next_table && String.length trimmed > 0
+       && trimmed.[0] = '[' then begin
+      (* New table started — insert the field before it *)
+      result_lines := (Printf.sprintf "%s = \"%s\"" key value) :: !result_lines;
+      found := true;
+      insert_before_next_table := false
+    end;
+    if String.trim trimmed = table_header then begin
+      in_target_table := true;
+      insert_before_next_table := true;
+      result_lines := line :: !result_lines
+    end
+    else if !in_target_table && String.length trimmed > 0
+            && trimmed.[0] = '[' then begin
+      in_target_table := false;
+      if !insert_before_next_table && not !found then begin
+        result_lines := (Printf.sprintf "%s = \"%s\"" key value) :: !result_lines;
+        found := true;
+        insert_before_next_table := false
+      end;
+      result_lines := line :: !result_lines
+    end
+    else if !in_target_table && not !found
+            && (String.length trimmed >= String.length key_prefix
+                && String.sub trimmed 0 (String.length key_prefix) = key_prefix
+                || String.length trimmed >= String.length key_prefix_eq
+                && String.sub trimmed 0 (String.length key_prefix_eq) = key_prefix_eq) then begin
+      result_lines := (Printf.sprintf "%s = \"%s\"" key value) :: !result_lines;
+      found := true;
+      insert_before_next_table := false
+    end
+    else
+      result_lines := line :: !result_lines
+  ) lines;
+  (* If we were in the target table at EOF and didn't find the key, append *)
+  if not !found && !insert_before_next_table then begin
+    result_lines := (Printf.sprintf "%s = \"%s\"" key value) :: !result_lines;
+    found := true
+  end;
+  if not !found then
+    Error (Printf.sprintf "table [%s] not found in TOML" table)
+  else
+    Ok (String.concat "\n" (List.rev !result_lines))
+
+(** Atomic file write: write to temp file then rename.
+    Rename is atomic on POSIX — prevents partial reads during concurrent access. *)
+let atomic_write_file ~(path : string) (content : string) : (unit, string) result =
+  let tmp = path ^ ".tmp" in
+  try
+    let oc = open_out tmp in
+    Fun.protect ~finally:(fun () -> close_out oc) (fun () ->
+      output_string oc content);
+    Unix.rename tmp path;
+    Ok ()
+  with exn ->
+    (try Sys.remove tmp with _ -> ());
+    Error (Printf.sprintf "atomic write failed: %s" (Printexc.to_string exn))
+
+(** Update a field in a keeper TOML file on disk.
+    Uses atomic write (temp file + rename) to prevent corruption
+    from concurrent reads during the supervisor sweep.
+    Returns [Ok ()] or [Error reason]. *)
+let update_keeper_toml_field ~(path : string) ~(key : string)
+    ~(value : string) : (unit, string) result =
+  match Safe_ops.read_file_safe path with
+  | Error e -> Error (Printf.sprintf "cannot read %s: %s" path e)
+  | Ok content ->
+    match update_field_in_content ~table:"keeper" ~key ~value content with
+    | Error e -> Error e
+    | Ok updated -> atomic_write_file ~path updated
+
 (* Higher-level functions (profile_defaults_of_toml, load_keeper_toml,
    discover_keepers) live in Keeper_types_profile to avoid a circular
    dependency: this module must not reference Keeper_types_profile. *)

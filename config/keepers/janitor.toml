@@ -50,7 +50,7 @@ tool_also_allow = [
   "keeper_board_delete",
   "keeper_board_cleanup",
   "keeper_tasks_audit",
-  "keeper_shell_readonly",
+  "keeper_shell",
   "masc_cleanup_zombies",
 ]
 

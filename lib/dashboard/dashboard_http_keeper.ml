@@ -324,6 +324,9 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                 Some "manual_reconcile_required"
             | _ -> None
           in
+          let runtime_blocker_fields =
+            runtime_blocker_fields_json config m
+          in
           let supervisor_diagnostics =
             match registry_entry with
             | Some entry ->
@@ -496,6 +499,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                 match reconcile_status with
                 | Some status -> `String status
                 | None -> `Null);
+            ] @ runtime_blocker_fields @ [
               ("supervisor_diagnostics", supervisor_diagnostics);
               ("agent_name", `String m.agent_name);
               ("emoji", `String (let (e, _) = get_agent_identity m.name in e));

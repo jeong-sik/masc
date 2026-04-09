@@ -39,7 +39,7 @@ let () =
     ; silent_ratio = 0.7
     ; tool_use_turns = 2
     ; text_response_turns = 1
-    ; unique_tools_used = ["keeper_board_list"; "keeper_shell_readonly"]
+    ; unique_tools_used = ["keeper_board_list"; "keeper_shell"]
     ; tool_utilization_rate = 0.9
     ; last_visible_action_age_sec = 3600
     ; pr_workflow_attempts = 0
@@ -100,11 +100,11 @@ let () =
   let tmp_path2 = Filename.temp_file "test_decisions_window_" ".jsonl" in
   let oc2 = open_out tmp_path2 in
   Printf.fprintf oc2
-    {|{"timestamp_unix":%.1f,"outcome":"tool_use","tool_call_count":1,"tools_used":["keeper_shell_readonly"]}|}
+    {|{"timestamp_unix":%.1f,"outcome":"tool_use","tool_call_count":1,"tools_used":["keeper_shell"]}|}
     (now -. 1800.0);  (* 30min ago — inside 1h window *)
   output_char oc2 '\n';
   Printf.fprintf oc2
-    {|{"timestamp_unix":%.1f,"outcome":"tool_use","tool_call_count":1,"tools_used":["keeper_shell_readonly"]}|}
+    {|{"timestamp_unix":%.1f,"outcome":"tool_use","tool_call_count":1,"tools_used":["keeper_shell"]}|}
     (now -. 7200.0);  (* 2h ago — outside 1h window *)
   output_char oc2 '\n';
   close_out oc2;
@@ -126,7 +126,7 @@ let () =
   let tmp_path3 = Filename.temp_file "test_decisions_cache_" ".jsonl" in
   let oc3 = open_out tmp_path3 in
   Printf.fprintf oc3
-    {|{"timestamp_unix":%.1f,"outcome":"tool_use","tool_call_count":1,"tools_used":["keeper_shell_readonly"]}|}
+    {|{"timestamp_unix":%.1f,"outcome":"tool_use","tool_call_count":1,"tools_used":["keeper_shell"]}|}
     (now -. 300.0);
   output_char oc3 '\n';
   close_out oc3;

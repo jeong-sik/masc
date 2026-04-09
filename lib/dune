@@ -382,6 +382,7 @@
    tool_unified
    tool_help_registry
    tool_registry
+   tool_registration_check
    tool_code
    tool_code_write
    tool_suspend
@@ -876,3 +877,5 @@
    )
  (preprocess (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq))
  (instrumentation (backend bisect_ppx)))
+ 
+; Core library for MASC MCP

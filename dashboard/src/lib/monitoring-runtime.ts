@@ -28,6 +28,11 @@ export interface KeeperMonitoringSummary {
   hint: string | null
 }
 
+export interface MonitoringEvidence {
+  phase: PhaseMeta | null
+  stage: StageMeta | null
+}
+
 const HEARTBEAT_STALE_MS = 5 * 60 * 1000
 const CONTEXT_ATTENTION_RATIO = 0.85
 
@@ -84,7 +89,7 @@ const PHASE_LABELS: Record<string, PhaseMeta> = {
 }
 
 const STAGE_LABELS: Record<string, StageMeta> = {
-  idle: { key: 'idle', label: '대기', description: '현재 턴에서 진행 중인 세부 단계가 없습니다.' },
+  idle: { key: 'idle', label: '활동 없음', description: '지금 진행 중인 세부 활동 단계가 없습니다.' },
   thinking: { key: 'thinking', label: '사고', description: '응답이나 다음 액션을 결정하는 중입니다.' },
   tool_use: { key: 'tool_use', label: '도구', description: '도구를 호출하거나 결과를 소비하는 중입니다.' },
   compacting: { key: 'compacting', label: '압축', description: '컨텍스트 압축 단계를 수행 중입니다.' },
@@ -96,6 +101,22 @@ const STAGE_LABELS: Record<string, StageMeta> = {
   crashed: { key: 'crashed', label: '중단', description: '파이프라인 실행이 비정상 종료되었습니다.' },
   restarting: { key: 'restarting', label: '재시작', description: '파이프라인을 다시 올리는 중입니다.' },
   offline: OFFLINE_STAGE_META,
+}
+
+const DEFAULT_PHASE_BY_BAND: Partial<Record<RuntimeBand, string>> = {
+  active: 'Running',
+  paused: 'Paused',
+  offline: 'Offline',
+}
+
+const STAGE_PHASE_EQUIVALENTS: Record<string, string> = {
+  compacting: 'Compacting',
+  handoff: 'HandingOff',
+  failing: 'Failing',
+  draining: 'Draining',
+  paused: 'Paused',
+  crashed: 'Crashed',
+  restarting: 'Restarting',
 }
 
 const BAND_META: Record<RuntimeBand, RuntimeBandMeta> = {
@@ -180,6 +201,16 @@ function isHeartbeatStale(keeper: Keeper): boolean {
   return Date.now() - ts > HEARTBEAT_STALE_MS
 }
 
+function runtimeBlockerHint(keeper: Keeper): string | null {
+  const blockerClass = keeper.runtime_blocker_class
+  if (!blockerClass) return null
+  if (keeper.runtime_blocker_summary?.trim()) return keeper.runtime_blocker_summary.trim()
+  if (blockerClass === 'ambiguous_post_commit_timeout') {
+    return '변경 도구 실행 뒤 턴이 timeout으로 끝났습니다. 중복 실행을 막기 위해 재시도하지 않았고 수동 정합성 확인이 필요합니다.'
+  }
+  return '변경 도구 실행 뒤 턴이 실패했습니다. 중복 실행을 막기 위해 재시도하지 않았고 수동 정합성 확인이 필요합니다.'
+}
+
 function keeperBand(keeper: Keeper, phaseKey: string, lifecycleKey: string): RuntimeBand {
   if (keeper.paused || phaseKey === 'Paused' || lifecycleKey === 'paused') return 'paused'
   if (
@@ -193,6 +224,7 @@ function keeperBand(keeper: Keeper, phaseKey: string, lifecycleKey: string): Run
   }
   if (
     ATTENTION_PHASES.has(phaseKey)
+    || Boolean(keeper.runtime_blocker_class)
     || Boolean(keeper.last_blocker?.trim())
     || isHeartbeatStale(keeper)
     || (typeof keeper.context_ratio === 'number' && keeper.context_ratio >= CONTEXT_ATTENTION_RATIO)
@@ -203,6 +235,8 @@ function keeperBand(keeper: Keeper, phaseKey: string, lifecycleKey: string): Run
 }
 
 function keeperHint(keeper: Keeper, band: RuntimeBand, stage: StageMeta): string | null {
+  const runtimeBlocker = runtimeBlockerHint(keeper)
+  if (runtimeBlocker) return runtimeBlocker
   const blocker = keeper.last_blocker?.trim()
   if (blocker) return blocker
   if (band === 'paused') return '운영자가 멈춰 둔 상태입니다.'
@@ -214,7 +248,8 @@ function keeperHint(keeper: Keeper, band: RuntimeBand, stage: StageMeta): string
   if (band === 'offline' && keeper.generation === 0 && (keeper.turn_count ?? 0) === 0) {
     return '아직 부팅된 적 없는 등록 런타임입니다.'
   }
-  return stage.key === 'idle' ? '현재 활동 단계는 비어 있습니다.' : stage.description
+  if (stage.key === 'idle' || stage.key === 'offline') return null
+  return stage.description
 }
 
 export function summarizeKeeperMonitoring(keeper: Keeper): KeeperMonitoringSummary {
@@ -229,6 +264,25 @@ export function summarizeKeeperMonitoring(keeper: Keeper): KeeperMonitoringSumma
     stage,
     hint: keeperHint(keeper, band.key, stage),
   }
+}
+
+export function summarizeMonitoringEvidence(summary: KeeperMonitoringSummary): MonitoringEvidence {
+  const defaultPhase = DEFAULT_PHASE_BY_BAND[summary.band.key]
+  const phase =
+    summary.phase.key === 'unknown' || summary.phase.key === 'Running' || summary.phase.key === defaultPhase
+      ? null
+      : summary.phase
+
+  const stageMatchesPhase = STAGE_PHASE_EQUIVALENTS[summary.stage.key] === summary.phase.key
+  const stage =
+    summary.stage.key === 'idle'
+    || summary.stage.key === 'offline'
+    || (summary.band.key === 'paused' && summary.stage.key === 'paused')
+    || stageMatchesPhase
+      ? null
+      : summary.stage
+
+  return { phase, stage }
 }
 
 function agentBand(status: string | undefined | null): RuntimeBand {

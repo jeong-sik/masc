@@ -167,6 +167,47 @@ describe('Overview freshness strip', () => {
     expect(container.textContent).toContain('Connector Panel')
   }, 15000)
 
+  it('renders the operations hub card and routes to governance', async () => {
+    namespaceTruth.value = {
+      generated_at: '2026-03-26T12:08:00Z',
+      command: {
+        pending_approvals: 2,
+      },
+      operator: {
+        attention_summary: {
+          count: 3,
+        },
+        pending_confirm_summary: {
+          visible_count: 1,
+          total_count: 1,
+        },
+      },
+      focus: {
+        label: '운영 검토 필요',
+        reason: '승인 대기 항목이 누적되고 있습니다.',
+        source: 'governance',
+        provenance: 'truth',
+        suggested_tab: 'command',
+      },
+    }
+
+    const { Overview } = await loadOverview()
+    render(html`<${Overview} />`, container)
+    await flushUi()
+
+    expect(container.textContent).toContain('운영 허브')
+    expect(container.textContent).toContain('정책 승인')
+    expect(container.textContent).toContain('운영 확인')
+    expect(container.textContent).toContain('주의 신호')
+    expect(container.textContent).toContain('승인 대기 항목이 누적되고 있습니다.')
+
+    const governanceLink = Array.from(container.querySelectorAll('a'))
+      .find(candidate => candidate.textContent?.includes('거버넌스 열기'))
+    governanceLink?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    expect(navigate).toHaveBeenCalledWith('command', { section: 'governance' })
+  }, 15000)
+
   it('renders the meta-cognition summary card when shell data is available', async () => {
     namespaceTruth.value = {
       generated_at: '2026-03-26T12:08:00Z',

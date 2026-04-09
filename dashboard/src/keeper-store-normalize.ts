@@ -316,6 +316,7 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         model,
         primary_model: asString(row.primary_model),
         active_model: asString(row.active_model),
+        last_model_used: asString(row.last_model_used),
         next_model_hint: asString(row.next_model_hint) ?? null,
         status: normalizeKeeperAgentStatus(statusRaw),
         presence_keepalive:
@@ -327,12 +328,22 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
           typeof row.proactive_enabled === 'boolean' ? row.proactive_enabled : undefined,
         proactive_idle_sec: asNumber(row.proactive_idle_sec),
         proactive_cooldown_sec: asNumber(row.proactive_cooldown_sec),
+        runtime_blocker_class:
+          (asString(row.runtime_blocker_class) as Keeper['runtime_blocker_class']) ?? null,
+        runtime_blocker_summary: asString(row.runtime_blocker_summary) ?? null,
+        runtime_blocker_manual_reconcile:
+          typeof row.runtime_blocker_manual_reconcile === 'boolean'
+            ? row.runtime_blocker_manual_reconcile
+            : null,
         created_at: toIsoTimestamp(row.created_at) ?? asString(row.created_at),
         updated_at: toIsoTimestamp(row.updated_at) ?? asString(row.updated_at),
         last_heartbeat: asString(row.last_heartbeat) ?? asString(agentRaw?.last_seen),
         last_autonomous_action_at: toIsoTimestamp(row.last_autonomous_action_at) ?? asString(row.last_autonomous_action_at) ?? null,
         generation: asNumber(row.generation),
         turn_count: asNumber(row.turn_count) ?? asNumber(row.total_turns),
+        total_turns: asNumber(row.total_turns) ?? asNumber(row.turn_count),
+        total_tokens: asNumber(row.total_tokens),
+        last_latency_ms: asNumber(row.last_latency_ms),
         autonomous_action_count: asNumber(row.autonomous_action_count),
         autonomous_turn_count: asNumber(row.autonomous_turn_count),
         autonomous_text_turn_count: asNumber(row.autonomous_text_turn_count),

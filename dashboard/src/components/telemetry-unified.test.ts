@@ -45,13 +45,14 @@ async function flushUi(): Promise<void> {
 async function loadPanel(
   fetchTelemetry: () => Promise<TelemetryResponse>,
   fetchTelemetrySummary: () => Promise<TelemetrySummaryResponse>,
-  fetchDashboardProof: () => Promise<null> = vi.fn().mockResolvedValue(null),
 ) {
   vi.resetModules()
   vi.doMock('../api/dashboard', () => ({
     fetchTelemetry,
     fetchTelemetrySummary,
-    fetchDashboardProof,
+    fetchDashboardShell: vi.fn().mockResolvedValue({ counts: { keepers: 2, agents: 0, tasks: 5 }, status: { version: '0.2.0', build: { uptime_seconds: 600 } } }),
+    fetchDashboardTools: vi.fn().mockResolvedValue({ tool_inventory: { count: 10, tools: [], surface_summary: { public_mcp: { count: 5, tools: [] } } }, tool_usage: { total_calls: 100, never_called_count: 0 } }),
+    fetchDashboardNamespaceTruth: vi.fn().mockResolvedValue({ execution: { summary: { active_sessions: 1, active_operations: 3, continuity_alerts: 0 } } }),
   }))
   return import('./telemetry-unified')
 }
@@ -117,8 +118,14 @@ describe('TelemetryUnified', () => {
     expect(container.textContent).toContain('Runtime Diagnosis')
     expect(container.textContent).toContain('MASC telemetry store')
     expect(container.textContent).toContain('Refresh')
-    expect(container.textContent).toContain('OAS Proof Bridge')
     expect(container.textContent).toContain('MASC telemetry store entries')
     expect(container.textContent).toContain('mcp__masc__masc_status')
+
+    // MASC Store Diagnosis cards (live state)
+    expect(container.textContent).toContain('Keeper 현황 (live)')
+    expect(container.textContent).toContain('Tool 등록 현황 (live)')
+    expect(container.textContent).toContain('Agent 현황 (live)')
+    expect(container.textContent).toContain('1 활성 세션')
+    expect(container.textContent).toContain('5 public')
   })
 })

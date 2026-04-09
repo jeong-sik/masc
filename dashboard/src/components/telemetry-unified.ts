@@ -1,12 +1,12 @@
-// Telemetry Unified — runtime diagnosis view.
-// Keeps MASC telemetry stores and OAS proof/runtime evidence separate in data flow,
-// then composes them in the UI so the boundary stays explicit.
+// Telemetry Unified — MASC runtime diagnosis view.
 
 import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { useSignal } from '@preact/signals'
 import {
-  fetchDashboardProof,
+  fetchDashboardShell,
+  fetchDashboardTools,
+  fetchDashboardNamespaceTruth,
   fetchTelemetry,
   fetchTelemetrySummary,
   type TelemetryEntry,
@@ -15,28 +15,48 @@ import {
 } from '../api/dashboard'
 import { route } from '../router'
 import { formatTimeAgo } from '../lib/format-time'
-import type { DashboardProofWorkerRunEvidence } from '../types'
 
-const SOURCE_META: Record<TelemetrySource, { label: string; color: string; icon: string }> = {
-  keeper_metric: { label: 'Keeper 메트릭', color: 'text-blue-400', icon: 'K' },
-  agent_event: { label: '에이전트 이벤트', color: 'text-emerald-400', icon: 'A' },
-  tool_call_io: { label: '도구 호출 I/O', color: 'text-amber-400', icon: 'T' },
-  tool_usage: { label: '도구 사용', color: 'text-purple-400', icon: 'U' },
-  tool_metric: { label: '도구 메트릭', color: 'text-cyan-400', icon: 'M' },
+const SOURCE_META: Record<TelemetrySource, { label: string; sublabel: string; color: string; icon: string }> = {
+  keeper_metric: { label: 'Keeper 턴 로그', sublabel: 'heartbeat ~80%, 실제 추론 턴 ~20%', color: 'text-blue-400', icon: 'K' },
+  agent_event: { label: 'Agent 이벤트', sublabel: 'tool_called 다수, join/leave/task 포함', color: 'text-emerald-400', icon: 'A' },
+  tool_call_io: { label: 'Keeper Tool I/O', sublabel: 'keeper->tool 입출력 전체 기록', color: 'text-amber-400', icon: 'T' },
+  tool_usage: { label: 'Keeper 내부 호출', sublabel: 'keeper_internal caller 기록', color: 'text-purple-400', icon: 'U' },
+  tool_metric: { label: 'Tool 성능', sublabel: 'duration/success 측정', color: 'text-cyan-400', icon: 'M' },
+}
+
+interface StoreSnapshot {
+  keepers: number
+  agents: number
+  tasks: number
+  activeSessions: number
+  activeOperations: number
+  continuityAlerts: number
+  toolsRegistered: number
+  toolsPublic: number
+  toolsTotalCalls: number
+  toolsNeverCalled: number
+  version: string | null
+  uptime: number | null
+}
+
+const EMPTY_STORE: StoreSnapshot = {
+  keepers: 0, agents: 0, tasks: 0,
+  activeSessions: 0, activeOperations: 0, continuityAlerts: 0,
+  toolsRegistered: 0, toolsPublic: 0, toolsTotalCalls: 0, toolsNeverCalled: 0,
+  version: null, uptime: null,
 }
 
 interface TelemetryState {
   entries: TelemetryEntry[]
   summary: TelemetrySourceSummary[]
   totalEntries: number
-  proofWorkerRuns: DashboardProofWorkerRunEvidence[]
-  proofSourceLabel: string | null
+  store: StoreSnapshot
   loading: boolean
   error: string | null
 }
 
 function sourceMeta(source: string) {
-  return SOURCE_META[source as TelemetrySource] ?? { label: source, color: 'text-gray-400', icon: '?' }
+  return SOURCE_META[source as TelemetrySource] ?? { label: source, sublabel: '', color: 'text-gray-400', icon: '?' }
 }
 
 function entryTimestamp(e: TelemetryEntry): number {
@@ -89,14 +109,27 @@ function entryPreview(e: TelemetryEntry): string {
     case 'keeper_metric': {
       const name = normalizeText(e.name) ?? '-'
       const channel = normalizeText(e.channel) ?? '-'
-      const model = normalizeText(e.model_used) ?? '-'
+      const rawModel = normalizeText(e.model_used)
+      const isStatusTag = rawModel != null && /^(turn-exhausted|unknown|none|-)$/i.test(rawModel)
+      const model = rawModel == null ? '-' : isStatusTag ? `(${rawModel})` : rawModel
       const tools = normalizeStringArray(e.tools_used)
       const toolCount = typeof e.tool_call_count === 'number' ? e.tool_call_count : tools.length
       return `${name} [${channel}] model=${model} tools=${toolCount}`
     }
     case 'agent_event': {
       const event = e.event
-      if (Array.isArray(event)) return `${event[0] ?? 'unknown'}`
+      if (Array.isArray(event)) {
+        const tag = String(event[0] ?? 'unknown')
+        const detail = event[1] as Record<string, unknown> | undefined
+        if (detail) {
+          const parts = [
+            normalizeText(detail.agent_id as string),
+            normalizeText(detail.tool_name as string),
+          ].filter(Boolean)
+          return parts.length > 0 ? `${tag}: ${parts.join(' -> ')}` : tag
+        }
+        return tag
+      }
       return String(event ?? '')
     }
     case 'tool_call_io': {
@@ -129,6 +162,7 @@ function SummaryCard({ src }: { src: TelemetrySourceSummary }) {
         <span class="font-mono font-bold ${meta.color}">${meta.icon}</span>
         <span class="text-xs font-medium text-[var(--text-strong)]">${meta.label}</span>
       </div>
+      ${meta.sublabel ? html`<div class="text-[10px] text-[var(--text-dim)] mb-1">${meta.sublabel}</div>` : null}
       <div class="text-2xl font-bold ${hasData ? 'text-[var(--text-strong)]' : 'text-[var(--text-muted)]'}">
         ${src.entry_count.toLocaleString()}
       </div>
@@ -142,28 +176,13 @@ function SummaryCard({ src }: { src: TelemetrySourceSummary }) {
   `
 }
 
-function DiagnosisCard({
-  title,
-  value,
-  detail,
-  tone = 'neutral',
-}: {
-  title: string
-  value: string
-  detail: string
-  tone?: 'neutral' | 'ok' | 'warn'
-}) {
-  const toneClass =
-    tone === 'ok'
-      ? 'border-green-500/20 bg-green-500/5'
-      : tone === 'warn'
-        ? 'border-amber-500/20 bg-amber-500/5'
-        : 'border-[var(--card-border)] bg-[rgba(255,255,255,0.02)]'
+function DiagnosisCard({ title, value, detail, tone }: { title: string; value: string; detail: string; tone: 'ok' | 'warn' | 'neutral' }) {
+  const toneColor = tone === 'ok' ? 'text-emerald-400' : tone === 'warn' ? 'text-amber-400' : 'text-[var(--text-muted)]'
   return html`
-    <div class="rounded-lg border ${toneClass} p-3 min-w-[180px]">
-      <div class="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">${title}</div>
-      <div class="mt-1 text-xl font-bold text-[var(--text-strong)]">${value}</div>
-      <div class="mt-1 text-[11px] leading-relaxed text-[var(--text-muted)]">${detail}</div>
+    <div class="rounded-lg border border-[var(--card-border)] bg-[rgba(255,255,255,0.02)] p-3 min-w-[140px]">
+      <div class="text-xs font-medium text-[var(--text-muted)] mb-1">${title}</div>
+      <div class="text-2xl font-bold ${toneColor}">${value}</div>
+      <div class="text-[10px] text-[var(--text-dim)]">${detail}</div>
     </div>
   `
 }
@@ -223,35 +242,13 @@ ${JSON.stringify(entry, null, 2)}</pre>
   `
 }
 
-function filterWorkerRuns(
-  runs: DashboardProofWorkerRunEvidence[],
-  sessionId: string,
-  operationId: string,
-  workerRunId: string,
-): DashboardProofWorkerRunEvidence[] {
-  return runs.filter(item => {
-    if (sessionId && item.session_id !== sessionId) return false
-    if (operationId && item.operation_id !== operationId) return false
-    if (workerRunId && item.worker_run_id !== workerRunId) return false
-    return true
-  })
-}
-
-function mismatchCount(items: DashboardProofWorkerRunEvidence[]): number {
-  return items.filter(item =>
-    (item.requested_model && item.resolved_model && item.requested_model !== item.resolved_model)
-    || (item.requested_runtime && item.resolved_runtime && item.requested_runtime !== item.resolved_runtime)
-  ).length
-}
-
 export function TelemetryUnified() {
   const params = route.value.params
   const state = useSignal<TelemetryState>({
     entries: [],
     summary: [],
     totalEntries: 0,
-    proofWorkerRuns: [],
-    proofSourceLabel: null,
+    store: EMPTY_STORE,
     loading: true,
     error: null,
   })
@@ -275,39 +272,48 @@ export function TelemetryUnified() {
   async function load() {
     state.value = { ...state.value, loading: true, error: null }
     try {
-      const telemetryPromise = fetchTelemetry({
-        source: sourceFilter.value || undefined,
-        keeper: keeperFilter.value || undefined,
-        session_id: sessionFilter.value || undefined,
-        operation_id: operationFilter.value || undefined,
-        worker_run_id: workerRunFilter.value || undefined,
-        n: limit.value,
+      const storePromise = Promise.all([
+        fetchDashboardShell().catch(() => null),
+        fetchDashboardTools().catch(() => null),
+        fetchDashboardNamespaceTruth().catch(() => null),
+      ]).then(([shell, tools, truth]) => {
+        const counts = shell?.counts
+        const execSummary = truth?.execution?.summary
+        const inv = tools?.tool_inventory
+        const usage = tools?.tool_usage
+        const surfacePublic = inv?.surface_summary?.public_mcp?.count ?? inv?.surface_summary?.public?.count ?? 0
+        return {
+          keepers: counts?.keepers ?? 0,
+          agents: counts?.agents ?? 0,
+          tasks: counts?.tasks ?? 0,
+          activeSessions: execSummary?.active_sessions ?? 0,
+          activeOperations: execSummary?.active_operations ?? 0,
+          continuityAlerts: execSummary?.continuity_alerts ?? 0,
+          toolsRegistered: inv?.count ?? 0,
+          toolsPublic: surfacePublic,
+          toolsTotalCalls: usage?.total_calls ?? 0,
+          toolsNeverCalled: usage?.never_called_count ?? 0,
+          version: shell?.status?.version ?? null,
+          uptime: shell?.status?.build?.uptime_seconds ?? null,
+        } satisfies StoreSnapshot
       })
-      const summaryPromise = fetchTelemetrySummary()
-      const proofPromise =
-        sessionFilter.value || operationFilter.value
-          ? fetchDashboardProof(sessionFilter.value || null, operationFilter.value || null)
-          : Promise.resolve(null)
-      const [telemetry, summary, proof] = await Promise.all([
-        telemetryPromise,
-        summaryPromise,
-        proofPromise,
+      const [telemetry, summary, store] = await Promise.all([
+        fetchTelemetry({
+          source: sourceFilter.value || undefined,
+          keeper: keeperFilter.value || undefined,
+          session_id: sessionFilter.value || undefined,
+          operation_id: operationFilter.value || undefined,
+          worker_run_id: workerRunFilter.value || undefined,
+          n: limit.value,
+        }),
+        fetchTelemetrySummary(),
+        storePromise,
       ])
-      const proofWorkerRuns = filterWorkerRuns(
-        Array.isArray(proof?.worker_run_evidence) ? proof?.worker_run_evidence ?? [] : [],
-        sessionFilter.value,
-        operationFilter.value,
-        workerRunFilter.value,
-      )
       state.value = {
         entries: telemetry.entries,
         summary: summary.sources,
         totalEntries: summary.total_entries,
-        proofWorkerRuns,
-        proofSourceLabel:
-          proof
-            ? `OAS proof bridge · ${(proof.session_id ?? sessionFilter.value) || '-'}${proof.operation_id ? ` · ${proof.operation_id}` : ''}`
-            : null,
+        store,
         loading: false,
         error: null,
       }
@@ -329,24 +335,17 @@ export function TelemetryUnified() {
     limit.value,
   ])
 
-  const { entries, summary, totalEntries, proofWorkerRuns, proofSourceLabel, loading, error } = state.value
-  const validationCount = proofWorkerRuns.filter(item => (item.validation_failures?.length ?? 0) > 0).length
-  const traceReadyCount = proofWorkerRuns.filter(item => item.trace_evidence_status === 'available').length
-  const proofReadyCount = proofWorkerRuns.filter(item => item.proof_evidence_status === 'available').length
-  const toolSurfaceMissingCount = proofWorkerRuns.filter(item => item.tool_surface_status === 'missing').length
-  const routingFallbackCount = proofWorkerRuns.filter(item => (item.routing_reason ?? '').toLowerCase().includes('fallback')).length
-  const resolutionMismatchCount = mismatchCount(proofWorkerRuns)
+  const { entries, summary, totalEntries, store, loading, error } = state.value
 
   return html`
     <div class="flex flex-col gap-4">
       <div class="rounded-xl border border-[var(--card-border)] bg-[rgba(255,255,255,0.02)] p-4">
         <div class="text-[12px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Runtime Diagnosis</div>
         <div class="mt-1 text-[14px] leading-relaxed text-[var(--text-body)]">
-          MASC telemetry store와 OAS proof bridge를 분리해서 보여줍니다. 저장소를 섞지 않고, UI에서만 한 화면으로 합성합니다.
+          MASC telemetry store (keeper/tool/agent) 진단 뷰.
         </div>
         <div class="mt-3 flex flex-wrap gap-2">
           <span class="rounded-md bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-dim)]">MASC: keeper/tool/agent store</span>
-          <span class="rounded-md bg-[rgba(245,158,11,0.12)] px-2 py-1 text-[11px] text-amber-300">OAS: proof/runtime evidence bridge</span>
           ${sessionFilter.value ? html`<span class="rounded-md bg-[var(--white-4)] px-2 py-1 text-[11px] font-mono text-[var(--text-dim)]">session ${sessionFilter.value}</span>` : null}
           ${operationFilter.value ? html`<span class="rounded-md bg-[var(--white-4)] px-2 py-1 text-[11px] font-mono text-[var(--text-dim)]">operation ${operationFilter.value}</span>` : null}
           ${workerRunFilter.value ? html`<span class="rounded-md bg-[var(--white-4)] px-2 py-1 text-[11px] font-mono text-[var(--text-dim)]">worker_run ${workerRunFilter.value}</span>` : null}
@@ -359,6 +358,32 @@ export function TelemetryUnified() {
           <div class="text-xs font-medium text-[var(--text-muted)] mb-1">Total</div>
           <div class="text-2xl font-bold text-[var(--text-strong)]">${totalEntries.toLocaleString()}</div>
         </div>
+      </div>
+
+      <div class="flex flex-wrap gap-3">
+        <${DiagnosisCard}
+          title="Keeper 현황 (live)"
+          value=${String(store.keepers)}
+          detail=${[
+            `${store.activeSessions} 활성 세션`,
+            `${store.continuityAlerts} continuity 알림`,
+            store.version ? `v${store.version}` : null,
+            store.uptime != null ? `uptime ${Math.floor(store.uptime / 60)}m` : null,
+          ].filter(Boolean).join(' · ')}
+          tone=${store.continuityAlerts > 0 ? 'warn' : store.keepers > 0 ? 'ok' : 'neutral'}
+        />
+        <${DiagnosisCard}
+          title="Tool 등록 현황 (live)"
+          value=${String(store.toolsRegistered)}
+          detail=${`${store.toolsPublic} public · ${store.toolsTotalCalls.toLocaleString()} 총 호출 · ${store.toolsNeverCalled} 미사용`}
+          tone=${store.toolsRegistered > 0 ? 'ok' : 'warn'}
+        />
+        <${DiagnosisCard}
+          title="Agent 현황 (live)"
+          value=${String(store.agents)}
+          detail=${`${store.tasks} 태스크 · ${store.activeOperations} 활성 작전`}
+          tone=${store.agents > 0 ? 'ok' : 'neutral'}
+        />
       </div>
 
       <div class="flex items-center gap-3 flex-wrap">
@@ -416,63 +441,6 @@ export function TelemetryUnified() {
         </button>
         ${loading ? html`<span class="text-xs text-[var(--text-muted)]">loading...</span>` : null}
       </div>
-
-      <div class="flex flex-wrap gap-3">
-        <${DiagnosisCard}
-          title="OAS Proof Bridge"
-          value=${String(proofWorkerRuns.length)}
-          detail=${proofSourceLabel ?? 'session_id 또는 operation_id를 고르면 OAS runtime/proof evidence를 별도 브리지로 읽습니다.'}
-          tone=${proofWorkerRuns.length > 0 ? 'ok' : 'neutral'}
-        />
-        <${DiagnosisCard}
-          title="Provider Resolve"
-          value=${String(resolutionMismatchCount)}
-          detail=${proofWorkerRuns.length > 0
-            ? `requested/resolved 불일치 ${resolutionMismatchCount}건 · routing fallback ${routingFallbackCount}건`
-            : '현재 scope에 연결된 worker run evidence 없음'}
-          tone=${resolutionMismatchCount > 0 || routingFallbackCount > 0 ? 'warn' : 'neutral'}
-        />
-        <${DiagnosisCard}
-          title="Validation Failure"
-          value=${String(validationCount)}
-          detail=${proofWorkerRuns.length > 0
-            ? `trace evidence ${traceReadyCount}건 · proof evidence ${proofReadyCount}건`
-            : '검증 대상 worker run evidence 없음'}
-          tone=${validationCount > 0 ? 'warn' : 'ok'}
-        />
-        <${DiagnosisCard}
-          title="Tool Surface"
-          value=${String(toolSurfaceMissingCount)}
-          detail=${proofWorkerRuns.length > 0
-            ? `tool surface missing ${toolSurfaceMissingCount}건`
-            : 'OAS worker scope가 없어서 tool surface를 아직 비교하지 않았습니다.'}
-          tone=${toolSurfaceMissingCount > 0 ? 'warn' : 'ok'}
-        />
-      </div>
-
-      ${proofWorkerRuns.length > 0 ? html`
-        <div class="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4">
-          <div class="text-[12px] font-semibold uppercase tracking-wider text-amber-300">OAS Runtime Bridge</div>
-          <div class="mt-2 grid gap-2">
-            ${proofWorkerRuns.map(item => html`
-              <div key=${item.worker_run_id} class="rounded-lg border border-white/10 bg-black/10 p-3">
-                <div class="flex flex-wrap items-center gap-2">
-                  <span class="text-[12px] font-semibold text-[var(--text-strong)]">${item.worker_name ?? item.worker_run_id}</span>
-                  <span class="rounded bg-white/5 px-1.5 py-0.5 text-[10px] font-mono text-[var(--text-dim)]">${item.worker_run_id}</span>
-                  ${item.session_id ? html`<span class="rounded bg-white/5 px-1.5 py-0.5 text-[10px] font-mono text-[var(--text-dim)]">S ${item.session_id}</span>` : null}
-                  ${item.operation_id ? html`<span class="rounded bg-white/5 px-1.5 py-0.5 text-[10px] font-mono text-[var(--text-dim)]">OP ${item.operation_id}</span>` : null}
-                </div>
-                <div class="mt-2 text-[12px] leading-relaxed text-[var(--text-body)]">
-                  요청 runtime/model: ${item.requested_runtime ?? '-'} / ${item.requested_model ?? '-'}<br />
-                  해석 runtime/model: ${item.resolved_runtime ?? '-'} / ${item.resolved_model ?? '-'}<br />
-                  trace/proof: ${item.trace_evidence_status ?? '-'} / ${item.proof_evidence_status ?? '-'}<br />
-                  validation: ${(item.validation_failures ?? []).length > 0 ? item.validation_failures?.join(' · ') : '없음'}
-                </div>
-              </div>
-            `)}
-          </div>
-        </div>
-      ` : null}
 
       ${error ? html`
         <div class="rounded border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">

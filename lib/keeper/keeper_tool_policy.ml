@@ -16,6 +16,8 @@ open Keeper_tool_registry
    None = config not yet loaded (init_policy_config not yet called). *)
 let policy_config : Keeper_tool_policy_config.t option ref = ref None
 
+let policy_config_for_validation () = !policy_config
+
 let init_policy_config ~base_path =
   match Keeper_tool_policy_config.load ~base_path with
   | Ok cfg ->

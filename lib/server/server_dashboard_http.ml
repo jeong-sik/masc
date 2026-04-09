@@ -100,6 +100,44 @@ let dashboard_governance_http_json request ~base_path : Yojson.Safe.t =
   Dashboard_governance.dashboard_json ~base_path ~limit ~offset
     ~status_filter
 
+let dashboard_governance_approval_resolve_http_json ~(args : Yojson.Safe.t) :
+    (Yojson.Safe.t, string) result =
+  match Safe_ops.json_string_opt "id" args with
+  | None ->
+      Error "id is required"
+  | Some id ->
+      let decision_name =
+        Safe_ops.json_string_opt "decision" args
+        |> Option.value ~default:"approve"
+        |> String.trim
+        |> String.lowercase_ascii
+      in
+      let decision =
+        match decision_name with
+        | "approve" -> Ok Oas.Hooks.Approve
+        | "reject" ->
+            let reason =
+              Safe_ops.json_string_opt "reason" args
+              |> Option.value ~default:"dashboard rejected approval"
+            in
+            Ok (Oas.Hooks.Reject reason)
+        | _ ->
+            Error "decision must be 'approve' or 'reject'"
+      in
+      match decision with
+      | Error _ as err -> err
+      | Ok decision ->
+          (match Keeper_approval_queue.resolve ~id ~decision with
+           | Ok () ->
+               Ok
+                 (`Assoc
+                   [
+                     ("ok", `Bool true);
+                     ("id", `String id);
+                     ("decision", `String decision_name);
+                   ])
+           | Error message -> Error message)
+
 let dashboard_planning_http_json ~(config : Room.config) : Yojson.Safe.t =
   let goals = Goal_store.list_goals config () in
   let rollup = Goal_store.compute_rollup goals in

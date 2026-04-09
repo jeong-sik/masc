@@ -25,6 +25,41 @@ check() {
   fi
 }
 
+check_forbidden_outside() {
+  local label="$1" pattern="$2" path="$3"
+  shift 3
+  local allowed=("$@")
+  if [[ ! -e "$REPO_ROOT/$path" ]]; then
+    echo "BOUNDARY ERROR: $label — path $path does not exist"
+    rc=1
+    return
+  fi
+  local hits=()
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    local file="${line%%:*}"
+    local allowed_hit=0
+    local rel_file="${file#$REPO_ROOT/}"
+    for allow in "${allowed[@]}"; do
+      if [[ "$rel_file" == "$allow" ]]; then
+        allowed_hit=1
+        break
+      fi
+    done
+    if [[ "$allowed_hit" -eq 0 ]]; then
+      hits+=("$line")
+    fi
+  done < <(grep -rn --include='*.ml' --include='*.mli' "$pattern" "$REPO_ROOT/$path" 2>/dev/null || true)
+
+  if [[ "${#hits[@]}" -gt 0 ]]; then
+    echo "BOUNDARY FAIL: $label — found ${#hits[@]} forbidden match(es)"
+    printf '%s\n' "${hits[@]:0:5}"
+    rc=1
+  else
+    echo "BOUNDARY INFO: $label — no forbidden matches"
+  fi
+}
+
 # V2: MASC-specific importance_scores in keeper working_context wrapper
 # These wrap OAS Context.t with domain-specific scoring that should
 # be handled by OAS custom closures instead.
@@ -72,6 +107,24 @@ check "V8-agent-state-mutation" 2 \
 check "V9-masc-llama-envvar" 7 \
   'MASC_LLAMA' \
   "lib/"
+
+# V10: OAS-owned provider filters must not be re-owned outside compatibility loaders.
+check_forbidden_outside "V10-provider-filter-ownership" \
+  'allowed_providers' \
+  "lib/" \
+  "lib/keeper/keeper_types.ml"
+
+# V11: proof-store layout knowledge must stay inside the proof reader adapter.
+check_forbidden_outside "V11-proof-store-layout" \
+  'Filename\.concat .*"proofs"' \
+  "lib/" \
+  "lib/proof_artifact_reader.ml"
+
+# V12: oas-runtime session root literal must stay inside the runtime path adapter.
+check_forbidden_outside "V12-oas-runtime-layout" \
+  '"oas-runtime"' \
+  "lib/" \
+  "lib/local/worker_container.ml"
 
 if [[ "$rc" -eq 0 ]]; then
   echo "BOUNDARY: all checks within baseline"

@@ -6,6 +6,7 @@ export type SurfaceSectionId =
   | 'agents'
   | 'activity'
   | 'board'
+  | 'governance'
   | 'evidence'
   | 'planning'
   | 'goals'
@@ -68,13 +69,12 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
   },
   {
     id: 'command',
-    label: '운영 큐',
+    label: '운영',
     icon: '🎛️',
-    description: '숨겨진 호환 surface. 기존 command deep link와 운영 큐 진입점을 유지합니다.',
+    description: '실시간 개입과 거버넌스 판단/승인 운영 화면',
     defaultTab: 'command',
     defaultParams: { section: 'intervene' },
     tabs: ['command'],
-    hidden: true,
   },
   {
     id: 'workspace',
@@ -123,7 +123,7 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     {
       id: 'agents',
       label: '에이전트 & 키퍼',
-      description: '에이전트 = 작업 수행 프로세스. 키퍼 = 장기 컨텍스트를 유지하는 상주 런타임.',
+      description: '통합 런타임 상태.',
       params: { section: 'agents' },
     },
     {
@@ -148,16 +148,22 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
   command: [
     {
       id: 'intervene',
-      label: '운영 큐',
-      description: 'review queue, 추천 액션, 승인 대기, 최소 개입을 한 화면에서 처리합니다.',
+      label: '실시간 개입',
+      description: '프로젝트 일시정지, 세션 중단, 키퍼 재시작 등 운영 개입.',
       params: { section: 'intervene' },
+    },
+    {
+      id: 'governance',
+      label: '거버넌스',
+      description: '에이전트 자율 결정의 검토/승인 기록. 위험 행동 방지 레이어.',
+      params: { section: 'governance' },
     },
   ],
   workspace: [
     {
       id: 'board',
       label: '작업 게시판',
-      description: '에이전트 간 지식 공유 게시판. 직접 작성 글, 자동화 글, 시스템 글을 함께 보여줍니다.',
+      description: '에이전트가 남긴 직접 작성 글, 자동화 글, 시스템 글을 한 곳에서 봅니다.',
       params: { section: 'board' },
     },
     {

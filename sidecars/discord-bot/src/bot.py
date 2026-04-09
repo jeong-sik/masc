@@ -289,6 +289,10 @@ class GateBot(discord.Client):
         channel: discord.abc.Messageable,
         keeper_name: str,
         content: str,
+        *,
+        channel_user_id: str,
+        channel_user_name: str,
+        channel_room_id: str,
     ) -> bool:
         """Stream a keeper response with progressive Discord message edits.
 
@@ -303,6 +307,9 @@ class GateBot(discord.Client):
         async for delta in self.gate.stream_message(
             keeper_name=keeper_name,
             content=content,
+            channel_user_id=channel_user_id,
+            channel_user_name=channel_user_name,
+            channel_room_id=channel_room_id,
         ):
             accumulated += delta
 
@@ -387,7 +394,12 @@ class GateBot(discord.Client):
         # Try streaming first, fall back to batch
         async with message.channel.typing():
             streamed = await self._stream_to_channel(
-                message.channel, keeper_name, content,
+                message.channel,
+                keeper_name,
+                content,
+                channel_user_id=str(message.author.id),
+                channel_user_name=str(message.author),
+                channel_room_id=str(message.channel.id),
             )
             if streamed:
                 return
@@ -562,6 +574,9 @@ async def keeper_ask(
     async for delta in bot.gate.stream_message(
         keeper_name=keeper,
         content=message.strip(),
+        channel_user_id=str(interaction.user.id),
+        channel_user_name=str(interaction.user),
+        channel_room_id=str(interaction.channel_id or "unknown"),
     ):
         accumulated += delta
         now = time.monotonic()

@@ -12,6 +12,17 @@ val resolve_path :
   Agent_sdk.Cdal_proof.artifact_ref ->
   (string, string) result
 
+(** Root directory for proof-store artifacts under the configured store. *)
+val proofs_root : Agent_sdk.Proof_store.config -> string
+
+(** Resolve a relative artifact path under a run directory.
+    Returns [Error] when the run id or relative path attempts traversal. *)
+val run_artifact_path :
+  Agent_sdk.Proof_store.config ->
+  run_id:string ->
+  relative_path:string ->
+  (string, string) result
+
 (** Read and parse a JSON artifact from the proof store.
     Returns [Error] if the file does not exist or is not valid JSON. *)
 val read_json :

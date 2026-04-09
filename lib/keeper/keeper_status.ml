@@ -163,7 +163,10 @@ let handle_keeper_list ctx args : tool_result =
                         ("authoritative", `Bool false);
 	                  ]
 	            in
-	            Some (`Assoc [
+              let runtime_blocker_fields =
+                runtime_blocker_fields_json ctx.config m
+              in
+	            Some (`Assoc ([
               ("name", `String m.name);
               ("agent_name", `String m.agent_name);
               ("trace_id", `String m.runtime.trace_id);
@@ -231,6 +234,7 @@ let handle_keeper_list ctx args : tool_result =
                 if String.trim m.runtime.last_need = ""
                 then `Null
                 else `String m.runtime.last_need);
+            ] @ runtime_blocker_fields @ [
               ("continuity_summary",
                 if String.trim m.continuity_summary = ""
                 then `Null
@@ -265,7 +269,7 @@ let handle_keeper_list ctx args : tool_result =
                 ("session_dir", `String (keeper_session_dir ctx.config m.runtime.trace_id));
                 ("history", `String (keeper_history_path ctx.config m.runtime.trace_id));
               ]);
-            ])
+            ]))
         ) keeper_names
       in
       let json = `Assoc [
@@ -275,14 +279,14 @@ let handle_keeper_list ctx args : tool_result =
       (true, Yojson.Safe.to_string json)
 
 let handle_keeper_trajectory ctx args : tool_result =
-  let name = get_string args "name" "" in
-  if not (validate_name name) then
+  let requested_name = String.trim (get_string args "name" "") in
+  if not (validate_name requested_name) then
     (false, "invalid keeper name")
   else
-    match read_meta ctx.config name with
+    match read_meta_resolved ctx.config requested_name with
     | Error e -> (false, "read error: " ^ e)
-    | Ok None -> (false, Printf.sprintf "keeper not found: %s" name)
-    | Ok (Some m) ->
+    | Ok None -> (false, Printf.sprintf "keeper not found: %s" requested_name)
+    | Ok (Some (_resolved_name, m)) ->
       let limit = get_int args "limit" 20 in
       let masc_root = Filename.concat ctx.config.base_path ".masc" in
       let entries =
@@ -297,11 +301,11 @@ let handle_keeper_trajectory ctx args : tool_result =
           List.filteri (fun i _e -> i >= drop) entries
       in
       if recent = [] then
-        (true, Printf.sprintf "Keeper %s (trace: %s) has no trajectory entries." name m.runtime.trace_id)
+        (true, Printf.sprintf "Keeper %s (trace: %s) has no trajectory entries." m.name m.runtime.trace_id)
       else
         let json_list = List.map Trajectory.entry_to_json recent in
         let json = `Assoc [
-          ("keeper", `String name);
+          ("keeper", `String m.name);
           ("trace_id", `String m.runtime.trace_id);
           ("generation", `Int m.runtime.generation);
           ("total_entries", `Int total);
@@ -311,21 +315,21 @@ let handle_keeper_trajectory ctx args : tool_result =
         (true, Yojson.Safe.to_string json)
 
 let handle_keeper_eval ctx args : tool_result =
-  let name = get_string args "name" "" in
-  if not (validate_name name) then
+  let requested_name = String.trim (get_string args "name" "") in
+  if not (validate_name requested_name) then
     (false, "invalid keeper name")
   else
-    match read_meta ctx.config name with
+    match read_meta_resolved ctx.config requested_name with
     | Error e -> (false, "read error: " ^ e)
-    | Ok None -> (false, Printf.sprintf "keeper not found: %s" name)
-    | Ok (Some m) ->
+    | Ok None -> (false, Printf.sprintf "keeper not found: %s" requested_name)
+    | Ok (Some (_resolved_name, m)) ->
       let scenario_file = get_string_opt args "scenario_file" in
       let masc_root = Filename.concat ctx.config.base_path ".masc" in
       let entries =
         Trajectory.read_entries ~masc_root ~keeper_name:m.name ~trace_id:m.runtime.trace_id
       in
       if entries = [] then
-        (true, Printf.sprintf "Keeper %s has no trajectory data to evaluate." name)
+        (true, Printf.sprintf "Keeper %s has no trajectory data to evaluate." m.name)
       else
         let total = List.length entries in
         (* Build a lightweight eval summary from trajectory *)
@@ -359,7 +363,7 @@ let handle_keeper_eval ctx args : tool_result =
                  (List.length scenarios) sf))
         in
         let json = `Assoc [
-          ("keeper", `String name);
+          ("keeper", `String m.name);
           ("trace_id", `String m.runtime.trace_id);
           ("generation", `Int m.runtime.generation);
           ("total_turns", `Int m.runtime.usage.total_turns);

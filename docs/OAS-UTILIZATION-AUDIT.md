@@ -1,7 +1,9 @@
 # MASC-MCP OAS Utilization Audit
 
 Date: 2026-04-09
-OAS Version: 0.118.0 floor (CI/runtime pin on `jeong-sik/oas@f5247fcd50e9c3847f9af6068b4f6384b22e9ba6`, latest tagged base `v0.118.0`)
+<!-- BEGIN GENERATED: oas-pin-audit-header -->
+OAS Pin Snapshot: dependency floor `0.118.0`, runtime pin `main@120710afaf6188e6b97685b60d3deb2538b00304`, declared base version `v0.118.0`
+<!-- END GENERATED: oas-pin-audit-header -->
 Snapshot: `main` audit aligned to the current upstream `agent_sdk.opam`; drift is checked against upstream `refs/heads/main`, not GitHub releases
 
 Latest boundary check: [docs/qa/OAS-BOUNDARY-HEALTHCHECK-2026-03-31.md](docs/qa/OAS-BOUNDARY-HEALTHCHECK-2026-03-31.md)
@@ -14,10 +16,13 @@ The main remaining problems are no longer “missing migration” at large. They
 1. incomplete bridge fidelity,
 2. a few remaining duplicated runtime paths,
 3. stale docs that still describe already-removed or already-migrated systems.
+4. a small number of boundary ownership leaks where MASC still reconstructs OAS-owned config or layout details locally.
 
 ## Pin Policy
 
-`masc-mcp` keeps the runtime pin ratcheted against upstream `main`, while the dependency floor tracks the pinned SDK's declared `agent_sdk.opam` version. As of this audit refresh, the runtime pin is `main@f5247fcd50e9c3847f9af6068b4f6384b22e9ba6`, the latest tagged base is `v0.118.0`, and the dependency floor is pinned to `0.118.0`.
+<!-- BEGIN GENERATED: oas-pin-audit-policy -->
+`masc-mcp` keeps the runtime pin ratcheted against upstream `main`, while the dependency floor tracks the pinned SDK declaration in `agent_sdk.opam`. Generated snapshot: runtime pin `main@120710afaf6188e6b97685b60d3deb2538b00304`, declared base version `v0.118.0`, dependency floor `0.118.0`.
+<!-- END GENERATED: oas-pin-audit-policy -->
 
 ## Status by Area
 
@@ -29,6 +34,7 @@ The main remaining problems are no longer “missing migration” at large. They
 | Memory bridge | Partial but real | `memory_oas_bridge.ml` now seeds long-term, procedural, and episodic memory; Working/Scratchpad remain runtime-only |
 | Team session swarm | Partial but real | `team_session_swarm_runner.ml` runs through OAS Swarm and now receives a real supported-tool dispatch bundle |
 | Runtime dedupe | Improving | dashboard single-run and initial local worker run now reuse shared OAS execution helpers |
+| Provider ownership | Improving | keeper state now treats OAS-owned provider allowlists in legacy TOML/meta as compatibility-only input and keeps active selection at `cascade_name` |
 
 ## Boundary Audit Snapshot
 
@@ -53,6 +59,12 @@ The main remaining problems are no longer “missing migration” at large. They
 - runtime duplication was reduced.
   - dashboard provider single-run now uses `Oas_worker.run_model`
   - initial local worker execution now uses `Worker_oas.run_worker_via_oas`
+- path/layout ownership is narrower.
+  - `cdal_loader` now resolves proof-store contract paths through `proof_artifact_reader`
+  - team-session evidence readers now reuse the shared `oas-runtime` session-root helper
+- keeper meta compatibility is narrower.
+  - persisted legacy tool-policy fields are scrubbed into canonical `tool_access`
+  - direct keeper meta parsing now rejects legacy compatibility keys instead of silently carrying them forward
 - this work also exposed and fixed a real pre-existing bug:
   - `Institution_eio.load_recent_episodes_jsonl` ignored `limit` when the log was larger than the requested window
 

@@ -154,7 +154,7 @@ function TrendSparkline({ points }: { points: HourlyPoint[] }) {
   return html`
     <div class="rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] p-3">
       <div class="flex items-center justify-between mb-1.5">
-        <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">Success Rate Trend</span>
+        <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">성공률 추이</span>
         <span class="text-xs font-mono" style="color:${lineColor}">${lastRate.toFixed(1)}%</span>
       </div>
       <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" style="background:#0b1220;">
@@ -195,7 +195,7 @@ function KeeperRateBars({ keepers }: { keepers: KeeperStat[] }) {
 
 function FailureList({ categories }: { categories: FailureCategory[] }) {
   const top = categories.slice(0, 8)
-  if (top.length === 0) return html`<div class="text-[11px] text-[var(--text-dim)]">No failures</div>`
+  if (top.length === 0) return html`<div class="text-[11px] text-[var(--text-dim)]">실패 없음</div>`
   return html`
     <div class="flex flex-col gap-1">
       ${top.map(c => html`
@@ -212,25 +212,25 @@ export function ToolQualityPanel() {
   useEffect(() => { void fetchToolQuality() }, [])
 
   const d = data.value
-  if (loading.value && !d) return html`<div class="p-4 text-[11px] text-[var(--text-dim)]">Loading tool quality...</div>`
-  if (error.value) return html`<div class="p-4 text-[11px] text-red-400">Error: ${error.value}</div>`
-  if (!d || d.total === 0) return html`<div class="p-4 text-[11px] text-[var(--text-dim)]">No tool call data</div>`
+  if (loading.value && !d) return html`<div class="p-4 text-[11px] text-[var(--text-dim)]">도구 품질 로딩 중...</div>`
+  if (error.value) return html`<div class="p-4 text-[11px] text-red-400">오류: ${error.value}</div>`
+  if (!d || d.total === 0) return html`<div class="p-4 text-[11px] text-[var(--text-dim)]">도구 호출 데이터 없음</div>`
 
   return html`
     <div class="flex flex-col gap-4 p-4">
       <div class="flex items-center justify-between">
-        <h2 class="text-sm font-medium">Tool Call Quality</h2>
+        <h2 class="text-sm font-medium">도구 호출 품질</h2>
         <button
           class="text-[10px] px-2 py-0.5 rounded bg-[var(--bg-subtle)] text-[var(--text-dim)] hover:text-[var(--text)]"
           onClick=${fetchToolQuality}
-          aria-label="Refresh tool quality metrics"
-        >Refresh</button>
+          aria-label="도구 품질 새로고침"
+        >새로고침</button>
       </div>
 
       <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div class="text-center">
           <div class="text-lg font-mono ${successColor.value}">${d.success_rate.toFixed(1)}%</div>
-          <div class="text-[9px] text-[var(--text-dim)] uppercase">Success Rate</div>
+          <div class="text-[9px] text-[var(--text-dim)] uppercase">성공률</div>
         </div>
         <div class="text-center">
           <div class="text-lg font-mono text-[var(--text)]">${d.total.toLocaleString()}</div>
@@ -254,7 +254,7 @@ export function ToolQualityPanel() {
       </div>
 
       <div>
-        <div class="text-[10px] text-[var(--text-dim)] uppercase tracking-wider mb-1">Tool Success Rate</div>
+        <div class="text-[10px] text-[var(--text-dim)] uppercase tracking-wider mb-1">도구별 성공률</div>
         <${ToolTable} tools=${d.by_tool} />
       </div>
 

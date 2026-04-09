@@ -110,7 +110,7 @@ export function KeeperToolCallInspector({ keeperName }: { keeperName: string }) 
   const sorted = useMemo(() => [...filtered].reverse(), [filtered])
 
   if (loading.value) {
-    return html`<div class="text-xs text-[var(--text-muted)] p-4">Loading tool calls...</div>`
+    return html`<div class="text-xs text-[var(--text-muted)] p-4">도구 호출 로딩 중...</div>`
   }
 
   if (error.value) {
@@ -118,7 +118,7 @@ export function KeeperToolCallInspector({ keeperName }: { keeperName: string }) 
   }
 
   if (entries.value.length === 0) {
-    return html`<div class="text-xs text-[var(--text-muted)] p-4">No tool call data yet. Data is recorded after server restart with this update.</div>`
+    return html`<div class="text-xs text-[var(--text-muted)] p-4">도구 호출 데이터 없음. 서버 재시작 후 기록됩니다.</div>`
   }
 
   // Summary stats

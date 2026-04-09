@@ -98,9 +98,9 @@ export function RuntimeMonitor() {
           class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-3 py-1 text-xs text-[var(--text-strong)] hover:bg-[var(--bg-panel-hover)]"
           onClick=${() => void load()}
         >
-          Refresh
+          새로고침
         </button>
-        ${state.value.loading ? html`<span class="text-xs text-[var(--text-muted)]">loading...</span>` : null}
+        ${state.value.loading ? html`<span class="text-xs text-[var(--text-muted)]">로딩 중...</span>` : null}
       </div>
 
       ${state.value.error

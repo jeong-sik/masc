@@ -433,7 +433,7 @@ export function TransportHealthPanel() {
         <button
           class="text-[10px] text-text-muted hover:text-text-body transition-colors"
           onClick=${() => void refreshTransportHealth()}
-        >refresh</button>
+        >새로고침</button>
       </div>
 
       <details class="group rounded-xl border border-card-border/50 bg-card/18 overflow-hidden" open=${hasAnyBadTransport}>

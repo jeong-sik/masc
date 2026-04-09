@@ -3,21 +3,9 @@
 
 /* ═══ Governance ═══ */
 
-/* ── Governance Row (stateful: hover, selected, content-visibility) ── */
-@utility governance-row {
-  content-visibility: auto;
-  contain-intrinsic-size: auto 48px;
-}
 button.governance-row.selected {
   border-color: rgba(71, 184, 255, 0.5);
   background: var(--accent-14);
-}
-
-/* ── Governance State badges (multi-variant) ── */
-@utility governance-state {
-  &.open, &.positive { border-color: var(--ok-48); background: var(--ok-soft); color: #b4f5ca; }
-  &.closed, &.vote { border-color: rgba(251, 191, 36, 0.45); background: rgba(251, 191, 36, 0.14); color: #ffe09b; }
-  &.negative { border-color: rgba(239, 68, 68, 0.46); background: rgba(239, 68, 68, 0.14); color: #fecaca; }
 }
 
 /* ── Governance Chips (multi-variant: ok, warn) ── */
@@ -54,25 +42,6 @@ button.governance-row.selected {
   box-shadow:
     0 0 20px rgba(200, 168, 78, 0.04),
     inset 0 1px 0 var(--ff-gold-8);
-}
-
-/* Signal badges — stateful variants */
-@utility ff-plate__signal--live {
-  color: var(--ok);
-  background: var(--ok-10);
-  border: 1px solid var(--ok-20);
-}
-
-@utility ff-plate__signal--stale {
-  color: var(--ff-gold);
-  background: var(--ff-gold-10);
-  border: 1px solid var(--ff-gold-20);
-}
-
-@utility ff-plate__signal--archived {
-  color: var(--text-dim);
-  background: rgba(128, 128, 128, 0.1);
-  border: 1px solid rgba(128, 128, 128, 0.15);
 }
 
 /* Mention bar — nested .control-input override */

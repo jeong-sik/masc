@@ -226,6 +226,7 @@ let status_json ?(audit_limit = 10) () =
   let audit_path = binding_audit_read_path () in
   let configured_bindings = read_bindings () in
   let recent_audit = read_recent_audit ~limit:audit_limit in
+  let channel = "discord" in
   let available = Option.is_some live_status in
   let updated_at =
     match live_status with
@@ -238,10 +239,7 @@ let status_json ?(audit_limit = 10) () =
     | Some json -> bool_member json "connected" && not stale
     | None -> false
   in
-  let error =
-    if available then ""
-    else "discord connector status file not found"
-  in
+  let error = if available then "" else "connector status file not found" in
   let status_field key f default =
     match live_status with
     | Some json -> f json key
@@ -249,6 +247,7 @@ let status_json ?(audit_limit = 10) () =
   in
   `Assoc
     [
+      ("channel", `String channel);
       ("available", `Bool available);
       ("connected", `Bool connected);
       ("stale", `Bool stale);

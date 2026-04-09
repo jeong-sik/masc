@@ -2,25 +2,6 @@
 
 /* ═══ OAS Pipeline ═══ */
 
-/* ── Event/Keeper Row hover ── */
-@utility oas-event-row { &:hover { background: var(--white-6, var(--white-3)); } }
-@utility oas-keeper-row { &:hover { background: var(--white-6, var(--white-3)); } }
-
-/* ── Event Badge variants ── */
-@utility badge--post { background: #1a3a2a; color: var(--ok); }
-@utility badge--comment { background: #1a2a3a; color: var(--accent); }
-@utility badge--upvote { background: #3a3a1a; color: #facc15; }
-@utility badge--skip { background: #2a2a2a; color: var(--text-dim); }
-
-@utility oas-event-ok { &.ok { color: var(--ok); } &.fail { color: var(--bad-light); } }
-
-/* ── Keeper context bars ── */
-@utility oas-keeper-bar { transition: width 0.3s ease; }
-
-@utility bar--ok { background: var(--ok); }
-@utility bar--mid { background: #facc15; }
-@utility bar--warn { background: var(--bad-light); }
-
 /* ── Pipeline Stage Indicator ── */
 @utility pipeline-stage-label { transition: color 0.3s ease; }
 

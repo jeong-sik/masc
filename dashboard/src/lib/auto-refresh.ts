@@ -14,21 +14,24 @@ export function setupVisibleAutoRefresh(
 ): () => void {
   let lastRefreshAt = 0
 
-  const runRefresh = () => {
+  const runRefresh = (dedupeRecentEvents: boolean) => {
     if (typeof document.visibilityState === 'string' && document.visibilityState !== 'visible') return
     const now = Date.now()
-    if (now - lastRefreshAt < AUTO_REFRESH_EVENT_DEDUPE_MS) return
+    if (dedupeRecentEvents && now - lastRefreshAt < AUTO_REFRESH_EVENT_DEDUPE_MS) return
     lastRefreshAt = now
     void refresh()
   }
 
-  const interval = window.setInterval(runRefresh, intervalMs)
-  window.addEventListener('focus', runRefresh)
-  document.addEventListener('visibilitychange', runRefresh)
+  const runIntervalRefresh = () => { runRefresh(false) }
+  const runEventRefresh = () => { runRefresh(true) }
+
+  const interval = window.setInterval(runIntervalRefresh, intervalMs)
+  window.addEventListener('focus', runEventRefresh)
+  document.addEventListener('visibilitychange', runEventRefresh)
 
   return () => {
     window.clearInterval(interval)
-    window.removeEventListener('focus', runRefresh)
-    document.removeEventListener('visibilitychange', runRefresh)
+    window.removeEventListener('focus', runEventRefresh)
+    document.removeEventListener('visibilitychange', runEventRefresh)
   }
 }

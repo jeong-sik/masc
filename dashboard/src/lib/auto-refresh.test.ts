@@ -42,4 +42,19 @@ describe('auto-refresh', () => {
     expect(refresh).toHaveBeenCalledTimes(2)
     dispose()
   })
+
+  it('keeps short interval refreshes active while deduplicating follow-up focus events', async () => {
+    const refresh = vi.fn()
+    const dispose = setupVisibleAutoRefresh(refresh, 200)
+
+    await vi.advanceTimersByTimeAsync(200)
+    expect(refresh).toHaveBeenCalledTimes(1)
+
+    window.dispatchEvent(new Event('focus'))
+    expect(refresh).toHaveBeenCalledTimes(1)
+
+    await vi.advanceTimersByTimeAsync(200)
+    expect(refresh).toHaveBeenCalledTimes(2)
+    dispose()
+  })
 })

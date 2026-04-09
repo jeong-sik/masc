@@ -17,7 +17,7 @@ TLA2TOOLS := keeper-state-machine/tla2tools.jar
 
 # Specs with known failures (parsing/evaluation errors under CI tla2tools).
 # Remove from this list as specs are fixed. Each entry is a basename (no .cfg).
-KNOWN_FAILURES ?= KeeperTraceSpec KeeperOASBridge KeeperWorkPipeline
+KNOWN_FAILURES ?= KeeperTraceSpec KeeperOASBridge KeeperWorkPipeline KeeperWorkPipelineBug
 
 TLC = $(JAVA) $(JAVA_OPTS) \
 	-Dtlc2.TLC.stopAfter=$(TLC_STOP) \

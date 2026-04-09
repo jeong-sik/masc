@@ -311,14 +311,6 @@ let handle_repo_synthesis_swarm_start ctx args =
                             let planned_workers =
                               repo_synthesis_planned_workers ~max_workers
                             in
-                            match
-                              Tool_team_session_routing_workers
-                              .register_planned_workers config session_id
-                                planned_workers
-                            with
-                            | Error message ->
-                                `Assoc [ ("error", `String message) ]
-                            | Ok () ->
                                 let run_id =
                                   Repo_synthesis_benchmark.make_run_id ()
                                 in

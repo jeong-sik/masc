@@ -170,11 +170,6 @@ let dispatch
         Printf.sprintf
           "tool '%s' belongs to the removed operator surface; keeper runtime stays on OAS Agent.run" name)
 
-  | Mod_team_session ->
-      Some (false,
-        Printf.sprintf
-          "tool '%s' belongs to the removed collaboration surface; keeper runtime stays on OAS Agent.run" name)
-
   | Mod_autoresearch ->
       (* Keeper already handles masc_autoresearch_* before reaching this path.
          If we get here, provide a minimal context without team session starter. *)

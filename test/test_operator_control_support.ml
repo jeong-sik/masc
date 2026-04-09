@@ -44,45 +44,20 @@ let operator_ctx ?mcp_session_id env sw config agent_name :
     mcp_session_id;
   }
 
-let team_ctx env sw config agent_name : _ Tool_team_session.context =
-  {
-    config;
-    agent_name;
-    sw;
-    clock = Eio.Stdenv.clock env;
-    proc_mgr = Some (Eio.Stdenv.process_mgr env);
-    net = Some (Eio.Stdenv.net env);
-  }
+(** Team session context stub — team session tools are removed.
+    Uses unit type to satisfy callers that still reference team_ctx. *)
+let team_ctx _env _sw _config _agent_name = ()
 
-let dispatch_team_exn ctx ~name ~args =
-  match Tool_team_session.dispatch ctx ~name ~args with
-  | Some result -> result
-  | None -> failwith ("team session dispatch missing: " ^ name)
+let dispatch_team_exn _ctx ~name ~args:_ =
+  failwith ("team session tools removed: " ^ name)
+
+let start_session_exn _ctx =
+  failwith "team session tools removed: cannot start session"
 
 let dispatch_keeper_exn ctx ~name ~args =
   match Tool_keeper.dispatch ctx ~name ~args with
   | Some result -> result
   | None -> failwith ("keeper dispatch missing: " ^ name)
-
-let start_session_exn ctx =
-  let ok, body =
-    dispatch_team_exn ctx ~name:"masc_team_session_start"
-      ~args:
-        (`Assoc
-          [
-            ("goal", `String "Operator control test session");
-            ("duration_seconds", `Int 120);
-            ("checkpoint_interval_sec", `Int 30);
-            ("min_agents", `Int 1);
-            ("orchestration_mode", `String "assist");
-            ("communication_mode", `String "broadcast");
-            ("agents", `List [ `String ctx.Tool_team_session.agent_name ]);
-          ])
-  in
-  Alcotest.(check bool) "session start ok" true ok;
-  let json = parse_json_exn body in
-  json |> result_field |> Yojson.Safe.Util.member "session_id"
-  |> Yojson.Safe.Util.to_string
 
 let unit_update_exn config ~actor args =
   match Command_plane_v2.unit_update_json config ~actor args with

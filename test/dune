@@ -200,7 +200,7 @@
 
 (test
  (name test_worker_run_evidence_summary)
- (modules test_worker_run_evidence_summary test_tool_team_session_support)
+ (modules test_worker_run_evidence_summary)
  (libraries masc_test_deps))
 
 (test
@@ -222,7 +222,7 @@
         test_dashboard_mission_briefing
         test_command_plane_help
         test_dashboard_proof
-        test_persist_worker_run_snapshot
+
         test_dashboard_cache
         test_dashboard_execution
         test_dashboard_http_core
@@ -366,7 +366,7 @@
         test_dashboard_mission_briefing
         test_command_plane_help
         test_dashboard_proof
-        test_persist_worker_run_snapshot
+
         test_dashboard_cache
         test_dashboard_execution
         test_dashboard_http_core
@@ -601,20 +601,6 @@
           test_command_plane_v2_scheduler_core_b
           test_command_plane_v2_scheduler_policy
           test_command_plane_v2_search)
- (libraries masc_test_deps))
-
-; Tool Team Session (8 modules)
-(test
- (name test_tool_team_session)
- (modules test_tool_team_session
-          test_tool_team_session_support
-          test_tool_team_session_lifecycle
-          test_tool_team_session_flow
-          test_tool_team_session_proof
-          test_tool_team_session_step_validation
-          test_tool_team_session_step_routing
-          test_tool_team_session_step_followup
-          test_tool_team_session_misc)
  (libraries masc_test_deps))
 
 ; Operator Control (7 modules)

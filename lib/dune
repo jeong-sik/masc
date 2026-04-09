@@ -318,19 +318,7 @@
    tool_relay
    worktree_live_context
    tool_operator
-   tool_team_session_support
-   tool_team_session_handlers
-   tool_team_session
-   tool_team_session_routing
-   tool_team_session_routing_workers
-   tool_team_session_step
-   tool_team_session_step_spawn
-   tool_team_session_step_spawn_impl
-   tool_team_session_step_spawn_run
-   tool_team_session_step_exec
-   tool_team_session_step_types
    team_session_plan
-   tool_team_session_schemas
    tool_heartbeat
    tool_auth
    tool_agent
@@ -593,7 +581,6 @@
  dashboard_mission_assembly
  keeper_types_profile
  keeper_types_support
- tool_team_session_routing_workers
  cp_lifecycle_search
  cp_lifecycle_intents
  server_dashboard_http_cache
@@ -691,7 +678,6 @@
   team_session_report_proof
   team_session_worker_run_meta
   ;; godsplit-phase1: file split sub-modules
-  tool_team_session_step_exec
   keeper_status_bridge
   ;; godsplit-phase2: additional sub-modules
   autoresearch_codegen

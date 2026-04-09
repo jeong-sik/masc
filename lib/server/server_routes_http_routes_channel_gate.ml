@@ -227,7 +227,7 @@ let handle_gate_connectors _state request reqd =
     also tolerates legacy [channel=<connector>] callers. *)
 let resolve_connector_status_name ?name ?channel () =
   match Option.map String.trim name with
-  | Some name when name <> "" -> Some name
+  | Some name when name <> "" -> Some (String.lowercase_ascii name)
   | _ -> (
       match Option.map String.trim channel with
       | Some legacy when legacy <> "" ->

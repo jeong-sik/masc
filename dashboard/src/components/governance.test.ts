@@ -82,6 +82,10 @@ async function loadComponentWithApi(api: {
   Vitest.vi.doMock('../sse-store', () => ({
     registerGovernanceRefresh: Vitest.vi.fn(),
   }))
+  Vitest.vi.doMock('./governance-panels', () => ({
+    DecisionDetail: () => html`<div data-testid="decision-detail-stub">decision detail</div>`,
+    GuardrailPane: () => html`<div data-testid="guardrail-pane-stub">guardrail pane</div>`,
+  }))
   return import('./governance')
 }
 
@@ -100,6 +104,7 @@ describe('Governance surface', () => {
     Vitest.vi.clearAllMocks()
     Vitest.vi.doUnmock('../api')
     Vitest.vi.doUnmock('../sse-store')
+    Vitest.vi.doUnmock('./governance-panels')
   })
 
   it('renders and refreshes without corrupting the DOM tree', async () => {

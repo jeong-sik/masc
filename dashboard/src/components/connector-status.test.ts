@@ -306,4 +306,36 @@ describe('ConnectorStatusPanel', () => {
     })
     expect(showToast).toHaveBeenCalledWith('Unbound 999999', 'success')
   })
+
+  it('shows selected keeper runtime metadata from the keeper directory', async () => {
+    const get = vi.fn<(path: string) => Promise<unknown>>().mockImplementation(async path => {
+      if (path === '/api/v1/gate/status') return sampleGateResponse()
+      if (path === '/api/v1/gate/discord/status') return sampleLiveResponse()
+      if (path === '/api/v1/gate/keepers?limit=50&detailed=true') return sampleKeepersResponse()
+      throw new Error(`unexpected path: ${path}`)
+    })
+
+    const { ConnectorStatusPanel } = await loadComponentWithApi({
+      get,
+      lastEvent: signal(null),
+    })
+
+    render(html`<${ConnectorStatusPanel} />`, container)
+    await flushUi()
+
+    const keeperSelect = container.querySelector('select') as HTMLSelectElement | null
+    expect(keeperSelect).not.toBeNull()
+    if (!keeperSelect) {
+      throw new Error('expected keeper select to exist')
+    }
+
+    keeperSelect.value = 'nova'
+    keeperSelect.dispatchEvent(new Event('change', { bubbles: true }))
+    await flushUi()
+
+    const text = container.textContent?.replace(/\s+/g, ' ').trim() ?? ''
+    expect(text).toContain('status busy')
+    expect(text).toContain('model gemini-2.5-flash')
+    expect(text).toContain('runtime keeper-nova-agent')
+  })
 })

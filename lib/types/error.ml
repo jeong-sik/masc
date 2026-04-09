@@ -165,6 +165,14 @@ let string_of_severity = function
   | Error -> "ERROR"
   | Critical -> "CRITICAL"
 
+(** Coerce to canonical [Severity.t] for cross-module communication. *)
+let to_severity : severity -> Severity.t = function
+  | Debug -> Debug
+  | Info -> Info
+  | Warning -> Warning
+  | Error -> Error
+  | Critical -> Critical
+
 (** {1 Migration Bridge}
 
     Convert [Error.t] to [Types_auth.masc_error] for incremental

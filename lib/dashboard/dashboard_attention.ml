@@ -26,6 +26,12 @@ let severity_icon = function
 
 let severity_order = function Critical -> 0 | Warning -> 1 | Info -> 2
 
+(** Coerce to canonical [Severity.t] for cross-module communication. *)
+let to_severity : severity -> Severity.t = function
+  | Critical -> Critical
+  | Warning -> Warning
+  | Info -> Info
+
 (* ===== Detection Rules ===== *)
 
 (** Detect stuck agents: Active/Busy but last_seen > threshold *)

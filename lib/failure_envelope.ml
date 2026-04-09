@@ -44,6 +44,12 @@ let recoverability_of_string = function
   | "fatal" -> Ok Fatal
   | other -> Error ("unknown failure recoverability: " ^ other)
 
+(** Coerce to canonical [Severity.t] for cross-module communication. *)
+let to_severity : severity -> Severity.t = function
+  | Warn -> Warning
+  | Bad -> Error
+  | Critical -> Critical
+
 let option_to_json f = function
   | Some value -> f value
   | None -> `Null

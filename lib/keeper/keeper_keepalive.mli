@@ -18,11 +18,11 @@ val process_directive : agent_name:string -> string -> unit
 
 (** Wake up a specific keeper immediately. Used by broadcast notification
     when a @mention targets a running keeper. *)
-val wakeup_keeper : string -> unit
+val wakeup_keeper : ?base_path:string -> string -> unit
 
 (** Wake up all running keepers. Used for @@all broadcast mentions
     or system-wide events. *)
-val wakeup_all_keepers : unit -> unit
+val wakeup_all_keepers : ?base_path:string -> unit -> unit
 
 val keeper_turn_throttle_limit : int
 (** Runtime keeper turn concurrency limit derived from
@@ -43,5 +43,5 @@ val percentile : float array -> float -> float
 
 val start_keepalive :
   ?proactive_warmup_sec:int -> 'a context -> keeper_meta -> unit
-val stop_keepalive : string -> unit
+val stop_keepalive : ?base_path:string -> string -> unit
 val stop_all_keepalives : unit -> unit

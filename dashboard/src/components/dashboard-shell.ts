@@ -201,9 +201,10 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
                   params=${surface.defaultParams}
                   class="flex items-center justify-center w-full rounded-xl border p-2 cursor-pointer transition-[background-color,border-color,color,box-shadow] duration-200 ${isSurfaceActive ? 'bg-[var(--accent-soft)] text-[var(--text-strong)] shadow-[inset_0_1px_1px_var(--white-10)] border-[var(--accent-20)]' : 'border-transparent text-[var(--text-muted)] hover:bg-[var(--white-5)]'}"
                   title=${surface.label}
+                  aria-label=${surface.label}
                   ariaCurrent=${isSurfaceActive ? 'page' : undefined}
                 >
-                  <span class="text-[18px] drop-shadow-md">${surface.icon}</span>
+                  <span class="text-[18px] drop-shadow-md" aria-hidden="true">${surface.icon}</span>
                 <//>
               `
             }
@@ -216,7 +217,7 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
                   class="flex items-center gap-2 w-full rounded-lg border px-2 py-1.5 text-left cursor-pointer transition-[background-color,border-color,color,box-shadow] duration-200 ${isSurfaceActive && sections.length === 0 ? 'bg-[linear-gradient(135deg,rgba(71,184,255,0.14),rgba(71,184,255,0.04))] text-[var(--text-strong)] shadow-[inset_0_1px_1px_var(--white-10)] border-[var(--accent-20)]' : 'bg-transparent border-transparent text-[var(--text-strong)] hover:bg-[var(--white-5)]'}"
                   ariaCurrent=${isSurfaceActive && sections.length === 0 ? 'page' : undefined}
                 >
-                  <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[var(--white-10)] bg-[var(--white-3)] text-[14px]">
+                  <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[var(--white-10)] bg-[var(--white-3)] text-[14px]" aria-hidden="true">
                     ${surface.icon}
                   </span>
                   <div class="flex-1 min-w-0">

@@ -528,6 +528,20 @@ let test_minimal_preset_includes_core_masc () =
   check bool "masc_broadcast excluded from universe" false
     (List.mem "masc_broadcast" universe)
 
+let test_full_keeper_model_tools_exclude_repo_synthesis_front_door () =
+  init_keeper_tool_registry ();
+  let base = make_gate_test_meta ~name:"test-full-keeper-model-tools" () in
+  let meta = { base with
+    tool_access = Preset { preset = Full; also_allow = [] };
+    tool_denylist = [];
+  } in
+  let allowed =
+    Keeper_exec_tools.keeper_allowed_model_tools meta
+    |> List.map (fun (schema : Types.tool_schema) -> schema.name)
+  in
+  check bool "repo synthesis swarm start excluded from keeper model tools" false
+    (List.mem "masc_repo_synthesis_swarm_start" allowed)
+
 (* ================================================================ *)
 (* Preset-scoped universe (#4637)                                    *)
 (* ================================================================ *)
@@ -759,6 +773,8 @@ let () =
             test_universe_superset_of_policy;
           test_case "minimal preset includes core masc" `Quick
             test_minimal_preset_includes_core_masc;
+          test_case "full keeper model tools exclude repo synthesis front door" `Quick
+            test_full_keeper_model_tools_exclude_repo_synthesis_front_door;
           test_case "registered inline board tool survives filter" `Quick
             test_registered_inline_board_tool_survives_filter;
         ] );

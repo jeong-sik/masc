@@ -23,6 +23,7 @@ DEFAULT_STATUS_PATH: Final[str] = ".masc/connectors/discord/status.json"
 LEGACY_BINDING_STORE_PATH: Final[str] = ".gate/discord_bindings.json"
 LEGACY_BINDING_AUDIT_PATH: Final[str] = ".gate/discord_binding_audit.jsonl"
 LEGACY_STATUS_PATH: Final[str] = ".gate/discord_status.json"
+LEGACY_BASE_ROOT: Final[Path] = Path("sidecars/discord-bot")
 
 
 def _is_loopback_host(raw_host: str | None) -> bool:
@@ -220,6 +221,15 @@ class BotConfig(BaseSettings):
             return base_root / path
         return Path.cwd() / path
 
+    def _resolve_legacy_storage_path(self, legacy_cwd_path: str) -> Path:
+        path = Path(legacy_cwd_path).expanduser()
+        if path.is_absolute():
+            return path
+        base_root = self.base_path_root()
+        if base_root is not None:
+            return base_root / LEGACY_BASE_ROOT / path
+        return Path.cwd() / path
+
     def binding_store_path(self) -> Path:
         """Return the durable binding store path.
 
@@ -235,13 +245,13 @@ class BotConfig(BaseSettings):
         return self._resolve_storage_path(self.discord_status_path)
 
     def legacy_binding_store_path(self) -> Path:
-        return Path.cwd() / LEGACY_BINDING_STORE_PATH
+        return self._resolve_legacy_storage_path(LEGACY_BINDING_STORE_PATH)
 
     def legacy_binding_audit_path(self) -> Path:
-        return Path.cwd() / LEGACY_BINDING_AUDIT_PATH
+        return self._resolve_legacy_storage_path(LEGACY_BINDING_AUDIT_PATH)
 
     def legacy_status_path(self) -> Path:
-        return Path.cwd() / LEGACY_STATUS_PATH
+        return self._resolve_legacy_storage_path(LEGACY_STATUS_PATH)
 
     def gate_message_url(self) -> str:
         base = self.gate_base_url.rstrip("/")

@@ -86,3 +86,53 @@ def test_config_falls_back_to_cwd_when_base_path_missing(tmp_path: Path) -> None
         if previous_base_path is not None:
             os.environ["MASC_BASE_PATH"] = previous_base_path
         os.chdir(original_cwd)
+
+
+def test_config_resolves_legacy_paths_from_base_path(tmp_path: Path) -> None:
+    base_path = tmp_path / "workspace"
+    base_path.mkdir()
+    cfg = BotConfig(
+        discord_bot_token="test-token",
+        gate_api_token="test-api-token",
+    )
+
+    previous_base_path = os.getenv("MASC_BASE_PATH")
+    original_cwd = Path.cwd()
+    try:
+        os.environ["MASC_BASE_PATH"] = str(base_path)
+        os.chdir(tmp_path)
+        assert cfg.legacy_binding_store_path() == (
+            base_path / "sidecars" / "discord-bot" / ".gate" / "discord_bindings.json"
+        )
+        assert cfg.legacy_binding_audit_path() == (
+            base_path / "sidecars" / "discord-bot" / ".gate" / "discord_binding_audit.jsonl"
+        )
+        assert cfg.legacy_status_path() == (
+            base_path / "sidecars" / "discord-bot" / ".gate" / "discord_status.json"
+        )
+    finally:
+        if previous_base_path is None:
+            os.environ.pop("MASC_BASE_PATH", None)
+        else:
+            os.environ["MASC_BASE_PATH"] = previous_base_path
+        os.chdir(original_cwd)
+
+
+def test_config_resolves_legacy_paths_from_cwd_without_base_path(tmp_path: Path) -> None:
+    cfg = BotConfig(
+        discord_bot_token="test-token",
+        gate_api_token="test-api-token",
+    )
+
+    previous_base_path = os.getenv("MASC_BASE_PATH")
+    original_cwd = Path.cwd()
+    try:
+        os.environ.pop("MASC_BASE_PATH", None)
+        os.chdir(tmp_path)
+        assert cfg.legacy_binding_store_path() == tmp_path / ".gate" / "discord_bindings.json"
+        assert cfg.legacy_binding_audit_path() == tmp_path / ".gate" / "discord_binding_audit.jsonl"
+        assert cfg.legacy_status_path() == tmp_path / ".gate" / "discord_status.json"
+    finally:
+        if previous_base_path is not None:
+            os.environ["MASC_BASE_PATH"] = previous_base_path
+        os.chdir(original_cwd)

@@ -165,6 +165,28 @@ let test_soft_context_in_dynamic_only () =
   check bool "no worktree in system" true
     (not (has_in tp.system_prompt "Worktree changes"))
 
+let test_direct_reply_prompt_matches_server_managed_heartbeat_policy () =
+  let prompt =
+    KP.build_keeper_system_prompt
+      ~goal:"Keep keeper guidance aligned with runtime behavior"
+      ~short_goal:"verify prompt wording"
+      ~mid_goal:"ship consistent keeper guidance"
+      ~long_goal:"avoid stale operational instructions"
+      ~will:"maintain coherent identity"
+      ~needs:"factual grounding"
+      ~desires:"useful progress"
+      ~instructions:""
+      ()
+  in
+  let has_in s needle =
+    try ignore (Str.search_forward (Str.regexp_string needle) s 0); true
+    with Not_found -> false
+  in
+  check bool "mentions server-managed heartbeat" true
+    (has_in prompt "Heartbeat is server-managed");
+  check bool "does not mention masc_heartbeat" false
+    (has_in prompt "masc_heartbeat")
+
 let test_token_report () =
   (* Emit a structured report for A/B comparison *)
   let tp = build_separated () in
@@ -208,6 +230,8 @@ let () =
             test_hard_constraints_in_system_only;
           test_case "soft context in dynamic only" `Quick
             test_soft_context_in_dynamic_only;
+          test_case "direct reply prompt matches server-managed heartbeat policy" `Quick
+            test_direct_reply_prompt_matches_server_managed_heartbeat_policy;
         ] );
       ( "metrics_report",
         [

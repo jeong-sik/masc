@@ -209,7 +209,6 @@ let test_tool_access_missing_migrates_legacy_standard_policy () =
       "masc_plan_set_task";
       "masc_transition";
       "masc_add_task";
-      "masc_heartbeat";
     ]
     |> List.sort_uniq String.compare
   in

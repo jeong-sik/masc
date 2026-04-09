@@ -484,7 +484,7 @@ let test_core_tools_are_core () =
     (List.mem "masc_status" core);
   check bool "masc_broadcast is not core" false
     (List.mem "masc_broadcast" core);
-  check bool "masc_heartbeat is core" true
+  check bool "masc_heartbeat removed from core" false
     (List.mem "masc_heartbeat" core);
   check bool "masc_tool_help moved to BM25" false
     (List.mem "masc_tool_help" core);
@@ -521,7 +521,7 @@ let test_minimal_preset_includes_core_masc () =
   let universe = Keeper_exec_tools.keeper_universe_tool_names meta in
   check bool "masc_status in universe" true
     (List.mem "masc_status" universe);
-  check bool "masc_heartbeat in universe" true
+  check bool "masc_heartbeat in universe (MCP-injected, but not executable)" true
     (List.mem "masc_heartbeat" universe);
   check bool "masc_tool_help in universe" true
     (List.mem "masc_tool_help" universe);
@@ -558,7 +558,7 @@ let test_preset_universe_includes_core () =
   let scoped = Keeper_exec_tools.keeper_preset_universe_tool_names meta in
   check bool "masc_status in scoped" true
     (List.mem "masc_status" scoped);
-  check bool "masc_heartbeat in scoped" true
+  check bool "masc_heartbeat removed from scoped" false
     (List.mem "masc_heartbeat" scoped);
   check bool "masc_tool_help in scoped" true
     (List.mem "masc_tool_help" scoped);

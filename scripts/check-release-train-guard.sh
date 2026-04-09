@@ -88,6 +88,16 @@ base_package_version="$(version_from_ref "$base_ref")"
 base_major="$(major_from_version "$base_package_version")"
 latest_tag="$(latest_tag_for_major "$base_major")"
 
+if [[ "$head_major" != "$base_major" ]]; then
+  head_latest_tag="$(latest_tag_for_major "$head_major")"
+  if [[ -n "$head_latest_tag" ]]; then
+    head_latest_tag_version="${head_latest_tag#v}"
+    if version_gt "$head_latest_tag_version" "$head_package_version"; then
+      fail "head ref $head_ref uses package version $head_package_version, which is older than latest tag v$head_latest_tag_version in major $head_major; pick a newer version before crossing release lines"
+    fi
+  fi
+fi
+
 if [[ -z "$latest_tag" ]]; then
   if [[ "$head_package_version" == "$base_package_version" ]]; then
     printf '::warning::Release train: major %s has no published tags yet. Tag v%s when ready.\n' \

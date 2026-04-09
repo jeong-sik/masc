@@ -40,6 +40,15 @@ Current numbering note:
 - Historical `v0.1.0` and `v0.1.1` tags already exist, so the active reset starts at the next unused train.
 - No new `v2.*` release tags should be published.
 
+Bootstrap sequence after the reset:
+
+1. merge the `v0.2.0` reset PR
+2. publish tag `v0.2.0`
+3. only then open `0.3.0` or later train bumps
+
+The release-train guard warns while `0.2.0` is merged but untagged, and it fails any attempt
+to widen the `0.x` train before that pending tag is published.
+
 ## Intake and Triage
 
 The user remains the primary dogfooding reporter, but Codex and internal agents are also allowed to file issues when they observe a concrete problem.

@@ -20,7 +20,7 @@
 @import "./keyframes.css";
 
 /* ── Feature imports (alphabetical, a11y.css last for cascade) ── */
-@import "./agent-monitor.css";
+
 @import "./board.css";
 @import "./chat.css";
 @import "./command-plane.css";
@@ -35,7 +35,6 @@
 @import "./overview.css";
 @import "./pipeline.css";
 @import "./pixel-avatar.css";
-@import "./roster-detail.css";
 @import "./tools.css";
 @import "./ui.css";
 @import "./responsive.css";
@@ -56,10 +55,6 @@
     0 3px 10px rgba(0, 0, 0, 0.08);
   transition: border-color 0.15s, box-shadow 0.15s;
   &:hover { border-color: var(--border-slate-22); }
-}
-
-@utility card-title-row {
-  margin-bottom: 10px;
 }
 
 @utility card-title {
@@ -153,31 +148,6 @@
   &.error { background: rgba(251,113,133,0.15); color: #fb7185; }
 }
 
-/* ── Ops Workbench — 3-column grid ─────────────────────────── */
-
-@utility ops-workbench {
-  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) minmax(0, 1fr);
-}
-
-/* ── Priority card value emphasis ──────────────────────────── */
-
-@utility ops-priority-card {
-  & strong {
-    font-size: 28px;
-    font-weight: 800;
-    line-height: 1;
-    color: var(--text-strong);
-    letter-spacing: -0.03em;
-    font-variant-numeric: tabular-nums;
-  }
-  &.ok strong { color: var(--ok); }
-  &.warn strong { color: var(--warn); }
-  &.bad strong { color: var(--bad-light); }
-  &.ok { border-left: 3px solid var(--ok); border-color: var(--ok-24); }
-  &.warn { border-left: 3px solid var(--warn); border-color: var(--warn-28); }
-  &.bad { border-left: 3px solid var(--bad-light); border-color: rgba(248, 113, 113, 0.34); }
-}
-
 /* ── Ops stat card value emphasis ──────────────────────────── */
 
 @utility ops-stat {
@@ -197,25 +167,6 @@
   }
   &.ok { border-color: var(--ok-35); }
   &.warn { border-color: rgba(251, 191, 36, 0.35); }
-}
-
-/* ── Action guide item base ────────────────────────────────── */
-
-@utility ops-action-guide-item {
-  display: grid;
-  gap: 2px;
-  padding: 10px 14px;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  cursor: pointer;
-  background: var(--white-4);
-  transition: filter 0.15s, border-color 0.15s;
-  & strong { font-size: var(--fs-base); }
-  & span { font-size: var(--fs-sm); opacity: 0.78; }
-  &:hover { filter: brightness(1.15); }
-  &.bad { background: var(--bad-12); color: #fca5a5; border-color: rgba(248, 113, 113, 0.18); }
-  &.warn { background: var(--warn-12); color: var(--warn); border-color: rgba(251, 191, 36, 0.18); }
-  &.ok { background: var(--ok-8); color: var(--ok); border-color: var(--ok-18); }
 }
 
 /* ── Control dock base styles ──────────────────────────────── */
@@ -314,51 +265,3 @@ tbody tr:hover {
 @utility warn { border-color: var(--warn-soft); }
 @utility bad { border-color: var(--bad-soft); }
 
-/* ── App Shell + Header ────────────────────────────────────── */
-@utility app-shell {
-  width: calc(100% - 32px);
-  max-width: 1600px;
-  margin: 16px auto 28px;
-}
-
-@utility dashboard-header {
-  position: sticky;
-  top: 0;
-  z-index: var(--z-header, 40);
-  min-height: var(--header-h);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-  padding: 14px 18px;
-  border: 1px solid var(--card-border);
-  border-radius: var(--radius-lg);
-  background: rgba(8, 15, 29, 0.78);
-  backdrop-filter: blur(10px);
-  box-shadow: 0 18px 34px rgba(0, 0, 0, 0.32);
-}
-
-@utility header-title-wrap {
-  & h1 {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    color: var(--text-strong);
-    font-size: 28px;
-    line-height: 1.2;
-  }
-}
-
-@utility header-subtitle {
-  margin-top: 4px;
-  color: var(--text-muted);
-  font-size: 13px;
-}
-
-@utility header-right {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: nowrap;
-  justify-content: flex-end;
-}

@@ -189,7 +189,7 @@ let test_invalidate_all_wakes_waiters () =
     JSON.  (Regression test for Codex review P2 on PR #1314.) *)
 let test_stale_preserved_on_timeout ~clock ~sw () =
   Dashboard_cache.invalidate_all ();
-  Dashboard_cache.set_sw sw;
+  Eio_context.set_switch sw;
   let original = `String "original_data" in
   (* 1. Seed the cache with a short-lived entry (TTL 0.1s, stale grace 0.3s) *)
   let v0 =
@@ -297,7 +297,6 @@ let () =
   let clock = Eio.Stdenv.clock env in
   Eio_guard.enable ();
   Time_compat.set_clock clock;
-  Dashboard_cache.set_clock clock;
   let open Alcotest in
   run ~and_exit:false "Dashboard_cache"
     [

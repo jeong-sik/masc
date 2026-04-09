@@ -344,7 +344,7 @@ export function TelemetryUnified() {
       <div class="flex flex-wrap gap-3">
         ${summary.map(src => html`<${SummaryCard} src=${src} />`)}
         <div class="rounded-lg border border-[var(--card-border)] bg-[rgba(255,255,255,0.02)] p-3 min-w-[140px]">
-          <div class="text-xs font-medium text-[var(--text-muted)] mb-1">Total</div>
+          <div class="text-xs font-medium text-[var(--text-muted)] mb-1">전체</div>
           <div class="text-2xl font-bold text-[var(--text-strong)]">${totalEntries.toLocaleString()}</div>
         </div>
       </div>
@@ -381,12 +381,12 @@ export function TelemetryUnified() {
           value=${sourceFilter.value}
           onChange=${(e: Event) => { sourceFilter.value = (e.target as HTMLSelectElement).value as TelemetrySource | '' }}
         >
-          <option value="">All sources</option>
+          <option value="">전체 소스</option>
           ${Object.entries(TELEMETRY_SOURCE_META).map(([key, m]) => html`<option value=${key}>${m.label}</option>`)}
         </select>
         <input
           type="text"
-          placeholder="Keeper name..."
+          placeholder="키퍼 이름..."
           class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-2 py-1 text-xs text-[var(--text-strong)] w-32"
           value=${keeperFilter.value}
           onInput=${(e: Event) => { keeperFilter.value = (e.target as HTMLInputElement).value }}
@@ -428,7 +428,7 @@ export function TelemetryUnified() {
         >
           Refresh
         </button>
-        ${loading ? html`<span class="text-xs text-[var(--text-muted)]">loading...</span>` : null}
+        ${loading ? html`<span class="text-xs text-[var(--text-muted)]">로딩 중...</span>` : null}
       </div>
 
       ${error ? html`

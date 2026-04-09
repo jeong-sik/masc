@@ -165,7 +165,7 @@ export function ServerConfig() {
           onClick=${() => void refreshServerConfig()}
           disabled=${loading}
         >
-          ${loading ? '...' : 'Refresh'}
+          ${loading ? '...' : '새로고침'}
         </button>
       </div>
 
@@ -174,7 +174,7 @@ export function ServerConfig() {
       ` : null}
 
       ${loading && !data ? html`
-        <div class="text-sm text-[var(--text-muted)] py-8 text-center">Loading...</div>
+        <div class="text-sm text-[var(--text-muted)] py-8 text-center">로딩 중...</div>
       ` : null}
 
       ${data ? html`

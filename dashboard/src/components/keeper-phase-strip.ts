@@ -92,7 +92,7 @@ function KeeperStrip({ name, data }: { name: string; data: KeeperTransitionsResp
       </div>
       <div class="flex-1 flex items-center gap-1.5 overflow-x-auto min-h-[24px]">
         ${transitions.length === 0
-          ? html`<span class="text-[11px] text-[var(--text-muted)]">no transitions</span>`
+          ? html`<span class="text-[11px] text-[var(--text-muted)]">전환 없음</span>`
           : transitions.map((t, i) => html`
               <${TransitionDot} t=${t} idx=${i} />
               ${i < transitions.length - 1 ? html`<div class="w-3 h-px bg-[var(--white-10)]" />` : null}
@@ -100,7 +100,7 @@ function KeeperStrip({ name, data }: { name: string; data: KeeperTransitionsResp
         }
       </div>
       <div class="shrink-0 text-[11px] text-[var(--text-muted)] tabular-nums">
-        ${transitions.length} transitions
+        ${transitions.length}건
       </div>
     </div>
   `
@@ -114,22 +114,22 @@ export function KeeperPhaseTimeline() {
   const keeperList = keepers.value
 
   if (isLoading && data.size === 0) {
-    return html`<div class="text-[12px] text-[var(--text-muted)] py-4 text-center">Phase timeline loading...</div>`
+    return html`<div class="text-[12px] text-[var(--text-muted)] py-4 text-center">페이즈 타임라인 로딩 중...</div>`
   }
 
   if (keeperList.length === 0) {
-    return html`<div class="text-[12px] text-[var(--text-muted)] py-4 text-center">No keepers registered</div>`
+    return html`<div class="text-[12px] text-[var(--text-muted)] py-4 text-center">등록된 키퍼 없음</div>`
   }
 
   return html`
     <div class="flex flex-col gap-2">
       <div class="flex items-center justify-between mb-1">
-        <div class="text-[11px] text-[var(--text-muted)] uppercase tracking-wider font-medium">Phase Transitions (recent 30)</div>
+        <div class="text-[11px] text-[var(--text-muted)] uppercase tracking-wider font-medium">페이즈 전환 (최근 30건)</div>
         <button
           type="button"
           class="text-[11px] text-[var(--text-dim)] hover:text-[var(--text-body)] transition-colors"
           onClick=${() => { void loadAll() }}
-        >refresh</button>
+        >새로고침</button>
       </div>
       ${keeperList.map(k => {
         const d = data.get(k.name)
@@ -138,7 +138,7 @@ export function KeeperPhaseTimeline() {
           : html`
             <div class="flex items-center gap-3 py-2 px-3 rounded-lg border border-[var(--white-6)] bg-[var(--white-3)]" key=${k.name}>
               <div class="w-24 text-[13px] font-semibold text-[var(--text-strong)] truncate">${k.name}</div>
-              <span class="text-[11px] text-[var(--text-muted)]">no data</span>
+              <span class="text-[11px] text-[var(--text-muted)]">데이터 없음</span>
             </div>
           `
       })}

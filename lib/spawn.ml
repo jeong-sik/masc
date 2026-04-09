@@ -369,8 +369,12 @@ let spawn ~agent_name ~prompt ?timeout_seconds ?working_dir () =
       cost_usd = None;
     }
   else (
+    (* prompt_args before mcp_args: yargs parses -p <prompt> first,
+       preventing --allowed-tools array values from leaking into
+       positional query slot. Fixes gemini "Cannot use both a positional
+       prompt and the --prompt (-p) flag together" error. (#5975) *)
     let cmd_args =
-      [ "timeout"; string_of_int timeout ] @ base_args @ mcp_args @ prompt_args
+      [ "timeout"; string_of_int timeout ] @ base_args @ prompt_args @ mcp_args
     in
     let cmd_array = Array.of_list cmd_args in
 

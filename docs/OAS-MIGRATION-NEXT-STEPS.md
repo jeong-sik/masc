@@ -43,7 +43,7 @@ They do. The gap is that the bridge is still lossy.
 
 - background swarm workers keep working after restart and can use real supported tools
 - operator/dashboard can inspect more than just final swarm success/failure
-- team-session bridge no longer describes itself as a heavily lossy projection
+- team-session bridge가 현재 loss budget과 omitted surfaces를 명시적으로 문서화한다
 
 ## Priority 2: Finish Runtime Consolidation
 
@@ -54,7 +54,7 @@ This pass reduced duplication, but one important path still remains outside the 
 - dashboard provider single-run now routes through `Oas_worker.run_model`
 - initial local worker run now routes through `Worker_oas.run_worker_via_oas`
 - local worker resume/continue now routes through `Worker_oas.resume_worker_via_oas`
-- team-session collaboration metadata now preserves richer worker/session semantics
+- team-session bridge는 `worker_specs`와 prompt context만 유지하고 `collaboration_context`는 제거 개념으로 둔다
 - swarm lifecycle events now include per-agent telemetry detail
 - `resource_check` now validates persisted running-session state, not just room initialization
 

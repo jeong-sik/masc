@@ -53,7 +53,7 @@ OAS  ──does not know──→ MASC
 | Event bus bridge | Complete for current `masc:*` flow | `oas_events.ml` publishes, `oas_sse_bridge.ml` relays to dashboard SSE |
 | Checkpoint integration | Partial complete | OAS checkpoint is used in shared worker/runtime paths, and the public OAS worker API now keeps the extra JSON as a neutral checkpoint sidecar. Keeper runtime still persists its own `working_context` / serialized checkpoint path in `lib/keeper/keeper_exec_context.ml` |
 | Memory bridge | Partial complete | long-term + procedural + institution episodic are bridged; broader memory unification is still separate |
-| Team-session swarm | Partial complete | OAS Swarm runner is active; current bridge uses `swarm_config` / `agent_entry` + worker metadata with `collaboration_context=None`, but fidelity is still incomplete |
+| Team-session swarm | Partial complete | OAS Swarm runner is active; current bridge uses `swarm_config` / `agent_entry` + worker metadata while intentionally omitting `collaboration_context`, so fidelity is still incomplete |
 
 ## Boundary Audit Snapshot
 

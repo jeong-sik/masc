@@ -3,7 +3,7 @@
 Current field map for `team_session_oas_bridge.ml`.
 
 **Current truth**: the bridge projects into OAS `swarm_config` / `agent_entry`
-and keeps `collaboration_context = None`. Session/worker semantics survive
+and intentionally omits `collaboration_context`. Session/worker semantics survive
 mainly through typed swarm fields plus `worker_specs` metadata JSON.
 
 ## planned_worker (23 fields) -> agent_entry (4 fields)
@@ -55,7 +55,7 @@ the remaining 18 are metadata-only in `worker_specs`, and 0 are truly dropped.
 | (hardcoded) | max_agent_retries | 1 |
 | (hardcoded) | enable_streaming | false |
 | (runtime) | resource_check | Health check closure |
-| (constant) | collaboration_context | Always `None` in current bridge |
+| (constant) | collaboration_context | Omitted by design |
 
 ### Preserved outside typed swarm_config fields
 
@@ -110,4 +110,4 @@ by apply_swarm_result after swarm execution completes.
 |-----------|--------|----------------|-----------------------------|---------------|
 | planned_worker -> agent_entry | 24 | 4 | `worker_specs` JSON | 0 |
 | session -> swarm_config | 47 | 12 | worker metadata + runtime/proof/session surfaces | 16 (metrics/post-exec) |
-| collaboration_context | 1 | 0 | none | 1 (`None` in current bridge) |
+| collaboration_context | 1 | 0 | none | 1 (removed by design) |

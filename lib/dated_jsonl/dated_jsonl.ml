@@ -277,4 +277,22 @@ let prune t ~days =
     !deleted
   end
 
-(* Duplicate count_entries removed — canonical definition at line 225 *)
+let count_entries t =
+  let total = ref 0 in
+  let months = list_month_dirs t.base_dir in
+  List.iter (fun m ->
+    let month_path = Filename.concat t.base_dir m in
+    let days = list_day_files month_path in
+    List.iter (fun d ->
+      let path = Filename.concat month_path d in
+      if Fs_compat.file_exists path then begin
+        let ic = open_in_bin path in
+        Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
+          try while true do
+            let line = input_line ic in
+            if String.length line > 0 then incr total
+          done with End_of_file -> ())
+      end
+    ) days
+  ) months;
+  !total

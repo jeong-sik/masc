@@ -154,6 +154,15 @@ let running_under_test_executable () =
   in
   String.starts_with ~prefix:"test_" executable
 
+let realpath p =
+  try Unix.realpath p with Unix.Unix_error _ -> p
+
+let is_ancestor_path ~ancestor ~descendant =
+  let a = realpath ancestor in
+  let d = realpath descendant in
+  let a = if String.ends_with ~suffix:"/" a then a else a ^ "/" in
+  String.starts_with ~prefix:a d
+
 let should_ignore_inherited_base_path ~requested_path ~explicit_path =
   not (bool_env "MASC_ALLOW_INHERITED_BASE_PATH")
   && String.trim requested_path <> ""
@@ -164,6 +173,7 @@ let should_ignore_inherited_base_path ~requested_path ~explicit_path =
   requested <> ""
   && explicit <> ""
   && not (String.equal requested explicit)
+  && not (is_ancestor_path ~ancestor:explicit ~descendant:requested)
   && path_has_masc_dir requested
   && path_has_masc_dir explicit
 
@@ -174,6 +184,8 @@ let should_ignore_inherited_test_base_path ~requested_path ~explicit_path =
   && String.trim requested_path <> ""
   && not (String.equal requested_path ".")
   && not (String.equal explicit_path requested_path)
+  && not (is_ancestor_path ~ancestor:(canonical_base_path explicit_path)
+            ~descendant:(canonical_base_path requested_path))
 
 let sync_test_base_path_env resolved_path =
   if running_under_test_executable ()
@@ -199,8 +211,10 @@ let resolve_requested_base_path path =
     directly unless a test executable intentionally ignores an inherited
     override. Git root detection applies for worktree auto-resolution when
     no explicit path is configured, or when that inherited test override is
-    ignored. This prevents a sub-repo .git (e.g. masc-mcp/) from hijacking
-    the intended base path. *)
+    ignored. When the explicit path is an ancestor of the requested path
+    (e.g. ~/me contains ~/me/workspace/.../masc-mcp), the ancestor wins
+    because the sub-repo is part of the parent project. Only unrelated
+    sibling paths with dual .masc/ dirs trigger the ignore guard. *)
 let resolve_masc_base_path path =
   match Env_config_core.base_path_opt () with
   | Some explicit

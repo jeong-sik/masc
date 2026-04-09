@@ -42,8 +42,12 @@ import type {
 
 // --- Dashboard projections ---
 
-export function fetchDashboardShell(): Promise<DashboardShellResponse> {
-  return get('/api/v1/dashboard/shell')
+type AbortableRequestOptions = {
+  signal?: AbortSignal
+}
+
+export function fetchDashboardShell(opts?: AbortableRequestOptions): Promise<DashboardShellResponse> {
+  return get('/api/v1/dashboard/shell', { signal: opts?.signal })
 }
 
 // --- System logs ---
@@ -180,12 +184,15 @@ export function fetchDashboardConfig(): Promise<DashboardConfigResponse> {
   return get('/api/v1/dashboard/config')
 }
 
-export function fetchDashboardNamespaceTruth(): Promise<DashboardNamespaceTruthResponse> {
-  return get('/api/v1/dashboard/namespace-truth', { timeoutMs: NAMESPACE_TRUTH_GET_TIMEOUT_MS })
+export function fetchDashboardNamespaceTruth(opts?: AbortableRequestOptions): Promise<DashboardNamespaceTruthResponse> {
+  return get('/api/v1/dashboard/namespace-truth', {
+    timeoutMs: NAMESPACE_TRUTH_GET_TIMEOUT_MS,
+    signal: opts?.signal,
+  })
 }
 
-export function fetchDashboardExecution(): Promise<DashboardExecutionResponse> {
-  return get('/api/v1/dashboard/execution')
+export function fetchDashboardExecution(opts?: AbortableRequestOptions): Promise<DashboardExecutionResponse> {
+  return get('/api/v1/dashboard/execution', { signal: opts?.signal })
 }
 
 export type ToolQualityToolStat = {
@@ -226,11 +233,11 @@ export type ToolQualityResponse = {
   hourly_trend?: ToolQualityHourlyPoint[]
 }
 
-export function fetchToolQuality(opts?: { n?: number }): Promise<ToolQualityResponse> {
+export function fetchToolQuality(opts?: { n?: number; signal?: AbortSignal }): Promise<ToolQualityResponse> {
   const params = new URLSearchParams()
   if (opts?.n != null) params.set('n', String(opts.n))
   const qs = params.toString()
-  return get<ToolQualityResponse>(`/api/v1/dashboard/tool-quality${qs ? `?${qs}` : ''}`)
+  return get<ToolQualityResponse>(`/api/v1/dashboard/tool-quality${qs ? `?${qs}` : ''}`, { signal: opts?.signal })
 }
 
 export interface DashboardPerfRow {
@@ -679,8 +686,8 @@ export function fetchToolMetrics(): Promise<ToolMetricsResponse> {
   return get('/api/v1/tool-metrics')
 }
 
-export async function fetchDashboardTools(): Promise<DashboardToolsResponse> {
-  const raw = await get<DashboardToolsResponse>('/api/v1/dashboard/tools')
+export async function fetchDashboardTools(opts?: AbortableRequestOptions): Promise<DashboardToolsResponse> {
+  const raw = await get<DashboardToolsResponse>('/api/v1/dashboard/tools', { signal: opts?.signal })
   const normalizedTools = raw.tool_inventory?.tools?.map(t => ({
     ...t,
     category: t.category ?? 'uncategorized',
@@ -1252,6 +1259,7 @@ export function fetchTelemetry(opts?: {
   operation_id?: string
   worker_run_id?: string
   n?: number
+  signal?: AbortSignal
 }): Promise<TelemetryResponse> {
   const params = new URLSearchParams()
   if (opts?.source) params.set('source', opts.source)
@@ -1261,11 +1269,11 @@ export function fetchTelemetry(opts?: {
   if (opts?.worker_run_id) params.set('worker_run_id', opts.worker_run_id)
   if (opts?.n) params.set('n', String(opts.n))
   const qs = params.toString()
-  return get<TelemetryResponse>(`/api/v1/dashboard/telemetry${qs ? '?' + qs : ''}`)
+  return get<TelemetryResponse>(`/api/v1/dashboard/telemetry${qs ? '?' + qs : ''}`, { signal: opts?.signal })
 }
 
-export function fetchTelemetrySummary(): Promise<TelemetrySummaryResponse> {
-  return get<TelemetrySummaryResponse>('/api/v1/dashboard/telemetry/summary')
+export function fetchTelemetrySummary(opts?: AbortableRequestOptions): Promise<TelemetrySummaryResponse> {
+  return get<TelemetrySummaryResponse>('/api/v1/dashboard/telemetry/summary', { signal: opts?.signal })
 }
 
 // --- Excuse Patterns ---

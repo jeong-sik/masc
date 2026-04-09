@@ -1097,7 +1097,24 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
                 let committed_tools =
                   committed_mutating_tools !mutating_tools_committed
                 in
-                if committed_tools <> [] then begin
+                if committed_tools <> []
+                   && Keeper_tool_registry.all_tools_reconcile_safe
+                        committed_tools
+                   && is_transient_network_error err
+                then begin
+                  (* All committed tools are board-like (duplicate-tolerant)
+                     AND the failure is transient.  Permanent errors (401, 403,
+                     malformed request) must NOT bypass — they would loop
+                     forever on retry.  Duplicate board posts are an acceptable
+                     cost vs. a permanently stuck keeper. *)
+                  let err_preview = short_preview (Oas.Error.to_string err) in
+                  Log.Keeper.warn
+                    "%s: transient error after committed reconcile-safe tool(s) [%s] — auto-recovering, no manual reconcile (error: %s)"
+                    meta.name
+                    (String.concat ", " committed_tools)
+                    err_preview;
+                  Error err
+                end else if committed_tools <> [] then begin
                   let reclassified, failure_reason =
                     match
                       classify_post_commit_failure
@@ -1191,7 +1208,23 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
             let committed_tools =
               committed_mutating_tools !mutating_tools_committed
             in
-            if committed_tools <> [] then begin
+            if committed_tools <> []
+               && Keeper_tool_registry.all_tools_reconcile_safe
+                    committed_tools
+            then begin
+              (* Timeouts are inherently transient — the provider was
+                 reachable (tools executed) but took too long.  Board-only
+                 committed tools are duplicate-tolerant, so we skip
+                 manual_reconcile.  Unlike the retry_loop path, no
+                 is_transient check is needed: a wall-clock timeout after
+                 successful tool execution is always transient by nature. *)
+              Log.Keeper.warn
+                "%s: turn wall-clock timeout after committed reconcile-safe tool(s) [%s] — auto-recovering, no manual reconcile (timeout: %s)"
+                meta.name
+                (String.concat ", " committed_tools)
+                msg;
+              Error (Oas.Error.Api (Timeout { message = msg }))
+            end else if committed_tools <> [] then begin
               let timeout_err =
                 Oas.Error.Api (Timeout { message = msg })
               in

@@ -1,7 +1,7 @@
 // Telemetry Unified — MASC runtime diagnosis view.
 
 import { html } from 'htm/preact'
-import { useEffect } from 'preact/hooks'
+import { useEffect, useRef } from 'preact/hooks'
 import { useSignal } from '@preact/signals'
 import {
   fetchDashboardShell,
@@ -14,8 +14,10 @@ import {
   type TelemetrySourceSummary,
 } from '../api/dashboard'
 import { route } from '../router'
+import { TELEMETRY_AUTO_REFRESH_MS } from '../config/constants'
 import { TELEMETRY_SOURCE_META, telemetrySourceMeta } from '../config/telemetry-sources'
 import { formatTimeAgo } from '../lib/format-time'
+import { formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../lib/auto-refresh'
 
 interface StoreSnapshot {
   keepers: number
@@ -74,6 +76,10 @@ function timeAgoSafe(ts: number): string {
 
 function normalizeText(value: unknown): string | null {
   return typeof value === 'string' && value.trim() !== '' ? value.trim() : null
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError'
 }
 
 function normalizeStringArray(value: unknown): string[] {
@@ -233,6 +239,9 @@ ${JSON.stringify(entry, null, 2)}</pre>
 
 export function TelemetryUnified() {
   const params = route.value.params
+  const latestRequestId = useRef(0)
+  const activeController = useRef<AbortController | null>(null)
+  const autoRefreshLoadRef = useRef<() => Promise<void>>(async () => undefined)
   const state = useSignal<TelemetryState>({
     entries: [],
     summary: [],
@@ -259,12 +268,21 @@ export function TelemetryUnified() {
   ])
 
   async function load() {
+    activeController.current?.abort()
+    const controller = new AbortController()
+    activeController.current = controller
+    const requestId = ++latestRequestId.current
     state.value = { ...state.value, loading: true, error: null }
     try {
+      const catchStoreFailure = <T,>(promise: Promise<T>) =>
+        promise.catch(error => {
+          if (isAbortError(error)) throw error
+          return null
+        })
       const storePromise = Promise.all([
-        fetchDashboardShell().catch(() => null),
-        fetchDashboardTools().catch(() => null),
-        fetchDashboardNamespaceTruth().catch(() => null),
+        catchStoreFailure(fetchDashboardShell({ signal: controller.signal })),
+        catchStoreFailure(fetchDashboardTools({ signal: controller.signal })),
+        catchStoreFailure(fetchDashboardNamespaceTruth({ signal: controller.signal })),
       ]).then(([shell, tools, truth]) => {
         const counts = shell?.counts
         const execSummary = truth?.execution?.summary
@@ -294,10 +312,12 @@ export function TelemetryUnified() {
           operation_id: operationFilter.value || undefined,
           worker_run_id: workerRunFilter.value || undefined,
           n: limit.value,
+          signal: controller.signal,
         }),
-        fetchTelemetrySummary(),
+        fetchTelemetrySummary({ signal: controller.signal }),
         storePromise,
       ])
+      if (requestId !== latestRequestId.current) return
       state.value = {
         entries: telemetry.entries,
         summary: summary.sources,
@@ -307,15 +327,23 @@ export function TelemetryUnified() {
         error: null,
       }
     } catch (e) {
+      if (isAbortError(e) || requestId !== latestRequestId.current) return
       state.value = {
         ...state.value,
         loading: false,
         error: e instanceof Error ? e.message : String(e),
       }
+    } finally {
+      if (activeController.current === controller) {
+        activeController.current = null
+      }
     }
   }
+  autoRefreshLoadRef.current = load
 
-  useEffect(() => { void load() }, [
+  useEffect(() => {
+    void load()
+  }, [
     sourceFilter.value,
     keeperFilter.value,
     sessionFilter.value,
@@ -323,6 +351,15 @@ export function TelemetryUnified() {
     workerRunFilter.value,
     limit.value,
   ])
+
+  useEffect(() => {
+    const disposeAutoRefresh = setupVisibleAutoRefresh(() => autoRefreshLoadRef.current(), TELEMETRY_AUTO_REFRESH_MS)
+    return () => {
+      disposeAutoRefresh()
+      activeController.current?.abort()
+      activeController.current = null
+    }
+  }, [])
 
   const { entries, summary, totalEntries, store, loading, error } = state.value
 
@@ -428,6 +465,7 @@ export function TelemetryUnified() {
         >
           Refresh
         </button>
+        <span class="text-xs text-[var(--text-muted)]">${formatAutoRefreshLabel(TELEMETRY_AUTO_REFRESH_MS)}</span>
         ${loading ? html`<span class="text-xs text-[var(--text-muted)]">로딩 중...</span>` : null}
       </div>
 

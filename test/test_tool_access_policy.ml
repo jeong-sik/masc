@@ -541,6 +541,8 @@ let test_autoresearch_keeper_tools_exclude_repo_synthesis_front_door () =
     (List.mem "masc_autoresearch_swarm_start" raw_names);
   check bool "repo synthesis swarm start exists in raw autoresearch schemas" true
     (List.mem "masc_repo_synthesis_swarm_start" raw_names);
+  check bool "solo autoresearch start survives filtered shard" true
+    (List.mem "masc_autoresearch_start" names);
   check bool "autoresearch swarm start excluded from autoresearch shard" false
     (List.mem "masc_autoresearch_swarm_start" names);
   check bool "repo synthesis swarm start excluded from autoresearch shard" false

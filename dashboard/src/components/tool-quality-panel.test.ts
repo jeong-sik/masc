@@ -142,6 +142,32 @@ describe('ToolQualityPanel', () => {
     expect(container.textContent).not.toContain('오류:')
   })
 
+  it('refreshes again when the refresh button is clicked', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => payload,
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const { ToolQualityPanel } = await import('./tool-quality-panel')
+
+    await act(async () => {
+      render(html`<${ToolQualityPanel} />`, container)
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    const button = container.querySelector('button[aria-label="도구 품질 새로고침"]')
+    expect(button).not.toBeNull()
+
+    await act(async () => {
+      button?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
   it('stops auto-refresh after the panel unmounts', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

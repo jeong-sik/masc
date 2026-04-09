@@ -136,7 +136,8 @@ let test_connectors_json_advertises_gate_connector_descriptor () =
               ] );
         ]
     in
-    let json = Discord_state.connectors_json ~gate_status_json () in
+    Masc_mcp.Channel_gate_connector.register (module Discord_state);
+    let json = Masc_mcp.Channel_gate_connector.connectors_json ~gate_status_json () in
     let connectors = json |> U.member "connectors" |> U.to_list in
     check int "one connector" 1 (List.length connectors);
     let connector = List.hd connectors in

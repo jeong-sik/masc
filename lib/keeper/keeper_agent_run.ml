@@ -161,6 +161,7 @@ let run_turn
          base_system_prompt:string -> messages:Agent_sdk.Types.message list -> turn_prompt)
       ~(user_message : string)
       ~(cascade_name : string)
+      ?provider_filter
       ~(generation : int)
       ?(max_turns : int = Env_config_keeper.KeeperKeepalive.oas_max_turns_per_call)
       (* Per-call turn budget. Keeper resumes via checkpoint if exhausted. *)
@@ -1370,6 +1371,7 @@ let run_turn
        Keeper_llm_bridge.run_with_timeout_and_fallback ~timeout_s (fun () ->
          Oas_worker.run_named
            ~cascade_name
+           ?provider_filter
            ~goal:user_message
            ~priority
            ~session_id:meta.runtime.trace_id

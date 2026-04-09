@@ -77,6 +77,7 @@ val default_model_strings : cascade_name:string -> string list
 val run_named :
   cascade_name:string ->
   goal:string ->
+  ?provider_filter:string list ->
   ?priority:Llm_provider.Request_priority.t ->
   ?session_id:string ->
   ?system_prompt:string ->

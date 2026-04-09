@@ -651,36 +651,8 @@ let with_personas_dir f =
       Masc_mcp.Config_dir_resolver.reset ();
       f personas_dir)
 
-let test_filter_by_providers_none () =
-  let models = [ "glm:auto"; "ollama:auto" ] in
-  let result = Masc_mcp.Oas_model_resolve.filter_by_providers None models in
-  check (list string) "None returns all" models result
-
-let test_filter_by_providers_empty () =
-  let models = [ "glm:auto"; "ollama:auto" ] in
-  let result = Masc_mcp.Oas_model_resolve.filter_by_providers (Some []) models in
-  check (list string) "empty list returns all" models result
-
-let test_filter_by_providers_single () =
-  let result =
-    Masc_mcp.Oas_model_resolve.filter_by_providers
-      (Some [ "ollama" ]) [ "glm:auto"; "ollama:auto" ]
-  in
-  check (list string) "single match" [ "ollama:auto" ] result
-
-let test_filter_by_providers_no_match () =
-  let models = [ "glm:auto"; "ollama:auto" ] in
-  let result =
-    Masc_mcp.Oas_model_resolve.filter_by_providers (Some [ "nonexistent" ]) models
-  in
-  check (list string) "no match falls back to all" models result
-
-let test_filter_by_providers_multi () =
-  let result =
-    Masc_mcp.Oas_model_resolve.filter_by_providers
-      (Some [ "glm"; "ollama" ]) [ "glm:auto"; "ollama:auto"; "claude:opus" ]
-  in
-  check (list string) "multi match" [ "glm:auto"; "ollama:auto" ] result
+(* filter_by_providers tests removed — filtering now in OAS cascade.
+   See masc-mcp#6001, oas#740. *)
 
 let test_profile_allowed_providers () =
   let input = {|
@@ -808,14 +780,6 @@ let () =
             test_profile_allowed_providers;
           test_case "allowed_providers absent" `Quick
             test_profile_allowed_providers_absent;
-        ] );
-      ( "filter_by_providers",
-        [
-          test_case "None returns all" `Quick test_filter_by_providers_none;
-          test_case "empty returns all" `Quick test_filter_by_providers_empty;
-          test_case "single match" `Quick test_filter_by_providers_single;
-          test_case "no match falls back" `Quick test_filter_by_providers_no_match;
-          test_case "multi match" `Quick test_filter_by_providers_multi;
         ] );
       ( "file_loading",
         [

@@ -140,9 +140,9 @@ let keeper_action_kind_of_tool_names tool_names =
 
 
 let effective_model_labels_for_turn (m : keeper_meta) : string list =
+  (* provider filtering now handled by OAS cascade via ~provider_filter *)
   let configured =
     Oas_model_resolve.models_of_cascade_name m.cascade_name
-    |> Oas_model_resolve.filter_by_providers m.allowed_providers
   in
   let configured_ids =
     try

@@ -267,7 +267,6 @@ let read_context_ratio ~(config : Room.config) ~(meta : keeper_meta) : float =
   try
     let cascade_models =
       Oas_model_resolve.models_of_cascade_name meta.cascade_name
-      |> Oas_model_resolve.filter_by_providers meta.allowed_providers
     in
     let primary_max_context =
       Oas_model_resolve.resolve_max_cascade_context cascade_models
@@ -292,7 +291,6 @@ let read_continuity_summary ~(config : Room.config) ~(meta : keeper_meta)
   try
     let cascade_models =
       Oas_model_resolve.models_of_cascade_name meta.cascade_name
-      |> Oas_model_resolve.filter_by_providers meta.allowed_providers
     in
     let primary_max_context =
       Oas_model_resolve.resolve_max_cascade_context cascade_models

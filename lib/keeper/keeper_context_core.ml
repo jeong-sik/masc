@@ -44,7 +44,16 @@ let ensure_dir path =
 
     All OAS Context_reducer estimation calls in MASC pass through this
     module.  Other keeper modules must NOT call
-    [Agent_sdk.Context_reducer.estimate_*] directly for decision-making. *)
+    [Agent_sdk.Context_reducer.estimate_*] directly for decision-making.
+
+    @boundary-contract
+    - MASC owns: observation (context_ratio for logging, compaction strategy
+      selection, dashboard display). Token estimates are read-only signals.
+    - OAS owns: authoritative token estimation (CJK-aware, ceil-based),
+      context budget enforcement during Agent.run, compaction execution.
+    - Neither may: MASC must not add safety buffers on top of OAS estimates
+      (removed in #5053); OAS estimates must not be used as exact counts
+      for billing or hard limits. *)
 
 (** Estimate token count for a raw string (CJK-aware). *)
 let estimate_char_tokens (s : string) : int =

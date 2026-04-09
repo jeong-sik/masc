@@ -169,6 +169,51 @@ export function fetchDashboardExecution(): Promise<DashboardExecutionResponse> {
   return get('/api/v1/dashboard/execution')
 }
 
+export type ToolQualityToolStat = {
+  name: string
+  calls: number
+  success_pct: number
+  avg_ms: number
+  output_truncated_count?: number
+  avg_output_chars?: number
+}
+
+export type ToolQualityKeeperStat = {
+  name: string
+  calls: number
+  success_pct: number
+}
+
+export type ToolQualityFailureCategory = {
+  category: string
+  count: number
+}
+
+export type ToolQualityHourlyPoint = {
+  hour: string
+  calls: number
+  success: number
+  success_rate: number
+}
+
+export type ToolQualityResponse = {
+  total: number
+  success: number
+  failure: number
+  success_rate: number
+  by_tool: ToolQualityToolStat[]
+  by_keeper: ToolQualityKeeperStat[]
+  failure_categories: ToolQualityFailureCategory[]
+  hourly_trend?: ToolQualityHourlyPoint[]
+}
+
+export function fetchToolQuality(opts?: { n?: number }): Promise<ToolQualityResponse> {
+  const params = new URLSearchParams()
+  if (opts?.n != null) params.set('n', String(opts.n))
+  const qs = params.toString()
+  return get<ToolQualityResponse>(`/api/v1/dashboard/tool-quality${qs ? `?${qs}` : ''}`)
+}
+
 export interface DashboardPerfRow {
   benchmark: string
   avg_ms: number

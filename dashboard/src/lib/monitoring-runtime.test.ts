@@ -137,7 +137,6 @@ describe('summarizeKeeperMonitoring', () => {
     expect(summary.phase.label).toBe('오프라인')
     expect(summary.hint).toContain('부팅')
   })
-
   it('keeps active stages only when they add new activity context', () => {
     const summary = summarizeKeeperMonitoring(
       makeKeeper({

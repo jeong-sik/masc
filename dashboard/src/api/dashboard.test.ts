@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { fetchDashboardTools } from './dashboard'
+import { fetchDashboardTools, fetchToolQuality } from './dashboard'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -74,5 +74,33 @@ describe('fetchDashboardTools', () => {
 
     const result = await fetchDashboardTools()
     expect(result.tool_inventory).toBeDefined()
+  })
+})
+
+describe('fetchToolQuality', () => {
+  it('passes through the requested sample window', async () => {
+    const rawResponse = {
+      total: 1,
+      success: 1,
+      failure: 0,
+      success_rate: 100,
+      by_tool: [],
+      by_keeper: [],
+      failure_categories: [],
+    }
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(rawResponse), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchToolQuality({ n: 250 })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/tool-quality?n=250')
+    expect(result.total).toBe(1)
   })
 })

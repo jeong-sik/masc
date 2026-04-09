@@ -316,6 +316,7 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         model,
         primary_model: asString(row.primary_model),
         active_model: asString(row.active_model),
+        last_model_used: asString(row.last_model_used),
         next_model_hint: asString(row.next_model_hint) ?? null,
         status: normalizeKeeperAgentStatus(statusRaw),
         presence_keepalive:
@@ -340,6 +341,9 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         last_autonomous_action_at: toIsoTimestamp(row.last_autonomous_action_at) ?? asString(row.last_autonomous_action_at) ?? null,
         generation: asNumber(row.generation),
         turn_count: asNumber(row.turn_count) ?? asNumber(row.total_turns),
+        total_turns: asNumber(row.total_turns) ?? asNumber(row.turn_count),
+        total_tokens: asNumber(row.total_tokens),
+        last_latency_ms: asNumber(row.last_latency_ms),
         autonomous_action_count: asNumber(row.autonomous_action_count),
         autonomous_turn_count: asNumber(row.autonomous_turn_count),
         autonomous_text_turn_count: asNumber(row.autonomous_text_turn_count),

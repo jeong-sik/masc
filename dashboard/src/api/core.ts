@@ -199,6 +199,8 @@ function bootstrapInitializingPayload(path: string): unknown | null {
         providers: {},
         meta_cognition: null,
         auth: null,
+        config_resolution: null,
+        runtime_resolution: null,
       }
     case '/api/v1/dashboard/namespace-truth':
     case '/api/v1/dashboard/room-truth':

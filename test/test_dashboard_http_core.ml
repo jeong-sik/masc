@@ -147,12 +147,35 @@ let test_dashboard_shell_http_json_includes_paths () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   let json = Lib.Server_dashboard_http_core.dashboard_shell_http_json config in
   let open Yojson.Safe.Util in
-  let paths = json |> member "paths" in
+  let fields =
+    match json with
+    | `Assoc fields -> fields
+    | _ -> Alcotest.fail "dashboard shell payload must be an object"
+  in
+  let paths =
+    match List.assoc_opt "paths" fields with
+    | Some value -> value
+    | None -> Alcotest.fail "paths key missing from dashboard shell payload"
+  in
+  let config_resolution =
+    List.assoc_opt "config_resolution" fields
+    |> Option.value ~default:`Null
+  in
+  let runtime_resolution =
+    List.assoc_opt "runtime_resolution" fields
+    |> Option.value ~default:`Null
+  in
   let effective_base_path = paths |> member "effective_base_path" |> to_string in
   let effective_masc_root = paths |> member "effective_masc_root" |> to_string in
   let expected_masc_root = Unix.realpath (Filename.concat config.base_path ".masc") in
   check bool "paths present" true
     (match paths with `Assoc _ -> true | _ -> false);
+  check bool "paths key present" true
+    (List.mem_assoc "paths" fields);
+  check bool "config_resolution key present" true
+    (List.mem_assoc "config_resolution" fields);
+  check bool "runtime_resolution key present" true
+    (List.mem_assoc "runtime_resolution" fields);
   check string "effective_base_path matches config" (Unix.realpath config.base_path)
     effective_base_path;
   check string "effective_masc_root matches config" expected_masc_root
@@ -160,7 +183,36 @@ let test_dashboard_shell_http_json_includes_paths () =
   check bool "paths include cwd" true
     (match paths |> member "cwd" with
      | `String value -> String.length value > 0
-     | _ -> false)
+     | _ -> false);
+  check bool "shell config resolution is object or null" true
+    (match config_resolution with
+     | `Assoc _ | `Null -> true
+     | _ -> false);
+  check bool "shell config root path surfaced when available" true
+    (match config_resolution with
+     | `Null -> true
+     | _ -> (
+         match config_resolution |> member "config_root" |> member "path" with
+         | `String value -> String.length value > 0
+         | _ -> false));
+  check bool "shell runtime resolution is object or null" true
+    (match runtime_resolution with
+     | `Assoc _ | `Null -> true
+     | _ -> false);
+  check bool "shell runtime data root path surfaced when available" true
+    (match runtime_resolution with
+     | `Null -> true
+     | _ -> (
+         match runtime_resolution |> member "data_root" |> member "path" with
+         | `String value -> String.length value > 0
+         | _ -> false));
+  check bool "shell runtime warnings surfaced as list when available" true
+    (match runtime_resolution with
+     | `Null -> true
+     | _ -> (
+         match runtime_resolution |> member "warnings" with
+         | `List _ -> true
+         | _ -> false))
 
 let () =
   run "dashboard_http_core"

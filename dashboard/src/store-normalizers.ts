@@ -5,6 +5,10 @@ import type {
   DashboardExecutionQueueItem, DashboardExecutionSessionBrief,
   DashboardExecutionOperationBrief, DashboardExecutionWorkerSupportBrief,
   DashboardExecutionContinuityBrief,
+  DashboardConfigResolution,
+  DashboardConfigResolutionItem,
+  DashboardRuntimeDiagnostic,
+  DashboardRuntimeResolution,
   DashboardShellMetaCognitionBelief,
   DashboardShellMetaCognitionDesire,
   DashboardShellMetaCognitionSummary,
@@ -372,6 +376,87 @@ export function normalizeShellMetaCognitionSummary(
     dominant_belief: normalizeShellMetaCognitionBelief(raw.dominant_belief),
     top_tension: normalizeShellMetaCognitionTension(raw.top_tension),
     top_desire: normalizeShellMetaCognitionDesire(raw.top_desire),
+  }
+}
+
+export function normalizeDashboardConfigResolutionItem(
+  raw: unknown,
+): DashboardConfigResolutionItem | null {
+  if (!isRecord(raw)) return null
+  const path = asString(raw.path)
+  const source = asString(raw.source)
+  const exists = asBoolean(raw.exists)
+  if (!path || !source || exists == null) return null
+  return { path, source, exists }
+}
+
+export function normalizeDashboardConfigResolution(
+  raw: unknown,
+): DashboardConfigResolution | null {
+  if (!isRecord(raw)) return null
+  const status = asString(raw.status)
+  const configRoot = normalizeDashboardConfigResolutionItem(raw.config_root)
+  const cascade = normalizeDashboardConfigResolutionItem(raw.cascade)
+  const prompts = normalizeDashboardConfigResolutionItem(raw.prompts)
+  const keepers = normalizeDashboardConfigResolutionItem(raw.keepers)
+  const personas = normalizeDashboardConfigResolutionItem(raw.personas)
+  if (!status || !configRoot || !cascade || !prompts || !keepers || !personas) return null
+  return {
+    status: status as DashboardConfigResolution['status'],
+    warnings: asStringArray(raw.warnings),
+    config_root: configRoot,
+    cascade,
+    prompts,
+    keepers,
+    personas,
+  }
+}
+
+export function normalizeDashboardRuntimeDiagnostic(
+  raw: unknown,
+): DashboardRuntimeDiagnostic | null {
+  if (!isRecord(raw)) return null
+  const ts = asString(raw.ts)
+  const kind = asString(raw.kind)
+  const message = asString(raw.message)
+  if (!ts || !kind || !message) return null
+  return {
+    ts,
+    kind,
+    signal: asString(raw.signal),
+    message,
+  }
+}
+
+export function normalizeDashboardRuntimeResolution(
+  raw: unknown,
+): DashboardRuntimeResolution | null {
+  if (!isRecord(raw)) return null
+  const status = asString(raw.status)
+  const basePath = normalizeDashboardConfigResolutionItem(raw.base_path)
+  const workspacePath = normalizeDashboardConfigResolutionItem(raw.workspace_path)
+  const resolvedBasePath = normalizeDashboardConfigResolutionItem(raw.resolved_base_path)
+  const dataRoot = normalizeDashboardConfigResolutionItem(raw.data_root)
+  const promptMarkdownDir = normalizeDashboardConfigResolutionItem(raw.prompt_markdown_dir)
+  const build = normalizeBuildIdentity(raw.build)
+  if (!status || !basePath || !workspacePath || !resolvedBasePath || !dataRoot || !promptMarkdownDir || !build) {
+    return null
+  }
+  return {
+    status,
+    warnings: asStringArray(raw.warnings),
+    base_path: basePath,
+    workspace_path: workspacePath,
+    resolved_base_path: resolvedBasePath,
+    data_root: dataRoot,
+    prompt_markdown_dir: promptMarkdownDir,
+    workspace_git_commit: asString(raw.workspace_git_commit) ?? null,
+    resolved_base_git_commit: asString(raw.resolved_base_git_commit) ?? null,
+    source_mismatch: asBoolean(raw.source_mismatch) ?? false,
+    diagnostics: (Array.isArray(raw.diagnostics) ? raw.diagnostics : [])
+      .map(normalizeDashboardRuntimeDiagnostic)
+      .filter((item): item is DashboardRuntimeDiagnostic => item !== null),
+    build,
   }
 }
 

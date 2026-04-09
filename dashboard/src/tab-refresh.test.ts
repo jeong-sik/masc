@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from 'vitest'
+import { waitFor } from '@testing-library/preact'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('./store', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./store')>()
@@ -23,15 +24,29 @@ vi.mock('./components/tool-quality-panel', () => ({
   refreshToolQuality: vi.fn(),
 }))
 
+vi.mock('./components/feature-health', () => ({
+  refreshFeatureHealth: vi.fn(),
+}))
+
+vi.mock('./components/server-config', () => ({
+  refreshServerConfig: vi.fn(),
+}))
+
 vi.mock('./command-store', () => ({
   commandPlaneSurface: { value: 'overview' },
   refreshCommandPlaneChainSummary: vi.fn(),
   refreshCommandPlaneCurrentSurface: vi.fn(),
 }))
 
-import { refreshPlanForRoute } from './tab-refresh'
+import { refreshFeatureHealth } from './components/feature-health'
+import { refreshServerConfig } from './components/server-config'
+import { refreshForRoute, refreshPlanForRoute } from './tab-refresh'
 
 describe('refreshPlanForRoute', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
   it('hydrates overview from namespace truth and mission snapshot', () => {
     expect(refreshPlanForRoute({
       tab: 'overview',
@@ -93,5 +108,17 @@ describe('refreshPlanForRoute', () => {
       tab: 'lab',
       params: { section: 'tools' },
     })).toEqual([])
+  })
+
+  it('refreshes the inspector shell through server config once', async () => {
+    refreshForRoute({
+      tab: 'lab',
+      params: { section: 'inspector' },
+    })
+
+    await waitFor(() => {
+      expect(refreshFeatureHealth).toHaveBeenCalledTimes(1)
+      expect(refreshServerConfig).toHaveBeenCalledTimes(1)
+    })
   })
 })

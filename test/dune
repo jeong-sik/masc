@@ -754,6 +754,11 @@
  (libraries alcotest unix))
 
 (test
+ (name test_release_train_guard_script)
+ (modules test_release_train_guard_script)
+ (libraries alcotest unix))
+
+(test
  (name test_start_masc_mcp_script)
  (modules test_start_masc_mcp_script)
  (libraries alcotest unix))

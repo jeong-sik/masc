@@ -253,6 +253,16 @@ let seed_worker_run_meta config session_id =
         ("proof_risk_class", `String "medium");
         ("proof_execution_mode", `String "execute");
         ("proof_evidence_count", `Int 2);
+        ("evidence_session_id", `String "oas-session-proof-raw");
+        ( "trace_ref",
+          `Assoc
+            [
+              ("worker_run_id", `String "wr-proof-raw");
+              ("start_seq", `Int 1);
+              ("end_seq", `Int 8);
+              ("agent_name", `String "worker-a");
+              ("session_id", `String session_id);
+            ] );
         ("tool_names", `List [ `String "file_write"; `String "shell_exec" ]);
         ("tool_call_count", `Int 2);
         ("output_preview", `String "Patched calc.py and verification passed.");
@@ -321,6 +331,16 @@ let seed_raw_only_worker_run_meta config session_id =
         ("wait_mode", `String "background");
         ("trace_capability", `String "raw");
         ("success", `Bool true);
+        ("evidence_session_id", `String "oas-session-raw-only");
+        ( "trace_ref",
+          `Assoc
+            [
+              ("worker_run_id", `String "wr-raw-only");
+              ("start_seq", `Int 1);
+              ("end_seq", `Int 4);
+              ("agent_name", `String "worker-raw");
+              ("session_id", `String session_id);
+            ] );
         ("proof_present", `Bool false);
         ("proof_run_id", `Null);
         ("proof_status", `Null);
@@ -361,8 +381,14 @@ let test_dashboard_proof_projection () =
       let session_id = "ts-proof-fixture-001" in
       seed_session_artifacts config session_id;
       let json = Lib.Dashboard_proof.json ~config () in
-      check string "verdict" "proven"
+      check string "verdict requires validated worker evidence" "partial"
         (json |> U.member "proof_verdict" |> U.to_string);
+      check string "live verdict remains partial without validated worker run"
+        "partial"
+        (json |> U.member "summary" |> U.member "live_verdict" |> U.to_string);
+      check int "validated worker run count absent" 0
+        (json |> U.member "summary" |> U.member "validated_worker_run_count"
+       |> U.to_int);
       check string "session id" session_id
         (json |> U.member "session_id" |> U.to_string);
       check string "selection mode" "latest_auto_selected"
@@ -451,6 +477,11 @@ let test_dashboard_proof_exposes_validated_worker_run_evidence () =
         (worker |> U.member "proof_execution_mode" |> U.to_string);
       check int "worker proof evidence count" 2
         (worker |> U.member "proof_evidence_count" |> U.to_int);
+      check string "worker evidence session id" "oas-session-proof-raw"
+        (worker |> U.member "evidence_session_id" |> U.to_string);
+      check string "worker trace ref run id" "wr-proof-raw"
+        (worker |> U.member "trace_ref" |> U.member "worker_run_id"
+       |> U.to_string);
       check string "worker final text" "Patched calc.py and verification passed."
         (worker |> U.member "final_text" |> U.to_string);
       check bool "worker proof path hidden" true
@@ -483,6 +514,8 @@ let test_dashboard_proof_exposes_raw_only_worker_run_evidence () =
       let worker = List.hd worker_runs in
       check string "worker run id" "wr-raw-only"
         (worker |> U.member "worker_run_id" |> U.to_string);
+      check string "raw-only evidence session id" "oas-session-raw-only"
+        (worker |> U.member "evidence_session_id" |> U.to_string);
       check string "output preview surfaced" "Raw trace completed without proof."
         (worker |> U.member "output_preview" |> U.to_string);
       check bool "proof_present false preserved" false

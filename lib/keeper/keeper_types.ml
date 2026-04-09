@@ -155,9 +155,6 @@ type keeper_meta =
   ; (* -- Operational control (top-level, not runtime) -- *)
     continuity_summary : string
   ; active_goal_ids : string list
-  ; active_team_session_id : string option
-  ; last_team_session_started_at : string
-  ; team_session_start_count_total : int
   ; paused : bool
   ; current_task_id : string option
     (** Currently claimed task ID for cost attribution.
@@ -604,12 +601,6 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; "last_continuity_update_ts", `Float rt.last_continuity_update_ts
     ; "continuity_summary", `String m.continuity_summary
     ; "active_goal_ids", `List (List.map (fun s -> `String s) m.active_goal_ids)
-    ; ( "active_team_session_id"
-      , match m.active_team_session_id with
-        | Some value -> `String value
-        | None -> `Null )
-    ; "last_team_session_started_at", `String m.last_team_session_started_at
-    ; "team_session_start_count_total", `Int m.team_session_start_count_total
     ; "last_autonomous_action_at", `String rt.last_autonomous_action_at
     ; "autonomous_action_count", `Int rt.autonomous_action_count
     ; "autonomous_turn_count", `Int rt.autonomous_turn_count
@@ -685,9 +676,6 @@ type parsed_keeper_state =
   ; ps_updated_at_raw : string
   ; ps_continuity_summary : string
   ; ps_active_goal_ids : string list
-  ; ps_active_team_session_id : string option
-  ; ps_last_team_session_started_at : string
-  ; ps_team_session_start_count_total : int
   ; ps_paused : bool
   ; ps_current_task_id : string option
   ; ps_max_context_override : int option
@@ -965,15 +953,6 @@ let parse_keeper_state
     parse_last_continuity_update_ts ~continuity_summary:ps_continuity_summary json
   in
   let ps_active_goal_ids = Safe_ops.json_string_list "active_goal_ids" json in
-  let ps_active_team_session_id =
-    Safe_ops.json_string_opt "active_team_session_id" json
-  in
-  let ps_last_team_session_started_at =
-    Safe_ops.json_string ~default:"" "last_team_session_started_at" json
-  in
-  let ps_team_session_start_count_total =
-    Safe_ops.json_int ~default:0 "team_session_start_count_total" json
-  in
   let last_autonomous_action_at =
     Safe_ops.json_string ~default:"" "last_autonomous_action_at" json
   in
@@ -1004,9 +983,6 @@ let parse_keeper_state
   ; ps_updated_at_raw
   ; ps_continuity_summary
   ; ps_active_goal_ids
-  ; ps_active_team_session_id
-  ; ps_last_team_session_started_at
-  ; ps_team_session_start_count_total
   ; ps_paused
   ; ps_current_task_id
   ; ps_max_context_override
@@ -1099,9 +1075,6 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
                   else state.ps_updated_at_raw)
              ; continuity_summary = state.ps_continuity_summary
              ; active_goal_ids = state.ps_active_goal_ids
-             ; active_team_session_id = state.ps_active_team_session_id
-             ; last_team_session_started_at = state.ps_last_team_session_started_at
-             ; team_session_start_count_total = state.ps_team_session_start_count_total
              ; paused = state.ps_paused
              ; current_task_id = state.ps_current_task_id
              ; max_context_override = state.ps_max_context_override
@@ -1200,9 +1173,6 @@ let fallback_canonical_keeper_meta_key_names =
   ; "last_continuity_update_ts"
   ; "continuity_summary"
   ; "active_goal_ids"
-  ; "active_team_session_id"
-  ; "last_team_session_started_at"
-  ; "team_session_start_count_total"
   ; "last_autonomous_action_at"
   ; "autonomous_action_count"
   ; "autonomous_turn_count"

@@ -1,7 +1,7 @@
 # masc-mcp Roadmap
 
-> Current package version: v2.263.0
-> Latest release: v2.263.0 (2026-04-09)
+> Current package version: v0.2.0
+> Latest release: v0.2.0 (2026-04-09)
 > Updated: 2026-04-09
 
 This roadmap is the 6-8 week operating view for `masc-mcp`.
@@ -75,8 +75,9 @@ Important work that stays visible but does not drive the next 6-8 weeks:
 
 ## Release Lane Rules
 
-- Each minor release must close one user-visible promise.
-- Patch releases stabilize the active promise; they do not open a new one.
+- The active release line is pre-1.0: `0.y.0` opens a user-visible train and `0.y.z` stabilizes it.
+- Do not open `1.0.0` until repo coordination, release truth, and the core operator path are trustworthy without caveats.
+- Historical `v2.*` tags remain audit history only; they do not define the active SemVer policy.
 - Do not tag a release while `release-blocker` issues remain open.
 - Do not tag a release while version truth is broken across `dune-project`, `masc_mcp.opam`, `ROADMAP.md`, and `CHANGELOG.md`.
 - Prefer `target:now`, `target:next`, and `target:later` over vague backlog buckets.
@@ -84,6 +85,12 @@ Important work that stays visible but does not drive the next 6-8 weeks:
 ## Completed Reference Points
 
 See [CHANGELOG.md](CHANGELOG.md) for release-by-release details.
+
+| Version | Theme | Key deliverables |
+|--------|-------|------------------|
+| v0.2.0 | Release line reset | restart SemVer at pre-1.0, skip already-used `v0.1.x`, freeze legacy `v2.*` line, and teach release automation about the new series |
+
+Legacy `v2.*` reference points:
 
 | Version | Theme | Key deliverables |
 |--------|-------|------------------|

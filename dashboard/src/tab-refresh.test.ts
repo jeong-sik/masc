@@ -15,11 +15,6 @@ vi.mock('./namespace-truth-store', () => ({
   requestNamespaceTruth: vi.fn(),
 }))
 
-vi.mock('./operator-store', () => ({
-  refreshOperatorRoomDigest: vi.fn(),
-  refreshOperatorSnapshot: vi.fn(),
-}))
-
 vi.mock('./mission-store', () => ({
   refreshMissionSnapshot: vi.fn(),
 }))
@@ -52,7 +47,7 @@ describe('refreshPlanForRoute', () => {
     })).toEqual(['execution', 'activityGraph'])
   })
 
-  it('uses the current command sections', () => {
+  it('keeps the hidden command surface hydrated for ops queue deep links', () => {
     expect(refreshPlanForRoute({
       tab: 'command',
       params: { section: 'intervene' },

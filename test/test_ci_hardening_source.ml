@@ -469,7 +469,7 @@ let test_transport_route_contracts () =
   in
   let h2_delete_path_verifies_full_mcp_auth =
     file_contains_pattern "lib/server/server_h2_gateway.ml"
-      {|`DELETE, "/mcp" | `DELETE, "/mcp/managed" | `DELETE, "/mcp/operator" ->|}
+      {|`DELETE, "/mcp" | `DELETE, "/mcp/managed" ->|}
     && file_contains_pattern "lib/server/server_h2_gateway.ml"
          {|verify_mcp_auth ~base_path httpun_request|}
   in

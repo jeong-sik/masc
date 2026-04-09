@@ -1,8 +1,8 @@
 import type { RouteState } from './types'
 import { refreshExecution, refreshBoard, refreshGoals, refreshShell } from './store'
 import { requestNamespaceTruth } from './namespace-truth-store'
-import { refreshOperatorRoomDigest, refreshOperatorSnapshot } from './operator-store'
 import { refreshMissionSnapshot } from './mission-store'
+import { refreshOperatorRoomDigest, refreshOperatorSnapshot } from './operator-store'
 
 async function refreshActivityGraphSurface(): Promise<void> {
   const { refreshActivityGraph } = await import('./components/activity-graph')

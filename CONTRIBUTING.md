@@ -134,6 +134,15 @@ chore: bump version to 0.9.0
 6. **Include review evidence** from a non-self model
 7. **Wait for review**
 
+### Release Versioning
+
+- The active product line is pre-1.0: use `0.y.0` for a new promise train and `0.y.z` for stabilization inside that train.
+- `v2.*` tags are legacy history and are no longer the active release line.
+- After a release-line reset or new train bump lands on `main`, publish its tag before opening the next train bump.
+  Example: after merging `0.2.0`, tag `v0.2.0` before opening `0.3.0`.
+- Use `bash scripts/check-version-truth.sh` and `bash scripts/check-doc-truth.sh` before asking for release review.
+- CI also enforces `bash scripts/check-release-train-guard.sh` to block widening an untagged pending train.
+
 ## GitHub Planning Rules
 
 `masc-mcp` uses GitHub as an operating system for product planning.

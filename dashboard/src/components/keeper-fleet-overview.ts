@@ -1,45 +1,44 @@
-// Keeper fleet overview — compact comparison grid showing all keepers
-// at a glance: pipeline stage, context ratio, tool calls, generation,
-// and activity recency. Designed for the Agents tab header.
-
 import { html } from 'htm/preact'
-import { navigate } from '../router'
-import type { Keeper, PipelineStage } from '../types/core'
+
 import { CONTEXT_RATIO_CRITICAL, CONTEXT_RATIO_FLEET_WARN } from '../config/constants'
+import { keeperPhaseForDisplay, summarizeKeeperMonitoring } from '../lib/monitoring-runtime'
+import type { Keeper } from '../types/core'
+import { openKeeperDetail } from './keeper-detail'
 import { KeeperPhaseBadge } from './keeper-phase-indicator'
 
-// ── Pipeline stage styling ────────────────────────────
+type ToneKey = 'ok' | 'warn' | 'paused' | 'muted'
 
-interface StageStyle {
-  label: string
-  color: string
+interface ToneStyle {
+  text: string
   bg: string
-  pulse: boolean
+  border: string
 }
 
-const STAGE_STYLES: Record<string, StageStyle> = {
-  thinking:             { label: '사고',    color: 'var(--accent)',  bg: 'rgba(71,184,255,0.12)', pulse: true },
-  tool_use:             { label: '도구',    color: 'var(--ok)',      bg: 'rgba(52,211,153,0.12)', pulse: true },
-  compacting:           { label: '압축',    color: '#a855f7',        bg: 'rgba(168,85,247,0.12)', pulse: true },
-  handoff:              { label: '승계',    color: '#ef4444',        bg: 'rgba(239,68,68,0.12)',  pulse: true },
-  scheduled_autonomous: { label: '자율',    color: 'var(--accent)',  bg: 'rgba(71,184,255,0.08)', pulse: true },
-  failing:              { label: '오류',    color: 'var(--bad)',     bg: 'rgba(239,68,68,0.12)',  pulse: true },
-  crashed:              { label: '중단',    color: '#ef4444',        bg: 'rgba(239,68,68,0.15)',  pulse: false },
-  restarting:           { label: '재시작',  color: '#38bdf8',        bg: 'rgba(56,189,248,0.12)', pulse: true },
-  draining:             { label: '종료중',  color: '#fb923c',        bg: 'rgba(251,146,60,0.12)', pulse: true },
-  paused:               { label: '일시정지', color: '#a78bfa',       bg: 'rgba(167,139,250,0.12)', pulse: false },
-  idle:                 { label: '대기',    color: 'var(--text-dim)', bg: 'var(--white-5)',        pulse: false },
-  offline:              { label: '오프',    color: 'var(--text-dim)', bg: 'var(--white-3)',        pulse: false },
+const BAND_STYLES: Record<string, ToneStyle> = {
+  active: { text: 'var(--ok)', bg: 'rgba(52,211,153,0.12)', border: 'rgba(52,211,153,0.2)' },
+  attention: { text: 'var(--warn)', bg: 'rgba(251,191,36,0.12)', border: 'rgba(251,191,36,0.2)' },
+  paused: { text: '#a78bfa', bg: 'rgba(167,139,250,0.12)', border: 'rgba(167,139,250,0.22)' },
+  offline: { text: 'var(--text-dim)', bg: 'var(--white-4)', border: 'var(--white-8)' },
 }
 
-const ACTIVE_STAGES = new Set<string>(['thinking', 'tool_use', 'compacting', 'handoff', 'scheduled_autonomous', 'failing', 'restarting', 'draining'])
-
-function stageStyle(stage?: PipelineStage): StageStyle {
-  if (!stage) return STAGE_STYLES['offline']!
-  return STAGE_STYLES[stage] ?? STAGE_STYLES['offline']!
+const STAGE_STYLES: Record<string, ToneStyle> = {
+  thinking: { text: 'var(--accent)', bg: 'rgba(71,184,255,0.12)', border: 'rgba(71,184,255,0.2)' },
+  tool_use: { text: 'var(--ok)', bg: 'rgba(52,211,153,0.12)', border: 'rgba(52,211,153,0.2)' },
+  compacting: { text: '#a855f7', bg: 'rgba(168,85,247,0.12)', border: 'rgba(168,85,247,0.2)' },
+  handoff: { text: '#f472b6', bg: 'rgba(244,114,182,0.12)', border: 'rgba(244,114,182,0.2)' },
+  scheduled_autonomous: { text: 'var(--accent)', bg: 'rgba(71,184,255,0.1)', border: 'rgba(71,184,255,0.18)' },
+  failing: { text: 'var(--warn)', bg: 'rgba(251,191,36,0.12)', border: 'rgba(251,191,36,0.2)' },
+  draining: { text: '#fb923c', bg: 'rgba(251,146,60,0.12)', border: 'rgba(251,146,60,0.2)' },
+  paused: { text: '#a78bfa', bg: 'rgba(167,139,250,0.12)', border: 'rgba(167,139,250,0.2)' },
+  restarting: { text: '#38bdf8', bg: 'rgba(56,189,248,0.12)', border: 'rgba(56,189,248,0.2)' },
+  crashed: { text: 'var(--bad)', bg: 'rgba(239,68,68,0.12)', border: 'rgba(239,68,68,0.2)' },
+  idle: { text: 'var(--text-dim)', bg: 'var(--white-4)', border: 'var(--white-8)' },
+  offline: { text: 'var(--text-dim)', bg: 'var(--white-4)', border: 'var(--white-8)' },
 }
 
-// ── Context bar ───────────────────────────────────────
+function pillStyle(tone: ToneStyle): string {
+  return `color:${tone.text};background:${tone.bg};border:1px solid ${tone.border};`
+}
 
 function ContextBar({ ratio }: { ratio: number | undefined }) {
   const pct = (ratio ?? 0) * 100
@@ -47,8 +46,10 @@ function ContextBar({ ratio }: { ratio: number | undefined }) {
   return html`
     <div class="flex items-center gap-1.5">
       <div class="flex-1 h-1.5 rounded-full bg-[var(--white-6)] overflow-hidden">
-        <div class="h-full rounded-full transition-all duration-500"
-          style="width: ${pct.toFixed(0)}%; background: ${color}"></div>
+        <div
+          class="h-full rounded-full transition-all duration-500"
+          style="width: ${pct.toFixed(0)}%; background: ${color}"
+        ></div>
       </div>
       <span class="text-[10px] font-mono w-8 text-right" style="color: ${color}">
         ${pct > 0 ? `${pct.toFixed(0)}%` : '-'}
@@ -56,8 +57,6 @@ function ContextBar({ ratio }: { ratio: number | undefined }) {
     </div>
   `
 }
-
-// ── Activity recency ──────────────────────────────────
 
 function formatRecency(agoS: number | undefined): string {
   if (agoS == null) return '-'
@@ -67,125 +66,167 @@ function formatRecency(agoS: number | undefined): string {
   return `${Math.floor(agoS / 86400)}일`
 }
 
-// ── Keeper row ────────────────────────────────────────
+function MetricPill({
+  label,
+  value,
+  tone = 'muted',
+}: {
+  label: string
+  value: string | number
+  tone?: ToneKey
+}) {
+  const style =
+    tone === 'ok'
+      ? 'text-[var(--ok)] bg-[rgba(52,211,153,0.12)] border-[rgba(52,211,153,0.2)]'
+      : tone === 'warn'
+        ? 'text-[var(--warn)] bg-[rgba(251,191,36,0.12)] border-[rgba(251,191,36,0.2)]'
+        : tone === 'paused'
+          ? 'text-[#a78bfa] bg-[rgba(167,139,250,0.12)] border-[rgba(167,139,250,0.2)]'
+          : 'text-[var(--text-muted)] bg-[var(--white-4)] border-[var(--white-8)]'
+
+  return html`
+    <span class="inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-medium ${style}">
+      <span>${label}</span>
+      <span class="font-mono text-[var(--text-strong)]">${value}</span>
+    </span>
+  `
+}
 
 function KeeperRow({ keeper }: { keeper: Keeper }) {
-  const stage = stageStyle(keeper.pipeline_stage)
-  const isActive = ACTIVE_STAGES.has(keeper.pipeline_stage ?? '')
+  const summary = summarizeKeeperMonitoring(keeper)
+  const bandTone = BAND_STYLES[summary.band.key] ?? BAND_STYLES.offline!
+  const stageTone = STAGE_STYLES[summary.stage.key] ?? STAGE_STYLES.offline!
   const toolCount = keeper.latest_tool_call_count ?? keeper.metrics_window?.tool_call_count ?? 0
 
   return html`
-    <div
-      class="flex items-center gap-3 py-2 px-3 rounded-lg cursor-pointer hover:bg-[var(--white-5)] transition-colors ${isActive ? 'ring-1 ring-[var(--accent-30)]' : ''}"
-      onClick=${() => navigate('monitoring', { section: 'agents', agent: keeper.name })}
+    <button
+      type="button"
+      class="group grid w-full gap-3 rounded-2xl border border-[var(--card-border)] bg-[linear-gradient(180deg,var(--white-2),rgba(255,255,255,0.02))] px-4 py-4 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-[var(--accent-30)] hover:bg-[linear-gradient(180deg,var(--accent-soft),rgba(255,255,255,0.04))]"
+      onClick=${() => openKeeperDetail(keeper)}
+      aria-label=${`${keeper.name} keeper 상세 보기`}
     >
-      ${'' /* Phase badge (lifecycle) + Stage badge (activity) */}
-      <div class="flex-shrink-0">
-        <${KeeperPhaseBadge} phase=${keeper.phase} compact />
-      </div>
-      <div
-        class="flex-shrink-0 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider text-center w-12"
-        style="color: ${stage.color}; background: ${stage.bg}; ${stage.pulse ? 'animation: loadingPulse 2s ease-in-out infinite;' : ''}"
-      >
-        ${stage.label}
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div class="min-w-0 flex-1">
+          <div class="flex flex-wrap items-center gap-2">
+            <span
+              class="inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-semibold tracking-[0.08em] uppercase"
+              style=${pillStyle(bandTone)}
+              title=${summary.band.description}
+            >${summary.band.label}</span>
+            <${KeeperPhaseBadge} phase=${keeperPhaseForDisplay(keeper)} compact />
+            <span
+              class="inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-medium"
+              style=${pillStyle(stageTone)}
+              title=${summary.stage.description}
+            >stage ${summary.stage.label}</span>
+          </div>
+          <div class="mt-2 flex items-center gap-2">
+            <span class="truncate text-[15px] font-semibold text-[var(--text-strong)]">${keeper.name}</span>
+            ${keeper.model ? html`<span class="truncate rounded-full border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5 text-[10px] font-mono text-[var(--text-muted)]">${keeper.model}</span>` : null}
+          </div>
+          <p class="mt-2 mb-0 text-[12px] leading-[1.55] text-[var(--text-body)]">
+            ${summary.hint ?? summary.phase.description}
+          </p>
+        </div>
+
+        <div class="grid min-w-[208px] gap-2 text-[10px] text-[var(--text-muted)] sm:grid-cols-2">
+          <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2">
+            <div>컨텍스트</div>
+            <div class="mt-1"><${ContextBar} ratio=${keeper.context_ratio} /></div>
+          </div>
+          <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2">
+            <div>최근 활동</div>
+            <div class="mt-1 text-[12px] font-mono text-[var(--text-strong)]">${formatRecency(keeper.last_activity_ago_s)}</div>
+          </div>
+        </div>
       </div>
 
-      ${'' /* Name */}
-      <div class="w-28 flex-shrink-0 truncate">
-        <span class="text-[12px] font-mono font-medium text-[var(--text-strong)]">${keeper.name}</span>
+      <div class="flex flex-wrap items-center gap-2">
+        <${MetricPill} label="Gen" value=${keeper.generation ?? 0} />
+        <${MetricPill} label="Turn" value=${keeper.turn_count ?? 0} />
+        <${MetricPill} label="Tool" value=${toolCount > 0 ? toolCount : '-'} />
+        ${keeper.last_blocker ? html`<${MetricPill} label="Blocker" value="yes" tone="warn" />` : null}
+        ${summary.band.key === 'paused' ? html`<${MetricPill} label="Pause" value="on" tone="paused" />` : null}
       </div>
-
-      ${'' /* Context bar */}
-      <div class="flex-1 min-w-20 max-w-40">
-        <${ContextBar} ratio=${keeper.context_ratio} />
-      </div>
-
-      ${'' /* Stats */}
-      <div class="flex items-center gap-4 flex-shrink-0 text-[10px] font-mono text-[var(--text-muted)]">
-        <span title="세대">G${keeper.generation ?? 0}</span>
-        <span title="턴">${keeper.turn_count ?? 0}t</span>
-        <span title="도구 호출">${toolCount > 0 ? `${toolCount}c` : '-'}</span>
-        <span title="마지막 활동" class="${(keeper.last_activity_ago_s ?? 999) < 120 ? 'text-[var(--ok)]' : ''}">
-          ${formatRecency(keeper.last_activity_ago_s)}
-        </span>
-      </div>
-    </div>
+    </button>
   `
 }
 
-// ── Fleet summary bar ─────────────────────────────────
-
 function FleetSummary({ keepers }: { keepers: Keeper[] }) {
-  const active = keepers.filter(k => ACTIVE_STAGES.has(k.pipeline_stage ?? '')).length
-  const idle = keepers.filter(k => k.pipeline_stage === 'idle').length
-  const offline = keepers.length - active - idle
-  const avgCtx = keepers.reduce((s, k) => s + (k.context_ratio ?? 0), 0) / (keepers.length || 1)
-  const totalTools = keepers.reduce((s, k) => s + (k.latest_tool_call_count ?? k.metrics_window?.tool_call_count ?? 0), 0)
-  const totalCompactions = keepers.reduce((s, k) => s + (k.compaction_count ?? 0), 0)
-  const compactKeepers = keepers.filter(k => k.metrics_window?.compaction_saved_ratio != null)
+  const counts = keepers.reduce(
+    (acc, keeper) => {
+      acc[summarizeKeeperMonitoring(keeper).band.key] += 1
+      return acc
+    },
+    { active: 0, attention: 0, paused: 0, offline: 0 },
+  )
+  const avgCtx = keepers.reduce((sum, keeper) => sum + (keeper.context_ratio ?? 0), 0) / (keepers.length || 1)
+  const totalTools = keepers.reduce((sum, keeper) => sum + (keeper.latest_tool_call_count ?? keeper.metrics_window?.tool_call_count ?? 0), 0)
+  const totalCompactions = keepers.reduce((sum, keeper) => sum + (keeper.compaction_count ?? 0), 0)
+  const compactKeepers = keepers.filter(keeper => keeper.metrics_window?.compaction_saved_ratio != null)
   const avgSavedRatio = compactKeepers.length > 0
-    ? compactKeepers.reduce((s, k) => s + (k.metrics_window?.compaction_saved_ratio ?? 0), 0) / compactKeepers.length
+    ? compactKeepers.reduce((sum, keeper) => sum + (keeper.metrics_window?.compaction_saved_ratio ?? 0), 0) / compactKeepers.length
     : null
 
   return html`
-    <div class="flex gap-3 flex-wrap text-[11px] mb-3">
-      <span class="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-[var(--white-4)] border border-[var(--white-6)]">
-        <span class="font-mono font-medium text-[var(--ok)]">${active}</span>
-        <span class="text-[var(--text-dim)]">활성</span>
-      </span>
-      <span class="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-[var(--white-4)] border border-[var(--white-6)]">
-        <span class="font-mono font-medium text-[var(--text-muted)]">${idle}</span>
-        <span class="text-[var(--text-dim)]">대기</span>
-      </span>
-      ${offline > 0 ? html`
-        <span class="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-[var(--white-4)] border border-[var(--white-6)]">
-          <span class="font-mono font-medium text-[var(--text-dim)]">${offline}</span>
-          <span class="text-[var(--text-dim)]">오프</span>
-        </span>
-      ` : null}
-      <span class="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-[var(--white-4)] border border-[var(--white-6)]">
-        <span class="text-[var(--text-dim)]">평균 컨텍스트</span>
-        <span class="font-mono font-medium ${avgCtx > CONTEXT_RATIO_CRITICAL ? 'text-[var(--bad)]' : avgCtx > CONTEXT_RATIO_FLEET_WARN ? 'text-[var(--warn)]' : 'text-[var(--text-strong)]'}">${(avgCtx * 100).toFixed(0)}%</span>
-      </span>
-      ${totalTools > 0 ? html`
-        <span class="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-[var(--white-4)] border border-[var(--white-6)]">
-          <span class="font-mono font-medium text-[var(--text-strong)]">${totalTools}</span>
-          <span class="text-[var(--text-dim)]">총 도구 호출</span>
-        </span>
-      ` : null}
-      ${totalCompactions > 0 ? html`
-        <span class="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-[var(--white-4)] border border-[var(--white-6)]">
-          <span class="font-mono font-medium text-[#a855f7]">${totalCompactions}</span>
-          <span class="text-[var(--text-dim)]">압축</span>
-          ${avgSavedRatio != null ? html`
-            <span class="font-mono font-medium ${avgSavedRatio >= 0.4 ? 'text-[var(--ok)]' : avgSavedRatio >= 0.2 ? 'text-[var(--warn)]' : 'text-[var(--bad)]'}">${(avgSavedRatio * 100).toFixed(0)}%</span>
-            <span class="text-[var(--text-dim)]">절감</span>
-          ` : null}
-        </span>
-      ` : null}
+    <div class="grid gap-3 md:grid-cols-[1.5fr_1fr]">
+      <div class="grid gap-2 sm:grid-cols-4">
+        <${MetricPill} label="가동중" value=${counts.active} tone="ok" />
+        <${MetricPill} label="주의 필요" value=${counts.attention} tone="warn" />
+        <${MetricPill} label="일시정지" value=${counts.paused} tone="paused" />
+        <${MetricPill} label="오프라인" value=${counts.offline} />
+      </div>
+      <div class="flex flex-wrap justify-start gap-2 md:justify-end">
+        <${MetricPill}
+          label="평균 CTX"
+          value=${`${(avgCtx * 100).toFixed(0)}%`}
+          tone=${avgCtx > CONTEXT_RATIO_CRITICAL ? 'warn' : avgCtx > CONTEXT_RATIO_FLEET_WARN ? 'paused' : 'ok'}
+        />
+        ${totalTools > 0 ? html`<${MetricPill} label="도구 호출" value=${totalTools} />` : null}
+        ${totalCompactions > 0 ? html`
+          <${MetricPill}
+            label="압축"
+            value=${avgSavedRatio == null ? totalCompactions : `${totalCompactions} / ${(avgSavedRatio * 100).toFixed(0)}%`}
+            tone=${avgSavedRatio != null && avgSavedRatio >= 0.4 ? 'ok' : avgSavedRatio != null ? 'warn' : 'muted'}
+          />
+        ` : null}
+      </div>
     </div>
   `
 }
-
-// ── Main component ────────────────────────────────────
 
 export function KeeperFleetOverview({ keepers: allKeepers }: { keepers: Keeper[] }) {
   if (allKeepers.length === 0) return null
 
-  // Sort: active first, then by recency
-  const sorted = [...allKeepers].sort((a, b) => {
-    const aActive = ACTIVE_STAGES.has(a.pipeline_stage ?? '') ? 1 : 0
-    const bActive = ACTIVE_STAGES.has(b.pipeline_stage ?? '') ? 1 : 0
-    if (aActive !== bActive) return bActive - aActive
-    return (a.last_activity_ago_s ?? 9999) - (b.last_activity_ago_s ?? 9999)
+  const sorted = [...allKeepers].sort((left, right) => {
+    const leftSummary = summarizeKeeperMonitoring(left)
+    const rightSummary = summarizeKeeperMonitoring(right)
+    const rank = { attention: 0, active: 1, paused: 2, offline: 3 }
+    if (rank[leftSummary.band.key] !== rank[rightSummary.band.key]) {
+      return rank[leftSummary.band.key] - rank[rightSummary.band.key]
+    }
+    return (left.last_activity_ago_s ?? Number.POSITIVE_INFINITY) - (right.last_activity_ago_s ?? Number.POSITIVE_INFINITY)
   })
 
   return html`
-    <div class="mb-6">
-      <${FleetSummary} keepers=${allKeepers} />
-      <div class="flex flex-col gap-0.5 rounded-xl border border-[var(--card-border)] bg-[var(--white-2)] p-2">
-        ${sorted.map(k => html`<${KeeperRow} key=${k.name} keeper=${k} />`)}
+    <section class="monitor-surface-card monitor-surface-card-medium mb-6 p-4 md:p-5">
+      <div class="flex flex-col gap-4">
+        <div class="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+          <div class="min-w-0">
+            <div class="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">Keeper 운영판</div>
+            <h3 class="m-0 mt-1 text-[18px] font-semibold tracking-[-0.02em] text-[var(--text-strong)]">먼저 볼 것은 state가 아니라 운영 상태입니다</h3>
+            <p class="m-0 mt-2 max-w-[720px] text-[12px] leading-[1.6] text-[var(--text-body)]">
+              가동중, 주의 필요, 일시정지, 오프라인은 운영 우선순위이고, 그 아래의 phase와 stage는 왜 그런지 설명하는 근거입니다.
+            </p>
+          </div>
+        </div>
+
+        <${FleetSummary} keepers=${allKeepers} />
+
+        <div class="grid gap-3">
+          ${sorted.map(keeper => html`<${KeeperRow} key=${keeper.name} keeper=${keeper} />`)}
+        </div>
       </div>
-    </div>
+    </section>
   `
 }

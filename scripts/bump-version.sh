@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Usage: ./scripts/bump-version.sh 2.77.0
+# Usage: ./scripts/bump-version.sh 0.2.0
 
 set -euo pipefail
 
 NEW_VERSION="${1:-}"
 if [ -z "$NEW_VERSION" ]; then
   echo "Usage: $0 <new-version>" >&2
-  echo "Example: $0 2.77.0" >&2
+  echo "Example: $0 0.2.0" >&2
   exit 1
 fi
 
@@ -97,6 +97,7 @@ echo "Release version layers:"
 echo "  1) release SemVer: $NEW_VERSION"
 echo "  2) protocol matrix: see /health.protocol + mcp-protocol-version"
 echo "  3) artifact schema: report/proof JSON schema_version"
+echo "  4) pre-1.0 lane: use 0.y.0 for promise trains, 0.y.z for stabilization"
 echo ""
 echo "Next:"
 echo "  dune build --root ."

@@ -16,7 +16,7 @@ let update_search_stats_for_operation config operation ~outcome =
   in
   write_search_stats config updated
 
-let operation_card_json ~search_store ~intents config units operations
+let operation_card_json ~search_store ~intents ~agents config units operations
     (operation : operation_record) =
   let unit_label =
     lookup_unit units operation.assigned_unit_id
@@ -41,10 +41,11 @@ let operation_card_json ~search_store ~intents config units operations
       ("operation", operation_to_json operation);
       ("assigned_unit_label", `String unit_label);
       ("intent", intent_json);
-      ("search", operation_search_json ~store:search_store ~intents config units operations operation);
+      ("search", operation_search_json ~store:search_store ~intents ~agents config units operations operation);
     ]
 
 let list_operations_json_from_state ?operation_id (state : snapshot_state) =
+  let agents = state.agents in
   let units = state.units in
   let intents = state.intents in
   let search_store = read_search_stats state.config in
@@ -93,7 +94,7 @@ let list_operations_json_from_state ?operation_id (state : snapshot_state) =
       ( "operations",
         `List
           (List.map
-             (operation_card_json ~search_store ~intents state.config units
+             (operation_card_json ~search_store ~intents ~agents state.config units
                 state.operations)
              operations) );
     ]

@@ -201,6 +201,11 @@
  (modules test_worker_run_evidence_summary test_tool_team_session_support)
  (libraries masc_test_deps))
 
+(test
+ (name test_team_session_worker_run_meta_repair)
+ (modules test_team_session_worker_run_meta_repair)
+ (libraries masc_test_deps))
+
 ; ============================================================
 ; Group 3: Eio-native tests (single-module, standard deps)
 ; Merged from ~100 individual (test ...) stanzas.
@@ -223,6 +228,7 @@
         test_dashboard_harness_health
         test_dashboard_repo_synthesis
         test_dashboard_tools
+        test_tool_quality_classify
         test_tui_decode
         test_dashboard_governance
         test_dashboard_labels
@@ -365,6 +371,7 @@
         test_dashboard_harness_health
         test_dashboard_repo_synthesis
         test_dashboard_tools
+        test_tool_quality_classify
         test_tui_decode
         test_dashboard_governance
         test_dashboard_labels
@@ -751,6 +758,11 @@
 (test
  (name test_pr_open_script)
  (modules test_pr_open_script)
+ (libraries alcotest unix))
+
+(test
+ (name test_release_train_guard_script)
+ (modules test_release_train_guard_script)
  (libraries alcotest unix))
 
 (test

@@ -65,6 +65,21 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
     H2.Body.Writer.close writer
   in
 
+  let h2_respond_removed_surface h2_reqd ~surface ~extra_headers =
+    let body =
+      Yojson.Safe.to_string
+        (`Assoc
+           [
+             ("error", `String "removed_surface");
+             ("surface", `String surface);
+             ("message",
+               `String
+                 "This compatibility surface was removed. Keepers and local clients should use the OAS-backed repo coordination front door.");
+           ])
+    in
+    h2_respond_json ~status:`Gone h2_reqd body ~extra_headers
+  in
+
   let h2_respond_bytes
       ?(status = `OK)
       ?(extra_headers = [])
@@ -281,7 +296,10 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
       (* ─────────────────────────────────────────────────────────────────────
          MCP Endpoints
          ───────────────────────────────────────────────────────────────────── *)
-      | `POST, "/mcp" | `POST, "/" | `POST, "/mcp/managed" | `POST, "/mcp/operator" ->
+      | `POST, "/mcp/operator" ->
+          h2_respond_removed_surface h2_reqd ~surface:"operator_remote" ~extra_headers:cors
+
+      | `POST, "/mcp" | `POST, "/" | `POST, "/mcp/managed" ->
           let session_was_provided = Option.is_some session_id_opt in
           let session_id = match session_id_opt with
             | Some id -> id
@@ -290,9 +308,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           let auth_token = auth_token_from_request httpun_request in
           let protocol_version = get_protocol_version_for_session ~session_id httpun_request in
           let profile =
-            if String.equal path "/mcp/operator"
-            then Server_mcp_transport_http.Operator_remote
-            else if String.equal path "/mcp/managed"
+            if String.equal path "/mcp/managed"
             then Server_mcp_transport_http.Managed_agent
             else Server_mcp_transport_http.Full
           in
@@ -391,11 +407,12 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                                      let body = Yojson.Safe.to_string json in
                                      h2_respond_json h2_reqd body ~extra_headers:mcp_hdrs))))
 
-      | `DELETE, "/mcp" | `DELETE, "/mcp/managed" | `DELETE, "/mcp/operator" ->
+      | `DELETE, "/mcp/operator" ->
+          h2_respond_removed_surface h2_reqd ~surface:"operator_remote" ~extra_headers:cors
+
+      | `DELETE, "/mcp" | `DELETE, "/mcp/managed" ->
           let profile =
-            if String.equal path "/mcp/operator"
-            then Server_mcp_transport_http.Operator_remote
-            else if String.equal path "/mcp/managed"
+            if String.equal path "/mcp/managed"
             then Server_mcp_transport_http.Managed_agent
             else Server_mcp_transport_http.Full
           in
@@ -674,120 +691,12 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                    (Printf.sprintf {|{"error":"%s"}|} (String.escaped msg))
                    ~status:`Not_found ~extra_headers:cors)
 
-      | `GET, "/api/v1/command-plane" ->
-          let state = get_server_state () in
-          let json = command_plane_snapshot_http_json ~state in
-          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+      | `GET, p when String.starts_with ~prefix:"/api/v1/command-plane" p ->
+          h2_respond_removed_surface h2_reqd ~surface:"command_plane" ~extra_headers:cors
 
-      | `GET, "/api/v1/command-plane/summary" ->
-          let state = get_server_state () in
-          let json = command_plane_summary_http_json ~state in
-          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
-
-      | `GET, "/api/v1/command-plane/help" ->
-          let json = command_plane_help_http_json () in
-          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
-
-      | `GET, "/api/v1/command-plane/topology" ->
-          let state = get_server_state () in
-          let json = command_plane_topology_http_json ~state in
-          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
-
-      | `GET, "/api/v1/command-plane/units" ->
-          let state = get_server_state () in
-          let json = command_plane_units_http_json ~state in
-          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
-
-      | `GET, "/api/v1/command-plane/operations" ->
-          let state = get_server_state () in
-          let json = command_plane_operations_http_json ~state httpun_request in
-          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
-
-      | `GET, "/api/v1/command-plane/detachments" ->
-          let state = get_server_state () in
-          let json = command_plane_detachments_http_json ~state httpun_request in
-          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
-
-      | `GET, "/api/v1/command-plane/detachment-status" ->
-          let state = get_server_state () in
-          (match command_plane_detachment_status_http_json ~state httpun_request with
-           | Ok json ->
-               h2_respond_json h2_reqd (Yojson.Safe.to_string json)
-                 ~extra_headers:cors
-           | Error message ->
-               h2_respond_json h2_reqd
-                 (Yojson.Safe.to_string (command_plane_error_json message))
-                 ~status:`Bad_request ~extra_headers:cors)
-
-      | `GET, "/api/v1/command-plane/decisions" ->
-          let state = get_server_state () in
-          let json = command_plane_decisions_http_json ~state httpun_request in
-          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
-
-      | `GET, "/api/v1/command-plane/capacity" ->
-          let state = get_server_state () in
-          let json = command_plane_capacity_http_json ~state in
-          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
-
-      | `GET, "/api/v1/command-plane/alerts" ->
-          let state = get_server_state () in
-          let json = command_plane_alerts_http_json ~state in
-          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
-
-      | `GET, "/api/v1/command-plane/traces" ->
-          let state = get_server_state () in
-          let json = command_plane_traces_http_json ~state httpun_request in
-          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
-
-      | `GET, "/api/v1/command-plane/swarm" ->
-          let state = get_server_state () in
-          let json = command_plane_swarm_http_json ~state httpun_request in
-          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
-
-      | `GET, "/api/v1/command-plane/orchestra" ->
-          let state = get_server_state () in
-          let json = command_plane_orchestra_http_json ~state httpun_request in
-          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
-
-      | `GET, "/api/v1/command-plane/policy" ->
-          let state = get_server_state () in
-          let json = command_plane_policy_status_http_json ~state in
-          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
-
-      | `GET, "/api/v1/operator" ->
-          let state = get_server_state () in
-          let path = Http.Request.path httpun_request in
-          if http_auth_strict_enabled () && not (is_public_read_path path) then
-            (match authorize_read_request ~base_path:state.Mcp_server.room_config.base_path httpun_request with
-             | Error err ->
-                 let status = http_status_of_auth_error err in
-                 h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors
-             | Ok () ->
-                 let json = operator_snapshot_http_json ~state ~sw ~clock httpun_request in
-                 h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors)
-          else
-            let json = operator_snapshot_http_json ~state ~sw ~clock httpun_request in
-            h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+      | `GET, "/api/v1/operator"
       | `GET, "/api/v1/operator/digest" ->
-          let state = get_server_state () in
-          let path = Http.Request.path httpun_request in
-          let respond_digest () =
-            match operator_digest_http_json ~state ~sw ~clock httpun_request with
-            | Ok json ->
-                h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
-            | Error message ->
-                h2_respond_json h2_reqd
-                  (Yojson.Safe.to_string (operator_error_json message))
-                  ~status:`Bad_request ~extra_headers:cors
-          in
-          if http_auth_strict_enabled () && not (is_public_read_path path) then
-            (match authorize_read_request ~base_path:state.Mcp_server.room_config.base_path httpun_request with
-             | Error err ->
-                 let status = http_status_of_auth_error err in
-                 h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors
-             | Ok () -> respond_digest ())
-          else
-            respond_digest ()
+          h2_respond_removed_surface h2_reqd ~surface:"operator" ~extra_headers:cors
       | `GET, "/api/v1/status" ->
           let state = get_server_state () in
           let config = state.Mcp_server.room_config in
@@ -874,6 +783,13 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                   (Yojson.Safe.to_string (error_json (Printf.sprintf "invalid json: %s" msg)))
                   ~status:`Bad_request ~extra_headers:cors
             )
+
+      | `POST, p when String.starts_with ~prefix:"/api/v1/command-plane" p ->
+          h2_respond_removed_surface h2_reqd ~surface:"command_plane" ~extra_headers:cors
+
+      | `POST, "/api/v1/operator/action"
+      | `POST, "/api/v1/operator/confirm" ->
+          h2_respond_removed_surface h2_reqd ~surface:"operator" ~extra_headers:cors
 
 
       (* ═══════════════════════════════════════════════════════════════════════

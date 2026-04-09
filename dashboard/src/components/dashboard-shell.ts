@@ -23,12 +23,24 @@ const buildIdentityOpen = signal(false)
 
 const LazyStatus = lazy(async () => ({ default: (await import('./status')).Status }))
 const LazyWork = lazy(async () => ({ default: (await import('./work')).Work }))
-const LazyOperations = lazy(async () => ({ default: (await import('./control')).Operations }))
 const LazyLabSurface = lazy(async () => ({ default: (await import('./lab')).Lab }))
 const LazyLogViewer = lazy(async () => ({ default: (await import('./logs')).LogViewer }))
 
 function lazyTabFallback(label: string) {
   return html`<${LoadingState}>${label} 불러오는 중...<//>`
+}
+
+function RetiredSurfaceNotice() {
+  return html`
+    <section class="rounded-2xl border border-[rgba(255,170,90,0.28)] bg-[linear-gradient(135deg,rgba(255,170,90,0.12),rgba(255,170,90,0.04))] p-5">
+      <div class="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">Retired Surface</div>
+      <h3 class="mt-2 text-[18px] font-semibold text-[var(--text-strong)]">운영 개입 surface는 제거되었습니다.</h3>
+      <p class="mt-2 text-[13px] leading-relaxed text-[var(--text-muted)]">
+        팀 세션, operator, command-plane compatibility lane은 front door에서 내려갔습니다.
+        현재 canonical path는 repo coordination과 OAS-backed keeper runtime입니다.
+      </p>
+    </section>
+  `
 }
 
 function formatDisconnectDuration(): string {
@@ -167,6 +179,7 @@ function HealthIndicator({ collapsed }: { collapsed?: boolean }) {
 export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggle?: () => void }) {
   const currentTab = route.value.tab
   const currentSection = currentSectionForRoute(route.value)
+  const visibleSurfaces = DASHBOARD_SURFACES.filter(surface => surface.hidden !== true)
 
   return html`
     <nav class="flex flex-col h-full" aria-label="Dashboard navigation">
@@ -189,7 +202,7 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
 
       <div class="flex-1 overflow-y-auto px-2 py-1.5">
         <div class="flex flex-col gap-2">
-          ${DASHBOARD_SURFACES.map(surface => {
+          ${visibleSurfaces.map(surface => {
             const isSurfaceActive = surface.id === currentTab
             const sections = visibleSectionItemsForTab(surface.id)
 
@@ -273,11 +286,7 @@ export function TabContent() {
         <//>
       `
     case 'command':
-      return html`
-        <${Suspense} fallback=${lazyTabFallback('운영 개입 화면')}>
-          <${LazyOperations} />
-        <//>
-      `
+      return html`<${RetiredSurfaceNotice} />`
     case 'lab':
       return html`
         <${Suspense} fallback=${lazyTabFallback('실험실 화면')}>

@@ -121,6 +121,29 @@ function sampleLiveResponse(overrides?: Partial<Record<string, unknown>>) {
   }
 }
 
+function sampleKeepersResponse(overrides?: Partial<Record<string, unknown>>) {
+  return {
+    count: 2,
+    keepers: [
+      {
+        name: 'luna',
+        agent_name: 'keeper-luna-agent',
+        status: 'idle',
+        model: 'glm-5',
+        keepalive_running: true,
+      },
+      {
+        name: 'nova',
+        agent_name: 'keeper-nova-agent',
+        status: 'busy',
+        model: 'gemini-2.5-flash',
+        keepalive_running: true,
+      },
+    ],
+    ...overrides,
+  }
+}
+
 async function flushUi(): Promise<void> {
   for (let i = 0; i < 4; i += 1) {
     await Promise.resolve()
@@ -174,6 +197,7 @@ describe('ConnectorStatusPanel', () => {
     const get = vi.fn<(path: string) => Promise<unknown>>().mockImplementation(async path => {
       if (path === '/api/v1/gate/status') return sampleGateResponse()
       if (path === '/api/v1/gate/discord/status') return sampleLiveResponse()
+      if (path === '/api/v1/gate/keepers?limit=50&detailed=true') return sampleKeepersResponse()
       throw new Error(`unexpected path: ${path}`)
     })
 
@@ -188,10 +212,13 @@ describe('ConnectorStatusPanel', () => {
 
     expect(get).toHaveBeenCalledWith('/api/v1/gate/status')
     expect(get).toHaveBeenCalledWith('/api/v1/gate/discord/status')
+    expect(get).toHaveBeenCalledWith('/api/v1/gate/keepers?limit=50&detailed=true')
     expect(text).toContain('Connector Operations')
     expect(text).toContain('Discord Direct')
     expect(text).toContain('connected')
     expect(text).toContain('sangsu')
+    expect(text).toContain('keeper dir 2')
+    expect(text).toContain('keeper-luna-agent')
     expect(text).toContain('Observed room bindings')
     expect(text).toContain('Recent binding audit')
     expect(text).toContain('Recent gate events')
@@ -203,6 +230,7 @@ describe('ConnectorStatusPanel', () => {
     const get = vi.fn<(path: string) => Promise<unknown>>().mockImplementation(async path => {
       if (path === '/api/v1/gate/status') throw new Error('GET /api/v1/gate/status: 503 Service Unavailable')
       if (path === '/api/v1/gate/discord/status') return sampleLiveResponse({ connected: false, stale: true })
+      if (path === '/api/v1/gate/keepers?limit=50&detailed=true') throw new Error('GET /api/v1/gate/keepers: 401 Unauthorized')
       throw new Error(`unexpected path: ${path}`)
     })
 
@@ -219,12 +247,14 @@ describe('ConnectorStatusPanel', () => {
     expect(text).toContain('stale')
     expect(text).toContain('Gate metrics unavailable')
     expect(text).toContain('Direct Discord runtime is visible')
+    expect(text).toContain('keeper directory unavailable, manual entry only')
   })
 
   it('posts bind and unbind actions through the dashboard endpoints', async () => {
     const get = vi.fn<(path: string) => Promise<unknown>>().mockImplementation(async path => {
       if (path === '/api/v1/gate/status') return sampleGateResponse()
       if (path === '/api/v1/gate/discord/status') return sampleLiveResponse()
+      if (path === '/api/v1/gate/keepers?limit=50&detailed=true') return sampleKeepersResponse()
       throw new Error(`unexpected path: ${path}`)
     })
     const post = vi.fn<(path: string, body: unknown) => Promise<unknown>>().mockResolvedValue({ ok: true })
@@ -275,5 +305,37 @@ describe('ConnectorStatusPanel', () => {
       channel_id: '999999',
     })
     expect(showToast).toHaveBeenCalledWith('Unbound 999999', 'success')
+  })
+
+  it('shows selected keeper runtime metadata from the keeper directory', async () => {
+    const get = vi.fn<(path: string) => Promise<unknown>>().mockImplementation(async path => {
+      if (path === '/api/v1/gate/status') return sampleGateResponse()
+      if (path === '/api/v1/gate/discord/status') return sampleLiveResponse()
+      if (path === '/api/v1/gate/keepers?limit=50&detailed=true') return sampleKeepersResponse()
+      throw new Error(`unexpected path: ${path}`)
+    })
+
+    const { ConnectorStatusPanel } = await loadComponentWithApi({
+      get,
+      lastEvent: signal(null),
+    })
+
+    render(html`<${ConnectorStatusPanel} />`, container)
+    await flushUi()
+
+    const keeperSelect = container.querySelector('select') as HTMLSelectElement | null
+    expect(keeperSelect).not.toBeNull()
+    if (!keeperSelect) {
+      throw new Error('expected keeper select to exist')
+    }
+
+    keeperSelect.value = 'nova'
+    keeperSelect.dispatchEvent(new Event('change', { bubbles: true }))
+    await flushUi()
+
+    const text = container.textContent?.replace(/\s+/g, ' ').trim() ?? ''
+    expect(text).toContain('status busy')
+    expect(text).toContain('model gemini-2.5-flash')
+    expect(text).toContain('runtime keeper-nova-agent')
   })
 })

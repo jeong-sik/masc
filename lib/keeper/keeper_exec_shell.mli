@@ -5,7 +5,9 @@
     git-clone).
 
     Write-capable bash blocks dangerous commands (rm, mv, chmod, etc.)
-    and chaining operators (&&, ||, ;) via substring blocklist. *)
+    and chaining operators (&&, ||, ;) via substring blocklist.
+    Both tools default to the keeper playground unless an explicit
+    allowed [cwd] is provided. *)
 
 val handle_keeper_bash :
   config:Room.config ->

@@ -245,15 +245,6 @@ let handle_keeper_list ctx args : tool_result =
               ("mention_reactive_turn_count", `Int m.runtime.mention_reactive_turn_count);
               ("noop_turn_count", `Int m.runtime.noop_turn_count);
               ("autonomous_action_count", `Int m.runtime.autonomous_action_count);
-              ("active_team_session_id",
-                Json_util.string_opt_to_json m.active_team_session_id);
-              ("team_session_state", team_session_state_json ctx.config m);
-              ("last_team_session_started_at",
-                if String.trim m.last_team_session_started_at = "" then `Null
-                else `String m.last_team_session_started_at);
-              ("team_session_start_count_total",
-                `Int m.team_session_start_count_total);
-              ("team_session_bridge", team_session_bridge_json ctx.config m);
               ("memory_note_count", `Int memory_bank_summary.total_notes);
               ("memory_top_kind",
                 Json_util.string_opt_to_json memory_bank_summary.top_kind);

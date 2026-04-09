@@ -8,12 +8,14 @@ import { keeperDisplayStatus } from '../lib/keeper-runtime-display'
 import { signal } from '@preact/signals'
 import { useRef, useState } from 'preact/hooks'
 import { requestConfirm } from './common/confirm-dialog'
+import { isRecord } from './common/normalize'
 import { currentDashboardActor, runOperatorAction } from '../api'
 import { bootKeeper, shutdownKeeper } from '../api/keeper'
 import { TimeAgo } from './common/time-ago'
 import type { Keeper } from '../types'
 import { invalidateDashboardCache, refreshDashboard } from '../store'
 import { selectKeeper } from '../keeper-runtime'
+import { keeperStatusDetails } from '../keeper-state'
 import { findKeeper } from '../lib/keeper-utils'
 import {
   KeeperConversationPanel,
@@ -39,6 +41,7 @@ import {
 import {
   KeeperConfigPanel,
   loadKeeperConfig,
+  peekLoadedKeeperConfig,
   resetKeeperConfig,
 } from './keeper-config-panel'
 import { PipelineStageBar } from './keeper-pipeline-stage'
@@ -236,6 +239,59 @@ function ProfileField({ label, value, color }: { label: string; value: string; c
   `
 }
 
+// ── Playground Repos Panel ──────────────────────────────
+
+interface PlaygroundRepo {
+  name: string
+  branch: string
+  latest_commit: string
+  shallow: boolean
+  last_action: string
+  updated_at: string
+}
+
+function isPlaygroundRepo(r: unknown): r is PlaygroundRepo {
+  if (!isRecord(r)) return false
+  return typeof r.name === 'string'
+    && typeof r.branch === 'string'
+    && typeof r.latest_commit === 'string'
+    && typeof r.shallow === 'boolean'
+    && typeof r.last_action === 'string'
+}
+
+function PlaygroundReposPanel({ keeperName }: { keeperName: string }) {
+  const detail = keeperStatusDetails.value[keeperName]
+  if (!detail?.rawStatus) return null
+  const raw = detail.rawStatus
+  if (!isRecord(raw)) return null
+  const execCtx = raw.execution_context
+  if (!isRecord(execCtx)) return null
+  const repos = Array.isArray(execCtx.playground_repos) ? execCtx.playground_repos : []
+  if (repos.length === 0) return null
+
+  const items = repos.filter(isPlaygroundRepo)
+
+  return html`
+    <${SectionCard} title="Playground (${items.length})">
+      <div class="flex flex-col gap-2">
+        ${items.map(r => html`
+          <div class="flex items-center gap-3 px-3 py-2 rounded-lg border border-[var(--white-8)] bg-[var(--white-2)]">
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2">
+                <span class="text-xs font-medium text-[var(--text-strong)] truncate">${r.name}</span>
+                <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--accent)] border border-[rgba(71,184,255,0.15)]">${r.branch}</span>
+                ${r.shallow ? html`<span class="text-[9px] px-1 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">shallow</span>` : null}
+              </div>
+              <div class="text-[10px] text-[var(--text-muted)] font-mono mt-0.5 truncate">${r.latest_commit}</div>
+            </div>
+            <span class="text-[10px] text-[var(--text-dim)] flex-shrink-0">${r.last_action}</span>
+          </div>
+        `)}
+      </div>
+    <//>
+  `
+}
+
 // ── Main Detail Overlay ─────────────────────────────────
 
 export function KeeperDetailOverlay() {
@@ -273,6 +329,20 @@ export function KeeperDetailOverlay() {
                       title=${lastUsed && keeper.model ? `마지막 호출: ${lastUsed}\n설정: ${keeper.model}` : ''}
                     >${display}</span>
                   ` : null
+                })()}
+                ${(() => {
+                  const preset = peekLoadedKeeperConfig(keeper.name)?.tools?.tool_preset
+                  if (!preset) return null
+                  const canPR = ['coding', 'delivery', 'full'].includes(preset)
+                  return html`
+                    <span class="inline-flex items-center py-0.5 px-2 rounded text-[10px] font-semibold uppercase tracking-wide
+                      ${canPR
+                        ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                        : 'bg-[var(--white-5)] text-[var(--text-muted)] border border-[var(--white-8)]'
+                      }"
+                      title=${`Tool preset: ${preset}${canPR ? ' (clone/PR 가능)' : ''}`}
+                    >${preset}</span>
+                  `
                 })()}
               </div>
               ${keeper.koreanName || keeper.created_at ? html`
@@ -464,6 +534,8 @@ export function KeeperDetailOverlay() {
               <${KeeperNeighborhood} keeper=${keeper} />
             </div>
           </details>
+
+          <${PlaygroundReposPanel} keeperName=${keeper.name} />
 
           <details class="p-5 rounded-2xl border border-card-border bg-card/40 backdrop-blur-md shadow-sm">
             <summary class="cursor-pointer text-[11px] font-semibold uppercase tracking-widest text-text-muted list-none select-none flex items-center gap-2">

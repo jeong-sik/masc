@@ -169,39 +169,6 @@ module Rest = struct
     | "masc_webrtc_answer" -> [ (POST, "/webrtc/answer") ]
     | "masc_broadcast" -> [ (POST, "/api/v1/broadcast") ]
     | "masc_agent_card" -> [ (GET, "/.well-known/agent.json") ]
-    | "masc_operator_snapshot" -> [ (GET, "/api/v1/operator") ]
-    | "masc_operator_digest" -> [ (GET, "/api/v1/operator/digest") ]
-    | "masc_operator_action" -> [ (POST, "/api/v1/operator/action") ]
-    | "masc_operator_confirm" -> [ (POST, "/api/v1/operator/confirm") ]
-    | "masc_operation_start" -> [ (POST, "/api/v1/command-plane/operations") ]
-    | "masc_operation_status" -> [ (GET, "/api/v1/command-plane/operations") ]
-    | "masc_operation_pause" -> [ (POST, "/api/v1/command-plane/operations/pause") ]
-    | "masc_operation_resume" -> [ (POST, "/api/v1/command-plane/operations/resume") ]
-    | "masc_operation_stop" -> [ (POST, "/api/v1/command-plane/operations/stop") ]
-    | "masc_operation_finalize" -> [ (POST, "/api/v1/command-plane/operations/finalize") ]
-    | "masc_operation_checkpoint" -> [ (POST, "/api/v1/command-plane/operations/checkpoint") ]
-    | "masc_dispatch_plan" -> [ (POST, "/api/v1/command-plane/dispatch/plan") ]
-    | "masc_dispatch_assign" -> [ (POST, "/api/v1/command-plane/dispatch/assign") ]
-    | "masc_dispatch_rebalance" -> [ (POST, "/api/v1/command-plane/dispatch/rebalance") ]
-    | "masc_dispatch_escalate" -> [ (POST, "/api/v1/command-plane/dispatch/escalate") ]
-    | "masc_dispatch_recall" -> [ (POST, "/api/v1/command-plane/dispatch/recall") ]
-    | "masc_dispatch_tick" -> [ (POST, "/api/v1/command-plane/dispatch/tick") ]
-    | "masc_unit_define" -> [ (POST, "/api/v1/command-plane/units") ]
-    | "masc_unit_list" -> [ (GET, "/api/v1/command-plane/units") ]
-    | "masc_unit_reassign" -> [ (POST, "/api/v1/command-plane/units/reassign") ]
-    | "masc_unit_reparent" -> [ (POST, "/api/v1/command-plane/units/reparent") ]
-    | "masc_policy_status" -> [ (GET, "/api/v1/command-plane/policy") ]
-    | "masc_policy_approve" -> [ (POST, "/api/v1/command-plane/policy/approve") ]
-    | "masc_policy_deny" -> [ (POST, "/api/v1/command-plane/policy/deny") ]
-    | "masc_policy_update" -> [ (POST, "/api/v1/command-plane/policy/update") ]
-    | "masc_policy_freeze_unit" -> [ (POST, "/api/v1/command-plane/policy/freeze") ]
-    | "masc_policy_kill_switch" -> [ (POST, "/api/v1/command-plane/policy/kill-switch") ]
-    | "masc_observe_topology" -> [ (GET, "/api/v1/command-plane/topology") ]
-    | "masc_observe_operations" -> [ (GET, "/api/v1/command-plane/operations") ]
-    | "masc_observe_swarm" -> [ (GET, "/api/v1/command-plane/swarm") ]
-    | "masc_observe_capacity" -> [ (GET, "/api/v1/command-plane/capacity") ]
-    | "masc_observe_alerts" -> [ (GET, "/api/v1/command-plane/alerts") ]
-    | "masc_observe_traces" -> [ (GET, "/api/v1/command-plane/traces") ]
     | _ -> []
 
   let find_schema name =
@@ -227,19 +194,7 @@ module Rest = struct
             })
 
   let tags_for_operation name =
-    if String.starts_with ~prefix:"masc_operator_" name then
-      [ "operator" ]
-    else if
-      String.starts_with ~prefix:"masc_operation_" name
-      || String.starts_with ~prefix:"masc_dispatch_" name
-      || String.starts_with ~prefix:"masc_unit_" name
-      || String.starts_with ~prefix:"masc_policy_" name
-      || String.starts_with ~prefix:"masc_observe_" name
-    then
-      [ "command-plane" ]
-    else if String.starts_with ~prefix:"masc_team_session_" name then
-      [ "team-session" ]
-    else if
+    if
       String.equal name "masc_transport_status"
       || String.equal name "masc_websocket_discovery"
       || String.equal name "masc_webrtc_offer"

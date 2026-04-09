@@ -12,6 +12,90 @@ let io_timeout_sec = 30.0
 let read_timeout_sec = 15.0
 let user_timeout_max_sec = 180.0
 
+(** Write playground repo state cache after successful clone/pull.
+    Reads git metadata from [repo_path] and upserts into
+    [playground_dir/.playground_state.json]. Best-effort: failures are logged
+    but do not propagate. *)
+let update_playground_repo_cache
+      ~(playground_dir : string) ~(repo_name : string) ~(repo_path : string)
+      ~(action : string) ~(shallow : bool) : unit =
+  try
+    let branch =
+      let st, s = Process_eio.run_argv_with_status ~timeout_sec:5.0
+        [ "git"; "-C"; repo_path; "rev-parse"; "--abbrev-ref"; "HEAD" ] in
+      if st = Unix.WEXITED 0 then String.trim s else "unknown"
+    in
+    let commit =
+      let st, s = Process_eio.run_argv_with_status ~timeout_sec:5.0
+        [ "git"; "-C"; repo_path; "log"; "--oneline"; "-1" ] in
+      if st = Unix.WEXITED 0 then String.trim s else ""
+    in
+    let ts = Printf.sprintf "%.0f" (Unix.gettimeofday ()) in
+    let entry = `Assoc [
+      "name", `String repo_name;
+      "branch", `String branch;
+      "latest_commit", `String commit;
+      "shallow", `Bool shallow;
+      "last_action", `String action;
+      "updated_at", `String ts;
+    ] in
+    let cache_path = Filename.concat playground_dir ".playground_state.json" in
+    let existing =
+      try
+        let json = Yojson.Safe.from_file cache_path in
+        (match Yojson.Safe.Util.member "repos" json with
+         | `List repos -> repos
+         | _ -> [])
+      with Sys_error _ | Yojson.Json_error _ -> []
+    in
+    let updated =
+      entry :: List.filter (fun r ->
+        match Yojson.Safe.Util.member "name" r with
+        | `String n -> n <> repo_name
+        | _ -> true) existing
+    in
+    let json = `Assoc [
+      "repos", `List updated;
+      "last_updated", `String ts;
+    ] in
+    ignore (Fs_compat.save_file_atomic cache_path
+      (Yojson.Safe.pretty_to_string json ^ "\n"))
+  with exn ->
+    Logs.warn (fun f -> f "playground cache update failed: %s"
+      (Printexc.to_string exn))
+
+let resolve_keeper_shell_read_cwd
+      ~(config : Room.config)
+      ~(meta : keeper_meta)
+      ~(args : Yojson.Safe.t)
+  =
+  let raw_cwd = Safe_ops.json_string ~default:"" "cwd" args |> String.trim in
+  let resolved =
+    if raw_cwd = ""
+    then Ok (keeper_default_read_root ~config ~meta)
+    else resolve_keeper_read_path ~config ~meta ~raw_path:raw_cwd
+  in
+  match resolved with
+  | Error _ as err -> err
+  | Ok cwd when Sys.file_exists cwd && Sys.is_directory cwd -> Ok cwd
+  | Ok cwd -> Error (Printf.sprintf "cwd_not_directory: %s" cwd)
+
+let resolve_keeper_shell_write_cwd
+      ~(config : Room.config)
+      ~(meta : keeper_meta)
+      ~(args : Yojson.Safe.t)
+  =
+  let raw_cwd = Safe_ops.json_string ~default:"" "cwd" args |> String.trim in
+  let resolved =
+    if raw_cwd = ""
+    then Ok (keeper_default_read_root ~config ~meta)
+    else resolve_keeper_path ~config ~meta ~raw_path:raw_cwd
+  in
+  match resolved with
+  | Error _ as err -> err
+  | Ok cwd when Sys.file_exists cwd && Sys.is_directory cwd -> Ok cwd
+  | Ok cwd -> Error (Printf.sprintf "cwd_not_directory: %s" cwd)
+
 let handle_keeper_bash
       ~(config : Room.config)
       ~(meta : keeper_meta)
@@ -73,9 +157,8 @@ let handle_keeper_bash
                      etc.) and is blocked for all presets." )
               ; "cmd", `String cmd_for_log
               ]))
-      (* Branch-switch guard: keeper_bash runs in the main repo root.
-         git checkout/switch/branch -b would mutate main's HEAD or create
-         branches in the shared repo. Use keeper_pr_workflow instead. *)
+      (* Branch-switch guard: keeper_bash must not mutate git branch state.
+         Use keeper_pr_workflow to create changes in an isolated clone/worktree. *)
       else if Worker_dev_tools.is_git_branch_switch cmd
       then (
         Log.Keeper.info "keeper_bash branch-switch blocked: %s (keeper=%s)" cmd_for_log meta.name;
@@ -107,19 +190,26 @@ let handle_keeper_bash
               ; "cmd", `String cmd_for_log
               ]))
       else (
-        if write_enabled && Worker_dev_tools.is_write_operation cmd then
-          Log.Keeper.info "WRITE_AUDIT: keeper=%s cmd=%s" meta.name cmd_for_log;
-        let root = Keeper_alerting_path.project_root_of_config config in
-        let shell_cmd = Printf.sprintf "cd %s && %s 2>&1" (Filename.quote root) cmd in
-        let st, out =
-          Process_eio.run_argv_with_status ~timeout_sec [ "/bin/bash"; "-lc"; shell_cmd ]
-        in
-        Yojson.Safe.to_string
-          (`Assoc
-              [ "ok", `Bool (st = Unix.WEXITED 0)
-              ; "status", Keeper_alerting_path.process_status_to_json st
-              ; "output", `String out
-              ]))
+        match resolve_keeper_shell_write_cwd ~config ~meta ~args with
+        | Error e -> error_json e
+        | Ok cwd ->
+          (match Worker_dev_tools.validate_command_paths ~workdir:cwd cmd with
+           | Error e -> error_json e
+           | Ok () ->
+             if write_enabled && Worker_dev_tools.is_write_operation cmd then
+               Log.Keeper.info "WRITE_AUDIT: keeper=%s cwd=%s cmd=%s"
+                 meta.name cwd cmd_for_log;
+             let st, out =
+               Process_eio.run_argv_with_status ~cwd ~timeout_sec
+                 [ "/bin/bash"; "-lc"; cmd ^ " 2>&1" ]
+             in
+             Yojson.Safe.to_string
+               (`Assoc
+                   [ "ok", `Bool (st = Unix.WEXITED 0)
+                   ; "cwd", `String cwd
+                   ; "status", Keeper_alerting_path.process_status_to_json st
+                   ; "output", `String out
+                   ])))
 ;;
 
 let handle_keeper_shell_readonly
@@ -146,25 +236,38 @@ let handle_keeper_shell_readonly
   let root = Keeper_alerting_path.project_root_of_config config in
   let read_target () =
     let raw_path = Safe_ops.json_string ~default:"." "path" args in
-    resolve_keeper_read_path ~config ~raw_path
+    resolve_keeper_read_path ~config ~meta ~raw_path
   in
-  let render_process_result ~cmd argv =
-    let st, out = Process_eio.run_argv_with_status ~timeout_sec:io_timeout_sec argv in
+  let cwd_target () = resolve_keeper_shell_read_cwd ~config ~meta ~args in
+  let render_process_result ?cwd ~cmd argv =
+    let st, out =
+      Process_eio.run_argv_with_status ?cwd ~timeout_sec:io_timeout_sec argv
+    in
     Yojson.Safe.to_string
       (`Assoc
           [ "ok", `Bool (st = Unix.WEXITED 0)
           ; "op", `String op
           ; "cmd", `String cmd
+          ; ( "cwd"
+            , match cwd with
+              | Some dir -> `String dir
+              | None -> `Null )
           ; "status", Keeper_alerting_path.process_status_to_json st
           ; "output", `String out
           ])
   in
   match op with
-  | "pwd" -> render_process_result ~cmd:"pwd" [ "/bin/pwd" ]
+  | "pwd" ->
+    (match cwd_target () with
+     | Error e -> error_json ~fields:[ "op", `String op ] e
+     | Ok cwd -> render_process_result ~cwd ~cmd:"pwd" [ "/bin/pwd" ])
   | "git_status" ->
-    render_process_result
-      ~cmd:"git -C <root> --no-optional-locks status --short --branch"
-      [ "git"; "-C"; root; "--no-optional-locks"; "status"; "--short"; "--branch" ]
+    (match cwd_target () with
+     | Error e -> error_json ~fields:[ "op", `String op ] e
+     | Ok cwd ->
+       render_process_result ~cwd
+         ~cmd:"git -C <cwd> --no-optional-locks status --short --branch"
+         [ "git"; "-C"; cwd; "--no-optional-locks"; "status"; "--short"; "--branch" ])
   | "ls" ->
     (match read_target () with
      | Error e -> error_json ~fields:[ "op", `String op ] e
@@ -234,24 +337,30 @@ let handle_keeper_shell_readonly
               ; "matches", lines_to_json ~limit out
               ]))
   | "git_log" ->
-    let count = max 1 (min 50 (Safe_ops.json_int ~default:10 "count" args)) in
-    let format = Safe_ops.json_string ~default:"%h %s" "format" args in
-    let file_path = Safe_ops.json_string ~default:"" "path" args |> String.trim in
-    let base_argv =
-      [ "git"; "-C"; root; "--no-optional-locks"; "log";
-        Printf.sprintf "--format=%s" format;
-        Printf.sprintf "-%d" count ]
-    in
-    let argv = if file_path <> "" then base_argv @ [ "--"; file_path ] else base_argv in
-    let st, out = Process_eio.run_argv_with_status ~timeout_sec:read_timeout_sec argv in
-    Yojson.Safe.to_string
-      (`Assoc
-          [ "ok", `Bool (st = Unix.WEXITED 0)
-          ; "op", `String op
-          ; "count", `Int count
-          ; "status", Keeper_alerting_path.process_status_to_json st
-          ; "entries", lines_to_json ~limit:50 out
-          ])
+    (match cwd_target () with
+     | Error e -> error_json ~fields:[ "op", `String op ] e
+     | Ok cwd ->
+       let count = max 1 (min 50 (Safe_ops.json_int ~default:10 "count" args)) in
+       let format = Safe_ops.json_string ~default:"%h %s" "format" args in
+       let file_path = Safe_ops.json_string ~default:"" "path" args |> String.trim in
+       let base_argv =
+         [ "git"; "-C"; cwd; "--no-optional-locks"; "log";
+           Printf.sprintf "--format=%s" format;
+           Printf.sprintf "-%d" count ]
+       in
+       let argv = if file_path <> "" then base_argv @ [ "--"; file_path ] else base_argv in
+       let st, out =
+         Process_eio.run_argv_with_status ~timeout_sec:read_timeout_sec argv
+       in
+       Yojson.Safe.to_string
+         (`Assoc
+             [ "ok", `Bool (st = Unix.WEXITED 0)
+             ; "op", `String op
+             ; "cwd", `String cwd
+             ; "count", `Int count
+             ; "status", Keeper_alerting_path.process_status_to_json st
+             ; "entries", lines_to_json ~limit:50 out
+             ]))
   | "find" ->
     let name_pattern = Safe_ops.json_string ~default:"" "pattern" args |> String.trim in
     if name_pattern = ""
@@ -338,57 +447,68 @@ let handle_keeper_shell_readonly
              ; "entries", lines_to_json ~limit out
              ]))
   | "git_diff" ->
-    render_process_result
-      ~cmd:"git diff --stat"
-      [ "git"; "-C"; root; "--no-optional-locks"; "diff"; "--stat" ]
+    (match cwd_target () with
+     | Error e -> error_json ~fields:[ "op", `String op ] e
+     | Ok cwd ->
+       render_process_result ~cwd
+         ~cmd:"git diff --stat"
+         [ "git"; "-C"; cwd; "--no-optional-locks"; "diff"; "--stat" ])
   | "git_worktree" ->
     let action =
       Safe_ops.json_string ~default:"list" "action" args
       |> String.trim |> String.lowercase_ascii
     in
-    (match action with
-     | "list" ->
-       render_process_result ~cmd:"git worktree list"
-         [ "git"; "-C"; root; "worktree"; "list" ]
-     | "add" ->
-       let branch = Safe_ops.json_string ~default:"" "branch" args |> String.trim in
-       let base = Safe_ops.json_string ~default:"origin/main" "base" args |> String.trim in
-       if branch = "" then
-         error_json ~fields:[ "op", `String op ]
-           "branch is required. Good: action='add', branch='feature/my-task'. Bad: branch=''."
-       else
-         (* Schema-level validation: check if branch is already in a worktree BEFORE running *)
-         let _st, wt_out =
-           Process_eio.run_argv_with_status ~timeout_sec:5.0
-             [ "git"; "-C"; root; "worktree"; "list"; "--porcelain" ]
-         in
-         if String_util.contains_substring_ci wt_out branch then
-           let existing_path =
-             String.split_on_char '\n' wt_out
-             |> List.find_map (fun line ->
-               if String_util.contains_substring_ci line "worktree" &&
-                  String_util.contains_substring_ci wt_out branch
-               then Some (String.trim line) else None)
-             |> Option.value ~default:"(unknown)"
-           in
-           Yojson.Safe.to_string
-             (`Assoc
-                 [ "ok", `Bool false
-                 ; "op", `String op
-                 ; "error", `String "branch_already_in_worktree"
-                 ; "branch", `String branch
-                 ; "existing_worktree", `String existing_path
-                 ; "hint", `String "Branch is already in a worktree. Use 'cd' to the existing path, or choose a different branch name."
-                 ])
-         else
-           let wt_path = Printf.sprintf ".worktrees/%s"
-             (String.map (fun c -> if c = '/' then '-' else c) branch) in
-           render_process_result
-             ~cmd:(Printf.sprintf "git worktree add %s -b %s %s" wt_path branch base)
-             [ "git"; "-C"; root; "worktree"; "add"; wt_path; "-b"; branch; base ]
-     | other ->
-       error_json ~fields:[ "op", `String op ]
-         (Printf.sprintf "Unknown git_worktree action '%s'. Use: list, add." other))
+    begin match action with
+    | "list" ->
+      (match cwd_target () with
+       | Error e -> error_json ~fields:[ "op", `String op ] e
+       | Ok cwd ->
+         render_process_result ~cwd ~cmd:"git worktree list"
+           [ "git"; "-C"; cwd; "worktree"; "list" ])
+    | "add" ->
+      let branch = Safe_ops.json_string ~default:"" "branch" args |> String.trim in
+      let base = Safe_ops.json_string ~default:"origin/main" "base" args |> String.trim in
+      if branch = "" then
+        error_json ~fields:[ "op", `String op ]
+          "branch is required. Good: action='add', branch='feature/my-task'. Bad: branch=''."
+      else (
+        match cwd_target () with
+        | Error e -> error_json ~fields:[ "op", `String op ] e
+        | Ok cwd ->
+          let _st, wt_out =
+            Process_eio.run_argv_with_status ~timeout_sec:5.0
+              [ "git"; "-C"; cwd; "worktree"; "list"; "--porcelain" ]
+          in
+          if String_util.contains_substring_ci wt_out branch then
+            let existing_path =
+              String.split_on_char '\n' wt_out
+              |> List.find_map (fun line ->
+                if String_util.contains_substring_ci line "worktree"
+                   && String_util.contains_substring_ci wt_out branch
+                then Some (String.trim line) else None)
+              |> Option.value ~default:"(unknown)"
+            in
+            Yojson.Safe.to_string
+              (`Assoc
+                  [ "ok", `Bool false
+                  ; "op", `String op
+                  ; "error", `String "branch_already_in_worktree"
+                  ; "branch", `String branch
+                  ; "existing_worktree", `String existing_path
+                  ; "hint", `String "Branch is already in a worktree. Use 'cd' to the existing path, or choose a different branch name."
+                  ])
+          else
+            let wt_path = Printf.sprintf ".worktrees/%s"
+              (String.map (fun c -> if c = '/' then '-' else c) branch)
+            in
+            render_process_result ~cwd
+              ~cmd:(Printf.sprintf "git worktree add %s -b %s %s" wt_path branch base)
+              [ "git"; "-C"; cwd; "worktree"; "add"; wt_path; "-b"; branch; base ]
+      )
+    | other ->
+      error_json ~fields:[ "op", `String op ]
+        (Printf.sprintf "Unknown git_worktree action '%s'. Use: list, add." other)
+    end
   | "bash" ->
     let cmd_str = Safe_ops.json_string ~default:"" "command" args |> String.trim in
     if cmd_str = "" then error_json ~fields:[ "op", `String op ] "command is required for bash op. Good: command='env'. Bad: command=''."
@@ -457,18 +577,25 @@ let handle_keeper_shell_readonly
               ; "hint", `String hint
               ])
       | None ->
-        let st, out =
-          Process_eio.run_argv_with_status ~timeout_sec:io_timeout_sec
-            [ "bash"; "-c"; cmd_str ]
-        in
-        Yojson.Safe.to_string
-          (`Assoc
-              [ "ok", `Bool (st = Unix.WEXITED 0)
-              ; "op", `String op
-              ; "command", `String cmd_str
-              ; "status", Keeper_alerting_path.process_status_to_json st
-              ; "output", `String out
-              ]))
+        (match cwd_target () with
+         | Error e -> error_json ~fields:[ "op", `String op ] e
+         | Ok cwd ->
+           (match Worker_dev_tools.validate_command_paths ~workdir:cwd cmd_str with
+            | Error e -> error_json ~fields:[ "op", `String op ] e
+            | Ok () ->
+              let st, out =
+                Process_eio.run_argv_with_status ~cwd ~timeout_sec:io_timeout_sec
+                  [ "bash"; "-lc"; cmd_str ^ " 2>&1" ]
+              in
+              Yojson.Safe.to_string
+                (`Assoc
+                    [ "ok", `Bool (st = Unix.WEXITED 0)
+                    ; "op", `String op
+                    ; "cwd", `String cwd
+                    ; "command", `String cmd_str
+                    ; "status", Keeper_alerting_path.process_status_to_json st
+                    ; "output", `String out
+                    ]))))
   | "git_clone" ->
     (* Clone a repo into this keeper's playground directory.
        Sandboxed: always targets .masc/playground/<keeper_name>/<repo_name>.
@@ -523,6 +650,10 @@ let handle_keeper_shell_readonly
              Process_eio.run_argv_with_status ~timeout_sec:60.0
                [ "git"; "-C"; clone_path; "pull"; "--ff-only" ]
            in
+           if st = Unix.WEXITED 0 then
+             update_playground_repo_cache
+               ~playground_dir:playground ~repo_name ~repo_path:clone_path
+               ~action:"pull" ~shallow:false;
            Yojson.Safe.to_string
              (`Assoc
                  [ "ok", `Bool (st = Unix.WEXITED 0)
@@ -533,10 +664,20 @@ let handle_keeper_shell_readonly
                  ; "output", `String out
                  ])
          else
-           let st, out =
-             Process_eio.run_argv_with_status ~timeout_sec:120.0
-               [ "git"; "clone"; "--depth"; "1"; url; clone_path ]
+           let depth = Keeper_tool_policy.clone_depth () |> max 0 in
+           let depth_args =
+             if depth > 0 then ["--depth"; string_of_int depth] else []
            in
+           let shallow = depth > 0 in
+           let st, out =
+             Process_eio.run_argv_with_status
+               ~timeout_sec:(Keeper_tool_policy.clone_timeout_sec ())
+               ("git" :: "clone" :: depth_args @ [ url; clone_path ])
+           in
+           if st = Unix.WEXITED 0 then
+             update_playground_repo_cache
+               ~playground_dir:playground ~repo_name ~repo_path:clone_path
+               ~action:"clone" ~shallow;
            Yojson.Safe.to_string
              (`Assoc
                  [ "ok", `Bool (st = Unix.WEXITED 0)
@@ -562,4 +703,3 @@ let handle_keeper_shell_readonly
                      "git_clone" ]) )
           ])
 ;;
-

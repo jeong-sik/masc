@@ -657,15 +657,6 @@ let test_keeper_msg_auto_team_session_bridge () =
           team_status_ok;
         Alcotest.(check bool) "spawn_error surfaced" true
           (first_json |> member "spawn_error" <> `Null);
-        let meta =
-          match Masc_mcp.Keeper_types.read_meta config keeper_name with
-          | Ok (Some meta) -> meta
-          | Ok None -> Alcotest.fail "keeper meta missing after keeper_msg"
-          | Error err -> Alcotest.fail ("meta read failed: " ^ err)
-        in
-        Alcotest.(check (option string)) "linked session id"
-          (Some session_id) meta.active_team_session_id;
-        Alcotest.(check int) "start count" 1 meta.team_session_start_count_total;
         let status_ok, status_body =
           dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_status"
             ~args:
@@ -685,11 +676,10 @@ let test_keeper_msg_auto_team_session_bridge () =
           Yojson.Safe.Util.(status_json |> member "auto_team_session" |> member "status" |> to_string);
         Alcotest.(check bool) "status exposes auto team session disabled" false
           Yojson.Safe.Util.(status_json |> member "auto_team_session_enabled" |> to_bool);
-        Alcotest.(check string) "status exposes running bridge" "running"
-          Yojson.Safe.Util.(status_json |> member "team_session_state" |> to_string);
-        Alcotest.(check bool) "status exposes bridge enabled" true
-          Yojson.Safe.Util.(
-            status_json |> member "team_session_bridge" |> member "enabled" |> to_bool);
+        Alcotest.(check bool) "status omits team session state" true
+          Yojson.Safe.Util.(status_json |> member "team_session_state" = `Null);
+        Alcotest.(check bool) "status omits team session bridge" true
+          Yojson.Safe.Util.(status_json |> member "team_session_bridge" = `Null);
         let events = Team_session_store.read_recent_events config session_id ~max_count:10 in
         let note_events =
           List.filter
@@ -741,19 +731,10 @@ let test_keeper_msg_auto_team_session_bridge () =
           | Ok None -> Alcotest.fail "keeper meta removed unexpectedly"
           | Error err -> Alcotest.fail ("meta read after down failed: " ^ err)
         in
-        let session_after_down =
-          match Team_session_store.load_session config session_id with
-          | Some session -> session
-          | None -> Alcotest.fail "team session removed unexpectedly on down"
-        in
-        Alcotest.(check string) "linked session interrupted on down" "interrupted"
-          (Team_session_types.status_to_string session_after_down.status);
-        Alcotest.(check (option string)) "linked session cleared on down" None
-          meta_after_down.active_team_session_id;
-        Alcotest.(check string) "last started cleared on down" ""
-          meta_after_down.last_team_session_started_at;
-        Alcotest.(check int) "start count retained on down" 1
-          meta_after_down.team_session_start_count_total)
+        Alcotest.(check bool) "keeper paused on down" true meta_after_down.paused;
+        ignore
+          (Team_session_engine_eio.stop_session ~config ~session_id
+             ~reason:"test_cleanup" ~generate_report:false))
 
 let test_operator_keeper_message_rejects_legacy_model_args () =
   Eio_main.run @@ fun env ->

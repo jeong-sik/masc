@@ -33,14 +33,8 @@ let latest_delivery_verdict_json_for_session config session_id =
   Option.map Team_session_types.delivery_verdict_to_yojson
     (latest_delivery_verdict_for_session config session_id)
 
-let proof_result_status_to_string =
-  Oas_worker_exec.proof_result_status_to_string
-
-let json_string_list values =
-  `List (List.map (fun value -> `String value) values)
-
 let local_worker_tool_names_of_scope scope =
-  Team_session_oas_bridge.supported_local_worker_tool_names_for_scope
+  Team_session_worker_run_meta.supported_local_worker_tool_names_for_scope
     (Some scope)
 
 let local_shell_tool_names_of_scope = function
@@ -48,93 +42,6 @@ let local_shell_tool_names_of_scope = function
       [ "file_read"; "shell_exec" ]
   | _ ->
       [ "file_read"; "file_write"; "shell_exec" ]
-
-let tool_surface_source_of_mode = function
-  | "swarm" -> Some "swarm_masc_tools"
-  | "spawn" | "delegate" -> Some "local_worker_tools"
-  | _ -> None
-
-let dedup_tool_names values =
-  Team_session_types.dedup_strings values |> List.sort String.compare
-
-let tool_surface_fields ~mode ?execution_scope ?(proof : Oas.Cdal_proof.t option)
-    () =
-  let tool_surface_masc_names =
-    match mode, execution_scope with
-    | "swarm", Some scope ->
-        Team_session_oas_bridge.supported_local_worker_tool_names_for_scope
-          (Some scope)
-    | ("spawn" | "delegate"), Some scope ->
-        local_worker_tool_names_of_scope scope
-    | _ -> []
-  in
-  let tool_surface_shell_names =
-    match mode, execution_scope with
-    | ("spawn" | "delegate"), Some scope ->
-        local_shell_tool_names_of_scope scope
-    | _ -> []
-  in
-  let tool_surface_names =
-    let proof_tool_names =
-      match proof with
-      | Some proof -> proof.capability_snapshot.tools
-      | None -> []
-    in
-    dedup_tool_names
-      (proof_tool_names @ tool_surface_masc_names @ tool_surface_shell_names)
-  in
-  [
-    ( "tool_surface_status",
-      `String
-        (if tool_surface_names <> [] then "available" else "missing") );
-    ( "tool_surface_source",
-      Option.fold ~none:`Null ~some:(fun value -> `String value)
-        (if tool_surface_names <> [] then tool_surface_source_of_mode mode
-         else None) );
-    ("tool_surface_names", json_string_list tool_surface_names);
-    ("tool_surface_masc_names", json_string_list tool_surface_masc_names);
-    ("tool_surface_shell_names", json_string_list tool_surface_shell_names);
-  ]
-
-let proof_summary_fields ~(worker_run_id : string)
-    ?(proof : Oas.Cdal_proof.t option) () =
-  let null_fields =
-    [
-      ("proof_run_id", `Null);
-      ("proof_status", `Null);
-      ("proof_risk_class", `Null);
-      ("proof_execution_mode", `Null);
-      ("proof_evidence_count", `Null);
-    ]
-  in
-  match proof with
-  | None -> null_fields
-  | Some proof -> (
-      match Repo_synthesis_benchmark.validate_run_id proof.run_id with
-      | Ok run_id ->
-          [
-            ("proof_run_id", `String run_id);
-            ( "proof_status",
-              `String (proof_result_status_to_string proof.result_status) );
-            ( "proof_risk_class",
-              `String (Oas.Risk_class.to_string proof.risk_class) );
-            ( "proof_execution_mode",
-              `String
-                (Oas.Execution_mode.to_string
-                   proof.effective_execution_mode) );
-            ( "proof_evidence_count",
-              `Int (List.length proof.raw_evidence_refs) );
-            ("tool_trace_refs", json_string_list proof.tool_trace_refs);
-            ("raw_evidence_refs", json_string_list proof.raw_evidence_refs);
-            ( "checkpoint_ref",
-              Option.fold ~none:`Null ~some:(fun value -> `String value)
-                proof.checkpoint_ref );
-          ]
-      | Error msg ->
-          Log.Misc.warn
-            "team_session_step: dropping invalid proof_run_id for worker_run=%s: %s"
-            worker_run_id msg;
-          null_fields)
 
 let delivery_verdict_of_verification ~session_id ~worker_run_id
     ~(contract : Team_session_types.delivery_contract)
@@ -497,7 +404,7 @@ let persist_worker_run_snapshot (env : _ step_env) ~worker_run_id ~worker_name
     | Some worker -> env.deps.oas_worker_status_to_json worker.status
     | None -> env.deps.worker_run_status_to_json status
   in
-  let trace_capability =
+  let effective_trace_capability =
     match trace_capability with
     | _ when Option.is_some oas_worker ->
         Option.value ~default:"summary_only"
@@ -543,48 +450,28 @@ let persist_worker_run_snapshot (env : _ step_env) ~worker_run_id ~worker_name
         | _ -> output_preview)
     | None -> output_preview
   in
-  let proof_fields =
-    proof_summary_fields ~worker_run_id ?proof ()
-  in
-  let tool_surface_fields =
-    tool_surface_fields ~mode ?execution_scope ?proof ()
-  in
   if Room_utils.path_exists env.ctx.config checkpoint_path then
     Team_session_store.save_worker_run_checkpoint_text env.ctx.config
       env.session_id worker_run_id
       (Team_session_store.read_text_file checkpoint_path);
-  Team_session_store.save_worker_run_meta_json env.ctx.config env.session_id
-    worker_run_id
-    (`Assoc
-      ([
-        ("worker_run_id", `String worker_run_id);
-        ("worker_name", `String worker_name);
-        ("mode", `String mode);
-        ("status", effective_status);
-        ("wait_mode", `String (Team_session_types.wait_mode_to_string wait_mode));
-        ("trace_capability", `String trace_capability);
-        ("success", `Bool success);
-        ("execution_scope", Option.fold ~none:`Null ~some:(fun scope -> `String (Team_session_types.execution_scope_to_string scope)) execution_scope);
-        ("requested_worker_class", Option.fold ~none:`Null ~some:(fun kind -> `String (Team_session_types.worker_class_to_string kind)) requested_worker_class);
-        ("resolved_runtime", Option.fold ~none:`Null ~some:(fun s -> `String s) resolved_runtime);
-        ("resolved_model", Option.fold ~none:`Null ~some:(fun s -> `String s) effective_resolved_model);
-        ("routing_reason", Option.fold ~none:`Null ~some:(fun s -> `String s) routing_reason);
-        ("tool_names", `List (List.map (fun name -> `String name) effective_tool_names));
-        ("tool_call_count", Option.fold ~none:`Null ~some:(fun n -> `Int n) tool_call_count);
-        ("output_preview", Option.fold ~none:`Null ~some:(fun s -> `String s) effective_output_preview);
-        ("error", Option.fold ~none:`Null ~some:(fun s -> `String s) effective_error);
-        ("trace_ref", Option.fold ~none:`Null ~some:env.deps.raw_trace_run_ref_to_json effective_trace_ref);
-        ("trace_summary", Option.fold ~none:`Null ~some:(fun json -> json) effective_trace_summary);
-        ("trace_validation", Option.fold ~none:`Null ~some:(fun json -> json) effective_trace_validation);
-        ("evidence_session_id", Option.fold ~none:`Null ~some:(fun s -> `String s) evidence_session_id);
-        ("oas_worker_run", Option.fold ~none:`Null ~some:(fun json -> json) (Option.bind oas_evidence (fun payload -> payload.worker_json)));
-        ("session_conformance", Option.fold ~none:`Null ~some:(fun json -> json) (Option.bind oas_evidence (fun payload -> payload.conformance_json)));
-        ("validated", Option.fold ~none:`Null ~some:(fun worker -> `Bool worker.Oas.Sessions.validated) oas_worker);
-        ("final_text", Option.fold ~none:`Null ~some:(fun worker -> Option.fold ~none:`Null ~some:(fun s -> `String s) worker.Oas.Sessions.final_text) oas_worker);
-        ("stop_reason", Option.fold ~none:`Null ~some:(fun worker -> Option.fold ~none:`Null ~some:(fun s -> `String s) worker.Oas.Sessions.stop_reason) oas_worker);
-        ("failure_reason", Option.fold ~none:`Null ~some:(fun worker -> Option.fold ~none:`Null ~some:(fun s -> `String s) worker.Oas.Sessions.failure_reason) oas_worker);
-        ("ts_iso", `String (Types.now_iso ()));
-      ] @ tool_surface_fields @ proof_fields))
+  Team_session_worker_run_meta.persist ~config:env.ctx.config
+    ~session_id:env.session_id ~worker_run_id ~worker_name ~mode ~wait_mode
+    ?execution_scope ?requested_worker_class ?resolved_runtime
+    ?resolved_model:effective_resolved_model ?routing_reason
+    ~tool_names:effective_tool_names ?tool_call_count ~status:effective_status
+    ~success ?output_preview:effective_output_preview ?error:effective_error
+    ~trace_capability:effective_trace_capability
+    ?trace_ref:effective_trace_ref ?trace_summary:effective_trace_summary
+    ?trace_validation:effective_trace_validation ?evidence_session_id
+    ?oas_evidence
+    ?final_text:
+      (Option.bind oas_worker (fun worker -> worker.Oas.Sessions.final_text))
+    ?stop_reason:
+      (Option.bind oas_worker (fun worker -> worker.Oas.Sessions.stop_reason))
+    ?failure_reason:
+      (Option.bind oas_worker (fun worker ->
+           worker.Oas.Sessions.failure_reason))
+    ?proof ()
 
 let release_prepared_runtime (prepared : prepared_spawn) ~success
     ?error ?latency_ms () =

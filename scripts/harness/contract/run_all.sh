@@ -86,9 +86,8 @@ if ! wait_for_mcp_initialize_ready "$MCP_URL" 25; then
   exit 1
 fi
 
-run_contract 1 4 "streamable_http_contract.sh"
-run_contract 2 4 "team_session_contract.sh"
-run_contract 3 4 "golden_path_1_contract.sh"
-run_contract 4 4 "public_tool_live_sweep.sh"
+run_contract 1 3 "streamable_http_contract.sh"
+run_contract 2 3 "golden_path_1_contract.sh"
+run_contract 3 3 "public_tool_live_sweep.sh"
 
 echo "PASS: contract harness suite"

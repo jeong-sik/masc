@@ -61,7 +61,9 @@ let main_result () =
                 Eio_guard.disable ())
               (fun () ->
                 match
-                  Lib.Worker_run_once.execute_spec ~sw ~room_config:None spec
+                  (* Worker_run_once removed *)
+                  ignore (sw, spec);
+                  (Error "Worker_run_once removed (team session layer)" : (Lib.Worker_container.run_result, string) result)
                 with
                 | Ok run_result ->
                     ( Lib.Worker_runtime_helper_protocol.success_json run_result,

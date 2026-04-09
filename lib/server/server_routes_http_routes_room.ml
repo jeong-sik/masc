@@ -84,9 +84,9 @@ module Keeper_stream = Server_routes_http_keeper_stream
              ]
            in
            let projection_fields =
-             match Task_contract_gate.task_projection_json config t with
-             | `Assoc fields -> fields
-             | _ -> []
+             (* Task_contract_gate removed *)
+             ignore (config, t);
+             []
            in
            `Assoc (base_fields @ projection_fields)
          ) page in

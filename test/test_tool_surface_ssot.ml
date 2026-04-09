@@ -39,15 +39,19 @@ let test_spawned_agent_parity () =
   let ssot = set_of (Tool_catalog.tools_for_surface Tool_catalog.Spawned_agent) in
   check_set_equal "Spawned_agent" ~expected:legacy ~actual:ssot
 
-let test_local_worker_parity () =
-  let legacy = set_of Team_session_oas_bridge.supported_local_worker_tool_names in
-  let ssot = set_of (Tool_catalog.tools_for_surface Tool_catalog.Local_worker) in
-  check_set_equal "Local_worker" ~expected:legacy ~actual:ssot
-
-let test_agent_local_worker_parity () =
-  let legacy = set_of Agent_tool_surfaces.local_worker_public_tool_names in
-  let ssot = set_of (Tool_catalog.tools_for_surface Tool_catalog.Local_worker) in
-  check_set_equal "Agent_tool_surfaces.Local_worker" ~expected:legacy ~actual:ssot
+let test_local_worker_public_tools_resolvable () =
+  let public_names =
+    set_of (Tool_catalog.tools_for_surface Tool_catalog.Local_worker)
+  in
+  let resolvable_names =
+    set_of (Agent_tool_surfaces.local_worker_resolvable_tool_names ())
+  in
+  let missing = SS.diff public_names resolvable_names in
+  if not (SS.is_empty missing) then
+    Alcotest.failf "Local_worker public tools missing schemas: {%s}"
+      (String.concat ", " (SS.elements missing));
+  Alcotest.(check bool) "Local_worker public tools resolvable" true
+    (SS.is_empty missing)
 
 let test_session_min_parity () =
   let legacy = set_of Worker_container.session_min_tool_names in
@@ -341,9 +345,8 @@ let () =
         [
           Alcotest.test_case "Public_mcp parity" `Quick test_public_mcp_parity;
           Alcotest.test_case "Spawned_agent parity" `Quick test_spawned_agent_parity;
-          Alcotest.test_case "Local_worker parity" `Quick test_local_worker_parity;
-          Alcotest.test_case "Agent local_worker parity" `Quick
-            test_agent_local_worker_parity;
+          Alcotest.test_case "Local_worker public tools resolvable" `Quick
+            test_local_worker_public_tools_resolvable;
           Alcotest.test_case "Session_min parity" `Quick test_session_min_parity;
           Alcotest.test_case "Admin parity" `Quick test_admin_parity;
           Alcotest.test_case "Keeper_denied parity" `Quick test_keeper_denied_parity;

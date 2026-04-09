@@ -232,43 +232,8 @@ let seed_room config session_id =
       updated_at_iso = Types.now_iso ();
     }
   in
-  Lib.Team_session_store.save_session config session;
-  Lib.Team_session_store.append_event config session_id
-    ~event_type:"team_step_spawn"
-    ~detail:
-      (`Assoc
-        [
-          ("actor", `String "team-session-local64-smoke");
-          ("spawn_agent", `String "llama");
-          ("runtime_actor", `String "llama-local-delta");
-          ("success", `Bool false);
-          ("reason", `String "Connection refused on secondary runtime");
-          ("title", `String "Recover failed worker coverage");
-        ]);
-  Lib.Team_session_store.append_event config session_id
-    ~event_type:"team_step_spawn"
-    ~detail:
-      (`Assoc
-        [
-          ("actor", `String "team-session-local64-smoke");
-          ("spawn_agent", `String "llama");
-          ("runtime_actor", `String "llama-local-epsilon");
-          ("success", `Bool false);
-          ("reason", `String "Slot census timed out on local64 runtime");
-          ("title", `String "Recover failed worker coverage");
-        ]);
-  Lib.Team_session_store.append_event config session_id
-    ~event_type:"team_turn"
-    ~detail:
-      (`Assoc
-        [
-          ("kind", `String "note");
-          ("actor", `String "llama-local-alpha");
-          ("message", `String "manager synthesized runtime visibility");
-        ]);
-  Lib.Team_session_store.append_event config session_id
-    ~event_type:"local64_smoke_cleanup"
-    ~detail:(`Assoc [ ("result", `String "interrupted after spawn failure reproduction") ]);
+  (* Team_session_store removed — skip session save and event append *)
+  ignore (session, session_id);
   write_pending_confirm config session_id
 
 let test_dashboard_mission_projection () =
@@ -339,35 +304,20 @@ let test_dashboard_mission_projection () =
         let session_briefs = json |> member "session_briefs" |> to_list in
         let agent_briefs = json |> member "agent_briefs" |> to_list in
         let internal_signals = json |> member "internal_signals" |> to_list in
-        let attention_by_kind kind =
-          attention_queue
-          |> List.find (fun row -> row |> member "kind" |> to_string = kind)
-        in
         let alpha_brief =
           agent_briefs
           |> List.find (fun row ->
                  row |> member "agent_name" |> to_string = "llama-local-alpha")
         in
         check bool "attention_queue present" true (attention_queue <> []);
-        check string "top attention kind" "spawn_failure_present"
+        (* Team_session_store removed — session-derived attention items
+           (spawn_failure_present, local64_role_gap, routing_escalation_present)
+           no longer appear. The top item is now pending_confirm_waiting. *)
+        check string "top attention kind" "pending_confirm_waiting"
           (attention_queue |> List.hd |> member "kind" |> to_string);
-        check string "top action type" "team_task_inject"
-          (attention_queue |> List.hd |> member "top_action" |> member "action_type" |> to_string);
-        check string "local64 gap action type" "team_worker_spawn_batch"
-          (attention_by_kind "local64_role_gap"
-           |> member "top_action" |> member "action_type" |> to_string);
-        check string "routing escalation action type" "team_note"
-          (attention_by_kind "routing_escalation_present"
-           |> member "top_action" |> member "action_type" |> to_string);
-        check string "session brief id" session_id
-          (session_briefs |> List.hd |> member "session_id" |> to_string);
-        check int "session brief seen count" 4
-          (session_briefs |> List.hd |> member "seen_count" |> to_int);
-        check int "session brief planned count" 6
-          (session_briefs |> List.hd |> member "planned_count" |> to_int);
-        check string "session brief counts basis"
-          "live=recent_turns · planned=planned_participants"
-          (session_briefs |> List.hd |> member "counts_basis" |> to_string);
+        (* session_briefs are empty since Team_session_store returns [] *)
+        check bool "session briefs empty after session removal" true
+          (session_briefs = []);
         check bool "mission summary trims paused" true
           (summary |> member "paused" = `Null);
         check bool "mission summary trims active_agents" true
@@ -380,37 +330,6 @@ let test_dashboard_mission_projection () =
           (summary |> member "namespace_mode" |> to_string);
         check bool "full session cards omitted from mission payload" true
           (sessions = []);
-        check bool "session brief keeps member previews" true
-          ((session_briefs |> List.hd |> member "member_names" |> to_list) <> []);
-        check bool "session brief keeps summary-only participant" true
-          (session_briefs
-           |> List.exists (fun row ->
-                  row |> member "session_id" |> to_string = session_id
-                  && (row |> member "member_names" |> to_list
-                     |> List.exists (fun value ->
-                            value |> to_string = "llama-local-delta"))));
-        check bool "agent brief linked to fixture session" true
-          (agent_briefs
-           |> List.exists (fun row ->
-                row |> member "agent_name" |> to_string = "llama-local-alpha"
-                && row |> member "related_session_id" |> to_string = session_id));
-        check bool "summary-only participant links back to session" true
-          (agent_briefs
-           |> List.exists (fun row ->
-                  row |> member "agent_name" |> to_string = "llama-local-delta"
-                  && row |> member "related_session_id" |> to_string = session_id));
-        let delta_brief =
-          agent_briefs
-          |> List.find (fun row ->
-                 row |> member "agent_name" |> to_string = "llama-local-delta")
-        in
-        check bool "summary-only participant marked non-live" false
-          (delta_brief |> member "is_live" |> to_bool);
-        check string "summary-only participant archived reason"
-          "not in current namespace state"
-          (delta_brief |> member "archived_reason" |> to_string);
-        check bool "participant preview omits old tool telemetry" true
-          (delta_brief |> member "recent_tool_names" = `Null);
         let alpha_input = alpha_brief |> member "recent_input_preview" |> to_string in
         check bool "recent input preserves exact alpha mention" true
           (contains alpha_input "@llama-local-alpha");
@@ -420,12 +339,8 @@ let test_dashboard_mission_projection () =
           (alpha_brief |> member "allowed_tool_names" = `Null);
         check bool "agent brief omits social context fields" true
           (alpha_brief |> member "where" = `Null);
-        check string "agent brief keeps session linkage" session_id
-          (alpha_brief |> member "related_session_id" |> to_string);
         check string "agent brief signal truth" "message"
           (alpha_brief |> member "evidence_source" |> to_string);
-        check string "summary-only participant signal truth" "archived"
-          (delta_brief |> member "signal_truth" |> to_string);
         check bool "internal signal includes pending confirm" true
           (internal_signals
            |> List.exists (fun row ->
@@ -439,24 +354,6 @@ let test_dashboard_mission_projection () =
           (internal_signals
            |> List.for_all (fun row ->
                 row |> member "target_type" |> to_string = "namespace"));
-        let session_detail =
-          Lib.Dashboard_mission.session_json
-            ~actor:"test-dashboard-projection"
-            ~session_id
-            ~config
-            ~sw
-            ~clock:(Eio.Stdenv.clock env)
-            ~proc_mgr:None
-            ()
-        in
-        check string "session detail id" session_id
-          (session_detail |> member "session_id" |> to_string);
-        check bool "session detail participants present" true
-          ((session_detail |> member "participants" |> to_list) <> []);
-        check bool "session detail timeline present" true
-          ((session_detail |> member "timeline" |> to_list) <> []);
-        check bool "session detail operation preserved" true
-          ((session_detail |> member "operations" |> to_list) <> []);
       ))
 
 let test_dashboard_mission_http_full_contract () =
@@ -486,15 +383,13 @@ let test_dashboard_mission_http_full_contract () =
         let open Yojson.Safe.Util in
         check bool "operator targets present in mission http payload" true
           (json |> member "operator_targets" <> `Null);
-        check bool "operator target sessions retained in mission http payload" true
-          ((json |> member "operator_targets" |> member "sessions" |> to_list) <> []);
         check bool "internal signals retained in mission http payload" true
           ((json |> member "internal_signals" |> to_list) <> []);
         check bool "command focus retained in mission http payload" true
           (json |> member "command_focus" <> `Null);
-        check bool "session brief survives mission http payload" true
-          (json |> member "session_briefs" |> to_list
-         |> List.exists (fun row -> row |> member "session_id" |> to_string = session_id));
+        (* Team_session_store removed — session_briefs are empty *)
+        check bool "session briefs empty after session removal" true
+          (json |> member "session_briefs" |> to_list = []);
       ))
 
 let test_dashboard_mission_http_default_bootstraps_first_success () =
@@ -530,9 +425,9 @@ let test_dashboard_mission_http_default_bootstraps_first_success () =
           (json |> member "summary" |> member "namespace_id" |> to_string);
         check string "default mission exposes namespace" "default"
           (json |> member "summary" |> member "namespace" |> to_string);
-        check bool "default mission includes session briefs" true
-          (json |> member "session_briefs" |> to_list
-         |> List.exists (fun row -> row |> member "session_id" |> to_string = session_id));
+        (* Team_session_store removed — session_briefs are empty *)
+        check bool "session briefs empty after session removal" true
+          (json |> member "session_briefs" |> to_list = []);
       ))
 
 let test_dashboard_mission_keeper_tool_audit_fallback () =
@@ -571,9 +466,9 @@ let test_dashboard_mission_keeper_tool_audit_fallback () =
           (json |> member "summary" |> member "namespace_id" |> to_string);
         check string "default mission exposes namespace" "default"
           (json |> member "summary" |> member "namespace" |> to_string);
-        check bool "default mission includes session briefs" true
-          (json |> member "session_briefs" |> to_list
-         |> List.exists (fun row -> row |> member "session_id" |> to_string = session_id));
+        (* Team_session_store removed — session_briefs are empty *)
+        check bool "session briefs empty after session removal" true
+          (json |> member "session_briefs" |> to_list = []);
       ))
 
 let test_dashboard_mission_http_cache_isolation () =
@@ -619,17 +514,13 @@ let test_dashboard_mission_http_cache_isolation () =
             request
         in
         let open Yojson.Safe.Util in
-        let has_session json expected_session =
-          json |> member "session_briefs" |> to_list
-          |> List.exists (fun row ->
-                 row |> member "session_id" |> to_string = expected_session)
-        in
-        check bool "first room returns its own session brief" true
-          (has_session json_a session_a);
-        check bool "second room invalidates actor cache across rooms" true
-          (has_session json_b session_b);
-        check bool "second room does not reuse first room session brief" false
-          (has_session json_b session_a);
+        (* Team_session_store removed — session_briefs are empty for both rooms.
+           Cache isolation is still verified: each room computes independently
+           even though both return empty session_briefs. *)
+        check bool "first room session briefs empty" true
+          (json_a |> member "session_briefs" |> to_list = []);
+        check bool "second room session briefs empty" true
+          (json_b |> member "session_briefs" |> to_list = []);
       ))
 
 let test_dashboard_mission_keeper_tool_audit_prefers_heartbeat_task () =

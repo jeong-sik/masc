@@ -49,7 +49,10 @@ let build_execution_spec ~base_path ~worker_name ~model_label ~team_session_id
 
 let run_worker_oas ~sw ?net ~room_config
     (spec : Worker_execution_spec.t) : unit -> (run_result, string) result =
-  fun () -> Worker_run_once.execute_spec ~sw ?net ~room_config spec
+  fun () ->
+    (* Worker_run_once removed — return error *)
+    ignore (sw, net, room_config, spec);
+    Error "Worker_run_once removed (team session layer)"
 
 let continue_worker ?worker_run_id ?contract ~sw ?net ~base_path ~room_config ~worker_name
     ~(team_session_id : string) ~(prompt : string) :

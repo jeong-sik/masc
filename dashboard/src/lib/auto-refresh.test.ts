@@ -3,12 +3,14 @@ import { formatAutoRefreshLabel, setupVisibleAutoRefresh } from './auto-refresh'
 
 describe('auto-refresh', () => {
   const originalVisibility = Object.getOwnPropertyDescriptor(Document.prototype, 'visibilityState')
+  let visibilityState: DocumentVisibilityState = 'visible'
 
   beforeEach(() => {
     vi.useFakeTimers()
+    visibilityState = 'visible'
     Object.defineProperty(document, 'visibilityState', {
       configurable: true,
-      get: () => 'visible',
+      get: () => visibilityState,
     })
   })
 
@@ -84,5 +86,30 @@ describe('auto-refresh', () => {
     await vi.advanceTimersByTimeAsync(1_000)
 
     expect(refresh).not.toHaveBeenCalled()
+  })
+
+  it('skips interval and event refreshes while the document is hidden', async () => {
+    visibilityState = 'hidden'
+    const refresh = vi.fn()
+    const dispose = setupVisibleAutoRefresh(refresh, 200)
+
+    window.dispatchEvent(new Event('focus'))
+    document.dispatchEvent(new Event('visibilitychange'))
+    await vi.advanceTimersByTimeAsync(1_000)
+
+    expect(refresh).not.toHaveBeenCalled()
+    dispose()
+  })
+
+  it('refreshes immediately when the document becomes visible again', () => {
+    visibilityState = 'hidden'
+    const refresh = vi.fn()
+    const dispose = setupVisibleAutoRefresh(refresh, 200)
+
+    visibilityState = 'visible'
+    document.dispatchEvent(new Event('visibilitychange'))
+
+    expect(refresh).toHaveBeenCalledTimes(1)
+    dispose()
   })
 })

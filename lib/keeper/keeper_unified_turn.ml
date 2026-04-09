@@ -955,20 +955,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
     ?(channel : Keeper_world_observation.unified_turn_channel = Scheduled_autonomous)
     ?(semaphore_wait_ms = 0)
     ?shared_context
-    ?boring_consecutive_turns_ref
     () : (keeper_meta, Oas.Error.sdk_error) result =
-  (* 0. Reactive channel resets boring counter.
-     Reactive turns are triggered by external stimulus (mentions, board events)
-     which means new work is available. Resetting before the turn ensures
-     before_turn_params sees boring_consecutive=0 and gives the LLM full tool
-     access. Without this, a keeper at boring=5 receiving a mention would
-     still get tool_choice=None_ from the boring gate. *)
-  (match channel, boring_consecutive_turns_ref with
-   | Keeper_world_observation.Reactive, Some ref when !ref > 0 ->
-     Log.Keeper.info "%s: reactive turn resets boring_consecutive from %d to 0"
-       meta.name !ref;
-     ref := 0
-   | _ -> ());
   (* 1. Check API keys *)
   let model_labels = Keeper_coordination.effective_model_labels_for_turn meta in
   match ensure_api_keys_for_labels model_labels with
@@ -1086,7 +1073,6 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
               ~is_retry
               ?shared_context
               ?event_bus:(Keeper_event_bus.get ())
-              ?boring_consecutive_turns_ref
               ()
           in
           let rec retry_loop ~run_meta ~max_context ~run_generation

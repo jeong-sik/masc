@@ -122,14 +122,13 @@ let has_mutating_side_effect (name : string) : bool =
 
 (** Tools that gather status but produce no side effects.
     Calling only these tools across consecutive turns indicates a
-    polling loop.  This shared classification is used both by the
-    boring-tool gate in [Keeper_hooks_oas] to detect and break such
-    loops, and by allowlist gating through [is_boring_tool].
+    polling loop. This shared classification is still useful for
+    prompt shaping, telemetry, and tool-diversity heuristics.
 
     A tool is "boring" if calling it N times yields the same
     information as calling it once, and it mutates nothing.
     [keeper_stay_silent] is included: it is a no-op by design
-    and must not reset the boring-turn counter.
+    and should not be treated as productive work.
     Contrast with [keeper_fs_read] which reads new content, or
     [keeper_board_post] which creates artifacts. *)
 let boring_tools =

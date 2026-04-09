@@ -43,6 +43,15 @@ min_version_re="${OAS_AGENT_SDK_MIN_VERSION//./\\.}"
 default_pin_source="${OAS_AGENT_SDK_URL}#${OAS_AGENT_SDK_SHA}"
 pin_source="${AGENT_SDK_PIN_URL:-${default_pin_source}}"
 expected_opam_pin_source="git+${OAS_AGENT_SDK_URL}#${OAS_AGENT_SDK_SHA}"
+git_common_dir_raw="$(git -C "${REPO_ROOT}" rev-parse --git-common-dir)"
+if [[ "${git_common_dir_raw}" = /* ]]; then
+  git_common_dir="${git_common_dir_raw}"
+else
+  git_common_dir="$(cd "${REPO_ROOT}/${git_common_dir_raw}" && pwd)"
+fi
+repo_checkout_root="$(cd "${git_common_dir}/.." && pwd)"
+default_local_oas_checkout="$(cd "${repo_checkout_root}/.." && pwd)/oas"
+local_oas_checkout="${AGENT_SDK_LOCAL_REPO:-${default_local_oas_checkout}}"
 
 if [[ "${pin_source}" == "${default_pin_source}" ]]; then
   if [[ "${LOCAL_ONLY}" -eq 0 ]]; then
@@ -62,6 +71,20 @@ if [[ "${pin_source}" == "${default_pin_source}" ]]; then
   fi
 else
   echo "OAS pin override in use: ${pin_source}"
+fi
+
+if [[ "${pin_source}" == "${default_pin_source}" ]]; then
+  if git -C "${local_oas_checkout}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    local_checkout_head="$(git -C "${local_oas_checkout}" rev-parse HEAD 2>/dev/null || true)"
+    if [[ "${local_checkout_head}" != "${OAS_AGENT_SDK_SHA}" ]]; then
+      echo "local oas checkout drift: ${local_oas_checkout}@${local_checkout_head:-unknown}, expected ${OAS_AGENT_SDK_SHA}" >&2
+      echo "repair: git -C \"${local_oas_checkout}\" checkout ${OAS_AGENT_SDK_SHA} # or pin that checkout explicitly via AGENT_SDK_PIN_URL" >&2
+      exit 1
+    fi
+  elif [[ -n "${AGENT_SDK_LOCAL_REPO:-}" ]]; then
+    echo "AGENT_SDK_LOCAL_REPO is not a git checkout: ${local_oas_checkout}" >&2
+    exit 1
+  fi
 fi
 
 if ! grep -Eq "\\(agent_sdk \\(>= ${min_version_re}\\)\\)" "${REPO_ROOT}/dune-project"; then

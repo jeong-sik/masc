@@ -237,15 +237,8 @@ let test_session_to_swarm_config_health_contract () =
   Alcotest.(check int) "initial telemetry turn_count" 0 telemetry.turn_count;
   Alcotest.(check bool) "initial telemetry usage empty" true
     (Option.is_none telemetry.usage);
-  Alcotest.(check bool) "collaboration_context populated" true
-    (Option.is_some swarm_cfg.collaboration_context);
-  (match swarm_cfg.collaboration_context with
-   | Some (`Assoc fields) ->
-       Alcotest.(check bool) "has team_goal field" true
-         (List.mem_assoc "team_goal" fields);
-       Alcotest.(check bool) "has task_tree field" true
-         (List.mem_assoc "task_tree" fields)
-   | _ -> Alcotest.fail "collaboration_context should be JSON object");
+  Alcotest.(check bool) "collaboration_context omitted" true
+    (Option.is_none swarm_cfg.collaboration_context);
   let resource_ok = Option.get swarm_cfg.resource_check () in
   Alcotest.(check bool) "resource check passes for initialized room" true
     resource_ok;

@@ -51,7 +51,7 @@
 | ~~Board Listener (polling)~~ | 11 | ~100 | **→ REMOVED** (PG relay, filesystem-first에서 불필요. Board_dispatch가 SSE 직접 발사) |
 | ~~Intent 도구 4종~~ | 06 | ~200 | **→ IMPL** (MCP tool registry 등록 + dispatch 완료) |
 | ~~Keeper OAS Memory.t 일부~~ | 05 | ~100 | **→ IMPL** (v2.140.0 filesystem-first 전환으로 완료) |
-| ~~Team Session lossy projection~~ | 07 | ~50 | **→ IMPL** (collaboration_context JSON 채움 + Prompt_composer로 system_prompt 보강. OAS #698에서 Collaboration.t→opaque JSON 전환 완료) |
+| Team Session lossy projection | 07 | ~50 | `worker_specs` + prompt context만 유지하며 `collaboration_context`는 제거 개념으로 둠 |
 | ~~env-gated 테스트~~ | 15 | ~300 | **→ IMPL** (6종 전부 MASC_E2E_TESTS=true로 CI 실행 중. PG 의존 없음 — 서버 바이너리 의존) |
 | ~~MDAL dashboard surface~~ | 10 | ~50 | **→ REMOVED** (개념 폐기) |
 
@@ -118,7 +118,7 @@
 | Swarm Runner | Load→convert→callbacks→run→apply | IMPL | team_session_swarm_runner.ml |
 | Report/Proof | Markdown/JSON, Standard/Strong | IMPL | team_session_report_proof.ml 419 LOC |
 | Tool Surface | 9 handler modules, 4.5K LOC | IMPL | God file 분할 완료 |
-| Session Bridge Fidelity | collaboration_context JSON + Prompt_composer + `worker_specs` projection | IMPL | OAS #698 opaque JSON, fidelity gap remains |
+| Session Bridge Fidelity | `worker_specs` projection + prompt context, no `collaboration_context` | Architectural | fidelity gap remains by design |
 
 ### 08-Governance (100% IMPL)
 
@@ -188,7 +188,6 @@ env-gated 6종은 CI에서 MASC_E2E_TESTS=true로 실행 확인.
 ### 완료된 항목
 - ~~Chain Engine~~ → 소스 삭제됨 (REMOVED)
 - ~~Intent 도구~~ → MCP 등록 완료 (IMPL)
-- ~~Team Session lossy projection~~ → collaboration_context + Prompt_composer (IMPL)
 - ~~env-gated 테스트~~ → CI에서 전부 실행 중 (IMPL)
 - ~~Board Listener~~ → 제거됨 (PG relay, Board_dispatch가 SSE 직접 발사)
 
@@ -203,7 +202,7 @@ env-gated 6종은 CI에서 MASC_E2E_TESTS=true로 실행 확인.
 |---------|------|------|
 | ~~1~~ | ~~Server: SSE rate limit 활성화~~ | **완료** (기본값 1s/60s-10 활성화) |
 | ~~2~~ | ~~Keeper: OAS Memory.t Long_term 백엔드 완성~~ | **완료** (v2.140.0 filesystem-first 전환) |
-| ~~1~~ | ~~Team Session: lossy projection 해소~~ | **완료** (collaboration_context JSON + Prompt_composer system_prompt 보강) |
+| 2 | Team Session: bridge fidelity 재설계 여부 결정 | `collaboration_context` 제거 상태에서 `worker_specs` / prompt context만으로 충분한지 판단 필요 |
 | ~~1~~ | ~~Board Listener: filesystem-first 재설계~~ | **완료** (제거됨 — Board_dispatch가 SSE 직접 발사, PG relay 불필요) |
 | 1 | Transport: HTTP/2 h2c 벤치마크 | opt-in→canonical 전환 판단 근거 |
 | 3 | Transport: live ICE/TURN/browser interop 증빙 lane | local smoke 확보됨, internet-grade만 남음 |

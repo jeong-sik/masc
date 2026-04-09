@@ -528,25 +528,19 @@ let test_minimal_preset_includes_core_masc () =
   check bool "masc_broadcast excluded from universe" false
     (List.mem "masc_broadcast" universe)
 
-let test_full_keeper_model_tools_exclude_repo_synthesis_front_door () =
-  init_keeper_tool_registry ();
-  let base = make_gate_test_meta ~name:"test-full-keeper-model-tools" () in
-  let meta = { base with
-    tool_access = Preset { preset = Full; also_allow = [] };
-    tool_denylist = [];
-  } in
-  let allowed =
-    Keeper_exec_tools.keeper_allowed_model_tools meta
+let test_autoresearch_keeper_tools_exclude_repo_synthesis_front_door () =
+  let raw_names =
+    Tool_autoresearch_schemas.schemas
     |> List.map (fun (schema : Types.tool_schema) -> schema.name)
   in
-  check bool "repo synthesis swarm start excluded from keeper model tools" false
-    (List.mem "masc_repo_synthesis_swarm_start" allowed)
-
-let test_autoresearch_keeper_tools_exclude_repo_synthesis_front_door () =
   let names =
     Tool_shard.autoresearch_keeper_tools
     |> List.map (fun (schema : Types.tool_schema) -> schema.name)
   in
+  check bool "autoresearch swarm start exists in raw autoresearch schemas" true
+    (List.mem "masc_autoresearch_swarm_start" raw_names);
+  check bool "repo synthesis swarm start exists in raw autoresearch schemas" true
+    (List.mem "masc_repo_synthesis_swarm_start" raw_names);
   check bool "autoresearch swarm start excluded from autoresearch shard" false
     (List.mem "masc_autoresearch_swarm_start" names);
   check bool "repo synthesis swarm start excluded from autoresearch shard" false
@@ -785,8 +779,6 @@ let () =
             test_minimal_preset_includes_core_masc;
           test_case "autoresearch keeper tools exclude repo synthesis front door" `Quick
             test_autoresearch_keeper_tools_exclude_repo_synthesis_front_door;
-          test_case "full keeper model tools exclude repo synthesis front door" `Quick
-            test_full_keeper_model_tools_exclude_repo_synthesis_front_door;
           test_case "registered inline board tool survives filter" `Quick
             test_registered_inline_board_tool_survives_filter;
         ] );

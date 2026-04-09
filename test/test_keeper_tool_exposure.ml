@@ -473,23 +473,34 @@ let test_path_empty_allowed_permits_all_within_root () =
     check bool "src ok with empty allowed" true (Result.is_ok r2))
 
 (* ============================================================
-   10b. Read-path: resolve_keeper_read_path ignores allowed_paths
+   10b. Read-path: resolve_keeper_read_path respects allowlists
    ============================================================ *)
 
-let test_read_path_ignores_allowed_paths () =
+let test_read_path_empty_allowlist_permits_full_root () =
   let dir = make_path_test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
     Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
     let config = Room.default_config dir in
-    (* Read path should succeed for any path within root,
-       even when write path would reject it *)
     let read_lib = Keeper_alerting_path.resolve_keeper_read_path
-      ~config ~raw_path:"lib/foo.ml" in
+      ~config ~allowed_paths:[] ~raw_path:"lib/foo.ml" in
     let read_src = Keeper_alerting_path.resolve_keeper_read_path
-      ~config ~raw_path:"src/bar.ml" in
+      ~config ~allowed_paths:[] ~raw_path:"src/bar.ml" in
     check bool "read lib ok" true (Result.is_ok read_lib);
     check bool "read src ok" true (Result.is_ok read_src))
+
+let test_read_path_respects_allowed_paths () =
+  let dir = make_path_test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
+    Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+    let config = Room.default_config dir in
+    let read_lib = Keeper_alerting_path.resolve_keeper_read_path
+      ~config ~allowed_paths:["lib"] ~raw_path:"lib/foo.ml" in
+    let read_src = Keeper_alerting_path.resolve_keeper_read_path
+      ~config ~allowed_paths:["lib"] ~raw_path:"src/bar.ml" in
+    check bool "read lib ok" true (Result.is_ok read_lib);
+    check bool "read src rejected" true (Result.is_error read_src))
 
 let test_read_path_rejects_outside_root () =
   let dir = make_path_test_dir () in
@@ -498,10 +509,10 @@ let test_read_path_rejects_outside_root () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
     let config = Room.default_config dir in
     let result = Keeper_alerting_path.resolve_keeper_read_path
-      ~config ~raw_path:"/etc/passwd" in
+      ~config ~allowed_paths:[] ~raw_path:"/etc/passwd" in
     check bool "read outside root rejected" true (Result.is_error result))
 
-let test_read_vs_write_path_separation () =
+let test_read_vs_write_path_alignment () =
   let dir = make_path_test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
     Eio_main.run @@ fun env ->
@@ -514,13 +525,13 @@ let test_read_vs_write_path_separation () =
       ~config ~allowed_paths:["lib"] ~raw_path:"src/bar.ml" in
     check bool "write lib ok" true (Result.is_ok write_lib);
     check bool "write src rejected" true (Result.is_error write_src);
-    (* Read: both allowed *)
+    (* Read: same allowlist behavior *)
     let read_lib = Keeper_alerting_path.resolve_keeper_read_path
-      ~config ~raw_path:"lib/foo.ml" in
+      ~config ~allowed_paths:["lib"] ~raw_path:"lib/foo.ml" in
     let read_src = Keeper_alerting_path.resolve_keeper_read_path
-      ~config ~raw_path:"src/bar.ml" in
+      ~config ~allowed_paths:["lib"] ~raw_path:"src/bar.ml" in
     check bool "read lib ok" true (Result.is_ok read_lib);
-    check bool "read src ok (read ignores allowed_paths)" true (Result.is_ok read_src))
+    check bool "read src rejected like write" true (Result.is_error read_src))
 
 (* ============================================================
    10c. Read-path: resolve_keeper_read_path bounded suffix resolution
@@ -534,11 +545,11 @@ let test_read_path_rejects_nonexistent () =
     let config = Room.default_config dir in
     (* Path within root but does not exist on disk *)
     let result = Keeper_alerting_path.resolve_keeper_read_path
-      ~config ~raw_path:"nonexistent-repo/" in
+      ~config ~allowed_paths:[] ~raw_path:"nonexistent-repo/" in
     check bool "nonexistent path rejected" true (Result.is_error result);
     let err = Result.get_error result in
-    check bool "error mentions project root miss" true
-      (String_util.contains_substring_ci err "path_not_found_under_project_root"))
+    check bool "error mentions allowed roots miss" true
+      (String_util.contains_substring_ci err "path_not_found_under_allowed_roots"))
 
 let test_read_path_resolves_unique_nested_repo_suffix () =
   let dir = make_path_test_dir () in
@@ -558,9 +569,13 @@ let test_read_path_resolves_unique_nested_repo_suffix () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
     let config = Room.default_config dir in
     let result = Keeper_alerting_path.resolve_keeper_read_path
-      ~config ~raw_path:"masc-mcp/lib" in
+      ~config ~allowed_paths:["workspace"] ~raw_path:"masc-mcp/lib" in
     check bool "unique nested repo suffix resolved" true (Result.is_ok result);
-    check string "resolved to discovered repo lib" lib_dir (Result.get_ok result))
+    let expected_lib_dir =
+      try Unix.realpath lib_dir with Unix.Unix_error _ -> lib_dir
+    in
+    check string "resolved to discovered repo lib" expected_lib_dir
+      (Result.get_ok result))
 
 let test_read_path_rejects_ambiguous_nested_repo_suffix () =
   let dir = make_path_test_dir () in
@@ -582,7 +597,7 @@ let test_read_path_rejects_ambiguous_nested_repo_suffix () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
     let config = Room.default_config dir in
     let result = Keeper_alerting_path.resolve_keeper_read_path
-      ~config ~raw_path:"masc-mcp/lib" in
+      ~config ~allowed_paths:["workspace-a"; "workspace-b"] ~raw_path:"masc-mcp/lib" in
     check bool "ambiguous nested repo suffix rejected" true (Result.is_error result);
     let err = Result.get_error result in
     check bool "error mentions ambiguity" true
@@ -614,11 +629,11 @@ let test_read_path_does_not_follow_symlink_outside_root () =
     Fs_compat.set_fs (Eio.Stdenv.fs env);
       let config = Room.default_config dir in
       let result = Keeper_alerting_path.resolve_keeper_read_path
-        ~config ~raw_path:"masc-mcp/lib" in
+        ~config ~allowed_paths:[] ~raw_path:"masc-mcp/lib" in
       check bool "symlink escape is rejected" true (Result.is_error result);
       let err = Result.get_error result in
       check bool "symlink escape does not resolve outside root" true
-        (String_util.contains_substring_ci err "path_not_found_under_project_root"))
+        (String_util.contains_substring_ci err "path_not_found_under_allowed_roots"))
 
 (* ============================================================
    11. Keeper-reported allowed_paths symlink bug
@@ -770,7 +785,10 @@ let () =
       test_case "empty path rejected" `Quick test_path_empty_rejected;
       test_case "whitespace only rejected" `Quick test_path_whitespace_only_rejected;
       test_case "empty allowed permits all" `Quick test_path_empty_allowed_permits_all_within_root;
-      test_case "read path ignores allowed_paths" `Quick test_read_path_ignores_allowed_paths;
+      test_case "read path empty allowlist permits full root" `Quick
+        test_read_path_empty_allowlist_permits_full_root;
+      test_case "read path respects allowed_paths" `Quick
+        test_read_path_respects_allowed_paths;
       test_case "read path rejects outside root" `Quick test_read_path_rejects_outside_root;
       test_case "read path rejects nonexistent" `Quick test_read_path_rejects_nonexistent;
       test_case "read path resolves unique nested repo suffix" `Quick
@@ -779,7 +797,7 @@ let () =
         test_read_path_rejects_ambiguous_nested_repo_suffix;
       test_case "read path does not follow symlink outside root" `Quick
         test_read_path_does_not_follow_symlink_outside_root;
-      test_case "read vs write path separation" `Quick test_read_vs_write_path_separation;
+      test_case "read vs write path alignment" `Quick test_read_vs_write_path_alignment;
       test_case "keeper-reported nonexistent subdir" `Quick
         test_keeper_reported_nonexistent_subdir;
       test_case "keeper-reported observe_only scope" `Quick

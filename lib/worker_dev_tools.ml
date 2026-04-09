@@ -252,6 +252,101 @@ let validate_command_coding cmd =
       in
       validate_segments segments
 
+let strip_wrapping_quotes token =
+  let len = String.length token in
+  if len >= 2 then
+    let first = token.[0] and last = token.[len - 1] in
+    if (first = '"' && last = '"') || (first = '\'' && last = '\'')
+    then String.sub token 1 (len - 2)
+    else token
+  else token
+
+let looks_like_url token =
+  let token = strip_wrapping_quotes token in
+  match String.index_opt token ':' with
+  | Some idx when idx + 2 < String.length token ->
+    token.[idx + 1] = '/' && token.[idx + 2] = '/'
+  | _ -> false
+
+let is_path_flag token =
+  match strip_wrapping_quotes token with
+  | "-C" | "--git-dir" | "--work-tree" | "--exec-path" -> true
+  | _ -> false
+
+let path_value_of_flagged_token token =
+  let token = strip_wrapping_quotes token in
+  let prefixes =
+    [ "--git-dir="; "--work-tree="; "--exec-path=" ]
+  in
+  List.find_map
+    (fun prefix ->
+       if String.starts_with ~prefix token then
+         Some
+           (String.sub token (String.length prefix)
+              (String.length token - String.length prefix))
+       else None)
+    prefixes
+
+let looks_like_path_token token =
+  let token = strip_wrapping_quotes token in
+  token <> ""
+  && not (looks_like_url token)
+  &&
+  (token = "." || token = ".."
+   || String.starts_with ~prefix:"/" token
+   || String.starts_with ~prefix:"./" token
+   || String.starts_with ~prefix:"../" token
+   || String.starts_with ~prefix:"~/" token
+   || String.contains token '/')
+
+let has_path_rewrite_syntax cmd =
+  String.exists
+    (function
+      | '\'' | '"' | '\\' | '*' | '?' | '[' | ']' | '{' | '}' -> true
+      | _ -> false)
+    cmd
+
+let validate_command_paths ?workdir cmd =
+  match workdir with
+  | None -> Ok ()
+  | Some _ ->
+    if String.contains cmd '/' && has_path_rewrite_syntax cmd then
+      Error
+        "Path syntax blocked: shell quoting, globbing, brace expansion, and backslash escapes are not allowed for path-bearing keeper commands. Use plain unquoted paths and explicit cwd."
+    else
+    let rec loop expect_path_value = function
+      | [] -> Ok ()
+      | token :: rest ->
+        let token = strip_wrapping_quotes token in
+        if token = "" then loop expect_path_value rest
+        else if expect_path_value then
+          if validate_path ?workdir token then loop false rest
+          else
+            Error
+              (Printf.sprintf
+                 "Path blocked: %s (outside allowed directories for this keeper command)"
+                 token)
+        else
+          match path_value_of_flagged_token token with
+          | Some value ->
+            if validate_path ?workdir value then loop false rest
+            else
+              Error
+                (Printf.sprintf
+                   "Path blocked: %s (outside allowed directories for this keeper command)"
+                   value)
+          | None when is_path_flag token -> loop true rest
+          | None when looks_like_path_token token ->
+            if validate_path ?workdir token then loop false rest
+            else
+              Error
+                (Printf.sprintf
+                   "Path blocked: %s (outside allowed directories for this keeper command)"
+                   token)
+          | None -> loop false rest
+    in
+    cmd |> split_shell_tokens |> loop false
+
 (** Check if a command performs write/mutating operations.
     Returns [true] for commands like [git push], [git commit],
     [make deploy], [npm publish], [mv], [cp], etc.

@@ -16,11 +16,12 @@ let max_suggested_entries = 12
 let file_not_found_prefix = "File not found:"
 
 let missing_file_error_json ~(config : Room.config) ~(target : string)
-      ~(error : string) =
-  let project_root = Keeper_alerting_path.project_root_of_config config in
+      ~(fallback_dir : string) ~(error : string) =
+  ignore config;
   let parent = Filename.dirname target in
   let suggestion_dir =
-    if Sys.file_exists parent && Sys.is_directory parent then parent else project_root
+    if Sys.file_exists parent && Sys.is_directory parent then parent
+    else fallback_dir
   in
   let suggested_entries =
     match Safe_ops.list_dir_safe suggestion_dir with
@@ -58,6 +59,25 @@ let keeper_effective_allowed_paths ~(meta : keeper_meta) =
   Keeper_alerting_path.effective_allowed_paths ~meta
 ;;
 
+let keeper_default_read_root ~(config : Room.config) ~(meta : keeper_meta) =
+  let project_root = Keeper_alerting_path.project_root_of_config config in
+  match keeper_effective_allowed_paths ~meta with
+  | [] -> project_root
+  | first :: _ ->
+    (match
+       Keeper_alerting_path.resolve_keeper_target_path
+         ~config ~allowed_paths:(keeper_effective_allowed_paths ~meta)
+         ~raw_path:first
+     with
+     | Ok path ->
+       Fs_compat.mkdir_p path;
+       path
+     | Error _ ->
+       let fallback = Filename.concat project_root first in
+       Fs_compat.mkdir_p fallback;
+       fallback)
+;;
+
 let resolve_keeper_path ~(config : Room.config) ~(meta : keeper_meta) ~(raw_path : string)
   =
   resolve_keeper_target_path
@@ -66,8 +86,12 @@ let resolve_keeper_path ~(config : Room.config) ~(meta : keeper_meta) ~(raw_path
     ~raw_path
 ;;
 
-let resolve_keeper_read_path ~(config : Room.config) ~(raw_path : string) =
-  Keeper_alerting_path.resolve_keeper_read_path ~config ~raw_path
+let resolve_keeper_read_path ~(config : Room.config) ~(meta : keeper_meta)
+      ~(raw_path : string) =
+  Keeper_alerting_path.resolve_keeper_read_path
+    ~config
+    ~allowed_paths:(keeper_effective_allowed_paths ~meta)
+    ~raw_path
 ;;
 
 let keeper_agent_sender ~(meta : keeper_meta) =
@@ -149,4 +173,3 @@ let keeper_tools_list_json ~(meta : keeper_meta) =
     (cat, `List (List.map (fun s -> `String s) list)) :: acc
   ) map [] in
   Yojson.Safe.to_string (`Assoc assoc)
-

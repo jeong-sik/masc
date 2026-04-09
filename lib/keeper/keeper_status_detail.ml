@@ -675,6 +675,19 @@ let handle_keeper_status ctx args : tool_result =
                (Keeper_alerting_path.playground_path_of_keeper m.name));
              ("execution_scope", `String m.execution_scope);
              ("allowed_paths", string_list_to_json m.allowed_paths);
+             ("playground_repos",
+               let cache_path = Filename.concat
+                 (Filename.concat ctx.config.base_path
+                   (Keeper_alerting_path.playground_path_of_keeper m.name))
+                 ".playground_state.json" in
+               try
+                 match Yojson.Safe.from_file cache_path with
+                 | `Assoc _ as json ->
+                   (match Yojson.Safe.Util.member "repos" json with
+                    | `Null -> `List []
+                    | repos -> repos)
+                 | _ -> `List []
+               with Sys_error _ | Yojson.Json_error _ -> `List []);
              ("last_evidence",
                match Keeper_evidence.latest_evidence
                  ~base_path:ctx.config.base_path

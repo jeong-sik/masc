@@ -12,6 +12,58 @@ let io_timeout_sec = 30.0
 let read_timeout_sec = 15.0
 let user_timeout_max_sec = 180.0
 
+(** Write playground repo state cache after successful clone/pull.
+    Reads git metadata from [repo_path] and upserts into
+    [playground_dir/.playground_state.json]. Best-effort: failures are logged
+    but do not propagate. *)
+let update_playground_repo_cache
+      ~(playground_dir : string) ~(repo_name : string) ~(repo_path : string)
+      ~(action : string) ~(shallow : bool) : unit =
+  try
+    let branch =
+      let st, s = Process_eio.run_argv_with_status ~timeout_sec:5.0
+        [ "git"; "-C"; repo_path; "rev-parse"; "--abbrev-ref"; "HEAD" ] in
+      if st = Unix.WEXITED 0 then String.trim s else "unknown"
+    in
+    let commit =
+      let st, s = Process_eio.run_argv_with_status ~timeout_sec:5.0
+        [ "git"; "-C"; repo_path; "log"; "--oneline"; "-1" ] in
+      if st = Unix.WEXITED 0 then String.trim s else ""
+    in
+    let ts = Printf.sprintf "%.0f" (Unix.gettimeofday ()) in
+    let entry = `Assoc [
+      "name", `String repo_name;
+      "branch", `String branch;
+      "latest_commit", `String commit;
+      "shallow", `Bool shallow;
+      "last_action", `String action;
+      "updated_at", `String ts;
+    ] in
+    let cache_path = Filename.concat playground_dir ".playground_state.json" in
+    let existing =
+      try
+        let json = Yojson.Safe.from_file cache_path in
+        (match Yojson.Safe.Util.member "repos" json with
+         | `List repos -> repos
+         | _ -> [])
+      with Sys_error _ | Yojson.Json_error _ -> []
+    in
+    let updated =
+      entry :: List.filter (fun r ->
+        match Yojson.Safe.Util.member "name" r with
+        | `String n -> n <> repo_name
+        | _ -> true) existing
+    in
+    let json = `Assoc [
+      "repos", `List updated;
+      "last_updated", `String ts;
+    ] in
+    ignore (Fs_compat.save_file_atomic cache_path
+      (Yojson.Safe.pretty_to_string json ^ "\n"))
+  with exn ->
+    Logs.warn (fun f -> f "playground cache update failed: %s"
+      (Printexc.to_string exn))
+
 let resolve_keeper_shell_read_cwd
       ~(config : Room.config)
       ~(meta : keeper_meta)
@@ -598,6 +650,10 @@ let handle_keeper_shell_readonly
              Process_eio.run_argv_with_status ~timeout_sec:60.0
                [ "git"; "-C"; clone_path; "pull"; "--ff-only" ]
            in
+           if st = Unix.WEXITED 0 then
+             update_playground_repo_cache
+               ~playground_dir:playground ~repo_name ~repo_path:clone_path
+               ~action:"pull" ~shallow:false;
            Yojson.Safe.to_string
              (`Assoc
                  [ "ok", `Bool (st = Unix.WEXITED 0)
@@ -612,11 +668,16 @@ let handle_keeper_shell_readonly
            let depth_args =
              if depth > 0 then ["--depth"; string_of_int depth] else []
            in
+           let shallow = depth > 0 in
            let st, out =
              Process_eio.run_argv_with_status
                ~timeout_sec:(Keeper_tool_policy.clone_timeout_sec ())
                ("git" :: "clone" :: depth_args @ [ url; clone_path ])
            in
+           if st = Unix.WEXITED 0 then
+             update_playground_repo_cache
+               ~playground_dir:playground ~repo_name ~repo_path:clone_path
+               ~action:"clone" ~shallow;
            Yojson.Safe.to_string
              (`Assoc
                  [ "ok", `Bool (st = Unix.WEXITED 0)

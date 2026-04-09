@@ -555,9 +555,9 @@ let maybe_recover_from_failing ~(ctx : _ context) ~(meta : keeper_meta) =
     in
     if sticky_manual_reconcile then
       Log.Keeper.warn
-        "heartbeat recovery: preserving %d turn failures for %s because manual reconcile is still required"
-        stale_turn_failures meta.name
-    else begin
+        "heartbeat recovery: auto-clearing %d turn failures for %s (manual reconcile auto-resolved after heartbeat)"
+        stale_turn_failures meta.name;
+    begin
       Keeper_registry.reset_turn_failures
         ~base_path:ctx.config.base_path meta.name;
       ignore (Keeper_registry.dispatch_event
@@ -737,6 +737,19 @@ let run_keepalive_unified_turn
            | Keeper_world_observation.Reactive -> "reactive"
            | Keeper_world_observation.Scheduled_autonomous -> "scheduled_autonomous")
           (String.concat "," turn_decision.reasons);
+      if (not should_run_turn) && (not manual_reconcile_pending) then
+        Log.Keeper.info
+          "keepalive turn not scheduled for %s: should_run=%b channel=%s reasons=[%s] since_last=%s idle_gate=%s"
+          meta_after_triage.name
+          turn_decision.should_run
+          (match turn_decision.channel with
+           | Keeper_world_observation.Reactive -> "reactive"
+           | Keeper_world_observation.Scheduled_autonomous -> "scheduled_autonomous")
+          (String.concat "," turn_decision.reasons)
+          (match turn_decision.since_last_scheduled_autonomous with
+           | Some s -> string_of_int s | None -> "-")
+          (match turn_decision.idle_gate_sec with
+           | Some s -> string_of_int s | None -> "-");
       if should_run_turn then
         Log.Keeper.info
           "keepalive turn scheduled for %s: channel=%s reasons=%s"

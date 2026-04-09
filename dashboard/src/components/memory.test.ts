@@ -108,7 +108,7 @@ describe('Memory Component', () => {
       },
     ] as any
     render(h(Memory, null))
-    expect(screen.getByText(/자율 글 \(1\)/)).toBeInTheDocument()
+    expect(screen.getByText(/자동화 글 \(1\)/)).toBeInTheDocument()
     expect(screen.getByText('Automation Post')).toBeInTheDocument()
   })
 

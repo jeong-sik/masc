@@ -285,3 +285,4 @@ CI_TEST_TIMEOUT_SEC=1200 CI_TEST_HEARTBEAT_SEC=30 \
 | [llms.txt](llms.txt) / [llms-full.txt](llms-full.txt) | Compressed front door for language models |
 
 Historical and archived documents remain in the repository, but the front-door SSOT is the README, the product operating plan, the roadmap, and the current spec suite.
+ 

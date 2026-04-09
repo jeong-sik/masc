@@ -58,6 +58,7 @@ type run_result = {
   session_id : string;
   turns : int;
   trace_ref : Oas.Raw_trace.run_ref option;
+  run_validation : Oas.Raw_trace.run_validation option;
   proof : Oas.Cdal_proof.t option;
   cascade_observation : cascade_observation option;
   stop_reason : stop_reason;

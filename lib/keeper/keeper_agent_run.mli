@@ -47,6 +47,7 @@ type run_result =
   ; tools_used : string list
   ; checkpoint : Agent_sdk.Checkpoint.t option
   ; proof : Agent_sdk.Cdal_proof.t option
+  ; run_validation : Agent_sdk.Raw_trace.run_validation option
   ; stop_reason : Oas_worker.stop_reason
   ; inference_telemetry : Agent_sdk.Types.inference_telemetry option
   }

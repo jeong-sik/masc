@@ -570,6 +570,11 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
   in
   let has_substantive_tools = has_substantive_tool_calls result.tools_used in
   let has_text = String.trim result.response_text <> "" in
+  let has_validated_evidence =
+    match result.run_validation with
+    | Some v -> v.ok && (v.evidence <> [] || v.has_file_write)
+    | None -> false
+  in
   let is_scheduled_autonomous_cycle =
     is_scheduled_autonomous_cycle_of_observation observation
   in
@@ -622,13 +627,13 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
           rt.proactive_rt.visible_count_total
           + (if update_proactive_rt
                && is_scheduled_autonomous_cycle
-               && (has_text || has_substantive_tools)
+               && (has_text || has_substantive_tools || has_validated_evidence)
              then 1
              else 0);
         last_visible_ts =
           (if update_proactive_rt
               && is_scheduled_autonomous_cycle
-              && (has_text || has_substantive_tools)
+              && (has_text || has_substantive_tools || has_validated_evidence)
            then now_ts
            else rt.proactive_rt.last_visible_ts);
         last_outcome =
@@ -642,6 +647,10 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
            else if has_substantive_tools then
              Printf.sprintf "unified:tools=[%s]"
                (String.concat "," result.tools_used)
+           else if has_validated_evidence then
+             (let v = Option.get result.run_validation in
+              Printf.sprintf "unified:validated_evidence(ok=%b,file_write=%b,evidence=%d)"
+                v.ok v.has_file_write (List.length v.evidence))
            else if not has_text then
              "unified:"
              ^ scheduled_autonomous_cycle_outcome_to_string Proactive_silent
@@ -686,7 +695,8 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
         rt.mention_reactive_turn_count + (if is_mention_reactive then 1 else 0);
       noop_turn_count =
         rt.noop_turn_count
-        + (if is_autonomous_turn && not has_text && not has_substantive_tools then 1 else 0);
+        + (if is_autonomous_turn && not has_text && not has_substantive_tools
+              && not has_validated_evidence then 1 else 0);
       last_autonomous_action_at =
         (if is_autonomous_turn && has_substantive_tools then now_iso ()
          else rt.last_autonomous_action_at);

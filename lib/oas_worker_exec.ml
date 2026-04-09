@@ -99,6 +99,7 @@ type run_result = {
   session_id : string;
   turns : int;
   trace_ref : Oas.Raw_trace.run_ref option;
+  run_validation : Oas.Raw_trace.run_validation option;
   proof : Oas.Cdal_proof.t option;
   cascade_observation : Oas_worker_cascade.cascade_observation option;
   stop_reason : stop_reason;
@@ -533,6 +534,14 @@ let run
     let turns = (Oas.Agent.state agent).turn_count in
     let trace_ref = Oas.Agent.last_raw_trace_run agent in
     Oas.Agent.close agent;
+    let run_validation =
+      match trace_ref with
+      | Some ref_ ->
+        (match Oas.Raw_trace_query.validate_run ref_ with
+         | Ok v -> Some v
+         | Error _ -> None)
+      | None -> None
+    in
     (match result with
     | Ok response ->
       Ok
@@ -542,6 +551,7 @@ let run
           session_id;
           turns;
           trace_ref;
+          run_validation;
           proof;
           cascade_observation = None;
           stop_reason = Completed;
@@ -562,6 +572,7 @@ let run
           session_id;
           turns;
           trace_ref;
+          run_validation;
           proof;
           cascade_observation = None;
           stop_reason = TurnBudgetExhausted { turns_used = r.turns; limit = r.limit };

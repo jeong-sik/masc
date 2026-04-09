@@ -895,7 +895,8 @@ let sample_prompt_metrics ?(system_prompt = "You are a keeper.")
   KAR.build_prompt_metrics ~system_prompt ~dynamic_context ~user_message
 
 let make_run_result ~text ~tools ~model ~input_tok ~output_tok
-    : Masc_mcp.Keeper_agent_run.run_result =
+    ?run_validation
+    () : Masc_mcp.Keeper_agent_run.run_result =
   {
     response_text = text;
     model_used = model;
@@ -907,6 +908,7 @@ let make_run_result ~text ~tools ~model ~input_tok ~output_tok
     tools_used = tools;
     checkpoint = None;
     proof = None;
+    run_validation;
     stop_reason = Masc_mcp.Oas_worker.Completed;
     inference_telemetry = None;
   }
@@ -940,7 +942,7 @@ let test_prompt_metrics_fingerprint_is_deterministic () =
 let test_metrics_text_response () =
   let result =
     make_run_result ~text:"I checked the board." ~tools:[]
-      ~model:"test-model" ~input_tok:100 ~output_tok:50
+      ~model:"test-model" ~input_tok:100 ~output_tok:50 ()
   in
   let updated =
     UT.update_metrics_from_result minimal_meta ~latency_ms:200
@@ -963,7 +965,7 @@ let test_metrics_text_response () =
 let test_metrics_tool_response () =
   let result =
     make_run_result ~text:"" ~tools:["keeper_board_post"; "keeper_board_comment"]
-      ~model:"test-model" ~input_tok:200 ~output_tok:80
+      ~model:"test-model" ~input_tok:200 ~output_tok:80 ()
   in
   let updated =
     UT.update_metrics_from_result minimal_meta ~latency_ms:500
@@ -984,7 +986,7 @@ let test_metrics_tool_response () =
 let test_metrics_noop_response () =
   let result =
     make_run_result ~text:"" ~tools:[]
-      ~model:"test-model" ~input_tok:50 ~output_tok:10
+      ~model:"test-model" ~input_tok:50 ~output_tok:10 ()
   in
   let updated =
     UT.update_metrics_from_result minimal_meta ~latency_ms:100
@@ -1003,10 +1005,95 @@ let test_metrics_noop_response () =
     updated.runtime.autonomous_action_count;
   check int "total_turns +1" (minimal_meta.runtime.usage.total_turns + 1) updated.runtime.usage.total_turns
 
+let sample_run_ref : Agent_sdk.Raw_trace.run_ref = {
+  worker_run_id = "test-run"; path = "/tmp/test.jsonl";
+  start_seq = 0; end_seq = 5; agent_name = "test"; session_id = None;
+}
+
+let test_metrics_validated_evidence_counts_as_visible () =
+  let validation : Agent_sdk.Raw_trace.run_validation = {
+    run_ref = sample_run_ref; ok = true;
+    checks = []; evidence = ["tool_paired:keeper_fs_read"];
+    paired_tool_result_count = 1; has_file_write = false;
+    verification_pass_after_file_write = false;
+    final_text = None; tool_names = ["keeper_fs_read"];
+    stop_reason = None; failure_reason = None;
+  } in
+  let result =
+    make_run_result ~text:"" ~tools:[]
+      ~model:"test-model" ~input_tok:50 ~output_tok:10
+      ~run_validation:validation ()
+  in
+  let updated =
+    UT.update_metrics_from_result minimal_meta ~latency_ms:100
+      ~observation:base_observation result
+  in
+  check int "proactive visible_count +1"
+    (minimal_meta.runtime.proactive_rt.visible_count_total + 1)
+    updated.runtime.proactive_rt.visible_count_total;
+  check int "noop unchanged"
+    minimal_meta.runtime.noop_turn_count
+    updated.runtime.noop_turn_count;
+  check bool "last_reason contains validated_evidence" true
+    (String.length updated.runtime.proactive_rt.last_reason > 0
+     && (let r = updated.runtime.proactive_rt.last_reason in
+         try ignore (Str.search_forward (Str.regexp_string "validated_evidence") r 0); true
+         with Not_found -> false))
+
+let test_metrics_failed_validation_does_not_count_as_visible () =
+  let validation : Agent_sdk.Raw_trace.run_validation = {
+    run_ref = sample_run_ref; ok = false;
+    checks = []; evidence = [];
+    paired_tool_result_count = 0; has_file_write = false;
+    verification_pass_after_file_write = false;
+    final_text = None; tool_names = [];
+    stop_reason = None; failure_reason = Some "validation failed";
+  } in
+  let result =
+    make_run_result ~text:"" ~tools:[]
+      ~model:"test-model" ~input_tok:50 ~output_tok:10
+      ~run_validation:validation ()
+  in
+  let updated =
+    UT.update_metrics_from_result minimal_meta ~latency_ms:100
+      ~observation:base_observation result
+  in
+  check int "proactive visible_count unchanged"
+    minimal_meta.runtime.proactive_rt.visible_count_total
+    updated.runtime.proactive_rt.visible_count_total;
+  check bool "outcome is silent" true
+    (updated.runtime.proactive_rt.last_outcome
+     = Masc_mcp.Keeper_types.Proactive_silent)
+
+let test_metrics_file_write_evidence_counts_as_visible () =
+  let validation : Agent_sdk.Raw_trace.run_validation = {
+    run_ref = sample_run_ref; ok = true;
+    checks = []; evidence = [];
+    paired_tool_result_count = 0; has_file_write = true;
+    verification_pass_after_file_write = true;
+    final_text = None; tool_names = ["keeper_fs_write"];
+    stop_reason = None; failure_reason = None;
+  } in
+  let result =
+    make_run_result ~text:"" ~tools:[]
+      ~model:"test-model" ~input_tok:50 ~output_tok:10
+      ~run_validation:validation ()
+  in
+  let updated =
+    UT.update_metrics_from_result minimal_meta ~latency_ms:100
+      ~observation:base_observation result
+  in
+  check int "proactive visible_count +1"
+    (minimal_meta.runtime.proactive_rt.visible_count_total + 1)
+    updated.runtime.proactive_rt.visible_count_total;
+  check int "noop unchanged"
+    minimal_meta.runtime.noop_turn_count
+    updated.runtime.noop_turn_count
+
 let test_metrics_heartbeat_only_tool_response_is_maintenance_only () =
   let result =
     make_run_result ~text:"" ~tools:[]
-      ~model:"test-model" ~input_tok:40 ~output_tok:0
+      ~model:"test-model" ~input_tok:40 ~output_tok:0 ()
   in
   let updated =
     UT.update_metrics_from_result minimal_meta ~latency_ms:80
@@ -1039,7 +1126,7 @@ let test_metrics_reactive_turn_does_not_mutate_proactive_runtime () =
   in
   let result =
     make_run_result ~text:"On it." ~tools:[]
-      ~model:"test-model" ~input_tok:90 ~output_tok:30
+      ~model:"test-model" ~input_tok:90 ~output_tok:30 ()
   in
   let updated =
     UT.update_metrics_from_result minimal_meta ~latency_ms:120
@@ -1058,7 +1145,7 @@ let test_metrics_reactive_turn_does_not_mutate_proactive_runtime () =
 let test_silent_proactive_cycle_advances_cooldown_anchor () =
   let result =
     make_run_result ~text:"" ~tools:[]
-      ~model:"test-model" ~input_tok:40 ~output_tok:10
+      ~model:"test-model" ~input_tok:40 ~output_tok:10 ()
   in
   let updated =
     UT.update_metrics_from_result
@@ -1132,7 +1219,7 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
       let result =
         {
           (make_run_result ~text:"Observed" ~tools:[]
-             ~model:"openai:qwen3.5-35b" ~input_tok:40 ~output_tok:20)
+             ~model:"openai:qwen3.5-35b" ~input_tok:40 ~output_tok:20 ())
           with
           prompt_metrics =
             sample_prompt_metrics
@@ -1307,7 +1394,7 @@ let test_metrics_persist_social_state_fields () =
       ~text:
         "SOCIAL_MODEL: bdi_speech_v1\nBELIEF_SUMMARY: quiet_room\nACTIVE_DESIRE: maintain_quiet_readiness\nCURRENT_INTENTION: stay_available_without_noise\nBLOCKER: none\nNEED: none\nSPEECH_ACT: stay_silent\nDELIVERY_SURFACE: silent"
       ~tools:[]
-      ~model:"test-model" ~input_tok:50 ~output_tok:10
+      ~model:"test-model" ~input_tok:50 ~output_tok:10 ()
   in
   let base_dir = temp_dir () in
   Fun.protect
@@ -1613,7 +1700,7 @@ let test_side_effect_reclassification_drops_keeper_read_only_tools_from_mixed_se
 let test_metrics_mixed_response () =
   let result =
     make_run_result ~text:"Done." ~tools:["keeper_fs_read"]
-      ~model:"test-model" ~input_tok:150 ~output_tok:60
+      ~model:"test-model" ~input_tok:150 ~output_tok:60 ()
   in
   let updated =
     UT.update_metrics_from_result minimal_meta ~latency_ms:300
@@ -1773,7 +1860,7 @@ let test_social_model_silences_skip_only_turn () =
       ~text:
         "SOCIAL_MODEL: bdi_speech_v1\nBELIEF_SUMMARY: quiet_room\nACTIVE_DESIRE: maintain_quiet_readiness\nCURRENT_INTENTION: stay_available_without_noise\nBLOCKER: none\nNEED: none\nSPEECH_ACT: stay_silent\nDELIVERY_SURFACE: silent"
       ~tools:[]
-      ~model:"test-model" ~input_tok:20 ~output_tok:5
+      ~model:"test-model" ~input_tok:20 ~output_tok:5 ()
   in
   let base_dir = temp_dir () in
   Fun.protect
@@ -1793,7 +1880,7 @@ let test_social_model_silences_skip_only_turn () =
 let test_social_model_infers_visible_reply_without_headers () =
   let result =
     make_run_result ~text:"I think I should ask for help." ~tools:[]
-      ~model:"test-model" ~input_tok:20 ~output_tok:5
+      ~model:"test-model" ~input_tok:20 ~output_tok:5 ()
   in
   let base_dir = temp_dir () in
   Fun.protect
@@ -1815,7 +1902,7 @@ let test_social_model_infers_visible_reply_without_headers () =
 let test_social_model_empty_text_without_headers_stays_silent () =
   let result =
     make_run_result ~text:"" ~tools:[]
-      ~model:"test-model" ~input_tok:20 ~output_tok:5
+      ~model:"test-model" ~input_tok:20 ~output_tok:5 ()
   in
   let routed, state =
     KSM.apply_to_result ~meta:minimal_meta
@@ -1836,7 +1923,7 @@ let test_social_model_routes_blocker_to_board_post () =
       ~text:
         "SOCIAL_MODEL: bdi_speech_v1\nBELIEF_SUMMARY: quiet_room\nACTIVE_DESIRE: seek_help\nCURRENT_INTENTION: recover_tool_route\nBLOCKER: tool route unavailable\nNEED: tool route or operator guidance\nSPEECH_ACT: request_help\nDELIVERY_SURFACE: board_post"
       ~tools:[]
-      ~model:"test-model" ~input_tok:30 ~output_tok:10
+      ~model:"test-model" ~input_tok:30 ~output_tok:10 ()
   in
   let base_dir = temp_dir () in
   Fun.protect
@@ -1877,7 +1964,7 @@ let test_social_model_routes_blocker_to_board_post () =
 let test_social_model_tool_only_turn_skips_protocol_violation () =
   let result =
     make_run_result ~text:"" ~tools:["masc_status"]
-      ~model:"test-model" ~input_tok:10 ~output_tok:1
+      ~model:"test-model" ~input_tok:10 ~output_tok:1 ()
   in
   let routed, state =
     KSM.apply_to_result ~meta:minimal_meta
@@ -1894,7 +1981,7 @@ let test_social_model_tool_only_turn_skips_protocol_violation () =
 let test_social_model_infers_board_comment_from_tool_use () =
   let result =
     make_run_result ~text:"" ~tools:["keeper_board_comment"; "masc_status"]
-      ~model:"test-model" ~input_tok:10 ~output_tok:1
+      ~model:"test-model" ~input_tok:10 ~output_tok:1 ()
   in
   let routed, state =
     KSM.apply_to_result ~meta:minimal_meta
@@ -2200,6 +2287,12 @@ let () =
           test_case "text response" `Quick test_metrics_text_response;
           test_case "tool response" `Quick test_metrics_tool_response;
           test_case "noop response" `Quick test_metrics_noop_response;
+          test_case "validated evidence counts as visible" `Quick
+            test_metrics_validated_evidence_counts_as_visible;
+          test_case "failed validation does not count as visible" `Quick
+            test_metrics_failed_validation_does_not_count_as_visible;
+          test_case "file write evidence counts as visible" `Quick
+            test_metrics_file_write_evidence_counts_as_visible;
           test_case "heartbeat-only tool response is maintenance only" `Quick
             test_metrics_heartbeat_only_tool_response_is_maintenance_only;
           test_case "reactive turn leaves proactive runtime untouched" `Quick

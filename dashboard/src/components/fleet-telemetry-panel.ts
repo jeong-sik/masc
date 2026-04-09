@@ -135,14 +135,22 @@ function buildToolQualityMap(toolQuality: ToolQualityResponse): Map<string, { ca
   return byKeeper
 }
 
-function fleetSortScore(row: FleetRow): [number, number, number, number, string] {
+function fleetSortScore(row: FleetRow): [number, number, number, number, number, number, string] {
   const liveScore = row.keepalive_running ? 1 : 0
-  const pressureScore = row.context_ratio >= PRESSURE_HOT_RATIO ? 2 : row.context_ratio >= PRESSURE_WARN_RATIO ? 1 : 0
+  const hasActivityScore =
+    row.last_activity_ago_s != null
+    && Number.isFinite(row.last_activity_ago_s)
+    && row.last_activity_ago_s >= 0
+      ? 1
+      : 0
+  const activityScore = hasActivityScore === 1 ? row.last_activity_ago_s ?? Number.POSITIVE_INFINITY : Number.POSITIVE_INFINITY
   return [
     liveScore,
-    pressureScore,
+    hasActivityScore,
+    activityScore,
+    row.tool_calls,
+    row.turn_count,
     row.context_ratio,
-    row.tool_calls + row.turn_count,
     row.name,
   ]
 }
@@ -152,9 +160,11 @@ function compareFleetRows(a: FleetRow, b: FleetRow): number {
   const bScore = fleetSortScore(b)
   if (aScore[0] !== bScore[0]) return bScore[0] - aScore[0]
   if (aScore[1] !== bScore[1]) return bScore[1] - aScore[1]
-  if (aScore[2] !== bScore[2]) return bScore[2] - aScore[2]
+  if (aScore[2] !== bScore[2]) return aScore[2] - bScore[2]
   if (aScore[3] !== bScore[3]) return bScore[3] - aScore[3]
-  return aScore[4].localeCompare(bScore[4])
+  if (aScore[4] !== bScore[4]) return bScore[4] - aScore[4]
+  if (aScore[5] !== bScore[5]) return bScore[5] - aScore[5]
+  return aScore[6].localeCompare(bScore[6])
 }
 
 export function buildFleetRows(keepers: Keeper[], toolQuality: ToolQualityResponse): FleetRow[] {

@@ -240,9 +240,16 @@ let handle_keeper_bash
       match resolve_keeper_shell_write_cwd ~config ~meta ~args with
       | Error e -> error_json e
       | Ok cwd ->
+      (* Canonicalize cwd to prevent path traversal bypass.
+         Without this, cwd=".masc/playground/X/../../lib" would pass the
+         prefix check while actually pointing outside the playground. *)
+      let cwd_canonical =
+        try Unix.realpath cwd
+        with Unix.Unix_error _ -> cwd
+      in
       (* Playground sandbox: git write ops are allowed inside the keeper's
          playground clone (.masc/playground/<name>/repos/<repo>).
-         This enables the clone → branch → edit → commit → push → PR workflow. *)
+         Both paths must be canonicalized to prevent ../traversal bypass. *)
       let playground_rel =
         Keeper_alerting_path.playground_path_of_keeper meta.name
       in
@@ -252,8 +259,8 @@ let handle_keeper_bash
         with Unix.Unix_error _ -> Filename.concat root playground_rel
       in
       let in_playground =
-        String.starts_with ~prefix:(playground_abs ^ "/") (cwd ^ "/")
-        || String.equal playground_abs cwd
+        String.starts_with ~prefix:(playground_abs ^ "/") (cwd_canonical ^ "/")
+        || String.equal playground_abs cwd_canonical
       in
       (* Destructive guard: always active regardless of preset or location *)
       if Worker_dev_tools.is_destructive_bash_operation cmd

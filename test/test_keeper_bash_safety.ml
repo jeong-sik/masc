@@ -195,6 +195,25 @@ let test_playground_guard_outside () =
   Alcotest.(check bool) "prefix attack (cheolsu2)"
     false (is_inside_playground ~playground_abs:pg (pg ^ "2/repos"))
 
+(** Path traversal: if cwd is canonicalized via realpath before the check,
+    ../traversal resolves to the actual target. This test verifies that
+    a canonicalized traversal path is correctly rejected.
+    In production, Unix.realpath on the cwd collapses ".." before comparison. *)
+let test_playground_guard_traversal () =
+  let pg = "/project/.masc/playground/cheolsu" in
+  (* After realpath, ".../cheolsu/repos/../../lib" becomes "/project/lib" *)
+  Alcotest.(check bool) "traversal resolves outside (canonicalized)"
+    false (is_inside_playground ~playground_abs:pg "/project/lib");
+  (* After realpath, ".../cheolsu/repos/../../../.masc" becomes "/project/.masc" *)
+  Alcotest.(check bool) "traversal to .masc (canonicalized)"
+    false (is_inside_playground ~playground_abs:pg "/project/.masc");
+  (* The raw non-canonical form would match the prefix — this proves
+     we MUST canonicalize before checking *)
+  let raw_traversal = pg ^ "/repos/masc-mcp/../../../../../../lib" in
+  let would_match_raw = String.starts_with ~prefix:(pg ^ "/") raw_traversal in
+  Alcotest.(check bool) "raw traversal WOULD match prefix (proves canonicalization needed)"
+    true would_match_raw
+
 let test_git_write_classification () =
   let is_branch_switch = Masc_mcp.Worker_dev_tools.is_git_branch_switch in
   let is_destructive = Masc_mcp.Worker_dev_tools.is_destructive_bash_operation in
@@ -230,6 +249,7 @@ let () =
       Alcotest.test_case "playground path structure" `Quick test_playground_path_structure;
       Alcotest.test_case "inside playground detected" `Quick test_playground_guard_inside;
       Alcotest.test_case "outside playground rejected" `Quick test_playground_guard_outside;
+      Alcotest.test_case "path traversal blocked after canonicalization" `Quick test_playground_guard_traversal;
       Alcotest.test_case "git write classification" `Quick test_git_write_classification;
     ]);
     ("edge", [

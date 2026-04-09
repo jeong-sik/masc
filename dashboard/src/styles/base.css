@@ -18,8 +18,10 @@ body {
   color: var(--text-body);
   line-height: 1.5;
   background:
-    radial-gradient(circle at 88% 14%, rgba(74, 222, 128, 0.10), transparent 20%),
-    linear-gradient(180deg, #06101d 0%, #0b1220 48%, #070d18 100%);
+    radial-gradient(circle at 88% 14%, rgba(74, 222, 128, 0.08), transparent 22%),
+    radial-gradient(circle at 8% 88%, rgba(251, 191, 36, 0.04), transparent 28%),
+    radial-gradient(circle at 50% 50%, rgba(71, 184, 255, 0.03), transparent 40%),
+    linear-gradient(180deg, #07111f 0%, #0c1424 48%, #080e1a 100%);
   background-attachment: fixed;
   position: relative;
 }

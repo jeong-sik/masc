@@ -14,15 +14,8 @@ import {
   type TelemetrySourceSummary,
 } from '../api/dashboard'
 import { route } from '../router'
+import { TELEMETRY_SOURCE_META, telemetrySourceMeta } from '../config/telemetry-sources'
 import { formatTimeAgo } from '../lib/format-time'
-
-const SOURCE_META: Record<TelemetrySource, { label: string; sublabel: string; color: string; icon: string }> = {
-  keeper_metric: { label: 'Keeper 턴 로그', sublabel: 'heartbeat ~80%, 실제 추론 턴 ~20%', color: 'text-blue-400', icon: 'K' },
-  agent_event: { label: 'Agent 이벤트', sublabel: 'tool_called 다수, join/leave/task 포함', color: 'text-emerald-400', icon: 'A' },
-  tool_call_io: { label: 'Keeper Tool I/O', sublabel: 'keeper->tool 입출력 전체 기록', color: 'text-amber-400', icon: 'T' },
-  tool_usage: { label: 'Keeper 내부 호출', sublabel: 'keeper_internal caller 기록', color: 'text-purple-400', icon: 'U' },
-  tool_metric: { label: 'Tool 성능', sublabel: 'duration/success 측정', color: 'text-cyan-400', icon: 'M' },
-}
 
 interface StoreSnapshot {
   keepers: number
@@ -45,7 +38,6 @@ const EMPTY_STORE: StoreSnapshot = {
   toolsRegistered: 0, toolsPublic: 0, toolsTotalCalls: 0, toolsNeverCalled: 0,
   version: null, uptime: null,
 }
-
 interface TelemetryState {
   entries: TelemetryEntry[]
   summary: TelemetrySourceSummary[]
@@ -55,9 +47,7 @@ interface TelemetryState {
   error: string | null
 }
 
-function sourceMeta(source: string) {
-  return SOURCE_META[source as TelemetrySource] ?? { label: source, sublabel: '', color: 'text-gray-400', icon: '?' }
-}
+const sourceMeta = telemetrySourceMeta
 
 function entryTimestamp(e: TelemetryEntry): number {
   const numeric = (e.ts_unix as number) ?? (e.ts as number) ?? (e.timestamp as number) ?? 0
@@ -78,9 +68,8 @@ function formatTs(ts: number): string {
   })
 }
 
-function timeAgo(ts: number): string {
-  if (ts === 0) return ''
-  return formatTimeAgo(ts)
+function timeAgoSafe(ts: number): string {
+  return ts === 0 ? '' : formatTimeAgo(ts)
 }
 
 function normalizeText(value: unknown): string | null {
@@ -210,7 +199,7 @@ function EntryRow({ entry }: { entry: TelemetryEntry }) {
       >
         <span class="font-mono font-bold ${meta.color} w-4 text-center flex-shrink-0">${meta.icon}</span>
         <span class="font-mono text-[var(--text-muted)] w-28 flex-shrink-0" title=${formatTs(ts)}>
-          ${timeAgo(ts)}
+          ${timeAgoSafe(ts)}
         </span>
         ${success != null ? html`
           <span class="flex-shrink-0 w-4 ${success ? 'text-green-400' : 'text-red-400'}">
@@ -355,7 +344,7 @@ export function TelemetryUnified() {
       <div class="flex flex-wrap gap-3">
         ${summary.map(src => html`<${SummaryCard} src=${src} />`)}
         <div class="rounded-lg border border-[var(--card-border)] bg-[rgba(255,255,255,0.02)] p-3 min-w-[140px]">
-          <div class="text-xs font-medium text-[var(--text-muted)] mb-1">Total</div>
+          <div class="text-xs font-medium text-[var(--text-muted)] mb-1">전체</div>
           <div class="text-2xl font-bold text-[var(--text-strong)]">${totalEntries.toLocaleString()}</div>
         </div>
       </div>
@@ -392,12 +381,12 @@ export function TelemetryUnified() {
           value=${sourceFilter.value}
           onChange=${(e: Event) => { sourceFilter.value = (e.target as HTMLSelectElement).value as TelemetrySource | '' }}
         >
-          <option value="">All sources</option>
-          ${Object.entries(SOURCE_META).map(([key, m]) => html`<option value=${key}>${m.label}</option>`)}
+          <option value="">전체 소스</option>
+          ${Object.entries(TELEMETRY_SOURCE_META).map(([key, m]) => html`<option value=${key}>${m.label}</option>`)}
         </select>
         <input
           type="text"
-          placeholder="Keeper name..."
+          placeholder="키퍼 이름..."
           class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-2 py-1 text-xs text-[var(--text-strong)] w-32"
           value=${keeperFilter.value}
           onInput=${(e: Event) => { keeperFilter.value = (e.target as HTMLInputElement).value }}
@@ -439,7 +428,7 @@ export function TelemetryUnified() {
         >
           Refresh
         </button>
-        ${loading ? html`<span class="text-xs text-[var(--text-muted)]">loading...</span>` : null}
+        ${loading ? html`<span class="text-xs text-[var(--text-muted)]">로딩 중...</span>` : null}
       </div>
 
       ${error ? html`

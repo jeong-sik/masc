@@ -451,15 +451,14 @@ let handle_keeper_down ctx args : tool_result =
 let handle_keeper_list ctx args : tool_result =
   let limit = max 0 (get_int args "limit" 50) in
   let detailed = get_bool args "detailed" false in
-  let cache_key = Printf.sprintf "%d:%b" limit detailed in
+  let cache_key =
+    Printf.sprintf "%s:%d:%b" ctx.config.base_path limit detailed
+  in
   let body =
     cached_text_by_key _keeper_list_cache ~key:cache_key
       ~ttl_s:(keeper_list_cache_ttl_s ()) (fun () ->
-        (* Use registry as source of truth for live keepers.
-           Each entry carries its own base_path so cross-base_path
-           keepers are listed correctly. *)
         let entries =
-          Keeper_registry.all ()
+          Keeper_registry.all ~base_path:ctx.config.base_path ()
           |> List.sort (fun (a : Keeper_registry.registry_entry)
                             (b : Keeper_registry.registry_entry) ->
                String.compare a.name b.name)
@@ -469,8 +468,7 @@ let handle_keeper_list ctx args : tool_result =
         let rows =
           entries
           |> List.filter_map (fun (e : Keeper_registry.registry_entry) ->
-               let config = { ctx.config with base_path = e.base_path } in
-               keeper_list_row_json ~runtime_class:"keeper" config e.name)
+               keeper_list_row_json ~runtime_class:"keeper" ctx.config e.name)
         in
         let json =
           if not detailed then
@@ -506,16 +504,9 @@ let maybe_bootstrap_existing_keepalives ctx ~name ~args =
        Log.Keeper.error "start_existing_keepalives failed: %s"
          (Printexc.to_string exn))
 
-(** Resolve context base_path via central Keeper_registry.resolve_config.
-    Skipped for creation tools where the caller's base_path is authoritative. *)
-let resolve_ctx ctx ~name args =
-  match name with
-  | "masc_keeper_up" | "masc_keeper_create_from_persona" | "masc_persona_list" -> ctx
-  | _ ->
-    let keeper_name = get_string args "name" "" in
-    let config = Keeper_registry.resolve_config ctx.config keeper_name in
-    if config == ctx.config then ctx
-    else { ctx with config }
+(** Keeper tools are scoped to the caller's current base_path.
+    Do not retarget requests across other base_path registries. *)
+let resolve_ctx ctx ~name:_ _args = ctx
 
 let dispatch ctx ~name ~args : tool_result option =
   maybe_bootstrap_existing_keepalives ctx ~name ~args;

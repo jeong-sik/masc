@@ -51,7 +51,7 @@ describe('KeeperToolCallInspector', () => {
     render(html`<${KeeperToolCallInspector} keeperName="alice" />`, container)
     await Promise.resolve()
 
-    expect(container.textContent).toContain('Loading')
+    expect(container.textContent).toContain('불러오는 중')
   })
 
   it('renders entries after successful fetch', async () => {
@@ -77,7 +77,7 @@ describe('KeeperToolCallInspector', () => {
     render(html`<${KeeperToolCallInspector} keeperName="alice" />`, container)
 
     await waitFor(() => {
-      expect(container.textContent).toContain('No tool call data')
+      expect(container.textContent).toContain('도구 호출 데이터 없음')
     })
   })
 

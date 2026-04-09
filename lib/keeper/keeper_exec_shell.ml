@@ -85,7 +85,6 @@ let shell_command_available name =
   match Process_eio.run_argv_with_status ~timeout_sec:2.0 [ "/bin/sh"; "-c"; probe ] with
   | Unix.WEXITED 0, _ -> true
   | _ -> false
-
 (** Write playground repo state cache after successful clone/pull.
     Reads git metadata from [repo_path] and upserts into
     [playground_dir/.playground_state.json]. Best-effort: failures are logged

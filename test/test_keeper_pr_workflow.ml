@@ -1113,7 +1113,6 @@ let test_shell_readonly_rg_reports_filter_limit_when_rg_missing () =
         check string "rg fallback filter error"
           "rg executable not found; grep fallback only supports pattern and path"
           (json_string "error" json)))
-
 let () =
   run "keeper_pr_workflow"
     [ "required_fields",

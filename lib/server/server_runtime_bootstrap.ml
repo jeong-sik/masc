@@ -26,6 +26,103 @@ let ensure_default_oas_cascade_timeout_env () =
       Unix.putenv "OAS_CASCADE_MODEL_TIMEOUT_SEC"
         (Printf.sprintf "%.0f" derived_timeout_s)
 
+let project_root_from_executable () =
+  let raw_exe =
+    try Sys.executable_name with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ""
+  in
+  let exe =
+    if String.equal raw_exe "" then ""
+    else
+      try Unix.realpath raw_exe
+      with Unix.Unix_error _ | Sys_error _ | Invalid_argument _ -> raw_exe
+  in
+  if String.equal exe "" then None
+  else
+    let rec walk_up dir =
+      let parent = Filename.dirname dir in
+      if String.equal parent dir then None
+      else if String.equal (Filename.basename dir) "_build" then Some parent
+      else walk_up parent
+    in
+    walk_up (Filename.dirname exe)
+
+let dedupe_keep_order items =
+  let seen = Hashtbl.create (List.length items) in
+  List.filter
+    (fun item ->
+      if Hashtbl.mem seen item then
+        false
+      else (
+        Hashtbl.add seen item ();
+        true))
+    items
+
+let versioned_config_root_candidates () =
+  let cwd_candidate = Filename.concat (Sys.getcwd ()) "config" in
+  let exe_candidate =
+    match project_root_from_executable () with
+    | Some root -> Some (Filename.concat root "config")
+    | None -> None
+  in
+  [ Some cwd_candidate; exe_candidate ]
+  |> List.filter_map (fun x -> x)
+  |> dedupe_keep_order
+  |> List.filter (fun path -> Sys.file_exists path && Sys.is_directory path)
+
+let copy_file_if_missing ~src ~dst =
+  if Sys.file_exists dst then
+    ()
+  else begin
+    Fs_compat.mkdir_p (Filename.dirname dst);
+    Fs_compat.save_file dst (Fs_compat.load_file src)
+  end
+
+let rec copy_missing_tree ~src ~dst =
+  if Sys.is_directory src then begin
+    if Sys.file_exists dst && not (Sys.is_directory dst) then
+      Log.Server.warn
+        "config bootstrap: refusing to replace file with directory (%s -> %s)"
+        src dst
+    else begin
+      Fs_compat.mkdir_p dst;
+      Sys.readdir src
+      |> Array.iter (fun name ->
+             copy_missing_tree
+               ~src:(Filename.concat src name)
+               ~dst:(Filename.concat dst name))
+    end
+  end else if Sys.file_exists dst then
+    ()
+  else
+    copy_file_if_missing ~src ~dst
+
+let bootstrap_base_path_config_root ~base_path =
+  if Option.is_some (Env_config_core.config_dir_opt ()) then
+    ()
+  else
+    let config_root =
+      Filename.concat (Filename.concat base_path ".masc") "config"
+    in
+    let source_root =
+      versioned_config_root_candidates () |> List.find_opt Sys.file_exists
+    in
+    (match source_root with
+     | Some source ->
+         copy_missing_tree ~src:source ~dst:config_root;
+         Log.Server.info
+           "bootstrapped base-path config root: %s <- %s"
+           config_root source
+     | None ->
+         Fs_compat.mkdir_p (Filename.concat config_root "prompts");
+         Fs_compat.mkdir_p (Filename.concat config_root "keepers");
+         Fs_compat.mkdir_p (Filename.concat config_root "personas");
+         if not (Sys.file_exists (Filename.concat config_root "cascade.json")) then
+           Fs_compat.save_file (Filename.concat config_root "cascade.json") "{}";
+         Log.Server.warn
+           "bootstrapped minimal base-path config root without versioned source: %s"
+           config_root);
+    Config_dir_resolver.reset ()
+
 (* GC tuning for long-running server with bursty allocation.
 
    Dashboard refresh loops create 2GB+ transient allocations per cycle.
@@ -74,6 +171,7 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
     end
   in
   Unix.putenv "MASC_BASE_PATH" base_path;
+  bootstrap_base_path_config_root ~base_path;
   (* RFC-0001 Gate A: initialize instrumentation stores *)
   Heuristic_metrics.init ~base_path;
   Agent_stress.init ~base_path;
@@ -326,11 +424,11 @@ let bootstrap_prompt_state (state : Mcp_server.server_state) =
       ~workspace_path:state.room_config.workspace_path
       ~base_path:state.room_config.base_path
   in
-  if prompt_markdown_dir
-     <> Filename.concat state.room_config.workspace_path "config/prompts"
-  then
-    Log.Misc.info "prompt markdown dir resolved outside room base: %s"
-      prompt_markdown_dir;
+  let expected_prompt_dir = Config_dir_resolver.prompts_dir () in
+  if prompt_markdown_dir <> expected_prompt_dir then
+    Log.Misc.warn
+      "prompt markdown dir diverges from resolved config root: %s (expected %s)"
+      prompt_markdown_dir expected_prompt_dir;
   let missing_prompt_files = Prompt_registry.validate_required_prompt_files () in
   if missing_prompt_files <> [] then
     Log.Misc.error "required prompt files missing: %s"

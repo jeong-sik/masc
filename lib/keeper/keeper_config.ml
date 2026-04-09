@@ -753,18 +753,6 @@ let keeper_slot_id (name : string) : int option =
     let h = Hashtbl.hash name in
     Some (h mod num_slots)
 
-
-let keeper_boring_exit_threshold_rp =
-  _rp_int ~key:"keeper.turn.boring_exit_threshold"
-    ~default:(fun () ->
-      int_of_env_default "MASC_KEEPER_BORING_EXIT_THRESHOLD"
-        ~default:8 ~min_v:2 ~max_v:50)
-    ~min_v:2 ~max_v:50
-    ~description:"Consecutive boring turns before exit_condition triggers and keepalive skips proactive turns" ()
-
-let keeper_boring_exit_threshold () : int =
-  Runtime_params.get keeper_boring_exit_threshold_rp
-
 let keeper_enable_thinking_rp =
   _rp_bool ~key:"keeper.turn.enable_thinking"
     ~default:(fun () -> bool_of_env_default "MASC_KEEPER_ENABLE_THINKING" ~default:false)

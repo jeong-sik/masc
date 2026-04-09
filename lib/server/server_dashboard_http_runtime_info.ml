@@ -150,9 +150,10 @@ let runtime_resolution_json (config : Room.config) =
   let prompt_markdown_dir =
     Prompt_registry.get_markdown_dir () |> Option.value ~default:""
   in
-  let prompt_outside_workspace =
+  let expected_prompt_dir = Config_dir_resolver.prompts_dir () in
+  let prompt_dir_mismatch =
     prompt_markdown_dir <> ""
-    && not (String.starts_with ~prefix:config.workspace_path prompt_markdown_dir)
+    && not (String.equal prompt_markdown_dir expected_prompt_dir)
   in
   let source_mismatch =
     match runtime_commit, workspace_commit with
@@ -174,10 +175,10 @@ let runtime_resolution_json (config : Room.config) =
       :: acc
     else acc
     |> fun acc ->
-    if prompt_outside_workspace then
+    if prompt_dir_mismatch then
       (Printf.sprintf
-         "Prompt markdown dir resolves outside workspace path: %s"
-         prompt_markdown_dir)
+         "Prompt markdown dir (%s) differs from resolved config root (%s)."
+         prompt_markdown_dir expected_prompt_dir)
       :: acc
     else acc
     |> fun acc ->

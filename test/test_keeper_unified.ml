@@ -2321,7 +2321,7 @@ let () =
           test_case "is_context_overflow only matches ContextOverflow" `Quick
             test_is_context_overflow_only_for_overflow_errors;
         ] );
-      ( "boring_tool_gate",
+      ( "boring_tools",
         [
           test_case "masc_status is boring" `Quick (fun () ->
             check bool "masc_status"

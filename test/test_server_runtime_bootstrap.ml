@@ -58,6 +58,28 @@ let with_cwd path f =
   Unix.chdir path;
   Fun.protect ~finally:(fun () -> Unix.chdir saved) f
 
+let rec mkdir_p path =
+  if path = "" || path = "." || path = "/" then
+    ()
+  else if Sys.file_exists path then
+    ()
+  else begin
+    mkdir_p (Filename.dirname path);
+    Unix.mkdir path 0o755
+  end
+
+let make_config_root root =
+  let config = Filename.concat root "config" in
+  mkdir_p (Filename.concat config "prompts");
+  mkdir_p (Filename.concat config "keepers");
+  mkdir_p (Filename.concat config "personas");
+  write_file (Filename.concat config "cascade.json") "{\"seed\":\"repo\"}";
+  write_file (Filename.concat config "tool_policy.toml")
+    "[groups.base]\ntools = [\"keeper_time_now\"]\n[presets.minimal]\ngroups = [\"base\"]\n";
+  write_file (Filename.concat config "prompts/keeper.unified.system.md") "prompt";
+  write_file (Filename.concat config "keepers/example.toml") "[keeper]\ngoal = \"example\"\n";
+  write_file (Filename.concat config "personas/example.txt") "persona";
+  config
 let find_free_port () =
   let socket = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
   Fun.protect
@@ -198,6 +220,65 @@ let test_default_oas_cascade_timeout_keeps_explicit_override () =
   Server_runtime_bootstrap.ensure_default_oas_cascade_timeout_env ();
   Alcotest.(check string) "explicit override wins" "45"
     (Sys.getenv "OAS_CASCADE_MODEL_TIMEOUT_SEC")
+
+let test_bootstrap_base_path_config_root_copies_versioned_config () =
+  with_temp_dir "startup-config-bootstrap" (fun dir ->
+      let repo = Filename.concat dir "repo" in
+      mkdir_p repo;
+      ignore (make_config_root repo);
+      let base_path = Filename.concat dir "base" in
+      mkdir_p base_path;
+      with_env "MASC_CONFIG_DIR" None @@ fun () ->
+      with_cwd repo @@ fun () ->
+      Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path;
+      let config_root = Filename.concat base_path ".masc/config" in
+      Alcotest.(check bool) "config root created" true (Sys.is_directory config_root);
+      Alcotest.(check string) "cascade copied" "{\"seed\":\"repo\"}"
+        (read_file (Filename.concat config_root "cascade.json"));
+      Alcotest.(check bool) "tool policy copied" true
+        (Sys.file_exists (Filename.concat config_root "tool_policy.toml"));
+      Alcotest.(check bool) "prompt copied" true
+        (Sys.file_exists
+           (Filename.concat config_root "prompts/keeper.unified.system.md"));
+      Alcotest.(check bool) "keeper TOML copied" true
+        (Sys.file_exists (Filename.concat config_root "keepers/example.toml")))
+
+let test_bootstrap_base_path_config_root_repairs_partial_root () =
+  with_temp_dir "startup-config-repair" (fun dir ->
+      let repo = Filename.concat dir "repo" in
+      mkdir_p repo;
+      ignore (make_config_root repo);
+      let base_path = Filename.concat dir "base" in
+      let config_root = Filename.concat base_path ".masc/config" in
+      mkdir_p config_root;
+      write_file (Filename.concat config_root "cascade.json") "{\"seed\":\"local\"}";
+      mkdir_p (Filename.concat config_root "personas");
+      with_env "MASC_CONFIG_DIR" None @@ fun () ->
+      with_cwd repo @@ fun () ->
+      Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path;
+      Alcotest.(check string) "existing cascade preserved" "{\"seed\":\"local\"}"
+        (read_file (Filename.concat config_root "cascade.json"));
+      Alcotest.(check bool) "keepers repaired" true
+        (Sys.is_directory (Filename.concat config_root "keepers"));
+      Alcotest.(check bool) "prompts repaired" true
+        (Sys.is_directory (Filename.concat config_root "prompts"));
+      Alcotest.(check bool) "tool policy repaired" true
+        (Sys.file_exists (Filename.concat config_root "tool_policy.toml")))
+
+let test_bootstrap_base_path_config_root_skips_explicit_config_override () =
+  with_temp_dir "startup-config-explicit" (fun dir ->
+      let repo = Filename.concat dir "repo" in
+      mkdir_p repo;
+      ignore (make_config_root repo);
+      let base_path = Filename.concat dir "base" in
+      mkdir_p base_path;
+      let explicit = Filename.concat dir "override-config" in
+      mkdir_p explicit;
+      with_env "MASC_CONFIG_DIR" (Some explicit) @@ fun () ->
+      with_cwd repo @@ fun () ->
+      Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path;
+      Alcotest.(check bool) "base-path config not bootstrapped" false
+        (Sys.file_exists (Filename.concat base_path ".masc/config")))
 
 let test_constructor_is_pure () =
   with_temp_dir "startup-pure" (fun dir ->
@@ -598,6 +679,25 @@ let test_prompt_markdown_dir_falls_back_to_resolved_config_dir () =
       Alcotest.(check string) "temp room falls back to resolved prompt dir"
         expected resolved)
 
+let test_prompt_markdown_dir_honors_masc_config_dir_override () =
+  with_temp_dir "startup-prompts-override" (fun dir ->
+      let workspace_prompts = Filename.concat dir "config/prompts" in
+      let override_root = Filename.concat dir "override-config" in
+      let override_prompts = Filename.concat override_root "prompts" in
+      Fs_compat.mkdir_p workspace_prompts;
+      Fs_compat.mkdir_p override_prompts;
+      with_env "MASC_CONFIG_DIR" (Some override_root) @@ fun () ->
+      Config_dir_resolver.reset ();
+      let resolved =
+        Fun.protect
+          ~finally:(fun () -> Config_dir_resolver.reset ())
+          (fun () ->
+             Prompt_defaults.resolve_prompt_markdown_dir
+               ~workspace_path:dir ~base_path:dir)
+      in
+      Alcotest.(check string) "resolved config root wins over workspace prompts"
+        override_prompts resolved)
+
 let test_prompt_markdown_dir_prefers_resolved_config_dir_over_cwd () =
   with_temp_dir "startup-prompts-priority" (fun dir ->
       let cwd_prompts = Filename.concat dir "config/prompts" in
@@ -619,7 +719,6 @@ let test_prompt_markdown_dir_prefers_resolved_config_dir_over_cwd () =
           Alcotest.(check string)
             "resolved config prompts win over cwd fallback"
             resolved_prompts resolved))
-
 let test_main_eio_serves_health_before_lazy_startup () =
   with_temp_dir "startup-health" (fun dir ->
       let exe = find_main_eio_exe () in
@@ -688,6 +787,16 @@ let () =
           Alcotest.test_case
             "default OAS cascade timeout keeps explicit override"
             `Quick test_default_oas_cascade_timeout_keeps_explicit_override;
+          Alcotest.test_case
+            "bootstrap base-path config copies versioned config"
+            `Quick test_bootstrap_base_path_config_root_copies_versioned_config;
+          Alcotest.test_case
+            "bootstrap base-path config repairs partial root"
+            `Quick test_bootstrap_base_path_config_root_repairs_partial_root;
+          Alcotest.test_case
+            "bootstrap base-path config skips explicit override"
+            `Quick
+            test_bootstrap_base_path_config_root_skips_explicit_config_override;
           Alcotest.test_case "constructors stay pure" `Quick
             test_constructor_is_pure;
           Alcotest.test_case "restore_persisted_sessions uses flat agents dir"
@@ -742,6 +851,8 @@ let () =
             test_startup_state_json_includes_watchdog;
           Alcotest.test_case "prompt markdown dir falls back to resolved config dir"
             `Quick test_prompt_markdown_dir_falls_back_to_resolved_config_dir;
+          Alcotest.test_case "prompt markdown dir honors MASC_CONFIG_DIR override"
+            `Quick test_prompt_markdown_dir_honors_masc_config_dir_override;
           Alcotest.test_case
             "prompt markdown dir prefers resolved config dir over cwd fallback"
             `Quick

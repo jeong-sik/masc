@@ -2,6 +2,43 @@ open Alcotest
 
 module KTPC = Masc_mcp.Keeper_tool_policy_config
 
+let with_temp_dir prefix f =
+  let dir = Filename.temp_file prefix "" in
+  Sys.remove dir;
+  Unix.mkdir dir 0o755;
+  let rec rm_rf path =
+    if Sys.file_exists path then
+      if Sys.is_directory path then begin
+        Sys.readdir path |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+        Unix.rmdir path
+      end else
+        Sys.remove path
+  in
+  Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
+
+let rec mkdir_p dir =
+  if dir = "" || dir = "." || dir = "/" then ()
+  else if Sys.file_exists dir then ()
+  else begin
+    mkdir_p (Filename.dirname dir);
+    Unix.mkdir dir 0o755
+  end
+
+let with_env name value f =
+  let previous = Sys.getenv_opt name in
+  (match value with
+   | Some v -> Unix.putenv name v
+   | None -> Unix.putenv name "");
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some v -> Unix.putenv name v
+      | None -> Unix.putenv name "")
+    f
+
+let read_file path =
+  In_channel.with_open_bin path In_channel.input_all
+
 let test_load_falls_back_to_resolved_config_dir () =
   (* Use the real project root so config/tool_policy.toml is found *)
   let base_path = Masc_test_deps.find_project_root () in
@@ -15,6 +52,27 @@ let test_load_falls_back_to_resolved_config_dir () =
         (Printf.sprintf
            "expected config load to succeed for base_path=%s: %s"
            base_path msg)
+
+let test_load_honors_masc_config_dir_override () =
+  with_temp_dir "tool-policy-config" @@ fun root ->
+  let source_root = Masc_test_deps.find_project_root () in
+  let config_dir = Filename.concat root "custom-config" in
+  mkdir_p config_dir;
+  let source_policy = Filename.concat source_root "config/tool_policy.toml" in
+  let target_policy = Filename.concat config_dir "tool_policy.toml" in
+  Out_channel.with_open_bin target_policy (fun oc ->
+      output_string oc (read_file source_policy));
+  with_env "MASC_CONFIG_DIR" (Some config_dir) @@ fun () ->
+  match KTPC.load ~base_path:"/tmp/unrelated-base-path" with
+  | Ok cfg ->
+      let presets = KTPC.preset_names cfg in
+      check bool "loads config from MASC_CONFIG_DIR override" true
+        (List.mem "full" presets && List.mem "messaging" presets)
+  | Error msg ->
+      fail
+        (Printf.sprintf
+           "expected config load to succeed for override config_dir=%s: %s"
+           config_dir msg)
 
 (* ── preset_can_satisfy tests ───────────────────────────────── *)
 
@@ -123,6 +181,8 @@ let () =
         [
           test_case "falls back to resolved config dir" `Quick
             test_load_falls_back_to_resolved_config_dir;
+          test_case "honors MASC_CONFIG_DIR override" `Quick
+            test_load_honors_masc_config_dir_override;
         ] );
       ( "preset_can_satisfy",
         [

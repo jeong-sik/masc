@@ -123,7 +123,7 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     {
       id: 'agents',
       label: '에이전트 & 키퍼',
-      description: '에이전트 = 작업 수행 프로세스. 키퍼 = 장기 컨텍스트를 유지하는 상주 런타임.',
+      description: '통합 런타임 상태.',
       params: { section: 'agents' },
     },
     {

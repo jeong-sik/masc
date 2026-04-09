@@ -4,6 +4,9 @@ import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { useSignal } from '@preact/signals'
 import {
+  fetchDashboardShell,
+  fetchDashboardTools,
+  fetchDashboardNamespaceTruth,
   fetchTelemetry,
   fetchTelemetrySummary,
   type TelemetryEntry,
@@ -21,10 +24,33 @@ const SOURCE_META: Record<TelemetrySource, { label: string; color: string; icon:
   tool_metric: { label: '도구 메트릭', color: 'text-cyan-400', icon: 'M' },
 }
 
+interface StoreSnapshot {
+  keepers: number
+  agents: number
+  tasks: number
+  activeSessions: number
+  activeOperations: number
+  continuityAlerts: number
+  toolsRegistered: number
+  toolsPublic: number
+  toolsTotalCalls: number
+  toolsNeverCalled: number
+  version: string | null
+  uptime: number | null
+}
+
+const EMPTY_STORE: StoreSnapshot = {
+  keepers: 0, agents: 0, tasks: 0,
+  activeSessions: 0, activeOperations: 0, continuityAlerts: 0,
+  toolsRegistered: 0, toolsPublic: 0, toolsTotalCalls: 0, toolsNeverCalled: 0,
+  version: null, uptime: null,
+}
+
 interface TelemetryState {
   entries: TelemetryEntry[]
   summary: TelemetrySourceSummary[]
   totalEntries: number
+  store: StoreSnapshot
   loading: boolean
   error: string | null
 }
@@ -197,6 +223,7 @@ export function TelemetryUnified() {
     entries: [],
     summary: [],
     totalEntries: 0,
+    store: EMPTY_STORE,
     loading: true,
     error: null,
   })
@@ -220,7 +247,32 @@ export function TelemetryUnified() {
   async function load() {
     state.value = { ...state.value, loading: true, error: null }
     try {
-      const [telemetry, summary] = await Promise.all([
+      const storePromise = Promise.all([
+        fetchDashboardShell().catch(() => null),
+        fetchDashboardTools().catch(() => null),
+        fetchDashboardNamespaceTruth().catch(() => null),
+      ]).then(([shell, tools, truth]) => {
+        const counts = shell?.counts
+        const execSummary = truth?.execution?.summary
+        const inv = tools?.tool_inventory
+        const usage = tools?.tool_usage
+        const surfacePublic = inv?.surface_summary?.public_mcp?.count ?? inv?.surface_summary?.public?.count ?? 0
+        return {
+          keepers: counts?.keepers ?? 0,
+          agents: counts?.agents ?? 0,
+          tasks: counts?.tasks ?? 0,
+          activeSessions: execSummary?.active_sessions ?? 0,
+          activeOperations: execSummary?.active_operations ?? 0,
+          continuityAlerts: execSummary?.continuity_alerts ?? 0,
+          toolsRegistered: inv?.count ?? 0,
+          toolsPublic: surfacePublic,
+          toolsTotalCalls: usage?.total_calls ?? 0,
+          toolsNeverCalled: usage?.never_called_count ?? 0,
+          version: shell?.status?.version ?? null,
+          uptime: shell?.status?.build?.uptime_seconds ?? null,
+        } satisfies StoreSnapshot
+      })
+      const [telemetry, summary, store] = await Promise.all([
         fetchTelemetry({
           source: sourceFilter.value || undefined,
           keeper: keeperFilter.value || undefined,
@@ -230,11 +282,13 @@ export function TelemetryUnified() {
           n: limit.value,
         }),
         fetchTelemetrySummary(),
+        storePromise,
       ])
       state.value = {
         entries: telemetry.entries,
         summary: summary.sources,
         totalEntries: summary.total_entries,
+        store,
         loading: false,
         error: null,
       }
@@ -256,7 +310,7 @@ export function TelemetryUnified() {
     limit.value,
   ])
 
-  const { entries, summary, totalEntries, loading, error } = state.value
+  const { entries, summary, totalEntries, store, loading, error } = state.value
 
   return html`
     <div class="flex flex-col gap-4">
@@ -279,6 +333,32 @@ export function TelemetryUnified() {
           <div class="text-xs font-medium text-[var(--text-muted)] mb-1">Total</div>
           <div class="text-2xl font-bold text-[var(--text-strong)]">${totalEntries.toLocaleString()}</div>
         </div>
+      </div>
+
+      <div class="flex flex-wrap gap-3">
+        <${DiagnosisCard}
+          title="Keeper Store"
+          value=${String(store.keepers)}
+          detail=${[
+            `${store.activeSessions} 활성 세션`,
+            `${store.continuityAlerts} continuity 알림`,
+            store.version ? `v${store.version}` : null,
+            store.uptime != null ? `uptime ${Math.floor(store.uptime / 60)}m` : null,
+          ].filter(Boolean).join(' · ')}
+          tone=${store.continuityAlerts > 0 ? 'warn' : store.keepers > 0 ? 'ok' : 'neutral'}
+        />
+        <${DiagnosisCard}
+          title="Tool Store"
+          value=${String(store.toolsRegistered)}
+          detail=${`${store.toolsPublic} public · ${store.toolsTotalCalls.toLocaleString()} 총 호출 · ${store.toolsNeverCalled} 미사용`}
+          tone=${store.toolsRegistered > 0 ? 'ok' : 'warn'}
+        />
+        <${DiagnosisCard}
+          title="Agent Store"
+          value=${String(store.agents)}
+          detail=${`${store.tasks} 태스크 · ${store.activeOperations} 활성 작전`}
+          tone=${store.agents > 0 ? 'ok' : 'neutral'}
+        />
       </div>
 
       <div class="flex items-center gap-3 flex-wrap">

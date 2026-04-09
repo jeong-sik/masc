@@ -50,6 +50,9 @@ async function loadPanel(
   vi.doMock('../api/dashboard', () => ({
     fetchTelemetry,
     fetchTelemetrySummary,
+    fetchDashboardShell: vi.fn().mockResolvedValue({ counts: { keepers: 2, agents: 0, tasks: 5 }, status: { version: '0.2.0', build: { uptime_seconds: 600 } } }),
+    fetchDashboardTools: vi.fn().mockResolvedValue({ tool_inventory: { count: 10, tools: [], surface_summary: { public_mcp: { count: 5, tools: [] } } }, tool_usage: { total_calls: 100, never_called_count: 0 } }),
+    fetchDashboardNamespaceTruth: vi.fn().mockResolvedValue({ execution: { summary: { active_sessions: 1, active_operations: 3, continuity_alerts: 0 } } }),
   }))
   return import('./telemetry-unified')
 }
@@ -117,5 +120,12 @@ describe('TelemetryUnified', () => {
     expect(container.textContent).toContain('Refresh')
     expect(container.textContent).toContain('MASC telemetry store entries')
     expect(container.textContent).toContain('mcp__masc__masc_status')
+
+    // MASC Store Diagnosis cards
+    expect(container.textContent).toContain('Keeper Store')
+    expect(container.textContent).toContain('Tool Store')
+    expect(container.textContent).toContain('Agent Store')
+    expect(container.textContent).toContain('1 활성 세션')
+    expect(container.textContent).toContain('5 public')
   })
 })

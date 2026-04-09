@@ -233,81 +233,6 @@ let after_done ~success =
       preconditions = [ "room_set"; "joined" ];
       common_mistakes = [] }
 
-(* ── Auxiliary Lane: Managed Operations ──────────────────────────── *)
-
-let after_operation_start ~success =
-  if success then
-    { next_steps =
-        [ s "masc_dispatch_tick" "Trigger the scheduler to advance the operation";
-          s "masc_observe_topology" "View the operation topology" ];
-      preconditions = [ "room_set"; "joined"; "unit_defined" ];
-      common_mistakes =
-        [ "Forgetting masc_dispatch_tick — the operation will not advance" ] }
-  else
-    { next_steps =
-        [ s "masc_unit_define" "Define organizational unit first";
-          s "masc_status" "Check namespace prerequisites" ];
-      preconditions = [ "room_set"; "joined" ];
-      common_mistakes = [] }
-
-let after_dispatch_tick ~success =
-  if success then
-    { next_steps =
-        [ s "masc_observe_operations" "Monitor operation progress";
-          s "masc_policy_status" "Review pending policy approvals" ];
-      preconditions = [ "room_set"; "joined"; "operation_active" ];
-      common_mistakes = [] }
-  else
-    { next_steps =
-        [ s "masc_operation_start" "Ensure an operation is active" ];
-      preconditions = [ "room_set"; "joined" ];
-      common_mistakes = [] }
-
-(* ── Golden Path 3: Supervised Execution / Supervisor ───────────── *)
-
-let after_team_session_start ~success =
-  if success then
-    { next_steps =
-        [ s "masc_team_session_step" "Record the first session turn";
-          s "masc_team_session_status" "View session state" ];
-      preconditions = [ "room_set"; "joined" ];
-      common_mistakes =
-        [ "Not recording turns — the session has no audit trail" ] }
-  else
-    { next_steps =
-        [ s "masc_join" "Ensure you have joined the namespace";
-          s "masc_status" "Check namespace state" ];
-      preconditions = [ "room_set" ];
-      common_mistakes = [] }
-
-let after_team_session_step ~success =
-  if success then
-    { next_steps =
-        [ s "masc_team_session_step" "Record the next turn or spawn workers";
-          s "masc_team_session_status" "Review session progress";
-          s "masc_team_session_prove" "Generate collaboration evidence when ready" ];
-      preconditions = [ "room_set"; "joined"; "session_active" ];
-      common_mistakes = [] }
-  else
-    { next_steps =
-        [ s "masc_team_session_status" "Check session state for errors" ];
-      preconditions = [ "room_set"; "joined"; "session_active" ];
-      common_mistakes = [] }
-
-let after_team_session_prove ~success =
-  if success then
-    { next_steps =
-        [ s "masc_team_session_stop" "End the session after evidence is collected";
-          s "masc_transition" "Mark the underlying task as complete (action=done)" ];
-      preconditions = [ "room_set"; "joined"; "session_active" ];
-      common_mistakes = [] }
-  else
-    { next_steps =
-        [ s "masc_team_session_step" "Record more evidence before proving";
-          s "masc_team_session_status" "Check what evidence is missing" ];
-      preconditions = [ "room_set"; "joined"; "session_active" ];
-      common_mistakes = [] }
-
 (* ── Common tools ────────────────────────────────────────────────── *)
 
 let after_broadcast ~success =
@@ -348,21 +273,6 @@ let after_init ~success =
       preconditions = [];
       common_mistakes = [] }
 
-let after_operator_digest ~success =
-  if success then
-    { next_steps =
-        [ s "masc_operator_action" "Execute a suggested action from the digest";
-          s "masc_team_session_status" "Drill into a specific session" ];
-      preconditions = [ "room_set"; "joined"; "session_active" ];
-      common_mistakes =
-        [ "Reading the digest without acting on critical items" ] }
-  else
-    { next_steps =
-        [ s "masc_operator_snapshot" "Get raw state instead";
-          s "masc_status" "Check basic namespace state" ];
-      preconditions = [ "room_set"; "joined" ];
-      common_mistakes = [] }
-
 (* ── Main dispatch ───────────────────────────────────────────────── *)
 
 let next_steps ~tool_name ~success =
@@ -379,18 +289,10 @@ let next_steps ~tool_name ~success =
   | "masc_heartbeat" -> after_heartbeat ~success
   | "masc_done" -> after_done ~success
   | "masc_transition" -> after_transition_generic ~success
-  (* Auxiliary Lane: Managed Operations *)
-  | "masc_operation_start" -> after_operation_start ~success
-  | "masc_dispatch_tick" -> after_dispatch_tick ~success
-  (* Delivery Lane: Supervised Execution *)
-  | "masc_team_session_start" -> after_team_session_start ~success
-  | "masc_team_session_step" -> after_team_session_step ~success
-  | "masc_team_session_prove" -> after_team_session_prove ~success
   (* Common *)
   | "masc_broadcast" -> after_broadcast ~success
   | "masc_worktree_create" -> after_worktree_create ~success
   | "masc_init" -> after_init ~success
-  | "masc_operator_digest" -> after_operator_digest ~success
   (* No guidance registered *)
   | _ -> empty
 
@@ -450,20 +352,6 @@ let workflow_context ~tool_name =
         [ "masc_plan_set_task" ]
     | "masc_transition" ->
         [ "masc_join"; "masc_status" ]
-    | "masc_operation_start" ->
-        [ "masc_unit_define" ]
-    | "masc_dispatch_tick" ->
-        [ "masc_operation_start" ]
-    | "masc_team_session_start" ->
-        [ "masc_join" ]
-    | "masc_team_session_step" ->
-        [ "masc_team_session_start" ]
-    | "masc_team_session_prove" ->
-        [ "masc_team_session_step" ]
-    | "masc_team_session_stop" ->
-        [ "masc_team_session_prove" ]
-    | "masc_operator_digest" ->
-        [ "masc_team_session_start" ]
     | _ -> []
   in
   let after_g = next_steps ~tool_name ~success:true in
@@ -513,9 +401,9 @@ let current_state_guidance ~room_set ~joined ~task_claimed
         [ "Working directly on main branch without a worktree" ] }
   else if session_active then
     { next_steps =
-        [ s "masc_team_session_step" "Record the next turn in your session";
-          s "masc_team_session_status" "Check session progress";
-          s "masc_heartbeat" "Keep your presence alive during work" ];
+        [ s "masc_status" "Refresh repo coordination state";
+          s "masc_heartbeat" "Keep your presence alive during work";
+          s "masc_transition" "Mark the task complete when work is done (action=done)" ];
       preconditions = [ "room_set"; "joined"; "task_claimed"; "current_task_set"; "worktree_active"; "session_active" ];
       common_mistakes = [] }
   else

@@ -11,35 +11,14 @@
    - `masc_plan_set_task` after `masc_transition(action=claim)`
    - `masc_heartbeat`
 
-2. `Supervised Delivery Swarm`
-   - Use for real implementation work.
-   - Start with `masc_team_session_start`, then use `masc_team_session_step` and `/mcp/operator`.
-   - Treat `masc_team_session_*` as the current tool family name for supervised execution, not a separate product concept.
-
-3. `Attached execution session`
-   - Use when an explicit managed operation also needs a worker team.
-   - Start the session with `operation_id=...` only when you intentionally opt into the managed-operation lane.
-
-4. `Supervisor path`
-   - Use `/mcp/operator` for `masc_operator_snapshot`, `masc_operator_digest`, `masc_operator_action`, `masc_operator_confirm`.
-
-5. `Managed Operation compatibility lane`
-   - Use only for benchmark topology experiments or command-plane compatibility coverage.
-   - Start with `masc_unit_define`, `masc_operation_start`, `masc_dispatch_tick`.
-
-## Workload templates
-
-- `coding_team` -> `coding_task` / default stage `decompose`
-- `research_team` -> `research_pipeline` / default stage `normalize`
-- `ops_governance_team` -> `research_pipeline` / default stage `audit`
+2. `Keeper Runtime`
+   - Keepers run on the OAS-backed `Agent.run` path.
+   - Use keeper tools for lifecycle, status, and messaging.
 
 ## Rules
 
-- Prefer supervised execution and supervisor paths for implementation work.
-- Use `masc_operation_start` only when you explicitly need the managed-operation compatibility lane.
-- Prefer `masc_team_session_start(operation_id=...)` over standalone sessions when command-plane truth matters.
 - Treat `masc_set_room` as a compatibility alias only; prefer `masc_start` for onboarding.
 - Treat `Social Board`, `TRPG`, and `RISC` as secondary surfaces unless the task explicitly needs them.
-- Use `/api/v1/command-plane/help` for the current golden paths and pitfalls.
+- Team-session, operator, and command-plane compatibility surfaces are retired from the supported front door.
 
 See `llms-full.txt` for the expanded contract.

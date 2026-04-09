@@ -155,9 +155,6 @@ type keeper_meta = {
   max_context_override: int option;
   continuity_summary: string;
   active_goal_ids: string list;
-  active_team_session_id: string option;
-  last_team_session_started_at: string;
-  team_session_start_count_total: int;
   paused: bool;
   current_task_id: string option;
   (** Currently claimed task ID for cost attribution. *)

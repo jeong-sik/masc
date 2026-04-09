@@ -124,9 +124,9 @@ let test_masc_mcp_tools () =
     (List.mem "mcp__masc__masc_status" Spawn.masc_mcp_tools);
   Alcotest.(check bool) "omits masc_claim" false
     (List.mem "mcp__masc__masc_claim" Spawn.masc_mcp_tools);
-  Alcotest.(check bool) "contains team_session_step" true
+  Alcotest.(check bool) "omits team_session_step" false
     (List.mem "mcp__masc__masc_team_session_step" Spawn.masc_mcp_tools);
-  Alcotest.(check bool) "contains team_session_finalize" true
+  Alcotest.(check bool) "omits team_session_finalize" false
     (List.mem "mcp__masc__masc_team_session_finalize" Spawn.masc_mcp_tools);
   (* portal_send and a2a_delegate removed from spawned-agent surface in #4999 *)
   Alcotest.(check bool) "omits portal_send (pruned)" false

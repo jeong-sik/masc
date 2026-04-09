@@ -164,21 +164,16 @@ let dispatch
           "tool '%s' is a keeper management tool (use MCP client)" name)
 
   | Mod_operator ->
-      (* Tool_operator depends on Operator_control -> Keeper_exec_status.
-         Operator tools are admin-level and routed through MCP server. *)
+      (* Operator control was retired from the keeper front door.
+         Keepers stay on the OAS Agent.run path only. *)
       Some (false,
         Printf.sprintf
-          "tool '%s' is an operator tool (use MCP client)" name)
+          "tool '%s' belongs to the removed operator surface; keeper runtime stays on OAS Agent.run" name)
 
   | Mod_team_session ->
-      (match require_sw (), require_clock () with
-       | Ok sw, Ok clock ->
-           Tool_team_session.dispatch
-             { Tool_team_session.config; agent_name; sw; clock;
-               proc_mgr = get_proc_mgr_opt ();
-               net = get_net_opt () }
-             ~name ~args
-       | Error e, _ | _, Error e -> Some (false, e))
+      Some (false,
+        Printf.sprintf
+          "tool '%s' belongs to the removed collaboration surface; keeper runtime stays on OAS Agent.run" name)
 
   | Mod_autoresearch ->
       (* Keeper already handles masc_autoresearch_* before reaching this path.
@@ -215,14 +210,9 @@ let dispatch
   (* ── Tier E: Hybrid (option fields degrade gracefully) ─────── *)
 
   | Mod_command_plane ->
-      let ctx : (_, _) Tool_command_plane.context =
-        { config; agent_name;
-          sw = Eio_context.get_switch_opt ();
-          clock = Eio_context.get_clock_opt ();
-          net = get_net_opt ();
-          mcp_state = None; mcp_session_id = None; auth_token = None }
-      in
-      Tool_command_plane.dispatch ctx ~name ~args
+      Some (false,
+        Printf.sprintf
+          "tool '%s' belongs to the removed command-plane compatibility surface; keeper runtime stays on OAS Agent.run" name)
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->

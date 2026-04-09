@@ -81,7 +81,7 @@ let test_visible_tools_expose_only_truthful_statuses () =
             (String.equal status "real" || String.equal status "adapter"))
         tools)
 
-let test_hidden_tools_report_contract_status () =
+let test_selected_tools_report_contract_status () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let clock = Eio.Stdenv.clock env in
@@ -93,7 +93,6 @@ let test_hidden_tools_report_contract_status () =
         tools_list_response ~clock ~sw ~include_hidden:true
           ~names:
             [
-              "masc_dispatch_plan";
               "masc_transition";
               "masc_runtime_verify";
               "masc_verify_handoff";
@@ -101,9 +100,6 @@ let test_hidden_tools_report_contract_status () =
           state
         |> response_tools
       in
-      let dispatch_plan = find_tool_exn tools "masc_dispatch_plan" in
-      check string "dispatch_plan real" "real"
-        (tool_string_field dispatch_plan "implementationStatus");
       let canonical = find_tool_exn tools "masc_transition" in
       check string "transition real" "real"
         (tool_string_field canonical "implementationStatus");
@@ -118,5 +114,5 @@ let () =
   run "tool contract truth"
     [
       ("visible", [ test_case "visible tools stay truthful" `Quick test_visible_tools_expose_only_truthful_statuses ]);
-      ("hidden", [ test_case "hidden metadata exposes implementation status" `Quick test_hidden_tools_report_contract_status ]);
+      ("hidden", [ test_case "selected tools expose implementation status" `Quick test_selected_tools_report_contract_status ]);
     ]

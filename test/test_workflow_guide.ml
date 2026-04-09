@@ -55,25 +55,27 @@ let test_done_success () =
   check_has_tool g.next_steps "masc_status";
   check_has_tool g.next_steps "masc_transition"
 
-(* ── Golden Path 2: CPv2 ─────────────────────────────────────────── *)
+(* ── Retired Compatibility Paths ─────────────────────────────────── *)
 
-let test_operation_start_success () =
+let test_operation_start_removed () =
   let g = WG.next_steps ~tool_name:"masc_operation_start" ~success:true in
-  check_has_tool g.next_steps "masc_dispatch_tick"
+  check (list string) "operation_start removed returns empty" []
+    (List.map (fun (s : WG.step) -> s.tool) g.next_steps)
 
-let test_dispatch_tick_success () =
+let test_dispatch_tick_removed () =
   let g = WG.next_steps ~tool_name:"masc_dispatch_tick" ~success:true in
-  check_has_tool g.next_steps "masc_observe_operations"
+  check (list string) "dispatch_tick removed returns empty" []
+    (List.map (fun (s : WG.step) -> s.tool) g.next_steps)
 
-(* ── Golden Path 3: Supervised Execution ────────────────────────── *)
-
-let test_team_session_start_success () =
+let test_team_session_start_removed () =
   let g = WG.next_steps ~tool_name:"masc_team_session_start" ~success:true in
-  check_has_tool g.next_steps "masc_team_session_step"
+  check (list string) "team_session_start removed returns empty" []
+    (List.map (fun (s : WG.step) -> s.tool) g.next_steps)
 
-let test_team_session_prove_success () =
+let test_team_session_prove_removed () =
   let g = WG.next_steps ~tool_name:"masc_team_session_prove" ~success:true in
-  check_has_tool g.next_steps "masc_team_session_stop"
+  check (list string) "team_session_prove removed returns empty" []
+    (List.map (fun (s : WG.step) -> s.tool) g.next_steps)
 
 (* ── Unknown tools return empty guidance ─────────────────────────── *)
 
@@ -247,13 +249,11 @@ let () =
       test_case "set_current_task alias matches canonical" `Quick
         test_set_current_task_alias_matches_canonical;
     ];
-    "golden_path_2", [
-      test_case "operation_start success" `Quick test_operation_start_success;
-      test_case "dispatch_tick success" `Quick test_dispatch_tick_success;
-    ];
-    "golden_path_3", [
-      test_case "team_session_start success" `Quick test_team_session_start_success;
-      test_case "team_session_prove success" `Quick test_team_session_prove_success;
+    "retired_paths", [
+      test_case "operation_start removed" `Quick test_operation_start_removed;
+      test_case "dispatch_tick removed" `Quick test_dispatch_tick_removed;
+      test_case "team_session_start removed" `Quick test_team_session_start_removed;
+      test_case "team_session_prove removed" `Quick test_team_session_prove_removed;
     ];
     "edge_cases", [
       test_case "unknown tool" `Quick test_unknown_tool;

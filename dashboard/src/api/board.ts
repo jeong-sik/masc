@@ -5,6 +5,7 @@ import type {
   GovernanceCaseBrief, GovernanceCaseBundle, GovernanceContextRef,
   GovernanceDecisionItem, GovernanceExecutedRoute, GovernanceExecutionOrder,
   GovernanceGuardrailState, GovernanceJudgeSummary, GovernanceJudgment,
+  KeeperApprovalQueueItem,
   GovernanceResolvedAction, GovernanceTimelineEvent, PendingConfirmation,
 } from '../types'
 
@@ -46,6 +47,25 @@ export function normalizePendingConfirmation(raw: unknown): PendingConfirmation 
     delegated_tool: asNullableString(raw.delegated_tool) ?? undefined,
     created_at: asNullableIsoTimestamp(raw.created_at) ?? undefined,
     preview: raw.preview,
+  }
+}
+
+export function normalizeKeeperApprovalQueueItem(raw: unknown): KeeperApprovalQueueItem | null {
+  if (!isRecord(raw)) return null
+  const id = asString(raw.id, '').trim()
+  const keeperName = asString(raw.keeper_name, '').trim()
+  const toolName = asString(raw.tool_name, '').trim()
+  const riskLevel = asString(raw.risk_level, '').trim()
+  if (!id || !keeperName || !toolName || !riskLevel) return null
+  return {
+    id,
+    keeper_name: keeperName,
+    tool_name: toolName,
+    risk_level: riskLevel,
+    requested_at: asNullableIsoTimestamp(raw.requested_at_iso ?? raw.requested_at),
+    waiting_s: asNumber(raw.waiting_s),
+    input: raw.input,
+    input_preview: asNullableString(raw.input_preview),
   }
 }
 

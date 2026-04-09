@@ -95,3 +95,10 @@ issue*.md
 .nvimlog
 config/personas/uranium666
 .ci_build/
+/.gitignore.bak
+/.playwright-mcp/
+/.tmp_verify/
+/merged_prs.json
+/pr_list.txt
+/scripts/changelog_unreleased.txt
+/specs/bug-models/*_TTrace_*.bin

@@ -16,28 +16,29 @@ let declarative_keeper_names () =
 let bootable_keeper_names config =
   dedupe_keep_order (keeper_names config @ declarative_keeper_names ())
 
+(** Apply a TOML profile default to a runtime meta value.
+    [Some v] from TOML overrides; [None] keeps the current runtime value. *)
+let apply_default opt current = match opt with Some v -> v | None -> current
+
+(** Same as [apply_default] but both TOML and meta are option-typed. *)
+let apply_default_opt opt current = match opt with Some _ -> opt | None -> current
+
 let ensure_keeper_meta config name =
   match read_meta config name with
   | Ok (Some meta) ->
-    (* Re-sync declarative keeper flags from profile/env defaults on bootstrap.
+    (* Re-sync ALL declarative keeper fields from profile/env defaults on bootstrap.
        Persisted meta may have stale values from a previous session;
-       persona config plus explicit env overrides are the source of truth. *)
+       persona config (TOML) plus explicit env overrides are the source of truth.
+       Fields where TOML has [Some v] are overwritten; [None] keeps runtime value. *)
     let defaults = Keeper_types_profile.load_keeper_profile_defaults meta.name in
+
+    (* --- Proactive --- *)
     let target_proactive =
-      match defaults.proactive_enabled with
-      | Some v -> v
-      | None -> Keeper_config.default_proactive_enabled
-    in
+      apply_default defaults.proactive_enabled Keeper_config.default_proactive_enabled in
     let target_idle_sec =
-      match defaults.proactive_idle_sec with
-      | Some v -> v
-      | None -> Keeper_config.default_proactive_idle_sec
-    in
+      apply_default defaults.proactive_idle_sec Keeper_config.default_proactive_idle_sec in
     let target_cooldown_sec =
-      match defaults.proactive_cooldown_sec with
-      | Some v -> v
-      | None -> Keeper_config.default_proactive_cooldown_sec
-    in
+      apply_default defaults.proactive_cooldown_sec Keeper_config.default_proactive_cooldown_sec in
     let target_room_signal_prompt_enabled =
       match Keeper_config.keeper_room_signal_prompt_enabled_override () with
       | Some override -> override
@@ -45,35 +46,99 @@ let ensure_keeper_meta config name =
           Option.value ~default:Keeper_config.default_room_signal_prompt_enabled
             defaults.room_signal_prompt_enabled
     in
-    let target_denylist =
-      match defaults.tool_denylist with
-      | Some dl -> dl
-      | None -> meta.tool_denylist
-    in
-    let target_cascade_name =
-      match defaults.cascade_name with
-      | Some name -> name
-      | None -> meta.cascade_name
-    in
+    let target_denylist = apply_default defaults.tool_denylist meta.tool_denylist in
+    let target_cascade_name = apply_default defaults.cascade_name meta.cascade_name in
+
+    (* --- Personality --- *)
+    let target_goal = apply_default defaults.goal meta.goal in
+    let target_short_goal = apply_default defaults.short_goal meta.short_goal in
+    let target_mid_goal = apply_default defaults.mid_goal meta.mid_goal in
+    let target_long_goal = apply_default defaults.long_goal meta.long_goal in
+    let target_will = apply_default defaults.will meta.will in
+    let target_needs = apply_default defaults.needs meta.needs in
+    let target_desires = apply_default defaults.desires meta.desires in
+    let target_instructions = apply_default defaults.instructions meta.instructions in
+
+    (* --- Policy --- *)
+    let target_policy_voice_enabled =
+      apply_default defaults.policy_voice_enabled meta.policy_voice_enabled in
+    let target_room_scope = apply_default defaults.room_scope meta.room_scope in
+    let target_scope_kind = apply_default defaults.scope_kind meta.scope_kind in
+    let target_mention_targets =
+      match defaults.mention_targets with [] -> meta.mention_targets | xs -> xs in
+    let target_execution_scope =
+      apply_default defaults.execution_scope meta.execution_scope in
+    let target_allowed_paths =
+      apply_default defaults.allowed_paths meta.allowed_paths in
+
+    (* --- Work Discovery --- *)
+    let target_wd_enabled =
+      apply_default_opt defaults.work_discovery_enabled meta.work_discovery_enabled in
+    let target_wd_sources =
+      apply_default_opt defaults.work_discovery_sources meta.work_discovery_sources in
+    let target_wd_interval =
+      apply_default_opt defaults.work_discovery_interval_sec meta.work_discovery_interval_sec in
+    let target_wd_guidance =
+      apply_default_opt defaults.work_discovery_guidance meta.work_discovery_guidance in
+
+    (* --- Telemetry Feedback --- *)
+    let target_tf_enabled =
+      apply_default_opt defaults.telemetry_feedback_enabled meta.telemetry_feedback_enabled in
+    let target_tf_window =
+      apply_default_opt defaults.telemetry_feedback_window_hours meta.telemetry_feedback_window_hours in
+
+    (* --- Change detection by category --- *)
+    let proactive_changed =
+      meta.proactive.enabled <> target_proactive
+      || meta.proactive.idle_sec <> target_idle_sec
+      || meta.proactive.cooldown_sec <> target_cooldown_sec in
+    let signal_changed =
+      meta.room_signal_prompt_enabled <> target_room_signal_prompt_enabled in
     let denylist_changed = meta.tool_denylist <> target_denylist in
     let cascade_changed = meta.cascade_name <> target_cascade_name in
-    let proactive_timers_changed =
-      meta.proactive.idle_sec <> target_idle_sec
-      || meta.proactive.cooldown_sec <> target_cooldown_sec
-    in
-    if meta.proactive.enabled <> target_proactive
-       || proactive_timers_changed
-       || meta.room_signal_prompt_enabled <> target_room_signal_prompt_enabled
-       || denylist_changed
-       || cascade_changed then begin
+    let personality_changed =
+      meta.goal <> target_goal
+      || meta.short_goal <> target_short_goal
+      || meta.mid_goal <> target_mid_goal
+      || meta.long_goal <> target_long_goal
+      || meta.will <> target_will
+      || meta.needs <> target_needs
+      || meta.desires <> target_desires
+      || meta.instructions <> target_instructions in
+    let policy_changed =
+      meta.policy_voice_enabled <> target_policy_voice_enabled
+      || meta.room_scope <> target_room_scope
+      || meta.scope_kind <> target_scope_kind
+      || meta.mention_targets <> target_mention_targets
+      || meta.execution_scope <> target_execution_scope
+      || meta.allowed_paths <> target_allowed_paths in
+    let discovery_changed =
+      meta.work_discovery_enabled <> target_wd_enabled
+      || meta.work_discovery_sources <> target_wd_sources
+      || meta.work_discovery_interval_sec <> target_wd_interval
+      || meta.work_discovery_guidance <> target_wd_guidance in
+    let telemetry_changed =
+      meta.telemetry_feedback_enabled <> target_tf_enabled
+      || meta.telemetry_feedback_window_hours <> target_tf_window in
+    let any_changed =
+      proactive_changed || signal_changed || denylist_changed || cascade_changed
+      || personality_changed || policy_changed || discovery_changed
+      || telemetry_changed in
+
+    if any_changed then begin
+      let cats = List.filter_map Fun.id [
+        (if proactive_changed then Some "proactive" else None);
+        (if signal_changed then Some "signal" else None);
+        (if denylist_changed then Some "denylist" else None);
+        (if cascade_changed then Some "cascade" else None);
+        (if personality_changed then Some "personality" else None);
+        (if policy_changed then Some "policy" else None);
+        (if discovery_changed then Some "discovery" else None);
+        (if telemetry_changed then Some "telemetry" else None);
+      ] in
       Log.Keeper.info
-        "ensure_keeper_meta: re-syncing proactive.enabled %b -> %b, idle_sec %d -> %d, cooldown_sec %d -> %d, room_signal_prompt_enabled %b -> %b, denylist_changed %b, cascade %s -> %s for %s"
-        meta.proactive.enabled target_proactive
-        meta.proactive.idle_sec target_idle_sec
-        meta.proactive.cooldown_sec target_cooldown_sec
-        meta.room_signal_prompt_enabled target_room_signal_prompt_enabled
-        denylist_changed
-        meta.cascade_name target_cascade_name
+        "ensure_keeper_meta: re-syncing [%s] for %s"
+        (String.concat "," cats)
         meta.name;
       let updated = { meta with
         proactive = {
@@ -84,6 +149,26 @@ let ensure_keeper_meta config name =
         room_signal_prompt_enabled = target_room_signal_prompt_enabled;
         tool_denylist = target_denylist;
         cascade_name = target_cascade_name;
+        goal = target_goal;
+        short_goal = target_short_goal;
+        mid_goal = target_mid_goal;
+        long_goal = target_long_goal;
+        will = target_will;
+        needs = target_needs;
+        desires = target_desires;
+        instructions = target_instructions;
+        policy_voice_enabled = target_policy_voice_enabled;
+        room_scope = target_room_scope;
+        scope_kind = target_scope_kind;
+        mention_targets = target_mention_targets;
+        execution_scope = target_execution_scope;
+        allowed_paths = target_allowed_paths;
+        work_discovery_enabled = target_wd_enabled;
+        work_discovery_sources = target_wd_sources;
+        work_discovery_interval_sec = target_wd_interval;
+        work_discovery_guidance = target_wd_guidance;
+        telemetry_feedback_enabled = target_tf_enabled;
+        telemetry_feedback_window_hours = target_tf_window;
         updated_at = now_iso ();
       } in
       match write_meta config updated with
@@ -263,6 +348,23 @@ let start_supervisor_sweep ctx =
           (try Keeper_supervisor.sweep_and_recover ctx
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              Log.Keeper.error "supervisor sweep failed: %s"
+               (Printexc.to_string exn));
+          (* TOML hot-reload: re-sync declarative fields for running keepers.
+             Runs after sweep_and_recover so TOML edits take effect within
+             one sweep cycle (~30s) without server restart. *)
+          (try
+            Keeper_registry.all ~base_path ()
+            |> List.iter (fun (entry : Keeper_registry.registry_entry) ->
+              match entry.phase with
+              | Keeper_state_machine.Running ->
+                  (match ensure_keeper_meta ctx.config entry.name with
+                   | Ok _meta -> ()
+                   | Error e ->
+                       Log.Keeper.warn "TOML reconcile failed for %s: %s"
+                         entry.name e)
+              | _ -> ())
+           with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+             Log.Keeper.error "TOML reconcile sweep failed: %s"
                (Printexc.to_string exn));
           Ok ()
       end)

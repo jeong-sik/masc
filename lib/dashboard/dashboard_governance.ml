@@ -34,12 +34,13 @@ let judge_json_of_runtime (runtime : Dashboard_governance_judge.runtime_snapshot
     ]
 
 let summary_json_of_runtime (runtime : Dashboard_governance_judge.runtime_snapshot) =
+  let pending_approval_count = Keeper_approval_queue.pending_count () in
   `Assoc
     [
       ("cases_open", `Int 0);
       ("pending_ruling", `Int 0);
       ("ready_auto_execute", `Int 0);
-      ("needs_human_gate", `Int 0);
+      ("needs_human_gate", `Int pending_approval_count);
       ("executed", `Int 0);
       ("blocked", `Int 0);
       ("ready_to_execute", `Int 0);
@@ -61,6 +62,7 @@ let factual_snapshot_json ~base_path:_ =
 let dashboard_json ~base_path ~limit ~offset:_ ~status_filter:_ =
   let runtime = Dashboard_governance_judge.runtime_status base_path in
   let judgments = Dashboard_governance_judge.fresh_judgments_json ~base_path ~limit in
+  let approval_queue = Keeper_approval_queue.list_pending_dashboard_json () in
   `Assoc
     ([
        ("generated_at", `String (Types.now_iso ()));
@@ -70,6 +72,7 @@ let dashboard_json ~base_path ~limit ~offset:_ ~status_filter:_ =
        ("judge", judge_json_of_runtime runtime);
        ("judgments", `List judgments);
        ("pending_actions", `List []);
+       ("approval_queue", approval_queue);
        ("cases", `List []);
      ]
     @ retired_case_tracking_fields)

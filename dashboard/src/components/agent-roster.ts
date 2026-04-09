@@ -22,14 +22,17 @@ import { missionKeeperBriefs, missionAgentBriefs } from '../mission-signals'
 import { FilterChips } from './common/filter-chips'
 import { TextInput } from './common/input'
 import { EmptyState } from './common/empty-state'
+import { TimeAgo } from './common/time-ago'
 import { AgentAvatar } from './overview/agent-avatar'
 import { openAgentDetail } from './agent-detail'
+import { openKeeperDetail } from './keeper-detail'
 import { formatDuration, trimText } from './mission-utils'
 import { namespaceTruth } from '../namespace-truth-store'
 import {
   keeperPhaseForDisplay,
   runtimeBandMeta,
   runtimeBandMetaForAgent,
+  summarizeMonitoringEvidence,
   summarizeKeeperMonitoring,
   type RuntimeBand,
 } from '../lib/monitoring-runtime'
@@ -55,6 +58,11 @@ interface KeeperInfo {
   model?: string | null
   current_work?: string | null
   last_turn_ago_s?: number | null
+  last_autonomous_action_at?: string | null
+  recent_tool_names?: string[]
+  latest_tool_names?: string[]
+  latest_tool_call_count?: number | null
+  tool_audit_at?: string | null
 }
 
 function findKeeper(agentName: string, keeperList: Keeper[], keeperBriefs: DashboardMissionKeeperBrief[]): KeeperInfo | null {
@@ -121,6 +129,20 @@ const FILTER_META: Record<StatusFilter, { label: string; description: string }> 
     label: '오프라인',
     description: '프로세스가 내려갔거나 아직 기동되지 않은 상태입니다.',
   },
+}
+
+function uniqueToolNames(...groups: Array<string[] | null | undefined>): string[] {
+  const seen = new Set<string>()
+  const names: string[] = []
+  for (const group of groups) {
+    for (const entry of group ?? []) {
+      const name = entry.trim()
+      if (!name || seen.has(name)) continue
+      seen.add(name)
+      names.push(name)
+    }
+  }
+  return names
 }
 
 function matchesKeeperFilter(
@@ -278,9 +300,6 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
   const briefMap = new Map<string, DashboardMissionAgentBrief>(
     briefs.map(brief => [brief.agent_name, brief] as const),
   )
-  const hasKeeperRuntime =
-    keeperFilter !== 'agent-only'
-    && (keeperList.length > 0 || keeperBriefs.length > 0 || runtimeCounts.keepers > 0)
   const scopedAgents = scopeAgentsByKeeperFilter(rosterAgents, keeperList, keeperBriefs, keeperFilter)
   const bandByAgent = new Map(
     scopedAgents.map(agent => [agent.name, runtimeBandMetaForAgent(agent, findKeeperRuntime(agent.name, keeperList))] as const),
@@ -289,12 +308,12 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     ? '키퍼 런타임'
     : keeperFilter === 'agent-only'
       ? '일반 에이전트'
-      : '에이전트 목록'
+      : '통합 런타임 목록'
   const pageDescription = keeperFilter === 'keeper-only'
-    ? '장기 컨텍스트를 유지하는 상주 런타임만 보여줍니다.'
+    ? '키퍼 런타임만 따로 봅니다.'
     : keeperFilter === 'agent-only'
-      ? '키퍼가 연결되지 않은 일반 에이전트만 보여줍니다.'
-      : '등록된 모든 런타임을 보여줍니다. 키퍼는 장기 컨텍스트를 유지하는 상주 런타임입니다.'
+      ? '키퍼가 연결되지 않은 일반 에이전트만 봅니다.'
+      : '에이전트와 키퍼를 한 목록에서 봅니다.'
 
   const filtered = scopedAgents
     .filter((a: Agent) => {
@@ -359,26 +378,6 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
       : executionLoaded.value
         ? `${countSourceLabel} 기준 ${scopeLabel}가 등록되어 있고 일부만 상세 목록에 반영됐습니다.`
         : `${countSourceLabel} 기준 ${scopeLabel}가 등록되어 있습니다. execution 상세 projection이 올라오면 상태별 분류와 카드가 채워집니다.`
-  const legendCards = [
-    {
-      title: '운영 상태',
-      body: '가장 먼저 보는 값입니다. 가동중 / 주의 필요 / 일시정지 / 오프라인으로 운영 우선순위를 보여줍니다.',
-    },
-    {
-      title: 'Phase',
-      body: 'TLA lifecycle state입니다. Running, Failing, Paused, Restarting 같은 전이 근거를 그대로 보여줍니다.',
-    },
-    {
-      title: 'Stage',
-      body: '현재 턴에서 무엇을 하는지 보여주는 세부 활동 단계입니다. idle, thinking, tool, handoff를 분리해서 봅니다.',
-    },
-    ...(hasKeeperRuntime
-      ? [{
-          title: '세대 / 컨텍스트 사용량',
-          body: '세대는 키퍼 핸드오프가 일어날 때 올라가는 런타임 번호입니다. 컨텍스트 사용량은 현재 창을 얼마나 쓰고 있는지 보여줍니다.',
-        }]
-      : []),
-  ]
 
   return html`
     <div class="agent-page flex w-full flex-col gap-5 px-0 py-1">
@@ -411,7 +410,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
             <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div class="flex flex-col gap-1">
                 <div class="text-[11px] font-semibold tracking-[0.08em] text-[var(--text-strong)] uppercase">운영 상태</div>
-                <p class="m-0 text-[12px] leading-[1.5] text-[var(--text-muted)]">phase와 stage를 운영 관점으로 한 번 더 요약한 밴드입니다. 먼저 이상 신호를 모으고, 그다음 phase와 stage를 확인합니다.</p>
+                <p class="m-0 text-[12px] leading-[1.5] text-[var(--text-muted)]">먼저 운영 상태로 걸러 보고, 필요할 때만 phase와 현재 활동 근거를 확인합니다.</p>
               </div>
               <${FilterChips}
                 chips=${statusChips}
@@ -440,18 +439,6 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                 </div>
               `
             : null}
-
-          <details class="monitor-muted-panel px-4 py-3">
-            <summary class="cursor-pointer text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wider select-none list-none">범례</summary>
-            <div class="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              ${legendCards.map(card => html`
-                <div class="monitor-muted-panel px-3 py-3">
-                  <div class="text-[11px] font-semibold text-[var(--text-strong)]">${card.title}</div>
-                  <p class="m-0 mt-1.5 text-[11px] leading-[1.5] text-[var(--text-muted)]">${card.body}</p>
-                </div>
-              `)}
-            </div>
-          </details>
         </div>
       </section>
 
@@ -462,19 +449,68 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
           const keeperRuntime = findKeeperRuntime(agent.name, keeperList)
           const band = bandByAgent.get(agent.name) ?? runtimeBandMeta('attention')
           const keeperMonitoring = keeperRuntime ? summarizeKeeperMonitoring(keeperRuntime) : null
+          const monitoringEvidence = keeperMonitoring ? summarizeMonitoringEvidence(keeperMonitoring) : null
           const isKeeper = keeper != null
           const currentWork = keeper?.current_work ?? brief?.current_work ?? agent.current_task ?? null
-          const lastActivity = keeper?.last_turn_ago_s ?? brief?.last_activity_age_sec ?? null
-          const ctxPct = keeper?.context_ratio != null ? Math.round(keeper.context_ratio * 100) : null
-          const workPreview = trimText(currentWork, 140) ?? '표시할 작업 정보가 없습니다.'
-          const lastActivityLabel = lastActivity != null ? `${formatDuration(lastActivity)} 전` : '활동 기록 없음'
+          const lastActivityAge = keeperRuntime?.last_activity_ago_s ?? keeper?.last_turn_ago_s ?? brief?.last_activity_age_sec ?? null
+          const lastActivityAt =
+            brief?.last_activity_at
+            ?? keeper?.last_autonomous_action_at
+            ?? keeperRuntime?.last_autonomous_action_at
+            ?? keeperRuntime?.last_heartbeat
+            ?? agent.last_seen
+            ?? null
+          const ctxPct = (keeperRuntime?.context_ratio ?? keeper?.context_ratio) != null
+            ? Math.round((keeperRuntime?.context_ratio ?? keeper?.context_ratio ?? 0) * 100)
+            : null
+          const workPreview =
+            trimText(currentWork, 140)
+            ?? trimText(brief?.recent_output_preview, 140)
+            ?? trimText(keeperRuntime?.recent_output_preview, 140)
+            ?? trimText(brief?.recent_input_preview, 140)
+            ?? trimText(keeperRuntime?.recent_input_preview, 140)
+            ?? '최근 활동 요약 없음'
+          const summaryText =
+            band.key === 'active'
+              ? workPreview
+              : keeperMonitoring?.hint ?? workPreview
+          const recentTools = uniqueToolNames(
+            brief?.recent_tool_names,
+            brief?.latest_tool_names,
+            keeperRuntime?.recent_tool_names,
+            keeperRuntime?.latest_tool_names,
+            keeper?.recent_tool_names,
+            keeper?.latest_tool_names,
+          )
+          const visibleTools = recentTools.slice(0, 2)
+          const hiddenToolCount = Math.max(0, recentTools.length - visibleTools.length)
+          const toolCallCount =
+            brief?.latest_tool_call_count
+            ?? keeper?.latest_tool_call_count
+            ?? keeperRuntime?.latest_tool_call_count
+            ?? null
+          const toolAuditAt =
+            brief?.tool_audit_at
+            ?? keeper?.tool_audit_at
+            ?? keeperRuntime?.tool_audit_at
+            ?? null
+          const model = keeperRuntime?.model ?? keeper?.model
+          const generation = keeperRuntime?.generation ?? keeper?.generation ?? null
+          const detailLabel = keeperRuntime ? `${agent.name} keeper 상세 보기` : `${agent.name} 상세 보기`
+          const openDetail = () => {
+            if (keeperRuntime) {
+              openKeeperDetail(keeperRuntime)
+              return
+            }
+            openAgentDetail(agent.name)
+          }
 
           return html`
             <button type="button"
               class="monitor-surface-card monitor-surface-card-medium group flex w-full flex-col gap-4 rounded-[22px] p-5 text-left transition-all duration-200 cursor-pointer hover:border-[var(--border-slate-22)] hover:bg-[var(--bg-1)] hover:-translate-y-0.5"
               key=${agent.name}
-              aria-label=${`${agent.name} 상세 보기`}
-              onClick=${() => openAgentDetail(agent.name)}
+              aria-label=${detailLabel}
+              onClick=${openDetail}
             >
               <div class="flex items-start gap-4">
                 <div class="shrink-0 relative">
@@ -484,7 +520,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                     traits=${agent.traits}
                     size="xl"
                     currentWork=${currentWork}
-                    activityAge=${lastActivity}
+                    activityAge=${lastActivityAge}
                   />
                 </div>
                 
@@ -495,20 +531,24 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                     <span class="inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${runtimeBadgeClass(band.key)}" title=${band.description}>${band.label}</span>
                     <span class="text-[11px] text-[var(--text-muted)] bg-[var(--white-4)] border border-[var(--card-border)] px-2 py-0.5 rounded-full">${isKeeper ? '키퍼 런타임' : '일반 에이전트'}</span>
                     ${agent.synthetic ? html`<span class="text-[10px] text-[var(--text-muted)] bg-[var(--white-6)] border border-dashed border-[var(--card-border)] px-1.5 py-px rounded italic" title="키퍼 데이터에서 파생된 합성 엔트리입니다.">파생</span>` : null}
-                    ${keeperMonitoring ? html`<${KeeperPhaseBadge} phase=${keeperRuntime ? keeperPhaseForDisplay(keeperRuntime) : null} compact />` : null}
-                    ${keeperMonitoring ? html`<span class="inline-flex items-center rounded-full border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5 text-[10px] font-medium text-[var(--text-muted)]" title=${keeperMonitoring.stage.description}>stage ${keeperMonitoring.stage.label}</span>` : null}
-                    ${keeper?.model ? html`<span class="font-mono text-[10px] text-[var(--text-muted)] bg-[var(--white-4)] border border-[var(--card-border)] px-1.5 py-px rounded">${keeper.model}</span>` : null}
-                    ${keeper?.generation != null ? html`<span class="text-[11px] text-[var(--accent)] font-medium bg-[var(--accent-10)] px-1.5 py-px rounded border border-[var(--accent-10)]" title="키퍼 핸드오프가 일어날 때 올라가는 런타임 세대입니다.">세대 ${keeper.generation}</span>` : null}
+                    ${monitoringEvidence?.phase && keeperRuntime ? html`<${KeeperPhaseBadge} phase=${keeperPhaseForDisplay(keeperRuntime)} compact />` : null}
+                    ${monitoringEvidence?.stage ? html`<span class="inline-flex items-center rounded-full border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5 text-[10px] font-medium text-[var(--text-muted)]" title=${monitoringEvidence.stage.description}>활동 ${monitoringEvidence.stage.label}</span>` : null}
+                    ${model ? html`<span class="font-mono text-[10px] text-[var(--text-muted)] bg-[var(--white-4)] border border-[var(--card-border)] px-1.5 py-px rounded">${model}</span>` : null}
+                    ${generation != null ? html`<span class="text-[11px] text-[var(--accent)] font-medium bg-[var(--accent-10)] px-1.5 py-px rounded border border-[var(--accent-10)]" title="키퍼 핸드오프가 일어날 때 올라가는 런타임 세대입니다.">세대 ${generation}</span>` : null}
                   </div>
                 </div>
               </div>
 
               <div class="flex flex-1 flex-col gap-3 border-t border-[var(--border-slate-12)] pt-3">
-                <p class="m-0 text-[13px] leading-[1.5] text-[var(--text-body)] break-words line-clamp-3" title=${currentWork ?? ''}>${keeperMonitoring?.hint ?? workPreview}</p>
+                <p class="m-0 text-[13px] leading-[1.5] text-[var(--text-body)] break-words line-clamp-3" title=${summaryText}>${summaryText}</p>
 
                 <div class="flex flex-wrap items-center gap-2 text-[11px] text-[var(--text-muted)]">
                   <span class="inline-flex items-center rounded-full border border-[var(--white-8)] bg-[var(--white-2)] px-2.5 py-1">
-                    ${lastActivityLabel}
+                    최근 활동 ${lastActivityAt
+                      ? html`<${TimeAgo} timestamp=${lastActivityAt} />`
+                      : lastActivityAge != null
+                        ? `${formatDuration(lastActivityAge)} 전`
+                        : '기록 없음'}
                   </span>
                   ${isKeeper && ctxPct != null ? html`
                     <span class="inline-flex items-center gap-1.5 rounded-full border border-[var(--white-8)] bg-[var(--white-2)] px-2.5 py-1">
@@ -520,6 +560,37 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                     </span>
                   ` : null}
                 </div>
+
+                ${(visibleTools.length > 0 || toolCallCount != null || toolAuditAt) ? html`
+                  <div class="flex flex-wrap items-center gap-1.5 text-[11px] text-[var(--text-muted)]">
+                    <span class="inline-flex items-center rounded-full border border-[var(--white-8)] bg-[var(--white-2)] px-2 py-0.5">tool</span>
+                    ${visibleTools.map(name => html`
+                      <span class="inline-flex items-center rounded-full border border-[var(--accent-20)] bg-[var(--accent-10)] px-2 py-0.5 font-mono text-[10px] text-[var(--text-body)]">
+                        ${name}
+                      </span>
+                    `)}
+                    ${hiddenToolCount > 0 ? html`
+                      <span class="inline-flex items-center rounded-full border border-dashed border-[var(--white-8)] bg-[var(--white-2)] px-2 py-0.5 text-[10px]">
+                        +${hiddenToolCount}
+                      </span>
+                    ` : null}
+                    ${visibleTools.length === 0 && toolCallCount === 0 ? html`
+                      <span class="inline-flex items-center rounded-full border border-[var(--white-8)] bg-[var(--white-2)] px-2 py-0.5 text-[10px]">
+                        최근 도구 없음
+                      </span>
+                    ` : null}
+                    ${visibleTools.length === 0 && toolCallCount != null && toolCallCount > 0 ? html`
+                      <span class="inline-flex items-center rounded-full border border-[var(--white-8)] bg-[var(--white-2)] px-2 py-0.5 text-[10px]">
+                        도구 ${toolCallCount}회
+                      </span>
+                    ` : null}
+                    ${toolAuditAt ? html`
+                      <span class="inline-flex items-center rounded-full border border-[var(--white-8)] bg-[var(--white-2)] px-2 py-0.5 text-[10px]">
+                        감사 <${TimeAgo} timestamp=${toolAuditAt} />
+                      </span>
+                    ` : null}
+                  </div>
+                ` : null}
               </div>
             </button>
           `

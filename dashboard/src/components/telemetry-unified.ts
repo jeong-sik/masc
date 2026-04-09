@@ -78,6 +78,10 @@ function normalizeText(value: unknown): string | null {
   return typeof value === 'string' && value.trim() !== '' ? value.trim() : null
 }
 
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError'
+}
+
 function normalizeStringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string' && item.trim() !== '') : []
 }
@@ -236,6 +240,7 @@ ${JSON.stringify(entry, null, 2)}</pre>
 export function TelemetryUnified() {
   const params = route.value.params
   const latestRequestId = useRef(0)
+  const activeController = useRef<AbortController | null>(null)
   const autoRefreshLoadRef = useRef<() => Promise<void>>(async () => undefined)
   const state = useSignal<TelemetryState>({
     entries: [],
@@ -263,13 +268,21 @@ export function TelemetryUnified() {
   ])
 
   async function load() {
+    activeController.current?.abort()
+    const controller = new AbortController()
+    activeController.current = controller
     const requestId = ++latestRequestId.current
     state.value = { ...state.value, loading: true, error: null }
     try {
+      const catchStoreFailure = <T,>(promise: Promise<T>) =>
+        promise.catch(error => {
+          if (isAbortError(error)) throw error
+          return null
+        })
       const storePromise = Promise.all([
-        fetchDashboardShell().catch(() => null),
-        fetchDashboardTools().catch(() => null),
-        fetchDashboardNamespaceTruth().catch(() => null),
+        catchStoreFailure(fetchDashboardShell({ signal: controller.signal })),
+        catchStoreFailure(fetchDashboardTools({ signal: controller.signal })),
+        catchStoreFailure(fetchDashboardNamespaceTruth({ signal: controller.signal })),
       ]).then(([shell, tools, truth]) => {
         const counts = shell?.counts
         const execSummary = truth?.execution?.summary
@@ -299,8 +312,9 @@ export function TelemetryUnified() {
           operation_id: operationFilter.value || undefined,
           worker_run_id: workerRunFilter.value || undefined,
           n: limit.value,
+          signal: controller.signal,
         }),
-        fetchTelemetrySummary(),
+        fetchTelemetrySummary({ signal: controller.signal }),
         storePromise,
       ])
       if (requestId !== latestRequestId.current) return
@@ -313,11 +327,15 @@ export function TelemetryUnified() {
         error: null,
       }
     } catch (e) {
-      if (requestId !== latestRequestId.current) return
+      if (isAbortError(e) || requestId !== latestRequestId.current) return
       state.value = {
         ...state.value,
         loading: false,
         error: e instanceof Error ? e.message : String(e),
+      }
+    } finally {
+      if (activeController.current === controller) {
+        activeController.current = null
       }
     }
   }
@@ -335,7 +353,12 @@ export function TelemetryUnified() {
   ])
 
   useEffect(() => {
-    return setupVisibleAutoRefresh(() => autoRefreshLoadRef.current(), TELEMETRY_AUTO_REFRESH_MS)
+    const disposeAutoRefresh = setupVisibleAutoRefresh(() => autoRefreshLoadRef.current(), TELEMETRY_AUTO_REFRESH_MS)
+    return () => {
+      disposeAutoRefresh()
+      activeController.current?.abort()
+      activeController.current = null
+    }
   }, [])
 
   const { entries, summary, totalEntries, store, loading, error } = state.value

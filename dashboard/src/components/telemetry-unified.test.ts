@@ -53,16 +53,21 @@ function requireResolver<T>(
 }
 
 async function loadPanel(
-  fetchTelemetry: () => Promise<TelemetryResponse>,
-  fetchTelemetrySummary: () => Promise<TelemetrySummaryResponse>,
+  fetchTelemetry: (opts?: { signal?: AbortSignal }) => Promise<TelemetryResponse>,
+  fetchTelemetrySummary: (opts?: { signal?: AbortSignal }) => Promise<TelemetrySummaryResponse>,
+  opts?: {
+    fetchDashboardShell?: (args?: { signal?: AbortSignal }) => Promise<unknown>
+    fetchDashboardTools?: (args?: { signal?: AbortSignal }) => Promise<unknown>
+    fetchDashboardNamespaceTruth?: (args?: { signal?: AbortSignal }) => Promise<unknown>
+  },
 ) {
   vi.resetModules()
   vi.doMock('../api/dashboard', () => ({
     fetchTelemetry,
     fetchTelemetrySummary,
-    fetchDashboardShell: vi.fn().mockResolvedValue({ counts: { keepers: 2, agents: 0, tasks: 5 }, status: { version: '0.2.0', build: { uptime_seconds: 600 } } }),
-    fetchDashboardTools: vi.fn().mockResolvedValue({ tool_inventory: { count: 10, tools: [], surface_summary: { public_mcp: { count: 5, tools: [] } } }, tool_usage: { total_calls: 100, never_called_count: 0 } }),
-    fetchDashboardNamespaceTruth: vi.fn().mockResolvedValue({ execution: { summary: { active_sessions: 1, active_operations: 3, continuity_alerts: 0 } } }),
+    fetchDashboardShell: opts?.fetchDashboardShell ?? vi.fn().mockResolvedValue({ counts: { keepers: 2, agents: 0, tasks: 5 }, status: { version: '0.2.0', build: { uptime_seconds: 600 } } }),
+    fetchDashboardTools: opts?.fetchDashboardTools ?? vi.fn().mockResolvedValue({ tool_inventory: { count: 10, tools: [], surface_summary: { public_mcp: { count: 5, tools: [] } } }, tool_usage: { total_calls: 100, never_called_count: 0 } }),
+    fetchDashboardNamespaceTruth: opts?.fetchDashboardNamespaceTruth ?? vi.fn().mockResolvedValue({ execution: { summary: { active_sessions: 1, active_operations: 3, continuity_alerts: 0 } } }),
   }))
   return import('./telemetry-unified')
 }
@@ -213,5 +218,59 @@ describe('TelemetryUnified', () => {
 
     expect(container.textContent).toContain('newer_tool')
     expect(container.textContent).not.toContain('older_tool')
+  })
+
+  it('aborts superseded telemetry requests before starting a newer refresh', async () => {
+    const abortedSignals: AbortSignal[] = []
+
+    const createAbortableResponse = <T,>(value: T) => {
+      let callCount = 0
+      return vi.fn().mockImplementation((opts?: { signal?: AbortSignal }) => {
+        callCount += 1
+        if (callCount > 1) return Promise.resolve(value)
+        return new Promise<T>((_resolve, reject) => {
+          opts?.signal?.addEventListener('abort', () => {
+            abortedSignals.push(opts.signal as AbortSignal)
+            reject(new DOMException('superseded request', 'AbortError'))
+          }, { once: true })
+        })
+      })
+    }
+
+    const fetchTelemetry = createAbortableResponse(baseTelemetry)
+    const fetchTelemetrySummary = createAbortableResponse(baseSummary)
+    const fetchDashboardShell = createAbortableResponse({ counts: { keepers: 2, agents: 0, tasks: 5 }, status: { version: '0.2.0', build: { uptime_seconds: 600 } } })
+    const fetchDashboardTools = createAbortableResponse({ tool_inventory: { count: 10, tools: [], surface_summary: { public_mcp: { count: 5, tools: [] } } }, tool_usage: { total_calls: 100, never_called_count: 0 } })
+    const fetchDashboardNamespaceTruth = createAbortableResponse({ execution: { summary: { active_sessions: 1, active_operations: 3, continuity_alerts: 0 } } })
+    const { TelemetryUnified } = await loadPanel(fetchTelemetry, fetchTelemetrySummary, {
+      fetchDashboardShell,
+      fetchDashboardTools,
+      fetchDashboardNamespaceTruth,
+    })
+
+    await act(async () => {
+      render(html`<${TelemetryUnified} />`, container)
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    const refreshButton = Array.from(container.querySelectorAll('button'))
+      .find(button => button.textContent?.includes('Refresh'))
+    expect(refreshButton).toBeTruthy()
+
+    await act(async () => {
+      refreshButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    expect(fetchTelemetry).toHaveBeenCalledTimes(2)
+    expect(fetchTelemetrySummary).toHaveBeenCalledTimes(2)
+    expect(fetchDashboardShell).toHaveBeenCalledTimes(2)
+    expect(fetchDashboardTools).toHaveBeenCalledTimes(2)
+    expect(fetchDashboardNamespaceTruth).toHaveBeenCalledTimes(2)
+    expect(abortedSignals.length).toBeGreaterThan(0)
+    expect(abortedSignals.every(signal => signal.aborted)).toBe(true)
+    expect(container.textContent).toContain('mcp__masc__masc_status')
   })
 })

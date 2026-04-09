@@ -71,6 +71,10 @@ function emptyState(): FleetTelemetryState {
   }
 }
 
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError'
+}
+
 // Delegated to config/telemetry-sources (SSOT)
 const sourceLabel = telemetrySourceLabel
 
@@ -441,9 +445,13 @@ function FailureCategoryPanel({ toolQuality }: { toolQuality: ToolQualityRespons
 
 export function FleetTelemetryPanel() {
   const latestRequestId = useRef(0)
+  const activeController = useRef<AbortController | null>(null)
   const state = useSignal<FleetTelemetryState>(emptyState())
 
   const loadFleetTelemetry = async () => {
+    activeController.current?.abort()
+    const controller = new AbortController()
+    activeController.current = controller
     const requestId = ++latestRequestId.current
     state.value = {
       ...state.value,
@@ -452,65 +460,77 @@ export function FleetTelemetryPanel() {
       warnings: [],
     }
 
-    const [executionResult, toolQualityResult, telemetrySummaryResult] = await Promise.allSettled([
-      fetchDashboardExecution(),
-      fetchToolQuality({ n: 5000 }),
-      fetchTelemetrySummary(),
-    ])
+    try {
+      const [executionResult, toolQualityResult, telemetrySummaryResult] = await Promise.allSettled([
+        fetchDashboardExecution({ signal: controller.signal }),
+        fetchToolQuality({ n: 5000, signal: controller.signal }),
+        fetchTelemetrySummary({ signal: controller.signal }),
+      ])
 
-    const warnings: string[] = []
+      if (controller.signal.aborted || requestId !== latestRequestId.current) return
 
-    const keepers =
-      executionResult.status === 'fulfilled'
-        ? normalizeKeepers(executionResult.value.keepers)
-        : []
-    if (executionResult.status === 'rejected') {
-      warnings.push(`Execution snapshot unavailable: ${errorMessage(executionResult.reason)}`)
-    }
+      const warnings: string[] = []
 
-    const toolQuality =
-      toolQualityResult.status === 'fulfilled'
-        ? toolQualityResult.value
-        : EMPTY_TOOL_QUALITY
-    if (toolQualityResult.status === 'rejected') {
-      warnings.push(`Tool quality unavailable: ${errorMessage(toolQualityResult.reason)}`)
-    }
+      const keepers =
+        executionResult.status === 'fulfilled'
+          ? normalizeKeepers(executionResult.value.keepers)
+          : []
+      if (executionResult.status === 'rejected' && !isAbortError(executionResult.reason)) {
+        warnings.push(`Execution snapshot unavailable: ${errorMessage(executionResult.reason)}`)
+      }
 
-    const telemetrySummary =
-      telemetrySummaryResult.status === 'fulfilled'
-        ? telemetrySummaryResult.value
-        : { generated_at: '', sources: [], total_entries: 0 }
-    if (telemetrySummaryResult.status === 'rejected') {
-      warnings.push(`Telemetry store summary unavailable: ${errorMessage(telemetrySummaryResult.reason)}`)
-    }
+      const toolQuality =
+        toolQualityResult.status === 'fulfilled'
+          ? toolQualityResult.value
+          : EMPTY_TOOL_QUALITY
+      if (toolQualityResult.status === 'rejected' && !isAbortError(toolQualityResult.reason)) {
+        warnings.push(`Tool quality unavailable: ${errorMessage(toolQualityResult.reason)}`)
+      }
 
-    const rows = buildFleetRows(keepers, toolQuality)
-    const updatedAt =
-      (executionResult.status === 'fulfilled' ? executionResult.value.generated_at : null)
-      || telemetrySummary.generated_at
-      || new Date().toISOString()
+      const telemetrySummary =
+        telemetrySummaryResult.status === 'fulfilled'
+          ? telemetrySummaryResult.value
+          : { generated_at: '', sources: [], total_entries: 0 }
+      if (telemetrySummaryResult.status === 'rejected' && !isAbortError(telemetrySummaryResult.reason)) {
+        warnings.push(`Telemetry store summary unavailable: ${errorMessage(telemetrySummaryResult.reason)}`)
+      }
 
-    const hasAnyData =
-      rows.length > 0
-      || toolQuality.total > 0
-      || telemetrySummary.total_entries > 0
+      const rows = buildFleetRows(keepers, toolQuality)
+      const updatedAt =
+        (executionResult.status === 'fulfilled' ? executionResult.value.generated_at : null)
+        || telemetrySummary.generated_at
+        || new Date().toISOString()
 
-    if (requestId !== latestRequestId.current) return
-    state.value = {
-      loading: false,
-      error: hasAnyData ? null : 'No fleet telemetry data available.',
-      warnings,
-      rows,
-      tool_quality: toolQuality,
-      telemetry_sources: telemetrySummary.sources,
-      total_telemetry_entries: telemetrySummary.total_entries,
-      updated_at: updatedAt,
+      const hasAnyData =
+        rows.length > 0
+        || toolQuality.total > 0
+        || telemetrySummary.total_entries > 0
+
+      state.value = {
+        loading: false,
+        error: hasAnyData ? null : 'No fleet telemetry data available.',
+        warnings,
+        rows,
+        tool_quality: toolQuality,
+        telemetry_sources: telemetrySummary.sources,
+        total_telemetry_entries: telemetrySummary.total_entries,
+        updated_at: updatedAt,
+      }
+    } finally {
+      if (activeController.current === controller) {
+        activeController.current = null
+      }
     }
   }
 
   useEffect(() => {
     void loadFleetTelemetry()
-    return setupVisibleAutoRefresh(loadFleetTelemetry, TELEMETRY_AUTO_REFRESH_MS)
+    const disposeAutoRefresh = setupVisibleAutoRefresh(loadFleetTelemetry, TELEMETRY_AUTO_REFRESH_MS)
+    return () => {
+      disposeAutoRefresh()
+      activeController.current?.abort()
+      activeController.current = null
+    }
   }, [])
 
   const value = state.value

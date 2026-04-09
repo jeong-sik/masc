@@ -92,9 +92,9 @@ function requireResolver<T>(
 }
 
 async function loadPanel(mocks: {
-  fetchDashboardExecution: () => Promise<DashboardExecutionResponse>
-  fetchToolQuality: () => Promise<ToolQualityResponse>
-  fetchTelemetrySummary: () => Promise<TelemetrySummaryResponse>
+  fetchDashboardExecution: (opts?: { signal?: AbortSignal }) => Promise<DashboardExecutionResponse>
+  fetchToolQuality: (opts?: { n?: number; signal?: AbortSignal }) => Promise<ToolQualityResponse>
+  fetchTelemetrySummary: (opts?: { signal?: AbortSignal }) => Promise<TelemetrySummaryResponse>
 }) {
   vi.resetModules()
   vi.doMock('../api/dashboard', () => ({
@@ -336,5 +336,51 @@ describe('FleetTelemetryPanel', () => {
 
     expect(container.textContent).toContain('keeper-gamma')
     expect(container.textContent).not.toContain('keeper-stale')
+  })
+
+  it('aborts superseded fleet telemetry requests before a newer refresh settles', async () => {
+    const abortedSignals: AbortSignal[] = []
+
+    const createAbortableResponse = <T,>(value: T) => {
+      let callCount = 0
+      return vi.fn().mockImplementation((opts?: { signal?: AbortSignal }) => {
+        callCount += 1
+        if (callCount > 1) return Promise.resolve(value)
+        return new Promise<T>((_resolve, reject) => {
+          opts?.signal?.addEventListener('abort', () => {
+            abortedSignals.push(opts.signal as AbortSignal)
+            reject(new DOMException('superseded request', 'AbortError'))
+          }, { once: true })
+        })
+      })
+    }
+
+    const fetchDashboardExecution = createAbortableResponse(executionResponse)
+    const abortableToolQuality = createAbortableResponse(toolQualityResponse)
+    const fetchToolQuality = vi.fn().mockImplementation((opts?: { n?: number; signal?: AbortSignal }) => (
+      abortableToolQuality(opts)
+    ))
+    const fetchTelemetrySummary = createAbortableResponse(telemetrySummaryResponse)
+    const { FleetTelemetryPanel } = await loadPanel({
+      fetchDashboardExecution,
+      fetchToolQuality,
+      fetchTelemetrySummary,
+    })
+
+    await act(async () => {
+      render(html`<${FleetTelemetryPanel} />`, container)
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    await vi.advanceTimersByTimeAsync(30_000)
+    await flushUi()
+
+    expect(fetchDashboardExecution).toHaveBeenCalledTimes(2)
+    expect(fetchToolQuality).toHaveBeenCalledTimes(2)
+    expect(fetchTelemetrySummary).toHaveBeenCalledTimes(2)
+    expect(abortedSignals.length).toBeGreaterThan(0)
+    expect(abortedSignals.every(signal => signal.aborted)).toBe(true)
+    expect(container.textContent).toContain('keeper-alpha')
   })
 })

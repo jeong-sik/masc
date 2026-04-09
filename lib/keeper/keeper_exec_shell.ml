@@ -241,11 +241,8 @@ let handle_keeper_bash
       | Error e -> error_json e
       | Ok cwd ->
       let normalize_path_for_containment path =
-        let normalized = Keeper_alerting_path.normalize_path_for_check path in
-        let len = String.length normalized in
-        if len > 1 && String.ends_with ~suffix:"/" normalized
-        then String.sub normalized 0 (len - 1)
-        else normalized
+        Keeper_alerting_path.normalize_path_for_check path
+        |> Keeper_alerting_path.strip_trailing_slashes
       in
       (* Canonicalize both cwd and the playground root for containment checks.
          This closes both path traversal and symlink-mismatch cases. *)
@@ -298,7 +295,7 @@ let handle_keeper_bash
                      Clone into your playground first (keeper_shell op=git_clone), \
                      then set cwd to the cloned repo path." )
               ; "cmd", `String cmd_for_log
-              ; "hint", `String "Use cwd=.masc/playground/YOUR_NAME/repos/REPO"
+              ; "hint", `String "Use cwd=.masc/playground/YOUR_KEEPER_NAME/repos/REPO"
               ]))
       (* Write gate: playground location must not bypass preset-based write policy. *)
       else if (not write_enabled) && Worker_dev_tools.is_write_operation cmd

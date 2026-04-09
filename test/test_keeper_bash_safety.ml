@@ -160,11 +160,33 @@ let test_git_worktree_branch_required () =
 let playground_path_of = Masc_mcp.Keeper_alerting_path.playground_path_of_keeper
 
 let normalize_path_for_containment path =
-  let normalized = Masc_mcp.Keeper_alerting_path.normalize_path_for_check path in
-  let len = String.length normalized in
-  if len > 1 && String.ends_with ~suffix:"/" normalized
-  then String.sub normalized 0 (len - 1)
-  else normalized
+  Masc_mcp.Keeper_alerting_path.normalize_path_for_check path
+  |> Masc_mcp.Keeper_alerting_path.strip_trailing_slashes
+
+let temp_dir () =
+  let dir = Filename.temp_file "keeper_bash_safety_" "" in
+  Unix.unlink dir;
+  Unix.mkdir dir 0o755;
+  dir
+
+let cleanup_dir dir =
+  let rec rm path =
+    if Sys.file_exists path then
+      if Sys.is_directory path then (
+        Array.iter (fun name -> rm (Filename.concat path name)) (Sys.readdir path);
+        Unix.rmdir path)
+      else
+        Unix.unlink path
+  in
+  try rm dir with _ -> ()
+
+let rec ensure_dir path =
+  if path = "" || path = "." || path = "/" then ()
+  else if Sys.file_exists path then ()
+  else (
+    let parent = Filename.dirname path in
+    if parent <> path then ensure_dir parent;
+    Unix.mkdir path 0o755)
 
 let test_playground_path_structure () =
   (* playground_path_of_keeper returns relative path ending with / *)
@@ -212,6 +234,19 @@ let test_playground_guard_trailing_slash () =
     true
     (is_inside_playground ~playground_abs:pg
        "/project/.masc/playground/cheolsu/repos/masc-mcp")
+
+let test_playground_guard_symlink_escape () =
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  let playground = Filename.concat base ".masc/playground/cheolsu" in
+  let repo_root = Filename.concat playground "repos" in
+  let outside = Filename.concat base "outside" in
+  let symlinked_cwd = Filename.concat repo_root "escape" in
+  ensure_dir repo_root;
+  ensure_dir outside;
+  Unix.symlink outside symlinked_cwd;
+  Alcotest.(check bool) "symlinked cwd resolving outside is rejected"
+    false (is_inside_playground ~playground_abs:playground symlinked_cwd)
 
 (** Path traversal: if cwd is canonicalized via realpath before the check,
     ../traversal resolves to the actual target. This test verifies that
@@ -284,6 +319,7 @@ let () =
       Alcotest.test_case "inside playground detected" `Quick test_playground_guard_inside;
       Alcotest.test_case "outside playground rejected" `Quick test_playground_guard_outside;
       Alcotest.test_case "trailing slash normalized" `Quick test_playground_guard_trailing_slash;
+      Alcotest.test_case "symlink escape rejected" `Quick test_playground_guard_symlink_escape;
       Alcotest.test_case "path traversal blocked after canonicalization" `Quick test_playground_guard_traversal;
       Alcotest.test_case "git write classification" `Quick test_git_write_classification;
       Alcotest.test_case "playground write policy" `Quick test_playground_write_policy;

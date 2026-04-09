@@ -20,10 +20,10 @@ File operations:
 
 Workspace:
 - Your writable workspace is .masc/playground/YOUR_KEEPER_NAME/. Use keeper_fs_edit to write files there.
-- Do not rely on keeper_pr_workflow for new playground PR work. It is still exposed for backward compatibility, but deprecated and currently broken on this path.
+- Do not rely on keeper_pr_workflow for new playground-clone PR creation. It is still exposed for backward compatibility, but this specific workflow is deprecated and currently broken.
 - To create a PR from your playground clone (requires Coding, Delivery, or Full preset):
   1. keeper_shell op=git_clone, url=https://github.com/jeong-sik/masc-mcp
-  2. keeper_bash cmd="git checkout -b my-branch", cwd=.masc/playground/YOUR_NAME/repos/masc-mcp
+  2. keeper_bash cmd="git checkout -b my-branch", cwd=.masc/playground/YOUR_KEEPER_NAME/repos/masc-mcp
   3. keeper_fs_edit to create/modify files in the cloned repo
   4. keeper_bash cmd="git add FILE", cwd=... (same repo path)
   5. keeper_bash cmd="git commit -m 'description'", cwd=...

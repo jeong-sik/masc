@@ -277,27 +277,6 @@ let models_of_cascade_name (cascade_name : string) : string list =
       cascade_name (Printexc.to_string exn);
     defaults
 
-let filter_by_providers (allowed : string list option) (models : string list)
-    : string list =
-  match allowed with
-  | None | Some [] -> models
-  | Some providers ->
-    let providers =
-      List.sort_uniq String.compare
-        (List.map String.lowercase_ascii providers)
-    in
-    let filtered =
-      List.filter
-        (fun label ->
-          match provider_name_of_label label with
-          | Some pname -> List.mem pname providers
-          | None -> false)
-        models
-    in
-    if filtered = [] then (
-      Log.warn ~ctx:"OasModelResolve"
-        "filter_by_providers matched no models; falling back to unfiltered \
-         (allowed=[%s] models=[%s])"
-        (String.concat "," providers) (String.concat "," models);
-      models)
-    else filtered
+(* filter_by_providers removed — provider filtering now handled by
+   OAS Cascade_config.complete_named ~provider_filter parameter.
+   See masc-mcp#6001. *)

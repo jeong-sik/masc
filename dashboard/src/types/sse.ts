@@ -27,6 +27,8 @@ export type SSEEventType =
   | 'client_input_rejected'
   | 'client_input_updated'
   | 'governance_param_changed'
+  | 'approval:pending'
+  | 'approval:resolved'
   // OAS bridge events (relayed from Event_bus via oas_sse_bridge)
   | 'oas:masc:autonomy:agent_selected'
   | 'oas:masc:autonomy:agent_decision'

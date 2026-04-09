@@ -195,6 +195,17 @@ export interface PendingConfirmation {
   preview?: unknown
 }
 
+export interface KeeperApprovalQueueItem {
+  id: string
+  keeper_name: string
+  tool_name: string
+  risk_level: string
+  requested_at?: string | null
+  waiting_s?: number
+  input?: unknown
+  input_preview?: string | null
+}
+
 export interface OperatorActionDescriptor {
   action_type: string
   target_type: string

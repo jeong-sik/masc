@@ -81,3 +81,4 @@
   ; OpenTelemetry observability + OTLP exporter
   (opentelemetry (>= 0.13))
   (ambient-context-eio (>= 0.2))))
+ 

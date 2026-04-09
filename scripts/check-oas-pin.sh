@@ -97,6 +97,21 @@ if [[ "${pin_source}" == "${default_pin_source}" ]]; then
   fi
 fi
 
+# Portable semver comparison: returns 0 (true) if $1 >= $2.
+# Handles 3-part versions (major.minor.patch); missing parts default to 0.
+version_gte() {
+  local IFS='.'
+  # shellcheck disable=SC2206
+  local a=($1) b=($2)
+  local i
+  for i in 0 1 2; do
+    local va=${a[$i]:-0} vb=${b[$i]:-0}
+    if (( va > vb )); then return 0; fi
+    if (( va < vb )); then return 1; fi
+  done
+  return 0
+}
+
 if command -v opam >/dev/null 2>&1; then
   installed_packages="$(opam list --installed --columns=name,version --short 2>/dev/null)"
   installed_version="$(awk '$1 == "agent_sdk" { print $2 }' <<<"${installed_packages}")"
@@ -105,8 +120,8 @@ if command -v opam >/dev/null 2>&1; then
     echo "repair: bash scripts/opam-pin-external-deps.sh && opam install . --deps-only --with-test --with-doc -y" >&2
     exit 1
   fi
-  if [[ "${installed_version}" != "${OAS_AGENT_SDK_MIN_VERSION}" ]]; then
-    echo "installed agent_sdk version is ${installed_version}, expected ${OAS_AGENT_SDK_MIN_VERSION}" >&2
+  if ! version_gte "${installed_version}" "${OAS_AGENT_SDK_MIN_VERSION}"; then
+    echo "installed agent_sdk version is ${installed_version}, expected >= ${OAS_AGENT_SDK_MIN_VERSION}" >&2
     echo "repair: bash scripts/opam-pin-external-deps.sh && opam install . --deps-only --with-test --with-doc -y" >&2
     exit 1
   fi
@@ -135,7 +150,7 @@ if command -v opam >/dev/null 2>&1; then
         ;;
     esac
   elif [[ "${LOCAL_ONLY}" -eq 0 ]]; then
-    echo "WARN: could not read agent_sdk pin source from opam; installed version matches ${OAS_AGENT_SDK_MIN_VERSION}" >&2
+    echo "WARN: could not read agent_sdk pin source from opam; installed version ${installed_version} satisfies floor ${OAS_AGENT_SDK_MIN_VERSION}" >&2
   fi
 fi
 

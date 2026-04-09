@@ -2,7 +2,7 @@ import { html } from 'htm/preact'
 import { signal, computed, type Signal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
 import { TELEMETRY_AUTO_REFRESH_MS } from '../config/constants'
-import { setupVisibleAutoRefresh } from '../lib/auto-refresh'
+import { formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../lib/auto-refresh'
 import { LoadingState } from './common/feedback-state'
 
 interface ToolStat {
@@ -236,7 +236,7 @@ export function ToolQualityPanel() {
           onClick=${refreshToolQuality}
           aria-label="도구 품질 새로고침"
         >새로고침</button>
-        <span class="text-[10px] text-[var(--text-dim)]">30초 자동 갱신</span>
+        <span class="text-[10px] text-[var(--text-dim)]">${formatAutoRefreshLabel(TELEMETRY_AUTO_REFRESH_MS)}</span>
       </div>
 
       <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">

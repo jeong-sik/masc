@@ -17,7 +17,7 @@ import { route } from '../router'
 import { TELEMETRY_AUTO_REFRESH_MS } from '../config/constants'
 import { TELEMETRY_SOURCE_META, telemetrySourceMeta } from '../config/telemetry-sources'
 import { formatTimeAgo } from '../lib/format-time'
-import { setupVisibleAutoRefresh } from '../lib/auto-refresh'
+import { formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../lib/auto-refresh'
 
 interface StoreSnapshot {
   keepers: number
@@ -236,6 +236,7 @@ ${JSON.stringify(entry, null, 2)}</pre>
 export function TelemetryUnified() {
   const params = route.value.params
   const latestRequestId = useRef(0)
+  const autoRefreshLoadRef = useRef<() => Promise<void>>(async () => undefined)
   const state = useSignal<TelemetryState>({
     entries: [],
     summary: [],
@@ -320,10 +321,10 @@ export function TelemetryUnified() {
       }
     }
   }
+  autoRefreshLoadRef.current = load
 
   useEffect(() => {
     void load()
-    return setupVisibleAutoRefresh(load, TELEMETRY_AUTO_REFRESH_MS)
   }, [
     sourceFilter.value,
     keeperFilter.value,
@@ -332,6 +333,10 @@ export function TelemetryUnified() {
     workerRunFilter.value,
     limit.value,
   ])
+
+  useEffect(() => {
+    return setupVisibleAutoRefresh(() => autoRefreshLoadRef.current(), TELEMETRY_AUTO_REFRESH_MS)
+  }, [])
 
   const { entries, summary, totalEntries, store, loading, error } = state.value
 
@@ -437,7 +442,7 @@ export function TelemetryUnified() {
         >
           Refresh
         </button>
-        <span class="text-xs text-[var(--text-muted)]">30초 자동 갱신</span>
+        <span class="text-xs text-[var(--text-muted)]">${formatAutoRefreshLabel(TELEMETRY_AUTO_REFRESH_MS)}</span>
         ${loading ? html`<span class="text-xs text-[var(--text-muted)]">로딩 중...</span>` : null}
       </div>
 

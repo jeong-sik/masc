@@ -10,7 +10,7 @@ import {
   type ToolQualityResponse,
 } from '../api/dashboard'
 import { TELEMETRY_AUTO_REFRESH_MS } from '../config/constants'
-import { setupVisibleAutoRefresh } from '../lib/auto-refresh'
+import { formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../lib/auto-refresh'
 import { normalizeKeepers } from '../keeper-store-normalize'
 import { telemetrySourceLabel } from '../config/telemetry-sources'
 import { formatElapsedCompact, formatTimeAgo } from '../lib/format-time'
@@ -546,7 +546,7 @@ export function FleetTelemetryPanel() {
             onClick=${() => { void loadFleetTelemetry() }}
             aria-label="Fleet 텔레메트리 새로고침"
           >새로고침</button>
-          <span class="text-[10px] text-[var(--text-dim)]">30초 자동 갱신</span>
+          <span class="text-[10px] text-[var(--text-dim)]">${formatAutoRefreshLabel(TELEMETRY_AUTO_REFRESH_MS)}</span>
         </div>
       </div>
 

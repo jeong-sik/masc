@@ -1,5 +1,11 @@
 (** Team session report generation (Markdown + JSON). *)
 
+(** Null-safe nested JSON member access for "detail" sub-fields. *)
+let detail_member key json =
+  match Yojson.Safe.Util.member "detail" json with
+  | `Assoc _ as detail -> Yojson.Safe.Util.member key detail
+  | _ -> `Null
+
 let report_schema_version = "1.0.0"
 let proof_schema_version = "1.0.0"
 
@@ -724,7 +730,7 @@ let collect_spawn_tool_names events =
              [ `String "team_step_spawn"; `String "team_step_delegate" ]
          then
            (match
-              Yojson.Safe.Util.member "detail" json |> Yojson.Safe.Util.member "tool_names"
+              detail_member "tool_names" json
             with
            | `List xs ->
                xs
@@ -747,7 +753,7 @@ let sum_spawn_tool_call_count events =
              [ `String "team_step_spawn"; `String "team_step_delegate" ]
          then
            (match
-              Yojson.Safe.Util.member "detail" json |> Yojson.Safe.Util.member "tool_call_count"
+              detail_member "tool_call_count" json
             with
            | `Int n -> acc + n
            | `Intlit s -> acc + Option.value ~default:0 (int_of_string_opt s)
@@ -762,7 +768,7 @@ let count_write_capable_spawns events =
          if Yojson.Safe.Util.member "event_type" json = `String "team_step_spawn"
          then
            match
-             Yojson.Safe.Util.member "detail" json |> Yojson.Safe.Util.member "execution_scope"
+             detail_member "execution_scope" json
            with
            | `String "limited_code_change" -> acc + 1
            | _ -> acc

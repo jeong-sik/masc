@@ -1,5 +1,12 @@
 (** Eio runtime engine for long-running team sessions. *)
 
+(** Null-safe nested JSON member access. Returns [`Null] if any
+    intermediate value is not an [`Assoc]. *)
+let detail_member key json =
+  match Yojson.Safe.Util.member "detail" json with
+  | `Assoc _ as detail -> Yojson.Safe.Util.member key detail
+  | _ -> `Null
+
 type runtime_state = {
   mutable stop_requested : bool;
   mutable stop_reason : string option;
@@ -57,14 +64,14 @@ let event_type_of_json json =
   | _ -> None
 
 let event_detail_actor_of_json json =
-  match Yojson.Safe.Util.member "detail" json |> Yojson.Safe.Util.member "actor" with
+  match detail_member "actor" json with
   | `String actor ->
       let trimmed = String.trim actor in
       if trimmed = "" then None else Some trimmed
   | _ -> None
 
 let event_detail_string key json =
-  match Yojson.Safe.Util.member "detail" json |> Yojson.Safe.Util.member key with
+  match detail_member key json with
   | `String value ->
       let trimmed = String.trim value in
       if trimmed = "" then None else Some trimmed
@@ -104,7 +111,7 @@ let worker_run_event_snapshot ?events (config : Room.config)
       | Some ("team_step_spawn" | "team_step_delegate") -> (
           match event_detail_string "worker_run_id" json with
           | Some worker_run_id -> (
-              match Yojson.Safe.Util.member "detail" json |> Yojson.Safe.Util.member "success" with
+              match detail_member "success" json with
               | `Bool success -> Hashtbl.replace completed worker_run_id success
               | _ -> ())
           | None -> ())
@@ -344,7 +351,7 @@ let lane_health_json ?events (config : Room.config) (session : Team_session_type
                | `Bool false, `String actor -> Some actor
                | _ -> None)
            | `String "session_agent_detached" -> (
-               match Yojson.Safe.Util.member "detail" json |> Yojson.Safe.Util.member "actor" with
+               match detail_member "actor" json with
                | `String actor -> Some actor
                | _ -> None)
            | _ -> None)

@@ -478,6 +478,9 @@ let extract_vote_id (text : string) =
   | None -> None
 
 let status_of_engine_status_json (json : Yojson.Safe.t) =
-  match Yojson.Safe.Util.member "session" json |> Yojson.Safe.Util.member "status" with
-  | `String s -> s
+  match Yojson.Safe.Util.member "session" json with
+  | `Assoc _ as session ->
+    (match Yojson.Safe.Util.member "status" session with
+     | `String s -> s
+     | _ -> "unknown")
   | _ -> "unknown"

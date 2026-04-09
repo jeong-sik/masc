@@ -23,22 +23,56 @@ let lowercase_shell_words text =
   |> String.split_on_char ' '
   |> List.filter (fun token -> token <> "")
 
-let contains_shell_token_sequence_ci text expected =
-  let tokens = lowercase_shell_words text in
-  let expected = List.map String.lowercase_ascii expected in
-  let rec starts_with tokens expected =
-    match tokens, expected with
-    | _, [] -> true
-    | [], _ -> false
-    | token :: token_rest, expected_token :: expected_rest ->
-      String.equal token expected_token && starts_with token_rest expected_rest
-  in
-  let rec loop = function
-    | [] -> expected = []
-    | _ :: rest as tokens ->
-      if starts_with tokens expected then true else loop rest
-  in
-  loop tokens
+let git_global_option_takes_value = function
+  | "-c" | "-C" | "--exec-path" | "--git-dir" | "--work-tree"
+  | "--namespace" | "--super-prefix" | "--config-env" -> true
+  | _ -> false
+
+let git_global_option_has_inline_value token =
+  List.exists (fun prefix -> String.starts_with ~prefix token)
+    [ "--exec-path="; "--git-dir="; "--work-tree="; "--namespace="; "--config-env=" ]
+
+let rec first_git_subcommand = function
+  | [] -> None
+  | token :: rest when git_global_option_takes_value token ->
+      (match rest with
+       | _value :: tail -> first_git_subcommand tail
+       | [] -> None)
+  | token :: rest when git_global_option_has_inline_value token ->
+      first_git_subcommand rest
+  | token :: rest when String.starts_with ~prefix:"-" token ->
+      first_git_subcommand rest
+  | token :: _rest -> Some token
+
+let readonly_shell_token_match tokens =
+  match tokens with
+  | [] -> None
+  | "git" :: rest ->
+      (match first_git_subcommand rest with
+       | Some "push" -> Some ("git push", "git_write")
+       | Some "reset" -> Some ("git reset", "git_write")
+       | Some "checkout" -> Some ("git checkout", "git_write")
+       | Some "rebase" -> Some ("git rebase", "git_write")
+       | _ -> None)
+  | "pip" :: "install" :: _ -> Some ("pip install", "package_install")
+  | "npm" :: "install" :: _ -> Some ("npm install", "package_install")
+  | "opam" :: "install" :: _ -> Some ("opam install", "package_install")
+  | "rm" :: _ -> Some ("rm ", "destructive")
+  | "rmdir" :: _ -> Some ("rmdir", "destructive")
+  | "mv" :: _ -> Some ("mv ", "destructive")
+  | "cp" :: _ -> Some ("cp ", "destructive")
+  | "chmod" :: _ -> Some ("chmod", "destructive")
+  | "chown" :: _ -> Some ("chown", "destructive")
+  | "kill" :: _ -> Some ("kill", "destructive")
+  | "pkill" :: _ -> Some ("pkill", "destructive")
+  | "dd" :: _ -> Some ("dd ", "destructive")
+  | "mkfs" :: _ -> Some ("mkfs", "destructive")
+  | "wget" :: _ -> Some ("wget ", "destructive")
+  | "curl" :: rest when List.exists (String.equal "-o") rest ->
+      Some ("curl -o", "destructive")
+  | "curl" :: rest when List.exists (String.equal "--output") rest ->
+      Some ("curl --output", "destructive")
+  | _ -> None
 
 let process_status_is_timeout = function
   | Unix.WSIGNALED sig_num -> sig_num = Sys.sigterm
@@ -585,42 +619,12 @@ let handle_keeper_shell
         ; "> ", "redirect"
         ]
       in
-      let token_rules =
-        [ (* git write *)
-          "git push", [ "git"; "push" ], "git_write"
-        ; "git reset", [ "git"; "reset" ], "git_write"
-        ; "git checkout", [ "git"; "checkout" ], "git_write"
-        ; "git rebase", [ "git"; "rebase" ], "git_write"
-        (* package install *)
-        ; "pip install", [ "pip"; "install" ], "package_install"
-        ; "npm install", [ "npm"; "install" ], "package_install"
-        ; "opam install", [ "opam"; "install" ], "package_install"
-        (* destructive / write *)
-        ; "rm ", [ "rm" ], "destructive"
-        ; "rmdir", [ "rmdir" ], "destructive"
-        ; "mv ", [ "mv" ], "destructive"
-        ; "cp ", [ "cp" ], "destructive"
-        ; "chmod", [ "chmod" ], "destructive"
-        ; "chown", [ "chown" ], "destructive"
-        ; "kill", [ "kill" ], "destructive"
-        ; "pkill", [ "pkill" ], "destructive"
-        ; "dd ", [ "dd" ], "destructive"
-        ; "mkfs", [ "mkfs" ], "destructive"
-        ; "wget ", [ "wget" ], "destructive"
-        ; "curl -o", [ "curl"; "-o" ], "destructive"
-        ; "curl --output", [ "curl"; "--output" ], "destructive"
-        ]
-      in
       let matched =
         match List.find_opt (fun (pat, _cat) ->
           String_util.contains_substring_ci cmd_str pat
         ) substring_rules with
         | Some (pat, category) -> Some (pat, category)
-        | None ->
-          List.find_opt (fun (_pat, tokens, _cat) ->
-            contains_shell_token_sequence_ci cmd_str tokens
-          ) token_rules
-          |> Option.map (fun (pat, _tokens, category) -> (pat, category))
+        | None -> readonly_shell_token_match (lowercase_shell_words cmd_str)
       in
       (match matched with
       | Some (pat, category) ->

@@ -902,6 +902,38 @@ let test_readonly_bash_allows_masc_mcp_argument () =
     check bool "command allowed" true (json_bool "ok" json);
     check string "output preserved" "masc-mcp remote\n" (json_string "output" json))
 
+let test_readonly_bash_allows_echo_git_push_text () =
+  with_room (fun config ->
+    let meta = make_meta_with_preset "delivery" in
+    let result =
+      call_tool config meta "keeper_shell"
+        (`Assoc
+          [ "op", `String "bash"
+          ; "command", `String "echo git push"
+          ])
+    in
+    let json = parse_json result in
+    check bool "echo git push allowed" true (json_bool "ok" json);
+    check string "echo output preserved" "git push\n" (json_string "output" json))
+
+let test_readonly_bash_blocks_git_push_with_global_opts () =
+  with_room (fun config ->
+    let meta = make_meta_with_preset "delivery" in
+    let result =
+      call_tool config meta "keeper_shell"
+        (`Assoc
+          [ "op", `String "bash"
+          ; "command", `String "git -C repo push origin main"
+          ])
+    in
+    let json = parse_json result in
+    check bool "returns readonly blocked error" true
+      (match json with `Assoc fields -> List.mem_assoc "error" fields | _ -> false);
+    check string "git push with global opts blocked" "command_blocked_readonly"
+      (json_string "error" json);
+    check string "blocked pattern identifies git push" "git push"
+      (json_string "blocked_pattern" json))
+
 let test_readonly_bash_surfaces_timeout_error () =
   with_room (fun config ->
     let meta = make_meta_with_preset "delivery" in
@@ -1064,6 +1096,10 @@ let () =
           test_readonly_bash_blocks_quoted_absolute_path_outside_playground
       ; test_case "readonly bash allows masc-mcp argument" `Quick
           test_readonly_bash_allows_masc_mcp_argument
+      ; test_case "readonly bash allows echo git push text" `Quick
+          test_readonly_bash_allows_echo_git_push_text
+      ; test_case "readonly bash blocks git push with global opts" `Quick
+          test_readonly_bash_blocks_git_push_with_global_opts
       ; test_case "readonly bash surfaces timeout error" `Quick
           test_readonly_bash_surfaces_timeout_error
       ; test_case "readonly ls defaults path to cwd" `Quick

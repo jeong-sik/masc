@@ -3,7 +3,7 @@ open Alcotest
 module Routes = Masc_mcp.Server_routes_http_routes_channel_gate
 
 let test_resolve_connector_status_name_prefers_explicit_name () =
-  check (option string) "name wins without normalization" (Some "Discord")
+  check (option string) "name wins and normalizes" (Some "discord")
     (Routes.resolve_connector_status_name ~name:"  Discord  "
        ~channel:"telegram" ())
 

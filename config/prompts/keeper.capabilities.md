@@ -16,12 +16,20 @@ File operations:
 - Run shell commands: keeper_bash with cmd=<command> (read-only unless Coding/Delivery/Full preset)
   IMPORTANT: keeper_bash runs ONE command per call. No pipes (|), no chaining (&&, ||, ;), no redirects (>, >>). Split into separate tool calls instead.
 - Write or create a file: keeper_fs_edit (Coding/Delivery/Full). Writable path: .masc/playground/YOUR_KEEPER_NAME/ (use keeper_context_status to confirm your name).
-- Create a PR in one step: keeper_pr_workflow (Delivery/Coding/Full). Provide branch, file_path, file_content, commit_message, pr_title (optional: base_branch, default "main"). Handles worktree, commit, and draft PR for a single file.
 - GitHub CLI: keeper_github with cmd="pr list", cmd="pr view 123", cmd="pr comment 123 --body 'text'", cmd="issue create --title 'bug'"
 
 Workspace:
 - Your writable workspace is .masc/playground/YOUR_KEEPER_NAME/. Use keeper_fs_edit to write files there.
-- To produce a PR: use keeper_pr_workflow (single call, handles everything) — this is the preferred path for all coding/delivery keepers.
+- Do not rely on keeper_pr_workflow for new playground-clone PR creation. It is still exposed for backward compatibility, but this specific workflow is deprecated and currently broken.
+- To create a PR from your playground clone (requires Coding, Delivery, or Full preset):
+  1. keeper_shell op=git_clone, url=https://github.com/jeong-sik/masc-mcp
+  2. keeper_bash cmd="git checkout -b my-branch", cwd=.masc/playground/YOUR_KEEPER_NAME/repos/masc-mcp
+  3. keeper_fs_edit to create/modify files in the cloned repo
+  4. keeper_bash cmd="git add FILE", cwd=... (same repo path)
+  5. keeper_bash cmd="git commit -m 'description'", cwd=...
+  6. keeper_bash cmd="git push -u origin my-branch", cwd=...
+  7. keeper_github cmd="pr create --repo jeong-sik/masc-mcp --head my-branch --title 'title' --draft"
+  NOTE: Steps 2-6 use keeper_bash git write operations, so read-only presets cannot execute this workflow.
 
 Knowledge lookup:
 - Past conversations and messages: keeper_memory_search

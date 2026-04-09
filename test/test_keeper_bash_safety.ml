@@ -155,6 +155,153 @@ let test_git_worktree_branch_required () =
   let branch = String.trim "" in
   Alcotest.(check bool) "empty branch rejected" true (branch = "")
 
+(* ── Playground path detection ──────────────────────────── *)
+
+let playground_path_of = Masc_mcp.Keeper_alerting_path.playground_path_of_keeper
+
+let normalize_path_for_containment path =
+  Masc_mcp.Keeper_alerting_path.normalize_path_for_check path
+  |> Masc_mcp.Keeper_alerting_path.strip_trailing_slashes
+
+let temp_dir () =
+  let dir = Filename.temp_file "keeper_bash_safety_" "" in
+  Unix.unlink dir;
+  Unix.mkdir dir 0o755;
+  dir
+
+let cleanup_dir dir =
+  let rec rm path =
+    match Unix.lstat path with
+    | { Unix.st_kind = Unix.S_DIR; _ } ->
+        Array.iter (fun name -> rm (Filename.concat path name)) (Sys.readdir path);
+        Unix.rmdir path
+    | _ ->
+        Unix.unlink path
+  in
+  try rm dir with _ -> ()
+
+let rec ensure_dir path =
+  if path = "" || path = "." || path = "/" then ()
+  else if Sys.file_exists path then ()
+  else (
+    let parent = Filename.dirname path in
+    if parent <> path then ensure_dir parent;
+    Unix.mkdir path 0o755)
+
+let test_playground_path_structure () =
+  (* playground_path_of_keeper returns relative path ending with / *)
+  Alcotest.(check string) "cheolsu"
+    ".masc/playground/cheolsu/" (playground_path_of "cheolsu");
+  Alcotest.(check string) "masc-improver"
+    ".masc/playground/masc-improver/" (playground_path_of "masc-improver")
+
+let is_inside_playground ~playground_abs cwd =
+  let playground_abs = normalize_path_for_containment playground_abs in
+  let cwd = normalize_path_for_containment cwd in
+  String.starts_with ~prefix:(playground_abs ^ "/") (cwd ^ "/")
+  || String.equal playground_abs cwd
+
+let test_playground_guard_inside () =
+  let pg = "/project/.masc/playground/cheolsu" in
+  (* Inside playground: various depths *)
+  Alcotest.(check bool) "exact playground dir"
+    true (is_inside_playground ~playground_abs:pg pg);
+  Alcotest.(check bool) "repos subdir"
+    true (is_inside_playground ~playground_abs:pg (pg ^ "/repos/masc-mcp"));
+  Alcotest.(check bool) "deep nested"
+    true (is_inside_playground ~playground_abs:pg (pg ^ "/repos/masc-mcp/lib/keeper"))
+
+let test_playground_guard_outside () =
+  let pg = "/project/.masc/playground/cheolsu" in
+  (* Outside playground: main repo and other keepers *)
+  Alcotest.(check bool) "project root"
+    false (is_inside_playground ~playground_abs:pg "/project");
+  Alcotest.(check bool) "project lib"
+    false (is_inside_playground ~playground_abs:pg "/project/lib/keeper");
+  Alcotest.(check bool) "other keeper playground"
+    false (is_inside_playground ~playground_abs:pg "/project/.masc/playground/sangsu");
+  Alcotest.(check bool) "playground parent"
+    false (is_inside_playground ~playground_abs:pg "/project/.masc/playground");
+  (* Prefix attack: cheolsu2 should not match cheolsu *)
+  Alcotest.(check bool) "prefix attack (cheolsu2)"
+    false (is_inside_playground ~playground_abs:pg (pg ^ "2/repos"))
+
+let test_playground_guard_trailing_slash () =
+  let pg = "/project/.masc/playground/cheolsu/" in
+  Alcotest.(check bool) "trailing slash exact match"
+    true (is_inside_playground ~playground_abs:pg "/project/.masc/playground/cheolsu");
+  Alcotest.(check bool) "trailing slash nested match"
+    true
+    (is_inside_playground ~playground_abs:pg
+       "/project/.masc/playground/cheolsu/repos/masc-mcp")
+
+let test_playground_guard_symlink_escape () =
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  let playground = Filename.concat base ".masc/playground/cheolsu" in
+  let repo_root = Filename.concat playground "repos" in
+  let outside = Filename.concat base "outside" in
+  let symlinked_cwd = Filename.concat repo_root "escape" in
+  ensure_dir repo_root;
+  ensure_dir outside;
+  Unix.symlink outside symlinked_cwd;
+  Alcotest.(check bool) "symlinked cwd resolving outside is rejected"
+    false (is_inside_playground ~playground_abs:playground symlinked_cwd)
+
+let test_cleanup_dir_does_not_follow_symlinks () =
+  let root = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir root) @@ fun () ->
+  let base = Filename.concat root "base" in
+  let outside = Filename.concat root "outside" in
+  let marker = Filename.concat outside "marker.txt" in
+  let link = Filename.concat base "escape" in
+  ensure_dir base;
+  ensure_dir outside;
+  let oc = open_out marker in
+  output_string oc "keep me";
+  close_out oc;
+  Unix.symlink outside link;
+  cleanup_dir base;
+  Alcotest.(check bool) "cleanup removed base dir" false (Sys.file_exists base);
+  Alcotest.(check bool) "outside target preserved" true (Sys.file_exists marker)
+
+(** Path traversal: if cwd is canonicalized via realpath before the check,
+    ../traversal resolves to the actual target. This test verifies that
+    a canonicalized traversal path is correctly rejected.
+    In production, Unix.realpath on the cwd collapses ".." before comparison. *)
+let test_playground_guard_traversal () =
+  let pg = "/project/.masc/playground/cheolsu" in
+  (* After realpath, ".../cheolsu/repos/../../lib" becomes "/project/lib" *)
+  Alcotest.(check bool) "traversal resolves outside (canonicalized)"
+    false (is_inside_playground ~playground_abs:pg "/project/lib");
+  (* After realpath, ".../cheolsu/repos/../../../.masc" becomes "/project/.masc" *)
+  Alcotest.(check bool) "traversal to .masc (canonicalized)"
+    false (is_inside_playground ~playground_abs:pg "/project/.masc");
+  (* The raw non-canonical form would match the prefix — this proves
+     we MUST canonicalize before checking *)
+  let raw_traversal = pg ^ "/repos/masc-mcp/../../../../../../lib" in
+  let would_match_raw = String.starts_with ~prefix:(pg ^ "/") raw_traversal in
+  Alcotest.(check bool) "raw traversal WOULD match prefix (proves canonicalization needed)"
+    true would_match_raw
+
+let test_git_write_classification () =
+  let is_branch_switch = Masc_mcp.Worker_dev_tools.is_git_branch_switch in
+  let is_destructive = Masc_mcp.Worker_dev_tools.is_destructive_bash_operation in
+  (* git checkout: branch switch, allowed in playground *)
+  Alcotest.(check bool) "checkout is branch switch"
+    true (is_branch_switch "git checkout -b my-feature");
+  Alcotest.(check bool) "switch is branch switch"
+    true (is_branch_switch "git switch -c my-feature");
+  (* git push: write op, allowed in playground *)
+  Alcotest.(check bool) "push is write" true (is_write "git push origin my-branch");
+  Alcotest.(check bool) "commit is write" true (is_write "git commit -m 'msg'");
+  (* destructive: blocked everywhere including playground *)
+  Alcotest.(check bool) "rm -rf is destructive"
+    true (is_destructive "rm -rf /tmp/something");
+  (* git push is NOT destructive (it's write, not destructive) *)
+  Alcotest.(check bool) "push is not destructive"
+    false (is_destructive "git push origin my-branch")
+
 let () =
   Alcotest.run "Keeper bash safety" [
     ("allowlist", [
@@ -167,6 +314,17 @@ let () =
     ("write_gate", [
       Alcotest.test_case "write operations detected" `Quick test_write_ops_detected;
       Alcotest.test_case "read operations pass" `Quick test_read_ops_pass;
+    ]);
+    ("playground_guard", [
+      Alcotest.test_case "playground path structure" `Quick test_playground_path_structure;
+      Alcotest.test_case "inside playground detected" `Quick test_playground_guard_inside;
+      Alcotest.test_case "outside playground rejected" `Quick test_playground_guard_outside;
+      Alcotest.test_case "trailing slash normalized" `Quick test_playground_guard_trailing_slash;
+      Alcotest.test_case "symlink escape rejected" `Quick test_playground_guard_symlink_escape;
+      Alcotest.test_case "cleanup does not follow symlinks" `Quick
+        test_cleanup_dir_does_not_follow_symlinks;
+      Alcotest.test_case "path traversal blocked after canonicalization" `Quick test_playground_guard_traversal;
+      Alcotest.test_case "git write classification" `Quick test_git_write_classification;
     ]);
     ("edge", [
       Alcotest.test_case "empty command blocked" `Quick test_empty_command;

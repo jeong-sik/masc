@@ -1,12 +1,9 @@
-// Telemetry Unified — runtime diagnosis view.
-// Keeps MASC telemetry stores and OAS proof/runtime evidence separate in data flow,
-// then composes them in the UI so the boundary stays explicit.
+// Telemetry Unified — MASC runtime diagnosis view.
 
 import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { useSignal } from '@preact/signals'
 import {
-  fetchDashboardProof,
   fetchTelemetry,
   fetchTelemetrySummary,
   type TelemetryEntry,
@@ -15,7 +12,6 @@ import {
 } from '../api/dashboard'
 import { route } from '../router'
 import { formatTimeAgo } from '../lib/format-time'
-import type { DashboardProofWorkerRunEvidence } from '../types'
 
 const SOURCE_META: Record<TelemetrySource, { label: string; color: string; icon: string }> = {
   keeper_metric: { label: 'Keeper 메트릭', color: 'text-blue-400', icon: 'K' },
@@ -29,8 +25,6 @@ interface TelemetryState {
   entries: TelemetryEntry[]
   summary: TelemetrySourceSummary[]
   totalEntries: number
-  proofWorkerRuns: DashboardProofWorkerRunEvidence[]
-  proofSourceLabel: string | null
   loading: boolean
   error: string | null
 }
@@ -142,32 +136,6 @@ function SummaryCard({ src }: { src: TelemetrySourceSummary }) {
   `
 }
 
-function DiagnosisCard({
-  title,
-  value,
-  detail,
-  tone = 'neutral',
-}: {
-  title: string
-  value: string
-  detail: string
-  tone?: 'neutral' | 'ok' | 'warn'
-}) {
-  const toneClass =
-    tone === 'ok'
-      ? 'border-green-500/20 bg-green-500/5'
-      : tone === 'warn'
-        ? 'border-amber-500/20 bg-amber-500/5'
-        : 'border-[var(--card-border)] bg-[rgba(255,255,255,0.02)]'
-  return html`
-    <div class="rounded-lg border ${toneClass} p-3 min-w-[180px]">
-      <div class="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">${title}</div>
-      <div class="mt-1 text-xl font-bold text-[var(--text-strong)]">${value}</div>
-      <div class="mt-1 text-[11px] leading-relaxed text-[var(--text-muted)]">${detail}</div>
-    </div>
-  `
-}
-
 function EntryRow({ entry }: { entry: TelemetryEntry }) {
   const expanded = useSignal(false)
   const meta = sourceMeta(entry.source)
@@ -223,35 +191,12 @@ ${JSON.stringify(entry, null, 2)}</pre>
   `
 }
 
-function filterWorkerRuns(
-  runs: DashboardProofWorkerRunEvidence[],
-  sessionId: string,
-  operationId: string,
-  workerRunId: string,
-): DashboardProofWorkerRunEvidence[] {
-  return runs.filter(item => {
-    if (sessionId && item.session_id !== sessionId) return false
-    if (operationId && item.operation_id !== operationId) return false
-    if (workerRunId && item.worker_run_id !== workerRunId) return false
-    return true
-  })
-}
-
-function mismatchCount(items: DashboardProofWorkerRunEvidence[]): number {
-  return items.filter(item =>
-    (item.requested_model && item.resolved_model && item.requested_model !== item.resolved_model)
-    || (item.requested_runtime && item.resolved_runtime && item.requested_runtime !== item.resolved_runtime)
-  ).length
-}
-
 export function TelemetryUnified() {
   const params = route.value.params
   const state = useSignal<TelemetryState>({
     entries: [],
     summary: [],
     totalEntries: 0,
-    proofWorkerRuns: [],
-    proofSourceLabel: null,
     loading: true,
     error: null,
   })
@@ -275,39 +220,21 @@ export function TelemetryUnified() {
   async function load() {
     state.value = { ...state.value, loading: true, error: null }
     try {
-      const telemetryPromise = fetchTelemetry({
-        source: sourceFilter.value || undefined,
-        keeper: keeperFilter.value || undefined,
-        session_id: sessionFilter.value || undefined,
-        operation_id: operationFilter.value || undefined,
-        worker_run_id: workerRunFilter.value || undefined,
-        n: limit.value,
-      })
-      const summaryPromise = fetchTelemetrySummary()
-      const proofPromise =
-        sessionFilter.value || operationFilter.value
-          ? fetchDashboardProof(sessionFilter.value || null, operationFilter.value || null)
-          : Promise.resolve(null)
-      const [telemetry, summary, proof] = await Promise.all([
-        telemetryPromise,
-        summaryPromise,
-        proofPromise,
+      const [telemetry, summary] = await Promise.all([
+        fetchTelemetry({
+          source: sourceFilter.value || undefined,
+          keeper: keeperFilter.value || undefined,
+          session_id: sessionFilter.value || undefined,
+          operation_id: operationFilter.value || undefined,
+          worker_run_id: workerRunFilter.value || undefined,
+          n: limit.value,
+        }),
+        fetchTelemetrySummary(),
       ])
-      const proofWorkerRuns = filterWorkerRuns(
-        Array.isArray(proof?.worker_run_evidence) ? proof?.worker_run_evidence ?? [] : [],
-        sessionFilter.value,
-        operationFilter.value,
-        workerRunFilter.value,
-      )
       state.value = {
         entries: telemetry.entries,
         summary: summary.sources,
         totalEntries: summary.total_entries,
-        proofWorkerRuns,
-        proofSourceLabel:
-          proof
-            ? `OAS proof bridge · ${(proof.session_id ?? sessionFilter.value) || '-'}${proof.operation_id ? ` · ${proof.operation_id}` : ''}`
-            : null,
         loading: false,
         error: null,
       }
@@ -329,24 +256,17 @@ export function TelemetryUnified() {
     limit.value,
   ])
 
-  const { entries, summary, totalEntries, proofWorkerRuns, proofSourceLabel, loading, error } = state.value
-  const validationCount = proofWorkerRuns.filter(item => (item.validation_failures?.length ?? 0) > 0).length
-  const traceReadyCount = proofWorkerRuns.filter(item => item.trace_evidence_status === 'available').length
-  const proofReadyCount = proofWorkerRuns.filter(item => item.proof_evidence_status === 'available').length
-  const toolSurfaceMissingCount = proofWorkerRuns.filter(item => item.tool_surface_status === 'missing').length
-  const routingFallbackCount = proofWorkerRuns.filter(item => (item.routing_reason ?? '').toLowerCase().includes('fallback')).length
-  const resolutionMismatchCount = mismatchCount(proofWorkerRuns)
+  const { entries, summary, totalEntries, loading, error } = state.value
 
   return html`
     <div class="flex flex-col gap-4">
       <div class="rounded-xl border border-[var(--card-border)] bg-[rgba(255,255,255,0.02)] p-4">
         <div class="text-[12px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Runtime Diagnosis</div>
         <div class="mt-1 text-[14px] leading-relaxed text-[var(--text-body)]">
-          MASC telemetry store와 OAS proof bridge를 분리해서 보여줍니다. 저장소를 섞지 않고, UI에서만 한 화면으로 합성합니다.
+          MASC telemetry store (keeper/tool/agent) 진단 뷰.
         </div>
         <div class="mt-3 flex flex-wrap gap-2">
           <span class="rounded-md bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-dim)]">MASC: keeper/tool/agent store</span>
-          <span class="rounded-md bg-[rgba(245,158,11,0.12)] px-2 py-1 text-[11px] text-amber-300">OAS: proof/runtime evidence bridge</span>
           ${sessionFilter.value ? html`<span class="rounded-md bg-[var(--white-4)] px-2 py-1 text-[11px] font-mono text-[var(--text-dim)]">session ${sessionFilter.value}</span>` : null}
           ${operationFilter.value ? html`<span class="rounded-md bg-[var(--white-4)] px-2 py-1 text-[11px] font-mono text-[var(--text-dim)]">operation ${operationFilter.value}</span>` : null}
           ${workerRunFilter.value ? html`<span class="rounded-md bg-[var(--white-4)] px-2 py-1 text-[11px] font-mono text-[var(--text-dim)]">worker_run ${workerRunFilter.value}</span>` : null}
@@ -416,63 +336,6 @@ export function TelemetryUnified() {
         </button>
         ${loading ? html`<span class="text-xs text-[var(--text-muted)]">loading...</span>` : null}
       </div>
-
-      <div class="flex flex-wrap gap-3">
-        <${DiagnosisCard}
-          title="OAS Proof Bridge"
-          value=${String(proofWorkerRuns.length)}
-          detail=${proofSourceLabel ?? 'session_id 또는 operation_id를 고르면 OAS runtime/proof evidence를 별도 브리지로 읽습니다.'}
-          tone=${proofWorkerRuns.length > 0 ? 'ok' : 'neutral'}
-        />
-        <${DiagnosisCard}
-          title="Provider Resolve"
-          value=${String(resolutionMismatchCount)}
-          detail=${proofWorkerRuns.length > 0
-            ? `requested/resolved 불일치 ${resolutionMismatchCount}건 · routing fallback ${routingFallbackCount}건`
-            : '현재 scope에 연결된 worker run evidence 없음'}
-          tone=${resolutionMismatchCount > 0 || routingFallbackCount > 0 ? 'warn' : 'neutral'}
-        />
-        <${DiagnosisCard}
-          title="Validation Failure"
-          value=${String(validationCount)}
-          detail=${proofWorkerRuns.length > 0
-            ? `trace evidence ${traceReadyCount}건 · proof evidence ${proofReadyCount}건`
-            : '검증 대상 worker run evidence 없음'}
-          tone=${validationCount > 0 ? 'warn' : 'ok'}
-        />
-        <${DiagnosisCard}
-          title="Tool Surface"
-          value=${String(toolSurfaceMissingCount)}
-          detail=${proofWorkerRuns.length > 0
-            ? `tool surface missing ${toolSurfaceMissingCount}건`
-            : 'OAS worker scope가 없어서 tool surface를 아직 비교하지 않았습니다.'}
-          tone=${toolSurfaceMissingCount > 0 ? 'warn' : 'ok'}
-        />
-      </div>
-
-      ${proofWorkerRuns.length > 0 ? html`
-        <div class="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4">
-          <div class="text-[12px] font-semibold uppercase tracking-wider text-amber-300">OAS Runtime Bridge</div>
-          <div class="mt-2 grid gap-2">
-            ${proofWorkerRuns.map(item => html`
-              <div key=${item.worker_run_id} class="rounded-lg border border-white/10 bg-black/10 p-3">
-                <div class="flex flex-wrap items-center gap-2">
-                  <span class="text-[12px] font-semibold text-[var(--text-strong)]">${item.worker_name ?? item.worker_run_id}</span>
-                  <span class="rounded bg-white/5 px-1.5 py-0.5 text-[10px] font-mono text-[var(--text-dim)]">${item.worker_run_id}</span>
-                  ${item.session_id ? html`<span class="rounded bg-white/5 px-1.5 py-0.5 text-[10px] font-mono text-[var(--text-dim)]">S ${item.session_id}</span>` : null}
-                  ${item.operation_id ? html`<span class="rounded bg-white/5 px-1.5 py-0.5 text-[10px] font-mono text-[var(--text-dim)]">OP ${item.operation_id}</span>` : null}
-                </div>
-                <div class="mt-2 text-[12px] leading-relaxed text-[var(--text-body)]">
-                  요청 runtime/model: ${item.requested_runtime ?? '-'} / ${item.requested_model ?? '-'}<br />
-                  해석 runtime/model: ${item.resolved_runtime ?? '-'} / ${item.resolved_model ?? '-'}<br />
-                  trace/proof: ${item.trace_evidence_status ?? '-'} / ${item.proof_evidence_status ?? '-'}<br />
-                  validation: ${(item.validation_failures ?? []).length > 0 ? item.validation_failures?.join(' · ') : '없음'}
-                </div>
-              </div>
-            `)}
-          </div>
-        </div>
-      ` : null}
 
       ${error ? html`
         <div class="rounded border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">

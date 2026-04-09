@@ -4,9 +4,12 @@
 import { signal, type ReadonlySignal } from '@preact/signals'
 import type { RouteState, TabId } from './types'
 import { VALID_TABS } from './types'
-import { normalizeRouteParams } from './config/navigation'
+import { normalizeRouteParams, sectionItemsForTab } from './config/navigation'
 
 const DEFAULT_ROUTE: RouteState = { tab: 'overview', params: {}, postId: null }
+const VALID_COMMAND_SECTIONS = new Set(
+  sectionItemsForTab('command').map(item => item.params.section),
+)
 
 function isTabId(v: string | null | undefined): v is TabId {
   return !!v && VALID_TABS.includes(v as TabId)
@@ -63,7 +66,13 @@ function parseSegments(
 
   if (segments[0] === 'command' && segments[1]) {
     const nextParams = { ...params }
-    nextParams.section = decodeSafe(segments[1])
+    const second = decodeSafe(segments[1])
+    if (!VALID_COMMAND_SECTIONS.has(second)) {
+      console.warn('[router] unknown command section, falling back to intervene', second)
+      nextParams.section = 'intervene'
+    } else {
+      nextParams.section = second
+    }
     return {
       tab: 'command',
       params: normalizeRouteParams('command', nextParams),

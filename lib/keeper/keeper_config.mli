@@ -199,15 +199,12 @@ val keeper_llama_slots : unit -> int
     Returns [None] when slot pinning is disabled. *)
 val keeper_slot_id : string -> int option
 
-val keeper_boring_exit_threshold : unit -> int
 val keeper_enable_thinking : unit -> bool
 val keeper_adaptive_thinking_enabled : unit -> bool
 
 (** {1 Runtime Param Handles}
 
     Exposed for test use only (e.g. [Runtime_params.clear]). *)
-
-val keeper_boring_exit_threshold_rp : int Runtime_params.param
 
 (** Room signal prompt enabled override from env var. *)
 val keeper_room_signal_prompt_enabled_override : unit -> bool option

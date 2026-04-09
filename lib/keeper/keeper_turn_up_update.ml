@@ -207,6 +207,6 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
   (match write_meta ctx.config updated with
    | Error e -> (false, e)
    | Ok () ->
-     stop_keepalive updated.name;
+     stop_keepalive ~base_path:ctx.config.base_path updated.name;
      start_keepalive ctx updated;
      (true, Yojson.Safe.to_string (meta_to_json updated)))

@@ -730,6 +730,77 @@ let test_dashboard_mission_keeper_tool_audit_uses_decision_log () =
       check bool "decision log still reports empty tool list" true
         ((brief |> member "latest_tool_names" |> to_list) = []))
 
+let test_dashboard_mission_keeper_brief_registry_lookup_scoped_to_base_path () =
+  let root_dir = test_dir () in
+  let dir_a = Filename.concat root_dir "a-scope" in
+  let dir_z = Filename.concat root_dir "z-scope" in
+  let keeper_name = "shared-dashboard-keeper" in
+  let make_meta ~also_allow name =
+    match
+      Lib.Keeper_types.meta_of_json
+        (`Assoc
+          [
+            ("name", `String name);
+            ("agent_name", `String name);
+            ("trace_id", `String ("trace-" ^ name));
+            ( "tool_access",
+              Lib.Keeper_types.tool_access_to_json
+                (Lib.Keeper_types.Preset
+                   { preset = Lib.Keeper_types.Minimal; also_allow }) );
+          ])
+    with
+    | Ok meta -> meta
+    | Error err -> failwith ("make_meta failed: " ^ err)
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Lib.Keeper_registry.clear ();
+      cleanup_dir root_dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      Unix.mkdir dir_a 0o755;
+      Unix.mkdir dir_z 0o755;
+      Masc_test_deps.init_keeper_tool_registry ();
+      let policy_base_path = Masc_test_deps.find_project_root () in
+      ignore (Result.get_ok (Lib.Keeper_exec_tools.init_policy_config ~base_path:policy_base_path));
+      let config_a = Room_utils.default_config dir_a in
+      let config_z = Room_utils.default_config dir_z in
+      ignore
+        (Lib.Keeper_registry.register ~base_path:config_a.base_path keeper_name
+           (make_meta ~also_allow:[ "keeper_board_vote" ] keeper_name));
+      ignore
+        (Lib.Keeper_registry.register ~base_path:config_z.base_path keeper_name
+           (make_meta ~also_allow:[ "keeper_board_post" ] keeper_name));
+      let briefs =
+        Lib.Dashboard_mission_assembly.build_keeper_briefs config_a
+          [
+            `Assoc
+              [
+                ("name", `String keeper_name);
+                ("agent_name", `String keeper_name);
+                ("status", `String "idle");
+                ("updated_at", `String (Types.now_iso ()));
+                ("allowed_tool_names", `Null);
+                ("latest_tool_names", `List []);
+                ("latest_tool_call_count", `Null);
+                ("tool_audit_source", `Null);
+                ("tool_audit_at", `Null);
+              ];
+          ]
+      in
+      let open Yojson.Safe.Util in
+      let brief =
+        briefs |> List.find (fun row -> row |> member "name" |> to_string = keeper_name)
+      in
+      let allowed_tool_names =
+        brief |> member "allowed_tool_names" |> to_list |> List.map to_string
+      in
+      check bool "current base path registry tools included" true
+        (List.mem "keeper_board_vote" allowed_tool_names);
+      check bool "other base path registry tools excluded" false
+        (List.mem "keeper_board_post" allowed_tool_names))
+
 let () =
   Alcotest.run "Dashboard Mission"
     [
@@ -749,5 +820,8 @@ let () =
             test_dashboard_mission_keeper_tool_audit_prefers_heartbeat_task;
           Alcotest.test_case "keeper brief uses decision log fallback" `Quick
             test_dashboard_mission_keeper_tool_audit_uses_decision_log;
+          Alcotest.test_case "keeper brief registry lookup scoped to base path"
+            `Quick
+            test_dashboard_mission_keeper_brief_registry_lookup_scoped_to_base_path;
         ] );
     ]

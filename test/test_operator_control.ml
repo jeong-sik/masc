@@ -124,6 +124,16 @@ let () =
           Alcotest.test_case "keeper down accepts agent alias" `Quick
             Test_operator_control_keeper
             .test_keeper_down_accepts_agent_name_alias;
+          Alcotest.test_case "keeper list scoped to current base path" `Quick
+            Test_operator_control_keeper
+            .test_keeper_list_scoped_to_current_base_path;
+          Alcotest.test_case "keeper status does not cross base path" `Quick
+            Test_operator_control_keeper
+            .test_keeper_status_does_not_cross_base_path;
+          Alcotest.test_case "keeper down only pauses current base path"
+            `Quick
+            Test_operator_control_keeper
+            .test_keeper_down_only_pauses_current_base_path;
           Alcotest.test_case "operator keeper probe accepts agent alias"
             `Quick
             Test_operator_control_keeper

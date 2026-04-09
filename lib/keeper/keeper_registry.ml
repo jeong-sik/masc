@@ -473,15 +473,10 @@ let resolve_config (config : Room_utils_backend_setup.config) keeper_name
     : Room_utils_backend_setup.config =
   if keeper_name = "" then config
   else
-    (* Fast path: scoped lookup in the caller's base_path (O(1) map) *)
+    (* Keeper config resolution is scoped to the caller's current base_path.
+       Do not retarget requests across other base_path registries. *)
     match get ~base_path:config.base_path keeper_name with
-    | Some _ -> config  (* already in the right scope *)
-    | None ->
-      (* Slow path: cross-base_path scan (O(n) registry) *)
-      match find_by_name keeper_name with
-      | Some entry when entry.base_path <> config.base_path ->
-        { config with base_path = entry.base_path }
-      | _ -> config  (* not found anywhere, keep original *)
+    | Some _ | None -> config
 
 (* -- Tool usage persistence ---------------------------------------- *)
 

@@ -236,7 +236,26 @@ let handle_keeper_bash
             ; "hint", `String hint
             ])
     | Ok () ->
-      (* Destructive guard: always active regardless of preset *)
+      (* Resolve cwd early — needed for playground detection in guards below *)
+      match resolve_keeper_shell_write_cwd ~config ~meta ~args with
+      | Error e -> error_json e
+      | Ok cwd ->
+      (* Playground sandbox: git write ops are allowed inside the keeper's
+         playground clone (.masc/playground/<name>/repos/<repo>).
+         This enables the clone → branch → edit → commit → push → PR workflow. *)
+      let playground_rel =
+        Keeper_alerting_path.playground_path_of_keeper meta.name
+      in
+      let root = Keeper_alerting_path.project_root_of_config config in
+      let playground_abs =
+        try Unix.realpath (Filename.concat root playground_rel)
+        with Unix.Unix_error _ -> Filename.concat root playground_rel
+      in
+      let in_playground =
+        String.starts_with ~prefix:(playground_abs ^ "/") (cwd ^ "/")
+        || String.equal playground_abs cwd
+      in
+      (* Destructive guard: always active regardless of preset or location *)
       if Worker_dev_tools.is_destructive_bash_operation cmd
       then (
         Log.Keeper.warn "keeper_bash DESTRUCTIVE blocked: %s (keeper=%s)" cmd_for_log meta.name;
@@ -250,9 +269,9 @@ let handle_keeper_bash
                      etc.) and is blocked for all presets." )
               ; "cmd", `String cmd_for_log
               ]))
-      (* Branch-switch guard: keeper_bash must not mutate git branch state.
-         Use keeper_pr_workflow to create changes in an isolated clone/worktree. *)
+      (* Branch-switch guard: blocked in main repo, allowed in playground *)
       else if Worker_dev_tools.is_git_branch_switch cmd
+              && not in_playground
       then (
         Log.Keeper.info "keeper_bash branch-switch blocked: %s (keeper=%s)" cmd_for_log meta.name;
         Yojson.Safe.to_string
@@ -261,15 +280,15 @@ let handle_keeper_bash
               ; "error", `String "branch_switch_blocked"
               ; ( "reason"
                 , `String
-                    "git checkout, git switch, and git branch mutations \
-                     (create/rename/copy) are blocked in the main repo. \
-                     Plain git branch listing is allowed. \
-                     Use keeper_pr_workflow to create changes in an isolated clone." )
+                    "git checkout/switch/branch mutations are blocked in the main repo. \
+                     Clone into your playground first (keeper_shell op=git_clone), \
+                     then set cwd to the cloned repo path." )
               ; "cmd", `String cmd_for_log
-              ; "hint", `String "keeper_pr_workflow"
+              ; "hint", `String "Use cwd=.masc/playground/YOUR_NAME/repos/REPO"
               ]))
-      (* Write gate: only for non-coding presets *)
-      else if (not write_enabled) && Worker_dev_tools.is_write_operation cmd
+      (* Write gate: blocked for non-coding presets outside playground *)
+      else if (not write_enabled) && (not in_playground)
+              && Worker_dev_tools.is_write_operation cmd
       then (
         Log.Keeper.info "keeper_bash write-gate: %s (keeper=%s)" cmd_for_log meta.name;
         Yojson.Safe.to_string
@@ -279,19 +298,17 @@ let handle_keeper_bash
               ; ( "reason"
                 , `String
                     "This command modifies state (git push/commit, make deploy, etc.). \
-                     Use a Coding preset keeper for write access." )
+                     Use a Coding preset keeper or work inside your playground." )
               ; "cmd", `String cmd_for_log
               ]))
       else (
-        match resolve_keeper_shell_write_cwd ~config ~meta ~args with
-        | Error e -> error_json e
-        | Ok cwd ->
           (match Worker_dev_tools.validate_command_paths ~workdir:cwd cmd with
            | Error e -> error_json e
            | Ok () ->
-             if write_enabled && Worker_dev_tools.is_write_operation cmd then
-               Log.Keeper.info "WRITE_AUDIT: keeper=%s cwd=%s cmd=%s"
-                 meta.name cwd cmd_for_log;
+             if (write_enabled || in_playground)
+                && Worker_dev_tools.is_write_operation cmd then
+               Log.Keeper.info "WRITE_AUDIT: keeper=%s cwd=%s cmd=%s playground=%b"
+                 meta.name cwd cmd_for_log in_playground;
              let st, out =
                Process_eio.run_argv_with_status ~cwd ~timeout_sec
                  [ "/bin/bash"; "-lc"; cmd ^ " 2>&1" ]

@@ -382,6 +382,7 @@
    tool_unified
    tool_help_registry
    tool_registry
+   tool_registration_check
    tool_code
    tool_code_write
    tool_suspend

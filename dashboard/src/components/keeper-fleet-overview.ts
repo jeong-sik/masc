@@ -62,7 +62,7 @@ function FleetSummary({ keepers }: { keepers: Keeper[] }) {
           value=${`${(avgCtx * 100).toFixed(0)}%`}
           tone=${avgCtx > CONTEXT_RATIO_CRITICAL ? 'warn' : avgCtx > CONTEXT_RATIO_FLEET_WARN ? 'paused' : 'ok'}
         />
-        <${MetricPill} label="최근 도구" value=${totalTools} />
+        ${totalTools > 0 ? html`<${MetricPill} label="최근 도구" value=${totalTools} />` : null}
         ${totalCompactions > 0 ? html`
           <${MetricPill}
             label="압축"

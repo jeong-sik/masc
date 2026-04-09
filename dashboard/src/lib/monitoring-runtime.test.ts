@@ -133,6 +133,22 @@ describe('summarizeKeeperMonitoring', () => {
       stage: summary.stage,
     })
   })
+
+  it('suppresses stage evidence when it matches the same lifecycle reason as phase', () => {
+    const summary = summarizeKeeperMonitoring(
+      makeKeeper({
+        status: 'busy',
+        phase: 'Compacting',
+        pipeline_stage: 'compacting',
+      }),
+    )
+
+    expect(summary.band.key).toBe('attention')
+    expect(summarizeMonitoringEvidence(summary)).toEqual({
+      phase: summary.phase,
+      stage: null,
+    })
+  })
 })
 
 describe('runtimeBandForAgent', () => {

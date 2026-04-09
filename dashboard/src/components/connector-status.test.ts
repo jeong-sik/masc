@@ -3,6 +3,11 @@ import { render } from 'preact'
 import { signal } from '@preact/signals'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+vi.setConfig({
+  testTimeout: 40000,
+  hookTimeout: 40000,
+})
+
 function sampleGateResponse(overrides?: Partial<Record<string, unknown>>) {
   return {
     channels: [

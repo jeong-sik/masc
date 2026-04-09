@@ -71,7 +71,7 @@ let unit_policy_blocker (unit : unit_record) ~workload_profile ~stage =
   else
     None
 
-let unit_guard_json_with ~agents ~units config unit_id =
+let unit_guard_json_with ~agents ~units ?operations config unit_id =
   match lookup_unit units unit_id with
   | None -> Error (Printf.sprintf "assigned unit not found: %s" unit_id)
   | Some unit ->
@@ -80,8 +80,12 @@ let unit_guard_json_with ~agents ~units config unit_id =
         |> List.filter (roster_name_is_live (live_agent_names agents))
         |> List.length
       in
+      let ops = match operations with
+        | Some ops -> ops
+        | None -> all_operations config units
+      in
       let active_count =
-        all_operations config units
+        ops
         |> List.filter (fun (operation : operation_record) ->
                active_operation_status operation.status
                && String.equal operation.assigned_unit_id unit.unit_id)
@@ -115,9 +119,12 @@ let unit_guard_json config unit_id =
   unit_guard_json_with ~agents ~units config unit_id
   |> Result.map snd
 
-let operation_assignment_guard_json config unit_id ~workload_profile ~stage =
-  let agents, _, units, _ = topology_units config in
-  match unit_guard_json_with ~agents ~units config unit_id with
+let operation_assignment_guard_json ?agents ?units ?operations config unit_id ~workload_profile ~stage =
+  let agents, units = match agents, units with
+    | Some a, Some u -> (a, u)
+    | _ -> let a, _, u, _ = topology_units config in (a, u)
+  in
+  match unit_guard_json_with ~agents ~units ?operations config unit_id with
   | Error _ as error -> error
   | Ok (unit, guard) -> (
       match unit_policy_blocker unit ~workload_profile ~stage with
@@ -676,7 +683,7 @@ let operation_active_count operations unit_id =
          && String.equal operation.assigned_unit_id unit_id)
   |> List.length
 
-let search_candidates_for_operation config units operations
+let search_candidates_for_operation ?agents config units operations
     (operation : operation_record) =
   let current_unit_id = Some operation.assigned_unit_id in
   let workload_profile = operation_workload_profile operation in
@@ -684,8 +691,8 @@ let search_candidates_for_operation config units operations
   candidate_units_for_operation units operations current_unit_id
   |> List.filter_map (fun (unit : unit_record) ->
          match
-           operation_assignment_guard_json config unit.unit_id ~workload_profile
-             ~stage
+           operation_assignment_guard_json ?agents ~units ~operations
+             config unit.unit_id ~workload_profile ~stage
          with
          | Error _ -> None
          | Ok _ ->
@@ -830,7 +837,7 @@ let apply_intent_forecast_bias ?intents config (operations : operation_record li
                    (right.breakdown.total, right.breakdown.capability_match, right.label)
                    (left.breakdown.total, left.breakdown.capability_match, left.label)))
 
-let operation_search_candidates ?store ?intents config units operations
+let operation_search_candidates ?store ?intents ?agents config units operations
     (operation : operation_record) =
   let stats =
     match store with
@@ -839,7 +846,7 @@ let operation_search_candidates ?store ?intents config units operations
   in
   Cp_search_fabric.score_candidates ~store:stats
     ~operation:(search_operation_descriptor operation)
-    ~candidates:(search_candidates_for_operation config units operations operation)
+    ~candidates:(search_candidates_for_operation ?agents config units operations operation)
   |> apply_intent_forecast_bias ?intents config operations operation
 
 let take_list n xs =
@@ -851,14 +858,14 @@ let take_list n xs =
   in
   loop [] xs n
 
-let operation_search_json ?store ?intents config units operations
+let operation_search_json ?store ?intents ?agents config units operations
     (operation : operation_record) =
   let readiness = operation_readiness operations operation in
   let candidates =
     match operation_search_strategy operation with
     | Cp_search_fabric.Legacy -> []
     | Cp_search_fabric.Best_first_v1 ->
-        operation_search_candidates ?store ?intents config units operations operation
+        operation_search_candidates ?store ?intents ?agents config units operations operation
   in
   let selected_unit_id =
     match candidates with

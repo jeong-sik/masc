@@ -174,8 +174,10 @@ let run_named
   in
   let candidate_cfgs = resolve_cascade_providers ~cascade_name in
   let capture, metrics = Oas_worker_cascade.cascade_metrics_for_candidates ~candidate_cfgs () in
-  (* TODO(#6001): pass ?provider_filter after OAS pin bump with oas#740 *)
-  let _ = provider_filter in
+  (* TODO(#6001): pass ?provider_filter to named_cascade after OAS pin bump *)
+  (match provider_filter with
+   | Some _ -> Log.Misc.warn "run_named: provider_filter not yet wired (pending oas#740/#6001)"
+   | None -> ());
   let named_cascade = Agent_sdk.Api.named_cascade ?config_path
     ~metrics ~name:cascade_name ~defaults () in
   let name = Printf.sprintf "oas-%s" cascade_name in

@@ -553,10 +553,19 @@ let maybe_recover_from_failing ~(ctx : _ context) ~(meta : keeper_meta) =
            | None -> false)
       | None -> false
     in
-    if sticky_manual_reconcile then
+    if sticky_manual_reconcile then begin
+      let reason_str =
+        match Keeper_registry.get ~base_path:ctx.config.base_path meta.name with
+        | Some entry ->
+            (match entry.last_failure_reason with
+             | Some reason -> Keeper_registry.failure_reason_to_string reason
+             | None -> "none")
+        | None -> "no_entry"
+      in
       Log.Keeper.warn
-        "heartbeat recovery: auto-clearing %d turn failures for %s (manual reconcile auto-resolved after heartbeat)"
-        stale_turn_failures meta.name;
+        "heartbeat recovery: auto-clearing %d turn failures for %s (reason=%s). Cursors already advanced — re-trigger risk is low."
+        stale_turn_failures meta.name reason_str
+    end;
     begin
       Keeper_registry.reset_turn_failures
         ~base_path:ctx.config.base_path meta.name;

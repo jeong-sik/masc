@@ -223,6 +223,7 @@
         test_dashboard_harness_health
         test_dashboard_repo_synthesis
         test_dashboard_tools
+        test_tool_quality_classify
         test_tui_decode
         test_dashboard_governance
         test_dashboard_labels
@@ -365,6 +366,7 @@
         test_dashboard_harness_health
         test_dashboard_repo_synthesis
         test_dashboard_tools
+        test_tool_quality_classify
         test_tui_decode
         test_dashboard_governance
         test_dashboard_labels

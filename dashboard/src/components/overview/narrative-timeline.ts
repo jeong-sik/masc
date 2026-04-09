@@ -4,6 +4,7 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import type { ReadonlySignal } from '@preact/signals'
+import { formatTimeOnly } from '../../lib/format-time'
 import type { JournalEntry } from '../../types'
 
 interface NarrativeTimelineProps {
@@ -72,11 +73,8 @@ function groupByTime(events: NarrativeEvent[]): TimeGroup[] {
   return groups
 }
 
-const timeOnlyFmt = new Intl.DateTimeFormat('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false })
-
-function formatTimestamp(ts: number): string {
-  return timeOnlyFmt.format(new Date(ts))
-}
+// Delegated to lib/format-time (SSOT)
+const formatTimestamp = formatTimeOnly
 
 export function NarrativeTimeline({ entries, maxItems }: NarrativeTimelineProps) {
   const baseLimit = maxItems ?? 8

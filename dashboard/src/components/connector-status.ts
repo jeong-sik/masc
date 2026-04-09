@@ -5,6 +5,8 @@ import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
 import { get, post } from '../api/core'
+import { formatElapsedCompact, formatTimeAgoEn } from '../lib/format-time'
+import { LoadingState } from './common/feedback-state'
 import { lastEvent } from '../sse'
 import { StatCard } from './common/stat-card'
 import { ActionButton } from './common/button'
@@ -207,24 +209,9 @@ function channelIcon(ch: string): string {
   return CHANNEL_ICONS[ch] ?? '\u{1F517}'
 }
 
-function formatUptime(seconds: number): string {
-  if (seconds < 60) return `${seconds}s`
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`
-  const h = Math.floor(seconds / 3600)
-  const m = Math.floor((seconds % 3600) / 60)
-  return m > 0 ? `${h}h ${m}m` : `${h}h`
-}
-
-function timeAgo(iso: string): string {
-  if (!iso.trim()) return 'unknown'
-  if (iso === 'never') return 'never'
-  const diff = (Date.now() - new Date(iso).getTime()) / 1000
-  if (Number.isNaN(diff)) return 'unknown'
-  if (diff < 60) return 'just now'
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
-  return `${Math.floor(diff / 86400)}d ago`
-}
+// Time formatting delegated to lib/format-time (SSOT)
+const formatUptime = formatElapsedCompact
+const timeAgo = formatTimeAgoEn
 
 function healthTone(health: string): { dot: string; badge: string; label: string } {
   switch (health) {
@@ -543,7 +530,7 @@ function DiscordLivePanel({
           <div>
             <div class="mb-1 text-[10px] uppercase tracking-[0.16em] text-[var(--text-dim)]">Configured bindings</div>
             ${configuredBindings.length === 0
-              ? html`<div class="rounded-md border border-dashed border-[var(--white-8)] px-3 py-4 text-xs text-[var(--text-dim)]">No persisted Discord bindings yet</div>`
+              ? html`<div class="rounded-md border border-dashed border-[var(--white-8)] px-3 py-4 text-xs text-[var(--text-dim)]">저장된 Discord 바인딩 없음</div>`
               : html`
                   <div class="space-y-2">
                     ${configuredBindings.map(binding => html`
@@ -795,7 +782,7 @@ export function ConnectorStatusPanel() {
   const live = discordLive.value
 
   if (loading.value && !d && !live) {
-    return html`<div class="text-xs text-[var(--text-dim)]">Loading connector status...</div>`
+    return html`<${LoadingState}>커넥터 상태 불러오는 중...<//>`
   }
 
   if (error.value && !d && !live) {
@@ -861,7 +848,7 @@ export function ConnectorStatusPanel() {
                     Observed room bindings
                   </div>
                   ${d.bindings.length === 0
-                    ? html`<div class="rounded-md border border-dashed border-[var(--white-8)] px-3 py-4 text-xs text-[var(--text-dim)]">No observed room bindings yet</div>`
+                    ? html`<div class="rounded-md border border-dashed border-[var(--white-8)] px-3 py-4 text-xs text-[var(--text-dim)]">관찰된 room 바인딩 없음</div>`
                     : html`
                         <div class="space-y-2">
                           ${d.bindings.slice(0, 6).map(binding => html`<${BindingRow} binding=${binding} />`)}
@@ -874,7 +861,7 @@ export function ConnectorStatusPanel() {
                     Recent gate events
                   </div>
                   ${d.recent_events.length === 0
-                    ? html`<div class="rounded-md border border-dashed border-[var(--white-8)] px-3 py-4 text-xs text-[var(--text-dim)]">No connector events recorded yet</div>`
+                    ? html`<div class="rounded-md border border-dashed border-[var(--white-8)] px-3 py-4 text-xs text-[var(--text-dim)]">커넥터 이벤트 기록 없음</div>`
                     : html`
                         <div class="space-y-2">
                           ${d.recent_events.slice(0, 8).map(event => html`<${EventRow} event=${event} />`)}
@@ -884,7 +871,7 @@ export function ConnectorStatusPanel() {
               </div>
 
               ${d.channels.length === 0
-                ? html`<div class="py-4 text-center text-xs text-[var(--text-dim)]">No active connectors</div>`
+                ? html`<div class="py-4 text-center text-xs text-[var(--text-dim)]">활성 커넥터 없음</div>`
                 : html`
                     <div class="grid grid-cols-2 gap-2 max-[900px]:grid-cols-1">
                       ${d.channels.map(ch => html`<${ChannelCard} ch=${ch} />`)}

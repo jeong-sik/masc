@@ -6,38 +6,25 @@ import { useEffect } from 'preact/hooks'
 import { keepers } from '../store'
 import { fetchKeeperTransitions, type KeeperTransition, type KeeperTransitionsResponse } from '../api/keeper'
 import { TimeAgo } from './common/time-ago'
+import { getPhaseStyle } from './keeper-phase-indicator'
 
 const transitionData = signal<Map<string, KeeperTransitionsResponse>>(new Map())
 const loading = signal(false)
 
-// Phase names come lowercase from the server (phase_to_string)
-const PHASE_COLORS: Record<string, string> = {
-  running: 'var(--ok)',
-  compacting: '#fbbf24',
-  handing_off: '#22d3ee',
-  failing: 'var(--bad)',
-  crashed: '#ef4444',
-  dead: '#6b7280',
-  paused: '#a78bfa',
-  draining: '#fb923c',
-  restarting: '#38bdf8',
-  stopped: '#9ca3af',
-  offline: '#4b5563',
+// Server sends lowercase (e.g. "running", "handing_off"); PHASE_STYLES uses PascalCase
+function toPascalPhase(phase: string): string {
+  return phase.toLowerCase()
+    .replace(/_([a-z])/g, (_, c: string) => c.toUpperCase())
+    .replace(/^./, s => s.toUpperCase())
 }
 
 function phaseColor(phase: string): string {
-  return PHASE_COLORS[phase.toLowerCase()] ?? '#6b7280'
+  return getPhaseStyle(toPascalPhase(phase)).color
 }
 
-function phaseBgClass(phase: string): string {
-  switch (phase.toLowerCase()) {
-    case 'running': return 'bg-[var(--ok)]/15 text-[var(--ok)]'
-    case 'failing': case 'crashed': return 'bg-[var(--bad)]/15 text-[var(--bad-light)]'
-    case 'compacting': return 'bg-[#fbbf24]/15 text-[#fbbf24]'
-    case 'handing_off': return 'bg-[#22d3ee]/15 text-[#22d3ee]'
-    case 'paused': return 'bg-[#a78bfa]/15 text-[#a78bfa]'
-    default: return 'bg-[var(--white-6)] text-[var(--text-muted)]'
-  }
+function phaseInlineStyle(phase: string): string {
+  const style = getPhaseStyle(toPascalPhase(phase))
+  return `color: ${style.color}; background: ${style.bg}; border: 1px solid ${style.border};`
 }
 
 // selected_event comes as object {type: "...", ...} from the server
@@ -96,13 +83,16 @@ function KeeperStrip({ name, data }: { name: string; data: KeeperTransitionsResp
     <div class="flex items-center gap-3 py-2 px-3 rounded-lg border border-[var(--white-6)] bg-[var(--white-3)]">
       <div class="w-24 shrink-0">
         <div class="text-[13px] font-semibold text-[var(--text-strong)] truncate">${name}</div>
-        <div class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium mt-1 ${phaseBgClass(phase)}">
-          ${phase}
+        <div
+          class="inline-flex items-center rounded-md px-2 py-0.5 text-[10px] font-semibold tracking-wide mt-1"
+          style="${phaseInlineStyle(phase)}"
+        >
+          ${getPhaseStyle(toPascalPhase(phase)).icon} ${getPhaseStyle(toPascalPhase(phase)).label}
         </div>
       </div>
       <div class="flex-1 flex items-center gap-1.5 overflow-x-auto min-h-[24px]">
         ${transitions.length === 0
-          ? html`<span class="text-[11px] text-[var(--text-muted)]">no transitions</span>`
+          ? html`<span class="text-[11px] text-[var(--text-muted)]">전환 없음</span>`
           : transitions.map((t, i) => html`
               <${TransitionDot} t=${t} idx=${i} />
               ${i < transitions.length - 1 ? html`<div class="w-3 h-px bg-[var(--white-10)]" />` : null}
@@ -110,7 +100,7 @@ function KeeperStrip({ name, data }: { name: string; data: KeeperTransitionsResp
         }
       </div>
       <div class="shrink-0 text-[11px] text-[var(--text-muted)] tabular-nums">
-        ${transitions.length} transitions
+        ${transitions.length}건
       </div>
     </div>
   `
@@ -124,22 +114,22 @@ export function KeeperPhaseTimeline() {
   const keeperList = keepers.value
 
   if (isLoading && data.size === 0) {
-    return html`<div class="text-[12px] text-[var(--text-muted)] py-4 text-center">Phase timeline loading...</div>`
+    return html`<div class="text-[12px] text-[var(--text-muted)] py-4 text-center">페이즈 타임라인 로딩 중...</div>`
   }
 
   if (keeperList.length === 0) {
-    return html`<div class="text-[12px] text-[var(--text-muted)] py-4 text-center">No keepers registered</div>`
+    return html`<div class="text-[12px] text-[var(--text-muted)] py-4 text-center">등록된 키퍼 없음</div>`
   }
 
   return html`
     <div class="flex flex-col gap-2">
       <div class="flex items-center justify-between mb-1">
-        <div class="text-[11px] text-[var(--text-muted)] uppercase tracking-wider font-medium">Phase Transitions (recent 30)</div>
+        <div class="text-[11px] text-[var(--text-muted)] uppercase tracking-wider font-medium">페이즈 전환 (최근 30건)</div>
         <button
           type="button"
           class="text-[11px] text-[var(--text-dim)] hover:text-[var(--text-body)] transition-colors"
           onClick=${() => { void loadAll() }}
-        >refresh</button>
+        >새로고침</button>
       </div>
       ${keeperList.map(k => {
         const d = data.get(k.name)
@@ -148,7 +138,7 @@ export function KeeperPhaseTimeline() {
           : html`
             <div class="flex items-center gap-3 py-2 px-3 rounded-lg border border-[var(--white-6)] bg-[var(--white-3)]" key=${k.name}>
               <div class="w-24 text-[13px] font-semibold text-[var(--text-strong)] truncate">${k.name}</div>
-              <span class="text-[11px] text-[var(--text-muted)]">no data</span>
+              <span class="text-[11px] text-[var(--text-muted)]">데이터 없음</span>
             </div>
           `
       })}

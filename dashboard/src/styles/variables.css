@@ -6,10 +6,10 @@
      a full light-theme token migration lands. */
   color-scheme: dark;
 
-  /* Base & Backgrounds */
-  --bg-root: #0b1220;
-  --bg-panel: rgba(16, 24, 42, 0.92);
-  --bg-panel-hover: rgba(30, 41, 59, 0.95);
+  /* Base & Backgrounds — slightly lifted from pure dark for depth separation */
+  --bg-root: #0c1424;
+  --bg-panel: rgba(18, 27, 46, 0.94);
+  --bg-panel-hover: rgba(32, 44, 64, 0.96);
 
   /* Text & Typography */
   --text-strong: #eaf1ff;
@@ -51,11 +51,11 @@
   --bad-10: rgba(239, 68, 68, 0.10);
   --bad-20: rgba(239, 68, 68, 0.20);
 
-  /* Overlays (White Alpha) */
-  --white-3: rgba(255, 255, 255, 0.03);
-  --white-5: rgba(255, 255, 255, 0.05);
-  --white-10: rgba(255, 255, 255, 0.10);
-  --white-20: rgba(255, 255, 255, 0.20);
+  /* Overlays (White Alpha) — bumped from 3/5 to 4/6 for clearer surface elevation */
+  --white-3: rgba(255, 255, 255, 0.04);
+  --white-5: rgba(255, 255, 255, 0.06);
+  --white-10: rgba(255, 255, 255, 0.11);
+  --white-20: rgba(255, 255, 255, 0.21);
   --white-50: rgba(255, 255, 255, 0.50);
   --white-80: rgba(255, 255, 255, 0.80);
 

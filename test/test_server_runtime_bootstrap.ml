@@ -80,7 +80,6 @@ let make_config_root root =
   write_file (Filename.concat config "keepers/example.toml") "[keeper]\ngoal = \"example\"\n";
   write_file (Filename.concat config "personas/example.txt") "persona";
   config
-
 let find_free_port () =
   let socket = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
   Fun.protect
@@ -699,6 +698,27 @@ let test_prompt_markdown_dir_honors_masc_config_dir_override () =
       Alcotest.(check string) "resolved config root wins over workspace prompts"
         override_prompts resolved)
 
+let test_prompt_markdown_dir_prefers_resolved_config_dir_over_cwd () =
+  with_temp_dir "startup-prompts-priority" (fun dir ->
+      let cwd_prompts = Filename.concat dir "config/prompts" in
+      let resolved_config = Filename.concat dir ".masc/config" in
+      let resolved_prompts = Filename.concat resolved_config "prompts" in
+      Fs_compat.mkdir_p cwd_prompts;
+      Fs_compat.mkdir_p resolved_prompts;
+      with_cwd dir @@ fun () ->
+      with_env "MASC_CONFIG_DIR" (Some resolved_config) @@ fun () ->
+      Config_dir_resolver.reset ();
+      Fun.protect
+        ~finally:(fun () -> Config_dir_resolver.reset ())
+        (fun () ->
+          let resolved =
+            Prompt_defaults.resolve_prompt_markdown_dir
+              ~workspace_path:(Filename.concat dir "workspace")
+              ~base_path:(Filename.concat dir "workspace")
+          in
+          Alcotest.(check string)
+            "resolved config prompts win over cwd fallback"
+            resolved_prompts resolved))
 let test_main_eio_serves_health_before_lazy_startup () =
   with_temp_dir "startup-health" (fun dir ->
       let exe = find_main_eio_exe () in
@@ -833,6 +853,10 @@ let () =
             `Quick test_prompt_markdown_dir_falls_back_to_resolved_config_dir;
           Alcotest.test_case "prompt markdown dir honors MASC_CONFIG_DIR override"
             `Quick test_prompt_markdown_dir_honors_masc_config_dir_override;
+          Alcotest.test_case
+            "prompt markdown dir prefers resolved config dir over cwd fallback"
+            `Quick
+            test_prompt_markdown_dir_prefers_resolved_config_dir_over_cwd;
           Alcotest.test_case "main_eio serves health before lazy startup"
             `Slow test_main_eio_serves_health_before_lazy_startup;
         ] );

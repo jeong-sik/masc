@@ -14,11 +14,3 @@
   isolation: isolate;
 }
 
-@utility keeper-field-search {
-  &:focus { outline: none; border-color: var(--ok-40); }
-}
-
-@utility keeper-chat__cursor {
-  animation: keeper-blink 0.8s step-end infinite;
-  color: var(--ff-gold);
-}

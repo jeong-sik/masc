@@ -87,12 +87,6 @@
   & summary { cursor: pointer; color: var(--purple); font-size: var(--fs-sm); }
 }
 
-/* ── SPA Refresh ─────────────────────────────────────────── */
-@utility main-tab-btn {
-  &:hover { color: #d6e5ff; border-color: var(--border-slate-35); }
-  &.active { color: #c9ebff; border-color: rgba(71, 184, 255, 0.5); background: var(--accent-soft); }
-}
-
 /* button.agent/agent-card: element+class selector, kept as raw CSS */
 button.agent,
 button.agent-card {
@@ -124,13 +118,6 @@ button.monitor-row {
 
 /* ── Agent List (Overview) ─────────────────────────────────── */
 /* agent-card:hover → dashboard.css (canonical, includes box-shadow + transform) */
-
-/* ── Agents Unified Tab (chip toggle) ────────── */
-@utility agents-chip {
-  transition-property: color, border-color;
-  transition-duration: 0.15s;
-  &:hover { border-color: var(--accent); color: var(--text-strong); }
-}
 
 /* ── Agent Monitor — runtime strip + live timeline ──────────── */
 

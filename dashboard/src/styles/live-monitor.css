@@ -18,15 +18,6 @@
   box-shadow: 0 0 8px var(--blue-400-15);
 }
 
-@utility activity-filter-btn {
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
-  &.active { color: var(--text-strong); border-color: var(--white-20); background: var(--white-6); }
-  &.live-event-broadcast.active { border-color: rgba(96,165,250,0.4); color: var(--accent); }
-  &.live-event-task.active { border-color: var(--ok-40); color: var(--ok); }
-  &.live-event-keeper.active { border-color: rgba(168,85,247,0.4); color: #a855f7; }
-  &.live-event-system.active { border-color: var(--white-20); color: var(--text-muted); }
-}
-
 @utility activity-item {
   transition: background 0.15s;
   &:hover { background: var(--white-4); }
@@ -55,11 +46,6 @@
 @utility focus-agent-selected {
   border-color: rgba(96,165,250,0.4);
   background: rgba(96,165,250,0.05);
-}
-
-@utility live-stat-dot {
-  &.connected { background: var(--ok); box-shadow: 0 0 4px rgba(74,222,128,0.6); }
-  &.disconnected { background: var(--bad); }
 }
 
 @media (max-width: 1100px) {

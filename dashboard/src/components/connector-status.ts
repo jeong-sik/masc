@@ -346,6 +346,10 @@ function keeperLabel(keeper: GateKeeperInfo): string {
 }
 
 function connectorStateLabel(connector: GateConnectorInfo | null): string {
+  const advertised = connector?.status?.trim().toLowerCase()
+  if (advertised === 'offline' || advertised === 'stale' || advertised === 'connected' || advertised === 'disconnected') {
+    return advertised
+  }
   if (!connector?.available) return 'offline'
   if (connector.stale) return 'stale'
   if (connector.connected) return 'connected'

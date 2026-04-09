@@ -270,6 +270,35 @@ describe('ConnectorStatusPanel', () => {
     expect(text).toContain('keeper directory unavailable, manual entry only')
   })
 
+  it('prefers backend-advertised connector status over derived booleans', async () => {
+    const get = vi.fn<(path: string) => Promise<unknown>>().mockImplementation(async path => {
+      if (path === '/api/v1/gate/status') return sampleGateResponse()
+      if (path === '/api/v1/gate/connectors') return sampleConnectorsResponse({
+        connectors: [{
+          ...sampleConnectorsResponse().connectors[0],
+          available: true,
+          connected: false,
+          stale: false,
+          status: 'connected',
+        }],
+      })
+      if (path === '/api/v1/gate/keepers?limit=50&detailed=true') return sampleKeepersResponse()
+      throw new Error(`unexpected path: ${path}`)
+    })
+
+    const { ConnectorStatusPanel } = await loadComponentWithApi({
+      get,
+      lastEvent: signal(null),
+    })
+
+    render(html`<${ConnectorStatusPanel} />`, container)
+    await flushUi()
+    const text = container.textContent?.replace(/\s+/g, ' ').trim() ?? ''
+
+    expect(text).toContain('connected')
+    expect(text).not.toContain('disconnected')
+  })
+
   it('posts bind and unbind actions through the dashboard endpoints', async () => {
     const get = vi.fn<(path: string) => Promise<unknown>>().mockImplementation(async path => {
       if (path === '/api/v1/gate/status') return sampleGateResponse()

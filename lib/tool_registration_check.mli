@@ -2,13 +2,13 @@
 
 type validation_result = {
   orphan_toml : string list;
-  (** In TOML groups but no Tool_spec registration *)
+  (** Configured in tool_policy.toml but missing from the runtime keeper tool universe. *)
   uncovered : string list;
-  (** Registered in Tool_spec but not in any TOML group *)
+  (** Reserved for reverse-coverage diagnostics; currently non-fatal and may be empty. *)
 }
 
 val validate : unit -> validation_result
-(** Cross-validate registered Tool_spec names against tool_policy.toml groups.
+(** Cross-validate tool_policy.toml against the runtime keeper tool universe.
     Returns orphan/uncovered tool names. Safe to call when policy not loaded. *)
 
 val log_validation_result : validation_result -> unit

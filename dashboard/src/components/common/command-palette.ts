@@ -17,6 +17,16 @@ interface NinjaKeysElement extends HTMLElement {
   data: CommandPaletteAction[]
 }
 
+const LIT_DEV_MODE_WARNING =
+  'Lit is in dev mode. Not recommended for production! See https://lit.dev/msg/dev-mode for more information.'
+
+function suppressKnownLitDevWarning() {
+  const globalScope = window as Window & { litIssuedWarnings?: Set<string> }
+  const issuedWarnings = globalScope.litIssuedWarnings ?? new Set<string>()
+  issuedWarnings.add(LIT_DEV_MODE_WARNING)
+  globalScope.litIssuedWarnings = issuedWarnings
+}
+
 export function CommandPalette() {
   const ref = useRef<NinjaKeysElement | null>(null)
   const [ready, setReady] = useState(false)
@@ -24,6 +34,9 @@ export function CommandPalette() {
   useEffect(() => {
     let cancelled = false
 
+    // ninja-keys brings Lit's dev bundle under Vite serve, which emits a
+    // known third-party warning that does not indicate a dashboard defect.
+    suppressKnownLitDevWarning()
     void import('ninja-keys')
       .then(() => {
         if (!cancelled) setReady(true)

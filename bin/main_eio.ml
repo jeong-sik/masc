@@ -26,7 +26,7 @@ module Operator_control = Masc_mcp.Operator_control
 module Command_plane_v2 = Masc_mcp.Command_plane_v2
 module Dashboard_execution = Masc_mcp.Dashboard_execution
 module Dashboard_mission = Masc_mcp.Dashboard_mission
-module Dashboard_proof = Masc_mcp.Dashboard_proof
+(* module Dashboard_proof removed *)
 module Dashboard_mission_briefing = Masc_mcp.Dashboard_mission_briefing
 module Build_identity = Masc_mcp.Build_identity
 module Graphql_api = Masc_mcp.Graphql_api

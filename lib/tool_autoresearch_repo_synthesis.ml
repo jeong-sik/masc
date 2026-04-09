@@ -147,9 +147,9 @@ let ensure_repo_synthesis_units config ~actor ~active_roster =
   in
   loop units
 
-let append_repo_synthesis_seed_event config session_id detail =
-  Team_session_store.append_event config session_id
-    ~event_type:"repo_synthesis_seeded" ~detail
+let append_repo_synthesis_seed_event _config _session_id _detail =
+  (* Team_session_store removed — no-op *)
+  ()
 
 let resolve_repo_synthesis_question ~repo_root ~question_id ~question ~artifact_scope =
   match question_id with
@@ -314,21 +314,22 @@ let handle_repo_synthesis_swarm_start ctx args =
                                 let run_id =
                                   Repo_synthesis_benchmark.make_run_id ()
                                 in
-                                let report_json_path =
-                                  Team_session_store.report_json_path config
+                                let _session_dir =
+                                  Filename.concat
+                                    (Filename.concat (Room.masc_dir config) "team-sessions")
                                     session_id
+                                in
+                                let report_json_path =
+                                  Filename.concat _session_dir "report.json"
                                 in
                                 let report_md_path =
-                                  Team_session_store.report_md_path config
-                                    session_id
+                                  Filename.concat _session_dir "report.md"
                                 in
                                 let proof_json_path =
-                                  Team_session_store.proof_json_path config
-                                    session_id
+                                  Filename.concat _session_dir "proof.json"
                                 in
                                 let proof_md_path =
-                                  Team_session_store.proof_md_path config
-                                    session_id
+                                  Filename.concat _session_dir "proof.md"
                                 in
                                 let planned_worker_roles =
                                   planned_workers

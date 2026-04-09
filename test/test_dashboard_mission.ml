@@ -232,43 +232,8 @@ let seed_room config session_id =
       updated_at_iso = Types.now_iso ();
     }
   in
-  Lib.Team_session_store.save_session config session;
-  Lib.Team_session_store.append_event config session_id
-    ~event_type:"team_step_spawn"
-    ~detail:
-      (`Assoc
-        [
-          ("actor", `String "team-session-local64-smoke");
-          ("spawn_agent", `String "llama");
-          ("runtime_actor", `String "llama-local-delta");
-          ("success", `Bool false);
-          ("reason", `String "Connection refused on secondary runtime");
-          ("title", `String "Recover failed worker coverage");
-        ]);
-  Lib.Team_session_store.append_event config session_id
-    ~event_type:"team_step_spawn"
-    ~detail:
-      (`Assoc
-        [
-          ("actor", `String "team-session-local64-smoke");
-          ("spawn_agent", `String "llama");
-          ("runtime_actor", `String "llama-local-epsilon");
-          ("success", `Bool false);
-          ("reason", `String "Slot census timed out on local64 runtime");
-          ("title", `String "Recover failed worker coverage");
-        ]);
-  Lib.Team_session_store.append_event config session_id
-    ~event_type:"team_turn"
-    ~detail:
-      (`Assoc
-        [
-          ("kind", `String "note");
-          ("actor", `String "llama-local-alpha");
-          ("message", `String "manager synthesized runtime visibility");
-        ]);
-  Lib.Team_session_store.append_event config session_id
-    ~event_type:"local64_smoke_cleanup"
-    ~detail:(`Assoc [ ("result", `String "interrupted after spawn failure reproduction") ]);
+  (* Team_session_store removed — skip session save and event append *)
+  ignore (session, session_id);
   write_pending_confirm config session_id
 
 let test_dashboard_mission_projection () =

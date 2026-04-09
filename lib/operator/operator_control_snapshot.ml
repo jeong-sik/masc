@@ -458,9 +458,9 @@ let sessions_json ?(status_cache : (string, Yojson.Safe.t) Hashtbl.t option) con
        (fun idx (session : Team_session_types.session) () ->
          (try
            let recent_events =
-             Team_session_store.read_events ~max_events:_session_recent_event_limit
-               config session.session_id
-             |> Team_session_engine_eio.take_last _session_recent_event_limit
+             (* Team_session_store + Team_session_engine_eio removed *)
+             ignore (config, _session_recent_event_limit);
+             []
            in
            let status =
              match status_cache with
@@ -468,10 +468,10 @@ let sessions_json ?(status_cache : (string, Yojson.Safe.t) Hashtbl.t option) con
                  match Hashtbl.find_opt tbl session.session_id with
                  | Some cached -> cached
                  | None ->
-                     let s = Team_session_engine_eio.session_status_json config session in
+                     let s = `Assoc [] in
                      Hashtbl.replace tbl session.session_id s;
                      s)
-             | None -> Team_session_engine_eio.session_status_json config session
+             | None -> `Assoc []
            in
            results.(idx) <-
              `Assoc
@@ -728,11 +728,9 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
     match sessions with
     | Some s -> s
     | None ->
-        if initialized then
-          let cutoff = Time_compat.now () -. _snapshot_session_window_seconds () in
-          Team_session_store.list_sessions ~since_unix:cutoff
-            ~limit:(_snapshot_session_limit ()) config
-        else []
+        (* Team_session_store removed — return empty *)
+        ignore (initialized, _snapshot_session_window_seconds (), _snapshot_session_limit ());
+        ([] : Team_session_types.session list)
   in
   let trace_id = trace_id "ops" in
   let actor_name = normalized_actor ~context_actor:ctx.agent_name actor in
@@ -766,7 +764,9 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
     match Hashtbl.find_opt status_cache session.session_id with
     | Some cached -> cached
     | None ->
-        let s = Team_session_engine_eio.session_status_json config session in
+        (* Team_session_engine_eio removed — return empty *)
+        ignore (config, session);
+        let s = `Assoc [] in
         Hashtbl.replace status_cache session.session_id s;
         s
   in

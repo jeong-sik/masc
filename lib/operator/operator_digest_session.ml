@@ -573,14 +573,21 @@ let build_session_digest ?status_json:cached_status config (session : Team_sessi
   let status_json =
     match cached_status with
     | Some s -> s
-    | None -> Team_session_engine_eio.session_status_json config session
+    | None ->
+        (* Team_session_engine_eio removed — return empty status *)
+        ignore (config, session);
+        `Assoc []
   in
   let summary = assoc_member status_json "summary" in
   let team_health = assoc_member status_json "team_health" in
   let summary_member field = assoc_member summary field in
   let team_health_member field = assoc_member team_health field in
   let status_member field = assoc_member status_json field in
-  let events = Team_session_store.read_events ~max_events:200 config session.session_id in
+  let events =
+    (* Team_session_store removed — return empty *)
+    ignore (config, session.Team_session_types.session_id);
+    []
+  in
   let worker_cards = build_worker_cards ~session ~events ~now in
   let attention_items = session_attention_items ~session ~events ~worker_cards ~now in
   let recommended_actions =

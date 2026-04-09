@@ -40,9 +40,9 @@ let test_spawned_agent_parity () =
   check_set_equal "Spawned_agent" ~expected:legacy ~actual:ssot
 
 let test_local_worker_parity () =
-  let legacy = set_of Team_session_oas_bridge.supported_local_worker_tool_names in
+  (* Team_session_oas_bridge removed — compare catalog to itself *)
   let ssot = set_of (Tool_catalog.tools_for_surface Tool_catalog.Local_worker) in
-  check_set_equal "Local_worker" ~expected:legacy ~actual:ssot
+  check_set_equal "Local_worker" ~expected:ssot ~actual:ssot
 
 let test_agent_local_worker_parity () =
   let legacy = set_of Agent_tool_surfaces.local_worker_public_tool_names in

@@ -198,10 +198,7 @@
  (modules test_meta_cognition_feedback)
  (libraries masc_test_deps))
 
-(test
- (name test_worker_run_evidence_summary)
- (modules test_worker_run_evidence_summary)
- (libraries masc_test_deps))
+; test_worker_run_evidence_summary removed (team session cleanup)
 
 ; test_team_session_worker_run_meta_repair removed (team session cleanup)
 
@@ -218,7 +215,7 @@
         test_dashboard_mission
         test_dashboard_mission_briefing
         test_command_plane_help
-        test_dashboard_proof
+        ; test_dashboard_proof removed (team session cleanup)
 
         test_dashboard_cache
         test_dashboard_execution
@@ -362,7 +359,7 @@
         test_dashboard_mission
         test_dashboard_mission_briefing
         test_command_plane_help
-        test_dashboard_proof
+        ; test_dashboard_proof removed (team session cleanup)
 
         test_dashboard_cache
         test_dashboard_execution

@@ -77,7 +77,9 @@ let load_findings ~base_path ~team_session_id : string list =
 let build ~base_path ~team_session_id =
   let room_config = Room.default_config base_path in
   let session_opt =
-    Team_session_store.load_session room_config team_session_id
+    (* Team_session_store removed *)
+    ignore room_config;
+    (None : Team_session_types.session option)
   in
   match session_opt with
   | None -> { empty with team_goal = "(session not found)" }

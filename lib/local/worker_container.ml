@@ -74,7 +74,7 @@ let oas_trace_session_root ~base_path =
 
 let ensure_worker_container_dirs ~base_path ~team_session_id ~worker_name =
   let dir = worker_container_dir ~base_path ~team_session_id ~worker_name in
-  Team_session_store.write_text_file (Filename.concat dir ".keep") "";
+  Fs_compat.save_file (Filename.concat dir ".keep") "";
   (try Sys.remove (Filename.concat dir ".keep") with Sys_error _ -> ())
 
 let stable_worker_session_id ?team_session_id worker_name =
@@ -233,7 +233,7 @@ let save_worker_meta ~base_path ~team_session_id ~worker_name
     (meta : worker_container_meta) =
   try
     ensure_worker_container_dirs ~base_path ~team_session_id ~worker_name;
-    Team_session_store.write_text_file
+    Fs_compat.save_file
       (worker_meta_path ~base_path ~team_session_id ~worker_name)
       (meta |> worker_meta_to_yojson |> Yojson.Safe.pretty_to_string);
     Ok ()
@@ -269,7 +269,7 @@ let load_worker_checkpoint ~base_path ~team_session_id ~worker_name =
 let save_worker_checkpoint ~base_path ~team_session_id ~worker_name checkpoint =
   try
     ensure_worker_container_dirs ~base_path ~team_session_id ~worker_name;
-    Team_session_store.write_text_file
+    Fs_compat.save_file
       (worker_checkpoint_path ~base_path ~team_session_id ~worker_name)
       (Oas.Checkpoint.to_string checkpoint);
     Ok ()
@@ -280,7 +280,7 @@ let save_worker_checkpoint ~base_path ~team_session_id ~worker_name checkpoint =
 let append_worker_turn_log ~base_path ~team_session_id ~worker_name json =
   try
     ensure_worker_container_dirs ~base_path ~team_session_id ~worker_name;
-    Team_session_store.append_text_file
+    Fs_compat.append_file
       (worker_turn_log_path ~base_path ~team_session_id ~worker_name)
       (Yojson.Safe.to_string json ^ "\n");
     Ok ()
@@ -329,12 +329,9 @@ let resolve_execution_scope ~base_path ~(team_session_id : string option)
   match execution_scope with
   | Some scope -> scope
   | None -> (
-      match team_session_id with
-      | Some session_id -> (
-          match Team_session_store.load_session (Room.default_config base_path) session_id with
-          | Some session -> session.execution_scope
-          | None -> Team_session_types.Limited_code_change)
-      | None -> Team_session_types.Limited_code_change)
+      (* Team_session_store removed — default scope *)
+      ignore (team_session_id, base_path);
+      Team_session_types.Limited_code_change)
 
 let build_oas_mcp_tools ~sw ~auth_token ~session_id ~worker_name ~prompt:_
     ~allowed_tools =

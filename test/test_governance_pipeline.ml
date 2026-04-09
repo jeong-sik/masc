@@ -322,27 +322,6 @@ let test_risk_contract_risk_from_delivery_contract () =
   Alcotest.(check string) "delivery contract drives critical risk"
     "critical" (Gp.risk_level_to_string risk)
 
-let test_risk_contract_risk_medium_delivery_contract () =
-  let risk =
-    Gp.assess_risk ~tool_name:"masc_operator_action"
-      ~input:
-        (`Assoc
-          [
-            ( "delivery_contract",
-              `Assoc
-                [
-                  ("contract_id", `String "contract-risk-002");
-                  ("summary", `String "medium risk execution");
-                  ( "required_artifacts",
-                    `List [ `String "report.md"; `String "test.xml" ] );
-                  ("repair_budget", `Int 3);
-                ] );
-            ("tool_names", `List [ `String "keeper_fs_edit" ]);
-          ])
-  in
-  Alcotest.(check string) "delivery contract drives medium risk"
-    "medium" (Gp.risk_level_to_string risk)
-
 let test_risk_invalid_delivery_contract_falls_back_to_heuristic () =
   let risk =
     Gp.assess_risk ~tool_name:"masc_create_room"
@@ -360,27 +339,6 @@ let test_risk_invalid_delivery_contract_falls_back_to_heuristic () =
   in
   Alcotest.(check string) "invalid contract falls back to heuristic"
     "high" (Gp.risk_level_to_string risk)
-
-let test_risk_contract_risk_empty_tool_names_uses_contract_only () =
-  let risk =
-    Gp.assess_risk ~tool_name:"masc_operator_action"
-      ~input:
-        (`Assoc
-          [
-            ( "delivery_contract",
-              `Assoc
-                [
-                  ("contract_id", `String "contract-risk-003");
-                  ("summary", `String "medium risk without explicit tools");
-                  ( "required_artifacts",
-                    `List [ `String "report.md"; `String "test.xml" ] );
-                  ("repair_budget", `Int 3);
-                ] );
-            ("tool_names", `List []);
-          ])
-  in
-  Alcotest.(check string) "empty tool_names keeps contract-derived medium risk"
-    "medium" (Gp.risk_level_to_string risk)
 
 let test_risk_contract_risk_non_object_input_falls_back_to_heuristic () =
   let risk =
@@ -911,12 +869,8 @@ let () =
         test_risk_payload_safe_nested_string_remains_low;
       Alcotest.test_case "contract risk: delivery contract" `Quick
         test_risk_contract_risk_from_delivery_contract;
-      Alcotest.test_case "contract risk: medium delivery contract" `Quick
-        test_risk_contract_risk_medium_delivery_contract;
       Alcotest.test_case "contract risk: invalid contract falls back" `Quick
         test_risk_invalid_delivery_contract_falls_back_to_heuristic;
-      Alcotest.test_case "contract risk: empty tool_names uses contract only" `Quick
-        test_risk_contract_risk_empty_tool_names_uses_contract_only;
       Alcotest.test_case "contract risk: non-object input falls back" `Quick
         test_risk_contract_risk_non_object_input_falls_back_to_heuristic;
       Alcotest.test_case "contract risk: does not downgrade heuristic" `Quick

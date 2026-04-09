@@ -562,6 +562,7 @@ export interface Keeper {
   model?: string
   primary_model?: string
   active_model?: string
+  last_model_used?: string
   next_model_hint?: string | null
   cascade_name?: string
   status: string
@@ -600,6 +601,9 @@ export interface Keeper {
   drift_count_total?: number
   generation?: number
   turn_count?: number
+  total_turns?: number
+  total_tokens?: number
+  last_latency_ms?: number
   last_activity_ago_s?: number
   context_ratio?: number
   context_tokens?: number

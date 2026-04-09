@@ -694,9 +694,6 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
       | `GET, p when String.starts_with ~prefix:"/api/v1/command-plane" p ->
           h2_respond_removed_surface h2_reqd ~surface:"command_plane" ~extra_headers:cors
 
-      | `GET, "/api/v1/operator"
-      | `GET, "/api/v1/operator/digest" ->
-          h2_respond_removed_surface h2_reqd ~surface:"operator" ~extra_headers:cors
       | `GET, "/api/v1/status" ->
           let state = get_server_state () in
           let config = state.Mcp_server.room_config in
@@ -786,11 +783,6 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
 
       | `POST, p when String.starts_with ~prefix:"/api/v1/command-plane" p ->
           h2_respond_removed_surface h2_reqd ~surface:"command_plane" ~extra_headers:cors
-
-      | `POST, "/api/v1/operator/action"
-      | `POST, "/api/v1/operator/confirm" ->
-          h2_respond_removed_surface h2_reqd ~surface:"operator" ~extra_headers:cors
-
 
       (* ═══════════════════════════════════════════════════════════════════════
          Delegated route groups

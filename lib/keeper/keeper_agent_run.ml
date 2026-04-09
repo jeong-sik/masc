@@ -1444,6 +1444,7 @@ let run_turn
     else None
   in
   let priority = Option.value priority ~default:Llm_provider.Request_priority.Proactive in
+  ignore (Keeper_alerting_path.ensure_playground_bundle ~config ~name:meta.name);
   let effective_allowed_paths = Keeper_alerting_path.effective_allowed_paths ~meta in
   match
     Keeper_alerting_path.absolute_allowed_paths_result

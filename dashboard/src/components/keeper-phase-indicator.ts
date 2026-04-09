@@ -39,7 +39,7 @@ function getPhaseStyle(phase: KeeperPhase | string | null | undefined): PhaseSty
 export function KeeperPhaseBadge({ phase, compact }: { phase?: KeeperPhase | string | null; compact?: boolean }) {
   const style = getPhaseStyle(phase)
   const isBuffer = BUFFER_PHASES.has(phase ?? '')
-  const size = compact ? 'px-1.5 py-px text-[9px]' : 'px-2 py-0.5 text-[10px]'
+  const size = compact ? 'px-1.5 py-px text-[10px]' : 'px-2 py-0.5 text-[11px]'
 
   return html`
     <span
@@ -71,7 +71,7 @@ export function KeeperPhaseAndStage({
     <div class="flex items-center gap-2">
       <${KeeperPhaseBadge} phase=${phase} />
       ${stageLabel ? html`
-        <span class="text-[9px] text-[var(--text-dim)] font-mono tracking-tight opacity-70">${stageLabel}</span>
+        <span class="text-[10px] text-[var(--text-dim)] font-mono tracking-tight opacity-80">${stageLabel}</span>
       ` : null}
     </div>
   `

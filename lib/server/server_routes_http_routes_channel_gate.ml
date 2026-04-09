@@ -221,6 +221,45 @@ let handle_gate_connectors _state request reqd =
   respond_json_with_cors ~status:`OK request reqd
     (Yojson.Safe.to_string json)
 
+(** GET /api/v1/gate/connector/status?name=<connector>&audit_limit=<n>
+
+    Generic connector status. Accepts the current [name=<connector>] form and
+    also tolerates legacy [channel=<connector>] callers. *)
+let resolve_connector_status_name ?name ?channel () =
+  match Option.map String.trim name with
+  | Some name when name <> "" -> Some name
+  | _ -> (
+      match Option.map String.trim channel with
+      | Some legacy when legacy <> "" ->
+          Some (String.lowercase_ascii legacy)
+      | _ -> None)
+
+let handle_gate_connector_status _state request reqd =
+  let connector_name =
+    resolve_connector_status_name
+      ?name:(query_param request "name")
+      ?channel:(query_param request "channel")
+      ()
+  in
+  match connector_name with
+  | None | Some "" ->
+      respond_json_with_cors ~status:`Bad_request request reqd
+        (Yojson.Safe.to_string
+           (Channel_gate.error_json "name or channel is required"))
+  | Some name -> (
+      match Channel_gate_connector.find name with
+      | None ->
+          respond_json_with_cors ~status:`Not_found request reqd
+            (Yojson.Safe.to_string
+               (Channel_gate.error_json ("unknown connector: " ^ name)))
+      | Some (module C) ->
+          let audit_limit =
+            int_query_param request "audit_limit" ~default:10
+            |> fun value -> max 1 (min 50 value)
+          in
+          respond_json_with_cors ~status:`OK request reqd
+            (Yojson.Safe.to_string (C.status_json ~audit_limit ())))
+
 (** GET /api/v1/gate/discord/status
     Dashboard-facing live connector status sourced from the Discord bot's
     status file plus the durable binding/audit stores. *)

@@ -976,6 +976,15 @@ let dashboard_shell_payload_json (config : Room.config) : Yojson.Safe.t =
     let elapsed_ms = int_of_float ((Unix.gettimeofday () -. t0) *. 1000.0) in
     (value, elapsed_ms)
   in
+  let measure_json_projection label f =
+    measure_ms (fun () ->
+        try f () with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn ->
+            Log.Server.warn "dashboard shell %s projection failed: %s" label
+              (Printexc.to_string exn);
+            `Null)
+  in
   let status_json, status_ms = measure_ms (fun () -> dashboard_shell_status_json config) in
   let agents, agents_ms = measure_ms (fun () -> dashboard_agents_safe config) in
   let general_agents = dashboard_general_agent_count agents in
@@ -985,6 +994,14 @@ let dashboard_shell_payload_json (config : Room.config) : Yojson.Safe.t =
   in
   let meta_cognition_json, meta_cognition_ms =
     measure_ms (fun () -> Meta_cognition.summary_json config)
+  in
+  let config_resolution_json, config_resolution_ms =
+    measure_json_projection "config_resolution" (fun () ->
+        Config_dir_resolver.(resolve () |> to_json))
+  in
+  let runtime_resolution_json, runtime_resolution_ms =
+    measure_json_projection "runtime_resolution"
+      (fun () -> Server_dashboard_http_runtime_info.runtime_resolution_json config)
   in
   `Assoc
     [
@@ -1000,6 +1017,8 @@ let dashboard_shell_payload_json (config : Room.config) : Yojson.Safe.t =
           ] );
       ("providers", provider_capacity_json ());
       ("meta_cognition", meta_cognition_json);
+      ("config_resolution", config_resolution_json);
+      ("runtime_resolution", runtime_resolution_json);
     ]
   |> with_projection_diagnostics ~surface:"shell" ~started_at
        ~extra:
@@ -1014,6 +1033,8 @@ let dashboard_shell_payload_json (config : Room.config) : Yojson.Safe.t =
            ("tasks_ms", `Int tasks_ms);
            ("keepers_ms", `Int keepers_ms);
            ("meta_cognition_ms", `Int meta_cognition_ms);
+           ("config_resolution_ms", `Int config_resolution_ms);
+           ("runtime_resolution_ms", `Int runtime_resolution_ms);
          ]
 
 let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Room.config) :

@@ -37,8 +37,15 @@ val keeper_read_only_tools : string list
 (** [true] when a keeper-only tool is inherently read-only. *)
 val is_keeper_read_only_tool : string -> bool
 
-(** Read-only classification with keeper-local fallback. *)
+(** [true] when [name] is read-only or idempotent (safe to retry).
+    Keeper-local fast-path (no mutex), then Tool_dispatch.is_read_only,
+    then Tool_dispatch.is_idempotent. Prefer {!has_mutating_side_effect}
+    at call sites for positive-sense readability. *)
 val is_effectively_read_only_tool : string -> bool
+
+(** [true] when calling [name] may produce non-idempotent side effects.
+    Used by the side-effect observer to block retry after committed mutations. *)
+val has_mutating_side_effect : string -> bool
 
 (** Schema for the keeper_tool_search tool. *)
 val keeper_tool_search_schema : Types.tool_schema

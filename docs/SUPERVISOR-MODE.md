@@ -281,7 +281,7 @@ two-worker llama batch spawn, and verifies:
 ## Related Docs
 
 - `docs/SWARM-DELIVERY-RUNBOOK.md`
-- `docs/REMOTE-MCP-OPERATOR.md`
+- `docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md`
 - `scripts/harness_supervisor_team_session.sh`
 - `scripts/harness_team_session_failed_batch_spawn.sh`
 

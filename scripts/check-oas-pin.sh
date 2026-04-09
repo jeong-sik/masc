@@ -43,17 +43,9 @@ min_version_re="${OAS_AGENT_SDK_MIN_VERSION//./\\.}"
 default_pin_source="${OAS_AGENT_SDK_URL}#${OAS_AGENT_SDK_SHA}"
 pin_source="${AGENT_SDK_PIN_URL:-${default_pin_source}}"
 expected_opam_pin_source="git+${OAS_AGENT_SDK_URL}#${OAS_AGENT_SDK_SHA}"
-keeper_manual_doc="${REPO_ROOT}/docs/KEEPER-USER-MANUAL.md"
-oas_audit_doc="${REPO_ROOT}/docs/OAS-UTILIZATION-AUDIT.md"
-git_common_dir_raw="$(git -C "${REPO_ROOT}" rev-parse --git-common-dir)"
-if [[ "${git_common_dir_raw}" = /* ]]; then
-  git_common_dir="${git_common_dir_raw}"
-else
-  git_common_dir="$(cd "${REPO_ROOT}/${git_common_dir_raw}" && pwd)"
-fi
-repo_checkout_root="$(cd "${git_common_dir}/.." && pwd)"
-default_local_oas_checkout="$(cd "${repo_checkout_root}/.." && pwd)/oas"
-local_oas_checkout="${AGENT_SDK_LOCAL_REPO:-${default_local_oas_checkout}}"
+# Ambient local checkouts are not authoritative for doctor runs.
+# Only validate a local OAS checkout when the caller explicitly opts in.
+local_oas_checkout="${AGENT_SDK_LOCAL_REPO:-}"
 
 if [[ "${pin_source}" == "${default_pin_source}" ]]; then
   if [[ "${LOCAL_ONLY}" -eq 0 ]]; then
@@ -85,22 +77,14 @@ if ! grep -Eq "\"agent_sdk\" \\{>= \"${min_version_re}\"\\}" "${REPO_ROOT}/masc_
   exit 1
 fi
 
-if ! grep -Fq "agent_sdk >= ${OAS_AGENT_SDK_MIN_VERSION}" "${keeper_manual_doc}" \
-  || ! grep -Fq "${OAS_AGENT_SDK_BASE_TAG}" "${keeper_manual_doc}" \
-  || ! grep -Fq "${OAS_AGENT_SDK_SHA}" "${keeper_manual_doc}"; then
-  echo "keeper manual OAS pin references are not aligned with scripts/oas-agent-sdk-pin.sh" >&2
-  exit 1
-fi
-
-if ! grep -Fq "OAS Version: ${OAS_AGENT_SDK_MIN_VERSION} floor" "${oas_audit_doc}" \
-  || ! grep -Fq "${OAS_AGENT_SDK_BASE_TAG}" "${oas_audit_doc}" \
-  || ! grep -Fq "${OAS_AGENT_SDK_SHA}" "${oas_audit_doc}"; then
-  echo "OAS utilization audit references are not aligned with scripts/oas-agent-sdk-pin.sh" >&2
+if ! bash "${SCRIPT_DIR}/sync-oas-pin-docs.sh" --check; then
+  echo "OAS pin generated doc blocks are not aligned with scripts/oas-agent-sdk-pin.sh" >&2
   exit 1
 fi
 
 if [[ "${pin_source}" == "${default_pin_source}" ]]; then
-  if git -C "${local_oas_checkout}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  if [[ -n "${local_oas_checkout}" ]] \
+    && git -C "${local_oas_checkout}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     local_checkout_head="$(git -C "${local_oas_checkout}" rev-parse HEAD 2>/dev/null || true)"
     if [[ "${local_checkout_head}" != "${OAS_AGENT_SDK_SHA}" ]]; then
       echo "local oas checkout drift: ${local_oas_checkout}@${local_checkout_head:-unknown}, expected ${OAS_AGENT_SDK_SHA}" >&2
@@ -165,13 +149,13 @@ if command -v opam >/dev/null 2>&1; then
         exit 1
         ;;
     esac
-  else
+  elif [[ "${LOCAL_ONLY}" -eq 0 ]]; then
     echo "WARN: could not read agent_sdk pin source from opam; installed version ${installed_version} satisfies floor ${OAS_AGENT_SDK_MIN_VERSION}" >&2
   fi
 fi
 
 if [[ "${pin_source}" == "${default_pin_source}" ]]; then
-  echo "OAS pin verified: ${OAS_AGENT_SDK_TRACK_REF}@${OAS_AGENT_SDK_SHA} (base tag ${OAS_AGENT_SDK_BASE_TAG})"
+  echo "OAS pin verified: ${OAS_AGENT_SDK_TRACK_REF}@${OAS_AGENT_SDK_SHA} (base version ${OAS_AGENT_SDK_BASE_VERSION})"
 else
   echo "OAS pin verified via override: ${pin_source}"
 fi

@@ -2,6 +2,42 @@
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-04-09
+
+### Added
+- Startup TOML cross-validation for tool registration (#6093)
+- Keeper cascade config API + dashboard selector + TOML hot-reload (#6100)
+- MASC store diagnosis cards in telemetry view (#6105)
+- OAS runtime diagnosis surfaces (#6061)
+- Prompt fingerprint telemetry (#6075)
+- Keeper PR history tracking + active worktree listing in dashboard (#6083)
+- Keeper playground state cache + dashboard panel (#6060)
+- Dashboard OAS worker observability enrichment (#6071)
+- Fleet telemetry panel improvements (#6104)
+- Governance HITL approvals dashboard (#6098)
+- Keeper TOML→JSON config SSOT resync — 20 fields (#6110)
+
+### Changed
+- **Breaking**: Renamed `keeper_shell_readonly` to `keeper_shell` across all configs, prompts, and registry (#6095)
+- Centralized keeper entrypoint alias resolution (#6096)
+- Simplified dashboard command surface (#6058)
+- Simplified monitoring agents runtime view (#6103)
+- Simplified playground status with stdlib `List.take` (#6097)
+- Tool spec handler_binding required variant for type-safe dispatch (#6073)
+- OAS pin bump to 120710a with Uncertain.t (#6114)
+- Hardened OAS ownership boundaries (#6101)
+- OAS pin SSOT and doctor checks relaxation (#6113)
+
+### Fixed
+- Discord keeper session isolation per room (#6094)
+- Keeper post-commit timeout classification (#6102)
+- Worker model_id hardcoded "turn-exhausted" in MaxTurnsExceeded response (#6087)
+- Dashboard error prefix stripping before JSON categorization (#6057)
+- Removed fake no-op Dashboard_cache.set_clock/set_sw (#6081, #6074)
+- Dead OAS proof bridge panels removed from telemetry view (#6106)
+- Sangsu keeper switched to local_only cascade (#6088)
+- CI semantic version comparison in OAS pin check (#6111)
+
 ## [0.2.0] - 2026-04-09
 
 ### Changed

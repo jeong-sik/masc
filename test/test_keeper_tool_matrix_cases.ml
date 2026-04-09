@@ -305,8 +305,6 @@ let extra_guard_fragments_for_name = function
   | "masc_get_metrics" -> [ "no metrics found" ]
   | "masc_library_promote" -> [ "no candidate matching" ]
   | "masc_portal_send" -> [ "no portal open" ]
-  | "masc_repo_synthesis_swarm_start" ->
-      [ "requires team-session launch support" ]
   | "masc_worktree_remove" -> [ "worktree not found" ]
   | _ -> []
 

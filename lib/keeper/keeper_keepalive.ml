@@ -562,6 +562,15 @@ let maybe_recover_from_failing ~(ctx : _ context) ~(meta : keeper_meta) =
     end
   end
 
+let keeper_requires_manual_reconcile ~base_path ~keeper_name =
+  match Keeper_registry.get ~base_path keeper_name with
+  | Some entry ->
+      (match entry.last_failure_reason with
+       | Some reason ->
+           Keeper_registry.failure_reason_requires_manual_reconcile reason
+       | None -> false)
+  | None -> false
+
 let sync_keeper_presence
       ~(ctx : _ context)
       ~(meta_current : keeper_meta)
@@ -716,16 +725,30 @@ let run_keepalive_unified_turn
           true
         end else false
       in
+      let manual_reconcile_pending =
+        keeper_requires_manual_reconcile
+          ~base_path:ctx.config.base_path
+          ~keeper_name:meta_after_triage.name
+      in
       let should_run_turn =
         (not (Atomic.get stop))
         && turn_decision.should_run
         && (not boring_skip)
+        && (not manual_reconcile_pending)
       in
       let meta_after_observe =
         Keeper_world_observation.apply_message_cursor_updates
           meta_after_triage
           obs.message_cursor_updates
       in
+      if manual_reconcile_pending && turn_decision.should_run then
+        Log.Keeper.info
+          "keepalive turn skipped for %s: manual reconcile pending channel=%s reasons=%s"
+          meta_after_triage.name
+          (match turn_decision.channel with
+           | Keeper_world_observation.Reactive -> "reactive"
+           | Keeper_world_observation.Scheduled_autonomous -> "scheduled_autonomous")
+          (String.concat "," turn_decision.reasons);
       if should_run_turn then
         Log.Keeper.info
           "keepalive turn scheduled for %s: channel=%s reasons=%s"

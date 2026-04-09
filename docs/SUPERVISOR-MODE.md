@@ -53,7 +53,7 @@ Use `/mcp` when an agent needs the full room and supervised-execution tool inven
 Repo-synthesis workflow에서는 이 분리를 그대로 유지한다.
 
 - start/control:
-  - `/mcp`에서 `masc_repo_synthesis_swarm_start`
+  - repo-synthesis는 `masc_autoresearch_cycle` 내부에서 dispatch된다 (전용 front-door tool은 retired)
   - 이어서 `masc_team_session_step`, `masc_operation_checkpoint`
 - read/proof:
   - `/mcp/operator`의 `masc_operator_snapshot` / `masc_operator_digest`

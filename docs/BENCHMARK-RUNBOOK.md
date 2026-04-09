@@ -70,7 +70,7 @@ Search-aware routing 실험은 [SEARCH-FABRIC-V1.md](./SEARCH-FABRIC-V1.md)를 �
 Phase 1 corpus는 `masc-mcp` 단일 repo다.
 
 - front door:
-  - `masc_repo_synthesis_swarm_start`
+  - `masc_autoresearch_cycle` (repo-synthesis is dispatched internally via the cycle system)
 - fairness:
   - same model
   - same time budget

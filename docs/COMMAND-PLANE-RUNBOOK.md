@@ -122,17 +122,12 @@ transport truth를 빠르게 분리하고 싶으면 먼저 `./benchmarks/quick-b
 9. `masc_operation_finalize`
    - 정상 종료 시 operation을 completed로 닫는다.
 
-### Repo Synthesis Front Door
+### Repo Synthesis
 
-repo 질문을 바로 `operation + session + proof` spine에 올리고 싶으면 `masc_repo_synthesis_swarm_start`를 쓴다.
+repo-synthesis는 `masc_autoresearch_cycle` 내부에서 cycle system을 통해 dispatch된다.
+별도 front-door tool은 retired 되었다 (config.ml retired list 참조).
 
-- wrapper path:
-  - managed `coding_task/inspect` operation 생성
-  - attached supervised execution session 시작
-  - planned worker roles seed
-  - benchmark run metadata를 `.masc/repo-synthesis-benchmarks/`에 저장
 - read path:
-  - MCP가 canonical write/control
   - dashboard는 `/api/v1/dashboard/repo-synthesis`와 proof/report artifact를 읽는 read-only surface
 - raw escape hatch:
   - 이후 세부 조율은 `masc_dispatch_tick`, `masc_operator_digest`, `masc_team_session_step`, `masc_team_session_prove`로 내려간다.

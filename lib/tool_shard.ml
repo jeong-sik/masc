@@ -727,11 +727,14 @@ let shard_taskboard : shard = {
   description = "Task board management: list, audit, force-release, force-done, broadcast";
 }
 
-(** Autoresearch tools: filtered subset for keeper use (excludes swarm_start). *)
+(** Autoresearch tools: filtered subset for keeper use.
+    Excludes team-session front doors that require runtime support outside the
+    normal keeper execution surface. *)
 let autoresearch_keeper_tools : Types.tool_schema list =
   Tool_autoresearch_schemas.schemas
   |> List.filter (fun (t : Types.tool_schema) ->
-       t.name <> "masc_autoresearch_swarm_start")
+       t.name <> "masc_autoresearch_swarm_start"
+       && t.name <> "masc_repo_synthesis_swarm_start")
 
 let shard_autoresearch : shard = {
   name = "autoresearch";

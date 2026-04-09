@@ -175,6 +175,13 @@ let select_existing_masc_tool_names names =
   |> List.filter (fun name -> List.mem name injected)
   |> dedupe_tool_names
 
+let keeper_maintenance_only_tools =
+  [ "masc_heartbeat"; "masc_heartbeat_start";
+    "masc_heartbeat_stop"; "masc_heartbeat_list" ]
+
+let is_keeper_maintenance_only_tool name =
+  List.mem name keeper_maintenance_only_tools
+
 (* ── Candidate aggregation (config-driven) ────────────────────── *)
 
 let keeper_base_candidate_tool_names () =
@@ -187,6 +194,7 @@ let keeper_base_candidate_tool_names () =
     ( config_tools
     @ keeper_internal_candidate_tool_names
     @ injected_masc_tool_names () )
+  |> List.filter (fun name -> not (is_keeper_maintenance_only_tool name))
 
 (** Resolve a named group from tool_policy.toml.  Returns the hardcoded
     fallback when config is not loaded. *)

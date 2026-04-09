@@ -15,11 +15,15 @@ let handle_keeper_down ctx args : tool_result =
   else
     let remove_meta = get_bool args "remove_meta" false in
     let remove_session = get_bool args "remove_session" false in
+    stop_keepalive requested_name;
+    (match keeper_name_from_agent_name requested_name with
+     | Some resolved_name when not (String.equal resolved_name requested_name) ->
+         stop_keepalive resolved_name
+     | _ -> ());
     match read_meta_resolved ctx.config requested_name with
     | Error e -> (false, "❌ " ^ e)
     | Ok None -> (true, Printf.sprintf "keeper already absent: %s" requested_name)
     | Ok (Some (name, m)) ->
-      stop_keepalive name;
       ignore
         (Operator_pending_confirm.remove_pending_confirms_by_target ctx.config
            ~target_type:"keeper" ~target_id:(Some name));

@@ -371,6 +371,76 @@ let test_operator_keeper_probe_accepts_agent_name_alias () =
       Alcotest.(check bool) "probe includes diagnostic" true
         Yojson.Safe.Util.(delegated_result |> member "diagnostic" <> `Null))
 
+let test_operator_keeper_recover_accepts_agent_name_alias () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let keeper_name = "probe-keeper" in
+  let keeper_agent_name = "keeper-probe-keeper-agent" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_keepalive.stop_keepalive keeper_name;
+      Keeper_registry.clear ();
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "operator"));
+      let keeper_ctx : _ Tool_keeper.context =
+        {
+          config;
+          agent_name = "operator";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = None;
+        }
+      in
+      let ok, _ =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_up"
+          ~args:
+            (`Assoc
+              [
+                ("name", `String keeper_name);
+                ("goal", `String "Probe keeper runtime");
+                ("proactive_enabled", `Bool false);
+              ])
+      in
+      Alcotest.(check bool) "keeper up ok" true ok;
+      Keeper_keepalive.stop_keepalive keeper_name;
+      let ctx = operator_ctx env sw config "operator" in
+      let action_json =
+        match
+          Operator_control.action_json ctx
+            (`Assoc
+              [
+                ("actor", `String "operator");
+                ("action_type", `String "keeper_recover");
+                ("target_type", `String "keeper");
+                ("target_id", `String keeper_agent_name);
+              ])
+        with
+        | Ok json -> json
+        | Error err -> Alcotest.fail err
+      in
+      Alcotest.(check string) "recover delegates to keeper recover"
+        "masc_keeper_recover"
+        Yojson.Safe.Util.(action_json |> member "tool_name" |> to_string);
+      let delegated_result =
+        Yojson.Safe.Util.(action_json |> member "result" |> member "result")
+      in
+      Alcotest.(check bool) "recover path marked recoverable before action" true
+        Yojson.Safe.Util.(delegated_result |> member "before" |> member "recoverable" |> to_bool);
+      Alcotest.(check string) "recover down resolves canonical keeper name"
+        keeper_name
+        Yojson.Safe.Util.(delegated_result |> member "down" |> member "name" |> to_string);
+      Alcotest.(check string) "recover up resolves canonical keeper name"
+        keeper_name
+        Yojson.Safe.Util.(delegated_result |> member "up" |> member "name" |> to_string);
+      Alcotest.(check bool) "recover reports after diagnostic" true
+        Yojson.Safe.Util.(delegated_result |> member "after" <> `Null))
+
 let test_keeper_status_schema_makes_name_optional () =
   let schema =
     List.find

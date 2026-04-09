@@ -128,6 +128,10 @@ let () =
             `Quick
             Test_operator_control_keeper
             .test_operator_keeper_probe_accepts_agent_name_alias;
+          Alcotest.test_case "operator keeper recover accepts agent alias"
+            `Quick
+            Test_operator_control_keeper
+            .test_operator_keeper_recover_accepts_agent_name_alias;
           Alcotest.test_case "keeper status schema makes name optional" `Quick
             Test_operator_control_keeper
             .test_keeper_status_schema_makes_name_optional;

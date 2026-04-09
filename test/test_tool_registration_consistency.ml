@@ -25,8 +25,7 @@ let test_workflow_guide_tools_exist () =
     "masc_worktree_create"; "masc_init";
     "masc_operator_digest";
     "masc_operation_start"; "masc_dispatch_tick";
-    "masc_team_session_start"; "masc_team_session_step";
-    "masc_team_session_prove"; "masc_team_session_stop";
+    (* team session tools removed — team session cleanup *)
   ] in
   List.iter (fun tool_name ->
     let g_ok = WG.next_steps ~tool_name ~success:true in

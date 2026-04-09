@@ -1101,22 +1101,8 @@ let test_keeper_msg_auto_team_session_bridge () =
         Alcotest.(check string) "session goal" first_message session.goal;
         Alcotest.(check string) "session status" "running"
           (Team_session_types.status_to_string session.status);
-        let team_ctx : _ Tool_team_session.context =
-          {
-            config;
-            agent_name = "operator";
-            sw;
-            clock = Eio.Stdenv.clock env;
-            proc_mgr = None;
-            net = None;
-          }
-        in
-        let team_status_ok, _ =
-          dispatch_team_exn team_ctx ~name:"masc_team_session_status"
-            ~args:(`Assoc [ ("session_id", `String session_id) ])
-        in
-        Alcotest.(check bool) "caller can access suggested team session tools" true
-          team_status_ok;
+        (* Team session tools removed — skip team_session_status dispatch test *)
+        ignore (config, sw, env, session_id);
         Alcotest.(check bool) "spawn_error surfaced" true
           (first_json |> member "spawn_error" <> `Null);
         let status_ok, status_body =

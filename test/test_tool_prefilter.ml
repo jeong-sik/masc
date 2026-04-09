@@ -61,8 +61,7 @@ let extended_tools =
       "Query the current governance policy status.";
     make_schema "masc_autoresearch_start"
       "Start an automated research cycle.";
-    make_schema "masc_team_session_start"
-      "Start a supervised execution session.";
+
     make_schema "masc_worktree_create"
       "Create a new git worktree for an isolated branch.";
     make_schema "masc_worktree_list"
@@ -81,7 +80,7 @@ let names_of results =
 let has_tool name results =
   List.mem name (names_of results)
 
-let contains_substring haystack needle =
+let _contains_substring haystack needle =
   let hay_len = String.length haystack in
   let needle_len = String.length needle in
   let rec loop idx =
@@ -170,11 +169,6 @@ let test_synonym_autoresearch_start () =
   check bool "synonym: masc_autoresearch_start via 'begin research'" true
     (has_tool "masc_autoresearch_start" result)
 
-let test_synonym_team_session_start () =
-  let result = Tool_prefilter.filter
-    ~tools:extended_tools ~query:"start a supervised execution session" ~k:3 in
-  check bool "synonym: masc_team_session_start via 'start supervised execution'" true
-    (has_tool "masc_team_session_start" result)
 
 let test_synonym_worktree_create () =
   let result = Tool_prefilter.filter
@@ -259,10 +253,7 @@ let test_synonym_text_enriches_description () =
   check bool "enriched longer than base" true
     (String.length enriched > String.length base)
 
-let test_synonym_text_team_session_runtime_keywords () =
-  let text = Tool_prefilter.synonym_text "masc_team_session_start" in
-  check bool "team session synonyms include execution wording" true
-    (contains_substring text "start supervised execution")
+
 
 (* ================================================================ *)
 (* Test runner                                                      *)
@@ -287,7 +278,7 @@ let () =
           test_case "code_read via synonym" `Quick test_synonym_code_read;
           test_case "governance_status via synonym" `Quick test_synonym_governance_status;
           test_case "autoresearch_start via synonym" `Quick test_synonym_autoresearch_start;
-          test_case "team_session_start via synonym" `Quick test_synonym_team_session_start;
+
           test_case "worktree_create via synonym" `Quick test_synonym_worktree_create;
           test_case "web_search via synonym" `Quick test_synonym_web_search;
         ] );
@@ -309,7 +300,5 @@ let () =
           test_case "known tool returns keywords" `Quick test_synonym_text_known;
           test_case "unknown tool returns empty" `Quick test_synonym_text_unknown;
           test_case "enriches description" `Quick test_synonym_text_enriches_description;
-          test_case "team session runtime keywords" `Quick
-            test_synonym_text_team_session_runtime_keywords;
         ] );
     ]

@@ -19,7 +19,7 @@ export function Live() {
         </div>
       </section>
 
-      <section class="rounded-[24px] border border-[var(--border-slate-12)] bg-[var(--white-3)] p-4">
+      <section class="rounded-[var(--radius-xl)] border border-[var(--border-slate-12)] bg-[var(--white-3)] p-4">
         <${PulseStrip} />
       </section>
 

@@ -1020,12 +1020,12 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
       (* 3. Derive parameters: cascade.json -> keeper env-var fallback *)
       let temperature =
         Cascade_inference.resolve_temperature
-          ~cascade_name:Keeper_config.default_cascade_name
+          ~cascade_name:meta.cascade_name
           ~fallback:Keeper_config.keeper_unified_temperature
       in
       let max_tokens =
         Cascade_inference.resolve_max_tokens
-          ~cascade_name:Keeper_config.default_cascade_name
+          ~cascade_name:meta.cascade_name
           ~fallback:Keeper_config.keeper_unified_max_tokens
       in
       (* max_turns: defer to OAS default (Types.default_agent_config.max_turns).
@@ -1077,7 +1077,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
             in
             Keeper_agent_run.run_turn ~config ~meta:run_meta ~base_dir
               ~max_context ~build_turn_prompt
-              ~user_message ~cascade_name:Keeper_config.default_cascade_name
+              ~user_message ~cascade_name:meta.cascade_name
               ~generation:run_generation ~max_idle_turns
               ~history_user_source:"world_state_prompt"
               ~history_assistant_source:"internal_assistant"

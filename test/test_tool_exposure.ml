@@ -245,7 +245,7 @@ let () =
             (fun () ->
               let internal =
                 [ "masc_code_search";
-                  "masc_team_session_step"; "masc_auth_create_token";
+                  "masc_auth_create_token";
                   "masc_worktree_create"; "masc_governance_set" ]
               in
               List.iter

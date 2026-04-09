@@ -40,18 +40,6 @@ let test_board_post_capability_merges_public_and_keeper_projections () =
   check bool "public projection" true (List.mem "masc_board_post" names);
   check bool "keeper projection" true (List.mem "keeper_board_post" names)
 
-let test_team_session_capability_merges_public_and_local_worker_projections () =
-  let capability =
-    Lib.Capability_registry.all_capabilities_from Lib.Config.raw_all_tool_schemas
-    |> List.find (fun (capability : Lib.Capability_registry.capability_def) ->
-           String.equal capability.Lib.Capability_registry.capability_id
-             "masc_team_session_step")
-  in
-  let names = projection_names capability in
-  check bool "public canonical projection" true
-    (List.mem "masc_team_session_step" names);
-  check bool "turn alias removed" false
-    (List.mem "masc_team_session_turn" names)
 
 let test_local_worker_projection_exposes_internal_and_auditable_tools () =
   match
@@ -114,9 +102,7 @@ let () =
           test_case "board capability merges public and keeper projections"
             `Quick
             test_board_post_capability_merges_public_and_keeper_projections;
-          test_case "team session capability merges public and local worker projections"
-            `Quick
-            test_team_session_capability_merges_public_and_local_worker_projections;
+
           test_case "local worker projection exposes internal and auditable tools"
             `Quick
             test_local_worker_projection_exposes_internal_and_auditable_tools;

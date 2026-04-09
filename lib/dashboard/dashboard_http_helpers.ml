@@ -121,31 +121,36 @@ let safe_age_seconds_opt ~(now_ts : float) ~(event_ts : float) : int option =
     let bounded = max 0.0 (min delta (float_of_int max_int)) in
     Some (int_of_float bounded)
 
+let safe_member key json =
+  match json with
+  | `Assoc _ -> Yojson.Safe.Util.member key json
+  | _ -> `Null
+
 let json_list_field key json =
-  match Yojson.Safe.Util.member key json with
+  match safe_member key json with
   | `List items -> items
   | _ -> []
 
 let json_int_field key json ~default =
-  match Yojson.Safe.Util.member key json with
+  match safe_member key json with
   | `Int value -> value
   | `Intlit raw -> (Option.value ~default:default (int_of_string_opt raw))
   | _ -> default
 
 let json_string_field_opt key json =
-  match Yojson.Safe.Util.member key json with
+  match safe_member key json with
   | `String value ->
       let trimmed = String.trim value in
       if trimmed = "" then None else Some trimmed
   | _ -> None
 
 let json_assoc_field key json =
-  match Yojson.Safe.Util.member key json with
+  match safe_member key json with
   | `Assoc _ as value -> value
   | _ -> `Assoc []
 
 let json_record_field key json =
-  match Yojson.Safe.Util.member key json with
+  match safe_member key json with
   | `Assoc _ as value -> Some value
   | _ -> None
 

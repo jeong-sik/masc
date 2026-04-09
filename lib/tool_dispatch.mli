@@ -65,6 +65,11 @@ val run_pre_hooks :
     Returns [(Some rejection, _)] on short-circuit,
     or [(None, final_args)] when all hooks pass. *)
 
+val run_post_hooks : Tool_result.t -> Tool_result.t
+(** Execute registered post-hooks in order, threading the result.
+    Used by keeper dispatch to feed metrics/usage hooks for tools
+    that bypass [dispatch]. *)
+
 val dispatch_structured : token:Tool_token.t -> args:Yojson.Safe.t -> Tool_result.t option
 (** Structured dispatch with hook support.
     Execution order: pre-hooks -> handler -> post-hooks.

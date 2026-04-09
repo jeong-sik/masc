@@ -572,8 +572,8 @@ let test_prompt_includes_operational_tool_guidance () =
     (contains_substring sys "Tool-first principle");
   check bool "mentions worktree inspection guidance" true
     (contains_substring sys "masc_code_read");
-  check bool "mentions heartbeat maintenance guidance" true
-    (contains_substring sys "masc_heartbeat")
+  check bool "mentions server-managed heartbeat" true
+    (contains_substring sys "Heartbeat is server-managed")
 
 let test_prompt_includes_autonomous_trigger_section () =
   let meta =
@@ -971,7 +971,7 @@ let test_metrics_noop_response () =
 
 let test_metrics_heartbeat_only_tool_response_is_maintenance_only () =
   let result =
-    make_run_result ~text:"" ~tools:["masc_heartbeat"]
+    make_run_result ~text:"" ~tools:[]
       ~model:"test-model" ~input_tok:40 ~output_tok:0
   in
   let updated =
@@ -1767,7 +1767,7 @@ let test_social_model_routes_blocker_to_board_post () =
 
 let test_social_model_tool_only_turn_skips_protocol_violation () =
   let result =
-    make_run_result ~text:"" ~tools:["masc_heartbeat"]
+    make_run_result ~text:"" ~tools:["masc_status"]
       ~model:"test-model" ~input_tok:10 ~output_tok:1
   in
   let routed, state =
@@ -1780,11 +1780,11 @@ let test_social_model_tool_only_turn_skips_protocol_violation () =
     (KSM.delivery_surface_to_string state.delivery_surface);
   check (option string) "no protocol violation blocker" None state.blocker;
   check string "visible response suppressed" "" routed.response_text;
-  check (list string) "tool list preserved" ["masc_heartbeat"] routed.tools_used
+  check (list string) "tool list preserved" ["masc_status"] routed.tools_used
 
 let test_social_model_infers_board_comment_from_tool_use () =
   let result =
-    make_run_result ~text:"" ~tools:["keeper_board_comment"; "masc_heartbeat"]
+    make_run_result ~text:"" ~tools:["keeper_board_comment"; "masc_status"]
       ~model:"test-model" ~input_tok:10 ~output_tok:1
   in
   let routed, state =
@@ -1798,7 +1798,7 @@ let test_social_model_infers_board_comment_from_tool_use () =
   check (option string) "no protocol violation blocker" None state.blocker;
   check string "visible response empty" "" routed.response_text;
   check (list string) "tool list preserved"
-    ["keeper_board_comment"; "masc_heartbeat"] routed.tools_used
+    ["keeper_board_comment"; "masc_status"] routed.tools_used
 
 (* ---------- render_inline_skip_reason tests ---------- *)
 
@@ -2200,9 +2200,9 @@ let () =
           test_case "masc_status is boring" `Quick (fun () ->
             check bool "masc_status"
               true (Masc_mcp.Keeper_tool_registry.is_boring_tool "masc_status"));
-          test_case "masc_heartbeat is boring" `Quick (fun () ->
+          test_case "masc_heartbeat is NOT boring (removed from keeper)" `Quick (fun () ->
             check bool "masc_heartbeat"
-              true (Masc_mcp.Keeper_tool_registry.is_boring_tool "masc_heartbeat"));
+              false (Masc_mcp.Keeper_tool_registry.is_boring_tool "masc_heartbeat"));
           test_case "keeper_tasks_list is boring" `Quick (fun () ->
             check bool "keeper_tasks_list"
               true (Masc_mcp.Keeper_tool_registry.is_boring_tool "keeper_tasks_list"));

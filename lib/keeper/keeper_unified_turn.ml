@@ -200,7 +200,7 @@ let scheduled_autonomous_outcome_of_result
   | true, true -> Proactive_mixed_response
 
 let has_substantive_tool_calls (tools_used : string list) : bool =
-  List.exists (fun tool_name -> tool_name <> "masc_heartbeat") tools_used
+  tools_used <> []
 
 let selected_mode_of_result (result : Keeper_agent_run.run_result) : string =
   let text = String.trim result.response_text in
@@ -514,9 +514,7 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
       ~output_tokens:result.usage.output_tokens ()
   in
   let substantive_tool_call_count =
-    result.tools_used
-    |> List.filter (fun tool_name -> tool_name <> "masc_heartbeat")
-    |> List.length
+    List.length result.tools_used
   in
   let has_substantive_tools = has_substantive_tool_calls result.tools_used in
   let has_text = String.trim result.response_text <> "" in

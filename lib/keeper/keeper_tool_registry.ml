@@ -26,14 +26,16 @@ let keeper_voice_tool_schemas =
 (* ── Layer 0: Core tools (always executable, always visible) ───── *)
 
 (** Tools that bypass policy restrictions.  Survival-critical only:
-    orientation (status), liveness (heartbeat), session control
-    (extend_turns), self-introspection (tools_list), and token
-    budget awareness (context_status).  Other tools moved to BM25
-    retrieval to free ranking budget.  See #4961. *)
+    orientation (status), session control (extend_turns),
+    self-introspection (tools_list), and token budget awareness
+    (context_status).  Heartbeat is server-managed via
+    keeper_keepalive.ml — no LLM tool call needed.
+    Other tools moved to BM25 retrieval to free ranking budget.
+    See #4961. *)
 let core_always_tools =
   [ "keeper_context_status"; "keeper_tools_list";
     "keeper_stay_silent"; "keeper_tool_search";
-    "masc_status"; "masc_heartbeat"; "extend_turns" ]
+    "masc_status"; "extend_turns" ]
 
 (** Core tools always visible to the LLM.  All other tools are
     discoverable on demand via [keeper_tool_search].
@@ -124,7 +126,7 @@ let is_effectively_read_only_tool (name : string) : bool =
     Contrast with [keeper_fs_read] which reads new content, or
     [keeper_board_post] which creates artifacts. *)
 let boring_tools =
-  [ "masc_status"; "masc_heartbeat"; "keeper_tasks_list";
+  [ "masc_status"; "keeper_tasks_list";
     "keeper_context_status"; "keeper_tools_list";
     "keeper_stay_silent" ]
 

@@ -489,7 +489,6 @@ let run_turn
     ; "masc_tasks", "태스크 목록 할일 작업"
     ; "masc_add_task", "태스크 추가 등록 생성"
     ; "masc_status", "상태 현황 방 룸 요약"
-    ; "masc_heartbeat", "하트비트 살아있음 생존"
     ; "masc_dashboard", "대시보드 현황 대시 보드 개요"
     ; "masc_plan_clear_task", "계획 태스크 제거 해제 클리어"
     ; "masc_agent_fitness", "에이전트 평가 점수 피트니스"

@@ -156,6 +156,7 @@ type keeper_profile_defaults = {
   telemetry_feedback_enabled : bool option;
   telemetry_feedback_window_hours : int option;
   allowed_providers : string list option;
+  cascade_name : string option;
 }
 
 type persona_summary = {
@@ -198,6 +199,7 @@ let empty_keeper_profile_defaults = {
   telemetry_feedback_enabled = None;
   telemetry_feedback_window_hours = None;
   allowed_providers = None;
+  cascade_name = None;
 }
 
 let personas_root_opt () =
@@ -323,6 +325,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
           (match strs "allowed_providers" with
            | [] -> None
            | xs -> Some (List.map String.lowercase_ascii xs));
+        cascade_name = str "cascade_name";
       })
     result
 
@@ -449,6 +452,7 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
                 telemetry_feedback_window_hours =
                   Safe_ops.json_int_opt "telemetry_feedback_window_hours" keeper_json;
                 allowed_providers = lower_string_list_opt (Safe_ops.json_string_list "allowed_providers" keeper_json);
+                cascade_name = Safe_ops.json_string_opt "cascade_name" keeper_json;
               }
           | _ -> { empty_keeper_profile_defaults with manifest_path = Some path })
 

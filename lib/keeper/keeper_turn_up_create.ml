@@ -235,7 +235,9 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         long_goal;
         
         social_model = default_social_model;
-        cascade_name = Keeper_config.default_cascade_name;
+        cascade_name = (match p.profile_defaults.cascade_name with
+          | Some name -> name
+          | None -> Keeper_config.default_cascade_name);
         will;
         needs;
         desires;

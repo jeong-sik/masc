@@ -232,28 +232,6 @@ let handle_gate_discord_status _state request reqd =
   respond_json_with_cors ~status:`OK request reqd
     (Yojson.Safe.to_string (Channel_gate_discord_state.status_json ~audit_limit:limit ()))
 
-(** Generic connector validation for the current single-connector surface.
-
-    Until multiple connector backends exist, only [channel=discord] is valid. *)
-let resolve_connector_channel request =
-  match query_param request "channel" |> Option.map String.trim with
-  | None | Some "" -> Error "channel is required"
-  | Some raw ->
-      let channel = String.lowercase_ascii raw in
-      if String.equal channel "discord" then Ok channel
-      else Error ("unsupported channel: " ^ channel)
-
-(** GET /api/v1/gate/connector/status?channel=discord
-
-    Generic alias for the current connector status surface. *)
-let handle_gate_connector_status state request reqd =
-  match resolve_connector_channel request with
-  | Error err ->
-      respond_json_with_cors ~status:`Bad_request request reqd
-        (Yojson.Safe.to_string (Channel_gate.error_json err))
-  | Ok "discord" -> handle_gate_discord_status state request reqd
-  | Ok _ -> assert false
-
 let gate_keeper_ctx ~sw ~clock state =
   {
     Tool_keeper.config = state.Mcp_server.room_config;

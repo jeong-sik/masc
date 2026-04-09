@@ -107,12 +107,22 @@ let test_route_auth_contracts () =
   check bool "h2 gateway dispatch tick uses tool auth" true
     (file_contains_pattern "lib/server/server_h2_gateway_routes_cp.ml"
        {|h2_authorize_tool state ~tool_name:"masc_dispatch_tick"|});
+  check bool "h2 gateway operator action uses tool auth" true
+    (file_contains_pattern "lib/server/server_h2_gateway_routes_cp.ml"
+       {|h2_authorize_tool state ~tool_name:"masc_operator_action"|});
   check bool "h2 gateway operator confirm uses tool auth" true
     (file_contains_pattern "lib/server/server_h2_gateway_routes_cp.ml"
        {|h2_authorize_tool state ~tool_name:"masc_operator_confirm"|});
-  check bool "h2 gateway operator read routes honor read auth under strict mode" true
+  check bool "h2 gateway operator snapshot read route honors read auth" true
     (file_contains_pattern "lib/server/server_h2_gateway_routes_cp.ml"
-       {|authorize_read_request|});
+       {|`GET, "/api/v1/operator" ->
+          let state = get_server_state () in
+          (match h2_authorize_read_if_needed state with|});
+  check bool "h2 gateway operator digest read route honors read auth" true
+    (file_contains_pattern "lib/server/server_h2_gateway_routes_cp.ml"
+       {|`GET, "/api/v1/operator/digest" ->
+          let state = get_server_state () in
+          (match h2_authorize_read_if_needed state with|});
   check bool "channel gate message route uses tool auth" true
     (file_contains_pattern
        "lib/server/server_routes_http_routes_channel_gate.ml"
@@ -273,7 +283,10 @@ let test_operator_surface_route_contracts () =
     (file_not_contains_pattern "lib/server/server_h2_gateway.ml"
        {|`POST, "/api/v1/operator/action"
       | `POST, "/api/v1/operator/confirm" ->
-          h2_respond_removed_surface|})
+          h2_respond_removed_surface|});
+  check bool "h2 gateway still delegates command-plane and operator routes" true
+    (file_contains_pattern "lib/server/server_h2_gateway.ml"
+       "Server_h2_gateway_routes_cp.dispatch ~sw ~clock ~h2_reqd ~httpun_request ~cors ~path httpun_meth")
 
 let test_input_validation_contracts () =
   (* Bug #1602: broadcast must reject empty messages *)

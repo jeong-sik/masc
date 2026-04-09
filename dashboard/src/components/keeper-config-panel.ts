@@ -208,6 +208,13 @@ function BoolBadge({ value }: { value: boolean }) {
     : html`<span class="text-[11px] font-bold px-2 py-0.5 rounded-md bg-white/5 text-text-dim border border-white/10 shadow-sm">OFF</span>`
 }
 
+function formatHookDestructiveTools(value: string[] | string): string {
+  if (Array.isArray(value)) {
+    return value.length > 0 ? value.join(', ') : '--'
+  }
+  const text = value.trim()
+  return text !== '' ? text : '--'
+}
 
 function ModelList({ models }: { models: string[] }) {
   if (models.length === 0) return html`<span class="text-[11px] text-text-muted italic">none</span>`
@@ -697,7 +704,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
           </div>
         `)}
         <${ConfigRow} label="거부 목록 수" value=${String(c.hooks.deny_list_count)} />
-        <${ConfigRow} label="파괴 검사 도구" value=${c.hooks.destructive_check_tools.join(', ')} />
+        <${ConfigRow} label="파괴 검사 도구" value=${formatHookDestructiveTools(c.hooks.destructive_check_tools)} />
         <${ConfigRow} label="비용 예산" value=${c.hooks.cost_budget.active ? '$' + (c.hooks.cost_budget.max_cost_usd ?? 0).toFixed(2) : '비활성'} />
       ` : null}
 

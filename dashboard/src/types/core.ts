@@ -563,6 +563,7 @@ export interface Keeper {
   primary_model?: string
   active_model?: string
   next_model_hint?: string | null
+  cascade_name?: string
   status: string
   presence_keepalive?: boolean
   presence_keepalive_sec?: number

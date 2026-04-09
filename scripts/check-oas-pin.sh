@@ -43,6 +43,8 @@ min_version_re="${OAS_AGENT_SDK_MIN_VERSION//./\\.}"
 default_pin_source="${OAS_AGENT_SDK_URL}#${OAS_AGENT_SDK_SHA}"
 pin_source="${AGENT_SDK_PIN_URL:-${default_pin_source}}"
 expected_opam_pin_source="git+${OAS_AGENT_SDK_URL}#${OAS_AGENT_SDK_SHA}"
+keeper_manual_doc="${REPO_ROOT}/docs/KEEPER-USER-MANUAL.md"
+oas_audit_doc="${REPO_ROOT}/docs/OAS-UTILIZATION-AUDIT.md"
 git_common_dir_raw="$(git -C "${REPO_ROOT}" rev-parse --git-common-dir)"
 if [[ "${git_common_dir_raw}" = /* ]]; then
   git_common_dir="${git_common_dir_raw}"
@@ -73,6 +75,30 @@ else
   echo "OAS pin override in use: ${pin_source}"
 fi
 
+if ! grep -Eq "\\(agent_sdk \\(>= ${min_version_re}\\)\\)" "${REPO_ROOT}/dune-project"; then
+  echo "dune-project agent_sdk floor is not ${OAS_AGENT_SDK_MIN_VERSION}" >&2
+  exit 1
+fi
+
+if ! grep -Eq "\"agent_sdk\" \\{>= \"${min_version_re}\"\\}" "${REPO_ROOT}/masc_mcp.opam"; then
+  echo "masc_mcp.opam agent_sdk floor is not ${OAS_AGENT_SDK_MIN_VERSION}" >&2
+  exit 1
+fi
+
+if ! grep -Fq "agent_sdk >= ${OAS_AGENT_SDK_MIN_VERSION}" "${keeper_manual_doc}" \
+  || ! grep -Fq "${OAS_AGENT_SDK_BASE_TAG}" "${keeper_manual_doc}" \
+  || ! grep -Fq "${OAS_AGENT_SDK_SHA}" "${keeper_manual_doc}"; then
+  echo "keeper manual OAS pin references are not aligned with scripts/oas-agent-sdk-pin.sh" >&2
+  exit 1
+fi
+
+if ! grep -Fq "OAS Version: ${OAS_AGENT_SDK_MIN_VERSION} floor" "${oas_audit_doc}" \
+  || ! grep -Fq "${OAS_AGENT_SDK_BASE_TAG}" "${oas_audit_doc}" \
+  || ! grep -Fq "${OAS_AGENT_SDK_SHA}" "${oas_audit_doc}"; then
+  echo "OAS utilization audit references are not aligned with scripts/oas-agent-sdk-pin.sh" >&2
+  exit 1
+fi
+
 if [[ "${pin_source}" == "${default_pin_source}" ]]; then
   if git -C "${local_oas_checkout}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     local_checkout_head="$(git -C "${local_oas_checkout}" rev-parse HEAD 2>/dev/null || true)"
@@ -85,23 +111,6 @@ if [[ "${pin_source}" == "${default_pin_source}" ]]; then
     echo "AGENT_SDK_LOCAL_REPO is not a git checkout: ${local_oas_checkout}" >&2
     exit 1
   fi
-fi
-
-if ! grep -Eq "\\(agent_sdk \\(>= ${min_version_re}\\)\\)" "${REPO_ROOT}/dune-project"; then
-  echo "dune-project agent_sdk floor is not ${OAS_AGENT_SDK_MIN_VERSION}" >&2
-  exit 1
-fi
-
-if ! grep -Eq "\"agent_sdk\" \\{>= \"${min_version_re}\"\\}" "${REPO_ROOT}/masc_mcp.opam"; then
-  echo "masc_mcp.opam agent_sdk floor is not ${OAS_AGENT_SDK_MIN_VERSION}" >&2
-  exit 1
-fi
-
-if grep -Eq '0\.81\.0' \
-  "${REPO_ROOT}/docs/KEEPER-USER-MANUAL.md" \
-  "${REPO_ROOT}/docs/OAS-UTILIZATION-AUDIT.md"; then
-  echo "stale OAS version references remain in keeper/OAS docs" >&2
-  exit 1
 fi
 
 if command -v opam >/dev/null 2>&1; then

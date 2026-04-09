@@ -1,4 +1,4 @@
-import { signal, computed } from '@preact/signals'
+import { signal, computed, effect } from '@preact/signals'
 import { callMcpTool } from '../../api/mcp'
 import { namespaceTruth, namespaceTruthInitializing } from '../../namespace-truth-store'
 import { serverStatus } from '../../store'
@@ -38,6 +38,10 @@ function syncFlowStateFromDashboardSignals(): boolean {
   }
   return false
 }
+
+effect(() => {
+  syncFlowStateFromDashboardSignals()
+})
 
 export async function fetchPauseStatus(): Promise<void> {
   if (syncFlowStateFromDashboardSignals()) return

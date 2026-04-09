@@ -1,12 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { signal } from '@preact/signals'
 
 const { callMcpTool } = vi.hoisted(() => ({
   callMcpTool: vi.fn(),
 }))
 
-const namespaceTruth = { value: null as unknown }
-const namespaceTruthInitializing = { value: false }
-const serverStatus = { value: null as unknown }
+const namespaceTruth = signal<unknown>(null)
+const namespaceTruthInitializing = signal(false)
+const serverStatus = signal<unknown>(null)
 
 vi.mock('../../api/mcp', () => ({
   callMcpTool,
@@ -83,5 +84,22 @@ describe('flow-control-state', () => {
     await fetchPauseStatus()
 
     expect(flowState.value).toBe('paused')
+  })
+
+  it('reacts to namespace-truth signal changes after mount', async () => {
+    const { flowState } = await import('./flow-control-state')
+
+    namespaceTruthInitializing.value = true
+    expect(flowState.value).toBe('initializing')
+
+    namespaceTruthInitializing.value = false
+    namespaceTruth.value = {
+      namespace: {
+        status: {
+          paused: false,
+        },
+      },
+    }
+    expect(flowState.value).toBe('running')
   })
 })

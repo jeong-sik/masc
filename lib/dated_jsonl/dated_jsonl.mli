@@ -25,6 +25,10 @@ val read_recent_lines : t -> int -> string list
 (** Like {!read_recent} but returns raw JSONL strings (no parse).
     Useful for tail-readers that do their own parsing. *)
 
+val count_entries : t -> int
+(** [count_entries t] returns the total number of non-empty JSONL rows
+    across all dated files in the store without parsing the JSON payloads. *)
+
 val read_range : t -> since:string -> until:string -> Yojson.Safe.t list
 (** [read_range t ~since ~until] returns entries whose day-file falls
     within [[since, until]] (inclusive, format ["YYYY-MM-DD"]).

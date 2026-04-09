@@ -96,6 +96,21 @@ let test_read_recent_lines () =
        with Yojson.Json_error _ -> false)
   ) lines
 
+let test_count_entries () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "dated_jsonl_count" in
+  let store = Dated_jsonl.create ~base_dir:dir () in
+  for i = 1 to 3 do
+    Dated_jsonl.append store (make_json i)
+  done;
+  let old_month = Filename.concat dir "2020-01" in
+  Fs_compat.mkdir_p old_month;
+  Fs_compat.append_file (Filename.concat old_month "15.jsonl")
+    "{\"i\":4}\n\n{\"i\":5}\n";
+  check int "counts non-empty rows across dated files" 5
+    (Dated_jsonl.count_entries store)
+
 (* ── read_range filters by date ────────────────────────── *)
 
 let test_read_range () =
@@ -201,6 +216,7 @@ let () =
       ( "read_recent_lines",
         [
           test_case "returns raw strings" `Quick test_read_recent_lines;
+          test_case "counts non-empty rows across files" `Quick test_count_entries;
         ] );
       ( "read_range",
         [

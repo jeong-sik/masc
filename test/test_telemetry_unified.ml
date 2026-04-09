@@ -20,6 +20,26 @@ let write_jsonl dir entries =
   let store = Dated_jsonl.create ~base_dir:dir () in
   List.iter (fun json -> Dated_jsonl.append store json) entries
 
+let today_jsonl_path dir =
+  let open Unix in
+  let tm = gmtime (gettimeofday ()) in
+  let month = Printf.sprintf "%04d-%02d" (tm.tm_year + 1900) (tm.tm_mon + 1) in
+  let day = Printf.sprintf "%02d.jsonl" tm.tm_mday in
+  let month_dir = Filename.concat dir month in
+  Fs_compat.mkdir_p month_dir;
+  Filename.concat month_dir day
+
+let write_raw_jsonl_rows dir rows =
+  let path = today_jsonl_path dir in
+  let content =
+    List.init rows (fun i ->
+      Printf.sprintf
+        "{\"timestamp\": %.1f, \"event\": \"e%d\"}\n"
+        (float_of_int i) i)
+    |> String.concat ""
+  in
+  Fs_compat.append_file path content
+
 (* ── Source roundtrip ────────────────────────────── *)
 
 let test_source_roundtrip () =
@@ -172,6 +192,21 @@ let test_summary_with_data () =
     Alcotest.(check bool) "at least 1 entry" true (total >= 1)
   | _ -> Alcotest.fail "expected Assoc"
 
+let test_summary_counts_all_entries_beyond_recent_cap () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "telem_summary_full_count" in
+  let telemetry_dir = Filename.concat dir ".masc/telemetry" in
+  Fs_compat.mkdir_p telemetry_dir;
+  write_raw_jsonl_rows telemetry_dir 10_050;
+  let json = Telemetry_unified.summary_json ~base_path:dir ~masc_root:(masc_root dir) () in
+  match json with
+  | `Assoc fields ->
+    let total = match List.assoc_opt "total_entries" fields with
+      | Some (`Int n) -> n | _ -> -1 in
+    Alcotest.(check int) "counts all rows, not read_recent cap" 10_050 total
+  | _ -> Alcotest.fail "expected Assoc"
+
 (* ── Cluster-aware path ─────────────────────────── *)
 
 let test_cluster_aware_read () =
@@ -237,6 +272,8 @@ let () =
         [
           Alcotest.test_case "empty" `Quick test_summary_empty;
           Alcotest.test_case "with data" `Quick test_summary_with_data;
+          Alcotest.test_case "counts all rows beyond recent cap" `Quick
+            test_summary_counts_all_entries_beyond_recent_cap;
         ] );
       ( "cluster",
         [

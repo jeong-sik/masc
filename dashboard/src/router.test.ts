@@ -27,4 +27,11 @@ describe('navigate', () => {
     expect(route.value.tab).toBe('command')
     expect(route.value.params.section).toBe('intervene')
   })
+
+  it('normalizes legacy governance deep links into the ops queue', () => {
+    window.location.hash = '#command/governance'
+    window.dispatchEvent(new HashChangeEvent('hashchange'))
+    expect(route.value.tab).toBe('command')
+    expect(route.value.params.section).toBe('intervene')
+  })
 })

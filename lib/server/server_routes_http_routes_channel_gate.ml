@@ -253,7 +253,7 @@ let handle_gate_connector_status_by_name _state request reqd =
   match
     resolve_connector_status_name ?name:(query_param request "name") ()
   with
-  | None | Some "" ->
+  | None ->
       respond_json_with_cors ~status:`Bad_request request reqd
         (Yojson.Safe.to_string (Channel_gate.error_json "name is required"))
   | Some connector_name ->

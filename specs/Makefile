@@ -21,7 +21,7 @@ KNOWN_FAILURES ?= KeeperTraceSpec KeeperOASBridge KeeperWorkPipeline KeeperWorkP
 
 # Buggy specs whose current invariant/model is documented as non-violating.
 # Remove from this list once the buggy cfg asserts a stronger property.
-KNOWN_BUGGY_NO_VIOLATION ?= CascadeExhaustion
+KNOWN_BUGGY_NO_VIOLATION ?=
 
 TLC = $(JAVA) $(JAVA_OPTS) \
 	-Dtlc2.TLC.stopAfter=$(TLC_STOP) \

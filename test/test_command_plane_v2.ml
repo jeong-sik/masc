@@ -93,6 +93,11 @@ let () =
             Test_command_plane_v2_traces
               .test_default_trace_view_invalidates_cache_when_event_log_changes;
           Alcotest.test_case
+            "default trace view invalidates cache when operator log grows"
+            `Quick
+            Test_command_plane_v2_traces
+              .test_default_trace_view_invalidates_cache_when_operator_log_grows_without_mtime_change;
+          Alcotest.test_case
             "swarm proof fallback reads bounded slot-sample tail"
             `Quick
             Test_command_plane_v2_summary

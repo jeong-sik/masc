@@ -176,3 +176,36 @@ let test_default_trace_view_invalidates_cache_when_event_log_changes () =
         "default trace cache refreshes after control-plane log change"
         true
         (List.mem "trace-new" (trace_ids json)))
+
+let test_default_trace_view_invalidates_cache_when_operator_log_grows_without_mtime_change
+    () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      with_eio_test base_dir @@ fun config ->
+      ignore (Room.init config ~agent_name:(Some "owner"));
+      let path = operator_action_log_path config in
+      let initial_row =
+        make_operator_row ~trace_id:"trace-initial"
+          ~action_type:"operator_action"
+          ~created_at:"2026-03-23T00:10:00Z"
+      in
+      write_jsonl_rows path [ initial_row ];
+      ignore (Command_plane_v2.list_traces_json config ~limit:5 ());
+      let initial_stats = Unix.stat path in
+      let updated_rows =
+        [
+          initial_row;
+          make_operator_row ~trace_id:"trace-new"
+            ~action_type:"operator_action"
+            ~created_at:"2026-03-23T00:11:00Z";
+        ]
+      in
+      write_jsonl_rows path updated_rows;
+      Unix.utimes path initial_stats.st_atime initial_stats.st_mtime;
+      let json = Command_plane_v2.list_traces_json config ~limit:5 () in
+      Alcotest.(check bool)
+        "default trace cache refreshes when operator log size changes"
+        true
+        (List.mem "trace-new" (trace_ids json)))

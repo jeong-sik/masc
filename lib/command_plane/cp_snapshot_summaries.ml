@@ -2,40 +2,59 @@ include Cp_snapshot_core
 
 let iso_of_unix = Dashboard_utils.iso_of_unix
 
+let file_fingerprint path =
+  try
+    let stats = Unix.stat path in
+    Some (stats.st_mtime, stats.st_size)
+  with Unix.Unix_error _ -> None
+
 let file_mtime path =
-  try Some (Unix.stat path).st_mtime with Unix.Unix_error _ -> None
+  match file_fingerprint path with
+  | Some (mtime, _) -> Some mtime
+  | None -> None
 
 type default_trace_cache_entry = {
-  cp_events_mtime : float option;
-  operator_log_mtime : float option;
-  limit : int;
+  cp_events_fingerprint : (float * int) option;
+  operator_log_fingerprint : (float * int) option;
   events : Yojson.Safe.t list;
 }
 
-let default_trace_cache : (string, default_trace_cache_entry) Hashtbl.t =
-  Hashtbl.create 4
+let default_trace_cache :
+    ((string * int), default_trace_cache_entry) Hashtbl.t =
+  Hashtbl.create 8
 
-let default_trace_cache_key config = Room.masc_dir config
+let max_default_trace_cache_entries = 16
 
-let default_trace_cache_mtimes config =
-  (file_mtime (events_path config), file_mtime (operator_action_log_path config))
+let default_trace_cache_key config ~limit =
+  (Room.masc_dir config, limit)
+
+let default_trace_cache_fingerprints config =
+  ( file_fingerprint (events_path config),
+    file_fingerprint (operator_action_log_path config) )
 
 let cached_default_trace_events config ~limit =
-  let key = default_trace_cache_key config in
-  let cp_events_mtime, operator_log_mtime = default_trace_cache_mtimes config in
+  let key = default_trace_cache_key config ~limit in
+  let cp_events_fingerprint, operator_log_fingerprint =
+    default_trace_cache_fingerprints config
+  in
   match Hashtbl.find_opt default_trace_cache key with
   | Some entry
-    when entry.limit = limit
-         && entry.cp_events_mtime = cp_events_mtime
-         && entry.operator_log_mtime = operator_log_mtime ->
+    when entry.cp_events_fingerprint = cp_events_fingerprint
+         && entry.operator_log_fingerprint = operator_log_fingerprint ->
       Some entry.events
   | _ -> None
 
 let store_default_trace_events config ~limit ~events =
-  let key = default_trace_cache_key config in
-  let cp_events_mtime, operator_log_mtime = default_trace_cache_mtimes config in
+  let key = default_trace_cache_key config ~limit in
+  let cp_events_fingerprint, operator_log_fingerprint =
+    default_trace_cache_fingerprints config
+  in
+  if
+    Hashtbl.length default_trace_cache >= max_default_trace_cache_entries
+    && not (Hashtbl.mem default_trace_cache key)
+  then Hashtbl.reset default_trace_cache;
   Hashtbl.replace default_trace_cache key
-    { cp_events_mtime; operator_log_mtime; limit; events }
+    { cp_events_fingerprint; operator_log_fingerprint; events }
 
 let traces_json_of_events events =
   `Assoc

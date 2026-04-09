@@ -56,6 +56,7 @@ function governanceRetiredMessage(): string {
 function GovernanceSummaryStrip() {
   const data = governanceData.value
   const summary = data?.summary
+  const judge = data?.judge
   const oldestAge = summary?.oldest_open_case_age_s
   const lastActivityAge = summary?.last_activity_age_s
   const caseTrackingRetired = governanceCaseTrackingRetired()
@@ -64,12 +65,15 @@ function GovernanceSummaryStrip() {
   const activityCount = data?.activity?.length ?? 0
   const judgmentCount = data?.judgments?.length ?? 0
   const approvalCount = data?.approval_queue?.length ?? summary?.needs_human_gate ?? 0
-  const retiredValue = '-'
-  const retiredHint = 'retired'
   const judgeOnlyLabel =
     approvalCount > 0
       ? `judge-only / 최근 판단 ${judgmentCount}건 / 승인 ${approvalCount}건`
       : `judge-only / 최근 판단 ${judgmentCount}건`
+  const liveJudgeState =
+    judge?.judge_online === true
+      ? (judge.refreshing ? '갱신 중' : '온라인')
+      : (judge?.last_error ? '오류' : '오프라인')
+  const liveJudgeModel = judge?.model_used?.trim() || judge?.keeper_name?.trim() || '-'
 
   return html`
     ${caseTrackingRetired ? html`
@@ -97,13 +101,24 @@ function GovernanceSummaryStrip() {
       </div>
       ${data?.generated_at ? html`<span class="text-[11px] text-text-dim font-mono">${data.generated_at}</span>` : null}
     </div>
-    <div class="mb-5 grid grid-cols-[repeat(auto-fit,minmax(160px,1fr))] gap-3">
-      <${KpiCard} label="열린 케이스" value=${caseTrackingRetired ? retiredValue : (summary?.cases_open ?? itemCount)} hint=${caseTrackingRetired ? retiredHint : undefined} />
-      <${KpiCard} label="판정 대기" value=${caseTrackingRetired ? retiredValue : (summary?.pending_ruling ?? 0)} hint=${caseTrackingRetired ? retiredHint : undefined} />
-      <${KpiCard} label="자동집행 준비" value=${caseTrackingRetired ? retiredValue : (summary?.ready_auto_execute ?? 0)} hint=${caseTrackingRetired ? retiredHint : undefined} />
-      <${KpiCard} label="관리자 승인 대기" value=${summary?.needs_human_gate ?? approvalCount} hint=${caseTrackingRetired ? 'live' : undefined} />
-      <${KpiCard} label="집행 완료" value=${caseTrackingRetired ? retiredValue : (summary?.executed ?? 0)} hint=${caseTrackingRetired ? retiredHint : undefined} />
-    </div>
+    ${caseTrackingRetired
+      ? html`
+          <div class="mb-5 grid grid-cols-[repeat(auto-fit,minmax(160px,1fr))] gap-3">
+            <${KpiCard} label="Judge 상태" value=${liveJudgeState} hint=${judge?.keeper_name?.trim() || 'live judge'} />
+            <${KpiCard} label="Judge 모델" value=${liveJudgeModel} hint=${judge?.model_used?.trim() ? 'runtime reported' : 'unknown'} />
+            <${KpiCard} label="최근 판단" value=${judgmentCount} hint="live" />
+            <${KpiCard} label="관리자 승인 대기" value=${approvalCount} hint="live" />
+          </div>
+        `
+      : html`
+          <div class="mb-5 grid grid-cols-[repeat(auto-fit,minmax(160px,1fr))] gap-3">
+            <${KpiCard} label="열린 케이스" value=${summary?.cases_open ?? itemCount} />
+            <${KpiCard} label="판정 대기" value=${summary?.pending_ruling ?? 0} />
+            <${KpiCard} label="자동집행 준비" value=${summary?.ready_auto_execute ?? 0} />
+            <${KpiCard} label="관리자 승인 대기" value=${summary?.needs_human_gate ?? approvalCount} />
+            <${KpiCard} label="집행 완료" value=${summary?.executed ?? 0} />
+          </div>
+        `}
     <${JudgeStatusBar} />
   `
 }
@@ -469,21 +484,30 @@ export function Governance() {
     void loadParamAudit()
   }, [])
 
+  const caseTrackingRetired = governanceCaseTrackingRetired()
+
   return html`
     <div class="flex flex-col gap-0.5">
       <${GovernanceSummaryStrip} />
-      <${GovernanceVisualSummary} />
-      <${GovernanceToolbar} />
-      <${KeeperApprovalQueueSection} />
-      <${JudgmentsSection} />
-      <div class="governance-layout">
-        <${DecisionInbox} />
-        <${DecisionDetail} />
-        <${GuardrailPane}
-          submitBrief=${submitBrief}
-          respondToExecutionOrder=${respondToExecutionOrder}
-        />
-      </div>
+      ${caseTrackingRetired
+        ? html`
+            <${KeeperApprovalQueueSection} />
+            <${JudgmentsSection} />
+          `
+        : html`
+            <${GovernanceVisualSummary} />
+            <${GovernanceToolbar} />
+            <${KeeperApprovalQueueSection} />
+            <${JudgmentsSection} />
+            <div class="governance-layout">
+              <${DecisionInbox} />
+              <${DecisionDetail} />
+              <${GuardrailPane}
+                submitBrief=${submitBrief}
+                respondToExecutionOrder=${respondToExecutionOrder}
+              />
+            </div>
+          `}
     </div>
   `
 }

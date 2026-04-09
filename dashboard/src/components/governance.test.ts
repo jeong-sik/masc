@@ -206,7 +206,13 @@ describe('Governance surface', () => {
 
     expect(container.textContent).toContain(serverNote)
     expect(container.textContent).toContain('judge-only / 최근 판단 0건')
+    expect(container.textContent).toContain('Judge 상태')
+    expect(container.textContent).toContain('Judge 모델')
     expect(container.textContent).not.toContain('keeper가 활동 중일 때 자동 생성됩니다')
+    expect(container.textContent).not.toContain('Case Load Visualized')
+    expect(container.textContent).not.toContain('청원 콘솔')
+    expect(container.textContent).not.toContain('사건 수신함')
+    expect(container.textContent).not.toContain('심의 의견 제출')
   }, 20000)
 
   it('renders judgments section with recommended action', async () => {
@@ -381,6 +387,8 @@ describe('Governance surface', () => {
     expect(container.textContent).toContain('Approval Input')
     expect(container.textContent).toContain('관리자 승인 대기')
     expect(container.textContent).toContain('1')
+    expect(container.textContent).not.toContain('Case Load Visualized')
+    expect(container.textContent).not.toContain('청원 콘솔')
 
     const approveButton = Array.from(container.querySelectorAll('button'))
       .find(button => button.textContent?.trim() === '승인')

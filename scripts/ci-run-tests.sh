@@ -121,7 +121,7 @@ heartbeat() {
 }
 
 test_cmd_needs_dune_sanitization() {
-  [[ "${TEST_CMD}" == *"dune "* ]] && [[ "${TEST_CMD}" != *"env -u DUNE_RPC"* ]]
+  [[ "${TEST_CMD}" == *"dune "* ]] && [[ "${TEST_CMD}" != *"unset DUNE_RPC"* ]]
 }
 
 test_cmd_has_explicit_build_dir() {
@@ -130,7 +130,7 @@ test_cmd_has_explicit_build_dir() {
 
 effective_test_cmd() {
   if test_cmd_needs_dune_sanitization; then
-    printf 'env -u DUNE_RPC %s' "${TEST_CMD}"
+    printf 'unset DUNE_RPC; %s' "${TEST_CMD}"
   else
     printf '%s' "${TEST_CMD}"
   fi
@@ -138,7 +138,7 @@ effective_test_cmd() {
 
 isolated_build_dir_cmd() {
   local cmd="${1}"
-  printf 'env DUNE_BUILD_DIR=%q %s' "${CI_TEST_ISOLATED_BUILD_DIR}" "${cmd}"
+  printf 'export DUNE_BUILD_DIR=%q; %s' "${ACTIVE_TEST_BUILD_DIR}" "${cmd}"
 }
 
 agent_sdk_interface_mismatch_detected() {

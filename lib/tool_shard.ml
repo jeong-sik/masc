@@ -949,3 +949,20 @@ let execute (tool_name : string) (arguments : Yojson.Safe.t) : (bool * Yojson.Sa
         (false, `Assoc [("status", `String "error"); ("message", `String "agent_name and shard_name are required")]))
 
   | _ -> (false, `String "Unknown tool")
+
+(* ================================================================ *)
+(* Tool_spec registration                                           *)
+(* ================================================================ *)
+
+let () =
+  List.iter
+    (fun (s : Types.tool_schema) ->
+      Tool_spec.register
+        (Tool_spec.create
+           ~name:s.name
+           ~description:s.description
+           ~module_tag:Tool_dispatch.Mod_shard
+           ~input_schema:s.input_schema
+           ~handler_binding:Tag_dispatch
+           ()))
+    schemas

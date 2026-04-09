@@ -185,5 +185,6 @@ let () =
            ~description:s.description
            ~module_tag:Tool_dispatch.Mod_auth
            ~input_schema:s.input_schema
+           ~handler_binding:Tag_dispatch
            ()))
     schemas

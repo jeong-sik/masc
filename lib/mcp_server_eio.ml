@@ -104,11 +104,10 @@ let () = Tool_dispatch.init_destructive_set
 
 (* Tag registry initialization.
    Most modules register via Tool_spec.register at module load time.
-   Only Tool_schemas_inline (sub-library) and gap-fill registrations remain here. *)
+   Only Tool_schemas_inline (sub-library) and Board remain here. *)
 let () =
   let open Tool_dispatch in
   register_module_tag ~schemas:Tool_schemas_inline.schemas ~tag:Mod_inline;
-  Tool_tag_init.register_all ();
   Tool_board.register ();
   mark_tag_registry_initialized ();
   (* Inject masc_* schemas into keeper bridge for surface/policy filtering.

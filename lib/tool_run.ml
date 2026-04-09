@@ -218,6 +218,7 @@ let () =
            ~description:s.description
            ~module_tag:Tool_dispatch.Mod_run
            ~input_schema:s.input_schema
+           ~handler_binding:Tag_dispatch
            ~is_read_only:is_ro
            ~is_idempotent:is_ro
            ()))

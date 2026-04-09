@@ -97,8 +97,8 @@ let test_messaging_preset_exposes_board () =
   (* Governance tools are no longer available *)
   Alcotest.(check bool) "no masc_governance_status" false
     (List.mem "masc_governance_status" names);
-  Alcotest.(check bool) "has keeper_shell_readonly" true
-    (List.mem "keeper_shell_readonly" names);
+  Alcotest.(check bool) "has keeper_shell" true
+    (List.mem "keeper_shell" names);
   (* github moved out of messaging to reduce surface; available in coding/delivery *)
   Alcotest.(check bool) "no keeper_github in messaging" false
     (List.mem "keeper_github" names);

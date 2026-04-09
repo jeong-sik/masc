@@ -237,7 +237,7 @@ let filesystem_tools : Types.tool_schema list = [
     description = "Read a file as text (truncated at max_bytes). \
 path is REQUIRED. \
 Good: path='lib/foo.ml'. Bad: path=''. \
-For multi-file search, use keeper_shell_readonly with op=rg.";
+For multi-file search, use keeper_shell with op=rg.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -269,7 +269,7 @@ Creates parent dirs.";
 
 let shell_tools : Types.tool_schema list = [
   {
-    name = "keeper_shell_readonly";
+    name = "keeper_shell";
     description = "Run a safe project shell command. \
 ops: pwd, ls, cat, rg, git_status, find, head, tail, wc, tree, git_log, git_diff, bash, git_clone. \
 Defaults to the keeper playground; use cwd to target an explicit allowed directory or cloned repo. \
@@ -305,7 +305,7 @@ NO chaining (&&, ||, ;), NO pipes (|), NO redirects (> >>). \
 Violations are blocked. Good: cmd='dune build', cmd='ls -la lib/'. \
 Bad: cmd='cd x && dune build', cmd='rg foo | wc -l'. \
 Runs in the keeper playground by default; use cwd to target an explicit allowed directory. \
-For read-only ops use keeper_shell_readonly, for file edits use keeper_fs_edit.";
+For read-only ops use keeper_shell, for file edits use keeper_fs_edit.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -689,9 +689,9 @@ let shard_filesystem : shard = {
 let shard_shell : shard = {
   name = "shell";
   tools = shell_tools;
-  read_only_tools = ["keeper_shell_readonly"];
+  read_only_tools = [];
   removable = true;
-  description = "Read-only shell: pwd, ls, cat, rg, git_status";
+  description = "Shell ops: pwd, ls, cat, rg, git_status, git_clone";
 }
 
 let shard_coding : shard = {

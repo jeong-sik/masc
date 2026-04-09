@@ -47,7 +47,7 @@
 - OAS pin drift doctor — local switch validation in Makefile build/test targets (#5958)
 - Spawn stderr capture + cloexec pipes — child process observability and hang prevention (#5960)
 - Approval audit log — persistent JSONL records for pending/resolved/expired events (#5969)
-- Git clone sandboxing in keeper_shell_readonly (#5930)
+- Git clone sandboxing in keeper_shell (#5930)
 
 ### Fixed
 - Ollama thinking mode disabled for keepers — unblocked all keeper timeouts (#5948)

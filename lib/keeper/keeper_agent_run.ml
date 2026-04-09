@@ -177,7 +177,7 @@ let tool_index_entry_of_tool
     else if String.starts_with ~prefix:"keeper_task" name then Some "tasks"
     else if String.starts_with ~prefix:"keeper_voice_" name then Some "voice"
     else if String.starts_with ~prefix:"keeper_fs_" name
-         || name = "keeper_shell_readonly"
+         || name = "keeper_shell"
          || name = "keeper_bash"
          || name = "keeper_write" then Some "filesystem"
     else if name = "keeper_github" then Some "vcs"
@@ -507,7 +507,7 @@ let run_turn
     ; "keeper_voice_listen", "음성 듣기 마이크 녹음 입력"
     ; "keeper_fs_read", "파일 읽기 소스코드 설정"
     ; "keeper_fs_edit", "파일 쓰기 편집 저장 수정 생성"
-    ; "keeper_shell_readonly", "명령어 조회 검색 탐색"
+    ; "keeper_shell", "명령어 조회 검색 탐색"
     ; "keeper_bash", "명령어 실행 쉘 빌드 테스트"
     ; "keeper_github", "깃허브 이슈 풀리퀘스트 PR CI"
     ; "keeper_pr_workflow", "PR 생성 워크트리 커밋 푸시 풀리퀘스트 원���"

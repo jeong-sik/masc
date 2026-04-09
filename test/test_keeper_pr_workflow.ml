@@ -790,7 +790,7 @@ let test_shell_readonly_pwd_defaults_to_playground () =
     in
     Fs_compat.mkdir_p expected_cwd;
     let result =
-      call_tool config meta "keeper_shell_readonly"
+      call_tool config meta "keeper_shell"
         (`Assoc [ "op", `String "pwd" ])
     in
     let json = parse_json result in
@@ -870,7 +870,7 @@ let test_readonly_bash_blocks_quoted_absolute_path_outside_playground () =
     let shared_file = Filename.concat (Lazy.force repo_root) "dune-project" in
     let quoted_cmd = Printf.sprintf "cat \"%s\"" shared_file in
     let result =
-      call_tool config meta "keeper_shell_readonly"
+      call_tool config meta "keeper_shell"
         (`Assoc [ "op", `String "bash"; "command", `String quoted_cmd ])
     in
     let json = parse_json result in

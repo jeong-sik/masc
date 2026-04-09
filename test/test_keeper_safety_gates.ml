@@ -196,7 +196,7 @@ let test_all_keepers_get_full_toolset () =
   check bool "has keeper_fs_read" true (List.mem "keeper_fs_read" tools);
   check bool "has keeper_board_list" true (List.mem "keeper_board_list" tools);
   check bool "has keeper_board_get" true (List.mem "keeper_board_get" tools);
-  check bool "has keeper_shell_readonly" true (List.mem "keeper_shell_readonly" tools)
+  check bool "has keeper_shell" true (List.mem "keeper_shell" tools)
 
 let test_all_keepers_have_research_tools () =
   let meta = make_meta ~preset:Keeper_types.Research  () in
@@ -218,14 +218,14 @@ let test_messaging_preset_tools () =
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "has board tools" true (List.mem "keeper_board_post" tools);
   check bool "has keeper_fs_read" true (List.mem "keeper_fs_read" tools);
-  check bool "has keeper_shell_readonly" true (List.mem "keeper_shell_readonly" tools);
+  check bool "has keeper_shell" true (List.mem "keeper_shell" tools);
   (* github removed from messaging to reduce surface; available in coding/delivery *)
   check bool "no keeper_github in messaging" false (List.mem "keeper_github" tools)
 
 let test_all_keepers_have_shell_and_coding () =
   let meta = make_meta ~preset:Keeper_types.Coding () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  check bool "keeper_shell_readonly included" true (List.mem "keeper_shell_readonly" tools);
+  check bool "keeper_shell included" true (List.mem "keeper_shell" tools);
   check bool "keeper_fs_read included" true (List.mem "keeper_fs_read" tools);
   check bool "keeper_board_get included" true (List.mem "keeper_board_get" tools)
 

@@ -1,6 +1,8 @@
 import { html } from 'htm/preact'
 import { signal, computed, type Signal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
+import { TELEMETRY_AUTO_REFRESH_MS } from '../config/constants'
+import { formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../lib/auto-refresh'
 import { LoadingState } from './common/feedback-state'
 
 interface ToolStat {
@@ -44,19 +46,32 @@ interface ToolQualityData {
 const data: Signal<ToolQualityData | null> = signal(null)
 const loading: Signal<boolean> = signal(false)
 const error: Signal<string | null> = signal(null)
+let latestRequestId = 0
+let activeController: AbortController | null = null
+let activeTimeout: ReturnType<typeof setTimeout> | null = null
 
-async function fetchToolQuality() {
+export async function refreshToolQuality() {
+  const requestId = ++latestRequestId
+  activeController?.abort()
+  if (activeTimeout !== null) {
+    clearTimeout(activeTimeout)
+    activeTimeout = null
+  }
   loading.value = true
   error.value = null
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), 15_000)
+  activeController = controller
+  activeTimeout = timeout
   try {
     const resp = await fetch('/api/v1/dashboard/tool-quality?n=5000', { signal: controller.signal })
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
     const json = await resp.json()
     if (typeof json?.total !== 'number') throw new Error('unexpected response shape')
+    if (requestId !== latestRequestId) return
     data.value = json as ToolQualityData
   } catch (e) {
+    if (requestId !== latestRequestId) return
     if (e instanceof DOMException && e.name === 'AbortError') {
       error.value = 'request timeout (15s)'
     } else {
@@ -64,6 +79,9 @@ async function fetchToolQuality() {
     }
   } finally {
     clearTimeout(timeout)
+    if (activeController === controller) activeController = null
+    if (activeTimeout === timeout) activeTimeout = null
+    if (requestId !== latestRequestId) return
     loading.value = false
   }
 }
@@ -210,7 +228,10 @@ function FailureList({ categories }: { categories: FailureCategory[] }) {
 }
 
 export function ToolQualityPanel() {
-  useEffect(() => { void fetchToolQuality() }, [])
+  useEffect(() => {
+    void refreshToolQuality()
+    return setupVisibleAutoRefresh(refreshToolQuality, TELEMETRY_AUTO_REFRESH_MS)
+  }, [])
 
   const d = data.value
   if (loading.value && !d) return html`<${LoadingState}>도구 품질 불러오는 중...<//>`
@@ -223,9 +244,10 @@ export function ToolQualityPanel() {
         <h2 class="text-sm font-medium">도구 호출 품질</h2>
         <button
           class="text-[10px] px-2 py-0.5 rounded bg-[var(--bg-subtle)] text-[var(--text-dim)] hover:text-[var(--text)]"
-          onClick=${fetchToolQuality}
+          onClick=${refreshToolQuality}
           aria-label="도구 품질 새로고침"
         >새로고침</button>
+        <span class="text-[10px] text-[var(--text-dim)]">${formatAutoRefreshLabel(TELEMETRY_AUTO_REFRESH_MS)}</span>
       </div>
 
       <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">

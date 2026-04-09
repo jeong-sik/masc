@@ -298,6 +298,8 @@ export function LogViewer() {
         <div class="logs-toolbar flex shrink-0 flex-wrap items-center justify-between gap-4 border-b border-[rgba(255,255,255,0.06)] px-4 py-4">
           <div class="logs-filters flex flex-wrap gap-2 items-center">
             <select
+              name="log-level"
+              aria-label="로그 레벨"
               class="logs-select rounded-md border border-[var(--white-10)] bg-[rgba(255,255,255,0.04)] px-3 py-2 text-[12px] text-[var(--text-body)]"
               value=${levelFilter.value}
               onChange=${(e: Event) => {
@@ -315,6 +317,8 @@ export function LogViewer() {
 
             <${TextInput}
               class="min-w-[220px]"
+              name="log-module-filter"
+              ariaLabel="모듈 필터"
               placeholder="모듈 필터"
               value=${moduleFilter.value}
               onInput=${(e: Event) => {
@@ -337,6 +341,8 @@ export function LogViewer() {
             />
 
             <select
+              name="log-limit"
+              aria-label="로그 개수"
               class="logs-select rounded-md border border-[var(--white-10)] bg-[rgba(255,255,255,0.04)] px-3 py-2 text-[12px] text-[var(--text-body)]"
               value=${String(logLimit.value)}
               onChange=${(e: Event) => {
@@ -359,6 +365,8 @@ export function LogViewer() {
             <label class="logs-auto-label flex items-center gap-1.5 cursor-pointer">
               <input
                 type="checkbox"
+                name="log-auto-refresh"
+                aria-label="자동 새로고침"
                 checked=${autoRefresh.value}
                 onChange=${() => { autoRefresh.value = !autoRefresh.value }}
               />

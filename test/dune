@@ -78,8 +78,8 @@
         test_tool_input_validation
         test_autoresearch_codegen
         test_autoresearch_oas_primitives
-        test_contract_risk
-        test_contract_composer
+        ; test_contract_risk removed (team session cleanup)
+        ; test_contract_composer removed (team session cleanup)
         test_cdal_conformance
         test_task_stage
         test_risk_digest
@@ -148,8 +148,8 @@
           test_tool_input_validation
           test_autoresearch_codegen
           test_autoresearch_oas_primitives
-          test_contract_risk
-          test_contract_composer
+          ; test_contract_risk removed (team session cleanup)
+          ; test_contract_composer removed (team session cleanup)
           test_cdal_conformance
           test_task_stage
           test_risk_digest
@@ -203,10 +203,7 @@
  (modules test_worker_run_evidence_summary)
  (libraries masc_test_deps))
 
-(test
- (name test_team_session_worker_run_meta_repair)
- (modules test_team_session_worker_run_meta_repair)
- (libraries masc_test_deps))
+; test_team_session_worker_run_meta_repair removed (team session cleanup)
 
 ; ============================================================
 ; Group 3: Eio-native tests (single-module, standard deps)
@@ -250,8 +247,8 @@
         test_memory_oas_5tier
         test_verifier_oas_bridge
         test_oas_adapters
-        test_team_session_oas_bridge
-        test_team_session_swarm_runner
+        ; test_team_session_oas_bridge removed (team session cleanup)
+        ; test_team_session_swarm_runner removed (team session cleanup)
         test_cache_eio
         test_metrics_store_eio
         test_hebbian_eio
@@ -271,7 +268,7 @@
         test_cp_search_fabric
         test_cp_section_cache
         test_cp_jsonl_tail
-        test_swarm_persistence
+        ; test_swarm_persistence removed (team session cleanup)
         test_tool_repo_synthesis
         test_local_runtime_pool
         test_keeper_tools_oas
@@ -317,7 +314,7 @@
         test_eval_gate
         test_eval_harness
         test_tool_board_coverage
-        test_proof_criteria
+        ; test_proof_criteria removed (team session cleanup)
         test_tool_registration_consistency
         test_tree_index
         test_tool_registry
@@ -394,8 +391,8 @@
         test_memory_oas_5tier
         test_verifier_oas_bridge
         test_oas_adapters
-        test_team_session_oas_bridge
-        test_team_session_swarm_runner
+        ; test_team_session_oas_bridge removed (team session cleanup)
+        ; test_team_session_swarm_runner removed (team session cleanup)
         test_cache_eio
         test_metrics_store_eio
         test_hebbian_eio
@@ -415,7 +412,7 @@
         test_cp_search_fabric
         test_cp_section_cache
         test_cp_jsonl_tail
-        test_swarm_persistence
+        ; test_swarm_persistence removed (team session cleanup)
         test_tool_repo_synthesis
         test_local_runtime_pool
         test_keeper_tools_oas
@@ -461,7 +458,7 @@
         test_eval_gate
         test_eval_harness
         test_tool_board_coverage
-        test_proof_criteria
+        ; test_proof_criteria removed (team session cleanup)
         test_tool_registration_consistency
         test_tree_index
         test_tool_registry

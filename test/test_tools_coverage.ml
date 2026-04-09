@@ -266,8 +266,6 @@ let test_retired_front_door_tools_absent_from_schema_inventory () =
       "masc_operator_confirm";
       "masc_operator_judgment_write";
       "masc_surface_audit";
-      "masc_team_session_step";
-      "masc_team_session_start";
       "masc_operation_start";
       "masc_dispatch_tick";
       "masc_observe_swarm";

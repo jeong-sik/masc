@@ -67,15 +67,7 @@ let test_dispatch_tick_removed () =
   check (list string) "dispatch_tick removed returns empty" []
     (List.map (fun (s : WG.step) -> s.tool) g.next_steps)
 
-let test_team_session_start_removed () =
-  let g = WG.next_steps ~tool_name:"masc_team_session_start" ~success:true in
-  check (list string) "team_session_start removed returns empty" []
-    (List.map (fun (s : WG.step) -> s.tool) g.next_steps)
 
-let test_team_session_prove_removed () =
-  let g = WG.next_steps ~tool_name:"masc_team_session_prove" ~success:true in
-  check (list string) "team_session_prove removed returns empty" []
-    (List.map (fun (s : WG.step) -> s.tool) g.next_steps)
 
 (* ── Unknown tools return empty guidance ─────────────────────────── *)
 
@@ -252,8 +244,6 @@ let () =
     "retired_paths", [
       test_case "operation_start removed" `Quick test_operation_start_removed;
       test_case "dispatch_tick removed" `Quick test_dispatch_tick_removed;
-      test_case "team_session_start removed" `Quick test_team_session_start_removed;
-      test_case "team_session_prove removed" `Quick test_team_session_prove_removed;
     ];
     "edge_cases", [
       test_case "unknown tool" `Quick test_unknown_tool;

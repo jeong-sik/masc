@@ -296,7 +296,7 @@ let test_risk_payload_safe_nested_string_remains_low () =
 
 let test_risk_contract_risk_from_delivery_contract () =
   let risk =
-    Gp.assess_risk ~tool_name:"masc_team_session_step"
+    Gp.assess_risk ~tool_name:"masc_operator_action"
       ~input:
         (`Assoc
           [
@@ -324,7 +324,7 @@ let test_risk_contract_risk_from_delivery_contract () =
 
 let test_risk_contract_risk_medium_delivery_contract () =
   let risk =
-    Gp.assess_risk ~tool_name:"masc_team_session_step"
+    Gp.assess_risk ~tool_name:"masc_operator_action"
       ~input:
         (`Assoc
           [
@@ -363,7 +363,7 @@ let test_risk_invalid_delivery_contract_falls_back_to_heuristic () =
 
 let test_risk_contract_risk_empty_tool_names_uses_contract_only () =
   let risk =
-    Gp.assess_risk ~tool_name:"masc_team_session_step"
+    Gp.assess_risk ~tool_name:"masc_operator_action"
       ~input:
         (`Assoc
           [
@@ -411,7 +411,7 @@ let test_risk_contract_risk_does_not_downgrade_heuristic () =
 
 let test_risk_payload_beats_contract_risk () =
   let risk =
-    Gp.assess_risk ~tool_name:"masc_team_session_step"
+    Gp.assess_risk ~tool_name:"masc_operator_action"
       ~input:
         (`Assoc
           [

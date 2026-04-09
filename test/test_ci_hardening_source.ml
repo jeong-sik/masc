@@ -77,13 +77,7 @@ let test_contract_harness_and_team_session_authz_contracts () =
        "extract_text()");
   check bool "golden path harness uses extract_text helper" true
     (file_contains_pattern "scripts/harness/contract/golden_path_1_contract.sh"
-       "| extract_text)");
-  check bool "team session stop unauthorized path covered" true
-    (file_contains_pattern "test/test_tool_team_session_misc.ml"
-       "unauthorized stop denied");
-  check bool "team session stop owner path covered" true
-    (file_contains_pattern "test/test_tool_team_session_misc.ml"
-       "owner stop allowed")
+       "| extract_text)")
 
 let test_route_auth_contracts () =
   check bool "http command-plane units use tool auth" true
@@ -422,9 +416,6 @@ let test_activity_surface_contracts () =
        "!Room_hooks.activity_emit_fn config");
   check bool "board success paths emit activity events" true
     (file_contains_pattern "lib/tool_inline_dispatch_extra.ml"
-       "Activity_graph.emit config");
-  check bool "team session store emits activity events" true
-    (file_contains_pattern "lib/team_session/team_session_store.ml"
        "Activity_graph.emit config")
 
 let test_local_review_script_contracts () =
@@ -590,10 +581,7 @@ let test_oas_worker_capability_threading_contracts () =
        "?sw:Eio.Switch.t ->");
   check bool "oas worker model-by-label accepts threaded net capability" true
     (file_contains_pattern "lib/oas_worker.mli"
-       "?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->");
-  check bool "team session bridge threads switch into oas worker" true
-    (file_contains_pattern "lib/team_session/team_session_oas_bridge.ml"
-       "?raw_trace ~proof_ref ?contract ~sw")
+       "?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->")
 
 let test_oas_capacity_restore_contracts () =
   check bool "operator judge backoff uses OAS local capacity" true
@@ -608,12 +596,6 @@ let test_oas_capacity_restore_contracts () =
   check bool "governance judge selection is explicit" true
     (file_contains_pattern "lib/dashboard/dashboard_governance_judge.ml"
        {|[ "governance_judge" ]|});
-  check bool "team session swarm config restores slot-aware OAS capacity query" true
-    (file_contains_pattern "lib/team_session/team_session_oas_bridge.ml"
-       "local_capacity_for_selections ~sw ~net");
-  check bool "team session swarm config reuses slot-aware cap helper" true
-    (file_contains_pattern "lib/team_session/team_session_oas_bridge.ml"
-       "slot_aware_concurrency_cap ~entry_count");
   check bool "autoresearch background gating restores OAS capacity query" true
     (file_contains_pattern "lib/autoresearch_codegen.ml"
        "local_capacity_for_selections ~sw ~net");
@@ -622,18 +604,8 @@ let test_oas_capacity_restore_contracts () =
        "Eio_context.get_switch_opt (), Eio_context.get_net_opt ()")
 
 let test_team_session_spawn_tool_contracts () =
-  check bool "team session spawn preflights via Worker_runtime" true
-    (file_contains_pattern "lib/tool_team_session_step_spawn.ml"
-       "Worker_runtime.preflight_spawn_batch");
-  check bool "team session spawn branches on local spawn agents" true
-    (file_contains_pattern "lib/tool_team_session_step_exec.ml"
-       "if env.deps.is_local_spawn_agent spec.spawn_agent then");
-  check bool "team session spawn contract uses scoped tool names" true
-    (file_contains_pattern "lib/tool_team_session_step_exec.ml"
-       "local_worker_tool_names_of_scope");
-  check bool "team session bridge exposes scoped local worker tools" true
-    (file_contains_pattern "lib/team_session/team_session_oas_bridge.ml"
-       "supported_local_worker_tool_names_for_scope")
+  (* team session spawn tool contracts removed — team session cleanup *)
+  ()
 
 let test_dashboard_timeout_guard_contracts () =
   check bool "http transport health route uses cached dashboard helper" true
@@ -698,12 +670,7 @@ let test_router_contract_alignment () =
   ()
 
 let test_runtime_precondition_contracts () =
-  check bool "team session support resolves start env via helper" true
-    (file_contains_pattern "lib/tool_team_session_support.ml"
-       "let team_session_start_env_result");
-  check bool "team session start returns typed precondition error" true
-    (file_contains_pattern "lib/tool_team_session_handlers.ml"
-       {|error_result_typed ~code:Precondition_failed|});
+  (* team session precondition checks removed — team session cleanup *)
   check bool "graphql routes expose result-based server state lookup" true
     (file_contains_pattern "lib/server/server_routes_http_pages.ml"
        "let get_server_state_result () =");

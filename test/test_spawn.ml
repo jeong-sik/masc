@@ -124,10 +124,6 @@ let test_masc_mcp_tools () =
     (List.mem "mcp__masc__masc_status" Spawn.masc_mcp_tools);
   Alcotest.(check bool) "omits masc_claim" false
     (List.mem "mcp__masc__masc_claim" Spawn.masc_mcp_tools);
-  Alcotest.(check bool) "omits team_session_step" false
-    (List.mem "mcp__masc__masc_team_session_step" Spawn.masc_mcp_tools);
-  Alcotest.(check bool) "omits team_session_finalize" false
-    (List.mem "mcp__masc__masc_team_session_finalize" Spawn.masc_mcp_tools);
   (* portal_send and a2a_delegate removed from spawned-agent surface in #4999 *)
   Alcotest.(check bool) "omits portal_send (pruned)" false
     (List.mem "mcp__masc__masc_portal_send" Spawn.masc_mcp_tools);
@@ -147,8 +143,6 @@ let test_masc_mcp_tools () =
     (List.mem "mcp__masc__masc_keeper_tool_catalog" Spawn.masc_mcp_tools);
   Alcotest.(check bool) "omits operator_snapshot" false
     (List.mem "mcp__masc__masc_operator_snapshot" Spawn.masc_mcp_tools);
-  Alcotest.(check bool) "omits team_session_prove" false
-    (List.mem "mcp__masc__masc_team_session_prove" Spawn.masc_mcp_tools);
   Alcotest.(check bool) "omits tool_list (no schema)" false
     (List.mem "mcp__masc__masc_tool_list" Spawn.masc_mcp_tools);
   Alcotest.(check bool) "omits tool_grant (no schema)" false

@@ -14,6 +14,7 @@ import { bootKeeper, shutdownKeeper } from '../api/keeper'
 import { TimeAgo } from './common/time-ago'
 import type { Keeper } from '../types'
 import { invalidateDashboardCache, refreshDashboard } from '../store'
+import { fetchCascadeProfiles, updateKeeperCascade } from '../api/dashboard'
 import { selectKeeper } from '../keeper-runtime'
 import { keeperStatusDetails } from '../keeper-state'
 import { findKeeper } from '../lib/keeper-utils'
@@ -417,6 +418,30 @@ export function KeeperDetailOverlay() {
                       }"
                       title=${`Tool preset: ${preset}${canPR ? ' (clone/PR 가능)' : ''}`}
                     >${preset}</span>
+                  `
+                })()}
+                ${(() => {
+                  const [profiles, setProfiles] = useState<string[]>([])
+                  const [currentCascade, setCurrentCascade] = useState(keeper.cascade_name || 'default')
+                  if (profiles.length === 0) {
+                    fetchCascadeProfiles().then(r => setProfiles(r.profiles)).catch(() => {})
+                  }
+                  if (profiles.length <= 1) return null
+                  return html`
+                    <select
+                      class="py-0.5 px-1 rounded text-[10px] font-mono bg-[var(--white-5)] text-[var(--text-muted)] border border-[var(--white-8)] cursor-pointer"
+                      title="Cascade profile"
+                      value=${currentCascade}
+                      onChange=${(e: Event) => {
+                        const val = (e.target as HTMLSelectElement).value
+                        setCurrentCascade(val)
+                        updateKeeperCascade(keeper.name, val).then(() => {
+                          refreshDashboard()
+                        })
+                      }}
+                    >
+                      ${profiles.map(p => html`<option value=${p}>${p}</option>`)}
+                    </select>
                   `
                 })()}
               </div>

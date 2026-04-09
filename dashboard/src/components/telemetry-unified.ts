@@ -176,6 +176,17 @@ function SummaryCard({ src }: { src: TelemetrySourceSummary }) {
   `
 }
 
+function DiagnosisCard({ title, value, detail, tone }: { title: string; value: string; detail: string; tone: 'ok' | 'warn' | 'neutral' }) {
+  const toneColor = tone === 'ok' ? 'text-emerald-400' : tone === 'warn' ? 'text-amber-400' : 'text-[var(--text-muted)]'
+  return html`
+    <div class="rounded-lg border border-[var(--card-border)] bg-[rgba(255,255,255,0.02)] p-3 min-w-[140px]">
+      <div class="text-xs font-medium text-[var(--text-muted)] mb-1">${title}</div>
+      <div class="text-2xl font-bold ${toneColor}">${value}</div>
+      <div class="text-[10px] text-[var(--text-dim)]">${detail}</div>
+    </div>
+  `
+}
+
 function EntryRow({ entry }: { entry: TelemetryEntry }) {
   const expanded = useSignal(false)
   const meta = sourceMeta(entry.source)

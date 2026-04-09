@@ -40,11 +40,28 @@ let effective_status_name (ctx : _ context) args =
   | "" -> normalize_status_name ctx.agent_name
   | value -> value
 
+let resolve_status_target (ctx : _ context) args =
+  let requested_name = effective_status_name ctx args in
+  if not (validate_name requested_name) then
+    Error "❌ invalid keeper name"
+  else
+    match read_meta_resolved ctx.config requested_name with
+    | Error e -> Error ("❌ " ^ e)
+    | Ok (Some (resolved_name, meta)) -> Ok (resolved_name, meta)
+    | Ok None ->
+        (match keeper_name_from_agent_name requested_name with
+         | Some stripped_name ->
+             Error
+               (Printf.sprintf
+                  "❌ keeper not found: %s (also tried %s)"
+                  requested_name stripped_name)
+         | None -> Error (Printf.sprintf "❌ keeper not found: %s" requested_name))
+
 (** Hash the status-affecting args so different parameter combos
     get separate cache entries (e.g. fast=true vs fast=false). *)
-let hash_status_args ctx args =
+let hash_status_args resolved_name args =
   let parts = [
-    effective_status_name ctx args;
+    resolved_name;
     string_of_bool (get_bool args "fast" false);
     string_of_bool (get_bool args "include_context" false);
     string_of_bool (get_bool args "include_metrics_overview" false);
@@ -57,15 +74,10 @@ let hash_status_args ctx args =
   Digest.string (String.concat "|" parts) |> Digest.to_hex
 
 let handle_keeper_status ctx args : tool_result =
-  let name = effective_status_name ctx args in
-  if not (validate_name name) then
-    (false, "❌ invalid keeper name")
-  else
-    match read_meta ctx.config name with
-    | Error e -> (false, "❌ " ^ e)
-    | Ok None -> (false, Printf.sprintf "❌ keeper not found: %s" name)
-    | Ok (Some m) ->
-      let args_hash = hash_status_args ctx args in
+  match resolve_status_target ctx args with
+  | Error err -> (false, err)
+  | Ok (name, m) ->
+      let args_hash = hash_status_args name args in
       (* Cache hit: same updated_at + same args → return cached response *)
       (match Hashtbl.find_opt _cache name with
        | Some entry
@@ -486,8 +498,11 @@ let handle_keeper_status ctx args : tool_result =
           Keeper_types.tool_access_custom_allowlist m.tool_access
           |> Option.value ~default:[]
         in
+        let runtime_blocker_fields =
+          runtime_blocker_fields_json ctx.config m
+        in
 
-         let json = `Assoc [
+         let json = `Assoc ([
            ("name", `String name);
            ("meta", meta_to_json m);
            ("goal", `String m.goal);
@@ -608,16 +623,8 @@ let handle_keeper_status ctx args : tool_result =
                if String.trim m.runtime.last_need = ""
                then `Null
                else `String m.runtime.last_need);
-           ]);
-           ("active_team_session_id",
-             Json_util.string_opt_to_json m.active_team_session_id);
-           ("team_session_state", team_session_state_json ctx.config m);
-           ("last_team_session_started_at",
-             if String.trim m.last_team_session_started_at = "" then `Null
-             else `String m.last_team_session_started_at);
-           ("team_session_start_count_total",
-             `Int m.team_session_start_count_total);
-           ("team_session_bridge", team_session_bridge_json ctx.config m);
+          ]);
+        ] @ runtime_blocker_fields @ [
            ("compaction_policy", `Assoc [
              ("profile", `String m.compaction.profile);
              ("ratio_gate", `Float compact_ratio_gate);
@@ -670,11 +677,45 @@ let handle_keeper_status ctx args : tool_result =
                    (Room_utils.safe_filename m.name)
                    (Room_utils.safe_filename m.runtime.trace_id))));
            ]);
-           ("execution_context", `Assoc [
-             ("playground_path", `String
-               (Keeper_alerting_path.playground_path_of_keeper m.name));
+           (let playground_rel = Keeper_alerting_path.playground_path_of_keeper m.name in
+           let playground_abs = Filename.concat ctx.config.base_path playground_rel in
+           "execution_context", `Assoc [
+             ("playground_path", `String playground_rel);
              ("execution_scope", `String m.execution_scope);
              ("allowed_paths", string_list_to_json m.allowed_paths);
+             ("playground_repos",
+               let cache_path = Filename.concat playground_abs
+                 ".playground_state.json" in
+               try
+                 match Yojson.Safe.from_file cache_path with
+                 | `Assoc _ as json ->
+                   (match Yojson.Safe.Util.member "repos" json with
+                    | `Null -> `List []
+                    | repos -> repos)
+                 | _ -> `List []
+               with Sys_error _ | Yojson.Json_error _ -> `List []);
+             ("pr_history",
+               let pr_path = Filename.concat playground_abs
+                 ".playground_pr_history.jsonl" in
+               try
+                 let entries = Fs_compat.load_jsonl pr_path in
+                 (* Last 10 PRs, most recent first *)
+                 `List (List.take 10 (List.rev entries))
+               with Sys_error _ -> `List []);
+             ("active_worktrees",
+               let worktrees_dir = Filename.concat ctx.config.base_path ".worktrees" in
+               try
+                 let entries = Sys.readdir worktrees_dir |> Array.to_list in
+                 let keeper_prefix = Keeper_alerting_path.sanitize_keeper_name m.name in
+                 let matching = List.filter (fun name ->
+                   String.starts_with ~prefix:(keeper_prefix ^ "-") name
+                   || String.starts_with ~prefix:(keeper_prefix ^ "/") name
+                   || name = keeper_prefix) entries in
+                 `List (List.map (fun name -> `Assoc [
+                   "name", `String name;
+                   "path", `String (Filename.concat ".worktrees" name);
+                 ]) matching)
+               with Sys_error _ -> `List []);
              ("last_evidence",
                match Keeper_evidence.latest_evidence
                  ~base_path:ctx.config.base_path
@@ -690,7 +731,7 @@ let handle_keeper_status ctx args : tool_result =
                | Ok () -> `Bool true
                | Error _ -> `Bool false);
            ]);
-         ] in
+         ]) in
          let response = Yojson.Safe.pretty_to_string json in
          Hashtbl.replace _cache name
            { updated_at = m.updated_at; args_hash; response };

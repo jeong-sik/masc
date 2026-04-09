@@ -185,12 +185,18 @@ let test_persist_worker_run_snapshot_with_proof () =
     (json |> U.member "proof_run_id" |> U.to_string);
   check string "proof status" "completed"
     (json |> U.member "proof_status" |> U.to_string);
+  check string "contract id" "dc-proof"
+    (json |> U.member "contract_id" |> U.to_string);
   check string "proof risk class" "medium"
     (json |> U.member "proof_risk_class" |> U.to_string);
   check string "proof execution mode" "execute"
     (json |> U.member "proof_execution_mode" |> U.to_string);
   check int "proof evidence count" 2
     (json |> U.member "proof_evidence_count" |> U.to_int);
+  check bool "proof persisted" true
+    (json |> U.member "proof_present" |> U.to_bool);
+  check bool "proof path exists" true
+    (json |> U.member "proof_path" |> U.to_string |> Sys.file_exists);
   check string "tool surface status" "available"
     (json |> U.member "tool_surface_status" |> U.to_string);
   check string "tool surface source" "local_worker_tools"
@@ -208,6 +214,8 @@ let test_persist_worker_run_snapshot_without_proof () =
     (json |> U.member "session_id" |> U.to_string);
   check bool "proof_run_id null" true
     (json |> U.member "proof_run_id" = `Null);
+  check bool "contract_id null" true
+    (json |> U.member "contract_id" = `Null);
   check bool "proof_status null" true
     (json |> U.member "proof_status" = `Null);
   check bool "proof_risk_class null" true

@@ -5,33 +5,25 @@
 open Tool_args
 open Keeper_types
 open Keeper_keepalive
-open Keeper_turn_session
 
 type tool_result = Keeper_types.tool_result
 
 let handle_keeper_down ctx args : tool_result =
-  let name = get_string args "name" "" in
-  if not (validate_name name) then
+  let requested_name = String.trim (get_string args "name" "") in
+  if not (validate_name requested_name) then
     (false, "❌ invalid keeper name")
   else
     let remove_meta = get_bool args "remove_meta" false in
     let remove_session = get_bool args "remove_session" false in
-    stop_keepalive name;
-    match read_meta ctx.config name with
+    stop_keepalive requested_name;
+    (match keeper_name_from_agent_name requested_name with
+     | Some resolved_name when not (String.equal resolved_name requested_name) ->
+         stop_keepalive resolved_name
+     | _ -> ());
+    match read_meta_resolved ctx.config requested_name with
     | Error e -> (false, "❌ " ^ e)
-    | Ok None -> (true, Printf.sprintf "keeper already absent: %s" name)
-    | Ok (Some m) ->
-      let stop_linked_session session_id =
-        match
-          Team_session_engine_eio.stop_session ~config:ctx.config ~session_id
-            ~reason:"keeper_down" ~generate_report:false
-        with
-        | Ok _ -> ()
-        | Error err ->
-            Log.Keeper.error "linked team session stop failed: %s"
-              err
-      in
-      Option.iter stop_linked_session m.active_team_session_id;
+    | Ok None -> (true, Printf.sprintf "keeper already absent: %s" requested_name)
+    | Ok (Some (name, m)) ->
       ignore
         (Operator_pending_confirm.remove_pending_confirms_by_target ctx.config
            ~target_type:"keeper" ~target_id:(Some name));
@@ -43,13 +35,14 @@ let handle_keeper_down ctx args : tool_result =
          let retained =
            {
              m with
-             active_team_session_id = None;
-             last_team_session_started_at = "";
              updated_at = now_iso ();
              paused = true;
            }
          in
-         (write_meta_logged ctx.config retained;
+         ((match write_meta ctx.config retained with
+           | Ok () -> ()
+           | Error err ->
+               Log.Keeper.error "keeper_down write_meta failed: %s" err);
           Keeper_registry.update_meta ~base_path:ctx.config.base_path name retained;
           ignore (Keeper_registry.dispatch_event ~base_path:ctx.config.base_path name
             Keeper_state_machine.Operator_pause)));

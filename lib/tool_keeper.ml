@@ -203,6 +203,12 @@ let keeper_list_row_json ~runtime_class config name =
 let invalidate_status_cache name =
   Keeper_status_detail.invalidate_status_cache_for name
 
+let with_keeper_name args name =
+  match args with
+  | `Assoc fields ->
+      `Assoc (("name", `String name) :: List.remove_assoc "name" fields)
+  | other -> other
+
 let handle_keeper_create_from_persona ctx args : tool_result =
   if not Server_startup_state.((!state).state_ready) then begin
     let elapsed = Server_startup_state.elapsed_since_start () in
@@ -258,37 +264,29 @@ let handle_keeper_status ctx args : tool_result =
      Yojson.Safe.pretty_to_string
        (annotate_keeper_json ~runtime_class:"keeper" json))
 
-let name_from_agent_name agent_name =
-  let prefix = "keeper-" and suffix = "-agent" in
-  let plen = String.length prefix and slen = String.length suffix in
-  let alen = String.length agent_name in
-  if alen > plen + slen
-     && String.sub agent_name 0 plen = prefix
-     && String.sub agent_name (alen - slen) slen = suffix
-  then Some (String.sub agent_name plen (alen - plen - slen))
-  else None
-
 let resolve_keeper_name ctx args =
-  let name = get_string args "name" "" in
-  match read_meta ctx.config name with
-  | Ok (Some _) -> Ok name
+  let name = String.trim (get_string args "name" "") in
+  match read_meta_resolved ctx.config name with
+  | Ok (Some (resolved_name, _meta)) -> Ok resolved_name
   | Ok None ->
-    (match name_from_agent_name name with
-     | Some stripped ->
-       (match read_meta ctx.config stripped with
-        | Ok (Some _) -> Ok stripped
-        | _ -> Error (Printf.sprintf "❌ keeper not found: %s (also tried %s)" name stripped))
-     | None -> Error (Printf.sprintf "❌ keeper not found: %s" name))
+      (match keeper_name_from_agent_name name with
+       | Some stripped ->
+           Error
+             (Printf.sprintf
+                "❌ keeper not found: %s (also tried %s)"
+                name stripped)
+       | None -> Error (Printf.sprintf "❌ keeper not found: %s" name))
   | Error err -> Error (Printf.sprintf "❌ %s" err)
 
 let handle_keeper_msg ctx args : tool_result =
   match resolve_keeper_name ctx args with
   | Error err -> (false, err)
   | Ok name ->
+      let resolved_args = with_keeper_name args name in
       let request_id = Keeper_msg_async.submit ~sw:ctx.sw
         ~keeper_name:name
         ~f:(fun () ->
-          let ok, body = Turn.handle_keeper_msg ctx args in
+          let ok, body = Turn.handle_keeper_msg ctx resolved_args in
           if ok then begin
             invalidate_keeper_list_cache ();
             invalidate_status_cache name
@@ -318,7 +316,8 @@ let handle_keeper_msg_stream ~on_text_delta ctx args : tool_result =
   match resolve_keeper_name ctx args with
   | Error err -> (false, err)
   | Ok name ->
-      let ok, body = Turn.handle_keeper_msg ~on_text_delta ctx args in
+      let resolved_args = with_keeper_name args name in
+      let ok, body = Turn.handle_keeper_msg ~on_text_delta ctx resolved_args in
       if not ok then (ok, body)
       else begin
         invalidate_keeper_list_cache ();
@@ -332,9 +331,9 @@ let handle_keeper_msg_stream ~on_text_delta ctx args : tool_result =
       end
 
 let resolve_keeper_meta ctx args =
-  let name = get_string args "name" "" in
-  match read_meta ctx.config name with
-  | Ok (Some meta) -> Ok meta
+  let name = String.trim (get_string args "name" "") in
+  match read_meta_resolved ctx.config name with
+  | Ok (Some (_resolved_name, meta)) -> Ok meta
   | Ok None -> Error (Printf.sprintf "❌ keeper not found: %s" name)
   | Error err -> Error (Printf.sprintf "❌ %s" err)
 
@@ -559,6 +558,7 @@ let () =
            ~description:s.description
            ~module_tag:Tool_dispatch.Mod_keeper
            ~input_schema:s.input_schema
+           ~handler_binding:Tag_dispatch
            ~is_read_only:(List.mem s.name _tool_spec_read_only)
            ~is_idempotent:(List.mem s.name _tool_spec_read_only)
            ()))

@@ -5,6 +5,29 @@
 
     @since 2.260.0 *)
 
+(** Classify a failed tool call output string into an error category.
+    Strips known prefixes ("error: ", "tool_error: ") before JSON parsing
+    so prefixed outputs like ["error: {\"ok\":false,\"error\":\"msg\"}"]
+    yield the actual error key instead of "parse_error". *)
+let classify_failure_output (output : string) : string =
+  if String.length output = 0 then "empty_output"
+  else
+    let json_str =
+      let prefixes = ["error: "; "tool_error: "] in
+      match List.find_opt (fun p ->
+        String.length output > String.length p
+        && String.sub output 0 (String.length p) = p
+      ) prefixes with
+      | Some p -> String.sub output (String.length p)
+                    (String.length output - String.length p)
+      | None -> output
+    in
+    match Yojson.Safe.from_string json_str with
+    | j ->
+      Safe_ops.json_string_opt "error" j
+      |> Option.value ~default:"unknown_error"
+    | exception Yojson.Json_error _ -> "parse_error"
+
 let aggregate ?(n = 5000) () : Yojson.Safe.t =
   let records = Keeper_tool_call_log.read_recent ~n () in
   if records = [] then
@@ -107,15 +130,7 @@ let aggregate ?(n = 5000) () : Yojson.Safe.t =
         Safe_ops.json_string_opt "output" record
         |> Option.value ~default:""
       in
-      let cat =
-        if String.length output > 0 then
-          (* Extract error key from JSON output *)
-          (match Yojson.Safe.from_string output with
-           | j ->
-             Safe_ops.json_string_opt "error" j
-             |> Option.value ~default:"unknown_error"
-           | exception Yojson.Json_error _ -> "parse_error")
-        else "empty_output"
+      let cat = classify_failure_output output
       in
       let r = match Hashtbl.find_opt failure_cats cat with
         | Some r -> r

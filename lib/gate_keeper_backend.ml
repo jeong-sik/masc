@@ -44,13 +44,58 @@ let extract_structured (body : string) : Yojson.Safe.t option =
 
 (* ── Dispatch ────────────────────────────────────────────────── *)
 
+let normalized_context_value value =
+  value
+  |> String.to_seq
+  |> Seq.map (function
+       | '\n' | '\r' | '\t' -> ' '
+       | ch -> ch)
+  |> String.of_seq
+  |> String.trim
+
+let normalized_or_unknown value =
+  match normalized_context_value value with
+  | "" -> "unknown"
+  | trimmed -> trimmed
+
+let agent_name_for_channel_actor ~channel ~channel_room_id ~channel_user_id =
+  Printf.sprintf "gate:%s:%s:%s"
+    (normalized_or_unknown channel)
+    (normalized_or_unknown channel_room_id)
+    (normalized_or_unknown channel_user_id)
+
+let contextualize_message ~channel ~channel_user_id ~channel_user_name
+    ~channel_room_id ~content =
+  let safe_channel = normalized_or_unknown channel in
+  let safe_user_id = normalized_or_unknown channel_user_id in
+  let safe_user_name = normalized_or_unknown channel_user_name in
+  let safe_room_id = normalized_or_unknown channel_room_id in
+  let safe_content = String.trim content in
+  String.concat "\n"
+    [
+      "[External channel context]";
+      "channel: " ^ safe_channel;
+      "room_id: " ^ safe_room_id;
+      "user_id: " ^ safe_user_id;
+      "user_name: " ^ safe_user_name;
+      "";
+      "[User message]";
+      safe_content;
+    ]
+
 let dispatch ~sw ~clock ~proc_mgr ~net ~config
-    ~channel ~channel_user_id ~keeper_name ~content =
-  let agent_name = Printf.sprintf "gate:%s:%s" channel channel_user_id in
+    ~channel ~channel_user_id ~channel_user_name ~channel_room_id
+    ~keeper_name ~content =
+  let agent_name =
+    agent_name_for_channel_actor ~channel ~channel_room_id ~channel_user_id
+  in
   let args =
     `Assoc [
       ("name", `String (String.trim keeper_name));
-      ("message", `String (String.trim content));
+      ( "message",
+        `String
+          (contextualize_message ~channel ~channel_user_id ~channel_user_name
+             ~channel_room_id ~content) );
       ("direct_reply", `Bool true);
     ]
   in

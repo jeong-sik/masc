@@ -392,6 +392,7 @@ let test_declared_tool_permission_from_tool_spec () =
       ~description:"declared permission tool"
       ~module_tag:Tool_dispatch.Mod_misc
       ~input_schema:(`Assoc [ ("type", `String "object") ])
+      ~handler_binding:Tag_dispatch
       ~required_permission:Types.CanAdmin
       ()
   in

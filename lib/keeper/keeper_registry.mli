@@ -13,12 +13,24 @@ open Keeper_types
 module StringMap : Map.S with type key = string
 
 (** Structured failure reason for crash cohort detection. *)
+type ambiguous_partial_commit_kind =
+  | Post_commit_timeout
+  | Post_commit_failure
+
+type ambiguous_partial_commit = {
+  kind : ambiguous_partial_commit_kind;
+  detail : string;
+}
+
 type failure_reason =
   | Heartbeat_consecutive_failures of int
   | Turn_consecutive_failures of int
-  | Ambiguous_partial_commit of string
+  | Ambiguous_partial_commit of ambiguous_partial_commit
   | Fiber_unresolved
   | Exception of string
+
+val ambiguous_partial_commit_kind_to_string :
+  ambiguous_partial_commit_kind -> string
 
 val failure_reason_to_string : failure_reason -> string
 val failure_reason_requires_manual_reconcile : failure_reason -> bool

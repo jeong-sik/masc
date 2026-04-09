@@ -122,8 +122,14 @@ let test_missing_manifest () =
 let test_malformed_manifest () =
   let (store, _tmp) = setup_store () in
   let run_id = "bad-manifest" in
-  let run_dir = Filename.concat
-    (Filename.concat store.root "proofs") run_id in
+  let run_dir =
+    match
+      Masc_mcp.Proof_artifact_reader.run_artifact_path store ~run_id
+        ~relative_path:"manifest.json"
+    with
+    | Ok path -> Filename.dirname path
+    | Error msg -> Alcotest.fail msg
+  in
   mkdirp run_dir;
   let manifest_path = Filename.concat run_dir "manifest.json" in
   let oc = open_out manifest_path in
@@ -166,10 +172,14 @@ let test_malformed_contract () =
   Agent_sdk.Proof_store.init_run store ~run_id;
   Agent_sdk.Proof_store.write_manifest store ~run_id proof;
   (* Write invalid contract JSON *)
-  let contract_path = Filename.concat
-    (Filename.concat
-       (Filename.concat store.root "proofs") run_id)
-    "contract.json" in
+  let contract_path =
+    match
+      Masc_mcp.Proof_artifact_reader.run_artifact_path store ~run_id
+        ~relative_path:"contract.json"
+    with
+    | Ok path -> path
+    | Error msg -> Alcotest.fail msg
+  in
   let oc = open_out contract_path in
   output_string oc "{not valid contract json}}}";
   close_out oc;

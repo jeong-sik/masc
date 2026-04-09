@@ -107,8 +107,8 @@ let test_custom_unknown_tool_names_are_dropped () =
 let test_coding_preset_has_shell_readonly () =
   let meta = make_meta ~preset:Keeper_types.Coding () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  check bool "has keeper_shell_readonly" true
-    (has_tool "keeper_shell_readonly" tools)
+  check bool "has keeper_shell" true
+    (has_tool "keeper_shell" tools)
 
 (* ============================================================
    5. All keepers get coding tools (mode removed)
@@ -233,7 +233,7 @@ let test_research_plus_also_allow_combined () =
   in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "has board_get via also_allow" true (has_tool "keeper_board_get" tools);
-  check bool "has shell readonly" true (has_tool "keeper_shell_readonly" tools);
+  check bool "has shell readonly" true (has_tool "keeper_shell" tools);
   check bool "has autoresearch" true (has_any_prefix "masc_autoresearch_" tools);
   check bool "has board_post via also_allow" true (has_tool "keeper_board_post" tools);
   check bool "has read" true (has_tool "keeper_fs_read" tools)
@@ -811,7 +811,7 @@ let () =
           check bool (name ^ " denied") true (List.mem name dl))
           [ "masc_room_delete"; "masc_spawn"; "masc_force_leave";
             "masc_config_set";
-            "masc_operator_action"; "masc_operator_confirm"; "masc_execute" ]);
+            "masc_reset"; "masc_execute"; "masc_execute_dry_run" ]);
       test_case "safe tools not denied" `Quick (fun () ->
         let dl = Keeper_hooks_oas.keeper_denied_tools in
         List.iter (fun name ->

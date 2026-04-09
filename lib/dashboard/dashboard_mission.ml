@@ -780,6 +780,11 @@ let session_json ?actor ?command_plane_summary ?swarm_status ~session_id ~config
       (fun (session : session_context) -> String.equal session.session_id session_id)
       projection.sessions
   in
+  let worker_runs_json =
+    match Team_session_store.load_session config session_id with
+    | Some session -> U.member "worker_runs" (Team_session_engine_eio.session_status_json config session)
+    | None -> `Null
+  in
   let operation_contexts = Dashboard_mission_assembly.build_operation_contexts projection.command_json in
   let operations_json =
     match session_context with
@@ -811,6 +816,7 @@ let session_json ?actor ?command_plane_summary ?swarm_status ~session_id ~config
       ("participants", `List participants_json);
       ("operations", `List operations_json);
       ("keepers", `List keepers_json);
+      ("worker_runs", worker_runs_json);
       ( "error",
         match session_row_json with
         | Some _ -> `Null

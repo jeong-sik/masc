@@ -155,9 +155,6 @@ type keeper_meta = {
   max_context_override: int option;
   continuity_summary: string;
   active_goal_ids: string list;
-  active_team_session_id: string option;
-  last_team_session_started_at: string;
-  team_session_start_count_total: int;
   paused: bool;
   current_task_id: string option;
   (** Currently claimed task ID for cost attribution. *)
@@ -167,7 +164,6 @@ type keeper_meta = {
   work_discovery_guidance : string option;
   telemetry_feedback_enabled : bool option;
   telemetry_feedback_window_hours : int option;
-  allowed_providers : string list option;
   runtime: agent_runtime_state;
 }
 
@@ -231,6 +227,9 @@ val keepalive_keeper_names : Room.config -> string list
 val persistent_agent_names : Room.config -> string list
 val fresher_meta : Room.config -> keeper_meta -> keeper_meta
 val write_meta : ?force:bool -> Room.config -> keeper_meta -> (unit, string) result
+val keeper_name_from_agent_name : string -> string option
+val read_meta_resolved :
+  Room.config -> string -> ((string * keeper_meta) option, string) result
 val read_meta : Room.config -> string -> (keeper_meta option, string) result
 
 (** Read keeper meta only if the file's mtime changed since [last_mtime].

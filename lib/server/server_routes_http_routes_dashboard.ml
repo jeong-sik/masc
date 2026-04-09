@@ -286,6 +286,9 @@ let rec add_routes ~sw ~clock router =
            |> max 1 |> min 500
          in
          let keeper_name = Server_utils.query_param req "keeper" in
+         let session_id = Server_utils.query_param req "session_id" in
+         let operation_id = Server_utils.query_param req "operation_id" in
+         let worker_run_id = Server_utils.query_param req "worker_run_id" in
          let sources =
            match Server_utils.query_param req "source" with
            | None -> Telemetry_unified.all_sources
@@ -296,7 +299,7 @@ let rec add_routes ~sw ~clock router =
          in
          let entries =
            Telemetry_unified.read_unified ~base_path ~masc_root ~sources
-             ?keeper_name ~n ()
+             ?keeper_name ?session_id ?operation_id ?worker_run_id ~n ()
          in
          let json = `Assoc [
            ("generated_at", `String (Types.now_iso ()));
@@ -570,4 +573,80 @@ and add_repo_synthesis_routes router =
                Http.Response.json ~status:`Not_found
                  (Printf.sprintf {|{"error":"%s"}|} (String.escaped msg))
                  reqd
+       ) request reqd)
+
+  (* ── Keeper cascade config API ──────────────────────────────── *)
+
+  |> Http.Router.get "/api/v1/keeper/cascades" (fun request reqd ->
+       with_public_read (fun _state _req reqd ->
+         let config_path = Oas_model_resolve.cascade_config_path () in
+         let profiles =
+           match config_path with
+           | None -> ["default"]
+           | Some path ->
+             (try
+               let json = Yojson.Safe.from_file path in
+               match json with
+               | `Assoc fields ->
+                 "default" ::
+                 (List.filter_map (fun (k, _) ->
+                   if String.length k > 7
+                      && String.sub k (String.length k - 7) 7 = "_models"
+                   then Some (String.sub k 0 (String.length k - 7))
+                   else None
+                 ) fields)
+               | _ -> ["default"]
+             with _ -> ["default"])
+         in
+         Http.Response.json ~request:request
+           (Yojson.Safe.to_string (`Assoc [
+             ("profiles", `List (List.map (fun s -> `String s) profiles));
+           ])) reqd
+       ) request reqd)
+
+  |> Http.Router.post "/api/v1/keeper/cascade" (fun request reqd ->
+       with_tool_auth ~tool_name:"masc_status" (fun state req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let json = Yojson.Safe.from_string body_str in
+             let keeper_name = Safe_ops.json_string_opt "keeper" json in
+             let cascade_name = Safe_ops.json_string_opt "cascade_name" json in
+             match keeper_name, cascade_name with
+             | None, _ | _, None ->
+               Http.Response.json ~status:`Bad_request ~request:req
+                 {|{"ok":false,"error":"requires {\"keeper\":\"...\",\"cascade_name\":\"...\"}"}|}
+                 reqd
+             | Some name, Some cascade ->
+               let config = state.Mcp_server.room_config in
+               let meta_path =
+                 Filename.concat
+                   (Filename.concat (Room.masc_root_dir config) "keepers")
+                   (name ^ ".json")
+               in
+               if not (Sys.file_exists meta_path) then
+                 Http.Response.json ~status:`Not_found ~request:req
+                   (Printf.sprintf {|{"ok":false,"error":"keeper %s not found"}|}
+                     (String.escaped name))
+                   reqd
+               else begin
+                 let meta_json = Yojson.Safe.from_file meta_path in
+                 let updated = match meta_json with
+                   | `Assoc fields ->
+                     `Assoc (("cascade_name", `String cascade) ::
+                       List.filter (fun (k,_) -> k <> "cascade_name") fields)
+                   | other -> other
+                 in
+                 let oc = open_out meta_path in
+                 Fun.protect ~finally:(fun () -> close_out oc) (fun () ->
+                   output_string oc (Yojson.Safe.pretty_to_string updated));
+                 Http.Response.json ~request:req
+                   (Printf.sprintf {|{"ok":true,"keeper":"%s","cascade_name":"%s"}|}
+                     (String.escaped name) (String.escaped cascade))
+                   reqd
+               end
+           with Yojson.Json_error _ ->
+             Http.Response.json ~status:`Bad_request ~request:req
+               {|{"ok":false,"error":"invalid JSON body"}|}
+               reqd
+         )
        ) request reqd)

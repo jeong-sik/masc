@@ -99,14 +99,12 @@ let tool_allowed_in_profile state profile tool_name =
   | Full ->
       if Tool_catalog.is_on_surface Tool_catalog.Keeper_internal tool_name then
         false
-      else if Tool_catalog.full_surface_override () then
-        Config.visible_tool_schemas ~include_hidden:true ~include_deprecated:true ()
-        |> List.exists (fun (schema : Types.tool_schema) ->
-               String.equal schema.name tool_name)
-      else if Tool_catalog.is_public_mcp tool_name then
-        true
       else
-        Tool_catalog.allow_direct_call tool_name
+        let allowed_schema_names =
+          Config.visible_tool_schemas ~include_hidden:true ~include_deprecated:true ()
+          |> List.map (fun (schema : Types.tool_schema) -> schema.name)
+        in
+        List.mem tool_name allowed_schema_names
   | Managed_agent ->
       Option.is_some (Sdk_tool_contract.sdk_binding_by_name tool_name)
       || (tool_schemas_for_profile state Managed_agent

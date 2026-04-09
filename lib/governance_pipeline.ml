@@ -66,7 +66,7 @@ let capability_classification : (string * capability_class list) list = [
   ("masc_web_fetch",           [External_input]);
   (* Shell can curl/wget external data AND read secrets AND execute *)
   ("keeper_bash",              [External_input; Sensitive_access; State_modification]);
-  ("keeper_shell_readonly",    [External_input; Sensitive_access]);
+  ("keeper_shell",    [External_input; Sensitive_access]);
   (* Sensitive data access *)
   ("keeper_fs_read",           [Sensitive_access]);
   ("keeper_memory_search",     [Sensitive_access]);

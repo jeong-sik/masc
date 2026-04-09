@@ -155,9 +155,6 @@ type keeper_meta =
   ; (* -- Operational control (top-level, not runtime) -- *)
     continuity_summary : string
   ; active_goal_ids : string list
-  ; active_team_session_id : string option
-  ; last_team_session_started_at : string
-  ; team_session_start_count_total : int
   ; paused : bool
   ; current_task_id : string option
     (** Currently claimed task ID for cost attribution.
@@ -169,7 +166,6 @@ type keeper_meta =
   ; work_discovery_guidance : string option
   ; telemetry_feedback_enabled : bool option
   ; telemetry_feedback_window_hours : int option
-  ; allowed_providers : string list option
   ; (* -- Agent runtime state (usage, tracing, autonomy metrics) -- *)
     runtime : agent_runtime_state
   }
@@ -296,12 +292,6 @@ let json_member_present key (json : Yojson.Safe.t) =
   | _ -> false
 ;;
 
-let json_object_member_present key (json : Yojson.Safe.t) =
-  match Yojson.Safe.Util.member key json with
-  | `Assoc _ -> true
-  | _ -> false
-;;
-
 let string_list_field_result ?label ~field_name (json : Yojson.Safe.t) =
   let label = Option.value ~default:field_name label in
   match Yojson.Safe.Util.member field_name json with
@@ -333,7 +323,11 @@ let parse_tool_preset_projection (json : Yojson.Safe.t) =
   | _ -> Error "keeper tool_preset must be a string"
 ;;
 
-let tool_access_projection_of_meta_json (json : Yojson.Safe.t) =
+let default_tool_access_of_meta_json () =
+  migrate_legacy_restricted_tools legacy_session_min_tool_names
+;;
+
+let legacy_tool_access_projection_of_meta_json (json : Yojson.Safe.t) =
   let custom_present = json_member_present "tool_custom_allowlist" json in
   let preset_present = json_member_present "tool_preset" json in
   let also_allow_present = json_member_present "tool_also_allow" json in
@@ -356,12 +350,12 @@ let tool_access_projection_of_meta_json (json : Yojson.Safe.t) =
     match string_list_field_result ~field_name:"tool_allowlist" json with
     | Ok names -> Ok (migrate_legacy_restricted_tools names)
     | Error msg -> Error msg)
-  else Ok (migrate_legacy_restricted_tools legacy_session_min_tool_names)
+  else Ok (default_tool_access_of_meta_json ())
 ;;
 
-let tool_access_of_meta_json (json : Yojson.Safe.t) =
+let legacy_tool_access_of_meta_json (json : Yojson.Safe.t) =
   match Yojson.Safe.Util.member "tool_access" json with
-  | `Null -> tool_access_projection_of_meta_json json
+  | `Null -> legacy_tool_access_projection_of_meta_json json
   | `Assoc _ as access_json ->
     let kind =
       Yojson.Safe.Util.member "kind" access_json |> Yojson.Safe.Util.to_string_option
@@ -378,6 +372,47 @@ let tool_access_of_meta_json (json : Yojson.Safe.t) =
         with
         | Ok tools -> Ok (migrate_legacy_restricted_tools tools)
         | Error msg -> Error msg)
+     | Some "preset" ->
+       let preset_raw =
+         Yojson.Safe.Util.member "preset" access_json |> Yojson.Safe.Util.to_string_option
+       in
+       (match preset_raw with
+        | None -> Error "keeper tool_access.preset required"
+        | Some raw ->
+          (match tool_preset_of_string raw with
+           | None -> Error (Printf.sprintf "invalid keeper tool_access.preset: %s" raw)
+           | Some preset ->
+             (match
+                string_list_field_opt_result
+                  ~field_name:"also_allow"
+                  ~label:"tool_access.also_allow"
+                  access_json
+              with
+              | Ok also_allow ->
+                Ok (normalize_tool_access (Preset { preset; also_allow }))
+              | Error msg -> Error msg)))
+     | Some "custom" ->
+       (match
+          string_list_field_result
+            ~field_name:"tools"
+            ~label:"tool_access.tools"
+            access_json
+        with
+        | Ok tools -> Ok (normalize_tool_access (Custom tools))
+        | Error msg -> Error msg)
+     | Some other -> Error (Printf.sprintf "invalid keeper tool_access.kind: %s" other)
+     | None -> Error "keeper tool_access.kind required")
+  | _ -> Error "keeper tool_access must be an object"
+;;
+
+let tool_access_of_meta_json (json : Yojson.Safe.t) =
+  match Yojson.Safe.Util.member "tool_access" json with
+  | `Null -> Ok (default_tool_access_of_meta_json ())
+  | `Assoc _ as access_json ->
+    let kind =
+      Yojson.Safe.Util.member "kind" access_json |> Yojson.Safe.Util.to_string_option
+    in
+    (match kind with
      | Some "preset" ->
        let preset_raw =
          Yojson.Safe.Util.member "preset" access_json |> Yojson.Safe.Util.to_string_option
@@ -481,15 +516,83 @@ let reject_removed_keeper_meta_fields (json : Yojson.Safe.t) =
     Error (Printf.sprintf "removed keeper meta fields: %s" (String.concat ", " fields))
 ;;
 
+let legacy_keeper_meta_tool_policy_key_names =
+  [ "tool_preset"; "tool_also_allow"; "tool_custom_allowlist"; "tool_allowlist" ]
+;;
+
+let legacy_keeper_meta_key_names =
+  "allowed_providers" :: legacy_keeper_meta_tool_policy_key_names
+;;
+
+let reject_legacy_keeper_meta_fields (json : Yojson.Safe.t) =
+  let present = present_json_keys legacy_keeper_meta_key_names json in
+  match present with
+  | [] -> Ok ()
+  | fields ->
+    Error
+      (Printf.sprintf
+         "legacy keeper meta fields require scrub via read_meta_file_path: %s"
+         (String.concat ", " fields))
+;;
+
+let legacy_tool_access_kind_needs_scrub (json : Yojson.Safe.t) =
+  match Yojson.Safe.Util.member "tool_access" json with
+  | `Assoc _ as access_json ->
+    (match
+       Yojson.Safe.Util.member "kind" access_json |> Yojson.Safe.Util.to_string_option
+     with
+     | Some "restricted" | Some "unrestricted" -> true
+     | _ -> false)
+  | _ -> false
+;;
+
+let scrub_legacy_tool_policy_meta_json (json : Yojson.Safe.t) : Yojson.Safe.t * string list =
+  let present = present_json_keys legacy_keeper_meta_key_names json in
+  let missing_tool_access = not (json_member_present "tool_access" json) in
+  let legacy_tool_access_kind = legacy_tool_access_kind_needs_scrub json in
+  let needs_tool_access_rewrite =
+    present <> [] || missing_tool_access || legacy_tool_access_kind
+  in
+  if not needs_tool_access_rewrite
+  then json, []
+  else
+    match legacy_tool_access_of_meta_json json with
+    | Error _ ->
+      let dropped =
+        present |> List.filter (fun key -> String.equal key "allowed_providers")
+      in
+      if dropped = []
+      then json, []
+      else
+        (drop_assoc_keys dropped json, dropped)
+    | Ok tool_access ->
+      let rewrite_reasons =
+        (if missing_tool_access then [ "tool_access(defaulted)" ] else [])
+        @ (if legacy_tool_access_kind then [ "tool_access(legacy-kind)" ] else [])
+        @ present
+      in
+      let base = drop_assoc_keys legacy_keeper_meta_key_names json in
+      let scrubbed =
+        match base with
+        | `Assoc fields ->
+          `Assoc
+            (("tool_access", tool_access_to_json tool_access)
+             :: List.remove_assoc "tool_access" fields)
+        | _ -> base
+      in
+      scrubbed, rewrite_reasons
+;;
+
 let scrub_persisted_keeper_meta_json ~path (json : Yojson.Safe.t) : Yojson.Safe.t * bool =
+  let json, legacy_tool_policy_rewrites = scrub_legacy_tool_policy_meta_json json in
   match json with
   | `Assoc fields ->
-    let present =
+    let removed_present =
       fields
       |> List.filter_map (fun (key, _) ->
         if List.mem key removed_keeper_meta_key_names then Some key else None)
     in
-    if present = []
+    if removed_present = [] && legacy_tool_policy_rewrites = []
     then json, false
     else (
       let migrate_legacy_disabled_keepalive =
@@ -509,9 +612,9 @@ let scrub_persisted_keeper_meta_json ~path (json : Yojson.Safe.t) : Yojson.Safe.
       (try
          Fs_compat.save_file path content;
          Log.Keeper.info
-           "scrubbed removed keeper meta fields for %s: %s%s"
+           "scrubbed legacy keeper meta fields for %s: %s%s"
            path
-           (String.concat ", " present)
+           (String.concat ", " (legacy_tool_policy_rewrites @ removed_present))
            (if migrate_legacy_disabled_keepalive
             then " (migrated presence_keepalive=false to paused=true)"
             else "")
@@ -604,12 +707,6 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; "last_continuity_update_ts", `Float rt.last_continuity_update_ts
     ; "continuity_summary", `String m.continuity_summary
     ; "active_goal_ids", `List (List.map (fun s -> `String s) m.active_goal_ids)
-    ; ( "active_team_session_id"
-      , match m.active_team_session_id with
-        | Some value -> `String value
-        | None -> `Null )
-    ; "last_team_session_started_at", `String m.last_team_session_started_at
-    ; "team_session_start_count_total", `Int m.team_session_start_count_total
     ; "last_autonomous_action_at", `String rt.last_autonomous_action_at
     ; "autonomous_action_count", `Int rt.autonomous_action_count
     ; "autonomous_turn_count", `Int rt.autonomous_turn_count
@@ -633,10 +730,6 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; "work_discovery_guidance", Json_util.string_opt_to_json m.work_discovery_guidance
     ; "telemetry_feedback_enabled", Json_util.bool_opt_to_json m.telemetry_feedback_enabled
     ; "telemetry_feedback_window_hours", Json_util.int_opt_to_json m.telemetry_feedback_window_hours
-    ; "allowed_providers"
-      , (match m.allowed_providers with
-         | Some xs -> `List (List.map (fun s -> `String s) xs)
-         | None -> `Null)
     ]
 ;;
 
@@ -685,9 +778,6 @@ type parsed_keeper_state =
   ; ps_updated_at_raw : string
   ; ps_continuity_summary : string
   ; ps_active_goal_ids : string list
-  ; ps_active_team_session_id : string option
-  ; ps_last_team_session_started_at : string
-  ; ps_team_session_start_count_total : int
   ; ps_paused : bool
   ; ps_current_task_id : string option
   ; ps_max_context_override : int option
@@ -965,15 +1055,6 @@ let parse_keeper_state
     parse_last_continuity_update_ts ~continuity_summary:ps_continuity_summary json
   in
   let ps_active_goal_ids = Safe_ops.json_string_list "active_goal_ids" json in
-  let ps_active_team_session_id =
-    Safe_ops.json_string_opt "active_team_session_id" json
-  in
-  let ps_last_team_session_started_at =
-    Safe_ops.json_string ~default:"" "last_team_session_started_at" json
-  in
-  let ps_team_session_start_count_total =
-    Safe_ops.json_int ~default:0 "team_session_start_count_total" json
-  in
   let last_autonomous_action_at =
     Safe_ops.json_string ~default:"" "last_autonomous_action_at" json
   in
@@ -1004,9 +1085,6 @@ let parse_keeper_state
   ; ps_updated_at_raw
   ; ps_continuity_summary
   ; ps_active_goal_ids
-  ; ps_active_team_session_id
-  ; ps_last_team_session_started_at
-  ; ps_team_session_start_count_total
   ; ps_paused
   ; ps_current_task_id
   ; ps_max_context_override
@@ -1038,7 +1116,10 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
   try
     match reject_removed_keeper_meta_fields json with
     | Error e -> Error e
-    | Ok () ->
+    | Ok () -> (
+      match reject_legacy_keeper_meta_fields json with
+      | Error e -> Error e
+      | Ok () ->
       let identity = parse_keeper_identity json in
       (match parse_keeper_policy json ~keeper_name:identity.pk_name with
        | Error _ as e -> e
@@ -1099,9 +1180,6 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
                   else state.ps_updated_at_raw)
              ; continuity_summary = state.ps_continuity_summary
              ; active_goal_ids = state.ps_active_goal_ids
-             ; active_team_session_id = state.ps_active_team_session_id
-             ; last_team_session_started_at = state.ps_last_team_session_started_at
-             ; team_session_start_count_total = state.ps_team_session_start_count_total
              ; paused = state.ps_paused
              ; current_task_id = state.ps_current_task_id
              ; max_context_override = state.ps_max_context_override
@@ -1119,9 +1197,9 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
              ; work_discovery_guidance = Safe_ops.json_string_opt "work_discovery_guidance" json
              ; telemetry_feedback_enabled = Safe_ops.json_bool_opt "telemetry_feedback_enabled" json
              ; telemetry_feedback_window_hours = Safe_ops.json_int_opt "telemetry_feedback_window_hours" json
-             ; allowed_providers = Keeper_types_profile.lower_string_list_opt (Safe_ops.json_string_list "allowed_providers" json)
              ; runtime = state.ps_runtime
              })
+      )
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn -> Error (Printf.sprintf "meta parse error: %s" (Printexc.to_string exn))
@@ -1200,9 +1278,6 @@ let fallback_canonical_keeper_meta_key_names =
   ; "last_continuity_update_ts"
   ; "continuity_summary"
   ; "active_goal_ids"
-  ; "active_team_session_id"
-  ; "last_team_session_started_at"
-  ; "team_session_start_count_total"
   ; "last_autonomous_action_at"
   ; "autonomous_action_count"
   ; "autonomous_turn_count"
@@ -1223,7 +1298,6 @@ let fallback_canonical_keeper_meta_key_names =
   ; "work_discovery_guidance"
   ; "telemetry_feedback_enabled"
   ; "telemetry_feedback_window_hours"
-  ; "allowed_providers"
   ]
 ;;
 
@@ -1247,20 +1321,13 @@ let canonical_keeper_meta_key_names =
     fallback_canonical_keeper_meta_key_names
 ;;
 
-let compatibility_keeper_meta_key_names =
-  [ "tool_preset"; "tool_also_allow"; "tool_custom_allowlist"; "tool_allowlist" ]
-;;
-
 let warn_unknown_keeper_meta_keys ~path (json : Yojson.Safe.t) =
   match json with
   | `Assoc fields ->
-    let known_keeper_meta_key_names =
-      canonical_keeper_meta_key_names @ compatibility_keeper_meta_key_names
-    in
     let unknown =
       fields
       |> List.filter_map (fun (key, _) ->
-        if List.mem key known_keeper_meta_key_names then None else Some key)
+        if List.mem key canonical_keeper_meta_key_names then None else Some key)
       |> dedupe_keep_order
     in
     if unknown <> []
@@ -1272,27 +1339,6 @@ let warn_unknown_keeper_meta_keys ~path (json : Yojson.Safe.t) =
   | _ -> ()
 ;;
 
-let warn_tool_access_compat_keys ~path (json : Yojson.Safe.t) =
-  let compat_present =
-    compatibility_keeper_meta_key_names
-    |> List.filter (fun key -> json_member_present key json)
-  in
-  match compat_present with
-  | [] -> ()
-  | fields ->
-    if json_object_member_present "tool_access" json
-    then
-      Log.Keeper.warn
-        "keeper meta %s has tool_access plus compatibility tool keys; ignoring %s"
-        path
-        (String.concat ", " fields)
-    else
-      Log.Keeper.warn
-        "keeper meta %s uses compatibility tool keys (%s); prefer canonical tool_access"
-        path
-        (String.concat ", " fields)
-;;
-
 let read_meta_file_path path : (keeper_meta option, string) result =
   if not (Sys.file_exists path)
   then Ok None
@@ -1302,7 +1348,6 @@ let read_meta_file_path path : (keeper_meta option, string) result =
     | Ok json ->
       let json, _scrubbed = scrub_persisted_keeper_meta_json ~path json in
       warn_unknown_keeper_meta_keys ~path json;
-      warn_tool_access_compat_keys ~path json;
       (match meta_of_json json with
        | Ok meta -> Ok (Some meta)
        | Error e ->
@@ -1359,16 +1404,53 @@ let write_meta ?(force = false) config (m : keeper_meta) : (unit, string) result
     Error (Printf.sprintf "failed to write meta %s: %s" path (Printexc.to_string exn))
 ;;
 
+let keeper_name_from_agent_name agent_name =
+  let prefix = "keeper-" and suffix = "-agent" in
+  let plen = String.length prefix and slen = String.length suffix in
+  let alen = String.length agent_name in
+  if alen > plen + slen
+     && String.sub agent_name 0 plen = prefix
+     && String.sub agent_name (alen - slen) slen = suffix
+  then
+    let keeper_name = String.sub agent_name plen (alen - plen - slen) in
+    if validate_name keeper_name then Some keeper_name else None
+  else
+    None
+;;
+
+let read_meta_resolved config name : ((string * keeper_meta) option, string) result =
+  let requested_name = String.trim name in
+  let read_candidate candidate =
+    read_meta_file_path (keeper_meta_path config candidate)
+    |> Result.map (Option.map (fun meta -> (candidate, meta)))
+  in
+  if requested_name = "" then
+    Ok None
+  else
+    match read_candidate requested_name with
+    | Ok None -> (
+        match keeper_name_from_agent_name requested_name with
+        | Some alias_name when not (String.equal alias_name requested_name) ->
+            read_candidate alias_name
+        | _ -> Ok None)
+    | Ok (Some _) as ok -> ok
+    | Error _ as err -> err
+;;
+
 let read_meta config name : (keeper_meta option, string) result =
-  let path = keeper_meta_path config name in
+  let requested_name = String.trim name in
+  let path = keeper_meta_path config requested_name in
   if keeper_debug
   then
     Log.Keeper.debug
       "read_meta name=%s path=%s exists=%b"
-      name
+      requested_name
       path
       (Sys.file_exists path);
-  read_meta_file_path path
+  match read_meta_resolved config requested_name with
+  | Ok (Some (_resolved_name, meta)) -> Ok (Some meta)
+  | Ok None -> Ok None
+  | Error _ as err -> err
 ;;
 
 (** Read keeper meta only if the file's mtime has changed since [last_mtime].
@@ -1377,15 +1459,25 @@ let read_meta config name : (keeper_meta option, string) result =
     operator has modified the meta file. *)
 let read_meta_if_changed config name ~(last_mtime : float)
   : (keeper_meta * float) option =
-  let path = keeper_meta_path config name in
-  if not (Sys.file_exists path) then None
-  else
-    let stat = Unix.stat path in
-    if stat.Unix.st_mtime <= last_mtime then None
+  let requested_name = String.trim name in
+  let read_candidate candidate =
+    let path = keeper_meta_path config candidate in
+    if not (Sys.file_exists path) then None
     else
-      match read_meta_file_path path with
-      | Ok (Some meta) -> Some (meta, stat.Unix.st_mtime)
-      | _ -> None
+      let stat = Unix.stat path in
+      if stat.Unix.st_mtime <= last_mtime then None
+      else
+        match read_meta_file_path path with
+        | Ok (Some meta) -> Some (meta, stat.Unix.st_mtime)
+        | _ -> None
+  in
+  match read_candidate requested_name with
+  | Some _ as changed -> changed
+  | None -> (
+      match keeper_name_from_agent_name requested_name with
+      | Some alias_name when not (String.equal alias_name requested_name) ->
+          read_candidate alias_name
+      | _ -> None)
 ;;
 
 (* Model selection, path utilities, and JSONL helpers

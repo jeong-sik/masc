@@ -3,9 +3,16 @@
 [![OCaml](https://img.shields.io/badge/OCaml-5.4+-orange.svg)](https://ocaml.org/)
 [![OAS](https://img.shields.io/badge/agent__sdk-%E2%89%A50.118.0-blue.svg)](https://github.com/jeong-sik/oas)
 
-Multi-Agent Streaming Coordination server built on OCaml 5.x + Eio. Keeps multiple coding agents coordinated inside one repository through shared namespace, task ownership, broadcasts, worktrees, and supervisor-visible proof.
+Multi-Agent Streaming Coordination server built on OCaml 5.x + Eio. Keeps multiple coding agents coordinated inside one repository through shared namespace, task ownership, broadcasts, worktrees, supervisor-visible proof, and OAS-backed keeper execution.
 
-Built for repo-local, single-machine, trusted-network workflows. Not a multi-tenant SaaS platform, generic scheduler, or model-serving runtime.
+Built for repo-local, single-machine, trusted-network workflows where several AI agents need shared coordination state instead of ad-hoc terminal coordination.
+
+Current product posture:
+
+- Front-door promise: repo coordination for coding workflows
+- Runtime substrate: OAS-backed keeper execution
+- Supporting surface: dashboard, activity views, and keeper status
+- Legacy or secondary: wider transport matrix, research modules, and retired compatibility surfaces
 
 Use `masc-mcp` when you need to reduce:
 
@@ -13,6 +20,13 @@ Use `masc-mcp` when you need to reduce:
 - duplicate implementation attempts
 - stale context between parallel workers
 - invisible ownership, heartbeat, and intervention state
+
+Do not start with `masc-mcp` if you need:
+
+- multi-tenant SaaS isolation
+- a generic workflow scheduler
+- a model-serving platform
+- a stable promise for every merged experimental surface
 
 ## Architecture
 
@@ -72,10 +86,25 @@ scripts/opam-pin-external-deps.sh
 opam install . --deps-only
 dune build
 
-# Start (loopback, no keeper autoboot)
-scripts/start-loopback.sh
-curl http://127.0.0.1:8935/health
+scripts/run-local.sh --target-dir "$PWD"
+PORT="$(scripts/run-local.sh --print-port --target-dir "$PWD")"
+curl "http://127.0.0.1:${PORT}/health"
 ```
+
+Defaults:
+
+- local-dev HTTP / MCP port: `9100-9999` range, deterministically derived from the target path
+- default bind host: `127.0.0.1`
+- local-dev data root: `<target>/.masc/`
+- local-dev config root: `<target>/.masc/config`
+- local-dev personas root: `<target>/.masc/config/personas`
+- local-dev transports: HTTP on, gRPC/WS/WebRTC off
+
+Notes:
+
+- Check the default port for a target: `scripts/run-local.sh --print-port --target-dir /path/to/project`
+- To use a fixed port: `scripts/run-local.sh --target-dir /path/to/project --port 94xx`
+- For shared repo/full-runtime paths, continue using `./start-masc-mcp.sh --http`
 
 Other start modes:
 
@@ -86,7 +115,7 @@ Other start modes:
 | Full runtime | `./start-masc-mcp.sh --http` | All transports, keeper autoboot, dashboard |
 | Direct binary | `./_build/default/bin/main_eio.exe --port 8935 --base-path .` | Manual control |
 
-Check auto-derived port for a target: `scripts/run-local.sh --print-port --target-dir /path`
+If you bind to a non-loopback address such as `0.0.0.0`, treat that as a remote exposure path and configure auth first. See [docs/REMOTE-MCP-OPERATOR.md](docs/REMOTE-MCP-OPERATOR.md) and [docs/spec/09-server-transport.md](docs/spec/09-server-transport.md).
 
 ## MCP Client Setup
 
@@ -104,6 +133,7 @@ Check auto-derived port for a target: `scripts/run-local.sh --print-port --targe
 - `/mcp` — full coordination surface (local-first)
 - `/mcp/operator` — bearer-token only, remote-safe reduced surface
 - Full config templates: [docs/MCP-TEMPLATE.md](docs/MCP-TEMPLATE.md)
+- For a dir-local local-dev environment, replace `8935` with the output of `scripts/run-local.sh --print-port --target-dir ...`
 
 ## Keeper System
 
@@ -146,8 +176,9 @@ Full list: `lib/config/env_config_keeper.ml`. Per-keeper config: `config/keepers
 
 - `config/cascade.json` follows the OAS cascade contract.
 - OAS owns cascade schema, parsing, and label semantics.
-- MASC chooses repo-level defaults; each keeper can override via `cascade_name` in its TOML.
-- See [docs/OAS-MASC-BOUNDARY.md](docs/OAS-MASC-BOUNDARY.md) and [docs/spec/13-oas-integration.md](docs/spec/13-oas-integration.md).
+- MASC uses that contract to choose repo-level checked-in defaults; each keeper can override via `cascade_name` in its TOML.
+- For committed defaults, prefer explicit `provider:model_id` labels instead of convenience labels.
+- See [docs/OAS-MASC-BOUNDARY.md](docs/OAS-MASC-BOUNDARY.md), [docs/spec/13-oas-integration.md](docs/spec/13-oas-integration.md), and [docs/spec/14-configuration.md](docs/spec/14-configuration.md).
 
 ## Safe Starting Paths
 
@@ -157,10 +188,13 @@ Full list: `lib/config/env_config_keeper.ml`. Per-keeper config: `config/keepers
 masc_start(path="/your/project", task_title="My first task")
 ```
 
-Canonical tool sequence:
+Canonical namespace/task hygiene:
 
-- `masc_start` → `masc_status` → `masc_transition(action="claim")` or `masc_claim_next`
-- `masc_plan_set_task` → `masc_heartbeat` → work → `masc_done`
+- `masc_start`
+- `masc_status`
+- `masc_transition(action="claim")` or `masc_claim_next`
+- `masc_plan_set_task` when needed
+- `masc_heartbeat`
 
 ### 2. Supervised Delivery Swarm
 
@@ -170,13 +204,26 @@ For planner / implementer / supervisor separation:
 - Supervisor: `/mcp/operator` with `masc_operator_snapshot`, `masc_operator_digest`, `masc_operator_action`, `masc_operator_confirm`
 - Runbooks: [docs/SWARM-DELIVERY-RUNBOOK.md](docs/SWARM-DELIVERY-RUNBOOK.md), [docs/SUPERVISOR-MODE.md](docs/SUPERVISOR-MODE.md)
 
-### 3. Dashboard
+### 3. Dashboard and Keeper Surfaces
 
-- Monitoring: `http://127.0.0.1:8935/dashboard#monitoring/sessions`
-- Intervention: `http://127.0.0.1:8935/dashboard#command/intervene`
-- Governance: `http://127.0.0.1:8935/dashboard#command/governance`
+- Monitoring: `http://127.0.0.1:<PORT>/dashboard#monitoring/sessions`
+- Ops Queue: `http://127.0.0.1:<PORT>/dashboard#command/intervene`
+- Workspace: `http://127.0.0.1:<PORT>/dashboard#workspace/board`
+- Lab: `http://127.0.0.1:<PORT>/dashboard#lab/tools`
 
-The dashboard is a read/operate UI. `start-masc-mcp.sh` builds it automatically if `pnpm` is available. Manual: `cd dashboard && pnpm run build`.
+The dashboard is a read-heavy UI for repo coordination and keeper/runtime visibility. Canonical write paths remain MCP tools.
+
+- `scripts/run-local.sh` does not build the dashboard automatically. Append `--build-dashboard` only when needed.
+- `start-masc-mcp.sh` automatically builds the dashboard SPA if `pnpm` or `corepack pnpm` is available.
+- To run the dev server separately, use:
+
+```bash
+PORT="$(scripts/run-local.sh --print-port --target-dir "$PWD")"
+cd dashboard && MASC_DASHBOARD_PROXY_TARGET="http://127.0.0.1:${PORT}" pnpm run dev
+```
+
+- For manual rebuilds, run `cd dashboard && pnpm run build`.
+- For local admin bearer bootstrap and dashboard keeper lifecycle control, see [docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md](docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md).
 
 ## Verification
 
@@ -192,13 +239,31 @@ curl -sS http://127.0.0.1:8935/health
 grpcurl -plaintext 127.0.0.1:8936 grpc.health.v1.Health/Check
 ```
 
+To reproduce CI-style test output with heartbeat logs locally:
+
+```bash
+CI_TEST_TIMEOUT_SEC=1200 CI_TEST_HEARTBEAT_SEC=30 \
+  scripts/ci-run-tests.sh "opam exec -- dune test --root ."
+```
+
 ## Transport and Auth
 
 - `POST /mcp` expects `Accept: application/json, text/event-stream`.
 - Legacy `/sse` and `/messages` endpoints are deprecated.
-- Binding to `0.0.0.0` enables strict auth; local `/mcp` fails closed unless `require_token=true`.
+- Binding to `0.0.0.0` or `::` enables strict auth; local `/mcp` fails closed unless `require_token=true`.
 - `/mcp/operator` is bearer-token only with a remote-safe surface. Do not expose full `/mcp` externally.
+- Retired compatibility surfaces such as command-plane/operator routes are no longer part of the supported front door.
 - See [docs/REMOTE-MCP-OPERATOR.md](docs/REMOTE-MCP-OPERATOR.md) and [docs/spec/09-server-transport.md](docs/spec/09-server-transport.md).
+
+## Product and Planning Docs
+
+| Document | Description |
+|----------|-------------|
+| [docs/PRODUCT-OPERATING-PLAN.md](docs/PRODUCT-OPERATING-PLAN.md) | Product promise, GitHub operating model, 6-8 week execution tracks |
+| [ROADMAP.md](ROADMAP.md) | Current package version, latest release truth, active tracks |
+| [docs/PRODUCT-REVIEW.md](docs/PRODUCT-REVIEW.md) | Current product posture by promise level |
+| [docs/design/keeper-continuity-product-rfc.md](docs/design/keeper-continuity-product-rfc.md) | Bounded keeper continuity contract and promise level |
+| [docs/KEEPER-CONTINUITY-PRODUCTION-RUNBOOK.md](docs/KEEPER-CONTINUITY-PRODUCTION-RUNBOOK.md) | Release gate, evidence, monitoring, and rollback for keeper continuity |
 
 ## Document Map
 
@@ -206,14 +271,17 @@ grpcurl -plaintext 127.0.0.1:8936 grpc.health.v1.Health/Check
 |----------|-------------|
 | [docs/QUICK-START.md](docs/QUICK-START.md) | Install, health check, first workflow |
 | [docs/MCP-TEMPLATE.md](docs/MCP-TEMPLATE.md) | HTTP / stdio MCP config templates |
+| [docs/BENCHMARK-RUNBOOK.md](docs/BENCHMARK-RUNBOOK.md) | Benchmark and comparison harnesses |
 | [docs/KEEPER-USER-MANUAL.md](docs/KEEPER-USER-MANUAL.md) | Keeper lifecycle and troubleshooting |
 | [docs/SUPERVISOR-MODE.md](docs/SUPERVISOR-MODE.md) | Supervised execution / operator workflow |
 | [docs/SWARM-DELIVERY-RUNBOOK.md](docs/SWARM-DELIVERY-RUNBOOK.md) | Single-agent vs swarm delivery |
 | [docs/REMOTE-MCP-OPERATOR.md](docs/REMOTE-MCP-OPERATOR.md) | Remote-safe operator endpoint |
 | [docs/OAS-MASC-BOUNDARY.md](docs/OAS-MASC-BOUNDARY.md) | OAS/MASC ownership boundary |
-| [docs/COMMAND-PLANE-RUNBOOK.md](docs/COMMAND-PLANE-RUNBOOK.md) | Command-plane operations |
+| [docs/COMMAND-PLANE-RUNBOOK.md](docs/COMMAND-PLANE-RUNBOOK.md) | Historical compatibility / command-plane details |
 | [docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md](docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md) | Dashboard auth bootstrap |
 | [docs/spec/SPEC-INDEX.md](docs/spec/SPEC-INDEX.md) | Spec suite (19 specs) |
 | [ROADMAP.md](ROADMAP.md) | Version, release truth, active tracks |
 | [docs/PRODUCT-OPERATING-PLAN.md](docs/PRODUCT-OPERATING-PLAN.md) | Product promise, execution tracks |
 | [llms.txt](llms.txt) / [llms-full.txt](llms-full.txt) | Compressed front door for language models |
+
+Historical and archived documents remain in the repository, but the front-door SSOT is the README, the product operating plan, the roadmap, and the current spec suite.

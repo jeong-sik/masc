@@ -658,6 +658,28 @@ let handle_keeper_pr_submit
             Ok (Printf.sprintf "PR created: %s" (String.trim out))
           end
         ) in
+        (* Record PR in playground history (best-effort, JSONL append) *)
+        if !step_ok && !pr_url <> "" then begin
+          try
+            let playground_dir = Filename.concat root
+              (Keeper_alerting_path.playground_path_of_keeper meta.name) in
+            Fs_compat.mkdir_p playground_dir;
+            let history_path = Filename.concat playground_dir
+              ".playground_pr_history.jsonl" in
+            let entry = `Assoc [
+              "pr_url", `String !pr_url;
+              "branch", `String !branch_name;
+              "title", `String pr_title;
+              "draft", `Bool draft;
+              "base", `String base_branch;
+              "cwd", `String cwd;
+              "created_at", `String (Printf.sprintf "%.0f" (Unix.gettimeofday ()));
+            ] in
+            Fs_compat.append_jsonl history_path entry
+          with exn ->
+            Log.Keeper.warn "pr_history append failed: %s (keeper=%s)"
+              (Printexc.to_string exn) meta.name
+        end;
         Yojson.Safe.to_string
           (`Assoc
             [ "ok", `Bool !step_ok

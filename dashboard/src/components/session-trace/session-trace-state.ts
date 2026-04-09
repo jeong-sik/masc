@@ -1,6 +1,6 @@
 // Session trace state — unified event store for GitHub Agents-style trace view.
-// Merges agent-timeline (broadcast/task) and keeper-trajectory (tool calls)
-// into a single chronological event stream.
+// Merges agent-timeline (broadcast/task), keeper-trajectory (tool calls),
+// and live OAS runtime SSE events into a single chronological event stream.
 // State is keyed per agent to avoid cross-overlay collisions.
 // Each SessionTraceView instance passes its own agentName to derived helpers.
 
@@ -10,15 +10,31 @@ import type { AgentTimelineEvent, AgentTimelineResponse, TrajectoryEntry, Trajec
 
 // ── Types ──────────────────────────────────────────────
 
-export type TraceEventKind = 'broadcast' | 'task' | 'tool_call' | 'heartbeat' | 'lifecycle' | 'thinking'
+export type TraceEventKind =
+  | 'broadcast'
+  | 'task'
+  | 'tool_call'
+  | 'heartbeat'
+  | 'lifecycle'
+  | 'thinking'
+  | 'oas_tool'
+  | 'oas_turn'
+  | 'oas_context'
+
+export type TraceSourceLane = 'masc' | 'oas'
 
 export interface UnifiedTraceEvent {
   id: string
   ts: number          // unix ms — sort key
   ts_iso: string
   kind: TraceEventKind
+  sourceLane: TraceSourceLane
   summary: string     // collapsed one-liner
   detail: Record<string, unknown>
+  agentName?: string
+  sessionId?: string | null
+  operationId?: string | null
+  workerRunId?: string | null
   // tool_call fields
   toolName?: string
   toolArgs?: Record<string, unknown> | string
@@ -36,6 +52,9 @@ export interface UnifiedTraceEvent {
 
 export interface TraceSummary {
   tool_call_count: number
+  oas_tool_count: number
+  oas_turn_count: number
+  oas_context_count: number
   broadcast_count: number
   task_completed_count: number
   task_claimed_count: number
@@ -57,8 +76,12 @@ interface TraceSlot {
 // ── Per-agent state map ────────────────────────────────
 
 const traceSlots = signal<Record<string, TraceSlot>>({})
+const liveTraceFeeds = signal<Record<string, UnifiedTraceEvent[]>>({})
 
 const EMPTY_SLOT: TraceSlot = { events: [], loading: false, error: null, filter: 'all', fetchToken: 0 }
+
+const LIVE_TRACE_LIMIT = 120
+let liveTraceSeq = 0
 
 function getSlot(agent: string): TraceSlot {
   return traceSlots.value[agent] ?? EMPTY_SLOT
@@ -82,7 +105,7 @@ export function getTraceError(agent: string): string | null {
 }
 
 export function getTraceEvents(agent: string): UnifiedTraceEvent[] {
-  return getSlot(agent).events
+  return mergeTraceEvents(getSlot(agent).events, liveTraceFeeds.value[agent] ?? [])
 }
 
 export function getTraceFilter(agent: string): TraceEventKind | 'all' {
@@ -99,6 +122,9 @@ export function getFilteredEvents(agent: string): UnifiedTraceEvent[] {
 export function getTraceSummary(agent: string): TraceSummary {
   const events = getTraceEvents(agent)
   let tool_call_count = 0
+  let oas_tool_count = 0
+  let oas_turn_count = 0
+  let oas_context_count = 0
   let broadcast_count = 0
   let task_completed_count = 0
   let task_claimed_count = 0
@@ -112,6 +138,15 @@ export function getTraceSummary(agent: string): TraceSummary {
       case 'tool_call':
         tool_call_count++
         total_cost_usd += e.cost_usd ?? 0
+        break
+      case 'oas_tool':
+        oas_tool_count++
+        break
+      case 'oas_turn':
+        oas_turn_count++
+        break
+      case 'oas_context':
+        oas_context_count++
         break
       case 'broadcast':
         broadcast_count++
@@ -132,12 +167,35 @@ export function getTraceSummary(agent: string): TraceSummary {
     }
   }
 
-  return { tool_call_count, broadcast_count, task_completed_count, task_claimed_count, heartbeat_count, lifecycle_count, thinking_count, total_cost_usd }
+  return {
+    tool_call_count,
+    oas_tool_count,
+    oas_turn_count,
+    oas_context_count,
+    broadcast_count,
+    task_completed_count,
+    task_claimed_count,
+    heartbeat_count,
+    lifecycle_count,
+    thinking_count,
+    total_cost_usd,
+  }
 }
 
 export function getKindCounts(agent: string): Record<TraceEventKind | 'all', number> {
   const events = getTraceEvents(agent)
-  const counts: Record<string, number> = { all: events.length, broadcast: 0, task: 0, tool_call: 0, heartbeat: 0, lifecycle: 0, thinking: 0 }
+  const counts: Record<string, number> = {
+    all: events.length,
+    broadcast: 0,
+    task: 0,
+    tool_call: 0,
+    heartbeat: 0,
+    lifecycle: 0,
+    thinking: 0,
+    oas_tool: 0,
+    oas_turn: 0,
+    oas_context: 0,
+  }
   for (const e of events) counts[e.kind] = (counts[e.kind] ?? 0) + 1
   return counts as Record<TraceEventKind | 'all', number>
 }
@@ -146,6 +204,7 @@ export function getKindCounts(agent: string): Record<TraceEventKind | 'all', num
 // Components subscribe to this to know when traceSlots changed.
 // Reading traceSlots.value inside a component body tracks reactivity.
 export { traceSlots as _traceSlots }
+export { liveTraceFeeds as _liveTraceFeeds }
 
 // ── Filter action ──────────────────────────────────────
 
@@ -161,6 +220,20 @@ function safeTimestamp(ts: string | undefined | null): number {
   return Number.isNaN(parsed) ? Date.now() : parsed
 }
 
+function mergeTraceEvents(
+  historical: UnifiedTraceEvent[],
+  live: UnifiedTraceEvent[],
+): UnifiedTraceEvent[] {
+  const merged = [...historical, ...live]
+  merged.sort((a, b) => a.ts - b.ts)
+  const seen = new Set<string>()
+  return merged.filter(event => {
+    if (seen.has(event.id)) return false
+    seen.add(event.id)
+    return true
+  })
+}
+
 function timelineEventToTrace(evt: AgentTimelineEvent, index: number): UnifiedTraceEvent {
   const ts = safeTimestamp(evt.ts)
   const detail = evt.detail ?? {}
@@ -173,6 +246,7 @@ function timelineEventToTrace(evt: AgentTimelineEvent, index: number): UnifiedTr
         ts,
         ts_iso: evt.ts ?? new Date(ts).toISOString(),
         kind: 'heartbeat',
+        sourceLane: 'masc',
         summary: content || 'heartbeat',
         detail,
       }
@@ -182,6 +256,7 @@ function timelineEventToTrace(evt: AgentTimelineEvent, index: number): UnifiedTr
       ts,
       ts_iso: evt.ts ?? new Date(ts).toISOString(),
       kind: 'broadcast',
+      sourceLane: 'masc',
       summary: content.slice(0, 120),
       detail,
     }
@@ -193,6 +268,7 @@ function timelineEventToTrace(evt: AgentTimelineEvent, index: number): UnifiedTr
       ts,
       ts_iso: evt.ts ?? new Date(ts).toISOString(),
       kind: 'lifecycle',
+      sourceLane: 'masc',
       summary: evt.type,
       detail,
     }
@@ -205,6 +281,7 @@ function timelineEventToTrace(evt: AgentTimelineEvent, index: number): UnifiedTr
     ts,
     ts_iso: evt.ts ?? new Date(ts).toISOString(),
     kind: 'task',
+    sourceLane: 'masc',
     summary: `${evt.type.replace('task_', '')} ${taskId} ${title}`.trim(),
     detail: { ...detail, type: evt.type },
   }
@@ -220,6 +297,7 @@ function trajectoryEntryToTrace(entry: TrajectoryEntry, index: number): UnifiedT
       ts,
       ts_iso: entry.ts_iso,
       kind: 'thinking',
+      sourceLane: 'masc',
       summary: entry.redacted ? '[비공개 사고]' : (entry.content?.slice(0, 120) ?? ''),
       detail: {},
       turn: entry.turn,
@@ -233,6 +311,7 @@ function trajectoryEntryToTrace(entry: TrajectoryEntry, index: number): UnifiedT
     ts,
     ts_iso: entry.ts_iso,
     kind: 'tool_call',
+    sourceLane: 'masc',
     summary: entry.tool_name ?? 'unknown',
     detail: {},
     toolName: entry.tool_name,
@@ -259,14 +338,7 @@ export function buildTraceEvents(
   const trajectoryTraces = trajectory
     ? (trajectory.entries ?? []).map(trajectoryEntryToTrace)
     : []
-  const merged = [...timelineTraces, ...trajectoryTraces]
-  merged.sort((a, b) => a.ts - b.ts)
-  const seen = new Set<string>()
-  return merged.filter(e => {
-    if (seen.has(e.id)) return false
-    seen.add(e.id)
-    return true
-  })
+  return mergeTraceEvents(timelineTraces, trajectoryTraces)
 }
 
 // ── Actions ────────────────────────────────────────────
@@ -280,6 +352,9 @@ export async function loadSessionTrace(agentName: string, isKeeper: boolean): Pr
   const prevSlot = getSlot(agentName)
   const token = prevSlot.fetchToken + 1
   patchSlot(agentName, { loading: true, error: null, fetchToken: token })
+  if (!liveTraceFeeds.value[agentName]) {
+    liveTraceFeeds.value = { ...liveTraceFeeds.value, [agentName]: [] }
+  }
 
   try {
     const timelinePromise = fetchAgentTimeline(agentName, TIMELINE_HOURS, TIMELINE_LIMIT)
@@ -309,8 +384,7 @@ export async function loadSessionTrace(agentName: string, isKeeper: boolean): Pr
   }
 }
 
-/** Append a live tool call event from SSE into an open trace slot.
- *  No-op if the agent's trace is not open (user hasn't opened the session view). */
+/** Append a live MASC tool call event from SSE into the trace feed. */
 export function appendLiveToolCall(
   agentName: string,
   evt: {
@@ -321,30 +395,59 @@ export function appendLiveToolCall(
     tsUnix: number
   },
 ): void {
-  const slot = traceSlots.value[agentName]
-  if (!slot) return // trace not open for this agent
-
   const tsMs = evt.tsUnix * 1000
-  const id = `live-${tsMs}-${evt.toolName}-${Math.random().toString(36).slice(2, 6)}`
-  const event: UnifiedTraceEvent = {
-    id,
+  appendLiveTraceEvent(agentName, {
+    id: `live-masc-tool-${tsMs}-${evt.toolName}`,
     ts: tsMs,
     ts_iso: new Date(tsMs).toISOString(),
     kind: 'tool_call',
+    sourceLane: 'masc',
     summary: evt.toolName,
     detail: {},
+    agentName,
     toolName: evt.toolName,
     duration_ms: evt.durationMs,
     error: evt.error,
-  }
+  })
+}
 
-  // Insert in chronological order (append — SSE events arrive in order)
-  const events = [...slot.events, event]
-  patchSlot(agentName, { events })
+/** Append a live OAS runtime event from SSE into the trace feed. */
+export function appendLiveOasEvent(
+  agentName: string,
+  event: Omit<UnifiedTraceEvent, 'sourceLane' | 'agentName'>,
+): void {
+  appendLiveTraceEvent(agentName, {
+    ...event,
+    sourceLane: 'oas',
+    agentName,
+  })
+}
+
+export function appendLiveTraceEvent(agentName: string, event: UnifiedTraceEvent): void {
+  if (!traceSlots.value[agentName] && !liveTraceFeeds.value[agentName]) return
+  const prev = liveTraceFeeds.value[agentName] ?? []
+  const historical = traceSlots.value[agentName]?.events ?? []
+  const seenIds = new Set([
+    ...historical.map(item => item.id),
+    ...prev.map(item => item.id),
+  ])
+  const uniqueEvent =
+    seenIds.has(event.id)
+      ? { ...event, id: `${event.id}-${++liveTraceSeq}` }
+      : event
+  const next = [...prev, uniqueEvent]
+  const pruned =
+    next.length > LIVE_TRACE_LIMIT
+      ? next.slice(next.length - LIVE_TRACE_LIMIT)
+      : next
+  liveTraceFeeds.value = { ...liveTraceFeeds.value, [agentName]: pruned }
 }
 
 export function closeSessionTrace(agentName: string): void {
   const next = { ...traceSlots.value }
   delete next[agentName]
   traceSlots.value = next
+  const feeds = { ...liveTraceFeeds.value }
+  delete feeds[agentName]
+  liveTraceFeeds.value = feeds
 }

@@ -190,6 +190,37 @@ export interface DashboardMissionTimelineItem {
   summary: string
 }
 
+export interface DashboardMissionWorkerReadiness {
+  worker_name: string
+  spawn_role?: string | null
+  execution_scope?: string | null
+  runtime_pool?: string | null
+  routing_reason?: string | null
+  has_meta?: boolean | null
+  has_checkpoint?: boolean | null
+  in_flight?: boolean | null
+  delegate_ready?: boolean | null
+  blocked_reason?: string | null
+  guidance?: string | null
+}
+
+export interface DashboardMissionSessionWorkerRuns {
+  requested_count?: number | null
+  completed_success_count?: number | null
+  completed_failed_count?: number | null
+  in_flight_count?: number | null
+  in_flight_run_ids: string[]
+  in_flight_actor_names: string[]
+  ready_worker_count?: number | null
+  ready_worker_names: string[]
+  delegate_ready_worker_names: string[]
+  blocked_worker_names: string[]
+  pending_worker_count?: number | null
+  pending_worker_names: string[]
+  worker_readiness: DashboardMissionWorkerReadiness[]
+  recent_runs: DashboardProofWorkerRunEvidence[]
+}
+
 export interface DashboardMissionSessionDetailResponse {
   generated_at?: string
   session_id: string
@@ -198,6 +229,7 @@ export interface DashboardMissionSessionDetailResponse {
   participants: DashboardMissionParticipantPreview[]
   operations: DashboardMissionOperationBadge[]
   keepers: DashboardMissionKeeperRef[]
+  worker_runs?: DashboardMissionSessionWorkerRuns | null
   error?: string | null
 }
 
@@ -322,17 +354,35 @@ export interface DashboardProofWorkerRunEvidence {
   worker_run_id: string
   session_id?: string | null
   operation_id?: string | null
+  trace_ref?: Record<string, unknown> | null
+  evidence_session_id?: string | null
+  session_conformance?: Record<string, unknown> | null
+  cdal_run_id?: string | null
+  contract_id?: string | null
+  result_status?: string | null
+  proof_present?: boolean | null
+  proof_run_id?: string | null
+  proof_status?: string | null
+  proof_risk_class?: string | null
+  proof_execution_mode?: string | null
+  proof_evidence_count?: number | null
+  checkpoint_ref?: string | null
+  tool_trace_refs?: string[]
+  raw_evidence_refs?: string[]
   worker_name?: string | null
   status?: string | null
   mode?: string | null
   wait_mode?: string | null
   trace_capability?: string | null
+  trace_evidence_status?: string | null
   trace_validated?: boolean | null
   validation_failures?: string[]
   success?: boolean | null
   execution_scope?: string | null
   requested_worker_class?: string | null
   requested_worker_size?: string | null
+  requested_runtime?: string | null
+  requested_model?: string | null
   tool_surface_status?: string | null
   tool_surface_source?: string | null
   tool_surface_names?: string[]
@@ -351,6 +401,7 @@ export interface DashboardProofWorkerRunEvidence {
   stop_reason?: string | null
   failure_reason?: string | null
   error?: string | null
+  proof_evidence_status?: string | null
   evidence_refs?: string[]
   ts_iso?: string | null
 }

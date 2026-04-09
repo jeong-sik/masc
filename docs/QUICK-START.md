@@ -164,7 +164,16 @@ masc_claim_next()
 
 수동 제어가 필요해도 기본 온보딩은 `masc_start(path=...)` 를 유지한다. 이 호출이 project scope 설정과 default namespace join까지 처리하므로, 같은 흐름에서 `masc_join(...)` 를 바로 이어 호출하지 않는다.
 
-## 5. Tool Surface
+## 5. 현재 front door
+
+지원하는 front door는 repo coordination과 keeper runtime이다.
+
+- repo coordination: `masc_start`, `masc_status`, `masc_transition`, `masc_plan_set_task`, `masc_heartbeat`
+- keeper runtime: `masc_keeper_up`, `masc_keeper_msg`, `masc_keeper_status`, `masc_keeper_down`
+
+`team-session`, `operator`, `command-plane` compatibility surface는 더 이상 기본 안내 경로가 아니다.
+
+## 6. Tool Surface
 
 `tools/list`는 기본 공개 surface만 보여준다. hidden/internal tool도 `tools/call`로는 호출 가능하다.
 
@@ -212,7 +221,7 @@ Allowlist SSOT: `lib/tool_catalog.ml` > `public_mcp_tools`
   - `EXA_API_KEY`
   - `BING_SEARCH_API_KEY` or `AZURE_BING_SEARCH_API_KEY`
 
-## 6. Error Recovery
+## 7. Error Recovery
 
 Failed tool calls include recovery hints automatically. Common patterns:
 

@@ -44,7 +44,7 @@ let keeper_internal_tools =
     "keeper_board_search";
     (* keeper_board_delete removed from default shard in #4309.
        Dispatch still accepts it for backward compat. *)
-    "keeper_shell_readonly";
+    "keeper_shell";
     "keeper_bash";
     "keeper_github";
     "keeper_pr_workflow";
@@ -143,9 +143,6 @@ let public_mcp_surface_tools =
     "masc_recall_search";
     "masc_verify_auto"; "masc_verify_handoff"; "masc_verify_pending";
     "masc_verify_request"; "masc_verify_status"; "masc_verify_submit";
-    (* Intent lifecycle *)
-    "masc_intent_create"; "masc_intent_status";
-    "masc_intent_update"; "masc_intent_forecast";
   ]
 
 let spawned_agent_surface_tools =
@@ -160,10 +157,6 @@ let spawned_agent_surface_tools =
     "masc_board_list"; "masc_board_post"; "masc_board_comment";
     "masc_board_vote"; "masc_board_get";
     "masc_tool_help"; "masc_web_search";
-    "masc_team_session_start"; "masc_team_session_step";
-    "masc_team_session_status"; "masc_team_session_events";
-    "masc_team_session_finalize"; "masc_team_session_stop";
-    "masc_team_session_report"; "masc_team_session_list";
     "masc_poll_events"; "masc_spawn";
     "masc_note_add";
     (* Phase 2: surface SSOT *)
@@ -201,22 +194,14 @@ let admin_surface_tools =
     "masc_auth_create_token";
     "masc_autoresearch_cycle"; "masc_autoresearch_inject";
     "masc_autoresearch_start"; "masc_autoresearch_stop";
-    "masc_autoresearch_swarm_start";
-    "masc_repo_synthesis_swarm_start";
-    "masc_policy_freeze_unit"; "masc_policy_kill_switch";
     "masc_tool_admin_update"; "masc_tool_grant"; "masc_tool_revoke";
-    "masc_operator_action"; "masc_operator_confirm"; "masc_operator_snapshot";
-    "masc_team_session_finalize"; "masc_tool_admin_snapshot";
+    "masc_tool_admin_snapshot";
     "masc_config";
     (* Phase 2: surface SSOT *)
     "masc_auth_disable"; "masc_auth_enable"; "masc_auth_list";
     "masc_auth_refresh"; "masc_auth_revoke"; "masc_auth_status";
-    "masc_dispatch_assign"; "masc_dispatch_escalate"; "masc_dispatch_plan";
-    "masc_dispatch_rebalance"; "masc_dispatch_recall"; "masc_dispatch_tick";
     "masc_keeper_create_from_persona";
-    "masc_operator_digest";
     "masc_pause"; "masc_resume";
-    "masc_policy_approve"; "masc_policy_deny"; "masc_policy_status"; "masc_policy_update";
     "masc_runtime_verify"; "masc_tool_list";
   ]
 
@@ -230,8 +215,6 @@ let keeper_denied_surface_tools =
     "masc_gc_force"; "masc_config_set";
     "masc_reset";
     "masc_spawn";
-    "masc_operator_action"; "masc_operator_confirm";
-    "masc_operator_judgment_write";
     "masc_execute"; "masc_execute_dry_run";
   ]
 
@@ -271,24 +254,14 @@ let system_internal_surface_tools =
     "masc_webrtc_offer"; "masc_webrtc_answer";
     (* Hidden callable tools pruned from user-facing surfaces in #5011. *)
     "masc_archive_view";
-    "masc_collaboration_graph";
     "masc_error_add"; "masc_error_resolve";
     "masc_find_by_capability";
     "masc_keeper_tool_catalog";
     "masc_library_add"; "masc_library_list"; "masc_library_promote";
     "masc_library_read"; "masc_library_search";
-    "masc_observe_alerts"; "masc_observe_capacity";
-    "masc_observe_operations"; "masc_observe_swarm";
-    "masc_observe_topology"; "masc_observe_traces";
-    "masc_operation_checkpoint"; "masc_operation_finalize";
-    "masc_operation_pause"; "masc_operation_resume";
-    "masc_operation_start"; "masc_operation_status"; "masc_operation_stop";
     "masc_relay_checkpoint"; "masc_relay_now";
     "masc_relay_smart_check"; "masc_relay_status";
     "masc_room_strategy_get"; "masc_room_strategy_set";
-    "masc_team_session_compare"; "masc_team_session_prove";
-    "masc_unit_define"; "masc_unit_list";
-    "masc_unit_reassign"; "masc_unit_reparent";
   ]
 
 (* ================================================================ *)
@@ -316,19 +289,12 @@ let coordination_role_tools : string list =
     "masc_board_get";
     "masc_claim_next";
     "masc_transition";
-    "masc_team_session_start";
-    "masc_team_session_status";
-    "masc_team_session_events";
-    "masc_team_session_report";
-    "masc_team_session_list";
     "masc_spawn";
   ]
 
 let execution_role_tools : string list =
   [
     "masc_heartbeat";
-    "masc_team_session_step";
-    "masc_team_session_status";
     "masc_claim_next";
     "masc_transition";
     "masc_broadcast";

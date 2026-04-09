@@ -1,19 +1,9 @@
 // MASC Dashboard — Dashboard projections, resource fetchers, tool metrics
 
-import { isRecord, asInt } from '../components/common/normalize'
-import {
-  asNullableIsoTimestamp,
-  normalizeGovernanceDecisionItem,
-  normalizeGovernanceTimelineEvent,
-  normalizeGovernanceJudgeSummary,
-  normalizeGovernanceJudgment,
-  normalizePendingConfirmation,
-} from './board'
-import { get, post, patch, withRetries, NAMESPACE_TRUTH_GET_TIMEOUT_MS } from './core'
+import { get, post, patch, NAMESPACE_TRUTH_GET_TIMEOUT_MS } from './core'
 import type {
   KeeperConfig,
   DashboardExecutionResponse,
-  DashboardGovernanceResponse,
   DashboardMemoryResponse,
   DashboardMissionBriefingResponse,
   DashboardMissionResponse,
@@ -24,10 +14,6 @@ import type {
   DashboardNamespaceTruthResponse,
   DashboardShellResponse,
   BoardSortMode,
-  GovernanceDecisionItem,
-  GovernanceJudgment,
-  GovernanceTimelineEvent,
-  PendingConfirmation,
   CommandPlaneHelpResponse,
   CommandPlaneChainRunResponse,
   CommandPlaneChainSummary,
@@ -183,6 +169,51 @@ export function fetchDashboardExecution(): Promise<DashboardExecutionResponse> {
   return get('/api/v1/dashboard/execution')
 }
 
+export type ToolQualityToolStat = {
+  name: string
+  calls: number
+  success_pct: number
+  avg_ms: number
+  output_truncated_count?: number
+  avg_output_chars?: number
+}
+
+export type ToolQualityKeeperStat = {
+  name: string
+  calls: number
+  success_pct: number
+}
+
+export type ToolQualityFailureCategory = {
+  category: string
+  count: number
+}
+
+export type ToolQualityHourlyPoint = {
+  hour: string
+  calls: number
+  success: number
+  success_rate: number
+}
+
+export type ToolQualityResponse = {
+  total: number
+  success: number
+  failure: number
+  success_rate: number
+  by_tool: ToolQualityToolStat[]
+  by_keeper: ToolQualityKeeperStat[]
+  failure_categories: ToolQualityFailureCategory[]
+  hourly_trend?: ToolQualityHourlyPoint[]
+}
+
+export function fetchToolQuality(opts?: { n?: number }): Promise<ToolQualityResponse> {
+  const params = new URLSearchParams()
+  if (opts?.n != null) params.set('n', String(opts.n))
+  const qs = params.toString()
+  return get<ToolQualityResponse>(`/api/v1/dashboard/tool-quality${qs ? `?${qs}` : ''}`)
+}
+
 export interface DashboardPerfRow {
   benchmark: string
   avg_ms: number
@@ -258,65 +289,6 @@ export function fetchDashboardMemory(
   return get(`/api/v1/dashboard/board${params.toString() ? `?${params}` : ''}`)
 }
 
-export function fetchDashboardGovernance(): Promise<DashboardGovernanceResponse> {
-  return withRetries('fetchDashboardGovernance', async () => {
-    const raw = await get<Record<string, unknown>>('/api/v1/dashboard/governance')
-    const items = Array.isArray(raw.items)
-      ? raw.items
-          .map(item => normalizeGovernanceDecisionItem(item))
-          .filter((item): item is GovernanceDecisionItem => item !== null)
-      : []
-    const pendingActions = Array.isArray(raw.pending_actions)
-      ? raw.pending_actions
-          .map(item => normalizePendingConfirmation(item))
-          .filter((item): item is PendingConfirmation => item !== null)
-      : []
-    return {
-      generated_at: asNullableIsoTimestamp(raw.generated_at) ?? undefined,
-      case_tracking_available:
-        typeof raw.case_tracking_available === 'boolean' ? raw.case_tracking_available : undefined,
-      note: typeof raw.note === 'string' && raw.note.trim() !== '' ? raw.note.trim() : undefined,
-      summary: isRecord(raw.summary)
-        ? {
-            cases_open: asInt(raw.summary.cases_open) ?? undefined,
-            pending_ruling: asInt(raw.summary.pending_ruling) ?? undefined,
-            ready_auto_execute: asInt(raw.summary.ready_auto_execute) ?? undefined,
-            needs_human_gate: asInt(raw.summary.needs_human_gate) ?? undefined,
-            executed: asInt(raw.summary.executed) ?? undefined,
-            blocked: asInt(raw.summary.blocked) ?? undefined,
-            ready_to_execute: asInt(raw.summary.ready_to_execute) ?? undefined,
-            oldest_open_case_age_s:
-              typeof raw.summary.oldest_open_case_age_s === 'number'
-                ? raw.summary.oldest_open_case_age_s
-                : null,
-            last_activity_age_s:
-              typeof raw.summary.last_activity_age_s === 'number'
-                ? raw.summary.last_activity_age_s
-                : null,
-            judge_online:
-              typeof raw.summary.judge_online === 'boolean'
-                ? raw.summary.judge_online
-                : undefined,
-            judge_last_seen_at: asNullableIsoTimestamp(raw.summary.judge_last_seen_at),
-          }
-        : undefined,
-      items,
-      activity: Array.isArray(raw.activity)
-        ? raw.activity
-            .map(item => normalizeGovernanceTimelineEvent(item))
-            .filter((item): item is GovernanceTimelineEvent => item !== null)
-        : [],
-      judge: normalizeGovernanceJudgeSummary(raw.judge),
-      judgments: Array.isArray(raw.judgments)
-        ? raw.judgments
-            .map(item => normalizeGovernanceJudgment(item))
-            .filter((item): item is GovernanceJudgment => item !== null)
-        : [],
-      pending_actions: pendingActions,
-    }
-  })
-}
-
 export interface RuntimeParamMeta {
   description: string
   value_type: string
@@ -381,6 +353,72 @@ export function fetchDashboardMission(): Promise<DashboardMissionResponse> {
 export function fetchDashboardMissionSession(sessionId: string): Promise<DashboardMissionSessionDetailResponse> {
   const query = `?session_id=${encodeURIComponent(sessionId)}`
   return get(`/api/v1/dashboard/session${query}`)
+}
+
+export interface DashboardRuntimeProviderDiscovery {
+  healthy?: boolean
+  discovered_model?: string | null
+  ctx_size?: number | null
+  total_slots?: number | null
+  busy_slots?: number | null
+  idle_slots?: number | null
+}
+
+export interface DashboardRuntimeProviderSnapshot {
+  provider: string
+  kind?: string | null
+  runtime_kind?: string | null
+  auth_kind?: string | null
+  status?: string | null
+  available?: boolean
+  supports_single_agent_run?: boolean
+  default_model?: string | null
+  model_count?: number | null
+  models: string[]
+  source?: string | null
+  endpoint_url?: string | null
+  note?: string | null
+  discovery?: DashboardRuntimeProviderDiscovery | null
+}
+
+export interface DashboardRuntimeProvidersResponse {
+  updated_at?: string
+  summary?: {
+    providers?: number
+    local_models?: number
+    cloud_models?: number
+  } | null
+  providers: DashboardRuntimeProviderSnapshot[]
+}
+
+export interface DashboardRuntimeModelMetric {
+  model_id: string
+  entry_count?: number | null
+  avg_tok_per_sec?: number | null
+  p50_tok_per_sec?: number | null
+  p95_tok_per_sec?: number | null
+  avg_latency_ms?: number | null
+  p50_latency_ms?: number | null
+  p95_latency_ms?: number | null
+  total_input_tokens?: number | null
+  total_output_tokens?: number | null
+  total_cache_read_tokens?: number | null
+  total_reasoning_tokens?: number | null
+  fallback_count?: number | null
+}
+
+export interface DashboardRuntimeModelMetricsResponse {
+  window_minutes?: number
+  total_entries?: number
+  models: DashboardRuntimeModelMetric[]
+}
+
+export function fetchRuntimeProviders(): Promise<DashboardRuntimeProvidersResponse> {
+  return get('/api/v1/providers')
+}
+
+export function fetchRuntimeModelMetrics(windowMinutes = 30): Promise<DashboardRuntimeModelMetricsResponse> {
+  return get(`/api/v1/models/metrics?window=${windowMinutes}`)
 }
 
 export interface DashboardVerificationRef {
@@ -772,13 +810,19 @@ export function fetchKeeperToolCalls(
 
 // ── Unified telemetry ──────────────────────────────────
 
-export type TelemetrySource = 'keeper_metric' | 'agent_event' | 'tool_call_io' | 'tool_usage' | 'tool_metric'
+export type TelemetrySource =
+  | 'keeper_metric'
+  | 'agent_event'
+  | 'tool_call_io'
+  | 'tool_usage'
+  | 'tool_metric'
 
 export type TelemetryEntry = Record<string, unknown> & {
   source: TelemetrySource
   ts?: number
   ts_unix?: number
   timestamp?: number
+  ts_iso?: string
 }
 
 export type TelemetryResponse = {
@@ -805,11 +849,17 @@ export type TelemetrySummaryResponse = {
 export function fetchTelemetry(opts?: {
   source?: TelemetrySource
   keeper?: string
+  session_id?: string
+  operation_id?: string
+  worker_run_id?: string
   n?: number
 }): Promise<TelemetryResponse> {
   const params = new URLSearchParams()
   if (opts?.source) params.set('source', opts.source)
   if (opts?.keeper) params.set('keeper', opts.keeper)
+  if (opts?.session_id) params.set('session_id', opts.session_id)
+  if (opts?.operation_id) params.set('operation_id', opts.operation_id)
+  if (opts?.worker_run_id) params.set('worker_run_id', opts.worker_run_id)
   if (opts?.n) params.set('n', String(opts.n))
   const qs = params.toString()
   return get<TelemetryResponse>(`/api/v1/dashboard/telemetry${qs ? '?' + qs : ''}`)
@@ -829,4 +879,14 @@ export function fetchExcusePatterns(): Promise<ExcusePattern[]> {
 
 export function updateExcusePatterns(patterns: ExcusePattern[]): Promise<{ ok: boolean }> {
   return post<{ ok: boolean }>('/api/v1/dashboard/config/excuse-patterns', patterns)
+}
+
+// --- Keeper Cascade Config ---
+
+export function fetchCascadeProfiles(): Promise<{ profiles: string[] }> {
+  return get<{ profiles: string[] }>('/api/v1/keeper/cascades')
+}
+
+export function updateKeeperCascade(keeper: string, cascade_name: string): Promise<{ ok: boolean }> {
+  return post<{ ok: boolean }>('/api/v1/keeper/cascade', { keeper, cascade_name })
 }

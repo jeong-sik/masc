@@ -77,7 +77,7 @@ let test_spawned_agent_surface_stays_curated () =
   let names = Lib.Capability_registry.spawned_agent_prefixed_tools in
   check bool "contains masc_status" true
     (List.mem "mcp__masc__masc_status" names);
-  check bool "contains team_session_step" true
+  check bool "omits team_session_step" false
     (List.mem "mcp__masc__masc_team_session_step" names);
   check bool "omits a2a_delegate" false
     (List.mem "mcp__masc__masc_a2a_delegate" names);

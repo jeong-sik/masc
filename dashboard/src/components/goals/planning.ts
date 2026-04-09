@@ -20,7 +20,6 @@ import { TaskBacklog } from './kanban-components'
 import { TaskCreateForm } from '../task-manage/task-create-form'
 
 const QUICK_START_DOC_URL = 'https://github.com/jeong-sik/masc-mcp/blob/main/docs/QUICK-START.md'
-const COMMAND_PLANE_DOC_URL = 'https://github.com/jeong-sik/masc-mcp/blob/main/docs/COMMAND-PLANE-RUNBOOK.md'
 
 function PlanningStat({
   label,
@@ -256,8 +255,8 @@ export function Planning() {
             summary=${hasGoals
               ? '등록된 목표를 단기/중기/장기로 나눠 추적합니다.'
               : '등록된 목표가 없습니다. 목표를 등록하면 여기에 표시됩니다.'}
-            docHref=${COMMAND_PLANE_DOC_URL}
-            docLabel="Command Plane Runbook"
+            docHref=${QUICK_START_DOC_URL}
+            docLabel="Quick Start"
           />
         </div>
       </section>

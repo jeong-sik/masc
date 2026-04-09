@@ -50,6 +50,9 @@ execution_scope = "workspace"
 
 tool_preset = "social"
 
+# Local LLM only — uses "local_only" cascade (ollama:auto)
+cascade_name = "local_only"
+
 # Telemetry Feedback
 telemetry_feedback_enabled = true
 telemetry_feedback_window_hours = 24

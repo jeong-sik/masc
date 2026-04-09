@@ -42,11 +42,6 @@ import {
 
 // --- Refresh function registration (avoids circular imports) ---
 
-let _refreshGovernanceFn: (() => void) | null = null
-export function registerGovernanceRefresh(fn: () => void): void {
-  _refreshGovernanceFn = fn
-}
-
 let _refreshCommandPlaneFn: (() => void) | null = null
 export function registerCommandPlaneRefresh(fn: () => void): void {
   _refreshCommandPlaneFn = fn
@@ -229,12 +224,6 @@ function handleKeeperLifecycle(event: { type: string; name?: string }): void {
   }
 }
 
-async function handleGovernance(): Promise<void> {
-  _refreshGovernanceFn?.()
-  const { loadRuntimeParams } = await import('./components/governance')
-  loadRuntimeParams()
-}
-
 async function refreshActiveRoute(): Promise<void> {
   try {
     const { refreshForRoute } = await import('./tab-refresh')
@@ -361,7 +350,11 @@ export function setupSSEReaction(): () => void {
 
     // 6. Governance events
     if (event.type.startsWith('decision_') || event.type === 'governance_param_changed') {
-      scheduleRefresh('governance', () => void handleGovernance())
+      if (route.value.tab === 'command') {
+        scheduleRefresh('command_route', () => {
+          void refreshActiveRoute()
+        })
+      }
     }
   })
 

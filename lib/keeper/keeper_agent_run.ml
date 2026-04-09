@@ -58,10 +58,92 @@ type turn_prompt =
   ; dynamic_context : string
   }
 
+(** Prompt segment metrics for effective keeper input attribution.
+    Bytes are stored rather than character counts because prompts are UTF-8. *)
+type prompt_segment_metrics =
+  { bytes : int
+  ; estimated_tokens : int
+  ; fingerprint : string option
+  }
+
+(** Effective prompt metrics for a keeper turn.
+    [estimated_cacheable_tokens] tracks the system prompt portion only because
+    OAS prompt caching is enabled via [cache_system_prompt:true]. *)
+type prompt_metrics =
+  { fingerprint : string
+  ; estimated_total_tokens : int
+  ; estimated_cacheable_tokens : int
+  ; system_prompt_segment : prompt_segment_metrics
+  ; dynamic_context_segment : prompt_segment_metrics
+  ; user_message_segment : prompt_segment_metrics
+  }
+
+let prompt_segment_metrics_of_text (text : string) : prompt_segment_metrics =
+  let text = Inference_utils.sanitize_text_utf8 text in
+  {
+    bytes = String.length text;
+    estimated_tokens =
+      (if text = "" then 0 else Agent_sdk.Context_reducer.estimate_char_tokens text);
+    fingerprint =
+      (if text = ""
+       then None
+       else Some Digestif.SHA256.(digest_string text |> to_hex));
+  }
+
+let build_prompt_metrics ~(system_prompt : string) ~(dynamic_context : string)
+    ~(user_message : string) : prompt_metrics =
+  let system_prompt = Inference_utils.sanitize_text_utf8 system_prompt in
+  let dynamic_context = Inference_utils.sanitize_text_utf8 dynamic_context in
+  let user_message = Inference_utils.sanitize_text_utf8 user_message in
+  let system_prompt_metrics = prompt_segment_metrics_of_text system_prompt in
+  let dynamic_context_metrics = prompt_segment_metrics_of_text dynamic_context in
+  let user_message_metrics = prompt_segment_metrics_of_text user_message in
+  let fingerprint_input =
+    `Assoc
+      [
+        ("system_prompt", `String system_prompt);
+        ("dynamic_context", `String dynamic_context);
+        ("user_message", `String user_message);
+      ]
+    |> Yojson.Safe.to_string
+  in
+  {
+    fingerprint = Digestif.SHA256.(digest_string fingerprint_input |> to_hex);
+    estimated_total_tokens =
+      (system_prompt_metrics.estimated_tokens
+       + dynamic_context_metrics.estimated_tokens
+       + user_message_metrics.estimated_tokens);
+    estimated_cacheable_tokens = system_prompt_metrics.estimated_tokens;
+    system_prompt_segment = system_prompt_metrics;
+    dynamic_context_segment = dynamic_context_metrics;
+    user_message_segment = user_message_metrics;
+  }
+
+let prompt_segment_metrics_to_json (segment : prompt_segment_metrics) :
+    Yojson.Safe.t =
+  `Assoc
+    [
+      ("bytes", `Int segment.bytes);
+      ("estimated_tokens", `Int segment.estimated_tokens);
+      ("fingerprint", Json_util.string_opt_to_json segment.fingerprint);
+    ]
+
+let prompt_metrics_to_json (metrics : prompt_metrics) : Yojson.Safe.t =
+  `Assoc
+    [
+      ("fingerprint", `String metrics.fingerprint);
+      ("estimated_total_tokens", `Int metrics.estimated_total_tokens);
+      ("estimated_cacheable_tokens", `Int metrics.estimated_cacheable_tokens);
+      ("system_prompt", prompt_segment_metrics_to_json metrics.system_prompt_segment);
+      ("dynamic_context", prompt_segment_metrics_to_json metrics.dynamic_context_segment);
+      ("user_message", prompt_segment_metrics_to_json metrics.user_message_segment);
+    ]
+
 (** Result of a single Agent.run() keeper turn. *)
 type run_result =
   { response_text : string
   ; model_used : string
+  ; prompt_metrics : prompt_metrics
   ; cascade_observation : Oas_worker.cascade_observation option
   ; turn_count : int
   ; tool_calls_made : int
@@ -95,7 +177,7 @@ let tool_index_entry_of_tool
     else if String.starts_with ~prefix:"keeper_task" name then Some "tasks"
     else if String.starts_with ~prefix:"keeper_voice_" name then Some "voice"
     else if String.starts_with ~prefix:"keeper_fs_" name
-         || name = "keeper_shell_readonly"
+         || name = "keeper_shell"
          || name = "keeper_bash"
          || name = "keeper_write" then Some "filesystem"
     else if name = "keeper_github" then Some "vcs"
@@ -289,7 +371,12 @@ let run_turn
      handing prompts/history to OAS. Keep this sanitization here even when
      upstream builders already cleaned their strings. *)
   let turn_system_prompt = Inference_utils.sanitize_text_utf8 turn_system_prompt in
+  let dynamic_context = Inference_utils.sanitize_text_utf8 dynamic_context in
   let user_message = Inference_utils.sanitize_text_utf8 user_message in
+  let prompt_metrics =
+    build_prompt_metrics ~system_prompt:turn_system_prompt ~dynamic_context
+      ~user_message
+  in
   (* 6. Append user message and persist.
      On retry (is_retry=true), the user message was already persisted by the
      first attempt.  Checkpoint reload does not include it (checkpoint is
@@ -420,7 +507,7 @@ let run_turn
     ; "keeper_voice_listen", "음성 듣기 마이크 녹음 입력"
     ; "keeper_fs_read", "파일 읽기 소스코드 설정"
     ; "keeper_fs_edit", "파일 쓰기 편집 저장 수정 생성"
-    ; "keeper_shell_readonly", "명령어 조회 검색 탐색"
+    ; "keeper_shell", "명령어 조회 검색 탐색"
     ; "keeper_bash", "명령어 실행 쉘 빌드 테스트"
     ; "keeper_github", "깃허브 이슈 풀리퀘스트 PR CI"
     ; "keeper_pr_workflow", "PR 생성 워크트리 커밋 푸시 풀리퀘스트 원���"
@@ -1685,6 +1772,7 @@ let run_turn
           Ok
             { response_text
             ; model_used = model
+            ; prompt_metrics
             ; cascade_observation = result.cascade_observation
             ; turn_count = result.turns
             ; tool_calls_made = List.length tool_names

@@ -275,6 +275,7 @@
    team_session_report_core
    team_session_report_proof_helpers
    team_session_report_proof
+   team_session_worker_run_meta
    team_session_engine_helpers
    team_session_engine_status
    team_session_engine_policy
@@ -367,7 +368,6 @@
    tool_token
    tool_dispatch
    tool_input_validation
-   tool_tag_init
    tool_prefilter
    tool_metrics
    tool_metrics_persist
@@ -382,6 +382,7 @@
    tool_unified
    tool_help_registry
    tool_registry
+   tool_registration_check
    tool_code
    tool_code_write
    tool_suspend
@@ -514,7 +515,6 @@
    keeper_trace_validate
    keeper_supervisor
    keeper_runtime
-   keeper_turn_session
    keeper_turn_setup
    keeper_turn_up_args
    keeper_turn_up_create
@@ -662,7 +662,6 @@
   keeper_tool_disclosure
   keeper_turn_telemetry
   keeper_exec_context
-  keeper_turn_session
   keeper_turn_setup
   keeper_turn_up_args
   keeper_turn_up_create
@@ -690,6 +689,7 @@
   team_session_report_core
   team_session_report_proof_helpers
   team_session_report_proof
+  team_session_worker_run_meta
   ;; godsplit-phase1: file split sub-modules
   tool_team_session_step_exec
   keeper_status_bridge

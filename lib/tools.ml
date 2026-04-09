@@ -6,6 +6,19 @@
 
 open Types
 
+let retired_front_door_schema_names =
+  [
+    "masc_collaboration_graph";
+    "masc_autoresearch_swarm_start";
+    "masc_repo_synthesis_swarm_start";
+  ]
+
+let filter_retired_front_door_schemas (schemas : tool_schema list) =
+  List.filter
+    (fun (schema : tool_schema) ->
+      not (List.mem schema.name retired_front_door_schema_names))
+    schemas
+
 (** Tool schemas from modules that do NOT depend on Config
     (avoids Tools -> Config -> Tools cycle) *)
 let raw_schemas : tool_schema list =
@@ -30,14 +43,14 @@ let all_schemas : tool_schema list = raw_schemas
 
 (** All schemas including config-dependent module schemas *)
 let all_schemas_extended =
-  all_schemas
-  @ Tool_schemas_control.schemas
-  @ Tool_schemas_a2a.schemas
-  @ Tool_schemas_misc.schemas
-  @ Tool_keeper.schemas
-  @ Tool_operator.schemas @ Tool_local_runtime.schemas @ Tool_command_plane.schemas
-  @ Tool_team_session.schemas @ Tool_shard.schemas
-  @ Tool_autoresearch.schemas
+  filter_retired_front_door_schemas
+    (all_schemas
+    @ Tool_schemas_control.schemas
+    @ Tool_schemas_a2a.schemas
+    @ Tool_schemas_misc.schemas
+    @ Tool_keeper.schemas
+    @ Tool_local_runtime.schemas @ Tool_shard.schemas
+    @ Tool_autoresearch.schemas)
 
 (** Get tool by name *)
 let find_tool name =

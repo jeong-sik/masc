@@ -20,6 +20,7 @@ let () =
                 ~description:"test required only"
                 ~module_tag:Tool_dispatch.Mod_misc
                 ~input_schema:empty_schema
+                ~handler_binding:Tag_dispatch
                 ()
             in
             check string "name" "__test_spec_required" spec.name;
@@ -42,6 +43,7 @@ let () =
                 ~description:"test optional"
                 ~module_tag:Tool_dispatch.Mod_compact
                 ~input_schema:empty_schema
+                ~handler_binding:Tag_dispatch
                 ~is_read_only:true
                 ~is_idempotent:true
                 ~visibility:Tool_catalog.Hidden
@@ -66,6 +68,7 @@ let () =
                 ~description:"tag registry test"
                 ~module_tag:Tool_dispatch.Mod_misc
                 ~input_schema:empty_schema
+                ~handler_binding:Tag_dispatch
                 ()
             in
             Tool_spec.register spec;
@@ -81,6 +84,7 @@ let () =
                 ~description:"schema registry test"
                 ~module_tag:Tool_dispatch.Mod_misc
                 ~input_schema:empty_schema
+                ~handler_binding:Tag_dispatch
                 ()
             in
             Tool_spec.register spec;
@@ -93,6 +97,7 @@ let () =
                 ~description:"read only test"
                 ~module_tag:Tool_dispatch.Mod_misc
                 ~input_schema:empty_schema
+                ~handler_binding:Tag_dispatch
                 ~is_read_only:true
                 ()
             in
@@ -106,6 +111,7 @@ let () =
                 ~description:"read-write test"
                 ~module_tag:Tool_dispatch.Mod_misc
                 ~input_schema:empty_schema
+                ~handler_binding:Tag_dispatch
                 ()
             in
             Tool_spec.register spec;
@@ -118,6 +124,7 @@ let () =
                 ~description:"join test"
                 ~module_tag:Tool_dispatch.Mod_misc
                 ~input_schema:empty_schema
+                ~handler_binding:Tag_dispatch
                 ~requires_join:true
                 ()
             in
@@ -131,6 +138,7 @@ let () =
                 ~description:"catalog test"
                 ~module_tag:Tool_dispatch.Mod_misc
                 ~input_schema:empty_schema
+                ~handler_binding:Tag_dispatch
                 ~is_destructive:true
                 ~required_permission:Types.CanAdmin
                 ~visibility:Tool_catalog.Hidden
@@ -154,6 +162,7 @@ let () =
                      ~description:"bad"
                      ~module_tag:Tool_dispatch.Mod_misc
                      ~input_schema:empty_schema
+                     ~handler_binding:Tag_dispatch
                      ())));
         ] );
       ( "register_all",
@@ -167,6 +176,7 @@ let () =
                     ~description:("bulk " ^ name)
                     ~module_tag:Tool_dispatch.Mod_misc
                     ~input_schema:empty_schema
+                    ~handler_binding:Tag_dispatch
                     ())
                 [ "__test_spec_bulk_a"; "__test_spec_bulk_b"; "__test_spec_bulk_c" ]
             in
@@ -186,6 +196,7 @@ let () =
                 ~description:"schema conv test"
                 ~module_tag:Tool_dispatch.Mod_misc
                 ~input_schema:empty_schema
+                ~handler_binding:Tag_dispatch
                 ()
             in
             let schema = Tool_spec.to_tool_schema spec in
@@ -194,32 +205,48 @@ let () =
         ] );
       ( "verify_handler_coverage",
         [
-          test_case "spec without handler appears in missing" `Quick (fun () ->
+          test_case "Tag_dispatch binding not in verify missing" `Quick (fun () ->
             let spec =
               Tool_spec.create
-                ~name:"__test_spec_no_handler"
-                ~description:"no handler test"
+                ~name:"__test_spec_tag_dispatch"
+                ~description:"tag dispatch test"
                 ~module_tag:Tool_dispatch.Mod_misc
                 ~input_schema:empty_schema
+                ~handler_binding:Tag_dispatch
                 ()
             in
             Tool_spec.register spec;
             let missing = Tool_spec.verify_handler_coverage () in
-            check bool "missing contains our tool" true
-              (List.mem "__test_spec_no_handler" missing));
-          test_case "spec with handler not in missing" `Quick (fun () ->
-            let name = "__test_spec_has_handler" in
+            check bool "Tag_dispatch not in missing" false
+              (List.mem "__test_spec_tag_dispatch" missing));
+          test_case "Match_chain binding not in verify missing" `Quick (fun () ->
             let spec =
               Tool_spec.create
-                ~name
-                ~description:"has handler"
+                ~name:"__test_spec_match_chain"
+                ~description:"match chain test"
                 ~module_tag:Tool_dispatch.Mod_misc
                 ~input_schema:empty_schema
+                ~handler_binding:Match_chain
                 ()
             in
             Tool_spec.register spec;
-            Tool_dispatch.register ~tool_name:name
-              ~handler:(fun ~name:_ ~args:_ -> Some (true, "ok"));
+            let missing = Tool_spec.verify_handler_coverage () in
+            check bool "Match_chain not in missing" false
+              (List.mem "__test_spec_match_chain" missing));
+          test_case "Direct binding registers handler" `Quick (fun () ->
+            let name = "__test_spec_direct_handler" in
+            let spec =
+              Tool_spec.create
+                ~name
+                ~description:"direct handler test"
+                ~module_tag:Tool_dispatch.Mod_misc
+                ~input_schema:empty_schema
+                ~handler_binding:(Direct (fun ~name:_ ~args:_ -> Some (true, "ok")))
+                ()
+            in
+            Tool_spec.register spec;
+            check bool "handler registered in Tool_dispatch" true
+              (Tool_dispatch.is_registered name);
             let missing = Tool_spec.verify_handler_coverage () in
             check bool "not in missing" false
               (List.mem name missing));

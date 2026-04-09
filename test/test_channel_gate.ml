@@ -140,17 +140,20 @@ let test_inbound_of_json_normalizes_channel_label () =
 
 (* ── Mock dispatch for handle_inbound tests ──────────────────── *)
 
-let mock_dispatch_ok ~channel:_ ~channel_user_id:_ ~keeper_name:_ ~content:_ =
+let mock_dispatch_ok ~channel:_ ~channel_user_id:_ ~channel_user_name:_
+    ~channel_room_id:_ ~keeper_name:_ ~content:_ =
   Gate_protocol.Reply {
     content = "mock reply";
     structured = None;
     stats = Some { Gate_protocol.model_used = "test-model"; duration_ms = 42; tokens_used = 10 };
   }
 
-let mock_dispatch_error ~channel:_ ~channel_user_id:_ ~keeper_name:_ ~content:_ =
+let mock_dispatch_error ~channel:_ ~channel_user_id:_ ~channel_user_name:_
+    ~channel_room_id:_ ~keeper_name:_ ~content:_ =
   Gate_protocol.Keeper_error_result "mock keeper error"
 
-let mock_dispatch_unavailable ~channel:_ ~channel_user_id:_ ~keeper_name:_ ~content:_ =
+let mock_dispatch_unavailable ~channel:_ ~channel_user_id:_ ~channel_user_name:_
+    ~channel_room_id:_ ~keeper_name:_ ~content:_ =
   Gate_protocol.Unavailable_result
 
 let test_handle_inbound_success () =
@@ -190,6 +193,37 @@ let test_handle_inbound_validation_blocks_dispatch () =
   | Error _ -> fail "expected Validation(Empty_content)"
   | Ok _ -> fail "expected validation to block dispatch"
 
+let test_handle_inbound_passes_channel_context_to_dispatch () =
+  reset_dedup ();
+  let seen = ref None in
+  let dispatch ~channel ~channel_user_id ~channel_user_name ~channel_room_id
+      ~keeper_name:_ ~content:_ =
+    seen :=
+      Some (channel, channel_user_id, channel_user_name, channel_room_id);
+    Gate_protocol.Reply {
+      content = "ok";
+      structured = None;
+      stats = None;
+    }
+  in
+  let msg =
+    {
+      (make_message ~idempotency_key:(unique_key "dispatch-context") ()) with
+      channel_user_name = "Alice";
+      channel_room_id = "thread-7";
+    }
+  in
+  match Channel_gate.handle_inbound ~dispatch msg with
+  | Ok _ -> (
+      match !seen with
+      | Some (channel, user_id, user_name, room_id) ->
+          check string "channel" "discord" channel;
+          check string "user id" "user-1" user_id;
+          check string "user name" "Alice" user_name;
+          check string "room id" "thread-7" room_id
+      | None -> fail "dispatch should receive connector context" )
+  | Error e -> fail (Channel_gate.gate_error_to_string e)
+
 let () =
   Alcotest.run "Channel_gate"
     [
@@ -218,6 +252,8 @@ let () =
         [
           test_case "dispatches and returns reply" `Quick
             test_handle_inbound_success;
+          test_case "passes channel context to dispatch" `Quick
+            test_handle_inbound_passes_channel_context_to_dispatch;
           test_case "returns keeper error" `Quick
             test_handle_inbound_keeper_error;
           test_case "returns unavailable" `Quick

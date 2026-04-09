@@ -283,6 +283,16 @@ let test_keeper_agent_name_prefixed () =
     "no double prefix in agent_name" "keeper-admin-agent"
     (Keeper_types.keeper_agent_name "keeper-admin")
 
+let test_keeper_name_from_agent_name_roundtrip () =
+  Alcotest.(check (option string))
+    "agent alias resolves to keeper name" (Some "sangsu")
+    (Keeper_types.keeper_name_from_agent_name "keeper-sangsu-agent")
+
+let test_keeper_name_from_agent_name_rejects_plain_name () =
+  Alcotest.(check (option string))
+    "plain keeper name is not treated as agent alias" None
+    (Keeper_types.keeper_name_from_agent_name "sangsu")
+
 (* ============================================================
    Test runner
    ============================================================ *)
@@ -327,5 +337,9 @@ let () =
       Alcotest.test_case "sender prefixed name" `Quick test_keeper_agent_sender_prefixed_name;
       Alcotest.test_case "agent_name plain" `Quick test_keeper_agent_name_plain;
       Alcotest.test_case "agent_name prefixed" `Quick test_keeper_agent_name_prefixed;
+      Alcotest.test_case "agent alias roundtrip" `Quick
+        test_keeper_name_from_agent_name_roundtrip;
+      Alcotest.test_case "plain name is not alias" `Quick
+        test_keeper_name_from_agent_name_rejects_plain_name;
     ]);
   ]

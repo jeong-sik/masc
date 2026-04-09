@@ -31,6 +31,21 @@ let test_namespace_surface_is_demoted_to_lab () =
       check bool "meets_main_gate" false
         Yojson.Safe.Util.(surface |> member "meets_main_gate" |> to_bool)
 
+let test_governance_surface_is_demoted_to_lab () =
+  let json = Dashboard_surface_readiness.json () in
+  let surfaces = Yojson.Safe.Util.(json |> member "surfaces" |> to_list) in
+  match find_surface surfaces "command.governance" with
+  | None -> fail "command.governance missing"
+  | Some surface ->
+      check string "exposure_status" "lab"
+        Yojson.Safe.Util.(surface |> member "exposure_status" |> to_string);
+      check bool "hidden_from_nav" true
+        Yojson.Safe.Util.(surface |> member "hidden_from_nav" |> to_bool);
+      check bool "meets_main_gate" false
+        Yojson.Safe.Util.(surface |> member "meets_main_gate" |> to_bool);
+      check bool "route_hash is null" true
+        Yojson.Safe.Util.(surface |> member "route_hash" = `Null)
+
 let test_live_spotcheck_serializes_route_values_as_routes () =
   let json = Dashboard_surface_readiness.json ~surface_id:"overview" () in
   let surfaces = Yojson.Safe.Util.(json |> member "surfaces" |> to_list) in
@@ -76,7 +91,6 @@ let test_visible_surfaces_are_listed () =
       "monitoring.agents";
       "monitoring.activity";
       "command.intervene";
-      "command.governance";
       "workspace.board";
       "workspace.evidence";
       "workspace.planning";
@@ -110,6 +124,8 @@ let () =
         [
           test_case "namespace surface demoted to lab" `Quick
             test_namespace_surface_is_demoted_to_lab;
+          test_case "governance surface demoted to lab" `Quick
+            test_governance_surface_is_demoted_to_lab;
           test_case "route live spotchecks stay routes" `Quick
             test_live_spotcheck_serializes_route_values_as_routes;
           test_case "script live spotchecks stay scripts" `Quick

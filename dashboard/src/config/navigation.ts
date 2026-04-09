@@ -6,7 +6,6 @@ export type SurfaceSectionId =
   | 'agents'
   | 'activity'
   | 'board'
-  | 'governance'
   | 'evidence'
   | 'planning'
   | 'goals'
@@ -15,6 +14,7 @@ export type SurfaceSectionId =
   | 'autoresearch'
   | 'harness'
   | 'inspector'
+  | 'runtime'
   | 'telemetry'
   | 'tool-quality'
   | 'fleet'
@@ -29,6 +29,7 @@ export interface DashboardNavGroup {
   defaultTab: TabId
   defaultParams?: Record<string, string>
   tabs: TabId[]
+  hidden?: boolean
 }
 
 export interface DashboardNavItem {
@@ -67,12 +68,13 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
   },
   {
     id: 'command',
-    label: '운영 개입',
+    label: '운영 큐',
     icon: '🎛️',
-    description: '실시간 개입과 운영 제어',
+    description: '숨겨진 호환 surface. 기존 command deep link와 운영 큐 진입점을 유지합니다.',
     defaultTab: 'command',
     defaultParams: { section: 'intervene' },
     tabs: ['command'],
+    hidden: true,
   },
   {
     id: 'workspace',
@@ -131,31 +133,31 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       params: { section: 'activity' },
     },
     {
+      id: 'runtime',
+      label: '런타임',
+      description: 'provider health, 슬롯 용량, model inference snapshot.',
+      params: { section: 'runtime' },
+    },
+    {
       id: 'telemetry',
       label: '텔레메트리',
-      description: '도구 호출, keeper 메트릭, 에이전트 이벤트 통합 뷰.',
+      description: 'append-only 이벤트 기록. runtime snapshot은 별도 런타임 탭에서 봅니다.',
       params: { section: 'telemetry' },
     },
   ],
   command: [
     {
       id: 'intervene',
-      label: '실시간 개입',
-      description: '프로젝트 일시정지, 세션 중단, 키퍼 재시작 등 운영 개입.',
+      label: '운영 큐',
+      description: 'review queue, 추천 액션, 승인 대기, 최소 개입을 한 화면에서 처리합니다.',
       params: { section: 'intervene' },
-    },
-    {
-      id: 'governance',
-      label: '거버넌스',
-      description: '에이전트 자율 결정의 검토/승인 기록. 위험 행동 방지 레이어.',
-      params: { section: 'governance' },
     },
   ],
   workspace: [
     {
       id: 'board',
       label: '작업 게시판',
-      description: '에이전트 간 지식 공유 게시판. 직접 작성 글, 자동화 글, 시스템 글을 함께 보여줍니다.',
+      description: '에이전트가 남긴 직접 작성 글, 자동화 글, 시스템 글을 한 곳에서 봅니다.',
       params: { section: 'board' },
     },
     {
@@ -251,7 +253,6 @@ export function normalizeRouteParams(tabId: TabId, params: Record<string, string
 
   delete next.surface
   delete next.operation
-  delete next.operation_id
   delete next.run_id
 
   return next

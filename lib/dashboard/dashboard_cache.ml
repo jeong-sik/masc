@@ -83,14 +83,6 @@ let [@warning "-32"] cleanup_expired () =
     List.iter (fun key -> Hashtbl.remove table key) victims;
     List.length victims)
 
-(* clock_ref removed: Time_compat.sleep is the single sleep path
-   since the Fiber.yield spin-loop fix (#4948). *)
-let set_clock _clk = ()
-
-(* _bg_sw removed: uses Eio_context.get_switch_opt() directly.
-   set_sw retained as no-op for backward compat with server_runtime_bootstrap. *)
-let set_sw _sw = ()
-
 let now () = Time_compat.now ()
 
 (** Default stale grace multiplier: stale data is served for [ttl * stale_factor]

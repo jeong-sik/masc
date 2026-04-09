@@ -152,7 +152,7 @@ let build_snapshot_state ?sessions config =
             Filename.concat (Room.masc_dir config) "agents"
           in
           let agents_mt = _file_mtime agents_dir in
-          let sessions_dir = Team_session_store.sessions_root config in
+          let sessions_dir = Filename.concat (Room.masc_dir config) "team-sessions" in
           let sessions_mt = _file_mtime sessions_dir in
           let intents_mt = _file_mtime (intents_path config) in
           let ops_mt = _file_mtime (operations_path config) in
@@ -171,7 +171,7 @@ let build_snapshot_state ?sessions config =
           end;
           (* Section 2: sessions — cap at _session_limit most recent *)
           if sessions_mt <> sc.sessions_mtime then begin
-            sc.sessions <- Team_session_store.list_sessions ~limit:_session_limit config;
+            sc.sessions <- [];
             sc.sessions_mtime <- sessions_mt
           end;
           (* Section 3: intents *)
@@ -212,7 +212,7 @@ let build_snapshot_state ?sessions config =
           state
       | Memory _ | PostgresNative _ ->
           let agents, managed_units, units, source = topology_units config in
-          let sessions = Team_session_store.list_sessions ~limit:_session_limit config in
+          let sessions = [] in
           let intents = read_intents config in
           let operations = all_operations ~sessions config units in
           let detachments = all_detachments ~sessions config units operations in
@@ -429,7 +429,7 @@ let capacity_json_from_state (state : snapshot_state) =
 let capacity_json config =
   capacity_json_from_state (build_snapshot_state config)
 
-let list_alerts_json_from_state config (state : snapshot_state) =
+let list_alerts_json_from_state _config (state : snapshot_state) =
   let units = state.units in
   let operations = state.operations in
   let live_agents = state.live_agents in
@@ -516,30 +516,8 @@ let list_alerts_json_from_state config (state : snapshot_state) =
               ~title:(operation.operation_id ^ " is assigned to a missing unit")
               ~detail:"Reassign this operation before it continues."
         | Some _ -> ());
-      match operation.detachment_session_id with
-      | Some session_id -> (
-          match Team_session_store.load_session config session_id with
-          | Some session -> (
-              match session.last_event_at with
-              | Some last_event_at ->
-                  let age_sec = max 0. (Unix.gettimeofday () -. last_event_at) in
-                  if age_sec > 1800. then begin
-                    (* BUG-005: Escalate severity based on duration instead of
-                       always using "warn". 6h+ = critical, 2h+ = bad. *)
-                    let severity =
-                      if age_sec > 21600. then "critical"      (* 6 hours *)
-                      else if age_sec > 7200. then "bad"       (* 2 hours *)
-                      else "warn"
-                    in
-                    push_alert ~severity ~kind:"detachment_quiet"
-                      ~scope_type:"operation" ~scope_id:operation.operation_id
-                      ~title:(operation.operation_id ^ " detachment went quiet")
-                      ~detail:
-                        (Printf.sprintf "No detachment event for %.0fs (%.1fh)" age_sec (age_sec /. 3600.))
-                  end
-              | None -> ())
-          | None -> ())
-      | None -> ())
+      (* Team_session_store removed — skip detachment quiet alerts *)
+      ignore operation.detachment_session_id)
     operations;
   state.decisions
   |> List.iter (fun (decision : policy_decision_record) ->

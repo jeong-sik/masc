@@ -223,13 +223,29 @@ let handle_gate_connectors _state request reqd =
 
 (** GET /api/v1/gate/connector/status?name=<connector>&audit_limit=<n>
 
-    Single connector status by name.  Returns 404 if the connector
-    is not registered. *)
-let handle_gate_connector_status_by_name _state request reqd =
-  match query_param request "name" with
+    Generic connector status. Accepts the current [name=<connector>] form and
+    also tolerates legacy [channel=<connector>] callers. *)
+let resolve_connector_status_name ?name ?channel () =
+  match Option.map String.trim name with
+  | Some name when name <> "" -> Some name
+  | _ -> (
+      match Option.map String.trim channel with
+      | Some legacy when legacy <> "" ->
+          Some (String.lowercase_ascii legacy)
+      | _ -> None)
+
+let handle_gate_connector_status _state request reqd =
+  let connector_name =
+    resolve_connector_status_name
+      ?name:(query_param request "name")
+      ?channel:(query_param request "channel")
+      ()
+  in
+  match connector_name with
   | None | Some "" ->
       respond_json_with_cors ~status:`Bad_request request reqd
-        (Yojson.Safe.to_string (Channel_gate.error_json "name is required"))
+        (Yojson.Safe.to_string
+           (Channel_gate.error_json "name or channel is required"))
   | Some name -> (
       match Channel_gate_connector.find name with
       | None ->
@@ -254,34 +270,6 @@ let handle_gate_discord_status _state request reqd =
   in
   respond_json_with_cors ~status:`OK request reqd
     (Yojson.Safe.to_string (Channel_gate_discord_state.status_json ~audit_limit:limit ()))
-
-(** Generic connector validation for the current single-connector surface.
-
-    Until multiple connector backends exist, only [channel=discord] is valid. *)
-let resolve_connector_channel request =
-  match query_param request "channel" |> Option.map String.trim with
-  | None | Some "" -> Error "channel is required"
-  | Some raw ->
-      let channel = String.lowercase_ascii raw in
-      if String.equal channel "discord" then Ok channel
-      else Error ("unsupported channel: " ^ channel)
-
-(** GET /api/v1/gate/connector/status?name=<connector>|channel=discord
-
-    Generic connector status surface. Prefer [name] for registered
-    connectors, but keep [channel=discord] as a compatibility alias for
-    the current single-connector dashboard flow. *)
-let handle_gate_connector_status state request reqd =
-  match query_param request "name" |> Option.map String.trim with
-  | Some name when name <> "" ->
-      handle_gate_connector_status_by_name state request reqd
-  | _ -> (
-      match resolve_connector_channel request with
-      | Error err ->
-          respond_json_with_cors ~status:`Bad_request request reqd
-            (Yojson.Safe.to_string (Channel_gate.error_json err))
-      | Ok "discord" -> handle_gate_discord_status state request reqd
-      | Ok _ -> assert false )
 
 let gate_keeper_ctx ~sw ~clock state =
   {

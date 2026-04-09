@@ -59,6 +59,7 @@ let update_direct_turn_meta (meta : keeper_meta) ~(latency_ms : int)
     (result : Keeper_agent_run.run_result) : keeper_meta =
   let now_ts = Time_compat.now () in
   let turn_cost = turn_cost_for_result ~meta result in
+  let surface_model_used = Keeper_agent_run.surface_model_used result in
   {
     meta with
     updated_at = now_iso ();
@@ -77,7 +78,7 @@ let update_direct_turn_meta (meta : keeper_meta) ~(latency_ms : int)
               + Keeper_exec_context.total_tokens result.usage;
             total_cost_usd = meta.runtime.usage.total_cost_usd +. turn_cost;
             last_turn_ts = now_ts;
-            last_model_used = result.model_used;
+            last_model_used = surface_model_used;
             last_input_tokens = result.usage.input_tokens;
             last_output_tokens = result.usage.output_tokens;
             last_total_tokens =
@@ -415,9 +416,10 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
               Progress.Tracker.complete turn_tracker
                 ~message:(Printf.sprintf "Turn completed: %d tool calls" result.tool_calls_made) ();
               let reply_json =
+                let surface_model_used = Keeper_agent_run.surface_model_used result in
                 let base = [
                     ("reply", `String result.response_text);
-                    ("model", `String result.model_used);
+                    ("model", `String surface_model_used);
                     ("turns", `Int result.turn_count);
                     ("tool_calls", `Int result.tool_calls_made);
                   ]

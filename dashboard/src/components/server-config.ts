@@ -3,11 +3,13 @@ import { signal } from '@preact/signals'
 import { Card } from './common/card'
 import { TextInput } from './common/input'
 import { TransportHealthPanel } from './transport-health'
+import { ConfigResolutionPanel } from './tools/config-resolution-panel'
 import { fetchDashboardConfig } from '../api/dashboard'
 import type { DashboardConfigResponse, ConfigEntry } from '../api/dashboard'
 import { createAsyncResource } from '../lib/async-state'
 import { formatElapsedCompact } from '../lib/format-time'
 import { LoadingState } from './common/feedback-state'
+import { refreshShell, shellConfigResolution, shellRuntimeResolution } from '../store'
 
 const configResource = createAsyncResource<DashboardConfigResponse>()
 const searchQuery = signal('')
@@ -15,6 +17,7 @@ const expandedCategories = signal<Set<string>>(new Set())
 
 export function refreshServerConfig(): Promise<void> {
   configResource.reset()
+  void refreshShell({ force: true })
   return configResource.load(async () => {
     const data = await fetchDashboardConfig()
     if (expandedCategories.value.size === 0) {
@@ -147,6 +150,8 @@ export function ServerConfig() {
   const data = s.status === 'loaded' ? s.data : undefined
   const loading = s.status === 'loading'
   const error = s.status === 'error' ? s.message : null
+  const configResolution = shellConfigResolution.value
+  const runtimeResolution = shellRuntimeResolution.value
 
   if (s.status === 'idle') {
     void refreshServerConfig()
@@ -177,6 +182,11 @@ export function ServerConfig() {
       ${loading && !data ? html`
         <${LoadingState}>설정 불러오는 중...<//>
       ` : null}
+
+      <${ConfigResolutionPanel}
+        resolution=${configResolution ?? undefined}
+        runtimeResolution=${runtimeResolution ?? undefined}
+      />
 
       ${data ? html`
         <${ServerMeta} />

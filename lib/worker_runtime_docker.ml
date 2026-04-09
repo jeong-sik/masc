@@ -140,7 +140,7 @@ let persist_stderr_artifact (spec : Worker_execution_spec.t) stderr =
   if String.trim stderr <> "" then (
     Worker_container.ensure_worker_container_dirs ~base_path:spec.base_path
       ~team_session_id:spec.team_session_id ~worker_name:spec.worker_name;
-    Team_session_store.write_text_file (stderr_artifact_path spec) stderr)
+    Fs_compat.save_file (stderr_artifact_path spec) stderr)
 
 let best_effort_remove_container ?clock_opt name =
   ignore

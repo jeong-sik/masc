@@ -133,21 +133,12 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
          Active sessions are preserved by list_sessions ~since_unix which does a
          lightweight status check on mtime-excluded dirs (avoids full JSON load). *)
       let cutoff_unix = Time_compat.now () -. Masc_time_constants.day in
+      let _session_list_timeout = session_list_timeout_s in
       let all_sessions =
-        if Room.is_initialized config then
-          (match
-             Eio.Time.with_timeout clock session_list_timeout_s (fun () ->
-                 Ok
-                   (Team_session_store.list_sessions ~since_unix:cutoff_unix
-                      ~limit:20 config))
-           with
-          | Ok rows -> rows
-          | Error `Timeout ->
-              Log.Dashboard.warn
-                "[dashboard_execution] session list timed out after %.0fs; serving without session rows"
-                session_list_timeout_s;
-              [])
-        else []
+        (* Team_session_store removed — return empty *)
+        ignore (config : Room.config);
+        ignore _session_list_timeout;
+        ([] : Team_session_types.session list)
       in
       let cutoff_iso =
         let tm = Unix.gmtime cutoff_unix in

@@ -99,8 +99,8 @@ let interruptible_sleep ~clock ~stop ~wakeup duration =
 (** Wake up a specific keeper immediately, causing it to skip the rest of
     its sleep and run the next heartbeat cycle. Used by broadcast notification
     when a @mention targets a running keeper. *)
-let wakeup_keeper name =
-  Keeper_registry.all ()
+let wakeup_keeper ?base_path name =
+  Keeper_registry.all ?base_path ()
   |> List.iter (fun (entry : Keeper_registry.registry_entry) ->
     if String.equal entry.name name && entry.phase = Keeper_state_machine.Running
     then Keeper_registry.wakeup ~base_path:entry.base_path name)
@@ -108,7 +108,14 @@ let wakeup_keeper name =
 
 (** Wake up all running keepers — used when a broadcast mentions @@all
     or when a system-wide event requires immediate attention. *)
-let wakeup_all_keepers () = Keeper_registry.wakeup_all ()
+let wakeup_all_keepers ?base_path () =
+  match base_path with
+  | None -> Keeper_registry.wakeup_all ()
+  | Some expected ->
+      Keeper_registry.all ~base_path:expected ()
+      |> List.iter (fun (entry : Keeper_registry.registry_entry) ->
+           if entry.phase = Keeper_state_machine.Running then
+             Keeper_registry.wakeup ~base_path:entry.base_path entry.name)
 
 let board_reactive_wakeup_allowed ~base_path ~keeper_name ~post_id =
   Keeper_registry.board_wakeup_allowed
@@ -123,7 +130,7 @@ let wakeup_relevant_keeper_for_board_signal
       (signal : Board_dispatch.keeper_board_signal)
   =
   let running_names =
-    Keeper_registry.all ()
+    Keeper_registry.all ~base_path:config.base_path ()
     |> List.filter_map (fun (e : Keeper_registry.registry_entry) ->
       if e.phase = Keeper_state_machine.Running then Some e.name else None)
   in
@@ -161,7 +168,7 @@ let wakeup_relevant_keeper_for_board_signal
         ~keeper_name:meta.name
         ~post_id:signal.post_id
     then (
-      wakeup_keeper meta.name;
+      wakeup_keeper ~base_path:config.base_path meta.name;
       Log.Keeper.info
         "board signal wakeup: keeper=%s reason=%s post=%s"
         meta.name
@@ -1207,7 +1214,7 @@ let wakeup_keeper_by_agent_name ~agent_name =
     ~agent_name
     ~on_missing:(fun () ->
       Log.Keeper.warn "directive wakeup: agent %s not in registry" agent_name)
-    (fun entry -> wakeup_keeper entry.name)
+    (fun entry -> wakeup_keeper ~base_path:entry.base_path entry.name)
 ;;
 
 let assign_keeper_task_from_directive ~agent_name ~task_id =
@@ -1220,7 +1227,7 @@ let assign_keeper_task_from_directive ~agent_name ~task_id =
          ~base_path:entry.base_path
          entry.name
          { entry.meta with current_task_id = Some task_id };
-       wakeup_keeper entry.name)
+       wakeup_keeper ~base_path:entry.base_path entry.name)
 ;;
 
 (** Process a single directive received from a gRPC HeartbeatAck.

@@ -155,6 +155,64 @@ let test_git_worktree_branch_required () =
   let branch = String.trim "" in
   Alcotest.(check bool) "empty branch rejected" true (branch = "")
 
+(* ── Playground path detection ──────────────────────────── *)
+
+let playground_path_of = Masc_mcp.Keeper_alerting_path.playground_path_of_keeper
+
+let test_playground_path_structure () =
+  (* playground_path_of_keeper returns relative path ending with / *)
+  Alcotest.(check string) "cheolsu"
+    ".masc/playground/cheolsu/" (playground_path_of "cheolsu");
+  Alcotest.(check string) "masc-improver"
+    ".masc/playground/masc-improver/" (playground_path_of "masc-improver")
+
+let is_inside_playground ~playground_abs cwd =
+  String.starts_with ~prefix:(playground_abs ^ "/") (cwd ^ "/")
+  || String.equal playground_abs cwd
+
+let test_playground_guard_inside () =
+  let pg = "/project/.masc/playground/cheolsu" in
+  (* Inside playground: various depths *)
+  Alcotest.(check bool) "exact playground dir"
+    true (is_inside_playground ~playground_abs:pg pg);
+  Alcotest.(check bool) "repos subdir"
+    true (is_inside_playground ~playground_abs:pg (pg ^ "/repos/masc-mcp"));
+  Alcotest.(check bool) "deep nested"
+    true (is_inside_playground ~playground_abs:pg (pg ^ "/repos/masc-mcp/lib/keeper"))
+
+let test_playground_guard_outside () =
+  let pg = "/project/.masc/playground/cheolsu" in
+  (* Outside playground: main repo and other keepers *)
+  Alcotest.(check bool) "project root"
+    false (is_inside_playground ~playground_abs:pg "/project");
+  Alcotest.(check bool) "project lib"
+    false (is_inside_playground ~playground_abs:pg "/project/lib/keeper");
+  Alcotest.(check bool) "other keeper playground"
+    false (is_inside_playground ~playground_abs:pg "/project/.masc/playground/sangsu");
+  Alcotest.(check bool) "playground parent"
+    false (is_inside_playground ~playground_abs:pg "/project/.masc/playground");
+  (* Prefix attack: cheolsu2 should not match cheolsu *)
+  Alcotest.(check bool) "prefix attack (cheolsu2)"
+    false (is_inside_playground ~playground_abs:pg (pg ^ "2/repos"))
+
+let test_git_write_classification () =
+  let is_branch_switch = Masc_mcp.Worker_dev_tools.is_git_branch_switch in
+  let is_destructive = Masc_mcp.Worker_dev_tools.is_destructive_bash_operation in
+  (* git checkout: branch switch, allowed in playground *)
+  Alcotest.(check bool) "checkout is branch switch"
+    true (is_branch_switch "git checkout -b my-feature");
+  Alcotest.(check bool) "switch is branch switch"
+    true (is_branch_switch "git switch -c my-feature");
+  (* git push: write op, allowed in playground *)
+  Alcotest.(check bool) "push is write" true (is_write "git push origin my-branch");
+  Alcotest.(check bool) "commit is write" true (is_write "git commit -m 'msg'");
+  (* destructive: blocked everywhere including playground *)
+  Alcotest.(check bool) "rm -rf is destructive"
+    true (is_destructive "rm -rf /tmp/something");
+  (* git push is NOT destructive (it's write, not destructive) *)
+  Alcotest.(check bool) "push is not destructive"
+    false (is_destructive "git push origin my-branch")
+
 let () =
   Alcotest.run "Keeper bash safety" [
     ("allowlist", [
@@ -167,6 +225,12 @@ let () =
     ("write_gate", [
       Alcotest.test_case "write operations detected" `Quick test_write_ops_detected;
       Alcotest.test_case "read operations pass" `Quick test_read_ops_pass;
+    ]);
+    ("playground_guard", [
+      Alcotest.test_case "playground path structure" `Quick test_playground_path_structure;
+      Alcotest.test_case "inside playground detected" `Quick test_playground_guard_inside;
+      Alcotest.test_case "outside playground rejected" `Quick test_playground_guard_outside;
+      Alcotest.test_case "git write classification" `Quick test_git_write_classification;
     ]);
     ("edge", [
       Alcotest.test_case "empty command blocked" `Quick test_empty_command;

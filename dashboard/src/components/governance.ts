@@ -287,6 +287,32 @@ function GovernanceToolbar() {
   `
 }
 
+function LiveGovernanceToolbar() {
+  return html`
+    <div class="mb-5">
+      <${Card} title="Live Judge" variant="compact">
+        <div class="flex flex-col gap-3">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <div class="text-[12px] text-text-muted">
+              retired된 case tracking 대신 live judge 판단과 keeper HITL 승인만 표시합니다.
+            </div>
+            <${ActionButton}
+              variant="ghost"
+              size="lg"
+              class="rounded-xl border-transparent bg-white/5 px-3.5 py-2 text-[13px] font-semibold text-text-muted hover:bg-white/10 hover:text-text-strong"
+              onClick=${refreshGovernance}
+              disabled=${governanceLoading.value}
+            >
+              ${governanceLoading.value ? '새로고침 중...' : '새로고침'}
+            <//>
+          </div>
+          ${governanceError.value ? html`<div class="rounded-lg border border-[var(--bad-30)] bg-[var(--bad-8)] p-2.5 text-[12px] text-[#f7b6b6]">${governanceError.value}</div>` : null}
+        </div>
+      <//>
+    </div>
+  `
+}
+
 function governanceEmptyMessage(): string {
   const data = governanceData.value
   const allItems = data?.items ?? []
@@ -491,6 +517,7 @@ export function Governance() {
       <${GovernanceSummaryStrip} />
       ${caseTrackingRetired
         ? html`
+            <${LiveGovernanceToolbar} />
             <${KeeperApprovalQueueSection} />
             <${JudgmentsSection} />
           `

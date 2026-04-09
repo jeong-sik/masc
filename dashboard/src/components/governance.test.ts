@@ -208,6 +208,8 @@ describe('Governance surface', () => {
     expect(container.textContent).toContain('judge-only / 최근 판단 0건')
     expect(container.textContent).toContain('Judge 상태')
     expect(container.textContent).toContain('Judge 모델')
+    expect(container.textContent).toContain('Live Judge')
+    expect(container.textContent).toContain('새로고침')
     expect(container.textContent).not.toContain('keeper가 활동 중일 때 자동 생성됩니다')
     expect(container.textContent).not.toContain('Case Load Visualized')
     expect(container.textContent).not.toContain('청원 콘솔')
@@ -387,6 +389,7 @@ describe('Governance surface', () => {
     expect(container.textContent).toContain('Approval Input')
     expect(container.textContent).toContain('관리자 승인 대기')
     expect(container.textContent).toContain('1')
+    expect(container.textContent).toContain('새로고침')
     expect(container.textContent).not.toContain('Case Load Visualized')
     expect(container.textContent).not.toContain('청원 콘솔')
 

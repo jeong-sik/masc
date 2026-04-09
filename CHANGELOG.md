@@ -2,6 +2,32 @@
 
 ## [Unreleased]
 
+## [2.263.0] - 2026-04-09
+
+### Added
+- OAS exit_condition plumbing — boring gate exits Agent.run early after 8+ idle turns (#5988)
+- Configurable boring exit threshold via Runtime_params (#5997)
+- Tool schemas for autonomy pipeline: keeper_pr_submit, keeper_preflight_check, keeper_pr_review_* (#5996)
+- Keeper read-only tool classification with Tool_dispatch mirroring (#5983)
+- Retry-safe tool metadata — board tools registered with Mod_inline + idempotent flags (#5973)
+- Self-repo --base-path guard — rejects runtime state in source repo (#5992)
+
+### Changed
+- Adaptive OAS timeout — context-based (180s + 1.5s/1K tokens), max_turns 200→5 (#5987)
+- GLM cascade simplified — removed redundant glm:glm-5-turbo, OAS glm:auto handles expansion (#5985)
+- Time constants extracted to Masc_time_constants SSOT module (#5993)
+- Network defaults centralized — SearXNG, OTel, allowed_origins (#5994)
+- Output cap and min context constants deduplicated (#5995)
+
+### Fixed
+- Dashboard null-status crash — assoc_member wrapper tolerates null nested JSON (#5985)
+- Keeper ambiguous-partial-commit reclassification for read-only tools (#5983, #5973)
+- OAS cascade model timeout derived from keeper OAS budget (#5985)
+- Cheolsu keeper set to ollama-only for slot queuing test (#5986)
+- TLA+ spec: separated timeout from fairness, use Filename.concat (#5979)
+- Version truth sync across ROADMAP, SPEC-INDEX, PRODUCT-OPERATING-PLAN (#5982)
+- OAS pin updated to 0.117.0 (#5981)
+
 ## [2.262.0] - 2026-04-09
 
 ### Added

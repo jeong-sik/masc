@@ -10,6 +10,14 @@ open Server_h2_gateway_helpers
 let dispatch ~sw ~clock ~h2_reqd ~httpun_request ~cors ~path
     (httpun_meth : [ `GET | `POST | `DELETE | `OPTIONS | `PUT | `HEAD
                     | `CONNECT | `TRACE | `Other of string ]) =
+  let h2_authorize_read_if_needed state =
+    if http_auth_strict_enabled () && not (is_public_read_path path) then
+      authorize_read_request
+        ~base_path:state.Mcp_server.room_config.base_path
+        httpun_request
+    else
+      Ok ()
+  in
   let h2_authorize_tool state ~tool_name =
     authorize_tool_request
       ~base_path:state.Mcp_server.room_config.base_path
@@ -18,6 +26,39 @@ let dispatch ~sw ~clock ~h2_reqd ~httpun_request ~cors ~path
   ignore (h2_authorize_tool);
   let handled = ref true in
   (match httpun_meth, path with
+      | `GET, "/api/v1/operator" ->
+          let state = get_server_state () in
+          (match h2_authorize_read_if_needed state with
+           | Error err ->
+               let status = http_status_of_auth_error err in
+               h2_respond_json h2_reqd (auth_error_json err) ~status
+                 ~extra_headers:cors
+           | Ok () ->
+               let json =
+                 operator_snapshot_http_json ~state ~sw ~clock httpun_request
+               in
+               h2_respond_json h2_reqd (Yojson.Safe.to_string json)
+                 ~extra_headers:cors)
+
+      | `GET, "/api/v1/operator/digest" ->
+          let state = get_server_state () in
+          (match h2_authorize_read_if_needed state with
+           | Error err ->
+               let status = http_status_of_auth_error err in
+               h2_respond_json h2_reqd (auth_error_json err) ~status
+                 ~extra_headers:cors
+           | Ok () -> (
+               match
+                 operator_digest_http_json ~state ~sw ~clock httpun_request
+               with
+               | Ok json ->
+                   h2_respond_json h2_reqd (Yojson.Safe.to_string json)
+                     ~extra_headers:cors
+               | Error message ->
+                   h2_respond_json h2_reqd
+                     (Yojson.Safe.to_string (operator_error_json message))
+                     ~status:`Bad_request ~extra_headers:cors))
+
       | `POST, "/api/v1/operator/action" ->
           let state = get_server_state () in
           (match h2_authorize_tool state ~tool_name:"masc_operator_action" with

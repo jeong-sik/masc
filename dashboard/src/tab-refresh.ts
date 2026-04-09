@@ -96,6 +96,7 @@ const REFRESHERS: Record<RefreshTask, () => void> = {
   autoresearch: () => { void refreshAutoresearchLabSurface() },
   harness: () => { void refreshHarnessLabSurface() },
   inspector: () => {
+    void refreshShell({ force: true })
     void refreshFeatureHealthSurface()
     void refreshServerConfigSurface()
   },

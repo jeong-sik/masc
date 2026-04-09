@@ -14,6 +14,8 @@ const refreshNamespaceTruth = vi.fn().mockResolvedValue(undefined)
 
 const topActiveAgents = { value: [] as unknown[] }
 const shellMetaCognition = { value: null as Record<string, unknown> | null }
+const shellConfigResolution = { value: null as Record<string, unknown> | null }
+const shellRuntimeResolution = { value: null as Record<string, unknown> | null }
 const serverStatus = { value: null as Record<string, unknown> | null }
 const navigate = vi.fn()
 const navigateToPost = vi.fn()
@@ -43,6 +45,8 @@ async function loadOverview() {
   }))
   vi.doMock('../../store', () => ({
     shellMetaCognition,
+    shellConfigResolution,
+    shellRuntimeResolution,
     serverStatus,
   }))
   vi.doMock('../../sse', () => ({
@@ -91,6 +95,8 @@ describe('Overview freshness strip', () => {
     namespaceTruthLoading.value = false
     topActiveAgents.value = []
     shellMetaCognition.value = null
+    shellConfigResolution.value = null
+    shellRuntimeResolution.value = null
     serverStatus.value = null
     connected.value = true
     eventCount.value = 0
@@ -286,6 +292,8 @@ describe('ToolCallHealthPanel', () => {
     namespaceTruthLoading.value = false
     topActiveAgents.value = []
     shellMetaCognition.value = null
+    shellConfigResolution.value = null
+    shellRuntimeResolution.value = null
     serverStatus.value = null
     connected.value = true
     eventCount.value = 0

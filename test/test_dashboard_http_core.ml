@@ -148,6 +148,8 @@ let test_dashboard_shell_http_json_includes_paths () =
   let json = Lib.Server_dashboard_http_core.dashboard_shell_http_json config in
   let open Yojson.Safe.Util in
   let paths = json |> member "paths" in
+  let config_resolution = json |> member "config_resolution" in
+  let runtime_resolution = json |> member "runtime_resolution" in
   let effective_base_path = paths |> member "effective_base_path" |> to_string in
   let effective_masc_root = paths |> member "effective_masc_root" |> to_string in
   let expected_masc_root = Unix.realpath (Filename.concat config.base_path ".masc") in
@@ -160,6 +162,18 @@ let test_dashboard_shell_http_json_includes_paths () =
   check bool "paths include cwd" true
     (match paths |> member "cwd" with
      | `String value -> String.length value > 0
+     | _ -> false);
+  check bool "shell config root path surfaced" true
+    (match config_resolution |> member "config_root" |> member "path" with
+     | `String value -> String.length value > 0
+     | _ -> false);
+  check bool "shell runtime data root path surfaced" true
+    (match runtime_resolution |> member "data_root" |> member "path" with
+     | `String value -> String.length value > 0
+     | _ -> false);
+  check bool "shell runtime warnings surfaced as list" true
+    (match runtime_resolution |> member "warnings" with
+     | `List _ -> true
      | _ -> false)
 
 let () =

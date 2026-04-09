@@ -52,6 +52,44 @@ export interface DashboardShellAuthSummary {
   keeper_msg_error?: string | null
 }
 
+export interface DashboardConfigResolutionItem {
+  path: string
+  exists: boolean
+  source: string
+}
+
+export interface DashboardConfigResolution {
+  status: 'ready' | 'warn' | 'invalid_env' | 'missing'
+  warnings: string[]
+  config_root: DashboardConfigResolutionItem
+  cascade: DashboardConfigResolutionItem
+  prompts: DashboardConfigResolutionItem
+  keepers: DashboardConfigResolutionItem
+  personas: DashboardConfigResolutionItem
+}
+
+export interface DashboardRuntimeDiagnostic {
+  ts: string
+  kind: string
+  signal?: string
+  message: string
+}
+
+export interface DashboardRuntimeResolution {
+  status: 'ready' | 'warn' | string
+  warnings: string[]
+  base_path: DashboardConfigResolutionItem
+  workspace_path: DashboardConfigResolutionItem
+  resolved_base_path: DashboardConfigResolutionItem
+  data_root: DashboardConfigResolutionItem
+  prompt_markdown_dir: DashboardConfigResolutionItem
+  workspace_git_commit: string | null
+  resolved_base_git_commit: string | null
+  source_mismatch: boolean
+  diagnostics: DashboardRuntimeDiagnostic[]
+  build: ServerBuildIdentity
+}
+
 export interface DashboardShellResponse {
   generated_at?: string
   status: ServerStatus
@@ -63,6 +101,8 @@ export interface DashboardShellResponse {
   providers?: Record<string, unknown>
   meta_cognition?: DashboardShellMetaCognitionSummary | null
   auth?: DashboardShellAuthSummary | null
+  config_resolution?: DashboardConfigResolution | null
+  runtime_resolution?: DashboardRuntimeResolution | null
 }
 
 export interface DashboardNamespaceTruthAttentionSummary {

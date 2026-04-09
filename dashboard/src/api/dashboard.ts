@@ -26,6 +26,11 @@ import type {
   DashboardGoalsTreeResponse,
   DashboardNamespaceTruthResponse,
   DashboardShellResponse,
+  DashboardConfigResolution,
+  DashboardConfigResolutionItem,
+  DashboardRuntimeDiagnostic,
+  DashboardRuntimeResolution,
+  ServerBuildIdentity,
   BoardSortMode,
   GovernanceCaseBundle,
   GovernanceDecisionItem,
@@ -630,49 +635,12 @@ export interface DashboardToolsResponse {
   tool_usage: ToolMetricsResponse
 }
 
-export interface DashboardConfigResolutionItem {
-  path: string
-  exists: boolean
-  source: string
-}
-
-export interface DashboardConfigResolution {
-  status: 'ready' | 'warn' | 'invalid_env' | 'missing'
-  warnings: string[]
-  config_root: DashboardConfigResolutionItem
-  cascade: DashboardConfigResolutionItem
-  prompts: DashboardConfigResolutionItem
-  keepers: DashboardConfigResolutionItem
-  personas: DashboardConfigResolutionItem
-}
-
-export interface DashboardRuntimeDiagnostic {
-  ts: string
-  kind: string
-  signal?: string
-  message: string
-}
-
-export interface DashboardBuildIdentity {
-  release_version: string
-  commit: string | null
-  started_at: string
-  uptime_seconds: number
-}
-
-export interface DashboardRuntimeResolution {
-  status: 'ready' | 'warn' | string
-  warnings: string[]
-  base_path: DashboardConfigResolutionItem
-  workspace_path: DashboardConfigResolutionItem
-  resolved_base_path: DashboardConfigResolutionItem
-  data_root: DashboardConfigResolutionItem
-  prompt_markdown_dir: DashboardConfigResolutionItem
-  workspace_git_commit: string | null
-  resolved_base_git_commit: string | null
-  source_mismatch: boolean
-  diagnostics: DashboardRuntimeDiagnostic[]
-  build: DashboardBuildIdentity
+export type {
+  DashboardConfigResolution,
+  DashboardConfigResolutionItem,
+  DashboardRuntimeDiagnostic,
+  DashboardRuntimeResolution,
+  ServerBuildIdentity as DashboardBuildIdentity,
 }
 
 export function fetchToolMetrics(): Promise<ToolMetricsResponse> {

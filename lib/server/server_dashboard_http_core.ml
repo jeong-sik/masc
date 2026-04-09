@@ -1004,6 +1004,13 @@ let dashboard_shell_payload_json (config : Room.config) : Yojson.Safe.t =
   let meta_cognition_json, meta_cognition_ms =
     measure_ms (fun () -> Meta_cognition.summary_json config)
   in
+  let config_resolution_json, config_resolution_ms =
+    measure_ms (fun () -> Config_dir_resolver.(resolve () |> to_json))
+  in
+  let runtime_resolution_json, runtime_resolution_ms =
+    measure_ms
+      (fun () -> Server_dashboard_http_runtime_info.runtime_resolution_json config)
+  in
   `Assoc
     [
       ("generated_at", `String (Types.now_iso ()));
@@ -1018,6 +1025,8 @@ let dashboard_shell_payload_json (config : Room.config) : Yojson.Safe.t =
           ] );
       ("providers", provider_capacity_json ());
       ("meta_cognition", meta_cognition_json);
+      ("config_resolution", config_resolution_json);
+      ("runtime_resolution", runtime_resolution_json);
     ]
   |> with_projection_diagnostics ~surface:"shell" ~started_at
        ~extra:
@@ -1032,6 +1041,8 @@ let dashboard_shell_payload_json (config : Room.config) : Yojson.Safe.t =
            ("tasks_ms", `Int tasks_ms);
            ("keepers_ms", `Int keepers_ms);
            ("meta_cognition_ms", `Int meta_cognition_ms);
+           ("config_resolution_ms", `Int config_resolution_ms);
+           ("runtime_resolution_ms", `Int runtime_resolution_ms);
          ]
 
 let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Room.config) :

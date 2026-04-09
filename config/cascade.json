@@ -3,7 +3,10 @@
     "glm:auto",
     "ollama:auto"
   ],
-  "_comment": "glm:auto expands inside OAS to glm-5.1 -> glm-5-turbo -> glm-4.7 -> glm-4.7-flashx. ollama:auto remains the local last resort. OAS discovery resolves ollama:auto via /api/tags.",
+  "local_only_models": [
+    "ollama:auto"
+  ],
+  "_comment": "default: GLM primary + Ollama fallback. local_only: Ollama only (no cloud). OAS discovery resolves ollama:auto via /api/tags.",
   "tool_rerank_temperature": 0.0,
   "tool_rerank_max_tokens": 200,
   "keeper_unified_temperature": 0.2,

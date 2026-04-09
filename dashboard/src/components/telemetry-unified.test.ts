@@ -121,10 +121,10 @@ describe('TelemetryUnified', () => {
     expect(container.textContent).toContain('MASC telemetry store entries')
     expect(container.textContent).toContain('mcp__masc__masc_status')
 
-    // MASC Store Diagnosis cards
-    expect(container.textContent).toContain('Keeper Store')
-    expect(container.textContent).toContain('Tool Store')
-    expect(container.textContent).toContain('Agent Store')
+    // MASC Store Diagnosis cards (live state)
+    expect(container.textContent).toContain('Keeper 현황 (live)')
+    expect(container.textContent).toContain('Tool 등록 현황 (live)')
+    expect(container.textContent).toContain('Agent 현황 (live)')
     expect(container.textContent).toContain('1 활성 세션')
     expect(container.textContent).toContain('5 public')
   })

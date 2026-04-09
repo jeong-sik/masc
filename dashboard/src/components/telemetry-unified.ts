@@ -16,12 +16,12 @@ import {
 import { route } from '../router'
 import { formatTimeAgo } from '../lib/format-time'
 
-const SOURCE_META: Record<TelemetrySource, { label: string; color: string; icon: string }> = {
-  keeper_metric: { label: 'Keeper 메트릭', color: 'text-blue-400', icon: 'K' },
-  agent_event: { label: '에이전트 이벤트', color: 'text-emerald-400', icon: 'A' },
-  tool_call_io: { label: '도구 호출 I/O', color: 'text-amber-400', icon: 'T' },
-  tool_usage: { label: '도구 사용', color: 'text-purple-400', icon: 'U' },
-  tool_metric: { label: '도구 메트릭', color: 'text-cyan-400', icon: 'M' },
+const SOURCE_META: Record<TelemetrySource, { label: string; sublabel: string; color: string; icon: string }> = {
+  keeper_metric: { label: 'Keeper 턴 로그', sublabel: 'heartbeat 포함', color: 'text-blue-400', icon: 'K' },
+  agent_event: { label: 'Agent 이벤트', sublabel: 'join/leave/tool_called', color: 'text-emerald-400', icon: 'A' },
+  tool_call_io: { label: 'Keeper Tool I/O', sublabel: 'keeper->tool 전체 기록', color: 'text-amber-400', icon: 'T' },
+  tool_usage: { label: 'Surface 호출', sublabel: 'MCP surface 경유 호출', color: 'text-purple-400', icon: 'U' },
+  tool_metric: { label: 'Tool 성능', sublabel: 'duration/success 측정', color: 'text-cyan-400', icon: 'M' },
 }
 
 interface StoreSnapshot {
@@ -56,7 +56,7 @@ interface TelemetryState {
 }
 
 function sourceMeta(source: string) {
-  return SOURCE_META[source as TelemetrySource] ?? { label: source, color: 'text-gray-400', icon: '?' }
+  return SOURCE_META[source as TelemetrySource] ?? { label: source, sublabel: '', color: 'text-gray-400', icon: '?' }
 }
 
 function entryTimestamp(e: TelemetryEntry): number {
@@ -109,14 +109,27 @@ function entryPreview(e: TelemetryEntry): string {
     case 'keeper_metric': {
       const name = normalizeText(e.name) ?? '-'
       const channel = normalizeText(e.channel) ?? '-'
-      const model = normalizeText(e.model_used) ?? '-'
+      const rawModel = normalizeText(e.model_used)
+      const isStatusTag = rawModel != null && /^(turn-exhausted|unknown|none|-)$/i.test(rawModel)
+      const model = rawModel == null ? '-' : isStatusTag ? `(${rawModel})` : rawModel
       const tools = normalizeStringArray(e.tools_used)
       const toolCount = typeof e.tool_call_count === 'number' ? e.tool_call_count : tools.length
       return `${name} [${channel}] model=${model} tools=${toolCount}`
     }
     case 'agent_event': {
       const event = e.event
-      if (Array.isArray(event)) return `${event[0] ?? 'unknown'}`
+      if (Array.isArray(event)) {
+        const tag = String(event[0] ?? 'unknown')
+        const detail = event[1] as Record<string, unknown> | undefined
+        if (detail) {
+          const parts = [
+            normalizeText(detail.agent_id as string),
+            normalizeText(detail.tool_name as string),
+          ].filter(Boolean)
+          return parts.length > 0 ? `${tag}: ${parts.join(' -> ')}` : tag
+        }
+        return tag
+      }
       return String(event ?? '')
     }
     case 'tool_call_io': {
@@ -149,6 +162,7 @@ function SummaryCard({ src }: { src: TelemetrySourceSummary }) {
         <span class="font-mono font-bold ${meta.color}">${meta.icon}</span>
         <span class="text-xs font-medium text-[var(--text-strong)]">${meta.label}</span>
       </div>
+      ${meta.sublabel ? html`<div class="text-[10px] text-[var(--text-dim)] mb-1">${meta.sublabel}</div>` : null}
       <div class="text-2xl font-bold ${hasData ? 'text-[var(--text-strong)]' : 'text-[var(--text-muted)]'}">
         ${src.entry_count.toLocaleString()}
       </div>
@@ -337,7 +351,7 @@ export function TelemetryUnified() {
 
       <div class="flex flex-wrap gap-3">
         <${DiagnosisCard}
-          title="Keeper Store"
+          title="Keeper 현황 (live)"
           value=${String(store.keepers)}
           detail=${[
             `${store.activeSessions} 활성 세션`,
@@ -348,13 +362,13 @@ export function TelemetryUnified() {
           tone=${store.continuityAlerts > 0 ? 'warn' : store.keepers > 0 ? 'ok' : 'neutral'}
         />
         <${DiagnosisCard}
-          title="Tool Store"
+          title="Tool 등록 현황 (live)"
           value=${String(store.toolsRegistered)}
           detail=${`${store.toolsPublic} public · ${store.toolsTotalCalls.toLocaleString()} 총 호출 · ${store.toolsNeverCalled} 미사용`}
           tone=${store.toolsRegistered > 0 ? 'ok' : 'warn'}
         />
         <${DiagnosisCard}
-          title="Agent Store"
+          title="Agent 현황 (live)"
           value=${String(store.agents)}
           detail=${`${store.tasks} 태스크 · ${store.activeOperations} 활성 작전`}
           tone=${store.agents > 0 ? 'ok' : 'neutral'}

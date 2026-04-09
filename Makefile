@@ -155,3 +155,4 @@ harness-trpg-grimland-smoke:
 # Local E2E checklist runner (contracts + optional viewer build/smoke)
 viewer-local-e2e-check:
 	scripts/viewer-local-e2e-check.sh
+# Formatting

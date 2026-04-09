@@ -47,13 +47,22 @@ const data: Signal<ToolQualityData | null> = signal(null)
 const loading: Signal<boolean> = signal(false)
 const error: Signal<string | null> = signal(null)
 let latestRequestId = 0
+let activeController: AbortController | null = null
+let activeTimeout: ReturnType<typeof setTimeout> | null = null
 
 export async function refreshToolQuality() {
   const requestId = ++latestRequestId
+  activeController?.abort()
+  if (activeTimeout !== null) {
+    clearTimeout(activeTimeout)
+    activeTimeout = null
+  }
   loading.value = true
   error.value = null
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), 15_000)
+  activeController = controller
+  activeTimeout = timeout
   try {
     const resp = await fetch('/api/v1/dashboard/tool-quality?n=5000', { signal: controller.signal })
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
@@ -70,6 +79,8 @@ export async function refreshToolQuality() {
     }
   } finally {
     clearTimeout(timeout)
+    if (activeController === controller) activeController = null
+    if (activeTimeout === timeout) activeTimeout = null
     if (requestId !== latestRequestId) return
     loading.value = false
   }

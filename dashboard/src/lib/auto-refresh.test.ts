@@ -57,4 +57,32 @@ describe('auto-refresh', () => {
     expect(refresh).toHaveBeenCalledTimes(2)
     dispose()
   })
+
+  it('deduplicates an interval tick that lands right after an event-triggered refresh', async () => {
+    const refresh = vi.fn()
+    const dispose = setupVisibleAutoRefresh(refresh, 200)
+
+    await vi.advanceTimersByTimeAsync(190)
+    window.dispatchEvent(new Event('focus'))
+    expect(refresh).toHaveBeenCalledTimes(1)
+
+    await vi.advanceTimersByTimeAsync(10)
+    expect(refresh).toHaveBeenCalledTimes(1)
+
+    await vi.advanceTimersByTimeAsync(600)
+    expect(refresh).toHaveBeenCalledTimes(2)
+    dispose()
+  })
+
+  it('stops interval and event refreshes after cleanup', async () => {
+    const refresh = vi.fn()
+    const dispose = setupVisibleAutoRefresh(refresh, 200)
+
+    dispose()
+    window.dispatchEvent(new Event('focus'))
+    document.dispatchEvent(new Event('visibilitychange'))
+    await vi.advanceTimersByTimeAsync(1_000)
+
+    expect(refresh).not.toHaveBeenCalled()
+  })
 })

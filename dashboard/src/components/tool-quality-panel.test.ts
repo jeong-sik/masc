@@ -72,4 +72,64 @@ describe('ToolQualityPanel', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
+
+  it('replaces a stale in-flight request with the newest refresh', async () => {
+    const fetchMock = vi.fn()
+      .mockImplementationOnce((_url: string, init?: RequestInit) => new Promise((_resolve, reject) => {
+        const signal = init?.signal as AbortSignal | undefined
+        signal?.addEventListener('abort', () => {
+          reject(new DOMException('replaced by newer refresh', 'AbortError'))
+        })
+      }))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => payload,
+      })
+    vi.stubGlobal('fetch', fetchMock)
+    const { ToolQualityPanel, refreshToolQuality } = await import('./tool-quality-panel')
+
+    await act(async () => {
+      render(html`<${ToolQualityPanel} />`, container)
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    expect(container.textContent).toContain('도구 품질 불러오는 중')
+
+    await act(async () => {
+      await refreshToolQuality()
+    })
+    await flushUi()
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(container.textContent).toContain('95.5%')
+    expect(container.textContent).not.toContain('오류:')
+  })
+
+  it('stops auto-refresh after the panel unmounts', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => payload,
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const { ToolQualityPanel } = await import('./tool-quality-panel')
+
+    await act(async () => {
+      render(html`<${ToolQualityPanel} />`, container)
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      render(null, container)
+      await Promise.resolve()
+    })
+
+    await vi.advanceTimersByTimeAsync(30_000)
+    await flushUi()
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
 })

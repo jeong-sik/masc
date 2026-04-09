@@ -33,27 +33,14 @@ let test_help_includes_attached_session_and_templates () =
   Alcotest.(check bool) "llms-full.txt listed" true
     (List.mem "llms-full.txt" doc_paths);
   let golden_paths = list_field "golden_paths" json in
-  let path_ids =
-    golden_paths |> List.filter_map (fun row -> string_field "id" row)
-  in
-  Alcotest.(check bool) "attached team session path present" true
-    (List.mem "attached_team_session" path_ids);
   let supervisor_path =
     match find_list_row_by_id golden_paths "supervisor_session" with
     | Some row -> row
     | None -> Alcotest.fail "supervisor_session path missing"
   in
-  let attached_path =
-    match find_list_row_by_id golden_paths "attached_team_session" with
-    | Some row -> row
-    | None -> Alcotest.fail "attached_team_session path missing"
-  in
   Alcotest.(check (option string)) "supervisor path title"
     (Some "Supervisor / Session Runtime")
     (string_field "title" supervisor_path);
-  Alcotest.(check (option string)) "attached path title"
-    (Some "Attached Execution Session")
-    (string_field "title" attached_path);
   let templates = list_field "workload_templates" json in
   let template_ids =
     templates |> List.filter_map (fun row -> string_field "id" row)

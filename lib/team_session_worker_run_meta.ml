@@ -1,6 +1,6 @@
 module U = Yojson.Safe.Util
 
-type oas_worker_evidence = Tool_team_session_step_types.oas_worker_evidence = {
+type oas_worker_evidence = {
   trace_ref : Oas.Raw_trace.run_ref option;
   trace_summary_json : Yojson.Safe.t option;
   trace_validation_json : Yojson.Safe.t option;

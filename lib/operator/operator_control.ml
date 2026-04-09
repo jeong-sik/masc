@@ -53,41 +53,6 @@ let keeper_diagnostic_for_name (ctx : 'a context) ~(name : string) =
                (Keeper_status_bridge.runtime_keepalive_started_at ctx.config meta)
              ~now_ts)
 
-let dispatch_team_session_json_as (ctx : 'a context) ~session_id ~requested_actor
-    ~tool_name ~args =
-  let* authorized_actor =
-    match Team_session_store.load_session ctx.config session_id with
-    | None -> Error (Printf.sprintf "team session not found: %s" session_id)
-    | Some session ->
-        if String.equal requested_actor session.created_by
-           || List.exists (String.equal requested_actor) session.agent_names
-        then
-          Ok requested_actor
-        else
-          Ok session.created_by
-  in
-  let args =
-    match args with
-    | `Assoc fields ->
-        `Assoc
-          (("actor", `String authorized_actor) :: List.remove_assoc "actor" fields)
-    | other -> other
-  in
-  let team_ctx : _ Tool_team_session.context =
-    {
-      config = ctx.config;
-      agent_name = authorized_actor;
-      sw = ctx.sw;
-      clock = ctx.clock;
-      proc_mgr = ctx.proc_mgr;
-      net = ctx.net;
-    }
-  in
-  match Tool_team_session.dispatch team_ctx ~name:tool_name ~args with
-  | Some (true, body) -> Ok (json_of_dispatch_output body)
-  | Some (false, err) -> Error err
-  | None -> Error (Printf.sprintf "%s dispatch unavailable" tool_name)
-
 let keeper_diagnostic_health_state json =
   match U.member "health_state" json with
   | `String value -> Some (String.lowercase_ascii value)
@@ -166,18 +131,8 @@ let execute_team_turn ~ctx ~request ~session_id ~turn_kind ~message ~target_agen
     in
     `Assoc fields
   in
-  let* result =
-    dispatch_team_session_json_as ctx ~session_id ~requested_actor:request.actor
-      ~tool_name:"masc_team_session_step" ~args
-  in
-  Ok
-    (`Assoc
-      [
-        ("tool_name", `String "masc_team_session_step");
-        ("result", result);
-        ("actor", `String actor_for_session);
-        ("operator_override", `Bool operator_override);
-      ])
+  ignore (ctx, args, actor_for_session, operator_override);
+  Error "team session tools removed"
 
 (** {1 Domain-specific action handlers} *)
 
@@ -325,16 +280,8 @@ let execute_team_action (ctx : 'a context) (request : action_request) =
         in
         `Assoc fields
       in
-      let* result_json =
-        dispatch_team_session_json_as ctx ~session_id ~requested_actor:request.actor
-          ~tool_name:"masc_team_session_step" ~args
-      in
-      Ok
-        (`Assoc
-          [
-            ("tool_name", `String "masc_team_session_step");
-            ("result", result_json);
-          ])
+      ignore args;
+      Error "team session tools removed"
   | "team_stop" ->
       let* () = validate_target_type "team_session" request in
       let* session_id = require_target_id request in

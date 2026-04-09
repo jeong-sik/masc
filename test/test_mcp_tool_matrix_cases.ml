@@ -836,7 +836,7 @@ let guard_fragments_for_name name =
         "masc_repo_synthesis_";
         "masc_runtime_";
         "masc_spawn";
-        "masc_team_session_";
+
         "masc_voice_";
       ]
   then

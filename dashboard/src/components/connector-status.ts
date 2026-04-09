@@ -367,14 +367,17 @@ function connectorStateTone(connector: GateConnectorInfo | null): string {
   return 'border-amber-400/30 bg-amber-500/12 text-amber-100'
 }
 
-async function bindDiscordChannel() {
+async function bindConnector(connectorId: string) {
   const channelId = channelDraft.value.trim()
   const keeperName = keeperDraft.value.trim()
   if (!channelId || !keeperName) return
 
   actionLoading.value = true
   try {
-    await post('/api/v1/gate/discord/bind', { channel_id: channelId, keeper_name: keeperName })
+    await post(`/api/v1/gate/connector/bind?name=${encodeURIComponent(connectorId)}`, {
+      channel_id: channelId,
+      keeper_name: keeperName,
+    })
     await refresh()
     showToast(`Bound ${channelId} -> ${keeperName}`, 'success')
   } catch (err) {
@@ -384,13 +387,15 @@ async function bindDiscordChannel() {
   }
 }
 
-async function unbindDiscordChannel(channelIdOverride?: string) {
+async function unbindConnector(connectorId: string, channelIdOverride?: string) {
   const channelId = (channelIdOverride ?? channelDraft.value).trim()
   if (!channelId) return
 
   actionLoading.value = true
   try {
-    await post('/api/v1/gate/discord/unbind', { channel_id: channelId })
+    await post(`/api/v1/gate/connector/unbind?name=${encodeURIComponent(connectorId)}`, {
+      channel_id: channelId,
+    })
     if (channelDraft.value.trim() === channelId) {
       channelDraft.value = ''
     }
@@ -475,7 +480,7 @@ function DiscordLivePanel({
                   variant="primary"
                   size="sm"
                   disabled=${actionLoading.value || channelDraft.value.trim().length === 0 || keeperDraft.value.trim().length === 0}
-                  onClick=${() => { void bindDiscordChannel() }}
+                  onClick=${() => { void bindConnector('discord') }}
                 >
                   ${actionLoading.value ? 'Applying...' : 'Bind'}
                 <//>
@@ -483,7 +488,7 @@ function DiscordLivePanel({
                   variant="danger"
                   size="sm"
                   disabled=${actionLoading.value || channelDraft.value.trim().length === 0}
-                  onClick=${() => { void unbindDiscordChannel() }}
+                  onClick=${() => { void unbindConnector('discord') }}
                 >
                   Unbind
                 <//>
@@ -625,7 +630,7 @@ function DiscordLivePanel({
                               keeperDraft.value = binding.keeper_name
                             }}>Use<//>
                             ${bindingActionsEnabled
-                              ? html`<${ActionButton} variant="danger" size="sm" disabled=${actionLoading.value} onClick=${() => { void unbindDiscordChannel(binding.channel_id) }}>Unbind<//>`
+                              ? html`<${ActionButton} variant="danger" size="sm" disabled=${actionLoading.value} onClick=${() => { void unbindConnector('discord', binding.channel_id) }}>Unbind<//>`
                               : null}
                           </div>
                         </div>

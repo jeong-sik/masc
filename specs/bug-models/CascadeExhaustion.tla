@@ -103,6 +103,10 @@ ExhaustionSafetyLastOk ==
     (AcceptOnExhaustion /\ cascade_outcome = "all_failed") =>
         provider_result[NumProviders] # "ok"
 
+ExhaustionDiagnosticConsistency ==
+    (cascade_outcome = "all_failed" /\ last_err = "rejected by accept validator") =>
+        provider_result[NumProviders] = "ok"
+
 \* ── Bug Model ──────────────────────────────────────────
 
 \* Bug: last provider returns Error, so accept_on_exhaustion never fires.

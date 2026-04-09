@@ -315,6 +315,7 @@ let is_public_read_path path =
   || String.equal path "/api/v1/gate/health"
   || String.equal path "/api/v1/gate/status"
   || String.equal path "/api/v1/gate/connectors"
+  || String.equal path "/api/v1/gate/connector/status"
   || String.equal path "/api/v1/gate/discord/status"
   || String.equal path "/api/v1/gate/connector/status"
   || String.equal path "/api/v1/gate/events"

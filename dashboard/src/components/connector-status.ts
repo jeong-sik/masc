@@ -9,6 +9,7 @@ import { lastEvent } from '../sse'
 import { StatCard } from './common/stat-card'
 import { ActionButton } from './common/button'
 import { TextInput } from './common/input'
+import { Select } from './common/select'
 import { showToast } from './common/toast'
 
 interface ChannelInfo {
@@ -49,6 +50,22 @@ interface GateStatusData {
   success_rate_pct: number
   dedup_table_size: number
   uptime_seconds: number
+}
+
+interface GateKeeperInfo {
+  name: string
+  agent_name?: string
+  status?: string
+  model?: string
+  active_model?: string
+  primary_model?: string
+  keepalive_running?: boolean
+  last_turn_ago_s?: number | null
+}
+
+interface GateKeepersData {
+  count: number
+  keepers: GateKeeperInfo[]
 }
 
 interface DiscordConfiguredBinding {
@@ -128,11 +145,14 @@ const discordLive = signal<DiscordLiveStatusData | null>(null)
 const loading = signal(false)
 const error = signal<string | null>(null)
 const liveError = signal<string | null>(null)
+const keeperDirectory = signal<GateKeeperInfo[]>([])
+const keeperDirectoryError = signal<string | null>(null)
 const actionLoading = signal(false)
 const channelDraft = signal('')
 const keeperDraft = signal('')
 
 let inflightRequest: Promise<void> | null = null
+const GATE_KEEPERS_PATH = '/api/v1/gate/keepers?limit=50&detailed=true'
 
 async function refresh() {
   if (inflightRequest) return
@@ -157,6 +177,14 @@ async function refresh() {
       }
     } catch (e) {
       liveError.value = e instanceof Error ? e.message : 'fetch failed'
+    }
+    try {
+      const keepersResult = await get<GateKeepersData>(GATE_KEEPERS_PATH)
+      keeperDirectory.value = keepersResult.keepers ?? []
+      keeperDirectoryError.value = null
+    } catch (e) {
+      keeperDirectory.value = []
+      keeperDirectoryError.value = e instanceof Error ? e.message : 'fetch failed'
     } finally {
       loading.value = false
       inflightRequest = null
@@ -257,6 +285,26 @@ function uniqueStrings(values: string[]): string[] {
   return ordered
 }
 
+function modelLabelForKeeper(keeper: GateKeeperInfo | null | undefined): string {
+  return keeper?.active_model?.trim()
+    || keeper?.model?.trim()
+    || keeper?.primary_model?.trim()
+    || ''
+}
+
+function runtimeLabelForKeeper(keeper: GateKeeperInfo | null | undefined): string {
+  const runtime = keeper?.agent_name?.trim()
+  if (!runtime || runtime === keeper?.name) return ''
+  return runtime
+}
+
+function keeperLabel(keeper: GateKeeperInfo): string {
+  const status = keeper.status?.trim() || 'unknown'
+  const model = modelLabelForKeeper(keeper)
+  const runtime = runtimeLabelForKeeper(keeper)
+  return [keeper.name, status, model, runtime].filter(Boolean).join(' · ')
+}
+
 function discordStateLabel(live: DiscordLiveStatusData | null): string {
   if (!live?.available) return 'offline'
   if (live.stale) return 'stale'
@@ -318,6 +366,8 @@ function DiscordLivePanel({
   live: DiscordLiveStatusData | null
   gate: GateStatusData | null
 }) {
+  const keepers = keeperDirectory.value
+  const keeperByName = new Map(keepers.map(keeper => [keeper.name, keeper] as const))
   const configuredBindings = live?.configured_bindings ?? []
   const audit = live?.recent_audit ?? []
   const observedRooms = uniqueStrings([
@@ -338,6 +388,7 @@ function DiscordLivePanel({
       .map(event => event.keeper),
     ...configuredBindings.map(binding => binding.keeper_name),
   ])
+  const selectedKeeper = keeperByName.get(keeperDraft.value.trim()) ?? null
   const directLabel = discordStateLabel(live)
   const directTone = discordStateTone(live)
 
@@ -360,6 +411,7 @@ function DiscordLivePanel({
             <span>guilds ${live?.guild_count ?? 0}</span>
             <span>runtime bindings ${live?.runtime_bindings_count ?? configuredBindings.length}</span>
             <span>source ${live?.binding_source || 'unknown'}</span>
+            <span>keeper dir ${keepers.length}</span>
             <span>
               gate ${live?.gate_healthy == null ? 'unknown' : live.gate_healthy ? 'healthy' : 'unhealthy'}
             </span>
@@ -413,12 +465,41 @@ function DiscordLivePanel({
           </div>
           <div>
             <div class="mb-1 text-[10px] uppercase tracking-[0.16em] text-[var(--text-dim)]">Keeper</div>
+            ${keepers.length > 0
+              ? html`
+                  <div class="mb-2">
+                    <${Select}
+                      value=${selectedKeeper?.name ?? ''}
+                      options=${keepers.map(keeper => ({ value: keeper.name, label: keeperLabel(keeper) }))}
+                      placeholder="keeper 선택"
+                      onInput=${(value: string) => { keeperDraft.value = value }}
+                    />
+                  </div>
+                `
+              : null}
             <${TextInput}
               value=${keeperDraft.value}
               placeholder="keeper name"
               ariaLabel="Keeper name"
               onInput=${(e: Event) => { keeperDraft.value = (e.target as HTMLInputElement).value }}
             />
+            ${selectedKeeper
+              ? html`
+                  <div class="mt-2 flex flex-wrap gap-2 text-[10px] text-[var(--text-dim)]">
+                    <span>status ${selectedKeeper.status || 'unknown'}</span>
+                    ${modelLabelForKeeper(selectedKeeper) ? html`<span>model ${modelLabelForKeeper(selectedKeeper)}</span>` : null}
+                    ${runtimeLabelForKeeper(selectedKeeper) ? html`<span>runtime ${runtimeLabelForKeeper(selectedKeeper)}</span>` : null}
+                    ${selectedKeeper.keepalive_running ? html`<span>keepalive</span>` : null}
+                  </div>
+                `
+              : null}
+            ${keepers.length === 0 && keeperDirectoryError.value
+              ? html`
+                  <div class="mt-2 text-[10px] text-[var(--text-dim)]">
+                    keeper directory unavailable, manual entry only
+                  </div>
+                `
+              : null}
           </div>
           ${observedRooms.length > 0
             ? html`
@@ -466,11 +547,23 @@ function DiscordLivePanel({
               : html`
                   <div class="space-y-2">
                     ${configuredBindings.map(binding => html`
+                      ${(() => {
+                        const keeperMeta = keeperByName.get(binding.keeper_name) ?? null
+                        return html`
                       <div class="rounded-md border border-[var(--white-8)] bg-[var(--white-4)] px-3 py-2">
                         <div class="flex items-start justify-between gap-3">
                           <div class="min-w-0">
                             <div class="text-xs font-medium text-[var(--text-body)]">${truncateMiddle(binding.channel_id, 26)}</div>
                             <div class="text-[10px] uppercase tracking-[0.16em] text-[var(--text-dim)]">keeper ${binding.keeper_name}</div>
+                            ${keeperMeta
+                              ? html`
+                                  <div class="mt-1 text-[10px] text-[var(--text-dim)]">
+                                    ${keeperMeta.status || 'unknown'}
+                                    ${modelLabelForKeeper(keeperMeta) ? ` · ${modelLabelForKeeper(keeperMeta)}` : ''}
+                                    ${runtimeLabelForKeeper(keeperMeta) ? ` · ${runtimeLabelForKeeper(keeperMeta)}` : ''}
+                                  </div>
+                                `
+                              : null}
                           </div>
                           <div class="flex gap-2">
                             <${ActionButton} variant="ghost" size="sm" onClick=${() => {
@@ -481,6 +574,8 @@ function DiscordLivePanel({
                           </div>
                         </div>
                       </div>
+                        `
+                      })()}
                     `)}
                   </div>
                 `}
@@ -491,10 +586,24 @@ function DiscordLivePanel({
                   <div class="mb-1 text-[10px] uppercase tracking-[0.16em] text-[var(--text-dim)]">Recent binding audit</div>
                   <div class="space-y-2">
                     ${audit.slice(0, 4).map(entry => html`
+                      ${(() => {
+                        const keeperMeta = keeperByName.get(entry.keeper_name) ?? null
+                        return html`
                       <div class="rounded-md border border-[var(--white-8)] bg-[var(--white-4)] px-3 py-2 text-[11px] text-[var(--text-dim)]">
                         <div class="font-medium text-[var(--text-body)]">${entry.action} · ${truncateMiddle(entry.channel_id, 22)} · ${entry.keeper_name}</div>
+                        ${keeperMeta && (keeperMeta.status || modelLabelForKeeper(keeperMeta) || runtimeLabelForKeeper(keeperMeta))
+                          ? html`
+                              <div class="mt-1 text-[10px]">
+                                ${keeperMeta.status || 'unknown'}
+                                ${modelLabelForKeeper(keeperMeta) ? ` · ${modelLabelForKeeper(keeperMeta)}` : ''}
+                                ${runtimeLabelForKeeper(keeperMeta) ? ` · ${runtimeLabelForKeeper(keeperMeta)}` : ''}
+                              </div>
+                            `
+                          : null}
                         <div class="mt-1">${entry.actor_name || 'dashboard'} · ${timeAgo(entry.timestamp)}</div>
                       </div>
+                        `
+                      })()}
                     `)}
                   </div>
                 </div>
@@ -793,6 +902,8 @@ export function resetConnectorStatusState() {
   loading.value = false
   error.value = null
   liveError.value = null
+  keeperDirectory.value = []
+  keeperDirectoryError.value = null
   actionLoading.value = false
   channelDraft.value = ''
   keeperDraft.value = ''

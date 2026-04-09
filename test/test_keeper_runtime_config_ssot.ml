@@ -244,6 +244,62 @@ work_discovery_guidance = "TOML guidance"
       check (option string) "work_discovery_guidance"
         (Some "TOML guidance") updated.work_discovery_guidance
 
+(** Test: update_field_in_content replaces existing field *)
+let test_toml_update_existing () =
+  let input = {|[keeper]
+goal = "old goal"
+cascade_name = "default"
+instructions = "keep this"
+|} in
+  match Keeper_toml_loader.update_field_in_content
+          ~table:"keeper" ~key:"cascade_name" ~value:"local_only" input with
+  | Error e -> fail ("update failed: " ^ e)
+  | Ok result ->
+      check bool "contains new value"
+        true (String.length result > 0);
+      (* Parse the result to verify *)
+      (match Keeper_toml_loader.parse_toml result with
+       | Error e -> fail ("re-parse failed: " ^ e)
+       | Ok doc ->
+         check (option string) "cascade_name updated"
+           (Some "local_only")
+           (Keeper_toml_loader.toml_string_opt doc "keeper.cascade_name");
+         check (option string) "goal preserved"
+           (Some "old goal")
+           (Keeper_toml_loader.toml_string_opt doc "keeper.goal");
+         check (option string) "instructions preserved"
+           (Some "keep this")
+           (Keeper_toml_loader.toml_string_opt doc "keeper.instructions"))
+
+(** Test: update_field_in_content inserts new field *)
+let test_toml_update_insert () =
+  let input = {|[keeper]
+goal = "test"
+|} in
+  match Keeper_toml_loader.update_field_in_content
+          ~table:"keeper" ~key:"cascade_name" ~value:"local_only" input with
+  | Error e -> fail ("update failed: " ^ e)
+  | Ok result ->
+      (match Keeper_toml_loader.parse_toml result with
+       | Error e -> fail ("re-parse failed: " ^ e)
+       | Ok doc ->
+         check (option string) "cascade_name inserted"
+           (Some "local_only")
+           (Keeper_toml_loader.toml_string_opt doc "keeper.cascade_name");
+         check (option string) "goal preserved"
+           (Some "test")
+           (Keeper_toml_loader.toml_string_opt doc "keeper.goal"))
+
+(** Test: update_field_in_content returns Error for missing table *)
+let test_toml_update_no_table () =
+  let input = {|# no [keeper] table here
+goal = "orphan"
+|} in
+  match Keeper_toml_loader.update_field_in_content
+          ~table:"keeper" ~key:"cascade_name" ~value:"x" input with
+  | Ok _ -> fail "should have returned Error for missing table"
+  | Error _ -> ()
+
 let () =
   run "Keeper_runtime config SSOT resync"
     [
@@ -274,5 +330,20 @@ let () =
             "TOML work_discovery fields overwrite stale meta"
             `Quick
             test_discovery_resync;
+        ] );
+      ( "toml_writer",
+        [
+          test_case
+            "replaces existing field in TOML"
+            `Quick
+            test_toml_update_existing;
+          test_case
+            "inserts new field into TOML table"
+            `Quick
+            test_toml_update_insert;
+          test_case
+            "returns Error when table is missing"
+            `Quick
+            test_toml_update_no_table;
         ] );
     ]

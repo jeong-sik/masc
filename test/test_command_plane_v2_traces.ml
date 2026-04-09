@@ -33,6 +33,14 @@ let event_sources json =
          Yojson.Safe.Util.member "source" event
          |> Yojson.Safe.Util.to_string_option)
 
+let event_ids json =
+  json
+  |> Yojson.Safe.Util.member "events"
+  |> Yojson.Safe.Util.to_list
+  |> List.filter_map (fun event ->
+         Yojson.Safe.Util.member "event_id" event
+         |> Yojson.Safe.Util.to_string_option)
+
 let make_cp_event ~event_id ~trace_id ~event_type ~ts =
   `Assoc
     [
@@ -122,3 +130,49 @@ let test_trace_filter_reads_tail_bounded_operator_log () =
         "operator source preserved"
         true
         (List.mem "operator" (event_sources json)))
+
+let test_default_trace_view_reuses_cached_operator_events_when_inputs_unchanged () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      with_eio_test base_dir @@ fun config ->
+      ignore (Room.init config ~agent_name:(Some "owner"));
+      write_jsonl_rows (operator_action_log_path config)
+        [ make_operator_row ~trace_id:"trace-cached"
+            ~action_type:"operator_action"
+            ~created_at:"2026-03-23T00:10:00Z" ];
+      let first = Command_plane_v2.list_traces_json config ~limit:5 () in
+      let second = Command_plane_v2.list_traces_json config ~limit:5 () in
+      Alcotest.(check (list string))
+        "default trace view reuses synthetic operator event ids"
+        (event_ids first) (event_ids second))
+
+let test_default_trace_view_invalidates_cache_when_event_log_changes () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      with_eio_test base_dir @@ fun config ->
+      ignore (Room.init config ~agent_name:(Some "owner"));
+      let initial_event =
+        make_cp_event ~event_id:"evt-initial" ~trace_id:"trace-initial"
+          ~event_type:"initial" ~ts:"2026-03-23T00:00:00Z"
+      in
+      write_jsonl_rows (control_plane_events_path config) [ initial_event ];
+      ignore (Command_plane_v2.list_traces_json config ~limit:5 ());
+      let updated_events =
+        [
+          initial_event;
+          make_cp_event ~event_id:"evt-new" ~trace_id:"trace-new"
+            ~event_type:"updated" ~ts:"2026-03-23T00:01:00Z";
+        ]
+      in
+      write_jsonl_rows (control_plane_events_path config) updated_events;
+      let now = Unix.gettimeofday () +. 1.0 in
+      Unix.utimes (control_plane_events_path config) now now;
+      let json = Command_plane_v2.list_traces_json config ~limit:5 () in
+      Alcotest.(check bool)
+        "default trace cache refreshes after control-plane log change"
+        true
+        (List.mem "trace-new" (trace_ids json)))

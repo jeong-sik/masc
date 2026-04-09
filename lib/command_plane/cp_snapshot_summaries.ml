@@ -5,6 +5,46 @@ let iso_of_unix = Dashboard_utils.iso_of_unix
 let file_mtime path =
   try Some (Unix.stat path).st_mtime with Unix.Unix_error _ -> None
 
+type default_trace_cache_entry = {
+  cp_events_mtime : float option;
+  operator_log_mtime : float option;
+  limit : int;
+  events : Yojson.Safe.t list;
+}
+
+let default_trace_cache : (string, default_trace_cache_entry) Hashtbl.t =
+  Hashtbl.create 4
+
+let default_trace_cache_key config = Room.masc_dir config
+
+let default_trace_cache_mtimes config =
+  (file_mtime (events_path config), file_mtime (operator_action_log_path config))
+
+let cached_default_trace_events config ~limit =
+  let key = default_trace_cache_key config in
+  let cp_events_mtime, operator_log_mtime = default_trace_cache_mtimes config in
+  match Hashtbl.find_opt default_trace_cache key with
+  | Some entry
+    when entry.limit = limit
+         && entry.cp_events_mtime = cp_events_mtime
+         && entry.operator_log_mtime = operator_log_mtime ->
+      Some entry.events
+  | _ -> None
+
+let store_default_trace_events config ~limit ~events =
+  let key = default_trace_cache_key config in
+  let cp_events_mtime, operator_log_mtime = default_trace_cache_mtimes config in
+  Hashtbl.replace default_trace_cache key
+    { cp_events_mtime; operator_log_mtime; limit; events }
+
+let traces_json_of_events events =
+  `Assoc
+    [
+      ("version", `String "cp-v2");
+      ("generated_at", `String (Types.now_iso ()));
+      ("events", `List events);
+    ]
+
 let swarm_slot_samples_tail_lines () =
   Dashboard_http_helpers.int_of_env_default
     "MASC_CP_SWARM_SLOT_SAMPLE_TAIL_LINES"
@@ -646,19 +686,9 @@ let recent_swarm_trace_events config limit =
         |> List.filteri (fun idx _ -> idx < limit)
     | _ -> []
 
-let list_traces_json config ?operation_id ?(limit = 25) () =
+let build_default_trace_events config ~limit =
   let events =
-    (match operation_id with
-     | None -> read_recent_events config ~limit:(max limit 50)
-     | Some _ -> read_events ~max_lines:(limit * 3) config)
-    |> List.filter (fun (event : event_record) ->
-           match operation_id with
-           | None -> true
-           | Some operation_ref ->
-               (match event.operation_id with
-               | Some value -> String.equal value operation_ref
-               | None -> false)
-               || String.equal event.trace_id operation_ref)
+    read_recent_events config ~limit:(max limit 50)
   in
   let cp_events =
     events
@@ -679,9 +709,50 @@ let list_traces_json config ?operation_id ?(limit = 25) () =
                ("detail", event.detail);
              ])
   in
-  let team_session_events =
-    match operation_id with
-    | Some operation_ref -> (
+  let operator_events = recent_operator_trace_events config limit in
+  cp_events @ operator_events
+
+let list_traces_json config ?operation_id ?(limit = 25) () =
+  match operation_id with
+  | None ->
+      let events =
+        match cached_default_trace_events config ~limit with
+        | Some events -> events
+        | None ->
+            let events = build_default_trace_events config ~limit in
+            store_default_trace_events config ~limit ~events;
+            events
+      in
+      traces_json_of_events events
+  | Some operation_ref ->
+      let events =
+        read_events ~max_lines:(limit * 3) config
+        |> List.filter (fun (event : event_record) ->
+               (match event.operation_id with
+               | Some value -> String.equal value operation_ref
+               | None -> false)
+               || String.equal event.trace_id operation_ref)
+      in
+      let cp_events =
+        events
+        |> List.rev
+        |> List.filteri (fun idx _ -> idx < limit)
+        |> List.rev
+        |> List.map (fun (event : event_record) ->
+               `Assoc
+                 [
+                   ("event_id", `String event.event_id);
+                   ("trace_id", `String event.trace_id);
+                   ("event_type", `String event.event_type);
+                   ("operation_id", Json_util.string_opt_to_json event.operation_id);
+                   ("unit_id", Json_util.string_opt_to_json event.unit_id);
+                   ("actor", Json_util.string_opt_to_json event.actor);
+                   ("source", `String event.source);
+                   ("timestamp", `String event.ts);
+                   ("detail", event.detail);
+                 ])
+      in
+      let team_session_events =
         let _, _, units, _ = topology_units config in
         let operations = all_operations config units in
         match
@@ -694,18 +765,9 @@ let list_traces_json config ?operation_id ?(limit = 25) () =
             match operation.detachment_session_id with
             | Some session_id -> recent_team_session_trace_events config session_id limit
             | None -> [])
-        | None -> [])
-    | None -> []
-  in
-  let operator_events =
-    match operation_id with
-    | Some operation_ref -> recent_operator_trace_events config ~trace_id:operation_ref limit
-    | None -> recent_operator_trace_events config limit
-  in
-  let merged = cp_events @ team_session_events @ operator_events in
-  `Assoc
-    [
-      ("version", `String "cp-v2");
-      ("generated_at", `String (Types.now_iso ()));
-      ("events", `List merged);
-    ]
+        | None -> []
+      in
+      let operator_events =
+        recent_operator_trace_events config ~trace_id:operation_ref limit
+      in
+      traces_json_of_events (cp_events @ team_session_events @ operator_events)

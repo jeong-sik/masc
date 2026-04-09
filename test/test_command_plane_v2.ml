@@ -83,6 +83,16 @@ let () =
             `Quick
             Test_command_plane_v2_traces.test_trace_filter_reads_tail_bounded_operator_log;
           Alcotest.test_case
+            "default trace view reuses cached operator events"
+            `Quick
+            Test_command_plane_v2_traces
+              .test_default_trace_view_reuses_cached_operator_events_when_inputs_unchanged;
+          Alcotest.test_case
+            "default trace view invalidates cache on event log change"
+            `Quick
+            Test_command_plane_v2_traces
+              .test_default_trace_view_invalidates_cache_when_event_log_changes;
+          Alcotest.test_case
             "swarm proof fallback reads bounded slot-sample tail"
             `Quick
             Test_command_plane_v2_summary

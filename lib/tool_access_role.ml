@@ -26,7 +26,6 @@ let admin_only_tools =
     (* CanAdmin — autoresearch *)
     "masc_autoresearch_start";
     "masc_autoresearch_swarm_start";
-    "masc_repo_synthesis_swarm_start";
     "masc_autoresearch_cycle";
     "masc_autoresearch_inject";
     "masc_autoresearch_stop";

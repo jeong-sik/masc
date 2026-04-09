@@ -75,34 +75,6 @@ let sdk_bindings : sdk_tool_binding list =
       discovery_hidden = false;
     };
     {
-      sdk_name = "masc_repo_synthesis_swarm_start";
-      canonical_operation = "masc_repo_synthesis_swarm_start";
-      description =
-        "Start a repo-synthesis benchmark or case-study run through the managed-operation compatibility lane, attached team session, and proof surfaces.";
-      input_schema =
-        object_schema ~required:[ "goal"; "question"; "repo_root" ]
-          [
-            assoc_field "goal" (string_prop "Human goal for the synthesis run");
-            assoc_field "question" (string_prop "Repo synthesis question or prompt");
-            assoc_field "repo_root" (string_prop "Repo root path used for metadata and dataset lookup");
-            assoc_field "question_id" (string_prop "Optional dataset question id");
-            assoc_field "program_note" (string_prop "Optional benchmark note");
-            assoc_field "model" (string_prop "Optional model label");
-            assoc_field "baseline_label" (string_prop "Optional paired baseline label");
-          ];
-      arg_bindings =
-        [
-          ("goal", Input_field "goal");
-          ("question", Input_field "question");
-          ("repo_root", Input_field "repo_root");
-          ("question_id", Input_field "question_id");
-          ("program_note", Input_field "program_note");
-          ("model", Input_field "model");
-          ("baseline_label", Input_field "baseline_label");
-        ];
-      discovery_hidden = false;
-    };
-    {
       sdk_name = "masc_add_task";
       canonical_operation = "masc_add_task";
       description = "Create a single new task in the MASC room backlog. Use when you identify work that any agent can pick up. Returns a task-XXX ID for tracking.";

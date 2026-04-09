@@ -14,7 +14,8 @@ type preset_resolution =
   | All_candidates        (** Use the entire candidate tool set *)
   | Subset of string list (** Use exactly this list of tool names *)
 
-(** Load and parse config/tool_policy.toml relative to [base_path].
+(** Load and parse [tool_policy.toml] from the resolved config root for
+    [base_path] (honoring [MASC_CONFIG_DIR] when present).
     Returns [Error msg] if the file is missing or malformed. *)
 val load : base_path:string -> (t, string) result
 

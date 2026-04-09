@@ -6,25 +6,9 @@
 let existing_dir path =
   Sys.file_exists path && Sys.is_directory path
 
-let dedupe_preserving_order items =
-  let seen = Hashtbl.create (List.length items) in
-  List.filter
-    (fun item ->
-      if Hashtbl.mem seen item then
-        false
-      else (
-        Hashtbl.add seen item ();
-        true))
-    items
-
 let prompt_markdown_dir_candidates ~workspace_path ~base_path =
-  dedupe_preserving_order
-    [
-      Config_dir_resolver.prompts_dir ();
-      Filename.concat workspace_path "config/prompts";
-      Filename.concat base_path "config/prompts";
-      Filename.concat (Sys.getcwd ()) "config/prompts";
-    ]
+  let _ = workspace_path, base_path in
+  [ Config_dir_resolver.prompts_dir () ]
 
 let resolve_prompt_markdown_dir ~workspace_path ~base_path =
   match

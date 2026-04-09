@@ -78,45 +78,57 @@ function sampleGateResponse(overrides?: Partial<Record<string, unknown>>) {
   }
 }
 
-function sampleLiveResponse(overrides?: Partial<Record<string, unknown>>) {
+function sampleConnectorsResponse(overrides?: Partial<Record<string, unknown>>) {
   return {
-    available: true,
-    connected: true,
-    stale: false,
-    stale_after_sec: 30,
-    error: '',
-    status_path: '/tmp/discord_status.json',
-    binding_store_path: '/tmp/discord_bindings.json',
-    audit_path: '/tmp/discord_binding_audit.jsonl',
-    updated_at: '2026-04-03T00:00:00Z',
-    last_ready_at: '2026-04-03T00:00:00Z',
-    bot_user_name: 'sangsu',
-    bot_user_id: '1489985300729172039',
-    guild_count: 2,
-    gate_base_url: 'http://localhost:8935',
-    gate_healthy: true,
-    gate_health_checked_at: '2026-04-03T00:00:00Z',
-    binding_source: 'persisted',
-    runtime_bindings_count: 1,
-    pid: 4242,
-    configured_bindings: [
+    connectors: [
       {
-        channel_id: '123456',
-        keeper_name: 'luna',
+        connector_id: 'discord',
+        display_name: 'Discord',
+        channel: 'discord',
+        capabilities: ['runtime_status', 'bindings', 'audit'],
+        status: 'connected',
+        available: true,
+        connected: true,
+        stale: false,
+        stale_after_sec: 30,
+        error: '',
+        status_path: '/tmp/discord_status.json',
+        binding_store_path: '/tmp/discord_bindings.json',
+        audit_path: '/tmp/discord_binding_audit.jsonl',
+        updated_at: '2026-04-03T00:00:00Z',
+        last_ready_at: '2026-04-03T00:00:00Z',
+        bot_user_name: 'sangsu',
+        bot_user_id: '1489985300729172039',
+        guild_count: 2,
+        gate_base_url: 'http://localhost:8935',
+        gate_healthy: true,
+        gate_health_checked_at: '2026-04-03T00:00:00Z',
+        binding_source: 'persisted',
+        runtime_bindings_count: 1,
+        pid: 4242,
+        configured_bindings: [
+          {
+            channel_id: '123456',
+            keeper_name: 'luna',
+          },
+        ],
+        recent_audit: [
+          {
+            timestamp: '2026-04-03T00:00:00Z',
+            action: 'bind',
+            guild_id: 'guild-1',
+            channel_id: '123456',
+            keeper_name: 'luna',
+            actor_id: 'dashboard',
+            actor_name: 'dashboard',
+            previous_keeper: '',
+          },
+        ],
       },
     ],
-    recent_audit: [
-      {
-        timestamp: '2026-04-03T00:00:00Z',
-        action: 'bind',
-        guild_id: 'guild-1',
-        channel_id: '123456',
-        keeper_name: 'luna',
-        actor_id: 'dashboard',
-        actor_name: 'dashboard',
-        previous_keeper: '',
-      },
-    ],
+    total: 1,
+    active_count: 1,
+    generated_at: '2026-04-03T00:00:00Z',
     ...overrides,
   }
 }
@@ -196,7 +208,7 @@ describe('ConnectorStatusPanel', () => {
   it('renders direct Discord runtime and gate-observed health together', async () => {
     const get = vi.fn<(path: string) => Promise<unknown>>().mockImplementation(async path => {
       if (path === '/api/v1/gate/status') return sampleGateResponse()
-      if (path === '/api/v1/gate/discord/status') return sampleLiveResponse()
+      if (path === '/api/v1/gate/connectors') return sampleConnectorsResponse()
       if (path === '/api/v1/gate/keepers?limit=50&detailed=true') return sampleKeepersResponse()
       throw new Error(`unexpected path: ${path}`)
     })
@@ -211,11 +223,12 @@ describe('ConnectorStatusPanel', () => {
     const text = container.textContent?.replace(/\s+/g, ' ').trim() ?? ''
 
     expect(get).toHaveBeenCalledWith('/api/v1/gate/status')
-    expect(get).toHaveBeenCalledWith('/api/v1/gate/discord/status')
+    expect(get).toHaveBeenCalledWith('/api/v1/gate/connectors')
     expect(get).toHaveBeenCalledWith('/api/v1/gate/keepers?limit=50&detailed=true')
-    expect(text).toContain('Connector Operations')
-    expect(text).toContain('Discord Direct')
+    expect(text).toContain('Channel Gate Connectors')
+    expect(text).toContain('Gate-Advertised Connector')
     expect(text).toContain('connected')
+    expect(text).toContain('Discord')
     expect(text).toContain('sangsu')
     expect(text).toContain('keeper dir 2')
     expect(text).toContain('keeper-luna-agent')
@@ -229,7 +242,14 @@ describe('ConnectorStatusPanel', () => {
   it('still renders direct runtime when gate metrics are unavailable', async () => {
     const get = vi.fn<(path: string) => Promise<unknown>>().mockImplementation(async path => {
       if (path === '/api/v1/gate/status') throw new Error('GET /api/v1/gate/status: 503 Service Unavailable')
-      if (path === '/api/v1/gate/discord/status') return sampleLiveResponse({ connected: false, stale: true })
+      if (path === '/api/v1/gate/connectors') return sampleConnectorsResponse({
+        connectors: [{
+          ...sampleConnectorsResponse().connectors[0],
+          connected: false,
+          stale: true,
+          status: 'stale',
+        }],
+      })
       if (path === '/api/v1/gate/keepers?limit=50&detailed=true') throw new Error('GET /api/v1/gate/keepers: 401 Unauthorized')
       throw new Error(`unexpected path: ${path}`)
     })
@@ -243,17 +263,17 @@ describe('ConnectorStatusPanel', () => {
     await flushUi()
     const text = container.textContent?.replace(/\s+/g, ' ').trim() ?? ''
 
-    expect(text).toContain('Discord Direct')
+    expect(text).toContain('Gate-Advertised Connector')
     expect(text).toContain('stale')
     expect(text).toContain('Gate metrics unavailable')
-    expect(text).toContain('Direct Discord runtime is visible')
+    expect(text).toContain('Gate-advertised connector runtime is visible')
     expect(text).toContain('keeper directory unavailable, manual entry only')
   })
 
   it('posts bind and unbind actions through the dashboard endpoints', async () => {
     const get = vi.fn<(path: string) => Promise<unknown>>().mockImplementation(async path => {
       if (path === '/api/v1/gate/status') return sampleGateResponse()
-      if (path === '/api/v1/gate/discord/status') return sampleLiveResponse()
+      if (path === '/api/v1/gate/connectors') return sampleConnectorsResponse()
       if (path === '/api/v1/gate/keepers?limit=50&detailed=true') return sampleKeepersResponse()
       throw new Error(`unexpected path: ${path}`)
     })
@@ -310,7 +330,7 @@ describe('ConnectorStatusPanel', () => {
   it('shows selected keeper runtime metadata from the keeper directory', async () => {
     const get = vi.fn<(path: string) => Promise<unknown>>().mockImplementation(async path => {
       if (path === '/api/v1/gate/status') return sampleGateResponse()
-      if (path === '/api/v1/gate/discord/status') return sampleLiveResponse()
+      if (path === '/api/v1/gate/connectors') return sampleConnectorsResponse()
       if (path === '/api/v1/gate/keepers?limit=50&detailed=true') return sampleKeepersResponse()
       throw new Error(`unexpected path: ${path}`)
     })

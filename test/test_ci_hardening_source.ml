@@ -139,6 +139,10 @@ let test_route_auth_contracts () =
     (file_contains_pattern
        "lib/server/server_auth.ml"
        {|String.equal path "/api/v1/gate/events"|});
+  check bool "channel gate connectors route stays public read" true
+    (file_contains_pattern
+       "lib/server/server_auth.ml"
+       {|String.equal path "/api/v1/gate/connectors"|});
   check bool "discord gate status route stays public read" true
     (file_contains_pattern
        "lib/server/server_auth.ml"
@@ -151,6 +155,10 @@ let test_route_auth_contracts () =
     (file_contains_pattern
        "lib/server/server_routes_http_routes_channel_gate.ml"
        {|Http.Router.get "/api/v1/gate/discord/status"|});
+  check bool "channel gate connectors route is registered" true
+    (file_contains_pattern
+       "lib/server/server_routes_http_routes_channel_gate.ml"
+       {|Http.Router.get "/api/v1/gate/connectors"|});
   check bool "discord gate bind route is registered" true
     (file_contains_pattern
        "lib/server/server_routes_http_routes_channel_gate.ml"

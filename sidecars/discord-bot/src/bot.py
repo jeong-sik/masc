@@ -83,11 +83,23 @@ class GateBot(discord.Client):
         self.status_store = StatusStore(self.cfg.status_path())
         persisted_bindings = self.binding_store.load()
         if persisted_bindings is None:
-            self.keeper_bindings = self.cfg.keeper_map()
-            self.binding_source = "env-seed"
+            legacy_binding_store = BindingStore(self.cfg.legacy_binding_store_path())
+            legacy_bindings = legacy_binding_store.load()
+            if legacy_bindings is not None:
+                self.keeper_bindings = legacy_bindings
+                self.binding_source = "legacy-fallback"
+            else:
+                self.keeper_bindings = self.cfg.keeper_map()
+                self.binding_source = "env-seed"
         else:
             self.keeper_bindings = persisted_bindings
             self.binding_source = "persisted"
+        if self.binding_source == "legacy-fallback":
+            logger.info(
+                "Loaded Discord bindings from legacy store %s; new writes go to %s",
+                self.cfg.legacy_binding_store_path(),
+                self.binding_store.path,
+            )
         self._binding_store_mtime_ns = self.binding_store.modified_time_ns()
         self._last_gate_health: bool | None = None
         self._last_gate_health_at = ""

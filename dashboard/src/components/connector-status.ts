@@ -86,7 +86,42 @@ interface DiscordAuditEntry {
   previous_keeper: string
 }
 
-interface DiscordLiveStatusData {
+interface ConnectorStoragePaths {
+  status_path: string
+  binding_store_path: string
+  audit_path: string
+}
+
+interface ConnectorRuntimeSummary {
+  available: boolean
+  connected: boolean
+  stale: boolean
+  stale_after_sec: number
+  status: string
+  error: string
+  updated_at: string
+  last_ready_at: string
+  bot_user_name: string
+  bot_user_id: string
+  guild_count: number
+  gate_base_url: string
+  gate_healthy: boolean | null
+  gate_health_checked_at: string
+  pid: number
+}
+
+interface ConnectorBindingSummary {
+  binding_source: string
+  runtime_bindings_count: number
+  configured_bindings_count: number
+}
+
+interface GateConnectorInfo {
+  connector_id: string
+  display_name: string
+  channel: string
+  capabilities: string[]
+  status: string
   available: boolean
   connected: boolean
   stale: boolean
@@ -108,6 +143,17 @@ interface DiscordLiveStatusData {
   pid: number
   configured_bindings: DiscordConfiguredBinding[]
   recent_audit: DiscordAuditEntry[]
+  storage_paths: ConnectorStoragePaths
+  runtime_summary: ConnectorRuntimeSummary
+  binding_summary: ConnectorBindingSummary
+  observed_channel?: ChannelInfo | null
+}
+
+interface GateConnectorsData {
+  connectors: GateConnectorInfo[]
+  total: number
+  active_count: number
+  generated_at: string
 }
 
 interface BindingInfo {
@@ -143,10 +189,10 @@ interface GateEventInfo {
 }
 
 const data = signal<GateStatusData | null>(null)
-const discordLive = signal<DiscordLiveStatusData | null>(null)
+const connectorsData = signal<GateConnectorsData | null>(null)
 const loading = signal(false)
 const error = signal<string | null>(null)
-const liveError = signal<string | null>(null)
+const connectorError = signal<string | null>(null)
 const keeperDirectory = signal<GateKeeperInfo[]>([])
 const keeperDirectoryError = signal<string | null>(null)
 const actionLoading = signal(false)
@@ -155,6 +201,12 @@ const keeperDraft = signal('')
 
 let inflightRequest: Promise<void> | null = null
 const GATE_KEEPERS_PATH = '/api/v1/gate/keepers?limit=50&detailed=true'
+const GATE_CONNECTORS_PATH = '/api/v1/gate/connectors'
+
+function preferredConnector(payload: GateConnectorsData | null): GateConnectorInfo | null {
+  if (!payload || payload.connectors.length === 0) return null
+  return payload.connectors.find(connector => connector.capabilities.includes('bindings')) ?? payload.connectors[0] ?? null
+}
 
 async function refresh() {
   if (inflightRequest) return
@@ -168,17 +220,18 @@ async function refresh() {
       error.value = e instanceof Error ? e.message : 'fetch failed'
     }
     try {
-      const liveResult = await get<DiscordLiveStatusData>('/api/v1/gate/discord/status')
-      discordLive.value = liveResult
-      liveError.value = null
-      if (!channelDraft.value && liveResult.configured_bindings.length > 0) {
-        channelDraft.value = liveResult.configured_bindings[0]?.channel_id ?? ''
+      const connectorResult = await get<GateConnectorsData>(GATE_CONNECTORS_PATH)
+      connectorsData.value = connectorResult
+      connectorError.value = null
+      const primaryConnector = preferredConnector(connectorResult)
+      if (!channelDraft.value && (primaryConnector?.configured_bindings.length ?? 0) > 0) {
+        channelDraft.value = primaryConnector?.configured_bindings[0]?.channel_id ?? ''
       }
-      if (!keeperDraft.value && liveResult.configured_bindings.length > 0) {
-        keeperDraft.value = liveResult.configured_bindings[0]?.keeper_name ?? ''
+      if (!keeperDraft.value && (primaryConnector?.configured_bindings.length ?? 0) > 0) {
+        keeperDraft.value = primaryConnector?.configured_bindings[0]?.keeper_name ?? ''
       }
     } catch (e) {
-      liveError.value = e instanceof Error ? e.message : 'fetch failed'
+      connectorError.value = e instanceof Error ? e.message : 'fetch failed'
     }
     try {
       const keepersResult = await get<GateKeepersData>(GATE_KEEPERS_PATH)
@@ -292,15 +345,15 @@ function keeperLabel(keeper: GateKeeperInfo): string {
   return [keeper.name, status, model, runtime].filter(Boolean).join(' · ')
 }
 
-function discordStateLabel(live: DiscordLiveStatusData | null): string {
-  if (!live?.available) return 'offline'
-  if (live.stale) return 'stale'
-  if (live.connected) return 'connected'
+function connectorStateLabel(connector: GateConnectorInfo | null): string {
+  if (!connector?.available) return 'offline'
+  if (connector.stale) return 'stale'
+  if (connector.connected) return 'connected'
   return 'disconnected'
 }
 
-function discordStateTone(live: DiscordLiveStatusData | null): string {
-  const label = discordStateLabel(live)
+function connectorStateTone(connector: GateConnectorInfo | null): string {
+  const label = connectorStateLabel(connector)
   if (label === 'connected') {
     return 'border-emerald-400/30 bg-emerald-500/12 text-emerald-100'
   }
@@ -347,94 +400,104 @@ async function unbindDiscordChannel(channelIdOverride?: string) {
 }
 
 function DiscordLivePanel({
-  live,
+  connector,
   gate,
 }: {
-  live: DiscordLiveStatusData | null
+  connector: GateConnectorInfo | null
   gate: GateStatusData | null
 }) {
   const keepers = keeperDirectory.value
   const keeperByName = new Map(keepers.map(keeper => [keeper.name, keeper] as const))
-  const configuredBindings = live?.configured_bindings ?? []
-  const audit = live?.recent_audit ?? []
+  const configuredBindings = connector?.configured_bindings ?? []
+  const audit = connector?.recent_audit ?? []
   const observedRooms = uniqueStrings([
     ...(gate?.bindings ?? [])
-      .filter(binding => binding.channel === 'discord')
+      .filter(binding => binding.channel === (connector?.channel ?? ''))
       .map(binding => binding.room_id),
     ...(gate?.recent_events ?? [])
-      .filter(event => event.channel === 'discord')
+      .filter(event => event.channel === (connector?.channel ?? ''))
       .map(event => event.room_id),
     ...configuredBindings.map(binding => binding.channel_id),
   ])
   const suggestedKeepers = uniqueStrings([
     ...(gate?.bindings ?? [])
-      .filter(binding => binding.channel === 'discord')
+      .filter(binding => binding.channel === (connector?.channel ?? ''))
       .map(binding => binding.keeper),
     ...(gate?.recent_events ?? [])
-      .filter(event => event.channel === 'discord')
+      .filter(event => event.channel === (connector?.channel ?? ''))
       .map(event => event.keeper),
     ...configuredBindings.map(binding => binding.keeper_name),
   ])
   const selectedKeeper = keeperByName.get(keeperDraft.value.trim()) ?? null
-  const directLabel = discordStateLabel(live)
-  const directTone = discordStateTone(live)
+  const directLabel = connectorStateLabel(connector)
+  const directTone = connectorStateTone(connector)
+  const bindingActionsEnabled =
+    connector?.connector_id === 'discord' && connector.capabilities.includes('bindings')
+  const connectorName = connector?.display_name || 'Connector'
+  const channelInputLabel = `${connectorName} channel id`
 
   return html`
     <div class="mb-4 rounded-xl border border-[var(--white-8)] bg-[linear-gradient(135deg,rgba(88,101,242,0.16),rgba(88,101,242,0.04))] p-4">
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div class="min-w-0">
-          <div class="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-dim)]">Discord Direct</div>
+          <div class="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-dim)]">Gate-Advertised Connector</div>
           <div class="mt-1 flex flex-wrap items-center gap-2">
             <span class=${`rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] ${directTone}`}>
               ${directLabel}
             </span>
             <span class="text-[13px] font-medium text-[var(--text-body)]">
-              ${live?.bot_user_name ? `${live.bot_user_name} · ${truncateMiddle(live.bot_user_id, 24)}` : 'No live bot identity yet'}
+              ${connector?.bot_user_name
+                ? `${connectorName} · ${connector.bot_user_name} · ${truncateMiddle(connector.bot_user_id, 24)}`
+                : `${connectorName} runtime has not reported identity yet`}
             </span>
           </div>
           <div class="mt-2 flex flex-wrap gap-3 text-[11px] text-[var(--text-dim)]">
-            <span>heartbeat ${timeAgo(live?.updated_at ?? '')}</span>
-            <span>ready ${timeAgo(live?.last_ready_at ?? '')}</span>
-            <span>guilds ${live?.guild_count ?? 0}</span>
-            <span>runtime bindings ${live?.runtime_bindings_count ?? configuredBindings.length}</span>
-            <span>source ${live?.binding_source || 'unknown'}</span>
+            <span>heartbeat ${timeAgo(connector?.updated_at ?? '')}</span>
+            <span>ready ${timeAgo(connector?.last_ready_at ?? '')}</span>
+            <span>guilds ${connector?.guild_count ?? 0}</span>
+            <span>runtime bindings ${connector?.runtime_bindings_count ?? configuredBindings.length}</span>
+            <span>source ${connector?.binding_source || 'unknown'}</span>
             <span>keeper dir ${keepers.length}</span>
             <span>
-              gate ${live?.gate_healthy == null ? 'unknown' : live.gate_healthy ? 'healthy' : 'unhealthy'}
+              gate ${connector?.gate_healthy == null ? 'unknown' : connector.gate_healthy ? 'healthy' : 'unhealthy'}
             </span>
           </div>
         </div>
         <div class="flex flex-wrap gap-2">
           <${ActionButton} variant="ghost" size="sm" disabled=${loading.value || actionLoading.value} onClick=${() => { void refresh() }}>Refresh<//>
-          <${ActionButton}
-            variant="primary"
-            size="sm"
-            disabled=${actionLoading.value || channelDraft.value.trim().length === 0 || keeperDraft.value.trim().length === 0}
-            onClick=${() => { void bindDiscordChannel() }}
-          >
-            ${actionLoading.value ? 'Applying...' : 'Bind'}
-          <//>
-          <${ActionButton}
-            variant="danger"
-            size="sm"
-            disabled=${actionLoading.value || channelDraft.value.trim().length === 0}
-            onClick=${() => { void unbindDiscordChannel() }}
-          >
-            Unbind
-          <//>
+          ${bindingActionsEnabled
+            ? html`
+                <${ActionButton}
+                  variant="primary"
+                  size="sm"
+                  disabled=${actionLoading.value || channelDraft.value.trim().length === 0 || keeperDraft.value.trim().length === 0}
+                  onClick=${() => { void bindDiscordChannel() }}
+                >
+                  ${actionLoading.value ? 'Applying...' : 'Bind'}
+                <//>
+                <${ActionButton}
+                  variant="danger"
+                  size="sm"
+                  disabled=${actionLoading.value || channelDraft.value.trim().length === 0}
+                  onClick=${() => { void unbindDiscordChannel() }}
+                >
+                  Unbind
+                <//>
+              `
+            : null}
         </div>
       </div>
 
-      ${liveError.value || live?.error
-        ? html`<div class="mt-3 rounded-md border border-amber-400/20 bg-amber-500/8 px-3 py-2 text-[11px] text-amber-100">${liveError.value ?? live?.error}</div>`
+      ${connectorError.value || connector?.error
+        ? html`<div class="mt-3 rounded-md border border-amber-400/20 bg-amber-500/8 px-3 py-2 text-[11px] text-amber-100">${connectorError.value ?? connector?.error}</div>`
         : null}
 
-      ${live
+      ${connector
         ? html`
             <div class="mt-3 flex flex-wrap gap-3 text-[10px] text-[var(--text-dim)]">
-              <span>status ${live.status_path || '-'}</span>
-              <span>bindings ${live.binding_store_path || '-'}</span>
-              <span>audit ${live.audit_path || '-'}</span>
+              <span>status ${connector.status_path || '-'}</span>
+              <span>bindings ${connector.binding_store_path || '-'}</span>
+              <span>audit ${connector.audit_path || '-'}</span>
             </div>
           `
         : null}
@@ -445,8 +508,8 @@ function DiscordLivePanel({
             <div class="mb-1 text-[10px] uppercase tracking-[0.16em] text-[var(--text-dim)]">Channel ID</div>
             <${TextInput}
               value=${channelDraft.value}
-              placeholder="Discord channel snowflake"
-              ariaLabel="Discord channel id"
+              placeholder=${`${connectorName} channel identifier`}
+              ariaLabel=${channelInputLabel}
               onInput=${(e: Event) => { channelDraft.value = (e.target as HTMLInputElement).value }}
             />
           </div>
@@ -530,7 +593,7 @@ function DiscordLivePanel({
           <div>
             <div class="mb-1 text-[10px] uppercase tracking-[0.16em] text-[var(--text-dim)]">Configured bindings</div>
             ${configuredBindings.length === 0
-              ? html`<div class="rounded-md border border-dashed border-[var(--white-8)] px-3 py-4 text-xs text-[var(--text-dim)]">저장된 Discord 바인딩 없음</div>`
+              ? html`<div class="rounded-md border border-dashed border-[var(--white-8)] px-3 py-4 text-xs text-[var(--text-dim)]">No persisted connector bindings yet</div>`
               : html`
                   <div class="space-y-2">
                     ${configuredBindings.map(binding => html`
@@ -557,7 +620,9 @@ function DiscordLivePanel({
                               channelDraft.value = binding.channel_id
                               keeperDraft.value = binding.keeper_name
                             }}>Use<//>
-                            <${ActionButton} variant="danger" size="sm" disabled=${actionLoading.value} onClick=${() => { void unbindDiscordChannel(binding.channel_id) }}>Unbind<//>
+                            ${bindingActionsEnabled
+                              ? html`<${ActionButton} variant="danger" size="sm" disabled=${actionLoading.value} onClick=${() => { void unbindDiscordChannel(binding.channel_id) }}>Unbind<//>`
+                              : null}
                           </div>
                         </div>
                       </div>
@@ -779,7 +844,7 @@ export function ConnectorStatusPanel() {
   }, [lastEvent.value])
 
   const d = data.value
-  const live = discordLive.value
+  const live = preferredConnector(connectorsData.value)
 
   if (loading.value && !d && !live) {
     return html`<${LoadingState}>커넥터 상태 불러오는 중...<//>`
@@ -795,18 +860,18 @@ export function ConnectorStatusPanel() {
     <div>
       <div class="mb-3 flex items-center justify-between gap-3">
         <div>
-          <h3 class="text-sm font-semibold text-[var(--text-body)]">Connector Operations</h3>
+          <h3 class="text-sm font-semibold text-[var(--text-body)]">Channel Gate Connectors</h3>
           <div class="mt-1 text-[11px] text-[var(--text-dim)]">
-            Discord direct runtime + Gate-observed traffic in one surface.
+            Gate advertises connector descriptors; traffic health comes from gate metrics.
           </div>
         </div>
         <div class="text-right text-[10px] uppercase tracking-[0.16em] text-[var(--text-dim)]">
-          <div>${d ? `success ${d.success_rate_pct}%` : `direct ${discordStateLabel(live)}`}</div>
+          <div>${d ? `success ${d.success_rate_pct}%` : `descriptor ${connectorStateLabel(live)}`}</div>
           <div>${d ? `uptime ${formatUptime(d.uptime_seconds)}` : 'gate metrics unavailable'}</div>
         </div>
       </div>
 
-      <${DiscordLivePanel} live=${live} gate=${d} />
+      <${DiscordLivePanel} connector=${live} gate=${d} />
 
       ${error.value
         ? html`
@@ -819,7 +884,7 @@ export function ConnectorStatusPanel() {
       ${!d
         ? html`
             <div class="rounded-md border border-dashed border-[var(--white-8)] px-3 py-4 text-xs text-[var(--text-dim)]">
-              Direct Discord runtime is visible, but Gate-observed traffic is not available yet.
+              Gate-advertised connector runtime is visible, but Gate-observed traffic is not available yet.
             </div>
           `
         : html`
@@ -885,10 +950,10 @@ export function ConnectorStatusPanel() {
 
 export function resetConnectorStatusState() {
   data.value = null
-  discordLive.value = null
+  connectorsData.value = null
   loading.value = false
   error.value = null
-  liveError.value = null
+  connectorError.value = null
   keeperDirectory.value = []
   keeperDirectoryError.value = null
   actionLoading.value = false

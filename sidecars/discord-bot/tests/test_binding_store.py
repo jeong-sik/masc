@@ -39,6 +39,8 @@ def test_binding_store_ignores_invalid_json(tmp_path: Path) -> None:
 
 
 def test_config_resolves_relative_binding_store_path(tmp_path: Path) -> None:
+    base_path = tmp_path / "workspace"
+    base_path.mkdir()
     cfg = BotConfig(
         discord_bot_token="test-token",
         gate_api_token="test-api-token",
@@ -47,11 +49,40 @@ def test_config_resolves_relative_binding_store_path(tmp_path: Path) -> None:
         discord_status_path="status/discord.json",
     )
 
+    previous_base_path = os.getenv("MASC_BASE_PATH")
     original_cwd = Path.cwd()
     try:
+        os.environ["MASC_BASE_PATH"] = str(base_path)
+        os.chdir(tmp_path)
+        assert cfg.binding_store_path() == base_path / "state" / "discord.json"
+        assert cfg.binding_audit_path() == base_path / "audit" / "discord.jsonl"
+        assert cfg.status_path() == base_path / "status" / "discord.json"
+    finally:
+        if previous_base_path is None:
+            os.environ.pop("MASC_BASE_PATH", None)
+        else:
+            os.environ["MASC_BASE_PATH"] = previous_base_path
+        os.chdir(original_cwd)
+
+
+def test_config_falls_back_to_cwd_when_base_path_missing(tmp_path: Path) -> None:
+    cfg = BotConfig(
+        discord_bot_token="test-token",
+        gate_api_token="test-api-token",
+        discord_binding_store_path="state/discord.json",
+        discord_binding_audit_path="audit/discord.jsonl",
+        discord_status_path="status/discord.json",
+    )
+
+    previous_base_path = os.getenv("MASC_BASE_PATH")
+    original_cwd = Path.cwd()
+    try:
+        os.environ.pop("MASC_BASE_PATH", None)
         os.chdir(tmp_path)
         assert cfg.binding_store_path() == tmp_path / "state" / "discord.json"
         assert cfg.binding_audit_path() == tmp_path / "audit" / "discord.jsonl"
         assert cfg.status_path() == tmp_path / "status" / "discord.json"
     finally:
+        if previous_base_path is not None:
+            os.environ["MASC_BASE_PATH"] = previous_base_path
         os.chdir(original_cwd)

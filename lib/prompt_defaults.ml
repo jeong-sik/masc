@@ -20,10 +20,10 @@ let dedupe_preserving_order items =
 let prompt_markdown_dir_candidates ~workspace_path ~base_path =
   dedupe_preserving_order
     [
+      Config_dir_resolver.prompts_dir ();
       Filename.concat workspace_path "config/prompts";
       Filename.concat base_path "config/prompts";
       Filename.concat (Sys.getcwd ()) "config/prompts";
-      Config_dir_resolver.prompts_dir ();
     ]
 
 let resolve_prompt_markdown_dir ~workspace_path ~base_path =

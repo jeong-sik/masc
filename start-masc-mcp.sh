@@ -170,6 +170,28 @@ build_dashboard_spa() {
     echo "[dashboard] Build failed (non-fatal, server will show fallback page)." >&2
 }
 
+bootstrap_base_path_config() {
+    local base_path="$1"
+    local local_masc_dir="$base_path/.masc"
+    local local_config_dir="$local_masc_dir/config"
+
+    if [ -n "${MASC_CONFIG_DIR:-}" ]; then
+        return 0
+    fi
+    if [ -d "$local_config_dir" ]; then
+        return 0
+    fi
+
+    mkdir -p "$local_masc_dir"
+    if [ -d "$SCRIPT_DIR/config" ]; then
+        cp -R "$SCRIPT_DIR/config" "$local_config_dir"
+        echo "[startup] Bootstrapped config into $local_config_dir" >&2
+    else
+        mkdir -p "$local_config_dir"
+        echo "[startup] Repo config/ missing; created empty $local_config_dir" >&2
+    fi
+}
+
 resolve_repo_env_root() {
     if command -v git >/dev/null 2>&1; then
         local common_dir
@@ -596,15 +618,9 @@ fi
 
 RESOLVED_BASE_PATH="$(resolve_base_path "$BASE_PATH")"
 export MASC_BASE_PATH="$RESOLVED_BASE_PATH"
+bootstrap_base_path_config "$RESOLVED_BASE_PATH"
 if [ -z "${MASC_CONFIG_DIR:-}" ]; then
-    home_config_root="${HOME:-}/.masc/config"
-    if [ -n "${HOME:-}" ] && [ -d "$home_config_root" ] && {
-        [ -f "$home_config_root/cascade.json" ] || [ -d "$home_config_root/prompts" ] || [ -d "$home_config_root/keepers" ] || [ -d "$home_config_root/personas" ];
-    }; then
-        export MASC_CONFIG_DIR="$home_config_root"
-    else
-        export MASC_CONFIG_DIR="$SCRIPT_DIR/config"
-    fi
+    export MASC_CONFIG_DIR="$RESOLVED_BASE_PATH/.masc/config"
 fi
 # Leave MASC_PERSONAS_DIR unset unless the caller explicitly overrides it.
 # The server-side config resolver will then use "$MASC_CONFIG_DIR/personas".

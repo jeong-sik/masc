@@ -67,6 +67,8 @@ let policy_init_once = lazy (
   Result.get_ok (Keeper_exec_tools.init_policy_config ~base_path:repo_root)
 )
 
+let repo_root = lazy (Masc_test_deps.find_project_root ())
+
 let with_room f =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -836,11 +838,7 @@ let test_fs_read_allows_explicit_custom_path () =
 let test_bash_blocks_absolute_path_outside_playground () =
   with_room (fun config ->
     let meta = make_meta_with_preset "delivery" in
-    let shared_file =
-      Filename.concat (Keeper_alerting_path.project_root_of_config config)
-        "workspace/yousleepwhen/oas/lib/approval.ml"
-    in
-    write_text_file shared_file "let approval = true\n";
+    let shared_file = Filename.concat (Lazy.force repo_root) "dune-project" in
     let result =
       call_tool config meta "keeper_bash"
         (`Assoc [ "cmd", `String (Printf.sprintf "cat %s" shared_file) ])
@@ -854,11 +852,7 @@ let test_bash_blocks_absolute_path_outside_playground () =
 let test_bash_blocks_quoted_absolute_path_outside_playground () =
   with_room (fun config ->
     let meta = make_meta_with_preset "delivery" in
-    let shared_file =
-      Filename.concat (Keeper_alerting_path.project_root_of_config config)
-        "workspace/yousleepwhen/oas/lib/approval.ml"
-    in
-    write_text_file shared_file "let approval = true\n";
+    let shared_file = Filename.concat (Lazy.force repo_root) "dune-project" in
     let quoted_cmd = Printf.sprintf "cat \"%s\"" shared_file in
     let result =
       call_tool config meta "keeper_bash"
@@ -873,11 +867,7 @@ let test_bash_blocks_quoted_absolute_path_outside_playground () =
 let test_readonly_bash_blocks_quoted_absolute_path_outside_playground () =
   with_room (fun config ->
     let meta = make_meta_with_preset "delivery" in
-    let shared_file =
-      Filename.concat (Keeper_alerting_path.project_root_of_config config)
-        "workspace/yousleepwhen/oas/lib/approval.ml"
-    in
-    write_text_file shared_file "let approval = true\n";
+    let shared_file = Filename.concat (Lazy.force repo_root) "dune-project" in
     let quoted_cmd = Printf.sprintf "cat \"%s\"" shared_file in
     let result =
       call_tool config meta "keeper_shell_readonly"

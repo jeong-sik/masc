@@ -382,7 +382,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                   ("crash_log", `List []);
                   ("last_failure_reason", `Null);
                   ("dead_since", `Null);
-                  ("sp_events", `List shared_sp_events);
+                  ("sp_events", `List []);
                   ("health_score", `Int 100);
                   ("dead_eta_sec", `Null);
                 ]

@@ -1471,18 +1471,18 @@ let test_side_effect_reclassification_requires_committed_tools () =
   check bool "not marked ambiguous partial" false
     (UT.is_ambiguous_side_effect_error reclassified)
 
-let test_side_effect_reclassification_ignores_heartbeat_only () =
+let test_side_effect_reclassification_ignores_read_only_tools () =
   let original =
     Agent_sdk.Error.Api
       (Timeout { message = "Execution cancelled after 300.0s" })
   in
   let reclassified =
     UT.reclassify_error_after_side_effect
-      ~tool_names:["masc_heartbeat"; "keeper_board_list"] original
+      ~tool_names:["keeper_board_list"; "keeper_fs_read"] original
   in
-  check bool "heartbeat-only timeout stays transient" true
+  check bool "read-only timeout stays transient" true
     (UT.is_transient_network_error reclassified);
-  check bool "heartbeat-only timeout not ambiguous partial" false
+  check bool "read-only timeout not ambiguous partial" false
     (UT.is_ambiguous_side_effect_error reclassified)
 
 let test_side_effect_reclassification_marks_any_post_commit_error () =
@@ -2220,8 +2220,8 @@ let () =
             test_side_effect_timeout_reclassified_as_persistent;
           test_case "reclassification requires committed tools" `Quick
             test_side_effect_reclassification_requires_committed_tools;
-          test_case "heartbeat-only timeouts stay transient" `Quick
-            test_side_effect_reclassification_ignores_heartbeat_only;
+          test_case "read-only tool timeouts stay transient" `Quick
+            test_side_effect_reclassification_ignores_read_only_tools;
           test_case "any post-commit error becomes ambiguous partial" `Quick
             test_side_effect_reclassification_marks_any_post_commit_error;
           test_case "read-only keeper tools do not become ambiguous partial" `Quick

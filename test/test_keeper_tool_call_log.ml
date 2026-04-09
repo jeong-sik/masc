@@ -107,6 +107,75 @@ let test_model_field_stored () =
     Alcotest.(check bool) "model field present" true
       (Observability_redact.contains_substring ~sub:"glm-4-9b" entry_str))
 
+let test_turn_context_fields_stored () =
+  with_tmp_log (fun () ->
+    Keeper_tool_call_log.set_turn_context
+      ~keeper_name:"k"
+      ~lane:"tool_required"
+      ~tool_choice:"required"
+      ~thinking_enabled:false
+      ~thinking_budget:1024
+      ();
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"k" ~tool_name:"masc_status"
+      ~input:(`Assoc []) ~output_text:"ok"
+      ~success:true ~duration_ms:2.0 ();
+    let entries = Keeper_tool_call_log.read_recent () in
+    Alcotest.(check int) "one entry" 1 (List.length entries);
+    let entry = List.hd entries in
+    Alcotest.(check (option string)) "lane field"
+      (Some "tool_required")
+      (Safe_ops.json_string_opt "lane" entry);
+    Alcotest.(check (option string)) "tool_choice field"
+      (Some "required")
+      (Safe_ops.json_string_opt "tool_choice" entry);
+    Alcotest.(check bool) "thinking_enabled present" true
+      (match Yojson.Safe.Util.member "thinking_enabled" entry with
+       | `Bool false -> true
+       | _ -> false);
+    Alcotest.(check int) "thinking_budget field" 1024
+      (Safe_ops.json_int ~default:0 "thinking_budget" entry))
+
+let find_bucket name json =
+  json
+  |> Yojson.Safe.Util.to_list
+  |> List.find (fun item ->
+         Safe_ops.json_string_opt "name" item = Some name)
+
+let test_dashboard_aggregate_groups_runtime_fields () =
+  with_tmp_log (fun () ->
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"k1" ~tool_name:"masc_status"
+      ~input:(`Assoc []) ~output_text:"ok"
+      ~success:true ~duration_ms:2.0
+      ~model:"glm-5.1" ~lane:"tool_required"
+      ~tool_choice:"required"
+      ~thinking_enabled:false ~thinking_budget:1024 ();
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"k2" ~tool_name:"masc_status"
+      ~input:(`Assoc []) ~output_text:"error: {\"ok\":false,\"error\":\"boom\"}"
+      ~success:false ~duration_ms:3.0
+      ~model:"qwen3.5-27b-unified" ~lane:"retry"
+      ~tool_choice:"auto"
+      ~thinking_enabled:true ~thinking_budget:4096 ();
+    let summary = Dashboard_http_tool_quality.aggregate ~n:10 () in
+    let by_model = Yojson.Safe.Util.member "by_model" summary in
+    let by_lane = Yojson.Safe.Util.member "by_lane" summary in
+    let by_thinking = Yojson.Safe.Util.member "by_thinking_mode" summary in
+    let by_tool_choice = Yojson.Safe.Util.member "by_tool_choice" summary in
+    let glm_bucket = find_bucket "glm-5.1" by_model in
+    let retry_bucket = find_bucket "retry" by_lane in
+    let enabled_bucket = find_bucket "enabled" by_thinking in
+    let auto_bucket = find_bucket "auto" by_tool_choice in
+    Alcotest.(check int) "glm bucket calls" 1
+      (Safe_ops.json_int ~default:0 "calls" glm_bucket);
+    Alcotest.(check int) "retry bucket calls" 1
+      (Safe_ops.json_int ~default:0 "calls" retry_bucket);
+    Alcotest.(check int) "enabled thinking calls" 1
+      (Safe_ops.json_int ~default:0 "calls" enabled_bucket);
+    Alcotest.(check int) "auto tool_choice calls" 1
+      (Safe_ops.json_int ~default:0 "calls" auto_bucket))
+
 let () =
   Alcotest.run "keeper_tool_call_log"
     [ ( "read_recent",
@@ -118,5 +187,8 @@ let () =
         [ eio_test "denied tool not logged" test_denied_tool_not_logged
         ; eio_test "sensitive input fields redacted" test_sensitive_input_fields_redacted
         ; eio_test "model field stored" test_model_field_stored
+        ; eio_test "turn context fields stored" test_turn_context_fields_stored
+        ; eio_test "dashboard aggregate groups runtime fields"
+            test_dashboard_aggregate_groups_runtime_fields
         ] )
     ]

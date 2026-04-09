@@ -1273,6 +1273,25 @@ let run_turn
                 then current_params.tool_choice (* last turn: Auto for [STATE] block *)
                 else Some Agent_sdk.Types.Any (* all other turns: force tool use *)
               in
+              let lane =
+                if is_retry then "retry"
+                else (
+                  match tool_choice with
+                  | Some Agent_sdk.Types.Any -> "tool_required"
+                  | Some Agent_sdk.Types.None_ -> "tool_disabled"
+                  | _ -> "tool_optional")
+              in
+              Keeper_tool_call_log.set_turn_context
+                ~keeper_name:meta.name
+                ~lane
+                ?tool_choice:(Option.map
+                  (fun choice ->
+                    Yojson.Safe.to_string
+                      (Agent_sdk.Types.tool_choice_to_json choice))
+                  tool_choice)
+                ~thinking_enabled:(Keeper_config.keeper_enable_thinking ())
+                ?thinking_budget:current_params.thinking_budget
+                ();
               (* Tool disclosure telemetry: emitted after all allow-list rewrites
            (last-turn intersect, max_tools cap) so that
            final_visible and hook_ms reflect the actual state sent to AdjustParams.

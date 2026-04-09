@@ -1,0 +1,122 @@
+import { html } from 'htm/preact'
+import { render } from 'preact'
+import { act } from 'preact/test-utils'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { TelemetryResponse, TelemetrySummaryResponse } from '../api/dashboard'
+
+void vi
+
+const baseTelemetry: TelemetryResponse = {
+  generated_at: '2026-04-09T05:10:00Z',
+  count: 1,
+  entries: [
+    {
+      source: 'tool_metric',
+      ts: 1_775_709_000,
+      tool_name: 'mcp__masc__masc_status',
+      duration_ms: 42,
+      success: true,
+    },
+  ],
+}
+
+const baseSummary: TelemetrySummaryResponse = {
+  generated_at: '2026-04-09T05:10:00Z',
+  sources: [
+    {
+      source: 'tool_metric',
+      entry_count: 1,
+      keeper_count: 1,
+      exists: true,
+    },
+  ],
+  total_entries: 1,
+}
+
+async function flushUi(): Promise<void> {
+  await act(async () => {
+    for (let i = 0; i < 4; i += 1) {
+      await Promise.resolve()
+      await vi.advanceTimersByTimeAsync(0)
+    }
+  })
+}
+
+async function loadPanel(
+  fetchTelemetry: () => Promise<TelemetryResponse>,
+  fetchTelemetrySummary: () => Promise<TelemetrySummaryResponse>,
+) {
+  vi.resetModules()
+  vi.doMock('../api/dashboard', () => ({
+    fetchTelemetry,
+    fetchTelemetrySummary,
+  }))
+  return import('./telemetry-unified')
+}
+
+describe('TelemetryUnified', () => {
+  let container: HTMLDivElement
+  const originalVisibility = Object.getOwnPropertyDescriptor(Document.prototype, 'visibilityState')
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => 'visible',
+    })
+  })
+
+  afterEach(() => {
+    render(null, container)
+    container.remove()
+    vi.clearAllMocks()
+    vi.resetModules()
+    vi.doUnmock('../api/dashboard')
+    vi.useRealTimers()
+    if (originalVisibility) {
+      Object.defineProperty(document, 'visibilityState', originalVisibility)
+    }
+  })
+
+  it('polls automatically after the initial load', async () => {
+    const fetchTelemetry = vi.fn().mockResolvedValue(baseTelemetry)
+    const fetchTelemetrySummary = vi.fn().mockResolvedValue(baseSummary)
+    const { TelemetryUnified } = await loadPanel(fetchTelemetry, fetchTelemetrySummary)
+
+    await act(async () => {
+      render(html`<${TelemetryUnified} />`, container)
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    expect(fetchTelemetry).toHaveBeenCalledTimes(1)
+    expect(fetchTelemetrySummary).toHaveBeenCalledTimes(1)
+
+    await vi.advanceTimersByTimeAsync(15_000)
+    await flushUi()
+
+    expect(fetchTelemetry).toHaveBeenCalledTimes(2)
+    expect(fetchTelemetrySummary).toHaveBeenCalledTimes(2)
+  })
+
+  it('renders local and UTC snapshot metadata for operators', async () => {
+    const fetchTelemetry = vi.fn().mockResolvedValue(baseTelemetry)
+    const fetchTelemetrySummary = vi.fn().mockResolvedValue(baseSummary)
+    const { TelemetryUnified } = await loadPanel(fetchTelemetry, fetchTelemetrySummary)
+
+    await act(async () => {
+      render(html`<${TelemetryUnified} />`, container)
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    expect(container.textContent).toContain('Telemetry Stream')
+    expect(container.textContent).toContain('Auto 15s ON')
+    expect(container.textContent).toContain('Local')
+    expect(container.textContent).toContain('UTC')
+    expect(container.textContent).toContain('Latest Entries')
+    expect(container.textContent).toContain('mcp__masc__masc_status')
+  })
+})

@@ -1084,7 +1084,22 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
                 let committed_tools =
                   committed_mutating_tools !mutating_tools_committed
                 in
-                if committed_tools <> [] then begin
+                if committed_tools <> []
+                   && Keeper_tool_registry.all_tools_reconcile_safe
+                        committed_tools
+                then begin
+                  (* All committed tools are board-like (idempotent enough).
+                     Duplicate mutations are harmless vs. a permanently stuck
+                     keeper, so we skip manual_reconcile and propagate as a
+                     normal transient error. *)
+                  let err_preview = short_preview (Oas.Error.to_string err) in
+                  Log.Keeper.warn
+                    "%s: error after committed reconcile-safe tool(s) [%s] — auto-recovering, no manual reconcile (error: %s)"
+                    meta.name
+                    (String.concat ", " committed_tools)
+                    err_preview;
+                  Error err
+                end else if committed_tools <> [] then begin
                   let reclassified, failure_reason =
                     match
                       classify_post_commit_failure
@@ -1178,7 +1193,16 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
             let committed_tools =
               committed_mutating_tools !mutating_tools_committed
             in
-            if committed_tools <> [] then begin
+            if committed_tools <> []
+               && Keeper_tool_registry.all_tools_reconcile_safe
+                    committed_tools
+            then begin
+              Log.Keeper.warn
+                "%s: turn wall-clock timeout after committed reconcile-safe tool(s) [%s] — auto-recovering, no manual reconcile"
+                meta.name
+                (String.concat ", " committed_tools);
+              Error (Oas.Error.Api (Timeout { message = msg }))
+            end else if committed_tools <> [] then begin
               let timeout_err =
                 Oas.Error.Api (Timeout { message = msg })
               in

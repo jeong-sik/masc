@@ -268,13 +268,30 @@ module KeeperKeepalive = struct
       When [MASC_KEEPER_OAS_TIMEOUT_SEC] is set, that value is used directly.
       Otherwise, {!oas_timeout_for_context} computes an adaptive timeout
       based on max_context tokens: base 180s + 1.5s per 1K context tokens,
-      capped at [30, 600].
+      capped at [30, turn_timeout_sec].
 
-      Env: [MASC_KEEPER_OAS_TIMEOUT_SEC]. Default: adaptive. Range: [30, 600]. *)
+      The formula includes both context-proportional overhead and a
+      per-turn budget.  extend_turns (ceiling=200) lets keepers run
+      20+ turns per OAS call; the previous formula (180 + ctx/1K × 1.5,
+      cap 600) yielded 573s at 262K context — right at the edge where
+      20-turn sessions would timeout, triggering manual_reconcile on
+      committed board mutations.
+
+      The new formula:
+        base + ctx/1K × per_1k + min(max_turns × 4, 40) × per_turn
+      adds an explicit turn budget with 4× headroom for extend_turns,
+      capped at 40 effective turns.
+
+      At 262K context, 5 initial turns:
+        Old: 180 + 393 = 573s  →  20-turn sessions timeout
+        New: 120 + 393 + 600 = 1113s  →  30+ turns fit comfortably
+
+      Env: [MASC_KEEPER_OAS_TIMEOUT_SEC]. Default: adaptive.
+      Range: [30, turn_timeout_sec]. *)
   let oas_timeout_sec_override =
     match Sys.getenv_opt "MASC_KEEPER_OAS_TIMEOUT_SEC" with
     | Some raw ->
-      Some (Float.max 30.0 (Float.min 600.0
+      Some (Float.max 30.0 (Float.min turn_timeout_sec
         (Option.value ~default:300.0 (Float.of_string_opt (String.trim raw)))))
     | None -> None
 
@@ -282,10 +299,19 @@ module KeeperKeepalive = struct
     match oas_timeout_sec_override with
     | Some v -> v
     | None ->
-      let base = 180.0 in
+      let base = 120.0 in
       let per_1k = 1.5 in
-      let extra = Float.of_int max_context /. 1000.0 *. per_1k in
-      Float.max 30.0 (Float.min 600.0 (base +. extra))
+      let per_turn = 30.0 in
+      let context_time = Float.of_int max_context /. 1000.0 *. per_1k in
+      let max_turns_per_call =
+        max 1 (min 50 (get_int ~default:5 "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL"))
+      in
+      let effective_turns =
+        Float.of_int (min (max_turns_per_call * 4) 40)
+      in
+      let turn_time = effective_turns *. per_turn in
+      Float.max 30.0
+        (Float.min turn_timeout_sec (base +. context_time +. turn_time))
 
   (** Backward-compatible accessor: returns the env override or 300s default.
       Prefer {!oas_timeout_for_context} when max_context is available. *)

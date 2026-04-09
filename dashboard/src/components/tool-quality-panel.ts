@@ -33,7 +33,9 @@ interface HourlyPoint {
   success_rate: number
 }
 
-type ToolQualityData = ToolQualityResponse
+type ToolQualityData = Omit<ToolQualityResponse, 'by_tool'> & {
+  by_tool: ToolStat[]
+}
 
 const data: Signal<ToolQualityData | null> = signal(null)
 const loading: Signal<boolean> = signal(false)
@@ -53,6 +55,17 @@ function cancelActiveToolQualityRequest() {
   activeController?.abort()
   activeController = null
   loading.value = false
+}
+
+function normalizeToolQualityData(json: ToolQualityResponse): ToolQualityData {
+  return {
+    ...json,
+    by_tool: json.by_tool.map(t => ({
+      ...t,
+      output_truncated_count: t.output_truncated_count ?? 0,
+      avg_output_chars: t.avg_output_chars ?? 0,
+    })),
+  }
 }
 
 export async function refreshToolQuality(opts: RefreshToolQualityOptions = {}) {
@@ -75,14 +88,16 @@ export async function refreshToolQuality(opts: RefreshToolQualityOptions = {}) {
   try {
     const json = await fetchToolQuality({ n: 5000, signal: controller.signal })
     if (requestId !== latestRequestId) return
-    data.value = json
+    data.value = normalizeToolQualityData(json)
   } catch (e) {
     if (requestId !== latestRequestId) return
     if (isAbortError(e)) {
       return
     }
     if (e instanceof Error && /timeout after \d+ms/i.test(e.message)) {
-      error.value = 'request timeout (15s)'
+      const match = e.message.match(/timeout after (\d+)ms/i)
+      const seconds = match?.[1] ? Math.round(Number(match[1]) / 1000) : '?'
+      error.value = `request timeout (${seconds}s)`
     } else {
       error.value = e instanceof Error ? e.message : 'fetch failed'
     }

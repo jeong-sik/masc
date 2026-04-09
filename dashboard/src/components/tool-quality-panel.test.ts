@@ -14,6 +14,18 @@ const payload = {
   hourly_trend: [],
 }
 
+const payloadWithMissingToolMetrics = {
+  ...payload,
+  by_tool: [
+    {
+      name: 'masc_example',
+      calls: 3,
+      success_pct: 100,
+      avg_ms: 42,
+    },
+  ],
+}
+
 async function flushUi(): Promise<void> {
   await act(async () => {
     for (let i = 0; i < 4; i += 1) {
@@ -71,6 +83,25 @@ describe('ToolQualityPanel', () => {
     await flushUi()
 
     expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('normalizes missing tool metric fields before rendering', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => payloadWithMissingToolMetrics,
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const { ToolQualityPanel } = await import('./tool-quality-panel')
+
+    await act(async () => {
+      render(html`<${ToolQualityPanel} />`, container)
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    expect(container.textContent).toContain('m:example')
+    expect(container.textContent).toContain('0.0k')
+    expect(container.textContent).not.toContain('오류:')
   })
 
   it('replaces a stale in-flight request with the newest refresh', async () => {
@@ -161,5 +192,32 @@ describe('ToolQualityPanel', () => {
     await flushUi()
 
     expect(activeSignal?.aborted).toBe(true)
+  })
+
+  it('reports timeout durations from the shared API helper', async () => {
+    const fetchMock = vi.fn().mockImplementation((_url: string, init?: RequestInit) => new Promise((_resolve, reject) => {
+      const signal = init?.signal as AbortSignal | undefined
+      signal?.addEventListener('abort', () => {
+        reject(new DOMException('request timed out', 'AbortError'))
+      }, { once: true })
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    const { ToolQualityPanel } = await import('./tool-quality-panel')
+
+    await act(async () => {
+      render(html`<${ToolQualityPanel} />`, container)
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => 'hidden',
+    })
+
+    await vi.advanceTimersByTimeAsync(35_000)
+    await flushUi()
+
+    expect(container.textContent).toContain('request timeout (35s)')
   })
 })

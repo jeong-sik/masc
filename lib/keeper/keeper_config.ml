@@ -10,6 +10,30 @@ let default_cascade_name = "keeper_unified"
     Prevents running with a context too small for effective reasoning. *)
 let min_keeper_context_tokens = 65_536
 
+(* ── Alert preview truncation lengths ─────────────────────── *)
+
+(** Error detail truncation for alert messages. *)
+let alert_error_detail_max_chars = 280
+
+(** Floor for excerpt cap (minimum preview length). *)
+let alert_excerpt_min_chars = 240
+
+(** Message preview cap for alert formatting. *)
+let alert_message_preview_max_chars = 300
+
+(** Reply preview cap for alert formatting. *)
+let alert_reply_preview_max_chars = 420
+
+(* ── Tool policy display thresholds ───────────────────────── *)
+
+(** Warn when tool policy allows more than this many schemas. *)
+let tool_policy_count_warn_threshold = 100
+
+(** Truncate tool description auto-hints at this many chars.
+    150 chars preserves op enums and parameter hints that
+    9B models need to call tools correctly on the first attempt. *)
+let tool_first_sentence_max_chars = 150
+
 let bool_default_true_of_env name =
   match Sys.getenv_opt name with
   | None -> true

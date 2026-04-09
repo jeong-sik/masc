@@ -64,7 +64,7 @@ let run_alert_channel_with_retry
       let (ok, detail_opt) = send_once () in
       let detail =
         match detail_opt with
-        | Some s when String.trim s <> "" -> Some (short_preview ~max_len:280 s)
+        | Some s when String.trim s <> "" -> Some (short_preview ~max_len:Keeper_config.alert_error_detail_max_chars s)
         | _ -> last_error
       in
       if ok then
@@ -240,9 +240,9 @@ let keeper_alert_text
     ~(response_alignment : float) : string =
   let reason_text = if reasons = [] then "-" else String.concat ", " reasons in
   let keyword_text = if keywords = [] then "-" else String.concat ", " keywords in
-  let excerpt_cap = max 240 Env_config.KeeperAlert.max_body_chars in
-  let message_preview = short_preview ~max_len:(min excerpt_cap 300) message in
-  let reply_preview = short_preview ~max_len:(min excerpt_cap 420) reply in
+  let excerpt_cap = max Keeper_config.alert_excerpt_min_chars Env_config.KeeperAlert.max_body_chars in
+  let message_preview = short_preview ~max_len:(min excerpt_cap Keeper_config.alert_message_preview_max_chars) message in
+  let reply_preview = short_preview ~max_len:(min excerpt_cap Keeper_config.alert_reply_preview_max_chars) reply in
   Printf.sprintf
     "[keeper-alert] %s score=%.2f\n\
      - trace: %s\n\

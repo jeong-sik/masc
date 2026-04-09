@@ -360,9 +360,9 @@ let run_cmd host port base_path =
   (* Enable Eio-aware locking globally (single call replaces per-module enable_eio) *)
   Eio_guard.enable ();
   Masc_mcp.Transport_metrics.init ();
-  Masc_mcp.Dashboard_cache.set_clock (Eio.Stdenv.clock env);
 
-  (* Set global clock for Time_compat (Eio-native timestamps) *)
+  (* Set global clock for Time_compat (Eio-native timestamps).
+     Dashboard_cache.now() reads from Time_compat directly. *)
   Time_compat.set_clock (Eio.Stdenv.clock env);
 
   (* Initialize thread-safe token store for cancellation support *)

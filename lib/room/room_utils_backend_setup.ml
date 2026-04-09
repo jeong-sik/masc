@@ -154,10 +154,14 @@ let running_under_test_executable () =
   in
   String.starts_with ~prefix:"test_" executable
 
+let realpath p =
+  try Unix.realpath p with Unix.Unix_error _ -> p
+
 let is_ancestor_path ~ancestor ~descendant =
-  let a = if String.ends_with ~suffix:"/" ancestor then ancestor
-          else ancestor ^ "/" in
-  String.starts_with ~prefix:a descendant
+  let a = realpath ancestor in
+  let d = realpath descendant in
+  let a = if String.ends_with ~suffix:"/" a then a else a ^ "/" in
+  String.starts_with ~prefix:a d
 
 let should_ignore_inherited_base_path ~requested_path ~explicit_path =
   not (bool_env "MASC_ALLOW_INHERITED_BASE_PATH")

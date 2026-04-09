@@ -118,8 +118,9 @@ let test_default_base_path_sanitizes_inherited_dual_roots () =
   with_env "ME_ROOT" (Some me_root) @@ fun () ->
   with_env "MASC_BASE_PATH" (Some me_root) @@ fun () ->
   with_env "MASC_ALLOW_INHERITED_BASE_PATH" (Some "") @@ fun () ->
-  Alcotest.(check string) "default base path prefers checkout root"
-    (canonical_path repo)
+  (* ancestor explicit path wins: me_root is parent of repo *)
+  Alcotest.(check string) "default base path preserves ancestor explicit path"
+    (canonical_path me_root)
     (Server_mcp_transport_http.default_base_path () |> canonical_path)
 
 let test_default_base_path_respects_opt_in_for_inherited_root () =
@@ -148,7 +149,7 @@ let () =
             test_strict_violation_respects_env;
           Alcotest.test_case "json exposes effective paths" `Quick
             test_to_yojson_exposes_effective_paths;
-          Alcotest.test_case "default base path sanitizes inherited dual roots"
+          Alcotest.test_case "default base path preserves ancestor explicit path"
             `Quick test_default_base_path_sanitizes_inherited_dual_roots;
           Alcotest.test_case "default base path honors inherited opt-in" `Quick
             test_default_base_path_respects_opt_in_for_inherited_root;

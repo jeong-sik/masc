@@ -86,21 +86,6 @@ let load_lines path =
       |> List.filter (fun l -> String.trim l <> "")
     with Sys_error _ -> []
 
-let count_non_empty_lines path =
-  if not (Fs_compat.file_exists path) then 0
-  else
-    try
-      let ic = open_in_bin path in
-      Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
-        let count = ref 0 in
-        (try
-           while true do
-             let line = input_line ic in
-             if String.trim line <> "" then incr count
-           done
-         with End_of_file -> ());
-        !count)
-    with Sys_error _ -> 0
 
 (** Read the last [n] non-empty lines from a file without loading the entire
     file into memory.  Reads backwards in 8 KB chunks from the end.
@@ -221,18 +206,6 @@ let read_recent_lines t n =
      with Done -> ());
     !collected
   end
-
-let count_entries t =
-  let months = list_month_dirs t.base_dir in
-  List.fold_left (fun total month ->
-    let month_path = Filename.concat t.base_dir month in
-    let days = list_day_files month_path in
-    total
-    + List.fold_left (fun month_total day ->
-        let path = Filename.concat month_path day in
-        month_total + count_non_empty_lines path
-      ) 0 days
-  ) 0 months
 
 let read_range t ~since ~until =
   match parse_date since, parse_date until with

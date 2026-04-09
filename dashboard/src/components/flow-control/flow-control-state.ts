@@ -1,5 +1,7 @@
 import { signal, computed } from '@preact/signals'
 import { callMcpTool } from '../../api/mcp'
+import { namespaceTruth, namespaceTruthInitializing } from '../../namespace-truth-store'
+import { serverStatus } from '../../store'
 import { showToast } from '../common/toast'
 import { createAsyncResource, getData } from '../../lib/async-state'
 
@@ -19,7 +21,26 @@ export const roomStrategyLoading = computed(() =>
 export const maintenanceResult = signal<string | null>(null)
 export const maintenanceLoading = signal(false)
 
+function syncFlowStateFromDashboardSignals(): boolean {
+  if (namespaceTruthInitializing.value) {
+    flowState.value = 'initializing'
+    return true
+  }
+
+  const paused = namespaceTruth.value?.namespace.status?.paused ?? serverStatus.value?.paused
+  if (paused === true) {
+    flowState.value = 'paused'
+    return true
+  }
+  if (paused === false) {
+    flowState.value = 'running'
+    return true
+  }
+  return false
+}
+
 export async function fetchPauseStatus(): Promise<void> {
+  if (syncFlowStateFromDashboardSignals()) return
   try {
     const raw = await callMcpTool('masc_pause_status', {})
     const parsed = JSON.parse(raw) as { paused?: boolean | null; status?: string; initializing?: boolean }

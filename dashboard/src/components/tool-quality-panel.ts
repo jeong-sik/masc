@@ -68,7 +68,7 @@ function normalizeToolQualityData(json: ToolQualityResponse): ToolQualityData {
   }
 }
 
-export async function refreshToolQuality(opts: RefreshToolQualityOptions = {}) {
+async function runToolQualityRefresh(opts: RefreshToolQualityOptions = {}) {
   const requestId = ++latestRequestId
   activeController?.abort()
   loading.value = true
@@ -109,6 +109,10 @@ export async function refreshToolQuality(opts: RefreshToolQualityOptions = {}) {
     if (requestId !== latestRequestId) return
     loading.value = false
   }
+}
+
+export async function refreshToolQuality() {
+  await runToolQualityRefresh()
 }
 
 const successColor = computed(() => {
@@ -255,7 +259,7 @@ function FailureList({ categories }: { categories: FailureCategory[] }) {
 export function ToolQualityPanel() {
   useEffect(() => {
     const lifecycleController = new AbortController()
-    const runRefresh = () => refreshToolQuality({ signal: lifecycleController.signal })
+    const runRefresh = () => runToolQualityRefresh({ signal: lifecycleController.signal })
 
     void runRefresh()
     const disposeAutoRefresh = setupVisibleAutoRefresh(() => {

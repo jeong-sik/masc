@@ -186,6 +186,30 @@ let handle_gate_events _state request reqd =
   respond_json_with_cors ~status:`OK request reqd
     (Yojson.Safe.to_string json)
 
+let normalize_connector_status_name raw =
+  let normalized = String.lowercase_ascii (String.trim raw) in
+  if normalized = "" then None else Some normalized
+
+let resolve_connector_status_name ?name ?channel () =
+  match Option.bind name normalize_connector_status_name with
+  | Some connector_name -> Some connector_name
+  | None -> Option.bind channel normalize_connector_status_name
+
+let respond_connector_status request reqd connector_name =
+  match Channel_gate_connector.find connector_name with
+  | None ->
+      respond_json_with_cors ~status:`Not_found request reqd
+        (Yojson.Safe.to_string
+           (Channel_gate.error_json
+              ("unknown connector: " ^ connector_name)))
+  | Some (module C) ->
+      let audit_limit =
+        int_query_param request "audit_limit" ~default:10
+        |> fun value -> max 1 (min 50 value)
+      in
+      respond_json_with_cors ~status:`OK request reqd
+        (Yojson.Safe.to_string (C.status_json ~audit_limit ()))
+
 (** GET /api/v1/gate/health
 
     Simple health check for the gate layer. *)
@@ -226,23 +250,14 @@ let handle_gate_connectors _state request reqd =
     Single connector status by name.  Returns 404 if the connector
     is not registered. *)
 let handle_gate_connector_status_by_name _state request reqd =
-  match query_param request "name" with
+  match
+    resolve_connector_status_name ?name:(query_param request "name") ()
+  with
   | None | Some "" ->
       respond_json_with_cors ~status:`Bad_request request reqd
         (Yojson.Safe.to_string (Channel_gate.error_json "name is required"))
-  | Some name -> (
-      match Channel_gate_connector.find name with
-      | None ->
-          respond_json_with_cors ~status:`Not_found request reqd
-            (Yojson.Safe.to_string
-               (Channel_gate.error_json ("unknown connector: " ^ name)))
-      | Some (module C) ->
-          let audit_limit =
-            int_query_param request "audit_limit" ~default:10
-            |> fun value -> max 1 (min 50 value)
-          in
-          respond_json_with_cors ~status:`OK request reqd
-            (Yojson.Safe.to_string (C.status_json ~audit_limit ())))
+  | Some connector_name ->
+      respond_connector_status request reqd connector_name
 
 (** GET /api/v1/gate/discord/status
     Dashboard-facing live connector status sourced from the Discord bot's
@@ -258,13 +273,12 @@ let handle_gate_discord_status _state request reqd =
 (** Generic connector validation for the current single-connector surface.
 
     Until multiple connector backends exist, only [channel=discord] is valid. *)
-let resolve_connector_channel request =
-  match query_param request "channel" |> Option.map String.trim with
-  | None | Some "" -> Error "channel is required"
-  | Some raw ->
-      let channel = String.lowercase_ascii raw in
-      if String.equal channel "discord" then Ok channel
-      else Error ("unsupported channel: " ^ channel)
+let resolve_connector_channel ?channel () =
+  match Option.bind channel normalize_connector_status_name with
+  | None -> Error "channel is required"
+  | Some connector_name ->
+      if String.equal connector_name "discord" then Ok connector_name
+      else Error ("unsupported channel: " ^ connector_name)
 
 (** GET /api/v1/gate/connector/status?name=<connector>|channel=discord
 
@@ -272,11 +286,14 @@ let resolve_connector_channel request =
     connectors, but keep [channel=discord] as a compatibility alias for
     the current single-connector dashboard flow. *)
 let handle_gate_connector_status state request reqd =
-  match query_param request "name" |> Option.map String.trim with
-  | Some name when name <> "" ->
-      handle_gate_connector_status_by_name state request reqd
+  match Option.bind (query_param request "name") normalize_connector_status_name with
+  | Some connector_name ->
+      let _ = state in
+      respond_connector_status request reqd connector_name
   | _ -> (
-      match resolve_connector_channel request with
+      match
+        resolve_connector_channel ?channel:(query_param request "channel") ()
+      with
       | Error err ->
           respond_json_with_cors ~status:`Bad_request request reqd
             (Yojson.Safe.to_string (Channel_gate.error_json err))

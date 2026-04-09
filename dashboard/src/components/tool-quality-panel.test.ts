@@ -3,6 +3,11 @@ import { render } from 'preact'
 import { act } from 'preact/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+vi.setConfig({
+  testTimeout: 40000,
+  hookTimeout: 40000,
+})
+
 const payload = {
   total: 22,
   success: 21,

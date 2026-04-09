@@ -383,6 +383,72 @@ export function fetchDashboardMissionSession(sessionId: string): Promise<Dashboa
   return get(`/api/v1/dashboard/session${query}`)
 }
 
+export interface DashboardRuntimeProviderDiscovery {
+  healthy?: boolean
+  discovered_model?: string | null
+  ctx_size?: number | null
+  total_slots?: number | null
+  busy_slots?: number | null
+  idle_slots?: number | null
+}
+
+export interface DashboardRuntimeProviderSnapshot {
+  provider: string
+  kind?: string | null
+  runtime_kind?: string | null
+  auth_kind?: string | null
+  status?: string | null
+  available?: boolean
+  supports_single_agent_run?: boolean
+  default_model?: string | null
+  model_count?: number | null
+  models: string[]
+  source?: string | null
+  endpoint_url?: string | null
+  note?: string | null
+  discovery?: DashboardRuntimeProviderDiscovery | null
+}
+
+export interface DashboardRuntimeProvidersResponse {
+  updated_at?: string
+  summary?: {
+    providers?: number
+    local_models?: number
+    cloud_models?: number
+  } | null
+  providers: DashboardRuntimeProviderSnapshot[]
+}
+
+export interface DashboardRuntimeModelMetric {
+  model_id: string
+  entry_count?: number | null
+  avg_tok_per_sec?: number | null
+  p50_tok_per_sec?: number | null
+  p95_tok_per_sec?: number | null
+  avg_latency_ms?: number | null
+  p50_latency_ms?: number | null
+  p95_latency_ms?: number | null
+  total_input_tokens?: number | null
+  total_output_tokens?: number | null
+  total_cache_read_tokens?: number | null
+  total_reasoning_tokens?: number | null
+  fallback_count?: number | null
+}
+
+export interface DashboardRuntimeModelMetricsResponse {
+  window_minutes?: number
+  total_entries?: number
+  models: DashboardRuntimeModelMetric[]
+}
+
+export function fetchRuntimeProviders(): Promise<DashboardRuntimeProvidersResponse> {
+  return get('/api/v1/providers')
+}
+
+export function fetchRuntimeModelMetrics(windowMinutes = 30): Promise<DashboardRuntimeModelMetricsResponse> {
+  return get(`/api/v1/models/metrics?window=${windowMinutes}`)
+}
+
 export interface DashboardVerificationRef {
   kind: string
   label: string

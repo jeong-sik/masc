@@ -9,6 +9,7 @@ import { ActionBar, ActionBtn } from './common/action-bar'
 import { StatusChip } from './common/status-chip'
 import { openAgentDetail } from './agent-detail'
 import { SessionFlowCard } from './mission-session-flow'
+import { WorkerRunEvidenceRow } from './proof-sections'
 import type {
   DashboardMissionSessionCard,
   DashboardMissionSessionDetailResponse,
@@ -136,6 +137,7 @@ export function SessionDetailCard({
   }
 
   const session = detail.session
+  const workerRuns = detail.worker_runs ?? null
   return html`
     <${Card} title="세션 상세" class="mission-list-card rounded-xl">
       <div class="grid gap-1.5 mb-4">
@@ -148,6 +150,93 @@ export function SessionDetailCard({
       <div class="mt-4">
         <${SessionFlowCard} detail=${detail} />
       </div>
+
+      ${workerRuns
+        ? html`
+            <div class="grid gap-4 mt-4">
+              <div class="flex justify-between gap-3 items-start flex-wrap">
+                <strong>워커 런타임</strong>
+                <${StatusChip}
+                  label=${`${workerRuns.completed_success_count ?? 0}/${workerRuns.requested_count ?? 0} 완료`}
+                  tone=${(workerRuns.completed_failed_count ?? 0) > 0 ? 'warn' : 'ok'}
+                />
+              </div>
+
+              <div class="grid grid-cols-2 gap-3">
+                <${StatCell}
+                  label="요청"
+                  value=${workerRuns.requested_count ?? 0}
+                  detail=${`in-flight ${workerRuns.in_flight_count ?? 0}`}
+                />
+                <${StatCell}
+                  label="완료"
+                  value=${workerRuns.completed_success_count ?? 0}
+                  detail=${`실패 ${workerRuns.completed_failed_count ?? 0}`}
+                />
+                <${StatCell}
+                  label="준비됨"
+                  value=${workerRuns.ready_worker_count ?? 0}
+                  detail=${workerRuns.ready_worker_names.join(', ') || '없음'}
+                />
+                <${StatCell}
+                  label="보류"
+                  value=${workerRuns.pending_worker_count ?? 0}
+                  detail=${workerRuns.pending_worker_names.join(', ') || '없음'}
+                />
+              </div>
+
+              <div class="grid grid-cols-2 gap-5">
+                <div class="grid gap-3">
+                  <div class="flex justify-between gap-3 items-start flex-wrap">
+                    <strong>Delegate Readiness</strong>
+                    <${StatusChip}
+                      label=${String(workerRuns.worker_readiness.length)}
+                      tone=${workerRuns.blocked_worker_names.length > 0 ? 'warn' : 'ok'}
+                    />
+                  </div>
+                  <div class="flex flex-col gap-3">
+                    ${workerRuns.worker_readiness.length > 0
+                      ? workerRuns.worker_readiness.map(readiness => html`
+                          <${ListItem}
+                            title=${readiness.worker_name}
+                            subtitle=${readiness.delegate_ready ? 'delegate ready' : readiness.blocked_reason ?? 'blocked'}
+                            detail=${readiness.guidance ?? '추가 지침 없음'}
+                          />
+                        `)
+                      : html`<${EmptyState} message="delegate readiness 기록이 없습니다." compact />`}
+                  </div>
+                </div>
+
+                <div class="grid gap-3">
+                  <div class="flex justify-between gap-3 items-start flex-wrap">
+                    <strong>워커 상태 묶음</strong>
+                    <${StatusChip}
+                      label=${`${workerRuns.in_flight_actor_names.length} active`}
+                      tone=${workerRuns.in_flight_actor_names.length > 0 ? 'warn' : 'ok'}
+                    />
+                  </div>
+                  <div class="grid gap-2 text-[13px] text-[var(--text-body)]">
+                    <div>in-flight · ${workerRuns.in_flight_actor_names.join(', ') || '없음'}</div>
+                    <div>delegate-ready · ${workerRuns.delegate_ready_worker_names.join(', ') || '없음'}</div>
+                    <div>blocked · ${workerRuns.blocked_worker_names.join(', ') || '없음'}</div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="grid gap-3">
+                <div class="flex justify-between gap-3 items-start flex-wrap">
+                  <strong>최근 워커 실행</strong>
+                  <${StatusChip} label=${String(workerRuns.recent_runs.length)} />
+                </div>
+                <div class="flex flex-col gap-3">
+                  ${workerRuns.recent_runs.length > 0
+                    ? workerRuns.recent_runs.map(item => html`<${WorkerRunEvidenceRow} item=${item} />`)
+                    : html`<${EmptyState} message="최근 worker run 증거가 없습니다." compact />`}
+                </div>
+              </div>
+            </div>
+          `
+        : null}
 
       <div class="grid grid-cols-2 gap-5 mt-4">
         <div class="grid gap-3">

@@ -92,6 +92,22 @@ export function WorkerRunEvidenceRow({ item }: { item: DashboardProofWorkerRunEv
   const validationFailures = Array.isArray(item.validation_failures) ? item.validation_failures : []
   const toolSurfaceNames = Array.isArray(item.tool_surface_names) ? item.tool_surface_names : []
   const toolNames = Array.isArray(item.tool_names) ? item.tool_names : []
+  const traceWorkerRunId =
+    item.trace_ref && typeof item.trace_ref.worker_run_id === 'string'
+      ? item.trace_ref.worker_run_id
+      : null
+  const conformance =
+    item.session_conformance && typeof item.session_conformance === 'object' && !Array.isArray(item.session_conformance)
+      ? item.session_conformance
+      : null
+  const conformanceChecks = Array.isArray(conformance?.checks) ? conformance.checks : []
+  const conformanceFailures = conformanceChecks.filter(check => check && typeof check === 'object' && 'passed' in check && (check as { passed?: unknown }).passed === false)
+  const proofEvidenceCount =
+    typeof item.proof_evidence_count === 'number'
+      ? item.proof_evidence_count
+      : Array.isArray(item.raw_evidence_refs)
+        ? item.raw_evidence_refs.length
+        : null
   return html`
     <article class="p-4 rounded-xl border border-card-border bg-card/40 backdrop-blur-md shadow-sm hover:border-accent/30 transition-all duration-200 flex flex-col gap-3">
       <div class="flex justify-between gap-4 items-start">
@@ -120,6 +136,26 @@ export function WorkerRunEvidenceRow({ item }: { item: DashboardProofWorkerRunEv
         ? html`<div class="flex flex-col gap-1.5 py-3 px-4 rounded-xl border border-warn/30 bg-warn/10 shadow-inner mt-1">
             <strong class="text-[11px] font-semibold uppercase tracking-widest text-warn">검증 실패</strong>
             <span class="text-[12px] text-text-body leading-relaxed whitespace-pre-wrap">${validationFailures.join(' · ')}</span>
+          </div>`
+        : null}
+      ${(traceWorkerRunId || item.evidence_session_id || item.proof_run_id || item.proof_status || conformance)
+        ? html`<div class="flex flex-col gap-2 mt-2 pt-3 border-t border-card-border/50">
+            <strong class="text-[11px] font-semibold uppercase tracking-widest text-text-muted">증거 식별자</strong>
+            <div class="grid gap-1.5 text-[11px] text-text-body">
+              ${traceWorkerRunId ? html`<div>trace_ref · <span class="font-mono">${traceWorkerRunId}</span></div>` : null}
+              ${item.evidence_session_id ? html`<div>evidence_session · <span class="font-mono">${item.evidence_session_id}</span></div>` : null}
+              ${item.proof_run_id ? html`<div>proof_run · <span class="font-mono">${item.proof_run_id}</span></div>` : null}
+              ${item.proof_status ? html`<div>proof_status · ${item.proof_status}${proofEvidenceCount != null ? ` · evidence ${proofEvidenceCount}` : ''}</div>` : null}
+              ${conformance
+                ? html`<div>
+                    conformance · ${conformanceFailures.length > 0
+                      ? `${conformanceFailures.length} failed`
+                      : conformanceChecks.length > 0
+                        ? `${conformanceChecks.length} checks ok`
+                        : 'report present'}
+                  </div>`
+                : null}
+            </div>
           </div>`
         : null}
       ${toolSurfaceNames.length > 0

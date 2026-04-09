@@ -30,9 +30,12 @@ import type {
   DashboardMissionSessionCard,
   DashboardMissionSessionDetailResponse,
   DashboardMissionSessionBrief,
+  DashboardMissionSessionWorkerRuns,
   DashboardMissionSummary,
   DashboardMissionTimelineItem,
+  DashboardMissionWorkerReadiness,
   DashboardMissionCommandFocus,
+  DashboardProofWorkerRunEvidence,
   DashboardMissionTargets,
   OperatorActionDescriptor,
   OperatorAttentionItem,
@@ -61,6 +64,134 @@ function normalizeSessionCard(raw: unknown): OperatorSessionCard | null {
     recommended_action_count: asNumber(raw.recommended_action_count),
     top_attention: normalizeAttentionItem(raw.top_attention),
     top_recommendation: normalizeRecommendedAction(raw.top_recommendation),
+  }
+}
+
+function normalizeWorkerRunEvidence(raw: unknown): DashboardProofWorkerRunEvidence | null {
+  if (!isRecord(raw)) return null
+  const workerRunId = asString(raw.worker_run_id)
+  if (!workerRunId) return null
+  return {
+    worker_run_id: workerRunId,
+    session_id: asString(raw.session_id) ?? null,
+    operation_id: asString(raw.operation_id) ?? null,
+    trace_ref: isRecord(raw.trace_ref) ? raw.trace_ref : null,
+    evidence_session_id: asString(raw.evidence_session_id) ?? null,
+    session_conformance: isRecord(raw.session_conformance) ? raw.session_conformance : null,
+    cdal_run_id: asString(raw.cdal_run_id) ?? null,
+    contract_id: asString(raw.contract_id) ?? null,
+    result_status: asString(raw.result_status) ?? null,
+    proof_present: asBoolean(raw.proof_present),
+    proof_run_id: asString(raw.proof_run_id) ?? null,
+    proof_status: asString(raw.proof_status) ?? null,
+    proof_risk_class: asString(raw.proof_risk_class) ?? null,
+    proof_execution_mode: asString(raw.proof_execution_mode) ?? null,
+    proof_evidence_count: asNumber(raw.proof_evidence_count),
+    checkpoint_ref: asString(raw.checkpoint_ref) ?? null,
+    tool_trace_refs: extractArray(raw.tool_trace_refs)
+      .map(item => (typeof item === 'string' ? item.trim() : ''))
+      .filter(Boolean),
+    raw_evidence_refs: extractArray(raw.raw_evidence_refs)
+      .map(item => (typeof item === 'string' ? item.trim() : ''))
+      .filter(Boolean),
+    worker_name: asString(raw.worker_name) ?? null,
+    status: asString(raw.status) ?? null,
+    mode: asString(raw.mode) ?? null,
+    wait_mode: asString(raw.wait_mode) ?? null,
+    trace_capability: asString(raw.trace_capability) ?? null,
+    trace_validated: asBoolean(raw.trace_validated),
+    validation_failures: extractArray(raw.validation_failures)
+      .map(item => (typeof item === 'string' ? item.trim() : ''))
+      .filter(Boolean),
+    success: asBoolean(raw.success),
+    execution_scope: asString(raw.execution_scope) ?? null,
+    requested_worker_class: asString(raw.requested_worker_class) ?? null,
+    requested_worker_size: asString(raw.requested_worker_size) ?? null,
+    tool_surface_status: asString(raw.tool_surface_status) ?? null,
+    tool_surface_source: asString(raw.tool_surface_source) ?? null,
+    tool_surface_names: extractArray(raw.tool_surface_names)
+      .map(item => (typeof item === 'string' ? item.trim() : ''))
+      .filter(Boolean),
+    tool_surface_masc_names: extractArray(raw.tool_surface_masc_names)
+      .map(item => (typeof item === 'string' ? item.trim() : ''))
+      .filter(Boolean),
+    tool_surface_shell_names: extractArray(raw.tool_surface_shell_names)
+      .map(item => (typeof item === 'string' ? item.trim() : ''))
+      .filter(Boolean),
+    tool_surface_count: asNumber(raw.tool_surface_count),
+    resolved_runtime: asString(raw.resolved_runtime) ?? null,
+    resolved_model: asString(raw.resolved_model) ?? null,
+    routing_reason: asString(raw.routing_reason) ?? null,
+    tool_names: extractArray(raw.tool_names)
+      .map(item => (typeof item === 'string' ? item.trim() : ''))
+      .filter(Boolean),
+    tool_call_count: asNumber(raw.tool_call_count),
+    output_preview: asString(raw.output_preview) ?? null,
+    record_count: asNumber(raw.record_count),
+    assistant_block_count: asNumber(raw.assistant_block_count),
+    final_text: asString(raw.final_text) ?? null,
+    stop_reason: asString(raw.stop_reason) ?? null,
+    failure_reason: asString(raw.failure_reason) ?? null,
+    error: asString(raw.error) ?? null,
+    evidence_refs: extractArray(raw.evidence_refs)
+      .map(item => (typeof item === 'string' ? item.trim() : ''))
+      .filter(Boolean),
+    ts_iso: asString(raw.ts_iso) ?? null,
+  }
+}
+
+function normalizeWorkerReadiness(raw: unknown): DashboardMissionWorkerReadiness | null {
+  if (!isRecord(raw)) return null
+  const workerName = asString(raw.worker_name)
+  if (!workerName) return null
+  return {
+    worker_name: workerName,
+    spawn_role: asString(raw.spawn_role) ?? null,
+    execution_scope: asString(raw.execution_scope) ?? null,
+    runtime_pool: asString(raw.runtime_pool) ?? null,
+    routing_reason: asString(raw.routing_reason) ?? null,
+    has_meta: asBoolean(raw.has_meta),
+    has_checkpoint: asBoolean(raw.has_checkpoint),
+    in_flight: asBoolean(raw.in_flight),
+    delegate_ready: asBoolean(raw.delegate_ready),
+    blocked_reason: asString(raw.blocked_reason) ?? null,
+    guidance: asString(raw.guidance) ?? null,
+  }
+}
+
+function normalizeSessionWorkerRuns(raw: unknown): DashboardMissionSessionWorkerRuns | null {
+  if (!isRecord(raw)) return null
+  return {
+    requested_count: asNumber(raw.requested_count),
+    completed_success_count: asNumber(raw.completed_success_count),
+    completed_failed_count: asNumber(raw.completed_failed_count),
+    in_flight_count: asNumber(raw.in_flight_count),
+    in_flight_run_ids: extractArray(raw.in_flight_run_ids)
+      .map(item => (typeof item === 'string' ? item.trim() : ''))
+      .filter(Boolean),
+    in_flight_actor_names: extractArray(raw.in_flight_actor_names)
+      .map(item => (typeof item === 'string' ? item.trim() : ''))
+      .filter(Boolean),
+    ready_worker_count: asNumber(raw.ready_worker_count),
+    ready_worker_names: extractArray(raw.ready_worker_names)
+      .map(item => (typeof item === 'string' ? item.trim() : ''))
+      .filter(Boolean),
+    delegate_ready_worker_names: extractArray(raw.delegate_ready_worker_names)
+      .map(item => (typeof item === 'string' ? item.trim() : ''))
+      .filter(Boolean),
+    blocked_worker_names: extractArray(raw.blocked_worker_names)
+      .map(item => (typeof item === 'string' ? item.trim() : ''))
+      .filter(Boolean),
+    pending_worker_count: asNumber(raw.pending_worker_count),
+    pending_worker_names: extractArray(raw.pending_worker_names)
+      .map(item => (typeof item === 'string' ? item.trim() : ''))
+      .filter(Boolean),
+    worker_readiness: extractArray(raw.worker_readiness)
+      .map(normalizeWorkerReadiness)
+      .filter((item): item is DashboardMissionWorkerReadiness => item !== null),
+    recent_runs: extractArray(raw.recent_runs)
+      .map(normalizeWorkerRunEvidence)
+      .filter((item): item is DashboardProofWorkerRunEvidence => item !== null),
   }
 }
 
@@ -287,6 +418,7 @@ export function normalizeMissionSessionDetail(raw: unknown): DashboardMissionSes
     keepers: extractArray(root.keepers)
       .map(normalizeKeeperRef)
       .filter((item): item is DashboardMissionKeeperRef => item !== null),
+    worker_runs: normalizeSessionWorkerRuns(root.worker_runs),
     error: asString(root.error) ?? null,
   }
 }

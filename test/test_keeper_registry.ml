@@ -375,7 +375,7 @@ let test_resolve_config_cross_base_path () =
   let _entry = R.register ~base_path:bp2 "rc2" (make_meta "rc2") in
   let config = make_test_config bp in
   let resolved = R.resolve_config config "rc2" in
-  check string "cross-base_path resolves" bp2 resolved.base_path
+  check string "cross-base_path keeps original scope" bp resolved.base_path
 
 let test_resolve_config_not_found () =
   R.clear ();
@@ -432,6 +432,48 @@ let test_directive_nonexistent_agent () =
   R.clear ();
   KK.process_directive ~agent_name:"ghost-agent" "pause";
   check bool "no crash on missing agent" true true
+
+let test_stop_keepalive_scoped_to_base_path () =
+  R.clear ();
+  let bp2 = "/tmp/stop-other" in
+  let entry_a = R.register ~base_path:bp "shared-stop" (make_meta "shared-stop") in
+  let entry_b = R.register ~base_path:bp2 "shared-stop" (make_meta "shared-stop") in
+  check bool "base path A stop initially false" false
+    (Atomic.get entry_a.fiber_stop);
+  check bool "base path B stop initially false" false
+    (Atomic.get entry_b.fiber_stop);
+  KK.stop_keepalive ~base_path:bp "shared-stop";
+  check bool "base path A stop set" true (Atomic.get entry_a.fiber_stop);
+  check bool "base path B stop stays unset" false
+    (Atomic.get entry_b.fiber_stop)
+
+let test_wakeup_keeper_scoped_to_base_path () =
+  R.clear ();
+  let bp2 = "/tmp/wakeup-other" in
+  let entry_a = R.register ~base_path:bp "shared" (make_meta "shared") in
+  let entry_b = R.register ~base_path:bp2 "shared" (make_meta "shared") in
+  check bool "base path A wakeup initially false" false
+    (Atomic.get entry_a.fiber_wakeup);
+  check bool "base path B wakeup initially false" false
+    (Atomic.get entry_b.fiber_wakeup);
+  KK.wakeup_keeper ~base_path:bp "shared";
+  check bool "base path A wakeup set" true (Atomic.get entry_a.fiber_wakeup);
+  check bool "base path B wakeup stays unset" false
+    (Atomic.get entry_b.fiber_wakeup)
+
+let test_wakeup_all_scoped_to_base_path () =
+  R.clear ();
+  let bp2 = "/tmp/wakeup-all-other" in
+  let entry_a = R.register ~base_path:bp "all-a" (make_meta "all-a") in
+  let entry_b = R.register ~base_path:bp2 "all-b" (make_meta "all-b") in
+  check bool "base path A all wakeup initially false" false
+    (Atomic.get entry_a.fiber_wakeup);
+  check bool "base path B all wakeup initially false" false
+    (Atomic.get entry_b.fiber_wakeup);
+  KK.wakeup_all_keepers ~base_path:bp ();
+  check bool "base path A all wakeup set" true (Atomic.get entry_a.fiber_wakeup);
+  check bool "base path B all wakeup stays unset" false
+    (Atomic.get entry_b.fiber_wakeup)
 
 let () =
   run "Keeper_registry"
@@ -495,5 +537,11 @@ let () =
           eio_test "claim directive" test_directive_claim;
           eio_test "unknown directive no crash" test_directive_unknown_no_crash;
           eio_test "nonexistent agent no crash" test_directive_nonexistent_agent;
+          eio_test "stop keepalive scoped to base_path"
+            test_stop_keepalive_scoped_to_base_path;
+          eio_test "wakeup keeper scoped to base_path"
+            test_wakeup_keeper_scoped_to_base_path;
+          eio_test "wakeup all scoped to base_path"
+            test_wakeup_all_scoped_to_base_path;
         ] );
     ]

@@ -1,7 +1,7 @@
 // Telemetry Unified — MASC runtime diagnosis view.
 
 import { html } from 'htm/preact'
-import { useEffect } from 'preact/hooks'
+import { useEffect, useRef } from 'preact/hooks'
 import { useSignal } from '@preact/signals'
 import {
   fetchDashboardShell,
@@ -14,8 +14,10 @@ import {
   type TelemetrySourceSummary,
 } from '../api/dashboard'
 import { route } from '../router'
+import { TELEMETRY_AUTO_REFRESH_MS } from '../config/constants'
 import { TELEMETRY_SOURCE_META, telemetrySourceMeta } from '../config/telemetry-sources'
 import { formatTimeAgo } from '../lib/format-time'
+import { setupVisibleAutoRefresh } from '../lib/auto-refresh'
 
 interface StoreSnapshot {
   keepers: number
@@ -233,6 +235,7 @@ ${JSON.stringify(entry, null, 2)}</pre>
 
 export function TelemetryUnified() {
   const params = route.value.params
+  const latestRequestId = useRef(0)
   const state = useSignal<TelemetryState>({
     entries: [],
     summary: [],
@@ -259,6 +262,7 @@ export function TelemetryUnified() {
   ])
 
   async function load() {
+    const requestId = ++latestRequestId.current
     state.value = { ...state.value, loading: true, error: null }
     try {
       const storePromise = Promise.all([
@@ -298,6 +302,7 @@ export function TelemetryUnified() {
         fetchTelemetrySummary(),
         storePromise,
       ])
+      if (requestId !== latestRequestId.current) return
       state.value = {
         entries: telemetry.entries,
         summary: summary.sources,
@@ -307,6 +312,7 @@ export function TelemetryUnified() {
         error: null,
       }
     } catch (e) {
+      if (requestId !== latestRequestId.current) return
       state.value = {
         ...state.value,
         loading: false,
@@ -315,7 +321,10 @@ export function TelemetryUnified() {
     }
   }
 
-  useEffect(() => { void load() }, [
+  useEffect(() => {
+    void load()
+    return setupVisibleAutoRefresh(load, TELEMETRY_AUTO_REFRESH_MS)
+  }, [
     sourceFilter.value,
     keeperFilter.value,
     sessionFilter.value,
@@ -428,6 +437,7 @@ export function TelemetryUnified() {
         >
           Refresh
         </button>
+        <span class="text-xs text-[var(--text-muted)]">30초 자동 갱신</span>
         ${loading ? html`<span class="text-xs text-[var(--text-muted)]">로딩 중...</span>` : null}
       </div>
 

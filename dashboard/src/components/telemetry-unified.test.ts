@@ -42,6 +42,16 @@ async function flushUi(): Promise<void> {
   })
 }
 
+function requireResolver<T>(
+  resolver: ((value: T) => void) | null,
+  label: string,
+): (value: T) => void {
+  if (!resolver) {
+    throw new Error(label)
+  }
+  return resolver
+}
+
 async function loadPanel(
   fetchTelemetry: () => Promise<TelemetryResponse>,
   fetchTelemetrySummary: () => Promise<TelemetrySummaryResponse>,
@@ -83,7 +93,7 @@ describe('TelemetryUnified', () => {
     }
   })
 
-  it('does not poll automatically after the initial load', async () => {
+  it('polls automatically while the document is visible', async () => {
     const fetchTelemetry = vi.fn().mockResolvedValue(baseTelemetry)
     const fetchTelemetrySummary = vi.fn().mockResolvedValue(baseSummary)
     const { TelemetryUnified } = await loadPanel(fetchTelemetry, fetchTelemetrySummary)
@@ -97,11 +107,11 @@ describe('TelemetryUnified', () => {
     expect(fetchTelemetry).toHaveBeenCalledTimes(1)
     expect(fetchTelemetrySummary).toHaveBeenCalledTimes(1)
 
-    await vi.advanceTimersByTimeAsync(15_000)
+    await vi.advanceTimersByTimeAsync(30_000)
     await flushUi()
 
-    expect(fetchTelemetry).toHaveBeenCalledTimes(1)
-    expect(fetchTelemetrySummary).toHaveBeenCalledTimes(1)
+    expect(fetchTelemetry).toHaveBeenCalledTimes(2)
+    expect(fetchTelemetrySummary).toHaveBeenCalledTimes(2)
   })
 
   it('renders runtime diagnosis metadata for operators', async () => {
@@ -118,6 +128,7 @@ describe('TelemetryUnified', () => {
     expect(container.textContent).toContain('Runtime Diagnosis')
     expect(container.textContent).toContain('MASC telemetry store')
     expect(container.textContent).toContain('Refresh')
+    expect(container.textContent).toContain('30초 자동 갱신')
     expect(container.textContent).toContain('MASC telemetry store entries')
     expect(container.textContent).toContain('mcp__masc__masc_status')
 
@@ -127,5 +138,80 @@ describe('TelemetryUnified', () => {
     expect(container.textContent).toContain('Agent 현황 (live)')
     expect(container.textContent).toContain('1 활성 세션')
     expect(container.textContent).toContain('5 public')
+  })
+
+  it('ignores out-of-order telemetry refresh responses', async () => {
+    let telemetryCall = 0
+    let summaryCall = 0
+    let resolveTelemetryFirst: ((value: TelemetryResponse) => void) | null = null
+    let resolveTelemetrySecond: ((value: TelemetryResponse) => void) | null = null
+    let resolveSummaryFirst: ((value: TelemetrySummaryResponse) => void) | null = null
+    let resolveSummarySecond: ((value: TelemetrySummaryResponse) => void) | null = null
+
+    const fetchTelemetry = vi.fn().mockImplementation(() => {
+      telemetryCall += 1
+      return new Promise<TelemetryResponse>(resolve => {
+        if (telemetryCall === 1) resolveTelemetryFirst = resolve
+        else resolveTelemetrySecond = resolve
+      })
+    })
+    const fetchTelemetrySummary = vi.fn().mockImplementation(() => {
+      summaryCall += 1
+      return new Promise<TelemetrySummaryResponse>(resolve => {
+        if (summaryCall === 1) resolveSummaryFirst = resolve
+        else resolveSummarySecond = resolve
+      })
+    })
+    const { TelemetryUnified } = await loadPanel(fetchTelemetry, fetchTelemetrySummary)
+
+    await act(async () => {
+      render(html`<${TelemetryUnified} />`, container)
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    const refreshButton = Array.from(container.querySelectorAll('button'))
+      .find(button => button.textContent?.includes('Refresh'))
+    expect(refreshButton).toBeTruthy()
+
+    await act(async () => {
+      refreshButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      await Promise.resolve()
+    })
+
+    const applyTelemetrySecond = requireResolver(resolveTelemetrySecond, 'missing second telemetry resolver')
+    const applySummarySecond = requireResolver(resolveSummarySecond, 'missing second summary resolver')
+    applyTelemetrySecond({
+      ...baseTelemetry,
+      entries: [{
+        source: 'tool_metric',
+        ts: 1_775_709_100,
+        tool_name: 'newer_tool',
+        duration_ms: 10,
+        success: true,
+      }],
+    })
+    applySummarySecond(baseSummary)
+    await flushUi()
+
+    expect(container.textContent).toContain('newer_tool')
+
+    const applyTelemetryFirst = requireResolver(resolveTelemetryFirst, 'missing first telemetry resolver')
+    const applySummaryFirst = requireResolver(resolveSummaryFirst, 'missing first summary resolver')
+    applyTelemetryFirst({
+      ...baseTelemetry,
+      entries: [{
+        source: 'tool_metric',
+        ts: 1_775_709_000,
+        tool_name: 'older_tool',
+        duration_ms: 42,
+        success: true,
+      }],
+    })
+    applySummaryFirst(baseSummary)
+    await flushUi()
+
+    expect(container.textContent).toContain('newer_tool')
+    expect(container.textContent).not.toContain('older_tool')
   })
 })

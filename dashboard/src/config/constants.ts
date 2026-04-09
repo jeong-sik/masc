@@ -33,6 +33,7 @@ export const SSE_KEEPER_THREAD_DEBOUNCE_MS = 800
 export const SSE_RECONNECT_RETRY_MS = 3_000
 export const PERIODIC_REFRESH_DEV_MS = 180_000
 export const PERIODIC_REFRESH_PROD_MS = 120_000
+export const TELEMETRY_AUTO_REFRESH_MS = 30_000
 
 // --- Context ratio thresholds ---
 // Lifecycle state thresholds (SSOT: lib/config/env_config_runtime.ml Dashboard module)

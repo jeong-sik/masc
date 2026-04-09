@@ -1,6 +1,6 @@
 import { html } from 'htm/preact'
 import { useSignal } from '@preact/signals'
-import { useEffect } from 'preact/hooks'
+import { useEffect, useRef } from 'preact/hooks'
 import { LoadingState } from './common/feedback-state'
 import {
   fetchDashboardExecution,
@@ -9,6 +9,8 @@ import {
   type TelemetrySourceSummary,
   type ToolQualityResponse,
 } from '../api/dashboard'
+import { TELEMETRY_AUTO_REFRESH_MS } from '../config/constants'
+import { setupVisibleAutoRefresh } from '../lib/auto-refresh'
 import { normalizeKeepers } from '../keeper-store-normalize'
 import { telemetrySourceLabel } from '../config/telemetry-sources'
 import { formatElapsedCompact, formatTimeAgo } from '../lib/format-time'
@@ -438,9 +440,11 @@ function FailureCategoryPanel({ toolQuality }: { toolQuality: ToolQualityRespons
 }
 
 export function FleetTelemetryPanel() {
+  const latestRequestId = useRef(0)
   const state = useSignal<FleetTelemetryState>(emptyState())
 
   const loadFleetTelemetry = async () => {
+    const requestId = ++latestRequestId.current
     state.value = {
       ...state.value,
       loading: true,
@@ -491,6 +495,7 @@ export function FleetTelemetryPanel() {
       || toolQuality.total > 0
       || telemetrySummary.total_entries > 0
 
+    if (requestId !== latestRequestId.current) return
     state.value = {
       loading: false,
       error: hasAnyData ? null : 'No fleet telemetry data available.',
@@ -505,6 +510,7 @@ export function FleetTelemetryPanel() {
 
   useEffect(() => {
     void loadFleetTelemetry()
+    return setupVisibleAutoRefresh(loadFleetTelemetry, TELEMETRY_AUTO_REFRESH_MS)
   }, [])
 
   const value = state.value
@@ -534,11 +540,14 @@ export function FleetTelemetryPanel() {
             ${value.updated_at ? `Updated ${formatTimeAgo(value.updated_at)}` : 'Runtime + telemetry store view'}
           </div>
         </div>
-        <button
-          class="rounded bg-[var(--bg-subtle)] px-2 py-0.5 text-[10px] text-[var(--text-dim)] hover:text-[var(--text)]"
-          onClick=${() => { void loadFleetTelemetry() }}
-          aria-label="Fleet 텔레메트리 새로고침"
-        >새로고침</button>
+        <div class="flex items-center gap-2">
+          <button
+            class="rounded bg-[var(--bg-subtle)] px-2 py-0.5 text-[10px] text-[var(--text-dim)] hover:text-[var(--text)]"
+            onClick=${() => { void loadFleetTelemetry() }}
+            aria-label="Fleet 텔레메트리 새로고침"
+          >새로고침</button>
+          <span class="text-[10px] text-[var(--text-dim)]">30초 자동 갱신</span>
+        </div>
       </div>
 
       <${WarningBanner} warnings=${value.warnings} />

@@ -159,6 +159,13 @@ let test_git_worktree_branch_required () =
 
 let playground_path_of = Masc_mcp.Keeper_alerting_path.playground_path_of_keeper
 
+let normalize_path_for_containment path =
+  let normalized = Masc_mcp.Keeper_alerting_path.normalize_path_for_check path in
+  let len = String.length normalized in
+  if len > 1 && String.ends_with ~suffix:"/" normalized
+  then String.sub normalized 0 (len - 1)
+  else normalized
+
 let test_playground_path_structure () =
   (* playground_path_of_keeper returns relative path ending with / *)
   Alcotest.(check string) "cheolsu"
@@ -167,6 +174,8 @@ let test_playground_path_structure () =
     ".masc/playground/masc-improver/" (playground_path_of "masc-improver")
 
 let is_inside_playground ~playground_abs cwd =
+  let playground_abs = normalize_path_for_containment playground_abs in
+  let cwd = normalize_path_for_containment cwd in
   String.starts_with ~prefix:(playground_abs ^ "/") (cwd ^ "/")
   || String.equal playground_abs cwd
 
@@ -194,6 +203,15 @@ let test_playground_guard_outside () =
   (* Prefix attack: cheolsu2 should not match cheolsu *)
   Alcotest.(check bool) "prefix attack (cheolsu2)"
     false (is_inside_playground ~playground_abs:pg (pg ^ "2/repos"))
+
+let test_playground_guard_trailing_slash () =
+  let pg = "/project/.masc/playground/cheolsu/" in
+  Alcotest.(check bool) "trailing slash exact match"
+    true (is_inside_playground ~playground_abs:pg "/project/.masc/playground/cheolsu");
+  Alcotest.(check bool) "trailing slash nested match"
+    true
+    (is_inside_playground ~playground_abs:pg
+       "/project/.masc/playground/cheolsu/repos/masc-mcp")
 
 (** Path traversal: if cwd is canonicalized via realpath before the check,
     ../traversal resolves to the actual target. This test verifies that
@@ -232,6 +250,22 @@ let test_git_write_classification () =
   Alcotest.(check bool) "push is not destructive"
     false (is_destructive "git push origin my-branch")
 
+let test_playground_write_policy () =
+  let branch_switch_allowed ~write_enabled ~in_playground =
+    write_enabled && in_playground
+  in
+  let write_allowed ~write_enabled = write_enabled in
+  Alcotest.(check bool) "branch switch requires write-enabled preset"
+    false (branch_switch_allowed ~write_enabled:false ~in_playground:true);
+  Alcotest.(check bool) "branch switch requires playground cwd"
+    false (branch_switch_allowed ~write_enabled:true ~in_playground:false);
+  Alcotest.(check bool) "branch switch allowed only with both conditions"
+    true (branch_switch_allowed ~write_enabled:true ~in_playground:true);
+  Alcotest.(check bool) "read-only preset still cannot write in playground"
+    false (write_allowed ~write_enabled:false);
+  Alcotest.(check bool) "write-enabled preset can perform write ops"
+    true (write_allowed ~write_enabled:true)
+
 let () =
   Alcotest.run "Keeper bash safety" [
     ("allowlist", [
@@ -249,8 +283,10 @@ let () =
       Alcotest.test_case "playground path structure" `Quick test_playground_path_structure;
       Alcotest.test_case "inside playground detected" `Quick test_playground_guard_inside;
       Alcotest.test_case "outside playground rejected" `Quick test_playground_guard_outside;
+      Alcotest.test_case "trailing slash normalized" `Quick test_playground_guard_trailing_slash;
       Alcotest.test_case "path traversal blocked after canonicalization" `Quick test_playground_guard_traversal;
       Alcotest.test_case "git write classification" `Quick test_git_write_classification;
+      Alcotest.test_case "playground write policy" `Quick test_playground_write_policy;
     ]);
     ("edge", [
       Alcotest.test_case "empty command blocked" `Quick test_empty_command;

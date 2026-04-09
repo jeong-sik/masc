@@ -42,7 +42,7 @@ let build_keeper_index () =
     "keeper_board_stats", "게시판 통계 활동 참여 게시글수";
     "keeper_fs_read", "파일 읽기 소스코드 설정";
     "keeper_fs_edit", "파일 쓰기 편집 저장 수정 생성";
-    "keeper_shell_readonly", "명령어 조회 검색 탐색";
+    "keeper_shell", "명령어 조회 검색 탐색";
     "keeper_bash", "명령어 실행 쉘 빌드 테스트";
     "keeper_github", "깃허브 이슈 풀리퀘스트 PR CI";
     "keeper_memory_search", "기억 검색 대화 이전 메시지";
@@ -130,7 +130,7 @@ let build_keeper_index () =
       else if String.starts_with ~prefix:"keeper_task" name then Some "tasks"
       else if String.starts_with ~prefix:"keeper_voice_" name then Some "voice"
       else if String.starts_with ~prefix:"keeper_fs_" name
-           || name = "keeper_shell_readonly"
+           || name = "keeper_shell"
            || name = "keeper_bash"
            || name = "keeper_write" then Some "filesystem"
       else if name = "keeper_github" then Some "vcs"
@@ -209,12 +209,12 @@ let test_file_write_kr () =
 let test_file_search_en () =
   let idx = build_keeper_index () in
   ignore (assert_retrieves ~label:"file_search_en" idx
-    "search for all occurrences of keeper_fs_edit in the codebase" "keeper_shell_readonly")
+    "search for all occurrences of keeper_fs_edit in the codebase" "keeper_shell")
 
 let test_file_search_kr () =
   let idx = build_keeper_index () in
   ignore (assert_retrieves ~label:"file_search_kr" idx
-    "명령어 검색 탐색" "keeper_shell_readonly")
+    "명령어 검색 탐색" "keeper_shell")
 
 (* ================================================================ *)
 (* Scenarios: knowledge lookup                                      *)

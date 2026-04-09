@@ -37,7 +37,7 @@ tools = ["keeper_tasks_list", "keeper_tasks_audit", "keeper_task_claim", "keeper
 # keeper_bash: full bash with 3-layer deterministic guard
 #   (validate_command → destructive_guard → write_gate).
 #   Non-coding presets get read-only mode (write_enabled=false).
-tools = ["keeper_shell_readonly", "keeper_bash"]
+tools = ["keeper_shell", "keeper_bash"]
 
 [groups.filesystem]
 tools = ["keeper_fs_read"]

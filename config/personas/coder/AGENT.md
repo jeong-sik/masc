@@ -23,7 +23,7 @@ This creates `.worktrees/fix/<short-description>/` — all subsequent work happe
 masc_code_read path=<file>           (read specific file)
 masc_code_symbols path=<file>        (list functions/types)
 keeper_fs_read path=<file>           (alternative reader)
-keeper_shell_readonly op=rg args=["pattern", "lib/"]  (search codebase)
+keeper_shell op=rg args=["pattern", "lib/"]  (search codebase)
 ```
 
 ### Step 4: Edit code

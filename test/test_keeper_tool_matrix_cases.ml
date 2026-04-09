@@ -243,7 +243,7 @@ let keeper_arguments fixture (schema : Types.tool_schema) =
           ("content", `String "matrix write\n");
           ("mode", `String "overwrite");
         ]
-  | "keeper_shell_readonly" -> `Assoc [ ("op", `String "git_status") ]
+  | "keeper_shell" -> `Assoc [ ("op", `String "git_status") ]
   | "keeper_bash" ->
       `Assoc [ ("cmd", `String "pwd"); ("timeout_sec", `Float 5.0) ]
   | "keeper_github" ->

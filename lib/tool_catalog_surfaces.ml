@@ -44,7 +44,7 @@ let keeper_internal_tools =
     "keeper_board_search";
     (* keeper_board_delete removed from default shard in #4309.
        Dispatch still accepts it for backward compat. *)
-    "keeper_shell_readonly";
+    "keeper_shell";
     "keeper_bash";
     "keeper_github";
     "keeper_pr_workflow";

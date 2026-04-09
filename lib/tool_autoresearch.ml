@@ -584,6 +584,8 @@ let dispatch (ctx : context) ~name ~args : result option =
   | "masc_autoresearch_start" -> Some (wrap_result (handle_start ctx args))
   | "masc_autoresearch_swarm_start" ->
       Some (wrap_result (handle_swarm_start ctx args))
+  | "masc_repo_synthesis_swarm_start" ->
+      Some (wrap_result (handle_repo_synthesis_swarm_start ctx args))
   | "masc_autoresearch_status" -> Some (wrap_result (handle_status ctx args))
   | "masc_autoresearch_stop" -> Some (wrap_result (handle_stop ctx args))
   | "masc_autoresearch_inject" -> Some (wrap_result (handle_inject ctx args))

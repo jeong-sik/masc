@@ -52,6 +52,12 @@ type run_result =
   ; inference_telemetry : Agent_sdk.Types.inference_telemetry option
   }
 
+(** Canonical model label for MASC status/metrics surfaces.
+    Prefers the final cascade attempt label when available, then the
+    selected/primary configured cascade label, and finally falls back to the
+    raw provider-reported [model_used]. *)
+val surface_model_used : run_result -> string
+
 (** {1 Telemetry serialisation} *)
 
 val build_prompt_metrics :

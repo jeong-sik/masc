@@ -896,12 +896,13 @@ let sample_prompt_metrics ?(system_prompt = "You are a keeper.")
 
 let make_run_result ~text ~tools ~model ~input_tok ~output_tok
     ?run_validation
+    ?cascade_observation
     () : Masc_mcp.Keeper_agent_run.run_result =
   {
     response_text = text;
     model_used = model;
     prompt_metrics = sample_prompt_metrics ();
-    cascade_observation = None;
+    cascade_observation;
     turn_count = 1;
     tool_calls_made = List.length tools;
     usage = { input_tokens = input_tok; output_tokens = output_tok; cache_creation_input_tokens = 0; cache_read_input_tokens = 0; cost_usd = None };
@@ -961,6 +962,64 @@ let test_metrics_text_response () =
     updated.runtime.autonomous_action_count;
   check int "input tokens" (minimal_meta.runtime.usage.total_input_tokens + 100) updated.runtime.usage.total_input_tokens;
   check int "output tokens" (minimal_meta.runtime.usage.total_output_tokens + 50) updated.runtime.usage.total_output_tokens
+
+let test_metrics_surface_model_prefers_successful_cascade_label () =
+  let selected_label = "llama:qwen3.5-3b-a3b-ud-q8-xl" in
+  let result =
+    make_run_result ~text:"I checked the board." ~tools:[]
+      ~model:"qwen3.5:27b-nvfp4" ~input_tok:100 ~output_tok:50
+      ~cascade_observation:
+        {
+          Masc_mcp.Oas_worker.cascade_name = "keeper_unified";
+          configured_labels = [ "llama:auto" ];
+          candidate_models =
+            [ "llama:qwen3.5-35b-a3b-ud-q8-xl"; selected_label ];
+          primary_model = Some "llama:qwen3.5-35b-a3b-ud-q8-xl";
+          selected_model = Some "qwen3.5:27b-nvfp4";
+          selected_model_raw = Some "qwen3.5:27b-nvfp4";
+          selected_index = None;
+          fallback_hops = Some 1;
+          fallback_applied = true;
+          attempts =
+            [
+              {
+                Masc_mcp.Oas_worker.attempt_index = 0;
+                model_id = "qwen3.5-35b-a3b-ud-q8-xl";
+                model_label = Some "llama:qwen3.5-35b-a3b-ud-q8-xl";
+                latency_ms = None;
+                error = Some "HTTP 503";
+              };
+              {
+                attempt_index = 1;
+                model_id = "qwen3.5-3b-a3b-ud-q8-xl";
+                model_label = Some selected_label;
+                latency_ms = Some 187;
+                error = None;
+              };
+            ];
+          fallback_events =
+            [
+              {
+                from_model_id = "qwen3.5-35b-a3b-ud-q8-xl";
+                from_model_label = Some "llama:qwen3.5-35b-a3b-ud-q8-xl";
+                to_model_id = "qwen3.5-3b-a3b-ud-q8-xl";
+                to_model_label = Some selected_label;
+                reason = "HTTP 503";
+              };
+            ];
+          attempt_details_available = true;
+          attempt_details_source = "oas_metrics_callbacks";
+        }
+      ()
+  in
+  let updated =
+    UT.update_metrics_from_result minimal_meta ~latency_ms:200
+      ~observation:base_observation result
+  in
+  check string "helper canonicalizes surface model" selected_label
+    (KAR.surface_model_used result);
+  check string "last_model_used stores canonical surface label" selected_label
+    updated.runtime.usage.last_model_used
 
 let test_metrics_tool_response () =
   let result =
@@ -1245,7 +1304,7 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
       let result =
         {
           (make_run_result ~text:"Observed" ~tools:[]
-             ~model:"openai:qwen3.5-35b" ~input_tok:40 ~output_tok:20 ())
+             ~model:"qwen3.5:27b-nvfp4" ~input_tok:40 ~output_tok:20 ())
           with
           prompt_metrics =
             sample_prompt_metrics
@@ -1257,12 +1316,15 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
             Some
               {
                 Masc_mcp.Oas_worker.cascade_name = "keeper_unified";
-                configured_labels = [ "glm:auto"; "llama:auto" ];
+                configured_labels = [ "llama:auto" ];
                 candidate_models =
-                  [ "glm:glm-5.1"; "openai:qwen3.5-35b" ];
-                primary_model = Some "glm:glm-5.1";
-                selected_model = Some "openai:qwen3.5-35b";
-                selected_model_raw = Some "qwen3.5-35b";
+                  [
+                    "llama:qwen3.5-35b-a3b-ud-q8-xl";
+                    "llama:qwen3.5-3b-a3b-ud-q8-xl";
+                  ];
+                primary_model = Some "llama:qwen3.5-35b-a3b-ud-q8-xl";
+                selected_model = Some "qwen3.5:27b-nvfp4";
+                selected_model_raw = Some "qwen3.5:27b-nvfp4";
                 selected_index = Some 1;
                 fallback_hops = Some 1;
                 fallback_applied = true;
@@ -1270,15 +1332,15 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
                   [
                     {
                       Masc_mcp.Oas_worker.attempt_index = 0;
-                      model_id = "glm-5.1";
-                      model_label = Some "glm:glm-5.1";
+                      model_id = "qwen3.5-35b-a3b-ud-q8-xl";
+                      model_label = Some "llama:qwen3.5-35b-a3b-ud-q8-xl";
                       latency_ms = None;
                       error = Some "HTTP 503";
                     };
                     {
                       attempt_index = 1;
-                      model_id = "qwen3.5-35b";
-                      model_label = Some "openai:qwen3.5-35b";
+                      model_id = "qwen3.5-3b-a3b-ud-q8-xl";
+                      model_label = Some "llama:qwen3.5-3b-a3b-ud-q8-xl";
                       latency_ms = Some 187;
                       error = None;
                     };
@@ -1286,10 +1348,10 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
                 fallback_events =
                   [
                     {
-                      from_model_id = "glm-5.1";
-                      from_model_label = Some "glm:glm-5.1";
-                      to_model_id = "qwen3.5-35b";
-                      to_model_label = Some "openai:qwen3.5-35b";
+                      from_model_id = "qwen3.5-35b-a3b-ud-q8-xl";
+                      from_model_label = Some "llama:qwen3.5-35b-a3b-ud-q8-xl";
+                      to_model_id = "qwen3.5-3b-a3b-ud-q8-xl";
+                      to_model_label = Some "llama:qwen3.5-3b-a3b-ud-q8-xl";
                       reason = "HTTP 503";
                     };
                   ];
@@ -1337,6 +1399,9 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
         | _ -> fail "expected one metrics line"
       in
       let json = Yojson.Safe.from_string line in
+      check string "metrics snapshot uses canonical surface model"
+        "llama:qwen3.5-3b-a3b-ud-q8-xl"
+        Yojson.Safe.Util.(json |> member "model_used" |> to_string);
       check bool "cascade field present" true
         Yojson.Safe.Util.(json |> member "cascade" <> `Null);
       check string "cascade name persisted" "keeper_unified"
@@ -2373,6 +2438,8 @@ let () =
           test_case "prompt metrics fingerprint" `Quick
             test_prompt_metrics_fingerprint_is_deterministic;
           test_case "text response" `Quick test_metrics_text_response;
+          test_case "surface model prefers successful cascade label" `Quick
+            test_metrics_surface_model_prefers_successful_cascade_label;
           test_case "tool response" `Quick test_metrics_tool_response;
           test_case "noop response" `Quick test_metrics_noop_response;
           test_case "validated evidence counts as visible" `Quick

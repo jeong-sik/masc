@@ -477,6 +477,7 @@ let append_decision_record
         ( "telemetry",
           match result with
           | Some r ->
+              let surface_model_used = Keeper_agent_run.surface_model_used r in
               let cascade_fields =
                 match r.cascade_observation with
                 | Some co ->
@@ -519,7 +520,7 @@ let append_decision_record
                 | None -> []
               in
               `Assoc ([
-                ("model_used", `String r.model_used);
+                ("model_used", `String surface_model_used);
                 ("turn_count", `Int r.turn_count);
                 ("stop_reason", `String stop_reason_str);
                 ("input_tokens", `Int r.usage.input_tokens);
@@ -574,6 +575,7 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
     ?social_state
     (result : Keeper_agent_run.run_result) : keeper_meta =
   let now_ts = Time_compat.now () in
+  let surface_model_used = Keeper_agent_run.surface_model_used result in
   let used_model_id =
     let strip_latest s =
       if String.length s > 7 && String.sub s (String.length s - 7) 7 = ":latest"
@@ -604,7 +606,7 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
   let has_text = String.trim result.response_text <> "" in
   let validated_evidence = visible_run_validation result in
   let has_validated_evidence = Option.is_some validated_evidence in
-  let has_visible_tool_signal =
+  let visible_tool_signal_present =
     has_substantive_tools || has_validated_evidence
   in
   let is_scheduled_autonomous_cycle =
@@ -640,7 +642,7 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
           rt.usage.total_tokens + Keeper_exec_context.total_tokens result.usage;
         total_cost_usd = rt.usage.total_cost_usd +. turn_cost;
         last_turn_ts = now_ts;
-        last_model_used = result.model_used;
+        last_model_used = surface_model_used;
         last_input_tokens = result.usage.input_tokens;
         last_output_tokens = result.usage.output_tokens;
         last_total_tokens = Keeper_exec_context.total_tokens result.usage;
@@ -659,19 +661,19 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
           rt.proactive_rt.visible_count_total
           + (if update_proactive_rt
                && is_scheduled_autonomous_cycle
-               && (has_text || has_visible_tool_signal)
+               && (has_text || visible_tool_signal_present)
              then 1
              else 0);
         last_visible_ts =
           (if update_proactive_rt
               && is_scheduled_autonomous_cycle
-              && (has_text || has_visible_tool_signal)
+              && (has_text || visible_tool_signal_present)
            then now_ts
            else rt.proactive_rt.last_visible_ts);
         last_outcome =
           (if update_proactive_rt && is_scheduled_autonomous_cycle then
              scheduled_autonomous_outcome_of_result ~has_text
-               ~has_tool_calls:has_visible_tool_signal
+               ~has_tool_calls:visible_tool_signal_present
            else rt.proactive_rt.last_outcome);
         last_reason =
           (if not update_proactive_rt || not is_scheduled_autonomous_cycle
@@ -765,6 +767,7 @@ let append_metrics_snapshot ~(config : Room.config) ~(meta : keeper_meta)
   let now_ts = Time_compat.now () in
   let _observation = observation in
   let work_kind = work_kind_of_result result in
+  let surface_model_used = Keeper_agent_run.surface_model_used result in
   let scheduled_autonomous_outcome =
     if is_scheduled_autonomous_channel channel then
       Some (scheduled_autonomous_outcome_for_result result)
@@ -781,7 +784,7 @@ let append_metrics_snapshot ~(config : Room.config) ~(meta : keeper_meta)
         ("agent_name", `String meta.agent_name);
         ("trace_id", `String meta.runtime.trace_id);
         ("generation", `Int turn_generation);
-        ("model_used", `String result.model_used);
+        ("model_used", `String surface_model_used);
         ("prompt_fingerprint", `String result.prompt_metrics.fingerprint);
         ("prompt", Keeper_agent_run.prompt_metrics_to_json result.prompt_metrics);
         ( "usage",
@@ -1507,7 +1510,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
               (Printexc.to_string exn));
           Log.Keeper.info
             "%s: unified turn OK model=%s tokens=%d latency=%dms mode=%s stop=%s"
-            updated_meta.name result.model_used
+            updated_meta.name (Keeper_agent_run.surface_model_used result)
             (result.usage.input_tokens + result.usage.output_tokens)
             latency_ms
             (selected_mode_of_result result)

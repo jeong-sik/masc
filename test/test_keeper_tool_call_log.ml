@@ -25,6 +25,21 @@ let with_tmp_log f =
       ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote dir))))
     (fun () -> f ())
 
+let with_tmp_log_dir f =
+  incr counter;
+  let dir = Filename.concat (Filename.get_temp_dir_name ())
+    (Printf.sprintf "test-keeper-tool-call-log-%d-%d-%d"
+       (Unix.getpid ()) !counter
+       (int_of_float (Unix.gettimeofday () *. 1000.0))) in
+  Fs_compat.mkdir_p dir;
+  Keeper_tool_call_log.reset_for_testing ();
+  Keeper_tool_call_log.init ~base_path:dir;
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_tool_call_log.reset_for_testing ();
+      ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote dir))))
+    (fun () -> f dir)
+
 (* ── read_recent edge cases ─────────────────────────── *)
 
 let test_read_recent_n_zero () =
@@ -136,6 +151,30 @@ let test_turn_context_fields_stored () =
     Alcotest.(check int) "thinking_budget field" 1024
       (Safe_ops.json_int ~default:0 "thinking_budget" entry))
 
+let test_turn_context_fields_absent_without_context () =
+  with_tmp_log (fun () ->
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"k" ~tool_name:"masc_status"
+      ~input:(`Assoc []) ~output_text:"ok"
+      ~success:true ~duration_ms:2.0 ();
+    let entries = Keeper_tool_call_log.read_recent () in
+    Alcotest.(check int) "one entry" 1 (List.length entries);
+    let entry = List.hd entries in
+    Alcotest.(check (option string)) "lane absent"
+      None
+      (Safe_ops.json_string_opt "lane" entry);
+    Alcotest.(check (option string)) "tool_choice absent"
+      None
+      (Safe_ops.json_string_opt "tool_choice" entry);
+    Alcotest.(check bool) "thinking_enabled absent" true
+      (match Yojson.Safe.Util.member "thinking_enabled" entry with
+       | `Null -> true
+       | _ -> false);
+    Alcotest.(check bool) "thinking_budget absent" true
+      (match Yojson.Safe.Util.member "thinking_budget" entry with
+       | `Null -> true
+       | _ -> false))
+
 let find_bucket name json =
   json
   |> Yojson.Safe.Util.to_list
@@ -176,6 +215,47 @@ let test_dashboard_aggregate_groups_runtime_fields () =
     Alcotest.(check int) "auto tool_choice calls" 1
       (Safe_ops.json_int ~default:0 "calls" auto_bucket))
 
+let test_dashboard_hourly_trend_numeric_ts () =
+  with_tmp_log_dir (fun dir ->
+    let store =
+      Dated_jsonl.create
+        ~base_dir:(Filename.concat dir ".masc/tool_calls")
+        ()
+    in
+    let ts = 1_710_000_000 in
+    Dated_jsonl.append store
+      (`Assoc
+         [ ("ts", `Int ts)
+         ; ("keeper", `String "k")
+         ; ("tool", `String "masc_status")
+         ; ("input", `Assoc [])
+         ; ("output", `String "ok")
+         ; ("success", `Bool true)
+         ; ("duration_ms", `Float 2.0)
+         ]);
+    let expected_hour =
+      let tm = Unix.gmtime (Float.of_int ts) in
+      Printf.sprintf "%04d-%02d-%02dT%02d"
+        (tm.Unix.tm_year + 1900)
+        (tm.Unix.tm_mon + 1)
+        tm.Unix.tm_mday
+        tm.Unix.tm_hour
+    in
+    let hourly =
+      Dashboard_http_tool_quality.aggregate ~n:10 ()
+      |> Yojson.Safe.Util.member "hourly_trend"
+      |> Yojson.Safe.Util.to_list
+    in
+    let bucket =
+      List.find (fun item ->
+        Safe_ops.json_string_opt "hour" item = Some expected_hour
+      ) hourly
+    in
+    Alcotest.(check int) "hour bucket calls" 1
+      (Safe_ops.json_int ~default:0 "calls" bucket);
+    Alcotest.(check int) "hour bucket success" 1
+      (Safe_ops.json_int ~default:0 "success" bucket))
+
 let () =
   Alcotest.run "keeper_tool_call_log"
     [ ( "read_recent",
@@ -188,7 +268,11 @@ let () =
         ; eio_test "sensitive input fields redacted" test_sensitive_input_fields_redacted
         ; eio_test "model field stored" test_model_field_stored
         ; eio_test "turn context fields stored" test_turn_context_fields_stored
+        ; eio_test "turn context fields absent without context"
+            test_turn_context_fields_absent_without_context
         ; eio_test "dashboard aggregate groups runtime fields"
             test_dashboard_aggregate_groups_runtime_fields
+        ; eio_test "dashboard hourly trend buckets numeric ts"
+            test_dashboard_hourly_trend_numeric_ts
         ] )
     ]

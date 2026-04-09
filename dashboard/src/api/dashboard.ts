@@ -835,3 +835,13 @@ export function fetchExcusePatterns(): Promise<ExcusePattern[]> {
 export function updateExcusePatterns(patterns: ExcusePattern[]): Promise<{ ok: boolean }> {
   return post<{ ok: boolean }>('/api/v1/dashboard/config/excuse-patterns', patterns)
 }
+
+// --- Keeper Cascade Config ---
+
+export function fetchCascadeProfiles(): Promise<{ profiles: string[] }> {
+  return get<{ profiles: string[] }>('/api/v1/keeper/cascades')
+}
+
+export function updateKeeperCascade(keeper: string, cascade_name: string): Promise<{ ok: boolean }> {
+  return post<{ ok: boolean }>('/api/v1/keeper/cascade', { keeper, cascade_name })
+}

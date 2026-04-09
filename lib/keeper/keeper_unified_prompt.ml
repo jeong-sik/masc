@@ -109,7 +109,7 @@ let actionable_routes ~(allowed_tools : string list)
       add
         "- Failed tasks are actionable, but task-audit tooling is unavailable under the current tool policy.";
   if Option.is_some observation.worktree_change_summary then
-    (match available [ "keeper_fs_read"; "keeper_shell_readonly"; "masc_code_read" ] with
+    (match available [ "keeper_fs_read"; "keeper_shell"; "masc_code_read" ] with
      | [] ->
          add
            "- Live worktree delta is actionable, but file-inspection tools are unavailable under the current tool policy."

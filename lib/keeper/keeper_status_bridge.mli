@@ -36,6 +36,9 @@ val runtime_keepalive_running :
 val runtime_keepalive_started_at :
   Room_utils.config -> keeper_meta -> float option
 
+val runtime_blocker_fields_json :
+  Room_utils.config -> keeper_meta -> (string * Yojson.Safe.t) list
+
 val runtime_surface_json :
   Room_utils.config -> keeper_meta -> Yojson.Safe.t
 

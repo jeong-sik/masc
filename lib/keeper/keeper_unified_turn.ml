@@ -87,6 +87,54 @@ let reclassify_error_after_side_effect
          "%s: [%s]; retry disabled to avoid duplicate mutation; original_error=%s"
          ambiguous_side_effect_error_prefix tools original)
 
+let post_commit_failure_kind_of_error (err : Oas.Error.sdk_error) =
+  match err with
+  | Oas.Error.Api (Timeout _) -> Keeper_registry.Post_commit_timeout
+  | _ -> Keeper_registry.Post_commit_failure
+
+let summarize_post_commit_failure
+    ~(tool_names : string list)
+    ~(kind : Keeper_registry.ambiguous_partial_commit_kind)
+    (err : Oas.Error.sdk_error) =
+  let tools = String.concat ", " (committed_mutating_tools tool_names) in
+  let err_preview = short_preview (Oas.Error.to_string err) in
+  match kind with
+  | Keeper_registry.Post_commit_timeout ->
+      Printf.sprintf
+        "Mutating tools [%s] committed before the turn timed out; retry stayed disabled and manual reconcile is required (error: %s)"
+        tools
+        err_preview
+  | Keeper_registry.Post_commit_failure ->
+      Printf.sprintf
+        "Mutating tools [%s] committed before the turn failed; retry stayed disabled and manual reconcile is required (error: %s)"
+        tools
+        err_preview
+
+let classify_post_commit_failure
+    ~(tool_names : string list)
+    ?kind
+    (err : Oas.Error.sdk_error) =
+  let committed_tools = committed_mutating_tools tool_names in
+  if committed_tools = []
+  then None
+  else
+    let resolved_kind =
+      Option.value ~default:(post_commit_failure_kind_of_error err) kind
+    in
+    let reclassified =
+      reclassify_error_after_side_effect ~tool_names:committed_tools err
+    in
+    let detail =
+      summarize_post_commit_failure
+        ~tool_names:committed_tools
+        ~kind:resolved_kind
+        err
+    in
+    Some
+      ( reclassified,
+        Keeper_registry.Ambiguous_partial_commit
+          { kind = resolved_kind; detail } )
+
 (** Max transient retries (excluding the initial attempt).  Total attempts
     = 1 initial + max_transient_retries.  OAS internal retry is 3 per
     provider; this outer retry covers cases where all providers fail
@@ -1003,6 +1051,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
          an independent observer, so concurrent keepers cannot interfere
          with each other's save/restore lifecycle. *)
       let mutating_tools_committed = ref [] in
+      let post_commit_failure_reason = ref None in
       let side_effect_observer ~tool_name ~success =
         if success && Keeper_exec_tools.has_mutating_side_effect tool_name then
           mutating_tools_committed := tool_name :: !mutating_tools_committed
@@ -1029,7 +1078,6 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
             Keeper_agent_run.run_turn ~config ~meta:run_meta ~base_dir
               ~max_context ~build_turn_prompt
               ~user_message ~cascade_name:Keeper_config.default_cascade_name
-              ?provider_filter:run_meta.allowed_providers
               ~generation:run_generation ~max_idle_turns
               ~history_user_source:"world_state_prompt"
               ~history_assistant_source:"internal_assistant"
@@ -1051,10 +1099,26 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
                   committed_mutating_tools !mutating_tools_committed
                 in
                 if committed_tools <> [] then begin
-                  let reclassified =
-                    reclassify_error_after_side_effect
-                      ~tool_names:committed_tools err
+                  let reclassified, failure_reason =
+                    match
+                      classify_post_commit_failure
+                        ~tool_names:committed_tools
+                        err
+                    with
+                    | Some classified -> classified
+                    | None ->
+                        ( reclassify_error_after_side_effect
+                            ~tool_names:committed_tools err,
+                          Keeper_registry.Ambiguous_partial_commit {
+                            kind = Keeper_registry.Post_commit_failure;
+                            detail =
+                              summarize_post_commit_failure
+                                ~tool_names:committed_tools
+                                ~kind:Keeper_registry.Post_commit_failure
+                                err;
+                          } )
                   in
+                  post_commit_failure_reason := Some failure_reason;
                   let err_preview = short_preview (Oas.Error.to_string err) in
                   if is_transient_network_error err then
                     Log.Keeper.error
@@ -1125,7 +1189,42 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
                 timeout_sec
             in
             Log.Keeper.error "%s: %s" meta.name msg;
-            Error (Oas.Error.Internal msg))))
+            let committed_tools =
+              committed_mutating_tools !mutating_tools_committed
+            in
+            if committed_tools <> [] then begin
+              let timeout_err =
+                Oas.Error.Api (Timeout { message = msg })
+              in
+              let reclassified, failure_reason =
+                match
+                  classify_post_commit_failure
+                    ~tool_names:committed_tools
+                    ~kind:Keeper_registry.Post_commit_timeout
+                    timeout_err
+                with
+                | Some classified -> classified
+                | None ->
+                    ( reclassify_error_after_side_effect
+                        ~tool_names:committed_tools
+                        timeout_err,
+                      Keeper_registry.Ambiguous_partial_commit {
+                        kind = Keeper_registry.Post_commit_timeout;
+                        detail =
+                          summarize_post_commit_failure
+                            ~tool_names:committed_tools
+                            ~kind:Keeper_registry.Post_commit_timeout
+                            timeout_err;
+                      } )
+              in
+              post_commit_failure_reason := Some failure_reason;
+              Log.Keeper.error
+                "%s: turn wall-clock timeout after committed mutating tool call(s) [%s] — treating as integrity failure, manual reconcile required"
+                meta.name
+                (String.concat ", " committed_tools);
+              Error reclassified
+            end else
+              Error (Oas.Error.Internal msg))))
       in
       match run_result with
       | Error err ->
@@ -1151,7 +1250,14 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
           if is_ambiguous_partial then begin
             Keeper_registry.set_failure_reason ~base_path:config.base_path
               meta.name
-              (Some (Keeper_registry.Ambiguous_partial_commit e_str));
+              (Some
+                 (Option.value
+                    ~default:
+                      (Keeper_registry.Ambiguous_partial_commit {
+                        kind = Keeper_registry.Post_commit_failure;
+                        detail = e_str;
+                      })
+                    !post_commit_failure_reason));
             ignore (Keeper_registry.dispatch_event
               ~base_path:config.base_path meta.name
               (Keeper_state_machine.Manual_reconcile_required {

@@ -55,4 +55,21 @@ describe('mission keeper runtime helpers', () => {
 
     expect(keeperRuntimeHint(keeper)).toBe('일시정지됨')
   })
+
+  it('prefers structured runtime blocker hints over paused/blocker text', () => {
+    const keeper = {
+      name: 'uranium666',
+      status: 'idle',
+      paused: true,
+      keepalive_running: true,
+      runtime_blocker_class: 'ambiguous_post_commit_timeout',
+      runtime_blocker_summary:
+        'Mutating tools [keeper_fs_edit] committed before the turn timed out.',
+      last_blocker: 'missing social headers',
+    } as Keeper
+
+    expect(keeperRuntimeHint(keeper)).toBe(
+      'Mutating tools [keeper_fs_edit] committed before the turn timed out.',
+    )
+  })
 })

@@ -70,15 +70,11 @@ let load ~(store : Agent_sdk.Proof_store.config)
   if manifest_proof.schema_version <> Agent_sdk.Cdal_proof.schema_version_current then
     Error (Schema_unsupported manifest_proof.schema_version)
   else
-  (* 3. Compute contract path and read.
-     Note: Proof_store.contract_path exists in OAS but is not exposed
-     in the .mli. Using the same convention directly as adapter. *)
-  let contract_path =
-    Filename.concat
-      (Filename.concat
-         (Filename.concat store.root "proofs")
-         manifest_proof.run_id)
-      "contract.json"
+  (* 3. Compute contract path via the local proof-store adapter. *)
+  let* contract_path =
+    Proof_artifact_reader.run_artifact_path store
+      ~run_id:manifest_proof.run_id ~relative_path:"contract.json"
+    |> Result.map_error (fun msg -> Ref_resolution_error msg)
   in
   let* contract_json =
     read_json_file contract_path

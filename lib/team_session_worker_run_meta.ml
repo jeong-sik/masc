@@ -12,7 +12,8 @@ type oas_worker_evidence = Tool_team_session_step_types.oas_worker_evidence = {
 let proof_result_status_to_string = Oas_worker_exec.proof_result_status_to_string
 
 let oas_trace_session_root config =
-  Filename.concat (Room_utils.masc_dir config) "oas-runtime"
+  let base_path = Filename.dirname (Room_utils.masc_dir config) in
+  Worker_container.oas_trace_session_root ~base_path
 
 let load_oas_worker_evidence ~(config : Room.config)
     ~(evidence_session_id : string) =

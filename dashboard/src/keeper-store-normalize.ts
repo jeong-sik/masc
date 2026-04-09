@@ -327,6 +327,13 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
           typeof row.proactive_enabled === 'boolean' ? row.proactive_enabled : undefined,
         proactive_idle_sec: asNumber(row.proactive_idle_sec),
         proactive_cooldown_sec: asNumber(row.proactive_cooldown_sec),
+        runtime_blocker_class:
+          (asString(row.runtime_blocker_class) as Keeper['runtime_blocker_class']) ?? null,
+        runtime_blocker_summary: asString(row.runtime_blocker_summary) ?? null,
+        runtime_blocker_manual_reconcile:
+          typeof row.runtime_blocker_manual_reconcile === 'boolean'
+            ? row.runtime_blocker_manual_reconcile
+            : null,
         created_at: toIsoTimestamp(row.created_at) ?? asString(row.created_at),
         updated_at: toIsoTimestamp(row.updated_at) ?? asString(row.updated_at),
         last_heartbeat: asString(row.last_heartbeat) ?? asString(agentRaw?.last_seen),

@@ -563,6 +563,7 @@ export interface Keeper {
   primary_model?: string
   active_model?: string
   next_model_hint?: string | null
+  cascade_name?: string
   status: string
   presence_keepalive?: boolean
   presence_keepalive_sec?: number
@@ -570,6 +571,9 @@ export interface Keeper {
   proactive_enabled?: boolean
   proactive_idle_sec?: number
   proactive_cooldown_sec?: number
+  runtime_blocker_class?: 'ambiguous_post_commit_timeout' | 'ambiguous_post_commit_failure' | null
+  runtime_blocker_summary?: string | null
+  runtime_blocker_manual_reconcile?: boolean | null
   active_goal_ids?: string[]
   last_autonomous_action_at?: string | null
   autonomous_action_count?: number
@@ -735,6 +739,9 @@ export interface KeeperConfigRuntime {
   fiber_health: string
   presence_keepalive: boolean
   presence_keepalive_sec: number
+  runtime_blocker_class?: 'ambiguous_post_commit_timeout' | 'ambiguous_post_commit_failure' | null
+  runtime_blocker_summary?: string | null
+  runtime_blocker_manual_reconcile?: boolean | null
 }
 
 export interface KeeperConfigCoordination {

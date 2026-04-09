@@ -201,6 +201,16 @@ function isHeartbeatStale(keeper: Keeper): boolean {
   return Date.now() - ts > HEARTBEAT_STALE_MS
 }
 
+function runtimeBlockerHint(keeper: Keeper): string | null {
+  const blockerClass = keeper.runtime_blocker_class
+  if (!blockerClass) return null
+  if (keeper.runtime_blocker_summary?.trim()) return keeper.runtime_blocker_summary.trim()
+  if (blockerClass === 'ambiguous_post_commit_timeout') {
+    return '변경 도구 실행 뒤 턴이 timeout으로 끝났습니다. 중복 실행을 막기 위해 재시도하지 않았고 수동 정합성 확인이 필요합니다.'
+  }
+  return '변경 도구 실행 뒤 턴이 실패했습니다. 중복 실행을 막기 위해 재시도하지 않았고 수동 정합성 확인이 필요합니다.'
+}
+
 function keeperBand(keeper: Keeper, phaseKey: string, lifecycleKey: string): RuntimeBand {
   if (keeper.paused || phaseKey === 'Paused' || lifecycleKey === 'paused') return 'paused'
   if (
@@ -214,6 +224,7 @@ function keeperBand(keeper: Keeper, phaseKey: string, lifecycleKey: string): Run
   }
   if (
     ATTENTION_PHASES.has(phaseKey)
+    || Boolean(keeper.runtime_blocker_class)
     || Boolean(keeper.last_blocker?.trim())
     || isHeartbeatStale(keeper)
     || (typeof keeper.context_ratio === 'number' && keeper.context_ratio >= CONTEXT_ATTENTION_RATIO)
@@ -224,6 +235,8 @@ function keeperBand(keeper: Keeper, phaseKey: string, lifecycleKey: string): Run
 }
 
 function keeperHint(keeper: Keeper, band: RuntimeBand, stage: StageMeta): string | null {
+  const runtimeBlocker = runtimeBlockerHint(keeper)
+  if (runtimeBlocker) return runtimeBlocker
   const blocker = keeper.last_blocker?.trim()
   if (blocker) return blocker
   if (band === 'paused') return '운영자가 멈춰 둔 상태입니다.'

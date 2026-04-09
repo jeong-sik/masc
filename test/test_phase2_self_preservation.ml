@@ -104,15 +104,28 @@ let test_failure_reason_exception () =
 let test_failure_reason_ambiguous_partial_commit () =
   let s =
     R.failure_reason_to_string
-      (R.Ambiguous_partial_commit "turn outcome ambiguous")
+      (R.Ambiguous_partial_commit
+         {
+           kind = R.Post_commit_timeout;
+           detail = "turn outcome ambiguous";
+         })
   in
   check string "ambiguous partial commit reason"
-    "ambiguous_partial_commit(turn outcome ambiguous)" s
+    "ambiguous_partial_commit(post_commit_timeout:turn outcome ambiguous)" s
+
+let test_failure_reason_ambiguous_partial_commit_kind_string () =
+  check string "ambiguous partial commit kind string"
+    "post_commit_timeout"
+    (R.ambiguous_partial_commit_kind_to_string R.Post_commit_timeout)
 
 let test_failure_reason_manual_reconcile_required () =
   check bool "ambiguous partial commit requires manual reconcile" true
     (R.failure_reason_requires_manual_reconcile
-       (R.Ambiguous_partial_commit "turn outcome ambiguous"));
+       (R.Ambiguous_partial_commit
+          {
+            kind = R.Post_commit_failure;
+            detail = "turn outcome ambiguous";
+          }));
   check bool "turn failures do not require manual reconcile" false
     (R.failure_reason_requires_manual_reconcile
        (R.Turn_consecutive_failures 2))
@@ -255,6 +268,8 @@ let () =
       test_case "exception" `Quick test_failure_reason_exception;
       test_case "ambiguous partial commit" `Quick
         test_failure_reason_ambiguous_partial_commit;
+      test_case "ambiguous partial commit kind string" `Quick
+        test_failure_reason_ambiguous_partial_commit_kind_string;
       test_case "manual reconcile helper" `Quick
         test_failure_reason_manual_reconcile_required;
     ];

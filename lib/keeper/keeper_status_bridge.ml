@@ -116,6 +116,49 @@ let runtime_keepalive_started_at (config : Room_utils.config)
     (meta : keeper_meta) =
   Keeper_registry.started_at ~base_path:config.base_path meta.name
 
+let runtime_blocker_surface_of_registry_entry
+    (entry_opt : Keeper_registry.registry_entry option) =
+  match entry_opt with
+  | Some
+      {
+        last_failure_reason =
+          Some
+            (Keeper_registry.Ambiguous_partial_commit { kind; detail });
+        _;
+      } ->
+      let blocker_class, default_summary =
+        match kind with
+        | Keeper_registry.Post_commit_timeout ->
+            ( "ambiguous_post_commit_timeout",
+              "Mutating tools committed before the turn timed out. Retry stayed disabled and manual reconcile is required." )
+        | Keeper_registry.Post_commit_failure ->
+            ( "ambiguous_post_commit_failure",
+              "Mutating tools committed before the turn failed. Retry stayed disabled and manual reconcile is required." )
+      in
+      let summary =
+        let trimmed = String.trim detail in
+        if trimmed = "" then default_summary else trimmed
+      in
+      Some (blocker_class, summary, true)
+  | _ -> None
+
+let runtime_blocker_fields_json
+    (config : Room_utils.config)
+    (meta : keeper_meta) =
+  match runtime_blocker_surface_of_registry_entry (runtime_registry_entry config meta.name) with
+  | Some (blocker_class, summary, manual_reconcile) ->
+      [
+        ("runtime_blocker_class", `String blocker_class);
+        ("runtime_blocker_summary", `String summary);
+        ("runtime_blocker_manual_reconcile", `Bool manual_reconcile);
+      ]
+  | None ->
+      [
+        ("runtime_blocker_class", `Null);
+        ("runtime_blocker_summary", `Null);
+        ("runtime_blocker_manual_reconcile", `Null);
+      ]
+
 let runtime_surface_json config (meta : keeper_meta) =
   let keepalive_running = runtime_keepalive_running config meta in
   let fiber_health =
@@ -131,16 +174,17 @@ let runtime_surface_json config (meta : keeper_meta) =
     | None -> None
   in
   `Assoc
-    [
-      ("paused", `Bool meta.paused);
-      ("keepalive_running", `Bool keepalive_running);
-      ("phase",
-       match phase with
-       | Some p -> `String p
-       | None -> `Null);
-      ( "fiber_health",
-        `String (Keeper_exec_status.string_of_fiber_health fiber_health) );
-    ]
+    ([
+       ("paused", `Bool meta.paused);
+       ("keepalive_running", `Bool keepalive_running);
+       ("phase",
+        match phase with
+        | Some p -> `String p
+        | None -> `Null);
+       ( "fiber_health",
+         `String (Keeper_exec_status.string_of_fiber_health fiber_health) );
+     ]
+     @ runtime_blocker_fields_json config meta)
 
 let source_provenance_json config (meta : keeper_meta) =
   let snapshot = keeper_default_source_snapshot meta.name in

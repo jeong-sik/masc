@@ -285,7 +285,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         work_discovery_guidance = p.profile_defaults.work_discovery_guidance;
         telemetry_feedback_enabled = p.profile_defaults.telemetry_feedback_enabled;
         telemetry_feedback_window_hours = p.profile_defaults.telemetry_feedback_window_hours;
-        allowed_providers = p.profile_defaults.allowed_providers;
         runtime = {
           usage = {
             total_turns = 0;

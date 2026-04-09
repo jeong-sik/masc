@@ -9,6 +9,7 @@ import {
   type ToolQualityResponse,
 } from '../api/dashboard'
 import { normalizeKeepers } from '../keeper-store-normalize'
+import { telemetrySourceLabel } from '../config/telemetry-sources'
 import { formatElapsedCompact, formatTimeAgo } from '../lib/format-time'
 import type { Keeper } from '../types'
 
@@ -17,14 +18,6 @@ import type { Keeper } from '../types'
 const PRESSURE_HOT_RATIO = 0.75
 const PRESSURE_WARN_RATIO = 0.5
 const STALE_ACTIVITY_SEC = 900
-
-const SOURCE_LABELS: Record<string, string> = {
-  keeper_metric: 'Keeper metrics',
-  agent_event: 'Agent events',
-  tool_call_io: 'Tool call I/O',
-  tool_usage: 'Tool usage',
-  tool_metric: 'Tool metrics',
-}
 
 interface FleetRow {
   name: string
@@ -75,9 +68,8 @@ function emptyState(): FleetTelemetryState {
   }
 }
 
-function sourceLabel(source: string): string {
-  return SOURCE_LABELS[source] ?? source
-}
+// Delegated to config/telemetry-sources (SSOT)
+const sourceLabel = telemetrySourceLabel
 
 function errorMessage(reason: unknown): string {
   return reason instanceof Error ? reason.message : 'unknown error'

@@ -14,15 +14,8 @@ import {
   type TelemetrySourceSummary,
 } from '../api/dashboard'
 import { route } from '../router'
+import { TELEMETRY_SOURCE_META, telemetrySourceMeta } from '../config/telemetry-sources'
 import { formatTimeAgo } from '../lib/format-time'
-
-const SOURCE_META: Record<TelemetrySource, { label: string; sublabel: string; color: string; icon: string }> = {
-  keeper_metric: { label: 'Keeper 턴 로그', sublabel: 'heartbeat ~80%, 실제 추론 턴 ~20%', color: 'text-blue-400', icon: 'K' },
-  agent_event: { label: 'Agent 이벤트', sublabel: 'tool_called 다수, join/leave/task 포함', color: 'text-emerald-400', icon: 'A' },
-  tool_call_io: { label: 'Keeper Tool I/O', sublabel: 'keeper->tool 입출력 전체 기록', color: 'text-amber-400', icon: 'T' },
-  tool_usage: { label: 'Keeper 내부 호출', sublabel: 'keeper_internal caller 기록', color: 'text-purple-400', icon: 'U' },
-  tool_metric: { label: 'Tool 성능', sublabel: 'duration/success 측정', color: 'text-cyan-400', icon: 'M' },
-}
 
 interface StoreSnapshot {
   keepers: number
@@ -45,7 +38,6 @@ const EMPTY_STORE: StoreSnapshot = {
   toolsRegistered: 0, toolsPublic: 0, toolsTotalCalls: 0, toolsNeverCalled: 0,
   version: null, uptime: null,
 }
-
 interface TelemetryState {
   entries: TelemetryEntry[]
   summary: TelemetrySourceSummary[]
@@ -55,9 +47,7 @@ interface TelemetryState {
   error: string | null
 }
 
-function sourceMeta(source: string) {
-  return SOURCE_META[source as TelemetrySource] ?? { label: source, sublabel: '', color: 'text-gray-400', icon: '?' }
-}
+const sourceMeta = telemetrySourceMeta
 
 function entryTimestamp(e: TelemetryEntry): number {
   const numeric = (e.ts_unix as number) ?? (e.ts as number) ?? (e.timestamp as number) ?? 0
@@ -392,7 +382,7 @@ export function TelemetryUnified() {
           onChange=${(e: Event) => { sourceFilter.value = (e.target as HTMLSelectElement).value as TelemetrySource | '' }}
         >
           <option value="">All sources</option>
-          ${Object.entries(SOURCE_META).map(([key, m]) => html`<option value=${key}>${m.label}</option>`)}
+          ${Object.entries(TELEMETRY_SOURCE_META).map(([key, m]) => html`<option value=${key}>${m.label}</option>`)}
         </select>
         <input
           type="text"

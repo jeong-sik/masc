@@ -6,12 +6,11 @@ import { useEffect, useMemo } from 'preact/hooks'
 import { useSignal } from '@preact/signals'
 import { fetchKeeperToolCalls } from '../api/dashboard'
 import type { ToolCallEntry } from '../api/dashboard'
+import { formatTimeHms } from '../lib/format-time'
 import { toolCategory, formatDuration, durationColor } from './tool-call-shared'
 
-function formatTimestamp(ts: number): string {
-  const d = new Date(ts * 1000)
-  return d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-}
+// Delegated to lib/format-time (SSOT)
+const formatTimestamp = formatTimeHms
 
 function formatInput(input: unknown): string {
   if (input == null) return '-'

@@ -433,6 +433,20 @@ let test_directive_nonexistent_agent () =
   KK.process_directive ~agent_name:"ghost-agent" "pause";
   check bool "no crash on missing agent" true true
 
+let test_stop_keepalive_scoped_to_base_path () =
+  R.clear ();
+  let bp2 = "/tmp/stop-other" in
+  let entry_a = R.register ~base_path:bp "shared-stop" (make_meta "shared-stop") in
+  let entry_b = R.register ~base_path:bp2 "shared-stop" (make_meta "shared-stop") in
+  check bool "base path A stop initially false" false
+    (Atomic.get entry_a.fiber_stop);
+  check bool "base path B stop initially false" false
+    (Atomic.get entry_b.fiber_stop);
+  KK.stop_keepalive ~base_path:bp "shared-stop";
+  check bool "base path A stop set" true (Atomic.get entry_a.fiber_stop);
+  check bool "base path B stop stays unset" false
+    (Atomic.get entry_b.fiber_stop)
+
 let test_wakeup_keeper_scoped_to_base_path () =
   R.clear ();
   let bp2 = "/tmp/wakeup-other" in
@@ -523,6 +537,8 @@ let () =
           eio_test "claim directive" test_directive_claim;
           eio_test "unknown directive no crash" test_directive_unknown_no_crash;
           eio_test "nonexistent agent no crash" test_directive_nonexistent_agent;
+          eio_test "stop keepalive scoped to base_path"
+            test_stop_keepalive_scoped_to_base_path;
           eio_test "wakeup keeper scoped to base_path"
             test_wakeup_keeper_scoped_to_base_path;
           eio_test "wakeup all scoped to base_path"

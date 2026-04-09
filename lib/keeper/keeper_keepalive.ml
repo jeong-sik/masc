@@ -107,7 +107,8 @@ let wakeup_keeper ?base_path name =
 ;;
 
 (** Wake up all running keepers — used when a broadcast mentions @@all
-    or when a system-wide event requires immediate attention. *)
+    or when a system-wide event requires immediate attention.
+    [None] preserves the legacy global wakeup behavior. *)
 let wakeup_all_keepers ?base_path () =
   match base_path with
   | None -> Keeper_registry.wakeup_all ()

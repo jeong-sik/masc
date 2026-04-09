@@ -29,6 +29,7 @@ import {
   InferenceTelemetryPanel,
   KpiGrid,
   MetricsCharts,
+  PromptTelemetryPanel,
   RawDataDebug,
   RelationshipList,
   TokenTrendChart,
@@ -426,6 +427,9 @@ export function KeeperDetailOverlay() {
 
         ${'' /* ── Per-turn token trend (input vs output) ── */}
         <${TokenTrendChart} keeper=${keeper} />
+
+        ${'' /* ── Prompt fingerprint / segment telemetry ── */}
+        <${PromptTelemetryPanel} keeper=${keeper} />
 
         ${'' /* ── Inference Telemetry (tok/s, cache, reasoning) ── */}
         <${InferenceTelemetryPanel} keeper=${keeper} />

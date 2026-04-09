@@ -208,6 +208,54 @@ describe('normalizeKeepers lifecycle metrics', () => {
     expect(keeper as unknown as Record<string, unknown>).not.toHaveProperty('allowed_tool_names')
   })
 
+  it('normalizes prompt telemetry dynamically from keeper metric points', () => {
+    const [keeper] = normalizeKeepers([
+      {
+        name: 'prompt-keeper',
+        status: 'active',
+        metrics_series: [
+          {
+            ts_unix: 4,
+            context_ratio: 0.42,
+            context_tokens: 420,
+            context_max: 1000,
+            latency_ms: 110,
+            generation: 2,
+            channel: 'turn',
+            model_used: 'glm-5',
+            cost_usd: 0.03,
+            compacted: false,
+            prompt_fingerprint: 'prompt-fp-001',
+            prompt: {
+              fingerprint: 'prompt-fp-001',
+              estimated_total_tokens: 321,
+              estimated_cacheable_tokens: 144,
+              system_prompt: { bytes: 512, estimated_tokens: 144, fingerprint: 'seg-system' },
+              dynamic_context: { bytes: 220, estimated_tokens: 61, fingerprint: 'seg-dynamic' },
+              user_message: { bytes: 98, estimated_tokens: 28, fingerprint: 'seg-user' },
+            },
+          },
+        ],
+      },
+    ])
+
+    expect(keeper?.metrics_series).toHaveLength(1)
+    const metric = keeper?.metrics_series?.[0]
+    expect(metric).toBeDefined()
+    if (!metric) throw new Error('metric missing')
+    expect(metric.prompt_fingerprint).toBe('prompt-fp-001')
+    expect(metric.prompt_metrics).toEqual({
+      fingerprint: 'prompt-fp-001',
+      estimated_total_tokens: 321,
+      estimated_cacheable_tokens: 144,
+      segments: {
+        system_prompt: { bytes: 512, estimated_tokens: 144, fingerprint: 'seg-system' },
+        dynamic_context: { bytes: 220, estimated_tokens: 61, fingerprint: 'seg-dynamic' },
+        user_message: { bytes: 98, estimated_tokens: 28, fingerprint: 'seg-user' },
+      },
+    })
+  })
+
   it('preserves paused runtime signals and blocker metadata for keeper UI', () => {
     const [keeper] = normalizeKeepers([
       {

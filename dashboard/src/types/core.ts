@@ -161,6 +161,19 @@ export interface InferenceTelemetry {
   request_latency_ms: number
 }
 
+export interface PromptSegmentTelemetry {
+  bytes: number
+  estimated_tokens: number
+  fingerprint: string | null
+}
+
+export interface PromptTelemetry {
+  fingerprint: string | null
+  estimated_total_tokens: number | null
+  estimated_cacheable_tokens: number | null
+  segments: Record<string, PromptSegmentTelemetry>
+}
+
 export interface KeeperMetricPoint {
   ts: number
   context_ratio: number
@@ -177,6 +190,8 @@ export interface KeeperMetricPoint {
   cost_usd: number
   handoff_to_model: string | null
   handoff_new_generation: number | null
+  prompt_fingerprint: string | null
+  prompt_metrics: PromptTelemetry | null
   inference_telemetry: InferenceTelemetry | null
   fallback_applied: boolean
   fallback_hops: number

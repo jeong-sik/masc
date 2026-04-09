@@ -689,6 +689,8 @@ let append_metrics_snapshot ~(config : Room.config) ~(meta : keeper_meta)
         ("trace_id", `String meta.runtime.trace_id);
         ("generation", `Int turn_generation);
         ("model_used", `String result.model_used);
+        ("prompt_fingerprint", `String result.prompt_metrics.fingerprint);
+        ("prompt", Keeper_agent_run.prompt_metrics_to_json result.prompt_metrics);
         ( "usage",
           `Assoc
             [

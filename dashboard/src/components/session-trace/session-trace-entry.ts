@@ -31,6 +31,9 @@ const KIND_STYLES: Record<TraceEventKind, KindStyle> = {
   heartbeat:  { icon: 'H', color: 'text-[#94a3b8]', label: '하트비트' },
   lifecycle:  { icon: 'L', color: 'text-[var(--warn)]', label: '생명주기' },
   thinking:   { icon: '\u{1F4AD}', color: 'text-[#c084fc]', label: '내부 사고' },
+  oas_tool:   { icon: 'O', color: 'text-[#f59e0b]', label: 'OAS 도구' },
+  oas_turn:   { icon: 'R', color: 'text-[#fb7185]', label: 'OAS 턴' },
+  oas_context: { icon: 'C', color: 'text-[#38bdf8]', label: 'OAS 압축' },
 }
 
 // Use shared tool category from tool-call-shared (SSOT)
@@ -244,6 +247,25 @@ function ThinkingDetail({ event }: { event: UnifiedTraceEvent }) {
   `
 }
 
+function OasDetail({ event }: { event: UnifiedTraceEvent }) {
+  const detailRows = Object.entries(event.detail)
+    .filter(([, value]) => value != null && value !== '')
+    .map(([label, value]) => ({ label, value: typeof value === 'string' ? value : JSON.stringify(value) }))
+  if (detailRows.length === 0) return null
+  return html`
+    <div class="mt-2 grid gap-2">
+      <div class="grid gap-1.5 px-3 py-2 rounded-lg bg-[var(--white-3)] border border-[var(--white-6)]">
+        ${detailRows.map(row => html`
+          <div class="flex items-start gap-2 text-[12px] leading-relaxed">
+            <span class="min-w-[92px] text-[var(--text-dim)] font-mono">${row.label}</span>
+            <span class="text-[var(--text-body)] font-mono break-all">${row.value}</span>
+          </div>
+        `)}
+      </div>
+    </div>
+  `
+}
+
 export function SessionTraceEntry({ event }: { event: UnifiedTraceEvent }) {
   const kindStyle = KIND_STYLES[event.kind]
   // For tool_call, use tool-specific icon/color
@@ -266,6 +288,9 @@ export function SessionTraceEntry({ event }: { event: UnifiedTraceEvent }) {
     || (event.kind === 'broadcast' && typeof event.detail.content === 'string' && event.detail.content.length > BROADCAST_PREVIEW_MAX)
     || event.kind === 'task'
     || event.kind === 'thinking'
+    || event.kind === 'oas_tool'
+    || event.kind === 'oas_turn'
+    || event.kind === 'oas_context'
 
   const row = html`
     <div class="flex items-start gap-3 py-2 px-3 rounded-lg ${gateRejected ? 'opacity-50' : ''}">
@@ -280,7 +305,17 @@ export function SessionTraceEntry({ event }: { event: UnifiedTraceEvent }) {
           ${event.kind === 'tool_call' && event.toolName
             ? html`<span class="text-xs font-mono font-medium ${style.color}">${event.toolName}</span>`
             : html`<span class="text-[10px] font-medium uppercase tracking-wider ${kindStyle.color}">${kindStyle.label}</span>`}
-          ${event.turn != null ? html`<span class="text-[10px] text-[var(--text-dim)]">T${event.turn}R${event.round ?? 0}</span>` : null}
+          <span class="text-[10px] px-1.5 py-0.5 rounded bg-[var(--white-5)] text-[var(--text-dim)] uppercase tracking-wider">
+            ${event.sourceLane === 'oas' ? 'OAS' : 'MASC'}
+          </span>
+          ${event.turn != null ? html`
+            <span class="text-[10px] text-[var(--text-dim)]">
+              T${event.turn}${event.round != null ? `R${event.round}` : ''}
+            </span>
+          ` : null}
+          ${event.sessionId ? html`<span class="text-[10px] text-[var(--text-dim)] font-mono">S ${event.sessionId}</span>` : null}
+          ${event.operationId ? html`<span class="text-[10px] text-[var(--text-dim)] font-mono">OP ${event.operationId}</span>` : null}
+          ${event.workerRunId ? html`<span class="text-[10px] text-[var(--text-dim)] font-mono">WR ${event.workerRunId}</span>` : null}
           ${event.kind === 'task' ? html`
             <span class="text-[10px] font-bold uppercase tracking-wider ${taskColor(String(event.detail.type))} bg-[var(--white-5)] px-1.5 py-0.5 rounded">
               ${taskIcon(String(event.detail.type))}
@@ -326,6 +361,9 @@ export function SessionTraceEntry({ event }: { event: UnifiedTraceEvent }) {
         ${event.kind === 'broadcast' ? html`<${BroadcastDetail} event=${event} />` : null}
         ${event.kind === 'task' ? html`<${TaskDetail} event=${event} />` : null}
         ${event.kind === 'thinking' ? html`<${ThinkingDetail} event=${event} />` : null}
+        ${event.kind === 'oas_tool' || event.kind === 'oas_turn' || event.kind === 'oas_context'
+          ? html`<${OasDetail} event=${event} />`
+          : null}
       </div>
     </details>
   `

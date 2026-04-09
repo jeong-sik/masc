@@ -286,6 +286,9 @@ let rec add_routes ~sw ~clock router =
            |> max 1 |> min 500
          in
          let keeper_name = Server_utils.query_param req "keeper" in
+         let session_id = Server_utils.query_param req "session_id" in
+         let operation_id = Server_utils.query_param req "operation_id" in
+         let worker_run_id = Server_utils.query_param req "worker_run_id" in
          let sources =
            match Server_utils.query_param req "source" with
            | None -> Telemetry_unified.all_sources
@@ -296,7 +299,7 @@ let rec add_routes ~sw ~clock router =
          in
          let entries =
            Telemetry_unified.read_unified ~base_path ~masc_root ~sources
-             ?keeper_name ~n ()
+             ?keeper_name ?session_id ?operation_id ?worker_run_id ~n ()
          in
          let json = `Assoc [
            ("generated_at", `String (Types.now_iso ()));

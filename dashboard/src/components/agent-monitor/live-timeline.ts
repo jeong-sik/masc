@@ -11,7 +11,7 @@ import { journal } from '../../sse'
 import { isErrorJournalEntry } from '../../journal-entry'
 import type { JournalEntry, JournalEventType } from '../../types'
 
-type FilterKind = 'all' | 'heartbeat' | 'turn' | 'tool' | 'error' | 'lifecycle'
+type FilterKind = 'all' | 'heartbeat' | 'message' | 'oas_turn' | 'tool' | 'error' | 'lifecycle'
 
 const activeFilter = signal<FilterKind>('all')
 const autoScroll = signal(true)
@@ -19,7 +19,8 @@ const autoScroll = signal(true)
 const FILTER_CHIPS: { key: FilterKind; label: string }[] = [
   { key: 'all', label: 'All' },
   { key: 'heartbeat', label: 'Heartbeat' },
-  { key: 'turn', label: 'Turn' },
+  { key: 'message', label: 'Message/Board' },
+  { key: 'oas_turn', label: 'OAS Turn' },
   { key: 'tool', label: 'Tool' },
   { key: 'error', label: 'Error' },
   { key: 'lifecycle', label: 'Lifecycle' },
@@ -31,14 +32,16 @@ function eventMatchesFilter(entry: JournalEntry, filter: FilterKind): boolean {
   switch (filter) {
     case 'heartbeat':
       return et === 'keeper_heartbeat' || et === 'oas_keeper_snapshot'
-    case 'turn':
+    case 'message':
       return et === 'broadcast' || et === 'board_post' || et === 'board_comment'
+    case 'oas_turn':
+      return et === 'oas_turn'
     case 'tool':
-      return entry.text.toLowerCase().includes('tool')
+      return et === 'keeper_tool_call' || et === 'oas_tool' || entry.text.toLowerCase().includes('tool')
     case 'error':
       return et === 'keeper_guardrail' || isErrorJournalEntry(entry)
     case 'lifecycle':
-      return et === 'agent_joined' || et === 'agent_left' || et === 'keeper_handoff' || et === 'keeper_compaction' || et === 'keeper_phase_changed'
+      return et === 'agent_joined' || et === 'agent_left' || et === 'keeper_handoff' || et === 'keeper_compaction' || et === 'keeper_phase_changed' || et === 'oas_context' || et === 'oas_event' || et === 'oas_task'
     default:
       return true
   }
@@ -51,6 +54,12 @@ function eventKindBadgeClass(entry: JournalEntry): string {
     case 'keeper_heartbeat':
     case 'oas_keeper_snapshot':
       return 'agent-event-badge--heartbeat'
+    case 'oas_turn':
+      return 'agent-event-badge--broadcast'
+    case 'oas_tool':
+      return 'agent-event-badge--task'
+    case 'oas_context':
+      return 'agent-event-badge--keeper'
     case 'agent_joined':
     case 'agent_left':
       return 'agent-event-badge--lifecycle'
@@ -75,6 +84,10 @@ function eventKindLabel(eventType: JournalEventType | undefined): string {
   switch (eventType) {
     case 'keeper_heartbeat': return 'HB'
     case 'oas_keeper_snapshot': return 'OAS'
+    case 'oas_turn': return 'TURN'
+    case 'oas_tool': return 'TOOL'
+    case 'oas_context': return 'CTX'
+    case 'oas_task': return 'TASK'
     case 'agent_joined': return 'JOIN'
     case 'agent_left': return 'LEFT'
     case 'keeper_handoff': return 'HAND'

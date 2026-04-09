@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import { StatusChip } from './common/status-chip'
+import { RouteLink } from './common/route-link'
 import { toolCategory } from './tool-call-shared'
 import type {
   DashboardProofActorContribution,
@@ -92,22 +93,12 @@ export function WorkerRunEvidenceRow({ item }: { item: DashboardProofWorkerRunEv
   const validationFailures = Array.isArray(item.validation_failures) ? item.validation_failures : []
   const toolSurfaceNames = Array.isArray(item.tool_surface_names) ? item.tool_surface_names : []
   const toolNames = Array.isArray(item.tool_names) ? item.tool_names : []
-  const traceWorkerRunId =
-    item.trace_ref && typeof item.trace_ref.worker_run_id === 'string'
-      ? item.trace_ref.worker_run_id
-      : null
-  const conformance =
-    item.session_conformance && typeof item.session_conformance === 'object' && !Array.isArray(item.session_conformance)
-      ? item.session_conformance
-      : null
-  const conformanceChecks = Array.isArray(conformance?.checks) ? conformance.checks : []
-  const conformanceFailures = conformanceChecks.filter(check => check && typeof check === 'object' && 'passed' in check && (check as { passed?: unknown }).passed === false)
-  const proofEvidenceCount =
-    typeof item.proof_evidence_count === 'number'
-      ? item.proof_evidence_count
-      : Array.isArray(item.raw_evidence_refs)
-        ? item.raw_evidence_refs.length
-        : null
+  const scopeParams: Record<string, string> = {
+    section: 'telemetry',
+    ...(item.session_id ? { session_id: item.session_id } : {}),
+    ...(item.operation_id ? { operation_id: item.operation_id } : {}),
+    ...(item.worker_run_id ? { worker_run_id: item.worker_run_id } : {}),
+  }
   return html`
     <article class="p-4 rounded-xl border border-card-border bg-card/40 backdrop-blur-md shadow-sm hover:border-accent/30 transition-all duration-200 flex flex-col gap-3">
       <div class="flex justify-between gap-4 items-start">
@@ -115,16 +106,37 @@ export function WorkerRunEvidenceRow({ item }: { item: DashboardProofWorkerRunEv
           <strong class="text-[13px] text-text-strong font-bold tracking-wide">${item.worker_name ?? item.worker_run_id}</strong>
           <div class="flex flex-wrap gap-2 text-[11px] text-text-muted font-medium items-center">
             <span class="font-mono bg-white/5 px-1.5 py-0.5 rounded border border-white/5">${item.worker_run_id}</span>
+            ${item.session_id ? html`<span class="font-mono bg-white/5 px-1.5 py-0.5 rounded border border-white/5">S ${item.session_id}</span>` : null}
+            ${item.operation_id ? html`<span class="font-mono bg-white/5 px-1.5 py-0.5 rounded border border-white/5">OP ${item.operation_id}</span>` : null}
             <span class="text-text-dim/60">•</span>
             <span>${item.ts_iso ? relativeTime(item.ts_iso) : '기록 없음'}</span>
           </div>
         </div>
-        <span class="px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-widest shadow-sm ${workerRunEvidenceTone(item)}">
-          ${workerRunEvidenceLabel(item)}
-        </span>
+        <div class="flex flex-col items-end gap-2">
+          <span class="px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-widest shadow-sm ${workerRunEvidenceTone(item)}">
+            ${workerRunEvidenceLabel(item)}
+          </span>
+          <${RouteLink}
+            tab="monitoring"
+            params=${scopeParams}
+            class="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-[10px] font-medium text-text-muted hover:text-text-strong hover:bg-white/10"
+          >
+            Runtime Diagnosis
+          <//>
+        </div>
       </div>
       <div class="text-[11px] text-text-body/80 bg-white/5 p-2 rounded-lg border border-white/10 mt-1 shadow-inner">
         ${workerRunEvidenceMeta(item) || 'runtime/model 메타데이터 없음'}
+      </div>
+      <div class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 rounded-xl border border-white/10 bg-black/10 px-3 py-3 text-[11px]">
+        <span class="text-text-muted">요청 runtime/model</span>
+        <span class="font-mono text-text-body">${item.requested_runtime ?? '-'} / ${item.requested_model ?? '-'}</span>
+        <span class="text-text-muted">해석 runtime/model</span>
+        <span class="font-mono text-text-body">${item.resolved_runtime ?? '-'} / ${item.resolved_model ?? '-'}</span>
+        <span class="text-text-muted">trace / proof</span>
+        <span class="font-mono text-text-body">${item.trace_evidence_status ?? '-'} / ${item.proof_evidence_status ?? '-'}</span>
+        <span class="text-text-muted">tool surface</span>
+        <span class="font-mono text-text-body">${item.tool_surface_status ?? '-'}${item.evidence_session_id ? ` · ${item.evidence_session_id}` : ''}</span>
       </div>
       ${preview
         ? html`<div class="flex flex-col gap-1.5 py-3 px-4 rounded-xl border border-card-border bg-bg-1/40 shadow-inner mt-1">
@@ -137,27 +149,11 @@ export function WorkerRunEvidenceRow({ item }: { item: DashboardProofWorkerRunEv
             <strong class="text-[11px] font-semibold uppercase tracking-widest text-warn">검증 실패</strong>
             <span class="text-[12px] text-text-body leading-relaxed whitespace-pre-wrap">${validationFailures.join(' · ')}</span>
           </div>`
-        : null}
-      ${(traceWorkerRunId || item.evidence_session_id || item.proof_run_id || item.proof_status || conformance)
-        ? html`<div class="flex flex-col gap-2 mt-2 pt-3 border-t border-card-border/50">
-            <strong class="text-[11px] font-semibold uppercase tracking-widest text-text-muted">증거 식별자</strong>
-            <div class="grid gap-1.5 text-[11px] text-text-body">
-              ${traceWorkerRunId ? html`<div>trace_ref · <span class="font-mono">${traceWorkerRunId}</span></div>` : null}
-              ${item.evidence_session_id ? html`<div>evidence_session · <span class="font-mono">${item.evidence_session_id}</span></div>` : null}
-              ${item.proof_run_id ? html`<div>proof_run · <span class="font-mono">${item.proof_run_id}</span></div>` : null}
-              ${item.proof_status ? html`<div>proof_status · ${item.proof_status}${proofEvidenceCount != null ? ` · evidence ${proofEvidenceCount}` : ''}</div>` : null}
-              ${conformance
-                ? html`<div>
-                    conformance · ${conformanceFailures.length > 0
-                      ? `${conformanceFailures.length} failed`
-                      : conformanceChecks.length > 0
-                        ? `${conformanceChecks.length} checks ok`
-                        : 'report present'}
-                  </div>`
-                : null}
-            </div>
+        : html`<div class="flex flex-col gap-1.5 py-3 px-4 rounded-xl border border-green-500/20 bg-green-500/5 shadow-inner mt-1">
+            <strong class="text-[11px] font-semibold uppercase tracking-widest text-green-300">검증 상태</strong>
+            <span class="text-[12px] text-text-body leading-relaxed whitespace-pre-wrap">${item.trace_validated ? 'trace validated' : 'validation failure 없음'}</span>
           </div>`
-        : null}
+      }
       ${toolSurfaceNames.length > 0
         ? html`<div class="flex flex-col gap-2 mt-2 pt-3 border-t border-card-border/50">
             <strong class="text-[11px] font-semibold uppercase tracking-widest text-text-muted">사용 가능 도구</strong>

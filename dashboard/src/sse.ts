@@ -16,7 +16,10 @@ import {
   normalizeJournalSource,
 } from './journal-entry'
 import type { OasKeeperSnapshot } from './types/oas'
-import { appendLiveToolCall } from './components/session-trace/session-trace-state'
+import {
+  appendLiveOasEvent,
+  appendLiveToolCall,
+} from './components/session-trace/session-trace-state'
 
 import {
   RECONNECT_BASE_MS,
@@ -93,6 +96,14 @@ function quotePreview(preview: string | undefined): string {
 function actorLabel(name: string | undefined): string {
   const normalized = (name ?? '').trim()
   return normalized || 'system'
+}
+
+function asString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() !== '' ? value : undefined
+}
+
+function asNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
 }
 
 function formatTaskNarrative(agent: string, taskId?: string, status?: string): string {
@@ -616,6 +627,152 @@ function handleEvent(event: SSEEvent): void {
         oasLastKeeperTick.value = now
       }
       oasTotalEvents.value++
+      break
+    }
+    case 'oas:agent_started':
+    case 'oas:agent_completed': {
+      const p = (event.payload ?? {}) as Record<string, unknown>
+      const agentName = asString(p.agent_name) ?? agent
+      const taskId = asString(p.task_id)
+      const elapsed = asNumber(p.elapsed_s)
+      const phase = type === 'oas:agent_started' ? 'started' : 'completed'
+      addTypedJournalEntry(
+        agentName,
+        `OAS agent ${phase}${taskId ? ` · ${taskId}` : ''}${elapsed != null ? ` · ${elapsed.toFixed(1)}s` : ''}`,
+        'oas',
+        'oas_event',
+        {
+          severity: event.severity,
+          source: event.source,
+          narrativeText: `${actorLabel(agentName)} OAS agent ${phase}${taskId ? ` (${taskId})` : ''}`,
+          preview: taskId,
+        },
+      )
+      if (agentName) {
+        const tsMs = (typeof event.ts_unix === 'number' ? event.ts_unix : Date.now() / 1000) * 1000
+        appendLiveOasEvent(agentName, {
+          id: `live-oas-agent-${phase}-${tsMs}-${agentName}`,
+          ts: tsMs,
+          ts_iso: new Date(tsMs).toISOString(),
+          kind: 'lifecycle',
+          summary: `agent ${phase}`,
+          detail: { task_id: taskId ?? null, elapsed_s: elapsed ?? null },
+        })
+      }
+      break
+    }
+    case 'oas:tool_called':
+    case 'oas:tool_completed': {
+      const p = (event.payload ?? {}) as Record<string, unknown>
+      const agentName = asString(p.agent_name) ?? agent
+      const toolName = asString(p.tool_name) ?? 'unknown'
+      const phase = type === 'oas:tool_called' ? 'called' : 'completed'
+      addTypedJournalEntry(
+        agentName,
+        `OAS tool ${phase}: ${toolName}`,
+        'oas',
+        'oas_tool',
+        {
+          severity: event.severity,
+          source: event.source,
+          narrativeText: `${actorLabel(agentName)} OAS 도구 ${phase}: ${toolName}`,
+        },
+      )
+      if (agentName) {
+        const tsMs = (typeof event.ts_unix === 'number' ? event.ts_unix : Date.now() / 1000) * 1000
+        appendLiveOasEvent(agentName, {
+          id: `live-oas-tool-${phase}-${tsMs}-${toolName}`,
+          ts: tsMs,
+          ts_iso: new Date(tsMs).toISOString(),
+          kind: 'oas_tool',
+          summary: `${phase} ${toolName}`,
+          detail: { phase, tool_name: toolName },
+          toolName,
+        })
+      }
+      break
+    }
+    case 'oas:turn_started':
+    case 'oas:turn_completed': {
+      const p = (event.payload ?? {}) as Record<string, unknown>
+      const agentName = asString(p.agent_name) ?? agent
+      const turn = asNumber(p.turn)
+      const phase = type === 'oas:turn_started' ? 'started' : 'completed'
+      addTypedJournalEntry(
+        agentName,
+        `OAS turn ${phase}${turn != null ? ` · T${turn}` : ''}`,
+        'oas',
+        'oas_turn',
+        {
+          severity: event.severity,
+          source: event.source,
+          narrativeText: `${actorLabel(agentName)} OAS turn ${phase}${turn != null ? ` (T${turn})` : ''}`,
+        },
+      )
+      if (agentName) {
+        const tsMs = (typeof event.ts_unix === 'number' ? event.ts_unix : Date.now() / 1000) * 1000
+        appendLiveOasEvent(agentName, {
+          id: `live-oas-turn-${phase}-${tsMs}-${turn ?? 'na'}`,
+          ts: tsMs,
+          ts_iso: new Date(tsMs).toISOString(),
+          kind: 'oas_turn',
+          summary: `${phase} turn${turn != null ? ` ${turn}` : ''}`,
+          detail: { phase, turn: turn ?? null },
+          turn,
+        })
+      }
+      break
+    }
+    case 'oas:context_compacted': {
+      const p = (event.payload ?? {}) as Record<string, unknown>
+      const agentName = asString(p.agent_name) ?? agent
+      const before = asNumber(p.before_tokens)
+      const after = asNumber(p.after_tokens)
+      const phase = asString(p.phase)
+      addTypedJournalEntry(
+        agentName,
+        `OAS compact${before != null && after != null ? ` · ${before}→${after}` : ''}${phase ? ` · ${phase}` : ''}`,
+        'oas',
+        'oas_context',
+        {
+          severity: event.severity,
+          source: event.source,
+          narrativeText: `${actorLabel(agentName)} OAS context compact${phase ? ` (${phase})` : ''}`,
+        },
+      )
+      if (agentName) {
+        const tsMs = (typeof event.ts_unix === 'number' ? event.ts_unix : Date.now() / 1000) * 1000
+        appendLiveOasEvent(agentName, {
+          id: `live-oas-context-${tsMs}-${phase ?? 'compact'}`,
+          ts: tsMs,
+          ts_iso: new Date(tsMs).toISOString(),
+          kind: 'oas_context',
+          summary: `compact${before != null && after != null ? ` ${before}→${after}` : ''}`,
+          detail: {
+            before_tokens: before ?? null,
+            after_tokens: after ?? null,
+            phase: phase ?? null,
+          },
+        })
+      }
+      break
+    }
+    case 'oas:task_state_changed': {
+      const p = (event.payload ?? {}) as Record<string, unknown>
+      const taskId = asString(p.task_id) ?? event.task_id ?? 'unknown'
+      const fromState = asString(p.from_state)
+      const toState = asString(p.to_state)
+      addTypedJournalEntry(
+        taskId,
+        `OAS task ${taskId}${fromState || toState ? ` · ${fromState ?? '?'}→${toState ?? '?'}` : ''}`,
+        'oas',
+        'oas_task',
+        {
+          severity: event.severity,
+          source: event.source,
+          narrativeText: `OAS task 상태 전이 ${taskId}${fromState || toState ? ` (${fromState ?? '?'} → ${toState ?? '?'})` : ''}`,
+        },
+      )
       break
     }
     default:

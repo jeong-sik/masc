@@ -43,5 +43,5 @@ val percentile : float array -> float -> float
 
 val start_keepalive :
   ?proactive_warmup_sec:int -> 'a context -> keeper_meta -> unit
-val stop_keepalive : string -> unit
+val stop_keepalive : ?base_path:string -> string -> unit
 val stop_all_keepalives : unit -> unit

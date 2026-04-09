@@ -1595,10 +1595,11 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
           Keeper_registry.cleanup_tracking ~base_path:ctx.config.base_path live_meta.name)))
 ;;
 
-let stop_keepalive name =
+let stop_keepalive ?base_path name =
   let entries =
-    Keeper_registry.all ()
-    |> List.filter (fun (e : Keeper_registry.registry_entry) -> String.equal e.name name)
+    Keeper_registry.all ?base_path ()
+    |> List.filter (fun (e : Keeper_registry.registry_entry) ->
+         String.equal e.name name)
   in
   List.iter
     (fun (entry : Keeper_registry.registry_entry) ->

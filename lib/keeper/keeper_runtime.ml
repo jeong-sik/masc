@@ -321,8 +321,8 @@ let start_existing_keepalives ctx =
       raise exn
   end
 
-let stop_keepalive name =
-  Keeper_keepalive.stop_keepalive name
+let stop_keepalive ?base_path name =
+  Keeper_keepalive.stop_keepalive ?base_path name
 
 let reset_test_state base_path =
   stop_supervisor_sweep base_path;

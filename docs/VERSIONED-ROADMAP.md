@@ -1,7 +1,7 @@
 # masc-mcp Versioned Roadmap — Feature Trains First
 
-> Last updated: 2026-03-13
-> Baseline: v2.87.0
+> Last updated: 2026-04-09
+> Baseline: v0.2.0
 
 ## Why This Document Exists
 
@@ -24,17 +24,21 @@ These version layers are separate and should not be mixed:
 
 Release lane rules:
 
-- `2.x.0`: feature train release. A minor must have one primary promise.
-- `2.x.1+`: patch stabilization for the current train only.
+- `0.y.0`: feature train release. Each train must have one primary promise.
+- `0.y.z` where `z > 0`: stabilization for the current train only.
+- `1.0.0` is reserved for the point where repo coordination, release truth, and the core operator path are trustworthy without caveats.
 - Public MCP surface expansion belongs in `minor` or `major`, not in patch.
 - Migration-heavy cleanup belongs in a named train, not in a stabilization patch.
+- Release automation compares tags inside the active major series only, so frozen legacy `v2.*` tags do not block the `0.x` line.
 
 Cross-check: `scripts/bump-version.sh` already treats these as distinct layers.
 
 Current numbering note:
 
-- `v2.87.0` has already been used as the merged release-bookkeeping bump on `main` (PR #978).
-- Feature-train execution therefore starts at `v2.88.0`.
+- `v2.87.0` through `v2.263.0` remain immutable historical tags from the old internal release-train counter.
+- `v0.2.0` resets product SemVer to the honest pre-1.0 line.
+- Historical `v0.1.0` and `v0.1.1` tags already exist, so the active reset starts at the next unused train.
+- No new `v2.*` release tags should be published.
 
 ## Intake and Triage
 

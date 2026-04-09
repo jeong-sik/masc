@@ -50,6 +50,15 @@ version_from_ref() {
   git show "$1:dune-project" 2>/dev/null | version_from_stream
 }
 
+major_from_version() {
+  printf '%s\n' "${1%%.*}"
+}
+
+latest_tag_for_major() {
+  local major="$1"
+  git tag --list "v${major}.*" --sort=-v:refname | head -n1
+}
+
 version_gt() {
   local left="$1"
   local right="$2"
@@ -58,15 +67,17 @@ version_gt() {
 
 head_package_version="$(version_from_ref "$head_ref")"
 [[ -n "$head_package_version" ]] || fail "missing package version in $head_ref:dune-project"
-
-latest_tag="$(git tag --list 'v[0-9]*' --sort=-v:refname | head -n1)"
-if [[ -z "$latest_tag" ]]; then
-  printf 'Release train guard OK: no release tags found, head=%s\n' "$head_package_version"
-  exit 0
-fi
-latest_tag_version="${latest_tag#v}"
+head_major="$(major_from_version "$head_package_version")"
 
 if [[ -z "$base_ref" ]]; then
+  latest_tag="$(latest_tag_for_major "$head_major")"
+  if [[ -z "$latest_tag" ]]; then
+    printf 'Release train guard OK: no release tags found for major=%s, head=%s\n' \
+      "$head_major" "$head_package_version"
+    exit 0
+  fi
+
+  latest_tag_version="${latest_tag#v}"
   printf 'Release train guard OK: no base ref provided, head=%s latest_tag=%s\n' \
     "$head_package_version" "$latest_tag_version"
   exit 0
@@ -74,6 +85,22 @@ fi
 
 base_package_version="$(version_from_ref "$base_ref")"
 [[ -n "$base_package_version" ]] || fail "missing package version in $base_ref:dune-project"
+base_major="$(major_from_version "$base_package_version")"
+latest_tag="$(latest_tag_for_major "$base_major")"
+
+if [[ -z "$latest_tag" ]]; then
+  if [[ "$head_package_version" == "$base_package_version" ]]; then
+    printf '::warning::Release train: major %s has no published tags yet. Tag v%s when ready.\n' \
+      "$base_major" "$base_package_version"
+    printf 'Release train guard OK (warn): base=%s head=%s latest_tag=none (bootstrap series)\n' \
+      "$base_package_version" "$head_package_version"
+    exit 0
+  fi
+
+  fail "base ref $base_ref starts bootstrap release line $base_package_version with no published v${base_major}.* tag, and head changes package version to $head_package_version; publish/tag v$base_package_version before widening the release line"
+fi
+
+latest_tag_version="${latest_tag#v}"
 
 if [[ "$base_package_version" == "$latest_tag_version" ]]; then
   printf 'Release train guard OK: base=%s head=%s latest_tag=%s\n' \

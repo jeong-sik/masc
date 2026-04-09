@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-04-09
+
+### Changed
+- Release SemVer restarts at `0.y.z` to reflect that `masc-mcp` is still pre-1.0.
+- Release-train automation now compares tags within the active major series, so frozen legacy `v2.*` tags do not block the new `0.x` line.
+- Front-door docs, release policy, and issue templates now point at `v0.2.0` as the active package version.
+- The reset starts at `0.2.0` because historical `v0.1.0` and `v0.1.1` tags already exist in the repo.
+
+### Deprecated
+- New `v2.*` release tags. Historical `v2.87.0` through `v2.263.0` remain immutable legacy references.
+
 ## [2.263.0] - 2026-04-09
 
 ### Added

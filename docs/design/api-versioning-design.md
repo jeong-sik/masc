@@ -139,7 +139,7 @@ The dynamic OpenAPI generation at `/api/v1/openapi.json` should include:
   "openapi": "3.0.3",
   "info": {
     "title": "MASC MCP Server",
-    "version": "2.162.0",
+    "version": "0.2.0",
     "x-api-contract-version": "v1"
   }
 }

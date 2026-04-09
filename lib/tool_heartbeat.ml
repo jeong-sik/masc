@@ -112,7 +112,7 @@ let handle_heartbeat_list _ctx args =
       hb.Heartbeat.id hb.agent_name hb.interval hb.message uptime
   in
   let list_str =
-    if List.length hbs = 0 then "No active heartbeats"
+    if hbs = [] then "No active heartbeats"
     else "Active heartbeats:\n" ^ String.concat "\n" (List.map fmt_hb hbs)
   in
   (true, list_str)

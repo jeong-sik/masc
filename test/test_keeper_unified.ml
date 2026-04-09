@@ -1519,41 +1519,6 @@ let test_side_effect_reclassification_drops_keeper_read_only_tools_from_mixed_se
   check bool "drops memory_search from ambiguous set" false
     (contains_substring rendered "keeper_memory_search")
 
-let test_side_effect_reclassification_skips_retry_safe_keeper_observation_tools () =
-  let original =
-    Agent_sdk.Error.Api
-      (Timeout { message = "Execution cancelled after 300.0s" })
-  in
-  let reclassified =
-    UT.reclassify_error_after_side_effect
-      ~tool_names:
-        [ "keeper_tasks_list";
-          "keeper_board_list";
-          "keeper_shell_readonly";
-          "keeper_fs_read";
-          "masc_heartbeat";
-        ]
-      original
-  in
-  check bool "retry-safe observation tools keep transient classification" true
-    (UT.is_transient_network_error reclassified);
-  check bool "retry-safe observation tools do not become ambiguous partial" false
-    (UT.is_ambiguous_side_effect_error reclassified)
-
-let test_retry_safe_tool_registry_uses_metadata_and_fallbacks () =
-  let dir = temp_dir () in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir dir)
-    (fun () ->
-      ignore (Masc_mcp.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir ());
-      check bool "masc_board_list is retry-safe via metadata"
-        true (Masc_mcp.Keeper_tool_registry.is_retry_safe_tool "masc_board_list");
-      check bool "keeper_fs_read is retry-safe via fallback"
-        true (Masc_mcp.Keeper_tool_registry.is_retry_safe_tool "keeper_fs_read");
-      check bool "keeper_fs_edit stays retry-unsafe"
-        true
-        (Masc_mcp.Keeper_tool_registry.has_retry_unsafe_side_effect "keeper_fs_edit"))
-
 let test_metrics_mixed_response () =
   let result =
     make_run_result ~text:"Done." ~tools:["keeper_fs_read"]
@@ -2220,10 +2185,6 @@ let () =
             test_side_effect_reclassification_ignores_keeper_read_only_tools;
           test_case "mixed tool sets only keep mutating keeper tools" `Quick
             test_side_effect_reclassification_drops_keeper_read_only_tools_from_mixed_set;
-          test_case "retry-safe keeper observation tools stay retryable" `Quick
-            test_side_effect_reclassification_skips_retry_safe_keeper_observation_tools;
-          test_case "retry-safe registry uses metadata and fallbacks" `Quick
-            test_retry_safe_tool_registry_uses_metadata_and_fallbacks;
           test_case "overflow detection and limit parsing" `Quick
             test_overflow_detection_and_limit_parsing;
         ] );

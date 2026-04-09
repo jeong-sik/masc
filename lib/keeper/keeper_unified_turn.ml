@@ -65,7 +65,7 @@ let ambiguous_side_effect_error_prefix =
 let committed_mutating_tools tool_names =
   tool_names
   |> dedupe_keep_order
-  |> List.filter Keeper_tool_registry.has_retry_unsafe_side_effect
+  |> List.filter (fun name -> not (Keeper_exec_tools.is_effectively_read_only_tool name))
 
 let is_ambiguous_side_effect_error (err : Oas.Error.sdk_error) : bool =
   match err with
@@ -1000,7 +1000,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
          with each other's save/restore lifecycle. *)
       let mutating_tools_committed = ref [] in
       let side_effect_observer ~tool_name ~success =
-        if success && Keeper_tool_registry.has_retry_unsafe_side_effect tool_name then
+        if success && not (Keeper_exec_tools.is_effectively_read_only_tool tool_name) then
           mutating_tools_committed := tool_name :: !mutating_tools_committed
       in
       Keeper_exec_tools.add_tool_call_observer side_effect_observer;

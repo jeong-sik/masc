@@ -121,14 +121,18 @@ let has_mutating_side_effect (name : string) : bool =
 (* ── Reconcile-safe tools (mutating but idempotent enough) ─── *)
 
 (** Tools that produce side effects but are safe to leave un-reconciled
-    after a timeout.  Board mutations (post, comment, vote) may create
-    duplicates on retry, but a duplicate post is harmless compared to
-    a permanently stuck keeper.  When ALL committed tools in a failed
-    turn belong to this set, manual_reconcile is skipped. *)
+    after a transient failure or timeout.  Board mutations (post, comment,
+    vote) are not strictly idempotent — retries may create duplicate
+    content — but duplicate posts are an acceptable cost vs. a permanently
+    stuck keeper.  When ALL committed tools in a failed turn belong to
+    this set AND the failure is transient, manual_reconcile is skipped.
+
+    Read-only tools (board_list, board_get) are excluded: they never
+    appear in [committed_mutating_tools] so including them here would
+    be misleading dead entries. *)
 let reconcile_safe_tools =
   [ "keeper_board_post"; "keeper_board_comment";
-    "keeper_board_vote"; "keeper_board_comment_vote";
-    "keeper_board_list"; "keeper_board_get" ]
+    "keeper_board_vote"; "keeper_board_comment_vote" ]
 
 let reconcile_safe_set : (string, unit) Hashtbl.t =
   let tbl = Hashtbl.create (List.length reconcile_safe_tools) in

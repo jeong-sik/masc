@@ -72,9 +72,12 @@ let is_server_rejected_parse_error (err : Oas.Error.sdk_error) : bool =
   match err with
   | Oas.Error.Api (InvalidRequest { message }) ->
       let lower = String.lowercase_ascii message in
-      string_contains_substring ~needle:"closing" lower
-      || string_contains_substring ~needle:"can't find" lower
-      || string_contains_substring ~needle:"unexpected character" lower
+      (* Compound patterns to avoid false positives on generic messages
+         like "Service closing" or "Can't find the specified tool".
+         Each pattern targets a specific JSON parser error family. *)
+      (string_contains_substring ~needle:"can't find closing" lower
+       || string_contains_substring ~needle:"find end of" lower)
+      || string_contains_substring ~needle:"unexpected character in json" lower
       || string_contains_substring ~needle:"unterminated" lower
       || string_contains_substring ~needle:"parse error" lower
   | _ -> false

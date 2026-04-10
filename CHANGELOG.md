@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Changed
+- Restructure keeper.world.md and keeper.capabilities.md: path rules at top, NEVER directives, BAD/GOOD bash examples (#6298)
+- Substitute actual keeper_name into world/capabilities prompts, replacing YOUR_KEEPER_NAME placeholder (#6316)
+- Expand decision log error_category: 5 → 7 categories (added timeout, ambiguous_side_effect) (#6316)
+- Auto-correct common wrong path prefixes in keeper_shell: /repos/X → .masc/playground/name/repos/X (#6317)
+- Wire OAS Tool_retry_policy (retry_on_validation_error=true, Structured_tool_result) (#6324)
+- Wire OAS post_tool_use_failure hook for structured failure metrics (#6324)
+- Per-keeper error prevention hints in TOML instructions: janitor, sangsu, cheolsu, masc-improver (#6298)
+
 ## [0.3.0] - 2026-04-09
 
 ### Added

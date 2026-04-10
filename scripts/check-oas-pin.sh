@@ -113,10 +113,23 @@ version_gte() {
 }
 
 if command -v opam >/dev/null 2>&1; then
-  installed_packages="$(opam exec -- opam list --installed --columns=name,version --short 2>/dev/null)"
+  # Refresh switch environment — opam install may have changed the switch
+  # state on disk without updating the current shell's env vars.
+  eval "$(opam env --switch=. --set-switch 2>/dev/null)" || true
+
+  # Use opam list directly (not opam exec --) to avoid stale environment
+  # from a cached exec context. Keep stderr visible for diagnostics.
+  installed_packages="$(opam list --installed --columns=name,version --short 2>&1)" || true
   installed_version="$(awk '$1 == "agent_sdk" { print $2 }' <<<"${installed_packages}")"
+
+  # Fallback: opam show reads package metadata directly from the switch.
+  if [[ -z "${installed_version}" ]]; then
+    installed_version="$(opam show agent_sdk --field=version 2>/dev/null || true)"
+  fi
+
   if [[ -z "${installed_version}" ]]; then
     echo "agent_sdk is not installed in the current opam switch" >&2
+    echo "  opam list output: ${installed_packages:-<empty>}" >&2
     echo "repair: bash scripts/opam-pin-external-deps.sh && opam install . --deps-only --with-test --with-doc -y" >&2
     exit 1
   fi
@@ -126,7 +139,7 @@ if command -v opam >/dev/null 2>&1; then
     exit 1
   fi
 
-  pin_list_output="$(opam exec -- opam pin list 2>/dev/null || true)"
+  pin_list_output="$(opam pin list 2>/dev/null || true)"
   pin_line="$(awk '$1 ~ /^agent_sdk\./ { print }' <<<"${pin_list_output}")"
   if [[ -n "${pin_line}" ]]; then
     installed_pin_source="$(awk '{print $3}' <<<"${pin_line}")"

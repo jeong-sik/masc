@@ -7,8 +7,8 @@
     Follows the UML orthogonal regions pattern. The keeper FSM is reused
     from {!Keeper_state_machine} without modification (TLA+ verified).
 
-    Phase 1 (advisory): invariant violations are logged, not enforced.
-    Phase 2 (enforcing): violations reject the transition.
+    Current mode: enforcing — invariant violations return [Error].
+    Callers that want advisory mode should log the error and proceed.
 
     @stability Evolving
     @since 2.260.0 *)
@@ -102,23 +102,16 @@ val initial : product
     - Keeper in [Compacting] -> turn must not be [Prompting | Awaiting] *)
 val check_invariants : product -> (unit, string) result
 
-(** {6 Unified Event Dispatch} *)
+(** {6 Per-Dimension Event Application} *)
 
-type event =
-  | K of Keeper.event
-  | T of Agent_turn.event
-  | V of Tool_validation.event
-
-val event_to_string : event -> string
-
-(** Apply an event to the appropriate dimension, then check invariants.
-
-    Returns the new product state or an invariant violation error.
-    For keeper events, delegates to {!Keeper_state_machine.apply_event}
-    which requires [conditions] and [now]. *)
+(** Apply a turn event.
+    Also resets validation on [Turn_start], [Turn_complete], [Turn_error]
+    (TLA+ verified: prevents orphaned validation state). *)
 val apply_turn_event :
   product -> Agent_turn.event -> (product, string) result
 
+(** Apply a validation event.
+    Guarded: validation events are only accepted when [turn = Dispatching]. *)
 val apply_validation_event :
   product -> Tool_validation.event -> (product, string) result
 

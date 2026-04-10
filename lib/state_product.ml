@@ -76,13 +76,12 @@ module Tool_validation = struct
     | Unchecked, Skip_validation -> Valid
     | Det_correcting, Det_fixed -> Det_valid
     | Det_correcting, Det_failed -> Det_invalid
-    | Det_valid, _ -> Valid  (* det correction succeeded *)
+    | Det_valid, Skip_validation -> Valid  (* explicit advance *)
     | Det_invalid, Nondet_attempt _ -> Nondet_retrying
     | Nondet_retrying, Nondet_fixed -> Valid
     | Nondet_retrying, Nondet_exhausted -> Rejected
     | Nondet_retrying, Nondet_attempt _ -> Nondet_retrying  (* retry loop *)
-    | _, Validate_start -> Det_correcting  (* reset *)
-    | phase, _ -> phase  (* ignore invalid transitions *)
+    | phase, _ -> phase  (* ignore invalid transitions — no global reset *)
 end
 
 (* ── Product State ──────────────────────────────────────── *)
@@ -145,17 +144,7 @@ let check_invariants (state : product) : (unit, string) result =
   | [] -> Ok ()
   | vs -> Error (String.concat "; " vs)
 
-(* ── Unified Event Dispatch ─────────────────────────────── *)
-
-type event =
-  | K of Keeper.event
-  | T of Agent_turn.event
-  | V of Tool_validation.event
-
-let event_to_string = function
-  | K e -> "keeper:" ^ Keeper.event_to_string e
-  | T e -> "turn:" ^ Agent_turn.event_to_string e
-  | V e -> "validation:" ^ Tool_validation.event_to_string e
+(* ── Per-Dimension Event Application ────────────────────── *)
 
 let apply_turn_event state event =
   let new_turn = Agent_turn.apply_event ~current:state.turn event in
@@ -173,11 +162,17 @@ let apply_turn_event state event =
   | Error reason -> Error reason
 
 let apply_validation_event state event =
-  let new_validation = Tool_validation.apply_event ~current:state.validation event in
-  let new_state = { state with validation = new_validation } in
-  match check_invariants new_state with
-  | Ok () -> Ok new_state
-  | Error reason -> Error reason
+  (* Guard: validation events only accepted during Dispatching (TLA+ spec). *)
+  if state.turn <> Agent_turn.Dispatching then
+    Error (Printf.sprintf "validation event %s rejected: turn=%s (expected Dispatching)"
+             (Tool_validation.event_to_string event)
+             (Agent_turn.phase_to_string state.turn))
+  else
+    let new_validation = Tool_validation.apply_event ~current:state.validation event in
+    let new_state = { state with validation = new_validation } in
+    match check_invariants new_state with
+    | Ok () -> Ok new_state
+    | Error reason -> Error reason
 
 (* ── Serialization ──────────────────────────────────────── *)
 

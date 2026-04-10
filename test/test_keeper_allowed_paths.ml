@@ -24,6 +24,12 @@ let playground_bundle name =
     KAP.playground_mind_path name;
     KAP.playground_repos_path name ]
 
+let workspace_defaults name =
+  [ Printf.sprintf ".masc/keepers/%s/" name;
+    ".masc/traces/";
+    ".worktrees/";
+    "lib/"; "test/"; "config/"; "bin/"; "scripts/"; "docs/" ]
+
 (* ── observe_only scope ── *)
 
 let test_observe_only_empty_paths () =
@@ -46,15 +52,14 @@ let test_workspace_empty_paths_computed_default () =
       ~name:"sangsu" () in
   let effective = KAP.effective_allowed_paths ~meta in
   check (list string) "workspace + [] = playground bundle + computed default"
-    (playground_bundle "sangsu" @ [".masc/keepers/sangsu/"; ".masc/traces/"]) effective
+    (playground_bundle "sangsu" @ workspace_defaults "sangsu") effective
 
 let test_workspace_explicit_paths () =
   let meta = make_meta ~execution_scope:"workspace"
       ~allowed_paths:["src/"; "docs/"] ~name:"t" () in
   let effective = KAP.effective_allowed_paths ~meta in
   check (list string) "workspace + explicit = playground bundle + ws defaults + explicit"
-    (playground_bundle "t" @ [".masc/keepers/t/"; ".masc/traces/";
-     "src/"; "docs/"]) effective
+    (playground_bundle "t" @ workspace_defaults "t" @ ["src/"; "docs/"]) effective
 
 let test_workspace_star_wildcard () =
   let meta = make_meta ~execution_scope:"workspace"
@@ -95,8 +100,7 @@ let test_explicit_paths_any_scope () =
       ~allowed_paths:paths ~name:"t" () in
   let ws_effective = KAP.effective_allowed_paths ~meta:ws_meta in
   check (list string) "workspace + explicit = playground bundle + ws defaults + explicit"
-    (playground_bundle "t" @ [".masc/keepers/t/"; ".masc/traces/";
-     "lib/keeper/"; "test/"]) ws_effective
+    (playground_bundle "t" @ workspace_defaults "t" @ ["lib/keeper/"; "test/"]) ws_effective
 
 (* ── keeper name in computed default ── *)
 
@@ -106,7 +110,7 @@ let test_computed_default_uses_keeper_name () =
   let effective = KAP.effective_allowed_paths ~meta in
   check (list string) "name embedded in path"
     (playground_bundle "cdal-formalist" @
-     [".masc/keepers/cdal-formalist/"; ".masc/traces/"]) effective
+     workspace_defaults "cdal-formalist") effective
 
 (* ── playground path ── *)
 

@@ -5,6 +5,7 @@ import { fetchToolQuality, type ToolQualityResponse } from '../api/dashboard'
 import { TELEMETRY_AUTO_REFRESH_MS } from '../config/constants'
 import { formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../lib/auto-refresh'
 import { LoadingState } from './common/feedback-state'
+import { isAbortError } from '../lib/async-state'
 
 interface ToolStat {
   name: string
@@ -46,9 +47,6 @@ type RefreshToolQualityOptions = {
   signal?: AbortSignal
 }
 
-function isAbortError(error: unknown): boolean {
-  return error instanceof Error && error.name === 'AbortError'
-}
 
 function cancelActiveToolQualityRequest() {
   latestRequestId += 1

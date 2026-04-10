@@ -222,10 +222,6 @@ export function decodeTransportHealthData(raw: unknown): TransportHealthData | n
   }
 }
 
-export function hydrateTransportHealthData(raw: unknown): TransportHealthData | null {
-  return decodeTransportHealthData(raw)
-}
-
 export async function fetchTransportHealth(opts?: AbortableRequestOptions): Promise<TransportHealthData> {
   const raw = await get<Record<string, unknown>>('/api/v1/dashboard/transport-health', { signal: opts?.signal })
   const decoded = decodeTransportHealthData(raw)

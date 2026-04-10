@@ -15,7 +15,6 @@ import {
   type GateConnectorsData,
   type GateEventInfo,
   type GateKeeperInfo,
-  type GateKeepersData,
   type GateStatusData,
 } from '../api/gate'
 import { formatElapsedCompact, formatTimeAgoEn } from '../lib/format-time'
@@ -68,24 +67,29 @@ async function refresh() {
       keeperError: null,
     }
 
-    try {
-      next.gate = await fetchGateStatus(signal)
-    } catch (error) {
-      next.gateError = error instanceof Error ? error.message : 'fetch failed'
+    const [gateResult, connResult, keeperResult] = await Promise.allSettled([
+      fetchGateStatus(signal),
+      fetchGateConnectors(signal),
+      fetchGateKeepers(signal),
+    ])
+
+    if (gateResult.status === 'fulfilled') {
+      next.gate = gateResult.value
+    } else {
+      next.gateError = gateResult.reason instanceof Error ? gateResult.reason.message : 'fetch failed'
     }
 
-    try {
-      next.connectors = await fetchGateConnectors(signal)
-    } catch (error) {
-      next.connectorError = error instanceof Error ? error.message : 'fetch failed'
+    if (connResult.status === 'fulfilled') {
+      next.connectors = connResult.value
+    } else {
+      next.connectorError = connResult.reason instanceof Error ? connResult.reason.message : 'fetch failed'
     }
 
-    try {
-      const keepersResult: GateKeepersData = await fetchGateKeepers(signal)
-      next.keepers = keepersResult.keepers ?? []
-    } catch (error) {
+    if (keeperResult.status === 'fulfilled') {
+      next.keepers = keeperResult.value.keepers ?? []
+    } else {
       next.keepers = []
-      next.keeperError = error instanceof Error ? error.message : 'fetch failed'
+      next.keeperError = keeperResult.reason instanceof Error ? keeperResult.reason.message : 'fetch failed'
     }
 
     return next
@@ -114,7 +118,6 @@ function channelIcon(ch: string): string {
   return CHANNEL_ICONS[ch] ?? '\u{1F517}'
 }
 
-// Time formatting delegated to lib/format-time (SSOT)
 const formatUptime = formatElapsedCompact
 const timeAgo = formatTimeAgoEn
 

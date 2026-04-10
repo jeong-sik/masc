@@ -6,7 +6,7 @@ import type { SSEEvent } from '../types'
 import { FetchScheduler } from '../lib/fetch-scheduler'
 import {
   fetchTransportHealth,
-  hydrateTransportHealthData,
+  decodeTransportHealthData,
   type TransportHealthData,
 } from '../api/transport-health'
 import { createManagedAsyncResource } from '../lib/async-state'
@@ -32,7 +32,7 @@ export function resetTransportHealthState(): void {
 
 /** Hydrate transport health from SSE payload — zero HTTP fetch. */
 export function hydrateTransportHealthFromSSE(data: unknown): void {
-  const decoded = hydrateTransportHealthData(data)
+  const decoded = decodeTransportHealthData(data)
   if (!decoded) return
   transportHealthResource.reset(decoded)
 }

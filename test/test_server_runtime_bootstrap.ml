@@ -280,7 +280,7 @@ let test_bootstrap_base_path_config_root_skips_explicit_config_override () =
       Alcotest.(check bool) "base-path config not bootstrapped" false
         (Sys.file_exists (Filename.concat base_path ".masc/config")))
 
-let test_activate_base_path_config_root_defaults_to_bootstrapped_root () =
+let test_startup_config_resolution_defaults_to_bootstrapped_root () =
   with_temp_dir "startup-config-activate" (fun dir ->
       let base_path = Filename.concat dir "base" in
       let config_root = Filename.concat base_path ".masc/config" in
@@ -289,27 +289,29 @@ let test_activate_base_path_config_root_defaults_to_bootstrapped_root () =
       mkdir_p (Filename.concat config_root "personas");
       write_file (Filename.concat config_root "cascade.json") "{}";
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
-      let activated =
-        Server_runtime_bootstrap.activate_base_path_config_root ~base_path
+      let resolution =
+        Server_runtime_bootstrap.startup_config_resolution ~base_path
       in
       let expected = config_root in
-      Alcotest.(check string) "returns base-path config root" expected activated;
-      Alcotest.(check (option string)) "env activated to base-path config"
-        (Some expected) (Sys.getenv_opt "MASC_CONFIG_DIR"))
+      Alcotest.(check string) "returns base-path config root" expected
+        resolution.Config_dir_resolver.config_root.path;
+      Alcotest.(check (option string)) "env remains unset" None
+        (Sys.getenv_opt "MASC_CONFIG_DIR"))
 
-let test_activate_base_path_config_root_preserves_explicit_override () =
+let test_startup_config_resolution_preserves_explicit_override () =
   with_temp_dir "startup-config-activate-explicit" (fun dir ->
       let base_path = Filename.concat dir "base" in
       let explicit = Filename.concat dir "custom-config" in
       mkdir_p (Filename.concat base_path ".masc/config");
       mkdir_p explicit;
       with_env "MASC_CONFIG_DIR" (Some explicit) @@ fun () ->
-      let activated =
-        Server_runtime_bootstrap.activate_base_path_config_root ~base_path
+      let resolution =
+        Server_runtime_bootstrap.startup_config_resolution ~base_path
       in
-      Alcotest.(check string) "explicit override preserved" explicit activated;
-      Alcotest.(check (option string)) "env override unchanged"
-        (Some explicit) (Sys.getenv_opt "MASC_CONFIG_DIR"))
+      Alcotest.(check string) "explicit override preserved" explicit
+        resolution.Config_dir_resolver.config_root.path;
+      Alcotest.(check (option string)) "env override unchanged" (Some explicit)
+        (Sys.getenv_opt "MASC_CONFIG_DIR"))
 
 let test_constructor_is_pure () =
   with_temp_dir "startup-pure" (fun dir ->
@@ -893,11 +895,11 @@ let () =
             `Quick
             test_bootstrap_base_path_config_root_skips_explicit_config_override;
           Alcotest.test_case
-            "activate base-path config defaults to bootstrapped root"
-            `Quick test_activate_base_path_config_root_defaults_to_bootstrapped_root;
+            "startup config resolution defaults to bootstrapped root"
+            `Quick test_startup_config_resolution_defaults_to_bootstrapped_root;
           Alcotest.test_case
-            "activate base-path config preserves explicit override"
-            `Quick test_activate_base_path_config_root_preserves_explicit_override;
+            "startup config resolution preserves explicit override"
+            `Quick test_startup_config_resolution_preserves_explicit_override;
           Alcotest.test_case "constructors stay pure" `Quick
             test_constructor_is_pure;
           Alcotest.test_case "restore_persisted_sessions uses flat agents dir"

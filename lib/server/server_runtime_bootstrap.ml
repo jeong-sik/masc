@@ -123,28 +123,17 @@ let bootstrap_base_path_config_root ~base_path =
            config_root);
     Config_dir_resolver.reset ()
 
-let activate_base_path_config_root ~base_path =
-  match Env_config_core.config_dir_opt () with
-  | Some explicit ->
-      Config_dir_resolver.reset ();
-      explicit
-  | None ->
-      let resolution =
-        Config_dir_resolver.resolve_with
-          Config_dir_resolver.
-            {
-              cwd = Sys.getcwd ();
-              executable_name = Sys.executable_name;
-              env_base_path = Some base_path;
-              env_config_dir = None;
-              env_personas_dir = Env_config_core.personas_dir_opt ();
-              env_home = Sys.getenv_opt "HOME";
-            }
-      in
-      let config_root = resolution.Config_dir_resolver.config_root.path in
-      Unix.putenv "MASC_CONFIG_DIR" config_root;
-      Config_dir_resolver.reset ();
-      config_root
+let startup_config_resolution ~base_path =
+  Config_dir_resolver.resolve_with
+    Config_dir_resolver.
+      {
+        cwd = Sys.getcwd ();
+        executable_name = Sys.executable_name;
+        env_base_path = Some base_path;
+        env_config_dir = Env_config_core.config_dir_opt ();
+        env_personas_dir = Env_config_core.personas_dir_opt ();
+        env_home = Sys.getenv_opt "HOME";
+      }
 
 (* GC tuning for long-running server with bursty allocation.
 
@@ -195,7 +184,6 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
   in
   Unix.putenv "MASC_BASE_PATH" base_path;
   bootstrap_base_path_config_root ~base_path;
-  ignore (activate_base_path_config_root ~base_path);
   (* RFC-0001 Gate A: initialize instrumentation stores *)
   Heuristic_metrics.init ~base_path;
   Agent_stress.init ~base_path;
@@ -214,7 +202,7 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
       ~base_path
   in
   let config_resolution =
-    Config_dir_resolver.(resolve () |> to_json)
+    startup_config_resolution ~base_path |> Config_dir_resolver.to_json
   in
   let path_diagnostics =
     Server_base_path_diagnostics.detect

@@ -62,6 +62,7 @@ let core_discovery_tools =
     (* Board: core interaction *)
     "keeper_board_get"; "keeper_board_post";
     "keeper_board_comment"; "keeper_board_vote"; "keeper_board_list";
+    "keeper_board_delete"; "keeper_board_cleanup";
     (* Shell: readonly + execution (action symmetry) *)
     "keeper_shell"; "keeper_bash";
     (* VCS: essential for coding keepers *)

@@ -70,7 +70,8 @@ GuardFires ==
                          ELSE thompson_beta
     /\ guard_penalties_this_cycle' = guard_penalties_this_cycle + 1
     /\ fsm_phase' = "Failing"
-    /\ UNCHANGED <<tool_count, thompson_alpha, turn_outcome>>
+    /\ turn_outcome' = "None"             \* Stale success invalidated on guard event
+    /\ UNCHANGED <<tool_count, thompson_alpha>>
 
 \* Tool restriction: Failing phase removes removable shards.
 \* Recovery floor (non-removable shards) enforces a hard lower bound.
@@ -112,8 +113,8 @@ RecoveryHeartbeat ==
     /\ fsm_phase = "Failing"
     /\ turn_outcome = "Success"
     /\ fsm_phase' = "Running"
-    /\ guard_penalties_this_cycle' = 0    \* Reset on recovery
-    /\ UNCHANGED <<tool_count, thompson_alpha, thompson_beta, turn_outcome>>
+    /\ UNCHANGED <<tool_count, thompson_alpha, thompson_beta,
+                   guard_penalties_this_cycle, turn_outcome>>
 
 \* Shard restoration: Running keeper with positive score regains shards.
 \* Mirrors: B2 — tool_shard.grant_shard on improved performance.
@@ -166,10 +167,11 @@ NextBuggy ==
 
 Fairness ==
     /\ WF_vars(TurnSucceeds)           \* Turns eventually succeed if tools available
-    /\ SF_vars(RecoveryHeartbeat)      \* Strong fairness: recovery fires even if
-                                        \* intermittently disabled by guard/turn events.
-                                        \* Justified: heartbeat runs on periodic timer,
-                                        \* independent of guard evaluation order.
+    /\ SF_vars(RecoveryHeartbeat)      \* Strong fairness: GuardFires resets turn_outcome
+                                        \* to "None", intermittently disabling recovery.
+                                        \* WF insufficient: TurnSucceeds re-enables it,
+                                        \* but GuardFires can preempt before it fires.
+                                        \* SF justified: heartbeat timer is independent.
     /\ WF_vars(NewCycle)               \* Heartbeat cycles advance
     /\ WF_vars(ShardRestoration)       \* Shards restored when score positive
 
@@ -210,8 +212,10 @@ TypeOK ==
 \*   1. tool_count >= RecoveryFloorSize > 0 always         (S1, ASSUME)
 \*   2. TurnSucceeds enabled (tool_count > 0) and fair     (WF)
 \*   3. turn_outcome = "Success" eventually                 (WF step 2)
-\*   4. RecoveryHeartbeat enabled and fair                  (WF)
-\*   5. fsm_phase = "Running"                               (WF step 4)
+\*   4. GuardFires may reset turn_outcome to "None"         (preemption)
+\*   5. But TurnSucceeds re-enables recovery (WF, step 2)   (infinitely often)
+\*   6. RecoveryHeartbeat infinitely often enabled           (SF applies)
+\*   7. fsm_phase = "Running"                               (SF fires)
 \*
 \* Buggy model: at tool_count = 0, TurnSucceeds is permanently disabled,
 \* breaking step 2. Failing persists forever → liveness violation.

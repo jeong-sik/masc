@@ -27,6 +27,7 @@ let list_hd_opt = function
 let dashboard_runtime_probe_cache : Yojson.Safe.t option Atomic.t = Atomic.make None
 let dashboard_runtime_probe_cache_updated_at = Atomic.make 0.0
 let dashboard_runtime_probe_cache_ttl_sec = 30.0
+let dashboard_runtime_probe_force_min_refresh_sec = 10.0
 let dashboard_runtime_probe_refresh_in_flight = Atomic.make false
 let dashboard_runtime_probe_runner_hook : (unit -> Yojson.Safe.t) option Atomic.t =
   Atomic.make None
@@ -175,25 +176,41 @@ let dashboard_runtime_probe_fresh_value ~now =
       Some (probe, refreshed_at)
   | _ -> None
 
+let dashboard_runtime_probe_recent_value ~now =
+  match dashboard_runtime_probe_cached_value () with
+  | Some (probe, refreshed_at)
+    when now -. refreshed_at <= dashboard_runtime_probe_force_min_refresh_sec ->
+      Some (probe, refreshed_at)
+  | _ -> None
+
 let dashboard_runtime_probe_http_json ?(force = false) () =
   let now = Time_compat.now () in
   let probe, cache_hit, refreshed_at =
-    match if force then None else dashboard_runtime_probe_fresh_value ~now with
+    match
+      if force then dashboard_runtime_probe_recent_value ~now
+      else dashboard_runtime_probe_fresh_value ~now
+    with
     | Some (cached, cached_at) -> (cached, true, cached_at)
     | None ->
         if
           Atomic.compare_and_set dashboard_runtime_probe_refresh_in_flight false
             true
         then
-          Fun.protect
-            ~finally:(fun () ->
-              Atomic.set dashboard_runtime_probe_refresh_in_flight false)
-            (fun () ->
-              let fresh = run_dashboard_runtime_probe () in
+          (* Run the Eio-yielding probe outside any Stdlib mutex/Fun.protect
+             scope.  The CAS guard above serialises refreshes; the [match]
+             below ensures the in-flight flag is always cleared even when
+             the probe raises or is cancelled (Atomic.set never yields). *)
+          match run_dashboard_runtime_probe () with
+          | fresh ->
               let refreshed_at = Time_compat.now () in
               Atomic.set dashboard_runtime_probe_cache (Some fresh);
               Atomic.set dashboard_runtime_probe_cache_updated_at refreshed_at;
-              (fresh, false, refreshed_at))
+              Atomic.set dashboard_runtime_probe_refresh_in_flight false;
+              (fresh, false, refreshed_at)
+          | exception exn ->
+              let bt = Printexc.get_raw_backtrace () in
+              Atomic.set dashboard_runtime_probe_refresh_in_flight false;
+              Printexc.raise_with_backtrace exn bt
         else
           let fallback_now = Time_compat.now () in
           match

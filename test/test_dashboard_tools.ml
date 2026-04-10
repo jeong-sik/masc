@@ -104,6 +104,11 @@ let test_dashboard_tools_projection () =
             (runtime_probe |> member "cache_hit" |> to_bool);
           check bool "runtime probe second request is cache hit" true
             (runtime_probe_cached |> member "cache_hit" |> to_bool);
+          let runtime_probe_forced =
+            Lib.Server_dashboard_http.dashboard_runtime_probe_http_json ~force:true ()
+          in
+          check bool "runtime probe forced refresh reuses recent cache" true
+            (runtime_probe_forced |> member "cache_hit" |> to_bool);
           check int "runtime probe computed once" 1
             (Atomic.get runtime_probe_calls));
       check bool "usage dispatch flag present" true

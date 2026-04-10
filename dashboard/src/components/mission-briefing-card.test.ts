@@ -42,7 +42,6 @@ function sampleMission(): DashboardMissionResponse {
       },
     ],
     internal_signals: [],
-    session_briefs: [],
     agent_briefs: [],
     keeper_briefs: [],
   } as unknown as DashboardMissionResponse

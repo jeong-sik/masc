@@ -1,7 +1,7 @@
 // Ops helpers — shared view helpers built on top of the canonical ops state.
 
 import { showToast } from '../common/toast'
-import { prettyJson, displayStatus, statusLabel } from '../../lib/status-label'
+import { prettyJson, displayStatus } from '../../lib/status-label'
 import type {
   OperatorDigest,
   OperatorGuidanceSummary,
@@ -10,7 +10,6 @@ import type {
   PendingConfirmation,
   OperatorRecommendedAction,
   OperatorJudgeRuntime,
-  OperatorSessionSnapshot,
 } from '../../types'
 import {
   confirmOperatorPendingAction,
@@ -28,14 +27,6 @@ import {
   taskTitle,
   taskDescription,
   taskPriority,
-  selectedSessionId,
-  teamTurnKind,
-  teamMessage,
-  teamTaskTitle,
-  teamTaskDescription,
-  teamTaskPriority,
-  teamSpawnBatchJson,
-  teamStopReason,
   selectedKeeperName,
   keeperMessage,
   hydratedWorkflowId,
@@ -52,14 +43,6 @@ export {
   taskTitle,
   taskDescription,
   taskPriority,
-  selectedSessionId,
-  teamTurnKind,
-  teamMessage,
-  teamTaskTitle,
-  teamTaskDescription,
-  teamTaskPriority,
-  teamSpawnBatchJson,
-  teamStopReason,
   selectedKeeperName,
   keeperMessage,
   hydratedWorkflowId,
@@ -137,45 +120,6 @@ export function normalizeStatus(value: unknown): string {
   return typeof value === 'string' ? value.trim().toLowerCase() : ''
 }
 
-export function isSessionTerminal(session: OperatorSessionSnapshot): boolean {
-  const status = normalizeStatus(session.status)
-  return status === 'done'
-    || status === 'completed'
-    || status === 'ended'
-    || status === 'cancelled'
-    || status === 'stopped'
-    || status === 'failed'
-    || status === 'error'
-    || status === 'interrupted'
-}
-
-export function pickPreferredSession(
-  sessions: OperatorSessionSnapshot[],
-): OperatorSessionSnapshot | null {
-  return sessions.find(session => !isSessionTerminal(session)) ?? sessions[0] ?? null
-}
-
-function resolveSelectedSessionId(
-  sessions: OperatorSessionSnapshot[],
-): string {
-  if (
-    selectedSessionId.value
-    && sessions.some(session => session.session_id === selectedSessionId.value)
-  ) {
-    return selectedSessionId.value
-  }
-  return pickPreferredSession(sessions)?.session_id ?? ''
-}
-
-export function sessionHealthLabel(session: OperatorSessionSnapshot): string {
-  const health = normalizeStatus(session.team_health?.status)
-  return health ? statusLabel(health) : '상태 확인 필요'
-}
-
-export function sessionOutcomeLabel(session: OperatorSessionSnapshot): string {
-  return `${session.done_delta_total ?? 0}건 완료`
-}
-
 export function keeperPriorityReasons(keeper: OperatorKeeperSnapshot): KeeperPriorityReason[] {
   const status = normalizeStatus(keeper.status)
   if (status === 'offline' || status === 'inactive' || status === 'error') return ['offline']
@@ -231,20 +175,8 @@ export function actionTypeLabel(value?: string | null): string {
     case 'namespace_resume':
     case 'room_resume':
       return '프로젝트 재개'
-    case 'team_turn':
-      return '세션 업데이트'
-    case 'team_note':
-      return '세션 메모'
-    case 'team_broadcast':
-      return '세션 공지'
-    case 'team_task_inject':
-      return '세션 작업 주입'
-    case 'team_worker_spawn_batch':
-      return '세션 작업자 교체'
     case 'task_inject':
       return '작업 주입'
-    case 'team_stop':
-      return '세션 중지'
     case 'keeper_message':
       return '키퍼 메시지'
     case 'keeper_probe':
@@ -266,8 +198,6 @@ export function targetTypeLabel(value?: string | null): string {
       return '프로젝트 범위'
     case 'room':
       return '프로젝트 범위'
-    case 'team_session':
-      return '세션'
     case 'keeper':
       return '키퍼'
     case 'review_item':
@@ -314,21 +244,6 @@ export function canManagePendingConfirmation(
   return (item.actor ?? '').trim() === currentActor
 }
 
-export function sessionActionLabel(value: typeof teamTurnKind.value): string {
-  switch (value) {
-    case 'note':
-      return '노트'
-    case 'broadcast':
-      return '방송'
-    case 'task':
-      return '작업'
-    case 'worker_spawn_batch':
-      return '작업자 교체'
-    default:
-      return value
-  }
-}
-
 function workflowPayloadString(
   payload: Record<string, unknown> | null | undefined,
   key: string,
@@ -343,13 +258,6 @@ function workflowPayloadString(
 function payloadRecord(payload: unknown): Record<string, unknown> | null {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null
   return payload as Record<string, unknown>
-}
-
-function spawnBatchJsonString(payload: Record<string, unknown> | null): string {
-  if (!payload) return ''
-  const direct = payload.spawn_batch
-  if (direct !== undefined) return prettyJson(direct)
-  return prettyJson(payload)
 }
 
 function hydrateActionForm(input: {
@@ -373,34 +281,6 @@ function hydrateActionForm(input: {
     }
     if (input.action_type === 'namespace_pause' || input.action_type === 'room_pause') {
       pauseReason.value = workflowPayloadString(payload, 'reason') ?? input.summary
-    }
-    return
-  }
-
-  if (input.target_type === 'team_session') {
-    if (input.target_id) selectedSessionId.value = input.target_id
-    if (input.action_type === 'team_stop') {
-      teamStopReason.value = workflowPayloadString(payload, 'reason') ?? input.summary
-      return
-    }
-    teamTurnKind.value =
-      input.action_type === 'team_worker_spawn_batch'
-        ? 'worker_spawn_batch'
-        : input.action_type === 'team_task_inject'
-          ? 'task'
-          : input.action_type === 'team_broadcast'
-            ? 'broadcast'
-            : 'note'
-    const message = workflowPayloadString(payload, 'message')
-    if (message) teamMessage.value = message
-    if (teamTurnKind.value === 'worker_spawn_batch') {
-      teamSpawnBatchJson.value = spawnBatchJsonString(payload)
-      return
-    }
-    if (teamTurnKind.value === 'task') {
-      teamTaskTitle.value = workflowPayloadString(payload, 'task_title') ?? workflowPayloadString(payload, 'title') ?? '운영자 주입 작업'
-      teamTaskDescription.value = workflowPayloadString(payload, 'task_description') ?? workflowPayloadString(payload, 'description') ?? input.summary
-      teamTaskPriority.value = workflowPayloadString(payload, 'task_priority') ?? workflowPayloadString(payload, 'priority') ?? teamTaskPriority.value
     }
     return
   }
@@ -434,14 +314,10 @@ export function hydrateRecommendedAction(item: OperatorRecommendedAction): void 
 
 export function workflowTargetReady(
   context: DashboardWorkflowContext | null,
-  sessions: OperatorSessionSnapshot[],
   keepers: OperatorKeeperSnapshot[],
 ): boolean {
   if (!context) return true
   if (!context.target_type || isNamespaceTarget(context.target_type)) return true
-  if (context.target_type === 'team_session') {
-    return !!context.target_id && sessions.some(session => session.session_id === context.target_id)
-  }
   if (context.target_type === 'keeper') {
     return !!context.target_id && keepers.some(keeper => keeper.name === context.target_id)
   }
@@ -449,8 +325,8 @@ export function workflowTargetReady(
 }
 
 export async function executeAction(input: {
-  action_type: 'broadcast' | 'namespace_pause' | 'namespace_resume' | 'room_pause' | 'room_resume' | 'task_inject' | 'team_note' | 'team_broadcast' | 'team_task_inject' | 'team_worker_spawn_batch' | 'team_stop' | 'keeper_message' | 'keeper_probe' | 'keeper_recover' | 'review_resolve' | 'review_defer'
-  target_type: 'namespace' | 'room' | 'team_session' | 'keeper' | 'review_item'
+  action_type: 'broadcast' | 'namespace_pause' | 'namespace_resume' | 'room_pause' | 'room_resume' | 'task_inject' | 'keeper_message' | 'keeper_probe' | 'keeper_recover' | 'review_resolve' | 'review_defer'
+  target_type: 'namespace' | 'room' | 'keeper' | 'review_item'
   target_id?: string
   payload: Record<string, unknown>
   successMessage: string
@@ -510,8 +386,8 @@ export async function executeRecommendedAction(action: OperatorRecommendedAction
       ? action.suggested_payload as Record<string, unknown>
       : {}
   return executeAction({
-    action_type: action.action_type as 'broadcast' | 'namespace_pause' | 'namespace_resume' | 'room_pause' | 'room_resume' | 'task_inject' | 'team_note' | 'team_broadcast' | 'team_task_inject' | 'team_worker_spawn_batch' | 'team_stop' | 'keeper_message' | 'keeper_probe' | 'keeper_recover',
-    target_type: action.target_type as 'namespace' | 'room' | 'team_session' | 'keeper',
+    action_type: action.action_type as 'broadcast' | 'namespace_pause' | 'namespace_resume' | 'room_pause' | 'room_resume' | 'task_inject' | 'keeper_message' | 'keeper_probe' | 'keeper_recover',
+    target_type: action.target_type as 'namespace' | 'room' | 'keeper',
     target_id: action.target_id ?? undefined,
     payload,
     successMessage: `${actionTypeLabel(action.action_type)}을(를) 요청했습니다`,
@@ -536,10 +412,8 @@ export function primaryActionForReviewItem(item: OperatorReviewItem): OperatorRe
 export function detailDigestForItem(
   item: OperatorReviewItem | null,
   roomDigest: OperatorDigest | null,
-  sessionDigest: OperatorDigest | null,
 ): OperatorDigest | null {
   if (!item) return null
-  if (item.target_type === 'team_session' && sessionDigest?.target_id === item.target_id) return sessionDigest
   if (isNamespaceTarget(item.target_type)) return roomDigest
   return null
 }
@@ -591,90 +465,6 @@ export async function submitTaskInject() {
     taskTitle.value = ''
     taskDescription.value = ''
   }
-}
-
-export async function submitTeamTurn() {
-  const snapshot = operatorSnapshot.value
-  const sessionId = resolveSelectedSessionId(snapshot?.sessions ?? [])
-  if (!sessionId) {
-    showToast('먼저 세션을 고르세요', 'warning')
-    return
-  }
-  const payload: Record<string, unknown> = {}
-  if (teamTurnKind.value === 'worker_spawn_batch') {
-    const raw = teamSpawnBatchJson.value.trim()
-    if (!raw) {
-      showToast('spawn_batch JSON을 먼저 채우세요', 'warning')
-      return
-    }
-    try {
-      const parsed = JSON.parse(raw) as unknown
-      if (Array.isArray(parsed)) {
-        payload.spawn_batch = parsed
-      } else if (parsed && typeof parsed === 'object' && Array.isArray((parsed as Record<string, unknown>).spawn_batch)) {
-        payload.spawn_batch = (parsed as Record<string, unknown>).spawn_batch
-      } else {
-        showToast('spawn_batch는 배열 또는 { spawn_batch: [...] } 형태여야 합니다', 'warning')
-        return
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'spawn_batch JSON 파싱에 실패했습니다'
-      showToast(message, 'error')
-      return
-    }
-    const result = await executeAction({
-      action_type: 'team_worker_spawn_batch',
-      target_type: 'team_session',
-      target_id: sessionId,
-      payload,
-      successMessage: '작업자 교체 요청을 적용했습니다',
-    })
-    if (result) teamSpawnBatchJson.value = ''
-    return
-  }
-  const message = teamMessage.value.trim()
-  if (message) payload.message = message
-  let actionType: 'team_note' | 'team_broadcast' | 'team_task_inject' = 'team_note'
-  if (teamTurnKind.value === 'broadcast') {
-    actionType = 'team_broadcast'
-  } else if (teamTurnKind.value === 'task') {
-    actionType = 'team_task_inject'
-  }
-  if (teamTurnKind.value === 'task') {
-    payload.task_title = teamTaskTitle.value.trim() || '운영자 주입 작업'
-    payload.task_description = teamTaskDescription.value.trim() || '개입 화면에서 주입'
-    payload.task_priority = Number.parseInt(teamTaskPriority.value, 10) || 2
-  }
-  const result = await executeAction({
-    action_type: actionType,
-    target_type: 'team_session',
-    target_id: sessionId,
-    payload,
-    successMessage: '세션 액션을 적용했습니다',
-  })
-  if (result) {
-    teamMessage.value = ''
-    if (teamTurnKind.value === 'task') {
-      teamTaskTitle.value = ''
-      teamTaskDescription.value = ''
-    }
-  }
-}
-
-export async function submitTeamStop() {
-  const snapshot = operatorSnapshot.value
-  const sessionId = resolveSelectedSessionId(snapshot?.sessions ?? [])
-  if (!sessionId) {
-    showToast('먼저 세션을 고르세요', 'warning')
-    return
-  }
-  await executeAction({
-    action_type: 'team_stop',
-    target_type: 'team_session',
-    target_id: sessionId,
-    payload: { reason: teamStopReason.value.trim() || '운영자 중지 요청' },
-    successMessage: '세션 중지를 요청했습니다',
-  })
 }
 
 export async function submitKeeperMessage() {

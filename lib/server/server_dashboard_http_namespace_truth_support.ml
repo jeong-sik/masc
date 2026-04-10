@@ -80,35 +80,24 @@ let dashboard_namespace_truth_focus_json ~initialized ~runtime_count
       |> Option.value ~default:"execution"
     in
     let target_id = json_string_field_opt "target_id" queue in
-    let linked_session_id = json_string_field_opt "linked_session_id" queue in
     let linked_operation_id =
       json_string_field_opt "linked_operation_id" queue
     in
     let suggested_tab, suggested_surface, suggested_params =
-      match linked_session_id with
-      | Some session_id ->
-          ( "intervene",
-            None,
+      match linked_operation_id with
+      | Some operation_id ->
+          ( "command",
+            Some "operations",
+            `Assoc [ ("operation_id", `String operation_id) ] )
+      | None ->
+          ( "command",
+            Some "summary",
             `Assoc
-              [
-                ("target_type", `String "execution_session");
-                ("target_id", `String session_id);
-              ] )
-      | None -> (
-          match linked_operation_id with
-          | Some operation_id ->
-              ( "command",
-                Some "operations",
-                `Assoc [ ("operation_id", `String operation_id) ] )
-          | None ->
-              ( "command",
-                Some "summary",
-                `Assoc
-                  (List.filter_map
-                     (fun (key, value_opt) ->
-                       Option.map (fun value -> (key, `String value)) value_opt)
-                     [ ("target_type", Some target_type); ("target_id", target_id) ])
-              ))
+              (List.filter_map
+                 (fun (key, value_opt) ->
+                   Option.map (fun value -> (key, `String value)) value_opt)
+                 [ ("target_type", Some target_type); ("target_id", target_id) ])
+          )
     in
     `Assoc
       [
@@ -225,28 +214,19 @@ let derived_meta_attention_item ~meta_cognition_json
                  ] );
            ])
 
-let derived_operator_digest_json (config : Room.config) execution_json
+let derived_operator_digest_json (config : Room.config) _execution_json
     meta_cognition_json meta_interpretation =
-  let session_briefs = json_list_field "session_briefs" execution_json in
-  let has_warn =
-    List.exists
-      (fun row ->
-        let h = json_string_field_opt "health" row in
-        h = Some "warn" || h = Some "bad")
-      session_briefs
-  in
   let meta_attention =
     Option.bind meta_interpretation
       (derived_meta_attention_item ~meta_cognition_json)
   in
-  let health = if has_warn || Option.is_some meta_attention then "warn" else "ok" in
-  let attention_count = if has_warn then 1 else if Option.is_some meta_attention then 1 else 0 in
+  let health = if Option.is_some meta_attention then "warn" else "ok" in
+  let attention_count = if Option.is_some meta_attention then 1 else 0 in
   let warn_count =
     match meta_attention with
     | Some item ->
         if json_string_field_opt "severity" item = Some "bad" then 0 else 1
-    | None ->
-        if has_warn then 1 else 0
+    | None -> 0
   in
   let bad_count =
     match meta_attention with
@@ -266,20 +246,6 @@ let derived_operator_digest_json (config : Room.config) execution_json
             ( "top_item",
               match meta_attention with
               | Some item -> item
-              | None when has_warn ->
-                  (* Derive top_item from execution-side session warning *)
-                  (match List.find_opt (fun row ->
-                    let h = json_string_field_opt "health" row in
-                    h = Some "warn" || h = Some "bad") session_briefs with
-                  | Some row -> `Assoc [
-                      ("source", `String "execution");
-                      ("severity", json_string_field_opt "health" row
-                        |> Option.value ~default:"warn" |> fun s -> `String s);
-                      ("label", match json_string_field_opt "session_id" row with
-                        | Some sid -> `String (Printf.sprintf "Session %s needs attention" sid)
-                        | None -> `String "Session needs attention");
-                    ]
-                  | None -> `Null)
               | None -> `Null );
             ("provenance", `String "derived");
           ] );
@@ -301,9 +267,6 @@ let execution_summary_json execution_json =
     | `List items -> items
     | _ -> []
   in
-  let execution_session_briefs =
-    json_list_field "session_briefs" execution_json |> take_n 20
-  in
   let execution_operation_briefs =
     json_list_field "operation_briefs" execution_json |> take_n 20
   in
@@ -321,16 +284,6 @@ let execution_summary_json execution_json =
   | _ ->
       `Assoc
         [
-          ("active_sessions", `Int (List.length execution_session_briefs));
-          ( "blocked_sessions",
-            `Int
-              (count_where execution_session_briefs (fun row ->
-                   let health = json_string_field_opt "health" row in
-                   let status = json_string_field_opt "status" row in
-                   has_text "blocker_summary" row
-                   || health = Some "warn"
-                   || health = Some "bad"
-                   || status = Some "blocked")) );
           ("active_operations", `Int (List.length execution_operation_briefs));
           ( "blocked_operations",
             `Int

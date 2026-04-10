@@ -42,7 +42,7 @@ Experimental features such as TRPG live under `lab`.
 - `GET /api/v1/dashboard/mission`
   - mission summary derived from operator + command truth
 - `GET /api/v1/dashboard/execution`
-  - `summary`, `execution_queue`, `session_briefs`, `operation_briefs`, `worker_support_briefs`, `continuity_briefs`, `offline_worker_briefs`
+  - `summary`, `execution_queue`, `operation_briefs`, `worker_support_briefs`, `continuity_briefs`, `offline_worker_briefs`
   - compatibility payloads remain: `agents`, `tasks`, `messages`, `keepers`
   - test fixture mode: `?fixture=execution_smoke` or `MASC_DASHBOARD_FIXTURE=execution_smoke`
 - `GET /api/v1/dashboard/board`

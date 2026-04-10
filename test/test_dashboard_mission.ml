@@ -33,7 +33,7 @@ let contains str substr =
     true
   with Not_found -> false
 
-let write_pending_confirm config session_id =
+let write_pending_confirm config _session_id =
   let operator_dir = Filename.concat (Room_utils.masc_dir config) "operator" in
   Room_utils.mkdir_p operator_dir;
   Room_utils.write_json config (Filename.concat operator_dir "pending_confirms.json")
@@ -45,11 +45,11 @@ let write_pending_confirm config session_id =
             ("confirm_token", `String "confirm-mission-test");
             ("trace_id", `String "ops_fixture_mission");
             ("actor", `String "dashboard-fixture");
-            ("action_type", `String "team_stop");
-            ("target_type", `String "execution_session");
-            ("target_id", `String session_id);
+            ("action_type", `String "keeper_message");
+            ("target_type", `String "keeper");
+            ("target_id", `String "fixture-keeper");
             ("payload", `Assoc [ ("reason", `String "fixture pending confirmation") ]);
-            ("delegated_tool", `String "masc_operator_action");
+            ("delegated_tool", `String "masc_keeper_msg");
             ("created_at", `String (Types.now_iso ()));
             ("expires_at", `Null);
           ];
@@ -74,7 +74,8 @@ let seed_room config session_id =
     (Lib.Room.broadcast config ~from_agent:"llama-local-alpha"
        ~content:"Spawned worker recovered partial role coverage and runtime visibility.");
 
-  (* Team session store removed — session creation deleted. *)
+  (* Team sessions are retired; mission fixtures now exercise room-level
+     attention and worker/keeper signals without persisting session records. *)
   ignore session_id;
   write_pending_confirm config session_id
 
@@ -141,9 +142,7 @@ let test_dashboard_mission_projection () =
         in
         let open Yojson.Safe.Util in
         let attention_queue = json |> member "attention_queue" |> to_list in
-        let sessions = json |> member "sessions" |> to_list in
         let summary = json |> member "summary" in
-        let session_briefs = json |> member "session_briefs" |> to_list in
         let agent_briefs = json |> member "agent_briefs" |> to_list in
         let internal_signals = json |> member "internal_signals" |> to_list in
         let alpha_brief =
@@ -157,9 +156,6 @@ let test_dashboard_mission_projection () =
            no longer appear. The top item is now pending_confirm_waiting. *)
         check string "top attention kind" "pending_confirm_waiting"
           (attention_queue |> List.hd |> member "kind" |> to_string);
-        (* session_briefs are empty since Team_session_store returns [] *)
-        check bool "session briefs empty after session removal" true
-          (session_briefs = []);
         check bool "mission summary trims paused" true
           (summary |> member "paused" = `Null);
         check bool "mission summary trims active_agents" true
@@ -170,8 +166,8 @@ let test_dashboard_mission_projection () =
           (summary |> member "namespace" |> to_string);
         check string "mission summary namespace mode" "flattened"
           (summary |> member "namespace_mode" |> to_string);
-        check bool "full session cards omitted from mission payload" true
-          (sessions = []);
+        check bool "sessions removed from mission payload" true
+          (json |> member "sessions" = `Null);
         let alpha_input = alpha_brief |> member "recent_input_preview" |> to_string in
         check bool "recent input preserves exact alpha mention" true
           (contains alpha_input "@llama-local-alpha");
@@ -229,9 +225,6 @@ let test_dashboard_mission_http_full_contract () =
           ((json |> member "internal_signals" |> to_list) <> []);
         check bool "command focus retained in mission http payload" true
           (json |> member "command_focus" <> `Null);
-        (* Team_session_store removed — session_briefs are empty *)
-        check bool "session briefs empty after session removal" true
-          (json |> member "session_briefs" |> to_list = []);
       ))
 
 let test_dashboard_mission_http_default_bootstraps_first_success () =
@@ -267,9 +260,6 @@ let test_dashboard_mission_http_default_bootstraps_first_success () =
           (json |> member "summary" |> member "namespace_id" |> to_string);
         check string "default mission exposes namespace" "default"
           (json |> member "summary" |> member "namespace" |> to_string);
-        (* Team_session_store removed — session_briefs are empty *)
-        check bool "session briefs empty after session removal" true
-          (json |> member "session_briefs" |> to_list = []);
       ))
 
 let test_dashboard_mission_keeper_tool_audit_fallback () =
@@ -308,9 +298,6 @@ let test_dashboard_mission_keeper_tool_audit_fallback () =
           (json |> member "summary" |> member "namespace_id" |> to_string);
         check string "default mission exposes namespace" "default"
           (json |> member "summary" |> member "namespace" |> to_string);
-        (* Team_session_store removed — session_briefs are empty *)
-        check bool "session briefs empty after session removal" true
-          (json |> member "session_briefs" |> to_list = []);
       ))
 
 let test_dashboard_mission_http_cache_isolation () =
@@ -356,13 +343,10 @@ let test_dashboard_mission_http_cache_isolation () =
             request
         in
         let open Yojson.Safe.Util in
-        (* Team_session_store removed — session_briefs are empty for both rooms.
-           Cache isolation is still verified: each room computes independently
-           even though both return empty session_briefs. *)
-        check bool "first room session briefs empty" true
-          (json_a |> member "session_briefs" |> to_list = []);
-        check bool "second room session briefs empty" true
-          (json_b |> member "session_briefs" |> to_list = []);
+        check string "first room namespace remains default" "default"
+          (json_a |> member "summary" |> member "namespace_id" |> to_string);
+        check string "second room namespace remains default" "default"
+          (json_b |> member "summary" |> member "namespace_id" |> to_string);
       ))
 
 let test_dashboard_mission_keeper_tool_audit_prefers_heartbeat_task () =

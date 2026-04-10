@@ -17,8 +17,7 @@ let normalize_judgment_target_type value =
   let normalized = String.trim value |> String.lowercase_ascii in
   match normalized with
   | "room" | "namespace" -> Ok ("namespace", Operator_judgment.Room)
-  | "execution_session" -> Ok ("execution_session", Operator_judgment.Execution_session)
-  | _ -> Error "target_type must be namespace or execution_session"
+  | _ -> Error "target_type must be namespace"
 
 let default_fresh_ttl_sec surface =
   match surface with
@@ -34,10 +33,6 @@ let judgment_write_json (ctx : 'a context) args =
   let target_id = get_string_opt args "target_id" in
   let summary = get_string args "summary" "" |> String.trim in
   if summary = "" then Error "summary is required"
-  else if
-    judgment_target_type = Operator_judgment.Execution_session && Option.is_none target_id
-  then
-    Error "target_id is required when target_type=execution_session"
   else
     let now_unix = Unix.gettimeofday () in
     let generated_at = iso_of_unix now_unix in
@@ -88,30 +83,25 @@ let judgment_latest_json (_ctx : 'a context) args =
     normalize_judgment_target_type (get_string args "target_type" "")
   in
   let target_id = get_string_opt args "target_id" in
-  if
-    judgment_target_type = Operator_judgment.Execution_session && Option.is_none target_id
-  then
-    Error "target_id is required when target_type=execution_session"
-  else
-    let require_fresh = get_bool args "require_fresh" true in
-    let judgment =
-      match
-        Operator_judgment.latest_active _ctx.config ~surface
-          ~target_type:judgment_target_type ~target_id
-      with
-      | Some value when (not require_fresh) || Operator_judgment.is_fresh value ->
-          Some value
-      | _ -> None
-    in
-    Ok
-      (`Assoc
-        [
-          ("status", `String "ok");
-          ( "judgment",
-            match judgment with
-            | Some value -> Operator_judgment.to_yojson value
-            | None -> `Null );
-        ])
+  let require_fresh = get_bool args "require_fresh" true in
+  let judgment =
+    match
+      Operator_judgment.latest_active _ctx.config ~surface
+        ~target_type:judgment_target_type ~target_id
+    with
+    | Some value when (not require_fresh) || Operator_judgment.is_fresh value ->
+        Some value
+    | _ -> None
+  in
+  Ok
+    (`Assoc
+      [
+        ("status", `String "ok");
+        ( "judgment",
+          match judgment with
+          | Some value -> Operator_judgment.to_yojson value
+          | None -> `Null );
+      ])
 
 type action_request = {
   actor : string;
@@ -127,11 +117,6 @@ let canonical_action_type action_type =
   | "room_pause" | "namespace_pause" -> "namespace_pause"
   | "room_resume" | "namespace_resume" -> "namespace_resume"
   | "social_sweep" -> "social_sweep"
-  | "team_turn" -> "team_turn"
-  | "team_note" -> "team_note"
-  | "team_broadcast" -> "team_broadcast"
-  | "team_task_inject" -> "team_task_inject"
-  | "team_worker_spawn_batch" -> "team_worker_spawn_batch"
   | "keeper_msg" -> "keeper_message"
   | "keeper_message" -> "keeper_message"
   | "keeper_probe" -> "keeper_probe"
@@ -143,16 +128,13 @@ let canonical_action_type action_type =
 let normalize_action_target_type target_type =
   match String.trim target_type |> String.lowercase_ascii with
   | "room" | "namespace" -> Ok "namespace"
-  | "execution_session" | "keeper" | "review_item" as value -> Ok value
+  | "keeper" | "review_item" as value -> Ok value
   | "" -> Ok ""
-  | _ -> Error "target_type must be namespace, execution_session, keeper, or review_item"
+  | _ -> Error "target_type must be namespace, keeper, or review_item"
 
 let default_target_type_for action_type =
   match action_type with
   | "broadcast" | "namespace_pause" | "namespace_resume" | "task_inject" | "social_sweep" -> "namespace"
-  | "team_turn" | "team_note" | "team_broadcast" | "team_task_inject"
-  | "team_worker_spawn_batch" | "team_stop" ->
-      "execution_session"
   | "keeper_message" | "keeper_probe" | "keeper_recover" -> "keeper"
   | "review_resolve" | "review_defer" -> "review_item"
   | _ -> ""
@@ -234,12 +216,6 @@ let delegated_tool_for action_type =
   | Some action -> action.tool_name
   | None ->
     (match action_type with
-     | "team_turn"
-     | "team_note"
-     | "team_broadcast"
-     | "team_task_inject"
-     | "team_worker_spawn_batch"
-     | "team_stop" -> "masc_operator_action"
      | "review_resolve" | "review_defer" -> "review_state"
      | _ -> "unknown")
 

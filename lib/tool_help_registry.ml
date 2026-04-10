@@ -160,7 +160,7 @@ let manual_help_entry name =
           doc_refs =
             [
               "docs/SWARM-DELIVERY-RUNBOOK.md";
-              "docs/TEAM-SESSION.md";
+              "docs/SUPERVISOR-MODE.md";
             ];
           prompt_hints =
             [

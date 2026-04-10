@@ -6,7 +6,6 @@ type snapshot_state = {
   managed_units : unit_record list;
   units : unit_record list;
   source : string;
-  sessions : Yojson.Safe.t list;
   intents : intent_record list;
   operations : operation_record list;
   detachments : detachment_record list;
@@ -100,7 +99,7 @@ let _session_limit = 20
 let _make_section_cache = Cp_snapshot_section_cache.create
 
 let snapshot_state_of_sections ~config ~agents ~managed_units ~units ~source
-    ~sessions ~intents ~operations ~detachments ~decisions =
+    ~intents ~operations ~detachments ~decisions =
   let live_agents = live_agent_names agents in
   let status_map = agent_status_map agents in
   let child_map = children_map units in
@@ -113,7 +112,6 @@ let snapshot_state_of_sections ~config ~agents ~managed_units ~units ~source
     managed_units;
     units;
     source;
-    sessions;
     intents;
     operations;
     detachments;
@@ -125,9 +123,7 @@ let snapshot_state_of_sections ~config ~agents ~managed_units ~units ~source
     tree_idx;
   }
 
-let build_snapshot_state ?sessions (config : Room_utils.config) =
-  (* Team sessions removed — sessions parameter is always [] *)
-  ignore sessions;
+let build_snapshot_state (config : Room_utils.config) =
   let sc = match !_section_cache with
     | Some cache -> cache
     | None ->
@@ -189,7 +185,7 @@ let build_snapshot_state ?sessions (config : Room_utils.config) =
           let state =
             snapshot_state_of_sections ~config ~agents:sc.agents
               ~managed_units:sc.managed_units ~units:sc.units ~source:sc.source
-              ~sessions:[] ~intents:sc.intents ~operations:sc.operations
+              ~intents:sc.intents ~operations:sc.operations
               ~detachments:sc.detachments ~decisions:sc.decisions
           in
           state
@@ -200,7 +196,7 @@ let build_snapshot_state ?sessions (config : Room_utils.config) =
           let detachments = all_detachments config units operations in
           let decisions = all_policy_decisions config in
           snapshot_state_of_sections ~config ~agents ~managed_units ~units
-            ~source ~sessions:[] ~intents ~operations ~detachments ~decisions
+            ~source ~intents ~operations ~detachments ~decisions
 
 let topology_json_from_state (state : snapshot_state) =
   let tree_idx = state.tree_idx in

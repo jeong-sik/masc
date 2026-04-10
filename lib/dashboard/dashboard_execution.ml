@@ -107,9 +107,6 @@ let render_timeout_s =
     "MASC_DASHBOARD_EXECUTION_RENDER_TIMEOUT_S"
     ~default:60.0 ~min_v:10.0 ~max_v:300.0
 
-let session_list_timeout_s =
-  Dashboard_http_helpers.dashboard_session_list_timeout_s ()
-
 let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
       let ctx : _ Operator_control.context =
         {
@@ -125,31 +122,6 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
       (* Yield between heavy phases so SSE / health-check fibers can progress *)
       Eio.Fiber.yield ();
       let t_start = Time_compat.now () in
-      (* Load sessions once; pass to snapshot_json to avoid repeated filesystem scans.
-         Only include active (Running/Paused) sessions plus recently finished ones
-         (last 24h) to avoid loading all historical sessions on every poll. *)
-      (* Pre-filter at filesystem level: only load sessions modified in last 24h.
-         This avoids reading all 1400+ historical session files on each poll.
-         Active sessions are preserved by list_sessions ~since_unix which does a
-         lightweight status check on mtime-excluded dirs (avoids full JSON load). *)
-      let cutoff_unix = Time_compat.now () -. Masc_time_constants.day in
-      let _session_list_timeout = session_list_timeout_s in
-      let all_sessions =
-        (* Team session store removed — always empty. *)
-        ignore (config : Room.config);
-        ignore _session_list_timeout;
-        []
-      in
-      let cutoff_iso =
-        let tm = Unix.gmtime cutoff_unix in
-        Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-          (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
-          tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
-      in
-      ignore cutoff_iso;
-      let sessions = all_sessions in
-      let t_sessions = Time_compat.now () in
-      Eio.Fiber.yield ();
       (* Compute directly without Dashboard_cache to avoid nested
          get_or_compute deadlock — the caller (dashboard_execution_http_json)
          already wraps this entire function in a cache entry. *)
@@ -158,52 +130,22 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
           ~actor:effective_actor
           ~view:"summary"
           ~include_messages:false
-          ~include_sessions:true
           ~include_keepers:true
           ~include_summary_fields:false
           ~include_command_plane:false
           ~lightweight_summary:true
-          ~sessions
           ctx
       in
-      let t_snapshot = Time_compat.now () in
       Eio.Fiber.yield ();
-      let session_cards =
-        if light then []
-        else
-          let digest_json =
-            match Operator_control.digest_json ~actor:effective_actor ~sessions ctx with
-            | Ok json -> json
-            | Error _message ->
-                `Assoc
-                  [
-                    ("health", `String "warn");
-                    ("attention_items", `List []);
-                    ("recommended_actions", `List []);
-                    ("session_cards", `List []);
-                  ]
-          in
-          list_field "session_cards" digest_json
-      in
-      let session_seeds =
-        member_assoc "sessions" snapshot_json |> member_assoc "items"
-        |> function
-        | `List items ->
-            items
-            |> List.filter_map (fun json -> build_session_seed json session_cards)
-        | _ -> []
-      in
       let command_plane_json =
-        Command_plane_v2.dashboard_projection_json ~sessions config
+        Command_plane_v2.dashboard_projection_json config
       in
       (* Yield between heavy computation phases to prevent fiber starvation.
          Eio's cooperative scheduler needs explicit yields in CPU-bound paths
          so other fibers (SSE, health checks) can progress. *)
       Eio.Fiber.yield ();
       let operation_contexts = build_operation_contexts command_plane_json in
-      let session_contexts =
-        build_session_contexts session_seeds operation_contexts
-      in
+      let session_contexts = [] in
       let execution_queue =
         build_execution_queue session_contexts operation_contexts
       in
@@ -234,16 +176,6 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
       let continuity_rows =
         build_continuity_briefs ~now_ts keepers session_contexts
       in
-      (* --- Payload size reduction: filter + limit --- *)
-      (* Sessions: running/paused first, then by severity, max 15 *)
-      let sorted_sessions = List.sort (fun (a : session_context) (b : session_context) ->
-        let status_ord (s : session_context) = match string_field_opt "status" s.json with
-          | Some "running" -> 0 | Some "paused" -> 1 | _ -> 2 in
-        let cmp = compare (status_ord a) (status_ord b) in
-        if cmp <> 0 then cmp
-        else compare (tone_rank b.severity) (tone_rank a.severity)
-      ) session_contexts in
-      let limited_sessions = take 15 sorted_sessions in
       (* Operations: only active/paused, max 20 *)
       let active_ops = List.filter (fun (op : operation_context) ->
         let status = string_field_opt "status" op.json in
@@ -257,7 +189,6 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
           ("generated_at", `String (Types.now_iso ()));
           ("status", room_status_json config);
           ("execution_queue", `List (List.map (fun (row : queue_context) -> row.json) limited_queue));
-          ("session_briefs", `List (List.map (fun (row : session_context) -> row.json) limited_sessions));
           ("operation_briefs", `List (List.map (fun (row : operation_context) -> row.json) limited_ops));
           ("worker_support_briefs", `List (List.map (fun (row : worker_context) -> row.json) worker_support_briefs));
           ("continuity_briefs", `List (List.map (fun (row : continuity_context) -> row.json) continuity_rows));
@@ -302,19 +233,17 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
       ] in
       let t_end = Time_compat.now () in
       let total_ms = (t_end -. t_start) *. 1000.0 in
-      let sessions_ms = (t_sessions -. t_start) *. 1000.0 in
-      let snapshot_ms = (t_snapshot -. t_sessions) *. 1000.0 in
-      let render_ms = (t_end -. t_snapshot) *. 1000.0 in
+      let snapshot_ms = 0.0 in
+      let render_ms = total_ms in
       if total_ms > 10000.0 then
         Log.Dashboard.warn
-          "[dashboard_execution] slow render: total=%.0fms sessions=%.0fms snapshot=%.0fms render=%.0fms (sessions=%d keepers=%d)"
-          total_ms sessions_ms snapshot_ms render_ms
-          (List.length sessions)
+          "[dashboard_execution] slow render: total=%.0fms snapshot=%.0fms render=%.0fms (keepers=%d)"
+          total_ms snapshot_ms render_ms
           (List.length keepers)
       else
         Log.Dashboard.debug
-          "[dashboard_execution] timing: total=%.0fms sessions=%.0fms snapshot=%.0fms render=%.0fms"
-          total_ms sessions_ms snapshot_ms render_ms;
+          "[dashboard_execution] timing: total=%.0fms snapshot=%.0fms render=%.0fms"
+          total_ms snapshot_ms render_ms;
       if light then
         `Assoc (base_fields @ task_fields)
       else

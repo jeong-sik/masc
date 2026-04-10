@@ -1184,7 +1184,7 @@ let test_handle_request_tools_list_include_deprecated_claim_alias_metadata () =
    | _ -> Alcotest.fail "tool is not an object");
   cleanup_dir base_path
 
-let _test_handle_request_tools_list_hides_execution_session_turn_by_default () =
+let _test_handle_request_tools_list_hides_internal_tool_by_default () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let clock = Eio.Stdenv.clock env in
@@ -1192,13 +1192,12 @@ let _test_handle_request_tools_list_hides_execution_session_turn_by_default () =
   let base_path = temp_dir () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
   let tools = tools_list_all ~clock ~sw state in
-  (* execution_session_step is not in the public MCP surface *)
-  Alcotest.(check bool) "step hidden from public surface" false
+  Alcotest.(check bool) "internal tool hidden from public surface" false
     (List.exists
        (function
          | `Assoc fields -> (
              match List.assoc_opt "name" fields with
-             | Some (`String "masc_execution_session_step") -> true
+             | Some (`String "masc_code_search") -> true
              | _ -> false)
          | _ -> false)
        tools);
@@ -1307,76 +1306,6 @@ let _test_execute_tool_trpg_flow () =
   cleanup_dir base_path
 
 (* Governance status tool is no longer dispatched *)
-
-let _test_execute_tool_execution_session_step_direct_call () =
-  Eio_main.run @@ fun env ->
-  let fs = Eio.Stdenv.fs env in
-  let proc_mgr = Eio.Stdenv.process_mgr env in
-  Fs_compat.set_fs fs;
-  Mcp_eio.set_net (Eio.Stdenv.net env);
-  Mcp_eio.set_clock (Eio.Stdenv.clock env);
-  let clock = Eio.Stdenv.clock env in
-  Eio.Switch.run @@ fun sw ->
-
-  let base_path = temp_dir () in
-  Fun.protect
-    ~finally:(fun () ->
-      Process_eio.reset_for_testing ();
-      cleanup_dir base_path)
-    (fun () ->
-      Process_eio.init ~cwd_default:Eio.Path.(fs / base_path) ~proc_mgr ~clock;
-      let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-      let sid = "hidden-deprecated-team-turn" in
-
-      let (ok_init, _init_msg) =
-        Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
-          ~name:"masc_init" ~arguments:(`Assoc [])
-      in
-      Alcotest.(check bool) "init success" true ok_init;
-
-      let (ok_join, _join_msg) =
-        Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
-          ~name:"masc_join"
-          ~arguments:(`Assoc [ ("agent_name", `String "codex") ])
-      in
-      Alcotest.(check bool) "join success" true ok_join;
-
-      let (ok_start, start_msg) =
-        Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
-          ~name:"masc_execution_session_start"
-          ~arguments:
-            (`Assoc
-              [
-                ("goal", `String "hidden deprecated team turn smoke");
-                ("duration_seconds", `Int 90);
-                ("checkpoint_interval_sec", `Int 10);
-                ("min_agents", `Int 1);
-              ])
-      in
-      Alcotest.(check bool) "team session start success" true ok_start;
-      let start_json = extract_json_from_text start_msg in
-      let session_id =
-        start_json |> Yojson.Safe.Util.member "result"
-        |> Yojson.Safe.Util.member "session_id" |> Yojson.Safe.Util.to_string
-      in
-
-      let (ok_turn, turn_msg) =
-        Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
-          ~name:"masc_execution_session_step"
-          ~arguments:
-            (`Assoc
-              [
-                ("session_id", `String session_id);
-                ("turn_kind", `String "note");
-                ("message", `String "canonical direct-call works");
-              ])
-      in
-      Alcotest.(check bool) "canonical step direct-call works" true ok_turn;
-      let turn_json = extract_json_from_text turn_msg in
-      Alcotest.(check string) "step turn kind" "note"
-        Yojson.Safe.Util.(
-          turn_json |> member "result" |> member "turn" |> member "kind"
-          |> to_string))
 
 let _test_execute_tool_trpg_validation () =
   Eio_main.run @@ fun env ->

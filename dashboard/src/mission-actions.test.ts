@@ -16,22 +16,22 @@ const missionPayload = {
   },
   incidents: [],
   recommended_actions: [],
-  command_focus: {
-    session_cards: [],
-  },
+  command_focus: {},
   operator_targets: {
-    sessions: [],
     keepers: [],
     pending_confirms: [],
     available_actions: [],
   },
   attention_queue: [],
-  session_briefs: [
+  sessions: [
     {
       session_id: 'session-1',
       goal: 'Ship dashboard',
       member_names: [ 'agent-1' ],
       related_attention_count: 0,
+      member_previews: [],
+      operation_badges: [],
+      keeper_refs: [],
     },
   ],
   agent_briefs: [
@@ -60,7 +60,6 @@ const initializingMissionPayload = {
   operator_targets: {},
   attention_queue: [],
   sessions: [],
-  session_briefs: [],
   agent_briefs: [],
   keeper_briefs: [],
   internal_signals: [],
@@ -107,12 +106,12 @@ describe('refreshMissionSnapshot', () => {
     const mission = missionStore.missionSnapshot.value as
       | {
           summary?: { room_health?: string | null }
-          session_briefs?: unknown[]
+          sessions?: unknown[]
           keeper_briefs?: unknown[]
         }
       | null
     expect(mission?.summary?.room_health).toBe('ok')
-    expect(mission?.session_briefs).toHaveLength(1)
+    expect(mission?.sessions).toHaveLength(1)
     expect(mission?.keeper_briefs).toHaveLength(1)
   })
 }, 20000)

@@ -83,7 +83,6 @@ val digest_json :
   ?target_type:string ->
   ?target_id:string ->
   ?include_workers:bool ->
-  ?sessions:'b list ->
   ?command_plane_summary:Yojson.Safe.t ->
   ?swarm_status:Yojson.Safe.t ->
   'a Operator_pending_confirm.context ->

@@ -388,7 +388,7 @@ function renderSessionCard(s: DashboardMissionSessionBrief) {
 
 function HotSessions() {
   const snap = missionSnapshot.value
-  const sessions = snap?.sessions ?? snap?.session_briefs ?? []
+  const sessions = snap?.sessions ?? []
   if (sessions.length === 0) return null
 
   const sorted = [...sessions].sort((a, b) => {

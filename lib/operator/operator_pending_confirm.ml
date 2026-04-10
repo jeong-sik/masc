@@ -49,7 +49,6 @@ let operator_surface_contract_json =
       ("deferred_queue", `String "derived");
       ("review_summary", `String "derived");
       ("recent_reviews", `String "operator_state");
-      ("session_cards", `String "derived");
       ("worker_cards", `String "truth");
     ]
 

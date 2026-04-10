@@ -4,7 +4,6 @@ open Result_syntax
 
 type target_type =
   | Room
-  | Execution_session
 
 type record = {
   judgment_id : string;
@@ -30,11 +29,9 @@ type record = {
 
 let target_type_to_string = function
   | Room -> "namespace"
-  | Execution_session -> "execution_session"
 
 let target_type_of_string = function
   | "room" | "namespace" -> Some Room
-  | "execution_session" -> Some Execution_session
   | _ -> None
 
 let option_to_yojson = Json_util.option_to_yojson

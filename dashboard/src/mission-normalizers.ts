@@ -12,7 +12,6 @@ import {
   normalizeMissionSessionCard,
   normalizeOperationBadge,
   normalizeParticipantPreview,
-  normalizeSessionBrief,
   normalizeTimelineItem,
 } from './mission-normalizers-entities'
 import type {
@@ -29,7 +28,6 @@ import type {
   DashboardMissionResponse,
   DashboardMissionSessionCard,
   DashboardMissionSessionDetailResponse,
-  DashboardMissionSessionBrief,
   DashboardMissionSessionWorkerRuns,
   DashboardMissionSummary,
   DashboardMissionTimelineItem,
@@ -41,31 +39,8 @@ import type {
   OperatorAttentionItem,
   OperatorKeeperSnapshot,
   OperatorRecommendedAction,
-  OperatorSessionCard,
-  OperatorSessionSnapshot,
   PendingConfirmation,
 } from './types'
-
-function normalizeSessionCard(raw: unknown): OperatorSessionCard | null {
-  if (!isRecord(raw)) return null
-  const sessionId = asString(raw.session_id)
-  if (!sessionId) return null
-  return {
-    session_id: sessionId,
-    goal: asString(raw.goal),
-    status: asString(raw.status),
-    health: asString(raw.health),
-    scale_profile: asString(raw.scale_profile),
-    control_profile: asString(raw.control_profile),
-    planned_worker_count: asNumber(raw.planned_worker_count),
-    active_agent_count: asNumber(raw.active_agent_count),
-    last_turn_age_sec: asNumber(raw.last_turn_age_sec) ?? null,
-    attention_count: asNumber(raw.attention_count),
-    recommended_action_count: asNumber(raw.recommended_action_count),
-    top_attention: normalizeAttentionItem(raw.top_attention),
-    top_recommendation: normalizeRecommendedAction(raw.top_recommendation),
-  }
-}
 
 function normalizeWorkerRunEvidence(raw: unknown): DashboardProofWorkerRunEvidence | null {
   if (!isRecord(raw)) return null
@@ -195,63 +170,6 @@ function normalizeSessionWorkerRuns(raw: unknown): DashboardMissionSessionWorker
   }
 }
 
-function normalizeSession(raw: unknown): OperatorSessionSnapshot | null {
-  if (!isRecord(raw)) return null
-  const sessionId = asString(raw.session_id)
-  if (!sessionId) return null
-  const payload = isRecord(raw.status) ? raw.status : raw
-  const payloadSummary = isRecord(payload.summary) ? payload.summary : undefined
-  return {
-    session_id: sessionId,
-    status:
-      asString(raw.status)
-      ?? asString(payloadSummary?.status)
-      ?? (isRecord(payload.session) ? asString(payload.session.status) : undefined),
-    progress_pct: asNumber(raw.progress_pct) ?? asNumber(payloadSummary?.progress_pct),
-    elapsed_sec: asNumber(raw.elapsed_sec) ?? asNumber(payloadSummary?.elapsed_sec),
-    remaining_sec: asNumber(raw.remaining_sec) ?? asNumber(payloadSummary?.remaining_sec),
-    done_delta_total: asNumber(raw.done_delta_total) ?? asNumber(payloadSummary?.done_delta_total),
-    summary: isRecord(raw.summary) ? raw.summary : payloadSummary,
-    team_health:
-      isRecord(raw.team_health)
-        ? raw.team_health
-        : (isRecord(payload.team_health) ? payload.team_health : undefined),
-    communication_metrics:
-      isRecord(raw.communication_metrics)
-        ? raw.communication_metrics
-        : (isRecord(payload.communication_metrics) ? payload.communication_metrics : undefined),
-    orchestration_state:
-      isRecord(raw.orchestration_state)
-        ? raw.orchestration_state
-        : (isRecord(payload.orchestration_state) ? payload.orchestration_state : undefined),
-    cascade_metrics:
-      isRecord(raw.cascade_metrics)
-        ? raw.cascade_metrics
-        : (isRecord(payload.cascade_metrics) ? payload.cascade_metrics : undefined),
-    report_paths: isRecord(raw.report_paths)
-      ? Object.fromEntries(
-          Object.entries(raw.report_paths)
-            .map(([key, value]) => {
-              const text = asString(value)
-              return text ? [key, text] : null
-            })
-            .filter((entry): entry is [string, string] => entry !== null),
-        )
-      : (isRecord(payload.report_paths)
-          ? Object.fromEntries(
-              Object.entries(payload.report_paths)
-                .map(([key, value]) => {
-                  const text = asString(value)
-                  return text ? [key, text] : null
-                })
-                .filter((entry): entry is [string, string] => entry !== null),
-            )
-          : undefined),
-    session: isRecord(raw.session) ? raw.session : (isRecord(payload.session) ? payload.session : undefined),
-    recent_events: extractArray(raw.recent_events, ['events']).filter(isRecord),
-  }
-}
-
 function normalizeKeeper(raw: unknown): OperatorKeeperSnapshot | null {
   if (!isRecord(raw)) return null
   const name = asString(raw.name)
@@ -337,18 +255,12 @@ function normalizeCommandFocus(raw: unknown): DashboardMissionCommandFocus {
     },
     top_attention: normalizeAttentionItem(root.top_attention),
     top_action: normalizeRecommendedAction(root.top_action),
-    session_cards: extractArray(root.session_cards)
-      .map(normalizeSessionCard)
-      .filter((item): item is OperatorSessionCard => item !== null),
   }
 }
 
 function normalizeTargets(raw: unknown): DashboardMissionTargets {
   const root = isRecord(raw) ? raw : {}
   return {
-    sessions: extractArray(root.sessions, ['items'])
-      .map(normalizeSession)
-      .filter((item): item is OperatorSessionSnapshot => item !== null),
     keepers: extractArray(root.keepers, ['items'])
       .map(normalizeKeeper)
       .filter((item): item is OperatorKeeperSnapshot => item !== null),
@@ -363,9 +275,6 @@ function normalizeTargets(raw: unknown): DashboardMissionTargets {
 
 export function normalizeMission(raw: unknown): DashboardMissionResponse {
   const root = isRecord(raw) ? raw : {}
-  const sessionBriefs = extractArray(root.session_briefs)
-    .map(normalizeSessionBrief)
-    .filter((item): item is DashboardMissionSessionBrief => item !== null)
   const sessionCards =
     extractArray(root.sessions)
       .map(normalizeMissionSessionCard)
@@ -384,10 +293,7 @@ export function normalizeMission(raw: unknown): DashboardMissionResponse {
     attention_queue: extractArray(root.attention_queue)
       .map(normalizeAttentionQueueItem)
       .filter((item): item is DashboardMissionAttentionQueueItem => item !== null),
-    sessions: sessionCards.length > 0
-      ? sessionCards
-      : sessionBriefs.map(item => ({ ...item, member_previews: [], operation_badges: [], keeper_refs: [] })),
-    session_briefs: sessionBriefs,
+    sessions: sessionCards,
     agent_briefs: extractArray(root.agent_briefs)
       .map(normalizeAgentBrief)
       .filter((item): item is DashboardMissionAgentBrief => item !== null),

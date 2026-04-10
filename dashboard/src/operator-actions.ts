@@ -9,7 +9,6 @@ import { UI_REFRESH_TTL_MS } from './config/constants'
 import {
   operatorSnapshot,
   operatorRoomDigest,
-  operatorSessionDigest,
   operatorLoading,
   operatorError,
   operatorDigestLoading,
@@ -27,11 +26,8 @@ interface RefreshOptions {
 
 let snapshotRefreshInflight: Promise<void> | null = null
 let roomDigestRefreshInflight: Promise<void> | null = null
-let sessionDigestRefreshInflight: Promise<void> | null = null
 let lastSnapshotRefreshAt = 0
 let lastRoomDigestRefreshAt = 0
-let lastSessionDigestRefreshAt = 0
-let lastSessionDigestId: string | null = null
 
 function stringifyUnknown(value: unknown): string {
   if (typeof value === 'string') return value
@@ -112,37 +108,6 @@ export async function refreshOperatorRoomDigest(opts?: RefreshOptions): Promise<
   return roomDigestRefreshInflight
 }
 
-export async function refreshOperatorSessionDigest(sessionId: string | null, opts?: RefreshOptions): Promise<void> {
-  if (!sessionId) {
-    operatorSessionDigest.value = null
-    lastSessionDigestId = null
-    return
-  }
-  if (sessionDigestRefreshInflight && lastSessionDigestId === sessionId) return sessionDigestRefreshInflight
-  if (lastSessionDigestId === sessionId && isFresh(lastSessionDigestRefreshAt, opts)) return
-
-  operatorDigestLoading.value = true
-  operatorDigestError.value = null
-  lastSessionDigestId = sessionId
-  sessionDigestRefreshInflight = (async () => {
-    try {
-      const raw = await fetchOperatorDigest({
-        targetType: 'team_session',
-        targetId: sessionId,
-        includeWorkers: true,
-      })
-      operatorSessionDigest.value = normalizeOperatorDigest(raw)
-      lastSessionDigestRefreshAt = Date.now()
-    } catch (err) {
-      operatorDigestError.value = err instanceof Error ? err.message : 'Failed to load session digest'
-    } finally {
-      operatorDigestLoading.value = false
-      sessionDigestRefreshInflight = null
-    }
-  })()
-  return sessionDigestRefreshInflight
-}
-
 export async function dispatchOperatorAction(request: OperatorActionRequest): Promise<OperatorActionResult> {
   operatorActionBusy.value = true
   operatorError.value = null
@@ -158,9 +123,6 @@ export async function dispatchOperatorAction(request: OperatorActionRequest): Pr
     })
     await refreshOperatorSnapshot({ force: true })
     await refreshOperatorRoomDigest({ force: true })
-    if (operatorSessionDigest.value?.target_id) {
-      await refreshOperatorSessionDigest(operatorSessionDigest.value.target_id, { force: true })
-    }
     return result
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Operator action failed'
@@ -197,9 +159,6 @@ export async function confirmOperatorPendingAction(
     })
     await refreshOperatorSnapshot({ force: true })
     await refreshOperatorRoomDigest({ force: true })
-    if (operatorSessionDigest.value?.target_id) {
-      await refreshOperatorSessionDigest(operatorSessionDigest.value.target_id, { force: true })
-    }
     return result
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Operator confirmation failed'
@@ -220,7 +179,4 @@ export async function confirmOperatorPendingAction(
 registerOperatorRefresh(() => {
   void refreshOperatorSnapshot({ force: true })
   void refreshOperatorRoomDigest({ force: true })
-  if (operatorSessionDigest.value?.target_id) {
-    void refreshOperatorSessionDigest(operatorSessionDigest.value.target_id, { force: true })
-  }
 })

@@ -422,9 +422,7 @@ let make_detachment_runtime config (target_unit : unit_record) (operation : oper
       roster = if target_unit.roster <> [] then target_unit.roster else base.roster;
       session_id;
       checkpoint_ref = option_first_some operation.checkpoint_ref base.checkpoint_ref;
-      runtime_kind =
-        (if target_count = 1 && session_id <> None then Some "execution_session"
-         else Some "managed");
+      runtime_kind = Some "managed";
       runtime_ref =
         (if target_count = 1 then option_first_some session_id (Some target_unit.unit_id)
          else Some target_unit.unit_id);

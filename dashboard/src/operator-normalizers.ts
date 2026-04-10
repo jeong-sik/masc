@@ -20,7 +20,6 @@ import type {
   OperatorRecommendedAction,
   OperatorJudgeRuntime,
   OperatorSessionSnapshot,
-  OperatorSessionCard,
   OperatorSnapshot,
   OperatorNamespaceSnapshot,
   OperatorWorkerCard,
@@ -258,27 +257,6 @@ function normalizeWorkerCard(raw: unknown): OperatorWorkerCard | null {
   }
 }
 
-function normalizeSessionCard(raw: unknown): OperatorSessionCard | null {
-  if (!isRecord(raw)) return null
-  const sessionId = asString(raw.session_id)
-  if (!sessionId) return null
-  return {
-    session_id: sessionId,
-    goal: asString(raw.goal),
-    status: asString(raw.status),
-    health: asString(raw.health),
-    scale_profile: asString(raw.scale_profile),
-    control_profile: asString(raw.control_profile),
-    planned_worker_count: asNumber(raw.planned_worker_count),
-    active_agent_count: asNumber(raw.active_agent_count),
-    last_turn_age_sec: asNumber(raw.last_turn_age_sec) ?? null,
-    attention_count: asNumber(raw.attention_count),
-    recommended_action_count: asNumber(raw.recommended_action_count),
-    top_attention: normalizeAttentionItem(raw.top_attention),
-    top_recommendation: normalizeRecommendedAction(raw.top_recommendation),
-  }
-}
-
 function normalizeLinkedAutoresearch(raw: unknown): OperatorLinkedAutoresearch | null {
   if (!isRecord(raw)) return null
   const loopId = asString(raw.loop_id)
@@ -346,9 +324,6 @@ export function normalizeOperatorDigest(raw: unknown): OperatorDigest {
     recent_reviews: extractArray(root.recent_reviews)
       .map(normalizeReviewDecision)
       .filter((item): item is OperatorReviewDecision => item !== null),
-    session_cards: extractArray(root.session_cards)
-      .map(normalizeSessionCard)
-      .filter((item): item is OperatorSessionCard => item !== null),
     worker_cards: extractArray(root.worker_cards)
       .map(normalizeWorkerCard)
       .filter((item): item is OperatorWorkerCard => item !== null),

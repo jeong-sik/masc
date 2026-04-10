@@ -48,7 +48,7 @@ import { isRecord, asString, asNumber } from './components/common/normalize'
 import {
   normalizeAgent, normalizeTask, normalizeMessage,
   normalizeExecutionSummary,
-  normalizeExecutionQueueItem, normalizeExecutionSessionBrief,
+  normalizeExecutionQueueItem,
   normalizeExecutionOperationBrief, normalizeExecutionWorkerSupportBrief,
   normalizeExecutionContinuityBrief,
   mergeMessages,
@@ -413,10 +413,6 @@ export function hydrateExecutionSnapshot(data: DashboardExecutionResponse): void
     .map(normalizeExecutionQueueItem)
     .filter((row): row is DashboardExecutionQueueItem => row !== null)
   setArrayByKeyIfChanged(executionQueue, normalizedQueue, q => q.id)
-  const normalizedSessionBriefs = (Array.isArray(data.session_briefs) ? data.session_briefs : [])
-    .map(normalizeExecutionSessionBrief)
-    .filter((row): row is DashboardExecutionSessionBrief => row !== null)
-  setArrayByKeyIfChanged(executionSessionBriefs, normalizedSessionBriefs, s => s.session_id)
   const normalizedOpBriefs = (Array.isArray(data.operation_briefs) ? data.operation_briefs : [])
     .map(normalizeExecutionOperationBrief)
     .filter((row): row is DashboardExecutionOperationBrief => row !== null)

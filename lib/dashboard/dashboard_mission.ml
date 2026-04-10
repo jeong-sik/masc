@@ -37,10 +37,6 @@ type attention_context = Dashboard_mission_assembly.attention_context = {
   json : Yojson.Safe.t;
 }
 
-let active_or_recent_sessions _config =
-  (* Team session store removed — always empty. *)
-  ([] : Yojson.Safe.t list)
-
 let room_scope_cache_segment (_config : Room_utils.config) = "default"
 
 let room_scoped_cache_key (config : Room_utils.config) prefix actor_name =
@@ -121,13 +117,35 @@ let event_summary event_json =
   | None, None, None, None ->
       String.map (fun ch -> if ch = '_' then ' ' else ch) event_type
 
-let session_origin_kind session_meta =
-  (* Simplified: team session types removed. Return raw string or "human". *)
-  match trim_to_option (string_field "origin_kind" session_meta) with
-  | Some value -> value
-  | None -> "human"
+let system_session_creator_prefixes =
+  [ "keeper"; "dashboard"; "operator"; "system"; "keeper-system"; "ecosystem" ]
 
-let build_session_context session_json session_cards =
+let creator_looks_system created_by =
+  let normalized = String.lowercase_ascii (String.trim created_by) in
+  normalized <> ""
+  && List.exists
+       (fun prefix ->
+         String.equal normalized prefix
+         || String.starts_with ~prefix:(prefix ^ "-") normalized
+         || String_util.contains_substring normalized ("-" ^ prefix ^ "-"))
+       system_session_creator_prefixes
+
+let session_origin_kind session_meta =
+  let created_by =
+    trim_to_option (string_field "created_by" session_meta)
+    |> Option.value ~default:"unknown"
+  in
+  trim_to_option (string_field "origin_kind" session_meta)
+  |> Option.value
+       ~default:
+         (match
+            trim_to_option (string_field "orchestration_mode" session_meta)
+            |> Option.map String.lowercase_ascii
+          with
+         | Some "auto" -> "system"
+         | _ -> if creator_looks_system created_by then "system" else "human")
+
+let _build_session_context session_json _cards =
   let session_id = string_field "session_id" session_json in
   if session_id = "" then None
   else
@@ -152,11 +170,7 @@ let build_session_context session_json session_cards =
       | item :: _ -> Some item
       | [] -> None
     in
-    let session_card =
-      List.find_opt
-        (fun json -> String.equal (string_field "session_id" json) session_id)
-        session_cards
-    in
+    let session_card = None in
     let top_attention =
       match session_card with
       | Some card -> (
@@ -370,11 +384,8 @@ let is_internal_attention incident =
 
 let related_sessions_for_attention incident sessions =
   let direct_session =
-    if String.equal (string_field "target_type" incident) "execution_session" then
-      trim_to_option (string_field "target_id" incident)
-      |> Option.to_list
-    else
-      []
+    ignore incident;
+    []
   in
   let actor = trim_to_option (string_field "actor" incident) in
   let by_actor =
@@ -470,7 +481,7 @@ let build_attention_queue incidents actions sessions =
            if by_action <> 0 then by_action
            else Float.compare right.last_seen_ts left.last_seen_ts)
 
-let build_session_briefs sessions attention_queue actions =
+let _build_briefs_from_sessions sessions attention_queue actions =
   let attention_for_session session_id =
     attention_queue
     |> List.filter (fun attention -> List.mem session_id attention.related_session_ids)
@@ -489,8 +500,7 @@ let build_session_briefs sessions attention_queue actions =
            | None -> (
                match top_attention_json with
                | Some attention -> matching_action_for_incident attention actions
-               | None ->
-                   matching_action "execution_session" (Some session.session_id) actions)
+               | None -> matching_action "namespace" None actions)
          in
          let health_tone =
            match top_attention_json with
@@ -545,7 +555,6 @@ type mission_projection = {
   recommended_actions : Yojson.Safe.t list;
   attention_queue : attention_context list;
   sessions : session_context list;
-  session_briefs : Yojson.Safe.t list;
   agent_briefs : Yojson.Safe.t list;
   keeper_briefs : Yojson.Safe.t list;
   internal_signals : Yojson.Safe.t list;
@@ -569,9 +578,6 @@ let build_projection ?actor ?command_plane_summary ?swarm_status ~config ~sw ~cl
       mcp_session_id = None;
     }
   in
-  let tracked_sessions =
-    if Room.is_initialized config then active_or_recent_sessions config else []
-  in
   let snapshot_json =
     Dashboard_cache.get_or_compute
       (room_scoped_cache_key config "snapshot" actor_name)
@@ -581,20 +587,17 @@ let build_projection ?actor ?command_plane_summary ?swarm_status ~config ~sw ~cl
           ~actor:actor_name
           ~view:"summary"
           ~include_messages:false
-          ~include_sessions:true
           ~include_keepers:true
           ~include_summary_fields:false
           ~include_command_plane:false
           ~lightweight_summary:true
-          ~sessions:tracked_sessions
           ctx)
   in
   let command_json =
     Dashboard_cache.get_or_compute
       (room_scoped_cache_key config "command_projection" actor_name)
       ~ttl:3.0
-      (fun () ->
-        Command_plane_v2.dashboard_projection_json ~sessions:tracked_sessions config)
+      (fun () -> Command_plane_v2.dashboard_projection_json config)
   in
   let digest_json =
     Dashboard_cache.get_or_compute
@@ -602,8 +605,8 @@ let build_projection ?actor ?command_plane_summary ?swarm_status ~config ~sw ~cl
       ~ttl:5.0
       (fun () ->
         match
-          Operator_control.digest_json ~actor:actor_name ~sessions:tracked_sessions
-            ?command_plane_summary ?swarm_status ctx
+          Operator_control.digest_json ~actor:actor_name ?command_plane_summary
+            ?swarm_status ctx
         with
         | Ok json -> json
         | Error message ->
@@ -612,7 +615,6 @@ let build_projection ?actor ?command_plane_summary ?swarm_status ~config ~sw ~cl
                 ("health", `String "warn");
                 ("attention_items", `List []);
                 ("recommended_actions", `List []);
-                ("session_cards", `List []);
                 ("swarm_status", Swarm_status.empty_json);
                 ("command_plane", `Assoc []);
                 ("error", `String message);
@@ -631,15 +633,8 @@ let build_projection ?actor ?command_plane_summary ?swarm_status ~config ~sw ~cl
              (severity_rank (string_field ~default:"ok" "severity" left)))
   in
   let recommended_actions = list_field "recommended_actions" digest_json in
-  let session_cards = list_field "session_cards" digest_json in
-  let sessions =
-    (match member_assoc "sessions" snapshot_json |> member_assoc "items" with
-    | `List items -> items
-    | _ -> [])
-    |> List.filter_map (fun json -> build_session_context json session_cards)
-  in
+  let sessions = [] in
   let attention_queue = build_attention_queue incidents recommended_actions sessions in
-  let session_briefs = build_session_briefs sessions attention_queue recommended_actions in
   let keeper_items =
     match member_assoc "keepers" snapshot_json |> member_assoc "items" with
     | `List items -> items
@@ -660,7 +655,6 @@ let build_projection ?actor ?command_plane_summary ?swarm_status ~config ~sw ~cl
     recommended_actions;
     attention_queue;
     sessions;
-    session_briefs;
     agent_briefs;
     keeper_briefs;
     internal_signals;
@@ -678,7 +672,6 @@ let json ?actor ?command_plane_summary ?swarm_status ~config ~sw ~clock ~proc_mg
   let decisions_summary =
     member_assoc "decisions" projection.command_json |> member_assoc "summary"
   in
-  let session_cards = list_field "session_cards" projection.digest_json in
   let summary_json =
     `Assoc
       [
@@ -700,16 +693,11 @@ let json ?actor ?command_plane_summary ?swarm_status ~config ~sw ~clock ~proc_mg
         ("swarm_overview", member_assoc "swarm_status" projection.digest_json |> member_assoc "overview");
         ("top_attention", top_item projection.incidents);
         ("top_action", top_item projection.recommended_actions);
-        ("session_cards", `List (take 3 session_cards));
       ]
   in
   let operator_targets_json =
     `Assoc
       [
-        (* Use briefs instead of raw snapshot dumps to reduce payload
-           from ~330KB to ~30KB. Full session data is available via
-           /api/v1/dashboard/mission/session/:id for on-demand detail. *)
-        ("sessions", `List projection.session_briefs);
         ("keepers", `List projection.keeper_briefs);
         ("pending_confirms", member_assoc "pending_confirms" projection.snapshot_json);
         ("available_actions", member_assoc "available_actions" projection.snapshot_json);
@@ -726,9 +714,6 @@ let json ?actor ?command_plane_summary ?swarm_status ~config ~sw ~clock ~proc_mg
       ( "attention_queue",
         `List (List.map (fun (item : attention_context) -> item.json) projection.attention_queue)
       );
-      (* Omit full sessions — frontend falls back to session_briefs *)
-      ("sessions", `List []);
-      ("session_briefs", `List projection.session_briefs);
       ("agent_briefs", `List projection.agent_briefs);
       ("keeper_briefs", `List projection.keeper_briefs);
       ("internal_signals", `List projection.internal_signals);

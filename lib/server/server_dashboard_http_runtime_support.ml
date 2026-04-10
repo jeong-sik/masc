@@ -136,8 +136,3 @@ let run_dashboard_compute state ?(mode = Offloaded_readonly) ?runtime ~sw ~clock
          Offloading isolates dashboard compute from keeper turns on the
          main domain, eliminating contention-induced latency spikes. *)
       offloaded ()
-
-let dashboard_active_or_recent_sessions_cached _state ~clock:_
-    ~refresh_interval_s:_ _config _load_sessions =
-  (* Team session store removed — always empty. *)
-  []

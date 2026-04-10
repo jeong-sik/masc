@@ -1,7 +1,7 @@
 include Cp_lifecycle_intents
 open Result_syntax
 
-let snapshot_json ?sessions config =
+let snapshot_json config =
   let t0 = Unix.gettimeofday () in
   let timed label f =
     let t_start = Unix.gettimeofday () in
@@ -11,7 +11,7 @@ let snapshot_json ?sessions config =
       Log.Dashboard.info "[cp_snapshot] %s: %.0fms" label (elapsed *. 1000.0);
     result
   in
-  let state = timed "build_state" (fun () -> build_snapshot_state ?sessions config) in
+  let state = timed "build_state" (fun () -> build_snapshot_state config) in
   let topology = timed "topology" (fun () -> topology_json_from_state state) in
   let intents = timed "intents" (fun () -> intents_summary_json_from_state state) in
   let operations = timed "operations" (fun () -> list_operations_json_from_state state) in
@@ -191,8 +191,8 @@ let dashboard_decisions_json_from_state (state : snapshot_state) =
          ]);
     ]
 
-let dashboard_projection_json ?sessions config =
-  let state = build_snapshot_state ?sessions config in
+let dashboard_projection_json config =
+  let state = build_snapshot_state config in
   `Assoc
     [
       ("version", `String "cp-v2");

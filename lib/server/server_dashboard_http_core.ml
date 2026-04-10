@@ -92,10 +92,6 @@ let dashboard_proof_cache_selector ?session_id ?operation_id () =
     (value_or_star session_id)
     (value_or_star operation_id)
 
-let dashboard_active_or_recent_sessions ~clock:_ _config =
-  (* Team session store removed — always empty. *)
-  ([] : Yojson.Safe.t list)
-
 let attach_projection_diagnostics json diagnostics =
   match json with
   | `Assoc fields -> `Assoc (("projection_diagnostics", diagnostics) :: fields)
@@ -345,15 +341,8 @@ let _operator_refresh_interval_s =
     ~min_v:5.0
     ~max_v:600.0
 
-let dashboard_active_or_recent_sessions_cached ~clock config =
-  Server_dashboard_http_runtime_support.dashboard_active_or_recent_sessions_cached
-    runtime_support ~clock ~refresh_interval_s:_operator_refresh_interval_s
-    config dashboard_active_or_recent_sessions
-
-let operator_snapshot_extra sessions =
+let operator_snapshot_extra () =
   [
-    ("session_count", `Int (List.length sessions));
-    ("session_list", `Assoc []);
     ("readonly_pool", Room_utils.domain_local_pg_backend_diagnostics_json ());
   ]
 
@@ -368,14 +357,6 @@ let start_operator_snapshot_refresh_loop ~state ~sw ~clock =
       run_dashboard_compute ~mode:Offloaded_readonly ?net ?mono_clock ~sw
         ~clock ~config
         (fun ~config ~sw ->
-          let t_sessions = Unix.gettimeofday () in
-          let sessions =
-            if Room.is_initialized config then
-              dashboard_active_or_recent_sessions_cached ~clock config
-            else
-              []
-          in
-          let dt_sessions = Unix.gettimeofday () -. t_sessions in
           let ctx : _ Operator_control.context =
             {
               config;
@@ -390,20 +371,20 @@ let start_operator_snapshot_refresh_loop ~state ~sw ~clock =
           let t_snapshot = Unix.gettimeofday () in
           let json =
             Operator_control.snapshot_json ~actor:"dashboard" ~view:"summary"
-              ~include_messages:true ~include_sessions:true ~include_keepers:true
+              ~include_messages:true ~include_keepers:true
               ~include_summary_fields:false
               ~lightweight_summary:true
-              ~include_command_plane:false ~sessions ctx
+              ~include_command_plane:false ctx
           in
           let dt_snapshot = Unix.gettimeofday () -. t_snapshot in
           let dt_total = Unix.gettimeofday () -. started_at in
           if dt_total >= 5.0 then
             Log.Dashboard.warn
               "[operator_snapshot profile] total=%.1fs sessions=%.1fs(%d) snapshot=%.1fs"
-              dt_total dt_sessions (List.length sessions) dt_snapshot;
+              dt_total 0.0 0 dt_snapshot;
           json
           |> with_projection_diagnostics ~surface:"operator_snapshot" ~started_at
-               ~extra:(operator_snapshot_extra sessions))
+               ~extra:(operator_snapshot_extra ()))
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
@@ -441,12 +422,6 @@ let start_operator_digest_refresh_loop ~state ~sw ~clock =
       run_dashboard_compute ~mode:Offloaded_readonly ?net ?mono_clock ~sw
         ~clock ~config
         (fun ~config ~sw ->
-          let sessions =
-            if Room.is_initialized config then
-              dashboard_active_or_recent_sessions_cached ~clock config
-            else
-              []
-          in
           let ctx : _ Operator_control.context =
             {
               config;
@@ -460,11 +435,11 @@ let start_operator_digest_refresh_loop ~state ~sw ~clock =
           in
           match
             Operator_control.digest_json ~actor:"dashboard" ~target_type:"namespace"
-              ~sessions ?command_plane_summary ?swarm_status ctx
+              ?command_plane_summary ?swarm_status ctx
           with
           | Ok json ->
               with_projection_diagnostics ~surface:"operator_digest" ~started_at
-                ~extra:(operator_snapshot_extra sessions) json
+                ~extra:(operator_snapshot_extra ()) json
           | Error err -> raise (Failure err))
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
@@ -496,7 +471,6 @@ let operator_snapshot_http_json ~state ~sw ~clock request =
   let default_summary_request =
     actor = None
     && query_param request "include_messages" = None
-    && query_param request "include_sessions" = None
     && query_param request "include_keepers" = None
     &&
     match view with
@@ -509,11 +483,6 @@ let operator_snapshot_http_json ~state ~sw ~clock request =
     let started_at = Unix.gettimeofday () in
     let include_messages =
       match query_param request "include_messages" with
-      | Some ("0" | "false" | "no") -> false
-      | _ -> true
-    in
-    let include_sessions =
-      match query_param request "include_sessions" with
       | Some ("0" | "false" | "no") -> false
       | _ -> true
     in
@@ -547,19 +516,17 @@ let operator_snapshot_http_json ~state ~sw ~clock request =
                }
              in
             Operator_control.snapshot_json ?actor ?view
-               ~include_messages ~include_sessions ~include_keepers
+               ~include_messages ~include_keepers
                ~include_summary_fields:include_command_plane
                ~lightweight_summary:(not include_command_plane)
                ~include_command_plane ctx))
     ) with
     | Ok json ->
-        let extra =
-          [
-            ("session_list", `Assoc []);
-            ("readonly_pool", Room_utils.domain_local_pg_backend_diagnostics_json ());
-          ]
-        in
-        with_projection_diagnostics ~surface:"operator_snapshot" ~started_at ~extra
+        with_projection_diagnostics ~surface:"operator_snapshot" ~started_at
+          ~extra:
+            [
+              ("readonly_pool", Room_utils.domain_local_pg_backend_diagnostics_json ());
+            ]
           json
     | Error `Timeout ->
         `Assoc [
@@ -622,18 +589,9 @@ let operator_digest_http_json ~state ~sw ~clock request =
                else
                  (None, None)
              in
-             let sessions =
-               if namespace_target_type (Some effective_target_type)
-                  && Room.is_initialized config
-               then
-                 Some (dashboard_active_or_recent_sessions ~clock config)
-               else
-                 None
-             in
              match
                Operator_control.digest_json ?actor ~target_type:effective_target_type
-                 ?target_id ?include_workers ?sessions
-                 ?command_plane_summary ?swarm_status
+                 ?target_id ?include_workers ?command_plane_summary ?swarm_status
                  ctx
              with
              | Ok json -> json
@@ -646,15 +604,13 @@ let operator_digest_http_json ~state ~sw ~clock request =
                    ]))
     ) with
     | Ok json ->
-        let extra =
-          [
-            ("session_list", `Assoc []);
-            ("readonly_pool", Room_utils.domain_local_pg_backend_diagnostics_json ());
-          ]
-        in
         Ok
           (with_projection_diagnostics ~surface:"operator_digest" ~started_at
-             ~extra json)
+             ~extra:
+               [
+                 ("readonly_pool", Room_utils.domain_local_pg_backend_diagnostics_json ());
+               ]
+             json)
     | Error `Timeout ->
         Ok
           (`Assoc
@@ -681,8 +637,6 @@ let _mission_cache =
         ("command_focus", `Assoc []);
         ("operator_targets", `Assoc []);
         ("attention_queue", `List []);
-        ("sessions", `List []);
-        ("session_briefs", `List []);
         ("agent_briefs", `List []);
         ("keeper_briefs", `List []);
         ("internal_signals", `List []);

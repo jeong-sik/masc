@@ -31,13 +31,11 @@ async function loadOps() {
     operatorDigestError: operatorStore.operatorDigestError,
     operatorError: operatorStore.operatorError,
     operatorRoomDigest: operatorStore.operatorRoomDigest,
-    operatorSessionDigest: operatorStore.operatorSessionDigest,
     operatorSnapshot: operatorStore.operatorSnapshot,
     hydratedWorkflowId: helpers.hydratedWorkflowId,
     reviewDecisionReason: helpers.reviewDecisionReason,
     selectedReviewItemId: helpers.selectedReviewItemId,
     selectedReviewTab: helpers.selectedReviewTab,
-    selectedSessionId: helpers.selectedSessionId,
   }
 }
 
@@ -66,13 +64,11 @@ describe('Ops intervene surface', () => {
       operatorDigestError,
       operatorError,
       operatorRoomDigest,
-      operatorSessionDigest,
       operatorSnapshot,
       hydratedWorkflowId,
       reviewDecisionReason,
       selectedReviewItemId,
       selectedReviewTab,
-      selectedSessionId,
     } = await loadOps()
 
     route.value = { tab: 'command', params: { section: 'intervene' }, postId: null } as RouteState
@@ -80,10 +76,8 @@ describe('Ops intervene surface', () => {
     reviewDecisionReason.value = ''
     selectedReviewItemId.value = ''
     selectedReviewTab.value = 'active'
-    selectedSessionId.value = ''
     operatorError.value = null
     operatorDigestError.value = null
-    operatorSessionDigest.value = null
     operatorSnapshot.value = {
       namespace: { paused: false, namespace: 'default' },
       sessions: [],
@@ -109,10 +103,9 @@ describe('Ops intervene surface', () => {
           fingerprint: 'fp-1',
           decision: 'resolved',
           actor: 'reviewer-1',
-          reason: '세션 A 검토 완료',
+          reason: '프로젝트 검토 완료',
           at: '2026-03-31T10:05:00Z',
-          target_type: 'team_session',
-          target_id: 'session-a',
+          target_type: 'namespace',
         },
         {
           item_id: 'review-oldest',
@@ -125,7 +118,6 @@ describe('Ops intervene surface', () => {
           target_id: 'keeper-a',
         },
       ],
-      session_cards: [],
       worker_cards: [],
     } as unknown as OperatorDigest
     operatorActionLog.value = [
@@ -133,10 +125,10 @@ describe('Ops intervene surface', () => {
         id: 7,
         at: '2026-03-31T10:03:00Z',
         actor: 'dashboard',
-        action_type: 'team_note',
-        target_label: 'team_session:session-a',
+        action_type: 'keeper_message',
+        target_label: 'keeper:keeper-a',
         outcome: 'executed',
-        message: '세션 A에 메모 전달',
+        message: 'keeper-a에게 메시지 전달',
       },
     ]
 
@@ -153,8 +145,8 @@ describe('Ops intervene surface', () => {
 
     const items = Array.from(container.querySelectorAll('[data-testid="ops-activity-item"]'))
     expect(items).toHaveLength(3)
-    expect(items[0]?.textContent).toContain('세션 A 검토 완료')
-    expect(items[1]?.textContent).toContain('세션 A에 메모 전달')
+    expect(items[0]?.textContent).toContain('프로젝트 검토 완료')
+    expect(items[1]?.textContent).toContain('keeper-a에게 메시지 전달')
     expect(items[2]?.textContent).toContain('키퍼 메시지는 잠시 보류')
   }, 120000)
 
@@ -166,13 +158,11 @@ describe('Ops intervene surface', () => {
       operatorDigestError,
       operatorError,
       operatorRoomDigest,
-      operatorSessionDigest,
       operatorSnapshot,
       hydratedWorkflowId,
       reviewDecisionReason,
       selectedReviewItemId,
       selectedReviewTab,
-      selectedSessionId,
     } = await loadOps()
 
     route.value = { tab: 'command', params: { section: 'intervene' }, postId: null } as RouteState
@@ -180,10 +170,8 @@ describe('Ops intervene surface', () => {
     reviewDecisionReason.value = ''
     selectedReviewItemId.value = ''
     selectedReviewTab.value = 'active'
-    selectedSessionId.value = ''
     operatorError.value = null
     operatorDigestError.value = null
-    operatorSessionDigest.value = null
     operatorSnapshot.value = {
       namespace: { paused: true, namespace: 'default' },
       sessions: [],
@@ -225,7 +213,6 @@ describe('Ops intervene surface', () => {
           target_type: 'namespace',
         },
       ],
-      session_cards: [],
       worker_cards: [],
     } as unknown as OperatorDigest
     operatorActionLog.value = []

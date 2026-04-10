@@ -36,7 +36,6 @@ function isMissionInitializingPayload(value: DashboardMissionResponse): boolean 
   return (
     value.summary.room_health === 'initializing'
     && value.sessions.length === 0
-    && value.session_briefs.length === 0
     && value.agent_briefs.length === 0
     && value.keeper_briefs.length === 0
     && value.attention_queue.length === 0

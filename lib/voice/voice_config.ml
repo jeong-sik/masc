@@ -315,8 +315,11 @@ let parse_session json =
   let* endpoints_json =
     require_list ~ctx:"session" ~field:"endpoints" session_json
   in
-  let* endpoints = parse_endpoints ~ctx:"session.endpoints" [] endpoints_json in
-  Ok { endpoints }
+  match endpoints_json with
+  | [] -> Ok { endpoints = [] }
+  | items ->
+    let* endpoints = parse_endpoints ~ctx:"session.endpoints" [] items in
+    Ok { endpoints }
 
 let parse_local_playback json =
   match Yojson.Safe.Util.member "local_playback" json with

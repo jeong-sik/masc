@@ -21,7 +21,7 @@ type entry = {
   completed_at : float option;
 }
 
-let mu = Mutex.create ()
+let mu = Eio.Mutex.create ()
 let pending : (string, entry) Hashtbl.t = Hashtbl.create 16
 let counter = Atomic.make 0
 
@@ -33,20 +33,16 @@ let generate_request_id ~keeper_name =
     (int_of_float (Unix.gettimeofday () *. 1000.0))
 
 let with_lock f =
-  Mutex.lock mu;
-  Fun.protect f ~finally:(fun () -> Mutex.unlock mu)
+  Eio.Mutex.use_rw ~protect:true mu (fun () -> f ())
 
 let gc_stale () =
   let now = Unix.gettimeofday () in
-  let stale = with_lock (fun () ->
-    Hashtbl.fold (fun id entry acc ->
-      if now -. entry.submitted_at > max_age_sec then id :: acc
-      else acc
-    ) pending []
-  ) in
-  List.iter (fun id ->
-    with_lock (fun () -> Hashtbl.remove pending id)
-  ) stale
+  with_lock (fun () ->
+      Hashtbl.fold
+        (fun id entry acc ->
+          if now -. entry.submitted_at > max_age_sec then id :: acc else acc)
+        pending []
+      |> List.iter (fun id -> Hashtbl.remove pending id))
 
 let set_status request_id status =
   with_lock (fun () ->
@@ -91,16 +87,15 @@ let submit ~sw ~(f : unit -> tool_result) ~keeper_name : string =
 
 (** Poll for the result of an async keeper_msg request. *)
 let poll request_id : entry option =
-  with_lock (fun () -> Hashtbl.find_opt pending request_id)
+  Eio.Mutex.use_ro mu (fun () -> Hashtbl.find_opt pending request_id)
 
 (** List all pending/running requests for a keeper. *)
 let list_for_keeper ~keeper_name : entry list =
-  with_lock (fun () ->
-    Hashtbl.fold (fun _id entry acc ->
-      if entry.keeper_name = keeper_name then entry :: acc
-      else acc
-    ) pending []
-  )
+  Eio.Mutex.use_ro mu (fun () ->
+      Hashtbl.fold
+        (fun _id entry acc ->
+          if entry.keeper_name = keeper_name then entry :: acc else acc)
+        pending [])
   |> List.sort (fun a b -> compare b.submitted_at a.submitted_at)
 
 let status_to_string = function

@@ -53,28 +53,33 @@ let should_orchestrate room_config =
     Log.Orchestrator.debug "room is paused, skipping";
     false
   end else begin
-  (* Get unclaimed tasks with priority <= min_priority *)
-  let tasks = Room.get_tasks_raw room_config in
-  let unclaimed_important = List.filter (fun (task: Types.task) ->
-    task.task_status = Types.Todo && task.priority <= 2
-  ) tasks in
+  match Room.read_backlog_r room_config with
+  | Error msg ->
+      Log.Orchestrator.error
+        "backlog unavailable, skipping orchestration check: %s" msg;
+      false
+  | Ok backlog ->
+      (* Get unclaimed tasks with priority <= min_priority *)
+      let unclaimed_important = List.filter (fun (task: Types.task) ->
+        task.task_status = Types.Todo && task.priority <= 2
+      ) backlog.tasks in
 
-  (* Get active (non-zombie) agents *)
-  let agents = Room.get_agents_raw room_config in
-  let active_agents = List.filter (fun (agent: Types.agent) ->
-    not (Resilience.Zombie.is_zombie agent.last_seen)
-  ) agents in
+      (* Get active (non-zombie) agents *)
+      let agents = Room.get_agents_raw room_config in
+      let active_agents = List.filter (fun (agent: Types.agent) ->
+        not (Resilience.Zombie.is_zombie agent.last_seen)
+      ) agents in
 
-  (* Need orchestration if: important tasks exist AND no active agents *)
-  let needs_orchestration =
-    List.length unclaimed_important > 0 && List.length active_agents = 0
-  in
+      (* Need orchestration if: important tasks exist AND no active agents *)
+      let needs_orchestration =
+        List.length unclaimed_important > 0 && List.length active_agents = 0
+      in
 
-  if needs_orchestration then
-    Log.Orchestrator.info "%d unclaimed tasks, %d active agents, spawning"
-      (List.length unclaimed_important) (List.length active_agents);
+      if needs_orchestration then
+        Log.Orchestrator.info "%d unclaimed tasks, %d active agents, spawning"
+          (List.length unclaimed_important) (List.length active_agents);
 
-  needs_orchestration
+      needs_orchestration
   end  (* end of else begin for pause check *)
 
 (** The orchestrator prompt - MCP tools are now available via --allowedTools! *)

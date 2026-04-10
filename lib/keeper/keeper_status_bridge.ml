@@ -45,8 +45,19 @@ let coordination_surface_json (meta : keeper_meta) =
       ("joined_room_ids", string_list_to_json meta.joined_room_ids);
     ]
 
+let effective_declarative_cascade_name
+    (defaults : keeper_profile_defaults)
+    (meta : keeper_meta) =
+  match defaults.cascade_name, defaults.manifest_path with
+  | Some cascade_name, _ -> cascade_name
+  | None, Some _ -> Keeper_config.default_cascade_name
+  | None, None -> meta.cascade_name
+
 let live_override_fields (meta : keeper_meta) (defaults : keeper_profile_defaults) :
     string list =
+  let effective_cascade_name =
+    effective_declarative_cascade_name defaults meta
+  in
   let add_if label cond acc = if cond then label :: acc else acc in
   []
   |> add_if "prompt.goal"
@@ -100,6 +111,8 @@ let live_override_fields (meta : keeper_meta) (defaults : keeper_profile_default
        (match defaults.tool_denylist with
         | Some authored -> authored <> meta.tool_denylist
         | None -> false)
+  |> add_if "model.cascade_name"
+       (effective_cascade_name <> meta.cascade_name)
   |> add_if "proactive.enabled"
        (match defaults.proactive_enabled with
         | Some value -> value <> meta.proactive.enabled

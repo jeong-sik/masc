@@ -60,14 +60,19 @@ let option_first_some left right =
 
 let decision_to_string = Autoresearch_serde.decision_to_string
 let decision_of_string = Autoresearch_serde.decision_of_string
+let decision_of_string_result = Autoresearch_serde.decision_of_string_result
 let status_to_string = Autoresearch_serde.status_to_string
 let status_of_string = Autoresearch_serde.status_of_string
+let status_of_string_result = Autoresearch_serde.status_of_string_result
 let cycle_to_yojson = Autoresearch_serde.cycle_to_yojson
 let cycle_of_yojson = Autoresearch_serde.cycle_of_yojson
+let cycle_of_yojson_result = Autoresearch_serde.cycle_of_yojson_result
 let state_to_yojson = Autoresearch_serde.state_to_yojson
 let state_of_yojson = Autoresearch_serde.state_of_yojson
+let state_of_yojson_result = Autoresearch_serde.state_of_yojson_result
 let swarm_link_to_yojson = Autoresearch_serde.swarm_link_to_yojson
 let swarm_link_of_yojson = Autoresearch_serde.swarm_link_of_yojson
+let swarm_link_of_yojson_result = Autoresearch_serde.swarm_link_of_yojson_result
 
 (* ================================================================ *)
 (* Re-exports: Storage                                               *)
@@ -85,7 +90,10 @@ let save_state = Autoresearch_storage.save_state
 let save_swarm_link = Autoresearch_storage.save_swarm_link
 let load_swarm_link_by_loop = Autoresearch_storage.load_swarm_link_by_loop
 let load_swarm_link_by_session = Autoresearch_storage.load_swarm_link_by_session
+let load_swarm_link_by_loop_result = Autoresearch_storage.load_swarm_link_by_loop_result
+let load_swarm_link_by_session_result = Autoresearch_storage.load_swarm_link_by_session_result
 let load_state = Autoresearch_storage.load_state
+let load_state_result = Autoresearch_storage.load_state_result
 let latest_cycle_record = Autoresearch_storage.latest_cycle_record
 let load_cycle_history = Autoresearch_storage.load_cycle_history
 let scan_persisted_loop_ids = Autoresearch_storage.scan_persisted_loop_ids

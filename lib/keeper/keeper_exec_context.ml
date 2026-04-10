@@ -192,17 +192,14 @@ let keeper_room_capabilities_need_sync config (meta : keeper_meta) capabilities 
     Filename.concat (Room.agents_dir config)
       (Room.safe_filename meta.agent_name ^ ".json")
   in
-  if not (Sys.file_exists agent_file) then
-    true
-  else
-    try
-      let json = Room.read_json config agent_file in
+  (* Use backend-aware read_json_opt instead of Sys.file_exists which
+     returns false for non-filesystem backends (PG, Memory). *)
+  match Room.read_json_opt config agent_file with
+  | None -> true
+  | Some json -> (
       match Types.agent_of_yojson json with
       | Ok agent -> agent.capabilities <> capabilities
-      | Error _ -> true
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | _ -> true
+      | Error _ -> true)
 
 let ensure_keeper_room_presence config (meta : keeper_meta) : keeper_meta =
   let room_ids = room_ids_for_meta config meta in

@@ -509,6 +509,10 @@
         test_keeper_github_hint)
  (libraries masc_test_deps))
 
+(test
+ (name test_keeper_mutex_coverage)
+ (libraries masc_test_deps))
+
 ; Tool diversity: Shannon entropy + QCheck PBT
 (test
  (name test_tool_diversity)

@@ -559,10 +559,25 @@ let append_decision_record
                 match error with
                 | Some e when String.length e > 0 ->
                   let e_lower = String.lowercase_ascii e in
-                  if String.length e_lower >= 15 && String.sub e_lower 0 15 = "invalid request" then "invalid_request"
-                  else if String.length e_lower >= 13 && String.sub e_lower 0 13 = "network error" then "network_error"
-                  else if String.length e_lower >= 14 && String.sub e_lower 0 14 = "internal error" then "internal_error"
-                  else if String.length e_lower >= 8 && String.sub e_lower 0 8 = "input to" then "input_budget_exceeded"
+                  let starts_with prefix =
+                    String.length e_lower >= String.length prefix
+                    && String.sub e_lower 0 (String.length prefix) = prefix
+                  in
+                  let contains needle =
+                    string_contains_substring ~needle e_lower
+                  in
+                  (* starts_with checks first (more specific), then contains *)
+                  if starts_with "invalid request" then "invalid_request"
+                  else if starts_with "network error" then "network_error"
+                  else if starts_with "internal error" then "internal_error"
+                  else if starts_with "input to" then "input_budget_exceeded"
+                  (* contains checks second (broader, order matters) *)
+                  else if contains "turn outcome ambiguous" then "ambiguous_side_effect"
+                  else if contains "connection_failure"
+                          || contains "connection refused" then "network_error"
+                  else if contains "timeout" || contains "timed out" then "timeout"
+                  else if contains "context length"
+                          || contains "token budget" then "input_budget_exceeded"
                   else "other"
                 | _ -> "unknown"
               in
@@ -1130,7 +1145,10 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
             Keeper_agent_run.run_turn ~config ~meta:run_meta ~base_dir
               ~max_context ~build_turn_prompt
               ~user_message ~cascade_name:meta.cascade_name
-              ~generation:run_generation ~max_idle_turns
+              ~generation:run_generation
+              ~actionable_signal:
+                (Keeper_world_observation.actionable_signal_present observation)
+              ~max_idle_turns
               ~history_user_source:"world_state_prompt"
               ~history_assistant_source:"internal_assistant"
               ~temperature ~max_tokens

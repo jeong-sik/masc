@@ -213,6 +213,7 @@ val build_keeper_system_prompt :
   desires:string ->
   instructions:string ->
   ?persona_extended:string ->
+  ?keeper_name:string ->
   unit ->
   string
 

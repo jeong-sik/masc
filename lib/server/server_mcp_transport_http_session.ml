@@ -17,7 +17,7 @@ let session_mutex = Eio.Mutex.create ()
 let default_base_path () =
   (* Match the launcher guard: a direct binary launch from a checkout with its
      own .masc must not silently inherit a stale parent MASC_BASE_PATH. *)
-  Room_utils_backend_setup.resolve_masc_base_path (Sys.getcwd ())
+  Room_utils_backend_setup.resolve_server_default_base_path (Sys.getcwd ())
 
 let is_valid_protocol_version version =
   List.mem version mcp_protocol_versions

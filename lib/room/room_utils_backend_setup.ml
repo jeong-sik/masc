@@ -187,6 +187,19 @@ let should_ignore_inherited_test_base_path ~requested_path ~explicit_path =
   && not (is_ancestor_path ~ancestor:(canonical_base_path explicit_path)
             ~descendant:(canonical_base_path requested_path))
 
+let should_ignore_inherited_server_base_path ~requested_path ~explicit_path =
+  not (bool_env "MASC_ALLOW_INHERITED_BASE_PATH")
+  && String.trim requested_path <> ""
+  && not (String.equal requested_path ".")
+  &&
+  let requested = canonical_base_path requested_path in
+  let explicit = canonical_base_path explicit_path in
+  requested <> ""
+  && explicit <> ""
+  && not (String.equal requested explicit)
+  && path_has_masc_dir requested
+  && path_has_masc_dir explicit
+
 let sync_test_base_path_env resolved_path =
   if running_under_test_executable ()
      && not (bool_env "MASC_TEST_ALLOW_INHERITED_BASE_PATH")
@@ -237,6 +250,24 @@ let resolve_masc_base_path path =
       Log.Room.info "MASC base: %s (explicit MASC_BASE_PATH)" explicit;
       explicit
   | None -> resolve_requested_base_path path
+
+let resolve_server_default_base_path path =
+  match Env_config_core.base_path_opt () with
+  | Some explicit
+    when should_ignore_inherited_server_base_path ~requested_path:path
+           ~explicit_path:explicit ->
+      let resolved = resolve_requested_base_path path in
+      let explicit_binding =
+        match Env_config_core.base_path_source_opt () with
+        | Some (name, raw) -> Printf.sprintf "%s=%s" name raw
+        | None -> Printf.sprintf "MASC_BASE_PATH=%s" explicit
+      in
+      Log.Room.warn
+        "Ignoring inherited %s for direct server startup because both %s and %s have .masc; using requested base path %s. Set MASC_ALLOW_INHERITED_BASE_PATH=1 to preserve the inherited root."
+        explicit_binding (canonical_base_path path) (canonical_base_path explicit)
+        resolved;
+      resolved
+  | _ -> resolve_masc_base_path path
 
 (* ============================================ *)
 (* Environment helpers                          *)

@@ -14,13 +14,10 @@ let add_names names tbl =
   tbl
 
 let runtime_keeper_tool_names () =
-  let schema_names =
-    Config.raw_all_tool_schemas
-    |> List.map (fun (schema : Types.tool_schema) -> schema.name)
-  in
   Hashtbl.create 512
-  |> add_names schema_names
-  |> add_names Keeper_exec_tools.core_always_tools
+  |> add_names Keeper_exec_tools.keeper_internal_candidate_tool_names
+  |> add_names (Keeper_exec_tools.effective_core_tools ())
+  |> add_names (Keeper_exec_tools.injected_masc_tool_names ())
 
 let validate () : validation_result =
   match Keeper_tool_policy.policy_config_for_validation () with

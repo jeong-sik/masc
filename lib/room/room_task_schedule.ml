@@ -20,7 +20,11 @@ let claim_next_r config ~agent_name ?(exclude_task_ids=[]) ?(task_filter=fun (_:
   let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
   with_file_lock config backlog_path (fun () ->
     try
-      let backlog = read_backlog config in
+      let backlog =
+        match read_backlog_r config with
+        | Ok backlog -> backlog
+        | Error msg -> raise (Invalid_argument msg)
+      in
 
       (* BUG-004: Detect and auto-release previous claim to prevent orphaned tasks.
          If this agent already holds a Claimed or InProgress task, release it
@@ -244,36 +248,47 @@ let claim_next config ~agent_name =
 let release_stale_claims config ~ttl_seconds =
   ensure_initialized config;
   let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
-  with_file_lock config backlog_path (fun () ->
-    let backlog = read_backlog config in
-    let now_str = now_iso () in
-    let now_f = Time_compat.now () in
-    let stale_tasks = ref [] in
-    let updated_tasks = List.map (fun (task : task) ->
-      match task.task_status with
-      | Claimed { assignee; claimed_at } ->
-          let ts = parse_iso8601 ~default_time:(now_f -. ttl_seconds -. 1.0) claimed_at in
-          if now_f -. ts > ttl_seconds then begin
-            stale_tasks := (task.id, assignee) :: !stale_tasks;
-            log_event config (Printf.sprintf
-              "{\"type\":\"stale_claim_released\",\"task_id\":\"%s\",\"assignee\":\"%s\",\"age_s\":%.0f,\"ts\":\"%s\"}"
-              task.id assignee (now_f -. ts) now_str);
-            { task with task_status = Todo }
-          end else task
-      | InProgress { assignee; started_at } ->
-          let ts = parse_iso8601 ~default_time:(now_f -. ttl_seconds -. 1.0) started_at in
-          if now_f -. ts > ttl_seconds then begin
-            stale_tasks := (task.id, assignee) :: !stale_tasks;
-            log_event config (Printf.sprintf
-              "{\"type\":\"stale_inprogress_released\",\"task_id\":\"%s\",\"assignee\":\"%s\",\"age_s\":%.0f,\"ts\":\"%s\"}"
-              task.id assignee (now_f -. ts) now_str);
-            { task with task_status = Todo }
-          end else task
-      | Todo | Done _ | Cancelled _ -> task
-    ) backlog.tasks in
-    if !stale_tasks <> [] then begin
-      let updated_backlog = { tasks = updated_tasks; last_updated = now_str; version = backlog.version + 1 } in
-      write_backlog config updated_backlog
-    end;
-    List.rev !stale_tasks
-  )
+  try
+    with_file_lock config backlog_path (fun () ->
+      let backlog =
+        match read_backlog_r config with
+        | Ok backlog -> backlog
+        | Error msg ->
+            Log.Orchestrator.error
+              "[stale-claims] skipping backlog mutation due to read failure: %s"
+              msg;
+            raise Exit
+      in
+      let now_str = now_iso () in
+      let now_f = Time_compat.now () in
+      let stale_tasks = ref [] in
+      let updated_tasks = List.map (fun (task : task) ->
+        match task.task_status with
+        | Claimed { assignee; claimed_at } ->
+            let ts = parse_iso8601 ~default_time:(now_f -. ttl_seconds -. 1.0) claimed_at in
+            if now_f -. ts > ttl_seconds then begin
+              stale_tasks := (task.id, assignee) :: !stale_tasks;
+              log_event config (Printf.sprintf
+                "{\"type\":\"stale_claim_released\",\"task_id\":\"%s\",\"assignee\":\"%s\",\"age_s\":%.0f,\"ts\":\"%s\"}"
+                task.id assignee (now_f -. ts) now_str);
+              { task with task_status = Todo }
+            end else task
+        | InProgress { assignee; started_at } ->
+            let ts = parse_iso8601 ~default_time:(now_f -. ttl_seconds -. 1.0) started_at in
+            if now_f -. ts > ttl_seconds then begin
+              stale_tasks := (task.id, assignee) :: !stale_tasks;
+              log_event config (Printf.sprintf
+                "{\"type\":\"stale_inprogress_released\",\"task_id\":\"%s\",\"assignee\":\"%s\",\"age_s\":%.0f,\"ts\":\"%s\"}"
+                task.id assignee (now_f -. ts) now_str);
+              { task with task_status = Todo }
+            end else task
+        | Todo | Done _ | Cancelled _ -> task
+      ) backlog.tasks in
+      if !stale_tasks <> [] then begin
+        let updated_backlog = { tasks = updated_tasks; last_updated = now_str; version = backlog.version + 1 } in
+        write_backlog config updated_backlog
+      end;
+      List.rev !stale_tasks
+    )
+  with
+  | Exit -> []

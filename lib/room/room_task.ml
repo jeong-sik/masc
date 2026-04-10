@@ -21,6 +21,11 @@ let trim_opt = function
       if trimmed = "" then None else Some trimmed
   | None -> None
 
+let read_backlog_or_raise config =
+  match read_backlog_r config with
+  | Ok backlog -> backlog
+  | Error msg -> raise (Invalid_argument msg)
+
 (** Tighter variant of [resolve_agent_name] for task ownership guards.
     Only accepts the resolved identity when it is the exact [-agent] suffix
     form of the normalised input (e.g. "keeper-coder" -> "keeper-coder-agent").
@@ -170,7 +175,7 @@ let add_task ?contract ?required_preset config ~title ~priority ~description =
   ensure_initialized config;
   let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
   with_file_lock config backlog_path (fun () ->
-    let backlog = read_backlog config in
+    let backlog = read_backlog_or_raise config in
     (* Dedup guard: reject if an active task with the same normalized title exists *)
     (match find_duplicate_task backlog title with
     | Some existing_id ->
@@ -227,7 +232,7 @@ let add_task_with_role ?contract config ~title ~priority ~description
   ensure_initialized config;
   let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
   with_file_lock config backlog_path (fun () ->
-    let backlog = read_backlog config in
+    let backlog = read_backlog_or_raise config in
     (match find_duplicate_task backlog title with
     | Some existing_id ->
       Printf.sprintf "⚠️ Duplicate rejected: '%s' matches existing %s. Use that task instead."
@@ -285,7 +290,7 @@ let batch_add_tasks_internal config tasks =
   let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
   with_file_lock config backlog_path (fun () ->
     try
-      let backlog = read_backlog config in
+      let backlog = read_backlog_or_raise config in
       let next_num = ref (next_task_number config backlog) in
       let added_tasks = List.map (fun (title, priority, description, contract) ->
         let task_id = Printf.sprintf "task-%03d" !next_num in
@@ -363,7 +368,7 @@ let claim_task config ~agent_name ~task_id =
   let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
   with_file_lock config backlog_path (fun () ->
     try
-      let backlog = read_backlog config in
+      let backlog = read_backlog_or_raise config in
       let found = ref false in
       let already_claimed = ref None in
       let new_tasks = List.map (fun task ->
@@ -451,7 +456,7 @@ let claim_task_r config ~agent_name ~task_id
   let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
   with_file_lock config backlog_path (fun () ->
     try
-      let backlog = read_backlog config in
+      let backlog = read_backlog_or_raise config in
       (* Check role constraint before attempting claim *)
       let target_task = List.find_opt (fun t -> t.id = task_id) backlog.tasks in
       let* task =
@@ -562,7 +567,7 @@ let transition_task_r config ~agent_name ~task_id ~action
   let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
   with_file_lock config backlog_path (fun () ->
     try
-      let backlog = read_backlog config in
+      let backlog = read_backlog_or_raise config in
       let* () =
         match expected_version with
         | Some v when backlog.version <> v ->
@@ -811,7 +816,7 @@ let complete_task config ~agent_name ~task_id ~notes =
   let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
   with_file_lock config backlog_path (fun () ->
     try
-      let backlog = read_backlog config in
+      let backlog = read_backlog_or_raise config in
       let task_opt = List.find_opt (fun t -> t.id = task_id) backlog.tasks in
       match task_opt with
       | None ->
@@ -916,7 +921,7 @@ let complete_task_r config ~agent_name ~task_id ~notes : string Types.masc_resul
     let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
     with_file_lock config backlog_path (fun () ->
       try
-        let backlog = read_backlog config in
+        let backlog = read_backlog_or_raise config in
         let task_opt = List.find_opt (fun t -> t.id = task_id) backlog.tasks in
         match task_opt with
         | None -> Error (Types.TaskNotFound task_id)
@@ -1012,7 +1017,7 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Types.masc_result
     let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
     with_file_lock config backlog_path (fun () ->
       try
-        let backlog = read_backlog config in
+        let backlog = read_backlog_or_raise config in
         let task_opt = List.find_opt (fun t -> t.id = task_id) backlog.tasks in
         match task_opt with
         | None -> Error (Types.TaskNotFound task_id)
@@ -1119,7 +1124,7 @@ let link_task_execution_artifacts_r config ~task_id ?session_id ?operation_id
     let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
     with_file_lock config backlog_path (fun () ->
         try
-          let backlog = read_backlog config in
+          let backlog = read_backlog_or_raise config in
           match List.find_opt (fun task -> task.id = task_id) backlog.tasks with
           | None -> Error (Types.TaskNotFound task_id)
           | Some task ->

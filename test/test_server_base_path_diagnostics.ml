@@ -87,6 +87,28 @@ let test_strict_violation_respects_env () =
   Alcotest.(check bool) "strict violation" true
     (Server_base_path_diagnostics.strict_violation diag)
 
+let test_explicit_resolution_source_bypasses_strict_violation () =
+  with_temp_dir "base-path-explicit" @@ fun root ->
+  let cwd = Filename.concat root "repo" in
+  let effective = Filename.concat root "workspace" in
+  Unix.mkdir cwd 0o755;
+  Unix.mkdir effective 0o755;
+  Unix.mkdir (Filename.concat cwd ".masc") 0o755;
+  Unix.mkdir (Filename.concat effective ".masc") 0o755;
+  with_env "MASC_BASE_PATH_STRICT" (Some "true") @@ fun () ->
+  let diag =
+    Server_base_path_diagnostics.detect ~cwd
+      ~resolution_source:"explicit_env"
+      ~input_base_path:effective
+      ~env_masc_base_path:effective
+      ~effective_base_path:effective
+      ~effective_masc_root:(Filename.concat effective ".masc")
+      ()
+  in
+  Alcotest.(check bool) "strict enabled" true diag.fail_fast_enabled;
+  Alcotest.(check bool) "explicit source skips strict violation" false
+    (Server_base_path_diagnostics.strict_violation diag)
+
 let test_to_yojson_exposes_effective_paths () =
   let diag =
     Server_base_path_diagnostics.detect ~cwd:"/tmp/repo"
@@ -104,6 +126,21 @@ let test_to_yojson_exposes_effective_paths () =
     (json |> member "effective_masc_root" |> to_string);
   Alcotest.(check bool) "roots diverge field" true
     (json |> member "roots_diverge" |> to_bool)
+
+let test_to_yojson_exposes_resolution_source () =
+  let diag =
+    Server_base_path_diagnostics.detect ~cwd:"/tmp/repo"
+      ~resolution_source:"explicit_cli"
+      ~input_base_path:"/tmp/workspace"
+      ~env_masc_base_path:"/tmp/workspace"
+      ~effective_base_path:"/tmp/workspace"
+      ~effective_masc_root:"/tmp/workspace/.masc"
+      ()
+  in
+  let open Yojson.Safe.Util in
+  let json = Server_base_path_diagnostics.to_yojson diag in
+  Alcotest.(check string) "resolution source" "explicit_cli"
+    (json |> member "resolution_source" |> to_string)
 
 let test_default_base_path_sanitizes_inherited_dual_roots () =
   with_temp_dir "base-path-default" @@ fun root ->
@@ -158,8 +195,14 @@ let () =
             test_detects_dual_masc_roots;
           Alcotest.test_case "strict violation respects env" `Quick
             test_strict_violation_respects_env;
+          Alcotest.test_case
+            "explicit resolution source bypasses strict violation"
+            `Quick
+            test_explicit_resolution_source_bypasses_strict_violation;
           Alcotest.test_case "json exposes effective paths" `Quick
             test_to_yojson_exposes_effective_paths;
+          Alcotest.test_case "json exposes resolution source" `Quick
+            test_to_yojson_exposes_resolution_source;
           Alcotest.test_case "default base path sanitizes inherited parent root"
             `Quick test_default_base_path_sanitizes_inherited_dual_roots;
           Alcotest.test_case "default base path honors inherited opt-in" `Quick

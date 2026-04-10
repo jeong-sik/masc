@@ -120,12 +120,15 @@ let read_json_local path =
     Log.Misc.warn "[read_json_local] %s" msg;
     `Assoc []
 
+let read_json_local_result path =
+  Safe_ops.read_json_file_safe path
+
 let write_json_local path json =
   mkdir_p (Filename.dirname path);
   let content = Yojson.Safe.pretty_to_string json in
-  let tmp_path = path ^ ".tmp" in
-  Fs_compat.save_file tmp_path content;
-  Unix.rename tmp_path path
+  match Fs_compat.save_file_atomic path content with
+  | Ok () -> ()
+  | Error msg -> invalid_arg msg
 
 (* Root-scoped JSON helpers for shared room registry/current_room metadata. *)
 let read_json_root config path =
@@ -202,6 +205,30 @@ let read_json config path =
         `Assoc []
     end
   | None -> read_json_local path
+
+let read_json_result config path =
+  let parse_backend_json ~context content =
+    let trimmed = String.trim content in
+    if trimmed = "" then Ok (`Assoc [])
+    else Safe_ops.parse_json_safe ~context trimmed
+  in
+  match key_of_path config path with
+  | Some key -> begin
+      match config.backend with
+      | FileSystem _ when Sys.file_exists path -> read_json_local_result path
+      | Memory _ | FileSystem _ | PostgresNative _ ->
+      match backend_get config ~key with
+      | Ok (Some content) ->
+          parse_backend_json ~context:"read_json_result" content
+      | Ok None -> Ok (`Assoc [])
+      | Error e ->
+          Error
+            (Printf.sprintf
+               "[read_json_result] backend_get failed for %s: %s"
+               key
+               (Backend_types.show_error e))
+    end
+  | None -> read_json_local_result path
 
 let read_text config path =
   match key_of_path config path with

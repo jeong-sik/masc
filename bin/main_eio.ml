@@ -332,6 +332,29 @@ let run_cmd host port base_path =
   let normalized_base_path =
     Env_config.normalize_masc_base_path_input base_path
   in
+  let resolution_source =
+    match Sys.getenv_opt "MASC_BASE_PATH_RESOLUTION_SOURCE" with
+    | Some source when String.trim source <> "" -> String.trim source
+    | _ ->
+        let inherited_env_matches =
+          match Sys.getenv_opt "MASC_BASE_PATH" with
+          | Some existing ->
+              String.equal
+                (Env_config.normalize_masc_base_path_input existing)
+                normalized_base_path
+          | None -> false
+        in
+        if inherited_env_matches then
+          "explicit_env"
+        else
+          let default_path =
+            Env_config.normalize_masc_base_path_input (default_base_path ())
+          in
+          if String.equal default_path normalized_base_path then
+            "implicit_repo_root"
+          else
+            "explicit_cli"
+  in
   let stripped_base_path =
     Env_config.strip_path_trailing_slashes (String.trim base_path)
   in
@@ -346,6 +369,7 @@ let run_cmd host port base_path =
       base_path normalized_base_path;
   Unix.putenv "MASC_BASE_PATH_INPUT" raw_base_path;
   Unix.putenv "MASC_BASE_PATH" normalized_base_path;
+  Unix.putenv "MASC_BASE_PATH_RESOLUTION_SOURCE" resolution_source;
   (* Persist logs inside .masc/logs/ — colocated with state, not a sibling.
      Previous code wrote to base_path/logs/ which diverged from .masc/ when
      base_path differed from the repo checkout directory. *)

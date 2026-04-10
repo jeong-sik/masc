@@ -171,6 +171,13 @@ let boring_tools_set : (string, unit) Hashtbl.t =
 let is_boring_tool (name : string) : bool =
   Hashtbl.mem boring_tools_set name
 
+let prune_boring_tools_for_actionable_turn (tool_names : string list) :
+    string list =
+  let actionable =
+    List.filter (fun name -> not (is_boring_tool name)) tool_names
+  in
+  if actionable = [] then tool_names else actionable
+
 (* ── Dynamic schema injection (masc_* tools) ──────────────────── *)
 
 let masc_schemas_ref : Types.tool_schema list ref = ref []

@@ -38,6 +38,42 @@ let source_of_string = function
 
 let all_sources = [Keeper_metric; Agent_event; Tool_call_io; Tool_usage; Tool_metric]
 
+type source_status =
+  | Source_ok
+  | Source_missing
+  | Source_degraded of string
+
+let source_status_to_string = function
+  | Source_ok -> "ok"
+  | Source_missing -> "missing"
+  | Source_degraded _ -> "degraded"
+
+let dir_status path =
+  try
+    if not (Sys.file_exists path) then Source_missing
+    else if Sys.is_directory path then Source_ok
+    else Source_degraded "not a directory"
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn -> Source_degraded (Printexc.to_string exn)
+
+let warn_source_failure ~source ~path ~action message =
+  Log.Telemetry.warn
+    "telemetry_unified %s failed: source=%s path=%s err=%s" action
+    (source_to_string source) path message
+
+let parse_recent_lines ~source ~path lines =
+  lines
+  |> List.mapi (fun index line -> (index + 1, line))
+  |> List.filter_map (fun (index, line) ->
+         try Some (Yojson.Safe.from_string line)
+         with
+         | Yojson.Json_error msg ->
+             Log.Telemetry.warn
+               "telemetry_unified parse failed: source=%s path=%s recent_row=%d err=%s"
+               (source_to_string source) path index msg;
+             None)
+
 (* ── Store paths ────────────────────────────────────── *)
 
 (** Fixed-path sources (single directory per source).
@@ -55,21 +91,36 @@ let fixed_store_dir ~masc_root ~base_path = function
 (** Discover all keeper metric directories under [masc_root/keepers/]. *)
 let discover_keeper_metric_dirs masc_root : (string * string) list =
   let keepers_dir = Filename.concat masc_root "keepers" in
-  if not (Sys.file_exists keepers_dir) then []
-  else
-    let entries =
-      try Array.to_list (Sys.readdir keepers_dir)
-      with Eio.Cancel.Cancelled _ as e -> raise e | _ -> []
-    in
-    List.filter_map (fun name ->
-      let metrics_dir = Filename.concat keepers_dir (name ^ "/metrics") in
-      if Sys.file_exists metrics_dir then Some (name, metrics_dir)
-      else None
-    ) entries
+  match dir_status keepers_dir with
+  | Source_missing -> []
+  | Source_degraded message ->
+      warn_source_failure ~source:Keeper_metric ~path:keepers_dir
+        ~action:"discover" message;
+      []
+  | Source_ok -> (
+      match Safe_ops.list_dir_safe keepers_dir with
+      | Error message ->
+          warn_source_failure ~source:Keeper_metric ~path:keepers_dir
+            ~action:"discover" message;
+          []
+      | Ok entries ->
+          List.filter_map
+            (fun name ->
+              let metrics_dir =
+                Filename.concat keepers_dir (name ^ "/metrics")
+              in
+              match dir_status metrics_dir with
+              | Source_ok -> Some (name, metrics_dir)
+              | Source_missing -> None
+              | Source_degraded message ->
+                  warn_source_failure ~source:Keeper_metric ~path:metrics_dir
+                    ~action:"discover" message;
+                  None)
+            entries)
 
 (* ── Timestamp extraction ───────────────────────────── *)
 
-let extract_ts (json : Yojson.Safe.t) : float =
+let extract_ts_opt (json : Yojson.Safe.t) : float option =
   match json with
   | `Assoc fields ->
     (* Try ts_unix first (keeper metrics), then ts, then timestamp *)
@@ -80,19 +131,19 @@ let extract_ts (json : Yojson.Safe.t) : float =
       | _ -> None
     in
     (match try_field "ts_unix" with
-     | Some f -> f
+     | Some f -> Some f
      | None ->
        match try_field "ts" with
-       | Some f -> f
+       | Some f -> Some f
        | None ->
          match try_field "timestamp" with
-         | Some f -> f
+         | Some f -> Some f
          | None ->
            (match List.assoc_opt "ts_iso" fields with
             | Some (`String iso) ->
-                Option.value ~default:0.0 (Types.parse_iso8601_opt iso)
-            | _ -> 0.0))
-  | _ -> 0.0
+                Types.parse_iso8601_opt iso
+            | _ -> None))
+  | _ -> None
 
 (* ── Entry tagging ──────────────────────────────────── *)
 
@@ -138,14 +189,24 @@ let matches_scope ?session_id ?operation_id ?worker_run_id (json : Yojson.Safe.t
 (* ── Read from a single fixed-path source ───────────── *)
 
 let read_fixed_source dir source ~n : Yojson.Safe.t list =
-  if not (Sys.file_exists dir) then []
-  else
-    match Dated_jsonl.create ~base_dir:dir () with
-    | store ->
-      let entries = Dated_jsonl.read_recent store n in
-      List.map (tag_entry source) entries
-    | exception (Eio.Cancel.Cancelled _ as e) -> raise e
-    | exception _ -> []
+  match dir_status dir with
+  | Source_missing -> []
+  | Source_degraded message ->
+      warn_source_failure ~source ~path:dir ~action:"read" message;
+      []
+  | Source_ok -> (
+      match Dated_jsonl.create ~base_dir:dir () with
+      | store ->
+          let entries =
+            Dated_jsonl.read_recent_lines store n
+            |> parse_recent_lines ~source ~path:dir
+          in
+          List.map (tag_entry source) entries
+      | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+      | exception exn ->
+          warn_source_failure ~source ~path:dir ~action:"read"
+            (Printexc.to_string exn);
+          [])
 
 (* ── Read keeper metrics (per-keeper directories) ───── *)
 
@@ -195,68 +256,179 @@ let read_unified ~base_path ~masc_root ?(sources = all_sources) ?keeper_name
       filtered
   in
   (* Sort by timestamp descending (newest first) *)
-  let sorted = List.sort (fun a b ->
-    Float.compare (extract_ts b) (extract_ts a)
-  ) filtered in
+  let sorted =
+    List.sort
+      (fun a b ->
+        match (extract_ts_opt a, extract_ts_opt b) with
+        | Some ta, Some tb -> Float.compare tb ta
+        | Some _, None -> -1
+        | None, Some _ -> 1
+        | None, None -> 0)
+      filtered
+  in
   if List.length sorted <= n then sorted
   else List.filteri (fun i _ -> i < n) sorted
 
 (* ── Summary ────────────────────────────────────────── *)
 
-let count_fixed_source_entries ~masc_root ~base_path source : int =
+let fixed_source_status_json ~masc_root ~base_path source =
   match fixed_store_dir ~masc_root ~base_path source with
-  | None -> 0
+  | None ->
+      `Assoc
+        [
+          ("source", `String (source_to_string source));
+          ("path", `String "");
+          ("exists", `Bool false);
+          ("status", `String "missing");
+          ("entry_count", `Int 0);
+        ]
   | Some dir ->
-    if not (Sys.file_exists dir) then 0
-    else
-      (match Dated_jsonl.create ~base_dir:dir () with
-       | store -> Dated_jsonl.count_entries store
-       | exception (Eio.Cancel.Cancelled _ as e) -> raise e
-       | exception _ -> 0)
+      let base_fields status entry_count =
+        [
+          ("source", `String (source_to_string source));
+          ("path", `String dir);
+          ("exists", `Bool (status <> Source_missing));
+          ("status", `String (source_status_to_string status));
+          ("entry_count", `Int entry_count);
+        ]
+      in
+      (match dir_status dir with
+       | Source_missing -> `Assoc (base_fields Source_missing 0)
+       | Source_degraded message ->
+           `Assoc
+             (base_fields (Source_degraded message) 0
+             @ [ ("error", `String message) ])
+       | Source_ok -> (
+           match Dated_jsonl.create ~base_dir:dir () with
+           | store -> `Assoc (base_fields Source_ok (Dated_jsonl.count_entries store))
+           | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+           | exception exn ->
+               let message = Printexc.to_string exn in
+               `Assoc
+                 (base_fields (Source_degraded message) 0
+                 @ [ ("error", `String message) ])))
+
+let keeper_metrics_status_json ~masc_root =
+  let keepers_dir = Filename.concat masc_root "keepers" in
+  let base_fields status keeper_count entry_count =
+    [
+      ("source", `String (source_to_string Keeper_metric));
+      ("path", `String keepers_dir);
+      ("exists", `Bool (status <> Source_missing));
+      ("status", `String (source_status_to_string status));
+      ("keeper_count", `Int keeper_count);
+      ("entry_count", `Int entry_count);
+    ]
+  in
+  match dir_status keepers_dir with
+  | Source_missing ->
+      `Assoc (base_fields Source_missing 0 0 @ [ ("keepers", `List []) ])
+  | Source_degraded message ->
+      `Assoc
+        (base_fields (Source_degraded message) 0 0
+        @ [ ("error", `String message); ("keepers", `List []) ])
+  | Source_ok -> (
+      match Safe_ops.list_dir_safe keepers_dir with
+      | Error message ->
+          `Assoc
+            (base_fields (Source_degraded message) 0 0
+            @ [ ("error", `String message); ("keepers", `List []) ])
+      | Ok entries ->
+          let keeper_items, degraded_count, total_entries =
+            List.fold_left
+              (fun (items, degraded_count, total_entries) name ->
+                let metrics_dir = Filename.concat keepers_dir (name ^ "/metrics") in
+                match dir_status metrics_dir with
+                | Source_missing -> (items, degraded_count, total_entries)
+                | Source_degraded message ->
+                    ( `Assoc
+                        [
+                          ("name", `String name);
+                          ("path", `String metrics_dir);
+                          ("status", `String "degraded");
+                          ("entry_count", `Int 0);
+                          ("error", `String message);
+                        ]
+                      :: items,
+                      degraded_count + 1,
+                      total_entries )
+                | Source_ok -> (
+                    match Dated_jsonl.create ~base_dir:metrics_dir () with
+                    | store ->
+                        let entry_count = Dated_jsonl.count_entries store in
+                        ( `Assoc
+                            [
+                              ("name", `String name);
+                              ("path", `String metrics_dir);
+                              ("status", `String "ok");
+                              ("entry_count", `Int entry_count);
+                            ]
+                          :: items,
+                          degraded_count,
+                          total_entries + entry_count )
+                    | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+                    | exception exn ->
+                        let message = Printexc.to_string exn in
+                        ( `Assoc
+                            [
+                              ("name", `String name);
+                              ("path", `String metrics_dir);
+                              ("status", `String "degraded");
+                              ("entry_count", `Int 0);
+                              ("error", `String message);
+                            ]
+                          :: items,
+                          degraded_count + 1,
+                          total_entries )))
+              ([], 0, 0) entries
+          in
+          let keeper_items = List.rev keeper_items in
+          let status =
+            if degraded_count > 0 then Source_degraded "one or more keeper metric stores degraded"
+            else Source_ok
+          in
+          let extra_fields =
+            match status with
+            | Source_ok | Source_missing -> []
+            | Source_degraded message -> [ ("error", `String message) ]
+          in
+          `Assoc
+            (base_fields status (List.length keeper_items) total_entries
+            @ extra_fields
+            @ [ ("keepers", `List keeper_items) ]))
 
 let summary_json ~base_path ~masc_root () : Yojson.Safe.t =
-  let keeper_dirs = discover_keeper_metric_dirs masc_root in
-  let keeper_total =
-    List.fold_left (fun acc (_, dir) ->
-      acc +
-      (match Dated_jsonl.create ~base_dir:dir () with
-       | store -> Dated_jsonl.count_entries store
-       | exception (Eio.Cancel.Cancelled _ as e) -> raise e
-       | exception _ -> 0)
-    ) 0 keeper_dirs
+  let sources_json =
+    List.map
+      (function
+        | Keeper_metric -> keeper_metrics_status_json ~masc_root
+        | source -> fixed_source_status_json ~masc_root ~base_path source)
+      all_sources
   in
-  let source_json source =
-    match source with
-    | Keeper_metric ->
-      `Assoc [
-        ("source", `String (source_to_string source));
-        ("keepers", `List (List.map (fun (name, dir) ->
-           `Assoc [
-             ("name", `String name);
-             ("path", `String dir);
-           ]) keeper_dirs));
-        ("keeper_count", `Int (List.length keeper_dirs));
-        ("entry_count", `Int keeper_total);
-      ]
-    | _ ->
-      let dir = match fixed_store_dir ~masc_root ~base_path source with
-        | Some d -> d | None -> "" in
-      let exists = dir <> "" && Sys.file_exists dir in
-      let count = if exists then count_fixed_source_entries ~masc_root ~base_path source else 0 in
-      `Assoc [
-        ("source", `String (source_to_string source));
-        ("path", `String dir);
-        ("exists", `Bool exists);
-        ("entry_count", `Int count);
-      ]
+  let degraded_sources =
+    List.fold_left
+      (fun acc -> function
+        | `Assoc fields -> (
+            match List.assoc_opt "status" fields with
+            | Some (`String "degraded") -> acc + 1
+            | _ -> acc)
+        | _ -> acc)
+      0 sources_json
   in
-  let fixed_total =
-    List.fold_left (fun acc s ->
-      acc + count_fixed_source_entries ~masc_root ~base_path s
-    ) 0 (List.filter (fun s -> s <> Keeper_metric) all_sources)
+  let total_entries =
+    List.fold_left
+      (fun acc -> function
+        | `Assoc fields -> (
+            match List.assoc_opt "entry_count" fields with
+            | Some (`Int count) -> acc + count
+            | _ -> acc)
+        | _ -> acc)
+      0 sources_json
   in
   `Assoc [
     ("generated_at", `String (Types.now_iso ()));
-    ("sources", `List (List.map source_json all_sources));
-    ("total_entries", `Int (keeper_total + fixed_total));
+    ("status", `String (if degraded_sources > 0 then "degraded" else "ok"));
+    ("degraded_source_count", `Int degraded_sources);
+    ("sources", `List sources_json);
+    ("total_entries", `Int total_entries);
   ]

@@ -303,7 +303,7 @@ let test_recent_activity_skips_bad_task_file () =
         item.summary
   | _ -> fail "expected one task activity item"
 
-let test_recent_activity_falls_back_from_bad_task_timestamp () =
+let test_recent_activity_skips_bad_task_timestamp () =
   with_temp_dir "activity-feed-ts" @@ fun base_path ->
   let config = Room.default_config base_path in
   let masc_dir = Room.masc_dir config in
@@ -320,12 +320,27 @@ let test_recent_activity_falls_back_from_bad_task_timestamp () =
            ("created_at", `String "not-a-timestamp");
          ]));
   let items = Activity_feed.recent_activity config ~limit:10 () in
-  check int "task still included" 1 (List.length items);
-  match items with
-  | [item] ->
-      check bool "timestamp falls back to a real time value" true
-        (item.created_at > 0.0)
-  | _ -> fail "expected one task activity item"
+  check int "bad timestamp skipped" 0 (List.length items)
+
+let test_recent_activity_skips_bad_board_post_timestamp () =
+  with_temp_dir "activity-feed-board-ts" @@ fun base_path ->
+  let config = Room.default_config base_path in
+  let masc_dir = Room.masc_dir config in
+  Fs_compat.mkdir_p masc_dir;
+  let board_posts_path = Filename.concat masc_dir "board_posts.jsonl" in
+  write_file board_posts_path
+    (Yojson.Safe.to_string
+       (`Assoc
+         [
+           ("id", `String "post-bad-ts");
+           ("author", `String "alice");
+           ("title", `String "Hello");
+           ("content", `String "body");
+           ("created_at", `String "nope");
+         ])
+    ^ "\n");
+  let items = Activity_feed.recent_activity config ~limit:10 () in
+  check int "board post with bad timestamp skipped" 0 (List.length items)
 
 (* ============================================================
    Runner
@@ -382,7 +397,9 @@ let () =
         test_recent_activity_skips_malformed_jsonl_lines;
       test_case "skips bad task file" `Quick
         test_recent_activity_skips_bad_task_file;
-      test_case "falls back from bad task timestamp" `Quick
-        test_recent_activity_falls_back_from_bad_task_timestamp;
+      test_case "skips bad task timestamp" `Quick
+        test_recent_activity_skips_bad_task_timestamp;
+      test_case "skips bad board post timestamp" `Quick
+        test_recent_activity_skips_bad_board_post_timestamp;
     ];
   ]

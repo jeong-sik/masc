@@ -326,9 +326,13 @@ let rec add_routes ~sw ~clock router =
            Telemetry_unified.read_unified ~base_path ~masc_root ~sources
              ?keeper_name ?session_id ?operation_id ?worker_run_id ~n ()
          in
+         let summary =
+           Telemetry_unified.summary_json ~base_path ~masc_root ()
+         in
          let json = `Assoc [
            ("generated_at", `String (Types.now_iso ()));
            ("count", `Int (List.length entries));
+           ("summary", summary);
            ("entries", `List entries);
          ] in
          Http.Response.json ~compress:true ~request:req

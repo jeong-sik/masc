@@ -55,5 +55,8 @@ val summary_json :
   unit ->
   Yojson.Safe.t
 (** [summary_json ~base_path ~masc_root ()] returns a JSON overview of
-    each source: path, entry count, and whether the store directory
-    exists.  [masc_root] is the cluster-aware .masc directory. *)
+    each source: path, entry count, existence, and read status
+    (`ok`, `missing`, or `degraded`). Degraded sources also
+    include an error string so callers can distinguish corrupt paths from
+    genuinely empty telemetry. [masc_root] is the cluster-aware .masc
+    directory. *)

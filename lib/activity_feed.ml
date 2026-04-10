@@ -67,13 +67,13 @@ let load_jsonl_safe ?(kind = "jsonl") (path : string) : Yojson.Safe.t list =
                    warn_parse_failure ~kind ~path ~line_no msg;
                    None)
 
-let parse_created_at_or_now ~kind ~path raw =
+let parse_created_at ~kind ~path raw =
   let raw = String.trim raw in
-  let fallback () =
-    Log.Feed.warn "%s timestamp parse fallback for %s: %S" kind path raw;
-    Time_compat.now ()
+  let invalid message =
+    Log.Feed.warn "%s timestamp invalid for %s: %s raw=%S" kind path message raw;
+    None
   in
-  if raw = "" then fallback ()
+  if raw = "" then invalid "empty timestamp"
   else
     try
       Scanf.sscanf raw "%d-%d-%dT%d:%d:%d"
@@ -86,13 +86,12 @@ let parse_created_at_or_now ~kind ~path raw =
            let local_epoch, _ = Unix.mktime tm in
            let utc_as_local, _ = Unix.mktime (Unix.gmtime local_epoch) in
            let tz_offset = local_epoch -. utc_as_local in
-           local_epoch +. tz_offset)
+           Some (local_epoch +. tz_offset))
     with
-    | Scanf.Scan_failure _ | Failure _ | End_of_file -> fallback ()
+    | Scanf.Scan_failure _ | Failure _ | End_of_file ->
+        invalid "parse failure"
     | exn ->
-        Log.Feed.warn "%s timestamp parse error for %s: %s" kind path
-          (Printexc.to_string exn);
-        fallback ()
+        invalid (Printexc.to_string exn)
 
 (** {1 Source Readers} *)
 
@@ -122,18 +121,21 @@ let task_activities (config : Room.config) : activity_item list =
           let assignee = Safe_ops.json_string ~default:"" "assignee" json in
           let title = Safe_ops.json_string ~default:"" "title" json in
           let created_at_str = Safe_ops.json_string ~default:"" "created_at" json in
-          let created_at = parse_created_at_or_now ~kind:"task activity" ~path created_at_str in
           let agent = if assignee <> "" then assignee else "system" in
           let summary = Printf.sprintf "Task %s: %s (%s)" id title status in
-          if id = "" then None
-          else Some {
-            id = "act-task-" ^ id;
-            kind = "task";
-            agent_name = agent;
-            summary;
-            detail_json = json;
-            created_at;
-          })
+          match parse_created_at ~kind:"task activity" ~path created_at_str with
+          | None -> None
+          | Some created_at ->
+              if id = "" then None
+              else
+                Some {
+                  id = "act-task-" ^ id;
+                  kind = "task";
+                  agent_name = agent;
+                  summary;
+                  detail_json = json;
+                  created_at;
+                })
 
 (** Read board post activity from `.masc/board_posts.jsonl`. *)
 let board_post_activities (config : Room.config) : activity_item list =
@@ -149,9 +151,9 @@ let board_post_activities (config : Room.config) : activity_item list =
         | Some ts -> ts
         | None ->
             Log.Feed.warn "board post missing/invalid created_at for %s" path;
-            Time_compat.now ()
+            -1.0
       in
-      if id = "" then None
+      if id = "" || created_at < 0.0 then None
       else
         let preview = if title <> "" then title
           else if String.length content > 80 then String.sub content 0 80 ^ "..."
@@ -179,9 +181,9 @@ let board_comment_activities (config : Room.config) : activity_item list =
         | Some ts -> ts
         | None ->
             Log.Feed.warn "board comment missing/invalid created_at for %s" path;
-            Time_compat.now ()
+            -1.0
       in
-      if id = "" then None
+      if id = "" || created_at < 0.0 then None
       else
         let preview =
           if String.length content > 80 then String.sub content 0 80 ^ "..."
@@ -210,9 +212,9 @@ let mention_activities (config : Room.config) : activity_item list =
         | Some ts -> ts
         | None ->
             Log.Feed.warn "mention inbox missing/invalid created_at for %s" path;
-            Time_compat.now ()
+            -1.0
       in
-      if id = "" then None
+      if id = "" || created_at < 0.0 then None
       else Some {
         id = "act-mention-" ^ id;
         kind = "mention";

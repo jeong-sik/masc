@@ -485,9 +485,14 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                 else
                   let reputation =
                     (try
-                       let rep = Agent_reputation.compute_reputation config ~agent_name:m.name in
+                       let rep = Agent_reputation.compute_reputation config ~agent_name:m.agent_name in
                        Agent_reputation.reputation_to_json rep
-                     with _ -> `Null)
+                     with
+                     | Eio.Cancel.Cancelled _ as e -> raise e
+                     | exn ->
+                       Log.Keeper.warn "trust_observatory reputation failed for %s: %s"
+                         m.name (Printexc.to_string exn);
+                       `Null)
                   in
                   let thompson =
                     let stats = Thompson_sampling.get_stats m.name in
@@ -501,7 +506,16 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                     ]
                   in
                   let stress =
-                    `List (Agent_stress.recent 10)
+                    let all_events = Agent_stress.recent 50 in
+                    let keeper_events = List.filter (fun ev ->
+                      match ev with
+                      | `Assoc fields ->
+                        (match List.assoc_opt "agent_name" fields with
+                         | Some (`String n) -> n = m.name || n = m.agent_name
+                         | _ -> false)
+                      | _ -> false
+                    ) all_events in
+                    `List (List.filteri (fun i _ -> i < 10) keeper_events)
                   in
                   `Assoc [
                     ("reputation", reputation);

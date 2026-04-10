@@ -11,6 +11,8 @@ type t = {
   pending_lazy_tasks : string list;
   last_error : string option;
   fallback_reason : string option;
+  path_diagnostics : Yojson.Safe.t option;
+  config_resolution : Yojson.Safe.t option;
   started_at : float;
 }
 
@@ -23,6 +25,8 @@ let state =
       pending_lazy_tasks = [];
       last_error = None;
       fallback_reason = None;
+      path_diagnostics = None;
+      config_resolution = None;
       started_at = Unix.gettimeofday ();
     }
 
@@ -43,6 +47,8 @@ let reset ?(backend_mode = "unknown") () =
       pending_lazy_tasks = [];
       last_error = None;
       fallback_reason = None;
+      path_diagnostics = None;
+      config_resolution = None;
       started_at = Unix.gettimeofday ();
     }
 
@@ -120,6 +126,10 @@ let fail_lazy_task ~task ~error =
 let mark_degraded ~error =
   update (fun current -> { current with phase = Degraded; last_error = Some error })
 
+let note_runtime_resolution ~path_diagnostics ~config_resolution =
+  update (fun current ->
+      { current with path_diagnostics = Some path_diagnostics; config_resolution = Some config_resolution })
+
 let to_yojson () =
   let current = !state in
   `Assoc
@@ -136,6 +146,14 @@ let to_yojson () =
       ( "fallback_reason",
         match current.fallback_reason with
         | Some reason -> `String reason
+        | None -> `Null );
+      ( "path_diagnostics",
+        match current.path_diagnostics with
+        | Some value -> value
+        | None -> `Null );
+      ( "config_resolution",
+        match current.config_resolution with
+        | Some value -> value
         | None -> `Null );
       ("elapsed_sec", `Float (elapsed_since_start ()));
       ("watchdog_timeout_sec", `Float (watchdog_timeout_sec ()));

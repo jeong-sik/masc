@@ -371,6 +371,54 @@ work_discovery_guidance = "TOML guidance"
       check (option string) "work_discovery_guidance"
         (Some "TOML guidance") updated.work_discovery_guidance
 
+(** Test: room presence sync updates stale agent capabilities from live keeper meta. *)
+let test_room_presence_syncs_capabilities () =
+  with_temp_dir "keeper-config-ssot-room" @@ fun room_dir ->
+  Fs_compat.clear_fs ();
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let keeper_name = "room-presence-sync-test" in
+  let agent_name = Keeper_types.keeper_agent_name keeper_name in
+  let config = Room.default_config room_dir in
+  let _ = Room.init config ~agent_name:None in
+  let initial_meta =
+    match
+      Keeper_types.meta_of_json
+        (`Assoc
+          [
+            ("name", `String keeper_name);
+            ("agent_name", `String agent_name);
+            ("trace_id", `String "trace-room-presence-sync");
+            ( "tool_access",
+              `Assoc
+                [
+                  ("kind", `String "preset");
+                  ("preset", `String "social");
+                ] );
+          ])
+    with
+    | Ok meta -> meta
+    | Error e -> fail ("meta_of_json failed: " ^ e)
+  in
+  (match Keeper_types.write_meta ~force:true config initial_meta with
+  | Error e -> fail ("write_meta failed: " ^ e)
+  | Ok () -> ());
+  ignore
+    (Room.join config ~agent_name ~capabilities:[ "keeper"; "preset:minimal" ] ());
+  let _synced = Keeper_exec_context.ensure_keeper_room_presence config initial_meta in
+  let agent =
+    Room.get_agents_raw config
+    |> List.find_opt (fun (agent : Types.agent) -> String.equal agent.name agent_name)
+  in
+  match agent with
+  | None -> fail "expected keeper agent after room presence sync"
+  | Some agent ->
+      check
+        (list string)
+        "capabilities synced from live meta"
+        [ "keeper"; "preset:social" ]
+        agent.capabilities
+
 (** Test: update_field_in_content replaces existing field *)
 let test_toml_update_existing () =
   let input = {|[keeper]
@@ -465,6 +513,10 @@ let () =
             "TOML work_discovery fields overwrite stale meta"
             `Quick
             test_discovery_resync;
+          test_case
+            "room presence sync overwrites stale agent capabilities"
+            `Quick
+            test_room_presence_syncs_capabilities;
         ] );
       ( "toml_writer",
         [

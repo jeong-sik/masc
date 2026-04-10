@@ -20,7 +20,7 @@ let missing_file_error_json ~(config : Room.config) ~(target : string)
   ignore config;
   let parent = Filename.dirname target in
   let suggestion_dir =
-    if Sys.file_exists parent && Sys.is_directory parent then parent
+    if Fs_compat.file_exists parent && Sys.is_directory parent then parent
     else fallback_dir
   in
   let suggested_entries =

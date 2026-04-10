@@ -28,7 +28,7 @@ let is_checkpoint_file (filename : string) : bool =
 (* ================================================================ *)
 
 let list_checkpoints ~(session_dir : string) : string list =
-  if not (Sys.file_exists session_dir) then []
+  if not (Fs_compat.file_exists session_dir) then []
   else
     Sys.readdir session_dir
     |> Array.to_list
@@ -189,7 +189,7 @@ let load_oas ~(session_dir : string) ~(session_id : string) :
        | Error e -> Error (Store_error (Agent_sdk.Error.to_string e)))
   | None ->
       let path = oas_checkpoint_path ~session_dir ~session_id in
-      if Sys.file_exists path then
+      if Fs_compat.file_exists path then
         try
           match Agent_sdk.Checkpoint.of_string (Fs_compat.load_file path) with
           | Ok ckpt -> Ok ckpt

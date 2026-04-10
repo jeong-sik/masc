@@ -513,7 +513,7 @@ let flush_tool_usage ~base_path name =
 
 let restore_tool_usage ~base_path name =
   let path = tool_usage_path ~base_path name in
-  if not (Sys.file_exists path) then ()
+  if not (Fs_compat.file_exists path) then ()
   else
     match StringMap.find_opt (registry_key ~base_path name) !registry with
     | None -> ()

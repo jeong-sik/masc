@@ -123,7 +123,7 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     {
       id: 'agents',
       label: '에이전트 & 키퍼',
-      description: '통합 런타임 상태.',
+      description: '이름과 운영 상태를 함께 봅니다.',
       params: { section: 'agents' },
     },
     {

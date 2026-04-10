@@ -47,9 +47,16 @@ type run_result =
   ; tools_used : string list
   ; checkpoint : Agent_sdk.Checkpoint.t option
   ; proof : Agent_sdk.Cdal_proof.t option
+  ; run_validation : Agent_sdk.Raw_trace.run_validation option
   ; stop_reason : Oas_worker.stop_reason
   ; inference_telemetry : Agent_sdk.Types.inference_telemetry option
   }
+
+(** Canonical model label for MASC status/metrics surfaces.
+    Prefers the final cascade attempt label when available, then the
+    selected/primary configured cascade label, and finally falls back to the
+    raw provider-reported [model_used]. *)
+val surface_model_used : run_result -> string
 
 (** {1 Telemetry serialisation} *)
 

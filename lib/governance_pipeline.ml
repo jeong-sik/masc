@@ -36,7 +36,7 @@ let risk_level_to_int = function
 let max_risk_level left right =
   if risk_level_to_int left >= risk_level_to_int right then left else right
 
-let risk_level_of_contract_risk = function
+let _risk_level_of_contract_risk = function
   | Agent_sdk.Risk_class.Low -> Low
   | Agent_sdk.Risk_class.Medium -> Medium
   | Agent_sdk.Risk_class.High -> High
@@ -254,24 +254,14 @@ let has_empty_overwrite_payload input =
   collect_string_values ~keys:empty_overwrite_payload_keys input
   |> List.exists (fun text -> String.trim text = "")
 
-let tool_names_of_input ~tool_name input =
+let _tool_names_of_input ~tool_name input =
   let (_ : string) = tool_name in
   collect_string_list_values ~keys:[ "tool_names" ] input
   |> List.sort_uniq String.compare
 
-let classify_with_contract_risk ~tool_name ~input =
-  match input with
-  | `Assoc _ -> (
-      match Team_session_types.delivery_contract_of_yojson
-              (Yojson.Safe.Util.member "delivery_contract" input) with
-      | Some delivery_contract ->
-          let tool_names = tool_names_of_input ~tool_name input in
-          Some
-            (risk_level_of_contract_risk
-               (Contract_risk.of_delivery_contract ~execution_scope:None
-                  ~delivery_contract ~tool_names))
-      | None -> None)
-  | _ -> None
+let classify_with_contract_risk ~tool_name:_ ~input:_ =
+  (* Contract_risk removed *)
+  None
 
 let classify_with_metadata ~tool_name =
   let meta = Tool_catalog.metadata tool_name in

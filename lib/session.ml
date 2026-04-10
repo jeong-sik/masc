@@ -48,6 +48,7 @@ let with_lock registry f =
 (** Register a new session *)
 let register registry ~agent_name =
   with_lock registry (fun () ->
+    let existing = Hashtbl.mem registry.sessions agent_name in
     let now = Time_compat.now () in
     let session = {
       agent_name;
@@ -57,8 +58,11 @@ let register registry ~agent_name =
       message_queue = [];
     } in
     Hashtbl.replace registry.sessions agent_name session;
-    Log.Session.info "Session registered: %s (total: %d)"
-      agent_name (Hashtbl.length registry.sessions);
+    let total = Hashtbl.length registry.sessions in
+    if existing then
+      Log.Session.debug "Session refreshed: %s (total: %d)" agent_name total
+    else
+      Log.Session.info "Session registered: %s (total: %d)" agent_name total;
     session
   )
 

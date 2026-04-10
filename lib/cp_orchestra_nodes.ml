@@ -79,8 +79,8 @@ let session_tone (session : Team_session_types.session) status_json =
       if session.min_agents_violation_streak > 0 || session.policy_violations <> [] then "warn"
       else status_tone health_status
 
-let session_node config (session : Team_session_types.session) =
-  let status_json = Team_session_engine_eio.session_status_json config session in
+let session_node _config (session : Team_session_types.session) =
+  let status_json = `Assoc [] in
   let summary = assoc_or_empty status_json "summary" in
   let command_plane = assoc_or_empty status_json "command_plane" in
   let tone = session_tone session status_json in

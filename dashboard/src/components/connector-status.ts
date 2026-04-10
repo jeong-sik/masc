@@ -374,7 +374,10 @@ async function bindConnector(connectorId: string) {
 
   actionLoading.value = true
   try {
-    await post(`/api/v1/gate/connector/bind?name=${encodeURIComponent(connectorId)}`, { channel_id: channelId, keeper_name: keeperName })
+    await post(`/api/v1/gate/connector/bind?name=${encodeURIComponent(connectorId)}`, {
+      channel_id: channelId,
+      keeper_name: keeperName,
+    })
     await refresh()
     showToast(`Bound ${channelId} -> ${keeperName}`, 'success')
   } catch (err) {
@@ -390,7 +393,9 @@ async function unbindConnector(connectorId: string, channelIdOverride?: string) 
 
   actionLoading.value = true
   try {
-    await post(`/api/v1/gate/connector/unbind?name=${encodeURIComponent(connectorId)}`, { channel_id: channelId })
+    await post(`/api/v1/gate/connector/unbind?name=${encodeURIComponent(connectorId)}`, {
+      channel_id: channelId,
+    })
     if (channelDraft.value.trim() === channelId) {
       channelDraft.value = ''
     }
@@ -435,9 +440,8 @@ function ConnectorLivePanel({
   const selectedKeeper = keeperByName.get(keeperDraft.value.trim()) ?? null
   const directLabel = connectorStateLabel(connector)
   const directTone = connectorStateTone(connector)
-  const connectorId = connector?.connector_id ?? ''
   const bindingActionsEnabled =
-    connectorId !== '' && connector?.capabilities.includes('bindings')
+    connector != null && connector.capabilities.includes('bindings')
   const connectorName = connector?.display_name || 'Connector'
   const channelInputLabel = `${connectorName} channel id`
 
@@ -476,7 +480,7 @@ function ConnectorLivePanel({
                   variant="primary"
                   size="sm"
                   disabled=${actionLoading.value || channelDraft.value.trim().length === 0 || keeperDraft.value.trim().length === 0}
-                  onClick=${() => { void bindConnector(connectorId) }}
+                  onClick=${() => { void bindConnector(connector!.connector_id) }}
                 >
                   ${actionLoading.value ? 'Applying...' : 'Bind'}
                 <//>
@@ -484,7 +488,7 @@ function ConnectorLivePanel({
                   variant="danger"
                   size="sm"
                   disabled=${actionLoading.value || channelDraft.value.trim().length === 0}
-                  onClick=${() => { void unbindConnector(connectorId) }}
+                  onClick=${() => { void unbindConnector(connector!.connector_id) }}
                 >
                   Unbind
                 <//>
@@ -626,7 +630,7 @@ function ConnectorLivePanel({
                               keeperDraft.value = binding.keeper_name
                             }}>Use<//>
                             ${bindingActionsEnabled
-                              ? html`<${ActionButton} variant="danger" size="sm" disabled=${actionLoading.value} onClick=${() => { void unbindConnector(connectorId, binding.channel_id) }}>Unbind<//>`
+                              ? html`<${ActionButton} variant="danger" size="sm" disabled=${actionLoading.value} onClick=${() => { void unbindConnector(connector!.connector_id, binding.channel_id) }}>Unbind<//>`
                               : null}
                           </div>
                         </div>

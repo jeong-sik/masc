@@ -240,21 +240,24 @@ let handle_keeper_bash
       match resolve_keeper_shell_write_cwd ~config ~meta ~args with
       | Error e -> error_json e
       | Ok cwd ->
-      (* Canonicalize both cwd and playground_abs via normalize_path_for_check
-         to prevent path traversal bypass AND symlink mismatch (e.g.,
-         /tmp vs /private/tmp on macOS).  Raw Unix.realpath would fall back to
-         the un-resolved string when the target does not yet exist on disk;
-         normalize_path_for_check walks up to the nearest resolvable ancestor. *)
-      let cwd_canonical =
-        Keeper_alerting_path.normalize_path_for_check cwd
+      let normalize_path_for_containment path =
+        Keeper_alerting_path.normalize_path_for_check path
+        |> Keeper_alerting_path.strip_trailing_slashes
       in
+      (* Canonicalize both cwd and the playground root for containment checks.
+         This closes both path traversal and symlink-mismatch cases. *)
+      let cwd_canonical =
+        normalize_path_for_containment cwd
+      in
+      (* Playground sandbox: git write ops are allowed inside the keeper's
+         playground clone (.masc/playground/<name>/repos/<repo>).
+         Both paths must be canonicalized to prevent ../traversal bypass. *)
       let playground_rel =
         Keeper_alerting_path.playground_path_of_keeper meta.name
       in
       let root = Keeper_alerting_path.project_root_of_config config in
       let playground_abs =
-        Keeper_alerting_path.normalize_path_for_check
-          (Filename.concat root playground_rel)
+        normalize_path_for_containment (Filename.concat root playground_rel)
       in
       let in_playground =
         String.starts_with ~prefix:(playground_abs ^ "/") (cwd_canonical ^ "/")
@@ -274,12 +277,12 @@ let handle_keeper_bash
                      etc.) and is blocked for all presets." )
               ; "cmd", `String cmd_for_log
               ]))
-      (* Branch-switch guard: blocked in main repo, allowed in playground
-         only when the keeper has a write-enabled preset. *)
+      (* Branch-switch guard: requires a write-enabled preset and a playground cwd. *)
       else if Worker_dev_tools.is_git_branch_switch cmd
               && not (write_enabled && in_playground)
       then (
-        Log.Keeper.info "keeper_bash branch-switch blocked: %s (keeper=%s, write_enabled=%b, playground=%b)"
+        Log.Keeper.info
+          "keeper_bash branch-switch blocked: %s (keeper=%s, write_enabled=%b, playground=%b)"
           cmd_for_log meta.name write_enabled in_playground;
         Yojson.Safe.to_string
           (`Assoc
@@ -288,17 +291,17 @@ let handle_keeper_bash
               ; ( "reason"
                 , `String
                     "git checkout/switch/branch mutations require a write-enabled preset \
-                     (Coding/Delivery/Full) and must target a playground clone. \
+                     (Coding/Delivery/Full) and a playground clone. \
                      Clone into your playground first (keeper_shell op=git_clone), \
                      then set cwd to the cloned repo path." )
               ; "cmd", `String cmd_for_log
-              ; "hint", `String "Use cwd=.masc/playground/YOUR_NAME/repos/REPO"
+              ; "hint", `String "Use cwd=.masc/playground/YOUR_KEEPER_NAME/repos/REPO"
               ]))
-      (* Write gate: requires write_enabled preset.  in_playground controls
-         where writes land, not whether they're allowed. *)
+      (* Write gate: playground location must not bypass preset-based write policy. *)
       else if (not write_enabled) && Worker_dev_tools.is_write_operation cmd
       then (
-        Log.Keeper.info "keeper_bash write-gate: %s (keeper=%s, playground=%b)" cmd_for_log meta.name in_playground;
+        Log.Keeper.info "keeper_bash write-gate: %s (keeper=%s, playground=%b)"
+          cmd_for_log meta.name in_playground;
         Yojson.Safe.to_string
           (`Assoc
               [ "ok", `Bool false
@@ -330,7 +333,7 @@ let handle_keeper_bash
           (match Worker_dev_tools.validate_command_paths ~workdir:cwd cmd with
            | Error e -> error_json e
            | Ok () ->
-             if write_enabled && in_playground
+             if write_enabled
                 && Worker_dev_tools.is_write_operation cmd then
                Log.Keeper.info "WRITE_AUDIT: keeper=%s cwd=%s cmd=%s playground=%b"
                  meta.name cwd cmd_for_log in_playground;

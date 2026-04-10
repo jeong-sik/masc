@@ -251,12 +251,45 @@ let has_substantive_tool_calls (tools_used : string list) : bool =
   List.exists (fun name ->
     not (Keeper_tool_registry.is_boring_tool name)) tools_used
 
+let visible_run_validation (result : Keeper_agent_run.run_result) :
+    Agent_sdk.Raw_trace.run_validation option =
+  match result.run_validation with
+  | Some v when v.ok && (v.evidence <> [] || v.has_file_write) -> Some v
+  | _ -> None
+
+let has_visible_tool_signal (result : Keeper_agent_run.run_result) : bool =
+  has_substantive_tool_calls result.tools_used
+  || Option.is_some (visible_run_validation result)
+
+let validated_evidence_preview
+    (v : Agent_sdk.Raw_trace.run_validation) : string =
+  if v.has_file_write then "(validated evidence: file_write)"
+  else
+    match v.tool_names with
+    | [] -> "(validated evidence)"
+    | names ->
+      Printf.sprintf "(validated evidence: %s)"
+        (String.concat ", " names)
+
+let scheduled_autonomous_outcome_for_result
+    (result : Keeper_agent_run.run_result) :
+    scheduled_autonomous_cycle_outcome =
+  scheduled_autonomous_outcome_of_result
+    ~has_text:(String.trim result.response_text <> "")
+    ~has_tool_calls:(has_visible_tool_signal result)
+
 let selected_mode_of_result (result : Keeper_agent_run.run_result) : string =
   let text = String.trim result.response_text in
-  if has_substantive_tool_calls result.tools_used then "tool_use"
+  if has_visible_tool_signal result then "tool_use"
   else if text = "" then "noop"
   else if String.starts_with ~prefix:"SKIP:" text then "skip_text"
   else "text_response"
+
+let work_kind_of_selected_mode (selected_mode : string) : string =
+  match selected_mode with
+  | "tool_use" -> "tool_use"
+  | "noop" -> "noop"
+  | _ -> "text_turn"
 
 let observed_triggers_of_observation
     (observation : Keeper_world_observation.world_observation) : string list =
@@ -445,6 +478,7 @@ let append_decision_record
         ( "telemetry",
           match result with
           | Some r ->
+              let surface_model_used = Keeper_agent_run.surface_model_used r in
               let cascade_fields =
                 match r.cascade_observation with
                 | Some co ->
@@ -487,7 +521,7 @@ let append_decision_record
                 | None -> []
               in
               `Assoc ([
-                ("model_used", `String r.model_used);
+                ("model_used", `String surface_model_used);
                 ("turn_count", `Int r.turn_count);
                 ("stop_reason", `String stop_reason_str);
                 ("input_tokens", `Int r.usage.input_tokens);
@@ -542,6 +576,7 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
     ?social_state
     (result : Keeper_agent_run.run_result) : keeper_meta =
   let now_ts = Time_compat.now () in
+  let surface_model_used = Keeper_agent_run.surface_model_used result in
   let used_model_id =
     let strip_latest s =
       if String.length s > 7 && String.sub s (String.length s - 7) 7 = ":latest"
@@ -570,6 +605,11 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
   in
   let has_substantive_tools = has_substantive_tool_calls result.tools_used in
   let has_text = String.trim result.response_text <> "" in
+  let validated_evidence = visible_run_validation result in
+  let has_validated_evidence = Option.is_some validated_evidence in
+  let visible_tool_signal_present =
+    has_substantive_tools || has_validated_evidence
+  in
   let is_scheduled_autonomous_cycle =
     is_scheduled_autonomous_cycle_of_observation observation
   in
@@ -603,7 +643,7 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
           rt.usage.total_tokens + Keeper_exec_context.total_tokens result.usage;
         total_cost_usd = rt.usage.total_cost_usd +. turn_cost;
         last_turn_ts = now_ts;
-        last_model_used = result.model_used;
+        last_model_used = surface_model_used;
         last_input_tokens = result.usage.input_tokens;
         last_output_tokens = result.usage.output_tokens;
         last_total_tokens = Keeper_exec_context.total_tokens result.usage;
@@ -622,19 +662,19 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
           rt.proactive_rt.visible_count_total
           + (if update_proactive_rt
                && is_scheduled_autonomous_cycle
-               && (has_text || has_substantive_tools)
+               && (has_text || visible_tool_signal_present)
              then 1
              else 0);
         last_visible_ts =
           (if update_proactive_rt
               && is_scheduled_autonomous_cycle
-              && (has_text || has_substantive_tools)
+              && (has_text || visible_tool_signal_present)
            then now_ts
            else rt.proactive_rt.last_visible_ts);
         last_outcome =
           (if update_proactive_rt && is_scheduled_autonomous_cycle then
              scheduled_autonomous_outcome_of_result ~has_text
-               ~has_tool_calls:has_substantive_tools
+               ~has_tool_calls:visible_tool_signal_present
            else rt.proactive_rt.last_outcome);
         last_reason =
           (if not update_proactive_rt || not is_scheduled_autonomous_cycle
@@ -642,6 +682,12 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
            else if has_substantive_tools then
              Printf.sprintf "unified:tools=[%s]"
                (String.concat "," result.tools_used)
+           else if has_validated_evidence then
+             (match validated_evidence with
+              | Some v ->
+                Printf.sprintf "unified:validated_evidence(ok=%b,file_write=%b,evidence=%d)"
+                  v.ok v.has_file_write (List.length v.evidence)
+              | None -> "unified:validated_evidence(unreachable)")
            else if not has_text then
              "unified:"
              ^ scheduled_autonomous_cycle_outcome_to_string Proactive_silent
@@ -653,7 +699,11 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
            else if has_text then short_preview result.response_text
            else if has_substantive_tools then
              Printf.sprintf "(tools: %s)" (String.concat ", " result.tools_used)
-           else rt.proactive_rt.last_preview);
+           else
+             (match validated_evidence with
+              | Some v -> validated_evidence_preview v
+              | None -> rt.proactive_rt.last_preview)
+          );
         (* Work discovery timestamp only advances when the keeper
            actually used tools in response to the nudge. This is
            intentional: the "Work Discovery Due" prompt block keeps
@@ -686,9 +736,14 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
         rt.mention_reactive_turn_count + (if is_mention_reactive then 1 else 0);
       noop_turn_count =
         rt.noop_turn_count
-        + (if is_autonomous_turn && not has_text && not has_substantive_tools then 1 else 0);
+        + (if is_autonomous_turn && not has_text && not has_substantive_tools
+              && not has_validated_evidence then 1 else 0);
+      (* This timestamp stays scoped to substantive tool actions.
+         Validated evidence affects proactive visibility, but it does not
+         redefine the autonomous action counter semantics. *)
       last_autonomous_action_at =
-        (if is_autonomous_turn && has_substantive_tools then now_iso ()
+        (if is_autonomous_turn && has_substantive_tools
+         then now_iso ()
          else rt.last_autonomous_action_at);
       last_speech_act = Social.speech_act_to_string social_state.speech_act;
       last_blocker = Option.value ~default:"" social_state.blocker;
@@ -712,17 +767,12 @@ let append_metrics_snapshot ~(config : Room.config) ~(meta : keeper_meta)
     ?deliberation_execution () : unit =
   let now_ts = Time_compat.now () in
   let _observation = observation in
-  let work_kind =
-    if has_substantive_tool_calls result.tools_used then "tool_use"
-    else if String.trim result.response_text <> "" then "text_turn"
-    else "noop"
-  in
+  let selected_mode = selected_mode_of_result result in
+  let work_kind = work_kind_of_selected_mode selected_mode in
+  let surface_model_used = Keeper_agent_run.surface_model_used result in
   let scheduled_autonomous_outcome =
     if is_scheduled_autonomous_channel channel then
-      Some
-        (scheduled_autonomous_outcome_of_result
-           ~has_text:(String.trim result.response_text <> "")
-           ~has_tool_calls:(has_substantive_tool_calls result.tools_used))
+      Some (scheduled_autonomous_outcome_for_result result)
     else None
   in
   let metrics_store = keeper_metrics_store config meta.name in
@@ -736,7 +786,7 @@ let append_metrics_snapshot ~(config : Room.config) ~(meta : keeper_meta)
         ("agent_name", `String meta.agent_name);
         ("trace_id", `String meta.runtime.trace_id);
         ("generation", `Int turn_generation);
-        ("model_used", `String result.model_used);
+        ("model_used", `String surface_model_used);
         ("prompt_fingerprint", `String result.prompt_metrics.fingerprint);
         ("prompt", Keeper_agent_run.prompt_metrics_to_json result.prompt_metrics);
         ( "usage",
@@ -1440,9 +1490,10 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
             ~turn_generation:lifecycle.turn_generation
             ~compaction:lifecycle.compaction
             ~handoff_json:lifecycle.handoff_json;
+          let selected_mode = selected_mode_of_result result in
           append_decision_record ~config ~meta:updated_meta ~observation
             ~latency_ms ~semaphore_wait_ms ~outcome:"success"
-            ~selected_mode:(selected_mode_of_result result)
+            ~selected_mode
             ~social_state
             ~result:(Some result) ();
           (* Post-turn evidence: deterministic git before/after delta *)
@@ -1462,10 +1513,10 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
               (Printexc.to_string exn));
           Log.Keeper.info
             "%s: unified turn OK model=%s tokens=%d latency=%dms mode=%s stop=%s"
-            updated_meta.name result.model_used
+            updated_meta.name (Keeper_agent_run.surface_model_used result)
             (result.usage.input_tokens + result.usage.output_tokens)
             latency_ms
-            (selected_mode_of_result result)
+            selected_mode
             (match result.stop_reason with
              | Oas_worker.Completed -> "completed"
              | Oas_worker.TurnBudgetExhausted { turns_used; limit; _ } ->

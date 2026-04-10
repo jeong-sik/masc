@@ -123,6 +123,18 @@ let bootstrap_base_path_config_root ~base_path =
            config_root);
     Config_dir_resolver.reset ()
 
+let startup_config_resolution ~base_path =
+  Config_dir_resolver.resolve_with
+    Config_dir_resolver.
+      {
+        cwd = Sys.getcwd ();
+        executable_name = Sys.executable_name;
+        env_base_path = Some base_path;
+        env_config_dir = Env_config_core.config_dir_opt ();
+        env_personas_dir = Env_config_core.personas_dir_opt ();
+        env_home = Sys.getenv_opt "HOME";
+      }
+
 (* GC tuning for long-running server with bursty allocation.
 
    Dashboard refresh loops create 2GB+ transient allocations per cycle.
@@ -189,6 +201,20 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
       ~mono_clock ~net
       ~base_path
   in
+  let config_resolution =
+    startup_config_resolution ~base_path |> Config_dir_resolver.to_json
+  in
+  let path_diagnostics =
+    Server_base_path_diagnostics.detect
+      ~input_base_path:base_path
+      ?env_masc_base_path:(Env_config_core.base_path_opt ())
+      ~effective_base_path:state.room_config.base_path
+      ~effective_masc_root:(Room.masc_root_dir state.room_config)
+      ()
+    |> Server_base_path_diagnostics.to_yojson
+  in
+  Server_startup_state.note_runtime_resolution ~path_diagnostics
+    ~config_resolution;
   state
 
 let runtime_path_diagnostics ?input_base_path (state : Mcp_server.server_state) =
@@ -662,14 +688,9 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
               | Some _process_mgr, None ->
                   Log.Server.warn
                     "skipping team session recovery: net not available"
-              | Some process_mgr, Some net ->
-                  let env = object
-                    method clock = clock
-                    method process_mgr = process_mgr
-                    method net = net
-                  end in
-                  Team_session_engine_eio.recover_running_sessions ~sw ~env
-                    ~config:state.Mcp_server.room_config );
+              | Some _process_mgr, Some _net ->
+                  (* Team_session_engine_eio removed — skip recovery *)
+                  ignore (sw, clock, state.Mcp_server.room_config) );
           ("prompt_bootstrap", fun () -> bootstrap_prompt_state state);
           ("telemetry_warmup", fun () -> warm_tool_registry_from_telemetry state);
           ("tool_metrics_restore", fun () -> restore_tool_metrics_from_disk state);

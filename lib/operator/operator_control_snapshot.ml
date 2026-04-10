@@ -70,6 +70,49 @@ let remote_confirm_ttl_seconds = 900.0
 
 let iso_of_unix = Dashboard_utils.iso_of_unix
 
+let runtime_status_from_live_signal (agent_status_json : Yojson.Safe.t) =
+  let runtime_status =
+    match Keeper_exec_status.agent_status_text agent_status_json with
+    | ("active" | "busy" | "listening" | "idle") as status -> Some status
+    | _ -> None
+  in
+  let has_live_signal =
+    Keeper_exec_status.agent_runtime_has_live_signal agent_status_json
+  in
+  let is_zombie =
+    match U.member "is_zombie" agent_status_json with
+    | `Bool value -> value
+    | _ -> false
+  in
+  match (runtime_status, has_live_signal, is_zombie) with
+  | Some status, true, false -> Some status
+  | _ -> None
+
+let health_state_allows_runtime_status_override (diagnostic : Yojson.Safe.t) =
+  match U.member "health_state" diagnostic with
+  | `String ("stale" | "degraded" | "zombie" | "dead") -> false
+  | _ -> true
+
+let align_keeper_runtime_status
+    ~(surface_status : string)
+    ~(diagnostic : Yojson.Safe.t)
+    ~(agent_status_json : Yojson.Safe.t)
+    ~(keepalive_running : bool) : string =
+  if not keepalive_running then
+    surface_status
+  else
+    let normalized_surface =
+      String.lowercase_ascii (String.trim surface_status)
+    in
+    let runtime_status =
+      if health_state_allows_runtime_status_override diagnostic then
+        runtime_status_from_live_signal agent_status_json
+      else None
+    in
+    match (normalized_surface, runtime_status) with
+    | ("inactive" | "offline"), Some status -> status
+    | _ -> surface_status
+
 let remote_client_type_of_context (ctx : 'a context) =
   match ctx.mcp_session_id with
   | Some _ -> "mcp_remote"
@@ -281,9 +324,14 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                    if lightweight then ([], [], None, None, None, None)
                    else keeper_tool_audit_fields config meta
                  in
-                 let agent_status =
+                 let surface_status =
                    if not agent_exists then "offline"
                    else Keeper_exec_status.keeper_surface_status ~agent_status:agent_json ~diagnostic
+                 in
+                 let aligned_status =
+                   align_keeper_runtime_status ~surface_status
+                     ~diagnostic
+                     ~agent_status_json:agent_json ~keepalive_running
                  in
                  let registry_phase =
                    Keeper_registry.get_phase ~base_path:config.base_path meta.name
@@ -311,7 +359,7 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                        ("short_goal", `String meta.short_goal);
                        ("mid_goal", `String meta.mid_goal);
                        ("long_goal", `String meta.long_goal);
-                       ("status", `String agent_status);
+                       ("status", `String aligned_status);
                        ("agent", agent_json);
                        ("generation", `Int meta.runtime.generation);
                        ("turn_count", `Int meta.runtime.usage.total_turns);
@@ -458,9 +506,9 @@ let sessions_json ?(status_cache : (string, Yojson.Safe.t) Hashtbl.t option) con
        (fun idx (session : Team_session_types.session) () ->
          (try
            let recent_events =
-             Team_session_store.read_events ~max_events:_session_recent_event_limit
-               config session.session_id
-             |> Team_session_engine_eio.take_last _session_recent_event_limit
+             (* Team_session_store + Team_session_engine_eio removed *)
+             ignore (config, _session_recent_event_limit);
+             []
            in
            let status =
              match status_cache with
@@ -468,10 +516,10 @@ let sessions_json ?(status_cache : (string, Yojson.Safe.t) Hashtbl.t option) con
                  match Hashtbl.find_opt tbl session.session_id with
                  | Some cached -> cached
                  | None ->
-                     let s = Team_session_engine_eio.session_status_json config session in
+                     let s = `Assoc [] in
                      Hashtbl.replace tbl session.session_id s;
                      s)
-             | None -> Team_session_engine_eio.session_status_json config session
+             | None -> `Assoc []
            in
            results.(idx) <-
              `Assoc
@@ -728,11 +776,9 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
     match sessions with
     | Some s -> s
     | None ->
-        if initialized then
-          let cutoff = Time_compat.now () -. _snapshot_session_window_seconds () in
-          Team_session_store.list_sessions ~since_unix:cutoff
-            ~limit:(_snapshot_session_limit ()) config
-        else []
+        (* Team_session_store removed — return empty *)
+        ignore (initialized, _snapshot_session_window_seconds (), _snapshot_session_limit ());
+        ([] : Team_session_types.session list)
   in
   let trace_id = trace_id "ops" in
   let actor_name = normalized_actor ~context_actor:ctx.agent_name actor in
@@ -766,7 +812,9 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
     match Hashtbl.find_opt status_cache session.session_id with
     | Some cached -> cached
     | None ->
-        let s = Team_session_engine_eio.session_status_json config session in
+        (* Team_session_engine_eio removed — return empty *)
+        ignore (config, session);
+        let s = `Assoc [] in
         Hashtbl.replace status_cache session.session_id s;
         s
   in

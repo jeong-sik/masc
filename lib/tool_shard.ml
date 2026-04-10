@@ -693,7 +693,7 @@ let shard_filesystem : shard = {
 let shard_shell : shard = {
   name = "shell";
   tools = shell_tools;
-  read_only_tools = [];
+  read_only_tools = ["keeper_shell"];
   removable = true;
   description = "Shell ops: pwd, ls, cat, rg, git_status, git_clone";
 }

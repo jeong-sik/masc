@@ -291,7 +291,7 @@ let test_apply_heartbeat_ok_does_not_clear_manual_reconcile () =
   check bool "manual reconcile preserved" true
     tr.updated_conditions.manual_reconcile_required
 
-let test_apply_turn_succeeded_clears_manual_reconcile () =
+let test_apply_turn_succeeded_does_not_clear_manual_reconcile () =
   let failing_conds = { running_conditions with
     turn_healthy = false;
     manual_reconcile_required = true;
@@ -300,7 +300,19 @@ let test_apply_turn_succeeded_clears_manual_reconcile () =
     ~current_phase:SM.Failing
     ~conditions:failing_conds
     ~event:SM.Turn_succeeded in
-  check phase_t "clean turn clears reconcile requirement" SM.Running tr.new_phase;
+  check phase_t "manual reconcile still blocks Running" SM.Failing tr.new_phase;
+  check bool "manual reconcile preserved" true
+    tr.updated_conditions.manual_reconcile_required
+
+let test_apply_manual_reconcile_cleared_clears_manual_reconcile () =
+  let failing_conds = { running_conditions with
+    manual_reconcile_required = true;
+  } in
+  let tr = apply_ok
+    ~current_phase:SM.Failing
+    ~conditions:failing_conds
+    ~event:SM.Manual_reconcile_cleared in
+  check phase_t "explicit clear returns to Running" SM.Running tr.new_phase;
   check bool "manual reconcile cleared" false
     tr.updated_conditions.manual_reconcile_required
 
@@ -1443,6 +1455,7 @@ let test_invariant_budget_exhaustion_permanent () =
   let all_events = [
     SM.Heartbeat_ok; SM.Fiber_started;
     SM.Manual_reconcile_required { reason="test" };
+    SM.Manual_reconcile_cleared;
     SM.Supervisor_restart_attempt { attempt=99 };
     SM.Restart_budget_exhausted;
     SM.Operator_resume;
@@ -1460,6 +1473,8 @@ let test_invariant_budget_exhaustion_permanent () =
           guardrail_triggered = false; drain_complete = false }
       | Manual_reconcile_required _ ->
         { conds_no_budget with manual_reconcile_required = true }
+      | Manual_reconcile_cleared ->
+        { conds_no_budget with manual_reconcile_required = false }
       | Supervisor_restart_attempt _ -> { conds_no_budget with backoff_elapsed = true }
       | Restart_budget_exhausted -> { conds_no_budget with restart_budget_remaining = false }
       | Operator_resume -> { conds_no_budget with operator_paused = false }
@@ -1712,7 +1727,8 @@ let () =
       test_case "Failing + fiber death -> Crashed" `Quick test_apply_failing_to_crashed;
       test_case "manual reconcile required -> Failing" `Quick test_apply_manual_reconcile_required_to_failing;
       test_case "heartbeat ok does not clear manual reconcile" `Quick test_apply_heartbeat_ok_does_not_clear_manual_reconcile;
-      test_case "turn succeeded clears manual reconcile" `Quick test_apply_turn_succeeded_clears_manual_reconcile;
+      test_case "turn succeeded does not clear manual reconcile" `Quick test_apply_turn_succeeded_does_not_clear_manual_reconcile;
+      test_case "manual reconcile cleared -> Running" `Quick test_apply_manual_reconcile_cleared_clears_manual_reconcile;
       test_case "partial heartbeat -> Failing" `Quick test_apply_partial_heartbeat_failure;
       test_case "fiber terminated -> Crashed" `Quick test_apply_fiber_terminated_crash;
       test_case "crash -> restart -> Running" `Quick test_apply_crash_restart_lifecycle;

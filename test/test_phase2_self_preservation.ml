@@ -6,6 +6,7 @@ open Alcotest
 module R = Masc_mcp.Keeper_registry
 module KT = Masc_mcp.Keeper_types
 module KSM = Masc_mcp.Keeper_state_machine
+module KMR = Masc_mcp.Keeper_manual_reconcile
 module Cfg = Env_config
 
 let bp = "/tmp/test-phase2"
@@ -246,6 +247,44 @@ let test_dead_tombstone_is_registered () =
   check bool "Dead is registered" true (R.is_registered ~base_path:bp "k1");
   check bool "Dead is not running" false (R.is_running ~base_path:bp "k1")
 
+let test_manual_reconcile_store_roundtrip () =
+  let dir = Filename.concat (Filename.get_temp_dir_name ()) "test-phase2-manual-reconcile" in
+  (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  let config = Masc_mcp.Room.default_config dir in
+  let record =
+    KMR.open_pending config
+      ~keeper_name:"k1"
+      ~blocker_class:"ambiguous_post_commit_timeout"
+      ~summary:"turn outcome ambiguous"
+      ~failure_reason:(Some "ambiguous_partial_commit(post_commit_timeout:test)")
+      ~trace_id:(Some "trace-k1")
+      ~generation:(Some 2)
+      ~committed_tools:["keeper_shell"; "keeper_task_done"]
+  in
+  check bool "pending after open" true (KMR.is_pending config "k1");
+  check string "cache key opened" record.updated_at
+    (match String.split_on_char '|' (KMR.cache_key config "k1") with
+     | _status :: updated_at :: _ -> updated_at
+     | _ -> "");
+  match KMR.clear config ~keeper_name:"k1" ~actor:"tester"
+          ~resolution:"verified downstream side effects"
+          ~evidence_refs:["board:p-1"; "task:T-1"]
+          ~idempotency_key:(Some "idem-1")
+  with
+  | KMR.Cleared_record cleared ->
+      check bool "not pending after clear" false (KMR.is_pending config "k1");
+      check string "status cleared" "cleared"
+        (match KMR.read config "k1" with
+         | Some record -> (
+             match record.status with
+             | KMR.Cleared -> "cleared"
+             | KMR.Pending -> "pending")
+         | None -> "missing");
+      check string "resolution persisted" "verified downstream side effects"
+        (Option.value ~default:"" cleared.resolution)
+  | KMR.Already_cleared _ -> fail "expected first clear to mutate"
+  | KMR.No_record -> fail "expected persisted record"
+
 (* ── Test runner ──────────────────────────────────────── *)
 
 let () =
@@ -295,5 +334,8 @@ let () =
     ];
     "dead_tombstone", [
       eio_test "Dead is registered but not running" test_dead_tombstone_is_registered;
+    ];
+    "manual_reconcile_store", [
+      eio_test "pending -> clear roundtrip" test_manual_reconcile_store_roundtrip;
     ];
   ]

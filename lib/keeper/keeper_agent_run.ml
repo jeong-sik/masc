@@ -277,7 +277,6 @@ let run_turn
       ?(max_idle_turns : int = 3)
       ?(history_user_source = "direct_user")
       ?(history_assistant_source = "direct_assistant")
-      ?(allow_empty_without_tools = false)
       ?guardrails
       ?temperature
       ?max_tokens
@@ -450,6 +449,9 @@ let run_turn
     | None -> 5
   in
   let discovered_ref = ref (Keeper_discovered_tools.create ~decay_turns) in
+  let completion_contract_ref =
+    ref Keeper_tool_disclosure.Allow_text_or_tool
+  in
   (* L1 Tool Affinity: pre-populate discovered tools from trajectory history.
      Solves the 9B text_response trap by making proven tools visible at
      turn 0 without requiring keeper_tool_search first.  #5566 *)
@@ -1326,6 +1328,11 @@ let run_turn
                 then current_params.tool_choice (* last turn: Auto for [STATE] block *)
                 else Some Agent_sdk.Types.Any (* all other turns: force tool use *)
               in
+              (match tool_choice with
+               | Some (Agent_sdk.Types.Any | Agent_sdk.Types.Tool _) ->
+                 completion_contract_ref :=
+                   Keeper_tool_disclosure.Require_tool_use
+               | _ -> ());
               let lane =
                 if is_retry then "retry"
                 else (
@@ -1592,48 +1599,52 @@ let run_turn
        in
        let usage = Keeper_exec_context.usage_of_response result.response in
        (match
-          Keeper_tool_disclosure.normalize_response_text
-            ~allow_empty_without_tools
-            ~text ~tool_names ()
+          Keeper_tool_disclosure.validate_completion_contract
+            ~contract:!completion_contract_ref
+            ~tool_names
+            ()
         with
         | Error e -> Error (Oas.Error.Internal e)
-        | Ok response_text ->
-          (* Ensure every generation has a [STATE] block for continuity.
+        | Ok () ->
+          (match Keeper_tool_disclosure.normalize_response_text ~text ~tool_names () with
+           | Error e -> Error (Oas.Error.Internal e)
+           | Ok response_text ->
+             (* Ensure every generation has a [STATE] block for continuity.
                 If the model omitted it, synthesize one deterministically
                 from tool usage and stop reason. *)
-          let response_text =
-            match Keeper_memory_policy.find_state_block response_text with
-            | Some _ -> response_text
-            | None ->
-              let stop_reason_str =
-                match result.stop_reason with
-                | Oas_worker.Completed -> "completed"
-                | Oas_worker.TurnBudgetExhausted _ -> "budget_exhausted"
-                | Oas_worker.MutationBoundaryReached { tool_name; _ } ->
-                    (match tool_name with
-                     | Some tool -> Printf.sprintf "mutation_boundary(%s)" tool
-                     | None -> "mutation_boundary")
-              in
-              let synth =
-                Keeper_memory_policy.synthesize_state_from_run_result
-                  ~goal:meta.goal
-                  ~tools_used:tool_names
-                  ~stop_reason:stop_reason_str
-                  ~response_text
-              in
-              let block = Keeper_memory_policy.render_state_block synth in
-              Log.Keeper.info
-                "keeper:%s [STATE] missing, synthesized from %d tools (stop=%s)"
-                meta.name
-                (List.length tool_names)
-                stop_reason_str;
-              response_text ^ "\n" ^ block
-          in
-          let assistant_msg = Agent_sdk.Types.assistant_msg response_text in
-          Keeper_exec_context.persist_message
-            ~source:history_assistant_source
-            session
-            assistant_msg;
+             let response_text =
+               match Keeper_memory_policy.find_state_block response_text with
+               | Some _ -> response_text
+               | None ->
+                 let stop_reason_str =
+                   match result.stop_reason with
+                   | Oas_worker.Completed -> "completed"
+                   | Oas_worker.TurnBudgetExhausted _ -> "budget_exhausted"
+                   | Oas_worker.MutationBoundaryReached { tool_name; _ } ->
+                       (match tool_name with
+                        | Some tool -> Printf.sprintf "mutation_boundary(%s)" tool
+                        | None -> "mutation_boundary")
+                 in
+                 let synth =
+                   Keeper_memory_policy.synthesize_state_from_run_result
+                     ~goal:meta.goal
+                     ~tools_used:tool_names
+                     ~stop_reason:stop_reason_str
+                     ~response_text
+                 in
+                 let block = Keeper_memory_policy.render_state_block synth in
+                 Log.Keeper.info
+                   "keeper:%s [STATE] missing, synthesized from %d tools (stop=%s)"
+                   meta.name
+                   (List.length tool_names)
+                   stop_reason_str;
+                 response_text ^ "\n" ^ block
+             in
+             let assistant_msg = Agent_sdk.Types.assistant_msg response_text in
+             Keeper_exec_context.persist_message
+               ~source:history_assistant_source
+               session
+               assistant_msg;
           (* ctx_snapshot is immutable — assistant message is persisted
                 via checkpoint (OAS) and persist_message (history file).
                 No in-memory mutation needed; next turn reconstructs
@@ -1784,19 +1795,19 @@ let run_turn
                "keeper:%s post_turn_eval jsonl append failed: %s"
                meta.name
                (Printexc.to_string exn));
-          Ok
-            { response_text
-            ; model_used = model
-            ; prompt_metrics
-            ; cascade_observation = result.cascade_observation
-            ; turn_count = result.turns
-            ; tool_calls_made = List.length tool_names
-            ; usage
-            ; tools_used = tool_names
-            ; checkpoint = saved_checkpoint
-            ; proof = result.proof
-            ; run_validation = result.run_validation
-            ; stop_reason = result.stop_reason
-            ; inference_telemetry = result.response.telemetry
-            }))
+             Ok
+               { response_text
+               ; model_used = model
+               ; prompt_metrics
+               ; cascade_observation = result.cascade_observation
+               ; turn_count = result.turns
+               ; tool_calls_made = List.length tool_names
+               ; usage
+               ; tools_used = tool_names
+               ; checkpoint = saved_checkpoint
+               ; proof = result.proof
+               ; run_validation = result.run_validation
+               ; stop_reason = result.stop_reason
+               ; inference_telemetry = result.response.telemetry
+               })))
 ;;

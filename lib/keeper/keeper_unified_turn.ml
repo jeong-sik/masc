@@ -1133,10 +1133,6 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
               ~generation:run_generation ~max_idle_turns
               ~history_user_source:"world_state_prompt"
               ~history_assistant_source:"internal_assistant"
-              ~allow_empty_without_tools:
-                (match channel with
-                 | Keeper_world_observation.Scheduled_autonomous -> true
-                 | Keeper_world_observation.Reactive -> false)
               ~temperature ~max_tokens
               ~max_cost_usd
               ~is_retry

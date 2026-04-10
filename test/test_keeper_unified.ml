@@ -1967,15 +1967,36 @@ let test_normalize_response_text_empty_without_tools_errors () =
          in
          found)
 
-let test_normalize_response_text_empty_without_tools_can_be_allowed () =
+let test_validate_completion_contract_allows_text_without_tools () =
   match
-    KTD.normalize_response_text
-      ~allow_empty_without_tools:true
-      ~text:""
+    KTD.validate_completion_contract
+      ~contract:KTD.Allow_text_or_tool
       ~tool_names:[]
       ()
   with
-  | Ok text -> check string "empty text preserved" "" text
+  | Ok () -> ()
+  | Error e -> fail ("unexpected error: " ^ e)
+
+let test_validate_completion_contract_requires_tool_use () =
+  match
+    KTD.validate_completion_contract
+      ~contract:KTD.Require_tool_use
+      ~tool_names:[]
+      ()
+  with
+  | Ok () -> fail "expected tool contract failure"
+  | Error e ->
+      check bool "error mentions required tool contract" true
+        (contains_substring e "required tool contract")
+
+let test_validate_completion_contract_accepts_stay_silent () =
+  match
+    KTD.validate_completion_contract
+      ~contract:KTD.Require_tool_use
+      ~tool_names:["keeper_stay_silent"]
+      ()
+  with
+  | Ok () -> ()
   | Error e -> fail ("unexpected error: " ^ e)
 
 let test_tool_usage_delta_uses_registry_counts () =
@@ -2573,8 +2594,12 @@ let () =
             test_normalize_response_text_tool_only_synthesizes;
           test_case "normalize empty without tools errors" `Quick
             test_normalize_response_text_empty_without_tools_errors;
-          test_case "normalize empty without tools can be allowed" `Quick
-            test_normalize_response_text_empty_without_tools_can_be_allowed;
+          test_case "completion contract allows text without tools" `Quick
+            test_validate_completion_contract_allows_text_without_tools;
+          test_case "completion contract requires tool use" `Quick
+            test_validate_completion_contract_requires_tool_use;
+          test_case "completion contract accepts stay silent" `Quick
+            test_validate_completion_contract_accepts_stay_silent;
           test_case "tool usage delta uses registry counts" `Quick
             test_tool_usage_delta_uses_registry_counts;
           test_case "tool usage delta ignores removed tools" `Quick

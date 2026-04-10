@@ -128,7 +128,6 @@ val run_turn :
   -> ?max_idle_turns:int
   -> ?history_user_source:string
   -> ?history_assistant_source:string
-  -> ?allow_empty_without_tools:bool
   -> ?guardrails:Agent_sdk.Guardrails.t
   -> ?temperature:float
   -> ?max_tokens:int

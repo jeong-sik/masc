@@ -41,11 +41,26 @@ let merge_reported_and_observed_tool_names
         reported_tool_names
 ;;
 
-let normalize_response_text
-      ?(allow_empty_without_tools = false)
-      ~(text : string)
+type completion_contract =
+  | Allow_text_or_tool
+  | Require_tool_use
+
+let validate_completion_contract
+      ~(contract : completion_contract)
       ~(tool_names : string list)
       ()
+  : (unit, string) result
+  =
+  match contract with
+  | Allow_text_or_tool -> Ok ()
+  | Require_tool_use ->
+    (match tool_names with
+     | _ :: _ -> Ok ()
+     | [] ->
+       Error
+         "keeper turn violated required tool contract: no tools were called")
+
+let normalize_response_text ~(text : string) ~(tool_names : string list) ()
   : (string, string) result
   =
   let trimmed = String.trim text in
@@ -53,10 +68,7 @@ let normalize_response_text
   then Ok text
   else (
     match tool_names with
-    | [] ->
-      if allow_empty_without_tools
-      then Ok ""
-      else Error "keeper turn completed with no textual reply"
+    | [] -> Error "keeper turn completed with no textual reply"
     | _ ->
       Ok
         (Printf.sprintf

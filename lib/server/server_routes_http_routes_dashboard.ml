@@ -12,6 +12,28 @@ module Runtime = Server_routes_http_runtime
 module Keeper_stream = Server_routes_http_keeper_stream
 module Keeper_api = Server_dashboard_http_keeper_api
 
+let available_cascade_profiles () : string list =
+  let config_path = Oas_model_resolve.cascade_config_path () in
+  match config_path with
+  | None -> ["default"]
+  | Some path ->
+    (match Yojson.Safe.from_file path with
+     | `Assoc fields ->
+       "default" ::
+       (List.filter_map (fun (k, _) ->
+         if String.length k > 7
+            && String.sub k (String.length k - 7) 7 = "_models"
+         then Some (String.sub k 0 (String.length k - 7))
+         else None
+       ) fields)
+     | _ -> ["default"]
+     | exception Yojson.Json_error msg ->
+       Log.Keeper.warn "cascade config parse error: %s" msg;
+       ["default"]
+     | exception Sys_error msg ->
+       Log.Keeper.warn "cascade config read error: %s" msg;
+       ["default"])
+
 let rec add_routes ~sw ~clock router =
   router
   |> Http.Router.post "/api/v1/broadcast" (fun request reqd ->
@@ -604,28 +626,7 @@ and add_repo_synthesis_routes router =
 
   |> Http.Router.get "/api/v1/keeper/cascades" (fun request reqd ->
        with_public_read (fun _state _req reqd ->
-         let config_path = Oas_model_resolve.cascade_config_path () in
-         let profiles =
-           match config_path with
-           | None -> ["default"]
-           | Some path ->
-             match Yojson.Safe.from_file path with
-             | `Assoc fields ->
-               "default" ::
-               (List.filter_map (fun (k, _) ->
-                 if String.length k > 7
-                    && String.sub k (String.length k - 7) 7 = "_models"
-                 then Some (String.sub k 0 (String.length k - 7))
-                 else None
-               ) fields)
-             | _ -> ["default"]
-             | exception Yojson.Json_error msg ->
-               Log.Keeper.warn "cascade config parse error: %s" msg;
-               ["default"]
-             | exception Sys_error msg ->
-               Log.Keeper.warn "cascade config read error: %s" msg;
-               ["default"]
-         in
+         let profiles = available_cascade_profiles () in
          Http.Response.json ~request:request
            (Yojson.Safe.to_string (`Assoc [
              ("profiles", `List (List.map (fun s -> `String s) profiles));
@@ -648,9 +649,15 @@ and add_repo_synthesis_routes router =
                  {|{"ok":false,"error":"requires {\"keeper\":\"...\",\"cascade_name\":\"...\"}"}|}
                  reqd
              | Some name, Some cascade ->
-               (* TOML-first: write to config/keepers/<name>.toml (SSOT).
-                  The supervisor sweep will pick up the change within ~30s
-                  and sync it to runtime JSON via ensure_keeper_meta. *)
+               let known = available_cascade_profiles () in
+               if not (List.mem cascade known) then
+                 Http.Response.json ~status:`Bad_request ~request:req
+                   (Printf.sprintf
+                     {|{"ok":false,"error":"unknown cascade %s. Available: %s"}|}
+                     (String.escaped cascade)
+                     (String.concat ", " known))
+                   reqd
+               else
                match Config_dir_resolver.keeper_toml_path_opt name with
                | None ->
                  Http.Response.json ~status:`Not_found ~request:req

@@ -737,29 +737,55 @@ let assert_branch_switch_allowed config cmd label =
   check bool (label ^ " not policy blocked")
     true (error <> "branch_switch_blocked" && has_status)
 
+let assert_branch_switch_blocked config cmd label =
+  let shared_repo_rel = "workspace/yousleepwhen/oas" in
+  let shared_repo_abs =
+    Filename.concat (Keeper_alerting_path.project_root_of_config config) shared_repo_rel
+  in
+  Fs_compat.mkdir_p shared_repo_abs;
+  let meta =
+    { (make_meta_with_preset "delivery") with
+      allowed_paths = [ shared_repo_rel ^ "/" ] }
+  in
+  let args =
+    `Assoc
+      [ "cmd", `String cmd
+      ; "cwd", `String shared_repo_rel
+      ]
+  in
+  let result = call_tool config meta "keeper_bash" args in
+  let json = parse_json result in
+  let error = try json_string "error" json with _ -> "" in
+  check string (label ^ " blocked") "branch_switch_blocked" error
+
 let test_bash_git_checkout_blocked () =
   with_room (fun config ->
-    assert_branch_switch_allowed config "git checkout refactor/some-branch" "checkout")
+    assert_branch_switch_blocked config "git checkout refactor/some-branch" "checkout")
 
 let test_bash_git_switch_blocked () =
   with_room (fun config ->
-    assert_branch_switch_allowed config "git switch feature/x" "switch")
+    assert_branch_switch_blocked config "git switch feature/x" "switch")
 
 let test_bash_git_checkout_with_global_opts_blocked () =
   with_room (fun config ->
-    assert_branch_switch_allowed config "git -C . checkout refactor/x" "checkout -C")
+    assert_branch_switch_blocked config "git -C . checkout refactor/x" "checkout -C")
 
 let test_bash_git_tab_separated_blocked () =
   with_room (fun config ->
-    assert_branch_switch_allowed config "git\tcheckout feature/x" "tab checkout")
+    assert_branch_switch_blocked config "git\tcheckout feature/x" "tab checkout")
 
 let test_bash_git_branch_create_blocked () =
   with_room (fun config ->
-    assert_branch_switch_allowed config "git branch new-feature" "branch create")
+    assert_branch_switch_blocked config "git branch new-feature" "branch create")
 
 let test_bash_git_branch_rename_blocked () =
   with_room (fun config ->
-    assert_branch_switch_allowed config "git branch -m old-name new-name" "branch -m")
+    assert_branch_switch_blocked config "git branch -m old-name new-name" "branch -m")
+
+let test_bash_git_checkout_allowed_in_default_playground () =
+  with_room (fun config ->
+    assert_branch_switch_allowed config "git checkout refactor/some-branch"
+      "checkout default playground")
 
 let test_bash_git_branch_list_allowed () =
   with_room (fun config ->
@@ -1157,12 +1183,14 @@ let () =
       [ test_case "second claim no tasks" `Quick test_second_claim_on_single_task_returns_no_tasks
       ]
     ; "bash_branch_guard",
-      [ test_case "checkout allowed" `Quick test_bash_git_checkout_blocked
-      ; test_case "switch allowed" `Quick test_bash_git_switch_blocked
-      ; test_case "checkout -C allowed" `Quick test_bash_git_checkout_with_global_opts_blocked
-      ; test_case "tab checkout allowed" `Quick test_bash_git_tab_separated_blocked
-      ; test_case "branch create allowed" `Quick test_bash_git_branch_create_blocked
-      ; test_case "branch rename allowed" `Quick test_bash_git_branch_rename_blocked
+      [ test_case "checkout blocked" `Quick test_bash_git_checkout_blocked
+      ; test_case "switch blocked" `Quick test_bash_git_switch_blocked
+      ; test_case "checkout -C blocked" `Quick test_bash_git_checkout_with_global_opts_blocked
+      ; test_case "tab checkout blocked" `Quick test_bash_git_tab_separated_blocked
+      ; test_case "branch create blocked" `Quick test_bash_git_branch_create_blocked
+      ; test_case "branch rename blocked" `Quick test_bash_git_branch_rename_blocked
+      ; test_case "checkout allowed in default playground" `Quick
+          test_bash_git_checkout_allowed_in_default_playground
       ; test_case "branch list allowed" `Quick test_bash_git_branch_list_allowed
       ; test_case "branch delete allowed" `Quick test_bash_git_branch_delete_allowed
       ; test_case "status allowed" `Quick test_bash_git_status_allowed

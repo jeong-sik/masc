@@ -1,7 +1,7 @@
 """Discord-specific Gate client.
 
 Thin adapter over the shared GateClientBase. Adds Discord-specific
-channel context and SSE streaming support.
+channel context and delegates SSE streaming to the base class.
 
 All communication with the gate goes through this module.
 The gate is the only interface; no direct keeper access.
@@ -9,15 +9,10 @@ The gate is the only interface; no direct keeper access.
 
 from __future__ import annotations
 
-import json as json_mod
 import logging
 import sys
 from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any, cast
-
-import httpx
-import httpx_sse
 
 # Add shared module to path
 _shared_root = Path(__file__).resolve().parent.parent.parent / "shared"
@@ -37,7 +32,7 @@ CONNECTOR_AGENT_NAME = "discord-gate-bot"
 
 
 class GateClient(GateClientBase):
-    """Discord-specific gate client with SSE streaming support.
+    """Discord-specific gate client.
 
     Uses a shared httpx.AsyncClient for connection pooling.
     Call ``aclose()`` on shutdown to release the underlying pool.
@@ -103,68 +98,15 @@ class GateClient(GateClientBase):
         channel_user_name: str,
         channel_room_id: str,
     ) -> AsyncIterator[str]:
-        """Stream a message to a keeper via SSE, yielding text deltas.
-
-        Uses POST /api/v1/keepers/chat/stream which returns AG-UI SSE events.
-        Only TEXT_MESSAGE_CONTENT deltas are yielded as strings.
-        Falls back to send_message on transport error (caller gets nothing streamed).
-        """
-        if self._breaker_is_open():
-            return
-
-        payload = {
-            "name": keeper_name,
-            "message": content,
-            **self._discord_context(
-                channel_user_id=channel_user_id,
-                channel_user_name=channel_user_name,
-                channel_room_id=channel_room_id,
-            ),
-        }
-        client = self._get_client()
-
-        try:
-            async with httpx_sse.aconnect_sse(
-                client,
-                "POST",
-                self._stream_url,
-                json=payload,
-                timeout=httpx.Timeout(timeout=300.0, connect=10.0),
-            ) as event_source:
-                if event_source.response.status_code >= 400:
-                    self._note_transport_failure(
-                        f"stream returned {event_source.response.status_code}"
-                    )
-                    return
-                self._note_success()
-                async for sse in event_source.aiter_sse():
-                    if not sse.data:
-                        continue
-                    try:
-                        event = json_mod.loads(sse.data)
-                    except json_mod.JSONDecodeError:
-                        continue
-                    if not isinstance(event, dict):
-                        continue
-                    event_data = cast(dict[str, Any], event)
-                    event_type = str(event_data.get("type", ""))
-                    if event_type == "TEXT_MESSAGE_CONTENT":
-                        delta = str(event_data.get("delta", ""))
-                        if delta:
-                            yield delta
-                    elif event_type == "RUN_ERROR":
-                        custom_raw = event_data.get("customValue", {})
-                        custom = (
-                            cast(dict[str, Any], custom_raw)
-                            if isinstance(custom_raw, dict)
-                            else {}
-                        )
-                        err = str(custom.get("message", ""))
-                        logger.warning("Keeper stream error: %s", err)
-                        return
-        except httpx.TimeoutException:
-            self._note_transport_failure("stream timeout after 300s")
-        except httpx.HTTPError as e:
-            self._note_transport_failure(f"stream http error: {e}")
-        except Exception as e:  # pragma: no cover
-            self._note_transport_failure(f"stream error: {e}")
+        """Stream a message to a keeper via SSE, yielding text deltas."""
+        context = self._discord_context(
+            channel_user_id=channel_user_id,
+            channel_user_name=channel_user_name,
+            channel_room_id=channel_room_id,
+        )
+        async for delta in self.stream_keeper(
+            keeper_name=keeper_name,
+            message=content,
+            context=context,
+        ):
+            yield delta

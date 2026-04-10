@@ -24,8 +24,14 @@ let list_hd_opt = function
   | [] -> None
   | x :: _ -> Some x
 
-let dashboard_runtime_probe_cache : Yojson.Safe.t option Atomic.t = Atomic.make None
-let dashboard_runtime_probe_cache_updated_at = Atomic.make 0.0
+type dashboard_runtime_probe_cache_entry = {
+  probe : Yojson.Safe.t;
+  refreshed_at : float;
+}
+
+let dashboard_runtime_probe_cache : dashboard_runtime_probe_cache_entry option Atomic.t =
+  Atomic.make None
+
 let dashboard_runtime_probe_cache_ttl_sec = 30.0
 let dashboard_runtime_probe_force_min_refresh_sec = 10.0
 let dashboard_runtime_probe_refresh_in_flight = Atomic.make false
@@ -40,7 +46,6 @@ let clear_dashboard_runtime_probe_runner_for_tests () =
 
 let clear_dashboard_runtime_probe_cache_for_tests () =
   Atomic.set dashboard_runtime_probe_cache None;
-  Atomic.set dashboard_runtime_probe_cache_updated_at 0.0;
   Atomic.set dashboard_runtime_probe_refresh_in_flight false
 
 let path_descends_from ~root path =
@@ -166,7 +171,7 @@ let run_dashboard_runtime_probe () =
 
 let dashboard_runtime_probe_cached_value () =
   match Atomic.get dashboard_runtime_probe_cache with
-  | Some probe -> Some (probe, Atomic.get dashboard_runtime_probe_cache_updated_at)
+  | Some entry -> Some (entry.probe, entry.refreshed_at)
   | None -> None
 
 let dashboard_runtime_probe_fresh_value ~now =
@@ -203,8 +208,8 @@ let dashboard_runtime_probe_http_json ?(force = false) () =
           match run_dashboard_runtime_probe () with
           | fresh ->
               let refreshed_at = Time_compat.now () in
-              Atomic.set dashboard_runtime_probe_cache (Some fresh);
-              Atomic.set dashboard_runtime_probe_cache_updated_at refreshed_at;
+              Atomic.set dashboard_runtime_probe_cache
+                (Some { probe = fresh; refreshed_at });
               Atomic.set dashboard_runtime_probe_refresh_in_flight false;
               (fresh, false, refreshed_at)
           | exception exn ->
@@ -221,9 +226,7 @@ let dashboard_runtime_probe_http_json ?(force = false) () =
           | None -> (
               match dashboard_runtime_probe_cached_value () with
               | Some (cached, cached_at) -> (cached, false, cached_at)
-              | None ->
-                  (`Null, false,
-                   Atomic.get dashboard_runtime_probe_cache_updated_at))
+              | None -> (`Null, false, 0.0))
   in
   let cache_age_sec = max 0.0 (now -. refreshed_at) in
   `Assoc

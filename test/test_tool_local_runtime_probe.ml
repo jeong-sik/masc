@@ -66,6 +66,20 @@ let test_request_body_keeps_explicit_keep_alive () =
     (Some "90s")
     (json |> member "keep_alive" |> to_string_option)
 
+let test_normalize_server_url_strips_trailing_slashes () =
+  check string "normalizes trailing slash" "http://127.0.0.1:11434"
+    (Masc_mcp.Tool_local_runtime_probe.normalize_ollama_server_url
+       " http://127.0.0.1:11434/// ")
+
+let test_endpoint_urls_use_normalized_base () =
+  check string "ps endpoint normalized" "http://127.0.0.1:11434/api/ps"
+    (Masc_mcp.Tool_local_runtime_probe.ollama_ps_url
+       "http://127.0.0.1:11434/");
+  check string "generate endpoint normalized"
+    "http://127.0.0.1:11434/api/generate"
+    (Masc_mcp.Tool_local_runtime_probe.ollama_generate_url
+       "http://127.0.0.1:11434///")
+
 let test_kv_cache_assessment_detects_repeat_improvement () =
   let runs =
     [
@@ -115,6 +129,10 @@ let () =
         ] );
       ( "generate",
         [
+          test_case "normalizes server url before endpoint join" `Quick
+            test_normalize_server_url_strips_trailing_slashes;
+          test_case "builds normalized endpoint urls" `Quick
+            test_endpoint_urls_use_normalized_base;
           test_case "omits keep_alive by default" `Quick
             test_request_body_omits_keep_alive_by_default;
           test_case "keeps explicit keep_alive when requested" `Quick

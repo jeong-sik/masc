@@ -38,6 +38,23 @@ let trim_to_option raw =
   let trimmed = String.trim raw in
   if trimmed = "" then None else Some trimmed
 
+let normalize_ollama_server_url raw =
+  let trimmed = String.trim raw in
+  let rec strip_trailing_slashes value =
+    let len = String.length value in
+    if len > 0 && Char.equal value.[len - 1] '/' then
+      strip_trailing_slashes (String.sub value 0 (len - 1))
+    else
+      value
+  in
+  strip_trailing_slashes trimmed
+
+let ollama_ps_url server_url =
+  normalize_ollama_server_url server_url ^ "/api/ps"
+
+let ollama_generate_url server_url =
+  normalize_ollama_server_url server_url ^ "/api/generate"
+
 let ns_to_ms value =
   value |> Option.map (fun ns -> float_of_int ns /. 1_000_000.0)
 
@@ -304,7 +321,7 @@ let default_probe_prompt () =
     ]
 
 let fetch_ollama_ps ?(timeout_sec = 8) ~server_url () =
-  let url = String.trim server_url ^ "/api/ps" in
+  let url = ollama_ps_url server_url in
   match http_get_json_with_status ~timeout_sec url with
   | Ok (http_status, json) ->
       let models =
@@ -368,7 +385,7 @@ let request_body_json ~keep_alive ~model_id ~prompt ~max_tokens =
 
 let run_single_probe ~keep_alive ~server_url ~model_id ~prompt ~max_tokens ~timeout_sec
     ~run_index =
-  let url = String.trim server_url ^ "/api/generate" in
+  let url = ollama_generate_url server_url in
   let started = Time_compat.now () in
   match
     http_post_json_text_with_status ~timeout_sec ~url
@@ -404,6 +421,7 @@ let runtime_ollama_probe_json ?server_url ?model ?prompt ?(probe_runs = 2)
   let server_url =
     Option.bind server_url trim_to_option
     |> Option.value ~default:Env_config_runtime.Ollama.server_url
+    |> normalize_ollama_server_url
   in
   let prompt =
     Option.bind prompt trim_to_option |> Option.value ~default:(default_probe_prompt ())
@@ -489,8 +507,8 @@ let runtime_ollama_probe_json ?server_url ?model ?prompt ?(probe_runs = 2)
     [
       ("source", `String "ollama native runtime");
       ("server_url", `String server_url);
-      ("ps_endpoint", `String (String.trim server_url ^ "/api/ps"));
-      ("generate_endpoint", `String (String.trim server_url ^ "/api/generate"));
+      ("ps_endpoint", `String (ollama_ps_url server_url));
+      ("generate_endpoint", `String (ollama_generate_url server_url));
       ("configured_default_model", string_opt_to_json (trim_to_option Env_config_runtime.Ollama.default_model));
       ("requested_model", string_opt_to_json (Option.bind model trim_to_option));
       ("effective_model", string_opt_to_json effective_model);

@@ -51,6 +51,54 @@ interface TelemetryState {
 
 const sourceMeta = telemetrySourceMeta
 
+type TelemetryCondensedCategory = 'heartbeat' | 'polling'
+
+export type TelemetryDisplayItem =
+  | {
+      kind: 'entry'
+      key: string
+      entry: TelemetryEntry
+    }
+  | {
+      kind: 'group'
+      key: string
+      category: TelemetryCondensedCategory
+      label: string
+      count: number
+      latestTs: number
+      oldestTs: number
+      entries: TelemetryEntry[]
+      sourceKeys: TelemetrySource[]
+      scopeBadges: string[]
+    }
+
+const CONDENSED_CATEGORY_META: Record<TelemetryCondensedCategory, {
+  label: string
+  icon: string
+  color: string
+}> = {
+  heartbeat: {
+    label: 'Heartbeat',
+    icon: 'H',
+    color: 'text-sky-400',
+  },
+  polling: {
+    label: 'Polling / no-op',
+    icon: 'P',
+    color: 'text-fuchsia-400',
+  },
+}
+
+const NOISY_TOOL_NAMES = new Set([
+  'masc_status',
+  'masc_tasks',
+  'masc_messages',
+  'masc_who',
+  'keeper_tasks_list',
+  'keeper_stay_silent',
+  'extend_turns',
+])
+
 function entryTimestamp(e: TelemetryEntry): number {
   const numeric = (e.ts_unix as number) ?? (e.ts as number) ?? (e.timestamp as number) ?? 0
   if (numeric > 0) return numeric
@@ -86,6 +134,18 @@ function normalizeStringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string' && item.trim() !== '') : []
 }
 
+function uniqueStrings(values: Array<string | null | undefined>): string[] {
+  const seen = new Set<string>()
+  const result: string[] = []
+  for (const value of values) {
+    const normalized = normalizeText(value)
+    if (!normalized || seen.has(normalized)) continue
+    seen.add(normalized)
+    result.push(normalized)
+  }
+  return result
+}
+
 function compactId(value: string | null | undefined, prefix: string): string | null {
   if (!value) return null
   return `${prefix} ${value}`
@@ -97,6 +157,61 @@ function telemetryScopeBadges(entry: TelemetryEntry): string[] {
     compactId(normalizeText(entry.operation_id), 'OP'),
     compactId(normalizeText(entry.worker_run_id), 'WR'),
   ].filter((value): value is string => Boolean(value))
+}
+
+function telemetryToolName(entry: TelemetryEntry): string | null {
+  if (entry.source === 'tool_call_io') return normalizeText(entry.tool)
+  if (entry.source === 'tool_usage' || entry.source === 'tool_metric') {
+    return normalizeText(entry.tool_name)
+  }
+  return null
+}
+
+function canonicalToolName(value: string | null): string | null {
+  if (!value) return null
+  // Split on double-underscore and take the last segment to handle
+  // server names that contain underscores or dashes (e.g. mcp__my_server__toolName).
+  if (value.startsWith('mcp__')) {
+    const segments = value.split('__')
+    // segments: ['mcp', '<server>', '<tool>'] — take the last non-empty segment
+    const tool = segments.length >= 3 ? segments[segments.length - 1] : value
+    return normalizeText(tool ?? value)
+  }
+  return normalizeText(value)
+}
+
+function entryGroupingDescriptor(entry: TelemetryEntry): {
+  key: string
+  category: TelemetryCondensedCategory
+  label: string
+} | null {
+  if (entry.source === 'keeper_metric' && normalizeText(entry.channel) === 'heartbeat') {
+    const keeper = normalizeText(entry.name) ?? 'unknown'
+    const scope = normalizeText(entry.session_id) ?? normalizeText(entry.operation_id) ?? keeper
+    return {
+      key: `heartbeat:${scope}:${keeper}`,
+      category: 'heartbeat',
+      label: `${keeper} heartbeat`,
+    }
+  }
+
+  const tool = canonicalToolName(telemetryToolName(entry))
+  if (!tool || !NOISY_TOOL_NAMES.has(tool)) return null
+
+  const scope =
+    normalizeText(entry.session_id)
+    ?? normalizeText(entry.operation_id)
+    ?? normalizeText(entry.worker_run_id)
+    ?? normalizeText(entry.keeper)
+    ?? normalizeText(entry.name)
+    ?? normalizeText(entry.caller)
+    ?? 'global'
+
+  return {
+    key: `polling:${scope}:${tool}`,
+    category: 'polling',
+    label: tool,
+  }
 }
 
 function entryPreview(e: TelemetryEntry): string {
@@ -145,6 +260,107 @@ function entryPreview(e: TelemetryEntry): string {
     default:
       return JSON.stringify(e).slice(0, 80)
   }
+}
+
+export function buildTelemetryDisplayItems(entries: TelemetryEntry[]): TelemetryDisplayItem[] {
+  const items: TelemetryDisplayItem[] = []
+  let nextItemId = 0
+  let activeGroup: {
+    key: string
+    category: TelemetryCondensedCategory
+    label: string
+    entries: TelemetryEntry[]
+    latestTs: number
+    oldestTs: number
+    sourceKeys: Set<TelemetrySource>
+    scopeBadges: string[]
+  } | null = null
+
+  const flushGroup = () => {
+    if (!activeGroup) return
+    if (activeGroup.entries.length === 1) {
+      const entry = activeGroup.entries[0] as TelemetryEntry
+      items.push({
+        kind: 'entry',
+        key: `${activeGroup.key}:${activeGroup.latestTs}:${nextItemId}`,
+        entry,
+      })
+      nextItemId += 1
+    } else {
+      items.push({
+        kind: 'group',
+        key: `${activeGroup.key}:${activeGroup.latestTs}:${activeGroup.entries.length}:${nextItemId}`,
+        category: activeGroup.category,
+        label: activeGroup.label,
+        count: activeGroup.entries.length,
+        latestTs: activeGroup.latestTs,
+        oldestTs: activeGroup.oldestTs,
+        entries: activeGroup.entries,
+        sourceKeys: Array.from(activeGroup.sourceKeys),
+        scopeBadges: activeGroup.scopeBadges,
+      })
+      nextItemId += 1
+    }
+    activeGroup = null
+  }
+
+  for (const entry of entries) {
+    const descriptor = entryGroupingDescriptor(entry)
+    if (!descriptor) {
+      flushGroup()
+      items.push({
+        kind: 'entry',
+        key: `${entry.source}:${entryTimestamp(entry)}:${nextItemId}`,
+        entry,
+      })
+      nextItemId += 1
+      continue
+    }
+
+    const ts = entryTimestamp(entry)
+    if (activeGroup && activeGroup.key === descriptor.key) {
+      activeGroup.entries.push(entry)
+      if (activeGroup.latestTs === 0 && ts !== 0) activeGroup.latestTs = ts
+      if (activeGroup.oldestTs === 0) activeGroup.oldestTs = ts
+      else if (ts !== 0) activeGroup.oldestTs = Math.min(activeGroup.oldestTs, ts)
+      activeGroup.sourceKeys.add(entry.source)
+      activeGroup.scopeBadges = uniqueStrings([
+        ...activeGroup.scopeBadges,
+        ...telemetryScopeBadges(entry),
+      ])
+      continue
+    }
+
+    flushGroup()
+    activeGroup = {
+      key: descriptor.key,
+      category: descriptor.category,
+      label: descriptor.label,
+      entries: [entry],
+      latestTs: ts,
+      oldestTs: ts,
+      sourceKeys: new Set([entry.source]),
+      scopeBadges: telemetryScopeBadges(entry),
+    }
+  }
+
+  flushGroup()
+  return items
+}
+
+function condensedStats(items: TelemetryDisplayItem[]) {
+  let groups = 0
+  let groupedEntries = 0
+  let collapsedEntries = 0
+  const byCategory = new Map<TelemetryCondensedCategory, number>()
+  for (const item of items) {
+    if (item.kind !== 'group') continue
+    groups += 1
+    groupedEntries += item.count
+    collapsedEntries += Math.max(0, item.count - 1)
+    byCategory.set(item.category, (byCategory.get(item.category) ?? 0) + item.count)
+  }
+  return { groups, groupedEntries, collapsedEntries, byCategory }
 }
 
 function SummaryCard({ src }: { src: TelemetrySourceSummary }) {
@@ -233,6 +449,76 @@ function EntryRow({ entry }: { entry: TelemetryEntry }) {
 ${JSON.stringify(entry, null, 2)}</pre>
         </div>
       ` : null}
+    </div>
+  `
+}
+
+function GroupRow({ item }: { item: Extract<TelemetryDisplayItem, { kind: 'group' }> }) {
+  const expanded = useSignal(false)
+  const meta = CONDENSED_CATEGORY_META[item.category]
+  const latestPreview = entryPreview(item.entries[0] as TelemetryEntry)
+  const sourceIcons = uniqueStrings(item.sourceKeys.map(source => sourceMeta(source).icon))
+  const contentId = `telemetry-group-${item.key.replace(/[^a-zA-Z0-9_-]/g, '-')}`
+
+  return html`
+    <div class="border-b border-[var(--card-border)] bg-[rgba(255,255,255,0.015)] hover:bg-[var(--bg-panel-hover)] transition-colors">
+      <div
+        class="flex items-center gap-2 px-3 py-1.5 text-xs cursor-pointer select-none"
+        role="button"
+        tabIndex=${0}
+        aria-expanded=${expanded.value}
+        aria-controls=${contentId}
+        onClick=${() => { expanded.value = !expanded.value }}
+        onKeyDown=${(e: KeyboardEvent) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            expanded.value = !expanded.value
+          }
+        }}
+      >
+        <span class="font-mono font-bold ${meta.color} w-4 text-center flex-shrink-0">${meta.icon}</span>
+        <span class="font-mono text-[var(--text-muted)] w-28 flex-shrink-0" title=${`${formatTs(item.oldestTs)} → ${formatTs(item.latestTs)}`}>
+          ${timeAgoSafe(item.latestTs)}
+        </span>
+        <span class="flex-shrink-0 w-4 text-[var(--text-dim)]">~</span>
+        <span class="font-mono text-[var(--text-strong)] truncate flex-1" title=${`${meta.label} · ${item.label} · ${item.count} events`}>
+          ${meta.label} · ${item.label} · ${item.count} events
+        </span>
+        ${sourceIcons.length > 0 ? html`
+          <span class="hidden lg:flex items-center gap-1 flex-shrink-0 text-[10px] text-[var(--text-dim)] font-mono">
+            ${sourceIcons.join('/')}
+          </span>
+        ` : null}
+        ${item.scopeBadges.length > 0 ? html`
+          <span class="hidden xl:flex items-center gap-1 flex-shrink-0">
+            ${item.scopeBadges.map(badge => html`<span class="rounded bg-[var(--white-4)] px-1.5 py-0.5 text-[10px] text-[var(--text-dim)] font-mono">${badge}</span>`)}
+          </span>
+        ` : null}
+        <span class="flex-shrink-0 w-4 text-[var(--text-muted)]">${expanded.value ? '-' : '+'}</span>
+      </div>
+      <div id=${contentId} class=${expanded.value ? 'px-3 pb-3 flex flex-col gap-2' : 'hidden'} role="region">
+        ${expanded.value ? html`
+          <div class="rounded bg-[var(--white-3)] px-2 py-1.5 text-[11px] text-[var(--text-dim)]">
+            Latest: <span class="font-mono text-[var(--text-strong)]">${latestPreview}</span>
+          </div>
+          ${item.entries.map((entry, index) => {
+            const entryMeta = sourceMeta(entry.source)
+            const ts = entryTimestamp(entry)
+            return html`
+              <div class="flex items-center gap-2 rounded bg-[rgba(0,0,0,0.2)] px-2 py-1.5 text-[10px]" key=${`${item.key}:${index}`}>
+                <span class="font-mono font-bold ${entryMeta.color} w-4 text-center flex-shrink-0">${entryMeta.icon}</span>
+                <span class="font-mono text-[var(--text-dim)] w-24 flex-shrink-0" title=${formatTs(ts)}>${timeAgoSafe(ts)}</span>
+                <span class="font-mono text-[var(--text-strong)] truncate flex-1" title=${entryPreview(entry)}>${entryPreview(entry)}</span>
+              </div>
+            `
+          })}
+          <details class="rounded bg-[rgba(0,0,0,0.2)] px-2 py-1.5">
+            <summary class="cursor-pointer text-[10px] text-[var(--text-dim)]">Raw JSON</summary>
+            <pre class="mt-2 text-[10px] font-mono text-[var(--text-muted)] overflow-x-auto max-h-[280px] overflow-y-auto whitespace-pre-wrap break-all">
+${JSON.stringify(item.entries, null, 2)}</pre>
+          </details>
+        ` : null}
+      </div>
     </div>
   `
 }
@@ -362,6 +648,8 @@ export function TelemetryUnified() {
   }, [])
 
   const { entries, summary, totalEntries, store, loading, error } = state.value
+  const displayItems = buildTelemetryDisplayItems(entries)
+  const condensed = condensedStats(displayItems)
 
   return html`
     <div class="flex flex-col gap-4">
@@ -478,10 +766,29 @@ export function TelemetryUnified() {
       <div class="rounded-xl border border-[var(--card-border)] overflow-hidden">
         <div class="px-3 py-2 border-b border-[var(--card-border)] bg-[var(--white-3)] text-xs text-[var(--text-muted)]">
           MASC telemetry store entries ${entries.length.toLocaleString()}건
+          ${condensed.groups > 0
+            ? ` · 반복 그룹 ${condensed.groups.toLocaleString()}개 · 원본 ${condensed.groupedEntries.toLocaleString()}건`
+            : ''}
         </div>
+        ${condensed.groups > 0 ? html`
+          <div class="px-3 py-2 border-b border-[var(--card-border)] bg-[rgba(255,255,255,0.02)] flex flex-wrap gap-2 text-[11px]">
+            ${Array.from(condensed.byCategory.entries()).map(([category, count]) => {
+              const meta = CONDENSED_CATEGORY_META[category]
+              return html`
+                <span class="rounded-md border border-[var(--card-border)] bg-[var(--white-3)] px-2 py-1 text-[var(--text-dim)]">
+                  <span class="font-mono ${meta.color}">${meta.icon}</span>
+                  <span class="ml-1">${meta.label}</span>
+                  <span class="ml-1 font-mono">${count}</span>
+                </span>
+              `
+            })}
+          </div>
+        ` : null}
         <div class="max-h-[600px] overflow-y-auto">
-          ${entries.length > 0
-            ? entries.map((entry, index) => html`<${EntryRow} key=${`${entry.source}-${entryTimestamp(entry)}-${index}`} entry=${entry} />`)
+          ${displayItems.length > 0
+            ? displayItems.map(item => item.kind === 'group'
+              ? html`<${GroupRow} key=${item.key} item=${item} />`
+              : html`<${EntryRow} key=${item.key} entry=${item.entry} />`)
             : html`<div class="px-4 py-6 text-sm text-[var(--text-muted)]">선택한 scope에 해당하는 MASC telemetry entry가 없습니다.</div>`}
         </div>
       </div>

@@ -220,6 +220,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             ~desires
             ~instructions
             ~persona_extended
+            ~keeper_name:p.name
             ()
       in
       let ctx0 = Keeper_exec_context.create ~system_prompt ~max_tokens:primary_max_context in

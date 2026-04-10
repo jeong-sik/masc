@@ -69,34 +69,28 @@ type skip_reason =
   | No_signal
 
 type turn_verdict =
-  | Run of { channel : unified_turn_channel;
-             reasons : turn_reason * turn_reason list }
-  | Skip of { channel : unified_turn_channel;
-              reasons : skip_reason * skip_reason list }
+  | Run of { reasons : turn_reason * turn_reason list }
+  | Skip of { reasons : skip_reason * skip_reason list }
 
 let turn_reason_to_string = function
   | Mention_pending -> "pending_mentions"
   | Board_event_pending -> "pending_board_events"
   | Scope_message_pending -> "pending_scope_messages"
-  | Idle_cooldown_elapsed { idle_sec; cooldown } ->
-      Printf.sprintf "idle_gate_elapsed(idle=%d,cooldown=%d)" idle_sec cooldown
-  | Task_backlog { unclaimed; failed } ->
-      Printf.sprintf "actionable_backlog(unclaimed=%d,failed=%d)" unclaimed failed
+  | Idle_cooldown_elapsed _ -> "idle_gate_elapsed"
+  | Task_backlog _ -> "actionable_backlog"
   | Task_reactive_cooldown_elapsed -> "task_reactive_cooldown_elapsed"
   | Never_started -> "never_started"
 
 let skip_reason_to_string = function
   | Scheduled_autonomous_disabled -> "scheduled_autonomous_disabled"
-  | Idle_gate_pending { remaining_sec } ->
-      Printf.sprintf "idle_gate_wait(%ds)" remaining_sec
-  | Cooldown_pending { remaining_sec } ->
-      Printf.sprintf "cooldown_wait(%ds)" remaining_sec
+  | Idle_gate_pending _ -> "idle_gate_wait"
+  | Cooldown_pending _ -> "cooldown_wait"
   | No_signal -> "no_signal"
 
 let verdict_reasons_to_strings = function
-  | Run { reasons = (first, rest); _ } ->
+  | Run { reasons = (first, rest) } ->
       List.map turn_reason_to_string (first :: rest)
-  | Skip { reasons = (first, rest); _ } ->
+  | Skip { reasons = (first, rest) } ->
       List.map skip_reason_to_string (first :: rest)
 
 type unified_turn_decision = {
@@ -713,7 +707,7 @@ let unified_turn_decision ~(meta : keeper_meta) (observation : world_observation
       {
         should_run = true;
         channel = Reactive;
-        verdict = Run { channel = Reactive; reasons = (first, rest) };
+        verdict = Run { reasons = (first, rest) };
         since_last_scheduled_autonomous = None;
         effective_cooldown = None;
         task_reactive_cooldown = None;
@@ -730,8 +724,7 @@ let unified_turn_decision ~(meta : keeper_meta) (observation : world_observation
         {
           should_run = false;
           channel = Scheduled_autonomous;
-          verdict = Skip { channel = Scheduled_autonomous;
-                           reasons = (Scheduled_autonomous_disabled, []) };
+          verdict = Skip { reasons = (Scheduled_autonomous_disabled, []) };
           since_last_scheduled_autonomous = Some since_last_scheduled_autonomous;
           effective_cooldown = None;
           task_reactive_cooldown = None;
@@ -788,13 +781,12 @@ let unified_turn_decision ~(meta : keeper_meta) (observation : world_observation
                so Idle_cooldown_elapsed is always present *)
             match run_reasons with
             | first :: rest ->
-                Run { channel = Scheduled_autonomous; reasons = (first, rest) }
+                Run { reasons = (first, rest) }
             | [] ->
                 (* Structurally unreachable: idle_gate_elapsed && should_run
                    guarantees at least Idle_cooldown_elapsed.
                    Defensive: fall through to skip. *)
-                Skip { channel = Scheduled_autonomous;
-                       reasons = (No_signal, []) }
+                Skip { reasons = (No_signal, []) }
           else
             let skip_reasons =
               [
@@ -813,10 +805,9 @@ let unified_turn_decision ~(meta : keeper_meta) (observation : world_observation
             in
             match skip_reasons with
             | first :: rest ->
-                Skip { channel = Scheduled_autonomous; reasons = (first, rest) }
+                Skip { reasons = (first, rest) }
             | [] ->
-                Skip { channel = Scheduled_autonomous;
-                       reasons = (No_signal, []) }
+                Skip { reasons = (No_signal, []) }
         in
         {
           should_run;

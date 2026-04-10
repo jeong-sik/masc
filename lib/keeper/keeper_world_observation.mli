@@ -113,18 +113,17 @@ type skip_reason =
 
 (** Turn decision with non-empty reason list (NEL).
     [Run] guarantees at least one trigger reason.
-    [Skip] guarantees at least one skip reason. *)
+    [Skip] guarantees at least one skip reason.
+    Channel is held by [unified_turn_decision], not duplicated here. *)
 type turn_verdict =
-  | Run of { channel : unified_turn_channel;
-             reasons : turn_reason * turn_reason list }
-  | Skip of { channel : unified_turn_channel;
-              reasons : skip_reason * skip_reason list }
+  | Run of { reasons : turn_reason * turn_reason list }
+  | Skip of { reasons : skip_reason * skip_reason list }
 
-(** Convert a single turn reason to its legacy string representation.
-    One-directional: typed -> string only (no Unknown variant needed). *)
+(** Convert a single turn reason to a structured string representation.
+    Includes context parameters where applicable (e.g. idle_sec, cooldown). *)
 val turn_reason_to_string : turn_reason -> string
 
-(** Convert a single skip reason to its legacy string representation. *)
+(** Convert a single skip reason to a structured string representation. *)
 val skip_reason_to_string : skip_reason -> string
 
 (** Extract all reasons as legacy string list from a verdict.

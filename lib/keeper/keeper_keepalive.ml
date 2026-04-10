@@ -756,7 +756,7 @@ let run_keepalive_unified_turn
       if (not should_run_turn) && (not manual_reconcile_pending) then (
         let log_not_scheduled =
           match turn_decision.verdict with
-          | Keeper_world_observation.Skip { reasons = (Keeper_world_observation.Scheduled_autonomous_disabled, []); _ } ->
+          | Keeper_world_observation.Skip { reasons = (Keeper_world_observation.Scheduled_autonomous_disabled, []) } ->
               Log.Keeper.debug
           | _ -> Log.Keeper.info
         in

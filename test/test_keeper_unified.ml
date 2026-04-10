@@ -403,7 +403,7 @@ let test_scheduled_turn_requires_idle_gate () =
   let decision = WO.unified_turn_decision ~meta obs in
   check bool "decision records idle wait reason" true
     (match decision.verdict with
-     | WO.Skip { reasons = (first, rest); _ } ->
+     | WO.Skip { reasons = (first, rest)} ->
          List.exists (function WO.Idle_gate_pending _ -> true | _ -> false)
            (first :: rest)
      | WO.Run _ -> false)
@@ -502,13 +502,13 @@ let test_scheduled_turn_decision_uses_backlog_acceleration () =
   check bool "backlog acceleration opens scheduled turn" true decision.should_run;
   check bool "marks actionable backlog" true
     (match decision.verdict with
-     | WO.Run { reasons = (first, rest); _ } ->
+     | WO.Run { reasons = (first, rest)} ->
          List.exists (function WO.Task_backlog _ -> true | _ -> false)
            (first :: rest)
      | WO.Skip _ -> false);
   check bool "marks backlog cooldown elapsed" true
     (match decision.verdict with
-     | WO.Run { reasons = (first, rest); _ } ->
+     | WO.Run { reasons = (first, rest)} ->
          List.mem WO.Task_reactive_cooldown_elapsed (first :: rest)
      | WO.Skip _ -> false)
 
@@ -1715,11 +1715,11 @@ let test_sanitize_messages_utf8_cleans_history_path () =
       check string "user history content sanitized" "hist ory entry"
         (Agent_sdk.Types.text_of_message user_msg);
       (match tool_msg.Agent_sdk.Types.content with
-       | [ Agent_sdk.Types.ToolResult { tool_use_id; content; _ } ] ->
+       | [ Agent_sdk.Types.ToolResult { tool_use_id; content} ] ->
            check string "tool id sanitized" "tool id" tool_use_id;
            check string "tool payload sanitized" "result payload" content;
            (match tool_msg.Agent_sdk.Types.content with
-            | [ Agent_sdk.Types.ToolResult { json = Some (`Assoc [ (key, `String value) ]); _ } ] ->
+            | [ Agent_sdk.Types.ToolResult { json = Some (`Assoc [ (key, `String value) ])} ] ->
                 check string "tool json key sanitized" "key " key;
                 check string "tool json value sanitized" "value " value
             | _ -> fail "expected sanitized tool result json")

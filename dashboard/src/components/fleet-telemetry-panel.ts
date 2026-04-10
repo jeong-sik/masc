@@ -15,6 +15,7 @@ import { normalizeKeepers } from '../keeper-store-normalize'
 import { telemetrySourceLabel } from '../config/telemetry-sources'
 import { formatElapsedCompact, formatTimeAgo } from '../lib/format-time'
 import type { Keeper } from '../types'
+import { isAbortError } from '../lib/async-state'
 
 // Fleet-level thresholds (lower than individual keeper thresholds in config/constants)
 // because fleet view highlights keepers that are approaching limits, not yet at them
@@ -70,10 +71,6 @@ function emptyState(): FleetTelemetryState {
     total_telemetry_entries: 0,
     updated_at: null,
   }
-}
-
-function isAbortError(error: unknown): boolean {
-  return error instanceof Error && error.name === 'AbortError'
 }
 
 // Delegated to config/telemetry-sources (SSOT)

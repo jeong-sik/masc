@@ -18,6 +18,7 @@ import { TELEMETRY_AUTO_REFRESH_MS } from '../config/constants'
 import { TELEMETRY_SOURCE_META, telemetrySourceMeta } from '../config/telemetry-sources'
 import { formatTimeAgo } from '../lib/format-time'
 import { formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../lib/auto-refresh'
+import { isAbortError } from '../lib/async-state'
 
 interface StoreSnapshot {
   keepers: number
@@ -124,10 +125,6 @@ function timeAgoSafe(ts: number): string {
 
 function normalizeText(value: unknown): string | null {
   return typeof value === 'string' && value.trim() !== '' ? value.trim() : null
-}
-
-function isAbortError(error: unknown): boolean {
-  return error instanceof Error && error.name === 'AbortError'
 }
 
 function normalizeStringArray(value: unknown): string[] {

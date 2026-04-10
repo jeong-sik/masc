@@ -1,5 +1,5 @@
 import { get, post, withRetries, defaultBoardVoter } from './core'
-import { isRecord, asString, asNumber, asInt, asStringList } from '../components/common/normalize'
+import { isRecord, asNullableString, asString, asNumber, asInt, asStringList } from '../components/common/normalize'
 import type {
   BoardPost, BoardComment, BoardSortMode,
   GovernanceCaseBrief, GovernanceCaseBundle, GovernanceContextRef,
@@ -26,12 +26,6 @@ export function asNullableIsoTimestamp(value: unknown): string | null {
     return new Date(ms).toISOString()
   }
   return null
-}
-
-function asNullableString(value: unknown): string | null {
-  if (typeof value !== 'string') return null
-  const trimmed = value.trim()
-  return trimmed ? trimmed : null
 }
 
 export function normalizePendingConfirmation(raw: unknown): PendingConfirmation | null {

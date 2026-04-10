@@ -1,6 +1,6 @@
 // MASC Dashboard — Dashboard projections, resource fetchers, tool metrics
 
-import { isRecord, asBoolean, asInt, asNumber, asRecordArray, asString, asStringArray } from '../components/common/normalize'
+import { isRecord, asBoolean, asInt, asNullableString, asNumber, asRecordArray, asString, asStringArray } from '../components/common/normalize'
 import {
   asNullableIsoTimestamp,
   normalizeGovernanceDecisionItem,
@@ -927,12 +927,6 @@ export function savePromptOverride(key: string, value: string): Promise<PromptMu
 
 export function clearPromptOverride(key: string): Promise<PromptMutationResponse> {
   return post('/api/v1/prompts', { action: 'clear', key })
-}
-
-function asNullableString(value: unknown): string | null {
-  if (typeof value !== 'string') return null
-  const trimmed = value.trim()
-  return trimmed !== '' ? trimmed : null
 }
 
 function asLooseBoolean(value: unknown, fallback = false): boolean {

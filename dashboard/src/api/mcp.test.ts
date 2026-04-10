@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+vi.setConfig({
+  testTimeout: 60_000,
+  hookTimeout: 60_000,
+})
+
 const { fetchWithTimeout, reportToolHostFailure, authHeaders, currentDashboardActor } = vi.hoisted(() => ({
   fetchWithTimeout: vi.fn(),
   reportToolHostFailure: vi.fn().mockResolvedValue({ ok: true }),

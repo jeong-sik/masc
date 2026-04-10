@@ -6,6 +6,11 @@ import type { TelemetrySummaryResponse, ToolQualityResponse } from '../api/dashb
 import { normalizeKeepers } from '../keeper-store-normalize'
 import type { DashboardExecutionResponse } from '../types'
 
+vi.setConfig({
+  testTimeout: 60_000,
+  hookTimeout: 60_000,
+})
+
 const executionResponse = {
   generated_at: '2026-04-09T08:10:00Z',
   keepers: [

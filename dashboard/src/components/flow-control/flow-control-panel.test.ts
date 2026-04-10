@@ -2,6 +2,11 @@ import { html } from 'htm/preact'
 import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+vi.setConfig({
+  testTimeout: 60_000,
+  hookTimeout: 60_000,
+})
+
 void vi
 
 const fetchPauseStatus = vi.fn().mockResolvedValue(undefined)

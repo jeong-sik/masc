@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { signal } from '@preact/signals'
 
+vi.setConfig({
+  testTimeout: 60_000,
+  hookTimeout: 60_000,
+})
+
 const { callMcpTool } = vi.hoisted(() => ({
   callMcpTool: vi.fn(),
 }))

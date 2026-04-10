@@ -142,7 +142,10 @@ let canonical_base_path path =
   | Some git_root -> git_root
   | None -> normalized
   | exception (Eio.Cancel.Cancelled _ as e) -> raise e
-  | exception _ -> normalized
+  | exception exn ->
+    Log.Room.warn "canonical_base_path: git root lookup failed for %s: %s"
+      normalized (Printexc.to_string exn);
+    normalized
 
 let path_has_masc_dir path =
   let masc_dir = Filename.concat path ".masc" in

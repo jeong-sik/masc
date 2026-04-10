@@ -46,7 +46,11 @@ let get_audit_store () =
      | store ->
        audit_store_ref := Some store;
        Some store
-     | exception _ -> None)
+     | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+     | exception exn ->
+       Log.Keeper.warn "approval_queue: audit store creation failed: %s"
+         (Printexc.to_string exn);
+       None)
 
 let audit_approval_event ~event_type ~id ~keeper_name ~tool_name
     ~risk_level ?(decision="") () =

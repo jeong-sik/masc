@@ -41,7 +41,11 @@ let merge_reported_and_observed_tool_names
         reported_tool_names
 ;;
 
-let normalize_response_text ~(text : string) ~(tool_names : string list) ()
+let normalize_response_text
+      ?(allow_empty_without_tools = false)
+      ~(text : string)
+      ~(tool_names : string list)
+      ()
   : (string, string) result
   =
   let trimmed = String.trim text in
@@ -49,7 +53,10 @@ let normalize_response_text ~(text : string) ~(tool_names : string list) ()
   then Ok text
   else (
     match tool_names with
-    | [] -> Error "keeper turn completed with no textual reply"
+    | [] ->
+      if allow_empty_without_tools
+      then Ok ""
+      else Error "keeper turn completed with no textual reply"
     | _ ->
       Ok
         (Printf.sprintf

@@ -277,6 +277,7 @@ let run_turn
       ?(max_idle_turns : int = 3)
       ?(history_user_source = "direct_user")
       ?(history_assistant_source = "direct_assistant")
+      ?(allow_empty_without_tools = false)
       ?guardrails
       ?temperature
       ?max_tokens
@@ -1590,7 +1591,11 @@ let run_turn
          Keeper_tool_disclosure.merge_reported_and_observed_tool_names ~reported_tool_names ~observed_tool_names
        in
        let usage = Keeper_exec_context.usage_of_response result.response in
-       (match Keeper_tool_disclosure.normalize_response_text ~text ~tool_names () with
+       (match
+          Keeper_tool_disclosure.normalize_response_text
+            ~allow_empty_without_tools
+            ~text ~tool_names ()
+        with
         | Error e -> Error (Oas.Error.Internal e)
         | Ok response_text ->
           (* Ensure every generation has a [STATE] block for continuity.

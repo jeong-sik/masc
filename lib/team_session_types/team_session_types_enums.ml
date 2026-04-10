@@ -247,6 +247,9 @@ let status_to_string = function
   | Failed -> "failed"
   | Cancelled -> "cancelled"
 
+let enum_error kind value =
+  Printf.sprintf "unknown %s: %s" kind value
+
 let status_of_string = function
   | "running" -> Running
   | "paused" -> Paused
@@ -255,6 +258,15 @@ let status_of_string = function
   | "failed" -> Failed
   | "cancelled" -> Cancelled
   | _ -> Failed
+
+let status_of_string_result = function
+  | "running" -> Ok Running
+  | "paused" -> Ok Paused
+  | "completed" -> Ok Completed
+  | "interrupted" -> Ok Interrupted
+  | "failed" -> Ok Failed
+  | "cancelled" -> Ok Cancelled
+  | value -> Error (enum_error "session status" value)
 
 let execution_scope_to_string = function
   | Observe_only -> "observe_only"
@@ -265,6 +277,12 @@ let execution_scope_of_string = function
   | "observe_only" -> Observe_only
   | "autonomous" -> Autonomous
   | _ -> Limited_code_change
+
+let execution_scope_of_string_result = function
+  | "observe_only" -> Ok Observe_only
+  | "limited_code_change" -> Ok Limited_code_change
+  | "autonomous" -> Ok Autonomous
+  | value -> Error (enum_error "execution scope" value)
 
 let wait_mode_to_string = function
   | Wait_background -> "background"
@@ -284,6 +302,12 @@ let orchestration_mode_of_string = function
   | "auto" -> Auto
   | _ -> Assist
 
+let orchestration_mode_of_string_result = function
+  | "manual" -> Ok Manual
+  | "assist" -> Ok Assist
+  | "auto" -> Ok Auto
+  | value -> Error (enum_error "orchestration mode" value)
+
 let communication_mode_to_string = function
   | Comm_off -> "off"
   | Comm_broadcast -> "broadcast"
@@ -296,6 +320,13 @@ let communication_mode_of_string = function
   | "hybrid" -> Comm_hybrid
   | _ -> Comm_broadcast
 
+let communication_mode_of_string_result = function
+  | "off" -> Ok Comm_off
+  | "broadcast" -> Ok Comm_broadcast
+  | "portal" -> Ok Comm_portal
+  | "hybrid" -> Ok Comm_hybrid
+  | value -> Error (enum_error "communication mode" value)
+
 let session_origin_kind_to_string = function
   | Origin_human -> "human"
   | Origin_system -> "system"
@@ -303,6 +334,11 @@ let session_origin_kind_to_string = function
 let session_origin_kind_of_string = function
   | "system" -> Origin_system
   | _ -> Origin_human
+
+let session_origin_kind_of_string_result = function
+  | "human" -> Ok Origin_human
+  | "system" -> Ok Origin_system
+  | value -> Error (enum_error "session origin kind" value)
 
 let scale_profile_to_string = function
   | Scale_standard -> "standard"
@@ -312,6 +348,11 @@ let scale_profile_of_string = function
   | "local64" -> Scale_local64
   | _ -> Scale_standard
 
+let scale_profile_of_string_result = function
+  | "standard" -> Ok Scale_standard
+  | "local64" -> Ok Scale_local64
+  | value -> Error (enum_error "scale profile" value)
+
 let control_profile_to_string = function
   | Control_flat -> "flat"
   | Control_hierarchical_quality_v1 -> "hierarchical_quality_v1"
@@ -319,6 +360,11 @@ let control_profile_to_string = function
 let control_profile_of_string = function
   | "hierarchical_quality_v1" -> Control_hierarchical_quality_v1
   | _ -> Control_flat
+
+let control_profile_of_string_result = function
+  | "flat" -> Ok Control_flat
+  | "hierarchical_quality_v1" -> Ok Control_hierarchical_quality_v1
+  | value -> Error (enum_error "control profile" value)
 
 let fallback_policy_to_string = function
   | Fallback_none -> "none"
@@ -330,6 +376,12 @@ let fallback_policy_of_string = function
   | "task_only" -> Fallback_task_only
   | _ -> Fallback_cascade_then_task
 
+let fallback_policy_of_string_result = function
+  | "none" -> Ok Fallback_none
+  | "cascade_then_task" -> Ok Fallback_cascade_then_task
+  | "task_only" -> Ok Fallback_task_only
+  | value -> Error (enum_error "fallback policy" value)
+
 let instruction_profile_to_string = function
   | Profile_standard -> "standard"
   | Profile_strict -> "strict"
@@ -337,6 +389,11 @@ let instruction_profile_to_string = function
 let instruction_profile_of_string = function
   | "strict" -> Profile_strict
   | _ -> Profile_standard
+
+let instruction_profile_of_string_result = function
+  | "standard" -> Ok Profile_standard
+  | "strict" -> Ok Profile_strict
+  | value -> Error (enum_error "instruction profile" value)
 
 let alert_channel_to_string = function
   | Alert_broadcast -> "broadcast"
@@ -348,6 +405,12 @@ let alert_channel_of_string = function
   | "board" -> Alert_board
   | _ -> Alert_both
 
+let alert_channel_of_string_result = function
+  | "broadcast" -> Ok Alert_broadcast
+  | "board" -> Ok Alert_board
+  | "both" -> Ok Alert_both
+  | value -> Error (enum_error "alert channel" value)
+
 let report_format_to_string = function
   | Markdown -> "markdown"
   | Json -> "json"
@@ -356,6 +419,11 @@ let report_format_of_string = function
   | "markdown" -> Some Markdown
   | "json" -> Some Json
   | _ -> None
+
+let report_format_of_string_result = function
+  | "markdown" -> Ok Markdown
+  | "json" -> Ok Json
+  | value -> Error (enum_error "report format" value)
 
 let report_formats_of_strings xs =
   let rec dedup acc = function
@@ -385,6 +453,12 @@ let delivery_verdict_status_of_string = function
   | "repair" -> Delivery_repair
   | "fail" -> Delivery_fail
   | _ -> Delivery_fail
+
+let delivery_verdict_status_of_string_result = function
+  | "pass" -> Ok Delivery_pass
+  | "repair" -> Ok Delivery_repair
+  | "fail" -> Ok Delivery_fail
+  | value -> Error (enum_error "delivery verdict status" value)
 
 let turn_kind_to_string = function
   | Turn_note -> "note"
@@ -416,6 +490,14 @@ let worker_class_of_string = function
   | "metacog" -> Some Worker_metacog
   | _ -> None
 
+let worker_class_of_string_result = function
+  | "manager" -> Ok Worker_manager
+  | "executor" -> Ok Worker_executor
+  | "scout" -> Ok Worker_scout
+  | "librarian" -> Ok Worker_librarian
+  | "metacog" -> Ok Worker_metacog
+  | value -> Error (enum_error "worker class" value)
+
 let task_profile_to_string = function
   | Profile_extract -> "extract"
   | Profile_normalize -> "normalize"
@@ -433,6 +515,15 @@ let task_profile_of_string = function
   | "synthesize" -> Some Profile_synthesize
   | _ -> None
 
+let task_profile_of_string_result = function
+  | "extract" -> Ok Profile_extract
+  | "normalize" -> Ok Profile_normalize
+  | "summarize" -> Ok Profile_summarize
+  | "verify" -> Ok Profile_verify
+  | "decide" -> Ok Profile_decide
+  | "synthesize" -> Ok Profile_synthesize
+  | value -> Error (enum_error "task profile" value)
+
 let risk_level_to_string = function
   | Risk_low -> "low"
   | Risk_medium -> "medium"
@@ -444,6 +535,12 @@ let risk_level_of_string = function
   | "high" -> Some Risk_high
   | _ -> None
 
+let risk_level_of_string_result = function
+  | "low" -> Ok Risk_low
+  | "medium" -> Ok Risk_medium
+  | "high" -> Ok Risk_high
+  | value -> Error (enum_error "risk level" value)
+
 let capsule_mode_to_string = function
   | Capsule_fresh -> "fresh"
   | Capsule_inherit -> "inherit"
@@ -454,6 +551,12 @@ let capsule_mode_of_string = function
   | "inherit" -> Some Capsule_inherit
   | "capsule" -> Some Capsule_capsule
   | _ -> None
+
+let capsule_mode_of_string_result = function
+  | "fresh" -> Ok Capsule_fresh
+  | "inherit" -> Ok Capsule_inherit
+  | "capsule" -> Ok Capsule_capsule
+  | value -> Error (enum_error "capsule mode" value)
 
 let controller_level_to_string = function
   | Controller_root -> "root"
@@ -467,6 +570,13 @@ let controller_level_of_string = function
   | "submanager" -> Some Controller_submanager
   | "worker" -> Some Controller_worker
   | _ -> None
+
+let controller_level_of_string_result = function
+  | "root" -> Ok Controller_root
+  | "lane" -> Ok Controller_lane
+  | "submanager" -> Ok Controller_submanager
+  | "worker" -> Ok Controller_worker
+  | value -> Error (enum_error "controller level" value)
 
 let control_domain_to_string = function
   | Domain_execution -> "execution"
@@ -482,6 +592,14 @@ let control_domain_of_string = function
   | "runtime" -> Some Domain_runtime
   | "meta" -> Some Domain_meta
   | _ -> None
+
+let control_domain_of_string_result = function
+  | "execution" -> Ok Domain_execution
+  | "quality" -> Ok Domain_quality
+  | "knowledge" -> Ok Domain_knowledge
+  | "runtime" -> Ok Domain_runtime
+  | "meta" -> Ok Domain_meta
+  | value -> Error (enum_error "control domain" value)
 
 let decomposability_to_string = function
   | Decomposability_high -> "high"

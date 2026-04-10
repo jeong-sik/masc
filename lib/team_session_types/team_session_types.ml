@@ -253,6 +253,215 @@ let non_empty_strings_of_json json =
 let string_list_to_json values =
   `List (List.map (fun value -> `String value) values)
 
+let ( let* ) result f =
+  match result with
+  | Ok value -> f value
+  | Error _ as error -> error
+
+let json_type_name = function
+  | `Null -> "null"
+  | `Bool _ -> "bool"
+  | `Int _ | `Intlit _ -> "int"
+  | `Float _ -> "float"
+  | `String _ -> "string"
+  | `Assoc _ -> "object"
+  | `List _ -> "array"
+
+let field_error kind field message =
+  Printf.sprintf "%s.%s: %s" kind field message
+
+let required_nonempty_string_field kind json field =
+  match member field json with
+  | `String value ->
+      let trimmed = String.trim value in
+      if trimmed = "" then Error (field_error kind field "empty string")
+      else Ok trimmed
+  | value ->
+      Error
+        (field_error kind field
+           (Printf.sprintf "expected string, got %s" (json_type_name value)))
+
+let required_string_field kind json field =
+  match member field json with
+  | `String value -> Ok (String.trim value)
+  | value ->
+      Error
+        (field_error kind field
+           (Printf.sprintf "expected string, got %s" (json_type_name value)))
+
+let optional_string_field kind json field =
+  match member field json with
+  | `Null -> Ok None
+  | `String value ->
+      let trimmed = String.trim value in
+      if trimmed = "" then Ok None else Ok (Some trimmed)
+  | value ->
+      Error
+        (field_error kind field
+           (Printf.sprintf "expected string or null, got %s" (json_type_name value)))
+
+let required_int_field kind json field =
+  match member field json with
+  | `Int value -> Ok value
+  | `Intlit raw -> (
+      match int_of_string_opt raw with
+      | Some value -> Ok value
+      | None -> Error (field_error kind field "invalid int literal"))
+  | value ->
+      Error
+        (field_error kind field
+           (Printf.sprintf "expected int, got %s" (json_type_name value)))
+
+let optional_int_field kind json field =
+  match member field json with
+  | `Null -> Ok None
+  | `Int value -> Ok (Some value)
+  | `Intlit raw -> (
+      match int_of_string_opt raw with
+      | Some value -> Ok (Some value)
+      | None -> Error (field_error kind field "invalid int literal"))
+  | value ->
+      Error
+        (field_error kind field
+           (Printf.sprintf "expected int or null, got %s" (json_type_name value)))
+
+let required_float_field kind json field =
+  match member field json with
+  | `Float value -> Ok value
+  | `Int value -> Ok (float_of_int value)
+  | `Intlit raw -> (
+      match float_of_string_opt raw with
+      | Some value -> Ok value
+      | None -> Error (field_error kind field "invalid float literal"))
+  | value ->
+      Error
+        (field_error kind field
+           (Printf.sprintf "expected float, got %s" (json_type_name value)))
+
+let optional_float_field kind json field =
+  match member field json with
+  | `Null -> Ok None
+  | `Float value -> Ok (Some value)
+  | `Int value -> Ok (Some (float_of_int value))
+  | `Intlit raw -> (
+      match float_of_string_opt raw with
+      | Some value -> Ok (Some value)
+      | None -> Error (field_error kind field "invalid float literal"))
+  | value ->
+      Error
+        (field_error kind field
+           (Printf.sprintf "expected float or null, got %s" (json_type_name value)))
+
+let required_bool_field kind json field =
+  match member field json with
+  | `Bool value -> Ok value
+  | value ->
+      Error
+        (field_error kind field
+           (Printf.sprintf "expected bool, got %s" (json_type_name value)))
+
+let required_enum_field kind json field parse =
+  let* value = required_nonempty_string_field kind json field in
+  match parse value with
+  | Ok parsed -> Ok parsed
+  | Error message -> Error (field_error kind field message)
+
+let optional_enum_field kind json field parse =
+  match member field json with
+  | `Null -> Ok None
+  | `String raw ->
+      let value = String.trim raw in
+      if value = "" then Ok None
+      else
+        (match parse value with
+         | Ok parsed -> Ok (Some parsed)
+         | Error message -> Error (field_error kind field message))
+  | value ->
+      Error
+        (field_error kind field
+           (Printf.sprintf "expected string or null, got %s" (json_type_name value)))
+
+let string_list_field_result kind json field =
+  match member field json with
+  | `List values ->
+      let rec loop acc = function
+        | [] -> Ok (dedup_strings (List.rev acc))
+        | `String value :: rest ->
+            let trimmed = String.trim value in
+            if trimmed = "" then loop acc rest else loop (trimmed :: acc) rest
+        | value :: _ ->
+            Error
+              (field_error kind field
+                 (Printf.sprintf "expected string items, got %s"
+                    (json_type_name value)))
+      in
+      loop [] values
+  | value ->
+      Error
+        (field_error kind field
+           (Printf.sprintf "expected array, got %s" (json_type_name value)))
+
+let assoc_int_field_result kind json field =
+  match member field json with
+  | `Assoc fields ->
+      let rec loop acc = function
+        | [] -> Ok (List.rev acc)
+        | (key, `Int value) :: rest -> loop ((key, value) :: acc) rest
+        | (key, `Intlit raw) :: rest -> (
+            match int_of_string_opt raw with
+            | Some value -> loop ((key, value) :: acc) rest
+            | None ->
+                Error
+                  (field_error kind field
+                     (Printf.sprintf "invalid int literal for key %s" key)))
+        | (key, value) :: _ ->
+            Error
+              (field_error kind field
+                 (Printf.sprintf "expected int values; key %s had %s"
+                    key (json_type_name value)))
+      in
+      loop [] fields
+  | value ->
+      Error
+        (field_error kind field
+           (Printf.sprintf "expected object, got %s" (json_type_name value)))
+
+let optional_assoc_int_field_result kind json field =
+  match member field json with
+  | `Null -> Ok None
+  | `Assoc _ ->
+      let* counts = assoc_int_field_result kind json field in
+      Ok (Some counts)
+  | value ->
+      Error
+        (field_error kind field
+           (Printf.sprintf "expected object or null, got %s"
+              (json_type_name value)))
+
+let report_formats_field_result kind json field =
+  match member field json with
+  | `List values ->
+      let rec loop seen acc = function
+        | [] -> Ok (List.rev acc)
+        | `String raw :: rest ->
+            let value = String.lowercase_ascii (String.trim raw) in
+            if value = "" then Error (field_error kind field "empty report format")
+            else
+              let* parsed = report_format_of_string_result value in
+              if List.mem parsed seen then loop seen acc rest
+              else loop (parsed :: seen) (parsed :: acc) rest
+        | value :: _ ->
+            Error
+              (field_error kind field
+                 (Printf.sprintf "expected string items, got %s"
+                    (json_type_name value)))
+      in
+      loop [] [] values
+  | value ->
+      Error
+        (field_error kind field
+           (Printf.sprintf "expected array, got %s" (json_type_name value)))
+
 let delivery_contract_to_yojson (contract : delivery_contract) =
   `Assoc
     [
@@ -271,68 +480,57 @@ let delivery_contract_to_yojson (contract : delivery_contract) =
       ("updated_at_iso", `String contract.updated_at_iso);
     ]
 
-let delivery_contract_of_yojson (json : Yojson.Safe.t) =
+let delivery_contract_of_yojson_result (json : Yojson.Safe.t) :
+    (delivery_contract, string) result =
+  let kind = "delivery_contract" in
   match json with
-  | `Assoc _ -> (
-      match Yojson.Safe.Util.member "contract_id" json with
-      | `String contract_id ->
-          let contract_id = String.trim contract_id in
-          if contract_id = "" then None
-          else
-            Some
-              {
-                contract_id;
-                summary =
-                  (match Yojson.Safe.Util.member "summary" json with
-                  | `String value -> String.trim value
-                  | _ -> "");
-                acceptance_checks =
-                  non_empty_strings_of_json
-                    (Yojson.Safe.Util.member "acceptance_checks" json);
-                required_artifacts =
-                  non_empty_strings_of_json
-                    (Yojson.Safe.Util.member "required_artifacts" json);
-                repair_budget =
-                  (match Yojson.Safe.Util.member "repair_budget" json with
-                  | `Int value -> max 0 value
-                  | `Intlit raw -> (
-                      match int_of_string_opt raw with Some v -> max 0 v | None -> 0)
-                  | _ -> 0);
-                generator_roles =
-                  non_empty_strings_of_json
-                    (Yojson.Safe.Util.member "generator_roles" json);
-                evaluator_role =
-                  (match
-                     Yojson.Safe.Util.member "evaluator_role" json
-                     |> Yojson.Safe.Util.to_string_option
-                     |> Option.map String.trim
-                   with
-                  | Some value when value <> "" -> Some value
-                  | _ -> None);
-                evaluator_cascade =
-                  (match Yojson.Safe.Util.member "evaluator_cascade" json with
-                  | `String value ->
-                      let trimmed = String.trim value in
-                      if trimmed = "" then "cross_verifier" else trimmed
-                  | _ -> "cross_verifier");
-                evidence_refs =
-                  non_empty_strings_of_json
-                    (Yojson.Safe.Util.member "evidence_refs" json);
-                updated_by =
-                  (match Yojson.Safe.Util.member "updated_by" json with
-                  | `String value ->
-                      let trimmed = String.trim value in
-                      if trimmed = "" then "unknown" else trimmed
-                  | _ -> "unknown");
-                updated_at_iso =
-                  (match Yojson.Safe.Util.member "updated_at_iso" json with
-                  | `String value ->
-                      let trimmed = String.trim value in
-                      if trimmed = "" then Types.now_iso () else trimmed
-                  | _ -> Types.now_iso ());
-              }
-      | _ -> None)
-  | _ -> None
+  | `Assoc _ ->
+      let* contract_id =
+        required_nonempty_string_field kind json "contract_id"
+      in
+      let* summary = required_string_field kind json "summary" in
+      let* acceptance_checks =
+        string_list_field_result kind json "acceptance_checks"
+      in
+      let* required_artifacts =
+        string_list_field_result kind json "required_artifacts"
+      in
+      let* repair_budget = required_int_field kind json "repair_budget" in
+      let* generator_roles =
+        string_list_field_result kind json "generator_roles"
+      in
+      let* evaluator_role = optional_string_field kind json "evaluator_role" in
+      let* evaluator_cascade =
+        required_nonempty_string_field kind json "evaluator_cascade"
+      in
+      let* evidence_refs = string_list_field_result kind json "evidence_refs" in
+      let* updated_by = required_nonempty_string_field kind json "updated_by" in
+      let* updated_at_iso =
+        required_nonempty_string_field kind json "updated_at_iso"
+      in
+      Ok
+        {
+          contract_id;
+          summary;
+          acceptance_checks;
+          required_artifacts;
+          repair_budget;
+          generator_roles;
+          evaluator_role;
+          evaluator_cascade;
+          evidence_refs;
+          updated_by;
+          updated_at_iso;
+        }
+  | value ->
+      Error
+        (field_error kind "<root>"
+           (Printf.sprintf "expected object, got %s" (json_type_name value)))
+
+let delivery_contract_of_yojson (json : Yojson.Safe.t) =
+  match delivery_contract_of_yojson_result json with
+  | Ok contract -> Some contract
+  | Error _ -> None
 
 let delivery_verdict_to_yojson (verdict : delivery_verdict) =
   `Assoc
@@ -352,67 +550,78 @@ let delivery_verdict_to_yojson (verdict : delivery_verdict) =
       ("generated_at_iso", `String verdict.generated_at_iso);
     ]
 
-let delivery_verdict_of_yojson (json : Yojson.Safe.t) =
+let delivery_verdict_of_yojson_result (json : Yojson.Safe.t) :
+    (delivery_verdict, string) result =
+  let kind = "delivery_verdict" in
   match json with
-  | `Assoc _ -> (
-      match Yojson.Safe.Util.member "contract_id" json with
-      | `String contract_id ->
-          let contract_id = String.trim contract_id in
-          if contract_id = "" then None
-          else
-            Some
-              {
-                contract_id;
-                status =
-                  (match Yojson.Safe.Util.member "status" json with
-                  | `String value ->
-                      delivery_verdict_status_of_string
-                        (String.lowercase_ascii (String.trim value))
-                  | _ -> Delivery_fail);
-                summary =
-                  (match Yojson.Safe.Util.member "summary" json with
-                  | `String value -> String.trim value
-                  | _ -> "");
-                evaluator =
-                  (match Yojson.Safe.Util.member "evaluator" json with
-                  | `String value ->
-                      let trimmed = String.trim value in
-                      if trimmed = "" then "unknown" else trimmed
-                  | _ -> "unknown");
-                evaluator_role =
-                  (match
-                     Yojson.Safe.Util.member "evaluator_role" json
-                     |> Yojson.Safe.Util.to_string_option
-                     |> Option.map String.trim
-                   with
-                  | Some value when value <> "" -> Some value
-                  | _ -> None);
-                evaluator_cascade =
-                  (match Yojson.Safe.Util.member "evaluator_cascade" json with
-                  | `String value ->
-                      let trimmed = String.trim value in
-                      if trimmed = "" then "cross_verifier" else trimmed
-                  | _ -> "cross_verifier");
-                repair_directive =
-                  (match
-                     Yojson.Safe.Util.member "repair_directive" json
-                     |> Yojson.Safe.Util.to_string_option
-                     |> Option.map String.trim
-                   with
-                  | Some value when value <> "" -> Some value
-                  | _ -> None);
-                evidence_refs =
-                  non_empty_strings_of_json
-                    (Yojson.Safe.Util.member "evidence_refs" json);
-                generated_at_iso =
-                  (match Yojson.Safe.Util.member "generated_at_iso" json with
-                  | `String value ->
-                      let trimmed = String.trim value in
-                      if trimmed = "" then Types.now_iso () else trimmed
-                  | _ -> Types.now_iso ());
-              }
-      | _ -> None)
-  | _ -> None
+  | `Assoc _ ->
+      let* contract_id =
+        required_nonempty_string_field kind json "contract_id"
+      in
+      let* status =
+        required_enum_field kind json "status"
+          delivery_verdict_status_of_string_result
+      in
+      let* summary = required_string_field kind json "summary" in
+      let* evaluator = required_nonempty_string_field kind json "evaluator" in
+      let* evaluator_role = optional_string_field kind json "evaluator_role" in
+      let* evaluator_cascade =
+        required_nonempty_string_field kind json "evaluator_cascade"
+      in
+      let* repair_directive =
+        optional_string_field kind json "repair_directive"
+      in
+      let* evidence_refs = string_list_field_result kind json "evidence_refs" in
+      let* generated_at_iso =
+        required_nonempty_string_field kind json "generated_at_iso"
+      in
+      Ok
+        {
+          contract_id;
+          status;
+          summary;
+          evaluator;
+          evaluator_role;
+          evaluator_cascade;
+          repair_directive;
+          evidence_refs;
+          generated_at_iso;
+        }
+  | value ->
+      Error
+        (field_error kind "<root>"
+           (Printf.sprintf "expected object, got %s" (json_type_name value)))
+
+let delivery_verdict_of_yojson (json : Yojson.Safe.t) =
+  match delivery_verdict_of_yojson_result json with
+  | Ok verdict -> Some verdict
+  | Error _ -> None
+
+let optional_delivery_contract_field_result kind json field =
+  match member field json with
+  | `Null -> Ok None
+  | (`Assoc _ as value) -> (
+      match delivery_contract_of_yojson value with
+      | Some contract -> Ok (Some contract)
+      | None -> Error (field_error kind field "invalid delivery contract"))
+  | value ->
+      Error
+        (field_error kind field
+           (Printf.sprintf "expected object or null, got %s"
+              (json_type_name value)))
+
+let optional_delivery_verdict_field_result kind json field =
+  match member field json with
+  | `Null -> Ok None
+  | (`Assoc _ as value) -> (
+      match delivery_verdict_of_yojson value with
+      | Some verdict -> Ok (Some verdict)
+      | None -> Error (field_error kind field "invalid delivery verdict"))
+  | value ->
+      Error
+        (field_error kind field
+           (Printf.sprintf "expected object or null, got %s"
+              (json_type_name value)))
 
 let planned_worker_to_yojson (w : planned_worker) =
   `Assoc
@@ -465,90 +674,107 @@ let planned_worker_to_yojson (w : planned_worker) =
       ("routing_escalated", `Bool w.routing_escalated);
     ]
 
-let planned_worker_of_yojson (json : Yojson.Safe.t) =
+let planned_worker_of_yojson_result (json : Yojson.Safe.t) :
+    (planned_worker, string) result =
+  let kind = "planned_worker" in
   match json with
   | `Assoc _ ->
-      let spawn_agent =
-        match member "spawn_agent" json with
-        | `String s ->
-            let trimmed = String.trim s in
-            if trimmed = "" then None else Some trimmed
-        | _ -> None
+      let* spawn_agent = required_nonempty_string_field kind json "spawn_agent" in
+      let* runtime_actor = optional_string_field kind json "runtime_actor" in
+      let* spawn_role = optional_string_field kind json "spawn_role" in
+      let* spawn_model = optional_string_field kind json "spawn_model" in
+      let* execution_scope =
+        optional_enum_field kind json "execution_scope"
+          execution_scope_of_string_result
       in
-      Option.map
-        (fun spawn_agent ->
-          {
-            spawn_agent;
-            runtime_actor = member "runtime_actor" json |> to_string_option;
-            spawn_role = member "spawn_role" json |> to_string_option;
-            spawn_model = member "spawn_model" json |> to_string_option;
-            execution_scope =
-              Option.map
-                execution_scope_of_string
-                (member "execution_scope" json |> to_string_option);
-            thinking_enabled =
-              member "thinking_enabled" json |> to_bool_option;
-            thinking_budget =
-              member "thinking_budget" json |> to_int_option;
-            max_turns =
-              member "max_turns" json |> to_int_option;
-            timeout_seconds =
-              member "timeout_seconds" json |> to_int_option;
-            worker_class =
-              Option.bind
-                (member "worker_class" json |> to_string_option)
-                (fun value ->
-                  worker_class_of_string
-                    (String.lowercase_ascii (String.trim value)));
-            parent_actor = member "parent_actor" json |> to_string_option;
-            capsule_mode =
-              Option.bind
-                (member "capsule_mode" json |> to_string_option)
-                (fun value ->
-                  capsule_mode_of_string
-                    (String.lowercase_ascii (String.trim value)));
-            runtime_pool = member "runtime_pool" json |> to_string_option;
-            lane_id = member "lane_id" json |> to_string_option;
-            controller_level =
-              Option.bind
-                (member "controller_level" json |> to_string_option)
-                (fun value ->
-                  controller_level_of_string
-                    (String.lowercase_ascii (String.trim value)));
-            control_domain =
-              Option.bind
-                (member "control_domain" json |> to_string_option)
-                (fun value ->
-                  control_domain_of_string
-                    (String.lowercase_ascii (String.trim value)));
-            supervisor_actor =
-              member "supervisor_actor" json |> to_string_option;
-            task_profile =
-              Option.bind
-                (member "task_profile" json |> to_string_option)
-                (fun value ->
-                  task_profile_of_string
-                    (String.lowercase_ascii (String.trim value)));
-            risk_level =
-              Option.bind
-                (member "risk_level" json |> to_string_option)
-                (fun value ->
-                  risk_level_of_string
-                    (String.lowercase_ascii (String.trim value)));
-            routing_confidence =
-              (match member "routing_confidence" json with
-              | `Float value -> Some value
-              | `Int value -> Some (float_of_int value)
-              | `Intlit raw -> (try Some (float_of_string raw) with Failure _ -> None)
-              | _ -> None);
-            routing_reason = member "routing_reason" json |> to_string_option;
-            routing_escalated =
-              (match member "routing_escalated" json with
-              | `Bool value -> value
-              | _ -> false);
-          })
-        spawn_agent
-  | _ -> None
+      let thinking_enabled = member "thinking_enabled" json |> to_bool_option in
+      let thinking_budget = member "thinking_budget" json |> to_int_option in
+      let max_turns = member "max_turns" json |> to_int_option in
+      let timeout_seconds = member "timeout_seconds" json |> to_int_option in
+      let* worker_class =
+        optional_enum_field kind json "worker_class" worker_class_of_string_result
+      in
+      let* parent_actor = optional_string_field kind json "parent_actor" in
+      let* capsule_mode =
+        optional_enum_field kind json "capsule_mode" capsule_mode_of_string_result
+      in
+      let* runtime_pool = optional_string_field kind json "runtime_pool" in
+      let* lane_id = optional_string_field kind json "lane_id" in
+      let* controller_level =
+        optional_enum_field kind json "controller_level"
+          controller_level_of_string_result
+      in
+      let* control_domain =
+        optional_enum_field kind json "control_domain"
+          control_domain_of_string_result
+      in
+      let* supervisor_actor =
+        optional_string_field kind json "supervisor_actor"
+      in
+      let* task_profile =
+        optional_enum_field kind json "task_profile" task_profile_of_string_result
+      in
+      let* risk_level =
+        optional_enum_field kind json "risk_level" risk_level_of_string_result
+      in
+      let* routing_confidence =
+        optional_float_field kind json "routing_confidence"
+      in
+      let* routing_reason = optional_string_field kind json "routing_reason" in
+      let routing_escalated =
+        match member "routing_escalated" json with
+        | `Bool value -> value
+        | _ -> false
+      in
+      Ok
+        {
+          spawn_agent;
+          runtime_actor;
+          spawn_role;
+          spawn_model;
+          execution_scope;
+          thinking_enabled;
+          thinking_budget;
+          max_turns;
+          timeout_seconds;
+          worker_class;
+          parent_actor;
+          capsule_mode;
+          runtime_pool;
+          lane_id;
+          controller_level;
+          control_domain;
+          supervisor_actor;
+          task_profile;
+          risk_level;
+          routing_confidence;
+          routing_reason;
+          routing_escalated;
+        }
+  | value ->
+      Error
+        (field_error kind "<root>"
+           (Printf.sprintf "expected object, got %s" (json_type_name value)))
+
+let planned_worker_of_yojson (json : Yojson.Safe.t) =
+  match planned_worker_of_yojson_result json with
+  | Ok worker -> Some worker
+  | Error _ -> None
+
+let planned_workers_field_result kind json field =
+  match member field json with
+  | `List values ->
+      let rec loop acc = function
+        | [] -> Ok (dedup_planned_workers (List.rev acc))
+        | value :: rest ->
+            let* worker = planned_worker_of_yojson_result value in
+            loop (worker :: acc) rest
+      in
+      loop [] values
+  | value ->
+      Error
+        (field_error kind field
+           (Printf.sprintf "expected array, got %s" (json_type_name value)))
 
 let session_to_yojson (s : session) =
   `Assoc
@@ -607,143 +833,176 @@ let session_to_yojson (s : session) =
       ("updated_at_iso", `String s.updated_at_iso);
     ]
 
+let session_of_yojson_result (json : Yojson.Safe.t) : (session, string) result =
+  let kind = "session" in
+  match json with
+  | `Assoc _ ->
+      let* session_id = required_nonempty_string_field kind json "session_id" in
+      let* goal = required_nonempty_string_field kind json "goal" in
+      let* created_by = required_nonempty_string_field kind json "created_by" in
+      let* origin_kind =
+        required_enum_field kind json "origin_kind"
+          session_origin_kind_of_string_result
+      in
+      let* room_id = required_nonempty_string_field kind json "room_id" in
+      let* operation_id = optional_string_field kind json "operation_id" in
+      let* status =
+        required_enum_field kind json "status" status_of_string_result
+      in
+      let* duration_seconds = required_int_field kind json "duration_seconds" in
+      let* execution_scope =
+        required_enum_field kind json "execution_scope"
+          execution_scope_of_string_result
+      in
+      let* checkpoint_interval_sec =
+        required_int_field kind json "checkpoint_interval_sec"
+      in
+      let* min_agents = required_int_field kind json "min_agents" in
+      let* scale_profile =
+        required_enum_field kind json "scale_profile"
+          scale_profile_of_string_result
+      in
+      let* control_profile =
+        required_enum_field kind json "control_profile"
+          control_profile_of_string_result
+      in
+      let* orchestration_mode =
+        required_enum_field kind json "orchestration_mode"
+          orchestration_mode_of_string_result
+      in
+      let* communication_mode =
+        required_enum_field kind json "communication_mode"
+          communication_mode_of_string_result
+      in
+      let* model_cascade = string_list_field_result kind json "model_cascade" in
+      let* fallback_policy =
+        required_enum_field kind json "fallback_policy"
+          fallback_policy_of_string_result
+      in
+      let* instruction_profile =
+        required_enum_field kind json "instruction_profile"
+          instruction_profile_of_string_result
+      in
+      let* alert_channel =
+        required_enum_field kind json "alert_channel"
+          alert_channel_of_string_result
+      in
+      let* auto_resume = required_bool_field kind json "auto_resume" in
+      let* report_formats = report_formats_field_result kind json "report_formats" in
+      let* turn_count = required_int_field kind json "turn_count" in
+      let* agent_names = string_list_field_result kind json "agent_names" in
+      let* planned_workers =
+        planned_workers_field_result kind json "planned_workers"
+      in
+      let* broadcast_count = required_int_field kind json "broadcast_count" in
+      let* portal_count = required_int_field kind json "portal_count" in
+      let* cascade_attempted = required_int_field kind json "cascade_attempted" in
+      let* cascade_success = required_int_field kind json "cascade_success" in
+      let* cascade_failed = required_int_field kind json "cascade_failed" in
+      let* fallback_task_created =
+        required_int_field kind json "fallback_task_created"
+      in
+      let* min_agents_violation_streak =
+        required_int_field kind json "min_agents_violation_streak"
+      in
+      let* policy_violations =
+        string_list_field_result kind json "policy_violations"
+      in
+      let* baseline_done_counts =
+        assoc_int_field_result kind json "baseline_done_counts"
+      in
+      let* final_done_delta_total =
+        optional_int_field kind json "final_done_delta_total"
+      in
+      let* final_done_delta_by_agent =
+        optional_assoc_int_field_result kind json "final_done_delta_by_agent"
+      in
+      let* started_at = required_float_field kind json "started_at" in
+      let* planned_end_at = required_float_field kind json "planned_end_at" in
+      let* stopped_at = optional_float_field kind json "stopped_at" in
+      let* last_checkpoint_at =
+        optional_float_field kind json "last_checkpoint_at"
+      in
+      let* last_event_at = optional_float_field kind json "last_event_at" in
+      let* last_turn_at = optional_float_field kind json "last_turn_at" in
+      let* stop_reason = optional_string_field kind json "stop_reason" in
+      let* generated_report = required_bool_field kind json "generated_report" in
+      let* delivery_contract =
+        optional_delivery_contract_field_result kind json "delivery_contract"
+      in
+      let* latest_delivery_verdict =
+        optional_delivery_verdict_field_result kind json
+          "latest_delivery_verdict"
+      in
+      let* artifacts_dir = required_string_field kind json "artifacts_dir" in
+      let* created_at_iso =
+        required_nonempty_string_field kind json "created_at_iso"
+      in
+      let* updated_at_iso =
+        required_nonempty_string_field kind json "updated_at_iso"
+      in
+      Ok
+        {
+          session_id;
+          goal;
+          created_by;
+          origin_kind;
+          room_id;
+          operation_id;
+          status;
+          duration_seconds;
+          execution_scope;
+          checkpoint_interval_sec;
+          min_agents;
+          scale_profile;
+          control_profile;
+          orchestration_mode;
+          communication_mode;
+          model_cascade;
+          fallback_policy;
+          instruction_profile;
+          alert_channel;
+          auto_resume;
+          report_formats;
+          turn_count;
+          agent_names;
+          planned_workers;
+          broadcast_count;
+          portal_count;
+          cascade_attempted;
+          cascade_success;
+          cascade_failed;
+          fallback_task_created;
+          min_agents_violation_streak;
+          policy_violations;
+          baseline_done_counts;
+          final_done_delta_total;
+          final_done_delta_by_agent;
+          started_at;
+          planned_end_at;
+          stopped_at;
+          last_checkpoint_at;
+          last_event_at;
+          last_turn_at;
+          stop_reason;
+          generated_report;
+          delivery_contract;
+          latest_delivery_verdict;
+          artifacts_dir;
+          created_at_iso;
+          updated_at_iso;
+        }
+  | value ->
+      Error
+        (field_error kind "<root>"
+           (Printf.sprintf "expected object, got %s" (json_type_name value)))
+
 let session_of_yojson json =
-  try
-    let get_int_default key default =
-      match member key json with
-      | `Int n -> n
-      | `Intlit s -> (Option.value ~default:default (int_of_string_opt s))
-      | _ -> default
-    in
-    let get_float_default key default =
-      match member key json with
-      | `Float v -> v
-      | `Int n -> float_of_int n
-      | `Intlit s -> (try float_of_string s with Failure _ -> default)
-      | _ -> default
-    in
-    let started_at = get_float_default "started_at" (Time_compat.now ()) in
-    let duration_seconds = get_int_default "duration_seconds" 3600 in
-    let default_end = started_at +. float_of_int duration_seconds in
-    Some
-      {
-        session_id = json |> member "session_id" |> to_string;
-        goal = json |> member "goal" |> to_string;
-        created_by = json |> member "created_by" |> to_string_option |> Option.value ~default:"unknown";
-        origin_kind =
-          (match json |> member "origin_kind" |> to_string_option with
-          | Some raw -> session_origin_kind_of_string raw
-          | None ->
-              infer_session_origin_kind
-                ~created_by:(json |> member "created_by" |> to_string_option |> Option.value ~default:"unknown")
-                ~orchestration_mode:(
-                  json |> member "orchestration_mode" |> to_string_option
-                  |> Option.value ~default:"assist"
-                  |> orchestration_mode_of_string));
-        room_id = json |> member "room_id" |> to_string_option |> Option.value ~default:"default";
-        operation_id = json |> member "operation_id" |> to_string_option;
-        status = json |> member "status" |> to_string_option |> Option.value ~default:"failed" |> status_of_string;
-        duration_seconds;
-        execution_scope =
-          json |> member "execution_scope" |> to_string_option |> Option.value ~default:"limited_code_change"
-          |> execution_scope_of_string;
-        checkpoint_interval_sec = get_int_default "checkpoint_interval_sec" 60;
-        min_agents = get_int_default "min_agents" 2;
-        scale_profile =
-          json |> member "scale_profile" |> to_string_option
-          |> Option.value ~default:"standard"
-          |> scale_profile_of_string;
-        control_profile =
-          json |> member "control_profile" |> to_string_option
-          |> Option.value ~default:"flat"
-          |> control_profile_of_string;
-        orchestration_mode =
-          json |> member "orchestration_mode" |> to_string_option
-          |> Option.value ~default:"assist"
-          |> orchestration_mode_of_string;
-        communication_mode =
-          json |> member "communication_mode" |> to_string_option
-          |> Option.value ~default:"broadcast"
-          |> communication_mode_of_string;
-        model_cascade =
-          (match member "model_cascade" json with
-           | `List xs -> List.filter_map (function `String s -> Some s | _ -> None) xs
-           | _ -> [])
-          |> dedup_strings;
-        fallback_policy =
-          json |> member "fallback_policy" |> to_string_option
-          |> Option.value ~default:"cascade_then_task"
-          |> fallback_policy_of_string;
-        instruction_profile =
-          json |> member "instruction_profile" |> to_string_option
-          |> Option.value ~default:"standard"
-          |> instruction_profile_of_string;
-        alert_channel =
-          json |> member "alert_channel" |> to_string_option
-          |> Option.value ~default:"both"
-          |> alert_channel_of_string;
-        auto_resume = json |> member "auto_resume" |> to_bool_option |> Option.value ~default:true;
-        report_formats =
-          (match member "report_formats" json with
-           | `List xs ->
-               xs
-               |> List.filter_map (function `String s -> Some s | _ -> None)
-               |> report_formats_of_strings
-           | _ -> [])
-          |> (fun xs -> if xs = [] then [Markdown; Json] else xs);
-        turn_count = get_int_default "turn_count" 0;
-        agent_names =
-          (match member "agent_names" json with
-           | `List xs -> List.filter_map (function `String s -> Some s | _ -> None) xs
-           | _ -> []);
-        planned_workers =
-          (match member "planned_workers" json with
-           | `List xs -> List.filter_map planned_worker_of_yojson xs
-           | _ -> [])
-          |> dedup_planned_workers;
-        broadcast_count = get_int_default "broadcast_count" 0;
-        portal_count = get_int_default "portal_count" 0;
-        cascade_attempted = get_int_default "cascade_attempted" 0;
-        cascade_success = get_int_default "cascade_success" 0;
-        cascade_failed = get_int_default "cascade_failed" 0;
-        fallback_task_created = get_int_default "fallback_task_created" 0;
-        min_agents_violation_streak = get_int_default "min_agents_violation_streak" 0;
-        policy_violations =
-          (match member "policy_violations" json with
-           | `List xs -> List.filter_map (function `String s -> Some s | _ -> None) xs
-           | _ -> [])
-          |> dedup_strings;
-        baseline_done_counts = assoc_int_of_json (member "baseline_done_counts" json);
-        final_done_delta_total =
-          (match member "final_done_delta_total" json with
-           | `Int n -> Some n
-           | `Intlit s -> (int_of_string_opt (s))
-           | _ -> None);
-        final_done_delta_by_agent =
-          (match member "final_done_delta_by_agent" json with
-           | `Assoc _ as assoc -> Some (assoc_int_of_json assoc)
-           | _ -> None);
-        started_at;
-        planned_end_at = get_float_default "planned_end_at" default_end;
-        stopped_at = json |> member "stopped_at" |> to_float_option;
-        last_checkpoint_at = json |> member "last_checkpoint_at" |> to_float_option;
-        last_event_at = json |> member "last_event_at" |> to_float_option;
-        last_turn_at = json |> member "last_turn_at" |> to_float_option;
-        stop_reason = json |> member "stop_reason" |> to_string_option;
-        generated_report = json |> member "generated_report" |> to_bool_option |> Option.value ~default:false;
-        delivery_contract =
-          delivery_contract_of_yojson (member "delivery_contract" json);
-        latest_delivery_verdict =
-          delivery_verdict_of_yojson
-            (member "latest_delivery_verdict" json);
-        artifacts_dir = json |> member "artifacts_dir" |> to_string_option |> Option.value ~default:"";
-        created_at_iso = json |> member "created_at_iso" |> to_string_option |> Option.value ~default:(Types.now_iso ());
-        updated_at_iso = json |> member "updated_at_iso" |> to_string_option |> Option.value ~default:(Types.now_iso ());
-      }
-  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-    Log.Session.error "session_of_yojson parse failed: %s"
-      (Printexc.to_string exn);
-    None
+  match session_of_yojson_result json with
+  | Ok session -> Some session
+  | Error message ->
+      Log.Session.error "session_of_yojson parse failed: %s" message;
+      None
 
 let event_entry_to_yojson (e : event_entry) =
   `Assoc
@@ -755,23 +1014,40 @@ let event_entry_to_yojson (e : event_entry) =
     ]
 
 let checkpoint_of_yojson (json : Yojson.Safe.t) : (checkpoint, string) result =
-  try
-    Ok
-      {
-        ts = json |> member "ts" |> to_float;
-        ts_iso = json |> member "ts_iso" |> to_string;
-        status =
-          json |> member "status" |> to_string |> status_of_string;
-        elapsed_sec = json |> member "elapsed_sec" |> to_int;
-        remaining_sec = json |> member "remaining_sec" |> to_int;
-        progress_pct = json |> member "progress_pct" |> to_float;
-        done_delta_total = json |> member "done_delta_total" |> to_int;
-        done_delta_by_agent =
-          assoc_int_of_json (json |> member "done_delta_by_agent");
-        active_agents =
-          json |> member "active_agents" |> to_list |> List.map to_string;
-      }
-  with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Error (Printexc.to_string exn)
+  let kind = "checkpoint" in
+  match json with
+  | `Assoc _ ->
+      let* ts = required_float_field kind json "ts" in
+      let* ts_iso = required_nonempty_string_field kind json "ts_iso" in
+      let* status =
+        required_enum_field kind json "status" status_of_string_result
+      in
+      let* elapsed_sec = required_int_field kind json "elapsed_sec" in
+      let* remaining_sec = required_int_field kind json "remaining_sec" in
+      let* progress_pct = required_float_field kind json "progress_pct" in
+      let* done_delta_total =
+        required_int_field kind json "done_delta_total"
+      in
+      let* done_delta_by_agent =
+        assoc_int_field_result kind json "done_delta_by_agent"
+      in
+      let* active_agents = string_list_field_result kind json "active_agents" in
+      Ok
+        {
+          ts;
+          ts_iso;
+          status;
+          elapsed_sec;
+          remaining_sec;
+          progress_pct;
+          done_delta_total;
+          done_delta_by_agent;
+          active_agents;
+        }
+  | value ->
+      Error
+        (field_error kind "<root>"
+           (Printf.sprintf "expected object, got %s" (json_type_name value)))
 
 let event_entry_of_yojson (json : Yojson.Safe.t) : (event_entry, string) result =
   try

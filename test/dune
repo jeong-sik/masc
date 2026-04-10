@@ -38,6 +38,7 @@
         test_graphql_endpoint
         test_subscriptions test_session test_progress test_spawn
         test_validation test_response
+        test_team_session_types_parsing
         test_channel_gate_connector_routes
         test_dashboard
         test_dashboard_perf
@@ -110,6 +111,7 @@
           test_graphql_endpoint
           test_subscriptions test_session test_progress test_spawn
           test_validation test_response
+          test_team_session_types_parsing
           test_channel_gate_connector_routes
           test_dashboard
           test_dashboard_perf

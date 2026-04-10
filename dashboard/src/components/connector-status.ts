@@ -250,6 +250,7 @@ async function refresh() {
 
 const CHANNEL_ICONS: Record<string, string> = {
   discord: '\u{1F3AE}',
+  imessage: '\u{1F4F1}',
   telegram: '\u{2708}',
   slack: '\u{1F4AC}',
   signal: '\u{1F512}',

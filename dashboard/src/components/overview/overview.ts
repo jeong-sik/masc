@@ -15,7 +15,6 @@ import { AttentionSpotlight } from './attention-spotlight'
 import { NarrativeTimeline } from './narrative-timeline'
 import { AgentAvatar } from './agent-avatar'
 import { TransportHealthPanel } from '../transport-health'
-import { ConnectorStatusPanel } from '../connector-status'
 import { PerfSnapshotPanel } from '../perf-snapshot'
 import { RouteLink } from '../common/route-link'
 import {
@@ -797,10 +796,6 @@ export function Overview() {
       ${agentPulse ? html`<div class=${OVERVIEW_CARD}>${agentPulse}</div>` : null}
 
       ${toolHealth ? html`<div class=${OVERVIEW_CARD}>${toolHealth}</div>` : null}
-
-      <div class=${OVERVIEW_CARD}>
-        <${ConnectorStatusPanel} />
-      </div>
 
       <details class=${OVERVIEW_CARD}>
         <summary class="cursor-pointer text-xs font-semibold text-[var(--text-strong)] uppercase tracking-wider select-none list-none flex items-center gap-2">

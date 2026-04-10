@@ -700,6 +700,7 @@ export interface DashboardRuntimeProbePayload {
   probe_runs_requested?: number
   probe_runs_completed?: number
   max_tokens?: number
+  keep_alive?: string | null
   timeout_sec?: number
   ps_timeout_sec?: number
   prompt_chars?: number

@@ -77,6 +77,11 @@ let set_grpc_client ?(env : Eio_unix.Stdenv.base option) c =
   Atomic.set grpc_env_ref env
 ;;
 
+let format_since_last_scheduled_autonomous = function
+  | Some s when s = max_int -> "never"
+  | Some s -> string_of_int s
+  | None -> "-"
+
 (** Sleep in short chunks so [stop_keepalive] or [wakeup_keeper] takes
     effect within ~chunk_sec instead of waiting for the full interval. *)
 let interruptible_sleep ~clock ~stop ~wakeup duration =
@@ -746,8 +751,14 @@ let run_keepalive_unified_turn
            | Keeper_world_observation.Reactive -> "reactive"
            | Keeper_world_observation.Scheduled_autonomous -> "scheduled_autonomous")
           (String.concat "," turn_decision.reasons);
-      if (not should_run_turn) && (not manual_reconcile_pending) then
-        Log.Keeper.info
+      if (not should_run_turn) && (not manual_reconcile_pending) then (
+        let log_not_scheduled =
+          match turn_decision.channel, turn_decision.reasons with
+          | Keeper_world_observation.Scheduled_autonomous,
+            [ "scheduled_autonomous_disabled" ] -> Log.Keeper.debug
+          | _ -> Log.Keeper.info
+        in
+        log_not_scheduled
           "keepalive turn not scheduled for %s: should_run=%b channel=%s reasons=[%s] since_last=%s idle_gate=%s"
           meta_after_triage.name
           turn_decision.should_run
@@ -755,10 +766,10 @@ let run_keepalive_unified_turn
            | Keeper_world_observation.Reactive -> "reactive"
            | Keeper_world_observation.Scheduled_autonomous -> "scheduled_autonomous")
           (String.concat "," turn_decision.reasons)
-          (match turn_decision.since_last_scheduled_autonomous with
-           | Some s -> string_of_int s | None -> "-")
+          (format_since_last_scheduled_autonomous
+             turn_decision.since_last_scheduled_autonomous)
           (match turn_decision.idle_gate_sec with
-           | Some s -> string_of_int s | None -> "-");
+           | Some s -> string_of_int s | None -> "-"));
       if should_run_turn then
         Log.Keeper.info
           "keepalive turn scheduled for %s: channel=%s reasons=%s"

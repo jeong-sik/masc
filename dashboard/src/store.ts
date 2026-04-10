@@ -22,6 +22,8 @@ import type {
   DashboardExecutionWorkerSupportBrief,
   DashboardExecutionContinuityBrief,
   DashboardExecutionResponse,
+  DashboardConfigResolution,
+  DashboardRuntimeResolution,
   DashboardShellAuthSummary,
   DashboardShellMetaCognitionSummary,
 } from './types'
@@ -51,6 +53,8 @@ import {
   normalizeExecutionContinuityBrief,
   mergeMessages,
   normalizeServerStatus, mergeServerStatus,
+  normalizeDashboardConfigResolution,
+  normalizeDashboardRuntimeResolution,
   normalizeShellMetaCognitionSummary,
 } from './store-normalizers'
 
@@ -65,6 +69,8 @@ export interface ShellCounts {
 export const shellCounts = signal<ShellCounts | null>(null)
 export const shellMetaCognition = signal<DashboardShellMetaCognitionSummary | null>(null)
 export const shellAuthSummary = signal<DashboardShellAuthSummary | null>(null)
+export const shellConfigResolution = signal<DashboardConfigResolution | null>(null)
+export const shellRuntimeResolution = signal<DashboardRuntimeResolution | null>(null)
 
 // --- Core state signals ---
 
@@ -364,6 +370,8 @@ export async function refreshShell(opts?: RefreshOptions): Promise<void> {
       }
       shellMetaCognition.value = normalizeShellMetaCognitionSummary(data.meta_cognition)
       shellAuthSummary.value = normalizeShellAuthSummary(data.auth)
+      shellConfigResolution.value = normalizeDashboardConfigResolution(data.config_resolution)
+      shellRuntimeResolution.value = normalizeDashboardRuntimeResolution(data.runtime_resolution)
       lastShellRefreshAt = Date.now()
     } catch (err) {
       console.warn('[Dashboard] shell fetch error:', err)

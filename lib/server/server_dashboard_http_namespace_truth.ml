@@ -168,13 +168,43 @@ let namespace_truth_snapshot_from_caches (state : Mcp_server.server_state) :
          ~initialized:(Room.is_initialized config) ~shell_json ~execution_json
          ~command_summary_json)
 
+let _last_namespace_truth_snapshot_hash : Digestif.SHA256.t option ref =
+  ref None
+
+let _namespace_truth_snapshot_hash_mu = Eio.Mutex.create ()
+
+let rec normalize_namespace_truth_snapshot_for_hash (json : Yojson.Safe.t) :
+    Yojson.Safe.t =
+  match json with
+  | `Assoc fields ->
+      `Assoc
+        (fields
+        |> List.filter_map (fun (key, value) ->
+               if String.equal key "generated_at" then None
+               else Some (key, normalize_namespace_truth_snapshot_for_hash value)))
+  | `List values ->
+      `List (List.map normalize_namespace_truth_snapshot_for_hash values)
+  | other -> other
+
+let should_broadcast_namespace_truth_snapshot (snapshot : Yojson.Safe.t) =
+  let serialized =
+    snapshot |> normalize_namespace_truth_snapshot_for_hash |> Yojson.Safe.to_string
+  in
+  let hash = Digestif.SHA256.digest_string serialized in
+  Eio.Mutex.use_rw ~protect:true _namespace_truth_snapshot_hash_mu (fun () ->
+      match !_last_namespace_truth_snapshot_hash with
+      | Some prev when Digestif.SHA256.equal prev hash -> false
+      | _ ->
+          _last_namespace_truth_snapshot_hash := Some hash;
+          true)
+
 (** Broadcast current namespace-truth snapshot to all Observer SSE sessions.
     Called after proactive cache refreshes and keeper lifecycle events.
     Safe to call from any fiber — reads only from cached refs. *)
 let broadcast_namespace_truth_snapshot (state : Mcp_server.server_state) : unit =
   match namespace_truth_snapshot_from_caches state with
   | None -> ()
-  | Some snapshot ->
+  | Some snapshot when should_broadcast_namespace_truth_snapshot snapshot ->
       let namespace_sse_json =
         `Assoc
           [
@@ -197,6 +227,8 @@ let broadcast_namespace_truth_snapshot (state : Mcp_server.server_state) : unit 
         (Server_meta_cognition_feedback.maybe_post_digest
            ~config:state.Mcp_server.room_config snapshot);
       Log.Dashboard.info "namespace-truth snapshot pushed via SSE"
+  | Some _ ->
+      Log.Dashboard.debug "namespace-truth snapshot unchanged, skipping SSE broadcast"
 
 let () =
   Execution_surfaces._broadcast_namespace_truth_ref :=

@@ -75,16 +75,12 @@ let keeper_recovery_outcome after_diagnostic =
              state) )
   | None -> (false, Some "keeper recovery did not return a health_state")
 
-let resolve_team_turn_actor config ~requested_actor ~session_id =
-  match Team_session_store.load_session config session_id with
-  | None -> Error (Printf.sprintf "team session not found: %s" session_id)
-  | Some session ->
-      if String.equal requested_actor session.created_by
-         || List.exists (String.equal requested_actor) session.agent_names
-      then
-        Ok (requested_actor, false)
-      else
-        Ok (session.created_by, true)
+let resolve_team_turn_actor _config ~requested_actor:_ ~session_id =
+  (* Team_session_store removed *)
+  Error
+    (Printf.sprintf
+       "team session actions are no longer supported (team session layer removed; session_id=%s)"
+       session_id)
 
 let execute_team_turn ~ctx ~request ~session_id ~turn_kind ~message ~target_agent
     ~task_title ~task_description ~task_priority =
@@ -289,16 +285,9 @@ let execute_team_action (ctx : 'a context) (request : action_request) =
         get_string request.payload "reason" "Stopped by operator control plane"
       in
       let generate_report = get_bool request.payload "generate_report" true in
-      let* result =
-        Team_session_engine_eio.stop_session ~config:ctx.config ~session_id
-          ~reason ~generate_report
-      in
-      Ok
-        (`Assoc
-          [
-            ("tool_name", `String "masc_team_session_stop");
-            ("result", result);
-          ])
+      (* Team_session_engine_eio removed *)
+      ignore (generate_report, reason);
+      Error (Printf.sprintf "team session engine removed, cannot stop session: %s" session_id)
   | _ -> Error (Printf.sprintf "not a team action: %s" request.action_type)
 
 let execute_keeper_action (ctx : 'a context) (request : action_request) =

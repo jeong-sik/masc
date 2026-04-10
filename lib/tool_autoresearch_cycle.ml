@@ -597,34 +597,14 @@ let handle_cycle (ctx : Tool_autoresearch_repo_synthesis.context) args =
                        Autoresearch.with_loops_rw (fun () ->
                          Hashtbl.replace Autoresearch.active_loops id state);
                        Autoresearch.save_state ~base_path:ctx.base_path state;
-                       let config = Room.default_config ctx.base_path in
+                       let _config = Room.default_config ctx.base_path in
                        (match
                           Autoresearch.load_swarm_link_by_loop
                             ~base_path:ctx.base_path id
                         with
-                       | Some link ->
-                         (try
-                            Team_session_store.append_event config link.session_id
-                              ~event_type:"linked_autoresearch_cycle"
-                              ~detail:
-                                (`Assoc
-                                  [
-                                    ("loop_id", `String id);
-                                    ("cycle", `Int effective_record.cycle);
-                                    ("hypothesis", `String hypothesis);
-                                    ( "decision",
-                                      `String
-                                        (Autoresearch.decision_to_string
-                                           effective_record.decision) );
-                                    ("delta", `Float effective_record.delta);
-                                    ("baseline", `Float state.baseline);
-                                    ("best_score", `Float state.best_score);
-                                  ])
-                          with
-                          | Eio.Cancel.Cancelled _ as e -> raise e
-                          | exn ->
-                            Log.Autoresearch.warn "cycle event append failed: %s"
-                              (Printexc.to_string exn))
+                       | Some _link ->
+                         (* Team_session_store removed — skip event append *)
+                         ()
                        | None -> ());
                        broadcast_cycle_result state effective_record;
                        `Assoc

@@ -18,10 +18,16 @@ import { TransportHealthPanel } from '../transport-health'
 import { ConnectorStatusPanel } from '../connector-status'
 import { PerfSnapshotPanel } from '../perf-snapshot'
 import { RouteLink } from '../common/route-link'
-import { serverStatus, shellMetaCognition } from '../../store'
+import {
+  serverStatus,
+  shellMetaCognition,
+  shellConfigResolution,
+  shellRuntimeResolution,
+} from '../../store'
 import { navigateToPost } from '../../router'
 import type { ObservatoryAgent } from '../../observatory-store'
 import type {
+  DashboardConfigResolutionItem,
   DashboardMissionSessionBrief,
   DashboardShellMetaCognitionSummary,
 } from '../../types'
@@ -591,6 +597,168 @@ function OperationsHubCard() {
   `
 }
 
+function resolutionTone(status?: string | null): string {
+  switch ((status ?? '').trim().toLowerCase()) {
+    case 'ready':
+      return 'border-ok/30 bg-ok/10 text-ok'
+    case 'warn':
+      return 'border-warn/30 bg-warn/12 text-warn'
+    case 'invalid_env':
+      return 'border-bad/30 bg-bad/10 text-bad-light'
+    default:
+      return 'border-card-border/50 bg-card/45 text-[var(--text-muted)]'
+  }
+}
+
+function sourceSummaryLabel(source?: string | null): string {
+  switch ((source ?? '').trim()) {
+    case 'env':
+      return 'env'
+    case 'home_masc':
+      return 'home'
+    case 'cwd':
+      return 'cwd'
+    case 'exe_relative':
+      return 'exe'
+    case 'resolved_base':
+      return 'resolved'
+    case 'runtime_data':
+      return 'runtime'
+    case 'prompt_registry':
+      return 'prompt'
+    default:
+      return source && source.length > 0 ? source : 'missing'
+  }
+}
+
+function PathTruthBlock({
+  label,
+  item,
+}: {
+  label: string
+  item: DashboardConfigResolutionItem | null | undefined
+}) {
+  if (!item) return null
+
+  return html`
+    <div class="rounded-lg border border-card-border/35 bg-card/45 p-3">
+      <div class="flex flex-wrap items-center gap-2">
+        <div class="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">${label}</div>
+        <span class="rounded-full border px-2 py-0.5 text-[10px] font-semibold ${item.exists ? 'border-ok/25 bg-ok/10 text-ok' : 'border-bad/25 bg-bad/10 text-bad-light'}">
+          ${item.exists ? 'present' : 'missing'}
+        </span>
+        <span class="rounded-full border border-card-border/50 bg-card/55 px-2 py-0.5 text-[10px] text-[var(--text-muted)]">
+          ${sourceSummaryLabel(item.source)}
+        </span>
+      </div>
+      <div class="mt-2 break-all font-mono text-[12px] leading-relaxed text-[var(--text-body)]">${item.path}</div>
+    </div>
+  `
+}
+
+function ConfigTruthCard() {
+  const configResolution = shellConfigResolution.value
+  const runtimeResolution = shellRuntimeResolution.value
+  if (!configResolution && !runtimeResolution) return null
+
+  const warningCount =
+    (configResolution?.warnings.length ?? 0)
+    + (runtimeResolution?.warnings.length ?? 0)
+    + (runtimeResolution?.source_mismatch ? 1 : 0)
+
+  return html`
+    <div>
+      <${HomeSectionHeader}
+        label="설정 Truth"
+        linkLabel="도구 상세 ->"
+        linkTab="lab"
+        linkParams=${{ section: 'tools' }}
+      />
+      <div class="grid grid-cols-[minmax(0,1fr)_auto] gap-4 max-[920px]:grid-cols-1">
+        <div class="rounded-xl border border-card-border/40 bg-card/40 p-4">
+          <div class="flex flex-wrap items-center gap-2">
+            ${configResolution
+              ? html`
+                  <span class="rounded-full border px-2.5 py-1 text-[11px] font-semibold ${resolutionTone(configResolution.status)}">
+                    config ${configResolution.status}
+                  </span>
+                `
+              : null}
+            ${runtimeResolution
+              ? html`
+                  <span class="rounded-full border px-2.5 py-1 text-[11px] font-semibold ${resolutionTone(runtimeResolution.status)}">
+                    runtime ${runtimeResolution.status}
+                  </span>
+                `
+              : null}
+            ${warningCount > 0
+              ? html`
+                  <span class="rounded-full border border-warn/25 bg-warn/12 px-2.5 py-1 text-[11px] font-semibold text-warn">
+                    warning ${warningCount}
+                  </span>
+                `
+              : html`
+                  <span class="rounded-full border border-ok/25 bg-ok/10 px-2.5 py-1 text-[11px] font-semibold text-ok">
+                    drift 없음
+                  </span>
+                `}
+          </div>
+
+          <div class="mt-3 text-[13px] leading-[1.7] text-[var(--text-body)]">
+            현재 서버가 어떤 config root와 runtime root를 보고 있는지 바로 확인합니다.
+            env override, passive copy, nested <code class="font-mono">.masc</code> drift를 여기서 먼저 드러냅니다.
+          </div>
+
+          <div class="mt-4 grid grid-cols-3 gap-3 max-[980px]:grid-cols-1">
+            <${PathTruthBlock} label="config root" item=${configResolution?.config_root} />
+            <${PathTruthBlock} label="runtime root" item=${runtimeResolution?.data_root} />
+            <${PathTruthBlock} label="personas" item=${configResolution?.personas} />
+          </div>
+
+          ${warningCount > 0
+            ? html`
+                <div class="mt-4 flex flex-col gap-2">
+                  ${configResolution?.warnings.slice(0, 2).map(warning => html`
+                    <div class="rounded-lg border border-warn/25 bg-warn/10 px-3 py-2 text-[12px] text-[var(--text-body)]">${warning}</div>
+                  `)}
+                  ${runtimeResolution?.warnings.slice(0, 2).map(warning => html`
+                    <div class="rounded-lg border border-warn/25 bg-warn/10 px-3 py-2 text-[12px] text-[var(--text-body)]">${warning}</div>
+                  `)}
+                  ${runtimeResolution?.source_mismatch
+                    ? html`
+                        <div class="rounded-lg border border-bad/25 bg-bad/10 px-3 py-2 text-[12px] text-[var(--text-body)]">
+                          workspace와 runtime build source가 다릅니다.
+                        </div>
+                      `
+                    : null}
+                </div>
+              `
+            : null}
+        </div>
+
+        <div class="flex flex-col gap-2">
+          <${RouteLink}
+            tab="lab"
+            params=${{ section: 'inspector' }}
+            class="rounded-xl border border-accent/25 bg-[var(--accent-10)] px-4 py-3 text-[13px] font-semibold text-accent transition-colors hover:bg-accent/18"
+            title="운영 인스펙터 열기"
+          >
+            운영 인스펙터
+          <//>
+          <${RouteLink}
+            tab="lab"
+            params=${{ section: 'tools' }}
+            class="rounded-xl border border-card-border/45 bg-card/45 px-4 py-3 text-[13px] font-semibold text-[var(--text-strong)] transition-colors hover:bg-card"
+            title="설정 경로 상세"
+          >
+            설정 경로 상세
+          <//>
+        </div>
+      </div>
+    </div>
+  `
+}
+
 // --- Overview (Home) ---
 
 const OVERVIEW_CARD = 'rounded-xl border border-card-border/40 bg-card/18 p-4 shadow-sm shadow-black/8'
@@ -599,6 +767,7 @@ export function Overview() {
   const snap = missionSnapshot.value
   const roomHealth = snap?.summary?.room_health ?? null
   const metaCognitionCard = MetaCognitionCard()
+  const configTruthCard = ConfigTruthCard()
   const hotSessions = HotSessions()
   const agentPulse = AgentPulse()
   const toolHealth = ToolCallHealthPanel()
@@ -618,6 +787,8 @@ export function Overview() {
       <div class=${OVERVIEW_CARD}>
         <${OperationsHubCard} />
       </div>
+
+      ${configTruthCard ? html`<div class=${OVERVIEW_CARD}>${configTruthCard}</div>` : null}
 
       ${metaCognitionCard}
 

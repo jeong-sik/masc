@@ -1093,14 +1093,8 @@ let test_keeper_msg_auto_team_session_bridge () =
         Alcotest.(check bool) "reused" false
           (first_json |> member "reused" |> to_bool);
         let session_id = first_json |> member "session_id" |> to_string in
-        let session =
-          match Team_session_store.load_session config session_id with
-          | Some session -> session
-          | None -> Alcotest.fail "team session missing after keeper_msg"
-        in
-        Alcotest.(check string) "session goal" first_message session.goal;
-        Alcotest.(check string) "session status" "running"
-          (Team_session_types.status_to_string session.status);
+        (* Team_session_store removed — skip session verification *)
+        ignore session_id;
         (* Team session tools removed — skip team_session_status dispatch test *)
         ignore (config, sw, env, session_id);
         Alcotest.(check bool) "spawn_error surfaced" true
@@ -1128,16 +1122,8 @@ let test_keeper_msg_auto_team_session_bridge () =
           Yojson.Safe.Util.(status_json |> member "team_session_state" = `Null);
         Alcotest.(check bool) "status omits team session bridge" true
           Yojson.Safe.Util.(status_json |> member "team_session_bridge" = `Null);
-        let events = Team_session_store.read_recent_events config session_id ~max_count:10 in
-        let note_events =
-          List.filter
-            (fun event ->
-              event.Team_session_types.event_type = "team_turn"
-              && Yojson.Safe.Util.(
-                   event.detail |> member "kind" |> to_string = "note"))
-            events
-        in
-        Alcotest.(check bool) "note event recorded" true (note_events <> []);
+        (* Team_session_store removed — skip event verification *)
+        ignore (config, session_id);
         let ok, second_body =
           dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_msg"
             ~args:
@@ -1155,19 +1141,8 @@ let test_keeper_msg_auto_team_session_bridge () =
           Yojson.Safe.Util.(second_json |> member "created" |> to_bool);
         Alcotest.(check bool) "second reused true" true
           Yojson.Safe.Util.(second_json |> member "reused" |> to_bool);
-        let events_after = Team_session_store.read_recent_events config session_id ~max_count:20 in
-        let note_count =
-          List.fold_left
-            (fun acc event ->
-              if
-                event.Team_session_types.event_type = "team_turn"
-                && Yojson.Safe.Util.(
-                     event.detail |> member "kind" |> to_string = "note")
-              then acc + 1
-              else acc)
-            0 events_after
-        in
-        Alcotest.(check bool) "second note recorded" true (note_count >= 2);
+        (* Team_session_store removed — skip event count verification *)
+        ignore (config, session_id);
         let ok, _ =
           dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_down"
             ~args:(`Assoc [ ("name", `String keeper_name) ])
@@ -1180,9 +1155,8 @@ let test_keeper_msg_auto_team_session_bridge () =
           | Error err -> Alcotest.fail ("meta read after down failed: " ^ err)
         in
         Alcotest.(check bool) "keeper paused on down" true meta_after_down.paused;
-        ignore
-          (Team_session_engine_eio.stop_session ~config ~session_id
-             ~reason:"test_cleanup" ~generate_report:false))
+        (* Team_session_engine_eio removed — skip session cleanup *)
+        ignore (config, session_id))
 
 let test_operator_keeper_message_rejects_legacy_model_args () =
   Eio_main.run @@ fun env ->

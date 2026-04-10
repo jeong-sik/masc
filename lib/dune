@@ -80,11 +80,6 @@
    dashboard_mission_agents
    dashboard_mission_assembly
    dashboard_mission
-   dashboard_proof
-   dashboard_proof_events
-   dashboard_proof_actors
-   dashboard_proof_verdict
-   dashboard_proof_helpers
    briefing_json_helpers
    briefing_compactors
    briefing_gaps
@@ -193,7 +188,6 @@
    worker_container_types
    worker_container
    worker_container_runners
-   worker_run_once
    worker_dev_tools
    worker_tool_input
    worker_verification
@@ -267,23 +261,9 @@
    convergence
    swarm
    swarm_goal_loop
-   worker_run_evidence_summary
    room
    run_eio
    team_context
-   team_session_store
-   team_session_report
-   team_session_report_core
-   team_session_report_proof_helpers
-   team_session_report_proof
-   team_session_worker_run_meta
-   team_session_engine_helpers
-   team_session_engine_status
-   team_session_engine_policy
-   team_session_engine_eio
-   team_session_oas_bridge
-   team_session_swarm_callbacks
-   team_session_swarm_runner
    ;; sctp/sctp_eio/sctp_transport removed — in ocaml-webrtc
    ;; sdp removed — in ocaml-webrtc
    session
@@ -319,14 +299,12 @@
    tool_relay
    worktree_live_context
    tool_operator
-   team_session_plan
    tool_heartbeat
    tool_auth
    tool_agent
    tool_task
    tool_task_schemas
    task_dispatch
-   task_contract_gate
    tool_room
    workflow_guide
    tool_control
@@ -414,7 +392,6 @@
    keeper_toml_loader
    keeper_contract
    keeper_cdal_contract
-   cdal_contract_bridge
    proof_artifact_reader
    violation_record
    token_usage_record
@@ -427,8 +404,6 @@
    golden_set
    adversarial_eval
    labeling
-   contract_risk
-   contract_composer
    keeper_telemetry_feedback
    keeper_deliberation
    keeper_types_profile
@@ -661,11 +636,6 @@
   keeper_event_bus
   keeper_file_tracker
   keeper_evidence
-  team_session_engine_helpers
-  team_session_engine_status
-  team_session_engine_policy
-  team_session_swarm_callbacks
-  team_session_swarm_runner
   ;; worker_container sub-modules
   worker_container_types
   worker_container
@@ -674,11 +644,6 @@
   keeper_memory_policy
   keeper_memory_bank
   keeper_memory_recall
-  ;; team_session_report sub-modules
-  team_session_report_core
-  team_session_report_proof_helpers
-  team_session_report_proof
-  team_session_worker_run_meta
   ;; godsplit-phase1: file split sub-modules
   keeper_status_bridge
   ;; godsplit-phase2: additional sub-modules
@@ -689,10 +654,6 @@
   tool_autoresearch_broadcast
   tool_autoresearch_repo_synthesis
   tool_autoresearch_cycle
-  dashboard_proof_events
-  dashboard_proof_actors
-  dashboard_proof_verdict
-  dashboard_proof_helpers
   keeper_skill_routing
   keeper_alerting_path
   ;; tool_local_runtime sub-modules

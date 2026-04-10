@@ -606,31 +606,9 @@ let summary_json ?sessions config =
       ("swarm_proof", swarm_proof_json config);
     ]
 
-let recent_team_session_trace_events config session_id limit =
-  Team_session_store.read_events ~max_events:limit config session_id
-  |> List.filter_map (fun json ->
-         let event_type = get_string_opt json "event_type" in
-         let timestamp = get_string_opt json "ts_iso" in
-         let detail =
-           match U.member "detail" json with
-           | `Assoc _ as value -> value
-           | `List _ as value -> value
-           | `Null -> `Assoc []
-           | value -> value
-         in
-         match event_type, timestamp with
-         | Some event_type, Some timestamp ->
-             Some
-               (`Assoc
-                 [
-                   ("event_id", `String (next_event_id "trace"));
-                   ("trace_id", `String session_id);
-                   ("event_type", `String event_type);
-                   ("source", `String "team_session");
-                   ("timestamp", `String timestamp);
-                   ("detail", detail);
-                 ])
-         | _ -> None)
+let recent_team_session_trace_events _config _session_id _limit =
+  (* Team_session_store removed — return empty *)
+  []
 
 let recent_operator_trace_events config ?trace_id limit =
   if not (Room_utils.path_exists config (operator_action_log_path config)) then

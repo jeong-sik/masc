@@ -92,29 +92,9 @@ let dashboard_proof_cache_selector ?session_id ?operation_id () =
     (value_or_star session_id)
     (value_or_star operation_id)
 
-let dashboard_active_or_recent_sessions ~clock config =
-  let cutoff_unix = Time_compat.now () -. Masc_time_constants.day in
-  let cutoff_iso = Dashboard_utils.iso_of_unix cutoff_unix in
-  let limit = dashboard_session_list_limit () in
-  let sessions =
-    match
-      Eio.Time.with_timeout clock _session_list_timeout_s (fun () ->
-          Ok
-            (Team_session_store.list_sessions ~since_unix:cutoff_unix
-               ~limit config))
-    with
-    | Ok rows -> rows
-    | Error `Timeout ->
-        Log.Dashboard.warn
-          "dashboard session list timed out after %.0fs (limit=%d); serving without session rows"
-          _session_list_timeout_s limit;
-        []
-  in
-  sessions
-  |> List.filter (fun (session : Team_session_types.session) ->
-         match session.status with
-         | Running | Paused -> true
-         | _ -> session.updated_at_iso >= cutoff_iso)
+let dashboard_active_or_recent_sessions ~clock:_ _config =
+  (* Team_session_store removed — return empty *)
+  ([] : Team_session_types.session list)
 
 let attach_projection_diagnostics json diagnostics =
   match json with
@@ -266,7 +246,7 @@ let dashboard_batch_json ?(compact = false) (config : Room.config) : Yojson.Safe
         ]
       in
       let projection_fields =
-        match Task_contract_gate.task_projection_json config t with
+        match (fun _t -> ignore config; `Assoc []) t with
         | `Assoc fields -> fields
         | _ -> []
       in
@@ -379,7 +359,7 @@ let dashboard_active_or_recent_sessions_cached ~clock config =
 let operator_snapshot_extra sessions =
   [
     ("session_count", `Int (List.length sessions));
-    ("session_list", Team_session_store.session_list_diagnostics_json ());
+    ("session_list", `Assoc []);
     ("readonly_pool", Room_utils.domain_local_pg_backend_diagnostics_json ());
   ]
 
@@ -581,7 +561,7 @@ let operator_snapshot_http_json ~state ~sw ~clock request =
     | Ok json ->
         let extra =
           [
-            ("session_list", Team_session_store.session_list_diagnostics_json ());
+            ("session_list", `Assoc []);
             ("readonly_pool", Room_utils.domain_local_pg_backend_diagnostics_json ());
           ]
         in
@@ -674,7 +654,7 @@ let operator_digest_http_json ~state ~sw ~clock request =
     | Ok json ->
         let extra =
           [
-            ("session_list", Team_session_store.session_list_diagnostics_json ());
+            ("session_list", `Assoc []);
             ("readonly_pool", Room_utils.domain_local_pg_backend_diagnostics_json ());
           ]
         in
@@ -865,8 +845,10 @@ let dashboard_proof_http_json ~state request =
   in
   Dashboard_cache.get_or_compute cache_key ~ttl:_dashboard_proof_cache_ttl_s
     (fun () ->
-      Dashboard_proof.json ?actor:(operator_actor_hint request) ?session_id
-        ?operation_id ~config:state.Mcp_server.room_config ())
+      (* Dashboard_proof removed — return empty *)
+      ignore (operator_actor_hint request, session_id, operation_id,
+              state.Mcp_server.room_config);
+      `Assoc [("status", `String "removed"); ("reason", `String "team session layer removed")])
 
 let dashboard_shell_status_json (config : Room.config) : Yojson.Safe.t =
   let room_state = Room.read_state config in
@@ -913,7 +895,7 @@ let dashboard_task_json config (task : Types.task) =
     ]
   in
   let projection_fields =
-    match Task_contract_gate.task_projection_json config task with
+    match (fun _t -> ignore config; `Assoc []) task with
     | `Assoc fields -> fields
     | _ -> []
   in
@@ -994,6 +976,15 @@ let dashboard_shell_payload_json (config : Room.config) : Yojson.Safe.t =
     let elapsed_ms = int_of_float ((Unix.gettimeofday () -. t0) *. 1000.0) in
     (value, elapsed_ms)
   in
+  let measure_json_projection label f =
+    measure_ms (fun () ->
+        try f () with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn ->
+            Log.Server.warn "dashboard shell %s projection failed: %s" label
+              (Printexc.to_string exn);
+            `Null)
+  in
   let status_json, status_ms = measure_ms (fun () -> dashboard_shell_status_json config) in
   let agents, agents_ms = measure_ms (fun () -> dashboard_agents_safe config) in
   let general_agents = dashboard_general_agent_count agents in
@@ -1003,6 +994,14 @@ let dashboard_shell_payload_json (config : Room.config) : Yojson.Safe.t =
   in
   let meta_cognition_json, meta_cognition_ms =
     measure_ms (fun () -> Meta_cognition.summary_json config)
+  in
+  let config_resolution_json, config_resolution_ms =
+    measure_json_projection "config_resolution" (fun () ->
+        Config_dir_resolver.(resolve () |> to_json))
+  in
+  let runtime_resolution_json, runtime_resolution_ms =
+    measure_json_projection "runtime_resolution"
+      (fun () -> Server_dashboard_http_runtime_info.runtime_resolution_json config)
   in
   `Assoc
     [
@@ -1018,6 +1017,8 @@ let dashboard_shell_payload_json (config : Room.config) : Yojson.Safe.t =
           ] );
       ("providers", provider_capacity_json ());
       ("meta_cognition", meta_cognition_json);
+      ("config_resolution", config_resolution_json);
+      ("runtime_resolution", runtime_resolution_json);
     ]
   |> with_projection_diagnostics ~surface:"shell" ~started_at
        ~extra:
@@ -1032,6 +1033,8 @@ let dashboard_shell_payload_json (config : Room.config) : Yojson.Safe.t =
            ("tasks_ms", `Int tasks_ms);
            ("keepers_ms", `Int keepers_ms);
            ("meta_cognition_ms", `Int meta_cognition_ms);
+           ("config_resolution_ms", `Int config_resolution_ms);
+           ("runtime_resolution_ms", `Int runtime_resolution_ms);
          ]
 
 let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Room.config) :

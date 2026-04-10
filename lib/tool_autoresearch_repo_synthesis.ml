@@ -139,28 +139,6 @@ type context = {
   clock : float Eio.Time.clock_ty Eio.Resource.t option;
 }
 
-let normalize_string_opt = function
-  | Some value ->
-      let trimmed = String.trim value in
-      if trimmed = "" then None else Some trimmed
-  | None -> None
-
-let parse_session_launch ctx json =
-  let open Yojson.Safe.Util in
-  let session_id = json |> member "session_id" |> to_string_option in
-  match normalize_string_opt session_id with
-  | None -> Error "team session launcher returned no session_id"
-  | Some session_id ->
-      let artifacts_dir =
-        json |> member "artifacts_dir" |> to_string_option
-        |> normalize_string_opt
-        |> Option.value
-             ~default:
-               (Filename.concat ctx.base_path
-                  (Filename.concat ".masc/team-sessions" session_id))
-      in
-      Ok (session_id, artifacts_dir)
-
 let handle_repo_synthesis_swarm_start _ctx _args =
   (* Team session engine removed — repo synthesis swarm start is no longer supported. *)
   ignore _ctx; ignore _args;
@@ -170,4 +148,3 @@ let handle_repo_synthesis_swarm_start _ctx _args =
         `String
           "masc_repo_synthesis_swarm_start is no longer supported (team session engine removed)" );
     ]
-

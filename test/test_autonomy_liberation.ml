@@ -208,6 +208,48 @@ let test_finding_accumulation () =
   (try Sys.rmdir masc_dir with Sys_error _ -> ());
   (try Sys.rmdir base_path with Sys_error _ -> ())
 
+let test_finding_accumulation_json_escaping () =
+  let base_path =
+    Filename.concat (Filename.get_temp_dir_name ()) "test_findings_escape"
+  in
+  let masc_dir = Filename.concat base_path ".masc" in
+  Fun.protect
+    ~finally:(fun () ->
+      (try Sys.remove (Filename.concat masc_dir "shared_findings.jsonl") with Sys_error _ -> ());
+      (try Sys.rmdir masc_dir with Sys_error _ -> ());
+      (try Sys.rmdir base_path with Sys_error _ -> ()))
+    (fun () ->
+      (try Sys.mkdir base_path 0o755 with Sys_error _ -> ());
+      (try Sys.mkdir masc_dir 0o755 with Sys_error _ -> ());
+      Team_context.add_finding ~base_path ~worker_name:"w\"1"
+        ~finding:"quote \" and slash \\\\ and newline\nok";
+      let findings = Team_context.load_findings ~base_path in
+      Alcotest.(check int) "one escaped finding" 1 (List.length findings);
+      Alcotest.(check bool) "quote preserved" true
+        (List.exists
+           (fun f -> contains_s f "quote \" and slash \\\\ and newline")
+           findings))
+
+let test_team_context_build_renders_findings_without_goal () =
+  let base_path =
+    Filename.concat (Filename.get_temp_dir_name ()) "test_findings_prompt"
+  in
+  let masc_dir = Filename.concat base_path ".masc" in
+  Fun.protect
+    ~finally:(fun () ->
+      (try Sys.remove (Filename.concat masc_dir "shared_findings.jsonl") with Sys_error _ -> ());
+      (try Sys.rmdir masc_dir with Sys_error _ -> ());
+      (try Sys.rmdir base_path with Sys_error _ -> ()))
+    (fun () ->
+      (try Sys.mkdir base_path 0o755 with Sys_error _ -> ());
+      (try Sys.mkdir masc_dir 0o755 with Sys_error _ -> ());
+      Team_context.add_finding ~base_path ~worker_name:"w1"
+        ~finding:"render me";
+      let ctx = Team_context.build ~base_path in
+      let section = Team_context.to_prompt_section ctx in
+      Alcotest.(check bool) "section rendered without goal" true
+        (contains_s section "render me"))
+
 let test_scope_default_unchanged () =
   (* Limited_code_change is still the default for unknown strings *)
   let scope = Worker_types.execution_scope_of_string "whatever" in
@@ -270,6 +312,10 @@ let () =
             test_autonomous_tool_count;
           Alcotest.test_case "finding accumulation roundtrip" `Quick
             test_finding_accumulation;
+          Alcotest.test_case "finding accumulation uses valid json escaping"
+            `Quick test_finding_accumulation_json_escaping;
+          Alcotest.test_case "build renders findings without goal" `Quick
+            test_team_context_build_renders_findings_without_goal;
           Alcotest.test_case "scope default unchanged" `Quick
             test_scope_default_unchanged;
         ] );

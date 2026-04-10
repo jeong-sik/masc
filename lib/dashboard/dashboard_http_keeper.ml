@@ -917,6 +917,7 @@ let keeper_config_json (config : Room.config) (name : string)
          ("proactive", proactive);
          ("drift", drift);
          ("auto_execution_session", auto_execution_session_surface_json ());
+         ("auto_team_session", auto_execution_session_surface_json ());
          ("handoff", handoff);
          ("tools", tools_access);
          ("hooks", Keeper_hooks_oas.hook_introspection_json ());

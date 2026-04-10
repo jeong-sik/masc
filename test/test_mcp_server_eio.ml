@@ -1184,7 +1184,7 @@ let test_handle_request_tools_list_include_deprecated_claim_alias_metadata () =
    | _ -> Alcotest.fail "tool is not an object");
   cleanup_dir base_path
 
-let _test_handle_request_tools_list_hides_team_session_turn_by_default () =
+let _test_handle_request_tools_list_hides_execution_session_turn_by_default () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let clock = Eio.Stdenv.clock env in
@@ -1192,13 +1192,13 @@ let _test_handle_request_tools_list_hides_team_session_turn_by_default () =
   let base_path = temp_dir () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
   let tools = tools_list_all ~clock ~sw state in
-  (* team_session_step is not in the public MCP surface *)
+  (* execution_session_step is not in the public MCP surface *)
   Alcotest.(check bool) "step hidden from public surface" false
     (List.exists
        (function
          | `Assoc fields -> (
              match List.assoc_opt "name" fields with
-             | Some (`String "masc_team_session_step") -> true
+             | Some (`String "masc_execution_session_step") -> true
              | _ -> false)
          | _ -> false)
        tools);
@@ -1308,7 +1308,7 @@ let _test_execute_tool_trpg_flow () =
 
 (* Governance status tool is no longer dispatched *)
 
-let _test_execute_tool_team_session_step_direct_call () =
+let _test_execute_tool_execution_session_step_direct_call () =
   Eio_main.run @@ fun env ->
   let fs = Eio.Stdenv.fs env in
   let proc_mgr = Eio.Stdenv.process_mgr env in
@@ -1343,7 +1343,7 @@ let _test_execute_tool_team_session_step_direct_call () =
 
       let (ok_start, start_msg) =
         Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
-          ~name:"masc_team_session_start"
+          ~name:"masc_execution_session_start"
           ~arguments:
             (`Assoc
               [
@@ -1362,7 +1362,7 @@ let _test_execute_tool_team_session_step_direct_call () =
 
       let (ok_turn, turn_msg) =
         Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
-          ~name:"masc_team_session_step"
+          ~name:"masc_execution_session_step"
           ~arguments:
             (`Assoc
               [
@@ -2558,7 +2558,7 @@ let eio_tests = [
     test_handle_request_tools_list_include_hidden_metadata;
   "handle tools/list include deprecated claim alias metadata", `Quick,
     test_handle_request_tools_list_include_deprecated_claim_alias_metadata;
-  (* team_session_turn hide test removed — team session cleanup *)
+  (* execution_session_turn hide test removed — team session cleanup *)
   "handle tools/list include usage metadata", `Quick,
     test_handle_request_tools_list_include_usage_metadata;
   "handle tools/list paginates", `Quick, test_handle_request_tools_list_paginates;
@@ -2584,7 +2584,7 @@ let eio_tests = [
   "handle method not found", `Quick, test_handle_request_method_not_found;
   (* TRPG tool tests removed — modules archived *)
   (* Governance status tool test removed *)
-  (* team_session_step direct call test removed — team session cleanup *)
+  (* execution_session_step direct call test removed — team session cleanup *)
   "legacy persisted agent read only for ephemeral names", `Quick,
     test_should_read_legacy_persisted_agent_name;
   "explicit agent_name not overridden", `Quick, test_execute_tool_explicit_agent_name_not_overridden;

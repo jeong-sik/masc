@@ -153,7 +153,7 @@ let all_entries =
       refs =
         {
           fixture_harness = Some "./scripts/harness_dashboard_mission_smoke.sh";
-          live_spotcheck = Some "./scripts/harness/workload/supervisor_team_session.sh";
+          live_spotcheck = Some "./scripts/harness/workload/supervisor_execution_session.sh";
           logs_ref = Some "/api/v1/dashboard/logs";
           metrics_ref = Some "/metrics";
           proof_ref = Some "/api/v1/dashboard/proof";

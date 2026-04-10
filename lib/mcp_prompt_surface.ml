@@ -28,7 +28,7 @@ let prompt_defs =
         ];
     };
     {
-      name = "team_session_proof";
+      name = "execution_session_proof";
       title = "Execution Session Proof";
       description = "Summarize auditable collaboration evidence for an execution session (deprecated: team session layer removed).";
       icons = [ Mcp_server.themed_icon ~label:"TP" ~bg:"#7C3AED" ~fg:"#F5F3FF" ];
@@ -150,11 +150,11 @@ let tool_help_text ~tool_name ~focus schemas =
            @
            (if entry.doc_refs = [] then [] else "" :: "Docs:" :: List.map (fun item -> "- " ^ item) entry.doc_refs)))
 
-let team_session_proof_text ~config:_ ~session_id ~operation_id:_ =
+let execution_session_proof_text ~config:_ ~session_id ~operation_id:_ =
   (* Dashboard_proof removed *)
   String.concat "\n"
     [
-      "Team session proof is not available (team session layer removed).";
+      "Execution session proof is not available (execution session layer removed).";
       Printf.sprintf "Session: %s" session_id;
     ]
 
@@ -204,11 +204,11 @@ let get_json ~config ~name ~arguments schemas =
                 let focus = assoc_string arguments "focus" in
                 tool_help_text ~tool_name ~focus schemas
             | None -> Error "tool_name is required")
-        | "team_session_proof" -> (
+        | "execution_session_proof" -> (
             match assoc_string arguments "session_id" with
             | Some session_id ->
                 let operation_id = assoc_string arguments "operation_id" in
-                Ok (team_session_proof_text ~config ~session_id ~operation_id)
+                Ok (execution_session_proof_text ~config ~session_id ~operation_id)
             | None -> Error "session_id is required")
         | "command_truth" ->
             let operation_id = assoc_string arguments "operation_id" in

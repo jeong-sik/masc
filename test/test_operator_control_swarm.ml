@@ -39,7 +39,7 @@ let test_confirm_rejects_expired_token () =
                        ("trace_id", `String "ops_expired");
                        ("actor", `String "operator");
                        ("action_type", `String "team_stop");
-                       ("target_type", `String "team_session");
+                       ("target_type", `String "execution_session");
                        ("target_id", `String "session-1");
                        ("payload", `Assoc []);
                        ("delegated_tool", `String "masc_operator_action");

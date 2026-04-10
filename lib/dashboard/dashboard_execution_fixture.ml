@@ -6,9 +6,9 @@ let execution_smoke_fixture_json () =
     handoff_json
       ~surface:"intervene"
       ~label:"세션 개입 열기"
-      ~target_type:"team_session"
+      ~target_type:"execution_session"
       ~target_id:"ts-execution-fixture-001"
-      ~focus_kind:"team_session"
+      ~focus_kind:"execution_session"
       ()
   in
   let command_handoff =
@@ -17,7 +17,7 @@ let execution_smoke_fixture_json () =
       ~command_surface:"operations"
       ~operation_id:"op-runtime-001"
       ~label:"작전 원인 보기"
-      ~target_type:"team_session"
+      ~target_type:"execution_session"
       ~target_id:"ts-execution-fixture-001"
       ~focus_kind:"operation"
       ()
@@ -60,7 +60,7 @@ let execution_smoke_fixture_json () =
                 ("severity", `String "bad");
                 ("status", `String "interrupted");
                 ("summary", `String "session has 2 failed spawn event(s)");
-                ("target_type", `String "team_session");
+                ("target_type", `String "execution_session");
                 ("target_id", `String "ts-execution-fixture-001");
                 ("linked_session_id", `String "ts-execution-fixture-001");
                 ("linked_operation_id", `String "op-runtime-001");
@@ -97,7 +97,7 @@ let execution_smoke_fixture_json () =
                 ("title", `String "ts-execution-fixture-001");
                 ("subtitle", `String "session has 2 failed spawn event(s)");
                 ("timestamp", `String generated_at);
-                ("target_type", `String "team_session");
+                ("target_type", `String "execution_session");
                 ("target_id", `String "ts-execution-fixture-001");
               ];
             `Assoc

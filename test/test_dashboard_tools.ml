@@ -115,7 +115,7 @@ let test_dashboard_tools_projection () =
         (match usage |> member "dispatch_v2_enabled" with
          | `Bool _ -> true
          | _ -> false);
-      (* masc_team_session_step: schema registered, not in public_mcp_tools,
+      (* masc_execution_session_step: schema registered, not in public_mcp_tools,
          so auto-hidden by Tool_catalog.metadata fallback. *)
       let hidden_tool =
         inventory_rows

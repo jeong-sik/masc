@@ -387,7 +387,7 @@ let urgency_rank = function
 
 let target_rank = function
   | "room" | "namespace" -> 3
-  | "team_session" -> 2
+  | "execution_session" -> 2
   | "keeper" -> 1
   | _ -> 0
 
@@ -806,6 +806,6 @@ let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_incl
             ]
             @ review_queue_json ~actor:actor_name active_reviews deferred_reviews recent_reviews
             @ active_guidance))
-    | "team_session" ->
-        Error "team_session is no longer supported (removed in Phase 2 of #6107)"
+    | "execution_session" ->
+        Error "execution_session digest is no longer supported (removed in Phase 2 of #6107)"
     | _ -> Error "unsupported target_type"

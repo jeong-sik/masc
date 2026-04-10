@@ -39,7 +39,7 @@ let legacy_action_alias_enums =
     `String "autonomy_tick" ]
 
 let target_type_enums =
-  [ `String "namespace"; `String "team_session"; `String "keeper"; `String "review_item" ]
+  [ `String "namespace"; `String "execution_session"; `String "keeper"; `String "review_item" ]
 
 let snapshot_schema ~remote =
   {
@@ -65,7 +65,7 @@ let snapshot_schema ~remote =
         ];
   }
 
-let digest_target_type_enums = [ `String "namespace"; `String "team_session" ]
+let digest_target_type_enums = [ `String "namespace"; `String "execution_session" ]
 let judgment_surface_enums =
   [
     `String "command.namespace";

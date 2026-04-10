@@ -91,7 +91,7 @@ let dashboard_namespace_truth_focus_json ~initialized ~runtime_count
             None,
             `Assoc
               [
-                ("target_type", `String "team_session");
+                ("target_type", `String "execution_session");
                 ("target_id", `String session_id);
               ] )
       | None -> (

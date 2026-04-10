@@ -22,7 +22,7 @@ const activeView = signal<AgentsView>('all')
 const CHIPS: { id: AgentsView; label: string; description: string }[] = [
   { id: 'all', label: '전체 보기', description: '에이전트와 키퍼를 한 목록에서 봅니다.' },
   { id: 'agents', label: '일반 에이전트', description: '키퍼가 연결되지 않은 일반 에이전트만 봅니다.' },
-  { id: 'keepers', label: '키퍼 런타임', description: '키퍼 런타임만 따로 봅니다.' },
+  { id: 'keepers', label: '키퍼', description: '키퍼만 따로 봅니다.' },
 ]
 
 export function AgentsUnified() {
@@ -57,25 +57,12 @@ export function AgentsUnified() {
   const totalCount = runtimeCounts.totalRuntimes
   const keeperCount = runtimeCounts.keepers
   const agentOnlyCount = runtimeCounts.agents
-  const currentViewMeta = CHIPS.find(chip => chip.id === currentView) ?? {
-    id: 'all' as const,
-    label: '전체 보기',
-    description: '에이전트와 키퍼를 한 목록에서 봅니다.',
-  }
-
   function chipCount(id: AgentsView): number | null {
     if (id === 'all') return totalCount
     if (id === 'agents') return agentOnlyCount
     if (id === 'keepers') return keeperCount
     return null
   }
-
-  const currentViewSummary =
-    currentView === 'all'
-      ? `일반 에이전트 ${agentOnlyCount}개와 키퍼 런타임 ${keeperCount}개를 한 목록에서 봅니다.`
-      : currentView === 'agents'
-        ? `일반 에이전트 ${agentOnlyCount}개만 표시합니다.`
-        : `키퍼 런타임 ${keeperCount}개만 표시합니다.`
   const viewChips = CHIPS.map(chip => ({
     key: chip.id,
     label: chip.label,
@@ -95,10 +82,6 @@ export function AgentsUnified() {
         tone="accent"
         class="monitor-muted-panel w-fit p-1.5 shadow-[inset_0_1px_0_var(--white-3)]"
       />
-      <div class="monitor-muted-panel bg-[linear-gradient(180deg,var(--accent-soft),var(--white-2))] px-4 py-3 text-[12px] leading-[1.5] text-[var(--text-body)]">
-        <strong class="mr-2 text-[var(--text-strong)]">${currentViewMeta.label}</strong>
-        <span>${currentViewSummary}</span>
-      </div>
 
       ${currentView !== 'agents' ? html`<${KeeperSpawnPanel} />` : null}
 

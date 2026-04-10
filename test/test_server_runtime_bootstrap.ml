@@ -280,6 +280,39 @@ let test_bootstrap_base_path_config_root_skips_explicit_config_override () =
       Alcotest.(check bool) "base-path config not bootstrapped" false
         (Sys.file_exists (Filename.concat base_path ".masc/config")))
 
+let test_startup_config_resolution_defaults_to_bootstrapped_root () =
+  with_temp_dir "startup-config-activate" (fun dir ->
+      let base_path = Filename.concat dir "base" in
+      let config_root = Filename.concat base_path ".masc/config" in
+      mkdir_p (Filename.concat config_root "prompts");
+      mkdir_p (Filename.concat config_root "keepers");
+      mkdir_p (Filename.concat config_root "personas");
+      write_file (Filename.concat config_root "cascade.json") "{}";
+      with_env "MASC_CONFIG_DIR" None @@ fun () ->
+      let resolution =
+        Server_runtime_bootstrap.startup_config_resolution ~base_path
+      in
+      let expected = config_root in
+      Alcotest.(check string) "returns base-path config root" expected
+        resolution.Config_dir_resolver.config_root.path;
+      Alcotest.(check (option string)) "env remains effectively unset" None
+        (Env_config_core.config_dir_opt ()))
+
+let test_startup_config_resolution_preserves_explicit_override () =
+  with_temp_dir "startup-config-activate-explicit" (fun dir ->
+      let base_path = Filename.concat dir "base" in
+      let explicit = Filename.concat dir "custom-config" in
+      mkdir_p (Filename.concat base_path ".masc/config");
+      mkdir_p explicit;
+      with_env "MASC_CONFIG_DIR" (Some explicit) @@ fun () ->
+      let resolution =
+        Server_runtime_bootstrap.startup_config_resolution ~base_path
+      in
+      Alcotest.(check string) "explicit override preserved" explicit
+        resolution.Config_dir_resolver.config_root.path;
+      Alcotest.(check (option string)) "env override unchanged" (Some explicit)
+        (Sys.getenv_opt "MASC_CONFIG_DIR"))
+
 let test_constructor_is_pure () =
   with_temp_dir "startup-pure" (fun dir ->
       let agents_dir = Room.agents_dir (Room.default_config dir) in
@@ -660,6 +693,70 @@ let test_startup_state_json_includes_watchdog () =
   Alcotest.(check bool) "watchdog_timeout_sec is positive" true
     (watchdog > 0.0)
 
+let test_startup_state_json_includes_runtime_resolution () =
+  Server_startup_state.reset ~backend_mode:"filesystem" ();
+  let path_diagnostics =
+    `Assoc
+      [
+        ("effective_base_path", `String "/tmp/runtime-root");
+        ("effective_masc_root", `String "/tmp/runtime-root/.masc");
+      ]
+  in
+  let config_resolution =
+    `Assoc
+      [
+        ( "config_root",
+          `Assoc
+            [
+              ("path", `String "/tmp/runtime-root/.masc/config");
+              ("exists", `Bool true);
+              ("source", `String "local_masc");
+            ] );
+      ]
+  in
+  Server_startup_state.note_runtime_resolution ~path_diagnostics
+    ~config_resolution;
+  let json = Server_startup_state.to_yojson () in
+  let open Yojson.Safe.Util in
+  Alcotest.(check string) "startup path diagnostics surfaced"
+    "/tmp/runtime-root"
+    (json |> member "path_diagnostics" |> member "effective_base_path"
+   |> to_string);
+  Alcotest.(check string) "startup config resolution surfaced"
+    "/tmp/runtime-root/.masc/config"
+    (json |> member "config_resolution" |> member "config_root" |> member "path"
+   |> to_string)
+
+let test_create_server_state_records_runtime_resolution () =
+  with_temp_dir "startup-create-state" (fun dir ->
+      let repo = Filename.concat dir "repo" in
+      mkdir_p repo;
+      ignore (make_config_root repo);
+      with_env "MASC_STORAGE_TYPE" (Some "filesystem") @@ fun () ->
+      with_env "MASC_POSTGRES_URL" None @@ fun () ->
+      with_env "MASC_CONFIG_DIR" None @@ fun () ->
+      with_cwd repo @@ fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let clock, mono_clock, net, _domain_mgr, proc_mgr, fs =
+        Server_runtime_bootstrap.init_runtime_context env
+      in
+      Eio.Switch.run @@ fun sw ->
+      Server_startup_state.reset ~backend_mode:"filesystem" ();
+      ignore
+        (Server_runtime_bootstrap.create_server_state ~sw ~base_path:dir ~clock
+           ~mono_clock ~net ~proc_mgr ~fs);
+      let json = Server_startup_state.to_yojson () in
+      let open Yojson.Safe.Util in
+      Alcotest.(check string) "create_server_state records config root"
+        (Filename.concat dir ".masc/config")
+        (json |> member "config_resolution" |> member "config_root" |> member "path"
+       |> to_string);
+      Alcotest.(check string) "create_server_state records effective masc root"
+        (Unix.realpath (Filename.concat dir ".masc"))
+        (json |> member "path_diagnostics" |> member "effective_masc_root"
+       |> to_string))
+
 let test_prompt_markdown_dir_falls_back_to_resolved_config_dir () =
   with_temp_dir "startup-prompts" (fun dir ->
       let expected =
@@ -797,6 +894,12 @@ let () =
             "bootstrap base-path config skips explicit override"
             `Quick
             test_bootstrap_base_path_config_root_skips_explicit_config_override;
+          Alcotest.test_case
+            "startup config resolution defaults to bootstrapped root"
+            `Quick test_startup_config_resolution_defaults_to_bootstrapped_root;
+          Alcotest.test_case
+            "startup config resolution preserves explicit override"
+            `Quick test_startup_config_resolution_preserves_explicit_override;
           Alcotest.test_case "constructors stay pure" `Quick
             test_constructor_is_pure;
           Alcotest.test_case "restore_persisted_sessions uses flat agents dir"
@@ -849,6 +952,11 @@ let () =
             test_watchdog_timeout_env;
           Alcotest.test_case "startup json includes watchdog fields" `Quick
             test_startup_state_json_includes_watchdog;
+          Alcotest.test_case "startup json includes runtime resolution" `Quick
+            test_startup_state_json_includes_runtime_resolution;
+          Alcotest.test_case
+            "create_server_state records runtime resolution"
+            `Quick test_create_server_state_records_runtime_resolution;
           Alcotest.test_case "prompt markdown dir falls back to resolved config dir"
             `Quick test_prompt_markdown_dir_falls_back_to_resolved_config_dir;
           Alcotest.test_case "prompt markdown dir honors MASC_CONFIG_DIR override"

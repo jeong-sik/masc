@@ -259,6 +259,10 @@ Current host note:
 
 Notes:
 
+- Discord connector runtime files are shared between the gate server and the
+  Discord bot. When the bot uses relative paths, resolve them against the same
+  `MASC_BASE_PATH` as the server. Operational setup and verification steps live
+  in `sidecars/discord-bot/README.md`.
 - `VOICE_MCP_HOST` and `VOICE_MCP_PORT` remain legacy environment fallbacks.
 - The voice session directory follows the selected voice-config directory, not an unrelated global path.
 

@@ -68,14 +68,14 @@ const OFFLINE_STAGE_META: StageMeta = {
 const PHASE_LABELS: Record<string, PhaseMeta> = {
   Offline: { key: 'Offline', label: '오프라인', description: '런타임이 올라오지 않았거나 연결 정보가 없습니다.' },
   Running: { key: 'Running', label: '실행중', description: 'keeper_state_machine 기준으로 정상 실행 상태입니다.' },
-  Failing: { key: 'Failing', label: '오류중', description: '최근 턴 또는 heartbeat/reconcile 과정에서 실패를 감지했습니다.' },
-  Compacting: { key: 'Compacting', label: '압축중', description: '컨텍스트 정리를 위해 compaction을 수행 중입니다.' },
-  HandingOff: { key: 'HandingOff', label: '승계중', description: '새 세대로 handoff를 진행하고 있습니다.' },
-  Draining: { key: 'Draining', label: '종료중', description: '현재 턴을 비우고 정지 상태로 이동하는 중입니다.' },
+  Failing: { key: 'Failing', label: '오류중', description: '최근 실행에서 오류를 감지했습니다.' },
+  Compacting: { key: 'Compacting', label: '압축중', description: '컨텍스트를 정리하는 중입니다.' },
+  HandingOff: { key: 'HandingOff', label: '승계중', description: '새 세대로 넘기는 중입니다.' },
+  Draining: { key: 'Draining', label: '종료중', description: '현재 작업을 마무리하는 중입니다.' },
   Paused: { key: 'Paused', label: '일시정지', description: '운영자가 keeper를 일시정지했습니다.' },
   Stopped: { key: 'Stopped', label: '정지', description: '정상 정지된 런타임입니다.' },
   Crashed: { key: 'Crashed', label: '비정상종료', description: 'fiber가 비정상적으로 종료되었습니다.' },
-  Restarting: { key: 'Restarting', label: '재시작중', description: 'supervisor가 복구를 시도하고 있습니다.' },
+  Restarting: { key: 'Restarting', label: '재시작중', description: '복구를 시도하고 있습니다.' },
   Dead: { key: 'Dead', label: '종료', description: '재시도 budget이 소진된 종료 상태입니다.' },
   active: { key: 'active', label: '실행중', description: '프로세스는 살아 있지만 state projection이 부족합니다.' },
   busy: { key: 'busy', label: '작업중', description: '프로세스는 살아 있고 현재 작업을 수행 중입니다.' },
@@ -128,7 +128,7 @@ const BAND_META: Record<RuntimeBand, RuntimeBandMeta> = {
   attention: {
     key: 'attention',
     label: '주의 필요',
-    description: '실패, 복구, 승계, 드레이닝, blocker, stale heartbeat 등으로 확인이 필요한 상태입니다.',
+    description: '응답 지연, 오류, 복구, 승계 등으로 상태 확인이 필요합니다.',
   },
   paused: {
     key: 'paused',
@@ -206,9 +206,9 @@ function runtimeBlockerHint(keeper: Keeper): string | null {
   if (!blockerClass) return null
   if (keeper.runtime_blocker_summary?.trim()) return keeper.runtime_blocker_summary.trim()
   if (blockerClass === 'ambiguous_post_commit_timeout') {
-    return '변경 도구 실행 뒤 턴이 timeout으로 끝났습니다. 중복 실행을 막기 위해 재시도하지 않았고 수동 정합성 확인이 필요합니다.'
+    return '최근 변경 이후 응답이 끊겨 상태 확인이 필요합니다.'
   }
-  return '변경 도구 실행 뒤 턴이 실패했습니다. 중복 실행을 막기 위해 재시도하지 않았고 수동 정합성 확인이 필요합니다.'
+  return '최근 변경 이후 실패가 있어 상태 확인이 필요합니다.'
 }
 
 function keeperBand(keeper: Keeper, phaseKey: string, lifecycleKey: string): RuntimeBand {
@@ -240,9 +240,9 @@ function keeperHint(keeper: Keeper, band: RuntimeBand, stage: StageMeta): string
   const blocker = keeper.last_blocker?.trim()
   if (blocker) return blocker
   if (band === 'paused') return '운영자가 멈춰 둔 상태입니다.'
-  if (isHeartbeatStale(keeper)) return '하트비트가 오래되어 실제 프로세스 확인이 필요합니다.'
+  if (isHeartbeatStale(keeper)) return '오래 응답이 없어 실제 상태 확인이 필요합니다.'
   if (typeof keeper.context_ratio === 'number' && keeper.context_ratio >= CONTEXT_ATTENTION_RATIO) {
-    return `컨텍스트 사용량 ${Math.round(keeper.context_ratio * 100)}%`
+    return `컨텍스트 사용량이 ${Math.round(keeper.context_ratio * 100)}%입니다.`
   }
   if (band === 'attention') return stage.description
   if (band === 'offline' && keeper.generation === 0 && (keeper.turn_count ?? 0) === 0) {

@@ -1,6 +1,56 @@
 open Masc_mcp
 open Test_operator_control_support
 
+let test_align_keeper_runtime_status_promotes_fresh_runtime_signal () =
+  let status =
+    Operator_control_snapshot.align_keeper_runtime_status
+      ~surface_status:"inactive"
+      ~diagnostic:(`Assoc [ ("health_state", `String "offline") ])
+      ~agent_status_json:
+        (`Assoc
+          [
+            ("status", `String "busy");
+            ("last_seen_ago_s", `Float 5.0);
+            ("is_zombie", `Bool false);
+          ])
+      ~keepalive_running:true
+  in
+  Alcotest.(check string) "fresh runtime signal promotes keeper status" "busy"
+    status
+
+let test_align_keeper_runtime_status_preserves_attention_health () =
+  let status =
+    Operator_control_snapshot.align_keeper_runtime_status
+      ~surface_status:"inactive"
+      ~diagnostic:(`Assoc [ ("health_state", `String "degraded") ])
+      ~agent_status_json:
+        (`Assoc
+          [
+            ("status", `String "active");
+            ("last_seen_ago_s", `Float 5.0);
+            ("is_zombie", `Bool false);
+          ])
+      ~keepalive_running:true
+  in
+  Alcotest.(check string) "degraded health remains inactive" "inactive" status
+
+let test_align_keeper_runtime_status_ignores_zombie_runtime_signal () =
+  let status =
+    Operator_control_snapshot.align_keeper_runtime_status
+      ~surface_status:"inactive"
+      ~diagnostic:(`Assoc [ ("health_state", `String "offline") ])
+      ~agent_status_json:
+        (`Assoc
+          [
+            ("status", `String "active");
+            ("last_seen_ago_s", `Float 5.0);
+            ("is_zombie", `Bool true);
+          ])
+      ~keepalive_running:true
+  in
+  Alcotest.(check string) "zombie runtime does not override inactive" "inactive"
+    status
+
 let test_snapshot_has_expected_sections () =
   Eio_main.run @@ fun env ->
   ensure_fs env;

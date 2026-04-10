@@ -9,6 +9,25 @@ export function runtimeAgentName(
   return agent === keeper ? null : agent
 }
 
+export function keeperPrimaryName(
+  keeperName: string | null | undefined,
+  agentName: string | null | undefined,
+): string | null {
+  const keeper = keeperName?.trim()
+  if (keeper) return keeper
+  const agent = agentName?.trim()
+  return agent || null
+}
+
+export function keeperIdentitySearchTerms(
+  keeperName: string | null | undefined,
+  agentName: string | null | undefined,
+): string[] {
+  const primary = keeperPrimaryName(keeperName, agentName)
+  const runtime = runtimeAgentName(keeperName, agentName)
+  return [primary, runtime].filter((value): value is string => Boolean(value))
+}
+
 export function keeperRuntimeLabel(
   keeperName: string | null | undefined,
   agentName: string | null | undefined,

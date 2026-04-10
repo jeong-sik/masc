@@ -93,15 +93,22 @@ async function flushUi(): Promise<void> {
 
 async function loadComponentWithApi(api: {
   get: (path: string) => Promise<unknown>
-  lastEvent: { value: unknown }
+  lastEvent: { value: unknown; subscribe?: (callback: (event: unknown) => void) => () => void }
   navigate?: (tab: string, params?: Record<string, string>) => void
 }) {
   vi.resetModules()
+  const lastEvent =
+    typeof api.lastEvent.subscribe === 'function'
+      ? api.lastEvent
+      : {
+          value: api.lastEvent.value,
+          subscribe: () => () => {},
+        }
   vi.doMock('../api/core', () => ({
     get: api.get,
   }))
   vi.doMock('../sse', () => ({
-    lastEvent: api.lastEvent,
+    lastEvent,
   }))
   vi.doMock('../router', () => ({
     navigate: api.navigate ?? vi.fn(),

@@ -45,6 +45,16 @@ vi.mock('shiki', () => {
   }
 })
 
+// Mock Mermaid to avoid heavyweight parsing/rendering during happy-dom tests.
+vi.mock('mermaid', () => ({
+  default: {
+    initialize: vi.fn(),
+    render: vi.fn(async (_id: string, source: string) => ({
+      svg: `<svg><text>${source}</text></svg>`,
+    })),
+  },
+}))
+
 // Mock ninja-keys Web Component to avoid Happy DOM parsing errors
 vi.mock('ninja-keys', () => {
   if (!customElements.get('ninja-keys')) {

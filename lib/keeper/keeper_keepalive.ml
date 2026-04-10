@@ -444,6 +444,16 @@ let write_heartbeat_snapshot
           };
         })
     in
+    (* B1: Guard → Thompson bridge. When guardrail fires, record a negative
+       signal in Thompson β. Penalty cap 1/cycle is naturally enforced: guard
+       evaluates once per heartbeat call. Gated by MASC_DECISION_LAYER_LEVEL >= 2. *)
+    if auto_rules.guardrail_stop
+       && Keeper_decision_audit.decision_layer_level () >= 2
+    then
+      (try Thompson_sampling.record_guard_penalty ~agent_name:meta_current.name
+       with exn ->
+         Log.Keeper.warn "guard→thompson penalty failed for %s: %s"
+           meta_current.name (Printexc.to_string exn));
     let snapshot =
       `Assoc
         [ "ts", `String (now_iso ())

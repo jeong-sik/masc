@@ -119,6 +119,39 @@ let is_effectively_read_only_tool (name : string) : bool =
 let has_mutating_side_effect (name : string) : bool =
   not (is_effectively_read_only_tool name)
 
+(* ── Input-aware read-only check ─────────────────────────────
+   Some tools (keeper_github) mix read-only and mutating subcommands
+   within a single tool name.  This function inspects the JSON input
+   to distinguish read-only invocations so that the mutation boundary
+   lets them through without opening a reconcile window. *)
+
+let gh_read_only_prefixes =
+  [ "pr list"; "pr view"; "pr diff"; "pr checks"; "pr status"
+  ; "issue list"; "issue view"; "issue status"
+  ; "repo view"; "repo list"
+  ; "release list"; "release view"
+  ; "api" (* read-only API calls — gh api is GET by default *)
+  ]
+
+let is_read_only_with_input ~(tool_name : string) ~(input : Yojson.Safe.t) : bool =
+  if is_effectively_read_only_tool tool_name then true
+  else match tool_name with
+  | "keeper_github" ->
+    let cmd =
+      (match input with
+       | `Assoc fields ->
+         (match List.assoc_opt "cmd" fields with
+          | Some (`String s) -> String.trim s
+          | _ -> "")
+       | _ -> "")
+    in
+    let cmd_lower = String.lowercase_ascii cmd in
+    List.exists (fun prefix ->
+      String.length cmd_lower >= String.length prefix
+      && String.sub cmd_lower 0 (String.length prefix) = prefix
+    ) gh_read_only_prefixes
+  | _ -> false
+
 (* ── Reconcile-safe tools (mutating but idempotent enough) ─── *)
 
 (** Tools that produce side effects but are safe to leave un-reconciled

@@ -244,7 +244,7 @@ function rowUrgencyScore(row: FleetRow): number {
   if (row.last_activity_ago_s != null && row.last_activity_ago_s >= STALE_ACTIVITY_SEC) {
     score += Math.min(row.last_activity_ago_s / STALE_ACTIVITY_SEC, 5)
   }
-  if (row.tool_success_pct != null && row.tool_success_pct < 90) {
+  if (typeof row.tool_success_pct === 'number' && row.tool_success_pct < 90) {
     score += (100 - row.tool_success_pct) / 5
   }
   return score

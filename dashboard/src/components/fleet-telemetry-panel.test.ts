@@ -320,6 +320,58 @@ describe('FleetTelemetryPanel', () => {
     })
   })
 
+  it('keeps low-success active rows ahead of paused rows without penalizing null success rates', async () => {
+    const { buildFleetRows } = await loadPanel({
+      fetchDashboardExecution: vi.fn().mockResolvedValue(executionResponse),
+      fetchToolQuality: vi.fn().mockResolvedValue(toolQualityResponse),
+      fetchTelemetrySummary: vi.fn().mockResolvedValue(telemetrySummaryResponse),
+    })
+
+    const keepers = normalizeKeepers([
+      {
+        name: 'keeper-healthy-null',
+        status: 'active',
+        keepalive_running: true,
+        context_ratio: 0.2,
+        total_turns: 8,
+        last_activity_ago_s: 40,
+      },
+      {
+        name: 'keeper-low-success',
+        status: 'active',
+        keepalive_running: true,
+        context_ratio: 0.2,
+        total_turns: 8,
+        last_activity_ago_s: 40,
+      },
+      {
+        name: 'keeper-paused',
+        status: 'paused',
+        keepalive_running: true,
+        context_ratio: 0.2,
+        total_turns: 8,
+        last_activity_ago_s: 40,
+      },
+    ])
+
+    const rows = buildFleetRows(keepers, {
+      ...toolQualityResponse,
+      by_keeper: [
+        {
+          name: 'keeper-low-success',
+          calls: 4,
+          success_pct: 70,
+        },
+      ],
+    })
+
+    expect(rows.map(row => row.name)).toEqual([
+      'keeper-low-success',
+      'keeper-healthy-null',
+      'keeper-paused',
+    ])
+  })
+
   it('renders tool activity fallback copy instead of misleading no-tools text', async () => {
     const fetchDashboardExecution = vi.fn().mockResolvedValue({
       ...executionResponse,

@@ -278,17 +278,18 @@ let scheduled_autonomous_outcome_for_result
     ~has_text:(String.trim result.response_text <> "")
     ~has_tool_calls:(has_visible_tool_signal result)
 
-let work_kind_of_result (result : Keeper_agent_run.run_result) : string =
-  if has_visible_tool_signal result then "tool_use"
-  else if String.trim result.response_text <> "" then "text_turn"
-  else "noop"
-
 let selected_mode_of_result (result : Keeper_agent_run.run_result) : string =
   let text = String.trim result.response_text in
   if has_visible_tool_signal result then "tool_use"
   else if text = "" then "noop"
   else if String.starts_with ~prefix:"SKIP:" text then "skip_text"
   else "text_response"
+
+let work_kind_of_result (result : Keeper_agent_run.run_result) : string =
+  match selected_mode_of_result result with
+  | "tool_use" -> "tool_use"
+  | "noop" -> "noop"
+  | _ -> "text_turn"
 
 let observed_triggers_of_observation
     (observation : Keeper_world_observation.world_observation) : string list =

@@ -2471,6 +2471,30 @@ let test_recent_tool_streak_count_ignores_stale_entries () =
     (HK.recent_tool_streak_count ~within_sec:60.0 ~tool_name:"masc_status"
        entries)
 
+let test_cross_turn_polling_tool_excludes_stay_silent () =
+  check bool "masc_status is polling tool" true
+    (HK.is_cross_turn_polling_tool "masc_status");
+  check bool "stay_silent excluded" false
+    (HK.is_cross_turn_polling_tool "keeper_stay_silent");
+  check bool "productive tool excluded" false
+    (HK.is_cross_turn_polling_tool "keeper_fs_edit")
+
+let test_should_block_cross_turn_polling_on_second_attempt () =
+  let recent_entries =
+    [ tool_log_entry "masc_status" ]
+  in
+  check bool "second consecutive polling attempt is blocked" true
+    (HK.should_block_cross_turn_polling ~within_sec:900.0 ~threshold:2
+       ~tool_name:"masc_status" ~recent_entries)
+
+let test_should_not_block_cross_turn_polling_without_prior_match () =
+  let recent_entries =
+    [ tool_log_entry "keeper_fs_edit" ]
+  in
+  check bool "no prior polling match means no block" false
+    (HK.should_block_cross_turn_polling ~within_sec:900.0 ~threshold:2
+       ~tool_name:"masc_status" ~recent_entries)
+
 let test_prompt_no_outcome_for_fresh_keeper () =
   let _sys, user = UP.build_prompt ~base_path:"/test" ~meta:minimal_meta ~observation:base_observation () in
   check bool "no Last Cycle Outcome for fresh keeper"
@@ -2588,6 +2612,12 @@ let () =
             test_recent_tool_streak_count_counts_tail_matches;
           test_case "recent tool streak ignores stale entries" `Quick
             test_recent_tool_streak_count_ignores_stale_entries;
+          test_case "cross-turn polling tool excludes stay_silent" `Quick
+            test_cross_turn_polling_tool_excludes_stay_silent;
+          test_case "cross-turn polling blocks second attempt" `Quick
+            test_should_block_cross_turn_polling_on_second_attempt;
+          test_case "cross-turn polling allows non-matching history" `Quick
+            test_should_not_block_cross_turn_polling_without_prior_match;
         ] );
       ( "config",
         [

@@ -247,6 +247,11 @@ let recent_tool_streak_count ?(within_sec = 900.0) ~(tool_name : string)
   in
   loop 0 (List.rev entries)
 
+let should_block_cross_turn_polling ~within_sec ~threshold
+    ~(tool_name : string) ~(recent_entries : Yojson.Safe.t list) : bool =
+  is_cross_turn_polling_tool tool_name
+  && recent_tool_streak_count ~within_sec ~tool_name recent_entries + 1 >= threshold
+
 let make_hooks
     ~config:(_config : Room.config)
     ~(meta_ref : Keeper_types.keeper_meta ref)
@@ -438,12 +443,14 @@ let make_hooks
           if prev_name = tool_name then prev_count + 1 else 1
         in
         tool_name_streak := (tool_name, new_count);
-        let cross_turn_streak =
+        let recent_entries =
           if is_cross_turn_polling_tool tool_name then
-            recent_tool_streak_count ~tool_name
-              (Keeper_tool_call_log.read_recent ~keeper_name ~n:8 ())
-            + 1
-          else 0
+            Keeper_tool_call_log.read_recent ~keeper_name ~n:8 ()
+          else []
+        in
+        let cross_turn_streak =
+          if recent_entries = [] then 0
+          else recent_tool_streak_count ~tool_name recent_entries + 1
         in
         if new_count >= streak_threshold then begin
           Log.Keeper.warn
@@ -459,7 +466,11 @@ let make_hooks
                  "%s called %d times consecutively. Use a DIFFERENT tool or keeper_stay_silent"
                  tool_name new_count))
         end
-        else if cross_turn_streak >= cross_turn_polling_threshold then begin
+        else if should_block_cross_turn_polling
+                  ~within_sec:900.0
+                  ~threshold:cross_turn_polling_threshold
+                  ~tool_name
+                  ~recent_entries then begin
           Log.Keeper.warn
             "keeper:%s cross_turn_polling_gate: %s called %d recent turns in a row, blocking"
             keeper_name tool_name cross_turn_streak;

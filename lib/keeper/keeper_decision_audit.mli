@@ -50,3 +50,14 @@ val flush_if_needed : base_path:string -> keeper_name:string -> unit
 
 (** Ring buffer capacity (env: MASC_DECISION_AUDIT_RING_CAPACITY, default 50, min 1). *)
 val ring_capacity : unit -> int
+
+(** Generate a Mermaid stateDiagram-v2 for the Decision Pipeline.
+    Shows the Guard→Thompson→ToolPolicy feedback loop with current
+    phase highlighted and Thompson score annotated. *)
+val decision_pipeline_to_mermaid :
+  phase:Keeper_state_machine.phase ->
+  thompson_alpha:float ->
+  thompson_beta:float ->
+  tool_count:int ->
+  recovery_floor_count:int ->
+  string

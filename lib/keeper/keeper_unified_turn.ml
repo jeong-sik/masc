@@ -59,6 +59,26 @@ let is_transient_network_error (err : Oas.Error.sdk_error) : bool =
   | Oas.Error.Api (ServerError { status = 503; _ }) -> true
   | _ -> false
 
+(** Detect server-side request body parse errors (e.g. Ollama yyjson
+    rejecting a request with "Value looks like object, but can't find
+    closing '}' symbol").  The LLM API never processed the request, so
+    committed tool results are not at risk of duplication.
+
+    These errors may recur with the same payload, so they are NOT
+    eligible for same-turn retry.  They ARE eligible for auto-recovery
+    (skip manual reconcile) when all committed tools are reconcile-safe:
+    the keeper's next heartbeat cycle will build a fresh prompt. *)
+let is_server_rejected_parse_error (err : Oas.Error.sdk_error) : bool =
+  match err with
+  | Oas.Error.Api (InvalidRequest { message }) ->
+      let lower = String.lowercase_ascii message in
+      string_contains_substring ~needle:"closing" lower
+      || string_contains_substring ~needle:"can't find" lower
+      || string_contains_substring ~needle:"unexpected character" lower
+      || string_contains_substring ~needle:"unterminated" lower
+      || string_contains_substring ~needle:"parse error" lower
+  | _ -> false
+
 let ambiguous_side_effect_error_prefix =
   "turn outcome ambiguous after committed mutating tool call(s)"
 
@@ -1170,17 +1190,23 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
                 if committed_tools <> []
                    && Keeper_tool_registry.all_tools_reconcile_safe
                         committed_tools
-                   && is_transient_network_error err
+                   && (is_transient_network_error err
+                       || is_server_rejected_parse_error err)
                 then begin
                   (* All committed tools are board-like (duplicate-tolerant)
-                     AND the failure is transient.  Permanent errors (401, 403,
-                     malformed request) must NOT bypass — they would loop
-                     forever on retry.  Duplicate board posts are an acceptable
-                     cost vs. a permanently stuck keeper. *)
+                     AND the failure is transient or the server rejected the
+                     request body before processing (parse error).  Parse
+                     errors mean the LLM never saw the request, so no risk
+                     of duplicate processing.  The keeper's next cycle will
+                     build a fresh prompt that may avoid the parse issue. *)
                   let err_preview = short_preview (Oas.Error.to_string err) in
+                  let reason =
+                    if is_server_rejected_parse_error err then "server parse rejection"
+                    else "transient error"
+                  in
                   Log.Keeper.warn
-                    "%s: transient error after committed reconcile-safe tool(s) [%s] — auto-recovering, no manual reconcile (error: %s)"
-                    meta.name
+                    "%s: %s after committed reconcile-safe tool(s) [%s] — auto-recovering, no manual reconcile (error: %s)"
+                    meta.name reason
                     (String.concat ", " committed_tools)
                     err_preview;
                   Error err

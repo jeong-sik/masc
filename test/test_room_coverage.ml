@@ -204,6 +204,49 @@ let test_claim_next_consecutive () =
       (str_contains r1 "task-001" || str_contains r2 "task-002")
   )
 
+let test_claim_next_reconciles_stale_agent_current_task () =
+  with_test_env (fun config ->
+    let agent_name =
+      match Room.get_agents_raw config with
+      | [ agent ] -> agent.Types.name
+      | _ -> Alcotest.fail "expected exactly one joined agent"
+    in
+    let _ = Room.add_task config ~title:"Done already" ~priority:1 ~description:"" in
+    let _ = Room.claim_task config ~agent_name ~task_id:"task-001" in
+    (match
+       Room.complete_task_r config ~agent_name ~task_id:"task-001" ~notes:"done"
+     with
+    | Ok _ -> ()
+    | Error e -> Alcotest.fail (Types.masc_error_to_string e));
+    let agent_file =
+      Filename.concat (Room.agents_dir config)
+        (Room.safe_filename agent_name ^ ".json")
+    in
+    let stale_agent =
+      match Room.read_json config agent_file |> Types.agent_of_yojson with
+      | Ok agent ->
+          { agent with status = Types.Busy; current_task = Some "task-001" }
+      | Error msg -> Alcotest.fail ("agent parse failed: " ^ msg)
+    in
+    Room.write_json config agent_file (Types.agent_to_yojson stale_agent);
+    match Room.claim_next_r config ~agent_name () with
+    | Room.Claim_next_no_unclaimed ->
+        let agents = Room.get_agents_raw config in
+        let agent_after =
+          List.find_opt (fun (agent : Types.agent) ->
+            String.equal agent.name agent_name) agents
+        in
+        (match agent_after with
+        | Some agent ->
+            Alcotest.(check (option string))
+              "stale current_task cleared" None agent.current_task;
+            Alcotest.(check string)
+              "status reset to active" "active"
+              (Types.agent_status_to_string agent.status)
+        | None -> Alcotest.fail "agent missing after reconcile")
+    | _ -> Alcotest.fail "expected no_unclaimed after stale reconcile"
+  )
+
 (* ============================================================ *)
 (* BUG-004: claim_next auto-release Tests                        *)
 (* ============================================================ *)
@@ -1008,6 +1051,8 @@ let () =
       Alcotest.test_case "empty backlog" `Quick test_claim_next_empty_backlog;
       Alcotest.test_case "all claimed" `Quick test_claim_next_all_claimed;
       Alcotest.test_case "consecutive" `Quick test_claim_next_consecutive;
+      Alcotest.test_case "reconciles stale current_task" `Quick
+        test_claim_next_reconciles_stale_agent_current_task;
       Alcotest.test_case "BUG-004: auto-releases previous" `Quick test_claim_next_auto_releases_previous;
       Alcotest.test_case "BUG-004: released task claimable" `Quick test_claim_next_released_task_claimable_by_others;
       Alcotest.test_case "BUG-004: released_task_id field" `Quick test_claim_next_r_released_task_field;

@@ -370,7 +370,7 @@ let is_internal_attention incident =
 
 let related_sessions_for_attention incident sessions =
   let direct_session =
-    if String.equal (string_field "target_type" incident) "team_session" then
+    if String.equal (string_field "target_type" incident) "execution_session" then
       trim_to_option (string_field "target_id" incident)
       |> Option.to_list
     else
@@ -490,7 +490,7 @@ let build_session_briefs sessions attention_queue actions =
                match top_attention_json with
                | Some attention -> matching_action_for_incident attention actions
                | None ->
-                   matching_action "team_session" (Some session.session_id) actions)
+                   matching_action "execution_session" (Some session.session_id) actions)
          in
          let health_tone =
            match top_attention_json with

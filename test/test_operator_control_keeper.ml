@@ -69,7 +69,7 @@ let test_snapshot_exposes_keeper_and_social_actions () =
             | Some row -> row
             | None -> Alcotest.fail "expected team_worker_spawn_batch in available_actions"
           in
-          Alcotest.(check string) "worker spawn batch target_type" "team_session"
+          Alcotest.(check string) "worker spawn batch target_type" "execution_session"
             Yojson.Safe.Util.(worker_spawn_batch |> member "target_type" |> to_string);
           Alcotest.(check bool) "worker spawn batch confirm true" true
             Yojson.Safe.Util.(worker_spawn_batch |> member "confirm_required" |> to_bool);
@@ -1091,7 +1091,7 @@ let test_keeper_msg_auto_execution_session_bridge () =
       else
         let first_json = parse_json_exn body in
         let open Yojson.Safe.Util in
-        Alcotest.(check string) "mode" "team_session"
+        Alcotest.(check string) "mode" "execution_session"
           (first_json |> member "mode" |> to_string);
         Alcotest.(check bool) "created" true
           (first_json |> member "created" |> to_bool);
@@ -1100,7 +1100,7 @@ let test_keeper_msg_auto_execution_session_bridge () =
         let session_id = first_json |> member "session_id" |> to_string in
         (* Team_session_store removed — skip session verification *)
         ignore session_id;
-        (* Team session tools removed — skip team_session_status dispatch test *)
+        (* Team session tools removed — skip execution_session_status dispatch test *)
         ignore (config, sw, env, session_id);
         Alcotest.(check bool) "spawn_error surfaced" true
           (first_json |> member "spawn_error" <> `Null);
@@ -1124,9 +1124,9 @@ let test_keeper_msg_auto_execution_session_bridge () =
         Alcotest.(check bool) "status exposes auto team session disabled" false
           Yojson.Safe.Util.(status_json |> member "auto_execution_session_enabled" |> to_bool);
         Alcotest.(check bool) "status omits team session state" true
-          Yojson.Safe.Util.(status_json |> member "team_session_state" = `Null);
+          Yojson.Safe.Util.(status_json |> member "execution_session_state" = `Null);
         Alcotest.(check bool) "status omits team session bridge" true
-          Yojson.Safe.Util.(status_json |> member "team_session_bridge" = `Null);
+          Yojson.Safe.Util.(status_json |> member "execution_session_bridge" = `Null);
         (* Team_session_store removed — skip event verification *)
         ignore (config, session_id);
         let ok, second_body =

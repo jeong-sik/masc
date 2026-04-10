@@ -215,12 +215,12 @@ let parse_session_judgment ~config ~generated_at ~generated_at_unix ~model_used 
             in
             Some
               (Operator_judgment.record config ~surface:"command.swarm"
-                 ~target_type:Operator_judgment.Team_session
+                 ~target_type:Operator_judgment.Execution_session
                  ~target_id:(Some session_id) ~summary ~confidence
                  ?model_name:(Some model_used)
                  ?recommended_action:
                    (build_recommended_action ~actor:keeper_name
-                      ~target_type:"team_session" ~target_id:(Some session_id)
+                      ~target_type:"execution_session" ~target_id:(Some session_id)
                       (json |> member "recommended_action"))
                  ~evidence_refs:(parse_string_list json "evidence_refs")
                  ~disagreement_with_truth:

@@ -8,12 +8,12 @@ module U = Yojson.Safe.Util
 
 let judgment_surface_for_target_type = function
   | "room" | "namespace" -> "command.namespace"
-  | "team_session" -> "command.swarm"
+  | "execution_session" -> "command.swarm"
   | _ -> "command.namespace"
 
 let judgment_target_type_of_string = function
   | "room" | "namespace" -> Operator_judgment.Room
-  | "team_session" -> Operator_judgment.Team_session
+  | "execution_session" -> Operator_judgment.Execution_session
   | _ -> Operator_judgment.Room
 
 let fresh_operator_judgment config ~target_type ~target_id =

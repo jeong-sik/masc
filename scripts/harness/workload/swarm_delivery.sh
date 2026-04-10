@@ -19,4 +19,4 @@ if [ -n "${SWARM_WORKER_BATCH_FILE:-}" ] && [ -z "${SWARM_WORKER_BATCH_JSON:-}" 
   SWARM_WORKER_BATCH_JSON="$(cat "$SWARM_WORKER_BATCH_FILE")"
 fi
 
-exec "${SCRIPT_DIR}/supervisor_team_session.sh" "$@"
+exec "${SCRIPT_DIR}/supervisor_execution_session.sh" "$@"

@@ -518,7 +518,7 @@ let with_server ?(host = "127.0.0.1") ?(enable_auth = true) f =
         ~implementer_b_token ~supervisor_nickname ~planner_nickname
         ~implementer_a_nickname ~implementer_b_nickname)
 
-let _test_operator_mcp_supervises_team_session_impl () =
+let _test_operator_mcp_supervises_execution_session_impl () =
   (* Disabled: operator MCP sessions don't resolve agent_name from bearer token,
      so tool-level authorize_tool fails with "No credential found for <agent>".
      Needs production fix in mcp_server_eio_execute.ml to propagate credential
@@ -571,7 +571,7 @@ let _test_operator_mcp_supervises_team_session_impl () =
          ]));
   let start_json =
     call_tool ~token:supervisor_token ~path:"/mcp" ~session_id:"operator-supervisor"
-      ~id:5 ~name:"masc_team_session_start"
+      ~id:5 ~name:"masc_execution_session_start"
       (`Assoc
         [
           ("goal", `String "Exercise supervised MCP team session flow");
@@ -594,13 +594,13 @@ let _test_operator_mcp_supervises_team_session_impl () =
         ])
   in
   let session_id =
-    start_json |> extract_tool_result_json "team_session_start"
+    start_json |> extract_tool_result_json "execution_session_start"
     |> U.member "session_id" |> U.to_string
   in
 
   ignore
     (call_tool ~token:supervisor_token ~path:"/mcp" ~session_id:"operator-supervisor"
-       ~id:6 ~name:"masc_team_session_step"
+       ~id:6 ~name:"masc_execution_session_step"
        (`Assoc
          [
            ("session_id", `String session_id);
@@ -613,7 +613,7 @@ let _test_operator_mcp_supervises_team_session_impl () =
   let worker_step token session_id_header id message =
     ignore
       (call_tool ~token ~path:"/mcp" ~session_id:session_id_header ~id
-         ~name:"masc_team_session_step"
+         ~name:"masc_execution_session_step"
          (`Assoc
            [
              ("session_id", `String session_id);
@@ -668,12 +668,12 @@ let _test_operator_mcp_supervises_team_session_impl () =
       (`Assoc
         [
           ("actor", `String supervisor_nickname);
-          ("target_type", `String "team_session");
+          ("target_type", `String "execution_session");
           ("target_id", `String session_id);
         ])
   in
   let digest_result = extract_tool_payload_json "operator_digest" digest_json in
-  check string "digest target type" "team_session"
+  check string "digest target type" "execution_session"
     (digest_result |> U.member "target_type" |> U.to_string);
   check string "digest target id" session_id
     (digest_result |> U.member "target_id" |> U.to_string);
@@ -740,7 +740,7 @@ let _test_operator_mcp_supervises_team_session_impl () =
 
   let events_json =
     call_tool ~token:supervisor_token ~path:"/mcp" ~session_id:"operator-supervisor" ~id:15
-      ~name:"masc_team_session_events"
+      ~name:"masc_execution_session_events"
       (`Assoc
         [
           ("session_id", `String session_id);
@@ -749,7 +749,7 @@ let _test_operator_mcp_supervises_team_session_impl () =
         ])
   in
   let events_text =
-    events_json |> extract_tool_result_json "team_session_events" |> Yojson.Safe.to_string
+    events_json |> extract_tool_result_json "execution_session_events" |> Yojson.Safe.to_string
   in
   check bool "planner event present" true (contains_substr "planner" events_text);
   check bool "implementer-a event present" true
@@ -768,7 +768,7 @@ let _test_operator_mcp_supervises_team_session_impl () =
   let finalize_json =
     call_tool ~token:supervisor_token ~max_time_sec:35 ~path:"/mcp"
       ~session_id:"operator-supervisor"
-      ~id:16 ~name:"masc_team_session_finalize"
+      ~id:16 ~name:"masc_execution_session_finalize"
       (`Assoc
         [
           ("session_id", `String session_id);
@@ -779,7 +779,7 @@ let _test_operator_mcp_supervises_team_session_impl () =
         ])
   in
   let finalize_result =
-    extract_tool_result_json "team_session_finalize" finalize_json
+    extract_tool_result_json "execution_session_finalize" finalize_json
   in
   check string "finalize terminal status" "interrupted"
     (finalize_result |> U.member "terminal_status" |> U.to_string);
@@ -790,14 +790,14 @@ let _test_operator_mcp_supervises_team_session_impl () =
 
   let report_json =
     call_tool ~token:supervisor_token ~path:"/mcp" ~session_id:"operator-supervisor"
-      ~id:17 ~name:"masc_team_session_report"
+      ~id:17 ~name:"masc_execution_session_report"
       (`Assoc
         [
           ("session_id", `String session_id);
           ("force_regenerate", `Bool false);
         ])
   in
-  let report_result = extract_tool_result_json "team_session_report" report_json in
+  let report_result = extract_tool_result_json "execution_session_report" report_json in
   check bool "report json path present" true
     (report_result |> U.member "json_path" <> `Null);
   check bool "report markdown path present" true
@@ -805,14 +805,14 @@ let _test_operator_mcp_supervises_team_session_impl () =
 
   let prove_json =
     call_tool ~token:supervisor_token ~path:"/mcp" ~session_id:"operator-supervisor"
-      ~id:18 ~name:"masc_team_session_prove"
+      ~id:18 ~name:"masc_execution_session_prove"
       (`Assoc
         [
           ("session_id", `String session_id);
           ("generate_report_if_missing", `Bool false);
         ])
   in
-  let prove_result = extract_tool_result_json "team_session_prove" prove_json in
+  let prove_result = extract_tool_result_json "execution_session_prove" prove_json in
   check bool "prove json path present" true
     (prove_result |> U.member "proof_json_path" <> `Null);
   check bool "prove markdown path present" true
@@ -877,7 +877,7 @@ let test_agent_json_route_served_on_canonical_path () =
   let (_json, name) = fetch_agent_card 3 in
   check string "agent card name present" "MASC-MCP" name
 
-let test_operator_mcp_supervises_team_session () =
+let test_operator_mcp_supervises_execution_session () =
   Alcotest.skip ()
 
 let () =
@@ -886,7 +886,7 @@ let () =
       ( "operator",
         [
           test_case "remote operator supervises team session over MCP" `Slow
-            test_operator_mcp_supervises_team_session;
+            test_operator_mcp_supervises_execution_session;
           test_case "full mcp requires auth on non-loopback bind" `Slow
             test_mcp_requires_auth_when_bound_non_loopback;
           test_case "canonical agent discovery route" `Quick

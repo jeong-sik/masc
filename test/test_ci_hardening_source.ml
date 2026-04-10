@@ -71,7 +71,7 @@ let test_health_and_ci_runner_diagnostics () =
   check bool "ci runner tracks active build dir for diagnostics" true
     (file_contains_pattern "scripts/ci-run-tests.sh" "ACTIVE_TEST_BUILD_DIR")
 
-let test_contract_harness_and_team_session_authz_contracts () =
+let test_contract_harness_and_execution_session_authz_contracts () =
   check bool "contract harness exposes extract_text helper" true
     (file_contains_pattern "scripts/harness/lib/test_framework.sh"
        "extract_text()");
@@ -614,7 +614,7 @@ let test_oas_capacity_restore_contracts () =
     (file_contains_pattern "lib/autoresearch_codegen.ml"
        "Eio_context.get_switch_opt (), Eio_context.get_net_opt ()")
 
-let test_team_session_spawn_tool_contracts () =
+let test_execution_session_spawn_tool_contracts () =
   (* team session spawn tool contracts removed — team session cleanup *)
   ()
 
@@ -734,7 +734,7 @@ let () =
       ("source_guard", [
            test_case "sync and asset contracts" `Quick test_ci_sync_and_asset_contracts;
            test_case "contract harness and team session authz contracts" `Quick
-             test_contract_harness_and_team_session_authz_contracts;
+             test_contract_harness_and_execution_session_authz_contracts;
            test_case "health and ci diagnostics" `Quick test_health_and_ci_runner_diagnostics;
            test_case "route auth contracts" `Quick test_route_auth_contracts;
            test_case "http write auth contracts" `Quick test_http_write_auth_contracts;
@@ -768,7 +768,7 @@ let () =
            test_case "oas capacity restore contracts" `Quick
              test_oas_capacity_restore_contracts;
            test_case "team session spawn tool contracts" `Quick
-             test_team_session_spawn_tool_contracts;
+             test_execution_session_spawn_tool_contracts;
            test_case "dashboard timeout guard contracts" `Quick
              test_dashboard_timeout_guard_contracts;
            test_case "mermaid xss contracts" `Quick test_mermaid_xss_contracts;

@@ -259,9 +259,9 @@ let build_session_contexts seeds operation_contexts : session_context list =
            handoff_json
              ~surface:"intervene"
              ~label:intervene_label
-             ~target_type:"team_session"
+             ~target_type:"execution_session"
              ~target_id:seed.session_id
-             ~focus_kind:"team_session"
+             ~focus_kind:"execution_session"
              ()
          in
          let command_handoff =
@@ -271,10 +271,10 @@ let build_session_contexts seeds operation_contexts : session_context list =
                (if Option.is_some linked_operation_id then "operations" else "swarm")
              ?operation_id:linked_operation_id
              ~label:"세션 원인 보기"
-             ~target_type:"team_session"
+             ~target_type:"execution_session"
              ~target_id:seed.session_id
              ~focus_kind:
-               (if Option.is_some linked_operation_id then "operation" else "team_session")
+               (if Option.is_some linked_operation_id then "operation" else "execution_session")
              ()
          in
          let top_handoff =
@@ -369,7 +369,7 @@ let build_execution_queue session_contexts operation_contexts =
                    ("severity", `String (string_of_tone session.severity));
                    ("status", member_assoc "status" session.json);
                    ("summary", `String (queue_summary_of_session session));
-                   ("target_type", `String "team_session");
+                   ("target_type", `String "execution_session");
                    ("target_id", `String session.session_id);
                    ("linked_session_id", `String session.session_id);
                    ("linked_operation_id", option_to_json (fun value -> `String value) session.linked_operation_id);

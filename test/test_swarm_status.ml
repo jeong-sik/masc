@@ -304,7 +304,7 @@ let test_terminal_projected_session_artifacts_do_not_keep_supervised_lane_presen
       operation_id = "detachment-ts-old";
       source = "projected";
       status = "cancelled";
-      runtime_kind = Some "team_session";
+      runtime_kind = Some "execution_session";
       session_id = Some "ts-old";
       roster = [ "worker-a"; "worker-b" ];
       leader_id = Some "worker-a";

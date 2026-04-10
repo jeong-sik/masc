@@ -186,7 +186,7 @@ normalized_worker_batch_json() {
 
 require_success_response() {
   local payload="$1"
-  local label="${2:-supervisor_team_session response}"
+  local label="${2:-supervisor_execution_session response}"
   mcp_require_jsonrpc_ok "$payload" "$label"
 }
 

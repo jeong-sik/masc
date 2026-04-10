@@ -92,7 +92,7 @@ let test_repo_synthesis_swarm_start_avoids_saturated_platoon_cap () =
       ]
   in
   (* Team_session_engine_eio removed — swarm_start returns an error
-     because start_team_session is stubbed to return Error. Verify
+     because start_execution_session is stubbed to return Error. Verify
      the dispatch handles this gracefully. *)
   match
     Lib.Tool_autoresearch.dispatch ctx ~name:"masc_repo_synthesis_swarm_start"

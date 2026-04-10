@@ -17,8 +17,8 @@ let normalize_judgment_target_type value =
   let normalized = String.trim value |> String.lowercase_ascii in
   match normalized with
   | "room" | "namespace" -> Ok ("namespace", Operator_judgment.Room)
-  | "team_session" -> Ok ("team_session", Operator_judgment.Team_session)
-  | _ -> Error "target_type must be namespace or team_session"
+  | "execution_session" -> Ok ("execution_session", Operator_judgment.Execution_session)
+  | _ -> Error "target_type must be namespace or execution_session"
 
 let default_fresh_ttl_sec surface =
   match surface with
@@ -35,9 +35,9 @@ let judgment_write_json (ctx : 'a context) args =
   let summary = get_string args "summary" "" |> String.trim in
   if summary = "" then Error "summary is required"
   else if
-    judgment_target_type = Operator_judgment.Team_session && Option.is_none target_id
+    judgment_target_type = Operator_judgment.Execution_session && Option.is_none target_id
   then
-    Error "target_id is required when target_type=team_session"
+    Error "target_id is required when target_type=execution_session"
   else
     let now_unix = Unix.gettimeofday () in
     let generated_at = iso_of_unix now_unix in
@@ -89,9 +89,9 @@ let judgment_latest_json (_ctx : 'a context) args =
   in
   let target_id = get_string_opt args "target_id" in
   if
-    judgment_target_type = Operator_judgment.Team_session && Option.is_none target_id
+    judgment_target_type = Operator_judgment.Execution_session && Option.is_none target_id
   then
-    Error "target_id is required when target_type=team_session"
+    Error "target_id is required when target_type=execution_session"
   else
     let require_fresh = get_bool args "require_fresh" true in
     let judgment =
@@ -143,16 +143,16 @@ let canonical_action_type action_type =
 let normalize_action_target_type target_type =
   match String.trim target_type |> String.lowercase_ascii with
   | "room" | "namespace" -> Ok "namespace"
-  | "team_session" | "keeper" | "review_item" as value -> Ok value
+  | "execution_session" | "keeper" | "review_item" as value -> Ok value
   | "" -> Ok ""
-  | _ -> Error "target_type must be namespace, team_session, keeper, or review_item"
+  | _ -> Error "target_type must be namespace, execution_session, keeper, or review_item"
 
 let default_target_type_for action_type =
   match action_type with
   | "broadcast" | "namespace_pause" | "namespace_resume" | "task_inject" | "social_sweep" -> "namespace"
   | "team_turn" | "team_note" | "team_broadcast" | "team_task_inject"
   | "team_worker_spawn_batch" | "team_stop" ->
-      "team_session"
+      "execution_session"
   | "keeper_message" | "keeper_probe" | "keeper_recover" -> "keeper"
   | "review_resolve" | "review_defer" -> "review_item"
   | _ -> ""

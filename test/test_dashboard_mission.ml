@@ -46,7 +46,7 @@ let write_pending_confirm config session_id =
             ("trace_id", `String "ops_fixture_mission");
             ("actor", `String "dashboard-fixture");
             ("action_type", `String "team_stop");
-            ("target_type", `String "team_session");
+            ("target_type", `String "execution_session");
             ("target_id", `String session_id);
             ("payload", `Assoc [ ("reason", `String "fixture pending confirmation") ]);
             ("delegated_tool", `String "masc_operator_action");

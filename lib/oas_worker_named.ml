@@ -19,14 +19,15 @@ let default_config_path () : string option =
     self-hosted providers so that cloud models never leak in via fallback. *)
 let is_local_only_cascade name =
   let lc = String.lowercase_ascii name in
-  let rec contains s i =
-    let slen = String.length s in
-    let plen = 5 (* "local" *) in
+  let pattern = "local" in
+  let plen = String.length pattern in
+  let slen = String.length lc in
+  let rec loop i =
     if i > slen - plen then false
-    else if String.sub s i plen = "local" then true
-    else contains s (i + 1)
+    else if String.sub lc i plen = pattern then true
+    else loop (i + 1)
   in
-  contains lc 0
+  loop 0
 
 let is_local_label label =
   match Oas_model_resolve.provider_name_of_label label with

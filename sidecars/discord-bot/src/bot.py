@@ -10,6 +10,7 @@ Usage:
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import logging
 import os
 import sys
@@ -368,16 +369,7 @@ class GateBot(discord.Client):
             return
 
         # Strip keeper-internal [STATE] blocks before rendering
-        response = GateResponse(
-            ok=response.ok,
-            keeper_name=response.keeper_name,
-            reply=strip_state_blocks(response.reply),
-            error=response.error,
-            model_used=response.model_used,
-            duration_ms=response.duration_ms,
-            tokens_used=response.tokens_used,
-            structured=response.structured,
-        )
+        response = dataclasses.replace(response, reply=strip_state_blocks(response.reply))
 
         # Try structured rendering (from gate or auto-parsed markdown)
         structured = response.structured or markdown_to_structured(response.reply)

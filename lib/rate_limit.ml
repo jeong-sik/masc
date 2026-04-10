@@ -42,6 +42,9 @@ let create ?(rate=default_rate) ?(burst=default_burst) () =
     mutex = Eio.Mutex.create ();
   }
 
+let rate t = t.rate
+let burst t = t.burst
+
 let create_from_env () =
   create ~rate:(rate_from_env ()) ~burst:(burst_from_env ()) ()
 

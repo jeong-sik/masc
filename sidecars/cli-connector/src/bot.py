@@ -13,11 +13,8 @@ import asyncio
 import logging
 import os
 import re
-import signal
 import sys
 from pathlib import Path
-
-import httpx
 
 logging.basicConfig(
     level=logging.WARNING,

@@ -10,13 +10,16 @@ Supports:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
+import signal
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from telegram import Update
+from telegram import Message, Update
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -214,7 +217,7 @@ class TelegramGateBot:
         update: Update,
         keeper: str,
         text: str,
-        thinking_msg: Any,
+        thinking_msg: Message,
     ) -> bool:
         """Try streaming response with live message editing.
 
@@ -222,7 +225,6 @@ class TelegramGateBot:
         Telegram rate-limits edit_message to ~30/min per chat, so we
         throttle edits to every ~1 second or 80 characters of new content.
         """
-        import time
 
         user = update.effective_user
         chat = update.effective_chat
@@ -398,12 +400,7 @@ async def main() -> None:
         logger.info("Telegram bot running. Press Ctrl+C to stop.")
 
         # Block until stopped
-        import asyncio
-
         stop_event = asyncio.Event()
-
-        import signal
-
         loop = asyncio.get_event_loop()
         for sig in (signal.SIGINT, signal.SIGTERM):
             loop.add_signal_handler(sig, stop_event.set)

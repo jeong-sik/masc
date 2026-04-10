@@ -458,6 +458,7 @@
    keeper_approval_queue
    keeper_agent_run
    keeper_world_observation
+   keeper_decision_audit
    keeper_unified_prompt
    keeper_unified_turn
 

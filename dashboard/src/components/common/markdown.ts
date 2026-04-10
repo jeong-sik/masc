@@ -11,7 +11,7 @@ import DOMPurify from 'dompurify'
 
 // ── Lazy shiki loader ────────────────────────────────────────
 import type { Highlighter } from 'shiki'
-import type MermaidDefault from 'mermaid'
+import type * as MermaidModule from 'mermaid'
 
 let shikiPromise: Promise<Highlighter> | null = null
 
@@ -31,7 +31,7 @@ function getShiki(): Promise<Highlighter> {
 }
 
 // ── Lazy mermaid loader ──────────────────────────────────────
-type MermaidApi = typeof MermaidDefault
+type MermaidApi = typeof MermaidModule.default
 
 function importMermaid(): Promise<MermaidApi> {
   return import('mermaid').then(module => module.default)

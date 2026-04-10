@@ -130,26 +130,94 @@ let gh_read_only_prefixes =
   ; "issue list"; "issue view"; "issue status"
   ; "repo view"; "repo list"
   ; "release list"; "release view"
-  ; "api" (* read-only API calls — gh api is GET by default *)
   ]
+
+(** [is_gh_api_read_only cmd_lower] returns true when a `gh api ...`
+    invocation is effectively a GET request with no mutation side effects.
+    `gh api` defaults to GET, but becomes mutating when:
+    - `-X`/`--method` specifies POST/PUT/PATCH/DELETE
+    - `-f`/`-F`/`--field`/`--raw-field` is present (implies POST)
+    - The subcommand is `graphql` (always POST)
+    The input [cmd_lower] must already be lowercased and trimmed. *)
+let is_gh_api_read_only (cmd_lower : string) : bool =
+  if not (String.length cmd_lower >= 3
+          && String.sub cmd_lower 0 3 = "api") then false
+  else
+    let rest = String.trim (String.sub cmd_lower 3 (String.length cmd_lower - 3)) in
+    (* graphql subcommand is always POST *)
+    if String.length rest >= 7 && String.sub rest 0 7 = "graphql" then false
+    else
+      let tokens = String.split_on_char ' ' cmd_lower in
+      let has_method_flag =
+        let rec check = function
+          | [] -> false
+          | tok :: rest_toks ->
+            if tok = "-x" || tok = "--method" then
+              (* next token is the method *)
+              (match rest_toks with
+               | method_tok :: _ ->
+                 method_tok <> "get"
+               | [] -> true (* flag with no value — conservative: mutating *))
+            else if (String.length tok > 3
+                     && String.sub tok 0 3 = "-x=") then
+              let method_val = String.sub tok 3 (String.length tok - 3) in
+              method_val <> "get"
+            else if (String.length tok > 9
+                     && String.sub tok 0 9 = "--method=") then
+              let method_val = String.sub tok 9 (String.length tok - 9) in
+              method_val <> "get"
+            else check rest_toks
+        in
+        check tokens
+      in
+      let has_field_flag =
+        List.exists (fun tok ->
+          tok = "-f" || tok = "-ff"
+          || String.length tok > 3 && String.sub tok 0 3 = "-f="
+          || tok = "--field" || tok = "--raw-field"
+          || String.length tok > 8 && String.sub tok 0 8 = "--field="
+        ) tokens
+      in
+      not has_method_flag && not has_field_flag
+
+(** Extract the effective gh command string from keeper_github JSON input.
+    [handle_keeper_github] uses [cmd] first; if empty, falls back to
+    joining [args].  This function mirrors that logic so the read-only
+    classification matches what actually executes. *)
+let gh_effective_cmd (input : Yojson.Safe.t) : string =
+  match input with
+  | `Assoc fields ->
+    let cmd =
+      match List.assoc_opt "cmd" fields with
+      | Some (`String s) -> String.trim s
+      | _ -> ""
+    in
+    if cmd <> "" then cmd
+    else
+      let args =
+        match List.assoc_opt "args" fields with
+        | Some (`List items) ->
+          List.filter_map (function `String s -> Some s | _ -> None) items
+        | _ -> []
+      in
+      if args <> [] then String.concat " " args else ""
+  | _ -> ""
 
 let is_read_only_with_input ~(tool_name : string) ~(input : Yojson.Safe.t) : bool =
   if is_effectively_read_only_tool tool_name then true
   else match tool_name with
   | "keeper_github" ->
-    let cmd =
-      (match input with
-       | `Assoc fields ->
-         (match List.assoc_opt "cmd" fields with
-          | Some (`String s) -> String.trim s
-          | _ -> "")
-       | _ -> "")
-    in
+    let cmd = gh_effective_cmd input in
     let cmd_lower = String.lowercase_ascii cmd in
-    List.exists (fun prefix ->
-      String.length cmd_lower >= String.length prefix
-      && String.sub cmd_lower 0 (String.length prefix) = prefix
-    ) gh_read_only_prefixes
+    if cmd_lower = "" then false
+    else if String.length cmd_lower >= 3
+            && String.sub cmd_lower 0 3 = "api" then
+      is_gh_api_read_only cmd_lower
+    else
+      List.exists (fun prefix ->
+        String.length cmd_lower >= String.length prefix
+        && String.sub cmd_lower 0 (String.length prefix) = prefix
+      ) gh_read_only_prefixes
   | _ -> false
 
 (* ── Reconcile-safe tools (mutating but idempotent enough) ─── *)

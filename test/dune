@@ -76,6 +76,7 @@
         test_keeper_discovered_tools
         test_keeper_tool_affinity
         test_keeper_github_safety
+        test_keeper_github_read_only
         test_worktree_live_context
         test_tool_input_validation
         test_autoresearch_codegen
@@ -149,6 +150,7 @@
           test_keeper_discovered_tools
           test_keeper_tool_affinity
           test_keeper_github_safety
+          test_keeper_github_read_only
           test_worktree_live_context
           test_tool_input_validation
           test_autoresearch_codegen

@@ -99,6 +99,15 @@ let test_base_path_raw_prefers_preserved_input_env () =
       check (option string) "base_path_raw_opt prefers preserved input env"
         (Some "/tmp/masc-custom-root/.masc")
         (Env_config.base_path_raw_opt ());
+      begin
+        match Env_config.base_path_source_opt () with
+        | Some (name, value) ->
+            check string "base_path_source_opt prefers preserved input env name"
+              "MASC_BASE_PATH_INPUT" name;
+            check string "base_path_source_opt prefers preserved input env value"
+              "/tmp/masc-custom-root/.masc" value
+        | None -> fail "expected base_path_source_opt"
+      end;
       check (option string) "base_path_opt still returns normalized path"
         (Some "/tmp/masc-custom-root")
         (Env_config.base_path_opt ());

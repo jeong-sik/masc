@@ -73,12 +73,17 @@ let output_for_status ~(status : Unix.process_status) ~(stdout : string)
     | out, "" -> out
     | out, err -> out ^ "\n" ^ err
 
-let process_error_output ?(stderr = "") ~label ~reason () =
+let process_error_output ?(stderr = "") ~label:_ ~reason () =
   let stderr = String.trim stderr in
   if stderr = "" then
-    Printf.sprintf "process_eio_error: %s (%s)" label reason
+    Printf.sprintf "process_eio_error: %s" reason
   else
-    Printf.sprintf "process_eio_error: %s (%s)\nstderr:\n%s" label reason stderr
+    Printf.sprintf "process_eio_error: %s\nstderr:\n%s" reason stderr
+
+let reason_of_exn_for_output = function
+  | Unix.Unix_error (err, fn, _) ->
+      Printf.sprintf "%s: %s" fn (Unix.error_message err)
+  | exn -> Printexc.to_string exn
 
 (** Create a private stderr capture file for Unix fallback status helpers.
     Uses [Filename.temp_file] for atomic creation, then opens the file with
@@ -236,7 +241,7 @@ let with_unix_capture ?env ?stdin_content ?(capture_stderr = false)
      | exn ->
          let stderr = captured_stderr_or_empty !stderr_path_ref in
          cleanup ();
-         on_error (Printexc.to_string exn) stderr)
+         on_error (reason_of_exn_for_output exn) stderr)
 
 let run_unix_argv_fallback ?env (argv : string list) : string =
   let label = String.concat " " (List.map Filename.quote argv) in
@@ -368,7 +373,7 @@ let run_argv ?(timeout_sec = 60.0) ?env (argv : string list) : string =
             ) else (
               Log.Misc.error "[Process_eio] argv error: %s — %s" label
                 (Printexc.to_string exn);
-              process_error_output ~label ~reason:(Printexc.to_string exn) ())
+              process_error_output ~label ~reason:(reason_of_exn_for_output exn) ())
 
 let run_argv_with_stdin ?(timeout_sec = 60.0) ?env ~(stdin_content : string) (argv : string list) : string =
   if not (is_initialized ()) then
@@ -402,7 +407,7 @@ let run_argv_with_stdin ?(timeout_sec = 60.0) ?env ~(stdin_content : string) (ar
             ) else (
               Log.Misc.error "[Process_eio] argv error: %s — %s" label
                 (Printexc.to_string exn);
-              process_error_output ~label ~reason:(Printexc.to_string exn) ())
+              process_error_output ~label ~reason:(reason_of_exn_for_output exn) ())
 
 let run_argv_with_stdin_and_status
     ?(timeout_sec = 60.0)
@@ -460,7 +465,7 @@ let run_argv_with_stdin_and_status
               Log.Misc.error "[Process_eio] argv error: %s — %s" label
                 (Printexc.to_string exn);
               ( Unix.WEXITED 127
-              , process_error_output ~label ~reason:(Printexc.to_string exn) () ))
+              , process_error_output ~label ~reason:(reason_of_exn_for_output exn) () ))
 
 let run_argv_with_status ?(timeout_sec = 60.0) ?env ?cwd (argv : string list) : Unix.process_status * string =
   if not (is_initialized ()) then run_unix_argv_with_status_fallback ?env argv
@@ -515,4 +520,4 @@ let run_argv_with_status ?(timeout_sec = 60.0) ?env ?cwd (argv : string list) : 
               Log.Misc.error "[Process_eio] argv error: %s — %s" label
                 (Printexc.to_string exn);
               ( Unix.WEXITED 127
-              , process_error_output ~label ~reason:(Printexc.to_string exn) () ))
+              , process_error_output ~label ~reason:(reason_of_exn_for_output exn) () ))

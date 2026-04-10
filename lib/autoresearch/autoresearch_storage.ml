@@ -171,8 +171,9 @@ let latest_cycle_record ~base_path loop_id =
     in
     List.fold_left
       (fun last line ->
+        let trimmed = String.trim line in
         match
-          try Ok (Yojson.Safe.from_string line)
+          try Ok (Yojson.Safe.from_string trimmed)
           with Yojson.Json_error msg -> Error msg
         with
         | Ok json -> (
@@ -206,8 +207,9 @@ let load_cycle_history ~base_path loop_id =
     in
     List.filter_map
       (fun line ->
+        let trimmed = String.trim line in
         match
-          try Ok (Yojson.Safe.from_string line)
+          try Ok (Yojson.Safe.from_string trimmed)
           with Yojson.Json_error msg -> Error msg
         with
         | Ok json -> (

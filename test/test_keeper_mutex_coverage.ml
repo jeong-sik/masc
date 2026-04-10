@@ -45,10 +45,18 @@ let wait_for_done request_id =
   in
   loop 200
 
-let test_keeper_msg_async_roundtrip () =
+let with_eio_env f =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Eio_guard.enable ();
+  Fun.protect
+    ~finally:(fun () ->
+      Fs_compat.clear_fs ();
+      Eio_guard.disable ())
+    (fun () -> f env)
+
+let test_keeper_msg_async_roundtrip () =
+  with_eio_env @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
   let request_id =
     Keeper_msg_async.submit ~sw
@@ -66,9 +74,7 @@ let test_keeper_msg_async_roundtrip () =
     (List.length (Keeper_msg_async.list_for_keeper ~keeper_name:"alpha"))
 
 let test_keeper_file_tracker_records_collisions () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  Eio_guard.enable ();
+  with_eio_env @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
   let make_worker keeper_name promise =
     Eio.Fiber.fork ~sw (fun () ->
@@ -89,9 +95,7 @@ let test_keeper_file_tracker_records_collisions () =
     (List.length w1 + List.length w2)
 
 let test_keeper_evidence_chain_verifies () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  Eio_guard.enable ();
+  with_eio_env @@ fun _env ->
   with_temp_dir "keeper-evidence-mutex" @@ fun base_path ->
   init_git_repo base_path;
   ignore

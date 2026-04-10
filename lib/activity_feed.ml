@@ -67,11 +67,17 @@ let load_jsonl_safe ?(kind = "jsonl") (path : string) : Yojson.Safe.t list =
                    warn_parse_failure ~kind ~path ~line_no msg;
                    None)
 
-let parse_created_at_or_now ~kind ~path raw =
+(** Fallback timestamp used when a source record has no parseable
+    [created_at].  Using epoch (0.0) instead of [Time_compat.now ()]
+    ensures items with missing timestamps sort to the end of the
+    timeline rather than being silently reordered to "now". *)
+let timestamp_fallback = 0.0
+
+let parse_created_at_or_fallback ~kind ~path raw =
   let raw = String.trim raw in
   let fallback () =
     Log.Feed.warn "%s timestamp parse fallback for %s: %S" kind path raw;
-    Time_compat.now ()
+    timestamp_fallback
   in
   if raw = "" then fallback ()
   else
@@ -122,7 +128,7 @@ let task_activities (config : Room.config) : activity_item list =
           let assignee = Safe_ops.json_string ~default:"" "assignee" json in
           let title = Safe_ops.json_string ~default:"" "title" json in
           let created_at_str = Safe_ops.json_string ~default:"" "created_at" json in
-          let created_at = parse_created_at_or_now ~kind:"task activity" ~path created_at_str in
+          let created_at = parse_created_at_or_fallback ~kind:"task activity" ~path created_at_str in
           let agent = if assignee <> "" then assignee else "system" in
           let summary = Printf.sprintf "Task %s: %s (%s)" id title status in
           if id = "" then None
@@ -149,7 +155,7 @@ let board_post_activities (config : Room.config) : activity_item list =
         | Some ts -> ts
         | None ->
             Log.Feed.warn "board post missing/invalid created_at for %s" path;
-            Time_compat.now ()
+            timestamp_fallback
       in
       if id = "" then None
       else
@@ -179,7 +185,7 @@ let board_comment_activities (config : Room.config) : activity_item list =
         | Some ts -> ts
         | None ->
             Log.Feed.warn "board comment missing/invalid created_at for %s" path;
-            Time_compat.now ()
+            timestamp_fallback
       in
       if id = "" then None
       else
@@ -210,7 +216,7 @@ let mention_activities (config : Room.config) : activity_item list =
         | Some ts -> ts
         | None ->
             Log.Feed.warn "mention inbox missing/invalid created_at for %s" path;
-            Time_compat.now ()
+            timestamp_fallback
       in
       if id = "" then None
       else Some {

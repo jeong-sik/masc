@@ -195,10 +195,10 @@ let test_playground_guard_outside () =
   Alcotest.(check bool) "prefix attack (cheolsu2)"
     false (is_inside_playground ~playground_abs:pg (pg ^ "2/repos"))
 
-(** Path traversal: if cwd is canonicalized via realpath before the check,
-    ../traversal resolves to the actual target. This test verifies that
-    a canonicalized traversal path is correctly rejected.
-    In production, Unix.realpath on the cwd collapses ".." before comparison. *)
+(** Path traversal: production uses [Keeper_alerting_path.normalize_path_for_check]
+    which walks up to the nearest resolvable ancestor (not bare Unix.realpath).
+    After normalization, ../traversal resolves to the actual target.
+    This test verifies that a canonicalized traversal path is correctly rejected. *)
 let test_playground_guard_traversal () =
   let pg = "/project/.masc/playground/cheolsu" in
   (* After realpath, ".../cheolsu/repos/../../lib" becomes "/project/lib" *)

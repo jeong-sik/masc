@@ -114,14 +114,13 @@ let check_invariants (state : product) : (unit, string) result =
               (Agent_turn.phase_to_string state.turn))
    | _ -> ());
 
-  (* Keeper draining -> turn must be idle or finalizing *)
+  (* Keeper draining -> turn must not be Prompting (no new LLM calls).
+     In-progress turns (Awaiting, Parsing, etc.) are allowed because
+     drain waits for the current turn to complete. TLA+ verified. *)
   (match state.keeper with
    | Keeper.Draining ->
-     (match state.turn with
-      | Agent_turn.Idle | Agent_turn.Finalizing -> ()
-      | other ->
-        add (Printf.sprintf "keeper=Draining but turn=%s (expected Idle|Finalizing)"
-               (Agent_turn.phase_to_string other)))
+     if state.turn = Agent_turn.Prompting then
+       add "keeper=Draining but turn=Prompting (no new LLM calls during drain)"
    | _ -> ());
 
   (* NonDet retrying -> turn must be dispatching *)
@@ -160,7 +159,15 @@ let event_to_string = function
 
 let apply_turn_event state event =
   let new_turn = Agent_turn.apply_event ~current:state.turn event in
-  let new_state = { state with turn = new_turn } in
+  (* TLA+ bug fix: TurnError and TurnFinalize must reset validation to
+     Unchecked, otherwise orphaned NondetRetrying violates invariant.
+     TurnStart also resets validation for the new turn. *)
+  let new_validation = match event with
+    | Agent_turn.Turn_error _ | Agent_turn.Turn_complete | Agent_turn.Turn_start ->
+      Tool_validation.Unchecked
+    | _ -> state.validation
+  in
+  let new_state = { state with turn = new_turn; validation = new_validation } in
   match check_invariants new_state with
   | Ok () -> Ok new_state
   | Error reason -> Error reason

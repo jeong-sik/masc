@@ -150,4 +150,27 @@ let () =
     ("json", [
       Alcotest.test_case "serialize" `Quick test_json;
     ]);
+    ("tla_bugfix", [
+      Alcotest.test_case "turn error resets validation" `Quick
+        (fun () ->
+          let s = mk ~keeper:K.Running ~turn:AT.Dispatching ~validation:TV.Nondet_retrying () in
+          match State_product.apply_turn_event s (AT.Turn_error "timeout") with
+          | Ok s ->
+            Alcotest.(check string) "turn idle" "idle" (AT.phase_to_string s.turn);
+            Alcotest.(check string) "validation reset" "unchecked" (TV.phase_to_string s.validation)
+          | Error e -> Alcotest.fail e);
+      Alcotest.test_case "turn complete resets validation" `Quick
+        (fun () ->
+          let s = mk ~keeper:K.Running ~turn:AT.Finalizing ~validation:TV.Valid () in
+          match State_product.apply_turn_event s AT.Turn_complete with
+          | Ok s ->
+            Alcotest.(check string) "turn idle" "idle" (AT.phase_to_string s.turn);
+            Alcotest.(check string) "validation reset" "unchecked" (TV.phase_to_string s.validation)
+          | Error e -> Alcotest.fail e);
+      Alcotest.test_case "draining+awaiting ok (TLA+ refined)" `Quick
+        (fun () ->
+          match State_product.check_invariants (mk ~keeper:K.Draining ~turn:AT.Awaiting ()) with
+          | Ok () -> ()
+          | Error e -> Alcotest.fail ("should be ok: " ^ e));
+    ]);
   ]

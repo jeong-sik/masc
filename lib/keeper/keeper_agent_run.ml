@@ -923,15 +923,17 @@ let run_turn
       ~session
       ~ctx_snapshot
       ~generation
-      ~pre_tool_use_guard:(fun ~tool_name ~input:_ ->
+      ~pre_tool_use_guard:(fun ~tool_name ~input ->
         match !mutation_boundary_tool_name with
-        | Some _ when Keeper_tool_registry.is_effectively_read_only_tool tool_name ->
-          None (* read-only tools pass through mutation boundary *)
+        | Some _ when Keeper_tool_registry.is_read_only_with_input
+                        ~tool_name ~input ->
+          None (* read-only tools/subcommands pass through mutation boundary *)
         | Some _ -> Some (mutation_boundary_summary ())
         | None -> None)
-      ~on_tool_executed:(fun ~tool_name ~input:_ ~output_text:_ ~success ->
+      ~on_tool_executed:(fun ~tool_name ~input ~output_text:_ ~success ->
         if success
-           && Keeper_exec_tools.has_mutating_side_effect tool_name
+           && not (Keeper_tool_registry.is_read_only_with_input
+                     ~tool_name ~input)
            && not (Keeper_tool_registry.is_reconcile_safe_tool tool_name)
            && Option.is_none !mutation_boundary_tool_name
         then begin

@@ -22,7 +22,8 @@ end
 
 module Trace_id = struct
   type t = string
-  let is_valid s = String.length s > 0 && not (String.contains s '/')
+  let is_valid s =
+    s <> "." && s <> ".." && Keeper_name.is_valid s
   let of_string s =
     if is_valid s then Ok s
     else Error "Invalid trace_id"

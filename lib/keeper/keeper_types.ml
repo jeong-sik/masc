@@ -787,7 +787,18 @@ type parsed_keeper_state =
 let parse_keeper_identity (json : Yojson.Safe.t) : parsed_keeper_identity =
   let pk_name = Safe_ops.json_string ~default:"" "name" json in
   let pk_agent_name = Safe_ops.json_string ~default:"" "agent_name" json in
-  let pk_trace_id = match Keeper_id.Trace_id.of_string (Safe_ops.json_string ~default:"" "trace_id" json) with Ok x -> x | Error _ -> Keeper_id.Trace_id.of_string "default" |> Result.get_ok in
+  let pk_trace_id_raw = Safe_ops.json_string ~default:"" "trace_id" json in
+  let pk_trace_id =
+    if String.trim pk_trace_id_raw = "" then
+      failwith "keeper meta parse error: missing trace_id in persisted keeper identity"
+    else
+      match Keeper_id.Trace_id.of_string pk_trace_id_raw with
+      | Ok x -> x
+      | Error err ->
+        failwith
+          ("keeper meta parse error: invalid trace_id in persisted keeper identity: "
+           ^ err)
+  in
   let pk_trace_history =
     Safe_ops.json_string_list "trace_history" json |> List.filter validate_name
   in

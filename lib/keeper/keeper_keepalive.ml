@@ -1327,8 +1327,14 @@ let process_directive ~agent_name directive =
     wakeup_keeper_by_agent_name ~agent_name
   | s when String.length s > 6 && String.sub s 0 6 = "claim:" ->
     let task_id = String.sub s 6 (String.length s - 6) in
-    Log.Keeper.info "directive: server assigned task %s to %s" task_id agent_name;
-    assign_keeper_task_from_directive ~agent_name ~task_id:(match Keeper_id.Task_id.of_string task_id with Ok t -> t | Error _ -> Keeper_id.Task_id.of_string "fallback" |> Result.get_ok)
+    (match Keeper_id.Task_id.of_string task_id with
+     | Ok parsed_task_id ->
+       Log.Keeper.info "directive: server assigned task %s to %s" task_id agent_name;
+       assign_keeper_task_from_directive ~agent_name ~task_id:parsed_task_id
+     | Error err ->
+       Log.Keeper.warn
+         "directive: ignoring invalid task assignment for %s (%s): %s"
+         agent_name task_id err)
   | unknown -> Log.Keeper.warn "unknown gRPC directive for %s: %s" agent_name unknown
 ;;
 

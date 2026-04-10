@@ -200,6 +200,14 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
     in
     Progress.Tracker.step tracker ~message:"Initializing session directory" ();
     let trace_id = generate_trace_id () in
+    match Keeper_id.Trace_id.of_string trace_id with
+    | Error err ->
+      Log.Keeper.error
+        "create_keeper failed: generated invalid trace_id for name=%s: %s"
+        p.name err;
+      Progress.stop_tracking task_id;
+      (false, "internal keeper trace_id generation failed")
+    | Ok trace_id_t ->
       let base_dir = session_base_dir ctx.config in
       (* Ensure full session dir tree, not just base_dir (issue #3019) *)
       ignore (Keeper_fs.ensure_dir (Filename.concat base_dir trace_id));
@@ -316,7 +324,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             work_discovery_count = 0;
           };
           generation = 0;
-          trace_id = (match Keeper_id.Trace_id.of_string trace_id with Ok x -> x | Error e -> failwith e);
+          trace_id = trace_id_t;
           trace_history = [];
           last_handoff_ts = 0.0;
           last_continuity_update_ts = now_ts;

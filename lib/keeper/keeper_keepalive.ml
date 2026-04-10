@@ -451,7 +451,9 @@ let write_heartbeat_snapshot
        && Keeper_decision_audit.decision_layer_level () >= 2
     then
       (try Thompson_sampling.record_guard_penalty ~agent_name:meta_current.name
-       with exn ->
+       with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
          Log.Keeper.warn "guard→thompson penalty failed for %s: %s"
            meta_current.name (Printexc.to_string exn));
     let snapshot =

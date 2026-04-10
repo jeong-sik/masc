@@ -232,6 +232,54 @@ let test_git_write_classification () =
   Alcotest.(check bool) "push is not destructive"
     false (is_destructive "git push origin my-branch")
 
+(** Guard decision matrix: preset × playground × operation → allow/block.
+    Models the 4 guards in handle_keeper_bash after the linter hardening:
+    1. destructive → always block
+    2. branch_switch → require (write_enabled AND in_playground)
+    3. write_op + not write_enabled → block
+    4. write_op + write_enabled + not in_playground → block (location gate)
+    Only write_enabled AND in_playground passes all gates for write ops. *)
+let test_guard_decision_matrix () =
+  let is_branch_switch = Masc_mcp.Worker_dev_tools.is_git_branch_switch in
+  let is_destructive = Masc_mcp.Worker_dev_tools.is_destructive_bash_operation in
+  (* Simulate the guard chain for a given cmd/preset/location *)
+  let guard_allows ~write_enabled ~in_playground cmd =
+    if is_destructive cmd then false
+    else if is_branch_switch cmd && not (write_enabled && in_playground) then false
+    else if (not write_enabled) && is_write cmd then false
+    else if (not in_playground) && is_write cmd then false
+    else true
+  in
+  (* ── Destructive: always blocked ── *)
+  Alcotest.(check bool) "destructive + write + playground → BLOCK"
+    false (guard_allows ~write_enabled:true ~in_playground:true "rm -rf /tmp");
+
+  (* ── Branch switch ── *)
+  Alcotest.(check bool) "checkout + write + playground → ALLOW"
+    true (guard_allows ~write_enabled:true ~in_playground:true "git checkout -b feat");
+  Alcotest.(check bool) "checkout + write + NOT playground → BLOCK"
+    false (guard_allows ~write_enabled:true ~in_playground:false "git checkout -b feat");
+  Alcotest.(check bool) "checkout + readonly + playground → BLOCK"
+    false (guard_allows ~write_enabled:false ~in_playground:true "git checkout -b feat");
+  Alcotest.(check bool) "checkout + readonly + NOT playground → BLOCK"
+    false (guard_allows ~write_enabled:false ~in_playground:false "git checkout -b feat");
+
+  (* ── Write ops (push/commit) ── *)
+  Alcotest.(check bool) "push + write + playground → ALLOW"
+    true (guard_allows ~write_enabled:true ~in_playground:true "git push origin feat");
+  Alcotest.(check bool) "push + write + NOT playground → BLOCK (location gate)"
+    false (guard_allows ~write_enabled:true ~in_playground:false "git push origin feat");
+  Alcotest.(check bool) "push + readonly + playground → BLOCK (preset gate)"
+    false (guard_allows ~write_enabled:false ~in_playground:true "git push origin feat");
+  Alcotest.(check bool) "commit + write + playground → ALLOW"
+    true (guard_allows ~write_enabled:true ~in_playground:true "git commit -m 'msg'");
+
+  (* ── Read ops: always allowed ── *)
+  Alcotest.(check bool) "git status + readonly + NOT playground → ALLOW"
+    true (guard_allows ~write_enabled:false ~in_playground:false "git status");
+  Alcotest.(check bool) "git log + readonly + NOT playground → ALLOW"
+    true (guard_allows ~write_enabled:false ~in_playground:false "git log --oneline")
+
 let () =
   Alcotest.run "Keeper bash safety" [
     ("allowlist", [
@@ -251,6 +299,7 @@ let () =
       Alcotest.test_case "outside playground rejected" `Quick test_playground_guard_outside;
       Alcotest.test_case "path traversal blocked after canonicalization" `Quick test_playground_guard_traversal;
       Alcotest.test_case "git write classification" `Quick test_git_write_classification;
+      Alcotest.test_case "guard decision matrix (preset × location × op)" `Quick test_guard_decision_matrix;
     ]);
     ("edge", [
       Alcotest.test_case "empty command blocked" `Quick test_empty_command;

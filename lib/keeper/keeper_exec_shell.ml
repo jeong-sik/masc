@@ -240,23 +240,21 @@ let handle_keeper_bash
       match resolve_keeper_shell_write_cwd ~config ~meta ~args with
       | Error e -> error_json e
       | Ok cwd ->
-      (* Canonicalize cwd to prevent path traversal bypass.
-         Without this, cwd=".masc/playground/X/../../lib" would pass the
-         prefix check while actually pointing outside the playground. *)
+      (* Canonicalize both cwd and playground_abs via normalize_path_for_check
+         to prevent path traversal bypass AND symlink mismatch (e.g.,
+         /tmp vs /private/tmp on macOS).  Raw Unix.realpath would fall back to
+         the un-resolved string when the target does not yet exist on disk;
+         normalize_path_for_check walks up to the nearest resolvable ancestor. *)
       let cwd_canonical =
-        try Unix.realpath cwd
-        with Unix.Unix_error _ -> cwd
+        Keeper_alerting_path.normalize_path_for_check cwd
       in
-      (* Playground sandbox: git write ops are allowed inside the keeper's
-         playground clone (.masc/playground/<name>/repos/<repo>).
-         Both paths must be canonicalized to prevent ../traversal bypass. *)
       let playground_rel =
         Keeper_alerting_path.playground_path_of_keeper meta.name
       in
       let root = Keeper_alerting_path.project_root_of_config config in
       let playground_abs =
-        try Unix.realpath (Filename.concat root playground_rel)
-        with Unix.Unix_error _ -> Filename.concat root playground_rel
+        Keeper_alerting_path.normalize_path_for_check
+          (Filename.concat root playground_rel)
       in
       let in_playground =
         String.starts_with ~prefix:(playground_abs ^ "/") (cwd_canonical ^ "/")
@@ -276,28 +274,31 @@ let handle_keeper_bash
                      etc.) and is blocked for all presets." )
               ; "cmd", `String cmd_for_log
               ]))
-      (* Branch-switch guard: blocked in main repo, allowed in playground *)
+      (* Branch-switch guard: blocked in main repo, allowed in playground
+         only when the keeper has a write-enabled preset. *)
       else if Worker_dev_tools.is_git_branch_switch cmd
-              && not in_playground
+              && not (write_enabled && in_playground)
       then (
-        Log.Keeper.info "keeper_bash branch-switch blocked: %s (keeper=%s)" cmd_for_log meta.name;
+        Log.Keeper.info "keeper_bash branch-switch blocked: %s (keeper=%s, write_enabled=%b, playground=%b)"
+          cmd_for_log meta.name write_enabled in_playground;
         Yojson.Safe.to_string
           (`Assoc
               [ "ok", `Bool false
               ; "error", `String "branch_switch_blocked"
               ; ( "reason"
                 , `String
-                    "git checkout/switch/branch mutations are blocked in the main repo. \
+                    "git checkout/switch/branch mutations require a write-enabled preset \
+                     (Coding/Delivery/Full) and must target a playground clone. \
                      Clone into your playground first (keeper_shell op=git_clone), \
                      then set cwd to the cloned repo path." )
               ; "cmd", `String cmd_for_log
               ; "hint", `String "Use cwd=.masc/playground/YOUR_NAME/repos/REPO"
               ]))
-      (* Write gate: blocked for non-coding presets outside playground *)
-      else if (not write_enabled) && (not in_playground)
-              && Worker_dev_tools.is_write_operation cmd
+      (* Write gate: requires write_enabled preset.  in_playground controls
+         where writes land, not whether they're allowed. *)
+      else if (not write_enabled) && Worker_dev_tools.is_write_operation cmd
       then (
-        Log.Keeper.info "keeper_bash write-gate: %s (keeper=%s)" cmd_for_log meta.name;
+        Log.Keeper.info "keeper_bash write-gate: %s (keeper=%s, playground=%b)" cmd_for_log meta.name in_playground;
         Yojson.Safe.to_string
           (`Assoc
               [ "ok", `Bool false
@@ -305,14 +306,31 @@ let handle_keeper_bash
               ; ( "reason"
                 , `String
                     "This command modifies state (git push/commit, make deploy, etc.). \
-                     Use a Coding preset keeper or work inside your playground." )
+                     A write-enabled preset (Coding/Delivery/Full) is required." )
               ; "cmd", `String cmd_for_log
+              ]))
+      (* Location guard: write ops outside playground are blocked even with
+         write_enabled — writes must target the playground clone. *)
+      else if (not in_playground) && Worker_dev_tools.is_write_operation cmd
+      then (
+        Log.Keeper.info "keeper_bash location-gate: %s (keeper=%s)" cmd_for_log meta.name;
+        Yojson.Safe.to_string
+          (`Assoc
+              [ "ok", `Bool false
+              ; "error", `String "write_outside_playground"
+              ; ( "reason"
+                , `String
+                    "Write operations must target your playground clone, not the main repo. \
+                     Clone into your playground first (keeper_shell op=git_clone), \
+                     then set cwd to the cloned repo path." )
+              ; "cmd", `String cmd_for_log
+              ; "hint", `String "Use cwd=.masc/playground/YOUR_NAME/repos/REPO"
               ]))
       else (
           (match Worker_dev_tools.validate_command_paths ~workdir:cwd cmd with
            | Error e -> error_json e
            | Ok () ->
-             if (write_enabled || in_playground)
+             if write_enabled && in_playground
                 && Worker_dev_tools.is_write_operation cmd then
                Log.Keeper.info "WRITE_AUDIT: keeper=%s cwd=%s cmd=%s playground=%b"
                  meta.name cwd cmd_for_log in_playground;

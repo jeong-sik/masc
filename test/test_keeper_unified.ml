@@ -537,17 +537,26 @@ let test_verdict_reasons_to_strings_preserves_legacy_run_tokens () =
     (WO.verdict_reasons_to_strings verdict)
 
 let test_verdict_reasons_to_strings_preserves_legacy_skip_tokens () =
-  let verdict =
+  let idle_gate_verdict =
     WO.Skip
       {
         reasons =
-          ( WO.Idle_gate_pending { remaining_sec = 180 },
-            [ WO.Cooldown_pending { remaining_sec = 60 } ] );
+          ( WO.Idle_gate_pending { remaining_sec = 180 }, [] );
       }
   in
-  check (list string) "legacy skip tokens preserved"
-    [ "idle_gate_wait"; "cooldown_wait" ]
-    (WO.verdict_reasons_to_strings verdict)
+  let cooldown_verdict =
+    WO.Skip
+      {
+        reasons =
+          ( WO.Cooldown_pending { remaining_sec = 60 }, [] );
+      }
+  in
+  check (list string) "legacy idle-gate skip tokens preserved"
+    [ "scheduled_autonomous_turn"; "idle_gate_wait" ]
+    (WO.verdict_reasons_to_strings idle_gate_verdict);
+  check (list string) "legacy cooldown skip tokens preserved"
+    [ "scheduled_autonomous_turn"; "idle_gate_elapsed" ]
+    (WO.verdict_reasons_to_strings cooldown_verdict)
 
 let test_task_reactive_cooldown_floor_never_hits_zero () =
   with_env "MASC_KEEPER_PROACTIVE_TASK_MIN_COOLDOWN_SEC" "0" (fun () ->

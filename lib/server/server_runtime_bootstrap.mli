@@ -10,6 +10,7 @@ val force_jsonl_fallback_env : unit -> unit
 val requested_backend_mode : unit -> string
 val ensure_default_oas_cascade_timeout_env : unit -> unit
 val bootstrap_base_path_config_root : base_path:string -> unit
+val activate_base_path_config_root : base_path:string -> string
 
 (** {1 Runtime Context}
 

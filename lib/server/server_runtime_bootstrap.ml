@@ -123,6 +123,19 @@ let bootstrap_base_path_config_root ~base_path =
            config_root);
     Config_dir_resolver.reset ()
 
+let activate_base_path_config_root ~base_path =
+  match Env_config_core.config_dir_opt () with
+  | Some explicit ->
+      Config_dir_resolver.reset ();
+      explicit
+  | None ->
+      let config_root =
+        Filename.concat (Filename.concat base_path ".masc") "config"
+      in
+      Unix.putenv "MASC_CONFIG_DIR" config_root;
+      Config_dir_resolver.reset ();
+      config_root
+
 (* GC tuning for long-running server with bursty allocation.
 
    Dashboard refresh loops create 2GB+ transient allocations per cycle.
@@ -172,6 +185,7 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
   in
   Unix.putenv "MASC_BASE_PATH" base_path;
   bootstrap_base_path_config_root ~base_path;
+  ignore (activate_base_path_config_root ~base_path);
   (* RFC-0001 Gate A: initialize instrumentation stores *)
   Heuristic_metrics.init ~base_path;
   Agent_stress.init ~base_path;
@@ -189,6 +203,20 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
       ~mono_clock ~net
       ~base_path
   in
+  let config_resolution =
+    Config_dir_resolver.(resolve () |> to_json)
+  in
+  let path_diagnostics =
+    Server_base_path_diagnostics.detect
+      ~input_base_path:base_path
+      ?env_masc_base_path:(Env_config_core.base_path_opt ())
+      ~effective_base_path:state.room_config.base_path
+      ~effective_masc_root:(Room.masc_root_dir state.room_config)
+      ()
+    |> Server_base_path_diagnostics.to_yojson
+  in
+  Server_startup_state.note_runtime_resolution ~path_diagnostics
+    ~config_resolution;
   state
 
 let runtime_path_diagnostics ?input_base_path (state : Mcp_server.server_state) =

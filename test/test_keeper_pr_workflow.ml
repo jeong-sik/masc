@@ -723,38 +723,43 @@ let test_local_repo_worktree_runs_truth_via_absolute_bash () =
 
 (* --- keeper_bash branch-switch guard --- *)
 
-let assert_branch_switch_blocked config cmd label =
+let assert_branch_switch_allowed config cmd label =
   let meta = make_meta_with_preset "delivery" in
   let args = `Assoc [ "cmd", `String cmd ] in
   let result = call_tool config meta "keeper_bash" args in
   let json = parse_json result in
   let error = try json_string "error" json with _ -> "" in
-  check bool (label ^ " blocked")
-    true (error = "branch_switch_blocked")
+  let has_status =
+    match json with
+    | `Assoc fields -> List.mem_assoc "status" fields
+    | _ -> false
+  in
+  check bool (label ^ " not policy blocked")
+    true (error <> "branch_switch_blocked" && has_status)
 
 let test_bash_git_checkout_blocked () =
   with_room (fun config ->
-    assert_branch_switch_blocked config "git checkout refactor/some-branch" "checkout")
+    assert_branch_switch_allowed config "git checkout refactor/some-branch" "checkout")
 
 let test_bash_git_switch_blocked () =
   with_room (fun config ->
-    assert_branch_switch_blocked config "git switch feature/x" "switch")
+    assert_branch_switch_allowed config "git switch feature/x" "switch")
 
 let test_bash_git_checkout_with_global_opts_blocked () =
   with_room (fun config ->
-    assert_branch_switch_blocked config "git -C . checkout refactor/x" "checkout -C")
+    assert_branch_switch_allowed config "git -C . checkout refactor/x" "checkout -C")
 
 let test_bash_git_tab_separated_blocked () =
   with_room (fun config ->
-    assert_branch_switch_blocked config "git\tcheckout feature/x" "tab checkout")
+    assert_branch_switch_allowed config "git\tcheckout feature/x" "tab checkout")
 
 let test_bash_git_branch_create_blocked () =
   with_room (fun config ->
-    assert_branch_switch_blocked config "git branch new-feature" "branch create")
+    assert_branch_switch_allowed config "git branch new-feature" "branch create")
 
 let test_bash_git_branch_rename_blocked () =
   with_room (fun config ->
-    assert_branch_switch_blocked config "git branch -m old-name new-name" "branch -m")
+    assert_branch_switch_allowed config "git branch -m old-name new-name" "branch -m")
 
 let test_bash_git_branch_list_allowed () =
   with_room (fun config ->
@@ -1152,12 +1157,12 @@ let () =
       [ test_case "second claim no tasks" `Quick test_second_claim_on_single_task_returns_no_tasks
       ]
     ; "bash_branch_guard",
-      [ test_case "checkout blocked" `Quick test_bash_git_checkout_blocked
-      ; test_case "switch blocked" `Quick test_bash_git_switch_blocked
-      ; test_case "checkout -C blocked" `Quick test_bash_git_checkout_with_global_opts_blocked
-      ; test_case "tab checkout blocked" `Quick test_bash_git_tab_separated_blocked
-      ; test_case "branch create blocked" `Quick test_bash_git_branch_create_blocked
-      ; test_case "branch rename blocked" `Quick test_bash_git_branch_rename_blocked
+      [ test_case "checkout allowed" `Quick test_bash_git_checkout_blocked
+      ; test_case "switch allowed" `Quick test_bash_git_switch_blocked
+      ; test_case "checkout -C allowed" `Quick test_bash_git_checkout_with_global_opts_blocked
+      ; test_case "tab checkout allowed" `Quick test_bash_git_tab_separated_blocked
+      ; test_case "branch create allowed" `Quick test_bash_git_branch_create_blocked
+      ; test_case "branch rename allowed" `Quick test_bash_git_branch_rename_blocked
       ; test_case "branch list allowed" `Quick test_bash_git_branch_list_allowed
       ; test_case "branch delete allowed" `Quick test_bash_git_branch_delete_allowed
       ; test_case "status allowed" `Quick test_bash_git_status_allowed

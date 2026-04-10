@@ -73,7 +73,7 @@ let to_json (r : decision_record) : Yojson.Safe.t =
 let ring_capacity_cached =
   lazy (Env_config_core.get_int ~default:50 "MASC_DECISION_AUDIT_RING_CAPACITY")
 
-let ring_capacity () = Lazy.force ring_capacity_cached
+let ring_capacity () = max 1 (Lazy.force ring_capacity_cached)
 
 type ring = {
   buf : decision_record option array;
@@ -99,7 +99,7 @@ let get_or_create_ring name =
   match Hashtbl.find_opt rings name with
   | Some r -> r
   | None ->
-    let cap = max 1 (ring_capacity ()) in
+    let cap = ring_capacity () in
     let r = { buf = Array.make cap None; pos = 0; count = 0;
               unflushed = 0; last_flush_ts = Time_compat.now () } in
     Hashtbl.replace rings name r;

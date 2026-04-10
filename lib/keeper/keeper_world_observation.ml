@@ -103,12 +103,17 @@ let turn_reason_legacy_tokens = function
       |> List.filter_map Fun.id
   | reason -> [ turn_reason_to_string reason ]
 
+let skip_reason_legacy_tokens = function
+  | Scheduled_autonomous_disabled -> [ "scheduled_autonomous_disabled" ]
+  | Idle_gate_pending _ -> [ "scheduled_autonomous_turn"; "idle_gate_wait" ]
+  | Cooldown_pending _ -> [ "scheduled_autonomous_turn"; "idle_gate_elapsed" ]
+  | No_signal -> [ "scheduled_autonomous_turn"; "idle_gate_elapsed" ]
+
 let verdict_reasons_to_strings = function
   | Run { reasons = (first, rest) } ->
       List.concat_map turn_reason_legacy_tokens (first :: rest)
   | Skip { reasons = (first, rest) } ->
-      List.map skip_reason_to_string (first :: rest)
-
+      List.concat_map skip_reason_legacy_tokens (first :: rest)
 type unified_turn_decision = {
   should_run : bool;
   channel : unified_turn_channel;

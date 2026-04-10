@@ -145,7 +145,10 @@ let read_fixed_source dir source ~n : Yojson.Safe.t list =
       let entries = Dated_jsonl.read_recent store n in
       List.map (tag_entry source) entries
     | exception (Eio.Cancel.Cancelled _ as e) -> raise e
-    | exception _ -> []
+    | exception exn ->
+      Log.Telemetry.warn "read_fixed_source: %s store open failed: %s"
+        (source_to_string source) (Printexc.to_string exn);
+      []
 
 (* ── Read keeper metrics (per-keeper directories) ───── *)
 
@@ -212,17 +215,23 @@ let count_fixed_source_entries ~masc_root ~base_path source : int =
       (match Dated_jsonl.create ~base_dir:dir () with
        | store -> Dated_jsonl.count_entries store
        | exception (Eio.Cancel.Cancelled _ as e) -> raise e
-       | exception _ -> 0)
+       | exception exn ->
+         Log.Telemetry.warn "count_source_entries: %s store open failed: %s"
+           (source_to_string source) (Printexc.to_string exn);
+         0)
 
 let summary_json ~base_path ~masc_root () : Yojson.Safe.t =
   let keeper_dirs = discover_keeper_metric_dirs masc_root in
   let keeper_total =
-    List.fold_left (fun acc (_, dir) ->
+    List.fold_left (fun acc (name, dir) ->
       acc +
       (match Dated_jsonl.create ~base_dir:dir () with
        | store -> Dated_jsonl.count_entries store
        | exception (Eio.Cancel.Cancelled _ as e) -> raise e
-       | exception _ -> 0)
+       | exception exn ->
+         Log.Telemetry.warn "summary_json: keeper %s store open failed: %s"
+           name (Printexc.to_string exn);
+         0)
     ) 0 keeper_dirs
   in
   let source_json source =

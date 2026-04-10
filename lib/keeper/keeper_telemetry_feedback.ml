@@ -63,7 +63,10 @@ let parse_decision_line (line : string) : parsed_decision option =
     let tools_used = Safe_ops.json_string_list "tools_used" json in
     Some { timestamp_unix; outcome; tool_call_count; tools_used }
   | exception (Eio.Cancel.Cancelled _ as e) -> raise e
-  | exception _ -> None
+  | exception exn ->
+    Log.Keeper.warn "telemetry_feedback: turn record parse failed: %s"
+      (Printexc.to_string exn);
+    None
 
 (* ------------------------------------------------------------------ *)
 (* Stats computation                                                   *)

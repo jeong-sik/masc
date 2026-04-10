@@ -122,7 +122,7 @@ let apply_post_turn_lifecycle
         if not compaction_decided then (false, ctx, Some cp)
         else
           let session =
-            create_session ~session_id:base_meta.runtime.trace_id ~base_dir
+            create_session ~session_id:(Keeper_id.Trace_id.to_string base_meta.runtime.trace_id) ~base_dir
           in
           (match save_oas_checkpoint
                ~max_checkpoint_messages:base_meta.compaction.max_checkpoint_messages
@@ -238,15 +238,15 @@ let recover_latest_checkpoint_for_overflow_retry
     ~(meta : keeper_meta)
     ~(model : string)
     ~(primary_model_max_tokens : int) : overflow_retry_recovery option =
-  let session = create_session ~session_id:meta.runtime.trace_id ~base_dir in
+  let session = create_session ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id) ~base_dir in
   let oas_result =
     Keeper_checkpoint_store.load_oas ~session_dir:session.session_dir
-      ~session_id:meta.runtime.trace_id
+      ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
   in
   (match oas_result with
    | Error (Parse_error d | Store_error d | Io_error d) ->
        Log.Keeper.error "keeper:%s overflow retry OAS load error: %s"
-         meta.runtime.trace_id d
+         (Keeper_id.Trace_id.to_string meta.runtime.trace_id) d
    | Error Not_found | Ok _ -> ());
   let oas_checkpoint = Result.to_option oas_result in
   let legacy_checkpoint =
@@ -255,7 +255,7 @@ let recover_latest_checkpoint_for_overflow_retry
      | Eio.Cancel.Cancelled _ as e -> raise e
      | exn ->
          Log.Keeper.error "keeper:%s overflow retry checkpoint load failed: %s"
-           meta.runtime.trace_id (Printexc.to_string exn);
+           (Keeper_id.Trace_id.to_string meta.runtime.trace_id) (Printexc.to_string exn);
          None)
   in
   let prefer_legacy =
@@ -283,7 +283,7 @@ let recover_latest_checkpoint_for_overflow_retry
          | exn ->
              Log.Keeper.error
                "keeper:%s overflow retry legacy checkpoint restore failed: %s"
-               meta.runtime.trace_id (Printexc.to_string exn);
+               (Keeper_id.Trace_id.to_string meta.runtime.trace_id) (Printexc.to_string exn);
              (match oas_checkpoint with
               | Some checkpoint ->
                   let turn_generation =

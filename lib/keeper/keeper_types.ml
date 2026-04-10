@@ -95,7 +95,7 @@ type agent_runtime_state =
   ; compaction_rt : compaction_runtime
   ; proactive_rt : proactive_runtime
   ; generation : int
-  ; trace_id : string
+  ; trace_id : Keeper_id.Trace_id.t
   ; trace_history : string list
   ; last_handoff_ts : float
   ; last_continuity_update_ts : float
@@ -156,7 +156,7 @@ type keeper_meta =
     continuity_summary : string
   ; active_goal_ids : string list
   ; paused : bool
-  ; current_task_id : string option
+  ; current_task_id : Keeper_id.Task_id.t option
     (** Currently claimed task ID for cost attribution.
       Set when keeper claims a task; cleared on masc_done.
       Propagated to trajectory accumulator for per-task cost tracking. *)
@@ -634,7 +634,7 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
   `Assoc
     [ "name", `String m.name
     ; "agent_name", `String m.agent_name
-    ; "trace_id", `String rt.trace_id
+    ; "trace_id", `String (Keeper_id.Trace_id.to_string rt.trace_id)
     ; "trace_history", `List (List.map (fun s -> `String s) rt.trace_history)
     ; "goal", `String m.goal
     ; "short_goal", `String m.short_goal
@@ -719,7 +719,7 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; "last_blocker", `String rt.last_blocker
     ; "last_need", `String rt.last_need
     ; "paused", `Bool m.paused
-    ; "current_task_id", Json_util.string_opt_to_json m.current_task_id
+    ; "current_task_id", Json_util.string_opt_to_json (Option.map Keeper_id.Task_id.to_string m.current_task_id)
     ; "max_context_override", Json_util.int_opt_to_json m.max_context_override
     ; "work_discovery_enabled", Json_util.bool_opt_to_json m.work_discovery_enabled
     ; "work_discovery_sources"
@@ -736,7 +736,7 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
 type parsed_keeper_identity =
   { pk_name : string
   ; pk_agent_name : string
-  ; pk_trace_id : string
+  ; pk_trace_id : Keeper_id.Trace_id.t
   ; pk_trace_history : string list
   ; pk_goal : string
   ; pk_short_goal : string
@@ -779,7 +779,7 @@ type parsed_keeper_state =
   ; ps_continuity_summary : string
   ; ps_active_goal_ids : string list
   ; ps_paused : bool
-  ; ps_current_task_id : string option
+  ; ps_current_task_id : Keeper_id.Task_id.t option
   ; ps_max_context_override : int option
   ; ps_runtime : agent_runtime_state
   }
@@ -787,7 +787,18 @@ type parsed_keeper_state =
 let parse_keeper_identity (json : Yojson.Safe.t) : parsed_keeper_identity =
   let pk_name = Safe_ops.json_string ~default:"" "name" json in
   let pk_agent_name = Safe_ops.json_string ~default:"" "agent_name" json in
-  let pk_trace_id = Safe_ops.json_string ~default:"" "trace_id" json in
+  let pk_trace_id_raw = Safe_ops.json_string ~default:"" "trace_id" json in
+  let pk_trace_id =
+    if String.trim pk_trace_id_raw = "" then
+      failwith "keeper meta parse error: missing trace_id in persisted keeper identity"
+    else
+      match Keeper_id.Trace_id.of_string pk_trace_id_raw with
+      | Ok x -> x
+      | Error err ->
+        failwith
+          ("keeper meta parse error: invalid trace_id in persisted keeper identity: "
+           ^ err)
+  in
   let pk_trace_history =
     Safe_ops.json_string_list "trace_history" json |> List.filter validate_name
   in
@@ -1040,7 +1051,7 @@ let parse_last_continuity_update_ts ~(continuity_summary : string) (json : Yojso
 
 let parse_keeper_state
       (json : Yojson.Safe.t)
-      ~(trace_id : string)
+      ~(trace_id : Keeper_id.Trace_id.t)
       ~(trace_history : string list)
   : parsed_keeper_state
   =
@@ -1079,7 +1090,7 @@ let parse_keeper_state
   let last_blocker = Safe_ops.json_string ~default:"" "last_blocker" json in
   let last_need = Safe_ops.json_string ~default:"" "last_need" json in
   let ps_paused = Safe_ops.json_bool ~default:false "paused" json in
-  let ps_current_task_id = Safe_ops.json_string_opt "current_task_id" json in
+  let ps_current_task_id = match Safe_ops.json_string_opt "current_task_id" json with None -> None | Some s -> (match Keeper_id.Task_id.of_string s with Ok tid -> Some tid | Error _ -> None) in
   let ps_max_context_override = Safe_ops.json_int_opt "max_context_override" json in
   { ps_created_at_raw
   ; ps_updated_at_raw
@@ -1132,7 +1143,7 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
          in
          if not (validate_name identity.pk_name)
          then Error "invalid keeper meta (bad name)"
-         else if not (validate_name identity.pk_trace_id)
+         else if not (validate_name (Keeper_id.Trace_id.to_string identity.pk_trace_id))
          then Error "invalid keeper meta (bad trace_id)"
          else
            Ok

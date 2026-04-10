@@ -407,6 +407,7 @@
    labeling
    keeper_telemetry_feedback
    keeper_deliberation
+   keeper_id
    keeper_types_profile
    keeper_types_support
    keeper_types

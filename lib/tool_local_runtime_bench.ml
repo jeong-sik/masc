@@ -123,6 +123,7 @@ let error_message_of_http_error = function
             | _ -> Printf.sprintf "HTTP %d" code)
         | _ -> Printf.sprintf "HTTP %d" code
       with Yojson.Json_error _ -> Printf.sprintf "HTTP %d" code)
+  | _ -> "Unknown Error"
 
 let per_runtime_breakdown_to_yojson counts =
   counts

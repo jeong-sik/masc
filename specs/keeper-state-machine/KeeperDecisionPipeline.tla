@@ -108,13 +108,17 @@ TurnFails ==
                    guard_penalties_this_cycle>>
 
 \* Recovery heartbeat: successful turn clears Failing condition.
+\* Resets turn_outcome so subsequent cycles start from a clean state;
+\* without this, a stale "Success" would let recovery re-fire immediately
+\* after the next GuardFires→Failing transition.
 \* Mirrors: keeper_state_machine.ml HeartbeatOk clearing guardrail_triggered.
 RecoveryHeartbeat ==
     /\ fsm_phase = "Failing"
     /\ turn_outcome = "Success"
     /\ fsm_phase' = "Running"
+    /\ turn_outcome' = "None"            \* Reset: require fresh TurnSucceeds for next recovery
     /\ UNCHANGED <<tool_count, thompson_alpha, thompson_beta,
-                   guard_penalties_this_cycle, turn_outcome>>
+                   guard_penalties_this_cycle>>
 
 \* Shard restoration: Running keeper with positive score regains shards.
 \* Mirrors: B2 — tool_shard.grant_shard on improved performance.
@@ -127,11 +131,15 @@ ShardRestoration ==
                    guard_penalties_this_cycle, turn_outcome>>
 
 \* Cycle boundary: heartbeat cycle advances, per-cycle penalty counter resets.
+\* This is the sole reset point for guard_penalties_this_cycle ("per-cycle"
+\* semantics).  RecoveryHeartbeat intentionally does NOT reset it — recovery
+\* is a phase transition within a cycle, not a cycle boundary.
+\* Also resets turn_outcome so stale results do not leak across cycles.
 NewCycle ==
     /\ guard_penalties_this_cycle > 0
     /\ guard_penalties_this_cycle' = 0
-    /\ UNCHANGED <<fsm_phase, tool_count, thompson_alpha, thompson_beta,
-                   turn_outcome>>
+    /\ turn_outcome' = "None"            \* Fresh cycle, fresh outcome
+    /\ UNCHANGED <<fsm_phase, tool_count, thompson_alpha, thompson_beta>>
 
 \* ── Next State ────────────────────────────────────────────
 
@@ -167,11 +175,13 @@ NextBuggy ==
 
 Fairness ==
     /\ WF_vars(TurnSucceeds)           \* Turns eventually succeed if tools available
-    /\ SF_vars(RecoveryHeartbeat)      \* Strong fairness: GuardFires resets turn_outcome
-                                        \* to "None", intermittently disabling recovery.
-                                        \* WF insufficient: TurnSucceeds re-enables it,
-                                        \* but GuardFires can preempt before it fires.
-                                        \* SF justified: heartbeat timer is independent.
+    /\ SF_vars(RecoveryHeartbeat)      \* Strong fairness required: RecoveryHeartbeat is
+                                        \* repeatedly enabled (TurnSucceeds sets turn_outcome
+                                        \* = "Success") but GuardFires can preempt, resetting
+                                        \* turn_outcome to "None" before recovery executes.
+                                        \* WF would require continuous enablement; SF fires
+                                        \* if the action is infinitely often enabled, which
+                                        \* holds because TurnSucceeds is WF-fair.
     /\ WF_vars(NewCycle)               \* Heartbeat cycles advance
     /\ WF_vars(ShardRestoration)       \* Shards restored when score positive
 

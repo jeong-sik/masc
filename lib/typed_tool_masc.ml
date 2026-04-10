@@ -29,26 +29,9 @@ let make_dispatch_handler (tool : (_, _) t) : Tool_dispatch.handler =
     | Ok { content } -> Some (true, content)
     | Error { message; _ } -> Some (false, message)
 
-let params_to_input_schema (params : Agent_sdk.Types.tool_param list) : Yojson.Safe.t =
-  let properties = List.map (fun (p : Agent_sdk.Types.tool_param) ->
-    let type_str = Agent_sdk.Types.param_type_to_string p.param_type in
-    (p.name, `Assoc [
-      ("type", `String type_str);
-      ("description", `String p.description);
-    ])
-  ) params in
-  let required = List.filter_map (fun (p : Agent_sdk.Types.tool_param) ->
-    if p.required then Some (`String p.name) else None
-  ) params in
-  `Assoc [
-    ("type", `String "object");
-    ("properties", `Assoc properties);
-    ("required", `List required);
-  ]
-
 let to_spec tool =
   let schema = Agent_sdk.Typed_tool.schema tool.oas_tool in
-  let input_schema = params_to_input_schema schema.parameters in
+  let input_schema = Agent_sdk.Types.params_to_input_schema schema.parameters in
   Tool_spec.create
     ~name:schema.name
     ~description:schema.description

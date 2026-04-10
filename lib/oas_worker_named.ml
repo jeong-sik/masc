@@ -31,7 +31,7 @@ let is_local_only_cascade name =
 let is_local_label label =
   match Oas_model_resolve.provider_name_of_label label with
   | Some pname -> Provider_adapter.is_local_provider pname
-  | None -> true
+  | None -> false
 
 (** Hardcoded fallback defaults — used only when cascade.json is missing
     and the cascade name has no "{name}_models" entry.

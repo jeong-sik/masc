@@ -25,21 +25,21 @@ let test_default_burst () =
 
 let test_create_default () =
   let limiter = Rate_limit.create () in
-  check (float 0.001) "rate" 60.0 limiter.rate;
-  check int "burst" 150 limiter.burst
+  check (float 0.001) "rate" 60.0 (Rate_limit.rate limiter);
+  check int "burst" 150 (Rate_limit.burst limiter)
 
 let test_create_custom_rate () =
   let limiter = Rate_limit.create ~rate:100.0 () in
-  check (float 0.001) "custom rate" 100.0 limiter.rate
+  check (float 0.001) "custom rate" 100.0 (Rate_limit.rate limiter)
 
 let test_create_custom_burst () =
   let limiter = Rate_limit.create ~burst:200 () in
-  check int "custom burst" 200 limiter.burst
+  check int "custom burst" 200 (Rate_limit.burst limiter)
 
 let test_create_both_custom () =
   let limiter = Rate_limit.create ~rate:50.0 ~burst:100 () in
-  check (float 0.001) "rate" 50.0 limiter.rate;
-  check int "burst" 100 limiter.burst
+  check (float 0.001) "rate" 50.0 (Rate_limit.rate limiter);
+  check int "burst" 100 (Rate_limit.burst limiter)
 
 (* ============================================================
    Check Tests
@@ -123,8 +123,8 @@ let test_burst_from_env_returns_int () =
 
 let test_create_from_env () =
   let limiter = Rate_limit.create_from_env () in
-  check bool "rate positive" true (limiter.rate > 0.0);
-  check bool "burst positive" true (limiter.burst > 0)
+  check bool "rate positive" true ((Rate_limit.rate limiter) > 0.0);
+  check bool "burst positive" true ((Rate_limit.burst limiter) > 0)
 
 (* ============================================================
    Global Instance Tests

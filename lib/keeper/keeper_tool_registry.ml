@@ -26,7 +26,7 @@ let keeper_voice_tool_schemas =
 (* ── Layer 0: Core tools (always executable, always visible) ───── *)
 
 (** Tools that bypass policy restrictions.  Survival-critical only:
-    orientation (status), session control (extend_turns),
+    session control (extend_turns),
     self-introspection (tools_list), and token budget awareness
     (context_status).  Heartbeat is server-managed via
     keeper_keepalive.ml — no LLM tool call needed.
@@ -35,7 +35,7 @@ let keeper_voice_tool_schemas =
 let core_always_tools =
   [ "keeper_context_status"; "keeper_tools_list";
     "keeper_stay_silent"; "keeper_tool_search";
-    "masc_status"; "extend_turns" ]
+    "extend_turns" ]
 
 (** Core tools always visible to the LLM.  All other tools are
     discoverable on demand via [keeper_tool_search].

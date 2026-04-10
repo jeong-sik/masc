@@ -27,8 +27,8 @@ val keeper_preset_universe_tool_names : keeper_meta -> string list
 (** Preset-scoped model tool schemas for BM25 indexing. *)
 val keeper_preset_universe_model_tools : keeper_meta -> Types.tool_schema list
 
-(** Core tools that are always executable and visible regardless of preset.
-    E.g. masc_status, masc_tool_help, extend_turns. *)
+(** Core tools that bypass preset filtering and seed the disclosure floor.
+    Runtime gating/pruning can still narrow their visibility on a given turn. *)
 val core_always_tools : string list
 
 (** Expanded core set for tool-discovery mode (MASC_KEEPER_TOOL_DISCOVERY). *)

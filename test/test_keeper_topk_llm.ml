@@ -288,6 +288,66 @@ let test_selection_boundary_sorts_discovered () =
     ["core_tool"; "tool_a"; "tool_b"]
     merged_ab
 
+let test_deterministic_prefilter_surfaces_code_tools () =
+  let tool_entries =
+    List.map
+      (fun (tool : Agent_sdk.Tool.t) ->
+        Agent_sdk.Tool_index.
+          {
+            name = tool.schema.name;
+            description = tool.schema.description;
+            group = None;
+            aliases = [];
+          })
+      test_tools
+  in
+  let search_index =
+    Agent_sdk.Tool_index.build
+      ~config:{ Agent_sdk.Tool_index.default_config with top_k = 10 }
+      tool_entries
+  in
+  let selected =
+    Keeper_tool_disclosure.deterministic_prefilter_names
+      ~search_index
+      ~query_text:"search code in the repository"
+      ~selection_limit:3
+      ~core:(Keeper_exec_tools.effective_core_tools ())
+  in
+  Alcotest.(check bool) "code search appears without llm rerank"
+    true (List.mem "masc_code_search" selected)
+
+let test_prune_boring_tools_after_recent_polling () =
+  let visible_tools =
+    [ "masc_status"; "keeper_tasks_list"; "keeper_context_status";
+      "keeper_stay_silent"; "keeper_fs_edit"; "masc_code_search" ]
+  in
+  let recent_entries =
+    [ `Assoc [ ("tool", `String "masc_status") ] ]
+  in
+  let pruned =
+    Keeper_tool_disclosure.prune_boring_tools_after_recent_polling
+      ~visible_tools ~recent_entries
+  in
+  Alcotest.(check (list string))
+    "recent polling hides boring tools but keeps productive tools"
+    [ "keeper_stay_silent"; "keeper_fs_edit"; "masc_code_search" ]
+    pruned
+
+let test_prune_boring_tools_keeps_set_when_last_tool_productive () =
+  let visible_tools =
+    [ "masc_status"; "keeper_tasks_list"; "keeper_stay_silent"; "keeper_fs_edit" ]
+  in
+  let recent_entries =
+    [ `Assoc [ ("tool", `String "keeper_fs_edit") ] ]
+  in
+  let pruned =
+    Keeper_tool_disclosure.prune_boring_tools_after_recent_polling
+      ~visible_tools ~recent_entries
+  in
+  Alcotest.(check (list string))
+    "productive last tool does not hide boring tools"
+    visible_tools pruned
+
 let test_keeper_config_defaults () =
   (* Default: LLM rerank disabled *)
   Alcotest.(check bool) "llm_rerank disabled by default"
@@ -322,6 +382,12 @@ let () =
         test_selection_boundary_appends_llm_only_extras;
       Alcotest.test_case "discovered sorted for stable order" `Quick
         test_selection_boundary_sorts_discovered;
+      Alcotest.test_case "deterministic prefilter surfaces code tools" `Quick
+        test_deterministic_prefilter_surfaces_code_tools;
+      Alcotest.test_case "recent polling prunes boring tools" `Quick
+        test_prune_boring_tools_after_recent_polling;
+      Alcotest.test_case "productive last tool keeps boring tools visible" `Quick
+        test_prune_boring_tools_keeps_set_when_last_tool_productive;
     ];
     "keeper_config", [
       Alcotest.test_case "config defaults" `Quick

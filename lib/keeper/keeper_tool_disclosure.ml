@@ -116,6 +116,49 @@ let tool_query_text_of_user_message (text : string) : string =
   loop None [] lines
 ;;
 
+let deterministic_prefilter_names
+    ~(search_index : Agent_sdk.Tool_index.t)
+    ~(query_text : string)
+    ~(selection_limit : int)
+    ~(core : string list) : string list =
+  if selection_limit <= 0 then []
+  else
+    Agent_sdk.Tool_index.retrieve search_index query_text
+    |> List.filter_map (fun (name, _) ->
+         if List.mem name core then None else Some name)
+    |> List.filteri (fun i _ -> i < selection_limit)
+;;
+
+let latest_tool_name (entries : Yojson.Safe.t list) : string option =
+  entries
+  |> List.rev
+  |> List.find_map (Safe_ops.json_string_opt "tool")
+;;
+
+let prune_boring_tools_after_recent_polling
+    ~(visible_tools : string list)
+    ~(recent_entries : Yojson.Safe.t list) : string list =
+  let productive_visible =
+    List.exists
+      (fun name -> not (Keeper_tool_registry.is_boring_tool name))
+      visible_tools
+  in
+  let just_polled =
+    match latest_tool_name recent_entries with
+    | Some name ->
+      Keeper_tool_registry.is_boring_tool name
+      && not (String.equal name "keeper_stay_silent")
+    | None -> false
+  in
+  if (not productive_visible) || not just_polled then visible_tools
+  else
+    List.filter
+      (fun name ->
+         not (Keeper_tool_registry.is_boring_tool name)
+         || String.equal name "keeper_stay_silent")
+      visible_tools
+;;
+
 let merge_tool_selection_boundary
     ~(core : string list)
     ~(deterministic_prefilter : string list)

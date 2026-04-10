@@ -874,7 +874,7 @@ let run_turn
       (List.length keeper_tools)
       (List.length tool_entries);
   (* Layer 0: Core tools — always visible to the LLM regardless of preset.
-     Kept to 5 survival-critical tools (#4961).  Other coordination tools
+     Kept to 5 survival-critical tools (#4961).  Status and other coordination tools
      (keeper_broadcast, keeper_task_claim, keeper_task_done, keeper_tasks_list,
      keeper_time_now, masc_tool_help) are now BM25-retrievable, freeing
      ranking budget for context-relevant tools. *)
@@ -1047,26 +1047,21 @@ let run_turn
                 in
                 let _ = Keeper_discovered_tools.decay !discovered_ref ~turn in
                 let selection_limit = min max_tools keeper_selection_top_k in
-                let preset_selection_context =
-                  if llm_rerank_enabled
-                  then Some (load_preset_selection_context ())
-                  else None
+                let preset_tools, preset_search_index =
+                  load_preset_selection_context ()
                 in
                 let deterministic_prefilter =
-                  match preset_selection_context with
-                  | Some (_, preset_search_index) ->
-                    (* Keep a deterministic BM25 floor even when TopK_llm is enabled:
-                       the LLM may enrich selection, but it must not be able to
-                       shrink the executable tool universe to below the BM25 floor. *)
-                    Agent_sdk.Tool_index.retrieve preset_search_index query_text
-                    |> List.filter (fun (name, _) -> not (List.mem name core))
-                    |> List.filteri (fun i _ -> i < selection_limit)
-                    |> List.map fst
-                  | None -> []
+                  (* Keep a deterministic BM25 floor even when TopK_llm is disabled:
+                     productive preset-local tools such as masc_code_search should
+                     stay visible without requiring keeper_tool_search first. *)
+                  Keeper_tool_disclosure.deterministic_prefilter_names
+                    ~search_index:preset_search_index
+                    ~query_text
+                    ~selection_limit
+                    ~core
                 in
                 let llm_selected =
-                  match preset_selection_context with
-                  | Some (preset_tools, _) ->
+                  if llm_rerank_enabled then
                     (match Eio_context.get_switch_opt (), Eio_context.get_net_opt () with
                      | Some sw, Some net ->
                        let rerank_cascade =
@@ -1135,7 +1130,7 @@ let run_turn
                           to core+prefilter+discovered"
                          meta.name;
                        [])
-                  | None -> []
+                  else []
                 in
                 let merged =
                   Keeper_tool_disclosure.merge_tool_selection_boundary
@@ -1148,7 +1143,7 @@ let run_turn
                 let selection_mode =
                   if llm_rerank_enabled
                   then "deterministic_plus_llm_hint"
-                  else "core_plus_discovered"
+                  else "core_plus_prefilter_plus_discovered"
                 in
                 let deterministic_floor_set =
                   Keeper_types.dedupe_keep_order
@@ -1206,6 +1201,16 @@ let run_turn
                     omitted_suffix);
                 validated
               in
+              let all_allowed_pruned =
+                if is_retry then all_allowed
+                else
+                  Keeper_tool_disclosure.prune_boring_tools_after_recent_polling
+                    ~visible_tools:all_allowed
+                    ~recent_entries:
+                      (match Keeper_tool_call_log.read_latest ~keeper_name:meta.name () with
+                       | Some entry -> [ entry ]
+                       | None -> [])
+              in
               let core_count = List.length (Keeper_exec_tools.effective_core_tools ()) in
               let discovered_count =
                 List.length (Keeper_discovered_tools.active_names !discovered_ref ~turn)
@@ -1222,7 +1227,7 @@ let run_turn
                   discovered_count
                   llm_selected_count
                   llm_rerank_enabled
-                  (List.length all_allowed)
+                  (List.length all_allowed_pruned)
                   (String.length query_text)
                   selection_mode;
               (* 3. Graceful last-turn: inject budget warnings and restrict
@@ -1283,8 +1288,8 @@ let run_turn
                 then
                   Agent_sdk.Tool_op.apply
                     (Agent_sdk.Tool_op.Intersect_with safe_last_turn_tools)
-                    all_allowed
-                else all_allowed
+                    all_allowed_pruned
+                else all_allowed_pruned
               in
               if is_warning_zone
               then

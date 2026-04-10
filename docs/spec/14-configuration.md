@@ -85,8 +85,20 @@ repo-managed config는 별도 규칙을 가진다: `MASC_CONFIG_DIR` -> `<MASC_B
 | `NEO4J_HTTP_URI` | string | `""` | Neo4j HTTP API URI |
 | `NEO4J_USER` | string | `"neo4j"` | Neo4j 사용자 |
 | `NEO4J_PASSWORD` | string | (필수) | Neo4j 비밀번호 |
-| `VOICE_MCP_HOST` | string | `"127.0.0.1"` | Legacy voice session fallback host. Prefer `.masc/voice_config.json` `session.endpoints` or `MASC_HTTP_*`. |
-| `VOICE_MCP_PORT` | int | 8936 | Legacy voice session fallback port. Prefer `.masc/voice_config.json` `session.endpoints` or `MASC_HTTP_*`. |
+| `VOICE_MCP_HOST` | string | `"127.0.0.1"` | Legacy voice session fallback host. Prefer `MASC_BASE_PATH/.masc/voice_config.json` `session.endpoints`. |
+| `VOICE_MCP_PORT` | int | 8936 | Legacy voice session fallback port. Prefer `MASC_BASE_PATH/.masc/voice_config.json` `session.endpoints`. |
+
+**Voice Configuration** (`MASC_BASE_PATH/.masc/voice_config.json`):
+
+All voice paths resolve relative to `MASC_BASE_PATH/.masc/`. The config file
+contains four sections: `tts`, `stt`, `session`, `local_playback`.
+
+| Section | Required endpoints | Notes |
+|---------|-------------------|-------|
+| `tts.endpoints` | At least 1 | TTS provider (e.g. `elevenlabs_direct`, `openai_compat`) |
+| `stt.endpoints` | At least 1 | STT provider (e.g. `elevenlabs_direct`) |
+| `session.endpoints` | 0 or more | Voice MCP session server. Empty `[]` is valid for HTTP-only TTS. |
+| `local_playback` | N/A | Optional local audio playback via ffplay/mpg123. |
 
 **Timeout 모듈** (통합 타임아웃):
 

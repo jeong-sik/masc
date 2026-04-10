@@ -109,8 +109,9 @@ The versioned config tree currently contains:
 | Audit/tool logs | `<runtime_root>/audit/`, `tool_calls/`, `tool_usage/` |
 | Auth | `<runtime_root>/auth/` |
 | Connectors | `<runtime_root>/connectors/discord/` |
-| Voice config | `<runtime_root>/voice_config.json` |
-| Voice sessions | `<voice config dir>/voice_sessions/` |
+| Voice config | `<runtime_root>/voice_config.json` (where `<runtime_root>` = `MASC_BASE_PATH/.masc/`) |
+| Voice audio | `<runtime_root>/audio/` (TTS output, auto-cleaned after 1h) |
+| Voice sessions | `<runtime_root>/voice_sessions/<agent>.json` |
 | Legacy compat | `<runtime_root>/team-sessions/`, `local-workers/`, `oas-runtime/` |
 
 ## 3. Runtime State by Domain
@@ -256,7 +257,8 @@ Current host note:
 - `<runtime_root>/connectors/discord/bindings.json`
 - `<runtime_root>/connectors/discord/binding_audit.jsonl`
 - `<runtime_root>/voice_config.json`
-- `<voice config dir>/voice_sessions/<agent>.json`
+- `<runtime_root>/audio/<timestamp>_<agent>.mp3` (TTS output, auto-cleaned)
+- `<runtime_root>/voice_sessions/<agent>.json`
 
 Notes:
 
@@ -265,7 +267,12 @@ Notes:
   `MASC_BASE_PATH` as the server. Operational setup and verification steps live
   in `sidecars/discord-bot/README.md`.
 - `VOICE_MCP_HOST` and `VOICE_MCP_PORT` remain legacy environment fallbacks.
-- The voice session directory follows the selected voice-config directory, not an unrelated global path.
+- All voice paths resolve relative to `MASC_BASE_PATH/.masc/`.
+  `voice_config.json` is discovered at `<runtime_root>/voice_config.json`
+  where `<runtime_root>` = `MASC_BASE_PATH/.masc/`.
+- `session.endpoints` in `voice_config.json` may be empty (`[]`).
+  HTTP TTS (e.g. ElevenLabs direct) works without a session endpoint.
+  Only Voice MCP session management requires a session endpoint.
 
 ### 3.10 Legacy / Compat Execution Artifacts
 

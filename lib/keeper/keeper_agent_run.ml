@@ -272,6 +272,7 @@ let run_turn
       ~(cascade_name : string)
       ?provider_filter
       ~(generation : int)
+      ?(actionable_signal = false)
       ?(max_turns : int = Env_config_keeper.KeeperKeepalive.oas_max_turns_per_call)
       (* Per-call turn budget. Keeper resumes via checkpoint if exhausted. *)
       ?(max_idle_turns : int = 3)
@@ -449,6 +450,9 @@ let run_turn
     | None -> 5
   in
   let discovered_ref = ref (Keeper_discovered_tools.create ~decay_turns) in
+  let completion_contract_ref =
+    ref Keeper_tool_disclosure.Allow_text_or_tool
+  in
   (* L1 Tool Affinity: pre-populate discovered tools from trajectory history.
      Solves the 9B text_response trap by making proven tools visible at
      turn 0 without requiring keeper_tool_search first.  #5566 *)
@@ -913,6 +917,16 @@ let run_turn
     | Some r -> r
     | None -> ref Agent_sdk.Tool_op.Keep_all
   in
+  let mutation_boundary_tool_name : string option ref = ref None in
+  let mutation_boundary_summary () =
+    match !mutation_boundary_tool_name with
+    | Some tool_name ->
+        Printf.sprintf
+          "previous committed tool '%s' created a mutation boundary; checkpoint and resume next cycle"
+          tool_name
+    | None ->
+        "a previous committed tool created a mutation boundary; checkpoint and resume next cycle"
+  in
   let base_hooks =
     Keeper_hooks_oas.make_hooks
       ~config
@@ -920,6 +934,21 @@ let run_turn
       ~session
       ~ctx_snapshot
       ~generation
+      ~pre_tool_use_guard:(fun ~tool_name:_ ~input:_ ->
+        match !mutation_boundary_tool_name with
+        | Some _ -> Some (mutation_boundary_summary ())
+        | None -> None)
+      ~on_tool_executed:(fun ~tool_name ~input:_ ~output_text:_ ~success ->
+        if success
+           && Keeper_exec_tools.has_mutating_side_effect tool_name
+           && not (Keeper_tool_registry.is_reconcile_safe_tool tool_name)
+           && Option.is_none !mutation_boundary_tool_name
+        then begin
+          mutation_boundary_tool_name := Some tool_name;
+          Log.Keeper.info
+            "keeper:%s mutation boundary opened after committed tool=%s"
+            meta.name tool_name
+        end)
       ?max_cost_usd
       ?trajectory_acc
       ()
@@ -1264,6 +1293,26 @@ let run_turn
                   turn
                   max_turns
                   is_last_turn;
+              let all_allowed =
+                if actionable_signal && not is_last_turn
+                then
+                  let pruned =
+                    Keeper_exec_tools.prune_boring_tools_for_actionable_turn
+                      all_allowed
+                  in
+                  if List.length pruned <> List.length all_allowed then (
+                    let removed =
+                      List.filter
+                        (fun name -> not (List.mem name pruned))
+                        all_allowed
+                    in
+                    Log.Keeper.info
+                      "keeper:%s actionable turn pruned boring tools: %s"
+                      meta.name
+                      (String.concat ", " removed));
+                  pruned
+                else all_allowed
+              in
               (* Context overflow guard: Tool_selector.select already respects
            the k limit, but overlays can grow the visible set beyond
            max_tools.  Cap the post-overlay set to stay inside small-model
@@ -1300,6 +1349,11 @@ let run_turn
                 then current_params.tool_choice (* last turn: Auto for [STATE] block *)
                 else Some Agent_sdk.Types.Any (* all other turns: force tool use *)
               in
+              (match tool_choice with
+               | Some (Agent_sdk.Types.Any | Agent_sdk.Types.Tool _) ->
+                 completion_contract_ref :=
+                   Keeper_tool_disclosure.Require_tool_use
+               | _ -> ());
               let lane =
                 if is_retry then "retry"
                 else (
@@ -1459,7 +1513,20 @@ let run_turn
            ~approval:(Governance_pipeline.to_oas_approval_callback
                         ~governance_level:(Env_config_core.governance_level ())
                         ~keeper_name:meta.name)
-            ~enable_thinking:(Keeper_config.keeper_enable_thinking ())
+           ~enable_thinking:(Keeper_config.keeper_enable_thinking ())
+           ~exit_condition:(fun _turn_count ->
+             Option.is_some !mutation_boundary_tool_name)
+           ~exit_condition_result:(fun turn_count ->
+             let tool_name = !mutation_boundary_tool_name in
+             ( Oas_worker.MutationBoundaryReached
+                 { turns_used = turn_count; tool_name },
+               Some
+                 (match tool_name with
+                  | Some tool ->
+                      Printf.sprintf
+                        "[mutation boundary reached after committed tool: %s]"
+                        tool
+                  | None -> "[mutation boundary reached]") ))
            ?oas_checkpoint:raw_oas_checkpoint
            ?event_bus
            ())
@@ -1552,41 +1619,53 @@ let run_turn
          Keeper_tool_disclosure.merge_reported_and_observed_tool_names ~reported_tool_names ~observed_tool_names
        in
        let usage = Keeper_exec_context.usage_of_response result.response in
-       (match Keeper_tool_disclosure.normalize_response_text ~text ~tool_names () with
+       (match
+          Keeper_tool_disclosure.validate_completion_contract
+            ~contract:!completion_contract_ref
+            ~tool_names
+            ()
+        with
         | Error e -> Error (Oas.Error.Internal e)
-        | Ok response_text ->
-          (* Ensure every generation has a [STATE] block for continuity.
+        | Ok () ->
+          (match Keeper_tool_disclosure.normalize_response_text ~text ~tool_names () with
+           | Error e -> Error (Oas.Error.Internal e)
+           | Ok response_text ->
+             (* Ensure every generation has a [STATE] block for continuity.
                 If the model omitted it, synthesize one deterministically
                 from tool usage and stop reason. *)
-          let response_text =
-            match Keeper_memory_policy.find_state_block response_text with
-            | Some _ -> response_text
-            | None ->
-              let stop_reason_str =
-                match result.stop_reason with
-                | Oas_worker.Completed -> "completed"
-                | Oas_worker.TurnBudgetExhausted _ -> "budget_exhausted"
-              in
-              let synth =
-                Keeper_memory_policy.synthesize_state_from_run_result
-                  ~goal:meta.goal
-                  ~tools_used:tool_names
-                  ~stop_reason:stop_reason_str
-                  ~response_text
-              in
-              let block = Keeper_memory_policy.render_state_block synth in
-              Log.Keeper.info
-                "keeper:%s [STATE] missing, synthesized from %d tools (stop=%s)"
-                meta.name
-                (List.length tool_names)
-                stop_reason_str;
-              response_text ^ "\n" ^ block
-          in
-          let assistant_msg = Agent_sdk.Types.assistant_msg response_text in
-          Keeper_exec_context.persist_message
-            ~source:history_assistant_source
-            session
-            assistant_msg;
+             let response_text =
+               match Keeper_memory_policy.find_state_block response_text with
+               | Some _ -> response_text
+               | None ->
+                 let stop_reason_str =
+                   match result.stop_reason with
+                   | Oas_worker.Completed -> "completed"
+                   | Oas_worker.TurnBudgetExhausted _ -> "budget_exhausted"
+                   | Oas_worker.MutationBoundaryReached { tool_name; _ } ->
+                       (match tool_name with
+                        | Some tool -> Printf.sprintf "mutation_boundary(%s)" tool
+                        | None -> "mutation_boundary")
+                 in
+                 let synth =
+                   Keeper_memory_policy.synthesize_state_from_run_result
+                     ~goal:meta.goal
+                     ~tools_used:tool_names
+                     ~stop_reason:stop_reason_str
+                     ~response_text
+                 in
+                 let block = Keeper_memory_policy.render_state_block synth in
+                 Log.Keeper.info
+                   "keeper:%s [STATE] missing, synthesized from %d tools (stop=%s)"
+                   meta.name
+                   (List.length tool_names)
+                   stop_reason_str;
+                 response_text ^ "\n" ^ block
+             in
+             let assistant_msg = Agent_sdk.Types.assistant_msg response_text in
+             Keeper_exec_context.persist_message
+               ~source:history_assistant_source
+               session
+               assistant_msg;
           (* ctx_snapshot is immutable — assistant message is persisted
                 via checkpoint (OAS) and persist_message (history file).
                 No in-memory mutation needed; next turn reconstructs
@@ -1737,19 +1816,19 @@ let run_turn
                "keeper:%s post_turn_eval jsonl append failed: %s"
                meta.name
                (Printexc.to_string exn));
-          Ok
-            { response_text
-            ; model_used = model
-            ; prompt_metrics
-            ; cascade_observation = result.cascade_observation
-            ; turn_count = result.turns
-            ; tool_calls_made = List.length tool_names
-            ; usage
-            ; tools_used = tool_names
-            ; checkpoint = saved_checkpoint
-            ; proof = result.proof
-            ; run_validation = result.run_validation
-            ; stop_reason = result.stop_reason
-            ; inference_telemetry = result.response.telemetry
-            }))
+             Ok
+               { response_text
+               ; model_used = model
+               ; prompt_metrics
+               ; cascade_observation = result.cascade_observation
+               ; turn_count = result.turns
+               ; tool_calls_made = List.length tool_names
+               ; usage
+               ; tools_used = tool_names
+               ; checkpoint = saved_checkpoint
+               ; proof = result.proof
+               ; run_validation = result.run_validation
+               ; stop_reason = result.stop_reason
+               ; inference_telemetry = result.response.telemetry
+               })))
 ;;

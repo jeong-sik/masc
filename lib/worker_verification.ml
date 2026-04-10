@@ -21,7 +21,6 @@ type verification_outcome =
     }
 
 let verify_worker_result
-    ?delivery_contract
     ~(goal : string)
     (run_result : Worker_container_types.run_result)
     : verification_outcome =
@@ -36,27 +35,7 @@ let verify_worker_result
   | Some response ->
     let unverified = Oas.Verified_output.of_response
       ~producer:run_result.model_used response in
-    let contract_goal =
-      match delivery_contract with
-      | None -> goal
-      | Some (contract : Team_session_types.delivery_contract) ->
-          let acceptance =
-            if contract.acceptance_checks = [] then
-              "(none)"
-            else
-              String.concat "; " contract.acceptance_checks
-          in
-          let required_artifacts =
-            if contract.required_artifacts = [] then
-              "(none)"
-            else
-              String.concat "; " contract.required_artifacts
-          in
-          Printf.sprintf
-            "%s\n\nDelivery contract %s\nSummary: %s\nAcceptance checks: %s\nRequired artifacts: %s\nRepair budget: %d"
-            goal contract.contract_id contract.summary acceptance
-            required_artifacts contract.repair_budget
-    in
+    let contract_goal = goal in
     let req : Verifier_oas.verification_request = {
       action_description = Printf.sprintf "Worker %s produced output"
         run_result.model_used;

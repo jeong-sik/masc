@@ -83,7 +83,7 @@
         ; test_contract_composer removed (team session cleanup)
         test_cdal_conformance
         test_task_stage
-        test_risk_digest
+        ; test_risk_digest removed (team session cleanup)
         test_artifact_store
         test_golden_set
         test_golden_set_eval
@@ -101,6 +101,7 @@
         test_run_local_script
         test_tool_prefilter
         test_keeper_state_machine
+        test_keeper_reconcile_tool
         test_telemetry_unified
         test_keeper_topk_llm
         test_warn_root_causes)
@@ -154,7 +155,7 @@
           ; test_contract_composer removed (team session cleanup)
           test_cdal_conformance
           test_task_stage
-          test_risk_digest
+          ; test_risk_digest removed (team session cleanup)
           test_artifact_store
           test_golden_set
           test_golden_set_eval
@@ -172,6 +173,7 @@
           test_run_local_script
           test_tool_prefilter
           test_keeper_state_machine
+          test_keeper_reconcile_tool
           test_telemetry_unified
           test_keeper_topk_llm
           test_warn_root_causes)
@@ -353,7 +355,8 @@
         test_governance_yojson_roundtrip
         test_eval_calibration
         test_goal_janitor
-        test_keeper_pr_workflow)
+        test_keeper_pr_workflow
+        test_keeper_github_hint)
  (modules
         test_runtime_params
         test_config_dir_resolver
@@ -498,7 +501,12 @@
         test_governance_yojson_roundtrip
         test_eval_calibration
         test_goal_janitor
-        test_keeper_pr_workflow)
+        test_keeper_pr_workflow
+        test_keeper_github_hint)
+ (libraries masc_test_deps))
+
+(test
+ (name test_keeper_mutex_coverage)
  (libraries masc_test_deps))
 
 ; Tool diversity: Shannon entropy + QCheck PBT

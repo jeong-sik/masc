@@ -97,6 +97,11 @@ let contains_substring ~needle haystack =
   in
   loop 0
 
+let response_text (resp : Oas.Types.api_response) =
+  resp.Oas.Types.content
+  |> List.filter_map (function Oas.Types.Text s -> Some s | _ -> None)
+  |> String.concat ""
+
 let start_multi_mock ~sw ~net ~port (responses : string list) =
   let idx = Atomic.make 0 in
   let handler _conn _req body =
@@ -371,13 +376,13 @@ let make_worker_meta ?(effective_model = "local-qwen") () :
     workspace_path = "/tmp/workspace";
     role = Some "executor";
     selection_note = Some "resume";
-    execution_scope = Team_session_types.Limited_code_change;
+    execution_scope = Worker_types.Limited_code_change;
     thinking_enabled = Some true;
     max_turns_override = None;
     timeout_seconds = Some 240;
     tool_profile = Worker_container_types.Profile_session_min;
     shell_profile = Worker_container_types.Shell_readonly;
-    worker_class = Some Team_session_types.Worker_executor;
+    worker_class = Some Worker_types.Worker_executor;
     effective_model;
     checkpoint_path = "/tmp/checkpoint.json";
     turn_log_path = "/tmp/turns.jsonl";
@@ -693,6 +698,80 @@ let test_worker_build_agent_validation_retry_exhausted () =
                 Eio.Switch.fail sw Exit
             | Error err -> Alcotest.fail (Oas.Error.to_string err))
     | Error err -> Alcotest.fail err
+  with Exit -> ()
+
+let test_oas_worker_exec_run_exit_condition_result_returns_partial_success () =
+  try
+    Eio.Switch.run @@ fun sw ->
+    let responses =
+      [
+        openai_tool_use_response "noop" {|{}|};
+        openai_text_response ~id:"chatcmpl-should-not-run" "should not happen";
+      ]
+    in
+    let port =
+      match find_free_port () with Some port -> port | None -> Alcotest.skip ()
+    in
+    let url =
+      try start_multi_mock ~sw ~net:(require_test_net ()) ~port responses
+      with
+      | Unix.Unix_error (Unix.EPERM, "bind", _)
+      | Unix.Unix_error (Unix.EACCES, "bind", _) ->
+          Alcotest.skip ()
+    in
+    let provider : Oas.Provider.config =
+      {
+        provider = Oas.Provider.Local { base_url = url };
+        model_id = "mock-model";
+        api_key_env = "";
+      }
+    in
+    let noop_tool = make_noop_tool () in
+    let base_config =
+      Oas_worker_exec.default_config
+        ~name:"oas-worker-exit-condition"
+        ~provider
+        ~model_id:"mock-model"
+        ~system_prompt:"system"
+        ~tools:[ noop_tool ]
+    in
+    let config =
+      {
+        base_config with
+        exit_condition = Some (fun turn -> turn >= 1);
+        exit_condition_result =
+          Some
+            (fun turn ->
+              ( Oas_worker_exec.MutationBoundaryReached
+                  { turns_used = turn; tool_name = Some "keeper_shell" },
+                Some
+                  "[mutation boundary reached after committed tool: keeper_shell]" ));
+      }
+    in
+    match
+      Oas_worker_exec.run
+        ~sw
+        ~net:(require_test_net ())
+        ~config
+        "say hello"
+    with
+    | Ok result ->
+        Alcotest.(check int) "turn count preserved" 1 result.turns;
+        Alcotest.(check bool) "checkpoint present" true
+          (Option.is_some result.checkpoint);
+        (match result.stop_reason with
+         | Oas_worker_exec.MutationBoundaryReached { turns_used; tool_name } ->
+             Alcotest.(check int) "boundary turn count" 1 turns_used;
+             Alcotest.(check (option string)) "boundary tool"
+               (Some "keeper_shell") tool_name
+         | _ ->
+             Alcotest.fail "expected mutation boundary stop reason");
+        Alcotest.(check bool) "partial response mentions mutation boundary" true
+          (contains_substring
+             ~needle:"mutation boundary reached after committed tool: keeper_shell"
+             (response_text result.response));
+        Eio.Switch.fail sw Exit
+    | Error err -> Alcotest.fail (Oas.Error.to_string err)
   with Exit -> ()
 
 (* ================================================================ *)
@@ -1457,6 +1536,8 @@ let () =
         test_worker_build_agent_validation_retry_success;
       Alcotest.test_case "worker build_agent exhausts validation retries deterministically" `Quick
         test_worker_build_agent_validation_retry_exhausted;
+      Alcotest.test_case "exit_condition_result returns partial success" `Quick
+        test_oas_worker_exec_run_exit_condition_result_returns_partial_success;
     ];
     "keeper_checkpoint_boundary", [
       Alcotest.test_case "prefers OAS checkpoint over legacy" `Quick

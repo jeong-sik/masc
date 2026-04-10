@@ -176,11 +176,25 @@ let pause_info config =
 (* ============================================ *)
 
 (** Read backlog *)
+let read_backlog_r config =
+  match read_json_result config (backlog_path config) with
+  | Error msg -> Error msg
+  | Ok json ->
+      (match backlog_of_yojson json with
+       | Ok backlog -> Ok backlog
+       | Error msg ->
+           Error
+             (Printf.sprintf
+                "[read_backlog] backlog decode failed for %s: %s"
+                (backlog_path config)
+                msg))
+
 let read_backlog config =
-  let json = read_json config (backlog_path config) in
-  match backlog_of_yojson json with
+  match read_backlog_r config with
   | Ok backlog -> backlog
-  | Error _ -> { tasks = []; last_updated = now_iso (); version = 1 }
+  | Error msg ->
+      Log.Misc.error "%s" msg;
+      { tasks = []; last_updated = now_iso (); version = 1 }
 
 (** Write backlog *)
 let write_backlog config backlog =

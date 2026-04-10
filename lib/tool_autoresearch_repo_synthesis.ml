@@ -16,52 +16,13 @@ let default_repo_synthesis_roles =
 let clamp_repo_synthesis_workers requested =
   requested |> max 1 |> min (List.length default_repo_synthesis_roles)
 
-let repo_synthesis_planned_workers ~max_workers =
-  let mk_worker idx role worker_class control_domain task_profile =
-    {
-      Team_session_types.spawn_agent = "default";
-      runtime_actor = Some (Printf.sprintf "repo-synth-%s-%d" role (idx + 1));
-      spawn_role = Some role;
-      spawn_model = None;
-      execution_scope = Some Team_session_types.Limited_code_change;
-      thinking_enabled = Some true;
-      thinking_budget = Some 32;
-      max_turns = Some 4;
-      timeout_seconds = Some 300;
-      worker_class = Some worker_class;
-      parent_actor = None;
-      capsule_mode = Some Team_session_types.Capsule_inherit;
-      runtime_pool = Some "local64";
-      lane_id = Some "repo-synthesis";
-      controller_level = Some Team_session_types.Controller_worker;
-      control_domain = Some control_domain;
-      supervisor_actor = None;
-      task_profile = Some task_profile;
-      risk_level = Some Team_session_types.Risk_low;
-      routing_confidence = Some 0.8;
-      routing_reason = Some "repo_synthesis_wrapper_seed";
-      routing_escalated = false;
-    }
-  in
-  [
-    mk_worker 0 "planner" Team_session_types.Worker_manager
-      Team_session_types.Domain_meta Team_session_types.Profile_decide;
-    mk_worker 1 "code-explorer" Team_session_types.Worker_executor
-      Team_session_types.Domain_execution Team_session_types.Profile_extract;
-    mk_worker 2 "doc-explorer" Team_session_types.Worker_librarian
-      Team_session_types.Domain_knowledge Team_session_types.Profile_extract;
-    mk_worker 3 "test-explorer" Team_session_types.Worker_scout
-      Team_session_types.Domain_quality Team_session_types.Profile_verify;
-    mk_worker 4 "synthesizer" Team_session_types.Worker_librarian
-      Team_session_types.Domain_knowledge Team_session_types.Profile_synthesize;
-    mk_worker 5 "reviewer" Team_session_types.Worker_metacog
-      Team_session_types.Domain_quality Team_session_types.Profile_verify;
-  ]
+let repo_synthesis_planned_worker_roles ~max_workers =
+  default_repo_synthesis_roles
   |> List.filteri (fun idx _ -> idx < clamp_repo_synthesis_workers max_workers)
 
 let ensure_repo_synthesis_units config ~actor ~active_roster =
   let roster =
-    Team_session_types.dedup_strings
+    List.sort_uniq String.compare
       (actor :: List.filter (fun value -> String.trim value <> "") active_roster)
   in
   let ensure_unit json =
@@ -307,8 +268,8 @@ let handle_repo_synthesis_swarm_start ctx args =
                         | Error message ->
                             `Assoc [ ("error", `String message) ]
                         | Ok (session_id, artifacts_dir) -> (
-                            let planned_workers =
-                              repo_synthesis_planned_workers ~max_workers
+                            let planned_worker_roles =
+                              repo_synthesis_planned_worker_roles ~max_workers
                             in
                                 let run_id =
                                   Repo_synthesis_benchmark.make_run_id ()
@@ -324,11 +285,6 @@ let handle_repo_synthesis_swarm_start ctx args =
                                 in
                                 let proof_md_path =
                                   Filename.concat artifacts_dir "proof.md"
-                                in
-                                let planned_worker_roles =
-                                  planned_workers
-                                  |> List.filter_map (fun worker ->
-                                         worker.Team_session_types.spawn_role)
                                 in
                                 let recommended_next_tools =
                                   [

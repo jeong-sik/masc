@@ -34,6 +34,19 @@ let write_file path contents =
     ~finally:(fun () -> close_out_noerr oc)
     (fun () -> output_string oc contents)
 
+let contains_substring haystack needle =
+  let haystack_len = String.length haystack in
+  let needle_len = String.length needle in
+  let rec loop index =
+    if index + needle_len > haystack_len then
+      false
+    else if String.sub haystack index needle_len = needle then
+      true
+    else
+      loop (index + 1)
+  in
+  loop 0
+
 let run_cmd_exn cmd =
   match Sys.command cmd with
   | 0 -> ()
@@ -147,6 +160,68 @@ let persisted_state_json ?(loop_id = "persisted-loop") ?updated_at
 |}
     loop_id status current_cycle best_score best_cycle workdir source_workdir
     elapsed_s updated_at_field warnings error
+
+let test_state_result_parser_valid () =
+  let json =
+    Yojson.Safe.from_string
+      (persisted_state_json ~loop_id:"parser-loop" ~updated_at:42.0
+         ~warnings:"[\"source_workdir_dirty\"]" ())
+  in
+  match Lib.Autoresearch.state_of_yojson_result json with
+  | Ok summary ->
+      check string "loop_id" "parser-loop" summary.loop_id;
+      check string "status" "running"
+        (Lib.Autoresearch.status_to_string summary.status);
+      check (option (float 0.01)) "updated_at" (Some 42.0) summary.updated_at;
+      check string "source_workdir" "/tmp/autoresearch"
+        summary.source_workdir
+  | Error message -> failwith message
+
+let test_state_result_parser_rejects_missing_required_field () =
+  match
+    Lib.Autoresearch.state_of_yojson_result
+      (`Assoc [ ("loop_id", `String "bad-loop") ])
+  with
+  | Ok _ -> failwith "expected parser to reject incomplete persisted state"
+  | Error message ->
+      check bool "mentions missing status" true
+        (contains_substring message "status")
+
+let test_cycle_result_parser_rejects_bad_decision () =
+  let json =
+    `Assoc
+      [
+        ("cycle", `Int 1);
+        ("hypothesis", `String "try something");
+        ("score_before", `Float 0.1);
+        ("score_after", `Float 0.2);
+        ("delta", `Float 0.1);
+        ("decision", `String "invalid");
+        ("elapsed_ms", `Int 12);
+        ("model_used", `String "glm");
+        ("timestamp", `Float 1.0);
+      ]
+  in
+  match Lib.Autoresearch.cycle_of_yojson_result json with
+  | Ok _ -> failwith "expected parser to reject invalid decision"
+  | Error message ->
+      check bool "has decision error" true
+        (String.length message > 0)
+
+let test_swarm_link_result_parser_rejects_missing_session_id () =
+  let json =
+    `Assoc
+      [
+        ("loop_id", `String "loop-1");
+        ("target_file", `String "README.md");
+        ("linked_at", `Float 1.0);
+      ]
+  in
+  match Lib.Autoresearch.swarm_link_of_yojson_result json with
+  | Ok _ -> failwith "expected parser to reject missing session_id"
+  | Error message ->
+      check bool "has session_id error" true
+        (String.length message > 0)
 
 let test_loops_json_skips_invalid_persisted_state () =
   with_eio_test @@ fun () ->
@@ -441,6 +516,17 @@ let test_linked_status_json_includes_task_id () =
 let () =
   run "dashboard_autoresearch"
     [
+      ( "parser_results",
+        [
+          test_case "state result parser valid" `Quick
+            test_state_result_parser_valid;
+          test_case "state result parser rejects missing field" `Quick
+            test_state_result_parser_rejects_missing_required_field;
+          test_case "cycle result parser rejects bad decision" `Quick
+            test_cycle_result_parser_rejects_bad_decision;
+          test_case "swarm link result parser rejects missing session_id" `Quick
+            test_swarm_link_result_parser_rejects_missing_session_id;
+        ] );
       ( "loops_json",
         [
           test_case "skips invalid persisted state" `Quick

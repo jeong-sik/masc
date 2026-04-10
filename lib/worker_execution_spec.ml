@@ -6,8 +6,8 @@ type t = {
   model_label : string;
   team_session_id : string option;
   working_dir : string option;
-  worker_class : Team_session_types.worker_class option;
-  execution_scope : Team_session_types.execution_scope option;
+  worker_class : Worker_types.worker_class option;
+  execution_scope : Worker_types.execution_scope option;
   thinking_enabled : bool option;
   max_turns : int;
   worker_run_id : string option;
@@ -17,7 +17,6 @@ type t = {
   allowed_tools : string list;
   allowed_shell_tools : string list;
   timeout_sec : int;
-  delivery_contract : Team_session_types.delivery_contract option;
 }
 
 let option_to_yojson to_json = function
@@ -50,25 +49,25 @@ let string_list_of_yojson = function
 
 let execution_scope_to_yojson = function
   | Some scope ->
-      `String (Team_session_types.execution_scope_to_string scope)
+      `String (Worker_types.execution_scope_to_string scope)
   | None -> `Null
 
 let execution_scope_of_yojson = function
   | `String value ->
       Some
-        (Team_session_types.execution_scope_of_string
+        (Worker_types.execution_scope_of_string
            (String.lowercase_ascii (String.trim value)))
   | `Null -> None
   | _ -> None
 
 let worker_class_to_yojson = function
   | Some worker_class ->
-      `String (Team_session_types.worker_class_to_string worker_class)
+      `String (Worker_types.worker_class_to_string worker_class)
   | None -> `Null
 
 let worker_class_of_yojson = function
   | `String value ->
-      Team_session_types.worker_class_of_string
+      Worker_types.worker_class_of_string
         (String.lowercase_ascii (String.trim value))
   | `Null -> None
   | _ -> None
@@ -94,9 +93,6 @@ let to_yojson (spec : t) =
         `List
           (List.map (fun value -> `String value) spec.allowed_shell_tools) );
       ("timeout_sec", `Int spec.timeout_sec);
-      ( "delivery_contract",
-        option_to_yojson Team_session_types.delivery_contract_to_yojson
-          spec.delivery_contract );
     ]
 
 let of_yojson (json : Yojson.Safe.t) =
@@ -118,12 +114,6 @@ let of_yojson (json : Yojson.Safe.t) =
          in
          let max_turns = json |> member "max_turns" |> to_int in
          let timeout_sec = json |> member "timeout_sec" |> to_int in
-         let delivery_contract =
-           match json |> member "delivery_contract" with
-           | `Null -> None
-           | contract_json ->
-               Team_session_types.delivery_contract_of_yojson contract_json
-         in
          Ok
            {
              base_path;
@@ -148,7 +138,6 @@ let of_yojson (json : Yojson.Safe.t) =
              allowed_shell_tools =
                string_list_of_yojson (json |> member "allowed_shell_tools");
              timeout_sec;
-             delivery_contract;
            }
        with
        | Yojson.Json_error msg -> Error ("worker execution spec JSON error: " ^ msg)

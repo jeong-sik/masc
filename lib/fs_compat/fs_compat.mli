@@ -31,6 +31,21 @@ val append_file : string -> string -> unit
 val file_exists : string -> bool
 (** Check if file exists. *)
 
+val file_size : string -> int option
+(** Return file size or None *)
+
+val file_mtime : string -> float option
+(** Return file mtime or None *)
+
+val rename : string -> string -> unit
+(** Rename file. *)
+
+val rmdir : string -> unit
+(** Remove directory. *)
+
+val realpath : string -> string
+(** Get realpath. *)
+
 val mkdir_p : string -> unit
 (** Create directory recursively. *)
 

@@ -179,26 +179,50 @@ let set_room_cursor meta room_id seq =
 let room_ids_for_meta _config (_meta : keeper_meta) : string list =
   [ "default" ]
 
+let keeper_room_capabilities (meta : keeper_meta) =
+  let preset_cap =
+    match Keeper_types.tool_access_preset meta.tool_access with
+    | Some p -> [ "preset:" ^ Keeper_types.tool_preset_to_string p ]
+    | None -> []
+  in
+  [ "keeper" ] @ preset_cap
+
+let keeper_room_capabilities_need_sync config (meta : keeper_meta) capabilities =
+  let agent_file =
+    Filename.concat (Room.agents_dir config)
+      (Room.safe_filename meta.agent_name ^ ".json")
+  in
+  (* Use backend-aware read_json_opt instead of Sys.file_exists which
+     returns false for non-filesystem backends (PG, Memory). *)
+  match Room.read_json_opt config agent_file with
+  | None -> true
+  | Some json -> (
+      match Types.agent_of_yojson json with
+      | Ok agent -> agent.capabilities <> capabilities
+      | Error _ -> true)
+
 let ensure_keeper_room_presence config (meta : keeper_meta) : keeper_meta =
   let room_ids = room_ids_for_meta config meta in
+  let capabilities = keeper_room_capabilities meta in
   let successful_rooms =
     List.fold_left
       (fun acc room_id ->
         try
-          if
-            not
-              (Room.is_agent_joined config
-                 ~agent_name:meta.agent_name)
+          let joined =
+            Room.is_agent_joined config ~agent_name:meta.agent_name
+          in
+          if not joined
           then begin
             Room.ensure_room_bootstrap config;
-            let preset_cap = match Keeper_types.tool_access_preset meta.tool_access with
-              | Some p -> ["preset:" ^ Keeper_types.tool_preset_to_string p]
-              | None -> []
-            in
             ignore
               (Room.join config ~agent_name:meta.agent_name
-                 ~capabilities:(["keeper"] @ preset_cap) ())
+                 ~capabilities ())
           end;
+          if joined && keeper_room_capabilities_need_sync config meta capabilities
+          then
+            ignore
+              (Room.update_agent_r config ~agent_name:meta.agent_name
+                 ~capabilities ());
           ignore
             (Room.heartbeat config ~agent_name:meta.agent_name);
           room_id :: acc

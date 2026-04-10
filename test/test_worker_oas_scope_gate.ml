@@ -7,7 +7,7 @@ open Alcotest
 open Masc_mcp
 
 let test_observe_only_denies_masc_mutating () =
-  let gate = Worker_oas.gate_config_of_execution_scope Team_session_types.Observe_only in
+  let gate = Worker_oas.gate_config_of_execution_scope Worker_types.Observe_only in
   let mutating_tools =
     [ "masc_worktree_create"; "masc_worktree_remove";
       "masc_add_task"; "masc_transition";
@@ -21,7 +21,7 @@ let test_observe_only_denies_masc_mutating () =
     mutating_tools
 
 let test_observe_only_denies_code_mutation () =
-  let gate = Worker_oas.gate_config_of_execution_scope Team_session_types.Observe_only in
+  let gate = Worker_oas.gate_config_of_execution_scope Worker_types.Observe_only in
   let code_tools =
     [ "keeper_bash"; "masc_code_write"; "masc_code_edit" ]
   in
@@ -31,24 +31,24 @@ let test_observe_only_denies_code_mutation () =
     code_tools
 
 let test_limited_allows_masc_mutating () =
-  let gate = Worker_oas.gate_config_of_execution_scope Team_session_types.Limited_code_change in
+  let gate = Worker_oas.gate_config_of_execution_scope Worker_types.Limited_code_change in
   check bool "masc_worktree_create allowed in Limited" false
     (List.mem "masc_worktree_create" gate.Eval_gate.denied_tools);
   check bool "masc_add_task allowed in Limited" false
     (List.mem "masc_add_task" gate.Eval_gate.denied_tools)
 
 let test_limited_denies_destructive () =
-  let gate = Worker_oas.gate_config_of_execution_scope Team_session_types.Limited_code_change in
+  let gate = Worker_oas.gate_config_of_execution_scope Worker_types.Limited_code_change in
   check bool "shell_exec_dangerous denied in Limited" true
     (List.mem "shell_exec_dangerous" gate.Eval_gate.denied_tools)
 
 let test_autonomous_allows_all () =
-  let gate = Worker_oas.gate_config_of_execution_scope Team_session_types.Autonomous in
+  let gate = Worker_oas.gate_config_of_execution_scope Worker_types.Autonomous in
   check bool "no denied tools in Autonomous" true
     (List.length gate.Eval_gate.denied_tools = 0)
 
 let test_observe_only_allows_read_tools () =
-  let gate = Worker_oas.gate_config_of_execution_scope Team_session_types.Observe_only in
+  let gate = Worker_oas.gate_config_of_execution_scope Worker_types.Observe_only in
   let read_tools = [ "masc_status"; "masc_tasks"; "masc_who" ] in
   List.iter (fun tool ->
     check bool (tool ^ " allowed in Observe_only") false

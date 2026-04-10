@@ -271,22 +271,48 @@ let handle_claim ctx args =
    | Error e -> Log.Task.debug "task claim failed for %s: %s" task_id (Types.masc_error_to_string e));
   result_to_response result
 
-(** Extract agent's preset from capabilities list (e.g., ["keeper", "preset:delivery"] -> Some "delivery"). *)
-let resolve_agent_preset config agent_name =
-  let agent_file = Filename.concat (Room.agents_dir config) (Room.safe_filename agent_name ^ ".json") in
-  try
-    let json = Room.read_json config agent_file in
-    let caps = Yojson.Safe.Util.(json |> member "capabilities" |> to_list |> List.map to_string) in
-    List.find_map (fun c ->
+(** Extract preset token from capabilities (e.g., ["keeper"; "preset:delivery"]). *)
+let preset_from_capabilities caps =
+  List.find_map
+    (fun c ->
       let prefix = "preset:" in
       let plen = String.length prefix in
-      if String.length c > plen && String.sub c 0 plen = prefix then
-        Some (String.sub c plen (String.length c - plen))
-      else None
-    ) caps
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | _ -> None
+      if String.length c > plen && String.sub c 0 plen = prefix
+      then Some (String.sub c plen (String.length c - plen))
+      else None)
+    caps
+
+let resolve_keeper_preset config agent_name =
+  match Keeper_types.keeper_name_from_agent_name agent_name with
+  | None -> None
+  | Some keeper_name -> (
+      match Keeper_types.read_meta config keeper_name with
+      | Ok (Some meta) ->
+          Keeper_types.tool_access_preset meta.tool_access
+          |> Option.map Keeper_types.tool_preset_to_string
+      | Ok None | Error _ -> None)
+
+(** Resolve an agent preset.
+    Keepers read from live keeper meta first so claim_next follows the
+    reconciled runtime/declarative SSOT rather than a stale join snapshot. *)
+let resolve_agent_preset config agent_name =
+  match resolve_keeper_preset config agent_name with
+  | Some _ as preset -> preset
+  | None ->
+      let agent_file =
+        Filename.concat (Room.agents_dir config)
+          (Room.safe_filename agent_name ^ ".json")
+      in
+      try
+        let json = Room.read_json config agent_file in
+        let caps =
+          Yojson.Safe.Util.(
+            json |> member "capabilities" |> to_list |> List.map to_string)
+        in
+        preset_from_capabilities caps
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | _ -> None
 
 (** Build a task_filter closure that checks required_preset against the agent's preset. *)
 let preset_task_filter ~agent_preset (task : Types.task) =

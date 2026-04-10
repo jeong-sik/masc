@@ -45,8 +45,19 @@ let coordination_surface_json (meta : keeper_meta) =
       ("joined_room_ids", string_list_to_json meta.joined_room_ids);
     ]
 
+let effective_declarative_cascade_name
+    (defaults : keeper_profile_defaults)
+    (meta : keeper_meta) =
+  match defaults.cascade_name, defaults.manifest_path with
+  | Some cascade_name, _ -> cascade_name
+  | None, Some _ -> Keeper_config.default_cascade_name
+  | None, None -> meta.cascade_name
+
 let live_override_fields (meta : keeper_meta) (defaults : keeper_profile_defaults) :
     string list =
+  let effective_cascade_name =
+    effective_declarative_cascade_name defaults meta
+  in
   let add_if label cond acc = if cond then label :: acc else acc in
   []
   |> add_if "prompt.goal"
@@ -100,6 +111,8 @@ let live_override_fields (meta : keeper_meta) (defaults : keeper_profile_default
        (match defaults.tool_denylist with
         | Some authored -> authored <> meta.tool_denylist
         | None -> false)
+  |> add_if "model.cascade_name"
+       (effective_cascade_name <> meta.cascade_name)
   |> add_if "proactive.enabled"
        (match defaults.proactive_enabled with
         | Some value -> value <> meta.proactive.enabled
@@ -145,7 +158,24 @@ let runtime_blocker_surface_of_registry_entry
 let runtime_blocker_fields_json
     (config : Room_utils.config)
     (meta : keeper_meta) =
-  match runtime_blocker_surface_of_registry_entry (runtime_registry_entry config meta.name) with
+  match Keeper_manual_reconcile.read config meta.name with
+  | Some { status = Keeper_manual_reconcile.Pending; blocker_class; summary; _ } ->
+      [
+        ("runtime_blocker_class", `String blocker_class);
+        ("runtime_blocker_summary", `String summary);
+        ("runtime_blocker_manual_reconcile", `Bool true);
+      ]
+  | Some { status = Keeper_manual_reconcile.Cleared; _ } ->
+      [
+        ("runtime_blocker_class", `Null);
+        ("runtime_blocker_summary", `Null);
+        ("runtime_blocker_manual_reconcile", `Null);
+      ]
+  | None ->
+      (match
+         runtime_blocker_surface_of_registry_entry
+           (runtime_registry_entry config meta.name)
+       with
   | Some (blocker_class, summary, manual_reconcile) ->
       [
         ("runtime_blocker_class", `String blocker_class);
@@ -157,7 +187,7 @@ let runtime_blocker_fields_json
         ("runtime_blocker_class", `Null);
         ("runtime_blocker_summary", `Null);
         ("runtime_blocker_manual_reconcile", `Null);
-      ]
+      ])
 
 let runtime_surface_json config (meta : keeper_meta) =
   let keepalive_running = runtime_keepalive_running config meta in

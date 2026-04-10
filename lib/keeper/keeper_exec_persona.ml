@@ -19,7 +19,7 @@ let string_list_to_json values =
   `List (List.map (fun value -> `String value) values)
 
 let read_jsonl_rows path ~max_bytes ~max_lines : Yojson.Safe.t list =
-  if not (Sys.file_exists path) then
+  if not (Fs_compat.file_exists path) then
     []
   else
     read_file_tail_lines path ~max_bytes ~max_lines

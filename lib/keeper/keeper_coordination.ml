@@ -41,32 +41,4 @@ let set_room_cursor meta room_id seq =
 let room_ids_for_meta _config (_meta : keeper_meta) : string list =
   [ "default" ]
 
-let ensure_keeper_room_presence config (meta : keeper_meta) : keeper_meta =
-  let room_ids = room_ids_for_meta config meta in
-  let successful_rooms =
-    List.fold_left
-      (fun acc room_id ->
-        try
-          if
-            not
-              (Room.is_agent_joined config
-                 ~agent_name:meta.agent_name)
-          then begin
-            Room.ensure_room_bootstrap config;
-            let preset_cap = match Keeper_types.tool_access_preset meta.tool_access with
-              | Some p -> ["preset:" ^ Keeper_types.tool_preset_to_string p]
-              | None -> []
-            in
-            ignore
-              (Room.join config ~agent_name:meta.agent_name
-                 ~capabilities:(["keeper"] @ preset_cap) ())
-          end;
-          ignore
-            (Room.heartbeat config ~agent_name:meta.agent_name);
-          room_id :: acc
-        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-          log_keeper_exn ~label:(Printf.sprintf "room presence sync failed for %s in %s" meta.name room_id) exn;
-          acc)
-      [] room_ids
-  in
-  { meta with joined_room_ids = List.rev successful_rooms }
+let ensure_keeper_room_presence = Keeper_exec_context.ensure_keeper_room_presence

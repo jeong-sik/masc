@@ -1,13 +1,13 @@
 (** test_keeper_state_machine_pbt — Property-based tests for keeper state machine.
 
     Two modes:
-    - Chaos: random events from all 22 variants. Tests rejection correctness.
+    - Chaos: random events from all 23 variants. Tests rejection correctness.
     - Guided: phase-aware events only. Tests state transition coverage. *)
 
 module SM = Masc_mcp.Keeper_state_machine
 module IC = Masc_mcp.Keeper_invariant_check
 
-(* ── Chaos Generator: all 22 event variants ────────────── *)
+(* ── Chaos Generator: all 23 event variants ────────────── *)
 
 let gen_auto_rules : SM.auto_rule_summary QCheck.Gen.t =
   let open QCheck.Gen in
@@ -30,6 +30,7 @@ let gen_event_chaos : SM.event QCheck.Gen.t =
     (let* consecutive = int_range 1 5 in
      return (SM.Turn_failed { consecutive; max_allowed = 3 }));
     return (SM.Manual_reconcile_required { reason = "pbt_test" });
+    return SM.Manual_reconcile_cleared;
     (let* ratio = float_range 0.0 1.0 in
      let* auto_rules = gen_auto_rules in
      return (SM.Context_measured {
@@ -67,6 +68,7 @@ let valid_events_for_phase (phase : SM.phase) (c : SM.conditions) : SM.event lis
         SM.Turn_succeeded;
         SM.Turn_failed { consecutive = 1; max_allowed = 3 };
         SM.Manual_reconcile_required { reason = "test" };
+        SM.Manual_reconcile_cleared;
         SM.Context_measured {
           context_ratio = 0.5; message_count = 50; token_count = 5000;
           auto_rules = { reflect = false; plan = false; compact = false;
@@ -82,6 +84,7 @@ let valid_events_for_phase (phase : SM.phase) (c : SM.conditions) : SM.event lis
       ]
     | SM.Failing ->
       [ SM.Heartbeat_ok; SM.Turn_succeeded;
+        SM.Manual_reconcile_cleared;
         SM.Manual_reconcile_required { reason = "test" };
         SM.Fiber_terminated { outcome = "crash" };
         SM.Stop_requested; SM.Operator_pause;

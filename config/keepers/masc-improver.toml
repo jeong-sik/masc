@@ -51,6 +51,9 @@ execution_scope = "workspace"
 
 tool_preset = "delivery"
 
+# Capability-first cascade for coding tasks
+cascade_name = "coding_first"
+
 # Work Discovery
 work_discovery_enabled = true
 work_discovery_sources = ["github_issues", "lint_errors", "stale_tasks"]

@@ -6,6 +6,11 @@ open Keeper_types
 
 let contains_ci = String_util.contains_substring_ci
 
+(* Pre-compiled patterns for keeper name substitution in prompt templates.
+   Top-level to avoid re-compilation on every build_keeper_system_prompt call. *)
+let re_keeper_name_curly = Re.(compile (str "{your-name}"))
+let re_keeper_name_upper = Re.(compile (str "YOUR_KEEPER_NAME"))
+
 let exact_direct_mention_present ~(targets : string list) (content : string) :
     bool =
   Mention.any_mentioned ~targets content
@@ -45,11 +50,9 @@ let build_keeper_system_prompt
   let substitute_keeper_name s =
     if keeper_name = "" then s
     else
-      let re_curly = Re.(compile (str "{your-name}")) in
-      let re_upper = Re.(compile (str "YOUR_KEEPER_NAME")) in
       s
-      |> Re.replace_string re_curly ~by:keeper_name
-      |> Re.replace_string re_upper ~by:keeper_name
+      |> Re.replace_string re_keeper_name_curly ~by:keeper_name
+      |> Re.replace_string re_keeper_name_upper ~by:keeper_name
   in
   let persona_block =
     let s = String.trim persona_extended in

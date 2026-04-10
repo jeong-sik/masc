@@ -566,14 +566,18 @@ let append_decision_record
                   let contains needle =
                     string_contains_substring ~needle e_lower
                   in
+                  (* starts_with checks first (more specific), then contains *)
                   if starts_with "invalid request" then "invalid_request"
-                  else if starts_with "network error" || contains "connection_failure"
+                  else if starts_with "network error" then "network_error"
+                  else if starts_with "internal error" then "internal_error"
+                  else if starts_with "input to" then "input_budget_exceeded"
+                  (* contains checks second (broader, order matters) *)
+                  else if contains "turn outcome ambiguous" then "ambiguous_side_effect"
+                  else if contains "connection_failure"
                           || contains "connection refused" then "network_error"
                   else if contains "timeout" || contains "timed out" then "timeout"
-                  else if starts_with "internal error" then "internal_error"
-                  else if starts_with "input to" || contains "context length"
+                  else if contains "context length"
                           || contains "token budget" then "input_budget_exceeded"
-                  else if contains "turn outcome ambiguous" then "ambiguous_side_effect"
                   else "other"
                 | _ -> "unknown"
               in

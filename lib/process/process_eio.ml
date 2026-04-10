@@ -73,6 +73,13 @@ let output_for_status ~(status : Unix.process_status) ~(stdout : string)
     | out, "" -> out
     | out, err -> out ^ "\n" ^ err
 
+let process_error_output ?(stderr = "") ~label ~reason () =
+  let stderr = String.trim stderr in
+  if stderr = "" then
+    Printf.sprintf "process_eio_error: %s (%s)" label reason
+  else
+    Printf.sprintf "process_eio_error: %s (%s)\nstderr:\n%s" label reason stderr
+
 (** Create a private stderr capture file for Unix fallback status helpers.
     Uses [Filename.temp_file] for atomic creation, then opens the file with
     private permissions and marks the descriptor close-on-exec to avoid
@@ -102,10 +109,10 @@ let captured_stderr_or_empty path_opt =
 
 let with_unix_capture ?env ?stdin_content ?(capture_stderr = false)
     (argv : string list)
-    ~(on_error : unit -> 'a)
+    ~(on_error : string -> string -> 'a)
     ~(on_success : Unix.process_status -> string -> string -> 'a) : 'a =
   match argv with
-  | [] -> on_error ()
+  | [] -> on_error "empty argv" ""
   | prog :: _ ->
     let stdout_r_ref = ref None in
     let stdout_w_ref = ref None in
@@ -194,7 +201,7 @@ let with_unix_capture ?env ?stdin_content ?(capture_stderr = false)
         | None ->
             (* stdout pipe already consumed — treat as error *)
             cleanup ();
-            on_error ()
+            on_error "stdout pipe unavailable during Unix fallback capture" ""
         | Some stdout_r ->
             stdout_r_ref := None;
             let rec waitpid_retry () =
@@ -226,32 +233,47 @@ let with_unix_capture ?env ?stdin_content ?(capture_stderr = false)
      | Eio.Cancel.Cancelled _ as exn ->
          cleanup ();
          raise exn
-     | _exn ->
+     | exn ->
+         let stderr = captured_stderr_or_empty !stderr_path_ref in
          cleanup ();
-         on_error ())
+         on_error (Printexc.to_string exn) stderr)
 
 let run_unix_argv_fallback ?env (argv : string list) : string =
-  with_unix_capture ?env argv ~on_error:(fun () -> "")
+  let label = String.concat " " (List.map Filename.quote argv) in
+  with_unix_capture ?env argv
+    ~on_error:(fun reason stderr ->
+      Log.Misc.error "[Process_eio] Unix fallback error: %s — %s" label reason;
+      process_error_output ~label ~reason ~stderr ())
     ~on_success:(fun _status stdout _stderr -> stdout)
 
 let run_unix_argv_with_status_fallback ?env (argv : string list) :
     Unix.process_status * string =
+  let label = String.concat " " (List.map Filename.quote argv) in
   with_unix_capture ?env ~capture_stderr:true argv
-    ~on_error:(fun () -> (Unix.WEXITED 1, ""))
+    ~on_error:(fun reason stderr ->
+      Log.Misc.error "[Process_eio] Unix fallback error: %s — %s" label reason;
+      (Unix.WEXITED 127, process_error_output ~label ~reason ~stderr ()))
     ~on_success:(fun status stdout stderr ->
       (status, output_for_status ~status ~stdout ~stderr))
 
 let run_unix_argv_with_stdin_fallback ?env ~(stdin_content : string)
     (argv : string list) : string =
-  with_unix_capture ?env ~stdin_content argv ~on_error:(fun () -> "")
+  let label = String.concat " " (List.map Filename.quote argv) in
+  with_unix_capture ?env ~stdin_content argv
+    ~on_error:(fun reason stderr ->
+      Log.Misc.error "[Process_eio] Unix fallback error: %s — %s" label reason;
+      process_error_output ~label ~reason ~stderr ())
     ~on_success:(fun _status stdout _stderr -> stdout)
 
 let run_unix_argv_with_stdin_and_status_fallback
     ?env
     ~(stdin_content : string)
     (argv : string list) : Unix.process_status * string =
+  let label = String.concat " " (List.map Filename.quote argv) in
   with_unix_capture ?env ~stdin_content ~capture_stderr:true argv
-    ~on_error:(fun () -> (Unix.WEXITED 1, ""))
+    ~on_error:(fun reason stderr ->
+      Log.Misc.error "[Process_eio] Unix fallback error: %s — %s" label reason;
+      (Unix.WEXITED 127, process_error_output ~label ~reason ~stderr ()))
     ~on_success:(fun status stdout stderr ->
       (status, output_for_status ~status ~stdout ~stderr))
 
@@ -334,7 +356,8 @@ let run_argv ?(timeout_sec = 60.0) ?env (argv : string list) : string =
         | Eio.Time.Timeout ->
             Log.Misc.warn "[Process_eio] Timeout after %.0fs: %s"
               timeout_sec label;
-            ""
+            process_error_output ~label
+              ~reason:(Printf.sprintf "timeout after %.0fs" timeout_sec) ()
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn ->
             if should_retry_unix_fallback exn then (
@@ -345,7 +368,7 @@ let run_argv ?(timeout_sec = 60.0) ?env (argv : string list) : string =
             ) else (
               Log.Misc.error "[Process_eio] argv error: %s — %s" label
                 (Printexc.to_string exn);
-              "")
+              process_error_output ~label ~reason:(Printexc.to_string exn) ())
 
 let run_argv_with_stdin ?(timeout_sec = 60.0) ?env ~(stdin_content : string) (argv : string list) : string =
   if not (is_initialized ()) then
@@ -367,7 +390,8 @@ let run_argv_with_stdin ?(timeout_sec = 60.0) ?env ~(stdin_content : string) (ar
         | Eio.Time.Timeout ->
             Log.Misc.warn "[Process_eio] Timeout after %.0fs: %s"
               timeout_sec label;
-            ""
+            process_error_output ~label
+              ~reason:(Printf.sprintf "timeout after %.0fs" timeout_sec) ()
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn ->
             if should_retry_unix_fallback exn then (
@@ -378,7 +402,7 @@ let run_argv_with_stdin ?(timeout_sec = 60.0) ?env ~(stdin_content : string) (ar
             ) else (
               Log.Misc.error "[Process_eio] argv error: %s — %s" label
                 (Printexc.to_string exn);
-              "")
+              process_error_output ~label ~reason:(Printexc.to_string exn) ())
 
 let run_argv_with_stdin_and_status
     ?(timeout_sec = 60.0)
@@ -412,12 +436,18 @@ let run_argv_with_stdin_and_status
         | Eio.Time.Timeout ->
             Log.Misc.warn "[Process_eio] Timeout after %.0fs: %s"
               timeout_sec label;
-            let timeout_status = Unix.WSIGNALED Sys.sigterm in
-            ( timeout_status
-            , output_for_status
+            let timeout_status = Unix.WEXITED 124 in
+            let output =
+              output_for_status
                 ~status:timeout_status
                 ~stdout:(Buffer.contents stdout_buf)
-                ~stderr:(Buffer.contents stderr_buf) )
+                ~stderr:(Buffer.contents stderr_buf)
+            in
+            ( timeout_status
+            , if String.trim output = "" then
+                process_error_output ~label
+                  ~reason:(Printf.sprintf "timeout after %.0fs" timeout_sec) ()
+              else output )
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn ->
             if should_retry_unix_fallback exn then (
@@ -429,7 +459,8 @@ let run_argv_with_stdin_and_status
             ) else (
               Log.Misc.error "[Process_eio] argv error: %s — %s" label
                 (Printexc.to_string exn);
-              (Unix.WEXITED 1, ""))
+              ( Unix.WEXITED 127
+              , process_error_output ~label ~reason:(Printexc.to_string exn) () ))
 
 let run_argv_with_status ?(timeout_sec = 60.0) ?env ?cwd (argv : string list) : Unix.process_status * string =
   if not (is_initialized ()) then run_unix_argv_with_status_fallback ?env argv
@@ -461,12 +492,18 @@ let run_argv_with_status ?(timeout_sec = 60.0) ?env ?cwd (argv : string list) : 
         | Eio.Time.Timeout ->
             Log.Misc.warn "[Process_eio] Timeout after %.0fs: %s"
               timeout_sec label;
-            let timeout_status = Unix.WSIGNALED Sys.sigterm in
-            ( timeout_status
-            , output_for_status
+            let timeout_status = Unix.WEXITED 124 in
+            let output =
+              output_for_status
                 ~status:timeout_status
                 ~stdout:(Buffer.contents stdout_buf)
-                ~stderr:(Buffer.contents stderr_buf) )
+                ~stderr:(Buffer.contents stderr_buf)
+            in
+            ( timeout_status
+            , if String.trim output = "" then
+                process_error_output ~label
+                  ~reason:(Printf.sprintf "timeout after %.0fs" timeout_sec) ()
+              else output )
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn ->
             if should_retry_unix_fallback exn then (
@@ -477,4 +514,5 @@ let run_argv_with_status ?(timeout_sec = 60.0) ?env ?cwd (argv : string list) : 
             ) else (
               Log.Misc.error "[Process_eio] argv error: %s — %s" label
                 (Printexc.to_string exn);
-              (Unix.WEXITED 1, ""))
+              ( Unix.WEXITED 127
+              , process_error_output ~label ~reason:(Printexc.to_string exn) () ))

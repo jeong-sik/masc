@@ -1,5 +1,5 @@
 (** Coverage tests for auto_recall (pure functions) and activity_feed (JSON roundtrip).
-    Only tests functions that do not require filesystem, Room, or Eio. *)
+    Also covers filesystem-backed activity_feed read-path regressions. *)
 
 open Alcotest
 open Masc_mcp
@@ -229,6 +229,105 @@ let test_activity_item_defaults () =
   | None -> fail "should parse with defaults"
 
 (* ============================================================
+   9. Activity_feed — filesystem-backed read paths
+   ============================================================ *)
+
+let rec remove_tree path =
+  if Sys.file_exists path then
+    if Sys.is_directory path then begin
+      Sys.readdir path
+      |> Array.iter (fun name -> remove_tree (Filename.concat path name));
+      Sys.rmdir path
+    end else
+      Sys.remove path
+
+let with_temp_dir prefix f =
+  let path = Filename.temp_file prefix "" in
+  Sys.remove path;
+  Unix.mkdir path 0o755;
+  Fun.protect ~finally:(fun () -> remove_tree path) (fun () -> f path)
+
+let write_file path content =
+  Fs_compat.save_file path content
+
+let test_recent_activity_skips_malformed_jsonl_lines () =
+  with_temp_dir "activity-feed-jsonl" @@ fun base_path ->
+  let config = Room.default_config base_path in
+  let masc_dir = Room.masc_dir config in
+  Fs_compat.mkdir_p masc_dir;
+  let board_posts_path = Filename.concat masc_dir "board_posts.jsonl" in
+  write_file board_posts_path
+    (String.concat "\n"
+       [
+         Yojson.Safe.to_string
+           (`Assoc
+             [
+               ("id", `String "post-1");
+               ("author", `String "alice");
+               ("title", `String "Hello");
+               ("content", `String "body");
+               ("created_at", `Float 123.0);
+             ]);
+         "not-json";
+       ] ^ "\n");
+  let items = Activity_feed.recent_activity config ~limit:10 () in
+  check int "valid board post survives" 1 (List.length items);
+  match items with
+  | [item] ->
+      check string "summary preserved" "Posted: Hello" item.summary;
+      check (float 0.01) "timestamp preserved" 123.0 item.created_at
+  | _ -> fail "expected one activity item"
+
+let test_recent_activity_skips_bad_task_file () =
+  with_temp_dir "activity-feed-task" @@ fun base_path ->
+  let config = Room.default_config base_path in
+  let masc_dir = Room.masc_dir config in
+  let tasks_dir = Filename.concat masc_dir "tasks" in
+  Fs_compat.mkdir_p tasks_dir;
+  write_file (Filename.concat tasks_dir "good.json")
+    (Yojson.Safe.to_string
+       (`Assoc
+         [
+           ("id", `String "task-1");
+           ("status", `String "done");
+           ("assignee", `String "bob");
+           ("title", `String "Write tests");
+           ("created_at", `String "2026-04-10T01:02:03");
+         ]));
+  write_file (Filename.concat tasks_dir "bad.json") "{\"id\":";
+  let items = Activity_feed.recent_activity config ~limit:10 () in
+  check int "malformed task file skipped" 1 (List.length items);
+  match items with
+  | [item] ->
+      check string "task summary preserved" "Task task-1: Write tests (done)"
+        item.summary
+  | _ -> fail "expected one task activity item"
+
+let test_recent_activity_falls_back_from_bad_task_timestamp () =
+  with_temp_dir "activity-feed-ts" @@ fun base_path ->
+  let config = Room.default_config base_path in
+  let masc_dir = Room.masc_dir config in
+  let tasks_dir = Filename.concat masc_dir "tasks" in
+  Fs_compat.mkdir_p tasks_dir;
+  write_file (Filename.concat tasks_dir "task.json")
+    (Yojson.Safe.to_string
+       (`Assoc
+         [
+           ("id", `String "task-2");
+           ("status", `String "running");
+           ("assignee", `String "carol");
+           ("title", `String "Investigate");
+           ("created_at", `String "not-a-timestamp");
+         ]));
+  let items = Activity_feed.recent_activity config ~limit:10 () in
+  check int "task still included" 1 (List.length items);
+  match items with
+  | [item] ->
+      check bool "timestamp falls back to a real time value" true
+        (item.created_at > 0.0)
+  | _ -> fail "expected one task activity item"
+
+(* ============================================================
    Runner
    ============================================================ *)
 
@@ -277,5 +376,13 @@ let () =
       test_case "missing detail" `Quick test_activity_item_missing_detail;
       test_case "malformed" `Quick test_activity_item_malformed;
       test_case "defaults" `Quick test_activity_item_defaults;
+    ];
+    "activity_feed_fs", [
+      test_case "skips malformed jsonl lines" `Quick
+        test_recent_activity_skips_malformed_jsonl_lines;
+      test_case "skips bad task file" `Quick
+        test_recent_activity_skips_bad_task_file;
+      test_case "falls back from bad task timestamp" `Quick
+        test_recent_activity_falls_back_from_bad_task_timestamp;
     ];
   ]

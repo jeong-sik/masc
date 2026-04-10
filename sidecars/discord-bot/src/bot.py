@@ -29,6 +29,7 @@ from .formatters import (
     format_keeper_embed,
     markdown_to_structured,
     render_structured_embeds,
+    strip_state_blocks,
 )
 from .gate_client import BreakerSnapshot, GateClient, GateResponse
 from .status_store import ConnectorRuntimeStatus, StatusStore
@@ -329,7 +330,7 @@ class GateBot(discord.Client):
             if now - last_edit < edit_interval:
                 continue
 
-            display = accumulated[:4000]
+            display = strip_state_blocks(accumulated)[:4000]
             if reply_msg is None:
                 reply_msg = await channel.send(display + " ...")
             else:
@@ -343,7 +344,7 @@ class GateBot(discord.Client):
             return False
 
         # Final edit with complete text
-        display = accumulated[:4000]
+        display = strip_state_blocks(accumulated)[:4000]
         if reply_msg is None:
             await channel.send(display)
         else:
@@ -365,6 +366,18 @@ class GateBot(discord.Client):
             embed = format_error_embed(response.error)
             await channel.send(embed=embed)
             return
+
+        # Strip keeper-internal [STATE] blocks before rendering
+        response = GateResponse(
+            ok=response.ok,
+            keeper_name=response.keeper_name,
+            reply=strip_state_blocks(response.reply),
+            error=response.error,
+            model_used=response.model_used,
+            duration_ms=response.duration_ms,
+            tokens_used=response.tokens_used,
+            structured=response.structured,
+        )
 
         # Try structured rendering (from gate or auto-parsed markdown)
         structured = response.structured or markdown_to_structured(response.reply)
@@ -594,7 +607,7 @@ async def keeper_ask(
         now = time.monotonic()
         if now - last_edit < edit_interval:
             continue
-        display = accumulated[:4000]
+        display = strip_state_blocks(accumulated)[:4000]
         if followup_msg is None:
             followup_msg = await interaction.followup.send(display + " ...", wait=True)
         else:
@@ -605,7 +618,7 @@ async def keeper_ask(
         last_edit = now
 
     if accumulated:
-        display = accumulated[:4000]
+        display = strip_state_blocks(accumulated)[:4000]
         if followup_msg is None:
             await interaction.followup.send(display)
         else:

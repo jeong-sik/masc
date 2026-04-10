@@ -124,6 +124,7 @@ val run_turn :
   -> cascade_name:string
   -> ?provider_filter:string list
   -> generation:int
+  -> ?actionable_signal:bool
   -> ?max_turns:int
   -> ?max_idle_turns:int
   -> ?history_user_source:string

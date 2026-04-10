@@ -354,7 +354,7 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                        ("phase", phase_str);
                        ("name", `String meta.name);
                        ("agent_name", `String meta.agent_name);
-                       ("trace_id", `String meta.runtime.trace_id);
+                       ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
                        ("goal", `String meta.goal);
                        ("short_goal", `String meta.short_goal);
                        ("mid_goal", `String meta.mid_goal);
@@ -450,7 +450,7 @@ let persistent_agents_json ?keeper_names config =
                   ("runtime_class", `String "keeper");
                   ("name", `String meta.name);
                   ("agent_name", `String meta.agent_name);
-                  ("trace_id", `String meta.runtime.trace_id);
+                  ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
                   ("goal", `String meta.goal);
                   ("short_goal", `String meta.short_goal);
                   ("mid_goal", `String meta.mid_goal);
@@ -617,17 +617,17 @@ let invalidate_snapshot_cache () =
 
 let namespace_scope_cache_segment (_config : Room_utils.config) = "default"
 
-let snapshot_json ?actor ?view ?(include_messages = true)
+let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = true)
     ?(include_keepers = true) ?(include_summary_fields = true)
-    ?(include_command_plane = true) ?(lightweight_summary = false)
+    ?(include_command_plane = true) ?(lightweight_summary = false) ?sessions
     (ctx : 'a context) : Yojson.Safe.t =
   let cache_key =
-    Printf.sprintf "%s|%s|%s|%s|%b|%b|%b|%b|%b"
+    Printf.sprintf "%s|%s|%s|%s|%b|%b|%b|%b|%b|%b"
       ctx.config.base_path
       (namespace_scope_cache_segment ctx.config)
       (Option.value ~default:"" actor)
       (Option.value ~default:"" view)
-      include_messages include_keepers include_summary_fields
+      include_messages include_sessions include_keepers include_summary_fields
       include_command_plane lightweight_summary
   in
   (* Singleflight cache lookup: check for fresh hit, in-flight compute,
@@ -719,10 +719,24 @@ let snapshot_json ?actor ?view ?(include_messages = true)
   in
   let config = ctx.config in
   let initialized = Room.is_initialized config in
-  ignore (initialized, _snapshot_session_window_seconds (), _snapshot_session_limit ());
+  let tracked_sessions =
+    match sessions with
+    | Some s -> s
+    | None ->
+        (* Team session store removed — always empty. *)
+        ignore (initialized, _snapshot_session_window_seconds (), _snapshot_session_limit ());
+        []
+  in
   let trace_id = trace_id "ops" in
   let actor_name = normalized_actor ~context_actor:ctx.agent_name actor in
   let view = parse_snapshot_view view in
+  let include_sessions =
+    include_sessions
+    &&
+    match view with
+    | Summary | Sessions | Full -> true
+    | Keepers | Messages -> false
+  in
   let include_keepers =
     include_keepers
     &&
@@ -795,7 +809,7 @@ let snapshot_json ?actor ?view ?(include_messages = true)
          Eio.Fiber.all [
            (fun () ->
              (* Team sessions removed — always empty *)
-             ignore (lightweight_summary, status_cache);
+             ignore (include_sessions, lightweight_summary, status_cache);
              sessions_ref := empty_section);
            (fun () ->
              keepers_ref :=
@@ -871,7 +885,7 @@ let snapshot_json ?actor ?view ?(include_messages = true)
   if elapsed_total > 1.0 then begin
     Log.Dashboard.info "[snapshot_json] total: %.0fms (sessions=%d keepers=%d)"
       (elapsed_total *. 1000.0)
-      0 (List.length keeper_names);
+      (List.length tracked_sessions) (List.length keeper_names);
     List.iter (fun (label, dt) ->
       if dt > 0.1 then
         Log.Dashboard.info "[snapshot_json]   %s: %.0fms" label (dt *. 1000.0))

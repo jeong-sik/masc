@@ -12,7 +12,7 @@ type sandbox = {
   task_id : string;
   worktree_path : string;
   branch_name : string;
-  execution_scope : Worker_contract_types_enums.execution_scope;
+  execution_scope : Worker_types.execution_scope;
   created_at : float;
 }
 
@@ -66,7 +66,7 @@ let symlink_masc ~repo_root ~worktree_path =
   else
     Ok ()
 
-let create ~config ~task_id ?(scope = Worker_contract_types_enums.Limited_code_change)
+let create ~config ~task_id ?(scope = Worker_types.Limited_code_change)
     ?(base_branch = "main") ~agent_name () =
   (* Delegate worktree creation to Room_worktree via the Room facade *)
   match Room_worktree.worktree_create_r ~link_task:true config

@@ -31,7 +31,8 @@ This glossary defines the official terminology for the MASC (Multi-Agent Streami
 | Compressed context | **Capsule** | DNA, summary, context blob | A compressed representation of agent context for efficient transfer |
 | Agent lifecycle | **Lifecycle** | cell state, cell lifecycle | The stages an agent goes through from creation to termination |
 | Work unit | **Task** | job, work, quest | A discrete unit of work assigned to an agent |
-| Agent workspace | **Worktree** | workspace, sandbox | Isolated git worktree for parallel agent work |
+| Agent sandbox | **Playground** | workspace | Keeper-owned writable sandbox for cloned repos and scratch files |
+| Git isolation workflow | **Worktree** | agent workspace | Isolated git worktree for parallel agent work |
 | Inter-agent message | **Broadcast** | announce, notify | A message sent to all agents in the room |
 | Direct communication | **Portal** | tunnel, channel | A direct communication link between two specific agents |
 | Resource protection | **Lock** | mutex, guard | Exclusive access to a shared resource |
@@ -41,6 +42,24 @@ This glossary defines the official terminology for the MASC (Multi-Agent Streami
 ---
 
 ## Term Definitions
+
+### Playground
+
+A keeper-owned writable sandbox under the runtime root:
+
+```bash
+# Location pattern
+.masc/playground/{keeper}/
+
+# Example clone path
+.masc/playground/sangsu/repos/masc-mcp/
+```
+
+Typical contents:
+
+- cloned repos for keeper-driven edits
+- scratch files and temporary notes
+- keeper-local state such as repo caches or PR history
 
 ### Handoff
 
@@ -105,7 +124,7 @@ A discrete unit of work with:
 
 ### Worktree
 
-An isolated git worktree created for agent work:
+An isolated git worktree used as a repo workflow for agent work:
 
 ```bash
 # Location pattern

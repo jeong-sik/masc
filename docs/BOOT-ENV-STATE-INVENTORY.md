@@ -200,9 +200,10 @@ Important outlier:
 
 Playground and execution model:
 
-- Keeper playground root: `<runtime_root>/playground/<keeper>/`
+- Keeper playground root: `<runtime_root>/playground/<keeper>/` (keeper-owned sandbox)
 - Clone target for repo work: `<runtime_root>/playground/<keeper>/repos/<repo_name>`
 - Additional scratch lane: `<runtime_root>/playground/<keeper>/mind/`
+- Repo worktree workflow is separate and uses repo-local `.worktrees/<branch-or-task>/`
 
 Allowed path model:
 

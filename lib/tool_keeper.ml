@@ -108,7 +108,7 @@ let keeper_brief_meta_json (meta : keeper_meta) =
     [
       ("name", `String meta.name);
       ("goal", `String meta.goal);
-      ("trace_id", `String meta.runtime.trace_id);
+      ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
       ("created_at", `String meta.created_at);
       ("updated_at", `String meta.updated_at);
     ]
@@ -420,7 +420,7 @@ let handle_keeper_repair ctx args : tool_result =
                           (get_string args "model_label"
                              (default_keeper_model_label meta)) );
                       ("max_attempts", `Int max_attempts);
-                      ("artifact_session_id", `String meta.runtime.trace_id);
+                      ("artifact_session_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
                     ]
                   in
                   let fields =

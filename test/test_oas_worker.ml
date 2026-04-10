@@ -376,13 +376,13 @@ let make_worker_meta ?(effective_model = "local-qwen") () :
     workspace_path = "/tmp/workspace";
     role = Some "executor";
     selection_note = Some "resume";
-    execution_scope = Worker_contract_types.Limited_code_change;
+    execution_scope = Worker_types.Limited_code_change;
     thinking_enabled = Some true;
     max_turns_override = None;
     timeout_seconds = Some 240;
     tool_profile = Worker_container_types.Profile_session_min;
     shell_profile = Worker_container_types.Shell_readonly;
-    worker_class = Some Worker_contract_types.Worker_executor;
+    worker_class = Some Worker_types.Worker_executor;
     effective_model;
     checkpoint_path = "/tmp/checkpoint.json";
     turn_log_path = "/tmp/turns.jsonl";
@@ -1027,7 +1027,7 @@ let test_keeper_oas_handoff_rollover_increments_generation () =
         }
       in
       let session =
-        Keeper_exec_context.create_session ~session_id:meta.runtime.trace_id ~base_dir
+        Keeper_exec_context.create_session ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id) ~base_dir
       in
       let ctx =
         Keeper_exec_context.create ~system_prompt:"rollover" ~max_tokens:100
@@ -1056,17 +1056,17 @@ let test_keeper_oas_handoff_rollover_increments_generation () =
       Alcotest.(check bool) "trace rotated" true
         (rollover.updated_meta.runtime.trace_id <> meta.runtime.trace_id);
       Alcotest.(check bool) "trace history contains previous trace" true
-        (List.mem meta.runtime.trace_id rollover.updated_meta.runtime.trace_history);
+        (List.mem (Keeper_id.Trace_id.to_string meta.runtime.trace_id) rollover.updated_meta.runtime.trace_history);
       Alcotest.(check bool) "handoff json present" true
         (Option.is_some rollover.handoff_json);
       let new_session =
         Keeper_exec_context.create_session
-          ~session_id:rollover.updated_meta.runtime.trace_id
+          ~session_id:(Keeper_id.Trace_id.to_string rollover.updated_meta.runtime.trace_id)
           ~base_dir
       in
       match
         Keeper_checkpoint_store.load_oas ~session_dir:new_session.session_dir
-          ~session_id:rollover.updated_meta.runtime.trace_id
+          ~session_id:(Keeper_id.Trace_id.to_string rollover.updated_meta.runtime.trace_id)
       with
       | Ok loaded ->
           let generation =
@@ -1096,7 +1096,7 @@ let test_keeper_oas_handoff_rollover_below_threshold_noop () =
         }
       in
       let session =
-        Keeper_exec_context.create_session ~session_id:meta.runtime.trace_id ~base_dir
+        Keeper_exec_context.create_session ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id) ~base_dir
       in
       let ctx =
         Keeper_exec_context.create ~system_prompt:"stable" ~max_tokens:100
@@ -1120,8 +1120,8 @@ let test_keeper_oas_handoff_rollover_below_threshold_noop () =
           ~primary_model_max_tokens:100
           ~checkpoint:(Some checkpoint)
       in
-      Alcotest.(check string) "trace unchanged" meta.runtime.trace_id
-        rollover.updated_meta.runtime.trace_id;
+      Alcotest.(check string) "trace unchanged" (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+        (Keeper_id.Trace_id.to_string rollover.updated_meta.runtime.trace_id);
       Alcotest.(check int) "generation unchanged" meta.runtime.generation
         rollover.updated_meta.runtime.generation;
       Alcotest.(check bool) "handoff json absent" false
@@ -1135,7 +1135,7 @@ let test_overflow_retry_legacy_restore_failure_falls_back_to_oas () =
       Fs_compat.clear_fs ();
       let meta = make_keeper_meta ~trace_id:"trace-overflow-legacy-fail" () in
       let session =
-        Keeper_exec_context.create_session ~session_id:meta.runtime.trace_id ~base_dir
+        Keeper_exec_context.create_session ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id) ~base_dir
       in
       let noisy_tool_output = String.make 4000 'x' in
       let ctx =
@@ -1188,7 +1188,7 @@ let test_overflow_retry_legacy_restore_failure_returns_none_without_oas () =
       Fs_compat.clear_fs ();
       let meta = make_keeper_meta ~trace_id:"trace-overflow-legacy-only" () in
       let session =
-        Keeper_exec_context.create_session ~session_id:meta.runtime.trace_id ~base_dir
+        Keeper_exec_context.create_session ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id) ~base_dir
       in
       let ctx =
         Keeper_exec_context.create ~system_prompt:"legacy" ~max_tokens:1024
@@ -1220,7 +1220,7 @@ let test_overflow_retry_requires_meaningful_reduction () =
       Fs_compat.clear_fs ();
       let meta = make_keeper_meta ~trace_id:"trace-overflow-noop" () in
       let session =
-        Keeper_exec_context.create_session ~session_id:meta.runtime.trace_id ~base_dir
+        Keeper_exec_context.create_session ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id) ~base_dir
       in
       let ctx =
         Keeper_exec_context.create ~system_prompt:"noop" ~max_tokens:4096
@@ -1251,7 +1251,7 @@ let test_overflow_retry_saves_compacted_checkpoint () =
       Fs_compat.clear_fs ();
       let meta = make_keeper_meta ~trace_id:"trace-overflow-compacts" () in
       let session =
-        Keeper_exec_context.create_session ~session_id:meta.runtime.trace_id ~base_dir
+        Keeper_exec_context.create_session ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id) ~base_dir
       in
       let noisy_tool_output = String.make 4000 'x' in
       let ctx =

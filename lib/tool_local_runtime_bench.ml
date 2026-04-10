@@ -112,6 +112,7 @@ let raw_completion ~model_id ~prompt ~max_tokens ~timeout_sec () =
 
 let error_message_of_http_error = function[@warning "-8-11"]
   | Llm_provider.Http_client.NetworkError { message } -> message
+  | Llm_provider.Http_client.AcceptRejected { reason } -> reason
   | Llm_provider.Http_client.HttpError { code; body } -> (
       try
         let json = Yojson.Safe.from_string body in
@@ -122,6 +123,7 @@ let error_message_of_http_error = function[@warning "-8-11"]
             | _ -> Printf.sprintf "HTTP %d" code)
         | _ -> Printf.sprintf "HTTP %d" code
       with Yojson.Json_error _ -> Printf.sprintf "HTTP %d" code)
+  | _ -> "Unknown Error"
 
 let per_runtime_breakdown_to_yojson counts =
   counts

@@ -13,14 +13,14 @@ type sandbox = {
   task_id : string;
   worktree_path : string;
   branch_name : string;
-  execution_scope : Worker_contract_types_enums.execution_scope;
+  execution_scope : Worker_types.execution_scope;
   created_at : float;
 }
 
 val create :
   config:Room_utils_backend_setup.config ->
   task_id:string ->
-  ?scope:Worker_contract_types_enums.execution_scope ->
+  ?scope:Worker_types.execution_scope ->
   ?base_branch:string ->
   agent_name:string ->
   unit ->
@@ -39,7 +39,7 @@ val cleanup :
 val with_sandbox :
   config:Room_utils_backend_setup.config ->
   task_id:string ->
-  ?scope:Worker_contract_types_enums.execution_scope ->
+  ?scope:Worker_types.execution_scope ->
   ?base_branch:string ->
   agent_name:string ->
   (sandbox -> 'a) ->

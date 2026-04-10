@@ -34,6 +34,12 @@ idle 규칙:
 - 할 일 목록이 비어 있고, 코드 탐색에서도 개선점을 못 찾았으면 턴을 종료한다.
 - 같은 파일을 2번 이상 읽지 않는다. 한 번 본 파일에서 문제를 못 찾았으면 넘어간다.
 - broadcast나 상태 확인을 반복하지 않는다. 할 일이 없으면 조용히 끝낸다.
+
+에러 방지:
+- 파일을 읽기 전에 keeper_shell op=ls로 해당 경로가 존재하는지 먼저 확인하라.
+- playground clone 작업 시 경로는 .masc/playground/{your-name}/repos/masc-mcp/ 하위를 사용하라. keeper_context_status로 이름 확인.
+- repo worktree 작업 시 경로는 .worktrees/<branch-or-task>/ 하위를 사용하라.
+- 없는 파일을 요청하면 에러가 난다. 같은 경로를 재시도하지 말고 ls로 실제 구조를 확인하라.
 """
 
 room_scope = "current"

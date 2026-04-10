@@ -256,7 +256,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
           in
           let history_path =
             Filename.concat
-              (Filename.concat (Keeper_types.session_base_dir config) m.runtime.trace_id)
+              (Filename.concat (Keeper_types.session_base_dir config) (Keeper_id.Trace_id.to_string m.runtime.trace_id))
               "history.jsonl"
           in
           let ( conversation_tail,
@@ -420,7 +420,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                      let (_session, ctx_opt) =
                        Keeper_execution.load_context_from_checkpoint
                          ~max_checkpoint_messages:m.compaction.max_checkpoint_messages
-                         ~trace_id:m.runtime.trace_id
+                         ~trace_id:(Keeper_id.Trace_id.to_string m.runtime.trace_id)
                          ~primary_model_max_tokens:primary_max_context
                          ~base_dir
                      in
@@ -507,7 +507,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
               ("agent_name", `String m.agent_name);
               ("emoji", `String (let (e, _) = get_agent_identity m.name in e));
               ("koreanName", `String (let (_, k) = get_agent_identity m.name in k));
-              ("trace_id", `String m.runtime.trace_id);
+              ("trace_id", `String (Keeper_id.Trace_id.to_string m.runtime.trace_id));
               ("generation", `Int m.runtime.generation);
               ("created_at", `String m.created_at);
               ("updated_at", `String m.updated_at);
@@ -728,7 +728,7 @@ let keeper_config_json (config : Room.config) (name : string)
           ~goal:m.goal ~short_goal:m.short_goal ~mid_goal:m.mid_goal
           ~long_goal:m.long_goal ~will:m.will
           ~needs:m.needs ~desires:m.desires ~instructions:m.instructions
-          ~persona_extended ()
+          ~persona_extended ~keeper_name:m.name ()
       in
       let prompt =
         `Assoc [

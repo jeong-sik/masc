@@ -200,6 +200,14 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
     in
     Progress.Tracker.step tracker ~message:"Initializing session directory" ();
     let trace_id = generate_trace_id () in
+    match Keeper_id.Trace_id.of_string trace_id with
+    | Error err ->
+      Log.Keeper.error
+        "create_keeper failed: generated invalid trace_id for name=%s: %s"
+        p.name err;
+      Progress.stop_tracking task_id;
+      (false, "internal keeper trace_id generation failed")
+    | Ok trace_id_t ->
       let base_dir = session_base_dir ctx.config in
       (* Ensure full session dir tree, not just base_dir (issue #3019) *)
       ignore (Keeper_fs.ensure_dir (Filename.concat base_dir trace_id));
@@ -220,6 +228,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             ~desires
             ~instructions
             ~persona_extended
+            ~keeper_name:p.name
             ()
       in
       let ctx0 = Keeper_exec_context.create ~system_prompt ~max_tokens:primary_max_context in
@@ -316,7 +325,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             work_discovery_count = 0;
           };
           generation = 0;
-          trace_id;
+          trace_id = trace_id_t;
           trace_history = [];
           last_handoff_ts = 0.0;
           last_continuity_update_ts = now_ts;
@@ -365,7 +374,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         (false, e)
       | Ok () ->
         Log.Keeper.debug "create_keeper: metadata written for name=%s trace_id=%s"
-          p.name meta.runtime.trace_id;
+          p.name (Keeper_id.Trace_id.to_string meta.runtime.trace_id);
         Progress.Tracker.step tracker ~message:"Starting keepalive loop" ();
         Log.Keeper.info "create_keeper: starting keepalive for name=%s" p.name;
         start_keepalive ctx meta;
@@ -377,11 +386,11 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
              Tool_shard.set_agent_shards p.name shard_names
          | Some [] | None -> ());
         Progress.Tracker.complete tracker ~message:"Keeper created" ();
-        Log.Keeper.info "create_keeper: completed for name=%s trace_id=%s" p.name meta.runtime.trace_id;
+        Log.Keeper.info "create_keeper: completed for name=%s trace_id=%s" p.name (Keeper_id.Trace_id.to_string meta.runtime.trace_id);
         let json = `Assoc [
           ("name", `String meta.name);
           ("agent_name", `String meta.agent_name);
-          ("trace_id", `String meta.runtime.trace_id);
+          ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
           ("generation", `Int meta.runtime.generation);
           ("goal", `String meta.goal);
           ("short_goal", `String meta.short_goal);

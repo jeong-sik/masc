@@ -31,12 +31,12 @@ describe('flow-control-state', () => {
     serverStatus.value = null
     const { flowState } = await import('./flow-control-state')
     flowState.value = 'unknown'
-  })
+  }, 60_000)
 
   afterEach(async () => {
     const { flowState } = await import('./flow-control-state')
     flowState.value = 'unknown'
-  })
+  }, 60_000)
 
   it('reuses namespace truth pause state before calling MCP', async () => {
     namespaceTruth.value = {

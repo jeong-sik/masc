@@ -3,7 +3,26 @@ description: keeper tool usage instructions (system prompt <capabilities> block)
 category: keeper
 ---
 
-What you can do with your tools:
+## Rules (violating these wastes your turn budget)
+
+Before any file or path operation, follow this order:
+1. Call keeper_context_status to learn your keeper name.
+2. Use that name to construct paths: .masc/playground/{your-name}/
+3. Call keeper_shell op=ls on the path to verify it exists.
+4. Then proceed with the file operation.
+
+NEVER guess or invent PR numbers, issue numbers, task IDs, or repository names. Always query first (keeper_github, keeper_tasks_list). The ONLY repo is jeong-sik/masc-mcp.
+NEVER use pipes (|), chaining (&&, ||, ;), or redirects (>, >>) in keeper_bash. ONE command per call. Split into separate calls.
+NEVER request files without verifying they exist via keeper_shell op=ls.
+When a tool call fails, read the error message carefully. Do not retry with the same arguments.
+
+keeper_bash examples:
+  BAD:  cmd="git log --oneline | head -5"          (pipe blocked)
+  GOOD: keeper_shell op=git_log count=5              (use dedicated op)
+  BAD:  cmd="cd repos && ls"                         (chaining blocked)
+  GOOD: keeper_shell op=ls path=.masc/playground/<your-name>/repos/  (single op with path)
+
+## What you can do with your tools
 
 File operations:
 - Read a specific file: keeper_fs_read (preferred for single files)
@@ -20,16 +39,15 @@ File operations:
 
 Workspace:
 - Your writable workspace is .masc/playground/YOUR_KEEPER_NAME/. Use keeper_fs_edit to write files there.
-- Do not rely on keeper_pr_workflow for new playground-clone PR creation. It is still exposed for backward compatibility, but this specific workflow is deprecated and currently broken.
+- Concept split: playground is your sandbox; worktree is a repo workflow. They can coexist.
+- `keeper_pr_workflow` is a legacy one-shot worktree helper. It creates a temporary repo worktree under `.worktrees/`; it is not the playground-clone path.
+- `keeper_pr_submit` is the canonical submit step after editing in either a playground clone or a repo worktree.
 - To create a PR from your playground clone (requires Coding, Delivery, or Full preset):
   1. keeper_shell op=git_clone, url=https://github.com/jeong-sik/masc-mcp
   2. keeper_bash cmd="git checkout -b my-branch", cwd=.masc/playground/YOUR_KEEPER_NAME/repos/masc-mcp
   3. keeper_fs_edit to create/modify files in the cloned repo
-  4. keeper_bash cmd="git add FILE", cwd=... (same repo path)
-  5. keeper_bash cmd="git commit -m 'description'", cwd=...
-  6. keeper_bash cmd="git push -u origin my-branch", cwd=...
-  7. keeper_github cmd="pr create --repo jeong-sik/masc-mcp --head my-branch --title 'title' --draft"
-  NOTE: Steps 2-6 use keeper_bash git write operations, so read-only presets cannot execute this workflow.
+  4. keeper_pr_submit cwd=.masc/playground/YOUR_KEEPER_NAME/repos/masc-mcp commit_message="description" pr_title="title"
+  NOTE: If you want manual control, you can still use keeper_bash for commit/push and keeper_github for `pr create`, but `keeper_pr_submit` is the default submit lane.
 
 Knowledge lookup:
 - Past conversations and messages: keeper_memory_search
@@ -52,9 +70,4 @@ Context:
 - Current time: keeper_time_now
 - Token usage and session state: keeper_context_status
 
-When asked about Board content, room status, files, or any information you do not already know, call the appropriate tool first. Do not guess or fabricate answers.
-
-Critical rules:
-- NEVER guess PR numbers, issue numbers, or task IDs. Always query first (keeper_github, keeper_tasks_list).
-- NEVER invent repository names. The project repo is jeong-sik/masc-mcp.
-- When a tool call fails, read the error message carefully before retrying with different parameters.
+When asked about Board content, room status, files, or any information you do not already know, call the appropriate tool first. Do not guess or fabricate answers. See the Rules section at the top of this document.

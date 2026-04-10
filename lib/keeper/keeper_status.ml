@@ -169,7 +169,7 @@ let handle_keeper_list ctx args : tool_result =
 	            Some (`Assoc ([
               ("name", `String m.name);
               ("agent_name", `String m.agent_name);
-              ("trace_id", `String m.runtime.trace_id);
+              ("trace_id", `String (Keeper_id.Trace_id.to_string m.runtime.trace_id));
               ("generation", `Int m.runtime.generation);
               ("goal", `String m.goal);
               ("short_goal", `String m.short_goal);
@@ -266,8 +266,8 @@ let handle_keeper_list ctx args : tool_result =
                 ("policy", `String (keeper_policy_log_path ctx.config m.name));
                 ("feedback", `String (keeper_feedback_log_path ctx.config m.name));
                 ("dataset_export", `String (keeper_dataset_export_path ctx.config m.name));
-                ("session_dir", `String (keeper_session_dir ctx.config m.runtime.trace_id));
-                ("history", `String (keeper_history_path ctx.config m.runtime.trace_id));
+                ("session_dir", `String (keeper_session_dir ctx.config (Keeper_id.Trace_id.to_string m.runtime.trace_id)));
+                ("history", `String (keeper_history_path ctx.config (Keeper_id.Trace_id.to_string m.runtime.trace_id)));
               ]);
             ]))
         ) keeper_names
@@ -290,7 +290,7 @@ let handle_keeper_trajectory ctx args : tool_result =
       let limit = get_int args "limit" 20 in
       let masc_root = Filename.concat ctx.config.base_path ".masc" in
       let entries =
-        Trajectory.read_entries ~masc_root ~keeper_name:m.name ~trace_id:m.runtime.trace_id
+        Trajectory.read_entries ~masc_root ~keeper_name:m.name ~trace_id:(Keeper_id.Trace_id.to_string m.runtime.trace_id)
       in
       let total = List.length entries in
       (* Take the last N entries (most recent) *)
@@ -301,12 +301,12 @@ let handle_keeper_trajectory ctx args : tool_result =
           List.filteri (fun i _e -> i >= drop) entries
       in
       if recent = [] then
-        (true, Printf.sprintf "Keeper %s (trace: %s) has no trajectory entries." m.name m.runtime.trace_id)
+        (true, Printf.sprintf "Keeper %s (trace: %s) has no trajectory entries." m.name (Keeper_id.Trace_id.to_string m.runtime.trace_id))
       else
         let json_list = List.map Trajectory.entry_to_json recent in
         let json = `Assoc [
           ("keeper", `String m.name);
-          ("trace_id", `String m.runtime.trace_id);
+          ("trace_id", `String (Keeper_id.Trace_id.to_string m.runtime.trace_id));
           ("generation", `Int m.runtime.generation);
           ("total_entries", `Int total);
           ("showing", `Int (List.length recent));
@@ -326,7 +326,7 @@ let handle_keeper_eval ctx args : tool_result =
       let scenario_file = get_string_opt args "scenario_file" in
       let masc_root = Filename.concat ctx.config.base_path ".masc" in
       let entries =
-        Trajectory.read_entries ~masc_root ~keeper_name:m.name ~trace_id:m.runtime.trace_id
+        Trajectory.read_entries ~masc_root ~keeper_name:m.name ~trace_id:(Keeper_id.Trace_id.to_string m.runtime.trace_id)
       in
       if entries = [] then
         (true, Printf.sprintf "Keeper %s has no trajectory data to evaluate." m.name)
@@ -364,7 +364,7 @@ let handle_keeper_eval ctx args : tool_result =
         in
         let json = `Assoc [
           ("keeper", `String m.name);
-          ("trace_id", `String m.runtime.trace_id);
+          ("trace_id", `String (Keeper_id.Trace_id.to_string m.runtime.trace_id));
           ("generation", `Int m.runtime.generation);
           ("total_turns", `Int m.runtime.usage.total_turns);
           ("total_input_tokens", `Int m.runtime.usage.total_input_tokens);

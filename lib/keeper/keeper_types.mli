@@ -99,7 +99,7 @@ type agent_runtime_state = {
   compaction_rt: compaction_runtime;
   proactive_rt: proactive_runtime;
   generation: int;
-  trace_id: string;
+  trace_id: Keeper_id.Trace_id.t;
   trace_history: string list;
   last_handoff_ts: float;
   last_continuity_update_ts: float;
@@ -156,7 +156,7 @@ type keeper_meta = {
   continuity_summary: string;
   active_goal_ids: string list;
   paused: bool;
-  current_task_id: string option;
+  current_task_id: Keeper_id.Task_id.t option;
   (** Currently claimed task ID for cost attribution. *)
   work_discovery_enabled : bool option;
   work_discovery_sources : string list option;

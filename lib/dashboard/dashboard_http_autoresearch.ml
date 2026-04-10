@@ -160,29 +160,6 @@ let safe_persisted_entry_json ~(base_path : string)
         summary.loop_id (Printexc.to_string exn);
       None
 
-let load_degraded_persisted_summary ~(base_path : string) loop_id =
-  let path = Autoresearch.state_file ~base_path loop_id in
-  match Safe_ops.read_json_file_safe path with
-  | Error _ -> None
-  | Ok (`Assoc fields as json) ->
-      if List.mem_assoc "llm_model" fields && not (List.mem_assoc "model_model" fields) then
-        None
-      else if not (Autoresearch_storage.has_required_persisted_state_fields json) then
-        None
-      else
-        (try Some (Autoresearch_serde.state_of_yojson json)
-         with
-         | Eio.Cancel.Cancelled _ as e -> raise e
-         | _ -> None)
-  | Ok json ->
-      if not (Autoresearch_storage.has_required_persisted_state_fields json) then
-        None
-      else
-        (try Some (Autoresearch_serde.state_of_yojson json)
-         with
-         | Eio.Cancel.Cancelled _ as e -> raise e
-         | _ -> None)
-
 (** Build the loops list JSON for GET /api/v1/autoresearch/loops.
     Merges in-memory active loops with persisted-only loops.
     Converts to JSON early to avoid polymorphic variant type mismatch. *)
@@ -208,14 +185,8 @@ let autoresearch_loops_json ~(base_path : string) : Yojson.Safe.t =
   let persisted_entries =
     List.filter_map
       (fun loop_id ->
-        let summary =
-          match Autoresearch.load_state ~base_path loop_id with
-          | Some _ as summary -> summary
-          | None -> load_degraded_persisted_summary ~base_path loop_id
-        in
-        match summary with
-        | Some summary ->
-            safe_persisted_entry_json ~base_path summary
+        match Autoresearch.load_state ~base_path loop_id with
+        | Some summary -> safe_persisted_entry_json ~base_path summary
         | None -> None)
       persisted_ids
   in

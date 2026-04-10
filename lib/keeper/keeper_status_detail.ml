@@ -108,7 +108,7 @@ let handle_keeper_status ctx args : tool_result =
              let (_session, ctx_opt) =
                load_context_from_checkpoint
                  ~max_checkpoint_messages:m.compaction.max_checkpoint_messages
-                 ~trace_id:m.runtime.trace_id
+                 ~trace_id:(Keeper_id.Trace_id.to_string m.runtime.trace_id)
                  ~primary_model_max_tokens:primary_max_context
                  ~base_dir
              in
@@ -201,8 +201,8 @@ let handle_keeper_status ctx args : tool_result =
          let metrics_store = keeper_metrics_store ctx.config m.name in
          let metrics_path = keeper_metrics_path ctx.config m.name in
          let memory_bank_path = keeper_memory_bank_path ctx.config m.name in
-         let session_dir = keeper_session_dir ctx.config m.runtime.trace_id in
-         let history_path = keeper_history_path ctx.config m.runtime.trace_id in
+         let session_dir = keeper_session_dir ctx.config (Keeper_id.Trace_id.to_string m.runtime.trace_id) in
+         let history_path = keeper_history_path ctx.config (Keeper_id.Trace_id.to_string m.runtime.trace_id) in
 
          let metrics_tail =
            let lines =
@@ -677,7 +677,7 @@ let handle_keeper_status ctx args : tool_result =
                (Filename.concat ctx.config.base_path
                  (Printf.sprintf ".masc/evidence/%s/%s"
                    (Room_utils.safe_filename m.name)
-                   (Room_utils.safe_filename m.runtime.trace_id))));
+                   (Room_utils.safe_filename (Keeper_id.Trace_id.to_string m.runtime.trace_id)))));
            ]);
            (let playground_rel = Keeper_alerting_path.playground_path_of_keeper m.name in
            let playground_abs = Filename.concat ctx.config.base_path playground_rel in
@@ -722,14 +722,14 @@ let handle_keeper_status ctx args : tool_result =
                match Keeper_evidence.latest_evidence
                  ~base_path:ctx.config.base_path
                  ~keeper_name:m.name
-                 ~trace_id:m.runtime.trace_id with
+                 ~trace_id:(Keeper_id.Trace_id.to_string m.runtime.trace_id) with
                | Some ev -> ev
                | None -> `Null);
              ("evidence_chain_valid",
                match Keeper_evidence.verify_evidence_chain
                  ~base_path:ctx.config.base_path
                  ~keeper_name:m.name
-                 ~trace_id:m.runtime.trace_id with
+                 ~trace_id:(Keeper_id.Trace_id.to_string m.runtime.trace_id) with
                | Ok () -> `Bool true
                | Error _ -> `Bool false);
            ]);

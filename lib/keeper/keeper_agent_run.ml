@@ -271,6 +271,7 @@ let run_turn
       ~(cascade_name : string)
       ?provider_filter
       ~(generation : int)
+      ?(actionable_signal = false)
       ?(max_turns : int = Env_config_keeper.KeeperKeepalive.oas_max_turns_per_call)
       (* Per-call turn budget. Keeper resumes via checkpoint if exhausted. *)
       ?(max_idle_turns : int = 3)
@@ -329,13 +330,13 @@ let run_turn
      exist before any file I/O (checkpoint load, history persist).
      In filesystem fallback mode (PG unavailable), these directories may
      not have been created by keeper_up if it only registered in-memory. *)
-  let session_dir = Filename.concat base_dir meta.runtime.trace_id in
+  let session_dir = Filename.concat base_dir (Keeper_id.Trace_id.to_string meta.runtime.trace_id) in
   Keeper_types.mkdir_p session_dir;
   (* 2. Load checkpoint *)
   let session, ctx_opt =
     Keeper_exec_context.load_context_from_checkpoint
       ~max_checkpoint_messages:meta.compaction.max_checkpoint_messages
-      ~trace_id:meta.runtime.trace_id
+      ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
       ~primary_model_max_tokens:max_context
       ~base_dir
   in
@@ -346,7 +347,7 @@ let run_turn
     match
       Keeper_checkpoint_store.load_oas
         ~session_dir:session.session_dir
-        ~session_id:meta.runtime.trace_id
+        ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
     with
     | Ok cp -> Some cp
     | Error _ -> None
@@ -373,6 +374,7 @@ let run_turn
       ~desires:meta.desires
       ~instructions:meta.instructions
       ~persona_extended
+      ~keeper_name:meta.name
       ()
   in
   (* 4. Create or restore working context, re-apply current prompt *)
@@ -1281,6 +1283,26 @@ let run_turn
                   turn
                   max_turns
                   is_last_turn;
+              let all_allowed =
+                if actionable_signal && not is_last_turn
+                then
+                  let pruned =
+                    Keeper_exec_tools.prune_boring_tools_for_actionable_turn
+                      all_allowed
+                  in
+                  if List.length pruned <> List.length all_allowed then (
+                    let removed =
+                      List.filter
+                        (fun name -> not (List.mem name pruned))
+                        all_allowed
+                    in
+                    Log.Keeper.info
+                      "keeper:%s actionable turn pruned boring tools: %s"
+                      meta.name
+                      (String.concat ", " removed));
+                  pruned
+                else all_allowed
+              in
               (* Context overflow guard: Tool_selector.select already respects
            the k limit, but overlays can grow the visible set beyond
            max_tools.  Cap the post-overlay set to stay inside small-model
@@ -1392,7 +1414,7 @@ let run_turn
     Memory_oas_bridge.create_memory_full
       ~agent_name
       ~base_dir
-      ~session_id:meta.runtime.trace_id
+      ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
       ~config
       ~episode_limit:30
       ~procedure_limit:10
@@ -1447,7 +1469,7 @@ let run_turn
            ?provider_filter
            ~goal:user_message
            ~priority
-           ~session_id:meta.runtime.trace_id
+           ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
            ~system_prompt:turn_system_prompt
            ~tools
            ~compact_ratio:meta.compaction.ratio_gate
@@ -1649,7 +1671,7 @@ let run_turn
               let patched =
                 Keeper_context_core.patch_checkpoint_last_assistant
                   checkpoint
-                  ~session_id:meta.runtime.trace_id
+                  ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
                   ~response_text
               in
               (match

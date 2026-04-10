@@ -102,18 +102,18 @@ let session_min_tool_names =
 
 let execution_scope_or_default = function
   | Some scope -> scope
-  | None -> Worker_contract_types.Limited_code_change
+  | None -> Worker_types.Limited_code_change
 
 (* Model tier inference removed (#4505). Cascade handles model selection
    without hardcoded name→tier mapping. *)
 
 let worker_profiles_of_scope scope =
   match scope with
-  | Worker_contract_types.Observe_only ->
+  | Worker_types.Observe_only ->
       (Profile_session_min, Shell_readonly)
-  | Worker_contract_types.Limited_code_change ->
+  | Worker_types.Limited_code_change ->
       (Profile_session_dev, Shell_dev)
-  | Worker_contract_types.Autonomous ->
+  | Worker_types.Autonomous ->
       (Profile_session_dev, Shell_dev)
 
 let worker_meta_to_yojson (meta : worker_container_meta) =
@@ -132,7 +132,7 @@ let worker_meta_to_yojson (meta : worker_container_meta) =
       );
       ( "execution_scope",
         `String
-          (Worker_contract_types.execution_scope_to_string meta.execution_scope) );
+          (Worker_types.execution_scope_to_string meta.execution_scope) );
       ("thinking_enabled", Option.fold ~none:`Null ~some:(fun v -> `Bool v) meta.thinking_enabled);
       ("max_turns_override", Option.fold ~none:`Null ~some:(fun n -> `Int n) meta.max_turns_override);
       ("timeout_seconds", Option.fold ~none:`Null ~some:(fun n -> `Int n) meta.timeout_seconds);
@@ -141,7 +141,7 @@ let worker_meta_to_yojson (meta : worker_container_meta) =
       ( "worker_class",
         Option.fold ~none:`Null
           ~some:(fun kind ->
-            `String (Worker_contract_types.worker_class_to_string kind))
+            `String (Worker_types.worker_class_to_string kind))
           meta.worker_class );
       ("effective_model", `String meta.effective_model);
       ("checkpoint_path", `String meta.checkpoint_path);
@@ -160,7 +160,7 @@ let worker_meta_of_yojson json =
           let execution_scope =
             json |> member "execution_scope" |> to_string_option
             |> Option.map (fun value ->
-                   Worker_contract_types.execution_scope_of_string
+                   Worker_types.execution_scope_of_string
                      (String.lowercase_ascii (String.trim value)))
             |> execution_scope_or_default
           in
@@ -205,7 +205,7 @@ let worker_meta_of_yojson json =
               worker_class =
                 (match json |> member "worker_class" |> to_string_option with
                 | Some value ->
-                    Worker_contract_types.worker_class_of_string
+                    Worker_types.worker_class_of_string
                       (String.lowercase_ascii (String.trim value))
                 | None -> None);
               effective_model =
@@ -332,7 +332,7 @@ let resolve_execution_scope ~base_path ~(team_session_id : string option)
   | None -> (
       (* Team_session_store removed — default scope *)
       ignore (team_session_id, base_path);
-      Worker_contract_types.Limited_code_change)
+      Worker_types.Limited_code_change)
 
 let build_oas_mcp_tools ~sw ~auth_token ~session_id ~worker_name ~prompt:_
     ~allowed_tools =
@@ -391,12 +391,12 @@ let build_local_shell_tools ~room_config ~worker_name ~execution_scope ~workdir 
         ()
       in
       match execution_scope with
-      | Worker_contract_types.Observe_only ->
+      | Worker_types.Observe_only ->
           Ok
             (Worker_dev_tools.make_readonly_tools ~proc_mgr ~clock
                ~workdir ~on_exec ())
-      | Worker_contract_types.Limited_code_change
-      | Worker_contract_types.Autonomous ->
+      | Worker_types.Limited_code_change
+      | Worker_types.Autonomous ->
           Ok
             (Worker_dev_tools.make_tools ~proc_mgr ~clock ~workdir
                ~on_exec ()))
@@ -549,7 +549,7 @@ let materialize_direct_evidence ~base_path ~worker_name
           requested_model = Some meta.effective_model;
           requested_policy =
             Some
-              (Worker_contract_types.execution_scope_to_string
+              (Worker_types.execution_scope_to_string
                  meta.execution_scope);
           workdir = Some workspace_path;
         }

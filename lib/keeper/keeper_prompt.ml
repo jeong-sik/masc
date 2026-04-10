@@ -6,6 +6,11 @@ open Keeper_types
 
 let contains_ci = String_util.contains_substring_ci
 
+(* Pre-compiled patterns for keeper name substitution in prompt templates.
+   Top-level to avoid re-compilation on every build_keeper_system_prompt call. *)
+let re_keeper_name_curly = Re.(compile (str "{your-name}"))
+let re_keeper_name_upper = Re.(compile (str "YOUR_KEEPER_NAME"))
+
 let exact_direct_mention_present ~(targets : string list) (content : string) :
     bool =
   Mention.any_mentioned ~targets content
@@ -15,7 +20,7 @@ let keeper_constitution () =
 
 let build_keeper_system_prompt
     ~goal ~short_goal ~mid_goal ~long_goal ~will ~needs ~desires
-    ~instructions ?(persona_extended = "") () =
+    ~instructions ?(persona_extended = "") ?(keeper_name = "") () =
   let goal = normalize_goal_horizon_text goal in
   let short_goal, mid_goal, long_goal =
     resolve_goal_horizons ~goal ~short_goal_opt:(Some short_goal)
@@ -42,6 +47,13 @@ let build_keeper_system_prompt
     if s = "" then ""
     else Printf.sprintf "\nCustom instructions:\n%s\n" s
   in
+  let substitute_keeper_name s =
+    if keeper_name = "" then s
+    else
+      s
+      |> Re.replace_string re_keeper_name_curly ~by:keeper_name
+      |> Re.replace_string re_keeper_name_upper ~by:keeper_name
+  in
   let persona_block =
     let s = String.trim persona_extended in
     if s = "" then ""
@@ -51,7 +63,7 @@ let build_keeper_system_prompt
     [
       persona_block;
       "<world>\n";
-      Prompt_registry.get_prompt Keeper_prompt_names.world;
+      substitute_keeper_name (Prompt_registry.get_prompt Keeper_prompt_names.world);
       "\n</world>\n\
        \n\
        <identity>\n\
@@ -87,7 +99,7 @@ let build_keeper_system_prompt
        - If no Board activity and no tasks: you may call keeper_board_list to observe, but do not block a productive action on a board scan. Do NOT fabricate activity.\n\
        - ANTI-POLLING: Do NOT call masc_status or keeper_tasks_list more than once per session unless you received genuinely new information. These are observation tools, not work.\n\
        - Heartbeat is server-managed. Do not plan or request heartbeat tool calls.\n\
-       - ACTION TOOLS: For productive turns, use these: keeper_task_claim (claim work), keeper_fs_read + keeper_fs_edit/keeper_write (read then modify files), keeper_bash (run commands), keeper_github (PR/issues), keeper_pr_workflow (git worktree+PR), keeper_board_post (share findings), keeper_stay_silent (nothing to do). Reading without acting is not productive — if you read a file, follow up with keeper_fs_edit or keeper_bash.\n\
+       - ACTION TOOLS: For productive turns, use these: keeper_task_claim (claim work), keeper_fs_read + keeper_fs_edit/keeper_write (read then modify files), keeper_bash (run commands), keeper_github (PR/issues), keeper_pr_submit (submit staged changes from a playground clone or repo worktree), keeper_pr_workflow (legacy one-shot worktree helper), keeper_board_post (share findings), keeper_stay_silent (nothing to do). Reading without acting is not productive — if you read a file, follow up with keeper_fs_edit, keeper_bash, or the appropriate PR submit path.\n\
        - TASK LIFECYCLE: When you claim a task (keeper_task_claim), you MUST call keeper_task_done when finished. Claim -> Work -> Done. Every claimed task must be closed. Leaving tasks open creates zombie tasks.\n\
        - You do not need permission to act. You live here.\n\
        When someone asks you a question:\n\
@@ -95,7 +107,7 @@ let build_keeper_system_prompt
        - If you can answer from conversation context alone, respond directly.\n\
        \n\
        <capabilities>\n";
-      Prompt_registry.get_prompt Keeper_prompt_names.capabilities;
+      substitute_keeper_name (Prompt_registry.get_prompt Keeper_prompt_names.capabilities);
       "\n</capabilities>\n\
        \n\
        ";

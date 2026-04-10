@@ -15,7 +15,8 @@ interface LogData {
 
 const logResource = createAsyncResource<LogData>()
 const levelFilter = signal('INFO')
-const moduleFilter = signal('')
+const moduleInput = signal('')
+const appliedModuleFilter = signal('')
 const autoRefresh = signal(true)
 const logLimit = signal(200)
 const latestSeq = signal<number | null>(null)
@@ -159,7 +160,7 @@ async function loadLogs(mode: LoadMode = 'reset') {
       const resp = await fetchLogs({
         limit: logLimit.value,
         level: levelFilter.value,
-        module: moduleFilter.value || undefined,
+        module: appliedModuleFilter.value || undefined,
       })
       const entries = sortLogEntries(resp.entries).slice(0, Math.max(1, logLimit.value))
       latestSeq.value = latestLogSeq(entries)
@@ -172,7 +173,7 @@ async function loadLogs(mode: LoadMode = 'reset') {
     const resp = await fetchLogs({
       limit: logLimit.value,
       level: levelFilter.value,
-      module: moduleFilter.value || undefined,
+      module: appliedModuleFilter.value || undefined,
       since_seq: latestSeq.value ?? undefined,
     })
     if (requestId !== latestRequestId) return
@@ -202,12 +203,12 @@ function renderLogRow(entry: LogEntry) {
   const sessionId = detailLabel(details, 'session_id')
   const failure = failureEnvelope(entry)
   const sourceClass = sourceTone(source)
-  const backgroundClass =
-    level === 'ERROR'
-      ? 'bg-[rgba(224,80,80,0.08)]'
-      : level === 'WARN'
-        ? 'bg-[rgba(230,167,0,0.05)]'
-        : 'bg-[rgba(255,255,255,0.02)]'
+  let backgroundClass = 'bg-[rgba(255,255,255,0.02)]'
+  if (level === 'ERROR') {
+    backgroundClass = 'bg-[rgba(224,80,80,0.08)]'
+  } else if (level === 'WARN') {
+    backgroundClass = 'bg-[rgba(230,167,0,0.05)]'
+  }
 
   return html`
     <div
@@ -274,16 +275,63 @@ function renderLogRow(entry: LogEntry) {
   `
 }
 
+export function resetLogsState(): void {
+  if (moduleDebounceTimer) {
+    clearTimeout(moduleDebounceTimer)
+    moduleDebounceTimer = null
+  }
+  logResource.reset()
+  levelFilter.value = 'INFO'
+  moduleInput.value = ''
+  appliedModuleFilter.value = ''
+  autoRefresh.value = true
+  logLimit.value = 200
+  latestSeq.value = null
+  latestRequestId = 0
+}
+
 export function LogViewer() {
   useEffect(() => {
-    logResource.reset()
-    void loadLogs('reset')
-    if (!autoRefresh.value) return
-    const id = setInterval(() => {
-      void loadLogs('delta')
-    }, POLL_INTERVAL_MS)
-    return () => clearInterval(id)
-  }, [levelFilter.value, moduleFilter.value, logLimit.value, autoRefresh.value])
+    let pollId: ReturnType<typeof setInterval> | null = null
+
+    const restart = () => {
+      if (pollId) {
+        clearInterval(pollId)
+        pollId = null
+      }
+      latestSeq.value = null
+      logResource.reset()
+      void loadLogs('reset')
+      if (!autoRefresh.value) return
+      pollId = setInterval(() => {
+        void loadLogs('delta')
+      }, POLL_INTERVAL_MS)
+    }
+
+    restart()
+
+    const unsubscribeLevel = levelFilter.subscribe(restart)
+    const unsubscribeModule = appliedModuleFilter.subscribe(restart)
+    const unsubscribeLimit = logLimit.subscribe(restart)
+    const unsubscribeAutoRefresh = autoRefresh.subscribe(restart)
+
+    return () => {
+      if (pollId) {
+        clearInterval(pollId)
+      }
+      unsubscribeLevel()
+      unsubscribeModule()
+      unsubscribeLimit()
+      unsubscribeAutoRefresh()
+    }
+  }, [])
+
+  useEffect(() => () => {
+    if (moduleDebounceTimer) {
+      clearTimeout(moduleDebounceTimer)
+      moduleDebounceTimer = null
+    }
+  }, [])
 
   const s = logResource.state.value
   const logData = s.status === 'loaded' ? s.data : undefined
@@ -304,9 +352,6 @@ export function LogViewer() {
               value=${levelFilter.value}
               onChange=${(e: Event) => {
                 levelFilter.value = (e.target as HTMLSelectElement).value
-                latestSeq.value = null
-                logResource.reset()
-                void loadLogs('reset')
               }}
             >
               <option value="DEBUG">DEBUG+</option>
@@ -320,22 +365,19 @@ export function LogViewer() {
               name="log-module-filter"
               ariaLabel="모듈 필터"
               placeholder="모듈 필터"
-              value=${moduleFilter.value}
+              value=${moduleInput.value}
               onInput=${(e: Event) => {
-                moduleFilter.value = (e.target as HTMLInputElement).value
+                moduleInput.value = (e.target as HTMLInputElement).value
                 if (moduleDebounceTimer) clearTimeout(moduleDebounceTimer)
                 moduleDebounceTimer = setTimeout(() => {
-                  latestSeq.value = null
-                  logResource.reset()
-                  void loadLogs('reset')
+                  appliedModuleFilter.value = moduleInput.value
                 }, 300)
               }}
               onKeyDown=${(e: KeyboardEvent) => {
                 if (e.key === 'Enter') {
                   if (moduleDebounceTimer) clearTimeout(moduleDebounceTimer)
-                  latestSeq.value = null
-                  logResource.reset()
-                  void loadLogs('reset')
+                  moduleDebounceTimer = null
+                  appliedModuleFilter.value = moduleInput.value
                 }
               }}
             />
@@ -347,9 +389,6 @@ export function LogViewer() {
               value=${String(logLimit.value)}
               onChange=${(e: Event) => {
                 logLimit.value = parseInt((e.target as HTMLSelectElement).value, 10)
-                latestSeq.value = null
-                logResource.reset()
-                void loadLogs('reset')
               }}
             >
               <option value="100">100</option>

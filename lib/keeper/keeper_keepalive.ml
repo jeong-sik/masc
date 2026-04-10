@@ -267,11 +267,11 @@ let write_heartbeat_snapshot
     max min_keeper_context raw
   in
   let base_dir = session_base_dir ctx.config in
-  ignore (Keeper_fs.ensure_dir (Filename.concat base_dir meta_current.runtime.trace_id));
+  ignore (Keeper_fs.ensure_dir (Filename.concat base_dir (Keeper_id.Trace_id.to_string meta_current.runtime.trace_id)));
   let _session, ctx_opt =
     load_context_from_checkpoint
       ~max_checkpoint_messages:meta_current.compaction.max_checkpoint_messages
-      ~trace_id:meta_current.runtime.trace_id
+      ~trace_id:(Keeper_id.Trace_id.to_string meta_current.runtime.trace_id)
       ~primary_model_max_tokens:max_cascade_context
       ~base_dir
   in
@@ -285,7 +285,7 @@ let write_heartbeat_snapshot
     | None ->
       let history_path =
         Filename.concat
-          (Filename.concat base_dir meta_current.runtime.trace_id)
+          (Filename.concat base_dir (Keeper_id.Trace_id.to_string meta_current.runtime.trace_id))
           "history.jsonl"
       in
       (let parse_errors = ref 0 in
@@ -311,7 +311,7 @@ let write_heartbeat_snapshot
        if !parse_errors > 0 then
          Log.Keeper.warn
            "write_heartbeat_snapshot: failed to parse %d message(s) from history.jsonl for keeper=%s trace_id=%s path=%s"
-           !parse_errors meta_current.name meta_current.runtime.trace_id history_path;
+           !parse_errors meta_current.name (Keeper_id.Trace_id.to_string meta_current.runtime.trace_id) history_path;
        messages)
   in
   let c_messages = messages_for_continuity in
@@ -444,6 +444,16 @@ let write_heartbeat_snapshot
           };
         })
     in
+    (* B1: Guard → Thompson bridge. When guardrail fires, record a negative
+       signal in Thompson β. Penalty cap 1/cycle is naturally enforced: guard
+       evaluates once per heartbeat call. Gated by MASC_DECISION_LAYER_LEVEL >= 2. *)
+    if auto_rules.guardrail_stop
+       && Keeper_decision_audit.decision_layer_level () >= 2
+    then
+      (try Thompson_sampling.record_guard_penalty ~agent_name:meta_current.name
+       with exn ->
+         Log.Keeper.warn "guard→thompson penalty failed for %s: %s"
+           meta_current.name (Printexc.to_string exn));
     let snapshot =
       `Assoc
         [ "ts", `String (now_iso ())
@@ -451,7 +461,7 @@ let write_heartbeat_snapshot
         ; "channel", `String "heartbeat"
         ; "name", `String meta_current.name
         ; "agent_name", `String meta_current.agent_name
-        ; "trace_id", `String meta_current.runtime.trace_id
+        ; "trace_id", `String (Keeper_id.Trace_id.to_string meta_current.runtime.trace_id)
         ; "generation", `Int meta_current.runtime.generation
         ; "model_used", `String meta_current.runtime.usage.last_model_used
         ; ( "usage"
@@ -978,7 +988,7 @@ let run_smart_heartbeat_gate
   | Heartbeat_smart.Skip_busy ->
     Log.Keeper.debug
       "smart heartbeat: skip (busy, task=%s)"
-      (Option.value ~default:"?" meta_current.current_task_id);
+      (match meta_current.current_task_id with Some t -> Keeper_id.Task_id.to_string t | None -> "?");
     let base =
       Heartbeat_smart.effective_interval
         ~config:smart_hb_config
@@ -1327,14 +1337,20 @@ let process_directive ~agent_name directive =
     wakeup_keeper_by_agent_name ~agent_name
   | s when String.length s > 6 && String.sub s 0 6 = "claim:" ->
     let task_id = String.sub s 6 (String.length s - 6) in
-    Log.Keeper.info "directive: server assigned task %s to %s" task_id agent_name;
-    assign_keeper_task_from_directive ~agent_name ~task_id
+    (match Keeper_id.Task_id.of_string task_id with
+     | Ok parsed_task_id ->
+       Log.Keeper.info "directive: server assigned task %s to %s" task_id agent_name;
+       assign_keeper_task_from_directive ~agent_name ~task_id:parsed_task_id
+     | Error err ->
+       Log.Keeper.warn
+         "directive: ignoring invalid task assignment for %s (%s): %s"
+         agent_name task_id err)
   | unknown -> Log.Keeper.warn "unknown gRPC directive for %s: %s" agent_name unknown
 ;;
 
 let current_task_id_for_agent agent_name =
   match Keeper_registry.find_by_agent_name agent_name with
-  | Some e -> Option.value ~default:"" e.meta.current_task_id
+  | Some e -> (match e.meta.current_task_id with Some t -> Keeper_id.Task_id.to_string t | None -> "")
   | None -> ""
 ;;
 

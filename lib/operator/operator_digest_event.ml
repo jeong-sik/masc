@@ -67,7 +67,7 @@ let empty_note_turn_actors events =
          | Some "team_turn", Some "note", Some actor -> (
              match event_detail_message json with None -> Some actor | Some _ -> None)
          | _ -> None)
-  |> Worker_contract_types.dedup_strings
+  |> List.sort_uniq String.compare
 
 let turn_count_by_actor events actor_name =
   List.fold_left

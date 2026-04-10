@@ -17,14 +17,16 @@ let test name f =
 
 (* Create test context *)
 let test_counter = ref 0
-let make_test_ctx () =
+let make_test_ctx_with_agent agent_name =
   incr test_counter;
   let tmp = Filename.concat (Filename.get_temp_dir_name ())
     (Printf.sprintf "masc-task-test-%d-%d" (int_of_float (Unix.gettimeofday () *. 1000.0)) !test_counter) in
   Unix.mkdir tmp 0o755;
   let config = Room.default_config tmp in
-  let _ = Room.init config ~agent_name:(Some "test-agent") in
-  { Tool_task.config; agent_name = "test-agent"; sw = None }
+  let _ = Room.init config ~agent_name:(Some agent_name) in
+  { Tool_task.config; agent_name; sw = None }
+
+let make_test_ctx () = make_test_ctx_with_agent "test-agent"
 
 let make_temp_dir prefix =
   incr test_counter;
@@ -303,6 +305,58 @@ let () = test "handle_claim_next_sets_planning_current_task" (fun () ->
   let (success, _result) = Tool_task.handle_claim_next ctx (`Assoc []) in
   assert success;
   assert (Planning_eio.get_current_task ctx.config = Some "task-001")
+)
+
+let () = test "handle_claim_next_prefers_live_keeper_preset" (fun () ->
+  let agent_name = "keeper-social-sync-agent" in
+  let keeper_name = "social-sync" in
+  let ctx = make_test_ctx_with_agent agent_name in
+  let base_path = Masc_test_deps.find_project_root () in
+  ignore (Result.get_ok (Keeper_tool_policy.init_policy_config ~base_path));
+  let initial_meta =
+    match
+      Keeper_types.meta_of_json
+        (`Assoc
+          [
+            ("name", `String keeper_name);
+            ("agent_name", `String agent_name);
+            ("trace_id", `String "trace-social-sync");
+            ( "tool_access",
+              `Assoc
+                [
+                  ("kind", `String "preset");
+                  ("preset", `String "social");
+                ] );
+          ])
+    with
+    | Ok meta -> meta
+    | Error e -> failwith ("meta_of_json failed: " ^ e)
+  in
+  (match Keeper_types.write_meta ~force:true ctx.config initial_meta with
+  | Ok () -> ()
+  | Error e -> failwith ("write_meta failed: " ^ e));
+  (match
+     Room.update_agent_r ctx.config ~agent_name
+       ~capabilities:[ "keeper"; "preset:minimal" ] ()
+   with
+  | Ok _ -> ()
+  | Error e -> failwith (Types.masc_error_to_string e));
+  let _ =
+    Tool_task.handle_add_task ctx
+      (`Assoc
+        [
+          ("title", `String "Needs social");
+          ("required_preset", `String "social");
+        ])
+  in
+  let success, result = Tool_task.handle_claim_next ctx (`Assoc []) in
+  assert success;
+  match Room.get_tasks_raw ctx.config with
+  | [ task ] -> (
+      match task.task_status with
+      | Types.Claimed { assignee; _ } -> assert (assignee = agent_name)
+      | _ -> failwith ("expected task to be claimed: " ^ result))
+  | _ -> failwith ("expected exactly one task: " ^ result)
 )
 
 let () = test "transition_claim_leaves_planning_current_task_unset" (fun () ->

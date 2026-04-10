@@ -633,6 +633,43 @@ let test_prompt_includes_operational_tool_guidance () =
   check bool "mentions server-managed heartbeat" true
     (contains_substring sys "Heartbeat is server-managed")
 
+let test_capabilities_prompt_distinguishes_playground_and_worktree () =
+  let prompt = Prompt_registry.get_prompt "keeper.capabilities" in
+  check bool "playground described as sandbox" true
+    (contains_substring prompt "playground is your sandbox; worktree is a repo workflow");
+  check bool "pr workflow marked as legacy worktree helper" true
+    (contains_substring prompt "`keeper_pr_workflow` is a legacy one-shot worktree helper");
+  check bool "pr submit marked canonical" true
+    (contains_substring prompt "`keeper_pr_submit` is the canonical submit step")
+
+let test_world_prompt_distinguishes_playground_and_worktree () =
+  let prompt = Prompt_registry.get_prompt "keeper.world" in
+  check bool "world prompt names playground sandbox" true
+    (contains_substring prompt "Playground is your default sandbox");
+  check bool "world prompt names worktree workflow" true
+    (contains_substring prompt
+       "Repo worktrees are a separate workflow path under `.worktrees/<branch-or-task>/`")
+
+let test_system_prompt_prefers_submit_over_legacy_workflow () =
+  let sys =
+    Masc_mcp.Keeper_prompt.build_keeper_system_prompt
+      ~goal:"test goal"
+      ~short_goal:"short"
+      ~mid_goal:"mid"
+      ~long_goal:"long"
+      ~will:"will"
+      ~needs:"needs"
+      ~desires:"desires"
+      ~instructions:""
+      ()
+  in
+  check bool "mentions pr submit" true
+    (contains_substring sys
+       "keeper_pr_submit (submit staged changes from a playground clone or repo worktree)");
+  check bool "marks pr workflow as legacy helper" true
+    (contains_substring sys
+       "keeper_pr_workflow (legacy one-shot worktree helper)")
+
 let test_prompt_includes_autonomous_trigger_section () =
   let meta =
     {
@@ -2504,6 +2541,12 @@ let () =
             test_prompt_mentions_extend_turns_guidance;
           test_case "includes operational tool guidance" `Quick
             test_prompt_includes_operational_tool_guidance;
+          test_case "distinguishes playground and worktree" `Quick
+            test_capabilities_prompt_distinguishes_playground_and_worktree;
+          test_case "world prompt distinguishes playground and worktree" `Quick
+            test_world_prompt_distinguishes_playground_and_worktree;
+          test_case "prefers submit over legacy workflow" `Quick
+            test_system_prompt_prefers_submit_over_legacy_workflow;
           test_case "includes autonomous trigger section" `Quick
             test_prompt_includes_autonomous_trigger_section;
           test_case "omits autonomous trigger for reactive turn" `Quick
@@ -2729,6 +2772,20 @@ let () =
           test_case "keeper_context_status is boring" `Quick (fun () ->
             check bool "keeper_context_status"
               true (Masc_mcp.Keeper_tool_registry.is_boring_tool "keeper_context_status"));
+          test_case "actionable turns prune boring tools when alternatives exist" `Quick (fun () ->
+            let pruned =
+              Masc_mcp.Keeper_tool_registry.prune_boring_tools_for_actionable_turn
+                [ "masc_status"; "keeper_tasks_list"; "keeper_board_post" ]
+            in
+            check (list string) "boring tools removed"
+              [ "keeper_board_post" ] pruned);
+          test_case "actionable turns keep boring tools when nothing else exists" `Quick (fun () ->
+            let pruned =
+              Masc_mcp.Keeper_tool_registry.prune_boring_tools_for_actionable_turn
+                [ "masc_status"; "keeper_tasks_list" ]
+            in
+            check (list string) "boring-only set preserved"
+              [ "masc_status"; "keeper_tasks_list" ] pruned);
           test_case "keeper_fs_read is NOT boring" `Quick (fun () ->
             check bool "keeper_fs_read"
               false (Masc_mcp.Keeper_tool_registry.is_boring_tool "keeper_fs_read"));

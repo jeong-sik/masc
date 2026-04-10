@@ -14,16 +14,45 @@ let default_config_path () : string option =
   Config_dir_resolver.log_warnings ~context:"OasWorker" ();
   Config_dir_resolver.cascade_path_opt ()
 
+(** True when cascade_name implies local-only routing (e.g. "local_only").
+    Convention: any name containing "local" restricts defaults to
+    self-hosted providers so that cloud models never leak in via fallback. *)
+let is_local_only_cascade name =
+  let lc = String.lowercase_ascii name in
+  let rec contains s i =
+    let slen = String.length s in
+    let plen = 5 (* "local" *) in
+    if i > slen - plen then false
+    else if String.sub s i plen = "local" then true
+    else contains s (i + 1)
+  in
+  contains lc 0
+
+let is_local_label label =
+  match Oas_model_resolve.provider_name_of_label label with
+  | Some pname -> Provider_adapter.is_local_provider pname
+  | None -> false
+
 (** Hardcoded fallback defaults — used only when cascade.json is missing
     and the cascade name has no "{name}_models" entry.
+    When cascade_name contains "local", only self-hosted providers are
+    returned to prevent cloud models from leaking into local-only cascades.
     All profiles are now in config/cascade.json (hot-reloadable). *)
-let default_model_strings ~cascade_name:_ =
-  match Provider_adapter.explicit_llama_model_label_result () with
-  | Ok label -> [ label ]
-  | Error _ -> (
-      match Provider_adapter.preferred_execution_model_labels () with
-      | [] -> [ Provider_adapter.default_local_fallback_label () ]
-      | labels -> labels)
+let default_model_strings ~cascade_name =
+  let all_labels =
+    match Provider_adapter.explicit_llama_model_label_result () with
+    | Ok label -> [ label ]
+    | Error _ -> (
+        match Provider_adapter.preferred_execution_model_labels () with
+        | [] -> [ Provider_adapter.default_local_fallback_label () ]
+        | labels -> labels)
+  in
+  if is_local_only_cascade cascade_name then
+    match List.filter is_local_label all_labels with
+    | [] -> [ Provider_adapter.default_local_fallback_label () ]
+    | local -> local
+  else
+    all_labels
 
 (* ================================================================ *)
 (* Named model execution                                            *)

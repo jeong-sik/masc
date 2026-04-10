@@ -75,8 +75,9 @@ let load_findings ~base_path ~team_session_id : string list =
     with Sys_error _ -> []
 
 let build ~base_path ~team_session_id =
-  ignore (base_path, team_session_id, max_tasks);
-  empty
+  (* Team session store removed — context is built from shared findings only. *)
+  let shared_findings = load_findings ~base_path ~team_session_id in
+  { empty with shared_findings }
 
 let truncate_list n lst =
   List.filteri (fun i _ -> i < n) lst

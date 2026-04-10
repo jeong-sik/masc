@@ -1,5 +1,5 @@
 (** Cp_unit_projection — Projected operations, detachments, and policy decisions
-    from swarm state and operator confirmations.
+    from team sessions, swarm state, and operator confirmations.
 
     Extracted from cp_unit to reduce file size. *)
 
@@ -35,6 +35,10 @@ let iso_expired_at now deadline =
   match parse_iso_timestamp deadline with
   | Some ts -> ts <= now
   | None -> false
+
+let projected_team_session_operations ?sessions:_ _config _units _managed_operations =
+  (* Team session store removed — no projected session operations. *)
+  []
 
 let projected_swarm_operations config units managed_operations =
   let swarm_json =
@@ -99,14 +103,20 @@ let projected_swarm_operations config units managed_operations =
         ]
   | _ -> []
 
-let all_operations config units =
+let all_operations ?sessions config units =
   let managed = read_operations config in
-  managed @ projected_swarm_operations config units managed
+  managed
+  @ projected_team_session_operations ?sessions config units managed
+  @ projected_swarm_operations config units managed
 
 let operation_by_id operations operation_id =
   List.find_opt
     (fun (operation : operation_record) -> String.equal operation.operation_id operation_id)
     operations
+
+let projected_team_session_detachments ?sessions:_ _config _operations =
+  (* Team session store removed — no projected session detachments. *)
+  []
 
 let projected_swarm_detachments config operations =
   let swarm_json =
@@ -165,7 +175,7 @@ let projected_swarm_detachments config operations =
           ])
   | _ -> []
 
-let all_detachments config units operations =
+let all_detachments ?sessions config units operations =
   let managed = read_detachments config in
   let managed_operation_ids =
     managed
@@ -178,7 +188,9 @@ let all_detachments config units operations =
            not (List.mem operation.operation_id managed_operation_ids))
   in
   let _ = units in
-  managed @ projected_swarm_detachments config projected_ops
+  managed
+  @ projected_team_session_detachments ?sessions config projected_ops
+  @ projected_swarm_detachments config projected_ops
 
 let projected_operator_decisions config =
   if not (Room_utils.path_exists config (operator_pending_confirms_path config)) then

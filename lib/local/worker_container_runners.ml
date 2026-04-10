@@ -15,14 +15,14 @@ let resolve_net ?net () =
 
 let default_shell_tool_names execution_scope =
   match execution_scope with
-  | Some Worker_contract_types.Observe_only ->
+  | Some Worker_types.Observe_only ->
       [ "file_read"; "shell_exec" ]
   | _ ->
       [ "file_read"; "file_write"; "shell_exec" ]
 
 let build_execution_spec ~base_path ~worker_name ~model_label ~team_session_id
     ?working_dir ?worker_class ?execution_scope
-    ?thinking_enabled ~max_turns ?worker_run_id ?delivery_contract
+    ?thinking_enabled ~max_turns ?worker_run_id
     ?allowed_shell_tools ~role ~selection_note
     ~(prompt : string) ~(allowed_tools : string list) ~(timeout_sec : int) () =
   {
@@ -44,7 +44,6 @@ let build_execution_spec ~base_path ~worker_name ~model_label ~team_session_id
       Option.value ~default:(default_shell_tool_names execution_scope)
         allowed_shell_tools;
     timeout_sec;
-    delivery_contract;
   }
 
 let run_worker_oas ~sw ?net ~room_config
@@ -126,12 +125,12 @@ let continue_worker ?worker_run_id ?contract ~sw ?net ~base_path ~room_config ~w
                 | Shell_readonly ->
                     build_local_shell_tools
                       ~room_config ~worker_name
-                      ~execution_scope:Worker_contract_types.Observe_only
+                      ~execution_scope:Worker_types.Observe_only
                       ~workdir:workspace_path
                 | Shell_dev ->
                     build_local_shell_tools
                       ~room_config ~worker_name
-                      ~execution_scope:Worker_contract_types.Limited_code_change
+                      ~execution_scope:Worker_types.Limited_code_change
                       ~workdir:workspace_path
               in
               let* shell_tools = shell_tools in
@@ -159,27 +158,29 @@ let continue_worker ?worker_run_id ?contract ~sw ?net ~base_path ~room_config ~w
               in
               let tools = mcp_tools @ shell_tools in
               let prompt =
-                let tool_contract = "" in
+                let tool_contract =
+                  "Tool contract reminder: if you call masc_team_session_step \
+                   with turn_kind=\"note\", you must include a non-empty \
+                   message field. Calls missing message fail."
+                in
                 let workflow_contract =
                   match meta.execution_scope with
-                  | Worker_contract_types.Limited_code_change ->
+                  | Worker_types.Limited_code_change ->
                       "Coding worker protocol: you must use tools before \
                        answering. If the task requires a code change, the \
                        expected loop is file_read -> shell_exec -> file_write \
                        -> shell_exec, and you should not finish until \
                        verification succeeds. If the task is inspection-only, \
                        do not modify files."
-                  | Worker_contract_types.Observe_only ->
+                  | Worker_types.Observe_only ->
                       "Readonly worker protocol: use file_read and shell_exec \
                        for inspection, but do not modify files."
-                  | Worker_contract_types.Autonomous ->
+                  | Worker_types.Autonomous ->
                       "You have full read and write access. Choose the approach \
                        that best accomplishes your task. Use tools to verify \
                        your work."
                 in
-                String.concat "\n\n"
-                  (List.filter (fun value -> String.trim value <> "")
-                     [ tool_contract; workflow_contract; prompt ])
+                String.concat "\n\n" [ tool_contract; workflow_contract; prompt ]
               in
               let* net = resolve_net ?net () in
               Worker_oas.resume_worker_via_oas ~sw ~net ~base_path ~meta ~checkpoint
@@ -207,7 +208,7 @@ let preflight_spawn_batch ?clock_opt specs =
 let run_worker ~sw ?net ~backend ~base_path ~worker_name ~model_label
     ~team_session_id ~room_config ?working_dir ?worker_class
     ?execution_scope ?thinking_enabled ?allowed_shell_tools ?max_turns
-    ?worker_run_id ?delivery_contract ~role ~selection_note
+    ?worker_run_id ~role ~selection_note
     ~(prompt : string) ~(allowed_tools : string list) ~(timeout_sec : int) :
     unit -> (run_result, string) result =
   let max_turns = Option.value ~default:10 max_turns in
@@ -215,7 +216,7 @@ let run_worker ~sw ?net ~backend ~base_path ~worker_name ~model_label
     build_execution_spec ~base_path ~worker_name ~model_label
       ~team_session_id ?working_dir ?worker_class
       ?execution_scope ?thinking_enabled ~max_turns ?worker_run_id
-      ?delivery_contract ?allowed_shell_tools ~role ~selection_note ~prompt
+      ?allowed_shell_tools ~role ~selection_note ~prompt
       ~allowed_tools ~timeout_sec ()
   in
   match backend with

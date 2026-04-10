@@ -47,6 +47,25 @@ let test_run_argv_with_stdin_fallback_preserves_input () =
   in
   check string "stdin content round-trips" "ping\n" output
 
+let test_run_argv_fallback_surfaces_spawn_error () =
+  Process_eio.reset_for_testing ();
+  let output =
+    Process_eio.run_argv [ "/definitely/missing/process-eio-command" ]
+  in
+  check bool "spawn error surfaced" true
+    (contains output "process_eio_error")
+
+let test_run_argv_with_status_fallback_surfaces_spawn_error () =
+  Process_eio.reset_for_testing ();
+  let status, output =
+    Process_eio.run_argv_with_status
+      [ "/definitely/missing/process-eio-command" ]
+  in
+  let code = match status with Unix.WEXITED c -> c | _ -> -1 in
+  check int "missing command exit code" 127 code;
+  check bool "missing command output surfaced" true
+    (contains output "process_eio_error")
+
 let test_init_exposes_complete_runtime () =
   Eio_main.run @@ fun env ->
   let proc_mgr = Eio.Stdenv.process_mgr env in
@@ -190,6 +209,10 @@ let () =
             test_run_argv_with_status_fallback_includes_stderr_on_failure;
           test_case "argv-with-stdin-fallback-preserves-input" `Quick
             test_run_argv_with_stdin_fallback_preserves_input;
+          test_case "argv-fallback-surfaces-spawn-error" `Quick
+            test_run_argv_fallback_surfaces_spawn_error;
+          test_case "argv-with-status-fallback-surfaces-spawn-error" `Quick
+            test_run_argv_with_status_fallback_surfaces_spawn_error;
           test_case "init-exposes-complete-runtime" `Quick
             test_init_exposes_complete_runtime;
         ] );

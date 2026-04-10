@@ -258,6 +258,16 @@ def format_error_embed(error_msg: str) -> discord.Embed:
     )
 
 
+_RE_STATE_BLOCK = re.compile(
+    r"\[STATE\].*?(?:\[/STATE\]|$)", re.DOTALL
+)
+
+
+def strip_state_blocks(text: str) -> str:
+    """Remove [STATE]...[/STATE] keeper metadata blocks from text."""
+    return _RE_STATE_BLOCK.sub("", text).strip()
+
+
 def compose_gate_content(text: str, attachment_lines: Sequence[str]) -> str:
     """Build deterministic gate content from text + Discord attachments."""
     parts: list[str] = []

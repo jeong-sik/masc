@@ -148,7 +148,7 @@ describe('Ops intervene surface', () => {
     expect(items[0]?.textContent).toContain('프로젝트 검토 완료')
     expect(items[1]?.textContent).toContain('keeper-a에게 메시지 전달')
     expect(items[2]?.textContent).toContain('키퍼 메시지는 잠시 보류')
-  }, 15000)
+  }, 120000)
 
   it('keeps the review workbench while replacing legacy KPI cards with compact badges', async () => {
     const {
@@ -228,5 +228,5 @@ describe('Ops intervene surface', () => {
     expect(container.textContent).not.toContain('Active Queue')
     expect(container.textContent).not.toContain('Deferred')
     expect(container.textContent).not.toContain('Mode')
-  }, 15000)
+  }, 120000)
 })

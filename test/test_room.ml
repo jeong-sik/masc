@@ -613,6 +613,25 @@ let test_room_bootstrap_ignores_invalid_room_id_in_flat_mode () =
       (Room.is_initialized config)
   )
 
+let test_read_backlog_r_reports_parse_error () =
+  with_test_env (fun config ->
+    Out_channel.with_open_text (Room.backlog_path config) (fun oc ->
+      output_string oc "{\n  \"tasks\": [\n");
+    match Room.read_backlog_r config with
+    | Ok _ -> Alcotest.fail "expected backlog parse error"
+    | Error msg ->
+        Alcotest.(check bool) "mentions backlog decode/read failure" true
+          (str_contains msg "read_backlog" || str_contains msg "JSON parse error")
+  )
+
+let test_release_stale_claims_skips_invalid_backlog () =
+  with_test_env (fun config ->
+    Out_channel.with_open_text (Room.backlog_path config) (fun oc ->
+      output_string oc "{\n  \"tasks\": [\n");
+    let released = Room.release_stale_claims config ~ttl_seconds:60.0 in
+    Alcotest.(check (list (pair string string))) "no stale claims released" [] released
+  )
+
 
 let test_heartbeat_nonexistent_agent () =
   with_test_env (fun config ->
@@ -1653,6 +1672,10 @@ let () =
       Alcotest.test_case "get agents status" `Quick test_get_agents_status;
       Alcotest.test_case "backend bootstrap preserves room state" `Quick test_room_bootstrap_preserves_backend_state;
       Alcotest.test_case "bootstrap ignores invalid room id in flat mode" `Quick test_room_bootstrap_ignores_invalid_room_id_in_flat_mode;
+      Alcotest.test_case "read_backlog_r reports parse error" `Quick
+        test_read_backlog_r_reports_parse_error;
+      Alcotest.test_case "release stale claims skips invalid backlog" `Quick
+        test_release_stale_claims_skips_invalid_backlog;
       Alcotest.test_case "cleanup zombies empty" `Quick test_cleanup_zombies_empty;
       Alcotest.test_case "cleanup detects regular zombie" `Quick test_cleanup_zombies_detects_regular;
       Alcotest.test_case "cleanup detects keeper zombie" `Quick test_cleanup_zombies_detects_keeper;

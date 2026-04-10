@@ -341,7 +341,7 @@ let decision_id ~(meta : keeper_meta) ~(ts : float) ~(suffix_seed : string) : st
     Digest.to_hex
       (Digest.string
          (Printf.sprintf "%s|%s|%.6f|%s"
-            meta.name meta.runtime.trace_id ts suffix_seed))
+            meta.name (Keeper_id.Trace_id.to_string meta.runtime.trace_id) ts suffix_seed))
   in
   Printf.sprintf "dec-%Ld-%s"
     (Int64.of_float (ts *. 1000.0))
@@ -414,7 +414,7 @@ let append_decision_record
         ("ts", `String (now_iso ()));
         ("ts_unix", `Float now_ts);
         ("audience", `String "internal_human_only");
-        ("trace_id", `String meta.runtime.trace_id);
+        ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
         ("generation", `Int meta.runtime.generation);
         ("keeper_name", `String meta.name);
         ("agent_name", `String meta.agent_name);
@@ -559,10 +559,25 @@ let append_decision_record
                 match error with
                 | Some e when String.length e > 0 ->
                   let e_lower = String.lowercase_ascii e in
-                  if String.length e_lower >= 15 && String.sub e_lower 0 15 = "invalid request" then "invalid_request"
-                  else if String.length e_lower >= 13 && String.sub e_lower 0 13 = "network error" then "network_error"
-                  else if String.length e_lower >= 14 && String.sub e_lower 0 14 = "internal error" then "internal_error"
-                  else if String.length e_lower >= 8 && String.sub e_lower 0 8 = "input to" then "input_budget_exceeded"
+                  let starts_with prefix =
+                    String.length e_lower >= String.length prefix
+                    && String.sub e_lower 0 (String.length prefix) = prefix
+                  in
+                  let contains needle =
+                    string_contains_substring ~needle e_lower
+                  in
+                  (* starts_with checks first (more specific), then contains *)
+                  if starts_with "invalid request" then "invalid_request"
+                  else if starts_with "network error" then "network_error"
+                  else if starts_with "internal error" then "internal_error"
+                  else if starts_with "input to" then "input_budget_exceeded"
+                  (* contains checks second (broader, order matters) *)
+                  else if contains "turn outcome ambiguous" then "ambiguous_side_effect"
+                  else if contains "connection_failure"
+                          || contains "connection refused" then "network_error"
+                  else if contains "timeout" || contains "timed out" then "timeout"
+                  else if contains "context length"
+                          || contains "token budget" then "input_budget_exceeded"
                   else "other"
                 | _ -> "unknown"
               in
@@ -799,7 +814,7 @@ let append_metrics_snapshot ~(config : Room.config) ~(meta : keeper_meta)
         ("channel", `String channel);
         ("name", `String meta.name);
         ("agent_name", `String meta.agent_name);
-        ("trace_id", `String meta.runtime.trace_id);
+        ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
         ("generation", `Int turn_generation);
         ("model_used", `String surface_model_used);
         ("prompt_fingerprint", `String result.prompt_metrics.fingerprint);
@@ -1068,7 +1083,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
       Eio.Fiber.yield ();
       let base_dir = session_base_dir config in
       (* Ensure session dir tree for filesystem fallback (issue #3019) *)
-      Keeper_types.mkdir_p (Filename.concat base_dir meta.runtime.trace_id);
+      Keeper_types.mkdir_p (Filename.concat base_dir (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
       (* 3. Derive parameters: cascade.json -> keeper env-var fallback *)
       let temperature =
         Cascade_inference.resolve_temperature
@@ -1130,7 +1145,10 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
             Keeper_agent_run.run_turn ~config ~meta:run_meta ~base_dir
               ~max_context ~build_turn_prompt
               ~user_message ~cascade_name:meta.cascade_name
-              ~generation:run_generation ~max_idle_turns
+              ~generation:run_generation
+              ~actionable_signal:
+                (Keeper_world_observation.actionable_signal_present observation)
+              ~max_idle_turns
               ~history_user_source:"world_state_prompt"
               ~history_assistant_source:"internal_assistant"
               ~temperature ~max_tokens
@@ -1352,7 +1370,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
                  ~summary:(short_preview e_str)
                  ~failure_reason:
                    (Some (Keeper_registry.failure_reason_to_string failure_reason))
-                 ~trace_id:(Some meta.runtime.trace_id)
+                 ~trace_id:(Some (Keeper_id.Trace_id.to_string meta.runtime.trace_id))
                  ~generation:(Some meta.runtime.generation)
                  ~committed_tools:
                    (committed_mutating_tools !mutating_tools_committed));
@@ -1471,7 +1489,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
                  ~base_path:base_dir meta.name
                  (Keeper_state_machine.Handoff_completed {
                    generation = lifecycle.updated_meta.runtime.generation;
-                   new_trace_id = lifecycle.updated_meta.runtime.trace_id;
+                   new_trace_id = Keeper_id.Trace_id.to_string lifecycle.updated_meta.runtime.trace_id;
                  }))
            | None -> ());
           let scope_only_reactive =
@@ -1530,7 +1548,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
             ignore (Keeper_evidence.capture_turn_evidence
               ~base_path:config.base_path
               ~keeper_name:meta.name
-              ~trace_id:updated_meta.runtime.trace_id
+              ~trace_id:(Keeper_id.Trace_id.to_string updated_meta.runtime.trace_id)
               ~turn_number:updated_meta.runtime.usage.total_turns
               ~tool_calls_made:result.tool_calls_made
               ~before_hash:evidence_before_hash

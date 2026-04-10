@@ -336,7 +336,7 @@ let read_context_ratio ~(config : Room.config) ~(meta : keeper_meta) : float =
     let _session, ctx_opt =
       load_context_from_checkpoint
         ~max_checkpoint_messages:meta.compaction.max_checkpoint_messages
-        ~trace_id:meta.runtime.trace_id
+        ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
         ~primary_model_max_tokens:primary_max_context ~base_dir
     in
     match ctx_opt with
@@ -360,7 +360,7 @@ let read_continuity_summary ~(config : Room.config) ~(meta : keeper_meta)
     let _session, ctx_opt =
       load_context_from_checkpoint
         ~max_checkpoint_messages:meta.compaction.max_checkpoint_messages
-        ~trace_id:meta.runtime.trace_id
+        ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
         ~primary_model_max_tokens:primary_max_context ~base_dir
     in
     match ctx_opt with
@@ -693,6 +693,14 @@ let observe ~(pending_board_events : pending_board_event list option)
     work_discovery_due;
     behavioral_stats;
   }
+
+let actionable_signal_present (observation : world_observation) =
+  observation.pending_mentions <> []
+  || observation.pending_board_events <> []
+  || observation.pending_scope_messages <> []
+  || observation.unclaimed_task_count > 0
+  || observation.failed_task_count > 0
+  || observation.work_discovery_due
 
 (** Compute effective scheduled autonomous cooldown with idle decay.
     After extended idle (> base cooldown), halve the cooldown each

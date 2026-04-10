@@ -1,106 +1,17 @@
 import { html } from 'htm/preact'
-import { signal, type Signal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
 import type { ComponentChildren } from 'preact'
-import { get } from '../api/core'
 import { lastEvent } from '../sse'
 import type { SSEEvent } from '../types'
 import { FetchScheduler } from '../lib/fetch-scheduler'
+import {
+  fetchTransportHealth,
+  hydrateTransportHealthData,
+  type TransportHealthData,
+} from '../api/transport-health'
+import { createManagedAsyncResource } from '../lib/async-state'
 
 type StatusTone = 'ok' | 'warn' | 'bad'
-
-interface HotSession {
-  session_id: string
-  kind: string
-  queue_depth: number
-  last_event_id: number
-  idle_seconds: number
-}
-
-interface TransportHealthData {
-  summary: {
-    primary_path: string
-    queue_pressure: string
-    recent_messages: number | null
-    recent_messages_available: boolean
-    recent_messages_source: string
-    external_fanout_targets: number
-  }
-  sse: {
-    sessions_observer: number
-    sessions_coordinator: number
-    sessions_total: number
-    external_subscribers: number
-    broadcast_avg_seconds: number
-    broadcast_count: number
-    queue_avg_depth: number
-    queue_max_depth: number
-    hot_sessions: HotSession[]
-  }
-  grpc: {
-    enabled: boolean
-    configured: boolean
-    listening: boolean
-    port: number
-    active_streams: number
-    subscribers: number
-    heartbeat_avg_seconds: number
-    events_delivered: number
-  }
-  websocket: {
-    enabled: boolean
-    configured: boolean
-    listening: boolean
-    mode: string
-    port: number
-    sessions: number
-    relay_source: string
-  }
-  webrtc: {
-    enabled: boolean
-    configured: boolean
-    signaling_available: boolean
-    signaling_mode: string
-    pending_offers: number
-    active_peers: number
-    live_connections: number
-    connected_channels: number
-    ice_server_count: number
-  }
-  streamable_http: {
-    endpoint: string
-    observer_stream: string
-    managed_endpoint: string
-    operator_endpoint: string
-    delete_endpoint: string
-    legacy_sse_endpoint: string
-    legacy_messages_endpoint: string
-    default_transport: string
-    supports_post: boolean
-    supports_sse_upgrade: boolean
-    supports_delete: boolean
-  }
-  http2: {
-    listener_mode: string
-    multiplex_ready: boolean
-    prior_knowledge_path: string
-  }
-  cluster: {
-    cluster: string
-    room_id: string
-    topology_available: boolean
-    topology_source: string
-    total_units: number | null
-    managed_units: number | null
-    live_agents: number | null
-    active_operations: number | null
-    stale_units: number | null
-  }
-  agent_health: {
-    stale_total: number
-  }
-  generated_at: string
-}
 
 type PracticalCase = {
   id: string
@@ -111,23 +22,20 @@ type PracticalCase = {
   live: (data: TransportHealthData) => string
 }
 
-const transportHealth: Signal<TransportHealthData | null> = signal(null)
-const loading: Signal<boolean> = signal(false)
-const error: Signal<string | null> = signal(null)
+const transportHealthResource = createManagedAsyncResource<TransportHealthData>()
+let inflightTransportHealthRefresh: Promise<void> | null = null
 
 export function resetTransportHealthState(): void {
-  transportHealth.value = null
-  loading.value = false
-  error.value = null
   inflightTransportHealthRefresh = null
+  transportHealthResource.reset()
 }
 
 /** Hydrate transport health from SSE payload — zero HTTP fetch. */
 export function hydrateTransportHealthFromSSE(data: unknown): void {
-  if (data == null || typeof data !== 'object') return
-  transportHealth.value = data as TransportHealthData
+  const decoded = hydrateTransportHealthData(data)
+  if (!decoded) return
+  transportHealthResource.reset(decoded)
 }
-let inflightTransportHealthRefresh: Promise<void> | null = null
 
 const PRACTICAL_CASES: PracticalCase[] = [
   {
@@ -150,7 +58,7 @@ const PRACTICAL_CASES: PracticalCase[] = [
     id: 'duplex-ui',
     title: '양방향 UI / 브라우저 브릿지',
     transport: 'WebSocket',
-    endpoint: (_data) => '/ws',
+    endpoint: () => '/ws',
     description: '양방향 소켓. operator UI 제어용.',
     live: (data) => `${data.websocket.listening ? 'live' : 'down'} · ${data.websocket.sessions} sessions · port ${data.websocket.port}`,
   },
@@ -158,7 +66,7 @@ const PRACTICAL_CASES: PracticalCase[] = [
     id: 'p2p-fastlane',
     title: 'P2P 패스트 레인',
     transport: 'WebRTC',
-    endpoint: (_data) => '/webrtc/offer -> /webrtc/answer',
+    endpoint: () => '/webrtc/offer -> /webrtc/answer',
     description: 'DataChannel P2P. signaling 후 직접 연결.',
     live: (data) => `${data.webrtc.connected_channels} channels · ${data.webrtc.active_peers} peers`,
   },
@@ -174,19 +82,12 @@ const PRACTICAL_CASES: PracticalCase[] = [
 
 async function refreshTransportHealth(): Promise<void> {
   if (inflightTransportHealthRefresh) return inflightTransportHealthRefresh
-  loading.value = true
-  error.value = null
-  inflightTransportHealthRefresh = (async () => {
-    try {
-      const data = await get<TransportHealthData>('/api/v1/dashboard/transport-health')
-      transportHealth.value = data
-    } catch (e) {
-      error.value = e instanceof Error ? e.message : String(e)
-    } finally {
-      loading.value = false
+  inflightTransportHealthRefresh = transportHealthResource
+    .load((signal) => fetchTransportHealth({ signal }))
+    .then(() => {})
+    .finally(() => {
       inflightTransportHealthRefresh = null
-    }
-  })()
+    })
   return inflightTransportHealthRefresh
 }
 
@@ -384,14 +285,14 @@ export function TransportHealthPanel() {
     }
   }, [])
 
-  const data = transportHealth.value
+  const { data, loading, error } = transportHealthResource.state.value
 
-  if (loading.value && !data) {
+  if (loading && !data) {
     return html`<div class="p-6 text-center text-text-muted text-sm">트랜스포트 상태 로딩 중...</div>`
   }
 
-  if (error.value && !data) {
-    return html`<div class="p-6 text-center text-[var(--bad)] text-sm">${error.value}</div>`
+  if (error && !data) {
+    return html`<div class="p-6 text-center text-[var(--bad)] text-sm">${error}</div>`
   }
 
   if (!data) return null

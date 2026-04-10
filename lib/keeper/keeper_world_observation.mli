@@ -119,11 +119,11 @@ type turn_verdict =
   | Run of { reasons : turn_reason * turn_reason list }
   | Skip of { reasons : skip_reason * skip_reason list }
 
-(** Convert a single turn reason to a structured string representation.
-    Includes context parameters where applicable (e.g. idle_sec, cooldown). *)
+(** Convert a single turn reason to its legacy string token.
+    Preserves backward compatibility for existing log and prompt consumers. *)
 val turn_reason_to_string : turn_reason -> string
 
-(** Convert a single skip reason to a structured string representation. *)
+(** Convert a single skip reason to its legacy string token. *)
 val skip_reason_to_string : skip_reason -> string
 
 (** Extract all reasons as legacy string list from a verdict.

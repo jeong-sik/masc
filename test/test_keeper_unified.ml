@@ -512,6 +512,35 @@ let test_scheduled_turn_decision_uses_backlog_acceleration () =
          List.mem WO.Task_reactive_cooldown_elapsed (first :: rest)
      | WO.Skip _ -> false)
 
+let test_verdict_reasons_to_strings_preserves_legacy_run_tokens () =
+  let verdict =
+    WO.Run
+      {
+        reasons =
+          ( WO.Idle_cooldown_elapsed { idle_sec = 120; cooldown = 900 },
+            [
+              WO.Task_backlog { unclaimed = 1; failed = 2 };
+              WO.Task_reactive_cooldown_elapsed;
+            ] );
+      }
+  in
+  check (list string) "legacy run tokens preserved"
+    [ "idle_gate_elapsed"; "actionable_backlog"; "task_reactive_cooldown_elapsed" ]
+    (WO.verdict_reasons_to_strings verdict)
+
+let test_verdict_reasons_to_strings_preserves_legacy_skip_tokens () =
+  let verdict =
+    WO.Skip
+      {
+        reasons =
+          ( WO.Idle_gate_pending { remaining_sec = 180 },
+            [ WO.Cooldown_pending { remaining_sec = 60 } ] );
+      }
+  in
+  check (list string) "legacy skip tokens preserved"
+    [ "idle_gate_wait"; "cooldown_wait" ]
+    (WO.verdict_reasons_to_strings verdict)
+
 let test_task_reactive_cooldown_floor_never_hits_zero () =
   with_env "MASC_KEEPER_PROACTIVE_TASK_MIN_COOLDOWN_SEC" "0" (fun () ->
     let meta =
@@ -1715,11 +1744,11 @@ let test_sanitize_messages_utf8_cleans_history_path () =
       check string "user history content sanitized" "hist ory entry"
         (Agent_sdk.Types.text_of_message user_msg);
       (match tool_msg.Agent_sdk.Types.content with
-       | [ Agent_sdk.Types.ToolResult { tool_use_id; content} ] ->
+       | [ Agent_sdk.Types.ToolResult { tool_use_id; content; _ } ] ->
            check string "tool id sanitized" "tool id" tool_use_id;
            check string "tool payload sanitized" "result payload" content;
            (match tool_msg.Agent_sdk.Types.content with
-            | [ Agent_sdk.Types.ToolResult { json = Some (`Assoc [ (key, `String value) ])} ] ->
+            | [ Agent_sdk.Types.ToolResult { json = Some (`Assoc [ (key, `String value) ]); _ } ] ->
                 check string "tool json key sanitized" "key " key;
                 check string "tool json value sanitized" "value " value
             | _ -> fail "expected sanitized tool result json")
@@ -2371,6 +2400,10 @@ let () =
             test_idle_decay_triggers_turn;
           test_case "scheduled decision uses backlog acceleration" `Quick
             test_scheduled_turn_decision_uses_backlog_acceleration;
+          test_case "verdict reasons preserve legacy run tokens" `Quick
+            test_verdict_reasons_to_strings_preserves_legacy_run_tokens;
+          test_case "verdict reasons preserve legacy skip tokens" `Quick
+            test_verdict_reasons_to_strings_preserves_legacy_skip_tokens;
           test_case "task reactive cooldown floor never hits zero" `Quick
             test_task_reactive_cooldown_floor_never_hits_zero;
           test_case "with goals" `Quick test_observation_with_goals;

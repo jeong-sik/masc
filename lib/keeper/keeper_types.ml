@@ -1355,13 +1355,20 @@ let read_meta_file_path path : (keeper_meta option, string) result =
          Error e))
 ;;
 
+(** Filter: only plain keeper meta files (e.g. "sangsu.json").
+    Excludes dotted-suffix files like "sangsu.manual_reconcile.json"
+    which are auxiliary data stored in the same directory. *)
+let is_keeper_meta_file f =
+  Filename.check_suffix f ".json"
+  && not (String.contains (Filename.remove_extension f) '.')
+
 let keeper_names config =
   let dir = keeper_dir config in
   match Safe_ops.list_dir_safe dir with
   | Error _ -> []
   | Ok files ->
     files
-    |> List.filter (fun f -> Filename.check_suffix f ".json")
+    |> List.filter is_keeper_meta_file
     |> List.map Filename.remove_extension
     |> List.filter validate_name
     |> List.sort String.compare

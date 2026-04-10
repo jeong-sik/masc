@@ -104,10 +104,26 @@ val keeper_universe_masc_tool_schemas : keeper_meta -> Types.tool_schema list
 (** Default model tools (keeper_model_tools + voice + tool_search). *)
 val keeper_default_model_tools : keeper_meta -> Types.tool_schema list
 
+(** {1 E6: .masc/ Write Protection} *)
+
+(** Check if a .masc/-relative path is in the keeper-writable whitelist.
+    Returns [false] for paths outside the whitelist (e.g. reputation, economy).
+    Whitelist: playground/, decision_audit/, worktrees/. *)
+val is_masc_write_allowed : string -> bool
+
+(** Recovery minimum tool names: non-removable shards only.
+    Guaranteed non-empty (TLA+ ToolSetNeverEmpty).
+    Phase B2: used in Failing phase as recovery floor. *)
+val failing_minimum_tool_names : unit -> string list
+
 (** Policy-filtered allowed tool names.
-    Returns empty list when [write_done] is true. *)
+    Returns empty list when [write_done] is true.
+    When [phase] is [Failing] and decision layer level >= 2,
+    returns [failing_minimum_tool_names] instead (recovery floor). *)
 val keeper_allowed_tool_names :
-  ?write_done:bool -> keeper_meta -> string list
+  ?write_done:bool ->
+  ?phase:Keeper_state_machine.phase ->
+  keeper_meta -> string list
 
 (** Universe tool names: candidates minus denied, no policy filter. *)
 val keeper_universe_tool_names : keeper_meta -> string list

@@ -793,6 +793,11 @@ let all_read_only_keeper_tools () : string list =
   ) all_shards []
   |> List.sort_uniq String.compare
 
+let recovery_minimum_shard_names () : string list =
+  StringMap.fold (fun name shard acc ->
+    if not shard.removable then name :: acc else acc
+  ) all_shards []
+
 (** Get a shard by name *)
 let get_shard (name : string) : shard option =
   StringMap.find_opt name all_shards

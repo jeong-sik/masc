@@ -1,6 +1,9 @@
 open Keeper_types
 
-val keeper_allowed_tool_names : ?write_done:bool -> keeper_meta -> string list
+val keeper_allowed_tool_names :
+  ?write_done:bool ->
+  ?phase:Keeper_state_machine.phase ->
+  keeper_meta -> string list
 val keeper_allowed_model_tools :
   ?write_done:bool -> keeper_meta -> Types.tool_schema list
 

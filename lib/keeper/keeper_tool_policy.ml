@@ -10,6 +10,24 @@ open Keeper_types
 open Keeper_alerting
 open Keeper_tool_registry
 
+(* -- E6: .masc/ write protection whitelist ----------------------------- *)
+(* Keeper-writable paths under .masc/. Everything else is structurally
+   blocked (Absence > Prohibition). Trust input data (reputation, economy,
+   stress, tasks) must NOT be in writable paths.
+   Phase B2 / Plan Part 2.5 Axis 4. *)
+
+let keeper_writable_prefixes = [
+  ".masc/playground/";       (* coding workspace *)
+  ".masc/decision_audit/";   (* self audit logs — forensics, not trust input *)
+  ".masc/worktrees/";        (* git worktree workspace *)
+]
+
+let is_masc_write_allowed path =
+  List.exists (fun prefix ->
+    String.length path >= String.length prefix
+    && String.sub path 0 (String.length prefix) = prefix
+  ) keeper_writable_prefixes
+
 (* -- Config-driven preset resolution -------------------------------- *)
 
 (* Loaded by init_policy_config at server startup.
@@ -364,10 +382,23 @@ let keeper_default_model_tools (_meta : keeper_meta) : Types.tool_schema list =
   keeper_model_tools @ keeper_voice_tool_schemas
   @ [ keeper_tool_search_schema ]
 
-let keeper_allowed_tool_names ?(write_done = false) (meta : keeper_meta) :
+(** Recovery minimum tools: non-removable shards only.
+    Used in Failing phase to guarantee minimum tool availability.
+    Phase B2: TLA+ RecoveryFloorMaintained invariant. *)
+let failing_minimum_tool_names () : string list =
+  Tool_shard.recovery_minimum_shard_names ()
+  |> Tool_shard.tools_of_shards
+  |> List.map (fun (t : Types.tool_schema) -> t.Types.name)
+
+let keeper_allowed_tool_names ?(write_done = false)
+    ?(phase = Keeper_state_machine.Running) (meta : keeper_meta) :
     string list =
   if write_done then
     []
+  else if phase = Keeper_state_machine.Failing
+          && Keeper_decision_audit.decision_layer_level () >= 2
+  then
+    failing_minimum_tool_names ()
   else
     let lookup = tool_access_lookup_of_meta meta in
     lookup.candidate_names

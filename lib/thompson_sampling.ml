@@ -375,7 +375,7 @@ let quality_fail_beta_penalty = 0.5
     Configurable via MASC_GUARD_PENALTY_BETA for B-SIM calibration.
     Default 0.5 is a conservative pre-calibration estimate. *)
 let guard_penalty_beta_nudge =
-  Env_config_core.get_float ~default:0.5 "MASC_GUARD_PENALTY_BETA"
+  Float.max 0.0 (Env_config_core.get_float ~default:0.5 "MASC_GUARD_PENALTY_BETA")
 
 (** Record a guard penalty (Guardrail_stop) into Thompson β.
     Phase B1: Guard → Thompson bridge.

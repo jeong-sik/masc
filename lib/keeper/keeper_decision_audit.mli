@@ -9,7 +9,7 @@
     @since Decision Layer v2 — Phase A2 (#6232) *)
 
 (** Current decision layer level (MASC_DECISION_LAYER_LEVEL, 0-4).
-    Cached at module init — no per-call env lookup.
+    Cached on first call — no per-call env lookup after initialization.
     Level 0: off, 1: audit, 2: +guard bridge, 3: +trust, 4: +claim. *)
 val decision_layer_level : unit -> int
 

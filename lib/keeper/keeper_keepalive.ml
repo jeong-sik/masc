@@ -450,7 +450,10 @@ let write_heartbeat_snapshot
     if auto_rules.guardrail_stop
        && Keeper_decision_audit.decision_layer_level () >= 2
     then
-      Thompson_sampling.record_guard_penalty ~agent_name:meta_current.name;
+      (try Thompson_sampling.record_guard_penalty ~agent_name:meta_current.name
+       with exn ->
+         Log.Keeper.warn "guard→thompson penalty failed for %s: %s"
+           meta_current.name (Printexc.to_string exn));
     let snapshot =
       `Assoc
         [ "ts", `String (now_iso ())

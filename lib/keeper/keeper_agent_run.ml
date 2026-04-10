@@ -1488,11 +1488,18 @@ let run_turn
            ~hooks
            ~context_reducer:reducer
            ~memory
-             (* Keepers rely on turn-level retry (multi-turn loop) rather than
-               per-call retry. Ideally this would be Tool_retry_policy.none, but
-               OAS does not expose a zero-retry variant yet. default_internal
-               (max_retries=1) is acceptable as a minimal fallback. *)
-           ~tool_retry_policy:Oas.Tool_retry_policy.default_internal
+             (* Keepers use turn-level retry for transient errors but benefit
+               from OAS per-call retry for validation errors (malformed tool
+               args). retry_on_validation_error=true lets OAS re-prompt the
+               LLM with structured feedback instead of wasting a full turn.
+               retry_on_recoverable_tool_error remains false — tool-level
+               errors are handled by MASC's consecutive failure guardrail. *)
+           ~tool_retry_policy:{
+             Oas.Tool_retry_policy.max_retries = 2;
+             retry_on_validation_error = true;
+             retry_on_recoverable_tool_error = false;
+             feedback_style = Oas.Tool_retry_policy.Structured_tool_result;
+           }
            ~max_turns
            ~max_idle_turns
            ~temperature

@@ -547,6 +547,23 @@ let make_hooks
           (!meta_ref).name tool_name error;
         Agent_sdk.Hooks.Continue
       | _ -> Agent_sdk.Hooks.Continue);
+
+    post_tool_use_failure = Some (function
+      | Agent_sdk.Hooks.PostToolUseFailure { tool_name; error; _ } ->
+        let meta = !meta_ref in
+        Log.Keeper.warn "keeper:%s tool_use_failure: %s — %s"
+          meta.name tool_name error;
+        Heuristic_metrics.record {
+          module_name = "keeper_hooks_oas";
+          site = Printf.sprintf "post_tool_use_failure:%s" tool_name;
+          raw_value = 1.0;
+          threshold = 0.0;
+          triggered = true;
+          provenance = Pipeline_stage "post_tool_use_failure";
+          timestamp = Unix.gettimeofday ();
+        };
+        Agent_sdk.Hooks.Continue
+      | _ -> Agent_sdk.Hooks.Continue);
   }
 
 (** Static introspection of hook slot configuration.

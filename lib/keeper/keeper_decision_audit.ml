@@ -180,3 +180,59 @@ let flush_if_needed ~base_path ~keeper_name =
            | e -> Log.Keeper.warn "decision_audit flush failed: %s" (Printexc.to_string e));
         ring.last_flush_ts <- now
       end
+
+(* ================================================================ *)
+(* Decision Pipeline Mermaid diagram                               *)
+(* ================================================================ *)
+
+let decision_pipeline_to_mermaid
+    ~(phase : Keeper_state_machine.phase)
+    ~(thompson_alpha : float)
+    ~(thompson_beta : float)
+    ~(tool_count : int)
+    ~(recovery_floor_count : int)
+    : string =
+  let b = Buffer.create 512 in
+  let p fmt = Printf.bprintf b fmt in
+  let level = decision_layer_level () in
+  let score =
+    if thompson_alpha +. thompson_beta > 0.0
+    then thompson_alpha /. (thompson_alpha +. thompson_beta)
+    else 0.5
+  in
+  p "stateDiagram-v2\n";
+  p "    state Running {\n";
+  p "        [*] --> NormalOps\n";
+  p "        NormalOps --> GuardFires: guardrail_stop\n";
+  p "        GuardFires --> ThompsonPenalty: beta += 0.5\n";
+  p "        ThompsonPenalty --> NormalOps: cap 1/cycle\n";
+  p "    }\n";
+  p "    state Failing {\n";
+  p "        [*] --> ToolRestricted\n";
+  p "        ToolRestricted --> TurnAttempt: recovery floor (%d tools)\n"
+    recovery_floor_count;
+  p "        TurnAttempt --> TurnAttempt: turn fails\n";
+  p "        TurnAttempt --> RecoveryReady: turn succeeds\n";
+  p "    }\n";
+  p "    Running --> Failing: consecutive failures\n";
+  p "    Failing --> Running: heartbeat_ok\n";
+  p "    Running --> Running: shard restored\n";
+  p "\n";
+  p "    classDef active fill:#22c55e,stroke:#16a34a,color:#fff,stroke-width:3px\n";
+  p "    classDef warn fill:#f59e0b,stroke:#d97706,color:#fff,stroke-width:3px\n";
+  p "    classDef off fill:#6b7280,stroke:#4b5563,color:#fff\n";
+  (match phase with
+   | Keeper_state_machine.Running ->
+     p "    class Running active\n"
+   | Keeper_state_machine.Failing ->
+     p "    class Failing warn\n"
+   | _ ->
+     p "    class Running off\n";
+     p "    class Failing off\n");
+  p "\n";
+  p "    note right of Running\n";
+  p "      Thompson: %.2f (α=%.1f β=%.1f)\n" score thompson_alpha thompson_beta;
+  p "      Tools: %d / floor %d\n" tool_count recovery_floor_count;
+  p "      Level: %d\n" level;
+  p "    end note\n";
+  Buffer.contents b

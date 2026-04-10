@@ -18,53 +18,42 @@ let handle_keeper_status = Keeper_status_detail.handle_keeper_status
 let handle_keeper_list ctx args : tool_result =
   let limit = max 0 (get_int args "limit" 50) in
   let detailed = get_bool args "detailed" false in
-  let dir = keeper_dir ctx.config in
-  match Safe_ops.list_dir_safe dir with
-  | Error e -> (false, "❌ " ^ e)
-  | Ok files ->
-    let keeper_names =
-      files
-      |> List.filter (fun f -> Filename.check_suffix f ".json")
-      |> List.map Filename.remove_extension
-      |> List.filter validate_name
-      |> List.sort String.compare
-      |> take limit
-    in
-    if not detailed then
-      let json = `Assoc [
-        ("count", `Int (List.length keeper_names));
-        ("keepers", `List (List.map (fun k -> `String k) keeper_names));
-      ] in
-      (true, Yojson.Safe.to_string json)
-    else
-      let now_ts = Time_compat.now () in
-      let keepers =
-        List.filter_map (fun name ->
-          match read_meta ctx.config name with
-          | Error _ -> None
-          | Ok None -> None
-          | Ok (Some m) ->
-            let created_ts =
-              Resilience.Time.parse_iso8601_opt m.created_at |> Option.value ~default:0.0
-            in
-            let keeper_age_s = if created_ts <= 0.0 then 0.0 else now_ts -. created_ts in
-            let last_turn_ago_s = if m.runtime.usage.last_turn_ts <= 0.0 then 0.0 else now_ts -. m.runtime.usage.last_turn_ts in
-            let last_proactive_ago_s =
-              if m.runtime.proactive_rt.last_ts <= 0.0 then 0.0 else now_ts -. m.runtime.proactive_rt.last_ts
-            in
-            let last_visible_proactive_ago_s =
-              if m.runtime.proactive_rt.last_visible_ts <= 0.0 then 0.0
-              else now_ts -. m.runtime.proactive_rt.last_visible_ts
-            in
-            let active_model = active_model_of_meta m in
-            let next_model_hint = next_model_hint_of_meta m in
-            let trace_history_count = List.length m.runtime.trace_history in
-            let last_compaction_saved_tokens =
-              max 0 (m.runtime.compaction_rt.last_before_tokens - m.runtime.compaction_rt.last_after_tokens)
-            in
-            let (compact_ratio_gate, compact_message_gate, compact_token_gate) =
-              compaction_policy_of_keeper m
-            in
+  let keeper_names = Keeper_types.keeper_names ctx.config |> take limit in
+  if not detailed then
+    let json = `Assoc [
+      ("count", `Int (List.length keeper_names));
+      ("keepers", `List (List.map (fun k -> `String k) keeper_names));
+    ] in
+    (true, Yojson.Safe.to_string json)
+  else
+    let now_ts = Time_compat.now () in
+    let keepers =
+      List.filter_map (fun name ->
+        match read_meta ctx.config name with
+        | Error _ -> None
+        | Ok None -> None
+        | Ok (Some m) ->
+          let created_ts =
+            Resilience.Time.parse_iso8601_opt m.created_at |> Option.value ~default:0.0
+          in
+          let keeper_age_s = if created_ts <= 0.0 then 0.0 else now_ts -. created_ts in
+          let last_turn_ago_s = if m.runtime.usage.last_turn_ts <= 0.0 then 0.0 else now_ts -. m.runtime.usage.last_turn_ts in
+          let last_proactive_ago_s =
+            if m.runtime.proactive_rt.last_ts <= 0.0 then 0.0 else now_ts -. m.runtime.proactive_rt.last_ts
+          in
+          let last_visible_proactive_ago_s =
+            if m.runtime.proactive_rt.last_visible_ts <= 0.0 then 0.0
+            else now_ts -. m.runtime.proactive_rt.last_visible_ts
+          in
+          let active_model = active_model_of_meta m in
+          let next_model_hint = next_model_hint_of_meta m in
+          let trace_history_count = List.length m.runtime.trace_history in
+          let last_compaction_saved_tokens =
+            max 0 (m.runtime.compaction_rt.last_before_tokens - m.runtime.compaction_rt.last_after_tokens)
+          in
+          let (compact_ratio_gate, compact_message_gate, compact_token_gate) =
+            compaction_policy_of_keeper m
+          in
 	            let metrics_store = keeper_metrics_store ctx.config m.name in
 	            let metrics_path = keeper_metrics_path ctx.config m.name in
 	            let metrics_window_lines =

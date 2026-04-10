@@ -1371,6 +1371,7 @@ let read_meta_file_path path : (keeper_meta option, string) result =
     Add new suffixes here when introducing new sidecar file types. *)
 let keeper_auxiliary_suffixes = [
   ".manual_reconcile.json";
+  ".dataset.json";
 ]
 
 (** Filter: only plain keeper meta files (e.g. "sangsu.json", "my.keeper.json").
@@ -1381,7 +1382,6 @@ let is_keeper_meta_file f =
   Filename.check_suffix f ".json"
   && not (List.exists (fun suffix -> Filename.check_suffix f suffix)
             keeper_auxiliary_suffixes)
-
 let keeper_names config =
   let dir = keeper_dir config in
   match Safe_ops.list_dir_safe dir with

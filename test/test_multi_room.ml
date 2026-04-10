@@ -42,7 +42,7 @@ let test_current_room_write_and_resolve_scope () =
       check (option string) "compat pointer stays default" (Some "default")
         (Room.read_current_room focused);
       check string "resolved scope stays default" "default"
-        "default";
+        focused.backend_config.Backend_types.cluster_name;
       check bool "focused scope initialized" true (Room.is_initialized focused))
 
 let test_current_room_writes_stay_canonical () =

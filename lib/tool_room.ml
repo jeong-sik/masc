@@ -77,9 +77,14 @@ let normalize_speculation_budget value =
 
 let room_strategy_json config =
   let state = Room.read_state config in
+  let cluster =
+    match config.backend_config.Backend_types.cluster_name with
+    | "" -> state.project
+    | name -> name
+  in
   `Assoc
     [
-      ("cluster", `String (Env_config_core.cluster_name ()));
+      ("cluster", `String cluster);
       ("search_strategy_default",
        Json_util.string_opt_to_json state.search_strategy_default);
       ("speculation_enabled", `Bool state.speculation_enabled);

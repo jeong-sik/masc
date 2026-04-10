@@ -80,7 +80,7 @@ let handle_ag_ui_events ~deps request reqd =
       register_sse_conn ~session_id ~info;
       let prime =
         Ag_ui.(
-          make_event ~thread_id:"default" ~run_id:(Some session_id) Run_started
+          make_event ~thread_id:default_thread_id ~run_id:(Some session_id) Run_started
           |> event_to_sse)
       in
       ignore (send_raw info prime);

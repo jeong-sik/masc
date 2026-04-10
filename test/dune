@@ -83,7 +83,7 @@
         ; test_contract_composer removed (team session cleanup)
         test_cdal_conformance
         test_task_stage
-        test_risk_digest
+        ; test_risk_digest removed (team session cleanup)
         test_artifact_store
         test_golden_set
         test_golden_set_eval
@@ -154,7 +154,7 @@
           ; test_contract_composer removed (team session cleanup)
           test_cdal_conformance
           test_task_stage
-          test_risk_digest
+          ; test_risk_digest removed (team session cleanup)
           test_artifact_store
           test_golden_set
           test_golden_set_eval

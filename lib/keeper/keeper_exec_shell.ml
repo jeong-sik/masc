@@ -169,17 +169,54 @@ let resolve_keeper_shell_write_cwd
   | Ok cwd when Fs_compat.file_exists cwd && Sys.is_directory cwd -> Ok cwd
   | Ok cwd -> Error (Printf.sprintf "cwd_not_directory: %s" cwd)
 
+(* Common wrong path prefixes that keepers use.
+   Maps wrong prefix → corrected relative path using keeper playground. *)
+let auto_correct_path ~(meta : keeper_meta) (raw : string) : string option =
+  let playground = Printf.sprintf ".masc/playground/%s" meta.name in
+  let try_strip prefix replacement =
+    let plen = String.length prefix in
+    if String.length raw >= plen
+       && String.sub raw 0 plen = prefix
+    then Some (replacement ^ String.sub raw plen (String.length raw - plen))
+    else None
+  in
+  (* /repos/X → .masc/playground/<name>/repos/X *)
+  match try_strip "/repos/" (playground ^ "/repos/") with
+  | Some _ as r -> r
+  | None ->
+  match try_strip "repos/" (playground ^ "/repos/") with
+  | Some _ as r -> r
+  | None ->
+  match try_strip "playground/" ".masc/playground/" with
+  | Some _ as r -> r
+  | None -> None
+
 let resolve_keeper_shell_read_path
       ~(config : Room.config)
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
   =
   let raw_path = Safe_ops.json_string ~default:"" "path" args |> String.trim in
+  let resolve_with_autocorrect raw_path_to_resolve =
+    match resolve_keeper_read_path ~config ~meta ~raw_path:raw_path_to_resolve with
+    | Ok _ as ok -> ok
+    | Error original_err ->
+      (* Try auto-correcting common wrong prefixes *)
+      match auto_correct_path ~meta raw_path_to_resolve with
+      | Some corrected ->
+        (match resolve_keeper_read_path ~config ~meta ~raw_path:corrected with
+         | Ok resolved ->
+           Log.Keeper.info "%s: auto-corrected path %S → %S"
+             meta.name raw_path_to_resolve resolved;
+           Ok resolved
+         | Error _ -> Error original_err)
+      | None -> Error original_err
+  in
   match resolve_keeper_shell_read_cwd ~config ~meta ~args with
   | Error _ as err when raw_path = "" -> err
   | Error _ ->
     let fallback_path = if raw_path = "" then "." else raw_path in
-    resolve_keeper_read_path ~config ~meta ~raw_path:fallback_path
+    resolve_with_autocorrect fallback_path
   | Ok cwd ->
     let resolved_raw_path =
       if raw_path = "" then
@@ -189,7 +226,7 @@ let resolve_keeper_shell_read_path
       else
         raw_path
     in
-    resolve_keeper_read_path ~config ~meta ~raw_path:resolved_raw_path
+    resolve_with_autocorrect resolved_raw_path
 
 let handle_keeper_bash
       ~(config : Room.config)

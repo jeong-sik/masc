@@ -728,7 +728,7 @@ let keeper_config_json (config : Room.config) (name : string)
           ~goal:m.goal ~short_goal:m.short_goal ~mid_goal:m.mid_goal
           ~long_goal:m.long_goal ~will:m.will
           ~needs:m.needs ~desires:m.desires ~instructions:m.instructions
-          ~persona_extended ()
+          ~persona_extended ~keeper_name:m.name ()
       in
       let prompt =
         `Assoc [

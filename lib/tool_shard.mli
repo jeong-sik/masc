@@ -59,6 +59,11 @@ val revoke_shard : string list -> string -> (string list, string) result
 val all_read_only_keeper_tools : unit -> string list
 (** Collect read_only_tools from all shards. *)
 
+val recovery_minimum_shard_names : unit -> string list
+(** Shard names where [removable = false]. Property-based recovery floor:
+    these shards cannot be revoked and remain available in Failing phase.
+    Phase B2: TLA+ ToolSetNeverEmpty relies on this being non-empty. *)
+
 val list_all_shards : unit -> (string * bool * int) list
 (** List all available shards with their status.
     Returns (name, removable, tool_count) tuples. *)

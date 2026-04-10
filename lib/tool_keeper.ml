@@ -489,6 +489,141 @@ let handle_keeper_list ctx args : tool_result =
   in
   (true, body)
 
+let keeper_failure_reason_json (config : Room.config) name =
+  match Keeper_registry.get ~base_path:config.base_path name with
+  | Some entry ->
+      Json_util.option_to_yojson
+        (fun reason -> `String (Keeper_registry.failure_reason_to_string reason))
+        entry.last_failure_reason
+  | None -> `Null
+
+let keeper_phase_json (config : Room.config) name =
+  match Keeper_registry.get ~base_path:config.base_path name with
+  | Some entry -> `String (Keeper_state_machine.phase_to_string entry.phase)
+  | None -> `Null
+
+let keeper_manual_reconcile_record_json (config : Room.config) name =
+  Json_util.option_to_yojson
+    Keeper_manual_reconcile.record_to_yojson
+    (Keeper_manual_reconcile.read config name)
+
+let clear_registry_manual_reconcile ~(ctx : _ context) ~(name : string) =
+  Keeper_registry.set_failure_reason ~base_path:ctx.config.base_path name None;
+  Keeper_registry.reset_turn_failures ~base_path:ctx.config.base_path name;
+  (match Keeper_registry.get ~base_path:ctx.config.base_path name with
+   | Some _ ->
+       ignore
+         (Keeper_registry.dispatch_event
+            ~base_path:ctx.config.base_path
+            name
+            Keeper_state_machine.Manual_reconcile_cleared)
+   | None -> ());
+  invalidate_keeper_list_cache ();
+  invalidate_status_cache name;
+  Keeper_keepalive.wakeup_keeper ~base_path:ctx.config.base_path name
+
+let handle_keeper_reconcile ctx args : tool_result =
+  match resolve_keeper_name ctx args with
+  | Error err -> (false, err)
+  | Ok name ->
+      let action = String.lowercase_ascii (String.trim (get_string args "action" "")) in
+      let record_opt = Keeper_manual_reconcile.read ctx.config name in
+      let pending = Keeper_manual_reconcile.is_pending ctx.config name in
+      (match action with
+       | "inspect" ->
+           (true,
+            Yojson.Safe.to_string
+              (`Assoc
+                [
+                  ("name", `String name);
+                  ("action", `String "inspect");
+                  ("exists", `Bool (Option.is_some record_opt));
+                  ("pending", `Bool pending);
+                  ("record", keeper_manual_reconcile_record_json ctx.config name);
+                  ("phase", keeper_phase_json ctx.config name);
+                  ("last_failure_reason", keeper_failure_reason_json ctx.config name);
+                ]))
+       | "clear" ->
+           let resolution = String.trim (get_string args "resolution" "") in
+           if resolution = "" then
+             error_result_typed ~code:Validation_error
+               "resolution is required for action=clear"
+           else
+             let actor =
+               match get_string_opt args "actor" with
+               | Some value -> value
+               | None -> ctx.agent_name
+             in
+             let evidence_refs = get_string_list args "evidence_refs" in
+             let idempotency_key = get_string_opt args "idempotency_key" in
+             let legacy_pending =
+               match Keeper_registry.get ~base_path:ctx.config.base_path name with
+               | Some entry ->
+                   (match entry.last_failure_reason with
+                    | Some reason ->
+                        Keeper_registry.failure_reason_requires_manual_reconcile reason
+                    | None -> false)
+               | None -> false
+             in
+             let body =
+               match
+                 Keeper_manual_reconcile.clear
+                   ctx.config
+                   ~keeper_name:name
+                   ~actor
+                   ~resolution
+                   ~evidence_refs
+                   ~idempotency_key
+               with
+               | Keeper_manual_reconcile.Cleared_record record ->
+                   clear_registry_manual_reconcile ~ctx ~name;
+                   `Assoc
+                     [
+                       ("name", `String name);
+                       ("action", `String "clear");
+                       ("cleared", `Bool true);
+                       ("already_cleared", `Bool false);
+                       ("legacy_only", `Bool false);
+                       ("record", Keeper_manual_reconcile.record_to_yojson record);
+                     ]
+               | Keeper_manual_reconcile.Already_cleared record ->
+                   clear_registry_manual_reconcile ~ctx ~name;
+                   `Assoc
+                     [
+                       ("name", `String name);
+                       ("action", `String "clear");
+                       ("cleared", `Bool false);
+                       ("already_cleared", `Bool true);
+                       ("legacy_only", `Bool false);
+                       ("record", Keeper_manual_reconcile.record_to_yojson record);
+                     ]
+               | Keeper_manual_reconcile.No_record when legacy_pending ->
+                   clear_registry_manual_reconcile ~ctx ~name;
+                   `Assoc
+                     [
+                       ("name", `String name);
+                       ("action", `String "clear");
+                       ("cleared", `Bool true);
+                       ("already_cleared", `Bool false);
+                       ("legacy_only", `Bool true);
+                       ("record", `Null);
+                     ]
+               | Keeper_manual_reconcile.No_record ->
+                   `Assoc
+                     [
+                       ("name", `String name);
+                       ("action", `String "clear");
+                       ("cleared", `Bool false);
+                       ("already_cleared", `Bool false);
+                       ("legacy_only", `Bool false);
+                       ("record", `Null);
+                     ]
+             in
+             (true, Yojson.Safe.to_string body)
+       | _ ->
+           error_result_typed ~code:Validation_error
+             "action must be one of: inspect, clear")
+
 (* Recurring loop tools (#3190) removed: zero callers. *)
 
 let should_bootstrap_existing_keepalives name args =
@@ -519,6 +654,7 @@ let dispatch ctx ~name ~args : tool_result option =
   | "masc_keeper_msg" -> Some (handle_keeper_msg ctx args)
   | "masc_keeper_msg_result" -> Some (handle_keeper_msg_result ctx args)
   | "masc_keeper_repair" -> Some (handle_keeper_repair ctx args)
+  | "masc_keeper_reconcile" -> Some (handle_keeper_reconcile ctx args)
   | "masc_keeper_down" -> Some (handle_keeper_down ctx args)
   | "masc_keeper_list" -> Some (handle_keeper_list ctx args)
   | _ -> None
@@ -540,6 +676,10 @@ let dispatch_stream ~on_text_delta ctx ~name ~args : tool_result option =
 
 let _tool_spec_read_only = [ "masc_keeper_list"; "masc_keeper_status" ]
 
+let tool_required_permission = function
+  | "masc_keeper_reconcile" -> Some Types.CanBroadcast
+  | _ -> None
+
 let () =
   List.iter
     (fun (s : Types.tool_schema) ->
@@ -552,5 +692,6 @@ let () =
            ~handler_binding:Tag_dispatch
            ~is_read_only:(List.mem s.name _tool_spec_read_only)
            ~is_idempotent:(List.mem s.name _tool_spec_read_only)
+           ?required_permission:(tool_required_permission s.name)
            ()))
     schemas

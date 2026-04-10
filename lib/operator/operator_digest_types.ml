@@ -121,18 +121,7 @@ let compare_worker_card (a : worker_card) (b : worker_card) =
         (Option.value ~default:"" a.actor)
         (Option.value ~default:"" b.actor)
 
-let compare_session_digest (a : session_digest) (b : session_digest) =
-  let by_health = Int.compare (severity_rank b.health) (severity_rank a.health) in
-  if by_health <> 0 then by_health
-  else
-    let by_status =
-      match (a.status, b.status) with
-      | "running", "running" -> 0
-      | "running", _ -> -1
-      | _, "running" -> 1
-      | _ -> String.compare a.status b.status
-    in
-    if by_status <> 0 then by_status else String.compare a.session_id b.session_id
+(* compare_session_digest removed — team session cleanup *)
 
 let attention_item_to_yojson (item : attention_item) =
   `Assoc
@@ -298,91 +287,11 @@ let spawn_batch_template_of_cards (cards : worker_card list) =
   in
   `Assoc [ ("spawn_batch", `List items) ]
 
-let all_planned_workers (sessions : Team_session_types.session list) =
-  List.concat_map
-    (fun (session : Team_session_types.session) -> session.planned_workers)
-    sessions
+(* aggregate_worker_counts, aggregate_*_counts, aggregate_all_worker_metrics,
+   aggregated_local_runtime_json, all_planned_workers removed —
+   team session cleanup. Sessions always return []. *)
 
-let aggregate_worker_counts sessions count_fn =
-  all_planned_workers sessions |> count_fn |> Team_session_types.counts_to_json
-
-let aggregate_worker_class_counts s   = aggregate_worker_counts s Team_session_types.worker_class_counts
-let aggregate_runtime_pool_counts s   = aggregate_worker_counts s Team_session_types.runtime_pool_counts
-let aggregate_lane_counts s           = aggregate_worker_counts s Team_session_types.lane_counts
-let aggregate_controller_counts s     = aggregate_worker_counts s Team_session_types.controller_level_counts
-let aggregate_control_domain_counts s = aggregate_worker_counts s Team_session_types.control_domain_counts
-let aggregate_task_profile_counts s   = aggregate_worker_counts s Team_session_types.task_profile_counts
-
-let aggregate_escalation_count s =
-  all_planned_workers s |> Team_session_types.escalation_count
-
-(** Compute all 7 worker-count aggregates + escalation with a single
-    [all_planned_workers] concat_map, avoiding 8 separate list allocations.
-    Each count_fn still iterates [workers] independently. *)
-let aggregate_all_worker_metrics sessions =
-  let workers = all_planned_workers sessions in
-  let to_json count_fn = count_fn workers |> Team_session_types.counts_to_json in
-  ( to_json Team_session_types.worker_class_counts,
-    to_json Team_session_types.runtime_pool_counts,
-    to_json Team_session_types.lane_counts,
-    to_json Team_session_types.controller_level_counts,
-    to_json Team_session_types.control_domain_counts,
-    to_json Team_session_types.task_profile_counts,
-    Team_session_types.escalation_count workers )
-
-let aggregated_local_runtime_json (sessions : Team_session_types.session list) =
-  if
-    List.exists
-      (fun (session : Team_session_types.session) ->
-        session.scale_profile = Team_session_types.Scale_local64)
-      sessions
-  then Tool_local_runtime.runtime_status_json ()
-  else `Null
-
-let session_card_to_yojson ~actor (digest : session_digest) =
-  let top_attention =
-    match digest.attention_items |> List.sort compare_attention with
-    | item :: _ -> Some item
-    | [] -> None
-  in
-  let top_recommendation =
-    match digest.recommended_actions |> List.sort compare_recommendation with
-    | item :: _ -> Some item
-    | [] -> None
-  in
-  `Assoc
-    [
-      ("session_id", `String digest.session_id);
-      ("goal", `String digest.goal);
-      ("status", `String digest.status);
-      ("health", `String digest.health);
-      ("scale_profile", `String digest.scale_profile);
-      ("control_profile", `String digest.control_profile);
-      ("planned_worker_count", `Int digest.planned_worker_count);
-      ("active_agent_count", `Int digest.active_agent_count);
-      ("last_turn_age_sec", option_to_json (fun v -> `Int v) digest.last_turn_age_sec);
-      ("worker_class_counts", digest.worker_class_counts);
-      ("runtime_pool_counts", digest.runtime_pool_counts);
-      ("lane_counts", digest.lane_counts);
-      ("controller_counts", digest.controller_counts);
-      ("control_domain_counts", digest.control_domain_counts);
-      ("task_profile_counts", digest.task_profile_counts);
-      ("escalation_count", `Int digest.escalation_count);
-      ("controller_tree", digest.controller_tree);
-      ("lane_health", digest.lane_health);
-      ("confidence_heatmap", digest.confidence_heatmap);
-      ("context_pressure_by_lane", digest.context_pressure_by_lane);
-      ("intervention_counters", digest.intervention_counters);
-      ("local_runtime", digest.local_runtime);
-      ("risk_digest", digest.risk_digest);
-      ("attention_count", `Int (List.length digest.attention_items));
-      ("top_attention", option_to_json attention_item_to_yojson top_attention);
-      ("recommended_action_count", `Int (List.length digest.recommended_actions));
-      ( "top_recommendation",
-        option_to_json (recommended_action_to_yojson ~actor) top_recommendation );
-      ("provenance", `String "derived");
-      ("authoritative", `Bool false);
-    ]
+(* session_card_to_yojson removed — team session cleanup *)
 
 let summary_of_attention_items (items : attention_item list) =
   let sorted = List.sort compare_attention items in

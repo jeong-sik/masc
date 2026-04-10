@@ -313,6 +313,22 @@ let test_startup_config_resolution_preserves_explicit_override () =
       Alcotest.(check (option string)) "env override unchanged" (Some explicit)
         (Sys.getenv_opt "MASC_CONFIG_DIR"))
 
+let test_bootstrap_base_path_config_root_collapses_masc_input () =
+  with_temp_dir "startup-config-collapse" (fun dir ->
+      let repo = Filename.concat dir "repo" in
+      mkdir_p repo;
+      ignore (make_config_root repo);
+      let base_path = Filename.concat dir "base" in
+      mkdir_p (Filename.concat base_path ".masc");
+      with_env "MASC_CONFIG_DIR" None @@ fun () ->
+      with_cwd repo @@ fun () ->
+      Server_runtime_bootstrap.bootstrap_base_path_config_root
+        ~base_path:(Filename.concat base_path ".masc");
+      Alcotest.(check bool) "config root created under parent .masc" true
+        (Sys.file_exists (Filename.concat base_path ".masc/config/cascade.json"));
+      Alcotest.(check bool) "nested .masc/.masc config not created" false
+        (Sys.file_exists
+           (Filename.concat base_path ".masc/.masc/config/cascade.json")))
 let test_constructor_is_pure () =
   with_temp_dir "startup-pure" (fun dir ->
       let agents_dir = Room.agents_dir (Room.default_config dir) in
@@ -757,6 +773,41 @@ let test_create_server_state_records_runtime_resolution () =
         (json |> member "path_diagnostics" |> member "effective_masc_root"
        |> to_string))
 
+let test_create_server_state_preserves_raw_input_base_path () =
+  with_temp_dir "startup-create-state-raw-input" (fun dir ->
+      let repo = Filename.concat dir "repo" in
+      let raw_input = Filename.concat dir ".masc" in
+      mkdir_p repo;
+      mkdir_p raw_input;
+      ignore (make_config_root repo);
+      with_env "MASC_STORAGE_TYPE" (Some "filesystem") @@ fun () ->
+      with_env "MASC_POSTGRES_URL" None @@ fun () ->
+      with_env "MASC_CONFIG_DIR" None @@ fun () ->
+      with_env "MASC_BASE_PATH" None @@ fun () ->
+      with_env "MASC_BASE_PATH_INPUT" None @@ fun () ->
+      with_cwd repo @@ fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let clock, mono_clock, net, _domain_mgr, proc_mgr, fs =
+        Server_runtime_bootstrap.init_runtime_context env
+      in
+      Eio.Switch.run @@ fun sw ->
+      Server_startup_state.reset ~backend_mode:"filesystem" ();
+      ignore
+        (Server_runtime_bootstrap.create_server_state ~sw ~base_path:raw_input
+           ~clock ~mono_clock ~net ~proc_mgr ~fs);
+      let json = Server_startup_state.to_yojson () in
+      let open Yojson.Safe.Util in
+      Alcotest.(check string) "raw input base path preserved in diagnostics"
+        raw_input
+        (json |> member "path_diagnostics" |> member "input_base_path"
+       |> to_string);
+      Alcotest.(check (option string)) "raw input env preserved"
+        (Some raw_input)
+        (Env_config_core.base_path_raw_opt ());
+      Alcotest.(check string) "normalized env remains effective workspace root"
+        dir (Sys.getenv "MASC_BASE_PATH"))
+
 let test_prompt_markdown_dir_falls_back_to_resolved_config_dir () =
   with_temp_dir "startup-prompts" (fun dir ->
       let expected =
@@ -900,6 +951,9 @@ let () =
           Alcotest.test_case
             "startup config resolution preserves explicit override"
             `Quick test_startup_config_resolution_preserves_explicit_override;
+          Alcotest.test_case
+            "bootstrap base-path config collapses .masc input path"
+            `Quick test_bootstrap_base_path_config_root_collapses_masc_input;
           Alcotest.test_case "constructors stay pure" `Quick
             test_constructor_is_pure;
           Alcotest.test_case "restore_persisted_sessions uses flat agents dir"
@@ -957,6 +1011,9 @@ let () =
           Alcotest.test_case
             "create_server_state records runtime resolution"
             `Quick test_create_server_state_records_runtime_resolution;
+          Alcotest.test_case
+            "create_server_state preserves raw input base path"
+            `Quick test_create_server_state_preserves_raw_input_base_path;
           Alcotest.test_case "prompt markdown dir falls back to resolved config dir"
             `Quick test_prompt_markdown_dir_falls_back_to_resolved_config_dir;
           Alcotest.test_case "prompt markdown dir honors MASC_CONFIG_DIR override"

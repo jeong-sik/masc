@@ -244,14 +244,13 @@ let dashboard_runtime_probe_http_json ?(force = false) () =
       ("cache_hit", `Bool cache_hit);
       ("probe", probe);
     ]
-
 let runtime_resolution_json (config : Room.config) =
   let build = Build_identity.current () in
   let runtime_commit = build.commit in
   let workspace_commit = git_rev_parse_short config.workspace_path in
   let resolved_base_commit = git_rev_parse_short config.base_path in
   let base_path_input =
-    Env_config_core.base_path_opt ()
+    Env_config_core.base_path_raw_opt ()
     |> Option.value ~default:config.workspace_path
   in
   let prompt_markdown_dir =

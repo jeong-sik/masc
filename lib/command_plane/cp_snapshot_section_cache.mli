@@ -7,13 +7,10 @@ type section_cache = {
   mutable managed_units : unit_record list;
   mutable units : unit_record list;
   mutable source : string;
-  mutable sessions_mtime : float;
-  mutable sessions : Team_session_types.session list;
   mutable intents_mtime : float;
   mutable intents : intent_record list;
   mutable ops_topo_units_mtime : float;
   mutable ops_topo_agents_mtime : float;
-  mutable ops_sessions_mtime : float;
   mutable ops_mtime : float;
   mutable operations : operation_record list;
   mutable det_mtime : float;

@@ -301,6 +301,7 @@ let acquire_pid_lock port =
     Detects by checking if the running executable lives under base_path/_build/.
     Runtime state (.masc/keepers, traces, logs) must not pollute the repo. *)
 let guard_self_repo_base_path base_path =
+  let base_path = Env_config.normalize_masc_base_path_input base_path in
   let abs_base =
     try Unix.realpath base_path with Unix.Unix_error _ -> base_path
   in
@@ -327,19 +328,33 @@ let guard_self_repo_base_path base_path =
 
 let run_cmd host port base_path =
   Printexc.record_backtrace true;
-  guard_self_repo_base_path base_path;
+  let raw_base_path = String.trim base_path in
+  let normalized_base_path =
+    Env_config.normalize_masc_base_path_input base_path
+  in
+  let stripped_base_path =
+    Env_config.strip_path_trailing_slashes (String.trim base_path)
+  in
+  guard_self_repo_base_path normalized_base_path;
   acquire_pid_lock port;
   Log.init_from_env ();
-  Unix.putenv "MASC_BASE_PATH" base_path;
+  if stripped_base_path <> ""
+     && String.equal (Filename.basename stripped_base_path) ".masc"
+  then
+    Log.Server.warn
+      "Normalizing --base-path from %s to %s because runtime base paths must point at the workspace root, not the .masc directory."
+      base_path normalized_base_path;
+  Unix.putenv "MASC_BASE_PATH_INPUT" raw_base_path;
+  Unix.putenv "MASC_BASE_PATH" normalized_base_path;
   (* Persist logs inside .masc/logs/ — colocated with state, not a sibling.
      Previous code wrote to base_path/logs/ which diverged from .masc/ when
      base_path differed from the repo checkout directory. *)
-  let masc_dir = Filename.concat base_path ".masc" in
+  let masc_dir = Filename.concat normalized_base_path ".masc" in
   let log_dir = Filename.concat masc_dir "logs" in
   Fs_compat.mkdir_p masc_dir;
   Fs_compat.mkdir_p log_dir;
   (* Migration: move .jsonl files from old base_path/logs/ if they exist *)
-  let old_log_dir = Filename.concat base_path "logs" in
+  let old_log_dir = Filename.concat normalized_base_path "logs" in
   (if Sys.file_exists old_log_dir && Sys.is_directory old_log_dir then
      let files = try Sys.readdir old_log_dir with Sys_error _ -> [||] in
      Array.iter (fun fname ->
@@ -350,7 +365,7 @@ let run_cmd host port base_path =
            (try Sys.rename src dst;
                 Log.info "log migration: moved %s -> .masc/logs/" fname
             with Sys_error _ -> ())
-       end) files);
+          end) files);
   Log.Ring.init_file_sink log_dir;
   Log.Ring.cleanup_old_files log_dir;
   Eio_main.run @@ fun env ->

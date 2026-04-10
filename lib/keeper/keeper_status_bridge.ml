@@ -145,7 +145,24 @@ let runtime_blocker_surface_of_registry_entry
 let runtime_blocker_fields_json
     (config : Room_utils.config)
     (meta : keeper_meta) =
-  match runtime_blocker_surface_of_registry_entry (runtime_registry_entry config meta.name) with
+  match Keeper_manual_reconcile.read config meta.name with
+  | Some { status = Keeper_manual_reconcile.Pending; blocker_class; summary; _ } ->
+      [
+        ("runtime_blocker_class", `String blocker_class);
+        ("runtime_blocker_summary", `String summary);
+        ("runtime_blocker_manual_reconcile", `Bool true);
+      ]
+  | Some { status = Keeper_manual_reconcile.Cleared; _ } ->
+      [
+        ("runtime_blocker_class", `Null);
+        ("runtime_blocker_summary", `Null);
+        ("runtime_blocker_manual_reconcile", `Null);
+      ]
+  | None ->
+      (match
+         runtime_blocker_surface_of_registry_entry
+           (runtime_registry_entry config meta.name)
+       with
   | Some (blocker_class, summary, manual_reconcile) ->
       [
         ("runtime_blocker_class", `String blocker_class);
@@ -157,7 +174,7 @@ let runtime_blocker_fields_json
         ("runtime_blocker_class", `Null);
         ("runtime_blocker_summary", `Null);
         ("runtime_blocker_manual_reconcile", `Null);
-      ]
+      ])
 
 let runtime_surface_json config (meta : keeper_meta) =
   let keepalive_running = runtime_keepalive_running config meta in

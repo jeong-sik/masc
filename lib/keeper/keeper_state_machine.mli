@@ -95,6 +95,7 @@ type event =
   | Turn_succeeded
   | Turn_failed of { consecutive : int; max_allowed : int }
   | Manual_reconcile_required of { reason : string }
+  | Manual_reconcile_cleared
   | Context_measured of {
       context_ratio : float;
       message_count : int;

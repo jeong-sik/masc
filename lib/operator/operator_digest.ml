@@ -2,8 +2,24 @@ open Operator_pending_confirm
 open Result_syntax
 
 include Operator_digest_types
-include Operator_digest_session
+(* Operator_digest_session removed — team session cleanup *)
 open Operator_digest_guidance
+
+(* Retained from Operator_digest_session — used for room-level attention health *)
+let health_from_attention_items (items : attention_item list) =
+  if
+    List.exists
+      (fun (item : attention_item) -> String.equal item.severity "bad")
+      items
+  then "bad"
+  else if items <> [] then "warn"
+  else "ok"
+
+let normalize_team_health = function
+  | "healthy" -> "ok"
+  | "degraded" -> "warn"
+  | "critical" -> "bad"
+  | other -> other
 
 let tool_host_attention_window_sec = 900.0
 
@@ -445,15 +461,7 @@ let review_summary_json ~actor active deferred recent =
       ("top_item", option_to_json (review_item_to_yojson ~actor) top_item);
     ]
 
-let top_attention_item items =
-  match items |> List.sort compare_attention with
-  | item :: _ -> Some item
-  | [] -> None
-
-let top_recommended_action items =
-  match items |> List.sort compare_recommendation with
-  | item :: _ -> Some item
-  | [] -> None
+(* top_attention_item and top_recommended_action removed — team session cleanup *)
 
 let pending_confirm_review_item ~now (entry : pending_confirm) =
   let summary =
@@ -555,93 +563,7 @@ let namespace_gate_review_item ~room_json =
         advice = review_empty_advice_json;
       }
 
-let session_review_item (digest : session_digest) =
-  let top_attention = top_attention_item digest.attention_items in
-  let top_recommendation = top_recommended_action digest.recommended_actions in
-  let status_needs_review =
-    match String.lowercase_ascii digest.status with
-    | "running" | "active" | "done" | "completed" -> false
-    | _ -> true
-  in
-  if String.equal digest.health "ok" && Option.is_none top_recommendation
-     && Option.is_none top_attention && not status_needs_review
-  then None
-  else
-    let summary =
-      match top_attention, top_recommendation with
-      | Some item, _ -> item.summary
-      | None, Some action -> action.reason
-      | None, None -> Printf.sprintf "세션 %s 상태를 점검하세요." digest.session_id
-    in
-    let why_parts =
-      [
-        (if digest.attention_items <> [] then
-           Some (Printf.sprintf "attention %d건" (List.length digest.attention_items))
-         else None);
-        (if digest.recommended_actions <> [] then
-           Some
-             (Printf.sprintf "추천 액션 %d건"
-                (List.length digest.recommended_actions))
-         else None);
-        (Option.map (fun age -> Printf.sprintf "최근 턴 %d초 전" age) digest.last_turn_age_sec);
-        (if status_needs_review then Some (Printf.sprintf "상태 %s" digest.status) else None);
-      ]
-      |> List.filter_map (fun value -> value)
-    in
-    let why_now =
-      if why_parts = [] then "세션 실행 상태를 다시 확인해야 합니다."
-      else String.concat " · " why_parts
-    in
-    let urgency =
-      if String.equal digest.health "bad"
-         || (match top_recommendation with
-            | Some item -> Operator_approval.confirm_required item.action_type
-            | None -> false)
-      then "now"
-      else "soon"
-    in
-    Some
-      {
-        id = "session_risk:" ^ digest.session_id;
-        kind = "session_risk";
-        target_type = "team_session";
-        target_id = Some digest.session_id;
-        severity = if String.equal digest.health "ok" then "warn" else digest.health;
-        urgency;
-        summary;
-        why_now;
-        source = "deterministic";
-        authoritative = false;
-        fingerprint =
-          review_fingerprint
-            [
-              digest.session_id;
-              digest.health;
-              summary;
-              why_now;
-              (match top_recommendation with
-              | Some item -> item.action_type
-              | None -> "");
-            ];
-        stale_sec = digest.last_turn_age_sec;
-        confirm_required =
-          (match top_recommendation with
-          | Some item -> Operator_approval.confirm_required item.action_type
-          | None -> false);
-        recommended_action = top_recommendation;
-        truth_ref =
-          review_truth_ref_json ~target_type:"team_session"
-            ~target_id:(Some digest.session_id);
-        friction =
-          `Assoc
-            [
-              ( "attention_items",
-                `List (List.map attention_item_to_yojson digest.attention_items) );
-              ("risk_digest", digest.risk_digest);
-              ("pending_confirm", `Null);
-            ];
-        advice = review_empty_advice_json;
-      }
+(* session_review_item removed — team session cleanup *)
 
 let keeper_review_item ~now keeper_json =
   let name = json_string_opt keeper_json "name" in
@@ -761,7 +683,7 @@ let review_queue_json ~actor active deferred recent_json =
     ("recent_reviews", recent_json);
   ]
 
-let digest_json ?actor ?target_type ?target_id ?include_workers ?sessions
+let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_include_workers ?sessions
     ?command_plane_summary ?swarm_status (ctx : 'a context) :
     (Yojson.Safe.t, string) result =
   let config = ctx.config in
@@ -803,16 +725,13 @@ let digest_json ?actor ?target_type ?target_id ?include_workers ?sessions
     let actor_name = normalized_actor ~context_actor:ctx.agent_name actor in
     let* target_type = normalize_digest_target_type target_type in
     let now = Time_compat.now () in
-    let tracked_sessions =
-      match sessions with
-      | Some s -> s
-      | None -> []
-    in
+    (* Team sessions removed — tracked_sessions is always []. *)
+    ignore sessions;
     let room_state_json = room_state_json config in
     let command_plane_digest_json =
       match command_plane_summary with
       | Some summary -> summary
-      | None -> Command_plane_v2.summary_json ~sessions:tracked_sessions config
+      | None -> Command_plane_v2.summary_json config
     in
     let swarm_status_json =
       match swarm_status with
@@ -822,25 +741,14 @@ let digest_json ?actor ?target_type ?target_id ?include_workers ?sessions
     in
     match target_type with
     | "namespace" ->
-        let sessions =
-          tracked_sessions
-          |> List.map (fun session -> build_session_digest config session ~now)
-          |> List.sort compare_session_digest
-        in
-        let limited_sessions =
-          sessions |> List.to_seq |> Seq.take room_digest_session_limit |> List.of_seq
-        in
         let confirm_scope = pending_confirm_scope ?actor config in
         let attention_items =
           build_room_attention_items ~command_plane_summary:command_plane_digest_json config
-          @ (limited_sessions |> List.concat_map (fun digest -> digest.attention_items))
           |> List.sort compare_attention
         in
         let recommended_actions =
           dedup_recommendations
-            (room_recommendations ~command_plane_summary:command_plane_digest_json config
-            @ (limited_sessions
-              |> List.concat_map (fun digest -> digest.recommended_actions)))
+            (room_recommendations ~command_plane_summary:command_plane_digest_json config)
         in
         let fallback_recommendation_summary =
           summary_of_recommendations ~actor:actor_name recommended_actions
@@ -857,7 +765,6 @@ let digest_json ?actor ?target_type ?target_id ?include_workers ?sessions
           @ (match namespace_gate_review_item ~room_json:room_state_json with
             | Some item -> [ item ]
             | None -> [])
-          @ (sessions |> List.filter_map session_review_item)
           @ (keeper_rows |> List.filter_map (keeper_review_item ~now))
         in
         let active_reviews, deferred_reviews =
@@ -877,14 +784,14 @@ let digest_json ?actor ?target_type ?target_id ?include_workers ?sessions
               ("operator_judge_runtime", operator_judge_runtime_json config);
               ("command_plane", command_plane_digest_json);
               ("swarm_status", swarm_status_json);
-              ("role_census", aggregate_worker_class_counts tracked_sessions);
-              ("runtime_pools", aggregate_runtime_pool_counts tracked_sessions);
-              ("lane_census", aggregate_lane_counts tracked_sessions);
-              ("controller_census", aggregate_controller_counts tracked_sessions);
-              ("control_domains", aggregate_control_domain_counts tracked_sessions);
-              ("task_profiles", aggregate_task_profile_counts tracked_sessions);
-              ("escalation_count", `Int (aggregate_escalation_count tracked_sessions));
-              ("local_runtime", aggregated_local_runtime_json tracked_sessions);
+              ("role_census", `Assoc []);
+              ("runtime_pools", `Assoc []);
+              ("lane_census", `Assoc []);
+              ("controller_census", `Assoc []);
+              ("control_domains", `Assoc []);
+              ("task_profiles", `Assoc []);
+              ("escalation_count", `Int 0);
+              ("local_runtime", `Null);
               ("attention_items", `List (List.map attention_item_to_yojson attention_items));
               ("attention_summary", summary_of_attention_items attention_items);
               ("pending_confirm_summary", pending_confirm_summary_json_of_scope confirm_scope);
@@ -894,79 +801,11 @@ let digest_json ?actor ?target_type ?target_id ?include_workers ?sessions
                      recommended_actions) );
               ("recommendation_summary", fallback_recommendation_summary);
               ("namespace", room_state_json);
-              ( "session_cards",
-                `List
-                  (List.map (session_card_to_yojson ~actor:actor_name) limited_sessions)
-              );
+              ("session_cards", `List []);
               ("worker_cards", `List []);
             ]
             @ review_queue_json ~actor:actor_name active_reviews deferred_reviews recent_reviews
             @ active_guidance))
-    | "team_session" -> (
-        match target_id with
-        | None -> Error "target_id is required when target_type=team_session"
-        | Some session_id -> (
-            (* Team_session_store removed *)
-            match (None : Team_session_types.session option) with
-            | None ->
-                Error (Printf.sprintf "team session not found: %s" session_id)
-            | Some session ->
-                let digest = build_session_digest config session ~now in
-                let worker_cards =
-                  let should_include =
-                    match include_workers with
-                    | Some value -> value
-                    | None -> true
-                  in
-                  if should_include then digest.worker_cards else []
-                in
-                let fallback_recommendation_summary =
-                  summary_of_recommendations ~actor:actor_name
-                    digest.recommended_actions
-                in
-                let active_guidance =
-                  active_guidance_fields ~config ~actor:actor_name
-                    ~target_type:"team_session" ~target_id:(Some session_id)
-                    ~fallback_recommendations:digest.recommended_actions
-                    ~fallback_summary:fallback_recommendation_summary
-                in
-                let review_items =
-                  match session_review_item digest with
-                  | Some item -> [ item ]
-                  | None -> []
-                in
-                let active_reviews, deferred_reviews =
-                  split_review_items config review_items
-                in
-                let recent_reviews =
-                  Operator_review_state.recent_review_decisions_json ~limit:12
-                    ~target_type:"team_session" ~target_id:session_id config
-                in
-                Ok
-                  (`Assoc
-                    ([
-                      ("trace_id", `String (trace_id "opsd"));
-                      ("target_type", `String "team_session");
-                      ("target_id", `String session_id);
-                      ("health", `String digest.health);
-                      ("provenance_summary", operator_surface_contract_json);
-                      ("operator_judge_runtime", operator_judge_runtime_json config);
-                      ("command_plane", command_plane_digest_json);
-                      ("swarm_status", swarm_status_json);
-                      ( "attention_items",
-                        `List
-                          (List.map attention_item_to_yojson digest.attention_items)
-                      );
-                      ("attention_summary", summary_of_attention_items digest.attention_items);
-                      ("pending_confirm_summary", pending_confirm_summary_json ?actor config);
-                      ( "recommended_actions",
-                        `List
-                          (List.map (recommended_action_to_yojson ~actor:actor_name)
-                             digest.recommended_actions) );
-                      ("recommendation_summary", fallback_recommendation_summary);
-                      ("session_cards", `List [ session_card_to_yojson ~actor:actor_name digest ]);
-                      ("worker_cards", `List (List.map worker_card_to_yojson worker_cards));
-                    ]
-                    @ review_queue_json ~actor:actor_name active_reviews deferred_reviews recent_reviews
-                    @ active_guidance))))
+    | "team_session" ->
+        Error "team_session is no longer supported (removed in Phase 2 of #6107)"
     | _ -> Error "unsupported target_type"

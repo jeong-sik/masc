@@ -84,8 +84,8 @@ let health_path_diagnostics () =
   match current_server_state_opt () with
   | Some state ->
       Server_base_path_diagnostics.detect
-        ?input_base_path:(Env_config_core.base_path_opt ())
-        ?env_masc_base_path:(Env_config_core.base_path_opt ())
+        ?input_base_path:(Env_config_core.base_path_raw_opt ())
+        ?env_masc_base_path:(Env_config_core.base_path_raw_opt ())
         ~effective_base_path:state.room_config.base_path
         ~effective_masc_root:(Room.masc_root_dir state.room_config)
         ()
@@ -93,8 +93,8 @@ let health_path_diagnostics () =
       let effective_base_path = default_base_path () in
       let effective_masc_root = Filename.concat effective_base_path ".masc" in
       Server_base_path_diagnostics.detect
-        ?input_base_path:(Env_config_core.base_path_opt ())
-        ?env_masc_base_path:(Env_config_core.base_path_opt ())
+        ?input_base_path:(Env_config_core.base_path_raw_opt ())
+        ?env_masc_base_path:(Env_config_core.base_path_raw_opt ())
         ~effective_base_path ~effective_masc_root ()
 
 let make_health_json ?(listener = "http/1.1") request =

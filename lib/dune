@@ -340,6 +340,7 @@
    tool_local_runtime_verify
    tool_local_runtime_bench
    tool_local_runtime_status
+   tool_local_runtime_probe
    tool_board
    tool_command_plane
    tool_command_plane_support
@@ -699,6 +700,7 @@
   tool_local_runtime_verify
   tool_local_runtime_bench
   tool_local_runtime_status
+  tool_local_runtime_probe
   ;; tool_inline_dispatch sub-modules
   tool_inline_dispatch_types
   tool_inline_dispatch_room

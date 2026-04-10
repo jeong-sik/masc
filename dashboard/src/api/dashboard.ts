@@ -682,8 +682,93 @@ export interface DashboardRuntimeResolution {
   build: DashboardBuildIdentity
 }
 
+export interface DashboardRuntimeProbeLoadedModel {
+  name?: string | null
+  model?: string | null
+  size_vram_bytes?: number | null
+  context_length?: number | null
+  expires_at?: string | null
+}
+
+export interface DashboardRuntimeProbeRun {
+  run_index: number
+  http_status?: number | null
+  wall_clock_ms?: number | null
+  total_duration_ms?: number | null
+  load_duration_ms?: number | null
+  prompt_eval_count?: number | null
+  prompt_eval_duration_ms?: number | null
+  prompt_tokens_per_second?: number | null
+  eval_count?: number | null
+  eval_duration_ms?: number | null
+  generation_tokens_per_second?: number | null
+  done?: boolean | null
+  done_reason?: string | null
+  thinking_present?: boolean
+  response_preview?: string | null
+  response_chars?: number | null
+  error?: string | null
+}
+
+export interface DashboardRuntimeProbeAssessment {
+  signal?: string | null
+  baseline_run_index?: number | null
+  best_repeat_run_index?: number | null
+  baseline_prompt_eval_duration_ms?: number | null
+  best_repeat_prompt_eval_duration_ms?: number | null
+  prompt_eval_duration_reduction_ratio?: number | null
+  note?: string | null
+  limitation?: string | null
+}
+
+export interface DashboardRuntimeProbePayload {
+  source?: string
+  server_url?: string
+  ps_endpoint?: string
+  generate_endpoint?: string
+  configured_default_model?: string | null
+  requested_model?: string | null
+  effective_model?: string | null
+  probe_runs_requested?: number
+  probe_runs_completed?: number
+  max_tokens?: number
+  timeout_sec?: number
+  ps_timeout_sec?: number
+  prompt_chars?: number
+  prompt_preview?: string
+  ps_http_status_before?: number | null
+  ps_http_status_after?: number | null
+  loaded_models_before?: DashboardRuntimeProbeLoadedModel[]
+  loaded_models_after?: DashboardRuntimeProbeLoadedModel[]
+  model_loaded_before_probe?: boolean
+  model_loaded_after_probe?: boolean
+  runs?: DashboardRuntimeProbeRun[]
+  kv_cache_assessment?: DashboardRuntimeProbeAssessment | null
+  observations?: string[]
+  errors?: string[]
+  limitations?: string[]
+  probe_ok?: boolean
+}
+
+export interface DashboardRuntimeProbeResponse {
+  generated_at?: string
+  refreshed_at_unix?: number
+  cache_ttl_sec?: number
+  cache_age_sec?: number
+  cache_hit?: boolean
+  probe?: DashboardRuntimeProbePayload | null
+}
+
 export function fetchToolMetrics(): Promise<ToolMetricsResponse> {
   return get('/api/v1/tool-metrics')
+}
+
+export function fetchDashboardRuntimeProbe(
+  force = false,
+  opts?: AbortableRequestOptions,
+): Promise<DashboardRuntimeProbeResponse> {
+  const query = force ? '?force=1' : ''
+  return get(`/api/v1/dashboard/runtime-probe${query}`, { signal: opts?.signal })
 }
 
 export async function fetchDashboardTools(opts?: AbortableRequestOptions): Promise<DashboardToolsResponse> {

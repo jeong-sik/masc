@@ -283,6 +283,7 @@ let legacy_permission_for_tool = function
   | "masc_operator_digest" | "masc_surface_audit"
   | "masc_keeper_status" | "masc_keeper_list"
   | "masc_runtime_verify"
+  | "masc_runtime_ollama_probe"
   | "masc_unit_list" | "masc_operation_status"
   | "masc_policy_status" | "masc_dispatch_plan"
   | "masc_observe_topology" | "masc_observe_operations"

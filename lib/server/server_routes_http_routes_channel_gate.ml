@@ -225,7 +225,7 @@ let handle_gate_connectors _state request reqd =
 
     Single connector status by name.  Returns 404 if the connector
     is not registered. *)
-let handle_gate_connector_status _state request reqd =
+let _handle_gate_connector_status_by_name _state request reqd =
   match query_param request "name" with
   | None | Some "" ->
       respond_json_with_cors ~status:`Bad_request request reqd

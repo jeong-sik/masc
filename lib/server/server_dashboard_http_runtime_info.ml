@@ -24,6 +24,10 @@ let list_hd_opt = function
   | [] -> None
   | x :: _ -> Some x
 
+let dashboard_runtime_probe_cache : Yojson.Safe.t option ref = ref None
+let dashboard_runtime_probe_cache_updated_at = Atomic.make 0.0
+let dashboard_runtime_probe_cache_ttl_sec = 30.0
+
 let path_descends_from ~root path =
   String.equal path root || String.starts_with ~prefix:(root ^ "/") path
 
@@ -137,6 +141,40 @@ let runtime_diagnostics_json () =
     count "state_repair",
     count "agent_state",
     count "backend_pressure" )
+
+let dashboard_runtime_probe_http_json ?(force = false) () =
+  let now = Time_compat.now () in
+  let cached_at = Atomic.get dashboard_runtime_probe_cache_updated_at in
+  let cache_hit =
+    (not force)
+    && !dashboard_runtime_probe_cache <> None
+    && now -. cached_at <= dashboard_runtime_probe_cache_ttl_sec
+  in
+  let probe =
+    if cache_hit then
+      Option.value ~default:`Null !dashboard_runtime_probe_cache
+    else
+      let fresh =
+        Tool_local_runtime.runtime_ollama_probe_json ~probe_runs:2 ~max_tokens:8
+          ~timeout_sec:6 ~ps_timeout_sec:2 ()
+      in
+      dashboard_runtime_probe_cache := Some fresh;
+      Atomic.set dashboard_runtime_probe_cache_updated_at now;
+      fresh
+  in
+  let refreshed_at =
+    if cache_hit then cached_at else Atomic.get dashboard_runtime_probe_cache_updated_at
+  in
+  let cache_age_sec = max 0.0 (now -. refreshed_at) in
+  `Assoc
+    [
+      ("generated_at", `String (Types.now_iso ()));
+      ("refreshed_at_unix", `Float refreshed_at);
+      ("cache_ttl_sec", `Float dashboard_runtime_probe_cache_ttl_sec);
+      ("cache_age_sec", `Float cache_age_sec);
+      ("cache_hit", `Bool cache_hit);
+      ("probe", probe);
+    ]
 
 let runtime_resolution_json (config : Room.config) =
   let build = Build_identity.current () in

@@ -202,7 +202,7 @@ let admin_surface_tools =
     "masc_auth_refresh"; "masc_auth_revoke"; "masc_auth_status";
     "masc_keeper_create_from_persona";
     "masc_pause"; "masc_resume";
-    "masc_runtime_verify"; "masc_tool_list";
+    "masc_runtime_verify"; "masc_runtime_ollama_probe"; "masc_tool_list";
   ]
 
 let keeper_internal_surface_tools = keeper_internal_tools

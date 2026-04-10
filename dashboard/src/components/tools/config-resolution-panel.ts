@@ -1,10 +1,14 @@
 import { html } from 'htm/preact'
+import { useSignal } from '@preact/signals'
+import { useEffect } from 'preact/hooks'
 import type {
   DashboardConfigResolution,
   DashboardConfigResolutionItem,
   DashboardRuntimeDiagnostic,
+  DashboardRuntimeProbeResponse,
   DashboardRuntimeResolution,
 } from '../../api/dashboard'
+import { fetchDashboardRuntimeProbe } from '../../api/dashboard'
 import { Card } from '../common/card'
 
 function toneClass(status: string): string {
@@ -197,6 +201,188 @@ function DiagnosticRow({ item }: { item: DashboardRuntimeDiagnostic }) {
   `
 }
 
+function fmtNumber(value: number | null | undefined, digits = 1): string {
+  if (typeof value !== 'number' || Number.isNaN(value)) return '--'
+  return value.toLocaleString('ko-KR', {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  })
+}
+
+function fmtBoolean(value: boolean | null | undefined): string {
+  if (value === true) return 'yes'
+  if (value === false) return 'no'
+  return '--'
+}
+
+function probeTone(signal: string | null | undefined, probeOk: boolean | null | undefined): string {
+  if (probeOk === false) return 'border-[rgba(244,63,94,0.28)] bg-[rgba(244,63,94,0.10)] text-[#fecdd3]'
+  switch (signal) {
+    case 'likely_reused':
+      return 'border-[rgba(34,197,94,0.28)] bg-[rgba(34,197,94,0.10)] text-[#bbf7d0]'
+    case 'possible_reuse':
+      return 'border-[rgba(250,204,21,0.28)] bg-[rgba(250,204,21,0.10)] text-[#fde68a]'
+    case 'no_visible_reuse':
+      return 'border-[var(--card-border)] bg-[var(--white-6)] text-[var(--text-muted)]'
+    default:
+      return 'border-[var(--card-border)] bg-[var(--white-6)] text-[var(--text-muted)]'
+  }
+}
+
+function probeSignalLabel(signal: string | null | undefined): string {
+  switch (signal) {
+    case 'likely_reused':
+      return 'kv likely reused'
+    case 'possible_reuse':
+      return 'kv possible reuse'
+    case 'no_visible_reuse':
+      return 'no visible reuse'
+    case 'insufficient_data':
+      return 'insufficient data'
+    default:
+      return 'probe pending'
+  }
+}
+
+function RuntimeProbePanel() {
+  const state = useSignal<{
+    data: DashboardRuntimeProbeResponse | null
+    loading: boolean
+    error: string | null
+  }>({
+    data: null,
+    loading: true,
+    error: null,
+  })
+
+  async function load(force = false) {
+    state.value = { ...state.value, loading: true, error: null }
+    try {
+      const data = await fetchDashboardRuntimeProbe(force)
+      state.value = { data, loading: false, error: null }
+    } catch (error) {
+      state.value = {
+        ...state.value,
+        loading: false,
+        error: error instanceof Error ? error.message : String(error),
+      }
+    }
+  }
+
+  useEffect(() => {
+    void load(false)
+  }, [])
+
+  const probe = state.value.data?.probe
+  const firstRun = probe?.runs?.[0] ?? null
+  const assessment = probe?.kv_cache_assessment ?? null
+  const signal = assessment?.signal ?? null
+
+  return html`
+    <div class="mt-4 rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] px-4 py-4">
+      <div class="mb-3 flex flex-wrap items-center gap-2">
+        <div class="text-[11px] uppercase tracking-[0.08em] text-[var(--text-muted)]">ollama warm / kv probe</div>
+        <span class="rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-[0.08em] ${probeTone(signal, probe?.probe_ok)}">
+          ${probeSignalLabel(signal)}
+        </span>
+        ${state.value.data?.cache_hit !== undefined
+          ? html`
+              <span class="rounded-full border border-[var(--card-border)] bg-[var(--white-6)] px-2 py-0.5 text-[10px] tracking-[0.08em] text-[var(--text-muted)]">
+                ${state.value.data.cache_hit ? 'cached' : 'fresh'} · age ${fmtNumber(state.value.data.cache_age_sec, 1)}s
+              </span>
+            `
+          : null}
+        <button
+          class="ml-auto rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-3 py-1 text-[11px] text-[var(--text-strong)] hover:bg-[var(--bg-panel-hover)]"
+          onClick=${() => void load(true)}
+        >
+          ${state.value.loading ? 'probing...' : 'refresh probe'}
+        </button>
+      </div>
+
+      ${state.value.error
+        ? html`
+            <div class="rounded-lg border border-[rgba(244,63,94,0.28)] bg-[rgba(244,63,94,0.10)] px-3 py-3 text-[12px] text-[#fecdd3]">
+              ${state.value.error}
+            </div>
+          `
+        : null}
+
+      ${!state.value.error && !probe
+        ? html`
+            <div class="text-[12px] text-[var(--text-muted)]">
+              ${state.value.loading ? 'runtime probe를 불러오는 중입니다.' : 'probe result가 아직 없습니다.'}
+            </div>
+          `
+        : null}
+
+      ${probe
+        ? html`
+            <div class="grid gap-3 md:grid-cols-2">
+              <${RuntimeMetaRow} label="effective model" value=${probe.effective_model ?? '--'} />
+              <${RuntimeMetaRow} label="server" value=${probe.server_url ?? '--'} />
+              <${RuntimeMetaRow} label="loaded before/after" value=${`${fmtBoolean(probe.model_loaded_before_probe)} / ${fmtBoolean(probe.model_loaded_after_probe)}`} />
+              <${RuntimeMetaRow}
+                label="first run load"
+                value=${`${fmtNumber(firstRun?.load_duration_ms, 1)} ms`}
+              />
+              <${RuntimeMetaRow}
+                label="prompt tok/s"
+                value=${`${fmtNumber(firstRun?.prompt_tokens_per_second, 1)} tok/s`}
+              />
+              <${RuntimeMetaRow}
+                label="generation tok/s"
+                value=${`${fmtNumber(firstRun?.generation_tokens_per_second, 1)} tok/s`}
+              />
+              <${RuntimeMetaRow}
+                label="prompt eval delta"
+                value=${assessment?.prompt_eval_duration_reduction_ratio != null
+                  ? `${fmtNumber(assessment.prompt_eval_duration_reduction_ratio * 100, 1)}%`
+                  : '--'}
+              />
+              <${RuntimeMetaRow}
+                label="loaded models"
+                value=${String(probe.loaded_models_after?.length ?? probe.loaded_models_before?.length ?? 0)}
+              />
+            </div>
+
+            ${assessment?.note
+              ? html`
+                  <div class="mt-3 text-[12px] leading-relaxed text-[var(--text-muted)]">
+                    ${assessment.note}
+                  </div>
+                `
+              : null}
+
+            ${(probe.observations?.length ?? 0) > 0
+              ? html`
+                  <div class="mt-3 flex flex-col gap-2">
+                    ${probe.observations?.map(item => html`
+                      <div class="rounded-lg border border-[var(--card-border)] bg-[var(--white-6)] px-3 py-2 text-[12px] text-[var(--text-body)]">
+                        ${item}
+                      </div>
+                    `)}
+                  </div>
+                `
+              : null}
+
+            ${(probe.errors?.length ?? 0) > 0
+              ? html`
+                  <div class="mt-3 flex flex-col gap-2">
+                    ${probe.errors?.map(item => html`
+                      <div class="rounded-lg border border-[rgba(244,63,94,0.28)] bg-[rgba(244,63,94,0.10)] px-3 py-2 text-[12px] text-[#fecdd3]">
+                        ${item}
+                      </div>
+                    `)}
+                  </div>
+                `
+              : null}
+          `
+        : null}
+    </div>
+  `
+}
+
 export function ConfigResolutionPanel({
   resolution,
   runtimeResolution,
@@ -319,6 +505,8 @@ export function ConfigResolutionPanel({
                       `}
                 </div>
               </div>
+
+              <${RuntimeProbePanel} />
             </div>
           `
         : null}

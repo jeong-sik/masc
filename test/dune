@@ -241,6 +241,7 @@
         test_worker_runtime
         test_capability_registry
         test_tool_local_runtime_verify
+        test_tool_local_runtime_probe
         test_board_ttl
         test_worker_dev_tools
         test_oas_integration
@@ -385,6 +386,7 @@
         test_worker_runtime
         test_capability_registry
         test_tool_local_runtime_verify
+        test_tool_local_runtime_probe
         test_board_ttl
         test_worker_dev_tools
         test_oas_integration

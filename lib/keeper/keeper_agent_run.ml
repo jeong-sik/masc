@@ -1207,7 +1207,9 @@ let run_turn
                   Keeper_tool_disclosure.prune_boring_tools_after_recent_polling
                     ~visible_tools:all_allowed
                     ~recent_entries:
-                      (Keeper_tool_call_log.read_recent ~keeper_name:meta.name ~n:8 ())
+                      (match Keeper_tool_call_log.read_latest ~keeper_name:meta.name () with
+                       | Some entry -> [ entry ]
+                       | None -> [])
               in
               let core_count = List.length (Keeper_exec_tools.effective_core_tools ()) in
               let discovered_count =

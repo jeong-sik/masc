@@ -311,7 +311,7 @@ let test_deterministic_prefilter_surfaces_code_tools () =
       ~search_index
       ~query_text:"search code in the repository"
       ~selection_limit:3
-      ~core:["keeper_context_status"; "masc_status"]
+      ~core:(Keeper_exec_tools.effective_core_tools ())
   in
   Alcotest.(check bool) "code search appears without llm rerank"
     true (List.mem "masc_code_search" selected)

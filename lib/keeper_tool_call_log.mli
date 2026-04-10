@@ -79,5 +79,13 @@ val read_recent :
 (** [read_recent ?keeper_name ?n ()] returns the [n] most recent entries,
     optionally filtered by keeper name. Default [n=100]. *)
 
+val read_latest :
+  ?keeper_name:string ->
+  unit ->
+  Yojson.Safe.t option
+(** [read_latest ?keeper_name ()] returns the newest matching entry, if any.
+    Uses a small raw-line scan so hot-path callers can avoid materializing
+    a larger recent-entry window when they only need the latest tool. *)
+
 val reset_for_testing : unit -> unit
 (** Resets the in-memory store reference. For unit tests only. *)

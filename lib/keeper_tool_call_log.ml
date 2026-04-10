@@ -163,20 +163,20 @@ let read_recent ?keeper_name ?(n = 100) () : Yojson.Safe.t list =
   match !store_ref with
   | None -> []
   | Some store ->
-    (* Single-pass: read from store, filter, and collect last n in one traversal *)
-    let raw = Dated_jsonl.read_recent store (n * 5) in
-    let matches name json =
+    let keeper_matches name json =
       match Safe_ops.json_string_opt "keeper" json with
       | Some k -> String.equal k name
       | None -> false
     in
+    (* Single-pass: read from store, filter, and collect last n in one traversal *)
+    let raw = Dated_jsonl.read_recent store (n * 5) in
     let buf = Array.make n (`Null : Yojson.Safe.t) in
     let pos = ref 0 in
     let total = ref 0 in
     List.iter (fun json ->
       let dominated = match keeper_name with
         | None -> true
-        | Some name -> matches name json
+        | Some name -> keeper_matches name json
       in
       if dominated then begin
         buf.(!pos mod n) <- json;
@@ -189,3 +189,33 @@ let read_recent ?keeper_name ?(n = 100) () : Yojson.Safe.t list =
     else
       let start = if !total <= n then 0 else !pos mod n in
       List.init count (fun i -> buf.((start + i) mod n))
+
+let read_latest ?keeper_name () : Yojson.Safe.t option =
+  let keeper_matches name json =
+    match Safe_ops.json_string_opt "keeper" json with
+    | Some k -> String.equal k name
+    | None -> false
+  in
+  match !store_ref with
+  | None -> None
+  | Some store ->
+      let scan_limit =
+        match keeper_name with
+        | None -> 1
+        | Some _ -> 16
+      in
+      let raw_lines = Dated_jsonl.read_recent_lines store scan_limit in
+      let rec loop = function
+        | [] -> None
+        | line :: rest -> (
+            match Yojson.Safe.from_string line with
+            | exception Yojson.Json_error _ -> loop rest
+            | json ->
+                let dominated =
+                  match keeper_name with
+                  | None -> true
+                  | Some name -> keeper_matches name json
+                in
+                if dominated then Some json else loop rest)
+      in
+      loop (List.rev raw_lines)

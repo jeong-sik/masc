@@ -40,6 +40,11 @@ let write_raw_jsonl_rows dir rows =
   in
   Fs_compat.append_file path content
 
+let write_raw_jsonl_lines dir lines =
+  let path = today_jsonl_path dir in
+  let content = String.concat "\n" lines ^ "\n" in
+  Fs_compat.append_file path content
+
 (* ── Source roundtrip ────────────────────────────── *)
 
 let test_source_roundtrip () =
@@ -134,6 +139,23 @@ let test_agent_event_source () =
       | Some (`String s) -> s | _ -> "" in
     Alcotest.(check string) "tagged as agent_event" "agent_event" source
   | _ -> Alcotest.fail "expected Assoc"
+
+let test_agent_event_source_skips_malformed_lines () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "telem_agent_event_malformed" in
+  let telemetry_dir = Filename.concat dir ".masc/telemetry" in
+  Fs_compat.mkdir_p telemetry_dir;
+  write_raw_jsonl_lines telemetry_dir
+    [
+      {|{"timestamp":1000.0,"event":"good"}|};
+      "not-json";
+    ];
+  let entries =
+    Telemetry_unified.read_unified ~base_path:dir ~masc_root:(masc_root dir)
+      ~sources:[Telemetry_unified.Agent_event] ()
+  in
+  Alcotest.(check int) "malformed line skipped" 1 (List.length entries)
 
 (* ── Keeper metrics discovery ────────────────────── *)
 
@@ -324,6 +346,8 @@ let () =
         [
           Alcotest.test_case "empty base" `Quick test_empty_returns_empty;
           Alcotest.test_case "agent events" `Quick test_agent_event_source;
+          Alcotest.test_case "agent events skip malformed lines" `Quick
+            test_agent_event_source_skips_malformed_lines;
           Alcotest.test_case "keeper metrics" `Quick test_keeper_metrics_per_keeper;
           Alcotest.test_case "sorted newest first" `Quick test_sorted_newest_first;
           Alcotest.test_case "n limits output" `Quick test_n_limits_output;

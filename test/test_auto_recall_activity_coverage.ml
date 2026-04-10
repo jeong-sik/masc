@@ -342,6 +342,44 @@ let test_recent_activity_skips_bad_board_post_timestamp () =
   let items = Activity_feed.recent_activity config ~limit:10 () in
   check int "board post with bad timestamp skipped" 0 (List.length items)
 
+let test_recent_activity_skips_bad_board_comment_timestamp () =
+  with_temp_dir "activity-feed-comment-ts" @@ fun base_path ->
+  let config = Room.default_config base_path in
+  let masc_dir = Room.masc_dir config in
+  Fs_compat.mkdir_p masc_dir;
+  let comments_path = Filename.concat masc_dir "board_comments.jsonl" in
+  write_file comments_path
+    (Yojson.Safe.to_string
+       (`Assoc
+         [
+           ("id", `String "comment-bad-ts");
+           ("author", `String "alice");
+           ("content", `String "body");
+           ("created_at", `String "nope");
+         ])
+    ^ "\n");
+  let items = Activity_feed.recent_activity config ~limit:10 () in
+  check int "board comment with bad timestamp skipped" 0 (List.length items)
+
+let test_recent_activity_skips_bad_mention_timestamp () =
+  with_temp_dir "activity-feed-mention-ts" @@ fun base_path ->
+  let config = Room.default_config base_path in
+  let inbox_path = Mention_inbox.inbox_path config in
+  Fs_compat.mkdir_p (Filename.dirname inbox_path);
+  write_file inbox_path
+    (Yojson.Safe.to_string
+       (`Assoc
+         [
+           ("id", `String "mention-bad-ts");
+           ("source_agent", `String "alice");
+           ("target_agent", `String "bob");
+           ("content_preview", `String "hello");
+           ("created_at", `String "nope");
+         ])
+    ^ "\n");
+  let items = Activity_feed.recent_activity config ~limit:10 () in
+  check int "mention with bad timestamp skipped" 0 (List.length items)
+
 (* ============================================================
    Runner
    ============================================================ *)
@@ -401,5 +439,9 @@ let () =
         test_recent_activity_skips_bad_task_timestamp;
       test_case "skips bad board post timestamp" `Quick
         test_recent_activity_skips_bad_board_post_timestamp;
+      test_case "skips bad board comment timestamp" `Quick
+        test_recent_activity_skips_bad_board_comment_timestamp;
+      test_case "skips bad mention timestamp" `Quick
+        test_recent_activity_skips_bad_mention_timestamp;
     ];
   ]

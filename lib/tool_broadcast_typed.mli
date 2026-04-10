@@ -1,11 +1,7 @@
 (** Typed broadcast tool — Phase 1 PoC for compile-time tool safety.
+    Schema and parse derived from {!Agent_sdk.Tool_schema_gen} combinators.
 
     @since 2.260.0 *)
-
-type broadcast_input = {
-  message : string;
-  format : string option;
-}
 
 type broadcast_output = {
   delivered : bool;
@@ -13,8 +9,7 @@ type broadcast_output = {
   mention : string option;
 }
 
-val parse_broadcast : Yojson.Safe.t -> (broadcast_input, string) result
+val broadcast_schema : (string * string) Agent_sdk.Tool_schema_gen.schema
 val encode_broadcast : broadcast_output -> Yojson.Safe.t
-val broadcast_params : Agent_sdk.Types.tool_param list
-val handle_broadcast : broadcast_input -> (broadcast_output, string) result
-val tool : (broadcast_input, broadcast_output) Typed_tool_masc.t
+val handle_broadcast : string * string -> (broadcast_output, string) result
+val tool : (string * string, broadcast_output) Typed_tool_masc.t

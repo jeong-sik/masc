@@ -2,38 +2,38 @@
 
 open Masc_mcp
 
+let parse = Agent_sdk.Tool_schema_gen.parse Tool_broadcast_typed.broadcast_schema
+
 let test_parse_valid () =
   let json = `Assoc [("message", `String "hello world")] in
-  match Tool_broadcast_typed.parse_broadcast json with
-  | Ok input ->
-    Alcotest.(check string) "message" "hello world" input.message;
-    Alcotest.(check bool) "format is none" true (input.format = None)
+  match parse json with
+  | Ok (message, format) ->
+    Alcotest.(check string) "message" "hello world" message;
+    Alcotest.(check string) "format default" "" format
   | Error e -> Alcotest.fail ("parse failed: " ^ e)
 
 let test_parse_with_format () =
   let json = `Assoc [("message", `String "hi"); ("format", `String "compact")] in
-  match Tool_broadcast_typed.parse_broadcast json with
-  | Ok input ->
-    Alcotest.(check string) "message" "hi" input.message;
-    Alcotest.(check (option string)) "format" (Some "compact") input.format
+  match parse json with
+  | Ok (message, format) ->
+    Alcotest.(check string) "message" "hi" message;
+    Alcotest.(check string) "format" "compact" format
   | Error e -> Alcotest.fail ("parse failed: " ^ e)
 
 let test_parse_missing_message () =
   let json = `Assoc [("format", `String "compact")] in
-  match Tool_broadcast_typed.parse_broadcast json with
+  match parse json with
   | Ok _ -> Alcotest.fail "expected parse error"
   | Error _ -> ()
 
 let test_parse_wrong_type () =
   let json = `Assoc [("message", `Int 42)] in
-  match Tool_broadcast_typed.parse_broadcast json with
+  match parse json with
   | Ok _ -> Alcotest.fail "expected parse error"
   | Error _ -> ()
 
 let test_handler_success () =
-  let input : Tool_broadcast_typed.broadcast_input =
-    { message = "hello @claude"; format = None } in
-  match Tool_broadcast_typed.handle_broadcast input with
+  match Tool_broadcast_typed.handle_broadcast ("hello @claude", "") with
   | Ok output ->
     Alcotest.(check bool) "delivered" true output.delivered;
     Alcotest.(check string) "message" "hello @claude" output.room_message;
@@ -41,16 +41,12 @@ let test_handler_success () =
   | Error e -> Alcotest.fail ("handler failed: " ^ e)
 
 let test_handler_empty () =
-  let input : Tool_broadcast_typed.broadcast_input =
-    { message = "   "; format = None } in
-  match Tool_broadcast_typed.handle_broadcast input with
+  match Tool_broadcast_typed.handle_broadcast ("   ", "") with
   | Ok _ -> Alcotest.fail "expected error"
   | Error _ -> ()
 
 let test_handler_trim () =
-  let input : Tool_broadcast_typed.broadcast_input =
-    { message = "  trimmed  "; format = None } in
-  match Tool_broadcast_typed.handle_broadcast input with
+  match Tool_broadcast_typed.handle_broadcast ("  trimmed  ", "") with
   | Ok output -> Alcotest.(check string) "trimmed" "trimmed" output.room_message
   | Error e -> Alcotest.fail e
 

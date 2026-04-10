@@ -288,6 +288,38 @@ describe('FleetTelemetryPanel', () => {
     })
   })
 
+  it('ignores placeholder audit sources when deciding tool telemetry availability', async () => {
+    const { buildFleetRows } = await loadPanel({
+      fetchDashboardExecution: vi.fn().mockResolvedValue(executionResponse),
+      fetchToolQuality: vi.fn().mockResolvedValue(toolQualityResponse),
+      fetchTelemetrySummary: vi.fn().mockResolvedValue(telemetrySummaryResponse),
+    })
+
+    const keepers = normalizeKeepers([
+      {
+        name: 'keeper-placeholder-audit',
+        status: 'active',
+        keepalive_running: true,
+        context_ratio: 0.11,
+        total_turns: 2,
+        tool_audit_source: 'none',
+        latest_tool_call_count: null,
+      },
+    ])
+
+    const rows = buildFleetRows(keepers, {
+      ...toolQualityResponse,
+      by_keeper: [],
+    })
+
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({
+      name: 'keeper-placeholder-audit',
+      tool_calls: 0,
+      tool_activity_known: false,
+    })
+  })
+
   it('renders tool activity fallback copy instead of misleading no-tools text', async () => {
     const fetchDashboardExecution = vi.fn().mockResolvedValue({
       ...executionResponse,

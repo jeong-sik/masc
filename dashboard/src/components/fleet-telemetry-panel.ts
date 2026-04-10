@@ -176,10 +176,18 @@ function keeperToolCallCount(keeper: Keeper, toolQualityCalls?: number): number 
   return counts.length > 0 ? Math.max(...counts) : 0
 }
 
+function hasMeaningfulToolAuditSource(keeper: Keeper): boolean {
+  const source = normalizeText(keeper.tool_audit_source)
+  return source === 'heartbeat_task'
+    || source === 'heartbeat_result'
+    || source === 'keeper_decision_log'
+    || source === 'keeper_metrics'
+}
+
 function keeperHasToolTelemetry(keeper: Keeper, toolCalls: number, recentTools: string[]): boolean {
   return toolCalls > 0
     || recentTools.length > 0
-    || normalizeText(keeper.tool_audit_source) != null
+    || hasMeaningfulToolAuditSource(keeper)
     || normalizeText(keeper.tool_audit_at) != null
     || keeper.latest_tool_call_count != null
     || (typeof keeper.metrics_window?.tool_call_count === 'number' && Number.isFinite(keeper.metrics_window.tool_call_count))
@@ -381,7 +389,7 @@ function toolSummary(row: FleetRow): { label: string; title: string } {
 
 function summaryCounts(rows: FleetRow[]) {
   const live = rows.filter(row => row.keepalive_running).length
-  const toolCovered = rows.filter(row => row.tool_calls > 0 || row.tool_activity_known).length
+  const toolCovered = rows.filter(row => row.tool_calls > 0 || row.recent_tools.length > 0).length
   const hot = rows.filter(row => row.keepalive_running && row.context_ratio >= PRESSURE_HOT_RATIO).length
   const warn = rows.filter(row =>
     row.keepalive_running

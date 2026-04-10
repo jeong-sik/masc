@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from .config import get_config
 from .gate_client import GateClient, GateResponse
-from .imessage_bridge import InboundMessage, read_new_messages, send_message
+from .imessage_bridge import InboundMessage, advance_cursor, read_new_messages, send_message
 from .status_store import ConnectorRuntimeStatus, StatusStore
 
 logging.basicConfig(
@@ -118,14 +118,17 @@ class IMessageBot:
     async def _poll_once(self) -> None:
         """Single poll cycle: read new messages and dispatch."""
         messages = read_new_messages()
-        if messages:
-            self._last_cursor_rowid = messages[-1].rowid
+        if not messages:
+            return
+        self._last_cursor_rowid = messages[-1].rowid
         for msg in messages:
             try:
                 await self._handle_message(msg)
             except Exception as e:
                 logger.error("Error handling message ROWID %d: %s", msg.rowid, e)
                 self._messages_failed += 1
+        # Advance cursor only after all messages are processed (at-least-once).
+        advance_cursor(Path(self.cfg.cursor_path), messages[-1].rowid)
 
     async def _write_status(self) -> None:
         """Persist current status for dashboard consumption."""

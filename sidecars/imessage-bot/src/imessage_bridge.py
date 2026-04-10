@@ -89,8 +89,12 @@ def _read_cursor(path: Path) -> int:
         return 0
 
 
-def _write_cursor(path: Path, rowid: int) -> None:
-    """Persist last seen ROWID atomically."""
+def advance_cursor(path: Path, rowid: int) -> None:
+    """Persist last seen ROWID atomically.
+
+    Call after messages are successfully processed to ensure
+    at-least-once delivery: unprocessed messages are re-fetched on restart.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f".{path.name}.tmp")
     try:
@@ -142,8 +146,7 @@ def read_new_messages() -> list[InboundMessage]:
                 )
                 messages.append(msg)
             if messages:
-                _write_cursor(cursor_path, messages[-1].rowid)
-                logger.info("Read %d new message(s), cursor now at ROWID %d", len(messages), messages[-1].rowid)
+                logger.info("Read %d new message(s) up to ROWID %d", len(messages), messages[-1].rowid)
         finally:
             conn.close()
     except sqlite3.OperationalError as e:
@@ -163,6 +166,9 @@ def read_new_messages() -> list[InboundMessage]:
 def send_message(recipient: str, text: str) -> bool:
     """Send an iMessage via AppleScript.
 
+    Uses ``on run argv`` to pass parameters as native AppleScript text
+    objects, eliminating string-literal injection risks entirely.
+
     Args:
         recipient: Phone number or Apple ID email.
         text: Message body.
@@ -170,21 +176,18 @@ def send_message(recipient: str, text: str) -> bool:
     Returns:
         True if AppleScript executed without error.
     """
-    # Escape special characters for AppleScript string literals.
-    # AppleScript does not support literal newlines in "..." strings.
-    escaped_text = text.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n").replace("\r", "")
-    escaped_recipient = recipient.replace("\\", "\\\\").replace('"', '\\"')
-
     script = (
-        f'tell application "Messages"\n'
-        f'  set targetBuddy to participant "{escaped_recipient}" of account 1\n'
-        f'  send "{escaped_text}" to targetBuddy\n'
-        f'end tell'
+        'on run argv\n'
+        '  tell application "Messages"\n'
+        '    set theBuddy to participant (item 1 of argv) of account 1\n'
+        '    send (item 2 of argv) to theBuddy\n'
+        '  end tell\n'
+        'end run'
     )
 
     try:
         result = subprocess.run(
-            ["osascript", "-e", script],
+            ["osascript", "-e", script, recipient, text],
             capture_output=True,
             text=True,
             timeout=15,

@@ -179,9 +179,9 @@ class GateClient:
         except httpx.TimeoutException:
             self._note_failure(f"timeout after {self._timeout}s")
             return GateResponse.from_error(f"timeout after {self._timeout}s")
-        except httpx.HTTPError as e:
-            self._note_failure(f"http error: {e}")
-            return GateResponse.from_error(f"http error: {e}")
+        except httpx.HTTPError:
+            self._note_failure("http request failed")
+            return GateResponse.from_error("http request failed")
 
     async def health_check(self) -> bool:
         if self._breaker_is_open():

@@ -906,18 +906,21 @@ let sample_prompt_metrics ?(system_prompt = "You are a keeper.")
   KAR.build_prompt_metrics ~system_prompt ~dynamic_context ~user_message
 
 let make_run_result ~text ~tools ~model ~input_tok ~output_tok
-    : Masc_mcp.Keeper_agent_run.run_result =
+    ?run_validation
+    ?cascade_observation
+    () : Masc_mcp.Keeper_agent_run.run_result =
   {
     response_text = text;
     model_used = model;
     prompt_metrics = sample_prompt_metrics ();
-    cascade_observation = None;
+    cascade_observation;
     turn_count = 1;
     tool_calls_made = List.length tools;
     usage = { input_tokens = input_tok; output_tokens = output_tok; cache_creation_input_tokens = 0; cache_read_input_tokens = 0; cost_usd = None };
     tools_used = tools;
     checkpoint = None;
     proof = None;
+    run_validation;
     stop_reason = Masc_mcp.Oas_worker.Completed;
     inference_telemetry = None;
   }
@@ -951,7 +954,7 @@ let test_prompt_metrics_fingerprint_is_deterministic () =
 let test_metrics_text_response () =
   let result =
     make_run_result ~text:"I checked the board." ~tools:[]
-      ~model:"test-model" ~input_tok:100 ~output_tok:50
+      ~model:"test-model" ~input_tok:100 ~output_tok:50 ()
   in
   let updated =
     UT.update_metrics_from_result minimal_meta ~latency_ms:200
@@ -971,10 +974,68 @@ let test_metrics_text_response () =
   check int "input tokens" (minimal_meta.runtime.usage.total_input_tokens + 100) updated.runtime.usage.total_input_tokens;
   check int "output tokens" (minimal_meta.runtime.usage.total_output_tokens + 50) updated.runtime.usage.total_output_tokens
 
+let test_metrics_surface_model_prefers_successful_cascade_label () =
+  let selected_label = "llama:qwen3.5-3b-a3b-ud-q8-xl" in
+  let result =
+    make_run_result ~text:"I checked the board." ~tools:[]
+      ~model:"qwen3.5:27b-nvfp4" ~input_tok:100 ~output_tok:50
+      ~cascade_observation:
+        {
+          Masc_mcp.Oas_worker.cascade_name = "keeper_unified";
+          configured_labels = [ "llama:auto" ];
+          candidate_models =
+            [ "llama:qwen3.5-35b-a3b-ud-q8-xl"; selected_label ];
+          primary_model = Some "llama:qwen3.5-35b-a3b-ud-q8-xl";
+          selected_model = Some "qwen3.5:27b-nvfp4";
+          selected_model_raw = Some "qwen3.5:27b-nvfp4";
+          selected_index = None;
+          fallback_hops = Some 1;
+          fallback_applied = true;
+          attempts =
+            [
+              {
+                Masc_mcp.Oas_worker.attempt_index = 0;
+                model_id = "qwen3.5-35b-a3b-ud-q8-xl";
+                model_label = Some "llama:qwen3.5-35b-a3b-ud-q8-xl";
+                latency_ms = None;
+                error = Some "HTTP 503";
+              };
+              {
+                attempt_index = 1;
+                model_id = "qwen3.5-3b-a3b-ud-q8-xl";
+                model_label = Some selected_label;
+                latency_ms = Some 187;
+                error = None;
+              };
+            ];
+          fallback_events =
+            [
+              {
+                from_model_id = "qwen3.5-35b-a3b-ud-q8-xl";
+                from_model_label = Some "llama:qwen3.5-35b-a3b-ud-q8-xl";
+                to_model_id = "qwen3.5-3b-a3b-ud-q8-xl";
+                to_model_label = Some selected_label;
+                reason = "HTTP 503";
+              };
+            ];
+          attempt_details_available = true;
+          attempt_details_source = "oas_metrics_callbacks";
+        }
+      ()
+  in
+  let updated =
+    UT.update_metrics_from_result minimal_meta ~latency_ms:200
+      ~observation:base_observation result
+  in
+  check string "helper canonicalizes surface model" selected_label
+    (KAR.surface_model_used result);
+  check string "last_model_used stores canonical surface label" selected_label
+    updated.runtime.usage.last_model_used
+
 let test_metrics_tool_response () =
   let result =
     make_run_result ~text:"" ~tools:["keeper_board_post"; "keeper_board_comment"]
-      ~model:"test-model" ~input_tok:200 ~output_tok:80
+      ~model:"test-model" ~input_tok:200 ~output_tok:80 ()
   in
   let updated =
     UT.update_metrics_from_result minimal_meta ~latency_ms:500
@@ -990,12 +1051,14 @@ let test_metrics_tool_response () =
      = Masc_mcp.Keeper_types.Proactive_tool_use);
   check int "autonomous_action +2" (minimal_meta.runtime.autonomous_action_count + 2)
     updated.runtime.autonomous_action_count;
+  check bool "last autonomous action ts updated" true
+    (String.trim updated.runtime.last_autonomous_action_at <> "");
   check int "latency_ms" 500 updated.runtime.usage.last_latency_ms
 
 let test_metrics_noop_response () =
   let result =
     make_run_result ~text:"" ~tools:[]
-      ~model:"test-model" ~input_tok:50 ~output_tok:10
+      ~model:"test-model" ~input_tok:50 ~output_tok:10 ()
   in
   let updated =
     UT.update_metrics_from_result minimal_meta ~latency_ms:100
@@ -1014,10 +1077,119 @@ let test_metrics_noop_response () =
     updated.runtime.autonomous_action_count;
   check int "total_turns +1" (minimal_meta.runtime.usage.total_turns + 1) updated.runtime.usage.total_turns
 
+let sample_run_ref : Agent_sdk.Raw_trace.run_ref = {
+  worker_run_id = "test-run"; path = "/tmp/test.jsonl";
+  start_seq = 0; end_seq = 5; agent_name = "test"; session_id = None;
+}
+
+let test_metrics_validated_evidence_counts_as_visible () =
+  let validation : Agent_sdk.Raw_trace.run_validation = {
+    run_ref = sample_run_ref; ok = true;
+    checks = []; evidence = ["tool_paired:keeper_fs_read"];
+    paired_tool_result_count = 1; has_file_write = false;
+    verification_pass_after_file_write = false;
+    final_text = None; tool_names = ["keeper_fs_read"];
+    stop_reason = None; failure_reason = None;
+  } in
+  let result =
+    make_run_result ~text:"" ~tools:[]
+      ~model:"test-model" ~input_tok:50 ~output_tok:10
+      ~run_validation:validation ()
+  in
+  let updated =
+    UT.update_metrics_from_result minimal_meta ~latency_ms:100
+      ~observation:base_observation result
+  in
+  check int "proactive visible_count +1"
+    (minimal_meta.runtime.proactive_rt.visible_count_total + 1)
+    updated.runtime.proactive_rt.visible_count_total;
+  check bool "validated evidence outcome is tool_use" true
+    (updated.runtime.proactive_rt.last_outcome
+     = Masc_mcp.Keeper_types.Proactive_tool_use);
+  check string "validated evidence preview"
+    "(validated evidence: keeper_fs_read)"
+    updated.runtime.proactive_rt.last_preview;
+  check int "noop unchanged"
+    minimal_meta.runtime.noop_turn_count
+    updated.runtime.noop_turn_count;
+  check int "autonomous action unchanged"
+    minimal_meta.runtime.autonomous_action_count
+    updated.runtime.autonomous_action_count;
+  check string "last autonomous action ts unchanged"
+    minimal_meta.runtime.last_autonomous_action_at
+    updated.runtime.last_autonomous_action_at;
+  check bool "last_reason contains validated_evidence" true
+    (String.length updated.runtime.proactive_rt.last_reason > 0
+     && (let r = updated.runtime.proactive_rt.last_reason in
+         try ignore (Str.search_forward (Str.regexp_string "validated_evidence") r 0); true
+         with Not_found -> false))
+
+let test_metrics_failed_validation_does_not_count_as_visible () =
+  let validation : Agent_sdk.Raw_trace.run_validation = {
+    run_ref = sample_run_ref; ok = false;
+    checks = []; evidence = [];
+    paired_tool_result_count = 0; has_file_write = false;
+    verification_pass_after_file_write = false;
+    final_text = None; tool_names = [];
+    stop_reason = None; failure_reason = Some "validation failed";
+  } in
+  let result =
+    make_run_result ~text:"" ~tools:[]
+      ~model:"test-model" ~input_tok:50 ~output_tok:10
+      ~run_validation:validation ()
+  in
+  let updated =
+    UT.update_metrics_from_result minimal_meta ~latency_ms:100
+      ~observation:base_observation result
+  in
+  check int "proactive visible_count unchanged"
+    minimal_meta.runtime.proactive_rt.visible_count_total
+    updated.runtime.proactive_rt.visible_count_total;
+  check bool "outcome is silent" true
+    (updated.runtime.proactive_rt.last_outcome
+     = Masc_mcp.Keeper_types.Proactive_silent)
+
+let test_metrics_file_write_evidence_counts_as_visible () =
+  let validation : Agent_sdk.Raw_trace.run_validation = {
+    run_ref = sample_run_ref; ok = true;
+    checks = []; evidence = [];
+    paired_tool_result_count = 0; has_file_write = true;
+    verification_pass_after_file_write = true;
+    final_text = None; tool_names = ["keeper_fs_write"];
+    stop_reason = None; failure_reason = None;
+  } in
+  let result =
+    make_run_result ~text:"" ~tools:[]
+      ~model:"test-model" ~input_tok:50 ~output_tok:10
+      ~run_validation:validation ()
+  in
+  let updated =
+    UT.update_metrics_from_result minimal_meta ~latency_ms:100
+      ~observation:base_observation result
+  in
+  check int "proactive visible_count +1"
+    (minimal_meta.runtime.proactive_rt.visible_count_total + 1)
+    updated.runtime.proactive_rt.visible_count_total;
+  check bool "file write evidence outcome is tool_use" true
+    (updated.runtime.proactive_rt.last_outcome
+     = Masc_mcp.Keeper_types.Proactive_tool_use);
+  check string "file write evidence preview"
+    "(validated evidence: file_write)"
+    updated.runtime.proactive_rt.last_preview;
+  check int "noop unchanged"
+    minimal_meta.runtime.noop_turn_count
+    updated.runtime.noop_turn_count;
+  check int "autonomous action unchanged"
+    minimal_meta.runtime.autonomous_action_count
+    updated.runtime.autonomous_action_count;
+  check string "last autonomous action ts unchanged"
+    minimal_meta.runtime.last_autonomous_action_at
+    updated.runtime.last_autonomous_action_at
+
 let test_metrics_heartbeat_only_tool_response_is_maintenance_only () =
   let result =
     make_run_result ~text:"" ~tools:[]
-      ~model:"test-model" ~input_tok:40 ~output_tok:0
+      ~model:"test-model" ~input_tok:40 ~output_tok:0 ()
   in
   let updated =
     UT.update_metrics_from_result minimal_meta ~latency_ms:80
@@ -1050,7 +1222,7 @@ let test_metrics_reactive_turn_does_not_mutate_proactive_runtime () =
   in
   let result =
     make_run_result ~text:"On it." ~tools:[]
-      ~model:"test-model" ~input_tok:90 ~output_tok:30
+      ~model:"test-model" ~input_tok:90 ~output_tok:30 ()
   in
   let updated =
     UT.update_metrics_from_result minimal_meta ~latency_ms:120
@@ -1069,7 +1241,7 @@ let test_metrics_reactive_turn_does_not_mutate_proactive_runtime () =
 let test_silent_proactive_cycle_advances_cooldown_anchor () =
   let result =
     make_run_result ~text:"" ~tools:[]
-      ~model:"test-model" ~input_tok:40 ~output_tok:10
+      ~model:"test-model" ~input_tok:40 ~output_tok:10 ()
   in
   let updated =
     UT.update_metrics_from_result
@@ -1143,7 +1315,7 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
       let result =
         {
           (make_run_result ~text:"Observed" ~tools:[]
-             ~model:"openai:qwen3.5-35b" ~input_tok:40 ~output_tok:20)
+             ~model:"qwen3.5:27b-nvfp4" ~input_tok:40 ~output_tok:20 ())
           with
           prompt_metrics =
             sample_prompt_metrics
@@ -1155,12 +1327,15 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
             Some
               {
                 Masc_mcp.Oas_worker.cascade_name = "keeper_unified";
-                configured_labels = [ "glm:auto"; "llama:auto" ];
+                configured_labels = [ "llama:auto" ];
                 candidate_models =
-                  [ "glm:glm-5.1"; "openai:qwen3.5-35b" ];
-                primary_model = Some "glm:glm-5.1";
-                selected_model = Some "openai:qwen3.5-35b";
-                selected_model_raw = Some "qwen3.5-35b";
+                  [
+                    "llama:qwen3.5-35b-a3b-ud-q8-xl";
+                    "llama:qwen3.5-3b-a3b-ud-q8-xl";
+                  ];
+                primary_model = Some "llama:qwen3.5-35b-a3b-ud-q8-xl";
+                selected_model = Some "qwen3.5:27b-nvfp4";
+                selected_model_raw = Some "qwen3.5:27b-nvfp4";
                 selected_index = Some 1;
                 fallback_hops = Some 1;
                 fallback_applied = true;
@@ -1168,15 +1343,15 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
                   [
                     {
                       Masc_mcp.Oas_worker.attempt_index = 0;
-                      model_id = "glm-5.1";
-                      model_label = Some "glm:glm-5.1";
+                      model_id = "qwen3.5-35b-a3b-ud-q8-xl";
+                      model_label = Some "llama:qwen3.5-35b-a3b-ud-q8-xl";
                       latency_ms = None;
                       error = Some "HTTP 503";
                     };
                     {
                       attempt_index = 1;
-                      model_id = "qwen3.5-35b";
-                      model_label = Some "openai:qwen3.5-35b";
+                      model_id = "qwen3.5-3b-a3b-ud-q8-xl";
+                      model_label = Some "llama:qwen3.5-3b-a3b-ud-q8-xl";
                       latency_ms = Some 187;
                       error = None;
                     };
@@ -1184,10 +1359,10 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
                 fallback_events =
                   [
                     {
-                      from_model_id = "glm-5.1";
-                      from_model_label = Some "glm:glm-5.1";
-                      to_model_id = "qwen3.5-35b";
-                      to_model_label = Some "openai:qwen3.5-35b";
+                      from_model_id = "qwen3.5-35b-a3b-ud-q8-xl";
+                      from_model_label = Some "llama:qwen3.5-35b-a3b-ud-q8-xl";
+                      to_model_id = "qwen3.5-3b-a3b-ud-q8-xl";
+                      to_model_label = Some "llama:qwen3.5-3b-a3b-ud-q8-xl";
                       reason = "HTTP 503";
                     };
                   ];
@@ -1235,6 +1410,9 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
         | _ -> fail "expected one metrics line"
       in
       let json = Yojson.Safe.from_string line in
+      check string "metrics snapshot uses canonical surface model"
+        "llama:qwen3.5-3b-a3b-ud-q8-xl"
+        Yojson.Safe.Util.(json |> member "model_used" |> to_string);
       check bool "cascade field present" true
         Yojson.Safe.Util.(json |> member "cascade" <> `Null);
       check string "cascade name persisted" "keeper_unified"
@@ -1279,6 +1457,68 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
           json |> member "prompt" |> member "user_message"
           |> member "fingerprint" |> to_string))
 
+let test_append_metrics_snapshot_treats_validated_evidence_as_tool_use () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc_mcp.Room.default_config base_dir in
+      let validation : Agent_sdk.Raw_trace.run_validation = {
+        run_ref = sample_run_ref; ok = true;
+        checks = []; evidence = ["tool_paired:keeper_fs_read"];
+        paired_tool_result_count = 1; has_file_write = false;
+        verification_pass_after_file_write = false;
+        final_text = None; tool_names = ["keeper_fs_read"];
+        stop_reason = None; failure_reason = None;
+      } in
+      let result =
+        make_run_result ~text:"" ~tools:[]
+          ~model:"openai:qwen3.5-35b" ~input_tok:40 ~output_tok:20
+          ~run_validation:validation ()
+      in
+      UT.append_metrics_snapshot
+        ~config
+        ~meta:minimal_meta
+        ~observation:base_observation
+        ~result
+        ~latency_ms:123
+        ~turn_cost:0.01
+        ~turn_generation:1
+        ~channel:"scheduled_autonomous"
+        ~snapshot_source:"test"
+        ~context_ratio:0.1
+        ~context_tokens:10
+        ~context_max:100
+        ~message_count:2
+        ~compaction:
+          {
+            Masc_mcp.Keeper_exec_context.applied = false;
+            trigger = None;
+            decision = "no_compaction";
+            before_tokens = 0;
+            after_tokens = 0;
+            saved_tokens = 0;
+          }
+        ~handoff_json:None
+        ();
+      let metrics_store =
+        Masc_mcp.Keeper_types.keeper_metrics_store config minimal_meta.name
+      in
+      let line =
+        match Dated_jsonl.read_recent_lines metrics_store 1 with
+        | [ line ] -> line
+        | _ -> fail "expected one metrics line"
+      in
+      let json = Yojson.Safe.from_string line in
+      check string "work kind persisted as tool_use" "tool_use"
+        Yojson.Safe.Util.(json |> member "work_kind" |> to_string);
+      check string "scheduled autonomous outcome persisted as tool_use"
+        "tool_use"
+        Yojson.Safe.Util.(
+          json |> member "scheduled_autonomous_outcome" |> to_string))
+
 (* context_overflow_limit is now in OAS as Retry.extract_context_limit.
    These tests verify the OAS SSOT API is accessible from MASC. *)
 let test_context_overflow_limit_parses_common_oas_errors () =
@@ -1318,7 +1558,7 @@ let test_metrics_persist_social_state_fields () =
       ~text:
         "SOCIAL_MODEL: bdi_speech_v1\nBELIEF_SUMMARY: quiet_room\nACTIVE_DESIRE: maintain_quiet_readiness\nCURRENT_INTENTION: stay_available_without_noise\nBLOCKER: none\nNEED: none\nSPEECH_ACT: stay_silent\nDELIVERY_SURFACE: silent"
       ~tools:[]
-      ~model:"test-model" ~input_tok:50 ~output_tok:10
+      ~model:"test-model" ~input_tok:50 ~output_tok:10 ()
   in
   let base_dir = temp_dir () in
   Fun.protect
@@ -1624,7 +1864,7 @@ let test_side_effect_reclassification_drops_keeper_read_only_tools_from_mixed_se
 let test_metrics_mixed_response () =
   let result =
     make_run_result ~text:"Done." ~tools:["keeper_fs_read"]
-      ~model:"test-model" ~input_tok:150 ~output_tok:60
+      ~model:"test-model" ~input_tok:150 ~output_tok:60 ()
   in
   let updated =
     UT.update_metrics_from_result minimal_meta ~latency_ms:300
@@ -1784,7 +2024,7 @@ let test_social_model_silences_skip_only_turn () =
       ~text:
         "SOCIAL_MODEL: bdi_speech_v1\nBELIEF_SUMMARY: quiet_room\nACTIVE_DESIRE: maintain_quiet_readiness\nCURRENT_INTENTION: stay_available_without_noise\nBLOCKER: none\nNEED: none\nSPEECH_ACT: stay_silent\nDELIVERY_SURFACE: silent"
       ~tools:[]
-      ~model:"test-model" ~input_tok:20 ~output_tok:5
+      ~model:"test-model" ~input_tok:20 ~output_tok:5 ()
   in
   let base_dir = temp_dir () in
   Fun.protect
@@ -1804,7 +2044,7 @@ let test_social_model_silences_skip_only_turn () =
 let test_social_model_infers_visible_reply_without_headers () =
   let result =
     make_run_result ~text:"I think I should ask for help." ~tools:[]
-      ~model:"test-model" ~input_tok:20 ~output_tok:5
+      ~model:"test-model" ~input_tok:20 ~output_tok:5 ()
   in
   let base_dir = temp_dir () in
   Fun.protect
@@ -1826,7 +2066,7 @@ let test_social_model_infers_visible_reply_without_headers () =
 let test_social_model_empty_text_without_headers_stays_silent () =
   let result =
     make_run_result ~text:"" ~tools:[]
-      ~model:"test-model" ~input_tok:20 ~output_tok:5
+      ~model:"test-model" ~input_tok:20 ~output_tok:5 ()
   in
   let routed, state =
     KSM.apply_to_result ~meta:minimal_meta
@@ -1847,7 +2087,7 @@ let test_social_model_routes_blocker_to_board_post () =
       ~text:
         "SOCIAL_MODEL: bdi_speech_v1\nBELIEF_SUMMARY: quiet_room\nACTIVE_DESIRE: seek_help\nCURRENT_INTENTION: recover_tool_route\nBLOCKER: tool route unavailable\nNEED: tool route or operator guidance\nSPEECH_ACT: request_help\nDELIVERY_SURFACE: board_post"
       ~tools:[]
-      ~model:"test-model" ~input_tok:30 ~output_tok:10
+      ~model:"test-model" ~input_tok:30 ~output_tok:10 ()
   in
   let base_dir = temp_dir () in
   Fun.protect
@@ -1888,7 +2128,7 @@ let test_social_model_routes_blocker_to_board_post () =
 let test_social_model_tool_only_turn_skips_protocol_violation () =
   let result =
     make_run_result ~text:"" ~tools:["masc_status"]
-      ~model:"test-model" ~input_tok:10 ~output_tok:1
+      ~model:"test-model" ~input_tok:10 ~output_tok:1 ()
   in
   let routed, state =
     KSM.apply_to_result ~meta:minimal_meta
@@ -1905,7 +2145,7 @@ let test_social_model_tool_only_turn_skips_protocol_violation () =
 let test_social_model_infers_board_comment_from_tool_use () =
   let result =
     make_run_result ~text:"" ~tools:["keeper_board_comment"; "masc_status"]
-      ~model:"test-model" ~input_tok:10 ~output_tok:1
+      ~model:"test-model" ~input_tok:10 ~output_tok:1 ()
   in
   let routed, state =
     KSM.apply_to_result ~meta:minimal_meta
@@ -2209,8 +2449,16 @@ let () =
           test_case "prompt metrics fingerprint" `Quick
             test_prompt_metrics_fingerprint_is_deterministic;
           test_case "text response" `Quick test_metrics_text_response;
+          test_case "surface model prefers successful cascade label" `Quick
+            test_metrics_surface_model_prefers_successful_cascade_label;
           test_case "tool response" `Quick test_metrics_tool_response;
           test_case "noop response" `Quick test_metrics_noop_response;
+          test_case "validated evidence counts as visible" `Quick
+            test_metrics_validated_evidence_counts_as_visible;
+          test_case "failed validation does not count as visible" `Quick
+            test_metrics_failed_validation_does_not_count_as_visible;
+          test_case "file write evidence counts as visible" `Quick
+            test_metrics_file_write_evidence_counts_as_visible;
           test_case "heartbeat-only tool response is maintenance only" `Quick
             test_metrics_heartbeat_only_tool_response_is_maintenance_only;
           test_case "reactive turn leaves proactive runtime untouched" `Quick
@@ -2223,6 +2471,8 @@ let () =
             test_meta_migration_does_not_infer_visible_proactive_fields;
           test_case "snapshot includes cascade observation" `Quick
             test_append_metrics_snapshot_includes_cascade_observation;
+          test_case "snapshot treats validated evidence as tool use" `Quick
+            test_append_metrics_snapshot_treats_validated_evidence_as_tool_use;
           test_case "social fields" `Quick
             test_metrics_persist_social_state_fields;
           test_case "failure response" `Quick test_metrics_failure_response;

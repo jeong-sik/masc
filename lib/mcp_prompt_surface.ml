@@ -150,17 +150,12 @@ let tool_help_text ~tool_name ~focus schemas =
            @
            (if entry.doc_refs = [] then [] else "" :: "Docs:" :: List.map (fun item -> "- " ^ item) entry.doc_refs)))
 
-let team_session_proof_text ~config ~session_id ~operation_id =
-  let proof_json =
-    Dashboard_proof.json ~config ~session_id ?operation_id ()
-    |> Yojson.Safe.pretty_to_string
-  in
+let team_session_proof_text ~config:_ ~session_id ~operation_id:_ =
+  (* Dashboard_proof removed *)
   String.concat "\n"
     [
-      "Summarize this team-session proof without exposing chain-of-thought.";
-      "Report who collaborated, what evidence exists, and what is still missing.";
-      "";
-      proof_json;
+      "Team session proof is not available (team session layer removed).";
+      Printf.sprintf "Session: %s" session_id;
     ]
 
 let command_truth_text ~config ?operation_id ?run_id () =

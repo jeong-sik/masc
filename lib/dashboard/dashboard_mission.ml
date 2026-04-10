@@ -37,17 +37,9 @@ type attention_context = Dashboard_mission_assembly.attention_context = {
   json : Yojson.Safe.t;
 }
 
-let active_or_recent_sessions config =
-  let cutoff_unix = Time_compat.now () -. Masc_time_constants.day in
-  let cutoff_iso = iso_of_unix cutoff_unix in
-  let is_active_or_recent (session : Team_session_types.session) =
-    match session.status with
-    | Running | Paused -> true
-    | _ -> session.updated_at_iso >= cutoff_iso
-  in
-  Team_session_store.list_sessions ~since_unix:cutoff_unix
-    ~limit:(Dashboard_http_helpers.dashboard_session_list_limit ()) config
-  |> List.filter is_active_or_recent
+let active_or_recent_sessions _config =
+  (* Team_session_store removed — return empty *)
+  ([] : Team_session_types.session list)
 
 let room_scope_cache_segment (_config : Room_utils.config) = "default"
 
@@ -781,9 +773,9 @@ let session_json ?actor ?command_plane_summary ?swarm_status ~session_id ~config
       projection.sessions
   in
   let worker_runs_json =
-    match Team_session_store.load_session config session_id with
-    | Some session -> U.member "worker_runs" (Team_session_engine_eio.session_status_json config session)
-    | None -> `Null
+    (* Team_session_store + Team_session_engine_eio removed *)
+    ignore (config, session_id);
+    `Null
   in
   let operation_contexts = Dashboard_mission_assembly.build_operation_contexts projection.command_json in
   let operations_json =

@@ -389,12 +389,9 @@ let make_detachment_runtime config (target_unit : unit_record) (operation : oper
     else None
   in
   let session_last_event =
-    match session_id with
-    | Some value -> (
-        match Team_session_store.load_session config value with
-        | Some session -> Option.map iso_of_unix session.last_event_at
-        | None -> None)
-    | None -> None
+    (* Team_session_store removed — no session event lookup *)
+    ignore (config, session_id);
+    None
   in
   let last_progress_at =
     match session_last_event, session_id with

@@ -155,33 +155,15 @@ let strict_release_requires_handoff = function
   | Some ({ contract = Some contract; _ } : Types.task) -> contract.strict
   | _ -> false
 
-let contract_gate_rejection_message (snapshot : Task_contract_gate.task_snapshot)
-    =
-  let reasons =
-    snapshot.done_gate.reasons @ snapshot.unmet_completion_contract
-    |> List.sort_uniq String.compare
-  in
-  let details =
-    match reasons with
-    | [] -> "task contract gate is not ready"
-    | reasons -> String.concat "; " reasons
-  in
-  Printf.sprintf
-    "Completion rejected by persisted task contract gate: %s"
-    details
+let _contract_gate_rejection_message _reasons =
+  (* Task_contract_gate removed — always allow completion *)
+  "task contract gate is not available"
 
 let persisted_contract_rejection ~(ctx : context)
     ~(task_opt : Types.task option) ~(notes : string) =
-  match task_opt with
-  | Some task when Option.is_some task.contract ->
-      let snapshot =
-        Task_contract_gate.evaluate ~completion_notes:notes ctx.config task
-      in
-      if Task_contract_gate.done_gate_allows_completion snapshot then
-        None
-      else
-        Some (contract_gate_rejection_message snapshot)
-  | _ -> None
+  (* Task_contract_gate removed — always allow completion *)
+  ignore (ctx, task_opt, notes);
+  None
 
 (* Handlers *)
 

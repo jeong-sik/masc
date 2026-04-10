@@ -116,8 +116,8 @@ let handle_broadcast (ctx : context) : result option =
       ~content:message
       ~mention
     in
-    Team_session_engine_eio.increment_broadcast_from_external config
-      ~agent_name;
+    (* Team_session_engine_eio removed — skip broadcast increment *)
+    ignore (config, agent_name);
     Audit_log.log_broadcast config ~agent_id:agent_name
       ~room_id:(Filename.basename config.base_path)
       ~message_preview:message ();

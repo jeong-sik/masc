@@ -1,0 +1,126 @@
+"""Configuration for Telegram Gate Bot.
+
+Loads and validates all required environment variables.
+Fails fast at startup if any required config is missing.
+"""
+
+from __future__ import annotations
+
+import ipaddress
+from typing import Final
+from urllib.parse import urlparse
+
+from pydantic import AliasChoices, Field, field_validator, model_validator
+from pydantic_settings import BaseSettings
+
+DEFAULT_STATE_DIR: Final[str] = ".masc/connectors/telegram"
+DEFAULT_BINDING_STORE_PATH: Final[str] = ".masc/connectors/telegram/bindings.json"
+DEFAULT_STATUS_PATH: Final[str] = ".masc/connectors/telegram/status.json"
+
+
+def _is_loopback_host(raw_host: str | None) -> bool:
+    if raw_host is None:
+        return False
+    host = raw_host.strip().lower()
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+class BotConfig(BaseSettings):
+    """Bot configuration from environment variables."""
+
+    model_config = {"env_prefix": "", "case_sensitive": True, "env_file": ".env"}
+
+    # Required: Telegram Bot API token from @BotFather
+    telegram_bot_token: str = Field(
+        validation_alias=AliasChoices("TELEGRAM_BOT_TOKEN", "telegram_bot_token")
+    )
+
+    # Gate connection
+    gate_base_url: str = Field(
+        default="http://localhost:8935",
+        validation_alias=AliasChoices("GATE_BASE_URL", "gate_base_url"),
+    )
+    gate_api_token: str = Field(
+        default="",
+        validation_alias=AliasChoices("GATE_API_TOKEN", "gate_api_token"),
+    )
+
+    # Default keeper when no binding exists
+    default_keeper: str = Field(
+        default="sangsu",
+        validation_alias=AliasChoices("TELEGRAM_DEFAULT_KEEPER", "default_keeper"),
+    )
+
+    # Admin user IDs (comma-separated Telegram user IDs)
+    admin_user_ids: str = Field(
+        default="",
+        validation_alias=AliasChoices("TELEGRAM_ADMIN_USER_IDS", "admin_user_ids"),
+    )
+
+    # Timeouts
+    gate_timeout_sec: float = Field(
+        default=120.0,
+        validation_alias=AliasChoices("GATE_TIMEOUT_SEC", "gate_timeout_sec"),
+    )
+    gate_breaker_failure_threshold: int = Field(default=3)
+    gate_breaker_reset_sec: int = Field(default=30)
+    status_cache_ttl_sec: int = Field(default=15)
+    keeper_cache_ttl_sec: int = Field(default=30)
+
+    # State paths
+    binding_store_path: str = Field(default=DEFAULT_BINDING_STORE_PATH)
+    status_path: str = Field(default=DEFAULT_STATUS_PATH)
+
+    @field_validator("telegram_bot_token")
+    @classmethod
+    def token_not_empty(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("TELEGRAM_BOT_TOKEN is required")
+        return v.strip()
+
+    @model_validator(mode="after")
+    def validate_gate_auth(self) -> BotConfig:
+        if self.gate_api_token or self._gate_is_loopback():
+            return self
+        raise ValueError(
+            "GATE_API_TOKEN is required unless gate URL points at a loopback host"
+        )
+
+    def _gate_is_loopback(self) -> bool:
+        parsed = urlparse(self.gate_base_url)
+        return _is_loopback_host(parsed.hostname)
+
+    def gate_origin(self) -> str:
+        parsed = urlparse(self.gate_base_url)
+        if parsed.scheme and parsed.netloc:
+            return f"{parsed.scheme}://{parsed.netloc}"
+        return self.gate_base_url.rstrip("/")
+
+    def admin_ids(self) -> set[int]:
+        """Parse comma-separated admin user IDs."""
+        if not self.admin_user_ids.strip():
+            return set()
+        result: set[int] = set()
+        for part in self.admin_user_ids.split(","):
+            stripped = part.strip()
+            if stripped.isdigit():
+                result.add(int(stripped))
+        return result
+
+
+_config: BotConfig | None = None
+
+TELEGRAM_MESSAGE_LIMIT: Final[int] = 4096
+
+
+def get_config() -> BotConfig:
+    """Get or create the singleton config."""
+    global _config  # noqa: PLW0603
+    if _config is None:
+        _config = BotConfig()  # type: ignore[call-arg]
+    return _config

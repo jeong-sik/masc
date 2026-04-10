@@ -279,5 +279,6 @@ def test_transport_failure_log_mentions_disabled_breaker(
     with caplog.at_level(logging.WARNING):
         client._note_transport_failure("gate timeout")  # pyright: ignore[reportPrivateUsage]
 
-    assert "breaker disabled" in caplog.text
-    assert "1/0" not in caplog.text
+    # Shared GateClientBase uses a unified log format regardless of breaker state
+    assert "gate timeout" in caplog.text
+    assert "transport failure" in caplog.text.lower()

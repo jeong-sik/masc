@@ -1,10 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-vi.setConfig({
-  testTimeout: 60_000,
-  hookTimeout: 60_000,
-})
-
 const { fetchWithTimeout, reportToolHostFailure, authHeaders, currentDashboardActor } = vi.hoisted(() => ({
   fetchWithTimeout: vi.fn(),
   reportToolHostFailure: vi.fn().mockResolvedValue({ ok: true }),
@@ -28,7 +23,7 @@ afterEach(async () => {
   resetMcpClientState()
   vi.clearAllMocks()
   vi.resetModules()
-})
+}, 60_000)
 
 function setupMcpSessionMocks(sessionId: string) {
   fetchWithTimeout
@@ -74,7 +69,7 @@ describe('mcpHeaders auth integration', () => {
     expect(toolCall).toBeDefined()
     const toolHeaders = toolCall![1].headers as Record<string, string>
     expect(toolHeaders['Authorization']).toBe('Bearer test-token-123')
-  })
+  }, 60_000)
 
   it('works without token when authHeaders returns empty', async () => {
     authHeaders.mockReturnValue({})
@@ -88,7 +83,7 @@ describe('mcpHeaders auth integration', () => {
     const noAuthHeaders = initCall![1].headers as Record<string, string>
     expect(noAuthHeaders['Authorization']).toBeUndefined()
     expect(noAuthHeaders['Content-Type']).toBe('application/json')
-  })
+  }, 60_000)
 })
 
 describe('callMcpTool', () => {
@@ -105,7 +100,7 @@ describe('callMcpTool', () => {
       persona_name: 'sonsukku',
       _agent_name: 'dashboard',
     })
-  })
+  }, 60_000)
 
   it('preserves an explicit agent_name field when the caller already set one', async () => {
     setupMcpSessionMocks('sess-explicit')
@@ -119,7 +114,7 @@ describe('callMcpTool', () => {
     expect(body.params.arguments).toEqual({
       agent_name: 'codex-tool-matrix',
     })
-  })
+  }, 60_000)
 
   it('reports tool-host failures after the MCP session is established', async () => {
     fetchWithTimeout

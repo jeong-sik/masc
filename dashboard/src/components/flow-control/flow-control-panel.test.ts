@@ -2,11 +2,6 @@ import { html } from 'htm/preact'
 import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-vi.setConfig({
-  testTimeout: 60_000,
-  hookTimeout: 60_000,
-})
-
 void vi
 
 const fetchPauseStatus = vi.fn().mockResolvedValue(undefined)
@@ -79,5 +74,5 @@ describe('FlowControlPanel', () => {
     expect(container.textContent).toContain('일시정지')
     expect(container.textContent).toContain('재개')
     expect(container.textContent).not.toContain('새로고침')
-  })
+  }, 60_000)
 })

@@ -7,6 +7,53 @@ open Types
 include Room_utils
 include Room_state
 
+let agent_current_task_matches_backlog backlog ~agent_name task_id =
+  match
+    List.find_opt
+      (fun (task : Types.task) -> String.equal task.id task_id)
+      backlog.tasks
+  with
+  | Some task -> (
+      match task.task_status with
+      | Claimed { assignee; _ } | InProgress { assignee; _ } ->
+          String.equal assignee agent_name
+      | Todo | Done _ | Cancelled _ -> false)
+  | None -> false
+
+let reconcile_agent_current_task_with_backlog config ~agent_name backlog =
+  let agent_file =
+    Filename.concat (agents_dir config) (safe_filename agent_name ^ ".json")
+  in
+  if Sys.file_exists agent_file then
+    match read_agent_with_repair config agent_file with
+    | Ok agent -> (
+        match agent.current_task with
+        | Some task_id
+          when not
+                 (agent_current_task_matches_backlog backlog ~agent_name task_id)
+          ->
+            let updated_status =
+              match agent.status with
+              | Inactive -> Inactive
+              | Active | Busy | Listening -> Active
+            in
+            let updated =
+              {
+                agent with
+                status = updated_status;
+                current_task = None;
+                last_seen = now_iso ();
+              }
+            in
+            write_json config agent_file (agent_to_yojson updated);
+            log_event config
+              (Printf.sprintf
+                 "{\"type\":\"agent_current_task_reconciled\",\"agent\":\"%s\",\"stale_task\":\"%s\",\"ts\":\"%s\"}"
+                 agent_name task_id (now_iso ()))
+        | Some _ | None -> ())
+    | Error msg ->
+        Log.Misc.error "agent state reconcile failed: %s" msg
+
 (** Claim next highest priority unclaimed task.
     Optional [exclude_task_ids] prevents re-claiming known bad tasks in the same loop run.
 
@@ -25,6 +72,7 @@ let claim_next_r config ~agent_name ?(exclude_task_ids=[]) ?(task_filter=fun (_:
         | Ok backlog -> backlog
         | Error msg -> raise (Invalid_argument msg)
       in
+      reconcile_agent_current_task_with_backlog config ~agent_name backlog;
 
       (* BUG-004: Detect and auto-release previous claim to prevent orphaned tasks.
          If this agent already holds a Claimed or InProgress task, release it

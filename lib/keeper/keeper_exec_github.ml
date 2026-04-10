@@ -1,6 +1,28 @@
 open Keeper_types
 open Keeper_exec_shared
 
+(** Pre-compiled regex for gh CLI "not found" error messages.
+    Matches case-insensitively against multiple known error phrases
+    to detect hallucinated issue/PR numbers. *)
+let gh_not_found_re =
+  Re.compile
+    (Re.alt
+       [ Re.no_case (Re.str "Could not resolve")
+       ; Re.no_case (Re.str "Could not find")
+       ; Re.no_case (Re.str "No such issue")
+       ; Re.no_case (Re.str "not found")
+       ])
+
+(** Return a hint field list when gh exits non-zero and output matches
+    a known "not found" pattern, indicating a hallucinated issue/PR number. *)
+let gh_not_found_hint ~(st : Unix.process_status) ~(out : string) =
+  if st <> Unix.WEXITED 0 && Re.execp gh_not_found_re out
+  then
+    [ "hint", `String
+        "The issue/PR number does not exist. Do not guess numbers. \
+         Use 'issue list' or 'pr list' to find valid targets first." ]
+  else []
+
 let handle_keeper_github
       ~(config : Room.config)
       ~(meta : keeper_meta)
@@ -129,10 +151,10 @@ let handle_keeper_github
           let st, out = Process_eio.run_argv_with_status ~timeout_sec [ "/bin/zsh"; "-lc"; shell_cmd ] in
           Yojson.Safe.to_string
             (`Assoc
-                [ "ok", `Bool (st = Unix.WEXITED 0)
-                ; "status", Keeper_alerting_path.process_status_to_json st
-                ; "output", `String out
-                ]))
+                ([ "ok", `Bool (st = Unix.WEXITED 0)
+                 ; "status", Keeper_alerting_path.process_status_to_json st
+                 ; "output", `String out
+                 ] @ gh_not_found_hint ~st ~out)))
       else (
         let gh_cmd =
           if cmd <> ""
@@ -146,10 +168,10 @@ let handle_keeper_github
         in
         Yojson.Safe.to_string
           (`Assoc
-              [ "ok", `Bool (st = Unix.WEXITED 0)
-              ; "status", Keeper_alerting_path.process_status_to_json st
-              ; "output", `String out
-              ])))
+              ([ "ok", `Bool (st = Unix.WEXITED 0)
+               ; "status", Keeper_alerting_path.process_status_to_json st
+               ; "output", `String out
+               ] @ gh_not_found_hint ~st ~out))))
 ;;
 
 let handle_keeper_pr_workflow

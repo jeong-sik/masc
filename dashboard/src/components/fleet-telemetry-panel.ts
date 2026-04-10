@@ -33,6 +33,7 @@ interface FleetRow {
   model: string
   tool_calls: number
   tool_success_pct: number | null
+  tool_activity_known: boolean
   recent_tools: string[]
 }
 
@@ -82,25 +83,66 @@ function errorMessage(reason: unknown): string {
   return reason instanceof Error ? reason.message : 'unknown error'
 }
 
+function normalizeText(value: string | null | undefined): string | null {
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  return trimmed === '' ? null : trimmed
+}
+
+const MODEL_PLACEHOLDERS = new Set(['unknown', 'none', '-', 'n/a'])
+
+function isPlaceholderModel(value: string): boolean {
+  return MODEL_PLACEHOLDERS.has(value.toLowerCase())
+}
+
+function normalizeModelText(value: string | null | undefined): string | null {
+  const text = normalizeText(value)
+  return text == null || isPlaceholderModel(text) ? null : text
+}
+
+function firstNonEmptyString(...values: Array<string | null | undefined>): string | null {
+  for (const value of values) {
+    const normalized = normalizeText(value)
+    if (normalized) return normalized
+  }
+  return null
+}
+
 function uniqueStrings(values: Array<string | null | undefined>): string[] {
   const seen = new Set<string>()
   const items: string[] = []
   for (const value of values) {
-    if (typeof value !== 'string') continue
-    const trimmed = value.trim()
-    if (trimmed === '' || seen.has(trimmed)) continue
+    const trimmed = normalizeText(value)
+    if (!trimmed || seen.has(trimmed)) continue
     seen.add(trimmed)
     items.push(trimmed)
   }
   return items
 }
 
+function keeperLatestMetricModel(keeper: Keeper): string | null {
+  const series = keeper.metrics_series ?? []
+  for (let index = series.length - 1; index >= 0; index -= 1) {
+    const model = normalizeModelText(series[index]?.model_used)
+    if (model) return model
+  }
+  return null
+}
+
+function keeperMetricsWindowModel(keeper: Keeper): string | null {
+  const primary = keeper.metrics_window?.primary_model
+  return typeof primary === 'string' ? normalizeModelText(primary) : null
+}
+
 function keeperModel(keeper: Keeper): string {
-  return keeper.last_model_used
-    || keeper.active_model
-    || keeper.model
-    || keeper.primary_model
-    || 'unknown'
+  return firstNonEmptyString(
+    keeper.last_model_used,
+    keeperLatestMetricModel(keeper),
+    keeperMetricsWindowModel(keeper),
+    keeper.active_model,
+    keeper.model,
+    keeper.primary_model,
+  ) ?? 'unknown'
 }
 
 function keeperLastLatencyMs(keeper: Keeper): number {
@@ -118,11 +160,51 @@ function successClass(rate: number | null): string {
   return 'text-red-400'
 }
 
+function keeperMetricsWindowTools(keeper: Keeper): string[] {
+  const topTools = keeper.metrics_window?.top_tools ?? []
+  return uniqueStrings(topTools.map(item =>
+    firstNonEmptyString(
+      typeof item.tool === 'string' ? item.tool : null,
+      typeof item.kind === 'string' ? item.kind : null,
+    )))
+}
+
 function keeperRecentTools(keeper: Keeper): string[] {
   return uniqueStrings([
     ...(keeper.recent_tool_names ?? []),
     ...(keeper.latest_tool_names ?? []),
+    ...keeperMetricsWindowTools(keeper),
   ]).slice(0, 3)
+}
+
+function keeperToolCallCount(keeper: Keeper, toolQualityCalls?: number): number {
+  if (typeof toolQualityCalls === 'number' && Number.isFinite(toolQualityCalls) && toolQualityCalls >= 0) {
+    return toolQualityCalls
+  }
+
+  const counts = [
+    keeper.latest_tool_call_count,
+    keeper.metrics_window?.tool_call_count,
+  ].filter((value): value is number =>
+    typeof value === 'number' && Number.isFinite(value) && value >= 0)
+  return counts.length > 0 ? Math.max(...counts) : 0
+}
+
+function hasMeaningfulToolAuditSource(keeper: Keeper): boolean {
+  const source = normalizeText(keeper.tool_audit_source)
+  return source === 'heartbeat_task'
+    || source === 'heartbeat_result'
+    || source === 'keeper_decision_log'
+    || source === 'keeper_metrics'
+}
+
+function keeperHasToolTelemetry(keeper: Keeper, toolCalls: number, recentTools: string[]): boolean {
+  return toolCalls > 0
+    || recentTools.length > 0
+    || hasMeaningfulToolAuditSource(keeper)
+    || normalizeText(keeper.tool_audit_at) != null
+    || keeper.latest_tool_call_count != null
+    || (typeof keeper.metrics_window?.tool_call_count === 'number' && Number.isFinite(keeper.metrics_window.tool_call_count))
 }
 
 function buildToolQualityMap(toolQuality: ToolQualityResponse): Map<string, { calls: number; success_pct: number }> {
@@ -136,36 +218,82 @@ function buildToolQualityMap(toolQuality: ToolQualityResponse): Map<string, { ca
   return byKeeper
 }
 
-function fleetSortScore(row: FleetRow): [number, number, number, number, number, number, string] {
-  const liveScore = row.keepalive_running ? 1 : 0
-  const hasActivityScore =
-    row.last_activity_ago_s != null
+type FleetBand = 'attention' | 'active' | 'paused' | 'offline'
+
+function fleetBand(row: FleetRow): FleetBand {
+  const normalizedStatus = normalizeText(row.status)?.toLowerCase() ?? 'unknown'
+  if (
+    !row.keepalive_running
+    || normalizedStatus === 'offline'
+    || normalizedStatus === 'inactive'
+    || normalizedStatus === 'unbooted'
+    || normalizedStatus === 'stopped'
+    || normalizedStatus === 'dead'
+    || normalizedStatus === 'crashed'
+  ) {
+    return 'offline'
+  }
+  if (normalizedStatus === 'paused') return 'paused'
+  if (
+    row.context_ratio >= PRESSURE_WARN_RATIO
+    || (row.last_activity_ago_s != null && row.last_activity_ago_s >= STALE_ACTIVITY_SEC)
+    || (row.tool_success_pct != null && row.tool_success_pct < 90)
+  ) {
+    return 'attention'
+  }
+  return 'active'
+}
+
+function fleetBandScore(row: FleetRow): number {
+  const band = fleetBand(row)
+  if (band === 'attention') return 3
+  if (band === 'active') return 2
+  if (band === 'paused') return 1
+  return 0
+}
+
+function rowUrgencyScore(row: FleetRow): number {
+  let score = 0
+  if (row.context_ratio >= PRESSURE_WARN_RATIO) score += row.context_ratio * 100
+  if (row.last_activity_ago_s != null && row.last_activity_ago_s >= STALE_ACTIVITY_SEC) {
+    score += Math.min(row.last_activity_ago_s / STALE_ACTIVITY_SEC, 5)
+  }
+  if (typeof row.tool_success_pct === 'number' && row.tool_success_pct < 90) {
+    score += (100 - row.tool_success_pct) / 5
+  }
+  return score
+}
+
+function hasKnownActivity(row: FleetRow): boolean {
+  return row.last_activity_ago_s != null
     && Number.isFinite(row.last_activity_ago_s)
     && row.last_activity_ago_s >= 0
-      ? 1
-      : 0
-  const activityScore = hasActivityScore === 1 ? row.last_activity_ago_s ?? Number.POSITIVE_INFINITY : Number.POSITIVE_INFINITY
-  return [
-    liveScore,
-    hasActivityScore,
-    activityScore,
-    row.tool_calls,
-    row.turn_count,
-    row.context_ratio,
-    row.name,
-  ]
+}
+
+function activityAge(row: FleetRow): number {
+  return hasKnownActivity(row) ? row.last_activity_ago_s ?? Number.POSITIVE_INFINITY : Number.POSITIVE_INFINITY
 }
 
 function compareFleetRows(a: FleetRow, b: FleetRow): number {
-  const aScore = fleetSortScore(a)
-  const bScore = fleetSortScore(b)
-  if (aScore[0] !== bScore[0]) return bScore[0] - aScore[0]
-  if (aScore[1] !== bScore[1]) return bScore[1] - aScore[1]
-  if (aScore[2] !== bScore[2]) return aScore[2] - bScore[2]
-  if (aScore[3] !== bScore[3]) return bScore[3] - aScore[3]
-  if (aScore[4] !== bScore[4]) return bScore[4] - aScore[4]
-  if (aScore[5] !== bScore[5]) return bScore[5] - aScore[5]
-  return aScore[6].localeCompare(bScore[6])
+  const aBand = fleetBandScore(a)
+  const bBand = fleetBandScore(b)
+  if (aBand !== bBand) return bBand - aBand
+
+  const aUrgency = rowUrgencyScore(a)
+  const bUrgency = rowUrgencyScore(b)
+  if (aUrgency !== bUrgency) return bUrgency - aUrgency
+
+  const aKnownActivity = hasKnownActivity(a) ? 1 : 0
+  const bKnownActivity = hasKnownActivity(b) ? 1 : 0
+  if (aKnownActivity !== bKnownActivity) return bKnownActivity - aKnownActivity
+
+  const aAge = activityAge(a)
+  const bAge = activityAge(b)
+  if (aAge !== bAge) return aAge - bAge
+  if (a.tool_calls !== b.tool_calls) return b.tool_calls - a.tool_calls
+  if (a.context_ratio !== b.context_ratio) return b.context_ratio - a.context_ratio
+  if (a.turn_count !== b.turn_count) return b.turn_count - a.turn_count
+  return a.name.localeCompare(b.name)
 }
 
 export function buildFleetRows(keepers: Keeper[], toolQuality: ToolQualityResponse): FleetRow[] {
@@ -174,6 +302,8 @@ export function buildFleetRows(keepers: Keeper[], toolQuality: ToolQualityRespon
     keepers.length > 0
       ? keepers.map((keeper): FleetRow => {
           const toolQualityForKeeper = toolStats.get(keeper.name)
+          const recentTools = keeperRecentTools(keeper)
+          const toolCalls = keeperToolCallCount(keeper, toolQualityForKeeper?.calls)
           return {
             name: keeper.name,
             status: keeper.status ?? (keeper.keepalive_running ? 'active' : 'offline'),
@@ -183,9 +313,10 @@ export function buildFleetRows(keepers: Keeper[], toolQuality: ToolQualityRespon
             last_latency_ms: keeperLastLatencyMs(keeper),
             last_activity_ago_s: keeper.last_activity_ago_s ?? null,
             model: keeperModel(keeper),
-            tool_calls: toolQualityForKeeper?.calls ?? 0,
+            tool_calls: toolCalls,
             tool_success_pct: toolQualityForKeeper?.success_pct ?? null,
-            recent_tools: keeperRecentTools(keeper),
+            tool_activity_known: keeperHasToolTelemetry(keeper, toolCalls, recentTools),
+            recent_tools: recentTools,
           }
         })
       : toolQuality.by_keeper.map((keeper): FleetRow => ({
@@ -199,6 +330,7 @@ export function buildFleetRows(keepers: Keeper[], toolQuality: ToolQualityRespon
           model: 'unknown',
           tool_calls: keeper.calls,
           tool_success_pct: keeper.success_pct,
+          tool_activity_known: keeper.calls > 0,
           recent_tools: [],
         }))
 
@@ -245,9 +377,33 @@ function formatActivity(seconds: number | null): string {
   return formatElapsedCompact(seconds)
 }
 
+function toolSummary(row: FleetRow): { label: string; title: string } {
+  if (row.recent_tools.length > 0) {
+    const text = row.recent_tools.join(', ')
+    return { label: text, title: text }
+  }
+  if (row.tool_calls > 0) {
+    const label = `${row.tool_calls.toLocaleString()} tool calls`
+    return {
+      label,
+      title: `${label}; names unavailable`,
+    }
+  }
+  if (row.tool_activity_known) {
+    return {
+      label: 'No recent tools recorded',
+      title: 'No recent tools recorded',
+    }
+  }
+  return {
+    label: 'Tool telemetry unavailable',
+    title: 'Tool telemetry unavailable',
+  }
+}
+
 function summaryCounts(rows: FleetRow[]) {
   const live = rows.filter(row => row.keepalive_running).length
-  const toolCovered = rows.filter(row => row.tool_calls > 0).length
+  const toolCovered = rows.filter(row => row.tool_calls > 0 || row.recent_tools.length > 0).length
   const hot = rows.filter(row => row.keepalive_running && row.context_ratio >= PRESSURE_HOT_RATIO).length
   const warn = rows.filter(row =>
     row.keepalive_running
@@ -363,12 +519,14 @@ function FleetComparisonTable({ rows }: { rows: FleetRow[] }) {
           </tr>
         </thead>
         <tbody>
-          ${rows.map(row => html`
+          ${rows.map(row => {
+            const toolInfo = toolSummary(row)
+            return html`
             <tr class="border-b border-[var(--card-border)] border-opacity-30 align-top">
               <td class="py-1.5">
                 <div class="font-mono text-[var(--text)]">${row.name}</div>
-                <div class="max-w-[240px] truncate text-[10px] text-[var(--text-dim)]" title=${row.recent_tools.join(', ') || 'No recent tools'}>
-                  ${row.recent_tools.length > 0 ? row.recent_tools.join(', ') : 'No recent tools'}
+                <div class="max-w-[240px] truncate text-[10px] text-[var(--text-dim)]" title=${toolInfo.title}>
+                  ${toolInfo.label}
                 </div>
               </td>
               <td class="py-1.5 text-right font-mono ${statusClass(row)}">${row.status}</td>
@@ -381,7 +539,7 @@ function FleetComparisonTable({ rows }: { rows: FleetRow[] }) {
               <td class="py-1.5 text-right text-[var(--text-dim)]">${formatLatency(row.last_latency_ms)}</td>
               <td class="py-1.5 text-right text-[10px] text-[var(--text-dim)]">${row.model}</td>
             </tr>
-          `)}
+          `})}
         </tbody>
       </table>
     </div>
@@ -576,7 +734,7 @@ export function FleetTelemetryPanel() {
         <${SummaryCard}
           title="Fleet Coverage"
           value=${`${counts.live}/${value.rows.length || 0}`}
-          detail=${`${counts.toolCovered}/${value.rows.length || 0} keepers emitted recent tool telemetry.`}
+          detail=${`${counts.toolCovered}/${value.rows.length || 0} keepers surfaced recent tool activity.`}
           tone=${liveTone}
         />
         <${SummaryCard}

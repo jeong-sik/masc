@@ -222,7 +222,7 @@ let tool_call_events (config : Room.config) ~agent_name ~limit :
     min 1000 (max limit expanded)
   in
   let all_events =
-    Activity_graph.list_events config ~room_id:"default"
+    Activity_graph.list_events config
       ~kinds:["tool.called"] ~after_seq:0 ~limit:scan_limit ()
   in
   all_events

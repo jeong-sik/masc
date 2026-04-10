@@ -30,13 +30,7 @@ let kind_filters deps request =
   in
   from_kinds @ from_kind |> List.sort_uniq String.compare
 
-let room_filter deps request =
-  match deps.query_param request "room_id" with
-  | Some value when String.trim value <> "" -> Some (String.trim value)
-  | _ -> (
-      match deps.query_param request "room" with
-      | Some value when String.trim value <> "" -> Some (String.trim value)
-      | _ -> None)
+(* room_filter removed — namespace retired (#unify-namespace). *)
 
 let last_event_id request =
   match Httpun.Headers.get request.Httpun.Request.headers "last-event-id" with
@@ -47,7 +41,7 @@ let last_event_id request =
   | None -> 0
 
 let events_http_json ~deps ~state request =
-  let room_id = room_filter deps request in
+
   let kinds = kind_filters deps request in
   let after_seq =
     deps.int_query_param request "after_seq" ~default:0 |> max 0
@@ -56,7 +50,7 @@ let events_http_json ~deps ~state request =
     deps.int_query_param request "limit" ~default:200
     |> clamp ~min_v:1 ~max_v:1000
   in
-  Activity_graph.json_response state.Mcp_server.room_config ?room_id ~kinds
+  Activity_graph.json_response state.Mcp_server.room_config ~kinds
     ~after_seq ~limit ()
 
 let parse_since_ms (raw : string) : int option =
@@ -71,7 +65,7 @@ let parse_since_ms (raw : string) : int option =
     | _ -> None
 
 let graph_http_json ~deps ~state request =
-  let room_id = room_filter deps request in
+
   let kinds = kind_filters deps request in
   let limit =
     deps.int_query_param request "limit" ~default:500
@@ -91,11 +85,11 @@ let graph_http_json ~deps ~state request =
          | None -> None)
     | None -> None
   in
-  Activity_graph.graph_json state.Mcp_server.room_config ?room_id ~kinds ~limit
+  Activity_graph.graph_json state.Mcp_server.room_config ~kinds ~limit
     ~timeline_limit ?since_ms ()
 
 let swimlane_http_json ~deps ~state request =
-  let room_id = room_filter deps request in
+
   let limit =
     deps.int_query_param request "limit" ~default:500
     |> clamp ~min_v:1 ~max_v:2000
@@ -110,7 +104,7 @@ let swimlane_http_json ~deps ~state request =
          | None -> None)
     | None -> None
   in
-  Activity_graph.agent_spans_json state.Mcp_server.room_config ?room_id ~limit
+  Activity_graph.agent_spans_json state.Mcp_server.room_config ~limit
     ?since_ms ()
 
 let stream_headers ~deps origin =
@@ -162,7 +156,7 @@ let handle_stream ~deps ~state request reqd =
   let session_id =
     Mcp_session.get_or_generate (deps.get_session_id_any request)
   in
-  let room_id = room_filter deps request in
+
   let kinds = kind_filters deps request in
   let replay_limit =
     deps.int_query_param request "limit" ~default:500
@@ -184,7 +178,7 @@ let handle_stream ~deps ~state request reqd =
     | None -> ()
   in
   let client_id =
-    Activity_graph.register session_id ~push ~last_seq:after_seq ?room_filter:room_id
+    Activity_graph.register session_id ~push ~last_seq:after_seq
       ~kind_filters:kinds ()
   in
   let info =
@@ -200,10 +194,10 @@ let handle_stream ~deps ~state request reqd =
   info_ref := Some info;
   ignore
     (send_raw info
-       (Printf.sprintf ": activity-stream room=%s after=%d\nretry: 3000\n\n"
-          (Option.value ~default:"*" room_id) after_seq));
+       (Printf.sprintf ": activity-stream after=%d\nretry: 3000\n\n"
+          after_seq));
   let replay =
-    Activity_graph.list_events state.Mcp_server.room_config ?room_id ~kinds
+    Activity_graph.list_events state.Mcp_server.room_config ~kinds
       ~after_seq ~limit:replay_limit ()
   in
   List.iter (fun value -> ignore (send_raw info (Activity_graph.format_sse_event value))) replay;

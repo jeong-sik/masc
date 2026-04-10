@@ -119,7 +119,6 @@ let handle_broadcast (ctx : context) : result option =
     (* Team_session_engine_eio removed — skip broadcast increment *)
     ignore (config, agent_name);
     Audit_log.log_broadcast config ~agent_id:agent_name
-      ~room_id:(Filename.basename config.base_path)
       ~message_preview:message ();
     Some (true, result)
   end

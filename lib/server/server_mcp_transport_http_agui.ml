@@ -6,7 +6,7 @@ open Server_mcp_transport_http_respond
 
 let sse_stream_headers = Server_mcp_transport_http_headers.sse_stream_headers
 
-let ag_ui_event_of_masc_event ~room_id event =
+let ag_ui_event_of_masc_event event =
   try
     let lines = String.split_on_char '\n' event in
     let data_line =
@@ -18,7 +18,7 @@ let ag_ui_event_of_masc_event ~room_id event =
     | Some dl ->
         let json_str = String.sub dl 6 (String.length dl - 6) in
         let json = Yojson.Safe.from_string json_str in
-        let ag_event = Ag_ui.of_custom ~room_id ~name:"MASC_EVENT" json in
+        let ag_event = Ag_ui.of_custom ~name:"MASC_EVENT" json in
         Ag_ui.event_to_sse ag_event
     | None -> event
   with
@@ -34,7 +34,7 @@ let handle_ag_ui_events ~deps request reqd =
   let origin = deps.get_origin request in
   let session_id = Mcp_session.get_or_generate (get_session_id_any request) in
   let protocol_version = get_protocol_version_for_session ~session_id request in
-  let room_id = Option.value ~default:"default" (query_param request "room") in
+  let _room_id_legacy = query_param request "room" in  (* ignored — namespace retired *)
   let last_event_id =
     match Httpun.Headers.get (request : Httpun.Request.t).headers "last-event-id" with
     | Some id -> (int_of_string_opt (id))
@@ -57,7 +57,7 @@ let handle_ag_ui_events ~deps request reqd =
       let push event =
         match !info_ref with
         | None -> ()
-        | Some info -> ignore (send_raw info (ag_ui_event_of_masc_event ~room_id event))
+        | Some info -> ignore (send_raw info (ag_ui_event_of_masc_event event))
       in
       let client_id, event_stream, evicted =
         Sse.register session_id ~push
@@ -80,7 +80,7 @@ let handle_ag_ui_events ~deps request reqd =
       register_sse_conn ~session_id ~info;
       let prime =
         Ag_ui.(
-          make_event ~thread_id:room_id ~run_id:(Some session_id) Run_started
+          make_event ~thread_id:"default" ~run_id:(Some session_id) Run_started
           |> event_to_sse)
       in
       ignore (send_raw info prime);

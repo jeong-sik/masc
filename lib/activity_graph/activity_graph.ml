@@ -97,20 +97,14 @@ let read_all_events config =
        []
   |> List.sort (fun a b -> Int.compare a.seq b.seq)
 
-let matches_filters ?room_id ?(kinds = []) (value : event) =
-  let room_ok =
-    match room_id with
-    | None -> true
-    | Some room -> String.equal room value.room_id
-  in
-  let kind_ok = kinds = [] || List.mem value.kind kinds in
-  room_ok && kind_ok
+let matches_filters ?(kinds = []) (value : event) =
+  kinds = [] || List.mem value.kind kinds
 
-let list_events config ?room_id ?(kinds = []) ~after_seq ~limit () =
+let list_events config ?(kinds = []) ~after_seq ~limit () =
   let all =
     read_all_events config
     |> List.filter (fun value ->
-           value.seq > after_seq && matches_filters ?room_id ~kinds value)
+           value.seq > after_seq && matches_filters ~kinds value)
   in
   if after_seq > 0 then
     List.take limit all
@@ -171,8 +165,8 @@ let emit config ?actor ?subject ?(tags = []) ~kind ~payload () =
 (* JSON response                                                    *)
 (* ================================================================ *)
 
-let json_response config ?room_id ?(kinds = []) ~after_seq ~limit () =
-  let events = list_events config ?room_id ~kinds ~after_seq ~limit () in
+let json_response config ?(kinds = []) ~after_seq ~limit () =
+  let events = list_events config ~kinds ~after_seq ~limit () in
   let next_after_seq =
     match List.rev events with
     | last :: _ -> last.seq
@@ -185,7 +179,7 @@ let json_response config ?room_id ?(kinds = []) ~after_seq ~limit () =
       ("after_seq", `Int after_seq);
       ("next_after_seq", `Int next_after_seq);
       ("limit", `Int limit);
-      ("room_id", Json_util.string_opt_to_json room_id);
+      ("room_id", `String "default");  (* backward compat *)
       ("kinds", `List (List.map (fun value -> `String value) kinds));
       ("latest_seq", `Int (latest_seq config));
     ]
@@ -194,9 +188,9 @@ let json_response config ?room_id ?(kinds = []) ~after_seq ~limit () =
 (* Graph building                                                   *)
 (* ================================================================ *)
 
-let graph_json config ?room_id ?(kinds = []) ?(limit = 500)
+let graph_json config ?(kinds = []) ?(limit = 500)
     ?(timeline_limit = 80) ?since_ms () =
-  let events = list_events config ?room_id ~kinds ~after_seq:0 ~limit () in
+  let events = list_events config ~kinds ~after_seq:0 ~limit () in
   let events = match since_ms with
     | Some ms -> List.filter (fun e -> e.ts_ms >= ms) events
     | None -> events
@@ -356,10 +350,7 @@ let graph_json config ?room_id ?(kinds = []) ?(limit = 500)
         `Assoc
           [
             ("limit", `Int limit);
-            ( "room_id",
-              match room_id with
-              | Some value -> `String value
-              | None -> `Null );
+            ("room_id", `String "default");  (* backward compat *)
             ("kinds", `List (List.map (fun value -> `String value) kinds));
           ] );
       ( "stats",
@@ -412,8 +403,8 @@ let span_end_status = function
   | "keeper.autonomy_completed" -> "completed"
   | _ -> "ended"
 
-let agent_spans_json config ?room_id ?(limit = 500) ?since_ms () =
-  let events = list_events config ?room_id ~kinds:[] ~after_seq:0 ~limit () in
+let agent_spans_json config ?(limit = 500) ?since_ms () =
+  let events = list_events config ~kinds:[] ~after_seq:0 ~limit () in
   let events = match since_ms with
     | Some ms -> List.filter (fun e -> e.ts_ms >= ms) events
     | None -> events

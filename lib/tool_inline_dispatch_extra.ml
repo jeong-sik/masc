@@ -78,7 +78,6 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
            in
            let agent_name = Safe_ops.json_string ~default:"unknown" "agent_name" arguments in
            Audit_log.log_action config ~agent_id:agent_name ~action:Audit_log.SearchRefinement
-             ~room_id:(Filename.basename config.base_path)
              ~details:(`Assoc [("query", `String query); ("results", `Int (List.length result.items))])
              ~outcome:Audit_log.Success ();
            if format = "grep" then

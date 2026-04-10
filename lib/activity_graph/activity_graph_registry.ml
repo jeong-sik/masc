@@ -29,17 +29,11 @@ let with_registry_ro f =
   else f ()
 
 let client_matches (client : client) (value : event) =
-  let room_ok =
-    match client.room_filter with
-    | None -> true
-    | Some room_id -> String.equal room_id value.room_id
-  in
-  let kind_ok =
-    match client.kind_filters with
-    | [] -> true
-    | filters -> List.mem value.kind filters
-  in
-  room_ok && kind_ok
+  (* room_filter ignored — namespace retired, all events are in default scope *)
+  ignore client.room_filter;
+  match client.kind_filters with
+  | [] -> true
+  | filters -> List.mem value.kind filters
 
 let register session_id ~push ~last_seq ?room_filter ?(kind_filters = []) () =
   with_registry_rw (fun () ->

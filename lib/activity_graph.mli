@@ -98,7 +98,6 @@ val emit :
 
 val list_events :
   Room_utils.config ->
-  ?room_id:string ->
   ?kinds:string list ->
   after_seq:int ->
   limit:int ->
@@ -111,7 +110,6 @@ val latest_seq : Room_utils.config -> int
 
 val json_response :
   Room_utils.config ->
-  ?room_id:string ->
   ?kinds:string list ->
   after_seq:int ->
   limit:int ->
@@ -120,7 +118,6 @@ val json_response :
 
 val graph_json :
   Room_utils.config ->
-  ?room_id:string ->
   ?kinds:string list ->
   ?limit:int ->
   ?timeline_limit:int ->
@@ -143,7 +140,6 @@ val agent_span_to_yojson : agent_span -> Yojson.Safe.t
 
 val agent_spans_json :
   Room_utils.config ->
-  ?room_id:string ->
   ?limit:int ->
   ?since_ms:int ->
   unit ->

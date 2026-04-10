@@ -548,8 +548,8 @@ let handle_keeper_get_subroutes state req request reqd =
       let mermaid = Keeper_state_machine.phase_to_mermaid ~current in
       let phase_str = Keeper_state_machine.phase_to_string current in
       let stats = Thompson_sampling.get_stats name in
-      let meta = Keeper_types.read_keeper_meta
-          ~config:state.Mcp_server.room_config name in
+      let meta = Keeper_types.read_meta
+          state.Mcp_server.room_config name in
       let tool_count = match meta with
         | Ok (Some m) ->
           List.length (Keeper_exec_tools.keeper_allowed_tool_names m)

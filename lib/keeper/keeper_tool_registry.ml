@@ -128,8 +128,9 @@ let has_mutating_side_effect (name : string) : bool =
     this set AND the failure is transient, manual_reconcile is skipped.
 
     [keeper_broadcast]: duplicate broadcast is noise, not data loss.
-    [keeper_task_claim], [keeper_task_done]: idempotent — claiming or
-    completing the same task twice is a no-op in the task registry.
+    [keeper_task_done]: completing the same task twice is a no-op.
+    [keeper_task_claim] is NOT safe: claim_next_r auto-releases a
+    previous claim and selects a new task, so retries are not idempotent.
 
     Read-only tools (board_list, board_get) are excluded: they never
     appear in [committed_mutating_tools] so including them here would
@@ -138,7 +139,7 @@ let reconcile_safe_tools =
   [ "keeper_board_post"; "keeper_board_comment";
     "keeper_board_vote"; "keeper_board_comment_vote";
     "keeper_broadcast";
-    "keeper_task_claim"; "keeper_task_done" ]
+    "keeper_task_done" ]
 
 let reconcile_safe_set : (string, unit) Hashtbl.t =
   let tbl = Hashtbl.create (List.length reconcile_safe_tools) in

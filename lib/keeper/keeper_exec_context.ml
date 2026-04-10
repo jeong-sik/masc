@@ -187,6 +187,23 @@ let keeper_room_capabilities (meta : keeper_meta) =
   in
   [ "keeper" ] @ preset_cap
 
+let keeper_room_capabilities_need_sync config (meta : keeper_meta) capabilities =
+  let agent_file =
+    Filename.concat (Room.agents_dir config)
+      (Room.safe_filename meta.agent_name ^ ".json")
+  in
+  if not (Sys.file_exists agent_file) then
+    true
+  else
+    try
+      let json = Room.read_json config agent_file in
+      match Types.agent_of_yojson json with
+      | Ok agent -> agent.capabilities <> capabilities
+      | Error _ -> true
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | _ -> true
+
 let ensure_keeper_room_presence config (meta : keeper_meta) : keeper_meta =
   let room_ids = room_ids_for_meta config meta in
   let capabilities = keeper_room_capabilities meta in
@@ -194,19 +211,21 @@ let ensure_keeper_room_presence config (meta : keeper_meta) : keeper_meta =
     List.fold_left
       (fun acc room_id ->
         try
-          Room.ensure_room_bootstrap config room_id;
-          if
-            not
-              (Room.is_agent_joined config
-                 ~agent_name:meta.agent_name)
+          let joined =
+            Room.is_agent_joined config ~agent_name:meta.agent_name
+          in
+          if not joined
           then begin
+            Room.ensure_room_bootstrap config room_id;
             ignore
               (Room.join config ~agent_name:meta.agent_name
                  ~capabilities ())
           end;
-          ignore
-            (Room.update_agent_r config ~agent_name:meta.agent_name
-               ~capabilities ());
+          if joined && keeper_room_capabilities_need_sync config meta capabilities
+          then
+            ignore
+              (Room.update_agent_r config ~agent_name:meta.agent_name
+                 ~capabilities ());
           ignore
             (Room.heartbeat config ~agent_name:meta.agent_name);
           room_id :: acc

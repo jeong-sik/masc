@@ -286,16 +286,11 @@ let resolve_keeper_preset config agent_name =
   match Keeper_types.keeper_name_from_agent_name agent_name with
   | None -> None
   | Some keeper_name -> (
-      match Keeper_runtime.ensure_keeper_meta config keeper_name with
-      | Ok meta ->
+      match Keeper_types.read_meta config keeper_name with
+      | Ok (Some meta) ->
           Keeper_types.tool_access_preset meta.tool_access
           |> Option.map Keeper_types.tool_preset_to_string
-      | Error _ -> (
-          match Keeper_types.read_meta config keeper_name with
-          | Ok (Some meta) ->
-              Keeper_types.tool_access_preset meta.tool_access
-              |> Option.map Keeper_types.tool_preset_to_string
-          | Ok None | Error _ -> None))
+      | Ok None | Error _ -> None)
 
 (** Resolve an agent preset.
     Keepers read from live keeper meta first so claim_next follows the

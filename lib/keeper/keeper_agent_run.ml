@@ -923,8 +923,10 @@ let run_turn
       ~session
       ~ctx_snapshot
       ~generation
-      ~pre_tool_use_guard:(fun ~tool_name:_ ~input:_ ->
+      ~pre_tool_use_guard:(fun ~tool_name ~input:_ ->
         match !mutation_boundary_tool_name with
+        | Some _ when Keeper_tool_registry.is_effectively_read_only_tool tool_name ->
+          None (* read-only tools pass through mutation boundary *)
         | Some _ -> Some (mutation_boundary_summary ())
         | None -> None)
       ~on_tool_executed:(fun ~tool_name ~input:_ ~output_text:_ ~success ->

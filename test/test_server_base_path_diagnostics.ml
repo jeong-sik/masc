@@ -115,9 +115,8 @@ let test_default_base_path_sanitizes_inherited_dual_roots () =
   with_cwd repo @@ fun () ->
   with_env "MASC_BASE_PATH" (Some base_path) @@ fun () ->
   with_env "MASC_ALLOW_INHERITED_BASE_PATH" (Some "") @@ fun () ->
-  (* ancestor explicit path wins: base_path is parent of repo *)
-  Alcotest.(check string) "default base path preserves ancestor explicit path"
-    (canonical_path base_path)
+  Alcotest.(check string) "default base path ignores inherited parent root"
+    (canonical_path repo)
     (Server_mcp_transport_http.default_base_path () |> canonical_path)
 
 let test_default_base_path_respects_opt_in_for_inherited_root () =
@@ -134,6 +133,19 @@ let test_default_base_path_respects_opt_in_for_inherited_root () =
     (canonical_path base_path)
     (Server_mcp_transport_http.default_base_path () |> canonical_path)
 
+let test_default_base_path_keeps_inherited_root_without_local_masc () =
+  with_temp_dir "base-path-default-no-local-masc" @@ fun root ->
+  let base_path = Filename.concat root "base" in
+  let repo = Filename.concat base_path "workspace/yousleepwhen/masc-mcp" in
+  mkdir_p repo;
+  Unix.mkdir (Filename.concat base_path ".masc") 0o755;
+  with_cwd repo @@ fun () ->
+  with_env "MASC_BASE_PATH" (Some base_path) @@ fun () ->
+  with_env "MASC_ALLOW_INHERITED_BASE_PATH" (Some "") @@ fun () ->
+  Alcotest.(check string) "default base path keeps inherited root without local .masc"
+    (canonical_path base_path)
+    (Server_mcp_transport_http.default_base_path () |> canonical_path)
+
 let () =
   Alcotest.run "Server_base_path_diagnostics"
     [
@@ -145,9 +157,12 @@ let () =
             test_strict_violation_respects_env;
           Alcotest.test_case "json exposes effective paths" `Quick
             test_to_yojson_exposes_effective_paths;
-          Alcotest.test_case "default base path preserves ancestor explicit path"
+          Alcotest.test_case "default base path sanitizes inherited parent root"
             `Quick test_default_base_path_sanitizes_inherited_dual_roots;
           Alcotest.test_case "default base path honors inherited opt-in" `Quick
             test_default_base_path_respects_opt_in_for_inherited_root;
+          Alcotest.test_case
+            "default base path keeps inherited root without local .masc"
+            `Quick test_default_base_path_keeps_inherited_root_without_local_masc;
         ] );
     ]

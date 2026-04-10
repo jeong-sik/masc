@@ -169,8 +169,15 @@ function telemetryToolName(entry: TelemetryEntry): string | null {
 
 function canonicalToolName(value: string | null): string | null {
   if (!value) return null
-  const normalized = value.replace(/^mcp__[^_]+__/, '')
-  return normalizeText(normalized)
+  // Split on double-underscore and take the last segment to handle
+  // server names that contain underscores or dashes (e.g. mcp__my_server__toolName).
+  if (value.startsWith('mcp__')) {
+    const segments = value.split('__')
+    // segments: ['mcp', '<server>', '<tool>'] — take the last non-empty segment
+    const tool = segments.length >= 3 ? segments[segments.length - 1] : value
+    return normalizeText(tool ?? value)
+  }
+  return normalizeText(value)
 }
 
 function entryGroupingDescriptor(entry: TelemetryEntry): {
@@ -489,8 +496,8 @@ function GroupRow({ item }: { item: Extract<TelemetryDisplayItem, { kind: 'group
         ` : null}
         <span class="flex-shrink-0 w-4 text-[var(--text-muted)]">${expanded.value ? '-' : '+'}</span>
       </div>
-      ${expanded.value ? html`
-        <div id=${contentId} class="px-3 pb-3 flex flex-col gap-2">
+      <div id=${contentId} class=${expanded.value ? 'px-3 pb-3 flex flex-col gap-2' : 'hidden'} role="region">
+        ${expanded.value ? html`
           <div class="rounded bg-[var(--white-3)] px-2 py-1.5 text-[11px] text-[var(--text-dim)]">
             Latest: <span class="font-mono text-[var(--text-strong)]">${latestPreview}</span>
           </div>
@@ -510,8 +517,8 @@ function GroupRow({ item }: { item: Extract<TelemetryDisplayItem, { kind: 'group
             <pre class="mt-2 text-[10px] font-mono text-[var(--text-muted)] overflow-x-auto max-h-[280px] overflow-y-auto whitespace-pre-wrap break-all">
 ${JSON.stringify(item.entries, null, 2)}</pre>
           </details>
-        </div>
-      ` : null}
+        ` : null}
+      </div>
     </div>
   `
 }

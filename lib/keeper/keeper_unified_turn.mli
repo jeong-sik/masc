@@ -82,6 +82,10 @@ val is_transient_network_error : Oas.Error.sdk_error -> bool
     of requiring manual reconcile. *)
 val is_server_rejected_parse_error : Oas.Error.sdk_error -> bool
 
+(** [true] when the keeper should preserve liveness and skip consecutive
+    failure counting, even if same-turn retry is still disabled. *)
+val is_auto_recoverable_turn_error : Oas.Error.sdk_error -> bool
+
 (** Reclassify any post-commit turn error as a persistent integrity error when
     mutating tool calls already committed in the same turn. *)
 val reclassify_error_after_side_effect :

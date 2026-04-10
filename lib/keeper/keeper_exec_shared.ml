@@ -59,7 +59,21 @@ let keeper_effective_allowed_paths ~(meta : keeper_meta) =
   Keeper_alerting_path.effective_allowed_paths ~meta
 ;;
 
-let keeper_default_read_root ~(config : Room.config) ~(meta : keeper_meta) =
+let authored_default_read_root_candidates ~(meta : keeper_meta) =
+  let is_internal_path raw =
+    let path = String.trim raw in
+    path = "" || String.starts_with ~prefix:".masc/" path
+  in
+  match meta.allowed_paths with
+  | ["*"] -> []
+  | explicit ->
+    let preferred, fallback =
+      List.partition (fun raw -> not (is_internal_path raw)) explicit
+    in
+    Keeper_types.dedupe_keep_order (preferred @ fallback)
+;;
+
+let keeper_default_write_root ~(config : Room.config) ~(meta : keeper_meta) =
   let project_root = Keeper_alerting_path.project_root_of_config config in
   match keeper_effective_allowed_paths ~meta with
   | [] -> project_root
@@ -76,6 +90,29 @@ let keeper_default_read_root ~(config : Room.config) ~(meta : keeper_meta) =
        let fallback = Filename.concat project_root first in
        Fs_compat.mkdir_p fallback;
        fallback)
+;;
+
+let keeper_default_read_root ~(config : Room.config) ~(meta : keeper_meta) =
+  let project_root = Keeper_alerting_path.project_root_of_config config in
+  let resolve_existing_dir raw_path =
+    match
+      Keeper_alerting_path.resolve_keeper_read_path
+        ~config
+        ~allowed_paths:(keeper_effective_allowed_paths ~meta)
+        ~raw_path
+    with
+    | Ok path when Fs_compat.file_exists path && Sys.is_directory path -> Some path
+    | _ -> None
+  in
+  match keeper_effective_allowed_paths ~meta with
+  | [] -> project_root
+  | _ -> (
+      match
+        List.find_map resolve_existing_dir
+          (authored_default_read_root_candidates ~meta)
+      with
+      | Some path -> path
+      | None -> keeper_default_write_root ~config ~meta)
 ;;
 
 let resolve_keeper_path ~(config : Room.config) ~(meta : keeper_meta) ~(raw_path : string)

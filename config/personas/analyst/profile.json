@@ -78,6 +78,9 @@
       "realist",
       "현실주의자"
     ],
+    "allowed_paths": [
+      "workspace/yousleepwhen/masc-mcp"
+    ],
     "tool_preset": "research",
     "proactive_enabled": true
   }

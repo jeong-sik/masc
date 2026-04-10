@@ -162,7 +162,7 @@ let resolve_keeper_shell_write_cwd
   let raw_cwd = Safe_ops.json_string ~default:"" "cwd" args |> String.trim in
   let resolved =
     if raw_cwd = ""
-    then Ok (keeper_default_read_root ~config ~meta)
+    then Ok (keeper_default_write_root ~config ~meta)
     else resolve_keeper_path ~config ~meta ~raw_path:raw_cwd
   in
   match resolved with

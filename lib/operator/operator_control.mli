@@ -12,7 +12,7 @@ val snapshot_json :
   ?include_summary_fields:bool ->
   ?include_command_plane:bool ->
   ?lightweight_summary:bool ->
-  ?sessions:Team_session_types.session list ->
+  ?sessions:'b list ->
   'a context ->
   Yojson.Safe.t
 

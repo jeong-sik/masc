@@ -135,10 +135,10 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
       let cutoff_unix = Time_compat.now () -. Masc_time_constants.day in
       let _session_list_timeout = session_list_timeout_s in
       let all_sessions =
-        (* Team_session_store removed — return empty *)
+        (* Team session store removed — always empty. *)
         ignore (config : Room.config);
         ignore _session_list_timeout;
-        ([] : Team_session_types.session list)
+        []
       in
       let cutoff_iso =
         let tm = Unix.gmtime cutoff_unix in
@@ -146,12 +146,8 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
           (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
           tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
       in
-      let is_active_or_recent (s : Team_session_types.session) =
-        match s.status with
-        | Running | Paused -> true
-        | _ -> s.updated_at_iso >= cutoff_iso
-      in
-      let sessions = List.filter is_active_or_recent all_sessions in
+      ignore cutoff_iso;
+      let sessions = all_sessions in
       let t_sessions = Time_compat.now () in
       Eio.Fiber.yield ();
       (* Compute directly without Dashboard_cache to avoid nested

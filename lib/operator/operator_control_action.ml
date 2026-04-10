@@ -273,13 +273,4 @@ let require_payload_field payload key error_message =
   | Some value -> Ok value
   | None -> Error error_message
 
-let parse_turn_kind payload =
-  let raw =
-    get_string payload "turn_kind" "" |> String.trim |> String.lowercase_ascii
-  in
-  match Team_session_types.turn_kind_of_string raw with
-  | Some turn_kind -> Ok turn_kind
-  | None when raw = "" -> Error "payload.turn_kind is required"
-  | None ->
-      Error
-        "payload.turn_kind must be one of: note, broadcast, portal, task, checkpoint"
+(* parse_turn_kind removed — team session turn types deleted. *)

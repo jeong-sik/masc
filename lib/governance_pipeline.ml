@@ -433,22 +433,18 @@ let install ~config ~governance_level =
     Tools below the threshold are auto-approved. *)
 let to_oas_approval_callback
       ~governance_level ~keeper_name : Oas.Hooks.approval_callback =
-  (* Pre-compute trifecta status from keeper's active shard tool set.
-     Computed once per keeper session, captured by the closure. *)
-  let active_shards = Tool_shard.get_agent_shards keeper_name in
-  let active_tool_names =
-    Tool_shard.tools_of_shards active_shards
-    |> List.map (fun (s : Types.tool_schema) -> s.name)
-  in
-  let (trifecta_count, _, _, _) = assess_trifecta ~active_tool_names in
-  let trifecta_active = trifecta_count >= 3 in
-  if trifecta_active then
-    Log.Governance.warn
-      "lethal trifecta: keeper=%s has all 3 capability classes \
-       (external_input + sensitive_access + state_modification). \
-       State-modifying tools will be escalated to High+ risk."
-      keeper_name;
+  (* B3: Per-decision trifecta. Evaluate on each tool call using current
+     shards, not a session-scoped closure capture. After grant_shard/
+     revoke_shard or Failing→recovery_floor, trifecta reflects actual state.
+     Cost: O(S+T) per call where S=shard count, T=tool count — <1ms. *)
   fun ~tool_name ~input ->
+    let active_tool_names =
+      Tool_shard.get_agent_shards keeper_name
+      |> Tool_shard.tools_of_shards
+      |> List.map (fun (s : Types.tool_schema) -> s.name)
+    in
+    let (trifecta_count, _, _, _) = assess_trifecta ~active_tool_names in
+    let trifecta_active = trifecta_count >= 3 in
     let base_risk = assess_risk ~tool_name ~input in
     let risk =
       combinatorial_risk_escalation ~trifecta_active ~tool_name ~base_risk

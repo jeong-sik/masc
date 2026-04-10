@@ -24,35 +24,36 @@ let reconcile_agent_current_task_with_backlog config ~agent_name backlog =
   let agent_file =
     Filename.concat (agents_dir config) (safe_filename agent_name ^ ".json")
   in
-  if Sys.file_exists agent_file then
-    match read_agent_with_repair config agent_file with
-    | Ok agent -> (
-        match agent.current_task with
-        | Some task_id
-          when not
-                 (agent_current_task_matches_backlog backlog ~agent_name task_id)
-          ->
-            let updated_status =
-              match agent.status with
-              | Inactive -> Inactive
-              | Active | Busy | Listening -> Active
-            in
-            let updated =
-              {
-                agent with
-                status = updated_status;
-                current_task = None;
-                last_seen = now_iso ();
-              }
-            in
-            write_json config agent_file (agent_to_yojson updated);
-            log_event config
-              (Printf.sprintf
-                 "{\"type\":\"agent_current_task_reconciled\",\"agent\":\"%s\",\"stale_task\":\"%s\",\"ts\":\"%s\"}"
-                 agent_name task_id (now_iso ()))
-        | Some _ | None -> ())
-    | Error msg ->
-        Log.Misc.error "agent state reconcile failed: %s" msg
+  if path_exists config agent_file then
+    with_file_lock config agent_file (fun () ->
+      match read_agent_with_repair config agent_file with
+      | Ok agent -> (
+          match agent.current_task with
+          | Some task_id
+            when not
+                   (agent_current_task_matches_backlog backlog ~agent_name task_id)
+            ->
+              let updated_status =
+                match agent.status with
+                | Inactive -> Inactive
+                | Active | Busy | Listening -> Active
+              in
+              let updated =
+                {
+                  agent with
+                  status = updated_status;
+                  current_task = None;
+                  last_seen = now_iso ();
+                }
+              in
+              write_json config agent_file (agent_to_yojson updated);
+              log_event config
+                (Printf.sprintf
+                   "{\"type\":\"agent_current_task_reconciled\",\"agent\":\"%s\",\"stale_task\":\"%s\",\"ts\":\"%s\"}"
+                   agent_name task_id (now_iso ()))
+          | Some _ | None -> ())
+      | Error msg ->
+          Log.Misc.error "agent state reconcile failed: %s" msg)
 
 (** Claim next highest priority unclaimed task.
     Optional [exclude_task_ids] prevents re-claiming known bad tasks in the same loop run.
@@ -154,7 +155,7 @@ let claim_next_r config ~agent_name ?(exclude_task_ids=[]) ?(task_filter=fun (_:
         match released_task_id with
         | Some _ ->
             let agent_file = Filename.concat (agents_dir config) (safe_filename agent_name ^ ".json") in
-            if Sys.file_exists agent_file then begin
+            if path_exists config agent_file then begin
               let json = read_json config agent_file in
               match agent_of_yojson json with
               | Ok agent ->
@@ -216,7 +217,7 @@ let claim_next_r config ~agent_name ?(exclude_task_ids=[]) ?(task_filter=fun (_:
 
           (* Update agent status *)
           let agent_file = Filename.concat (agents_dir config) (safe_filename agent_name ^ ".json") in
-          if Sys.file_exists agent_file then begin
+          if path_exists config agent_file then begin
             let json = read_json config agent_file in
             match agent_of_yojson json with
             | Ok agent ->

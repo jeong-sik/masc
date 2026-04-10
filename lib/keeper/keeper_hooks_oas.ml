@@ -555,7 +555,7 @@ let make_hooks
           meta.name tool_name error;
         Heuristic_metrics.record {
           module_name = "keeper_hooks_oas";
-          site = Printf.sprintf "post_tool_use_failure:%s" tool_name;
+          site = "post_tool_use_failure";
           raw_value = 1.0;
           threshold = 0.0;
           triggered = true;
@@ -629,6 +629,13 @@ let hook_introspection_json
       ("on_tool_error", `Assoc [
         ("active", `Bool true);
         ("source", `String "keeper_hooks_oas");
+      ]);
+      ("post_tool_use_failure", `Assoc [
+        ("active", `Bool true);
+        ("source", `String "keeper_hooks_oas");
+        ("effects", `List [
+          `String "heuristic_metrics";
+        ]);
       ]);
     ]);
     ("deny_list", denied_json);

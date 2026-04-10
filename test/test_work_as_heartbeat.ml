@@ -81,7 +81,7 @@ let test_oas_timeout_128k () =
 
 let test_oas_timeout_262k () =
   let v = adaptive ~max_context:262_144 in
-  (* 120 + 262.144 * 1.5 + 20 * 30 = 1113.216, capped at turn_timeout_sec. *)
+  (* 120 + 262.144 * 1.5 + 20 * 30 = 1113.216, which is below turn_timeout_sec. *)
   check bool "262K → [1100, 1200]" true (v >= 1100.0 && v <= 1200.0)
 
 let test_oas_timeout_zero () =

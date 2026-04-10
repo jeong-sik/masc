@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { signal, computed, type Signal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
+import { fetchToolQuality, type ToolQualityResponse } from '../api/dashboard'
 import { TELEMETRY_AUTO_REFRESH_MS } from '../config/constants'
 import { formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../lib/auto-refresh'
 import { LoadingState } from './common/feedback-state'
@@ -32,15 +33,8 @@ interface HourlyPoint {
   success_rate: number
 }
 
-interface ToolQualityData {
-  total: number
-  success: number
-  failure: number
-  success_rate: number
+type ToolQualityData = Omit<ToolQualityResponse, 'by_tool'> & {
   by_tool: ToolStat[]
-  by_keeper: KeeperStat[]
-  failure_categories: FailureCategory[]
-  hourly_trend?: HourlyPoint[]
 }
 
 const data: Signal<ToolQualityData | null> = signal(null)
@@ -48,42 +42,81 @@ const loading: Signal<boolean> = signal(false)
 const error: Signal<string | null> = signal(null)
 let latestRequestId = 0
 let activeController: AbortController | null = null
-let activeTimeout: ReturnType<typeof setTimeout> | null = null
+type RefreshToolQualityOptions = {
+  signal?: AbortSignal
+}
 
-export async function refreshToolQuality() {
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError'
+}
+
+function cancelActiveToolQualityRequest() {
+  latestRequestId += 1
+  activeController?.abort()
+  activeController = null
+  loading.value = false
+}
+
+function normalizeToolQualityData(json: ToolQualityResponse): ToolQualityData {
+  return {
+    ...json,
+    by_tool: json.by_tool.map(t => ({
+      ...t,
+      output_truncated_count: t.output_truncated_count ?? 0,
+      avg_output_chars: t.avg_output_chars ?? 0,
+    })),
+  }
+}
+
+async function runToolQualityRefresh(opts: RefreshToolQualityOptions = {}) {
   const requestId = ++latestRequestId
   activeController?.abort()
-  if (activeTimeout !== null) {
-    clearTimeout(activeTimeout)
-    activeTimeout = null
-  }
   loading.value = true
   error.value = null
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 15_000)
   activeController = controller
-  activeTimeout = timeout
+  const abortFromUpstream = () => controller.abort()
+
+  if (opts.signal) {
+    if (opts.signal.aborted) {
+      controller.abort()
+    } else {
+      opts.signal.addEventListener('abort', abortFromUpstream, { once: true })
+    }
+  }
+
   try {
-    const resp = await fetch('/api/v1/dashboard/tool-quality?n=5000', { signal: controller.signal })
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
-    const json = await resp.json()
-    if (typeof json?.total !== 'number') throw new Error('unexpected response shape')
+    const json = await fetchToolQuality({ n: 5000, signal: controller.signal })
     if (requestId !== latestRequestId) return
-    data.value = json as ToolQualityData
+    data.value = normalizeToolQualityData(json)
   } catch (e) {
     if (requestId !== latestRequestId) return
-    if (e instanceof DOMException && e.name === 'AbortError') {
-      error.value = 'request timeout (15s)'
+    if (isAbortError(e)) {
+      return
+    }
+    if (e instanceof Error && /timeout after \d+ms/i.test(e.message)) {
+      const match = e.message.match(/timeout after (\d+)ms/i)
+      const seconds = match?.[1] ? Math.round(Number(match[1]) / 1000) : '?'
+      error.value = `request timeout (${seconds}s)`
     } else {
       error.value = e instanceof Error ? e.message : 'fetch failed'
     }
   } finally {
-    clearTimeout(timeout)
-    if (activeController === controller) activeController = null
-    if (activeTimeout === timeout) activeTimeout = null
+    opts.signal?.removeEventListener('abort', abortFromUpstream)
+    if (activeController === controller) {
+      activeController = null
+    }
     if (requestId !== latestRequestId) return
     loading.value = false
   }
+}
+
+export async function refreshToolQuality() {
+  await runToolQualityRefresh()
+}
+
+function handleRefreshToolQualityClick() {
+  void refreshToolQuality()
 }
 
 const successColor = computed(() => {
@@ -229,8 +262,20 @@ function FailureList({ categories }: { categories: FailureCategory[] }) {
 
 export function ToolQualityPanel() {
   useEffect(() => {
-    void refreshToolQuality()
-    return setupVisibleAutoRefresh(refreshToolQuality, TELEMETRY_AUTO_REFRESH_MS)
+    const lifecycleController = new AbortController()
+    const runRefresh = () => runToolQualityRefresh({ signal: lifecycleController.signal })
+
+    void runRefresh()
+    const disposeAutoRefresh = setupVisibleAutoRefresh(() => {
+      if (lifecycleController.signal.aborted) return
+      void runRefresh()
+    }, TELEMETRY_AUTO_REFRESH_MS)
+
+    return () => {
+      lifecycleController.abort()
+      cancelActiveToolQualityRequest()
+      disposeAutoRefresh()
+    }
   }, [])
 
   const d = data.value
@@ -244,7 +289,7 @@ export function ToolQualityPanel() {
         <h2 class="text-sm font-medium">도구 호출 품질</h2>
         <button
           class="text-[10px] px-2 py-0.5 rounded bg-[var(--bg-subtle)] text-[var(--text-dim)] hover:text-[var(--text)]"
-          onClick=${refreshToolQuality}
+          onClick=${handleRefreshToolQualityClick}
           aria-label="도구 품질 새로고침"
         >새로고침</button>
         <span class="text-[10px] text-[var(--text-dim)]">${formatAutoRefreshLabel(TELEMETRY_AUTO_REFRESH_MS)}</span>

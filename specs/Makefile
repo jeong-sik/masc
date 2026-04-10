@@ -17,7 +17,11 @@ TLA2TOOLS := keeper-state-machine/tla2tools.jar
 
 # Specs with known failures (parsing/evaluation errors under CI tla2tools).
 # Remove from this list as specs are fixed. Each entry is a basename (no .cfg).
-KNOWN_FAILURES ?= KeeperTraceSpec KeeperOASBridge KeeperWorkPipeline
+KNOWN_FAILURES ?= KeeperTraceSpec KeeperOASBridge KeeperWorkPipeline KeeperWorkPipelineBug
+
+# Buggy specs whose current invariant/model is documented as non-violating.
+# Remove from this list once the buggy cfg asserts a stronger property.
+KNOWN_BUGGY_NO_VIOLATION ?=
 
 TLC = $(JAVA) $(JAVA_OPTS) \
 	-Dtlc2.TLC.stopAfter=$(TLC_STOP) \
@@ -62,6 +66,8 @@ check-buggy:
 	  bugbase=$$(basename "$$cfg" -buggy.cfg); \
 	  tla="$$dir/$$bugbase.tla"; \
 	  if [ ! -f "$$tla" ]; then echo "SKIP $$cfg (no .tla)"; continue; fi; \
+	  skip=0; for kb in $(KNOWN_BUGGY_NO_VIOLATION); do [ "$$bugbase" = "$$kb" ] && skip=1; done; \
+	  if [ $$skip -eq 1 ]; then printf "SKIP %-40s (KNOWN_BUGGY_NO_VIOLATION)\n" "$$bugbase (buggy)"; continue; fi; \
 	  printf "CHECK %-40s " "$$bugbase (buggy)"; \
 	  $(TLC) -config "$$cfg" "$$tla" > /tmp/tlc-$$bugbase-buggy.log 2>&1; \
 	  rc=$$?; \

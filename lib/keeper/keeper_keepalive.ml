@@ -753,8 +753,6 @@ let run_keepalive_unified_turn
       ~(stop : bool Atomic.t)
       ~(proactive_warmup_elapsed : bool)
       ~(shared_context : Agent_sdk.Context.t)
-      ~(boring_consecutive_turns : int ref)
-      ~(boring_exit_threshold : int)
   : keeper_meta
   =
   if not proactive_warmup_elapsed
@@ -780,18 +778,6 @@ let run_keepalive_unified_turn
           ~config:ctx.config
           ~keeper_name:meta_after_triage.name
       in
-      let is_reactive =
-        turn_decision.channel = Keeper_world_observation.Reactive
-      in
-      let boring_skip =
-        !boring_consecutive_turns >= boring_exit_threshold
-        && not is_reactive
-      in
-      if boring_skip && turn_decision.should_run then
-        Log.Keeper.info
-          "keeper:%s boring_gate skip: %d consecutive idle turns (reactive=%b)"
-          meta_after_triage.name !boring_consecutive_turns is_reactive;
-      if is_reactive then boring_consecutive_turns := 0;
       (* Auto-clear manual_reconcile to break deadlock: reconcile blocks
          turns, but turns are needed to clear reconcile. Log and proceed. *)
       if manual_reconcile_pending then (
@@ -804,7 +790,6 @@ let run_keepalive_unified_turn
       let should_run_turn =
         (not (Atomic.get stop))
         && turn_decision.should_run
-        && (not boring_skip)
       in
       let meta_after_observe =
         Keeper_world_observation.apply_message_cursor_updates
@@ -905,30 +890,7 @@ let run_keepalive_unified_turn
                  meta_after_observe.name e;
                meta_after_observe)
           | Ok updated ->
-            (* Boring-gate: compare total_turns to detect productive work.
-               If turns incremented but no new tool calls appeared in the log,
-               the keeper is polling without acting. *)
-            let tools_before = meta_after_observe.runtime.usage.total_turns in
-            let tools_after = updated.runtime.usage.total_turns in
-            let did_turn = tools_after > tools_before in
-            let had_productive_tool =
-              match Keeper_tool_call_log.read_latest ~keeper_name:updated.name () with
-              | Some entry ->
-                (match Yojson.Safe.Util.member "tool_name" entry |> Yojson.Safe.Util.to_string_option with
-                 | Some name -> not (Keeper_tool_registry.is_boring_tool name)
-                 | None -> false)
-              | None -> false
-            in
-            if did_turn && not had_productive_tool then
-              incr boring_consecutive_turns
-            else if had_productive_tool then
-              boring_consecutive_turns := 0;
-            if !boring_consecutive_turns >= boring_exit_threshold then (
-              Log.Keeper.info
-                "keeper:%s boring_gate: %d consecutive idle turns, skipping until reactive event"
-                updated.name !boring_consecutive_turns;
-              boring_consecutive_turns := 0);
-            (* Phase 3: clear manual_reconcile trap after successful turn *)
+            (* Clear manual_reconcile trap after successful turn *)
             ignore (Keeper_registry.dispatch_event
               ~base_path:ctx.config.base_path updated.name
               Keeper_state_machine.Manual_reconcile_cleared);
@@ -1167,12 +1129,6 @@ let run_heartbeat_loop
      no operator has modified it.  Initialized to 0.0 so the first
      cycle always reads. *)
   let last_meta_mtime = ref 0.0 in
-  (* Boring-gate counter: tracks consecutive keepalive turns where the
-     keeper produced zero substantive tool calls. When the counter
-     reaches the exit threshold, skip proactive turns until a reactive
-     event (board mention, wakeup) resets it. *)
-  let boring_consecutive_turns = ref 0 in
-  let boring_exit_threshold = 12 in
   let rec loop () =
     if Atomic.get stop
     then ()
@@ -1259,8 +1215,6 @@ let run_heartbeat_loop
             ~stop
             ~proactive_warmup_elapsed
             ~shared_context
-            ~boring_consecutive_turns
-            ~boring_exit_threshold
         in
         (* Turn failure threshold: registry tracks count (via unified_turn),
                  keepalive raises to terminate the fiber for supervisor restart. *)

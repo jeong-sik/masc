@@ -216,14 +216,8 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
       let config = state.room_config in
       let masc_root = Room.masc_root_dir config in
       let keeper_dir = Keeper_fs.keeper_dir config in
-      let all_count =
-        (match Safe_ops.list_dir_safe keeper_dir with
-         | Ok _ -> ()
-         | Error e ->
-           Log.Keeper.warn "autoboot: failed to list keeper_dir %s: %s"
-             keeper_dir e);
-        List.length (Keeper_types.keeper_names config)
-      in
+      let all_names = Keeper_types.keeper_names config in
+      let all_count = List.length all_names in
       Log.Keeper.info
         "autoboot: base_path=%s masc_root=%s keeper_dir=%s keeper_json_count=%d"
         config.base_path masc_root keeper_dir all_count;

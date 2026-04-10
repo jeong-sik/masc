@@ -3,6 +3,7 @@
 import { get } from '../api/core'
 import { createAsyncResource, loaded, type AsyncResource } from '../lib/async-state'
 import { lastEvent } from '../sse'
+import { asNumber, asString, asStringArray, isRecord } from './common/normalize'
 
 export type RailStatus = 'healthy' | 'warning' | 'stale' | 'idle'
 
@@ -138,31 +139,28 @@ function updateHarnessData(
   harness.state.value = loaded(update(s.data))
 }
 
-export function handleHarnessSSE(): void {
-  const evt = lastEvent.value
+function decodeEventPayload(event: unknown): Record<string, unknown> | null {
+  if (!isRecord(event)) return null
+  return isRecord(event.payload) ? event.payload : null
+}
+
+function processHarnessEvent(evt: unknown): void {
   if (!evt) return
-  const type = evt.type ?? ''
-  const rawPayload = (evt as unknown as { payload?: Record<string, unknown> }).payload
-  const payload =
-    rawPayload && typeof rawPayload === 'object'
-      ? rawPayload
-      : null
+  const event = evt as Record<string, unknown>
+  const type = typeof event.type === 'string' ? event.type : ''
+  const payload = decodeEventPayload(evt)
 
   if (type === 'oas:masc:harness:verdict_recorded') {
     if (!payload) return
     const nextItem: HarnessVerdictItem = {
-      timestamp:
-        typeof payload.timestamp === 'number'
-          ? payload.timestamp
-          : Date.now() / 1000,
-      task_id: String(payload.task_id ?? ''),
-      task_title: String(payload.task_title ?? 'task'),
-      agent_name: String(payload.agent_name ?? ''),
-      gate: String(payload.gate ?? ''),
-      verdict: String(payload.verdict ?? ''),
-      evaluator_cascade: String(payload.evaluator_cascade ?? ''),
-      fallback_reason:
-        payload.fallback_reason == null ? null : String(payload.fallback_reason),
+      timestamp: asNumber(payload.timestamp) ?? Date.now() / 1000,
+      task_id: asString(payload.task_id, ''),
+      task_title: asString(payload.task_title, 'task'),
+      agent_name: asString(payload.agent_name, ''),
+      gate: asString(payload.gate, ''),
+      verdict: asString(payload.verdict, ''),
+      evaluator_cascade: asString(payload.evaluator_cascade, ''),
+      fallback_reason: asString(payload.fallback_reason) ?? null,
     }
     updateHarnessData(data => ({
       ...data,
@@ -187,19 +185,14 @@ export function handleHarnessSSE(): void {
   if (type === 'oas:masc:harness:pre_compact') {
     if (!payload) return
     const nextItem: PreCompactEvent = {
-      timestamp:
-        typeof payload.timestamp === 'number'
-          ? payload.timestamp
-          : Date.now() / 1000,
-      keeper_name: String(payload.keeper_name ?? ''),
-      context_ratio: Number(payload.context_ratio ?? 0),
-      message_count: Number(payload.message_count ?? 0),
-      token_count: Number(payload.token_count ?? 0),
-      strategies: Array.isArray(payload.strategies)
-        ? payload.strategies.map(value => String(value))
-        : [],
-      model_family: String(payload.model_family ?? ''),
-      trigger: String(payload.trigger ?? ''),
+      timestamp: asNumber(payload.timestamp) ?? Date.now() / 1000,
+      keeper_name: asString(payload.keeper_name, ''),
+      context_ratio: asNumber(payload.context_ratio, 0),
+      message_count: asNumber(payload.message_count, 0),
+      token_count: asNumber(payload.token_count, 0),
+      strategies: asStringArray(payload.strategies),
+      model_family: asString(payload.model_family, ''),
+      trigger: asString(payload.trigger, ''),
     }
     updateHarnessData(data => ({
       ...data,
@@ -252,28 +245,17 @@ export function handleHarnessSSE(): void {
       })
       return
     }
+    const nextGeneration = asNumber(handoffPayload.next_generation)
+    const toGeneration = asNumber(handoffPayload.to_generation)
     const nextItem: HandoffEvent = {
-      timestamp:
-        typeof handoffPayload.timestamp === 'number'
-          ? handoffPayload.timestamp
-          : typeof handoffPayload.ts_unix === 'number'
-            ? handoffPayload.ts_unix
-          : Date.now() / 1000,
-      keeper_name: String(handoffPayload.keeper_name ?? handoffPayload.name ?? ''),
-      trace_id: String(handoffPayload.trace_id ?? handoffPayload.new_trace_id ?? ''),
-      generation: Number(handoffPayload.generation ?? handoffPayload.from_generation ?? 0),
-      next_generation:
-        handoffPayload.next_generation != null
-          ? Number(handoffPayload.next_generation)
-          : handoffPayload.to_generation != null
-            ? Number(handoffPayload.to_generation)
-            : null,
-      prev_trace_id:
-        handoffPayload.prev_trace_id == null ? null : String(handoffPayload.prev_trace_id),
-      new_trace_id:
-        handoffPayload.new_trace_id == null ? null : String(handoffPayload.new_trace_id),
-      to_model:
-        handoffPayload.to_model == null ? null : String(handoffPayload.to_model),
+      timestamp: asNumber(handoffPayload.timestamp) ?? asNumber(handoffPayload.ts_unix) ?? Date.now() / 1000,
+      keeper_name: asString(handoffPayload.keeper_name) ?? asString(handoffPayload.name, ''),
+      trace_id: asString(handoffPayload.trace_id) ?? asString(handoffPayload.new_trace_id, ''),
+      generation: asNumber(handoffPayload.generation) ?? asNumber(handoffPayload.from_generation, 0),
+      next_generation: nextGeneration ?? toGeneration ?? null,
+      prev_trace_id: asString(handoffPayload.prev_trace_id) ?? null,
+      new_trace_id: asString(handoffPayload.new_trace_id) ?? null,
+      to_model: asString(handoffPayload.to_model) ?? null,
     }
     updateHarnessData(data => ({
       ...data,
@@ -300,4 +282,10 @@ export function handleHarnessSSE(): void {
     }))
     scheduleHarnessReload()
   }
+}
+
+export function handleHarnessSSE(): () => void {
+  return lastEvent.subscribe((event) => {
+    processHarnessEvent(event)
+  })
 }

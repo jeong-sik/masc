@@ -137,6 +137,11 @@ let all_flags : flag list = [
     default = false; category = "keeper";
     lifecycle = Active; since = "2.214.0" };
 
+  { env_name = "MASC_KEEPER_DOCKER_PLAYGROUND";
+    description = "Route keeper_bash commands through Docker container";
+    default = false; category = "keeper";
+    lifecycle = Active; since = "2.233.0" };
+
   (* ── Dashboard & Governance ───────────────────────────────── *)
   { env_name = "MASC_COMMAND_PLANE_SNAPSHOT_REFRESH_ENABLED";
     description = "Proactive command-plane snapshot refresh loop";

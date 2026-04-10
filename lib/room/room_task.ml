@@ -174,56 +174,61 @@ let find_duplicate_task (backlog : backlog) (title : string) : string option =
 let add_task ?contract ?required_preset config ~title ~priority ~description =
   ensure_initialized config;
   let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
-  with_file_lock config backlog_path (fun () ->
-    let backlog = read_backlog_or_raise config in
-    (* Dedup guard: reject if an active task with the same normalized title exists *)
-    (match find_duplicate_task backlog title with
-    | Some existing_id ->
-      Printf.sprintf "⚠️ Duplicate rejected: '%s' matches existing %s. Use that task instead."
-        title existing_id
-    | None ->
-    let task_id = Printf.sprintf "task-%03d" (next_task_number config backlog) in
-    let contract = Option.map normalize_task_contract contract in
+  try
+    with_file_lock config backlog_path (fun () ->
+      let backlog = read_backlog_or_raise config in
+      (* Dedup guard: reject if an active task with the same normalized title exists *)
+      (match find_duplicate_task backlog title with
+      | Some existing_id ->
+        Printf.sprintf "⚠️ Duplicate rejected: '%s' matches existing %s. Use that task instead."
+          title existing_id
+      | None ->
+      let task_id = Printf.sprintf "task-%03d" (next_task_number config backlog) in
+      let contract = Option.map normalize_task_contract contract in
 
-    let new_task = {
-      id = task_id;
-      title;
-      description;
-      task_status = Todo;
-      priority;
-      files = [];
-      created_at = now_iso ();
-      worktree = None;
-      required_role = Types_core.Unassigned;
-      required_preset;
-      stage = None;
-      contract;
-      handoff_context = None;
-    } in
+      let new_task = {
+        id = task_id;
+        title;
+        description;
+        task_status = Todo;
+        priority;
+        files = [];
+        created_at = now_iso ();
+        worktree = None;
+        required_role = Types_core.Unassigned;
+        required_preset;
+        stage = None;
+        contract;
+        handoff_context = None;
+      } in
 
-    let new_backlog = {
-      tasks = backlog.tasks @ [new_task];
-      last_updated = now_iso ();
-      version = backlog.version + 1;
-    } in
-    write_backlog config new_backlog;
-    emit_task_activity config ~agent_name:"system" ~task_id ~kind:"task.created"
-      ~payload:
-        (`Assoc
-          [
-            ("task_id", `String task_id);
-            ("title", `String title);
-            ("priority", `Int priority);
-            ( "strict_contract",
-              `Bool
-                (match contract with
-                | Some contract -> contract.strict
-                | None -> false) );
-          ]);
+      let new_backlog = {
+        tasks = backlog.tasks @ [new_task];
+        last_updated = now_iso ();
+        version = backlog.version + 1;
+      } in
+      write_backlog config new_backlog;
+      emit_task_activity config ~agent_name:"system" ~task_id ~kind:"task.created"
+        ~payload:
+          (`Assoc
+            [
+              ("task_id", `String task_id);
+              ("title", `String title);
+              ("priority", `Int priority);
+              ( "strict_contract",
+                `Bool
+                  (match contract with
+                  | Some contract -> contract.strict
+                  | None -> false) );
+            ]);
 
-    !Room_hooks.on_task_mutation_fn ();
-    let _ = broadcast config ~from_agent:"system" ~content:(Printf.sprintf "📋 New quest: %s" title) in
-    Printf.sprintf "✅ Added %s: %s" task_id title))
+      !Room_hooks.on_task_mutation_fn ();
+      let _ = broadcast config ~from_agent:"system" ~content:(Printf.sprintf "📋 New quest: %s" title) in
+      Printf.sprintf "✅ Added %s: %s" task_id title))
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e ->
+      Printf.sprintf "❌ Error: %s" (Printexc.to_string e)
 
 (** Add task with a required role constraint — file-locked.
     Same dedup guard as [add_task]. *)
@@ -231,58 +236,63 @@ let add_task_with_role ?contract config ~title ~priority ~description
     ~required_role =
   ensure_initialized config;
   let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
-  with_file_lock config backlog_path (fun () ->
-    let backlog = read_backlog_or_raise config in
-    (match find_duplicate_task backlog title with
-    | Some existing_id ->
-      Printf.sprintf "⚠️ Duplicate rejected: '%s' matches existing %s. Use that task instead."
-        title existing_id
-    | None ->
-    let task_id = Printf.sprintf "task-%03d" (next_task_number config backlog) in
-    let contract = Option.map normalize_task_contract contract in
+  try
+    with_file_lock config backlog_path (fun () ->
+      let backlog = read_backlog_or_raise config in
+      (match find_duplicate_task backlog title with
+      | Some existing_id ->
+        Printf.sprintf "⚠️ Duplicate rejected: '%s' matches existing %s. Use that task instead."
+          title existing_id
+      | None ->
+      let task_id = Printf.sprintf "task-%03d" (next_task_number config backlog) in
+      let contract = Option.map normalize_task_contract contract in
 
-    let new_task = {
-      id = task_id;
-      title;
-      description;
-      task_status = Todo;
-      priority;
-      files = [];
-      created_at = now_iso ();
-      worktree = None;
-      required_role;
-      required_preset = None;
-      stage = None;
-      contract;
-      handoff_context = None;
-    } in
+      let new_task = {
+        id = task_id;
+        title;
+        description;
+        task_status = Todo;
+        priority;
+        files = [];
+        created_at = now_iso ();
+        worktree = None;
+        required_role;
+        required_preset = None;
+        stage = None;
+        contract;
+        handoff_context = None;
+      } in
 
-    let new_backlog = {
-      tasks = backlog.tasks @ [new_task];
-      last_updated = now_iso ();
-      version = backlog.version + 1;
-    } in
-    write_backlog config new_backlog;
-    emit_task_activity config ~agent_name:"system" ~task_id ~kind:"task.created"
-      ~payload:
-        (`Assoc
-          [
-            ("task_id", `String task_id);
-            ("title", `String title);
-            ("priority", `Int priority);
-            ( "required_role",
-              `String (Types_core.role_to_string required_role) );
-            ( "strict_contract",
-              `Bool
-                (match contract with
-                | Some contract -> contract.strict
-                | None -> false) );
-          ]);
+      let new_backlog = {
+        tasks = backlog.tasks @ [new_task];
+        last_updated = now_iso ();
+        version = backlog.version + 1;
+      } in
+      write_backlog config new_backlog;
+      emit_task_activity config ~agent_name:"system" ~task_id ~kind:"task.created"
+        ~payload:
+          (`Assoc
+            [
+              ("task_id", `String task_id);
+              ("title", `String title);
+              ("priority", `Int priority);
+              ( "required_role",
+                `String (Types_core.role_to_string required_role) );
+              ( "strict_contract",
+                `Bool
+                  (match contract with
+                  | Some contract -> contract.strict
+                  | None -> false) );
+            ]);
 
-    let role_str = Types_core.role_to_string required_role in
-    let _ = broadcast config ~from_agent:"system"
-      ~content:(Printf.sprintf "📋 New quest: %s (requires: %s)" title role_str) in
-    Printf.sprintf "✅ Added %s: %s (required_role: %s)" task_id title role_str))
+      let role_str = Types_core.role_to_string required_role in
+      let _ = broadcast config ~from_agent:"system"
+        ~content:(Printf.sprintf "📋 New quest: %s (requires: %s)" title role_str) in
+      Printf.sprintf "✅ Added %s: %s (required_role: %s)" task_id title role_str))
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e ->
+      Printf.sprintf "❌ Error: %s" (Printexc.to_string e)
 
 (** Add multiple tasks in a batch *)
 let batch_add_tasks_internal config tasks =

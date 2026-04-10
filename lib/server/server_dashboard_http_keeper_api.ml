@@ -547,10 +547,30 @@ let handle_keeper_get_subroutes state req request reqd =
       let current = match phase with Some p -> p | None -> Keeper_state_machine.Offline in
       let mermaid = Keeper_state_machine.phase_to_mermaid ~current in
       let phase_str = Keeper_state_machine.phase_to_string current in
+      let stats = Thompson_sampling.get_stats name in
+      let meta = Keeper_types.read_keeper_meta
+          ~config:state.Mcp_server.room_config name in
+      let tool_count = match meta with
+        | Ok (Some m) ->
+          List.length (Keeper_exec_tools.keeper_allowed_tool_names m)
+        | _ -> 0
+      in
+      let recovery_floor_count =
+        List.length (Keeper_tool_policy.failing_minimum_tool_names ())
+      in
+      let decision_pipeline_mermaid =
+        Keeper_decision_audit.decision_pipeline_to_mermaid
+          ~phase:current
+          ~thompson_alpha:stats.alpha
+          ~thompson_beta:stats.beta
+          ~tool_count
+          ~recovery_floor_count
+      in
       let json = `Assoc [
         "keeper", `String name;
         "current_phase", `String phase_str;
         "mermaid", `String mermaid;
+        "decision_pipeline_mermaid", `String decision_pipeline_mermaid;
       ] in
       Http.Response.json ~compress:true ~request:req
         (Yojson.Safe.to_string json) reqd

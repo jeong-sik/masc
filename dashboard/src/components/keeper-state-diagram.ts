@@ -82,6 +82,7 @@ function formatPhaseBadgeLabel(phase: string | null | undefined): string {
 
 export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStateDiagramProps) {
   const [mermaid, setMermaid] = useState<string | null>(null)
+  const [pipelineMermaid, setPipelineMermaid] = useState<string | null>(null)
   const [apiPhase, setApiPhase] = useState<string | null>(null)
   const [transitions, setTransitions] = useState<KeeperTransition[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -100,9 +101,11 @@ export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStat
         if (cancelled) return
         if (diagramResult.status === 'fulfilled') {
           setMermaid(diagramResult.value.mermaid)
+          setPipelineMermaid(diagramResult.value.decision_pipeline_mermaid ?? null)
           setApiPhase(diagramResult.value.current_phase)
         } else {
           setMermaid(null)
+          setPipelineMermaid(null)
           setApiPhase(null)
           setError(diagramResult.reason instanceof Error ? diagramResult.reason.message : 'state diagram fetch failed')
         }
@@ -177,6 +180,20 @@ export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStat
           minHeightClass="min-h-[120px]"
         />
       </div>
+
+      ${pipelineMermaid ? html`
+        <div class="mt-2">
+          <div class="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)] mb-2">Decision Pipeline (Guard → Thompson → ToolPolicy)</div>
+          <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)] p-3">
+            <${MermaidGraph}
+              source=${pipelineMermaid}
+              prefix="decision-pipeline"
+              diagramClass="[&_svg]:max-w-full [&_svg]:mx-auto"
+              minHeightClass="min-h-[120px]"
+            />
+          </div>
+        </div>
+      ` : null}
 
       ${transitions.length > 0 ? html`
         <div class="grid gap-2">

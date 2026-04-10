@@ -867,6 +867,20 @@ let keeper_config_json (config : Room.config) (name : string)
         Keeper_state_machine.phase_to_mermaid
           ~current:(Option.value ~default:Keeper_state_machine.Offline current_phase)
       in
+      let decision_pipeline_diagram =
+        let phase = Option.value ~default:Keeper_state_machine.Offline current_phase in
+        let stats = Thompson_sampling.get_stats m.agent_name in
+        let tool_count = List.length (Keeper_exec_tools.keeper_allowed_tool_names m) in
+        let recovery_floor_count =
+          List.length (Keeper_tool_policy.failing_minimum_tool_names ())
+        in
+        Keeper_decision_audit.decision_pipeline_to_mermaid
+          ~phase
+          ~thompson_alpha:stats.alpha
+          ~thompson_beta:stats.beta
+          ~tool_count
+          ~recovery_floor_count
+      in
       let tools_access =
         let allowed = Keeper_exec_tools.keeper_allowed_tool_names m in
         let masc_tools =
@@ -911,6 +925,7 @@ let keeper_config_json (config : Room.config) (name : string)
              (Keeper_alerting_path.effective_allowed_paths ~meta:m)));
          ("pipeline_stage", `String pipeline_stage);
          ("state_diagram", `String state_diagram);
+         ("decision_pipeline_diagram", `String decision_pipeline_diagram);
          ("prompt", prompt);
          ("execution", execution);
          ("compaction", compaction);

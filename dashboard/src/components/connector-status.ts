@@ -732,17 +732,17 @@ export function ConnectorStatusPanel() {
   const snapshot = connectorStatusResource.state.value.data ?? EMPTY_SNAPSHOT
   const loading = connectorStatusResource.state.value.loading
   const d = snapshot.gate
-  const live = preferredConnector(snapshot.connectors)
+  const allConnectors = snapshot.connectors?.connectors ?? []
 
-  if (loading && !d && !live) {
+  if (loading && !d && allConnectors.length === 0) {
     return html`<${LoadingState}>커넥터 상태 불러오는 중...<//>`
   }
 
-  if (snapshot.gateError && !d && !live) {
+  if (snapshot.gateError && !d && allConnectors.length === 0) {
     return html`<${ErrorState} message=${`Gate: ${snapshot.gateError}`} />`
   }
 
-  if (!d && !live) return null
+  if (!d && allConnectors.length === 0) return null
 
   return html`
     <div>
@@ -754,19 +754,21 @@ export function ConnectorStatusPanel() {
           </div>
         </div>
         <div class="text-right text-[10px] uppercase tracking-[0.16em] text-[var(--text-dim)]">
-          <div>${d ? `success ${d.success_rate_pct}%` : `descriptor ${connectorStateLabel(live)}`}</div>
+          <div>${d ? `success ${d.success_rate_pct}%` : `${allConnectors.length} connector${allConnectors.length !== 1 ? 's' : ''}`}</div>
           <div>${d ? `uptime ${formatUptime(d.uptime_seconds)}` : 'gate metrics unavailable'}</div>
         </div>
       </div>
 
-      <${ConnectorLivePanel}
-        connector=${live}
-        gate=${d}
-        keepers=${snapshot.keepers}
-        connectorError=${snapshot.connectorError}
-        keeperDirectoryError=${snapshot.keeperError}
-        loading=${loading}
-      />
+      ${allConnectors.map(c => html`
+        <${ConnectorLivePanel}
+          connector=${c}
+          gate=${d}
+          keepers=${snapshot.keepers}
+          connectorError=${snapshot.connectorError}
+          keeperDirectoryError=${snapshot.keeperError}
+          loading=${loading}
+        />
+      `)}
 
       ${snapshot.gateError
         ? html`

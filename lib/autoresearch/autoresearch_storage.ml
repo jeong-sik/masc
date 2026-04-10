@@ -33,7 +33,9 @@ let ensure_dir path =
   let rec mkdir_p dir =
     if not (Sys.file_exists dir) then begin
       mkdir_p (Filename.dirname dir);
-      (try Sys.mkdir dir 0o755 with Sys_error _ -> ())
+      (try Sys.mkdir dir 0o755
+       with Sys_error msg ->
+         Log.Misc.warn "ensure_dir: mkdir %s failed: %s" dir msg)
     end
   in
   mkdir_p path
@@ -235,4 +237,9 @@ let scan_persisted_loop_ids ~base_path =
       |> List.filter (fun name ->
              let state_path = Filename.concat (Filename.concat dir name) "state.json" in
              Fs_compat.file_exists state_path)
-    with Eio.Cancel.Cancelled _ as e -> raise e | _ -> []
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn ->
+      Log.Misc.warn "get_loop_ids_with_state: readdir %s failed: %s"
+        dir (Printexc.to_string exn);
+      []

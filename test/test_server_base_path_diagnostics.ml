@@ -114,6 +114,7 @@ let test_default_base_path_sanitizes_inherited_dual_roots () =
   Unix.mkdir (Filename.concat repo ".masc") 0o755;
   with_cwd repo @@ fun () ->
   with_env "MASC_BASE_PATH" (Some base_path) @@ fun () ->
+  with_env "MASC_BASE_PATH_INPUT" None @@ fun () ->
   with_env "MASC_ALLOW_INHERITED_BASE_PATH" (Some "") @@ fun () ->
   Alcotest.(check string) "default base path ignores inherited parent root"
     (canonical_path repo)
@@ -128,6 +129,7 @@ let test_default_base_path_respects_opt_in_for_inherited_root () =
   Unix.mkdir (Filename.concat repo ".masc") 0o755;
   with_cwd repo @@ fun () ->
   with_env "MASC_BASE_PATH" (Some base_path) @@ fun () ->
+  with_env "MASC_BASE_PATH_INPUT" None @@ fun () ->
   with_env "MASC_ALLOW_INHERITED_BASE_PATH" (Some "1") @@ fun () ->
   Alcotest.(check string) "opt-in keeps inherited root"
     (canonical_path base_path)
@@ -141,6 +143,7 @@ let test_default_base_path_keeps_inherited_root_without_local_masc () =
   Unix.mkdir (Filename.concat base_path ".masc") 0o755;
   with_cwd repo @@ fun () ->
   with_env "MASC_BASE_PATH" (Some base_path) @@ fun () ->
+  with_env "MASC_BASE_PATH_INPUT" None @@ fun () ->
   with_env "MASC_ALLOW_INHERITED_BASE_PATH" (Some "") @@ fun () ->
   Alcotest.(check string) "default base path keeps inherited root without local .masc"
     (canonical_path base_path)

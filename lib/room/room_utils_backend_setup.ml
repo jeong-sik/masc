@@ -257,9 +257,15 @@ let resolve_server_default_base_path path =
     when should_ignore_inherited_server_base_path ~requested_path:path
            ~explicit_path:explicit ->
       let resolved = resolve_requested_base_path path in
+      let explicit_binding =
+        match Env_config_core.base_path_source_opt () with
+        | Some (name, raw) -> Printf.sprintf "%s=%s" name raw
+        | None -> Printf.sprintf "MASC_BASE_PATH=%s" explicit
+      in
       Log.Room.warn
-        "Ignoring inherited MASC_BASE_PATH=%s for direct server startup because both %s and %s have .masc; using requested base path %s. Set MASC_ALLOW_INHERITED_BASE_PATH=1 to preserve the inherited root."
-        explicit (canonical_base_path path) (canonical_base_path explicit) resolved;
+        "Ignoring inherited %s for direct server startup because both %s and %s have .masc; using requested base path %s. Set MASC_ALLOW_INHERITED_BASE_PATH=1 to preserve the inherited root."
+        explicit_binding (canonical_base_path path) (canonical_base_path explicit)
+        resolved;
       resolved
   | _ -> resolve_masc_base_path path
 

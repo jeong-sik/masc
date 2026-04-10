@@ -419,6 +419,23 @@ end
     Thresholds used by the dashboard keeper health scorer and harness health
     panels.  Distinct from compaction triggers — these affect UI display only. *)
 
+(** {1 Docker Playground} *)
+
+module DockerPlayground = struct
+  (** Route keeper_bash commands through a Docker container instead of
+      local subprocess.  The container must be running and named
+      [keeper-playground].  When disabled, commands run locally with
+      the existing allowlist restrictions.
+      Env: [MASC_KEEPER_DOCKER_PLAYGROUND]. Default: false. *)
+  let enabled =
+    Feature_flag_registry.get_bool "MASC_KEEPER_DOCKER_PLAYGROUND"
+
+  (** Docker container name for keeper playground execution.
+      Env: [MASC_KEEPER_DOCKER_CONTAINER]. Default: "keeper-playground". *)
+  let container_name =
+    get_string ~default:"keeper-playground" "MASC_KEEPER_DOCKER_CONTAINER"
+end
+
 module DashboardHealth = struct
   let ctx_critical = get_float ~default:0.9 "MASC_DASHBOARD_HEALTH_CTX_CRITICAL"
   let ctx_warn = get_float ~default:0.8 "MASC_DASHBOARD_HEALTH_CTX_WARN"

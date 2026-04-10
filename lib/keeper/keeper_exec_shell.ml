@@ -169,6 +169,21 @@ let resolve_keeper_shell_write_cwd
   | Ok cwd when Fs_compat.file_exists cwd && Sys.is_directory cwd -> Ok cwd
   | Ok cwd -> Error (Printf.sprintf "cwd_not_directory: %s" cwd)
 
+(* Docker playground path mapping: host → container.
+   Host:      /Users/dancer/me/.masc/playground/cheolsu/repos/X
+   Container: /home/keeper/playground/cheolsu/repos/X *)
+let docker_playground_cwd ~(config : Room.config) ~(meta : keeper_meta) host_cwd =
+  let root = Keeper_alerting_path.project_root_of_config config in
+  let playground_prefix = Filename.concat root ".masc/playground" in
+  if String.starts_with ~prefix:playground_prefix host_cwd then
+    let suffix =
+      String.sub host_cwd (String.length playground_prefix)
+        (String.length host_cwd - String.length playground_prefix)
+    in
+    "/home/keeper/playground" ^ suffix
+  else
+    Printf.sprintf "/home/keeper/playground/%s" meta.name
+
 (* Common wrong path prefixes that keepers use.
    Maps wrong prefix → corrected relative path using keeper playground. *)
 let auto_correct_path ~(meta : keeper_meta) (raw : string) : string option =
@@ -358,8 +373,22 @@ let handle_keeper_bash
                Log.Keeper.info "WRITE_AUDIT: keeper=%s cwd=%s cmd=%s playground=%b"
                  meta.name cwd cmd_for_log in_playground;
              let st, out =
-               Process_eio.run_argv_with_status ~cwd ~timeout_sec
-                 [ "/bin/bash"; "-lc"; cmd ^ " 2>&1" ]
+               if Env_config_keeper.DockerPlayground.enabled
+                  && in_playground then
+                 (* Docker playground: route through container.
+                    Map host playground path to container path. *)
+                 let container = Env_config_keeper.DockerPlayground.container_name in
+                 let container_cwd =
+                   docker_playground_cwd ~config ~meta cwd
+                 in
+                 Process_eio.run_argv_with_status
+                   ~cwd:(Sys.getcwd ()) ~timeout_sec
+                   [ "docker"; "exec"; "-u"; "keeper";
+                     "-w"; container_cwd;
+                     container; "bash"; "-c"; cmd ^ " 2>&1" ]
+               else
+                 Process_eio.run_argv_with_status ~cwd ~timeout_sec
+                   [ "/bin/bash"; "-lc"; cmd ^ " 2>&1" ]
              in
              Yojson.Safe.to_string
                (`Assoc

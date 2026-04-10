@@ -21,6 +21,10 @@ let clamp_shell_timeout ?(min_sec = 1.0) ~default args =
 let re_hint_chain = Re.(compile (Pcre.re "chain|redirect|pipe|semicolon"))
 let re_hint_inject = Re.(compile (Pcre.re "inject|symbol"))
 
+let path_has_prefix_boundary ~prefix path =
+  String.equal prefix path
+  || String.starts_with ~prefix:(prefix ^ "/") path
+
 let lowercase_shell_words text =
   text
   |> String.map (function '\t' | '\r' | '\n' -> ' ' | c -> c)
@@ -179,6 +183,9 @@ let resolve_keeper_shell_write_cwd
 let docker_container_playground_root = "/home/keeper/playground"
 
 let docker_playground_cwd ~playground_abs ~(meta : keeper_meta) host_cwd =
+  let keeper_root =
+    Printf.sprintf "%s/%s" docker_container_playground_root meta.name
+  in
   let normalized_prefix =
     Keeper_alerting_path.normalize_path_for_check playground_abs
     |> Keeper_alerting_path.strip_trailing_slashes
@@ -187,14 +194,14 @@ let docker_playground_cwd ~playground_abs ~(meta : keeper_meta) host_cwd =
     Keeper_alerting_path.normalize_path_for_check host_cwd
     |> Keeper_alerting_path.strip_trailing_slashes
   in
-  if String.starts_with ~prefix:normalized_prefix normalized_cwd then
+  if path_has_prefix_boundary ~prefix:normalized_prefix normalized_cwd then
     let suffix =
       String.sub normalized_cwd (String.length normalized_prefix)
         (String.length normalized_cwd - String.length normalized_prefix)
     in
-    docker_container_playground_root ^ suffix
+    keeper_root ^ suffix
   else
-    Printf.sprintf "%s/%s" docker_container_playground_root meta.name
+    keeper_root
 
 (* Common wrong path prefixes that keepers use.
    Maps wrong prefix → corrected relative path using keeper playground. *)
@@ -296,8 +303,7 @@ let handle_keeper_bash
       normalize_path_for_containment (Filename.concat root playground_rel)
     in
     let in_playground =
-      String.starts_with ~prefix:(playground_abs ^ "/") (cwd_canonical ^ "/")
-      || String.equal playground_abs cwd_canonical
+      path_has_prefix_boundary ~prefix:playground_abs cwd_canonical
     in
     let use_docker =
       Env_config_keeper.DockerPlayground.enabled && in_playground

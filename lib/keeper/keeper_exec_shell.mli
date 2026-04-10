@@ -13,6 +13,12 @@ val handle_keeper_bash :
   args:Yojson.Safe.t ->
   string
 
+val docker_playground_cwd :
+  playground_abs:string ->
+  meta:Keeper_types.keeper_meta ->
+  string ->
+  string
+
 val handle_keeper_shell :
   config:Room.config ->
   meta:Keeper_types.keeper_meta ->

@@ -423,9 +423,10 @@ end
 
 module DockerPlayground = struct
   (** Route keeper_bash commands through a Docker container instead of
-      local subprocess.  The container must be running and named
-      [keeper-playground].  When disabled, commands run locally with
-      the existing allowlist restrictions.
+      local subprocess.  The container must be running; by default its
+      name is [keeper-playground], configurable via
+      [MASC_KEEPER_DOCKER_CONTAINER].  When disabled, commands run
+      locally with the existing allowlist restrictions.
       Env: [MASC_KEEPER_DOCKER_PLAYGROUND]. Default: false. *)
   let enabled =
     Feature_flag_registry.get_bool "MASC_KEEPER_DOCKER_PLAYGROUND"

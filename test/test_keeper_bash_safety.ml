@@ -302,6 +302,39 @@ let test_git_write_classification () =
   Alcotest.(check bool) "push is not destructive"
     false (is_destructive "git push origin my-branch")
 
+let docker_meta =
+  match Masc_mcp.Keeper_types.meta_of_json
+    (`Assoc [("name", `String "cheolsu"); ("trace_id", `String "trace-docker-cwd")])
+  with
+  | Ok meta -> meta
+  | Error e -> failwith ("docker_meta failed: " ^ e)
+
+let test_docker_playground_cwd_mapping () =
+  let playground_abs = "/project/.masc/playground/cheolsu" in
+  let mapped =
+    Masc_mcp.Keeper_exec_shell.docker_playground_cwd
+      ~playground_abs ~meta:docker_meta
+      "/project/.masc/playground/cheolsu/repos/masc-mcp"
+  in
+  Alcotest.(check string) "nested path maps into container playground"
+    "/home/keeper/playground/cheolsu/repos/masc-mcp" mapped;
+  let exact =
+    Masc_mcp.Keeper_exec_shell.docker_playground_cwd
+      ~playground_abs ~meta:docker_meta playground_abs
+  in
+  Alcotest.(check string) "exact playground dir maps to keeper root"
+    "/home/keeper/playground/cheolsu" exact
+
+let test_docker_playground_cwd_prefix_boundary () =
+  let playground_abs = "/project/.masc/playground/cheolsu" in
+  let mapped =
+    Masc_mcp.Keeper_exec_shell.docker_playground_cwd
+      ~playground_abs ~meta:docker_meta
+      "/project/.masc/playground/cheolsu2/repos/masc-mcp"
+  in
+  Alcotest.(check string) "prefix attack falls back to keeper root"
+    "/home/keeper/playground/cheolsu" mapped
+
 let () =
   Alcotest.run "Keeper bash safety" [
     ("allowlist", [
@@ -325,6 +358,10 @@ let () =
         test_cleanup_dir_does_not_follow_symlinks;
       Alcotest.test_case "path traversal blocked after canonicalization" `Quick test_playground_guard_traversal;
       Alcotest.test_case "git write classification" `Quick test_git_write_classification;
+      Alcotest.test_case "docker playground cwd maps nested paths" `Quick
+        test_docker_playground_cwd_mapping;
+      Alcotest.test_case "docker playground cwd rejects prefix attacks" `Quick
+        test_docker_playground_cwd_prefix_boundary;
     ]);
     ("edge", [
       Alcotest.test_case "empty command blocked" `Quick test_empty_command;

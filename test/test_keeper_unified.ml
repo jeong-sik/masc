@@ -1914,6 +1914,40 @@ let test_post_commit_failure_kind_marks_non_timeouts_as_failures () =
     (KR.ambiguous_partial_commit_kind_to_string
        (UT.post_commit_failure_kind_of_error auth_error))
 
+let test_server_rejected_parse_error_ollama_closing_brace () =
+  let err =
+    Agent_sdk.Error.Api
+      (InvalidRequest { message = {|Value looks like object, but can't find closing '}' symbol|} })
+  in
+  check bool "ollama closing brace is parse error" true
+    (UT.is_server_rejected_parse_error err);
+  check bool "ollama closing brace is NOT transient network" false
+    (UT.is_transient_network_error err)
+
+let test_server_rejected_parse_error_unterminated () =
+  let err =
+    Agent_sdk.Error.Api
+      (InvalidRequest { message = "Unterminated string in JSON" })
+  in
+  check bool "unterminated is parse error" true
+    (UT.is_server_rejected_parse_error err)
+
+let test_server_rejected_parse_error_generic_invalid_request () =
+  let err =
+    Agent_sdk.Error.Api
+      (InvalidRequest { message = "bad tool schema" })
+  in
+  check bool "generic InvalidRequest is NOT parse error" false
+    (UT.is_server_rejected_parse_error err)
+
+let test_server_rejected_parse_error_network_error () =
+  let err =
+    Agent_sdk.Error.Api
+      (NetworkError { message = "connection refused" })
+  in
+  check bool "network error is NOT parse error" false
+    (UT.is_server_rejected_parse_error err)
+
 let test_side_effect_reclassification_ignores_keeper_read_only_tools () =
   let original =
     Agent_sdk.Error.Api
@@ -2803,6 +2837,14 @@ let () =
             test_post_commit_failure_kind_marks_timeouts;
           test_case "non-timeout classified as post-commit failure" `Quick
             test_post_commit_failure_kind_marks_non_timeouts_as_failures;
+          test_case "ollama closing brace detected as server parse error" `Quick
+            test_server_rejected_parse_error_ollama_closing_brace;
+          test_case "unterminated JSON detected as server parse error" `Quick
+            test_server_rejected_parse_error_unterminated;
+          test_case "generic InvalidRequest is NOT server parse error" `Quick
+            test_server_rejected_parse_error_generic_invalid_request;
+          test_case "network error is NOT server parse error" `Quick
+            test_server_rejected_parse_error_network_error;
           test_case "read-only keeper tools do not become ambiguous partial" `Quick
             test_side_effect_reclassification_ignores_keeper_read_only_tools;
           test_case "mixed tool sets only keep mutating keeper tools" `Quick

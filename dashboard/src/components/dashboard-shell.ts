@@ -305,11 +305,11 @@ function SurfaceLead() {
   const description = currentSection?.description ?? currentView?.description ?? null
 
   return html`
-    <div class="mb-3 flex flex-wrap items-baseline justify-between gap-2">
-      <h2 class="flex items-center gap-2 text-[22px] font-bold tracking-tight text-[var(--text-strong)]">
+    <div class="mb-3 flex flex-col gap-1.5">
+      <h2 class="text-[22px] font-bold tracking-tight text-[var(--text-strong)]">
         ${currentSection?.label ?? currentView?.label ?? '홈'}
-        ${description ? html`<span class="text-[13px] font-normal text-[var(--text-dim)] truncate min-w-0">${description}</span>` : null}
       </h2>
+      ${description ? html`<p class="m-0 text-[13px] leading-[1.5] text-[var(--text-dim)]">${description}</p>` : null}
     </div>
   `
 }

@@ -9,6 +9,9 @@ val keeper_allowed_model_tools :
     scope so progressive disclosure can surface tools beyond the preset. *)
 val keeper_universe_tool_names : keeper_meta -> string list
 
+(** Keeper-facing runtime candidate names before policy filtering. *)
+val keeper_internal_candidate_tool_names : string list
+
 (** Universe model tool schemas.  Returns schemas for all universe tools
     so [make_tools] can build Agent_sdk.Tool.t for the full search scope. *)
 val keeper_universe_model_tools : keeper_meta -> Types.tool_schema list
@@ -53,8 +56,16 @@ val keeper_tool_search_schema : Types.tool_schema
 (** Injected masc_* tool schemas (populated at startup by [inject_masc_schemas]). *)
 val masc_schemas_ref : Types.tool_schema list ref
 
+(** Injected masc_* tool names (populated at startup by [inject_masc_schemas]). *)
+val injected_masc_tool_names : unit -> string list
+
 (** [is_core_always_tool name] — true if [name] bypasses policy restrictions. *)
 val is_core_always_tool : string -> bool
+
+(** Drop boring observation tools when a turn already has actionable work.
+    Returns the original set when every tool is boring so callers do not end
+    up with an empty allowlist. *)
+val prune_boring_tools_for_actionable_turn : string list -> string list
 
 (** Deduplicate tool names, preserving order. *)
 val dedupe_tool_names : string list -> string list

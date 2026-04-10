@@ -23,6 +23,14 @@ let apply_default opt current = match opt with Some v -> v | None -> current
 (** Same as [apply_default] but both TOML and meta are option-typed. *)
 let apply_default_opt opt current = match opt with Some _ -> opt | None -> current
 
+let effective_declarative_cascade_name
+    (defaults : Keeper_types_profile.keeper_profile_defaults)
+    (meta : keeper_meta) =
+  match defaults.cascade_name, defaults.manifest_path with
+  | Some cascade_name, _ -> cascade_name
+  | None, Some _ -> Keeper_config.default_cascade_name
+  | None, None -> meta.cascade_name
+
 let resynced_tool_access
     (defaults : Keeper_types_profile.keeper_profile_defaults)
     (meta : keeper_meta) =
@@ -69,7 +77,9 @@ let ensure_keeper_meta config name =
             defaults.room_signal_prompt_enabled
     in
     let target_denylist = apply_default defaults.tool_denylist meta.tool_denylist in
-    let target_cascade_name = apply_default defaults.cascade_name meta.cascade_name in
+    let target_cascade_name =
+      effective_declarative_cascade_name defaults meta
+    in
     let target_tool_access = resynced_tool_access defaults meta in
 
     (* --- Personality --- *)

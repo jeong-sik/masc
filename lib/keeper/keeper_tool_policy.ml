@@ -134,7 +134,7 @@ let is_keeper_mcp_context_required name =
   List.mem name keeper_mcp_context_required_tools
   || Tool_dispatch.is_mcp_context_required name
 
-let inject_masc_schemas (schemas : Types.tool_schema list) =
+let keeper_supported_masc_schemas (schemas : Types.tool_schema list) =
   let supported_in_keeper name =
     if Tool_dispatch.is_registered name then
       true
@@ -160,14 +160,21 @@ let inject_masc_schemas (schemas : Types.tool_schema list) =
     | "masc_board_vote" | "masc_board_delete" -> true
     | _ -> false
   in
-  masc_schemas_ref :=
-    List.filter (fun (s : Types.tool_schema) ->
+  List.filter (fun (s : Types.tool_schema) ->
       String.starts_with ~prefix:"masc_" s.name
       && not (is_keeper_mcp_context_required s.name)
       && supported_in_keeper s.name
       && not (is_keeper_denied s.name)
       && not (has_keeper_board_wrapper s.name))
       schemas
+
+let keeper_supported_masc_tool_names_from_schemas schemas =
+  keeper_supported_masc_schemas schemas
+  |> List.map (fun (schema : Types.tool_schema) -> schema.name)
+  |> dedupe_tool_names
+
+let inject_masc_schemas (schemas : Types.tool_schema list) =
+  masc_schemas_ref := keeper_supported_masc_schemas schemas
 
 let select_existing_masc_tool_names names =
   let injected = injected_masc_tool_names () in

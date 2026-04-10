@@ -129,9 +129,19 @@ let activate_base_path_config_root ~base_path =
       Config_dir_resolver.reset ();
       explicit
   | None ->
-      let config_root =
-        Filename.concat (Filename.concat base_path ".masc") "config"
+      let resolution =
+        Config_dir_resolver.resolve_with
+          Config_dir_resolver.
+            {
+              cwd = Sys.getcwd ();
+              executable_name = Sys.executable_name;
+              env_base_path = Some base_path;
+              env_config_dir = None;
+              env_personas_dir = Env_config_core.personas_dir_opt ();
+              env_home = Sys.getenv_opt "HOME";
+            }
       in
+      let config_root = resolution.Config_dir_resolver.config_root.path in
       Unix.putenv "MASC_CONFIG_DIR" config_root;
       Config_dir_resolver.reset ();
       config_root

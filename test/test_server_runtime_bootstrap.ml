@@ -283,12 +283,16 @@ let test_bootstrap_base_path_config_root_skips_explicit_config_override () =
 let test_activate_base_path_config_root_defaults_to_bootstrapped_root () =
   with_temp_dir "startup-config-activate" (fun dir ->
       let base_path = Filename.concat dir "base" in
-      mkdir_p (Filename.concat base_path ".masc/config");
+      let config_root = Filename.concat base_path ".masc/config" in
+      mkdir_p (Filename.concat config_root "prompts");
+      mkdir_p (Filename.concat config_root "keepers");
+      mkdir_p (Filename.concat config_root "personas");
+      write_file (Filename.concat config_root "cascade.json") "{}";
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
       let activated =
         Server_runtime_bootstrap.activate_base_path_config_root ~base_path
       in
-      let expected = Filename.concat base_path ".masc/config" in
+      let expected = config_root in
       Alcotest.(check string) "returns base-path config root" expected activated;
       Alcotest.(check (option string)) "env activated to base-path config"
         (Some expected) (Sys.getenv_opt "MASC_CONFIG_DIR"))
@@ -721,6 +725,36 @@ let test_startup_state_json_includes_runtime_resolution () =
     (json |> member "config_resolution" |> member "config_root" |> member "path"
    |> to_string)
 
+let test_create_server_state_records_runtime_resolution () =
+  with_temp_dir "startup-create-state" (fun dir ->
+      let repo = Filename.concat dir "repo" in
+      mkdir_p repo;
+      ignore (make_config_root repo);
+      with_env "MASC_STORAGE_TYPE" (Some "filesystem") @@ fun () ->
+      with_env "MASC_POSTGRES_URL" None @@ fun () ->
+      with_env "MASC_CONFIG_DIR" None @@ fun () ->
+      with_cwd repo @@ fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let clock, mono_clock, net, _domain_mgr, proc_mgr, fs =
+        Server_runtime_bootstrap.init_runtime_context env
+      in
+      Eio.Switch.run @@ fun sw ->
+      Server_startup_state.reset ~backend_mode:"filesystem" ();
+      ignore
+        (Server_runtime_bootstrap.create_server_state ~sw ~base_path:dir ~clock
+           ~mono_clock ~net ~proc_mgr ~fs);
+      let json = Server_startup_state.to_yojson () in
+      let open Yojson.Safe.Util in
+      Alcotest.(check string) "create_server_state records config root"
+        (Filename.concat dir ".masc/config")
+        (json |> member "config_resolution" |> member "config_root" |> member "path"
+       |> to_string);
+      Alcotest.(check string) "create_server_state records effective masc root"
+        (Unix.realpath (Filename.concat dir ".masc"))
+        (json |> member "path_diagnostics" |> member "effective_masc_root"
+       |> to_string))
+
 let test_prompt_markdown_dir_falls_back_to_resolved_config_dir () =
   with_temp_dir "startup-prompts" (fun dir ->
       let expected =
@@ -918,6 +952,9 @@ let () =
             test_startup_state_json_includes_watchdog;
           Alcotest.test_case "startup json includes runtime resolution" `Quick
             test_startup_state_json_includes_runtime_resolution;
+          Alcotest.test_case
+            "create_server_state records runtime resolution"
+            `Quick test_create_server_state_records_runtime_resolution;
           Alcotest.test_case "prompt markdown dir falls back to resolved config dir"
             `Quick test_prompt_markdown_dir_falls_back_to_resolved_config_dir;
           Alcotest.test_case "prompt markdown dir honors MASC_CONFIG_DIR override"

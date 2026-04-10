@@ -643,6 +643,19 @@ let maybe_bootstrap_existing_keepalives ctx ~name ~args =
     Do not retarget requests across other base_path registries. *)
 let resolve_ctx ctx ~name:_ _args = ctx
 
+let handle_keeper_reset ctx args : tool_result =
+  match resolve_keeper_meta ctx args with
+  | Error err -> (false, err)
+  | Ok meta ->
+    let reset_meta = Keeper_types.reset_runtime_state meta in
+    (match Keeper_types.write_meta ctx.config reset_meta with
+     | Ok () ->
+       (true, Printf.sprintf
+         "Reset runtime state for %s: usage counters zeroed, last_model_used cleared."
+         meta.name)
+     | Error err ->
+       (false, Printf.sprintf "Failed to write reset meta for %s: %s" meta.name err))
+
 let dispatch ctx ~name ~args : tool_result option =
   maybe_bootstrap_existing_keepalives ctx ~name ~args;
   let ctx = resolve_ctx ctx ~name args in
@@ -657,6 +670,7 @@ let dispatch ctx ~name ~args : tool_result option =
   | "masc_keeper_reconcile" -> Some (handle_keeper_reconcile ctx args)
   | "masc_keeper_down" -> Some (handle_keeper_down ctx args)
   | "masc_keeper_list" -> Some (handle_keeper_list ctx args)
+  | "masc_keeper_reset" -> Some (handle_keeper_reset ctx args)
   | _ -> None
 
 (** Streaming dispatch: only handles keeper_msg with text delta forwarding.

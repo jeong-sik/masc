@@ -189,6 +189,8 @@ val tool_access_of_meta_json : Yojson.Safe.t -> (tool_access, string) result
 
 val map_runtime : (agent_runtime_state -> agent_runtime_state) -> keeper_meta -> keeper_meta
 val map_usage : (usage_metrics -> usage_metrics) -> keeper_meta -> keeper_meta
+val zero_usage : usage_metrics
+val reset_runtime_state : keeper_meta -> keeper_meta
 val map_compaction_rt : (compaction_runtime -> compaction_runtime) -> keeper_meta -> keeper_meta
 val map_proactive_rt : (proactive_runtime -> proactive_runtime) -> keeper_meta -> keeper_meta
 val map_scheduled_autonomous_rt :

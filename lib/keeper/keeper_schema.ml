@@ -493,6 +493,22 @@ let keeper_schemas : tool_schema list = [
     ];
   };
 
+  {
+    name = "masc_keeper_reset";
+    description = "Reset a keeper's runtime state (usage counters, last_model_used, token stats). \
+Clears stale data from previous sessions. Does not affect configuration, goals, or persona.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Keeper handle to reset");
+        ]);
+      ]);
+      ("required", `List [`String "name"]);
+    ];
+  };
+
 ]
 
 let schemas : tool_schema list =

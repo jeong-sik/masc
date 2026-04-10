@@ -43,5 +43,5 @@ val to_json : decision_record -> Yojson.Safe.t
     Called periodically from heartbeat loop. *)
 val flush_if_needed : base_path:string -> keeper_name:string -> unit
 
-(** Ring buffer capacity. Registered as Runtime_params. *)
+(** Ring buffer capacity (env: MASC_DECISION_AUDIT_RING_CAPACITY, default 50, min 1). *)
 val ring_capacity : unit -> int

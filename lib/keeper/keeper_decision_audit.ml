@@ -99,7 +99,7 @@ let get_or_create_ring name =
   match Hashtbl.find_opt rings name with
   | Some r -> r
   | None ->
-    let cap = ring_capacity () in
+    let cap = max 1 (ring_capacity ()) in
     let r = { buf = Array.make cap None; pos = 0; count = 0;
               unflushed = 0; last_flush_ts = Time_compat.now () } in
     Hashtbl.replace rings name r;
@@ -111,9 +111,9 @@ let append ~keeper_name (rec_ : decision_record) =
     let ring = get_or_create_ring keeper_name in
     let cap = Array.length ring.buf in
     ring.buf.(ring.pos mod cap) <- Some rec_;
-    ring.pos <- ring.pos + 1;
-    ring.count <- ring.count + 1;
-    ring.unflushed <- ring.unflushed + 1
+    ring.pos <- (ring.pos + 1) mod cap;
+    ring.count <- min (ring.count + 1) cap;
+    ring.unflushed <- min (ring.unflushed + 1) cap
   end
 
 let recent ~keeper_name ~limit : decision_record list =
@@ -149,37 +149,44 @@ let flush_if_needed ~base_path ~keeper_name =
       in
       if not should_flush then ()
       else begin
+        (* Sanitize keeper_name to prevent path traversal *)
+        let safe_name =
+          String.map (fun c ->
+            if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+               || (c >= '0' && c <= '9') || c = '-' || c = '_'
+            then c else '_') keeper_name
+        in
         let dir =
           let open Unix in
           let tm = localtime now in
           Printf.sprintf "%s/.masc/decision_audit/%s/%04d-%02d/%02d.jsonl"
-            base_path keeper_name
+            base_path safe_name
             (tm.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday
         in
-        (* Ensure parent directory exists *)
         let parent = Filename.dirname dir in
-        (try Fs_compat.mkdir_p parent with _ -> ());
-        (* Append unflushed records *)
+        (try Fs_compat.mkdir_p parent
+         with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
         let cap = Array.length ring.buf in
         let start = ((ring.pos - ring.unflushed) mod cap + cap) mod cap in
         let oc =
           try Some (open_out_gen [Open_append; Open_creat; Open_text] 0o644 dir)
-          with e ->
+          with Eio.Cancel.Cancelled _ as e -> raise e
+             | e ->
             Log.Keeper.warn "decision_audit flush failed: %s" (Printexc.to_string e);
             None
         in
-        (match oc with
-         | None -> ()
-         | Some oc ->
-           Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
-             for i = 0 to ring.unflushed - 1 do
-               let idx = (start + i) mod cap in
-               match ring.buf.(idx) with
-               | Some r ->
-                 output_string oc (Yojson.Safe.to_string (to_json r));
-                 output_char oc '\n'
-               | None -> ()
-             done));
-        ring.unflushed <- 0;
-        ring.last_flush_ts <- now
+        match oc with
+        | None -> ()  (* Keep unflushed count — retry next cycle *)
+        | Some oc ->
+          Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
+            for i = 0 to ring.unflushed - 1 do
+              let idx = (start + i) mod cap in
+              match ring.buf.(idx) with
+              | Some r ->
+                output_string oc (Yojson.Safe.to_string (to_json r));
+                output_char oc '\n'
+              | None -> ()
+            done);
+          ring.unflushed <- 0;
+          ring.last_flush_ts <- now
       end

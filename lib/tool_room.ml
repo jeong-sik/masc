@@ -75,16 +75,16 @@ let normalize_speculation_budget value =
   | Some v when v <= 0 -> Error "❌ speculation_budget must be > 0"
   | Some v -> Ok (Some v)
 
+let effective_cluster_name (config : Room.config) =
+  match String.trim config.backend_config.Backend_types.cluster_name with
+  | "" -> Env_config_core.cluster_name ()
+  | name -> name
+
 let room_strategy_json config =
   let state = Room.read_state config in
-  let cluster =
-    match config.backend_config.Backend_types.cluster_name with
-    | "" -> state.project
-    | name -> name
-  in
   `Assoc
     [
-      ("cluster", `String cluster);
+      ("cluster", `String (effective_cluster_name config));
       ("search_strategy_default",
        Json_util.string_opt_to_json state.search_strategy_default);
       ("speculation_enabled", `Bool state.speculation_enabled);
@@ -196,11 +196,7 @@ let status_summary_string (ctx : context) =
   in
   let current_task = safe_current_task ctx ~joined in
   let worktree_active = status_worktree_active ctx in
-  let cluster_name =
-    match ctx.config.backend_config.Backend_types.cluster_name with
-    | "" -> state.project
-    | name -> name
-  in
+  let cluster_name = effective_cluster_name ctx.config in
   let agents =
     safe_get_agents ctx
     |> List.sort (fun (a : Types.agent) (b : Types.agent) ->

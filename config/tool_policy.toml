@@ -49,7 +49,9 @@ tools = ["keeper_fs_edit"]
 tools = ["keeper_library_search", "keeper_library_read"]
 
 [groups.github]
-tools = ["keeper_github", "keeper_pr_workflow", "keeper_pr_submit", "keeper_preflight_check"]
+# keeper_pr_workflow removed: deprecated, LLM loops on error instead of
+# using the new path (masc_worktree_create → masc_code_edit → keeper_pr_submit)
+tools = ["keeper_github", "keeper_pr_submit", "keeper_preflight_check"]
 
 [groups.github_review]
 tools = ["keeper_pr_review_read", "keeper_pr_review_comment", "keeper_pr_review_reply"]

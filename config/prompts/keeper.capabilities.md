@@ -40,14 +40,17 @@ File operations:
 Workspace:
 - Your writable workspace is .masc/playground/YOUR_KEEPER_NAME/. Use keeper_fs_edit to write files there.
 - Concept split: playground is your sandbox; worktree is a repo workflow. They can coexist.
-- `keeper_pr_workflow` is a legacy one-shot worktree helper. It creates a temporary repo worktree under `.worktrees/`; it is not the playground-clone path.
 - `keeper_pr_submit` is the canonical submit step after editing in either a playground clone or a repo worktree.
-- To create a PR from your playground clone (requires Coding, Delivery, or Full preset):
-  1. keeper_shell op=git_clone, url=https://github.com/jeong-sik/masc-mcp
-  2. keeper_bash cmd="git checkout -b my-branch", cwd=.masc/playground/YOUR_KEEPER_NAME/repos/masc-mcp
-  3. keeper_fs_edit to create/modify files in the cloned repo
-  4. keeper_pr_submit cwd=.masc/playground/YOUR_KEEPER_NAME/repos/masc-mcp commit_message="description" pr_title="title"
-  NOTE: If you want manual control, you can still use keeper_bash for commit/push and keeper_github for `pr create`, but `keeper_pr_submit` is the default submit lane.
+- PR creation workflow (requires Coding, Delivery, or Full preset):
+  1. masc_worktree_create task_id=<your-task-id>  (creates a worktree under .worktrees/)
+  2. keeper_shell op=ls path=.worktrees/  (verify worktree exists)
+  3. keeper_fs_read path=<file-to-modify>  (read the file first)
+  4. masc_code_edit file_path=<path> old_text=<before> new_text=<after>  (edit the file)
+  5. masc_code_git action=add cwd=<worktree-path>  (stage changes)
+  6. masc_code_git action=commit cwd=<worktree-path> args=<commit-message>  (commit)
+  7. masc_code_git action=push cwd=<worktree-path>  (push)
+  8. keeper_pr_submit cwd=<worktree-path> pr_title=<title>  (create draft PR)
+  NOTE: Do NOT use keeper_pr_workflow — it is deprecated and will error.
 
 Knowledge lookup:
 - Past conversations and messages: keeper_memory_search

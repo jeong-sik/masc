@@ -52,7 +52,7 @@ let ensure_keeper_room_presence config (meta : keeper_meta) : keeper_meta =
               (Room.is_agent_joined config
                  ~agent_name:meta.agent_name)
           then begin
-            Room.ensure_room_bootstrap config room_id;
+            Room.ensure_room_bootstrap config;
             let preset_cap = match Keeper_types.tool_access_preset meta.tool_access with
               | Some p -> ["preset:" ^ Keeper_types.tool_preset_to_string p]
               | None -> []

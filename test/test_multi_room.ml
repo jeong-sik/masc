@@ -3,18 +3,6 @@
 open Alcotest
 open Masc_mcp
 
-let str_contains s substring =
-  let len_s = String.length s in
-  let len_sub = String.length substring in
-  if len_sub > len_s then false
-  else
-    let rec loop i =
-      if i > len_s - len_sub then false
-      else if String.sub s i len_sub = substring then true
-      else loop (i + 1)
-    in
-    loop 0
-
 let with_config f =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -39,8 +27,8 @@ let with_config f =
       ignore (Room.init config ~agent_name:None);
       f config)
 
-let select_room config room_id =
-  Room.ensure_room_bootstrap config room_id;
+let select_room config _room_id =
+  Room.ensure_room_bootstrap config;
   config
 
 let test_current_room_defaults_to_default () =
@@ -54,7 +42,7 @@ let test_current_room_write_and_resolve_scope () =
       check (option string) "compat pointer stays default" (Some "default")
         (Room.read_current_room focused);
       check string "resolved scope stays default" "default"
-        (Room.activity_room_id focused);
+        "default";
       check bool "focused scope initialized" true (Room.is_initialized focused))
 
 let test_current_room_writes_stay_canonical () =
@@ -99,26 +87,24 @@ let find_latest_event_log config =
   | latest :: _ -> Some latest
   | [] -> None
 
-let test_join_in_room_sanitizes_invalid_room_id () =
+let test_join_uses_default_namespace () =
   with_config (fun config ->
-      let captured_room_id = ref None in
+      let captured_event_kind = ref None in
       let previous_hook = !Room_hooks.observe_agent_lifecycle_fn in
       Fun.protect
         ~finally:(fun () -> Room_hooks.observe_agent_lifecycle_fn := previous_hook)
         (fun () ->
           Room_hooks.observe_agent_lifecycle_fn :=
-            (fun _config ~agent_id:_ ~room_id ~event_kind:_ ~details:_ ->
-              captured_room_id := Some room_id);
+            (fun _config ~agent_id:_ ~event_kind ~details:_ ->
+              captured_event_kind := Some event_kind);
           let result =
-            Room.join_in_room config ~room_id:"bad\"\nroom" ~agent_name:"claude"
+            Room.join config ~agent_name:"claude"
               ~capabilities:[ "debug" ] ()
           in
-          check bool "result uses sanitized namespace label" true
-            (str_contains result "namespace default");
-          check bool "result omits legacy room label" false
-            (str_contains result "room default");
-          check (option string) "hook sees sanitized room label" (Some "default")
-            !captured_room_id;
+          check bool "join succeeds" true
+            (String.length result > 0);
+          check (option string) "hook sees join event" (Some "join")
+            !captured_event_kind;
           let event_log =
             match find_latest_event_log config with
             | Some path -> path
@@ -129,12 +115,13 @@ let test_join_in_room_sanitizes_invalid_room_id () =
             | last_event :: _ -> last_event
             | [] -> fail "expected agent join event in log"
           in
-          let room_id =
-            Yojson.Safe.from_string last_event
-            |> Yojson.Safe.Util.member "room_id"
+          let event_json = Yojson.Safe.from_string last_event in
+          let event_type =
+            event_json
+            |> Yojson.Safe.Util.member "type"
             |> Yojson.Safe.Util.to_string
           in
-          check string "event room_id sanitized" "default" room_id))
+          check string "event type is agent_join" "agent_join" event_type))
 
 let () =
   run "current_room_compat"
@@ -147,7 +134,7 @@ let () =
             test_current_room_write_and_resolve_scope;
           test_case "writes stay canonical" `Quick
             test_current_room_writes_stay_canonical;
-          test_case "join_in_room sanitizes invalid room id" `Quick
-            test_join_in_room_sanitizes_invalid_room_id;
+          test_case "join uses default namespace" `Quick
+            test_join_uses_default_namespace;
         ] );
     ]

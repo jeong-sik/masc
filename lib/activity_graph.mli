@@ -88,7 +88,6 @@ val format_sse_event : event -> string
 
 val emit :
   Room_utils.config ->
-  room_id:string ->
   ?actor:entity_ref ->
   ?subject:entity_ref ->
   ?tags:string list ->

@@ -124,7 +124,7 @@ let latest_seq config = read_current_seq config
 (* Event emission                                                   *)
 (* ================================================================ *)
 
-let emit config ~room_id ?actor ?subject ?(tags = []) ~kind ~payload () =
+let emit config ?actor ?subject ?(tags = []) ~kind ~payload () =
   let value =
     Room_utils.with_file_lock config (lock_path config) (fun () ->
         ensure_dirs config;
@@ -135,7 +135,7 @@ let emit config ~room_id ?actor ?subject ?(tags = []) ~kind ~payload () =
             seq;
             ts_ms = now_ts_ms ();
             ts_iso = Types.now_iso ();
-            room_id;
+            room_id = "default";  (* retained for JSONL backward compat *)
             kind;
             actor;
             subject;

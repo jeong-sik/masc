@@ -141,8 +141,7 @@ let command_plane_summary_cache_parts ~allow_initializing ~state =
 let dashboard_batch_json ?(compact = false) (config : Room.config) : Yojson.Safe.t =
   let room_state = Room.read_state config in
   let tempo = Tempo.get_tempo config in
-  (* M-17 fix: use room-scoped queries consistent with compact/shell dashboard *)
-  let room_id = "default" in
+  (* M-17 fix: single-namespace, queries scoped by basepath *)
   let tasks = Room.get_tasks_safe config in
   let agents = Room.get_active_agents config in
   let msgs = Room.get_messages_raw config ~since_seq:0 ~limit:20 in
@@ -187,16 +186,11 @@ let dashboard_batch_json ?(compact = false) (config : Room.config) : Yojson.Safe
       ~min_v:10
       ~max_v:Masc_time_constants.day_int
   in
-  let canonical_namespace = Room.default_namespace_id in
+  let cluster = Env_config_core.cluster_name () in
   let status_json =
     `Assoc [
-      ("namespace_id", `String canonical_namespace);
-      ("namespace", `String canonical_namespace);
-      ("current_namespace", `String canonical_namespace);
-      ("namespace_mode", `String "flattened");
-      ("room", `Null);
-      ("current_room", `String room_id);
-      ("room_base_path", `Null);
+      ("cluster", `String cluster);
+      ("base_path", `String config.base_path);
       ("coordination_root", `String config.base_path);
       ("workspace_path", `String config.workspace_path);
       ("workspace_differs", `Bool (config.workspace_path <> config.base_path));
@@ -852,19 +846,13 @@ let dashboard_proof_http_json ~state request =
 
 let dashboard_shell_status_json (config : Room.config) : Yojson.Safe.t =
   let room_state = Room.read_state config in
-  let current_room = Room.default_namespace_id in
-  let canonical_namespace = Room.default_namespace_id in
+  let cluster = Env_config_core.cluster_name () in
   let tempo = Tempo.get_tempo config in
   let build = Build_identity.current () in
   `Assoc
     [
-      ("namespace_id", `String canonical_namespace);
-      ("namespace", `String canonical_namespace);
-      ("current_namespace", `String canonical_namespace);
-      ("namespace_mode", `String "flattened");
-      ("room", `Null);
-      ("current_room", `String current_room);
-      ("room_base_path", `Null);
+      ("cluster", `String cluster);
+      ("base_path", `String config.base_path);
       ("coordination_root", `String config.base_path);
       ("workspace_path", `String config.workspace_path);
       ("workspace_differs", `Bool (config.workspace_path <> config.base_path));
@@ -930,7 +918,7 @@ let dashboard_message_json (message : Types.message) =
       ("seq", `Int message.seq);
     ]
 
-let dashboard_current_room_id _config = Room.default_namespace_id
+(* dashboard_current_room_id removed — namespace retired (#unify-namespace). *)
 
 let dashboard_tasks_safe config =
   Room.get_tasks_safe config
@@ -967,8 +955,7 @@ let dashboard_shell_paths_json (config : Room.config) : Yojson.Safe.t =
   |> Server_base_path_diagnostics.to_yojson
 
 let dashboard_shell_payload_json (config : Room.config) : Yojson.Safe.t =
-  let current_room = dashboard_current_room_id config in
-  let canonical_namespace = Room.default_namespace_id in
+  let cluster = Env_config_core.cluster_name () in
   let started_at = Unix.gettimeofday () in
   let measure_ms f =
     let t0 = Unix.gettimeofday () in
@@ -1023,8 +1010,7 @@ let dashboard_shell_payload_json (config : Room.config) : Yojson.Safe.t =
   |> with_projection_diagnostics ~surface:"shell" ~started_at
        ~extra:
          [
-           ("current_namespace", `String canonical_namespace);
-           ("current_room", `String current_room);
+           ("cluster", `String cluster);
            ("coordination_root", `String config.base_path);
            ("workspace_path", `String config.workspace_path);
            ("keeper_count_source", `String "keeper_meta");
@@ -1125,10 +1111,9 @@ let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Room.confi
     ]
 
 let dashboard_shell_http_json ?clock ?request (config : Room.config) : Yojson.Safe.t =
-  let current_room = dashboard_current_room_id config in
   let cache_key =
-    Printf.sprintf "shell:coord=%s:workspace=%s:room=%s"
-      config.base_path config.workspace_path current_room
+    Printf.sprintf "shell:coord=%s:workspace=%s"
+      config.base_path config.workspace_path
   in
   let compute () =
     (* Shell endpoint is read-only; use config directly without isolation

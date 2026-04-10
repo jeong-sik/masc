@@ -4,7 +4,7 @@ open Types
 include Room_utils
 include Room_state
 
-let activity_room_id _config = "default"
+(* activity_room_id removed — namespace retired (#unify-namespace). *)
 
 let task_actor_kind agent_name =
   let normalized = String.lowercase_ascii (String.trim agent_name) in
@@ -87,7 +87,6 @@ let merge_execution_links (existing : Types.task_execution_links) ?session_id
 let emit_task_activity config ~agent_name ~task_id ~kind ~payload =
   try
     !Room_hooks.activity_emit_fn config
-      ~room_id:(activity_room_id config)
       ~actor:Room_hooks.{ kind = task_actor_kind agent_name; id = agent_name }
       ~subject:Room_hooks.{ kind = "task"; id = task_id }
       ~kind
@@ -137,7 +136,7 @@ let task_transition_details ~from_status ~to_status ?notes ?reason ?duration_ms
 
 let observe_task_transition config ~agent_name ~task_id ~transition ~details =
   !Room_hooks.observe_task_transition_fn config ~agent_name
-    ~room_id:(activity_room_id config) ~task_id ~transition ~details
+    ~task_id ~transition ~details
 
 (** Normalize title for deduplication: lowercase, keep only alphanumeric+space.
     Deterministic string transform — no LLM involved. *)

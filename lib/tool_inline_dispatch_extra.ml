@@ -3,12 +3,10 @@
     (recall, board, conversation).
     Returns [Some (success, message)] if handled, [None] otherwise. *)
 
-let activity_room_id (_config : Room_utils.config) = "default"
-
 let emit_activity config ~kind ~actor ?subject ?(tags = []) ~payload () =
   try
     ignore
-      (Activity_graph.emit config ~room_id:(activity_room_id config)
+      (Activity_graph.emit config
          ~actor:(Activity_graph.entity ~kind:"agent" actor)
          ?subject ~kind ~payload ~tags ())
   with

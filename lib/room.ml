@@ -64,14 +64,13 @@ let task_action_of_transition = function
   | "release" -> Audit_log.ReleaseTask
   | other -> Audit_log.Custom ("task_" ^ other)
 
-let observe_agent_lifecycle config ~agent_id ~room_id ~event_kind ~details =
+let observe_agent_lifecycle config ~agent_id ~event_kind ~details =
   let details =
     merge_detail_fields
       [
         ("event_family", `String "agent_lifecycle");
         ("event_kind", `String event_kind);
         ("agent_id", `String agent_id);
-        ("room_id", `String room_id);
       ]
       details
   in
@@ -82,9 +81,9 @@ let observe_agent_lifecycle config ~agent_id ~room_id ~event_kind ~details =
   in
   let message =
     match event_kind with
-    | "rejoin" -> Printf.sprintf "agent rejoined: %s (%s)" agent_id room_id
-    | "leave" -> Printf.sprintf "agent left: %s (%s)" agent_id room_id
-    | _ -> Printf.sprintf "agent joined: %s (%s)" agent_id room_id
+    | "rejoin" -> Printf.sprintf "agent rejoined: %s" agent_id
+    | "leave" -> Printf.sprintf "agent left: %s" agent_id
+    | _ -> Printf.sprintf "agent joined: %s" agent_id
   in
   Log.emit level ~module_name:"Room" ~details message;
   (match event_kind with
@@ -104,7 +103,7 @@ let observe_agent_lifecycle config ~agent_id ~room_id ~event_kind ~details =
   (* Audit and telemetry require Eio context (Eio.Mutex).
      Silently skip when running in non-Eio test context. *)
   (try
-    Audit_log.log_action config ~agent_id ~action ~room_id
+    Audit_log.log_action config ~agent_id ~action
       ~details:audit_details ~outcome:Audit_log.Success ();
     if telemetry_enabled () then
       match event_kind with
@@ -114,7 +113,7 @@ let observe_agent_lifecycle config ~agent_id ~room_id ~event_kind ~details =
       | _ -> Telemetry_eio.track_agent_joined config ~agent_id ()
   with Stdlib.Effect.Unhandled _ -> ())
 
-let observe_task_transition_event config ~agent_name ~room_id ~task_id
+let observe_task_transition_event config ~agent_name ~task_id
     ~transition ~details =
   let details =
     merge_detail_fields
@@ -123,7 +122,6 @@ let observe_task_transition_event config ~agent_name ~room_id ~task_id
         ("transition", `String transition);
         ("task_id", `String task_id);
         ("agent_id", `String agent_name);
-        ("room_id", `String room_id);
       ]
       details
   in
@@ -133,13 +131,12 @@ let observe_task_transition_event config ~agent_name ~room_id ~task_id
     | _ -> Log.Info
   in
   let message =
-    Printf.sprintf "task %s %s by %s (%s)" task_id transition agent_name
-      room_id
+    Printf.sprintf "task %s %s by %s" task_id transition agent_name
   in
   Log.emit level ~module_name:"Task" ~details message;
   (try
     Audit_log.log_action config ~agent_id:agent_name
-      ~action:(task_action_of_transition transition) ~room_id
+      ~action:(task_action_of_transition transition)
       ~details ~outcome:Audit_log.Success ();
     if telemetry_enabled () then
       match transition with
@@ -161,9 +158,9 @@ let () = Room_hooks.force_release_task_fn :=
 
 (* Activity graph emit — wraps Activity_graph for room sub-modules *)
 let () = Room_hooks.activity_emit_fn :=
-  (fun config ~room_id ~actor ?subject ~kind ~payload ~tags () ->
+  (fun config ~actor ?subject ~kind ~payload ~tags () ->
     (try
-      ignore (Activity_graph.emit config ~room_id
+      ignore (Activity_graph.emit config
         ~actor:(Activity_graph.entity ~kind:actor.Room_hooks.kind actor.id)
         ?subject:(Option.map (fun (s : Room_hooks.activity_entity) ->
           Activity_graph.entity ~kind:s.kind s.id) subject)
@@ -187,13 +184,13 @@ let () = Room_hooks.relation_on_leave_fn := Relation_materializer.on_agent_leave
 let () = Room_hooks.relation_on_task_done_fn := Relation_materializer.on_task_done
 
 let () = Room_hooks.observe_agent_lifecycle_fn :=
-  (fun config ~agent_id ~room_id ~event_kind ~details ->
-    observe_agent_lifecycle config ~agent_id ~room_id ~event_kind ~details)
+  (fun config ~agent_id ~event_kind ~details ->
+    observe_agent_lifecycle config ~agent_id ~event_kind ~details)
 
 let () = Room_hooks.observe_task_transition_fn :=
-  (fun config ~agent_name ~room_id ~task_id ~transition ~details ->
+  (fun config ~agent_name ~task_id ~transition ~details ->
     !Room_hooks.on_task_mutation_fn ();
-    observe_task_transition_event config ~agent_name ~room_id ~task_id
+    observe_task_transition_event config ~agent_name ~task_id
       ~transition ~details)
 
 (* Board artifact cleanup — wraps Board_dispatch for GC *)

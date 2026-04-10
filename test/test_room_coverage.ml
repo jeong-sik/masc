@@ -465,7 +465,6 @@ let test_join_leave_emit_observability () =
            [
              ("event_family", "agent_lifecycle");
              ("event_kind", "join");
-             ("room_id", "default");
            ]);
     Alcotest.(check bool) "audit leave recorded" true
       (audit_has_entry audit_entries ~agent_id:gemini
@@ -474,7 +473,6 @@ let test_join_leave_emit_observability () =
            [
              ("event_family", "agent_lifecycle");
              ("event_kind", "leave");
-             ("room_id", "default");
            ]);
 
     let telemetry_events = Telemetry_eio.read_all_events config in

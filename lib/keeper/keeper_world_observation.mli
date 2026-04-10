@@ -126,6 +126,9 @@ val turn_reason_to_string : turn_reason -> string
 (** Convert a single skip reason to its legacy string token. *)
 val skip_reason_to_string : skip_reason -> string
 
+(** Convert channel to string tag. *)
+val channel_to_string : unified_turn_channel -> string
+
 (** Extract all reasons as legacy string list from a verdict.
     Preserves backward compatibility with existing log and prompt consumers. *)
 val verdict_reasons_to_strings : turn_verdict -> string list

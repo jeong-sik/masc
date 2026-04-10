@@ -9,8 +9,10 @@
 (* Feature flag                                                     *)
 (* ================================================================ *)
 
-let decision_layer_level () =
-  Env_config_core.get_int ~default:0 "MASC_DECISION_LAYER_LEVEL"
+let decision_layer_level_cached =
+  lazy (Env_config_core.get_int ~default:0 "MASC_DECISION_LAYER_LEVEL")
+
+let decision_layer_level () = Lazy.force decision_layer_level_cached
 
 let audit_enabled () = decision_layer_level () >= 1
 
@@ -65,8 +67,10 @@ let to_json (r : decision_record) : Yojson.Safe.t =
 (* Ring buffer                                                      *)
 (* ================================================================ *)
 
-let ring_capacity () =
-  Env_config_core.get_int ~default:50 "MASC_DECISION_AUDIT_RING_CAPACITY"
+let ring_capacity_cached =
+  lazy (Env_config_core.get_int ~default:50 "MASC_DECISION_AUDIT_RING_CAPACITY")
+
+let ring_capacity () = Lazy.force ring_capacity_cached
 
 type ring = {
   buf : decision_record option array;
@@ -78,11 +82,15 @@ type ring = {
 
 let rings : (string, ring) Hashtbl.t = Hashtbl.create 8
 
-let flush_interval_sec () =
-  Env_config_core.get_float ~default:60.0 "MASC_DECISION_AUDIT_FLUSH_INTERVAL_SEC"
+let flush_interval_sec_cached =
+  lazy (Env_config_core.get_float ~default:60.0 "MASC_DECISION_AUDIT_FLUSH_INTERVAL_SEC")
 
-let flush_batch_size () =
-  Env_config_core.get_int ~default:10 "MASC_DECISION_AUDIT_FLUSH_BATCH_SIZE"
+let flush_interval_sec () = Lazy.force flush_interval_sec_cached
+
+let flush_batch_size_cached =
+  lazy (Env_config_core.get_int ~default:10 "MASC_DECISION_AUDIT_FLUSH_BATCH_SIZE")
+
+let flush_batch_size () = Lazy.force flush_batch_size_cached
 
 let get_or_create_ring name =
   match Hashtbl.find_opt rings name with

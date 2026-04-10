@@ -87,6 +87,10 @@ let skip_reason_to_string = function
   | Cooldown_pending _ -> "cooldown_wait"
   | No_signal -> "no_signal"
 
+let channel_to_string = function
+  | Reactive -> "reactive"
+  | Scheduled_autonomous -> "scheduled_autonomous"
+
 let verdict_reasons_to_strings = function
   | Run { reasons = (first, rest) } ->
       List.map turn_reason_to_string (first :: rest)

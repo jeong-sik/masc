@@ -8,6 +8,10 @@
 
     @since Decision Layer v2 — Phase A2 (#6232) *)
 
+(** Whether audit is enabled (MASC_DECISION_LAYER_LEVEL >= 1).
+    Cached at module init — no per-call env lookup. *)
+val audit_enabled : unit -> bool
+
 (** Abstract decision record. Field access restricted to this module. *)
 type decision_record
 

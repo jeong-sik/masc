@@ -744,10 +744,7 @@ let run_keepalive_unified_turn
           obs.message_cursor_updates
       in
       let verdict_strs = Keeper_world_observation.verdict_reasons_to_strings turn_decision.verdict in
-      let channel_str = match turn_decision.channel with
-        | Keeper_world_observation.Reactive -> "reactive"
-        | Keeper_world_observation.Scheduled_autonomous -> "scheduled_autonomous"
-      in
+      let channel_str = Keeper_world_observation.channel_to_string turn_decision.channel in
       if manual_reconcile_pending && turn_decision.should_run then
         Log.Keeper.info
           "keepalive turn skipped for %s: manual reconcile pending channel=%s reasons=%s"
@@ -774,22 +771,24 @@ let run_keepalive_unified_turn
           "keepalive turn scheduled for %s: channel=%s reasons=%s"
           meta_after_triage.name channel_str
           (String.concat "," verdict_strs);
-      (* Phase A2: record decision in audit trail *)
-      let audit_wall_clock = Time_compat.now () in
-      Keeper_decision_audit.append
-        ~keeper_name:meta_after_triage.name
-        (Keeper_decision_audit.make
-           ~cycle_id:(Printf.sprintf "cycle-%s-%Ld"
-              meta_after_triage.name
-              (Int64.of_float (audit_wall_clock *. 1000.0)))
-           ~keeper_name:meta_after_triage.name
-           ~generation:meta_after_triage.runtime.generation
-           ~heartbeat_verdict:Heartbeat_smart.Emit
-           ~turn_verdict:turn_decision.verdict
-           ~wall_clock:audit_wall_clock ());
-      Keeper_decision_audit.flush_if_needed
-        ~base_path:ctx.config.base_path
-        ~keeper_name:meta_after_triage.name;
+      (* Phase A2: record decision in audit trail (skip all work when disabled) *)
+      if Keeper_decision_audit.audit_enabled () then begin
+        let audit_wall_clock = Time_compat.now () in
+        Keeper_decision_audit.append
+          ~keeper_name:meta_after_triage.name
+          (Keeper_decision_audit.make
+             ~cycle_id:(Printf.sprintf "cycle-%s-%Ld"
+                meta_after_triage.name
+                (Int64.of_float (audit_wall_clock *. 1000.0)))
+             ~keeper_name:meta_after_triage.name
+             ~generation:meta_after_triage.runtime.generation
+             ~heartbeat_verdict:Heartbeat_smart.Emit
+             ~turn_verdict:turn_decision.verdict
+             ~wall_clock:audit_wall_clock ());
+        Keeper_decision_audit.flush_if_needed
+          ~base_path:ctx.config.base_path
+          ~keeper_name:meta_after_triage.name
+      end;
       if (not should_run_turn)
          && (not has_message_signal)
          && obs.message_cursor_updates <> []

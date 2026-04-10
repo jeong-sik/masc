@@ -239,9 +239,9 @@ let test_remote_operator_action_schema_is_strict () =
                   (List.mem (`String "task_inject") enums);
                 Alcotest.(check bool) "remote excludes keeper_msg" false
                   (List.mem (`String "keeper_msg") enums);
-                Alcotest.(check bool) "remote includes team_note" true
+                Alcotest.(check bool) "remote excludes team_note" false
                   (List.mem (`String "team_note") enums);
-                Alcotest.(check bool) "remote includes team_worker_spawn_batch" true
+                Alcotest.(check bool) "remote excludes team_worker_spawn_batch" false
                   (List.mem (`String "team_worker_spawn_batch") enums);
                 Alcotest.(check bool) "remote includes social_sweep" true
                   (List.mem (`String "social_sweep") enums);

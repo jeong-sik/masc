@@ -335,6 +335,9 @@ let resolve_keeper_read_path ~(config : Room.config)
 
 let process_status_to_json (st : Unix.process_status) : Yojson.Safe.t =
   match st with
+  | Unix.WEXITED 124 ->
+      (* Process_eio returns exit code 124 on Eio.Time.Timeout *)
+      `Assoc [("kind", `String "timeout")]
   | Unix.WEXITED code ->
       `Assoc [("kind", `String "exit"); ("code", `Int code)]
   | Unix.WSIGNALED sig_num when sig_num = Sys.sigterm ->

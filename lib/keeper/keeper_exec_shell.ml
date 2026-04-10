@@ -76,6 +76,7 @@ let readonly_shell_token_match tokens =
 
 let process_status_is_timeout = function
   | Unix.WSIGNALED sig_num -> sig_num = Sys.sigterm
+  | Unix.WEXITED 124 -> true  (* Process_eio returns 124 on Eio.Time.Timeout *)
   | _ -> false
 
 let shell_command_available name =

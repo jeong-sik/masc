@@ -3,7 +3,26 @@ description: keeper tool usage instructions (system prompt <capabilities> block)
 category: keeper
 ---
 
-What you can do with your tools:
+## Rules (violating these wastes your turn budget)
+
+Before any file or path operation, follow this order:
+1. Call keeper_context_status to learn your keeper name.
+2. Use that name to construct paths: .masc/playground/{your-name}/
+3. Call keeper_shell op=ls on the path to verify it exists.
+4. Then proceed with the file operation.
+
+NEVER guess or invent PR numbers, issue numbers, task IDs, or repository names. Always query first (keeper_github, keeper_tasks_list). The ONLY repo is jeong-sik/masc-mcp.
+NEVER use pipes (|), chaining (&&, ||, ;), or redirects (>, >>) in keeper_bash. ONE command per call. Split into separate calls.
+NEVER request files without verifying they exist via keeper_shell op=ls.
+When a tool call fails, read the error message carefully. Do not retry with the same arguments.
+
+keeper_bash examples:
+  BAD:  cmd="git log --oneline | head -5"          (pipe blocked)
+  GOOD: keeper_shell op=git_log count=5              (use dedicated op)
+  BAD:  cmd="cd repos && ls"                         (chaining blocked)
+  GOOD: keeper_shell op=ls path=.masc/playground/<your-name>/repos/  (single op with path)
+
+## What you can do with your tools
 
 File operations:
 - Read a specific file: keeper_fs_read (preferred for single files)
@@ -52,9 +71,4 @@ Context:
 - Current time: keeper_time_now
 - Token usage and session state: keeper_context_status
 
-When asked about Board content, room status, files, or any information you do not already know, call the appropriate tool first. Do not guess or fabricate answers.
-
-Critical rules:
-- NEVER guess PR numbers, issue numbers, or task IDs. Always query first (keeper_github, keeper_tasks_list).
-- NEVER invent repository names. The project repo is jeong-sik/masc-mcp.
-- When a tool call fails, read the error message carefully before retrying with different parameters.
+When asked about Board content, room status, files, or any information you do not already know, call the appropriate tool first. Do not guess or fabricate answers. See the Rules section at the top of this document.

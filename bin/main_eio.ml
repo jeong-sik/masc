@@ -328,6 +328,7 @@ let guard_self_repo_base_path base_path =
 
 let run_cmd host port base_path =
   Printexc.record_backtrace true;
+  let raw_base_path = String.trim base_path in
   let normalized_base_path =
     Env_config.normalize_masc_base_path_input base_path
   in
@@ -343,6 +344,7 @@ let run_cmd host port base_path =
     Log.Server.warn
       "Normalizing --base-path from %s to %s because runtime base paths must point at the workspace root, not the .masc directory."
       base_path normalized_base_path;
+  Unix.putenv "MASC_BASE_PATH_INPUT" raw_base_path;
   Unix.putenv "MASC_BASE_PATH" normalized_base_path;
   (* Persist logs inside .masc/logs/ — colocated with state, not a sibling.
      Previous code wrote to base_path/logs/ which diverged from .masc/ when

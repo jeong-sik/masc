@@ -167,6 +167,11 @@ let init_runtime_context env =
 
 let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
     : Mcp_server.server_state =
+  let input_base_path =
+    match String.trim base_path with
+    | "" -> None
+    | raw -> Some raw
+  in
   let base_path = Env_config_core.normalize_masc_base_path_input base_path in
   Fs_compat.set_fs fs;
   Mcp_eio.set_net net;
@@ -184,6 +189,7 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
       method mono_clock = mono_clock
     end
   in
+  Unix.putenv "MASC_BASE_PATH_INPUT" (Option.value ~default:"" input_base_path);
   Unix.putenv "MASC_BASE_PATH" base_path;
   bootstrap_base_path_config_root ~base_path;
   (* RFC-0001 Gate A: initialize instrumentation stores *)
@@ -208,8 +214,8 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
   in
   let path_diagnostics =
     Server_base_path_diagnostics.detect
-      ~input_base_path:base_path
-      ?env_masc_base_path:(Env_config_core.base_path_opt ())
+      ?input_base_path
+      ?env_masc_base_path:(Env_config_core.base_path_raw_opt ())
       ~effective_base_path:state.room_config.base_path
       ~effective_masc_root:(Room.masc_root_dir state.room_config)
       ()

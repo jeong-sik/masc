@@ -218,7 +218,9 @@ let get_port ~default name =
     Set at startup; may be overridden via Unix.putenv before use.
     Returns None when MASC_BASE_PATH is unset or empty. *)
 let base_path_raw_opt () =
-  Sys.getenv_opt "MASC_BASE_PATH" |> trim_opt
+  match Sys.getenv_opt "MASC_BASE_PATH_INPUT" |> trim_opt with
+  | Some _ as value -> value
+  | None -> Sys.getenv_opt "MASC_BASE_PATH" |> trim_opt
 
 let base_path_opt () =
   base_path_raw_opt () |> Option.map normalize_masc_base_path_input

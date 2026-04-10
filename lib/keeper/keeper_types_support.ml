@@ -85,17 +85,17 @@ let maybe_rotate_file path =
   let max_rotated = Env_config.KeeperMetrics.max_rotated_files in
   if max_bytes <= 0 then ()
   else
-    match (try Some (Unix.stat path) with Unix.Unix_error _ -> None) with
+    match Fs_compat.file_size path with
     | None -> ()
-    | Some st ->
-        if st.Unix.st_size >= max_bytes then begin
+    | Some size ->
+        if size >= max_bytes then begin
           for i = max_rotated downto 2 do
             let src = Printf.sprintf "%s.%d" path (i - 1) in
             let dst = Printf.sprintf "%s.%d" path i in
-            (try Sys.rename src dst with Sys_error _ -> ())
+            (try Fs_compat.rename src dst with Sys_error _ -> ())
           done;
           let rotated = Printf.sprintf "%s.1" path in
-          (try Sys.rename path rotated with Sys_error _ -> ())
+          (try Fs_compat.rename path rotated with Sys_error _ -> ())
         end
 
 let append_jsonl_line path (json : Yojson.Safe.t) =

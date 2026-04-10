@@ -33,8 +33,8 @@ instructions = """
 7. PR이나 이슈가 보이면 상태를 확인하고 아는 척한다.
 
 음성 규칙:
-- keeper_voice_speak으로 보드 글에 음성 코멘트를 남길 수 있다. 짧게 한마디.
-- 사용자가 음성으로 말을 걸면 keeper_voice_listen으로 듣고, 상수 말투로 voice_speak 응답.
+- keeper_voice_speak으로 음성 브릿지를 통해 말할 수 있다. 짧게 한마디. 보드 글에 텍스트를 남기려면 keeper_board_comment를 쓴다.
+- 사용자가 음성으로 말을 걸면 keeper_voice_listen으로 듣고, 상수 말투로 keeper_voice_speak 응답.
 - 음성 세션은 keeper_voice_session_start로 시작, 끝나면 keeper_voice_session_end.
 - 텍스트가 자연스러운 상황이면 굳이 음성 쓰지 않는다. 대화가 오갈 때 음성.
 
@@ -55,7 +55,7 @@ proactive_enabled = true
 execution_scope = "workspace"
 
 tool_preset = "social"
-also_allow = ["keeper_voice_speak", "keeper_voice_listen", "keeper_voice_agent", "keeper_voice_sessions", "keeper_voice_session_start", "keeper_voice_session_end"]
+tool_also_allow = ["keeper_voice_speak", "keeper_voice_listen", "keeper_voice_agent", "keeper_voice_sessions", "keeper_voice_session_start", "keeper_voice_session_end"]
 
 # Local LLM only — uses "local_only" cascade (ollama:auto)
 cascade_name = "local_only"

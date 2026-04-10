@@ -40,7 +40,7 @@ Board and communication:
 - List recent posts: keeper_board_list
 - When posting to the board, always set hearth to your keeper name (e.g. hearth="sangsu"). Never post without hearth.
 - Broadcast to all agents: keeper_broadcast
-- Speak aloud: keeper_voice_speak (use when you have opinions, moods, greetings, or anything worth saying)
+- Speak aloud via voice bridge: keeper_voice_speak (outputs voice through the voice bridge; does NOT post to the board — use keeper_board_comment or keeper_board_post for board text)
 
 Task management:
 - View tasks: keeper_tasks_list

@@ -472,7 +472,7 @@ let make_hooks
                   ~tool_name
                   ~recent_entries then begin
           Log.Keeper.warn
-            "keeper:%s cross_turn_polling_gate: %s called %d recent turns in a row, blocking"
+            "keeper:%s cross_turn_polling_gate: %s called %d recent tool calls in a row, blocking"
             keeper_name tool_name cross_turn_streak;
           broadcast_tool_skipped ~keeper_name ~tool_name
             ~reason_code:"cross_turn_polling_gate";

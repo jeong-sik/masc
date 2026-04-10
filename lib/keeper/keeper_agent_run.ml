@@ -872,7 +872,7 @@ let run_turn
       (List.length keeper_tools)
       (List.length tool_entries);
   (* Layer 0: Core tools — always visible to the LLM regardless of preset.
-     Kept to 4 survival-critical tools (#4961).  Status and other coordination tools
+     Kept to 5 survival-critical tools (#4961).  Status and other coordination tools
      (keeper_broadcast, keeper_task_claim, keeper_task_done, keeper_tasks_list,
      keeper_time_now, masc_tool_help) are now BM25-retrievable, freeing
      ranking budget for context-relevant tools. *)
@@ -1141,7 +1141,7 @@ let run_turn
                 let selection_mode =
                   if llm_rerank_enabled
                   then "deterministic_plus_llm_hint"
-                  else "core_plus_prefilter"
+                  else "core_plus_prefilter_plus_discovered"
                 in
                 let deterministic_floor_set =
                   Keeper_types.dedupe_keep_order
@@ -1199,7 +1199,7 @@ let run_turn
                     omitted_suffix);
                 validated
               in
-              let all_allowed =
+              let all_allowed_pruned =
                 if is_retry then all_allowed
                 else
                   Keeper_tool_disclosure.prune_boring_tools_after_recent_polling
@@ -1223,7 +1223,7 @@ let run_turn
                   discovered_count
                   llm_selected_count
                   llm_rerank_enabled
-                  (List.length all_allowed)
+                  (List.length all_allowed_pruned)
                   (String.length query_text)
                   selection_mode;
               (* 3. Graceful last-turn: inject budget warnings and restrict
@@ -1284,8 +1284,8 @@ let run_turn
                 then
                   Agent_sdk.Tool_op.apply
                     (Agent_sdk.Tool_op.Intersect_with safe_last_turn_tools)
-                    all_allowed
-                else all_allowed
+                    all_allowed_pruned
+                else all_allowed_pruned
               in
               if is_warning_zone
               then

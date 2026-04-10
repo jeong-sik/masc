@@ -66,8 +66,9 @@ execution_scope = "workspace"
 tool_preset = "social"
 also_allow = ["keeper_voice_speak", "keeper_voice_listen"]
 
-# Local LLM only — uses "local_only" cascade (ollama:qwen3.5:35b-a3b-nvfp4)
-cascade_name = "local_only"
+# GLM flash cascade for reliable tool calling (voice_speak, voice_listen).
+# local_only cascade has poor tool selection with qwen3.5.
+cascade_name = "keeper_unified"
 
 # Telemetry Feedback
 telemetry_feedback_enabled = true

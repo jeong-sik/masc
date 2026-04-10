@@ -724,8 +724,21 @@ let test_local_repo_worktree_runs_truth_via_absolute_bash () =
 (* --- keeper_bash branch-switch guard --- *)
 
 let assert_branch_switch_blocked config cmd label =
-  let meta = make_meta_with_preset "delivery" in
-  let args = `Assoc [ "cmd", `String cmd ] in
+  let shared_repo_rel = "workspace/yousleepwhen/oas" in
+  let shared_repo_abs =
+    Filename.concat (Keeper_alerting_path.project_root_of_config config) shared_repo_rel
+  in
+  Fs_compat.mkdir_p shared_repo_abs;
+  let meta =
+    { (make_meta_with_preset "delivery") with
+      allowed_paths = [ shared_repo_rel ^ "/" ] }
+  in
+  let args =
+    `Assoc
+      [ "cmd", `String cmd
+      ; "cwd", `String shared_repo_rel
+      ]
+  in
   let result = call_tool config meta "keeper_bash" args in
   let json = parse_json result in
   let error = try json_string "error" json with _ -> "" in

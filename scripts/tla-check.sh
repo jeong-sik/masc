@@ -52,6 +52,43 @@ run_tlc() {
   echo ""
 }
 
+# Run a buggy spec that MUST violate an invariant or property.
+# TLC exit codes: 12 = safety violation, 13 = liveness violation.
+# If TLC exits 0 (no violation), the spec is too weak and the test fails.
+run_tlc_buggy() {
+  local spec_dir="$1"
+  local tla_file="$2"
+  local cfg_file="${tla_file%.tla}-buggy.cfg"
+
+  if [ ! -f "$spec_dir/$cfg_file" ]; then
+    echo "SKIP $tla_file buggy (no -buggy.cfg file)"
+    return 0
+  fi
+
+  echo "=== Checking $spec_dir/$tla_file (buggy, expect violation) ==="
+  local rc=0
+  "$JAVA" -XX:+UseParallelGC -Xmx4g \
+    -cp "$TLC_JAR" tlc2.TLC \
+    -config "$spec_dir/$cfg_file" \
+    -workers auto \
+    -deadlock \
+    "$spec_dir/$tla_file" || rc=$?
+
+  if [ "$rc" -eq 12 ] || [ "$rc" -eq 13 ]; then
+    echo "OK: buggy model correctly violated (exit $rc)."
+    echo ""
+    return 0
+  elif [ "$rc" -eq 0 ]; then
+    echo "FAIL: buggy model passed without violation. Invariant/property too weak."
+    echo ""
+    return 1
+  else
+    echo "FAIL: unexpected TLC exit code $rc."
+    echo ""
+    return 1
+  fi
+}
+
 ensure_trace_data() {
   local trace_data="$REPO_ROOT/specs/keeper-state-machine/TraceData.tla"
   local trace_source="${MASC_TLA_TRACE_JSONL:-$REPO_ROOT/specs/keeper-state-machine/synthetic.tla-trace.jsonl}"
@@ -75,6 +112,7 @@ run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperTurnCycle.tla"
 run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperOASBridge.tla"
 run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperOASAdvanced.tla"
 run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperDecisionPipeline.tla"
+run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperDecisionPipeline.tla"
 
 # Optional: run TraceSpec if --trace flag provided
 if [ "${1:-}" = "--trace" ]; then

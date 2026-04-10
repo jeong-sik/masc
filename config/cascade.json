@@ -19,9 +19,9 @@
   "tool_rerank_max_tokens": 200,
   "keeper_unified_temperature": 0.2,
   "keeper_unified_max_tokens": 65536,
-  "keeper_turn_max_tokens": 16384,
+  "keeper_turn_max_tokens": 32768,
   "local_only_temperature": 0.2,
-  "local_only_max_tokens": 16384,
+  "local_only_max_tokens": 32768,
   "default_temperature": 0.3,
   "default_max_tokens": 4096
 }

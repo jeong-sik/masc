@@ -75,8 +75,12 @@ class IMessageBot:
             return keeper
         return DEFAULT_KEEPER
 
-    async def _handle_message(self, msg: InboundMessage) -> None:
-        """Process one inbound message: gate dispatch + reply."""
+    async def _handle_message(self, msg: InboundMessage) -> bool:
+        """Process one inbound message: gate dispatch + reply.
+
+        Returns True if the message was processed successfully (or was a
+        benign duplicate), False on gate error (caller should stop batch).
+        """
         keeper = self._resolve_keeper(msg)
         logger.info(
             "Dispatching message from %s (chat=%s) to keeper %s",
@@ -111,24 +115,39 @@ class IMessageBot:
 
         if response.ok:
             self._messages_processed += 1
+        elif response.error == "duplicate message":
+            pass  # expected during at-least-once redelivery
         else:
             self._messages_failed += 1
+            return False
+
         self._last_message_at = datetime.now(tz=timezone.utc).isoformat()
+        return True
 
     async def _poll_once(self) -> None:
-        """Single poll cycle: read new messages and dispatch."""
-        messages = read_new_messages()
+        """Single poll cycle: read new messages and dispatch.
+
+        At-least-once delivery: cursor advances only to the last successfully
+        processed ROWID. On first failure, processing stops and the cursor
+        stays behind so unprocessed messages are re-fetched on restart.
+        """
+        messages = await asyncio.to_thread(read_new_messages)
         if not messages:
             return
-        self._last_cursor_rowid = messages[-1].rowid
+        last_ok_rowid: int | None = None
         for msg in messages:
             try:
-                await self._handle_message(msg)
+                ok = await self._handle_message(msg)
             except Exception as e:
                 logger.error("Error handling message ROWID %d: %s", msg.rowid, e)
                 self._messages_failed += 1
-        # Advance cursor only after all messages are processed (at-least-once).
-        advance_cursor(Path(self.cfg.cursor_path), messages[-1].rowid)
+                break  # stop to keep cursor behind failed message
+            if not ok:
+                break  # gate error -- stop to allow retry on next cycle
+            last_ok_rowid = msg.rowid
+        if last_ok_rowid is not None:
+            advance_cursor(Path(self.cfg.cursor_path), last_ok_rowid)
+        self._last_cursor_rowid = last_ok_rowid or self._last_cursor_rowid
 
     async def _write_status(self) -> None:
         """Persist current status for dashboard consumption."""

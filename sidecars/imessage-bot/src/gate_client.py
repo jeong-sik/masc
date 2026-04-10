@@ -90,6 +90,10 @@ class GateClient:
         if cfg.gate_api_token:
             headers["Authorization"] = f"Bearer {cfg.gate_api_token}"
         else:
+            logger.warning(
+                "gate_api_token not set; using Origin header fallback. "
+                "Set MASC_GATE_API_TOKEN if the gate requires authentication."
+            )
             headers["Origin"] = cfg.gate_origin()
         return headers
 

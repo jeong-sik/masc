@@ -93,8 +93,8 @@ let dashboard_proof_cache_selector ?session_id ?operation_id () =
     (value_or_star operation_id)
 
 let dashboard_active_or_recent_sessions ~clock:_ _config =
-  (* Team_session_store removed — return empty *)
-  ([] : Team_session_types.session list)
+  (* Team session store removed — always empty. *)
+  ([] : Yojson.Safe.t list)
 
 let attach_projection_diagnostics json diagnostics =
   match json with

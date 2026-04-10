@@ -6,7 +6,7 @@ type snapshot_state = {
   managed_units : unit_record list;
   units : unit_record list;
   source : string;
-  sessions : Team_session_types.session list;
+  sessions : Yojson.Safe.t list;
   intents : intent_record list;
   operations : operation_record list;
   detachments : detachment_record list;

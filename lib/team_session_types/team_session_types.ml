@@ -360,6 +360,16 @@ let required_bool_field kind json field =
         (field_error kind field
            (Printf.sprintf "expected bool, got %s" (json_type_name value)))
 
+let optional_bool_field kind json field =
+  match member field json with
+  | `Null -> Ok None
+  | `Bool value -> Ok (Some value)
+  | value ->
+      Error
+        (field_error kind field
+           (Printf.sprintf "expected bool or null, got %s"
+              (json_type_name value)))
+
 let required_enum_field kind json field parse =
   let* value = required_nonempty_string_field kind json field in
   match parse value with
@@ -442,14 +452,18 @@ let report_formats_field_result kind json field =
   match member field json with
   | `List values ->
       let rec loop seen acc = function
-        | [] -> Ok (List.rev acc)
+        | [] ->
+            if acc = [] then Error (field_error kind field "empty report format list")
+            else Ok (List.rev acc)
         | `String raw :: rest ->
             let value = String.lowercase_ascii (String.trim raw) in
             if value = "" then Error (field_error kind field "empty report format")
             else
-              let* parsed = report_format_of_string_result value in
-              if List.mem parsed seen then loop seen acc rest
-              else loop (parsed :: seen) (parsed :: acc) rest
+              (match report_format_of_string_result value with
+               | Ok parsed ->
+                   if List.mem parsed seen then loop seen acc rest
+                   else loop (parsed :: seen) (parsed :: acc) rest
+               | Error message -> Error (field_error kind field message))
         | value :: _ ->
             Error
               (field_error kind field
@@ -496,6 +510,11 @@ let delivery_contract_of_yojson_result (json : Yojson.Safe.t) :
         string_list_field_result kind json "required_artifacts"
       in
       let* repair_budget = required_int_field kind json "repair_budget" in
+      let* repair_budget =
+        if repair_budget < 0 then
+          Error (field_error kind "repair_budget" "must be non-negative")
+        else Ok repair_budget
+      in
       let* generator_roles =
         string_list_field_result kind json "generator_roles"
       in
@@ -601,9 +620,9 @@ let optional_delivery_contract_field_result kind json field =
   match member field json with
   | `Null -> Ok None
   | (`Assoc _ as value) -> (
-      match delivery_contract_of_yojson value with
-      | Some contract -> Ok (Some contract)
-      | None -> Error (field_error kind field "invalid delivery contract"))
+      match delivery_contract_of_yojson_result value with
+      | Ok contract -> Ok (Some contract)
+      | Error message -> Error (field_error kind field message))
   | value ->
       Error
         (field_error kind field
@@ -614,9 +633,9 @@ let optional_delivery_verdict_field_result kind json field =
   match member field json with
   | `Null -> Ok None
   | (`Assoc _ as value) -> (
-      match delivery_verdict_of_yojson value with
-      | Some verdict -> Ok (Some verdict)
-      | None -> Error (field_error kind field "invalid delivery verdict"))
+      match delivery_verdict_of_yojson_result value with
+      | Ok verdict -> Ok (Some verdict)
+      | Error message -> Error (field_error kind field message))
   | value ->
       Error
         (field_error kind field
@@ -687,10 +706,14 @@ let planned_worker_of_yojson_result (json : Yojson.Safe.t) :
         optional_enum_field kind json "execution_scope"
           execution_scope_of_string_result
       in
-      let thinking_enabled = member "thinking_enabled" json |> to_bool_option in
-      let thinking_budget = member "thinking_budget" json |> to_int_option in
-      let max_turns = member "max_turns" json |> to_int_option in
-      let timeout_seconds = member "timeout_seconds" json |> to_int_option in
+      let* thinking_enabled =
+        optional_bool_field kind json "thinking_enabled"
+      in
+      let* thinking_budget = optional_int_field kind json "thinking_budget" in
+      let* max_turns = optional_int_field kind json "max_turns" in
+      let* timeout_seconds =
+        optional_int_field kind json "timeout_seconds"
+      in
       let* worker_class =
         optional_enum_field kind json "worker_class" worker_class_of_string_result
       in
@@ -721,10 +744,15 @@ let planned_worker_of_yojson_result (json : Yojson.Safe.t) :
         optional_float_field kind json "routing_confidence"
       in
       let* routing_reason = optional_string_field kind json "routing_reason" in
-      let routing_escalated =
+      let* routing_escalated =
         match member "routing_escalated" json with
-        | `Bool value -> value
-        | _ -> false
+        | `Null -> Ok false
+        | `Bool value -> Ok value
+        | value ->
+            Error
+              (field_error kind "routing_escalated"
+                 (Printf.sprintf "expected bool or null, got %s"
+                    (json_type_name value)))
       in
       Ok
         {

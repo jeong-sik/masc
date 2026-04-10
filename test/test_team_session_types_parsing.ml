@@ -192,6 +192,32 @@ let test_session_result_rejects_invalid_planned_worker_enum () =
       check bool "mentions worker_class" true
         (contains_substring message "worker_class")
 
+let test_session_result_rejects_invalid_planned_worker_bool_type () =
+  let bad_worker =
+    Team_session_types.planned_worker_to_yojson sample_planned_worker
+    |> replace_assoc_field "thinking_enabled" (`String "yes")
+  in
+  let json =
+    Team_session_types.session_to_yojson (sample_session ())
+    |> replace_assoc_field "planned_workers" (`List [ bad_worker ])
+  in
+  match Team_session_types.session_of_yojson_result json with
+  | Ok _ -> fail "expected parser to reject invalid thinking_enabled type"
+  | Error message ->
+      check bool "mentions thinking_enabled" true
+        (contains_substring message "thinking_enabled")
+
+let test_session_result_rejects_empty_report_formats () =
+  let json =
+    Team_session_types.session_to_yojson (sample_session ())
+    |> replace_assoc_field "report_formats" (`List [])
+  in
+  match Team_session_types.session_of_yojson_result json with
+  | Ok _ -> fail "expected parser to reject empty report_formats"
+  | Error message ->
+      check bool "mentions report_formats" true
+        (contains_substring message "report_formats")
+
 let test_session_result_rejects_invalid_nested_delivery_verdict () =
   let bad_verdict =
     match Team_session_types.session_to_yojson (sample_session ()) with
@@ -211,6 +237,26 @@ let test_session_result_rejects_invalid_nested_delivery_verdict () =
   | Error message ->
       check bool "mentions latest_delivery_verdict" true
         (contains_substring message "latest_delivery_verdict")
+
+let test_session_result_rejects_negative_delivery_contract_repair_budget () =
+  let bad_contract =
+    match Team_session_types.session_to_yojson (sample_session ()) with
+    | `Assoc fields -> (
+        match List.assoc_opt "delivery_contract" fields with
+        | Some (`Assoc _ as contract) ->
+            replace_assoc_field "repair_budget" (`Int (-1)) contract
+        | _ -> failwith "sample session missing contract")
+    | _ -> failwith "sample session should serialize as object"
+  in
+  let json =
+    Team_session_types.session_to_yojson (sample_session ())
+    |> replace_assoc_field "delivery_contract" bad_contract
+  in
+  match Team_session_types.session_of_yojson_result json with
+  | Ok _ -> fail "expected parser to reject negative repair_budget"
+  | Error message ->
+      check bool "mentions repair_budget" true
+        (contains_substring message "repair_budget")
 
 let test_session_wrapper_returns_none_on_invalid_json () =
   let json =
@@ -243,8 +289,14 @@ let () =
             test_session_result_rejects_unknown_execution_scope;
           test_case "rejects invalid planned worker enum" `Quick
             test_session_result_rejects_invalid_planned_worker_enum;
+          test_case "rejects invalid planned worker bool type" `Quick
+            test_session_result_rejects_invalid_planned_worker_bool_type;
+          test_case "rejects empty report_formats" `Quick
+            test_session_result_rejects_empty_report_formats;
           test_case "rejects invalid nested delivery verdict" `Quick
             test_session_result_rejects_invalid_nested_delivery_verdict;
+          test_case "rejects negative contract repair_budget" `Quick
+            test_session_result_rejects_negative_delivery_contract_repair_budget;
           test_case "wrapper returns none on invalid payload" `Quick
             test_session_wrapper_returns_none_on_invalid_json;
         ] );

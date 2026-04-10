@@ -85,7 +85,7 @@ let json ?run_id:_ ?operation_id:_ (ctx : _ Operator_control.context) =
     swarm_workers
     |> List.filter_map (fun row -> string_opt row "name")
   in
-  let actual_worker_name_set = actual_worker_names |> List.sort_uniq String.compare in
+  let _actual_worker_name_set = actual_worker_names |> List.sort_uniq String.compare in
   let worker_lanes =
     swarm_workers
     |> List.fold_left
@@ -97,7 +97,9 @@ let json ?run_id:_ ?operation_id:_ (ctx : _ Operator_control.context) =
     |> List.map (fun (lane, rows) -> (lane, List.rev rows))
     |> List.sort (fun (left, _) (right, _) -> String.compare left right)
   in
-  let session_nodes = List.map (session_node config) sessions in
+  (* Team sessions removed — session_nodes always empty *)
+  let session_nodes = [] in
+  ignore sessions;
   let operation_nodes = List.map operation_node active_operation_rows in
   let detachment_nodes = List.map detachment_node active_detachment_rows in
   let lane_nodes =
@@ -109,32 +111,8 @@ let json ?run_id:_ ?operation_id:_ (ctx : _ Operator_control.context) =
       |> List.map control_lane_node
   in
   let actual_worker_nodes = List.map actual_worker_node swarm_workers in
-  let ghost_worker_nodes =
-    sessions
-    |> List.concat_map (fun (session : Team_session_types.session) ->
-           let planned =
-             if session.planned_workers <> [] then
-               session.planned_workers
-               |> List.map (fun (worker : Team_session_types.planned_worker) ->
-                      let label =
-                        match worker.runtime_actor, worker.spawn_role with
-                        | Some actor, _ when String.trim actor <> "" -> String.trim actor
-                        | _, Some role when String.trim role <> "" -> String.trim role
-                        | _ -> worker.spawn_agent
-                      in
-                      ( label,
-                        Option.value ~default:"planned" worker.spawn_role,
-                        worker.lane_id ) )
-             else
-               session.agent_names
-               |> List.map (fun name -> (name, "participant", None))
-           in
-           planned
-           |> List.filter (fun (label, _, _) -> not (List.mem label actual_worker_name_set))
-           |> List.map (fun (label, subtitle, lane_id) ->
-                  ghost_worker_node ~session_id:session.session_id ~label
-                    ~subtitle ?lane_id ()))
-  in
+  (* ghost_worker_nodes from sessions removed — sessions always [] *)
+  let ghost_worker_nodes = [] in
   let keeper_nodes = List.map keeper_node keepers in
   let nodes =
     namespace_node namespace (List.length sessions) (List.length active_operation_rows)
@@ -147,25 +125,8 @@ let json ?run_id:_ ?operation_id:_ (ctx : _ Operator_control.context) =
   let operation_rows_by_id = by_id active_operation_rows "operation_id" in
   let detachment_rows_by_id = by_id active_detachment_rows "detachment_id" in
   let edges =
-    (sessions
-    |> List.map (fun (session : Team_session_types.session) ->
-           edge ~id:("edge:namespace-session:" ^ session.session_id)
-             ~source:namespace_id ~target:("session:" ^ session.session_id)
-             ~kind:"contains" ~label:"session" ~provenance:"truth" ())
-    )
-    @ (sessions
-      |> List.filter_map (fun (session : Team_session_types.session) ->
-             match session.operation_id with
-             | Some operation_id
-               when List.mem_assoc operation_id operation_rows_by_id ->
-                 Some
-                   (edge
-                      ~id:("edge:session-operation:" ^ session.session_id ^ ":" ^ operation_id)
-                      ~source:("session:" ^ session.session_id)
-                      ~target:("operation:" ^ operation_id) ~kind:"attached"
-                      ~label:"operation" ~provenance:"truth" ())
-             | _ -> None))
-    @ (active_detachment_rows
+    (* Session edges removed — sessions always [] *)
+    (active_detachment_rows
       |> List.filter_map (fun det ->
              match string_opt det "operation_id" with
              | Some operation_id

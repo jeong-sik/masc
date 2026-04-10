@@ -108,14 +108,45 @@ let () =
     | Error e -> fail_board_test "Failed to create system post" e
   in
 
-let test_post_kind_keeper_provenance_upgrade () =
-  let store = create_store () in
-  let meta = `Assoc [ ("source", `String "keeper_board_post") ] in
-  match
-    create_post store ~author:"dm-keeper" ~content:"Keeper board post"
-      ~post_kind:Automation_post ~meta_json:meta ()
-  with
-  | Ok post ->
+  let test_post_kind_prefers_explicit_judgment () =
+    let store = create_store () in
+    let summary =
+      "LLM judged this as automation because it summarizes a completed keeper background run."
+    in
+    let meta =
+      `Assoc
+        [
+          ("source", `String "keeper_board_post");
+          ( "judgment",
+            `Assoc
+              [
+                ("summary", `String summary);
+                ("confidence", `Float 0.82);
+              ] );
+        ]
+    in
+    match
+      create_post store ~author:"dm-keeper" ~content:"Keeper board post"
+        ~post_kind:Automation_post ~meta_json:meta ()
+    with
+    | Ok post ->
+        let json = post_to_yojson post in
+        let reason =
+          Yojson.Safe.Util.(json |> member "classification_reason" |> to_string)
+        in
+        assert (String.equal reason summary);
+        Printf.printf "✓ Explicit judgment summary overrides fallback reason\n"
+    | Error e -> fail_board_test "Failed to create judged keeper post" e
+  in
+
+  let test_post_kind_keeper_provenance_upgrade () =
+    let store = create_store () in
+    let meta = `Assoc [ ("source", `String "keeper_board_post") ] in
+    match
+      create_post store ~author:"dm-keeper" ~content:"Keeper board post"
+        ~post_kind:Automation_post ~meta_json:meta ()
+    with
+    | Ok post ->
         assert (classify_post_kind post = Automation_post);
         let json = post_to_yojson post in
         let kind = Yojson.Safe.Util.(json |> member "post_kind" |> to_string) in
@@ -124,9 +155,10 @@ let test_post_kind_keeper_provenance_upgrade () =
         in
         assert (String.equal kind "automation");
         assert
-          (String.equal reason "Keeper board adapter forced automation classification.");
+          (String.equal reason
+             "Automation classification based on source=keeper_board_post, author=dm-keeper, and the automation post_kind contract.");
         Printf.printf "✓ Keeper provenance preserves automation post kind\n"
-  | Error e -> fail_board_test "Failed to create keeper provenance post" e
+    | Error e -> fail_board_test "Failed to create keeper provenance post" e
   in
 
   (* Run Eio tests *)
@@ -134,6 +166,7 @@ let test_post_kind_keeper_provenance_upgrade () =
   test_expiring_post ();
   test_sweeper_skips_permanent ();
   test_post_kind_direct_default ();
+  test_post_kind_prefers_explicit_judgment ();
   test_post_kind_automation_contract ();
   test_post_kind_system_contract ();
   test_post_kind_keeper_provenance_upgrade ();

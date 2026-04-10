@@ -114,7 +114,6 @@ let verdict_reasons_to_strings = function
       List.concat_map turn_reason_legacy_tokens (first :: rest)
   | Skip { reasons = (first, rest) } ->
       List.concat_map skip_reason_legacy_tokens (first :: rest)
-
 type unified_turn_decision = {
   should_run : bool;
   channel : unified_turn_channel;

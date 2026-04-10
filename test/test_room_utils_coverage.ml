@@ -136,6 +136,32 @@ let test_resolve_masc_base_path_keeps_matching_explicit_env () =
       check string "matching explicit env preserved" requested
         (Room_utils.resolve_masc_base_path requested))
 
+let test_resolve_masc_base_path_collapses_requested_masc_dir () =
+  let requested =
+    Filename.concat
+      (Filename.concat (Filename.get_temp_dir_name ()) "room-utils-collapse")
+      ".masc"
+  in
+  with_envs
+    [ ("MASC_BASE_PATH", None);
+      ("MASC_TEST_ALLOW_INHERITED_BASE_PATH", None) ]
+    (fun () ->
+      check string "requested .masc input collapses to parent"
+        (Filename.dirname requested)
+        (Room_utils.resolve_masc_base_path requested))
+
+let test_resolve_masc_base_path_collapses_explicit_env_masc_dir () =
+  let requested =
+    Filename.concat (Filename.get_temp_dir_name ()) "room-utils-explicit"
+  in
+  let explicit = Filename.concat requested ".masc" in
+  with_envs
+    [ ("MASC_BASE_PATH", Some explicit);
+      ("MASC_TEST_ALLOW_INHERITED_BASE_PATH", None) ]
+    (fun () ->
+      check string "explicit .masc env collapses to parent" requested
+        (Room_utils.resolve_masc_base_path requested))
+
 let test_resolve_masc_base_path_allows_test_opt_in () =
   let requested =
     Filename.concat (Filename.get_temp_dir_name ()) "room-utils-opt-in"
@@ -636,6 +662,10 @@ let () =
         test_resolve_masc_base_path_ignores_inherited_env_in_test;
       test_case "keeps matching explicit env" `Quick
         test_resolve_masc_base_path_keeps_matching_explicit_env;
+      test_case "collapses requested .masc path" `Quick
+        test_resolve_masc_base_path_collapses_requested_masc_dir;
+      test_case "collapses explicit .masc env" `Quick
+        test_resolve_masc_base_path_collapses_explicit_env_masc_dir;
       test_case "allows explicit opt-in to inherited env" `Quick
         test_resolve_masc_base_path_allows_test_opt_in;
       test_case "ignores dual .masc roots by default" `Quick

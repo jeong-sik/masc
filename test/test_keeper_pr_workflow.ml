@@ -723,6 +723,20 @@ let test_local_repo_worktree_runs_truth_via_absolute_bash () =
 
 (* --- keeper_bash branch-switch guard --- *)
 
+let assert_branch_switch_allowed config cmd label =
+  let meta = make_meta_with_preset "delivery" in
+  let args = `Assoc [ "cmd", `String cmd ] in
+  let result = call_tool config meta "keeper_bash" args in
+  let json = parse_json result in
+  let error = try json_string "error" json with _ -> "" in
+  let has_status =
+    match json with
+    | `Assoc fields -> List.mem_assoc "status" fields
+    | _ -> false
+  in
+  check bool (label ^ " not policy blocked")
+    true (error <> "branch_switch_blocked" && has_status)
+
 let assert_branch_switch_blocked config cmd label =
   let shared_repo_rel = "workspace/yousleepwhen/oas" in
   let shared_repo_abs =
@@ -742,8 +756,7 @@ let assert_branch_switch_blocked config cmd label =
   let result = call_tool config meta "keeper_bash" args in
   let json = parse_json result in
   let error = try json_string "error" json with _ -> "" in
-  check bool (label ^ " blocked")
-    true (error = "branch_switch_blocked")
+  check string (label ^ " blocked") "branch_switch_blocked" error
 
 let test_bash_git_checkout_blocked () =
   with_room (fun config ->
@@ -768,6 +781,11 @@ let test_bash_git_branch_create_blocked () =
 let test_bash_git_branch_rename_blocked () =
   with_room (fun config ->
     assert_branch_switch_blocked config "git branch -m old-name new-name" "branch -m")
+
+let test_bash_git_checkout_allowed_in_default_playground () =
+  with_room (fun config ->
+    assert_branch_switch_allowed config "git checkout refactor/some-branch"
+      "checkout default playground")
 
 let test_bash_git_branch_list_allowed () =
   with_room (fun config ->
@@ -1171,6 +1189,8 @@ let () =
       ; test_case "tab checkout blocked" `Quick test_bash_git_tab_separated_blocked
       ; test_case "branch create blocked" `Quick test_bash_git_branch_create_blocked
       ; test_case "branch rename blocked" `Quick test_bash_git_branch_rename_blocked
+      ; test_case "checkout allowed in default playground" `Quick
+          test_bash_git_checkout_allowed_in_default_playground
       ; test_case "branch list allowed" `Quick test_bash_git_branch_list_allowed
       ; test_case "branch delete allowed" `Quick test_bash_git_branch_delete_allowed
       ; test_case "status allowed" `Quick test_bash_git_status_allowed

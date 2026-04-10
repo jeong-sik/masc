@@ -124,7 +124,7 @@ let public_mcp_surface_tools =
     "masc_heartbeat";
     (* Keeper interaction *)
     "masc_keeper_msg"; "masc_keeper_msg_result"; "masc_keeper_list"; "masc_keeper_status";
-    "masc_keeper_up"; "masc_keeper_repair"; "masc_keeper_down";
+    "masc_keeper_up"; "masc_keeper_repair"; "masc_keeper_reconcile"; "masc_keeper_down";
     "masc_persona_list";
     (* Board *)
     "masc_board_post"; "masc_board_list"; "masc_board_get";
@@ -202,7 +202,7 @@ let admin_surface_tools =
     "masc_auth_refresh"; "masc_auth_revoke"; "masc_auth_status";
     "masc_keeper_create_from_persona";
     "masc_pause"; "masc_resume";
-    "masc_runtime_verify"; "masc_tool_list";
+    "masc_runtime_verify"; "masc_runtime_ollama_probe"; "masc_tool_list";
   ]
 
 let keeper_internal_surface_tools = keeper_internal_tools

@@ -110,6 +110,8 @@ or starting discussions that other keepers should see.";
         ("content", `Assoc [("type", `String "string"); ("description", `String "Post content (max 4000 chars)")]);
         ("hearth", `Assoc [("type", `String "string"); ("description", `String "Topic channel name (e.g. code-review, research, ops)")]);
         ("thread_id", `Assoc [("type", `String "string"); ("description", `String "Linked conversation thread ID (optional)")]);
+        ("classification_reason", `Assoc [("type", `String "string"); ("description", `String "Optional explicit rationale for why this should appear as automation/direct in board views")]);
+        ("judgment", `Assoc [("type", `String "object"); ("description", `String "Optional structured LLM judgment metadata. Use summary or reason to preserve why you posted/classified it this way")]);
       ]);
       ("required", `List [`String "content"]);
     ];

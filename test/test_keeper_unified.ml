@@ -1976,6 +1976,38 @@ let test_normalize_response_text_empty_without_tools_errors () =
          in
          found)
 
+let test_validate_completion_contract_allows_text_without_tools () =
+  match
+    KTD.validate_completion_contract
+      ~contract:KTD.Allow_text_or_tool
+      ~tool_names:[]
+      ()
+  with
+  | Ok () -> ()
+  | Error e -> fail ("unexpected error: " ^ e)
+
+let test_validate_completion_contract_requires_tool_use () =
+  match
+    KTD.validate_completion_contract
+      ~contract:KTD.Require_tool_use
+      ~tool_names:[]
+      ()
+  with
+  | Ok () -> fail "expected tool contract failure"
+  | Error e ->
+      check bool "error mentions required tool contract" true
+        (contains_substring e "required tool contract")
+
+let test_validate_completion_contract_accepts_stay_silent () =
+  match
+    KTD.validate_completion_contract
+      ~contract:KTD.Require_tool_use
+      ~tool_names:["keeper_stay_silent"]
+      ()
+  with
+  | Ok () -> ()
+  | Error e -> fail ("unexpected error: " ^ e)
+
 let test_tool_usage_delta_uses_registry_counts () =
   let before =
     [
@@ -2126,6 +2158,44 @@ let test_social_model_empty_text_without_headers_stays_silent () =
     (Some "no tool calls and no social headers") state.blocker;
   check string "visible response suppressed" "" routed.response_text;
   check (list string) "no synthetic tools" [] routed.tools_used
+
+let test_social_model_state_only_reply_stays_silent () =
+  let result =
+    make_run_result
+      ~text:
+        "[STATE]\nGoal: keep things tidy\nProgress: no visible response needed\n[/STATE]"
+      ~tools:[]
+      ~model:"test-model" ~input_tok:20 ~output_tok:5 ()
+  in
+  let routed, state =
+    KSM.apply_to_result ~meta:minimal_meta
+      ~observation:base_observation result
+  in
+  check string "speech act" "defer"
+    (KSM.speech_act_to_string state.speech_act);
+  check string "delivery surface" "silent"
+    (KSM.delivery_surface_to_string state.delivery_surface);
+  check string "visible response suppressed" "" routed.response_text
+
+let test_social_model_strips_state_block_from_visible_reply () =
+  let result =
+    make_run_result
+      ~text:
+        "Board checked.\n[STATE]\nGoal: keep things tidy\nProgress: board scanned\n[/STATE]"
+      ~tools:[]
+      ~model:"test-model" ~input_tok:20 ~output_tok:5 ()
+  in
+  let routed, state =
+    KSM.apply_to_result ~meta:minimal_meta
+      ~observation:base_observation result
+  in
+  check string "speech act" "inform"
+    (KSM.speech_act_to_string state.speech_act);
+  check string "delivery surface" "visible_reply"
+    (KSM.delivery_surface_to_string state.delivery_surface);
+  check string "visible response strips state block"
+    "Board checked."
+    routed.response_text
 
 let test_social_model_routes_blocker_to_board_post () =
   let result =
@@ -2533,6 +2603,12 @@ let () =
             test_normalize_response_text_tool_only_synthesizes;
           test_case "normalize empty without tools errors" `Quick
             test_normalize_response_text_empty_without_tools_errors;
+          test_case "completion contract allows text without tools" `Quick
+            test_validate_completion_contract_allows_text_without_tools;
+          test_case "completion contract requires tool use" `Quick
+            test_validate_completion_contract_requires_tool_use;
+          test_case "completion contract accepts stay silent" `Quick
+            test_validate_completion_contract_accepts_stay_silent;
           test_case "tool usage delta uses registry counts" `Quick
             test_tool_usage_delta_uses_registry_counts;
           test_case "tool usage delta ignores removed tools" `Quick
@@ -2549,6 +2625,10 @@ let () =
             test_social_model_infers_visible_reply_without_headers;
           test_case "social model empty text without headers stays silent" `Quick
             test_social_model_empty_text_without_headers_stays_silent;
+          test_case "social model state-only reply stays silent" `Quick
+            test_social_model_state_only_reply_stays_silent;
+          test_case "social model strips state block from visible reply" `Quick
+            test_social_model_strips_state_block_from_visible_reply;
           test_case "social model routes blocker to board post" `Quick
             test_social_model_routes_blocker_to_board_post;
           test_case "social model tool-only turn skips protocol violation" `Quick

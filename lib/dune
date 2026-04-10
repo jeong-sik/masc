@@ -234,8 +234,8 @@
    operator_digest_review_types
    opentelemetry_client_cohttp_eio
    observability_redact
-   risk_digest
-   operator_digest_session
+   ; risk_digest removed (team session cleanup)
+   ; operator_digest_session removed (team session cleanup)
    operator_review_state
    operator_control
    operator_control_snapshot
@@ -318,6 +318,7 @@
    tool_local_runtime_verify
    tool_local_runtime_bench
    tool_local_runtime_status
+   tool_local_runtime_probe
    tool_board
    tool_command_plane
    tool_command_plane_support
@@ -409,6 +410,7 @@
    keeper_types_support
    keeper_types
    keeper_memory
+   keeper_manual_reconcile
    keeper_memory_policy
    keeper_memory_bank
    keeper_memory_recall
@@ -644,6 +646,7 @@
   keeper_memory_policy
   keeper_memory_bank
   keeper_memory_recall
+  keeper_manual_reconcile
   ;; godsplit-phase1: file split sub-modules
   keeper_status_bridge
   ;; godsplit-phase2: additional sub-modules
@@ -661,6 +664,7 @@
   tool_local_runtime_verify
   tool_local_runtime_bench
   tool_local_runtime_status
+  tool_local_runtime_probe
   ;; tool_inline_dispatch sub-modules
   tool_inline_dispatch_types
   tool_inline_dispatch_room

@@ -19,6 +19,7 @@ export type SurfaceSectionId =
   | 'telemetry'
   | 'tool-quality'
   | 'fleet'
+  | 'connectors'
 
 type NonHomeTabId = Exclude<TabId, 'overview' | 'logs'>
 
@@ -157,6 +158,12 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: '거버넌스',
       description: '에이전트 자율 결정의 검토/승인 기록. 위험 행동 방지 레이어.',
       params: { section: 'governance' },
+    },
+    {
+      id: 'connectors',
+      label: '커넥터',
+      description: '외부 채널(Discord 등) 연결 상태, 바인딩 관리, 이벤트 로그.',
+      params: { section: 'connectors' },
     },
   ],
   workspace: [

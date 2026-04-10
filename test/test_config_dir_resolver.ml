@@ -123,6 +123,22 @@ let test_local_masc_fallback_precedes_home_masc () =
     (Lib.Config_dir_resolver.source_to_string resolution.config_root.source);
   check string "root path" local_config resolution.config_root.path
 
+let test_local_masc_fallback_collapses_explicit_masc_dir () =
+  with_temp_dir "config-dir-local-masc" @@ fun root ->
+  let target = Filename.concat root "target" in
+  let local_config = make_config_root (Filename.concat target ".masc") in
+  let resolution =
+    Lib.Config_dir_resolver.resolve_with
+      (make_inputs ~cwd:root
+         ~env_base_path:(Filename.concat target ".masc")
+         ~executable_name:"/tmp/nonexistent-masc" ())
+  in
+  check string "status" "ready"
+    (Lib.Config_dir_resolver.status_to_string resolution.status);
+  check string "root source" "local_masc"
+    (Lib.Config_dir_resolver.source_to_string resolution.config_root.source);
+  check string "root path" local_config resolution.config_root.path
+
 let test_no_legacy_me_root_fallback () =
   with_temp_dir "config-dir-no-legacy" @@ fun me_root ->
   let _repo_root =
@@ -206,6 +222,8 @@ let () =
           test_case "cwd fallback" `Quick test_cwd_fallback;
           test_case "local masc fallback precedes home masc" `Quick
             test_local_masc_fallback_precedes_home_masc;
+          test_case "local masc fallback collapses explicit .masc dir"
+            `Quick test_local_masc_fallback_collapses_explicit_masc_dir;
           test_case "home masc fallback" `Quick test_home_masc_fallback;
           test_case "does not fallback to legacy me_root repo path" `Quick
             test_no_legacy_me_root_fallback;

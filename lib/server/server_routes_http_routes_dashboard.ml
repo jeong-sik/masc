@@ -74,6 +74,17 @@ let rec add_routes ~sw ~clock router =
          in
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/runtime-probe" (fun request reqd ->
+       let handle _state req reqd =
+         let force = Server_utils.bool_query_param req "force" ~default:false in
+         let json = dashboard_runtime_probe_http_json ~force () in
+         Http.Response.json ~compress:true ~request:req
+           (Yojson.Safe.to_string json) reqd
+       in
+       if Server_utils.bool_query_param request "force" ~default:false then
+         with_tool_auth ~tool_name:"masc_runtime_ollama_probe" handle request reqd
+       else
+         with_public_read handle request reqd)
   |> Http.Router.get "/api/v1/dashboard/logs" (fun request reqd ->
        with_public_read (fun _state req reqd ->
          let limit =

@@ -582,8 +582,7 @@ let test_is_agent_joined_after_default_join () =
 
 let test_room_bootstrap_preserves_backend_state () =
   with_memory_test_env (fun config ->
-    let room_id = "side-room" in
-    Room.ensure_room_bootstrap config room_id;
+    Room.ensure_room_bootstrap config;
     let _ =
       Room.update_state config (fun state ->
         { state with message_seq = 41 })
@@ -598,7 +597,7 @@ let test_room_bootstrap_preserves_backend_state () =
     Room_utils.write_json config (Room.backlog_path config)
       (Types.backlog_to_yojson backlog);
 
-    Room.ensure_room_bootstrap config room_id;
+    Room.ensure_room_bootstrap config;
 
     let state = Room.read_state config in
     let saved_backlog = Room.read_backlog config in
@@ -608,7 +607,7 @@ let test_room_bootstrap_preserves_backend_state () =
 
 let test_room_bootstrap_ignores_invalid_room_id_in_flat_mode () =
   with_memory_test_env (fun config ->
-    Room.ensure_room_bootstrap config "../escape";
+    Room.ensure_room_bootstrap config;
     Alcotest.(check bool) "root state initialized" true
       (Room.is_initialized config)
   )

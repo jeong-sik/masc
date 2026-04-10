@@ -211,8 +211,7 @@ let handle_repo_synthesis_swarm_start ctx args =
           resolve_repo_synthesis_question ~repo_root ~question_id ~question
             ~artifact_scope
         in
-        let room_id = "default" in
-        Room.ensure_room_bootstrap config room_id;
+        Room.ensure_room_bootstrap config;
         let active_roster =
           (Room.read_state config).Types.active_agents
         in

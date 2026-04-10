@@ -48,7 +48,6 @@ type graph_edge = {
 type client = {
   client_id : int;
   push : string -> unit;
-  room_filter : string option;
   kind_filters : string list;
   mutable last_seq : int;
   created_at : float;
@@ -73,7 +72,6 @@ val register :
   string ->
   push:(string -> unit) ->
   last_seq:int ->
-  ?room_filter:string ->
   ?kind_filters:string list ->
   unit ->
   int
@@ -88,7 +86,6 @@ val format_sse_event : event -> string
 
 val emit :
   Room_utils.config ->
-  room_id:string ->
   ?actor:entity_ref ->
   ?subject:entity_ref ->
   ?tags:string list ->
@@ -99,7 +96,6 @@ val emit :
 
 val list_events :
   Room_utils.config ->
-  ?room_id:string ->
   ?kinds:string list ->
   after_seq:int ->
   limit:int ->
@@ -112,7 +108,6 @@ val latest_seq : Room_utils.config -> int
 
 val json_response :
   Room_utils.config ->
-  ?room_id:string ->
   ?kinds:string list ->
   after_seq:int ->
   limit:int ->
@@ -121,7 +116,6 @@ val json_response :
 
 val graph_json :
   Room_utils.config ->
-  ?room_id:string ->
   ?kinds:string list ->
   ?limit:int ->
   ?timeline_limit:int ->
@@ -144,7 +138,6 @@ val agent_span_to_yojson : agent_span -> Yojson.Safe.t
 
 val agent_spans_json :
   Room_utils.config ->
-  ?room_id:string ->
   ?limit:int ->
   ?since_ms:int ->
   unit ->

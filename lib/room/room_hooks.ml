@@ -60,14 +60,13 @@ let cp_cleanup_fn
     Fire-and-forget: return value is ignored by callers. *)
 let activity_emit_fn
   : (Room_utils_backend_setup.config ->
-     room_id:string ->
      actor:activity_entity ->
      ?subject:activity_entity ->
      kind:string ->
      payload:Yojson.Safe.t ->
      tags:string list ->
      unit -> unit) ref
-  = ref (fun _config ~room_id:_ ~actor:_ ?subject:_ ~kind:_ ~payload:_ ~tags:_ () -> ())
+  = ref (fun _config ~actor:_ ?subject:_ ~kind:_ ~payload:_ ~tags:_ () -> ())
 
 (** Agent economy earn — wraps Agent_economy.earn for task completion credits. *)
 let agent_economy_earn_fn
@@ -97,12 +96,11 @@ let relation_on_task_done_fn
 let observe_agent_lifecycle_fn
   : (Room_utils_backend_setup.config ->
      agent_id:string ->
-     room_id:string ->
      event_kind:string ->
      details:Yojson.Safe.t ->
      unit) ref
   = ref
-      (fun _config ~agent_id:_ ~room_id:_ ~event_kind:_ ~details:_ -> ())
+      (fun _config ~agent_id:_ ~event_kind:_ ~details:_ -> ())
 
 (** Shared observability hook for task transitions.
     Used by room task modules so every successful state transition is logged
@@ -110,13 +108,12 @@ let observe_agent_lifecycle_fn
 let observe_task_transition_fn
   : (Room_utils_backend_setup.config ->
      agent_name:string ->
-     room_id:string ->
      task_id:string ->
      transition:string ->
      details:Yojson.Safe.t ->
      unit) ref
   = ref
-      (fun _config ~agent_name:_ ~room_id:_ ~task_id:_ ~transition:_
+      (fun _config ~agent_name:_ ~task_id:_ ~transition:_
            ~details:_ -> ())
 
 (** Board artifact cleanup — wraps Board_dispatch.list_posts + delete_post.

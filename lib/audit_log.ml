@@ -285,36 +285,36 @@ let log_action
 
 (** Convenience functions for common events *)
 
-let log_join config ~agent_id ~room_id ?cost_estimate ?token_count () =
-  log_action config ~agent_id ~action:Join ~room_id
+let log_join config ~agent_id ?cost_estimate ?token_count () =
+  log_action config ~agent_id ~action:Join
     ?cost_estimate ?token_count ~outcome:Success ()
 
-let log_leave config ~agent_id ~room_id ?cost_estimate ?token_count () =
-  log_action config ~agent_id ~action:Leave ~room_id
+let log_leave config ~agent_id ?cost_estimate ?token_count () =
+  log_action config ~agent_id ~action:Leave
     ?cost_estimate ?token_count ~outcome:Success ()
 
-let log_claim_task config ~agent_id ~room_id ~task_id ?cost_estimate ?token_count () =
-  log_action config ~agent_id ~action:ClaimTask ~room_id
+let log_claim_task config ~agent_id ~task_id ?cost_estimate ?token_count () =
+  log_action config ~agent_id ~action:ClaimTask
     ~details:(`Assoc [("task_id", `String task_id)])
     ?cost_estimate ?token_count ~outcome:Success ()
 
-let log_done_task config ~agent_id ~room_id ~task_id ?cost_estimate ?token_count () =
-  log_action config ~agent_id ~action:DoneTask ~room_id
+let log_done_task config ~agent_id ~task_id ?cost_estimate ?token_count () =
+  log_action config ~agent_id ~action:DoneTask
     ~details:(`Assoc [("task_id", `String task_id)])
     ?cost_estimate ?token_count ~outcome:Success ()
 
-let log_cancel_task config ~agent_id ~room_id ~task_id ~reason ?cost_estimate ?token_count () =
-  log_action config ~agent_id ~action:CancelTask ~room_id
+let log_cancel_task config ~agent_id ~task_id ~reason ?cost_estimate ?token_count () =
+  log_action config ~agent_id ~action:CancelTask
     ~details:(`Assoc [
       ("task_id", `String task_id);
       ("reason", `String reason);
     ])
     ?cost_estimate ?token_count ~outcome:Success ()
 
-let log_broadcast config ~agent_id ~room_id ~message_preview ?cost_estimate ?token_count () =
+let log_broadcast config ~agent_id ~message_preview ?cost_estimate ?token_count () =
   (* Truncate message for privacy/size *)
   let preview = preview ~max_len:100 message_preview in
-  log_action config ~agent_id ~action:Broadcast ~room_id
+  log_action config ~agent_id ~action:Broadcast
     ~details:(`Assoc [("preview", `String preview)])
     ?cost_estimate ?token_count ~outcome:Success ()
 

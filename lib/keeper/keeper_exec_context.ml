@@ -213,7 +213,7 @@ let ensure_keeper_room_presence config (meta : keeper_meta) : keeper_meta =
           in
           if not joined
           then begin
-            Room.ensure_room_bootstrap config room_id;
+            Room.ensure_room_bootstrap config;
             ignore
               (Room.join config ~agent_name:meta.agent_name
                  ~capabilities ())

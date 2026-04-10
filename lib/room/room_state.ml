@@ -28,7 +28,8 @@ let default_room_state config = {
   speculation_budget = None;
 }
 
-let default_namespace_id = "default"
+(* default_namespace_id removed — namespace concept retired (#unify-namespace).
+   All coordination uses a single basepath-scoped identity. *)
 
 let non_empty_string_opt = function
   | Some value ->
@@ -199,7 +200,7 @@ let read_backlog config =
 let write_backlog config backlog =
   write_json config (backlog_path config) (backlog_to_yojson backlog)
 
-let activity_room_id _config = default_namespace_id
+(* activity_room_id removed — room/namespace retired (#unify-namespace). *)
 
 let emit_message_activity config ~from_agent ~content ~mention
     ?session_id ?operation_id ?worker_run_id ?(evidence_refs = []) () =
@@ -231,7 +232,7 @@ let emit_message_activity config ~from_agent ~content ~mention
   let actor = Room_hooks.{ kind = "agent"; id = from_agent } in
   let emit ?subject ~kind ~tags () =
     try
-      !Room_hooks.activity_emit_fn config ~room_id:(activity_room_id config)
+      !Room_hooks.activity_emit_fn config
         ~actor ?subject ~kind ~payload ~tags ()
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
@@ -384,7 +385,7 @@ let resolve_agent_name config agent_name =
 (* Room Bootstrap                               *)
 (* ============================================ *)
 
-let ensure_room_bootstrap config room_id =
+let ensure_room_bootstrap config =
   (* 1. Always ensure root infrastructure exists *)
   let root_dir = masc_root_dir config in
   let root_agents_dir = Filename.concat root_dir "agents" in
@@ -408,8 +409,7 @@ let ensure_room_bootstrap config room_id =
     write_json_root config root_backlog_path
       (backlog_to_yojson { tasks = []; last_updated = now_iso (); version = 1 });
 
-  (* 2. Bootstrap target room — since #4638 always resolves to root .masc/ *)
-  ignore room_id;
+  (* 2. Bootstrap scoped dirs — single namespace since #4638 *)
   let scoped_agents = agents_dir config in
   let scoped_tasks = tasks_dir config in
   let scoped_messages = messages_dir config in
@@ -454,20 +454,19 @@ let broadcast ?trace_context config ~from_agent ~content =
       (Printf.sprintf "%09d_%s_broadcast.json" seq (safe_filename from_agent))
   in
   write_json config msg_file (message_to_yojson msg);
-  let room_id = "default" in
   (match backend_publish config ~channel:(broadcast_channel config)
       ~message:(Yojson.Safe.to_string (message_to_yojson msg)) with
    | Ok _ -> ()
    | Error (Backend_types.BackendNotSupported msg) when String.starts_with ~prefix:"FileSystem backend" msg ->
-       Log.Misc.debug "broadcast publish skipped for %s: %s" room_id msg
-   | Error e -> Log.Misc.error "broadcast publish failed for %s: %s" room_id (Backend_types.show_error e));
+       Log.Misc.debug "broadcast publish skipped: %s" msg
+   | Error e -> Log.Misc.error "broadcast publish failed: %s" (Backend_types.show_error e));
   emit_message_activity config ~from_agent:safe_agent ~content:safe_content
     ~mention ();
   (try !on_broadcast_mention mention
    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
      Log.Misc.warn "on_broadcast_mention callback failed: %s"
        (Printexc.to_string exn));
-  Printf.sprintf "📢 [%s@%s] %s" safe_agent room_id safe_content
+  Printf.sprintf "📢 [%s] %s" safe_agent safe_content
 
 (* ============================================ *)
 (* Zombie Detection Helpers                     *)

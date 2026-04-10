@@ -312,7 +312,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
 
   (* Emit activity graph event for tool call — enables real-time dashboard tracking *)
   (try
-    ignore (Activity_graph.emit state.Mcp_server.room_config ~room_id:"default"
+    ignore (Activity_graph.emit state.Mcp_server.room_config
       ~actor:(Activity_graph.entity ~kind:"agent" agent_name)
       ~subject:(Activity_graph.entity ~kind:"tool" name)
       ~kind:"tool.called"

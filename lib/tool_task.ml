@@ -454,7 +454,6 @@ let handle_done ctx args =
        Prometheus.record_task_completed ();
        (* Audit: log done event *)
        Audit_log.log_done_task ctx.config ~agent_id:ctx.agent_name
-         ~room_id:(Filename.basename ctx.config.base_path)
          ~task_id ()
    | Error err ->
        Log.Task.error "metrics record failed: %s" (Types.masc_error_to_string err));

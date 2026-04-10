@@ -7,8 +7,8 @@ open Types
 open Room_utils
 open Room_state
 
-(* All operations use default_namespace_id ("default").
-   room_id_of_config and compat_room_id removed — single-namespace. *)
+(* Single-namespace: room_id/namespace_id concepts retired (#unify-namespace).
+   All coordination scoped by cluster basepath only. *)
 
 (** Join room - with auto-generated nickname and metadata *)
 let join config ~agent_name ?(agent_type_override=None) ~capabilities
@@ -89,7 +89,7 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
            "{\"type\":\"agent_join\",\"agent\":\"%s\",\"agent_type\":\"%s\",\"session_id\":\"%s\",\"rejoin\":true,\"ts\":\"%s\"}"
            nickname agent_type new_session_id (now_iso ()));
          !Room_hooks.observe_agent_lifecycle_fn config ~agent_id:nickname
-           ~room_id:default_namespace_id ~event_kind:"rejoin"
+           ~event_kind:"rejoin"
            ~details:
              (`Assoc
                [
@@ -147,7 +147,7 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
     (Yojson.Safe.to_string (`List (List.map (fun s -> `String s) capabilities)))
     (now_iso ()));
   !Room_hooks.observe_agent_lifecycle_fn config ~agent_id:nickname
-    ~room_id:default_namespace_id ~event_kind:"join"
+    ~event_kind:"join"
     ~details:
       (`Assoc
         [
@@ -161,137 +161,8 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
     nickname nickname agent_type session_id
   end
 
-(** @deprecated Since #4638 storage is flattened to the default scope.
-    This compat helper still accepts [room_id], normalizes invalid values to
-    the default label for legacy messages/log entries, and shares state with
-    [join]. *)
-let join_in_room config ~room_id:_ ~agent_name ?(agent_type_override=None) ~capabilities
-    ?(pid=None) ?(hostname=None) ?(tty=None) ?(worktree=None) ?(parent_task=None) () =
-  let legacy_room_id = default_namespace_id in
-  ensure_room_bootstrap config legacy_room_id;
-
-  let agent_type = match agent_type_override with
-    | Some t -> t
-    | None ->
-        if Nickname.is_generated_nickname agent_name then
-          Option.value (Nickname.extract_agent_type agent_name) ~default:agent_name
-        else
-          agent_name
-  in
-  let nickname =
-    if Nickname.is_generated_nickname agent_name then agent_name
-    else
-      let resolved = resolve_agent_name config agent_name in
-      if resolved <> agent_name && Nickname.is_generated_nickname resolved then
-        resolved
-      else
-        Nickname.generate agent_type
-  in
-  let agent_file_dedup =
-    Filename.concat (agents_dir config) (safe_filename nickname ^ ".json")
-  in
-  if Sys.file_exists agent_file_dedup then begin
-    (* Lock the agent file to prevent race with heartbeat writes.
-       read-modify-write must be atomic; without this lock, a concurrent
-       heartbeat can update current_task/status between our read and write,
-       and the rejoin write would silently discard those changes. *)
-    let was_inactive = with_file_lock config agent_file_dedup (fun () ->
-      match read_agent_with_repair config agent_file_dedup with
-      | Ok existing_agent ->
-          let is_inactive = existing_agent.status = Inactive in
-          let updated = { existing_agent with
-            status = Active;
-            last_seen = now_iso ();
-            capabilities;
-          } in
-          write_json config agent_file_dedup (agent_to_yojson updated);
-          is_inactive
-      | Error e ->
-          Log.Room.warn "agent dedup: invalid agent JSON for %s: %s" nickname e;
-          false
-    ) in
-    if was_inactive then begin
-      let _ = update_state config (fun s ->
-        let agents = nickname :: List.filter ((<>) nickname) s.active_agents in
-        { s with active_agents = agents }
-      ) in
-      let _ = broadcast config ~from_agent:nickname
-                ~content:(Printf.sprintf "👋 %s rejoined namespace %s" nickname legacy_room_id) in
-      log_event config
-        (Yojson.Safe.to_string
-           (`Assoc
-             [
-               ("type", `String "agent_join");
-               ("room_id", `String legacy_room_id);
-               ("agent", `String nickname);
-               ("rejoin", `Bool true);
-               ("ts", `String (now_iso ()));
-             ]));
-      !Room_hooks.observe_agent_lifecycle_fn config ~agent_id:nickname
-        ~room_id:legacy_room_id
-        ~event_kind:"rejoin"
-        ~details:(`Assoc [ ("rejoin", `Bool true) ]);
-    end;
-    Printf.sprintf "✅ %s already in namespace %s (last_seen updated)" nickname legacy_room_id
-  end else begin
-    let session_id = generate_session_id () in
-    let meta : agent_meta = {
-      session_id;
-      agent_type;
-      pid;
-      hostname = (match hostname with Some h -> Some h | None -> get_hostname ());
-      tty = (match tty with Some t -> Some t | None -> get_tty ());
-      worktree;
-      parent_task;
-    } in
-    let agent_file =
-      Filename.concat (agents_dir config) (safe_filename nickname ^ ".json")
-    in
-    let agent = {
-      name = nickname;
-      agent_type;
-      status = Active;
-      capabilities;
-      current_task = None;
-      joined_at = now_iso ();
-      last_seen = now_iso ();
-      meta = Some meta;
-    } in
-    write_json config agent_file (agent_to_yojson agent);
-    let _ = update_state config (fun s ->
-      let agents = nickname :: List.filter ((<>) nickname) s.active_agents in
-      { s with active_agents = agents }
-    ) in
-    let _ =
-      broadcast config ~from_agent:nickname
-        ~content:(Printf.sprintf "👋 %s joined the namespace" nickname)
-    in
-    log_event config
-      (Yojson.Safe.to_string
-         (`Assoc
-           [
-             ("type", `String "agent_join");
-             ("room_id", `String legacy_room_id);
-             ("agent", `String nickname);
-             ("agent_type", `String agent_type);
-             ("session_id", `String session_id);
-             ( "capabilities",
-               `List (List.map (fun s -> `String s) capabilities) );
-             ("ts", `String (now_iso ()));
-           ]));
-    !Room_hooks.observe_agent_lifecycle_fn config ~agent_id:nickname
-      ~room_id:legacy_room_id
-      ~event_kind:"join"
-      ~details:
-        (`Assoc
-          [
-            ("agent_type", `String agent_type);
-            ("session_id", `String session_id);
-            ( "capabilities",
-              `List (List.map (fun s -> `String s) capabilities) );
-          ]);
-    Printf.sprintf "✅ %s joined namespace %s" nickname legacy_room_id
-  end
+(* join_in_room removed — namespace concept retired (#unify-namespace).
+   Use [join] directly. *)
 
 (** Leave room *)
 let leave config ~agent_name =
@@ -329,7 +200,7 @@ let leave config ~agent_name =
       "{\"type\":\"agent_leave\",\"agent\":\"%s\",\"ts\":\"%s\"}"
       actual_name (now_iso ()));
     !Room_hooks.observe_agent_lifecycle_fn config ~agent_id:actual_name
-      ~room_id:default_namespace_id ~event_kind:"leave"
+      ~event_kind:"leave"
       ~details:`Null;
 
     (* Record co-presence relationships via hook (async, non-blocking) *)

@@ -222,7 +222,7 @@ let test_dashboard_execution_namespace_status () =
       let config = Room_utils.default_config dir in
       Eio_main.run @@ fun env ->
       ignore (Lib.Room.init config ~agent_name:None);
-      Lib.Room.ensure_room_bootstrap config "focus-room";
+      Lib.Room.ensure_room_bootstrap config;
       check (option string) "room state current_room flattened" (Some "default")
         (Lib.Room.read_current_room config);
       Eio.Switch.run (fun sw ->
@@ -235,6 +235,9 @@ let test_dashboard_execution_namespace_status () =
             ()
         in
         let open Yojson.Safe.Util in
+        let key_absent key json =
+          List.assoc_opt key (to_assoc json) = None
+        in
         let status = json |> member "status" in
         check string "status namespace_id exposed" "default"
           (status |> member "namespace_id" |> to_string);
@@ -245,15 +248,17 @@ let test_dashboard_execution_namespace_status () =
         check string "status namespace mode flattened" "flattened"
           (status |> member "namespace_mode" |> to_string);
         check bool "legacy room removed" true
-          (status |> member "room" = `Null);
+          (key_absent "room" status);
         check bool "legacy room base path removed" true
-          (status |> member "room_base_path" = `Null);
+          (key_absent "room_base_path" status);
         let batch = Lib.Server_dashboard_http_core.dashboard_batch_json config in
         let batch_status = batch |> member "status" in
-        check string "batch current_namespace exposed" "default"
-          (batch_status |> member "current_namespace" |> to_string);
-        check string "batch current_room legacy selector exposed" "default"
-          (batch_status |> member "current_room" |> to_string);
+        check string "batch cluster exposed" ("default")
+          (batch_status |> member "cluster" |> to_string);
+        check bool "batch current_namespace removed" true
+          (key_absent "current_namespace" batch_status);
+        check bool "batch current_room removed" true
+          (key_absent "current_room" batch_status);
       ))
 
 let test_dashboard_shell_namespace_status () =
@@ -265,36 +270,31 @@ let test_dashboard_shell_namespace_status () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
       let config = Room_utils.default_config dir in
       ignore (Lib.Room.init config ~agent_name:None);
-      Lib.Room.ensure_room_bootstrap config "focus-room";
+      Lib.Room.ensure_room_bootstrap config;
       let json = Lib.Server_dashboard_http.dashboard_shell_http_json config in
       let open Yojson.Safe.Util in
+      let key_absent key json =
+        List.assoc_opt key (to_assoc json) = None
+      in
       let status = json |> member "status" in
-      check string "shell namespace_id exposed" "default"
-        (status |> member "namespace_id" |> to_string);
-      check string "shell namespace exposed" "default"
-        (status |> member "namespace" |> to_string);
-      check string "shell current_namespace exposed" "default"
-        (status |> member "current_namespace" |> to_string);
-      check string "shell current_room exposed" "default"
-        (status |> member "current_room" |> to_string);
-      check string "shell namespace mode flattened" "flattened"
-        (status |> member "namespace_mode" |> to_string);
-      check bool "shell legacy room removed" true
-        (status |> member "room" = `Null);
-      check bool "shell legacy room base path removed" true
-        (status |> member "room_base_path" = `Null);
+      check string "shell cluster exposed" ("default")
+        (status |> member "cluster" |> to_string);
+      check bool "shell namespace_id removed" true
+        (key_absent "namespace_id" status);
+      check bool "shell namespace removed" true
+        (key_absent "namespace" status);
+      check bool "shell current_namespace removed" true
+        (key_absent "current_namespace" status);
+      check bool "shell current_room removed" true
+        (key_absent "current_room" status);
+      check bool "shell namespace_mode removed" true
+        (key_absent "namespace_mode" status);
       check string "shell coordination root surfaced" dir
         (status |> member "coordination_root" |> to_string);
       check string "shell workspace path surfaced" dir
         (status |> member "workspace_path" |> to_string);
       check bool "shell workspace differs false when same root" false
         (status |> member "workspace_differs" |> to_bool);
-      check string "shell diagnostics current_namespace surfaced" "default"
-        (json |> member "projection_diagnostics" |> member "current_namespace"
-        |> to_string);
-      check string "shell diagnostics current_room surfaced" "default"
-        (json |> member "projection_diagnostics" |> member "current_room"
-        |> to_string);
       check string "shell diagnostics surface" "shell"
         (json |> member "projection_diagnostics" |> member "surface" |> to_string))
 

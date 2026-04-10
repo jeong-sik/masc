@@ -5,7 +5,6 @@ open Activity_graph_types
 type client = {
   client_id : int;
   push : string -> unit;
-  room_filter : string option;
   kind_filters : string list;
   mutable last_seq : int;
   created_at : float;
@@ -29,19 +28,11 @@ let with_registry_ro f =
   else f ()
 
 let client_matches (client : client) (value : event) =
-  let room_ok =
-    match client.room_filter with
-    | None -> true
-    | Some room_id -> String.equal room_id value.room_id
-  in
-  let kind_ok =
-    match client.kind_filters with
-    | [] -> true
-    | filters -> List.mem value.kind filters
-  in
-  room_ok && kind_ok
+  match client.kind_filters with
+  | [] -> true
+  | filters -> List.mem value.kind filters
 
-let register session_id ~push ~last_seq ?room_filter ?(kind_filters = []) () =
+let register session_id ~push ~last_seq ?(kind_filters = []) () =
   with_registry_rw (fun () ->
       let created_at = Time_compat.now () in
       let client_id = Atomic.fetch_and_add client_id_counter 1 + 1 in
@@ -49,7 +40,6 @@ let register session_id ~push ~last_seq ?room_filter ?(kind_filters = []) () =
         {
           client_id;
           push;
-          room_filter;
           kind_filters;
           last_seq;
           created_at;

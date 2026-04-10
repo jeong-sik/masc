@@ -30,28 +30,28 @@ let with_config f =
 let test_emit_and_list_events () =
   with_config (fun config ->
       ignore
-        (Activity_graph.emit config ~room_id:"default" ~kind:"agent.joined"
+        (Activity_graph.emit config ~kind:"agent.joined"
            ~actor:(Activity_graph.entity ~kind:"agent" "claude")
            ~subject:(Activity_graph.entity ~kind:"agent" "claude")
            ~tags:[ "agent"; "join" ]
            ~payload:(`Assoc [ ("agent_name", `String "claude") ])
            ());
       ignore
-        (Activity_graph.emit config ~room_id:"default" ~kind:"task.created"
+        (Activity_graph.emit config ~kind:"task.created"
            ~actor:(Activity_graph.entity ~kind:"agent" "system")
            ~subject:(Activity_graph.entity ~kind:"task" "task-001")
            ~tags:[ "task"; "create" ]
            ~payload:(`Assoc [ ("title", `String "Investigate drift") ])
            ());
       let events =
-        Activity_graph.list_events config ~room_id:"default" ~after_seq:0
+        Activity_graph.list_events config ~after_seq:0
           ~limit:10 ()
       in
       check int "two events" 2 (List.length events);
       check string "latest kind is task.created" "task.created"
         ((List.hd (List.rev events)).kind);
       let task_only =
-        Activity_graph.list_events config ~room_id:"default"
+        Activity_graph.list_events config
           ~kinds:[ "task.created" ] ~after_seq:0 ~limit:10 ()
       in
       check int "task filter" 1 (List.length task_only))
@@ -64,18 +64,17 @@ let test_filtered_client_receives_matching_events () =
       let push frame = received := frame :: !received in
       let _client_id =
         Activity_graph.register "activity-test" ~push ~last_seq:0
-          ~room_filter:"focus" ~kind_filters:[ "task.created" ] ()
+          ~kind_filters:[ "task.created" ] ()
       in
       ignore
-        (Activity_graph.emit config ~room_id:"focus" ~kind:"task.created"
+        (Activity_graph.emit config ~kind:"task.created"
            ~actor:(Activity_graph.entity ~kind:"agent" "system")
            ~subject:(Activity_graph.entity ~kind:"task" "task-101")
            ~tags:[ "task"; "create" ]
            ~payload:(`Assoc [ ("title", `String "Match me") ])
            ());
       ignore
-        (Activity_graph.emit config ~room_id:"focus"
-           ~kind:"message.broadcast"
+        (Activity_graph.emit config           ~kind:"message.broadcast"
            ~actor:(Activity_graph.entity ~kind:"agent" "system")
            ~tags:[ "message"; "broadcast" ]
            ~payload:(`Assoc [ ("content", `String "ignore") ])
@@ -88,28 +87,28 @@ let test_graph_json_summarizes_relationships () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   with_config (fun config ->
       ignore
-        (Activity_graph.emit config ~room_id:"default" ~kind:"agent.joined"
+        (Activity_graph.emit config ~kind:"agent.joined"
            ~actor:(Activity_graph.entity ~kind:"agent" "claude")
            ~subject:(Activity_graph.entity ~kind:"agent" "claude")
            ~tags:[ "agent"; "join" ]
            ~payload:(`Assoc [ ("agent_name", `String "claude") ])
            ());
       ignore
-        (Activity_graph.emit config ~room_id:"default" ~kind:"task.created"
+        (Activity_graph.emit config ~kind:"task.created"
            ~actor:(Activity_graph.entity ~kind:"agent" "system")
            ~subject:(Activity_graph.entity ~kind:"task" "task-003")
            ~tags:[ "task"; "create" ]
            ~payload:(`Assoc [ ("title", `String "Stabilize stream") ])
            ());
       ignore
-        (Activity_graph.emit config ~room_id:"default" ~kind:"task.claimed"
+        (Activity_graph.emit config ~kind:"task.claimed"
            ~actor:(Activity_graph.entity ~kind:"agent" "claude")
            ~subject:(Activity_graph.entity ~kind:"task" "task-003")
            ~tags:[ "task"; "claim" ]
            ~payload:(`Assoc [ ("task_id", `String "task-003") ])
            ());
       let json =
-        Activity_graph.graph_json config ~room_id:"default" ~limit:20
+        Activity_graph.graph_json config ~limit:20
           ~timeline_limit:10 ()
       in
       let open Yojson.Safe.Util in
@@ -125,45 +124,42 @@ let test_graph_json_tracks_runtime_activity_kinds () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   with_config (fun config ->
       ignore
-        (Activity_graph.emit config ~room_id:"default"
-           ~kind:"operation.started"
+        (Activity_graph.emit config           ~kind:"operation.started"
            ~actor:(Activity_graph.entity ~kind:"agent" "team-session")
            ~subject:(Activity_graph.entity ~kind:"operation" "sess-001")
            ~tags:[ "team_session"; "operation.started" ]
            ~payload:(`Assoc [ ("session_id", `String "sess-001") ])
            ());
       ignore
-        (Activity_graph.emit config ~room_id:"default" ~kind:"team.turn"
+        (Activity_graph.emit config ~kind:"team.turn"
            ~actor:(Activity_graph.entity ~kind:"agent" "claude")
            ~subject:(Activity_graph.entity ~kind:"operation" "sess-001")
            ~tags:[ "team_session"; "team.turn" ]
            ~payload:(`Assoc [ ("kind", `String "broadcast") ])
            ());
       ignore
-        (Activity_graph.emit config ~room_id:"default" ~kind:"task.started"
+        (Activity_graph.emit config ~kind:"task.started"
            ~actor:(Activity_graph.entity ~kind:"agent" "claude")
            ~subject:(Activity_graph.entity ~kind:"task" "task-777")
            ~tags:[ "task"; "task.started" ]
            ~payload:(`Assoc [ ("task_id", `String "task-777") ])
            ());
       ignore
-        (Activity_graph.emit config ~room_id:"default"
-           ~kind:"board.posted"
+        (Activity_graph.emit config           ~kind:"board.posted"
            ~actor:(Activity_graph.entity ~kind:"agent" "claude")
            ~subject:(Activity_graph.entity ~kind:"post" "post-42")
            ~tags:[ "board"; "board.posted" ]
            ~payload:(`Assoc [ ("post_id", `String "post-42") ])
            ());
       ignore
-        (Activity_graph.emit config ~room_id:"default"
-           ~kind:"board.voted"
+        (Activity_graph.emit config           ~kind:"board.voted"
            ~actor:(Activity_graph.entity ~kind:"agent" "gemini")
            ~subject:(Activity_graph.entity ~kind:"post" "post-42")
            ~tags:[ "board"; "board.voted" ]
            ~payload:(`Assoc [ ("target_id", `String "post-42") ])
            ());
       let json =
-        Activity_graph.graph_json config ~room_id:"default" ~limit:20
+        Activity_graph.graph_json config ~limit:20
           ~timeline_limit:10 ()
       in
       let open Yojson.Safe.Util in
@@ -197,26 +193,26 @@ let test_graph_json_reports_kind_counts_and_heatmap_totals () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   with_config (fun config ->
       ignore
-        (Activity_graph.emit config ~room_id:"default" ~kind:"message.broadcast"
+        (Activity_graph.emit config ~kind:"message.broadcast"
            ~actor:(Activity_graph.entity ~kind:"agent" "claude")
            ~tags:[ "message"; "broadcast" ]
            ~payload:(`Assoc [ ("content", `String "hello") ])
            ());
       ignore
-        (Activity_graph.emit config ~room_id:"default" ~kind:"message.broadcast"
+        (Activity_graph.emit config ~kind:"message.broadcast"
            ~actor:(Activity_graph.entity ~kind:"agent" "claude")
            ~tags:[ "message"; "broadcast" ]
            ~payload:(`Assoc [ ("content", `String "world") ])
            ());
       ignore
-        (Activity_graph.emit config ~room_id:"default" ~kind:"task.started"
+        (Activity_graph.emit config ~kind:"task.started"
            ~actor:(Activity_graph.entity ~kind:"agent" "claude")
            ~subject:(Activity_graph.entity ~kind:"task" "task-900")
            ~tags:[ "task"; "task.started" ]
            ~payload:(`Assoc [ ("task_id", `String "task-900") ])
            ());
       let json =
-        Activity_graph.graph_json config ~room_id:"default" ~limit:20
+        Activity_graph.graph_json config ~limit:20
           ~timeline_limit:10 ()
       in
       let open Yojson.Safe.Util in
@@ -238,7 +234,7 @@ let test_agent_spans_json_honors_since_ms () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   with_config (fun config ->
       ignore
-        (Activity_graph.emit config ~room_id:"default" ~kind:"task.started"
+        (Activity_graph.emit config ~kind:"task.started"
            ~actor:(Activity_graph.entity ~kind:"agent" "claude")
            ~subject:(Activity_graph.entity ~kind:"task" "task-old")
            ~tags:[ "task"; "task.started" ]
@@ -247,22 +243,21 @@ let test_agent_spans_json_honors_since_ms () =
       ignore (Unix.select [] [] [] 0.02);
       let cutoff_ms = int_of_float (Time_compat.now () *. 1000.0) in
       ignore
-        (Activity_graph.emit config ~room_id:"default" ~kind:"task.started"
+        (Activity_graph.emit config ~kind:"task.started"
            ~actor:(Activity_graph.entity ~kind:"agent" "claude")
            ~subject:(Activity_graph.entity ~kind:"task" "task-new")
            ~tags:[ "task"; "task.started" ]
            ~payload:(`Assoc [ ("task_id", `String "task-new") ])
            ());
       ignore
-        (Activity_graph.emit config ~room_id:"default" ~kind:"task.done"
+        (Activity_graph.emit config ~kind:"task.done"
            ~actor:(Activity_graph.entity ~kind:"agent" "claude")
            ~subject:(Activity_graph.entity ~kind:"task" "task-new")
            ~tags:[ "task"; "task.done" ]
            ~payload:(`Assoc [ ("task_id", `String "task-new") ])
            ());
       let json =
-        Activity_graph.agent_spans_json config ~room_id:"default"
-          ~since_ms:cutoff_ms ~limit:20 ()
+        Activity_graph.agent_spans_json config          ~since_ms:cutoff_ms ~limit:20 ()
       in
       let open Yojson.Safe.Util in
       let spans = json |> member "spans" |> to_list in

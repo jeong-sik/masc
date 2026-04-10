@@ -58,7 +58,7 @@ Board and communication:
 - List recent posts: keeper_board_list
 - When posting to the board, always set hearth to your keeper name (e.g. hearth="sangsu"). Never post without hearth.
 - Broadcast to all agents: keeper_broadcast
-- Speak aloud: keeper_voice_speak (use when you have opinions, moods, greetings, or anything worth saying)
+- Speak aloud: keeper_voice_speak (requires MASC_BASE_PATH/.masc/voice_config.json with tts.endpoints configured and ELEVENLABS_API_KEY set)
 
 Task management:
 - View tasks: keeper_tasks_list

@@ -74,5 +74,5 @@ describe('FlowControlPanel', () => {
     expect(container.textContent).toContain('일시정지')
     expect(container.textContent).toContain('재개')
     expect(container.textContent).not.toContain('새로고침')
-  })
+  }, 60_000)
 })

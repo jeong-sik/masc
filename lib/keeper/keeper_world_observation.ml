@@ -694,6 +694,14 @@ let observe ~(pending_board_events : pending_board_event list option)
     behavioral_stats;
   }
 
+let actionable_signal_present (observation : world_observation) =
+  observation.pending_mentions <> []
+  || observation.pending_board_events <> []
+  || observation.pending_scope_messages <> []
+  || observation.unclaimed_task_count > 0
+  || observation.failed_task_count > 0
+  || observation.work_discovery_due
+
 (** Compute effective scheduled autonomous cooldown with idle decay.
     After extended idle (> base cooldown), halve the cooldown each
     additional period, down to a configurable floor.  This prevents

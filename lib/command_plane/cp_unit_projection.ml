@@ -36,93 +36,9 @@ let iso_expired_at now deadline =
   | Some ts -> ts <= now
   | None -> false
 
-let operation_status_of_session (status : Team_session_types.session_status) =
-  match status with
-  | Running -> Active
-  | Paused -> Paused
-  | Completed -> Completed
-  | Interrupted -> Cancelled
-  | Cancelled -> Cancelled
-  | Failed -> Failed
-
-let choose_unit_for_session units (session : Team_session_types.session) =
-  let session_agents = session.agent_names |> filter_nonempty_strings in
-  let overlap (unit : unit_record) =
-    List.fold_left
-      (fun acc agent_name -> if List.mem agent_name unit.roster then acc + 1 else acc)
-      0 session_agents
-  in
-  let cmp (score_a, rank_a, roster_a) (score_b, rank_b, roster_b) =
-    match Int.compare score_a score_b with
-    | 0 -> (
-        match Int.compare rank_b rank_a with
-        | 0 -> Int.compare roster_b roster_a
-        | other -> other)
-    | other -> other
-  in
-  let candidates : (unit_record * int * int * int) list =
-    units
-    |> List.filter (fun (unit : unit_record) ->
-           unit.kind = Squad || unit.kind = Platoon || unit.kind = Company)
-    |> List.map (fun (unit : unit_record) ->
-           (unit, overlap unit, kind_order unit.kind, List.length unit.roster))
-  in
-  candidates
-  |> List.sort (fun (_, score_a, rank_a, roster_a) (_, score_b, rank_b, roster_b) ->
-         cmp (score_b, rank_b, roster_b) (score_a, rank_a, roster_a))
-  |> List.filter (fun (_unit, score, _rank, _roster) -> score > 0)
-  |> List.map (fun ((unit : unit_record), _, _, _) -> unit.unit_id)
-  |> list_hd_opt
-
-let projected_team_session_operations ?sessions config units managed_operations =
-  let managed_session_ids =
-    managed_operations
-    |> List.filter_map (fun (operation : operation_record) -> operation.detachment_session_id)
-    |> List.sort_uniq String.compare
-  in
-  let all_sessions =
-    match sessions with
-    | Some s -> s
-    | None -> []
-  in
-  all_sessions
-  |> List.filter (fun (session : Team_session_types.session) ->
-         not (List.mem session.session_id managed_session_ids))
-  |> List.map (fun (session : Team_session_types.session) ->
-         let assigned_unit_id =
-           choose_unit_for_session units session
-           |> Option.value
-                ~default:
-                  (match units with
-                  | (unit : unit_record) :: _ -> unit.unit_id
-                  | [] -> "company-runtime")
-         in
-         {
-           operation_id = "detachment-" ^ session.session_id;
-           objective = session.goal;
-           intent_id = None;
-           assigned_unit_id;
-           policy_class =
-             Team_session_types.execution_scope_to_string session.execution_scope;
-           budget_class =
-             Team_session_types.communication_mode_to_string session.communication_mode;
-           workload_template = None;
-           workload_profile = "coding_task";
-           stage = Some "implement";
-           artifact_scope = [];
-           depends_on_operation_ids = [];
-           search_strategy = room_search_strategy_default config;
-           detachment_session_id = Some session.session_id;
-           trace_id = session.session_id;
-           checkpoint_ref = nonempty_string (Some session.artifacts_dir);
-           active_goal_ids = [];
-           note = session.stop_reason;
-           created_by = session.created_by;
-           source = "projected";
-           status = operation_status_of_session session.status;
-           created_at = session.created_at_iso;
-           updated_at = session.updated_at_iso;
-         })
+let projected_team_session_operations ?sessions:_ _config _units _managed_operations =
+  (* Team session store removed — no projected session operations. *)
+  []
 
 let projected_swarm_operations config units managed_operations =
   let swarm_json =
@@ -198,44 +114,9 @@ let operation_by_id operations operation_id =
     (fun (operation : operation_record) -> String.equal operation.operation_id operation_id)
     operations
 
-let projected_team_session_detachments ?sessions _config operations =
-  let find_session session_id =
-    match sessions with
-    | Some cached ->
-        List.find_opt
-          (fun (s : Team_session_types.session) ->
-            String.equal s.session_id session_id)
-          cached
-    | None -> None
-  in
-  operations
-  |> List.filter_map (fun (operation : operation_record) ->
-         match operation.detachment_session_id with
-         | None when operation.source = "projected" -> None
-         | None -> None
-         | Some session_id -> (
-             match find_session session_id with
-             | None -> None
-             | Some session ->
-                 Some
-                   {
-                     detachment_id = "detachment-" ^ session_id;
-                     operation_id = operation.operation_id;
-                     assigned_unit_id = operation.assigned_unit_id;
-                     leader_id = Some session.created_by;
-                     roster = filter_nonempty_strings session.agent_names;
-                     session_id = Some session_id;
-                     checkpoint_ref = nonempty_string (Some session.artifacts_dir);
-                     runtime_kind = Some "team_session";
-                     runtime_ref = Some session_id;
-                     source = "projected";
-                     status = string_of_operation_status operation.status;
-                     last_event_at = Option.map iso_of_unix session.last_event_at;
-                     last_progress_at = Option.map iso_of_unix session.last_event_at;
-                     heartbeat_deadline = None;
-                     created_at = session.created_at_iso;
-                     updated_at = session.updated_at_iso;
-                   }))
+let projected_team_session_detachments ?sessions:_ _config _operations =
+  (* Team session store removed — no projected session detachments. *)
+  []
 
 let projected_swarm_detachments config operations =
   let swarm_json =

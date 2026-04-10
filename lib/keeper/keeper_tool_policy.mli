@@ -51,6 +51,14 @@ val pr_create_timeout_sec : unit -> float
     Call once after MASC schemas are registered. *)
 val inject_masc_schemas : Types.tool_schema list -> unit
 
+(** Filter raw schemas down to the masc_* subset a keeper can actually see. *)
+val keeper_supported_masc_schemas :
+  Types.tool_schema list -> Types.tool_schema list
+
+(** Return names from [keeper_supported_masc_schemas]. *)
+val keeper_supported_masc_tool_names_from_schemas :
+  Types.tool_schema list -> string list
+
 (** Filter names to only those present in the injected MASC set. *)
 val select_existing_masc_tool_names : string list -> string list
 

@@ -19,7 +19,7 @@ function toolQualityByKeeper(
 }
 
 describe('buildFleetRows sort order', () => {
-  it('prefers recent live activity before less recent live keepers', () => {
+  it('surfaces attention keepers ahead of otherwise healthier live rows', () => {
     const keepers = [
       {
         name: 'recent-tools',
@@ -47,10 +47,10 @@ describe('buildFleetRows sort order', () => {
       ]),
     )
 
-    expect(rows.map(row => row.name)).toEqual(['recent-tools', 'older-more-tools'])
+    expect(rows.map(row => row.name)).toEqual(['older-more-tools', 'recent-tools'])
   })
 
-  it('falls back to tool volume before context pressure when activity is unavailable', () => {
+  it('keeps attention pressure ahead of tool volume when activity is unavailable', () => {
     const keepers = [
       {
         name: 'high-context-fewer-tools',
@@ -85,8 +85,8 @@ describe('buildFleetRows sort order', () => {
     )
 
     expect(rows.map(row => row.name)).toEqual([
-      'more-tools-lower-context',
       'high-context-fewer-tools',
+      'more-tools-lower-context',
       'inactive-heavy-tools',
     ])
   })

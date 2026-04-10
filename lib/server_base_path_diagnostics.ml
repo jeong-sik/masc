@@ -7,6 +7,7 @@ type t = {
   effective_base_path : string;
   effective_masc_root : string;
   env_masc_base_path : string option;
+  resolution_source : string option;
   cwd_masc_root : string;
   cwd_has_masc_dir : bool;
   effective_has_masc_dir : bool;
@@ -50,7 +51,16 @@ let fail_fast_env_enabled () =
       | _ -> false)
   | None -> false
 
-let detect ?cwd ?env_masc_base_path ?strict ?input_base_path
+let resolution_source_opt ?resolution_source () =
+  match resolution_source with
+  | Some raw -> trim_opt (Some raw)
+  | None -> trim_opt (Sys.getenv_opt "MASC_BASE_PATH_RESOLUTION_SOURCE")
+
+let explicit_resolution_source = function
+  | Some ("explicit_env" | "explicit_cli") -> true
+  | _ -> false
+
+let detect ?cwd ?env_masc_base_path ?strict ?input_base_path ?resolution_source
     ~effective_base_path ~effective_masc_root () =
   let cwd =
     match cwd with
@@ -75,12 +85,19 @@ let detect ?cwd ?env_masc_base_path ?strict ?input_base_path
     | Some enabled -> enabled
     | None -> fail_fast_env_enabled ()
   in
+  let resolution_source = resolution_source_opt ?resolution_source () in
   let warning =
     if dual_masc_roots then
-      Some
-        (Printf.sprintf
-           "process cwd (%s) differs from effective base path (%s) and both .masc roots exist (%s vs %s); operator surfaces may inspect stale state"
-           cwd_norm effective_base_norm cwd_masc_root effective_masc_norm)
+      if explicit_resolution_source resolution_source then
+        Some
+          (Printf.sprintf
+             "process cwd (%s) differs from explicit effective base path (%s) and both .masc roots exist (%s vs %s); runtime will use the explicit base path, but operator surfaces may inspect stale state from cwd"
+             cwd_norm effective_base_norm cwd_masc_root effective_masc_norm)
+      else
+        Some
+          (Printf.sprintf
+             "process cwd (%s) differs from effective base path (%s) and both .masc roots exist (%s vs %s); operator surfaces may inspect stale state"
+             cwd_norm effective_base_norm cwd_masc_root effective_masc_norm)
     else
       None
   in
@@ -90,6 +107,7 @@ let detect ?cwd ?env_masc_base_path ?strict ?input_base_path
     effective_base_path = effective_base_norm;
     effective_masc_root = effective_masc_norm;
     env_masc_base_path = trim_opt env_masc_base_path;
+    resolution_source;
     cwd_masc_root;
     cwd_has_masc_dir;
     effective_has_masc_dir;
@@ -100,7 +118,9 @@ let detect ?cwd ?env_masc_base_path ?strict ?input_base_path
   }
 
 let strict_violation (diag : t) =
-  diag.fail_fast_enabled && diag.dual_masc_roots
+  diag.fail_fast_enabled
+  && diag.dual_masc_roots
+  && not (explicit_resolution_source diag.resolution_source)
 
 let startup_lines (diag : t) =
   let lines =
@@ -112,6 +132,9 @@ let startup_lines (diag : t) =
        | _ -> None);
       (match diag.env_masc_base_path with
        | Some path -> Some (Printf.sprintf "   MASC_BASE_PATH(env): %s" path)
+       | None -> None);
+      (match diag.resolution_source with
+       | Some source -> Some (Printf.sprintf "   Base path source: %s" source)
        | None -> None);
       (match diag.warning with
        | Some message -> Some (Printf.sprintf "   Path warning: %s" message)
@@ -159,5 +182,6 @@ let to_yojson (diag : t) =
         [
           option_field "input_base_path" diag.input_base_path;
           option_field "env_masc_base_path" diag.env_masc_base_path;
+          option_field "resolution_source" diag.resolution_source;
           option_field "warning" diag.warning;
         ])

@@ -1,6 +1,6 @@
 // MASC Dashboard — Dashboard projections, resource fetchers, tool metrics
 
-import { isRecord, asBoolean, asInt, asNumber, asStringArray } from '../components/common/normalize'
+import { isRecord, asBoolean, asInt, asNumber, asRecordArray, asString, asStringArray } from '../components/common/normalize'
 import {
   asNullableIsoTimestamp,
   normalizeGovernanceDecisionItem,
@@ -75,6 +75,36 @@ export interface LogsResponse {
   entries: LogEntry[]
 }
 
+function decodeLogEntry(raw: unknown): LogEntry | null {
+  if (!isRecord(raw)) return null
+  const seq = asNumber(raw.seq)
+  const ts = asString(raw.ts)
+  const message = asString(raw.message)
+  if (seq === undefined || !ts || !message) return null
+  return {
+    seq,
+    ts,
+    level: asString(raw.level, 'INFO'),
+    raw_level: asString(raw.raw_level, asString(raw.level, 'INFO')),
+    normalized_level: asString(raw.normalized_level, asString(raw.level, 'INFO')),
+    source: asString(raw.source, 'structured'),
+    legacy_classified: asBoolean(raw.legacy_classified, false),
+    module: asString(raw.module, ''),
+    message,
+    details: isRecord(raw.details) ? raw.details : null,
+  }
+}
+
+function decodeLogsResponse(raw: unknown): LogsResponse | null {
+  if (!isRecord(raw)) return null
+  return {
+    total: asNumber(raw.total, 0),
+    entries: asRecordArray(raw.entries)
+      .map(decodeLogEntry)
+      .filter((entry): entry is LogEntry => entry !== null),
+  }
+}
+
 export function fetchLogs(opts?: {
   limit?: number
   level?: string
@@ -89,7 +119,12 @@ export function fetchLogs(opts?: {
     params.set('since_seq', String(opts.since_seq))
   }
   const qs = params.toString()
-  return get(`/api/v1/dashboard/logs${qs ? `?${qs}` : ''}`)
+  return get<Record<string, unknown>>(`/api/v1/dashboard/logs${qs ? `?${qs}` : ''}`)
+    .then((raw) => {
+      const decoded = decodeLogsResponse(raw)
+      if (!decoded) throw new Error('invalid logs payload')
+      return decoded
+    })
 }
 
 export interface ToolHostFailureReport {
@@ -548,12 +583,105 @@ export interface DashboardRuntimeModelMetricsResponse {
   models: DashboardRuntimeModelMetric[]
 }
 
-export function fetchRuntimeProviders(): Promise<DashboardRuntimeProvidersResponse> {
-  return get('/api/v1/providers')
+function decodeRuntimeProviderDiscovery(raw: unknown): DashboardRuntimeProviderDiscovery | null {
+  if (!isRecord(raw)) return null
+  return {
+    healthy: asBoolean(raw.healthy),
+    discovered_model: asNullableString(raw.discovered_model),
+    ctx_size: asNumber(raw.ctx_size) ?? null,
+    total_slots: asNumber(raw.total_slots) ?? null,
+    busy_slots: asNumber(raw.busy_slots) ?? null,
+    idle_slots: asNumber(raw.idle_slots) ?? null,
+  }
 }
 
-export function fetchRuntimeModelMetrics(windowMinutes = 30): Promise<DashboardRuntimeModelMetricsResponse> {
-  return get(`/api/v1/models/metrics?window=${windowMinutes}`)
+function decodeRuntimeProviderSnapshot(raw: unknown): DashboardRuntimeProviderSnapshot | null {
+  if (!isRecord(raw)) return null
+  const provider = asString(raw.provider)
+  if (!provider) return null
+  return {
+    provider,
+    kind: asNullableString(raw.kind),
+    runtime_kind: asNullableString(raw.runtime_kind),
+    auth_kind: asNullableString(raw.auth_kind),
+    status: asNullableString(raw.status),
+    available: asBoolean(raw.available),
+    supports_single_agent_run: asBoolean(raw.supports_single_agent_run),
+    default_model: asNullableString(raw.default_model),
+    model_count: asNumber(raw.model_count) ?? null,
+    models: asStringArray(raw.models),
+    source: asNullableString(raw.source),
+    endpoint_url: asNullableString(raw.endpoint_url),
+    note: asNullableString(raw.note),
+    discovery: decodeRuntimeProviderDiscovery(raw.discovery),
+  }
+}
+
+function decodeRuntimeProvidersResponse(raw: unknown): DashboardRuntimeProvidersResponse | null {
+  if (!isRecord(raw)) return null
+  const summary = isRecord(raw.summary) ? raw.summary : null
+  return {
+    updated_at: asString(raw.updated_at),
+    summary: summary
+      ? {
+          providers: asNumber(summary.providers),
+          local_models: asNumber(summary.local_models),
+          cloud_models: asNumber(summary.cloud_models),
+        }
+      : null,
+    providers: asRecordArray(raw.providers)
+      .map(decodeRuntimeProviderSnapshot)
+      .filter((provider): provider is DashboardRuntimeProviderSnapshot => provider !== null),
+  }
+}
+
+function decodeRuntimeModelMetric(raw: unknown): DashboardRuntimeModelMetric | null {
+  if (!isRecord(raw)) return null
+  const modelId = asString(raw.model_id)
+  if (!modelId) return null
+  return {
+    model_id: modelId,
+    entry_count: asNumber(raw.entry_count) ?? null,
+    avg_tok_per_sec: asNumber(raw.avg_tok_per_sec) ?? null,
+    p50_tok_per_sec: asNumber(raw.p50_tok_per_sec) ?? null,
+    p95_tok_per_sec: asNumber(raw.p95_tok_per_sec) ?? null,
+    avg_latency_ms: asNumber(raw.avg_latency_ms) ?? null,
+    p50_latency_ms: asNumber(raw.p50_latency_ms) ?? null,
+    p95_latency_ms: asNumber(raw.p95_latency_ms) ?? null,
+    total_input_tokens: asNumber(raw.total_input_tokens) ?? null,
+    total_output_tokens: asNumber(raw.total_output_tokens) ?? null,
+    total_cache_read_tokens: asNumber(raw.total_cache_read_tokens) ?? null,
+    total_reasoning_tokens: asNumber(raw.total_reasoning_tokens) ?? null,
+    fallback_count: asNumber(raw.fallback_count) ?? null,
+  }
+}
+
+function decodeRuntimeModelMetricsResponse(raw: unknown): DashboardRuntimeModelMetricsResponse | null {
+  if (!isRecord(raw)) return null
+  return {
+    window_minutes: asNumber(raw.window_minutes),
+    total_entries: asNumber(raw.total_entries),
+    models: asRecordArray(raw.models)
+      .map(decodeRuntimeModelMetric)
+      .filter((metric): metric is DashboardRuntimeModelMetric => metric !== null),
+  }
+}
+
+export async function fetchRuntimeProviders(opts?: AbortableRequestOptions): Promise<DashboardRuntimeProvidersResponse> {
+  const raw = await get<Record<string, unknown>>('/api/v1/providers', { signal: opts?.signal })
+  const decoded = decodeRuntimeProvidersResponse(raw)
+  if (!decoded) throw new Error('invalid runtime providers payload')
+  return decoded
+}
+
+export async function fetchRuntimeModelMetrics(
+  windowMinutes = 30,
+  opts?: AbortableRequestOptions,
+): Promise<DashboardRuntimeModelMetricsResponse> {
+  const raw = await get<Record<string, unknown>>(`/api/v1/models/metrics?window=${windowMinutes}`, { signal: opts?.signal })
+  const decoded = decodeRuntimeModelMetricsResponse(raw)
+  if (!decoded) throw new Error('invalid runtime model metrics payload')
+  return decoded
 }
 
 export interface DashboardVerificationRef {
@@ -1229,14 +1357,65 @@ export type ToolStatsResponse = {
   timeline: HourlyBucket[]
 }
 
+function decodeToolStat(raw: unknown): ToolStat | null {
+  if (!isRecord(raw)) return null
+  const name = asString(raw.name)
+  if (!name) return null
+  return {
+    name,
+    call_count: asNumber(raw.call_count, 0),
+    success_count: asNumber(raw.success_count, 0),
+    failure_count: asNumber(raw.failure_count, 0),
+    avg_duration_ms: asNumber(raw.avg_duration_ms, 0),
+    p95_duration_ms: asNumber(raw.p95_duration_ms, 0),
+    max_duration_ms: asNumber(raw.max_duration_ms, 0),
+    total_cost_usd: asNumber(raw.total_cost_usd, 0),
+    last_used_at: asString(raw.last_used_at, ''),
+  }
+}
+
+function decodeHourlyBucket(raw: unknown): HourlyBucket | null {
+  if (!isRecord(raw)) return null
+  const hour = asString(raw.hour)
+  if (!hour) return null
+  return {
+    hour,
+    call_count: asNumber(raw.call_count, 0),
+    error_count: asNumber(raw.error_count, 0),
+  }
+}
+
+function decodeToolStatsResponse(raw: unknown): ToolStatsResponse | null {
+  if (!isRecord(raw)) return null
+  const keeper = asString(raw.keeper)
+  if (!keeper) return null
+  return {
+    keeper,
+    window_hours: asNumber(raw.window_hours, 24),
+    total_entries: asNumber(raw.total_entries, 0),
+    tools: asRecordArray(raw.tools)
+      .map(decodeToolStat)
+      .filter((tool): tool is ToolStat => tool !== null),
+    timeline: asRecordArray(raw.timeline)
+      .map(decodeHourlyBucket)
+      .filter((bucket): bucket is HourlyBucket => bucket !== null),
+  }
+}
+
 export function fetchKeeperToolStats(
   name: string,
   windowHours?: number,
+  opts?: AbortableRequestOptions,
 ): Promise<ToolStatsResponse> {
   const params = windowHours != null ? `?window_hours=${windowHours}` : ''
-  return get<ToolStatsResponse>(
+  return get<Record<string, unknown>>(
     `/api/v1/keepers/${encodeURIComponent(name)}/tool-stats${params}`,
-  )
+    { signal: opts?.signal },
+  ).then((raw) => {
+    const decoded = decodeToolStatsResponse(raw)
+    if (!decoded) throw new Error('invalid keeper tool stats payload')
+    return decoded
+  })
 }
 
 // ── Keeper tool call log (full I/O) ──────────────────────
@@ -1258,14 +1437,50 @@ export type ToolCallsResponse = {
   entries: ToolCallEntry[]
 }
 
+function decodeToolCallEntry(raw: unknown): ToolCallEntry | null {
+  if (!isRecord(raw)) return null
+  const keeper = asString(raw.keeper)
+  const tool = asString(raw.tool)
+  if (!keeper || !tool) return null
+  return {
+    ts: asNumber(raw.ts, 0),
+    keeper,
+    tool,
+    input: raw.input,
+    output: asString(raw.output, ''),
+    success: asBoolean(raw.success, false),
+    duration_ms: asNumber(raw.duration_ms, 0),
+    model: asString(raw.model),
+  }
+}
+
+function decodeToolCallsResponse(raw: unknown): ToolCallsResponse | null {
+  if (!isRecord(raw)) return null
+  const keeper = asString(raw.keeper)
+  if (!keeper) return null
+  return {
+    keeper,
+    count: asNumber(raw.count, 0),
+    entries: asRecordArray(raw.entries)
+      .map(decodeToolCallEntry)
+      .filter((entry): entry is ToolCallEntry => entry !== null),
+  }
+}
+
 export function fetchKeeperToolCalls(
   name: string,
   limit?: number,
+  opts?: AbortableRequestOptions,
 ): Promise<ToolCallsResponse> {
   const params = limit != null ? `?limit=${limit}` : ''
-  return get<ToolCallsResponse>(
+  return get<Record<string, unknown>>(
     `/api/v1/keepers/${encodeURIComponent(name)}/tool-calls${params}`,
-  )
+    { signal: opts?.signal },
+  ).then((raw) => {
+    const decoded = decodeToolCallsResponse(raw)
+    if (!decoded) throw new Error('invalid keeper tool call payload')
+    return decoded
+  })
 }
 
 // ── Unified telemetry ──────────────────────────────────
@@ -1306,6 +1521,79 @@ export type TelemetrySummaryResponse = {
   total_entries: number
 }
 
+function decodeTelemetrySource(value: unknown): TelemetrySource | null {
+  switch (value) {
+    case 'keeper_metric':
+    case 'agent_event':
+    case 'tool_call_io':
+    case 'tool_usage':
+    case 'tool_metric':
+      return value
+    default:
+      return null
+  }
+}
+
+function decodeTelemetryEntry(raw: unknown): TelemetryEntry | null {
+  if (!isRecord(raw)) return null
+  const source = decodeTelemetrySource(raw.source)
+  if (!source) return null
+  return {
+    ...raw,
+    source,
+    ts: asNumber(raw.ts),
+    ts_unix: asNumber(raw.ts_unix),
+    timestamp: asNumber(raw.timestamp),
+    ts_iso: asString(raw.ts_iso),
+  }
+}
+
+function decodeTelemetryResponse(raw: unknown): TelemetryResponse | null {
+  if (!isRecord(raw)) return null
+  const generatedAt = asString(raw.generated_at)
+  if (!generatedAt) return null
+  return {
+    generated_at: generatedAt,
+    count: asNumber(raw.count, 0),
+    entries: asRecordArray(raw.entries)
+      .map(decodeTelemetryEntry)
+      .filter((entry): entry is TelemetryEntry => entry !== null),
+  }
+}
+
+function decodeTelemetrySourceSummary(raw: unknown): TelemetrySourceSummary | null {
+  if (!isRecord(raw)) return null
+  const source = asString(raw.source)
+  if (!source) return null
+  return {
+    source,
+    path: asString(raw.path),
+    exists: asBoolean(raw.exists),
+    entry_count: asNumber(raw.entry_count, 0),
+    keepers: asRecordArray(raw.keepers)
+      .map((keeper) => {
+        const name = asString(keeper.name)
+        const path = asString(keeper.path)
+        return name && path ? { name, path } : null
+      })
+      .filter((keeper): keeper is { name: string; path: string } => keeper !== null),
+    keeper_count: asNumber(raw.keeper_count),
+  }
+}
+
+function decodeTelemetrySummaryResponse(raw: unknown): TelemetrySummaryResponse | null {
+  if (!isRecord(raw)) return null
+  const generatedAt = asString(raw.generated_at)
+  if (!generatedAt) return null
+  return {
+    generated_at: generatedAt,
+    sources: asRecordArray(raw.sources)
+      .map(decodeTelemetrySourceSummary)
+      .filter((summary): summary is TelemetrySourceSummary => summary !== null),
+    total_entries: asNumber(raw.total_entries, 0),
+  }
+}
+
 export function fetchTelemetry(opts?: {
   source?: TelemetrySource
   keeper?: string
@@ -1323,11 +1611,21 @@ export function fetchTelemetry(opts?: {
   if (opts?.worker_run_id) params.set('worker_run_id', opts.worker_run_id)
   if (opts?.n) params.set('n', String(opts.n))
   const qs = params.toString()
-  return get<TelemetryResponse>(`/api/v1/dashboard/telemetry${qs ? '?' + qs : ''}`, { signal: opts?.signal })
+  return get<Record<string, unknown>>(`/api/v1/dashboard/telemetry${qs ? '?' + qs : ''}`, { signal: opts?.signal })
+    .then((raw) => {
+      const decoded = decodeTelemetryResponse(raw)
+      if (!decoded) throw new Error('invalid telemetry payload')
+      return decoded
+    })
 }
 
 export function fetchTelemetrySummary(opts?: AbortableRequestOptions): Promise<TelemetrySummaryResponse> {
-  return get<TelemetrySummaryResponse>('/api/v1/dashboard/telemetry/summary', { signal: opts?.signal })
+  return get<Record<string, unknown>>('/api/v1/dashboard/telemetry/summary', { signal: opts?.signal })
+    .then((raw) => {
+      const decoded = decodeTelemetrySummaryResponse(raw)
+      if (!decoded) throw new Error('invalid telemetry summary payload')
+      return decoded
+    })
 }
 
 // --- Excuse Patterns ---

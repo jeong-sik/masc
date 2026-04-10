@@ -723,9 +723,9 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
     match sessions with
     | Some s -> s
     | None ->
-        (* Team_session_store removed — return empty *)
+        (* Team session store removed — always empty. *)
         ignore (initialized, _snapshot_session_window_seconds (), _snapshot_session_limit ());
-        ([] : Team_session_types.session list)
+        []
   in
   let trace_id = trace_id "ops" in
   let actor_name = normalized_actor ~context_actor:ctx.agent_name actor in

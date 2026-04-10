@@ -178,6 +178,7 @@
    local_runtime_pool
    retrieval_projection
    sdk_tool_contract
+   worker_types
    worker_oas
    worker_execution_backend
    worker_execution_spec
@@ -805,8 +806,7 @@
    masc_mcp.config
    ;; Dashboard utilities (extracted sub-library)
    masc_mcp.dashboard_utils
-   ;; Team session types (extracted sub-library)
-   masc_mcp.team_session_types
+   ;; Team session types removed (Epic #6107)
    ;; MCP tool schema cluster (extracted sub-library)
    masc_mcp.tool_schemas
    ;; Activity graph event/model cluster (extracted sub-library)

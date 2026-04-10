@@ -355,7 +355,8 @@
         test_governance_yojson_roundtrip
         test_eval_calibration
         test_goal_janitor
-        test_keeper_pr_workflow)
+        test_keeper_pr_workflow
+        test_keeper_github_hint)
  (modules
         test_runtime_params
         test_config_dir_resolver
@@ -500,7 +501,12 @@
         test_governance_yojson_roundtrip
         test_eval_calibration
         test_goal_janitor
-        test_keeper_pr_workflow)
+        test_keeper_pr_workflow
+        test_keeper_github_hint)
+ (libraries masc_test_deps))
+
+(test
+ (name test_keeper_mutex_coverage)
  (libraries masc_test_deps))
 
 ; Tool diversity: Shannon entropy + QCheck PBT

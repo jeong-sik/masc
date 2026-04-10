@@ -163,8 +163,15 @@ let is_ancestor_path ~ancestor ~descendant =
   let a = if String.ends_with ~suffix:"/" a then a else a ^ "/" in
   String.starts_with ~prefix:a d
 
+let explicit_base_path_is_authoritative explicit_path =
+  let trimmed = String.trim explicit_path in
+  trimmed <> ""
+  && not (Filename.is_relative trimmed)
+  && not (running_under_test_executable ())
+
 let should_ignore_inherited_base_path ~requested_path ~explicit_path =
   not (bool_env "MASC_ALLOW_INHERITED_BASE_PATH")
+  && not (explicit_base_path_is_authoritative explicit_path)
   && String.trim requested_path <> ""
   && not (String.equal requested_path ".")
   &&
@@ -189,6 +196,7 @@ let should_ignore_inherited_test_base_path ~requested_path ~explicit_path =
 
 let should_ignore_inherited_server_base_path ~requested_path ~explicit_path =
   not (bool_env "MASC_ALLOW_INHERITED_BASE_PATH")
+  && not (explicit_base_path_is_authoritative explicit_path)
   && String.trim requested_path <> ""
   && not (String.equal requested_path ".")
   &&

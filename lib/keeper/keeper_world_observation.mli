@@ -192,6 +192,8 @@ val observe :
   meta:Keeper_types.keeper_meta ->
   world_observation
 
+val actionable_signal_present : world_observation -> bool
+
 val apply_message_cursor_updates :
   Keeper_types.keeper_meta ->
   (string * int) list ->

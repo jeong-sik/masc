@@ -5,7 +5,7 @@ type docker_config = {
 
 type team_session_spawn = {
   backend : Worker_execution_backend.t;
-  docker_scopes : Team_session_types.execution_scope list;
+  docker_scopes : Worker_types.execution_scope list;
   docker : docker_config;
 }
 
@@ -15,8 +15,8 @@ type t = {
 
 let default_docker_scopes =
   [
-    Team_session_types.Limited_code_change;
-    Team_session_types.Autonomous;
+    Worker_types.Limited_code_change;
+    Worker_types.Autonomous;
   ]
 
 let default =
@@ -67,9 +67,9 @@ let env_host_mcp_base_url_opt () =
 
 let execution_scope_of_string_opt value =
   match String.lowercase_ascii (String.trim value) with
-  | "observe_only" -> Some Team_session_types.Observe_only
-  | "limited_code_change" -> Some Team_session_types.Limited_code_change
-  | "autonomous" -> Some Team_session_types.Autonomous
+  | "observe_only" -> Some Worker_types.Observe_only
+  | "limited_code_change" -> Some Worker_types.Limited_code_change
+  | "autonomous" -> Some Worker_types.Autonomous
   | _ -> None
 
 let scopes_of_json = function
@@ -174,7 +174,7 @@ let reset () =
 
 let backend_for_scope scope =
   match scope with
-  | Team_session_types.Observe_only ->
+  | Worker_types.Observe_only ->
       Worker_execution_backend.Local
   | _ ->
       let config = resolve () in

@@ -38,8 +38,8 @@ type attention_context = Dashboard_mission_assembly.attention_context = {
 }
 
 let active_or_recent_sessions _config =
-  (* Team_session_store removed — return empty *)
-  ([] : Team_session_types.session list)
+  (* Team session store removed — always empty. *)
+  ([] : Yojson.Safe.t list)
 
 let room_scope_cache_segment (_config : Room_utils.config) = "default"
 
@@ -122,22 +122,10 @@ let event_summary event_json =
       String.map (fun ch -> if ch = '_' then ' ' else ch) event_type
 
 let session_origin_kind session_meta =
-  let created_by =
-    trim_to_option (string_field "created_by" session_meta)
-    |> Option.value ~default:"unknown"
-  in
-  let orchestration_mode =
-    trim_to_option (string_field "orchestration_mode" session_meta)
-    |> Option.value ~default:"assist"
-    |> Team_session_types.orchestration_mode_of_string
-  in
-  trim_to_option (string_field "origin_kind" session_meta)
-  |> Option.map Team_session_types.session_origin_kind_of_string
-  |> Option.value
-       ~default:
-         (Team_session_types.infer_session_origin_kind
-            ~created_by ~orchestration_mode)
-  |> Team_session_types.session_origin_kind_to_string
+  (* Simplified: team session types removed. Return raw string or "human". *)
+  match trim_to_option (string_field "origin_kind" session_meta) with
+  | Some value -> value
+  | None -> "human"
 
 let build_session_context session_json session_cards =
   let session_id = string_field "session_id" session_json in

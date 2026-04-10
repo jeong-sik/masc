@@ -21,20 +21,20 @@ type file_entry = {
 
 let collision_window_sec = 300.0
 
-let mu = Mutex.create ()
+let mu = Eio.Mutex.create ()
 let tracker : (string, file_entry) Hashtbl.t = Hashtbl.create 64
 
 let with_lock f =
-  Mutex.lock mu;
-  Fun.protect f ~finally:(fun () -> Mutex.unlock mu)
+  Eio.Mutex.use_rw ~protect:true mu (fun () -> f ())
 
 let gc_stale () =
   let now = Unix.gettimeofday () in
-  let stale = Hashtbl.fold (fun path entry acc ->
-    if now -. entry.ts > collision_window_sec *. 2.0 then path :: acc
-    else acc
-  ) tracker [] in
-  List.iter (Hashtbl.remove tracker) stale
+  Hashtbl.fold
+    (fun path entry acc ->
+      if now -. entry.ts > collision_window_sec *. 2.0 then path :: acc
+      else acc)
+    tracker []
+  |> List.iter (Hashtbl.remove tracker)
 
 (** Record files from a turn's git status output. Returns collision warnings.
     Each status line is e.g. " M lib/foo.ml" — extract file path. *)
@@ -69,15 +69,16 @@ let record_turn_files ~keeper_name ~files : collision_warning list =
 (** Recent collisions involving a specific keeper. *)
 let recent_collisions ~keeper_name : collision_warning list =
   let now = Unix.gettimeofday () in
-  with_lock (fun () ->
-    Hashtbl.fold (fun path entry acc ->
-      if entry.keeper_name <> keeper_name
-         && now -. entry.ts < collision_window_sec then
-        { file_path = path;
-          other_keeper = entry.keeper_name;
-          other_ts = entry.ts } :: acc
-      else acc
-    ) tracker [])
+  Eio.Mutex.use_ro mu (fun () ->
+      Hashtbl.fold
+        (fun path entry acc ->
+          if entry.keeper_name <> keeper_name
+             && now -. entry.ts < collision_window_sec then
+            { file_path = path;
+              other_keeper = entry.keeper_name;
+              other_ts = entry.ts } :: acc
+          else acc)
+        tracker [])
 
 let collision_to_json (w : collision_warning) : Yojson.Safe.t =
   `Assoc [

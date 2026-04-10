@@ -139,6 +139,12 @@ let verdict_to_hook_decision (v : verdict) : Agent_sdk.Hooks.hook_decision =
     Log.Verifier.error "FAIL (skipping tool): %s" reason;
     Agent_sdk.Hooks.Skip
 
+let continue_with_degraded_verifier ~tool_name ~reason =
+  Log.Verifier.error
+    "verification degraded for %s; allowing tool to continue: %s"
+    tool_name reason;
+  Agent_sdk.Hooks.Continue
+
 let handle_pre_tool_use
     ?(verify_fn = verify)
     ~(goal : string)
@@ -157,8 +163,8 @@ let handle_pre_tool_use
           | exn -> Error (Printexc.to_string exn)
      with
      | Error msg ->
-         Log.Verifier.error "Failed to serialize input for verifier: %s" msg;
-         Agent_sdk.Hooks.Skip
+         continue_with_degraded_verifier ~tool_name
+           ~reason:(Printf.sprintf "input serialization failed: %s" msg)
      | Ok input_str ->
          let req : verification_request = {
            action_description;
@@ -169,8 +175,8 @@ let handle_pre_tool_use
          begin match verify_fn req with
          | Ok verdict -> verdict_to_hook_decision verdict
          | Error msg ->
-             Log.Verifier.error "OAS run failed; skipping tool: %s" msg;
-             Agent_sdk.Hooks.Skip
+             continue_with_degraded_verifier ~tool_name
+               ~reason:(Printf.sprintf "verifier backend error: %s" msg)
          end)
 
 (* ================================================================ *)

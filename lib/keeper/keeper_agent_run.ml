@@ -272,6 +272,7 @@ let run_turn
       ~(cascade_name : string)
       ?provider_filter
       ~(generation : int)
+      ?(actionable_signal = false)
       ?(max_turns : int = Env_config_keeper.KeeperKeepalive.oas_max_turns_per_call)
       (* Per-call turn budget. Keeper resumes via checkpoint if exhausted. *)
       ?(max_idle_turns : int = 3)
@@ -374,6 +375,7 @@ let run_turn
       ~desires:meta.desires
       ~instructions:meta.instructions
       ~persona_extended
+      ~keeper_name:meta.name
       ()
   in
   (* 4. Create or restore working context, re-apply current prompt *)
@@ -1295,6 +1297,26 @@ let run_turn
                   turn
                   max_turns
                   is_last_turn;
+              let all_allowed =
+                if actionable_signal && not is_last_turn
+                then
+                  let pruned =
+                    Keeper_exec_tools.prune_boring_tools_for_actionable_turn
+                      all_allowed
+                  in
+                  if List.length pruned <> List.length all_allowed then (
+                    let removed =
+                      List.filter
+                        (fun name -> not (List.mem name pruned))
+                        all_allowed
+                    in
+                    Log.Keeper.info
+                      "keeper:%s actionable turn pruned boring tools: %s"
+                      meta.name
+                      (String.concat ", " removed));
+                  pruned
+                else all_allowed
+              in
               (* Context overflow guard: Tool_selector.select already respects
            the k limit, but overlays can grow the visible set beyond
            max_tools.  Cap the post-overlay set to stay inside small-model

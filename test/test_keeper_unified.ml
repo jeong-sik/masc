@@ -2791,6 +2791,20 @@ let () =
           test_case "keeper_context_status is boring" `Quick (fun () ->
             check bool "keeper_context_status"
               true (Masc_mcp.Keeper_tool_registry.is_boring_tool "keeper_context_status"));
+          test_case "actionable turns prune boring tools when alternatives exist" `Quick (fun () ->
+            let pruned =
+              Masc_mcp.Keeper_tool_registry.prune_boring_tools_for_actionable_turn
+                [ "masc_status"; "keeper_tasks_list"; "keeper_board_post" ]
+            in
+            check (list string) "boring tools removed"
+              [ "keeper_board_post" ] pruned);
+          test_case "actionable turns keep boring tools when nothing else exists" `Quick (fun () ->
+            let pruned =
+              Masc_mcp.Keeper_tool_registry.prune_boring_tools_for_actionable_turn
+                [ "masc_status"; "keeper_tasks_list" ]
+            in
+            check (list string) "boring-only set preserved"
+              [ "masc_status"; "keeper_tasks_list" ] pruned);
           test_case "keeper_fs_read is NOT boring" `Quick (fun () ->
             check bool "keeper_fs_read"
               false (Masc_mcp.Keeper_tool_registry.is_boring_tool "keeper_fs_read"));

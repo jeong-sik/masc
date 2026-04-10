@@ -62,16 +62,39 @@ let run_shell ?(env = []) ~cwd cmd =
     if List.mem_assoc "MASC_ALLOW_PORT_REUSE" env then env
     else ("MASC_ALLOW_PORT_REUSE", "1") :: env
   in
+  let scrubbed_env =
+    [
+      "MASC_STORAGE_TYPE";
+      "MASC_POSTGRES_URL";
+      "DATABASE_URL";
+      "SUPABASE_DB_URL";
+      "SB_PG_URL";
+      "MASC_KEEPER_BOOTSTRAP_ENABLED";
+      "MASC_MCP_PORT";
+      "MASC_HOST";
+      "MASC_BASE_PATH";
+      "MASC_BASE_PATH_INPUT";
+      "MASC_BASE_PATH_RESOLUTION_SOURCE";
+      "MASC_CONFIG_DIR";
+      "MASC_PERSONAS_DIR";
+      "MASC_WS_ENABLED";
+      "MASC_WEBRTC_ENABLED";
+    ]
+    |> List.map (fun name -> Printf.sprintf "-u %s" name)
+    |> String.concat " "
+  in
   let env_prefix =
     env
     |> List.map (fun (k, v) -> Printf.sprintf "%s=%s" k (quote v))
     |> String.concat " "
   in
+  let shell_cmd =
+    match String.trim env_prefix with
+    | "" -> Printf.sprintf "env %s %s" scrubbed_env cmd
+    | _ -> Printf.sprintf "env %s %s %s" scrubbed_env env_prefix cmd
+  in
   let full =
-    if env_prefix = "" then
-      Printf.sprintf "cd %s && %s" (quote cwd) cmd
-    else
-      Printf.sprintf "cd %s && %s %s" (quote cwd) env_prefix cmd
+    Printf.sprintf "cd %s && %s" (quote cwd) shell_cmd
   in
   let out = Filename.temp_file "start-masc-out" ".txt" in
   let err = Filename.temp_file "start-masc-err" ".txt" in
@@ -253,7 +276,7 @@ let test_bootstraps_base_path_config_from_repo_when_unset () =
       check bool "repo config copied to base path config" true
         (Sys.file_exists (Filename.concat bootstrapped_config "cascade.json")))
 
-let test_inherited_base_path_with_dual_masc_roots_is_sanitized () =
+let test_absolute_inherited_base_path_with_dual_masc_roots_is_preserved () =
   with_temp_dir "start-masc-script" (fun dir ->
       let script = Filename.concat dir "start-masc-mcp.sh" in
       copy_script (script_path ()) script;
@@ -279,10 +302,10 @@ let test_inherited_base_path_with_dual_masc_roots_is_sanitized () =
         failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout
           stderr;
       let captured = read_file capture in
-      check bool "inherited base path corrected to script root" true
-        (contains_substring captured ("MASC_BASE_PATH=" ^ dir)))
+      check bool "absolute inherited base path preserved" true
+        (contains_substring captured ("MASC_BASE_PATH=" ^ stale_root)))
 
-let test_parent_project_base_path_with_dual_masc_roots_is_sanitized () =
+let test_absolute_parent_project_base_path_with_dual_masc_roots_is_preserved () =
   with_temp_dir "start-masc-script" (fun dir ->
       let parent = Filename.concat dir "parent-root" in
       let repo = Filename.concat parent "workspace/yousleepwhen/masc-mcp" in
@@ -310,10 +333,10 @@ let test_parent_project_base_path_with_dual_masc_roots_is_sanitized () =
         failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout
           stderr;
       let captured = read_file capture in
-      check bool "parent root inheritance corrected to repo root" true
-        (contains_substring captured ("MASC_BASE_PATH=" ^ repo)))
+      check bool "absolute parent root inheritance preserved" true
+        (contains_substring captured ("MASC_BASE_PATH=" ^ parent)))
 
-let test_zshenv_inherited_base_path_with_dual_roots_is_sanitized () =
+let test_zshenv_absolute_base_path_with_dual_roots_is_preserved () =
   with_temp_dir "start-masc-script" (fun dir ->
       let parent = Filename.concat dir "parent-root" in
       let repo = Filename.concat parent "workspace/yousleepwhen/masc-mcp" in
@@ -342,8 +365,8 @@ let test_zshenv_inherited_base_path_with_dual_roots_is_sanitized () =
         failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout
           stderr;
       let captured = read_file capture in
-      check bool "zshenv inherited base path corrected to repo root" true
-        (contains_substring captured ("MASC_BASE_PATH=" ^ repo)))
+      check bool "zshenv absolute base path preserved" true
+        (contains_substring captured ("MASC_BASE_PATH=" ^ parent)))
 
 let test_dual_masc_roots_opt_in_preserves_inherited_base_path () =
   with_temp_dir "start-masc-script" (fun dir ->
@@ -473,12 +496,16 @@ let () =
             test_realtime_transports_default_to_base_path_config_and_preserve_override;
           test_case "bootstraps base path config from repo when unset" `Quick
             test_bootstraps_base_path_config_from_repo_when_unset;
-          test_case "inherited base path with dual .masc roots is sanitized" `Quick
-            test_inherited_base_path_with_dual_masc_roots_is_sanitized;
-          test_case "parent project inherited base path is sanitized" `Quick
-            test_parent_project_base_path_with_dual_masc_roots_is_sanitized;
-          test_case "zshenv inherited base path is sanitized" `Quick
-            test_zshenv_inherited_base_path_with_dual_roots_is_sanitized;
+          test_case
+            "absolute inherited base path with dual .masc roots is preserved"
+            `Quick
+            test_absolute_inherited_base_path_with_dual_masc_roots_is_preserved;
+          test_case
+            "absolute parent project inherited base path is preserved"
+            `Quick
+            test_absolute_parent_project_base_path_with_dual_masc_roots_is_preserved;
+          test_case "zshenv absolute base path is preserved" `Quick
+            test_zshenv_absolute_base_path_with_dual_roots_is_preserved;
           test_case "dual roots opt-in preserves inherited base path" `Quick
             test_dual_masc_roots_opt_in_preserves_inherited_base_path;
           test_case "worktree prefers local build over workspace build" `Quick

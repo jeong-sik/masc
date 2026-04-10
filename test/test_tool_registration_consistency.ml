@@ -228,6 +228,24 @@ let test_docs_do_not_reintroduce_removed_mode_surface () =
             "masc_tool_disable" ])
     paths
 
+let test_tool_registration_check_does_not_depend_on_injected_masc_schemas () =
+  match Keeper_exec_tools.init_policy_config ~base_path:(repo_root ()) with
+  | Error msg ->
+      Alcotest.failf "failed to load tool policy config: %s" msg
+  | Ok () ->
+      let saved = !(Keeper_exec_tools.masc_schemas_ref) in
+      Fun.protect
+        ~finally:(fun () -> Keeper_exec_tools.masc_schemas_ref := saved)
+        (fun () ->
+          Keeper_exec_tools.masc_schemas_ref := [];
+          let validation = Tool_registration_check.validate () in
+          let masc_orphans =
+            validation.Tool_registration_check.orphan_toml
+            |> List.filter (String.starts_with ~prefix:"masc_")
+          in
+          Alcotest.(check (list string))
+            "no masc orphan_toml without injected schemas" [] masc_orphans)
+
 (* ── Test 3: No duplicate tool names in schemas ──────────────── *)
 
 let test_no_duplicate_schemas () =
@@ -330,6 +348,10 @@ let () =
             test_board_delete_tag_registered;
           Alcotest.test_case "board read-only metadata registered" `Quick
             test_board_read_only_metadata_registered;
+          Alcotest.test_case
+            "tool registration check does not depend on injected masc schemas"
+            `Quick
+            test_tool_registration_check_does_not_depend_on_injected_masc_schemas;
           Alcotest.test_case "keeper_backend_tool_name matches keeper_internal_replacement" `Quick
             test_keeper_alias_ssot_consistency;
         ] );

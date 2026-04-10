@@ -58,7 +58,7 @@ val room_scoped_cache_key : Room.config -> string -> string -> string
 val dashboard_active_or_recent_sessions :
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
   Room.config ->
-  Team_session_types.session list
+  Yojson.Safe.t list
 
 (** {1 Projection Diagnostics} *)
 
@@ -170,4 +170,4 @@ val dashboard_shell_http_json :
 val dashboard_active_or_recent_sessions_cached :
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
   Room.config ->
-  Team_session_types.session list
+  Yojson.Safe.t list

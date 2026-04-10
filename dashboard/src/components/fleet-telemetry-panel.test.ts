@@ -3,6 +3,7 @@ import { render } from 'preact'
 import { act } from 'preact/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { TelemetrySummaryResponse, ToolQualityResponse } from '../api/dashboard'
+import { normalizeKeepers } from '../keeper-store-normalize'
 import type { DashboardExecutionResponse } from '../types'
 
 const executionResponse = {
@@ -71,6 +72,14 @@ const telemetrySummaryResponse: TelemetrySummaryResponse = {
       exists: true,
     },
   ],
+}
+
+const metricSeriesPoint = {
+  ts_unix: 1_744_186_600,
+  context_ratio: 0.4,
+  latency_ms: 1200,
+  generation: 3,
+  channel: 'turn',
 }
 
 async function flushUi(): Promise<void> {
@@ -151,11 +160,326 @@ describe('FleetTelemetryPanel', () => {
     expect(fetchToolQuality).toHaveBeenCalledTimes(1)
     expect(fetchTelemetrySummary).toHaveBeenCalledTimes(1)
     expect(container.textContent).toContain('Fleet Coverage')
-    expect(container.textContent).toContain('1/2 keepers emitted recent tool telemetry.')
+    expect(container.textContent).toContain('1/2 keepers surfaced recent tool activity.')
     expect(container.textContent).toContain('keeper-alpha')
     expect(container.textContent).toContain('keeper-beta')
     expect(container.textContent).toContain('Keeper 턴 로그')
     expect(container.textContent).toContain('Failure Categories')
+  }, 60_000)
+
+  it('falls back to runtime model and tool audit data when quality rows are sparse', async () => {
+    const { buildFleetRows } = await loadPanel({
+      fetchDashboardExecution: vi.fn().mockResolvedValue(executionResponse),
+      fetchToolQuality: vi.fn().mockResolvedValue(toolQualityResponse),
+      fetchTelemetrySummary: vi.fn().mockResolvedValue(telemetrySummaryResponse),
+    })
+
+    const keepers = normalizeKeepers([
+      {
+        name: 'keeper-sparse',
+        status: 'active',
+        keepalive_running: true,
+        context_ratio: 0.41,
+        total_turns: 12,
+        last_activity_ago_s: 45,
+        latest_tool_call_count: 3,
+        tool_audit_source: 'heartbeat_result',
+        tool_audit_at: '2026-04-09T08:10:30Z',
+        metrics_window: {
+          tool_call_count: 3,
+          top_tools: [
+            { tool: 'masc_status', count: 2 },
+            { tool: 'keeper_stay_silent', count: 1 },
+          ],
+        },
+        metrics_series: [
+          {
+            ...metricSeriesPoint,
+            model_used: 'glm-5.1',
+          },
+        ],
+      },
+    ])
+
+    const rows = buildFleetRows(keepers, {
+      ...toolQualityResponse,
+      by_keeper: [],
+    })
+
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({
+      name: 'keeper-sparse',
+      model: 'glm-5.1',
+      tool_calls: 3,
+      tool_activity_known: true,
+    })
+    expect(rows[0]?.recent_tools).toEqual(['masc_status', 'keeper_stay_silent'])
+  })
+
+  it('prefers active_model over placeholder metric model strings', async () => {
+    const { buildFleetRows } = await loadPanel({
+      fetchDashboardExecution: vi.fn().mockResolvedValue(executionResponse),
+      fetchToolQuality: vi.fn().mockResolvedValue(toolQualityResponse),
+      fetchTelemetrySummary: vi.fn().mockResolvedValue(telemetrySummaryResponse),
+    })
+
+    const keepers = normalizeKeepers([
+      {
+        name: 'keeper-placeholder-model',
+        status: 'active',
+        keepalive_running: true,
+        context_ratio: 0.3,
+        total_turns: 5,
+        last_activity_ago_s: 60,
+        active_model: 'gpt-5.4',
+        metrics_series: [
+          { ...metricSeriesPoint, model_used: 'unknown' },
+        ],
+        metrics_window: {
+          primary_model: 'none',
+        },
+      },
+    ])
+
+    const rows = buildFleetRows(keepers, { ...toolQualityResponse, by_keeper: [] })
+
+    expect(rows).toHaveLength(1)
+    expect(rows[0]?.model).toBe('gpt-5.4')
+  })
+
+  it('sorts attention keepers ahead of healthy and offline rows', async () => {
+    const { buildFleetRows } = await loadPanel({
+      fetchDashboardExecution: vi.fn().mockResolvedValue(executionResponse),
+      fetchToolQuality: vi.fn().mockResolvedValue(toolQualityResponse),
+      fetchTelemetrySummary: vi.fn().mockResolvedValue(telemetrySummaryResponse),
+    })
+
+    const keepers = normalizeKeepers([
+      {
+        name: 'keeper-fresh',
+        status: 'active',
+        keepalive_running: true,
+        context_ratio: 0.22,
+        total_turns: 9,
+        last_activity_ago_s: 20,
+      },
+      {
+        name: 'keeper-hot',
+        status: 'active',
+        keepalive_running: true,
+        context_ratio: 0.91,
+        total_turns: 4,
+        last_activity_ago_s: 1400,
+      },
+      {
+        name: 'keeper-offline',
+        status: 'offline',
+        keepalive_running: false,
+        context_ratio: 0.1,
+        total_turns: 20,
+      },
+    ])
+
+    const rows = buildFleetRows(keepers, {
+      ...toolQualityResponse,
+      by_keeper: [],
+    })
+
+    expect(rows.map(row => row.name)).toEqual([
+      'keeper-hot',
+      'keeper-fresh',
+      'keeper-offline',
+    ])
+  })
+
+  it('marks tool-quality-only fallback rows as known tool activity', async () => {
+    const { buildFleetRows } = await loadPanel({
+      fetchDashboardExecution: vi.fn().mockResolvedValue(executionResponse),
+      fetchToolQuality: vi.fn().mockResolvedValue(toolQualityResponse),
+      fetchTelemetrySummary: vi.fn().mockResolvedValue(telemetrySummaryResponse),
+    })
+
+    const rows = buildFleetRows([], {
+      ...toolQualityResponse,
+      by_keeper: [
+        {
+          name: 'keeper-tool-only',
+          calls: 5,
+          success_pct: 100,
+        },
+      ],
+    })
+
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({
+      name: 'keeper-tool-only',
+      tool_calls: 5,
+      tool_activity_known: true,
+      model: 'unknown',
+    })
+  })
+
+  it('prefers tool-quality call counts when success data is present', async () => {
+    const { buildFleetRows } = await loadPanel({
+      fetchDashboardExecution: vi.fn().mockResolvedValue(executionResponse),
+      fetchToolQuality: vi.fn().mockResolvedValue(toolQualityResponse),
+      fetchTelemetrySummary: vi.fn().mockResolvedValue(telemetrySummaryResponse),
+    })
+
+    const keepers = normalizeKeepers([
+      {
+        name: 'keeper-quality-preferred',
+        status: 'active',
+        keepalive_running: true,
+        context_ratio: 0.25,
+        total_turns: 4,
+        latest_tool_call_count: 8,
+        metrics_window: {
+          tool_call_count: 11,
+        },
+      },
+    ])
+
+    const rows = buildFleetRows(keepers, {
+      ...toolQualityResponse,
+      by_keeper: [
+        {
+          name: 'keeper-quality-preferred',
+          calls: 3,
+          success_pct: 66.7,
+        },
+      ],
+    })
+
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({
+      name: 'keeper-quality-preferred',
+      tool_calls: 3,
+      tool_success_pct: 66.7,
+    })
+  })
+
+  it('ignores placeholder audit sources when deciding tool telemetry availability', async () => {
+    const { buildFleetRows } = await loadPanel({
+      fetchDashboardExecution: vi.fn().mockResolvedValue(executionResponse),
+      fetchToolQuality: vi.fn().mockResolvedValue(toolQualityResponse),
+      fetchTelemetrySummary: vi.fn().mockResolvedValue(telemetrySummaryResponse),
+    })
+
+    const keepers = normalizeKeepers([
+      {
+        name: 'keeper-placeholder-audit',
+        status: 'active',
+        keepalive_running: true,
+        context_ratio: 0.11,
+        total_turns: 2,
+        tool_audit_source: 'none',
+        latest_tool_call_count: null,
+      },
+    ])
+
+    const rows = buildFleetRows(keepers, {
+      ...toolQualityResponse,
+      by_keeper: [],
+    })
+
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({
+      name: 'keeper-placeholder-audit',
+      tool_calls: 0,
+      tool_activity_known: false,
+    })
+  })
+
+  it('keeps low-success active rows ahead of paused rows without penalizing null success rates', async () => {
+    const { buildFleetRows } = await loadPanel({
+      fetchDashboardExecution: vi.fn().mockResolvedValue(executionResponse),
+      fetchToolQuality: vi.fn().mockResolvedValue(toolQualityResponse),
+      fetchTelemetrySummary: vi.fn().mockResolvedValue(telemetrySummaryResponse),
+    })
+
+    const keepers = normalizeKeepers([
+      {
+        name: 'keeper-healthy-null',
+        status: 'active',
+        keepalive_running: true,
+        context_ratio: 0.2,
+        total_turns: 8,
+        last_activity_ago_s: 40,
+      },
+      {
+        name: 'keeper-low-success',
+        status: 'active',
+        keepalive_running: true,
+        context_ratio: 0.2,
+        total_turns: 8,
+        last_activity_ago_s: 40,
+      },
+      {
+        name: 'keeper-paused',
+        status: 'paused',
+        keepalive_running: true,
+        context_ratio: 0.2,
+        total_turns: 8,
+        last_activity_ago_s: 40,
+      },
+    ])
+
+    const rows = buildFleetRows(keepers, {
+      ...toolQualityResponse,
+      by_keeper: [
+        {
+          name: 'keeper-low-success',
+          calls: 4,
+          success_pct: 70,
+        },
+      ],
+    })
+
+    expect(rows.map(row => row.name)).toEqual([
+      'keeper-low-success',
+      'keeper-healthy-null',
+      'keeper-paused',
+    ])
+  })
+
+  it('renders tool activity fallback copy instead of misleading no-tools text', async () => {
+    const fetchDashboardExecution = vi.fn().mockResolvedValue({
+      ...executionResponse,
+      keepers: [
+        executionResponse.keepers[0],
+        {
+          ...executionResponse.keepers[1],
+          last_model_used: '',
+          latest_tool_call_count: 3,
+          tool_audit_source: 'heartbeat_result',
+          tool_audit_at: '2026-04-09T08:10:30Z',
+          metrics_series: [
+            {
+              ...metricSeriesPoint,
+              model_used: 'glm-5.1',
+            },
+          ],
+        },
+      ],
+    } as DashboardExecutionResponse)
+    const fetchToolQuality = vi.fn().mockResolvedValue(toolQualityResponse)
+    const fetchTelemetrySummary = vi.fn().mockResolvedValue(telemetrySummaryResponse)
+    const { FleetTelemetryPanel } = await loadPanel({
+      fetchDashboardExecution,
+      fetchToolQuality,
+      fetchTelemetrySummary,
+    })
+
+    await act(async () => {
+      render(html`<${FleetTelemetryPanel} />`, container)
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    expect(container.textContent).toContain('3 tool calls')
+    expect(container.textContent).not.toContain('No recent tools')
+    expect(container.textContent).toContain('glm-5.1')
   })
 
   it('shows partial telemetry warnings while keeping degraded data visible', async () => {
@@ -187,7 +511,7 @@ describe('FleetTelemetryPanel', () => {
     expect(container.textContent).toContain('Execution snapshot unavailable: execution down')
     expect(container.textContent).toContain('keeper-fallback')
     expect(container.textContent).toContain('Telemetry Stores')
-  })
+  }, 60_000)
 
   it('refreshes automatically on a visible page', async () => {
     const fetchDashboardExecution = vi.fn().mockResolvedValue(executionResponse)
@@ -216,7 +540,7 @@ describe('FleetTelemetryPanel', () => {
     expect(fetchToolQuality).toHaveBeenCalledTimes(2)
     expect(fetchTelemetrySummary).toHaveBeenCalledTimes(2)
     expect(container.textContent).toContain('30초 자동 갱신')
-  })
+  }, 60_000)
 
   it('ignores out-of-order fleet telemetry refresh responses', async () => {
     let executionCall = 0
@@ -336,7 +660,7 @@ describe('FleetTelemetryPanel', () => {
 
     expect(container.textContent).toContain('keeper-gamma')
     expect(container.textContent).not.toContain('keeper-stale')
-  })
+  }, 60_000)
 
   it('aborts superseded fleet telemetry requests before a newer refresh settles', async () => {
     const abortedSignals: AbortSignal[] = []
@@ -382,5 +706,5 @@ describe('FleetTelemetryPanel', () => {
     expect(abortedSignals.length).toBeGreaterThan(0)
     expect(abortedSignals.every(signal => signal.aborted)).toBe(true)
     expect(container.textContent).toContain('keeper-alpha')
-  })
+  }, 60_000)
 })

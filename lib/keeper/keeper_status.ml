@@ -20,80 +20,73 @@ let handle_keeper_list ctx args : tool_result =
   let detailed = get_bool args "detailed" false in
   let dir = keeper_dir ctx.config in
   match Safe_ops.list_dir_safe dir with
-  | Error e -> (false, "❌ " ^ e)
-  | Ok files ->
-    let keeper_names =
-      files
-      |> List.filter (fun f -> Filename.check_suffix f ".json")
-      |> List.map Filename.remove_extension
-      |> List.filter validate_name
-      |> List.sort String.compare
-      |> take limit
-    in
-    if not detailed then
-      let json = `Assoc [
-        ("count", `Int (List.length keeper_names));
-        ("keepers", `List (List.map (fun k -> `String k) keeper_names));
-      ] in
-      (true, Yojson.Safe.to_string json)
-    else
-      let now_ts = Time_compat.now () in
-      let keepers =
-        List.filter_map (fun name ->
-          match read_meta ctx.config name with
-          | Error _ -> None
-          | Ok None -> None
-          | Ok (Some m) ->
-            let created_ts =
-              Resilience.Time.parse_iso8601_opt m.created_at |> Option.value ~default:0.0
+  | Error e -> (false, e)
+  | Ok _files ->
+  let keeper_names = Keeper_types.keeper_names ctx.config |> take limit in
+  if not detailed then
+    let json = `Assoc [
+      ("count", `Int (List.length keeper_names));
+      ("keepers", `List (List.map (fun k -> `String k) keeper_names));
+    ] in
+    (true, Yojson.Safe.to_string json)
+  else
+    let now_ts = Time_compat.now () in
+    let keepers =
+      List.filter_map (fun name ->
+        match read_meta ctx.config name with
+        | Error _ -> None
+        | Ok None -> None
+        | Ok (Some m) ->
+          let created_ts =
+            Resilience.Time.parse_iso8601_opt m.created_at |> Option.value ~default:0.0
+          in
+          let keeper_age_s = if created_ts <= 0.0 then 0.0 else now_ts -. created_ts in
+          let last_turn_ago_s = if m.runtime.usage.last_turn_ts <= 0.0 then 0.0 else now_ts -. m.runtime.usage.last_turn_ts in
+          let last_proactive_ago_s =
+            if m.runtime.proactive_rt.last_ts <= 0.0 then 0.0 else now_ts -. m.runtime.proactive_rt.last_ts
+          in
+          let last_visible_proactive_ago_s =
+            if m.runtime.proactive_rt.last_visible_ts <= 0.0 then 0.0
+            else now_ts -. m.runtime.proactive_rt.last_visible_ts
+          in
+          let active_model = active_model_of_meta m in
+          let next_model_hint = next_model_hint_of_meta m in
+          let trace_history_count = List.length m.runtime.trace_history in
+          let last_compaction_saved_tokens =
+            max 0 (m.runtime.compaction_rt.last_before_tokens - m.runtime.compaction_rt.last_after_tokens)
+          in
+          let (compact_ratio_gate, compact_message_gate, compact_token_gate) =
+            compaction_policy_of_keeper m
+          in
+          let metrics_store = keeper_metrics_store ctx.config m.name in
+          let metrics_path = keeper_metrics_path ctx.config m.name in
+          let metrics_window_lines =
+            let dated = Dated_jsonl.read_recent_lines metrics_store 120 in
+            if dated <> [] then dated
+            else read_file_tail_lines metrics_path ~max_bytes:120000 ~max_lines:120
+          in
+          let last_metrics =
+            match List.rev metrics_window_lines with
+            | line :: _ -> (try Some (Yojson.Safe.from_string line) with Yojson.Json_error _ -> None)
+            | [] -> None
+          in
+          let metrics_overview =
+            summarize_metrics_lines metrics_window_lines ~default_generation:m.runtime.generation
+          in
+          let last_skill_metrics =
+            let rec find_latest = function
+              | [] -> None
+              | line :: tl ->
+                  (try
+                     let j = Yojson.Safe.from_string line in
+                     match Safe_ops.json_string_opt "skill_primary" j with
+                     | Some primary when String.trim primary <> "" -> Some j
+                     | _ -> find_latest tl
+                   with Yojson.Json_error _ -> find_latest tl)
             in
-            let keeper_age_s = if created_ts <= 0.0 then 0.0 else now_ts -. created_ts in
-            let last_turn_ago_s = if m.runtime.usage.last_turn_ts <= 0.0 then 0.0 else now_ts -. m.runtime.usage.last_turn_ts in
-            let last_proactive_ago_s =
-              if m.runtime.proactive_rt.last_ts <= 0.0 then 0.0 else now_ts -. m.runtime.proactive_rt.last_ts
-            in
-            let last_visible_proactive_ago_s =
-              if m.runtime.proactive_rt.last_visible_ts <= 0.0 then 0.0
-              else now_ts -. m.runtime.proactive_rt.last_visible_ts
-            in
-            let active_model = active_model_of_meta m in
-            let next_model_hint = next_model_hint_of_meta m in
-            let trace_history_count = List.length m.runtime.trace_history in
-            let last_compaction_saved_tokens =
-              max 0 (m.runtime.compaction_rt.last_before_tokens - m.runtime.compaction_rt.last_after_tokens)
-            in
-            let (compact_ratio_gate, compact_message_gate, compact_token_gate) =
-              compaction_policy_of_keeper m
-            in
-	            let metrics_store = keeper_metrics_store ctx.config m.name in
-	            let metrics_path = keeper_metrics_path ctx.config m.name in
-	            let metrics_window_lines =
-	              let dated = Dated_jsonl.read_recent_lines metrics_store 120 in
-	              if dated <> [] then dated
-	              else read_file_tail_lines metrics_path ~max_bytes:120000 ~max_lines:120
-	            in
-	            let last_metrics =
-	              match List.rev metrics_window_lines with
-	              | line :: _ -> (try Some (Yojson.Safe.from_string line) with Yojson.Json_error _ -> None)
-	              | [] -> None
-	            in
-	            let metrics_overview =
-	              summarize_metrics_lines metrics_window_lines ~default_generation:m.runtime.generation
-	            in
-	            let last_skill_metrics =
-	              let rec find_latest = function
-	                | [] -> None
-	                | line :: tl ->
-	                    (try
-	                       let j = Yojson.Safe.from_string line in
-	                       match Safe_ops.json_string_opt "skill_primary" j with
-	                       | Some primary when String.trim primary <> "" -> Some j
-	                       | _ -> find_latest tl
-	                     with Yojson.Json_error _ -> find_latest tl)
-	              in
-	              find_latest (List.rev metrics_window_lines)
-	            in
-            let memory_bank_summary =
+            find_latest (List.rev metrics_window_lines)
+          in
+          let memory_bank_summary =
               read_keeper_memory_summary
                 ctx.config
                 ~name:m.name
@@ -118,55 +111,55 @@ let handle_keeper_list ctx args : tool_result =
               else
                 let elapsed = now_ts -. last_reflection_ts in
                 max 0.0 (cooldown -. elapsed)
-            in
-	            let context_json =
-	              match last_metrics with
-	              | None -> `Assoc [("source", `String "none")]
-	              | Some metrics ->
-	                `Assoc [
-	                  ("source", `String "metrics");
-	                  ("context_ratio", `Float (Safe_ops.json_float "context_ratio" metrics));
-	                  ("context_tokens", `Int (Safe_ops.json_int "context_tokens" metrics));
-	                  ("context_max", `Int (Safe_ops.json_int "context_max" metrics));
-	                  ("message_count", `Int (Safe_ops.json_int "message_count" metrics));
-	                ]
-	            in
-	            let skill_route_json =
-	              let open Yojson.Safe.Util in
-                  let fallback_selection_mode_string = "agent" in
-                  let fallback_selection_provenance = "fallback" in
-	              match last_skill_metrics with
-	              | None -> `Null
-	              | Some metrics ->
-	                  let primary = Safe_ops.json_string_opt "skill_primary" metrics in
-	                  let secondary =
-	                    match metrics |> member "skill_secondary" with
-	                    | `List xs ->
-	                        xs
-	                        |> List.filter_map (fun v ->
-	                             match v with `String s when String.trim s <> "" -> Some s | _ -> None)
-	                    | _ -> []
-	                  in
-	                  let reason = Safe_ops.json_string_opt "skill_reason" metrics in
-	                  `Assoc [
-	                    ("primary", Json_util.string_opt_to_json primary);
-	                    ("secondary", `List (List.map (fun s -> `String s) secondary));
-	                    ("reason", Json_util.string_opt_to_json reason);
-                        ( "selection_mode",
-                          `String
-                            (Safe_ops.json_string_opt "skill_selection_mode" metrics
-                             |> Option.value ~default:fallback_selection_mode_string) );
-                        ( "provenance",
-                          `String
-                            (Safe_ops.json_string_opt "skill_provenance" metrics
-                             |> Option.value ~default:fallback_selection_provenance) );
-                        ("authoritative", `Bool false);
-	                  ]
-	            in
-              let runtime_blocker_fields =
-                runtime_blocker_fields_json ctx.config m
-              in
-	            Some (`Assoc ([
+          in
+          let context_json =
+            match last_metrics with
+            | None -> `Assoc [("source", `String "none")]
+            | Some metrics ->
+              `Assoc [
+                ("source", `String "metrics");
+                ("context_ratio", `Float (Safe_ops.json_float "context_ratio" metrics));
+                ("context_tokens", `Int (Safe_ops.json_int "context_tokens" metrics));
+                ("context_max", `Int (Safe_ops.json_int "context_max" metrics));
+                ("message_count", `Int (Safe_ops.json_int "message_count" metrics));
+              ]
+          in
+          let skill_route_json =
+            let open Yojson.Safe.Util in
+            let fallback_selection_mode_string = "agent" in
+            let fallback_selection_provenance = "fallback" in
+            match last_skill_metrics with
+            | None -> `Null
+            | Some metrics ->
+                let primary = Safe_ops.json_string_opt "skill_primary" metrics in
+                let secondary =
+                  match metrics |> member "skill_secondary" with
+                  | `List xs ->
+                      xs
+                      |> List.filter_map (fun v ->
+                           match v with `String s when String.trim s <> "" -> Some s | _ -> None)
+                  | _ -> []
+                in
+                let reason = Safe_ops.json_string_opt "skill_reason" metrics in
+                `Assoc [
+                  ("primary", Json_util.string_opt_to_json primary);
+                  ("secondary", `List (List.map (fun s -> `String s) secondary));
+                  ("reason", Json_util.string_opt_to_json reason);
+                  ( "selection_mode",
+                    `String
+                      (Safe_ops.json_string_opt "skill_selection_mode" metrics
+                       |> Option.value ~default:fallback_selection_mode_string) );
+                  ( "provenance",
+                    `String
+                      (Safe_ops.json_string_opt "skill_provenance" metrics
+                       |> Option.value ~default:fallback_selection_provenance) );
+                  ("authoritative", `Bool false);
+                ]
+          in
+          let runtime_blocker_fields =
+            runtime_blocker_fields_json ctx.config m
+          in
+          Some (`Assoc ([
               ("name", `String m.name);
               ("agent_name", `String m.agent_name);
               ("trace_id", `String (Keeper_id.Trace_id.to_string m.runtime.trace_id));
@@ -252,12 +245,12 @@ let handle_keeper_list ctx args : tool_result =
               ("memory_note_count", `Int memory_bank_summary.total_notes);
               ("memory_top_kind",
                 Json_util.string_opt_to_json memory_bank_summary.top_kind);
-	              ("memory_recent_note",
-	                Json_util.string_opt_to_json memory_recent_note);
-	              ("context", context_json);
-	              ("skill_route", skill_route_json);
-	              ("metrics_overview", metrics_summary_to_json metrics_overview);
-	              ("memory_bank", memory_summary_to_json memory_bank_summary);
+              ("memory_recent_note",
+                Json_util.string_opt_to_json memory_recent_note);
+              ("context", context_json);
+              ("skill_route", skill_route_json);
+              ("metrics_overview", metrics_summary_to_json metrics_overview);
+              ("memory_bank", memory_summary_to_json memory_bank_summary);
               ("storage_paths", `Assoc [
                 ("meta", `String (keeper_meta_path ctx.config m.name));
                 ("metrics", `String (Dated_jsonl.base_dir metrics_store));

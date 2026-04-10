@@ -239,6 +239,7 @@
         test_server_runtime_bootstrap
         test_server_base_path_diagnostics
         test_server_startup_takeover
+        test_keeper_meta_listing
         test_worker_runtime
         test_capability_registry
         test_tool_local_runtime_verify
@@ -387,6 +388,7 @@
         test_server_runtime_bootstrap
         test_server_base_path_diagnostics
         test_server_startup_takeover
+        test_keeper_meta_listing
         test_worker_runtime
         test_capability_registry
         test_tool_local_runtime_verify

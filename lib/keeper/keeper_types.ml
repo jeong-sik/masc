@@ -1366,15 +1366,26 @@ let read_meta_file_path path : (keeper_meta option, string) result =
          Error e))
 ;;
 
-(** Keeper meta files are [{name}.json] where [name] contains no dots.
-    Sidecar files use [{name}.{kind}.json] (e.g. [keeper.manual_reconcile.json]).
-    This whitelist approach (Absence > Prohibition) means new sidecar types
-    are automatically excluded without updating a blacklist. *)
+(** Sidecar stem suffixes (without the trailing .json).
+    A file like [sangsu.manual_reconcile.json] has stem
+    [sangsu.manual_reconcile]; stripping [.json] and checking
+    [String.ends_with ~suffix] on this stem filters sidecars while
+    allowing keeper names that contain dots (e.g. [dot.name.json]).
+    When adding a new sidecar kind, add its dot-prefixed suffix here. *)
+let keeper_sidecar_stem_suffixes =
+  [ ".manual_reconcile"; ".dataset" ]
+
 let is_keeper_meta_file f =
   if not (Filename.check_suffix f ".json") then false
   else
     let stem = Filename.chop_suffix f ".json" in
-    stem <> "" && not (String.contains stem '.')
+    stem <> ""
+    && not
+         (List.exists
+            (fun suf ->
+              String.length stem > String.length suf
+              && String.ends_with ~suffix:suf stem)
+            keeper_sidecar_stem_suffixes)
 let keeper_names config =
   let dir = keeper_dir config in
   match Safe_ops.list_dir_safe dir with

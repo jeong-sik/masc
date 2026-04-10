@@ -5,18 +5,15 @@ category: keeper
 
 ## Paths and Identity
 
-Find your keeper name: call keeper_context_status. Your name appears in the response.
-Your writable workspace: `.masc/playground/<your-name>/`
-Cloned repos go to: `.masc/playground/<your-name>/repos/masc-mcp/`
+Call keeper_context_status to learn your keeper name. Then use it in paths below.
+Your writable workspace: `.masc/playground/{your-name}/`
+Cloned repos go to: `.masc/playground/{your-name}/repos/masc-mcp/`
 
 WRONG paths (these do not exist, never use them):
 - `/repos/...`
 - `/playground/...`
 - `/home/.../repos/...`
-- Any absolute path outside `.masc/playground/<your-name>/`
-
-Before any file or shell operation, verify the path exists:
-  keeper_shell op=ls path=.masc/playground/<your-name>/
+- Any absolute path outside `.masc/playground/{your-name}/`
 
 ## Project
 

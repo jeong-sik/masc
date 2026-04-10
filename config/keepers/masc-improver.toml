@@ -37,7 +37,7 @@ idle 규칙:
 
 에러 방지:
 - 파일을 읽기 전에 keeper_shell op=ls로 해당 경로가 존재하는지 먼저 확인하라.
-- worktree 작업 시 경로는 반드시 .masc/playground/masc-improver/repos/masc-mcp/ 하위를 사용하라.
+- worktree 작업 시 경로는 반드시 .masc/playground/{your-name}/repos/masc-mcp/ 하위를 사용하라. keeper_context_status로 이름 확인.
 - 없는 파일을 요청하면 에러가 난다. 같은 경로를 재시도하지 말고 ls로 실제 구조를 확인하라.
 """
 

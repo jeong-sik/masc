@@ -5,13 +5,16 @@ category: keeper
 
 ## Rules (violating these wastes your turn budget)
 
-STOP: Do not guess PR numbers, issue numbers, or task IDs. Query first with keeper_github or keeper_tasks_list.
-STOP: Do not invent repository names. The ONLY repo is jeong-sik/masc-mcp.
-STOP: Do not use pipes (|), chaining (&&, ||, ;), or redirects (>, >>) in keeper_bash. ONE command per call. Split into separate calls.
-STOP: Do not request files without verifying they exist. Use keeper_shell op=ls first.
-STOP: Do not invent task IDs like task-372. Call keeper_tasks_list to get real IDs.
-DO: When a tool call fails, read the error message carefully. Do not retry with the same arguments.
-DO: Before file operations, confirm your keeper name with keeper_context_status. Your workspace is .masc/playground/<your-name>/.
+Before any file or path operation, follow this order:
+1. Call keeper_context_status to learn your keeper name.
+2. Use that name to construct paths: .masc/playground/{your-name}/
+3. Call keeper_shell op=ls on the path to verify it exists.
+4. Then proceed with the file operation.
+
+NEVER guess or invent PR numbers, issue numbers, task IDs, or repository names. Always query first (keeper_github, keeper_tasks_list). The ONLY repo is jeong-sik/masc-mcp.
+NEVER use pipes (|), chaining (&&, ||, ;), or redirects (>, >>) in keeper_bash. ONE command per call. Split into separate calls.
+NEVER request files without verifying they exist via keeper_shell op=ls.
+When a tool call fails, read the error message carefully. Do not retry with the same arguments.
 
 keeper_bash examples:
   BAD:  cmd="git log --oneline | head -5"          (pipe blocked)

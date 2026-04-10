@@ -461,7 +461,8 @@ let test_room_presence_syncs_capabilities () =
         "capabilities synced from live meta"
         [ "keeper"; "preset:social" ]
         agent.capabilities
-(** Test: update_field_in_content replaces existing field *)
+
+(* Test: update_field_in_content replaces existing field *)
 let test_toml_update_existing () =
   let input = {|[keeper]
 goal = "old goal"

@@ -62,11 +62,8 @@ The MODEL receives the full file, generates a modified version, and writes it ba
 
   {
     name = "masc_autoresearch_swarm_start";
-    description = "Start an experiment loop with team coordination. Same experiment logic \
-as masc_autoresearch_start but also creates an execution session, seeds worker roles, and \
-links loop status to the team. Use when multiple agents should collaborate on the \
-research. Returns loop_id. Other agents can monitor via session \
-runtime tools. Note: team session engine has been removed; this tool returns an error.";
+    description = "Deprecated. Team session engine has been removed, so this tool now \
+returns an unsupported/deprecated error instead of starting a coordinated experiment loop.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -115,17 +112,14 @@ runtime tools. Note: team session engine has been removed; this tool returns an 
           ("description", `String "When true, lower metric values are better (e.g., loss, BPB). Default: false.");
         ]);
       ]);
-      ("required", `List [`String "goal"; `String "metric_fn"; `String "target_file"]);
+      ("required", `List []);
     ];
   };
 
   {
     name = "masc_repo_synthesis_swarm_start";
-    description = "Start a repository-scoped code synthesis task with team coordination. \
-Use for questions about a codebase (e.g. 'Generate a DB schema from these requirements'). \
-Creates an execution session and seeds workers to answer the question collaboratively. \
-Unlike autoresearch (metric-driven loops), this is question-driven with artifact output. \
-Returns synthesis_id. Note: team session engine has been removed; this tool returns an error.";
+    description = "Deprecated. Team session engine has been removed, so this tool now \
+returns an unsupported/deprecated error instead of launching a repository synthesis swarm.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -171,7 +165,7 @@ Returns synthesis_id. Note: team session engine has been removed; this tool retu
           ("description", `String "Optional baseline label for paired benchmark comparisons.");
         ]);
       ]);
-      ("required", `List [`String "goal"; `String "question"; `String "repo_root"]);
+      ("required", `List []);
     ];
   };
 

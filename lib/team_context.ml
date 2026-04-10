@@ -41,10 +41,13 @@ let add_finding ~base_path ~worker_name ~finding =
   let dir = Filename.dirname path in
   Fs_compat.mkdir_p dir;
   let entry =
-    Printf.sprintf {|{"worker":"%s","finding":"%s","ts":%.0f}|}
-      (String.escaped worker_name)
-      (String.escaped finding)
-      (Time_compat.now ())
+    `Assoc
+      [
+        ("worker", `String worker_name);
+        ("finding", `String finding);
+        ("ts", `Float (Time_compat.now ()));
+      ]
+    |> Yojson.Safe.to_string
   in
   Fs_compat.append_file path (entry ^ "\n")
 
@@ -79,12 +82,20 @@ let build ~base_path =
 let truncate_list n lst =
   List.filteri (fun i _ -> i < n) lst
 
+let has_visible_content ctx =
+  String.trim ctx.team_goal <> ""
+  || ctx.prior_decisions <> []
+  || ctx.shared_findings <> []
+  || ctx.active_workers <> []
+  || ctx.task_tree <> []
+
 let to_prompt_section ctx =
-  if ctx.team_goal = "" then ""
+  if not (has_visible_content ctx) then ""
   else
     let buf = Buffer.create 512 in
     Buffer.add_string buf "--- Team Context ---\n";
-    Buffer.add_string buf (Printf.sprintf "Goal: %s\n" ctx.team_goal);
+    if String.trim ctx.team_goal <> "" then
+      Buffer.add_string buf (Printf.sprintf "Goal: %s\n" ctx.team_goal);
     (match truncate_list max_decisions ctx.prior_decisions with
      | [] -> ()
      | decisions ->

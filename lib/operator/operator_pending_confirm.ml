@@ -270,6 +270,21 @@ let available_actions : available_action list =
     make_available_action ~action_type:"task_inject" ~tool_name:"masc_add_task"
       ~target_type:"namespace"
       ~description:"Inject a backlog task into the namespace.";
+    make_available_action ~action_type:"team_note" ~tool_name:"masc_operator_action"
+      ~target_type:"team_session"
+      ~description:"Attach an operator note to the active team session.";
+    make_available_action ~action_type:"team_broadcast" ~tool_name:"masc_operator_action"
+      ~target_type:"team_session"
+      ~description:"Broadcast an operator message to the active team session.";
+    make_available_action ~action_type:"team_task_inject" ~tool_name:"masc_operator_action"
+      ~target_type:"team_session"
+      ~description:"Inject a task into the active team session.";
+    make_available_action ~action_type:"team_worker_spawn_batch" ~tool_name:"masc_operator_action"
+      ~target_type:"team_session"
+      ~description:"Adjust worker allocation for the active team session.";
+    make_available_action ~action_type:"team_stop" ~tool_name:"masc_operator_action"
+      ~target_type:"team_session"
+      ~description:"Stop the active team session.";
     make_available_action ~action_type:"keeper_message" ~tool_name:"masc_keeper_msg"
       ~target_type:"keeper"
       ~description:"Send a direct operator message to a keeper.";

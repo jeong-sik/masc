@@ -162,6 +162,11 @@ let test_keeper_status_exposes_summary_and_recoverable () =
       Alcotest.(check string) "auto team session removed" "removed"
         Yojson.Safe.Util.(
           status_json |> member "auto_execution_session" |> member "status" |> to_string);
+      Alcotest.(check string) "legacy auto_team_session alias preserved" "removed"
+        Yojson.Safe.Util.(
+          status_json |> member "auto_team_session" |> member "status" |> to_string);
+      Alcotest.(check bool) "legacy auto_team_session_enabled alias preserved" false
+        Yojson.Safe.Util.(status_json |> member "auto_team_session_enabled" |> to_bool);
       Alcotest.(check bool) "keepalive running false" false
         Yojson.Safe.Util.(status_json |> member "keepalive_running" |> to_bool))
 

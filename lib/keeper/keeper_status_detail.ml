@@ -601,6 +601,8 @@ let handle_keeper_status ctx args : tool_result =
            ]);
            ("auto_execution_session", auto_execution_session_surface_json ());
            ("auto_execution_session_enabled", `Bool false);
+           ("auto_team_session", auto_execution_session_surface_json ());
+           ("auto_team_session_enabled", `Bool false);
            ("autonomy", `Assoc [
              ("turn_count", `Int m.runtime.autonomous_turn_count);
              ("tool_turn_count", `Int m.runtime.autonomous_tool_turn_count);

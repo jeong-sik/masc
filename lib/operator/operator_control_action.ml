@@ -234,7 +234,12 @@ let delegated_tool_for action_type =
   | Some action -> action.tool_name
   | None ->
     (match action_type with
-     | "team_turn" -> "masc_operator_action"
+     | "team_turn"
+     | "team_note"
+     | "team_broadcast"
+     | "team_task_inject"
+     | "team_worker_spawn_batch"
+     | "team_stop" -> "masc_operator_action"
      | "review_resolve" | "review_defer" -> "review_state"
      | _ -> "unknown")
 

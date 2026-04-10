@@ -154,7 +154,7 @@ let autonomous_trigger_lines
       let lines =
         [
           Some "- Scheduler: scheduled autonomous keepalive turn.";
-          (match decision.reasons with
+          (match Keeper_world_observation.verdict_reasons_to_strings decision.verdict with
            | [] -> None
            | reasons ->
                Some

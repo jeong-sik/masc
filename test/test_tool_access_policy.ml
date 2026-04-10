@@ -480,7 +480,7 @@ let make_gate_test_meta ?(name = "test-gate") () : Keeper_types.keeper_meta =
 let test_core_tools_are_core () =
   init_keeper_tool_registry ();
   let core = Keeper_exec_tools.core_always_tools in
-  check bool "masc_status is core" true
+  check bool "masc_status is not core-always" false
     (List.mem "masc_status" core);
   check bool "masc_broadcast is not core" false
     (List.mem "masc_broadcast" core);
@@ -490,7 +490,7 @@ let test_core_tools_are_core () =
     (List.mem "masc_tool_help" core);
   check bool "extend_turns is core" true
     (List.mem "extend_turns" core);
-  check bool "is_core_always_tool masc_status" true
+  check bool "is_core_always_tool masc_status" false
     (Keeper_exec_tools.is_core_always_tool "masc_status");
   check bool "non-core tool" false
     (Keeper_exec_tools.is_core_always_tool "keeper_bash")

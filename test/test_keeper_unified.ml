@@ -73,6 +73,10 @@ let contains_disallowed_control_char s =
   in
   loop 0
 
+let tool_log_entry ?ts tool_name =
+  let ts = Option.value ~default:(Time_compat.now ()) ts in
+  `Assoc [ ("tool", `String tool_name); ("ts", `Float ts) ]
+
 let with_env name value f =
   let old = Sys.getenv_opt name in
   Unix.putenv name value;
@@ -2443,6 +2447,30 @@ let test_on_idle_skip_with_custom_threshold () =
       (Agent_sdk.Hooks.decision_kind_to_string
         (Agent_sdk.Hooks.classify_decision other)))
 
+let test_recent_tool_streak_count_counts_tail_matches () =
+  let now = Time_compat.now () in
+  let entries =
+    [
+      tool_log_entry ~ts:(now -. 30.0) "keeper_fs_read";
+      tool_log_entry ~ts:(now -. 20.0) "masc_status";
+      tool_log_entry ~ts:(now -. 10.0) "masc_status";
+    ]
+  in
+  check int "tail streak count" 2
+    (HK.recent_tool_streak_count ~tool_name:"masc_status" entries)
+
+let test_recent_tool_streak_count_ignores_stale_entries () =
+  let now = Time_compat.now () in
+  let entries =
+    [
+      tool_log_entry ~ts:(now -. 1800.0) "masc_status";
+      tool_log_entry ~ts:(now -. 10.0) "masc_status";
+    ]
+  in
+  check int "stale entry does not extend streak" 1
+    (HK.recent_tool_streak_count ~within_sec:60.0 ~tool_name:"masc_status"
+       entries)
+
 let test_prompt_no_outcome_for_fresh_keeper () =
   let _sys, user = UP.build_prompt ~base_path:"/test" ~meta:minimal_meta ~observation:base_observation () in
   check bool "no Last Cycle Outcome for fresh keeper"
@@ -2556,6 +2584,10 @@ let () =
             test_on_idle_skip_at_repeated_idle;
           test_case "on_idle skip with custom threshold" `Quick
             test_on_idle_skip_with_custom_threshold;
+          test_case "recent tool streak counts tail matches" `Quick
+            test_recent_tool_streak_count_counts_tail_matches;
+          test_case "recent tool streak ignores stale entries" `Quick
+            test_recent_tool_streak_count_ignores_stale_entries;
         ] );
       ( "config",
         [

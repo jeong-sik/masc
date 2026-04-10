@@ -130,6 +130,8 @@ let error_message_of_http_error = function
             | _ -> Printf.sprintf "HTTP %d" code)
         | _ -> Printf.sprintf "HTTP %d" code
       with Yojson.Json_error _ -> Printf.sprintf "HTTP %d" code)
+  | Llm_provider.Http_client.AcceptRejected { reason } ->
+      Printf.sprintf "Accept rejected: %s" reason
 
 let probe_chat_completion_compatible
     ?(timeout_sec = 5)

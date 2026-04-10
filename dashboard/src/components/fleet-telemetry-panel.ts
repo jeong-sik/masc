@@ -89,6 +89,17 @@ function normalizeText(value: string | null | undefined): string | null {
   return trimmed === '' ? null : trimmed
 }
 
+const MODEL_PLACEHOLDERS = new Set(['unknown', 'none', '-', 'n/a'])
+
+function isPlaceholderModel(value: string): boolean {
+  return MODEL_PLACEHOLDERS.has(value.toLowerCase())
+}
+
+function normalizeModelText(value: string | null | undefined): string | null {
+  const text = normalizeText(value)
+  return text == null || isPlaceholderModel(text) ? null : text
+}
+
 function firstNonEmptyString(...values: Array<string | null | undefined>): string | null {
   for (const value of values) {
     const normalized = normalizeText(value)
@@ -112,7 +123,7 @@ function uniqueStrings(values: Array<string | null | undefined>): string[] {
 function keeperLatestMetricModel(keeper: Keeper): string | null {
   const series = keeper.metrics_series ?? []
   for (let index = series.length - 1; index >= 0; index -= 1) {
-    const model = normalizeText(series[index]?.model_used)
+    const model = normalizeModelText(series[index]?.model_used)
     if (model) return model
   }
   return null
@@ -120,7 +131,7 @@ function keeperLatestMetricModel(keeper: Keeper): string | null {
 
 function keeperMetricsWindowModel(keeper: Keeper): string | null {
   const primary = keeper.metrics_window?.primary_model
-  return typeof primary === 'string' ? normalizeText(primary) : null
+  return typeof primary === 'string' ? normalizeModelText(primary) : null
 }
 
 function keeperModel(keeper: Keeper): string {

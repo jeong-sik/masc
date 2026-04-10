@@ -216,6 +216,37 @@ describe('FleetTelemetryPanel', () => {
     expect(rows[0]?.recent_tools).toEqual(['masc_status', 'keeper_stay_silent'])
   })
 
+  it('prefers active_model over placeholder metric model strings', async () => {
+    const { buildFleetRows } = await loadPanel({
+      fetchDashboardExecution: vi.fn().mockResolvedValue(executionResponse),
+      fetchToolQuality: vi.fn().mockResolvedValue(toolQualityResponse),
+      fetchTelemetrySummary: vi.fn().mockResolvedValue(telemetrySummaryResponse),
+    })
+
+    const keepers = normalizeKeepers([
+      {
+        name: 'keeper-placeholder-model',
+        status: 'active',
+        keepalive_running: true,
+        context_ratio: 0.3,
+        total_turns: 5,
+        last_activity_ago_s: 60,
+        active_model: 'gpt-5.4',
+        metrics_series: [
+          { ...metricSeriesPoint, model_used: 'unknown' },
+        ],
+        metrics_window: {
+          primary_model: 'none',
+        },
+      },
+    ])
+
+    const rows = buildFleetRows(keepers, { ...toolQualityResponse, by_keeper: [] })
+
+    expect(rows).toHaveLength(1)
+    expect(rows[0]?.model).toBe('gpt-5.4')
+  })
+
   it('sorts attention keepers ahead of healthy and offline rows', async () => {
     const { buildFleetRows } = await loadPanel({
       fetchDashboardExecution: vi.fn().mockResolvedValue(executionResponse),

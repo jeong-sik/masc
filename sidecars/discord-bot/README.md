@@ -83,11 +83,11 @@ For local development, the server usually owns the runtime root. The safest
 pattern is:
 
 ```bash
-export MASC_BASE_PATH=~/me
+export MASC_BASE_PATH=/path/to/your/project
 ```
 
 That keeps the bot aligned with a server process that also runs with
-`MASC_BASE_PATH=~/me`, so both sides read and write the same connector state.
+the same `MASC_BASE_PATH`, so both sides read and write the same connector state.
 
 If you intentionally want sidecar-local files instead, set explicit paths in
 `.env`:

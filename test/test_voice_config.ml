@@ -26,24 +26,14 @@ let minimal_config_json ~session_endpoints =
 }|} session_endpoints
 
 let parse json_str =
-  let tmp = Filename.temp_file "test_voice_config" ".json" in
-  Fun.protect
-    ~finally:(fun () -> try Sys.remove tmp with Sys_error _ -> ())
-    (fun () ->
-      let oc = open_out tmp in
-      output_string oc json_str;
-      close_out oc;
-      (* Voice_config.load reads from config_path(), but we need to parse
-         the JSON directly.  Use the internal parse chain via Yojson. *)
-      let json = Yojson.Safe.from_string json_str in
-      (* Replicate the load() pipeline without file I/O *)
-      let open Result in
-      let ( let* ) = bind in
-      let* tts = Vc.parse_tts json in
-      let* stt = Vc.parse_stt json in
-      let* session = Vc.parse_session json in
-      let* local_playback = Vc.parse_local_playback json in
-      Ok { Vc.tts; stt; session; local_playback })
+  let json = Yojson.Safe.from_string json_str in
+  let open Result in
+  let ( let* ) = bind in
+  let* tts = Vc.parse_tts json in
+  let* stt = Vc.parse_stt json in
+  let* session = Vc.parse_session json in
+  let* local_playback = Vc.parse_local_playback json in
+  Ok { Vc.tts; stt; session; local_playback }
 
 let test_session_empty_endpoints_ok () =
   let json = minimal_config_json ~session_endpoints:"[]" in
@@ -78,6 +68,29 @@ let test_tts_endpoints_reachable_when_session_empty () =
   | Error err ->
     fail (Printf.sprintf "expected Ok for tts check, got Error: %s" err)
 
+let test_session_invalid_endpoint_rejected () =
+  let json = minimal_config_json ~session_endpoints:{|[{"bad": true}]|} in
+  match parse json with
+  | Ok _ -> fail "expected Error for invalid endpoint, got Ok"
+  | Error _ -> ()
+
+let test_tts_empty_endpoints_rejected () =
+  let json_str = {|{
+  "tts": {
+    "default_model": "m", "default_voice": "v",
+    "default_voice_settings": {},
+    "endpoints": []
+  },
+  "stt": {
+    "default_model": "s",
+    "endpoints": [{ "id": "stt", "kind": "elevenlabs_direct", "enabled": true }]
+  },
+  "session": { "endpoints": [] }
+}|} in
+  match parse json_str with
+  | Ok _ -> fail "expected Error for empty tts endpoints, got Ok"
+  | Error _ -> ()
+
 let () =
   Alcotest.run "voice_config"
     [
@@ -89,5 +102,12 @@ let () =
             `Quick test_session_with_endpoint_ok;
           test_case "tts reachable when session empty"
             `Quick test_tts_endpoints_reachable_when_session_empty;
+        ] );
+      ( "error_paths",
+        [
+          test_case "invalid session endpoint rejected"
+            `Quick test_session_invalid_endpoint_rejected;
+          test_case "empty tts endpoints still rejected"
+            `Quick test_tts_empty_endpoints_rejected;
         ] );
     ]

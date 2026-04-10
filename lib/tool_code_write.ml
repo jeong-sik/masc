@@ -23,25 +23,38 @@ type result = bool * string
 let max_write_size = 1024 * 1024 (* 1MB *)
 
 (* Security: Validate path is within a .worktrees/ directory.
-   Uses canonical paths from Tool_code.validate_path — already normalized. *)
+   Uses canonical paths from Tool_code.validate_path — already normalized.
+   Checks both the base_path git root AND the process cwd git root,
+   because base_path may be ~/me while the actual repo worktrees live
+   under ~/me/workspace/.../masc-mcp/.worktrees/. *)
 let validate_writable_path config path =
   match Tool_code.validate_path config path with
   | Error e -> Error e
   | Ok canonical_path ->
-    let git_root = match Room_git.git_root ~base_path:config.Room.base_path with
-      | None -> Error (IoError "Not in a git repository")
-      | Some root -> Ok root
+    let worktree_roots =
+      let base_root = Room_git.git_root ~base_path:config.Room.base_path in
+      let cwd_root =
+        try Some (String.trim (Tool_code.normalize_path (Sys.getcwd ())))
+        with _ -> None
+      in
+      List.filter_map (fun r ->
+        match r with
+        | Some root -> Some (Tool_code.normalize_path
+            (Filename.concat root ".worktrees"))
+        | None -> None)
+        [base_root; cwd_root]
+      |> List.sort_uniq String.compare
     in
-    match git_root with
-    | Error e -> Error e
-    | Ok root ->
-      let worktree_prefix = Tool_code.normalize_path
-        (Filename.concat root ".worktrees") in
-      if String.starts_with ~prefix:(worktree_prefix ^ "/") canonical_path then
-        Ok canonical_path
-      else
-        Error (IoError (Printf.sprintf
-          "Write restricted to .worktrees/ directory (got: %s)" canonical_path))
+    if worktree_roots = [] then
+      Error (IoError "Not in a git repository")
+    else if List.exists (fun prefix ->
+      String.starts_with ~prefix:(prefix ^ "/") canonical_path
+    ) worktree_roots then
+      Ok canonical_path
+    else
+      Error (IoError (Printf.sprintf
+        "Write restricted to .worktrees/ directory (got: %s, checked: [%s])"
+        canonical_path (String.concat "; " worktree_roots)))
 
 (* Shell command allowlist *)
 let allowed_shell_commands = [

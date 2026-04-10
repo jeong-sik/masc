@@ -81,11 +81,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Verify OAS pin ratchet
-        run: |
-          chmod +x scripts/check-oas-pin.sh
-          scripts/check-oas-pin.sh
-
       - name: Setup OCaml toolchain
         uses: ./.github/actions/setup-ocaml-toolchain
 
@@ -99,6 +94,11 @@ jobs:
         with:
           install-flags: --with-test
           os-packages: ripgrep bc
+
+      - name: Verify OAS pin ratchet
+        run: |
+          chmod +x scripts/check-oas-pin.sh
+          scripts/check-oas-pin.sh
 
       - name: Check front-door doc truth
         run: |

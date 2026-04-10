@@ -7,7 +7,7 @@ import { useEffect, useRef } from 'preact/hooks'
 import { fetchKeeperToolStats } from '../api/dashboard'
 import type { ToolStat, HourlyBucket, ToolStatsResponse } from '../api/dashboard'
 import { toolCategory, formatDuration, durationColor } from './tool-call-shared'
-import { createManagedAsyncResource } from '../lib/async-state'
+import { createManagedAsyncResource, type ManagedAsyncResource } from '../lib/async-state'
 
 // ── Types ─────────────────────────────────────────────
 
@@ -99,15 +99,18 @@ interface KeeperToolTelemetryProps {
 }
 
 export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
-  const resourceRef = useRef(createManagedAsyncResource<TelemetryState>({
-    tools: [],
-    timeline: [],
-    totalEntries: 0,
-    windowHours: 24,
-  }))
+  const resourceRef = useRef<ManagedAsyncResource<TelemetryState> | null>(null)
+  if (resourceRef.current === null) {
+    resourceRef.current = createManagedAsyncResource<TelemetryState>({
+      tools: [],
+      timeline: [],
+      totalEntries: 0,
+      windowHours: 24,
+    })
+  }
+  const resource = resourceRef.current
 
   useEffect(() => {
-    const resource = resourceRef.current
     void resource.load(async (signal) => {
       const data: ToolStatsResponse = await fetchKeeperToolStats(keeperName, 24, { signal })
       return {
@@ -120,9 +123,9 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
     return () => {
       resource.cancel()
     }
-  }, [keeperName])
+  }, [keeperName, resource])
 
-  const asyncState = resourceRef.current.state.value
+  const asyncState = resource.state.value
   const s = asyncState.data ?? {
     tools: [],
     timeline: [],

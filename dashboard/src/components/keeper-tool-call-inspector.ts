@@ -9,7 +9,7 @@ import type { ToolCallEntry } from '../api/dashboard'
 import { formatTimeHms } from '../lib/format-time'
 import { LoadingState } from './common/feedback-state'
 import { toolCategory, formatDuration, durationColor } from './tool-call-shared'
-import { createManagedAsyncResource } from '../lib/async-state'
+import { createManagedAsyncResource, type ManagedAsyncResource } from '../lib/async-state'
 
 // Delegated to lib/format-time (SSOT)
 const formatTimestamp = formatTimeHms
@@ -83,11 +83,14 @@ function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
 // ── Main component ──────────────────────────────────────
 
 export function KeeperToolCallInspector({ keeperName }: { keeperName: string }) {
-  const resourceRef = useRef(createManagedAsyncResource<ToolCallEntry[]>([]))
+  const resourceRef = useRef<ManagedAsyncResource<ToolCallEntry[]> | null>(null)
+  if (resourceRef.current === null) {
+    resourceRef.current = createManagedAsyncResource<ToolCallEntry[]>([])
+  }
+  const resource = resourceRef.current
   const filterTool = useSignal('')
 
   useEffect(() => {
-    const resource = resourceRef.current
     void resource.load(async (signal) => {
       const response = await fetchKeeperToolCalls(keeperName, 100, { signal })
       return response.entries ?? []
@@ -95,9 +98,9 @@ export function KeeperToolCallInspector({ keeperName }: { keeperName: string }) 
     return () => {
       resource.cancel()
     }
-  }, [keeperName])
+  }, [keeperName, resource])
 
-  const allEntries = resourceRef.current.state.value.data ?? []
+  const allEntries = resource.state.value.data ?? []
   const filter = filterTool.value.toLowerCase()
   const filtered = !filter
     ? allEntries
@@ -106,12 +109,12 @@ export function KeeperToolCallInspector({ keeperName }: { keeperName: string }) 
   // Reverse to show newest first
   const sorted = [...filtered].reverse()
 
-  if (resourceRef.current.state.value.loading) {
+  if (resource.state.value.loading) {
     return html`<${LoadingState}>도구 호출 불러오는 중...<//>`
   }
 
-  if (resourceRef.current.state.value.error) {
-    return html`<div class="text-xs text-[var(--bad)] p-4">${resourceRef.current.state.value.error}</div>`
+  if (resource.state.value.error) {
+    return html`<div class="text-xs text-[var(--bad)] p-4">${resource.state.value.error}</div>`
   }
 
   const entries = allEntries

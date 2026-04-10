@@ -23,8 +23,10 @@ type PracticalCase = {
 }
 
 const transportHealthResource = createManagedAsyncResource<TransportHealthData>()
+let inflightTransportHealthRefresh: Promise<void> | null = null
 
 export function resetTransportHealthState(): void {
+  inflightTransportHealthRefresh = null
   transportHealthResource.reset()
 }
 
@@ -32,11 +34,7 @@ export function resetTransportHealthState(): void {
 export function hydrateTransportHealthFromSSE(data: unknown): void {
   const decoded = hydrateTransportHealthData(data)
   if (!decoded) return
-  transportHealthResource.state.value = {
-    data: decoded,
-    loading: false,
-    error: null,
-  }
+  transportHealthResource.reset(decoded)
 }
 
 const PRACTICAL_CASES: PracticalCase[] = [
@@ -83,7 +81,14 @@ const PRACTICAL_CASES: PracticalCase[] = [
 ]
 
 async function refreshTransportHealth(): Promise<void> {
-  await transportHealthResource.load((signal) => fetchTransportHealth({ signal }))
+  if (inflightTransportHealthRefresh) return inflightTransportHealthRefresh
+  inflightTransportHealthRefresh = transportHealthResource
+    .load((signal) => fetchTransportHealth({ signal }))
+    .then(() => {})
+    .finally(() => {
+      inflightTransportHealthRefresh = null
+    })
+  return inflightTransportHealthRefresh
 }
 
 function shouldRefreshFromEvent(event: SSEEvent): boolean {

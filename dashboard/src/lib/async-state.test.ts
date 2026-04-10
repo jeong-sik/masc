@@ -270,16 +270,17 @@ describe('createManagedAsyncResource', () => {
     })
   })
 
-  it('cancel stops the request without replacing current data', async () => {
+  it('cancel prevents late results from replacing current data', async () => {
     const resource = createManagedAsyncResource<string>('keep')
+    let resolve!: (value: string) => void
 
-    void resource.load((signal) => new Promise<string>((resolve, reject) => {
-      signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), { once: true })
-      setTimeout(() => resolve('late'), 10)
+    const inflight = resource.load(() => new Promise<string>((r) => {
+      resolve = r
     }))
 
     resource.cancel()
-    await Promise.resolve()
+    resolve('late')
+    await inflight
 
     expect(resource.state.value).toEqual({
       data: 'keep',

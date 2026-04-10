@@ -14,7 +14,7 @@ import { EmptyState } from './common/empty-state'
 import { LoadingState } from './common/feedback-state'
 import { StatCell } from './common/stat-cell'
 import { StatusChip } from './common/status-chip'
-import { createManagedAsyncResource } from '../lib/async-state'
+import { createManagedAsyncResource, type ManagedAsyncResource } from '../lib/async-state'
 
 interface RuntimeData {
   providers: DashboardRuntimeProvidersResponse | null
@@ -43,11 +43,15 @@ function fmtNumber(value?: number | null, digits = 0): string {
 }
 
 export function RuntimeMonitor() {
-  const resourceRef = useRef(createManagedAsyncResource<RuntimeData>())
+  const resourceRef = useRef<ManagedAsyncResource<RuntimeData> | null>(null)
+  if (resourceRef.current === null) {
+    resourceRef.current = createManagedAsyncResource<RuntimeData>()
+  }
+  const resource = resourceRef.current
   const windowMinutes = useSignal(30)
 
   async function load() {
-    await resourceRef.current.load(async (signal) => {
+    await resource.load(async (signal) => {
       const [providers, metrics] = await Promise.all([
         fetchRuntimeProviders({ signal }),
         fetchRuntimeModelMetrics(windowMinutes.value, { signal }),
@@ -57,7 +61,6 @@ export function RuntimeMonitor() {
   }
 
   useEffect(() => {
-    const resource = resourceRef.current
     void resource.load(async (signal) => {
       const [providers, metrics] = await Promise.all([
         fetchRuntimeProviders({ signal }),
@@ -68,9 +71,9 @@ export function RuntimeMonitor() {
     return () => {
       resource.cancel()
     }
-  }, [windowMinutes.value])
+  }, [resource, windowMinutes.value])
 
-  const current = resourceRef.current.state.value
+  const current = resource.state.value
   const providers = current.data?.providers ?? null
   const metrics = current.data?.metrics ?? null
 

@@ -141,7 +141,8 @@ export function createManagedAsyncResource<T>(initialData: T | null = null): Man
       const previous = state.value.data
       const gen = ++generation
       controller?.abort()
-      controller = new AbortController()
+      const requestController = new AbortController()
+      controller = requestController
       state.value = {
         data: previous,
         loading: true,
@@ -150,7 +151,7 @@ export function createManagedAsyncResource<T>(initialData: T | null = null): Man
 
       let promise: Promise<T>
       try {
-        promise = fn(controller.signal, previous)
+        promise = fn(requestController.signal, previous)
       } catch (error) {
         state.value = {
           data: previous,
@@ -162,7 +163,7 @@ export function createManagedAsyncResource<T>(initialData: T | null = null): Man
 
       inflight = promise
         .then((data) => {
-          if (gen !== generation || controller?.signal.aborted) return undefined
+          if (gen !== generation || requestController.signal.aborted) return undefined
           state.value = {
             data,
             loading: false,
@@ -180,7 +181,7 @@ export function createManagedAsyncResource<T>(initialData: T | null = null): Man
           return undefined
         })
         .finally(() => {
-          if (gen === generation) {
+          if (gen === generation && controller === requestController) {
             inflight = null
             controller = null
           }
@@ -190,6 +191,7 @@ export function createManagedAsyncResource<T>(initialData: T | null = null): Man
     },
 
     cancel(): void {
+      ++generation
       controller?.abort()
       controller = null
       inflight = null

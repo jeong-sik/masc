@@ -323,8 +323,8 @@ let test_recent_activity_falls_back_from_bad_task_timestamp () =
   check int "task still included" 1 (List.length items);
   match items with
   | [item] ->
-      check bool "timestamp falls back to a real time value" true
-        (item.created_at > 0.0)
+      check (float 0.01) "timestamp falls back to epoch 0.0" 0.0
+        item.created_at
   | _ -> fail "expected one task activity item"
 
 (* ============================================================

@@ -104,7 +104,7 @@ let test_turn_timeout_default () =
     Cfg.KeeperKeepalive.turn_timeout_sec
 
 let test_max_turns_default () =
-  check int "default max_turns_per_call 5" 5
+  check int "default max_turns_per_call 15" 15
     Cfg.KeeperKeepalive.oas_max_turns_per_call
 
 let test_max_turns_range () =

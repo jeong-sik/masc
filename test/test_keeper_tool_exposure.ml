@@ -40,7 +40,12 @@ let has_any_prefix prefix tools =
     && String.sub n 0 (String.length prefix) = prefix) tools
 
 let raw_schema_by_name name =
-  Config.raw_all_tool_schemas
+  let all =
+    Config.raw_all_tool_schemas
+    @ Tool_shard.coding_tools
+    @ Tool_shard.keeper_pr_submit_tools
+  in
+  all
   |> List.find_opt (fun (schema : Types.tool_schema) -> String.equal schema.name name)
 
 (* ============================================================

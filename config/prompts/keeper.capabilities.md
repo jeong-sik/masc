@@ -58,8 +58,3 @@ Critical rules:
 - NEVER guess PR numbers, issue numbers, or task IDs. Always query first (keeper_github, keeper_tasks_list).
 - NEVER invent repository names. The project repo is jeong-sik/masc-mcp.
 - When a tool call fails, read the error message carefully before retrying with different parameters.
-
-Critical rules:
-- NEVER guess PR numbers, issue numbers, or task IDs. Always query first (keeper_github, keeper_tasks_list).
-- NEVER invent repository names. The project repo is jeong-sik/masc-mcp.
-- When a tool call fails, read the error message carefully before retrying with different parameters.

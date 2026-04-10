@@ -287,17 +287,18 @@ let scheduled_autonomous_outcome_for_result
     ~has_text:(String.trim result.response_text <> "")
     ~has_tool_calls:(has_visible_tool_signal result)
 
-let work_kind_of_result (result : Keeper_agent_run.run_result) : string =
-  if has_visible_tool_signal result then "tool_use"
-  else if String.trim result.response_text <> "" then "text_turn"
-  else "noop"
-
 let selected_mode_of_result (result : Keeper_agent_run.run_result) : string =
   let text = String.trim result.response_text in
   if has_visible_tool_signal result then "tool_use"
   else if text = "" then "noop"
   else if String.starts_with ~prefix:"SKIP:" text then "skip_text"
   else "text_response"
+
+let work_kind_of_selected_mode (selected_mode : string) : string =
+  match selected_mode with
+  | "tool_use" -> "tool_use"
+  | "noop" -> "noop"
+  | _ -> "text_turn"
 
 let observed_triggers_of_observation
     (observation : Keeper_world_observation.world_observation) : string list =
@@ -781,7 +782,8 @@ let append_metrics_snapshot ~(config : Room.config) ~(meta : keeper_meta)
     ?deliberation_execution () : unit =
   let now_ts = Time_compat.now () in
   let _observation = observation in
-  let work_kind = work_kind_of_result result in
+  let selected_mode = selected_mode_of_result result in
+  let work_kind = work_kind_of_selected_mode selected_mode in
   let surface_model_used = Keeper_agent_run.surface_model_used result in
   let scheduled_autonomous_outcome =
     if is_scheduled_autonomous_channel channel then
@@ -1521,9 +1523,10 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
             ~turn_generation:lifecycle.turn_generation
             ~compaction:lifecycle.compaction
             ~handoff_json:lifecycle.handoff_json;
+          let selected_mode = selected_mode_of_result result in
           append_decision_record ~config ~meta:updated_meta ~observation
             ~latency_ms ~semaphore_wait_ms ~outcome:"success"
-            ~selected_mode:(selected_mode_of_result result)
+            ~selected_mode
             ~social_state
             ~result:(Some result) ();
           (* Post-turn evidence: deterministic git before/after delta *)
@@ -1546,12 +1549,12 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
             updated_meta.name (Keeper_agent_run.surface_model_used result)
             (result.usage.input_tokens + result.usage.output_tokens)
             latency_ms
-            (selected_mode_of_result result)
-             (match result.stop_reason with
-              | Oas_worker.Completed -> "completed"
-              | Oas_worker.TurnBudgetExhausted { turns_used; limit; _ } ->
+            selected_mode
+            (match result.stop_reason with
+             | Oas_worker.Completed -> "completed"
+             | Oas_worker.TurnBudgetExhausted { turns_used; limit; _ } ->
                  Printf.sprintf "budget_exhausted(%d/%d)" turns_used limit
-              | Oas_worker.MutationBoundaryReached { turns_used; tool_name } ->
+             | Oas_worker.MutationBoundaryReached { turns_used; tool_name } ->
                  (match tool_name with
                   | Some tool ->
                       Printf.sprintf "mutation_boundary(%d:%s)" turns_used tool

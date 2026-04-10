@@ -124,7 +124,7 @@ let container_name (spec : Worker_execution_spec.t) =
 
 let artifact_dir (spec : Worker_execution_spec.t) =
   Worker_container.worker_container_dir ~base_path:spec.base_path
-    ~team_session_id:spec.team_session_id ~worker_name:spec.worker_name
+    ~worker_name:spec.worker_name
 
 let stderr_artifact_path (spec : Worker_execution_spec.t) =
   let suffix =
@@ -139,7 +139,7 @@ let stderr_artifact_path (spec : Worker_execution_spec.t) =
 let persist_stderr_artifact (spec : Worker_execution_spec.t) stderr =
   if String.trim stderr <> "" then (
     Worker_container.ensure_worker_container_dirs ~base_path:spec.base_path
-      ~team_session_id:spec.team_session_id ~worker_name:spec.worker_name;
+      ~worker_name:spec.worker_name;
     Fs_compat.save_file (stderr_artifact_path spec) stderr)
 
 let best_effort_remove_container ?clock_opt name =

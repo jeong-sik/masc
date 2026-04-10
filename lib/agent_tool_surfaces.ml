@@ -88,41 +88,6 @@ let local_worker_internal_schemas : Types.tool_schema list =
         `Assoc [ ("type", `String "object"); ("properties", `Assoc []) ];
     };
     {
-      Types.name = "masc_team_session_status";
-      description =
-        "Get the current status and progress summary for a team session.";
-      input_schema =
-        `Assoc
-          [
-            ("type", `String "object");
-            ( "properties",
-              `Assoc [ ("session_id", `Assoc [ ("type", `String "string") ]) ] );
-            ("required", `List [ `String "session_id" ]);
-          ];
-    };
-    {
-      Types.name = "masc_team_session_step";
-      description =
-        "Record a team orchestration turn and optionally execute broadcast or checkpoint action.";
-      input_schema =
-        `Assoc
-          [
-            ("type", `String "object");
-            ( "properties",
-              `Assoc
-                [
-                  ("session_id", `Assoc [ ("type", `String "string") ]);
-                  ("message", `Assoc [ ("type", `String "string") ]);
-                  ("turn_kind", `Assoc [ ("type", `String "string") ]);
-                  ("target_agent", `Assoc [ ("type", `String "string") ]);
-                  ("task_title", `Assoc [ ("type", `String "string") ]);
-                  ("task_description", `Assoc [ ("type", `String "string") ]);
-                  ("task_priority", `Assoc [ ("type", `String "integer") ]);
-                ] );
-            ("required", `List [ `String "session_id"; `String "turn_kind" ]);
-          ];
-    };
-    {
       Types.name = "masc_repair_loop_start";
       description =
         "Start a detachable internal code repair loop and persist its initial state.";

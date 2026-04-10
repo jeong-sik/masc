@@ -189,12 +189,11 @@ let test_finding_accumulation () =
   (try Sys.mkdir base_path 0o755 with Sys_error _ -> ());
   (try Sys.mkdir masc_dir 0o755 with Sys_error _ -> ());
   (try Sys.mkdir session_dir 0o755 with Sys_error _ -> ());
-  let sid = "test_al" in
-  Team_context.add_finding ~base_path ~team_session_id:sid ~worker_name:"w1"
+  Team_context.add_finding ~base_path ~worker_name:"w1"
     ~finding:"found issue A";
-  Team_context.add_finding ~base_path ~team_session_id:sid ~worker_name:"w2"
+  Team_context.add_finding ~base_path ~worker_name:"w2"
     ~finding:"found issue B";
-  let findings = Team_context.load_findings ~base_path ~team_session_id:sid in
+  let findings = Team_context.load_findings ~base_path in
   Alcotest.(check int) "two findings" 2 (List.length findings);
   Alcotest.(check bool) "has issue A" true
     (List.exists (fun f -> contains_s f "found issue A") findings);

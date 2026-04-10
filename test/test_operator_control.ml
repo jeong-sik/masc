@@ -122,7 +122,7 @@ let () =
             Test_operator_control_keeper
             .test_snapshot_keeper_tool_audit_uses_decision_log;
           Alcotest.test_case "keeper msg auto team session bridge" `Quick
-            Test_operator_control_keeper.test_keeper_msg_auto_team_session_bridge;
+            Test_operator_control_keeper.test_keeper_msg_auto_execution_session_bridge;
           Alcotest.test_case "operator keeper_message rejects legacy models"
             `Quick
             Test_operator_control_keeper

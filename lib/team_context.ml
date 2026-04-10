@@ -1,4 +1,4 @@
-(** Team_context — shared context for team session workers.
+(** Team_context — shared context for coordinated workers.
     @since 3.0.0 *)
 
 type task_summary = {
@@ -30,16 +30,14 @@ let max_decisions = 3
 let max_findings = 5
 let max_tasks = 10
 
-(** Shared findings file within the session directory. *)
-let findings_path ~base_path ~team_session_id =
+(** Shared findings file within the .masc directory. *)
+let findings_path ~base_path =
   Filename.concat
-    (Filename.concat
-       (Filename.concat base_path ".masc")
-       ("session_" ^ team_session_id))
+    (Filename.concat base_path ".masc")
     "shared_findings.jsonl"
 
-let add_finding ~base_path ~team_session_id ~worker_name ~finding =
-  let path = findings_path ~base_path ~team_session_id in
+let add_finding ~base_path ~worker_name ~finding =
+  let path = findings_path ~base_path in
   let dir = Filename.dirname path in
   Fs_compat.mkdir_p dir;
   let entry =
@@ -50,8 +48,8 @@ let add_finding ~base_path ~team_session_id ~worker_name ~finding =
   in
   Fs_compat.append_file path (entry ^ "\n")
 
-let load_findings ~base_path ~team_session_id : string list =
-  let path = findings_path ~base_path ~team_session_id in
+let load_findings ~base_path : string list =
+  let path = findings_path ~base_path in
   if not (Sys.file_exists path) then []
   else
     try
@@ -74,9 +72,8 @@ let load_findings ~base_path ~team_session_id : string list =
       ) lines
     with Sys_error _ -> []
 
-let build ~base_path ~team_session_id =
-  (* Team session store removed — context is built from shared findings only. *)
-  let shared_findings = load_findings ~base_path ~team_session_id in
+let build ~base_path =
+  let shared_findings = load_findings ~base_path in
   { empty with shared_findings }
 
 let truncate_list n lst =

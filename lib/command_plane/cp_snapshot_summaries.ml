@@ -606,7 +606,7 @@ let summary_json ?sessions config =
       ("swarm_proof", swarm_proof_json config);
     ]
 
-let recent_team_session_trace_events _config _session_id _limit =
+let recent_execution_session_trace_events _config _session_id _limit =
   (* Team_session_store removed — return empty *)
   []
 
@@ -760,7 +760,7 @@ let list_traces_json config ?operation_id ?(limit = 25) () =
                    ("detail", event.detail);
                  ])
       in
-      let team_session_events =
+      let execution_session_events =
         let _, _, units, _ = topology_units config in
         let operations = all_operations config units in
         match
@@ -771,11 +771,11 @@ let list_traces_json config ?operation_id ?(limit = 25) () =
         with
         | Some operation -> (
             match operation.detachment_session_id with
-            | Some session_id -> recent_team_session_trace_events config session_id limit
+            | Some session_id -> recent_execution_session_trace_events config session_id limit
             | None -> [])
         | None -> []
       in
       let operator_events =
         recent_operator_trace_events config ~trace_id:operation_ref limit
       in
-      traces_json_of_events (cp_events @ team_session_events @ operator_events)
+      traces_json_of_events (cp_events @ execution_session_events @ operator_events)

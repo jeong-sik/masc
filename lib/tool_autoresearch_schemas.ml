@@ -65,8 +65,8 @@ The MODEL receives the full file, generates a modified version, and writes it ba
     description = "Start an experiment loop with team coordination. Same experiment logic \
 as masc_autoresearch_start but also creates an execution session, seeds worker roles, and \
 links loop status to the team. Use when multiple agents should collaborate on the \
-research. Returns loop_id and team_session_id. Other agents can monitor via session \
-runtime tools.";
+research. Returns loop_id. Other agents can monitor via session \
+runtime tools. Note: team session engine has been removed; this tool returns an error.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -125,7 +125,7 @@ runtime tools.";
 Use for questions about a codebase (e.g. 'Generate a DB schema from these requirements'). \
 Creates an execution session and seeds workers to answer the question collaboratively. \
 Unlike autoresearch (metric-driven loops), this is question-driven with artifact output. \
-Returns synthesis_id and team_session_id.";
+Returns synthesis_id. Note: team session engine has been removed; this tool returns an error.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

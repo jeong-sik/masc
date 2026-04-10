@@ -80,10 +80,10 @@ let sample_meta ?(trace_capability = `String "raw")
             `String "file_write";
             `String "shell_exec";
             `String "masc_status";
-            `String "masc_team_session_step";
+            `String "masc_broadcast";
           ] );
       ( "tool_surface_masc_names",
-        `List [ `String "masc_status"; `String "masc_team_session_step" ] );
+        `List [ `String "masc_status"; `String "masc_broadcast" ] );
       ( "tool_surface_shell_names",
         `List [ `String "file_read"; `String "file_write"; `String "shell_exec" ] );
       ("resolved_runtime", `String "llama-primary");
@@ -142,7 +142,7 @@ let test_summary_projects_tool_surface_visibility () =
   check int "tool surface count" 5
     U.(summary |> member "tool_surface_count" |> to_int);
   check (list string) "tool surface names"
-    [ "file_read"; "file_write"; "shell_exec"; "masc_status"; "masc_team_session_step" ]
+    [ "file_read"; "file_write"; "shell_exec"; "masc_status"; "masc_broadcast" ]
     U.(summary |> member "tool_surface_names" |> to_list |> List.map to_string)
 
 let test_summary_distinguishes_missing_vs_unavailable_evidence () =

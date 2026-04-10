@@ -1,16 +1,16 @@
-(** Keeper status team session bridge helpers. *)
+(** Keeper status bridge helpers. *)
 
 open Keeper_types
 
 let string_list_to_json values =
   `List (List.map (fun value -> `String value) values)
 
-let team_session_state_json config (meta : keeper_meta) =
+let execution_session_state_json config (meta : keeper_meta) =
   let _ = config in
   let _ = meta in
   `String "removed"
 
-let team_session_bridge_json config (meta : keeper_meta) =
+let execution_session_bridge_json config (meta : keeper_meta) =
   let _ = config in
   let _ = meta in
   `Assoc
@@ -29,7 +29,7 @@ let drift_surface_json () =
       ("last_reason", `Null);
     ]
 
-let auto_team_session_surface_json () =
+let auto_execution_session_surface_json () =
   `Assoc
     [
       ("status", `String "removed");

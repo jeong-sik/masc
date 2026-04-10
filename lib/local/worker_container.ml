@@ -24,16 +24,8 @@ let shell_profile_of_string = function
   | "dev" -> Some Shell_dev
   | _ -> None
 
-let worker_container_root ~base_path ~(team_session_id : string option) =
-  match team_session_id with
-  | Some session_id ->
-      Filename.concat
-        (Filename.concat
-           (Filename.concat (Filename.concat base_path ".masc") "team-sessions")
-           session_id)
-        "workers"
-  | None ->
-      Filename.concat (Filename.concat base_path ".masc") "local-workers"
+let worker_container_root ~base_path =
+  Filename.concat (Filename.concat base_path ".masc") "local-workers"
 
 let safe_worker_token worker_name =
   worker_name
@@ -43,47 +35,46 @@ let safe_worker_token worker_name =
        | _ -> '_')
   |> String.of_seq
 
-let worker_container_dir ~base_path ~(team_session_id : string option)
-    ~worker_name =
+let worker_container_dir ~base_path ~worker_name =
   Filename.concat
-    (worker_container_root ~base_path ~team_session_id)
+    (worker_container_root ~base_path)
     (safe_worker_token worker_name)
 
-let worker_meta_path ~base_path ~team_session_id ~worker_name =
+let worker_meta_path ~base_path ~worker_name =
   Filename.concat
-    (worker_container_dir ~base_path ~team_session_id ~worker_name)
+    (worker_container_dir ~base_path ~worker_name)
     "meta.json"
 
-let worker_checkpoint_path ~base_path ~team_session_id ~worker_name =
+let worker_checkpoint_path ~base_path ~worker_name =
   Filename.concat
-    (worker_container_dir ~base_path ~team_session_id ~worker_name)
+    (worker_container_dir ~base_path ~worker_name)
     "checkpoint.json"
 
-let worker_turn_log_path ~base_path ~team_session_id ~worker_name =
+let worker_turn_log_path ~base_path ~worker_name =
   Filename.concat
-    (worker_container_dir ~base_path ~team_session_id ~worker_name)
+    (worker_container_dir ~base_path ~worker_name)
     "turns.jsonl"
 
-let worker_raw_trace_path ~base_path ~team_session_id ~worker_name =
+let worker_raw_trace_path ~base_path ~worker_name =
   Filename.concat
-    (worker_container_dir ~base_path ~team_session_id ~worker_name)
+    (worker_container_dir ~base_path ~worker_name)
     "raw-trace.jsonl"
 
 let oas_trace_session_root ~base_path =
   Filename.concat (Filename.concat base_path ".masc") "oas-runtime"
 
-let ensure_worker_container_dirs ~base_path ~team_session_id ~worker_name =
-  let dir = worker_container_dir ~base_path ~team_session_id ~worker_name in
+let ensure_worker_container_dirs ~base_path ~worker_name =
+  let dir = worker_container_dir ~base_path ~worker_name in
   Fs_compat.mkdir_p dir;
   Fs_compat.save_file (Filename.concat dir ".keep") "";
   (try Sys.remove (Filename.concat dir ".keep") with Sys_error _ -> ())
 
-let stable_worker_session_id ?team_session_id worker_name =
+let stable_worker_session_id worker_name =
   let basis =
     String.concat "\n"
       [
         worker_name;
-        Option.value ~default:"global" team_session_id;
+        "global";
       ]
   in
   let digest = Digest.string basis |> Digest.to_hex in
@@ -122,9 +113,6 @@ let worker_meta_to_yojson (meta : worker_container_meta) =
       ("version", `Int meta.version);
       ("worker_name", `String meta.worker_name);
       ("mcp_session_id", `String meta.mcp_session_id);
-      ( "team_session_id",
-        Option.fold ~none:`Null ~some:(fun s -> `String s) meta.team_session_id
-      );
       ("workspace_path", `String meta.workspace_path);
       ("role", Option.fold ~none:`Null ~some:(fun s -> `String s) meta.role);
       ( "selection_note",
@@ -173,8 +161,6 @@ let worker_meta_of_yojson json =
               mcp_session_id =
                 json |> member "mcp_session_id" |> to_string_option
                 |> Option.value ~default:(stable_worker_session_id worker_name);
-              team_session_id =
-                json |> member "team_session_id" |> to_string_option;
               workspace_path =
                 json |> member "workspace_path" |> to_string_option
                 |> Option.value ~default:"";
@@ -221,8 +207,8 @@ let worker_meta_of_yojson json =
             })
   | _ -> None
 
-let load_worker_meta ~base_path ~team_session_id ~worker_name =
-  let path = worker_meta_path ~base_path ~team_session_id ~worker_name in
+let load_worker_meta ~base_path ~worker_name =
+  let path = worker_meta_path ~base_path ~worker_name in
   if Sys.file_exists path then
     try
       Safe_ops.read_json_eio path |> worker_meta_of_yojson
@@ -230,34 +216,34 @@ let load_worker_meta ~base_path ~team_session_id ~worker_name =
   else
     None
 
-let save_worker_meta ~base_path ~team_session_id ~worker_name
+let save_worker_meta ~base_path ~worker_name
     (meta : worker_container_meta) =
   try
-    ensure_worker_container_dirs ~base_path ~team_session_id ~worker_name;
+    ensure_worker_container_dirs ~base_path ~worker_name;
     Fs_compat.save_file
-      (worker_meta_path ~base_path ~team_session_id ~worker_name)
+      (worker_meta_path ~base_path ~worker_name)
       (meta |> worker_meta_to_yojson |> Yojson.Safe.pretty_to_string);
     Ok ()
   with Sys_error msg ->
     Error
       (sprintf "failed to save worker meta for %s: %s" worker_name msg)
 
-let worker_container_state ~base_path ~team_session_id ~worker_name =
+let worker_container_state ~base_path ~worker_name =
   let meta_exists =
-    Sys.file_exists (worker_meta_path ~base_path ~team_session_id ~worker_name)
+    Sys.file_exists (worker_meta_path ~base_path ~worker_name)
   in
   let checkpoint_exists =
     Sys.file_exists
-      (worker_checkpoint_path ~base_path ~team_session_id ~worker_name)
+      (worker_checkpoint_path ~base_path ~worker_name)
   in
   match meta_exists, checkpoint_exists with
   | false, false -> Worker_missing
   | _, true -> Worker_ready
   | true, false -> Worker_pending
 
-let load_worker_checkpoint ~base_path ~team_session_id ~worker_name =
+let load_worker_checkpoint ~base_path ~worker_name =
   let path =
-    worker_checkpoint_path ~base_path ~team_session_id ~worker_name
+    worker_checkpoint_path ~base_path ~worker_name
   in
   if Sys.file_exists path then
     try
@@ -267,32 +253,32 @@ let load_worker_checkpoint ~base_path ~team_session_id ~worker_name =
   else
     None
 
-let save_worker_checkpoint ~base_path ~team_session_id ~worker_name checkpoint =
+let save_worker_checkpoint ~base_path ~worker_name checkpoint =
   try
-    ensure_worker_container_dirs ~base_path ~team_session_id ~worker_name;
+    ensure_worker_container_dirs ~base_path ~worker_name;
     Fs_compat.save_file
-      (worker_checkpoint_path ~base_path ~team_session_id ~worker_name)
+      (worker_checkpoint_path ~base_path ~worker_name)
       (Oas.Checkpoint.to_string checkpoint);
     Ok ()
   with Sys_error msg ->
     Error
       (sprintf "failed to save worker checkpoint for %s: %s" worker_name msg)
 
-let append_worker_turn_log ~base_path ~team_session_id ~worker_name json =
+let append_worker_turn_log ~base_path ~worker_name json =
   try
-    ensure_worker_container_dirs ~base_path ~team_session_id ~worker_name;
+    ensure_worker_container_dirs ~base_path ~worker_name;
     Fs_compat.append_file
-      (worker_turn_log_path ~base_path ~team_session_id ~worker_name)
+      (worker_turn_log_path ~base_path ~worker_name)
       (Yojson.Safe.to_string json ^ "\n");
     Ok ()
   with Sys_error msg ->
     Error
       (sprintf "failed to append worker turn log for %s: %s" worker_name msg)
 
-let resolved_mcp_session_id ~base_path ~team_session_id ~worker_name =
-  match load_worker_meta ~base_path ~team_session_id ~worker_name with
+let resolved_mcp_session_id ~base_path ~worker_name =
+  match load_worker_meta ~base_path ~worker_name with
   | Some meta when String.trim meta.mcp_session_id <> "" -> meta.mcp_session_id
-  | _ -> stable_worker_session_id ?team_session_id worker_name
+  | _ -> stable_worker_session_id worker_name
 
 let start_worker_heartbeat ~sw ~(auth_token : string option) ~session_id
     ~worker_name =
@@ -325,14 +311,10 @@ let start_worker_heartbeat ~sw ~(auth_token : string option) ~session_id
               worker_name (Printexc.to_string exn));
       fun () -> active := false
 
-let resolve_execution_scope ~base_path ~(team_session_id : string option)
-    ?execution_scope () =
+let resolve_execution_scope ?execution_scope () =
   match execution_scope with
   | Some scope -> scope
-  | None -> (
-      (* Team_session_store removed — default scope *)
-      ignore (team_session_id, base_path);
-      Worker_types.Limited_code_change)
+  | None -> Worker_types.Limited_code_change
 
 let build_oas_mcp_tools ~sw ~auth_token ~session_id ~worker_name ~prompt:_
     ~allowed_tools =
@@ -427,7 +409,7 @@ let resolve_oas_provider_of_label (label : string) :
 let oas_tool_names (tools : Oas.Tool.t list) =
   List.map (fun (tool : Oas.Tool.t) -> tool.schema.name) tools
 
-let make_worker_meta ~base_path ~workspace_path ~team_session_id ~worker_name
+let make_worker_meta ~base_path ~workspace_path ~worker_name
     ~mcp_session_id ~role ~selection_note ~execution_scope ~worker_class
     ~effective_model ~thinking_enabled ~max_turns_override
     ~timeout_seconds =
@@ -436,7 +418,6 @@ let make_worker_meta ~base_path ~workspace_path ~team_session_id ~worker_name
     version = worker_container_version;
     worker_name;
     mcp_session_id;
-    team_session_id;
     workspace_path;
     role;
     selection_note;
@@ -449,15 +430,15 @@ let make_worker_meta ~base_path ~workspace_path ~team_session_id ~worker_name
     worker_class;
     effective_model;
     checkpoint_path =
-      worker_checkpoint_path ~base_path ~team_session_id ~worker_name;
+      worker_checkpoint_path ~base_path ~worker_name;
     turn_log_path =
-      worker_turn_log_path ~base_path ~team_session_id ~worker_name;
+      worker_turn_log_path ~base_path ~worker_name;
     last_run_at = None;
   }
 
-let append_worker_completion_log ~base_path ~team_session_id ~worker_name
+let append_worker_completion_log ~base_path ~worker_name
     ~prompt ~tool_names ~status ~output ?error () =
-  append_worker_turn_log ~base_path ~team_session_id ~worker_name
+  append_worker_turn_log ~base_path ~worker_name
     (`Assoc
       [
         ("ts", `Float (Time_compat.now ()));
@@ -541,7 +522,7 @@ let materialize_direct_evidence ~base_path ~worker_name
           title = Some (Printf.sprintf "MASC worker %s" worker_name);
           tag = Some "masc-team-worker";
           worker_id =
-            Some (stable_worker_session_id ?team_session_id:meta.team_session_id worker_name);
+            Some (stable_worker_session_id worker_name);
           runtime_actor = Some worker_name;
           role = meta.role;
           aliases;

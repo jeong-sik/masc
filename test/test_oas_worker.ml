@@ -372,7 +372,6 @@ let make_worker_meta ?(effective_model = "local-qwen") () :
       Worker_container_types.worker_container_version;
     worker_name = "resume-worker";
     mcp_session_id = "session-1";
-    team_session_id = Some "team-session-1";
     workspace_path = "/tmp/workspace";
     role = Some "executor";
     selection_note = Some "resume";

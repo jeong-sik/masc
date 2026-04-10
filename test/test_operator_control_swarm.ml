@@ -42,7 +42,7 @@ let test_confirm_rejects_expired_token () =
                        ("target_type", `String "team_session");
                        ("target_id", `String "session-1");
                        ("payload", `Assoc []);
-                       ("delegated_tool", `String "masc_team_session_stop");
+                       ("delegated_tool", `String "masc_operator_action");
                        ("created_at", `String "2026-03-06T00:00:00Z");
                        ("expires_at", `String "2026-03-06T00:00:01Z");
                      ];

@@ -599,8 +599,8 @@ let handle_keeper_status ctx args : tool_result =
             ("available_internal_tools", string_list_to_json all_internal_tools);
             ("blocked_internal_tools", string_list_to_json blocked_internal_tools);
            ]);
-           ("auto_team_session", auto_team_session_surface_json ());
-           ("auto_team_session_enabled", `Bool false);
+           ("auto_execution_session", auto_execution_session_surface_json ());
+           ("auto_execution_session_enabled", `Bool false);
            ("autonomy", `Assoc [
              ("turn_count", `Int m.runtime.autonomous_turn_count);
              ("tool_turn_count", `Int m.runtime.autonomous_tool_turn_count);

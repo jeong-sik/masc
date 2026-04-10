@@ -251,38 +251,6 @@ let command_plane_help_http_json () =
                     ~success_signals:[ "intervention trace appended"; "session reflects the change" ]
                     ~pitfalls:[ "do not mix this path with managed-operation commands in the same explanation unless the caller explicitly needs both" ];
                 ];
-            path ~id:"attached_team_session" ~title:"Attached Execution Session"
-              ~summary:
-                "Attach an execution session to a managed operation when you explicitly need both the delivery path and the managed-operation compatibility lane."
-              ~when_to_use:
-                "Use this for hybrid execution where a managed operation owns the objective and an execution session materializes the worker team."
-              ~steps:
-                [
-                  step ~id:"start-managed-operation"
-                    ~title:"Start managed operation" ~tool:"masc_operation_start"
-                    ~summary:
-                      "Create the operation first, optionally with workload_template for coding, research, or governance teams."
-                    ~success_signals:
-                      [ "operation_id issued"; "workload_profile/stage normalized"; "trace_id issued" ]
-                    ~pitfalls:
-                      [ "workload_template and workload_profile must stay in the same family" ];
-                  step ~id:"start-attached-session"
-                    ~title:"Start attached execution session" ~tool:"masc_team_session_start"
-                    ~summary:
-                      "Start an execution session with operation_id so the operation detachment_session_id points back to the session."
-                    ~success_signals:
-                      [ "execution session response includes operation_id"; "command-plane operation references session_id" ]
-                    ~pitfalls:
-                      [ "an operation can only be attached to one execution session at a time" ];
-                  step ~id:"observe-attached-runtime"
-                    ~title:"Observe hybrid runtime" ~tool:"masc_team_session_status"
-                    ~summary:
-                      "Read execution-session status together with command-plane operation state."
-                    ~success_signals:
-                      [ "session command_plane block returns operation_path"; "operation/detachment visibility is consistent" ]
-                    ~pitfalls:
-                      [ "do not treat projected detached sessions as the same as attached managed sessions" ];
-                ];
           ] );
       ( "workload_templates",
         `List
@@ -293,7 +261,7 @@ let command_plane_help_http_json () =
               ~workload_profile:"coding_task" ~default_stage:"decompose"
               ~autonomy_target:"L3_Guided -> L5_Independent"
               ~recommended_tools:
-                [ "masc_operation_start"; "masc_team_session_start"; "masc_operator_digest"; "masc_operation_finalize" ];
+                [ "masc_operation_start"; "masc_operator_digest"; "masc_operation_finalize" ];
             workload_template ~id:"research_team" ~title:"Research Team"
               ~summary:
                 "Collect -> verify -> curate -> rank -> audit style team. Defaults to research_pipeline/normalize."
@@ -307,7 +275,7 @@ let command_plane_help_http_json () =
               ~workload_profile:"research_pipeline" ~default_stage:"audit"
               ~autonomy_target:"L2_Suggestive -> L4_Autonomous"
               ~recommended_tools:
-                [ "masc_operation_start"; "masc_team_session_start"; "masc_operator_snapshot"; "masc_policy_approve" ];
+                [ "masc_operation_start"; "masc_operator_snapshot"; "masc_policy_approve" ];
           ] );
       ( "tool_groups",
         `List
@@ -326,7 +294,7 @@ let command_plane_help_http_json () =
               ~description:
                 "Small operator loop for intervention-oriented sessions."
               ~tools:
-                [ "masc_operator_snapshot"; "masc_operator_action"; "masc_operator_confirm"; "masc_team_session_events" ];
+                [ "masc_operator_snapshot"; "masc_operator_action"; "masc_operator_confirm" ];
           ] );
       ( "pitfalls",
         `List

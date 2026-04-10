@@ -298,13 +298,6 @@ let core_remote_operation_names =
         "masc_observe_alerts";
         "masc_observe_traces";
         "masc_autoresearch_swarm_start";
-        "masc_team_session_start";
-        "masc_team_session_step";
-        "masc_team_session_status";
-        "masc_team_session_stop";
-        "masc_team_session_list";
-        "masc_team_session_events";
-        "masc_team_session_finalize";
         "decision_create";
         "decision_finalize";
         "decision_status";

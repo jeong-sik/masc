@@ -47,6 +47,10 @@ function getMermaid(): Promise<MermaidApi> {
     mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'strict' })
     mermaidConfigured = true
     return mermaid
+  }).catch((err) => {
+    mermaidPromise = null
+    mermaidConfigured = false
+    throw err
   })
 }
 

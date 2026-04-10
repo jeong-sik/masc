@@ -21,6 +21,16 @@ interface RuntimeData {
   metrics: DashboardRuntimeModelMetricsResponse | null
 }
 
+async function loadRuntimeData(resource: ManagedAsyncResource<RuntimeData>, windowMinutes: number) {
+  await resource.load(async (signal) => {
+    const [providers, metrics] = await Promise.all([
+      fetchRuntimeProviders({ signal }),
+      fetchRuntimeModelMetrics(windowMinutes, { signal }),
+    ])
+    return { providers, metrics }
+  })
+}
+
 function providerTone(provider: DashboardRuntimeProviderSnapshot): string {
   if (provider.available === false) return 'bad'
   if (provider.discovery?.healthy === false) return 'warn'
@@ -50,24 +60,10 @@ export function RuntimeMonitor() {
   const resource = resourceRef.current
   const windowMinutes = useSignal(30)
 
-  async function load() {
-    await resource.load(async (signal) => {
-      const [providers, metrics] = await Promise.all([
-        fetchRuntimeProviders({ signal }),
-        fetchRuntimeModelMetrics(windowMinutes.value, { signal }),
-      ])
-      return { providers, metrics }
-    })
-  }
+  const load = () => loadRuntimeData(resource, windowMinutes.value)
 
   useEffect(() => {
-    void resource.load(async (signal) => {
-      const [providers, metrics] = await Promise.all([
-        fetchRuntimeProviders({ signal }),
-        fetchRuntimeModelMetrics(windowMinutes.value, { signal }),
-      ])
-      return { providers, metrics }
-    })
+    void loadRuntimeData(resource, windowMinutes.value)
     return () => {
       resource.cancel()
     }

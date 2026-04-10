@@ -1366,26 +1366,29 @@ let read_meta_file_path path : (keeper_meta option, string) result =
          Error e))
 ;;
 
-(** Known auxiliary suffixes that share the keepers/ directory.
-    Files matching [<name>.<suffix>.json] are excluded from autoboot scan.
-    Add new suffixes here when introducing new sidecar file types. *)
-let keeper_auxiliary_suffixes = [
-  ".manual_reconcile.json";
-  ".dataset.json";
-]
+(** Sidecar stem suffixes (without the trailing .json).
+    A file like [keeper.manual_reconcile.json] has stem
+    [keeper.manual_reconcile]; stripping [.json] and checking
+    [String.ends_with ~suffix] on this stem avoids false-positives
+    for keeper names that happen to contain dots (e.g. [foo.dataset]). *)
+let keeper_sidecar_stem_suffixes =
+  [ ".manual_reconcile"; ".dataset" ]
 
-(** Filter: only plain keeper meta files (e.g. "sangsu.json", "my.keeper.json").
-    Excludes known auxiliary sidecar files like "sangsu.manual_reconcile.json".
-    Uses an explicit suffix list rather than rejecting all dots in the stem,
-    because [validate_name] allows dots in keeper names. *)
 let is_keeper_meta_file f =
-  Filename.check_suffix f ".json"
-  && not (List.exists (fun suffix -> Filename.check_suffix f suffix)
-            keeper_auxiliary_suffixes)
+  if not (Filename.check_suffix f ".json") then false
+  else
+    let stem = Filename.chop_suffix f ".json" in
+    not
+      (List.exists
+         (fun suf -> String.length stem > String.length suf
+                     && String.ends_with ~suffix:suf stem)
+         keeper_sidecar_stem_suffixes)
 let keeper_names config =
   let dir = keeper_dir config in
   match Safe_ops.list_dir_safe dir with
-  | Error _ -> []
+  | Error e ->
+    Log.Keeper.warn "keeper_names: failed to list directory %s: %s" dir e;
+    []
   | Ok files ->
     files
     |> List.filter is_keeper_meta_file

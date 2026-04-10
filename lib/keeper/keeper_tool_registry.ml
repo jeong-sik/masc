@@ -203,6 +203,9 @@ let gh_effective_cmd (input : Yojson.Safe.t) : string =
       if args <> [] then String.concat " " args else ""
   | _ -> ""
 
+let git_read_only_actions =
+  [ "diff"; "status"; "log"; "branch"; "fetch" ]
+
 let is_read_only_with_input ~(tool_name : string) ~(input : Yojson.Safe.t) : bool =
   if is_effectively_read_only_tool tool_name then true
   else match tool_name with
@@ -218,6 +221,17 @@ let is_read_only_with_input ~(tool_name : string) ~(input : Yojson.Safe.t) : boo
         String.length cmd_lower >= String.length prefix
         && String.sub cmd_lower 0 (String.length prefix) = prefix
       ) gh_read_only_prefixes
+  | "masc_code_git" ->
+    let action =
+      match input with
+      | `Assoc fields ->
+        (match List.assoc_opt "action" fields with
+         | Some (`String s) -> String.lowercase_ascii (String.trim s)
+         | _ -> "")
+      | _ -> ""
+    in
+    List.mem action git_read_only_actions
+  | "masc_worktree_list" -> true
   | _ -> false
 
 (* ── Reconcile-safe tools (mutating but idempotent enough) ─── *)

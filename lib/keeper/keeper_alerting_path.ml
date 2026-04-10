@@ -249,7 +249,18 @@ let effective_allowed_paths ~(meta : Keeper_types.keeper_meta) : string list =
     | "workspace" ->
       let safe_name = sanitize_keeper_name meta.name in
       [ Printf.sprintf ".masc/keepers/%s/" safe_name;
-        ".masc/traces/" ]
+        ".masc/traces/";
+        (* Worktrees created by masc_worktree_create land here.
+           Without this, keepers can create worktrees but cannot
+           read or write files inside them. *)
+        ".worktrees/";
+        (* Main repo source for read access *)
+        "lib/";
+        "test/";
+        "config/";
+        "bin/";
+        "scripts/";
+        "docs/" ]
     | _ -> []
   in
   match meta.allowed_paths with

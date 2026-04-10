@@ -28,7 +28,6 @@ let with_registry_ro f =
   else f ()
 
 let client_matches (client : client) (value : event) =
-  ignore value;  (* suppress unused warning *)
   match client.kind_filters with
   | [] -> true
   | filters -> List.mem value.kind filters

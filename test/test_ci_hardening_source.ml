@@ -137,10 +137,6 @@ let test_route_auth_contracts () =
     (file_contains_pattern
        "lib/server/server_auth.ml"
        {|String.equal path "/api/v1/gate/connectors"|});
-  check bool "discord gate status route stays public read" true
-    (file_contains_pattern
-       "lib/server/server_auth.ml"
-       {|String.equal path "/api/v1/gate/discord/status"|});
   check bool "generic connector status route stays public read" true
     (file_contains_pattern
        "lib/server/server_auth.ml"
@@ -149,10 +145,6 @@ let test_route_auth_contracts () =
     (file_contains_pattern
         "lib/server/server_routes_http_routes_channel_gate.ml"
         {|Http.Router.get "/api/v1/gate/health"|});
-  check bool "discord gate status route is registered" true
-    (file_contains_pattern
-       "lib/server/server_routes_http_routes_channel_gate.ml"
-       {|Http.Router.get "/api/v1/gate/discord/status"|});
   check bool "generic connector status route is registered" true
     (file_contains_pattern
        "lib/server/server_routes_http_routes_channel_gate.ml"
@@ -161,18 +153,10 @@ let test_route_auth_contracts () =
     (file_contains_pattern
        "lib/server/server_routes_http_routes_channel_gate.ml"
        {|Http.Router.get "/api/v1/gate/connectors"|});
-  check bool "discord gate bind route is registered" true
-    (file_contains_pattern
-       "lib/server/server_routes_http_routes_channel_gate.ml"
-       {|Http.Router.post "/api/v1/gate/discord/bind"|});
   check bool "generic connector bind route is registered" true
     (file_contains_pattern
        "lib/server/server_routes_http_routes_channel_gate.ml"
        {|Http.Router.post "/api/v1/gate/connector/bind"|});
-  check bool "discord gate unbind route is registered" true
-    (file_contains_pattern
-       "lib/server/server_routes_http_routes_channel_gate.ml"
-       {|Http.Router.post "/api/v1/gate/discord/unbind"|});
   check bool "generic connector unbind route is registered" true
     (file_contains_pattern
        "lib/server/server_routes_http_routes_channel_gate.ml"

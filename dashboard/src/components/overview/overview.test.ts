@@ -102,7 +102,6 @@ describe('Overview freshness strip', () => {
       generated_at: '2026-03-26T12:09:00Z',
       summary: {},
       sessions: [],
-      session_briefs: [],
       attention_queue: [],
     }
     namespaceTruth.value = {
@@ -389,7 +388,6 @@ describe('ToolCallHealthPanel', () => {
       generated_at: '2026-03-26T12:09:00Z',
       summary: {},
       sessions: [],
-      session_briefs: [],
       attention_queue: [],
     }
     namespaceTruth.value = {

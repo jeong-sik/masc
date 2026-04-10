@@ -617,17 +617,17 @@ let invalidate_snapshot_cache () =
 
 let namespace_scope_cache_segment (_config : Room_utils.config) = "default"
 
-let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = true)
+let snapshot_json ?actor ?view ?(include_messages = true)
     ?(include_keepers = true) ?(include_summary_fields = true)
-    ?(include_command_plane = true) ?(lightweight_summary = false) ?sessions
+    ?(include_command_plane = true) ?(lightweight_summary = false)
     (ctx : 'a context) : Yojson.Safe.t =
   let cache_key =
-    Printf.sprintf "%s|%s|%s|%s|%b|%b|%b|%b|%b|%b"
+    Printf.sprintf "%s|%s|%s|%s|%b|%b|%b|%b|%b"
       ctx.config.base_path
       (namespace_scope_cache_segment ctx.config)
       (Option.value ~default:"" actor)
       (Option.value ~default:"" view)
-      include_messages include_sessions include_keepers include_summary_fields
+      include_messages include_keepers include_summary_fields
       include_command_plane lightweight_summary
   in
   (* Singleflight cache lookup: check for fresh hit, in-flight compute,
@@ -719,24 +719,10 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
   in
   let config = ctx.config in
   let initialized = Room.is_initialized config in
-  let tracked_sessions =
-    match sessions with
-    | Some s -> s
-    | None ->
-        (* Team_session_store removed — return empty *)
-        ignore (initialized, _snapshot_session_window_seconds (), _snapshot_session_limit ());
-        ([] : Team_session_types.session list)
-  in
+  ignore (initialized, _snapshot_session_window_seconds (), _snapshot_session_limit ());
   let trace_id = trace_id "ops" in
   let actor_name = normalized_actor ~context_actor:ctx.agent_name actor in
   let view = parse_snapshot_view view in
-  let include_sessions =
-    include_sessions
-    &&
-    match view with
-    | Summary | Sessions | Full -> true
-    | Keepers | Messages -> false
-  in
   let include_keepers =
     include_keepers
     &&
@@ -809,7 +795,7 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
          Eio.Fiber.all [
            (fun () ->
              (* Team sessions removed — always empty *)
-             ignore (include_sessions, lightweight_summary, status_cache);
+             ignore (lightweight_summary, status_cache);
              sessions_ref := empty_section);
            (fun () ->
              keepers_ref :=
@@ -885,7 +871,7 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
   if elapsed_total > 1.0 then begin
     Log.Dashboard.info "[snapshot_json] total: %.0fms (sessions=%d keepers=%d)"
       (elapsed_total *. 1000.0)
-      (List.length tracked_sessions) (List.length keeper_names);
+      0 (List.length keeper_names);
     List.iter (fun (label, dt) ->
       if dt > 0.1 then
         Log.Dashboard.info "[snapshot_json]   %s: %.0fms" label (dt *. 1000.0))

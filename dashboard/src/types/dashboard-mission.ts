@@ -27,11 +27,9 @@ export interface DashboardMissionCommandFocus {
   swarm_overview?: CommandPlaneSwarmStatus['overview']
   top_attention?: OperatorAttentionItem | null
   top_action?: OperatorRecommendedAction | null
-  session_cards: OperatorSessionCard[]
 }
 
 export interface DashboardMissionTargets {
-  sessions: OperatorSessionSnapshot[]
   keepers: OperatorKeeperSnapshot[]
   pending_confirms: PendingConfirmation[]
   available_actions: OperatorActionDescriptor[]
@@ -176,7 +174,6 @@ export interface DashboardMissionResponse {
   operator_targets: DashboardMissionTargets
   attention_queue: DashboardMissionAttentionQueueItem[]
   sessions: DashboardMissionSessionCard[]
-  session_briefs: DashboardMissionSessionBrief[]
   agent_briefs: DashboardMissionAgentBrief[]
   keeper_briefs: DashboardMissionKeeperBrief[]
   internal_signals: DashboardMissionInternalSignal[]
@@ -639,7 +636,7 @@ export interface OperatorReviewDecision {
 export interface OperatorReviewItem {
   id: string
   kind: 'pending_confirm' | 'namespace_gate' | 'room_gate' | 'session_risk' | 'keeper_pressure' | string
-  target_type: 'namespace' | 'room' | 'team_session' | 'keeper' | string
+  target_type: 'namespace' | 'room' | 'keeper' | string
   target_id?: string | null
   severity: string
   urgency: 'now' | 'soon' | string
@@ -669,7 +666,7 @@ export interface OperatorReviewSummary {
 
 export interface OperatorDigest {
   trace_id?: string
-  target_type: 'namespace' | 'room' | 'team_session' | string
+  target_type: 'namespace' | 'room' | string
   target_id?: string | null
   health?: string
   judgment_owner?: string | null
@@ -691,7 +688,6 @@ export interface OperatorDigest {
   deferred_queue: OperatorReviewItem[]
   review_summary?: OperatorReviewSummary | null
   recent_reviews: OperatorReviewDecision[]
-  session_cards: OperatorSessionCard[]
   worker_cards: OperatorWorkerCard[]
 }
 
@@ -732,18 +728,13 @@ export type OperatorActionType =
   | 'room_resume'
   | 'social_sweep'
   | 'task_inject'
-  | 'team_note'
-  | 'team_broadcast'
-  | 'team_task_inject'
-  | 'team_worker_spawn_batch'
-  | 'team_stop'
   | 'keeper_message'
   | 'keeper_probe'
   | 'keeper_recover'
   | 'review_resolve'
   | 'review_defer'
 
-export type OperatorTargetType = 'namespace' | 'room' | 'team_session' | 'keeper' | 'review_item'
+export type OperatorTargetType = 'namespace' | 'room' | 'keeper' | 'review_item'
 
 export interface OperatorActionRequest {
   actor: string

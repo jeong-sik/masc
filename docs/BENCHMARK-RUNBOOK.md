@@ -148,20 +148,7 @@ scripts/harness_agent_swarm_live.sh
 
 ## session runtime local64 compat lane
 
-hot-swarm proof와 별도로, `./scripts/harness_team_session_local64_smoke.sh`는 `team_session_swarm_runner.ml` 기반의 current session-runtime/OAS bridge를 검증하는 보조 lane이다.
-
-이 경로는 다음을 검증할 때 쓴다.
-
-- `masc_team_session_start` + `masc_team_session_step(spawn_batch=...)` 흐름이 실제 local worker spawn으로 이어지는지
-- `team_session_oas_bridge.ml`가 session state를 swarm config로 정확히 투영하는지
-- `team_session_swarm_runner.ml` / `team_session_swarm_callbacks.ml`가 turn, event, proof artifact를 남기는지
-- explicit model 선택과 local64 runtime attach가 session proof에서 보이는지
-
-이 모드는 보조 경로다.
-
-- managed-operation live proof의 pass/fail 기준을 대체하지 않는다
-- managed-operation operation/detachment/current_task truth는 여전히 live harness/read model 쪽이다
-- task claim/current_task semantics 자체를 검증하려면 `./scripts/harness_agent_swarm_live.sh`를 사용한다
+Removed. Team-session compat harnesses are retired; use managed-operation live proof and command-plane read models instead.
 
 ## 최소 unit 예시
 

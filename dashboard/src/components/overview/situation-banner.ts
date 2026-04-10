@@ -49,8 +49,7 @@ export function synthesizeSituation(snap: DashboardMissionResponse | null): Situ
     return { text: '데이터 대기 중...', tone: 'ok', reasons: [] }
   }
 
-  const sessions: SessionItem[] =
-    (snap.sessions ?? []).length > 0 ? snap.sessions : (snap.session_briefs ?? [])
+  const sessions: SessionItem[] = snap.sessions ?? []
   const total = sessions.length
   const blocked = sessions.filter(s => s.blocker_summary).length
   const attentionItems = snap.attention_queue ?? []

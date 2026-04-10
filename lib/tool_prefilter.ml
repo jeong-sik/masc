@@ -188,31 +188,6 @@ let synonyms : (string * string list) list =
      [ "get task from plan"; "plan task"; "current plan task" ]);
     ("masc_plan_clear_task",
      [ "clear plan task"; "remove plan task"; "unassign plan task" ]);
-    (* masc_team_session_* — supervised execution/session operations *)
-    ("masc_team_session_start",
-     [ "start team session"; "start execution session"; "start supervised execution";
-       "begin swarm"; "team work start"; "parallel session" ]);
-    ("masc_team_session_status",
-     [ "team session status"; "execution session status"; "session runtime status";
-       "swarm status"; "parallel progress" ]);
-    ("masc_team_session_step",
-     [ "team step"; "session step"; "execution step"; "swarm step"; "team turn" ]);
-    ("masc_team_session_stop",
-     [ "stop team session"; "stop execution session"; "end swarm"; "finish parallel work" ]);
-    ("masc_team_session_list",
-     [ "list team sessions"; "list execution sessions"; "swarm list"; "team sessions";
-       "execution sessions" ]);
-    ("masc_team_session_events",
-     [ "team events"; "session timeline"; "execution timeline"; "swarm events" ]);
-    ("masc_team_session_prove",
-     [ "prove session"; "verify team work"; "session proof" ]);
-    ("masc_team_session_report",
-     [ "team report"; "session report"; "swarm report" ]);
-    ("masc_team_session_compare",
-     [ "compare sessions"; "diff sessions"; "session compare" ]);
-    ("masc_team_session_finalize",
-     [ "finalize session"; "finalize execution session"; "complete team session";
-       "complete execution session"; "wrap up session" ]);
     (* masc_worktree_* — git worktree management *)
     ("masc_worktree_create",
      [ "create worktree"; "new worktree"; "isolated branch"; "git worktree add" ]);

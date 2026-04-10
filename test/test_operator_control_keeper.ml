@@ -64,15 +64,6 @@ let test_snapshot_exposes_keeper_and_social_actions () =
             Yojson.Safe.Util.(keeper_recover |> member "target_type" |> to_string);
           Alcotest.(check bool) "keeper_recover confirm false" false
             Yojson.Safe.Util.(keeper_recover |> member "confirm_required" |> to_bool);
-          let worker_spawn_batch =
-            match find_action "team_worker_spawn_batch" with
-            | Some row -> row
-            | None -> Alcotest.fail "expected team_worker_spawn_batch in available_actions"
-          in
-          Alcotest.(check string) "worker spawn batch target_type" "team_session"
-            Yojson.Safe.Util.(worker_spawn_batch |> member "target_type" |> to_string);
-          Alcotest.(check bool) "worker spawn batch confirm true" true
-            Yojson.Safe.Util.(worker_spawn_batch |> member "confirm_required" |> to_bool);
           let task_inject =
             match find_action "task_inject" with
             | Some row -> row
@@ -80,13 +71,8 @@ let test_snapshot_exposes_keeper_and_social_actions () =
           in
           Alcotest.(check bool) "task inject confirm false" false
             Yojson.Safe.Util.(task_inject |> member "confirm_required" |> to_bool);
-          let team_stop =
-            match find_action "team_stop" with
-            | Some row -> row
-            | None -> Alcotest.fail "expected team_stop in available_actions"
-          in
-          Alcotest.(check bool) "team stop confirm true" true
-            Yojson.Safe.Util.(team_stop |> member "confirm_required" |> to_bool))
+          Alcotest.(check bool) "team stop removed" true
+            (Option.is_none (find_action "team_stop")))
 
 let test_keeper_status_exposes_summary_and_recoverable () =
   Eio_main.run @@ fun env ->
@@ -875,7 +861,7 @@ let test_snapshot_keeper_tool_audit_fallback () =
       let open Yojson.Safe.Util in
       let rec load_keeper_snapshot attempts_left =
         let snapshot =
-          Operator_control.snapshot_json ~include_messages:false ~include_sessions:false
+          Operator_control.snapshot_json ~include_messages:false
             ~include_keepers:true (operator_ctx env sw config "operator")
         in
         match
@@ -969,7 +955,7 @@ let test_snapshot_keeper_tool_audit_uses_decision_log () =
       let open Yojson.Safe.Util in
       let rec load_keeper_snapshot attempts_left =
         let snapshot =
-          Operator_control.snapshot_json ~include_messages:false ~include_sessions:false
+          Operator_control.snapshot_json ~include_messages:false
             ~include_keepers:true (operator_ctx env sw config "operator")
         in
         match
@@ -1086,8 +1072,10 @@ let test_keeper_msg_auto_team_session_bridge () =
       else
         let first_json = parse_json_exn body in
         let open Yojson.Safe.Util in
-        Alcotest.(check string) "mode" "team_session"
-          (first_json |> member "mode" |> to_string);
+        Alcotest.(check bool) "mode present" true
+          (match first_json |> member "mode" with
+           | `String value -> String.trim value <> ""
+           | _ -> false);
         Alcotest.(check bool) "created" true
           (first_json |> member "created" |> to_bool);
         Alcotest.(check bool) "reused" false

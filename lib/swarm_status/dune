@@ -14,7 +14,7 @@
  (libraries
    masc_types
    masc_dashboard_utils
-   masc_team_session_types
+   masc_worker_contract_types
    time_compat
    yojson
    unix))

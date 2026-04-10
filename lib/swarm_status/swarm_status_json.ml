@@ -217,8 +217,8 @@ let gap_guidance ~lane_ids code =
         "Confirm or deny the pending operator action before expecting more movement." )
   | "missing_worker_binding" ->
       ( "A supervised session with no worker binding cannot produce meaningful collaboration evidence.",
-        "masc_team_session_status",
-        "Inspect the execution session and attach or restart a worker before reading proof." )
+        "masc_operator_digest",
+        "Inspect the namespace digest and worker census before reading proof." )
   | "projected_only" ->
       ( "Projected swarm state shows intent, but not a live runtime.",
         "masc_operation_start",
@@ -229,8 +229,8 @@ let gap_guidance ~lane_ids code =
         "Run a dispatch tick or inspect managed traces to confirm whether progress is stuck." )
   | "stale_data" when has_lane "supervised" ->
       ( "The supervised session has gone stale and may no longer reflect active collaboration.",
-        "masc_team_session_status",
-        "Check the session status and recent worker events before treating it as active." )
+        "masc_observe_traces",
+        "Inspect recent swarm traces before treating the supervised lane as active." )
   | "missing_trace_events" ->
       ( "Without trace events, the dashboard cannot show why the swarm moved or stalled.",
         "masc_observe_traces",

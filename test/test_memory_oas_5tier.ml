@@ -96,7 +96,7 @@ let test_create_memory_full_seeds_recent_episodes () =
   let dir = setup_tmp_dir () in
   ignore
     (Institution_eio.record_episode_jsonl
-       ~event_type:"team_session"
+       ~event_type:"operation"
        ~summary:"worker completed setup"
        ~participants:["worker-a"]
        ~outcome:`Success

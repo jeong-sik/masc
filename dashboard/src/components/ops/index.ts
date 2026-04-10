@@ -12,9 +12,7 @@ import {
   operatorDigestError,
   operatorError,
   operatorRoomDigest,
-  operatorSessionDigest,
   operatorSnapshot,
-  refreshOperatorSessionDigest,
 } from '../../operator-store'
 import {
   workflowActionLabel,
@@ -41,7 +39,6 @@ import {
   runtimeJudgeLabel,
   selectedReviewItemId,
   selectedReviewTab,
-  selectedSessionId,
   submitReviewDecision,
   targetTypeLabel,
   workflowTargetReady,
@@ -239,8 +236,7 @@ function renderActivityTimeline() {
 function renderTruth(item: OperatorReviewItem | null) {
   const snapshot = operatorSnapshot.value
   const roomDigest = operatorRoomDigest.value
-  const sessionDigest = operatorSessionDigest.value
-  const detailDigest = detailDigestForItem(item, roomDigest, sessionDigest)
+  const detailDigest = detailDigestForItem(item, roomDigest)
 
   if (!item) {
     return html`<div class="text-[12px] text-[var(--text-muted)]">큐에서 항목을 고르면 truth를 보여줍니다.</div>`
@@ -259,29 +255,6 @@ function renderTruth(item: OperatorReviewItem | null) {
           <div class="text-[11px] text-[var(--text-muted)] uppercase tracking-[0.08em]">Gate</div>
           <strong>${room.paused ? '일시정지' : '열림'}</strong>
           <div class="text-[12px] text-[var(--text-muted)]">${room.pause_reason ?? '추가 사유 없음'}</div>
-        </div>
-      </div>
-    `
-  }
-
-  if (item.target_type === 'team_session') {
-    const session = snapshot?.sessions.find(row => row.session_id === item.target_id) ?? null
-    const detailCard = detailDigest?.session_cards[0] ?? null
-    return html`
-      <div class="grid grid-cols-2 gap-3 max-[880px]:grid-cols-1">
-        <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)]">
-          <div class="text-[11px] text-[var(--text-muted)] uppercase tracking-[0.08em]">Session</div>
-          <strong>${item.target_id ?? 'unknown'}</strong>
-          <div class="text-[12px] text-[var(--text-muted)]">
-            상태 ${session?.status ?? detailCard?.status ?? 'unknown'} · 진행 ${Math.round(session?.progress_pct ?? 0)}%
-          </div>
-        </div>
-        <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)]">
-          <div class="text-[11px] text-[var(--text-muted)] uppercase tracking-[0.08em]">Runtime</div>
-          <strong>${detailCard?.health ?? 'unknown'}</strong>
-          <div class="text-[12px] text-[var(--text-muted)]">
-            활성 ${detailCard?.active_agent_count ?? 0} · 계획 ${detailCard?.planned_worker_count ?? 0}
-          </div>
         </div>
       </div>
     `
@@ -310,8 +283,7 @@ function renderTruth(item: OperatorReviewItem | null) {
 
 function renderAdvice(item: OperatorReviewItem | null) {
   const roomDigest = operatorRoomDigest.value
-  const sessionDigest = operatorSessionDigest.value
-  const detailDigest = detailDigestForItem(item, roomDigest, sessionDigest)
+  const detailDigest = detailDigestForItem(item, roomDigest)
   const summary = detailDigest?.active_summary ?? item?.advice?.active_summary ?? null
   const guidanceLayer = detailDigest?.active_guidance_layer ?? item?.advice?.active_guidance_layer ?? null
   const runtime = detailDigest?.operator_judge_runtime ?? roomDigest?.operator_judge_runtime ?? null
@@ -395,7 +367,7 @@ export function Ops() {
   const roomDigest = operatorRoomDigest.value
   const activeQueue = roomDigest?.review_queue ?? []
   const deferredQueue = roomDigest?.deferred_queue ?? []
-  const workflowReady = workflowTargetReady(workflowContext, snapshot?.sessions ?? [], snapshot?.keepers ?? [])
+  const workflowReady = workflowTargetReady(workflowContext, snapshot?.keepers ?? [])
   const tab = selectedReviewTab.value
   const currentQueue = reviewListForTab(tab, activeQueue, deferredQueue)
   const selectedItem =
@@ -444,12 +416,6 @@ export function Ops() {
       selectedReviewItemId.value = currentQueue[0]?.id ?? ''
     }
   }, [tab, currentQueue.map(item => item.id).join('|')])
-
-  useEffect(() => {
-    if (selectedItem?.target_type !== 'team_session' || !selectedItem.target_id) return
-    selectedSessionId.value = selectedItem.target_id ?? ''
-    void refreshOperatorSessionDigest(selectedItem.target_id, { force: true })
-  }, [selectedItem?.id, selectedItem?.target_type, selectedItem?.target_id])
 
   return html`
     <section class="flex flex-col gap-4">

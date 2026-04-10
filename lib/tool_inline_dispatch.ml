@@ -253,7 +253,7 @@ let dispatch (ctx : context) ~(name : string) : result option =
       let execution_scope =
         match arguments |> U.member "execution_scope" with
         | `String s when s <> "" ->
-            Some (Team_session_types.execution_scope_of_string s)
+            Some (Worker_contract_types.execution_scope_of_string s)
         | _ -> None
       in
        (match runtime_model_valid with

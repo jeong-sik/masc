@@ -160,9 +160,9 @@ let choose_recommendation lanes =
               with
               | Some lane ->
                   {
-                    tool = "masc_team_session_status";
-                    label = "Inspect the execution session";
-                    reason = "The supervised lane is stale and needs a session status check.";
+                    tool = "masc_observe_traces";
+                    label = "Inspect recent swarm traces";
+                    reason = "The supervised lane is stale and needs a trace check.";
                     lane_id = Some lane.lane_id;
                   }
               | None -> (
@@ -177,14 +177,6 @@ let choose_recommendation lanes =
                         tool = "masc_operation_start";
                         label = "Convert projection into runtime";
                         reason = "Projected swarm state exists without a managed operation.";
-                        lane_id = Some projected.lane_id;
-                      }
-                  | Some projected, _, Some supervised
-                    when projected.present && not supervised.present ->
-                      {
-                        tool = "masc_team_session_start";
-                        label = "Start a supervised session";
-                        reason = "Projected swarm state exists without a supervised session.";
                         lane_id = Some projected.lane_id;
                       }
                   | _ ->

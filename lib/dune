@@ -806,7 +806,7 @@
    ;; Dashboard utilities (extracted sub-library)
    masc_mcp.dashboard_utils
    ;; Team session types (extracted sub-library)
-   masc_mcp.team_session_types
+   masc_mcp.worker_contract_types
    ;; MCP tool schema cluster (extracted sub-library)
    masc_mcp.tool_schemas
    ;; Activity graph event/model cluster (extracted sub-library)

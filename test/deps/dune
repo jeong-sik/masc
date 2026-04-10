@@ -39,7 +39,7 @@
    (re_export masc_mcp.mcp_transport_protocol)
    (re_export masc_mcp.prompt_registry)
    (re_export masc_mcp.response)
-   (re_export masc_mcp.team_session_types)
+   (re_export masc_mcp.worker_contract_types)
    (re_export masc_mcp.tool_schemas)
    (re_export masc_process)
    (re_export masc_room)

@@ -125,7 +125,7 @@ export function BuildIdentityBadge() {
 function HealthIndicator({ collapsed }: { collapsed?: boolean }) {
   const live = connected.value
   const snap = missionSnapshot.value
-  const sessions = snap?.sessions ?? snap?.session_briefs ?? []
+  const sessions = snap?.sessions ?? []
   let blockers = 0
   for (let i = 0; i < sessions.length; i++) {
     if (sessions[i]?.blocker_summary) blockers++

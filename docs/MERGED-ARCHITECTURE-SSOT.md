@@ -31,7 +31,7 @@
 기능 구현을 swarm으로 굴릴 때의 기본 경로다.
 
 - 대상: planner / implementer / supervisor workflow
-- 핵심 도구: `masc_team_session_*`, `masc_operator_*`
+- 핵심 도구: command-plane execution surfaces, `masc_operator_*`
 - operator-facing digest는 command-plane/search/microarch 신호를 번역해 노출하는 canonical intervention surface다.
 - SSOT 문서:
   - [SWARM-DELIVERY-RUNBOOK.md](./SWARM-DELIVERY-RUNBOOK.md)

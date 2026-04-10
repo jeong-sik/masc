@@ -2,23 +2,14 @@ include Dashboard_execution_helpers
 
 let execution_smoke_fixture_json () =
   let generated_at = Types.now_iso () in
-  let intervene_handoff =
-    handoff_json
-      ~surface:"intervene"
-      ~label:"세션 개입 열기"
-      ~target_type:"team_session"
-      ~target_id:"ts-execution-fixture-001"
-      ~focus_kind:"team_session"
-      ()
-  in
   let command_handoff =
     handoff_json
       ~surface:"command"
       ~command_surface:"operations"
       ~operation_id:"op-runtime-001"
       ~label:"작전 원인 보기"
-      ~target_type:"team_session"
-      ~target_id:"ts-execution-fixture-001"
+      ~target_type:"operation"
+      ~target_id:"op-runtime-001"
       ~focus_kind:"operation"
       ()
   in
@@ -55,22 +46,6 @@ let execution_smoke_fixture_json () =
           [
             `Assoc
               [
-                ("id", `String "session-ts-execution-fixture-001");
-                ("kind", `String "session");
-                ("severity", `String "bad");
-                ("status", `String "interrupted");
-                ("summary", `String "session has 2 failed spawn event(s)");
-                ("target_type", `String "team_session");
-                ("target_id", `String "ts-execution-fixture-001");
-                ("linked_session_id", `String "ts-execution-fixture-001");
-                ("linked_operation_id", `String "op-runtime-001");
-                ("last_seen_at", `String generated_at);
-                ("top_handoff", intervene_handoff);
-                ("intervene_handoff", intervene_handoff);
-                ("command_handoff", command_handoff);
-              ];
-            `Assoc
-              [
                 ("id", `String "operation-op-runtime-002");
                 ("kind", `String "operation");
                 ("severity", `String "warn");
@@ -85,21 +60,26 @@ let execution_smoke_fixture_json () =
                 ("intervene_handoff", `Null);
                 ("command_handoff", operation_handoff);
               ];
+            `Assoc
+              [
+                ("id", `String "operation-op-runtime-001");
+                ("kind", `String "operation");
+                ("severity", `String "bad");
+                ("status", `String "active");
+                ("summary", `String "Runtime squad needs trace review before verify proceeds");
+                ("target_type", `String "operation");
+                ("target_id", `String "op-runtime-001");
+                ("linked_session_id", `Null);
+                ("linked_operation_id", `String "op-runtime-001");
+                ("last_seen_at", `String generated_at);
+                ("top_handoff", command_handoff);
+                ("intervene_handoff", `Null);
+                ("command_handoff", command_handoff);
+              ];
           ] );
       ( "priority_queue",
         `List
           [
-            `Assoc
-              [
-                ("id", `String "session-ts-execution-fixture-001");
-                ("kind", `String "session");
-                ("tone", `String "bad");
-                ("title", `String "ts-execution-fixture-001");
-                ("subtitle", `String "session has 2 failed spawn event(s)");
-                ("timestamp", `String generated_at);
-                ("target_type", `String "team_session");
-                ("target_id", `String "ts-execution-fixture-001");
-              ];
             `Assoc
               [
                 ("id", `String "operation-op-runtime-002");
@@ -111,59 +91,16 @@ let execution_smoke_fixture_json () =
                 ("target_type", `String "operation");
                 ("target_id", `String "op-runtime-002");
               ];
-          ] );
-      ( "session_briefs",
-        `List
-          [
             `Assoc
               [
-                ("session_id", `String "ts-execution-fixture-001");
-                ("goal", `String "Validate local64 swarm role coverage, runtime visibility, and operator census");
-                ("namespace", `String "default");
-                ("room", `String "default");
-                ("status", `String "interrupted");
-                ("health", `String "bad");
-                ("member_names", `List [ `String "local-alpha"; `String "local-beta"; `String "local-delta" ]);
-                ("linked_operation_id", `String "op-runtime-001");
-                ("linked_detachment_id", `String "det-runtime-001");
-                ("runtime_blocker", `String "session has 2 failed spawn event(s)");
-                ("worker_gap_summary", `String "Recover failed worker coverage");
-                ("last_activity_at", `String generated_at);
-                ("last_activity_summary", `String "local64 smoke cleanup");
-                ("communication_summary", `String "hybrid · broadcast 0 · portal 0");
-                ("active_count", `Int 3);
-                ("seen_count", `Int 3);
-                ("planned_count", `Int 4);
-                ("required_count", `Int 1);
-                ("counts_basis", `String "live=recent_turns · planned=roster");
-                ("top_handoff", intervene_handoff);
-                ("intervene_handoff", intervene_handoff);
-                ("command_handoff", command_handoff);
-              ];
-            `Assoc
-              [
-                ("session_id", `String "ts-execution-fixture-002");
-                ("goal", `String "Monitor runtime pressure without intervention");
-                ("namespace", `String "default");
-                ("room", `String "default");
-                ("status", `String "running");
-                ("health", `String "ok");
-                ("member_names", `List [ `String "local-gamma" ]);
-                ("linked_operation_id", `String "op-runtime-003");
-                ("linked_detachment_id", `String "det-runtime-003");
-                ("runtime_blocker", `Null);
-                ("worker_gap_summary", `Null);
-                ("last_activity_at", `String generated_at);
-                ("last_activity_summary", `String "healthy runtime census");
-                ("communication_summary", `String "hybrid · broadcast 1 · portal 0");
-                ("active_count", `Int 1);
-                ("seen_count", `Int 1);
-                ("planned_count", `Int 1);
-                ("required_count", `Int 1);
-                ("counts_basis", `String "live=recent_turns · planned=roster");
-                ("top_handoff", command_handoff);
-                ("intervene_handoff", intervene_handoff);
-                ("command_handoff", command_handoff);
+                ("id", `String "operation-op-runtime-001");
+                ("kind", `String "operation");
+                ("tone", `String "bad");
+                ("title", `String "op-runtime-001");
+                ("subtitle", `String "Runtime squad needs trace review before verify proceeds");
+                ("timestamp", `String generated_at);
+                ("target_type", `String "operation");
+                ("target_id", `String "op-runtime-001");
               ];
           ] );
       ( "operation_briefs",
@@ -177,11 +114,11 @@ let execution_smoke_fixture_json () =
                 ("stage", `String "verify");
                 ("assigned_unit_id", `String "squad-runtime");
                 ("assigned_unit_label", `String "Runtime Squad");
-                ("linked_session_id", `String "ts-execution-fixture-001");
-                ("linked_detachment_id", `String "det-runtime-001");
-                ("blocker_summary", `String "session has 2 failed spawn event(s)");
+                ("linked_session_id", `Null);
+                ("linked_detachment_id", `Null);
+                ("blocker_summary", `String "Runtime squad needs trace review before verify proceeds");
                 ("search_status", `String "blocked");
-                ("next_tool", `String "masc_team_session_events");
+                ("next_tool", `String "masc_observe_traces");
                 ("updated_at", `String generated_at);
                 ("top_handoff", command_handoff);
                 ("command_handoff", command_handoff);
@@ -221,7 +158,7 @@ let execution_smoke_fixture_json () =
                 ("signal_truth", `String "live");
                 ("evidence_source", `String "message");
                 ("active_task_count", `Int 1);
-                ("related_session_id", `String "ts-execution-fixture-001");
+                ("related_session_id", `Null);
                 ("related_operation_id", `String "op-runtime-001");
                 ("emoji", `String "🤖");
                 ("korean_name", `String "local-alpha");

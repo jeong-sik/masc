@@ -15,7 +15,7 @@ let resolve_net ?net () =
 
 let default_shell_tool_names execution_scope =
   match execution_scope with
-  | Some Team_session_types.Observe_only ->
+  | Some Worker_contract_types.Observe_only ->
       [ "file_read"; "shell_exec" ]
   | _ ->
       [ "file_read"; "file_write"; "shell_exec" ]
@@ -126,12 +126,12 @@ let continue_worker ?worker_run_id ?contract ~sw ?net ~base_path ~room_config ~w
                 | Shell_readonly ->
                     build_local_shell_tools
                       ~room_config ~worker_name
-                      ~execution_scope:Team_session_types.Observe_only
+                      ~execution_scope:Worker_contract_types.Observe_only
                       ~workdir:workspace_path
                 | Shell_dev ->
                     build_local_shell_tools
                       ~room_config ~worker_name
-                      ~execution_scope:Team_session_types.Limited_code_change
+                      ~execution_scope:Worker_contract_types.Limited_code_change
                       ~workdir:workspace_path
               in
               let* shell_tools = shell_tools in
@@ -159,29 +159,27 @@ let continue_worker ?worker_run_id ?contract ~sw ?net ~base_path ~room_config ~w
               in
               let tools = mcp_tools @ shell_tools in
               let prompt =
-                let tool_contract =
-                  "Tool contract reminder: if you call masc_team_session_step \
-                   with turn_kind=\"note\", you must include a non-empty \
-                   message field. Calls missing message fail."
-                in
+                let tool_contract = "" in
                 let workflow_contract =
                   match meta.execution_scope with
-                  | Team_session_types.Limited_code_change ->
+                  | Worker_contract_types.Limited_code_change ->
                       "Coding worker protocol: you must use tools before \
                        answering. If the task requires a code change, the \
                        expected loop is file_read -> shell_exec -> file_write \
                        -> shell_exec, and you should not finish until \
                        verification succeeds. If the task is inspection-only, \
                        do not modify files."
-                  | Team_session_types.Observe_only ->
+                  | Worker_contract_types.Observe_only ->
                       "Readonly worker protocol: use file_read and shell_exec \
                        for inspection, but do not modify files."
-                  | Team_session_types.Autonomous ->
+                  | Worker_contract_types.Autonomous ->
                       "You have full read and write access. Choose the approach \
                        that best accomplishes your task. Use tools to verify \
                        your work."
                 in
-                String.concat "\n\n" [ tool_contract; workflow_contract; prompt ]
+                String.concat "\n\n"
+                  (List.filter (fun value -> String.trim value <> "")
+                     [ tool_contract; workflow_contract; prompt ])
               in
               let* net = resolve_net ?net () in
               Worker_oas.resume_worker_via_oas ~sw ~net ~base_path ~meta ~checkpoint

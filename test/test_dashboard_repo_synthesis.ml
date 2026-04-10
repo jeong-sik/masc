@@ -51,7 +51,7 @@ let sample_run run_id =
     planned_worker_roles =
       [ "planner"; "code-explorer"; "doc-explorer"; "test-explorer" ];
     recommended_next_tools =
-      [ "masc_operator_snapshot"; "masc_team_session_prove" ];
+      [ "masc_operator_snapshot"; "masc_operator_digest" ];
     status = "started";
   }
 

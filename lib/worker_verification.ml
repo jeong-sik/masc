@@ -39,7 +39,7 @@ let verify_worker_result
     let contract_goal =
       match delivery_contract with
       | None -> goal
-      | Some (contract : Team_session_types.delivery_contract) ->
+      | Some (contract : Worker_contract_types.delivery_contract) ->
           let acceptance =
             if contract.acceptance_checks = [] then
               "(none)"

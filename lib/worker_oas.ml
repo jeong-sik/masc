@@ -9,7 +9,7 @@
     - MASC execution_scope -> OAS max_turns cap + system prompt contract
     - MASC heartbeat -> OAS periodic_callback
     - MASC tool_profile/shell_profile -> OAS Tool.t list filtering
-    - MASC team_session -> OAS Builder.with_description metadata
+    - MASC legacy session metadata -> OAS Builder.with_description metadata
 
     @since Phase 5 — OAS Agent.run adapter for workers *)
 
@@ -32,7 +32,7 @@ let oas_model_of_effective_model (model_id : string) : string =
 
 (** Map MASC execution_scope to max_turns cap.
     Mirrors the logic in local_agent_eio_runners.ml run_worker_oas. *)
-let max_turns_cap_of_scope (scope : Team_session_types.execution_scope) : int =
+let max_turns_cap_of_scope (scope : Worker_contract_types.execution_scope) : int =
   match scope with
   | Observe_only -> 12
   | Limited_code_change -> 20
@@ -103,10 +103,10 @@ let description_of_meta (meta : Worker_container_types.worker_container_meta) : 
    | Some n -> add "selection_note" n
    | None -> ());
   add "execution_scope"
-    (Team_session_types.execution_scope_to_string meta.execution_scope);
+    (Worker_contract_types.execution_scope_to_string meta.execution_scope);
   add "effective_model" meta.effective_model;
   (match meta.worker_class with
-   | Some cls -> add "worker_class" (Team_session_types.worker_class_to_string cls)
+   | Some cls -> add "worker_class" (Worker_contract_types.worker_class_to_string cls)
    | None -> ());
   String.concat "\n" (List.rev !lines)
 
@@ -170,7 +170,7 @@ let default_internal_tool_retry_policy =
   Oas.Tool_retry_policy.default_internal
 
 let tool_policy_of_execution_scope
-    (scope : Team_session_types.execution_scope) : Tool_access_policy.t =
+    (scope : Worker_contract_types.execution_scope) : Tool_access_policy.t =
   match scope with
   | Observe_only ->
       {
@@ -192,7 +192,7 @@ let tool_policy_of_execution_scope
       Tool_access_policy.allow_all
 
 let gate_config_of_execution_scope
-    (scope : Team_session_types.execution_scope) : Eval_gate.gate_config =
+    (scope : Worker_contract_types.execution_scope) : Eval_gate.gate_config =
   let tool_policy = tool_policy_of_execution_scope scope in
   let denied_tools =
     Tool_access_policy.resolve_selector tool_policy.deny

@@ -33,7 +33,7 @@ let contains str substr =
     true
   with Not_found -> false
 
-let write_pending_confirm config session_id =
+let write_pending_confirm config _session_id =
   let operator_dir = Filename.concat (Room_utils.masc_dir config) "operator" in
   Room_utils.mkdir_p operator_dir;
   Room_utils.write_json config (Filename.concat operator_dir "pending_confirms.json")
@@ -45,11 +45,11 @@ let write_pending_confirm config session_id =
             ("confirm_token", `String "confirm-mission-test");
             ("trace_id", `String "ops_fixture_mission");
             ("actor", `String "dashboard-fixture");
-            ("action_type", `String "team_stop");
-            ("target_type", `String "team_session");
-            ("target_id", `String session_id);
+            ("action_type", `String "keeper_message");
+            ("target_type", `String "keeper");
+            ("target_id", `String "fixture-keeper");
             ("payload", `Assoc [ ("reason", `String "fixture pending confirmation") ]);
-            ("delegated_tool", `String "masc_team_session_stop");
+            ("delegated_tool", `String "masc_keeper_msg");
             ("created_at", `String (Types.now_iso ()));
             ("expires_at", `Null);
           ];
@@ -74,166 +74,9 @@ let seed_room config session_id =
     (Lib.Room.broadcast config ~from_agent:"llama-local-alpha"
        ~content:"Spawned worker recovered partial role coverage and runtime visibility.");
 
-  let now = Unix.gettimeofday () in
-  let open Team_session_types in
-  let session =
-    {
-      session_id;
-      goal = "Validate local64 swarm role coverage, runtime visibility, and operator census";
-      created_by = "fixture-root";
-      origin_kind = Origin_human;
-      room_id = "default";
-      operation_id = Some "op-mission-fixture-001";
-      status = Interrupted;
-      duration_seconds = 2700;
-      execution_scope = Observe_only;
-      checkpoint_interval_sec = 60;
-      min_agents = 1;
-      scale_profile = Scale_local64;
-      control_profile = Control_hierarchical_quality_v1;
-      orchestration_mode = Assist;
-      communication_mode = Comm_hybrid;
-      model_cascade = [ "qwen3.5-35b-a3b-ud-q8-xl"; "qwen27-balanced"; "qwen9-swarm" ];
-      fallback_policy = Fallback_cascade_then_task;
-      instruction_profile = Profile_strict;
-      alert_channel = Alert_both;
-      auto_resume = false;
-      report_formats = [ Markdown; Json ];
-      turn_count = 3;
-      agent_names =
-        [
-          "team-session-local64-smoke";
-          "llama-local-alpha";
-          "llama-local-beta";
-          "llama-local-gamma";
-        ];
-      planned_workers =
-        [
-          {
-            spawn_agent = "llama";
-            runtime_actor = Some "llama-local-alpha";
-            spawn_role = Some "manager";
-            spawn_model = Some "qwen3.5-35b-a3b-ud-q8-xl";
-            execution_scope = Some Observe_only;
-            worker_class = Some Worker_manager;
-            parent_actor = Some "team-session-local64-smoke";
-            capsule_mode = Some Capsule_inherit;
-            runtime_pool = Some "local64";
-            lane_id = Some "lane-manager";
-            controller_level = Some Controller_root;
-            control_domain = Some Domain_execution;
-            supervisor_actor = Some "team-session-local64-smoke";
-            task_profile = Some Profile_decide;
-            risk_level = Some Risk_high;
-            routing_confidence = Some 0.94;
-            routing_reason = Some "manager must hold root synthesis";
-            thinking_enabled = None;
-            thinking_budget = None;
-            max_turns = None;
-            timeout_seconds = None;
-            routing_escalated = false;
-          };
-          {
-            spawn_agent = "llama";
-            runtime_actor = Some "llama-local-beta";
-            spawn_role = Some "metacog";
-            spawn_model = Some "qwen27-balanced";
-            execution_scope = Some Observe_only;
-            worker_class = Some Worker_metacog;
-            parent_actor = Some "team-session-local64-smoke";
-            capsule_mode = Some Capsule_inherit;
-            runtime_pool = Some "local64";
-            lane_id = Some "lane-meta";
-            controller_level = Some Controller_lane;
-            control_domain = Some Domain_meta;
-            supervisor_actor = Some "llama-local-alpha";
-            task_profile = Some Profile_verify;
-            risk_level = Some Risk_medium;
-            routing_confidence = Some 0.68;
-            routing_reason = Some "spawn failures hide runtime census";
-            thinking_enabled = None;
-            thinking_budget = None;
-            max_turns = None;
-            timeout_seconds = None;
-            routing_escalated = true;
-          };
-          {
-            spawn_agent = "llama";
-            runtime_actor = Some "llama-local-gamma";
-            spawn_role = Some "executor";
-            spawn_model = Some "qwen9-swarm";
-            execution_scope = Some Limited_code_change;
-            worker_class = Some Worker_executor;
-            parent_actor = Some "team-session-local64-smoke";
-            capsule_mode = Some Capsule_fresh;
-            runtime_pool = Some "local64";
-            lane_id = Some "lane-worker";
-            controller_level = Some Controller_worker;
-            control_domain = Some Domain_runtime;
-            supervisor_actor = Some "llama-local-alpha";
-            task_profile = Some Profile_extract;
-            risk_level = Some Risk_medium;
-            routing_confidence = Some 0.88;
-            routing_reason = Some "executor covers direct runtime checks";
-            thinking_enabled = None;
-            thinking_budget = None;
-            max_turns = None;
-            timeout_seconds = None;
-            routing_escalated = false;
-          };
-          {
-            spawn_agent = "llama";
-            runtime_actor = Some "llama-local-delta";
-            spawn_role = Some "observer";
-            spawn_model = Some "qwen9-swarm";
-            execution_scope = Some Observe_only;
-            worker_class = Some Worker_scout;
-            parent_actor = Some "team-session-local64-smoke";
-            capsule_mode = Some Capsule_fresh;
-            runtime_pool = Some "local64";
-            lane_id = Some "lane-observer";
-            controller_level = Some Controller_worker;
-            control_domain = Some Domain_runtime;
-            supervisor_actor = Some "llama-local-alpha";
-            task_profile = Some Profile_extract;
-            risk_level = Some Risk_low;
-            routing_confidence = Some 0.72;
-            routing_reason = Some "observer preserves room-level runtime census";
-            thinking_enabled = None;
-            thinking_budget = None;
-            max_turns = None;
-            timeout_seconds = None;
-            routing_escalated = false;
-          };
-        ];
-      broadcast_count = 2;
-      portal_count = 0;
-      cascade_attempted = 1;
-      cascade_success = 0;
-      cascade_failed = 1;
-      fallback_task_created = 1;
-      min_agents_violation_streak = 0;
-      policy_violations = [];
-      baseline_done_counts = [];
-      final_done_delta_total = None;
-      final_done_delta_by_agent = None;
-      started_at = now -. 45.0;
-      planned_end_at = now +. 2655.0;
-      stopped_at = Some now;
-      last_checkpoint_at = Some (now -. 15.0);
-      last_event_at = Some (now -. 3.0);
-      last_turn_at = Some (now -. 12.0);
-      stop_reason = Some "fixture_interrupted_after_spawn_failure";
-      generated_report = false;
-      delivery_contract = None;
-      latest_delivery_verdict = None;
-      artifacts_dir = Filename.concat ".masc/team-sessions" session_id;
-      created_at_iso = Types.now_iso ();
-      updated_at_iso = Types.now_iso ();
-    }
-  in
-  (* Team_session_store removed — skip session save and event append *)
-  ignore (session, session_id);
+  (* Team sessions are retired; mission fixtures now exercise room-level
+     attention and worker/keeper signals without persisting session records. *)
+  ignore session_id;
   write_pending_confirm config session_id
 
 let test_dashboard_mission_projection () =
@@ -299,9 +142,7 @@ let test_dashboard_mission_projection () =
         in
         let open Yojson.Safe.Util in
         let attention_queue = json |> member "attention_queue" |> to_list in
-        let sessions = json |> member "sessions" |> to_list in
         let summary = json |> member "summary" in
-        let session_briefs = json |> member "session_briefs" |> to_list in
         let agent_briefs = json |> member "agent_briefs" |> to_list in
         let internal_signals = json |> member "internal_signals" |> to_list in
         let alpha_brief =
@@ -315,9 +156,6 @@ let test_dashboard_mission_projection () =
            no longer appear. The top item is now pending_confirm_waiting. *)
         check string "top attention kind" "pending_confirm_waiting"
           (attention_queue |> List.hd |> member "kind" |> to_string);
-        (* session_briefs are empty since Team_session_store returns [] *)
-        check bool "session briefs empty after session removal" true
-          (session_briefs = []);
         check bool "mission summary trims paused" true
           (summary |> member "paused" = `Null);
         check bool "mission summary trims active_agents" true
@@ -328,8 +166,8 @@ let test_dashboard_mission_projection () =
           (summary |> member "namespace" |> to_string);
         check string "mission summary namespace mode" "flattened"
           (summary |> member "namespace_mode" |> to_string);
-        check bool "full session cards omitted from mission payload" true
-          (sessions = []);
+        check bool "sessions removed from mission payload" true
+          (json |> member "sessions" = `Null);
         let alpha_input = alpha_brief |> member "recent_input_preview" |> to_string in
         check bool "recent input preserves exact alpha mention" true
           (contains alpha_input "@llama-local-alpha");
@@ -387,9 +225,6 @@ let test_dashboard_mission_http_full_contract () =
           ((json |> member "internal_signals" |> to_list) <> []);
         check bool "command focus retained in mission http payload" true
           (json |> member "command_focus" <> `Null);
-        (* Team_session_store removed — session_briefs are empty *)
-        check bool "session briefs empty after session removal" true
-          (json |> member "session_briefs" |> to_list = []);
       ))
 
 let test_dashboard_mission_http_default_bootstraps_first_success () =
@@ -425,9 +260,6 @@ let test_dashboard_mission_http_default_bootstraps_first_success () =
           (json |> member "summary" |> member "namespace_id" |> to_string);
         check string "default mission exposes namespace" "default"
           (json |> member "summary" |> member "namespace" |> to_string);
-        (* Team_session_store removed — session_briefs are empty *)
-        check bool "session briefs empty after session removal" true
-          (json |> member "session_briefs" |> to_list = []);
       ))
 
 let test_dashboard_mission_keeper_tool_audit_fallback () =
@@ -466,9 +298,6 @@ let test_dashboard_mission_keeper_tool_audit_fallback () =
           (json |> member "summary" |> member "namespace_id" |> to_string);
         check string "default mission exposes namespace" "default"
           (json |> member "summary" |> member "namespace" |> to_string);
-        (* Team_session_store removed — session_briefs are empty *)
-        check bool "session briefs empty after session removal" true
-          (json |> member "session_briefs" |> to_list = []);
       ))
 
 let test_dashboard_mission_http_cache_isolation () =
@@ -514,13 +343,10 @@ let test_dashboard_mission_http_cache_isolation () =
             request
         in
         let open Yojson.Safe.Util in
-        (* Team_session_store removed — session_briefs are empty for both rooms.
-           Cache isolation is still verified: each room computes independently
-           even though both return empty session_briefs. *)
-        check bool "first room session briefs empty" true
-          (json_a |> member "session_briefs" |> to_list = []);
-        check bool "second room session briefs empty" true
-          (json_b |> member "session_briefs" |> to_list = []);
+        check string "first room namespace remains default" "default"
+          (json_a |> member "summary" |> member "namespace_id" |> to_string);
+        check string "second room namespace remains default" "default"
+          (json_b |> member "summary" |> member "namespace_id" |> to_string);
       ))
 
 let test_dashboard_mission_keeper_tool_audit_prefers_heartbeat_task () =

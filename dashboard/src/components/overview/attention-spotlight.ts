@@ -32,8 +32,7 @@ function gatherSpotlightItems(snap: DashboardMissionResponse): SpotlightItem[] {
     })
   }
 
-  const sessions: SessionItem[] =
-    (snap.sessions ?? []).length > 0 ? snap.sessions : (snap.session_briefs ?? [])
+  const sessions: SessionItem[] = snap.sessions ?? []
   const aqIds = new Set(items.map(i => i.id))
 
   for (const s of sessions) {

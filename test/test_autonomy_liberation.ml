@@ -1,7 +1,7 @@
 (** Tests for the autonomy liberation refactoring (Phases 1-5). *)
 
 module Spawn = Masc_mcp.Spawn
-module Team_session_types = Team_session_types
+module Worker_contract_types = Worker_contract_types
 module Agent_tool_surfaces = Masc_mcp.Agent_tool_surfaces
 module Keeper_deliberation = Masc_mcp.Keeper_deliberation
 
@@ -32,16 +32,16 @@ let test_lifecycle_no_strict () =
     (contains_s suffix "capabilities")
 
 let test_autonomous_scope_roundtrip () =
-  let scope = Team_session_types.Autonomous in
-  let s = Team_session_types.execution_scope_to_string scope in
+  let scope = Worker_contract_types.Autonomous in
+  let s = Worker_contract_types.execution_scope_to_string scope in
   Alcotest.(check string) "to_string" "autonomous" s;
-  let back = Team_session_types.execution_scope_of_string s in
-  let back_s = Team_session_types.execution_scope_to_string back in
+  let back = Worker_contract_types.execution_scope_of_string s in
+  let back_s = Worker_contract_types.execution_scope_to_string back in
   Alcotest.(check string) "roundtrip" "autonomous" back_s
 
 let test_scope_default_is_limited () =
-  let scope = Team_session_types.execution_scope_of_string "unknown_value" in
-  let s = Team_session_types.execution_scope_to_string scope in
+  let scope = Worker_contract_types.execution_scope_of_string "unknown_value" in
+  let s = Worker_contract_types.execution_scope_to_string scope in
   Alcotest.(check string) "default" "limited_code_change" s
 
 (* ── Phase 2: Tool Discovery ──────────────────────────────────── *)
@@ -211,8 +211,8 @@ let test_finding_accumulation () =
 
 let test_scope_default_unchanged () =
   (* Limited_code_change is still the default for unknown strings *)
-  let scope = Team_session_types.execution_scope_of_string "whatever" in
-  let s = Team_session_types.execution_scope_to_string scope in
+  let scope = Worker_contract_types.execution_scope_of_string "whatever" in
+  let s = Worker_contract_types.execution_scope_to_string scope in
   Alcotest.(check string) "default scope" "limited_code_change" s;
   (* Worker tools should remain a small focused set *)
   let worker_tools =

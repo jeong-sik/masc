@@ -129,14 +129,14 @@ let test_graph_json_tracks_runtime_activity_kinds () =
            ~kind:"operation.started"
            ~actor:(Activity_graph.entity ~kind:"agent" "team-session")
            ~subject:(Activity_graph.entity ~kind:"operation" "sess-001")
-           ~tags:[ "team_session"; "operation.started" ]
+           ~tags:[ "operation"; "operation.started" ]
            ~payload:(`Assoc [ ("session_id", `String "sess-001") ])
            ());
       ignore
         (Activity_graph.emit config ~room_id:"default" ~kind:"team.turn"
            ~actor:(Activity_graph.entity ~kind:"agent" "claude")
            ~subject:(Activity_graph.entity ~kind:"operation" "sess-001")
-           ~tags:[ "team_session"; "team.turn" ]
+           ~tags:[ "operation"; "team.turn" ]
            ~payload:(`Assoc [ ("kind", `String "broadcast") ])
            ());
       ignore

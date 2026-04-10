@@ -105,18 +105,18 @@ let test_worker_runtime_config_prefers_env_override () =
   check string "file config enables docker for code-change scope" "docker"
     (Lib.Worker_execution_backend.to_string
        (Lib.Worker_runtime_config.backend_for_scope
-          Team_session_types.Limited_code_change));
+          Worker_contract_types.Limited_code_change));
   check string "observe-only remains local" "local"
     (Lib.Worker_execution_backend.to_string
        (Lib.Worker_runtime_config.backend_for_scope
-          Team_session_types.Observe_only));
+          Worker_contract_types.Observe_only));
   with_env "MASC_WORKER_RUNTIME_BACKEND" (Some "local") @@ fun () ->
   Lib.Config_dir_resolver.reset ();
   Lib.Worker_runtime_config.reset ();
   check string "env override forces local backend" "local"
     (Lib.Worker_execution_backend.to_string
        (Lib.Worker_runtime_config.backend_for_scope
-          Team_session_types.Limited_code_change))
+          Worker_contract_types.Limited_code_change))
 
 let test_worker_runtime_helper_protocol_roundtrip () =
   let run_result : Lib.Worker_container_types.run_result =
@@ -164,7 +164,7 @@ let test_worker_runtime_invalid_config_fails_closed () =
   check string "malformed config resolves to fail-closed docker backend" "docker"
     (Lib.Worker_execution_backend.to_string
        (Lib.Worker_runtime_config.backend_for_scope
-          Team_session_types.Limited_code_change));
+          Worker_contract_types.Limited_code_change));
   check string "malformed config clears docker image" ""
     (Lib.Worker_runtime_config.docker_image ())
 

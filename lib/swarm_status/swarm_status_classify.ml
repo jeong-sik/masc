@@ -39,7 +39,7 @@ let classify_detachment operations_by_id (detachment : detachment_info) =
     Managed
   else
     match detachment.runtime_kind with
-    | Some "team_session" -> Supervised
+    | Some "supervised" -> Supervised
     | Some "swarm_projection" -> Projected
     | _ -> (
         match List.assoc_opt detachment.operation_id operations_by_id with
@@ -61,11 +61,11 @@ let classify_decision operations_by_id (decision : decision_info) =
     | Some operation_id -> Option.value ~default:Managed (List.assoc_opt operation_id operations_by_id)
     | None -> (
         match decision.scope_type with
-        | Some "team_session" -> Supervised
+        | Some "supervised" -> Supervised
         | _ -> Managed)
 
 let classify_trace operations_by_id (trace : trace_info) =
-  if String.equal trace.source "team_session" || String.equal trace.source "operator" then
+  if String.equal trace.source "supervised" || String.equal trace.source "operator" then
     Supervised
   else if String.equal trace.source "swarm"
           || String.starts_with ~prefix:"swarm-trace-" trace.trace_id
@@ -310,7 +310,7 @@ let lane_timeline_events kind traces sessions decisions =
                  session.goal session.session_id;
              tone =
                if String.equal session.status "running" then "ok" else "warn";
-             source = "team_session";
+             source = "supervised";
            })
   in
   let approval_events =

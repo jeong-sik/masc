@@ -41,13 +41,13 @@ type worker_container_meta = {
   workspace_path : string;
   role : string option;
   selection_note : string option;
-  execution_scope : Team_session_types.execution_scope;
+  execution_scope : Worker_contract_types.execution_scope;
   thinking_enabled : bool option;
   max_turns_override : int option;
   timeout_seconds : int option;
   tool_profile : tool_profile;
   shell_profile : shell_profile;
-  worker_class : Team_session_types.worker_class option;
+  worker_class : Worker_contract_types.worker_class option;
   effective_model : string;
   checkpoint_path : string;
   turn_log_path : string;
@@ -612,9 +612,8 @@ Use tools when state inspection, task coordination, work delegation, or room upd
 Keep responses concise and task-focused.
 If a tool schema includes agent_name and you omit it, the runtime will inject %s automatically.
 Do not invent tool names or arguments that are not in schema.
-If you are operating inside a team session, record your own work with masc_team_session_step as the worker.
-Inside a team session, record at least one note turn with masc_team_session_step(session_id="...", turn_kind="note", message="...") and a non-empty message that states your concrete contribution.
-A note turn without a message is invalid and will be rejected.
+If you are operating inside a supervised swarm, keep your progress visible through the available room, task, and operator tools.
+When work materially changes state, prefer a concrete task, message, or checkpoint update over silent progress.
 When the task is complete, return a short final result summarizing what you changed or learned.|}
     worker_name model_id session_line role_line selection_line worker_name
 

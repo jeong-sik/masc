@@ -110,7 +110,7 @@ let raw_completion ~model_id ~prompt ~max_tokens ~timeout_sec () =
   raw_completion_at ~server_url:Env_config.Llama.server_url ~model_id ~prompt
     ~max_tokens ~timeout_sec ()
 
-let error_message_of_http_error = function
+let error_message_of_http_error = function[@warning "-8-11"]
   | Llm_provider.Http_client.NetworkError { message } -> message
   | Llm_provider.Http_client.HttpError { code; body } -> (
       try

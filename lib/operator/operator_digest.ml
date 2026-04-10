@@ -387,7 +387,6 @@ let urgency_rank = function
 
 let target_rank = function
   | "room" | "namespace" -> 3
-  | "team_session" -> 2
   | "keeper" -> 1
   | _ -> 0
 
@@ -683,7 +682,7 @@ let review_queue_json ~actor active deferred recent_json =
     ("recent_reviews", recent_json);
   ]
 
-let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_include_workers ?sessions
+let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_include_workers
     ?command_plane_summary ?swarm_status (ctx : 'a context) :
     (Yojson.Safe.t, string) result =
   let config = ctx.config in
@@ -718,15 +717,12 @@ let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_incl
           ("deferred_queue", `List []);
           ("review_summary", review_summary_json ~actor:"dashboard" [] [] 0);
           ("recent_reviews", recent_reviews);
-          ("session_cards", `List []);
           ("worker_cards", `List []);
         ])
   else
     let actor_name = normalized_actor ~context_actor:ctx.agent_name actor in
     let* target_type = normalize_digest_target_type target_type in
     let now = Time_compat.now () in
-    (* Team sessions removed — tracked_sessions is always []. *)
-    ignore sessions;
     let room_state_json = room_state_json config in
     let command_plane_digest_json =
       match command_plane_summary with
@@ -801,11 +797,8 @@ let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_incl
                      recommended_actions) );
               ("recommendation_summary", fallback_recommendation_summary);
               ("namespace", room_state_json);
-              ("session_cards", `List []);
               ("worker_cards", `List []);
             ]
             @ review_queue_json ~actor:actor_name active_reviews deferred_reviews recent_reviews
             @ active_guidance))
-    | "team_session" ->
-        Error "team_session is no longer supported (removed in Phase 2 of #6107)"
     | _ -> Error "unsupported target_type"

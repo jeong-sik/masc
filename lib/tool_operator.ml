@@ -21,11 +21,6 @@ let strict_action_enums =
     `String "namespace_pause";
     `String "namespace_resume";
     `String "social_sweep";
-    `String "team_note";
-    `String "team_broadcast";
-    `String "team_task_inject";
-    `String "team_worker_spawn_batch";
-    `String "team_stop";
     `String "keeper_message";
     `String "keeper_probe";
     `String "keeper_recover";
@@ -34,21 +29,20 @@ let strict_action_enums =
   ]
 
 let legacy_action_alias_enums =
-  [ `String "team_turn"; `String "keeper_msg"; `String "task_inject";
-    `String "room_pause"; `String "room_resume";
+  [ `String "keeper_msg"; `String "task_inject"; `String "room_pause"; `String "room_resume";
     `String "autonomy_tick" ]
 
 let target_type_enums =
-  [ `String "namespace"; `String "team_session"; `String "keeper"; `String "review_item" ]
+  [ `String "namespace"; `String "keeper"; `String "review_item" ]
 
 let snapshot_schema ~remote =
   {
     name = "masc_operator_snapshot";
     description =
       if remote then
-        "Read the unified operator control-plane state. Use this when you need current namespace, session, keeper, message, and pending-confirm data before taking action."
+        "Read the unified operator control-plane state. Use this when you need current namespace, keeper, message, and pending-confirm data before taking action."
       else
-        "Read unified operator state for the default namespace, team sessions, keepers, recent messages, and pending confirmations. Use this before issuing control-plane actions.";
+        "Read unified operator state for the default namespace, keepers, recent messages, and pending confirmations. Use this before issuing control-plane actions.";
     input_schema =
       `Assoc
         [
@@ -57,15 +51,14 @@ let snapshot_schema ~remote =
             schema_properties
               [
                 ("actor", `Assoc [ ("type", `String "string") ]);
-                ("view", `Assoc [ ("type", `String "string"); ("enum", `List [ `String "summary"; `String "sessions"; `String "keepers"; `String "messages"; `String "full" ]) ]);
+                ("view", `Assoc [ ("type", `String "string"); ("enum", `List [ `String "summary"; `String "keepers"; `String "messages"; `String "full" ]) ]);
                 ("include_messages", `Assoc [ ("type", `String "boolean") ]);
-                ("include_sessions", `Assoc [ ("type", `String "boolean") ]);
                 ("include_keepers", `Assoc [ ("type", `String "boolean") ]);
               ] );
         ];
   }
 
-let digest_target_type_enums = [ `String "namespace"; `String "team_session" ]
+let digest_target_type_enums = [ `String "namespace" ]
 let judgment_surface_enums =
   [
     `String "command.namespace";
@@ -78,9 +71,9 @@ let digest_schema ~remote =
     name = "masc_operator_digest";
     description =
       if remote then
-        "Read an intervention-oriented operator digest. Use this when you need namespace or team-session health, attention items, command-plane search or microarch signals, worker summaries, and recommended next actions before deciding how to intervene."
+        "Read an intervention-oriented operator digest. Use this when you need namespace health, attention items, command-plane search or microarch signals, worker summaries, and recommended next actions before deciding how to intervene."
       else
-        "Read a high-signal operator digest with intervention recommendations for the default namespace or a specific team session. Use this when raw snapshot data is too low-level for fast supervision and you want translated command-plane search or microarch signals.";
+        "Read a high-signal operator digest with intervention recommendations for the default namespace. Use this when raw snapshot data is too low-level for fast supervision and you want translated command-plane search or microarch signals.";
     input_schema =
       `Assoc
         [
@@ -248,12 +241,11 @@ let dispatch (ctx : 'a context) ~name ~args : result option =
       let actor = get_string_opt args "actor" in
       let view = get_string_opt args "view" in
       let include_messages = get_bool args "include_messages" true in
-      let include_sessions = get_bool args "include_sessions" true in
       let include_keepers = get_bool args "include_keepers" true in
       Some
         ( true,
           Yojson.Safe.to_string
-            (Operator_control.snapshot_json ?actor ?view ~include_messages ~include_sessions
+            (Operator_control.snapshot_json ?actor ?view ~include_messages
                ~include_keepers control_ctx) )
   | "masc_operator_digest" ->
       let actor = get_string_opt args "actor" in

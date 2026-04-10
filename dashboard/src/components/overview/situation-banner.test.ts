@@ -24,7 +24,6 @@ describe('synthesizeSituation', () => {
 
     const result = synthesizeSituation({
       sessions: [{ session_id: 'sess-1', goal: 'goal-1' }],
-      session_briefs: [],
       attention_queue: [],
       incidents: [],
       agent_briefs: [],

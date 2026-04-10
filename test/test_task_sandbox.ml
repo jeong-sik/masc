@@ -48,7 +48,7 @@ let test_sandbox_type_fields () =
     task_id = "task-001";
     worktree_path = "/tmp/test/.worktrees/agent-task-001";
     branch_name = "agent/task-001";
-    execution_scope = Team_session_types_enums.Limited_code_change;
+    execution_scope = Worker_contract_types_enums.Limited_code_change;
     created_at = 1234567890.0;
   } in
   check string "task_id" "task-001" sb.task_id;

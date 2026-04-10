@@ -357,8 +357,7 @@ let normalize_digest_target_type value =
   | Some raw -> (
       match String.trim raw |> String.lowercase_ascii with
       | "room" | "namespace" -> Ok "namespace"
-      | "team_session" -> Ok "team_session"
-      | _ -> Error "target_type must be one of: namespace, team_session")
+      | _ -> Error "target_type must be namespace")
   | None -> Ok "namespace"
 
 (* review_item type + helpers are in Operator_digest_review_types

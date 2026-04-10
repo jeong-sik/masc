@@ -75,50 +75,8 @@ let load_findings ~base_path ~team_session_id : string list =
     with Sys_error _ -> []
 
 let build ~base_path ~team_session_id =
-  let room_config = Room.default_config base_path in
-  let session_opt =
-    (* Team_session_store removed *)
-    ignore room_config;
-    (None : Team_session_types.session option)
-  in
-  match session_opt with
-  | None -> empty
-  | Some session ->
-      let team_goal = session.Team_session_types.goal in
-      let active_workers =
-        session.agent_names
-        |> List.filteri (fun i _ -> i < 10)
-      in
-      let task_tree =
-        session.planned_workers
-        |> List.filteri (fun i _ -> i < max_tasks)
-        |> List.map (fun (pw : Team_session_types.planned_worker) ->
-               {
-                 task_id = pw.spawn_agent;
-                 title =
-                   Option.value ~default:"(untitled)" pw.spawn_role;
-                 status =
-                   (match pw.execution_scope with
-                    | Some scope ->
-                        Team_session_types.execution_scope_to_string scope
-                    | None -> "pending");
-                 assignee = pw.runtime_actor;
-               })
-      in
-      let shared_findings =
-        load_findings ~base_path ~team_session_id
-      in
-      let prior_decisions =
-        (* Extract from session events if available, otherwise empty *)
-        []
-      in
-      {
-        team_goal;
-        prior_decisions;
-        shared_findings;
-        active_workers;
-        task_tree;
-      }
+  ignore (base_path, team_session_id, max_tasks);
+  empty
 
 let truncate_list n lst =
   List.filteri (fun i _ -> i < n) lst

@@ -201,7 +201,7 @@ Canonical namespace/task hygiene:
 
 For planner / implementer / supervisor separation:
 
-- Runtime: `masc_team_session_*` tools
+- Runtime: command-plane operations + worker/keeper surfaces
 - Supervisor: `/mcp/operator` with `masc_operator_snapshot`, `masc_operator_digest`, `masc_operator_action`, `masc_operator_confirm`
 - Runbooks: [docs/SWARM-DELIVERY-RUNBOOK.md](docs/SWARM-DELIVERY-RUNBOOK.md), [docs/SUPERVISOR-MODE.md](docs/SUPERVISOR-MODE.md)
 

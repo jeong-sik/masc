@@ -331,7 +331,7 @@ let test_default_gate_roundtrip () =
 let test_observe_only_roundtrip () =
   let gate =
     Worker_oas.gate_config_of_execution_scope
-      Team_session_types.Observe_only
+      Worker_contract_types.Observe_only
   in
   let g = Verifier_oas.eval_gate_to_oas_guardrails gate in
   Alcotest.(check bool) "Observe_only -> DenyList (code mutation blocked)"
@@ -345,7 +345,7 @@ let test_observe_only_roundtrip () =
 let test_observe_only_denies_mutating_masc_tools () =
   let gate =
     Worker_oas.gate_config_of_execution_scope
-      Team_session_types.Observe_only
+      Worker_contract_types.Observe_only
   in
   List.iter
     (fun name ->
@@ -366,7 +366,7 @@ let test_observe_only_denies_mutating_masc_tools () =
 let test_limited_code_change_roundtrip () =
   let gate =
     Worker_oas.gate_config_of_execution_scope
-      Team_session_types.Limited_code_change
+      Worker_contract_types.Limited_code_change
   in
   let g = Verifier_oas.eval_gate_to_oas_guardrails gate in
   Alcotest.(check bool) "Limited -> DenyList"
@@ -378,7 +378,7 @@ let test_limited_code_change_roundtrip () =
 let test_autonomous_roundtrip () =
   let gate =
     Worker_oas.gate_config_of_execution_scope
-      Team_session_types.Autonomous
+      Worker_contract_types.Autonomous
   in
   let g = Verifier_oas.eval_gate_to_oas_guardrails gate in
   Alcotest.(check bool) "Autonomous -> AllowAll"

@@ -151,11 +151,11 @@ let test_confirm_keeps_pending_token_when_delegated_action_fails () =
             ("token", `String token);
             ("trace_id", `String "trace-retry");
             ("actor", `String "operator");
-            ("action_type", `String "team_stop");
-            ("target_type", `String "team_session");
-            ("target_id", `String "missing-session");
+            ("action_type", `String "missing_action_type");
+            ("target_type", `String "namespace");
+            ("target_id", `Null);
             ("payload", `Assoc []);
-            ("delegated_tool", `String "masc_team_session_stop");
+            ("delegated_tool", `String "missing_operator_tool");
             ("created_at", `String (Types.now_iso ()));
             ("expires_at", `Null);
           ]

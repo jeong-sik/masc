@@ -13,16 +13,14 @@ let worker_usage ?cost_usd ~input_tokens ~output_tokens () :
 
 let test_parse_text_tool_calls_single () =
   let content =
-    {|mcp__masc__masc_team_session_step(session_id="ts-123", turn_kind="note", message="[local64-smoke-01] manager decide online for hybrid smoke")|}
+    {|mcp__masc__masc_keeper_msg(name="keeper-alpha", message="[local64-smoke-01] manager decide online for hybrid smoke")|}
   in
   match Worker_runtime.parse_text_tool_calls content with
   | [ Agent_sdk.Types.ToolUse { name; input; _ } ] ->
-      check string "tool name" "masc_team_session_step" name;
+      check string "tool name" "masc_keeper_msg" name;
       let json = input in
-      check string "session id" "ts-123"
-        Yojson.Safe.Util.(json |> member "session_id" |> to_string);
-      check string "turn kind" "note"
-        Yojson.Safe.Util.(json |> member "turn_kind" |> to_string);
+      check string "keeper name" "keeper-alpha"
+        Yojson.Safe.Util.(json |> member "name" |> to_string);
       check string "message"
         "[local64-smoke-01] manager decide online for hybrid smoke"
         Yojson.Safe.Util.(json |> member "message" |> to_string)
@@ -35,7 +33,7 @@ let test_parse_text_tool_calls_multiple () =
 done
 </think>
 mcp__masc__masc_heartbeat()
-mcp__masc__masc_team_session_step(session_id="ts-123", turn_kind="note", message="[local64-smoke-02] metacog verify online for hybrid smoke")
+mcp__masc__masc_keeper_msg(name="keeper-alpha", message="[local64-smoke-02] metacog verify online for hybrid smoke")
 done:local64-smoke-02
 |}
   in
@@ -45,7 +43,7 @@ done:local64-smoke-02
       check string "first tool" "masc_heartbeat" name1;
       check string "heartbeat args" "{}"
         (Yojson.Safe.to_string input1);
-      check string "second tool" "masc_team_session_step" name2
+      check string "second tool" "masc_keeper_msg" name2
   | _ -> fail "expected two parsed text tool calls"
 
 let test_merge_usage_preserves_present_cost () =

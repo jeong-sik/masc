@@ -15,15 +15,11 @@ import { actorName, persistActorName, quickTarget, quickMessage } from './ops-st
 import { executeAction, normalizeStatus } from './helpers'
 
 function parseTarget(value: string): {
-  action_type: 'broadcast' | 'team_note' | 'keeper_message'
-  target_type: 'namespace' | 'team_session' | 'keeper'
+  action_type: 'broadcast' | 'keeper_message'
+  target_type: 'namespace' | 'keeper'
   target_id?: string
   label: string
 } {
-  if (value.startsWith('session:')) {
-    const id = value.slice('session:'.length)
-    return { action_type: 'team_note', target_type: 'team_session', target_id: id, label: id }
-  }
   if (value.startsWith('keeper:')) {
     const name = value.slice('keeper:'.length)
     return { action_type: 'keeper_message', target_type: 'keeper', target_id: name, label: name }
@@ -48,11 +44,9 @@ async function submitQuickMessage() {
 export function QuickIntervene() {
   const [showAdvanced, setShowAdvanced] = useState(false)
   const snapshot = operatorSnapshot.value
-  const sessions = snapshot?.sessions ?? []
   const keepers = snapshot?.keepers ?? []
   const busy = operatorActionBusy.value
 
-  const runningSessions = sessions.filter(s => { const st = normalizeStatus(s.status); return st === 'running' || st === 'active' })
   const onlineKeepers = keepers.filter(k => normalizeStatus(k.status) !== 'offline')
 
   return html`
@@ -60,7 +54,7 @@ export function QuickIntervene() {
       <div class="flex items-start justify-between gap-3">
         <div class="min-w-0">
           <h3 class="text-sm font-semibold text-[var(--text-strong)]">빠른 개입</h3>
-          <p class="mt-1 text-[12px] leading-[1.45] text-[var(--text-muted)]">메시지나 메모를 방, 세션, 키퍼에 바로 보냅니다.</p>
+          <p class="mt-1 text-[12px] leading-[1.45] text-[var(--text-muted)]">메시지나 메모를 방 또는 키퍼에 바로 보냅니다.</p>
         </div>
         <${ActionButton}
           variant="subtle"
@@ -81,11 +75,6 @@ export function QuickIntervene() {
           disabled=${busy}
         >
           <option value="namespace">전체</option>
-          ${runningSessions.map(s => html`
-            <option key=${s.session_id} value=${`session:${s.session_id}`}>
-              세션 ${s.session_id.slice(0, 8)}
-            </option>
-          `)}
           ${onlineKeepers.map(k => html`
             <option key=${k.name} value=${`keeper:${k.name}`}>
               ${k.name}

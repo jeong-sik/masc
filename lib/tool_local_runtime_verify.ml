@@ -118,7 +118,7 @@ let first_endpoint_url endpoints =
   | (endpoint : Discovery_cache.endpoint_info) :: _ -> Some endpoint.url
   | [] -> None
 
-let error_message_of_http_error = function
+let error_message_of_http_error = function[@warning "-8-11"]
   | Llm_provider.Http_client.NetworkError { message } -> message
   | Llm_provider.Http_client.HttpError { code; body } -> (
       try

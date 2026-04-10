@@ -11,8 +11,6 @@ type t = {
   mutable cached_readonly_pg_config : Room.config option;
   readonly_config_mu : Eio.Mutex.t;
   mutable pg_semaphore : Eio.Semaphore.t option;
-  mutable shared_sessions : Team_session_types.session list option;
-  mutable shared_sessions_at : float;
 }
 
 let create () =
@@ -20,8 +18,6 @@ let create () =
     cached_readonly_pg_config = None;
     readonly_config_mu = Eio.Mutex.create ();
     pg_semaphore = None;
-    shared_sessions = None;
-    shared_sessions_at = 0.0;
   }
 
 let default_state : t = create ()
@@ -140,15 +136,3 @@ let run_dashboard_compute state ?(mode = Offloaded_readonly) ?runtime ~sw ~clock
          Offloading isolates dashboard compute from keeper turns on the
          main domain, eliminating contention-induced latency spikes. *)
       offloaded ()
-
-let dashboard_active_or_recent_sessions_cached state ~clock
-    ~refresh_interval_s config load_sessions =
-  let now = Time_compat.now () in
-  match state.shared_sessions with
-  | Some cached when now -. state.shared_sessions_at < refresh_interval_s *. 0.8 ->
-      cached
-  | _ ->
-      let sessions = load_sessions ~clock config in
-      state.shared_sessions <- Some sessions;
-      state.shared_sessions_at <- now;
-      sessions

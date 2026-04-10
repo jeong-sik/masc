@@ -854,17 +854,17 @@ export function ConnectorStatusPanel() {
   }, [lastEvent.value])
 
   const d = data.value
-  const live = preferredConnector(connectorsData.value)
+  const allConnectors = connectorsData.value?.connectors ?? []
 
-  if (loading.value && !d && !live) {
+  if (loading.value && !d && allConnectors.length === 0) {
     return html`<${LoadingState}>커넥터 상태 불러오는 중...<//>`
   }
 
-  if (error.value && !d && !live) {
+  if (error.value && !d && allConnectors.length === 0) {
     return html`<div class="text-xs text-[var(--red)]">Gate: ${error.value}</div>`
   }
 
-  if (!d && !live) return null
+  if (!d && allConnectors.length === 0) return null
 
   return html`
     <div>
@@ -876,12 +876,12 @@ export function ConnectorStatusPanel() {
           </div>
         </div>
         <div class="text-right text-[10px] uppercase tracking-[0.16em] text-[var(--text-dim)]">
-          <div>${d ? `success ${d.success_rate_pct}%` : `descriptor ${connectorStateLabel(live)}`}</div>
+          <div>${d ? `success ${d.success_rate_pct}%` : `${allConnectors.length} connector${allConnectors.length !== 1 ? 's' : ''}`}</div>
           <div>${d ? `uptime ${formatUptime(d.uptime_seconds)}` : 'gate metrics unavailable'}</div>
         </div>
       </div>
 
-      <${ConnectorLivePanel} connector=${live} gate=${d} />
+      ${allConnectors.map(c => html`<${ConnectorLivePanel} connector=${c} gate=${d} />`)}
 
       ${error.value
         ? html`

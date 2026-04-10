@@ -785,8 +785,7 @@ let unified_turn_decision ~(meta : keeper_meta) (observation : world_observation
                  then Some (Idle_cooldown_elapsed
                               { idle_sec = observation.idle_seconds;
                                 cooldown = effective_cooldown }) else None);
-                (if cooldown_elapsed
-                 then Some Cooldown_elapsed else None);
+                (if cooldown_elapsed then Some Cooldown_elapsed else None);
                 (if has_actionable_tasks
                  then Some (Task_backlog
                               { unclaimed = observation.unclaimed_task_count;

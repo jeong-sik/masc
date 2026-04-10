@@ -36,6 +36,20 @@ let make_meta_with_preset preset_str =
   | Ok meta -> meta
   | Error e -> failwith (Printf.sprintf "make_meta_with_preset('%s') failed: %s" preset_str e)
 
+let make_meta_with_custom_tools tools =
+  match Keeper_types.meta_of_json
+    (`Assoc
+      [ "name", `String "test-keeper"
+      ; "agent_name", `String "test-keeper"
+      ; "trace_id", `String "test-trace-pr"
+      ; "tool_access", `Assoc
+          [ "kind", `String "custom"
+          ; "tools", `List (List.map (fun tool -> `String tool) tools)
+          ]
+      ]) with
+  | Ok meta -> meta
+  | Error e -> failwith ("make_meta_with_custom_tools failed: " ^ e)
+
 let make_ctx_work () =
   Keeper_exec_context.create ~system_prompt:"test" ~max_tokens:4000
 
@@ -104,6 +118,17 @@ let call_tool config meta name input =
   let ctx_work = make_ctx_work () in
   Keeper_exec_tools.execute_keeper_tool_call
     ~config ~meta ~ctx_work ~name ~input ()
+
+let with_env key value f =
+  let saved = Sys.getenv_opt key in
+  Fun.protect
+    ~finally:(fun () ->
+      match saved with
+      | Some v -> Unix.putenv key v
+      | None -> Unix.putenv key "")
+    (fun () ->
+      Unix.putenv key value;
+      f ())
 
 let parse_json s =
   try Yojson.Safe.from_string s
@@ -820,6 +845,30 @@ let test_bash_git_status_allowed () =
     check bool "git status returns normal execution shape"
       true has_status)
 
+let test_bash_docker_playground_preserves_write_gate () =
+  with_room (fun config ->
+    let meta = make_meta_with_custom_tools ["keeper_bash"] in
+    with_env "MASC_KEEPER_DOCKER_PLAYGROUND" "true" (fun () ->
+        let result =
+          call_tool config meta "keeper_bash"
+            (`Assoc [ "cmd", `String "git commit -m test" ])
+        in
+        let json = parse_json result in
+        check string "docker write gate preserved"
+          "write_operation_gated" (json_string "error" json)))
+
+let test_bash_docker_playground_preserves_branch_switch_gate () =
+  with_room (fun config ->
+    let meta = make_meta_with_custom_tools ["keeper_bash"] in
+    with_env "MASC_KEEPER_DOCKER_PLAYGROUND" "true" (fun () ->
+        let result =
+          call_tool config meta "keeper_bash"
+            (`Assoc [ "cmd", `String "git checkout feature/x" ])
+        in
+        let json = parse_json result in
+        check string "docker branch-switch gate preserved"
+          "branch_switch_blocked" (json_string "error" json)))
+
 let test_shell_readonly_pwd_defaults_to_playground () =
   with_room (fun config ->
     let meta = make_meta_with_preset "delivery" in
@@ -1194,6 +1243,10 @@ let () =
       ; test_case "branch list allowed" `Quick test_bash_git_branch_list_allowed
       ; test_case "branch delete allowed" `Quick test_bash_git_branch_delete_allowed
       ; test_case "status allowed" `Quick test_bash_git_status_allowed
+      ; test_case "docker keeps write gate" `Quick
+          test_bash_docker_playground_preserves_write_gate
+      ; test_case "docker keeps branch-switch gate" `Quick
+          test_bash_docker_playground_preserves_branch_switch_gate
       ; test_case "readonly pwd defaults to playground" `Quick
           test_shell_readonly_pwd_defaults_to_playground
       ; test_case "fs read blocks shared repo by default" `Quick

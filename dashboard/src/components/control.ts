@@ -16,17 +16,24 @@ function currentSection(): OperationsSection {
   return 'intervene'
 }
 
+function renderSection(section: OperationsSection) {
+  switch (section) {
+    case 'governance':
+      return html`<${Governance} />`
+    case 'connectors':
+      return html`<${ConnectorStatusPanel} />`
+    case 'intervene':
+      return html`<${Ops} />`
+  }
+}
+
 export function Operations() {
   const section = currentSection()
 
   return html`
     <div class="flex flex-col gap-5">
       <div class="transition-opacity duration-300">
-        ${section === 'governance'
-          ? html`<${Governance} />`
-          : section === 'connectors'
-            ? html`<${ConnectorStatusPanel} />`
-            : html`<${Ops} />`}
+        ${renderSection(section)}
       </div>
     </div>
   `

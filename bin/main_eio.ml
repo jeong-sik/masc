@@ -265,9 +265,7 @@ let run_server ~sw:_ ~env ~host ~port ~base_path =
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
-    let error = Printexc.to_string exn in
-    Server_startup_state.mark_degraded ~error;
-    Log.Server.error "[main] server bootstrap failed; runtime marked degraded: %s" error
+    Log.Server.error "[main] keeper bootstrap failed (continuing without keepers): %s" (Printexc.to_string exn)
 
 (** CLI options *)
 let port =

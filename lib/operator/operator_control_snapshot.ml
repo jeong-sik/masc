@@ -70,6 +70,49 @@ let remote_confirm_ttl_seconds = 900.0
 
 let iso_of_unix = Dashboard_utils.iso_of_unix
 
+let runtime_status_from_live_signal (agent_status_json : Yojson.Safe.t) =
+  let runtime_status =
+    match Keeper_exec_status.agent_status_text agent_status_json with
+    | ("active" | "busy" | "listening" | "idle") as status -> Some status
+    | _ -> None
+  in
+  let has_live_signal =
+    Keeper_exec_status.agent_runtime_has_live_signal agent_status_json
+  in
+  let is_zombie =
+    match U.member "is_zombie" agent_status_json with
+    | `Bool value -> value
+    | _ -> false
+  in
+  match (runtime_status, has_live_signal, is_zombie) with
+  | Some status, true, false -> Some status
+  | _ -> None
+
+let health_state_allows_runtime_status_override (diagnostic : Yojson.Safe.t) =
+  match U.member "health_state" diagnostic with
+  | `String ("stale" | "degraded" | "zombie" | "dead") -> false
+  | _ -> true
+
+let align_keeper_runtime_status
+    ~(surface_status : string)
+    ~(diagnostic : Yojson.Safe.t)
+    ~(agent_status_json : Yojson.Safe.t)
+    ~(keepalive_running : bool) : string =
+  if not keepalive_running then
+    surface_status
+  else
+    let normalized_surface =
+      String.lowercase_ascii (String.trim surface_status)
+    in
+    let runtime_status =
+      if health_state_allows_runtime_status_override diagnostic then
+        runtime_status_from_live_signal agent_status_json
+      else None
+    in
+    match (normalized_surface, runtime_status) with
+    | ("inactive" | "offline"), Some status -> status
+    | _ -> surface_status
+
 let remote_client_type_of_context (ctx : 'a context) =
   match ctx.mcp_session_id with
   | Some _ -> "mcp_remote"
@@ -281,9 +324,14 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                    if lightweight then ([], [], None, None, None, None)
                    else keeper_tool_audit_fields config meta
                  in
-                 let agent_status =
+                 let surface_status =
                    if not agent_exists then "offline"
                    else Keeper_exec_status.keeper_surface_status ~agent_status:agent_json ~diagnostic
+                 in
+                 let aligned_status =
+                   align_keeper_runtime_status ~surface_status
+                     ~diagnostic
+                     ~agent_status_json:agent_json ~keepalive_running
                  in
                  let registry_phase =
                    Keeper_registry.get_phase ~base_path:config.base_path meta.name
@@ -311,7 +359,7 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                        ("short_goal", `String meta.short_goal);
                        ("mid_goal", `String meta.mid_goal);
                        ("long_goal", `String meta.long_goal);
-                       ("status", `String agent_status);
+                       ("status", `String aligned_status);
                        ("agent", agent_json);
                        ("generation", `Int meta.runtime.generation);
                        ("turn_count", `Int meta.runtime.usage.total_turns);

@@ -93,10 +93,61 @@ type unified_turn_channel =
   | Reactive
   | Scheduled_autonomous
 
+(** Typed reason for running a keeper turn. Each variant corresponds to
+    exactly one code path in {!unified_turn_decision}. *)
+type turn_reason =
+  | Mention_pending
+  | Board_event_pending
+  | Scope_message_pending
+  | Scheduled_autonomous_turn
+  | Idle_cooldown_elapsed of { idle_sec : int; cooldown : int }
+  | Cooldown_elapsed
+  | Task_backlog of { unclaimed : int; failed : int }
+  | Task_reactive_cooldown_elapsed
+  | Never_started
+
+(** Typed reason for skipping a keeper turn. *)
+type skip_reason =
+  | Scheduled_autonomous_disabled
+  | Idle_gate_pending of { remaining_sec : int }
+  | Cooldown_pending of { remaining_sec : int }
+  | No_signal
+
+(** Turn decision with non-empty reason list (NEL).
+    [Run] guarantees at least one trigger reason.
+    [Skip] guarantees at least one skip reason.
+    Channel is held by [unified_turn_decision], not duplicated here. *)
+type turn_verdict =
+  | Run of { reasons : turn_reason * turn_reason list }
+  | Skip of { reasons : skip_reason * skip_reason list }
+
+(** Convert a single turn reason to a flat string tag.
+    Encoding is compatibility-oriented: variant payloads
+    (idle_sec, cooldown, unclaimed, failed, remaining_sec) are
+    not included in the output. Returns the same fixed tag
+    regardless of parameter values. *)
+val turn_reason_to_string : turn_reason -> string
+
+(** Convert a single skip reason to a flat string tag.
+    Encoding is compatibility-oriented: variant payloads
+    (remaining_sec) are not included in the output. *)
+val skip_reason_to_string : skip_reason -> string
+
+(** Convert channel to string tag. *)
+val channel_to_string : unified_turn_channel -> string
+
+(** Extract all reasons as flat string tags from a verdict.
+    Tags are compatibility-oriented and do not include variant payloads.
+    Scheduled-autonomous run verdicts preserve the legacy flat tokens
+    that downstream logs and prompts previously consumed, including the
+    synthetic ["scheduled_autonomous_turn"], ["cooldown_elapsed"],
+    ["unclaimed_tasks"], and ["failed_tasks"] tags. *)
+val verdict_reasons_to_strings : turn_verdict -> string list
+
 type unified_turn_decision = {
   should_run : bool;
   channel : unified_turn_channel;
-  reasons : string list;
+  verdict : turn_verdict;
   since_last_scheduled_autonomous : int option;
   effective_cooldown : int option;
   task_reactive_cooldown : int option;

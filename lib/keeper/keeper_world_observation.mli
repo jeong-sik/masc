@@ -99,7 +99,9 @@ type turn_reason =
   | Mention_pending
   | Board_event_pending
   | Scope_message_pending
+  | Scheduled_autonomous_turn
   | Idle_cooldown_elapsed of { idle_sec : int; cooldown : int }
+  | Cooldown_elapsed
   | Task_backlog of { unclaimed : int; failed : int }
   | Task_reactive_cooldown_elapsed
   | Never_started
@@ -136,10 +138,10 @@ val channel_to_string : unified_turn_channel -> string
 
 (** Extract all reasons as flat string tags from a verdict.
     Tags are compatibility-oriented and do not include variant payloads.
-    The scheduled-autonomous path emits typed variants that may not
-    cover every legacy reason string previously produced by the
-    untyped code path; callers that depend on exhaustive legacy
-    coverage should match on [turn_verdict] directly. *)
+    Scheduled-autonomous run verdicts preserve the legacy flat tokens
+    that downstream logs and prompts previously consumed, including the
+    synthetic ["scheduled_autonomous_turn"], ["cooldown_elapsed"],
+    ["unclaimed_tasks"], and ["failed_tasks"] tags. *)
 val verdict_reasons_to_strings : turn_verdict -> string list
 
 type unified_turn_decision = {

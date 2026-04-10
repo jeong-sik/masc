@@ -517,15 +517,23 @@ let test_verdict_reasons_to_strings_preserves_legacy_run_tokens () =
     WO.Run
       {
         reasons =
-          ( WO.Idle_cooldown_elapsed { idle_sec = 120; cooldown = 900 },
+          ( WO.Scheduled_autonomous_turn,
             [
+              WO.Idle_cooldown_elapsed { idle_sec = 120; cooldown = 900 };
+              WO.Cooldown_elapsed;
               WO.Task_backlog { unclaimed = 1; failed = 2 };
               WO.Task_reactive_cooldown_elapsed;
             ] );
       }
   in
   check (list string) "legacy run tokens preserved"
-    [ "idle_gate_elapsed"; "actionable_backlog"; "task_reactive_cooldown_elapsed" ]
+    [ "scheduled_autonomous_turn";
+      "idle_gate_elapsed";
+      "cooldown_elapsed";
+      "actionable_backlog";
+      "unclaimed_tasks";
+      "failed_tasks";
+      "task_reactive_cooldown_elapsed" ]
     (WO.verdict_reasons_to_strings verdict)
 
 let test_verdict_reasons_to_strings_preserves_legacy_skip_tokens () =

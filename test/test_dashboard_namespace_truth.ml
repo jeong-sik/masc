@@ -168,10 +168,10 @@ let test_dashboard_namespace_truth_execution_fixture () =
             (request "/api/v1/dashboard/namespace-truth?fixture=execution_smoke")
         in
         let open Yojson.Safe.Util in
-        check int "fixture blocked sessions"
+        check int "fixture blocked operations"
           0
-          (json |> member "execution" |> member "summary" |> member "blocked_sessions" |> to_int);
-        (* top_queue is null when no blocked sessions exist *)
+          (json |> member "execution" |> member "summary" |> member "blocked_operations" |> to_int);
+        (* top_queue is null when cache has no execution_queue entries *)
         check bool "fixture top queue absent when no blockers"
           true
           (json |> member "execution" |> member "top_queue" = `Null);
@@ -496,9 +496,9 @@ let test_dashboard_namespace_truth_cold_cache_falls_back_to_partial_truth () =
         check bool "namespace block present"
           true
           (json |> member "namespace" <> `Null);
-        check int "execution summary falls back to zero sessions"
+        check int "execution summary falls back to zero operations"
           0
-          (json |> member "execution" |> member "summary" |> member "active_sessions" |> to_int);
+          (json |> member "execution" |> member "summary" |> member "active_operations" |> to_int);
         check string "namespace truth diagnostics keep execution cache state"
           "initializing"
           (json |> member "projection_diagnostics" |> member "execution_cache_state" |> to_string);

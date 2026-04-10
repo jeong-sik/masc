@@ -336,6 +336,7 @@
    tool_spec
    typed_tool_masc
    tool_broadcast_typed
+   state_product
    tool_token
    tool_dispatch
    tool_input_validation

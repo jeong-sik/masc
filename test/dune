@@ -323,6 +323,7 @@
         test_tool_dispatch
         test_tool_spec
         test_typed_tool_masc
+        test_state_product
         test_tool_result
         test_tool_hooks
         test_governance_pipeline
@@ -470,6 +471,7 @@
         test_tool_dispatch
         test_tool_spec
         test_typed_tool_masc
+        test_state_product
         test_tool_result
         test_tool_hooks
         test_governance_pipeline

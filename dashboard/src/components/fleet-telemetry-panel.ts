@@ -723,7 +723,7 @@ export function FleetTelemetryPanel() {
         <${SummaryCard}
           title="Fleet Coverage"
           value=${`${counts.live}/${value.rows.length || 0}`}
-          detail=${`${counts.toolCovered}/${value.rows.length || 0} keepers emitted recent tool telemetry.`}
+          detail=${`${counts.toolCovered}/${value.rows.length || 0} keepers surfaced recent tool activity.`}
           tone=${liveTone}
         />
         <${SummaryCard}

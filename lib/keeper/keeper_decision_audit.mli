@@ -8,6 +8,11 @@
 
     @since Decision Layer v2 — Phase A2 (#6232) *)
 
+(** Current decision layer level (MASC_DECISION_LAYER_LEVEL, 0-4).
+    Cached at module init — no per-call env lookup.
+    Level 0: off, 1: audit, 2: +guard bridge, 3: +trust, 4: +claim. *)
+val decision_layer_level : unit -> int
+
 (** Whether audit is enabled (MASC_DECISION_LAYER_LEVEL >= 1).
     Cached at module init — no per-call env lookup. *)
 val audit_enabled : unit -> bool

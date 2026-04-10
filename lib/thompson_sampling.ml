@@ -371,6 +371,21 @@ let quality_pass_alpha_boost = 0.3
 let quality_warn_beta_nudge  = 0.1
 let quality_fail_beta_penalty = 0.5
 
+(** Guard penalty β nudge: same magnitude as quality_fail.
+    Configurable via MASC_GUARD_PENALTY_BETA for B-SIM calibration.
+    Default 0.5 is a conservative pre-calibration estimate. *)
+let guard_penalty_beta_nudge =
+  Env_config_core.get_float ~default:0.5 "MASC_GUARD_PENALTY_BETA"
+
+(** Record a guard penalty (Guardrail_stop) into Thompson β.
+    Phase B1: Guard → Thompson bridge.
+    Penalty cap (1/cycle) is enforced by the caller. *)
+let record_guard_penalty ~agent_name =
+  let s = get_stats agent_name in
+  s.beta <- s.beta +. guard_penalty_beta_nudge;
+  s.beta <- Float.max min_prior s.beta;
+  s.updated_at <- Time_compat.now ()
+
 (** Record Post Verifier result into Thompson Sampling priors. *)
 let record_quality_signal ~agent_name ~(verdict : Post_verifier.verdict) =
   let s = get_stats agent_name in

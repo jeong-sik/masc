@@ -67,4 +67,11 @@
  (modules keeper_room_signal_eval)
  (libraries masc_mcp masc_mcp.prompt_registry masc_eio_context fs_compat yojson unix eio_main eio mirage-crypto-rng.unix))
  
+;; B-SIM: Decision Pipeline Monte Carlo simulation
+;; Phase B gate verification. No external dependencies.
+(executable
+ (name b_sim)
+ (modules b_sim)
+ (libraries))
+
 ; Executable for MASC MCP

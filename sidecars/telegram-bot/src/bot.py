@@ -209,8 +209,84 @@ class TelegramGateBot:
 
     # ── Message Handler ────────────────────────────────────
 
+    async def _stream_response(
+        self,
+        update: Update,
+        keeper: str,
+        text: str,
+        thinking_msg: Any,
+    ) -> bool:
+        """Try streaming response with live message editing.
+
+        Returns True if streaming succeeded, False to fall back to batch.
+        Telegram rate-limits edit_message to ~30/min per chat, so we
+        throttle edits to every ~1 second or 80 characters of new content.
+        """
+        import time
+
+        user = update.effective_user
+        chat = update.effective_chat
+        if user is None or chat is None:
+            return False
+
+        accumulated = ""
+        last_edit_time = 0.0
+        last_edit_len = 0
+        edit_interval = 1.0  # seconds between edits
+        char_threshold = 80  # min chars of new content before edit
+        streamed_any = False
+
+        try:
+            async for delta in self.gate.stream_message(
+                keeper_name=keeper,
+                content=text,
+                user_id=user.id,
+                username=user.username or str(user.id),
+                chat_id=chat.id,
+            ):
+                accumulated += delta
+                streamed_any = True
+                now = time.monotonic()
+                new_chars = len(accumulated) - last_edit_len
+                if now - last_edit_time >= edit_interval and new_chars >= char_threshold:
+                    display = strip_state_blocks(accumulated)
+                    if display:
+                        try:
+                            await thinking_msg.edit_text(display)
+                        except Exception:
+                            pass
+                        last_edit_time = now
+                        last_edit_len = len(accumulated)
+        except Exception as e:
+            logger.warning("Stream error: %s", e)
+            return False
+
+        if not streamed_any:
+            return False
+
+        # Final edit with complete text
+        final = strip_state_blocks(accumulated)
+        if final:
+            try:
+                await thinking_msg.edit_text(final)
+            except Exception:
+                await chat.send_message(final)
+            self._messages_processed += 1
+        else:
+            try:
+                await thinking_msg.edit_text("(empty response)")
+            except Exception:
+                pass
+            self._messages_processed += 1
+
+        return True
+
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle incoming text messages -- route to keeper."""
+        """Handle incoming text messages -- route to keeper.
+
+        Tries SSE streaming first for real-time response display.
+        Falls back to batch mode if streaming fails.
+        """
         if (
             update.effective_chat is None
             or update.effective_user is None
@@ -227,6 +303,13 @@ class TelegramGateBot:
         # Send "thinking" indicator
         thinking_msg = await update.effective_chat.send_message("...")
 
+        # Try streaming first
+        streamed = await self._stream_response(update, keeper, text, thinking_msg)
+        if streamed:
+            self._last_message_at = datetime.now(tz=timezone.utc).isoformat()
+            return
+
+        # Fall back to batch mode
         response = await self.gate.send_telegram_message(
             keeper_name=keeper,
             content=text,
@@ -247,17 +330,14 @@ class TelegramGateBot:
 
             chunks = chunk_text(reply)
 
-            # Edit the "thinking" message with the first chunk
             first_text = chunks[0]
             if footer and len(chunks) == 1:
                 first_text = f"{first_text}\n\n{footer}"
             try:
                 await thinking_msg.edit_text(first_text)
             except Exception:
-                # If edit fails, send as new message
                 await update.effective_chat.send_message(first_text)
 
-            # Send remaining chunks as new messages
             for i, chunk in enumerate(chunks[1:], 1):
                 msg_text = chunk
                 if footer and i == len(chunks) - 1:

@@ -112,8 +112,7 @@ let raw_completion ~model_id ~prompt ~max_tokens ~timeout_sec () =
 
 let error_message_of_http_error = function
   | Llm_provider.Http_client.NetworkError { message } -> message
-  | Llm_provider.Http_client.AcceptRejected { reason } ->
-    Printf.sprintf "Accept rejected: %s" reason
+  | Llm_provider.Http_client.AcceptRejected { reason } -> reason
   | Llm_provider.Http_client.HttpError { code; body } -> (
       try
         let json = Yojson.Safe.from_string body in

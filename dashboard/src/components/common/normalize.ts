@@ -44,6 +44,15 @@ export function asStringArray(value: unknown): string[] {
     .filter(Boolean)
 }
 
+export function asRecordArray(value: unknown): Record<string, unknown>[] {
+  if (!Array.isArray(value)) return []
+  return value.filter(isRecord)
+}
+
+export function asNullableString(value: unknown): string | null {
+  return asString(value) ?? null
+}
+
 export function asStringList(value: unknown): string[] {
   if (!Array.isArray(value)) return []
   return value
@@ -74,4 +83,3 @@ export function toIsoTimestamp(value: unknown): string | undefined {
   if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return undefined
   return new Date(value * 1000).toISOString()
 }
-

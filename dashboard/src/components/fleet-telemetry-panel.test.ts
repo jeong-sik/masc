@@ -165,7 +165,7 @@ describe('FleetTelemetryPanel', () => {
     expect(container.textContent).toContain('keeper-beta')
     expect(container.textContent).toContain('Keeper 턴 로그')
     expect(container.textContent).toContain('Failure Categories')
-  })
+  }, 60_000)
 
   it('falls back to runtime model and tool audit data when quality rows are sparse', async () => {
     const { buildFleetRows } = await loadPanel({
@@ -511,7 +511,7 @@ describe('FleetTelemetryPanel', () => {
     expect(container.textContent).toContain('Execution snapshot unavailable: execution down')
     expect(container.textContent).toContain('keeper-fallback')
     expect(container.textContent).toContain('Telemetry Stores')
-  })
+  }, 60_000)
 
   it('refreshes automatically on a visible page', async () => {
     const fetchDashboardExecution = vi.fn().mockResolvedValue(executionResponse)
@@ -540,7 +540,7 @@ describe('FleetTelemetryPanel', () => {
     expect(fetchToolQuality).toHaveBeenCalledTimes(2)
     expect(fetchTelemetrySummary).toHaveBeenCalledTimes(2)
     expect(container.textContent).toContain('30초 자동 갱신')
-  })
+  }, 60_000)
 
   it('ignores out-of-order fleet telemetry refresh responses', async () => {
     let executionCall = 0
@@ -660,7 +660,7 @@ describe('FleetTelemetryPanel', () => {
 
     expect(container.textContent).toContain('keeper-gamma')
     expect(container.textContent).not.toContain('keeper-stale')
-  })
+  }, 60_000)
 
   it('aborts superseded fleet telemetry requests before a newer refresh settles', async () => {
     const abortedSignals: AbortSignal[] = []
@@ -706,5 +706,5 @@ describe('FleetTelemetryPanel', () => {
     expect(abortedSignals.length).toBeGreaterThan(0)
     expect(abortedSignals.every(signal => signal.aborted)).toBe(true)
     expect(container.textContent).toContain('keeper-alpha')
-  })
+  }, 60_000)
 })

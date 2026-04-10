@@ -11,6 +11,7 @@ import DOMPurify from 'dompurify'
 
 // ── Lazy shiki loader ────────────────────────────────────────
 import type { Highlighter } from 'shiki'
+import type MermaidDefault from 'mermaid'
 
 let shikiPromise: Promise<Highlighter> | null = null
 
@@ -30,20 +31,26 @@ function getShiki(): Promise<Highlighter> {
 }
 
 // ── Lazy mermaid loader ──────────────────────────────────────
-type MermaidApi = typeof import('mermaid')['default']
+type MermaidApi = typeof MermaidDefault
+
+function importMermaid(): Promise<MermaidApi> {
+  return import('mermaid').then(module => module.default)
+}
 let mermaidPromise: Promise<MermaidApi> | null = null
 let mermaidConfigured = false
 let mermaidRenderCount = 0
 
 function getMermaid(): Promise<MermaidApi> {
-  if (!mermaidPromise) {
-    mermaidPromise = import('mermaid').then(m => m.default)
-  }
-  return mermaidPromise.then(mermaid => {
+  const promise = mermaidPromise ?? (mermaidPromise = importMermaid())
+  return promise.then(mermaid => {
     if (mermaidConfigured) return mermaid
     mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'strict' })
     mermaidConfigured = true
     return mermaid
+  }).catch((err) => {
+    mermaidPromise = null
+    mermaidConfigured = false
+    throw err
   })
 }
 
@@ -135,6 +142,10 @@ function renderMarkdown(text: string): string {
 // ── Component ────────────────────────────────────────────────
 export function Markdown({ text, class: className }: { text: string; class?: string }) {
   if (!text) return null
+  return html`<${MarkdownContent} text=${text} class=${className} />`
+}
+
+function MarkdownContent({ text, class: className }: { text: string; class?: string }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const htmlStr = useMemo(() => renderMarkdown(text), [text])
   const classes = ['markdown-content', className].filter(Boolean).join(' ')
@@ -147,7 +158,7 @@ export function Markdown({ text, class: className }: { text: string; class?: str
     if (mermaidCodes.length === 0) return
 
     let cancelled = false
-    ;(async () => {
+    void (async () => {
       const mermaid = await getMermaid()
       if (cancelled) return
       for (const codeEl of mermaidCodes) {
@@ -181,7 +192,7 @@ export function Markdown({ text, class: className }: { text: string; class?: str
     if (codeBlocks.length === 0) return
 
     let cancelled = false
-    ;(async () => {
+    void (async () => {
       let highlighter: Highlighter | null = null
       
       for (const codeEl of codeBlocks) {
@@ -207,8 +218,8 @@ export function Markdown({ text, class: className }: { text: string; class?: str
         
         try {
           const loadedLangs = highlighter.getLoadedLanguages()
-          if (lang !== 'text' && !loadedLangs.includes(lang as any)) {
-            await highlighter.loadLanguage(lang as any)
+          if (lang !== 'text' && !loadedLangs.includes(lang)) {
+            lang = 'text'
           }
         } catch {
           lang = 'text'

@@ -261,6 +261,33 @@ describe('FleetTelemetryPanel', () => {
     ])
   })
 
+  it('marks tool-quality-only fallback rows as known tool activity', async () => {
+    const { buildFleetRows } = await loadPanel({
+      fetchDashboardExecution: vi.fn().mockResolvedValue(executionResponse),
+      fetchToolQuality: vi.fn().mockResolvedValue(toolQualityResponse),
+      fetchTelemetrySummary: vi.fn().mockResolvedValue(telemetrySummaryResponse),
+    })
+
+    const rows = buildFleetRows([], {
+      ...toolQualityResponse,
+      by_keeper: [
+        {
+          name: 'keeper-tool-only',
+          calls: 5,
+          success_pct: 100,
+        },
+      ],
+    })
+
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({
+      name: 'keeper-tool-only',
+      tool_calls: 5,
+      tool_activity_known: true,
+      model: 'unknown',
+    })
+  })
+
   it('renders tool activity fallback copy instead of misleading no-tools text', async () => {
     const fetchDashboardExecution = vi.fn().mockResolvedValue({
       ...executionResponse,

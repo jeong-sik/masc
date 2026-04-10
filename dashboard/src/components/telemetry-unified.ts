@@ -337,15 +337,17 @@ export function buildTelemetryDisplayItems(entries: TelemetryEntry[]): Telemetry
 
 function condensedStats(items: TelemetryDisplayItem[]) {
   let groups = 0
+  let groupedEntries = 0
   let collapsedEntries = 0
   const byCategory = new Map<TelemetryCondensedCategory, number>()
   for (const item of items) {
     if (item.kind !== 'group') continue
     groups += 1
+    groupedEntries += item.count
     collapsedEntries += Math.max(0, item.count - 1)
     byCategory.set(item.category, (byCategory.get(item.category) ?? 0) + item.count)
   }
-  return { groups, collapsedEntries, byCategory }
+  return { groups, groupedEntries, collapsedEntries, byCategory }
 }
 
 function SummaryCard({ src }: { src: TelemetrySourceSummary }) {
@@ -748,7 +750,9 @@ export function TelemetryUnified() {
       <div class="rounded-xl border border-[var(--card-border)] overflow-hidden">
         <div class="px-3 py-2 border-b border-[var(--card-border)] bg-[var(--white-3)] text-xs text-[var(--text-muted)]">
           MASC telemetry store entries ${entries.length.toLocaleString()}건
-          ${condensed.groups > 0 ? ` · 반복 노이즈 압축 ${condensed.collapsedEntries.toLocaleString()}건` : ''}
+          ${condensed.groups > 0
+            ? ` · 반복 그룹 ${condensed.groups.toLocaleString()}개 · 원본 ${condensed.groupedEntries.toLocaleString()}건`
+            : ''}
         </div>
         ${condensed.groups > 0 ? html`
           <div class="px-3 py-2 border-b border-[var(--card-border)] bg-[rgba(255,255,255,0.02)] flex flex-wrap gap-2 text-[11px]">

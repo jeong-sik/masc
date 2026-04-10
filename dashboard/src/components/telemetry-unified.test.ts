@@ -208,10 +208,133 @@ describe('TelemetryUnified', () => {
     })
     await flushUi()
 
-    expect(container.textContent).toContain('반복 노이즈 압축 2건')
+    expect(container.textContent).toContain('반복 그룹 1개 · 원본 3건')
     expect(container.textContent).toContain('Polling / no-op')
     expect(container.textContent).toContain('Polling / no-op · masc_status · 3 events')
     expect(container.textContent).toContain('task_claimed: keeper-alpha')
+  })
+
+  it('groups heartbeat keeper metrics into a heartbeat category', async () => {
+    const fetchTelemetry = vi.fn().mockResolvedValue({
+      ...baseTelemetry,
+      count: 3,
+      entries: [
+        {
+          source: 'keeper_metric',
+          ts: 1_775_709_310,
+          name: 'keeper-heart',
+          channel: 'heartbeat',
+          session_id: 'sess-heart',
+          model_used: 'unknown',
+          tool_call_count: 0,
+        },
+        {
+          source: 'keeper_metric',
+          ts: 1_775_709_309,
+          name: 'keeper-heart',
+          channel: 'heartbeat',
+          session_id: 'sess-heart',
+          model_used: 'unknown',
+          tool_call_count: 0,
+        },
+        {
+          source: 'keeper_metric',
+          ts: 1_775_709_200,
+          name: 'keeper-heart',
+          channel: 'turn',
+          model_used: 'glm-5.1',
+          tool_call_count: 1,
+        },
+      ],
+    })
+    const fetchTelemetrySummary = vi.fn().mockResolvedValue({
+      ...baseSummary,
+      sources: [
+        { source: 'keeper_metric', entry_count: 3, keeper_count: 1, exists: true },
+      ],
+      total_entries: 3,
+    })
+    const { TelemetryUnified, buildTelemetryDisplayItems } = await loadPanel(fetchTelemetry, fetchTelemetrySummary)
+
+    const displayItems = buildTelemetryDisplayItems((await fetchTelemetry()).entries)
+    expect(displayItems[0]).toMatchObject({
+      kind: 'group',
+      category: 'heartbeat',
+      label: 'keeper-heart heartbeat',
+      count: 2,
+    })
+    expect(displayItems[1]).toMatchObject({
+      kind: 'entry',
+    })
+
+    await act(async () => {
+      render(html`<${TelemetryUnified} />`, container)
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    expect(container.textContent).toContain('Heartbeat · keeper-heart heartbeat · 2 events')
+  })
+
+  it('expands grouped rows to reveal the condensed raw entries', async () => {
+    const fetchTelemetry = vi.fn().mockResolvedValue({
+      ...baseTelemetry,
+      count: 3,
+      entries: [
+        {
+          source: 'tool_metric',
+          ts: 1_775_709_300,
+          session_id: 'sess-2',
+          tool_name: 'mcp__masc__masc_status',
+          duration_ms: 15,
+          success: true,
+        },
+        {
+          source: 'tool_usage',
+          ts: 1_775_709_299,
+          session_id: 'sess-2',
+          caller: 'keeper_internal',
+          tool_name: 'masc_status',
+        },
+        {
+          source: 'tool_call_io',
+          ts: 1_775_709_298,
+          session_id: 'sess-2',
+          keeper: 'keeper-alpha',
+          tool: 'masc_status',
+        },
+      ],
+    })
+    const fetchTelemetrySummary = vi.fn().mockResolvedValue({
+      ...baseSummary,
+      sources: [
+        { source: 'tool_metric', entry_count: 1, keeper_count: 1, exists: true },
+        { source: 'tool_usage', entry_count: 1, keeper_count: 1, exists: true },
+        { source: 'tool_call_io', entry_count: 1, keeper_count: 1, exists: true },
+      ],
+      total_entries: 3,
+    })
+    const { TelemetryUnified } = await loadPanel(fetchTelemetry, fetchTelemetrySummary)
+
+    await act(async () => {
+      render(html`<${TelemetryUnified} />`, container)
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    const groupRow = Array.from(container.querySelectorAll('[role="button"]'))
+      .find(node => node.textContent?.includes('Polling / no-op · masc_status · 3 events'))
+    expect(groupRow).toBeTruthy()
+
+    await act(async () => {
+      groupRow?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    expect(container.textContent).toContain('Latest:')
+    expect(container.textContent).toContain('keeper-alpha -> masc_status')
+    expect(container.textContent).toContain('Raw JSON')
   })
 
   it('ignores out-of-order telemetry refresh responses', async () => {

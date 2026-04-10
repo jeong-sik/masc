@@ -199,7 +199,7 @@ function buildToolQualityMap(toolQuality: ToolQualityResponse): Map<string, { ca
 type FleetBand = 'attention' | 'active' | 'paused' | 'offline'
 
 function fleetBand(row: FleetRow): FleetBand {
-  const normalizedStatus = row.status.trim().toLowerCase()
+  const normalizedStatus = normalizeText(row.status)?.toLowerCase() ?? 'unknown'
   if (
     !row.keepalive_running
     || normalizedStatus === 'offline'
@@ -232,12 +232,12 @@ function fleetBandScore(row: FleetRow): number {
 
 function rowUrgencyScore(row: FleetRow): number {
   let score = 0
-  if (row.context_ratio >= PRESSURE_WARN_RATIO) score += row.context_ratio * 10
+  if (row.context_ratio >= PRESSURE_WARN_RATIO) score += row.context_ratio * 100
   if (row.last_activity_ago_s != null && row.last_activity_ago_s >= STALE_ACTIVITY_SEC) {
-    score += Math.min(row.last_activity_ago_s / STALE_ACTIVITY_SEC, 10)
+    score += Math.min(row.last_activity_ago_s / STALE_ACTIVITY_SEC, 5)
   }
   if (row.tool_success_pct != null && row.tool_success_pct < 90) {
-    score += (100 - row.tool_success_pct) / 10
+    score += (100 - row.tool_success_pct) / 5
   }
   return score
 }

@@ -29,11 +29,13 @@ Run the bot from `sidecars/discord-bot`, but make sure its runtime root matches
 the server's `MASC_BASE_PATH`.
 
 ```bash
-cd ~/me/workspace/yousleepwhen/masc-mcp/sidecars/discord-bot
+REPO_ROOT=$(git rev-parse --show-toplevel) &&
+cd "$REPO_ROOT/sidecars/discord-bot" &&
 cp .env.example .env
 
 # Required for shared connector state with the local MASC server.
-export MASC_BASE_PATH=~/me
+# Match the same runtime root the server uses.
+export MASC_BASE_PATH=/path/to/server/runtime/root
 
 # Install dependencies once.
 uv pip install -e ".[dev]"
@@ -217,7 +219,7 @@ Useful checks:
 
 ```bash
 curl -sfS http://127.0.0.1:8935/api/v1/gate/discord/status
-ls -la ~/me/.masc/connectors/discord
+ls -la "${MASC_BASE_PATH:-$(pwd)}/.masc/connectors/discord"
 ```
 
 ### Messages are ignored in a channel

@@ -11,7 +11,7 @@ let starts_with ~(prefix : string) (s : string) : bool =
 let strip_trailing_slashes = Env_config_core.strip_trailing_slashes
 
 let normalize_path_for_check (path : string) : string =
-  try Unix.realpath path
+  try Fs_compat.realpath path
   with Unix.Unix_error _ ->
     (* Walk up the directory tree until we find an ancestor that exists and
        can be resolved via realpath, then reconstruct the suffix.
@@ -24,7 +24,7 @@ let normalize_path_for_check (path : string) : string =
         (* Reached filesystem root without a successful realpath. *)
         (p, acc)
       else
-        match (try Some (Unix.realpath p) with Unix.Unix_error _ -> None) with
+        match (try Some (Fs_compat.realpath p) with Unix.Unix_error _ -> None) with
         | Some resolved -> (resolved, acc)
         | None -> collect_suffix parent (Filename.basename p :: acc)
     in
@@ -54,7 +54,7 @@ let join_path_components = function
   | hd :: tl -> List.fold_left Filename.concat hd tl
 
 let path_exists (path : string) : bool =
-  Sys.file_exists path
+  Fs_compat.file_exists path
 
 let parent_exists (path : string) : bool =
   let parent = Filename.dirname path in

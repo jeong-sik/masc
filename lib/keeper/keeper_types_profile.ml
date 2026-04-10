@@ -227,7 +227,7 @@ let persona_profile_path_opt name =
   dirs
   |> List.find_map (fun root ->
          let path = Filename.concat (Filename.concat root name) "profile.json" in
-         if Sys.file_exists path then Some path else None)
+         if Fs_compat.file_exists path then Some path else None)
 
 (* ================================================================ *)
 (* TOML -> keeper_profile_defaults conversion                        *)
@@ -353,7 +353,7 @@ let load_keeper_toml (path : string)
 
 let discover_keepers_toml (dir : string)
     : (string * keeper_profile_defaults) list =
-  if not (Sys.file_exists dir && Sys.is_directory dir) then []
+  if not (Fs_compat.file_exists dir && Sys.is_directory dir) then []
   else
     dir
     |> Sys.readdir
@@ -512,7 +512,7 @@ let load_persona_extended ?(max_chars = persona_description_max_chars) name : st
   |> List.rev
   |> List.find_map (fun root ->
       let path = Filename.concat (Filename.concat root name) "AGENT.md" in
-      if Sys.file_exists path then
+      if Fs_compat.file_exists path then
         match Safe_ops.read_file_safe path with
         | Error msg ->
           Log.Keeper.warn "[load_agent_md] failed to read %s: %s" path msg;
@@ -595,7 +595,7 @@ let list_persona_summaries () : persona_summary list =
              let profile_path =
                Filename.concat (Filename.concat root name) "profile.json"
              in
-             if Sys.file_exists profile_path then Some (name, profile_path)
+             if Fs_compat.file_exists profile_path then Some (name, profile_path)
              else None)
     with Sys_error _ -> []
   in

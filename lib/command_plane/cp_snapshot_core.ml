@@ -125,7 +125,9 @@ let snapshot_state_of_sections ~config ~agents ~managed_units ~units ~source
     tree_idx;
   }
 
-let build_snapshot_state ?sessions config =
+let build_snapshot_state ?sessions (config : Room_utils.config) =
+  (* Team sessions removed — sessions parameter is always [] *)
+  ignore sessions;
   let sc = match !_section_cache with
     | Some cache -> cache
     | None ->
@@ -133,18 +135,7 @@ let build_snapshot_state ?sessions config =
         _section_cache := Some cache;
         cache
   in
-  (* When caller provides explicit sessions, bypass cache entirely *)
-  match sessions with
-  | Some provided_sessions ->
-      let agents, managed_units, units, source = topology_units config in
-      let intents = read_intents config in
-      let operations = all_operations ~sessions:provided_sessions config units in
-      let detachments = all_detachments ~sessions:provided_sessions config units operations in
-      let decisions = all_policy_decisions config in
-      snapshot_state_of_sections ~config ~agents ~managed_units ~units ~source
-        ~sessions:provided_sessions ~intents ~operations ~detachments ~decisions
-  | None ->
-      (match config.backend with
+  match config.backend with
       | FileSystem _ ->
           (* Per-section mtime check: only re-read sections whose files changed. *)
           let units_mt = _file_mtime (units_path config) in
@@ -152,8 +143,6 @@ let build_snapshot_state ?sessions config =
             Filename.concat (Room.masc_dir config) "agents"
           in
           let agents_mt = _file_mtime agents_dir in
-          let sessions_dir = Filename.concat (Room.masc_dir config) "team-sessions" in
-          let sessions_mt = _file_mtime sessions_dir in
           let intents_mt = _file_mtime (intents_path config) in
           let ops_mt = _file_mtime (operations_path config) in
           let det_mt = _file_mtime (detachments_path config) in
@@ -169,30 +158,24 @@ let build_snapshot_state ?sessions config =
             sc.topo_units_mtime <- units_mt;
             sc.topo_agents_mtime <- agents_mt
           end;
-          (* Section 2: sessions — cap at _session_limit most recent *)
-          if sessions_mt <> sc.sessions_mtime then begin
-            sc.sessions <- [];
-            sc.sessions_mtime <- sessions_mt
-          end;
+          (* Section 2: sessions removed — team session cleanup *)
           (* Section 3: intents *)
           if intents_mt <> sc.intents_mtime then begin
             sc.intents <- read_intents config;
             sc.intents_mtime <- intents_mt
           end;
-          (* Section 4: operations — re-read if ops file, topology, or sessions changed *)
+          (* Section 4: operations — re-read if ops file or topology changed *)
           if ops_mt <> sc.ops_mtime
              || sc.topo_units_mtime <> sc.ops_topo_units_mtime
-             || sc.topo_agents_mtime <> sc.ops_topo_agents_mtime
-             || sc.sessions_mtime <> sc.ops_sessions_mtime then begin
-            sc.operations <- all_operations ~sessions:sc.sessions config sc.units;
+             || sc.topo_agents_mtime <> sc.ops_topo_agents_mtime then begin
+            sc.operations <- all_operations config sc.units;
             sc.ops_mtime <- ops_mt;
             sc.ops_topo_units_mtime <- sc.topo_units_mtime;
-            sc.ops_topo_agents_mtime <- sc.topo_agents_mtime;
-            sc.ops_sessions_mtime <- sc.sessions_mtime
+            sc.ops_topo_agents_mtime <- sc.topo_agents_mtime
           end;
           (* Section 5: detachments — re-read if detachments file or operations changed *)
           if det_mt <> sc.det_mtime || sc.ops_mtime <> sc.det_ops_mtime then begin
-            sc.detachments <- all_detachments ~sessions:sc.sessions config sc.units sc.operations;
+            sc.detachments <- all_detachments config sc.units sc.operations;
             sc.det_mtime <- det_mt;
             sc.det_ops_mtime <- sc.ops_mtime
           end;
@@ -206,19 +189,18 @@ let build_snapshot_state ?sessions config =
           let state =
             snapshot_state_of_sections ~config ~agents:sc.agents
               ~managed_units:sc.managed_units ~units:sc.units ~source:sc.source
-              ~sessions:sc.sessions ~intents:sc.intents ~operations:sc.operations
+              ~sessions:[] ~intents:sc.intents ~operations:sc.operations
               ~detachments:sc.detachments ~decisions:sc.decisions
           in
           state
       | Memory _ | PostgresNative _ ->
           let agents, managed_units, units, source = topology_units config in
-          let sessions = [] in
           let intents = read_intents config in
-          let operations = all_operations ~sessions config units in
-          let detachments = all_detachments ~sessions config units operations in
+          let operations = all_operations config units in
+          let detachments = all_detachments config units operations in
           let decisions = all_policy_decisions config in
           snapshot_state_of_sections ~config ~agents ~managed_units ~units
-            ~source ~sessions ~intents ~operations ~detachments ~decisions)
+            ~source ~sessions:[] ~intents ~operations ~detachments ~decisions
 
 let topology_json_from_state (state : snapshot_state) =
   let tree_idx = state.tree_idx in

@@ -501,13 +501,11 @@ let update_field_in_content ~(table : string) ~(key : string)
 let atomic_write_file ~(path : string) (content : string) : (unit, string) result =
   let tmp = path ^ ".tmp" in
   try
-    let oc = open_out tmp in
-    Fun.protect ~finally:(fun () -> close_out oc) (fun () ->
-      output_string oc content);
-    Unix.rename tmp path;
+    Fs_compat.save_file tmp content;
+    Fs_compat.rename tmp path;
     Ok ()
   with exn ->
-    (try Sys.remove tmp with _ -> ());
+    (try Sys.remove tmp with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
     Error (Printf.sprintf "atomic write failed: %s" (Printexc.to_string exn))
 
 (** Update a field in a keeper TOML file on disk.

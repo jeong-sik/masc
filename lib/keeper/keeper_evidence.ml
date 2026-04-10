@@ -26,26 +26,26 @@ let hash_lines lines =
 
 (* ── Hash chain state (process-scoped) ───────────────────────── *)
 
-let chain_mu = Mutex.create ()
+let chain_mu = Eio.Mutex.create ()
 let chain_latest : (string, string) Hashtbl.t = Hashtbl.create 8
 
 let chain_key ~keeper_name ~trace_id =
   Printf.sprintf "%s/%s" keeper_name trace_id
 
 let get_prev_hash ~keeper_name ~trace_id =
-  Mutex.lock chain_mu;
+  Eio.Mutex.lock chain_mu;
   let result =
     match Hashtbl.find_opt chain_latest (chain_key ~keeper_name ~trace_id) with
     | Some h -> h
     | None -> "genesis"
   in
-  Mutex.unlock chain_mu;
+  Eio.Mutex.unlock chain_mu;
   result
 
 let set_latest_hash ~keeper_name ~trace_id hash =
-  Mutex.lock chain_mu;
+  Eio.Mutex.lock chain_mu;
   Hashtbl.replace chain_latest (chain_key ~keeper_name ~trace_id) hash;
-  Mutex.unlock chain_mu
+  Eio.Mutex.unlock chain_mu
 
 (* ── Phase 1: Turn-level evidence capture ────────────────────── *)
 

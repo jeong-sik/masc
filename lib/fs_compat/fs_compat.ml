@@ -123,7 +123,39 @@ let append_file (path : string) (content : string) : unit =
 (** Check if file exists.
     Uses Sys.file_exists (works in both Eio and non-Eio contexts). *)
 let file_exists (path : string) : bool =
-  Sys.file_exists path
+  with_fs_or_fallback ~path ~fallback:(fun () -> Sys.file_exists path) (fun fs ->
+    try
+      let _ = Eio.Path.stat ~follow:true Eio.Path.(fs / path) in true
+    with Eio.Io _ -> false)
+
+let file_size (path : string) : int option =
+  with_fs_or_fallback ~path
+    ~fallback:(fun () -> try Some (Unix.stat path).st_size with Unix.Unix_error _ -> None)
+    (fun _fs ->
+      try Some (Eio_unix.run_in_systhread (fun () -> (Unix.stat path).st_size))
+      with Unix.Unix_error _ -> None)
+
+let file_mtime (path : string) : float option =
+  with_fs_or_fallback ~path
+    ~fallback:(fun () -> try Some (Unix.stat path).st_mtime with Unix.Unix_error _ -> None)
+    (fun _fs ->
+      try Some (Eio_unix.run_in_systhread (fun () -> (Unix.stat path).st_mtime))
+      with Unix.Unix_error _ -> None)
+
+
+let rename (src : string) (dst : string) : unit =
+  with_fs_or_fallback ~path:src ~fallback:(fun () -> Sys.rename src dst) (fun fs ->
+    Eio.Path.rename Eio.Path.(fs / src) Eio.Path.(fs / dst))
+
+let rmdir (path : string) : unit =
+  with_fs_or_fallback ~path ~fallback:(fun () -> Unix.rmdir path) (fun fs ->
+    Eio.Path.rmdir Eio.Path.(fs / path))
+
+let realpath (path : string) : string =
+  with_fs_or_fallback ~path
+    ~fallback:(fun () -> Unix.realpath path)
+    (fun _fs ->
+      Eio_unix.run_in_systhread (fun () -> Unix.realpath path))
 
 (** Create directory recursively if not exists.
     @raises Sys_error on all I/O failures. Eio.Io is normalized internally. *)

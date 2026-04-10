@@ -59,9 +59,10 @@ let resolve_status_target (ctx : _ context) args =
 
 (** Hash the status-affecting args so different parameter combos
     get separate cache entries (e.g. fast=true vs fast=false). *)
-let hash_status_args resolved_name args =
+let hash_status_args config resolved_name args =
   let parts = [
     resolved_name;
+    Keeper_manual_reconcile.cache_key config resolved_name;
     string_of_bool (get_bool args "fast" false);
     string_of_bool (get_bool args "include_context" false);
     string_of_bool (get_bool args "include_metrics_overview" false);
@@ -77,7 +78,7 @@ let handle_keeper_status ctx args : tool_result =
   match resolve_status_target ctx args with
   | Error err -> (false, err)
   | Ok (name, m) ->
-      let args_hash = hash_status_args name args in
+      let args_hash = hash_status_args ctx.config name args in
       (* Cache hit: same updated_at + same args → return cached response *)
       (match Hashtbl.find_opt _cache name with
        | Some entry
@@ -662,6 +663,7 @@ let handle_keeper_status ctx args : tool_result =
            ("compaction_history_count", `Int (snd compaction_history_tail));
            ("storage_paths", `Assoc [
              ("meta", `String (keeper_meta_path ctx.config m.name));
+             ("manual_reconcile", `String (Keeper_manual_reconcile.record_path ctx.config m.name));
              ("metrics", `String (Dated_jsonl.base_dir metrics_store));
              ("metrics_single_file", `String metrics_path);
              ("memory_bank", `String memory_bank_path);

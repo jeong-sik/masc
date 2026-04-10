@@ -1,6 +1,28 @@
 open Keeper_types
 open Keeper_exec_shared
 
+(** Pre-compiled regex for gh CLI "not found" error messages.
+    Matches case-insensitively against multiple known error phrases
+    to detect hallucinated issue/PR numbers. *)
+let gh_not_found_re =
+  Re.compile
+    (Re.alt
+       [ Re.no_case (Re.str "Could not resolve")
+       ; Re.no_case (Re.str "Could not find")
+       ; Re.no_case (Re.str "No such issue")
+       ; Re.no_case (Re.str "not found")
+       ])
+
+(** Return a hint field list when gh exits non-zero and output matches
+    a known "not found" pattern, indicating a hallucinated issue/PR number. *)
+let gh_not_found_hint ~(st : Unix.process_status) ~(out : string) =
+  if st <> Unix.WEXITED 0 && Re.execp gh_not_found_re out
+  then
+    [ "hint", `String
+        "The issue/PR number does not exist. Do not guess numbers. \
+         Use 'issue list' or 'pr list' to find valid targets first." ]
+  else []
+
 let handle_keeper_github
       ~(config : Room.config)
       ~(meta : keeper_meta)
@@ -129,10 +151,10 @@ let handle_keeper_github
           let st, out = Process_eio.run_argv_with_status ~timeout_sec [ "/bin/zsh"; "-lc"; shell_cmd ] in
           Yojson.Safe.to_string
             (`Assoc
-                [ "ok", `Bool (st = Unix.WEXITED 0)
-                ; "status", Keeper_alerting_path.process_status_to_json st
-                ; "output", `String out
-                ]))
+                ([ "ok", `Bool (st = Unix.WEXITED 0)
+                 ; "status", Keeper_alerting_path.process_status_to_json st
+                 ; "output", `String out
+                 ] @ gh_not_found_hint ~st ~out)))
       else (
         let gh_cmd =
           if cmd <> ""
@@ -146,10 +168,10 @@ let handle_keeper_github
         in
         Yojson.Safe.to_string
           (`Assoc
-              [ "ok", `Bool (st = Unix.WEXITED 0)
-              ; "status", Keeper_alerting_path.process_status_to_json st
-              ; "output", `String out
-              ])))
+              ([ "ok", `Bool (st = Unix.WEXITED 0)
+               ; "status", Keeper_alerting_path.process_status_to_json st
+               ; "output", `String out
+               ] @ gh_not_found_hint ~st ~out))))
 ;;
 
 let handle_keeper_pr_workflow
@@ -272,7 +294,7 @@ let handle_keeper_pr_workflow
           then String.sub path 0 (String.length path - 1)
           else path
         in
-        try Unix.realpath stripped
+        try Fs_compat.realpath stripped
         with Unix.Unix_error _ -> stripped
       in
       let same_worktree_path left right =
@@ -305,7 +327,7 @@ let handle_keeper_pr_workflow
           loop None (String.split_on_char '\n' out)
       in
       let cleanup_worktree () =
-        if !worktree_dir <> "" && Sys.file_exists !worktree_dir then begin
+        if !worktree_dir <> "" && Fs_compat.file_exists !worktree_dir then begin
           match remove_worktree_path !worktree_dir with
           | Ok () -> ()
           | Error msg ->
@@ -323,7 +345,7 @@ let handle_keeper_pr_workflow
           let worktree_path = Filename.concat worktrees_dir worktree_id in
           Fs_compat.mkdir_p worktrees_dir;
           let prepare_result =
-            if Sys.file_exists worktree_path then
+            if Fs_compat.file_exists worktree_path then
               match remove_worktree_path worktree_path with
               | Ok () -> Ok ()
               | Error msg ->
@@ -388,7 +410,7 @@ let handle_keeper_pr_workflow
                 | Error _ as err -> err
                 | Ok () -> begin
                   let worktree_root =
-                    try Unix.realpath worktree_path
+                    try Fs_compat.realpath worktree_path
                     with Unix.Unix_error _ -> worktree_path
                   in
                   worktree_dir := worktree_root;
@@ -414,10 +436,10 @@ let handle_keeper_pr_workflow
         else begin
           let abs_path = Filename.concat !worktree_dir file_path in
           let canonical =
-            try Some (Unix.realpath abs_path)
+            try Some (Fs_compat.realpath abs_path)
             with Unix.Unix_error _ ->
               try
-                let parent = Unix.realpath (Filename.dirname abs_path) in
+                let parent = Fs_compat.realpath (Filename.dirname abs_path) in
                 Some (Filename.concat parent (Filename.basename abs_path))
               with Unix.Unix_error _ -> None
           in
@@ -441,7 +463,7 @@ let handle_keeper_pr_workflow
         if !worktree_dir = "" then Error "no worktree path"
         else begin
           let check_script = Filename.concat !worktree_dir "scripts/check-version-truth.sh" in
-          if not (Sys.file_exists check_script) then
+          if not (Fs_compat.file_exists check_script) then
             Error "missing version truth script: scripts/check-version-truth.sh"
           else
           let st, out = run_argv ~timeout_sec:10.0

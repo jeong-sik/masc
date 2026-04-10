@@ -157,6 +157,7 @@ let run_named
     ?enable_thinking
     ?approval
     ?exit_condition
+    ?exit_condition_result
     ?oas_checkpoint
     ?event_bus
     ?sw
@@ -213,6 +214,7 @@ let run_named
       event_bus;
       approval;
       exit_condition;
+      exit_condition_result;
     }
   in
   let config = { config with named_cascade = Some named_cascade; initial_messages; raw_trace; yield_on_tool } in

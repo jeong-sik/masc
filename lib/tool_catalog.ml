@@ -210,6 +210,8 @@ let explicit_metadata : (string * metadata) list =
         (hidden_active "Direct execution can apply privileged side effects and should be treated as destructive.") );
     ("masc_tool_grant", destructive_tool);
     ("masc_tool_revoke", destructive_tool);
+    ( "masc_keeper_reconcile",
+      { default_metadata with required_permission = Some Types.CanBroadcast } );
     ( "masc_operation_stop",
       destructive_tool );
     ( "masc_operation_pause",

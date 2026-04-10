@@ -17,7 +17,7 @@ let ensured_dirs : (string, unit) Hashtbl.t = Hashtbl.create 16
 
 let ensure_dir (path : string) : string =
   Eio_guard.with_mutex dir_mu (fun () ->
-    if not (Hashtbl.mem ensured_dirs path) || not (Sys.file_exists path) then begin
+    if not (Hashtbl.mem ensured_dirs path) || not (Fs_compat.file_exists path) then begin
       (try Fs_compat.mkdir_p path
        with
        | Eio.Cancel.Cancelled _ as exn ->

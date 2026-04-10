@@ -41,6 +41,25 @@ let merge_reported_and_observed_tool_names
         reported_tool_names
 ;;
 
+type completion_contract =
+  | Allow_text_or_tool
+  | Require_tool_use
+
+let validate_completion_contract
+      ~(contract : completion_contract)
+      ~(tool_names : string list)
+      ()
+  : (unit, string) result
+  =
+  match contract with
+  | Allow_text_or_tool -> Ok ()
+  | Require_tool_use ->
+    (match tool_names with
+     | _ :: _ -> Ok ()
+     | [] ->
+       Error
+         "keeper turn violated required tool contract: no tools were called")
+
 let normalize_response_text ~(text : string) ~(tool_names : string list) ()
   : (string, string) result
   =

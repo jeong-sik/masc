@@ -101,6 +101,7 @@ type event =
   | Turn_succeeded
   | Turn_failed of { consecutive : int; max_allowed : int }
   | Manual_reconcile_required of { reason : string }
+  | Manual_reconcile_cleared
   | Context_measured of {
       context_ratio : float;
       message_count : int;
@@ -133,6 +134,7 @@ let event_to_string = function
     Printf.sprintf "turn_failed(%d/%d)" r.consecutive r.max_allowed
   | Manual_reconcile_required r ->
     Printf.sprintf "manual_reconcile_required(%s)" r.reason
+  | Manual_reconcile_cleared -> "manual_reconcile_cleared"
   | Context_measured r ->
     Printf.sprintf "context_measured(ratio=%.3f)" r.context_ratio
   | Compaction_started -> "compaction_started"
@@ -294,15 +296,14 @@ let update_conditions (c : conditions) (ev : event) : conditions =
     let _ = max_allowed in
     { c with heartbeat_healthy = consecutive = 0 }
   | Turn_succeeded ->
-    { c with
-      turn_healthy = true;
-      manual_reconcile_required = false;
-    }
+    { c with turn_healthy = true }
   | Turn_failed { consecutive; max_allowed } ->
     let _ = max_allowed in
     { c with turn_healthy = consecutive = 0 }
   | Manual_reconcile_required _ ->
     { c with manual_reconcile_required = true }
+  | Manual_reconcile_cleared ->
+    { c with manual_reconcile_required = false }
   | Context_measured { auto_rules; _ } ->
     { c with
       guardrail_triggered = auto_rules.guardrail_stop;
@@ -485,6 +486,7 @@ let event_to_json (ev : event) : Yojson.Safe.t =
     ]
   | Manual_reconcile_required r ->
     obj "manual_reconcile_required" ["reason", `String r.reason]
+  | Manual_reconcile_cleared -> obj "manual_reconcile_cleared" []
   | Context_measured r ->
     obj "context_measured" [
       "context_ratio", `Float r.context_ratio;

@@ -179,26 +179,34 @@ let set_room_cursor meta room_id seq =
 let room_ids_for_meta _config (_meta : keeper_meta) : string list =
   [ "default" ]
 
+let keeper_room_capabilities (meta : keeper_meta) =
+  let preset_cap =
+    match Keeper_types.tool_access_preset meta.tool_access with
+    | Some p -> [ "preset:" ^ Keeper_types.tool_preset_to_string p ]
+    | None -> []
+  in
+  [ "keeper" ] @ preset_cap
+
 let ensure_keeper_room_presence config (meta : keeper_meta) : keeper_meta =
   let room_ids = room_ids_for_meta config meta in
+  let capabilities = keeper_room_capabilities meta in
   let successful_rooms =
     List.fold_left
       (fun acc room_id ->
         try
+          Room.ensure_room_bootstrap config room_id;
           if
             not
               (Room.is_agent_joined config
                  ~agent_name:meta.agent_name)
           then begin
-            Room.ensure_room_bootstrap config room_id;
-            let preset_cap = match Keeper_types.tool_access_preset meta.tool_access with
-              | Some p -> ["preset:" ^ Keeper_types.tool_preset_to_string p]
-              | None -> []
-            in
             ignore
               (Room.join config ~agent_name:meta.agent_name
-                 ~capabilities:(["keeper"] @ preset_cap) ())
+                 ~capabilities ())
           end;
+          ignore
+            (Room.update_agent_r config ~agent_name:meta.agent_name
+               ~capabilities ());
           ignore
             (Room.heartbeat config ~agent_name:meta.agent_name);
           room_id :: acc

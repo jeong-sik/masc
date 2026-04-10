@@ -97,7 +97,7 @@ val initial : product
 
     Invariants enforced:
     - Keeper in [Stopped | Dead] -> turn must be [Idle]
-    - Keeper in [Draining] -> turn must be [Idle | Finalizing]
+    - Keeper in [Draining] -> turn must not be [Prompting] (in-progress turns allowed; drain waits for completion)
     - Validation in [Nondet_retrying] -> turn must be [Dispatching]
     - Keeper in [Compacting] -> turn must not be [Prompting | Awaiting] *)
 val check_invariants : product -> (unit, string) result

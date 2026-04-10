@@ -72,6 +72,34 @@ interface KeeperInfo {
   tool_audit_at?: string | null
 }
 
+function registerKeeperLookup<T extends Pick<KeeperInfo, 'name' | 'agent_name'>>(
+  lookup: Map<string, T>,
+  source: T,
+) {
+  const candidates = [source.agent_name, source.name]
+  for (const candidate of candidates) {
+    const key = candidate?.trim()
+    if (!key || lookup.has(key)) continue
+    lookup.set(key, source)
+  }
+}
+
+function buildKeeperInfoLookup(
+  keeperList: Keeper[],
+  keeperBriefs: DashboardMissionKeeperBrief[],
+): Map<string, KeeperInfo> {
+  const lookup = new Map<string, KeeperInfo>()
+  for (const brief of keeperBriefs) registerKeeperLookup(lookup, brief)
+  for (const keeper of keeperList) registerKeeperLookup(lookup, keeper)
+  return lookup
+}
+
+function buildKeeperRuntimeLookup(keeperList: Keeper[]): Map<string, Keeper> {
+  const lookup = new Map<string, Keeper>()
+  for (const keeper of keeperList) registerKeeperLookup(lookup, keeper)
+  return lookup
+}
+
 function findKeeper(agentName: string, keeperList: Keeper[], keeperBriefs: DashboardMissionKeeperBrief[]): KeeperInfo | null {
   // Try keeper briefs first (richer data from mission snapshot)
   for (const kb of keeperBriefs) {
@@ -308,8 +336,29 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     briefs.map(brief => [brief.agent_name, brief] as const),
   )
   const scopedAgents = scopeAgentsByKeeperFilter(rosterAgents, keeperList, keeperBriefs, keeperFilter)
+  const keeperInfoLookup = buildKeeperInfoLookup(keeperList, keeperBriefs)
+  const keeperRuntimeLookup = buildKeeperRuntimeLookup(keeperList)
   const bandByAgent = new Map(
-    scopedAgents.map(agent => [agent.name, runtimeBandMetaForAgent(agent, findKeeperRuntime(agent.name, keeperList))] as const),
+    scopedAgents.map(agent => [
+      agent.name,
+      runtimeBandMetaForAgent(
+        agent,
+        keeperRuntimeLookup.get(agent.name) ?? findKeeperRuntime(agent.name, keeperList),
+      ),
+    ] as const),
+  )
+  const normalizedSearch = search.trim().toLowerCase()
+  const searchTermsByAgent = new Map(
+    scopedAgents.map(agent => {
+      const keeper = keeperInfoLookup.get(agent.name) ?? findKeeper(agent.name, keeperList, keeperBriefs)
+      return [
+        agent.name,
+        keeperIdentitySearchTerms(
+          keeper?.name ?? null,
+          keeper?.agent_name ?? agent.name,
+        ).map(term => term.toLowerCase()),
+      ] as const
+    }),
   )
   const pageTitle = keeperFilter === 'keeper-only'
     ? '키퍼 목록'
@@ -325,13 +374,9 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
   const filtered = scopedAgents
     .filter((a: Agent) => {
       if (filter !== 'all' && bandByAgent.get(a.name)?.key !== filter) return false
-      if (search) {
-        const keeper = findKeeper(a.name, keeperList, keeperBriefs)
-        const terms = keeperIdentitySearchTerms(
-          keeper?.name ?? null,
-          keeper?.agent_name ?? a.name,
-        )
-        if (!terms.some(term => term.toLowerCase().includes(search.toLowerCase()))) {
+      if (normalizedSearch) {
+        const terms = searchTermsByAgent.get(a.name) ?? [a.name.toLowerCase()]
+        if (!terms.some(term => term.includes(normalizedSearch))) {
           return false
         }
       }
@@ -461,8 +506,8 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
       <div class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
         ${filtered.map((agent: Agent) => {
           const brief = briefMap.get(agent.name)
-          const keeper = findKeeper(agent.name, keeperList, keeperBriefs)
-          const keeperRuntime = findKeeperRuntime(agent.name, keeperList)
+          const keeper = keeperInfoLookup.get(agent.name) ?? findKeeper(agent.name, keeperList, keeperBriefs)
+          const keeperRuntime = keeperRuntimeLookup.get(agent.name) ?? findKeeperRuntime(agent.name, keeperList)
           const band = bandByAgent.get(agent.name) ?? runtimeBandMeta('attention')
           const keeperMonitoring = keeperRuntime ? summarizeKeeperMonitoring(keeperRuntime) : null
           const monitoringEvidence = keeperMonitoring ? summarizeMonitoringEvidence(keeperMonitoring) : null

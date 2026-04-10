@@ -458,6 +458,15 @@ let map_usage (f : usage_metrics -> usage_metrics) (m : keeper_meta) : keeper_me
   { m with runtime = { m.runtime with usage = f m.runtime.usage } }
 ;;
 
+let zero_usage : usage_metrics =
+  { total_turns = 0; total_input_tokens = 0; total_output_tokens = 0
+  ; total_tokens = 0; total_cost_usd = 0.0; last_turn_ts = 0.0
+  ; last_model_used = ""; last_input_tokens = 0; last_output_tokens = 0
+  ; last_total_tokens = 0; last_latency_ms = 0 }
+
+let reset_runtime_state (m : keeper_meta) : keeper_meta =
+  map_usage (fun _ -> zero_usage) m
+
 let map_compaction_rt (f : compaction_runtime -> compaction_runtime) (m : keeper_meta)
   : keeper_meta
   =

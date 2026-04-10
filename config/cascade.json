@@ -14,7 +14,14 @@
     "glm:glm-5-turbo",
     "ollama:qwen3.5:35b-a3b-nvfp4"
   ],
-  "_comment": "Speed-first GLM cascade: flashx(5s) -> 5.1(17s) -> 5-turbo(27s) -> local fallback. local_only = Ollama 35B-A3B only.",
+  "coding_first_models": [
+    "glm:glm-5.1",
+    "glm:glm-5-turbo",
+    "ollama:qwen3.5:35b-a3b-nvfp4"
+  ],
+  "_comment": "keeper_unified = speed-first: flashx(5s) -> 5.1(17s) -> 5-turbo(27s) -> local. coding_first = capability-first: 5.1(17s) -> 5-turbo(27s) -> local. local_only = Ollama only.",
+  "coding_first_temperature": 0.2,
+  "coding_first_max_tokens": 65536,
   "tool_rerank_temperature": 0.0,
   "tool_rerank_max_tokens": 200,
   "keeper_unified_temperature": 0.2,

@@ -133,7 +133,10 @@ let execute_room_action (ctx : 'a context) (request : action_request) =
 
 let execute_team_action (_ctx : 'a context) (request : action_request) =
   (* Team session actions removed — all return error *)
-  Error (Printf.sprintf "team session actions removed: %s" request.action_type)
+  Error (Printf.sprintf "team session actions removed: action=%s target_type=%s target_id=%s"
+    request.action_type
+    request.target_type
+    (Option.value ~default:"?" request.target_id))
 
 let execute_keeper_action (ctx : 'a context) (request : action_request) =
   match request.action_type with

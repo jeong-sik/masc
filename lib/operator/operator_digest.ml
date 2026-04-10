@@ -683,7 +683,7 @@ let review_queue_json ~actor active deferred recent_json =
     ("recent_reviews", recent_json);
   ]
 
-let digest_json ?actor ?target_type ?target_id ?include_workers ?sessions
+let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_include_workers ?sessions
     ?command_plane_summary ?swarm_status (ctx : 'a context) :
     (Yojson.Safe.t, string) result =
   let config = ctx.config in
@@ -806,11 +806,6 @@ let digest_json ?actor ?target_type ?target_id ?include_workers ?sessions
             ]
             @ review_queue_json ~actor:actor_name active_reviews deferred_reviews recent_reviews
             @ active_guidance))
-    | "team_session" -> (
-        match target_id with
-        | None -> Error "target_id is required when target_type=team_session"
-        | Some session_id ->
-            ignore include_workers;
-            (* Team_session_store removed — sessions always empty *)
-            Error (Printf.sprintf "team session not found: %s" session_id))
+    | "team_session" ->
+        Error "team_session is no longer supported (removed in Phase 2 of #6107)"
     | _ -> Error "unsupported target_type"

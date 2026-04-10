@@ -1,8 +1,15 @@
 import { html } from 'htm/preact'
 import { render } from 'preact'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ConfigResolutionPanel } from './config-resolution-panel'
+
+async function flush(): Promise<void> {
+  for (let i = 0; i < 4; i += 1) {
+    await Promise.resolve()
+    await new Promise(resolve => setTimeout(resolve, 0))
+  }
+}
 
 describe('ConfigResolutionPanel', () => {
   let container: HTMLDivElement
@@ -10,14 +17,54 @@ describe('ConfigResolutionPanel', () => {
   beforeEach(() => {
     container = document.createElement('div')
     document.body.appendChild(container)
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            generated_at: '2026-04-10T00:00:00Z',
+            cache_hit: true,
+            cache_age_sec: 3.2,
+            probe: {
+              source: 'ollama native runtime',
+              effective_model: 'qwen3.5:35b-a3b-coding-nvfp4',
+              server_url: 'http://127.0.0.1:11434',
+              model_loaded_before_probe: true,
+              model_loaded_after_probe: true,
+              loaded_models_after: [{ name: 'qwen3.5:35b-a3b-coding-nvfp4' }],
+              runs: [
+                {
+                  load_duration_ms: 33.6,
+                  prompt_tokens_per_second: 26.1,
+                  generation_tokens_per_second: 65.5,
+                },
+              ],
+              kv_cache_assessment: {
+                signal: 'likely_reused',
+                note: 'Prompt evaluation time dropped materially on a repeated prompt.',
+                prompt_eval_duration_reduction_ratio: 0.42,
+              },
+              observations: ['Repeated prompt_eval_duration_ms dropped enough to suggest repeated-prefix reuse.'],
+              errors: [],
+              probe_ok: true,
+            },
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
+      ),
+    )
   })
 
   afterEach(() => {
     render(null, container)
     container.remove()
+    vi.unstubAllGlobals()
   })
 
-  it('renders resolved paths, root-relative config paths, and runtime diagnostics', () => {
+  it('renders resolved paths, root-relative config paths, and runtime diagnostics', async () => {
     render(
       html`<${ConfigResolutionPanel}
         resolution=${{
@@ -59,6 +106,8 @@ describe('ConfigResolutionPanel', () => {
       container,
     )
 
+    await flush()
+
     expect(container.textContent).toContain('설정 경로')
     expect(container.textContent).toContain('/tmp/runtime/config')
     expect(container.textContent).toContain('env override')
@@ -74,6 +123,9 @@ describe('ConfigResolutionPanel', () => {
     expect(container.textContent).toContain('source mismatch')
     expect(container.textContent).toContain('SIGTERM')
     expect(container.textContent).toContain('Runtime build commit (deadbee) differs from workspace HEAD (cafef00d).')
+    expect(container.textContent).toContain('ollama warm / kv probe')
+    expect(container.textContent).toContain('kv likely reused')
+    expect(container.textContent).toContain('qwen3.5:35b-a3b-coding-nvfp4')
   })
   it('keeps the full path on hover title and hides duplicate source badges', () => {
     render(

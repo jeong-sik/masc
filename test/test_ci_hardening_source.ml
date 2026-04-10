@@ -92,6 +92,9 @@ let test_route_auth_contracts () =
   check bool "http keeper chat stream uses keeper tool auth" true
     (file_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
        {|with_tool_auth ~tool_name:"masc_keeper_msg"|});
+  check bool "dashboard runtime probe force refresh uses tool auth" true
+    (file_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
+       {|with_tool_auth ~tool_name:"masc_runtime_ollama_probe"|});
   check bool "http keeper chat stream forces direct reply mode" true
     (file_contains_pattern "lib/server/server_routes_http_keeper_stream.ml"
        {|("direct_reply", `Bool true)|});

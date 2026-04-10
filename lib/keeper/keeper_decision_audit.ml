@@ -162,25 +162,21 @@ let flush_if_needed ~base_path ~keeper_name =
          with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
         let cap = Array.length ring.buf in
         let start = ((ring.pos - ring.unflushed) mod cap + cap) mod cap in
-        let oc =
-          try Some (open_out_gen [Open_append; Open_creat; Open_text] 0o644 dir)
-          with Eio.Cancel.Cancelled _ as e -> raise e
-             | e ->
-            Log.Keeper.warn "decision_audit flush failed: %s" (Printexc.to_string e);
-            None
-        in
-        match oc with
-        | None -> ()  (* Keep unflushed count — retry next cycle *)
-        | Some oc ->
-          Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
-            for i = 0 to ring.unflushed - 1 do
+        let flush_lines =
+          let rec gather i acc =
+            if i >= ring.unflushed then List.rev acc
+            else
               let idx = (start + i) mod cap in
               match ring.buf.(idx) with
-              | Some r ->
-                output_string oc (Yojson.Safe.to_string (to_json r));
-                output_char oc '\n'
-              | None -> ()
-            done);
-          ring.unflushed <- 0;
-          ring.last_flush_ts <- now
+              | Some r -> gather (i + 1) ((Yojson.Safe.to_string (to_json r) ^ "\n") :: acc)
+              | None -> gather (i + 1) acc
+          in
+          String.concat "" (gather 0 [])
+        in
+        (try
+          Fs_compat.append_file dir flush_lines;
+          ring.unflushed <- 0
+        with Eio.Cancel.Cancelled _ as e -> raise e
+           | e -> Log.Keeper.warn "decision_audit flush failed: %s" (Printexc.to_string e));
+        ring.last_flush_ts <- now
       end

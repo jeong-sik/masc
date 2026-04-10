@@ -294,15 +294,14 @@ let compact_memory_bank_if_needed
     (meta : keeper_meta) : memory_bank_compaction =
   let target_notes = memory_compaction_target_notes () in
   let path = keeper_memory_bank_path config meta.name in
-  if not (Sys.file_exists path) then
+  if not (Fs_compat.file_exists path) then
     { no_memory_bank_compaction with
       target_notes;
       reason = Some "missing_file";
     }
   else
     let size_bytes =
-      try (Unix.stat path).st_size
-      with Unix.Unix_error _ -> 0
+      (match Fs_compat.file_size path with Some s -> s | None -> 0)
     in
     let trigger_bytes = memory_compaction_trigger_bytes ~target_notes in
     if size_bytes < trigger_bytes then

@@ -150,7 +150,7 @@ let resolve_keeper_shell_read_cwd
   in
   match resolved with
   | Error _ as err -> err
-  | Ok cwd when Sys.file_exists cwd && Sys.is_directory cwd -> Ok cwd
+  | Ok cwd when Fs_compat.file_exists cwd && Sys.is_directory cwd -> Ok cwd
   | Ok cwd -> Error (Printf.sprintf "cwd_not_directory: %s" cwd)
 
 let resolve_keeper_shell_write_cwd
@@ -166,7 +166,7 @@ let resolve_keeper_shell_write_cwd
   in
   match resolved with
   | Error _ as err -> err
-  | Ok cwd when Sys.file_exists cwd && Sys.is_directory cwd -> Ok cwd
+  | Ok cwd when Fs_compat.file_exists cwd && Sys.is_directory cwd -> Ok cwd
   | Ok cwd -> Error (Printf.sprintf "cwd_not_directory: %s" cwd)
 
 let resolve_keeper_shell_read_path
@@ -774,7 +774,7 @@ let handle_keeper_shell
            if safe = "" || safe = "." || safe = ".." then "repo" else safe
          in
          let clone_path = Filename.concat repos_dir repo_name in
-         if Sys.file_exists clone_path then
+         if Fs_compat.file_exists clone_path then
            (* Already cloned — pull latest instead *)
            let st, out =
              Process_eio.run_argv_with_status ~timeout_sec:60.0

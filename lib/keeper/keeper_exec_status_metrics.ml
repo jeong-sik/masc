@@ -518,7 +518,7 @@ let latest_snapshot_of_lines lines ~parse_snapshot ~has_legacy_shape =
 
 let latest_tool_audit_snapshot_from_decisions config keeper_name =
   let path = Keeper_types.keeper_decision_log_path config keeper_name in
-  if not (Sys.file_exists path) then None
+  if not (Fs_compat.file_exists path) then None
   else
     let lines = Keeper_memory.read_file_tail_lines path ~max_bytes:40000 ~max_lines:12 in
     let parse_snapshot line =

@@ -1340,7 +1340,7 @@ let warn_unknown_keeper_meta_keys ~path (json : Yojson.Safe.t) =
 ;;
 
 let read_meta_file_path path : (keeper_meta option, string) result =
-  if not (Sys.file_exists path)
+  if not (Fs_compat.file_exists path)
   then Ok None
   else (
     match Safe_ops.read_json_file_safe path with
@@ -1446,7 +1446,7 @@ let read_meta config name : (keeper_meta option, string) result =
       "read_meta name=%s path=%s exists=%b"
       requested_name
       path
-      (Sys.file_exists path);
+      (Fs_compat.file_exists path);
   match read_meta_resolved config requested_name with
   | Ok (Some (_resolved_name, meta)) -> Ok (Some meta)
   | Ok None -> Ok None
@@ -1462,14 +1462,14 @@ let read_meta_if_changed config name ~(last_mtime : float)
   let requested_name = String.trim name in
   let read_candidate candidate =
     let path = keeper_meta_path config candidate in
-    if not (Sys.file_exists path) then None
+    if not (Fs_compat.file_exists path) then None
     else
-      let stat = Unix.stat path in
-      if stat.Unix.st_mtime <= last_mtime then None
-      else
-        match read_meta_file_path path with
-        | Ok (Some meta) -> Some (meta, stat.Unix.st_mtime)
-        | _ -> None
+      match Fs_compat.file_mtime path with
+      | Some mtime when mtime > last_mtime ->
+          (match read_meta_file_path path with
+          | Ok (Some meta) -> Some (meta, mtime)
+          | _ -> None)
+      | _ -> None
   in
   match read_candidate requested_name with
   | Some _ as changed -> changed

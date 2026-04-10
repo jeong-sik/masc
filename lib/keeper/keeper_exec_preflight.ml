@@ -44,7 +44,7 @@ let handle_keeper_preflight_check
                json |> member "defaultBranchRef" |> member "name" |> to_string)
            in
            default_branch := branch_ref
-         with _ -> ());
+         with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
       add_check "repo_access" ok out
   in
   (* Check 3: keeper identity *)

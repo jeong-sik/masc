@@ -224,7 +224,7 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
         "SOUL.md"
     in
     let soul_content =
-      if not (Sys.file_exists soul_path) then (
+      if not (Fs_compat.file_exists soul_path) then (
         Log.Keeper.info "SOUL.md not found for %s (%s)" name soul_path;
         "")
       else

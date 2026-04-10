@@ -48,12 +48,12 @@ let handle_keeper_down ctx args : tool_result =
             Keeper_state_machine.Operator_pause)));
       if remove_session then (
         let rec rm_rf path =
-          if Sys.file_exists path then begin
+          if Fs_compat.file_exists path then begin
             if Sys.is_directory path then begin
               Sys.readdir path |> Array.iter (fun entry ->
                 rm_rf (Filename.concat path entry)
               );
-              Unix.rmdir path
+              Fs_compat.rmdir path
             end else
               Sys.remove path
           end

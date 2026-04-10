@@ -13,18 +13,13 @@ let read_file_tail_lines path ~max_bytes ~max_lines : string list =
   else if not (Fs_compat.file_exists path) then []
   else
     try
-      let ic = open_in path in
-      Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
-        let file_len = in_channel_length ic in
-        let read_start =
-          if max_bytes <= 0 then 0
-          else max 0 (file_len - max_bytes)
-        in
-        seek_in ic read_start;
-        let chunk_len = file_len - read_start in
-        let buf = Bytes.create chunk_len in
-        really_input ic buf 0 chunk_len;
-        let content = Bytes.unsafe_to_string buf in
+      let full_content = Fs_compat.load_file path in
+      let file_len = String.length full_content in
+      let read_start =
+        if max_bytes <= 0 then 0
+        else max 0 (file_len - max_bytes)
+      in
+      let content = String.sub full_content read_start (file_len - read_start) in
         let lines =
           content
           |> String.split_on_char '\n'
@@ -40,7 +35,7 @@ let read_file_tail_lines path ~max_bytes ~max_lines : string list =
         if n <= max_lines then lines
         else
           let drop = n - max_lines in
-          List.filteri (fun i _ -> i >= drop) lines)
+          List.filteri (fun i _ -> i >= drop) lines
     with Sys_error _ | End_of_file ->
       []
 

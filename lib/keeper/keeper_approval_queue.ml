@@ -63,7 +63,7 @@ let audit_approval_event ~event_type ~id ~keeper_name ~tool_name
       ("decision", `String decision);
     ] in
     (try Dated_jsonl.append store json
-     with _ -> ())
+     with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ())
 
 let generate_id () =
   let entropy =
@@ -134,7 +134,7 @@ let submit_and_await ~keeper_name ~tool_name ~input ~risk_level
       (try
          Eio.Mutex.use_rw ~protect:true mu (fun () ->
            Hashtbl.remove pending id)
-       with _ -> ()))
+       with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ()))
 
 (* ── Resolve (operator action) ────────────────────────────── *)
 
@@ -170,7 +170,7 @@ let resolve ~id ~(decision : Oas.Hooks.approval_decision) : (unit, string) resul
                  ("decision", `String decision_str);
                ]);
             ])
-       with _ -> ());
+       with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
       Ok ())
 
 (* ── Query ────────────────────────────────────────────────── *)

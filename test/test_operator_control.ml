@@ -5,6 +5,18 @@ let () =
     [
       ( "operator",
         [
+          Alcotest.test_case "snapshot runtime alignment promotes fresh live signal"
+            `Quick
+            Test_operator_control_snapshot
+            .test_align_keeper_runtime_status_promotes_fresh_runtime_signal;
+          Alcotest.test_case "snapshot runtime alignment preserves attention health"
+            `Quick
+            Test_operator_control_snapshot
+            .test_align_keeper_runtime_status_preserves_attention_health;
+          Alcotest.test_case "snapshot runtime alignment ignores zombie runtime signal"
+            `Quick
+            Test_operator_control_snapshot
+            .test_align_keeper_runtime_status_ignores_zombie_runtime_signal;
           Alcotest.test_case "snapshot sections" `Quick
             Test_operator_control_snapshot.test_snapshot_has_expected_sections;
           Alcotest.test_case "snapshot pending confirm summary tracks actor scope"

@@ -409,13 +409,13 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
             </div>
 
             <label class="flex w-full max-w-[320px] flex-col gap-2 text-[11px] font-semibold tracking-[0.08em] text-[var(--text-muted)] uppercase">
-              <span>에이전트 이름으로 찾기</span>
+              <span>키퍼/런타임 이름으로 찾기</span>
               <${TextInput}
                 class="rounded-2xl bg-[var(--white-3)] px-4 py-3 text-[14px] text-[var(--text-body)] shadow-[inset_0_1px_0_var(--white-3)] focus:border-[var(--accent)] focus:shadow-[0_0_0_2px_var(--accent-soft)]"
                 name="agent_search"
-                ariaLabel="에이전트 이름 검색"
+                ariaLabel="키퍼 또는 런타임 이름 검색"
                 autoComplete="off"
-                placeholder="에이전트 이름으로 찾기"
+                placeholder="키퍼 또는 런타임 이름으로 찾기"
                 value=${search}
                 onInput=${(e: Event) => setSearch((e.target as HTMLInputElement).value)}
               />

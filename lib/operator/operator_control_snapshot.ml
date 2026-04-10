@@ -70,8 +70,35 @@ let remote_confirm_ttl_seconds = 900.0
 
 let iso_of_unix = Dashboard_utils.iso_of_unix
 
+let runtime_status_from_live_signal (agent_status_json : Yojson.Safe.t) =
+  let runtime_status =
+    match U.member "status" agent_status_json with
+    | `String (("active" | "busy" | "listening" | "idle") as status) -> Some status
+    | _ -> None
+  in
+  let last_seen_ago_s =
+    match U.member "last_seen_ago_s" agent_status_json with
+    | `Float value -> Some value
+    | `Int value -> Some (float_of_int value)
+    | _ -> None
+  in
+  let is_zombie =
+    match U.member "is_zombie" agent_status_json with
+    | `Bool value -> value
+    | _ -> false
+  in
+  match (runtime_status, last_seen_ago_s, is_zombie) with
+  | Some status, Some age_s, false when age_s <= 120.0 -> Some status
+  | _ -> None
+
+let health_state_allows_runtime_status_override (diagnostic : Yojson.Safe.t) =
+  match U.member "health_state" diagnostic with
+  | `String ("stale" | "degraded" | "zombie" | "dead") -> false
+  | _ -> true
+
 let align_keeper_runtime_status
     ~(surface_status : string)
+    ~(diagnostic : Yojson.Safe.t)
     ~(agent_status_json : Yojson.Safe.t)
     ~(keepalive_running : bool) : string =
   if not keepalive_running then
@@ -81,9 +108,9 @@ let align_keeper_runtime_status
       String.lowercase_ascii (String.trim surface_status)
     in
     let runtime_status =
-      match U.member "status" agent_status_json with
-      | `String (("active" | "busy" | "listening" | "idle") as status) -> Some status
-      | _ -> None
+      if health_state_allows_runtime_status_override diagnostic then
+        runtime_status_from_live_signal agent_status_json
+      else None
     in
     match (normalized_surface, runtime_status) with
     | ("inactive" | "offline"), Some status -> status
@@ -306,6 +333,7 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                  in
                  let agent_status =
                    align_keeper_runtime_status ~surface_status:agent_status
+                     ~diagnostic
                      ~agent_status_json:agent_json ~keepalive_running
                  in
                  let registry_phase =

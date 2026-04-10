@@ -139,10 +139,18 @@ let handle_compact args : result =
     let strategy_str = args |> member "strategy" |> to_string in
     let max_tokens =
       (try args |> member "max_tokens" |> to_int
-       with Eio.Cancel.Cancelled _ as e -> raise e | _ -> 128_000) in
+       with Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
+         Log.Misc.warn "handle_compact: max_tokens parse failed (%s), using 128000"
+           (Printexc.to_string exn);
+         128_000) in
     let system_prompt =
       (try args |> member "system_prompt" |> to_string
-       with Eio.Cancel.Cancelled _ as e -> raise e | _ -> "") in
+       with Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
+         Log.Misc.warn "handle_compact: system_prompt parse failed (%s), using empty"
+           (Printexc.to_string exn);
+         "") in
     let strategies = match strategies_of_string strategy_str with
       | Ok s -> s
       | Error msg -> raise (Invalid_argument msg)

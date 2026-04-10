@@ -39,6 +39,9 @@ let make ~cycle_id ~keeper_name ~generation ?snapshot
 (* Serialization                                                    *)
 (* ================================================================ *)
 
+(* Simplified tags for JSONL audit keys — intentionally differs from
+   Heartbeat_smart.decision_to_string which uses colon-separated format
+   with timing data ("skip:busy", "skip:idle(next in 3.2s)"). *)
 let heartbeat_verdict_to_string = function
   | Heartbeat_smart.Emit -> "emit"
   | Heartbeat_smart.Skip_busy -> "skip_busy"

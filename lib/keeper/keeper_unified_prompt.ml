@@ -154,10 +154,9 @@ let autonomous_trigger_lines
       let lines =
         [
           Some "- Scheduler: scheduled autonomous keepalive turn.";
-          (let reasons = Keeper_world_observation.verdict_reasons_to_strings decision.verdict in
-           match reasons with
+          (match Keeper_world_observation.verdict_reasons_to_strings decision.verdict with
            | [] -> None
-           | _ ->
+           | reasons ->
                Some
                  (Printf.sprintf "- Reasons: %s"
                     (String.concat ", " reasons)));

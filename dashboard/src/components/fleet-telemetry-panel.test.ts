@@ -288,6 +288,46 @@ describe('FleetTelemetryPanel', () => {
     })
   })
 
+  it('prefers tool-quality call counts when success data is present', async () => {
+    const { buildFleetRows } = await loadPanel({
+      fetchDashboardExecution: vi.fn().mockResolvedValue(executionResponse),
+      fetchToolQuality: vi.fn().mockResolvedValue(toolQualityResponse),
+      fetchTelemetrySummary: vi.fn().mockResolvedValue(telemetrySummaryResponse),
+    })
+
+    const keepers = normalizeKeepers([
+      {
+        name: 'keeper-quality-preferred',
+        status: 'active',
+        keepalive_running: true,
+        context_ratio: 0.25,
+        total_turns: 4,
+        latest_tool_call_count: 8,
+        metrics_window: {
+          tool_call_count: 11,
+        },
+      },
+    ])
+
+    const rows = buildFleetRows(keepers, {
+      ...toolQualityResponse,
+      by_keeper: [
+        {
+          name: 'keeper-quality-preferred',
+          calls: 3,
+          success_pct: 66.7,
+        },
+      ],
+    })
+
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({
+      name: 'keeper-quality-preferred',
+      tool_calls: 3,
+      tool_success_pct: 66.7,
+    })
+  })
+
   it('ignores placeholder audit sources when deciding tool telemetry availability', async () => {
     const { buildFleetRows } = await loadPanel({
       fetchDashboardExecution: vi.fn().mockResolvedValue(executionResponse),

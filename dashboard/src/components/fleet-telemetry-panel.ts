@@ -167,8 +167,11 @@ function keeperRecentTools(keeper: Keeper): string[] {
 }
 
 function keeperToolCallCount(keeper: Keeper, toolQualityCalls?: number): number {
+  if (typeof toolQualityCalls === 'number' && Number.isFinite(toolQualityCalls) && toolQualityCalls >= 0) {
+    return toolQualityCalls
+  }
+
   const counts = [
-    toolQualityCalls,
     keeper.latest_tool_call_count,
     keeper.metrics_window?.tool_call_count,
   ].filter((value): value is number =>

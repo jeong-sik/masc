@@ -257,6 +257,7 @@ function entryPreview(e: TelemetryEntry): string {
 
 export function buildTelemetryDisplayItems(entries: TelemetryEntry[]): TelemetryDisplayItem[] {
   const items: TelemetryDisplayItem[] = []
+  let nextItemId = 0
   let activeGroup: {
     key: string
     category: TelemetryCondensedCategory
@@ -274,13 +275,14 @@ export function buildTelemetryDisplayItems(entries: TelemetryEntry[]): Telemetry
       const entry = activeGroup.entries[0] as TelemetryEntry
       items.push({
         kind: 'entry',
-        key: `${activeGroup.key}:${activeGroup.latestTs}`,
+        key: `${activeGroup.key}:${activeGroup.latestTs}:${nextItemId}`,
         entry,
       })
+      nextItemId += 1
     } else {
       items.push({
         kind: 'group',
-        key: `${activeGroup.key}:${activeGroup.latestTs}:${activeGroup.entries.length}`,
+        key: `${activeGroup.key}:${activeGroup.latestTs}:${activeGroup.entries.length}:${nextItemId}`,
         category: activeGroup.category,
         label: activeGroup.label,
         count: activeGroup.entries.length,
@@ -290,6 +292,7 @@ export function buildTelemetryDisplayItems(entries: TelemetryEntry[]): Telemetry
         sourceKeys: Array.from(activeGroup.sourceKeys),
         scopeBadges: activeGroup.scopeBadges,
       })
+      nextItemId += 1
     }
     activeGroup = null
   }
@@ -300,16 +303,19 @@ export function buildTelemetryDisplayItems(entries: TelemetryEntry[]): Telemetry
       flushGroup()
       items.push({
         kind: 'entry',
-        key: `${entry.source}:${entryTimestamp(entry)}:${items.length}`,
+        key: `${entry.source}:${entryTimestamp(entry)}:${nextItemId}`,
         entry,
       })
+      nextItemId += 1
       continue
     }
 
     const ts = entryTimestamp(entry)
     if (activeGroup && activeGroup.key === descriptor.key) {
       activeGroup.entries.push(entry)
-      activeGroup.oldestTs = ts === 0 ? activeGroup.oldestTs : Math.min(activeGroup.oldestTs, ts)
+      if (activeGroup.latestTs === 0 && ts !== 0) activeGroup.latestTs = ts
+      if (activeGroup.oldestTs === 0) activeGroup.oldestTs = ts
+      else if (ts !== 0) activeGroup.oldestTs = Math.min(activeGroup.oldestTs, ts)
       activeGroup.sourceKeys.add(entry.source)
       activeGroup.scopeBadges = uniqueStrings([
         ...activeGroup.scopeBadges,
@@ -445,6 +451,7 @@ function GroupRow({ item }: { item: Extract<TelemetryDisplayItem, { kind: 'group
   const meta = CONDENSED_CATEGORY_META[item.category]
   const latestPreview = entryPreview(item.entries[0] as TelemetryEntry)
   const sourceIcons = uniqueStrings(item.sourceKeys.map(source => sourceMeta(source).icon))
+  const contentId = `telemetry-group-${item.key.replace(/[^a-zA-Z0-9_-]/g, '-')}`
 
   return html`
     <div class="border-b border-[var(--card-border)] bg-[rgba(255,255,255,0.015)] hover:bg-[var(--bg-panel-hover)] transition-colors">
@@ -452,6 +459,8 @@ function GroupRow({ item }: { item: Extract<TelemetryDisplayItem, { kind: 'group
         class="flex items-center gap-2 px-3 py-1.5 text-xs cursor-pointer select-none"
         role="button"
         tabIndex=${0}
+        aria-expanded=${expanded.value}
+        aria-controls=${contentId}
         onClick=${() => { expanded.value = !expanded.value }}
         onKeyDown=${(e: KeyboardEvent) => {
           if (e.key === 'Enter' || e.key === ' ') {
@@ -481,7 +490,7 @@ function GroupRow({ item }: { item: Extract<TelemetryDisplayItem, { kind: 'group
         <span class="flex-shrink-0 w-4 text-[var(--text-muted)]">${expanded.value ? '-' : '+'}</span>
       </div>
       ${expanded.value ? html`
-        <div class="px-3 pb-3 flex flex-col gap-2">
+        <div id=${contentId} class="px-3 pb-3 flex flex-col gap-2">
           <div class="rounded bg-[var(--white-3)] px-2 py-1.5 text-[11px] text-[var(--text-dim)]">
             Latest: <span class="font-mono text-[var(--text-strong)]">${latestPreview}</span>
           </div>

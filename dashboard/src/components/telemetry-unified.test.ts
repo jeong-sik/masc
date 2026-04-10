@@ -325,6 +325,7 @@ describe('TelemetryUnified', () => {
     const groupRow = Array.from(container.querySelectorAll('[role="button"]'))
       .find(node => node.textContent?.includes('Polling / no-op · masc_status · 3 events'))
     expect(groupRow).toBeTruthy()
+    expect(groupRow?.getAttribute('aria-expanded')).toBe('false')
 
     await act(async () => {
       groupRow?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
@@ -332,9 +333,73 @@ describe('TelemetryUnified', () => {
     })
     await flushUi()
 
+    expect(groupRow?.getAttribute('aria-expanded')).toBe('true')
     expect(container.textContent).toContain('Latest:')
     expect(container.textContent).toContain('keeper-alpha -> masc_status')
     expect(container.textContent).toContain('Raw JSON')
+  })
+
+  it('keeps condensed keys stable when repeated no-timestamp groups reappear', async () => {
+    const { buildTelemetryDisplayItems } = await loadPanel(
+      vi.fn().mockResolvedValue(baseTelemetry),
+      vi.fn().mockResolvedValue(baseSummary),
+    )
+
+    const items = buildTelemetryDisplayItems([
+      {
+        source: 'tool_usage',
+        session_id: 'sess-a',
+        caller: 'keeper_internal',
+        tool_name: 'masc_status',
+      },
+      {
+        source: 'agent_event',
+        event: ['noop'],
+      },
+      {
+        source: 'tool_usage',
+        session_id: 'sess-a',
+        caller: 'keeper_internal',
+        tool_name: 'masc_status',
+      },
+    ])
+
+    expect(items).toHaveLength(3)
+    expect(items[0]?.kind).toBe('entry')
+    expect(items[1]?.kind).toBe('entry')
+    expect(items[2]?.kind).toBe('entry')
+    const entryKeys = items.map(item => item.key)
+    expect(new Set(entryKeys).size).toBe(entryKeys.length)
+  })
+
+  it('ignores unknown timestamps when computing grouped oldest timestamp', async () => {
+    const { buildTelemetryDisplayItems } = await loadPanel(
+      vi.fn().mockResolvedValue(baseTelemetry),
+      vi.fn().mockResolvedValue(baseSummary),
+    )
+
+    const items = buildTelemetryDisplayItems([
+      {
+        source: 'tool_usage',
+        session_id: 'sess-z',
+        caller: 'keeper_internal',
+        tool_name: 'masc_status',
+      },
+      {
+        source: 'tool_usage',
+        ts: 1_775_709_111,
+        session_id: 'sess-z',
+        caller: 'keeper_internal',
+        tool_name: 'masc_status',
+      },
+    ])
+
+    expect(items).toHaveLength(1)
+    expect(items[0]).toMatchObject({
+      kind: 'group',
+      latestTs: 1_775_709_111,
+      oldestTs: 1_775_709_111,
+    })
   })
 
   it('ignores out-of-order telemetry refresh responses', async () => {

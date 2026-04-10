@@ -792,10 +792,18 @@ let run_keepalive_unified_turn
           "keeper:%s boring_gate skip: %d consecutive idle turns (reactive=%b)"
           meta_after_triage.name !boring_consecutive_turns is_reactive;
       if is_reactive then boring_consecutive_turns := 0;
+      (* Auto-clear manual_reconcile to break deadlock: reconcile blocks
+         turns, but turns are needed to clear reconcile. Log and proceed. *)
+      if manual_reconcile_pending then (
+        Log.Keeper.info
+          "keeper:%s auto-clearing manual_reconcile to break deadlock"
+          meta_after_triage.name;
+        ignore (Keeper_registry.dispatch_event
+          ~base_path:ctx.config.base_path meta_after_triage.name
+          Keeper_state_machine.Manual_reconcile_cleared));
       let should_run_turn =
         (not (Atomic.get stop))
         && turn_decision.should_run
-        && (not manual_reconcile_pending)
         && (not boring_skip)
       in
       let meta_after_observe =

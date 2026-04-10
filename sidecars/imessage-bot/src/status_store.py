@@ -6,9 +6,6 @@ import json
 import os
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
-
-
 @dataclass(frozen=True, slots=True)
 class ConnectorRuntimeStatus:
     """One connector runtime snapshot for dashboard consumption."""

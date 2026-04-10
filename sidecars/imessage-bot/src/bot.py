@@ -16,8 +16,6 @@ import os
 import signal
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
-
 from .config import get_config
 from .gate_client import GateClient, GateResponse
 from .imessage_bridge import InboundMessage, read_new_messages, send_message
@@ -46,6 +44,7 @@ class IMessageBot:
         self._messages_failed = 0
         self._last_message_at = ""
         self._bindings: dict[str, str] = {}  # chat_id -> keeper_name
+        self._last_cursor_rowid: int = 0
 
     def _load_bindings(self) -> None:
         """Load chat-to-keeper bindings from state file."""
@@ -119,6 +118,8 @@ class IMessageBot:
     async def _poll_once(self) -> None:
         """Single poll cycle: read new messages and dispatch."""
         messages = read_new_messages()
+        if messages:
+            self._last_cursor_rowid = messages[-1].rowid
         for msg in messages:
             try:
                 await self._handle_message(msg)
@@ -136,16 +137,6 @@ class IMessageBot:
         except Exception:
             gate_healthy = False
 
-        # Read cursor
-        cursor_rowid = 0
-        cursor_path = Path(self.cfg.cursor_path)
-        if cursor_path.exists():
-            try:
-                data = json.loads(cursor_path.read_text(encoding="utf-8"))
-                cursor_rowid = int(data.get("last_rowid", 0))
-            except Exception:
-                pass
-
         self.status_store.write(
             ConnectorRuntimeStatus(
                 updated_at=datetime.now(tz=timezone.utc).isoformat(),
@@ -156,7 +147,7 @@ class IMessageBot:
                 last_message_at=self._last_message_at,
                 messages_processed=self._messages_processed,
                 messages_failed=self._messages_failed,
-                cursor_rowid=cursor_rowid,
+                cursor_rowid=self._last_cursor_rowid,
                 chat_db_path=self.cfg.chat_db_path,
                 poll_interval_sec=self.cfg.poll_interval_sec,
                 pid=os.getpid(),

@@ -127,12 +127,18 @@ let has_mutating_side_effect (name : string) : bool =
     stuck keeper.  When ALL committed tools in a failed turn belong to
     this set AND the failure is transient, manual_reconcile is skipped.
 
+    [keeper_broadcast]: duplicate broadcast is noise, not data loss.
+    [keeper_task_claim], [keeper_task_done]: idempotent — claiming or
+    completing the same task twice is a no-op in the task registry.
+
     Read-only tools (board_list, board_get) are excluded: they never
     appear in [committed_mutating_tools] so including them here would
     be misleading dead entries. *)
 let reconcile_safe_tools =
   [ "keeper_board_post"; "keeper_board_comment";
-    "keeper_board_vote"; "keeper_board_comment_vote" ]
+    "keeper_board_vote"; "keeper_board_comment_vote";
+    "keeper_broadcast";
+    "keeper_task_claim"; "keeper_task_done" ]
 
 let reconcile_safe_set : (string, unit) Hashtbl.t =
   let tbl = Hashtbl.create (List.length reconcile_safe_tools) in

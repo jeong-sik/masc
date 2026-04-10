@@ -228,13 +228,19 @@ let dashboard_runtime_probe_http_json ?(force = false) () =
               | Some (cached, cached_at) -> (cached, false, cached_at)
               | None -> (`Null, false, 0.0))
   in
-  let cache_age_sec = max 0.0 (now -. refreshed_at) in
+  let response_now = Time_compat.now () in
+  let refreshed_at_json, cache_age_json =
+    if refreshed_at > 0.0 then
+      (`Float refreshed_at, `Float (max 0.0 (response_now -. refreshed_at)))
+    else
+      (`Null, `Null)
+  in
   `Assoc
     [
       ("generated_at", `String (Types.now_iso ()));
-      ("refreshed_at_unix", `Float refreshed_at);
+      ("refreshed_at_unix", refreshed_at_json);
       ("cache_ttl_sec", `Float dashboard_runtime_probe_cache_ttl_sec);
-      ("cache_age_sec", `Float cache_age_sec);
+      ("cache_age_sec", cache_age_json);
       ("cache_hit", `Bool cache_hit);
       ("probe", probe);
     ]

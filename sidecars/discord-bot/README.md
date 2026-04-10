@@ -11,6 +11,37 @@ Discord <-> This Bot <-> Channel Gate (/api/v1/gate/*) <-> Keeper
 This bot is a **protocol adapter**. It translates between Discord's API and
 the Channel Gate's HTTP API. No business logic, no LLM calls.
 
+## What "Working" Means
+
+The Discord path is healthy only when all of the following are true:
+
+1. The MASC server is running and `/api/v1/gate/health` returns `ok=true`.
+2. The Discord bot process is running and logged into Discord.
+3. The bot and the server resolve the same runtime root for connector state.
+4. `/api/v1/gate/discord/status` reports `connected=true`.
+
+If the gate says `offline` with `connector status file not found`, the server is
+up but the Discord bot has not written its runtime heartbeat yet.
+
+## Quick Start
+
+Run the bot from `sidecars/discord-bot`, but make sure its runtime root matches
+the server's `MASC_BASE_PATH`.
+
+```bash
+cd ~/me/workspace/yousleepwhen/masc-mcp/sidecars/discord-bot
+cp .env.example .env
+
+# Required for shared connector state with the local MASC server.
+export MASC_BASE_PATH=~/me
+
+# Install dependencies once.
+uv pip install -e ".[dev]"
+
+# Start the bot from this directory so .env is auto-loaded.
+python -m src
+```
+
 ## Setup
 
 ### 1. Create Discord Bot
@@ -35,7 +66,40 @@ cp .env.example .env
 can omit it when the server keeps `require_token=false`; in that mode the
 connector falls back to same-origin auth headers against `127.0.0.1`/`localhost`.
 
-### 3. Run
+### 3. Match The Server Runtime Root
+
+By default the bot writes runtime files under:
+
+- `.masc/connectors/discord/bindings.json`
+- `.masc/connectors/discord/binding_audit.jsonl`
+- `.masc/connectors/discord/status.json`
+
+Relative paths resolve from `MASC_BASE_PATH` when it is set; otherwise they
+resolve from the bot's current working directory.
+
+For local development, the server usually owns the runtime root. The safest
+pattern is:
+
+```bash
+export MASC_BASE_PATH=~/me
+```
+
+That keeps the bot aligned with a server process that also runs with
+`MASC_BASE_PATH=~/me`, so both sides read and write the same connector state.
+
+If you intentionally want sidecar-local files instead, set explicit paths in
+`.env`:
+
+```bash
+DISCORD_BINDING_STORE_PATH=.gate/discord_bindings.json
+DISCORD_BINDING_AUDIT_PATH=.gate/discord_binding_audit.jsonl
+DISCORD_STATUS_PATH=.gate/discord_status.json
+```
+
+Use that mode only if the server is configured to read the same files via
+`MASC_DISCORD_*` overrides or matching base-path rules.
+
+### 4. Run
 
 ```bash
 # Install dependencies
@@ -45,11 +109,44 @@ uv pip install -e ".[dev]"
 python -m src
 ```
 
-### 4. Test
+### 5. Test
 
 ```bash
 uv pip install -e ".[dev]"
 pytest tests/
+```
+
+## Verify End-To-End
+
+Before starting the bot:
+
+```bash
+curl -sfS http://127.0.0.1:8935/api/v1/gate/health
+curl -sfS http://127.0.0.1:8935/api/v1/gate/discord/status
+```
+
+Expected state before the bot is ready:
+
+- `/gate/health` returns `{"ok":true,...}`
+- `/gate/discord/status` may show `offline`
+
+After the bot is logged in and heartbeats are being written:
+
+```bash
+curl -sfS http://127.0.0.1:8935/api/v1/gate/discord/status
+curl -sfS http://127.0.0.1:8935/api/v1/gate/connectors
+```
+
+Expected state after the bot is ready:
+
+- `connected=true`
+- `status="connected"`
+- `status_path` points at the same runtime root the bot is using
+
+If you want a quick process check:
+
+```bash
+ps -ef | rg "python(3)? -m src|discord-gate-bot"
 ```
 
 ## Channel-Keeper Mapping
@@ -104,3 +201,39 @@ Use the `/keeper-ask` slash command to talk to any keeper from any channel.
   `Attachments:` block instead of dropping them as empty content
 - A lightweight transport circuit breaker prevents repeated timeouts / 5xx
   storms from hammering the gate while still serving cached status data
+
+## Troubleshooting
+
+### Gate shows `offline`
+
+Check these in order:
+
+1. The bot process is running.
+2. `MASC_BASE_PATH` matches the server runtime root.
+3. `DISCORD_STATUS_PATH` resolves to the file the server is reading.
+4. The bot token is valid and the bot has logged into Discord.
+
+Useful checks:
+
+```bash
+curl -sfS http://127.0.0.1:8935/api/v1/gate/discord/status
+ls -la ~/me/.masc/connectors/discord
+```
+
+### Messages are ignored in a channel
+
+The bot only forwards messages from mapped channels.
+
+Check:
+
+- `DISCORD_KEEPER_MAP` in `.env`
+- `/keeper-map`
+- `/keeper-bind <keeper>`
+
+### Dashboard bind/unbind works but the bot does not follow changes
+
+The bot hot-reloads the durable binding store. If it does not react:
+
+1. Confirm the dashboard and the bot are writing the same `bindings.json`.
+2. Confirm the file mtime changes after bind/unbind.
+3. Restart the bot once to rule out a stale process.

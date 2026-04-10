@@ -374,6 +374,7 @@ let run_turn
       ~desires:meta.desires
       ~instructions:meta.instructions
       ~persona_extended
+      ~keeper_name:meta.name
       ()
   in
   (* 4. Create or restore working context, re-apply current prompt *)

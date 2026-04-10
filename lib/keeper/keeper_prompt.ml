@@ -15,7 +15,7 @@ let keeper_constitution () =
 
 let build_keeper_system_prompt
     ~goal ~short_goal ~mid_goal ~long_goal ~will ~needs ~desires
-    ~instructions ?(persona_extended = "") () =
+    ~instructions ?(persona_extended = "") ?(keeper_name = "") () =
   let goal = normalize_goal_horizon_text goal in
   let short_goal, mid_goal, long_goal =
     resolve_goal_horizons ~goal ~short_goal_opt:(Some short_goal)
@@ -42,6 +42,15 @@ let build_keeper_system_prompt
     if s = "" then ""
     else Printf.sprintf "\nCustom instructions:\n%s\n" s
   in
+  let substitute_keeper_name s =
+    if keeper_name = "" then s
+    else
+      let re_curly = Re.(compile (str "{your-name}")) in
+      let re_upper = Re.(compile (str "YOUR_KEEPER_NAME")) in
+      s
+      |> Re.replace_string re_curly ~by:keeper_name
+      |> Re.replace_string re_upper ~by:keeper_name
+  in
   let persona_block =
     let s = String.trim persona_extended in
     if s = "" then ""
@@ -51,7 +60,7 @@ let build_keeper_system_prompt
     [
       persona_block;
       "<world>\n";
-      Prompt_registry.get_prompt Keeper_prompt_names.world;
+      substitute_keeper_name (Prompt_registry.get_prompt Keeper_prompt_names.world);
       "\n</world>\n\
        \n\
        <identity>\n\
@@ -95,7 +104,7 @@ let build_keeper_system_prompt
        - If you can answer from conversation context alone, respond directly.\n\
        \n\
        <capabilities>\n";
-      Prompt_registry.get_prompt Keeper_prompt_names.capabilities;
+      substitute_keeper_name (Prompt_registry.get_prompt Keeper_prompt_names.capabilities);
       "\n</capabilities>\n\
        \n\
        ";

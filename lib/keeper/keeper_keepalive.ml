@@ -763,6 +763,22 @@ let run_keepalive_unified_turn
           "keepalive turn scheduled for %s: channel=%s reasons=%s"
           meta_after_triage.name channel_str
           (String.concat "," verdict_strs);
+      (* Phase A2: record decision in audit trail *)
+      let audit_wall_clock = Time_compat.now () in
+      Keeper_decision_audit.append
+        ~keeper_name:meta_after_triage.name
+        (Keeper_decision_audit.make
+           ~cycle_id:(Printf.sprintf "cycle-%s-%Ld"
+              meta_after_triage.name
+              (Int64.of_float (audit_wall_clock *. 1000.0)))
+           ~keeper_name:meta_after_triage.name
+           ~generation:meta_after_triage.runtime.generation
+           ~heartbeat_verdict:Heartbeat_smart.Emit
+           ~turn_verdict:turn_decision.verdict
+           ~wall_clock:audit_wall_clock ());
+      Keeper_decision_audit.flush_if_needed
+        ~base_path:ctx.config.base_path
+        ~keeper_name:meta_after_triage.name;
       if (not should_run_turn)
          && (not has_message_signal)
          && obs.message_cursor_updates <> []

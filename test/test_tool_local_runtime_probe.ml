@@ -80,6 +80,10 @@ let test_endpoint_urls_use_normalized_base () =
     (Masc_mcp.Tool_local_runtime_probe.ollama_generate_url
        "http://127.0.0.1:11434///")
 
+let test_ollama_ps_non_200_is_reported_as_error () =
+  check string "ps non-200 surfaced" "ollama ps returned http 503"
+    (Masc_mcp.Tool_local_runtime_probe.ollama_http_error "ps" (Some 503))
+
 let test_kv_cache_assessment_detects_repeat_improvement () =
   let runs =
     [
@@ -133,6 +137,8 @@ let () =
             test_normalize_server_url_strips_trailing_slashes;
           test_case "builds normalized endpoint urls" `Quick
             test_endpoint_urls_use_normalized_base;
+          test_case "reports ps non-200 as error" `Quick
+            test_ollama_ps_non_200_is_reported_as_error;
           test_case "omits keep_alive by default" `Quick
             test_request_body_omits_keep_alive_by_default;
           test_case "keeps explicit keep_alive when requested" `Quick

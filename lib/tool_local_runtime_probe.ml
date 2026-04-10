@@ -55,6 +55,11 @@ let ollama_ps_url server_url =
 let ollama_generate_url server_url =
   normalize_ollama_server_url server_url ^ "/api/generate"
 
+let ollama_http_error operation http_status =
+  match http_status with
+  | Some code -> Printf.sprintf "ollama %s returned http %d" operation code
+  | None -> Printf.sprintf "ollama %s returned http unknown" operation
+
 let ns_to_ms value =
   value |> Option.map (fun ns -> float_of_int ns /. 1_000_000.0)
 
@@ -324,23 +329,26 @@ let fetch_ollama_ps ?(timeout_sec = 8) ~server_url () =
   let url = ollama_ps_url server_url in
   match http_get_json_with_status ~timeout_sec url with
   | Ok (http_status, json) ->
-      let models =
-        ollama_loaded_models_of_ps_json json
-        |> List.filter_map (fun item ->
-               match item with
-               | `Assoc _ -> (
-                   let open Yojson.Safe.Util in
-                   Some
-                     {
-                       name = item |> member "name" |> to_string_option;
-                       model = item |> member "model" |> to_string_option;
-                       size_vram_bytes = int_member item "size_vram_bytes";
-                       context_length = int_member item "context_length";
-                       expires_at = item |> member "expires_at" |> to_string_option;
-                     })
-               | _ -> None)
-      in
-      (http_status, models, None)
+      if http_status <> Some 200 then
+        (http_status, [], Some (ollama_http_error "ps" http_status))
+      else
+        let models =
+          ollama_loaded_models_of_ps_json json
+          |> List.filter_map (fun item ->
+                 match item with
+                 | `Assoc _ -> (
+                     let open Yojson.Safe.Util in
+                     Some
+                       {
+                         name = item |> member "name" |> to_string_option;
+                         model = item |> member "model" |> to_string_option;
+                         size_vram_bytes = int_member item "size_vram_bytes";
+                         context_length = int_member item "context_length";
+                         expires_at = item |> member "expires_at" |> to_string_option;
+                       })
+                 | _ -> None)
+        in
+        (http_status, models, None)
   | Error err -> (None, [], Some err)
 
 let select_effective_model ~requested_model loaded_models =

@@ -68,58 +68,7 @@ let namespace_node namespace_json session_count operation_count worker_count kee
       ]
     ~link_tab:"command" ~link_surface:"summary" ()
 
-let session_tone (session : Team_session_types.session) status_json =
-  let status = Team_session_types.status_to_string session.status in
-  match status with
-  | "failed" | "cancelled" -> "bad"
-  | "paused" | "interrupted" -> "warn"
-  | _ ->
-      let team_health = assoc_or_empty status_json "team_health" in
-      let health_status = string_opt team_health "status" |> Option.value ~default:"ok" in
-      if session.min_agents_violation_streak > 0 || session.policy_violations <> [] then "warn"
-      else status_tone health_status
-
-let session_node _config (session : Team_session_types.session) =
-  let status_json = `Assoc [] in
-  let summary = assoc_or_empty status_json "summary" in
-  let command_plane = assoc_or_empty status_json "command_plane" in
-  let tone = session_tone session status_json in
-  let progress =
-    float_opt summary "progress_pct"
-    |> Option.map (fun value -> Printf.sprintf "%.0f%%" value)
-    |> Option.value ~default:"n/a"
-  in
-  let active_agents =
-    int_opt summary "active_agent_count"
-    |> Option.map string_of_int
-    |> Option.value ~default:(string_of_int (List.length session.agent_names))
-  in
-  node ~id:("session:" ^ session.session_id) ~kind:"session"
-    ~label:session.session_id ~subtitle:session.goal
-    ~status:(Team_session_types.status_to_string session.status)
-    ~tone ~provenance:"truth" ~visual_class:"session-island" ~glyph:"◈"
-    ?pulse:(pulse_of_tone tone)
-    ~facts:
-      [
-        fact "goal" session.goal;
-        fact "progress" progress;
-        fact "agents" active_agents;
-        fact "mode"
-          (Team_session_types.orchestration_mode_to_string
-             session.orchestration_mode);
-        fact "scale"
-          (Team_session_types.scale_profile_to_string session.scale_profile);
-        fact "operation"
-          (string_opt command_plane "operation_id" |> Option.value ~default:"none");
-      ]
-    ~link_tab:"intervene"
-    ~link_params:
-      (json_params
-         [
-           ("target_type", `String "team_session");
-           ("target_id", `String session.session_id);
-         ])
-    ()
+(* session_tone and session_node removed — team session cleanup *)
 
 let operation_node op_json =
   let operation_id = string_opt op_json "operation_id" |> Option.value ~default:"operation" in
@@ -278,22 +227,7 @@ let actual_worker_node worker_json =
       ]
     ~link_tab:"command" ~link_surface:"swarm" ()
 
-let ghost_worker_id session_id label =
-  let digest = Digestif.SHA1.(to_hex (digest_string label)) in
-  "ghost:" ^ session_id ^ ":" ^ String.sub digest 0 (min 40 (String.length digest))
-
-let ghost_worker_node ~session_id ~label ~subtitle ?lane_id () =
-  node ~id:(ghost_worker_id session_id label) ~kind:"worker" ~label
-    ~subtitle ~status:"planned" ~tone:"warn" ~provenance:"derived"
-    ~visual_class:"worker-ghost" ~glyph:"◌" ?lane_id
-    ~parent_id:("session:" ^ session_id)
-    ?pulse:(Some "pulse")
-    ~facts:[ fact "session" session_id; fact "state" "planned" ]
-    ~link_tab:"intervene"
-    ~link_params:
-      (json_params
-         [ ("target_type", `String "team_session"); ("target_id", `String session_id) ])
-    ()
+(* ghost_worker_id and ghost_worker_node removed — team session cleanup *)
 
 let keeper_node row =
   let name = string_opt row "name" |> Option.value ~default:"keeper" in

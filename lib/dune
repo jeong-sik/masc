@@ -234,8 +234,8 @@
    operator_digest_review_types
    opentelemetry_client_cohttp_eio
    observability_redact
-   risk_digest
-   operator_digest_session
+   ; risk_digest removed (team session cleanup)
+   ; operator_digest_session removed (team session cleanup)
    operator_review_state
    operator_control
    operator_control_snapshot

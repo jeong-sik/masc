@@ -14,7 +14,7 @@
 val decision_layer_level : unit -> int
 
 (** Whether audit is enabled (MASC_DECISION_LAYER_LEVEL >= 1).
-    Cached at module init — no per-call env lookup. *)
+    Cached on first call (delegates to [decision_layer_level]). *)
 val audit_enabled : unit -> bool
 
 (** Abstract decision record. Field access restricted to this module. *)

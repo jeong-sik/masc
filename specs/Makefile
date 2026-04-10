@@ -17,15 +17,20 @@ TLA2TOOLS := keeper-state-machine/tla2tools.jar
 
 # Specs with known failures (parsing/evaluation errors under CI tla2tools).
 # Remove from this list as specs are fixed. Each entry is a basename (no .cfg).
-KNOWN_FAILURES ?= KeeperTraceSpec KeeperOASBridge KeeperWorkPipeline KeeperWorkPipelineBug
+KNOWN_FAILURES ?= KeeperTraceSpec KeeperOASBridge
 
 # Buggy specs whose current invariant/model is documented as non-violating.
 # Remove from this list once the buggy cfg asserts a stronger property.
 KNOWN_BUGGY_NO_VIOLATION ?=
 
+# Module search path: all spec directories so INSTANCE across directories works.
+# TLC resolves modules from the spec's own directory + TLA2-Library system property.
+SPEC_DIRS := $(shell find . -mindepth 1 -maxdepth 1 -type d | tr '\n' ':')
+
 TLC = $(JAVA) $(JAVA_OPTS) \
 	-Dtlc2.TLC.stopAfter=$(TLC_STOP) \
 	-Dtlc2.TLC.ide=Github \
+	-DTLA2-Library="$(SPEC_DIRS)" \
 	-cp $(TLA2TOOLS) tlc2.TLC $(TLC_FLAGS)
 
 CLEAN_CFGS := $(shell find . -name '*.cfg' ! -name '*-buggy.cfg' ! -name '*-ci.cfg' | sort)

@@ -73,7 +73,6 @@ function emptyState(): FleetTelemetryState {
   }
 }
 
-
 // Delegated to config/telemetry-sources (SSOT)
 const sourceLabel = telemetrySourceLabel
 

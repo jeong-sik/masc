@@ -105,7 +105,7 @@ async function loadComponentWithApi(api: {
   vi.resetModules()
   vi.doMock('../api/transport-health', () => ({
     fetchTransportHealth: api.fetchTransportHealth,
-    hydrateTransportHealthData: (payload: unknown) => payload,
+    decodeTransportHealthData: (payload: unknown) => payload,
   }))
   vi.doMock('../sse', () => ({
     lastEvent: api.lastEvent,

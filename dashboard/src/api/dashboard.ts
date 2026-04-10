@@ -929,7 +929,6 @@ export function clearPromptOverride(key: string): Promise<PromptMutationResponse
   return post('/api/v1/prompts', { action: 'clear', key })
 }
 
-
 function asLooseBoolean(value: unknown, fallback = false): boolean {
   const booleanValue = asBoolean(value)
   if (booleanValue !== undefined) return booleanValue

@@ -47,7 +47,6 @@ type RefreshToolQualityOptions = {
   signal?: AbortSignal
 }
 
-
 function cancelActiveToolQualityRequest() {
   latestRequestId += 1
   activeController?.abort()

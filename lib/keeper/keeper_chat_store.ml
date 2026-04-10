@@ -47,7 +47,7 @@ let append_pair ~base_dir ~keeper_name
 type chat_message = {
   role : string;
   content : string;
-  ts : float;
+  ts : float option;
 }
 
 let parse_line (line : string) : chat_message option =
@@ -56,7 +56,9 @@ let parse_line (line : string) : chat_message option =
     let open Yojson.Safe.Util in
     let role = member "role" json |> to_string_option |> Option.value ~default:"" in
     let content = member "content" json |> to_string_option |> Option.value ~default:"" in
-    let ts = (try member "ts" json |> to_float with Eio.Cancel.Cancelled _ as e -> raise e | _ -> 0.0) in
+    let ts =
+      (try Some (member "ts" json |> to_float)
+       with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None) in
     if role = "" || content = "" then None
     else Some { role; content; ts }
   with Yojson.Json_error _ -> None
@@ -93,9 +95,9 @@ let to_json_array (messages : chat_message list) : Yojson.Safe.t =
     (List.map
        (fun m ->
          `Assoc
-           [
-             ("role", `String m.role);
-             ("content", `String m.content);
-             ("ts", `Float m.ts);
-           ])
+           ([ ("role", `String m.role);
+              ("content", `String m.content);
+            ] @ (match m.ts with
+                 | Some t -> [("ts", `Float t)]
+                 | None -> [])))
        messages)

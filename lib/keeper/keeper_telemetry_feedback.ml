@@ -39,7 +39,7 @@ let empty_stats ~window_hours =
 (* ------------------------------------------------------------------ *)
 
 type parsed_decision = {
-  timestamp_unix : float;
+  timestamp_unix : float option;
   outcome : string;
   tool_call_count : int;
   tools_used : string list;
@@ -48,10 +48,7 @@ type parsed_decision = {
 let parse_decision_line (line : string) : parsed_decision option =
   match Yojson.Safe.from_string line with
   | json ->
-    let timestamp_unix =
-      Safe_ops.json_float_opt "timestamp_unix" json
-      |> Option.value ~default:0.0
-    in
+    let timestamp_unix = Safe_ops.json_float_opt "timestamp_unix" json in
     let outcome =
       Safe_ops.json_string_opt "outcome" json
       |> Option.value ~default:"unknown"
@@ -92,7 +89,10 @@ let compute_stats ~decision_log_path ~window_hours =
   let decisions =
     lines
     |> List.filter_map parse_decision_line
-    |> List.filter (fun d -> d.timestamp_unix >= window_start)
+    |> List.filter (fun d ->
+      match d.timestamp_unix with
+      | Some ts -> ts >= window_start
+      | None -> false)
   in
   let total_turns = List.length decisions in
   if total_turns = 0 then
@@ -132,7 +132,9 @@ let compute_stats ~decision_log_path ~window_hours =
       decisions
       |> List.filter (fun d -> not (is_silent d))
       |> List.fold_left (fun acc d ->
-        max acc d.timestamp_unix) 0.0
+        match d.timestamp_unix with
+        | Some ts -> max acc ts
+        | None -> acc) 0.0
     in
     let last_visible_action_age_sec =
       if last_visible_ts <= 0.0 then

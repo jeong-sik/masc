@@ -48,7 +48,6 @@ type graph_edge = {
 type client = {
   client_id : int;
   push : string -> unit;
-  room_filter : string option;
   kind_filters : string list;
   mutable last_seq : int;
   created_at : float;
@@ -73,7 +72,6 @@ val register :
   string ->
   push:(string -> unit) ->
   last_seq:int ->
-  ?room_filter:string ->
   ?kind_filters:string list ->
   unit ->
   int

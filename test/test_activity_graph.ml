@@ -64,7 +64,7 @@ let test_filtered_client_receives_matching_events () =
       let push frame = received := frame :: !received in
       let _client_id =
         Activity_graph.register "activity-test" ~push ~last_seq:0
-          ~room_filter:"default" ~kind_filters:[ "task.created" ] ()
+          ~kind_filters:[ "task.created" ] ()
       in
       ignore
         (Activity_graph.emit config ~kind:"task.created"

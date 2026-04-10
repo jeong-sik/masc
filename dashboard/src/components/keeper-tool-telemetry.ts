@@ -3,19 +3,17 @@
 // cross-trace aggregation, and hourly timeline sparklines.
 
 import { html } from 'htm/preact'
-import { useEffect, useMemo } from 'preact/hooks'
-import { useSignal } from '@preact/signals'
+import { useEffect, useRef } from 'preact/hooks'
 import { fetchKeeperToolStats } from '../api/dashboard'
 import type { ToolStat, HourlyBucket, ToolStatsResponse } from '../api/dashboard'
 import { toolCategory, formatDuration, durationColor } from './tool-call-shared'
+import { createManagedAsyncResource } from '../lib/async-state'
 
 // ── Types ─────────────────────────────────────────────
 
 interface TelemetryState {
   tools: ToolStat[]
   timeline: HourlyBucket[]
-  loading: boolean
-  error: string | null
   totalEntries: number
   windowHours: number
 }
@@ -75,7 +73,12 @@ function Sparkline({ buckets, height = 32 }: { buckets: HourlyBucket[]; height?:
 
 function SuccessRateBar({ stat }: { stat: ToolStat }) {
   const successPct = stat.call_count > 0 ? (stat.success_count / stat.call_count) * 100 : 100
-  const barColor = successPct >= 95 ? 'var(--ok)' : successPct >= 80 ? 'var(--warn)' : 'var(--bad)'
+  let barColor = 'var(--bad)'
+  if (successPct >= 95) {
+    barColor = 'var(--ok)'
+  } else if (successPct >= 80) {
+    barColor = 'var(--warn)'
+  }
 
   return html`
     <div class="flex items-center gap-2 w-full">
@@ -96,50 +99,49 @@ interface KeeperToolTelemetryProps {
 }
 
 export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
-  const state = useSignal<TelemetryState>({
-    tools: [], timeline: [], loading: false, error: null, totalEntries: 0, windowHours: 24,
-  })
+  const resourceRef = useRef(createManagedAsyncResource<TelemetryState>({
+    tools: [],
+    timeline: [],
+    totalEntries: 0,
+    windowHours: 24,
+  }))
 
   useEffect(() => {
-    state.value = { ...state.value, loading: true, error: null }
-    void (async () => {
-      try {
-        const data: ToolStatsResponse = await fetchKeeperToolStats(keeperName, 24)
-        state.value = {
-          tools: data.tools,
-          timeline: data.timeline,
-          loading: false,
-          error: null,
-          totalEntries: data.total_entries,
-          windowHours: data.window_hours,
-        }
-      } catch (err) {
-        state.value = {
-          tools: [], timeline: [], loading: false,
-          error: err instanceof Error ? err.message : 'fetch failed',
-          totalEntries: 0, windowHours: 24,
-        }
+    const resource = resourceRef.current
+    void resource.load(async (signal) => {
+      const data: ToolStatsResponse = await fetchKeeperToolStats(keeperName, 24, { signal })
+      return {
+        tools: data.tools,
+        timeline: data.timeline,
+        totalEntries: data.total_entries,
+        windowHours: data.window_hours,
       }
-    })()
+    })
+    return () => {
+      resource.cancel()
+    }
   }, [keeperName])
 
-  const s = state.value
+  const asyncState = resourceRef.current.state.value
+  const s = asyncState.data ?? {
+    tools: [],
+    timeline: [],
+    totalEntries: 0,
+    windowHours: 24,
+  }
 
   // Loading and empty states return null — the section card
   // is only rendered when there is actual telemetry data to show.
-  if (s.loading || s.tools.length === 0) return null
-  if (s.error) {
-    return html`<div class="text-xs text-[var(--bad)] py-2 px-3">텔레메트리 로드 실패: ${s.error}</div>`
+  if (asyncState.loading || s.tools.length === 0) return null
+  if (asyncState.error) {
+    return html`<div class="text-xs text-[var(--bad)] py-2 px-3">텔레메트리 로드 실패: ${asyncState.error}</div>`
   }
 
   const totalCost = s.tools.reduce((sum, t) => sum + t.total_cost_usd, 0)
   const maxCount = s.tools[0]?.call_count ?? 1
 
   // Find tools with highest p95
-  const slowest = useMemo(() =>
-    [...s.tools].sort((a, b) => b.p95_duration_ms - a.p95_duration_ms).slice(0, 3),
-    [s.tools],
-  )
+  const slowest = [...s.tools].sort((a, b) => b.p95_duration_ms - a.p95_duration_ms).slice(0, 3)
 
   return html`
     <div class="p-5 rounded-2xl border border-card-border bg-card/40 backdrop-blur-md shadow-sm transition-[border-color,box-shadow] duration-200 hover:border-accent/30 hover:shadow-md">

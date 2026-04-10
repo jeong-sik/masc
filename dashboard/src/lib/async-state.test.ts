@@ -9,6 +9,7 @@ import {
   isFailed,
   getData,
   createAsyncResource,
+  createManagedAsyncResource,
   type AsyncState,
 } from './async-state'
 
@@ -208,5 +209,82 @@ describe('createAsyncResource', () => {
     await p1
 
     expect(getData(resource.state.value)).toBe('fresh')
+  })
+})
+
+describe('createManagedAsyncResource', () => {
+  it('keeps previous data visible while refreshing', async () => {
+    const resource = createManagedAsyncResource<number>(3)
+    let resolve!: (value: number) => void
+
+    const inflight = resource.load(() => new Promise<number>(r => { resolve = r }))
+
+    expect(resource.state.value).toEqual({
+      data: 3,
+      loading: true,
+      error: null,
+    })
+
+    resolve(9)
+    await inflight
+
+    expect(resource.state.value).toEqual({
+      data: 9,
+      loading: false,
+      error: null,
+    })
+  })
+
+  it('drops stale results from aborted requests', async () => {
+    const resource = createManagedAsyncResource<string>('current')
+    let resolveFirst!: (value: string) => void
+
+    const first = resource.load((signal) => new Promise<string>((resolve, reject) => {
+      resolveFirst = resolve
+      signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), { once: true })
+    }))
+
+    const second = resource.load(async () => 'next')
+    resolveFirst('stale')
+
+    await Promise.all([first, second])
+
+    expect(resource.state.value).toEqual({
+      data: 'next',
+      loading: false,
+      error: null,
+    })
+  })
+
+  it('preserves previous data on failure', async () => {
+    const resource = createManagedAsyncResource<string>('stable')
+
+    await resource.load(async () => {
+      throw new Error('boom')
+    })
+
+    expect(resource.state.value).toEqual({
+      data: 'stable',
+      loading: false,
+      error: 'boom',
+    })
+  })
+
+  it('cancel stops the request without replacing current data', async () => {
+    const resource = createManagedAsyncResource<string>('keep')
+
+    void resource.load((signal) => new Promise<string>((resolve, reject) => {
+      signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), { once: true })
+      setTimeout(() => resolve('late'), 10)
+    }))
+
+    resource.cancel()
+    await Promise.resolve()
+
+    expect(resource.state.value).toEqual({
+      data: 'keep',
+      loading: false,
+      error: null,
+    })
   })
 })

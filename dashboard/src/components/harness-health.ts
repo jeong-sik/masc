@@ -2,7 +2,6 @@
 
 import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
-import { lastEvent } from '../sse'
 import { navigate } from '../router'
 import { Card } from './common/card'
 import { MermaidGraph } from './common/mermaid-graph'
@@ -80,7 +79,7 @@ function activeRail(data: HarnessHealthData): HarnessRailKey | null {
 function escapeMermaidLabel(value: string): string {
   return value
     .replace(/"/g, '\'')
-    .replace(/[\[\]{}()|#;]/g, ' ')
+    .replace(/[[\]{}()|#;]/g, ' ')
     .replace(/\n+/g, ' ')
     .replace(/\s{2,}/g, ' ')
     .trim()
@@ -213,7 +212,12 @@ export function HarnessHealth() {
       clearHarnessReloadTimer()
     }
   }, [])
-  useEffect(handleHarnessSSE, [lastEvent.value])
+  useEffect(() => {
+    const unsubscribe = handleHarnessSSE()
+    return () => {
+      unsubscribe()
+    }
+  }, [])
 
   const s = harness.state.value
   const data = s.status === 'loaded' ? s.data : undefined
@@ -226,72 +230,77 @@ export function HarnessHealth() {
   const fallbackPct = data ? Math.round((data.overview.fallback_ratio ?? 0) * 100) : 0
   const fallbackReasons = cal?.recent_fallback_reasons ?? []
   const flowSource = data ? buildHarnessFlowMermaid(data) : null
+  const isLoading = s.status === 'loading' || s.status === 'idle'
+  const isError = s.status === 'error'
+  let overviewContent = html`<${EmptySignal} text="안전 감시 데이터가 없습니다." />`
+
+  if (isLoading) {
+    overviewContent = html`<div class="text-sm text-[var(--text-dim)]">로딩 중...</div>`
+  } else if (isError) {
+    overviewContent = html`<div class="text-sm text-[var(--bad)]">${s.message}</div>`
+  } else if (data) {
+    overviewContent = html`
+      <div class="space-y-4">
+        <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-4)] p-4">
+          <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+            <div class="max-w-3xl">
+              <div class="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">keeper 장기 실행 중 평가/압축/교체가 정상인지 감시합니다</div>
+              <div class="mt-2 text-2xl font-semibold text-[var(--text-strong)]">${heroTitle(data)}</div>
+              <div class="mt-2 text-sm leading-[1.7] text-[var(--text-body)]">${heroBody(data)}</div>
+            </div>
+            <div class="flex items-center gap-2">
+              <button
+                type="button"
+                class="rounded border border-[var(--white-8)] px-2.5 py-1 text-[11px] text-[var(--text-muted)] transition-colors hover:border-[var(--accent)] hover:text-[var(--text-body)]"
+                onClick=${() => { void loadHarnessHealth() }}
+              >새로고침</button>
+              <button
+                type="button"
+                class="rounded border border-[var(--white-8)] px-2.5 py-1 text-[11px] text-[var(--text-muted)] transition-colors hover:border-[var(--ok-30)] hover:text-[var(--text-body)]"
+                onClick=${() => navigate('lab', { section: 'autoresearch' })}
+              >오토리서치 보기</button>
+            </div>
+          </div>
+
+          <div class="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+            <${HeroRailCard}
+              label="평가 모델"
+              status=${data.overview.evaluator_status}
+              detail=${railDetail(data, 'evaluator')}
+              freshness=${railFreshness(data, 'evaluator')}
+            />
+            <${HeroRailCard}
+              label="압축 전 상태"
+              status=${data.overview.pre_compact_status}
+              detail=${railDetail(data, 'pre_compact')}
+              freshness=${railFreshness(data, 'pre_compact')}
+            />
+            <${HeroRailCard}
+              label="세대 교체"
+              status=${data.overview.handoff_status}
+              detail=${railDetail(data, 'handoff')}
+              freshness=${railFreshness(data, 'handoff')}
+            />
+          </div>
+
+          <div class="mt-4 text-xs text-[var(--text-dim)]">
+            generated ${formatTimestamp(data.generated_at)} · 마지막 안전 신호 ${freshnessLabel(data.overview.last_signal_at)}
+          </div>
+        </div>
+
+        <div class="rounded-lg border border-[var(--white-8)] bg-[var(--white-4)] px-4 py-3 text-sm leading-[1.7] text-[var(--text-body)]">
+          ${data.scope_note}
+        </div>
+
+        <${ScopePairing} />
+      </div>
+    `
+  }
 
   return html`
     <div class="space-y-4">
       <${Card} title="안전 감시" class="section">
-        ${s.status === 'loading' || s.status === 'idle' ? html`
-          <div class="text-sm text-[var(--text-dim)]">로딩 중...</div>
-        ` : s.status === 'error' ? html`
-          <div class="text-sm text-[var(--bad)]">${s.message}</div>
-        ` : !data ? html`
-          <${EmptySignal} text="안전 감시 데이터가 없습니다." />
-        ` : html`
-          <div class="space-y-4">
-            <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-4)] p-4">
-              <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                <div class="max-w-3xl">
-                  <div class="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">keeper 장기 실행 중 평가/압축/교체가 정상인지 감시합니다</div>
-                  <div class="mt-2 text-2xl font-semibold text-[var(--text-strong)]">${heroTitle(data)}</div>
-                  <div class="mt-2 text-sm leading-[1.7] text-[var(--text-body)]">${heroBody(data)}</div>
-                </div>
-                <div class="flex items-center gap-2">
-                  <button
-                    type="button"
-                    class="rounded border border-[var(--white-8)] px-2.5 py-1 text-[11px] text-[var(--text-muted)] transition-colors hover:border-[var(--accent)] hover:text-[var(--text-body)]"
-                    onClick=${() => { void loadHarnessHealth() }}
-                  >새로고침</button>
-                  <button
-                    type="button"
-                    class="rounded border border-[var(--white-8)] px-2.5 py-1 text-[11px] text-[var(--text-muted)] transition-colors hover:border-[var(--ok-30)] hover:text-[var(--text-body)]"
-                    onClick=${() => navigate('lab', { section: 'autoresearch' })}
-                  >오토리서치 보기</button>
-                </div>
-              </div>
-
-              <div class="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
-                <${HeroRailCard}
-                  label="평가 모델"
-                  status=${data.overview.evaluator_status}
-                  detail=${railDetail(data, 'evaluator')}
-                  freshness=${railFreshness(data, 'evaluator')}
-                />
-                <${HeroRailCard}
-                  label="압축 전 상태"
-                  status=${data.overview.pre_compact_status}
-                  detail=${railDetail(data, 'pre_compact')}
-                  freshness=${railFreshness(data, 'pre_compact')}
-                />
-                <${HeroRailCard}
-                  label="세대 교체"
-                  status=${data.overview.handoff_status}
-                  detail=${railDetail(data, 'handoff')}
-                  freshness=${railFreshness(data, 'handoff')}
-                />
-              </div>
-
-              <div class="mt-4 text-xs text-[var(--text-dim)]">
-                generated ${formatTimestamp(data.generated_at)} · 마지막 안전 신호 ${freshnessLabel(data.overview.last_signal_at)}
-              </div>
-            </div>
-
-            <div class="rounded-lg border border-[var(--white-8)] bg-[var(--white-4)] px-4 py-3 text-sm leading-[1.7] text-[var(--text-body)]">
-              ${data.scope_note}
-            </div>
-
-            <${ScopePairing} />
-          </div>
-        `}
+        ${overviewContent}
       <//>
 
       <${Card} title="감시 흐름도" class="section">

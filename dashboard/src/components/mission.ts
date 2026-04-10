@@ -59,7 +59,7 @@ export function missionJumpNavItems({
     { id: 'mission-attention', label: '우선순위', count: attentionCount, visible: attentionCount > 0 },
   ]
     .filter(item => item.visible)
-    .map(({ visible: _visible, ...item }) => item)
+    .map(item => ({ id: item.id, label: item.label, count: item.count }))
 }
 
 export function Mission() {
@@ -74,6 +74,10 @@ export function Mission() {
     return html`<${EmptyState} message="상황판 스냅샷이 아직 없습니다." compact />`
   }
 
+  return html`<${MissionLoaded} mission=${mission} />`
+}
+
+function MissionLoaded({ mission }: { mission: NonNullable<typeof missionSnapshot.value> }) {
   const sessionRows = mission.sessions
   const activeSelectedAttentionId =
     selectedAttentionId.value && mission.attention_queue.some(item => item.id === selectedAttentionId.value)
@@ -125,6 +129,12 @@ export function Mission() {
     activityCount,
     attentionCount: attentionQueue.length,
   })
+  let roomHealthClass = 'bg-[var(--bad)]'
+  if (toneClass(mission.summary.room_health) === 'ok') {
+    roomHealthClass = 'bg-[var(--ok)]'
+  } else if (toneClass(mission.summary.room_health) === 'warn') {
+    roomHealthClass = 'bg-[var(--warn)]'
+  }
 
   useEffect(() => {
     void refreshMissionSessionDetail(activeSessionId)
@@ -134,7 +144,7 @@ export function Mission() {
     <section class="flex flex-col gap-5">
       <div class="flex items-center justify-end gap-2 flex-wrap">
         <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-medium border border-[var(--card-border)] bg-[var(--white-3)] text-[var(--text-body)]">
-          <span class="w-1.5 h-1.5 rounded-full ${toneClass(mission.summary.room_health) === 'ok' ? 'bg-[var(--ok)]' : toneClass(mission.summary.room_health) === 'warn' ? 'bg-[var(--warn)]' : 'bg-[var(--bad)]'}"></span>
+          <span class="w-1.5 h-1.5 rounded-full ${roomHealthClass}"></span>
           ${statusLabel(mission.summary.room_health)}
         </span>
         <span class="text-[10px] text-[var(--text-muted)]">${mission.generated_at ? relativeTime(mission.generated_at) : ''}</span>

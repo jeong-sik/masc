@@ -57,6 +57,19 @@ export interface AsyncResource<T> {
   reset(): void
 }
 
+export interface ManagedAsyncState<T> {
+  readonly data: T | null
+  readonly loading: boolean
+  readonly error: string | null
+}
+
+export interface ManagedAsyncResource<T> {
+  readonly state: Signal<ManagedAsyncState<T>>
+  load(fn: (signal: AbortSignal, previous: T | null) => Promise<T>): Promise<T | undefined>
+  cancel(): void
+  reset(nextData?: T | null): void
+}
+
 export function createAsyncResource<T>(): AsyncResource<T> {
   const state = signal<AsyncState<T>>(idle)
   let inflight: Promise<void> | null = null
@@ -99,6 +112,103 @@ export function createAsyncResource<T>(): AsyncResource<T> {
       ++generation
       state.value = idle
       inflight = null
+    },
+  }
+}
+
+function toErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError'
+}
+
+export function createManagedAsyncResource<T>(initialData: T | null = null): ManagedAsyncResource<T> {
+  const state = signal<ManagedAsyncState<T>>({
+    data: initialData,
+    loading: false,
+    error: null,
+  })
+  let inflight: Promise<T | undefined> | null = null
+  let generation = 0
+  let controller: AbortController | null = null
+
+  return {
+    state,
+
+    load(fn: (signal: AbortSignal, previous: T | null) => Promise<T>): Promise<T | undefined> {
+      const previous = state.value.data
+      const gen = ++generation
+      controller?.abort()
+      controller = new AbortController()
+      state.value = {
+        data: previous,
+        loading: true,
+        error: null,
+      }
+
+      let promise: Promise<T>
+      try {
+        promise = fn(controller.signal, previous)
+      } catch (error) {
+        state.value = {
+          data: previous,
+          loading: false,
+          error: toErrorMessage(error),
+        }
+        return Promise.resolve(undefined)
+      }
+
+      inflight = promise
+        .then((data) => {
+          if (gen !== generation || controller?.signal.aborted) return undefined
+          state.value = {
+            data,
+            loading: false,
+            error: null,
+          }
+          return data
+        })
+        .catch((error) => {
+          if (gen !== generation || isAbortError(error)) return undefined
+          state.value = {
+            data: previous,
+            loading: false,
+            error: toErrorMessage(error),
+          }
+          return undefined
+        })
+        .finally(() => {
+          if (gen === generation) {
+            inflight = null
+            controller = null
+          }
+        })
+
+      return inflight
+    },
+
+    cancel(): void {
+      controller?.abort()
+      controller = null
+      inflight = null
+      state.value = {
+        ...state.value,
+        loading: false,
+      }
+    },
+
+    reset(nextData: T | null = null): void {
+      ++generation
+      controller?.abort()
+      controller = null
+      inflight = null
+      state.value = {
+        data: nextData,
+        loading: false,
+        error: null,
+      }
     },
   }
 }

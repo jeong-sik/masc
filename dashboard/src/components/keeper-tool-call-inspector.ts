@@ -2,13 +2,14 @@
 // Fetches from GET /api/v1/keepers/:name/tool-calls
 
 import { html } from 'htm/preact'
-import { useEffect, useMemo } from 'preact/hooks'
+import { useEffect, useRef } from 'preact/hooks'
 import { useSignal } from '@preact/signals'
 import { fetchKeeperToolCalls } from '../api/dashboard'
 import type { ToolCallEntry } from '../api/dashboard'
 import { formatTimeHms } from '../lib/format-time'
 import { LoadingState } from './common/feedback-state'
 import { toolCategory, formatDuration, durationColor } from './tool-call-shared'
+import { createManagedAsyncResource } from '../lib/async-state'
 
 // Delegated to lib/format-time (SSOT)
 const formatTimestamp = formatTimeHms
@@ -82,52 +83,49 @@ function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
 // ── Main component ──────────────────────────────────────
 
 export function KeeperToolCallInspector({ keeperName }: { keeperName: string }) {
-  const entries = useSignal<ToolCallEntry[]>([])
-  const loading = useSignal(true)
-  const error = useSignal<string | null>(null)
+  const resourceRef = useRef(createManagedAsyncResource<ToolCallEntry[]>([]))
   const filterTool = useSignal('')
 
   useEffect(() => {
-    loading.value = true
-    error.value = null
-    fetchKeeperToolCalls(keeperName, 100)
-      .then(res => {
-        entries.value = res.entries ?? []
-        loading.value = false
-      })
-      .catch(e => {
-        error.value = e?.message ?? 'fetch failed'
-        loading.value = false
-      })
+    const resource = resourceRef.current
+    void resource.load(async (signal) => {
+      const response = await fetchKeeperToolCalls(keeperName, 100, { signal })
+      return response.entries ?? []
+    })
+    return () => {
+      resource.cancel()
+    }
   }, [keeperName])
 
-  const filtered = useMemo(() => {
-    const f = filterTool.value.toLowerCase()
-    if (!f) return entries.value
-    return entries.value.filter(e => e.tool.toLowerCase().includes(f))
-  }, [entries.value, filterTool.value])
+  const allEntries = resourceRef.current.state.value.data ?? []
+  const filter = filterTool.value.toLowerCase()
+  const filtered = !filter
+    ? allEntries
+    : allEntries.filter(entry => entry.tool.toLowerCase().includes(filter))
 
   // Reverse to show newest first
-  const sorted = useMemo(() => [...filtered].reverse(), [filtered])
+  const sorted = [...filtered].reverse()
 
-  if (loading.value) {
+  if (resourceRef.current.state.value.loading) {
     return html`<${LoadingState}>도구 호출 불러오는 중...<//>`
   }
 
-  if (error.value) {
-    return html`<div class="text-xs text-[var(--bad)] p-4">${error.value}</div>`
+  if (resourceRef.current.state.value.error) {
+    return html`<div class="text-xs text-[var(--bad)] p-4">${resourceRef.current.state.value.error}</div>`
   }
 
-  if (entries.value.length === 0) {
+  const entries = allEntries
+
+  if (entries.length === 0) {
     return html`<div class="text-xs text-[var(--text-muted)] p-4">도구 호출 데이터 없음. 서버 재시작 후 기록됩니다.</div>`
   }
 
   // Summary stats
-  const totalCalls = entries.value.length
+  const totalCalls = entries.length
   const successRate = totalCalls > 0
-    ? Math.round((entries.value.filter(e => e.success).length / totalCalls) * 100)
+    ? Math.round((entries.filter(e => e.success).length / totalCalls) * 100)
     : 0
-  const uniqueTools = new Set(entries.value.map(e => e.tool)).size
+  const uniqueTools = new Set(entries.map(e => e.tool)).size
 
   return html`
     <div class="space-y-3">
@@ -155,7 +153,7 @@ export function KeeperToolCallInspector({ keeperName }: { keeperName: string }) 
           <span class="w-5 text-center">OK</span>
           <span class="w-4"></span>
         </div>
-        ${sorted.map((entry) => html`<${ToolCallRow} key=${`${entry.ts}-${entry.keeper}-${entry.tool}`} entry=${entry} />`)}
+        ${sorted.map((entry: ToolCallEntry) => html`<${ToolCallRow} key=${`${entry.ts}-${entry.keeper}-${entry.tool}`} entry=${entry} />`)}
       </div>
     </div>
   `

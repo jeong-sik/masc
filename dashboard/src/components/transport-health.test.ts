@@ -99,12 +99,13 @@ async function flushUi(): Promise<void> {
 }
 
 async function loadComponentWithApi(api: {
-  get: (path: string) => Promise<unknown>
+  fetchTransportHealth: () => Promise<unknown>
   lastEvent: { value: unknown }
 }) {
   vi.resetModules()
-  vi.doMock('../api/core', () => ({
-    get: api.get,
+  vi.doMock('../api/transport-health', () => ({
+    fetchTransportHealth: api.fetchTransportHealth,
+    hydrateTransportHealthData: (payload: unknown) => payload,
   }))
   vi.doMock('../sse', () => ({
     lastEvent: api.lastEvent,
@@ -130,12 +131,12 @@ describe('TransportHealthPanel', () => {
     vi.useRealTimers()
     vi.resetModules()
     vi.clearAllMocks()
-    vi.doUnmock('../api/core')
+    vi.doUnmock('../api/transport-health')
     vi.doUnmock('../sse')
   })
 
   it('renders WebRTC signaling truth without pretending there is a separate listener', async () => {
-    const get = vi.fn<(path: string) => Promise<unknown>>().mockResolvedValue(
+    const fetchTransportHealth = vi.fn<() => Promise<unknown>>().mockResolvedValue(
       sampleResponse({
         webrtc: {
           enabled: true,
@@ -152,14 +153,14 @@ describe('TransportHealthPanel', () => {
     )
 
     const { TransportHealthPanel } = await loadComponentWithApi({
-      get,
+      fetchTransportHealth,
       lastEvent: signal(null),
     })
 
     render(html`<${TransportHealthPanel} />`, container)
     await flushUi()
 
-    expect(get).toHaveBeenCalledWith('/api/v1/dashboard/transport-health')
+    expect(fetchTransportHealth).toHaveBeenCalled()
     expect(container.textContent).toContain('WebRTC')
     expect(container.textContent).toContain('시그널링')
     expect(container.textContent).toContain('shared_http')
@@ -169,7 +170,7 @@ describe('TransportHealthPanel', () => {
   })
 
   it('renders namespace chip with cluster prefix for non-default clusters', async () => {
-    const get = vi.fn<(path: string) => Promise<unknown>>().mockResolvedValue(
+    const fetchTransportHealth = vi.fn<() => Promise<unknown>>().mockResolvedValue(
       sampleResponse({
         cluster: {
           cluster: 'prod',
@@ -186,35 +187,35 @@ describe('TransportHealthPanel', () => {
     )
 
     const { TransportHealthPanel } = await loadComponentWithApi({
-      get,
+      fetchTransportHealth,
       lastEvent: signal(null),
     })
 
     render(html`<${TransportHealthPanel} />`, container)
     await flushUi()
 
-    expect(get).toHaveBeenCalledWith('/api/v1/dashboard/transport-health')
+    expect(fetchTransportHealth).toHaveBeenCalled()
     expect(container.textContent).toContain('prod / namespace default')
   })
 
   it('debounces SSE-driven transport refreshes through FetchScheduler', async () => {
     const lastEvent = signal<unknown>(null)
-    const get = vi.fn<(path: string) => Promise<unknown>>().mockResolvedValue(sampleResponse())
+    const fetchTransportHealth = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleResponse())
 
-    const { TransportHealthPanel } = await loadComponentWithApi({ get, lastEvent })
+    const { TransportHealthPanel } = await loadComponentWithApi({ fetchTransportHealth, lastEvent })
 
     render(html`<${TransportHealthPanel} />`, container)
     await flushUi()
-    expect(get).toHaveBeenCalledTimes(1)
+    expect(fetchTransportHealth).toHaveBeenCalledTimes(1)
 
     vi.useFakeTimers()
     lastEvent.value = { type: 'agent_joined' }
     lastEvent.value = { type: 'agent_left' }
     lastEvent.value = { type: 'task_claimed' }
     await vi.advanceTimersByTimeAsync(1_199)
-    expect(get).toHaveBeenCalledTimes(1)
+    expect(fetchTransportHealth).toHaveBeenCalledTimes(1)
 
     await vi.advanceTimersByTimeAsync(1)
-    expect(get).toHaveBeenCalledTimes(2)
+    expect(fetchTransportHealth).toHaveBeenCalledTimes(2)
   })
 })

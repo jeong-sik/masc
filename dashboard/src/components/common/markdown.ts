@@ -11,6 +11,7 @@ import DOMPurify from 'dompurify'
 
 // ── Lazy shiki loader ────────────────────────────────────────
 import type { Highlighter } from 'shiki'
+import type mermaidDefault from 'mermaid'
 
 let shikiPromise: Promise<Highlighter> | null = null
 
@@ -30,7 +31,7 @@ function getShiki(): Promise<Highlighter> {
 }
 
 // ── Lazy mermaid loader ──────────────────────────────────────
-type MermaidApi = typeof import('mermaid')['default']
+type MermaidApi = typeof mermaidDefault
 let mermaidPromise: Promise<MermaidApi> | null = null
 let mermaidConfigured = false
 let mermaidRenderCount = 0
@@ -135,6 +136,10 @@ function renderMarkdown(text: string): string {
 // ── Component ────────────────────────────────────────────────
 export function Markdown({ text, class: className }: { text: string; class?: string }) {
   if (!text) return null
+  return html`<${MarkdownContent} text=${text} class=${className} />`
+}
+
+function MarkdownContent({ text, class: className }: { text: string; class?: string }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const htmlStr = useMemo(() => renderMarkdown(text), [text])
   const classes = ['markdown-content', className].filter(Boolean).join(' ')
@@ -147,7 +152,7 @@ export function Markdown({ text, class: className }: { text: string; class?: str
     if (mermaidCodes.length === 0) return
 
     let cancelled = false
-    ;(async () => {
+    void (async () => {
       const mermaid = await getMermaid()
       if (cancelled) return
       for (const codeEl of mermaidCodes) {
@@ -181,7 +186,7 @@ export function Markdown({ text, class: className }: { text: string; class?: str
     if (codeBlocks.length === 0) return
 
     let cancelled = false
-    ;(async () => {
+    void (async () => {
       let highlighter: Highlighter | null = null
       
       for (const codeEl of codeBlocks) {
@@ -207,8 +212,8 @@ export function Markdown({ text, class: className }: { text: string; class?: str
         
         try {
           const loadedLangs = highlighter.getLoadedLanguages()
-          if (lang !== 'text' && !loadedLangs.includes(lang as any)) {
-            await highlighter.loadLanguage(lang as any)
+          if (lang !== 'text' && !loadedLangs.includes(lang)) {
+            lang = 'text'
           }
         } catch {
           lang = 'text'

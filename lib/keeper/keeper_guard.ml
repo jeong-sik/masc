@@ -19,6 +19,7 @@ let event_priority = function
   | Context_measured _ -> 5
   | Heartbeat_ok -> 10
   | Turn_succeeded -> 10
+  | Manual_reconcile_cleared -> 10
   | _ -> 10
 
 let evaluate (s : measurement_snapshot) : event list =

@@ -10,6 +10,11 @@
 (* Configuration                                                     *)
 (* ================================================================ *)
 
+type stop_reason =
+  | Completed
+  | TurnBudgetExhausted of { turns_used : int; limit : int }
+  | MutationBoundaryReached of { turns_used : int; tool_name : string option }
+
 type config = {
   name : string;
   provider : Oas.Provider.config;
@@ -48,6 +53,7 @@ type config = {
   slot_id : int option;
   approval : Oas.Hooks.approval_callback option;
   exit_condition : (int -> bool) option;
+  exit_condition_result : (int -> stop_reason * string option) option;
 }
 
 let default_config ~name ~provider ~model_id ~system_prompt ~tools : config =
@@ -83,15 +89,8 @@ let default_config ~name ~provider ~model_id ~system_prompt ~tools : config =
     slot_id = None;
     approval = None;
     exit_condition = None;
+    exit_condition_result = None;
   }
-
-(* ================================================================ *)
-(* Result type                                                       *)
-(* ================================================================ *)
-
-type stop_reason =
-  | Completed
-  | TurnBudgetExhausted of { turns_used : int; limit : int }
 
 type run_result = {
   response : Oas.Types.api_response;
@@ -187,6 +186,20 @@ let build_checkpoint ~session_id ?checkpoint_sidecar (agent : Oas.Agent.t) =
         ~context:(Oas.Agent.context agent)
         ~mcp_clients:(Oas.Agent.options agent).mcp_clients
         ()
+
+let partial_response_of_stop
+    ~(session_id : string)
+    ~(model_id : string)
+    ~(text : string)
+  : Oas.Types.api_response =
+  {
+    id = session_id;
+    model = model_id;
+    stop_reason = Oas.Types.EndTurn;
+    content = [ Oas.Types.Text text ];
+    usage = None;
+    telemetry = None;
+  }
 
 (* ================================================================ *)
 (* Build                                                             *)
@@ -560,14 +573,13 @@ let run
           stop_reason = Completed;
         }
     | Error (Oas.Error.Agent (Oas.Error.MaxTurnsExceeded r)) ->
-      let partial_response : Oas.Types.api_response = {
-        id = session_id; model = config.model_id;
-        stop_reason = Oas.Types.EndTurn;
-        content = [Oas.Types.Text (Printf.sprintf
-          "[turn budget exhausted: %d/%d turns used]" r.turns r.limit)];
-        usage = None;
-        telemetry = None;
-      } in
+      let partial_response =
+        partial_response_of_stop
+          ~session_id
+          ~model_id:config.model_id
+          ~text:(Printf.sprintf
+            "[turn budget exhausted: %d/%d turns used]" r.turns r.limit)
+      in
       Ok
         {
           response = partial_response;
@@ -580,6 +592,35 @@ let run
           cascade_observation = None;
           stop_reason = TurnBudgetExhausted { turns_used = r.turns; limit = r.limit };
         }
+    | Error (Oas.Error.Agent (Oas.Error.ExitConditionMet r)) -> (
+      match config.exit_condition_result with
+      | Some render ->
+        let stop_reason, response_text_opt = render r.turn in
+        let response_text =
+          match response_text_opt with
+          | Some text when String.trim text <> "" -> text
+          | _ -> Printf.sprintf "[exit condition met at turn %d]" r.turn
+        in
+        let partial_response =
+          partial_response_of_stop
+            ~session_id
+            ~model_id:config.model_id
+            ~text:response_text
+        in
+        Ok
+          {
+            response = partial_response;
+            checkpoint;
+            session_id;
+            turns;
+            trace_ref;
+            run_validation;
+            proof;
+            cascade_observation = None;
+            stop_reason;
+          }
+      | None ->
+        Error (Oas.Error.Agent (Oas.Error.ExitConditionMet r)))
     | Error err ->
       let detail = Oas.Error.to_string err in
       let detail =

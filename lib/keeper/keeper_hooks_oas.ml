@@ -145,6 +145,8 @@ let emit_cost_event
     @param generation Current generation counter
     @param max_cost_usd Optional cost budget (rejects tool calls above limit)
     @param destructive_check Enable destructive pattern detection (default true)
+    @param pre_tool_use_guard Optional callback that can short-circuit a tool
+           before execution by returning an inline override response.
     @param on_tool_executed Optional callback after each tool execution
     @param trajectory_acc Optional trajectory accumulator for cost attribution *)
 
@@ -234,8 +236,13 @@ let make_hooks
     ~(generation : int)
     ?(max_cost_usd : float option)
     ?(destructive_check : bool = true)
-    ?(on_tool_executed : string -> Yojson.Safe.t -> string -> unit =
-        fun _ _ _ -> ())
+    ?(pre_tool_use_guard :
+        tool_name:string -> input:Yojson.Safe.t -> string option =
+        fun ~tool_name:_ ~input:_ -> None)
+    ?(on_tool_executed :
+        tool_name:string -> input:Yojson.Safe.t -> output_text:string ->
+        success:bool -> unit =
+        fun ~tool_name:_ ~input:_ ~output_text:_ ~success:_ -> ())
     ?(trajectory_acc : Trajectory.accumulator option)
     ()
   : Agent_sdk.Hooks.hooks =
@@ -368,7 +375,12 @@ let make_hooks
              ?lane ?tool_choice ?thinking_enabled ?thinking_budget
              ~result_bytes ?truncated_to ()
          with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
-        (try on_tool_executed tool_name input output_text
+        (try
+           on_tool_executed
+             ~tool_name
+             ~input
+             ~output_text
+             ~success:(outcome = "ok")
          with Eio.Cancel.Cancelled _ as e -> raise e
             | exn ->
               Log.Keeper.error "keeper:%s on_tool_executed callback failed for %s: %s"
@@ -384,6 +396,19 @@ let make_hooks
       | Agent_sdk.Hooks.PreToolUse { tool_name; input; accumulated_cost_usd; _ } ->
         tool_start_time := Time_compat.now ();
         let keeper_name = (!meta_ref).name in
+        (match pre_tool_use_guard ~tool_name ~input with
+         | Some reason ->
+           Log.Keeper.info
+             "keeper:%s pre_tool_use guard blocked %s"
+             keeper_name tool_name;
+           broadcast_tool_skipped ~keeper_name ~tool_name
+             ~reason_code:"pre_tool_use_guard";
+           Agent_sdk.Hooks.Override
+             (render_inline_skip_reason
+                ~tool_name
+                ~reason_code:"pre_tool_use_guard"
+                ~reason_text:reason)
+         | None ->
         (* Same-name streak gate: block when the same tool name is called
            streak_threshold+ times consecutively, regardless of args.
            Returns Override (tool NOT executed) with a directive to switch tools.
@@ -480,7 +505,7 @@ let make_hooks
              if needs_approval then
                Agent_sdk.Hooks.ApprovalRequired
              else
-               Agent_sdk.Hooks.Continue)
+               Agent_sdk.Hooks.Continue))
       | _ -> Agent_sdk.Hooks.Continue);
 
     on_idle = Some (fun event ->

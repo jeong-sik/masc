@@ -913,6 +913,16 @@ let run_turn
     | Some r -> r
     | None -> ref Agent_sdk.Tool_op.Keep_all
   in
+  let mutation_boundary_tool_name : string option ref = ref None in
+  let mutation_boundary_summary () =
+    match !mutation_boundary_tool_name with
+    | Some tool_name ->
+        Printf.sprintf
+          "previous committed tool '%s' created a mutation boundary; checkpoint and resume next cycle"
+          tool_name
+    | None ->
+        "a previous committed tool created a mutation boundary; checkpoint and resume next cycle"
+  in
   let base_hooks =
     Keeper_hooks_oas.make_hooks
       ~config
@@ -920,6 +930,21 @@ let run_turn
       ~session
       ~ctx_snapshot
       ~generation
+      ~pre_tool_use_guard:(fun ~tool_name:_ ~input:_ ->
+        match !mutation_boundary_tool_name with
+        | Some _ -> Some (mutation_boundary_summary ())
+        | None -> None)
+      ~on_tool_executed:(fun ~tool_name ~input:_ ~output_text:_ ~success ->
+        if success
+           && Keeper_exec_tools.has_mutating_side_effect tool_name
+           && not (Keeper_tool_registry.is_reconcile_safe_tool tool_name)
+           && Option.is_none !mutation_boundary_tool_name
+        then begin
+          mutation_boundary_tool_name := Some tool_name;
+          Log.Keeper.info
+            "keeper:%s mutation boundary opened after committed tool=%s"
+            meta.name tool_name
+        end)
       ?max_cost_usd
       ?trajectory_acc
       ()
@@ -1459,7 +1484,20 @@ let run_turn
            ~approval:(Governance_pipeline.to_oas_approval_callback
                         ~governance_level:(Env_config_core.governance_level ())
                         ~keeper_name:meta.name)
-            ~enable_thinking:(Keeper_config.keeper_enable_thinking ())
+           ~enable_thinking:(Keeper_config.keeper_enable_thinking ())
+           ~exit_condition:(fun _turn_count ->
+             Option.is_some !mutation_boundary_tool_name)
+           ~exit_condition_result:(fun turn_count ->
+             let tool_name = !mutation_boundary_tool_name in
+             ( Oas_worker.MutationBoundaryReached
+                 { turns_used = turn_count; tool_name },
+               Some
+                 (match tool_name with
+                  | Some tool ->
+                      Printf.sprintf
+                        "[mutation boundary reached after committed tool: %s]"
+                        tool
+                  | None -> "[mutation boundary reached]") ))
            ?oas_checkpoint:raw_oas_checkpoint
            ?event_bus
            ())
@@ -1566,6 +1604,10 @@ let run_turn
                 match result.stop_reason with
                 | Oas_worker.Completed -> "completed"
                 | Oas_worker.TurnBudgetExhausted _ -> "budget_exhausted"
+                | Oas_worker.MutationBoundaryReached { tool_name; _ } ->
+                    (match tool_name with
+                     | Some tool -> Printf.sprintf "mutation_boundary(%s)" tool
+                     | None -> "mutation_boundary")
               in
               let synth =
                 Keeper_memory_policy.synthesize_state_from_run_result

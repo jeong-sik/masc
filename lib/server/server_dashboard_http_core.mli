@@ -53,13 +53,6 @@ val with_dashboard_timeout :
 
 val room_scoped_cache_key : Room.config -> string -> string -> string
 
-(** {1 Session List} *)
-
-val dashboard_active_or_recent_sessions :
-  clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  Room.config ->
-  Yojson.Safe.t list
-
 (** {1 Projection Diagnostics} *)
 
 val with_projection_diagnostics :
@@ -164,10 +157,3 @@ val dashboard_shell_http_json :
   ?request:Httpun.Request.t ->
   Room.config ->
   Yojson.Safe.t
-
-(** {1 Session Cache} *)
-
-val dashboard_active_or_recent_sessions_cached :
-  clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  Room.config ->
-  Yojson.Safe.t list

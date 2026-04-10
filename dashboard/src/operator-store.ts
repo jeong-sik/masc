@@ -3,7 +3,6 @@
 export {
   operatorSnapshot,
   operatorRoomDigest,
-  operatorSessionDigest,
   operatorLoading,
   operatorError,
   operatorDigestLoading,
@@ -18,7 +17,6 @@ export {
 export {
   refreshOperatorSnapshot,
   refreshOperatorRoomDigest,
-  refreshOperatorSessionDigest,
   dispatchOperatorAction,
   confirmOperatorPendingAction,
 } from './operator-actions'

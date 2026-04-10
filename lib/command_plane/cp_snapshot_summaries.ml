@@ -583,8 +583,8 @@ let intents_summary_json_from_state (state : snapshot_state) =
       ("intents", `List (List.map intent_to_json state.intents));
     ]
 
-let summary_json ?sessions config =
-  let state = build_snapshot_state ?sessions config in
+let summary_json config =
+  let state = build_snapshot_state config in
   let alerts =
     list_alerts_json_from_state config state
     |> U.member "summary"

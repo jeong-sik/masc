@@ -341,7 +341,6 @@ export interface DashboardExecutionResponse {
   social_tick?: unknown
   social_checkins?: unknown[]
   execution_queue?: unknown[]
-  session_briefs?: unknown[]
   operation_briefs?: unknown[]
   worker_support_briefs?: unknown[]
   priority_queue?: unknown[]

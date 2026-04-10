@@ -168,13 +168,13 @@ describe('get bootstrap warm-up mapping', () => {
     const data = await get<{
       generated_at?: string
       execution_queue?: unknown[]
-      session_briefs?: unknown[]
+      operation_briefs?: unknown[]
       agents?: unknown[]
     }>('/api/v1/dashboard/execution')
 
     expect(data.generated_at).toBeDefined()
     expect(data.execution_queue).toEqual([])
-    expect(data.session_briefs).toEqual([])
+    expect(data.operation_briefs).toEqual([])
     expect(data.agents).toEqual([])
   })
 
@@ -211,15 +211,15 @@ describe('get bootstrap warm-up mapping', () => {
       generated_at?: string
       summary?: { room_health?: string }
       incidents?: unknown[]
-      command_focus?: { session_cards?: unknown[] }
-      operator_targets?: { sessions?: unknown[] }
+      command_focus?: Record<string, unknown>
+      operator_targets?: { keepers?: unknown[] }
     }>('/api/v1/dashboard/mission')
 
     expect(data.generated_at).toBeDefined()
     expect(data.summary?.room_health).toBe('initializing')
     expect(data.incidents).toEqual([])
-    expect(data.command_focus?.session_cards).toEqual([])
-    expect(data.operator_targets?.sessions).toEqual([])
+    expect(data.command_focus).toEqual({})
+    expect(data.operator_targets?.keepers).toEqual([])
   })
 
   it('passes through valid 2xx responses on bootstrap paths', async () => {

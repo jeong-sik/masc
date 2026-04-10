@@ -1,0 +1,8 @@
+(include_subdirs no)
+
+(library
+ (name masc_worker_contract_types)
+ (public_name masc_mcp.worker_contract_types)
+ (modules worker_contract_types worker_contract_types_enums)
+ (wrapped false)
+ (libraries masc_mcp.dashboard_utils masc_types masc_core masc_log time_compat eio yojson))

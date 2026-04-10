@@ -292,7 +292,6 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
           |> with_projection_diagnostics ~surface:"execution" ~started_at
                ~extra:
                  [
-                   ("session_list", `Assoc []);
                    ( "readonly_pool",
                      Room_utils.domain_local_pg_backend_diagnostics_json () );
                  ])
@@ -362,7 +361,6 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
         |> with_projection_diagnostics ~surface:"execution" ~started_at
              ~extra:
                [
-                 ("session_list", `Assoc []);
                  ( "readonly_pool",
                    Room_utils.domain_local_pg_backend_diagnostics_json () );
                ])

@@ -15,7 +15,7 @@ merged 기준 전체 구조 요약은 [MERGED-ARCHITECTURE-SSOT.md](./MERGED-ARC
 - `operation`
   - managed-operation compatibility lane의 관리 단위. default delivery path는 아니다.
 - `session`
-  - supervised implementation execution unit. 현재 MCP tool family 이름은 아직 `masc_team_session_*`이지만, 제품 개념으로는 별도 `team-session`을 전면에 두지 않는다.
+  - historical supervised implementation execution unit. current codebase treats this as removed and uses command-plane operations/detachments instead.
 - `detachment`
   - scheduler가 materialize한 실행 단위. liveness, runtime binding, heartbeat를 여기서 본다.
 - `policy decision`
@@ -130,7 +130,7 @@ repo-synthesis는 `masc_autoresearch_cycle` 내부에서 cycle system을 통해 
 - read path:
   - dashboard는 `/api/v1/dashboard/repo-synthesis`와 proof/report artifact를 읽는 read-only surface
 - raw escape hatch:
-  - 이후 세부 조율은 `masc_dispatch_tick`, `masc_operator_digest`, `masc_team_session_step`, `masc_team_session_prove`로 내려간다.
+  - 이후 세부 조율은 `masc_dispatch_tick`, `masc_operator_digest`, command-plane truth surfaces로 내려간다.
 
 ### 첫 번째 concrete example: 12-worker live harness
 

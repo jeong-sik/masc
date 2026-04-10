@@ -7,12 +7,10 @@ val snapshot_json :
   ?actor:string ->
   ?view:string ->
   ?include_messages:bool ->
-  ?include_sessions:bool ->
   ?include_keepers:bool ->
   ?include_summary_fields:bool ->
   ?include_command_plane:bool ->
   ?lightweight_summary:bool ->
-  ?sessions:'b list ->
   'a context ->
   Yojson.Safe.t
 

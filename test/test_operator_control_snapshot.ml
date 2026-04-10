@@ -166,7 +166,7 @@ let test_snapshot_pending_confirm_summary_tracks_actor_scope () =
            (fun row ->
              Yojson.Safe.Util.(row |> member "action_type" |> to_string) = "namespace_pause")
            confirm_required_actions);
-      Alcotest.(check bool) "team stop listed" true
+      Alcotest.(check bool) "team stop removed" false
         (List.exists
            (fun row ->
              Yojson.Safe.Util.(row |> member "action_type" |> to_string) = "team_stop")

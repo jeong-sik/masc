@@ -100,10 +100,9 @@ describe('CommandPalette', () => {
     expect(cleanupZombies).not.toHaveBeenCalled()
   })
 
-  it('falls back to session briefs when snapshot sessions are empty', async () => {
+  it('indexes live mission sessions in the palette', async () => {
     missionSnapshot.value = {
-      sessions: [],
-      session_briefs: [
+      sessions: [
         { session_id: 'sess-1', goal: 'fallback brief', status: 'running' },
       ],
     }

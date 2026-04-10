@@ -97,23 +97,6 @@ let test_partial_invalidation () =
   Alcotest.(check bool) "intents list is fresh object" true
     (not (_state1.intents == state2.intents) || _state1.intents = [])
 
-(** Explicit sessions parameter bypasses cache entirely. *)
-let test_explicit_sessions_bypass () =
-  let base = temp_dir () in
-  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  reset_section_cache ();
-  let config = Room.default_config base in
-  let _ = Room.init config ~agent_name:None in
-  let _state1 = Command_plane_v2.build_snapshot_state config in
-  (* Pass explicit empty sessions — should NOT use section cache *)
-  let state2 = Command_plane_v2.build_snapshot_state ~sessions:[] config in
-  (* With explicit sessions, agents are freshly read (not from cache) *)
-  Alcotest.(check bool) "agents freshly read with explicit sessions" true
-    (not (_state1.agents == state2.agents)
-     || List.length _state1.agents = 0)
-
 let test_operations_render_uses_snapshot_intents () =
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
@@ -198,8 +181,6 @@ let () =
             test_cache_hit_no_change;
           Alcotest.test_case "partial invalidation" `Quick
             test_partial_invalidation;
-          Alcotest.test_case "explicit sessions bypass" `Quick
-            test_explicit_sessions_bypass;
           Alcotest.test_case "operations render uses snapshot intents" `Quick
             test_operations_render_uses_snapshot_intents;
         ] );

@@ -126,30 +126,18 @@ let test_dashboard_execution_fixture () =
         in
         let open Yojson.Safe.Util in
         let execution_queue = json |> member "execution_queue" |> to_list in
-        let session_briefs = json |> member "session_briefs" |> to_list in
         let operation_briefs = json |> member "operation_briefs" |> to_list in
         let worker_briefs = json |> member "worker_support_briefs" |> to_list in
         let continuity_briefs = json |> member "continuity_briefs" |> to_list in
         let offline_worker_briefs = json |> member "offline_worker_briefs" |> to_list in
         check bool "summary removed from execution payload" true
           (json |> member "summary" = `Null);
-        check string "top queue kind" "session"
+        check string "top queue kind" "operation"
           (execution_queue |> List.hd |> member "kind" |> to_string);
-        check string "top queue target" "ts-execution-fixture-001"
+        check string "top queue target" "op-runtime-002"
           (execution_queue |> List.hd |> member "target_id" |> to_string);
-        check string "top queue handoff surface" "intervene"
+        check string "top queue handoff surface" "command"
           (execution_queue |> List.hd |> member "top_handoff" |> member "surface" |> to_string);
-        check int "session briefs" 2 (List.length session_briefs);
-        check string "fixture session namespace" "default"
-          (session_briefs |> List.hd |> member "namespace" |> to_string);
-        check string "fixture session room alias kept" "default"
-          (session_briefs |> List.hd |> member "room" |> to_string);
-        check int "fixture seen count" 3
-          (session_briefs |> List.hd |> member "seen_count" |> to_int);
-        check int "fixture planned count" 4
-          (session_briefs |> List.hd |> member "planned_count" |> to_int);
-        check string "fixture counts basis" "live=recent_turns · planned=roster"
-          (session_briefs |> List.hd |> member "counts_basis" |> to_string);
         check int "operation briefs" 2 (List.length operation_briefs);
         check int "worker briefs" 3 (List.length worker_briefs);
         check string "worker signal truth" "live"
@@ -172,11 +160,12 @@ let test_dashboard_execution_fixture () =
           [ "masc_board_get"; "masc_board_post"; "masc_keeper_status" ]
           (continuity_briefs |> List.hd |> member "allowed_tool_preview"
          |> to_list |> List.map to_string);
-        check bool "worker focus carried through" true
+        check bool "worker focus carries operation without session" true
           (worker_briefs
            |> List.exists (fun row ->
                   row |> member "name" |> to_string = "local-alpha"
-                  && row |> member "related_session_id" |> to_string = "ts-execution-fixture-001"));
+                  && row |> member "related_session_id" = `Null
+                  && row |> member "related_operation_id" |> to_string = "op-runtime-001"));
       ))
 
 let test_dashboard_execution_live_empty_room () =
@@ -204,8 +193,6 @@ let test_dashboard_execution_live_empty_room () =
           (json |> member "status" |> member "namespace_mode" |> to_string);
         check int "execution queue empty" 0
           (json |> member "execution_queue" |> to_list |> List.length);
-        check int "session briefs empty" 0
-          (json |> member "session_briefs" |> to_list |> List.length);
         check int "operation briefs empty" 0
           (json |> member "operation_briefs" |> to_list |> List.length);
         check int "worker briefs empty" 0

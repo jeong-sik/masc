@@ -50,7 +50,7 @@ bin/
 lib/
 ├── command_plane/            # CPv2 orchestration subsystems
 ├── keeper/                   # keeper runtime and turn loop
-├── team_session/             # supervised collaboration engine
+├── worker_contract_types/    # worker contract enums and shared runtime types
 ├── dashboard/                # dashboard providers and read models
 ├── board/                    # board/social surface helpers
 ├── grpc/                     # gRPC transport support
@@ -72,7 +72,7 @@ test/                         # Alcotest suites + fixtures
 | **Board** | `lib/board/`, `lib/tool_board.ml` | Posts, votes, comments |
 | **Command Plane** | `lib/command_plane/`, `lib/tool_command_plane.ml` | units, operations, detachments, policies |
 | **Keeper** | `lib/keeper/`, `lib/tool_keeper.ml` | long-running keeper runtime |
-| **Team Session** | `lib/team_session/`, `lib/tool_team_session.ml` | supervised collaboration sessions |
+| **Worker Contracts** | `lib/worker_contract_types/` | shared worker/runtime contract types |
 | **A2A** | `a2a_tools.ml` | Agent-to-Agent protocol tools |
 
 ### Testing

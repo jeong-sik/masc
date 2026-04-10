@@ -140,14 +140,9 @@ let compute_briefing_json ~actor_name ~config ~sw ~clock ~proc_mgr () =
          command-plane, and message payloads here duplicates the heaviest
          snapshot path and can spike memory on rooms with many keepers. *)
       Operator_control.snapshot_json ~actor:actor_name ~view:"summary"
-        ~include_messages:false ~include_sessions:true ~include_keepers:false
+        ~include_messages:false ~include_keepers:false
         ~include_summary_fields:false ~include_command_plane:false
         ~lightweight_summary:true ctx
-    in
-    let sessions =
-      match snapshot_json |> member_assoc "sessions" |> member_assoc "items" with
-      | `List items -> items
-      | _ -> []
     in
     let scope_json =
       match snapshot_json |> member_assoc "namespace" with
@@ -165,7 +160,8 @@ let compute_briefing_json ~actor_name ~config ~sw ~clock ~proc_mgr () =
               |> Option.value ~default:"default")
     in
     let sessions =
-      Briefing_compactors.relevant_sessions_for_briefing ~current_namespace ~now_ts sessions
+      Briefing_compactors.relevant_sessions_for_briefing ~current_namespace
+        ~now_ts []
     in
     let keepers =
       match mission_json |> member_assoc "keeper_briefs" with

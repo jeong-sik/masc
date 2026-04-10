@@ -35,7 +35,7 @@
       "dashboard_proof_links_cp_backing"
     ],
     "cited_paths": [
-      "docs/TEAM-SESSION.md",
+      "docs/SUPERVISOR-MODE.md",
       "docs/SUPERVISOR-MODE.md",
       "lib/dashboard/dashboard_proof.ml"
     ],

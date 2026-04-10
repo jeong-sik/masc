@@ -215,7 +215,6 @@ function bootstrapInitializingPayload(path: string): unknown | null {
         status: bootstrapStatusEnvelope(generatedAt),
         summary: {},
         execution_queue: [],
-        session_briefs: [],
         operation_briefs: [],
         worker_support_briefs: [],
         continuity_briefs: [],
@@ -246,11 +245,10 @@ function bootstrapInitializingPayload(path: string): unknown | null {
         },
         incidents: [],
         recommended_actions: [],
-        command_focus: { session_cards: [] },
-        operator_targets: { sessions: [], keepers: [], pending_confirms: [], available_actions: [] },
+        command_focus: {},
+        operator_targets: { keepers: [], pending_confirms: [], available_actions: [] },
         attention_queue: [],
         sessions: [],
-        session_briefs: [],
         agent_briefs: [],
         keeper_briefs: [],
         internal_signals: [],
@@ -486,7 +484,7 @@ export function fetchOperatorSnapshot(): Promise<OperatorSnapshot> {
 }
 
 export function fetchOperatorDigest(options: {
-  targetType?: 'namespace' | 'room' | 'team_session'
+  targetType?: 'namespace' | 'room'
   targetId?: string
   includeWorkers?: boolean
 } = {}): Promise<OperatorDigest> {

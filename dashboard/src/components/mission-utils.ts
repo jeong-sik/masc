@@ -62,7 +62,6 @@ export function missionTargetTypeLabel(value?: string | null): string {
       return '프로젝트'
     case 'room':
       return '프로젝트'
-    case 'team_session':
     case 'session':
       return '세션'
     case 'operation':
@@ -135,16 +134,7 @@ export function openActionCommand(
 }
 
 export function openSession(_mode: 'intervene' | 'command', sessionId: string): void {
-  const params: Record<string, string> = {
-    source: 'mission',
-    target_type: 'team_session',
-    target_id: sessionId,
-    focus_kind: 'team_session',
-  }
-  navigate('command', {
-    section: 'intervene',
-    ...params,
-  })
+  navigate('workspace', { section: 'session', session_id: sessionId, source: 'mission' })
 }
 
 export function attentionAsIncident(item: DashboardMissionAttentionQueueItem): OperatorAttentionItem {
@@ -186,8 +176,7 @@ export function enrichedKeeperRow(brief: DashboardMissionKeeperBrief): EnrichedK
 export function sessionLookupById() {
   const mission = missionSnapshot.value
   if (!mission) return new Map<string, DashboardMissionSessionBrief>()
-  const rows = mission.sessions.length > 0 ? mission.sessions : mission.session_briefs
-  return new Map(rows.map(item => [item.session_id, item]))
+  return new Map(mission.sessions.map(item => [item.session_id, item]))
 }
 
 export function toggleAttention(id: string): void {

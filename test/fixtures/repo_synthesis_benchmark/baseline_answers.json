@@ -9,7 +9,7 @@
     "cited_paths": [
       "docs/COMMAND-PLANE-RUNBOOK.md",
       "docs/SUPERVISOR-MODE.md",
-      "docs/TEAM-SESSION.md"
+      "docs/SUPERVISOR-MODE.md"
     ],
     "latency_ms": 640
   },
@@ -35,7 +35,7 @@
       "proof_is_only_kept_in_markdown"
     ],
     "cited_paths": [
-      "docs/TEAM-SESSION.md",
+      "docs/SUPERVISOR-MODE.md",
       "docs/SUPERVISOR-MODE.md",
       "lib/tool_room.ml"
     ],

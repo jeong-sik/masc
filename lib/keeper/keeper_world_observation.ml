@@ -53,10 +53,56 @@ type unified_turn_channel =
   | Reactive
   | Scheduled_autonomous
 
+type turn_reason =
+  | Mention_pending
+  | Board_event_pending
+  | Scope_message_pending
+  | Idle_cooldown_elapsed of { idle_sec : int; cooldown : int }
+  | Task_backlog of { unclaimed : int; failed : int }
+  | Task_reactive_cooldown_elapsed
+  | Never_started
+
+type skip_reason =
+  | Scheduled_autonomous_disabled
+  | Idle_gate_pending of { remaining_sec : int }
+  | Cooldown_pending of { remaining_sec : int }
+  | No_signal
+
+type turn_verdict =
+  | Run of { channel : unified_turn_channel;
+             reasons : turn_reason * turn_reason list }
+  | Skip of { channel : unified_turn_channel;
+              reasons : skip_reason * skip_reason list }
+
+let turn_reason_to_string = function
+  | Mention_pending -> "pending_mentions"
+  | Board_event_pending -> "pending_board_events"
+  | Scope_message_pending -> "pending_scope_messages"
+  | Idle_cooldown_elapsed { idle_sec; cooldown } ->
+      Printf.sprintf "idle_gate_elapsed(idle=%d,cooldown=%d)" idle_sec cooldown
+  | Task_backlog { unclaimed; failed } ->
+      Printf.sprintf "actionable_backlog(unclaimed=%d,failed=%d)" unclaimed failed
+  | Task_reactive_cooldown_elapsed -> "task_reactive_cooldown_elapsed"
+  | Never_started -> "never_started"
+
+let skip_reason_to_string = function
+  | Scheduled_autonomous_disabled -> "scheduled_autonomous_disabled"
+  | Idle_gate_pending { remaining_sec } ->
+      Printf.sprintf "idle_gate_wait(%ds)" remaining_sec
+  | Cooldown_pending { remaining_sec } ->
+      Printf.sprintf "cooldown_wait(%ds)" remaining_sec
+  | No_signal -> "no_signal"
+
+let verdict_reasons_to_strings = function
+  | Run { reasons = (first, rest); _ } ->
+      List.map turn_reason_to_string (first :: rest)
+  | Skip { reasons = (first, rest); _ } ->
+      List.map skip_reason_to_string (first :: rest)
+
 type unified_turn_decision = {
   should_run : bool;
   channel : unified_turn_channel;
-  reasons : string list;
+  verdict : turn_verdict;
   since_last_scheduled_autonomous : int option;
   effective_cooldown : int option;
   task_reactive_cooldown : int option;
@@ -654,20 +700,20 @@ let effective_proactive_cooldown =
   effective_scheduled_autonomous_cooldown
 
 let unified_turn_decision ~(meta : keeper_meta) (observation : world_observation) =
-  let reactive_reasons =
+  let reactive_triggers =
     [
-      (if observation.pending_mentions <> [] then Some "pending_mentions" else None);
-      (if observation.pending_board_events <> [] then Some "pending_board_events" else None);
-      (if observation.pending_scope_messages <> [] then Some "pending_scope_messages" else None);
+      (if observation.pending_mentions <> [] then Some Mention_pending else None);
+      (if observation.pending_board_events <> [] then Some Board_event_pending else None);
+      (if observation.pending_scope_messages <> [] then Some Scope_message_pending else None);
     ]
     |> List.filter_map Fun.id
   in
-  match reactive_reasons with
-  | _ :: _ ->
+  match reactive_triggers with
+  | first :: rest ->
       {
         should_run = true;
         channel = Reactive;
-        reasons = reactive_reasons;
+        verdict = Run { channel = Reactive; reasons = (first, rest) };
         since_last_scheduled_autonomous = None;
         effective_cooldown = None;
         task_reactive_cooldown = None;
@@ -684,7 +730,8 @@ let unified_turn_decision ~(meta : keeper_meta) (observation : world_observation
         {
           should_run = false;
           channel = Scheduled_autonomous;
-          reasons = [ "scheduled_autonomous_disabled" ];
+          verdict = Skip { channel = Scheduled_autonomous;
+                           reasons = (Scheduled_autonomous_disabled, []) };
           since_last_scheduled_autonomous = Some since_last_scheduled_autonomous;
           effective_cooldown = None;
           task_reactive_cooldown = None;
@@ -717,24 +764,64 @@ let unified_turn_decision ~(meta : keeper_meta) (observation : world_observation
           has_actionable_tasks
           && since_last_scheduled_autonomous >= task_reactive_cooldown
         in
-        let reasons =
-          [
-            Some "scheduled_autonomous_turn";
-            (if since_last_scheduled_autonomous = max_int then Some "never_started"
-             else None);
-            (if idle_gate_elapsed then Some "idle_gate_elapsed" else Some "idle_gate_wait");
-            (if cooldown_elapsed then Some "cooldown_elapsed" else None);
-            (if has_actionable_tasks then Some "actionable_backlog" else None);
-            (if observation.unclaimed_task_count > 0 then Some "unclaimed_tasks" else None);
-            (if observation.failed_task_count > 0 then Some "failed_tasks" else None);
-            (if backlog_elapsed then Some "task_reactive_cooldown_elapsed" else None);
-          ]
-          |> List.filter_map Fun.id
+        let should_run = idle_gate_elapsed && (cooldown_elapsed || backlog_elapsed) in
+        let verdict =
+          if should_run then
+            let run_reasons =
+              [
+                (if since_last_scheduled_autonomous = max_int
+                 then Some Never_started else None);
+                (if idle_gate_elapsed
+                 then Some (Idle_cooldown_elapsed
+                              { idle_sec = observation.idle_seconds;
+                                cooldown = effective_cooldown }) else None);
+                (if has_actionable_tasks
+                 then Some (Task_backlog
+                              { unclaimed = observation.unclaimed_task_count;
+                                failed = observation.failed_task_count }) else None);
+                (if backlog_elapsed
+                 then Some Task_reactive_cooldown_elapsed else None);
+              ]
+              |> List.filter_map Fun.id
+            in
+            (* NEL: idle_gate_elapsed is always true when should_run=true,
+               so Idle_cooldown_elapsed is always present *)
+            match run_reasons with
+            | first :: rest ->
+                Run { channel = Scheduled_autonomous; reasons = (first, rest) }
+            | [] ->
+                (* Structurally unreachable: idle_gate_elapsed && should_run
+                   guarantees at least Idle_cooldown_elapsed.
+                   Defensive: fall through to skip. *)
+                Skip { channel = Scheduled_autonomous;
+                       reasons = (No_signal, []) }
+          else
+            let skip_reasons =
+              [
+                (if not idle_gate_elapsed
+                 then Some (Idle_gate_pending
+                              { remaining_sec =
+                                  idle_gate_sec - observation.idle_seconds })
+                 else None);
+                (if idle_gate_elapsed && not cooldown_elapsed
+                 then Some (Cooldown_pending
+                              { remaining_sec =
+                                  effective_cooldown - since_last_scheduled_autonomous })
+                 else None);
+              ]
+              |> List.filter_map Fun.id
+            in
+            match skip_reasons with
+            | first :: rest ->
+                Skip { channel = Scheduled_autonomous; reasons = (first, rest) }
+            | [] ->
+                Skip { channel = Scheduled_autonomous;
+                       reasons = (No_signal, []) }
         in
         {
-          should_run = idle_gate_elapsed && (cooldown_elapsed || backlog_elapsed);
+          should_run;
           channel = Scheduled_autonomous;
-          reasons;
+          verdict;
           since_last_scheduled_autonomous = Some since_last_scheduled_autonomous;
           effective_cooldown = Some effective_cooldown;
           task_reactive_cooldown = Some task_reactive_cooldown;

@@ -738,23 +738,22 @@ let run_keepalive_unified_turn
           meta_after_triage
           obs.message_cursor_updates
       in
+      let verdict_strs = Keeper_world_observation.verdict_reasons_to_strings turn_decision.verdict in
+      let channel_str = match turn_decision.channel with
+        | Keeper_world_observation.Reactive -> "reactive"
+        | Keeper_world_observation.Scheduled_autonomous -> "scheduled_autonomous"
+      in
       if manual_reconcile_pending && turn_decision.should_run then
         Log.Keeper.info
           "keepalive turn skipped for %s: manual reconcile pending channel=%s reasons=%s"
-          meta_after_triage.name
-          (match turn_decision.channel with
-           | Keeper_world_observation.Reactive -> "reactive"
-           | Keeper_world_observation.Scheduled_autonomous -> "scheduled_autonomous")
-          (String.concat "," turn_decision.reasons);
+          meta_after_triage.name channel_str
+          (String.concat "," verdict_strs);
       if (not should_run_turn) && (not manual_reconcile_pending) then
         Log.Keeper.info
           "keepalive turn not scheduled for %s: should_run=%b channel=%s reasons=[%s] since_last=%s idle_gate=%s"
           meta_after_triage.name
-          turn_decision.should_run
-          (match turn_decision.channel with
-           | Keeper_world_observation.Reactive -> "reactive"
-           | Keeper_world_observation.Scheduled_autonomous -> "scheduled_autonomous")
-          (String.concat "," turn_decision.reasons)
+          turn_decision.should_run channel_str
+          (String.concat "," verdict_strs)
           (match turn_decision.since_last_scheduled_autonomous with
            | Some s -> string_of_int s | None -> "-")
           (match turn_decision.idle_gate_sec with
@@ -762,11 +761,8 @@ let run_keepalive_unified_turn
       if should_run_turn then
         Log.Keeper.info
           "keepalive turn scheduled for %s: channel=%s reasons=%s"
-          meta_after_triage.name
-          (match turn_decision.channel with
-           | Keeper_world_observation.Reactive -> "reactive"
-           | Keeper_world_observation.Scheduled_autonomous -> "scheduled_autonomous")
-          (String.concat "," turn_decision.reasons);
+          meta_after_triage.name channel_str
+          (String.concat "," verdict_strs);
       if (not should_run_turn)
          && (not has_message_signal)
          && obs.message_cursor_updates <> []

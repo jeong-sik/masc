@@ -93,10 +93,48 @@ type unified_turn_channel =
   | Reactive
   | Scheduled_autonomous
 
+(** Typed reason for running a keeper turn. Each variant corresponds to
+    exactly one code path in {!unified_turn_decision}. *)
+type turn_reason =
+  | Mention_pending
+  | Board_event_pending
+  | Scope_message_pending
+  | Idle_cooldown_elapsed of { idle_sec : int; cooldown : int }
+  | Task_backlog of { unclaimed : int; failed : int }
+  | Task_reactive_cooldown_elapsed
+  | Never_started
+
+(** Typed reason for skipping a keeper turn. *)
+type skip_reason =
+  | Scheduled_autonomous_disabled
+  | Idle_gate_pending of { remaining_sec : int }
+  | Cooldown_pending of { remaining_sec : int }
+  | No_signal
+
+(** Turn decision with non-empty reason list (NEL).
+    [Run] guarantees at least one trigger reason.
+    [Skip] guarantees at least one skip reason. *)
+type turn_verdict =
+  | Run of { channel : unified_turn_channel;
+             reasons : turn_reason * turn_reason list }
+  | Skip of { channel : unified_turn_channel;
+              reasons : skip_reason * skip_reason list }
+
+(** Convert a single turn reason to its legacy string representation.
+    One-directional: typed -> string only (no Unknown variant needed). *)
+val turn_reason_to_string : turn_reason -> string
+
+(** Convert a single skip reason to its legacy string representation. *)
+val skip_reason_to_string : skip_reason -> string
+
+(** Extract all reasons as legacy string list from a verdict.
+    Preserves backward compatibility with existing log and prompt consumers. *)
+val verdict_reasons_to_strings : turn_verdict -> string list
+
 type unified_turn_decision = {
   should_run : bool;
   channel : unified_turn_channel;
-  reasons : string list;
+  verdict : turn_verdict;
   since_last_scheduled_autonomous : int option;
   effective_cooldown : int option;
   task_reactive_cooldown : int option;

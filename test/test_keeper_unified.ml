@@ -402,7 +402,11 @@ let test_scheduled_turn_requires_idle_gate () =
     (WO.should_run_unified_turn ~meta obs);
   let decision = WO.unified_turn_decision ~meta obs in
   check bool "decision records idle wait reason" true
-    (List.mem "idle_gate_wait" decision.reasons)
+    (match decision.verdict with
+     | WO.Skip { reasons = (first, rest); _ } ->
+         List.exists (function WO.Idle_gate_pending _ -> true | _ -> false)
+           (first :: rest)
+     | WO.Run _ -> false)
 
 let test_effective_cooldown_no_decay_within_base () =
   (* Within the base cooldown period, no decay should apply. *)
@@ -497,9 +501,16 @@ let test_scheduled_turn_decision_uses_backlog_acceleration () =
   let decision = WO.unified_turn_decision ~meta obs in
   check bool "backlog acceleration opens scheduled turn" true decision.should_run;
   check bool "marks actionable backlog" true
-    (List.mem "actionable_backlog" decision.reasons);
+    (match decision.verdict with
+     | WO.Run { reasons = (first, rest); _ } ->
+         List.exists (function WO.Task_backlog _ -> true | _ -> false)
+           (first :: rest)
+     | WO.Skip _ -> false);
   check bool "marks backlog cooldown elapsed" true
-    (List.mem "task_reactive_cooldown_elapsed" decision.reasons)
+    (match decision.verdict with
+     | WO.Run { reasons = (first, rest); _ } ->
+         List.mem WO.Task_reactive_cooldown_elapsed (first :: rest)
+     | WO.Skip _ -> false)
 
 let test_task_reactive_cooldown_floor_never_hits_zero () =
   with_env "MASC_KEEPER_PROACTIVE_TASK_MIN_COOLDOWN_SEC" "0" (fun () ->

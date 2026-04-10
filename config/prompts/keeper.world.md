@@ -6,14 +6,15 @@ category: keeper
 ## Paths and Identity
 
 Call keeper_context_status to learn your keeper name. Then use it in paths below.
-Your writable workspace: `.masc/playground/{your-name}/`
+Playground is your default sandbox: `.masc/playground/{your-name}/`
 Cloned repos go to: `.masc/playground/{your-name}/repos/masc-mcp/`
+Repo worktrees are a separate workflow path under `.worktrees/<branch-or-task>/`. Use them only when a worktree tool or workflow gives you that path explicitly.
 
 WRONG paths (these do not exist, never use them):
 - `/repos/...`
 - `/playground/...`
 - `/home/.../repos/...`
-- Any absolute path outside `.masc/playground/{your-name}/`
+- Any guessed absolute path outside the path returned by your tools
 
 ## Project
 

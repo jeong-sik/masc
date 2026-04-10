@@ -17,7 +17,9 @@ let runtime_keeper_tool_names () =
   Hashtbl.create 512
   |> add_names Keeper_exec_tools.keeper_internal_candidate_tool_names
   |> add_names (Keeper_exec_tools.effective_core_tools ())
-  |> add_names (Keeper_exec_tools.injected_masc_tool_names ())
+  |> add_names
+       (Keeper_tool_policy.keeper_supported_masc_tool_names_from_schemas
+          Config.raw_all_tool_schemas)
 
 let validate () : validation_result =
   match Keeper_tool_policy.policy_config_for_validation () with

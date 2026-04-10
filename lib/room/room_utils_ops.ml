@@ -128,7 +128,7 @@ let write_json_local path json =
   let content = Yojson.Safe.pretty_to_string json in
   match Fs_compat.save_file_atomic path content with
   | Ok () -> ()
-  | Error msg -> invalid_arg msg
+  | Error msg -> raise (Sys_error msg)
 
 (* Root-scoped JSON helpers for shared room registry/current_room metadata. *)
 let read_json_root config path =

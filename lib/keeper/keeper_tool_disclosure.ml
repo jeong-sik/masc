@@ -150,7 +150,11 @@ let prune_boring_tools_after_recent_polling
       && not (String.equal name "keeper_stay_silent")
     | None -> false
   in
-  if (not productive_visible) || not just_polled then visible_tools
+  if not just_polled then visible_tools
+  else if not productive_visible then
+    (* All visible tools are boring and we just used one — force silent
+       to break the polling loop instead of offering the same boring tools. *)
+    List.filter (fun name -> String.equal name "keeper_stay_silent") visible_tools
   else
     List.filter
       (fun name ->

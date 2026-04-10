@@ -169,6 +169,21 @@ let resolve_keeper_shell_write_cwd
   | Ok cwd when Fs_compat.file_exists cwd && Sys.is_directory cwd -> Ok cwd
   | Ok cwd -> Error (Printf.sprintf "cwd_not_directory: %s" cwd)
 
+(* Docker playground path mapping: host → container.
+   Host:      /Users/dancer/me/.masc/playground/cheolsu/repos/X
+   Container: /home/keeper/playground/cheolsu/repos/X *)
+let docker_playground_cwd ~(config : Room.config) ~(meta : keeper_meta) host_cwd =
+  let root = Keeper_alerting_path.project_root_of_config config in
+  let playground_prefix = Filename.concat root ".masc/playground" in
+  if String.starts_with ~prefix:playground_prefix host_cwd then
+    let suffix =
+      String.sub host_cwd (String.length playground_prefix)
+        (String.length host_cwd - String.length playground_prefix)
+    in
+    "/home/keeper/playground" ^ suffix
+  else
+    Printf.sprintf "/home/keeper/playground/%s" meta.name
+
 (* Common wrong path prefixes that keepers use.
    Maps wrong prefix → corrected relative path using keeper playground. *)
 let auto_correct_path ~(meta : keeper_meta) (raw : string) : string option =
@@ -250,124 +265,146 @@ let handle_keeper_bash
   then error_json "cmd is required. Good: cmd='ls -la lib/'. Bad: cmd=''."
 
   else
-    let validate =
-      if write_enabled then Worker_dev_tools.validate_command_coding
-      else Worker_dev_tools.validate_command
+    (* Resolve cwd early — needed for playground detection before validation. *)
+    match resolve_keeper_shell_write_cwd ~config ~meta ~args with
+    | Error e -> error_json e
+    | Ok cwd ->
+    let normalize_path_for_containment path =
+      Keeper_alerting_path.normalize_path_for_check path
+      |> Keeper_alerting_path.strip_trailing_slashes
     in
-    match validate cmd with
-    | Error reason ->
-      Log.Keeper.warn "keeper_bash blocked: %s (cmd=%s)" reason cmd_for_log;
-      let hint =
-        if String.length reason > 0 &&
-           (Re.execp (Re.Pcre.re "chain|redirect|pipe|semicolon" |> Re.compile) (String.lowercase_ascii reason))
-        then "Use separate tool calls instead of chaining. Call keeper_bash once per command."
-        else if Re.execp (Re.Pcre.re "inject|symbol" |> Re.compile) (String.lowercase_ascii reason)
-        then "Avoid shell metacharacters. Use keeper_shell with a specific op (rg, find, ls) instead."
-        else "Check the command for blocked patterns. Use keeper_shell for structured ops (rg, ls, find)."
-      in
+    let cwd_canonical =
+      normalize_path_for_containment cwd
+    in
+    let playground_rel =
+      Keeper_alerting_path.playground_path_of_keeper meta.name
+    in
+    let root = Keeper_alerting_path.project_root_of_config config in
+    let playground_abs =
+      normalize_path_for_containment (Filename.concat root playground_rel)
+    in
+    let in_playground =
+      String.starts_with ~prefix:(playground_abs ^ "/") (cwd_canonical ^ "/")
+      || String.equal playground_abs cwd_canonical
+    in
+    let use_docker =
+      Env_config_keeper.DockerPlayground.enabled && in_playground
+    in
+    (* Destructive guard: always active regardless of Docker or preset *)
+    if Worker_dev_tools.is_destructive_bash_operation cmd
+    then (
+      Log.Keeper.warn "keeper_bash DESTRUCTIVE blocked: %s (keeper=%s)" cmd_for_log meta.name;
       Yojson.Safe.to_string
         (`Assoc
             [ "ok", `Bool false
-            ; "error", `String "command_blocked"
-            ; "reason", `String reason
-            ; "hint", `String hint
-            ])
-    | Ok () ->
-      (* Resolve cwd early — needed for playground detection in guards below *)
-      match resolve_keeper_shell_write_cwd ~config ~meta ~args with
-      | Error e -> error_json e
-      | Ok cwd ->
-      let normalize_path_for_containment path =
-        Keeper_alerting_path.normalize_path_for_check path
-        |> Keeper_alerting_path.strip_trailing_slashes
+            ; "error", `String "destructive_operation_blocked"
+            ; ( "reason"
+              , `String
+                  "This command is destructive (force push, push to main, rm -rf, \
+                   etc.) and is blocked for all presets." )
+            ; "cmd", `String cmd_for_log
+            ]))
+    else if use_docker then (
+      (* Docker playground path: skip command whitelist and path validation.
+         The container provides isolation — chaining, pipes, tee are safe.
+         Only the destructive guard above is retained. *)
+      Log.Keeper.info "DOCKER_EXEC: keeper=%s cwd=%s cmd=%s"
+        meta.name cwd cmd_for_log;
+      let container = Env_config_keeper.DockerPlayground.container_name in
+      let container_cwd = docker_playground_cwd ~config ~meta cwd in
+      let st, out =
+        Process_eio.run_argv_with_status
+          ~cwd:(Sys.getcwd ()) ~timeout_sec
+          [ "docker"; "exec"; "-u"; "keeper";
+            "-w"; container_cwd;
+            container; "bash"; "-c"; cmd ^ " 2>&1" ]
       in
-      (* Canonicalize both cwd and the playground root for containment checks.
-         This closes both path traversal and symlink-mismatch cases. *)
-      let cwd_canonical =
-        normalize_path_for_containment cwd
+      Yojson.Safe.to_string
+        (`Assoc
+            [ "ok", `Bool (st = Unix.WEXITED 0)
+            ; "cwd", `String cwd
+            ; "status", Keeper_alerting_path.process_status_to_json st
+            ; "output", `String out
+            ]))
+    else
+      (* Local execution path: full validation applies *)
+      let validate =
+        if write_enabled then Worker_dev_tools.validate_command_coding
+        else Worker_dev_tools.validate_command
       in
-      (* Playground sandbox: git write ops are allowed inside the keeper's
-         playground clone (.masc/playground/<name>/repos/<repo>).
-         Both paths must be canonicalized to prevent ../traversal bypass. *)
-      let playground_rel =
-        Keeper_alerting_path.playground_path_of_keeper meta.name
-      in
-      let root = Keeper_alerting_path.project_root_of_config config in
-      let playground_abs =
-        normalize_path_for_containment (Filename.concat root playground_rel)
-      in
-      let in_playground =
-        String.starts_with ~prefix:(playground_abs ^ "/") (cwd_canonical ^ "/")
-        || String.equal playground_abs cwd_canonical
-      in
-      (* Destructive guard: always active regardless of preset or location *)
-      if Worker_dev_tools.is_destructive_bash_operation cmd
-      then (
-        Log.Keeper.warn "keeper_bash DESTRUCTIVE blocked: %s (keeper=%s)" cmd_for_log meta.name;
+      match validate cmd with
+      | Error reason ->
+        Log.Keeper.warn "keeper_bash blocked: %s (cmd=%s)" reason cmd_for_log;
+        let hint =
+          if String.length reason > 0 &&
+             (Re.execp (Re.Pcre.re "chain|redirect|pipe|semicolon" |> Re.compile) (String.lowercase_ascii reason))
+          then "Use separate tool calls instead of chaining. Call keeper_bash once per command."
+          else if Re.execp (Re.Pcre.re "inject|symbol" |> Re.compile) (String.lowercase_ascii reason)
+          then "Avoid shell metacharacters. Use keeper_shell with a specific op (rg, find, ls) instead."
+          else "Check the command for blocked patterns. Use keeper_shell for structured ops (rg, ls, find)."
+        in
         Yojson.Safe.to_string
           (`Assoc
               [ "ok", `Bool false
-              ; "error", `String "destructive_operation_blocked"
-              ; ( "reason"
-                , `String
-                    "This command is destructive (force push, push to main, rm -rf, \
-                     etc.) and is blocked for all presets." )
-              ; "cmd", `String cmd_for_log
-              ]))
-      (* Branch-switch guard: requires a write-enabled preset and a playground cwd. *)
-      else if Worker_dev_tools.is_git_branch_switch cmd
-              && not (write_enabled && in_playground)
-      then (
-        Log.Keeper.info
-          "keeper_bash branch-switch blocked: %s (keeper=%s, write_enabled=%b, playground=%b)"
-          cmd_for_log meta.name write_enabled in_playground;
-        Yojson.Safe.to_string
-          (`Assoc
-              [ "ok", `Bool false
-              ; "error", `String "branch_switch_blocked"
-              ; ( "reason"
-                , `String
-                    "git checkout/switch/branch mutations require a write-enabled preset \
-                     (Coding/Delivery/Full) and a playground clone. \
-                     Clone into your playground first (keeper_shell op=git_clone), \
-                     then set cwd to the cloned repo path." )
-              ; "cmd", `String cmd_for_log
-              ; "hint", `String "Use cwd=.masc/playground/YOUR_KEEPER_NAME/repos/REPO"
-              ]))
-      (* Write gate: playground location must not bypass preset-based write policy. *)
-      else if (not write_enabled) && Worker_dev_tools.is_write_operation cmd
-      then (
-        Log.Keeper.info "keeper_bash write-gate: %s (keeper=%s, playground=%b)"
-          cmd_for_log meta.name in_playground;
-        Yojson.Safe.to_string
-          (`Assoc
-              [ "ok", `Bool false
-              ; "error", `String "write_operation_gated"
-              ; ( "reason"
-                , `String
-                    "This command modifies state (git push/commit, make deploy, etc.). \
-                     A write-enabled preset (Coding/Delivery/Full) is required." )
-              ; "cmd", `String cmd_for_log
-              ]))
-      else (
-          (match Worker_dev_tools.validate_command_paths ~workdir:cwd cmd with
-           | Error e -> error_json e
-           | Ok () ->
-             if write_enabled
-                && Worker_dev_tools.is_write_operation cmd then
-               Log.Keeper.info "WRITE_AUDIT: keeper=%s cwd=%s cmd=%s playground=%b"
-                 meta.name cwd cmd_for_log in_playground;
-             let st, out =
-               Process_eio.run_argv_with_status ~cwd ~timeout_sec
-                 [ "/bin/bash"; "-lc"; cmd ^ " 2>&1" ]
-             in
-             Yojson.Safe.to_string
-               (`Assoc
-                   [ "ok", `Bool (st = Unix.WEXITED 0)
-                   ; "cwd", `String cwd
-                   ; "status", Keeper_alerting_path.process_status_to_json st
-                   ; "output", `String out
-                   ])))
+              ; "error", `String "command_blocked"
+              ; "reason", `String reason
+              ; "hint", `String hint
+              ])
+      | Ok () ->
+        (* Branch-switch guard *)
+        if Worker_dev_tools.is_git_branch_switch cmd
+                && not (write_enabled && in_playground)
+        then (
+          Log.Keeper.info
+            "keeper_bash branch-switch blocked: %s (keeper=%s, write_enabled=%b, playground=%b)"
+            cmd_for_log meta.name write_enabled in_playground;
+          Yojson.Safe.to_string
+            (`Assoc
+                [ "ok", `Bool false
+                ; "error", `String "branch_switch_blocked"
+                ; ( "reason"
+                  , `String
+                      "git checkout/switch/branch mutations require a write-enabled preset \
+                       (Coding/Delivery/Full) and a playground clone. \
+                       Clone into your playground first (keeper_shell op=git_clone), \
+                       then set cwd to the cloned repo path." )
+                ; "cmd", `String cmd_for_log
+                ; "hint", `String "Use cwd=.masc/playground/YOUR_KEEPER_NAME/repos/REPO"
+                ]))
+        (* Write gate *)
+        else if (not write_enabled) && Worker_dev_tools.is_write_operation cmd
+        then (
+          Log.Keeper.info "keeper_bash write-gate: %s (keeper=%s, playground=%b)"
+            cmd_for_log meta.name in_playground;
+          Yojson.Safe.to_string
+            (`Assoc
+                [ "ok", `Bool false
+                ; "error", `String "write_operation_gated"
+                ; ( "reason"
+                  , `String
+                      "This command modifies state (git push/commit, make deploy, etc.). \
+                       A write-enabled preset (Coding/Delivery/Full) is required." )
+                ; "cmd", `String cmd_for_log
+                ]))
+        else (
+            (match Worker_dev_tools.validate_command_paths ~workdir:cwd cmd with
+             | Error e -> error_json e
+             | Ok () ->
+               if write_enabled
+                  && Worker_dev_tools.is_write_operation cmd then
+                 Log.Keeper.info "WRITE_AUDIT: keeper=%s cwd=%s cmd=%s playground=%b"
+                   meta.name cwd cmd_for_log in_playground;
+               let st, out =
+                 Process_eio.run_argv_with_status ~cwd ~timeout_sec
+                   [ "/bin/bash"; "-lc"; cmd ^ " 2>&1" ]
+               in
+               Yojson.Safe.to_string
+                 (`Assoc
+                     [ "ok", `Bool (st = Unix.WEXITED 0)
+                     ; "cwd", `String cwd
+                     ; "status", Keeper_alerting_path.process_status_to_json st
+                     ; "output", `String out
+                     ])))
 ;;
 
 let handle_keeper_shell

@@ -434,8 +434,8 @@ let install ~config ~governance_level =
 let to_oas_approval_callback
       ~governance_level ~keeper_name : Oas.Hooks.approval_callback =
   (* B3: Per-decision trifecta. Evaluate on each tool call using current
-     shards, not a session-scoped closure capture. After grant_shard/
-     revoke_shard or Failing→recovery_floor, trifecta reflects actual state.
+     shards, not a session-scoped closure capture, so shard grants and
+     revocations are reflected immediately in the trifecta state.
      Cost: O(S+T) per call where S=shard count, T=tool count — <1ms. *)
   fun ~tool_name ~input ->
     let active_tool_names =
@@ -454,6 +454,21 @@ let to_oas_approval_callback
       | Some threshold -> risk_level_to_int risk >= risk_level_to_int threshold
       | None -> false
     in
+    if trifecta_active then
+      Log.Governance.debug
+        "[%s] trifecta_active tool=%s base=%s effective=%s needs_approval=%b"
+        keeper_name tool_name
+        (risk_level_to_string base_risk)
+        (risk_level_to_string risk)
+        needs_approval;
+    if trifecta_active
+       && risk_level_to_int risk > risk_level_to_int base_risk
+    then
+      Log.Governance.warn
+        "[%s] trifecta escalated tool=%s base=%s effective=%s"
+        keeper_name tool_name
+        (risk_level_to_string base_risk)
+        (risk_level_to_string risk);
     if needs_approval then
       Keeper_approval_queue.submit_and_await
         ~keeper_name

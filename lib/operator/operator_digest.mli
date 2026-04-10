@@ -44,44 +44,12 @@ type worker_card = {
   last_turn_ts_iso : string option;
 }
 
-type session_digest = {
-  session_id : string;
-  goal : string;
-  status : string;
-  health : string;
-  scale_profile : string;
-  planned_worker_count : int;
-  active_agent_count : int;
-  last_turn_age_sec : int option;
-  control_profile : string;
-  worker_class_counts : Yojson.Safe.t;
-  runtime_pool_counts : Yojson.Safe.t;
-  lane_counts : Yojson.Safe.t;
-  controller_counts : Yojson.Safe.t;
-  control_domain_counts : Yojson.Safe.t;
-  task_profile_counts : Yojson.Safe.t;
-  escalation_count : int;
-  controller_tree : Yojson.Safe.t;
-  lane_health : Yojson.Safe.t;
-  confidence_heatmap : Yojson.Safe.t;
-  context_pressure_by_lane : Yojson.Safe.t;
-  intervention_counters : Yojson.Safe.t;
-  local_runtime : Yojson.Safe.t;
-  attention_items : attention_item list;
-  recommended_actions : recommended_action list;
-  worker_cards : worker_card list;
-  risk_digest : Yojson.Safe.t;
-}
-
-val stalled_session_threshold_sec : float
-val planned_worker_turn_grace_sec : float
-val room_digest_session_limit : int
+(* session_digest type removed — team session cleanup *)
 
 val severity_rank : string -> int
 val compare_attention : attention_item -> attention_item -> int
 val compare_recommendation : recommended_action -> recommended_action -> int
 val compare_worker_card : worker_card -> worker_card -> int
-val compare_session_digest : session_digest -> session_digest -> int
 
 val attention_item_to_yojson : attention_item -> Yojson.Safe.t
 val recommended_confirm_required : string -> bool
@@ -90,52 +58,12 @@ val worker_card_to_yojson : worker_card -> Yojson.Safe.t
 
 val spawn_batch_template_of_cards : worker_card list -> Yojson.Safe.t
 
-val aggregate_worker_class_counts : Team_session_types.session list -> Yojson.Safe.t
-val aggregate_runtime_pool_counts : Team_session_types.session list -> Yojson.Safe.t
-val aggregate_lane_counts : Team_session_types.session list -> Yojson.Safe.t
-val aggregate_controller_counts : Team_session_types.session list -> Yojson.Safe.t
-val aggregate_control_domain_counts : Team_session_types.session list -> Yojson.Safe.t
-val aggregate_task_profile_counts : Team_session_types.session list -> Yojson.Safe.t
-val aggregate_escalation_count : Team_session_types.session list -> int
-val aggregate_all_worker_metrics :
-  Team_session_types.session list ->
-  Yojson.Safe.t * Yojson.Safe.t * Yojson.Safe.t * Yojson.Safe.t *
-  Yojson.Safe.t * Yojson.Safe.t * int
-val aggregated_local_runtime_json : Team_session_types.session list -> Yojson.Safe.t
-
-val session_card_to_yojson : actor:string -> session_digest -> Yojson.Safe.t
 val summary_of_attention_items : attention_item list -> Yojson.Safe.t
 val dedup_recommendations : recommended_action list -> recommended_action list
 val summary_of_recommendations : actor:string -> recommended_action list -> Yojson.Safe.t
 
 val health_from_attention_items : attention_item list -> string
 val normalize_team_health : string -> string
-
-val build_worker_cards :
-  session:Team_session_types.session ->
-  events:Yojson.Safe.t list ->
-  now:float ->
-  worker_card list
-
-val session_attention_items :
-  session:Team_session_types.session ->
-  events:Yojson.Safe.t list ->
-  worker_cards:worker_card list ->
-  now:float ->
-  attention_item list
-
-val session_recommendations :
-  session:Team_session_types.session ->
-  attentions:attention_item list ->
-  worker_cards:worker_card list ->
-  recommended_action list
-
-val build_session_digest :
-  ?status_json:Yojson.Safe.t ->
-  Room.config ->
-  Team_session_types.session ->
-  now:float ->
-  session_digest
 
 val build_room_attention_items :
   ?command_plane_summary:Yojson.Safe.t ->

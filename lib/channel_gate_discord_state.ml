@@ -20,9 +20,6 @@ let connector_id = "discord"
 let display_name = "Discord"
 let channel = "discord"
 
-(* Backward-compatible aliases used internally *)
-let connector_display_name = display_name
-let connector_channel = channel
 
 let default_status_path = ".masc/connectors/discord/status.json"
 let default_binding_store_path = ".masc/connectors/discord/bindings.json"
@@ -314,7 +311,7 @@ let connector_json ?gate_status_json ?(audit_limit = 10) () =
         match list_assoc_field "channels" json with
         | Some channels -> (
             match
-              find_assoc_by_string_field ~field:"channel" ~value:connector_channel
+              find_assoc_by_string_field ~field:"channel" ~value:channel
                 channels
             with
             | Some row -> row
@@ -369,8 +366,8 @@ let connector_json ?gate_status_json ?(audit_limit = 10) () =
   `Assoc
     [
       ("connector_id", `String connector_id);
-      ("display_name", `String connector_display_name);
-      ("channel", `String connector_channel);
+      ("display_name", `String display_name);
+      ("channel", `String channel);
       ("capabilities", `List [ `String "runtime_status"; `String "bindings"; `String "audit" ]);
       ("status", `String (string_member status "status"));
       ("available", `Bool (bool_member status "available"));
@@ -403,8 +400,6 @@ let connector_json ?gate_status_json ?(audit_limit = 10) () =
       ("binding_summary", binding_summary);
       ("observed_channel", observed_channel);
     ]
-
-(* connectors_json removed — use Channel_gate_connector.connectors_json instead *)
 
 let rollback_bindings original_bindings =
   try save_bindings original_bindings with

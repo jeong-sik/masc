@@ -9,6 +9,13 @@
 module Tool_shard = Masc_mcp.Tool_shard
 module Types = Types
 
+let get_json_assoc key = function
+  | `Assoc fields -> (
+      match List.assoc_opt key fields with
+      | Some (`Assoc assoc) -> Some assoc
+      | _ -> None)
+  | _ -> None
+
 (* ============================================================
    Predefined shard tests
    ============================================================ *)
@@ -322,6 +329,22 @@ let test_board_tools_names () =
   Alcotest.(check bool) "has board_comment" true (List.mem "keeper_board_comment" names);
   Alcotest.(check bool) "has board_vote" true (List.mem "keeper_board_vote" names)
 
+let test_keeper_board_post_schema_supports_judgment () =
+  match
+    List.find_opt
+      (fun (tool : Types.tool_schema) -> tool.name = "keeper_board_post")
+      Tool_shard.board_tools
+  with
+  | None -> Alcotest.fail "keeper_board_post schema missing"
+  | Some schema ->
+      match get_json_assoc "properties" schema.input_schema with
+      | Some props ->
+          Alcotest.(check bool) "has classification_reason" true
+            (List.mem_assoc "classification_reason" props);
+          Alcotest.(check bool) "has judgment" true
+            (List.mem_assoc "judgment" props)
+      | None -> Alcotest.fail "keeper_board_post missing properties"
+
 (* ============================================================
    Voice tools content tests (#3: all 5 voice tools present)
    ============================================================ *)
@@ -558,6 +581,8 @@ let () =
     ("tool_content", [
       Alcotest.test_case "base tools" `Quick test_base_tools_names;
       Alcotest.test_case "board tools" `Quick test_board_tools_names;
+      Alcotest.test_case "keeper_board_post supports judgment" `Quick
+        test_keeper_board_post_schema_supports_judgment;
       Alcotest.test_case "voice tools" `Quick test_voice_tools_names;
       Alcotest.test_case "keeper_model excludes voice" `Quick
         test_keeper_model_excludes_voice_tools;

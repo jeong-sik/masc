@@ -51,6 +51,7 @@ type cascade_observation = {
 type stop_reason =
   | Completed
   | TurnBudgetExhausted of { turns_used : int; limit : int }
+  | MutationBoundaryReached of { turns_used : int; tool_name : string option }
 
 type run_result = {
   response : Oas.Types.api_response;
@@ -116,6 +117,7 @@ val run_named :
   ?enable_thinking:bool ->
   ?approval:Oas.Hooks.approval_callback ->
   ?exit_condition:(int -> bool) ->
+  ?exit_condition_result:(int -> stop_reason * string option) ->
   ?oas_checkpoint:Oas.Checkpoint.t ->
   ?event_bus:Oas.Event_bus.t ->
   ?sw:Eio.Switch.t ->

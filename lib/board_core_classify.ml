@@ -65,6 +65,45 @@ let meta_source = function
       | _ -> None)
   | _ -> None
 
+let meta_field meta_json key =
+  match meta_json with
+  | Some (`Assoc fields) -> List.assoc_opt key fields
+  | _ -> None
+
+let nonempty_json_string = function
+  | `String value ->
+      let value = String.trim value in
+      if value = "" then None else Some value
+  | _ -> None
+
+let judgment_reason = function
+  | `String _ as value -> nonempty_json_string value
+  | `Assoc fields ->
+      let find keys =
+        List.find_map
+          (fun key ->
+             match List.assoc_opt key fields with
+             | Some value -> nonempty_json_string value
+             | None -> None)
+          keys
+      in
+      find [ "summary"; "reason"; "classification_reason" ]
+  | _ -> None
+
+let meta_explicit_classification_reason meta_json =
+  match
+    (match meta_field meta_json "classification_reason" with
+     | Some value -> nonempty_json_string value
+     | None -> None)
+  with
+  | Some _ as reason -> reason
+  | None ->
+      [ "judgment"; "judgement" ]
+      |> List.find_map (fun key ->
+             match meta_field meta_json key with
+             | Some value -> judgment_reason value
+             | None -> None)
+
 let legacy_migrate_post_kind ~meta_json ~author ~visibility ~expires_at ~hearth =
   let author = String.lowercase_ascii author in
   let hearth =
@@ -99,27 +138,33 @@ let legacy_migrate_post_kind ~meta_json ~author ~visibility ~expires_at ~hearth 
 let classify_post_kind (p : post) = p.post_kind
 
 let post_classification_reason (p : post) =
-  let author = String.lowercase_ascii (Agent_id.to_string p.author) in
-  match p.post_kind, meta_source p.meta_json with
-  | Human_post, Some "dashboard_board_post" ->
-      "Direct board post created from the dashboard without automation override."
-  | Human_post, Some source ->
-      Printf.sprintf
-        "Direct board post without automation override (source=%s)." source
-  | Human_post, None ->
-      "Direct board post without automation provenance."
-  | Automation_post, Some "keeper_board_post" ->
-      "Keeper board adapter forced automation classification."
-  | Automation_post, Some "dashboard_board_post" ->
-      "Dashboard board post classified as automation for a joined agent author."
-  | Automation_post, Some source ->
-      Printf.sprintf "Automation provenance source: %s." source
-  | Automation_post, None when legacy_author_looks_automation author ->
-      "Legacy automation classification from author naming heuristic."
-  | Automation_post, None ->
-      "Automation post preserved by board post_kind contract."
-  | System_post, _ ->
-      "System post reserved for platform or operator authored messages."
+  match meta_explicit_classification_reason p.meta_json with
+  | Some reason -> reason
+  | None ->
+      let author = Agent_id.to_string p.author in
+      let author_lc = String.lowercase_ascii author in
+      match p.post_kind, meta_source p.meta_json with
+      | Human_post, Some "dashboard_board_post" ->
+          "Direct board post created from the dashboard without automation override."
+      | Human_post, Some source ->
+          Printf.sprintf
+            "Direct board post without automation override (source=%s)." source
+      | Human_post, None ->
+          "Direct board post without automation provenance."
+      | Automation_post, Some "keeper_board_post" ->
+          Printf.sprintf
+            "Automation classification based on source=keeper_board_post, author=%s, and the automation post_kind contract."
+            author
+      | Automation_post, Some "dashboard_board_post" ->
+          "Dashboard board post classified as automation for a joined agent author."
+      | Automation_post, Some source ->
+          Printf.sprintf "Automation provenance source: %s." source
+      | Automation_post, None when legacy_author_looks_automation author_lc ->
+          "Legacy automation classification from author naming heuristic."
+      | Automation_post, None ->
+          "Automation post preserved by board post_kind contract."
+      | System_post, _ ->
+          "System post reserved for platform or operator authored messages."
 
 let post_matches_filters ~exclude_system ~exclude_automation (p : post) =
   let kind = p.post_kind in

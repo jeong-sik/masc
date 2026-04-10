@@ -219,6 +219,7 @@ For external channel adapters, treat the Channel Gate as the boundary owner:
 - write/traffic path: `/api/v1/gate/message`
 - read/descriptor path: `/api/v1/gate/connectors`
 - per-channel metrics path: `/api/v1/gate/status`
+- Discord bot setup and live verification: [sidecars/discord-bot/README.md](sidecars/discord-bot/README.md)
 
 The dashboard should learn connector type and status from the gate descriptor
 surface instead of hardcoding vendor-specific assumptions.

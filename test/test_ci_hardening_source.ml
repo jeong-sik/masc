@@ -92,6 +92,9 @@ let test_route_auth_contracts () =
   check bool "http keeper chat stream uses keeper tool auth" true
     (file_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
        {|with_tool_auth ~tool_name:"masc_keeper_msg"|});
+  check bool "dashboard runtime probe force refresh uses tool auth" true
+    (file_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
+       {|with_tool_auth ~tool_name:"masc_runtime_ollama_probe"|});
   check bool "http keeper chat stream forces direct reply mode" true
     (file_contains_pattern "lib/server/server_routes_http_keeper_stream.ml"
        {|("direct_reply", `Bool true)|});
@@ -137,10 +140,6 @@ let test_route_auth_contracts () =
     (file_contains_pattern
        "lib/server/server_auth.ml"
        {|String.equal path "/api/v1/gate/connectors"|});
-  check bool "discord gate status route stays public read" true
-    (file_contains_pattern
-       "lib/server/server_auth.ml"
-       {|String.equal path "/api/v1/gate/discord/status"|});
   check bool "generic connector status route stays public read" true
     (file_contains_pattern
        "lib/server/server_auth.ml"
@@ -149,10 +148,6 @@ let test_route_auth_contracts () =
     (file_contains_pattern
         "lib/server/server_routes_http_routes_channel_gate.ml"
         {|Http.Router.get "/api/v1/gate/health"|});
-  check bool "discord gate status route is registered" true
-    (file_contains_pattern
-       "lib/server/server_routes_http_routes_channel_gate.ml"
-       {|Http.Router.get "/api/v1/gate/discord/status"|});
   check bool "generic connector status route is registered" true
     (file_contains_pattern
        "lib/server/server_routes_http_routes_channel_gate.ml"
@@ -161,18 +156,10 @@ let test_route_auth_contracts () =
     (file_contains_pattern
        "lib/server/server_routes_http_routes_channel_gate.ml"
        {|Http.Router.get "/api/v1/gate/connectors"|});
-  check bool "discord gate bind route is registered" true
-    (file_contains_pattern
-       "lib/server/server_routes_http_routes_channel_gate.ml"
-       {|Http.Router.post "/api/v1/gate/discord/bind"|});
   check bool "generic connector bind route is registered" true
     (file_contains_pattern
        "lib/server/server_routes_http_routes_channel_gate.ml"
        {|Http.Router.post "/api/v1/gate/connector/bind"|});
-  check bool "discord gate unbind route is registered" true
-    (file_contains_pattern
-       "lib/server/server_routes_http_routes_channel_gate.ml"
-       {|Http.Router.post "/api/v1/gate/discord/unbind"|});
   check bool "generic connector unbind route is registered" true
     (file_contains_pattern
        "lib/server/server_routes_http_routes_channel_gate.ml"

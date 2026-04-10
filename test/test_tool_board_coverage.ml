@@ -36,6 +36,26 @@ let dispatch name args =
 
 let make_args pairs = `Assoc pairs
 
+let parse_create_response_json body =
+  match String.index_opt body '\n' with
+  | Some idx ->
+      Yojson.Safe.from_string
+        (String.sub body (idx + 1) (String.length body - idx - 1))
+  | None -> Alcotest.fail "expected JSON payload in create response"
+
+let make_keeper_meta ?(name = "judge-keeper") () : Keeper_types.keeper_meta =
+  match
+    Keeper_types.meta_of_json
+      (`Assoc
+         [
+           ("name", `String name);
+           ("agent_name", `String name);
+           ("trace_id", `String "test-trace-board");
+         ])
+  with
+  | Ok meta -> meta
+  | Error e -> failwith (Printf.sprintf "make_keeper_meta failed: %s" e)
+
 let contains_substring haystack needle =
   try
     ignore (Str.search_forward (Str.regexp_string needle) haystack 0);
@@ -215,6 +235,68 @@ let test_post_create_structured_payload () =
      so meta.state_block is absent (null) in the created post. *)
   Alcotest.(check bool) "state_block absent after strip" true
     (Yojson.Safe.Util.(json |> member "meta" |> member "state_block") = `Null)
+
+let test_post_create_judgment_roundtrip () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let summary =
+    "LLM judged this as a direct post because it is a user-authored explanation rather than automation output."
+  in
+  let ok, body =
+    dispatch "masc_board_post"
+      (make_args
+         [
+           ("content", `String "Judged board post");
+           ("author", `String "tester");
+           ( "judgment",
+             `Assoc
+               [
+                 ("summary", `String summary);
+                 ("confidence", `Float 0.77);
+               ] );
+         ])
+  in
+  Alcotest.(check bool) "create ok" true ok;
+  let json = parse_create_response_json body in
+  Alcotest.(check string) "classification reason from judgment" summary
+    Yojson.Safe.Util.(json |> member "classification_reason" |> to_string);
+  Alcotest.(check string) "judgment summary kept in meta" summary
+    Yojson.Safe.Util.(json |> member "meta" |> member "judgment" |> member "summary" |> to_string)
+
+let test_keeper_board_post_preserves_meta_reason () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let keeper_meta = make_keeper_meta ~name:"judge-keeper" () in
+  let reason =
+    "LLM judged this as automation because it broadcasts a keeper-owned status update."
+  in
+  let body =
+    Keeper_exec_board.handle_keeper_board_tool
+      ~meta:keeper_meta
+      ~name:"keeper_board_post"
+      ~args:
+        (make_args
+           [
+             ("content", `String "keeper authored update");
+             ( "meta",
+               `Assoc
+                 [
+                   ("classification_reason", `String reason);
+                   ("trace", `String "probe-1");
+                 ] );
+           ])
+  in
+  let json = parse_create_response_json body in
+  Alcotest.(check string) "classification reason kept" reason
+    Yojson.Safe.Util.(json |> member "classification_reason" |> to_string);
+  Alcotest.(check string) "keeper source injected" "keeper_board_post"
+    Yojson.Safe.Util.(json |> member "meta" |> member "source" |> to_string);
+  Alcotest.(check string) "existing meta preserved" "probe-1"
+    Yojson.Safe.Util.(json |> member "meta" |> member "trace" |> to_string);
+  Alcotest.(check string) "author forced from keeper meta" "judge-keeper"
+    Yojson.Safe.Util.(json |> member "author" |> to_string)
 
 let test_post_create_accepts_automation_rejects_system () =
   Eio_main.run @@ fun env ->
@@ -654,6 +736,10 @@ let () =
           Alcotest.test_case "create success" `Quick test_post_create_success;
           Alcotest.test_case "create structured payload" `Quick
             test_post_create_structured_payload;
+          Alcotest.test_case "create judgment roundtrip" `Quick
+            test_post_create_judgment_roundtrip;
+          Alcotest.test_case "keeper board post preserves meta reason" `Quick
+            test_keeper_board_post_preserves_meta_reason;
           Alcotest.test_case "accept automation reject system" `Quick
             test_post_create_accepts_automation_rejects_system;
           Alcotest.test_case "create empty content" `Quick test_post_create_empty_content;

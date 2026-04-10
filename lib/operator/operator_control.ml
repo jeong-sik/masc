@@ -75,60 +75,7 @@ let keeper_recovery_outcome after_diagnostic =
              state) )
   | None -> (false, Some "keeper recovery did not return a health_state")
 
-let resolve_team_turn_actor _config ~requested_actor:_ ~session_id =
-  (* Team_session_store removed *)
-  Error
-    (Printf.sprintf
-       "team session actions are no longer supported (team session layer removed; session_id=%s)"
-       session_id)
-
-let execute_team_turn ~ctx ~request ~session_id ~turn_kind ~message ~target_agent
-    ~task_title ~task_description ~task_priority =
-  let* actor_for_session, operator_override =
-    resolve_team_turn_actor ctx.config ~requested_actor:request.actor ~session_id
-  in
-  let message =
-    if operator_override then
-      match message with
-      | Some raw -> Some (Printf.sprintf "[operator:%s] %s" request.actor raw)
-      | None -> Some (Printf.sprintf "[operator:%s]" request.actor)
-    else
-      message
-  in
-  let args =
-    let fields =
-      [
-        ("session_id", `String session_id);
-        ("actor", `String actor_for_session);
-        ( "turn_kind",
-          `String (Team_session_types.turn_kind_to_string turn_kind) );
-        ("task_priority", `Int task_priority);
-      ]
-    in
-    let fields =
-      match message with
-      | Some value -> ("message", `String value) :: fields
-      | None -> fields
-    in
-    let fields =
-      match target_agent with
-      | Some value -> ("target_agent", `String value) :: fields
-      | None -> fields
-    in
-    let fields =
-      match task_title with
-      | Some value -> ("task_title", `String value) :: fields
-      | None -> fields
-    in
-    let fields =
-      match task_description with
-      | Some value -> ("task_description", `String value) :: fields
-      | None -> fields
-    in
-    `Assoc fields
-  in
-  ignore (ctx, args, actor_for_session, operator_override);
-  Error "team session tools removed"
+(* resolve_team_turn_actor and execute_team_turn removed — team session cleanup *)
 
 (** {1 Domain-specific action handlers} *)
 
@@ -184,111 +131,12 @@ let execute_room_action (ctx : 'a context) (request : action_request) =
       room_action_result request (`String result)
   | _ -> Error (Printf.sprintf "not a namespace action: %s" request.action_type)
 
-let execute_team_action (ctx : 'a context) (request : action_request) =
-  match request.action_type with
-  | "team_turn" ->
-      let* () = validate_target_type "team_session" request in
-      let* session_id = require_target_id request in
-      let* turn_kind = parse_turn_kind request.payload in
-      let message = get_string_opt request.payload "message" in
-      let target_agent = get_string_opt request.payload "target_agent" in
-      let task_title =
-        match get_string_opt request.payload "task_title" with
-        | Some value -> Some value
-        | None -> get_string_opt request.payload "title"
-      in
-      let task_description =
-        match get_string_opt request.payload "task_description" with
-        | Some value -> Some value
-        | None -> get_string_opt request.payload "description"
-      in
-      let task_priority = get_int request.payload "task_priority" (get_int request.payload "priority" 3) in
-      execute_team_turn ~ctx ~request ~session_id ~turn_kind ~message ~target_agent
-        ~task_title ~task_description ~task_priority
-  | "team_note" ->
-      let* () = validate_target_type "team_session" request in
-      let* session_id = require_target_id request in
-      let* message =
-        require_payload_field request.payload "message" "payload.message is required"
-      in
-      execute_team_turn ~ctx ~request ~session_id
-        ~turn_kind:Team_session_types.Turn_note ~message:(Some message)
-        ~target_agent:None ~task_title:None ~task_description:None
-        ~task_priority:3
-  | "team_broadcast" ->
-      let* () = validate_target_type "team_session" request in
-      let* session_id = require_target_id request in
-      let* message =
-        require_payload_field request.payload "message" "payload.message is required"
-      in
-      execute_team_turn ~ctx ~request ~session_id
-        ~turn_kind:Team_session_types.Turn_broadcast ~message:(Some message)
-        ~target_agent:(get_string_opt request.payload "target_agent")
-        ~task_title:None ~task_description:None ~task_priority:3
-  | "team_task_inject" ->
-      let* () = validate_target_type "team_session" request in
-      let* session_id = require_target_id request in
-      let* task_title =
-        match get_string_opt request.payload "task_title" with
-        | Some value -> Ok value
-        | None -> require_payload_field request.payload "title" "payload.task_title or payload.title is required"
-      in
-      let task_description =
-        match get_string_opt request.payload "task_description" with
-        | Some value -> Some value
-        | None -> get_string_opt request.payload "description"
-      in
-      let task_priority = get_int request.payload "task_priority" (get_int request.payload "priority" 2) in
-      execute_team_turn ~ctx ~request ~session_id
-        ~turn_kind:Team_session_types.Turn_task
-        ~message:(get_string_opt request.payload "message")
-        ~target_agent:(get_string_opt request.payload "target_agent")
-        ~task_title:(Some task_title) ~task_description ~task_priority
-  | "team_worker_spawn_batch" ->
-      let* () = validate_target_type "team_session" request in
-      let* session_id = require_target_id request in
-      let* spawn_batch =
-        match U.member "spawn_batch" request.payload with
-        | `List [] -> Error "payload.spawn_batch must contain at least one item"
-        | `List _ as xs -> Ok xs
-        | _ -> Error "payload.spawn_batch is required"
-      in
-      let* wait_mode =
-        match get_string_opt request.payload "wait_mode" with
-        | None -> Ok None
-        | Some ("background" | "blocking" as v) -> Ok (Some v)
-        | Some other ->
-            Error (Printf.sprintf
-              "payload.wait_mode must be \"background\" or \"blocking\", got %S" other)
-      in
-      let args =
-        let base_fields =
-          [
-            ("session_id", `String session_id);
-            ("actor", `String request.actor);
-            ("spawn_batch", spawn_batch);
-          ]
-        in
-        let fields =
-          match wait_mode with
-          | Some value -> ("wait_mode", `String value) :: base_fields
-          | None -> base_fields
-        in
-        `Assoc fields
-      in
-      ignore args;
-      Error "team session tools removed"
-  | "team_stop" ->
-      let* () = validate_target_type "team_session" request in
-      let* session_id = require_target_id request in
-      let reason =
-        get_string request.payload "reason" "Stopped by operator control plane"
-      in
-      let generate_report = get_bool request.payload "generate_report" true in
-      (* Team_session_engine_eio removed *)
-      ignore (generate_report, reason);
-      Error (Printf.sprintf "team session engine removed, cannot stop session: %s" session_id)
-  | _ -> Error (Printf.sprintf "not a team action: %s" request.action_type)
+let execute_team_action (_ctx : 'a context) (request : action_request) =
+  (* Team session actions removed — all return error *)
+  Error (Printf.sprintf "team session actions removed: action=%s target_type=%s target_id=%s"
+    request.action_type
+    request.target_type
+    (Option.value ~default:"?" request.target_id))
 
 let execute_keeper_action (ctx : 'a context) (request : action_request) =
   match request.action_type with

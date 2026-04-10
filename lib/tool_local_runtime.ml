@@ -6,7 +6,8 @@
     - Tool_local_runtime_http   : HTTP helpers (curl wrappers, JSON member access)
     - Tool_local_runtime_verify : runtime contract verification
     - Tool_local_runtime_bench  : concurrency benchmark
-    - Tool_local_runtime_status : runtime pool status reporting *)
+    - Tool_local_runtime_status : runtime pool status reporting
+    - Tool_local_runtime_probe  : native Ollama timing/KV inference probe *)
 
 open Types
 
@@ -16,9 +17,13 @@ include Tool_local_runtime_core
 (* Re-export sub-module public values used by external callers *)
 let runtime_status_json = Tool_local_runtime_status.runtime_status_json
 let runtime_verify_json = Tool_local_runtime_verify.runtime_verify_json
+let runtime_ollama_probe_json = Tool_local_runtime_probe.runtime_ollama_probe_json
 let run_bench = Tool_local_runtime_bench.run_bench
 let provider_health_reachable = Tool_local_runtime_verify.provider_health_reachable
 let classify_runtime_blocker = Tool_local_runtime_verify.classify_runtime_blocker
+let ollama_loaded_models_of_ps_json = Tool_local_runtime_probe.ollama_loaded_models_of_ps_json
+let ollama_probe_run_of_generate_json = Tool_local_runtime_probe.ollama_probe_run_of_generate_json
+let kv_cache_assessment_json = Tool_local_runtime_probe.kv_cache_assessment_json
 
 let handle_models _ctx : result =
   match fetch_models () with
@@ -122,11 +127,45 @@ let handle_runtime_bench _ctx args : result =
   | Ok json -> (true, json_ok [ ("result", json) ])
   | Error err -> (false, json_error err)
 
+let handle_runtime_ollama_probe _ctx args : result =
+  let open Yojson.Safe.Util in
+  let server_url = member "server_url" args |> to_string_option in
+  let model = member "model" args |> to_string_option in
+  let prompt = member "prompt" args |> to_string_option in
+  let keep_alive = member "keep_alive" args |> to_string_option in
+  let probe_runs =
+    match member "probe_runs" args with
+    | `Int value -> value
+    | `Intlit value -> Option.value ~default:2 (parse_int_opt value)
+    | _ -> 2
+  in
+  let max_tokens =
+    match member "max_tokens" args with
+    | `Int value -> value
+    | `Intlit value -> Option.value ~default:16 (parse_int_opt value)
+    | _ -> 16
+  in
+  let timeout_sec =
+    match member "timeout_sec" args with
+    | `Int value -> value
+    | `Intlit value -> Option.value ~default:45 (parse_int_opt value)
+    | _ -> 45
+  in
+  ( true,
+    json_ok
+      [
+        ( "result",
+          runtime_ollama_probe_json ?server_url ?model ?prompt ?keep_alive
+            ~probe_runs ~max_tokens ~timeout_sec () );
+      ] )
+
 let dispatch ctx ~name ~args : result option =
   match name with
   (* Canonical names *)
   | "masc_runtime_verify" ->
       Some (handle_runtime_verify ctx args)
+  | "masc_runtime_ollama_probe" ->
+      Some (handle_runtime_ollama_probe ctx args)
   | _ -> None
 
 let schemas : tool_schema list =
@@ -146,6 +185,27 @@ let schemas : tool_schema list =
                   ("expected_model", `Assoc [ ("type", `String "string") ]);
                   ("expected_slots", `Assoc [ ("type", `String "integer") ]);
                   ("expected_ctx", `Assoc [ ("type", `String "integer") ]);
+                ] );
+          ];
+    };
+    {
+      name = "masc_runtime_ollama_probe";
+      description =
+        "Probe native Ollama timing behavior with repeated /api/generate calls. Returns loaded models from /api/ps, per-run load/prompt-eval/generation timings, tok/sec estimates, and a timing-based repeated-prefix reuse inference. This does not expose direct KV occupancy or hit-rate.";
+      input_schema =
+        `Assoc
+          [
+            ("type", `String "object");
+            ( "properties",
+              `Assoc
+                [
+                  ("server_url", `Assoc [ ("type", `String "string") ]);
+                  ("model", `Assoc [ ("type", `String "string") ]);
+                  ("prompt", `Assoc [ ("type", `String "string") ]);
+                  ("keep_alive", `Assoc [ ("type", `String "string") ]);
+                  ("probe_runs", `Assoc [ ("type", `String "integer") ]);
+                  ("max_tokens", `Assoc [ ("type", `String "integer") ]);
+                  ("timeout_sec", `Assoc [ ("type", `String "integer") ]);
                 ] );
           ];
     };

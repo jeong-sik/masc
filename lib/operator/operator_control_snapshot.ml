@@ -72,23 +72,20 @@ let iso_of_unix = Dashboard_utils.iso_of_unix
 
 let runtime_status_from_live_signal (agent_status_json : Yojson.Safe.t) =
   let runtime_status =
-    match U.member "status" agent_status_json with
-    | `String (("active" | "busy" | "listening" | "idle") as status) -> Some status
+    match Keeper_exec_status.agent_status_text agent_status_json with
+    | ("active" | "busy" | "listening" | "idle") as status -> Some status
     | _ -> None
   in
-  let last_seen_ago_s =
-    match U.member "last_seen_ago_s" agent_status_json with
-    | `Float value -> Some value
-    | `Int value -> Some (float_of_int value)
-    | _ -> None
+  let has_live_signal =
+    Keeper_exec_status.agent_runtime_has_live_signal agent_status_json
   in
   let is_zombie =
     match U.member "is_zombie" agent_status_json with
     | `Bool value -> value
     | _ -> false
   in
-  match (runtime_status, last_seen_ago_s, is_zombie) with
-  | Some status, Some age_s, false when age_s <= 120.0 -> Some status
+  match (runtime_status, has_live_signal, is_zombie) with
+  | Some status, true, false -> Some status
   | _ -> None
 
 let health_state_allows_runtime_status_override (diagnostic : Yojson.Safe.t) =
@@ -327,12 +324,12 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                    if lightweight then ([], [], None, None, None, None)
                    else keeper_tool_audit_fields config meta
                  in
-                 let agent_status =
+                 let surface_status =
                    if not agent_exists then "offline"
                    else Keeper_exec_status.keeper_surface_status ~agent_status:agent_json ~diagnostic
                  in
-                 let agent_status =
-                   align_keeper_runtime_status ~surface_status:agent_status
+                 let aligned_status =
+                   align_keeper_runtime_status ~surface_status
                      ~diagnostic
                      ~agent_status_json:agent_json ~keepalive_running
                  in
@@ -362,7 +359,7 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                        ("short_goal", `String meta.short_goal);
                        ("mid_goal", `String meta.mid_goal);
                        ("long_goal", `String meta.long_goal);
-                       ("status", `String agent_status);
+                       ("status", `String aligned_status);
                        ("agent", agent_json);
                        ("generation", `Int meta.runtime.generation);
                        ("turn_count", `Int meta.runtime.usage.total_turns);
@@ -490,60 +487,7 @@ let _snapshot_session_limit () =
 let _snapshot_recent_completed_limit () =
   Dashboard_http_helpers.operator_snapshot_recent_completed_limit ()
 
-let sessions_json ?(status_cache : (string, Yojson.Safe.t) Hashtbl.t option) config sessions =
-  let ordered_sessions =
-    sessions
-    |> List.sort (fun (a : Team_session_types.session) (b : Team_session_types.session) ->
-           compare b.started_at a.started_at)
-  in
-  (* Parallel session I/O: each session's events + status reads run
-     concurrently as Eio fibers.  Same pattern as dashboard_http_keeper.ml.
-     Hashtbl cache: Eio cooperative scheduling means find_opt/replace don't
-     interleave mid-operation.  Two fibers may both miss and compute the
-     same session_id — this is harmless (idempotent replace, identical
-     results) and avoids mutex overhead on a read-heavy path. *)
-  let n = List.length ordered_sessions in
-  let results = Array.make n (`Assoc []) in
-  Eio.Fiber.all
-    (List.mapi
-       (fun idx (session : Team_session_types.session) () ->
-         (try
-           let recent_events =
-             (* Team_session_store + Team_session_engine_eio removed *)
-             ignore (config, _session_recent_event_limit);
-             []
-           in
-           let status =
-             match status_cache with
-             | Some tbl -> (
-                 match Hashtbl.find_opt tbl session.session_id with
-                 | Some cached -> cached
-                 | None ->
-                     let s = `Assoc [] in
-                     Hashtbl.replace tbl session.session_id s;
-                     s)
-             | None -> `Assoc []
-           in
-           results.(idx) <-
-             `Assoc
-               [
-                 ("session_id", `String session.session_id);
-                 ("command_plane_operation_id", `String ("detachment-" ^ session.session_id));
-                 ("command_plane_detachment_id", `String ("detachment-" ^ session.session_id));
-                 ("status", status);
-                 ("recent_events", `List recent_events);
-               ]
-         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-           Log.Dashboard.error "sessions_json fiber error (%s): %s"
-             session.session_id (Printexc.to_string exn);
-           results.(idx) <-
-             `Assoc
-               [ ("session_id", `String session.session_id);
-                 ("status", `Assoc [("error", `String (Printexc.to_string exn))]);
-                 ("recent_events", `List []) ]))
-       ordered_sessions);
-  let items = Array.to_list results in
-  `Assoc [ ("count", `Int n); ("items", `List items) ]
+(* sessions_json removed — team session cleanup. Sessions always return []. *)
 
 let room_json config =
   let initialized = Room.is_initialized config in
@@ -807,24 +751,12 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
     | Summary | Messages | Full -> true
     | Sessions | Keepers -> false
   in
-  (* Pre-compute session_status_json once per session. build_session_digest
-     and sessions_json both call session_status_json for each session.
-     Caching avoids the duplicate I/O + computation. *)
-  let status_cache : (string, Yojson.Safe.t) Hashtbl.t = Hashtbl.create 16 in
-  let cached_session_status_json (session : Team_session_types.session) =
-    match Hashtbl.find_opt status_cache session.session_id with
-    | Some cached -> cached
-    | None ->
-        (* Team_session_engine_eio removed — return empty *)
-        ignore (config, session);
-        let s = `Assoc [] in
-        Hashtbl.replace status_cache session.session_id s;
-        s
-  in
+  (* Team sessions removed — status_cache and session digests no longer needed. *)
+  let status_cache : (string, Yojson.Safe.t) Hashtbl.t = Hashtbl.create 0 in
   let command_plane_summary =
     if include_summary_fields && initialized then
       timed "command_plane_summary" (fun () ->
-        Some (Command_plane_v2.summary_json ~sessions:tracked_sessions config))
+        Some (Command_plane_v2.summary_json config))
     else None
   in
   let summary_fields = timed "summary_fields" (fun () ->
@@ -832,21 +764,12 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
        && initialized
        && (match view with Summary | Full -> true | _ -> false)
     then
-      let now = Time_compat.now () in
-      let session_digests =
-        tracked_sessions
-        |> List.map (fun session ->
-          let status_json = cached_session_status_json session in
-          build_session_digest ~status_json config session ~now)
-      in
       let room_attention =
         build_room_attention_items ?command_plane_summary config
-        @ (session_digests |> List.concat_map (fun digest -> digest.attention_items))
         |> List.sort compare_attention
       in
       let room_recommendation_items =
         room_recommendations ?command_plane_summary config
-        @ (session_digests |> List.concat_map (fun digest -> digest.recommended_actions))
       in
       [
         ("attention_summary", summary_of_attention_items room_attention);
@@ -885,25 +808,9 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
          let swarm_status_ref = ref `Null in
          Eio.Fiber.all [
            (fun () ->
-             sessions_ref :=
-               timed "sessions_json" (fun () ->
-                 if initialized && include_sessions then
-                   let capped =
-                     if lightweight_summary then
-                       let active, rest =
-                         List.partition (fun (s : Team_session_types.session) ->
-                           s.status = Running || s.status = Paused) tracked_sessions
-                       in
-                       let recent =
-                         List.filteri
-                           (fun i _ -> i < _snapshot_recent_completed_limit ())
-                           rest
-                       in
-                       active @ recent
-                     else tracked_sessions
-                   in
-                   sessions_json ~status_cache config capped
-                 else empty_section));
+             (* Team sessions removed — always empty *)
+             ignore (include_sessions, lightweight_summary, status_cache);
+             sessions_ref := empty_section);
            (fun () ->
              keepers_ref :=
                timed "keepers_json" (fun () ->
@@ -920,7 +827,7 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
            (fun () ->
              let cp = timed "command_plane_json" (fun () ->
                if initialized && include_command_plane then
-                 Command_plane_v2.snapshot_json ~sessions:tracked_sessions config
+                 Command_plane_v2.snapshot_json config
                else `Null)
              in
              command_plane_ref := cp;
@@ -937,21 +844,18 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
            ("swarm_status", !swarm_status_ref);
          ]
       )
-      @ (let (role_census, runtime_pools, lane_census, controller_census,
-              control_domains, task_profiles, escalation_count) =
-           timed "aggregates" (fun () -> aggregate_all_worker_metrics tracked_sessions)
-         in
-         [
-           ("role_census", role_census);
-           ("runtime_pools", runtime_pools);
-           ("lane_census", lane_census);
-           ("controller_census", controller_census);
-           ("control_domains", control_domains);
-           ("task_profiles", task_profiles);
-           ("escalation_count", `Int escalation_count);
-         ])
+      (* Team sessions removed — aggregate metrics are always empty. *)
       @ [
-         ("local_runtime", aggregated_local_runtime_json tracked_sessions);
+           ("role_census", `Assoc []);
+           ("runtime_pools", `Assoc []);
+           ("lane_census", `Assoc []);
+           ("controller_census", `Assoc []);
+           ("control_domains", `Assoc []);
+           ("task_profiles", `Assoc []);
+           ("escalation_count", `Int 0);
+         ]
+      @ [
+         ("local_runtime", `Null);
          ( "recent_messages",
            if initialized && include_messages && not lightweight_summary then
              recent_messages_json config

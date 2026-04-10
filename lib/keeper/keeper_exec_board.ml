@@ -1,8 +1,20 @@
 open Keeper_types
 open Keeper_exec_shared
 
+let assoc_replace key value fields =
+  (key, value) :: List.filter (fun (name, _) -> name <> key) fields
+
+let keeper_board_meta ~source = function
+  | `Assoc fields -> `Assoc (assoc_replace "source" (`String source) fields)
+  | _ -> `Assoc [ "source", `String source ]
+
 let ensure_keeper_board_post_args ~author ~source = function
   | `Assoc fields ->
+    let raw_meta =
+      match List.assoc_opt "meta" fields with
+      | Some (`Assoc _ as meta) -> meta
+      | _ -> `Assoc []
+    in
     let fields =
       List.filter (fun (k, _) -> k <> "author" && k <> "post_kind" && k <> "meta") fields
     in
@@ -24,7 +36,7 @@ let ensure_keeper_board_post_args ~author ~source = function
     `Assoc
       ([ "author", `String author
        ; "post_kind", `String "automation"
-       ; "meta", `Assoc [ "source", `String source ]
+       ; "meta", keeper_board_meta ~source raw_meta
        ]
        @ fields)
   | other -> other
@@ -71,4 +83,3 @@ let handle_keeper_board_tool
   | "keeper_board_cleanup" -> dispatch "masc_board_cleanup" args
   | other -> error_json ~fields:[ "tool", `String other ] "unknown_board_tool"
 ;;
-

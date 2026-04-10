@@ -540,6 +540,40 @@ let keeper_agent_status (meta : keeper_meta) =
     | None -> Types.Active)
 ;;
 
+let manual_reconcile_blocker_detail (config : Room.config) keeper_name =
+  match Keeper_manual_reconcile.read config keeper_name with
+  | Some ({ status = Keeper_manual_reconcile.Pending; summary; failure_reason; _ } as record)
+    ->
+      let detail =
+        match failure_reason with
+        | Some value when String.trim value <> "" -> value
+        | _ when String.trim summary <> "" -> summary
+        | _ -> record.blocker_class
+      in
+      `Pending detail
+  | Some { status = Keeper_manual_reconcile.Cleared; _ } -> `Cleared
+  | None ->
+      (match Keeper_registry.get ~base_path:config.base_path keeper_name with
+       | Some entry ->
+           (match entry.last_failure_reason with
+            | Some reason
+              when Keeper_registry.failure_reason_requires_manual_reconcile reason ->
+                `Legacy_pending (Keeper_registry.failure_reason_to_string reason)
+            | _ -> `Absent)
+       | None -> `Absent)
+
+let sync_manual_reconcile_condition ~(config : Room.config) ~(keeper_name : string) =
+  match
+    manual_reconcile_blocker_detail config keeper_name,
+    Keeper_registry.get ~base_path:config.base_path keeper_name
+  with
+  | `Pending detail, Some entry
+    when not entry.conditions.manual_reconcile_required ->
+      ignore (Keeper_registry.dispatch_event
+        ~base_path:config.base_path keeper_name
+        (Keeper_state_machine.Manual_reconcile_required { reason = detail }))
+  | _ -> ()
+
 (** Reset stale turn failures so the keeper can exit Failing phase.
     Called unconditionally after presence sync (whether I/O was skipped or not).
     If the underlying issue persists, the next turn will re-fail. *)
@@ -549,23 +583,19 @@ let maybe_recover_from_failing ~(ctx : _ context) ~(meta : keeper_meta) =
       ~base_path:ctx.config.base_path meta.name
   in
   if stale_turn_failures > 0 then begin
+    sync_manual_reconcile_condition ~config:ctx.config ~keeper_name:meta.name;
+    let blocker_detail = manual_reconcile_blocker_detail ctx.config meta.name in
     let sticky_manual_reconcile =
-      match Keeper_registry.get ~base_path:ctx.config.base_path meta.name with
-      | Some entry ->
-          (match entry.last_failure_reason with
-           | Some reason ->
-               Keeper_registry.failure_reason_requires_manual_reconcile reason
-           | None -> false)
-      | None -> false
+      match blocker_detail with
+      | `Pending _ | `Legacy_pending _ -> true
+      | `Cleared | `Absent -> false
     in
     if sticky_manual_reconcile then begin
       let reason_str =
-        match Keeper_registry.get ~base_path:ctx.config.base_path meta.name with
-        | Some entry ->
-            (match entry.last_failure_reason with
-             | Some reason -> Keeper_registry.failure_reason_to_string reason
-             | None -> "none")
-        | None -> "no_entry"
+        match blocker_detail with
+        | `Pending detail | `Legacy_pending detail -> detail
+        | `Cleared -> "cleared"
+        | `Absent -> "none"
       in
       Log.Keeper.warn
         "heartbeat recovery: auto-clearing %d turn failures for %s (reason=%s). Cursors already advanced — re-trigger risk is low."
@@ -577,23 +607,26 @@ let maybe_recover_from_failing ~(ctx : _ context) ~(meta : keeper_meta) =
       ignore (Keeper_registry.dispatch_event
         ~base_path:ctx.config.base_path meta.name
         Keeper_state_machine.Heartbeat_ok);
-      ignore (Keeper_registry.dispatch_event
-        ~base_path:ctx.config.base_path meta.name
-        Keeper_state_machine.Turn_succeeded);
-      Log.Keeper.info
-        "heartbeat recovery: reset %d stale turn failures for %s"
-        stale_turn_failures meta.name
+      if sticky_manual_reconcile
+      then
+        Log.Keeper.info
+          "heartbeat recovery: reset %d stale turn failures for %s but retained manual reconcile blocker"
+          stale_turn_failures meta.name
+      else (
+        ignore (Keeper_registry.dispatch_event
+          ~base_path:ctx.config.base_path meta.name
+          Keeper_state_machine.Turn_succeeded);
+        Log.Keeper.info
+          "heartbeat recovery: reset %d stale turn failures for %s"
+          stale_turn_failures meta.name)
     end
   end
 
-let keeper_requires_manual_reconcile ~base_path ~keeper_name =
-  match Keeper_registry.get ~base_path keeper_name with
-  | Some entry ->
-      (match entry.last_failure_reason with
-       | Some reason ->
-           Keeper_registry.failure_reason_requires_manual_reconcile reason
-       | None -> false)
-  | None -> false
+let keeper_requires_manual_reconcile ~(config : Room.config) ~keeper_name =
+  sync_manual_reconcile_condition ~config ~keeper_name;
+  match manual_reconcile_blocker_detail config keeper_name with
+  | `Pending _ | `Legacy_pending _ -> true
+  | `Cleared | `Absent -> false
 
 let sync_keeper_presence
       ~(ctx : _ context)
@@ -730,7 +763,7 @@ let run_keepalive_unified_turn
       in
       let manual_reconcile_pending =
         keeper_requires_manual_reconcile
-          ~base_path:ctx.config.base_path
+          ~config:ctx.config
           ~keeper_name:meta_after_triage.name
       in
       let should_run_turn =
@@ -743,29 +776,25 @@ let run_keepalive_unified_turn
           meta_after_triage
           obs.message_cursor_updates
       in
+      let verdict_strs = Keeper_world_observation.verdict_reasons_to_strings turn_decision.verdict in
+      let channel_str = Keeper_world_observation.channel_to_string turn_decision.channel in
       if manual_reconcile_pending && turn_decision.should_run then
         Log.Keeper.info
           "keepalive turn skipped for %s: manual reconcile pending channel=%s reasons=%s"
-          meta_after_triage.name
-          (match turn_decision.channel with
-           | Keeper_world_observation.Reactive -> "reactive"
-           | Keeper_world_observation.Scheduled_autonomous -> "scheduled_autonomous")
-          (String.concat "," turn_decision.reasons);
+          meta_after_triage.name channel_str
+          (String.concat "," verdict_strs);
       if (not should_run_turn) && (not manual_reconcile_pending) then (
         let log_not_scheduled =
-          match turn_decision.channel, turn_decision.reasons with
-          | Keeper_world_observation.Scheduled_autonomous,
-            [ "scheduled_autonomous_disabled" ] -> Log.Keeper.debug
+          match turn_decision.verdict with
+          | Keeper_world_observation.Skip { reasons = (Keeper_world_observation.Scheduled_autonomous_disabled, []) } ->
+              Log.Keeper.debug
           | _ -> Log.Keeper.info
         in
         log_not_scheduled
           "keepalive turn not scheduled for %s: should_run=%b channel=%s reasons=[%s] since_last=%s idle_gate=%s"
           meta_after_triage.name
-          turn_decision.should_run
-          (match turn_decision.channel with
-           | Keeper_world_observation.Reactive -> "reactive"
-           | Keeper_world_observation.Scheduled_autonomous -> "scheduled_autonomous")
-          (String.concat "," turn_decision.reasons)
+          turn_decision.should_run channel_str
+          (String.concat "," verdict_strs)
           (format_since_last_scheduled_autonomous
              turn_decision.since_last_scheduled_autonomous)
           (match turn_decision.idle_gate_sec with
@@ -773,11 +802,26 @@ let run_keepalive_unified_turn
       if should_run_turn then
         Log.Keeper.info
           "keepalive turn scheduled for %s: channel=%s reasons=%s"
-          meta_after_triage.name
-          (match turn_decision.channel with
-           | Keeper_world_observation.Reactive -> "reactive"
-           | Keeper_world_observation.Scheduled_autonomous -> "scheduled_autonomous")
-          (String.concat "," turn_decision.reasons);
+          meta_after_triage.name channel_str
+          (String.concat "," verdict_strs);
+      (* Phase A2: record decision in audit trail (skip all work when disabled) *)
+      if Keeper_decision_audit.audit_enabled () then begin
+        let audit_wall_clock = Time_compat.now () in
+        Keeper_decision_audit.append
+          ~keeper_name:meta_after_triage.name
+          (Keeper_decision_audit.make
+             ~cycle_id:(Printf.sprintf "cycle-%s-%Ld"
+                meta_after_triage.name
+                (Int64.of_float (audit_wall_clock *. 1000.0)))
+             ~keeper_name:meta_after_triage.name
+             ~generation:meta_after_triage.runtime.generation
+             ~heartbeat_verdict:Heartbeat_smart.Emit
+             ~turn_verdict:turn_decision.verdict
+             ~wall_clock:audit_wall_clock ());
+        Keeper_decision_audit.flush_if_needed
+          ~base_path:ctx.config.base_path
+          ~keeper_name:meta_after_triage.name
+      end;
       if (not should_run_turn)
          && (not has_message_signal)
          && obs.message_cursor_updates <> []

@@ -211,6 +211,40 @@ let format_comment_tree ?(max_depth=5) (comments : Board.comment list) =
 
 (** {1 Handlers} *)
 
+let assoc_replace key value fields =
+  (key, value) :: List.filter (fun (name, _) -> name <> key) fields
+
+let judgment_arg args =
+  let value_of key =
+    match Yojson.Safe.Util.member key args with
+    | `Null -> None
+    | `String value when String.trim value = "" -> None
+    | `String _ as value -> Some value
+    | `Assoc _ as value -> Some value
+    | _ -> None
+  in
+  match value_of "judgment" with
+  | Some _ as value -> value
+  | None -> value_of "judgement"
+
+let normalize_board_post_meta args =
+  let base_fields =
+    match Yojson.Safe.Util.member "meta" args with
+    | `Assoc fields -> fields
+    | _ -> []
+  in
+  let base_fields =
+    match get_string_opt args "classification_reason" with
+    | Some reason -> assoc_replace "classification_reason" (`String reason) base_fields
+    | None -> base_fields
+  in
+  let base_fields =
+    match judgment_arg args with
+    | Some judgment -> assoc_replace "judgment" judgment base_fields
+    | None -> base_fields
+  in
+  if base_fields = [] then None else Some (`Assoc base_fields)
+
 let handle_post_create args =
   let title = get_string_opt args "title" in
   (* Reject empty or whitespace-only titles *)
@@ -241,11 +275,7 @@ let handle_post_create args =
   let hearth = get_string_opt args "hearth" in
   let thread_id = get_string_opt args "thread_id" in
   let raw_post_kind = get_string_opt args "post_kind" in
-  let meta_json =
-    match Yojson.Safe.Util.member "meta" args with
-    | `Assoc _ as meta -> Some meta
-    | _ -> None
-  in
+  let meta_json = normalize_board_post_meta args in
 
   let visibility = match visibility_of_string visibility_str with
     | Some v -> v
@@ -558,6 +588,8 @@ let tool_post_create : Types.tool_schema = {
       ("content", `Assoc [("type", `String "string"); ("description", `String "Post content (max 4000 chars)")]);
       ("author", `Assoc [("type", `String "string"); ("description", `String "Author name")]);
       ("meta", `Assoc [("type", `String "object"); ("description", `String "Optional structured operational metadata")]);
+      ("classification_reason", `Assoc [("type", `String "string"); ("description", `String "Optional explicit classification rationale; persisted into meta and surfaced by the dashboard")]);
+      ("judgment", `Assoc [("type", `String "object"); ("description", `String "Optional structured LLM judgment metadata. Use summary/reason/confidence keys when you want the board to retain your classification rationale")]);
       ("visibility", `Assoc [("type", `String "string"); ("description", `String "public|unlisted|internal|direct (default: internal)")]);
       ("ttl_hours", `Assoc [("type", `String "integer"); ("description", `String "Time-to-live in hours (default: 168, max: 720)")]);
       ("hearth", `Assoc [("type", `String "string"); ("description", `String "Topic hearth name (e.g. webrtc, code-review)")]);

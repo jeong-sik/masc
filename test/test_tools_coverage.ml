@@ -299,6 +299,16 @@ let test_masc_room_strategy_set_schema () =
             (List.mem_assoc "speculation_budget" props)
       | None -> Alcotest.fail "masc_room_strategy_set missing properties"
 
+let test_masc_board_post_schema_supports_judgment () =
+  let schema = Masc_mcp.Tool_board.tool_post_create in
+  match get_json_assoc "properties" schema.input_schema with
+  | Some props ->
+      Alcotest.(check bool) "has classification_reason" true
+        (List.mem_assoc "classification_reason" props);
+      Alcotest.(check bool) "has judgment" true
+        (List.mem_assoc "judgment" props)
+  | None -> Alcotest.fail "masc_board_post missing properties"
+
 
 
 
@@ -534,6 +544,20 @@ let test_masc_keeper_repair_schema () =
             (List.mem_assoc "validator_profile" props)
       | None -> Alcotest.fail "masc_keeper_repair missing properties"
 
+let test_masc_keeper_reconcile_schema () =
+  match find_tool "masc_keeper_reconcile" with
+  | None -> Alcotest.fail "masc_keeper_reconcile not found"
+  | Some schema ->
+      match get_json_assoc "properties" schema.input_schema with
+      | Some props ->
+          Alcotest.(check bool) "has action" true
+            (List.mem_assoc "action" props);
+          Alcotest.(check bool) "has resolution" true
+            (List.mem_assoc "resolution" props);
+          Alcotest.(check bool) "has evidence_refs" true
+            (List.mem_assoc "evidence_refs" props)
+      | None -> Alcotest.fail "masc_keeper_reconcile missing properties"
+
 (* keeper policy schema tests removed — policy tool schemas no longer exist *)
 
 let test_masc_tool_admin_snapshot_schema () =
@@ -767,6 +791,8 @@ let () =
       Alcotest.test_case "masc_broadcast" `Quick test_masc_broadcast_schema;
       Alcotest.test_case "masc_transition" `Quick test_masc_transition_schema;
       Alcotest.test_case "masc_add_task" `Quick test_masc_add_task_schema;
+      Alcotest.test_case "masc_board_post supports judgment" `Quick
+        test_masc_board_post_schema_supports_judgment;
       Alcotest.test_case "remote_operator_action_strict" `Quick
         test_remote_operator_action_schema_is_strict;
       Alcotest.test_case "retired front-door tools absent" `Quick
@@ -811,6 +837,8 @@ let () =
         test_masc_keeper_msg_schema;
       Alcotest.test_case "keeper-repair" `Quick
         test_masc_keeper_repair_schema;
+      Alcotest.test_case "keeper-reconcile" `Quick
+        test_masc_keeper_reconcile_schema;
     ];
     "runtime_admin_tools", [
       Alcotest.test_case "tool-admin-snapshot" `Quick

@@ -110,6 +110,15 @@ let summarize_post_commit_failure
         tools
         err_preview
 
+let blocker_class_of_failure_reason = function
+  | Keeper_registry.Ambiguous_partial_commit
+      { kind = Keeper_registry.Post_commit_timeout; _ } ->
+      "ambiguous_post_commit_timeout"
+  | Keeper_registry.Ambiguous_partial_commit
+      { kind = Keeper_registry.Post_commit_failure; _ } ->
+      "ambiguous_post_commit_failure"
+  | _ -> "manual_reconcile_required"
+
 let classify_post_commit_failure
     ~(tool_names : string list)
     ?kind
@@ -278,17 +287,18 @@ let scheduled_autonomous_outcome_for_result
     ~has_text:(String.trim result.response_text <> "")
     ~has_tool_calls:(has_visible_tool_signal result)
 
-let work_kind_of_result (result : Keeper_agent_run.run_result) : string =
-  if has_visible_tool_signal result then "tool_use"
-  else if String.trim result.response_text <> "" then "text_turn"
-  else "noop"
-
 let selected_mode_of_result (result : Keeper_agent_run.run_result) : string =
   let text = String.trim result.response_text in
   if has_visible_tool_signal result then "tool_use"
   else if text = "" then "noop"
   else if String.starts_with ~prefix:"SKIP:" text then "skip_text"
   else "text_response"
+
+let work_kind_of_selected_mode (selected_mode : string) : string =
+  match selected_mode with
+  | "tool_use" -> "tool_use"
+  | "noop" -> "noop"
+  | _ -> "text_turn"
 
 let observed_triggers_of_observation
     (observation : Keeper_world_observation.world_observation) : string list =
@@ -491,12 +501,18 @@ let append_decision_record
                     ]
                 | None -> []
               in
-              let stop_reason_str =
-                match r.stop_reason with
-                | Oas_worker.Completed -> "completed"
-                | Oas_worker.TurnBudgetExhausted { turns_used; limit } ->
-                    Printf.sprintf "turn_budget_exhausted(%d/%d)" turns_used limit
-              in
+                let stop_reason_str =
+                  match r.stop_reason with
+                  | Oas_worker.Completed -> "completed"
+                  | Oas_worker.TurnBudgetExhausted { turns_used; limit } ->
+                      Printf.sprintf "turn_budget_exhausted(%d/%d)" turns_used limit
+                  | Oas_worker.MutationBoundaryReached { turns_used; tool_name } ->
+                      (match tool_name with
+                       | Some tool ->
+                           Printf.sprintf "mutation_boundary(%d:%s)" turns_used tool
+                       | None ->
+                           Printf.sprintf "mutation_boundary(%d)" turns_used)
+                in
               let inference_fields =
                 match r.inference_telemetry with
                 | Some t ->
@@ -766,7 +782,8 @@ let append_metrics_snapshot ~(config : Room.config) ~(meta : keeper_meta)
     ?deliberation_execution () : unit =
   let now_ts = Time_compat.now () in
   let _observation = observation in
-  let work_kind = work_kind_of_result result in
+  let selected_mode = selected_mode_of_result result in
+  let work_kind = work_kind_of_selected_mode selected_mode in
   let surface_model_used = Keeper_agent_run.surface_model_used result in
   let scheduled_autonomous_outcome =
     if is_scheduled_autonomous_channel channel then
@@ -1315,16 +1332,30 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
               ~is_transient ~social_state ()
           in
           if is_ambiguous_partial then begin
+            let failure_reason =
+              Option.value
+                ~default:
+                  (Keeper_registry.Ambiguous_partial_commit {
+                    kind = Keeper_registry.Post_commit_failure;
+                    detail = e_str;
+                  })
+                !post_commit_failure_reason
+            in
             Keeper_registry.set_failure_reason ~base_path:config.base_path
               meta.name
-              (Some
-                 (Option.value
-                    ~default:
-                      (Keeper_registry.Ambiguous_partial_commit {
-                        kind = Keeper_registry.Post_commit_failure;
-                        detail = e_str;
-                      })
-                    !post_commit_failure_reason));
+              (Some failure_reason);
+            ignore
+              (Keeper_manual_reconcile.open_pending
+                 config
+                 ~keeper_name:meta.name
+                 ~blocker_class:(blocker_class_of_failure_reason failure_reason)
+                 ~summary:(short_preview e_str)
+                 ~failure_reason:
+                   (Some (Keeper_registry.failure_reason_to_string failure_reason))
+                 ~trace_id:(Some meta.runtime.trace_id)
+                 ~generation:(Some meta.runtime.generation)
+                 ~committed_tools:
+                   (committed_mutating_tools !mutating_tools_committed));
             ignore (Keeper_registry.dispatch_event
               ~base_path:config.base_path meta.name
               (Keeper_state_machine.Manual_reconcile_required {
@@ -1488,9 +1519,10 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
             ~turn_generation:lifecycle.turn_generation
             ~compaction:lifecycle.compaction
             ~handoff_json:lifecycle.handoff_json;
+          let selected_mode = selected_mode_of_result result in
           append_decision_record ~config ~meta:updated_meta ~observation
             ~latency_ms ~semaphore_wait_ms ~outcome:"success"
-            ~selected_mode:(selected_mode_of_result result)
+            ~selected_mode
             ~social_state
             ~result:(Some result) ();
           (* Post-turn evidence: deterministic git before/after delta *)
@@ -1513,11 +1545,17 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
             updated_meta.name (Keeper_agent_run.surface_model_used result)
             (result.usage.input_tokens + result.usage.output_tokens)
             latency_ms
-            (selected_mode_of_result result)
+            selected_mode
             (match result.stop_reason with
              | Oas_worker.Completed -> "completed"
              | Oas_worker.TurnBudgetExhausted { turns_used; limit; _ } ->
-                 Printf.sprintf "budget_exhausted(%d/%d)" turns_used limit);
+                 Printf.sprintf "budget_exhausted(%d/%d)" turns_used limit
+             | Oas_worker.MutationBoundaryReached { turns_used; tool_name } ->
+                 (match tool_name with
+                  | Some tool ->
+                      Printf.sprintf "mutation_boundary(%d:%s)" turns_used tool
+                  | None ->
+                      Printf.sprintf "mutation_boundary(%d)" turns_used));
           (* 7. Persist updated meta *)
           (match write_meta config updated_meta with
            | Ok () -> ()
@@ -1532,6 +1570,13 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
              (* Do NOT increment turn_failures — this is not a crash.
                 The keeper made progress and saved a checkpoint.
                 Reset failures since the turn itself ran successfully. *)
+             Keeper_registry.reset_turn_failures ~base_path:config.base_path
+               updated_meta.name
+           | Oas_worker.MutationBoundaryReached { tool_name; _ } ->
+             Log.Keeper.info
+               "keeper:%s mutation boundary reached after %s, checkpoint saved — will resume next cycle"
+               updated_meta.name
+               (match tool_name with Some tool -> tool | None -> "committed tool");
              Keeper_registry.reset_turn_failures ~base_path:config.base_path
                updated_meta.name
            | Oas_worker.Completed ->

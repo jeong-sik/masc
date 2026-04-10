@@ -14,16 +14,13 @@ type broadcast_output = {
 let parse_broadcast (json : Yojson.Safe.t) : (broadcast_input, string) result =
   let open Yojson.Safe.Util in
   try
-    let message = json |> member "message" |> to_string in
-    let format = try
-      match json |> member "format" with
-      | `Null -> None
-      | v -> Some (to_string v)
-    with _ -> None in
-    Ok { message; format }
+    match json |> member "message" |> to_string_option with
+    | None -> Error "missing required field: message"
+    | Some message ->
+      let format = json |> member "format" |> to_string_option in
+      Ok { message; format }
   with
   | Yojson.Safe.Util.Type_error (msg, _) -> Error msg
-  | Not_found -> Error "missing required field: message"
 
 let encode_broadcast (output : broadcast_output) : Yojson.Safe.t =
   `Assoc ([

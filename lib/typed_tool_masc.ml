@@ -20,14 +20,14 @@ let create ~name ~description ~module_tag ~params ~parse ~handler ~encode
   { oas_tool; module_tag; is_read_only; is_destructive;
     is_idempotent; visibility; requires_join }
 
+(** Build a dispatch handler for the typed tool.
+    The handler is registered via [Tool_spec.Direct] for a specific tool name,
+    so the [name] parameter will always match — no guard needed. *)
 let make_dispatch_handler (tool : (_, _) t) : Tool_dispatch.handler =
-  let tool_name = Agent_sdk.Typed_tool.name tool.oas_tool in
-  fun ~name ~args ->
-    if name <> tool_name then None
-    else
-      match Agent_sdk.Typed_tool.execute tool.oas_tool args with
-      | Ok { content } -> Some (true, content)
-      | Error { message; _ } -> Some (false, message)
+  fun ~name:_ ~args ->
+    match Agent_sdk.Typed_tool.execute tool.oas_tool args with
+    | Ok { content } -> Some (true, content)
+    | Error { message; _ } -> Some (false, message)
 
 let params_to_input_schema (params : Agent_sdk.Types.tool_param list) : Yojson.Safe.t =
   let properties = List.map (fun (p : Agent_sdk.Types.tool_param) ->

@@ -387,7 +387,9 @@ let rec skip_git_global_options = function
 
 (** Detect git branch-switch commands that would mutate the main repo's HEAD.
     keeper_bash runs in the repo root, so checkout/switch/branch mutations must
-    be redirected to keeper_pr_workflow (playground clone).
+    be redirected to a sandboxed PR lane: either keeper_pr_workflow for the
+    legacy one-shot worktree helper, or a playground/explicit worktree flow
+    that later submits with keeper_pr_submit.
 
     Handles tab-separated tokens, global git options like [-C dir], and real
     branch mutation forms (create, rename, copy). Allows read-only listing. *)

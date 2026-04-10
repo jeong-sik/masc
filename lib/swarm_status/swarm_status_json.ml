@@ -24,7 +24,7 @@ let lane_kind_string = function
 let source_of_truth = function
   | Managed -> "managed_command_plane"
   | Projected -> "projected_swarm_json"
-  | Supervised -> "team_session_operator"
+  | Supervised -> "execution_session_operator"
 
 let swarm_surface_contract_json =
   `Assoc
@@ -217,7 +217,7 @@ let gap_guidance ~lane_ids code =
         "Confirm or deny the pending operator action before expecting more movement." )
   | "missing_worker_binding" ->
       ( "A supervised session with no worker binding cannot produce meaningful collaboration evidence.",
-        "masc_team_session_status",
+        "masc_operator_snapshot",
         "Inspect the execution session and attach or restart a worker before reading proof." )
   | "projected_only" ->
       ( "Projected swarm state shows intent, but not a live runtime.",
@@ -229,7 +229,7 @@ let gap_guidance ~lane_ids code =
         "Run a dispatch tick or inspect managed traces to confirm whether progress is stuck." )
   | "stale_data" when has_lane "supervised" ->
       ( "The supervised session has gone stale and may no longer reflect active collaboration.",
-        "masc_team_session_status",
+        "masc_operator_snapshot",
         "Check the session status and recent worker events before treating it as active." )
   | "missing_trace_events" ->
       ( "Without trace events, the dashboard cannot show why the swarm moved or stalled.",

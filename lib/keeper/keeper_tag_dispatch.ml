@@ -177,7 +177,6 @@ let dispatch
         { Tool_autoresearch.base_path = config.base_path;
           agent_name = Some agent_name;
           start_operation = None;
-          start_team_session = None;
           config = Some config;
           sw = Eio_context.get_switch_opt ();
           clock = Eio_context.get_clock_opt () }

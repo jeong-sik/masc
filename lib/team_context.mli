@@ -1,4 +1,4 @@
-(** Team_context — shared context for team session workers.
+(** Team_context — shared context for coordinated workers.
 
     Provides a compact summary of the team's state that can be injected
     into worker prompts so they have awareness of:
@@ -11,7 +11,7 @@
 
     @since 3.0.0 *)
 
-(** Summary of a single task in the session. *)
+(** Summary of a single task. *)
 type task_summary = {
   task_id : string;
   title : string;
@@ -19,7 +19,7 @@ type task_summary = {
   assignee : string option;
 }
 
-(** Team context shared across workers in a session. *)
+(** Team context shared across workers. *)
 type team_context = {
   team_goal : string;
   prior_decisions : string list;
@@ -28,10 +28,9 @@ type team_context = {
   task_tree : task_summary list;
 }
 
-(** Build a team context from the current session state.
-    Reads the session goal, worker results, and task list. *)
+(** Build a team context from the current shared findings. *)
 val build :
-  base_path:string -> team_session_id:string -> team_context
+  base_path:string -> team_context
 
 (** Render the team context as a prompt section string.
     Output is capped to stay within ~500 tokens. *)
@@ -41,15 +40,14 @@ val to_prompt_section : team_context -> string
     [finding] should be 1-2 sentences summarizing the key result. *)
 val add_finding :
   base_path:string ->
-  team_session_id:string ->
   worker_name:string ->
   finding:string ->
   unit
 
-(** Load shared findings recorded by prior workers in a session.
+(** Load shared findings recorded by prior workers.
     Returns a list of formatted strings: "[worker_name] finding". *)
 val load_findings :
-  base_path:string -> team_session_id:string -> string list
+  base_path:string -> string list
 
-(** Empty context for when no session is active. *)
+(** Empty context for when no active coordination. *)
 val empty : team_context

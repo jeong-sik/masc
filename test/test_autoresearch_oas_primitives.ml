@@ -154,7 +154,7 @@ let test_cycle_reinjects_diff_guard_lesson () =
       base_path = root;
       agent_name = Some "test";
       start_operation = None;
-      start_team_session = None;
+
       config = None;
       sw = Some sw;
       clock = Some clock;
@@ -231,7 +231,7 @@ let test_build_verify_downgrade_rewrites_history () =
       base_path = root;
       agent_name = Some "test";
       start_operation = None;
-      start_team_session = None;
+
       config = None;
       sw = Some sw;
       clock = Some clock;
@@ -312,7 +312,7 @@ let test_start_seeds_source_only_target_file_into_managed_worktree () =
       base_path = root;
       agent_name = Some "test";
       start_operation = None;
-      start_team_session = None;
+
       config = None;
       sw = Some sw;
       clock = Some clock;
@@ -391,7 +391,7 @@ let test_cycle_restores_ignored_target_after_empty_diff () =
       base_path = root;
       agent_name = Some "test";
       start_operation = None;
-      start_team_session = None;
+
       config = None;
       sw = Some sw;
       clock = Some clock;

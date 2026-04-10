@@ -1,4 +1,4 @@
-(** Worker execution types — extracted from team_session_types.
+(** Worker execution types.
 
     Contains only the types actively used by the worker execution layer:
     execution_scope, worker_class, and wait_mode. *)

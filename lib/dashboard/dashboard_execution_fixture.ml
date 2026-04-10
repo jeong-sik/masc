@@ -181,7 +181,7 @@ let execution_smoke_fixture_json () =
                 ("linked_detachment_id", `String "det-runtime-001");
                 ("blocker_summary", `String "session has 2 failed spawn event(s)");
                 ("search_status", `String "blocked");
-                ("next_tool", `String "masc_team_session_events");
+                ("next_tool", `String "masc_operator_snapshot");
                 ("updated_at", `String generated_at);
                 ("top_handoff", command_handoff);
                 ("command_handoff", command_handoff);

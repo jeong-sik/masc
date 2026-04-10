@@ -129,12 +129,6 @@ let on_task_mutation_fn
   : (unit -> unit) ref
   = ref (fun () -> ())
 
-(** Invalidate team-session-derived dashboard caches after session writes.
-    Wired by server bootstrap to avoid circular dependency between
-    Team_session_store and dashboard surfaces. *)
-let on_team_session_mutation_fn
-  : (Room_utils_backend_setup.config -> session_id:string -> unit) ref
-  = ref (fun _config ~session_id:_ -> ())
 
 (** Auto-subscribe agent to messages on join — wraps Subscriptions.SubscriptionStore. *)
 let subscribe_messages_fn

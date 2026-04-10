@@ -4,7 +4,6 @@ type t = {
   base_path : string;
   worker_name : string;
   model_label : string;
-  team_session_id : string option;
   working_dir : string option;
   worker_class : Worker_types.worker_class option;
   execution_scope : Worker_types.execution_scope option;
@@ -78,7 +77,6 @@ let to_yojson (spec : t) =
       ("base_path", `String spec.base_path);
       ("worker_name", `String spec.worker_name);
       ("model_label", `String spec.model_label);
-      ("team_session_id", option_to_yojson (fun s -> `String s) spec.team_session_id);
       ("working_dir", option_to_yojson (fun s -> `String s) spec.working_dir);
       ("worker_class", worker_class_to_yojson spec.worker_class);
       ("execution_scope", execution_scope_to_yojson spec.execution_scope);
@@ -119,7 +117,6 @@ let of_yojson (json : Yojson.Safe.t) =
              base_path;
              worker_name;
              model_label;
-             team_session_id = option_string (json |> member "team_session_id");
              working_dir = option_string (json |> member "working_dir");
              worker_class = worker_class_of_yojson (json |> member "worker_class");
              execution_scope =

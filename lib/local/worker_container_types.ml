@@ -37,7 +37,6 @@ type worker_container_meta = {
   version : int;
   worker_name : string;
   mcp_session_id : string;
-  team_session_id : string option;
   workspace_path : string;
   role : string option;
   selection_note : string option;
@@ -582,14 +581,8 @@ let leave_worker ~sw ~(auth_token : string option) ~session_id ~worker_name =
   let args = `Assoc [ ("agent_name", `String worker_name) ] in
   call_masc_tool ~sw ~auth_token ~session_id ~tool_name:"masc_leave" ~args
 
-let default_system_prompt ~worker_name ~model_id ?session_id ?role
+let default_system_prompt ~worker_name ~model_id ?role
     ?selection_note () =
-  let session_line =
-    match session_id with
-    | Some value when String.trim value <> "" ->
-        sprintf "Team session: %s\n" (String.trim value)
-    | _ -> ""
-  in
   let role_line =
     match role with
     | Some value when String.trim value <> "" ->
@@ -606,17 +599,14 @@ let default_system_prompt ~worker_name ~model_id ?session_id ?role
     {|You are a MASC-managed tool-aware worker.
 Worker name: %s
 Model: %s
-%s%s%s
+%s%s
 Operate through the provided MASC tools.
 Use tools when state inspection, task coordination, work delegation, or room updates are needed.
 Keep responses concise and task-focused.
 If a tool schema includes agent_name and you omit it, the runtime will inject %s automatically.
 Do not invent tool names or arguments that are not in schema.
-If you are operating inside a team session, record your own work with masc_team_session_step as the worker.
-Inside a team session, record at least one note turn with masc_team_session_step(session_id="...", turn_kind="note", message="...") and a non-empty message that states your concrete contribution.
-A note turn without a message is invalid and will be rejected.
 When the task is complete, return a short final result summarizing what you changed or learned.|}
-    worker_name model_id session_line role_line selection_line worker_name
+    worker_name model_id role_line selection_line worker_name
 
 let worker_session_id worker_name =
   let digest =

@@ -72,17 +72,12 @@ let test_repo_synthesis_swarm_start_avoids_saturated_platoon_cap () =
   ignore (Lib.Room.init config ~agent_name:(Some "owner"));
   ignore (Lib.Room.join config ~agent_name:"owner" ~capabilities:[ "ocaml"; "docs" ] ());
   saturate_repo_synthesis_platoon config ~actor:"owner";
-  let start_team_session ~goal:_ ~operation_id:_ ~loop_id:_ ~target_file:_ ~program_note:_ =
-    (* Team_session_engine_eio removed *)
-    ignore (sw, env, config);
-    Error "team session engine removed"
-  in
+  ignore (sw, env);
   let ctx : Lib.Tool_autoresearch.context =
     {
       base_path;
       agent_name = Some "owner";
       start_operation = None;
-      start_team_session = Some start_team_session;
       config = Some config;
       sw = Some sw;
       clock = Some clock;

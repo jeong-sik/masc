@@ -155,7 +155,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
       (* start_keepalive is deferred AFTER run_turn completes.
          Starting it here causes the heartbeat fiber to immediately grab LLM
          slots, starving the synchronous run_turn call (Issue #2610). *)
-      (* auto_team_session interception removed in #2908 *)
+      (* auto execution session interception removed in #2908 *)
       (* === Harness: trajectory accumulator + eval gate config === *)
       let masc_root = Filename.concat ctx.config.base_path ".masc" in
       let trajectory_acc =

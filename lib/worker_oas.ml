@@ -9,7 +9,7 @@
     - MASC execution_scope -> OAS max_turns cap + system prompt contract
     - MASC heartbeat -> OAS periodic_callback
     - MASC tool_profile/shell_profile -> OAS Tool.t list filtering
-    - MASC team_session -> OAS Builder.with_description metadata
+    - MASC worker metadata -> OAS Builder.with_description metadata
 
     @since Phase 5 — OAS Agent.run adapter for workers *)
 
@@ -82,8 +82,8 @@ let agent_config_of_worker_meta
 (* ================================================================ *)
 
 (** Encode MASC-specific worker metadata as a human-readable description
-    string. This preserves context (role, scope, team session, worker
-    class) that has no direct OAS equivalent. *)
+    string. This preserves context (role, scope, worker class) that has
+    no direct OAS equivalent. *)
 let description_of_meta (meta : Worker_container_types.worker_container_meta) : string =
   let lines = ref [] in
   let add key value =
@@ -92,9 +92,6 @@ let description_of_meta (meta : Worker_container_types.worker_container_meta) : 
   in
   add "worker_name" meta.worker_name;
   add "mcp_session_id" meta.mcp_session_id;
-  (match meta.team_session_id with
-   | Some sid -> add "team_session_id" sid
-   | None -> ());
   add "workspace" meta.workspace_path;
   (match meta.role with
    | Some r -> add "role" r
@@ -517,7 +514,6 @@ let rec run_worker_via_oas
     ?worker_run_id
     () : (Worker_container_types.run_result, string) result =
   let session_id = meta.mcp_session_id in
-  let team_session_id = meta.team_session_id in
   let worker_name = meta.worker_name in
   let* auth_token =
     Worker_container_types.worker_auth_token ~base_path ~worker_name
@@ -536,7 +532,7 @@ let rec run_worker_via_oas
   in
   let* () =
     Worker_container.save_worker_meta ~base_path
-      ~team_session_id ~worker_name meta
+      ~worker_name meta
   in
   Fun.protect
     ~finally:(fun () ->
@@ -590,7 +586,7 @@ and resume_worker_via_oas
   in
   let system_prompt =
     Worker_container_types.default_system_prompt ~worker_name
-      ~model_id:resume_model_id ?session_id:meta.team_session_id ?role:meta.role
+      ~model_id:resume_model_id ?role:meta.role
       ?selection_note:meta.selection_note ()
   in
   let max_turns = effective_max_turns meta in
@@ -644,7 +640,6 @@ and run_existing_worker_agent
     ~(tool_names_ref : string list ref)
     (agent : Oas.Agent.t)
   : (Worker_container_types.run_result, string) result =
-  let team_session_id = meta.team_session_id in
   let worker_name = meta.worker_name in
   let session_id = meta.mcp_session_id in
   Fun.protect
@@ -671,11 +666,11 @@ and run_existing_worker_agent
       in
       let* () =
         Worker_container.save_worker_checkpoint ~base_path
-          ~team_session_id ~worker_name checkpoint
+          ~worker_name checkpoint
       in
       let* () =
         Worker_container.save_worker_meta ~base_path
-          ~team_session_id ~worker_name
+          ~worker_name
           { meta with last_run_at = Some (Time_compat.now ()) }
       in
       Worker_container.materialize_direct_evidence
@@ -692,7 +687,7 @@ and run_existing_worker_agent
           in
           let* () =
             Worker_container.append_worker_completion_log
-              ~base_path ~team_session_id ~worker_name ~prompt ~tool_names
+              ~base_path ~worker_name ~prompt ~tool_names
               ~status:"ok" ~output ()
           in
           Ok
@@ -724,7 +719,7 @@ and run_existing_worker_agent
              Log.LocalWorker.warn "worker %s errored (no proof): %s" worker_name detail);
           let* () =
             Worker_container.append_worker_completion_log
-              ~base_path ~team_session_id ~worker_name ~prompt ~tool_names
+              ~base_path ~worker_name ~prompt ~tool_names
               ~status:"error" ~output:detail ~error:detail ()
           in
           Error detail)

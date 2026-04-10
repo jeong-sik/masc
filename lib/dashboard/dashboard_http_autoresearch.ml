@@ -511,7 +511,6 @@ let start_loop_json ~(base_path : string) ~(args : Yojson.Safe.t) :
       base_path;
       agent_name = None;
       start_operation = None;
-      start_team_session = None;
       config = None;
       sw = None;
       clock = None;

@@ -50,7 +50,7 @@ let test_supervised_trace_only_does_not_make_lane_present () =
   check string "timeline provenance contract" "truth"
     (json |> U.member "provenance_summary" |> U.member "timeline" |> U.to_string);
   check bool "do not recommend team session inspection" false
-    (String.equal "masc_team_session_status"
+    (String.equal "masc_operator_snapshot"
        (json |> U.member "recommended_next_action" |> U.member "tool" |> U.to_string))
 
 let test_managed_trace_only_does_not_make_lane_present () =
@@ -196,7 +196,7 @@ let test_stale_supervised_session_keeps_stale_flag () =
        (fun flag ->
          String.equal "stale_data" (flag |> U.member "code" |> U.to_string))
        hard_flags);
-  check string "stale supervised recommendation" "masc_team_session_status"
+  check string "stale supervised recommendation" "masc_operator_snapshot"
     (json |> U.member "recommended_next_action" |> U.member "tool" |> U.to_string);
   check string "stale narrative lane" "supervised"
     (json |> U.member "narrative" |> U.member "lane_id" |> U.to_string);
@@ -205,7 +205,7 @@ let test_stale_supervised_session_keeps_stale_flag () =
     |> List.find (fun row ->
            String.equal "stale_data" (row |> U.member "code" |> U.to_string))
   in
-  check string "stale gap next tool" "masc_team_session_status"
+  check string "stale gap next tool" "masc_operator_snapshot"
     (stale_gap |> U.member "next_tool" |> U.to_string);
   check bool "stale gap why" true
     (stale_gap |> U.member "why_it_matters" |> U.to_string <> "")

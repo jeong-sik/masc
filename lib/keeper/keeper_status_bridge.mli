@@ -15,15 +15,15 @@ open Keeper_types
 
 val string_list_to_json : string list -> Yojson.Safe.t
 
-val team_session_state_json :
+val execution_session_state_json :
   Room_utils.config -> keeper_meta -> Yojson.Safe.t
 
-val team_session_bridge_json :
+val execution_session_bridge_json :
   Room_utils.config -> keeper_meta -> Yojson.Safe.t
 
 val drift_surface_json : unit -> Yojson.Safe.t
 
-val auto_team_session_surface_json : unit -> Yojson.Safe.t
+val auto_execution_session_surface_json : unit -> Yojson.Safe.t
 
 val coordination_surface_json : keeper_meta -> Yojson.Safe.t
 

@@ -53,12 +53,7 @@ let truncate ~max_len text =
     String.sub text 0 (max 0 (max_len - 1)) ^ "…"
 
 let help_doc_refs name =
-  if String.starts_with ~prefix:"masc_team_session_" name then
-    [
-      "docs/TEAM-SESSION-ARCHITECTURE.md";
-      "docs/SUPERVISOR-MODE.md";
-    ]
-  else if
+  if
     String.starts_with ~prefix:"masc_operation_" name
     || String.starts_with ~prefix:"masc_dispatch_" name
     || String.starts_with ~prefix:"masc_unit_" name
@@ -80,8 +75,6 @@ let help_doc_refs name =
 let help_prompt_hints name =
   if String.equal name "masc_tool_help" then
     [ "Use prompt 'tool_help' when the caller needs a guided explanation." ]
-  else if String.starts_with ~prefix:"masc_team_session_" name then
-    [ "Use prompt 'team_session_proof' for collaboration evidence." ]
   else if
     String.starts_with ~prefix:"masc_operation_" name
     || String.starts_with ~prefix:"masc_dispatch_" name
@@ -148,26 +141,6 @@ let manual_help_entry name =
             "Returns the canonical short description, lifecycle/visibility metadata, replacement info, and detailed help for a specific tool.";
           doc_refs = [ "docs/COMMAND-PLANE-RUNBOOK.md" ];
           prompt_hints = [ "Pair with prompt 'tool_help' when you want a ready-to-use explanation." ];
-        }
-  | "masc_team_session_step" ->
-      Some
-        {
-          name;
-          short_description = "Record a structured session turn, checkpoint, or worker spawn.";
-          when_to_use = "Use when a supervisor needs to append auditable execution activity without bypassing the session ledger.";
-          key_constraints =
-            [
-              "Requires a valid session_id.";
-              "Write semantics depend on turn_kind and optional spawn/task fields.";
-            ];
-          details_markdown =
-            "This is the canonical write entrypoint for supervised execution activity. It records a turn, optional run-note or deliverable, and can spawn workers through the session runtime lane.";
-          doc_refs =
-            [
-              "docs/TEAM-SESSION-ARCHITECTURE.md";
-              "docs/SUPERVISOR-MODE.md";
-            ];
-          prompt_hints = [ "Use prompt 'team_session_proof' to read the resulting execution evidence." ];
         }
   | "masc_autoresearch_swarm_start" ->
       Some

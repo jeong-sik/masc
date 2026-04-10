@@ -546,16 +546,8 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         in
         Tool_repair_loop.dispatch ctx ~name ~args:coerced_args
     | Mod_autoresearch ->
-        let start_team_session ~goal ~operation_id ~loop_id:_ ~target_file:_
-            ~program_note:_ =
-          (* Team_session_engine_eio removed *)
-          ignore (state.Mcp_server.proc_mgr, state.Mcp_server.net,
-                  sw, config, agent_name, goal, operation_id);
-          Error "team session engine removed"
-        in
         let ctx : Tool_autoresearch.context = { base_path = config.base_path;
           agent_name = Some agent_name; start_operation = None;
-          start_team_session = Some start_team_session;
           config = Some config; sw = Some sw; clock = Some clock } in
         Tool_autoresearch.dispatch ctx ~name ~args:coerced_args
     | Mod_shard ->

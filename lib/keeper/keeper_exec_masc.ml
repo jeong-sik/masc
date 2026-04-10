@@ -11,7 +11,6 @@ let handle_keeper_autoresearch_tool
     { base_path = Keeper_alerting_path.project_root_of_config config
     ; agent_name = Some meta.name
     ; start_operation = None
-    ; start_team_session = None
     ; config = Some config
     ; sw = None
     ; clock = None

@@ -3,14 +3,14 @@ type docker_config = {
   host_mcp_base_url : string option;
 }
 
-type team_session_spawn = {
+type worker_spawn = {
   backend : Worker_execution_backend.t;
   docker_scopes : Worker_types.execution_scope list;
   docker : docker_config;
 }
 
 type t = {
-  team_session_spawn : team_session_spawn;
+  worker_spawn : worker_spawn;
 }
 
 let default_docker_scopes =
@@ -21,7 +21,7 @@ let default_docker_scopes =
 
 let default =
   {
-    team_session_spawn =
+    worker_spawn =
       {
         backend = Worker_execution_backend.Local;
         docker_scopes = default_docker_scopes;
@@ -35,7 +35,7 @@ let default =
 
 let malformed_fail_closed =
   {
-    team_session_spawn =
+    worker_spawn =
       {
         backend = Worker_execution_backend.Docker;
         docker_scopes = default_docker_scopes;
@@ -86,14 +86,19 @@ let load_file_config path =
     try
       let json = Safe_ops.read_json_eio path in
         let open Yojson.Safe.Util in
-        let spawn_json = member "team_session_spawn" json in
+        let spawn_json =
+          (* Accept both new "worker_spawn" and legacy "team_session_spawn" keys *)
+          match member "worker_spawn" json with
+          | `Null -> member "team_session_spawn" json
+          | v -> v
+        in
         let backend =
           match spawn_json |> member "backend" with
           | `String value -> (
               match Worker_execution_backend.of_string value with
               | Some backend -> backend
-              | None -> default.team_session_spawn.backend)
-          | _ -> default.team_session_spawn.backend
+              | None -> default.worker_spawn.backend)
+          | _ -> default.worker_spawn.backend
         in
         let docker_scopes =
           match spawn_json |> member "docker_scopes" |> scopes_of_json with
@@ -104,7 +109,7 @@ let load_file_config path =
         let image =
           match docker_json |> member "image" with
           | `String value when String.trim value <> "" -> value
-          | _ -> default.team_session_spawn.docker.image
+          | _ -> default.worker_spawn.docker.image
         in
         let host_mcp_base_url =
           match docker_json |> member "host_mcp_base_url" with
@@ -114,7 +119,7 @@ let load_file_config path =
           | _ -> None
         in
         {
-          team_session_spawn =
+          worker_spawn =
             {
               backend;
               docker_scopes;
@@ -133,22 +138,22 @@ let apply_env_overrides (config : t) =
   let backend =
     match backend_of_env () with
     | Some backend -> backend
-    | None -> config.team_session_spawn.backend
+    | None -> config.worker_spawn.backend
   in
   let image =
     match env_image_opt () with
     | Some image -> image
-    | None -> config.team_session_spawn.docker.image
+    | None -> config.worker_spawn.docker.image
   in
   let host_mcp_base_url =
     match env_host_mcp_base_url_opt () with
     | Some value -> Some value
-    | None -> config.team_session_spawn.docker.host_mcp_base_url
+    | None -> config.worker_spawn.docker.host_mcp_base_url
   in
   {
-    team_session_spawn =
+    worker_spawn =
       {
-        config.team_session_spawn with
+        config.worker_spawn with
         backend;
         docker = { image; host_mcp_base_url };
       };
@@ -178,15 +183,15 @@ let backend_for_scope scope =
       Worker_execution_backend.Local
   | _ ->
       let config = resolve () in
-      match config.team_session_spawn.backend with
+      match config.worker_spawn.backend with
       | Worker_execution_backend.Local -> Worker_execution_backend.Local
       | Worker_execution_backend.Docker ->
-          if List.mem scope config.team_session_spawn.docker_scopes then
+          if List.mem scope config.worker_spawn.docker_scopes then
             Worker_execution_backend.Docker
           else Worker_execution_backend.Local
 
 let docker_image () =
-  (resolve ()).team_session_spawn.docker.image
+  (resolve ()).worker_spawn.docker.image
 
 let host_mcp_base_url_opt () =
-  (resolve ()).team_session_spawn.docker.host_mcp_base_url
+  (resolve ()).worker_spawn.docker.host_mcp_base_url

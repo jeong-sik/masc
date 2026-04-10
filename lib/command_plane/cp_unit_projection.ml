@@ -36,7 +36,7 @@ let iso_expired_at now deadline =
   | Some ts -> ts <= now
   | None -> false
 
-let projected_team_session_operations ?sessions:_ _config _units _managed_operations =
+let projected_execution_session_operations ?sessions:_ _config _units _managed_operations =
   (* Team session store removed — no projected session operations. *)
   []
 
@@ -106,7 +106,7 @@ let projected_swarm_operations config units managed_operations =
 let all_operations ?sessions config units =
   let managed = read_operations config in
   managed
-  @ projected_team_session_operations ?sessions config units managed
+  @ projected_execution_session_operations ?sessions config units managed
   @ projected_swarm_operations config units managed
 
 let operation_by_id operations operation_id =
@@ -114,7 +114,7 @@ let operation_by_id operations operation_id =
     (fun (operation : operation_record) -> String.equal operation.operation_id operation_id)
     operations
 
-let projected_team_session_detachments ?sessions:_ _config _operations =
+let projected_execution_session_detachments ?sessions:_ _config _operations =
   (* Team session store removed — no projected session detachments. *)
   []
 
@@ -189,7 +189,7 @@ let all_detachments ?sessions config units operations =
   in
   let _ = units in
   managed
-  @ projected_team_session_detachments ?sessions config projected_ops
+  @ projected_execution_session_detachments ?sessions config projected_ops
   @ projected_swarm_detachments config projected_ops
 
 let projected_operator_decisions config =

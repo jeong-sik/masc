@@ -161,7 +161,7 @@ let test_keeper_status_exposes_summary_and_recoverable () =
         Yojson.Safe.Util.(status_json |> member "diagnostic" = `Null);
       Alcotest.(check string) "auto team session removed" "removed"
         Yojson.Safe.Util.(
-          status_json |> member "auto_team_session" |> member "status" |> to_string);
+          status_json |> member "auto_execution_session" |> member "status" |> to_string);
       Alcotest.(check bool) "keepalive running false" false
         Yojson.Safe.Util.(status_json |> member "keepalive_running" |> to_bool))
 
@@ -794,7 +794,7 @@ proactive_enabled = true
       Alcotest.(check bool) "live override flagged" true
         (json |> member "sources" |> member "has_live_override" |> to_bool);
       Alcotest.(check string) "auto team session removed" "removed"
-        (json |> member "auto_team_session" |> member "status" |> to_string);
+        (json |> member "auto_execution_session" |> member "status" |> to_string);
       let override_fields =
         json |> member "sources" |> member "override_fields" |> to_list
         |> List.map to_string
@@ -996,7 +996,7 @@ let test_snapshot_keeper_tool_audit_uses_decision_log () =
       Alcotest.(check bool) "decision log names remain empty" true
         ((keeper |> member "latest_tool_names" |> to_list) = []))
 
-let test_keeper_msg_auto_team_session_bridge () =
+let test_keeper_msg_auto_execution_session_bridge () =
   (* This test triggers a real LLM cascade call (keeper_msg -> run_turn).
      It is opt-in because local runtime/model availability is not stable
      across developer machines or CI.
@@ -1115,9 +1115,9 @@ let test_keeper_msg_auto_team_session_bridge () =
         Alcotest.(check bool) "keeper status ok" true status_ok;
         let status_json = parse_json_exn status_body in
         Alcotest.(check string) "status exposes auto team session removal" "removed"
-          Yojson.Safe.Util.(status_json |> member "auto_team_session" |> member "status" |> to_string);
+          Yojson.Safe.Util.(status_json |> member "auto_execution_session" |> member "status" |> to_string);
         Alcotest.(check bool) "status exposes auto team session disabled" false
-          Yojson.Safe.Util.(status_json |> member "auto_team_session_enabled" |> to_bool);
+          Yojson.Safe.Util.(status_json |> member "auto_execution_session_enabled" |> to_bool);
         Alcotest.(check bool) "status omits team session state" true
           Yojson.Safe.Util.(status_json |> member "team_session_state" = `Null);
         Alcotest.(check bool) "status omits team session bridge" true

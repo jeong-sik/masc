@@ -687,15 +687,15 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
         [
           ("restore_sessions", fun () -> restore_persisted_sessions state);
           ("reconcile_active_agents", fun () -> reconcile_active_agents_gauge state);
-          ( "recover_running_team_sessions",
+          ( "recover_running_sessions",
             fun () ->
               match state.Mcp_server.proc_mgr, state.Mcp_server.net with
               | None, _ ->
                   Log.Server.warn
-                    "skipping team session recovery: process_mgr not available"
+                    "skipping session recovery: process_mgr not available"
               | Some _process_mgr, None ->
                   Log.Server.warn
-                    "skipping team session recovery: net not available"
+                    "skipping session recovery: net not available"
               | Some _process_mgr, Some _net ->
                   (* Team_session_engine_eio removed — skip recovery *)
                   ignore (sw, clock, state.Mcp_server.room_config) );

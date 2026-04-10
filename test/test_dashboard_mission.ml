@@ -49,7 +49,7 @@ let write_pending_confirm config session_id =
             ("target_type", `String "team_session");
             ("target_id", `String session_id);
             ("payload", `Assoc [ ("reason", `String "fixture pending confirmation") ]);
-            ("delegated_tool", `String "masc_team_session_stop");
+            ("delegated_tool", `String "masc_operator_action");
             ("created_at", `String (Types.now_iso ()));
             ("expires_at", `Null);
           ];

@@ -29,8 +29,8 @@ let prompt_defs =
     };
     {
       name = "team_session_proof";
-      title = "Team Session Proof";
-      description = "Summarize auditable collaboration evidence for a team session.";
+      title = "Execution Session Proof";
+      description = "Summarize auditable collaboration evidence for an execution session (deprecated: team session layer removed).";
       icons = [ Mcp_server.themed_icon ~label:"TP" ~bg:"#7C3AED" ~fg:"#F5F3FF" ];
       arguments =
         [

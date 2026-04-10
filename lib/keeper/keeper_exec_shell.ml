@@ -16,6 +16,11 @@ let clamp_shell_timeout ?(min_sec = 1.0) ~default args =
   Safe_ops.json_float ~default "timeout_sec" args
   |> fun n -> max min_sec (min user_timeout_max_sec n)
 
+(* Pre-compiled regex patterns for blocked-command hint classification.
+   Hoisted to module level to avoid recompilation on every rejected call. *)
+let re_hint_chain = Re.(compile (Pcre.re "chain|redirect|pipe|semicolon"))
+let re_hint_inject = Re.(compile (Pcre.re "inject|symbol"))
+
 let lowercase_shell_words text =
   text
   |> String.map (function '\t' | '\r' | '\n' -> ' ' | c -> c)
@@ -170,19 +175,26 @@ let resolve_keeper_shell_write_cwd
   | Ok cwd -> Error (Printf.sprintf "cwd_not_directory: %s" cwd)
 
 (* Docker playground path mapping: host → container.
-   Host:      /Users/dancer/me/.masc/playground/cheolsu/repos/X
-   Container: /home/keeper/playground/cheolsu/repos/X *)
-let docker_playground_cwd ~(config : Room.config) ~(meta : keeper_meta) host_cwd =
-  let root = Keeper_alerting_path.project_root_of_config config in
-  let playground_prefix = Filename.concat root ".masc/playground" in
-  if String.starts_with ~prefix:playground_prefix host_cwd then
+   Maps <root>/.masc/playground/<name>/... → /home/keeper/playground/<name>/... *)
+let docker_container_playground_root = "/home/keeper/playground"
+
+let docker_playground_cwd ~playground_abs ~(meta : keeper_meta) host_cwd =
+  let normalized_prefix =
+    Keeper_alerting_path.normalize_path_for_check playground_abs
+    |> Keeper_alerting_path.strip_trailing_slashes
+  in
+  let normalized_cwd =
+    Keeper_alerting_path.normalize_path_for_check host_cwd
+    |> Keeper_alerting_path.strip_trailing_slashes
+  in
+  if String.starts_with ~prefix:normalized_prefix normalized_cwd then
     let suffix =
-      String.sub host_cwd (String.length playground_prefix)
-        (String.length host_cwd - String.length playground_prefix)
+      String.sub normalized_cwd (String.length normalized_prefix)
+        (String.length normalized_cwd - String.length normalized_prefix)
     in
-    "/home/keeper/playground" ^ suffix
+    docker_container_playground_root ^ suffix
   else
-    Printf.sprintf "/home/keeper/playground/%s" meta.name
+    Printf.sprintf "%s/%s" docker_container_playground_root meta.name
 
 (* Common wrong path prefixes that keepers use.
    Maps wrong prefix → corrected relative path using keeper playground. *)
@@ -311,21 +323,38 @@ let handle_keeper_bash
       Log.Keeper.info "DOCKER_EXEC: keeper=%s cwd=%s cmd=%s"
         meta.name cwd cmd_for_log;
       let container = Env_config_keeper.DockerPlayground.container_name in
-      let container_cwd = docker_playground_cwd ~config ~meta cwd in
+      let container_cwd =
+        docker_playground_cwd ~playground_abs ~meta cwd
+      in
       let st, out =
         Process_eio.run_argv_with_status
-          ~cwd:(Sys.getcwd ()) ~timeout_sec
+          ~cwd:root ~timeout_sec
           [ "docker"; "exec"; "-u"; "keeper";
             "-w"; container_cwd;
             container; "bash"; "-c"; cmd ^ " 2>&1" ]
       in
-      Yojson.Safe.to_string
-        (`Assoc
-            [ "ok", `Bool (st = Unix.WEXITED 0)
-            ; "cwd", `String cwd
-            ; "status", Keeper_alerting_path.process_status_to_json st
-            ; "output", `String out
-            ]))
+      (* Detect Docker daemon errors (container not running, not found) *)
+      match st with
+      | Unix.WEXITED 125 | Unix.WEXITED 126 | Unix.WEXITED 127 ->
+        Log.Keeper.warn "DOCKER_EXEC failed: keeper=%s exit=%d output=%s"
+          meta.name
+          (match st with Unix.WEXITED n -> n | _ -> -1)
+          (Worker_dev_tools.truncate_for_log out);
+        Yojson.Safe.to_string
+          (`Assoc
+              [ "ok", `Bool false
+              ; "error", `String "docker_exec_failed"
+              ; "reason", `String "Docker container is not running or command not found in container."
+              ; "output", `String out
+              ])
+      | _ ->
+        Yojson.Safe.to_string
+          (`Assoc
+              [ "ok", `Bool (st = Unix.WEXITED 0)
+              ; "cwd", `String cwd
+              ; "status", Keeper_alerting_path.process_status_to_json st
+              ; "output", `String out
+              ]))
     else
       (* Local execution path: full validation applies *)
       let validate =
@@ -337,9 +366,9 @@ let handle_keeper_bash
         Log.Keeper.warn "keeper_bash blocked: %s (cmd=%s)" reason cmd_for_log;
         let hint =
           if String.length reason > 0 &&
-             (Re.execp (Re.Pcre.re "chain|redirect|pipe|semicolon" |> Re.compile) (String.lowercase_ascii reason))
+             Re.execp re_hint_chain (String.lowercase_ascii reason)
           then "Use separate tool calls instead of chaining. Call keeper_bash once per command."
-          else if Re.execp (Re.Pcre.re "inject|symbol" |> Re.compile) (String.lowercase_ascii reason)
+          else if Re.execp re_hint_inject (String.lowercase_ascii reason)
           then "Avoid shell metacharacters. Use keeper_shell with a specific op (rg, find, ls) instead."
           else "Check the command for blocked patterns. Use keeper_shell for structured ops (rg, ls, find)."
         in

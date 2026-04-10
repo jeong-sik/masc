@@ -196,6 +196,12 @@ let all_flags : flag list = [
     default = true; category = "runtime";
     lifecycle = Active; since = "2.162.0" };
 
+  (* ── Docker Playground ─────────────────────────────────────── *)
+  { env_name = "MASC_KEEPER_DOCKER_PLAYGROUND";
+    description = "Route keeper_bash through Docker container for unrestricted playground execution";
+    default = false; category = "keeper";
+    lifecycle = Experimental; since = "2.262.0" };
+
 ]
 
 (** Lookup a flag by env var name. O(n) — acceptable for ~30 flags. *)

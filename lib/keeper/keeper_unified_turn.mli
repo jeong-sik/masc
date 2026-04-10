@@ -76,7 +76,7 @@ val broadcast_lifecycle_events :
 val is_transient_network_error : Oas.Error.sdk_error -> bool
 
 (** Detect server-side request body parse errors (e.g. Ollama yyjson
-    rejecting a malformed or oversized request body).  The LLM never
+    rejecting a malformed request body).  The LLM never
     processed the request, so committed tool results are not at risk
     of duplication.  Used to auto-recover reconcile-safe tools instead
     of requiring manual reconcile. *)

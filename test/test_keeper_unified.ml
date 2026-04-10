@@ -1932,12 +1932,52 @@ let test_server_rejected_parse_error_unterminated () =
   check bool "unterminated is parse error" true
     (UT.is_server_rejected_parse_error err)
 
+let test_server_rejected_parse_error_unexpected_char () =
+  let err =
+    Agent_sdk.Error.Api
+      (InvalidRequest { message = "Unexpected character in JSON at position 42" })
+  in
+  check bool "unexpected character in json is parse error" true
+    (UT.is_server_rejected_parse_error err)
+
+let test_server_rejected_parse_error_parse_error () =
+  let err =
+    Agent_sdk.Error.Api
+      (InvalidRequest { message = "Parse error at position 1024" })
+  in
+  check bool "parse error is parse error" true
+    (UT.is_server_rejected_parse_error err)
+
+let test_server_rejected_parse_error_case_insensitive () =
+  let err =
+    Agent_sdk.Error.Api
+      (InvalidRequest { message = "PARSE ERROR in request body" })
+  in
+  check bool "uppercase PARSE ERROR detected" true
+    (UT.is_server_rejected_parse_error err)
+
 let test_server_rejected_parse_error_generic_invalid_request () =
   let err =
     Agent_sdk.Error.Api
       (InvalidRequest { message = "bad tool schema" })
   in
   check bool "generic InvalidRequest is NOT parse error" false
+    (UT.is_server_rejected_parse_error err)
+
+let test_server_rejected_parse_error_generic_closing () =
+  let err =
+    Agent_sdk.Error.Api
+      (InvalidRequest { message = "Service closing for maintenance" })
+  in
+  check bool "generic 'closing' is NOT parse error" false
+    (UT.is_server_rejected_parse_error err)
+
+let test_server_rejected_parse_error_generic_cant_find () =
+  let err =
+    Agent_sdk.Error.Api
+      (InvalidRequest { message = "Can't find the specified tool 'my_tool'" })
+  in
+  check bool "generic 'can't find' is NOT parse error" false
     (UT.is_server_rejected_parse_error err)
 
 let test_server_rejected_parse_error_network_error () =
@@ -2841,8 +2881,18 @@ let () =
             test_server_rejected_parse_error_ollama_closing_brace;
           test_case "unterminated JSON detected as server parse error" `Quick
             test_server_rejected_parse_error_unterminated;
+          test_case "unexpected character in JSON detected" `Quick
+            test_server_rejected_parse_error_unexpected_char;
+          test_case "parse error detected" `Quick
+            test_server_rejected_parse_error_parse_error;
+          test_case "case insensitive detection" `Quick
+            test_server_rejected_parse_error_case_insensitive;
           test_case "generic InvalidRequest is NOT server parse error" `Quick
             test_server_rejected_parse_error_generic_invalid_request;
+          test_case "generic 'closing' is NOT server parse error" `Quick
+            test_server_rejected_parse_error_generic_closing;
+          test_case "generic 'can't find' is NOT server parse error" `Quick
+            test_server_rejected_parse_error_generic_cant_find;
           test_case "network error is NOT server parse error" `Quick
             test_server_rejected_parse_error_network_error;
           test_case "read-only keeper tools do not become ambiguous partial" `Quick

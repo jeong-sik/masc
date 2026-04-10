@@ -149,13 +149,7 @@ let flush_if_needed ~base_path ~keeper_name =
       in
       if not should_flush then ()
       else begin
-        (* Sanitize keeper_name to prevent path traversal *)
-        let safe_name =
-          String.map (fun c ->
-            if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
-               || (c >= '0' && c <= '9') || c = '-' || c = '_'
-            then c else '_') keeper_name
-        in
+        let safe_name = Keeper_alerting_path.sanitize_keeper_name keeper_name in
         let dir =
           let open Unix in
           let tm = localtime now in

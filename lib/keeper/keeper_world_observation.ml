@@ -789,7 +789,10 @@ let unified_turn_decision ~(meta : keeper_meta) (observation : world_observation
             | [] ->
                 (* Structurally unreachable: idle_gate_elapsed && should_run
                    guarantees at least Idle_cooldown_elapsed.
-                   Defensive: fall through to skip. *)
+                   Defensive: log warning and fall through to skip so that
+                   should_run (derived below) stays consistent with verdict. *)
+                Log.Keeper.warn
+                  "unreachable: should_run=true but run_reasons is empty";
                 Skip { reasons = (No_signal, []) }
           else
             let skip_reasons =
@@ -812,6 +815,12 @@ let unified_turn_decision ~(meta : keeper_meta) (observation : world_observation
                 Skip { reasons = (first, rest) }
             | [] ->
                 Skip { reasons = (No_signal, []) }
+        in
+        (* Derive should_run from verdict to guarantee consistency.
+           The earlier [let should_run] is an intent signal; verdict is
+           authoritative after the reason-list construction. *)
+        let should_run =
+          match verdict with Run _ -> true | Skip _ -> false
         in
         {
           should_run;

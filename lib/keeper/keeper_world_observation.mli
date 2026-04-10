@@ -119,18 +119,27 @@ type turn_verdict =
   | Run of { reasons : turn_reason * turn_reason list }
   | Skip of { reasons : skip_reason * skip_reason list }
 
-(** Convert a single turn reason to its legacy string token.
-    Preserves backward compatibility for existing log and prompt consumers. *)
+(** Convert a single turn reason to a flat string tag.
+    Encoding is compatibility-oriented: variant payloads
+    (idle_sec, cooldown, unclaimed, failed, remaining_sec) are
+    not included in the output. Returns the same fixed tag
+    regardless of parameter values. *)
 val turn_reason_to_string : turn_reason -> string
 
-(** Convert a single skip reason to its legacy string token. *)
+(** Convert a single skip reason to a flat string tag.
+    Encoding is compatibility-oriented: variant payloads
+    (remaining_sec) are not included in the output. *)
 val skip_reason_to_string : skip_reason -> string
 
 (** Convert channel to string tag. *)
 val channel_to_string : unified_turn_channel -> string
 
-(** Extract all reasons as legacy string list from a verdict.
-    Preserves backward compatibility with existing log and prompt consumers. *)
+(** Extract all reasons as flat string tags from a verdict.
+    Tags are compatibility-oriented and do not include variant payloads.
+    The scheduled-autonomous path emits typed variants that may not
+    cover every legacy reason string previously produced by the
+    untyped code path; callers that depend on exhaustive legacy
+    coverage should match on [turn_verdict] directly. *)
 val verdict_reasons_to_strings : turn_verdict -> string list
 
 type unified_turn_decision = {

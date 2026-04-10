@@ -21,6 +21,14 @@ describe('Markdown', () => {
     expect(container.querySelector('.markdown-content')).toBeNull()
   })
 
+  it('can transition from empty to populated text in the same mount point', () => {
+    render(html`<${Markdown} text="" />`, container)
+    expect(container.querySelector('.markdown-content')).toBeNull()
+
+    render(html`<${Markdown} text="later" />`, container)
+    expect(container.querySelector('.markdown-content')?.textContent).toContain('later')
+  })
+
   it('renders a paragraph', () => {
     render(html`<${Markdown} text="hello world" />`, container)
     expect(container.querySelector('p')?.textContent).toBe('hello world')

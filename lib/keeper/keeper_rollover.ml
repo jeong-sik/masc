@@ -85,37 +85,44 @@ let maybe_rollover_oas_handoff
                 base_meta.name e;
               rollover_base
           | Ok _checkpoint ->
-              let updated_meta =
-                {
-                  base_meta with
-                  updated_at = now_iso ();
-                  runtime = { base_meta.runtime with
-                    trace_id = new_trace_id;
-                    trace_history =
-                      dedupe_keep_order (prev_trace_id :: base_meta.runtime.trace_history);
-                    generation = next_generation;
-                    last_handoff_ts = now_ts;
-                  };
-                }
-              in
-              let handoff_json =
-                `Assoc
-                  [
-                    ("performed", `Bool true);
-                    ("from_generation", `Int current_generation);
-                    ("to_generation", `Int next_generation);
-                    ("new_generation", `Int next_generation);
-                    ("prev_trace_id", `String prev_trace_id);
-                    ("new_trace_id", `String new_trace_id);
-                    ("to_model", `String model);
-                    ("context_ratio", `Float ratio);
-                  ]
-              in
-              Log.Keeper.info
-                "keeper:%s OAS handoff rollover trace=%s->%s gen=%d->%d ratio=%.3f"
-                base_meta.name prev_trace_id new_trace_id current_generation
-                next_generation ratio;
-              { rollover_base with updated_meta; handoff_json = Some handoff_json }
+              (match Keeper_id.Trace_id.of_string new_trace_id with
+               | Error err ->
+                 Log.Keeper.error
+                   "keeper:%s OAS handoff rollover ABORTED — generated invalid trace_id %s: %s"
+                   base_meta.name new_trace_id err;
+                 rollover_base
+               | Ok parsed_trace_id ->
+                 let updated_meta =
+                   {
+                     base_meta with
+                     updated_at = now_iso ();
+                     runtime = { base_meta.runtime with
+                       trace_id = parsed_trace_id;
+                       trace_history =
+                         dedupe_keep_order ((Keeper_id.Trace_id.to_string prev_trace_id) :: base_meta.runtime.trace_history);
+                       generation = next_generation;
+                       last_handoff_ts = now_ts;
+                     };
+                   }
+                 in
+                 let handoff_json =
+                   `Assoc
+                     [
+                       ("performed", `Bool true);
+                       ("from_generation", `Int current_generation);
+                       ("to_generation", `Int next_generation);
+                       ("new_generation", `Int next_generation);
+                       ("prev_trace_id", `String (Keeper_id.Trace_id.to_string prev_trace_id));
+                       ("new_trace_id", `String new_trace_id);
+                       ("to_model", `String model);
+                       ("context_ratio", `Float ratio);
+                     ]
+                 in
+                 Log.Keeper.info
+                   "keeper:%s OAS handoff rollover trace=%s->%s gen=%d->%d ratio=%.3f"
+                   base_meta.name (Keeper_id.Trace_id.to_string prev_trace_id) new_trace_id current_generation
+                   next_generation ratio;
+                 { rollover_base with updated_meta; handoff_json = Some handoff_json })
         with
         | Eio.Cancel.Cancelled _ as e -> raise e
         | exn ->

@@ -39,6 +39,10 @@ let has_any_prefix prefix tools =
   List.exists (fun n -> String.length n >= String.length prefix
     && String.sub n 0 (String.length prefix) = prefix) tools
 
+let raw_schema_by_name name =
+  Config.raw_all_tool_schemas
+  |> List.find_opt (fun (schema : Types.tool_schema) -> String.equal schema.name name)
+
 (* ============================================================
    1. write_done isolation
    ============================================================ *)
@@ -156,6 +160,25 @@ let test_coding_preset_has_keeper_bash () =
     (has_tool "keeper_bash" tools);
   check bool "has keeper_github" true
     (has_tool "keeper_github" tools)
+
+let test_pr_schema_descriptions_distinguish_workflow_lanes () =
+  let workflow_desc =
+    match raw_schema_by_name "keeper_pr_workflow" with
+    | Some schema -> schema.description
+    | None -> fail "keeper_pr_workflow schema missing"
+  in
+  let submit_desc =
+    match raw_schema_by_name "keeper_pr_submit" with
+    | Some schema -> schema.description
+    | None -> fail "keeper_pr_submit schema missing"
+  in
+  check bool "workflow is legacy" true
+    (String_util.contains_substring workflow_desc "Legacy one-shot worktree PR helper");
+  check bool "workflow is not playground path" true
+    (String_util.contains_substring workflow_desc "It is not the playground-clone path");
+  check bool "submit covers playground and worktree" true
+    (String_util.contains_substring submit_desc
+       "Canonical submit step for a playground clone or repo worktree")
 
 (* ============================================================
    6. All keepers get autoresearch tools (mode removed)
@@ -907,5 +930,9 @@ let () =
         match Keeper_types.tool_access_of_meta_json outer with
         | Error _ -> ()
         | Ok _ -> fail "expected Error for non-string tools member");
+    ]);
+    ("pr_lane_wording", [
+      test_case "schema descriptions distinguish workflow lanes" `Quick
+        test_pr_schema_descriptions_distinguish_workflow_lanes;
     ]);
   ]

@@ -447,9 +447,9 @@ let test_migrate_resident_keeper_dirs_promotes_valid_meta () =
         read_meta_exn (Filename.concat keepers_dir "other.json")
       in
       Alcotest.(check string) "sangsu trace promoted from resident-keepers"
-        "trace-sangsu-live" sangsu_meta.runtime.trace_id;
+        "trace-sangsu-live" (Keeper_id.Trace_id.to_string sangsu_meta.runtime.trace_id);
       Alcotest.(check string) "other keeper migrated from resident-keepers"
-        "trace-other-live" other_meta.runtime.trace_id;
+        "trace-other-live" (Keeper_id.Trace_id.to_string other_meta.runtime.trace_id);
       Alcotest.(check bool) "legacy dir removed after merge" false
         (Sys.file_exists legacy_dir);
       Alcotest.(check bool) "replaced stale keeper quarantined" true

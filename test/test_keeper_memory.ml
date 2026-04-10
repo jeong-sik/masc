@@ -356,7 +356,7 @@ let test_memory_search_cross_generation () =
     let meta = keeper_meta ~name:"cross-gen-keeper" ~mention_targets:["cross-gen-keeper"] () in
     let trace_id = meta.runtime.trace_id in
     (* Write history.jsonl with messages from previous generations *)
-    let history_path = Keeper_types.keeper_history_path config trace_id in
+    let history_path = Keeper_types.keeper_history_path config (Masc_mcp.Keeper_id.Trace_id.to_string trace_id) in
     write_lines history_path [
       {|{"role":"user","content":"deploy the canary release"}|};
       {|{"role":"assistant","content":"deploying now"}|};
@@ -405,7 +405,7 @@ let test_memory_search_dedup () =
     let config = make_test_room_config dir in
     let meta = keeper_meta ~name:"dedup-keeper" ~mention_targets:["dedup-keeper"] () in
     let trace_id = meta.runtime.trace_id in
-    let history_path = Keeper_types.keeper_history_path config trace_id in
+    let history_path = Keeper_types.keeper_history_path config (Masc_mcp.Keeper_id.Trace_id.to_string trace_id) in
     write_lines history_path [
       {|{"role":"user","content":"unique needle from history"}|};
       {|{"role":"user","content":"shared needle message"}|};
@@ -612,7 +612,7 @@ let test_memory_search_source_history () =
     let config = make_test_room_config dir in
     let meta = keeper_meta ~name:"hist-keeper" ~mention_targets:["hist-keeper"] () in
     let trace_id = meta.runtime.trace_id in
-    let history_path = Keeper_types.keeper_history_path config trace_id in
+    let history_path = Keeper_types.keeper_history_path config (Masc_mcp.Keeper_id.Trace_id.to_string trace_id) in
     write_lines history_path [
       {|{"role":"user","content":"deploy the legacy service"}|};
     ];
@@ -639,7 +639,7 @@ let test_memory_search_source_all () =
     ];
     (* History has raw message *)
     let trace_id = meta.runtime.trace_id in
-    let history_path = Keeper_types.keeper_history_path config trace_id in
+    let history_path = Keeper_types.keeper_history_path config (Masc_mcp.Keeper_id.Trace_id.to_string trace_id) in
     write_lines history_path [
       {|{"role":"user","content":"alpha from history"}|};
     ];

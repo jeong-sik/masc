@@ -481,7 +481,7 @@ let handle_keeper_get_subroutes state req request reqd =
          let masc_root = Filename.concat config.base_path ".masc" in
          let all_lines =
            Trajectory.read_all_lines ~masc_root ~keeper_name:m.name
-             ~trace_id:m.runtime.trace_id
+             ~trace_id:(Keeper_id.Trace_id.to_string m.runtime.trace_id)
          in
          (* Filter out thinking entries if not requested *)
          let lines =
@@ -499,7 +499,7 @@ let handle_keeper_get_subroutes state req request reqd =
          in
          let json = `Assoc [
            ("keeper", `String name);
-           ("trace_id", `String m.runtime.trace_id);
+           ("trace_id", `String (Keeper_id.Trace_id.to_string m.runtime.trace_id));
            ("generation", `Int m.runtime.generation);
            ("total_entries", `Int total);
            ("showing", `Int (List.length recent));

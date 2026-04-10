@@ -4,13 +4,14 @@ import { html } from 'htm/preact'
 import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { waitFor } from '@testing-library/preact'
+import type * as DashboardApi from '../api/dashboard'
 
 const { fetchKeeperToolCalls } = vi.hoisted(() => ({
   fetchKeeperToolCalls: vi.fn(),
 }))
 
 vi.mock('../api/dashboard', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../api/dashboard')>()
+  const actual = await importOriginal<typeof DashboardApi>()
   return { ...actual, fetchKeeperToolCalls }
 })
 
@@ -49,9 +50,9 @@ describe('KeeperToolCallInspector', () => {
     fetchKeeperToolCalls.mockReturnValue(new Promise(() => {}))
 
     render(html`<${KeeperToolCallInspector} keeperName="alice" />`, container)
-    await Promise.resolve()
-
-    expect(container.textContent).toContain('불러오는 중')
+    await waitFor(() => {
+      expect(container.textContent).toContain('불러오는 중')
+    })
   })
 
   it('renders entries after successful fetch', async () => {

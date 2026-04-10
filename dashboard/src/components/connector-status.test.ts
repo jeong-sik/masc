@@ -169,15 +169,21 @@ async function flushUi(): Promise<void> {
 }
 
 async function loadComponentWithApi(api: {
-  get: (path: string) => Promise<unknown>
+  fetchGateStatus: () => Promise<unknown>
+  fetchGateConnectors: () => Promise<unknown>
+  fetchGateKeepers: () => Promise<unknown>
   post?: (path: string, body: unknown) => Promise<unknown>
   lastEvent: { value: unknown }
   showToast?: (message: string, type?: string) => void
 }) {
   vi.resetModules()
   vi.doMock('../api/core', () => ({
-    get: api.get,
     post: api.post ?? vi.fn().mockResolvedValue({ ok: true }),
+  }))
+  vi.doMock('../api/gate', () => ({
+    fetchGateStatus: api.fetchGateStatus,
+    fetchGateConnectors: api.fetchGateConnectors,
+    fetchGateKeepers: api.fetchGateKeepers,
   }))
   vi.doMock('../sse', () => ({
     lastEvent: api.lastEvent,
@@ -206,20 +212,20 @@ describe('ConnectorStatusPanel', () => {
     vi.resetModules()
     vi.clearAllMocks()
     vi.doUnmock('../api/core')
+    vi.doUnmock('../api/gate')
     vi.doUnmock('../sse')
     vi.doUnmock('./common/toast')
   })
 
   it('renders direct Discord runtime and gate-observed health together', async () => {
-    const get = vi.fn<(path: string) => Promise<unknown>>().mockImplementation(async path => {
-      if (path === '/api/v1/gate/status') return sampleGateResponse()
-      if (path === '/api/v1/gate/connectors') return sampleConnectorsResponse()
-      if (path === '/api/v1/gate/keepers?limit=50&detailed=true') return sampleKeepersResponse()
-      throw new Error(`unexpected path: ${path}`)
-    })
+    const fetchGateStatus = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleGateResponse())
+    const fetchGateConnectors = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleConnectorsResponse())
+    const fetchGateKeepers = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleKeepersResponse())
 
     const { ConnectorStatusPanel } = await loadComponentWithApi({
-      get,
+      fetchGateStatus,
+      fetchGateConnectors,
+      fetchGateKeepers,
       lastEvent: signal(null),
     })
 
@@ -227,9 +233,9 @@ describe('ConnectorStatusPanel', () => {
     await flushUi()
     const text = container.textContent?.replace(/\s+/g, ' ').trim() ?? ''
 
-    expect(get).toHaveBeenCalledWith('/api/v1/gate/status')
-    expect(get).toHaveBeenCalledWith('/api/v1/gate/connectors')
-    expect(get).toHaveBeenCalledWith('/api/v1/gate/keepers?limit=50&detailed=true')
+    expect(fetchGateStatus).toHaveBeenCalled()
+    expect(fetchGateConnectors).toHaveBeenCalled()
+    expect(fetchGateKeepers).toHaveBeenCalled()
     expect(text).toContain('Channel Gate Connectors')
     expect(text).toContain('Gate-Advertised Connector')
     expect(text).toContain('connected')
@@ -245,22 +251,21 @@ describe('ConnectorStatusPanel', () => {
   })
 
   it('still renders direct runtime when gate metrics are unavailable', async () => {
-    const get = vi.fn<(path: string) => Promise<unknown>>().mockImplementation(async path => {
-      if (path === '/api/v1/gate/status') throw new Error('GET /api/v1/gate/status: 503 Service Unavailable')
-      if (path === '/api/v1/gate/connectors') return sampleConnectorsResponse({
-        connectors: [{
-          ...sampleConnectorsResponse().connectors[0],
-          connected: false,
-          stale: true,
-          status: 'stale',
-        }],
-      })
-      if (path === '/api/v1/gate/keepers?limit=50&detailed=true') throw new Error('GET /api/v1/gate/keepers: 401 Unauthorized')
-      throw new Error(`unexpected path: ${path}`)
-    })
+    const fetchGateStatus = vi.fn<() => Promise<unknown>>().mockRejectedValue(new Error('GET /api/v1/gate/status: 503 Service Unavailable'))
+    const fetchGateConnectors = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleConnectorsResponse({
+      connectors: [{
+        ...sampleConnectorsResponse().connectors[0],
+        connected: false,
+        stale: true,
+        status: 'stale',
+      }],
+    }))
+    const fetchGateKeepers = vi.fn<() => Promise<unknown>>().mockRejectedValue(new Error('GET /api/v1/gate/keepers: 401 Unauthorized'))
 
     const { ConnectorStatusPanel } = await loadComponentWithApi({
-      get,
+      fetchGateStatus,
+      fetchGateConnectors,
+      fetchGateKeepers,
       lastEvent: signal(null),
     })
 
@@ -276,23 +281,22 @@ describe('ConnectorStatusPanel', () => {
   })
 
   it('prefers backend-advertised connector status over derived booleans', async () => {
-    const get = vi.fn<(path: string) => Promise<unknown>>().mockImplementation(async path => {
-      if (path === '/api/v1/gate/status') return sampleGateResponse()
-      if (path === '/api/v1/gate/connectors') return sampleConnectorsResponse({
-        connectors: [{
-          ...sampleConnectorsResponse().connectors[0],
-          available: true,
-          connected: false,
-          stale: false,
-          status: 'connected',
-        }],
-      })
-      if (path === '/api/v1/gate/keepers?limit=50&detailed=true') return sampleKeepersResponse()
-      throw new Error(`unexpected path: ${path}`)
-    })
+    const fetchGateStatus = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleGateResponse())
+    const fetchGateConnectors = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleConnectorsResponse({
+      connectors: [{
+        ...sampleConnectorsResponse().connectors[0],
+        available: true,
+        connected: false,
+        stale: false,
+        status: 'connected',
+      }],
+    }))
+    const fetchGateKeepers = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleKeepersResponse())
 
     const { ConnectorStatusPanel } = await loadComponentWithApi({
-      get,
+      fetchGateStatus,
+      fetchGateConnectors,
+      fetchGateKeepers,
       lastEvent: signal(null),
     })
 
@@ -305,17 +309,16 @@ describe('ConnectorStatusPanel', () => {
   })
 
   it('posts bind and unbind actions through the dashboard endpoints', async () => {
-    const get = vi.fn<(path: string) => Promise<unknown>>().mockImplementation(async path => {
-      if (path === '/api/v1/gate/status') return sampleGateResponse()
-      if (path === '/api/v1/gate/connectors') return sampleConnectorsResponse()
-      if (path === '/api/v1/gate/keepers?limit=50&detailed=true') return sampleKeepersResponse()
-      throw new Error(`unexpected path: ${path}`)
-    })
+    const fetchGateStatus = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleGateResponse())
+    const fetchGateConnectors = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleConnectorsResponse())
+    const fetchGateKeepers = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleKeepersResponse())
     const post = vi.fn<(path: string, body: unknown) => Promise<unknown>>().mockResolvedValue({ ok: true })
     const showToast = vi.fn()
 
     const { ConnectorStatusPanel } = await loadComponentWithApi({
-      get,
+      fetchGateStatus,
+      fetchGateConnectors,
+      fetchGateKeepers,
       post,
       lastEvent: signal(null),
       showToast,
@@ -324,8 +327,8 @@ describe('ConnectorStatusPanel', () => {
     render(html`<${ConnectorStatusPanel} />`, container)
     await flushUi()
 
-    const channelInput = container.querySelector('input[aria-label="Discord channel id"]') as HTMLInputElement | null
-    const keeperInput = container.querySelector('input[aria-label="Keeper name"]') as HTMLInputElement | null
+    const channelInput = container.querySelector<HTMLInputElement>('input[aria-label="Discord channel id"]')
+    const keeperInput = container.querySelector<HTMLInputElement>('input[aria-label="Keeper name"]')
     expect(channelInput).not.toBeNull()
     expect(keeperInput).not.toBeNull()
 
@@ -362,22 +365,21 @@ describe('ConnectorStatusPanel', () => {
   })
 
   it('shows selected keeper runtime metadata from the keeper directory', async () => {
-    const get = vi.fn<(path: string) => Promise<unknown>>().mockImplementation(async path => {
-      if (path === '/api/v1/gate/status') return sampleGateResponse()
-      if (path === '/api/v1/gate/connectors') return sampleConnectorsResponse()
-      if (path === '/api/v1/gate/keepers?limit=50&detailed=true') return sampleKeepersResponse()
-      throw new Error(`unexpected path: ${path}`)
-    })
+    const fetchGateStatus = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleGateResponse())
+    const fetchGateConnectors = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleConnectorsResponse())
+    const fetchGateKeepers = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleKeepersResponse())
 
     const { ConnectorStatusPanel } = await loadComponentWithApi({
-      get,
+      fetchGateStatus,
+      fetchGateConnectors,
+      fetchGateKeepers,
       lastEvent: signal(null),
     })
 
     render(html`<${ConnectorStatusPanel} />`, container)
     await flushUi()
 
-    const keeperSelect = container.querySelector('select') as HTMLSelectElement | null
+    const keeperSelect = container.querySelector<HTMLSelectElement>('select')
     expect(keeperSelect).not.toBeNull()
     if (!keeperSelect) {
       throw new Error('expected keeper select to exist')

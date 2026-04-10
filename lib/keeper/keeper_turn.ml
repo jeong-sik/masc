@@ -162,7 +162,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
         Trajectory.create_accumulator
           ~masc_root
           ~keeper_name:meta.name
-          ~trace_id:meta.runtime.trace_id
+          ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
           ~generation:meta.runtime.generation
       in
       let turn_cascade_name = if direct_reply then "keeper_reply" else "keeper_turn" in
@@ -355,7 +355,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                      ~base_path:base_dir meta.name
                      (Keeper_state_machine.Handoff_completed {
                        generation = lifecycle.updated_meta.runtime.generation;
-                       new_trace_id = lifecycle.updated_meta.runtime.trace_id;
+                       new_trace_id = Keeper_id.Trace_id.to_string lifecycle.updated_meta.runtime.trace_id;
                      }))
                | None -> ());
               let updated_meta =
@@ -400,7 +400,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                   Keeper_evidence.capture_turn_evidence
                     ~base_path:ctx.config.base_path
                     ~keeper_name:name
-                    ~trace_id:updated_meta.runtime.trace_id
+                    ~trace_id:(Keeper_id.Trace_id.to_string updated_meta.runtime.trace_id)
                     ~turn_number:updated_meta.runtime.usage.total_turns
                     ~tool_calls_made:result.tool_calls_made
                     ~before_hash:evidence_before_hash

@@ -336,7 +336,8 @@ Use for: issues, PRs, review comments, CI status.";
   };
   {
     name = "keeper_pr_workflow";
-    description = "One-shot PR pipeline: creates branch, writes file, commits, pushes, opens draft PR. \
+    description = "Legacy one-shot worktree PR helper: creates a temporary repo worktree, writes one file, commits, pushes, and opens a draft PR. \
+It is not the playground-clone path. Prefer keeper_pr_submit after editing in a playground clone or explicit worktree. \
 Provide all 5 required params: branch, file_path, file_content, commit_message, pr_title. \
 Example: branch='fix/typo', file_path='lib/foo.ml', file_content='let x = 1', \
 commit_message='fix typo', pr_title='Fix typo in foo'. Requires coding or delivery preset.";
@@ -361,7 +362,7 @@ commit_message='fix typo', pr_title='Fix typo in foo'. Requires coding or delive
 let keeper_pr_submit_tools : Types.tool_schema list = [
   {
     name = "keeper_pr_submit";
-    description = "Commit staged changes with keeper identity, push, and open a draft PR. \
+    description = "Canonical submit step for a playground clone or repo worktree: commit staged changes with keeper identity, push, and open a draft PR. \
 Works in any worktree or playground repos directory. \
 Provide cwd (worktree path), commit_message, pr_title. \
 Optional: pr_body, base_branch (default: main), draft (default: true), files (array, default: git add -A).";
@@ -792,6 +793,12 @@ let all_read_only_keeper_tools () : string list =
     shard.read_only_tools @ acc
   ) all_shards []
   |> List.sort_uniq String.compare
+
+let recovery_minimum_shard_names () : string list =
+  StringMap.fold (fun name shard acc ->
+    if not shard.removable then name :: acc else acc
+  ) all_shards []
+  |> List.rev
 
 (** Get a shard by name *)
 let get_shard (name : string) : shard option =

@@ -1,7 +1,7 @@
 # masc-mcp
 
 [![OCaml](https://img.shields.io/badge/OCaml-5.4+-orange.svg)](https://ocaml.org/)
-[![OAS](https://img.shields.io/badge/agent__sdk-%E2%89%A50.118.0-blue.svg)](https://github.com/jeong-sik/oas)
+[![OAS](https://img.shields.io/badge/agent__sdk-%E2%89%A50.118.2-blue.svg)](https://github.com/jeong-sik/oas)
 
 Multi-Agent Streaming Coordination server built on OCaml 5.x + Eio. Keeps multiple coding agents coordinated inside one repository through shared namespace, task ownership, broadcasts, worktrees, supervisor-visible proof, and OAS-backed keeper execution.
 
@@ -69,7 +69,7 @@ All protocols run concurrently from a single Eio fiber pool:
 ### Tech Stack
 
 - **OCaml 5.4+** with Eio structured concurrency (no Lwt)
-- **agent_sdk** >= 0.118.0 (OAS agent runtime)
+- **agent_sdk** >= 0.118.2 (OAS agent runtime)
 - **mcp_protocol** >= 1.3.0 (MCP JSON-RPC contract)
 - **h2-eio** (HTTP/2), **grpc-direct** (gRPC), **ocaml-webrtc** (WebRTC)
 - **caqti** + PostgreSQL (optional), **sqlite3** (fallback), **neo4j_bolt** (optional graph)

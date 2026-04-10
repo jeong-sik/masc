@@ -417,7 +417,7 @@ let test_directive_claim () =
   match R.get ~base_path:bp "dc1" with
   | Some e ->
     (match e.meta.current_task_id with
-     | Some tid -> check string "task assigned" "T-42" tid
+     | Some tid -> check string "task assigned" "T-42" (Masc_mcp.Keeper_id.Task_id.to_string tid)
      | None -> fail "expected current_task_id set")
   | None -> fail "expected dc1"
 

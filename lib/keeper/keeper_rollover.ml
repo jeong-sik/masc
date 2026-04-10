@@ -90,9 +90,9 @@ let maybe_rollover_oas_handoff
                   base_meta with
                   updated_at = now_iso ();
                   runtime = { base_meta.runtime with
-                    trace_id = new_trace_id;
+                    trace_id = (match Keeper_id.Trace_id.of_string new_trace_id with Ok x -> x | Error e -> failwith e);
                     trace_history =
-                      dedupe_keep_order (prev_trace_id :: base_meta.runtime.trace_history);
+                      dedupe_keep_order ((Keeper_id.Trace_id.to_string prev_trace_id) :: base_meta.runtime.trace_history);
                     generation = next_generation;
                     last_handoff_ts = now_ts;
                   };
@@ -105,7 +105,7 @@ let maybe_rollover_oas_handoff
                     ("from_generation", `Int current_generation);
                     ("to_generation", `Int next_generation);
                     ("new_generation", `Int next_generation);
-                    ("prev_trace_id", `String prev_trace_id);
+                    ("prev_trace_id", `String (Keeper_id.Trace_id.to_string prev_trace_id));
                     ("new_trace_id", `String new_trace_id);
                     ("to_model", `String model);
                     ("context_ratio", `Float ratio);
@@ -113,7 +113,7 @@ let maybe_rollover_oas_handoff
               in
               Log.Keeper.info
                 "keeper:%s OAS handoff rollover trace=%s->%s gen=%d->%d ratio=%.3f"
-                base_meta.name prev_trace_id new_trace_id current_generation
+                base_meta.name (Keeper_id.Trace_id.to_string prev_trace_id) new_trace_id current_generation
                 next_generation ratio;
               { rollover_base with updated_meta; handoff_json = Some handoff_json }
         with

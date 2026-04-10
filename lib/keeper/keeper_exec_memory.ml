@@ -103,7 +103,7 @@ let search_history
       ~(limit : int) : string list =
   let current_history =
     Keeper_memory_recall.load_history_user_messages
-      ~path:(keeper_history_path config meta.runtime.trace_id)
+      ~path:(keeper_history_path config (Keeper_id.Trace_id.to_string meta.runtime.trace_id))
       ~max_n:50
   in
   let prev_history =
@@ -252,7 +252,7 @@ let keeper_context_status_json ~(meta : keeper_meta) ~(ctx_work : working_contex
   Yojson.Safe.to_string
     (`Assoc
         [ "name", `String meta.name
-        ; "trace_id", `String meta.runtime.trace_id
+        ; "trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
         ; "generation", `Int meta.runtime.generation
         ; "context_ratio", `Float ctx_ratio
         ; "context_tokens", `Int ctx_tokens

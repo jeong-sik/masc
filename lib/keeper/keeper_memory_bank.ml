@@ -493,7 +493,7 @@ let append_memory_notes_from_reply
               ("ts", `String (now_iso ()));
               ("ts_unix", `Float now_ts);
               ("name", `String meta.name);
-              ("trace_id", `String meta.runtime.trace_id);
+              ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
               ("generation", `Int meta.runtime.generation);
               ("turn", `Int turn);
               ("kind", `String kind);

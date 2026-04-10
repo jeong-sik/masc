@@ -176,7 +176,7 @@ let write_keeper_meta config keeper_name =
   match make_keeper_meta keeper_name with
   | Error err -> Error err
   | Ok meta -> (
-      Keeper_types.mkdir_p (Keeper_types.keeper_session_dir config meta.runtime.trace_id);
+      Keeper_types.mkdir_p (Keeper_types.keeper_session_dir config (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
       match Keeper_types.write_meta ~force:true config meta with
       | Ok () ->
           ignore

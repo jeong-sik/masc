@@ -354,7 +354,7 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                        ("phase", phase_str);
                        ("name", `String meta.name);
                        ("agent_name", `String meta.agent_name);
-                       ("trace_id", `String meta.runtime.trace_id);
+                       ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
                        ("goal", `String meta.goal);
                        ("short_goal", `String meta.short_goal);
                        ("mid_goal", `String meta.mid_goal);
@@ -450,7 +450,7 @@ let persistent_agents_json ?keeper_names config =
                   ("runtime_class", `String "keeper");
                   ("name", `String meta.name);
                   ("agent_name", `String meta.agent_name);
-                  ("trace_id", `String meta.runtime.trace_id);
+                  ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
                   ("goal", `String meta.goal);
                   ("short_goal", `String meta.short_goal);
                   ("mid_goal", `String meta.mid_goal);

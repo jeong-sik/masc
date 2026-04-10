@@ -255,7 +255,7 @@ let keeper_alert_text
      - response_alignment: %.2f\n\
      - user: %s\n\
      - reply: %s"
-    meta.name score meta.runtime.trace_id meta.runtime.generation work_kind
+    meta.name score (Keeper_id.Trace_id.to_string meta.runtime.trace_id) meta.runtime.generation work_kind
     reason_text keyword_text context_ratio goal_alignment response_alignment
     message_preview reply_preview
 
@@ -488,7 +488,7 @@ let maybe_emit_interesting_alert
       }
     else
       let now_ts = Time_compat.now () in
-      let alert_id = Printf.sprintf "%s-%d" meta.runtime.trace_id (int_of_float (now_ts *. 1000.0)) in
+      let alert_id = Printf.sprintf "%s-%d" (Keeper_id.Trace_id.to_string meta.runtime.trace_id) (int_of_float (now_ts *. 1000.0)) in
       let alert_text =
         keeper_alert_text
           ~meta
@@ -509,7 +509,7 @@ let maybe_emit_interesting_alert
           ("alert_id", `String alert_id);
           ("name", `String meta.name);
           ("agent_name", `String meta.agent_name);
-          ("trace_id", `String meta.runtime.trace_id);
+          ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
           ("generation", `Int meta.runtime.generation);
           ("score", `Float score);
           ("threshold", `Float threshold);

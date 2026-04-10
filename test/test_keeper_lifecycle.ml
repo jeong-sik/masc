@@ -68,7 +68,7 @@ let build_dense_context ~turns ~max_tokens ~state_reply =
 
 let save_checkpoint ~base_dir ~(meta : KT.keeper_meta) ~ctx =
   let session =
-    KEC.create_session ~session_id:meta.runtime.trace_id ~base_dir
+    KEC.create_session ~session_id:(Masc_mcp.Keeper_id.Trace_id.to_string meta.runtime.trace_id) ~base_dir
   in
   match KEC.save_oas_checkpoint
     ~max_checkpoint_messages:120
@@ -129,7 +129,7 @@ let test_load_context_prefers_live_primary_max_tokens_over_checkpoint_limit () =
       check int "stored checkpoint max preserved in checkpoint helper" 4096
         (KEC.checkpoint_max_tokens checkpoint ~fallback:32768);
       match
-        load_context ~base_dir ~trace_id:meta.runtime.trace_id
+        load_context ~base_dir ~trace_id:(Masc_mcp.Keeper_id.Trace_id.to_string meta.runtime.trace_id)
           ~max_tokens:32768
       with
       | Some loaded ->
@@ -194,7 +194,7 @@ let test_apply_post_turn_lifecycle_compacts_and_updates_continuity () =
       check bool "continuity ts updated" true
         (lifecycle.updated_meta.runtime.last_continuity_update_ts > 0.0);
       match
-        load_context ~base_dir ~trace_id:lifecycle.updated_meta.runtime.trace_id
+        load_context ~base_dir ~trace_id:(Masc_mcp.Keeper_id.Trace_id.to_string lifecycle.updated_meta.runtime.trace_id)
           ~max_tokens:320
       with
       | Some loaded ->
@@ -247,7 +247,7 @@ let test_apply_post_turn_lifecycle_keeps_checkpoint_when_compaction_skips () =
       check string "skip decision recorded" "blocked:below_thresholds"
         lifecycle.compaction.decision;
       match
-        load_context ~base_dir ~trace_id:lifecycle.updated_meta.runtime.trace_id
+        load_context ~base_dir ~trace_id:(Masc_mcp.Keeper_id.Trace_id.to_string lifecycle.updated_meta.runtime.trace_id)
           ~max_tokens:4096
       with
       | Some loaded ->
@@ -308,7 +308,7 @@ let test_apply_post_turn_lifecycle_handoffs_after_compaction () =
       check bool "trace rotated" true
         (lifecycle.updated_meta.runtime.trace_id <> meta.runtime.trace_id);
       check bool "previous trace stored in history" true
-        (List.mem meta.runtime.trace_id lifecycle.updated_meta.runtime.trace_history);
+        (List.mem (Masc_mcp.Keeper_id.Trace_id.to_string meta.runtime.trace_id) lifecycle.updated_meta.runtime.trace_history);
       (match lifecycle.handoff_json with
        | Some handoff ->
            let open Yojson.Safe.Util in
@@ -318,7 +318,7 @@ let test_apply_post_turn_lifecycle_handoffs_after_compaction () =
              (handoff |> member "to_generation" |> to_int_option)
        | None -> fail "expected handoff json");
       match
-        load_context ~base_dir ~trace_id:lifecycle.updated_meta.runtime.trace_id
+        load_context ~base_dir ~trace_id:(Masc_mcp.Keeper_id.Trace_id.to_string lifecycle.updated_meta.runtime.trace_id)
           ~max_tokens:256
       with
       | Some loaded ->
@@ -380,7 +380,7 @@ let test_rollover_aborts_on_save_failure () =
       check bool "handoff NOT emitted on save failure" false
         (Option.is_some rollover.handoff_json);
       check string "trace_id unchanged" original_trace
-        rollover.updated_meta.runtime.trace_id;
+        (Masc_mcp.Keeper_id.Trace_id.to_string rollover.updated_meta.runtime.trace_id);
       check int "generation unchanged" 0
         rollover.updated_meta.runtime.generation)
 
@@ -408,7 +408,7 @@ let test_recover_latest_checkpoint_for_overflow_retry_compacts_oas_checkpoint ()
           check bool "saved tokens positive" true
             (recovery.compaction.saved_tokens > 0);
           (match
-             load_context ~base_dir ~trace_id:meta.runtime.trace_id
+             load_context ~base_dir ~trace_id:(Masc_mcp.Keeper_id.Trace_id.to_string meta.runtime.trace_id)
                ~max_tokens:256
           with
           | Some loaded ->
@@ -426,7 +426,7 @@ let test_recover_latest_checkpoint_for_overflow_retry_uses_legacy_checkpoint () 
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let meta = make_keeper_meta ~trace_id:"trace-overflow-retry-legacy" () in
       let session =
-        KEC.create_session ~session_id:meta.runtime.trace_id ~base_dir
+        KEC.create_session ~session_id:(Masc_mcp.Keeper_id.Trace_id.to_string meta.runtime.trace_id) ~base_dir
       in
       let legacy_ctx =
         build_dense_context ~turns:18 ~max_tokens:2048
@@ -442,7 +442,7 @@ let test_recover_latest_checkpoint_for_overflow_retry_uses_legacy_checkpoint () 
           check int "legacy generation preserved" 3 recovery.turn_generation;
           check bool "legacy recovery compacts" true recovery.compaction.applied;
           (match
-             load_context ~base_dir ~trace_id:meta.runtime.trace_id
+             load_context ~base_dir ~trace_id:(Masc_mcp.Keeper_id.Trace_id.to_string meta.runtime.trace_id)
                ~max_tokens:192
            with
           | Some loaded ->
@@ -480,7 +480,7 @@ let test_recover_latest_checkpoint_for_overflow_retry_ignores_checkpoint_system_
       with
       | Some _ ->
           (match
-             load_context ~base_dir ~trace_id:meta.runtime.trace_id
+             load_context ~base_dir ~trace_id:(Masc_mcp.Keeper_id.Trace_id.to_string meta.runtime.trace_id)
                ~max_tokens:512
            with
           | Some loaded ->

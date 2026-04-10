@@ -29,7 +29,7 @@ describe('lab navigation', () => {
 })
 
 describe('command navigation', () => {
-  it('keeps operations visible with intervene and governance sections', () => {
+  it('keeps operations visible with intervene, governance, and connectors sections', () => {
     expect(defaultParamsForTab('command')).toEqual({ section: 'intervene' })
 
     const commandSections = visibleSectionItemsForTab('command')
@@ -37,11 +37,13 @@ describe('command navigation', () => {
     expect(commandSections.map(item => item.id)).toEqual([
       'intervene',
       'governance',
+      'connectors',
     ])
 
     expect(commandSections.map(item => item.label)).toEqual([
       '실시간 개입',
       '거버넌스',
+      '커넥터',
     ])
   })
 })

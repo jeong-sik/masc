@@ -323,11 +323,13 @@ module KeeperKeepalive = struct
       {!Oas_worker.TurnBudgetExhausted} is returned.
       Previous default of 200 caused "ambiguous partial commit" errors:
       the 300s timeout would fire mid-turn after tools had already executed,
-      leaving the keeper in an ambiguous state. With 5 turns per call and
-      adaptive timeout, each turn gets a realistic time budget.
-      Env: [MASC_KEEPER_OAS_MAX_TURNS_PER_CALL]. Default: 5. Range: [1, 50]. *)
+      leaving the keeper in an ambiguous state. With 15 turns per call and
+      adaptive timeout, each turn gets a realistic time budget. Budget=5
+      was too low: mutation boundary blocks tools after the first write,
+      leaving only 1 productive action per cycle.
+      Env: [MASC_KEEPER_OAS_MAX_TURNS_PER_CALL]. Default: 15. Range: [1, 50]. *)
   let oas_max_turns_per_call =
-    max 1 (min 50 (get_int ~default:5 "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL"))
+    max 1 (min 50 (get_int ~default:15 "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL"))
 
   (** Consecutive idle tool repetitions before on_idle hook issues Skip.
       Below this: graduated Nudge messages.

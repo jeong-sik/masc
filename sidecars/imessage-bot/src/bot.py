@@ -14,8 +14,6 @@ import json
 import logging
 import os
 import signal
-import sys
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -128,15 +126,12 @@ class IMessageBot:
                 logger.error("Error handling message ROWID %d: %s", msg.rowid, e)
                 self._messages_failed += 1
 
-    def _write_status(self) -> None:
+    async def _write_status(self) -> None:
         """Persist current status for dashboard consumption."""
         gate_healthy: bool | None = None
         gate_health_checked_at = ""
         try:
-            # Sync check -- best effort
-            import httpx
-            resp = httpx.get(self.cfg.gate_health_url(), timeout=5.0)
-            gate_healthy = resp.status_code < 400
+            gate_healthy = await self.gate.health_check()
             gate_health_checked_at = datetime.now(tz=timezone.utc).isoformat()
         except Exception:
             gate_healthy = False
@@ -195,13 +190,18 @@ class IMessageBot:
             except Exception as e:
                 logger.error("Poll cycle error: %s", e)
 
-            # Write status every 5 cycles
             status_counter += 1
+
+            # Write status every 5 cycles
             if status_counter % 5 == 0:
                 try:
-                    self._write_status()
+                    await self._write_status()
                 except Exception as e:
                     logger.warning("Status write error: %s", e)
+
+            # Reload bindings every 50 cycles (~100s at default 2s interval)
+            if status_counter % 50 == 0:
+                self._load_bindings()
 
             await asyncio.sleep(self.cfg.poll_interval_sec)
 
@@ -222,7 +222,7 @@ async def main() -> None:
         await bot.run()
     finally:
         await bot.gate.aclose()
-        bot._write_status()
+        await bot._write_status()
         logger.info("iMessage bot stopped (processed=%d, failed=%d)", bot._messages_processed, bot._messages_failed)
 
 

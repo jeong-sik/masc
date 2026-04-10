@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 APPLE_EPOCH = datetime(2001, 1, 1, tzinfo=timezone.utc)
 POLL_QUERY: Final[str] = """
-SELECT
+SELECT DISTINCT
     m.ROWID,
     m.text,
     m.date,
@@ -170,8 +170,9 @@ def send_message(recipient: str, text: str) -> bool:
     Returns:
         True if AppleScript executed without error.
     """
-    # Escape special characters for AppleScript string literals
-    escaped_text = text.replace("\\", "\\\\").replace('"', '\\"')
+    # Escape special characters for AppleScript string literals.
+    # AppleScript does not support literal newlines in "..." strings.
+    escaped_text = text.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n").replace("\r", "")
     escaped_recipient = recipient.replace("\\", "\\\\").replace('"', '\\"')
 
     script = (

@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import ipaddress
 import os
-from pathlib import Path
 from typing import Final
 from urllib.parse import urlparse
 
@@ -59,7 +58,6 @@ class BotConfig(BaseSettings):
 
     # Gate HTTP
     gate_timeout_sec: float = Field(default=30.0)
-    gate_max_retries: int = Field(default=1)
     gate_breaker_failure_threshold: int = Field(default=5)
     gate_breaker_reset_sec: int = Field(default=60)
 

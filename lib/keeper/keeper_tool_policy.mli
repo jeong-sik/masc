@@ -106,9 +106,12 @@ val keeper_default_model_tools : keeper_meta -> Types.tool_schema list
 
 (** {1 E6: .masc/ Write Protection} *)
 
-(** Check if a .masc/-relative path is in the keeper-writable whitelist.
+(** Check if a path is in the keeper-writable whitelist.
+    The path is lexically normalised (collapsing [.] and [..] segments)
+    before prefix matching, preventing traversal bypasses like
+    [.masc/playground/../reputation/].
     Returns [false] for paths outside the whitelist (e.g. reputation, economy).
-    Whitelist: playground/, decision_audit/, worktrees/. *)
+    Whitelist: [.masc/playground/], [.masc/decision_audit/], [.worktrees/]. *)
 val is_masc_write_allowed : string -> bool
 
 (** Recovery minimum tool names: non-removable shards only.

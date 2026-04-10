@@ -11,7 +11,7 @@ open Keeper_alerting
 open Keeper_tool_registry
 
 (* -- E6: .masc/ write protection whitelist ----------------------------- *)
-(* Keeper-writable paths under .masc/. Everything else is structurally
+(* Keeper-writable path prefixes.  Everything else is structurally
    blocked (Absence > Prohibition). Trust input data (reputation, economy,
    stress, tasks) must NOT be in writable paths.
    Phase B2 / Plan Part 2.5 Axis 4. *)
@@ -19,10 +19,28 @@ open Keeper_tool_registry
 let keeper_writable_prefixes = [
   ".masc/playground/";       (* coding workspace *)
   ".masc/decision_audit/";   (* self audit logs — forensics, not trust input *)
-  ".masc/worktrees/";        (* git worktree workspace *)
+  ".worktrees/";             (* git worktree workspace — repo-root, not .masc/ *)
 ]
 
+(** Collapse [.] and [..] segments in a path to prevent traversal bypasses
+    such as [.masc/playground/../reputation/].
+    Does not resolve symlinks — pure lexical normalisation. *)
+let normalize_path path =
+  let segments = String.split_on_char '/' path in
+  let rec collapse acc = function
+    | [] -> List.rev acc
+    | "." :: rest -> collapse acc rest
+    | ".." :: rest ->
+      (match acc with
+       | [] -> collapse [] rest   (* already at root — drop *)
+       | _ :: tl -> collapse tl rest)
+    | seg :: rest -> collapse (seg :: acc) rest
+  in
+  let collapsed = collapse [] segments in
+  String.concat "/" collapsed
+
 let is_masc_write_allowed path =
+  let path = normalize_path path in
   List.exists (fun prefix ->
     String.length path >= String.length prefix
     && String.sub path 0 (String.length prefix) = prefix
@@ -384,7 +402,12 @@ let keeper_default_model_tools (_meta : keeper_meta) : Types.tool_schema list =
 
 (** Recovery minimum tools: non-removable shards only.
     Used in Failing phase to guarantee minimum tool availability.
-    Phase B2: TLA+ RecoveryFloorMaintained invariant. *)
+    Phase B2: TLA+ RecoveryFloorMaintained invariant.
+
+    INTENTIONAL: this bypasses the normal access/deny filtering.
+    In Failing phase the keeper must retain a guaranteed floor of tools
+    regardless of preset, deny-list, or policy config.  The floor is
+    determined solely by shard removability (structural, not policy). *)
 let failing_minimum_tool_names () : string list =
   Tool_shard.recovery_minimum_shard_names ()
   |> Tool_shard.tools_of_shards

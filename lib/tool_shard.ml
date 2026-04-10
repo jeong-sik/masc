@@ -797,6 +797,7 @@ let recovery_minimum_shard_names () : string list =
   StringMap.fold (fun name shard acc ->
     if not shard.removable then name :: acc else acc
   ) all_shards []
+  |> List.rev
 
 (** Get a shard by name *)
 let get_shard (name : string) : shard option =

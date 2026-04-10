@@ -475,6 +475,54 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
 	                     ~keepalive_started_at:(runtime_keepalive_started_at config m)
                      ~now_ts
               in
+              (* C0: Trust Observatory — raw signals side-by-side, no synthesis.
+                 Reputation (overall_score), Thompson (alpha/beta), Stress (5 kinds).
+                 Gated by MASC_DECISION_LAYER_LEVEL >= 3. *)
+              let trust_observatory =
+                if compact
+                   || Keeper_decision_audit.decision_layer_level () < 3
+                then `Null
+                else
+                  let reputation =
+                    (try
+                       let rep = Agent_reputation.compute_reputation config ~agent_name:m.agent_name in
+                       Agent_reputation.reputation_to_json rep
+                     with
+                     | Eio.Cancel.Cancelled _ as e -> raise e
+                     | exn ->
+                       Log.Keeper.warn "trust_observatory reputation failed for %s: %s"
+                         m.name (Printexc.to_string exn);
+                       `Null)
+                  in
+                  let thompson =
+                    let stats = Thompson_sampling.get_stats m.name in
+                    `Assoc [
+                      ("alpha", `Float stats.Thompson_sampling.alpha);
+                      ("beta", `Float stats.Thompson_sampling.beta);
+                      ("score", `Float (stats.alpha /. (stats.alpha +. stats.beta)));
+                      ("selections", `Int stats.selections);
+                      ("votes_up", `Int stats.total_votes_up);
+                      ("votes_down", `Int stats.total_votes_down);
+                    ]
+                  in
+                  let stress =
+                    let all_events = Agent_stress.recent 50 in
+                    let keeper_events = List.filter (fun ev ->
+                      match ev with
+                      | `Assoc fields ->
+                        (match List.assoc_opt "agent_name" fields with
+                         | Some (`String n) -> n = m.name || n = m.agent_name
+                         | _ -> false)
+                      | _ -> false
+                    ) all_events in
+                    `List (List.filteri (fun i _ -> i < 10) keeper_events)
+                  in
+                  `Assoc [
+                    ("reputation", reputation);
+                    ("thompson", thompson);
+                    ("stress_recent", stress);
+                  ]
+              in
               let detail_fields =
                 if compact then []
                 else [
@@ -484,6 +532,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                   ("memory_bank", memory_bank_json);
                   ("conversation_tail", conversation_tail);
                   ("k2k_recent", k2k_recent);
+                  ("trust_observatory", trust_observatory);
                 ]
               in
 	            `Assoc ([

@@ -244,7 +244,7 @@ let test_verify_skips_readonly () =
   Alcotest.(check bool) "read-only skips to Pass" true
     (Verifier_oas.verify req = Ok Pass)
 
-let test_hook_skips_on_verify_error () =
+let test_hook_continues_on_verify_error () =
   let verify_called = ref false in
   let hook =
     Verifier_oas.make_pre_tool_hook
@@ -267,9 +267,9 @@ let test_hook_skips_on_verify_error () =
        })
   in
   Alcotest.(check bool) "verify called" true !verify_called;
-  Alcotest.(check bool) "verifier errors fail closed"
+  Alcotest.(check bool) "verifier errors degrade open"
     true
-    (decision = Oas.Hooks.Skip)
+    (decision = Oas.Hooks.Continue)
 
 let test_hook_readonly_skips_verifier () =
   let verify_called = ref false in
@@ -437,8 +437,8 @@ let () =
     ]);
     ("verify_skip", [
       Alcotest.test_case "read-only skips" `Quick test_verify_skips_readonly;
-      Alcotest.test_case "hook verifier errors fail closed" `Quick
-        test_hook_skips_on_verify_error;
+      Alcotest.test_case "hook verifier errors degrade open" `Quick
+        test_hook_continues_on_verify_error;
       Alcotest.test_case "hook skips verifier for readonly tools" `Quick
         test_hook_readonly_skips_verifier;
     ]);

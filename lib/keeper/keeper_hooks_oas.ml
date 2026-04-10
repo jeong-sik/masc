@@ -67,7 +67,12 @@ let broadcast_tool_skipped ~keeper_name ~tool_name ~reason_code =
         ("reason_code", `String reason_code);
         ("ts_unix", `Float (Unix.gettimeofday ()));
       ])
-  with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ())
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+      Log.Keeper.warn
+        "tool skip SSE broadcast failed: keeper=%s tool=%s reason=%s err=%s"
+        keeper_name tool_name reason_code (Printexc.to_string exn))
 
 (** Extract command or content string from tool input JSON for screening.
     Reads "command", "cmd" (keeper_github), or "content" keys. *)

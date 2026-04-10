@@ -64,114 +64,128 @@ let save_swarm_link ~base_path (link : Autoresearch_types.swarm_link) =
   write loop_path;
   write session_path
 
-let load_json_file path =
+let load_json_file_result path =
   if not (Fs_compat.file_exists path) then
     None
   else
     try
       let content = Fs_compat.load_file path in
-      Some (Yojson.Safe.from_string content)
-    with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None
+      Some (Ok (Yojson.Safe.from_string content))
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | Yojson.Json_error msg -> Some (Error msg)
+    | exn -> Some (Error (Printexc.to_string exn))
 
-let decode_json_file ~path ~kind decode =
-  match load_json_file path with
+let decode_json_file_result ~path ~kind decode =
+  match load_json_file_result path with
   | None -> None
-  | Some json ->
-      (try Some (decode json)
-       with
-       | Eio.Cancel.Cancelled _ as e -> raise e
-       | exn ->
-           Log.Autoresearch.warn "%s decode failed for %s: %s"
-             kind path (Printexc.to_string exn);
-           None)
+  | Some (Error msg) -> Some (Error (Printf.sprintf "%s load failed for %s: %s" kind path msg))
+  | Some (Ok json) ->
+      Some
+        (match decode json with
+         | Ok value -> Ok value
+         | Error msg ->
+             Error (Printf.sprintf "%s decode failed for %s: %s" kind path msg))
+
+let load_swarm_link_by_loop_result ~base_path loop_id =
+  let path = loop_link_file ~base_path loop_id in
+  decode_json_file_result ~path ~kind:"swarm link"
+    Autoresearch_serde.swarm_link_of_yojson_result
 
 let load_swarm_link_by_loop ~base_path loop_id =
-  let path = loop_link_file ~base_path loop_id in
-  decode_json_file ~path ~kind:"swarm link"
-    Autoresearch_serde.swarm_link_of_yojson
+  match load_swarm_link_by_loop_result ~base_path loop_id with
+  | None -> None
+  | Some (Ok link) -> Some link
+  | Some (Error msg) ->
+      Log.Autoresearch.warn "%s" msg;
+      None
+
+let load_swarm_link_by_session_result ~base_path session_id =
+  let path = session_link_file ~base_path session_id in
+  decode_json_file_result ~path ~kind:"swarm link"
+    Autoresearch_serde.swarm_link_of_yojson_result
 
 let load_swarm_link_by_session ~base_path session_id =
-  let path = session_link_file ~base_path session_id in
-  decode_json_file ~path ~kind:"swarm link"
-    Autoresearch_serde.swarm_link_of_yojson
+  match load_swarm_link_by_session_result ~base_path session_id with
+  | None -> None
+  | Some (Ok link) -> Some link
+  | Some (Error msg) ->
+      Log.Autoresearch.warn "%s" msg;
+      None
 
-let has_required_string_field json key =
-  match Yojson.Safe.Util.member key json with
-  | `String value -> String.trim value <> ""
-  | _ -> false
-
-let has_required_number_field json key =
-  match Yojson.Safe.Util.member key json with
-  | `Int _ | `Intlit _ | `Float _ -> true
-  | _ -> false
-
-let has_required_persisted_state_fields json =
-  List.for_all (has_required_string_field json)
-    [ "loop_id"; "status"; "goal"; "metric_fn"; "model_model"; "target_file"; "workdir" ]
-  && List.for_all (has_required_number_field json)
-       [
-         "current_cycle";
-         "baseline";
-         "best_score";
-         "best_cycle";
-         "total_keeps";
-         "total_discards";
-         "max_cycles";
-         "cycle_timeout_s";
-         "elapsed_s";
-       ]
-
-let load_state ~base_path loop_id =
+let load_state_result ~base_path loop_id =
   let path = state_file ~base_path loop_id in
   let file_mtime_opt () =
     try Some ((Unix.stat path).Unix.st_mtime)
     with Unix.Unix_error _ -> None
   in
-  match load_json_file path with
+  match load_json_file_result path with
   | None -> None
-  | Some json ->
-      (try
-         match json with
+  | Some (Error msg) -> Some (Error (Printf.sprintf "autoresearch state load failed for %s: %s" path msg))
+  | Some (Ok json) ->
+      Some
+        (match json with
          | `Assoc fields
            when List.mem_assoc "llm_model" fields
                 && not (List.mem_assoc "model_model" fields) ->
-             Log.Autoresearch.error
-               "unsupported legacy autoresearch state schema for %s: found llm_model; expected model_model"
-               path;
-             None
-         | `Assoc _
-           when not (has_required_persisted_state_fields json) ->
-             Log.Autoresearch.error
-               "invalid autoresearch state schema for %s: missing required fields"
-               path;
-             None
+             Error
+               (Printf.sprintf
+                  "unsupported legacy autoresearch state schema for %s: found llm_model; expected model_model"
+                  path)
          | _ ->
-             let summary = Autoresearch_serde.state_of_yojson json in
-             Some
-               (match summary.updated_at with
-               | Some _ -> summary
-               | None -> { summary with updated_at = file_mtime_opt () })
-       with
-       | Eio.Cancel.Cancelled _ as e -> raise e
-       | exn ->
-           Log.Autoresearch.error "%s decode failed for %s: %s"
-             "autoresearch state" path (Printexc.to_string exn);
-           None)
+             (match Autoresearch_serde.state_of_yojson_result json with
+              | Ok summary ->
+                  Ok
+                    (match summary.updated_at with
+                     | Some _ -> summary
+                     | None -> { summary with updated_at = file_mtime_opt () })
+              | Error msg ->
+                  Error
+                    (Printf.sprintf "autoresearch state decode failed for %s: %s"
+                       path msg)))
+
+let load_state ~base_path loop_id =
+  match load_state_result ~base_path loop_id with
+  | None -> None
+  | Some (Ok summary) -> Some summary
+  | Some (Error msg) ->
+      Log.Autoresearch.error "%s" msg;
+      None
 
 let latest_cycle_record ~base_path loop_id =
   let path = results_file ~base_path loop_id in
   if not (Fs_compat.file_exists path) then
     None
   else
-    let lines = Fs_compat.load_jsonl path in
-    List.fold_left (fun last json ->
-      try Some (Autoresearch_serde.cycle_of_yojson json)
+    let lines =
+      try
+        Fs_compat.load_file path
+        |> String.split_on_char '\n'
+        |> List.filter (fun line -> String.length (String.trim line) > 0)
       with
-      | Yojson.Json_error _ -> last
+      | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->
-          Log.Autoresearch.warn "cycle parse failed: %s" (Printexc.to_string exn);
-          last
-    ) None lines
+          Log.Autoresearch.warn "cycle history load failed for %s: %s"
+            path (Printexc.to_string exn);
+          []
+    in
+    List.fold_left
+      (fun last line ->
+        let trimmed = String.trim line in
+        match
+          try Ok (Yojson.Safe.from_string trimmed)
+          with Yojson.Json_error msg -> Error msg
+        with
+        | Ok json -> (
+            match Autoresearch_serde.cycle_of_yojson_result json with
+            | Ok cycle -> Some cycle
+            | Error msg ->
+                Log.Autoresearch.warn "cycle parse failed for %s: %s" path msg;
+                last)
+        | Error msg ->
+            Log.Autoresearch.warn "cycle JSON parse failed for %s: %s" path msg;
+            last)
+      None lines
 
 (** Load full cycle history from results.jsonl for a loop. *)
 let load_cycle_history ~base_path loop_id =
@@ -179,17 +193,41 @@ let load_cycle_history ~base_path loop_id =
   if not (Fs_compat.file_exists path) then
     []
   else
-    let lines = Fs_compat.load_jsonl path in
-    List.filter_map (fun json ->
-      try Some (Autoresearch_serde.cycle_of_yojson json)
-      with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None
-    ) lines
+    let lines =
+      try
+        Fs_compat.load_file path
+        |> String.split_on_char '\n'
+        |> List.filter (fun line -> String.length (String.trim line) > 0)
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn ->
+          Log.Autoresearch.warn "cycle history load failed for %s: %s"
+            path (Printexc.to_string exn);
+          []
+    in
+    List.filter_map
+      (fun line ->
+        let trimmed = String.trim line in
+        match
+          try Ok (Yojson.Safe.from_string trimmed)
+          with Yojson.Json_error msg -> Error msg
+        with
+        | Ok json -> (
+            match Autoresearch_serde.cycle_of_yojson_result json with
+            | Ok cycle -> Some cycle
+            | Error msg ->
+                Log.Autoresearch.warn "cycle parse skipped for %s: %s" path msg;
+                None)
+        | Error msg ->
+            Log.Autoresearch.warn "cycle JSON parse skipped for %s: %s" path msg;
+            None)
+      lines
 
 (** Scan .masc/autoresearch/ for all persisted loop IDs.
     Returns loop IDs (directory names) that contain a state.json file. *)
 let scan_persisted_loop_ids ~base_path =
   let dir = Filename.concat base_path (Filename.concat ".masc" "autoresearch") in
-  if not (Sys.file_exists dir) then []
+  if not (Fs_compat.file_exists dir) then []
   else
     try
       Sys.readdir dir

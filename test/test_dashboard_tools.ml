@@ -65,19 +65,36 @@ let test_dashboard_tools_projection () =
         (match runtime_resolution |> member "build" |> member "started_at" with
          | `String value -> String.length value > 0
          | _ -> false);
-      let runtime_probe = Lib.Server_dashboard_http.dashboard_runtime_probe_http_json () in
-      check bool "runtime probe envelope contains generated_at" true
-        (match runtime_probe |> member "generated_at" with
-         | `String value -> String.length value > 0
-         | _ -> false);
-      check bool "runtime probe contains cache age" true
-        (match runtime_probe |> member "cache_age_sec" with
-         | `Float _ | `Int _ -> true
-         | _ -> false);
-      check bool "runtime probe contains probe payload" true
-        (match runtime_probe |> member "probe" |> member "source" with
-         | `String value -> String.length value > 0
-         | _ -> false);
+      let stub_probe =
+        `Assoc
+          [
+            ("source", `String "test runtime probe");
+            ("probe_ok", `Bool true);
+          ]
+      in
+      Lib.Server_dashboard_http.clear_dashboard_runtime_probe_cache_for_tests ();
+      Lib.Server_dashboard_http.set_dashboard_runtime_probe_runner_for_tests
+        (fun () -> stub_probe);
+      Fun.protect
+        ~finally:(fun () ->
+          Lib.Server_dashboard_http.clear_dashboard_runtime_probe_runner_for_tests ();
+          Lib.Server_dashboard_http.clear_dashboard_runtime_probe_cache_for_tests ())
+        (fun () ->
+          let runtime_probe =
+            Lib.Server_dashboard_http.dashboard_runtime_probe_http_json ~force:true ()
+          in
+          check bool "runtime probe envelope contains generated_at" true
+            (match runtime_probe |> member "generated_at" with
+             | `String value -> String.length value > 0
+             | _ -> false);
+          check bool "runtime probe contains cache age" true
+            (match runtime_probe |> member "cache_age_sec" with
+             | `Float _ | `Int _ -> true
+             | _ -> false);
+          check bool "runtime probe contains probe payload" true
+            (match runtime_probe |> member "probe" |> member "source" with
+             | `String value -> String.length value > 0
+             | _ -> false));
       check bool "usage dispatch flag present" true
         (match usage |> member "dispatch_v2_enabled" with
          | `Bool _ -> true

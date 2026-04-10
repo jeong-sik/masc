@@ -24,9 +24,26 @@ let list_hd_opt = function
   | [] -> None
   | x :: _ -> Some x
 
+let dashboard_runtime_probe_cache_mu = Mutex.create ()
 let dashboard_runtime_probe_cache : Yojson.Safe.t option ref = ref None
-let dashboard_runtime_probe_cache_updated_at = Atomic.make 0.0
+let dashboard_runtime_probe_cache_updated_at = ref 0.0
 let dashboard_runtime_probe_cache_ttl_sec = 30.0
+let dashboard_runtime_probe_runner_hook : (unit -> Yojson.Safe.t) option Atomic.t =
+  Atomic.make None
+
+let set_dashboard_runtime_probe_runner_for_tests hook =
+  Atomic.set dashboard_runtime_probe_runner_hook (Some hook)
+
+let clear_dashboard_runtime_probe_runner_for_tests () =
+  Atomic.set dashboard_runtime_probe_runner_hook None
+
+let clear_dashboard_runtime_probe_cache_for_tests () =
+  Mutex.lock dashboard_runtime_probe_cache_mu;
+  Fun.protect
+    ~finally:(fun () -> Mutex.unlock dashboard_runtime_probe_cache_mu)
+    (fun () ->
+      dashboard_runtime_probe_cache := None;
+      dashboard_runtime_probe_cache_updated_at := 0.0)
 
 let path_descends_from ~root path =
   String.equal path root || String.starts_with ~prefix:(root ^ "/") path
@@ -142,28 +159,33 @@ let runtime_diagnostics_json () =
     count "agent_state",
     count "backend_pressure" )
 
+let run_dashboard_runtime_probe () =
+  match Atomic.get dashboard_runtime_probe_runner_hook with
+  | Some hook -> hook ()
+  | None ->
+      Tool_local_runtime.runtime_ollama_probe_json ~probe_runs:2 ~max_tokens:8
+        ~timeout_sec:6 ~ps_timeout_sec:2 ()
+
 let dashboard_runtime_probe_http_json ?(force = false) () =
   let now = Time_compat.now () in
-  let cached_at = Atomic.get dashboard_runtime_probe_cache_updated_at in
-  let cache_hit =
-    (not force)
-    && !dashboard_runtime_probe_cache <> None
-    && now -. cached_at <= dashboard_runtime_probe_cache_ttl_sec
-  in
-  let probe =
-    if cache_hit then
-      Option.value ~default:`Null !dashboard_runtime_probe_cache
-    else
-      let fresh =
-        Tool_local_runtime.runtime_ollama_probe_json ~probe_runs:2 ~max_tokens:8
-          ~timeout_sec:6 ~ps_timeout_sec:2 ()
-      in
-      dashboard_runtime_probe_cache := Some fresh;
-      Atomic.set dashboard_runtime_probe_cache_updated_at now;
-      fresh
-  in
-  let refreshed_at =
-    if cache_hit then cached_at else Atomic.get dashboard_runtime_probe_cache_updated_at
+  let probe, cache_hit, refreshed_at =
+    Mutex.lock dashboard_runtime_probe_cache_mu;
+    Fun.protect
+      ~finally:(fun () -> Mutex.unlock dashboard_runtime_probe_cache_mu)
+      (fun () ->
+        let cached_at = !dashboard_runtime_probe_cache_updated_at in
+        let cache_hit =
+          (not force)
+          && !dashboard_runtime_probe_cache <> None
+          && now -. cached_at <= dashboard_runtime_probe_cache_ttl_sec
+        in
+        if cache_hit then
+          (Option.value ~default:`Null !dashboard_runtime_probe_cache, true, cached_at)
+        else
+          let fresh = run_dashboard_runtime_probe () in
+          dashboard_runtime_probe_cache := Some fresh;
+          dashboard_runtime_probe_cache_updated_at := now;
+          (fresh, false, now))
   in
   let cache_age_sec = max 0.0 (now -. refreshed_at) in
   `Assoc

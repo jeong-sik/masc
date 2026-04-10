@@ -345,29 +345,34 @@ let model_is_loaded model_id loaded_models =
       | None -> false)
     loaded_models
 
-let request_body_json ~model_id ~prompt ~max_tokens =
-  `Assoc
+let request_body_json ~keep_alive ~model_id ~prompt ~max_tokens =
+  let fields =
     [
-      ("model", `String model_id);
-      ("prompt", `String prompt);
-      ("stream", `Bool false);
-      ("keep_alive", `String "30m");
-      ( "options",
-        `Assoc
-          [
-            ("temperature", `Float 0.0);
-            ("num_predict", `Int max_tokens);
-          ] );
+      Some ("model", `String model_id);
+      Some ("prompt", `String prompt);
+      Some ("stream", `Bool false);
+      (match Option.bind keep_alive trim_to_option with
+      | Some value -> Some ("keep_alive", `String value)
+      | None -> None);
+      Some
+        ( "options",
+          `Assoc
+            [
+              ("temperature", `Float 0.0);
+              ("num_predict", `Int max_tokens);
+            ] );
     ]
-  |> Yojson.Safe.to_string
+    |> List.filter_map Fun.id
+  in
+  `Assoc fields |> Yojson.Safe.to_string
 
-let run_single_probe ~server_url ~model_id ~prompt ~max_tokens ~timeout_sec
+let run_single_probe ~keep_alive ~server_url ~model_id ~prompt ~max_tokens ~timeout_sec
     ~run_index =
   let url = String.trim server_url ^ "/api/generate" in
   let started = Time_compat.now () in
   match
     http_post_json_text_with_status ~timeout_sec ~url
-      ~body_json:(request_body_json ~model_id ~prompt ~max_tokens)
+      ~body_json:(request_body_json ~keep_alive ~model_id ~prompt ~max_tokens)
   with
   | Error err ->
       failed_probe_run ~run_index ~http_status:None
@@ -394,7 +399,8 @@ let run_single_probe ~server_url ~model_id ~prompt ~max_tokens ~timeout_sec
               ~wall_clock_ms json
 
 let runtime_ollama_probe_json ?server_url ?model ?prompt ?(probe_runs = 2)
-    ?(max_tokens = 16) ?(timeout_sec = 45) ?(ps_timeout_sec = 8) () =
+    ?keep_alive ?(max_tokens = 16) ?(timeout_sec = 45) ?(ps_timeout_sec = 8)
+    () =
   let server_url =
     Option.bind server_url trim_to_option
     |> Option.value ~default:Env_config_runtime.Ollama.server_url
@@ -417,8 +423,8 @@ let runtime_ollama_probe_json ?server_url ?model ?prompt ?(probe_runs = 2)
         let completed_runs =
           List.init probe_runs (fun idx -> idx + 1)
           |> List.map (fun run_index ->
-                 run_single_probe ~server_url ~model_id ~prompt ~max_tokens
-                   ~timeout_sec ~run_index)
+                 run_single_probe ~keep_alive ~server_url ~model_id ~prompt
+                   ~max_tokens ~timeout_sec ~run_index)
         in
         let run_errors =
           completed_runs
@@ -490,6 +496,7 @@ let runtime_ollama_probe_json ?server_url ?model ?prompt ?(probe_runs = 2)
       ("effective_model", string_opt_to_json effective_model);
       ("probe_runs_requested", `Int probe_runs);
       ("probe_runs_completed", `Int (List.length runs));
+      ("keep_alive", string_opt_to_json (Option.bind keep_alive trim_to_option));
       ("max_tokens", `Int max_tokens);
       ("timeout_sec", `Int timeout_sec);
       ("ps_timeout_sec", `Int ps_timeout_sec);

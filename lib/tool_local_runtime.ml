@@ -132,6 +132,7 @@ let handle_runtime_ollama_probe _ctx args : result =
   let server_url = member "server_url" args |> to_string_option in
   let model = member "model" args |> to_string_option in
   let prompt = member "prompt" args |> to_string_option in
+  let keep_alive = member "keep_alive" args |> to_string_option in
   let probe_runs =
     match member "probe_runs" args with
     | `Int value -> value
@@ -154,8 +155,8 @@ let handle_runtime_ollama_probe _ctx args : result =
     json_ok
       [
         ( "result",
-          runtime_ollama_probe_json ?server_url ?model ?prompt ~probe_runs
-            ~max_tokens ~timeout_sec () );
+          runtime_ollama_probe_json ?server_url ?model ?prompt ?keep_alive
+            ~probe_runs ~max_tokens ~timeout_sec () );
       ] )
 
 let dispatch ctx ~name ~args : result option =
@@ -201,6 +202,7 @@ let schemas : tool_schema list =
                   ("server_url", `Assoc [ ("type", `String "string") ]);
                   ("model", `Assoc [ ("type", `String "string") ]);
                   ("prompt", `Assoc [ ("type", `String "string") ]);
+                  ("keep_alive", `Assoc [ ("type", `String "string") ]);
                   ("probe_runs", `Assoc [ ("type", `String "integer") ]);
                   ("max_tokens", `Assoc [ ("type", `String "integer") ]);
                   ("timeout_sec", `Assoc [ ("type", `String "integer") ]);

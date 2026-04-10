@@ -42,6 +42,30 @@ let test_ollama_generate_parser_computes_tok_per_second () =
   check (option string) "response preview kept" (Some "READY")
     run_json.response_preview
 
+let test_request_body_omits_keep_alive_by_default () =
+  let json =
+    Masc_mcp.Tool_local_runtime_probe.request_body_json
+      ~keep_alive:None ~model_id:"qwen3.5:35b-a3b-coding-nvfp4" ~prompt:"READY"
+      ~max_tokens:8
+    |> Yojson.Safe.from_string
+  in
+  let open Yojson.Safe.Util in
+  check (option string) "keep_alive omitted"
+    None
+    (json |> member "keep_alive" |> to_string_option)
+
+let test_request_body_keeps_explicit_keep_alive () =
+  let json =
+    Masc_mcp.Tool_local_runtime_probe.request_body_json
+      ~keep_alive:(Some "90s") ~model_id:"qwen3.5:35b-a3b-coding-nvfp4"
+      ~prompt:"READY" ~max_tokens:8
+    |> Yojson.Safe.from_string
+  in
+  let open Yojson.Safe.Util in
+  check (option string) "keep_alive included"
+    (Some "90s")
+    (json |> member "keep_alive" |> to_string_option)
+
 let test_kv_cache_assessment_detects_repeat_improvement () =
   let runs =
     [
@@ -91,6 +115,10 @@ let () =
         ] );
       ( "generate",
         [
+          test_case "omits keep_alive by default" `Quick
+            test_request_body_omits_keep_alive_by_default;
+          test_case "keeps explicit keep_alive when requested" `Quick
+            test_request_body_keeps_explicit_keep_alive;
           test_case "computes tok per second from generate response" `Quick
             test_ollama_generate_parser_computes_tok_per_second;
         ] );

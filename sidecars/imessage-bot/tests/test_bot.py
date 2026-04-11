@@ -214,3 +214,52 @@ class IMessageBotTests(unittest.IsolatedAsyncioTestCase):
             text="reply text",
             chat_guid="source-guid",
         )
+
+    @patch("src.bot.send_message", return_value=False)
+    @patch("src.bot.resolve_self_chat_guid", return_value="self-guid")
+    @patch("src.bot.GateClient")
+    @patch("src.bot.get_config")
+    async def test_handle_message_counts_reply_send_failure_without_retrying_gate(
+        self,
+        get_config_mock,
+        gate_client_cls,
+        resolve_self_chat_guid_mock,
+        send_message_mock,
+    ) -> None:
+        get_config_mock.return_value = self._config()
+        gate_client = gate_client_cls.return_value
+        gate_client.send_message = AsyncMock(
+            return_value=GateResponse(
+                ok=True,
+                keeper_name=DEFAULT_KEEPER,
+                reply="reply text",
+                model_used="test-model",
+                duration_ms=42,
+                tokens_used=12,
+                error="",
+                structured=None,
+            )
+        )
+
+        bot = IMessageBot()
+        msg = InboundMessage(
+            rowid=10,
+            text="hello",
+            date=datetime.now(tz=timezone.utc),
+            service="iMessage",
+            sender="+15550002222",
+            chat_guid="source-guid",
+            chat_identifier="chat900",
+            display_name="Test",
+        )
+
+        ok = await bot._handle_message(msg)
+
+        self.assertTrue(ok)
+        resolve_self_chat_guid_mock.assert_called_once_with("/tmp/chat.db", "")
+        send_message_mock.assert_called_once_with(
+            text="reply text",
+            chat_guid="self-guid",
+        )
+        self.assertEqual(bot._messages_processed, 1)
+        self.assertEqual(bot._messages_failed, 1)

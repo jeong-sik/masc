@@ -156,6 +156,7 @@ class IMessageBot:
                     msg.chat_identifier or msg.chat_guid or "unknown",
                     target_chat_guid,
                 )
+                self._messages_failed += 1
         elif response.error and response.error != "duplicate message":
             logger.warning("Gate error for %s: %s", msg.sender, response.error)
 

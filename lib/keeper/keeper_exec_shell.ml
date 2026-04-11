@@ -209,8 +209,11 @@ let docker_playground_cwd ~(config : Room.config) ~(meta : keeper_meta) host_cwd
 
 (* Common wrong path prefixes that keepers use.
    Maps wrong prefix → corrected relative path using the keeper
-   playground SSOT ([Playground_paths]). The keeper name is sanitized
-   here so a poisoned meta.name cannot escape the playground. *)
+   playground SSOT ([Playground_paths]). [sanitize_keeper_name] in the
+   SSOT rejects "", "." and ".." as whole-name segments (substituting
+   "_", "_", "__" respectively), so a poisoned [meta.name] cannot
+   produce a ".."/"." directory component and cannot escape the
+   playground bundle via [Filename.concat]. *)
 let auto_correct_path ~(meta : keeper_meta) (raw : string) : string option =
   (* bundle_root yields ".masc/playground/<safe>/" — strip the trailing
      slash so we can append "/repos/..." cleanly. *)

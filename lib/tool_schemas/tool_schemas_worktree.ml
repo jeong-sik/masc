@@ -31,7 +31,8 @@ masc_worktree_remove.";
         ]);
         ("repo_name", `Assoc [
           ("type", `String "string");
-          ("description", `String "Optional. Disambiguates which playground clone to use when you have multiple repos under .masc/playground/<your-name>/repos/. Example: repo_name='masc-mcp'. Leave empty to auto-pick the first clone alphabetically.");
+          ("description", `String "Optional. Disambiguates which playground clone to use when you have multiple repos under .masc/playground/<your-name>/repos/. Example: repo_name='masc-mcp'. Allowed characters: [A-Za-z0-9._-] — a single directory name, no slashes, no path traversal, no '.' or '..'. Leave empty to auto-pick the first clone alphabetically.");
+          ("pattern", `String "^[A-Za-z0-9._-]+$");
         ]);
       ]);
       ("required", `List [`String "task_id"]);

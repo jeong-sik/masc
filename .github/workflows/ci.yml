@@ -300,6 +300,11 @@ jobs:
           chmod +x scripts/check-toml-syntax.sh
           scripts/check-toml-syntax.sh
 
+      - name: Check keeper prompt paths drift (#6527 iter9)
+        run: |
+          chmod +x scripts/validate-prompt-paths.sh
+          scripts/validate-prompt-paths.sh
+
       - name: Check MASC/OAS boundary ratchet
         run: |
           chmod +x scripts/check-boundary-guard.sh

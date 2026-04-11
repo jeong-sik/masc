@@ -225,6 +225,18 @@ let explicit_metadata : (string * metadata) list =
     (* Voice MCP tool: deprecated after voice group removal from tool_policy.toml.
        Schema still registered in keeper_schema.ml for backward compat dispatch. *)
     ("masc_voice_ping_pong", deprecated "Voice group removed from tool_policy.toml");
+    (* Incomplete addition: schema + dispatch exist (keeper_schema.ml:497,
+       tool_keeper.ml:673) but tool was never wired to any surface, auth.ml
+       permission map, operator_control, prefilter, or access_role. Marking
+       Deprecated with direct-call retained keeps the handler reachable for
+       any internal caller without leaving it as an SSOT orphan. If an owner
+       wants to expose it publicly, re-promote by adding to
+       tool_catalog_surfaces.public_mcp_surface_tools and updating auth.ml. *)
+    ( "masc_keeper_reset",
+      deprecated
+        ~allow_direct_call_when_hidden:true
+        ~implementation_status:Real
+        "orphaned — schema/handler present but no caller wiring" );
   ]
 
 (* ================================================================ *)

@@ -9,10 +9,10 @@
 
     @since 2.204.0 — Phase 0 of Tool Gate architecture (#4381) *)
 
-val admin_only_tools : string list
+val admin_only_tools : unit -> string list
 (** Tools requiring Admin role. Derived from [Tool_permission_map.permission_for_tool]. *)
 
-val worker_only_tools : string list
+val worker_only_tools : unit -> string list
 (** Tools requiring at least Worker role. Derived from [Tool_permission_map.permission_for_tool]. *)
 
 val policy_for_role : Types.agent_role -> Tool_access_policy.t

@@ -48,7 +48,7 @@ let tools_for_required_role required_role =
 (* Admin-only tools (CanInit + CanReset + CanAdmin)                 *)
 (* ================================================================ *)
 
-let admin_only_tools = tools_for_required_role Admin_role
+let admin_only_tools () = tools_for_required_role Admin_role
 
 (* ================================================================ *)
 (* Worker-only tools (CanAddTask + CanClaimTask + CanCompleteTask + *)
@@ -56,7 +56,7 @@ let admin_only_tools = tools_for_required_role Admin_role
 (*                    CanCreateWorktree + CanRemoveWorktree + CanVote) *)
 (* ================================================================ *)
 
-let worker_only_tools = tools_for_required_role Worker_role
+let worker_only_tools () = tools_for_required_role Worker_role
 
 (* ================================================================ *)
 (* Role → Policy                                                     *)
@@ -68,7 +68,7 @@ let policy_for_role : Types.agent_role -> Tool_access_policy.t = function
   | Worker ->
       {
         allow =
-          Diff { base = All; exclude = Names admin_only_tools };
+          Diff { base = All; exclude = Names (admin_only_tools ()) };
         deny = Empty;
       }
   | Reader ->
@@ -78,7 +78,7 @@ let policy_for_role : Types.agent_role -> Tool_access_policy.t = function
             {
               base = All;
               exclude =
-                Union [ Names admin_only_tools; Names worker_only_tools ];
+                Union [ Names (admin_only_tools ()); Names (worker_only_tools ()) ];
             };
         deny = Empty;
       }

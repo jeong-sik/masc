@@ -5,6 +5,7 @@
 
 (generate_opam_files true)
 (implicit_transitive_deps false)
+(executables_implicit_empty_intf false)
 
 (source
  (github jeong-sik/masc-mcp))

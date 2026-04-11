@@ -50,7 +50,7 @@ Workspace:
   6. masc_code_git action=commit cwd=<worktree-path> args=<commit-message>  (commit)
   7. masc_code_git action=push cwd=<worktree-path>  (push)
   8. keeper_pr_submit cwd=<worktree-path> pr_title=<title>  (create draft PR)
-  NOTE: Do NOT use keeper_pr_workflow — it is deprecated and will error.
+  NOTE: `keeper_pr_workflow` is a legacy one-shot worktree helper. Prefer `keeper_pr_submit` after editing in a playground clone or explicit worktree.
 
 Knowledge lookup:
 - Past conversations and messages: keeper_memory_search

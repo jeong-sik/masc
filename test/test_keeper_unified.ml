@@ -1479,6 +1479,8 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
         ~compaction:
           {
             Masc_mcp.Keeper_exec_context.applied = false;
+            attempted = false;
+            failure_reason = None;
             trigger = None;
             decision = "no_compaction";
             before_tokens = 0;
@@ -1582,6 +1584,8 @@ let test_append_metrics_snapshot_treats_validated_evidence_as_tool_use () =
         ~compaction:
           {
             Masc_mcp.Keeper_exec_context.applied = false;
+            attempted = false;
+            failure_reason = None;
             trigger = None;
             decision = "no_compaction";
             before_tokens = 0;

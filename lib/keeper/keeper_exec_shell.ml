@@ -420,7 +420,7 @@ let handle_keeper_bash
                 ; "cmd", `String cmd_for_log
                 ; "hint", `String "Use cwd=.masc/playground/YOUR_KEEPER_NAME/repos/REPO"
                 ]))
-        (* Write gate *)
+        (* Write gate — preset layer *)
         else if (not write_enabled) && Worker_dev_tools.is_write_operation cmd
         then (
           Log.Keeper.info "keeper_bash write-gate: %s (keeper=%s, playground=%b)"
@@ -434,6 +434,36 @@ let handle_keeper_bash
                       "This command modifies state (git push/commit, make deploy, etc.). \
                        A write-enabled preset (Coding/Delivery/Full) is required." )
                 ; "cmd", `String cmd_for_log
+                ]))
+        (* Write gate — playground containment layer (#6527 iter 3).
+           A write-enabled keeper still must not mutate anything outside
+           its own playground bundle. branch-switch already requires
+           in_playground; match the same invariant for the general
+           write operations (git push/commit, make deploy, etc.) so
+           a coding-preset keeper cannot push from, e.g., a
+           workspace-default `.worktrees/` path or `lib/` on the server
+           repo. *)
+        else if write_enabled
+                && Worker_dev_tools.is_write_operation cmd
+                && not in_playground
+        then (
+          Log.Keeper.info
+            "keeper_bash write-containment blocked: %s (keeper=%s, cwd=%s, playground=%b)"
+            cmd_for_log meta.name cwd in_playground;
+          Yojson.Safe.to_string
+            (`Assoc
+                [ "ok", `Bool false
+                ; "error", `String "write_outside_playground_blocked"
+                ; ( "reason"
+                  , `String
+                      "Write operations (git push/commit, make deploy, etc.) \
+                       must run with cwd inside your playground \
+                       (.masc/playground/<keeper>/...). Open a worktree under \
+                       your playground clone first via masc_worktree_create, \
+                       then set cwd to the returned worktree path." )
+                ; "cmd", `String cmd_for_log
+                ; "cwd", `String cwd
+                ; "hint", `String "cwd must start with .masc/playground/YOUR_KEEPER_NAME/"
                 ]))
         else (
             (match Worker_dev_tools.validate_command_paths ~workdir:cwd cmd with

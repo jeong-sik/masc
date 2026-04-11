@@ -169,13 +169,6 @@ let wakeup_relevant_keeper_for_board_signal
          (fun (_meta, (matched : Keeper_world_observation.board_signal_match)) ->
             matched.explicit_mention)
   in
-  let global_scope =
-    candidates
-    |> List.filter (fun (meta, _matched) ->
-         match Keeper_contract.scope_kind_of_string meta.scope_kind with
-         | Keeper_contract.Global -> true
-         | Keeper_contract.Local -> false)
-  in
   let wake_meta (meta : keeper_meta) reason =
     if
       board_reactive_wakeup_allowed
@@ -194,8 +187,8 @@ let wakeup_relevant_keeper_for_board_signal
   | _ :: _ ->
     explicit |> List.iter (fun (meta, _matched) -> wake_meta meta "explicit_mention")
   | [] ->
-    global_scope
-    |> List.iter (fun (meta, _matched) -> wake_meta meta "global_scope")
+    candidates
+    |> List.iter (fun (meta, _matched) -> wake_meta meta "board_activity")
 ;;
 
 let max_consecutive_heartbeat_failures () =

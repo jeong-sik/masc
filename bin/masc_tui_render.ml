@@ -290,7 +290,7 @@ let render_keeper_detail (state : state) =
     add_section "Identity";
     add_row "Name:" k.k_name;
     add_row "Generation:" (string_of_int k.k_generation);
-    add_row "Scope:" (Printf.sprintf "%s / %s" k.k_scope_kind k.k_room_scope);
+    add_row "Room Scope:" k.k_room_scope;
     add_row "Trigger Mode:" k.k_trigger_mode;
     add_row "Verify:" (bool_indicator k.k_verify);
     add_empty ();

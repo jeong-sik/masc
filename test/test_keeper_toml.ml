@@ -422,7 +422,6 @@ needs = "log access"
 desires = "low false positives"
 instructions = "You are a log analyzer."
 room_scope = "all"
-scope_kind = "global"
 mention_targets = ["sherlock", "log-analyzer"]
 proactive_enabled = true
 room_signal_prompt_enabled = true

@@ -40,7 +40,6 @@ let coordination_surface_json (meta : keeper_meta) =
   `Assoc
     [
       ("room_scope", `String meta.room_scope);
-      ("scope_kind", `String meta.scope_kind);
       ("mention_targets", string_list_to_json meta.mention_targets);
       ("joined_room_ids", string_list_to_json meta.joined_room_ids);
     ]
@@ -91,10 +90,6 @@ let live_override_fields (meta : keeper_meta) (defaults : keeper_profile_default
         | Some value ->
             let authored = String.trim value in
             authored <> "" && authored <> meta.room_scope
-        | None -> false)
-  |> add_if "coordination.scope_kind"
-       (match defaults.scope_kind with
-        | Some value -> canonical_scope_kind value <> meta.scope_kind
         | None -> false)
   |> add_if "coordination.mention_targets"
        (defaults.mention_targets <> [] && defaults.mention_targets <> meta.mention_targets)

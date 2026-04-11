@@ -130,7 +130,6 @@ type keeper_meta =
     policy_voice_enabled : bool
   ; execution_scope : string
   ; allowed_paths : string list
-  ; scope_kind : string
   ; tool_access : tool_access
   ; tool_denylist : string list
   ; room_scope : string
@@ -659,7 +658,6 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; "policy_voice_enabled", `Bool m.policy_voice_enabled
     ; "execution_scope", `String m.execution_scope
     ; "allowed_paths", `List (List.map (fun s -> `String s) m.allowed_paths)
-    ; "scope_kind", `String m.scope_kind
     ; "tool_access", tool_access_to_json m.tool_access
     ; "tool_denylist", `List (List.map (fun s -> `String s) m.tool_denylist)
     ; "room_scope", `String m.room_scope
@@ -764,7 +762,6 @@ type parsed_keeper_policy =
   { pp_policy_voice_enabled : bool
   ; pp_execution_scope : string
   ; pp_allowed_paths : string list
-  ; pp_scope_kind : string
   ; pp_tool_access : tool_access
   ; pp_tool_denylist : string list
   ; pp_room_scope : string
@@ -876,9 +873,6 @@ let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
       Safe_ops.json_string ~default:default_execution_scope "execution_scope" json
     in
     let pp_allowed_paths = Safe_ops.json_string_list "allowed_paths" json in
-    let pp_scope_kind =
-      Safe_ops.json_string ~default:"local" "scope_kind" json |> canonical_scope_kind
-    in
     let pp_tool_denylist = Safe_ops.json_string_list "tool_denylist" json in
     let pp_room_scope =
       Safe_ops.json_string ~default:"current" "room_scope" json |> canonical_room_scope
@@ -968,7 +962,6 @@ let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
       { pp_policy_voice_enabled
       ; pp_execution_scope
       ; pp_allowed_paths
-      ; pp_scope_kind
       ; pp_tool_access
       ; pp_tool_denylist
       ; pp_room_scope
@@ -1178,7 +1171,6 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
              ; policy_voice_enabled = policy.pp_policy_voice_enabled
              ; execution_scope = policy.pp_execution_scope
              ; allowed_paths = policy.pp_allowed_paths
-             ; scope_kind = policy.pp_scope_kind
              ; tool_access = policy.pp_tool_access
              ; tool_denylist = policy.pp_tool_denylist
              ; room_scope = policy.pp_room_scope
@@ -1247,7 +1239,6 @@ let fallback_canonical_keeper_meta_key_names =
   ; "policy_voice_enabled"
   ; "execution_scope"
   ; "allowed_paths"
-  ; "scope_kind"
   ; "tool_access"
   ; "tool_denylist"
   ; "room_scope"

@@ -31,12 +31,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
     |> Option.value ~default:"current"
     |> canonical_room_scope
   in
-  let scope_kind =
-    p.scope_kind_opt
-    |> first_some p.profile_defaults.scope_kind
-    |> Option.value ~default:(if room_scope = "all" then "global" else "local")
-    |> canonical_scope_kind
-  in
   let policy_voice_enabled =
     first_some
       p.policy_voice_enabled_opt
@@ -251,7 +245,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         policy_voice_enabled;
         execution_scope;
         allowed_paths;
-        scope_kind;
         tool_access;
         tool_denylist;
         room_scope;

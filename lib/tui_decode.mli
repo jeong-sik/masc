@@ -30,7 +30,6 @@ type keeper = {
   k_last_turn_ts : string;
   k_compaction_count : int;
   k_compaction_ratio_gate : float;
-  k_scope_kind : string;
   k_room_scope : string;
   k_trigger_mode : string;
   k_context_budget : int;

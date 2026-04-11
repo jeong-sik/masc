@@ -131,9 +131,8 @@ type board_signal_match = {
 }
 
 let scope_message_feed_enabled (meta : keeper_meta) : bool =
-  match Keeper_contract.scope_kind_of_string meta.scope_kind with
-  | Keeper_contract.Global -> true
-  | Keeper_contract.Local -> false
+  let _ = meta in
+  true
 
 let message_feed_targets (meta : keeper_meta) =
   if meta.mention_targets <> [] then meta.mention_targets else [ meta.name ]

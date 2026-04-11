@@ -129,11 +129,14 @@ set -eu
 capture="${FAKE_CAPTURE_FILE:?}"
 {
   printf 'FAKE_EXE_MARKER=%s\n' '%s'
+  printf 'PWD=%%s\n' "$PWD"
   printf 'MASC_STORAGE_TYPE=%%s\n' "${MASC_STORAGE_TYPE:-}"
   printf 'SUPABASE_DB_URL=%%s\n' "${SUPABASE_DB_URL:-}"
   printf 'MASC_BASE_PATH=%%s\n' "${MASC_BASE_PATH:-}"
   printf 'MASC_CONFIG_DIR=%%s\n' "${MASC_CONFIG_DIR:-}"
   printf 'MASC_KEEPER_BOOTSTRAP_ENABLED=%%s\n' "${MASC_KEEPER_BOOTSTRAP_ENABLED:-}"
+  printf 'MASC_GRPC_PORT=%%s\n' "${MASC_GRPC_PORT:-}"
+  printf 'MASC_WS_PORT=%%s\n' "${MASC_WS_PORT:-}"
   printf 'MASC_WS_ENABLED=%%s\n' "${MASC_WS_ENABLED:-}"
   printf 'MASC_WEBRTC_ENABLED=%%s\n' "${MASC_WEBRTC_ENABLED:-}"
   printf 'ARGS=%%s\n' "$*"
@@ -148,6 +151,18 @@ let make_fake_eio_exe repo_root =
   let exe_path = Filename.concat repo_root "_build/default/bin/main_eio.exe" in
   write_fake_eio_exe exe_path ~marker:"local"
 
+let make_fake_eio_exe_with_stderr repo_root =
+  let exe_path = Filename.concat repo_root "_build/default/bin/main_eio.exe" in
+  mkdir_p (Filename.dirname exe_path);
+  write_executable exe_path
+    {|
+#!/bin/sh
+set -eu
+echo "+[WARN] ℹ️  Running without TLS (plaintext h2c)" >&2
+echo "+[INFO] gRPC server on 127.0.0.1:9952" >&2
+echo "stderr-keep" >&2
+exit 0
+|}
 let test_explicit_env_overrides_repo_env_files () =
   with_temp_dir "start-masc-script" (fun dir ->
       let script = Filename.concat dir "start-masc-mcp.sh" in
@@ -429,6 +444,87 @@ let test_worktree_prefers_local_build_over_workspace_build () =
       check bool "local build wins in worktree" true
         (contains_substring captured "FAKE_EXE_MARKER=local"))
 
+let test_explicit_base_path_execs_from_base_path () =
+  with_temp_dir "start-masc-script" (fun dir ->
+      let parent = Filename.concat dir "parent-root" in
+      let repo = Filename.concat parent "workspace/yousleepwhen/masc-mcp" in
+      let home_dir = Filename.concat dir "empty-home" in
+      mkdir_p repo;
+      mkdir_p home_dir;
+      mkdir_p (Filename.concat parent ".masc");
+      mkdir_p (Filename.concat repo ".masc");
+      let script = Filename.concat repo "start-masc-mcp.sh" in
+      copy_script (script_path ()) script;
+      make_fake_eio_exe repo;
+      let capture = Filename.concat dir "captured-explicit-cwd.txt" in
+      let code, stdout, stderr =
+        run_shell ~cwd:repo
+          ~env:
+            [
+              ("FAKE_CAPTURE_FILE", capture);
+              ("HOME", home_dir);
+              ("MASC_BASE_PATH", parent);
+              ("MASC_ALLOW_INHERITED_BASE_PATH", "");
+            ]
+          (Printf.sprintf "%s --http --port 9966 --base-path %s"
+             (quote script) (quote parent))
+      in
+      if code <> 0 then
+        failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout
+          stderr;
+      let captured = read_file capture in
+      check bool "exec cwd matches explicit base path" true
+        (contains_substring captured ("PWD=" ^ parent)))
+
+let test_explicit_http_port_derives_sidecar_ports () =
+  with_temp_dir "start-masc-script" (fun dir ->
+      let script = Filename.concat dir "start-masc-mcp.sh" in
+      copy_script (script_path ()) script;
+      make_fake_eio_exe dir;
+      let capture = Filename.concat dir "captured-sidecar-ports.txt" in
+      let code, stdout, stderr =
+        run_shell ~cwd:dir
+          ~env:
+            [
+              ("FAKE_CAPTURE_FILE", capture);
+              ("MASC_BASE_PATH", dir);
+            ]
+          (Printf.sprintf "%s --http --port 9951 --base-path %s"
+             (quote script) (quote dir))
+      in
+      if code <> 0 then
+        failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout
+          stderr;
+      let captured = read_file capture in
+      check bool "grpc port derived from explicit http port" true
+        (contains_substring captured "MASC_GRPC_PORT=9952");
+      check bool "ws port derived from explicit http port" true
+        (contains_substring captured "MASC_WS_PORT=9953"))
+
+let test_grpc_direct_banner_is_preserved_in_stderr () =
+  with_temp_dir "start-masc-script" (fun dir ->
+      let script = Filename.concat dir "start-masc-mcp.sh" in
+      copy_script (script_path ()) script;
+      make_fake_eio_exe_with_stderr dir;
+      let code, stdout, stderr =
+        run_shell ~cwd:dir
+          ~env:
+            [
+              ("MASC_BASE_PATH", dir);
+            ]
+          (Printf.sprintf "%s --http --port 9951 --base-path %s"
+             (quote script) (quote dir))
+      in
+      if code <> 0 then
+        failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout
+          stderr;
+      check bool "grpc-direct tls banner preserved" true
+        (contains_substring stderr "Running without TLS (plaintext h2c)");
+      check bool "grpc-direct server banner preserved" true
+        (contains_substring stderr "gRPC server on 127.0.0.1:9952");
+      check bool "other stderr preserved" true
+        (contains_substring stderr "stderr-keep"))
+
 let test_loopback_disables_keeper_autoboot_by_default_and_preserves_override ()
     =
   with_temp_dir "start-loopback-script" (fun dir ->
@@ -503,6 +599,12 @@ let () =
             "absolute parent project inherited base path is preserved"
             `Quick
             test_absolute_parent_project_base_path_with_dual_masc_roots_is_preserved;
+          test_case "explicit base path execs from base path" `Quick
+            test_explicit_base_path_execs_from_base_path;
+          test_case "explicit http port derives sidecar ports" `Quick
+            test_explicit_http_port_derives_sidecar_ports;
+          test_case "grpc-direct banner is preserved in stderr" `Quick
+            test_grpc_direct_banner_is_preserved_in_stderr;
           test_case "zshenv absolute base path is preserved" `Quick
             test_zshenv_absolute_base_path_with_dual_roots_is_preserved;
           test_case "dual roots opt-in preserves inherited base path" `Quick

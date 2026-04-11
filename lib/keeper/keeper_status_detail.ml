@@ -684,6 +684,10 @@ let handle_keeper_status ctx args : tool_result =
            let playground_abs = Filename.concat ctx.config.base_path playground_rel in
            "execution_context", `Assoc [
              ("playground_path", `String playground_rel);
+             ("default_cwd",
+               `String
+                 (Keeper_exec_shared.keeper_default_write_root
+                    ~config:ctx.config ~meta:m));
              ("execution_scope", `String m.execution_scope);
              ("allowed_paths", string_list_to_json m.allowed_paths);
              ("playground_repos",

@@ -371,11 +371,13 @@ let test_room_init_bootstraps_keeper_runtime_dirs () =
       ignore (Room.init config ~agent_name:None);
       let root_dir = Room.masc_root_dir config in
       let keeper_dir = Filename.concat root_dir "keepers" in
-      let perpetual_dir = Filename.concat root_dir "perpetual" in
+      let traces_dir = Filename.concat root_dir "traces" in
       Alcotest.(check bool) "keeper dir exists" true
         (Sys.file_exists keeper_dir && Sys.is_directory keeper_dir);
-      Alcotest.(check bool) "perpetual dir exists" true
-        (Sys.file_exists perpetual_dir && Sys.is_directory perpetual_dir))
+      Alcotest.(check bool) "traces dir exists" true
+        (Sys.file_exists traces_dir && Sys.is_directory traces_dir);
+      Alcotest.(check bool) "perpetual dir not recreated" false
+        (Sys.file_exists (Filename.concat root_dir "perpetual")))
 
 let test_otel_exporter_setup_failure_is_soft () =
   Otel_spans.shutdown ~enabled:true ();

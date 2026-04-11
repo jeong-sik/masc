@@ -42,8 +42,8 @@ Workspace:
 - The playground bundle has three canonical subdirs: `mind/` (notes and scratch), `repos/` (cloned repos for coding), and the bundle root itself for general work.
 - Your clones live under `.masc/playground/YOUR_KEEPER_NAME/repos/<REPO_NAME>/` — this is your default coding workspace. Use `keeper_shell op=ls path=.masc/playground/YOUR_KEEPER_NAME/repos/` to see which clones you currently have.
 - If `repos/` is empty, use `keeper_shell op=git_clone url=https://github.com/<allowed_org>/<repo>.git` to create one. The clone lands at `.masc/playground/YOUR_KEEPER_NAME/repos/<repo>/` automatically.
-- playground is your sandbox; worktrees are repo-scoped branch workflows. `masc_worktree_create` picks the first git clone under your playground `repos/` (alphabetical); if none, it falls back to the server's repo root.
-- Default to the playground clone. If no clone exists, create one first, then open a worktree.
+- playground is your sandbox; worktrees are repo-scoped branch workflows. `masc_worktree_create` always opens the worktree under a git clone inside your playground `repos/` (alphabetical first clone, or whichever `repo_name` you pass). It never creates worktrees outside your playground.
+- You MUST have a clone under `.masc/playground/YOUR_KEEPER_NAME/repos/` before calling `masc_worktree_create`. If `repos/` is empty, call `keeper_shell op=git_clone url=https://github.com/<allowed_org>/<repo>.git` first, then open the worktree. Do not try to operate on the MASC server repository directly.
 - If you have multiple clones and want to target a specific one, pass `repo_name=<clone-dir-name>` to `masc_worktree_create`. Example: `repo_name='masc-mcp'` when your repos/ has both `masc-mcp/` and `kirin/`.
 - `keeper_pr_submit` is the canonical submit step after editing.
 - `keeper_pr_workflow` is a legacy one-shot worktree helper. Prefer `keeper_pr_submit`.

@@ -160,15 +160,33 @@ let heartbeat_stream t ~sw ~env =
   (* Map typed pings to raw bytes *)
   let raw_requests = Grpc_eio.Stream.create 16 in
   Eio.Fiber.fork ~sw (fun () ->
+    let close_request_stream () =
+      try Grpc_eio.Stream.close request_stream with _ -> ()
+    in
+    let close_raw_requests () =
+      try Grpc_eio.Stream.close raw_requests with _ -> ()
+    in
     let rec loop () =
       match Grpc_eio.Stream.take request_stream with
       | bytes ->
         Grpc_eio.Stream.add raw_requests bytes;
         loop ()
       | exception End_of_file ->
-        Grpc_eio.Stream.close raw_requests
+        close_raw_requests ()
     in
-    loop ());
+    try loop ()
+    with
+    | Eio.Cancel.Cancelled _ as e ->
+      (* Close both sides so senders and downstream receivers unblock. *)
+      close_request_stream ();
+      close_raw_requests ();
+      raise e
+    | exn ->
+      Log.Transport.error
+        "gRPC heartbeat request-mapper crashed: %s"
+        (Printexc.to_string exn);
+      close_request_stream ();
+      close_raw_requests ());
   let raw_responses =
     Grpc_eio.Client.call_bidi ~sw ~env t.client
       ~service ~method_:"Heartbeat" ~requests:raw_requests

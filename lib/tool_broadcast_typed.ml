@@ -35,12 +35,20 @@ let handle_broadcast ((message, _format) : string * string)
     let mention = Mention.extract trimmed in
     Ok { delivered = true; room_message = trimmed; mention }
 
+let parse_broadcast (json : Yojson.Safe.t) =
+  match Sg.parse broadcast_schema json with
+  | Ok v -> Ok v
+  | Error (errs : Agent_sdk.Tool_input_validation.field_error list) ->
+      Error
+        (Agent_sdk.Tool_input_validation.format_errors
+           ~tool_name:"masc_broadcast_typed" errs)
+
 let tool = Typed_tool_masc.create
   ~name:"masc_broadcast_typed"
   ~description:"[Typed PoC] Send a message visible to ALL agents via SSE push."
   ~module_tag:Tool_dispatch.Mod_room
   ~params:(Sg.to_params broadcast_schema)
-  ~parse:(Sg.parse broadcast_schema)
+  ~parse:parse_broadcast
   ~handler:handle_broadcast
   ~encode:encode_broadcast
   ~requires_join:true

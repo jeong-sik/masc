@@ -246,6 +246,34 @@ let stage_timing_to_json ~ring ~count =
       ])
 ;;
 
+let keepalive_entry_accepts_late_event ~(ctx : _ context) ~(keeper_name : string) =
+  match Keeper_registry.get_phase ~base_path:ctx.config.base_path keeper_name with
+  | None -> false
+  | Some (Keeper_state_machine.Stopped | Keeper_state_machine.Dead) -> false
+  | Some _ -> true
+
+let dispatch_keepalive_event ~(ctx : _ context) ~(keeper_name : string) event =
+  if keepalive_entry_accepts_late_event ~ctx ~keeper_name then
+    ignore (Keeper_registry.dispatch_event
+      ~base_path:ctx.config.base_path keeper_name event)
+
+let dispatch_keepalive_event_with_audit
+      ~(ctx : _ context)
+      ~(keeper_name : string)
+      ~snapshot
+      ~events_fired
+      ~selected_event
+      event
+  =
+  if keepalive_entry_accepts_late_event ~ctx ~keeper_name then
+    ignore (Keeper_registry.dispatch_event_with_audit
+      ~base_path:ctx.config.base_path
+      ~snapshot
+      ~events_fired
+      ~selected_event
+      keeper_name
+      event)
+
 let write_heartbeat_snapshot
       ~(ctx : _ context)
       ~(meta_current : keeper_meta)
@@ -435,13 +463,13 @@ let write_heartbeat_snapshot
     in
     let selected_guard_event = Keeper_guard.prioritized_event guard_events in
     (* RFC-0002: dispatch Context_measured event through state machine *)
-    let _dispatch_result =
-      Keeper_registry.dispatch_event_with_audit
-        ~base_path:ctx.config.base_path
+    let () =
+      dispatch_keepalive_event_with_audit
+        ~ctx
+        ~keeper_name:meta_current.name
         ~snapshot:measurement
         ~events_fired:guard_events
         ~selected_event:selected_guard_event
-        meta_current.name
         (Keeper_state_machine.Context_measured {
           context_ratio = context_ratio_v;
           message_count = message_count_v;
@@ -638,9 +666,8 @@ let maybe_recover_from_failing ~(ctx : _ context) ~(meta : keeper_meta) =
           "heartbeat recovery: reset %d stale turn failures for %s but retained manual reconcile blocker"
           stale_turn_failures meta.name
       else (
-        ignore (Keeper_registry.dispatch_event
-          ~base_path:ctx.config.base_path meta.name
-          Keeper_state_machine.Turn_succeeded);
+        dispatch_keepalive_event ~ctx ~keeper_name:meta.name
+          Keeper_state_machine.Turn_succeeded;
         Log.Keeper.info
           "heartbeat recovery: reset %d stale turn failures for %s"
           stale_turn_failures meta.name)
@@ -896,9 +923,8 @@ let run_keepalive_unified_turn
                meta_after_observe)
           | Ok updated ->
             (* Clear manual_reconcile trap after successful turn *)
-            ignore (Keeper_registry.dispatch_event
-              ~base_path:ctx.config.base_path updated.name
-              Keeper_state_machine.Manual_reconcile_cleared);
+            dispatch_keepalive_event ~ctx ~keeper_name:updated.name
+              Keeper_state_machine.Manual_reconcile_cleared;
             updated))
       else if (not has_message_signal) && obs.message_cursor_updates <> [] then
         meta_after_observe
@@ -1236,16 +1262,14 @@ let run_heartbeat_loop
         in
         (* RFC-0002: dispatch turn status event *)
         if turn_fail_count > 0 then
-          ignore (Keeper_registry.dispatch_event
-            ~base_path:ctx.config.base_path m.name
+          dispatch_keepalive_event ~ctx ~keeper_name:m.name
             (Keeper_state_machine.Turn_failed {
               consecutive = turn_fail_count;
               max_allowed = max_consecutive_turn_failures ();
-            }))
+            })
         else
-          ignore (Keeper_registry.dispatch_event
-            ~base_path:ctx.config.base_path m.name
-            Keeper_state_machine.Turn_succeeded);
+          dispatch_keepalive_event ~ctx ~keeper_name:m.name
+            Keeper_state_machine.Turn_succeeded;
         if turn_fail_count >= max_consecutive_turn_failures ()
         then begin
           Keeper_registry.set_failure_reason

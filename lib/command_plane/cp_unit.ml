@@ -333,13 +333,24 @@ let children_map units =
 
 let _max_tree_depth = 50
 
-let rec descendant_ids ?(visited = []) child_map unit_id =
-  if List.mem unit_id visited then []
+(* [descendant_ids] was the Stack_overflow culprit for #6633: the visited-list
+   cycle check catches true cycles but provides no protection against deep
+   non-cyclic chains, and [@]/[List.concat_map] are non-tail so every level
+   holds a stack frame.  Bound the recursion with [_max_tree_depth] (same
+   ceiling used by [build_tree_json]) so a deep unit chain cannot blow the
+   stack.  Returns the partial descendant list when the guard fires, matching
+   the cycle-truncation branch's "best-effort" behaviour. *)
+let rec descendant_ids ?(depth = 0) ?(visited = []) child_map unit_id =
+  if depth > _max_tree_depth || List.mem unit_id visited then []
   else
   let visited = unit_id :: visited in
   let children = List.assoc_opt unit_id child_map |> Option.value ~default:[] in
   let direct = List.map (fun (unit : unit_record) -> unit.unit_id) children in
-  direct @ List.concat_map (fun child_id -> descendant_ids ~visited child_map child_id) direct
+  direct
+  @ List.concat_map
+      (fun child_id ->
+        descendant_ids ~depth:(depth + 1) ~visited child_map child_id)
+      direct
 
 let rec build_tree_json ?(depth = 0) ?(visited = [])
     ~child_map ~unit_lookup ~agent_statuses ~live_agents ~operations unit_id =

@@ -641,6 +641,11 @@
           test_command_plane_v2_search)
  (libraries masc_test_deps))
 
+; Cp_unit.descendant_ids depth guard regression (#6633)
+(test
+ (name test_cp_unit_descendant_ids)
+ (libraries masc_test_deps))
+
 ; Operator Control (7 modules)
 (test
  (name test_operator_control)

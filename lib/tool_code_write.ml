@@ -75,25 +75,35 @@ let allowed_worktree_prefixes config =
 (* Security: Validate path is within an allowed writable sandbox.
    Uses canonical paths from Tool_code.validate_path — already normalized.
    Worktree paths are anchored to actual git common roots so a nested
-   "/.worktrees/" segment elsewhere in the tree is not accepted. *)
-let validate_writable_path config path =
+   "/.worktrees/" segment elsewhere in the tree is not accepted.
+
+   Playground writes are gated per-agent (#6527 iter 6): the caller
+   must only be allowed to write inside its own
+   [.masc/playground/<agent_name>/] bundle. This prevents one agent
+   from mutating another agent's playground via the shared
+   `masc_code_*` dispatch. Server-wide `.worktrees/` remains allowed
+   so legacy server operations that need to touch repo worktrees
+   continue to work. *)
+let validate_writable_path ~(agent_name : string) config path =
   match Tool_code.validate_path config path with
   | Error e -> Error e
   | Ok canonical_path ->
     let worktree_prefixes = allowed_worktree_prefixes config in
-    let playground_prefix =
+    let agent_playground_prefix =
       normalize_dir_prefix
-        (Filename.concat config.Room.base_path ".masc/playground")
+        (Filename.concat config.Room.base_path
+           (Keeper_alerting_path.playground_path_of_keeper agent_name))
     in
     if List.exists
          (fun prefix -> String.starts_with ~prefix canonical_path)
          worktree_prefixes
-       || String.starts_with ~prefix:playground_prefix canonical_path then
+       || String.starts_with ~prefix:agent_playground_prefix canonical_path then
       Ok canonical_path
     else
       Error (IoError (Printf.sprintf
-        "Write restricted to allowed sandboxes: /.worktrees/ or %s (got: %s)"
-        playground_prefix
+        "Write restricted to allowed sandboxes: /.worktrees/ or %s (got: %s). \
+         Cross-agent playground writes are blocked — use your own playground."
+        agent_playground_prefix
         canonical_path))
 
 (* Shell command allowlist *)
@@ -245,8 +255,11 @@ let validate_clone_url ~base_path url =
         | _ -> Ok ()
 
 (** Validate cwd for clone: allows .worktrees/ itself (not just subdirs)
-    and .masc/playground/{name}/repos/ directories. *)
-let validate_clone_cwd config cwd =
+    and THIS agent's own .masc/playground/<agent_name>/repos/ directory.
+
+    #6527 iter 6 scoped this per-agent so agent A cannot drop a clone
+    into agent B's playground/repos/ via masc_code_git action=clone. *)
+let validate_clone_cwd ~(agent_name : string) config cwd =
   match Tool_code.validate_path config cwd with
   | Error e -> Error e
   | Ok canonical_path ->
@@ -255,33 +268,37 @@ let validate_clone_cwd config cwd =
     | Some root ->
       let worktree_prefix = Tool_code.normalize_path
         (Filename.concat root ".worktrees") in
-      let playground_prefix = Tool_code.normalize_path
-        (Filename.concat root ".masc/playground") in
+      let agent_playground_prefix = Tool_code.normalize_path
+        (Filename.concat root
+           (Keeper_alerting_path.playground_path_of_keeper agent_name)) in
       let in_worktrees =
         canonical_path = worktree_prefix ||
         String.starts_with ~prefix:(worktree_prefix ^ "/") canonical_path
       in
-      let in_playground_repos =
-        (* Match .masc/playground/{name}/repos or subdirs thereof.
-           Path after playground_prefix must be /{name}/repos[/...]. *)
-        if String.starts_with ~prefix:(playground_prefix ^ "/") canonical_path then
-          let suffix = String.sub canonical_path
-            (String.length playground_prefix + 1)
-            (String.length canonical_path - String.length playground_prefix - 1) in
-          match String.index_opt suffix '/' with
-          | None -> false
-          | Some idx ->
-            let after_name = String.sub suffix (idx + 1)
-              (String.length suffix - idx - 1) in
-            after_name = "repos" ||
-            String.starts_with ~prefix:"repos/" after_name
-        else false
+      let in_agent_playground_repos =
+        (* Match <agent_playground_prefix>/repos or subdirs thereof.
+           [playground_path_of_keeper] already ends with "/", and the
+           canonical normalisation strips trailing slashes, so we strip
+           the trailing slash before prefix matching. *)
+        let prefix_no_slash =
+          if String.length agent_playground_prefix > 0
+             && agent_playground_prefix.[String.length agent_playground_prefix - 1] = '/'
+          then String.sub agent_playground_prefix 0
+                 (String.length agent_playground_prefix - 1)
+          else agent_playground_prefix
+        in
+        canonical_path = Filename.concat prefix_no_slash "repos"
+        || String.starts_with
+             ~prefix:(Filename.concat prefix_no_slash "repos/")
+             canonical_path
       in
-      if in_worktrees || in_playground_repos then
+      if in_worktrees || in_agent_playground_repos then
         Ok canonical_path
       else
         Error (IoError (Printf.sprintf
-          "Clone restricted to .worktrees/ or .masc/playground/*/repos/ directory (got: %s)"
+          "Clone restricted to .worktrees/ or this agent's own \
+           %srepos/ (got: %s). Cross-agent playground clones are blocked."
+          agent_playground_prefix
           canonical_path))
 
 (* Handler: masc_code_write — Create or overwrite a file *)
@@ -298,7 +315,7 @@ let handle_code_write ctx args =
   else if Tool_code.is_binary_file path then
     (false, "Binary file extension not allowed for write")
   else begin
-    match validate_writable_path ctx.config path with
+    match validate_writable_path ~agent_name:ctx.agent_name ctx.config path with
     | Error e -> (false, Types.masc_error_to_string e)
     | Ok abs_path ->
       try
@@ -329,7 +346,7 @@ let handle_code_edit ctx args =
   else if old_string = "" then (false, "old_string parameter required")
   else if old_string = new_string then (false, "old_string and new_string are identical")
   else begin
-    match validate_writable_path ctx.config path with
+    match validate_writable_path ~agent_name:ctx.agent_name ctx.config path with
     | Error e -> (false, Types.masc_error_to_string e)
     | Ok abs_path ->
       if not (Sys.file_exists abs_path) then
@@ -414,7 +431,7 @@ let handle_code_delete ctx args =
 
   if path = "" then (false, "path parameter required")
   else begin
-    match validate_writable_path ctx.config path with
+    match validate_writable_path ~agent_name:ctx.agent_name ctx.config path with
     | Error e -> (false, Types.masc_error_to_string e)
     | Ok abs_path ->
       if not (Sys.file_exists abs_path) then
@@ -457,7 +474,7 @@ let handle_code_shell ctx args =
       (* Validate cwd if provided *)
       let cwd_result =
         if cwd = "" then Ok None
-        else match validate_writable_path ctx.config cwd with
+        else match validate_writable_path ~agent_name:ctx.agent_name ctx.config cwd with
           | Ok abs_cwd -> Ok (Some abs_cwd)
           | Error e -> Error e
       in
@@ -518,7 +535,7 @@ let handle_code_git ctx args =
       match validate_clone_url ~base_path:ctx.config.Room.base_path url with
       | Error msg -> (false, msg)
       | Ok () ->
-        match validate_clone_cwd ctx.config cwd with
+        match validate_clone_cwd ~agent_name:ctx.agent_name ctx.config cwd with
         | Error e -> (false, Types.masc_error_to_string e)
         | Ok abs_cwd ->
           (* Only pass the validated URL — no extra args allowed.
@@ -571,7 +588,7 @@ let handle_code_git ctx args =
       let cwd_result =
         if cwd = "" then (false, "cwd parameter required for git operations") |> fun (ok, msg) ->
           if ok then Ok None else Error (IoError msg)
-        else match validate_writable_path ctx.config cwd with
+        else match validate_writable_path ~agent_name:ctx.agent_name ctx.config cwd with
           | Ok abs_cwd -> Ok (Some abs_cwd)
           | Error e -> Error e
       in

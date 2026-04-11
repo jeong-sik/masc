@@ -113,19 +113,39 @@ let worktree_create_r ?(link_task=true) config ~agent_name ~task_id ~base_branch
   | Error e, _ -> Error e
   | _, Error e -> Error e
   | Ok _, Ok _ ->
-    (* Prefer the keeper's playground clone. If it is missing, fall back
-       to the configured repository root so explicit repo-worktree flows
-       still work instead of failing with a missing-clone error. *)
+    (* Prefer a keeper's playground clone under
+       [.masc/playground/<agent>/repos/]. Scan the directory for any
+       cloned git repo (first match wins) instead of hardcoding a repo
+       name — keepers may work on any repo their tool_policy allows.
+       If no playground clone is present, fall back to the configured
+       repository root so explicit repo-worktree flows still work
+       instead of failing with a missing-clone error. *)
     let resolve_keeper_repo_root () =
-      let playground_repo =
+      let repos_dir =
         Filename.concat config.base_path
-          (Printf.sprintf ".masc/playground/%s/repos/masc-mcp"
+          (Printf.sprintf ".masc/playground/%s/repos"
              (safe_filename agent_name))
       in
-      if Sys.file_exists playground_repo
-         && Sys.file_exists (Filename.concat playground_repo ".git")
-      then Ok playground_repo
-      else
+      let scan_first_git_repo dir =
+        if not (Sys.file_exists dir && Sys.is_directory dir) then None
+        else
+          let entries =
+            try Sys.readdir dir with Sys_error _ -> [||]
+          in
+          Array.sort compare entries;
+          let rec find i =
+            if i >= Array.length entries then None
+            else
+              let candidate = Filename.concat dir entries.(i) in
+              if Sys.file_exists (Filename.concat candidate ".git")
+              then Some candidate
+              else find (i + 1)
+          in
+          find 0
+      in
+      match scan_first_git_repo repos_dir with
+      | Some clone -> Ok clone
+      | None ->
         match require_repository_root_with_git config with
         | Ok root -> Ok root
         | Error e -> Error e

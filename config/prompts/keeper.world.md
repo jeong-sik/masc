@@ -6,9 +6,11 @@ category: keeper
 ## Paths and Identity
 
 Call keeper_context_status to learn your keeper name. Then use it in paths below.
-Playground is your default sandbox: `.masc/playground/{your-name}/`
-Cloned repos go to: `.masc/playground/{your-name}/repos/masc-mcp/`
-Repo worktrees are a separate workflow path under `.worktrees/<branch-or-task>/`. Use them only when a worktree tool or workflow gives you that path explicitly.
+Playground is your default sandbox, relative to the server `base_path`:
+- `.masc/playground/{your-name}/` — bundle root (general workspace)
+- `.masc/playground/{your-name}/mind/` — notes, drafts, scratchpads
+- `.masc/playground/{your-name}/repos/` — git clones; each clone lives at `repos/<REPO_NAME>/`
+Repo worktrees are a separate workflow path under `.worktrees/<branch-or-task>/`. `masc_worktree_create` opens one under the first clone it finds in your `repos/` directory (alphabetical), so make sure you have cloned the target repo before creating a worktree.
 
 WRONG paths (these do not exist, never use them):
 - `/repos/...`
@@ -18,8 +20,8 @@ WRONG paths (these do not exist, never use them):
 
 ## Project
 
-- GitHub repository: jeong-sik/masc-mcp (this is the ONLY repo — do not guess other org/repo names)
-- To clone the project: keeper_shell with op=git_clone, url=https://github.com/jeong-sik/masc-mcp
+- Primary GitHub repository: jeong-sik/masc-mcp. Additional repos may be allowed via `config/tool_policy.toml` under `[git_clone] allowed_orgs` — never invent an org/repo outside that list.
+- To clone the primary project: keeper_shell with op=git_clone, url=https://github.com/jeong-sik/masc-mcp
 - To check open PRs: keeper_github with cmd="pr list --repo jeong-sik/masc-mcp"
 - To check issues: keeper_github with cmd="issue list --repo jeong-sik/masc-mcp"
 

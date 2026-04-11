@@ -171,19 +171,25 @@ let resolve_keeper_shell_write_cwd
   | Ok cwd -> Error (Printf.sprintf "cwd_not_directory: %s" cwd)
 
 (* Docker playground path mapping: host → container.
-   Host:      /Users/dancer/me/.masc/playground/cheolsu/repos/X
-   Container: /home/keeper/playground/cheolsu/repos/X *)
+   Host:      <base_path>/.masc/playground/<keeper>/repos/X
+   Container: <container_playground_root>/<keeper>/repos/X
+   The container-side root comes from
+   [Env_config_keeper.DockerPlayground.container_playground_root] so the
+   mount point is configurable (default "/home/keeper/playground"). *)
 let docker_playground_cwd ~(config : Room.config) ~(meta : keeper_meta) host_cwd =
   let root = Keeper_alerting_path.project_root_of_config config in
   let playground_prefix = Filename.concat root ".masc/playground" in
+  let container_root =
+    Env_config_keeper.DockerPlayground.container_playground_root
+  in
   if String.starts_with ~prefix:playground_prefix host_cwd then
     let suffix =
       String.sub host_cwd (String.length playground_prefix)
         (String.length host_cwd - String.length playground_prefix)
     in
-    "/home/keeper/playground" ^ suffix
+    container_root ^ suffix
   else
-    Printf.sprintf "/home/keeper/playground/%s" meta.name
+    Filename.concat container_root meta.name
 
 (* Common wrong path prefixes that keepers use.
    Maps wrong prefix → corrected relative path using keeper playground. *)

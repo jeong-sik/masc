@@ -16,7 +16,7 @@ type verdict_record = {
   task_title : string;
   agent_name : string;
   verdict : string;
-  gate : string;
+  gate : Anti_rationalization.gate;
   evaluator_cascade : string;
   generator_cascade : string option;
   fallback_reason : string option;

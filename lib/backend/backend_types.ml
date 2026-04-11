@@ -29,7 +29,6 @@ type 'a result = ('a, error) Stdlib.result
 type backend_type =
   | Memory
   | FileSystem
-  | PostgresNative
 [@@deriving show, eq]
 
 (* ============================================ *)
@@ -76,14 +75,13 @@ let default_config = {
 }
 
 (* ============================================ *)
-(* Status & Pool Statistics                     *)
+(* Status                                        *)
 (* ============================================ *)
 
 let get_status config : Yojson.Safe.t =
   let backend_str = match config.backend_type with
     | Memory -> "memory"
     | FileSystem -> "filesystem"
-    | PostgresNative -> "postgres_native"
   in
   `Assoc [
     ("backend_type", `String backend_str);
@@ -92,24 +90,6 @@ let get_status config : Yojson.Safe.t =
     ("cluster_name", `String config.cluster_name);
     ("postgres_url", Json_util.string_opt_to_json config.postgres_url);
   ]
-
-type pool_stats = {
-  max_size: int;
-  pool_count: int;
-  shared_pool_injected: bool;
-}
-
-let pool_stats_to_yojson (s : pool_stats) : Yojson.Safe.t =
-  `Assoc [
-    ("max_size", `Int s.max_size);
-    ("pool_count", `Int s.pool_count);
-    ("shared_pool_injected", `Bool s.shared_pool_injected);
-  ]
-
-let configured_max_pool_size () =
-  match Sys.getenv_opt "MASC_PG_POOL_SIZE" with
-  | Some s -> (Option.value ~default:5 (int_of_string_opt s))
-  | None -> 5
 
 (* ============================================ *)
 (* Safety Utilities                             *)

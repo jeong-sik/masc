@@ -335,10 +335,6 @@ let auto_respond_opt () =
 let postgres_url_opt () =
   None
 
-(** Legacy PG connection pool size, clamped to [1, 50]. Default: 10. *)
-let pg_pool_size () =
-  max 1 (min 50 (get_int ~default:10 "MASC_PG_POOL_SIZE"))
-
 (** PubSub max messages per read. Default: 1000. *)
 let pubsub_max_messages () =
   get_int ~default:1000 "MASC_PUBSUB_MAX_MESSAGES"

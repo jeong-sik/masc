@@ -535,7 +535,7 @@ RELEASE_BINARY="$SCRIPT_DIR/masc-mcp-macos-arm64"
 WORKSPACE_EXE="$SCRIPT_DIR/../_build/default/masc-mcp/bin/main.exe"
 LOCAL_EXE="$SCRIPT_DIR/_build/default/bin/main.exe"
 INSTALLED_EXE="$(command -v masc-mcp || true)"
-# Eio-based server (main_eio.exe) - for PostgresNative backend
+# Eio-based server (main_eio.exe)
 WORKSPACE_EIO_EXE="$SCRIPT_DIR/../_build/default/masc-mcp/bin/main_eio.exe"
 LOCAL_EIO_EXE="$SCRIPT_DIR/_build/default/bin/main_eio.exe"
 WORKSPACE_STDIO_EIO_EXE="$SCRIPT_DIR/../_build/default/masc-mcp/bin/main_stdio_eio.exe"

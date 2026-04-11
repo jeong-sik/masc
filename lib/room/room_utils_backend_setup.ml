@@ -4,7 +4,6 @@
 type storage_backend =
   | Memory of Backend.Memory.t
   | FileSystem of Backend.FileSystem.t
-  | PostgresNative of Backend.Postgres.t
 
 (** Room configuration *)
 type config = {
@@ -15,54 +14,17 @@ type config = {
   backend: storage_backend;
 }
 
-let _domain_local_pg_backend_created = Atomic.make 0
-let _domain_local_pg_backend_failed = Atomic.make 0
-let _domain_local_pg_backend_last_error = Atomic.make ""
-
 let domain_local_pg_backend_diagnostics_json () =
   `Assoc
     [
-      ("creations", `Int (Atomic.get _domain_local_pg_backend_created));
-      ("failures", `Int (Atomic.get _domain_local_pg_backend_failed));
-      ( "last_error",
-        match String.trim (Atomic.get _domain_local_pg_backend_last_error) with
-        | "" -> `Null
-        | value -> `String value );
+      ("creations", `Int 0);
+      ("failures", `Int 0);
+      ("last_error", `Null);
     ]
 
-(** Create a config with a domain-local PostgresNative backend.
-    Use when running in a different Eio domain (e.g., Executor_pool)
-    where the main domain's Caqti pool would crash due to Switch
-    being domain-bound.  Skips schema init (already done by main pool).
-    Constructs [Caqti_eio.stdenv] from [Eio_context] globals (net/clock
-    are cross-domain safe, only Switch is domain-bound).
-    Returns [None] on failure. *)
 let with_domain_local_pg_backend ~sw ~net ~clock ~mono_clock config =
-  match config.backend with
-  | PostgresNative _ ->
-    let env : Caqti_eio.stdenv =
-      object
-        method net = (net :> [`Generic] Eio.Net.ty Eio.Resource.t)
-        method clock = clock
-        method mono_clock = mono_clock
-      end
-    in
-    let url = match config.backend_config.Backend_types.postgres_url with
-      | Some u -> u
-      | None -> ""
-    in
-    (match Backend.Postgres.create_readonly ~sw ~env ~url config.backend_config with
-    | Ok t ->
-      Atomic.fetch_and_add _domain_local_pg_backend_created 1 |> ignore;
-      Some { config with backend = PostgresNative t }
-    | Error err ->
-      Atomic.fetch_and_add _domain_local_pg_backend_failed 1 |> ignore;
-      Atomic.set _domain_local_pg_backend_last_error (Backend_types.show_error err);
-      Log.Room.warn "Domain-local PG backend failed: %s"
-        (Backend_types.show_error err);
-      None)
-  | Memory _ | FileSystem _ ->
-    Some config
+  let _ = sw, net, clock, mono_clock in
+  Some config
 
 (* ============================================ *)
 (* Git Root Detection (Worktree Support)        *)
@@ -292,7 +254,7 @@ let is_unresolved_template value =
 let env_opt name =
   match Sys.getenv_opt name with
   | Some value when String.trim value <> "" ->
-      if Backend_pg_url.is_unresolved_template value then begin
+      if is_unresolved_template value then begin
         Log.Backend.warn
           "%s contains unresolved 1Password template; skipping" name;
         None
@@ -412,13 +374,9 @@ let create_backend cfg =
               Fall back to shared Memory backend for the same base path. *)
            filesystem_fallback
              "No Eio fs context for FileSystem backend;")
-  | Backend_types.PostgresNative ->
-      filesystem_fallback
-        "Postgres backend support removed;"
-
 (** Create backend with Eio context. *)
-let create_backend_eio ~sw ~env cfg =
-  let _ = sw, env in
+let create_backend_eio ~sw cfg =
+  let _ = sw in
   create_backend cfg
 
 let default_config base_path =
@@ -434,8 +392,7 @@ let default_config base_path =
         Log.Backend.info "Backend initialized: %s"
           (match backend with
            | Memory _ -> "Memory"
-           | FileSystem _ -> "FileSystem"
-           | PostgresNative _ -> "PostgresNative");
+           | FileSystem _ -> "FileSystem");
         backend
     | Error e ->
         Log.Backend.warn "Backend init failed (%s). Falling back to filesystem."
@@ -457,23 +414,22 @@ let default_config base_path =
     backend;
   }
 
-(** Create config with Eio context - required for PostgresNative backend.
+(** Create config with Eio context.
     [on_backend_ready] is called after backend creation, allowing callers
     to initialize dependent systems (e.g., Board) without Room depending on them. *)
-let default_config_eio ~sw ~env ?(on_backend_ready = fun _backend -> ()) base_path =
+let default_config_eio ~sw ?(on_backend_ready = fun _backend -> ()) base_path =
   let resolved_path = resolve_masc_base_path base_path in
   sync_test_base_path_env resolved_path;
   let backend_config = backend_config_for resolved_path in
   Log.Backend.info "MASC Backend: type=%s"
     (Backend_types.show_backend_type backend_config.backend_type);
   let backend =
-    match create_backend_eio ~sw ~env backend_config with
+    match create_backend_eio ~sw backend_config with
     | Ok backend ->
         Log.Backend.info "Backend initialized: %s"
           (match backend with
            | Memory _ -> "Memory"
-           | FileSystem _ -> "FileSystem"
-           | PostgresNative _ -> "PostgresNative");
+           | FileSystem _ -> "FileSystem");
         on_backend_ready backend;
         backend
     | Error e ->

@@ -57,54 +57,45 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
       let format = arguments |> U.member "format" |> U.to_string_option
         |> Option.value ~default:"json" in
 
-      (match state.Mcp_server.env with
-       | None ->
-           Some (true, Yojson.Safe.to_string (`Assoc [
-             ("success", `Bool false);
-             ("error", `String "Database environment not available");
-             ("suggestion", `String "Ensure runtime environment is initialized");
-           ]))
-       | Some env ->
-           let recall_config = Auto_recall.make_config
-             ~enabled:true
-             ~sources:[Auto_recall.Recent_broadcasts; Auto_recall.Masc_cache; Auto_recall.File_context]
-             ~max_tokens:4000 (* recall context token cap *)
-             ~max_broadcasts:limit
-             ()
-           in
-           let result = Auto_recall.fetch_context_eio ~sw ~env ~clock config ~config:recall_config ~query () in
-           let grep_projection =
-             Auto_recall.format_for_injection result
-           in
-           let agent_name = Safe_ops.json_string ~default:"unknown" "agent_name" arguments in
-           Audit_log.log_action config ~agent_id:agent_name ~action:Audit_log.SearchRefinement
-             ~details:(`Assoc [("query", `String query); ("results", `Int (List.length result.items))])
-             ~outcome:Audit_log.Success ();
-           if format = "grep" then
-             (* Compact grep-like format — LLM in-distribution output *)
-             Some (true, if grep_projection = "" then "No results" else grep_projection)
-           else
-             let response = `Assoc [
-               ("success", `Bool true);
-               ("query", `String query);
-               ("items", `List (List.map (fun (item : Auto_recall.recall_item) ->
-                 `Assoc [
-                   ("source", `String (match item.source with
-                     | Auto_recall.Masc_cache -> "cache"
-                     | Auto_recall.Recent_broadcasts -> "broadcast"
-                     | Auto_recall.File_context -> "file"));
-                   ("content", `String item.content);
-                   ("relevance", `Float item.relevance);
-                   ("metadata", item.metadata);
-                 ]
-               ) result.items));
-               ("total_tokens", `Int result.total_tokens);
-               ("truncated", `Bool result.truncated);
-               ("grep_projection", `String grep_projection);
-               ("message", `String (Printf.sprintf "Found %d relevant items for query: %s"
-                 (List.length result.items) query));
-             ] in
-             Some (true, Yojson.Safe.to_string response))
+      let recall_config = Auto_recall.make_config
+        ~enabled:true
+        ~sources:[Auto_recall.Recent_broadcasts; Auto_recall.Masc_cache; Auto_recall.File_context]
+        ~max_tokens:4000
+        ~max_broadcasts:limit
+        ()
+      in
+      let result = Auto_recall.fetch_context config ~config:recall_config ~query () in
+      let grep_projection =
+        Auto_recall.format_for_injection result
+      in
+      let agent_name = Safe_ops.json_string ~default:"unknown" "agent_name" arguments in
+      Audit_log.log_action config ~agent_id:agent_name ~action:Audit_log.SearchRefinement
+        ~details:(`Assoc [("query", `String query); ("results", `Int (List.length result.items))])
+        ~outcome:Audit_log.Success ();
+      if format = "grep" then
+        Some (true, if grep_projection = "" then "No results" else grep_projection)
+      else
+        let response = `Assoc [
+          ("success", `Bool true);
+          ("query", `String query);
+          ("items", `List (List.map (fun (item : Auto_recall.recall_item) ->
+            `Assoc [
+              ("source", `String (match item.source with
+                | Auto_recall.Masc_cache -> "cache"
+                | Auto_recall.Recent_broadcasts -> "broadcast"
+                | Auto_recall.File_context -> "file"));
+              ("content", `String item.content);
+              ("relevance", `Float item.relevance);
+              ("metadata", item.metadata);
+            ]
+          ) result.items));
+          ("total_tokens", `Int result.total_tokens);
+          ("truncated", `Bool result.truncated);
+          ("grep_projection", `String grep_projection);
+          ("message", `String (Printf.sprintf "Found %d relevant items for query: %s"
+            (List.length result.items) query));
+        ] in
+        Some (true, Yojson.Safe.to_string response)
 
   | "masc_board_post" ->
       let (success, message) as result = Tool_board.handle_tool name arguments in

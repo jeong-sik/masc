@@ -23,18 +23,6 @@ let is_initialized () =
   | Active _ -> true
   | Uninitialized -> false
 
-(** Initialize PostgreSQL backend.
-    PG storage support has been removed, so this now initializes JSONL. *)
-let init_pg _pool =
-  if match !backend_state with Active _ -> true | Uninitialized -> false then begin
-    Log.Task.warn "WARNING: already initialized, ignoring init_pg";
-    Ok ()
-  end else begin
-    backend_state := Active Jsonl;
-    Log.Task.info "JSONL backend initialized (using Room.* functions).";
-    Ok ()
-  end
-
 (** Initialize JSONL backend. Default fallback. *)
 let init_jsonl () =
   if match !backend_state with Active _ -> true | Uninitialized -> false then
@@ -59,9 +47,6 @@ let backend () =
 
 (** Check if PostgreSQL backend is active *)
 let is_postgres () = false
-
-(** Get PostgreSQL pool if available *)
-let get_pg_pool () = None
 
 (** {1 Dispatch Functions} *)
 

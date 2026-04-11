@@ -1,7 +1,7 @@
 (** Room_utils Module Coverage Tests
 
     Tests for Room utility functions:
-    - storage_backend type: Memory, FileSystem, PostgresNative
+    - storage_backend type: Memory, FileSystem
     - config record type
     - parse_gitdir_to_main_root: gitdir line parsing for worktrees
     - env_opt: environment variable helper
@@ -285,10 +285,6 @@ let test_storage_backend_memory_variant () =
 
 let test_storage_backend_filesystem_variant () =
   let _ : string = "FileSystem" in
-  ()
-
-let test_storage_backend_postgres_variant () =
-  let _ : string = "PostgresNative" in
   ()
 
 (* ============================================================
@@ -687,7 +683,6 @@ let () =
     "storage_backend", [
       test_case "memory variant" `Quick test_storage_backend_memory_variant;
       test_case "filesystem variant" `Quick test_storage_backend_filesystem_variant;
-      test_case "postgres variant" `Quick test_storage_backend_postgres_variant;
     ];
     "config", [
       test_case "base_path type" `Quick test_config_base_path_type;

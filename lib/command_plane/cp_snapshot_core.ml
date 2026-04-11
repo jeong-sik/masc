@@ -189,7 +189,7 @@ let build_snapshot_state (config : Room_utils.config) =
               ~detachments:sc.detachments ~decisions:sc.decisions
           in
           state
-      | Memory _ | PostgresNative _ ->
+      | Memory _ ->
           let agents, managed_units, units, source = topology_units config in
           let intents = read_intents config in
           let operations = all_operations config units in

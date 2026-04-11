@@ -50,42 +50,6 @@ let with_test_env f =
         ~sw
         (fun () -> f ~env ~sw ~config))
 
-let with_pg_test_env f =
-  match Env_config_core.postgres_url_opt () with
-  | None -> ()
-  | Some url ->
-      let dir = test_dir () in
-      Fun.protect
-        ~finally:(fun () -> cleanup_dir dir)
-        (fun () ->
-          with_env "MASC_STORAGE_TYPE" "postgres" @@ fun () ->
-          with_env "MASC_POSTGRES_URL" url @@ fun () ->
-          with_env "DATABASE_URL" "" @@ fun () ->
-          with_env "SUPABASE_DB_URL" "" @@ fun () ->
-          with_env "SB_PG_URL" "" @@ fun () ->
-          Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-          Eio.Switch.run @@ fun sw ->
-          Eio_context.with_test_env
-            ~net:(Eio.Stdenv.net env)
-            ~clock:(Eio.Stdenv.clock env)
-            ~mono_clock:(Eio.Stdenv.mono_clock env)
-            ~sw
-            (fun () ->
-              match
-                try
-                  Ok
-                    (Room_utils.default_config_eio ~sw
-                       ~env:(env :> Caqti_eio.stdenv) dir)
-                with
-                | Invalid_argument _ -> Error `Backend_unavailable
-              with
-              | Error `Backend_unavailable -> ()
-              | Ok config ->
-                  match config.Room_utils.backend with
-                  | Room_utils.PostgresNative _ -> f ~env ~sw ~config
-                  | Room_utils.Memory _ | Room_utils.FileSystem _ -> ()))
-
 let test_run_dashboard_compute_without_pool_stays_in_current_domain () =
   with_test_env @@ fun ~env ~sw ~config ->
   let caller_domain = Domain.self () in
@@ -119,29 +83,6 @@ let test_run_dashboard_compute_with_pool_uses_executor_domain () =
   in
   check bool "non-PG backend offloads to executor pool domain" true
     (result_domain <> caller_domain)
-
-let test_run_dashboard_compute_without_pool_uses_isolated_pg_backend () =
-  with_pg_test_env @@ fun ~env ~sw ~config ->
-  match config.Room_utils.backend with
-  | Room_utils.PostgresNative shared_backend ->
-      let reused_shared_pool =
-        Lib.Server_dashboard_http_core.run_dashboard_compute
-          ~net:(Eio.Stdenv.net env)
-          ~mono_clock:(Eio.Stdenv.mono_clock env)
-          ~sw
-          ~clock:(Eio.Stdenv.clock env)
-          ~config
-          (fun ~config ~sw:_ ->
-            match config.Room_utils.backend with
-            | Room_utils.PostgresNative readonly_backend ->
-                Backend.Postgres.get_pool shared_backend
-                == Backend.Postgres.get_pool readonly_backend
-            | Room_utils.Memory _ | Room_utils.FileSystem _ ->
-                Alcotest.fail "expected postgres backend during readonly compute")
-      in
-      check bool "no pool uses isolated postgres backend" false
-        reused_shared_pool
-  | Room_utils.Memory _ | Room_utils.FileSystem _ -> ()
 
 let test_dashboard_shell_http_json_includes_paths () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
@@ -232,8 +173,6 @@ let () =
         [
           test_case "no pool stays on caller domain" `Quick
             test_run_dashboard_compute_without_pool_stays_in_current_domain;
-          test_case "pg no pool uses isolated backend" `Quick
-            test_run_dashboard_compute_without_pool_uses_isolated_pg_backend;
           test_case "pool uses executor domain" `Quick
             test_run_dashboard_compute_with_pool_uses_executor_domain;
           test_case "shell payload includes paths diagnostics" `Quick

@@ -270,7 +270,6 @@
         test_resilience
         test_common
         test_room_messages_raw
-        test_room_messages_pg
         test_cp_cleanup
         test_cp_search_fabric
         test_cp_section_cache
@@ -293,7 +292,6 @@
         test_room_eio
         test_http_server_eio
         test_compression
-        test_pubsub_postgres
         test_fs_compat
         test_concurrency_stress
         test_eio_mutex_concurrency
@@ -420,7 +418,6 @@
         test_resilience
         test_common
         test_room_messages_raw
-        test_room_messages_pg
         test_cp_cleanup
         test_cp_search_fabric
         test_cp_section_cache
@@ -443,7 +440,6 @@
         test_room_eio
         test_http_server_eio
         test_compression
-        test_pubsub_postgres
         test_fs_compat
         test_concurrency_stress
         test_eio_mutex_concurrency
@@ -817,20 +813,6 @@
  (name test_keeper_fs)
  (modules test_keeper_fs)
  (libraries masc_mcp alcotest yojson unix eio eio_main))
-
-; ============================================================
-; Special: Board PG (requires caqti-driver-postgresql)
-; ============================================================
-
-(test
- (name test_board_pg)
- (modules test_board_pg)
- (libraries masc_test_deps caqti caqti-eio.unix caqti-driver-postgresql))
-
-(test
- (name test_board_pg_notify)
- (modules test_board_pg_notify)
- (libraries masc_test_deps))
 
 ; ============================================================
 ; Executables (benchmarks, distributed tests, tools)

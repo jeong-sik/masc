@@ -69,22 +69,17 @@ val get_clock : unit -> float Eio.Time.clock_ty Eio.Resource.t
     @param base_path Base path for MASC data directory *)
 val create_state : ?test_mode:bool -> base_path:string -> unit -> server_state
 
-(** Create server state with Eio context - required for PostgresNative backend
-
-    This variant provides the Eio environment needed for caqti-eio database
-    connection pooling. Use this when running in an Eio context with PostgreSQL.
+(** Create server state with Eio context.
 
     @param sw Eio.Switch for structured concurrency
-    @param env Caqti-compatible Eio environment (net, clock, mono_clock)
     @param proc_mgr Eio process manager for agent spawning
     @param fs Eio filesystem for file operations
     @param clock Eio time clock for timestamps/sleep
-    @param mono_clock Eio monotonic clock for readonly PG compute isolation
+    @param mono_clock Eio monotonic clock
     @param net Eio network capability for HTTP/TLS calls
     @param base_path Base path for MASC data directory *)
 val create_state_eio :
   sw:Eio.Switch.t ->
-  env:Caqti_eio.stdenv ->
   proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t ->
   fs:Eio.Fs.dir_ty Eio.Path.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->

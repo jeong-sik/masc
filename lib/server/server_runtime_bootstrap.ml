@@ -6,7 +6,11 @@ module Mcp_server = Mcp_server
 module Mcp_eio = Mcp_server_eio
 
 let force_jsonl_fallback_env () =
-  Unix.putenv "MASC_STORAGE_TYPE" "filesystem"
+  Unix.putenv "MASC_STORAGE_TYPE" "filesystem";
+  Unix.putenv "MASC_POSTGRES_URL" "";
+  Unix.putenv "DATABASE_URL" "";
+  Unix.putenv "SUPABASE_DB_URL" "";
+  Unix.putenv "SB_PG_URL" ""
 
 let requested_backend_mode () =
   Env_config_core.storage_type ()
@@ -178,13 +182,6 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
   Eio_context.set_mono_clock mono_clock;
   ensure_default_oas_cascade_timeout_env ();
   Process_eio.init ~cwd_default:Eio.Path.(fs / base_path) ~proc_mgr ~clock;
-  let caqti_env : Caqti_eio.stdenv =
-    object
-      method net = (net :> [`Generic] Eio.Net.ty Eio.Resource.t)
-      method clock = clock
-      method mono_clock = mono_clock
-    end
-  in
   Unix.putenv "MASC_BASE_PATH_INPUT" (Option.value ~default:"" input_base_path);
   Unix.putenv "MASC_BASE_PATH" base_path;
   bootstrap_base_path_config_root ~base_path;
@@ -201,7 +198,7 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
   let validation = Tool_registration_check.validate () in
   Tool_registration_check.log_validation_result validation;
   let state =
-    Mcp_eio.create_state_eio ~sw ~env:caqti_env ~proc_mgr ~fs ~clock
+    Mcp_eio.create_state_eio ~sw ~proc_mgr ~fs ~clock
       ~mono_clock ~net
       ~base_path
   in
@@ -657,7 +654,6 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       let t2 = Eio.Time.now clock in
       Log.Server.info "Bootstrap completed in %.1fs" (t2 -. t1);
       Server_bootstrap_loops.install_tooling ~governance_level state;
-      Server_bootstrap_pg.init_pg_schemas_sequential ();
       Log.Server.info "Tooling + schemas in %.1fs" (Eio.Time.now clock -. t2);
       (state, path_diagnostics)
     in
@@ -719,25 +715,8 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       Eio.Fiber.fork ~sw (fun () -> List.iter run_lazy_task tasks)
     in
     try
-      let pg_init_timeout =
-        Safe_ops.get_env_float_logged "MASC_PG_INIT_TIMEOUT_SEC" ~default:30.0
-      in
       Server_startup_state.mark_blocking ~backend_mode:initial_backend_mode;
-      let state, path_diagnostics =
-        if String.equal initial_backend_mode "postgres-native" then
-          (try
-             Eio.Time.with_timeout_exn clock pg_init_timeout init_state_blocking
-           with Eio.Time.Timeout ->
-             let reason =
-               Printf.sprintf
-                 "PG init timed out after %.0fs with MASC_STORAGE_TYPE=postgres"
-                 pg_init_timeout
-             in
-             Log.Server.error "%s" reason;
-             raise (Invalid_argument reason))
-        else
-          init_state_blocking ()
-      in
+      let state, path_diagnostics = init_state_blocking () in
       server_state := Some state;
       Server_startup_state.mark_state_ready
         ~backend_mode:(Room.backend_name state.room_config);
@@ -901,9 +880,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
     | exn ->
       Server_startup_state.mark_degraded ~error:(Printexc.to_string exn);
       Log.Server.error "Background init failed (HTTP still serving): %s"
-        (Printexc.to_string exn);
-      if String.equal initial_backend_mode "postgres-native" then
-        exit 1);
+        (Printexc.to_string exn));
 
   (* 2b. Startup watchdog: if init does not reach state_ready within timeout,
      log and exit so external process managers can restart the server.

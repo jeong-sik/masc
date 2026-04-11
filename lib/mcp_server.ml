@@ -465,7 +465,6 @@ type server_state = {
   fs: Eio.Fs.dir_ty Eio.Path.t option; (* For filesystem access *)
   clock: float Eio.Time.clock_ty Eio.Resource.t option; (* For timestamps/sleep *)
   mono_clock: Eio.Time.Mono.ty Eio.Resource.t option;
-  env: Caqti_eio.stdenv option; (* For HTTP access - Agent Being Protocol *)
   net: Eio_context.eio_net option; (* For network calls - P3a: replaces global ref *)
 }
 
@@ -485,7 +484,6 @@ let create_state ~base_path =
     fs = None;
     clock = None;
     mono_clock = None;
-    env = None;
     net = None;
   } in
   Tool_board.set_agent_lookup (fun name ->
@@ -494,9 +492,9 @@ let create_state ~base_path =
   state
 
 (** Create state with Eio context. *)
-let create_state_eio ~sw ~env ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
+let create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
   let config =
-    Room.default_config_eio ~sw ~env
+    Room.default_config_eio ~sw
       ~on_backend_ready:(fun backend ->
         ignore backend;
         Log.Backend.info "Board: JSONL default backend";
@@ -517,7 +515,6 @@ let create_state_eio ~sw ~env ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
     fs = Some fs;
     clock = Some clock;
     mono_clock = Some mono_clock;
-    env = Some env;
     net = Some net;
   } in
   (* Board post kind auto-classification: reads state.room_config so

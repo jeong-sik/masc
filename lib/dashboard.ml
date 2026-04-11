@@ -219,7 +219,7 @@ let rec count_lock_files path =
 let count_locks_for_dir (config : Room_utils.config) locks_dir =
   match config.backend with
   | Room_utils.FileSystem _ -> count_lock_files locks_dir
-  | Room_utils.Memory _ | Room_utils.PostgresNative _ ->
+  | Room_utils.Memory _ ->
       (match Room_utils.key_of_path config locks_dir with
        | Some key_prefix ->
            (match Room_utils.backend_list_keys config ~prefix:(key_prefix ^ ":") with

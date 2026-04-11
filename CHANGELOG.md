@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-04-11
+
+### Changed
+- FSM apply_event returns `Applied | Ignored` transition type — detect invalid events (#6481)
+- Replace stringly-typed gate field with variant type (#6454)
+
+### Fixed
+- Restore keeper reset surface and typed tool expectations (#6477)
+- Use glm-coding (Coding Plan) before glm (pay-per-use) in cascade (#6475)
+- Align 4 tests with post-#6433 main state (#6460)
+
 ## [0.5.0] - 2026-04-11
 
 ### Added

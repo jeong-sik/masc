@@ -18,7 +18,7 @@ let resolve_loop_id args =
 let lesson_pattern (state : Autoresearch.loop_state) =
   Printf.sprintf "autoresearch %s %s" state.target_file state.goal
 
-let make_loop_memory (ctx : Tool_autoresearch_repo_synthesis.context)
+let make_loop_memory (ctx : Tool_autoresearch_context.t)
     (state : Autoresearch.loop_state) =
   let memory =
     Memory_oas_bridge.create_memory
@@ -61,7 +61,7 @@ let render_recent_findings findings =
     Some ("Recent autoresearch findings:\n" ^ String.concat "\n" lines)
 
 let build_goal_with_feedback
-    (ctx : Tool_autoresearch_repo_synthesis.context)
+    (ctx : Tool_autoresearch_context.t)
     (state : Autoresearch.loop_state) =
   let pattern = lesson_pattern state in
   let memory = make_loop_memory ctx state in
@@ -82,7 +82,7 @@ let build_goal_with_feedback
   |> String.concat "\n\n"
 
 let persist_failure_feedback
-    (ctx : Tool_autoresearch_repo_synthesis.context)
+    (ctx : Tool_autoresearch_context.t)
     (state : Autoresearch.loop_state)
     ~hypothesis ~summary ?action ?stdout ?stderr ?diff_summary ?trace_summary
     ?metric_error ?(tags = []) ?conclusion () =
@@ -179,7 +179,7 @@ let forced_discard_record
   (state, record)
 
 let persist_discard_record
-    (ctx : Tool_autoresearch_repo_synthesis.context)
+    (ctx : Tool_autoresearch_context.t)
     (state : Autoresearch.loop_state)
     ~loop_id ~hypothesis ~reason record =
   Autoresearch.append_cycle ~base_path:ctx.base_path state.loop_id record;
@@ -244,7 +244,7 @@ let diff_guard_summary report =
     Acquires [loops_mu] for short critical sections around Hashtbl access.
     Long-running operations (metric measurement, code generation, git) run
     outside the lock. *)
-let handle_cycle (ctx : Tool_autoresearch_repo_synthesis.context) args =
+let handle_cycle (ctx : Tool_autoresearch_context.t) args =
   match resolve_loop_id args with
   | None -> `Assoc [("error", `String "No autoresearch loop running")]
   | Some id ->

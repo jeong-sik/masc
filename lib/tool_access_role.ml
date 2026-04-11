@@ -25,7 +25,6 @@ let admin_only_tools =
     "masc_reset";
     (* CanAdmin — autoresearch *)
     "masc_autoresearch_start";
-    "masc_autoresearch_swarm_start";
     "masc_autoresearch_cycle";
     "masc_autoresearch_inject";
     "masc_autoresearch_stop";

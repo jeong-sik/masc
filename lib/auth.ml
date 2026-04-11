@@ -327,7 +327,7 @@ let legacy_permission_for_tool = function
   | "masc_dispatch_recall" | "masc_policy_approve"
   | "masc_policy_deny" | "masc_policy_update" ->
       Some CanBroadcast
-  | "masc_autoresearch_start" | "masc_autoresearch_swarm_start"
+  | "masc_autoresearch_start"
   | "masc_autoresearch_cycle" | "masc_autoresearch_inject"
   | "masc_autoresearch_stop" ->
       Some CanAdmin

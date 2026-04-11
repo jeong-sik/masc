@@ -279,7 +279,6 @@
         test_cp_section_cache
         test_cp_jsonl_tail
         ; test_swarm_persistence removed (team session cleanup)
-        test_tool_repo_synthesis
         test_local_runtime_pool
         test_keeper_tools_oas
         test_keeper_tool_exposure
@@ -430,7 +429,6 @@
         test_cp_section_cache
         test_cp_jsonl_tail
         ; test_swarm_persistence removed (team session cleanup)
-        test_tool_repo_synthesis
         test_local_runtime_pool
         test_keeper_tools_oas
         test_keeper_tool_exposure

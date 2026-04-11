@@ -9,7 +9,6 @@ open Types
 let retired_front_door_schema_names =
   [
     "masc_collaboration_graph";
-    "masc_autoresearch_swarm_start";
   ]
 
 let filter_retired_front_door_schemas (schemas : tool_schema list) =

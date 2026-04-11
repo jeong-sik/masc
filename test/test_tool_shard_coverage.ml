@@ -521,13 +521,19 @@ let () =
       Alcotest.test_case "removable" `Quick (fun () ->
         let s = Option.get (Tool_shard.get_shard "autoresearch") in
         Alcotest.(check bool) "removable" true s.removable);
-      Alcotest.test_case "excludes swarm_start" `Quick (fun () ->
+      Alcotest.test_case "has no retired swarm front doors" `Quick (fun () ->
         let tools = Tool_shard.autoresearch_keeper_tools in
         let has_swarm =
           List.exists (fun (t : Types.tool_schema) ->
             t.name = "masc_autoresearch_swarm_start") tools
         in
-        Alcotest.(check bool) "no swarm_start" false has_swarm);
+        let has_repo_synthesis =
+          List.exists (fun (t : Types.tool_schema) ->
+            t.name = "masc_repo_synthesis_swarm_start") tools
+        in
+        Alcotest.(check bool) "no swarm_start" false has_swarm;
+        Alcotest.(check bool) "no repo synthesis swarm start" false
+          has_repo_synthesis);
       Alcotest.test_case "has cycle" `Quick (fun () ->
         let tools = Tool_shard.autoresearch_keeper_tools in
         let has_cycle =

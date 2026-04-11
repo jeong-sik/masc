@@ -38,9 +38,9 @@ let turn_semaphore = Eio.Semaphore.make keeper_turn_throttle_limit
    keepers fire scheduled turns simultaneously on a shared LLM server.
    Reactive turns (explicit mentions, board events) bypass this gate
    so they are never starved by slow autonomous turns.
-   Default 1 = with 1-slot llama-server, only one request can be in-flight
-   at a time. Higher values cause queue buildup and TCP keepalive timeouts.
-   For 8-slot servers, set MASC_KEEPER_AUTONOMOUS_CONCURRENCY=3-4. *)
+   Default 3 = a conservative parallelism level for shared remote providers.
+   Lower to 1 for single-slot local servers. For 8-slot servers,
+   MASC_KEEPER_AUTONOMOUS_CONCURRENCY=3-4 is a reasonable range. *)
 let autonomous_turn_limit =
   Keeper_config.int_of_env_default
     "MASC_KEEPER_AUTONOMOUS_CONCURRENCY" ~default:3 ~min_v:1 ~max_v:8
@@ -60,7 +60,7 @@ let with_keeper_turn_slot ~channel f =
     | Keeper_world_observation.Reactive -> false
   in
   let t0 = Time_compat.now () in
-  Log.Keeper.info "semaphore_acquire: channel=%s autonomous_available=%d turn_available=%d"
+  Log.Keeper.debug "semaphore_acquire: channel=%s autonomous_available=%d turn_available=%d"
     (if is_autonomous then "autonomous" else "reactive")
     (Eio.Semaphore.get_value autonomous_turn_semaphore)
     (Eio.Semaphore.get_value turn_semaphore);

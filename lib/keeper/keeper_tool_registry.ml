@@ -120,10 +120,9 @@ let has_mutating_side_effect (name : string) : bool =
   not (is_effectively_read_only_tool name)
 
 (* ── Input-aware read-only check ─────────────────────────────
-   Some tools (keeper_github) mix read-only and mutating subcommands
-   within a single tool name.  This function inspects the JSON input
-   to distinguish read-only invocations so that the mutation boundary
-   lets them through without opening a reconcile window. *)
+   Some tools (keeper_github, masc_code_git) mix read-only and mutating
+   subcommands within a single tool name. This function inspects the
+   JSON input to distinguish calls with no side effects. *)
 
 let gh_read_only_prefixes =
   [ "pr list"; "pr view"; "pr diff"; "pr checks"; "pr status"
@@ -206,6 +205,14 @@ let gh_effective_cmd (input : Yojson.Safe.t) : string =
 let git_read_only_actions =
   [ "diff"; "status"; "log"; "branch"; "fetch" ]
 
+let git_action_of_input (input : Yojson.Safe.t) : string =
+  match input with
+  | `Assoc fields ->
+    (match List.assoc_opt "action" fields with
+     | Some (`String s) -> String.lowercase_ascii (String.trim s)
+     | _ -> "")
+  | _ -> ""
+
 let is_read_only_with_input ~(tool_name : string) ~(input : Yojson.Safe.t) : bool =
   if is_effectively_read_only_tool tool_name then true
   else match tool_name with
@@ -221,29 +228,32 @@ let is_read_only_with_input ~(tool_name : string) ~(input : Yojson.Safe.t) : boo
         String.length cmd_lower >= String.length prefix
         && String.sub cmd_lower 0 (String.length prefix) = prefix
       ) gh_read_only_prefixes
-  | "masc_code_git" ->
-    let action =
-      match input with
-      | `Assoc fields ->
-        (match List.assoc_opt "action" fields with
-         | Some (`String s) -> String.lowercase_ascii (String.trim s)
-         | _ -> "")
-      | _ -> ""
-    in
-    List.mem action git_read_only_actions
+  | "masc_code_git" -> List.mem (git_action_of_input input) git_read_only_actions
   | "masc_worktree_list" -> true
-  (* MASC coordination tools: internal state only, no filesystem mutation *)
-  | "keeper_task_claim" | "keeper_task_done" | "keeper_tasks_list"
-  | "keeper_board_post" | "keeper_board_comment" | "keeper_board_vote"
-  | "keeper_board_list" | "keeper_board_get"
-  | "keeper_broadcast" -> true
-  (* Coding tools: operate in worktree scope (not main), safe for
-     multi-step coding pipelines. Without this, mutation boundary blocks
-     the create-worktree → edit → commit → push → PR pipeline. *)
-  | "masc_code_edit" | "masc_code_write" | "masc_code_delete"
-  | "masc_code_shell" | "masc_worktree_create"
-  | "keeper_pr_submit" | "keeper_fs_edit" -> true
   | _ -> false
+
+(* ── Input-aware mutation-boundary bypass ────────────────────
+   Some tools do mutate state, but they should not open the
+   main-worktree checkpoint boundary because they either:
+   - only touch MASC coordination state, or
+   - operate inside an explicit worktree/playground sandbox.
+
+   Keep these tools mutating for reconcile/error handling; this predicate
+   only controls whether the per-turn boundary blocks follow-up tools. *)
+let is_main_worktree_boundary_exempt_with_input
+    ~(tool_name : string)
+    ~(input : Yojson.Safe.t) : bool =
+  if is_read_only_with_input ~tool_name ~input then true
+  else
+    match tool_name with
+    | "keeper_task_claim" | "keeper_task_done" | "keeper_tasks_list"
+    | "keeper_board_post" | "keeper_board_comment" | "keeper_board_vote"
+    | "keeper_board_list" | "keeper_board_get"
+    | "keeper_broadcast" -> true
+    | "masc_code_edit" | "masc_code_write" | "masc_code_delete"
+    | "masc_code_shell" | "masc_code_git" | "masc_worktree_create"
+    | "keeper_pr_submit" | "keeper_fs_edit" -> true
+    | _ -> false
 
 (* ── Reconcile-safe tools (mutating but idempotent enough) ─── *)
 

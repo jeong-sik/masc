@@ -53,6 +53,33 @@ let () =
 
 let autonomous_turn_semaphore = Eio.Semaphore.make autonomous_turn_limit
 
+(** Wall-clock cap on [Eio.Semaphore.acquire] when waiting for a keeper
+    turn slot. Without this, a keeper whose peers hold all slots while
+    their LLM calls stall for the entire 1200s turn budget would block
+    unboundedly, because [Eio.Semaphore.acquire] has no intrinsic timeout.
+
+    Empirical motivation (2026-04-11): [semaphore_wait_ms] of 1.1-2.1 Ms
+    observed in keeper decision logs — the sitting keeper waited past its
+    own turn budget because peers held slots for the full outer wall-clock.
+
+    Default 60s = short enough that keepers fail fast and fall back to the
+    next heartbeat cycle (giving real slot holders time to release), long
+    enough that legitimate turn contention (3+ concurrent keepers on a
+    fast provider) does not mis-trigger.
+
+    Env: [MASC_KEEPER_SEMAPHORE_WAIT_TIMEOUT_SEC]. Default 60. Range [5, 600]. *)
+let semaphore_wait_timeout_sec =
+  Keeper_config.float_of_env_default
+    "MASC_KEEPER_SEMAPHORE_WAIT_TIMEOUT_SEC"
+    ~default:60.0 ~min_v:5.0 ~max_v:600.0
+;;
+
+(** Raised by [with_keeper_turn_slot] when [semaphore_wait_timeout_sec]
+    elapses before both turn semaphores could be acquired. The caller
+    should treat this as "skip this turn, retry on next heartbeat"; it is
+    not a keeper failure in the unified-turn sense. *)
+exception Semaphore_wait_timeout of float
+
 let with_keeper_turn_slot ~channel f =
   let is_autonomous =
     match channel with
@@ -64,8 +91,31 @@ let with_keeper_turn_slot ~channel f =
     (if is_autonomous then "autonomous" else "reactive")
     (Eio.Semaphore.get_value autonomous_turn_semaphore)
     (Eio.Semaphore.get_value turn_semaphore);
-  if is_autonomous then Eio.Semaphore.acquire autonomous_turn_semaphore;
-  Eio.Semaphore.acquire turn_semaphore;
+  let acquire_bounded ~label sem =
+    match Eio_context.get_clock_opt () with
+    | Some clock ->
+      (try
+        Eio.Time.with_timeout_exn clock semaphore_wait_timeout_sec (fun () ->
+          Eio.Semaphore.acquire sem)
+      with Eio.Time.Timeout ->
+        Log.Keeper.warn
+          "semaphore_wait: %s semaphore wait exceeded %.0fs (channel=%s), \
+           skipping turn"
+          label semaphore_wait_timeout_sec
+          (if is_autonomous then "autonomous" else "reactive");
+        raise (Semaphore_wait_timeout semaphore_wait_timeout_sec))
+    | None ->
+      (* No Eio clock (e.g. unit tests running outside an Eio main):
+         fall back to unbounded acquire. *)
+      Eio.Semaphore.acquire sem
+  in
+  if is_autonomous then acquire_bounded ~label:"autonomous" autonomous_turn_semaphore;
+  (try acquire_bounded ~label:"turn" turn_semaphore
+   with exn ->
+     (* Autonomous semaphore already acquired above — release it so we
+        do not leak a slot on timeout. *)
+     if is_autonomous then Eio.Semaphore.release autonomous_turn_semaphore;
+     raise exn);
   let semaphore_wait_ms =
     int_of_float ((Time_compat.now () -. t0) *. 1000.0) in
   Fun.protect
@@ -935,6 +985,15 @@ let run_keepalive_unified_turn
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | Keeper_registry.Keeper_fiber_crash as e -> raise e
+    | Semaphore_wait_timeout wait_sec ->
+      (* Peers held the turn semaphore longer than the wait cap — not a
+         keeper failure. Skip this cycle and let the next heartbeat retry
+         once a slot opens up. Meta is left untouched so failure counters
+         do not tick. *)
+      Log.Keeper.warn
+        "%s: skipping turn (semaphore wait > %.0fs, peers holding slot)"
+        meta_after_triage.name wait_sec;
+      meta_after_triage
     | exn ->
       Log.Keeper.error "%s: unified turn exception: %s"
         meta_after_triage.name (Printexc.to_string exn);

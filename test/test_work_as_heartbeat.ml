@@ -120,6 +120,28 @@ let test_oas_timeout_sec_compat () =
   let v = Cfg.KeeperKeepalive.oas_timeout_sec in
   check (float 1.0) "backward compat default 300s" 300.0 v
 
+(* ── Semaphore wait timeout (defense against peer slot hoarding) ── *)
+
+let test_semaphore_wait_timeout_default () =
+  (* Default 60s — short enough to unblock starved keepers, long enough
+     to not mis-trigger under legitimate contention. *)
+  check (float 0.1) "default semaphore wait timeout 60s" 60.0
+    KK.semaphore_wait_timeout_sec
+
+let test_semaphore_wait_timeout_range () =
+  let v = KK.semaphore_wait_timeout_sec in
+  check bool "wait timeout >= 5s" true (v >= 5.0);
+  check bool "wait timeout <= 600s" true (v <= 600.0)
+
+let test_semaphore_wait_timeout_exception_shape () =
+  (* The exception carries the wait cap in seconds so the caller can
+     render it in a log line without re-reading the env var. *)
+  let carried =
+    try raise (KK.Semaphore_wait_timeout 42.5); -1.0
+    with KK.Semaphore_wait_timeout v -> v
+  in
+  check (float 0.001) "exception carries wait sec" 42.5 carried
+
 (* ── KeeperGrpc config defaults ────────────────────────── *)
 
 let test_grpc_max_reconnect_default () =
@@ -291,6 +313,11 @@ let () =
       test_case "max_turns default is 5" `Quick test_max_turns_default;
       test_case "max_turns range" `Quick test_max_turns_range;
       test_case "oas_timeout_sec backward compat" `Quick test_oas_timeout_sec_compat;
+    ];
+    "semaphore_wait_timeout", [
+      test_case "default 60s" `Quick test_semaphore_wait_timeout_default;
+      test_case "range [5, 600]" `Quick test_semaphore_wait_timeout_range;
+      test_case "exception carries wait sec" `Quick test_semaphore_wait_timeout_exception_shape;
     ];
     "grpc_config", [
       test_case "max_reconnect default" `Quick test_grpc_max_reconnect_default;

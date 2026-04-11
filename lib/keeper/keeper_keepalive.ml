@@ -151,6 +151,57 @@ let set_grpc_client ?(env : Eio_unix.Stdenv.base option) c =
   Atomic.set grpc_env_ref env
 ;;
 
+(* Per-keeper throttle for the "keepalive turn skipped: manual reconcile
+   pending" INFO log. Without this, every scheduled keepalive tick
+   emits one line per stuck keeper — 6 stuck keepers × ~30s tick rate
+   flooded /tmp/masc-min-p-restart.log with 266 identical skip lines
+   in 14 minutes on 2026-04-12. The underlying state is a legitimate
+   operator-only recovery point (cleared via the [keeper_manual_reconcile]
+   MCP tool), so we cannot drop the log entirely — operators need
+   periodic confirmation that the keeper is still blocked. We emit
+   INFO at most once per [skip_log_throttle_sec] per keeper; the rest
+   go to DEBUG for deep-investigation scenarios.
+
+   The throttle table is guarded by a [Stdlib.Mutex] even though all
+   production call sites live on a single Eio domain. Reason: the
+   module exposes [should_log_manual_reconcile_skip] in the [.mli] so
+   regression tests can exercise the window semantics — exposing it
+   admits a call path where an unrelated caller on another domain
+   reaches the table, and OCaml 5's Hashtbl is not multi-domain safe.
+   The mutex is cheap relative to Hashtbl ops and avoids reasoning
+   about hypothetical yield points inside Hashtbl internals. *)
+let skip_log_throttle_sec = 60.0
+
+let manual_reconcile_skip_log_mutex = Mutex.create ()
+
+let manual_reconcile_skip_log_last_ts : (string, float) Hashtbl.t =
+  Hashtbl.create 16
+
+let should_log_manual_reconcile_skip ~(now : float) keeper_name =
+  Mutex.lock manual_reconcile_skip_log_mutex;
+  let result =
+    match
+      Hashtbl.find_opt manual_reconcile_skip_log_last_ts keeper_name
+    with
+    | Some last when now -. last < skip_log_throttle_sec -> false
+    | _ ->
+        Hashtbl.replace manual_reconcile_skip_log_last_ts keeper_name now;
+        true
+  in
+  Mutex.unlock manual_reconcile_skip_log_mutex;
+  result
+;;
+
+(** Test-only reset for the throttle table. Clears every [(keeper, ts)]
+    entry, restoring the "never logged" state used by test setup
+    fixtures. Production code must not call this — doing so would
+    flood the log on the next tick. *)
+let reset_skip_log_throttle () =
+  Mutex.lock manual_reconcile_skip_log_mutex;
+  Hashtbl.clear manual_reconcile_skip_log_last_ts;
+  Mutex.unlock manual_reconcile_skip_log_mutex
+;;
+
 let format_since_last_scheduled_autonomous = function
   | Some s when s = max_int -> "never"
   | Some s -> string_of_int s
@@ -902,11 +953,17 @@ let run_keepalive_unified_turn
       in
       let verdict_strs = Keeper_world_observation.verdict_reasons_to_strings turn_decision.verdict in
       let channel_str = Keeper_world_observation.channel_to_string turn_decision.channel in
-      if manual_reconcile_pending && turn_decision.should_run then
-        Log.Keeper.info
+      if manual_reconcile_pending && turn_decision.should_run then (
+        let now = Time_compat.now () in
+        let log_fn =
+          if should_log_manual_reconcile_skip ~now meta_after_triage.name
+          then Log.Keeper.info
+          else Log.Keeper.debug
+        in
+        log_fn
           "keepalive turn skipped for %s: manual reconcile pending channel=%s reasons=%s"
           meta_after_triage.name channel_str
-          (String.concat "," verdict_strs);
+          (String.concat "," verdict_strs));
       if (not should_run_turn) && (not manual_reconcile_pending) then (
         let log_not_scheduled =
           match turn_decision.verdict with

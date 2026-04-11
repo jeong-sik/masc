@@ -48,8 +48,7 @@ mention_targets = ["cheolsu", "철수", "sangsu", "coder"]
 proactive_enabled = true
 execution_scope = "workspace"
 
-tool_preset = "social"
-also_allow = ["keeper_github", "keeper_fs_read", "keeper_shell", "keeper_fs_write", "masc_worktree_create", "masc_worktree_list", "masc_code_git", "masc_code_edit", "keeper_pr_submit"]
+tool_preset = "coding"
 
 # Capability-first cascade: glm-5.1(17s) -> 5-turbo -> local
 cascade_name = "coding_first"

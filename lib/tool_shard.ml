@@ -323,6 +323,7 @@ For read-only ops use keeper_shell, for file edits use keeper_fs_edit.";
     name = "keeper_github";
     description = "Run a single gh CLI command. \
 NO chaining (&&/||/;), NO pipes (|), NO redirects (>). \
+Do NOT guess the repo owner — omit --repo to use the current repo automatically. \
 Good: cmd='pr list --state open'. Bad: cmd='pr list && echo done'. \
 Use for: issues, PRs, review comments, CI status.";
     input_schema = `Assoc [

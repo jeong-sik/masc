@@ -13,14 +13,89 @@ let gh_not_found_re =
        ; Re.no_case (Re.str "not found")
        ])
 
+(** Detect owner/repo from git remote origin in the project root.
+    Returns "owner/repo" or None on failure.
+    Cached per-process since the remote does not change at runtime.
+    Uses a mutable ref for caching to avoid Stdlib.Lazy + Eio interaction. *)
+let _repo_slug_cache : string option option ref = ref None
+
+let project_repo_slug () : string option =
+  match !_repo_slug_cache with
+  | Some cached -> cached
+  | None ->
+    let result =
+      let st, out =
+        Process_eio.run_argv_with_status ~timeout_sec:5.0
+          [ "/bin/zsh"; "-lc"; "git remote get-url origin 2>/dev/null" ]
+      in
+      if st <> Unix.WEXITED 0 then None
+      else
+        let url = String.trim out in
+        (* Parse SSH (git@github.com:owner/repo.git)
+           or HTTPS (https://github.com/owner/repo.git) *)
+        let slug_of_url u =
+          let u = if String.ends_with ~suffix:".git" u
+                  then String.sub u 0 (String.length u - 4) else u in
+          match String.rindex_opt u ':' with
+          | Some i when not (String.contains_from u (i+1) '/') -> None
+          | Some i ->
+              let after = String.sub u (i+1) (String.length u - i - 1) in
+              if String.contains after '/' then Some after else None
+          | None -> None
+        in
+        match slug_of_url url with
+        | Some _ as s -> s
+        | None ->
+            match String.split_on_char '/' url with
+            | _ :: _ :: _ :: owner :: repo :: _ -> Some (owner ^ "/" ^ repo)
+            | _ -> None
+    in
+    _repo_slug_cache := Some result;
+    result
+
+(** Regex for --repo or -R flag in gh commands. *)
+let repo_flag_re =
+  Re.compile
+    (Re.seq
+       [ Re.alt [ Re.str "--repo"; Re.str "-R" ]
+       ; Re.alt [ Re.char '='; Re.rep1 (Re.char ' ') ]
+       ; Re.group (Re.rep1 (Re.compl [ Re.char ' ' ]))
+       ])
+
+(** Replace a hallucinated --repo/​-R value with the correct repo slug.
+    Returns the corrected command and whether a correction was made. *)
+let correct_repo_flag ~(correct_slug : string) (cmd : string) : string * bool =
+  match Re.exec_opt repo_flag_re cmd with
+  | None -> (cmd, false)
+  | Some g ->
+      let found_slug = Re.Group.get g 1 in
+      if String.equal found_slug correct_slug then (cmd, false)
+      else
+        let corrected = Re.replace repo_flag_re ~f:(fun g ->
+          let full = Re.Group.get g 0 in
+          let prefix_len = String.length full - String.length (Re.Group.get g 1) in
+          String.sub full 0 prefix_len ^ correct_slug
+        ) cmd in
+        Log.Keeper.warn
+          "keeper_github repo correction: %s -> %s" found_slug correct_slug;
+        (corrected, true)
+
 (** Return a hint field list when gh exits non-zero and output matches
     a known "not found" pattern, indicating a hallucinated issue/PR number. *)
 let gh_not_found_hint ~(st : Unix.process_status) ~(out : string) =
   if st <> Unix.WEXITED 0 && Re.execp gh_not_found_re out
   then
+    let repo_hint =
+      match project_repo_slug () with
+      | Some slug ->
+          Printf.sprintf
+            " The correct repo is '%s'. Do not guess the owner." slug
+      | None -> ""
+    in
     [ "hint", `String
-        "The issue/PR number does not exist. Do not guess numbers. \
-         Use 'issue list' or 'pr list' to find valid targets first." ]
+        ("The issue/PR number or repo does not exist. Do not guess numbers. \
+          Use 'issue list' or 'pr list' to find valid targets first."
+         ^ repo_hint) ]
   else []
 
 let handle_keeper_github
@@ -33,8 +108,13 @@ let handle_keeper_github
   let timeout_sec =
     Safe_ops.json_float ~default:30.0 "timeout_sec" args |> fun n -> max 1.0 (min 180.0 n)
   in
-  let gh_raw =
+  let gh_raw_uncorrected =
     if cmd <> "" then cmd else if gh_args <> [] then String.concat " " gh_args else ""
+  in
+  let (gh_raw, _repo_corrected) =
+    match project_repo_slug () with
+    | Some slug -> correct_repo_flag ~correct_slug:slug gh_raw_uncorrected
+    | None -> (gh_raw_uncorrected, false)
   in
   if gh_raw = ""
   then error_json "cmd is required. \

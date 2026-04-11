@@ -59,7 +59,9 @@ let read_last_lines path n =
         if len <= n then all
         else
           List.filteri (fun i _ -> i >= len - n) all)
-  with Sys_error _ -> []
+  with Sys_error err ->
+    Printf.eprintf "[masc-tui] read_last_lines %s: %s\n%!" path err;
+    []
 
 (** Parse a single metrics JSONL line into a log_entry *)
 let parse_log_entry (line : string) : log_entry option =

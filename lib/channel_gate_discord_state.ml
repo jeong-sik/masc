@@ -81,8 +81,14 @@ let read_json_file_opt path =
   if not (Sys.file_exists path) then
     None
   else
-    try Some (Yojson.Safe.from_file path) with
-    | Sys_error _ | Yojson.Json_error _ -> None
+    match Yojson.Safe.from_file path with
+    | json -> Some json
+    | exception Sys_error msg ->
+        Log.warn "channel_gate: cannot read %s: %s" path msg;
+        None
+    | exception Yojson.Json_error msg ->
+        Log.warn "channel_gate: corrupt JSON in %s: %s" path msg;
+        None
 
 let normalize_bindings_json (json : Yojson.Safe.t) : binding list =
   match json with
@@ -189,8 +195,12 @@ let read_recent_audit ~limit =
                let trimmed = String.trim line in
                if trimmed = "" then None
                else
-                 try Some (Yojson.Safe.from_string trimmed) with
-                 | Yojson.Json_error _ -> None)
+                 match Yojson.Safe.from_string trimmed with
+                 | json -> Some json
+                 | exception Yojson.Json_error msg ->
+                     Log.warn
+                       "channel_gate: malformed audit JSONL line: %s" msg;
+                     None)
         |> List.rev
         |> fun rows ->
         let total = List.length rows in

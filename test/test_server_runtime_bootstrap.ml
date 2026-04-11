@@ -294,6 +294,8 @@ let test_startup_config_resolution_defaults_to_bootstrapped_root () =
       mkdir_p (Filename.concat config_root "keepers");
       mkdir_p (Filename.concat config_root "personas");
       write_file (Filename.concat config_root "cascade.json") "{}";
+      write_file (Filename.concat config_root "tool_policy.toml")
+        "[groups.base]\ntools = [\"keeper_time_now\"]\n[presets.minimal]\ngroups = [\"base\"]\n";
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
       let resolution =
         Server_runtime_bootstrap.startup_config_resolution ~base_path

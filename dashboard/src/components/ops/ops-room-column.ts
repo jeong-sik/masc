@@ -6,7 +6,7 @@ import { signal } from '@preact/signals'
 import { CARD_STANDARD } from '../common/card'
 import { ActionButton } from '../common/button'
 import { useRef } from 'preact/hooks'
-import { LoadingState } from '../common/feedback-state'
+import { EmptyState, LoadingState } from '../common/feedback-state'
 import {
   operatorActionBusy,
   operatorDigestLoading,
@@ -131,7 +131,7 @@ export function OpsRoomColumn() {
             `)}
           </div>
         ` : html`
-          <div class="p-3 rounded-xl border border-dashed border-[var(--card-border)] text-[var(--text-muted)] text-[13px]">지금 떠 있는 추천 개입은 없습니다.</div>
+          <${EmptyState} message="지금 떠 있는 추천 개입은 없습니다." compact />
         `}
       </section>
 
@@ -209,11 +209,12 @@ export function OpsRoomColumn() {
             `})}
           </div>
         ` : html`
-          <div class="p-3 rounded-xl border border-dashed border-[var(--card-border)] text-[var(--text-muted)] text-[13px]">
-            ${pendingConfirms.length > 0
+          <${EmptyState}
+            message=${pendingConfirms.length > 0
               ? '선택한 필터에는 승인 대기가 없습니다. 전체 목록으로 돌아가서 다시 확인하세요.'
               : '지금 승인 대기는 없습니다.'}
-          </div>
+            compact
+          />
         `}
       </section>
 
@@ -348,7 +349,7 @@ export function OpsRoomColumn() {
               </article>
             `)}
           </div>
-        ` : html`<div class="p-3 rounded-xl border border-dashed border-[var(--card-border)] text-[var(--text-muted)] text-[13px]">최근 전체 메시지가 없습니다.</div>`}
+        ` : html`<${EmptyState} message="최근 전체 메시지가 없습니다." compact />`}
       </section>
     </div>
   `

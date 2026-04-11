@@ -99,8 +99,15 @@ let start ~sw ~clock ~bus =
   in
   Eio.Fiber.fork ~sw (fun () ->
     let rec loop () =
-      let events = Agent_sdk.Event_bus.drain sub in
-      List.iter relay_event events;
+      (try
+         let events = Agent_sdk.Event_bus.drain sub in
+         List.iter relay_event events
+       with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
+         Log.Misc.warn
+           "oas_sse_bridge: relay iteration failed: %s"
+           (Printexc.to_string exn));
       Eio.Time.sleep clock interval_s;
       loop ()
     in

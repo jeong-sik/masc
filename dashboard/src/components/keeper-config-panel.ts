@@ -10,6 +10,7 @@ import type { KeeperConfig } from '../types'
 import type { KeeperConfigLoadStatus } from './keeper-detail-source'
 import { formatTokens } from '../lib/format-number'
 import { showToast } from './common/toast'
+import { ErrorState, LoadingState } from './common/feedback-state'
 import { createAsyncResource, loaded } from '../lib/async-state'
 
 // ── State ────────────────────────────────────────────────
@@ -345,11 +346,11 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
   }
 
   if (state.status === 'loading') {
-    return html`<div class="py-3 text-xs text-[var(--text-muted)]">설정 로딩 중...</div>`
+    return html`<${LoadingState}>설정 불러오는 중...<//>`
   }
 
   if (state.status === 'error') {
-    return html`<div class="py-3 text-xs text-[var(--bad)]">${state.message}</div>`
+    return html`<${ErrorState} message=${state.message} />`
   }
 
   if (state.status !== 'loaded') return null

@@ -277,7 +277,7 @@ export function ToolQualityPanel() {
 
   const d = data.value
   if (loading.value && !d) return html`<${LoadingState}>도구 품질 불러오는 중...<//>`
-  if (error.value) return html`<${ErrorState} message=${`오류: ${error.value}`} class="m-4" />`
+  if (error.value) return html`<${ErrorState} message=${error.value} class="m-4" />`
   if (!d || d.total === 0) return html`<div class="p-4 text-[11px] text-[var(--text-dim)]">도구 호출 데이터 없음</div>`
 
   return html`

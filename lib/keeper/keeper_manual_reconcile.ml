@@ -156,7 +156,23 @@ let open_pending config ~keeper_name ~blocker_class ~summary ~failure_reason
   let opened_at =
     match pending_record config keeper_name with
     | Some record -> record.opened_at
-    | None -> now_iso ()
+    | None ->
+        (* If a Cleared record exists on disk, this open overwrites its
+           resolution/cleared_at/cleared_by/idempotency_key metadata
+           silently — a contract bug tracked in #6561. Until the full
+           audit-history redesign lands, emit a warn log so the erase
+           is at least visible in operations. *)
+        (match read config keeper_name with
+         | Some { status = Cleared; cleared_at; cleared_by; _ } ->
+             Log.Keeper.warn
+               "keeper:%s manual_reconcile open_pending overwrites prior \
+                Cleared record (cleared_at=%s cleared_by=%s); audit trail \
+                for the previous clear is lost. See #6561."
+               keeper_name
+               (Option.value cleared_at ~default:"?")
+               (Option.value cleared_by ~default:"?")
+         | _ -> ());
+        now_iso ()
   in
   let record =
     {

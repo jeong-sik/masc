@@ -21,6 +21,10 @@ let contains_check result = String.sub result 0 3 = "\xE2\x9C\x85"  (* ✅ *)
 let contains_warning result = String.sub result 0 3 = "\xE2\x9A\xA0"  (* ⚠ *)
 let contains_portal result = String.sub result 0 4 = "\xF0\x9F\x8C\x80"  (* 🌀 *)
 
+let room_config tmp_dir =
+  Unix.putenv "MASC_BASE_PATH" tmp_dir;
+  Room.default_config tmp_dir
+
 let test_init_creates_folder () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -28,7 +32,7 @@ let test_init_creates_folder () =
     (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
 
-  let config = Room.default_config tmp_dir in
+  let config = room_config tmp_dir in
 
   (* Initially not initialized *)
   Alcotest.(check bool) "not init" false (Room.is_initialized config);
@@ -51,7 +55,7 @@ let test_join_creates_agent () =
     (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
 
-  let config = Room.default_config tmp_dir in
+  let config = room_config tmp_dir in
   let _ = Room.init config ~agent_name:None in
 
   (* Join - now returns auto-generated nickname like "test_agent-swift-fox" *)
@@ -76,7 +80,7 @@ let test_add_and_claim_task () =
     (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
 
-  let config = Room.default_config tmp_dir in
+  let config = room_config tmp_dir in
   let _ = Room.init config ~agent_name:(Some "claude") in
 
   (* Add task *)
@@ -102,7 +106,7 @@ let test_add_task_uses_archive_max_id () =
     (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
 
-  let config = Room.default_config tmp_dir in
+  let config = room_config tmp_dir in
   let _ = Room.init config ~agent_name:None in
 
   let archive_path = Filename.concat (Filename.concat tmp_dir ".masc") "tasks-archive.json" in
@@ -129,7 +133,7 @@ let test_broadcast_message () =
     (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
 
-  let config = Room.default_config tmp_dir in
+  let config = room_config tmp_dir in
   let _ = Room.init config ~agent_name:(Some "claude") in
 
   (* Broadcast *)
@@ -151,7 +155,7 @@ let test_worktree_list_no_git () =
     (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
 
-  let config = Room.default_config tmp_dir in
+  let config = room_config tmp_dir in
   let _ = Room.init config ~agent_name:None in
 
   (* worktree_list should return error for non-git dir *)
@@ -173,7 +177,7 @@ let test_worktree_create_no_git () =
     (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
 
-  let config = Room.default_config tmp_dir in
+  let config = room_config tmp_dir in
   let _ = Room.init config ~agent_name:None in
 
   (* worktree_create_r should fail for non-git dir *)
@@ -202,7 +206,7 @@ let test_worktree_project_root_for_nested_subdir () =
   let tmp_dir = Filename.concat (Filename.get_temp_dir_name ())
     (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
-  let config = Room.default_config tmp_dir in
+  let config = room_config tmp_dir in
   let _ = Room.init config ~agent_name:(Some "claude") in
   let repo_root = config.base_path in
   Unix.mkdir (Filename.concat repo_root ".git") 0o755;
@@ -221,7 +225,7 @@ let test_worktree_project_root_for_gitfile_worktree () =
   let tmp_dir = Filename.concat (Filename.get_temp_dir_name ())
     (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
-  let config = Room.default_config tmp_dir in
+  let config = room_config tmp_dir in
   let _ = Room.init config ~agent_name:(Some "claude") in
   let repo_root = config.base_path in
   Unix.mkdir (Filename.concat repo_root ".git") 0o755;
@@ -244,7 +248,7 @@ let test_worktree_project_root_for_nested_gitfile_worktree_subdir () =
   let tmp_dir = Filename.concat (Filename.get_temp_dir_name ())
     (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
-  let config = Room.default_config tmp_dir in
+  let config = room_config tmp_dir in
   let _ = Room.init config ~agent_name:(Some "claude") in
   let repo_root = config.base_path in
   Unix.mkdir (Filename.concat repo_root ".git") 0o755;
@@ -269,7 +273,7 @@ let test_worktree_project_root_for_masc_dir_base () =
   let tmp_dir = Filename.concat (Filename.get_temp_dir_name ())
     (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
-  let config = Room.default_config tmp_dir in
+  let config = room_config tmp_dir in
   let _ = Room.init config ~agent_name:(Some "claude") in
   let repo_root = config.base_path in
   Unix.mkdir (Filename.concat repo_root ".git") 0o755;
@@ -287,7 +291,7 @@ let test_event_log () =
     (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
 
-  let config = Room.default_config tmp_dir in
+  let config = room_config tmp_dir in
   let _ = Room.init config ~agent_name:None in
 
   (* Broadcast should create event log *)
@@ -316,7 +320,7 @@ let with_test_env f =
   let tmp_dir = Filename.concat (Filename.get_temp_dir_name ())
     (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
-  let config = Room.default_config tmp_dir in
+  let config = room_config tmp_dir in
   let _ = Room.init config ~agent_name:(Some "claude") in
   try
     f config;
@@ -609,7 +613,7 @@ let test_event_log_on_join () =
     (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
 
-  let config = Room.default_config tmp_dir in
+  let config = room_config tmp_dir in
   let _ = Room.init config ~agent_name:None in
   let _ = Room.join config ~agent_name:"test_agent" ~capabilities:["ocaml"] () in
 
@@ -630,7 +634,7 @@ let test_event_log_on_claim_done () =
     (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
 
-  let config = Room.default_config tmp_dir in
+  let config = room_config tmp_dir in
   let _ = Room.init config ~agent_name:(Some "claude") in
   let _ = Room.add_task config ~title:"Test" ~priority:1 ~description:"" in
   let _ = Room.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
@@ -1082,7 +1086,7 @@ let test_reset_clears_all_state () =
     (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
 
-  let config = Room.default_config tmp_dir in
+  let config = room_config tmp_dir in
   let _ = Room.init config ~agent_name:(Some "claude") in
   let _ = Room.add_task config ~title:"Task" ~priority:1 ~description:"" in
   let _ = Room.broadcast config ~from_agent:"claude" ~content:"Hello" in
@@ -1102,7 +1106,7 @@ let test_reinit_after_reset () =
     (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
 
-  let config = Room.default_config tmp_dir in
+  let config = room_config tmp_dir in
   let _ = Room.init config ~agent_name:(Some "claude") in
   let _ = Room.reset config in
   (* Reinit should work *)

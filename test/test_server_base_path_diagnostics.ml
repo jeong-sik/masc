@@ -92,7 +92,7 @@ let test_detects_dual_masc_roots () =
            warning
      | None -> false)
 
-let test_strict_violation_respects_env () =
+let test_dual_roots_are_always_strict_violation () =
   with_temp_dir "base-path-strict" @@ fun root ->
   let cwd = Filename.concat root "repo" in
   let effective = Filename.concat root "workspace" in
@@ -100,7 +100,7 @@ let test_strict_violation_respects_env () =
   Unix.mkdir effective 0o755;
   Unix.mkdir (Filename.concat cwd ".masc") 0o755;
   Unix.mkdir (Filename.concat effective ".masc") 0o755;
-  with_env "MASC_BASE_PATH_STRICT" (Some "true") @@ fun () ->
+  with_env "MASC_BASE_PATH_STRICT" (Some "false") @@ fun () ->
   let diag =
     Server_base_path_diagnostics.detect ~cwd
       ~effective_base_path:effective
@@ -111,7 +111,7 @@ let test_strict_violation_respects_env () =
   Alcotest.(check bool) "strict violation" true
     (Server_base_path_diagnostics.strict_violation diag)
 
-let test_explicit_resolution_source_bypasses_strict_violation () =
+let test_explicit_resolution_source_still_violates () =
   with_temp_dir "base-path-explicit" @@ fun root ->
   let cwd = Filename.concat root "repo" in
   let effective = Filename.concat root "workspace" in
@@ -130,7 +130,7 @@ let test_explicit_resolution_source_bypasses_strict_violation () =
       ()
   in
   Alcotest.(check bool) "strict enabled" true diag.fail_fast_enabled;
-  Alcotest.(check bool) "explicit source skips strict violation" false
+  Alcotest.(check bool) "explicit source still violates" true
     (Server_base_path_diagnostics.strict_violation diag)
 
 let test_to_yojson_exposes_effective_paths () =
@@ -170,7 +170,7 @@ let test_to_yojson_exposes_resolution_source () =
   Alcotest.(check string) "resolution source" "explicit_cli"
     (json |> member "resolution_source" |> to_string)
 
-let test_default_base_path_sanitizes_inherited_dual_roots () =
+let test_default_base_path_preserves_explicit_parent_root () =
   with_temp_dir "base-path-default" @@ fun root ->
   let base_path = Filename.concat root "base" in
   let repo = Filename.concat base_path "workspace/yousleepwhen/masc-mcp" in
@@ -180,12 +180,11 @@ let test_default_base_path_sanitizes_inherited_dual_roots () =
   with_cwd repo @@ fun () ->
   with_env "MASC_BASE_PATH" (Some base_path) @@ fun () ->
   with_env "MASC_BASE_PATH_INPUT" None @@ fun () ->
-  with_env "MASC_ALLOW_INHERITED_BASE_PATH" (Some "") @@ fun () ->
-  Alcotest.(check string) "default base path ignores inherited parent root"
-    (canonical_path repo)
+  Alcotest.(check string) "default base path preserves explicit parent root"
+    (canonical_path base_path)
     (Server_mcp_transport_http.default_base_path () |> canonical_path)
 
-let test_default_base_path_respects_opt_in_for_inherited_root () =
+let test_default_base_path_preserves_explicit_root_without_opt_in () =
   with_temp_dir "base-path-default-optin" @@ fun root ->
   let base_path = Filename.concat root "base" in
   let repo = Filename.concat base_path "workspace/yousleepwhen/masc-mcp" in
@@ -195,8 +194,7 @@ let test_default_base_path_respects_opt_in_for_inherited_root () =
   with_cwd repo @@ fun () ->
   with_env "MASC_BASE_PATH" (Some base_path) @@ fun () ->
   with_env "MASC_BASE_PATH_INPUT" None @@ fun () ->
-  with_env "MASC_ALLOW_INHERITED_BASE_PATH" (Some "1") @@ fun () ->
-  Alcotest.(check string) "opt-in keeps inherited root"
+  Alcotest.(check string) "explicit root preserved without opt-in"
     (canonical_path base_path)
     (Server_mcp_transport_http.default_base_path () |> canonical_path)
 
@@ -209,7 +207,6 @@ let test_default_base_path_keeps_inherited_root_without_local_masc () =
   with_cwd repo @@ fun () ->
   with_env "MASC_BASE_PATH" (Some base_path) @@ fun () ->
   with_env "MASC_BASE_PATH_INPUT" None @@ fun () ->
-  with_env "MASC_ALLOW_INHERITED_BASE_PATH" (Some "") @@ fun () ->
   Alcotest.(check string) "default base path keeps inherited root without local .masc"
     (canonical_path base_path)
     (Server_mcp_transport_http.default_base_path () |> canonical_path)
@@ -221,20 +218,21 @@ let () =
         [
           Alcotest.test_case "detects dual .masc roots" `Quick
             test_detects_dual_masc_roots;
-          Alcotest.test_case "strict violation respects env" `Quick
-            test_strict_violation_respects_env;
+          Alcotest.test_case "dual roots are always strict violation" `Quick
+            test_dual_roots_are_always_strict_violation;
           Alcotest.test_case
-            "explicit resolution source bypasses strict violation"
+            "explicit resolution source still violates"
             `Quick
-            test_explicit_resolution_source_bypasses_strict_violation;
+            test_explicit_resolution_source_still_violates;
           Alcotest.test_case "json exposes effective paths" `Quick
             test_to_yojson_exposes_effective_paths;
           Alcotest.test_case "json exposes resolution source" `Quick
             test_to_yojson_exposes_resolution_source;
-          Alcotest.test_case "default base path sanitizes inherited parent root"
-            `Quick test_default_base_path_sanitizes_inherited_dual_roots;
-          Alcotest.test_case "default base path honors inherited opt-in" `Quick
-            test_default_base_path_respects_opt_in_for_inherited_root;
+          Alcotest.test_case "default base path preserves explicit parent root"
+            `Quick test_default_base_path_preserves_explicit_parent_root;
+          Alcotest.test_case
+            "default base path preserves explicit root without opt-in"
+            `Quick test_default_base_path_preserves_explicit_root_without_opt_in;
           Alcotest.test_case
             "default base path keeps inherited root without local .masc"
             `Quick test_default_base_path_keeps_inherited_root_without_local_masc;

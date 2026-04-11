@@ -278,7 +278,7 @@ let shell_tools : Types.tool_schema list = [
     name = "keeper_shell";
     description = "Run a safe project shell command. \
 ops: pwd, ls, cat, rg, git_status, find, head, tail, wc, tree, git_log, git_diff, bash, git_clone. \
-Read-only ops default to the first explicit allowed directory when configured; otherwise they use the keeper playground. \
+Read-only ops default to the keeper playground. \
 Use cwd to target an explicit allowed directory or cloned repo. \
 find REQUIRES pattern param (e.g. pattern=\"*.ml\"). \
 bash op: single command only, no chaining (&&, ||, |, ; are blocked), no redirects (>, >>). \

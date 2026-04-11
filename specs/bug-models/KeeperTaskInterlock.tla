@@ -222,4 +222,75 @@ NextBuggy ==
 
 SpecBuggy == Init /\ [][NextBuggy]_vars
 
+\* ── Current implementation model ──────────────────────
+\* The real code (as of 2026-04-12) does not match the "clean drain"
+\* discipline above. Instead, the real path is:
+\*
+\*   1. CrashToDead is a NORMAL lifecycle transition (restart budget
+\*      exhausted, supervisor shutdown, crash recovery). It does NOT
+\*      synchronously release claimed tasks — the post-crash registry
+\*      update in keeper_registry.mark_dead leaves task_claimer
+\*      pointing at the dead keeper.
+\*
+\*   2. A separate asynchronous subsystem, Room_gc.cleanup_zombies
+\*      (lib/room/room_gc.ml), periodically scans agents by heartbeat
+\*      last_seen and force-releases Claimed/InProgress tasks whose
+\*      assignee is a zombie agent. This is modelled below as
+\*      ReconcileByGC.
+\*
+\* So the current implementation satisfies the invariant
+\* NoDeadKeeperHoldsTask only eventually, not synchronously. This
+\* section models that reality and proves the eventual property with
+\* a TLA+ fairness + leads-to (~>) construction, so TLC can verify
+\* it against the TLC runner in tla-check.sh / specs/Makefile.
+
+\* Zombie GC reconciliation: release an orphaned task whose claimer
+\* is dead. Mirrors room_gc.ml:118-132 Phase 3 cascade.
+ReconcileByGC(t) ==
+    /\ Held(t)
+    /\ keeper_phase[task_claimer[t]] = "dead"
+    /\ task_status'  = [task_status  EXCEPT ![t] = "todo"]
+    /\ task_claimer' = [task_claimer EXCEPT ![t] = "none"]
+    /\ UNCHANGED keeper_phase
+
+\* The current path: CrashToDead is legitimate, ReconcileByGC is
+\* the cleanup. We intentionally drop the clean Draining path
+\* from NextCurrent because the current code does not use it for
+\* mark_dead (it only runs during voluntary Operator_stop, which
+\* is out of scope for this invariant).
+NextCurrent ==
+    \/ \E t \in T, k \in K : ClaimTask(t, k)
+    \/ \E t \in T : StartTask(t)
+    \/ \E t \in T : DoneTask(t)
+    \/ \E t \in T : ReleaseTask(t)
+    \/ \E k \in K : CrashToDead(k)
+    \/ \E t \in T : ReconcileByGC(t)
+
+\* Weak fairness on GC: if ReconcileByGC is continuously enabled
+\* for some task, it must eventually fire. This is the formal
+\* analogue of "the periodic GC cycle will eventually run and
+\* cleanup_zombies will find this task".
+SpecCurrent ==
+    /\ Init
+    /\ [][NextCurrent]_vars
+    /\ WF_vars(\E t \in T : ReconcileByGC(t))
+
+\* Predicate: there exists a task held by a dead keeper.
+\* This is the safety violation we accept as a transient state
+\* in the current implementation, bounded by GC cycle time.
+OrphanedTaskExists ==
+    \E t \in T : Held(t) /\ keeper_phase[task_claimer[t]] = "dead"
+
+\* Liveness: once an orphaned state appears, it is eventually
+\* resolved. This is the leads-to formalization of "async GC
+\* eventually catches up".
+EventuallyCleaned == OrphanedTaskExists ~> ~OrphanedTaskExists
+
+\* Weaker safety suitable for the current model: any held task
+\* that is not yet GC'd has a claimer that was *previously*
+\* running. The claimer may currently be dead (awaiting GC), but
+\* no task can have a claimer that was never running — that would
+\* be a type error. TypeOK already guarantees this, so we keep it
+\* as documentation: the only weaker-than-synchronous safety the
+\* current model preserves is the stronger TypeOK guarantee.
 ====

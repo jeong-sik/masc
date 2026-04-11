@@ -293,7 +293,12 @@ let write_heartbeat_snapshot
     let min_keeper_context = Keeper_config.min_keeper_context_tokens in
     let raw = match meta_current.max_context_override with
       | Some v -> v
-      | None -> Oas_model_resolve.resolve_max_cascade_context cascade_models
+      | None ->
+          let resolved =
+            Oas_model_resolve.resolve_max_cascade_context cascade_models
+          in
+          Oas_model_resolve.clamp_context_for_pure_local_labels
+            ~labels:cascade_models ~max_context:resolved
     in
     max min_keeper_context raw
   in

@@ -12,6 +12,7 @@ module KD = Masc_mcp.Keeper_deliberation
 module AE = Masc_mcp.Agent_economy
 module KC = Masc_mcp.Keeper_config
 module HK = Masc_mcp.Keeper_hooks_oas
+module OMR = Masc_mcp.Oas_model_resolve
 
 let has_prompt_root path =
   Sys.file_exists (Filename.concat path "config/prompts/keeper.unified.system.md")
@@ -2020,6 +2021,50 @@ let test_auto_recoverable_turn_error_excludes_persistent_errors () =
   check bool "auth error is persistent" false
     (UT.is_auto_recoverable_turn_error err)
 
+let test_bounded_oas_timeout_uses_adaptive_when_budget_is_large () =
+  let expected =
+    Env_config.KeeperKeepalive.oas_timeout_for_context ~max_context:262_144
+  in
+  match
+    UT.bounded_oas_timeout_for_turn_budget
+      ~max_context:262_144 ~remaining_turn_budget_s:1200.0
+  with
+  | Some timeout_s ->
+      check (float 0.01) "adaptive timeout kept under full budget"
+        expected timeout_s
+  | None -> fail "expected bounded timeout"
+
+let test_bounded_oas_timeout_caps_to_remaining_turn_budget () =
+  match
+    UT.bounded_oas_timeout_for_turn_budget
+      ~max_context:262_144 ~remaining_turn_budget_s:235.7
+  with
+  | Some timeout_s ->
+      check (float 0.01) "remaining budget cap applies" 234.7 timeout_s
+  | None -> fail "expected bounded timeout"
+
+let test_bounded_oas_timeout_refuses_too_little_budget () =
+  check (option (float 0.01)) "insufficient budget returns none" None
+    (UT.bounded_oas_timeout_for_turn_budget
+       ~max_context:262_144 ~remaining_turn_budget_s:20.0)
+
+let test_pure_local_labels_detection () =
+  check bool "ollama-only cascade is pure local" true
+    (OMR.labels_are_pure_local [ "ollama:qwen3.5:35b-a3b-nvfp4" ]);
+  check bool "mixed cascade is not pure local" false
+    (OMR.labels_are_pure_local [ "glm:glm-5.1"; "ollama:qwen3.5:35b-a3b-nvfp4" ])
+
+let test_clamp_context_for_pure_local_labels () =
+  let local_floor = Env_config.ContextCompact.small_local_floor in
+  check int "pure local max_context gets capped" local_floor
+    (OMR.clamp_context_for_pure_local_labels
+       ~labels:[ "ollama:qwen3.5:35b-a3b-nvfp4" ]
+       ~max_context:262_144);
+  check int "mixed cascade keeps raw context" 262_144
+    (OMR.clamp_context_for_pure_local_labels
+       ~labels:[ "glm:glm-5.1"; "ollama:qwen3.5:35b-a3b-nvfp4" ]
+       ~max_context:262_144)
+
 let test_side_effect_reclassification_ignores_keeper_read_only_tools () =
   let original =
     Agent_sdk.Error.Api
@@ -2953,6 +2998,16 @@ let () =
             test_auto_recoverable_turn_error_includes_server_parse_rejection;
           test_case "auto-recoverable excludes persistent errors" `Quick
             test_auto_recoverable_turn_error_excludes_persistent_errors;
+          test_case "bounded OAS timeout keeps adaptive timeout under full budget" `Quick
+            test_bounded_oas_timeout_uses_adaptive_when_budget_is_large;
+          test_case "bounded OAS timeout caps to remaining turn budget" `Quick
+            test_bounded_oas_timeout_caps_to_remaining_turn_budget;
+          test_case "bounded OAS timeout refuses too little remaining budget" `Quick
+            test_bounded_oas_timeout_refuses_too_little_budget;
+          test_case "pure local label detection" `Quick
+            test_pure_local_labels_detection;
+          test_case "pure local context clamp" `Quick
+            test_clamp_context_for_pure_local_labels;
           test_case "read-only keeper tools do not become ambiguous partial" `Quick
             test_side_effect_reclassification_ignores_keeper_read_only_tools;
           test_case "mixed tool sets only keep mutating keeper tools" `Quick

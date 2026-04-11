@@ -114,17 +114,18 @@ let worktree_create_r ?(link_task=true) config ~agent_name ~task_id ~base_branch
   | _, Error e -> Error e
   | Ok _, Ok _ ->
     (* Prefer a keeper's playground clone under
-       [.masc/playground/<agent>/repos/]. Scan the directory for any
-       cloned git repo (first match wins) instead of hardcoding a repo
-       name — keepers may work on any repo their tool_policy allows.
-       If no playground clone is present, fall back to the configured
-       repository root so explicit repo-worktree flows still work
-       instead of failing with a missing-clone error. *)
+       [.masc/playground/<agent>/repos/]. The layout is the SSOT in
+       [Playground_paths] (masc_config). Scan the directory for any
+       cloned git repo (first match wins, alphabetical) instead of
+       hardcoding a repo name — keepers may work on any repo their
+       [tool_policy.toml] allows. If no playground clone is present,
+       fall back to the configured repository root so explicit
+       repo-worktree flows still work instead of failing with a
+       missing-clone error. *)
     let resolve_keeper_repo_root () =
       let repos_dir =
         Filename.concat config.base_path
-          (Printf.sprintf ".masc/playground/%s/repos"
-             (safe_filename agent_name))
+          (Playground_paths.repos_path agent_name)
       in
       let scan_first_git_repo dir =
         if not (Sys.file_exists dir && Sys.is_directory dir) then None

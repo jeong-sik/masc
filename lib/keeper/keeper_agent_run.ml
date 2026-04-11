@@ -1323,7 +1323,8 @@ let run_turn
                 if is_retry then "retry"
                 else (
                   match tool_choice with
-                  | Some Agent_sdk.Types.Any -> "tool_required"
+                  | Some (Agent_sdk.Types.Any | Agent_sdk.Types.Tool _) ->
+                    "tool_required"
                   | Some Agent_sdk.Types.None_ -> "tool_disabled"
                   | _ -> "tool_optional")
               in

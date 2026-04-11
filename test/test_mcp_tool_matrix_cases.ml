@@ -489,22 +489,61 @@ let ensure_library_topic fixture =
       fixture.library_topic <- Some "tool-matrix-library";
       "tool-matrix-library"
 
-let ensure_worktree_created fixture =
+(* Ensure the keeper's playground has a git clone before calling
+   masc_worktree_create. After PRs #6533/#6542 removed the server-root
+   fallback, keepers must clone into
+   .masc/playground/<agent>/repos/<repo>/ first. This helper clones
+   the fixture's local bare remote into the playground repos
+   directory and is idempotent.
+
+   The [agent] parameter overrides [fixture.agent_name] for cases
+   where a different keeper identity is used at runtime (e.g. the
+   keeper tool matrix, whose runtime keeper meta name differs from
+   the generic fixture agent name). *)
+let ensure_playground_clone_for ?agent fixture =
+  let agent_name = match agent with Some n -> n | None -> fixture.agent_name in
+  let playground_repos =
+    Filename.concat fixture.base_path
+      (Printf.sprintf ".masc/playground/%s/repos" agent_name)
+  in
+  let clone_target = Filename.concat playground_repos "tool-matrix" in
+  if not (Sys.file_exists clone_target) then begin
+    mkdir_p playground_repos;
+    let remote_dir = Filename.concat fixture.base_path ".remote.git" in
+    run_cmd_exn [ "git"; "clone"; "-q"; remote_dir; clone_target ];
+    run_cmd_exn
+      [ "git"; "-C"; clone_target; "config"; "user.email"; "tool-matrix@example.test" ];
+    run_cmd_exn
+      [ "git"; "-C"; clone_target; "config"; "user.name"; "Tool Matrix" ]
+  end;
+  clone_target
+
+let ensure_playground_clone fixture = ensure_playground_clone_for fixture
+
+(* Create a worktree for a specific agent name (defaults to
+   [fixture.agent_name]). Takes [?agent] so the keeper tool matrix can
+   create the worktree under the real keeper meta name instead of the
+   generic fixture agent, keeping create and remove paths consistent. *)
+let ensure_worktree_created_for ?agent fixture =
+  let agent_name = match agent with Some n -> n | None -> fixture.agent_name in
   match fixture.worktree_task_id with
   | Some task_id -> task_id
   | None ->
       let task_id = ensure_task fixture in
+      let _ = ensure_playground_clone_for ?agent fixture in
       ignore
         (execute_tool_ok fixture ~name:"masc_worktree_create"
            ~arguments:
              (`Assoc
                [
-                 ("agent_name", `String fixture.agent_name);
+                 ("agent_name", `String agent_name);
                  ("task_id", `String task_id);
                  ("base_branch", `String "main");
                ]));
       fixture.worktree_task_id <- Some task_id;
       task_id
+
+let ensure_worktree_created fixture = ensure_worktree_created_for fixture
 
 let ensure_code_file fixture =
   match fixture.code_file_path with
@@ -537,6 +576,8 @@ let prepare_for_name fixture name =
     ignore (ensure_verification_request fixture);
   if name = "masc_webrtc_answer" then
     ignore (ensure_webrtc_offer fixture);
+  if List.mem name [ "masc_worktree_create"; "masc_worktree_list" ] then
+    ignore (ensure_playground_clone fixture);
   if name = "masc_worktree_remove" then
     ignore (ensure_worktree_created fixture);
   if List.mem name [ "masc_code_edit"; "masc_code_delete"; "masc_code_git"; "masc_code_shell"; "masc_code_read"; "masc_code_symbols" ] then

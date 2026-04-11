@@ -398,7 +398,7 @@ export function ConfigResolutionPanel({
   return html`
     <${Card} title="설정 경로" class="section mb-4">
       <div class="mb-4 text-[12px] leading-relaxed text-[var(--text-muted)]">
-        repo-managed config root와 실제 runtime/data root를 함께 보여줍니다. 실행 중인 서버가 어떤 worktree와 경로를 보고 있는지 바로 비교할 수 있습니다.
+        서버가 실제로 해석한 config root와 runtime/data root를 함께 보여줍니다. 체크인된 repo config는 fallback/default source일 뿐이며, 현재 실행이 바라보는 경로와는 다를 수 있습니다.
       </div>
 
       ${resolution
@@ -411,7 +411,7 @@ export function ConfigResolutionPanel({
                 <span class="rounded-full border border-[var(--card-border)] bg-[var(--white-6)] px-2 py-0.5 text-[10px] text-[var(--text-muted)]">
                   ${sourceLabel(resolution.config_root.source)}
                 </span>
-                <span class="text-[12px] text-[var(--text-muted)]">repo-managed config root</span>
+                <span class="text-[12px] text-[var(--text-muted)]">resolved config root</span>
               </div>
 
               <div class="mb-4">

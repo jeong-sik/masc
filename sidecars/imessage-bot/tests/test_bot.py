@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, patch
 
@@ -10,13 +11,29 @@ from src.imessage_bridge import InboundMessage
 
 
 class IMessageBotTests(unittest.IsolatedAsyncioTestCase):
+    def _config(self, *, reply_mode: str = "self-chat", self_chat_guid: str = ""):
+        return SimpleNamespace(
+            status_path="/tmp/imessage-status.json",
+            binding_store_path="/tmp/imessage-bindings.json",
+            chat_db_path="/tmp/chat.db",
+            poll_interval_sec=2.0,
+            gate_base_url="http://127.0.0.1:8935",
+            reply_mode=reply_mode,
+            self_chat_guid=self_chat_guid,
+        )
+
     @patch("src.bot.send_message", return_value=True)
+    @patch("src.bot.resolve_self_chat_guid", return_value="self-guid")
     @patch("src.bot.GateClient")
+    @patch("src.bot.get_config")
     async def test_handle_message_replies_to_chat_guid(
         self,
+        get_config_mock,
         gate_client_cls,
+        resolve_self_chat_guid_mock,
         send_message_mock,
     ) -> None:
+        get_config_mock.return_value = self._config()
         gate_client = gate_client_cls.return_value
         gate_client.send_message = AsyncMock(
             return_value=GateResponse(
@@ -38,7 +55,7 @@ class IMessageBotTests(unittest.IsolatedAsyncioTestCase):
             date=datetime.now(tz=timezone.utc),
             service="iMessage",
             sender="+15551234567",
-            chat_guid="iMessage;-;+15551234567",
+            chat_guid="source-guid",
             chat_identifier="chat123",
             display_name="Test",
         )
@@ -46,6 +63,7 @@ class IMessageBotTests(unittest.IsolatedAsyncioTestCase):
         ok = await bot._handle_message(msg)
 
         self.assertTrue(ok)
+        resolve_self_chat_guid_mock.assert_called_once_with("/tmp/chat.db", "")
         gate_client.send_message.assert_awaited_once_with(
             keeper_name=DEFAULT_KEEPER,
             content="hello",
@@ -55,16 +73,65 @@ class IMessageBotTests(unittest.IsolatedAsyncioTestCase):
         )
         send_message_mock.assert_called_once_with(
             text="reply text",
-            chat_guid="iMessage;-;+15551234567",
+            chat_guid="self-guid",
         )
 
     @patch("src.bot.send_message", return_value=True)
+    @patch("src.bot.resolve_self_chat_guid", return_value="")
     @patch("src.bot.GateClient")
-    async def test_handle_message_fails_closed_without_chat_guid(
+    @patch("src.bot.get_config")
+    async def test_handle_message_fails_closed_without_self_chat_guid(
         self,
+        get_config_mock,
         gate_client_cls,
+        resolve_self_chat_guid_mock,
         send_message_mock,
     ) -> None:
+        get_config_mock.return_value = self._config()
+        gate_client = gate_client_cls.return_value
+        gate_client.send_message = AsyncMock(
+            return_value=GateResponse(
+                ok=True,
+                keeper_name=DEFAULT_KEEPER,
+                reply="reply text",
+                model_used="test-model",
+                duration_ms=42,
+                tokens_used=12,
+                error="",
+                structured=None,
+            )
+        )
+
+        bot = IMessageBot()
+        msg = InboundMessage(
+            rowid=7,
+            text="hello",
+            date=datetime.now(tz=timezone.utc),
+            service="iMessage",
+            sender="+15557654321",
+            chat_guid="source-guid",
+            chat_identifier="chat456",
+            display_name="Test",
+        )
+
+        ok = await bot._handle_message(msg)
+
+        self.assertFalse(ok)
+        self.assertEqual(resolve_self_chat_guid_mock.call_count, 2)
+        send_message_mock.assert_not_called()
+
+    @patch("src.bot.send_message", return_value=True)
+    @patch("src.bot.resolve_self_chat_guid", return_value="")
+    @patch("src.bot.GateClient")
+    @patch("src.bot.get_config")
+    async def test_handle_message_fails_closed_without_chat_guid(
+        self,
+        get_config_mock,
+        gate_client_cls,
+        resolve_self_chat_guid_mock,
+        send_message_mock,
+    ) -> None:
+        get_config_mock.return_value = self._config(reply_mode="source-chat")
         gate_client = gate_client_cls.return_value
         gate_client.send_message = AsyncMock(
             return_value=GateResponse(
@@ -94,4 +161,5 @@ class IMessageBotTests(unittest.IsolatedAsyncioTestCase):
         ok = await bot._handle_message(msg)
 
         self.assertFalse(ok)
+        resolve_self_chat_guid_mock.assert_not_called()
         send_message_mock.assert_not_called()

@@ -18,7 +18,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from .config import get_config
 from .gate_client import GateClient
-from .imessage_bridge import InboundMessage, advance_cursor, read_new_messages, send_message
+from .imessage_bridge import (
+    InboundMessage,
+    advance_cursor,
+    read_new_messages,
+    resolve_self_chat_guid,
+    send_message,
+)
 from .status_store import ConnectorRuntimeStatus, StatusStore
 
 logging.basicConfig(
@@ -45,6 +51,12 @@ class IMessageBot:
         self._last_message_at = ""
         self._bindings: dict[str, str] = {}  # chat_id -> keeper_name
         self._last_cursor_rowid: int = 0
+        self._self_chat_guid = ""
+        if self.cfg.reply_mode == "self-chat":
+            self._self_chat_guid = resolve_self_chat_guid(
+                self.cfg.chat_db_path,
+                self.cfg.self_chat_guid,
+            )
 
     def _load_bindings(self) -> None:
         """Load chat-to-keeper bindings from state file."""
@@ -75,6 +87,18 @@ class IMessageBot:
             return keeper
         return DEFAULT_KEEPER
 
+    def _resolve_reply_chat_guid(self, msg: InboundMessage) -> str:
+        """Resolve the outbound chat guid according to configured reply mode."""
+        if self.cfg.reply_mode == "source-chat":
+            return msg.chat_guid
+        if self._self_chat_guid:
+            return self._self_chat_guid
+        self._self_chat_guid = resolve_self_chat_guid(
+            self.cfg.chat_db_path,
+            self.cfg.self_chat_guid,
+        )
+        return self._self_chat_guid
+
     async def _handle_message(self, msg: InboundMessage) -> bool:
         """Process one inbound message: gate dispatch + reply.
 
@@ -98,23 +122,26 @@ class IMessageBot:
         )
 
         if response.ok and response.reply:
-            if not msg.chat_guid:
+            target_chat_guid = self._resolve_reply_chat_guid(msg)
+            if not target_chat_guid:
                 logger.error(
-                    "Refusing to send reply to %s: missing chat guid for chat=%s",
+                    "Refusing to send reply to %s: missing target chat guid (mode=%s, source_chat=%s)",
                     msg.sender,
-                    msg.chat_identifier or "unknown",
+                    self.cfg.reply_mode,
+                    msg.chat_identifier or msg.chat_guid or "unknown",
                 )
                 self._messages_failed += 1
                 return False
             sent = send_message(
                 text=response.reply,
-                chat_guid=msg.chat_guid,
+                chat_guid=target_chat_guid,
             )
             if sent:
                 logger.info(
-                    "Replied to %s (chat=%s, %d chars, keeper=%s, model=%s, %dms)",
+                    "Replied to %s (source_chat=%s, target_chat=%s, %d chars, keeper=%s, model=%s, %dms)",
                     msg.sender,
                     msg.chat_identifier or msg.chat_guid or "unknown",
+                    target_chat_guid,
                     len(response.reply),
                     response.keeper_name,
                     response.model_used,
@@ -122,9 +149,10 @@ class IMessageBot:
                 )
             else:
                 logger.error(
-                    "Failed to send reply to %s (chat=%s) via AppleScript",
+                    "Failed to send reply to %s (source_chat=%s, target_chat=%s) via AppleScript",
                     msg.sender,
                     msg.chat_identifier or msg.chat_guid or "unknown",
+                    target_chat_guid,
                 )
         elif response.error and response.error != "duplicate message":
             logger.warning("Gate error for %s: %s", msg.sender, response.error)
@@ -198,10 +226,11 @@ class IMessageBot:
         self._load_bindings()
 
         logger.info(
-            "iMessage bot starting (poll=%.1fs, gate=%s, default_keeper=%s)",
+            "iMessage bot starting (poll=%.1fs, gate=%s, default_keeper=%s, reply_mode=%s)",
             self.cfg.poll_interval_sec,
             self.cfg.gate_base_url,
             DEFAULT_KEEPER,
+            self.cfg.reply_mode,
         )
 
         # Initial health check

@@ -50,6 +50,40 @@ ORDER BY m.ROWID ASC
 LIMIT 100
 """
 
+SELF_CHAT_GUID_QUERY: Final[str] = """
+WITH own_aliases AS (
+    SELECT DISTINCT
+        trim(
+            CASE
+                WHEN account_login LIKE 'E:%' OR account_login LIKE 'P:%'
+                    THEN substr(account_login, 3)
+                ELSE account_login
+            END
+        ) AS alias
+    FROM chat
+    WHERE service_name = 'iMessage'
+      AND account_login IS NOT NULL
+      AND trim(account_login) != ''
+),
+self_chats AS (
+    SELECT
+        c.guid AS chat_guid,
+        max(coalesce(m.date, 0)) AS last_date,
+        count(m.ROWID) AS msg_count
+    FROM chat c
+    JOIN own_aliases a ON c.chat_identifier = a.alias
+    LEFT JOIN chat_message_join cmj ON c.ROWID = cmj.chat_id
+    LEFT JOIN message m ON m.ROWID = cmj.message_id
+    WHERE c.service_name = 'iMessage'
+    GROUP BY c.ROWID
+)
+SELECT chat_guid
+FROM self_chats
+WHERE trim(chat_guid) != ''
+ORDER BY last_date DESC, msg_count DESC
+LIMIT 1
+"""
+
 
 @dataclass(frozen=True, slots=True)
 class InboundMessage:
@@ -164,6 +198,47 @@ def read_new_messages() -> list[InboundMessage]:
         logger.error("Unexpected error reading chat.db: %s", e)
 
     return messages
+
+
+def resolve_self_chat_guid(chat_db_path: str, explicit_chat_guid: str = "") -> str:
+    """Resolve the chat guid to use for self-chat mode.
+
+    Prefers an explicit override. Otherwise auto-detects the most recently
+    active self-chat whose chat identifier matches one of the account aliases
+    visible in Messages metadata.
+    """
+    explicit = explicit_chat_guid.strip()
+    if explicit:
+        return explicit
+
+    db_path = Path(chat_db_path)
+    if not db_path.exists():
+        logger.warning("Cannot resolve self-chat guid: chat.db not found at %s", db_path)
+        return ""
+
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        conn.row_factory = sqlite3.Row
+        try:
+            row = conn.execute(SELF_CHAT_GUID_QUERY).fetchone()
+        finally:
+            conn.close()
+    except sqlite3.OperationalError as e:
+        logger.warning("Failed to resolve self-chat guid from chat.db: %s", e)
+        return ""
+    except Exception as e:
+        logger.warning("Unexpected error resolving self-chat guid: %s", e)
+        return ""
+
+    if row is None:
+        logger.warning("No self-chat guid candidate found in chat.db")
+        return ""
+
+    chat_guid = str(row["chat_guid"] or "").strip()
+    if chat_guid == "":
+        logger.warning("Resolved self-chat row without a chat guid")
+        return ""
+    return chat_guid
 
 
 def send_message(*, text: str, chat_guid: str = "") -> bool:

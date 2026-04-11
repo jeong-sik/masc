@@ -181,4 +181,32 @@ let () =
     | Error msg ->
         assert (contains_substring msg "does not exist"))
 
+(* 7. If the caller's playground bundle does not exist yet, the
+      helper must fail closed with an explicit error naming the
+      playground path and the recovery action. Pre-iter10 code
+      silently fell back to the raw non-realpath'd parent, which
+      on macOS symlink-heavy filesystems could yield a false accept.
+      Regression gate for GLM-5.1 MEDIUM finding on PR #6651. *)
+let () =
+  test "missing_playground_fails_closed" (fun () ->
+    let base_path = fresh_base_path ~tag:"missing_pg" in
+    (* Intentionally do NOT create `.masc/playground/agent-alpha/`.
+       The caller has no playground bundle yet — every request must
+       be rejected with an actionable error, not silently accepted. *)
+    let sibling = Filename.concat base_path "some-dir" in
+    Unix.mkdir sibling 0o755;
+    match
+      Tool_repair_loop.resolve_playground_working_dir
+        ~agent_name:"agent-alpha" ~base_path ~working_dir_arg:sibling
+    with
+    | Ok resolved ->
+        failwith
+          (Printf.sprintf
+             "expected fail-closed Error on missing playground, got Ok %S"
+             resolved)
+    | Error msg ->
+        assert (contains_substring msg "playground directory");
+        assert (contains_substring msg "does not exist");
+        assert (contains_substring msg "masc_worktree_create"))
+
 let () = Printf.printf "\n✅ All Tool_repair_loop containment tests passed!\n"

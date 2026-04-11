@@ -245,32 +245,52 @@ let resolve_playground_working_dir ~agent_name ~base_path ~working_dir_arg =
   let playground_abs_raw =
     Filename.concat base_path playground_rel
   in
-  let playground_abs =
-    try Unix.realpath playground_abs_raw with
-    | Unix.Unix_error _ -> playground_abs_raw
-  in
-  let effective_arg =
-    if String.trim working_dir_arg = "" then playground_abs
-    else working_dir_arg
-  in
-  let resolved =
-    try Ok (Unix.realpath effective_arg) with
+  (* Fail closed: if the playground bundle does not yet exist we
+     cannot canonicalise it, so we cannot safely compare it against a
+     child path. Falling back to the raw (non-realpath) parent would
+     silently regress to pre-iter10 behaviour on filesystems where
+     symlinks or case-insensitivity flip the [starts_with] result
+     (notably macOS `/tmp` → `/private/tmp`). Surface an explicit
+     error that points the LLM at the recovery action instead.
+     Found by GLM-5.1 review of PR #6651, Issue 2. *)
+  match
+    try Ok (Unix.realpath playground_abs_raw) with
     | Unix.Unix_error _ ->
-        Error "working_dir does not exist or is not accessible"
-  in
-  match resolved with
-  | Error msg -> Error msg
-  | Ok working_dir ->
-      if is_safe_subpath ~parent:playground_abs ~child:working_dir then
-        Ok working_dir
-      else
         Error
           (Printf.sprintf
-             "working_dir must be inside your own keeper playground \
-              (%s). Cross-keeper repair loops are blocked — use \
-              masc_worktree_create to provision a workspace under your \
-              playground first. See #6527/#6641."
+             "keeper playground directory %S does not exist yet — cannot \
+              validate working_dir containment. Run masc_worktree_create \
+              to provision your playground first. See #6527/#6641."
              playground_rel)
+  with
+  | Error msg -> Error msg
+  | Ok playground_abs ->
+      let effective_arg =
+        if String.trim working_dir_arg = "" then playground_abs
+        else working_dir_arg
+      in
+      let resolved =
+        try Ok (Unix.realpath effective_arg) with
+        | Unix.Unix_error _ ->
+            Error "working_dir does not exist or is not accessible"
+      in
+      (match resolved with
+      | Error msg -> Error msg
+      | Ok working_dir ->
+          (* Both [playground_abs] and [working_dir] are Unix.realpath'd,
+             which strips trailing slashes and collapses symlinks, so
+             [is_safe_subpath]'s [String.starts_with] check is safe
+             from trailing-slash mismatch and macOS /private canonicalisation. *)
+          if is_safe_subpath ~parent:playground_abs ~child:working_dir then
+            Ok working_dir
+          else
+            Error
+              (Printf.sprintf
+                 "working_dir must be inside your own keeper playground \
+                  (%s). Cross-keeper repair loops are blocked — use \
+                  masc_worktree_create to provision a workspace under your \
+                  playground first. See #6527/#6641."
+                 playground_rel))
 
 let handle_start (ctx : _ context) args : tool_result =
   let*! task_spec = get_string_required args "task_spec" in

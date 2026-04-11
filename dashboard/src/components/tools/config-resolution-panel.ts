@@ -30,6 +30,8 @@ function sourceLabel(source: string): string {
       return 'env override'
     case 'home_masc':
       return 'home config'
+    case 'local_masc':
+      return 'local .masc'
     case 'invalid_env':
       return 'invalid env'
     case 'exe_relative':

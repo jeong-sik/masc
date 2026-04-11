@@ -294,7 +294,7 @@ Memory compaction 시 어떤 정보를 우선 보존할지는 통합 정책(`kee
 
 ### 4.3 모델 해석
 
-Keeper 모델 선택은 profile.json 인자가 아니라 `cascade_name`으로 결정된다. 기본 keeper는 `keeper_unified` cascade를 사용하고, 실제 모델 목록은 resolved config root의 `cascade.json`에서 해석된다.
+Keeper 모델 선택은 profile.json 인자가 아니라 `cascade_name`으로 결정된다. 기본 keeper는 `keeper_unified` cascade를 사용하고, 실제 모델 목록은 저장소의 고정 경로 `config/cascade.json`이 아니라 resolved config root 기준의 `<resolved-config-root>/cascade.json`에서 해석된다.
 
 ### 4.4 작성 예시
 

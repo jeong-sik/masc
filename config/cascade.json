@@ -2,6 +2,7 @@
   "default_models": [
     "glm-coding:glm-5.1",
     "glm:glm-5.1",
+    "groq:qwen/qwen3-32b",
     "ollama:qwen3.5:35b-a3b-nvfp4"
   ],
   "local_only_models": [
@@ -10,14 +11,16 @@
   "keeper_unified_models": [
     "glm-coding:glm-5.1",
     "glm:glm-5.1",
+    "groq:qwen/qwen3-32b",
     "ollama:qwen3.5:35b-a3b-nvfp4"
   ],
   "coding_first_models": [
     "glm-coding:glm-5.1",
     "glm:glm-5.1",
+    "groq:qwen/qwen3-32b",
     "ollama:qwen3.5:35b-a3b-nvfp4"
   ],
-  "_comment": "glm-coding = Coding Plan (subscription). glm = general API (pay-per-use). local last. glm-4.7 dropped 2026-04-11: 100% HTTP 500 on keeper-size bodies (#6567); glm-5.1 succeeds, fallback unchanged.",
+  "_comment": "glm-coding = Coding Plan (subscription). glm = general API (pay-per-use). groq = Groq LPU ($0.29/$0.59 per M, GROQ_API_KEY). local last. glm-4.7 dropped 2026-04-11: 100% HTTP 500 on keeper-size bodies (#6567); glm-5.1 succeeds, fallback unchanged.",
   "coding_first_temperature": 0.2,
   "coding_first_max_tokens": 65536,
   "tool_rerank_temperature": 0.0,

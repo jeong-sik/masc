@@ -327,6 +327,20 @@ let test_same_origin_https_tunnel_same_host () =
   | Ok () -> ()
   | Error e -> fail (Types.masc_error_to_string e)
 
+let test_same_origin_allows_loopback_alias_same_port () =
+  let module Server_auth = Masc_mcp.Server_auth in
+  let headers =
+    Httpun.Headers.of_list
+      [
+        ("host", "127.0.0.1:8935");
+        ("origin", "http://localhost:8935");
+      ]
+  in
+  let request = Httpun.Request.create ~headers `POST "/api/v1/operator/action" in
+  match Server_auth.ensure_same_origin_browser_request request with
+  | Ok () -> ()
+  | Error e -> fail (Types.masc_error_to_string e)
+
 let test_same_origin_rejects_different_explicit_port () =
   let module Server_auth = Masc_mcp.Server_auth in
   let headers =
@@ -766,6 +780,8 @@ let () =
         test_same_origin_browser_request_rejects_cross_origin;
       test_case "same-origin allows https tunnel same host" `Quick
         test_same_origin_https_tunnel_same_host;
+      test_case "same-origin allows loopback alias same port" `Quick
+        test_same_origin_allows_loopback_alias_same_port;
       test_case "same-origin rejects different explicit port" `Quick
         test_same_origin_rejects_different_explicit_port;
       test_case "same-origin allows explicit default port https" `Quick

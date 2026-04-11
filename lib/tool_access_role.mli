@@ -3,19 +3,17 @@
     Maps each authentication role (Reader, Worker, Admin) to a
     Tool_access_policy.t that determines which tools the role can invoke.
 
-    Replaces the legacy per-tool permission mapping (auth.ml
-    legacy_permission_for_tool) with a single policy-based funnel.
+    The role policy is derived from [Tool_permission_map.permission_for_tool], so
+    Tool_catalog-declared required_permission metadata and auth-layer
+    fallbacks stay aligned instead of maintaining a second hardcoded tool list.
 
     @since 2.204.0 — Phase 0 of Tool Gate architecture (#4381) *)
 
-val admin_only_tools : string list
-(** Tools requiring Admin role. Derived from legacy CanInit, CanReset,
-    CanAdmin permissions. *)
+val admin_only_tools : unit -> string list
+(** Tools requiring Admin role. Derived from [Tool_permission_map.permission_for_tool]. *)
 
-val worker_only_tools : string list
-(** Tools requiring at least Worker role. Derived from legacy CanAddTask,
-    CanClaimTask, CanCompleteTask, CanBroadcast, CanOpenPortal,
-    CanSendPortal, CanCreateWorktree, CanRemoveWorktree, CanVote. *)
+val worker_only_tools : unit -> string list
+(** Tools requiring at least Worker role. Derived from [Tool_permission_map.permission_for_tool]. *)
 
 val policy_for_role : Types.agent_role -> Tool_access_policy.t
 (** Build the access policy for a role.

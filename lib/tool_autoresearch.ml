@@ -435,6 +435,15 @@ let dispatch (ctx : context) ~name ~args : tool_result option =
 
 let _tool_spec_system_internal = [ "masc_autoresearch_status" ]
 
+let tool_required_permission = function
+  | "masc_autoresearch_status" ->
+      Some Types.CanReadState
+  | "masc_autoresearch_start" | "masc_autoresearch_swarm_start"
+  | "masc_repo_synthesis_swarm_start" | "masc_autoresearch_cycle"
+  | "masc_autoresearch_inject" | "masc_autoresearch_stop" ->
+      Some Types.CanAdmin
+  | _ -> None
+
 let () =
   List.iter
     (fun (s : Types.tool_schema) ->
@@ -448,5 +457,6 @@ let () =
            ~handler_binding:Tag_dispatch
            ~visibility:(if is_system then Tool_catalog.Hidden else Tool_catalog.Default)
            ~allow_direct_call_when_hidden:is_system
+           ?required_permission:(tool_required_permission s.name)
            ()))
     schemas

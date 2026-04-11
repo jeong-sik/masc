@@ -153,6 +153,38 @@ let explicit_metadata : (string * metadata) list =
     ("masc_keeper_status", readonly_tool);
     ("masc_plan_get", readonly_tool);
     ("masc_worktree_list", readonly_tool);
+    ( "masc_join",
+      { default_metadata with required_permission = Some Types.CanJoin } );
+    ( "masc_leave",
+      { default_metadata with required_permission = Some Types.CanLeave } );
+    ( "masc_broadcast",
+      { default_metadata with required_permission = Some Types.CanBroadcast } );
+    ( "masc_listen",
+      { default_metadata with required_permission = Some Types.CanBroadcast } );
+    ( "masc_messages",
+      { readonly_tool with required_permission = Some Types.CanReadState } );
+    ( "masc_who",
+      { readonly_tool with required_permission = Some Types.CanReadState } );
+    ( "channel_gate",
+      { default_metadata with required_permission = Some Types.CanBroadcast } );
+    ( "masc_verify_auto",
+      { readonly_tool with required_permission = Some Types.CanReadState } );
+    ( "masc_verify_pending",
+      { readonly_tool with required_permission = Some Types.CanReadState } );
+    ( "masc_verify_request",
+      { default_metadata with required_permission = Some Types.CanReadState } );
+    ( "masc_verify_status",
+      { readonly_tool with required_permission = Some Types.CanReadState } );
+    ( "masc_verify_submit",
+      { default_metadata with required_permission = Some Types.CanReadState } );
+    ( "masc_recall_search",
+      { readonly_tool with required_permission = Some Types.CanReadState } );
+    ( "masc_portal_open",
+      { default_metadata with required_permission = Some Types.CanOpenPortal } );
+    ( "masc_portal_close",
+      { default_metadata with required_permission = Some Types.CanOpenPortal } );
+    ( "masc_portal_send",
+      { default_metadata with required_permission = Some Types.CanSendPortal } );
     ( "masc_set_room",
       hidden_active ~canonical_name:"masc_start" ~replacement:"masc_start"
         "Compatibility alias that only selects the project coordination root. Prefer masc_start for truthful namespace onboarding." );

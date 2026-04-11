@@ -112,6 +112,11 @@ let dispatch ctx ~name ~args : tool_result option =
 (* Tool_spec registration                                           *)
 (* ================================================================ *)
 
+let tool_required_permission = function
+  | "masc_pause_status" -> Some Types.CanReadState
+  | "masc_pause" | "masc_resume" -> Some Types.CanBroadcast
+  | _ -> None
+
 let () =
   List.iter
     (fun (s : Types.tool_schema) ->
@@ -122,5 +127,6 @@ let () =
            ~module_tag:Tool_dispatch.Mod_control
            ~input_schema:s.input_schema
            ~handler_binding:Tag_dispatch
+           ?required_permission:(tool_required_permission s.name)
            ()))
     schemas

@@ -224,6 +224,13 @@ let _tool_spec_requires_join = [ "masc_heartbeat" ]
 let _tool_spec_system_internal =
   [ "masc_heartbeat_start"; "masc_heartbeat_stop"; "masc_heartbeat_list" ]
 
+let tool_required_permission = function
+  | "masc_heartbeat" | "masc_heartbeat_start" | "masc_heartbeat_stop" ->
+      Some Types.CanBroadcast
+  | "masc_heartbeat_list" ->
+      Some Types.CanReadState
+  | _ -> None
+
 let () =
   List.iter
     (fun (s : Types.tool_schema) ->
@@ -238,5 +245,6 @@ let () =
            ~requires_join:(List.mem s.name _tool_spec_requires_join)
            ~visibility:(if is_system then Tool_catalog.Hidden else Tool_catalog.Default)
            ~allow_direct_call_when_hidden:is_system
+           ?required_permission:(tool_required_permission s.name)
            ()))
     schemas

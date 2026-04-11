@@ -692,7 +692,13 @@ let dispatch_stream ~on_text_delta ctx ~name ~args : tool_result option =
 let _tool_spec_read_only = [ "masc_keeper_list"; "masc_keeper_status" ]
 
 let tool_required_permission = function
-  | "masc_keeper_reconcile" -> Some Types.CanBroadcast
+  | "masc_persona_list" | "masc_keeper_list" | "masc_keeper_status" ->
+      Some Types.CanReadState
+  | "masc_keeper_create_from_persona" | "masc_keeper_up"
+  | "masc_keeper_msg" | "masc_keeper_msg_result"
+  | "masc_keeper_repair" | "masc_keeper_reconcile"
+  | "masc_keeper_down" | "masc_keeper_reset" ->
+      Some Types.CanBroadcast
   | _ -> None
 
 let () =

@@ -892,6 +892,17 @@ let tool_spec_read_only =
 
 let register () =
   let handler = fun ~name ~args -> Some (handle_tool name args) in
+  let tool_required_permission = function
+    | "masc_board_list" | "masc_board_get" | "masc_board_stats"
+    | "masc_board_search" | "masc_board_profile" | "masc_board_hearths" ->
+        Some Types.CanReadState
+    | "masc_board_post" | "masc_board_comment" | "masc_board_vote"
+    | "masc_board_comment_vote" ->
+        Some Types.CanBroadcast
+    | "masc_board_delete" | "masc_board_cleanup" ->
+        Some Types.CanAdmin
+    | _ -> None
+  in
   let make_spec (s : Types.tool_schema) =
     let ro = List.mem s.name tool_spec_read_only in
     Tool_spec.create
@@ -899,6 +910,7 @@ let register () =
       ~module_tag:Tool_dispatch.Mod_inline ~input_schema:s.input_schema
       ~handler_binding:(Shared handler)
       ~is_read_only:ro ~is_idempotent:ro
+      ?required_permission:(tool_required_permission s.name)
       ()
   in
   Tool_spec.register_all (List.map make_spec tools)

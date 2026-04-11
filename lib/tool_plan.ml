@@ -197,6 +197,11 @@ let schemas = Tool_schemas_plan.schemas
 let _tool_spec_read_only = [ "masc_plan_get" ]
 let _tool_spec_requires_join = [ "masc_plan_set_task"; "masc_plan_clear_task" ]
 
+let tool_required_permission = function
+  | "masc_plan_get" | "masc_plan_get_task" ->
+      Some Types.CanReadState
+  | _ -> None
+
 let () =
   List.iter
     (fun (s : Types.tool_schema) ->
@@ -210,5 +215,6 @@ let () =
            ~is_read_only:(List.mem s.name _tool_spec_read_only)
            ~is_idempotent:(List.mem s.name _tool_spec_read_only)
            ~requires_join:(List.mem s.name _tool_spec_requires_join)
+           ?required_permission:(tool_required_permission s.name)
            ()))
     schemas

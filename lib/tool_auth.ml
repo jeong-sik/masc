@@ -172,6 +172,15 @@ let dispatch ctx ~name ~args : tool_result option =
 
 let schemas = Tool_schemas_auth.schemas
 
+let tool_required_permission = function
+  | "masc_auth_enable" | "masc_auth_disable" | "masc_auth_revoke" ->
+      Some Types.CanInit
+  | "masc_auth_status" | "masc_auth_refresh" | "masc_auth_list" ->
+      Some Types.CanReadState
+  | "masc_auth_create_token" ->
+      Some Types.CanAdmin
+  | _ -> None
+
 (* ================================================================ *)
 (* Tool_spec registration                                           *)
 (* ================================================================ *)
@@ -186,5 +195,6 @@ let () =
            ~module_tag:Tool_dispatch.Mod_auth
            ~input_schema:s.input_schema
            ~handler_binding:Tag_dispatch
+           ?required_permission:(tool_required_permission s.name)
            ()))
     schemas

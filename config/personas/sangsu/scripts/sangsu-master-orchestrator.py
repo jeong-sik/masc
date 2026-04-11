@@ -307,7 +307,7 @@ class SangsuOrchestrator:
         # Call Claude
         try:
             message = client.messages.create(
-                model="claude-sonnet-4-5-20250929",
+                model=os.getenv("MASC_PERSONA_MODEL", "claude-sonnet-4-5-20250929"),
                 max_tokens=150,
                 temperature=0.9,
                 system=persona,

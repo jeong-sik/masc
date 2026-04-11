@@ -96,7 +96,7 @@ def detect_emotion_llm(user_message: str, context: dict = None) -> dict:
 
     try:
         response = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model=os.getenv("MASC_PERSONA_MODEL", "claude-sonnet-4-20250514"),
             max_tokens=300,
             messages=[{"role": "user", "content": prompt}]
         )

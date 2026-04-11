@@ -147,7 +147,11 @@ let generate_code_change = Autoresearch_codegen.generate_code_change
 (* Loop State Management                                             *)
 (* ================================================================ *)
 
-let create_state ~goal ~metric_fn ?(model_model = "glm") ~target_file ~cycle_timeout_s ~max_cycles ?patience ?build_verify_fn ?(lower_is_better = false) ~workdir () =
+let create_state ~goal ~metric_fn ?model_model ~target_file ~cycle_timeout_s ~max_cycles ?patience ?build_verify_fn ?(lower_is_better = false) ~workdir () =
+  let model_model = match model_model with
+    | Some m -> m
+    | None -> Provider_adapter.default_model_provider_prefix_result () |> Result.value ~default:"auto"
+  in
   let now = Time_compat.now () in
   let patience = match patience with
     | Some p -> p

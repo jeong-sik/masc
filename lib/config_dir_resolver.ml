@@ -84,14 +84,21 @@ let to_json (resolution : resolution) =
       ("personas", item_to_json resolution.personas);
     ]
 
+(* A config root is identified by [tool_policy.toml] — the SSOT file that
+   keeper/tool runtime cannot start without. Any config directory that
+   lacks tool_policy.toml is a partial build artifact (e.g. dune materializes
+   [config/cascade.json] into [_build/default/config/] when a test declares
+   it as a dep), and must not be picked as the resolved root.
+
+   Before this change the signature was [tool_policy.toml OR prompts OR
+   keepers OR personas OR cascade.json]. The OR semantics caused
+   [_build/default/config/] with only cascade.json to be picked ahead of
+   the real source [config/], making init_policy_config fail in CI with
+   "tool policy config not found at resolved config root …/_build/default/
+   config/tool_policy.toml". *)
 let config_signature_exists config_dir =
-  let cascade = Filename.concat config_dir "cascade.json" in
-  let prompts = Filename.concat config_dir "prompts" in
-  let keepers = Filename.concat config_dir "keepers" in
-  let personas = Filename.concat config_dir "personas" in
-  existing_dir config_dir
-  && (existing_file cascade || existing_dir prompts || existing_dir keepers
-     || existing_dir personas)
+  let tool_policy = Filename.concat config_dir "tool_policy.toml" in
+  existing_dir config_dir && existing_file tool_policy
 
 let rec ancestor_dirs path =
   let dir = absolute_path path in

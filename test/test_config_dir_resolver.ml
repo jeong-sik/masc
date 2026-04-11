@@ -35,6 +35,17 @@ let make_config_root root =
   mkdir_p (Filename.concat config "keepers");
   mkdir_p (Filename.concat config "personas");
   write_file (Filename.concat config "cascade.json") "{}";
+  write_file (Filename.concat config "tool_policy.toml") "# test marker\n";
+  config
+
+(* A partial config dir that mimics dune's [_build/default/config/]
+   materialisation: cascade.json is promoted but tool_policy.toml is
+   absent. The resolver must NOT pick this as the config root; it
+   should keep walking up. *)
+let make_partial_config_root root =
+  let config = Filename.concat root "config" in
+  mkdir_p config;
+  write_file (Filename.concat config "cascade.json") "{}";
   config
 
 let make_inputs ?env_base_path ?env_config_dir ?env_personas_dir
@@ -139,6 +150,37 @@ let test_local_masc_fallback_collapses_explicit_masc_dir () =
     (Lib.Config_dir_resolver.source_to_string resolution.config_root.source);
   check string "root path" local_config resolution.config_root.path
 
+(* Regression: dune materialises [config/cascade.json] into
+   [_build/default/config/cascade.json] when a test declares it as a
+   [(deps %{workspace_root}/config/cascade.json)] rule. Before the
+   config_signature_exists tightening, the executable-relative lookup
+   matched [_build/default/config/] on that lone file and reported a
+   broken config root. With tool_policy.toml required, the lookup
+   walks past _build and picks the real source config. *)
+let test_build_dir_partial_config_is_skipped () =
+  with_temp_dir "config-dir-build-partial" @@ fun root ->
+  let real_config = make_config_root root in
+  let build_config_parent = Filename.concat root "_build/default/test" in
+  mkdir_p build_config_parent;
+  let exe = Filename.concat build_config_parent "test_runner.exe" in
+  write_file exe "#!/bin/sh\n";
+  Unix.chmod exe 0o755;
+  (* Partial config mimicking _build/default/config materialisation:
+     cascade.json is promoted but tool_policy.toml is absent. *)
+  let _partial =
+    make_partial_config_root (Filename.concat root "_build/default")
+  in
+  let resolution =
+    Lib.Config_dir_resolver.resolve_with
+      (make_inputs ~cwd:build_config_parent ~executable_name:exe ())
+  in
+  check string "status ready" "ready"
+    (Lib.Config_dir_resolver.status_to_string resolution.status);
+  check string "skipped partial _build config" real_config
+    resolution.config_root.path;
+  check string "source is exe_relative" "exe_relative"
+    (Lib.Config_dir_resolver.source_to_string resolution.config_root.source)
+
 let test_no_legacy_me_root_fallback () =
   with_temp_dir "config-dir-no-legacy" @@ fun me_root ->
   let _repo_root =
@@ -200,6 +242,7 @@ let test_personas_dirs_ignores_base_path_fallback () =
   mkdir_p (Filename.concat config_root "keepers");
   mkdir_p (Filename.concat config_root "personas");
   write_file (Filename.concat config_root "cascade.json") "{}";
+  write_file (Filename.concat config_root "tool_policy.toml") "# test marker\n";
   let base = Filename.dirname config_root in
   let base_personas = Filename.concat (Filename.concat base ".masc") "personas" in
   mkdir_p base_personas;
@@ -225,6 +268,8 @@ let () =
           test_case "local masc fallback collapses explicit .masc dir"
             `Quick test_local_masc_fallback_collapses_explicit_masc_dir;
           test_case "home masc fallback" `Quick test_home_masc_fallback;
+          test_case "build dir partial config is skipped (cascade-only)"
+            `Quick test_build_dir_partial_config_is_skipped;
           test_case "does not fallback to legacy me_root repo path" `Quick
             test_no_legacy_me_root_fallback;
         ] );

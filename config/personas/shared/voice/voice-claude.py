@@ -133,7 +133,7 @@ def query_claude(text: str):
         print("🤖 Claude: ", end="", flush=True)
 
         with anthropic_client.messages.stream(
-            model="claude-sonnet-4-20250514",
+            model=os.getenv("MASC_PERSONA_MODEL", "claude-sonnet-4-20250514"),
             max_tokens=4096,
             messages=[{"role": "user", "content": text}]
         ) as stream:

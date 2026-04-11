@@ -35,12 +35,20 @@ let handle_broadcast ((message, _format) : string * string)
     let mention = Mention.extract trimmed in
     Ok { delivered = true; room_message = trimmed; mention }
 
+let parse_broadcast json =
+  Sg.parse broadcast_schema json
+  |> Result.map_error (fun errs ->
+    errs
+    |> List.map (fun (e : Agent_sdk.Tool_input_validation.field_error) ->
+      Printf.sprintf "%s: expected %s, got %s" e.path e.expected e.actual)
+    |> String.concat "; ")
+
 let tool = Typed_tool_masc.create
   ~name:"masc_broadcast_typed"
   ~description:"[Typed PoC] Send a message visible to ALL agents via SSE push."
   ~module_tag:Tool_dispatch.Mod_room
   ~params:(Sg.to_params broadcast_schema)
-  ~parse:(Sg.parse broadcast_schema)
+  ~parse:parse_broadcast
   ~handler:handle_broadcast
   ~encode:encode_broadcast
   ~requires_join:true

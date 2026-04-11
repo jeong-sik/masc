@@ -2,7 +2,15 @@
 
 open Masc_mcp
 
-let parse = Agent_sdk.Tool_schema_gen.parse Tool_broadcast_typed.broadcast_schema
+let format_parse_errors errs =
+  errs
+  |> List.map (fun (e : Agent_sdk.Tool_input_validation.field_error) ->
+    Printf.sprintf "%s: expected %s, got %s" e.path e.expected e.actual)
+  |> String.concat "; "
+
+let parse json =
+  Agent_sdk.Tool_schema_gen.parse Tool_broadcast_typed.broadcast_schema json
+  |> Result.map_error format_parse_errors
 
 let test_parse_valid () =
   let json = `Assoc [("message", `String "hello world")] in

@@ -11,6 +11,25 @@
 #
 # For local development against an unreleased checkout:
 #   AGENT_SDK_PIN_URL=/path/to/local/oas opam-pin-external-deps.sh
+#
+# ──────────────────────────────────────────────────────────────────────────
+# pin vs install trap (2026-04-11 post-mortem)
+#
+# Every `opam pin add` here uses `-n -y`: `-y` answers yes automatically,
+# `-n` means "do NOT install/rebuild the pinned package". Those flags are
+# correct for CI, which runs a clean `opam install` pass after pinning so
+# the cache stays deterministic. But for LOCAL development they are a
+# footgun: after bumping a SHA and re-running this script you will see
+# "pinned successfully" and conclude the new code is live, when in fact
+# the installed binary is still the OLD commit. Symptoms include "my
+# feat is staged in OAS but `masc-mcp` never sees it" and "the function
+# exists in the pinned source tree but `dune build` links against an
+# older copy".
+#
+# Pass `--install` to run `opam install --yes <pinned packages>` at the
+# tail of this script so the binary actually matches the pin. The full
+# install takes several minutes, which is why it is opt-in.
+# ──────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -23,6 +42,7 @@ readonly NEO4J_BOLT_SHA="a1ca30c1247db5c58934e99306fe330419f7b21a"
 
 include_bisect=false
 include_compact_protocol=false
+do_install=false
 agent_sdk_pin_source="${AGENT_SDK_PIN_URL:-${OAS_AGENT_SDK_URL}#${OAS_AGENT_SDK_SHA}}"
 
 for arg in "$@"; do
@@ -33,6 +53,9 @@ for arg in "$@"; do
     --with-compact-protocol)
       include_compact_protocol=true
       ;;
+    --install)
+      do_install=true
+      ;;
     *)
       echo "unknown argument: $arg" >&2
       exit 2
@@ -40,23 +63,52 @@ for arg in "$@"; do
   esac
 done
 
+# Accumulate the package names we pin so a follow-up `opam install` in
+# --install mode can rebuild exactly the set that changed, nothing more.
+pinned_pkgs=()
+
 if $include_compact_protocol; then
   opam pin add compact-protocol https://github.com/jeong-sik/compact-protocol.git#main -n -y
+  pinned_pkgs+=("compact-protocol")
 fi
 
 # mcp_protocol_eio and mcp_protocol_http merged into mcp_protocol
 # as sub-libraries (mcp-protocol-sdk#60). Pin the released single-package line.
 opam pin add mcp_protocol https://github.com/jeong-sik/mcp-protocol-sdk.git#v1.3.0 -n -y
+pinned_pkgs+=("mcp_protocol")
 opam pin add agent_sdk "${agent_sdk_pin_source}" -n -y
+pinned_pkgs+=("agent_sdk")
 opam pin add ocaml-webrtc "https://github.com/jeong-sik/ocaml-webrtc.git#${WEBRTC_SHA}" -n -y
+pinned_pkgs+=("ocaml-webrtc")
 opam pin add grpc-direct-core "https://github.com/jeong-sik/grpc-direct.git#${GRPC_DIRECT_SHA}" -n -y
+pinned_pkgs+=("grpc-direct-core")
 opam pin add grpc-direct "https://github.com/jeong-sik/grpc-direct.git#${GRPC_DIRECT_SHA}" -n -y
+pinned_pkgs+=("grpc-direct")
 opam pin add neo4j_packstream "https://github.com/jeong-sik/ocaml-neo4j-bolt.git#${NEO4J_BOLT_SHA}" -n -y
+pinned_pkgs+=("neo4j_packstream")
 opam pin add neo4j_bolt_common "https://github.com/jeong-sik/ocaml-neo4j-bolt.git#${NEO4J_BOLT_SHA}" -n -y
+pinned_pkgs+=("neo4j_bolt_common")
 opam pin add neo4j_bolt "https://github.com/jeong-sik/ocaml-neo4j-bolt.git#${NEO4J_BOLT_SHA}" -n -y
+pinned_pkgs+=("neo4j_bolt")
 opam pin add neo4j_bolt_eio "https://github.com/jeong-sik/ocaml-neo4j-bolt.git#${NEO4J_BOLT_SHA}" -n -y
+pinned_pkgs+=("neo4j_bolt_eio")
 
 if $include_bisect; then
   # bisect_ppx opam constraints lag newer compilers; keep CI solvable under OCaml 5.4 by pinning.
   opam pin add bisect_ppx git+https://github.com/patricoferris/bisect_ppx.git#5.2 -n -y
+  pinned_pkgs+=("bisect_ppx")
+fi
+
+if $do_install; then
+  echo ""
+  echo "[opam-pin] --install set; rebuilding ${#pinned_pkgs[@]} pinned packages..."
+  opam install --yes "${pinned_pkgs[@]}"
+  echo "[opam-pin] install complete. Installed binaries now match the pins above."
+else
+  echo ""
+  echo "[opam-pin] Pins updated. NOTE: installed binaries are still the previous versions."
+  echo "[opam-pin] Run the same command with --install to rebuild, or run manually:"
+  printf '[opam-pin]   opam install --yes'
+  printf ' %s' "${pinned_pkgs[@]}"
+  printf '\n'
 fi

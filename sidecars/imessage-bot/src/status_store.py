@@ -15,8 +15,6 @@ class ConnectorRuntimeStatus:
     gate_base_url: str
     gate_healthy: bool | None
     gate_health_checked_at: str
-    reply_mode: str
-    self_chat_guid: str
     last_message_at: str
     messages_processed: int
     messages_failed: int
@@ -24,6 +22,8 @@ class ConnectorRuntimeStatus:
     chat_db_path: str
     poll_interval_sec: float
     pid: int
+    reply_mode: str = ""
+    self_chat_guid: str = ""
 
 
 class StatusStore:

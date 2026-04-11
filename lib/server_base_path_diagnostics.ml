@@ -97,12 +97,27 @@ let detect ?cwd ?env_masc_base_path ?strict ?input_base_path ?resolution_source
     && effective_has_masc_dir
     && not (String.equal cwd_masc_root effective_masc_norm)
   in
+  let resolution_source = resolution_source_opt ?resolution_source () in
+  (* Dual .masc roots only force fail-fast when the effective base
+     path was derived from a cwd heuristic (i.e. NOT an explicit env
+     or CLI flag). If the operator, CI harness, or test driver
+     explicitly set [MASC_BASE_PATH] / [--base-path], the warning
+     already documents that "runtime will use the explicit base path,
+     but operator surfaces may inspect stale state from cwd" — that is
+     exactly the contract that lets test harnesses point the server at
+     a [/tmp/...-base-<hex>] directory from inside a checked-out git
+     worktree that happens to carry its own committed [.masc/] tree.
+     Pre-#6548 behavior had this escape; removing it broke the
+     [Run SSE reconnect e2e] CI step which fails immediately on
+     [Dual .masc roots are not supported]. *)
+  let implicit_dual_roots =
+    dual_masc_roots && not (explicit_resolution_source resolution_source)
+  in
   let fail_fast_enabled =
     match strict with
-    | Some enabled -> enabled || dual_masc_roots
-    | None -> fail_fast_env_enabled () || dual_masc_roots
+    | Some enabled -> enabled || implicit_dual_roots
+    | None -> fail_fast_env_enabled () || implicit_dual_roots
   in
-  let resolution_source = resolution_source_opt ?resolution_source () in
   let warning =
     if dual_masc_roots then
       let stale_suffix =
@@ -146,7 +161,16 @@ let detect ?cwd ?env_masc_base_path ?strict ?input_base_path ?resolution_source
     warning;
   }
 
-let strict_violation (diag : t) = diag.dual_masc_roots
+let strict_violation (diag : t) =
+  (* Only a *heuristic* dual-root detection should abort startup. If the
+     operator explicitly pointed the server at a base path via env or
+     CLI, honor that decision — the warning still fires so operator
+     tools can flag the stale cwd [.masc] tree, but the runtime must
+     not kill itself out from under a CI/test harness or a developer
+     who deliberately pointed at a tmp directory. Pairs with the same
+     escape condition used to compute [fail_fast_enabled] above. *)
+  diag.dual_masc_roots
+  && not (explicit_resolution_source diag.resolution_source)
 
 let startup_lines (diag : t) =
   let lines =

@@ -176,6 +176,7 @@
    institution_eio
    level2_config
    level4_config
+   llm_metric_bridge
    local_runtime_pool
    retrieval_projection
    sdk_tool_contract

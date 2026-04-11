@@ -655,6 +655,11 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
         exit 1
       end;
       Governance_registry.ensure_init ();
+      (* Install the LLM provider metrics bridge before any keeper turn
+         fires — otherwise early calls resolve OAS's Metrics.get_global
+         to the default noop and bypass the Prometheus counter. *)
+      Llm_metric_bridge.install ();
+      Log.Server.info "Llm_metric_bridge installed (masc_llm_provider_http_status_total)";
       Runtime_params.restore ~base_path;
       Log.Server.info "Runtime_params restored from %s" base_path;
       Keeper_crash_persistence.start_drain_fiber ~sw ~clock;

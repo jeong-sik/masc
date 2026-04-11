@@ -185,7 +185,15 @@ let init () =
   add "masc_inference_queue_cancelled_total"
     "Total admission waits cancelled by fiber cancellation" Counter;
   register_histogram ~name:"masc_inference_queue_wait_seconds"
-    ~help:"Time waiting in admission queue before acquiring permit" ()
+    ~help:"Time waiting in admission queue before exchanging for permit" ();
+  (* LLM provider HTTP response counter — emitted by Llm_metric_bridge
+     via the OAS Metrics.t on_http_status hook.  Labels are populated
+     dynamically per call; no initial registration with zero-value rows
+     is needed because inc_counter auto-creates the label series on
+     first observation. *)
+  add "masc_llm_provider_http_status_total"
+    "Total HTTP responses from LLM providers, labeled by provider, model, and status code"
+    Counter
 
 let start_time = Time_compat.now ()
 

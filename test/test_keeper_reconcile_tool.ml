@@ -135,9 +135,11 @@ let test_keeper_reconcile_inspect_and_clear () =
               ])
       in
       check bool "clear ok" true ok;
-      let clear_json = parse_json_exn clear_body in
-      check bool "clear result true" true
-        Yojson.Safe.Util.(clear_json |> member "cleared" |> to_bool);
+      ignore (parse_json_exn clear_body);
+      (* Skip mechanism assertions (cleared / already_cleared) because
+         the keepalive auto-clear deadlock-break can race and produce
+         any of Cleared_record, Already_cleared, or No_record.
+         Rely on the post-condition checks below instead. *)
       let ok, status_body_after =
         dispatch_keeper_exn ctx ~name:"masc_keeper_status"
           ~args:(`Assoc [ ("name", `String keeper_name) ])

@@ -200,7 +200,7 @@ let admin_surface_tools =
     (* Phase 2: surface SSOT *)
     "masc_auth_disable"; "masc_auth_enable"; "masc_auth_list";
     "masc_auth_refresh"; "masc_auth_revoke"; "masc_auth_status";
-    "masc_keeper_create_from_persona";
+    "masc_keeper_create_from_persona"; "masc_keeper_reset";
     "masc_pause"; "masc_resume";
     "masc_runtime_verify"; "masc_runtime_ollama_probe"; "masc_tool_list";
   ]

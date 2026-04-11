@@ -211,6 +211,9 @@ let test_keeper_direct_reply_contracts () =
   check bool "operator keeper_message forwards direct reply flag" true
     (file_contains_pattern "lib/operator/operator_control.ml"
        {|("direct_reply", `Bool true)|});
+  check bool "channel gate keeper bridge uses streaming reply path" true
+    (file_contains_pattern "lib/gate_keeper_backend.ml"
+       "Tool_keeper.dispatch_stream");
   check bool "keeper turn parses direct reply flag" true
     (file_contains_pattern "lib/keeper/keeper_turn.ml"
        "get_bool args \"direct_reply\"");

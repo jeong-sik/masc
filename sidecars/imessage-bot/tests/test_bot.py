@@ -216,7 +216,7 @@ class IMessageBotTests(unittest.IsolatedAsyncioTestCase):
         )
 
     @patch("src.bot.send_message", return_value=False)
-    @patch("src.bot.resolve_self_chat_guid", return_value="self-guid")
+    @patch("src.bot.resolve_self_chat_guid", return_value="source-guid")
     @patch("src.bot.GateClient")
     @patch("src.bot.get_config")
     async def test_handle_message_counts_reply_send_failure_without_retrying_gate(
@@ -259,7 +259,7 @@ class IMessageBotTests(unittest.IsolatedAsyncioTestCase):
         resolve_self_chat_guid_mock.assert_called_once_with("/tmp/chat.db", "")
         send_message_mock.assert_called_once_with(
             text="reply text",
-            chat_guid="self-guid",
+            chat_guid="source-guid",
         )
         self.assertEqual(bot._messages_processed, 1)
         self.assertEqual(bot._messages_failed, 1)

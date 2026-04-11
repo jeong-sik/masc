@@ -12,8 +12,7 @@ open Tool_args
 (* Re-export sub-modules *)
 include Tool_autoresearch_registry
 include Tool_autoresearch_broadcast
-include Tool_autoresearch_repo_synthesis
-
+type context = Tool_autoresearch_context.t
 let schemas = Tool_autoresearch_schemas.schemas
 
 type result = bool * string
@@ -282,15 +281,6 @@ let handle_start (ctx : context) args =
         ("warnings", `List (List.map (fun value -> `String value) state.warnings));
       ])
 
-let handle_swarm_start (_ctx : context) _args =
-  (* Team session engine removed — swarm start is no longer supported. *)
-  `Assoc
-    [
-      ( "error",
-        `String
-          "masc_autoresearch_swarm_start is no longer supported (team session engine removed)" );
-    ]
-
 let handle_status (ctx : context) args =
   match resolve_loop_id args with
   | None -> `Assoc [("error", `String "No autoresearch loop running")]
@@ -433,10 +423,6 @@ let handle_search_findings _ctx args =
 let dispatch (ctx : context) ~name ~args : result option =
   match name with
   | "masc_autoresearch_start" -> Some (wrap_result (handle_start ctx args))
-  | "masc_autoresearch_swarm_start" ->
-      Some (wrap_result (handle_swarm_start ctx args))
-  | "masc_repo_synthesis_swarm_start" ->
-      Some (wrap_result (handle_repo_synthesis_swarm_start ctx args))
   | "masc_autoresearch_status" -> Some (wrap_result (handle_status ctx args))
   | "masc_autoresearch_stop" -> Some (wrap_result (handle_stop ctx args))
   | "masc_autoresearch_inject" -> Some (wrap_result (handle_inject ctx args))

@@ -498,11 +498,6 @@ let test_permission_for_tool_autoresearch_start () =
   | Some Types.CanAdmin -> ()
   | _ -> fail "expected CanAdmin"
 
-let test_permission_for_tool_autoresearch_swarm_start () =
-  match Auth.permission_for_tool "masc_autoresearch_swarm_start" with
-  | Some Types.CanAdmin -> ()
-  | _ -> fail "expected CanAdmin"
-
 let test_permission_for_tool_autoresearch_cycle () =
   match Auth.permission_for_tool "masc_autoresearch_cycle" with
   | Some Types.CanAdmin -> ()
@@ -748,8 +743,6 @@ let () =
         test_permission_for_tool_autoresearch_status;
       test_case "autoresearch_start" `Quick
         test_permission_for_tool_autoresearch_start;
-      test_case "autoresearch_swarm_start" `Quick
-        test_permission_for_tool_autoresearch_swarm_start;
       test_case "autoresearch_cycle" `Quick
         test_permission_for_tool_autoresearch_cycle;
       test_case "autoresearch_inject" `Quick

@@ -149,7 +149,7 @@ let test_cycle_reinjects_diff_guard_lesson () =
   Lib.Autoresearch.with_loops_rw (fun () ->
       Hashtbl.replace Lib.Autoresearch.active_loops state.loop_id state;
       Lib.Autoresearch.latest_loop_id := Some state.loop_id);
-  let ctx : Lib.Tool_autoresearch_repo_synthesis.context =
+  let ctx : Lib.Tool_autoresearch_context.t =
     {
       base_path = root;
       agent_name = Some "test";
@@ -226,7 +226,7 @@ let test_build_verify_downgrade_rewrites_history () =
   Lib.Autoresearch.with_loops_rw (fun () ->
       Hashtbl.replace Lib.Autoresearch.active_loops state.loop_id state;
       Lib.Autoresearch.latest_loop_id := Some state.loop_id);
-  let ctx : Lib.Tool_autoresearch_repo_synthesis.context =
+  let ctx : Lib.Tool_autoresearch_context.t =
     {
       base_path = root;
       agent_name = Some "test";
@@ -386,7 +386,7 @@ let test_cycle_restores_ignored_target_after_empty_diff () =
   Lib.Autoresearch.with_loops_rw (fun () ->
       Hashtbl.replace Lib.Autoresearch.active_loops state.loop_id state;
       Lib.Autoresearch.latest_loop_id := Some state.loop_id);
-  let ctx : Lib.Tool_autoresearch_repo_synthesis.context =
+  let ctx : Lib.Tool_autoresearch_context.t =
     {
       base_path = root;
       agent_name = Some "test";

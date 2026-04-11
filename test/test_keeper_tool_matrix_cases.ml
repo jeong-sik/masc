@@ -299,8 +299,6 @@ let extra_guard_fragments_for_name = function
   | "masc_autoresearch_status"
   | "masc_autoresearch_stop" ->
       [ "no autoresearch loop running" ]
-  | "masc_autoresearch_swarm_start" ->
-      [ "requires local team-session runtime context" ]
   | "masc_board_migrate" -> [ "requires postgresql backend" ]
   | "masc_get_metrics" -> [ "no metrics found" ]
   | "masc_library_promote" -> [ "no candidate matching" ]
@@ -316,32 +314,7 @@ let merge_expectation base extras =
   | Expect_success_or_guard fragments ->
       Expect_success_or_guard (fragments @ extras)
 
-let retired_front_door_case_for_name name =
-  match name with
-  | "masc_repo_synthesis_swarm_start" ->
-      Some
-        {
-          init_mode = Init_joined;
-          prepare = (fun _fixture -> ());
-          arguments =
-            (fun fixture _schema ->
-              `Assoc
-                [
-                  ("question", `String "tool matrix synthesis question");
-                  ("repo_path", `String fixture.generic.base_path);
-                ]);
-          expectation =
-            Expect_success_or_guard
-              ([ "requires local team-session runtime context";
-                 "requires team-session launch support" ]
-              @ extra_guard_fragments_for_name name);
-        }
-  | _ -> None
-
 let case_for_name name =
-  match retired_front_door_case_for_name name with
-  | Some case -> case
-  | None ->
   if string_starts_with ~prefix:"masc_" name then
     let generic_case = Generic.case_for_name name in
     {

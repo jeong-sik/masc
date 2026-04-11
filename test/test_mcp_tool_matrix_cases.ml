@@ -78,7 +78,6 @@ let strict_success_names =
     "masc_plan_init";
     "masc_plan_set_task";
     "masc_plan_update";
-    "masc_repo_synthesis_swarm_start";
     "masc_start";
     "masc_status";
     "masc_tool_help";
@@ -124,7 +123,6 @@ let generic_matrix_excluded_names =
     "masc_observe_topology";
     "masc_operator_snapshot";
     "masc_policy_status";
-    "masc_repo_synthesis_swarm_start";
     "masc_tool_admin_snapshot";
     "masc_unit_define";
   ]

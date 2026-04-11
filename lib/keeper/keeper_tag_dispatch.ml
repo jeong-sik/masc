@@ -173,14 +173,18 @@ let dispatch
   | Mod_autoresearch ->
       (* Keeper already handles masc_autoresearch_* before reaching this path.
          If we get here, provide a minimal context without team session starter. *)
-      Tool_autoresearch.dispatch
-        { Tool_autoresearch.base_path = config.base_path;
+      let ctx : Tool_autoresearch.context =
+        {
+          base_path = config.base_path;
           agent_name = Some agent_name;
           start_operation = None;
           config = Some config;
           sw = Eio_context.get_switch_opt ();
-          clock = Eio_context.get_clock_opt () }
-        ~name ~args
+          clock = Eio_context.get_clock_opt ();
+        }
+      in
+      Tool_autoresearch.dispatch
+        ctx ~name ~args
 
   (* ── Tier C: MCP-state-dependent ───────────────────────────── *)
 

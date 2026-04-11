@@ -1,6 +1,6 @@
 import { html } from 'htm/preact'
 import { useSignal } from '@preact/signals'
-import { useEffect, useRef } from 'preact/hooks'
+import { useEffect, useMemo, useRef } from 'preact/hooks'
 import { LoadingState } from './common/feedback-state'
 import {
   fetchDashboardExecution,
@@ -689,7 +689,7 @@ export function FleetTelemetryPanel() {
   }, [])
 
   const value = state.value
-  const counts = summaryCounts(value.rows)
+  const counts = useMemo(() => summaryCounts(value.rows), [value.rows])
   const liveTone: 'neutral' | 'ok' | 'warn' =
     value.rows.length === 0
       ? 'neutral'

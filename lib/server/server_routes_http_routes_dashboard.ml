@@ -19,13 +19,19 @@ let available_cascade_profiles () : string list =
   | Some path ->
     (match Yojson.Safe.from_file path with
      | `Assoc fields ->
-       "default" ::
-       (List.filter_map (fun (k, _) ->
-         if String.length k > 7
-            && String.sub k (String.length k - 7) 7 = "_models"
-         then Some (String.sub k 0 (String.length k - 7))
-         else None
-       ) fields)
+       let from_keys =
+         List.filter_map (fun (k, _) ->
+           if String.length k > 7
+              && String.sub k (String.length k - 7) 7 = "_models"
+           then Some (String.sub k 0 (String.length k - 7))
+           else None
+         ) fields
+       in
+       let with_default =
+         if List.mem "default" from_keys then from_keys
+         else "default" :: from_keys
+       in
+       List.sort_uniq String.compare with_default
      | _ -> ["default"]
      | exception Yojson.Json_error msg ->
        Log.Keeper.warn "cascade config parse error: %s" msg;

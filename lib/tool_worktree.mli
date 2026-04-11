@@ -5,12 +5,12 @@ type context = {
   agent_name: string;
 }
 
-type result = bool * string
+type tool_result = bool * string
 
-val handle_worktree_create : context -> Yojson.Safe.t -> result
-val handle_worktree_remove : context -> Yojson.Safe.t -> result
-val handle_worktree_list : context -> Yojson.Safe.t -> result
+val handle_worktree_create : context -> Yojson.Safe.t -> tool_result
+val handle_worktree_remove : context -> Yojson.Safe.t -> tool_result
+val handle_worktree_list : context -> Yojson.Safe.t -> tool_result
 
-val dispatch : context -> name:string -> args:Yojson.Safe.t -> result option
+val dispatch : context -> name:string -> args:Yojson.Safe.t -> tool_result option
 
 val schemas : Types.tool_schema list

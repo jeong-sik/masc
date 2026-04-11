@@ -8,7 +8,7 @@ type context = {
   agent_name: string;
 }
 
-type result = bool * string
+type tool_result = bool * string
 
 (* Individual handlers *)
 let handle_worktree_create ctx args =
@@ -49,7 +49,7 @@ let handle_worktree_list ctx _args =
   (true, Yojson.Safe.to_string json)
 
 (* Dispatch function - returns None if tool not handled *)
-let dispatch ctx ~name ~args : result option =
+let dispatch ctx ~name ~args : tool_result option =
   match name with
   | "masc_worktree_create" -> Some (handle_worktree_create ctx args)
   | "masc_worktree_remove" -> Some (handle_worktree_remove ctx args)

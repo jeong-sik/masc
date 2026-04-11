@@ -7,7 +7,7 @@
 
 open Yojson.Safe.Util
 
-type result = bool * string
+type tool_result = bool * string
 
 type context = {
   config: Room.config;
@@ -577,7 +577,7 @@ let handle_check ctx args =
   (true, Yojson.Safe.to_string result)
 
 (* Dispatch function *)
-let dispatch ctx ~name ~args : result option =
+let dispatch ctx ~name ~args : tool_result option =
   match name with
   | "masc_status" -> Some (handle_status ctx args)
   | "masc_init" -> Some (handle_init ctx args)

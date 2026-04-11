@@ -9,7 +9,7 @@ type 'a context = {
   clock: 'a Eio.Time.clock;
 }
 
-type result = bool * string
+type tool_result = bool * string
 
 (* Eio cancellation is structured control flow, not an operational error. *)
 let log_non_cancelled prefix = function
@@ -117,7 +117,7 @@ let handle_heartbeat_list _ctx args =
   in
   (true, list_str)
 
-let dispatch ctx ~name ~args : result option =
+let dispatch ctx ~name ~args : tool_result option =
   match name with
   | "masc_heartbeat" -> Some (handle_heartbeat ctx args)
   | "masc_heartbeat_start" -> Some (handle_heartbeat_start ctx args)

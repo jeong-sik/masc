@@ -40,7 +40,7 @@ let strip_state_blocks_text (s : string) : string =
   loop 0 buf;
   Buffer.contents buf
 
-type result = bool * string
+type tool_result = bool * string
 
 
 (** {1 Helpers} *)

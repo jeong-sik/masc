@@ -15,7 +15,7 @@ let arg_get_string_list ctx key =
   Safe_ops.json_string_list key ctx.arguments
 
 (** masc_start — compound onboarding (set project root + join + optional task) *)
-let handle_start (ctx : context) : result option =
+let handle_start (ctx : context) : tool_result option =
   let config = ctx.config in
   let agent_name = ctx.agent_name in
   let state = ctx.state in
@@ -118,7 +118,7 @@ let handle_start (ctx : context) : result option =
       end
 
 (** masc_lock — acquire a file lock *)
-let handle_lock (ctx : context) : result option =
+let handle_lock (ctx : context) : tool_result option =
   let config = ctx.config in
   let agent_name = ctx.agent_name in
   let file = arg_get_string ctx "file" "" in
@@ -160,7 +160,7 @@ let handle_lock (ctx : context) : result option =
   end
 
 (** masc_unlock — release a file lock *)
-let handle_unlock (ctx : context) : result option =
+let handle_unlock (ctx : context) : tool_result option =
   let config = ctx.config in
   let agent_name = ctx.agent_name in
   let file = arg_get_string ctx "file" "" in
@@ -197,7 +197,7 @@ let handle_unlock (ctx : context) : result option =
   end
 
 (** masc_set_room — set the active MASC project root *)
-let handle_set_room (ctx : context) : result option =
+let handle_set_room (ctx : context) : tool_result option =
   let state = ctx.state in
   let path =
     let p = arg_get_string ctx "path" "" in
@@ -250,7 +250,7 @@ let handle_set_room (ctx : context) : result option =
     end
 
 (** masc_join — join the active MASC project namespace *)
-let handle_join (ctx : context) : result option =
+let handle_join (ctx : context) : tool_result option =
   let config = ctx.config in
   let agent_name = ctx.agent_name in
   let registry = ctx.registry in
@@ -317,7 +317,7 @@ let handle_join (ctx : context) : result option =
   Some (true, final_result)
 
 (** masc_leave — leave a MASC room *)
-let handle_leave (ctx : context) : result option =
+let handle_leave (ctx : context) : tool_result option =
   let config = ctx.config in
   let agent_name = ctx.agent_name in
   let registry = ctx.registry in

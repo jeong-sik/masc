@@ -19,7 +19,7 @@ type context = {
   agent_name : string;
 }
 
-type result = bool * string
+type tool_result = bool * string
 
 let max_write_size = 1024 * 1024 (* 1MB *)
 
@@ -606,7 +606,7 @@ let handle_code_git ctx args =
   end
 
 (* Dispatch *)
-let dispatch ctx ~name ~args : result option =
+let dispatch ctx ~name ~args : tool_result option =
   match name with
   | "masc_code_write" -> Some (handle_code_write ctx args)
   | "masc_code_edit" -> Some (handle_code_edit ctx args)

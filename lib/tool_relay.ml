@@ -9,7 +9,7 @@ type context = {
   proc_mgr: Eio_unix.Process.mgr_ty Eio.Resource.t option;
 }
 
-type result = bool * string
+type tool_result = bool * string
 
 let handle_relay_status ctx args =
   let*! messages = get_int_required args "messages" in
@@ -274,7 +274,7 @@ Returns relay recommendation before you commit. Pair with masc_relay_now if rela
 
 ]
 
-let dispatch ctx ~name ~args : result option =
+let dispatch ctx ~name ~args : tool_result option =
   match name with
   | "masc_relay_status" -> Some (handle_relay_status ctx args)
   | "masc_relay_checkpoint" -> Some (handle_relay_checkpoint ctx args)

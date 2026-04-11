@@ -11,7 +11,7 @@ type 'a context = {
   mcp_session_id : string option;
 }
 
-type result = bool * string
+type tool_result = bool * string
 
 let schema_properties entries = `Assoc entries
 
@@ -224,7 +224,7 @@ let json_string_of_result = function
   | Ok json -> (true, Yojson.Safe.to_string json)
   | Error message -> (false, Yojson.Safe.to_string (`Assoc [ ("status", `String "error"); ("message", `String message) ]))
 
-let dispatch (ctx : 'a context) ~name ~args : result option =
+let dispatch (ctx : 'a context) ~name ~args : tool_result option =
   let control_ctx : 'a Operator_control.context =
     {
       config = ctx.config;

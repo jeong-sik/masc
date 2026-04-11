@@ -6,12 +6,12 @@ type context = {
   agent_name: string;
 }
 
-type result = bool * string
+type tool_result = bool * string
 
-val handle_poll_events : context -> Yojson.Safe.t -> result
-val handle_heartbeat_result : context -> Yojson.Safe.t -> result
+val handle_poll_events : context -> Yojson.Safe.t -> tool_result
+val handle_heartbeat_result : context -> Yojson.Safe.t -> tool_result
 
 (** Tool schemas for MCP tools/list *)
 val schemas : Types.tool_schema list
 
-val dispatch : context -> name:string -> args:Yojson.Safe.t -> result option
+val dispatch : context -> name:string -> args:Yojson.Safe.t -> tool_result option

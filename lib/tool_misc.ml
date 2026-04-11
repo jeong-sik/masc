@@ -11,7 +11,7 @@
 
 open Tool_args
 
-type result = bool * string
+type tool_result = bool * string
 
 type context = {
   config: Room.config;
@@ -192,7 +192,7 @@ let tool_inventory_json ctx ~include_hidden ~include_deprecated =
 (* Dispatch (facade)                                                *)
 (* ================================================================ *)
 
-let dispatch ctx ~name ~args : result option =
+let dispatch ctx ~name ~args : tool_result option =
   let admin_ctx : Tool_misc_admin.context =
     { config = ctx.config; agent_name = ctx.agent_name }
   in

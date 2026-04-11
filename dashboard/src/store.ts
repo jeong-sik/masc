@@ -466,6 +466,26 @@ export async function refreshExecution(opts?: RefreshOptions): Promise<void> {
   }
 }
 
+/** Reconcile board posts by id+updated_at so unchanged items keep
+ *  the same object reference.  Preact skips re-rendering subtrees
+ *  whose props haven't changed, preserving scroll position. */
+function reconcileBoardPosts(prev: BoardPost[], next: BoardPost[]): BoardPost[] {
+  if (prev.length === 0) return next
+  const prevById = new Map(prev.map(p => [p.id, p]))
+  let changed = prev.length !== next.length
+  const merged = next.map(n => {
+    const old = prevById.get(n.id)
+    if (old && old.updated_at === n.updated_at
+        && old.votes === n.votes
+        && old.comment_count === n.comment_count) {
+      return old
+    }
+    changed = true
+    return n
+  })
+  return changed ? merged : prev
+}
+
 export async function refreshBoard(): Promise<void> {
   boardLoading.value = true
   try {
@@ -474,7 +494,8 @@ export async function refreshBoard(): Promise<void> {
       excludeAutomation: boardExcludeAutomation.value,
       author: boardAuthorFilter.value || undefined,
     })
-    boardPosts.value = data.posts ?? []
+    const next = data.posts ?? []
+    boardPosts.value = reconcileBoardPosts(boardPosts.value, next)
     lastBoardRefreshAt.value = new Date().toISOString()
   } catch (err) {
     console.warn('[Board] fetch error:', err)

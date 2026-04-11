@@ -60,6 +60,10 @@ let with_keeper_turn_slot ~channel f =
     | Keeper_world_observation.Reactive -> false
   in
   let t0 = Time_compat.now () in
+  Log.Keeper.info "semaphore_acquire: channel=%s autonomous_available=%d turn_available=%d"
+    (if is_autonomous then "autonomous" else "reactive")
+    (Eio.Semaphore.get_value autonomous_turn_semaphore)
+    (Eio.Semaphore.get_value turn_semaphore);
   if is_autonomous then Eio.Semaphore.acquire autonomous_turn_semaphore;
   Eio.Semaphore.acquire turn_semaphore;
   let semaphore_wait_ms =

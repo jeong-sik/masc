@@ -16,7 +16,7 @@ include Tool_autoresearch_repo_synthesis
 
 let schemas = Tool_autoresearch_schemas.schemas
 
-type result = bool * string
+type tool_result = bool * string
 
 let persisted_summary_json (summary : Autoresearch.persisted_summary) =
   `Assoc
@@ -430,7 +430,7 @@ let handle_search_findings _ctx args =
     ]
 
 (** Dispatch an autoresearch tool call (standard MCP pattern). *)
-let dispatch (ctx : context) ~name ~args : result option =
+let dispatch (ctx : context) ~name ~args : tool_result option =
   match name with
   | "masc_autoresearch_start" -> Some (wrap_result (handle_start ctx args))
   | "masc_autoresearch_swarm_start" ->

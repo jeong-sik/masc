@@ -18,7 +18,7 @@ type context = {
   agent_name: string;
 }
 
-type result = bool * string
+type tool_result = bool * string
 
 (* Security: Binary file extensions *)
 let binary_extensions = [
@@ -336,7 +336,7 @@ let handle_code_read ctx args =
   end
 
 (* Dispatch function - returns None if tool not handled *)
-let dispatch ctx ~name ~args : result option =
+let dispatch ctx ~name ~args : tool_result option =
   match name with
   | "masc_code_search" -> Some (handle_code_search ctx args)
   | "masc_code_symbols" -> Some (handle_code_symbols ctx args)

@@ -3,7 +3,7 @@
     Extracted to avoid circular dependencies between
     tool_inline_dispatch, tool_inline_dispatch_room, and tool_inline_dispatch_comm. *)
 
-type result = bool * string
+type tool_result = bool * string
 
 (** Context record capturing all bindings from execute_tool_eio
     that the inline dispatch block needs. *)

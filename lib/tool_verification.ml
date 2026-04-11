@@ -12,7 +12,7 @@
 open Yojson.Safe.Util
 open Tool_args
 
-type result = bool * string
+type tool_result = bool * string
 
 (** masc_verify_request: Create a verification request *)
 let handle_request config agent_name args =
@@ -111,7 +111,7 @@ let handle_auto config _agent_name args =
     | Error e -> (false, e)
 
 (** Dispatch tool calls *)
-let dispatch config agent_name tool_name args : result =
+let dispatch config agent_name tool_name args : tool_result =
   match tool_name with
   | "masc_verify_request" -> handle_request config agent_name args
   | "masc_verify_submit" -> handle_submit config agent_name args

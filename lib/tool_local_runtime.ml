@@ -25,7 +25,7 @@ let ollama_loaded_models_of_ps_json = Tool_local_runtime_probe.ollama_loaded_mod
 let ollama_probe_run_of_generate_json = Tool_local_runtime_probe.ollama_probe_run_of_generate_json
 let kv_cache_assessment_json = Tool_local_runtime_probe.kv_cache_assessment_json
 
-let handle_models _ctx : result =
+let handle_models _ctx : tool_result =
   match fetch_models () with
   | Error msg -> (false, json_error msg)
   | Ok (url, models) ->
@@ -43,7 +43,7 @@ let handle_models _ctx : result =
                 ] );
           ] )
 
-let handle_runtime_status _ctx args : result =
+let handle_runtime_status _ctx args : tool_result =
   let include_models =
     match Yojson.Safe.Util.member "include_models" args with
     | `Bool flag -> flag
@@ -51,7 +51,7 @@ let handle_runtime_status _ctx args : result =
   in
   (true, json_ok [ ("result", runtime_status_json ~include_models ()) ])
 
-let handle_runtime_verify _ctx args : result =
+let handle_runtime_verify _ctx args : tool_result =
   let open Yojson.Safe.Util in
   let runtime_pool = member "runtime_pool" args |> to_string_option in
   let expected_model = member "expected_model" args |> to_string_option in
@@ -75,7 +75,7 @@ let handle_runtime_verify _ctx args : result =
             ?expected_model () );
       ] )
 
-let handle_runtime_bench _ctx args : result =
+let handle_runtime_bench _ctx args : tool_result =
   let open Yojson.Safe.Util in
   let model_id = member "model" args |> to_string_option in
   let runtime_pool = member "runtime_pool" args |> to_string_option in
@@ -127,7 +127,7 @@ let handle_runtime_bench _ctx args : result =
   | Ok json -> (true, json_ok [ ("result", json) ])
   | Error err -> (false, json_error err)
 
-let handle_runtime_ollama_probe _ctx args : result =
+let handle_runtime_ollama_probe _ctx args : tool_result =
   let open Yojson.Safe.Util in
   let server_url = member "server_url" args |> to_string_option in
   let model = member "model" args |> to_string_option in
@@ -159,7 +159,7 @@ let handle_runtime_ollama_probe _ctx args : result =
             ~probe_runs ~max_tokens ~timeout_sec () );
       ] )
 
-let dispatch ctx ~name ~args : result option =
+let dispatch ctx ~name ~args : tool_result option =
   match name with
   (* Canonical names *)
   | "masc_runtime_verify" ->

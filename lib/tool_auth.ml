@@ -7,7 +7,7 @@ type context = {
   agent_name: string;
 }
 
-type result = bool * string
+type tool_result = bool * string
 
 let target_agent_name ctx args =
   match get_string args "agent_name" ctx.agent_name |> String.trim with
@@ -159,7 +159,7 @@ let handle_auth_list ctx _args =
     (true, Buffer.contents buf)
   end
 
-let dispatch ctx ~name ~args : result option =
+let dispatch ctx ~name ~args : tool_result option =
   match name with
   | "masc_auth_enable" -> Some (handle_auth_enable ctx args)
   | "masc_auth_disable" -> Some (handle_auth_disable ctx args)

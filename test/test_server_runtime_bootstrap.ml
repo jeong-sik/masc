@@ -18,6 +18,11 @@ let with_pg_envs f =
   with_env "SUPABASE_DB_URL" (Some "postgresql://supabase/db") @@ fun () ->
   with_env "SB_PG_URL" (Some "postgresql://sb/db") f
 
+let with_clean_base_path_env f =
+  with_env "MASC_BASE_PATH" None @@ fun () ->
+  with_env "MASC_BASE_PATH_INPUT" None @@ fun () ->
+  with_env "MASC_BASE_PATH_RESOLUTION_SOURCE" None f
+
 let write_file path content =
   Out_channel.with_open_bin path (fun oc -> output_string oc content)
 
@@ -51,7 +56,8 @@ let with_temp_dir prefix f =
   let dir = Filename.temp_file prefix "" in
   Sys.remove dir;
   Unix.mkdir dir 0o755;
-  Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
+  Fun.protect ~finally:(fun () -> rm_rf dir)
+    (fun () -> with_clean_base_path_env (fun () -> f dir))
 
 let with_cwd path f =
   let saved = Sys.getcwd () in

@@ -649,7 +649,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       in
       Server_base_path_diagnostics.log_startup_warning path_diagnostics;
       if Server_base_path_diagnostics.strict_violation path_diagnostics then begin
-        Log.Server.error "%s\nSet MASC_BASE_PATH explicitly or unset MASC_BASE_PATH_STRICT to recover."
+        Log.Server.error "%s\nDual .masc roots are not supported. Start the server from the intended base path or remove the stale .masc tree."
           (Option.value path_diagnostics.warning
              ~default:
                "strict base-path guard triggered without a diagnostic warning");

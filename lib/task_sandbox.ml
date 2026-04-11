@@ -135,11 +135,20 @@ let cleanup ~config ~agent_name sandbox =
     Log.Misc.warn "[task_sandbox] cleanup failed for %s: %s"
       sandbox.task_id (Types.masc_error_to_string e);
     (* Attempt force removal as fallback *)
-    let base_path = config.base_path in
+    let rec find_git_owner dir =
+      if Sys.file_exists (Filename.concat dir ".git") then Some dir
+      else
+        let parent = Filename.dirname dir in
+        if parent = dir then None else find_git_owner parent
+    in
     let repo_root =
-      match Room_git.git_root ~base_path with
-      | Some r -> r
-      | None -> base_path
+      match find_git_owner (Filename.dirname sandbox.worktree_path) with
+      | Some root -> root
+      | None ->
+          let base_path = config.base_path in
+          match Room_git.git_root ~base_path with
+          | Some r -> r
+          | None -> base_path
     in
     let exit_code =
       git_exit ~cwd:repo_root

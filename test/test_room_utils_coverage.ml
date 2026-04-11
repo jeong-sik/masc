@@ -93,7 +93,7 @@ let rec rm_rf path =
 
 (* capture_stderr removed — legacy warning tests removed in room flat-path cleanup *)
 
-let test_resolve_masc_base_path_keeps_git_root_resolution_when_env_ignored () =
+let test_resolve_masc_base_path_explicit_env_wins_over_git_root_resolution () =
   let scratch = Filename.temp_dir "room-utils-worktree" "" in
   let repo_root = Filename.concat scratch "repo" in
   let repo_git = Filename.concat repo_root ".git" in
@@ -111,10 +111,10 @@ let test_resolve_masc_base_path_keeps_git_root_resolution_when_env_ignored () =
     [ ("MASC_BASE_PATH", Some "/Users/dancer/me");
       ("MASC_TEST_ALLOW_INHERITED_BASE_PATH", None) ]
     (fun () ->
-      check string "ignored env still resolves git root" repo_root
+      check string "explicit env wins over git root" "/Users/dancer/me"
         (Room_utils.resolve_masc_base_path worktree_path))
 
-let test_resolve_masc_base_path_ignores_inherited_env_in_test () =
+let test_resolve_masc_base_path_preserves_explicit_env_in_test () =
   let requested =
     Filename.concat (Filename.get_temp_dir_name ()) "room-utils-requested"
   in
@@ -122,7 +122,7 @@ let test_resolve_masc_base_path_ignores_inherited_env_in_test () =
     [ ("MASC_BASE_PATH", Some "/Users/dancer/me");
       ("MASC_TEST_ALLOW_INHERITED_BASE_PATH", None) ]
     (fun () ->
-      check string "requested temp path wins in tests" requested
+      check string "explicit env wins in tests" "/Users/dancer/me"
         (Room_utils.resolve_masc_base_path requested))
 
 let test_resolve_masc_base_path_keeps_matching_explicit_env () =
@@ -162,19 +162,19 @@ let test_resolve_masc_base_path_collapses_explicit_env_masc_dir () =
       check string "explicit .masc env collapses to parent" requested
         (Room_utils.resolve_masc_base_path requested))
 
-let test_resolve_masc_base_path_allows_test_opt_in () =
+let test_resolve_masc_base_path_preserves_explicit_env_without_opt_in () =
   let requested =
     Filename.concat (Filename.get_temp_dir_name ()) "room-utils-opt-in"
   in
   let explicit = "/Users/dancer/me" in
   with_envs
     [ ("MASC_BASE_PATH", Some explicit);
-      ("MASC_TEST_ALLOW_INHERITED_BASE_PATH", Some "true") ]
+      ("MASC_TEST_ALLOW_INHERITED_BASE_PATH", None) ]
     (fun () ->
-      check string "opt-in preserves inherited env" explicit
+      check string "explicit env preserved without opt-in" explicit
         (Room_utils.resolve_masc_base_path requested))
 
-let test_resolve_masc_base_path_ignores_dual_masc_roots_outside_test_override ()
+let test_resolve_masc_base_path_preserves_explicit_env_with_dual_masc_roots ()
     =
   let scratch = Filename.temp_dir "room-utils-dual-roots" "" in
   let requested = Filename.concat scratch "repo" in
@@ -191,10 +191,10 @@ let test_resolve_masc_base_path_ignores_dual_masc_roots_outside_test_override ()
           ("MASC_ALLOW_INHERITED_BASE_PATH", None);
           ("MASC_TEST_ALLOW_INHERITED_BASE_PATH", None) ]
         (fun () ->
-          check string "dual roots prefer requested path" requested
+          check string "dual roots still preserve explicit path" explicit
             (Room_utils.resolve_masc_base_path requested)))
 
-let test_resolve_masc_base_path_allows_dual_root_opt_in () =
+let test_resolve_masc_base_path_dual_root_opt_in_is_noop () =
   let scratch = Filename.temp_dir "room-utils-dual-opt-in" "" in
   let requested = Filename.concat scratch "repo" in
   let explicit = Filename.concat scratch "parent-root" in
@@ -210,7 +210,7 @@ let test_resolve_masc_base_path_allows_dual_root_opt_in () =
           ("MASC_ALLOW_INHERITED_BASE_PATH", Some "true");
           ("MASC_TEST_ALLOW_INHERITED_BASE_PATH", None) ]
         (fun () ->
-          check string "opt-in preserves explicit dual-root env" explicit
+          check string "dual-root opt-in no longer changes result" explicit
             (Room_utils.resolve_masc_base_path requested)))
 
 let test_resolve_masc_base_path_preserves_ancestor_explicit_path () =
@@ -242,7 +242,7 @@ let test_default_config_syncs_test_base_path_env () =
     Filename.concat (Filename.get_temp_dir_name ()) "room-utils-sync-env"
   in
   with_envs
-    [ ("MASC_BASE_PATH", Some "/Users/dancer/me");
+    [ ("MASC_BASE_PATH", None);
       ("MASC_TEST_ALLOW_INHERITED_BASE_PATH", None) ]
     (fun () ->
       ignore (Room_utils.default_config requested);
@@ -652,22 +652,22 @@ let () =
       test_case "empty" `Quick test_parse_gitdir_empty;
       test_case "nested" `Quick test_parse_gitdir_nested_worktree;
       test_case "with spaces" `Quick test_parse_gitdir_with_spaces;
-      test_case "ignored env keeps git-root resolution" `Quick
-        test_resolve_masc_base_path_keeps_git_root_resolution_when_env_ignored;
-      test_case "ignores inherited base env in tests" `Quick
-        test_resolve_masc_base_path_ignores_inherited_env_in_test;
+      test_case "explicit env wins over git-root resolution" `Quick
+        test_resolve_masc_base_path_explicit_env_wins_over_git_root_resolution;
+      test_case "preserves explicit base env in tests" `Quick
+        test_resolve_masc_base_path_preserves_explicit_env_in_test;
       test_case "keeps matching explicit env" `Quick
         test_resolve_masc_base_path_keeps_matching_explicit_env;
       test_case "collapses requested .masc path" `Quick
         test_resolve_masc_base_path_collapses_requested_masc_dir;
       test_case "collapses explicit .masc env" `Quick
         test_resolve_masc_base_path_collapses_explicit_env_masc_dir;
-      test_case "allows explicit opt-in to inherited env" `Quick
-        test_resolve_masc_base_path_allows_test_opt_in;
-      test_case "ignores dual .masc roots by default" `Quick
-        test_resolve_masc_base_path_ignores_dual_masc_roots_outside_test_override;
-      test_case "allows dual-root opt-in" `Quick
-        test_resolve_masc_base_path_allows_dual_root_opt_in;
+      test_case "preserves explicit env without opt-in" `Quick
+        test_resolve_masc_base_path_preserves_explicit_env_without_opt_in;
+      test_case "preserves explicit env with dual .masc roots" `Quick
+        test_resolve_masc_base_path_preserves_explicit_env_with_dual_masc_roots;
+      test_case "dual-root opt-in is noop" `Quick
+        test_resolve_masc_base_path_dual_root_opt_in_is_noop;
       test_case "preserves ancestor explicit path" `Quick
         test_resolve_masc_base_path_preserves_ancestor_explicit_path;
       test_case "default config syncs test base env" `Quick

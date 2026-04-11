@@ -99,8 +99,8 @@ let detect ?cwd ?env_masc_base_path ?strict ?input_base_path ?resolution_source
   in
   let fail_fast_enabled =
     match strict with
-    | Some enabled -> enabled
-    | None -> fail_fast_env_enabled ()
+    | Some enabled -> enabled || dual_masc_roots
+    | None -> fail_fast_env_enabled () || dual_masc_roots
   in
   let resolution_source = resolution_source_opt ?resolution_source () in
   let warning =
@@ -146,10 +146,7 @@ let detect ?cwd ?env_masc_base_path ?strict ?input_base_path ?resolution_source
     warning;
   }
 
-let strict_violation (diag : t) =
-  diag.fail_fast_enabled
-  && diag.dual_masc_roots
-  && not (explicit_resolution_source diag.resolution_source)
+let strict_violation (diag : t) = diag.dual_masc_roots
 
 let startup_lines (diag : t) =
   let lines =

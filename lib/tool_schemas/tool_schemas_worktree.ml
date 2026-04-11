@@ -8,10 +8,9 @@ Requires task_id (REQUIRED). Example: task_id='fix-login', task_id='feature/auth
 The worktree is rooted in your playground clone — typically at \
 .masc/playground/<your-name>/repos/<repo>/.worktrees/<agent>-<task_id>. \
 Repo resolution: pass repo_name to target a specific clone, otherwise \
-the first git clone under your repos/ is used (alphabetical). If \
-repos/ is empty, the server repo root is used as a fallback — clone \
-the target repo first with keeper_shell op=git_clone to keep the \
-worktree under your playground. After work, create a PR then call \
+the first git clone under your repos/ is used (alphabetical). Clone \
+the target repo first with keeper_shell op=git_clone if your repos/ \
+directory is empty. After work, create a PR then call \
 masc_worktree_remove.";
     input_schema = `Assoc [
       ("type", `String "object");

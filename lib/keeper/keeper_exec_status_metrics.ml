@@ -498,22 +498,25 @@ let latest_snapshot_of_lines lines ~parse_snapshot ~has_legacy_shape =
   | None ->
       List.find_map
         (fun line ->
-          try
-            let json = Yojson.Safe.from_string line in
-            match parse_snapshot line with
-            | Some _ as snapshot -> snapshot
-            | None ->
-                if has_legacy_shape json then
-                  Some
-                    {
-                      latest_tool_names = [];
-                      latest_tool_call_count = Some 0;
-                      latest_action_source = None;
-                      tool_audit_source = None;
-                      tool_audit_at = json_iso_opt json;
-                    }
-                else None
-          with Yojson.Json_error _ -> None)
+          match Yojson.Safe.from_string line with
+          | json ->
+              (match parse_snapshot line with
+               | Some _ as snapshot -> snapshot
+               | None ->
+                   if has_legacy_shape json then
+                     Some
+                       {
+                         latest_tool_names = [];
+                         latest_tool_call_count = None;
+                         latest_action_source = None;
+                         tool_audit_source = Some "legacy_shape";
+                         tool_audit_at = json_iso_opt json;
+                       }
+                   else None)
+          | exception Yojson.Json_error msg ->
+              Log.Keeper.warn
+                "tool audit: malformed JSONL line skipped: %s" msg;
+              None)
         ordered
 
 let latest_tool_audit_snapshot_from_decisions config keeper_name =
@@ -522,28 +525,31 @@ let latest_tool_audit_snapshot_from_decisions config keeper_name =
   else
     let lines = Keeper_memory.read_file_tail_lines path ~max_bytes:40000 ~max_lines:12 in
     let parse_snapshot line =
-      try
-        let json = Yojson.Safe.from_string line in
-        let tools = json_string_list_member "tools_used" json in
-        let raw_tool_call_count = json_int_opt_member "tool_call_count" json in
-        let tool_call_count =
-          match raw_tool_call_count with
-          | Some _ as value -> value
-          | None -> Some (List.length tools)
-        in
-        let action_source = action_source_opt_member json in
-        if not (has_tool_audit_evidence ~tools ~raw_tool_call_count ~action_source)
-        then None
-        else
-          Some
-            {
-              latest_tool_names = List.sort_uniq String.compare tools;
-              latest_tool_call_count = tool_call_count;
-              latest_action_source = action_source;
-              tool_audit_source = Some "keeper_decision_log";
-              tool_audit_at = json_iso_opt json;
-            }
-      with Yojson.Json_error _ -> None
+      match Yojson.Safe.from_string line with
+      | json ->
+          let tools = json_string_list_member "tools_used" json in
+          let raw_tool_call_count = json_int_opt_member "tool_call_count" json in
+          let tool_call_count =
+            match raw_tool_call_count with
+            | Some _ as value -> value
+            | None -> Some (List.length tools)
+          in
+          let action_source = action_source_opt_member json in
+          if not (has_tool_audit_evidence ~tools ~raw_tool_call_count ~action_source)
+          then None
+          else
+            Some
+              {
+                latest_tool_names = List.sort_uniq String.compare tools;
+                latest_tool_call_count = tool_call_count;
+                latest_action_source = action_source;
+                tool_audit_source = Some "keeper_decision_log";
+                tool_audit_at = json_iso_opt json;
+              }
+      | exception Yojson.Json_error msg ->
+          Log.Keeper.warn
+            "tool audit (decisions): malformed JSONL skipped: %s" msg;
+          None
     in
     latest_snapshot_of_lines lines
       ~parse_snapshot
@@ -563,31 +569,34 @@ let latest_tool_audit_snapshot_from_decisions config keeper_name =
 let latest_tool_audit_snapshot_from_metrics config keeper_name =
   let lines = read_recent_metrics_lines config keeper_name in
   let parse_snapshot line =
-    try
-      let json = Yojson.Safe.from_string line in
-      let tools =
-        json_string_list_member "tools_used" json
-        |> List.sort_uniq String.compare
-      in
-      let raw_tool_call_count = json_int_opt_member "tool_call_count" json in
-      let tool_call_count =
-        match raw_tool_call_count with
-        | Some _ as value -> value
-        | None -> Some (List.length tools)
-      in
-      let action_source = action_source_opt_member json in
-      if not (has_tool_audit_evidence ~tools ~raw_tool_call_count ~action_source)
-      then None
-      else
-        Some
-          {
-            latest_tool_names = tools;
-            latest_tool_call_count = tool_call_count;
-            latest_action_source = action_source;
-            tool_audit_source = Some "keeper_metrics";
-            tool_audit_at = json_iso_opt json;
-          }
-    with Yojson.Json_error _ -> None
+    match Yojson.Safe.from_string line with
+    | json ->
+        let tools =
+          json_string_list_member "tools_used" json
+          |> List.sort_uniq String.compare
+        in
+        let raw_tool_call_count = json_int_opt_member "tool_call_count" json in
+        let tool_call_count =
+          match raw_tool_call_count with
+          | Some _ as value -> value
+          | None -> Some (List.length tools)
+        in
+        let action_source = action_source_opt_member json in
+        if not (has_tool_audit_evidence ~tools ~raw_tool_call_count ~action_source)
+        then None
+        else
+          Some
+            {
+              latest_tool_names = tools;
+              latest_tool_call_count = tool_call_count;
+              latest_action_source = action_source;
+              tool_audit_source = Some "keeper_metrics";
+              tool_audit_at = json_iso_opt json;
+            }
+    | exception Yojson.Json_error msg ->
+        Log.Keeper.warn
+          "tool audit (metrics): malformed JSONL skipped: %s" msg;
+        None
   in
   latest_snapshot_of_lines lines
     ~parse_snapshot

@@ -143,17 +143,30 @@ let init config ~task_id ~agent_name : (run_record, string) result =
   | Eio.Cancel.Cancelled _ as e -> raise e
   | e -> Error (Printexc.to_string e)
 
-(** Update plan *)
+(** Update plan.
+
+    The read_run → modify → write_run sequence is a read-modify-write
+    on [run.json]; two concurrent callers (different fibers handling
+    [tool_run] MCP requests for the same task) would each read the
+    same snapshot and the later writer would overwrite the earlier
+    [plan] / [deliverable] update.  The sibling [append_log] already
+    uses [with_file_lock] on its log file; extend the same discipline
+    to [run.json] writes.  The [plan.md] mirror at [plan_path] is a
+    single full-content overwrite, so it does not need a separate
+    lock — writing the mirror and the [run.json] record inside the
+    same critical section keeps them consistent. *)
 let update_plan config ~task_id ~content : (run_record, string) result =
   try
-    match read_run config task_id with
-    | Error e -> Error e
-    | Ok run ->
-        let updated = { run with plan = content; updated_at = now_iso () } in
-        let path = plan_path config task_id in
-        write_text_file path content;
-        write_run config updated;
-        Ok updated
+    let run_file = run_json_path config task_id in
+    with_file_lock config run_file (fun () ->
+      match read_run config task_id with
+      | Error e -> Error e
+      | Ok run ->
+          let updated = { run with plan = content; updated_at = now_iso () } in
+          let path = plan_path config task_id in
+          write_text_file path content;
+          write_run config updated;
+          Ok updated)
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | e -> Error (Printexc.to_string e)
@@ -173,17 +186,23 @@ let append_log config ~task_id ~note : (log_entry, string) result =
   | Eio.Cancel.Cancelled _ as e -> raise e
   | e -> Error (Printexc.to_string e)
 
-(** Set deliverable *)
+(** Set deliverable.  Same lost-update concern as [update_plan] —
+    read_run → modify → write_run is a read-modify-write on
+    [run.json] that two concurrent fibers could each read from the
+    same snapshot and clobber.  Wrapped in the same [run.json] file
+    lock for identical reasons. *)
 let set_deliverable config ~task_id ~content : (run_record, string) result =
   try
-    match read_run config task_id with
-    | Error e -> Error e
-    | Ok run ->
-        let updated = { run with deliverable = content; updated_at = now_iso () } in
-        let path = deliverable_path config task_id in
-        write_text_file path content;
-        write_run config updated;
-        Ok updated
+    let run_file = run_json_path config task_id in
+    with_file_lock config run_file (fun () ->
+      match read_run config task_id with
+      | Error e -> Error e
+      | Ok run ->
+          let updated = { run with deliverable = content; updated_at = now_iso () } in
+          let path = deliverable_path config task_id in
+          write_text_file path content;
+          write_run config updated;
+          Ok updated)
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | e -> Error (Printexc.to_string e)

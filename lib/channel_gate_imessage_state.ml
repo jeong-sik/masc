@@ -244,6 +244,8 @@ let status_json ?(audit_limit = 10) () =
       ("binding_store_path", `String binding_store_path);
       ("audit_path", `String audit_path);
       ("updated_at", `String updated_at);
+      ("reply_mode", `String (status_field "reply_mode" string_member ""));
+      ("self_chat_guid", `String (status_field "self_chat_guid" string_member ""));
       ("last_message_at", `String (status_field "last_message_at" string_member ""));
       ("messages_processed", `Int (status_field "messages_processed" int_member 0));
       ("messages_failed", `Int (status_field "messages_failed" int_member 0));
@@ -308,6 +310,8 @@ let connector_json ?gate_status_json ?(audit_limit = 10) () =
       ("stale_after_sec", `Int (int_member status "stale_after_sec"));
       ("error", `String (string_member status "error"));
       ("updated_at", `String (string_member status "updated_at"));
+      ("reply_mode", `String (string_member status "reply_mode"));
+      ("self_chat_guid", `String (string_member status "self_chat_guid"));
       ("last_message_at", `String (string_member status "last_message_at"));
       ("messages_processed", `Int (int_member status "messages_processed"));
       ("messages_failed", `Int (int_member status "messages_failed"));

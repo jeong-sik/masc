@@ -210,6 +210,8 @@ class IMessageBot:
                 gate_base_url=self.cfg.gate_base_url,
                 gate_healthy=gate_healthy,
                 gate_health_checked_at=gate_health_checked_at,
+                reply_mode=self.cfg.reply_mode,
+                self_chat_guid=self._self_chat_guid,
                 last_message_at=self._last_message_at,
                 messages_processed=self._messages_processed,
                 messages_failed=self._messages_failed,

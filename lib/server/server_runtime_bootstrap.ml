@@ -444,6 +444,7 @@ let bootstrap_server_state_blocking (state : Mcp_server.server_state) =
 
 let bootstrap_prompt_state (state : Mcp_server.server_state) =
   Config_dir_resolver.log_warnings ~context:"ServerBootstrap" ();
+  Config_dir_resolver.log_resolution ~context:"ServerBootstrap" ();
   (* Initialize prompt registry with defaults and restore saved overrides *)
   let prompt_markdown_dir =
     Prompt_defaults.bootstrap_runtime

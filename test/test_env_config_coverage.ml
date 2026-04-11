@@ -394,6 +394,45 @@ let test_keeper_alert_slack_dm_user_id_readable () =
     (String.length Env_config.KeeperAlert.slack_dm_user_id >= 0)
 
 (* ============================================================
+   KeeperCascade.provider_allowlist Tests
+   Iteration 1 runtime knob: MASC_KEEPER_CASCADE_PROVIDER_ALLOWLIST
+   ============================================================ *)
+
+let test_cascade_allowlist_blank_is_none () =
+  with_env "MASC_KEEPER_CASCADE_PROVIDER_ALLOWLIST" "" (fun () ->
+    let result = Env_config.KeeperCascade.provider_allowlist () in
+    check (option (list string)) "blank env is None" None result)
+
+let test_cascade_allowlist_whitespace_only_is_none () =
+  with_env "MASC_KEEPER_CASCADE_PROVIDER_ALLOWLIST" "   " (fun () ->
+    let result = Env_config.KeeperCascade.provider_allowlist () in
+    check (option (list string)) "whitespace-only is None" None result)
+
+let test_cascade_allowlist_single () =
+  with_env "MASC_KEEPER_CASCADE_PROVIDER_ALLOWLIST" "ollama" (fun () ->
+    let result = Env_config.KeeperCascade.provider_allowlist () in
+    check (option (list string)) "single provider" (Some [ "ollama" ]) result)
+
+let test_cascade_allowlist_multi () =
+  with_env "MASC_KEEPER_CASCADE_PROVIDER_ALLOWLIST" "ollama,glm" (fun () ->
+    let result = Env_config.KeeperCascade.provider_allowlist () in
+    check (option (list string)) "multiple providers"
+      (Some [ "ollama"; "glm" ]) result)
+
+let test_cascade_allowlist_trims_whitespace () =
+  with_env "MASC_KEEPER_CASCADE_PROVIDER_ALLOWLIST" " ollama , glm " (fun () ->
+    let result = Env_config.KeeperCascade.provider_allowlist () in
+    check (option (list string)) "entries are trimmed"
+      (Some [ "ollama"; "glm" ]) result)
+
+let test_cascade_allowlist_drops_empty_entries () =
+  with_env "MASC_KEEPER_CASCADE_PROVIDER_ALLOWLIST" "ollama,,glm,,"
+    (fun () ->
+      let result = Env_config.KeeperCascade.provider_allowlist () in
+      check (option (list string)) "empty entries dropped"
+        (Some [ "ollama"; "glm" ]) result)
+
+(* ============================================================
    Test Runners
    ============================================================ *)
 
@@ -504,5 +543,15 @@ let () =
       test_case "max retries non-negative" `Quick test_keeper_alert_retry_non_negative;
       test_case "body chars positive" `Quick test_keeper_alert_body_chars_positive;
       test_case "slack dm user id readable" `Quick test_keeper_alert_slack_dm_user_id_readable;
+    ];
+    "keeper_cascade_provider_allowlist", [
+      test_case "blank env is None" `Quick test_cascade_allowlist_blank_is_none;
+      test_case "whitespace-only is None" `Quick
+        test_cascade_allowlist_whitespace_only_is_none;
+      test_case "single provider" `Quick test_cascade_allowlist_single;
+      test_case "multiple providers" `Quick test_cascade_allowlist_multi;
+      test_case "entries are trimmed" `Quick test_cascade_allowlist_trims_whitespace;
+      test_case "empty entries dropped" `Quick
+        test_cascade_allowlist_drops_empty_entries;
     ];
   ]

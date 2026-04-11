@@ -2,6 +2,47 @@
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-04-11
+
+### Added
+- Expose llm_provider_http_status via Prometheus counter (#6514)
+
+### Changed
+- Extract shared tool permission map from auth (#6501)
+- Rename type result to tool_result across all tool modules (#6482)
+- Bump OAS pin to v0.120.0 (#6510)
+- Replace tautological assertions with observable post-conditions in keeper-registry tests (#6506)
+- Prune retired front doors (#6520)
+- Remove unused delete_posts_by_predicate (#6509)
+- Remove 13 dead dashboard exports (#6493)
+
+### Fixed
+- Keeper: gate auto-clear of manual reconcile behind age threshold (#6497)
+- Keeper: should_run_turn now consults manual_reconcile_pending (#6518)
+- Keeper: SSOT playground paths, drop hardcoded masc-mcp and container root (#6468)
+- Keeper: convert parse_keeper_identity from failwith to Result (#6479)
+- Keeper FSM runtime integration (#6451)
+- Goal-janitor: surface write_meta Error instead of ignoring (#6513)
+- Board: log vote/vote_comment errors instead of silent drop (#6463)
+- Backend: detect partial writes in atomic_increment and atomic_update (#6480)
+- Transport: surface WS and WebRTC send failures in server bootstrap (#6517)
+- Eio: wrap oas_sse_bridge + rate_limit cleanup fibers with exception loggers (#6519)
+- Dashboard: restore control surface routing (#6490, #6523)
+- Dashboard: standardize error display to CSS variable color scheme (#6494)
+- Dashboard: standardize time display to relativeTime/TimeAgo (#6491)
+- Dashboard: improve accessibility for buttons and form labels (#6496)
+- Dashboard: preserve board scroll position on refresh (#6461)
+- Dashboard: rename harness rail labels to match actual state (#6521)
+- Dashboard: align navigation descriptions with actual UI (#6526)
+- Worktree: use config base_path for worktree root (#6449)
+- Playground: docker_playground_cwd double-slash escape (#6522)
+
+### Security
+- Remove tracked localhost TLS key from repository (#6487)
+
+### Performance
+- Memoize expensive derived state in fleet and agent-roster dashboard (#6492)
+
 ## [0.5.2] - 2026-04-11
 
 ### Changed

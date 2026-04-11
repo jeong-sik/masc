@@ -233,12 +233,22 @@ let effective_allowed_paths ~(meta : Keeper_types.keeper_meta) : string list =
     match String.lowercase_ascii meta.execution_scope with
     | "workspace" ->
       let safe_name = sanitize_keeper_name meta.name in
+      (* NOTE (#6527 iter 4): `.worktrees/` was previously included
+         here so keepers could read and write worktrees created at the
+         server repository root by the old `worktree_create_r`
+         fallback. That fallback was removed in PR #6542 (iter 2), so
+         new worktrees always land at
+         `.masc/playground/<keeper>/repos/<clone>/.worktrees/<name>/`,
+         which is already inside `playground_paths`. Keeping
+         `.worktrees/` as a workspace default would allow any keeper
+         with workspace scope to read and write into another keeper's
+         server-root worktree or into the MASC repo's own worktrees —
+         exactly the containment leak #6527 is closing. Remove it.
+         Keepers that genuinely need access to a specific worktree can
+         still add it via explicit `allowed_paths` on their keeper
+         meta. *)
       [ Printf.sprintf ".masc/keepers/%s/" safe_name;
         ".masc/traces/";
-        (* Worktrees created by masc_worktree_create land here.
-           Without this, keepers can create worktrees but cannot
-           read or write files inside them. *)
-        ".worktrees/";
         (* Main repo source for read access *)
         "lib/";
         "test/";

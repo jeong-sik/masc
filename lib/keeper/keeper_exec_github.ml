@@ -737,23 +737,41 @@ let handle_keeper_pr_submit
           ])
     else
       let root = Keeper_alerting_path.project_root_of_config config in
-      (* Validate cwd is within .worktrees/ or .masc/playground/ *)
+      (* Validate cwd is inside THIS keeper's own playground bundle.
+         Before PR #6527 iter 4, the gate accepted any `.worktrees/`
+         or any `.masc/playground/*` — i.e. it was not per-keeper, so
+         keeper-A could submit a PR from keeper-B's playground or
+         from a server-wide worktree. After iter 2 (PR #6542)
+         masc_worktree_create always lands the worktree under
+         `.masc/playground/<keeper>/repos/<clone>/.worktrees/...`, so
+         the only legitimate cwd for pr_submit is this keeper's own
+         playground bundle prefix. *)
       let abs_cwd =
         if Filename.is_relative cwd then Filename.concat root cwd
         else cwd
       in
-      let worktrees_prefix = Filename.concat root ".worktrees" in
-      let playground_prefix = Filename.concat root ".masc/playground" in
+      let keeper_playground_prefix =
+        Filename.concat root
+          (Keeper_alerting_path.playground_path_of_keeper meta.name)
+      in
+      (* [playground_path_of_keeper] returns a path with a trailing
+         slash, so prefix matching is already boundary-safe — a
+         sibling directory with the same stem cannot slip through. *)
       let cwd_ok =
-        String.starts_with ~prefix:(worktrees_prefix ^ "/") abs_cwd
-        || String.starts_with ~prefix:(playground_prefix ^ "/") abs_cwd
+        String.starts_with ~prefix:keeper_playground_prefix abs_cwd
       in
       if not cwd_ok then
         Yojson.Safe.to_string
           (`Assoc
             [ "ok", `Bool false
-            ; "error", `String "cwd_outside_boundary"
-            ; "reason", `String "cwd must be within .worktrees/ or .masc/playground/"
+            ; "error", `String "cwd_outside_playground"
+            ; ( "reason"
+              , `String
+                  "cwd must be inside this keeper's own playground bundle \
+                   (.masc/playground/<keeper>/...). \
+                   Open a worktree via masc_worktree_create first." )
+            ; "cwd", `String abs_cwd
+            ; "expected_prefix", `String keeper_playground_prefix
             ])
       else
         let steps = Buffer.create 512 in

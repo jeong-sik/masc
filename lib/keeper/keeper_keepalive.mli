@@ -28,6 +28,20 @@ val keeper_turn_throttle_limit : int
 (** Runtime keeper turn concurrency limit derived from
     [MASC_KEEPER_AUTOBOOT_MAX]. *)
 
+val semaphore_wait_timeout_sec : float
+(** Wall-clock cap on [Eio.Semaphore.acquire] when waiting for a keeper
+    turn slot. Derived from [MASC_KEEPER_SEMAPHORE_WAIT_TIMEOUT_SEC]
+    (default 60.0, range [5, 600]). Keepers whose peers hold slots past
+    this cap are skipped for the current cycle and retry on the next
+    heartbeat. *)
+
+exception Semaphore_wait_timeout of float
+(** Raised inside [with_keeper_turn_slot] when acquiring either the
+    autonomous or turn semaphore exceeds [semaphore_wait_timeout_sec].
+    The float carries the wait cap so the caller can render it without
+    re-reading the env var. Callers should treat this as "skip this
+    turn, retry on next heartbeat" rather than a keeper failure. *)
+
 val wakeup_relevant_keeper_for_board_signal :
   config:Room.config -> Board_dispatch.keeper_board_signal -> unit
 

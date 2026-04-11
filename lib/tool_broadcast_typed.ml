@@ -38,7 +38,10 @@ let handle_broadcast ((message, _format) : string * string)
 let parse_broadcast (json : Yojson.Safe.t) =
   match Sg.parse broadcast_schema json with
   | Ok v -> Ok v
-  | Error err -> Error err
+  | Error errs ->
+      Error
+        (Agent_sdk.Tool_input_validation.format_errors
+           ~tool_name:"masc_broadcast_typed" errs)
 
 let tool = Typed_tool_masc.create
   ~name:"masc_broadcast_typed"

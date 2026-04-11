@@ -824,6 +824,17 @@ let dispatch ctx ~name ~args : tool_result option =
 let _tool_spec_read_only = [ "masc_task_history"; "masc_tasks" ]
 let _tool_spec_requires_join = [ "masc_add_task"; "masc_claim_next"; "masc_transition" ]
 
+let tool_required_permission = function
+  | "masc_tasks" | "masc_task_history" | "masc_archive_view" ->
+      Some Types.CanReadState
+  | "masc_add_task" | "masc_batch_add_tasks" ->
+      Some Types.CanAddTask
+  | "masc_claim_next" ->
+      Some Types.CanClaimTask
+  | "masc_transition" | "masc_update_priority" ->
+      Some Types.CanCompleteTask
+  | _ -> None
+
 let () =
   List.iter
     (fun (s : Types.tool_schema) ->
@@ -837,5 +848,6 @@ let () =
            ~is_read_only:(List.mem s.name _tool_spec_read_only)
            ~is_idempotent:(List.mem s.name _tool_spec_read_only)
            ~requires_join:(List.mem s.name _tool_spec_requires_join)
+           ?required_permission:(tool_required_permission s.name)
            ()))
     schemas

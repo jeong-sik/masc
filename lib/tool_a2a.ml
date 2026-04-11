@@ -59,6 +59,11 @@ let dispatch ctx ~name ~args : tool_result option =
 
 let schemas = Tool_schemas_a2a.schemas
 
+let tool_required_permission = function
+  | "masc_poll_events" | "masc_heartbeat_result" ->
+      Some Types.CanReadState
+  | _ -> None
+
 (* ================================================================ *)
 (* Tool_spec registration                                           *)
 (* ================================================================ *)
@@ -73,5 +78,6 @@ let () =
            ~module_tag:Tool_dispatch.Mod_a2a
            ~input_schema:s.input_schema
            ~handler_binding:Tag_dispatch
+           ?required_permission:(tool_required_permission s.name)
            ()))
     schemas

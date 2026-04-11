@@ -597,6 +597,16 @@ let schemas = Tool_schemas_room.schemas
 let _tool_spec_read_only = [ "masc_status" ]
 let _tool_spec_system_internal = [ "masc_init"; "masc_reset" ]
 
+let tool_required_permission = function
+  | "masc_status" | "masc_room_strategy_get" | "masc_workflow_guide"
+  | "masc_check" ->
+      Some Types.CanReadState
+  | "masc_init" ->
+      Some Types.CanInit
+  | "masc_reset" ->
+      Some Types.CanReset
+  | _ -> None
+
 let () =
   List.iter
     (fun (s : Types.tool_schema) ->
@@ -612,5 +622,6 @@ let () =
            ~is_idempotent:(List.mem s.name _tool_spec_read_only)
            ~visibility:(if is_system then Tool_catalog.Hidden else Tool_catalog.Default)
            ~allow_direct_call_when_hidden:is_system
+           ?required_permission:(tool_required_permission s.name)
            ()))
     schemas

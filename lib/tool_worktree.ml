@@ -97,6 +97,12 @@ let schemas = Tool_schemas_worktree.schemas
 let _tool_spec_read_only = [ "masc_worktree_list" ]
 let _tool_spec_requires_join = [ "masc_worktree_create"; "masc_worktree_remove" ]
 
+let tool_required_permission = function
+  | "masc_worktree_list" -> Some Types.CanReadState
+  | "masc_worktree_create" -> Some Types.CanCreateWorktree
+  | "masc_worktree_remove" -> Some Types.CanRemoveWorktree
+  | _ -> None
+
 let () =
   List.iter
     (fun (s : Types.tool_schema) ->
@@ -110,5 +116,6 @@ let () =
            ~is_read_only:(List.mem s.name _tool_spec_read_only)
            ~is_idempotent:(List.mem s.name _tool_spec_read_only)
            ~requires_join:(List.mem s.name _tool_spec_requires_join)
+           ?required_permission:(tool_required_permission s.name)
            ()))
     schemas

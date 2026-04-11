@@ -177,6 +177,45 @@ let test_portal_tools_require_worker () =
       (Tool_access_policy.allows_name worker_policy tool_name))
     [ "masc_portal_open"; "masc_portal_close"; "masc_portal_send" ]
 
+let test_permissions_promoted_to_metadata_ssot () =
+  let expectations =
+    [
+      ("masc_init", Types.CanInit);
+      ("masc_status", Types.CanReadState);
+      ("masc_add_task", Types.CanAddTask);
+      ("masc_board_list", Types.CanReadState);
+      ("masc_auth_enable", Types.CanInit);
+      ("masc_operator_action", Types.CanBroadcast);
+      ("masc_worktree_create", Types.CanCreateWorktree);
+      ("masc_autoresearch_status", Types.CanReadState);
+      ("masc_agent_card", Types.CanReadState);
+      ("masc_heartbeat", Types.CanBroadcast);
+      ("masc_config", Types.CanReadState);
+      ("masc_unit_list", Types.CanReadState);
+      ("masc_pause_status", Types.CanReadState);
+      ("masc_tool_list", Types.CanReadState);
+      ("masc_runtime_verify", Types.CanReadState);
+      ("masc_persona_list", Types.CanReadState);
+      ("masc_join", Types.CanJoin);
+      ("masc_broadcast", Types.CanBroadcast);
+      ("masc_verify_request", Types.CanReadState);
+      ("masc_portal_send", Types.CanSendPortal);
+      ("channel_gate", Types.CanBroadcast);
+    ]
+  in
+  List.iter
+    (fun (tool_name, expected_permission) ->
+      let meta = Tool_catalog.metadata tool_name in
+      check (option testable_permission)
+        (Printf.sprintf "%s uses metadata permission" tool_name)
+        (Some expected_permission)
+        meta.required_permission;
+      check (option testable_permission)
+        (Printf.sprintf "%s no longer needs legacy fallback" tool_name)
+        None
+        (Tool_permission_map.legacy_permission_for_tool tool_name))
+    expectations
+
 (* ================================================================ *)
 (* Unregistered tool behavior                                        *)
 (* ================================================================ *)
@@ -221,6 +260,11 @@ let test_no_overlap_admin_worker () =
       (List.mem tool_name Tool_access_role.worker_only_tools)
   ) Tool_access_role.admin_only_tools
 
+let testable_permission =
+  testable
+    Types.show_permission
+    (fun a b -> a = b)
+
 (* ================================================================ *)
 (* Runner                                                            *)
 (* ================================================================ *)
@@ -255,6 +299,8 @@ let () =
             test_channel_gate_requires_worker;
           test_case "portal tools require worker" `Quick
             test_portal_tools_require_worker;
+          test_case "permissions promoted to metadata ssot" `Quick
+            test_permissions_promoted_to_metadata_ssot;
         ] );
       ( "unregistered",
         [

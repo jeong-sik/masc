@@ -215,6 +215,11 @@ let schemas : tool_schema list =
 (* Tool_spec registration                                           *)
 (* ================================================================ *)
 
+let tool_required_permission = function
+  | "masc_runtime_verify" | "masc_runtime_ollama_probe" ->
+      Some Types.CanReadState
+  | _ -> None
+
 let () =
   List.iter
     (fun (s : tool_schema) ->
@@ -225,5 +230,6 @@ let () =
            ~module_tag:Tool_dispatch.Mod_local_runtime
            ~input_schema:s.input_schema
            ~handler_binding:Tag_dispatch
+           ?required_permission:(tool_required_permission s.name)
            ()))
     schemas

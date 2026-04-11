@@ -301,6 +301,14 @@ let _tool_spec_requires_join = [ "masc_operator_action"; "masc_operator_confirm"
 let _tool_spec_hidden = [ "masc_operator_judgment_write"; "masc_surface_audit" ]
 let _tool_spec_hidden_destructive = [ "masc_operator_action" ]
 
+let tool_required_permission = function
+  | "masc_operator_snapshot" | "masc_operator_digest" | "masc_surface_audit" ->
+      Some Types.CanReadState
+  | "masc_operator_action" | "masc_operator_confirm"
+  | "masc_operator_judgment_write" ->
+      Some Types.CanBroadcast
+  | _ -> None
+
 let () =
   List.iter
     (fun (s : tool_schema) ->
@@ -321,5 +329,6 @@ let () =
            ~is_destructive
            ~allow_direct_call_when_hidden:is_hidden
            ?reason:existing.reason
+           ?required_permission:(tool_required_permission s.name)
            ()))
     schemas

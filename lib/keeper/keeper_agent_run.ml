@@ -1400,17 +1400,10 @@ let run_turn
       ()
   in
   let reducer =
-    Agent_sdk.Context_reducer.dynamic (fun ~turn:_ ~messages:_ ->
-      (* Token_budget is the only constraint needed: with 262k context,
-       keeper conversations rarely approach the limit.  The previous
-       Stub_tool_results{keep_recent=3} after turn 5 operated on ALL
-       messages including initial_messages from the checkpoint, wiping
-       tool results from prior turns and destroying the history that
-       lets keepers learn from their own actions.
-       Merge_contiguous collapses adjacent same-role messages.
-       Rescued from orphaned commit db730c58a (post-merge on #5508). *)
-      let open Agent_sdk.Context_reducer in
-      Compose [ Merge_contiguous; Token_budget max_context ])
+    Agent_sdk.Context_reducer.compose [
+      Agent_sdk.Context_reducer.repair_dangling_tool_calls;
+      Agent_sdk.Context_reducer.merge_contiguous;
+    ]
   in
   (* 8. Run Agent *)
   let contract =

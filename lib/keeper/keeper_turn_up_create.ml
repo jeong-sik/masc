@@ -273,7 +273,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           message_gate = compaction_message_gate;
           token_gate = compaction_token_gate;
           cooldown_sec = continuity_compaction_cooldown_sec;
-          max_checkpoint_messages = 120;
+          max_checkpoint_messages = 80;
         };
         auto_handoff;
         handoff_threshold;

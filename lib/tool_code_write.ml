@@ -101,8 +101,12 @@ let validate_writable_path ~(agent_name : string) config path =
       Ok canonical_path
     else
       Error (IoError (Printf.sprintf
-        "Write restricted to allowed sandboxes: /.worktrees/ or %s (got: %s). \
-         Cross-agent playground writes are blocked — use your own playground."
+        "Write restricted to allowed sandboxes for agent %s. \
+         Expected path prefix: %s (or /.worktrees/ for server ops). \
+         Got: %s. Cross-agent playground writes are blocked — write \
+         under your own playground only. Call masc_status if you are \
+         unsure of your agent_name."
+        agent_name
         agent_playground_prefix
         canonical_path))
 
@@ -296,10 +300,14 @@ let validate_clone_cwd ~(agent_name : string) config cwd =
         Ok canonical_path
       else
         Error (IoError (Printf.sprintf
-          "Clone restricted to .worktrees/ or this agent's own \
-           %srepos/ (got: %s). Cross-agent playground clones are blocked."
+          "Clone restricted to /.worktrees/ or this agent's own \
+           %srepos/ (got: %s). Cross-agent playground clones are blocked \
+           — clone into %srepos/<repo-name> instead. Call masc_status \
+           if you are unsure of your agent_name (currently %s)."
           agent_playground_prefix
-          canonical_path))
+          canonical_path
+          agent_playground_prefix
+          agent_name))
 
 (* Handler: masc_code_write — Create or overwrite a file *)
 let handle_code_write ctx args =

@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Added
+- `MASC_KEEPER_CASCADE_PROVIDER_ALLOWLIST` env knob for runtime cascade narrowing (CSV of provider kinds - `ollama`, `glm`, etc.). Flows through `Env_config_keeper.KeeperCascade.provider_allowlist` -> `Keeper_agent_run.run_turn` -> OAS `Cascade_config.apply_provider_filter`. Unset => full cascade, no behavior change. (#6478)
+- `Config_dir_resolver.log_resolution` info log emitted once at server startup. When `MASC_CONFIG_DIR` silently shadows a `<base_path>/.masc/config` overlay, the log line appends a hint so operators don't lose time debugging an overlay that is being ignored. (#6478)
+- `test_cascade_config_validity` alcotest suite - runs every committed `config/cascade.json` profile through OAS `parse_model_string_exn`, hard-fails on unknown providers / invalid specs, soft-passes on "provider unavailable" (missing API key). Profile names are discovered from the JSON, not hardcoded. Includes a meta-guard that feeds a synthetic unknown-provider entry to prove the happy-path assertion is not vacuous. (#6478)
+- `scripts/sync-version-truth.sh` - dry-run-by-default helper that keeps `dune-project`, `masc_mcp.opam`, and `ROADMAP.md` "Current package version" in sync. Uses `dune-project` as the single source of truth; regenerates opam via `dune build`; updates ROADMAP with an anchored sed. `--apply` required to write; `check-version-truth.sh` post-verify runs automatically. (#6478)
+
 ## [0.5.3] - 2026-04-11
 
 ### Added

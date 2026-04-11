@@ -280,6 +280,41 @@ restore_env_override() {
 
 REPO_ENV_ROOT="$(resolve_repo_env_root)"
 
+repo_local_config_dir_match() {
+    local candidate="${1:-}"
+    candidate="${candidate%/}"
+    [ -n "$candidate" ] || return 1
+    [ "$candidate" = "$REPO_ENV_ROOT/config" ] || [ "$candidate" = "$SCRIPT_DIR/config" ]
+}
+
+repo_local_personas_dir_match() {
+    local candidate="${1:-}"
+    candidate="${candidate%/}"
+    [ -n "$candidate" ] || return 1
+    [ "$candidate" = "$REPO_ENV_ROOT/config/personas" ] || [ "$candidate" = "$SCRIPT_DIR/config/personas" ]
+}
+
+clear_repo_local_config_for_explicit_base_path() {
+    local resolved_base_path="$1"
+
+    if [ "$BASE_PATH_EXPLICIT" != "1" ]; then
+        return 0
+    fi
+    if [ "$resolved_base_path" = "$REPO_ENV_ROOT" ] || [ "$resolved_base_path" = "$SCRIPT_DIR" ]; then
+        return 0
+    fi
+
+    if repo_local_config_dir_match "${MASC_CONFIG_DIR:-}"; then
+        echo "[startup] Ignoring repo-local MASC_CONFIG_DIR=${MASC_CONFIG_DIR%/} because --base-path was supplied; defaulting to $resolved_base_path/.masc/config" >&2
+        unset MASC_CONFIG_DIR
+    fi
+
+    if repo_local_personas_dir_match "${MASC_PERSONAS_DIR:-}"; then
+        echo "[startup] Ignoring repo-local MASC_PERSONAS_DIR=${MASC_PERSONAS_DIR%/} because --base-path was supplied; personas will resolve from the active config root" >&2
+        unset MASC_PERSONAS_DIR
+    fi
+}
+
 # Caller-provided env must win over repo-local .env/.env.local files.
 for env_name in \
     MASC_STORAGE_TYPE \
@@ -611,6 +646,7 @@ if [ -n "$MASC_EIO_EXE" ] && command -v dune >/dev/null 2>&1; then
 fi
 
 RESOLVED_BASE_PATH="$(resolve_base_path "$BASE_PATH")"
+clear_repo_local_config_for_explicit_base_path "$RESOLVED_BASE_PATH"
 export MASC_BASE_PATH="$RESOLVED_BASE_PATH"
 export MASC_BASE_PATH_RESOLUTION_SOURCE="$BASE_PATH_RESOLUTION_SOURCE"
 bootstrap_base_path_config "$RESOLVED_BASE_PATH"

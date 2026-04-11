@@ -99,14 +99,19 @@ export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params
   }
 }
 
-const REFRESHERS: Record<RefreshTask, () => void> = {
+const REFRESHERS: Record<RefreshTask, (routeState: Pick<RouteState, 'tab' | 'params'>) => void> = {
   shell: () => { void refreshShell({ force: true }) },
   namespaceTruth: () => { requestNamespaceTruth() },
   missionSnapshot: () => { void refreshMissionSnapshot() },
   execution: () => { void refreshExecution({ force: true }) },
   activityGraph: () => { void refreshActivityGraphSurface() },
   board: () => { void refreshBoard() },
-  proof: () => { void refreshProofSnapshot() },
+  proof: routeState => {
+    void refreshProofSnapshot(
+      routeState.params.session_id ?? null,
+      routeState.params.operation_id ?? null,
+    )
+  },
   goals: () => { void refreshGoals() },
   autoresearch: () => { void refreshAutoresearchLabSurface() },
   harness: () => { void refreshHarnessLabSurface() },
@@ -152,6 +157,6 @@ export function refreshForRoute(
     recordTabVisit(routeState.tab, routeState.params.section)
   }
   refreshPlanForRoute(routeState).forEach(task => {
-    REFRESHERS[task]()
+    REFRESHERS[task](routeState)
   })
 }

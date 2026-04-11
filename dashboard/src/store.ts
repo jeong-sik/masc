@@ -469,15 +469,41 @@ export async function refreshExecution(opts?: RefreshOptions): Promise<void> {
 /** Reconcile board posts by id+updated_at so unchanged items keep
  *  the same object reference.  Preact skips re-rendering subtrees
  *  whose props haven't changed, preserving scroll position. */
+function sameStringArray(a: string[] | undefined, b: string[] | undefined): boolean {
+  const left = a ?? []
+  const right = b ?? []
+  return left.length === right.length && left.every((value, index) => value === right[index])
+}
+
+function canReuseBoardPost(previous: BoardPost, next: BoardPost): boolean {
+  return previous.updated_at === next.updated_at
+    && previous.votes === next.votes
+    && previous.vote_balance === next.vote_balance
+    && previous.comment_count === next.comment_count
+    && previous.post_kind === next.post_kind
+    && previous.classification_reason === next.classification_reason
+    && previous.title === next.title
+    && previous.body === next.body
+    && previous.content === next.content
+    && previous.flair === next.flair
+    && previous.hearth === next.hearth
+    && previous.visibility === next.visibility
+    && previous.expires_at === next.expires_at
+    && sameStringArray(previous.tags, next.tags)
+    && (previous.meta?.source ?? null) === (next.meta?.source ?? null)
+    && (previous.meta?.state_block ?? null) === (next.meta?.state_block ?? null)
+}
+
 export function reconcileBoardPosts(prev: BoardPost[], next: BoardPost[]): BoardPost[] {
   if (prev.length === 0) return next
   const prevById = new Map(prev.map(p => [p.id, p]))
   let changed = prev.length !== next.length
-  const merged = next.map(n => {
+  const merged = next.map((n, index) => {
     const old = prevById.get(n.id)
-    if (old && old.updated_at === n.updated_at
-        && old.votes === n.votes
-        && old.comment_count === n.comment_count) {
+    if (!changed && prev[index]?.id !== n.id) {
+      changed = true
+    }
+    if (old && canReuseBoardPost(old, n)) {
       return old
     }
     changed = true

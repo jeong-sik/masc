@@ -6,6 +6,8 @@ function makePost(overrides: Partial<BoardPost> = {}): BoardPost {
   return {
     id: 'p-1',
     author: 'keeper-a',
+    post_kind: 'direct',
+    classification_reason: null,
     title: 'title',
     body: 'body',
     content: 'content',
@@ -64,6 +66,22 @@ describe('reconcileBoardPosts', () => {
     expect(result[0]).toBe(updated)
   })
 
+  it('detects change when post_kind differs without updated_at changing', () => {
+    const post = makePost()
+    const prev = [post]
+    const updated = { ...post, post_kind: 'automation' as const }
+    const result = reconcileBoardPosts(prev, [updated])
+    expect(result[0]).toBe(updated)
+  })
+
+  it('detects change when classification_reason differs without updated_at changing', () => {
+    const post = makePost()
+    const prev = [post]
+    const updated = { ...post, classification_reason: 'reclassified' }
+    const result = reconcileBoardPosts(prev, [updated])
+    expect(result[0]).toBe(updated)
+  })
+
   it('detects change when array length differs (new post added)', () => {
     const existing = makePost({ id: 'p-1' })
     const prev = [existing]
@@ -81,5 +99,15 @@ describe('reconcileBoardPosts', () => {
     const result = reconcileBoardPosts(prev, [{ ...a }])
     expect(result).toHaveLength(1)
     expect(result[0]).toBe(a)
+  })
+
+  it('reorders posts when the server order changes while keeping stable references', () => {
+    const a = makePost({ id: 'p-1' })
+    const b = makePost({ id: 'p-2' })
+    const prev = [a, b]
+    const result = reconcileBoardPosts(prev, [{ ...b }, { ...a }])
+    expect(result).not.toBe(prev)
+    expect(result[0]).toBe(b)
+    expect(result[1]).toBe(a)
   })
 })

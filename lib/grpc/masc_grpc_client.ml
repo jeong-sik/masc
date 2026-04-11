@@ -91,26 +91,68 @@ let subscribe t ~sw ~env ~agent_name ~session_id ~event_types ~since_seq =
   (* Transform raw stream items to typed events *)
   let typed_stream = Grpc_eio.Stream.create 64 in
   Eio.Fiber.fork ~sw (fun () ->
+    let push_closed = `Closed in
+    let push_typed item =
+      if Grpc_eio.Stream.is_closed typed_stream
+      then push_closed
+      else
+        try
+          Grpc_eio.Stream.add typed_stream item;
+          `Added
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn ->
+          if Grpc_eio.Stream.is_closed typed_stream then push_closed else `Failed exn
+    in
+    let push_error message =
+      push_typed (Error message)
+    in
+    let close_typed () =
+      try Grpc_eio.Stream.close typed_stream with _ -> ()
+    in
     let rec loop () =
       match Grpc_eio.Stream.take raw_stream with
       | Ok bytes ->
         (try
-          Grpc_eio.Stream.add typed_stream (Ok (T.Event.of_bytes bytes))
+          push_typed (Ok (T.Event.of_bytes bytes))
         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-          Grpc_eio.Stream.add typed_stream
-            (Error (Printf.sprintf "event decode error: %s"
-              (Printexc.to_string exn))));
+          push_error
+            (Printf.sprintf "event decode error: %s"
+               (Printexc.to_string exn)));
         loop ()
       | Error status ->
         if not (Grpc_core.Status.is_ok status) then
-          Grpc_eio.Stream.add typed_stream
-            (Error (Printf.sprintf "subscribe stream error: %s"
-              (Grpc_core.Status.to_string status)));
-        Grpc_eio.Stream.close typed_stream
+          push_error
+            (Printf.sprintf "subscribe stream error: %s"
+               (Grpc_core.Status.to_string status));
+        close_typed ()
       | exception End_of_file ->
-        Grpc_eio.Stream.close typed_stream
+        close_typed ()
     in
-    loop ());
+    try loop ()
+    with
+    | Eio.Cancel.Cancelled _ as e ->
+      close_typed ();
+      raise e
+    | exn ->
+      let message =
+        Printf.sprintf "gRPC subscribe fiber died outside iteration: %s"
+          (Printexc.to_string exn)
+      in
+      let delivery = push_error message in
+      close_typed ();
+      (match delivery with
+       | `Added ->
+         Log.Transport.error "%s" message
+       | `Closed ->
+         Log.Transport.debug
+           "gRPC subscribe fiber exit after typed stream closed: %s"
+           (Printexc.to_string exn)
+       | `Failed push_exn ->
+         Log.Transport.error
+           "%s (failed to deliver error to typed stream: %s)"
+           message
+           (Printexc.to_string push_exn)));
   typed_stream
 
 let heartbeat_stream t ~sw ~env =
@@ -118,15 +160,33 @@ let heartbeat_stream t ~sw ~env =
   (* Map typed pings to raw bytes *)
   let raw_requests = Grpc_eio.Stream.create 16 in
   Eio.Fiber.fork ~sw (fun () ->
+    let close_request_stream () =
+      try Grpc_eio.Stream.close request_stream with _ -> ()
+    in
+    let close_raw_requests () =
+      try Grpc_eio.Stream.close raw_requests with _ -> ()
+    in
     let rec loop () =
       match Grpc_eio.Stream.take request_stream with
       | bytes ->
         Grpc_eio.Stream.add raw_requests bytes;
         loop ()
       | exception End_of_file ->
-        Grpc_eio.Stream.close raw_requests
+        close_raw_requests ()
     in
-    loop ());
+    try loop ()
+    with
+    | Eio.Cancel.Cancelled _ as e ->
+      (* Close both sides so senders and downstream receivers unblock. *)
+      close_request_stream ();
+      close_raw_requests ();
+      raise e
+    | exn ->
+      Log.Transport.error
+        "gRPC heartbeat request-mapper crashed: %s"
+        (Printexc.to_string exn);
+      close_request_stream ();
+      close_raw_requests ());
   let raw_responses =
     Grpc_eio.Client.call_bidi ~sw ~env t.client
       ~service ~method_:"Heartbeat" ~requests:raw_requests

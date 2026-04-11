@@ -78,7 +78,9 @@ module Tool_validation = struct
 
   type transition = Applied of phase | Ignored of { phase: phase; event: event }
 
-  let apply_event ~current event =
+  let default_max_nondet_retries = 3
+
+  let apply_event ?(max_nondet_retries = default_max_nondet_retries) ~current event =
     match current, event with
     | Unchecked, Validate_start -> Applied Det_correcting
     | Unchecked, Skip_validation -> Applied Valid
@@ -88,11 +90,13 @@ module Tool_validation = struct
     | Det_invalid, Nondet_attempt _ -> Applied Nondet_retrying
     | Nondet_retrying, Nondet_fixed -> Applied Valid
     | Nondet_retrying, Nondet_exhausted -> Applied Rejected
-    | Nondet_retrying, Nondet_attempt _ -> Applied Nondet_retrying
+    | Nondet_retrying, Nondet_attempt n ->
+      if n < max_nondet_retries then Applied Nondet_retrying
+      else Applied Rejected
     | phase, event -> Ignored { phase; event }
 
-  let apply_event_lossy ~current event =
-    match apply_event ~current event with
+  let apply_event_lossy ?max_nondet_retries ~current event =
+    match apply_event ?max_nondet_retries ~current event with
     | Applied p | Ignored { phase = p; _ } -> p
 end
 
@@ -173,14 +177,16 @@ let apply_turn_event state event =
   | Ok () -> Ok new_state
   | Error reason -> Error reason
 
-let apply_validation_event state event =
+let apply_validation_event ?max_nondet_retries state event =
   (* Guard: validation events only accepted during Dispatching (TLA+ spec). *)
   if state.turn <> Agent_turn.Dispatching then
     Error (Printf.sprintf "validation event %s rejected: turn=%s (expected Dispatching)"
              (Tool_validation.event_to_string event)
              (Agent_turn.phase_to_string state.turn))
   else
-    let new_validation = Tool_validation.apply_event_lossy ~current:state.validation event in
+    let new_validation =
+      Tool_validation.apply_event_lossy ?max_nondet_retries ~current:state.validation event
+    in
     let new_state = { state with validation = new_validation } in
     match check_invariants new_state with
     | Ok () -> Ok new_state

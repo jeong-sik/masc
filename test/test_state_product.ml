@@ -50,6 +50,37 @@ let test_validation_rejected () =
   let s = TV.apply_event_lossy ~current:Nondet_retrying Nondet_exhausted in
   Alcotest.(check string) "rejected" "rejected" (TV.phase_to_string s)
 
+(* ── Nondet Retry Cap ──────────────────────────────────── *)
+
+let test_nondet_attempt_under_cap () =
+  (* attempt n=2 with default cap 3 -> still retrying *)
+  let s = TV.apply_event ~current:Nondet_retrying (Nondet_attempt 2) in
+  match s with
+  | Applied Nondet_retrying -> ()
+  | Applied p -> Alcotest.fail (Printf.sprintf "expected Nondet_retrying, got %s" (TV.phase_to_string p))
+  | Ignored _ -> Alcotest.fail "expected Applied, got Ignored"
+
+let test_nondet_attempt_at_cap () =
+  (* attempt n=3 with default cap 3 -> rejected *)
+  let s = TV.apply_event ~current:Nondet_retrying (Nondet_attempt 3) in
+  match s with
+  | Applied Rejected -> ()
+  | Applied p -> Alcotest.fail (Printf.sprintf "expected Rejected, got %s" (TV.phase_to_string p))
+  | Ignored _ -> Alcotest.fail "expected Applied, got Ignored"
+
+let test_nondet_custom_cap () =
+  (* custom cap of 1: attempt n=0 ok, attempt n=1 rejected *)
+  let s0 = TV.apply_event ~max_nondet_retries:1 ~current:Nondet_retrying (Nondet_attempt 0) in
+  (match s0 with
+   | Applied Nondet_retrying -> ()
+   | Applied p -> Alcotest.fail (Printf.sprintf "n=0: expected Nondet_retrying, got %s" (TV.phase_to_string p))
+   | Ignored _ -> Alcotest.fail "n=0: expected Applied, got Ignored");
+  let s1 = TV.apply_event ~max_nondet_retries:1 ~current:Nondet_retrying (Nondet_attempt 1) in
+  (match s1 with
+   | Applied Rejected -> ()
+   | Applied p -> Alcotest.fail (Printf.sprintf "n=1: expected Rejected, got %s" (TV.phase_to_string p))
+   | Ignored _ -> Alcotest.fail "n=1: expected Applied, got Ignored")
+
 let test_validation_skip () =
   let s = TV.apply_event_lossy ~current:Unchecked Skip_validation in
   Alcotest.(check string) "valid" "valid" (TV.phase_to_string s)
@@ -132,6 +163,9 @@ let () =
       Alcotest.test_case "nondet retry" `Quick test_validation_nondet_retry;
       Alcotest.test_case "rejected" `Quick test_validation_rejected;
       Alcotest.test_case "skip" `Quick test_validation_skip;
+      Alcotest.test_case "nondet attempt under cap" `Quick test_nondet_attempt_under_cap;
+      Alcotest.test_case "nondet attempt at cap" `Quick test_nondet_attempt_at_cap;
+      Alcotest.test_case "nondet custom cap" `Quick test_nondet_custom_cap;
     ]);
     ("invariants", [
       Alcotest.test_case "initial ok" `Quick test_initial_ok;

@@ -375,7 +375,14 @@ module Reflection_bridge = struct
             in
             try loop () with End_of_file -> ()
       in
-      Eio.Fiber.fork ~sw process_loop;
+      Eio.Fiber.fork ~sw (fun () ->
+        try process_loop ()
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn ->
+            Log.Server.error
+              "gRPC reflection process_loop crashed: %s"
+              (Printexc.to_string exn));
       response_stream
     in
     Grpc_eio.Service.create service_name

@@ -5,8 +5,7 @@ import { signal } from '@preact/signals'
 import { useRef, useEffect } from 'preact/hooks'
 import type { ComponentChildren } from 'preact'
 import autoAnimate from '@formkit/auto-animate'
-import { EmptyState } from '../common/empty-state'
-import { LoadingState } from '../common/feedback-state'
+import { EmptyState, ErrorState, LoadingState } from '../common/feedback-state'
 import { ActionButton } from '../common/button'
 import { Card } from '../common/card'
 import { TimeAgo } from '../common/time-ago'
@@ -209,8 +208,8 @@ export function TaskBacklog() {
   if (hasError && !hasData) {
     return html`
       <${Card} title="태스크 백로그" class="section">
-        <div class="text-center py-6">
-          <div class="text-[13px] text-bad mb-3">데이터를 불러오지 못했습니다.</div>
+        <div class="flex flex-col items-center gap-3 py-6">
+          <${ErrorState} message="데이터를 불러오지 못했습니다." />
           <${ActionButton} variant="ghost" size="sm" onClick=${() => refreshExecution({ force: true })}>재시도<//>
         </div>
       <//>

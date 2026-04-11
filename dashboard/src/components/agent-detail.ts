@@ -4,7 +4,7 @@
 import { html } from 'htm/preact'
 import { useRef } from 'preact/hooks'
 import { Card } from './common/card'
-import { EmptyState } from './common/empty-state'
+import { EmptyState, ErrorState } from './common/feedback-state'
 import { StatusBadge } from './common/status-badge'
 import { TimeAgo } from './common/time-ago'
 import { resolveUnifiedStatus } from '../lib/unified-status'
@@ -178,7 +178,7 @@ export function AgentDetailOverlay() {
           </div>
         </div>
 
-        ${detailError.value ? html`<div class="p-4 text-bad border border-bad/30 rounded-xl bg-bad/10 shadow-sm font-medium text-sm">${detailError.value}</div>` : null}
+        ${detailError.value ? html`<${ErrorState} message=${detailError.value} />` : null}
 
         <${AgentSessionReport} agentName=${agentName} />
 

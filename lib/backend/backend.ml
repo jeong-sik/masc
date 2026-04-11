@@ -162,6 +162,19 @@ module FileSystem = struct
             Unix.close fd)
         @@ fun () -> f fd)
 
+  (** Write all bytes to fd, retrying on partial writes.
+      Raises [Unix.Unix_error] if a zero-length write occurs (disk full). *)
+  let write_all_substring fd s ofs len =
+    let rec loop ofs remaining =
+      if remaining > 0 then begin
+        let written = Unix.write_substring fd s ofs remaining in
+        if written = 0 then
+          raise (Unix.Unix_error (Unix.EIO, "write_all_substring", "zero-length write"));
+        loop (ofs + written) (remaining - written)
+      end
+    in
+    loop ofs len
+
   (** {2 Core Operations} *)
 
   let _ensure_parent_dir ?(log_errors = false) path =
@@ -533,8 +546,8 @@ module FileSystem = struct
           let new_value = current + 1 in
           let new_str = string_of_int new_value in
           let _ = Unix.lseek fd 0 Unix.SEEK_SET in
-          let _ = Unix.ftruncate fd 0 in
-          let _ = Unix.write_substring fd new_str 0 (String.length new_str) in
+          Unix.ftruncate fd 0;
+          write_all_substring fd new_str 0 (String.length new_str);
           Ok new_value
         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
           Error (IOError (Printf.sprintf "atomic_increment failed: %s" (Printexc.to_string exn)))
@@ -610,8 +623,8 @@ module FileSystem = struct
           let new_content = f current in
           let compressed = _compress new_content in
           let _ = Unix.lseek fd 0 Unix.SEEK_SET in
-          let _ = Unix.ftruncate fd 0 in
-          let _ = Unix.write_substring fd compressed 0 (String.length compressed) in
+          Unix.ftruncate fd 0;
+          write_all_substring fd compressed 0 (String.length compressed);
           Ok new_content
         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
           Error (IOError (Printf.sprintf "atomic_update failed: %s" (Printexc.to_string exn)))

@@ -2,14 +2,48 @@
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-04-11
+
+### Added
+- Typed_tool_masc + State_product + TLA+ orthogonal FSM verification (#6321)
+- Trust Observatory dashboard — raw signals (Phase C0) (#6359)
+- B-SIM Monte Carlo verification — 4 gates pass (#6352)
+- Per-decision trifecta evaluation (Phase B3) (#6346)
+- Guard → Thompson bridge (Phase B1) (#6307)
+- TLA+ KeeperDecisionPipeline — Phase B0 gate (#6277)
+- Shared gate client + Telegram/CLI connectors (#6367)
+- iMessage channel connector (#6329)
+- Docker playground for keeper_bash (#6338)
+- Decision Pipeline FSM diagram in keeper detail dashboard (#6405)
+- masc_keeper_reset command for stale runtime state (#6428)
+- rate_limit.mli — hide bucket internals behind abstract type (#6431)
+- coding_first cascade profile — glm-5.1 first for PR-capable keepers (#6430)
+- Voice tools for sangsu (ElevenLabs Roger) (#6247)
+- Keeper Failing → recovery minimum shards + .masc/ whitelist (Phase B2) (#6325)
+
 ### Changed
-- Restructure keeper.world.md and keeper.capabilities.md: path rules at top, NEVER directives, BAD/GOOD bash examples (#6298)
-- Substitute actual keeper_name into world/capabilities prompts, replacing YOUR_KEEPER_NAME placeholder (#6316)
-- Expand decision log error_category: 5 → 7 categories (added timeout, ambiguous_side_effect) (#6316)
-- Auto-correct common wrong path prefixes in keeper_shell: /repos/X → .masc/playground/name/repos/X (#6317)
-- Wire OAS Tool_retry_policy (retry_on_validation_error=true, Structured_tool_result) (#6324)
-- Wire OAS post_tool_use_failure hook for structured failure metrics (#6324)
-- Per-keeper error prevention hints in TOML instructions: janitor, sangsu, cheolsu, masc-improver (#6298)
+- Restructure keeper.world.md and keeper.capabilities.md (#6298)
+- Substitute keeper_name into world/capabilities prompts (#6316)
+- Expand decision log error_category: 5 → 7 categories (#6316)
+- Wire OAS Tool_retry_policy + post_tool_use_failure hook (#6324)
+- Per-keeper error prevention hints in TOML instructions (#6298)
+- Broadcast PoC uses Tool_schema_gen combinators (#6427)
+- Remove params_to_input_schema duplicate — use OAS shared utility (#6418)
+- Draining invariant doc fix to match TLA+ (#6403)
+- Rename team_session → execution_session (#6364)
+- Remove remaining team session surfaces (#6363)
+- OAS pin bumped to v0.119.1 (#6446)
+- Allow localhost cross-port browser mutations for dev dashboard (#6459)
+
+### Fixed
+- Keeper turn timeout 300s → 1200s default (env var override removed) (#6371)
+- Auto-recover reconcile-safe tools on server parse errors (#6370)
+- Feature flag registry: MASC_KEEPER_DOCKER_PLAYGROUND (#6365)
+- Voice config empty session endpoints (#6357)
+- Keeper sidecar suffix check for dotted names (#6408)
+- Worktree basepath config resolution (#6449)
+- Keeper autonomous stall — raise turn budget, classify shell read-only (#6371)
+- 50 additional bug fixes across keeper, dashboard, and infrastructure
 
 ## [0.3.0] - 2026-04-09
 

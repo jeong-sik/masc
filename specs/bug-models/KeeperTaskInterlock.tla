@@ -33,6 +33,54 @@
 \* because the real FSM's Failing/Compacting/HandingOff/etc.
 \* phases never transition directly to Dead without traversing the
 \* drain path modelled here.
+\*
+\* ── Current implementation note (as of 2026-04-12) ──
+\* The real code does NOT satisfy NoDeadKeeperHoldsTask
+\* synchronously. Audited in issue #6609. Key findings:
+\*
+\*   1. Keeper_registry.mark_dead (keeper_registry.ml:237) sets
+\*      entry.phase = Dead but never touches the task FSM. No
+\*      task cascade fires on this call.
+\*   2. cleanup_dead_tombstone (keeper_supervisor.ml:225) writes
+\*      paused=true and unregisters the keeper; task FSM untouched.
+\*   3. Task assignee = keeper's agent identity (the keeper IS the
+\*      claimant), so a dead keeper's Claimed/InProgress tasks have
+\*      task_claimer == keeper_name, and the TLA+ "Held ∧ Dead"
+\*      predicate is directly reachable in practice.
+\*
+\* What actually restores the invariant:
+\*
+\*   Room_gc.cleanup_zombies (room/room_gc.ml:39-150) scans the
+\*   agents directory on a periodic GC cycle, detects agents whose
+\*   last_seen is older than Env_config.Zombie.keeper_threshold_seconds
+\*   ("zombie" agents), and in Phase 3 iterates the backlog calling
+\*   Room_hooks.force_release_task_fn for every Claimed/InProgress
+\*   task whose assignee is a zombie. This is the **asynchronous,
+\*   heartbeat-timeout-driven** path that eventually restores the
+\*   NoDeadKeeperHoldsTask property.
+\*
+\* Implication for this spec:
+\*
+\*   This file formalizes an UPGRADE TARGET, not a proof of current
+\*   correctness. A synchronous cascade from mark_dead into the task
+\*   FSM would be the code change that makes the invariant hold
+\*   without the GC window. Until that cascade exists, a Dead keeper
+\*   can hold a Claimed task for up to ~keeper_threshold_seconds —
+\*   the transient window is visible on the dashboard Keepers section
+\*   (#6556) and is safe because Room.claim_task_r rejects any
+\*   attempt by another agent to re-claim the orphaned task
+\*   (TaskAlreadyClaimed), so no state corruption is possible.
+\*
+\* Do NOT read this file as "the code is broken". Read it as "here
+\* is the discipline the code should enforce, and here is TLC ready
+\* to catch a regression if someone tries to take a shortcut."
+\*
+\* Audit trichotomy reference: feedback memory
+\*   feedback_tla-spec-audit-outcome-trichotomy.md
+\* describes the three audit outcomes observed in the series:
+\*   (1) safe by emission discipline (KeepalivePhaseConsistency)
+\*   (2) safe by async independent path (this spec)
+\*   (3) actual gap (none observed)
 
 CONSTANTS K, T   \* sets of keeper names and task IDs
 

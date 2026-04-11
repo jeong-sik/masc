@@ -134,7 +134,8 @@ let get_or_create_identity ?mcp_session_id params =
 
       Log.Session.info "[AgentRegistry] New identity: %s (session=%s, mcp=%s)"
         registered.agent_name
-        (String.sub registered.session_key 0 8)
+        (String.sub registered.session_key 0
+           (min 8 (String.length registered.session_key)))
         (Option.value mcp_session_id ~default:"none");
 
       maybe_evict_session_caches ();

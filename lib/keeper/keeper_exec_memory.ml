@@ -249,6 +249,12 @@ let keeper_context_status_json ~(meta : keeper_meta) ~(ctx_work : working_contex
     then 0.0
     else float_of_int ctx_tokens /. float_of_int ctx_work.max_tokens
   in
+  (* Give the keeper the three canonical playground paths from the SSOT
+     so it does not need to re-interpolate ".masc/playground/<name>/..."
+     strings every turn. These are relative to the server base_path. *)
+  let playground_bundle = Playground_paths.bundle_root meta.name in
+  let playground_mind = Playground_paths.mind_path meta.name in
+  let playground_repos = Playground_paths.repos_path meta.name in
   Yojson.Safe.to_string
     (`Assoc
         [ "name", `String meta.name
@@ -259,6 +265,9 @@ let keeper_context_status_json ~(meta : keeper_meta) ~(ctx_work : working_contex
         ; "context_max", `Int ctx_work.max_tokens
         ; "message_count", `Int (List.length ctx_work.messages)
         ; "last_model_used", `String meta.runtime.usage.last_model_used
+        ; "playground_bundle", `String playground_bundle
+        ; "playground_mind", `String playground_mind
+        ; "playground_repos", `String playground_repos
         ; ( "continuity_state"
           , match continuity with
             | None -> `Null

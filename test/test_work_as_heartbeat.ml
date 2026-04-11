@@ -137,7 +137,8 @@ let test_semaphore_wait_timeout_exception_shape () =
   (* The exception carries the wait cap in seconds so the caller can
      render it in a log line without re-reading the env var. *)
   let carried =
-    try raise (KK.Semaphore_wait_timeout 42.5); -1.0
+    try
+      raise (KK.Semaphore_wait_timeout 42.5)
     with KK.Semaphore_wait_timeout v -> v
   in
   check (float 0.001) "exception carries wait sec" 42.5 carried

@@ -275,80 +275,100 @@ let handle_heartbeat
   Atomic.incr active_heartbeat_streams;
   Transport_metrics.set_grpc_active_streams (Atomic.get active_heartbeat_streams);
   Eio.Fiber.fork ~sw (fun () ->
+    let cleanup () =
+      Atomic.decr active_heartbeat_streams;
+      Transport_metrics.set_grpc_active_streams
+        (Atomic.get active_heartbeat_streams);
+      (try Grpc_eio.Stream.close response_stream with _ -> ())
+    in
     let rec loop () =
       match Grpc_eio.Stream.take request_stream with
       | bytes ->
-        let t0 = Unix.gettimeofday () in
-        let ping = T.HeartbeatPing.of_bytes bytes in
-        (* Update agent last_seen *)
         (try
-          let agent_file =
-            Filename.concat
-              (Filename.concat
-                (Filename.concat room_config.base_path ".masc")
-                "agents")
-              (safe_filename ping.agent_name ^ ".json")
+          let t0 = Unix.gettimeofday () in
+          let ping = T.HeartbeatPing.of_bytes bytes in
+          (* Update agent last_seen *)
+          (try
+            let agent_file =
+              Filename.concat
+                (Filename.concat
+                  (Filename.concat room_config.base_path ".masc")
+                  "agents")
+                (safe_filename ping.agent_name ^ ".json")
+            in
+            if Sys.file_exists agent_file then begin
+              let json = Yojson.Safe.from_string (read_file_safe agent_file) in
+              match Types.agent_of_yojson json with
+              | Ok agent ->
+                let now = Unix.gettimeofday () in
+                let iso_now =
+                  let tm = Unix.gmtime now in
+                  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
+                    (1900 + tm.tm_year) (1 + tm.tm_mon) tm.tm_mday
+                    tm.tm_hour tm.tm_min tm.tm_sec
+                in
+                let updated = { agent with Types.last_seen = iso_now } in
+                let content =
+                  Yojson.Safe.to_string (Types.agent_to_yojson updated)
+                in
+                let tmp_path = agent_file ^ ".tmp" in
+                Fs_compat.save_file tmp_path content;
+                Unix.rename tmp_path agent_file
+              | Error e ->
+                  Log.Transport.warn "gRPC heartbeat: invalid agent JSON for %s: %s"
+                    ping.agent_name e
+            end
+          with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Transport.error "gRPC heartbeat update failed: %s" (Printexc.to_string exn));
+          (* Count active agents and pending tasks *)
+          let masc_dir = Filename.concat room_config.base_path ".masc" in
+          let agents_dir = Filename.concat masc_dir "agents" in
+          let agent_count =
+            if Sys.file_exists agents_dir then
+              Array.length (Sys.readdir agents_dir)
+            else 0
           in
-          if Sys.file_exists agent_file then begin
-            let json = Yojson.Safe.from_string (read_file_safe agent_file) in
-            match Types.agent_of_yojson json with
-            | Ok agent ->
-              let now = Unix.gettimeofday () in
-              let iso_now =
-                let tm = Unix.gmtime now in
-                Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-                  (1900 + tm.tm_year) (1 + tm.tm_mon) tm.tm_mday
-                  tm.tm_hour tm.tm_min tm.tm_sec
-              in
-              let updated = { agent with Types.last_seen = iso_now } in
-              let content =
-                Yojson.Safe.to_string (Types.agent_to_yojson updated)
-              in
-              let tmp_path = agent_file ^ ".tmp" in
-              Fs_compat.save_file tmp_path content;
-              Unix.rename tmp_path agent_file
-            | Error e ->
-                Log.Transport.warn "gRPC heartbeat: invalid agent JSON for %s: %s"
-                  ping.agent_name e
-          end
-        with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Transport.error "gRPC heartbeat update failed: %s" (Printexc.to_string exn));
-        (* Count active agents and pending tasks *)
-        let masc_dir = Filename.concat room_config.base_path ".masc" in
-        let agents_dir = Filename.concat masc_dir "agents" in
-        let agent_count =
-          if Sys.file_exists agents_dir then
-            Array.length (Sys.readdir agents_dir)
-          else 0
-        in
-        let tasks_dir = Filename.concat masc_dir "tasks" in
-        let pending_count =
-          if Sys.file_exists tasks_dir then
-            Sys.readdir tasks_dir
-            |> Array.to_list
-            |> List.filter (fun f -> Filename.check_suffix f ".json")
-            |> List.length
-          else 0
-        in
-        let directives =
-          compute_directives ~room_config ~agent_name:ping.agent_name
-        in
-        let ack = T.HeartbeatAck.{
-          timestamp_ms = now_ms ();
-          active_agent_count = agent_count;
-          pending_task_count = pending_count;
-          directives;
-        } in
-        Grpc_eio.Stream.add response_stream (T.HeartbeatAck.to_bytes ack);
-        (* Record heartbeat latency *)
-        let latency = Unix.gettimeofday () -. t0 in
-        Transport_metrics.observe_grpc_heartbeat_latency latency;
+          let tasks_dir = Filename.concat masc_dir "tasks" in
+          let pending_count =
+            if Sys.file_exists tasks_dir then
+              Sys.readdir tasks_dir
+              |> Array.to_list
+              |> List.filter (fun f -> Filename.check_suffix f ".json")
+              |> List.length
+            else 0
+          in
+          let directives =
+            compute_directives ~room_config ~agent_name:ping.agent_name
+          in
+          let ack = T.HeartbeatAck.{
+            timestamp_ms = now_ms ();
+            active_agent_count = agent_count;
+            pending_task_count = pending_count;
+            directives;
+          } in
+          Grpc_eio.Stream.add response_stream (T.HeartbeatAck.to_bytes ack);
+          (* Record heartbeat latency *)
+          let latency = Unix.gettimeofday () -. t0 in
+          Transport_metrics.observe_grpc_heartbeat_latency latency
+         with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | exn ->
+           Log.Transport.error
+             "gRPC heartbeat iteration crashed: %s"
+             (Printexc.to_string exn));
         loop ()
       | exception End_of_file ->
-        Atomic.decr active_heartbeat_streams;
-        Transport_metrics.set_grpc_active_streams (Atomic.get active_heartbeat_streams);
-        Grpc_eio.Stream.close response_stream
+        cleanup ()
     in
-    loop ());
+    try loop ()
+    with
+    | Eio.Cancel.Cancelled _ as e ->
+      cleanup ();
+      raise e
+    | exn ->
+      Log.Transport.error
+        "gRPC heartbeat fiber died outside iteration: %s"
+        (Printexc.to_string exn);
+      cleanup ());
   response_stream
 
 (** Subscribe server-streaming handler: push room events to the agent. *)

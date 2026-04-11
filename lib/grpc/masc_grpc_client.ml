@@ -126,7 +126,17 @@ let heartbeat_stream t ~sw ~env =
       | exception End_of_file ->
         Grpc_eio.Stream.close raw_requests
     in
-    loop ());
+    try loop ()
+    with
+    | Eio.Cancel.Cancelled _ as e ->
+      (* Close the downstream to unblock any receiver before propagating. *)
+      (try Grpc_eio.Stream.close raw_requests with _ -> ());
+      raise e
+    | exn ->
+      Log.Transport.error
+        "gRPC heartbeat request-mapper crashed: %s"
+        (Printexc.to_string exn);
+      (try Grpc_eio.Stream.close raw_requests with _ -> ()));
   let raw_responses =
     Grpc_eio.Client.call_bidi ~sw ~env t.client
       ~service ~method_:"Heartbeat" ~requests:raw_requests

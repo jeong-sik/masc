@@ -22,37 +22,51 @@ let run_argv_exit argv =
   | Unix.WSIGNALED _, _ -> 128
   | Unix.WSTOPPED _, _ -> 128
 
-(** Get git root directory - delegates to Room_git *)
-let git_root config =
-  Room_git.git_root ~base_path:config.base_path
-
 (** Check if directory is a git repository - delegates to Room_git *)
 let is_git_repo config =
   Room_git.is_git_repo ~base_path:config.base_path
 
 (** Resolve the project root from config.base_path.
     If base_path ends with ".masc", use its parent; otherwise use base_path.
-    This is the SSOT for where .worktrees/ lives — not git rev-parse.
+    Then walk parent directories until we find the owning repository root
+    (.git directory). This keeps config.base_path as the anchor while still
+    handling nested subdirectories and worktree roots (.git file).
     Inlined from Keeper_alerting_path to avoid room→keeper dependency. *)
+let git_marker_kind path =
+  match (try Some (Sys.is_directory path) with Sys_error _ -> None) with
+  | Some true -> `Directory
+  | Some false -> `File
+  | None -> `Missing
+
 let project_root config =
   let base = config.base_path in
-  if Filename.basename base = ".masc" then Filename.dirname base else base
+  let candidate =
+    if Filename.basename base = ".masc" then Filename.dirname base else base
+  in
+  let rec find_repo_root dir =
+    let git_marker = Filename.concat dir ".git" in
+    match git_marker_kind git_marker with
+    | `Directory -> Some dir
+    | `File | `Missing ->
+        let parent = Filename.dirname dir in
+        if String.equal parent dir then None else find_repo_root parent
+  in
+  match find_repo_root candidate with
+  | Some root -> root
+  | None -> candidate
 
 let require_repository_root_with_git config =
   let root = project_root config in
   let git_marker = Filename.concat root ".git" in
-  if Sys.file_exists git_marker then
+  match git_marker_kind git_marker with
+  | `Directory | `File ->
     Ok root
-  else
-    (* Worktree .git is a file, not a directory — also valid *)
-    match (try Some (Sys.is_directory git_marker) with Sys_error _ -> None) with
-    | Some false -> Ok root  (* .git file = git worktree, still valid *)
-    | _ ->
-        Error
-          (IoError
-             (Printf.sprintf
-                "Worktree isolation requires repository root with .git: %s (current base path: %s)"
-                root config.base_path))
+  | `Missing ->
+    Error
+      (IoError
+         (Printf.sprintf
+            "Worktree isolation requires repository root with .git: %s (current base path: %s)"
+            root config.base_path))
 
 let ensure_worktree_path root worktree_name =
   let worktrees_dir = Filename.concat root ".worktrees" in

@@ -184,6 +184,60 @@ let test_worktree_create_no_git () =
   let _ = Room.reset config in
   Unix.rmdir tmp_dir
 
+let write_file path content =
+  Out_channel.with_open_bin path (fun oc -> output_string oc content)
+
+let rec rm_rf path =
+  if Sys.file_exists path then
+    if Sys.is_directory path then begin
+      Sys.readdir path
+      |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+      Unix.rmdir path
+    end else
+      Sys.remove path
+
+let test_worktree_project_root_for_nested_subdir () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let tmp_dir = Filename.concat (Filename.get_temp_dir_name ())
+    (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
+  Unix.mkdir tmp_dir 0o755;
+  let config = Room.default_config tmp_dir in
+  let _ = Room.init config ~agent_name:(Some "claude") in
+  let repo_root = config.base_path in
+  Unix.mkdir (Filename.concat repo_root ".git") 0o755;
+  let nested = Filename.concat repo_root "nested" in
+  Unix.mkdir nested 0o755;
+  let nested_config = { config with base_path = nested } in
+  Alcotest.(check string) "nested path resolves to repo root"
+    repo_root
+    (Room.project_root nested_config);
+  let _ = Room.reset config in
+  rm_rf tmp_dir
+
+let test_worktree_project_root_for_gitfile_worktree () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let tmp_dir = Filename.concat (Filename.get_temp_dir_name ())
+    (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
+  Unix.mkdir tmp_dir 0o755;
+  let config = Room.default_config tmp_dir in
+  let _ = Room.init config ~agent_name:(Some "claude") in
+  let repo_root = config.base_path in
+  Unix.mkdir (Filename.concat repo_root ".git") 0o755;
+  let worktrees_dir = Filename.concat repo_root ".worktrees" in
+  Unix.mkdir worktrees_dir 0o755;
+  let worktree_root = Filename.concat worktrees_dir "agent-task" in
+  Unix.mkdir worktree_root 0o755;
+  write_file (Filename.concat worktree_root ".git")
+    "gitdir: /tmp/fake-common-dir/worktrees/agent-task\n";
+  let worktree_config = { config with base_path = worktree_root } in
+  Alcotest.(check string) "worktree path resolves to shared repo root"
+    repo_root
+    (Room.project_root worktree_config);
+  let _ = Room.reset config in
+  rm_rf tmp_dir
+
 let test_event_log () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1606,6 +1660,10 @@ let () =
     "worktree", [
       Alcotest.test_case "list no git" `Quick test_worktree_list_no_git;
       Alcotest.test_case "create no git" `Quick test_worktree_create_no_git;
+      Alcotest.test_case "project root nested subdir" `Quick
+        test_worktree_project_root_for_nested_subdir;
+      Alcotest.test_case "project root worktree gitfile" `Quick
+        test_worktree_project_root_for_gitfile_worktree;
     ];
     "portal", [
       Alcotest.test_case "open and status" `Quick test_portal_open_and_status;

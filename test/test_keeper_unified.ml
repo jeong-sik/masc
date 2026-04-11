@@ -1765,14 +1765,29 @@ let test_prompt_sanitizes_control_chars () =
         ];
     }
   in
-  let sys, user = UP.build_prompt ~base_path:"/test" ~meta ~observation:obs () in
+  let sys_raw, user_raw =
+    UP.build_prompt ~base_path:"/test" ~meta ~observation:obs ()
+  in
+  (* #6645 intentionally moved UTF-8 sanitization from MASC's
+     [build_prompt] to the OAS pipeline boundary (agent.ml,
+     pipeline.ml, agent_turn.ml in OAS v0.121.0). MASC callers now
+     receive raw strings and the OAS [Agent.run] pipeline scrubs them
+     before hitting the LLM. This test mirrors that downstream
+     responsibility by invoking [sanitize_text_utf8] on the return
+     values post-[build_prompt], confirming the pipeline's invariant:
+     disallowed control chars (< 0x20 excl. \t\n\r, and 0x7f) end up
+     replaced with spaces so user-controlled bytes never reach the
+     LLM raw. See #6656 for the test-only fix; the sanitize call on
+     [build_prompt] output itself was deliberately removed by #6645. *)
+  let sys = Masc_mcp.Inference_utils.sanitize_text_utf8 sys_raw in
+  let user = Masc_mcp.Inference_utils.sanitize_text_utf8 user_raw in
   check bool "system prompt sanitized" false
     (contains_disallowed_control_char sys);
   check bool "user prompt sanitized" false
     (contains_disallowed_control_char user);
-  check bool "mention text preserved" true
+  check bool "mention text preserved after sanitize" true
     (contains_substring user "ping pong");
-  check bool "board preview preserved" true
+  check bool "board preview preserved after sanitize" true
     (contains_substring user "bad preview")
 
 let test_sanitize_messages_utf8_cleans_history_path () =

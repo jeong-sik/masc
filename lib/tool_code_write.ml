@@ -31,11 +31,10 @@ let validate_writable_path config path =
   match Tool_code.validate_path config path with
   | Error e -> Error e
   | Ok canonical_path ->
-    (* Simple check: path must contain /.worktrees/ somewhere.
-       This is safe because .worktrees/ is never on main — it's always
-       a git worktree checkout, so writes here can't corrupt main. *)
-    let has_worktree_segment path =
-      let marker = "/.worktrees/" in
+    (* Path must be inside a safe sandbox: .worktrees/ or .masc/playground/.
+       Both are isolated from main — worktrees are git checkouts,
+       playground is each keeper's personal clone. *)
+    let has_segment path marker =
       let mlen = String.length marker in
       let plen = String.length path in
       let rec scan i =
@@ -45,7 +44,8 @@ let validate_writable_path config path =
       in
       scan 0
     in
-    if has_worktree_segment canonical_path then
+    if has_segment canonical_path "/.worktrees/"
+       || has_segment canonical_path "/.masc/playground/" then
       Ok canonical_path
     else
       Error (IoError (Printf.sprintf

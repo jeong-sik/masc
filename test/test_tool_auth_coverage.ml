@@ -28,11 +28,37 @@ let extract_first_backtick_value text =
        | None -> failwith ("unterminated backtick-delimited value in: " ^ text)
        | Some stop -> String.sub text (start + 1) (stop - start - 1))
 
+let with_env name value_opt f =
+  let original = Sys.getenv_opt name in
+  let restore () =
+    match original with
+    | Some value -> Unix.putenv name value
+    | None -> Unix.putenv name ""
+  in
+  Fun.protect
+    ~finally:restore
+    (fun () ->
+      (match value_opt with
+       | Some value -> Unix.putenv name value
+       | None -> Unix.putenv name "");
+      f ())
+
+let with_isolated_runtime_env f =
+  with_env "MASC_BASE_PATH" None (fun () ->
+    with_env "MASC_BASE_PATH_INPUT" None (fun () ->
+      with_env "MASC_STORAGE_TYPE" None (fun () ->
+        with_env "MASC_POSTGRES_URL" None (fun () ->
+          with_env "DATABASE_URL" None (fun () ->
+            with_env "SUPABASE_DB_URL" None (fun () ->
+              with_env "SB_PG_URL" None f))))))
+
 (* Test helper — wraps in Eio context so dispatch paths that use
    Eio.Mutex or structured concurrency work correctly. *)
 let test name f =
   try
-    Eio_main.run @@ (fun env -> Fs_compat.set_fs (Eio.Stdenv.fs env); f ());
+    Eio_main.run @@ (fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      with_isolated_runtime_env f);
     Printf.printf "✓ %s passed\n" name
   with e ->
     Printf.printf "✗ %s FAILED: %s\n" name (Printexc.to_string e);

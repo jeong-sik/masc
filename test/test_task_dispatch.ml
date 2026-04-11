@@ -24,7 +24,6 @@ let test_default_backend_jsonl () =
   Alcotest.(check bool) "defaults to jsonl" false (Task_dispatch.is_postgres ());
   match Task_dispatch.backend () with
   | Task_dispatch.Jsonl -> ()
-  | Task_dispatch.Postgres _ -> Alcotest.fail "expected Jsonl backend"
 
 let test_add_task_in_jsonl_mode () =
   with_temp_config (fun config ->

@@ -27,6 +27,8 @@ let test_parse_missing_message () =
   | Error _ -> ()
 
 let test_parse_wrong_type () =
+  (* agent_sdk coerces scalar values into string fields, so use a container
+     value here to assert a non-coercible parse failure. *)
   let json = `Assoc [("message", `List [`String "a"])] in
   match parse json with
   | Ok _ -> Alcotest.fail "expected parse error"

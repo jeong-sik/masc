@@ -90,6 +90,11 @@ val keeper_auto_rule_eval_to_json : keeper_auto_rule_eval -> Yojson.Safe.t
 val keeper_reflection_payload_of_auto_rules :
   keeper_auto_rule_eval -> Yojson.Safe.t
 
+val keeper_auto_rule_eval_of_measurement :
+  ?events:Keeper_state_machine.event list ->
+  Keeper_measurement.measurement_snapshot ->
+  keeper_auto_rule_eval
+
 (** {1 Model-Aware Threshold Adjustment} *)
 
 (** Compute threshold multipliers from OAS [Llm_provider.Model_meta] parameters.

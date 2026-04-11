@@ -15,10 +15,7 @@ if command -v opam >/dev/null 2>&1; then
     eval "$(opam env 2>/dev/null)" >/dev/null 2>/dev/null || true
 fi
 
-# Storage backend: filesystem by default (single-machine, no PG dependency).
-# PG auto-detect caused 4-min connection timeouts that starved Eio fibers
-# and blocked keeper autoboot (2026-03-28 incident). Board LISTEN/NOTIFY
-# uses its own dedicated PG connection and is unaffected by this setting.
+# Storage backend: filesystem by default.
 export MASC_STORAGE_TYPE="${MASC_STORAGE_TYPE:-filesystem}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -284,14 +281,8 @@ restore_env_override() {
 REPO_ENV_ROOT="$(resolve_repo_env_root)"
 
 # Caller-provided env must win over repo-local .env/.env.local files.
-# This keeps one-off overrides like MASC_STORAGE_TYPE=postgres effective
-# instead of being silently reset by checked-in defaults.
 for env_name in \
     MASC_STORAGE_TYPE \
-    MASC_POSTGRES_URL \
-    DATABASE_URL \
-    SUPABASE_DB_URL \
-    SB_PG_URL \
     MASC_KEEPER_BOOTSTRAP_ENABLED \
     MASC_MCP_PORT \
     MASC_HOST \
@@ -320,10 +311,6 @@ fi
 
 for env_name in \
     MASC_STORAGE_TYPE \
-    MASC_POSTGRES_URL \
-    DATABASE_URL \
-    SUPABASE_DB_URL \
-    SB_PG_URL \
     MASC_KEEPER_BOOTSTRAP_ENABLED \
     MASC_MCP_PORT \
     MASC_HOST \
@@ -335,6 +322,17 @@ for env_name in \
 do
     restore_env_override "$env_name"
 done
+
+case "$(printf '%s' "${MASC_STORAGE_TYPE:-filesystem}" | tr '[:upper:]' '[:lower:]')" in
+    postgres|postgresql|postgres-native)
+        export MASC_STORAGE_TYPE="filesystem"
+        ;;
+esac
+
+unset MASC_POSTGRES_URL
+unset DATABASE_URL
+unset SUPABASE_DB_URL
+unset SB_PG_URL
 
 # Did caller provide --base-path explicitly on CLI?
 BASE_PATH_EXPLICIT=0
@@ -537,7 +535,7 @@ RELEASE_BINARY="$SCRIPT_DIR/masc-mcp-macos-arm64"
 WORKSPACE_EXE="$SCRIPT_DIR/../_build/default/masc-mcp/bin/main.exe"
 LOCAL_EXE="$SCRIPT_DIR/_build/default/bin/main.exe"
 INSTALLED_EXE="$(command -v masc-mcp || true)"
-# Eio-based server (main_eio.exe) - for PostgresNative backend
+# Eio-based server (main_eio.exe)
 WORKSPACE_EIO_EXE="$SCRIPT_DIR/../_build/default/masc-mcp/bin/main_eio.exe"
 LOCAL_EIO_EXE="$SCRIPT_DIR/_build/default/bin/main_eio.exe"
 WORKSPACE_STDIO_EIO_EXE="$SCRIPT_DIR/../_build/default/masc-mcp/bin/main_stdio_eio.exe"

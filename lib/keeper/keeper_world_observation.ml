@@ -275,17 +275,12 @@ let list_board_posts_after_cursor (cursor_ts, cursor_post_id) =
       (cursor_ts, cursor_post_id)
     > 0
   in
-  match Board_dispatch.backend () with
-  | Board_dispatch.Jsonl store ->
-      Board.search_posts store ~predicate:(fun _ -> true) ~limit:max_int
-      |> List.filter is_after_cursor
-      |> List.sort (fun (a : Board.post) (b : Board.post) ->
-           compare_board_cursor_token
-             (board_cursor_token_of_post a)
-             (board_cursor_token_of_post b))
-  | Board_dispatch.Postgres t ->
-      Board_pg.list_posts_updated_since t ~since_ts:cursor_ts
-      |> List.filter is_after_cursor
+  Board_dispatch.list_posts ~sort_by:Board_dispatch.Updated ~limit:max_int ()
+  |> List.filter is_after_cursor
+  |> List.sort (fun (a : Board.post) (b : Board.post) ->
+       compare_board_cursor_token
+         (board_cursor_token_of_post a)
+         (board_cursor_token_of_post b))
 
 let board_signal_text (signal : Board_dispatch.keeper_board_signal) =
   String.concat "\n"

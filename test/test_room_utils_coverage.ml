@@ -1,7 +1,7 @@
 (** Room_utils Module Coverage Tests
 
     Tests for Room utility functions:
-    - storage_backend type: Memory, FileSystem, PostgresNative
+    - storage_backend type: Memory, FileSystem
     - config record type
     - parse_gitdir_to_main_root: gitdir line parsing for worktrees
     - env_opt: environment variable helper
@@ -287,10 +287,6 @@ let test_storage_backend_filesystem_variant () =
   let _ : string = "FileSystem" in
   ()
 
-let test_storage_backend_postgres_variant () =
-  let _ : string = "PostgresNative" in
-  ()
-
 (* ============================================================
    config Record Tests
    ============================================================ *)
@@ -441,7 +437,7 @@ let test_storage_type_explicit_postgres () =
   with_envs
     (pg_env_bindings ~masc_storage_type:"postgres" ())
     (fun () ->
-      check string "explicit postgres" "postgres"
+      check string "explicit postgres coerces to filesystem" "filesystem"
         (Room_utils.storage_type_from_env ()))
 
 let test_storage_type_legacy_url_does_not_auto_select () =
@@ -461,7 +457,7 @@ let test_storage_type_auto_is_deprecated () =
 
 let test_backend_config_for_requires_explicit_postgres () =
   let url = "postgresql://sb.example/test_backend_config" in
-  (* Legacy URL alone should NOT select postgres *)
+  (* Legacy URL alone should NOT select postgres. *)
   with_envs
     (pg_env_bindings ~sb_pg_url:url ())
     (fun () ->
@@ -470,16 +466,16 @@ let test_backend_config_for_requires_explicit_postgres () =
         (match cfg.backend_type with
          | Backend_types.FileSystem -> true
          | _ -> false));
-  (* Explicit MASC_STORAGE_TYPE=postgres + MASC_POSTGRES_URL should select postgres *)
+  (* Explicit postgres selection is now coerced to filesystem. *)
   with_envs
     (pg_env_bindings ~masc_storage_type:"postgres" ~masc_postgres_url:url ())
     (fun () ->
       let cfg = Room_utils.backend_config_for "/tmp/test-room-utils" in
-      check bool "explicit postgres selects postgres native" true
+      check bool "explicit postgres still resolves to filesystem" true
         (match cfg.backend_type with
-         | Backend_types.PostgresNative -> true
+         | Backend_types.FileSystem -> true
          | _ -> false);
-      check (option string) "postgres url" (Some url) cfg.postgres_url)
+      check (option string) "postgres url ignored" None cfg.postgres_url)
 
 let test_postgres_url_from_env_ignores_legacy_without_masc_url () =
   let raw_url =
@@ -499,8 +495,8 @@ let test_postgres_url_from_env_uses_masc_postgres_url () =
   with_envs
     (pg_env_bindings ~masc_postgres_url:url ())
     (fun () ->
-      check (option string) "MASC_POSTGRES_URL is primary"
-        (Some url)
+      check (option string) "MASC_POSTGRES_URL ignored"
+        None
         (Room_utils.postgres_url_from_env ()))
 
 (* ============================================================
@@ -687,7 +683,6 @@ let () =
     "storage_backend", [
       test_case "memory variant" `Quick test_storage_backend_memory_variant;
       test_case "filesystem variant" `Quick test_storage_backend_filesystem_variant;
-      test_case "postgres variant" `Quick test_storage_backend_postgres_variant;
     ];
     "config", [
       test_case "base_path type" `Quick test_config_base_path_type;

@@ -2,7 +2,6 @@
 
 module Mcp_eio = Masc_mcp.Mcp_server_eio
 module Server_runtime_bootstrap = Masc_mcp.Server_runtime_bootstrap
-module Server_bootstrap_pg = Masc_mcp.Server_bootstrap_pg
 module Server_bootstrap_loops = Masc_mcp.Server_bootstrap_loops
 module Shutdown_hooks = Masc_mcp.Shutdown_hooks
 module Board_dispatch = Masc_mcp.Board_dispatch
@@ -32,8 +31,6 @@ let run_cmd base_path =
   Server_runtime_bootstrap.bootstrap_server_state_blocking state;
   (* keeper bootstrap delegated to keeper_autoboot subsystem or
      Keeper_runtime.start_existing_keepalives if needed *)
-  Server_bootstrap_pg.init_task_backend ();
-  Server_bootstrap_pg.inject_shared_pg_pool ();
   ignore (Server_bootstrap_loops.start_background_maintenance ~sw ~clock ~env state);
   Fun.protect
     ~finally:(fun () ->

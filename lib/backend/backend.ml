@@ -737,75 +737,48 @@ module Memory = struct
     )
 end
 
-(** {1 PostgreSQL Backend (Eio)}
-    Implementation delegated to Backend_pg for separation of concerns. *)
-
-module Postgres = struct
-  include Backend_pg
-
-  (** Adapter: accept [config] record matching [Backend.config]. *)
-  let create ~sw ~env ~url config =
-    Backend_pg.create ~sw ~env ~url
-      ~cluster_name:config.cluster_name ~node_id:config.node_id
-
-  (** Readonly adapter with smaller pool. *)
-  let create_readonly ~sw ~env ~url config =
-    Backend_pg.create_readonly ~sw ~env ~url
-      ~cluster_name:config.cluster_name ~node_id:config.node_id
-end
-
 (** {1 Unified Backend} *)
 
 type backend =
   | FS of FileSystem.t
   | Mem of Memory.t
-  | PG of Postgres.t
 
 let get = function
   | FS t -> FileSystem.get t
   | Mem t -> Memory.get t
-  | PG t -> Postgres.get t
 
 let set = function
   | FS t -> FileSystem.set t
   | Mem t -> Memory.set t
-  | PG t -> Postgres.set t
 
 let exists = function
   | FS t -> FileSystem.exists t
   | Mem t -> Memory.exists t
-  | PG t -> Postgres.exists t
 
 let delete = function
   | FS t -> FileSystem.delete t
   | Mem t -> Memory.delete t
-  | PG t -> Postgres.delete t
 
 let list_keys = function
   | FS t -> FileSystem.list_keys t ~prefix:""
   | Mem t -> Memory.list_keys t ~prefix:""
-  | PG t -> Postgres.list_keys t ~prefix:""
 
 let set_if_not_exists backend key value =
   match backend with
   | FS t -> FileSystem.set_if_not_exists t key value
   | Mem t -> Memory.set_if_not_exists t key value
-  | PG t -> Postgres.set_if_not_exists t key value
 
 let acquire_lock backend ~key ~owner ~ttl_seconds =
   match backend with
   | FS t -> FileSystem.acquire_lock t ~key ~owner ~ttl_seconds
   | Mem _ -> Ok true  (* In-memory is single-process *)
-  | PG t -> Postgres.acquire_lock t ~key ~owner ~ttl_seconds
 
 let release_lock backend ~key ~owner =
   match backend with
   | FS t -> FileSystem.release_lock t ~key ~owner
   | Mem _ -> Ok true
-  | PG t -> Postgres.release_lock t ~key ~owner
 
 let extend_lock backend ~key ~owner ~ttl_seconds =
   match backend with
   | FS t -> FileSystem.extend_lock t ~key ~owner ~ttl_seconds
   | Mem _ -> Ok true
-  | PG t -> Postgres.extend_lock t ~key ~owner ~ttl_seconds

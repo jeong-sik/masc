@@ -1045,7 +1045,9 @@ let test_keeper_oas_handoff_rollover_increments_generation () =
         with Ok cp -> cp | Error e -> Alcotest.fail e
       in
       let rollover =
-        Keeper_exec_context.maybe_rollover_oas_handoff ~base_dir ~meta
+        Keeper_exec_context.maybe_rollover_oas_handoff
+          ~on_started:(fun () -> ())
+          ~base_dir ~meta
           ~model:"llama:auto"
           ~primary_model_max_tokens:100
           ~checkpoint:(Some checkpoint)
@@ -1114,7 +1116,9 @@ let test_keeper_oas_handoff_rollover_below_threshold_noop () =
         with Ok cp -> cp | Error e -> Alcotest.fail e
       in
       let rollover =
-        Keeper_exec_context.maybe_rollover_oas_handoff ~base_dir ~meta
+        Keeper_exec_context.maybe_rollover_oas_handoff
+          ~on_started:(fun () -> ())
+          ~base_dir ~meta
           ~model:"llama:auto"
           ~primary_model_max_tokens:100
           ~checkpoint:(Some checkpoint)

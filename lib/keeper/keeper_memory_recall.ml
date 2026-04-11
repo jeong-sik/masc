@@ -264,6 +264,93 @@ let keeper_reflection_payload_of_auto_rules (e : keeper_auto_rule_eval) : Yojson
     ("reasons", `List (List.map (fun reason -> `String reason) e.reasons));
   ]
 
+let context_measured_auto_rules_of_events
+    (events : Keeper_state_machine.event list)
+  : Keeper_state_machine.auto_rule_summary
+  =
+  let rec loop = function
+    | Keeper_state_machine.Context_measured { auto_rules; _ } :: _ -> auto_rules
+    | _ :: rest -> loop rest
+    | [] ->
+      invalid_arg
+        "keeper_auto_rule_eval_of_measurement: events missing Context_measured"
+  in
+  loop events
+
+let keeper_auto_rule_eval_of_measurement
+    ?events
+    (snapshot : Keeper_measurement.measurement_snapshot)
+  : keeper_auto_rule_eval
+  =
+  let events =
+    match events with
+    | Some value -> value
+    | None -> Keeper_guard.evaluate snapshot
+  in
+  let auto_rules = context_measured_auto_rules_of_events events in
+  let t = snapshot.thresholds in
+  let effective_handoff_threshold =
+    t.handoff_threshold *. t.model_handoff_multiplier
+  in
+  let reasons = [] in
+  let reasons =
+    if auto_rules.reflect then
+      (Printf.sprintf
+         "reflect(repetition_risk=%.3f>=%.3f)"
+         snapshot.similarity.repetition_risk
+         t.reflect_repetition_threshold)
+      :: reasons
+    else reasons
+  in
+  let reasons =
+    if auto_rules.plan then
+      (Printf.sprintf
+         "plan(goal_alignment=%.3f<=%.3f,response_alignment=%.3f<=%.3f)"
+         snapshot.similarity.goal_alignment
+         t.plan_goal_alignment_threshold
+         snapshot.similarity.response_alignment
+         t.plan_response_alignment_threshold)
+      :: reasons
+    else reasons
+  in
+  let reasons =
+    if auto_rules.compact then
+      (Printf.sprintf
+         "compact(ctx=%.3f,msg=%d,tokens=%d)"
+         snapshot.context.context_ratio
+         snapshot.context.message_count
+         snapshot.context.token_count)
+      :: reasons
+    else reasons
+  in
+  let reasons =
+    if auto_rules.handoff then
+      (Printf.sprintf
+         "handoff(ctx=%.3f>=%.3f)"
+         snapshot.context.context_ratio
+         effective_handoff_threshold)
+      :: reasons
+    else reasons
+  in
+  let reasons =
+    match auto_rules.guardrail_reason with
+    | Some reason -> reason :: reasons
+    | None -> reasons
+  in
+  {
+    repetition_risk = snapshot.similarity.repetition_risk;
+    goal_alignment = snapshot.similarity.goal_alignment;
+    response_alignment = snapshot.similarity.response_alignment;
+    goal_drift = auto_rules.goal_drift;
+    reflect = auto_rules.reflect;
+    plan = auto_rules.plan;
+    compact = auto_rules.compact;
+    handoff = auto_rules.handoff;
+    guardrail_stop = auto_rules.guardrail_stop;
+    guardrail_reason = auto_rules.guardrail_reason;
+    reasons = List.rev reasons;
+  }
+
 (* ================================================================ *)
 (* Model-aware threshold adjustment (#3069)                          *)
 (* ================================================================ *)
@@ -299,122 +386,66 @@ let evaluate_keeper_auto_rules
     ~(goal_alignment : float)
     ~(response_alignment : float)
     ?(model_id : string option) () : keeper_auto_rule_eval =
-  (* Apply model-aware threshold adjustment when model_id is provided *)
   let (ratio_mult, handoff_mult) =
     match model_id with
     | Some id -> model_threshold_multipliers_of_model_id id
     | None -> (1.0, 1.0)
   in
-  let ratio_gate = Float.min Env_config_keeper.context_ratio_hard_cap (meta.compaction.ratio_gate *. ratio_mult) in
-  let message_gate = meta.compaction.message_gate in
-  let token_gate = meta.compaction.token_gate in
-  let reflect_threshold = keeper_rule_reflect_repetition_threshold () in
-  let plan_goal_alignment_threshold = keeper_rule_plan_goal_alignment_threshold () in
-  let plan_response_alignment_threshold = keeper_rule_plan_response_alignment_threshold () in
-  let guardrail_repetition_threshold = keeper_rule_guardrail_repetition_threshold () in
-  let guardrail_goal_alignment_threshold = keeper_rule_guardrail_goal_alignment_threshold () in
-  let guardrail_response_alignment_threshold = keeper_rule_guardrail_response_alignment_threshold () in
-  let guardrail_context_threshold =
-    max ratio_gate (keeper_rule_guardrail_context_threshold ())
+  let measurement =
+    Keeper_measurement.capture
+      ~snapshot_id:(Printf.sprintf "auto-rules-%s" meta.name)
+      ~keeper_name:meta.name
+      ~generation:meta.runtime.generation
+      ~timestamp:0.0
+      ~thresholds:
+        { compaction_ratio_gate =
+            Float.min Env_config_keeper.context_ratio_hard_cap
+              (meta.compaction.ratio_gate *. ratio_mult)
+        ; compaction_message_gate = meta.compaction.message_gate
+        ; compaction_token_gate = meta.compaction.token_gate
+        ; compaction_cooldown_sec = meta.compaction.cooldown_sec
+        ; handoff_threshold = meta.handoff_threshold
+        ; handoff_cooldown_sec = meta.handoff_cooldown_sec
+        ; auto_handoff_enabled = meta.auto_handoff
+        ; reflect_repetition_threshold =
+            keeper_rule_reflect_repetition_threshold ()
+        ; plan_goal_alignment_threshold =
+            keeper_rule_plan_goal_alignment_threshold ()
+        ; plan_response_alignment_threshold =
+            keeper_rule_plan_response_alignment_threshold ()
+        ; guardrail_repetition_threshold =
+            keeper_rule_guardrail_repetition_threshold ()
+        ; guardrail_goal_alignment_threshold =
+            keeper_rule_guardrail_goal_alignment_threshold ()
+        ; guardrail_response_alignment_threshold =
+            keeper_rule_guardrail_response_alignment_threshold ()
+        ; guardrail_context_threshold =
+            max
+              (Float.min Env_config_keeper.context_ratio_hard_cap
+                 (meta.compaction.ratio_gate *. ratio_mult))
+              (keeper_rule_guardrail_context_threshold ())
+        ; max_consecutive_hb_failures = 1
+        ; max_consecutive_turn_failures = 1
+        ; model_ratio_multiplier = ratio_mult
+        ; model_handoff_multiplier = handoff_mult
+        }
+      ~context_ratio
+      ~message_count
+      ~token_count
+      ~max_tokens:(max 1 token_count)
+      ~repetition_risk
+      ~goal_alignment
+      ~response_alignment
+      ~now_ts:0.0
+      ~idle_seconds:0
+      ~since_last_compaction_sec:(float_of_int meta.compaction.cooldown_sec)
+      ~since_last_handoff_sec:(float_of_int meta.handoff_cooldown_sec)
+      ~proactive_warmup_elapsed:true
+      ~consecutive_hb_failures:0
+      ~consecutive_turn_failures:0
+      ()
   in
-  let goal_drift =
-    1.0 -. max 0.0 (min 1.0 (max goal_alignment response_alignment))
-    |> max 0.0
-    |> min 1.0
-  in
-  let reflect = repetition_risk >= reflect_threshold in
-  let plan =
-    goal_alignment <= plan_goal_alignment_threshold
-    && response_alignment <= plan_response_alignment_threshold
-  in
-  let compact =
-    context_ratio >= ratio_gate
-    || (message_gate > 0 && message_count >= message_gate)
-    || (token_gate > 0 && token_count >= token_gate)
-  in
-  let adjusted_handoff_threshold = Float.min Env_config_keeper.context_ratio_hard_cap (meta.handoff_threshold *. handoff_mult) in
-  let handoff = meta.auto_handoff && context_ratio >= adjusted_handoff_threshold in
-  let guardrail_stop =
-    repetition_risk >= guardrail_repetition_threshold
-    && goal_alignment <= guardrail_goal_alignment_threshold
-    && response_alignment <= guardrail_response_alignment_threshold
-    && context_ratio >= guardrail_context_threshold
-  in
-  let guardrail_reason =
-    if guardrail_stop then
-      Some
-        (Printf.sprintf
-           "guardrail_stop(rep=%.3f>=%.3f,goal=%.3f<=%.3f,response=%.3f<=%.3f,ctx=%.3f>=%.3f)"
-           repetition_risk
-           guardrail_repetition_threshold
-           goal_alignment
-           guardrail_goal_alignment_threshold
-           response_alignment
-           guardrail_response_alignment_threshold
-           context_ratio
-           guardrail_context_threshold)
-    else
-      None
-  in
-  let reasons = [] in
-  let reasons =
-    if reflect then
-      (Printf.sprintf
-         "reflect(repetition_risk=%.3f>=%.3f)"
-         repetition_risk
-         reflect_threshold)
-      :: reasons
-    else reasons
-  in
-  let reasons =
-    if plan then
-      (Printf.sprintf
-         "plan(goal_alignment=%.3f<=%.3f,response_alignment=%.3f<=%.3f)"
-         goal_alignment
-         plan_goal_alignment_threshold
-         response_alignment
-         plan_response_alignment_threshold)
-      :: reasons
-    else reasons
-  in
-  let reasons =
-    if compact then
-      (Printf.sprintf
-         "compact(ctx=%.3f,msg=%d,tokens=%d)"
-         context_ratio
-         message_count
-         token_count)
-      :: reasons
-    else reasons
-  in
-  let reasons =
-    if handoff then
-      (Printf.sprintf
-         "handoff(ctx=%.3f>=%.3f%s)"
-         context_ratio
-         adjusted_handoff_threshold
-         (match model_id with Some id -> ",model=" ^ id | None -> ""))
-      :: reasons
-    else reasons
-  in
-  let reasons =
-    match guardrail_reason with
-    | Some reason -> reason :: reasons
-    | None -> reasons
-  in
-  {
-    repetition_risk;
-    goal_alignment;
-    response_alignment;
-    goal_drift;
-    reflect;
-    plan;
-    compact;
-    handoff;
-    guardrail_stop;
-    guardrail_reason;
-    reasons = List.rev reasons;
-  }
+  keeper_auto_rule_eval_of_measurement measurement
 
 (** Deterministic priority stack for auto-rule evaluation results.
     Given a keeper_auto_rule_eval where multiple rules may fire simultaneously,

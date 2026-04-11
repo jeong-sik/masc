@@ -23,10 +23,6 @@
    board_core_classify
    board_core_payload
    board_votes
-   board_pg
-   board_pg_queries
-   board_pg_notify
-   board_pg_admin
    board_dispatch
    capability_registry
    bounded
@@ -133,7 +129,6 @@
    server_h2_gateway_routes_extra
    server_h2_gateway_routes_cp
    server_bootstrap_http
-   server_bootstrap_pg
    server_bootstrap_loops
    server_base_path_diagnostics
    server_runtime_bootstrap
@@ -198,7 +193,6 @@
    prompt_composer
    oas_response
    thompson_sampling
-   memory_pg
    memory_jsonl
    memory_oas_bridge
    meta_cognition
@@ -696,9 +690,6 @@
   meta_cognition_parse
   meta_cognition_interpret
   meta_cognition_digest
-  ;; godsplit-board-pg: board_pg decomposition
-  board_pg_notify
-  board_pg_admin
   ;; godsplit-tool-task: schema extraction
   tool_task_schemas
   ;; godsplit-board-core: board_core decomposition
@@ -717,11 +708,6 @@
    httpun-ws
    httpun-ws-eio
    bigstringaf
-   ;; PostgreSQL backend (Eio-native, non-blocking)
-   caqti
-   caqti-eio
-   caqti-eio.unix
-   caqti-driver-postgresql
    sqlite3
    unix
    threads

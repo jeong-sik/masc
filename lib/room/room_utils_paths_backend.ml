@@ -32,14 +32,12 @@ let archive_path config = Filename.concat (masc_dir config) "tasks-archive.json"
 (* Backend dispatch functions                   *)
 (* ============================================ *)
 
-(** Check if using PostgresNative backend (for HTTP state persistence) *)
 let is_pg_backend config =
-  match config.backend with
-  | PostgresNative _ -> true
-  | Memory _ | FileSystem _ -> false
+  let _ = config in
+  false
 
 (** Shared in-memory pubsub for FileSystem and Memory backends.
-    PostgreSQL backend has its own pg_notify-based pubsub. *)
+    All supported backends now share the same in-memory pubsub. *)
 let _shared_pubsub = Backend_types.Pubsub_mem.create ()
 
 (** Adapt Backend get (returns Ok string | Error NotFound) to
@@ -48,7 +46,6 @@ let backend_get config ~key =
   let result = match config.backend with
     | Memory t -> Backend.Memory.get t key
     | FileSystem t -> Backend.FileSystem.get t key
-    | PostgresNative t -> Backend.Postgres.get t key
   in
   (match result with
    | Ok v -> Ok (Some v)
@@ -59,7 +56,6 @@ let backend_set config ~key ~value =
   match config.backend with
   | Memory t -> Backend.Memory.set t key value
   | FileSystem t -> Backend.FileSystem.set t key value
-  | PostgresNative t -> Backend.Postgres.set t key value
 
 (** Adapt Backend delete (returns Ok unit | Error NotFound) to
     the (bool, error) result shape. *)
@@ -67,7 +63,6 @@ let backend_delete config ~key =
   let result = match config.backend with
     | Memory t -> Backend.Memory.delete t key
     | FileSystem t -> Backend.FileSystem.delete t key
-    | PostgresNative t -> Backend.Postgres.delete t key
   in
   (match result with
    | Ok () -> Ok true
@@ -78,19 +73,15 @@ let backend_exists config ~key =
   match config.backend with
   | Memory t -> Backend.Memory.exists t key
   | FileSystem t -> Backend.FileSystem.exists t key
-  | PostgresNative t -> Backend.Postgres.exists t key
 
 let backend_list_keys config ~prefix =
   match config.backend with
   | Memory t -> Backend.Memory.list_keys t ~prefix
   | FileSystem t -> Backend.FileSystem.list_keys t ~prefix
-  | PostgresNative t -> Backend.Postgres.list_keys t ~prefix
 
-(** get_all: Memory uses native Hashtbl fold, FileSystem uses list_keys + get.
-    PostgreSQL has a native get_all. *)
+(** get_all: Memory uses native Hashtbl fold, FileSystem uses list_keys + get. *)
 let backend_get_all config ~prefix =
   match config.backend with
-  | PostgresNative t -> Backend.Postgres.get_all t ~prefix
   | Memory t -> Backend.Memory.get_all t ~prefix
   | FileSystem _ ->
       (match backend_list_keys config ~prefix with
@@ -107,43 +98,34 @@ let backend_set_if_not_exists config ~key ~value =
   match config.backend with
   | Memory t -> Backend.Memory.set_if_not_exists t key value
   | FileSystem t -> Backend.FileSystem.set_if_not_exists t key value
-  | PostgresNative t -> Backend.Postgres.set_if_not_exists t key value
 
 let backend_acquire_lock config ~key ~ttl_seconds ~owner =
   match config.backend with
   | Memory _ -> Ok true  (* In-memory is single-process *)
   | FileSystem t -> Backend.FileSystem.acquire_lock t ~key ~owner ~ttl_seconds
-  | PostgresNative t -> Backend.Postgres.acquire_lock t ~key ~owner ~ttl_seconds
 
 let backend_release_lock config ~key ~owner =
   match config.backend with
   | Memory _ -> Ok true
   | FileSystem t -> Backend.FileSystem.release_lock t ~key ~owner
-  | PostgresNative t -> Backend.Postgres.release_lock t ~key ~owner
 
 let backend_extend_lock config ~key ~ttl_seconds ~owner =
   match config.backend with
   | Memory _ -> Ok true
   | FileSystem t -> Backend.FileSystem.extend_lock t ~key ~owner ~ttl_seconds
-  | PostgresNative t -> Backend.Postgres.extend_lock t ~key ~owner ~ttl_seconds
 
 let backend_health_check config =
   match config.backend with
   | Memory _ -> Ok { Backend_types.latency_ms = 0.0; is_healthy = true }
   | FileSystem t -> Backend.FileSystem.health_check t
-  | PostgresNative t -> Backend.Postgres.health_check t
 
-(** Publish: PostgreSQL uses pg_notify, FileSystem/Memory use shared in-mem pubsub. *)
 let backend_publish config ~channel ~message =
   match config.backend with
-  | PostgresNative t -> Backend.Postgres.publish t ~channel ~message
   | Memory _ | FileSystem _ ->
       Backend_types.Pubsub_mem.publish (_shared_pubsub) ~channel ~message
 
-(** Subscribe: PostgreSQL uses table polling, FileSystem/Memory use shared in-mem pubsub. *)
 let backend_subscribe config ~channel ~callback =
   match config.backend with
-  | PostgresNative t -> Backend.Postgres.subscribe t ~channel ~callback
   | Memory _ | FileSystem _ ->
       Backend_types.Pubsub_mem.subscribe (_shared_pubsub) ~channel ~callback
 
@@ -151,20 +133,14 @@ let backend_name config =
   match config.backend with
   | Memory _ -> "memory"
   | FileSystem _ -> "filesystem"
-  | PostgresNative _ -> "postgres-native"
 
 let backend_supports_local_dir = function
   | FileSystem _ -> true
-  | Memory _ | PostgresNative _ -> false
+  | Memory _ -> false
 
-(** Cleanup pubsub messages - only effective for PostgreSQL backend.
-    Other backends use FS cleanup in gc or are ephemeral.
-    Returns the number of deleted messages. *)
 let backend_cleanup_pubsub config ~days ~max_messages =
-  match config.backend with
-  | PostgresNative t -> Backend.Postgres.cleanup_pubsub t ~days ~max_messages
-  | Memory _ | FileSystem _ ->
-      Ok 0
+  let _ = config, days, max_messages in
+  Ok 0
 
 (* ============================================ *)
 (* Key/path conversion                          *)
@@ -190,7 +166,7 @@ let key_of_path_from_root config ~root path =
     in
     let key = String.map (fun c -> if c = '/' then ':' else c) rel in
     match config.backend with
-    | Memory _ | PostgresNative _ -> Some (project_prefix config ^ ":" ^ key)
+    | Memory _ -> Some (project_prefix config ^ ":" ^ key)
     | FileSystem _ -> Some key
   else
     None
@@ -240,7 +216,7 @@ let legacy_root_state_path config = Filename.concat (masc_root_dir config) "stat
     Used by room/cluster management features. *)
 let root_is_initialized config =
   match config.backend with
-  | Memory _ | PostgresNative _ ->
+  | Memory _ ->
       let exists_root path ~fallback_key =
         let key =
           match root_key_of_path config path with
@@ -259,7 +235,7 @@ let root_is_initialized config =
 (** Check if current room is initialized - backend-agnostic *)
 let is_initialized config =
   match config.backend with
-  | Memory _ | PostgresNative _ ->
+  | Memory _ ->
       let state_key =
         match key_of_path config (state_path config) with
         | Some k -> k

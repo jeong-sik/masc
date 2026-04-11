@@ -3,6 +3,9 @@ open Masc_mcp
 
 let () = Mirage_crypto_rng_unix.use_default ()
 let () = Server_startup_state.mark_state_ready ~backend_mode:"test"
+let () =
+  let base_path = Masc_test_deps.find_project_root () in
+  ignore (Result.get_ok (Keeper_exec_tools.init_policy_config ~base_path))
 
 let temp_dir () =
   let dir = Filename.temp_file "test_keeper_reconcile_" "" in
@@ -122,6 +125,22 @@ let test_keeper_reconcile_inspect_and_clear () =
       let status_json = parse_json_exn status_body in
       check string "status exposes blocker" "ambiguous_post_commit_timeout"
         Yojson.Safe.Util.(status_json |> member "runtime_blocker_class" |> to_string);
+      Eio.Time.sleep (Eio.Stdenv.clock env) 0.05;
+      let ok, inspect_body_after_wait =
+        dispatch_keeper_exn ctx ~name:"masc_keeper_reconcile"
+          ~args:
+            (`Assoc
+              [
+                ("name", `String keeper_name);
+                ("action", `String "inspect");
+              ])
+      in
+      check bool "inspect ok after wait" true ok;
+      let inspect_after_wait_json = parse_json_exn inspect_body_after_wait in
+      check bool "inspect still pending after wait" true
+        Yojson.Safe.Util.(inspect_after_wait_json |> member "pending" |> to_bool);
+      check string "inspect still failing after wait" "failing"
+        Yojson.Safe.Util.(inspect_after_wait_json |> member "phase" |> to_string);
       let ok, clear_body =
         dispatch_keeper_exn ctx ~name:"masc_keeper_reconcile"
           ~args:

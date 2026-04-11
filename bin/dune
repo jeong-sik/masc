@@ -5,21 +5,21 @@
  (modules main_eio)
  (public_name masc-mcp)
  (package masc_mcp)
- (libraries masc_mcp masc_mcp.config masc_mcp.mcp_session masc_mcp.mcp_transport_protocol masc_eio_context cmdliner eio eio_main h2 h2-eio httpun-eio gluten-eio gluten httpun caqti-eio dune-build-info masc_core masc_types fs_compat time_compat masc_log masc_room masc_backend masc_process unix fmt yojson str mirage-crypto-rng.unix cohttp cohttp-eio masc_mcp.prompt_registry agent_sdk agent_sdk.llm_provider ))
+ (libraries masc_mcp masc_mcp.config masc_mcp.mcp_session masc_mcp.mcp_transport_protocol masc_eio_context cmdliner eio eio_main h2 h2-eio httpun-eio gluten-eio gluten httpun dune-build-info masc_core masc_types fs_compat time_compat masc_log masc_room masc_backend masc_process unix fmt yojson str mirage-crypto-rng.unix cohttp cohttp-eio masc_mcp.prompt_registry agent_sdk agent_sdk.llm_provider ))
 
 (executable
  (name main_stdio_eio)
  (modules main_stdio_eio)
  (public_name masc-mcp-stdio)
  (package masc_mcp)
- (libraries masc_mcp masc_core cmdliner eio eio_main mirage-crypto-rng.unix dune-build-info masc_types fs_compat time_compat masc_log masc_room masc_backend masc_process masc_eio_context unix fmt yojson str caqti-eio httpun cohttp cohttp-eio masc_mcp.prompt_registry masc_mcp.mcp_transport_protocol agent_sdk agent_sdk.llm_provider ))
+ (libraries masc_mcp masc_core cmdliner eio eio_main mirage-crypto-rng.unix dune-build-info masc_types fs_compat time_compat masc_log masc_room masc_backend masc_process masc_eio_context unix fmt yojson str httpun cohttp cohttp-eio masc_mcp.prompt_registry masc_mcp.mcp_transport_protocol agent_sdk agent_sdk.llm_provider ))
 
 (executable
  (name masc_cost)
  (modules masc_cost)
  (public_name masc-cost)
  (package masc_mcp)
- (libraries masc_mcp masc_core unix yojson masc_types fs_compat time_compat masc_log masc_room masc_backend masc_process masc_eio_context fmt str eio_main eio mirage-crypto-rng.unix caqti-eio httpun cohttp cohttp-eio masc_mcp.prompt_registry masc_mcp.mcp_transport_protocol agent_sdk agent_sdk.llm_provider ))
+ (libraries masc_mcp masc_core unix yojson masc_types fs_compat time_compat masc_log masc_room masc_backend masc_process masc_eio_context fmt str eio_main eio mirage-crypto-rng.unix httpun cohttp cohttp-eio masc_mcp.prompt_registry masc_mcp.mcp_transport_protocol agent_sdk agent_sdk.llm_provider ))
 
 (executable
  (name public_tool_manifest)
@@ -38,7 +38,7 @@
  (modules masc_tui masc_tui_types masc_tui_ansi masc_tui_render masc_tui_loader)
  (public_name masc-tui)
  (package masc_mcp)
- (libraries masc_mcp masc_mcp.config unix yojson masc_core masc_types fs_compat time_compat masc_log masc_room masc_backend masc_process masc_eio_context fmt str eio_main eio mirage-crypto-rng.unix caqti-eio httpun cohttp cohttp-eio masc_mcp.prompt_registry masc_mcp.mcp_transport_protocol agent_sdk agent_sdk.llm_provider ))
+ (libraries masc_mcp masc_mcp.config unix yojson masc_core masc_types fs_compat time_compat masc_log masc_room masc_backend masc_process masc_eio_context fmt str eio_main eio mirage-crypto-rng.unix httpun cohttp cohttp-eio masc_mcp.prompt_registry masc_mcp.mcp_transport_protocol agent_sdk agent_sdk.llm_provider ))
 
 ;; CDAL Labeling Protocol v0 CLI
 (executable
@@ -46,13 +46,12 @@
  (modules cdal_label)
  (public_name cdal-label)
  (package masc_mcp)
- (libraries masc_mcp cmdliner yojson unix masc_core masc_types fs_compat time_compat masc_log masc_room masc_backend masc_process masc_eio_context fmt str eio_main eio mirage-crypto-rng.unix caqti-eio httpun cohttp cohttp-eio masc_mcp.prompt_registry masc_mcp.mcp_transport_protocol agent_sdk agent_sdk.llm_provider ))
+ (libraries masc_mcp cmdliner yojson unix masc_core masc_types fs_compat time_compat masc_log masc_room masc_backend masc_process masc_eio_context fmt str eio_main eio mirage-crypto-rng.unix httpun cohttp cohttp-eio masc_mcp.prompt_registry masc_mcp.mcp_transport_protocol agent_sdk agent_sdk.llm_provider ))
 
 (executable
  (name masc_worker_run)
  (modules masc_worker_run)
  (public_name masc-worker-run)
  (package masc_mcp)
- (libraries masc_mcp yojson unix eio_main eio masc_core masc_types fs_compat time_compat masc_log masc_room masc_backend masc_process masc_eio_context fmt str mirage-crypto-rng.unix caqti-eio httpun cohttp cohttp-eio masc_mcp.prompt_registry masc_mcp.mcp_transport_protocol agent_sdk agent_sdk.llm_provider ))
-
+ (libraries masc_mcp yojson unix eio_main eio masc_core masc_types fs_compat time_compat masc_log masc_room masc_backend masc_process masc_eio_context fmt str mirage-crypto-rng.unix httpun cohttp cohttp-eio masc_mcp.prompt_registry masc_mcp.mcp_transport_protocol agent_sdk agent_sdk.llm_provider ))
 ; Executable for MASC MCP

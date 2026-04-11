@@ -39,6 +39,8 @@ val all_phases : phase list
     Phase is DERIVED from conditions via [derive_phase].
     Conditions are the primitive; phase is the projection. *)
 type conditions = {
+  launch_pending : bool;
+  (** Fresh registration exists, but the keepalive fiber has not started yet. *)
   fiber_alive : bool;
   (** [done_p] unresolved AND [fiber_stop] not set *)
   heartbeat_healthy : bool;
@@ -158,17 +160,17 @@ val transition_error_to_string : transition_error -> string
 
     Priority (first match wins):
     1. Dead (terminal)
-    2. Restarting (fiber dead + budget + backoff elapsed)
-    3. Crashed (fiber dead + budget remaining)
-    4. Stopped (stop_requested + drain_complete)
-    5. Draining (stop_requested)
-    6. Guardrail -> Failing
-    7. Paused (operator_paused)
-    8. HandingOff (handoff_active)
-    9. Compacting (compaction_active)
-    10. Failing (heartbeat degraded, turn degraded, or manual reconcile required)
-    11. Running (fiber_alive)
-    12. Offline (default) *)
+    2. Stopped (stop_requested + drain_complete)
+    3. Offline (launch_pending before first fiber start)
+    4. Restarting (fiber dead + budget + backoff elapsed)
+    5. Crashed (fiber dead + budget remaining)
+    6. Draining (stop_requested)
+    7. Guardrail -> Failing
+    8. Paused (operator_paused)
+    9. HandingOff (handoff_active)
+    10. Compacting (compaction_active)
+    11. Failing (heartbeat degraded, turn degraded, or manual reconcile required)
+    12. Running (fiber_alive) *)
 val derive_phase : conditions -> phase
 
 (** Apply an event to the current state: update conditions, derive new phase.

@@ -5,6 +5,7 @@
 
 (generate_opam_files true)
 (implicit_transitive_deps false)
+(executables_implicit_empty_intf false)
 
 (source
  (github jeong-sik/masc-mcp))
@@ -57,9 +58,6 @@
   (httpun-ws (>= 0.2))
   (httpun-ws-eio (>= 0.2))
   (bigstringaf (>= 0.10))
-  (caqti (>= 2.1))
-  (caqti-eio (>= 2.1))
-  (caqti-driver-postgresql (>= 2.1))
   (eio (>= 1.0))
   (eio_main (>= 1.0))
   (eio_posix (>= 0.16))

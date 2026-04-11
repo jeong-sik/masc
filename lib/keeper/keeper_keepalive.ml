@@ -255,10 +255,39 @@ let stage_timing_to_json ~ring ~count =
       ])
 ;;
 
+let keepalive_entry_accepts_late_event ~(ctx : _ context) ~(keeper_name : string) =
+  match Keeper_registry.get_phase ~base_path:ctx.config.base_path keeper_name with
+  | None -> true
+  | Some (Keeper_state_machine.Stopped | Keeper_state_machine.Dead) -> false
+  | Some _ -> true
+
+let dispatch_keepalive_event ~(ctx : _ context) ~(keeper_name : string) event =
+  if keepalive_entry_accepts_late_event ~ctx ~keeper_name then
+    ignore (Keeper_registry.dispatch_event
+      ~base_path:ctx.config.base_path keeper_name event)
+
+let dispatch_keepalive_event_with_audit
+      ~(ctx : _ context)
+      ~(keeper_name : string)
+      ~snapshot
+      ~events_fired
+      ~selected_event
+      event
+  =
+  if keepalive_entry_accepts_late_event ~ctx ~keeper_name then
+    ignore (Keeper_registry.dispatch_event_with_audit
+      ~base_path:ctx.config.base_path
+      ~snapshot
+      ~events_fired
+      ~selected_event
+      keeper_name
+      event)
+
 let write_heartbeat_snapshot
       ~(ctx : _ context)
       ~(meta_current : keeper_meta)
       ~(now_ts : float)
+      ~(consecutive_hb_failures : int)
       ~(timing_ring : stage_timing array)
       ~(timing_filled : int)
   : unit
@@ -365,20 +394,24 @@ let write_heartbeat_snapshot
       | Some c -> Keeper_exec_context.token_count c
       | None -> 0
     in
-    let auto_rules =
-      evaluate_keeper_auto_rules
-        ~meta:meta_current
-        ~context_ratio:context_ratio_v
-        ~message_count:message_count_v
-        ~token_count:token_count_v
-        ~repetition_risk
-        ~goal_alignment
-        ~response_alignment
-        ()
+    let turn_fail_count =
+      Keeper_registry.get_turn_failures
+        ~base_path:ctx.config.base_path
+        meta_current.name
+    in
+    let since_last_compaction_sec =
+      if meta_current.runtime.compaction_rt.last_ts <= 0.0
+      then now_ts
+      else max 0.0 (now_ts -. meta_current.runtime.compaction_rt.last_ts)
+    in
+    let since_last_handoff_sec =
+      if meta_current.runtime.last_handoff_ts <= 0.0
+      then now_ts
+      else max 0.0 (now_ts -. meta_current.runtime.last_handoff_ts)
     in
     (* RFC-0002: build measurement_snapshot via pure capture function.
-       Timing/failure fields not yet wired from heartbeat loop context
-       use defaults; a follow-up PR will thread them through. *)
+       Timing/failure inputs now come from the live keepalive loop and
+       registry so audit reflects the real runtime decision surface. *)
     let thresholds : Keeper_measurement.threshold_params =
       { compaction_ratio_gate = meta_current.compaction.ratio_gate
       ; compaction_message_gate = meta_current.compaction.message_gate
@@ -407,7 +440,7 @@ let write_heartbeat_snapshot
       ; model_handoff_multiplier = 1.0
       }
     in
-    let _measurement =
+    let measurement =
       Keeper_measurement.capture
         ~snapshot_id:
           (Printf.sprintf "msnap-%s-%Ld"
@@ -426,18 +459,26 @@ let write_heartbeat_snapshot
         ~response_alignment
         ~now_ts
         ~idle_seconds:0
-        ~since_last_compaction_sec:0.0
-        ~since_last_handoff_sec:0.0
+        ~since_last_compaction_sec
+        ~since_last_handoff_sec
         ~proactive_warmup_elapsed:false
-        ~consecutive_hb_failures:0
-        ~consecutive_turn_failures:0
+        ~consecutive_hb_failures
+        ~consecutive_turn_failures:turn_fail_count
         ()
     in
+    let guard_events = Keeper_guard.evaluate measurement in
+    let auto_rules =
+      keeper_auto_rule_eval_of_measurement ~events:guard_events measurement
+    in
+    let selected_guard_event = Keeper_guard.prioritized_event guard_events in
     (* RFC-0002: dispatch Context_measured event through state machine *)
-    let _dispatch_result =
-      Keeper_registry.dispatch_event
-        ~base_path:ctx.config.base_path
-        meta_current.name
+    let () =
+      dispatch_keepalive_event_with_audit
+        ~ctx
+        ~keeper_name:meta_current.name
+        ~snapshot:measurement
+        ~events_fired:guard_events
+        ~selected_event:selected_guard_event
         (Keeper_state_machine.Context_measured {
           context_ratio = context_ratio_v;
           message_count = message_count_v;
@@ -634,9 +675,8 @@ let maybe_recover_from_failing ~(ctx : _ context) ~(meta : keeper_meta) =
           "heartbeat recovery: reset %d stale turn failures for %s but retained manual reconcile blocker"
           stale_turn_failures meta.name
       else (
-        ignore (Keeper_registry.dispatch_event
-          ~base_path:ctx.config.base_path meta.name
-          Keeper_state_machine.Turn_succeeded);
+        dispatch_keepalive_event ~ctx ~keeper_name:meta.name
+          Keeper_state_machine.Turn_succeeded;
         Log.Keeper.info
           "heartbeat recovery: reset %d stale turn failures for %s"
           stale_turn_failures meta.name)
@@ -787,71 +827,6 @@ let run_keepalive_unified_turn
           ~config:ctx.config
           ~keeper_name:meta_after_triage.name
       in
-      (* Auto-clear manual_reconcile to break deadlock: reconcile blocks
-         turns, but turns are needed to clear reconcile.  Clear both the
-         on-disk record AND the registry state, then proceed as if clean.
-
-         Age gate: only auto-clear records older than
-         [auto_clear_min_age_sec]. Without a threshold this races with
-         explicit operator clears that immediately follow reconcile
-         openings — triage fires auto-clear first, operator's explicit
-         [masc_keeper_reconcile clear] then hits [Already_cleared]
-         returning [cleared=false], and any inspect/clear contract
-         test becomes flaky. Records older than the threshold are
-         genuinely stuck and still get the deadlock-break treatment. *)
-      let auto_clear_min_age_sec = 300.0 in
-      let manual_reconcile_pending =
-        if manual_reconcile_pending then (
-          let should_auto_clear =
-            match
-              Keeper_manual_reconcile.read
-                ctx.config
-                meta_after_triage.name
-            with
-            | Some record -> (
-                match Types.parse_iso8601_opt record.opened_at with
-                | Some opened_unix ->
-                    let age = Time_compat.now () -. opened_unix in
-                    age >= auto_clear_min_age_sec
-                | None ->
-                    (* Unparseable timestamp: treat as stale so a
-                       corrupted record doesn't keep a keeper blocked
-                       forever. *)
-                    true)
-            | None ->
-                (* Legacy pending flag without an on-disk record:
-                   preserve prior behavior and proceed as clean. *)
-                true
-          in
-          if should_auto_clear then (
-            Log.Keeper.info
-              "keeper:%s auto-clearing manual_reconcile to break deadlock"
-              meta_after_triage.name;
-            ignore (Keeper_manual_reconcile.clear ctx.config
-              ~keeper_name:meta_after_triage.name
-              ~actor:"auto_clear_deadlock_break"
-              ~resolution:"Automatic deadlock break: stale reconcile cleared to restore keeper activity"
-              ~evidence_refs:[]
-              ~idempotency_key:None);
-            ignore (Keeper_registry.dispatch_event
-              ~base_path:ctx.config.base_path meta_after_triage.name
-              Keeper_state_machine.Manual_reconcile_cleared);
-            false (* reconcile is now cleared — proceed as normal *))
-          else (
-            Log.Keeper.debug
-              "keeper:%s manual_reconcile pending but below age threshold, \
-               leaving for operator"
-              meta_after_triage.name;
-            true))
-        else false
-      in
-      (* Honor a pending manual reconcile: the "keepalive turn skipped" log
-         at line 821 claims to skip, but previously should_run_turn did not
-         consult manual_reconcile_pending, so the log was a lie whenever the
-         reconcile record survived the auto-clear block above (e.g. the
-         record is too fresh per the age-threshold gate in #6497, or the
-         gate was never enabled). Make the skip real so the log matches
-         behavior and the pending record acts as a turn brake. *)
       let should_run_turn =
         (not (Atomic.get stop))
         && turn_decision.should_run
@@ -957,9 +932,8 @@ let run_keepalive_unified_turn
                meta_after_observe)
           | Ok updated ->
             (* Clear manual_reconcile trap after successful turn *)
-            ignore (Keeper_registry.dispatch_event
-              ~base_path:ctx.config.base_path updated.name
-              Keeper_state_machine.Manual_reconcile_cleared);
+            dispatch_keepalive_event ~ctx ~keeper_name:updated.name
+              Keeper_state_machine.Manual_reconcile_cleared;
             updated))
       else if (not has_message_signal) && obs.message_cursor_updates <> [] then
         meta_after_observe
@@ -1093,6 +1067,7 @@ let maybe_write_heartbeat_snapshot
       ~(ctx : _ context)
       ~(meta_current : keeper_meta)
       ~(now_ts : float)
+      ~(consecutive_hb_failures : int)
       ~(last_snapshot_ts : float ref)
       ~(snapshot_interval_sec : int)
       ~(timing_ring : stage_timing array)
@@ -1102,7 +1077,13 @@ let maybe_write_heartbeat_snapshot
   if now_ts -. !last_snapshot_ts >= float_of_int snapshot_interval_sec
   then (
     (try
-       write_heartbeat_snapshot ~ctx ~meta_current ~now_ts ~timing_ring ~timing_filled
+       write_heartbeat_snapshot
+         ~ctx
+         ~meta_current
+         ~now_ts
+         ~consecutive_hb_failures
+         ~timing_ring
+         ~timing_filled
      with
      | Eio.Cancel.Cancelled _ as e -> raise e
      | exn ->
@@ -1256,6 +1237,7 @@ let run_heartbeat_loop
           ~ctx
           ~meta_current
           ~now_ts
+          ~consecutive_hb_failures:!consecutive_failures
           ~last_snapshot_ts
           ~snapshot_interval_sec:(snapshot_interval_sec ())
           ~timing_ring
@@ -1289,16 +1271,14 @@ let run_heartbeat_loop
         in
         (* RFC-0002: dispatch turn status event *)
         if turn_fail_count > 0 then
-          ignore (Keeper_registry.dispatch_event
-            ~base_path:ctx.config.base_path m.name
+          dispatch_keepalive_event ~ctx ~keeper_name:m.name
             (Keeper_state_machine.Turn_failed {
               consecutive = turn_fail_count;
               max_allowed = max_consecutive_turn_failures ();
-            }))
+            })
         else
-          ignore (Keeper_registry.dispatch_event
-            ~base_path:ctx.config.base_path m.name
-            Keeper_state_machine.Turn_succeeded);
+          dispatch_keepalive_event ~ctx ~keeper_name:m.name
+            Keeper_state_machine.Turn_succeeded;
         if turn_fail_count >= max_consecutive_turn_failures ()
         then begin
           Keeper_registry.set_failure_reason
@@ -1639,6 +1619,17 @@ let publish_keeper_started ~(live_meta : keeper_meta) : unit =
     ~detail:"keepalive"
 ;;
 
+let dispatch_fiber_started ~base_path keeper_name =
+  match Keeper_registry.dispatch_event ~base_path keeper_name
+          Keeper_state_machine.Fiber_started with
+  | Ok _ -> ()
+  | Error err ->
+      Log.Keeper.warn
+        "keeper %s: Fiber_started rejected during launch: %s"
+        keeper_name
+        (Keeper_state_machine.transition_error_to_string err)
+;;
+
 let resolve_registry_done
       (entry : Keeper_registry.registry_entry)
       (value : [ `Stopped | `Crashed of string ])
@@ -1664,8 +1655,6 @@ let record_keeper_stopped
       Keeper_state_machine.Stop_requested);
     ignore (Keeper_registry.dispatch_event ~base_path keeper_name
       Keeper_state_machine.Drain_complete);
-    ignore (Keeper_registry.dispatch_event ~base_path keeper_name
-      (Keeper_state_machine.Fiber_terminated { outcome = "stopped" }));
     publish_keeper_lifecycle ~event:"stopped" ~keeper_name ~detail;
     true)
   else
@@ -1692,13 +1681,13 @@ let record_keeper_crashed
 
 let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_meta) : unit
   =
-  if Keeper_registry.is_running ~base_path:ctx.config.base_path m.name
-  then Log.Keeper.info "start_keepalive: skipped %s (already running)" m.name
+  if Keeper_registry.is_registered ~base_path:ctx.config.base_path m.name
+  then Log.Keeper.info "start_keepalive: skipped %s (already registered)" m.name
   else if not (Keeper_registry.spawn_slots_available ())
   then Log.Keeper.info "start_keepalive: skipped %s (no spawn slots)" m.name
   else (
     (* Register in Keeper_registry first — single source of truth. *)
-    let reg = Keeper_registry.register ~base_path:ctx.config.base_path m.name m in
+    let reg = Keeper_registry.register_offline ~base_path:ctx.config.base_path m.name m in
     (* Restore persisted tool usage stats from previous session *)
     Keeper_registry.restore_tool_usage ~base_path:ctx.config.base_path m.name;
     let stop = reg.fiber_stop in
@@ -1729,6 +1718,7 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
          ~interval_sec:60
          ~stop
      | _ -> ());
+    dispatch_fiber_started ~base_path:ctx.config.base_path live_meta.name;
     Eio.Fiber.fork ~sw:ctx.sw (fun () ->
       let record_crash failure_reason =
         record_keeper_crashed

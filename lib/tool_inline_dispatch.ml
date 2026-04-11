@@ -14,7 +14,7 @@
 *)
 
 (** Re-export shared types so callers can use
-    [Tool_inline_dispatch.context] and [Tool_inline_dispatch.result]
+    [Tool_inline_dispatch.context] and [Tool_inline_dispatch.tool_result]
     without knowing about the types sub-module. *)
 type tool_result = Tool_inline_dispatch_types.tool_result
 type context = Tool_inline_dispatch_types.context = {

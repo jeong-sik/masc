@@ -1590,21 +1590,31 @@ let run_turn
           (which wastes the entire OAS run), log a warning and treat the
           text response as valid. The turn is counted as text_response
           in telemetry via keeper_unified_turn. See #5566. *)
-       let () =
+       let text =
          match
            Keeper_tool_disclosure.validate_completion_contract
              ~contract:!completion_contract_ref
              ~tool_names
              ()
          with
-         | Ok () -> ()
+         | Ok () -> text
          | Error reason ->
+           let contract_str =
+             match !completion_contract_ref with
+             | Keeper_tool_disclosure.Allow_text_or_tool -> "Allow_text_or_tool"
+             | Keeper_tool_disclosure.Require_tool_use -> "Require_tool_use"
+           in
            Log.Keeper.warn
              "keeper:%s text_response trap: tool contract violated \
-              (turn=%d, tools=0, contract=Require_tool_use). \
+              (turn=%d, tools=0, contract=%s). \
               Provider likely ignored tool_choice=Any. Tolerating text-only \
               response to avoid wasting OAS run. Reason: %s"
-             meta.name result.turns reason
+             meta.name result.turns contract_str reason;
+           (* When both text and tool_names are empty, normalize_response_text
+              would hard-fail. Synthesize minimal text so the turn survives. *)
+           if String.trim text = "" && tool_names = []
+           then "[no output]"
+           else text
        in
        (match Keeper_tool_disclosure.normalize_response_text ~text ~tool_names () with
         | Error e -> Error (Oas.Error.Internal e)

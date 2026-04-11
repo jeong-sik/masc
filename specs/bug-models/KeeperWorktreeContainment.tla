@@ -86,24 +86,60 @@ CreateInOtherPlayground(k, victim) ==
 NextClean ==
     \/ \E k \in Keepers : CreateInOwnPlayground(k)
 
-NextBuggy ==
+\* Buggy variant 1: adds the pre-#6542 server-root fallback.
+\* Violates KeeperWorktreeKind (and by conjunction
+\* KeeperWorktreeContainment). Used by
+\* [KeeperWorktreeContainment-server-root-buggy.cfg].
+NextBuggyServerRoot ==
     \/ NextClean
     \/ \E k \in Keepers : CreateAtServerRoot(k)
+
+\* Buggy variant 2: adds the pre-#6580 cross-keeper playground leak.
+\* Violates KeeperWorktreeOwner (but NOT KeeperWorktreeKind). This is
+\* why the cfgs must list BOTH invariants: if only KeeperWorktreeKind
+\* were checked, this bug action would slip through.
+\* Used by [KeeperWorktreeContainment-other-playground-buggy.cfg].
+NextBuggyOtherPlayground ==
+    \/ NextClean
     \/ \E k, v \in Keepers : CreateInOtherPlayground(k, v)
 
-SpecClean == Init /\ [][NextClean]_vars
-SpecBuggy == Init /\ [][NextBuggy]_vars
+SpecClean                == Init /\ [][NextClean]_vars
+SpecBuggyServerRoot      == Init /\ [][NextBuggyServerRoot]_vars
+SpecBuggyOtherPlayground == Init /\ [][NextBuggyOtherPlayground]_vars
 
-\* ---- Safety Invariant ---------------------------------------------
+\* ---- Safety Invariants --------------------------------------------
 \*
-\* Every recorded worktree must (a) live in a playground, and (b) be
-\* owned by the keeper that created it. Anything else breaks the
-\* containment invariant the trilogy is closing.
+\* Two independent invariants. They are split intentionally so a
+\* future refactor cannot silently weaken the spec by dropping one of
+\* the conjuncts from a joint invariant. Each cfg must list BOTH:
+\*
+\*   1. `KeeperWorktreeKind`  — every worktree lives in a playground
+\*                              (never in the server repository root)
+\*   2. `KeeperWorktreeOwner` — the playground is owned by the keeper
+\*                              that created the worktree (not by
+\*                              another keeper)
+\*
+\* If a future commit drops `KeeperWorktreeOwner`, the buggy
+\* spec's `CreateInOtherPlayground` action will NOT be caught (because
+\* `kind = "playground"` still holds). Splitting forces the spec to
+\* carry both checks and makes any dropped invariant surface as a
+\* cfg-level change reviewers can notice.
 
-KeeperWorktreeContainment ==
+KeeperWorktreeKind ==
     \A wt \in worktrees :
-        /\ wt.location.kind = "playground"
-        /\ wt.location.owner = wt.keeper
+        wt.location.kind = "playground"
+
+KeeperWorktreeOwner ==
+    \A wt \in worktrees :
+        wt.location.owner = wt.keeper
+
+\* Combined invariant — kept for compat with the original PR body
+\* and the bug-model registry script. Consumers should still list
+\* KeeperWorktreeKind and KeeperWorktreeOwner individually in the
+\* cfg so neither can be silently dropped.
+KeeperWorktreeContainment ==
+    /\ KeeperWorktreeKind
+    /\ KeeperWorktreeOwner
 
 \* Type invariant for TLC sanity.
 TypeOK ==

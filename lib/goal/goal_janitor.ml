@@ -121,9 +121,15 @@ let run ?(config = default_config) (room_config : Room.config) : sweep_result =
             prune_active_goal_ids ~valid_goal_ids:valid_ids meta.active_goal_ids
           in
           if removed > 0 then begin
-            total_orphans := !total_orphans + removed;
             let updated = { meta with active_goal_ids = pruned_ids } in
-            ignore (Keeper_types.write_meta room_config updated)
+            match Keeper_types.write_meta room_config updated with
+            | Ok () ->
+                total_orphans := !total_orphans + removed
+            | Error e ->
+                Log.Misc.warn
+                  "[GoalJanitor] failed to persist orphan-pruned meta for \
+                   keeper=%s removed=%d: %s"
+                  name removed e
           end
         | _ -> ()
       end);

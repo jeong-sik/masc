@@ -21,3 +21,13 @@ class BotConfigTests(unittest.TestCase):
         cfg = BotConfig(self_chat_guid=" any;-;forsyphilis@gmail.com  ")
 
         self.assertEqual(cfg.self_chat_guid, "any;-;forsyphilis@gmail.com")
+
+    def test_self_chat_guid_whitespace_normalizes_to_empty_string(self) -> None:
+        cfg = BotConfig(self_chat_guid="   ")
+
+        self.assertEqual(cfg.self_chat_guid, "")
+
+    def test_self_chat_guid_none_normalizes_to_empty_string(self) -> None:
+        cfg = BotConfig(self_chat_guid=None)
+
+        self.assertEqual(cfg.self_chat_guid, "")

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ipaddress
 import os
+from typing import Any
 from typing import Final
 from urllib.parse import urlparse
 
@@ -110,9 +111,13 @@ class BotConfig(BaseSettings):
             raise ValueError("reply_mode must be self-chat or source-chat")
         return normalized
 
-    @field_validator("self_chat_guid")
+    @field_validator("self_chat_guid", mode="before")
     @classmethod
-    def validate_self_chat_guid(cls, v: str) -> str:
+    def validate_self_chat_guid(cls, v: Any) -> Any:
+        if v is None:
+            return ""
+        if not isinstance(v, str):
+            return v
         return v.strip()
 
     def gate_message_url(self) -> str:

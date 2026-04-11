@@ -77,6 +77,7 @@ function AuthPopover({ authenticated }: { authenticated: boolean }) {
           <input
             type="password"
             placeholder="Bearer token"
+            aria-label="Bearer token"
             class="w-full py-1.5 px-2 rounded-md text-[11px] border border-[var(--card-border)] bg-[var(--white-4)] text-[var(--text-body)] placeholder-[var(--text-muted)] outline-none focus:border-[rgba(71,184,255,0.5)]"
             value=${tokenInput.value}
             onInput=${(e: Event) => { tokenInput.value = (e.target as HTMLInputElement).value }}

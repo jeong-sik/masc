@@ -11,6 +11,6 @@
 
 val install : unit -> unit
 (** Register the OAS → masc-mcp log sink as a global OAS sink.  Call
-    once before any keeper turn fires an LLM call; subsequent calls
-    will add duplicate sinks and cause each record to be forwarded
-    multiple times. *)
+    once before any keeper turn fires an LLM call.  Idempotent via an
+    internal [Atomic.t] latch, so re-entering bootstrap (test harness,
+    in-process restart) is safe. *)

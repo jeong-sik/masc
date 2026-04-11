@@ -60,10 +60,19 @@ let make_sink () : Agent_sdk.Log.sink =
     ?details
     record.message
 
-(** Install the bridge as a global OAS sink.  Idempotent in the sense
-    that each call adds a new sink, so repeated [install ()] calls
-    would duplicate every record.  Callers should invoke this exactly
-    once during server bootstrap, before any keeper turn fires an LLM
-    call. *)
+(** Process-wide latch to make [install] idempotent.  Unlike
+    [Llm_metric_bridge] which uses [set_global] (replacement semantics),
+    [Agent_sdk.Log.add_sink] appends to a sink list, so a naive double
+    call would forward every record twice.  Bootstrap is the only
+    documented caller today, but test harnesses, in-process restarts,
+    or a future supervisor reconnect could all re-enter bootstrap.
+    One [Atomic.compare_and_set] closes the hole cheaply. *)
+let installed = Atomic.make false
+
+(** Install the bridge as a global OAS sink.  First call registers the
+    sink; subsequent calls are no-ops and return cleanly.  Intended to
+    be invoked exactly once during server bootstrap, before any keeper
+    turn fires an LLM call. *)
 let install () : unit =
-  Agent_sdk.Log.add_sink (make_sink ())
+  if Atomic.compare_and_set installed false true then
+    Agent_sdk.Log.add_sink (make_sink ())

@@ -21,9 +21,41 @@ let handle_worktree_create ctx args =
   in
   let raw_task_id = get_string args "task_id" "" in
   let base_branch = get_string args "base_branch" "develop" in
+  (* repo_name comes straight from MCP tool args. Reject anything that
+     isn't a single safe directory component so it cannot escape
+     [.masc/playground/<keeper>/repos/]. Room.worktree_create_r also
+     re-validates defensively, but rejecting here gives a clearer
+     error message back to the caller. *)
+  let is_safe_repo_name s =
+    s <> "" && s <> "." && s <> ".."
+    && not (String.contains s '/')
+    && not (String.contains s '\\')
+    && not (String.contains s '\x00')
+    && String.for_all (fun c ->
+      (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
+      || (c >= '0' && c <= '9') || c = '-' || c = '_' || c = '.') s
+  in
+  let raw_repo_name = String.trim (get_string args "repo_name" "") in
+  let repo_name, repo_name_error =
+    match raw_repo_name with
+    | "" -> (None, None)
+    | s when is_safe_repo_name s -> (Some s, None)
+    | bad ->
+      ( None,
+        Some (Printf.sprintf
+          "repo_name %S is invalid. Use a single directory name \
+           under your playground repos/ (e.g. repo_name='masc-mcp'). \
+           Allowed characters: [A-Za-z0-9._-]. No slashes, no \
+           path traversal, no '.'/'..' specials." bad) )
+  in
+  match repo_name_error with
+  | Some err -> (false, err)
+  | None ->
   if raw_task_id = "" then
-    (false, "task_id is required. Example: task_id='fix-login', task_id='add-auth'. \
-             Use a-z, 0-9, hyphen, underscore only. No slashes.")
+    (false, "task_id is required. Example: task_id='fix-login', \
+             task_id='add-auth'. Allowed characters: a-z, 0-9, hyphen, \
+             underscore. Slashes and backslashes are auto-normalized \
+             to hyphens, so 'feature/auth' becomes 'feature-auth'.")
   else
   (* Normalize: replace / and \ with - so LLMs can use branch-style names *)
   let task_id =
@@ -31,7 +63,7 @@ let handle_worktree_create ctx args =
     |> Seq.map (fun c -> if c = '/' || c = '\\' then '-' else c)
     |> String.of_seq
   in
-  match Room.worktree_create_r ctx.config ~agent_name ~task_id ~base_branch with
+  match Room.worktree_create_r ?repo_name ctx.config ~agent_name ~task_id ~base_branch with
   | Ok msg -> (true, msg)
   | Error e -> (false, Types.masc_error_to_string e)
 

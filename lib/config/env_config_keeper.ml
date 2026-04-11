@@ -436,6 +436,15 @@ module DockerPlayground = struct
       Env: [MASC_KEEPER_DOCKER_CONTAINER]. Default: "keeper-playground". *)
   let container_name =
     get_string ~default:"keeper-playground" "MASC_KEEPER_DOCKER_CONTAINER"
+
+  (** Container-side root under which keeper playground bundles are mounted.
+      Host [<base_path>/.masc/playground/<keeper>/…] maps to
+      [<container_playground_root>/<keeper>/…] inside the container.
+      Env: [MASC_KEEPER_DOCKER_PLAYGROUND_ROOT].
+      Default: "/home/keeper/playground". *)
+  let container_playground_root =
+    get_string ~default:"/home/keeper/playground"
+      "MASC_KEEPER_DOCKER_PLAYGROUND_ROOT"
 end
 
 module DashboardHealth = struct

@@ -12,6 +12,7 @@
    env_config_snapshot
    feature_flag_registry
    masc_network_defaults
-   masc_time_constants)
+   masc_time_constants
+   playground_paths)
  (wrapped false)
  (libraries masc_core masc_log yojson uri))

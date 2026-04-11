@@ -44,9 +44,13 @@ Use to timestamp events, check elapsed time, or include current time in reports.
   (* Context status *)
   {
     name = "keeper_context_status";
-    description = "Check your own context window usage and session state. Returns context_ratio (0.0-1.0), \
-token_count, message_count, generation, continuity_summary. Use when deciding whether to \
-compact context, extend turns, or hand off to the next generation.";
+    description = "Check your own context window usage and session state. Returns: \
+name (your keeper name), context_ratio (0.0-1.0), context_tokens, context_max, \
+message_count, generation, last_model_used, continuity_summary, and your three \
+canonical playground paths (playground_bundle, playground_mind, playground_repos) \
+relative to the server base_path. Use when deciding whether to compact context, \
+extend turns, hand off to the next generation, or resolve a path without \
+string-interpolating your own keeper name.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);

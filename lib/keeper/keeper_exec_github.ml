@@ -31,21 +31,26 @@ let truncate_gh_output (out : string) : string * (string * Yojson.Safe.t) list =
   let len = String.length out in
   if len <= max_gh_output_bytes then out, []
   else
+    let banner shown_bytes =
+      Printf.sprintf
+        "\n... [truncated: %d bytes total, showing first %d]"
+        len shown_bytes
+    in
     let render prefix =
       let shown_bytes = String.length prefix in
-      let banner =
-        Printf.sprintf
-          "\n... [truncated: %d bytes total, showing first %d]"
-          len shown_bytes
-      in
-      prefix ^ banner, shown_bytes
+      let banner = banner shown_bytes in
+      prefix ^ banner, shown_bytes, String.length banner
     in
     let rec fit budget =
       let prefix = Keeper_config.utf8_safe_prefix_bytes out ~max_bytes:budget in
-      let rendered, shown_bytes = render prefix in
+      let rendered, shown_bytes, banner_len = render prefix in
       if String.length rendered <= max_gh_output_bytes || budget = 0
       then rendered, shown_bytes
-      else fit (budget - 1)
+      else
+        let next_budget = max 0 (max_gh_output_bytes - banner_len) in
+        if next_budget >= budget
+        then rendered, shown_bytes
+        else fit next_budget
     in
     let rendered, shown_bytes = fit max_gh_output_bytes in
     rendered,

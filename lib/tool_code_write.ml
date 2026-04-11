@@ -50,7 +50,10 @@ let git_common_root path =
          in
          Some (Tool_code.normalize_path (Filename.dirname git_common_dir)))
     | _ -> None
-  with _ -> None
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | Unix.Unix_error _ -> None
+  | Sys_error _ -> None
 
 let dedupe_keep_order paths =
   let seen = Hashtbl.create (List.length paths) in

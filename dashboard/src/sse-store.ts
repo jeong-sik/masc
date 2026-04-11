@@ -382,11 +382,9 @@ export function setupSSEReaction(): () => void {
 
 // --- Periodic refresh ---
 
-const PERIODIC_REFRESH_MS =
-  typeof import.meta !== 'undefined'
-    && Boolean((import.meta as unknown as { env?: { DEV?: unknown } }).env?.DEV)
-    ? PERIODIC_REFRESH_DEV_MS
-    : PERIODIC_REFRESH_PROD_MS
+const PERIODIC_REFRESH_MS = import.meta.env.DEV
+  ? PERIODIC_REFRESH_DEV_MS
+  : PERIODIC_REFRESH_PROD_MS
 
 let _periodicId: ReturnType<typeof setInterval> | null = null
 

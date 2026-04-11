@@ -737,29 +737,35 @@ let render_prompt_template key vars =
 (** Validate and apply a single override entry (shared logic for
     [set_override] and [restore_overrides]).  Caller must NOT hold [mu].
     Returns [Ok ()] on success or [Error msg] describing why the entry
-    was rejected. *)
+    was rejected.
+
+    Validation and the override write happen inside a single
+    [with_mutex] block so the [meta_tbl] snapshot we validated
+    against is still in effect when we install the override.  A
+    prior version split the two into separate mutex transactions —
+    a concurrent [unregister] or [register_prompt] landing between
+    them could invalidate the validation decision (e.g. overwrite a
+    key's metadata with a different [template_variables] set after
+    we validated but before we wrote the override). *)
 let apply_override_validated key value =
   let trimmed = String.trim value in
   if not (is_valid_prompt_key key) then Error "Invalid prompt key"
   else if trimmed = "" then Error "Prompt cannot be empty"
   else if String.length trimmed > 10000 then Error "Prompt too long (max 10000 chars)"
   else
-    match
-      with_mutex (fun () ->
-          match Hashtbl.find_opt meta_tbl key with
-          | None -> Error "Unknown prompt key"
-          | Some meta ->
-              let unexpected = unexpected_template_variables meta trimmed in
-              if unexpected <> [] then
-                Error
-                  (Printf.sprintf "Unknown template variables: %s"
-                     (String.concat ", " unexpected))
-              else Ok ())
-    with
-    | Error msg -> Error msg
-    | Ok () ->
-        with_mutex (fun () -> Hashtbl.replace override_tbl key trimmed);
-        Ok ()
+    with_mutex (fun () ->
+        match Hashtbl.find_opt meta_tbl key with
+        | None -> Error "Unknown prompt key"
+        | Some meta ->
+            let unexpected = unexpected_template_variables meta trimmed in
+            if unexpected <> [] then
+              Error
+                (Printf.sprintf "Unknown template variables: %s"
+                   (String.concat ", " unexpected))
+            else begin
+              Hashtbl.replace override_tbl key trimmed;
+              Ok ()
+            end)
 
 (** Set an override for a prompt *)
 let set_override key value = apply_override_validated key value

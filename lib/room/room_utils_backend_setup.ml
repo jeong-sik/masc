@@ -110,6 +110,7 @@ let sync_test_base_path_env resolved_path =
     | Some current when String.equal current resolved_path -> ()
     | _ ->
         Unix.putenv "MASC_BASE_PATH" resolved_path;
+        Unix.putenv "MASC_TEST_SYNCED_BASE_PATH" resolved_path;
         Log.Room.info "Synchronized MASC_BASE_PATH=%s for test executable %s"
           resolved_path (Filename.basename Sys.executable_name)
 
@@ -128,6 +129,18 @@ let resolve_requested_base_path path =
     - otherwise resolve the requested path to its git root *)
 let resolve_masc_base_path path =
   match Env_config_core.base_path_opt () with
+  | Some explicit
+    when running_under_test_executable ()
+         && not
+              (Env_config_core.get_bool ~default:false
+                 "MASC_TEST_ALLOW_INHERITED_BASE_PATH")
+         && Option.equal String.equal
+              (Sys.getenv_opt "MASC_TEST_SYNCED_BASE_PATH")
+              (Some explicit) ->
+      Log.Room.info
+        "Ignoring auto-synced MASC_BASE_PATH=%s for requested test path %s"
+        explicit path;
+      resolve_requested_base_path path
   | Some explicit ->
       Log.Room.info "MASC base: %s (explicit MASC_BASE_PATH)" explicit;
       explicit

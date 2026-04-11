@@ -157,12 +157,16 @@ let parse_git_clone (doc : Keeper_toml_loader.toml_doc) : git_clone_config =
    resolver (used by dashboard/runtime code that reads per-env state
    from the resolved root) is untouched. *)
 let config_root_for_base_path ~base_path =
+  let base_path =
+    if Filename.is_relative base_path then Filename.concat (Sys.getcwd ()) base_path
+    else base_path
+  in
   let direct_config = Filename.concat base_path "config" in
   let direct_policy = Filename.concat direct_config "tool_policy.toml" in
   if Sys.file_exists direct_policy then (direct_config, [])
   else
     let inputs = Config_dir_resolver.inputs_from_env () in
-    let inputs = { inputs with env_base_path = Some base_path } in
+    let inputs = { inputs with cwd = base_path; env_base_path = Some base_path } in
     let resolution = Config_dir_resolver.resolve_with inputs in
     (resolution.Config_dir_resolver.config_root.path, resolution.warnings)
 

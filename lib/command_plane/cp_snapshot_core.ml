@@ -131,6 +131,27 @@ let build_snapshot_state (config : Room_utils.config) =
         _section_cache := Some cache;
         cache
   in
+  if not (Option.equal String.equal sc.base_path (Some config.base_path)) then begin
+    sc.base_path <- Some config.base_path;
+    sc.topo_units_mtime <- 0.0;
+    sc.topo_agents_mtime <- 0.0;
+    sc.agents <- [];
+    sc.managed_units <- [];
+    sc.units <- [];
+    sc.source <- "auto";
+    sc.intents_mtime <- 0.0;
+    sc.intents <- [];
+    sc.ops_topo_units_mtime <- 0.0;
+    sc.ops_topo_agents_mtime <- 0.0;
+    sc.ops_mtime <- 0.0;
+    sc.operations <- [];
+    sc.det_mtime <- 0.0;
+    sc.det_ops_mtime <- 0.0;
+    sc.detachments <- [];
+    sc.decisions_mtime <- 0.0;
+    sc.decisions_operator_mtime <- 0.0;
+    sc.decisions <- []
+  end;
   match config.backend with
       | FileSystem _ ->
           (* Per-section mtime check: only re-read sections whose files changed. *)

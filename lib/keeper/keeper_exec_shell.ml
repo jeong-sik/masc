@@ -196,11 +196,24 @@ let docker_playground_cwd ~(config : Room.config) ~(meta : keeper_meta) host_cwd
   if starts_at_boundary then
     if host_cwd = playground_prefix then container_root
     else
-      let suffix =
+      let raw_suffix =
         String.sub host_cwd (String.length prefix_with_sep)
           (String.length host_cwd - String.length prefix_with_sep)
       in
-      Filename.concat container_root suffix
+      (* A [host_cwd] like ".../.masc/playground//cheolsu/..." produces a
+         [raw_suffix] that starts with "/". [Filename.concat] would then
+         treat [raw_suffix] as an absolute path and drop [container_root],
+         silently escaping the mount. Strip any leading slashes so the
+         suffix is always a strict relative segment. *)
+      let suffix =
+        let n = String.length raw_suffix in
+        let i = ref 0 in
+        while !i < n && raw_suffix.[!i] = '/' do incr i done;
+        if !i = 0 then raw_suffix
+        else String.sub raw_suffix !i (n - !i)
+      in
+      if suffix = "" then container_root
+      else Filename.concat container_root suffix
   else
     (* meta.name is sanitized through Playground_paths so a poisoned
        name cannot escape the container_root. *)

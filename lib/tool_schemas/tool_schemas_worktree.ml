@@ -31,7 +31,13 @@ masc_worktree_remove.";
         ]);
         ("repo_name", `Assoc [
           ("type", `String "string");
-          ("description", `String "Optional. Disambiguates which playground clone to use when you have multiple repos under .masc/playground/<your-name>/repos/. Example: repo_name='masc-mcp'. Allowed characters: [A-Za-z0-9._-] — a single directory name, no slashes, no path traversal, no '.' or '..'. Leave empty to auto-pick the first clone alphabetically.");
+          ("description", `String "Optional. Disambiguates which playground clone to use when you have multiple repos under .masc/playground/<your-name>/repos/. Example: repo_name='masc-mcp'. Allowed characters: [A-Za-z0-9._-]. Must be a single directory name — no slashes, no path traversal. The special values '.' and '..' match the character class above but are rejected at runtime in tool_worktree.handle_worktree_create and Room_worktree.worktree_create_r. Leave empty to auto-pick the first clone alphabetically.");
+          (* Negative lookahead is not supported by JSON Schema Draft 7
+             (used by most MCP clients), so the pattern below only
+             enforces the character class. The ".", ".." special cases
+             are enforced at runtime so the three layers (schema,
+             tool dispatch, Room resolver) agree on the same rule even
+             though the schema cannot express it. *)
           ("pattern", `String "^[A-Za-z0-9._-]+$");
         ]);
       ]);

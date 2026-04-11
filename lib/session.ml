@@ -74,13 +74,6 @@ let unregister registry ~agent_name =
       agent_name (Hashtbl.length registry.sessions)
   )
 
-(** @deprecated Use [unregister] instead. Direct Hashtbl.remove without
-    mutex creates a race window with concurrent register/heartbeat calls
-    (see TLA+ SessionRegistryGhost spec). *)
-let unregister_sync (registry : registry) ~agent_name =
-  Hashtbl.remove registry.sessions agent_name;
-  Log.Session.info "Session unregistered (sync): %s (total: %d)"
-    agent_name (Hashtbl.length registry.sessions)
 
 (** Update activity timestamp *)
 let update_activity registry ~agent_name ?(is_listening = None) () =
@@ -293,10 +286,22 @@ let wait_for_message registry ~agent_name ~timeout =
   let start_time = Time_compat.now () in
   let check_interval = 2.0 in
 
-  (* Ensure session exists *)
-  (match Hashtbl.find_opt registry.sessions agent_name with
-   | Some _ -> ()
-   | None -> ignore (register registry ~agent_name));
+  (* Ensure session exists — check under lock so the read of
+     [registry.sessions] is atomic with respect to concurrent
+     [register]/[unregister]/[push_message] calls.  [register] itself
+     takes [with_lock] internally, but the existence probe here must
+     also be guarded; without it, a concurrent [unregister] between
+     the probe and the [register] call could cause a redundant
+     re-registration that clobbers a session that was just restored. *)
+  with_lock registry (fun () ->
+    if not (Hashtbl.mem registry.sessions agent_name) then
+      ignore (Hashtbl.replace registry.sessions agent_name {
+        agent_name;
+        connected_at = Time_compat.now ();
+        last_activity = Time_compat.now ();
+        is_listening = false;
+        message_queue = [];
+      }));
 
   update_activity registry ~agent_name ~is_listening:(Some true) ();
 
@@ -325,32 +330,43 @@ let wait_for_message registry ~agent_name ~timeout =
 
 (** Get inactive agents (idle > threshold seconds) *)
 let get_inactive_agents registry ~threshold =
-  let now = Time_compat.now () in
-  Hashtbl.fold (fun name session acc ->
-    if now -. session.last_activity > threshold then
-      name :: acc
-    else
-      acc
-  ) registry.sessions []
+  (* [session.last_activity] is mutable and is written by
+     [update_activity] under [registry.lock]; folding the hashtable
+     without the same lock is a contract violation of the type
+     declaration ("accessed exclusively under registry.lock").  Build
+     the result inside the critical section and return it. *)
+  with_lock registry (fun () ->
+    let now = Time_compat.now () in
+    Hashtbl.fold (fun name session acc ->
+      if now -. session.last_activity > threshold then
+        name :: acc
+      else
+        acc
+    ) registry.sessions [])
 
 (** Get all agent statuses *)
 let get_agent_statuses registry =
-  let now = Time_compat.now () in
-  Hashtbl.fold (fun name session acc ->
-    let idle_secs = int_of_float (now -. session.last_activity) in
-    let status_icon =
-      if session.is_listening then "🎧"
-      else if idle_secs > 60 then "💤"
-      else "🔨"
-    in
-    let status = `Assoc [
-      ("name", `String name);
-      ("listening", `Bool session.is_listening);
-      ("idle_seconds", `Int idle_secs);
-      ("status", `String status_icon);
-    ] in
-    status :: acc
-  ) registry.sessions []
+  (* Reads mutable [is_listening] and [last_activity] fields plus the
+     hashtable itself.  Must hold [registry.lock] to match the
+     contract and to avoid observing torn state after a concurrent
+     [update_activity]/[register]/[unregister]. *)
+  with_lock registry (fun () ->
+    let now = Time_compat.now () in
+    Hashtbl.fold (fun name session acc ->
+      let idle_secs = int_of_float (now -. session.last_activity) in
+      let status_icon =
+        if session.is_listening then "🎧"
+        else if idle_secs > 60 then "💤"
+        else "🔨"
+      in
+      let status = `Assoc [
+        ("name", `String name);
+        ("listening", `Bool session.is_listening);
+        ("idle_seconds", `Int idle_secs);
+        ("status", `String status_icon);
+      ] in
+      status :: acc
+    ) registry.sessions [])
 
 (** Format status for display *)
 let status_string registry =
@@ -389,7 +405,11 @@ let status_string registry =
 
 (** Connected agent names *)
 let connected_agents registry =
-  Hashtbl.fold (fun name _ acc -> name :: acc) registry.sessions []
+  (* Reading [registry.sessions] without [registry.lock] races with
+     [register]/[unregister] which write under the lock; the type
+     declaration explicitly forbids lock-free access. *)
+  with_lock registry (fun () ->
+    Hashtbl.fold (fun name _ acc -> name :: acc) registry.sessions [])
 
 (** Restore sessions from disk (call on server startup) *)
 let restore_from_disk registry ~agents_path =

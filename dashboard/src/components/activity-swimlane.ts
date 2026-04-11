@@ -18,6 +18,18 @@ import 'vis-timeline/styles/vis-timeline-graph2d.css'
 const swimlaneResource = createAsyncResource<SwimlaneResponse | null>()
 type TimelineItemId = number
 
+interface SwimlaneTimelineItem {
+  id: TimelineItemId
+  group: string
+  start: Date
+  end: Date
+  content: string
+  title: string
+  type: 'range'
+  className: string
+  style: string
+}
+
 function escapeHtml(value: string): string {
   return value
     .replace(/&/g, '&amp;')
@@ -122,7 +134,7 @@ export function ActivitySwimlane({ since }: { since?: string }) {
 
     const itemIdsByAgent = new Map<string, TimelineItemId[]>()
     let idCounter = 1
-    const items = new DataSet(data.spans.map(span => {
+    const items = new DataSet<SwimlaneTimelineItem>(data.spans.map(span => {
       const { bg: color, text: textColor } = spanStyle(span.kind)
       const duration = formatDurationMs(span.end_ms - span.start_ms)
       const itemId = idCounter++
@@ -133,7 +145,7 @@ export function ActivitySwimlane({ since }: { since?: string }) {
       agentItemIds.push(itemId)
       itemIdsByAgent.set(span.agent, agentItemIds)
 
-      return {
+      const item: SwimlaneTimelineItem = {
         id: itemId,
         group: span.agent,
         start: new Date(span.start_ms),
@@ -144,8 +156,9 @@ export function ActivitySwimlane({ since }: { since?: string }) {
         className: span.kind === 'presence'
           ? 'activity-swimlane-item activity-swimlane-item--presence'
           : 'activity-swimlane-item',
-        style: `background-color: ${color}; border-color: ${color}; color: ${textColor}; font-size: 10px; border-radius: 3px; font-family: system-ui, sans-serif; overflow: hidden;`
+        style: `background-color: ${color}; border-color: ${color}; color: ${textColor}; font-size: 10px; border-radius: 3px; font-family: system-ui, sans-serif; overflow: hidden;`,
       }
+      return item
     }))
 
     const options: TimelineOptions = {
@@ -172,11 +185,12 @@ export function ActivitySwimlane({ since }: { since?: string }) {
     syncTimelineSelection(timeline, container, data.agents, itemIdsByAgent, highlightedAgentId.value)
 
     timeline.on('select', (props) => {
-      if (props.items.length > 0) {
-        const item = items.get(props.items[0]) as any
-        if (item && item.group) {
+      const firstId = props.items[0]
+      if (firstId != null) {
+        const item = items.get(firstId as TimelineItemId)
+        if (item && !Array.isArray(item) && item.group) {
           selectedNodeId.value = 'agent:' + item.group
-          highlightedAgentId.value = item.group as string
+          highlightedAgentId.value = item.group
         }
       } else {
         selectedNodeId.value = null

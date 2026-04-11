@@ -2153,6 +2153,22 @@ let test_validate_completion_contract_accepts_stay_silent () =
   | Ok () -> ()
   | Error e -> fail ("unexpected error: " ^ e)
 
+let test_completion_contract_of_tool_choice_allows_auto () =
+  check bool "auto allows text" true
+    (match KTD.completion_contract_of_tool_choice None with
+     | KTD.Allow_text_or_tool -> true
+     | KTD.Require_tool_use -> false);
+  check bool "none allows text" true
+    (match KTD.completion_contract_of_tool_choice (Some Agent_sdk.Types.None_) with
+     | KTD.Allow_text_or_tool -> true
+     | KTD.Require_tool_use -> false)
+
+let test_completion_contract_of_tool_choice_requires_any () =
+  check bool "any requires tool use" true
+    (match KTD.completion_contract_of_tool_choice (Some Agent_sdk.Types.Any) with
+     | KTD.Require_tool_use -> true
+     | KTD.Allow_text_or_tool -> false)
+
 let test_tool_usage_delta_uses_registry_counts () =
   let before =
     [
@@ -2818,6 +2834,10 @@ let () =
             test_validate_completion_contract_requires_tool_use;
           test_case "completion contract accepts stay silent" `Quick
             test_validate_completion_contract_accepts_stay_silent;
+          test_case "completion contract mapping allows auto" `Quick
+            test_completion_contract_of_tool_choice_allows_auto;
+          test_case "completion contract mapping requires any" `Quick
+            test_completion_contract_of_tool_choice_requires_any;
           test_case "tool usage delta uses registry counts" `Quick
             test_tool_usage_delta_uses_registry_counts;
           test_case "tool usage delta ignores removed tools" `Quick

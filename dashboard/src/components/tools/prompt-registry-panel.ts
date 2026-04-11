@@ -9,6 +9,7 @@ import {
   type PromptSource,
 } from '../../api'
 import { Card } from '../common/card'
+import { ErrorState } from '../common/feedback-state'
 import { ActionButton } from '../common/button'
 import { TextArea } from '../common/input'
 
@@ -116,7 +117,7 @@ export function PromptRegistryPanel() {
         <div>이 화면에서는 현재 effective 값 확인과 runtime override 적용/해제만 합니다.</div>
       </div>
 
-      ${error ? html`<div class="mb-4 rounded-lg border border-[rgba(244,63,94,0.28)] bg-[rgba(244,63,94,0.08)] px-3 py-2 text-[12px] text-[#fecdd3]">${error}</div>` : null}
+      ${error ? html`<${ErrorState} message=${error} class="mb-4" />` : null}
       ${status ? html`<div class="mb-4 rounded-lg border border-[rgba(56,189,248,0.28)] bg-[rgba(56,189,248,0.08)] px-3 py-2 text-[12px] text-[#bae6fd]">${status}</div>` : null}
 
       <div class="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">

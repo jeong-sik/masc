@@ -11,7 +11,7 @@ import {
 } from '../api/dashboard'
 import { Card } from './common/card'
 import { EmptyState } from './common/empty-state'
-import { LoadingState } from './common/feedback-state'
+import { ErrorState, LoadingState } from './common/feedback-state'
 import { StatCell } from './common/stat-cell'
 import { StatusChip } from './common/status-chip'
 import { createManagedAsyncResource, type ManagedAsyncResource } from '../lib/async-state'
@@ -96,7 +96,7 @@ export function RuntimeMonitor() {
       </div>
 
       ${current.error
-        ? html`<div class="rounded border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">${current.error}</div>`
+        ? html`<${ErrorState} message=${current.error} />`
         : null}
 
       ${current.loading && !providers && !metrics

@@ -393,13 +393,6 @@ let run_turn
   let { system_prompt = turn_system_prompt; dynamic_context } =
     build_turn_prompt ~base_system_prompt ~messages:ctx_work.messages
   in
-  (* Defense in depth: unified prompt builders sanitize their own output,
-     but run_turn is shared by other callers and is the final boundary before
-     handing prompts/history to OAS. Keep this sanitization here even when
-     upstream builders already cleaned their strings. *)
-  let turn_system_prompt = Inference_utils.sanitize_text_utf8 turn_system_prompt in
-  let dynamic_context = Inference_utils.sanitize_text_utf8 dynamic_context in
-  let user_message = Inference_utils.sanitize_text_utf8 user_message in
   let prompt_metrics =
     build_prompt_metrics ~system_prompt:turn_system_prompt ~dynamic_context
       ~user_message

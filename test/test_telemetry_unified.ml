@@ -102,6 +102,48 @@ let test_agent_event_source () =
     Alcotest.(check string) "tagged as agent_event" "agent_event" source
   | _ -> Alcotest.fail "expected Assoc"
 
+let test_oas_event_source_and_scope_filter () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "telem_oas_event" in
+  let oas_events_dir = Filename.concat dir ".masc/oas-events" in
+  Fs_compat.mkdir_p oas_events_dir;
+  write_jsonl oas_events_dir [
+    `Assoc
+      [
+        ("ts_unix", `Float 1000.0);
+        ("event_type", `String "tool_called");
+        ("agent_name", `String "alpha");
+        ("session_id", `String "sess-1");
+        ("worker_run_id", `String "run-1");
+        ("tool_name", `String "masc_status");
+      ];
+    `Assoc
+      [
+        ("ts_unix", `Float 2000.0);
+        ("event_type", `String "turn_completed");
+        ("agent_name", `String "beta");
+        ("session_id", `String "sess-2");
+        ("worker_run_id", `String "run-2");
+        ("turn", `Int 3);
+      ];
+  ];
+  let entries =
+    Telemetry_unified.read_unified ~base_path:dir ~masc_root:(masc_root dir)
+      ~sources:[Telemetry_unified.Oas_event]
+      ~session_id:"sess-2" ~worker_run_id:"run-2" ()
+  in
+  Alcotest.(check int) "one filtered oas event" 1 (List.length entries);
+  match List.hd entries with
+  | `Assoc fields ->
+    let source = match List.assoc_opt "source" fields with
+      | Some (`String s) -> s | _ -> "" in
+    let event_type = match List.assoc_opt "event_type" fields with
+      | Some (`String s) -> s | _ -> "" in
+    Alcotest.(check string) "tagged as oas_event" "oas_event" source;
+    Alcotest.(check string) "event type preserved" "turn_completed" event_type
+  | _ -> Alcotest.fail "expected Assoc"
+
 (* ── Keeper metrics discovery ────────────────────── *)
 
 let test_keeper_metrics_per_keeper () =
@@ -264,6 +306,8 @@ let () =
         [
           Alcotest.test_case "empty base" `Quick test_empty_returns_empty;
           Alcotest.test_case "agent events" `Quick test_agent_event_source;
+          Alcotest.test_case "oas events + scope filter" `Quick
+            test_oas_event_source_and_scope_filter;
           Alcotest.test_case "keeper metrics" `Quick test_keeper_metrics_per_keeper;
           Alcotest.test_case "sorted newest first" `Quick test_sorted_newest_first;
           Alcotest.test_case "n limits output" `Quick test_n_limits_output;

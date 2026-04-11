@@ -1483,6 +1483,7 @@ export type TelemetrySource =
   | 'agent_event'
   | 'tool_call_io'
   | 'tool_usage'
+  | 'oas_event'
   | 'tool_metric'
 
 export type TelemetryEntry = Record<string, unknown> & {
@@ -1520,6 +1521,7 @@ function decodeTelemetrySource(value: unknown): TelemetrySource | null {
     case 'agent_event':
     case 'tool_call_io':
     case 'tool_usage':
+    case 'oas_event':
     case 'tool_metric':
       return value
     default:

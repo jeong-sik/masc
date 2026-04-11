@@ -40,7 +40,11 @@ let tool = Typed_tool_masc.create
   ~description:"[Typed PoC] Send a message visible to ALL agents via SSE push."
   ~module_tag:Tool_dispatch.Mod_room
   ~params:(Sg.to_params broadcast_schema)
-  ~parse:(Sg.parse broadcast_schema)
+  ~parse:(fun json ->
+    Result.map_error
+      (Agent_sdk.Tool_input_validation.format_errors
+         ~tool_name:"masc_broadcast_typed")
+      (Sg.parse broadcast_schema json))
   ~handler:handle_broadcast
   ~encode:encode_broadcast
   ~requires_join:true

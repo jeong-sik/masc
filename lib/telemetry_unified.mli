@@ -1,12 +1,13 @@
 (** Telemetry_unified — Read-only aggregation of scattered telemetry stores.
 
-    Provides a single, time-sorted view over five separate JSONL stores.
+    Provides a single, time-sorted view over six separate JSONL stores.
     Paths under [.masc/] are resolved via the cluster-aware [masc_root]
     (use [Room.masc_root_dir config]):
     - [<masc_root>/keepers/<name>/metrics/] — Per-keeper turn metrics
     - [<masc_root>/telemetry/]              — Agent lifecycle + tool call events
     - [<masc_root>/tool_calls/]             — Full I/O for keeper tool calls
     - [<masc_root>/tool_usage/]             — System_internal surface tool calls
+    - [<masc_root>/oas-events/]             — Durable OAS native/custom bus events
     - [<base_path>/data/tool-metrics/]      — Tool duration/success metrics
 
     Each returned entry is tagged with a ["source"] field for discrimination.
@@ -20,6 +21,7 @@ type source =
   | Agent_event    (** Agent lifecycle, task, handoff events *)
   | Tool_call_io   (** Keeper tool calls with full input/output *)
   | Tool_usage     (** System_internal surface tool invocations *)
+  | Oas_event      (** Durable OAS native/custom event bus relays *)
   | Tool_metric    (** Tool duration and success metrics *)
 
 val source_to_string : source -> string
@@ -39,7 +41,7 @@ val read_unified :
   Yojson.Safe.t list
 (** [read_unified ~base_path ~masc_root ?sources ?keeper_name ?session_id
       ?operation_id ?worker_run_id ?n ()]
-    reads entries from [sources] (default: all five), optionally filtered
+    reads entries from [sources] (default: all six), optionally filtered
     by [keeper_name] and generic correlation keys, and returns at most [n]
     entries (default 100) sorted by timestamp descending (newest first).
 

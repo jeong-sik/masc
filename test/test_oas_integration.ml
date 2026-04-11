@@ -3,6 +3,27 @@
 open Agent_sdk
 open Masc_mcp
 
+let temp_counter = ref 0
+
+let tmpdir prefix =
+  incr temp_counter;
+  let dir = Filename.concat
+    (Filename.get_temp_dir_name ())
+    (Printf.sprintf "%s_%d_%d_%.0f" prefix !temp_counter (Unix.getpid ())
+       (Unix.gettimeofday ()))
+  in
+  Fs_compat.mkdir_p dir;
+  dir
+
+let rec cleanup_dir path =
+  if Sys.file_exists path then
+    if Sys.is_directory path then begin
+      Sys.readdir path
+      |> Array.iter (fun name -> cleanup_dir (Filename.concat path name));
+      Unix.rmdir path
+    end else
+      Unix.unlink path
+
 (* ================================================================ *)
 (* Oas_events tests                                                  *)
 (* ================================================================ *)
@@ -49,6 +70,55 @@ let test_event_bus_task_transition () =
     let tid = Yojson.Safe.Util.(member "task_id" payload |> to_string) in
     Alcotest.(check string) "task id" "task-1" tid
   | _ -> Alcotest.fail "expected Custom masc:task_transition event"
+
+let test_oas_sse_bridge_persists_native_events () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "oas_sse_bridge" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      let config = Room.default_config dir in
+      let bus = Event_bus.create () in
+      Sse.set_clock (Eio.Stdenv.clock env);
+      try
+        Eio.Switch.run (fun sw ->
+          Oas_sse_bridge.start ~sw ~clock:(Eio.Stdenv.clock env) ~config ~bus;
+          Event_bus.publish bus
+            (Event_bus.ToolCalled
+               {
+                 agent_name = "bridge-agent";
+                 tool_name = "masc_status";
+                 input = `Assoc [];
+                 session_id = Some "sess-bridge";
+                 worker_run_id = Some "run-bridge";
+               });
+          Eio.Time.sleep (Eio.Stdenv.clock env) 2.2;
+          let store =
+            Dated_jsonl.create
+              ~base_dir:(Filename.concat (Room.masc_root_dir config) "oas-events")
+              ()
+          in
+          let events = Dated_jsonl.read_recent store 5 in
+          Alcotest.(check bool) "durable oas event appended" true (events <> []);
+          (match List.hd events with
+           | `Assoc fields ->
+               let field_string name =
+                 match List.assoc_opt name fields with
+                 | Some (`String value) -> value
+                 | _ -> ""
+               in
+               Alcotest.(check string) "event type" "tool_called"
+                 (field_string "event_type");
+               Alcotest.(check string) "agent name" "bridge-agent"
+                 (field_string "agent_name");
+               Alcotest.(check string) "session id" "sess-bridge"
+                 (field_string "session_id");
+               Alcotest.(check string) "worker run id" "run-bridge"
+                 (field_string "worker_run_id")
+           | _ -> Alcotest.fail "expected persisted oas event object");
+          raise Exit)
+      with Exit -> ())
 
 (* ================================================================ *)
 (* Message conversion tests (formerly oas_checkpoint_bridge)         *)
@@ -132,6 +202,8 @@ let () =
       Alcotest.test_case "heartbeat event" `Quick test_event_bus_heartbeat;
       Alcotest.test_case "task transition event" `Quick
         test_event_bus_task_transition;
+      Alcotest.test_case "sse bridge persists native events" `Quick
+        test_oas_sse_bridge_persists_native_events;
     ];
     "message_conversion", [
       Alcotest.test_case "message roundtrip" `Quick test_message_roundtrip;

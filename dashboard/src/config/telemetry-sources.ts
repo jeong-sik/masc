@@ -1,12 +1,13 @@
 // Telemetry source metadata — SSOT for labels, colors, and icons.
 // Used by telemetry-unified, fleet-telemetry-panel, and any view rendering
-// the 5 append-only JSONL telemetry stores.
+// the append-only JSONL telemetry stores.
 
 export type TelemetrySourceKey =
   | 'keeper_metric'
   | 'agent_event'
   | 'tool_call_io'
   | 'tool_usage'
+  | 'oas_event'
   | 'tool_metric'
 
 export interface TelemetrySourceMeta {
@@ -21,6 +22,7 @@ export const TELEMETRY_SOURCE_META: Record<TelemetrySourceKey, TelemetrySourceMe
   agent_event: { label: 'Agent 이벤트', sublabel: 'tool_called 다수, join/leave/task 포함', color: 'text-emerald-400', icon: 'A' },
   tool_call_io: { label: 'Keeper Tool I/O', sublabel: 'keeper->tool 입출력 전체 기록', color: 'text-amber-400', icon: 'T' },
   tool_usage: { label: 'Keeper 내부 호출', sublabel: 'keeper_internal caller 기록', color: 'text-purple-400', icon: 'U' },
+  oas_event: { label: 'OAS 이벤트', sublabel: 'native/custom event bus durable relay', color: 'text-rose-400', icon: 'O' },
   tool_metric: { label: 'Tool 성능', sublabel: 'duration/success 측정', color: 'text-cyan-400', icon: 'M' },
 }
 

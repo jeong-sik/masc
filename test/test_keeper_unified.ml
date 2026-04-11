@@ -997,6 +997,7 @@ let sample_prompt_metrics ?(system_prompt = "You are a keeper.")
   KAR.build_prompt_metrics ~system_prompt ~dynamic_context ~user_message
 
 let make_run_result ~text ~tools ~model ~input_tok ~output_tok
+    ?trace_ref
     ?run_validation
     ?cascade_observation
     () : Masc_mcp.Keeper_agent_run.run_result =
@@ -1011,6 +1012,7 @@ let make_run_result ~text ~tools ~model ~input_tok ~output_tok
     tools_used = tools;
     checkpoint = None;
     proof = None;
+    trace_ref;
     run_validation;
     stop_reason = Masc_mcp.Oas_worker.Completed;
     inference_telemetry = None;
@@ -1403,6 +1405,15 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
       let config = Masc_mcp.Room.default_config base_dir in
+      let validation : Agent_sdk.Raw_trace.run_validation = {
+        run_ref = sample_run_ref; ok = true;
+        checks = []; evidence = ["tool_paired:keeper_board_list"];
+        paired_tool_result_count = 1; has_file_write = false;
+        verification_pass_after_file_write = false;
+        final_text = Some "Observed";
+        tool_names = ["keeper_board_list"];
+        stop_reason = Some "completed"; failure_reason = None;
+      } in
       let result =
         {
           (make_run_result ~text:"Observed" ~tools:[]
@@ -1414,6 +1425,8 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
               ~dynamic_context:"Pending mentions: 2"
               ~user_message:"Review the board and decide what to do next."
               ();
+          trace_ref = Some sample_run_ref;
+          run_validation = Some validation;
           cascade_observation =
             Some
               {
@@ -1548,7 +1561,16 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
            result.prompt_metrics.user_message_segment.fingerprint)
         Yojson.Safe.Util.(
           json |> member "prompt" |> member "user_message"
-          |> member "fingerprint" |> to_string))
+          |> member "fingerprint" |> to_string);
+      check string "trace ref worker run id persisted"
+        sample_run_ref.worker_run_id
+        Yojson.Safe.Util.(
+          json |> member "trace_ref" |> member "worker_run_id" |> to_string);
+      check bool "run validation persisted" true
+        Yojson.Safe.Util.(json |> member "run_validation" <> `Null);
+      check bool "run validation ok persisted" true
+        Yojson.Safe.Util.(
+          json |> member "run_validation" |> member "ok" |> to_bool))
 
 let test_append_metrics_snapshot_treats_validated_evidence_as_tool_use () =
   Eio_main.run @@ fun env ->

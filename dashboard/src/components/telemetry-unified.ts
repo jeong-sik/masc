@@ -249,6 +249,20 @@ function entryPreview(e: TelemetryEntry): string {
       const caller = normalizeText(e.caller) ?? ''
       return `${caller || 'unknown'} -> ${tool}`
     }
+    case 'oas_event': {
+      const eventType = normalizeText(e.event_type) ?? normalizeText(e.type) ?? 'oas'
+      const agentName = normalizeText(e.agent_name)
+      const toolName = normalizeText(e.tool_name)
+      const turn = typeof e.turn === 'number' ? e.turn : null
+      const taskId = normalizeText(e.task_id)
+      const parts = [
+        agentName,
+        toolName,
+        turn != null ? `turn ${turn}` : null,
+        taskId,
+      ].filter(Boolean)
+      return parts.length > 0 ? `${eventType}: ${parts.join(' · ')}` : eventType
+    }
     case 'tool_metric': {
       const tool = normalizeText(e.tool_name) ?? ''
       const dur = typeof e.duration_ms === 'number' ? e.duration_ms : null

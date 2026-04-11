@@ -11,6 +11,7 @@
     - [<masc_root>/telemetry/]               — Agent lifecycle + tool call events
     - [<masc_root>/tool_calls/]              — Full I/O for keeper tool calls
     - [<masc_root>/tool_usage/]              — System_internal surface tool calls
+    - [<masc_root>/oas-events/]              — Durable OAS native/custom events
     - [<base_path>/data/tool-metrics/]       — Tool duration/success metrics
     @since 2.251.0 *)
 
@@ -19,6 +20,7 @@ type source =
   | Agent_event    (** Agent lifecycle, task, handoff events *)
   | Tool_call_io   (** Keeper tool calls with full input/output *)
   | Tool_usage     (** System_internal surface tool invocations *)
+  | Oas_event      (** Durable OAS native/custom event bus relays *)
   | Tool_metric    (** Tool duration and success metrics *)
 
 let source_to_string = function
@@ -26,6 +28,7 @@ let source_to_string = function
   | Agent_event -> "agent_event"
   | Tool_call_io -> "tool_call_io"
   | Tool_usage -> "tool_usage"
+  | Oas_event -> "oas_event"
   | Tool_metric -> "tool_metric"
 
 let source_of_string = function
@@ -33,10 +36,18 @@ let source_of_string = function
   | "agent_event" -> Some Agent_event
   | "tool_call_io" -> Some Tool_call_io
   | "tool_usage" -> Some Tool_usage
+  | "oas_event" -> Some Oas_event
   | "tool_metric" -> Some Tool_metric
   | _ -> None
 
-let all_sources = [Keeper_metric; Agent_event; Tool_call_io; Tool_usage; Tool_metric]
+let all_sources =
+  [ Keeper_metric
+  ; Agent_event
+  ; Tool_call_io
+  ; Tool_usage
+  ; Oas_event
+  ; Tool_metric
+  ]
 
 (* ── Store paths ────────────────────────────────────── *)
 
@@ -49,6 +60,7 @@ let fixed_store_dir ~masc_root ~base_path = function
   | Agent_event  -> Some (Filename.concat masc_root "telemetry")
   | Tool_call_io -> Some (Filename.concat masc_root "tool_calls")
   | Tool_usage   -> Some (Filename.concat masc_root "tool_usage")
+  | Oas_event    -> Some (Filename.concat masc_root "oas-events")
   | Tool_metric  -> Some (Filename.concat base_path "data/tool-metrics")
   | Keeper_metric -> None  (* handled separately *)
 
@@ -113,8 +125,13 @@ let matches_keeper name (json : Yojson.Safe.t) : bool =
       | Some (`String k) -> String.equal k name
       | _ -> false
     in
-    (* keeper_metric: "name" field; tool_call_io: "keeper"; tool_usage: "caller" *)
-    check "name" || check "keeper" || check "caller" || check "agent_id"
+    (* keeper_metric: "name" field; tool_call_io: "keeper"; oas_event: "agent_name" *)
+    check "name"
+    || check "keeper"
+    || check "caller"
+    || check "agent_id"
+    || check "agent_name"
+    || check "agent"
   | _ -> false
 
 let matches_string_field field expected (json : Yojson.Safe.t) : bool =

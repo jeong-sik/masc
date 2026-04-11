@@ -15,6 +15,10 @@ open Masc_mcp
 let is_ro ~tool_name ~input =
   Keeper_tool_registry.is_read_only_with_input ~tool_name ~input
 
+let is_boundary_exempt ~tool_name ~input =
+  Keeper_tool_registry.is_main_worktree_boundary_exempt_with_input
+    ~tool_name ~input
+
 let mk_cmd cmd =
   `Assoc [ ("cmd", `String cmd) ]
 
@@ -24,6 +28,9 @@ let mk_args args =
 let mk_cmd_and_args cmd args =
   `Assoc [ ("cmd", `String cmd);
            ("args", `List (List.map (fun s -> `String s) args)) ]
+
+let mk_action action =
+  `Assoc [ ("action", `String action) ]
 
 (* ================================================================ *)
 (* Read-only subcommands via cmd                                     *)
@@ -197,6 +204,36 @@ let test_api_via_args () =
        ~input:(mk_args ["api"; "-X"; "POST"; "/repos/o/r/pulls/1/merge"]))
 
 (* ================================================================ *)
+(* Main-worktree mutation-boundary exemptions                        *)
+(* ================================================================ *)
+
+let test_task_claim_is_mutating_but_boundary_exempt () =
+  Alcotest.(check bool) "task claim is not read-only"
+    false
+    (is_ro ~tool_name:"keeper_task_claim" ~input:(`Assoc []));
+  Alcotest.(check bool) "task claim bypasses boundary"
+    true
+    (is_boundary_exempt ~tool_name:"keeper_task_claim" ~input:(`Assoc []))
+
+let test_masc_code_git_write_actions_bypass_boundary () =
+  List.iter
+    (fun action ->
+      Alcotest.(check bool)
+        (Printf.sprintf "git %s is mutating" action)
+        false
+        (is_ro ~tool_name:"masc_code_git" ~input:(mk_action action));
+      Alcotest.(check bool)
+        (Printf.sprintf "git %s bypasses boundary" action)
+        true
+        (is_boundary_exempt ~tool_name:"masc_code_git" ~input:(mk_action action)))
+    [ "add"; "commit"; "push" ]
+
+let test_keeper_bash_still_opens_boundary () =
+  Alcotest.(check bool) "keeper_bash not exempt"
+    false
+    (is_boundary_exempt ~tool_name:"keeper_bash" ~input:(mk_cmd "git status"))
+
+(* ================================================================ *)
 (* Runner                                                            *)
 (* ================================================================ *)
 
@@ -241,5 +278,11 @@ let () =
             test_non_keeper_github_tool;
           Alcotest.test_case "api via args" `Quick
             test_api_via_args;
+          Alcotest.test_case "task claim mutating but boundary exempt" `Quick
+            test_task_claim_is_mutating_but_boundary_exempt;
+          Alcotest.test_case "masc_code_git write actions bypass boundary" `Quick
+            test_masc_code_git_write_actions_bypass_boundary;
+          Alcotest.test_case "keeper_bash still opens boundary" `Quick
+            test_keeper_bash_still_opens_boundary;
         ] );
     ]

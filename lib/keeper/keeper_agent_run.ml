@@ -925,14 +925,14 @@ let run_turn
       ~generation
       ~pre_tool_use_guard:(fun ~tool_name ~input ->
         match !mutation_boundary_tool_name with
-        | Some _ when Keeper_tool_registry.is_read_only_with_input
+        | Some _ when Keeper_tool_registry.is_main_worktree_boundary_exempt_with_input
                         ~tool_name ~input ->
-          None (* read-only tools/subcommands pass through mutation boundary *)
+          None (* coordination/worktree-sandbox tools pass through boundary *)
         | Some _ -> Some (mutation_boundary_summary ())
         | None -> None)
       ~on_tool_executed:(fun ~tool_name ~input ~output_text:_ ~success ->
         if success
-           && not (Keeper_tool_registry.is_read_only_with_input
+           && not (Keeper_tool_registry.is_main_worktree_boundary_exempt_with_input
                      ~tool_name ~input)
            && not (Keeper_tool_registry.is_reconcile_safe_tool tool_name)
            && Option.is_none !mutation_boundary_tool_name

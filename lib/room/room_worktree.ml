@@ -89,8 +89,9 @@ let worktree_create_r ?(link_task=true) config ~agent_name ~task_id ~base_branch
   | Error e, _ -> Error e
   | _, Error e -> Error e
   | Ok _, Ok _ ->
-    (* Default to playground clone; fall back to base_path git root.
-       Keeper coding should happen in playground, not the main repo. *)
+    (* Prefer the keeper's playground clone. If it is missing, fall back
+       to the configured repository root so explicit repo-worktree flows
+       still work instead of failing with a missing-clone error. *)
     let resolve_keeper_repo_root () =
       let playground_repo =
         Filename.concat config.base_path

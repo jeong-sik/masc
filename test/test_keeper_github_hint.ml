@@ -13,6 +13,8 @@
 open Alcotest
 
 let hint = Masc_mcp.Keeper_exec_github.gh_not_found_hint
+let truncate = Masc_mcp.Keeper_exec_github.truncate_gh_output
+let max_gh_output_bytes = Masc_mcp.Keeper_exec_github.max_gh_output_bytes
 
 let has_hint result =
   List.exists (fun (k, _) -> k = "hint") result
@@ -118,6 +120,32 @@ let test_hint_text_content () =
             with Not_found -> false)
   | _ -> fail "expected hint key with string value"
 
+let test_truncate_preserves_short_output () =
+  let out = "short gh output" in
+  let truncated, fields = truncate out in
+  check string "unchanged output" out truncated;
+  check int "no metadata" 0 (List.length fields)
+
+let test_truncate_caps_total_length () =
+  let out = String.make (max_gh_output_bytes + 512) 'a' in
+  let truncated, fields = truncate out in
+  check bool "marked truncated"
+    true
+    (List.mem_assoc "truncated" fields);
+  check (option int) "original bytes recorded"
+    (Some (String.length out))
+    (match List.assoc_opt "original_bytes" fields with
+     | Some (`Int n) -> Some n
+     | _ -> None);
+  check bool "shown bytes recorded"
+    true
+    (match List.assoc_opt "shown_bytes" fields with
+     | Some (`Int n) -> n >= 0
+     | _ -> false);
+  check bool "total output is capped"
+    true
+    (String.length truncated <= max_gh_output_bytes)
+
 let () =
   run "keeper_github_hint"
     [ "not_found_detection",
@@ -141,5 +169,9 @@ let () =
           test_signaled_with_matching_output
       ; test_case "hint text content" `Quick
           test_hint_text_content
+      ; test_case "short output unchanged" `Quick
+          test_truncate_preserves_short_output
+      ; test_case "truncate caps total length" `Quick
+          test_truncate_caps_total_length
       ]
     ]

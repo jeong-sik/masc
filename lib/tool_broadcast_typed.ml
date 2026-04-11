@@ -5,9 +5,9 @@ module Sg = Agent_sdk.Tool_schema_gen
 
 let broadcast_schema = Sg.two
   (Sg.string_field "message" ~required:true
-     ~desc:"Message content to broadcast to all agents" ())
+     ~desc:"Message content to broadcast to all agents")
   (Sg.string_field "format" ~required:false
-     ~desc:"Output format: compact or verbose (default: verbose)" ())
+     ~desc:"Output format: compact or verbose (default: verbose)")
 
 type broadcast_output = {
   delivered : bool;

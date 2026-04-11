@@ -113,11 +113,11 @@ class BotConfig(BaseSettings):
 
     @field_validator("self_chat_guid", mode="before")
     @classmethod
-    def validate_self_chat_guid(cls, v: Any) -> Any:
+    def validate_self_chat_guid(cls, v: Any) -> str:
         if v is None:
             return ""
         if not isinstance(v, str):
-            return v
+            raise ValueError("self_chat_guid must be a string or null")
         return v.strip()
 
     def gate_message_url(self) -> str:

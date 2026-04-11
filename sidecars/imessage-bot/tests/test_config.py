@@ -31,3 +31,7 @@ class BotConfigTests(unittest.TestCase):
         cfg = BotConfig(self_chat_guid=None)
 
         self.assertEqual(cfg.self_chat_guid, "")
+
+    def test_self_chat_guid_rejects_non_string_values(self) -> None:
+        with self.assertRaises(ValidationError):
+            BotConfig(self_chat_guid=123)

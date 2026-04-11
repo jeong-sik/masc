@@ -86,20 +86,46 @@ let test_profile_parses_non_empty profile () =
     (Printf.sprintf "%s has entries" profile)
     true
     (strings <> []);
-  let parsed =
-    Llm_provider.Cascade_config.parse_model_strings strings
+  (* Use parse_model_string_exn per entry so we can distinguish
+     "unknown provider / invalid spec" (hard failure — real typo) from
+     "provider unavailable" (soft — just means the API key env var is
+     unset in this test run). The former must fail the test; the latter
+     is acceptable because this static check never calls the API. *)
+  let contains_substring ~needle s =
+    let nl = String.length needle in
+    let sl = String.length s in
+    if nl = 0 || nl > sl then false
+    else
+      let limit = sl - nl in
+      let rec loop i =
+        if i > limit then false
+        else if String.sub s i nl = needle then true
+        else loop (i + 1)
+      in
+      loop 0
   in
-  check int
-    (Printf.sprintf "%s parses all model strings" profile)
-    (List.length strings)
-    (List.length parsed);
+  (* error format from OAS: `provider "glm" unavailable (missing env var "ZAI_API_KEY")` *)
+  let is_unavailable_error msg =
+    contains_substring ~needle:"unavailable" msg
+  in
+  let expanded =
+    Llm_provider.Cascade_config.expand_auto_models strings
+  in
   List.iter
-    (fun (cfg : Llm_provider.Provider_config.t) ->
-      check bool
-        (Printf.sprintf "%s: %s has non-empty model_id" profile cfg.model_id)
-        true
-        (String.trim cfg.model_id <> ""))
-    parsed
+    (fun s ->
+      match Llm_provider.Cascade_config.parse_model_string_exn s with
+      | Ok (cfg : Llm_provider.Provider_config.t) ->
+        check bool
+          (Printf.sprintf "%s: %S has non-empty model_id" profile s)
+          true
+          (String.trim cfg.model_id <> "")
+      | Error msg when is_unavailable_error msg ->
+        (* Provider known but its API key env var is empty — accepted. *)
+        ()
+      | Error msg ->
+        Alcotest.fail
+          (Printf.sprintf "%s: %S hard-fails parse: %s" profile s msg))
+    expanded
 
 (** Meta / regression guard: prove that the happy-path assertion in
     [test_profile_parses_non_empty] is NOT vacuous.

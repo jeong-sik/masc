@@ -86,14 +86,20 @@ type ring = {
 let rings : (string, ring) Hashtbl.t = Hashtbl.create 8
 
 let flush_interval_sec_cached =
-  lazy (Env_config_core.get_float ~default:60.0 "MASC_DECISION_AUDIT_FLUSH_INTERVAL_SEC")
+  (* Flush cadence is only consulted from keeper runtime fibers, so use
+     Eio.Lazy here to avoid concurrent Stdlib.Lazy.force hazards. *)
+  Eio.Lazy.from_fun ~cancel:`Protect (fun () ->
+    Env_config_core.get_float ~default:60.0
+      "MASC_DECISION_AUDIT_FLUSH_INTERVAL_SEC")
 
-let flush_interval_sec () = Lazy.force flush_interval_sec_cached
+let flush_interval_sec () = Eio.Lazy.force flush_interval_sec_cached
 
 let flush_batch_size_cached =
-  lazy (Env_config_core.get_int ~default:10 "MASC_DECISION_AUDIT_FLUSH_BATCH_SIZE")
+  Eio.Lazy.from_fun ~cancel:`Protect (fun () ->
+    Env_config_core.get_int ~default:10
+      "MASC_DECISION_AUDIT_FLUSH_BATCH_SIZE")
 
-let flush_batch_size () = Lazy.force flush_batch_size_cached
+let flush_batch_size () = Eio.Lazy.force flush_batch_size_cached
 
 let get_or_create_ring name =
   match Hashtbl.find_opt rings name with

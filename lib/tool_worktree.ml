@@ -21,6 +21,11 @@ let handle_worktree_create ctx args =
   in
   let raw_task_id = get_string args "task_id" "" in
   let base_branch = get_string args "base_branch" "develop" in
+  let repo_name =
+    match String.trim (get_string args "repo_name" "") with
+    | "" -> None
+    | s -> Some s
+  in
   if raw_task_id = "" then
     (false, "task_id is required. Example: task_id='fix-login', task_id='add-auth'. \
              Use a-z, 0-9, hyphen, underscore only. No slashes.")
@@ -31,7 +36,7 @@ let handle_worktree_create ctx args =
     |> Seq.map (fun c -> if c = '/' || c = '\\' then '-' else c)
     |> String.of_seq
   in
-  match Room.worktree_create_r ctx.config ~agent_name ~task_id ~base_branch with
+  match Room.worktree_create_r ?repo_name ctx.config ~agent_name ~task_id ~base_branch with
   | Ok msg -> (true, msg)
   | Error e -> (false, Types.masc_error_to_string e)
 

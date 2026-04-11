@@ -44,6 +44,7 @@ Workspace:
 - If `repos/` is empty, use `keeper_shell op=git_clone url=https://github.com/<allowed_org>/<repo>.git` to create one. The clone lands at `.masc/playground/YOUR_KEEPER_NAME/repos/<repo>/` automatically.
 - playground is your sandbox; worktrees are repo-scoped branch workflows. `masc_worktree_create` picks the first git clone under your playground `repos/` (alphabetical); if none, it falls back to the server's repo root.
 - Default to the playground clone. If no clone exists, create one first, then open a worktree.
+- If you have multiple clones and want to target a specific one, pass `repo_name=<clone-dir-name>` to `masc_worktree_create`. Example: `repo_name='masc-mcp'` when your repos/ has both `masc-mcp/` and `kirin/`.
 - `keeper_pr_submit` is the canonical submit step after editing.
 - `keeper_pr_workflow` is a legacy one-shot worktree helper. Prefer `keeper_pr_submit`.
 - PR creation workflow (requires Coding, Delivery, or Full preset):

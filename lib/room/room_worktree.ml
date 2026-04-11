@@ -103,8 +103,13 @@ let link_worktree_to_task config ~task_id ~worktree_info =
         end
 
 (** Create worktree for agent - Result version
-    @param link_task If true, links worktree info to the task in backlog (default: true) *)
-let worktree_create_r ?(link_task=true) config ~agent_name ~task_id ~base_branch : string masc_result =
+    @param link_task If true, links worktree info to the task in backlog (default: true)
+    @param repo_name If set, target the keeper's playground clone at
+           [.masc/playground/<agent>/repos/<repo_name>/] directly. If
+           unset, scan [repos/] and use the first git clone found
+           (alphabetical). Either way, falls back to the server repo
+           root when no matching playground clone exists. *)
+let worktree_create_r ?(link_task=true) ?repo_name config ~agent_name ~task_id ~base_branch : string masc_result =
   if not (is_initialized config) then
     Error NotInitialized
   else if not (is_git_repo config) then
@@ -115,17 +120,29 @@ let worktree_create_r ?(link_task=true) config ~agent_name ~task_id ~base_branch
   | Ok _, Ok _ ->
     (* Prefer a keeper's playground clone under
        [.masc/playground/<agent>/repos/]. The layout is the SSOT in
-       [Playground_paths] (masc_config). Scan the directory for any
-       cloned git repo (first match wins, alphabetical) instead of
-       hardcoding a repo name — keepers may work on any repo their
-       [tool_policy.toml] allows. If no playground clone is present,
-       fall back to the configured repository root so explicit
-       repo-worktree flows still work instead of failing with a
-       missing-clone error. *)
+       [Playground_paths] (masc_config). If [repo_name] is supplied,
+       target that clone directly; otherwise scan the directory and
+       pick the first git clone (alphabetical). Keepers may work on
+       any repo their [tool_policy.toml] allows. If no matching
+       playground clone is present, fall back to the configured
+       repository root so explicit repo-worktree flows still work
+       instead of failing with a missing-clone error. *)
     let resolve_keeper_repo_root () =
       let repos_dir =
         Filename.concat config.base_path
           (Playground_paths.repos_path agent_name)
+      in
+      let is_git_clone candidate =
+        Sys.file_exists candidate
+        && Sys.is_directory candidate
+        && Sys.file_exists (Filename.concat candidate ".git")
+      in
+      let explicit_repo =
+        match repo_name with
+        | None | Some "" -> None
+        | Some name ->
+          let candidate = Filename.concat repos_dir name in
+          if is_git_clone candidate then Some candidate else None
       in
       let scan_first_git_repo dir =
         if not (Sys.file_exists dir && Sys.is_directory dir) then None
@@ -138,13 +155,17 @@ let worktree_create_r ?(link_task=true) config ~agent_name ~task_id ~base_branch
             if i >= Array.length entries then None
             else
               let candidate = Filename.concat dir entries.(i) in
-              if Sys.file_exists (Filename.concat candidate ".git")
+              if is_git_clone candidate
               then Some candidate
               else find (i + 1)
           in
           find 0
       in
-      match scan_first_git_repo repos_dir with
+      match
+        match explicit_repo with
+        | Some _ as r -> r
+        | None -> scan_first_git_repo repos_dir
+      with
       | Some clone -> Ok clone
       | None ->
         match require_repository_root_with_git config with

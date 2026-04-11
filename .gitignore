@@ -105,3 +105,5 @@ config/personas/uranium666
 /pr_list.txt
 /scripts/changelog_unreleased.txt
 /specs/bug-models/*_TTrace_*.bin
+
+# End of .gitignore

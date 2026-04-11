@@ -35,12 +35,23 @@ let handle_broadcast ((message, _format) : string * string)
     let mention = Mention.extract trimmed in
     Ok { delivered = true; room_message = trimmed; mention }
 
+(* Bridge OAS Sg.parse (field_error list) to Typed_tool_masc (string).
+   Upstream oas#810 changed schema_gen to return structured field errors;
+   Typed_tool_masc still carries string-result parsers, so collapse with
+   format_errors here.  Keeps error shape consistent with legacy parsers. *)
+let broadcast_parse json =
+  match Sg.parse broadcast_schema json with
+  | Ok v -> Ok v
+  | Error errs ->
+    Error (Agent_sdk.Tool_input_validation.format_errors
+             ~tool_name:"masc_broadcast_typed" errs)
+
 let tool = Typed_tool_masc.create
   ~name:"masc_broadcast_typed"
   ~description:"[Typed PoC] Send a message visible to ALL agents via SSE push."
   ~module_tag:Tool_dispatch.Mod_room
   ~params:(Sg.to_params broadcast_schema)
-  ~parse:(Sg.parse broadcast_schema)
+  ~parse:broadcast_parse
   ~handler:handle_broadcast
   ~encode:encode_broadcast
   ~requires_join:true

@@ -638,6 +638,14 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
          the default noop sink instead of the Prometheus-backed one. *)
       Llm_metric_bridge.install ();
       Log.Server.info "Llm_metric_bridge installed (masc_llm_provider_http_status_total)";
+      (* Forward Agent_sdk.Log records (per-turn timing from oas#816 and
+         any subsequent structured emits) into the masc-mcp log ring so
+         they land in ~/.masc/logs/system_log_*.jsonl alongside
+         masc-mcp's own records.  Without this, OAS's structured Log
+         global sink registry is empty and every Log.info inside
+         agent_sdk is a silent drop. *)
+      Oas_log_bridge.install ();
+      Log.Server.info "Oas_log_bridge installed (agent_sdk.Log -> masc structured log)";
       let state =
         create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
       in

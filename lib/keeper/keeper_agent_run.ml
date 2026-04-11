@@ -1401,8 +1401,8 @@ let run_turn
   in
   let reducer =
     Agent_sdk.Context_reducer.compose [
-      Agent_sdk.Context_reducer.Repair_dangling_tool_calls;
-      Agent_sdk.Context_reducer.Merge_contiguous;
+      Agent_sdk.Context_reducer.repair_dangling_tool_calls;
+      Agent_sdk.Context_reducer.merge_contiguous;
     ]
   in
   (* 8. Run Agent *)

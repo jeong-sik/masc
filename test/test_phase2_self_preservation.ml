@@ -273,15 +273,36 @@ let test_manual_reconcile_store_roundtrip () =
   with
   | KMR.Cleared_record cleared ->
       check bool "not pending after clear" false (KMR.is_pending config "k1");
-      check string "status cleared" "cleared"
+      (* delete-on-clear: the on-disk record is gone after a successful
+         clear so legacy readers can never mistake a Cleared file for a
+         blocker. The in-memory Cleared_record is the one-shot audit. *)
+      check string "record removed after clear" "missing"
         (match KMR.read config "k1" with
          | Some record -> (
              match record.status with
              | KMR.Cleared -> "cleared"
              | KMR.Pending -> "pending")
          | None -> "missing");
-      check string "resolution persisted" "verified downstream side effects"
-        (Option.value ~default:"" cleared.resolution)
+      check string "resolution carried in return value"
+        "verified downstream side effects"
+        (Option.value ~default:"" cleared.resolution);
+      check string "cleared_by carried in return value" "tester"
+        (Option.value ~default:"" cleared.cleared_by);
+      (* Idempotent retry: on delete-on-clear, a second clear with the
+         same idempotency key returns No_record because the file is gone.
+         This is a deliberate semantic change — callers that previously
+         relied on the Already_cleared signal must treat No_record as
+         "already handled". *)
+      (match KMR.clear config ~keeper_name:"k1" ~actor:"tester"
+               ~resolution:"retry"
+               ~evidence_refs:[]
+               ~idempotency_key:(Some "idem-1")
+       with
+       | KMR.No_record -> ()
+       | KMR.Cleared_record _ ->
+           fail "retry should not reopen a cleared record"
+       | KMR.Already_cleared _ ->
+           fail "retry cannot observe Already_cleared after delete-on-clear")
   | KMR.Already_cleared _ -> fail "expected first clear to mutate"
   | KMR.No_record -> fail "expected persisted record"
 

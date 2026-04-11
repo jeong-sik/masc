@@ -83,6 +83,11 @@ is_absolute_path() {
 # so both see the same effective base path.
 resolve_base_path() {
     local path="$1"
+    local abs_path=""
+
+    if [ -d "$path" ]; then
+        abs_path="$(cd "$path" && pwd -P)"
+    fi
 
     if [ -f "$path/.git" ]; then
         local gitdir
@@ -102,7 +107,7 @@ resolve_base_path() {
     fi
 
     if [ -d "$path/.git" ]; then
-        echo "$path"
+        echo "${abs_path:-$path}"
         return
     fi
 
@@ -110,12 +115,12 @@ resolve_base_path() {
         local git_root
         git_root="$(git -C "$path" rev-parse --show-toplevel 2>/dev/null || true)"
         if [ -n "$git_root" ]; then
-            echo "$git_root"
+            echo "$(cd "$git_root" && pwd -P)"
             return
         fi
     fi
 
-    echo "$path"
+    echo "${abs_path:-$path}"
 }
 
 build_dashboard_spa() {

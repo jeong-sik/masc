@@ -9,6 +9,25 @@ include module type of Room_state
 
 (** {1 Task activity helpers} *)
 
+val update_local_agent_state :
+  config -> agent_name:string -> (Types.agent -> Types.agent) -> unit
+(** Update the on-disk agent state record under its own
+    [with_file_lock] on the agent file.  The callback receives the
+    current agent record and returns the updated one; the helper
+    silently skips writes when the agent file is missing (matching
+    the pre-existing best-effort mirror semantics) and logs JSON
+    parse failures with the agent name for diagnostic context.
+
+    Callers that hold an outer lock on a different file (e.g. the
+    backlog in [Room_task_schedule.claim_next_r]) must nest this
+    call inside the outer lock; lock acquisition order is always
+    {b outer path → agent file} across every call site to keep the
+    graph acyclic.
+
+    @since PR #6634 — previously inline at six sites in [Room_task]
+    task transitions; exposed here so [Room_task_schedule] can reuse
+    the same discipline for its own agent-state writes. *)
+
 val emit_task_activity :
   config -> agent_name:string -> task_id:string ->
   kind:string -> payload:Yojson.Safe.t -> unit

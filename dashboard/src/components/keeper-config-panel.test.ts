@@ -142,7 +142,7 @@ describe('KeeperConfigPanel', () => {
 
     expect(mocks.fetchKeeperConfig).toHaveBeenCalledTimes(1)
     expect(container.textContent).toContain('편집 가능 범위')
-    expect(container.textContent).toContain('config/cascade.json')
+    expect(container.textContent).toContain('resolved config root의 cascade.json')
     expect(container.textContent).toContain('런타임 설정')
     expect(container.textContent).toContain('/tmp/.masc/keepers/keeper-sangsu/live.json')
     expect(container.textContent).toContain('활성 모델')

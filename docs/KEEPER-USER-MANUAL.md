@@ -294,7 +294,7 @@ Memory compaction 시 어떤 정보를 우선 보존할지는 통합 정책(`kee
 
 ### 4.3 모델 해석
 
-Keeper 모델 선택은 profile.json 인자가 아니라 `cascade_name`으로 결정된다. 기본 keeper는 `keeper_unified` cascade를 사용하고, 실제 모델 목록은 `config/cascade.json`에서 해석된다.
+Keeper 모델 선택은 profile.json 인자가 아니라 `cascade_name`으로 결정된다. 기본 keeper는 `keeper_unified` cascade를 사용하고, 실제 모델 목록은 저장소의 고정 경로 `config/cascade.json`이 아니라 resolved config root 기준의 `<resolved-config-root>/cascade.json`에서 해석된다.
 
 ### 4.4 작성 예시
 
@@ -378,7 +378,7 @@ masc_keeper_create_from_persona(persona_name: "sangsu")
 flowchart TD
     A[last_model_used 확인] -->|있으면| Z[Active Model 결정]
     A -->|없으면| B[cascade_name 해석]
-    B --> C[config/cascade.json 첫 모델]
+    B --> C[resolved config root/cascade.json 첫 모델]
     C --> Z
 
     style Z fill:#e8f5e9
@@ -388,7 +388,7 @@ flowchart TD
 
 Next Model Hint는 handoff 시 successor에게 추천할 모델이다.
 
-1. `config/cascade.json`에서 `cascade_name`의 모델 목록을 읽는다
+1. resolved config root의 `cascade.json`에서 `cascade_name`의 모델 목록을 읽는다
 2. 현재 `active_model`과 다른 첫 번째 모델을 고른다
 3. 다른 모델이 없으면 현재 모델을 반환한다
 4. cascade가 비어 있으면 `None`
@@ -411,7 +411,7 @@ Next Model Hint는 handoff 시 successor에게 추천할 모델이다.
 
 - keeper는 per-call `models` override나 persisted `active_model` pinning을 지원하지 않는다
 - handoff 시 cross-model 정규화가 자동 적용된다: Llama는 Tool 메시지 변환, Claude는 alternating 규칙 적용
-- cascade fallback은 `config/cascade.json`의 해당 cascade 순서대로 시도한다
+- cascade fallback은 resolved config root의 `cascade.json`에 있는 해당 cascade 순서대로 시도한다
 
 ---
 
@@ -571,7 +571,7 @@ flowchart TD
 |------|----------|
 | 의도한 모델이 사용 안 됨 | `active_model` vs `last_model_used` 비교 |
 | cascade가 fallback으로 넘어감 | MODEL provider 연결 상태 확인 (API key, 서버 상태 등) |
-| `active_model`이 빈 문자열 | `config/cascade.json`의 `keeper_unified` 설정 확인 |
+| `active_model`이 빈 문자열 | resolved config root의 `cascade.json`에서 `keeper_unified` 설정 확인 |
 
 **Cascade 디버깅**:
 ```
@@ -609,7 +609,7 @@ Keeper 설정은 아래 소스에서 공급된다. 상세 우선순위는 `docs/
 
 별도 keepalive 등록 레지스트리는 없다. keeper의 선언과 런타임 상태는 `.masc/keepers/<name>.json`에 함께 저장되고, keeper는 durable always-on으로 취급된다. 멈춤은 설정값이 아니라 `paused` 또는 `keeper_down` 상태 전이로 표현한다.
 
-repo-managed config root는 `MASC_CONFIG_DIR`가 있으면 그 디렉토리를 우선 사용하고, 없으면 `<MASC_BASE_PATH>/.masc/config`를 먼저 초기화/사용한다. 그 다음 `~/.masc/config`, 마지막으로 repo `config/` fallback chain을 사용한다. `MASC_PERSONAS_DIR`는 persona만 별도 override한다. 즉 웹/대시보드는 파일을 직접 읽지 않고, 서버가 해석한 config root와 persona root를 사용한다.
+resolved config root는 `MASC_CONFIG_DIR`가 있으면 그 디렉토리를 우선 사용하고, 없으면 `<MASC_BASE_PATH>/.masc/config`를 먼저 초기화/사용한다. 그 다음 `~/.masc/config`, 마지막으로 repo `config/` fallback chain을 사용한다. repo `config/`는 체크인된 default/example source이며, 웹/대시보드는 파일을 직접 읽지 않고 서버가 해석한 config root와 persona root를 사용한다.
 
 ### 8.2 Template 변경 반영
 
@@ -630,11 +630,11 @@ dir-local 실행에서 shared keeper 상태가 보이지 않는 것은 정상이
 
 해결: dir-local 개발은 `scripts/run-local.sh --target-dir <dir>`를 사용하고, shared `.masc/`를 봐야 할 때만 `./start-masc-mcp.sh --http` 또는 explicit `--base-path`를 사용한다.
 
-이 값은 `.masc/` data root를 결정하고, explicit `MASC_CONFIG_DIR`가 없을 때는 `<MASC_BASE_PATH>/.masc/config`를 repo-managed config의 첫 fallback으로도 사용한다.
+이 값은 `.masc/` data root를 결정하고, explicit `MASC_CONFIG_DIR`가 없을 때는 `<MASC_BASE_PATH>/.masc/config`를 resolved config root의 첫 후보로도 사용한다.
 
 ### 8.4 모델 실행
 
-모델 선택은 `config/cascade.json`이 유일한 권위다. Keeper 설정에 모델 필드를 직접 지정하지 않는다. `cascade_name` (기본 `"keeper_unified"`)이 cascade를 지정하고 `Oas_model_resolve`가 실행 모델을 결정한다.
+모델 선택은 resolved config root의 `cascade.json`이 유일한 권위다. Keeper 설정에 모델 필드를 직접 지정하지 않는다. `cascade_name` (기본 `"keeper_unified"`)이 cascade를 지정하고 `Oas_model_resolve`가 실행 모델을 결정한다.
 
 ---
 

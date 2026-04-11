@@ -229,4 +229,24 @@ describe('ConfigResolutionPanel', () => {
     expect(container.textContent).toContain('home config')
     expect(container.textContent).toContain('/home/test/.masc/config')
   })
+
+  it('renders local .masc source label', () => {
+    render(
+      html`<${ConfigResolutionPanel}
+        resolution=${{
+          status: 'ready',
+          warnings: [],
+          config_root: { path: '/tmp/project/.masc/config', exists: true, source: 'local_masc' },
+          cascade: { path: '/tmp/project/.masc/config/cascade.json', exists: true, source: 'local_masc' },
+          prompts: { path: '/tmp/project/.masc/config/prompts', exists: true, source: 'local_masc' },
+          keepers: { path: '/tmp/project/.masc/config/keepers', exists: true, source: 'local_masc' },
+          personas: { path: '/tmp/project/.masc/config/personas', exists: true, source: 'local_masc' },
+        }}
+      />`,
+      container,
+    )
+
+    expect(container.textContent).toContain('local .masc')
+    expect(container.textContent).toContain('/tmp/project/.masc/config')
+  })
 })

@@ -132,20 +132,44 @@ let worktree_create_r ?(link_task=true) ?repo_name config ~agent_name ~task_id ~
         Filename.concat config.base_path
           (Playground_paths.repos_path agent_name)
       in
+      (* [Sys.is_directory] raises [Sys_error] on permission errors or
+         if the path disappears between [file_exists] and [is_directory]
+         (TOCTOU). Swallow those errors and treat the candidate as
+         "not a clone" so a broken entry under [repos/] never crashes
+         the worktree resolver. *)
+      let safe_is_dir path =
+        try Sys.file_exists path && Sys.is_directory path
+        with Sys_error _ -> false
+      in
       let is_git_clone candidate =
-        Sys.file_exists candidate
-        && Sys.is_directory candidate
-        && Sys.file_exists (Filename.concat candidate ".git")
+        safe_is_dir candidate
+        && (try Sys.file_exists (Filename.concat candidate ".git")
+            with Sys_error _ -> false)
+      in
+      (* Reject repo_name values that aren't a single safe path
+         component. This prevents "../kirin" or "foo/bar" from escaping
+         the repos/ directory via [Filename.concat]. Keeper names are
+         already sanitized by [Playground_paths], but [repo_name] comes
+         straight from MCP tool args and needs its own gate. *)
+      let safe_repo_name name =
+        name <> "" && name <> "." && name <> ".."
+        && not (String.contains name '/')
+        && not (String.contains name '\\')
+        && not (String.contains name '\x00')
+        && String.for_all (fun c ->
+          (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
+          || (c >= '0' && c <= '9') || c = '-' || c = '_' || c = '.') name
       in
       let explicit_repo =
         match repo_name with
         | None | Some "" -> None
+        | Some name when not (safe_repo_name name) -> None
         | Some name ->
           let candidate = Filename.concat repos_dir name in
           if is_git_clone candidate then Some candidate else None
       in
       let scan_first_git_repo dir =
-        if not (Sys.file_exists dir && Sys.is_directory dir) then None
+        if not (safe_is_dir dir) then None
         else
           let entries =
             try Sys.readdir dir with Sys_error _ -> [||]

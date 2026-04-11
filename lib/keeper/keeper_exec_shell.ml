@@ -184,14 +184,28 @@ let docker_playground_cwd ~(config : Room.config) ~(meta : keeper_meta) host_cwd
   let container_root =
     Env_config_keeper.DockerPlayground.container_playground_root
   in
-  if String.starts_with ~prefix:playground_prefix host_cwd then
-    let suffix =
-      String.sub host_cwd (String.length playground_prefix)
-        (String.length host_cwd - String.length playground_prefix)
-    in
-    container_root ^ suffix
+  (* Boundary-safe prefix match: require either an exact match or a
+     prefix ending at a path separator. Without this, host paths like
+     "<root>/.masc/playgroundXYZ/..." would match "<root>/.masc/playground"
+     and leak into the container playground. *)
+  let prefix_with_sep = playground_prefix ^ "/" in
+  let starts_at_boundary =
+    host_cwd = playground_prefix
+    || String.starts_with ~prefix:prefix_with_sep host_cwd
+  in
+  if starts_at_boundary then
+    if host_cwd = playground_prefix then container_root
+    else
+      let suffix =
+        String.sub host_cwd (String.length prefix_with_sep)
+          (String.length host_cwd - String.length prefix_with_sep)
+      in
+      Filename.concat container_root suffix
   else
-    Filename.concat container_root meta.name
+    (* meta.name is sanitized through Playground_paths so a poisoned
+       name cannot escape the container_root. *)
+    Filename.concat container_root
+      (Playground_paths.sanitize_keeper_name meta.name)
 
 (* Common wrong path prefixes that keepers use.
    Maps wrong prefix → corrected relative path using the keeper

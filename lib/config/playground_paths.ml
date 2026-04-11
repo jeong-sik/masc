@@ -17,12 +17,25 @@
 let all_playgrounds_prefix : string = ".masc/playground"
 
 (** Sanitize a keeper name into a filesystem-safe component. Allows
-    [A-Za-z0-9._-] and replaces everything else with [_]. *)
+    [A-Za-z0-9._-] and replaces everything else with [_]. An empty
+    input or the special path components [.] / [..] are replaced with
+    [_], so [sanitize_keeper_name ".."] returns ["__"] rather than
+    returning a traversal segment as a directory name. *)
 let sanitize_keeper_name (name : string) : string =
-  String.map (fun c ->
-    if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
-       || (c >= '0' && c <= '9') || c = '-' || c = '_' || c = '.'
-    then c else '_') name
+  let mapped =
+    String.map (fun c ->
+      if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
+         || (c >= '0' && c <= '9') || c = '-' || c = '_' || c = '.'
+      then c else '_') name
+  in
+  (* Reject empty, "." and ".." explicitly — these are filesystem
+     special directory references, not real keeper names, and would
+     let a poisoned [meta.name] escape the playground bundle. *)
+  match mapped with
+  | "" -> "_"
+  | "." -> "_"
+  | ".." -> "__"
+  | _ -> mapped
 
 (** Relative path [".masc/playground/<safe_name>/"] (trailing slash). *)
 let bundle_root (name : string) : string =

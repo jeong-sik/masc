@@ -18,8 +18,14 @@ let test_sanitize_replaces_unsafe_chars () =
   check string "slash becomes underscore"
     "a_b"
     (PP.sanitize_keeper_name "a/b");
-  check string "dot-dot becomes dots (still safe chars)"
-    ".."
+  check string "empty string becomes single underscore"
+    "_"
+    (PP.sanitize_keeper_name "");
+  check string "single dot is replaced with underscore"
+    "_"
+    (PP.sanitize_keeper_name ".");
+  check string "dot-dot is replaced with double underscore (no traversal)"
+    "__"
     (PP.sanitize_keeper_name "..");
   check string "path traversal with slash is neutralized"
     ".._.._etc_passwd"
@@ -64,10 +70,23 @@ let test_no_path_escape () =
     (String.length bundle >= String.length PP.all_playgrounds_prefix
      && String.sub bundle 0 (String.length PP.all_playgrounds_prefix)
         = PP.all_playgrounds_prefix);
-  check bool "no '..' remains as a path component"
+  (* After sanitization, every non-safe char becomes '_'. "../../../etc"
+     → ".._.._.._etc" which contains no "/" path separators at all, so
+     the canonical "/<..>/" traversal segment cannot appear. *)
+  check bool "no '/../' path segment remains in bundle"
     false
     (let re = Re.Pcre.re {|/\.\./|} |> Re.compile in
-     Re.execp re bundle)
+     Re.execp re bundle);
+  (* And neither ".." nor "." can appear as a whole directory component. *)
+  check string "dot-dot as whole name is neutralized"
+    ".masc/playground/__/"
+    (PP.bundle_root "..");
+  check string "single dot as whole name is neutralized"
+    ".masc/playground/_/"
+    (PP.bundle_root ".");
+  check string "empty name is neutralized"
+    ".masc/playground/_/"
+    (PP.bundle_root "")
 
 let () =
   run "Playground_paths"

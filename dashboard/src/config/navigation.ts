@@ -208,7 +208,7 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     {
       id: 'harness',
       label: '세이프티 하네스',
-      description: 'Evaluator, compaction, DNA safety rail 감시 상태.',
+      description: '평가 모델, 압축 전 상태, 세대 교체 rail 감시 상태.',
       params: { section: 'harness' },
     },
     {

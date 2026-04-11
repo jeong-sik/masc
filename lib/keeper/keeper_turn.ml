@@ -187,7 +187,12 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
              | Some v ->
                  Log.Keeper.debug "%s: using max_context_override=%d (manual turn)" meta.name v;
                  v
-             | None -> Oas_model_resolve.resolve_max_cascade_context effective_models
+             | None ->
+                 let resolved =
+                   Oas_model_resolve.resolve_max_cascade_context effective_models
+                 in
+                 Oas_model_resolve.clamp_context_for_pure_local_labels
+                   ~labels:effective_models ~max_context:resolved
            in
            if raw < min_keeper_context then begin
              Log.Keeper.warn "%s: resolved max_context=%d below minimum %d, clamped"

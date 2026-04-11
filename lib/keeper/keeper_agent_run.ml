@@ -279,6 +279,7 @@ let run_turn
       ?guardrails
       ?temperature
       ?max_tokens
+      ?oas_timeout_s
       ?max_cost_usd
       ?on_event
       ?(trajectory_acc : Trajectory.accumulator option)
@@ -1430,7 +1431,12 @@ let run_turn
   with
   | Error e -> Error (Oas.Error.Internal e)
   | Ok oas_allowed_paths ->
-    let timeout_s = Env_config_keeper.KeeperKeepalive.oas_timeout_for_context ~max_context in
+    let timeout_s =
+      match oas_timeout_s with
+      | Some value -> value
+      | None ->
+          Env_config_keeper.KeeperKeepalive.oas_timeout_for_context ~max_context
+    in
     (match
        Keeper_llm_bridge.run_with_timeout_and_fallback ~timeout_s (fun () ->
          Oas_worker.run_named

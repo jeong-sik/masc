@@ -139,6 +139,22 @@ let resolve_max_cascade_context (labels : string list) : int =
   | [] -> 128_000
   | ctxs -> List.fold_left max 0 ctxs
 
+let labels_are_pure_local (labels : string list) : bool =
+  labels <> []
+  &&
+  List.for_all
+    (fun label ->
+       match provider_name_of_label label with
+       | Some pname -> Provider_adapter.is_local_provider pname
+       | None -> false)
+    labels
+
+let clamp_context_for_pure_local_labels ~(labels : string list) ~(max_context : int)
+    : int =
+  if labels_are_pure_local labels
+  then min max_context Env_config.ContextCompact.small_local_floor
+  else max_context
+
 (** Resolve model_id for the first available model in a label list.
     Returns the model_id portion of "provider:model_id".
     Falls back to empty string if no model is available. *)

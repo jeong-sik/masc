@@ -131,6 +131,7 @@ val run_turn :
   -> ?guardrails:Agent_sdk.Guardrails.t
   -> ?temperature:float
   -> ?max_tokens:int
+  -> ?oas_timeout_s:float
   -> ?max_cost_usd:float
   -> ?on_event:(Oas.Types.sse_event -> unit)
   -> ?trajectory_acc:Trajectory.accumulator

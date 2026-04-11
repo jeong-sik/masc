@@ -29,6 +29,22 @@ let playground_bundle name =
    New worktrees land inside the keeper's own
    `.masc/playground/<keeper>/repos/<clone>/.worktrees/...` and are
    already covered by the playground bundle paths above. *)
+let with_temp_dir prefix f =
+  let path = Filename.temp_file prefix "" in
+  Sys.remove path;
+  Unix.mkdir path 0o755;
+  Fun.protect ~finally:(fun () ->
+    let rec rm dir =
+      if Sys.file_exists dir then
+        if Sys.is_directory dir then begin
+          Sys.readdir dir
+          |> Array.iter (fun name -> rm (Filename.concat dir name));
+          Unix.rmdir dir
+        end else
+          Sys.remove dir
+    in
+    rm path
+  ) (fun () -> f path)
 let workspace_defaults name =
   [ Printf.sprintf ".masc/keepers/%s/" name;
     ".masc/traces/";
@@ -157,19 +173,7 @@ let test_ensure_playground_bundle_creates_subdirs () =
     ) created)
 
 let with_temp_config f =
-  let dir = Filename.concat (Filename.get_temp_dir_name ())
-      (Printf.sprintf "keeper_default_root_%d" (Random.bits ())) in
-  Unix.mkdir dir 0o755;
-  Fun.protect ~finally:(fun () ->
-    let rec rm path =
-      if Sys.file_exists path then
-        if Sys.is_directory path then begin
-          Sys.readdir path |> Array.iter (fun name -> rm (Filename.concat path name));
-          Unix.rmdir path
-        end else Sys.remove path
-    in
-    rm dir
-  ) (fun () ->
+  with_temp_dir "keeper_default_root_" (fun dir ->
     Eio_main.run @@ fun env ->
     Fs_compat.set_fs (Eio.Stdenv.fs env);
     f (Masc_mcp.Room.default_config dir))

@@ -113,7 +113,20 @@ let handle_keeper_status ctx args : tool_result =
         get_bool args "include_compaction_history" (not fast)
       in
       let models = Oas_model_resolve.models_of_cascade_name m.cascade_name in
-      let primary_max_context = Oas_model_resolve.resolve_max_cascade_context models in
+      let primary_max_context =
+        let min_keeper_context = Keeper_config.min_keeper_context_tokens in
+        let raw =
+          match m.max_context_override with
+          | Some value -> value
+          | None ->
+              let resolved =
+                Oas_model_resolve.resolve_max_cascade_context models
+              in
+              Oas_model_resolve.clamp_context_for_pure_local_labels
+                ~labels:models ~max_context:resolved
+        in
+        max min_keeper_context raw
+      in
       let base_dir = session_base_dir ctx.config in
          let ctx_opt =
            if include_context then
@@ -696,10 +709,7 @@ let handle_keeper_status ctx args : tool_result =
            let playground_abs = Filename.concat ctx.config.base_path playground_rel in
            "execution_context", `Assoc [
              ("playground_path", `String playground_rel);
-             ("default_cwd",
-               `String
-                 (Keeper_exec_shared.keeper_default_write_root
-                    ~config:ctx.config ~meta:m));
+             ("default_cwd", `String playground_abs);
              ("execution_scope", `String m.execution_scope);
              ("allowed_paths", string_list_to_json m.allowed_paths);
              ("playground_repos",

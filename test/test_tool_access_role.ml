@@ -204,6 +204,8 @@ let test_permissions_promoted_to_metadata_ssot () =
       ("masc_tool_list", Types.CanReadState);
       ("masc_runtime_verify", Types.CanReadState);
       ("masc_persona_list", Types.CanReadState);
+      ("masc_keeper_reconcile", Types.CanBroadcast);
+      ("masc_keeper_reset", Types.CanBroadcast);
       ("masc_join", Types.CanJoin);
       ("masc_broadcast", Types.CanBroadcast);
       ("masc_verify_request", Types.CanReadState);

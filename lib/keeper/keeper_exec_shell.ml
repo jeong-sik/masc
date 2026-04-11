@@ -192,9 +192,19 @@ let docker_playground_cwd ~(config : Room.config) ~(meta : keeper_meta) host_cwd
     Filename.concat container_root meta.name
 
 (* Common wrong path prefixes that keepers use.
-   Maps wrong prefix → corrected relative path using keeper playground. *)
+   Maps wrong prefix → corrected relative path using the keeper
+   playground SSOT ([Playground_paths]). The keeper name is sanitized
+   here so a poisoned meta.name cannot escape the playground. *)
 let auto_correct_path ~(meta : keeper_meta) (raw : string) : string option =
-  let playground = Printf.sprintf ".masc/playground/%s" meta.name in
+  (* bundle_root yields ".masc/playground/<safe>/" — strip the trailing
+     slash so we can append "/repos/..." cleanly. *)
+  let playground_bundle = Playground_paths.bundle_root meta.name in
+  let playground =
+    if String.length playground_bundle > 0
+       && playground_bundle.[String.length playground_bundle - 1] = '/'
+    then String.sub playground_bundle 0 (String.length playground_bundle - 1)
+    else playground_bundle
+  in
   let try_strip prefix replacement =
     let plen = String.length prefix in
     if String.length raw >= plen
@@ -202,7 +212,7 @@ let auto_correct_path ~(meta : keeper_meta) (raw : string) : string option =
     then Some (replacement ^ String.sub raw plen (String.length raw - plen))
     else None
   in
-  (* /repos/X → .masc/playground/<name>/repos/X *)
+  (* /repos/X → .masc/playground/<safe-name>/repos/X *)
   match try_strip "/repos/" (playground ^ "/repos/") with
   | Some _ as r -> r
   | None ->

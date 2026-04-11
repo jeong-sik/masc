@@ -4,7 +4,7 @@ import { useEffect } from 'preact/hooks'
 import { fetchToolQuality, type ToolQualityResponse } from '../api/dashboard'
 import { TELEMETRY_AUTO_REFRESH_MS } from '../config/constants'
 import { formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../lib/auto-refresh'
-import { LoadingState } from './common/feedback-state'
+import { ErrorState, LoadingState } from './common/feedback-state'
 import { isAbortError } from '../lib/async-state'
 
 interface ToolStat {
@@ -277,7 +277,7 @@ export function ToolQualityPanel() {
 
   const d = data.value
   if (loading.value && !d) return html`<${LoadingState}>도구 품질 불러오는 중...<//>`
-  if (error.value) return html`<div class="p-4 text-[11px] text-red-400">오류: ${error.value}</div>`
+  if (error.value) return html`<${ErrorState} message=${error.value} class="m-4" />`
   if (!d || d.total === 0) return html`<div class="p-4 text-[11px] text-[var(--text-dim)]">도구 호출 데이터 없음</div>`
 
   return html`

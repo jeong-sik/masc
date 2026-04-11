@@ -4,7 +4,7 @@
 import { html } from 'htm/preact'
 import { useState } from 'preact/hooks'
 import { EmptyState } from '../common/empty-state'
-import { LoadingState } from '../common/feedback-state'
+import { ErrorState, LoadingState } from '../common/feedback-state'
 import { TimeAgo } from '../common/time-ago'
 import { JsonViewerCard, parseJsonLikeData } from '../common/json-viewer'
 import { Settings, MessageSquare, CheckSquare, Heart, RefreshCcw, Dot, ChevronRight } from 'lucide-preact'
@@ -82,7 +82,7 @@ function ActivityEntry({ event }: { event: UnifiedTraceEvent }) {
               <${JsonViewerCard} data=${parseJsonLikeData(event.toolResult)} title="Result" />
             </div>
           ` : null}
-          ${event.error ? html`<div class="text-[11px] text-bad mt-1">${event.error}</div>` : null}
+          ${event.error ? html`<div class="text-[11px] text-[var(--bad-light)] mt-1">${event.error}</div>` : null}
           ${event.cost_usd != null ? html`<div class="text-[10px] text-text-dim mt-1">cost: $${event.cost_usd.toFixed(4)}</div>` : null}
         </div>
       ` : null}
@@ -102,7 +102,7 @@ export function TaskActivityList({
   showToolCalls: boolean
 }) {
   if (loading) return html`<${LoadingState}>활동 불러오는 중...<//>`
-  if (error) return html`<div class="text-[12px] text-bad py-2">${error}</div>`
+  if (error) return html`<${ErrorState} message=${error} />`
   if (events.length === 0) return html`<${EmptyState} message="담당자의 최근 활동이 없습니다" compact />`
 
   const filter = activeFilter.value

@@ -1,5 +1,6 @@
 // Tool Metrics — P4 Phase 4.5
 import { ActionButton } from './common/button'
+import { ErrorState } from './common/feedback-state'
 // Displays tool usage statistics from Tool_unified.summary_report()
 
 import { html } from 'htm/preact'
@@ -103,7 +104,7 @@ export function ToolMetrics() {
         <//>
       </div>
 
-      ${error ? html`<div class="px-2.5 py-3 bg-[var(--bad-12)] border border-[rgba(239,68,68,0.34)] text-[#fecaca] text-base rounded-lg">${error}</div>` : null}
+      ${error ? html`<${ErrorState} message=${error} />` : null}
 
       ${data ? html`
         <div class="text-[11px] text-[var(--text-muted)] mb-3">

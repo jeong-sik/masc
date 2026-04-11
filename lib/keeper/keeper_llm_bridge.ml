@@ -41,11 +41,12 @@ let run_with_timeout_and_fallback ~timeout_s fn =
        Cancelled means a parent fiber (server shutdown, global stop) requested
        cancellation — NOT a timeout. Re-raise so the keeper exits immediately
        instead of entering the retry loop. *)
+    let bt = Printexc.get_raw_backtrace () in
     let wall = elapsed () in
     Log.Keeper.warn
       "keeper_llm_bridge: OAS execution cancelled after %.1fs (re-raising; OAS context rollback only; external tool side effects are not reverted)"
       wall;
-    raise exn
+    Printexc.raise_with_backtrace exn bt
   | exn ->
     (* TLA+: HandleError -> Rollback context *)
     let bt = Printexc.get_backtrace () in

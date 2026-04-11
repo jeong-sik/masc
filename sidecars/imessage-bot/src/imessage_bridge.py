@@ -104,6 +104,17 @@ class InboundMessage:
         return self.chat_identifier or self.sender
 
 
+def redact_chat_guid(raw: str) -> str:
+    """Redact the PII-bearing tail of a Messages chat guid for logs/UI."""
+    value = raw.strip()
+    if value == "":
+        return ""
+    parts = value.split(";")
+    if len(parts) <= 1:
+        return "[redacted]"
+    return ";".join(parts[:-1] + ["[redacted]"])
+
+
 def _apple_date_to_datetime(apple_ns: int) -> datetime:
     """Convert Apple Core Data timestamp (nanoseconds since 2001-01-01) to datetime."""
     seconds = apple_ns / 1_000_000_000
@@ -281,7 +292,7 @@ def send_message(*, text: str, chat_guid: str) -> bool:
             return False
         return True
     except subprocess.TimeoutExpired:
-        logger.error("AppleScript send timed out for chat %s", chat_guid)
+        logger.error("AppleScript send timed out for chat %s", redact_chat_guid(chat_guid))
         return False
     except Exception as e:
         logger.error("AppleScript send error: %s", e)

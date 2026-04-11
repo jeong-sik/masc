@@ -18,9 +18,9 @@ class BotConfigTests(unittest.TestCase):
             BotConfig(reply_mode="everyone")
 
     def test_self_chat_guid_is_trimmed(self) -> None:
-        cfg = BotConfig(self_chat_guid=" any;-;forsyphilis@gmail.com  ")
+        cfg = BotConfig(self_chat_guid=" any;-;user@example.com  ")
 
-        self.assertEqual(cfg.self_chat_guid, "any;-;forsyphilis@gmail.com")
+        self.assertEqual(cfg.self_chat_guid, "any;-;user@example.com")
 
     def test_self_chat_guid_whitespace_normalizes_to_empty_string(self) -> None:
         cfg = BotConfig(self_chat_guid="   ")

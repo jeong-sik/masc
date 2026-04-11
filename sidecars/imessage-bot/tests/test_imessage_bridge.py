@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from src.imessage_bridge import resolve_self_chat_guid, send_message
+from src.imessage_bridge import redact_chat_guid, resolve_self_chat_guid, send_message
 
 
 class SendMessageTests(unittest.TestCase):
@@ -34,7 +34,7 @@ class SendMessageTests(unittest.TestCase):
                     "INSERT INTO chat VALUES (1, 'self-phone-guid', '+821029399460', 'P:+821029399460', 'iMessage')"
                 )
                 conn.execute(
-                    "INSERT INTO chat VALUES (2, 'self-email-guid', 'forsyphilis@gmail.com', 'E:forsyphilis@gmail.com', 'iMessage')"
+                    "INSERT INTO chat VALUES (2, 'self-email-guid', 'user@example.com', 'E:user@example.com', 'iMessage')"
                 )
                 conn.execute("INSERT INTO message VALUES (1, 100)")
                 conn.execute("INSERT INTO message VALUES (2, 200)")
@@ -73,3 +73,9 @@ class SendMessageTests(unittest.TestCase):
 
         self.assertFalse(ok)
         run_mock.assert_not_called()
+
+    def test_redact_chat_guid_redacts_tail(self) -> None:
+        self.assertEqual(
+            redact_chat_guid("any;-;user@example.com"),
+            "any;-;[redacted]",
+        )

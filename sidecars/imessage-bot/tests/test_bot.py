@@ -117,7 +117,7 @@ class IMessageBotTests(unittest.IsolatedAsyncioTestCase):
         ok = await bot._handle_message(msg)
 
         self.assertTrue(ok)
-        self.assertEqual(resolve_self_chat_guid_mock.call_count, 2)
+        self.assertEqual(resolve_self_chat_guid_mock.call_count, 1)
         send_message_mock.assert_not_called()
         self.assertEqual(bot._messages_processed, 1)
         self.assertEqual(bot._messages_failed, 1)
@@ -167,6 +167,54 @@ class IMessageBotTests(unittest.IsolatedAsyncioTestCase):
         send_message_mock.assert_not_called()
         self.assertEqual(bot._messages_processed, 1)
         self.assertEqual(bot._messages_failed, 1)
+
+    @patch("src.bot.send_message", return_value=True)
+    @patch("src.bot.resolve_self_chat_guid", return_value="")
+    @patch("src.bot.GateClient")
+    @patch("src.bot.get_config")
+    async def test_handle_message_throttles_self_chat_guid_retries_after_failure(
+        self,
+        get_config_mock,
+        gate_client_cls,
+        resolve_self_chat_guid_mock,
+        send_message_mock,
+    ) -> None:
+        get_config_mock.return_value = self._config()
+        gate_client = gate_client_cls.return_value
+        gate_client.send_message = AsyncMock(
+            return_value=GateResponse(
+                ok=True,
+                keeper_name=DEFAULT_KEEPER,
+                reply="reply text",
+                model_used="test-model",
+                duration_ms=42,
+                tokens_used=12,
+                error="",
+                structured=None,
+            )
+        )
+
+        bot = IMessageBot()
+        msg = InboundMessage(
+            rowid=11,
+            text="hello",
+            date=datetime.now(tz=timezone.utc),
+            service="iMessage",
+            sender="+15550003333",
+            chat_guid="source-guid",
+            chat_identifier="chat901",
+            display_name="Test",
+        )
+
+        first_ok = await bot._handle_message(msg)
+        second_ok = await bot._handle_message(msg)
+
+        self.assertTrue(first_ok)
+        self.assertTrue(second_ok)
+        self.assertEqual(resolve_self_chat_guid_mock.call_count, 1)
+        send_message_mock.assert_not_called()
+        self.assertEqual(bot._messages_processed, 2)
+        self.assertEqual(bot._messages_failed, 2)
 
     @patch("src.bot.send_message", return_value=True)
     @patch("src.bot.resolve_self_chat_guid", return_value="")

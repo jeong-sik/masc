@@ -56,7 +56,7 @@ let sample_status_json =
       ("gate_healthy", `Bool true);
       ("gate_health_checked_at", `String "2026-04-11T00:00:00Z");
       ("reply_mode", `String "self-chat");
-      ("self_chat_guid", `String "any;-;forsyphilis@gmail.com");
+      ("self_chat_guid", `String "any;-;user@example.com");
       ("last_message_at", `String "2026-04-11T00:00:00Z");
       ("messages_processed", `Int 3);
       ("messages_failed", `Int 1);

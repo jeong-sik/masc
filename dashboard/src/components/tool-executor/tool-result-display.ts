@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import { useSignal } from '@preact/signals'
+import { formatTimeAgo } from '../../lib/format-time'
 import { CountBadge } from '../common/badge'
 import { ActionButton } from '../common/button'
 import { JsonViewer } from '../common/json-viewer'
@@ -22,7 +23,7 @@ function tryParseJson(text: string): { isJson: boolean; parsed: unknown } {
 export function ToolResultDisplay({ success, text, toolName, timestamp }: ToolResultProps) {
   const expanded = useSignal(true)
   const { isJson, parsed } = tryParseJson(text)
-  const timeStr = new Date(timestamp).toLocaleTimeString('ko-KR')
+  const timeStr = formatTimeAgo(timestamp)
   const lines = text.split('\n').length
   return html`
     <div class="flex flex-col gap-2 mt-3">

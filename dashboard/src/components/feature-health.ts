@@ -4,6 +4,7 @@ import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { get } from '../api/core'
 import { createAsyncResource, type AsyncResource } from '../lib/async-state'
+import { formatTimeAgo } from '../lib/format-time'
 import { AsyncContainer } from './common/async-container'
 import { Card } from './common/card'
 import { StatCard } from './common/stat-card'
@@ -188,7 +189,7 @@ export function FeatureHealth() {
                   </div>
 
                   <div class="mt-4 text-xs text-[var(--text-dim)]">
-                    generated ${new Date(data.generated_at * 1000).toLocaleString('ko-KR')}
+                    generated ${formatTimeAgo(data.generated_at)}
                   </div>
                 </div>
 

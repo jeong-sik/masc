@@ -227,7 +227,7 @@ describe('Overview freshness strip', () => {
         source: 'runtime_data',
       },
       prompt_markdown_dir: {
-        path: '/Users/dancer/me/workspace/yousleepwhen/masc-mcp/config/prompts',
+        path: '/Users/dancer/me/.masc/config/prompts',
         exists: true,
         source: 'prompt_registry',
       },

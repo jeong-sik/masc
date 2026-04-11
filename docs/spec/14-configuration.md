@@ -42,15 +42,15 @@
 | 환경변수 | 타입 | 기본값 | 설명 |
 |----------|------|--------|------|
 | `MASC_BASE_PATH` | string | `.` | `.masc` 데이터 디렉토리의 기준 경로 |
-| `MASC_CONFIG_DIR` | string | 자동 탐색 | repo-managed config root (`config/cascade.json`, `config/prompts`, `config/keepers`, `config/personas`) |
-| `MASC_PERSONAS_DIR` | string | unset | persona root override. 설정 시 `config/personas` 대신 이 디렉토리를 사용 |
+| `MASC_CONFIG_DIR` | string | 자동 탐색 | resolved config root override. 하위 항목: `cascade.json`, `prompts/`, `keepers/`, `personas/` |
+| `MASC_PERSONAS_DIR` | string | unset | persona root override. 설정 시 resolved config root의 `personas/` 대신 이 디렉토리를 사용 |
 | `MASC_HTTP_PORT` | string | `"8935"` | HTTP 서버 포트 |
 | `MASC_HTTP_BASE_URL` | string | - | 전체 base URL (설정 시 host/port 무시) |
 | `MASC_HOST` | string | - | 바인드 호스트 (base URL 미설정 시 필수) |
 | `LIBDATACHANNEL_PATH` | string | 자동 탐색 | WebRTC 라이브러리 경로 |
 
 runtime data root는 `MASC_BASE_PATH`를 사용한다. 미설정 시 일부 경로는 현재 작업 디렉토리 기준 fallback을 사용한다.
-repo-managed config는 별도 규칙을 가진다: `MASC_CONFIG_DIR` -> `<MASC_BASE_PATH>/.masc/config` -> `~/.masc/config` -> `cwd/config` -> executable-relative `config/`.
+resolved config root는 별도 탐색 규칙을 가진다: `MASC_CONFIG_DIR` -> `<MASC_BASE_PATH>/.masc/config` -> `~/.masc/config` -> `cwd/config` -> executable-relative `config/`. repo `config/`는 체크인된 default/example source이며, 마지막 fallback으로만 사용된다.
 
 ### 3.2 Runtime (Env_config_runtime)
 
@@ -445,7 +445,7 @@ $MASC_PERSONAS_DIR
 ```
 
 암묵적 secondary search(`~/.masc/personas`, `$MASC_BASE_PATH/.masc/personas`)는 사용하지 않는다.
-Persona, keeper TOML, prompt markdown, cascade, tool_policy 같은 repo-managed 설정은 모두 같은 resolved config root를 기준으로 해석한다.
+Persona, keeper TOML, prompt markdown, cascade, tool_policy는 모두 같은 resolved config root를 기준으로 해석한다.
 
 ### 12.4 Template 변경 반영
 
@@ -460,7 +460,7 @@ Template 변경은 기존 keeper에 자동 전파되지 않는다. 반영 방법
 
 dir-local local-dev에서는 `.masc/`가 target 디렉토리 내부를 가리키므로 shared repo keeper 상태와 분리된다. shared state가 필요하면 canonical shared launcher를 사용해야 한다.
 
-이 값은 runtime data root를 결정하고, explicit `MASC_CONFIG_DIR`가 없을 때는 `<MASC_BASE_PATH>/.masc/config`를 repo-managed config의 첫 fallback으로도 사용한다.
+이 값은 runtime data root를 결정하고, explicit `MASC_CONFIG_DIR`가 없을 때는 `<MASC_BASE_PATH>/.masc/config`를 resolved config root의 첫 fallback으로도 사용한다.
 
 ### 12.6 모델 실행
 

@@ -25,6 +25,54 @@ let verdict_to_string (result : Anti_rationalization.review_result) =
   | Anti_rationalization.Approve -> "approve"
   | Anti_rationalization.Reject reason -> "reject:" ^ reason
 
+(** True when both cascades are non-empty AND distinct.
+
+    Must match {!Eval_calibration.calibration_stats} inclusion criteria
+    exactly (both [evaluator_cascade <> ""] and [generator_cascade <> ""])
+    so that a real-time SSE event and the aggregated cross_model_rate
+    agree on which verdicts count as cross-model. *)
+let is_cross_model_verdict (result : Anti_rationalization.review_result) : bool =
+  match result.generator_cascade with
+  | None -> false
+  | Some g ->
+    g <> ""
+    && result.evaluator_cascade <> ""
+    && not (String.equal g result.evaluator_cascade)
+
+(** Build the [verdict_recorded] SSE payload for a finished review.
+
+    Pure function: no IO, no broadcast, no logging. Extracted so the
+    payload contract can be exercised by unit tests. *)
+let build_verdict_sse_payload
+    ~(now : float)
+    ~(task_id : string)
+    ~(req : Anti_rationalization.review_request)
+    ~(result : Anti_rationalization.review_result) : Yojson.Safe.t =
+  `Assoc
+    [
+      ("type", `String "oas:masc:harness:verdict_recorded");
+      ( "payload",
+        `Assoc
+          [
+            ("timestamp", `Float now);
+            ("task_id", `String task_id);
+            ("task_title", `String req.task_title);
+            ("agent_name", `String req.agent_name);
+            ("gate", `String (Anti_rationalization.gate_to_string result.gate));
+            ("verdict", `String (verdict_to_string result));
+            ("evaluator_cascade", `String result.evaluator_cascade);
+            ( "generator_cascade",
+              match result.generator_cascade with
+              | Some c -> `String c
+              | None -> `Null );
+            ("cross_model", `Bool (is_cross_model_verdict result));
+            ( "fallback_reason",
+              match result.fallback_reason with
+              | Some reason -> `String reason
+              | None -> `Null );
+          ] );
+    ]
+
 (** Validate task_id is non-empty. Prevents phantom operations on empty IDs. *)
 let validate_task_id task_id =
   if task_id = "" then Error (Types.TaskNotFound "")
@@ -51,26 +99,9 @@ let review_completion_notes
           ~task_id ~req:ar_req ~result ();
         (try
            Sse.broadcast
-             (`Assoc
-               [
-                 ("type", `String "oas:masc:harness:verdict_recorded");
-                 ( "payload",
-                   `Assoc
-                     [
-                       ("timestamp", `Float (Time_compat.now ()));
-                       ("task_id", `String task_id);
-                       ("task_title", `String ar_req.task_title);
-                       ("agent_name", `String ar_req.agent_name);
-                       ("gate", `String (Anti_rationalization.gate_to_string result.gate));
-                       ("verdict", `String (verdict_to_string result));
-                       ( "evaluator_cascade",
-                         `String result.evaluator_cascade );
-                       ( "fallback_reason",
-                         match result.fallback_reason with
-                         | Some reason -> `String reason
-                         | None -> `Null );
-                     ] );
-               ])
+             (build_verdict_sse_payload
+                ~now:(Time_compat.now ())
+                ~task_id ~req:ar_req ~result)
          with
         | Eio.Cancel.Cancelled _ as e -> raise e
         | exn ->

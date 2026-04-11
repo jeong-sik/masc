@@ -192,9 +192,14 @@ let worktree_create_r ?(link_task=true) ?repo_name config ~agent_name ~task_id ~
       with
       | Some clone -> Ok clone
       | None ->
-        match require_repository_root_with_git config with
-        | Ok root -> Ok root
-        | Error e -> Error e
+        Error
+          (IoError
+             (Printf.sprintf
+                "No git clone found under playground repos (%s). \
+                 Clone a repository first: keeper_shell op=git_clone \
+                 url=https://github.com/<allowed_org>/<repo>.git — \
+                 then retry masc_worktree_create."
+                repos_dir))
     in
     match resolve_keeper_repo_root () with
     | Error e -> Error e

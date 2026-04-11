@@ -15,16 +15,36 @@
 \*
 \* Invariant: a turn must never be in flight while the phase is one
 \* of the non-dispatchable states.
+\*
+\* ── Abstraction note ──
+\* The real keeper_state_machine.ml has 11 phases:
+\*   Offline, Running, Failing, Compacting, HandingOff, Draining,
+\*   Paused, Stopped, Crashed, Restarting, Dead.
+\* This model collapses them to 6 representative phases for the
+\* keepalive-dispatch invariant. The collapse:
+\*   - Failing/Crashed/Restarting -> not modeled (treated as Offline or
+\*     Running by the dispatcher; their invariants belong to
+\*     KeeperStateMachine.tla, not this spec).
+\*   - Draining -> not modeled (a variant of Stopped for the keepalive
+\*     contract; no dispatch allowed in either).
+\*   - Paused -> not modeled here. Paused is a caller-controlled soft
+\*     pause in the real FSM; whether it is dispatchable is out of
+\*     scope for this bug model. Intentionally omitted so the model
+\*     does not accidentally constrain paused semantics.
+\* The 6 modeled phases cover every transition relevant to the
+\* "ghost dispatch under non-dispatchable phase" bug. Any future
+\* change that adds a new non-dispatchable phase requires extending
+\* [NonDispatchable] below.
 
 VARIABLES
-    phase,           \* "offline" | "running" | "compacting" | "handing_off"
-                     \* | "paused" | "stopped" | "dead"
+    phase,           \* "offline" | "running" | "compacting"
+                     \* | "handing_off" | "stopped" | "dead"
     turn_in_flight   \* Boolean: keepalive has dispatched a turn, awaiting reply
 
 vars == <<phase, turn_in_flight>>
 
 Phases == {"offline", "running", "compacting", "handing_off",
-           "paused", "stopped", "dead"}
+           "stopped", "dead"}
 
 NonDispatchable == {"offline", "compacting", "handing_off", "stopped", "dead"}
 

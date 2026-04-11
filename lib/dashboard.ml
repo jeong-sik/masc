@@ -506,10 +506,7 @@ let keepers_section now : section =
     let last_info =
       match e.last_error with
       | Some err ->
-        let short = if String.length err > 40
-          then String.sub err 0 37 ^ "..."
-          else err in
-        Printf.sprintf " | err=%s" short
+        Printf.sprintf " | err=%s" (truncate_message err)
       | None -> ""
     in
     Printf.sprintf "%s: %s | seq=%d | since=%s%s"

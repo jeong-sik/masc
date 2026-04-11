@@ -100,10 +100,15 @@ let () = test "dispatch_tasks" (fun () ->
 )
 
 let () = test "masc_oas_bridge_runs_without_eio_env" (fun () ->
-  match Masc_oas_bridge.run_safe ~timeout_s:0.1 (fun () -> Ok "ok") with
-  | Ok "ok" -> ()
-  | Ok other -> failwith ("unexpected result: " ^ other)
-  | Error err -> failwith (Oas.Error.to_string err)
+  match Masc_eio_env.get_opt () with
+  | Some _ ->
+    failwith
+      "masc_oas_bridge_runs_without_eio_env requires Masc_eio_env.get_opt () = None before calling run_safe"
+  | None ->
+    match Masc_oas_bridge.run_safe ~timeout_s:0.1 (fun () -> Ok "ok") with
+    | Ok "ok" -> ()
+    | Ok other -> failwith ("unexpected result: " ^ other)
+    | Error err -> failwith (Oas.Error.to_string err)
 )
 
 (* Test dispatch transition claim *)

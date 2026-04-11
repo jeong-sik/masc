@@ -67,6 +67,21 @@ let require_eio ?sw ?net () =
   | None, _ -> Error "Eio switch not available (running outside server context)"
   | _, None -> Error "Eio net not available (running outside server context)"
 
+let admission_wait_timeout_error
+    ~(keeper_name : string)
+    ~(cascade_name : string)
+    ~(priority : Llm_provider.Request_priority.t)
+    (wait_ms : int) =
+  let wait_sec = float_of_int wait_ms /. 1000.0 in
+  let msg =
+    Printf.sprintf
+      "Admission queue wait timeout after %.1fs (wait_ms=%d, keeper=%s, cascade=%s, priority=%s)"
+      wait_sec wait_ms keeper_name cascade_name
+      (Llm_provider.Request_priority.to_string priority)
+  in
+  Log.Misc.warn "%s" msg;
+  Error (Oas.Error.Internal msg)
+
 (** Resolve cascade provider configs via OAS Cascade_config.
     Returns OAS Provider_config.t list directly, bypassing the old Model_spec facade. *)
 let resolve_cascade_providers ~cascade_name : Llm_provider.Provider_config.t list =
@@ -161,6 +176,7 @@ let run_named
     ?(max_tokens = Oas_worker_cascade.default_max_tokens)
     ?max_input_tokens
     ?max_cost_usd
+    ?wait_timeout_sec
     ?(accept = fun (_ : Oas_response.api_response) -> true)
     ?guardrails
     ?hooks
@@ -251,35 +267,40 @@ let run_named
   let queue_priority =
     Option.value priority ~default:Llm_provider.Request_priority.Proactive
   in
-  Admission_queue.with_permit
-    ~priority:queue_priority ~keeper_name:name ~cascade_name
-    (fun () ->
-  match Oas_worker_exec.run ~sw ~net ~config ?oas_checkpoint ?on_event ?on_yield ?on_resume ?agent_ref ?proof_ref ?contract goal with
-  | Ok result when accept result.response ->
-    let observation =
-      Oas_worker_cascade.cascade_observation_with_metrics ~cascade_name ~configured_labels
-        ~candidate_cfgs ~selected_model_raw:(Some result.response.model)
-        ~capture
-    in
-    let result = { result with cascade_observation = Some observation } in
-    Oas_worker_cascade.record_cascade ~cascade_name ~outcome:`Success ~observation:(Some observation);
-    Ok result
-  | Ok result ->
-    let observation =
-      Oas_worker_cascade.cascade_observation_with_metrics ~cascade_name ~configured_labels
-        ~candidate_cfgs ~selected_model_raw:(Some result.response.model)
-        ~capture
-    in
-    Oas_worker_cascade.record_cascade ~cascade_name ~outcome:`Rejected ~observation:(Some observation);
-    Error (Oas.Error.Internal
-      (Printf.sprintf "cascade %s: response rejected by accept" cascade_name))
-  | Error e ->
-    let observation =
-      Oas_worker_cascade.cascade_observation_with_metrics ~cascade_name ~configured_labels
-        ~candidate_cfgs ~selected_model_raw:None ~capture
-    in
-    Oas_worker_cascade.record_cascade ~cascade_name ~outcome:`Failure ~observation:(Some observation);
-    Error e)
+  try
+    Admission_queue.with_permit ?wait_timeout_sec
+      ~priority:queue_priority ~keeper_name:name ~cascade_name
+      (fun () ->
+        match Oas_worker_exec.run ~sw ~net ~config ?oas_checkpoint ?on_event ?on_yield ?on_resume ?agent_ref ?proof_ref ?contract goal with
+        | Ok result when accept result.response ->
+          let observation =
+            Oas_worker_cascade.cascade_observation_with_metrics ~cascade_name ~configured_labels
+              ~candidate_cfgs ~selected_model_raw:(Some result.response.model)
+              ~capture
+          in
+          let result = { result with cascade_observation = Some observation } in
+          Oas_worker_cascade.record_cascade ~cascade_name ~outcome:`Success ~observation:(Some observation);
+          Ok result
+        | Ok result ->
+          let observation =
+            Oas_worker_cascade.cascade_observation_with_metrics ~cascade_name ~configured_labels
+              ~candidate_cfgs ~selected_model_raw:(Some result.response.model)
+              ~capture
+          in
+          Oas_worker_cascade.record_cascade ~cascade_name ~outcome:`Rejected ~observation:(Some observation);
+          Error (Oas.Error.Internal
+            (Printf.sprintf "cascade %s: response rejected by accept" cascade_name))
+        | Error e ->
+          let observation =
+            Oas_worker_cascade.cascade_observation_with_metrics ~cascade_name ~configured_labels
+              ~candidate_cfgs ~selected_model_raw:None ~capture
+          in
+          Oas_worker_cascade.record_cascade ~cascade_name ~outcome:`Failure ~observation:(Some observation);
+          Error e)
+  with
+  | Admission_queue.Wait_timeout wait_ms ->
+      admission_wait_timeout_error ~keeper_name:name ~cascade_name
+        ~priority:queue_priority wait_ms
 
 (** Run a single Agent.run() using a model label string (e.g. "llama:qwen3.5").
     Validates the label parses before attempting execution. *)
@@ -294,6 +315,7 @@ let run_model_by_label
     ?(max_tokens = Oas_worker_cascade.default_max_tokens)
     ?max_input_tokens
     ?max_cost_usd
+    ?wait_timeout_sec
     ?(accept = fun (_ : Oas_response.api_response) -> true)
     ?guardrails
     ?hooks
@@ -332,17 +354,23 @@ let run_model_by_label
             ()
         in
         let config = { config with transport = transport_resolved } in
-        Admission_queue.with_permit
-          ~priority:Llm_provider.Request_priority.Proactive
-          ~keeper_name:"oas-label-model"
-          ~cascade_name:model_label
-          (fun () ->
-        match Oas_worker_exec.run ~sw ~net ~config ?on_event ?contract goal with
-        | Ok result when accept result.response -> Ok result
-        | Ok _ ->
-            Error (Oas.Error.Internal
-              (Printf.sprintf "response rejected by accept from %s" model_label))
-        | Error e -> Error e))
+        try
+          Admission_queue.with_permit ?wait_timeout_sec
+            ~priority:Llm_provider.Request_priority.Proactive
+            ~keeper_name:"oas-label-model"
+            ~cascade_name:model_label
+            (fun () ->
+              match Oas_worker_exec.run ~sw ~net ~config ?on_event ?contract goal with
+              | Ok result when accept result.response -> Ok result
+              | Ok _ ->
+                  Error (Oas.Error.Internal
+                    (Printf.sprintf "response rejected by accept from %s" model_label))
+              | Error e -> Error e)
+        with
+        | Admission_queue.Wait_timeout wait_ms ->
+            admission_wait_timeout_error ~keeper_name:"oas-label-model"
+              ~cascade_name:model_label
+              ~priority:Llm_provider.Request_priority.Proactive wait_ms)
 
 let run_named_with_masc_tools
     ~cascade_name
@@ -356,6 +384,7 @@ let run_named_with_masc_tools
     ?(max_tokens = Oas_worker_cascade.default_max_tokens)
     ?max_input_tokens
     ?max_cost_usd
+    ?wait_timeout_sec
     ?guardrails
     ?hooks
     ?memory
@@ -380,7 +409,8 @@ let run_named_with_masc_tools
       (fun input -> dispatch ~name:td.name ~args:input)
   ) masc_tools in
   run_named ~cascade_name ~goal ?priority ~system_prompt ~tools:oas_tools
-    ~max_turns ~temperature ~max_tokens ?max_input_tokens ?max_cost_usd ?guardrails ?hooks ?memory
+    ~max_turns ~temperature ~max_tokens ?max_input_tokens ?max_cost_usd
+    ?wait_timeout_sec ?guardrails ?hooks ?memory
     ?tool_retry_policy
     ?compact_ratio
     ?raw_trace ?on_event ?on_yield ?on_resume ?proof_ref
@@ -398,6 +428,7 @@ let run_model_with_masc_tools
     ?(max_tokens = Oas_worker_cascade.default_max_tokens)
     ?max_input_tokens
     ?max_cost_usd
+    ?wait_timeout_sec
     ?guardrails
     ?hooks
     ?memory
@@ -428,10 +459,16 @@ let run_model_with_masc_tools
           ()
       in
       let config = { config with raw_trace; transport = transport_resolved } in
-      Admission_queue.with_permit
-        ~priority:Llm_provider.Request_priority.Proactive
-        ~keeper_name:"oas-explicit-model"
-        ~cascade_name:model_label
-        (fun () ->
-      Oas_worker_exec.run_with_masc_tools ~sw ~net ~config ~masc_tools ~dispatch ?contract ?on_event
-        goal)
+      try
+        Admission_queue.with_permit ?wait_timeout_sec
+          ~priority:Llm_provider.Request_priority.Proactive
+          ~keeper_name:"oas-explicit-model"
+          ~cascade_name:model_label
+          (fun () ->
+            Oas_worker_exec.run_with_masc_tools ~sw ~net ~config ~masc_tools ~dispatch ?contract ?on_event
+              goal)
+      with
+      | Admission_queue.Wait_timeout wait_ms ->
+          admission_wait_timeout_error ~keeper_name:"oas-explicit-model"
+            ~cascade_name:model_label
+            ~priority:Llm_provider.Request_priority.Proactive wait_ms

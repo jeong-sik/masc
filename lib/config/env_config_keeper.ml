@@ -260,6 +260,24 @@ module KeeperKeepalive = struct
     Float.max 60.0 (Float.min 3600.0
       (get_float ~default:1200.0 "MASC_KEEPER_TURN_TIMEOUT_SEC"))
 
+  (** Maximum time a proactive keeper will wait in the MASC admission queue
+      before abandoning the current OAS attempt. This prevents background
+      keepers from looking silently stuck behind long-running inference calls.
+      Env: [MASC_KEEPER_ADMISSION_WAIT_TIMEOUT_SEC]. Default: 45.0.
+      Range: [5, 600]. *)
+  let admission_wait_timeout_sec =
+    Float.max 5.0 (Float.min 600.0
+      (get_float ~default:45.0 "MASC_KEEPER_ADMISSION_WAIT_TIMEOUT_SEC"))
+
+  (** Maximum time a scheduled autonomous keeper will wait for the local
+      keeper turn gate before skipping the cycle. Reactive turns still wait
+      indefinitely because they correspond to explicit external triggers.
+      Env: [MASC_KEEPER_AUTONOMOUS_SLOT_WAIT_TIMEOUT_SEC]. Default: 30.0.
+      Range: [5, 300]. *)
+  let autonomous_slot_wait_timeout_sec =
+    Float.max 5.0 (Float.min 300.0
+      (get_float ~default:30.0 "MASC_KEEPER_AUTONOMOUS_SLOT_WAIT_TIMEOUT_SEC"))
+
   (** Per-call timeout in seconds for a single OAS Agent.run execution.
       Guards against indefinite LLM response waits within a turn.
 

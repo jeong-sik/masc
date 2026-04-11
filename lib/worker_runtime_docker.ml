@@ -60,12 +60,8 @@ let rewrite_spec_for_container (spec : Worker_execution_spec.t) =
 
 let allowlisted_env_pairs () =
   let keys =
-    [
-      "ANTHROPIC_API_KEY";
-      "OPENAI_API_KEY";
-      "GEMINI_API_KEY";
-      "ZAI_API_KEY";
-      "OPENROUTER_API_KEY";
+    Provider_adapter.all_auth_env_keys ()
+    @ [
       "GOOGLE_CLOUD_PROJECT";
       "GOOGLE_CLOUD_LOCATION";
       "MASC_STORAGE_TYPE";
@@ -162,22 +158,15 @@ let mount_args (spec : Worker_execution_spec.t) =
 let auth_requirements_of_model_label model_label =
   match Llm_provider.Cascade_config.parse_model_string model_label with
   | None -> Ok []
-  | Some cfg -> (
-      match cfg.Llm_provider.Provider_config.kind with
-      | Llm_provider.Provider_config.Anthropic -> Ok [ "ANTHROPIC_API_KEY" ]
-      | Llm_provider.Provider_config.Glm -> Ok [ "ZAI_API_KEY" ]
-      | Llm_provider.Provider_config.OpenAI_compat ->
-          let base_url = cfg.Llm_provider.Provider_config.base_url in
-          let uri = Uri.of_string base_url in
-          if is_loopback_host (Uri.host uri) then Ok [] else Ok [ "OPENAI_API_KEY" ]
-      | Llm_provider.Provider_config.Gemini ->
-          if Sys.getenv_opt "GEMINI_API_KEY" |> Option.is_some then
-            Ok [ "GEMINI_API_KEY" ]
-          else
-            Error
-              "Gemini Docker workers currently require GEMINI_API_KEY; Vertex ADC is unsupported in v1"
-      | Llm_provider.Provider_config.Claude_code -> Ok []
-      | Llm_provider.Provider_config.Ollama -> Ok [])
+  | Some cfg ->
+    let keys = Provider_adapter.auth_env_keys_of_provider_kind cfg.Llm_provider.Provider_config.kind in
+    let missing = List.filter (fun key ->
+      match Sys.getenv_opt key with Some v -> String.trim v = "" | None -> true
+    ) keys in
+    if missing = [] then Ok keys
+    else
+      let kind_name = Provider_adapter.cascade_prefix_of_provider_kind cfg.Llm_provider.Provider_config.kind in
+      Error (Printf.sprintf "%s Docker workers require %s" kind_name (String.concat ", " missing))
 
 let missing_required_envs keys =
   keys

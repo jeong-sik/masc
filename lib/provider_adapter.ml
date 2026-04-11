@@ -977,4 +977,23 @@ let classify_model_family ~is_local ~context_window =
   else if context_window >= large_cloud_context_floor then "large_cloud"
   else "medium_cloud"
 
+let auth_env_keys_of_provider_kind (kind : Llm_provider.Provider_config.provider_kind) : string list =
+  let cn = string_of_provider_kind kind in
+  match resolve_direct_adapter cn with
+  | None -> []
+  | Some adapter ->
+    match adapter.auth_mode with
+    | No_auth -> []
+    | Api_key env_name -> [ env_name ]
+    | Vertex_adc { project_env; location_env } -> [ project_env; location_env ]
+
+let all_auth_env_keys () : string list =
+  direct_adapters
+  |> List.filter_map (fun adapter ->
+    match adapter.auth_mode with
+    | No_auth -> None
+    | Api_key env_name -> Some env_name
+    | Vertex_adc _ -> None)
+  |> List.sort_uniq String.compare
+
 (* is_spawnable removed: use is_spawnable_agent directly. *)

@@ -203,7 +203,17 @@ let ensure_same_origin_browser_request request :
                (normalize_loopback_host request_host) ->
           let default = default_port_of_scheme scheme in
           let norm p = match p with Some _ -> p | None -> default in
-          if norm origin_port = norm request_port then Ok ()
+          (* Loopback relaxation: when both origin and host resolve to a
+             loopback address (localhost / 127.0.0.1 / ::1), cross-port
+             mutations are allowed. The dev proxy (vite 5173 → backend
+             8935) relies on this, and remote attackers cannot forge a
+             loopback Origin. For public hosts we still require an
+             exact port match. Restores the behaviour that
+             test_auth_coverage.test_same_origin_allows_different_
+             explicit_port_on_loopback expects after #6449. *)
+          if is_loopback_host (normalize_loopback_host origin_host) then
+            Ok ()
+          else if norm origin_port = norm request_port then Ok ()
           else (
             Log.Auth.debug
               "same-origin port mismatch: origin=%S host=%s"

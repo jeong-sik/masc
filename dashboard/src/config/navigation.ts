@@ -118,7 +118,7 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     {
       id: 'sessions',
       label: '세션',
-      description: '실시간 세션 상태와 주의 신호.',
+      description: '실시간 세션 상태, 블로커, 내부 신호, 주의 큐를 한 화면에서 봅니다.',
       params: { section: 'sessions' },
     },
     {
@@ -150,7 +150,7 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     {
       id: 'intervene',
       label: '실시간 개입',
-      description: '프로젝트 일시정지, 세션 중단, 키퍼 재시작 등 운영 개입.',
+      description: '네임스페이스 브로드캐스트, 키퍼 개별 메시지 발송 등 운영 메시지 개입.',
       params: { section: 'intervene' },
     },
     {
@@ -182,7 +182,7 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     {
       id: 'planning',
       label: '계획 및 메트릭',
-      description: 'backlog와 수동 등록형 goal 상태를 함께 보는 화면. goal은 자동 생성되지 않습니다.',
+      description: '태스크 kanban과 backlog 관리. 목표 계층은 별도 탭에서 봅니다.',
       params: { section: 'planning' },
     },
     {

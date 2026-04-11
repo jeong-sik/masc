@@ -93,7 +93,7 @@ So the flattened operational surface is roughly 83 fields. Approximately 29-30 o
 - `context_budget` — context window budget ratio
 
 **Domain state fields in keeper_meta (correct placement):**
-- `scope_kind`, `room_scope` (`current` only compatibility), `mention_targets`, `proactive_*` — operational coordination policy
+- `room_scope` (`current` only compatibility), `mention_targets`, `proactive_*` — operational coordination policy
 - `joined_room_ids`, `last_seen_seq_by_room` — current-room compatibility state (single-room canonical model)
 - `autonomy_level`, `active_goal_ids` — coordination state
 

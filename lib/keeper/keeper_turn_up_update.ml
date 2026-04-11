@@ -53,14 +53,6 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
     |> Option.value ~default:"current"
     |> canonical_room_scope
   in
-  let scope_kind =
-    p.scope_kind_opt
-    |> first_some
-         (if String.trim old.scope_kind <> "" then Some old.scope_kind else None)
-    |> first_some p.profile_defaults.scope_kind
-    |> Option.value ~default:(if room_scope = "all" then "global" else "local")
-    |> canonical_scope_kind
-  in
   let mention_targets =
     resolve_mention_targets
       ~mention_targets_in:p.mention_targets_in
@@ -160,7 +152,6 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
     allowed_paths;
     execution_scope =
       Option.value ~default:old.execution_scope p.execution_scope_opt;
-    scope_kind;
     tool_access;
     tool_denylist;
     room_scope;

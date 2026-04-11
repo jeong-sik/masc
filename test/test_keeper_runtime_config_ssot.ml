@@ -114,7 +114,6 @@ let test_policy_resync () =
     {|[keeper]
 goal = "test"
 execution_scope = "playground"
-scope_kind = "global"
 room_scope = "current"
 policy_voice_enabled = false
 |};
@@ -128,7 +127,6 @@ policy_voice_enabled = false
             ("agent_name", `String keeper_name);
             ("trace_id", `String "trace-policy-resync");
             ("execution_scope", `String "standard");
-            ("scope_kind", `String "local");
             ("room_scope", `String "all");
             ("policy_voice_enabled", `Bool true);
           ])
@@ -143,7 +141,6 @@ policy_voice_enabled = false
   | Error e -> fail ("ensure_keeper_meta failed: " ^ e)
   | Ok updated ->
       check string "execution_scope" "playground" updated.Keeper_types.execution_scope;
-      check string "scope_kind" "global" updated.scope_kind;
       check string "room_scope" "current" updated.room_scope;
       check bool "policy_voice_enabled" false updated.policy_voice_enabled
 

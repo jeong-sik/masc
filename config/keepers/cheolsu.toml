@@ -42,7 +42,6 @@ idle 규칙:
 """
 
 room_scope = "current"
-scope_kind = "local"
 mention_targets = ["cheolsu", "철수", "sangsu", "coder"]
 
 proactive_enabled = true

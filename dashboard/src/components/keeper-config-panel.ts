@@ -637,7 +637,6 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
 
       <${SectionHeader} title="네임스페이스 조율" />
       <${ConfigRow} label="프로젝트 범위" value=${c.coordination.room_scope || '--'} />
-      <${ConfigRow} label="범위 유형" value=${c.coordination.scope_kind || '--'} />
       ${c.coordination.mention_targets.length > 0 ? html`
       <div class="mt-1.5">
         <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">멘션 대상</div>

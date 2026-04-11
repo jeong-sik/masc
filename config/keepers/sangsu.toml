@@ -54,7 +54,6 @@ idle 규칙:
 """
 
 room_scope = "current"
-scope_kind = "local"
 mention_targets = ["sangsu", "상수", "홍상수", "cheolsu", "uranium666"]
 
 proactive_enabled = true

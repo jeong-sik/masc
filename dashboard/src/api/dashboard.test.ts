@@ -188,7 +188,6 @@ describe('fetchKeeperConfig', () => {
       },
       coordination: {
         room_scope: 'global',
-        scope_kind: 'global',
         mention_targets: 'sangsu',
         joined_room_ids: 'default',
       },

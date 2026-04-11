@@ -500,8 +500,6 @@ let test_masc_keeper_up_schema () =
             (List.mem_assoc "mid_goal" props);
           Alcotest.(check bool) "has long_goal" true
             (List.mem_assoc "long_goal" props);
-          Alcotest.(check bool) "has scope_kind" true
-            (List.mem_assoc "scope_kind" props);
           Alcotest.(check bool) "omits models" false
             (List.mem_assoc "models" props);
           Alcotest.(check bool) "omits allowed_models" false

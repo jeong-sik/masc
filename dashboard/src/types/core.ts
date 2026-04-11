@@ -750,7 +750,6 @@ export interface KeeperConfigRuntime {
 
 export interface KeeperConfigCoordination {
   room_scope: string
-  scope_kind: string
   mention_targets: string[]
   joined_room_ids: string[]
 }

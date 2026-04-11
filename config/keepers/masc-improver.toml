@@ -43,7 +43,6 @@ idle 규칙:
 """
 
 room_scope = "current"
-scope_kind = "local"
 mention_targets = ["masc-improver", "improver", "refactorer"]
 
 proactive_enabled = true

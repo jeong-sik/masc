@@ -294,6 +294,7 @@
    tool_run
    tool_bridge
    tool_access_policy
+   tool_permission_map
    tool_access_role
    tool_portal
    tool_worktree

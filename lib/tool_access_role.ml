@@ -1,6 +1,9 @@
 (** Tool_access_role — Role-based tool access policy builder.
 
-    Derived mechanically from legacy_permission_for_tool in auth.ml.
+    Derived mechanically from Tool_permission_map.permission_for_tool, which
+    already respects Tool_catalog-declared required_permission metadata before
+    falling back to legacy auth mappings.
+
     Each tool's required permission determines which role tier it belongs to:
     - Reader tier: CanReadState, CanJoin, CanLeave
     - Worker tier: CanAddTask, CanClaimTask, CanCompleteTask, CanBroadcast,
@@ -10,115 +13,50 @@
 
     @since 2.204.0 *)
 
+type required_role =
+  | Reader_role
+  | Worker_role
+  | Admin_role
+
+let all_surface_tools () =
+  Tool_permission_map.known_tool_names
+  |> List.sort_uniq String.compare
+
+let required_role_of_permission = function
+  | Types.CanInit | Types.CanReset | Types.CanAdmin -> Admin_role
+  | Types.CanReadState | Types.CanJoin | Types.CanLeave -> Reader_role
+  | Types.CanAddTask
+  | Types.CanClaimTask
+  | Types.CanCompleteTask
+  | Types.CanBroadcast
+  | Types.CanOpenPortal
+  | Types.CanSendPortal
+  | Types.CanCreateWorktree
+  | Types.CanRemoveWorktree
+  | Types.CanVote ->
+      Worker_role
+
+let tools_for_required_role required_role =
+  all_surface_tools ()
+  |> List.filter (fun tool_name ->
+         match Tool_permission_map.permission_for_tool tool_name with
+         | None -> false
+         | Some permission ->
+             required_role_of_permission permission = required_role)
+
 (* ================================================================ *)
-(* Admin-only tools (CanInit + CanReset + CanAdmin)                  *)
+(* Admin-only tools (CanInit + CanReset + CanAdmin)                 *)
 (* ================================================================ *)
 
-let admin_only_tools =
-  [
-    (* CanInit *)
-    "masc_init";
-    "masc_auth_enable";
-    "masc_auth_disable";
-    "masc_auth_revoke";
-    (* CanReset *)
-    "masc_reset";
-    (* CanAdmin — autoresearch *)
-    "masc_autoresearch_start";
-    "masc_autoresearch_cycle";
-    "masc_autoresearch_inject";
-    "masc_autoresearch_stop";
-    (* CanAdmin — command-plane policy *)
-    "masc_policy_freeze_unit";
-    "masc_policy_kill_switch";
-    (* CanAdmin — board moderation *)
-    "masc_board_delete";
-    (* CanAdmin — auth *)
-    "masc_auth_create_token";
-    (* CanAdmin — tool administration *)
-    "masc_tool_grant";
-    "masc_tool_revoke";
-    "masc_tool_admin_update";
-  ]
+let admin_only_tools = tools_for_required_role Admin_role
 
 (* ================================================================ *)
-(* Worker-only tools (CanAddTask + CanClaimTask + CanCompleteTask +  *)
-(*                    CanBroadcast + CanOpenPortal + CanSendPortal + *)
+(* Worker-only tools (CanAddTask + CanClaimTask + CanCompleteTask + *)
+(*                    CanBroadcast + CanOpenPortal + CanSendPortal +*)
 (*                    CanCreateWorktree + CanRemoveWorktree + CanVote) *)
 (* ================================================================ *)
 
-let worker_only_tools =
-  [
-    (* CanAddTask *)
-    "masc_add_task";
-    (* CanClaimTask *)
-    "masc_claim_next";
-    (* CanCompleteTask *)
-    "masc_done";
-    "masc_update_priority";
-    "masc_transition";
-    "masc_release";
-    (* CanBroadcast — messaging *)
-    "masc_broadcast";
-    "masc_listen";
-    "masc_heartbeat";
-    (* CanBroadcast — transport *)
-    "masc_webrtc_offer";
-    "masc_webrtc_answer";
-    "channel_gate";
-    (* CanBroadcast — capability registry *)
-    "masc_register_capabilities";
-    "masc_find_by_capability";
-    (* CanBroadcast — agent management *)
-    "masc_agent_update";
-    "masc_operator_action";
-    "masc_operator_confirm";
-    (* CanBroadcast — keeper management *)
-    "masc_keeper_up";
-    "masc_keeper_down";
-    "masc_keeper_msg";
-    "masc_keeper_msg_result";
-    "masc_keeper_repair";
-    "masc_keeper_reconcile";
-    "masc_keeper_reset";
-    "masc_keeper_create_from_persona";
-    (* CanBroadcast — org units *)
-    "masc_unit_define";
-    "masc_unit_reparent";
-    "masc_unit_reassign";
-    (* CanBroadcast — operations *)
-    "masc_operation_start";
-    "masc_operation_checkpoint";
-    "masc_operation_pause";
-    "masc_operation_resume";
-    "masc_operation_stop";
-    "masc_operation_finalize";
-    (* CanBroadcast — dispatch *)
-    "masc_dispatch_assign";
-    "masc_dispatch_rebalance";
-    "masc_dispatch_escalate";
-    "masc_dispatch_recall";
-    (* CanBroadcast — policy decisions *)
-    "masc_policy_approve";
-    "masc_policy_deny";
-    "masc_policy_update";
-    (* CanBroadcast — maintenance *)
-    "masc_cleanup_zombies";
-    (* CanBroadcast — board writes *)
-    "masc_board_post";
-    "masc_board_comment";
-    "masc_board_vote";
-    "masc_board_comment_vote";
-    (* CanOpenPortal *)
-    "masc_portal_open";
-    "masc_portal_close";
-    (* CanSendPortal *)
-    "masc_portal_send";
-    (* CanCreateWorktree *)
-    "masc_worktree_create";
-    (* CanRemoveWorktree *)
-    "masc_worktree_remove";
-  ]
+let worker_only_tools = tools_for_required_role Worker_role
 
 (* ================================================================ *)
 (* Role → Policy                                                     *)

@@ -101,6 +101,8 @@ function sampleConnectorsResponse(overrides?: Partial<Record<string, unknown>>) 
         binding_store_path: '/tmp/discord_bindings.json',
         audit_path: '/tmp/discord_binding_audit.jsonl',
         updated_at: '2026-04-03T00:00:00Z',
+        reply_mode: '',
+        self_chat_guid: '',
         last_ready_at: '2026-04-03T00:00:00Z',
         bot_user_name: 'sangsu',
         bot_user_id: '1489985300729172039',
@@ -306,6 +308,35 @@ describe('ConnectorStatusPanel', () => {
 
     expect(text).toContain('connected')
     expect(text).not.toContain('disconnected')
+  })
+
+  it('renders iMessage reply mode metadata when advertised by the runtime', async () => {
+    const fetchGateStatus = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleGateResponse())
+    const fetchGateConnectors = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleConnectorsResponse({
+      connectors: [{
+        ...sampleConnectorsResponse().connectors[0],
+        connector_id: 'imessage',
+        display_name: 'iMessage',
+        channel: 'imessage',
+        reply_mode: 'self-chat',
+        self_chat_guid: 'self-chat-guid',
+      }],
+    }))
+    const fetchGateKeepers = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleKeepersResponse())
+
+    const { ConnectorStatusPanel } = await loadComponentWithApi({
+      fetchGateStatus,
+      fetchGateConnectors,
+      fetchGateKeepers,
+      lastEvent: signal(null),
+    })
+
+    render(html`<${ConnectorStatusPanel} />`, container)
+    await flushUi()
+    const text = container.textContent?.replace(/\s+/g, ' ').trim() ?? ''
+
+    expect(text).toContain('reply self-chat')
+    expect(text).toContain('self-chat self-chat-guid')
   })
 
   it('posts bind and unbind actions through the dashboard endpoints', async () => {

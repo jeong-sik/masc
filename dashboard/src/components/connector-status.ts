@@ -335,6 +335,8 @@ function ConnectorLivePanel({
             <span>ready ${timeAgo(connector?.last_ready_at ?? '')}</span>
             <span>guilds ${connector?.guild_count ?? 0}</span>
             <span>runtime bindings ${connector?.runtime_bindings_count ?? configuredBindings.length}</span>
+            ${connector?.reply_mode ? html`<span>reply ${connector.reply_mode}</span>` : null}
+            ${connector?.self_chat_guid ? html`<span>self-chat ${truncateMiddle(connector.self_chat_guid, 28)}</span>` : null}
             <span>source ${connector?.binding_source || 'unknown'}</span>
             <span>keeper dir ${keepers.length}</span>
             <span>

@@ -46,10 +46,6 @@ interface FeatureHealthData {
 
 const featureHealth: AsyncResource<FeatureHealthData> = createAsyncResource()
 
-export function resetFeatureHealthState(): void {
-  featureHealth.reset()
-}
-
 function loadFeatureHealth(): Promise<void> {
   return featureHealth.load(() => get<FeatureHealthData>('/api/v1/dashboard/feature-health'))
 }

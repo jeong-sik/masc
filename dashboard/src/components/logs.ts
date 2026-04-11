@@ -275,21 +275,6 @@ function renderLogRow(entry: LogEntry) {
   `
 }
 
-export function resetLogsState(): void {
-  if (moduleDebounceTimer) {
-    clearTimeout(moduleDebounceTimer)
-    moduleDebounceTimer = null
-  }
-  logResource.reset()
-  levelFilter.value = 'INFO'
-  moduleInput.value = ''
-  appliedModuleFilter.value = ''
-  autoRefresh.value = true
-  logLimit.value = 200
-  latestSeq.value = null
-  latestRequestId = 0
-}
-
 export function LogViewer() {
   useEffect(() => {
     let pollId: ReturnType<typeof setInterval> | null = null

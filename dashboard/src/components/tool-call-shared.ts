@@ -74,13 +74,6 @@ export function toolCategory(name: string): ToolCategoryResult {
   return found ?? DEFAULT_TOOL_STYLE
 }
 
-/** Human-readable tool name: strip common prefixes, replace underscores. */
-export function humanToolName(name: string): string {
-  return name
-    .replace(/^(keeper_|masc_|mcp__[a-z_-]+__)/i, '')
-    .replace(/_/g, ' ')
-}
-
 /** Format duration as human-readable string with unit. */
 export function formatDuration(ms: number): string {
   const rounded = Math.round(ms)

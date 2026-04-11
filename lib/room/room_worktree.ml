@@ -89,7 +89,23 @@ let worktree_create_r ?(link_task=true) config ~agent_name ~task_id ~base_branch
   | Error e, _ -> Error e
   | _, Error e -> Error e
   | Ok _, Ok _ ->
-    match require_repository_root_with_git config with
+    (* Default to playground clone; fall back to base_path git root.
+       Keeper coding should happen in playground, not the main repo. *)
+    let resolve_keeper_repo_root () =
+      let playground_repo =
+        Filename.concat config.base_path
+          (Printf.sprintf ".masc/playground/%s/repos/masc-mcp"
+             (safe_filename agent_name))
+      in
+      if Sys.file_exists playground_repo
+         && Sys.file_exists (Filename.concat playground_repo ".git")
+      then Ok playground_repo
+      else
+        match require_repository_root_with_git config with
+        | Ok root -> Ok root
+        | Error e -> Error e
+    in
+    match resolve_keeper_repo_root () with
     | Error e -> Error e
     | Ok root -> begin
         let worktree_name = Printf.sprintf "%s-%s" agent_name task_id in

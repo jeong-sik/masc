@@ -43,8 +43,13 @@ let turn_semaphore = Eio.Semaphore.make keeper_turn_throttle_limit
    For 8-slot servers, set MASC_KEEPER_AUTONOMOUS_CONCURRENCY=3-4. *)
 let autonomous_turn_limit =
   Keeper_config.int_of_env_default
-    "MASC_KEEPER_AUTONOMOUS_CONCURRENCY" ~default:1 ~min_v:1 ~max_v:8
+    "MASC_KEEPER_AUTONOMOUS_CONCURRENCY" ~default:3 ~min_v:1 ~max_v:8
 ;;
+
+let () =
+  Log.Keeper.info "autonomous_turn_concurrency=%d (env=%s)"
+    autonomous_turn_limit
+    (Option.value ~default:"<unset>" (Sys.getenv_opt "MASC_KEEPER_AUTONOMOUS_CONCURRENCY"))
 
 let autonomous_turn_semaphore = Eio.Semaphore.make autonomous_turn_limit
 
@@ -55,6 +60,10 @@ let with_keeper_turn_slot ~channel f =
     | Keeper_world_observation.Reactive -> false
   in
   let t0 = Time_compat.now () in
+  Log.Keeper.info "semaphore_acquire: channel=%s autonomous_available=%d turn_available=%d"
+    (if is_autonomous then "autonomous" else "reactive")
+    (Eio.Semaphore.get_value autonomous_turn_semaphore)
+    (Eio.Semaphore.get_value turn_semaphore);
   if is_autonomous then Eio.Semaphore.acquire autonomous_turn_semaphore;
   Eio.Semaphore.acquire turn_semaphore;
   let semaphore_wait_ms =

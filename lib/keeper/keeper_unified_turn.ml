@@ -82,6 +82,9 @@ let is_server_rejected_parse_error (err : Oas.Error.sdk_error) : bool =
       || string_contains_substring ~needle:"parse error" lower
   | _ -> false
 
+let is_auto_recoverable_turn_error (err : Oas.Error.sdk_error) : bool =
+  is_transient_network_error err || is_server_rejected_parse_error err
+
 let ambiguous_side_effect_error_prefix =
   "turn outcome ambiguous after committed mutating tool call(s)"
 
@@ -1191,8 +1194,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
                 if committed_tools <> []
                    && Keeper_tool_registry.all_tools_reconcile_safe
                         committed_tools
-                   && (is_transient_network_error err
-                       || is_server_rejected_parse_error err)
+                   && is_auto_recoverable_turn_error err
                 then begin
                   (* All committed tools are board-like (duplicate-tolerant)
                      AND the failure is transient or the server rejected the
@@ -1359,12 +1361,16 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
       | Error err ->
           let e_str = Oas.Error.to_string err in
           let is_transient = is_transient_network_error err in
+          let is_server_parse_rejection = is_server_rejected_parse_error err in
+          let is_auto_recoverable = is_auto_recoverable_turn_error err in
           let is_ambiguous_partial = is_ambiguous_side_effect_error err in
           Log.Keeper.error
             "%s: unified turn FAILED cascade=%s max_context=%d latency=%dms%s error=%s"
             meta.name meta.cascade_name max_cascade_context latency_ms
             (if is_ambiguous_partial then
                " (ambiguous partial commit)"
+             else if is_server_parse_rejection then
+               " (server parse rejection, auto-recoverable)"
              else if is_transient then
                " (transient, cooldown preserved)"
              else "")
@@ -1429,11 +1435,11 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
              that causes unnecessary restarts and context loss.
              Only persistent errors (auth failure, config error, context
              overflow after compaction) increment the crash counter. *)
-          if not is_transient then
+          if not is_auto_recoverable then
             Keeper_registry.increment_turn_failures ~base_path meta.name
           else
             Log.Keeper.info
-              "%s: transient turn failure (not counted toward crash threshold): %s"
+              "%s: auto-recoverable turn failure (not counted toward crash threshold): %s"
               meta.name (short_preview e_str);
           let count = Keeper_registry.get_turn_failures ~base_path meta.name in
           let threshold =

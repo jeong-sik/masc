@@ -533,13 +533,23 @@
 ; unknown provider names (e.g. a future typo or stale cascade head)
 ; fail at test time rather than when a keeper actually tries to resolve
 ; the cascade at runtime. Path is injected via env var, not hardcoded.
+;
+; Note on ZAI_API_KEY=test-dummy: the file-level (env ... (ZAI_API_KEY ""))
+; at the top of this dune file zeros out ZAI_API_KEY so tests never hit
+; the real z.ai API. That zeroing also causes Provider_registry.find to
+; report glm / glm-coding providers as is_available=false, making
+; Cascade_config.parse_model_string return None for every glm:* entry —
+; which silently breaks this static validity check. Scope a non-empty
+; dummy here so the availability gate lets glm / glm-coding parse while
+; still never reaching the network (this test does not make calls).
 (test
  (name test_cascade_config_validity)
  (modules test_cascade_config_validity)
  (deps %{workspace_root}/config/cascade.json)
  (action
   (setenv MASC_CASCADE_JSON_PATH %{workspace_root}/config/cascade.json
-   (run %{test})))
+   (setenv ZAI_API_KEY test-dummy
+    (run %{test}))))
  (libraries masc_test_deps))
 
 ; ============================================================

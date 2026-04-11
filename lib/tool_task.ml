@@ -256,11 +256,24 @@ let handle_claim ctx args =
     | "" -> Types_core.Unassigned
     | s -> Types_core.role_of_string s
   in
+  (* Preset-fit check: same SSOT as claim_next, but soft (warn, don't block).
+     Manual claims are intentional — operator may override preset policy. *)
+  let preset_warning =
+    let agent_preset = resolve_agent_preset ctx.config ctx.agent_name in
+    let tasks = Room.get_tasks_raw ctx.config in
+    match List.find_opt (fun (t : Types.task) -> t.id = task_id) tasks with
+    | None -> None
+    | Some task ->
+        match evaluate_preset_fit ~agent_preset ~required_preset:task.required_preset with
+        | Ok () -> None
+        | Error reason ->
+            let msg = Printf.sprintf "preset_mismatch: task %s %s" task_id reason in
+            Log.Task.warn "%s (agent=%s)" msg ctx.agent_name;
+            Some msg
+  in
   let result = Room.claim_task_r ctx.config ~agent_name:ctx.agent_name ~task_id ~agent_role () in
-  (* Notification harness: push claim event to all active sessions *)
   (match result with
    | Ok _ ->
-       (* Auto-set current_task so planning tools pick it up immediately *)
        Planning_eio.set_current_task ctx.config ~task_id;
        Subscriptions.push_event_to_sessions (`Assoc [
          ("type", `String "masc/task_claimed");
@@ -269,7 +282,10 @@ let handle_claim ctx args =
          ("timestamp", `Float (Time_compat.now ()));
        ])
    | Error e -> Log.Task.debug "task claim failed for %s: %s" task_id (Types.masc_error_to_string e));
-  result_to_response result
+  let (ok, msg) = result_to_response result in
+  match preset_warning, ok with
+  | Some warning, true -> (true, msg ^ "\n⚠️ " ^ warning)
+  | _ -> (ok, msg)
 
 (** Extract preset token from capabilities (e.g., ["keeper"; "preset:delivery"]). *)
 let preset_from_capabilities caps =
@@ -314,13 +330,26 @@ let resolve_agent_preset config agent_name =
       | Eio.Cancel.Cancelled _ as e -> raise e
       | _ -> None
 
+(** Evaluate whether an agent's preset satisfies a task's requirement.
+    Returns [Ok ()] on match or no requirement, [Error reason] on mismatch.
+    SSOT for preset-fit logic — used by both claim and claim_next. *)
+let evaluate_preset_fit ~(agent_preset : string option)
+    ~(required_preset : string option) : (unit, string) result =
+  match required_preset, agent_preset with
+  | None, _ -> Ok ()
+  | Some required, None ->
+      Error (Printf.sprintf
+        "requires preset '%s' but agent has no preset" required)
+  | Some required, Some preset ->
+      if Keeper_tool_policy.preset_can_satisfy ~agent_preset:preset ~required_preset:required
+      then Ok ()
+      else Error (Printf.sprintf
+        "requires preset '%s' but agent has '%s'" required preset)
+
 (** Build a task_filter closure that checks required_preset against the agent's preset. *)
 let preset_task_filter ~agent_preset (task : Types.task) =
-  match task.required_preset, agent_preset with
-  | None, _ -> true
-  | Some _required, None -> false  (* agent without preset cannot satisfy preset requirement *)
-  | Some required, Some preset ->
-    Keeper_tool_policy.preset_can_satisfy ~agent_preset:preset ~required_preset:required
+  evaluate_preset_fit ~agent_preset ~required_preset:task.required_preset
+  |> Result.is_ok
 
 let handle_claim_next ctx _args =
   if not (try Room.is_agent_joined ctx.config ~agent_name:ctx.agent_name with Sys_error _ | Not_found -> false) then

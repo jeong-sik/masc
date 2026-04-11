@@ -2,6 +2,7 @@ import { html } from 'htm/preact'
 import { JsonViewerCard } from '../common/json-viewer'
 import { useEffect } from 'preact/hooks'
 import { CARD_STANDARD } from '../common/card'
+import { EmptyState } from '../common/feedback-state'
 import { ActionButton } from '../common/button'
 import { CountBadge } from '../common/badge'
 import { TimeAgo } from '../common/time-ago'
@@ -208,7 +209,7 @@ function renderSummaryBadges(activeCount: number, deferredCount: number, recentC
 function renderActivityTimeline() {
   const entries = timelineEntries()
   if (entries.length === 0) {
-    return html`<div class="p-3 rounded-xl border border-dashed border-[var(--card-border)] text-[13px] text-[var(--text-muted)]">아직 기록된 운영 활동이 없습니다.</div>`
+    return html`<${EmptyState} message="아직 기록된 운영 활동이 없습니다." compact />`
   }
 
   return html`
@@ -342,7 +343,7 @@ function renderRecentReviews() {
   const roomDigest = operatorRoomDigest.value
   const recent = roomDigest?.recent_reviews ?? []
   if (recent.length === 0) {
-    return html`<div class="p-3 rounded-xl border border-dashed border-[var(--card-border)] text-[13px] text-[var(--text-muted)]">최근 처리 기록이 없습니다.</div>`
+    return html`<${EmptyState} message="최근 처리 기록이 없습니다." compact />`
   }
   return html`
     <div class="grid gap-2">
@@ -474,7 +475,7 @@ export function Ops() {
             ${tab === 'recent'
               ? html`<${renderRecentReviews} />`
               : currentQueue.length === 0
-                ? html`<div class="p-3 rounded-xl border border-dashed border-[var(--card-border)] text-[13px] text-[var(--text-muted)]">이 탭에는 review item이 없습니다.</div>`
+                ? html`<${EmptyState} message="이 탭에는 review item이 없습니다." compact />`
                 : html`
                     <div class="grid gap-2">
                       ${currentQueue.map(item => html`
@@ -538,7 +539,7 @@ export function Ops() {
             </div>
 
             ${selectedItem == null
-              ? html`<div class="p-3 rounded-xl border border-dashed border-[var(--card-border)] text-[13px] text-[var(--text-muted)]">먼저 review item을 고르세요.</div>`
+              ? html`<${EmptyState} message="먼저 review item을 고르세요." compact />`
               : html`
                   ${primaryAction
                     ? html`
@@ -559,7 +560,7 @@ export function Ops() {
                           </div>
                         </article>
                       `
-                    : html`<div class="p-3 rounded-xl border border-dashed border-[var(--card-border)] text-[13px] text-[var(--text-muted)]">이 항목에는 자동으로 제안된 primary action이 없습니다.</div>`}
+                    : html`<${EmptyState} message="이 항목에는 자동으로 제안된 primary action이 없습니다." compact />`}
 
                   ${confirmToken
                     ? html`

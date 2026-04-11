@@ -3,6 +3,9 @@ open Masc_mcp
 
 let () = Mirage_crypto_rng_unix.use_default ()
 let () = Server_startup_state.mark_state_ready ~backend_mode:"test"
+let () =
+  let base_path = Masc_test_deps.find_project_root () in
+  ignore (Result.get_ok (Keeper_exec_tools.init_policy_config ~base_path))
 
 let temp_dir () =
   let dir = Filename.temp_file "test_keeper_reconcile_" "" in

@@ -13,6 +13,14 @@
     for test assertions and dashboard integration. *)
 val http_status_metric : string
 
+(** Emit a single HTTP status observation to the Prometheus counter.
+    Called by both the global sink built in {!make_sink} and any
+    per-call OAS [Metrics.t] literal that wants to forward
+    [on_http_status] (e.g. cascade observation captures).  Single
+    source of truth for the label shape. *)
+val emit_http_status :
+  provider:string -> model_id:string -> status:int -> unit
+
 (** Construct the OAS Metrics.t sink without installing it.  Useful
     for tests that want to pass [~metrics] explicitly without
     touching global state. *)

@@ -325,17 +325,12 @@ let cascade_metrics_for_candidates
          pass this per-call metrics sink explicitly (cascade
          observation path), OAS does not consult the global
          Llm_metric_bridge sink, so we must re-emit here to avoid
-         blackholing provider counters for captured turns. *)
+         blackholing provider counters for captured turns.  Delegating
+         to [Llm_metric_bridge.emit_http_status] keeps the label shape
+         a single source of truth. *)
       on_http_status =
         (fun ~provider ~model_id ~status ->
-          Prometheus.inc_counter Llm_metric_bridge.http_status_metric
-            ~labels:
-              [
-                ("provider", provider);
-                ("model", model_id);
-                ("status", string_of_int status);
-              ]
-            ());
+          Llm_metric_bridge.emit_http_status ~provider ~model_id ~status);
     }
   in
   (capture, metrics)

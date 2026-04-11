@@ -154,20 +154,15 @@ let claim_next_r config ~agent_name ?(exclude_task_ids=[]) ?(task_filter=fun (_:
           agent_name preset_filtered (now_iso ()));
 
       (* Helper: clear agent current_task and reset status after auto-release
-         when no replacement task can be claimed. *)
+         when no replacement task can be claimed.  Delegates to
+         [Room_task.update_local_agent_state] so the agent-file write
+         holds [with_file_lock] on the agent file itself, matching the
+         discipline used by [Room_task] transitions (PR #6634). *)
       let clear_agent_state_after_release () =
         match released_task_id with
         | Some _ ->
-            let agent_file = Filename.concat (agents_dir config) (safe_filename agent_name ^ ".json") in
-            if path_exists config agent_file then begin
-              let json = read_json config agent_file in
-              match agent_of_yojson json with
-              | Ok agent ->
-                  let updated = { agent with status = Active; current_task = None } in
-                  write_json config agent_file (agent_to_yojson updated)
-              | Error msg ->
-                  Log.Misc.error "agent state clear failed: %s" msg
-            end
+            Room_task.update_local_agent_state config ~agent_name (fun agent ->
+              { agent with status = Active; current_task = None })
         | None -> ()
       in
 
@@ -219,17 +214,13 @@ let claim_next_r config ~agent_name ?(exclude_task_ids=[]) ?(task_filter=fun (_:
           } in
           write_backlog config new_backlog;
 
-          (* Update agent status *)
-          let agent_file = Filename.concat (agents_dir config) (safe_filename agent_name ^ ".json") in
-          if path_exists config agent_file then begin
-            let json = read_json config agent_file in
-            match agent_of_yojson json with
-            | Ok agent ->
-                let updated = { agent with status = Busy; current_task = Some task.id } in
-                write_json config agent_file (agent_to_yojson updated)
-            | Error msg ->
-                Log.Misc.error "agent state write failed: %s" msg
-          end;
+          (* Update agent status — takes [with_file_lock] on the
+             agent file via [Room_task.update_local_agent_state] to
+             keep the record consistent with concurrent
+             [Room_agent.update_agent_r] or other task transitions
+             that hold the agent-file lock (PR #6634). *)
+          Room_task.update_local_agent_state config ~agent_name (fun agent ->
+            { agent with status = Busy; current_task = Some task.id });
 
           (* No broadcast — log_event + emit_task_activity below are sufficient. *)
           (match released_task_id with

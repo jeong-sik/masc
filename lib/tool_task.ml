@@ -244,39 +244,6 @@ let handle_batch_add_tasks ctx args =
     in
     (true, Room.batch_add_tasks_with_contracts ctx.config tasks)
 
-let handle_claim ctx args =
-  if not (try Room.is_agent_joined ctx.config ~agent_name:ctx.agent_name with Sys_error _ | Not_found -> false) then
-    result_to_response (Error (Types.AgentNotJoined ctx.agent_name))
-  else
-  let task_id = get_string args "task_id" "" in
-  match validate_task_id task_id with
-  | Error e -> result_to_response (Error e)
-  | Ok task_id ->
-  let agent_role = match get_string args "agent_role" "" with
-    | "" -> Types_core.Unassigned
-    | s -> Types_core.role_of_string s
-  in
-  let preset_warning = check_preset_mismatch ctx.config ~agent_name:ctx.agent_name ~task_id in
-  let result = Room.claim_task_r ctx.config ~agent_name:ctx.agent_name ~task_id ~agent_role () in
-  (match result with
-   | Ok _ ->
-       Planning_eio.set_current_task ctx.config ~task_id;
-       (match preset_warning with
-        | Some warning ->
-            Log.Task.warn "%s (agent=%s)" warning ctx.agent_name
-        | None -> ());
-       Subscriptions.push_event_to_sessions (`Assoc [
-         ("type", `String "masc/task_claimed");
-         ("task_id", `String task_id);
-         ("agent_name", `String ctx.agent_name);
-         ("timestamp", `Float (Time_compat.now ()));
-       ])
-   | Error e -> Log.Task.debug "task claim failed for %s: %s" task_id (Types.masc_error_to_string e));
-  let (ok, msg) = result_to_response result in
-  match preset_warning, ok with
-  | Some warning, true -> (true, msg ^ "\n⚠️ " ^ warning)
-  | _ -> (ok, msg)
-
 (** Extract preset token from capabilities (e.g., ["keeper"; "preset:delivery"]). *)
 let preset_from_capabilities caps =
   List.find_map
@@ -345,6 +312,39 @@ let check_preset_mismatch config ~agent_name ~task_id =
              The agent may lack tools needed for this task. \
              Consider reassigning or upgrading the preset."
             task_id required preset)
+
+let handle_claim ctx args =
+  if not (try Room.is_agent_joined ctx.config ~agent_name:ctx.agent_name with Sys_error _ | Not_found -> false) then
+    result_to_response (Error (Types.AgentNotJoined ctx.agent_name))
+  else
+  let task_id = get_string args "task_id" "" in
+  match validate_task_id task_id with
+  | Error e -> result_to_response (Error e)
+  | Ok task_id ->
+  let agent_role = match get_string args "agent_role" "" with
+    | "" -> Types_core.Unassigned
+    | s -> Types_core.role_of_string s
+  in
+  let preset_warning = check_preset_mismatch ctx.config ~agent_name:ctx.agent_name ~task_id in
+  let result = Room.claim_task_r ctx.config ~agent_name:ctx.agent_name ~task_id ~agent_role () in
+  (match result with
+   | Ok _ ->
+       Planning_eio.set_current_task ctx.config ~task_id;
+       (match preset_warning with
+        | Some warning ->
+            Log.Task.warn "%s (agent=%s)" warning ctx.agent_name
+        | None -> ());
+       Subscriptions.push_event_to_sessions (`Assoc [
+         ("type", `String "masc/task_claimed");
+         ("task_id", `String task_id);
+         ("agent_name", `String ctx.agent_name);
+         ("timestamp", `Float (Time_compat.now ()));
+       ])
+   | Error e -> Log.Task.debug "task claim failed for %s: %s" task_id (Types.masc_error_to_string e));
+  let (ok, msg) = result_to_response result in
+  match preset_warning, ok with
+  | Some warning, true -> (true, msg ^ "\n⚠️ " ^ warning)
+  | _ -> (ok, msg)
 
 (** Build a task_filter closure that checks required_preset against the agent's preset. *)
 let preset_task_filter ~agent_preset (task : Types.task) =

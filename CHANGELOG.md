@@ -2,6 +2,30 @@
 
 ## [Unreleased]
 
+## [0.5.5] - 2026-04-12
+
+### Added
+- Harness: expose cross-model enforcement rate on dashboard (#6565)
+- Dashboard: expose keeper FSM + root-fix hardcoded constants + TLA+ bug model (#6556)
+
+### Fixed
+- Keeper: cap Eio.Semaphore.acquire wait in with_keeper_turn_slot (#6608)
+- Keeper: delete manual_reconcile file on clear to unblock legacy binaries (#6576)
+- Tool worktree: reject cross-agent agent_name in masc_worktree_create (#6617)
+- Tool code_write: scope writable paths and clone cwd per-agent (#6610)
+- CI: narrow Keeper_tool_policy_config shortcut, revert signature tightening (#6607)
+- CI: require tool_policy.toml in config_signature_exists (#6595)
+
+### Changed
+- Bump OAS pin to v0.121.0 for keep_alive=-1 fix (#6601)
+- CI: wire specs/bug-models/ into tla-check.sh (#6582)
+
+### Specifications
+- TLA+ KeeperTaskInterlock: no Dead keeper holds a claimed task (#6574)
+
+### Documentation
+- Document post-turn-lifecycle implicit invariant (#6604)
+
 ## [0.5.4] - 2026-04-11
 
 ### Added

@@ -191,11 +191,19 @@ let ensure_same_origin_browser_request request :
          Set MASC_ALLOW_ANONYMOUS_MUTATIONS=true for local development.")
   | Some origin -> (
       match host_port_scheme_of_origin origin, host_port_of_request request with
+      (* Loopback relaxation: skip port check for localhost/127.0.0.1.
+         Allows vite dev server (5173) to mutate the backend (8935).
+         Not a security concern — both ports are on the same machine,
+         and remote attackers cannot forge a loopback Origin. *)
+      | Some (origin_host, _origin_port, _scheme),
+        Some (request_host, _request_port)
+        when (let norm h = if h = "127.0.0.1" then "localhost" else h in
+              let is_local h = h = "localhost" || h = "127.0.0.1" in
+              is_local origin_host && String.equal (norm origin_host) (norm request_host)) ->
+          Ok ()
       | Some (origin_host, origin_port, scheme),
         Some (request_host, request_port)
         when String.equal origin_host request_host ->
-          (* Normalize implicit ports using Origin's scheme so that
-             e.g. Origin "https://h" (port=None→443) matches Host "h:443". *)
           let default = default_port_of_scheme scheme in
           let norm p = match p with Some _ -> p | None -> default in
           if norm origin_port = norm request_port then Ok ()

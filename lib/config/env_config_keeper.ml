@@ -304,6 +304,10 @@ module KeeperKeepalive = struct
       let per_1k = 1.5 in
       let per_turn = 30.0 in
       let context_time = Float.of_int max_context /. 1000.0 *. per_1k in
+      (* Cap at 40 effective turns even if user sets MASC_KEEPER_OAS_MAX_TURNS_PER_CALL
+         higher.  This is a deliberate safety cap: with per_turn=30s, 40 turns alone
+         consume 1200s — the entire turn_timeout_sec budget.  Users pushing beyond
+         40 turns should instead raise turn_timeout_sec or split the work. *)
       let effective_turns =
         Float.of_int (min oas_max_turns_per_call 40)
       in

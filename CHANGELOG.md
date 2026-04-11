@@ -2,12 +2,38 @@
 
 ## [Unreleased]
 
+## [0.5.4] - 2026-04-11
+
 ### Added
-- `MASC_KEEPER_CASCADE_PROVIDER_ALLOWLIST` env knob for runtime cascade narrowing (CSV of provider kinds - `ollama`, `glm`, etc.). Flows through `Env_config_keeper.KeeperCascade.provider_allowlist` -> `Keeper_agent_run.run_turn` -> OAS `Cascade_config.apply_provider_filter`. Unset => full cascade, no behavior change. (#6478)
-- `Config_dir_resolver.log_resolution` info log emitted once at server startup. When `MASC_CONFIG_DIR` silently shadows a `<base_path>/.masc/config` overlay, the log line appends a hint so operators don't lose time debugging an overlay that is being ignored. (#6478)
-- `test_cascade_config_validity` alcotest suite - runs every committed `config/cascade.json` profile through OAS `parse_model_string_exn`, hard-fails on unknown providers / invalid specs, soft-passes on "provider unavailable" (missing API key). Profile names are discovered from the JSON, not hardcoded. Includes a meta-guard that feeds a synthetic unknown-provider entry to prove the happy-path assertion is not vacuous. (#6478)
-- `scripts/sync-version-truth.sh` - dry-run-by-default helper that keeps `dune-project`, `masc_mcp.opam`, and `ROADMAP.md` "Current package version" in sync. Uses `dune-project` as the single source of truth; regenerates opam via `dune build`; updates ROADMAP with an anchored sed. `--apply` required to write; `check-version-truth.sh` post-verify runs automatically. (#6478)
-- `scripts/opam-pin-external-deps.sh --install` flag - rebuild pinned packages after pin, closes the "pin updated but binary is still old" local-dev footgun documented in the file header. (#6478)
+- `MASC_KEEPER_CASCADE_PROVIDER_ALLOWLIST` env knob for runtime cascade narrowing (#6478)
+- `Config_dir_resolver.log_resolution` startup log with shadow hint (#6478)
+- `test_cascade_config_validity` alcotest suite for cascade.json profiles (#6478)
+- `scripts/sync-version-truth.sh` dry-run version sync helper (#6478)
+- `scripts/opam-pin-external-deps.sh --install` flag (#6478)
+
+### Changed
+- Keeper: remove scope_kind gating (#6544)
+- Cascade: drop unsupported groq labels (#6558)
+- Dashboard: remove dead SSE route entries (#6557)
+
+### Fixed
+- Keeper: block write ops outside playground in keeper_bash (#6579)
+- Keeper: address cross-model review follow-ups for #6543 (#6563)
+- Keeper: log when open_pending overwrites a Cleared reconcile record (#6562)
+- Keeper: use Eio.Lazy for decision_audit env caches (#6549)
+- Keeper: tolerate text_response when provider ignores tool_choice (#6532)
+- Keeper: distinguish Cancel from Timeout in LLM bridge (#6543)
+- Keeper: enforce base path SSOT for playgrounds (#6548)
+- Keeper: fix startup base path and cwd defaults (#6546)
+- Keeper: fix channel gate ack leak (#6545)
+- gRPC: guarantee cleanup on heartbeat fiber exit paths (#6524)
+- gRPC: guarantee typed_stream close on subscribe fiber exit paths (#6529)
+- Worktree: remove server-root fallback from worktree_create_r (#6542)
+- Config: align config truth with runtime paths (#6503)
+- CI: clean log noise and TLA workflow (#6505)
+- Dashboard: type supervisor_diagnostics + ErrorState wave 3 (#6550)
+- Test: clone into playground before masc_worktree_* (#6577)
+- Docs: require keeper worktree under own playground clone (#6533)
 
 ## [0.5.3] - 2026-04-11
 

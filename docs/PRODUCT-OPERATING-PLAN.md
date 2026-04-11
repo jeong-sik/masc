@@ -1,7 +1,7 @@
 # Product Operating Plan
 
-> Current package version: v0.5.3
-> Latest release: v0.5.3 (2026-04-11)
+> Current package version: v0.5.4
+> Latest release: v0.5.4 (2026-04-11)
 > Updated: 2026-04-11
 > Release line: pre-1.0 (`0.y.z`); legacy `v2.*` tags are frozen history
 

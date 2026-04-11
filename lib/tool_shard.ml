@@ -324,13 +324,15 @@ For read-only ops use keeper_shell, for file edits use keeper_fs_edit.";
     name = "keeper_github";
     description = "Run a single gh CLI command. \
 NO chaining (&&/||/;), NO pipes (|), NO redirects (>). \
-Good: cmd='pr list --state open'. Bad: cmd='pr list && echo done'. \
+Do NOT put --repo in cmd. Use the repo parameter instead, or omit it to use the current repo. \
+Good: cmd='pr list --state open'. Bad: cmd='pr list --repo owner/repo'. \
 Use for: issues, PRs, review comments, CI status.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
         ("cmd", `Assoc [("type", `String "string"); ("description", `String "gh subcommand string, e.g. 'issue create --title ...'")]);
         ("args", `Assoc [("type", `String "array"); ("items", `Assoc [("type", `String "string")]); ("description", `String "Optional argv list for gh (without leading gh)")]);
+        ("repo", `Assoc [("type", `String "string"); ("description", `String "owner/repo slug. Omit to use the current repo from git remote. Do NOT guess.")]);
         ("timeout_sec", `Assoc [("type", `String "number"); ("description", `String "Timeout seconds (default: 30, max: 180)")]);
       ]);
     ];

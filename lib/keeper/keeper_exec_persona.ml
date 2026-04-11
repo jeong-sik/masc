@@ -23,8 +23,8 @@ let read_jsonl_rows path ~max_bytes ~max_lines : Yojson.Safe.t list =
     []
   else
     read_file_tail_lines path ~max_bytes ~max_lines
-    |> List.filter_map (fun line ->
-           try Some (Yojson.Safe.from_string line) with Yojson.Json_error _ -> None)
+    |> Fs_compat.parse_jsonl_lines ~source:"persona_metrics"
+    |> fst
 
 let find_jsonl_row_by_action_id rows action_id =
   rows

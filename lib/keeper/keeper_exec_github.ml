@@ -58,6 +58,104 @@ let truncate_gh_output (out : string) : string * (string * Yojson.Safe.t) list =
       "original_bytes", `Int len;
       "shown_bytes", `Int shown_bytes ]
 
+(** Regex matching --repo owner/name, --repo=owner/name, or -R owner/name in gh CLI commands. *)
+let repo_flag_re =
+  Re.compile
+    (Re.seq
+       [ Re.alt [ Re.str "--repo"; Re.str "-R" ]
+       ; Re.alt [ Re.rep1 Re.blank; Re.str "=" ]
+       ; Re.rep1 (Re.compl [ Re.blank ])
+       ])
+
+let has_repo_flag cmd =
+  Re.execp repo_flag_re cmd
+
+let is_valid_repo_segment segment =
+  segment <> ""
+  && String.for_all
+       (function
+         | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '.' | '-' | '_' -> true
+         | _ -> false)
+       segment
+
+let validate_repo_slug raw =
+  let slug = String.trim raw in
+  match String.split_on_char '/' slug with
+  | [ owner; repo ] when is_valid_repo_segment owner && is_valid_repo_segment repo ->
+      Ok (owner ^ "/" ^ repo)
+  | _ ->
+      Error
+        "repo must be an owner/repo slug without spaces or extra flags."
+
+let rec strip_repo_flags_from_args = function
+  | [] -> []
+  | "--repo" :: _value :: rest
+  | "-R" :: _value :: rest ->
+      strip_repo_flags_from_args rest
+  | arg :: rest when String.starts_with ~prefix:"--repo=" arg ->
+      strip_repo_flags_from_args rest
+  | arg :: rest ->
+      arg :: strip_repo_flags_from_args rest
+
+let args_have_repo_flag args =
+  List.exists
+    (fun arg -> arg = "--repo" || arg = "-R" || String.starts_with ~prefix:"--repo=" arg)
+    args
+
+let inject_repo_flag_args ~repo_slug args =
+  strip_repo_flags_from_args args @ [ "--repo"; repo_slug ]
+
+(** Cached owner/repo slug from git remote origin. *)
+let _repo_slug_cache : string option option ref = ref None
+
+let project_repo_slug () : string option =
+  match !_repo_slug_cache with
+  | Some cached -> cached
+  | None ->
+      let slug =
+        match Process_eio.run_argv_with_status ~timeout_sec:5.0
+                ["git"; "remote"; "get-url"; "origin"] with
+        | Unix.WEXITED 0, url ->
+            let url = String.trim url in
+            (* git@github.com:owner/repo.git or https://github.com/owner/repo.git *)
+            let strip_git s =
+              if String.length s > 4 && String.sub s (String.length s - 4) 4 = ".git"
+              then String.sub s 0 (String.length s - 4)
+              else s
+            in
+            (match String.split_on_char ':' url with
+             | [_; path] when String.contains url '@' ->
+                 Some (strip_git path)
+             | _ ->
+                 (* https://github.com/owner/repo.git *)
+                 let parts = String.split_on_char '/' url in
+                 let n = List.length parts in
+                 if n >= 2 then
+                   let owner = List.nth parts (n - 2) in
+                   let repo = strip_git (List.nth parts (n - 1)) in
+                   Some (owner ^ "/" ^ repo)
+                 else None)
+        | _ -> None
+      in
+      _repo_slug_cache := Some slug;
+      slug
+
+(** Replace a wrong --repo/-R slug in cmd with the correct one.
+    Returns (corrected_cmd, was_corrected). *)
+let correct_repo_flag ~(correct_slug : string) (cmd : string) : string * bool =
+  if Re.execp repo_flag_re cmd then
+    let corrected =
+      Re.replace repo_flag_re
+        ~f:(fun g ->
+          let matched = Re.Group.get g 0 in
+          let flag = if String.length matched > 2 && matched.[0] = '-' && matched.[1] = 'R'
+                     then "-R" else "--repo" in
+          flag ^ " " ^ correct_slug)
+        cmd
+    in
+    (corrected, corrected <> cmd)
+  else (cmd, false)
+
 let handle_keeper_github
       ~(config : Room.config)
       ~(meta : keeper_meta)
@@ -65,17 +163,58 @@ let handle_keeper_github
   =
   let cmd = Safe_ops.json_string ~default:"" "cmd" args |> String.trim in
   let gh_args = Safe_ops.json_string_list "args" args in
+  let repo_param = Safe_ops.json_string ~default:"" "repo" args |> String.trim in
   let timeout_sec =
     Safe_ops.json_float ~default:30.0 "timeout_sec" args |> fun n -> max 1.0 (min 180.0 n)
   in
-  let gh_raw =
+  let gh_raw_base =
     if cmd <> "" then cmd else if gh_args <> [] then String.concat " " gh_args else ""
   in
-  if gh_raw = ""
+  let root = Keeper_alerting_path.project_root_of_config config in
+  if gh_raw_base = ""
   then error_json "cmd is required. \
                    Good: cmd='pr list --state open'. Bad: cmd=''. \
                    Single gh subcommand only, no chaining."
-  else (
+  else
+  let repo_slug =
+    if repo_param = "" then Ok None else Result.map Option.some (validate_repo_slug repo_param)
+  in
+  match repo_slug with
+  | Error reason -> error_json reason
+  | Ok repo_slug ->
+  (* Structured repo parameter: if provided, inject --repo flag.
+     If not provided but cmd contains --repo/-R with wrong owner, correct it.
+     This is the root fix for LLM hallucinating repo owners (#6043). *)
+  let gh_raw, gh_cmd =
+    match cmd <> "", repo_slug with
+    | true, Some slug ->
+        let normalized =
+          if has_repo_flag gh_raw_base then fst (correct_repo_flag ~correct_slug:slug gh_raw_base)
+          else Printf.sprintf "%s --repo %s" gh_raw_base slug
+        in
+        normalized, "gh " ^ normalized
+    | false, Some slug ->
+        let normalized_args = inject_repo_flag_args ~repo_slug:slug gh_args in
+        String.concat " " normalized_args,
+        "gh " ^ String.concat " " (List.map Filename.quote normalized_args)
+    | true, None -> (
+        match project_repo_slug () with
+        | Some slug when has_repo_flag gh_raw_base ->
+            let corrected, _ = correct_repo_flag ~correct_slug:slug gh_raw_base in
+            corrected, "gh " ^ corrected
+        | _ ->
+            gh_raw_base, "gh " ^ gh_raw_base)
+    | false, None -> (
+        match project_repo_slug () with
+        | Some slug when args_have_repo_flag gh_args ->
+            let normalized_args = inject_repo_flag_args ~repo_slug:slug gh_args in
+            String.concat " " normalized_args,
+            "gh " ^ String.concat " " (List.map Filename.quote normalized_args)
+        | _ ->
+            String.concat " " gh_args,
+            "gh " ^ String.concat " " (List.map Filename.quote gh_args))
+  in
+  (
     match Worker_dev_tools.validate_gh_command gh_raw with
     | Error reason ->
       Log.Keeper.warn "keeper_github blocked: %s (cmd=%s)" reason gh_raw;
@@ -178,10 +317,6 @@ let handle_keeper_github
                 ; "cmd", `String ("gh " ^ gh_raw)
                 ])
         | `Allowed ->
-          let gh_cmd =
-            "gh "
-            ^ (if cmd <> "" then cmd else String.concat " " (List.map Filename.quote gh_args))
-          in
           let shell_cmd = Printf.sprintf "cd %s && %s 2>&1" (Filename.quote root) gh_cmd in
           let st, raw_out = Process_eio.run_argv_with_status ~timeout_sec [ "/bin/zsh"; "-lc"; shell_cmd ] in
           let out, trunc_fields = truncate_gh_output raw_out in
@@ -192,12 +327,6 @@ let handle_keeper_github
                  ; "output", `String out
                  ] @ trunc_fields @ gh_not_found_hint ~st ~out)))
       else (
-        let gh_cmd =
-          if cmd <> ""
-          then "gh " ^ cmd
-          else "gh " ^ String.concat " " (List.map Filename.quote gh_args)
-        in
-        let root = Keeper_alerting_path.project_root_of_config config in
         let shell_cmd = Printf.sprintf "cd %s && %s 2>&1" (Filename.quote root) gh_cmd in
         let st, raw_out =
           Process_eio.run_argv_with_status ~timeout_sec [ "/bin/zsh"; "-lc"; shell_cmd ]

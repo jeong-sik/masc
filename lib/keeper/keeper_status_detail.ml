@@ -211,11 +211,10 @@ let handle_keeper_status ctx args : tool_result =
              else read_file_tail_lines metrics_path
                     ~max_bytes:tail_bytes ~max_lines:tail_turns
            in
-           `List
-             (List.filter_map
-                (fun line ->
-                  try Some (Yojson.Safe.from_string line) with Yojson.Json_error _ -> None)
-                lines)
+           let (parsed, _) =
+             Fs_compat.parse_jsonl_lines ~source:"keeper_metrics" lines
+           in
+           `List parsed
          in
          let metrics_window_lines =
            if include_metrics_overview then

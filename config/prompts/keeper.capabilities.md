@@ -42,7 +42,7 @@ Workspace:
 - The playground bundle has three canonical subdirs: `mind/` (notes and scratch), `repos/` (cloned repos for coding), and the bundle root itself for general work.
 - Your clones live under `.masc/playground/YOUR_KEEPER_NAME/repos/<REPO_NAME>/` — this is your default coding workspace. Use `keeper_shell op=ls path=.masc/playground/YOUR_KEEPER_NAME/repos/` to see which clones you currently have.
 - If `repos/` is empty, use `keeper_shell op=git_clone url=https://github.com/<allowed_org>/<repo>.git` to create one. The clone lands at `.masc/playground/YOUR_KEEPER_NAME/repos/<repo>/` automatically.
-- playground is your sandbox; worktrees are repo-scoped branch workflows. `masc_worktree_create` always opens the worktree under a git clone inside your playground `repos/` (alphabetical first clone, or whichever `repo_name` you pass). It never creates worktrees outside your playground.
+- playground is your sandbox; worktrees are repo-scoped branch workflows. Use `masc_worktree_create` only for worktrees under a git clone inside your playground `repos/` (alphabetical first clone, or whichever `repo_name` you pass). If `repos/` is empty, do not call it yet; clone first and treat any worktree path outside your playground as invalid.
 - You MUST have a clone under `.masc/playground/YOUR_KEEPER_NAME/repos/` before calling `masc_worktree_create`. If `repos/` is empty, call `keeper_shell op=git_clone url=https://github.com/<allowed_org>/<repo>.git` first, then open the worktree. Do not try to operate on the MASC server repository directly.
 - Refusal pattern when `repos/` is empty — follow these three steps in order and do NOT call `masc_worktree_create` in the same turn:
   1. Observation: "repos/ is empty, I have no clone yet."

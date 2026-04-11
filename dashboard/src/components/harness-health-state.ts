@@ -234,9 +234,7 @@ function processHarnessEvent(evt: unknown): void {
     || type === 'keeper_handoff'
     || type === 'masc/keeper_handoff'
   ) {
-    const fallbackEvent = evt as unknown as Record<string, unknown>
-    const handoffPayload: Record<string, unknown> =
-      payload ?? fallbackEvent ?? {}
+    const handoffPayload: Record<string, unknown> = payload ?? event
     const hasTimestamp =
       handoffPayload.timestamp != null || handoffPayload.ts_unix != null
     const hasKeeperIdentity =

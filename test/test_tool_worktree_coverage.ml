@@ -192,7 +192,7 @@ let () =
       test_case "worktree_list" `Quick test_dispatch_worktree_list;
       test_case "unknown" `Quick test_dispatch_unknown_tool;
     ];
-    "iter7_agent_name_spoof_6527", [
+    "agent_name_spoof", [
       test_case "spoofed agent_name blocked" `Quick
         test_dispatch_worktree_create_spoofed_agent_blocked;
       test_case "matching agent_name passes spoof gate" `Quick

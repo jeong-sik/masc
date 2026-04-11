@@ -10,6 +10,24 @@ open Keeper_status_bridge
 
 include Dashboard_http_keeper_detail
 
+(** Parse JSONL lines, returning both parsed values and the count of
+    malformed (unparseable) lines.  Surfaces degraded state instead of
+    silently dropping bad rows. *)
+let parse_jsonl_with_diagnostics (lines : string list)
+    : Yojson.Safe.t list * int =
+  let malformed = ref 0 in
+  let parsed =
+    List.filter_map (fun line ->
+      match Yojson.Safe.from_string line with
+      | json -> Some json
+      | exception Yojson.Json_error msg ->
+          incr malformed;
+          Log.Dashboard.warn "malformed JSONL line dropped: %s" msg;
+          None
+    ) lines
+  in
+  (parsed, !malformed)
+
 (** Context-ratio thresholds for keeper health scoring.
     These are distinct from Dashboard.ctx_* (compaction triggers) —
     health scoring penalizes keepers approaching context limits.
@@ -108,7 +126,10 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
     (List.mapi (fun idx name -> fun () ->
       results.(idx) <- (
       match Keeper_types.read_meta config name with
-      | Error _ | Ok None -> None
+      | Error msg ->
+          Log.Dashboard.warn "keeper %s meta read error (degraded): %s" name msg;
+          None
+      | Ok None -> None
       | Ok (Some (m : Keeper_types.keeper_meta)) ->
           let agent = Keeper_exec_status.parse_agent_status config ~agent_name:m.agent_name in
 
@@ -177,10 +198,8 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
             else keeper_metrics_24h_json ~metrics_lines:all_metrics_lines ~now_ts
           in
           let metrics_lines = all_metrics_lines in
-          let parsed_metrics =
-            List.filter_map (fun line ->
-              try Some (Yojson.Safe.from_string line) with Yojson.Json_error _ -> None
-            ) metrics_lines
+          let (parsed_metrics, metrics_malformed) =
+            parse_jsonl_with_diagnostics metrics_lines
           in
 	          let last_metrics =
 	            match List.rev parsed_metrics with
@@ -414,7 +433,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                      `Assoc [("has_checkpoint", `Bool false)]
                  | _ ->
                      let primary_max_context =
-                       (match cfgs with c :: _ -> c.Llm_provider.Provider_config.max_tokens | [] -> 128_000)
+                       Oas_model_resolve.resolve_primary_max_context effective_models
                      in
                      let base_dir = Keeper_types.session_base_dir config in
                      let (_session, ctx_opt) =
@@ -533,7 +552,10 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                   ("conversation_tail", conversation_tail);
                   ("k2k_recent", k2k_recent);
                   ("trust_observatory", trust_observatory);
-                ]
+                ] @ (if metrics_malformed > 0 then
+                       [("metrics_malformed_lines", `Int metrics_malformed)]
+                     else [])
+
               in
 	            `Assoc ([
               ("name", `String m.name);
@@ -738,21 +760,21 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
     ) names);
   let summaries = Array.to_list results |> List.filter_map Fun.id in
   (* H-9 fix: include recent alerts so BAD alerts are visible on dashboard *)
-  let recent_alerts =
+  let (recent_alerts, alerts_malformed) =
     let alerts_path = Keeper_types.keeper_alerts_path config in
     let lines =
       Keeper_memory.read_file_tail_lines alerts_path ~max_bytes:50000 ~max_lines:10
     in
-    List.filter_map (fun line ->
-      try Some (Yojson.Safe.from_string line) with Yojson.Json_error _ -> None
-    ) lines
+    parse_jsonl_with_diagnostics lines
   in
-  `Assoc [
+  `Assoc ([
     ("keepers", `List summaries);
     ("total", `Int (List.length summaries));
     ("recent_alerts", `List recent_alerts);
     ("alert_count", `Int (List.length recent_alerts));
-  ]
+  ] @ (if alerts_malformed > 0 then
+         [("alerts_malformed_lines", `Int alerts_malformed)]
+       else []))
 
 (** Build a structured config JSON for a single keeper, grouped by category.
     Returns (http_status, json). *)

@@ -18,10 +18,10 @@ type verdict_record = {
   task_title : string;
   agent_name : string;
   verdict : string;               (** "approve" | "reject:<reason>" *)
-  gate : string;                  (** Anti_rationalization.gate_to_string output *)
+  gate : Anti_rationalization.gate;  (** Typed gate — was stringly-typed *)
   evaluator_cascade : string;
   generator_cascade : string option;
-  fallback_reason : string option; (** Error message when gate="fallback" *)
+  fallback_reason : string option; (** Error message when gate=Fallback *)
   timestamp : float;
 }
 
@@ -92,7 +92,7 @@ let verdict_record_to_json (r : verdict_record) : Yojson.Safe.t =
     ("task_title", `String r.task_title);
     ("agent_name", `String r.agent_name);
     ("verdict", `String r.verdict);
-    ("gate", `String r.gate);
+    ("gate", `String (Anti_rationalization.gate_to_string r.gate));
     ("evaluator_cascade", `String r.evaluator_cascade);
     ("generator_cascade", Json_util.string_opt_to_json r.generator_cascade);
     ("timestamp", `Float r.timestamp);
@@ -124,12 +124,12 @@ let to_harness_verdict (r : verdict_record) : Agent_sdk.Harness.verdict =
   let passed = r.verdict = "approve" in
   let score = if passed then Some 1.0 else Some 0.0 in
   let evidence = [
-    Printf.sprintf "gate=%s" r.gate;
+    Printf.sprintf "gate=%s" (Anti_rationalization.gate_to_string r.gate);
     Printf.sprintf "evaluator=%s" r.evaluator_cascade;
     Printf.sprintf "task_id=%s" r.task_id;
   ] in
   let detail = if passed then None
-    else Some (Printf.sprintf "rejected at %s gate: %s" r.gate r.verdict)
+    else Some (Printf.sprintf "rejected at %s gate: %s" (Anti_rationalization.gate_to_string r.gate) r.verdict)
   in
   { Agent_sdk.Harness.passed; score; evidence; detail }
 
@@ -155,7 +155,7 @@ let record_verdict
     task_title = req.task_title;
     agent_name = req.agent_name;
     verdict = verdict_str;
-    gate = Anti_rationalization.gate_to_string result.gate;
+    gate = result.gate;
     evaluator_cascade = result.evaluator_cascade;
     generator_cascade = result.generator_cascade;
     fallback_reason = result.fallback_reason;

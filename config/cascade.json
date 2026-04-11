@@ -1,23 +1,25 @@
 {
   "default_models": [
+    "glm-coding:glm-4.7",
+    "glm-coding:glm-5.1",
     "glm:glm-5.1",
-    "glm:glm-5-turbo",
     "ollama:qwen3.5:35b-a3b-nvfp4"
   ],
   "local_only_models": [
     "ollama:qwen3.5:35b-a3b-nvfp4"
   ],
   "keeper_unified_models": [
-    "glm:glm-5.1",
-    "glm:glm-5-turbo",
+    "glm-coding:glm-4.7",
+    "glm-coding:glm-5.1",
     "ollama:qwen3.5:35b-a3b-nvfp4"
   ],
   "coding_first_models": [
+    "glm-coding:glm-4.7",
+    "glm-coding:glm-5.1",
     "glm:glm-5.1",
-    "glm:glm-5-turbo",
     "ollama:qwen3.5:35b-a3b-nvfp4"
   ],
-  "_comment": "keeper_unified = 5.1(3s) -> 5-turbo -> local. coding_first = same order. flashx removed: hangs on api.z.ai (2026-04-11). local_only = Ollama only.",
+  "_comment": "glm-coding = Coding Plan endpoint (included in subscription). glm = general API (pay-per-use). Coding Plan first, API fallback, local last.",
   "coding_first_temperature": 0.2,
   "coding_first_max_tokens": 65536,
   "tool_rerank_temperature": 0.0,

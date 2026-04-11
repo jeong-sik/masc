@@ -569,6 +569,7 @@ export interface Keeper {
   presence_keepalive?: boolean
   presence_keepalive_sec?: number
   keepalive_running?: boolean
+  registry_state?: string | null
   proactive_enabled?: boolean
   proactive_idle_sec?: number
   proactive_cooldown_sec?: number

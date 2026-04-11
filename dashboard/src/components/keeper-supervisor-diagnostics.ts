@@ -125,7 +125,7 @@ export function SupervisorDiagnosticsPanel({ keeper }: { keeper: Keeper }) {
         </div>
         <div class="flex items-center justify-between">
           <span class="text-xs text-[var(--text-muted)]">실행 상태</span>
-          ${registryStateBadge(null)}
+          ${registryStateBadge(keeper.registry_state ?? null)}
         </div>
         <div>
           <div class="flex items-center justify-between mb-1">

@@ -31,9 +31,9 @@ let validate_writable_path config path =
   match Tool_code.validate_path config path with
   | Error e -> Error e
   | Ok canonical_path ->
-    (* Path must be inside a safe sandbox: .worktrees/ or .masc/playground/.
-       Both are isolated from main — worktrees are git checkouts,
-       playground is each keeper's personal clone. *)
+    (* Path must be inside a safe sandbox:
+       - any /.worktrees/ ancestor (git worktree checkouts)
+       - {base_path}/.masc/playground/ (keeper personal clones) *)
     let has_segment path marker =
       let mlen = String.length marker in
       let plen = String.length path in
@@ -44,8 +44,12 @@ let validate_writable_path config path =
       in
       scan 0
     in
+    let playground_prefix =
+      Tool_code.normalize_path
+        (Filename.concat config.Room.base_path ".masc/playground") ^ "/"
+    in
     if has_segment canonical_path "/.worktrees/"
-       || has_segment canonical_path "/.masc/playground/" then
+       || String.starts_with ~prefix:playground_prefix canonical_path then
       Ok canonical_path
     else
       Error (IoError (Printf.sprintf

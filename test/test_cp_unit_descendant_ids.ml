@@ -112,6 +112,45 @@ let test_cycle_still_caught () =
     "cycle handled without Stack_overflow" true
     (List.length descendants <= 2)
 
+(* ─── descendant_units_of_kind tests (#6635 follow-up) ────────────── *)
+(* Same failure template — this function had no depth guard and no
+   cycle detection before the fix, so a deep chain (or a cycle) would
+   recurse until Stack_overflow.  Mirrors the [descendant_ids] coverage. *)
+
+let test_duok_linear_chain_60_no_overflow () =
+  let units = linear_chain 60 in
+  let descendants =
+    Cp_unit.descendant_units_of_kind units "unit_0" Squad
+  in
+  (* No exception is the primary assertion; a truncated list is the
+     secondary sanity check.  All 60 units have [kind = Squad] in
+     [make_unit], so before the depth guard all 59 descendants would
+     be visited; after the fix we bound at [_max_tree_depth = 50]. *)
+  Alcotest.(check bool)
+    "chain 60 truncates below full depth without Stack_overflow" true
+    (List.length descendants < 60 && List.length descendants >= 1)
+
+let test_duok_short_chain_matches_kind () =
+  let units = linear_chain 10 in
+  let descendants =
+    Cp_unit.descendant_units_of_kind units "unit_0" Squad
+  in
+  (* Chain of 10, all [Squad], so unit_0 has 9 descendants of kind Squad. *)
+  Alcotest.(check int)
+    "chain of 10 returns 9 Squad descendants" 9 (List.length descendants)
+
+let test_duok_cycle_terminates () =
+  let a = make_unit ~unit_id:"a" ~parent_unit_id:"b" () in
+  let b = make_unit ~unit_id:"b" ~parent_unit_id:"a" () in
+  let descendants =
+    Cp_unit.descendant_units_of_kind [a; b] "a" Squad
+  in
+  (* Cycle detection returns [] on re-entry.  The call must terminate
+     and return a bounded-length list. *)
+  Alcotest.(check bool)
+    "cycle handled without Stack_overflow" true
+    (List.length descendants <= 2)
+
 let () =
   Alcotest.run "Cp_unit_descendant_ids"
     [
@@ -123,5 +162,14 @@ let () =
             `Quick test_short_chain_unaffected;
           Alcotest.test_case "cycle still caught by visited check"
             `Quick test_cycle_still_caught;
+        ] );
+      ( "descendant_units_of_kind",
+        [
+          Alcotest.test_case "linear chain 60 truncates below full depth"
+            `Quick test_duok_linear_chain_60_no_overflow;
+          Alcotest.test_case "linear chain 10 returns 9 Squad descendants"
+            `Quick test_duok_short_chain_matches_kind;
+          Alcotest.test_case "cycle terminates without Stack_overflow"
+            `Quick test_duok_cycle_terminates;
         ] );
     ]

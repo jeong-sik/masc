@@ -469,7 +469,7 @@ export async function refreshExecution(opts?: RefreshOptions): Promise<void> {
 /** Reconcile board posts by id+updated_at so unchanged items keep
  *  the same object reference.  Preact skips re-rendering subtrees
  *  whose props haven't changed, preserving scroll position. */
-function reconcileBoardPosts(prev: BoardPost[], next: BoardPost[]): BoardPost[] {
+export function reconcileBoardPosts(prev: BoardPost[], next: BoardPost[]): BoardPost[] {
   if (prev.length === 0) return next
   const prevById = new Map(prev.map(p => [p.id, p]))
   let changed = prev.length !== next.length

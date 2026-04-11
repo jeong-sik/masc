@@ -149,7 +149,7 @@ else
 
     MASC_ORCHESTRATOR_ENABLED=0 \
     MASC_AUTO_RESPOND=true \
-    MASC_CONFIG_DIR="${MASC_CONFIG_DIR:-$REPO_DIR/config}" \
+    MASC_CONFIG_DIR="${MASC_CONFIG_DIR:-$BASE_PATH/.masc/config}" \
         nohup "$RELEASE_EXE" \
             --port="$PROD_PORT" \
             --base-path="$BASE_PATH" \
@@ -199,7 +199,7 @@ else
             fi
             MASC_ORCHESTRATOR_ENABLED=0 \
             MASC_AUTO_RESPOND=true \
-            MASC_CONFIG_DIR="${MASC_CONFIG_DIR:-$REPO_DIR/config}" \
+            MASC_CONFIG_DIR="${MASC_CONFIG_DIR:-$BASE_PATH/.masc/config}" \
                 nohup "$RELEASE_EXE" \
                     --port="$PROD_PORT" \
                     --base-path="$BASE_PATH" \

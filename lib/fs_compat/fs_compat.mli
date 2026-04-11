@@ -55,7 +55,7 @@ val load_jsonl : string -> Yojson.Safe.t list
 
 val load_jsonl_diagnostics : string -> Yojson.Safe.t list * int
 (** Load JSONL file, returning parsed values and count of malformed lines.
-    Logs each malformed line with file path.  Use when the caller needs
+    Logs each malformed line with the provided source label. Use when the caller needs
     to surface degraded state (e.g. dashboard malformed_lines field). *)
 
 val parse_jsonl_lines : source:string -> string list -> Yojson.Safe.t list * int

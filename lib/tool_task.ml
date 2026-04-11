@@ -329,13 +329,14 @@ let handle_claim ctx args =
         match evaluate_preset_fit ~agent_preset ~required_preset:task.required_preset with
         | Ok () -> None
         | Error reason ->
-            let msg = Printf.sprintf "preset_mismatch: task %s %s" task_id reason in
-            Log.Task.warn "%s (agent=%s)" msg ctx.agent_name;
-            Some msg
+            Some (Printf.sprintf "preset_mismatch: task %s %s" task_id reason)
   in
   let result = Room.claim_task_r ctx.config ~agent_name:ctx.agent_name ~task_id ~agent_role () in
   (match result with
    | Ok _ ->
+       (match preset_warning with
+        | Some warning -> Log.Task.warn "%s (agent=%s)" warning ctx.agent_name
+        | None -> ());
        Planning_eio.set_current_task ctx.config ~task_id;
        Subscriptions.push_event_to_sessions (`Assoc [
          ("type", `String "masc/task_claimed");

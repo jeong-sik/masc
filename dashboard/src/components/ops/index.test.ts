@@ -18,7 +18,7 @@ async function loadOps() {
   vi.doMock('../flow-control/flow-control-panel', () => ({
     FlowControlPanel: () => html`<div data-testid="flow-control-panel">FlowControlPanel</div>`,
   }))
-  vi.doMock('../command/control', () => ({
+  vi.doMock('../control', () => ({
     ControlSurface: () => html`<div data-testid="control-surface">ControlSurface</div>`,
   }))
 
@@ -57,7 +57,7 @@ describe('Ops intervene surface', () => {
     vi.clearAllMocks()
     vi.doUnmock('./quick-intervene')
     vi.doUnmock('../flow-control/flow-control-panel')
-    vi.doUnmock('../command/control')
+    vi.doUnmock('../control')
   })
 
   it('renders a combined activity timeline for healthy mode without legacy KPI cards', async () => {

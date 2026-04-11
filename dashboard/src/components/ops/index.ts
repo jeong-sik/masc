@@ -44,7 +44,7 @@ import {
   workflowTargetReady,
 } from './helpers'
 import { FlowControlPanel } from '../flow-control/flow-control-panel'
-import { ControlSurface } from '../command/control'
+import { ControlSurface } from '../control'
 import { displayStatus } from '../../lib/status-label'
 
 function severityClass(value?: string | null): string {

@@ -238,6 +238,23 @@ let test_worktree_project_root_for_gitfile_worktree () =
   let _ = Room.reset config in
   rm_rf tmp_dir
 
+let test_worktree_project_root_for_masc_dir_base () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let tmp_dir = Filename.concat (Filename.get_temp_dir_name ())
+    (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
+  Unix.mkdir tmp_dir 0o755;
+  let config = Room.default_config tmp_dir in
+  let _ = Room.init config ~agent_name:(Some "claude") in
+  let repo_root = config.base_path in
+  Unix.mkdir (Filename.concat repo_root ".git") 0o755;
+  let masc_config = { config with base_path = Filename.concat repo_root ".masc" } in
+  Alcotest.(check string) ".masc base path resolves to repo root"
+    repo_root
+    (Room.project_root masc_config);
+  let _ = Room.reset config in
+  rm_rf tmp_dir
+
 let test_event_log () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1664,6 +1681,8 @@ let () =
         test_worktree_project_root_for_nested_subdir;
       Alcotest.test_case "project root worktree gitfile" `Quick
         test_worktree_project_root_for_gitfile_worktree;
+      Alcotest.test_case "project root .masc base path" `Quick
+        test_worktree_project_root_for_masc_dir_base;
     ];
     "portal", [
       Alcotest.test_case "open and status" `Quick test_portal_open_and_status;

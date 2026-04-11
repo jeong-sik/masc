@@ -791,7 +791,7 @@ let () =
       test_case "same-origin allows matching origin" `Quick
         test_same_origin_browser_request_allows_matching_origin;
       test_case "same-origin rejects cross origin" `Quick
-        test_same_origin_browser_request_rejects_cross_origin;
+      test_same_origin_browser_request_rejects_cross_origin;
       test_case "same-origin allows https tunnel same host" `Quick
         test_same_origin_https_tunnel_same_host;
       test_case "same-origin allows loopback alias same port" `Quick

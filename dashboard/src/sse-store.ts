@@ -92,31 +92,27 @@ interface SimpleRoute {
   debounceMs?: number
 }
 
+// Route table maps SSE event type → refresh target. Only entries whose
+// corresponding server emitter exists in lib/ are kept; dead keys were
+// removed after cross-referencing the OCaml sources under lib/.
 const SIMPLE_ROUTES: Record<string, SimpleRoute> = {
-  // Agent lifecycle (server may emit with or without "masc/" prefix)
-  agent_joined:          { target: 'execution' },
-  'masc/agent_joined':   { target: 'execution' },
-  agent_left:            { target: 'execution' },
-  'masc/agent_left':     { target: 'execution' },
-  // Broadcasts
-  broadcast:             { target: 'execution' },
-  'masc/broadcast':      { target: 'execution' },
+  // Agent lifecycle — emitted by lib/tool_inline_dispatch_room.ml
+  'masc/agent_joined':  { target: 'execution' },
+  'masc/agent_left':    { target: 'execution' },
+  // Broadcasts — emitted by lib/tool_inline_dispatch_comm.ml
+  'masc/broadcast':     { target: 'execution' },
   // Keeper lifecycle (also triggers operator refresh via handler)
-  keeper_handoff:        { target: 'execution' },
-  keeper_compaction:     { target: 'execution' },
-  keeper_phase_changed:  { target: 'execution' },
-  // Board
-  board_post:           { target: 'board' },
+  keeper_handoff:       { target: 'execution' },
+  keeper_compaction:    { target: 'execution' },
+  keeper_phase_changed: { target: 'execution' },
+  // Board — emitted by lib/tool_inline_dispatch_extra.ml
   'masc/board_post':    { target: 'board' },
   board_comment:        { target: 'board' },
-  'masc/board_comment': { target: 'board' },
-  board_delete:         { target: 'board' },
   'masc/board_delete':  { target: 'board' },
   post_voted:           { target: 'board' },
   comment_voted:        { target: 'board' },
   // Activity graph
-  'activity':                { target: 'activity', debounceMs: SSE_ACTIVITY_DEBOUNCE_MS },
-  'masc/activity':           { target: 'activity', debounceMs: SSE_ACTIVITY_DEBOUNCE_MS },
+  activity:             { target: 'activity', debounceMs: SSE_ACTIVITY_DEBOUNCE_MS },
 }
 
 // Prefix patterns for events that use startsWith matching

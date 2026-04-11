@@ -30,14 +30,22 @@ let git_root config =
 let is_git_repo config =
   Room_git.is_git_repo ~base_path:config.base_path
 
+(** Resolve the project root from config.base_path.
+    If base_path ends with ".masc", use its parent; otherwise use base_path.
+    This is the SSOT for where .worktrees/ lives — not git rev-parse. *)
+let project_root config =
+  Keeper_alerting_path.project_root_of_config config
+
 let require_repository_root_with_git config =
-  match git_root config with
-  | None -> Error (IoError "Cannot determine git root")
-  | Some root ->
-      let git_marker = Filename.concat root ".git" in
-      if Sys.file_exists git_marker then
-        Ok root
-      else
+  let root = project_root config in
+  let git_marker = Filename.concat root ".git" in
+  if Sys.file_exists git_marker then
+    Ok root
+  else
+    (* Worktree .git is a file, not a directory — also valid *)
+    match (try Some (Sys.is_directory git_marker) with Sys_error _ -> None) with
+    | Some false -> Ok root  (* .git file = git worktree, still valid *)
+    | _ ->
         Error
           (IoError
              (Printf.sprintf

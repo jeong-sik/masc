@@ -15,19 +15,19 @@ module Resilience = Resilience
    ============================================================ *)
 
 let test_dashboard_max_path_length () =
-  check int "max_path_length" 30 Dashboard.max_path_length
+  check int "max_path_length" 30 (Dashboard.max_path_length ())
 
 let test_dashboard_max_message_length () =
-  check int "max_message_length" 35 Dashboard.max_message_length
+  check int "max_message_length" 35 (Dashboard.max_message_length ())
 
 let test_dashboard_max_pending_tasks () =
-  check int "max_pending_tasks" 5 Dashboard.max_pending_tasks
+  check int "max_pending_tasks" 5 (Dashboard.max_pending_tasks ())
 
 let test_dashboard_max_recent_messages () =
-  check int "max_recent_messages" 5 Dashboard.max_recent_messages
+  check int "max_recent_messages" 5 (Dashboard.max_recent_messages ())
 
 let test_dashboard_min_border_length () =
-  check int "min_border_length" 45 Dashboard.min_border_length
+  check int "min_border_length" 45 (Dashboard.min_border_length ())
 
 (* ============================================================
    Dashboard section Tests

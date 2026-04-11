@@ -683,8 +683,15 @@ let search_candidates_for_operation ?agents config units operations
   let current_unit_id = Some operation.assigned_unit_id in
   let workload_profile = operation_workload_profile operation in
   let stage = operation.stage in
-  candidate_units_for_operation units operations current_unit_id
-  |> List.filter_map (fun (unit : unit_record) ->
+  let target_unit_ids =
+    detachment_targets_for_operation units operation
+    |> List.map (fun (unit : unit_record) -> unit.unit_id)
+  in
+  let candidates =
+    candidate_units_for_operation units operations current_unit_id
+    |> List.filter (fun (unit : unit_record) ->
+           List.mem unit.unit_id target_unit_ids)
+    |> List.filter_map (fun (unit : unit_record) ->
          match
            operation_assignment_guard_json ?agents ~units ~operations
              config unit.unit_id ~workload_profile ~stage
@@ -703,6 +710,8 @@ let search_candidates_for_operation ?agents config units operations
                    active_operations = operation_active_count operations unit.unit_id;
                    current_assignment = String.equal unit.unit_id operation.assigned_unit_id;
                  })
+  in
+  candidates
 
 let candidate_matches_scope candidate scope =
   let haystack =

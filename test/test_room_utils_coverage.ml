@@ -243,11 +243,28 @@ let test_default_config_syncs_test_base_path_env () =
   in
   with_envs
     [ ("MASC_BASE_PATH", None);
+      ("MASC_TEST_SYNCED_BASE_PATH", None);
       ("MASC_TEST_ALLOW_INHERITED_BASE_PATH", None) ]
     (fun () ->
       ignore (Room_utils.default_config requested);
       check (option string) "env synced to requested path" (Some requested)
         (Sys.getenv_opt "MASC_BASE_PATH"))
+
+let test_auto_synced_test_base_path_does_not_override_later_requests () =
+  let first =
+    Filename.concat (Filename.get_temp_dir_name ()) "room-utils-sync-first"
+  in
+  let second =
+    Filename.concat (Filename.get_temp_dir_name ()) "room-utils-sync-second"
+  in
+  with_envs
+    [ ("MASC_BASE_PATH", None);
+      ("MASC_TEST_SYNCED_BASE_PATH", None);
+      ("MASC_TEST_ALLOW_INHERITED_BASE_PATH", None) ]
+    (fun () ->
+      ignore (Room_utils.default_config first);
+      check string "later requested path wins over auto-synced env" second
+        (Room_utils.resolve_masc_base_path second))
 
 (* ============================================================
    env_opt Tests
@@ -672,6 +689,8 @@ let () =
         test_resolve_masc_base_path_preserves_ancestor_explicit_path;
       test_case "default config syncs test base env" `Quick
         test_default_config_syncs_test_base_path_env;
+      test_case "auto-synced test base env does not override later requests" `Quick
+        test_auto_synced_test_base_path_does_not_override_later_requests;
     ];
     "env_opt", [
       test_case "nonexistent" `Quick test_env_opt_nonexistent;

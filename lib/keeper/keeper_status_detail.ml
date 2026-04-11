@@ -1,7 +1,7 @@
 (** Keeper_status_detail — single-keeper detailed status handler.
     Split from keeper_status.ml.
 
-    Server-side response cache: keyed on (name, updated_at, args_hash).
+    Server-side response cache: keyed on (base_path, name, updated_at, args_hash).
     Avoids expensive JSONL parsing and checkpoint loading when keeper
     state has not changed between consecutive status polls. *)
 
@@ -28,10 +28,21 @@ type cache_entry = {
 let _cache : (string, cache_entry) Hashtbl.t = Hashtbl.create 8
 
 let invalidate_status_cache_for name =
-  Hashtbl.remove _cache name
+  Hashtbl.filter_map_inplace
+    (fun key entry ->
+      match String.rindex_opt key ':' with
+      | Some idx ->
+          let cached_name =
+            String.sub key (idx + 1) (String.length key - idx - 1)
+          in
+          if String.equal cached_name name then None else Some entry
+      | None -> Some entry)
+    _cache
 
 let invalidate_status_cache_all () =
   Hashtbl.clear _cache
+
+let status_cache_key ~base_path ~name = base_path ^ ":" ^ name
 
 let normalize_status_name = String.trim
 
@@ -78,9 +89,10 @@ let handle_keeper_status ctx args : tool_result =
   match resolve_status_target ctx args with
   | Error err -> (false, err)
   | Ok (name, m) ->
+      let cache_key = status_cache_key ~base_path:ctx.config.base_path ~name in
       let args_hash = hash_status_args ctx.config name args in
       (* Cache hit: same updated_at + same args → return cached response *)
-      (match Hashtbl.find_opt _cache name with
+      (match Hashtbl.find_opt _cache cache_key with
        | Some entry
          when entry.updated_at = m.updated_at
            && entry.args_hash = args_hash ->
@@ -740,6 +752,6 @@ let handle_keeper_status ctx args : tool_result =
            ]);
          ]) in
          let response = Yojson.Safe.pretty_to_string json in
-         Hashtbl.replace _cache name
+         Hashtbl.replace _cache cache_key
            { updated_at = m.updated_at; args_hash; response };
          (true, response))

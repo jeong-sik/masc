@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-04-11
+
+### Changed
+- Eliminate vendor hardcoding outside provider_adapter boundary (#6495)
+- Root cause fixes for JSONL parsing, keeper_github repo, preset validation (#6457)
+
+### Fixed
+- Restore loopback cross-port relaxation in auth (#6504)
+- Delegate context budget to OAS pipeline (#6488)
+
 ## [0.5.1] - 2026-04-11
 
 ### Changed

@@ -279,8 +279,13 @@ let vote ~voter ~post_id ~direction =
     | Jsonl store -> Board.vote store ~voter ~post_id ~direction
   in
   (match result with
-  | Ok _score -> emit_board_sse_event (Post_voted { post_id; voter; direction })
-  | Error _ -> ());
+   | Ok _score ->
+       emit_board_sse_event
+         (Post_voted { post_id; voter; direction })
+   | Error e ->
+       Log.BoardLog.warn
+         "board vote failed: post_id=%s voter=%s: %s"
+         post_id voter (Board_types.show_board_error e));
   result
 
 let vote_comment ~voter ~comment_id ~direction =
@@ -289,8 +294,13 @@ let vote_comment ~voter ~comment_id ~direction =
     | Jsonl store -> Board.vote_comment store ~voter ~comment_id ~direction
   in
   (match result with
-  | Ok _score -> emit_board_sse_event (Comment_voted { comment_id; voter; direction })
-  | Error _ -> ());
+   | Ok _score ->
+       emit_board_sse_event
+         (Comment_voted { comment_id; voter; direction })
+   | Error e ->
+       Log.BoardLog.warn
+         "board vote_comment failed: comment_id=%s voter=%s: %s"
+         comment_id voter (Board_types.show_board_error e));
   result
 
 let stats () =

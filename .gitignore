@@ -77,6 +77,8 @@ specs/**/TraceData.tla
 # Infrastructure secrets (launchd plist contains env vars with tokens)
 infrastructure/launchd/*.plist
 infrastructure/**/*.env
+certs/*.key
+certs/*.pem
 
 # Serena MCP local state
 .serena/

@@ -159,7 +159,8 @@ let test_noop_on_missing () =
   R.set_grpc_close ~base_path:bp "ghost" None;
   R.wakeup ~base_path:bp "ghost";
   R.unregister ~base_path:bp "ghost";
-  check bool "no crash on missing" true true
+  check bool "ghost never materialized via no-op ops" true
+    (Option.is_none (R.get ~base_path:bp "ghost"))
 
 let test_register_replaces () =
   R.clear ();
@@ -431,7 +432,8 @@ let test_directive_unknown_no_crash () =
 let test_directive_nonexistent_agent () =
   R.clear ();
   KK.process_directive ~agent_name:"ghost-agent" "pause";
-  check bool "no crash on missing agent" true true
+  check bool "directive on ghost agent leaves registry empty" true
+    (Option.is_none (R.get ~base_path:bp "ghost-agent"))
 
 let test_stop_keepalive_scoped_to_base_path () =
   R.clear ();

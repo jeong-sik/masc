@@ -108,7 +108,15 @@ let subscribe t ~sw ~env ~agent_name ~session_id ~event_types ~since_seq =
       push_typed (Error message)
     in
     let close_typed () =
-      try Grpc_eio.Stream.close typed_stream with _ -> ()
+      (* [with _ -> ()] would swallow [Eio.Cancel.Cancelled]. This helper is
+         called from the [Error status] and [End_of_file] branches of [loop]
+         (outside any cancel handler); if [Stream.close] raises [Cancelled]
+         on those paths, the outer [try loop () with Cancelled _] at line 136
+         would never see it and the cancel would be silently absorbed. *)
+      try Grpc_eio.Stream.close typed_stream
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | _ -> ()
     in
     let rec loop () =
       match Grpc_eio.Stream.take raw_stream with
@@ -162,11 +170,18 @@ let heartbeat_stream t ~sw ~env =
   (* Map typed pings to raw bytes *)
   let raw_requests = Grpc_eio.Stream.create 16 in
   Eio.Fiber.fork ~sw (fun () ->
+    (* Both helpers must re-raise [Eio.Cancel.Cancelled] — they are called
+       from the [End_of_file] and generic-[exn] branches of the enclosing
+       loop (lines 177, 190-191), neither of which is a cancel handler.
+       [with _ -> ()] would swallow a cancel racing with [Stream.close],
+       leaving the fork fiber alive past the cancel boundary. *)
     let close_request_stream () =
-      try Grpc_eio.Stream.close request_stream with _ -> ()
+      try Grpc_eio.Stream.close request_stream
+      with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ()
     in
     let close_raw_requests () =
-      try Grpc_eio.Stream.close raw_requests with _ -> ()
+      try Grpc_eio.Stream.close raw_requests
+      with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ()
     in
     let rec loop () =
       match Grpc_eio.Stream.take request_stream with

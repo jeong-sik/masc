@@ -279,7 +279,15 @@ let handle_heartbeat
       Atomic.decr active_heartbeat_streams;
       Transport_metrics.set_grpc_active_streams
         (Atomic.get active_heartbeat_streams);
-      (try Grpc_eio.Stream.close response_stream with _ -> ())
+      (* Called from [End_of_file] at line 360 and the generic-[exn] handler
+         at line 371 — neither is a cancel handler. [with _ -> ()] would
+         swallow [Eio.Cancel.Cancelled] racing with [Stream.close], leaving
+         the fiber to fall past the cancel boundary. The counters above are
+         decremented first, so re-raising here is safe. *)
+      (try Grpc_eio.Stream.close response_stream
+       with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | _ -> ())
     in
     let rec loop () =
       match Grpc_eio.Stream.take request_stream with

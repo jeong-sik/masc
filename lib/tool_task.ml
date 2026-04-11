@@ -65,6 +65,15 @@ let review_completion_notes
                        ("verdict", `String (verdict_to_string result));
                        ( "evaluator_cascade",
                          `String result.evaluator_cascade );
+                       ( "generator_cascade",
+                         match result.generator_cascade with
+                         | Some c -> `String c
+                         | None -> `Null );
+                       ( "cross_model",
+                         `Bool
+                           (match result.generator_cascade with
+                            | Some g -> not (String.equal g result.evaluator_cascade)
+                            | None -> false) );
                        ( "fallback_reason",
                          match result.fallback_reason with
                          | Some reason -> `String reason

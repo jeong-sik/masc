@@ -1317,16 +1317,14 @@ let run_turn
                 then current_params.tool_choice (* last turn: Auto for [STATE] block *)
                 else Some Agent_sdk.Types.Any (* all other turns: force tool use *)
               in
-              (match tool_choice with
-               | Some (Agent_sdk.Types.Any | Agent_sdk.Types.Tool _) ->
-                 completion_contract_ref :=
-                   Keeper_tool_disclosure.Require_tool_use
-               | _ -> ());
+              completion_contract_ref :=
+                Keeper_tool_disclosure.completion_contract_of_tool_choice tool_choice;
               let lane =
                 if is_retry then "retry"
                 else (
                   match tool_choice with
-                  | Some Agent_sdk.Types.Any -> "tool_required"
+                  | Some (Agent_sdk.Types.Any | Agent_sdk.Types.Tool _) ->
+                    "tool_required"
                   | Some Agent_sdk.Types.None_ -> "tool_disabled"
                   | _ -> "tool_optional")
               in
@@ -1587,22 +1585,46 @@ let run_turn
          Keeper_tool_disclosure.merge_reported_and_observed_tool_names ~reported_tool_names ~observed_tool_names
        in
        let usage = Keeper_exec_context.usage_of_response result.response in
-       (match
-          Keeper_tool_disclosure.validate_completion_contract
-            ~contract:!completion_contract_ref
-            ~tool_names
-            ()
-        with
+       (* Text-response trap tolerance: when tool_choice=Any is set but
+          the provider ignores it (e.g. Ollama #14493), the model returns
+          text-only on non-last turns. Instead of hard-failing the turn
+          (which wastes the entire OAS run), log a warning and treat the
+          text response as valid. The turn is counted as text_response
+          in telemetry via keeper_unified_turn. See #5566. *)
+       let text =
+         match
+           Keeper_tool_disclosure.validate_completion_contract
+             ~contract:!completion_contract_ref
+             ~tool_names
+             ()
+         with
+         | Ok () -> text
+         | Error reason ->
+           let contract_str =
+             match !completion_contract_ref with
+             | Keeper_tool_disclosure.Allow_text_or_tool -> "Allow_text_or_tool"
+             | Keeper_tool_disclosure.Require_tool_use -> "Require_tool_use"
+           in
+           Log.Keeper.warn
+             "keeper:%s text_response trap: tool contract violated \
+              (turn=%d, tools=0, contract=%s). \
+              Provider likely ignored tool_choice=Any. Tolerating text-only \
+              response to avoid wasting OAS run. Reason: %s"
+             meta.name result.turns contract_str reason;
+           (* When both text and tool_names are empty, normalize_response_text
+              would hard-fail. Synthesize minimal text so the turn survives. *)
+           if String.trim text = "" && tool_names = []
+           then "[no output]"
+           else text
+       in
+       (match Keeper_tool_disclosure.normalize_response_text ~text ~tool_names () with
         | Error e -> Error (Oas.Error.Internal e)
-        | Ok () ->
-          (match Keeper_tool_disclosure.normalize_response_text ~text ~tool_names () with
-           | Error e -> Error (Oas.Error.Internal e)
-           | Ok response_text ->
-             (* Ensure every generation has a [STATE] block for continuity.
-                If the model omitted it, synthesize one deterministically
-                from tool usage and stop reason. *)
-             let response_text =
-               match Keeper_memory_policy.find_state_block response_text with
+        | Ok response_text ->
+          (* Ensure every generation has a [STATE] block for continuity.
+             If the model omitted it, synthesize one deterministically
+             from tool usage and stop reason. *)
+          let response_text =
+            match Keeper_memory_policy.find_state_block response_text with
                | Some _ -> response_text
                | None ->
                  let stop_reason_str =
@@ -1798,5 +1820,5 @@ let run_turn
                ; run_validation = result.run_validation
                ; stop_reason = result.stop_reason
                ; inference_telemetry = result.response.telemetry
-               })))
+               }))
 ;;

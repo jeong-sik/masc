@@ -296,3 +296,40 @@ let log_warnings ?(context = "ConfigDir") () =
       resolution.warnings;
     last_logged_signature := Some signature
   end
+
+(* Track the last resolution signature we info-logged so startup banner is
+   idempotent across repeated [log_resolution] calls (bootstrap + per-query). *)
+let last_logged_resolution_signature : string option ref = ref None
+
+(** Emit a single info-level line stating the resolved config root source and
+    path. When [MASC_CONFIG_DIR] is set, also note whether a [<base_path>/.masc/config]
+    overlay is being silently shadowed — this is a footgun operators commonly
+    hit when they write to an overlay and then wonder why changes are ignored.
+
+    The message is a SSOT surface for "which config is actually active right
+    now?"; downstream tooling should read it instead of re-guessing via env
+    vars. *)
+let log_resolution ?(context = "ConfigDir") () =
+  let inputs = inputs_from_env () in
+  let resolution = resolve () in
+  let item = resolution.config_root in
+  let source = source_to_string item.source in
+  let shadow_note =
+    match item.source with
+    | Env ->
+      (match path_from_local_masc inputs with
+       | Some overlay_path when overlay_path <> item.path ->
+         Printf.sprintf
+           " (MASC_CONFIG_DIR shadows local_masc overlay at %s; \
+            unset MASC_CONFIG_DIR to prefer the overlay)"
+           overlay_path
+       | _ -> "")
+    | _ -> ""
+  in
+  let signature =
+    Printf.sprintf "source=%s path=%s%s" source item.path shadow_note
+  in
+  if !last_logged_resolution_signature <> Some signature then begin
+    Log.info ~ctx:context "resolved: %s" signature;
+    last_logged_resolution_signature := Some signature
+  end

@@ -91,6 +91,13 @@ let with_keeper_turn_slot ~channel f =
     (if is_autonomous then "autonomous" else "reactive")
     (Eio.Semaphore.get_value autonomous_turn_semaphore)
     (Eio.Semaphore.get_value turn_semaphore);
+  (* Track acquisitions in mutable flags so the outer Fun.protect can
+     release exactly the slots we hold — regardless of which exception
+     path fires (Semaphore_wait_timeout, Eio.Cancel.Cancelled, or any
+     other). This keeps resource cleanup independent of Eio.Semaphore's
+     internal cancel-race handling. *)
+  let acquired_autonomous = ref false in
+  let acquired_turn = ref false in
   let acquire_bounded ~label sem =
     match Eio_context.get_clock_opt () with
     | Some clock ->
@@ -105,24 +112,32 @@ let with_keeper_turn_slot ~channel f =
           (if is_autonomous then "autonomous" else "reactive");
         raise (Semaphore_wait_timeout semaphore_wait_timeout_sec))
     | None ->
-      (* No Eio clock (e.g. unit tests running outside an Eio main):
-         fall back to unbounded acquire. *)
+      (* No Eio clock available: we are running outside an Eio main loop
+         (e.g. Alcotest without [Eio_main.run]). Production masc-mcp
+         always provides a clock via [Masc_eio_env.init]; reaching this
+         branch at runtime would indicate an environment-setup drift,
+         so log it prominently before falling back to unbounded acquire. *)
+      Log.Keeper.warn
+        "semaphore_wait: no Eio clock available — %s acquire will be unbounded (environment drift?)"
+        label;
       Eio.Semaphore.acquire sem
   in
-  if is_autonomous then acquire_bounded ~label:"autonomous" autonomous_turn_semaphore;
-  (try acquire_bounded ~label:"turn" turn_semaphore
-   with exn ->
-     (* Autonomous semaphore already acquired above — release it so we
-        do not leak a slot on timeout. *)
-     if is_autonomous then Eio.Semaphore.release autonomous_turn_semaphore;
-     raise exn);
-  let semaphore_wait_ms =
-    int_of_float ((Time_compat.now () -. t0) *. 1000.0) in
   Fun.protect
     ~finally:(fun () ->
-      Eio.Semaphore.release turn_semaphore;
-      if is_autonomous then Eio.Semaphore.release autonomous_turn_semaphore)
-    (fun () -> f ~semaphore_wait_ms)
+      (* Release exactly what we acquired. Order does not matter because
+         these two semaphores do not contend with each other. *)
+      if !acquired_turn then Eio.Semaphore.release turn_semaphore;
+      if !acquired_autonomous then Eio.Semaphore.release autonomous_turn_semaphore)
+    (fun () ->
+      if is_autonomous then begin
+        acquire_bounded ~label:"autonomous" autonomous_turn_semaphore;
+        acquired_autonomous := true
+      end;
+      acquire_bounded ~label:"turn" turn_semaphore;
+      acquired_turn := true;
+      let semaphore_wait_ms =
+        int_of_float ((Time_compat.now () -. t0) *. 1000.0) in
+      f ~semaphore_wait_ms)
 ;;
 
 (** Optional gRPC client + env — WORM Atomic: set at server bootstrap

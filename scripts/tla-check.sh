@@ -127,4 +127,33 @@ fi
 
 run_tlc "$REPO_ROOT/specs/masc-ecosystem" "MASCEcosystem.tla"
 
+# ── bug-models ─────────────────────────────────────────────────
+# Every .tla in specs/bug-models/ that has a matching .cfg and/or
+# -buggy.cfg is run automatically. Symlinks are skipped (they point
+# into specs/keeper-state-machine/ and are already run above).
+# Specs with neither cfg are reported as SKIP by the helpers, which
+# is the same behavior as the keeper-state-machine section.
+#
+# Discovered 2026-04-11: this directory had been untracked by the
+# CI harness since inception. Local sweep (scripts/tla-check.sh +
+# direct tlc) confirms all 14 bug-models with cfgs behave correctly
+# (14 clean=PASS, 14 buggy=VIOLATED). Wiring them up strengthens
+# CI without adding any new spec. Future bug-model additions are
+# picked up automatically by the glob.
+BUG_MODELS_DIR="$REPO_ROOT/specs/bug-models"
+if [ -d "$BUG_MODELS_DIR" ]; then
+  for tla_path in "$BUG_MODELS_DIR"/*.tla; do
+    [ -e "$tla_path" ] || continue              # no matches
+    [ -L "$tla_path" ] && continue              # symlink → already run
+    tla_name="$(basename "$tla_path")"
+    base="${tla_name%.tla}"
+    if [ -f "$BUG_MODELS_DIR/${base}.cfg" ]; then
+      run_tlc "$BUG_MODELS_DIR" "$tla_name"
+    fi
+    if [ -f "$BUG_MODELS_DIR/${base}-buggy.cfg" ]; then
+      run_tlc_buggy "$BUG_MODELS_DIR" "$tla_name"
+    fi
+  done
+fi
+
 echo "All TLA+ checks passed."

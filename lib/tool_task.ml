@@ -6,7 +6,7 @@
 
 open Yojson.Safe.Util
 
-type result = bool * string
+type tool_result = bool * string
 
 type context = {
   config: Room.config;
@@ -804,7 +804,7 @@ let handle_archive_view ctx args =
 
 include Tool_task_schemas
 (* Dispatch function *)
-let dispatch ctx ~name ~args : result option =
+let dispatch ctx ~name ~args : tool_result option =
   match name with
   | "masc_add_task" -> Some (handle_add_task ctx args)
   | "masc_batch_add_tasks" -> Some (handle_batch_add_tasks ctx args)

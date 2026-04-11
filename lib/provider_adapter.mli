@@ -115,6 +115,17 @@ val make_local_label : string -> string
 val string_of_provider_kind :
   Llm_provider.Provider_config.provider_kind -> string
 
+(** Resolve required auth env keys for a provider kind. *)
+val auth_env_keys_of_provider_kind :
+  Llm_provider.Provider_config.provider_kind -> string list
+
+(** Resolve Docker worker auth env keys for a provider config. *)
+val docker_auth_env_keys_of_provider_config :
+  Llm_provider.Provider_config.t -> string list
+
+(** Collect all auth env keys across direct adapters. *)
+val all_auth_env_keys : unit -> string list
+
 (** Resolve an adapter by canonical name or alias. *)
 val resolve_direct_adapter : string -> adapter option
 

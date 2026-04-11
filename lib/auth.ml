@@ -315,7 +315,7 @@ let legacy_permission_for_tool = function
   | "masc_register_capabilities" | "masc_find_by_capability"
   | "masc_agent_update" | "masc_operator_action"
   | "masc_keeper_up" | "masc_keeper_down" | "masc_keeper_msg" | "masc_keeper_msg_result"
-  | "masc_keeper_repair"
+  | "masc_keeper_repair" | "masc_keeper_reset"
   | "masc_keeper_create_from_persona"
   | "masc_operator_confirm" | "masc_unit_define"
   | "masc_unit_reparent"
@@ -327,7 +327,7 @@ let legacy_permission_for_tool = function
   | "masc_dispatch_recall" | "masc_policy_approve"
   | "masc_policy_deny" | "masc_policy_update" ->
       Some CanBroadcast
-  | "masc_autoresearch_start" | "masc_autoresearch_swarm_start"
+  | "masc_autoresearch_start"
   | "masc_autoresearch_cycle" | "masc_autoresearch_inject"
   | "masc_autoresearch_stop" ->
       Some CanAdmin

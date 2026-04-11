@@ -11,13 +11,13 @@ type context = {
 }
 
 (** Tool result type *)
-type result = bool * string
+type tool_result = bool * string
 
 open Tool_args
 
 (** {1 Individual Handlers} *)
 
-let handle_plan_init ctx args : result =
+let handle_plan_init ctx args : tool_result =
   let task_id = get_string args "task_id" "" in
   let result = Planning_eio.init ctx.config ~task_id in
   match result with
@@ -31,7 +31,7 @@ let handle_plan_init ctx args : result =
   | Error e ->
       (false, Printf.sprintf "❌ Failed to init planning: %s" e)
 
-let handle_plan_update ctx args : result =
+let handle_plan_update ctx args : tool_result =
   let task_id = get_string args "task_id" "" in
   let content = get_string args "content" "" in
   let result = Planning_eio.update_plan ctx.config ~task_id ~content in
@@ -46,7 +46,7 @@ let handle_plan_update ctx args : result =
   | Error e ->
       (false, Printf.sprintf "❌ Failed to update plan: %s" e)
 
-let handle_note_add ctx args : result =
+let handle_note_add ctx args : tool_result =
   let task_id = get_string args "task_id" "" in
   let note = get_string args "note" "" in
   let result = Planning_eio.add_note ctx.config ~task_id ~note in
@@ -61,7 +61,7 @@ let handle_note_add ctx args : result =
   | Error e ->
       (false, Printf.sprintf "❌ Failed to add note: %s" e)
 
-let handle_deliver ctx args : result =
+let handle_deliver ctx args : tool_result =
   let task_id_input = get_string args "task_id" "" in
   match Planning_eio.resolve_task_id ctx.config ~task_id:task_id_input with
   | Error e -> (false, Printf.sprintf "❌ %s" e)
@@ -82,7 +82,7 @@ let handle_deliver ctx args : result =
   | Error e ->
       (false, Printf.sprintf "❌ Failed to set deliverable: %s" e)
 
-let handle_plan_get ctx args : result =
+let handle_plan_get ctx args : tool_result =
   let task_id_input = get_string args "task_id" "" in
   match Planning_eio.resolve_task_id ctx.config ~task_id:task_id_input with
   | Error e -> (false, Printf.sprintf "❌ %s" e)
@@ -100,7 +100,7 @@ let handle_plan_get ctx args : result =
       | Error e ->
           (false, Printf.sprintf "❌ Planning context not found: %s" e)
 
-let handle_error_add ctx args : result =
+let handle_error_add ctx args : tool_result =
   let task_id = get_string args "task_id" "" in
   let error_type = get_string args "error_type" "" in
   let message = get_string args "message" "" in
@@ -120,7 +120,7 @@ let handle_error_add ctx args : result =
   | Error e ->
       (false, Printf.sprintf "❌ Failed to add error: %s" e)
 
-let handle_error_resolve ctx args : result =
+let handle_error_resolve ctx args : tool_result =
   let task_id = get_string args "task_id" "" in
   let error_index = get_int args "error_index" 0 in
   let result = Planning_eio.resolve_error ctx.config ~task_id ~index:error_index in
@@ -137,7 +137,7 @@ let handle_error_resolve ctx args : result =
   | Error e ->
       (false, Printf.sprintf "❌ Failed to resolve error: %s" e)
 
-let handle_plan_set_task ctx args : result =
+let handle_plan_set_task ctx args : tool_result =
   let task_id = get_string args "task_id" "" in
   if task_id = "" then
     (false, "❌ task_id is required")
@@ -150,7 +150,7 @@ let handle_plan_set_task ctx args : result =
     (true, Yojson.Safe.to_string response)
   end
 
-let handle_plan_get_task ctx _args : result =
+let handle_plan_get_task ctx _args : tool_result =
   match Planning_eio.get_current_task ctx.config with
   | Some task_id ->
       let response = `Assoc [
@@ -164,7 +164,7 @@ let handle_plan_get_task ctx _args : result =
       ] in
       (true, Yojson.Safe.to_string response)
 
-let handle_plan_clear_task ctx _args : result =
+let handle_plan_clear_task ctx _args : tool_result =
   Planning_eio.clear_current_task ctx.config;
   let response = `Assoc [
     ("status", `String "cleared");
@@ -174,7 +174,7 @@ let handle_plan_clear_task ctx _args : result =
 
 (** {1 Dispatcher} *)
 
-let dispatch ctx ~name ~args : result option =
+let dispatch ctx ~name ~args : tool_result option =
   match name with
   | "masc_plan_init" -> Some (handle_plan_init ctx args)
   | "masc_plan_update" -> Some (handle_plan_update ctx args)

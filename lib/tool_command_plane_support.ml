@@ -11,7 +11,7 @@ type ('clock, 'net) context = {
   auth_token : string option;
 }
 
-type result = bool * string
+type tool_result = bool * string
 
 let get_string_opt = Tool_args.get_string_opt
 let get_bool = Tool_args.get_bool
@@ -335,7 +335,7 @@ let swarm_live_error_payload config ~run_id ~message ?proc () =
   | Some process -> Yojson.Safe.to_string (json_with_process_metadata payload process)
   | None -> Yojson.Safe.to_string payload
 
-let handle_unit_define (ctx : (_, _) context) args : result =
+let handle_unit_define (ctx : (_, _) context) args : tool_result =
   try
     match Command_plane_v2.upsert_unit ctx.config ~actor:ctx.agent_name args with
     | Ok unit ->
@@ -348,7 +348,7 @@ let handle_unit_define (ctx : (_, _) context) args : result =
     | Error message -> (false, json_error message)
   with Invalid_argument message -> (false, json_error message)
 
-let handle_unit_list (ctx : (_, _) context) : result =
+let handle_unit_list (ctx : (_, _) context) : tool_result =
   (true, Yojson.Safe.to_string (Command_plane_v2.list_units_json ctx.config))
 
 let object_schema = Tool_schema_dsl.object_schema

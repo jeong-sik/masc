@@ -25,7 +25,6 @@ let admin_only_tools =
     "masc_reset";
     (* CanAdmin — autoresearch *)
     "masc_autoresearch_start";
-    "masc_autoresearch_swarm_start";
     "masc_autoresearch_cycle";
     "masc_autoresearch_inject";
     "masc_autoresearch_stop";
@@ -81,6 +80,7 @@ let worker_only_tools =
     "masc_keeper_msg_result";
     "masc_keeper_repair";
     "masc_keeper_reconcile";
+    "masc_keeper_reset";
     "masc_keeper_create_from_persona";
     (* CanBroadcast — org units *)
     "masc_unit_define";

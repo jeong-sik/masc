@@ -639,10 +639,12 @@ let test_prompt_includes_operational_tool_guidance () =
 
 let test_capabilities_prompt_distinguishes_playground_and_worktree () =
   let prompt = Prompt_registry.get_prompt "keeper.capabilities" in
-  check bool "playground described as sandbox" true
-    (contains_substring prompt "playground is your sandbox; worktree is a repo workflow");
-  check bool "pr workflow marked as legacy worktree helper" true
-    (contains_substring prompt "`keeper_pr_workflow` is a legacy one-shot worktree helper");
+  check bool "playground paths documented" true
+    (contains_substring prompt ".masc/playground/");
+  check bool "playground is default coding workspace" true
+    (contains_substring prompt "default coding workspace");
+  check bool "pr workflow deprecated" true
+    (contains_substring prompt "Do NOT use keeper_pr_workflow");
   check bool "pr submit marked canonical" true
     (contains_substring prompt "`keeper_pr_submit` is the canonical submit step")
 
@@ -1992,6 +1994,30 @@ let test_server_rejected_parse_error_network_error () =
   check bool "network error is NOT parse error" false
     (UT.is_server_rejected_parse_error err)
 
+let test_auto_recoverable_turn_error_includes_transient_network () =
+  let err =
+    Agent_sdk.Error.Api
+      (Timeout { message = "Execution cancelled after 300.0s" })
+  in
+  check bool "timeout is auto-recoverable" true
+    (UT.is_auto_recoverable_turn_error err)
+
+let test_auto_recoverable_turn_error_includes_server_parse_rejection () =
+  let err =
+    Agent_sdk.Error.Api
+      (InvalidRequest { message = "Parse error at position 42" })
+  in
+  check bool "server parse rejection is auto-recoverable" true
+    (UT.is_auto_recoverable_turn_error err)
+
+let test_auto_recoverable_turn_error_excludes_persistent_errors () =
+  let err =
+    Agent_sdk.Error.Api
+      (AuthError { message = "Unauthorized" })
+  in
+  check bool "auth error is persistent" false
+    (UT.is_auto_recoverable_turn_error err)
+
 let test_side_effect_reclassification_ignores_keeper_read_only_tools () =
   let original =
     Agent_sdk.Error.Api
@@ -2899,6 +2925,12 @@ let () =
             test_server_rejected_parse_error_generic_cant_find;
           test_case "network error is NOT server parse error" `Quick
             test_server_rejected_parse_error_network_error;
+          test_case "auto-recoverable includes transient network" `Quick
+            test_auto_recoverable_turn_error_includes_transient_network;
+          test_case "auto-recoverable includes server parse rejection" `Quick
+            test_auto_recoverable_turn_error_includes_server_parse_rejection;
+          test_case "auto-recoverable excludes persistent errors" `Quick
+            test_auto_recoverable_turn_error_excludes_persistent_errors;
           test_case "read-only keeper tools do not become ambiguous partial" `Quick
             test_side_effect_reclassification_ignores_keeper_read_only_tools;
           test_case "mixed tool sets only keep mutating keeper tools" `Quick

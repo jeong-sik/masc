@@ -2,7 +2,7 @@ import { get, post, withRetries, defaultBoardVoter } from './core'
 import { isRecord, asNullableString, asString, asNumber, asInt, asStringList } from '../components/common/normalize'
 import type {
   BoardPost, BoardComment, BoardSortMode,
-  GovernanceCaseBrief, GovernanceCaseBundle, GovernanceContextRef,
+  GovernanceContextRef,
   GovernanceDecisionItem, GovernanceExecutedRoute, GovernanceExecutionOrder,
   GovernanceGuardrailState, GovernanceJudgeSummary, GovernanceJudgment,
   KeeperApprovalQueueItem,
@@ -179,22 +179,6 @@ export function normalizeGovernanceDecisionItem(raw: unknown): GovernanceDecisio
   }
 }
 
-function normalizeGovernanceCaseBrief(raw: unknown): GovernanceCaseBrief | null {
-  if (!isRecord(raw)) return null
-  const id = asString(raw.id, '').trim()
-  const author = asString(raw.author, '').trim()
-  const summary = asString(raw.summary, '').trim()
-  if (!id || !author || !summary) return null
-  return {
-    id,
-    author,
-    stance: asString(raw.stance, 'support'),
-    summary,
-    evidence_refs: asStringList(raw.evidence_refs),
-    created_at: asNullableIsoTimestamp(raw.created_at),
-  }
-}
-
 export function normalizeGovernanceExecutionOrder(raw: unknown): GovernanceExecutionOrder | null {
   if (!isRecord(raw)) return null
   const id = asString(raw.id, '').trim()
@@ -211,55 +195,6 @@ export function normalizeGovernanceExecutionOrder(raw: unknown): GovernanceExecu
     execution_ref: asNullableString(raw.execution_ref),
     result_summary: asNullableString(raw.result_summary),
     actor: asNullableString(raw.actor),
-  }
-}
-
-export function normalizeGovernanceCaseBundle(raw: unknown): GovernanceCaseBundle | null {
-  if (!isRecord(raw) || !isRecord(raw.case)) return null
-  const caseRaw = raw.case
-  const id = asString(caseRaw.id, '').trim()
-  const title = asString(caseRaw.title, '').trim()
-  if (!id || !title) return null
-  return {
-    case: {
-      id,
-      petition_ids: asStringList(caseRaw.petition_ids),
-      title,
-      origin: asNullableString(caseRaw.origin),
-      subject_type: asNullableString(caseRaw.subject_type),
-      risk_class: asNullableString(caseRaw.risk_class),
-      status: asString(caseRaw.status, 'pending_ruling'),
-      created_at: asNullableIsoTimestamp(caseRaw.created_at),
-      updated_at: asNullableIsoTimestamp(caseRaw.updated_at),
-      source_refs: asStringList(caseRaw.source_refs),
-      briefs: Array.isArray(caseRaw.briefs)
-        ? caseRaw.briefs
-            .map(item => normalizeGovernanceCaseBrief(item))
-            .filter((item): item is GovernanceCaseBrief => item !== null)
-        : [],
-    },
-    petitions: Array.isArray(raw.petitions)
-      ? raw.petitions.flatMap(item => {
-          if (!isRecord(item)) return []
-          const petitionId = asString(item.id, '').trim()
-          const caseId = asString(item.case_id, '').trim()
-          const petitionTitle = asString(item.title, '').trim()
-          if (!petitionId || !caseId || !petitionTitle) return []
-          return [{
-            id: petitionId,
-            case_id: caseId,
-            title: petitionTitle,
-            origin: asNullableString(item.origin),
-            subject_type: asNullableString(item.subject_type),
-            risk_class: asNullableString(item.risk_class),
-            source_refs: asStringList(item.source_refs),
-            created_by: asNullableString(item.created_by),
-            created_at: asNullableIsoTimestamp(item.created_at),
-          }]
-        })
-      : [],
-    ruling: normalizeGovernanceJudgment(raw.ruling),
-    execution_order: normalizeGovernanceExecutionOrder(raw.execution_order),
   }
 }
 

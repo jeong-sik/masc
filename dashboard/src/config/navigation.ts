@@ -81,7 +81,7 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
     id: 'workspace',
     label: '작업',
     icon: '📋',
-    description: '작업 게시판, 근거 및 계획 이력 탐색',
+    description: '작업 게시판, 증명/판정, 계획 이력 탐색',
     defaultTab: 'workspace',
     defaultParams: { section: 'board' },
     tabs: ['workspace'],
@@ -175,8 +175,8 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     },
     {
       id: 'evidence',
-      label: '근거 및 이력',
-      description: '협업 증거. team turn, broadcast, 멘션 등 백엔드에서 실시간 동적 집계한 결과.',
+      label: '증명 및 판정',
+      description: 'verdict, 도구 사용 증거, 타임라인, worker 실행 기록 등 에이전트 행동의 근거를 봅니다.',
       params: { section: 'evidence' },
     },
     {
@@ -208,7 +208,7 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     {
       id: 'harness',
       label: '세이프티 하네스',
-      description: 'Evaluator, compaction, DNA safety rail 감시 상태.',
+      description: '평가 모델, 압축 전 상태, 세대 교체 rail 감시 상태.',
       params: { section: 'harness' },
     },
     {

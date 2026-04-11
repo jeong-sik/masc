@@ -76,7 +76,7 @@ Each message has 'role' (system/user/assistant/tool) and 'content' (string).");
 (* Types                                                            *)
 (* ================================================================ *)
 
-type result = bool * string
+type tool_result = bool * string
 
 (* ================================================================ *)
 (* Helpers                                                          *)
@@ -132,7 +132,7 @@ let message_to_json (m : Agent_sdk.Types.message) : Yojson.Safe.t =
 (* Handler                                                          *)
 (* ================================================================ *)
 
-let handle_compact args : result =
+let handle_compact args : tool_result =
   try
     let open Yojson.Safe.Util in
     let messages_json = args |> member "messages" |> to_list in
@@ -198,7 +198,7 @@ let handle_compact args : result =
 (* Dispatcher                                                       *)
 (* ================================================================ *)
 
-let dispatch ~name ~args : result option =
+let dispatch ~name ~args : tool_result option =
   match name with
   | "masc_compact_context" -> Some (handle_compact args)
   | _ -> None

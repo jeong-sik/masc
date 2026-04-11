@@ -14,8 +14,6 @@ let dedupe_schemas (schemas : Types.tool_schema list) =
 let retired_front_door_schema_names =
   [
     "masc_collaboration_graph";
-    "masc_autoresearch_swarm_start";
-    "masc_repo_synthesis_swarm_start";
   ]
 
 let filter_retired_front_door_schemas (schemas : Types.tool_schema list) =

@@ -5,7 +5,7 @@
 
 open Tool_args
 
-type result = bool * string
+type tool_result = bool * string
 
 type context = {
   config: Room.config;
@@ -101,7 +101,7 @@ let handle_pause_status ctx args =
 let schemas = Tool_schemas_control.schemas
 
 (* Dispatch function *)
-let dispatch ctx ~name ~args : result option =
+let dispatch ctx ~name ~args : tool_result option =
   match name with
   | "masc_pause" -> Some (handle_pause ctx args)
   | "masc_resume" -> Some (handle_resume ctx args)

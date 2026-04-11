@@ -9,7 +9,7 @@ type ('clock, 'net) context = ('clock, 'net) Tool_command_plane_support.context 
   auth_token : string option;
 }
 
-type result = Tool_command_plane_support.result
+type tool_result = Tool_command_plane_support.tool_result
 
 let dispatch = Tool_command_plane_dispatch.dispatch
 

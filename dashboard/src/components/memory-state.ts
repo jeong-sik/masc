@@ -83,17 +83,6 @@ export function defaultCommentAuthor(): string {
 export const commentAuthor = signal(defaultCommentAuthor())
 
 // ── Utility functions ──────────────────────────────────────────────
-export function previewText(content: string): string {
-  const flattened = content
-    .replace(/!\[[^\]]*\]\([^)]+\)/g, ' ')
-    .replace(/\[[^\]]+\]\([^)]+\)/g, '$1')
-    .replace(/[`#>*_~-]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-  if (!flattened) return '미리보기 없음'
-  return flattened.length > 250 ? `${flattened.slice(0, 247)}...` : flattened
-}
-
 export function isUpdated(post: BoardPost): boolean {
   return post.updated_at !== post.created_at
 }

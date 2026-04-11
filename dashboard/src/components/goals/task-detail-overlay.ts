@@ -6,7 +6,7 @@ import { Check, X, ArrowRight, Dot, UserPlus } from 'lucide-preact'
 import { DialogOverlay } from '../common/dialog'
 import { StatusBadge } from '../common/status-badge'
 import { EmptyState } from '../common/empty-state'
-import { LoadingState } from '../common/feedback-state'
+import { ErrorState, LoadingState } from '../common/feedback-state'
 import { TimeAgo } from '../common/time-ago'
 import { findKeeper } from '../../lib/keeper-utils'
 import {
@@ -51,7 +51,7 @@ function TaskEventsSection() {
   const error = taskEventsError.value
 
   if (loading) return html`<${LoadingState}>이벤트 불러오는 중...<//>`
-  if (error) return html`<div class="text-[12px] text-bad py-2">${error}</div>`
+  if (error) return html`<${ErrorState} message=${error} />`
   if (events.length === 0) return html`<${EmptyState} message="기록된 이벤트가 없습니다" compact />`
 
   return html`

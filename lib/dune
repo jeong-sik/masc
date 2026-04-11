@@ -171,6 +171,7 @@
    institution_eio
    level2_config
    level4_config
+   llm_metric_bridge
    local_runtime_pool
    retrieval_projection
    sdk_tool_contract
@@ -526,10 +527,10 @@
    autoresearch
    autoresearch_codegen
    autoresearch_knowledge
+   tool_autoresearch_context
    tool_autoresearch_schemas
    tool_autoresearch_registry
    tool_autoresearch_broadcast
-   tool_autoresearch_repo_synthesis
    tool_autoresearch_cycle
    tool_autoresearch
    ;; godsplit-catalog: tool_catalog decomposition (private sub-modules)
@@ -652,10 +653,10 @@
   ;; godsplit-phase2: additional sub-modules
   autoresearch_codegen
   autoresearch_knowledge
+  tool_autoresearch_context
   tool_autoresearch_schemas
   tool_autoresearch_registry
   tool_autoresearch_broadcast
-  tool_autoresearch_repo_synthesis
   tool_autoresearch_cycle
   keeper_skill_routing
   keeper_alerting_path

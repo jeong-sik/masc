@@ -5,7 +5,7 @@
     that captures its own context, so the dispatch layer does not need
     to know about heterogeneous context types. *)
 
-(** Unified handler type: every tool call is [name * args -> result option].
+(** Unified handler type: every tool call is [name * args -> tool_result option].
     [None] means "this handler does not know this tool". *)
 type handler = name:string -> args:Yojson.Safe.t -> (bool * string) option
 

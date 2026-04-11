@@ -142,31 +142,6 @@ let manual_help_entry name =
           doc_refs = [ "docs/COMMAND-PLANE-RUNBOOK.md" ];
           prompt_hints = [ "Pair with prompt 'tool_help' when you want a ready-to-use explanation." ];
         }
-  | "masc_autoresearch_swarm_start" ->
-      Some
-        {
-          name;
-          short_description =
-            "Start an autoresearch loop through the swarm-facing session runtime surface and optional managed-operation lane.";
-          when_to_use =
-            "Use when you want Karpathy-style autoresearch to show up in the normal supervised swarm workflow instead of living as a standalone ecosystem loop.";
-          key_constraints =
-            [
-              "Requires goal, metric_fn, and target_file.";
-              "Needs local session-runtime context; managed-operation launch is best-effort and may degrade to session-only with warnings.";
-            ];
-          details_markdown =
-            "Creates the raw autoresearch loop first, then links it to a supervised execution session and, when possible, a research_pipeline managed operation on the compatibility lane. Session status exposes a linked_autoresearch block and session stop stops the linked loop.";
-          doc_refs =
-            [
-              "docs/SWARM-DELIVERY-RUNBOOK.md";
-              "docs/SUPERVISOR-MODE.md";
-            ];
-          prompt_hints =
-            [
-              "Use when you want raw masc_autoresearch_* behavior but need operator-visible session/proof surfaces.";
-            ];
-        }
   | "masc_operation_start" ->
       Some
         {

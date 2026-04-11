@@ -630,6 +630,13 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
     let governance_level = Env_config_core.governance_level () in
     let init_state_blocking () =
       let t0 = Eio.Time.now clock in
+      (* Install the LLM provider metrics bridge BEFORE any subsystem
+         that might issue an LLM call.  Placed here — before server
+         state creation — so it is impossible for an init-time LLM
+         call (e.g. a warmup probe, early keeper fiber) to capture
+         the default noop sink instead of the Prometheus-backed one. *)
+      Llm_metric_bridge.install ();
+      Log.Server.info "Llm_metric_bridge installed (masc_llm_provider_http_status_total)";
       let state =
         create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
       in
@@ -771,8 +778,16 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
                   ~mcp_session_id:ws_session_id state body_str
               in
               let response_str = Yojson.Safe.to_string response_json in
-              if response_str <> "null" then
-                ignore (Server_mcp_transport_ws.send_to_session ws_session_id response_str)
+              if response_str <> "null" then begin
+                if not
+                     (Server_mcp_transport_ws.send_to_session
+                        ws_session_id response_str)
+                then
+                  Log.Server.warn
+                    "WS send_to_session dropped response for session=%s (session \
+                     gone or write failed; session cleaned up by transport)"
+                    ws_session_id
+              end
             with
             | Eio.Cancel.Cancelled _ as e -> raise e
             | exn ->
@@ -789,8 +804,16 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
                     ~mcp_session_id:peer_id state body_str
                 in
                 let response_str = Yojson.Safe.to_string response_json in
-                if response_str <> "null" then
-                  ignore (Server_webrtc_transport.send_to_peer peer_id response_str)
+                if response_str <> "null" then begin
+                  match
+                    Server_webrtc_transport.send_to_peer peer_id response_str
+                  with
+                  | Ok _bytes -> ()
+                  | Error e ->
+                    Log.Server.warn
+                      "WebRTC send_to_peer dropped response for peer=%s: %s"
+                      peer_id e
+                end
               with
               | Eio.Cancel.Cancelled _ as e -> raise e
               | exn ->

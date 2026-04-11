@@ -44,8 +44,13 @@ module Agent_turn : sig
 
   val event_to_string : event -> string
 
-  (** Pure transition function. *)
-  val apply_event : current:phase -> event -> phase
+  type transition = Applied of phase | Ignored of { phase: phase; event: event }
+
+  (** Pure transition function. Returns [Ignored] for invalid transitions. *)
+  val apply_event : current:phase -> event -> transition
+
+  (** Like [apply_event] but silently returns the phase on invalid transitions. *)
+  val apply_event_lossy : current:phase -> event -> phase
 end
 
 (** {3 Dimension 3: Tool Validation Lifecycle} *)
@@ -74,8 +79,10 @@ module Tool_validation : sig
 
   val event_to_string : event -> string
 
-  (** Pure transition function. *)
-  val apply_event : current:phase -> event -> phase
+  type transition = Applied of phase | Ignored of { phase: phase; event: event }
+
+  val apply_event : current:phase -> event -> transition
+  val apply_event_lossy : current:phase -> event -> phase
 end
 
 (** {4 Product State} *)

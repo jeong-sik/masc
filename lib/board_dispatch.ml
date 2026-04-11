@@ -313,18 +313,6 @@ let delete_post ~post_id =
   match backend () with
   | Jsonl store -> Board.delete_post store ~post_id
 
-let delete_posts_by_predicate ~predicate ?(limit = 5200) () =
-  list_posts ~sort_by:Recent ~limit ()
-  |> List.fold_left
-       (fun acc (post : Board.post) ->
-         if predicate post then
-           match delete_post ~post_id:(Board.Post_id.to_string post.id) with
-           | Ok () -> acc + 1
-           | Error _ -> acc
-         else
-           acc)
-       0
-
 let search ~query ~limit =
   match backend () with
   | Jsonl store ->

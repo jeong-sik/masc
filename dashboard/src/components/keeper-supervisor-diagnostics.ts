@@ -3,6 +3,7 @@
 // Extracted from keeper-detail.ts to reduce file size.
 
 import { html } from 'htm/preact'
+import { formatTimeAgo } from '../lib/format-time'
 import type { Keeper } from '../types'
 
 // ── Helpers ──────────────────────────────────────────────
@@ -79,7 +80,7 @@ function SpEventsPanel({ sp_events }: { sp_events: any[] }) {
       <div class="space-y-1 max-h-28 overflow-y-auto">
         ${sp_events.slice(0, 10).map((e: any) => html`
           <div class="flex items-center justify-between py-1 px-2 rounded text-[11px] bg-[rgba(139,92,246,0.06)]">
-            <span class="font-mono text-[var(--text-muted)]">${new Date((e.ts ?? 0) * 1000).toLocaleTimeString()}</span>
+            <span class="font-mono text-[var(--text-muted)]">${formatTimeAgo(e.ts ?? 0)}</span>
             <span class="text-[#8b5cf6]">${e.suppressed_count}/${e.total} 억제 (${e.dominant_cohort})</span>
           </div>
         `)}
@@ -132,7 +133,7 @@ export function SupervisorDiagnosticsPanel({ keeper }: { keeper: Keeper }) {
         ` : null}
         ${dead_since ? html`
           <div class="py-2 px-3 rounded-lg bg-[rgba(239,68,68,0.06)] border border-[rgba(239,68,68,0.15)] text-xs text-[#fb7185]">
-            ${new Date(dead_since * 1000).toLocaleString()} 이후 중단됨. 재기동 필요.
+            ${formatTimeAgo(dead_since)} 이후 중단됨. 재기동 필요.
           </div>
         ` : null}
         <${CrashCohortBar} crash_log=${crash_log} />
@@ -142,7 +143,7 @@ export function SupervisorDiagnosticsPanel({ keeper }: { keeper: Keeper }) {
             <div class="space-y-1 max-h-32 overflow-y-auto">
               ${crash_log.slice(0, 10).map((e: any) => html`
                 <div class="flex items-center justify-between py-1 px-2 rounded text-[11px] bg-[var(--white-3)]">
-                  <span class="font-mono text-[var(--text-muted)]">${new Date((e.ts ?? 0) * 1000).toLocaleTimeString()}</span>
+                  <span class="font-mono text-[var(--text-muted)]">${formatTimeAgo(e.ts ?? 0)}</span>
                   <span class="text-[#fb7185]">${e.reason ?? 'unknown'}</span>
                 </div>
               `)}

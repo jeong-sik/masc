@@ -327,7 +327,21 @@ let test_same_origin_https_tunnel_same_host () =
   | Ok () -> ()
   | Error e -> fail (Types.masc_error_to_string e)
 
-let test_same_origin_rejects_different_explicit_port () =
+let test_same_origin_allows_loopback_alias_same_port () =
+  let module Server_auth = Masc_mcp.Server_auth in
+  let headers =
+    Httpun.Headers.of_list
+      [
+        ("host", "127.0.0.1:8935");
+        ("origin", "http://localhost:8935");
+      ]
+  in
+  let request = Httpun.Request.create ~headers `POST "/api/v1/operator/action" in
+  match Server_auth.ensure_same_origin_browser_request request with
+  | Ok () -> ()
+  | Error e -> fail (Types.masc_error_to_string e)
+
+let test_same_origin_allows_different_explicit_port_on_loopback () =
   let module Server_auth = Masc_mcp.Server_auth in
   let headers =
     Httpun.Headers.of_list
@@ -338,7 +352,21 @@ let test_same_origin_rejects_different_explicit_port () =
   in
   let request = Httpun.Request.create ~headers `POST "/api/v1/operator/action" in
   match Server_auth.ensure_same_origin_browser_request request with
-  | Ok () -> fail "expected different-port request to be rejected"
+  | Ok () -> ()
+  | Error e -> fail (Types.masc_error_to_string e)
+
+let test_same_origin_rejects_different_explicit_port_on_public_host () =
+  let module Server_auth = Masc_mcp.Server_auth in
+  let headers =
+    Httpun.Headers.of_list
+      [
+        ("host", "example.com:9000");
+        ("origin", "http://example.com:8935");
+      ]
+  in
+  let request = Httpun.Request.create ~headers `POST "/api/v1/operator/action" in
+  match Server_auth.ensure_same_origin_browser_request request with
+  | Ok () -> fail "expected different-port public host request to be rejected"
   | Error (Types.Forbidden _) -> ()
   | Error e -> fail (Types.masc_error_to_string e)
 
@@ -481,11 +509,6 @@ let test_permission_for_tool_autoresearch_status () =
 
 let test_permission_for_tool_autoresearch_start () =
   match Auth.permission_for_tool "masc_autoresearch_start" with
-  | Some Types.CanAdmin -> ()
-  | _ -> fail "expected CanAdmin"
-
-let test_permission_for_tool_autoresearch_swarm_start () =
-  match Auth.permission_for_tool "masc_autoresearch_swarm_start" with
   | Some Types.CanAdmin -> ()
   | _ -> fail "expected CanAdmin"
 
@@ -734,8 +757,6 @@ let () =
         test_permission_for_tool_autoresearch_status;
       test_case "autoresearch_start" `Quick
         test_permission_for_tool_autoresearch_start;
-      test_case "autoresearch_swarm_start" `Quick
-        test_permission_for_tool_autoresearch_swarm_start;
       test_case "autoresearch_cycle" `Quick
         test_permission_for_tool_autoresearch_cycle;
       test_case "autoresearch_inject" `Quick
@@ -763,11 +784,15 @@ let () =
       test_case "same-origin allows matching origin" `Quick
         test_same_origin_browser_request_allows_matching_origin;
       test_case "same-origin rejects cross origin" `Quick
-        test_same_origin_browser_request_rejects_cross_origin;
+      test_same_origin_browser_request_rejects_cross_origin;
       test_case "same-origin allows https tunnel same host" `Quick
         test_same_origin_https_tunnel_same_host;
-      test_case "same-origin rejects different explicit port" `Quick
-        test_same_origin_rejects_different_explicit_port;
+      test_case "same-origin allows loopback alias same port" `Quick
+        test_same_origin_allows_loopback_alias_same_port;
+      test_case "same-origin allows different explicit port on loopback" `Quick
+        test_same_origin_allows_different_explicit_port_on_loopback;
+      test_case "same-origin rejects different explicit port on public host" `Quick
+        test_same_origin_rejects_different_explicit_port_on_public_host;
       test_case "same-origin allows explicit default port https" `Quick
         test_same_origin_allows_explicit_default_port_https;
       test_case "same-origin allows explicit default port http" `Quick

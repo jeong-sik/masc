@@ -117,10 +117,19 @@ let start_cleanup_loop ~sw ~clock ?(interval=Env_config.RateLimit.cleanup_interv
   Eio.Fiber.fork ~sw (fun () ->
     let rec loop () =
       Eio.Time.sleep clock interval;
-      let older_than_seconds = int_of_float Env_config.RateLimit.entry_max_age_seconds in
-      let removed = cleanup limiter ~older_than_seconds in
-      if removed > 0 then
-        Log.Misc.info "Cleaned up %d stale buckets" removed;
+      (try
+         let older_than_seconds =
+           int_of_float Env_config.RateLimit.entry_max_age_seconds
+         in
+         let removed = cleanup limiter ~older_than_seconds in
+         if removed > 0 then
+           Log.Misc.info "Cleaned up %d stale buckets" removed
+       with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
+         Log.Misc.warn
+           "rate_limit cleanup iteration failed: %s"
+           (Printexc.to_string exn));
       loop ()
     in
     loop ()

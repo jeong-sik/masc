@@ -837,6 +837,53 @@ let test_shell_readonly_pwd_defaults_to_playground () =
     check bool "pwd ok" true (json_bool "ok" json);
     check string "pwd cwd" expected_cwd (json_string "cwd" json))
 
+let test_shell_readonly_pwd_prefers_explicit_allowed_root () =
+  with_room (fun config ->
+    let shared_repo_rel = "workspace/yousleepwhen/oas" in
+    let shared_repo_abs =
+      Filename.concat (Keeper_alerting_path.project_root_of_config config) shared_repo_rel
+    in
+    Fs_compat.mkdir_p shared_repo_abs;
+    let meta =
+      { (make_meta_with_preset "delivery") with
+        allowed_paths = [ shared_repo_rel ^ "/" ] }
+    in
+    let result =
+      call_tool config meta "keeper_shell"
+        (`Assoc [ "op", `String "pwd" ])
+    in
+    let json = parse_json result in
+    let expected_cwd = shared_repo_abs ^ "/" in
+    check bool "pwd with explicit allowed root ok" true (json_bool "ok" json);
+    check string "pwd prefers explicit allowed root" expected_cwd
+      (json_string "cwd" json))
+
+let test_shell_readonly_cat_defaults_to_explicit_allowed_root () =
+  with_room (fun config ->
+    let shared_repo_rel = "workspace/yousleepwhen/oas" in
+    let shared_repo_abs =
+      Filename.concat (Keeper_alerting_path.project_root_of_config config) shared_repo_rel
+    in
+    let shared_file = Filename.concat shared_repo_abs "lib/approval.ml" in
+    write_text_file shared_file "let approval = true\n";
+    let meta =
+      { (make_meta_with_preset "delivery") with
+        allowed_paths = [ shared_repo_rel ^ "/" ] }
+    in
+    let result =
+      call_tool config meta "keeper_shell"
+        (`Assoc
+          [ "op", `String "cat"
+          ; "path", `String "lib/approval.ml"
+          ])
+    in
+    let json = parse_json result in
+    check bool "cat with explicit allowed root ok" true (json_bool "ok" json);
+    check string "cat path resolves from explicit allowed root" shared_file
+      (json_string "path" json);
+    check string "cat returns shared repo content" "let approval = true\n"
+      (json_string "content" json))
+
 let test_fs_read_blocks_shared_repo_by_default () =
   with_room (fun config ->
     let meta = make_meta_with_preset "delivery" in
@@ -1196,6 +1243,10 @@ let () =
       ; test_case "status allowed" `Quick test_bash_git_status_allowed
       ; test_case "readonly pwd defaults to playground" `Quick
           test_shell_readonly_pwd_defaults_to_playground
+      ; test_case "readonly pwd prefers explicit allowed root" `Quick
+          test_shell_readonly_pwd_prefers_explicit_allowed_root
+      ; test_case "readonly cat defaults to explicit allowed root" `Quick
+          test_shell_readonly_cat_defaults_to_explicit_allowed_root
       ; test_case "fs read blocks shared repo by default" `Quick
           test_fs_read_blocks_shared_repo_by_default
       ; test_case "fs read allows explicit custom path" `Quick

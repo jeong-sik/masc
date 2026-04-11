@@ -22,27 +22,51 @@ let run_argv_exit argv =
   | Unix.WSIGNALED _, _ -> 128
   | Unix.WSTOPPED _, _ -> 128
 
-(** Get git root directory - delegates to Room_git *)
-let git_root config =
-  Room_git.git_root ~base_path:config.base_path
-
 (** Check if directory is a git repository - delegates to Room_git *)
 let is_git_repo config =
   Room_git.is_git_repo ~base_path:config.base_path
 
+(** Resolve the project root from config.base_path.
+    If base_path ends with ".masc", use its parent; otherwise use base_path.
+    Then walk parent directories until we find the owning repository root
+    (.git directory). This keeps config.base_path as the anchor while still
+    handling nested subdirectories and worktree roots (.git file).
+    Inlined from Keeper_alerting_path to avoid room→keeper dependency. *)
+let git_marker_kind path =
+  match (try Some (Sys.is_directory path) with Sys_error _ -> None) with
+  | Some true -> `Directory
+  | Some false -> `File
+  | None -> `Missing
+
+let project_root config =
+  let base = config.base_path in
+  let candidate =
+    if Filename.basename base = ".masc" then Filename.dirname base else base
+  in
+  let rec find_repo_root dir =
+    let git_marker = Filename.concat dir ".git" in
+    match git_marker_kind git_marker with
+    | `Directory -> Some dir
+    | `File | `Missing ->
+        let parent = Filename.dirname dir in
+        if String.equal parent dir then None else find_repo_root parent
+  in
+  match find_repo_root candidate with
+  | Some root -> root
+  | None -> candidate
+
 let require_repository_root_with_git config =
-  match git_root config with
-  | None -> Error (IoError "Cannot determine git root")
-  | Some root ->
-      let git_marker = Filename.concat root ".git" in
-      if Sys.file_exists git_marker then
-        Ok root
-      else
-        Error
-          (IoError
-             (Printf.sprintf
-                "Worktree isolation requires repository root with .git: %s (current base path: %s)"
-                root config.base_path))
+  let root = project_root config in
+  let git_marker = Filename.concat root ".git" in
+  match git_marker_kind git_marker with
+  | `Directory | `File ->
+    Ok root
+  | `Missing ->
+    Error
+      (IoError
+         (Printf.sprintf
+            "Worktree isolation requires repository root with .git: %s (current base path: %s)"
+            root config.base_path))
 
 let ensure_worktree_path root worktree_name =
   let worktrees_dir = Filename.concat root ".worktrees" in
@@ -79,8 +103,13 @@ let link_worktree_to_task config ~task_id ~worktree_info =
         end
 
 (** Create worktree for agent - Result version
-    @param link_task If true, links worktree info to the task in backlog (default: true) *)
-let worktree_create_r ?(link_task=true) config ~agent_name ~task_id ~base_branch : string masc_result =
+    @param link_task If true, links worktree info to the task in backlog (default: true)
+    @param repo_name If set, target the keeper's playground clone at
+           [.masc/playground/<agent>/repos/<repo_name>/] directly. If
+           unset, scan [repos/] and use the first git clone found
+           (alphabetical). Either way, falls back to the server repo
+           root when no matching playground clone exists. *)
+let worktree_create_r ?(link_task=true) ?repo_name config ~agent_name ~task_id ~base_branch : string masc_result =
   if not (is_initialized config) then
     Error NotInitialized
   else if not (is_git_repo config) then
@@ -89,7 +118,85 @@ let worktree_create_r ?(link_task=true) config ~agent_name ~task_id ~base_branch
   | Error e, _ -> Error e
   | _, Error e -> Error e
   | Ok _, Ok _ ->
-    match require_repository_root_with_git config with
+    (* Prefer a keeper's playground clone under
+       [.masc/playground/<agent>/repos/]. The layout is the SSOT in
+       [Playground_paths] (masc_config). If [repo_name] is supplied,
+       target that clone directly; otherwise scan the directory and
+       pick the first git clone (alphabetical). Keepers may work on
+       any repo their [tool_policy.toml] allows. If no matching
+       playground clone is present, fall back to the configured
+       repository root so explicit repo-worktree flows still work
+       instead of failing with a missing-clone error. *)
+    let resolve_keeper_repo_root () =
+      let repos_dir =
+        Filename.concat config.base_path
+          (Playground_paths.repos_path agent_name)
+      in
+      (* [Sys.is_directory] raises [Sys_error] on permission errors or
+         if the path disappears between [file_exists] and [is_directory]
+         (TOCTOU). Swallow those errors and treat the candidate as
+         "not a clone" so a broken entry under [repos/] never crashes
+         the worktree resolver. *)
+      let safe_is_dir path =
+        try Sys.file_exists path && Sys.is_directory path
+        with Sys_error _ -> false
+      in
+      let is_git_clone candidate =
+        safe_is_dir candidate
+        && (try Sys.file_exists (Filename.concat candidate ".git")
+            with Sys_error _ -> false)
+      in
+      (* Reject repo_name values that aren't a single safe path
+         component. This prevents "../kirin" or "foo/bar" from escaping
+         the repos/ directory via [Filename.concat]. Keeper names are
+         already sanitized by [Playground_paths], but [repo_name] comes
+         straight from MCP tool args and needs its own gate. *)
+      let safe_repo_name name =
+        name <> "" && name <> "." && name <> ".."
+        && not (String.contains name '/')
+        && not (String.contains name '\\')
+        && not (String.contains name '\x00')
+        && String.for_all (fun c ->
+          (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
+          || (c >= '0' && c <= '9') || c = '-' || c = '_' || c = '.') name
+      in
+      let explicit_repo =
+        match repo_name with
+        | None | Some "" -> None
+        | Some name when not (safe_repo_name name) -> None
+        | Some name ->
+          let candidate = Filename.concat repos_dir name in
+          if is_git_clone candidate then Some candidate else None
+      in
+      let scan_first_git_repo dir =
+        if not (safe_is_dir dir) then None
+        else
+          let entries =
+            try Sys.readdir dir with Sys_error _ -> [||]
+          in
+          Array.sort compare entries;
+          let rec find i =
+            if i >= Array.length entries then None
+            else
+              let candidate = Filename.concat dir entries.(i) in
+              if is_git_clone candidate
+              then Some candidate
+              else find (i + 1)
+          in
+          find 0
+      in
+      match
+        match explicit_repo with
+        | Some _ as r -> r
+        | None -> scan_first_git_repo repos_dir
+      with
+      | Some clone -> Ok clone
+      | None ->
+        match require_repository_root_with_git config with
+        | Ok root -> Ok root
+        | Error e -> Error e
+    in
+    match resolve_keeper_repo_root () with
     | Error e -> Error e
     | Ok root -> begin
         let worktree_name = Printf.sprintf "%s-%s" agent_name task_id in

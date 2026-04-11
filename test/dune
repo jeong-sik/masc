@@ -39,6 +39,7 @@
         test_subscriptions test_session test_progress test_spawn
         test_validation test_response
         test_channel_gate_connector_routes
+        test_channel_gate_imessage_state
         test_dashboard
         test_dashboard_perf
         test_dashboard_tool_host_events
@@ -57,6 +58,7 @@
         test_keeper_registry
         test_keeper_supervisor
         test_keeper_allowed_paths
+        test_playground_paths
         test_keeper_llama_only
         test_keeper_meta_cwd_resilience
         test_metrics_rotation
@@ -113,6 +115,7 @@
           test_subscriptions test_session test_progress test_spawn
           test_validation test_response
           test_channel_gate_connector_routes
+          test_channel_gate_imessage_state
           test_dashboard
           test_dashboard_perf
           test_dashboard_tool_host_events
@@ -131,6 +134,7 @@
           test_keeper_registry
           test_keeper_supervisor
           test_keeper_allowed_paths
+          test_playground_paths
           test_keeper_llama_only
           test_keeper_meta_cwd_resilience
           test_metrics_rotation
@@ -244,6 +248,7 @@
         test_server_base_path_diagnostics
         test_server_startup_takeover
         test_keeper_meta_listing
+        test_keeper_identity_parse
         test_worker_runtime
         test_capability_registry
         test_tool_local_runtime_verify
@@ -275,7 +280,6 @@
         test_cp_section_cache
         test_cp_jsonl_tail
         ; test_swarm_persistence removed (team session cleanup)
-        test_tool_repo_synthesis
         test_local_runtime_pool
         test_keeper_tools_oas
         test_keeper_tool_exposure
@@ -392,6 +396,7 @@
         test_server_base_path_diagnostics
         test_server_startup_takeover
         test_keeper_meta_listing
+        test_keeper_identity_parse
         test_worker_runtime
         test_capability_registry
         test_tool_local_runtime_verify
@@ -423,7 +428,6 @@
         test_cp_section_cache
         test_cp_jsonl_tail
         ; test_swarm_persistence removed (team session cleanup)
-        test_tool_repo_synthesis
         test_local_runtime_pool
         test_keeper_tools_oas
         test_keeper_tool_exposure
@@ -515,6 +519,7 @@
 
 (test
  (name test_keeper_mutex_coverage)
+ (modules test_keeper_mutex_coverage)
  (libraries masc_test_deps))
 
 ; Tool diversity: Shannon entropy + QCheck PBT

@@ -2,7 +2,7 @@ open Tool_command_plane_support
 open Tool_command_plane_mutations
 open Tool_command_plane_operations
 
-let dispatch (ctx : (_, _) context) ~name ~args : result option =
+let dispatch (ctx : (_, _) context) ~name ~args : tool_result option =
   match name with
   | "masc_unit_define" -> Some (handle_unit_define ctx args)
   | "masc_unit_list" -> Some (handle_unit_list ctx)

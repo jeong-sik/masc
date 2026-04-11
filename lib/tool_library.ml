@@ -24,7 +24,7 @@ let string_contains ~sub s =
     in
     check 0
 
-type result = bool * string
+type tool_result = bool * string
 
 type context = {
   agent_name: string;
@@ -282,7 +282,7 @@ let handle_search _ctx args =
   end
 
 (* Dispatch *)
-let dispatch ctx ~name ~args : result option =
+let dispatch ctx ~name ~args : tool_result option =
   match name with
   | "masc_library_list" -> Some (handle_list ctx args)
   | "masc_library_read" -> Some (handle_read ctx args)

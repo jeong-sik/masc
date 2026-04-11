@@ -4,7 +4,7 @@
     the codebase.  All values are in seconds (float) unless suffixed with
     [_int].
 
-    @since 2.XXX.0 *)
+    @since 0.4.0 *)
 
 (** Seconds in one minute. *)
 let minute = 60.0

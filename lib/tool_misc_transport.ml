@@ -7,7 +7,7 @@
 
 open Tool_args
 
-type result = bool * string
+type tool_result = bool * string
 
 (* ================================================================ *)
 (* Local helpers (duplicated from tool_misc to avoid circular deps) *)
@@ -31,7 +31,7 @@ let env_flag_enabled name =
 (* Handlers                                                         *)
 (* ================================================================ *)
 
-let handle_transport_status _args : result =
+let handle_transport_status _args : tool_result =
   let ctx =
     Transport_read_model.context_from_env
       ~allow_legacy_accept:(env_flag_enabled "MASC_ALLOW_LEGACY_ACCEPT") ()
@@ -39,7 +39,7 @@ let handle_transport_status _args : result =
   let json = Transport_read_model.transport_status_json ctx in
   (true, Yojson.Safe.to_string json)
 
-let handle_websocket_discovery _args : result =
+let handle_websocket_discovery _args : tool_result =
   let ctx =
     Transport_read_model.context_from_env
       ~allow_legacy_accept:(env_flag_enabled "MASC_ALLOW_LEGACY_ACCEPT") ()
@@ -47,7 +47,7 @@ let handle_websocket_discovery _args : result =
   let json = Transport_read_model.websocket_discovery_json ctx in
   (true, Yojson.Safe.to_string json)
 
-let handle_webrtc_offer args : result =
+let handle_webrtc_offer args : tool_result =
   if not (Server_webrtc_transport.is_enabled ()) then
     error_result "webrtc transport disabled"
   else
@@ -71,7 +71,7 @@ let handle_webrtc_offer args : result =
   | Ok body -> (true, pretty_json_string body)
   | Error msg -> error_result msg
 
-let handle_webrtc_answer args : result =
+let handle_webrtc_answer args : tool_result =
   if not (Server_webrtc_transport.is_enabled ()) then
     error_result "webrtc transport disabled"
   else

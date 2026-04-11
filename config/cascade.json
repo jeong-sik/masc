@@ -1,25 +1,25 @@
 {
   "default_models": [
-    "glm:glm-4.7-flashx",
+    "glm-coding:glm-4.7",
+    "glm-coding:glm-5.1",
     "glm:glm-5.1",
-    "glm:glm-5-turbo",
     "ollama:qwen3.5:35b-a3b-nvfp4"
   ],
   "local_only_models": [
     "ollama:qwen3.5:35b-a3b-nvfp4"
   ],
   "keeper_unified_models": [
-    "glm:glm-4.7-flashx",
-    "glm:glm-5.1",
-    "glm:glm-5-turbo",
+    "glm-coding:glm-4.7",
+    "glm-coding:glm-5.1",
     "ollama:qwen3.5:35b-a3b-nvfp4"
   ],
   "coding_first_models": [
+    "glm-coding:glm-4.7",
+    "glm-coding:glm-5.1",
     "glm:glm-5.1",
-    "glm:glm-5-turbo",
     "ollama:qwen3.5:35b-a3b-nvfp4"
   ],
-  "_comment": "keeper_unified = speed-first: flashx(5s) -> 5.1(17s) -> 5-turbo(27s) -> local. coding_first = capability-first: 5.1(17s) -> 5-turbo(27s) -> local. local_only = Ollama only.",
+  "_comment": "glm-coding = Coding Plan endpoint (included in subscription). glm = general API (pay-per-use). Coding Plan first, API fallback, local last.",
   "coding_first_temperature": 0.2,
   "coding_first_max_tokens": 65536,
   "tool_rerank_temperature": 0.0,

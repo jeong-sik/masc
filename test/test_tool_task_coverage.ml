@@ -325,6 +325,62 @@ let () = test "handle_claim_sets_planning_current_task" (fun () ->
   assert (Planning_eio.get_current_task ctx.config = Some "task-001")
 )
 
+let () = test "handle_claim_appends_preset_warning_only_on_success" (fun () ->
+  let agent_name = "test-agent" in
+  let ctx = make_test_ctx_with_agent agent_name in
+  let base_path = Masc_test_deps.find_project_root () in
+  ignore (Result.get_ok (Keeper_tool_policy.init_policy_config ~base_path));
+  (match
+     Room.update_agent_r ctx.config ~agent_name
+       ~capabilities:[ "preset:minimal" ] ()
+   with
+  | Ok _ -> ()
+  | Error e -> failwith (Types.masc_error_to_string e));
+  let _ =
+    Tool_task.handle_add_task ctx
+      (`Assoc
+        [
+          ("title", `String "Needs social");
+          ("required_preset", `String "social");
+        ])
+  in
+  let success, result =
+    Tool_task.handle_claim ctx (`Assoc [ ("task_id", `String "task-001") ])
+  in
+  assert success;
+  assert (str_contains result "preset_mismatch")
+)
+
+let () = test "handle_claim_skips_preset_warning_on_failed_claim" (fun () ->
+  let agent_name = "test-agent" in
+  let ctx = make_test_ctx_with_agent agent_name in
+  let base_path = Masc_test_deps.find_project_root () in
+  ignore (Result.get_ok (Keeper_tool_policy.init_policy_config ~base_path));
+  (match
+     Room.update_agent_r ctx.config ~agent_name
+       ~capabilities:[ "preset:minimal" ] ()
+   with
+  | Ok _ -> ()
+  | Error e -> failwith (Types.masc_error_to_string e));
+  let _ =
+    Tool_task.handle_add_task ctx
+      (`Assoc
+        [
+          ("title", `String "Needs social");
+          ("required_preset", `String "social");
+        ])
+  in
+  let _ = Room.join ctx.config ~agent_name:"other-agent" ~capabilities:[] () in
+  (match Room.claim_task_r ctx.config ~agent_name:"other-agent" ~task_id:"task-001" () with
+  | Ok _ -> ()
+  | Error e -> failwith (Types.masc_error_to_string e));
+  let success, result =
+    Tool_task.handle_claim ctx (`Assoc [ ("task_id", `String "task-001") ])
+  in
+  assert (not success);
+  assert (not (str_contains result "preset_mismatch"))
+)
+
 let () = test "handle_claim_next_sets_planning_current_task" (fun () ->
   let ctx = make_test_ctx () in
   let _ = Tool_task.handle_add_task ctx (`Assoc [("title", `String "Claim next")]) in

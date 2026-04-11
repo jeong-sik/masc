@@ -4,6 +4,7 @@ import { html } from 'htm/preact'
 import { useEffect, useRef, useCallback } from 'preact/hooks'
 import { VirtualList } from '../common/virtual-list'
 import { EmptyState } from '../common/empty-state'
+import { ErrorState } from '../common/feedback-state'
 import { TextInput } from '../common/input'
 import { route } from '../../router'
 import type { DashboardToolInventoryItem } from '../../api'
@@ -196,7 +197,7 @@ export function FullInventoryView({
       </div>
     </div>
 
-    ${error ? html`<div class="px-3 py-2.5 bg-[var(--bad-12)] border border-[var(--bad-30)] text-[#fecaca] text-[13px] rounded-lg mt-2">${error}</div>` : null}
+    ${error ? html`<${ErrorState} message=${error} class="mt-2" />` : null}
 
     <div ref=${listContainerRef} class="overflow-y-auto max-h-[calc(100vh-420px)] min-h-[300px]">
       ${filtered.length > 0

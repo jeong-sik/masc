@@ -162,7 +162,7 @@ let resolve_keeper_shell_write_cwd
   let raw_cwd = Safe_ops.json_string ~default:"" "cwd" args |> String.trim in
   let resolved =
     if raw_cwd = ""
-    then Ok (keeper_default_read_root ~config ~meta)
+    then Ok (keeper_default_write_root ~config ~meta)
     else resolve_keeper_path ~config ~meta ~raw_path:raw_cwd
   in
   match resolved with
@@ -171,24 +171,59 @@ let resolve_keeper_shell_write_cwd
   | Ok cwd -> Error (Printf.sprintf "cwd_not_directory: %s" cwd)
 
 (* Docker playground path mapping: host → container.
-   Host:      /Users/dancer/me/.masc/playground/cheolsu/repos/X
-   Container: /home/keeper/playground/cheolsu/repos/X *)
+   Host:      <base_path>/.masc/playground/<keeper>/repos/X
+   Container: <container_playground_root>/<keeper>/repos/X
+   The container-side root comes from
+   [Env_config_keeper.DockerPlayground.container_playground_root] so the
+   mount point is configurable (default "/home/keeper/playground"). *)
 let docker_playground_cwd ~(config : Room.config) ~(meta : keeper_meta) host_cwd =
   let root = Keeper_alerting_path.project_root_of_config config in
-  let playground_prefix = Filename.concat root ".masc/playground" in
-  if String.starts_with ~prefix:playground_prefix host_cwd then
-    let suffix =
-      String.sub host_cwd (String.length playground_prefix)
-        (String.length host_cwd - String.length playground_prefix)
-    in
-    "/home/keeper/playground" ^ suffix
+  let playground_prefix =
+    Filename.concat root Playground_paths.all_playgrounds_prefix
+  in
+  let container_root =
+    Env_config_keeper.DockerPlayground.container_playground_root
+  in
+  (* Boundary-safe prefix match: require either an exact match or a
+     prefix ending at a path separator. Without this, host paths like
+     "<root>/.masc/playgroundXYZ/..." would match "<root>/.masc/playground"
+     and leak into the container playground. *)
+  let prefix_with_sep = playground_prefix ^ "/" in
+  let starts_at_boundary =
+    host_cwd = playground_prefix
+    || String.starts_with ~prefix:prefix_with_sep host_cwd
+  in
+  if starts_at_boundary then
+    if host_cwd = playground_prefix then container_root
+    else
+      let suffix =
+        String.sub host_cwd (String.length prefix_with_sep)
+          (String.length host_cwd - String.length prefix_with_sep)
+      in
+      Filename.concat container_root suffix
   else
-    Printf.sprintf "/home/keeper/playground/%s" meta.name
+    (* meta.name is sanitized through Playground_paths so a poisoned
+       name cannot escape the container_root. *)
+    Filename.concat container_root
+      (Playground_paths.sanitize_keeper_name meta.name)
 
 (* Common wrong path prefixes that keepers use.
-   Maps wrong prefix → corrected relative path using keeper playground. *)
+   Maps wrong prefix → corrected relative path using the keeper
+   playground SSOT ([Playground_paths]). [sanitize_keeper_name] in the
+   SSOT rejects "", "." and ".." as whole-name segments (substituting
+   "_", "_", "__" respectively), so a poisoned [meta.name] cannot
+   produce a ".."/"." directory component and cannot escape the
+   playground bundle via [Filename.concat]. *)
 let auto_correct_path ~(meta : keeper_meta) (raw : string) : string option =
-  let playground = Printf.sprintf ".masc/playground/%s" meta.name in
+  (* bundle_root yields ".masc/playground/<safe>/" — strip the trailing
+     slash so we can append "/repos/..." cleanly. *)
+  let playground_bundle = Playground_paths.bundle_root meta.name in
+  let playground =
+    if String.length playground_bundle > 0
+       && playground_bundle.[String.length playground_bundle - 1] = '/'
+    then String.sub playground_bundle 0 (String.length playground_bundle - 1)
+    else playground_bundle
+  in
   let try_strip prefix replacement =
     let plen = String.length prefix in
     if String.length raw >= plen
@@ -196,7 +231,7 @@ let auto_correct_path ~(meta : keeper_meta) (raw : string) : string option =
     then Some (replacement ^ String.sub raw plen (String.length raw - plen))
     else None
   in
-  (* /repos/X → .masc/playground/<name>/repos/X *)
+  (* /repos/X → .masc/playground/<safe-name>/repos/X *)
   match try_strip "/repos/" (playground ^ "/repos/") with
   | Some _ as r -> r
   | None ->

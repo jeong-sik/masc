@@ -5,7 +5,7 @@ type context = {
   agent_name : string;
 }
 
-type result = bool * string
+type tool_result = bool * string
 
 type llama_process = {
   pid : int option;

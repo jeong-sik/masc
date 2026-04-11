@@ -455,4 +455,44 @@ module DashboardHealth = struct
   let runtime_warning_ctx_ratio = get_float ~default:0.95 "MASC_DASHBOARD_RUNTIME_WARNING_CTX_RATIO"
 end
 
+(** {1 Cascade Runtime Overrides}
+
+    Runtime-only narrowing of the OAS cascade provider set. The underlying
+    cascade profile (loaded from [cascade.json]) is unchanged; this filter is
+    applied by OAS [complete_named] via [~provider_filter] on every keeper turn,
+    so switching between full cascade and a single-provider fallback is a pure
+    env-var change with no file or code edit.
+
+    Use case: GLM endpoint outage (e.g. z.ai quota exhausted), Ollama-only
+    hard mode, or A/B testing a single provider. *)
+module KeeperCascade = struct
+  (** Comma-separated provider kind allowlist for every keeper cascade call.
+      Values are OAS [Provider_config.string_of_provider_kind]:
+      [ollama], [glm], [anthropic], [gemini], [openai_compat], [claude_code].
+      Matching is case-insensitive; empty entries are dropped.
+
+      Semantics: when set, keeper turns pass this list as [provider_filter]
+      into [Oas_worker.run_named], which forwards it to OAS
+      [Cascade_config.complete_named]. OAS keeps only matching providers from
+      the resolved profile; if the filter leaves zero providers, OAS falls back
+      to the unfiltered profile (see [apply_provider_filter] safety net).
+
+      [None] (env var unset or blank) = full cascade, unfiltered.
+
+      Env: [MASC_KEEPER_CASCADE_PROVIDER_ALLOWLIST]. Default: unset. *)
+  let provider_allowlist () : string list option =
+    match Sys.getenv_opt "MASC_KEEPER_CASCADE_PROVIDER_ALLOWLIST" with
+    | None -> None
+    | Some raw ->
+      let parts =
+        raw
+        |> String.split_on_char ','
+        |> List.map String.trim
+        |> List.filter (fun s -> s <> "")
+      in
+      (match parts with
+       | [] -> None
+       | _ -> Some parts)
+end
+
 (** Print configuration summary for debugging *)
